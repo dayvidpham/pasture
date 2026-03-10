@@ -2,6 +2,7 @@ package hooks_test
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -339,6 +340,84 @@ func TestManager_Dispatch_OneHandlerErrors_OtherStillCalled(t *testing.T) {
 	}
 }
 
+// ─── dispatchErrors.Error and Unwrap ────────────────────────────────────────
+
+func TestDispatchErrors_Error_MultipleHandlers(t *testing.T) {
+	m := hooks.NewManager()
+
+	// Register two handlers that both return errors on the same event.
+	err1 := stderrors.New("first handler error")
+	err2 := stderrors.New("second handler error")
+	h1 := newErrorHandler(err1, hooks.HookEpochStarted)
+	h2 := newErrorHandler(err2, hooks.HookEpochStarted)
+	m.Register(h1)
+	m.Register(h2)
+
+	// Dispatch the event; expect a combined error with both handler errors.
+	err := m.Dispatch(context.Background(), samplePayload(hooks.HookEpochStarted))
+	if err == nil {
+		t.Fatal("expected error from handlers, got nil")
+	}
+
+	// Check that the error message contains numbered lines for both errors.
+	errMsg := err.Error()
+	if !contains(errMsg, "[1]") {
+		t.Errorf("Error message missing [1] prefix: %s", errMsg)
+	}
+	if !contains(errMsg, "[2]") {
+		t.Errorf("Error message missing [2] prefix: %s", errMsg)
+	}
+	if !contains(errMsg, "first handler error") {
+		t.Errorf("Error message missing 'first handler error': %s", errMsg)
+	}
+	if !contains(errMsg, "second handler error") {
+		t.Errorf("Error message missing 'second handler error': %s", errMsg)
+	}
+}
+
+func TestDispatchErrors_Unwrap(t *testing.T) {
+	m := hooks.NewManager()
+
+	// Register two handlers that return errors.
+	err1 := stderrors.New("handler 1 failed")
+	err2 := stderrors.New("handler 2 failed")
+	h1 := newErrorHandler(err1, hooks.HookSliceCompleted)
+	h2 := newErrorHandler(err2, hooks.HookSliceCompleted)
+	m.Register(h1)
+	m.Register(h2)
+
+	// Dispatch and get the combined error.
+	combinedErr := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceCompleted))
+	if combinedErr == nil {
+		t.Fatal("expected error from handlers, got nil")
+	}
+
+	// The dispatchErrors type implements Unwrap() []error, which allows errors.Is and errors.As
+	// to traverse the error chain. Verify the error message contains both numbered entries.
+	errMsg := combinedErr.Error()
+	if !contains(errMsg, "[1]") {
+		t.Errorf("Error() should contain [1], got: %s", errMsg)
+	}
+	if !contains(errMsg, "[2]") {
+		t.Errorf("Error() should contain [2], got: %s", errMsg)
+	}
+	if !contains(errMsg, "handler 1 failed") {
+		t.Errorf("Error() should contain 'handler 1 failed', got: %s", errMsg)
+	}
+	if !contains(errMsg, "handler 2 failed") {
+		t.Errorf("Error() should contain 'handler 2 failed', got: %s", errMsg)
+	}
+
+	// Verify that errors.Is can detect the original errors in the wrapped error chain.
+	// The Unwrap() []error method enables the error chain traversal.
+	if !stderrors.Is(combinedErr, err1) {
+		t.Error("errors.Is should find err1 in combined error via Unwrap() []error")
+	}
+	if !stderrors.Is(combinedErr, err2) {
+		t.Error("errors.Is should find err2 in combined error via Unwrap() []error")
+	}
+}
+
 // ─── HookPayload fields ───────────────────────────────────────────────────────
 
 func TestHookPayload_ZeroPhase_IsAcceptable(t *testing.T) {
@@ -362,4 +441,11 @@ func TestHookPayload_ZeroPhase_IsAcceptable(t *testing.T) {
 	if p := h.payloads(); len(p) > 0 && p[0].Phase != "" {
 		t.Errorf("Phase should be empty for session event, got %q", p[0].Phase)
 	}
+}
+
+// ─── Test helpers (continued) ────────────────────────────────────────────────
+
+// contains checks if needle is present in haystack.
+func contains(haystack, needle string) bool {
+	return strings.Contains(haystack, needle)
 }
