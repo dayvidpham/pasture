@@ -1,38 +1,39 @@
-// Package acp — IndexingSessionHandler implements SessionHandler by accumulating
-// ACP session updates, indexing them via SharedIndexer on session end, and
-// persisting the resulting entries to the audit trail. Hook events are fired at
-// session start and end via the injected hooks.Manager.
+// Package acp — IndexingSessionHandler implements SessionHandler by flushing
+// each ACP session update to the audit trail immediately (per-update mode).
+// Hook events are fired at session start and end via the injected hooks.Manager.
 package acp
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/hooks"
 )
 
-// IndexingSessionHandler implements SessionHandler by accumulating updates per
-// session and flushing them as audit SessionEntry records when the session ends.
+// IndexingSessionHandler implements SessionHandler by indexing and persisting
+// each update immediately on HandleUpdate (per-update flush mode).
 //
 // All methods are safe for concurrent invocation (multiple sessions may run in
 // parallel within a single Temporal activity).
 //
 // Lifecycle per session:
-//  1. First HandleUpdate call → fire HookSessionStarted, accumulate update.
-//  2. Subsequent HandleUpdate calls → accumulate updates (no extra hooks).
-//  3. HandleSessionEnd → Index updates → RecordSessionEntries → fire HookSessionEnded → clean up.
+//  1. First HandleUpdate call → fire HookSessionStarted, index update, persist to trail.
+//  2. Subsequent HandleUpdate calls → index update, persist to trail (no extra hooks).
+//  3. HandleSessionEnd → fire HookSessionEnded → clean up session tracking state.
 type IndexingSessionHandler struct {
 	indexer  *SharedIndexer
 	trail    audit.Trail
 	hooksMgr *hooks.Manager
 	epochID  string
 
-	mu              sync.Mutex
-	updates         map[string][]SessionUpdate // sessionID → accumulated updates
-	entriesWritten  int                        // total entries persisted across all sessions
-	lastSessionID   string                     // last session ID seen via HandleSessionEnd
-	lastStopReason  StopReason                 // stop reason from the last HandleSessionEnd call
+	mu             sync.Mutex
+	sessions       map[string]bool // sessionID → started (true once first update received)
+	entriesWritten int             // total entries persisted across all sessions
+	lastSessionID  string          // last session ID seen via HandleSessionEnd
+	lastStopReason StopReason      // stop reason from the last HandleSessionEnd call
 }
 
 // NewIndexingSessionHandler constructs a ready-to-use IndexingSessionHandler.
@@ -58,30 +59,52 @@ func NewIndexingSessionHandler(
 		trail:    trail,
 		hooksMgr: hooksMgr,
 		epochID:  epochID,
-		updates:  make(map[string][]SessionUpdate),
+		sessions: make(map[string]bool),
 	}
 }
 
-// HandleUpdate accumulates update into the per-session queue.
+// HandleUpdate indexes the update immediately and persists it to the audit trail.
 //
 // On the first update for a session, HookSessionStarted is dispatched via the
-// Manager (if non-nil). Hook errors are treated as best-effort and logged but
-// do not cause HandleUpdate to return an error.
+// Manager (if non-nil). Hook errors are treated as best-effort: logged via
+// slog.Warn but do not cause HandleUpdate to return an error.
 //
-// Returns an error only if the context is already cancelled.
+// Returns an error only if the context is already cancelled, indexing fails,
+// or the trail write fails.
 func (h *IndexingSessionHandler) HandleUpdate(ctx context.Context, update SessionUpdate) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 
+	// Determine whether this is the first update for this session (under lock).
 	h.mu.Lock()
-	existing := h.updates[update.SessionID]
-	isFirst := len(existing) == 0
-	h.updates[update.SessionID] = append(existing, update)
+	isFirst := !h.sessions[update.SessionID]
+	if isFirst {
+		h.sessions[update.SessionID] = true
+	}
 	h.mu.Unlock()
 
+	// Fire HookSessionStarted on the first update for this session (best-effort).
 	if isFirst {
 		h.dispatchHook(ctx, hooks.HookSessionStarted, update.SessionID, nil)
+	}
+
+	// Index the single update → []protocol.SessionEntry.
+	entries, err := h.indexer.Index([]SessionUpdate{update})
+	if err != nil {
+		return fmt.Errorf("acp.IndexingSessionHandler.HandleUpdate: indexing failed (sessionID=%q): %w",
+			update.SessionID, err)
+	}
+
+	// Persist to audit trail immediately.
+	if len(entries) > 0 {
+		if err := h.trail.RecordSessionEntries(ctx, entries); err != nil {
+			return fmt.Errorf("acp.IndexingSessionHandler.HandleUpdate: trail write failed (sessionID=%q, entries=%d): %w",
+				update.SessionID, len(entries), err)
+		}
+		h.mu.Lock()
+		h.entriesWritten += len(entries)
+		h.mu.Unlock()
 	}
 
 	return nil
@@ -90,49 +113,25 @@ func (h *IndexingSessionHandler) HandleUpdate(ctx context.Context, update Sessio
 // HandleSessionEnd finalises the session identified by sessionID.
 //
 // Steps (in order):
-//  1. Retrieve accumulated updates for the session (under lock; then release).
-//  2. Call indexer.Index to convert updates → []protocol.SessionEntry.
-//  3. Persist entries via trail.RecordSessionEntries.
-//  4. Dispatch HookSessionEnded (best-effort).
-//  5. Remove the session from the accumulation map.
+//  1. Dispatch HookSessionEnded (best-effort).
+//  2. Record last session ID and stop reason.
+//  3. Remove the session from the tracking map.
 //
-// Returns the first fatal error encountered in steps 2–3. Step 4 errors are
-// best-effort and do not cause HandleSessionEnd to return an error.
+// No bulk indexing occurs here — entries are already persisted by HandleUpdate.
+// Returns nil unless the context is cancelled.
 func (h *IndexingSessionHandler) HandleSessionEnd(ctx context.Context, sessionID string, reason StopReason) error {
+	// Read current entries count for the hook payload (under lock).
 	h.mu.Lock()
-	accumulated := h.updates[sessionID]
-	// Copy to avoid holding the lock during indexing and I/O.
-	snapshot := make([]SessionUpdate, len(accumulated))
-	copy(snapshot, accumulated)
-	// Delete immediately under the same lock to prevent a concurrent
-	// HandleSessionEnd from re-processing the same session (double-end race).
-	delete(h.updates, sessionID)
-	h.mu.Unlock()
-
-	// Index updates → SessionEntry rows.
-	entries, err := h.indexer.Index(snapshot)
-	if err != nil {
-		return err
-	}
-
-	// Persist to audit trail.
-	if len(entries) > 0 {
-		if err := h.trail.RecordSessionEntries(ctx, entries); err != nil {
-			return err
-		}
-	}
-
-	// Record session outcome and update counters under a single lock acquisition.
-	h.mu.Lock()
-	h.entriesWritten += len(entries)
+	currentEntries := h.entriesWritten
 	h.lastSessionID = sessionID
 	h.lastStopReason = reason
+	delete(h.sessions, sessionID)
 	h.mu.Unlock()
 
 	// Fire HookSessionEnded (best-effort; do not return hook errors).
 	h.dispatchHook(ctx, hooks.HookSessionEnded, sessionID, map[string]any{
 		"stopReason":      string(reason),
-		"entriesRecorded": len(entries),
+		"entriesRecorded": currentEntries,
 	})
 
 	return nil
@@ -166,7 +165,8 @@ func (h *IndexingSessionHandler) LastStopReason() StopReason {
 }
 
 // dispatchHook fires an event to the Manager if it is non-nil.
-// Errors are intentionally swallowed — hook dispatch is best-effort.
+// Hook dispatch errors are logged via slog.Warn and intentionally not returned —
+// hook dispatch is best-effort and must not disrupt the session lifecycle.
 func (h *IndexingSessionHandler) dispatchHook(
 	ctx context.Context,
 	event hooks.HookEvent,
@@ -189,6 +189,15 @@ func (h *IndexingSessionHandler) dispatchHook(
 		EpochID: h.epochID,
 		Data:    data,
 	}
-	//nolint:errcheck // hook dispatch is best-effort; errors are intentionally ignored
-	_ = h.hooksMgr.Dispatch(ctx, payload)
+	if err := h.hooksMgr.Dispatch(ctx, payload); err != nil {
+		slog.Warn("hook dispatch failed",
+			"what", fmt.Sprintf("hook dispatch failed for event %s", payload.Event),
+			"why", err.Error(),
+			"impact", "hook handlers for this event did not execute",
+			"fix", "check handler registration and handler implementation",
+			"event", string(event),
+			"sessionId", sessionID,
+			"epochId", h.epochID,
+		)
+	}
 }
