@@ -16,50 +16,51 @@ import (
 
 // ─── PhaseId ─────────────────────────────────────────────────────────────────
 
-// PhaseId identifies a phase in the 12-phase epoch lifecycle.
-// Values are short wire-format strings (e.g. "p1", "p2", ..., "complete").
+// PhaseId identifies a phase in the 12-phase epoch lifecycle by its name.
+// The position (pX number) is determined by the phase's index in a Pipeline,
+// not by the value of the PhaseId itself.
 type PhaseId string
 
 const (
-	P1_Request     PhaseId = "p1"
-	P2_Elicit      PhaseId = "p2"
-	P3_Propose     PhaseId = "p3"
-	P4_Review      PhaseId = "p4"
-	P5_Uat         PhaseId = "p5"
-	P6_Ratify      PhaseId = "p6"
-	P7_Handoff     PhaseId = "p7"
-	P8_ImplPlan    PhaseId = "p8"
-	P9_Slice       PhaseId = "p9"
-	P10_CodeReview PhaseId = "p10"
-	P11_ImplUat    PhaseId = "p11"
-	P12_Landing    PhaseId = "p12"
-	Complete       PhaseId = "complete"
+	PhaseRequest      PhaseId = "request"
+	PhaseElicit       PhaseId = "elicit"
+	PhasePropose      PhaseId = "propose"
+	PhaseReview       PhaseId = "review"
+	PhasePlanReview   PhaseId = "plan-review"
+	PhaseRatify       PhaseId = "ratify"
+	PhaseHandoff      PhaseId = "handoff"
+	PhaseImplPlan     PhaseId = "impl-plan"
+	PhaseWorkerSlices PhaseId = "worker-slices"
+	PhaseCodeReview   PhaseId = "code-review"
+	PhaseImplUAT      PhaseId = "impl-uat"
+	PhaseLanding      PhaseId = "landing"
+	PhaseComplete     PhaseId = "complete"
 )
 
-// AllPhaseIds is the ordered slice of all valid PhaseId values.
+// AllPhaseIds is the ordered slice of all valid PhaseId values (pipeline + terminal).
 // Useful for iteration, completeness checks, and building lookup tables.
 var AllPhaseIds = []PhaseId{
-	P1_Request,
-	P2_Elicit,
-	P3_Propose,
-	P4_Review,
-	P5_Uat,
-	P6_Ratify,
-	P7_Handoff,
-	P8_ImplPlan,
-	P9_Slice,
-	P10_CodeReview,
-	P11_ImplUat,
-	P12_Landing,
-	Complete,
+	PhaseRequest,
+	PhaseElicit,
+	PhasePropose,
+	PhaseReview,
+	PhasePlanReview,
+	PhaseRatify,
+	PhaseHandoff,
+	PhaseImplPlan,
+	PhaseWorkerSlices,
+	PhaseCodeReview,
+	PhaseImplUAT,
+	PhaseLanding,
+	PhaseComplete,
 }
 
 // IsValid reports whether p is a known PhaseId value.
 func (p PhaseId) IsValid() bool {
 	switch p {
-	case P1_Request, P2_Elicit, P3_Propose, P4_Review, P5_Uat,
-		P6_Ratify, P7_Handoff, P8_ImplPlan, P9_Slice,
-		P10_CodeReview, P11_ImplUat, P12_Landing, Complete:
+	case PhaseRequest, PhaseElicit, PhasePropose, PhaseReview, PhasePlanReview,
+		PhaseRatify, PhaseHandoff, PhaseImplPlan, PhaseWorkerSlices,
+		PhaseCodeReview, PhaseImplUAT, PhaseLanding, PhaseComplete:
 		return true
 	}
 	return false
@@ -68,134 +69,176 @@ func (p PhaseId) IsValid() bool {
 // String returns the wire-format string value of p.
 func (p PhaseId) String() string { return string(p) }
 
+// ─── Pipeline ─────────────────────────────────────────────────────────────────
+
+// Pipeline is an ordered sequence of phases. The 0-based index of a PhaseId
+// in the slice determines its 1-based phase number (pX). PhaseComplete is a
+// terminal state and is NOT included in the pipeline itself.
+type Pipeline []PhaseId
+
+// DefaultPipeline is the standard 12-phase aura protocol pipeline.
+// The index in this slice determines the pX number (0-based index + 1).
+var DefaultPipeline = Pipeline{
+	PhaseRequest,      // p1
+	PhaseElicit,       // p2
+	PhasePropose,      // p3
+	PhaseReview,       // p4
+	PhasePlanReview,   // p5
+	PhaseRatify,       // p6
+	PhaseHandoff,      // p7
+	PhaseImplPlan,     // p8
+	PhaseWorkerSlices, // p9
+	PhaseCodeReview,   // p10
+	PhaseImplUAT,      // p11
+	PhaseLanding,      // p12
+}
+
+// Index returns the 0-based index of id in the pipeline, or -1 if not found.
+func (p Pipeline) Index(id PhaseId) int {
+	for i, phase := range p {
+		if phase == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// Contains reports whether the pipeline contains id.
+func (p Pipeline) Contains(id PhaseId) bool {
+	return p.Index(id) >= 0
+}
+
+// PhaseNumber returns the 1-based phase number for id, or -1 if not found.
+func (p Pipeline) PhaseNumber(id PhaseId) int {
+	i := p.Index(id)
+	if i < 0 {
+		return -1
+	}
+	return i + 1
+}
+
+// PhaseAt returns the PhaseId at the given 1-based phase number.
+// Returns ("", false) if number is out of range.
+func (p Pipeline) PhaseAt(number int) (PhaseId, bool) {
+	if number < 1 || number > len(p) {
+		return "", false
+	}
+	return p[number-1], true
+}
+
+// Next returns the next phase after id in the pipeline.
+// Returns PhaseComplete if id is the last phase or not found.
+func (p Pipeline) Next(id PhaseId) PhaseId {
+	i := p.Index(id)
+	if i < 0 || i >= len(p)-1 {
+		return PhaseComplete
+	}
+	return p[i+1]
+}
+
+// ─── ParsePhaseId ─────────────────────────────────────────────────────────────
+
 // ParsePhaseId parses a flexible phase input string into a PhaseId.
 //
 // Supported formats (case-insensitive):
-//   - Short wire format:   "p1", "p2", ..., "p12", "complete"
-//   - Number only:         "1", "2", ..., "12"
-//   - Name only:           "request", "elicit", "propose", "review", "uat",
-//     "ratify", "handoff", "implplan", "slice",
-//     "codereview", "impluat", "landing", "complete"
-//   - PascalCase:          "P1_Request", "P2_Elicit", ...
-//   - Full underscore:     "p1_request", "p2_elicit", ...
+//   - Name only:   "request", "elicit", "propose", "review", "plan-review",
+//     "ratify", "handoff", "impl-plan", "worker-slices",
+//     "code-review", "impl-uat", "landing", "complete"
+//   - pX format:   "p1", "p2", ..., "p12" (resolved via DefaultPipeline)
+//   - pX-name:     "p1-request", "p2-elicit", ... (legacy; name portion used)
+//   - Number only: "1", "2", ..., "12"
 //
 // Returns an error if the input does not match any known format.
 func ParsePhaseId(s string) (PhaseId, error) {
 	lower := strings.ToLower(strings.TrimSpace(s))
 
-	// Direct match on wire format (e.g. "p1", "complete").
+	// Direct name-only match.
 	switch lower {
-	case "p1":
-		return P1_Request, nil
-	case "p2":
-		return P2_Elicit, nil
-	case "p3":
-		return P3_Propose, nil
-	case "p4":
-		return P4_Review, nil
-	case "p5":
-		return P5_Uat, nil
-	case "p6":
-		return P6_Ratify, nil
-	case "p7":
-		return P7_Handoff, nil
-	case "p8":
-		return P8_ImplPlan, nil
-	case "p9":
-		return P9_Slice, nil
-	case "p10":
-		return P10_CodeReview, nil
-	case "p11":
-		return P11_ImplUat, nil
-	case "p12":
-		return P12_Landing, nil
+	case "request":
+		return PhaseRequest, nil
+	case "elicit":
+		return PhaseElicit, nil
+	case "propose":
+		return PhasePropose, nil
+	case "review":
+		return PhaseReview, nil
+	case "plan-review", "planreview", "plan_review":
+		return PhasePlanReview, nil
+	case "ratify":
+		return PhaseRatify, nil
+	case "handoff":
+		return PhaseHandoff, nil
+	case "impl-plan", "implplan", "impl_plan":
+		return PhaseImplPlan, nil
+	case "worker-slices", "workerslices", "worker_slices", "slice", "slices":
+		return PhaseWorkerSlices, nil
+	case "code-review", "codereview", "code_review":
+		return PhaseCodeReview, nil
+	case "impl-uat", "impluat", "impl_uat", "uat":
+		return PhaseImplUAT, nil
+	case "landing":
+		return PhaseLanding, nil
 	case "complete":
-		return Complete, nil
+		return PhaseComplete, nil
 	}
 
-	// Number-only format (e.g. "1", "12").
-	switch lower {
-	case "1":
-		return P1_Request, nil
-	case "2":
-		return P2_Elicit, nil
-	case "3":
-		return P3_Propose, nil
-	case "4":
-		return P4_Review, nil
-	case "5":
-		return P5_Uat, nil
-	case "6":
-		return P6_Ratify, nil
-	case "7":
-		return P7_Handoff, nil
-	case "8":
-		return P8_ImplPlan, nil
-	case "9":
-		return P9_Slice, nil
-	case "10":
-		return P10_CodeReview, nil
-	case "11":
-		return P11_ImplUat, nil
-	case "12":
-		return P12_Landing, nil
-	}
+	// pX format: "p1", "p2", ..., "p12"
+	if strings.HasPrefix(lower, "p") {
+		rest := lower[1:]
 
-	// Normalized name matching: strip "p<n>_" prefix then match by name.
-	// Handles: "request", "p1_request", "P1_Request", "p1request"
-	//
-	// First, strip a leading "p<digits>_" or "p<digits>" prefix if present.
-	normalized := lower
-	if strings.HasPrefix(normalized, "p") {
-		// Skip the 'p' and any digits that follow.
-		rest := normalized[1:]
+		// Find end of digits.
 		digEnd := 0
 		for digEnd < len(rest) && rest[digEnd] >= '0' && rest[digEnd] <= '9' {
 			digEnd++
 		}
+
 		if digEnd > 0 {
-			// Strip optional trailing underscore separator.
+			numStr := rest[:digEnd]
 			suffix := rest[digEnd:]
-			if strings.HasPrefix(suffix, "_") {
+
+			// Strip optional separator (hyphen or underscore) before name.
+			if len(suffix) > 0 && (suffix[0] == '-' || suffix[0] == '_') {
 				suffix = suffix[1:]
 			}
+
+			// If there's a name suffix, parse it recursively (pX-name format).
 			if suffix != "" {
-				normalized = suffix
+				return ParsePhaseId(suffix)
+			}
+
+			// Pure pX format — resolve via DefaultPipeline.
+			num := 0
+			for _, ch := range numStr {
+				num = num*10 + int(ch-'0')
+			}
+			phase, ok := DefaultPipeline.PhaseAt(num)
+			if ok {
+				return phase, nil
 			}
 		}
 	}
 
-	switch normalized {
-	case "request":
-		return P1_Request, nil
-	case "elicit":
-		return P2_Elicit, nil
-	case "propose":
-		return P3_Propose, nil
-	case "review":
-		return P4_Review, nil
-	case "uat":
-		return P5_Uat, nil
-	case "ratify":
-		return P6_Ratify, nil
-	case "handoff":
-		return P7_Handoff, nil
-	case "implplan", "impl_plan":
-		return P8_ImplPlan, nil
-	case "slice":
-		return P9_Slice, nil
-	case "codereview", "code_review":
-		return P10_CodeReview, nil
-	case "impluat", "impl_uat":
-		return P11_ImplUat, nil
-	case "landing":
-		return P12_Landing, nil
+	// Number-only format: "1", "2", ..., "12"
+	num := 0
+	allDigits := len(lower) > 0
+	for _, ch := range lower {
+		if ch < '0' || ch > '9' {
+			allDigits = false
+			break
+		}
+		num = num*10 + int(ch-'0')
+	}
+	if allDigits && len(lower) > 0 {
+		phase, ok := DefaultPipeline.PhaseAt(num)
+		if ok {
+			return phase, nil
+		}
 	}
 
 	return "", fmt.Errorf(
 		"protocol.ParsePhaseId: unrecognized phase %q — "+
 			"valid formats: \"p1\"..\"p12\", \"complete\", \"1\"..\"12\", "+
-			"or a phase name like \"request\", \"elicit\", \"propose\"",
+			"or a phase name like \"request\", \"elicit\", \"propose\", \"code-review\"",
 		s,
 	)
 }

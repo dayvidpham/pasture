@@ -45,9 +45,9 @@ func PhaseAdvance(
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     fmt.Sprintf("%q is not a valid phase", toPhase),
-			Why:      "PhaseId must be one of: p1, p2, ..., p12, complete",
+			Why:      "PhaseId must be one of: request, elicit, propose, ..., landing, complete (or pX shorthand)",
 			Impact:   "phase advance cannot be sent with an unknown target phase",
-			Fix:      "use a valid phase ID (e.g., p1, p2, ... p12, complete)",
+			Fix:      "use a valid phase name (e.g., request, elicit, code-review) or pX shorthand (p1..p12)",
 		}
 		return pasterrors.ExitCode(err), err
 	}

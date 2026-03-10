@@ -47,9 +47,9 @@ func runTrailSuite(t *testing.T, trail audit.Trail) {
 	roleA := "supervisor"
 	roleB := "worker"
 
-	ev1 := makeEvent(ep1, protocol.P1_Request, roleA, protocol.EventPhaseTransition)
-	ev2 := makeEvent(ep1, protocol.P2_Elicit, roleB, protocol.EventVoteRecorded)
-	ev3 := makeEvent(ep2, protocol.P1_Request, roleA, protocol.EventPhaseTransition)
+	ev1 := makeEvent(ep1, protocol.PhaseRequest, roleA, protocol.EventPhaseTransition)
+	ev2 := makeEvent(ep1, protocol.PhaseElicit, roleB, protocol.EventVoteRecorded)
+	ev3 := makeEvent(ep2, protocol.PhaseRequest, roleA, protocol.EventPhaseTransition)
 
 	// Record three events.
 	if err := trail.RecordEvent(ctx, ev1); err != nil {
@@ -75,7 +75,7 @@ func runTrailSuite(t *testing.T, trail audit.Trail) {
 
 	// Query ep1 filtered by phase p1 — expect ev1 only.
 	t.Run("QueryByEpochAndPhase", func(t *testing.T) {
-		ph := protocol.P1_Request
+		ph := protocol.PhaseRequest
 		got, err := trail.QueryEvents(ctx, ep1, &ph, nil)
 		if err != nil {
 			t.Fatalf("QueryEvents: %v", err)
@@ -104,7 +104,7 @@ func runTrailSuite(t *testing.T, trail audit.Trail) {
 
 	// Query ep1 filtered by both phase p2 and role roleB — expect ev2 only.
 	t.Run("QueryByEpochPhaseAndRole", func(t *testing.T) {
-		ph := protocol.P2_Elicit
+		ph := protocol.PhaseElicit
 		got, err := trail.QueryEvents(ctx, ep1, &ph, &roleB)
 		if err != nil {
 			t.Fatalf("QueryEvents: %v", err)

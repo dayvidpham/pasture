@@ -23,40 +23,40 @@ type PhaseSpec struct {
 // Port of Python PHASE_SPECS from scripts/aura_protocol/types.py.
 //
 // Gate rules (enforced by EpochStateMachine, not by this table):
-//   - p4→p5 and p10→p11 require all 3 review axes to ACCEPT (consensus gate).
-//   - p10→p11 additionally requires blocker_count == 0 (BLOCKER gate).
-//   - At p4/p10 with any REVISE vote, only the backward transition is available.
+//   - PhaseReview→PhasePlanReview and PhaseCodeReview→PhaseImplUAT require all 3 review axes to ACCEPT (consensus gate).
+//   - PhaseCodeReview→PhaseImplUAT additionally requires blocker_count == 0 (BLOCKER gate).
+//   - At PhaseReview/PhaseCodeReview with any REVISE vote, only the backward transition is available.
 var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
-	protocol.P1_Request:     {Transitions: []protocol.PhaseId{protocol.P2_Elicit}},
-	protocol.P2_Elicit:      {Transitions: []protocol.PhaseId{protocol.P3_Propose}},
-	protocol.P3_Propose:     {Transitions: []protocol.PhaseId{protocol.P4_Review}},
-	protocol.P4_Review:      {Transitions: []protocol.PhaseId{protocol.P5_Uat, protocol.P3_Propose}},
-	protocol.P5_Uat:         {Transitions: []protocol.PhaseId{protocol.P6_Ratify}},
-	protocol.P6_Ratify:      {Transitions: []protocol.PhaseId{protocol.P7_Handoff}},
-	protocol.P7_Handoff:     {Transitions: []protocol.PhaseId{protocol.P8_ImplPlan}},
-	protocol.P8_ImplPlan:    {Transitions: []protocol.PhaseId{protocol.P9_Slice}},
-	protocol.P9_Slice:       {Transitions: []protocol.PhaseId{protocol.P10_CodeReview}},
-	protocol.P10_CodeReview: {Transitions: []protocol.PhaseId{protocol.P11_ImplUat, protocol.P9_Slice}},
-	protocol.P11_ImplUat:    {Transitions: []protocol.PhaseId{protocol.P12_Landing}},
-	protocol.P12_Landing:    {Transitions: []protocol.PhaseId{protocol.Complete}},
+	protocol.PhaseRequest:      {Transitions: []protocol.PhaseId{protocol.PhaseElicit}},
+	protocol.PhaseElicit:       {Transitions: []protocol.PhaseId{protocol.PhasePropose}},
+	protocol.PhasePropose:      {Transitions: []protocol.PhaseId{protocol.PhaseReview}},
+	protocol.PhaseReview:       {Transitions: []protocol.PhaseId{protocol.PhasePlanReview, protocol.PhasePropose}},
+	protocol.PhasePlanReview:   {Transitions: []protocol.PhaseId{protocol.PhaseRatify}},
+	protocol.PhaseRatify:       {Transitions: []protocol.PhaseId{protocol.PhaseHandoff}},
+	protocol.PhaseHandoff:      {Transitions: []protocol.PhaseId{protocol.PhaseImplPlan}},
+	protocol.PhaseImplPlan:     {Transitions: []protocol.PhaseId{protocol.PhaseWorkerSlices}},
+	protocol.PhaseWorkerSlices: {Transitions: []protocol.PhaseId{protocol.PhaseCodeReview}},
+	protocol.PhaseCodeReview:   {Transitions: []protocol.PhaseId{protocol.PhaseImplUAT, protocol.PhaseWorkerSlices}},
+	protocol.PhaseImplUAT:      {Transitions: []protocol.PhaseId{protocol.PhaseLanding}},
+	protocol.PhaseLanding:      {Transitions: []protocol.PhaseId{protocol.PhaseComplete}},
 }
 
 // consensusGated is the set of (from, to) transitions requiring all-ACCEPT consensus.
 var consensusGated = map[[2]protocol.PhaseId]struct{}{
-	{protocol.P4_Review, protocol.P5_Uat}:         {},
-	{protocol.P10_CodeReview, protocol.P11_ImplUat}: {},
+	{protocol.PhaseReview, protocol.PhasePlanReview}:     {},
+	{protocol.PhaseCodeReview, protocol.PhaseImplUAT}: {},
 }
 
 // blockerGated is the set of (from, to) transitions blocked when blocker_count > 0.
 var blockerGated = map[[2]protocol.PhaseId]struct{}{
-	{protocol.P10_CodeReview, protocol.P11_ImplUat}: {},
+	{protocol.PhaseCodeReview, protocol.PhaseImplUAT}: {},
 }
 
 // reviseDrivesBackPhases are review phases where a REVISE vote forces only the
 // backward transition (revision loop).
 var reviseDrivesBackPhases = map[protocol.PhaseId]struct{}{
-	protocol.P4_Review:      {},
-	protocol.P10_CodeReview: {},
+	protocol.PhaseReview:     {},
+	protocol.PhaseCodeReview: {},
 }
 
 // ─── EpochStateMachine ────────────────────────────────────────────────────────
@@ -79,7 +79,7 @@ type EpochStateMachine struct {
 	specs map[protocol.PhaseId]PhaseSpec
 }
 
-// NewEpochStateMachine creates a new EpochStateMachine initialized to P1_Request.
+// NewEpochStateMachine creates a new EpochStateMachine initialized to PhaseRequest.
 // Accepts an optional specs map for dependency injection in tests; pass nil to
 // use the canonical PhaseSpecs.
 func NewEpochStateMachine(epochID string, specs map[protocol.PhaseId]PhaseSpec) *EpochStateMachine {
@@ -89,7 +89,7 @@ func NewEpochStateMachine(epochID string, specs map[protocol.PhaseId]PhaseSpec) 
 	return &EpochStateMachine{
 		state: &types.EpochState{
 			EpochID:           epochID,
-			CurrentPhase:      protocol.P1_Request,
+			CurrentPhase:      protocol.PhaseRequest,
 			CurrentRole:       types.RoleEpoch,
 			CompletedPhases:   []protocol.PhaseId{},
 			ReviewVotes:       make(map[types.ReviewAxis]types.VoteType),
@@ -116,7 +116,7 @@ func (sm *EpochStateMachine) State() *types.EpochState {
 // Returns empty slice when current phase is Complete or has no spec.
 func (sm *EpochStateMachine) AvailableTransitions() []protocol.PhaseId {
 	current := sm.state.CurrentPhase
-	if current == protocol.Complete {
+	if current == protocol.PhaseComplete {
 		return nil
 	}
 	spec, ok := sm.specs[current]
@@ -179,7 +179,7 @@ func (sm *EpochStateMachine) ValidateAdvance(toPhase protocol.PhaseId) []string 
 	var violations []string
 	current := sm.state.CurrentPhase
 
-	if current == protocol.Complete {
+	if current == protocol.PhaseComplete {
 		violations = append(violations,
 			"epoch is already COMPLETE; no further transitions are possible")
 		return violations

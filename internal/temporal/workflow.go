@@ -30,19 +30,19 @@ var (
 
 // phaseDomain maps PhaseId to its protocol domain string.
 var phaseDomain = map[protocol.PhaseId]string{
-	protocol.P1_Request:     "user",
-	protocol.P2_Elicit:      "user",
-	protocol.P3_Propose:     "plan",
-	protocol.P4_Review:      "plan",
-	protocol.P5_Uat:         "plan",
-	protocol.P6_Ratify:      "plan",
-	protocol.P7_Handoff:     "impl",
-	protocol.P8_ImplPlan:    "impl",
-	protocol.P9_Slice:       "impl",
-	protocol.P10_CodeReview: "impl",
-	protocol.P11_ImplUat:    "impl",
-	protocol.P12_Landing:    "impl",
-	protocol.Complete:       "impl",
+	protocol.PhaseRequest:      "user",
+	protocol.PhaseElicit:       "user",
+	protocol.PhasePropose:      "plan",
+	protocol.PhaseReview:       "plan",
+	protocol.PhasePlanReview:   "plan",
+	protocol.PhaseRatify:       "plan",
+	protocol.PhaseHandoff:      "impl",
+	protocol.PhaseImplPlan:     "impl",
+	protocol.PhaseWorkerSlices: "impl",
+	protocol.PhaseCodeReview:   "impl",
+	protocol.PhaseImplUAT:      "impl",
+	protocol.PhaseLanding:      "impl",
+	protocol.PhaseComplete:     "impl",
 }
 
 // ─── Workflow I/O types ───────────────────────────────────────────────────────
@@ -143,7 +143,7 @@ func (w *EpochWorkflow) Run(ctx workflow.Context, input EpochInput) (*EpochResul
 	}
 
 	// Main signal-driven loop.
-	for w.sm.State().CurrentPhase != protocol.Complete {
+	for w.sm.State().CurrentPhase != protocol.PhaseComplete {
 		// Wait until there is work to do.
 		_ = workflow.Await(ctx, func() bool {
 			return len(w.pendingAdvance) > 0 || len(w.pendingVotes) > 0
@@ -227,7 +227,7 @@ func (w *EpochWorkflow) Run(ctx workflow.Context, input EpochInput) (*EpochResul
 		// 2e. Upsert search attributes atomically with the transition.
 		current := w.sm.State().CurrentPhase
 		status := "running"
-		if current == protocol.Complete {
+		if current == protocol.PhaseComplete {
 			status = "complete"
 		}
 		if upsertErr := workflow.UpsertTypedSearchAttributes(ctx,

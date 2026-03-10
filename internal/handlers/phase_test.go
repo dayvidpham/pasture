@@ -20,7 +20,7 @@ func TestPhaseAdvance_Success(t *testing.T) {
 	conn := config.ConnectionConfig{}
 	code, err := handlers.PhaseAdvance(
 		context.Background(), conn,
-		"epoch-1", protocol.P10_CodeReview, "supervisor", "all slices complete",
+		"epoch-1", protocol.PhaseCodeReview, "supervisor", "all slices complete",
 		types.OutputText, factory,
 	)
 
@@ -60,7 +60,7 @@ func TestPhaseAdvance_MissingEpochID(t *testing.T) {
 	conn := config.ConnectionConfig{}
 	code, err := handlers.PhaseAdvance(
 		context.Background(), conn,
-		"", protocol.P2_Elicit, "", "",
+		"", protocol.PhaseElicit, "", "",
 		types.OutputText, factory,
 	)
 
@@ -80,7 +80,7 @@ func TestPhaseAdvance_WorkflowError(t *testing.T) {
 	conn := config.ConnectionConfig{}
 	code, err := handlers.PhaseAdvance(
 		context.Background(), conn,
-		"epoch-1", protocol.P3_Propose, "supervisor", "",
+		"epoch-1", protocol.PhasePropose, "supervisor", "",
 		types.OutputText, factory,
 	)
 
@@ -100,7 +100,7 @@ func TestPhaseAdvance_JSONFormat(t *testing.T) {
 	conn := config.ConnectionConfig{}
 	code, err := handlers.PhaseAdvance(
 		context.Background(), conn,
-		"epoch-1", protocol.Complete, "epoch", "all phases done",
+		"epoch-1", protocol.PhaseComplete, "epoch", "all phases done",
 		types.OutputJSON, factory,
 	)
 

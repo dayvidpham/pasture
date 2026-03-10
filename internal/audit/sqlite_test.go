@@ -42,8 +42,8 @@ func TestSqliteAuditTrail_Durability(t *testing.T) {
 		t.Fatalf("NewSqliteAuditTrail: %v", err)
 	}
 
-	ev1 := makeEvent("dur-epoch", protocol.P1_Request, "supervisor", protocol.EventPhaseTransition)
-	ev2 := makeEvent("dur-epoch", protocol.P2_Elicit, "worker", protocol.EventVoteRecorded)
+	ev1 := makeEvent("dur-epoch", protocol.PhaseRequest, "supervisor", protocol.EventPhaseTransition)
+	ev2 := makeEvent("dur-epoch", protocol.PhaseElicit, "worker", protocol.EventVoteRecorded)
 
 	if err := trail1.RecordEvent(ctx, ev1); err != nil {
 		t.Fatalf("RecordEvent: %v", err)
@@ -69,11 +69,11 @@ func TestSqliteAuditTrail_Durability(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("want 2 events after reopen, got %d", len(got))
 	}
-	if got[0].Phase != protocol.P1_Request {
-		t.Errorf("event[0]: want phase %q, got %q", protocol.P1_Request, got[0].Phase)
+	if got[0].Phase != protocol.PhaseRequest {
+		t.Errorf("event[0]: want phase %q, got %q", protocol.PhaseRequest, got[0].Phase)
 	}
-	if got[1].Phase != protocol.P2_Elicit {
-		t.Errorf("event[1]: want phase %q, got %q", protocol.P2_Elicit, got[1].Phase)
+	if got[1].Phase != protocol.PhaseElicit {
+		t.Errorf("event[1]: want phase %q, got %q", protocol.PhaseElicit, got[1].Phase)
 	}
 }
 
@@ -112,7 +112,7 @@ func TestSqliteAuditTrail_ConcurrentAccess(t *testing.T) {
 			for j := range eventsPerGoroutine {
 				ev := protocol.AuditEvent{
 					EpochID:   "concurrent-sqlite",
-					Phase:     protocol.P9_Slice,
+					Phase:     protocol.PhaseWorkerSlices,
 					Role:      "worker",
 					EventType: protocol.EventSliceStarted,
 					Payload:   map[string]any{"goroutine": idx, "seq": j},
@@ -144,7 +144,7 @@ func TestSqliteAuditTrail_PreservesChronologicalOrder(t *testing.T) {
 	trail, _ := newTestSqliteTrail(t)
 	ctx := context.Background()
 
-	phases := []protocol.PhaseId{protocol.P1_Request, protocol.P2_Elicit, protocol.P3_Propose}
+	phases := []protocol.PhaseId{protocol.PhaseRequest, protocol.PhaseElicit, protocol.PhasePropose}
 	for _, ph := range phases {
 		ev := makeEvent("order-sqlite", ph, "supervisor", protocol.EventPhaseTransition)
 		if err := trail.RecordEvent(ctx, ev); err != nil {

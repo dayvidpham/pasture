@@ -31,7 +31,7 @@ func TestInMemoryAuditTrail_ConcurrentAccess(t *testing.T) {
 			for j := range eventsPerGoroutine {
 				ev := protocol.AuditEvent{
 					EpochID:   "concurrent-epoch",
-					Phase:     protocol.P9_Slice,
+					Phase:     protocol.PhaseWorkerSlices,
 					Role:      "worker",
 					EventType: protocol.EventSliceStarted,
 					Payload:   map[string]any{"goroutine": idx, "seq": j},
@@ -62,7 +62,7 @@ func TestInMemoryAuditTrail_PreservesInsertionOrder(t *testing.T) {
 	trail := audit.NewInMemoryAuditTrail()
 	ctx := context.Background()
 
-	phases := []protocol.PhaseId{protocol.P1_Request, protocol.P2_Elicit, protocol.P3_Propose}
+	phases := []protocol.PhaseId{protocol.PhaseRequest, protocol.PhaseElicit, protocol.PhasePropose}
 	for _, ph := range phases {
 		ev := makeEvent("order-epoch", ph, "supervisor", protocol.EventPhaseTransition)
 		if err := trail.RecordEvent(ctx, ev); err != nil {

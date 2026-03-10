@@ -40,7 +40,7 @@ func (e *connErr) Error() string { return e.msg }
 
 func TestQueryState_Success(t *testing.T) {
 	result := types.QueryStateResult{
-		CurrentPhase:       protocol.P9_Slice,
+		CurrentPhase:       protocol.PhaseWorkerSlices,
 		CurrentRole:        types.RoleWorker,
 		ActiveSessionCount: 2,
 	}
@@ -97,7 +97,7 @@ func TestQueryState_WorkflowNotFound(t *testing.T) {
 
 func TestQueryState_JSONFormat(t *testing.T) {
 	result := types.QueryStateResult{
-		CurrentPhase: protocol.P1_Request,
+		CurrentPhase: protocol.PhaseRequest,
 		CurrentRole:  types.RoleEpoch,
 	}
 

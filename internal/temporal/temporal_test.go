@@ -19,8 +19,8 @@ func TestStateMachine_InitialState(t *testing.T) {
 	t.Parallel()
 	sm := temporal.NewEpochStateMachine("epoch-1", nil)
 	state := sm.State()
-	if state.CurrentPhase != protocol.P1_Request {
-		t.Errorf("initial phase = %q, want %q", state.CurrentPhase, protocol.P1_Request)
+	if state.CurrentPhase != protocol.PhaseRequest {
+		t.Errorf("initial phase = %q, want %q", state.CurrentPhase, protocol.PhaseRequest)
 	}
 	if state.EpochID != "epoch-1" {
 		t.Errorf("epoch ID = %q, want %q", state.EpochID, "epoch-1")
@@ -38,20 +38,20 @@ func TestStateMachine_Advance_HappyPath(t *testing.T) {
 	sm := temporal.NewEpochStateMachine("epoch-2", nil)
 	now := time.Now()
 
-	record, err := sm.Advance(protocol.P2_Elicit, "architect", "classification confirmed", now)
+	record, err := sm.Advance(protocol.PhaseElicit, "architect", "classification confirmed", now)
 	if err != nil {
 		t.Fatalf("Advance to p2: unexpected error: %v", err)
 	}
-	if record.ToPhase != protocol.P2_Elicit {
-		t.Errorf("record.ToPhase = %q, want %q", record.ToPhase, protocol.P2_Elicit)
+	if record.ToPhase != protocol.PhaseElicit {
+		t.Errorf("record.ToPhase = %q, want %q", record.ToPhase, protocol.PhaseElicit)
 	}
 	if !record.Success {
 		t.Error("record.Success = false, want true")
 	}
-	if sm.State().CurrentPhase != protocol.P2_Elicit {
-		t.Errorf("current phase = %q, want %q", sm.State().CurrentPhase, protocol.P2_Elicit)
+	if sm.State().CurrentPhase != protocol.PhaseElicit {
+		t.Errorf("current phase = %q, want %q", sm.State().CurrentPhase, protocol.PhaseElicit)
 	}
-	if len(sm.State().CompletedPhases) != 1 || sm.State().CompletedPhases[0] != protocol.P1_Request {
+	if len(sm.State().CompletedPhases) != 1 || sm.State().CompletedPhases[0] != protocol.PhaseRequest {
 		t.Errorf("completed phases = %v, want [p1]", sm.State().CompletedPhases)
 	}
 }
@@ -61,13 +61,13 @@ func TestStateMachine_Advance_InvalidTransition(t *testing.T) {
 	sm := temporal.NewEpochStateMachine("epoch-3", nil)
 
 	// Attempt to jump to p3 from p1 (only p2 is valid).
-	_, err := sm.Advance(protocol.P3_Propose, "bad-actor", "skip elicit", time.Now())
+	_, err := sm.Advance(protocol.PhasePropose, "bad-actor", "skip elicit", time.Now())
 	if err == nil {
 		t.Fatal("expected error for invalid transition p1 → p3, got nil")
 	}
 	// Current phase should remain p1.
-	if sm.State().CurrentPhase != protocol.P1_Request {
-		t.Errorf("current phase after failed advance = %q, want %q", sm.State().CurrentPhase, protocol.P1_Request)
+	if sm.State().CurrentPhase != protocol.PhaseRequest {
+		t.Errorf("current phase after failed advance = %q, want %q", sm.State().CurrentPhase, protocol.PhaseRequest)
 	}
 }
 
@@ -77,17 +77,17 @@ func TestStateMachine_ConsensusGate_P4ToP5(t *testing.T) {
 	now := time.Now()
 
 	// Advance to p4.
-	for _, phase := range []protocol.PhaseId{protocol.P2_Elicit, protocol.P3_Propose, protocol.P4_Review} {
+	for _, phase := range []protocol.PhaseId{protocol.PhaseElicit, protocol.PhasePropose, protocol.PhaseReview} {
 		if _, err := sm.Advance(phase, "architect", "ok", now); err != nil {
 			t.Fatalf("advance to %q: %v", phase, err)
 		}
 	}
-	if sm.State().CurrentPhase != protocol.P4_Review {
+	if sm.State().CurrentPhase != protocol.PhaseReview {
 		t.Fatalf("want p4, got %q", sm.State().CurrentPhase)
 	}
 
 	// Without consensus, p4→p5 should fail.
-	violations := sm.ValidateAdvance(protocol.P5_Uat)
+	violations := sm.ValidateAdvance(protocol.PhasePlanReview)
 	if len(violations) == 0 {
 		t.Error("expected consensus gate violation for p4→p5 with no votes, got none")
 	}
@@ -96,7 +96,7 @@ func TestStateMachine_ConsensusGate_P4ToP5(t *testing.T) {
 	_ = sm.RecordVote(types.AxisCorrectness, types.VoteAccept)
 	_ = sm.RecordVote(types.AxisTestQuality, types.VoteAccept)
 
-	violations = sm.ValidateAdvance(protocol.P5_Uat)
+	violations = sm.ValidateAdvance(protocol.PhasePlanReview)
 	if len(violations) == 0 {
 		t.Error("expected consensus gate violation for p4→p5 with 2/3 votes, got none")
 	}
@@ -104,12 +104,12 @@ func TestStateMachine_ConsensusGate_P4ToP5(t *testing.T) {
 	// Add 3rd vote — now consensus reached.
 	_ = sm.RecordVote(types.AxisElegance, types.VoteAccept)
 
-	violations = sm.ValidateAdvance(protocol.P5_Uat)
+	violations = sm.ValidateAdvance(protocol.PhasePlanReview)
 	if len(violations) != 0 {
 		t.Errorf("unexpected violations for p4→p5 after consensus: %v", violations)
 	}
 
-	if _, err := sm.Advance(protocol.P5_Uat, "reviewer", "all 3 vote ACCEPT", now); err != nil {
+	if _, err := sm.Advance(protocol.PhasePlanReview, "reviewer", "all 3 vote ACCEPT", now); err != nil {
 		t.Fatalf("advance to p5 after consensus: %v", err)
 	}
 }
@@ -120,7 +120,7 @@ func TestStateMachine_ReviseGate_P4BackToP3(t *testing.T) {
 	now := time.Now()
 
 	// Advance to p4.
-	for _, phase := range []protocol.PhaseId{protocol.P2_Elicit, protocol.P3_Propose, protocol.P4_Review} {
+	for _, phase := range []protocol.PhaseId{protocol.PhaseElicit, protocol.PhasePropose, protocol.PhaseReview} {
 		if _, err := sm.Advance(phase, "architect", "ok", now); err != nil {
 			t.Fatalf("advance to %q: %v", phase, err)
 		}
@@ -132,13 +132,13 @@ func TestStateMachine_ReviseGate_P4BackToP3(t *testing.T) {
 	// Available transitions should only include backward (p3), not p5.
 	avail := sm.AvailableTransitions()
 	for _, a := range avail {
-		if a == protocol.P5_Uat {
+		if a == protocol.PhasePlanReview {
 			t.Error("REVISE gate: p5 should NOT be available when any axis voted REVISE")
 		}
 	}
 	hasP3 := false
 	for _, a := range avail {
-		if a == protocol.P3_Propose {
+		if a == protocol.PhasePropose {
 			hasP3 = true
 		}
 	}
@@ -154,9 +154,9 @@ func TestStateMachine_BlockerGate_P10ToP11(t *testing.T) {
 
 	// Advance straight through to p10.
 	phases := []protocol.PhaseId{
-		protocol.P2_Elicit, protocol.P3_Propose, protocol.P4_Review,
-		protocol.P5_Uat, protocol.P6_Ratify, protocol.P7_Handoff,
-		protocol.P8_ImplPlan, protocol.P9_Slice, protocol.P10_CodeReview,
+		protocol.PhaseElicit, protocol.PhasePropose, protocol.PhaseReview,
+		protocol.PhasePlanReview, protocol.PhaseRatify, protocol.PhaseHandoff,
+		protocol.PhaseImplPlan, protocol.PhaseWorkerSlices, protocol.PhaseCodeReview,
 	}
 	// p4→p5 needs consensus first.
 	for i, phase := range phases {
@@ -170,7 +170,7 @@ func TestStateMachine_BlockerGate_P10ToP11(t *testing.T) {
 		}
 	}
 
-	if sm.State().CurrentPhase != protocol.P10_CodeReview {
+	if sm.State().CurrentPhase != protocol.PhaseCodeReview {
 		t.Fatalf("want p10, got %q", sm.State().CurrentPhase)
 	}
 
@@ -183,7 +183,7 @@ func TestStateMachine_BlockerGate_P10ToP11(t *testing.T) {
 	_ = sm.RecordVote(types.AxisElegance, types.VoteAccept)
 
 	// p10→p11 should fail due to blocker.
-	violations := sm.ValidateAdvance(protocol.P11_ImplUat)
+	violations := sm.ValidateAdvance(protocol.PhaseImplUAT)
 	hasBlockerViolation := false
 	for _, v := range violations {
 		if len(v) > 0 {
@@ -197,7 +197,7 @@ func TestStateMachine_BlockerGate_P10ToP11(t *testing.T) {
 	// Resolve the blocker.
 	sm.RecordBlocker(true) // -1 blocker
 
-	violations = sm.ValidateAdvance(protocol.P11_ImplUat)
+	violations = sm.ValidateAdvance(protocol.PhaseImplUAT)
 	if len(violations) != 0 {
 		t.Errorf("unexpected violations for p10→p11 after resolving blocker: %v", violations)
 	}
@@ -253,7 +253,7 @@ func TestStateMachine_VotesCleared_AfterAdvance(t *testing.T) {
 	now := time.Now()
 
 	_ = sm.RecordVote(types.AxisCorrectness, types.VoteAccept)
-	if _, err := sm.Advance(protocol.P2_Elicit, "test", "ok", now); err != nil {
+	if _, err := sm.Advance(protocol.PhaseElicit, "test", "ok", now); err != nil {
 		t.Fatalf("advance: %v", err)
 	}
 	if len(sm.State().ReviewVotes) != 0 {
@@ -265,9 +265,9 @@ func TestStateMachine_CompletePhase_NoFurtherTransitions(t *testing.T) {
 	t.Parallel()
 	sm := temporal.NewEpochStateMachine("epoch-11", nil)
 	// Manually inject COMPLETE to test gate.
-	sm.State().CurrentPhase = protocol.Complete
+	sm.State().CurrentPhase = protocol.PhaseComplete
 
-	violations := sm.ValidateAdvance(protocol.P1_Request)
+	violations := sm.ValidateAdvance(protocol.PhaseRequest)
 	if len(violations) == 0 {
 		t.Error("expected violation for COMPLETE epoch, got none")
 	}
@@ -282,16 +282,16 @@ func TestStateMachine_CustomSpecs(t *testing.T) {
 	t.Parallel()
 	// Inject a tiny custom spec for testability.
 	customSpecs := map[protocol.PhaseId]temporal.PhaseSpec{
-		protocol.P1_Request: {Transitions: []protocol.PhaseId{protocol.P3_Propose}},
-		protocol.P3_Propose: {Transitions: []protocol.PhaseId{protocol.Complete}},
+		protocol.PhaseRequest: {Transitions: []protocol.PhaseId{protocol.PhasePropose}},
+		protocol.PhasePropose: {Transitions: []protocol.PhaseId{protocol.PhaseComplete}},
 	}
 	sm := temporal.NewEpochStateMachine("epoch-custom", customSpecs)
 
-	if _, err := sm.Advance(protocol.P3_Propose, "test", "custom spec", time.Now()); err != nil {
+	if _, err := sm.Advance(protocol.PhasePropose, "test", "custom spec", time.Now()); err != nil {
 		t.Fatalf("advance with custom spec: %v", err)
 	}
-	if sm.State().CurrentPhase != protocol.P3_Propose {
-		t.Errorf("phase = %q, want %q", sm.State().CurrentPhase, protocol.P3_Propose)
+	if sm.State().CurrentPhase != protocol.PhasePropose {
+		t.Errorf("phase = %q, want %q", sm.State().CurrentPhase, protocol.PhasePropose)
 	}
 }
 
@@ -305,11 +305,11 @@ func TestCheckConstraints_ValidTransition(t *testing.T) {
 
 	state := types.EpochState{
 		EpochID:      "epoch-act-1",
-		CurrentPhase: protocol.P1_Request,
+		CurrentPhase: protocol.PhaseRequest,
 		ReviewVotes:  make(map[types.ReviewAxis]types.VoteType),
 	}
 
-	val, err := env.ExecuteActivity(temporal.CheckConstraints, state, protocol.P2_Elicit)
+	val, err := env.ExecuteActivity(temporal.CheckConstraints, state, protocol.PhaseElicit)
 	if err != nil {
 		t.Fatalf("CheckConstraints activity failed: %v", err)
 	}
@@ -330,11 +330,11 @@ func TestCheckConstraints_InvalidTransition(t *testing.T) {
 
 	state := types.EpochState{
 		EpochID:      "epoch-act-2",
-		CurrentPhase: protocol.P1_Request,
+		CurrentPhase: protocol.PhaseRequest,
 		ReviewVotes:  make(map[types.ReviewAxis]types.VoteType),
 	}
 
-	val, err := env.ExecuteActivity(temporal.CheckConstraints, state, protocol.P3_Propose)
+	val, err := env.ExecuteActivity(temporal.CheckConstraints, state, protocol.PhasePropose)
 	if err != nil {
 		t.Fatalf("CheckConstraints activity failed: %v", err)
 	}
@@ -357,8 +357,8 @@ func TestRecordTransition_UninitializedTrail(t *testing.T) {
 	env.RegisterActivity(temporal.RecordTransition)
 
 	record := types.TransitionRecord{
-		FromPhase: protocol.P1_Request,
-		ToPhase:   protocol.P2_Elicit,
+		FromPhase: protocol.PhaseRequest,
+		ToPhase:   protocol.PhaseElicit,
 		Timestamp: time.Now(),
 		Success:   true,
 	}
@@ -380,8 +380,8 @@ func TestRecordTransition_WithTrail(t *testing.T) {
 	env.RegisterActivity(temporal.RecordTransition)
 
 	record := types.TransitionRecord{
-		FromPhase:    protocol.P1_Request,
-		ToPhase:      protocol.P2_Elicit,
+		FromPhase:    protocol.PhaseRequest,
+		ToPhase:      protocol.PhaseElicit,
 		Timestamp:    time.Now(),
 		TriggeredBy:  "test",
 		ConditionMet: "test ok",
@@ -408,13 +408,13 @@ func TestInMemoryAuditTrail_RecordAndQuery(t *testing.T) {
 
 	event1 := protocol.AuditEvent{
 		EpochID:   "epoch-trail-1",
-		Phase:     protocol.P1_Request,
+		Phase:     protocol.PhaseRequest,
 		EventType: protocol.EventPhaseTransition,
 		Timestamp: time.Now(),
 	}
 	event2 := protocol.AuditEvent{
 		EpochID:   "epoch-trail-2",
-		Phase:     protocol.P2_Elicit,
+		Phase:     protocol.PhaseElicit,
 		EventType: protocol.EventVoteRecorded,
 		Timestamp: time.Now(),
 	}
@@ -436,12 +436,12 @@ func TestInMemoryAuditTrail_RecordAndQuery(t *testing.T) {
 	}
 
 	// Query by epoch ID and phase.
-	p2 := protocol.P2_Elicit
+	p2 := protocol.PhaseElicit
 	results, err = trail.QueryEvents(ctx, "epoch-trail-2", &p2, nil)
 	if err != nil {
 		t.Fatalf("QueryEvents by phase: %v", err)
 	}
-	if len(results) != 1 || results[0].Phase != protocol.P2_Elicit {
+	if len(results) != 1 || results[0].Phase != protocol.PhaseElicit {
 		t.Errorf("QueryEvents by phase: got %d events", len(results))
 	}
 
@@ -471,7 +471,7 @@ func TestEpochWorkflow_P1ToP2_Signal(t *testing.T) {
 	// Register a delayed signal to advance from p1 to p2.
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(temporal.SignalAdvancePhase, types.PhaseAdvanceSignal{
-			ToPhase:      protocol.P2_Elicit,
+			ToPhase:      protocol.PhaseElicit,
 			TriggeredBy:  "architect",
 			ConditionMet: "classification confirmed",
 		})
@@ -512,7 +512,7 @@ func TestEpochWorkflow_AdvancePhase_InvalidIgnored(t *testing.T) {
 	// Send an invalid advance signal (p3 from p1 is invalid).
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(temporal.SignalAdvancePhase, types.PhaseAdvanceSignal{
-			ToPhase:      protocol.P3_Propose, // invalid from p1
+			ToPhase:      protocol.PhasePropose, // invalid from p1
 			TriggeredBy:  "bad-actor",
 			ConditionMet: "skipping elicit",
 		})
@@ -813,7 +813,7 @@ func TestQueryAuditEvents_WithTrail(t *testing.T) {
 	// Pre-populate trail.
 	_ = trail.RecordEvent(ctx, protocol.AuditEvent{
 		EpochID:   "epoch-q-2",
-		Phase:     protocol.P1_Request,
+		Phase:     protocol.PhaseRequest,
 		EventType: protocol.EventPhaseTransition,
 		Timestamp: time.Now(),
 	})
@@ -846,7 +846,7 @@ func TestRecordAuditEvent_WithTrail(t *testing.T) {
 
 	event := protocol.AuditEvent{
 		EpochID:   "epoch-audit-1",
-		Phase:     protocol.P2_Elicit,
+		Phase:     protocol.PhaseElicit,
 		EventType: protocol.EventVoteRecorded,
 		Timestamp: time.Now(),
 	}
@@ -868,7 +868,7 @@ func TestStateMachine_AvailableTransitions_ConsensusNotYetReached(t *testing.T) 
 	now := time.Now()
 
 	// Advance to p4.
-	for _, phase := range []protocol.PhaseId{protocol.P2_Elicit, protocol.P3_Propose, protocol.P4_Review} {
+	for _, phase := range []protocol.PhaseId{protocol.PhaseElicit, protocol.PhasePropose, protocol.PhaseReview} {
 		if _, err := sm.Advance(phase, "test", "ok", now); err != nil {
 			t.Fatalf("advance to %q: %v", phase, err)
 		}
@@ -877,14 +877,14 @@ func TestStateMachine_AvailableTransitions_ConsensusNotYetReached(t *testing.T) 
 	// No votes yet — p5 should not be available (consensus gate).
 	avail := sm.AvailableTransitions()
 	for _, a := range avail {
-		if a == protocol.P5_Uat {
+		if a == protocol.PhasePlanReview {
 			t.Error("p5 should not be available without consensus")
 		}
 	}
 	// Backward transition (p3) should be available.
 	hasP3 := false
 	for _, a := range avail {
-		if a == protocol.P3_Propose {
+		if a == protocol.PhasePropose {
 			hasP3 = true
 		}
 	}
@@ -911,18 +911,18 @@ func TestTransitionError_MultipleViolations(t *testing.T) {
 	now := time.Now()
 
 	// Advance to p10 manually (inject state).
-	sm.State().CurrentPhase = protocol.P10_CodeReview
+	sm.State().CurrentPhase = protocol.PhaseCodeReview
 	sm.State().ReviewVotes = make(map[types.ReviewAxis]types.VoteType)
 	sm.State().BlockerCount = 1 // unresolved blocker
 
 	// p10→p11 needs consensus AND 0 blockers. Both should fail.
-	violations := sm.ValidateAdvance(protocol.P11_ImplUat)
+	violations := sm.ValidateAdvance(protocol.PhaseImplUAT)
 	if len(violations) < 2 {
 		t.Errorf("expected at least 2 violations (consensus + blocker), got %d: %v", len(violations), violations)
 	}
 
 	// Trigger Advance to get the TransitionError.
-	_, err := sm.Advance(protocol.P11_ImplUat, "test", "force", now)
+	_, err := sm.Advance(protocol.PhaseImplUAT, "test", "force", now)
 	if err == nil {
 		t.Fatal("expected TransitionError, got nil")
 	}
@@ -959,7 +959,7 @@ func TestEpochWorkflow_FullLifecycle_ThroughP2(t *testing.T) {
 	// Advance p1→p2, then cancel.
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(temporal.SignalAdvancePhase, types.PhaseAdvanceSignal{
-			ToPhase:      protocol.P2_Elicit,
+			ToPhase:      protocol.PhaseElicit,
 			TriggeredBy:  "architect",
 			ConditionMet: "classification confirmed",
 		})
@@ -971,9 +971,9 @@ func TestEpochWorkflow_FullLifecycle_ThroughP2(t *testing.T) {
 		if qErr == nil {
 			var state types.EpochState
 			if decErr := val.Get(&state); decErr == nil {
-				if state.CurrentPhase != protocol.P2_Elicit {
+				if state.CurrentPhase != protocol.PhaseElicit {
 					t.Errorf("after advance, current phase = %q, want %q",
-						state.CurrentPhase, protocol.P2_Elicit)
+						state.CurrentPhase, protocol.PhaseElicit)
 				}
 			}
 		}
@@ -999,7 +999,7 @@ func TestRecordAuditEvent_UninitializedTrail(t *testing.T) {
 
 	event := protocol.AuditEvent{
 		EpochID:   "epoch-nil-trail",
-		Phase:     protocol.P1_Request,
+		Phase:     protocol.PhaseRequest,
 		EventType: protocol.EventPhaseTransition,
 		Timestamp: time.Now(),
 	}
@@ -1037,7 +1037,7 @@ func TestEpochWorkflow_QueryAvailableTransitions(t *testing.T) {
 			t.Errorf("decode QueryAvailableTransitions: %v", decErr)
 			return
 		}
-		if len(transitions) != 1 || transitions[0] != protocol.P2_Elicit {
+		if len(transitions) != 1 || transitions[0] != protocol.PhaseElicit {
 			t.Errorf("QueryAvailableTransitions at p1 = %v, want [p2]", transitions)
 		}
 		env.CancelWorkflow()
@@ -1074,8 +1074,8 @@ func TestEpochWorkflow_QueryFullState(t *testing.T) {
 			t.Errorf("decode QueryFullState: %v", decErr)
 			return
 		}
-		if result.CurrentPhase != protocol.P1_Request {
-			t.Errorf("QueryFullState.CurrentPhase = %q, want %q", result.CurrentPhase, protocol.P1_Request)
+		if result.CurrentPhase != protocol.PhaseRequest {
+			t.Errorf("QueryFullState.CurrentPhase = %q, want %q", result.CurrentPhase, protocol.PhaseRequest)
 		}
 		if len(result.AvailableTransitions) == 0 {
 			t.Error("QueryFullState.AvailableTransitions is empty, want at least one transition")

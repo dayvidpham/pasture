@@ -14,19 +14,19 @@ func TestPhaseId_IsValid(t *testing.T) {
 	t.Parallel()
 
 	validCases := []protocol.PhaseId{
-		protocol.P1_Request,
-		protocol.P2_Elicit,
-		protocol.P3_Propose,
-		protocol.P4_Review,
-		protocol.P5_Uat,
-		protocol.P6_Ratify,
-		protocol.P7_Handoff,
-		protocol.P8_ImplPlan,
-		protocol.P9_Slice,
-		protocol.P10_CodeReview,
-		protocol.P11_ImplUat,
-		protocol.P12_Landing,
-		protocol.Complete,
+		protocol.PhaseRequest,
+		protocol.PhaseElicit,
+		protocol.PhasePropose,
+		protocol.PhaseReview,
+		protocol.PhasePlanReview,
+		protocol.PhaseRatify,
+		protocol.PhaseHandoff,
+		protocol.PhaseImplPlan,
+		protocol.PhaseWorkerSlices,
+		protocol.PhaseCodeReview,
+		protocol.PhaseImplUAT,
+		protocol.PhaseLanding,
+		protocol.PhaseComplete,
 	}
 	for _, p := range validCases {
 		p := p // capture range var
@@ -40,7 +40,7 @@ func TestPhaseId_IsValid(t *testing.T) {
 
 	invalidCases := []protocol.PhaseId{
 		"",
-		"P1",
+		"p1",
 		"p13",
 		"unknown",
 		"COMPLETE",
@@ -60,7 +60,7 @@ func TestPhaseId_IsValid(t *testing.T) {
 func TestAllPhaseIds_Completeness(t *testing.T) {
 	t.Parallel()
 
-	// AllPhaseIds must contain exactly 13 entries (p1..p12 + complete).
+	// AllPhaseIds must contain exactly 13 entries (12 pipeline phases + complete).
 	if got := len(protocol.AllPhaseIds); got != 13 {
 		t.Errorf("len(AllPhaseIds) = %d, want 13", got)
 	}
@@ -82,9 +82,10 @@ func TestPhaseId_String(t *testing.T) {
 		phase protocol.PhaseId
 		want  string
 	}{
-		{protocol.P1_Request, "p1"},
-		{protocol.Complete, "complete"},
-		{protocol.P10_CodeReview, "p10"},
+		{protocol.PhaseRequest, "request"},
+		{protocol.PhaseComplete, "complete"},
+		{protocol.PhaseCodeReview, "code-review"},
+		{protocol.PhaseWorkerSlices, "worker-slices"},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -108,53 +109,70 @@ func TestParsePhaseId(t *testing.T) {
 	}
 
 	validCases := []tc{
-		// Wire format
-		{"p1", protocol.P1_Request},
-		{"p2", protocol.P2_Elicit},
-		{"p3", protocol.P3_Propose},
-		{"p4", protocol.P4_Review},
-		{"p5", protocol.P5_Uat},
-		{"p6", protocol.P6_Ratify},
-		{"p7", protocol.P7_Handoff},
-		{"p8", protocol.P8_ImplPlan},
-		{"p9", protocol.P9_Slice},
-		{"p10", protocol.P10_CodeReview},
-		{"p11", protocol.P11_ImplUat},
-		{"p12", protocol.P12_Landing},
-		{"complete", protocol.Complete},
+		// Name-only format (canonical)
+		{"request", protocol.PhaseRequest},
+		{"elicit", protocol.PhaseElicit},
+		{"propose", protocol.PhasePropose},
+		{"review", protocol.PhaseReview},
+		{"plan-review", protocol.PhasePlanReview},
+		{"ratify", protocol.PhaseRatify},
+		{"handoff", protocol.PhaseHandoff},
+		{"impl-plan", protocol.PhaseImplPlan},
+		{"worker-slices", protocol.PhaseWorkerSlices},
+		{"code-review", protocol.PhaseCodeReview},
+		{"impl-uat", protocol.PhaseImplUAT},
+		{"landing", protocol.PhaseLanding},
+		{"complete", protocol.PhaseComplete},
+		// Alias name formats
+		{"planreview", protocol.PhasePlanReview},
+		{"plan_review", protocol.PhasePlanReview},
+		{"implplan", protocol.PhaseImplPlan},
+		{"impl_plan", protocol.PhaseImplPlan},
+		{"workerslices", protocol.PhaseWorkerSlices},
+		{"worker_slices", protocol.PhaseWorkerSlices},
+		{"slice", protocol.PhaseWorkerSlices},
+		{"slices", protocol.PhaseWorkerSlices},
+		{"codereview", protocol.PhaseCodeReview},
+		{"code_review", protocol.PhaseCodeReview},
+		{"impluat", protocol.PhaseImplUAT},
+		{"impl_uat", protocol.PhaseImplUAT},
+		{"uat", protocol.PhaseImplUAT},
+		// pX format resolved via DefaultPipeline
+		{"p1", protocol.PhaseRequest},
+		{"p2", protocol.PhaseElicit},
+		{"p3", protocol.PhasePropose},
+		{"p4", protocol.PhaseReview},
+		{"p5", protocol.PhasePlanReview},
+		{"p6", protocol.PhaseRatify},
+		{"p7", protocol.PhaseHandoff},
+		{"p8", protocol.PhaseImplPlan},
+		{"p9", protocol.PhaseWorkerSlices},
+		{"p10", protocol.PhaseCodeReview},
+		{"p11", protocol.PhaseImplUAT},
+		{"p12", protocol.PhaseLanding},
+		// pX-name legacy format
+		{"p1-request", protocol.PhaseRequest},
+		{"p2-elicit", protocol.PhaseElicit},
+		{"p9-worker-slices", protocol.PhaseWorkerSlices},
+		{"p10-code-review", protocol.PhaseCodeReview},
+		// pX_name legacy format
+		{"p1_request", protocol.PhaseRequest},
+		{"p4_review", protocol.PhaseReview},
 		// Number only
-		{"1", protocol.P1_Request},
-		{"2", protocol.P2_Elicit},
-		{"3", protocol.P3_Propose},
-		{"10", protocol.P10_CodeReview},
-		{"11", protocol.P11_ImplUat},
-		{"12", protocol.P12_Landing},
-		// Name only
-		{"request", protocol.P1_Request},
-		{"elicit", protocol.P2_Elicit},
-		{"propose", protocol.P3_Propose},
-		{"review", protocol.P4_Review},
-		{"uat", protocol.P5_Uat},
-		{"ratify", protocol.P6_Ratify},
-		{"handoff", protocol.P7_Handoff},
-		{"implplan", protocol.P8_ImplPlan},
-		{"slice", protocol.P9_Slice},
-		{"codereview", protocol.P10_CodeReview},
-		{"impluat", protocol.P11_ImplUat},
-		{"landing", protocol.P12_Landing},
-		// Case-insensitive wire format
-		{"P1", protocol.P1_Request},
-		{"P10", protocol.P10_CodeReview},
-		{"COMPLETE", protocol.Complete},
-		// Full underscore format
-		{"p1_request", protocol.P1_Request},
-		{"p2_elicit", protocol.P2_Elicit},
-		{"p10_codereview", protocol.P10_CodeReview},
-		// PascalCase-style (lowered = same as underscore)
-		{"P1_Request", protocol.P1_Request},
-		{"P4_Review", protocol.P4_Review},
+		{"1", protocol.PhaseRequest},
+		{"2", protocol.PhaseElicit},
+		{"3", protocol.PhasePropose},
+		{"10", protocol.PhaseCodeReview},
+		{"11", protocol.PhaseImplUAT},
+		{"12", protocol.PhaseLanding},
+		// Case-insensitive
+		{"REQUEST", protocol.PhaseRequest},
+		{"COMPLETE", protocol.PhaseComplete},
+		{"P1", protocol.PhaseRequest},
+		{"P10", protocol.PhaseCodeReview},
 		// Whitespace trimming
-		{"  p1  ", protocol.P1_Request},
+		{"  p1  ", protocol.PhaseRequest},
+		{"  request  ", protocol.PhaseRequest},
 	}
 
 	for _, tc := range validCases {
@@ -194,6 +212,139 @@ func TestParsePhaseId(t *testing.T) {
 	}
 }
 
+// ─── Pipeline ────────────────────────────────────────────────────────────────
+
+func TestDefaultPipeline_Length(t *testing.T) {
+	t.Parallel()
+	if got := len(protocol.DefaultPipeline); got != 12 {
+		t.Errorf("DefaultPipeline length = %d, want 12", got)
+	}
+}
+
+func TestDefaultPipeline_PhaseComplete_NotIncluded(t *testing.T) {
+	t.Parallel()
+	if protocol.DefaultPipeline.Contains(protocol.PhaseComplete) {
+		t.Error("DefaultPipeline should NOT contain PhaseComplete (terminal state)")
+	}
+}
+
+func TestPipeline_PhaseNumber(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		phase protocol.PhaseId
+		want  int
+	}{
+		{protocol.PhaseRequest, 1},
+		{protocol.PhaseElicit, 2},
+		{protocol.PhasePropose, 3},
+		{protocol.PhaseReview, 4},
+		{protocol.PhasePlanReview, 5},
+		{protocol.PhaseRatify, 6},
+		{protocol.PhaseHandoff, 7},
+		{protocol.PhaseImplPlan, 8},
+		{protocol.PhaseWorkerSlices, 9},
+		{protocol.PhaseCodeReview, 10},
+		{protocol.PhaseImplUAT, 11},
+		{protocol.PhaseLanding, 12},
+		{protocol.PhaseComplete, -1}, // terminal, not in pipeline
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(string(tc.phase), func(t *testing.T) {
+			t.Parallel()
+			got := protocol.DefaultPipeline.PhaseNumber(tc.phase)
+			if got != tc.want {
+				t.Errorf("DefaultPipeline.PhaseNumber(%q) = %d, want %d", tc.phase, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPipeline_PhaseAt(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		number int
+		want   protocol.PhaseId
+		ok     bool
+	}{
+		{1, protocol.PhaseRequest, true},
+		{5, protocol.PhasePlanReview, true},
+		{9, protocol.PhaseWorkerSlices, true},
+		{10, protocol.PhaseCodeReview, true},
+		{12, protocol.PhaseLanding, true},
+		{0, "", false},
+		{13, "", false},
+		{-1, "", false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run("", func(t *testing.T) {
+			t.Parallel()
+			got, ok := protocol.DefaultPipeline.PhaseAt(tc.number)
+			if ok != tc.ok {
+				t.Errorf("DefaultPipeline.PhaseAt(%d) ok = %v, want %v", tc.number, ok, tc.ok)
+			}
+			if got != tc.want {
+				t.Errorf("DefaultPipeline.PhaseAt(%d) = %q, want %q", tc.number, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPipeline_Contains(t *testing.T) {
+	t.Parallel()
+	if !protocol.DefaultPipeline.Contains(protocol.PhaseRequest) {
+		t.Error("Contains(PhaseRequest) = false, want true")
+	}
+	if !protocol.DefaultPipeline.Contains(protocol.PhaseLanding) {
+		t.Error("Contains(PhaseLanding) = false, want true")
+	}
+	if protocol.DefaultPipeline.Contains(protocol.PhaseComplete) {
+		t.Error("Contains(PhaseComplete) = true, want false (terminal state)")
+	}
+	if protocol.DefaultPipeline.Contains("") {
+		t.Error("Contains(\"\") = true, want false")
+	}
+}
+
+func TestPipeline_Next(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		current protocol.PhaseId
+		want    protocol.PhaseId
+	}{
+		{protocol.PhaseRequest, protocol.PhaseElicit},
+		{protocol.PhaseElicit, protocol.PhasePropose},
+		{protocol.PhaseWorkerSlices, protocol.PhaseCodeReview},
+		{protocol.PhaseLanding, protocol.PhaseComplete},    // last in pipeline → Complete
+		{protocol.PhaseComplete, protocol.PhaseComplete},   // not in pipeline → Complete
+		{"unknown", protocol.PhaseComplete},               // not in pipeline → Complete
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(string(tc.current), func(t *testing.T) {
+			t.Parallel()
+			got := protocol.DefaultPipeline.Next(tc.current)
+			if got != tc.want {
+				t.Errorf("DefaultPipeline.Next(%q) = %q, want %q", tc.current, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPipeline_Index(t *testing.T) {
+	t.Parallel()
+	if got := protocol.DefaultPipeline.Index(protocol.PhaseRequest); got != 0 {
+		t.Errorf("Index(PhaseRequest) = %d, want 0", got)
+	}
+	if got := protocol.DefaultPipeline.Index(protocol.PhaseLanding); got != 11 {
+		t.Errorf("Index(PhaseLanding) = %d, want 11", got)
+	}
+	if got := protocol.DefaultPipeline.Index(protocol.PhaseComplete); got != -1 {
+		t.Errorf("Index(PhaseComplete) = %d, want -1", got)
+	}
+}
+
 // ─── EventType.IsValid ────────────────────────────────────────────────────────
 
 func TestEventType_IsValid(t *testing.T) {
@@ -222,7 +373,7 @@ func TestEventType_IsValid(t *testing.T) {
 	invalidCases := []protocol.EventType{
 		"",
 		"unknown",
-		"phase_transition", // old snake_case not valid
+		"phaseTransition",   // camelCase not valid (EventType values use PascalCase)
 		"phase-transition",  // hyphen not valid
 	}
 	for _, e := range invalidCases {
@@ -257,7 +408,7 @@ func TestAuditEvent_JSONRoundTrip(t *testing.T) {
 	ts := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
 	event := protocol.AuditEvent{
 		EpochID:   "epoch-abc-123",
-		Phase:     protocol.P9_Slice,
+		Phase:     protocol.PhaseWorkerSlices,
 		Role:      "worker",
 		EventType: protocol.EventSliceCompleted,
 		Payload: map[string]any{
@@ -299,7 +450,7 @@ func TestAuditEvent_JSONKeys(t *testing.T) {
 
 	event := protocol.AuditEvent{
 		EpochID:   "epoch-1",
-		Phase:     protocol.P1_Request,
+		Phase:     protocol.PhaseRequest,
 		Role:      "epoch",
 		EventType: protocol.EventPhaseTransition,
 		Payload:   map[string]any{},

@@ -24,7 +24,10 @@ var phaseAdvanceCmd = &cobra.Command{
 	Short: "Advance the epoch to the next phase",
 	Long: `Send a PhaseAdvanceSignal to the running epoch workflow.
 
-Valid phase IDs: p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, complete
+Valid phase names: request, elicit, propose, review, plan-review, ratify,
+handoff, impl-plan, worker-slices, code-review, impl-uat, landing, complete
+
+Also accepts pX shorthand (p1..p12) or numeric (1..12) for convenience.
 
 The triggered-by field identifies who sent the signal (e.g. a role name or
 automated trigger). The condition field describes the protocol transition
@@ -42,7 +45,7 @@ condition that was satisfied.`,
 		toPhase, err := protocol.ParsePhaseId(toPhaseStr)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "validation error: invalid phase %q: %v\n", toPhaseStr, err)
-			fmt.Fprintln(os.Stderr, "  fix: use a valid phase ID: p1, p2, ... p12, complete")
+			fmt.Fprintln(os.Stderr, "  fix: use a phase name (e.g., request, elicit, code-review) or pX shorthand (p1..p12)")
 			exitWithCode(1)
 		}
 
@@ -65,7 +68,7 @@ condition that was satisfied.`,
 
 func init() {
 	phaseAdvanceCmd.Flags().String("epoch-id", "", "Epoch workflow ID (required)")
-	phaseAdvanceCmd.Flags().String("to-phase", "", "Target phase ID (e.g., p2, p10, complete) (required)")
+	phaseAdvanceCmd.Flags().String("to-phase", "", "Target phase name (e.g., elicit, code-review, complete) or pX (required)")
 	phaseAdvanceCmd.Flags().String("triggered-by", "", "Identifier of the triggering entity (e.g., supervisor)")
 	phaseAdvanceCmd.Flags().String("condition", "", "Protocol condition that was satisfied")
 	_ = phaseAdvanceCmd.MarkFlagRequired("epoch-id")

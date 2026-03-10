@@ -21,12 +21,12 @@ func sampleQueryStateResult() types.QueryStateResult {
 	lastErr := "constraint check failed"
 	ts := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 	return types.QueryStateResult{
-		CurrentPhase: protocol.P9_Slice,
+		CurrentPhase: protocol.PhaseWorkerSlices,
 		CurrentRole:  types.RoleWorker,
 		TransitionHistory: []types.TransitionRecord{
 			{
-				FromPhase:    protocol.P8_ImplPlan,
-				ToPhase:      protocol.P9_Slice,
+				FromPhase:    protocol.PhaseImplPlan,
+				ToPhase:      protocol.PhaseWorkerSlices,
 				Timestamp:    ts,
 				TriggeredBy:  "supervisor",
 				ConditionMet: "plan ratified",
@@ -38,7 +38,7 @@ func sampleQueryStateResult() types.QueryStateResult {
 			types.AxisTestQuality: types.VoteRevise,
 		},
 		LastError:            &lastErr,
-		AvailableTransitions: []protocol.PhaseId{protocol.P10_CodeReview},
+		AvailableTransitions: []protocol.PhaseId{protocol.PhaseCodeReview},
 		ActiveSessionCount:   3,
 	}
 }
@@ -66,8 +66,8 @@ func TestFormatEpochState_JSON(t *testing.T) {
 	}
 
 	// currentPhase and currentRole values.
-	if got := m["currentPhase"].(string); got != "p9" {
-		t.Errorf("currentPhase: want %q, got %q", "p9", got)
+	if got := m["currentPhase"].(string); got != "worker-slices" {
+		t.Errorf("currentPhase: want %q, got %q", "worker-slices", got)
 	}
 	if got := m["currentRole"].(string); got != "worker" {
 		t.Errorf("currentRole: want %q, got %q", "worker", got)
@@ -85,11 +85,11 @@ func TestFormatEpochState_JSON(t *testing.T) {
 	}
 	if len(hist) == 1 {
 		entry := hist[0].(map[string]any)
-		if entry["fromPhase"] != "p8" {
-			t.Errorf("transitionHistory[0].fromPhase: want %q, got %q", "p8", entry["fromPhase"])
+		if entry["fromPhase"] != "impl-plan" {
+			t.Errorf("transitionHistory[0].fromPhase: want %q, got %q", "impl-plan", entry["fromPhase"])
 		}
-		if entry["toPhase"] != "p9" {
-			t.Errorf("transitionHistory[0].toPhase: want %q, got %q", "p9", entry["toPhase"])
+		if entry["toPhase"] != "worker-slices" {
+			t.Errorf("transitionHistory[0].toPhase: want %q, got %q", "worker-slices", entry["toPhase"])
 		}
 		if entry["success"] != true {
 			t.Errorf("transitionHistory[0].success: want true, got %v", entry["success"])
@@ -111,10 +111,10 @@ func TestFormatEpochState_JSON(t *testing.T) {
 	// availableTransitions.
 	avail, ok := m["availableTransitions"].([]any)
 	if !ok || len(avail) != 1 {
-		t.Errorf("availableTransitions: want [p10], got %v", m["availableTransitions"])
+		t.Errorf("availableTransitions: want [code-review], got %v", m["availableTransitions"])
 	}
-	if len(avail) == 1 && avail[0] != "p10" {
-		t.Errorf("availableTransitions[0]: want %q, got %v", "p10", avail[0])
+	if len(avail) == 1 && avail[0] != "code-review" {
+		t.Errorf("availableTransitions[0]: want %q, got %v", "code-review", avail[0])
 	}
 }
 
@@ -129,7 +129,7 @@ func TestFormatEpochState_Text(t *testing.T) {
 		label    string
 		contains string
 	}{
-		{"Phase line", "Phase: p9"},
+		{"Phase line", "Phase: worker-slices"},
 		{"Role line", "Role:  worker"},
 		{"Votes header", "Votes:"},
 		{"Correctness vote", "correctness"},
@@ -138,7 +138,7 @@ func TestFormatEpochState_Text(t *testing.T) {
 		{"REVISE vote", "REVISE"},
 		{"LastError line", "Last Error: constraint check failed"},
 		{"Available transitions header", "Available Transitions:"},
-		{"Available transition p10", "-> p10"},
+		{"Available transition code-review", "-> code-review"},
 		{"Transition count", "Transitions: 1"},
 		{"Active sessions", "Active Sessions: 3"},
 	}
