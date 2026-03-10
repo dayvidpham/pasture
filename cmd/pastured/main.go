@@ -169,19 +169,21 @@ func run(cmd *cobra.Command, configFile string) error {
 		)
 	}
 
-	// ── 6. Create worker and register workflows + activities ──────────────────
-	w := worker.New(temporalClient, cfg.Connection.TaskQueue, worker.Options{})
-	temporal.RegisterWorkflows(w)
-	logger.Info("registered workflows and activities",
-		"taskQueue", cfg.Connection.TaskQueue,
-	)
-
-	// ── 7. Initialise hooks Manager ───────────────────────────────────────────
+	// ── 6. Initialise hooks Manager ───────────────────────────────────────────
+	// Must be initialised before RegisterWorkflows so that activities dispatched
+	// during workflow execution (e.g. DispatchHook) have a manager available.
 	// No default handlers in v1. Plugin integrations (e.g. Claude Code hooks)
 	// register handlers by importing pastured as a library or via the hooks API.
 	hooksMgr := hooks.NewManager()
 	hooks.InitHooksManager(hooksMgr)
 	logger.Info("hooks manager ready", "handlers", 0)
+
+	// ── 7. Create worker and register workflows + activities ──────────────────
+	w := worker.New(temporalClient, cfg.Connection.TaskQueue, worker.Options{})
+	temporal.RegisterWorkflows(w)
+	logger.Info("registered workflows and activities",
+		"taskQueue", cfg.Connection.TaskQueue,
+	)
 
 	// ── 8. Start worker, block, graceful shutdown ─────────────────────────────
 	// worker.Run() blocks internally and stops when the interrupt channel fires.

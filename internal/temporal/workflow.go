@@ -462,8 +462,9 @@ const (
 	ReviewWorkflowType = "reviewWorkflowFn"
 )
 
-// ActivityInfo is a helper that returns activity registration info.
-// Used to register activities with the Temporal worker.
+// ActivityFunctions lists all activity functions registered by RegisterWorkflows.
+// Must be kept in sync with the RegisterWorkflows call below. Used by callers
+// that need to enumerate or re-register activities (e.g. test harnesses).
 var ActivityFunctions = []interface{}{
 	CheckConstraints,
 	RecordTransition,
@@ -471,6 +472,7 @@ var ActivityFunctions = []interface{}{
 	QueryAuditEvents,
 	RecordSessionEntries,
 	QuerySessionEntries,
+	RunAgentSession,
 	hooks.DispatchHook,
 }
 

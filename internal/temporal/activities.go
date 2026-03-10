@@ -345,20 +345,21 @@ func RunAgentSession(ctx context.Context, input RunAgentSessionInput) (*RunAgent
 		)
 	}
 
-	// Summarise results.
+	// Summarise results. The IndexingSessionHandler records the last session ID
+	// and stop reason on each HandleSessionEnd call; we surface these in the
+	// result so callers can correlate the activity output with audit trail data.
 	result := &RunAgentSessionResult{
 		EntriesRecorded: handler.EntriesRecorded(),
+		SessionID:       handler.LastSessionID(),
+		StopReason:      string(handler.LastStopReason()),
 	}
 
-	// Retrieve session stats for the summary. There may be zero or one session
-	// when running a single agent (the ACP client supports multi-session but
-	// most agents open one). We return the first session ID seen.
-	if count := acpClient.SessionCount(); count > 0 {
-		logger.Info("RunAgentSession: complete",
-			slog.Int("sessions", count),
-			slog.Int("entriesRecorded", result.EntriesRecorded),
-		)
-	}
+	logger.Info("RunAgentSession: complete",
+		slog.Int("sessions", acpClient.SessionCount()),
+		slog.Int("entriesRecorded", result.EntriesRecorded),
+		slog.String("lastSessionID", result.SessionID),
+		slog.String("lastStopReason", result.StopReason),
+	)
 
 	return result, nil
 }

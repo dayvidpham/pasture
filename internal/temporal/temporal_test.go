@@ -1099,3 +1099,91 @@ func TestEpochWorkflow_QueryFullState(t *testing.T) {
 		RequestDescription: "test full state query",
 	})
 }
+
+// ─── RunAgentSession Activity Tests ──────────────────────────────────────────
+
+// TestRunAgentSession_UninitializedTrail verifies that RunAgentSession returns
+// a non-retryable ApplicationError when the audit trail singleton has not been
+// initialized via InitAuditTrail.
+func TestRunAgentSession_UninitializedTrail(t *testing.T) {
+	// Not parallel: shares global auditTrail singleton.
+	temporal.InitAuditTrail(nil)
+	t.Cleanup(func() { temporal.InitAuditTrail(nil) })
+
+	suite := &testsuite.WorkflowTestSuite{}
+	env := suite.NewTestActivityEnvironment()
+	env.RegisterActivity(temporal.RunAgentSession)
+
+	input := temporal.RunAgentSessionInput{
+		AgentCmd:  "claude",
+		AgentArgs: []string{"--mcp-server", "test"},
+		EpochID:   "epoch-uninitialized-session",
+	}
+	_, err := env.ExecuteActivity(temporal.RunAgentSession, input)
+	if err == nil {
+		t.Error("expected error from RunAgentSession with uninitialized trail, got nil")
+	}
+}
+
+// TestRunAgentSession_ConnectError verifies that RunAgentSession wraps
+// connection errors (e.g. binary not found) and returns them to the caller.
+func TestRunAgentSession_ConnectError(t *testing.T) {
+	// Not parallel: shares global auditTrail singleton.
+	trail := audit.NewInMemoryAuditTrail()
+	temporal.InitAuditTrail(trail)
+	t.Cleanup(func() { temporal.InitAuditTrail(nil) })
+
+	suite := &testsuite.WorkflowTestSuite{}
+	env := suite.NewTestActivityEnvironment()
+	env.RegisterActivity(temporal.RunAgentSession)
+
+	// Use a clearly non-existent binary to force a connection error.
+	input := temporal.RunAgentSessionInput{
+		AgentCmd:  "/no-such-binary-pasture-test-xyz",
+		AgentArgs: []string{},
+		EpochID:   "epoch-connect-error",
+	}
+	_, err := env.ExecuteActivity(temporal.RunAgentSession, input)
+	if err == nil {
+		t.Error("expected error from RunAgentSession with bogus agent command, got nil")
+	}
+}
+
+// ─── RecordSessionEntries Activity Tests ─────────────────────────────────────
+
+// TestRecordSessionEntries_UninitializedTrail mirrors TestRecordAuditEvent_UninitializedTrail
+// for the RecordSessionEntries activity.
+func TestRecordSessionEntries_UninitializedTrail(t *testing.T) {
+	// Not parallel: shares global auditTrail singleton.
+	temporal.InitAuditTrail(nil)
+	t.Cleanup(func() { temporal.InitAuditTrail(nil) })
+
+	suite := &testsuite.WorkflowTestSuite{}
+	env := suite.NewTestActivityEnvironment()
+	env.RegisterActivity(temporal.RecordSessionEntries)
+
+	entries := []protocol.SessionEntry{
+		{SessionID: "s-nil", EntryIndex: 0, Provider: "anthropic", EntryType: "message", Role: "user"},
+	}
+	_, err := env.ExecuteActivity(temporal.RecordSessionEntries, entries)
+	if err == nil {
+		t.Error("expected non-retryable error from RecordSessionEntries with uninitialized trail, got nil")
+	}
+}
+
+// TestQuerySessionEntries_UninitializedTrail mirrors TestRecordAuditEvent_UninitializedTrail
+// for the QuerySessionEntries activity.
+func TestQuerySessionEntries_UninitializedTrail(t *testing.T) {
+	// Not parallel: shares global auditTrail singleton.
+	temporal.InitAuditTrail(nil)
+	t.Cleanup(func() { temporal.InitAuditTrail(nil) })
+
+	suite := &testsuite.WorkflowTestSuite{}
+	env := suite.NewTestActivityEnvironment()
+	env.RegisterActivity(temporal.QuerySessionEntries)
+
+	_, err := env.ExecuteActivity(temporal.QuerySessionEntries, "session-nil-trail")
+	if err == nil {
+		t.Error("expected non-retryable error from QuerySessionEntries with uninitialized trail, got nil")
+	}
+}

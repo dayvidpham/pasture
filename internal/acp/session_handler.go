@@ -28,9 +28,11 @@ type IndexingSessionHandler struct {
 	hooksMgr *hooks.Manager
 	epochID  string
 
-	mu             sync.Mutex
-	updates        map[string][]SessionUpdate // sessionID → accumulated updates
-	entriesWritten int                        // total entries persisted across all sessions
+	mu              sync.Mutex
+	updates         map[string][]SessionUpdate // sessionID → accumulated updates
+	entriesWritten  int                        // total entries persisted across all sessions
+	lastSessionID   string                     // last session ID seen via HandleSessionEnd
+	lastStopReason  StopReason                 // stop reason from the last HandleSessionEnd call
 }
 
 // NewIndexingSessionHandler constructs a ready-to-use IndexingSessionHandler.
@@ -102,6 +104,9 @@ func (h *IndexingSessionHandler) HandleSessionEnd(ctx context.Context, sessionID
 	// Copy to avoid holding the lock during indexing and I/O.
 	snapshot := make([]SessionUpdate, len(accumulated))
 	copy(snapshot, accumulated)
+	// Delete immediately under the same lock to prevent a concurrent
+	// HandleSessionEnd from re-processing the same session (double-end race).
+	delete(h.updates, sessionID)
 	h.mu.Unlock()
 
 	// Index updates → SessionEntry rows.
@@ -115,21 +120,20 @@ func (h *IndexingSessionHandler) HandleSessionEnd(ctx context.Context, sessionID
 		if err := h.trail.RecordSessionEntries(ctx, entries); err != nil {
 			return err
 		}
-		h.mu.Lock()
-		h.entriesWritten += len(entries)
-		h.mu.Unlock()
 	}
+
+	// Record session outcome and update counters under a single lock acquisition.
+	h.mu.Lock()
+	h.entriesWritten += len(entries)
+	h.lastSessionID = sessionID
+	h.lastStopReason = reason
+	h.mu.Unlock()
 
 	// Fire HookSessionEnded (best-effort; do not return hook errors).
 	h.dispatchHook(ctx, hooks.HookSessionEnded, sessionID, map[string]any{
 		"stopReason":      string(reason),
 		"entriesRecorded": len(entries),
 	})
-
-	// Clean up accumulated state for this session.
-	h.mu.Lock()
-	delete(h.updates, sessionID)
-	h.mu.Unlock()
 
 	return nil
 }
@@ -141,6 +145,24 @@ func (h *IndexingSessionHandler) EntriesRecorded() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.entriesWritten
+}
+
+// LastSessionID returns the session ID from the most recent HandleSessionEnd
+// call. Returns an empty string if no session has ended yet.
+// Safe for concurrent use.
+func (h *IndexingSessionHandler) LastSessionID() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.lastSessionID
+}
+
+// LastStopReason returns the StopReason from the most recent HandleSessionEnd
+// call. Returns an empty StopReason if no session has ended yet.
+// Safe for concurrent use.
+func (h *IndexingSessionHandler) LastStopReason() StopReason {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.lastStopReason
 }
 
 // dispatchHook fires an event to the Manager if it is non-nil.
