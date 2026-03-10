@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt clean
+.PHONY: build test lint fmt clean release-local release-all
 
 VERSION ?= dev
 
@@ -63,8 +63,46 @@ fmt:
 	fi
 
 # --------------------------------------------------------------------------
+# Release
+# --------------------------------------------------------------------------
+
+# Build all 3 binaries for the current platform (stripped, no CGO).
+# Outputs: dist/<binary>-<goos>-<goarch>
+release-local:
+	@GOOS=$$(go env GOOS); \
+	GOARCH=$$(go env GOARCH); \
+	SUFFIX="$${GOOS}-$${GOARCH}"; \
+	mkdir -p dist; \
+	for cmd in pastured pasture-msg pasture-release; do \
+		echo "Building $${cmd}-$${SUFFIX}..."; \
+		CGO_ENABLED=0 go build \
+			-ldflags "-s -w -X main.version=$(VERSION)" \
+			-o "dist/$${cmd}-$${SUFFIX}" \
+			./cmd/$${cmd}; \
+	done; \
+	echo "Binaries written to dist/"
+
+# Cross-compile all 3 binaries for all 4 supported release platforms.
+# Outputs: dist/<binary>-<platform>
+release-all:
+	@mkdir -p dist; \
+	for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do \
+		GOOS=$$(echo $$target | cut -d/ -f1); \
+		GOARCH=$$(echo $$target | cut -d/ -f2); \
+		SUFFIX="$${GOOS}-$${GOARCH}"; \
+		for cmd in pastured pasture-msg pasture-release; do \
+			echo "Building $${cmd}-$${SUFFIX}..."; \
+			CGO_ENABLED=0 GOOS=$${GOOS} GOARCH=$${GOARCH} go build \
+				-ldflags "-s -w -X main.version=$(VERSION)" \
+				-o "dist/$${cmd}-$${SUFFIX}" \
+				./cmd/$${cmd}; \
+		done; \
+	done; \
+	echo "All binaries written to dist/"
+
+# --------------------------------------------------------------------------
 # Clean
 # --------------------------------------------------------------------------
 
 clean:
-	rm -rf bin/
+	rm -rf bin/ dist/
