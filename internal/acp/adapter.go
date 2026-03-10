@@ -3,7 +3,6 @@ package acp
 import (
 	"fmt"
 	"sort"
-	"sync"
 )
 
 // Adapter converts agent-specific transcript record bytes into a SessionUpdate.
@@ -33,24 +32,15 @@ type Adapter interface {
 	Format() string
 }
 
-// ─── Registry ────────────────────────────────────────────────────────────────
+// ─── Static Registry ─────────────────────────────────────────────────────────
 
-var (
-	registryMu sync.RWMutex
-	registry   = map[string]Adapter{}
-)
-
-// RegisterAdapter adds a to the global adapter registry.
+// adapters is the compile-time static adapter registry.
 //
-// The adapter is keyed by a.Format(). Registering a second adapter for the
-// same format overwrites the previous entry. This is intentional to allow
-// updated adapters to replace older versions during initialization.
-//
-// RegisterAdapter is safe for concurrent use.
-func RegisterAdapter(a Adapter) {
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	registry[a.Format()] = a
+// New adapters must be added here at compile time. The map is never mutated
+// after package initialisation, so no mutex is required for reads.
+var adapters = map[string]Adapter{
+	"claude-jsonl":  &claudeAdapter{},
+	"opencode-json": &openCodeAdapter{},
 }
 
 // GetAdapter retrieves the registered adapter for the given format name.
@@ -59,17 +49,14 @@ func RegisterAdapter(a Adapter) {
 // lists all currently registered format names to help the caller choose a
 // valid option.
 //
-// GetAdapter is safe for concurrent use.
+// GetAdapter is safe for concurrent use; the underlying map is read-only.
 func GetAdapter(format string) (Adapter, error) {
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-
-	a, ok := registry[format]
+	a, ok := adapters[format]
 	if !ok {
 		return nil, fmt.Errorf(
 			"acp.GetAdapter: unknown format %q — "+
 				"registered formats: [%s]; "+
-				"register a new adapter with acp.RegisterAdapter",
+				"add a new adapter to the static registry in internal/acp/adapter.go",
 			format,
 			joinedFormats(),
 		)
@@ -77,19 +64,17 @@ func GetAdapter(format string) (Adapter, error) {
 	return a, nil
 }
 
-// RegisteredFormats returns a sorted slice of all currently registered format names.
+// RegisteredFormats returns a sorted slice of all compile-time registered
+// format names.
 //
 // RegisteredFormats is safe for concurrent use.
 func RegisteredFormats() []string {
-	registryMu.RLock()
-	defer registryMu.RUnlock()
 	return joinedFormatSlice()
 }
 
 // ─── internal helpers ─────────────────────────────────────────────────────────
 
 // joinedFormats returns a comma-separated list of registered format names.
-// Caller must hold registryMu (read or write).
 func joinedFormats() string {
 	names := joinedFormatSlice()
 	result := ""
@@ -103,10 +88,9 @@ func joinedFormats() string {
 }
 
 // joinedFormatSlice returns a sorted slice of registered format names.
-// Caller must hold registryMu (read or write).
 func joinedFormatSlice() []string {
-	names := make([]string, 0, len(registry))
-	for k := range registry {
+	names := make([]string, 0, len(adapters))
+	for k := range adapters {
 		names = append(names, k)
 	}
 	sort.Strings(names)

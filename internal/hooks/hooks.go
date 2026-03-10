@@ -105,8 +105,9 @@ type HookPayload struct {
 // The Manager only dispatches payloads whose Event is in the returned set.
 //
 // Handle is called with the payload and a context that carries the dispatch
-// deadline (DefaultDispatchTimeout). Implementations should respect ctx.Done()
-// and return promptly when the context is cancelled.
+// deadline set on the Manager (see WithDispatchTimeout; default is
+// DefaultDispatchTimeout). Implementations should respect ctx.Done() and
+// return promptly when the context is cancelled.
 type HookHandler interface {
 	// Handle processes a hook payload. Must respect ctx cancellation.
 	Handle(ctx context.Context, payload HookPayload) error
@@ -120,23 +121,43 @@ type HookHandler interface {
 //
 // Handlers are registered per-event at startup via Register. At runtime,
 // Dispatch fans out to all handlers subscribed to the payload's event.
-// Each handler runs in its own goroutine under a fresh context with
-// DefaultDispatchTimeout. Errors from individual handlers are collected
-// and returned as a combined error, but do not prevent other handlers
-// from running.
+// Each handler runs in its own goroutine under a fresh context bounded by
+// the Manager's dispatchTimeout (default: DefaultDispatchTimeout). Errors
+// from individual handlers are collected and returned as a combined error,
+// but do not prevent other handlers from running.
 //
 // Manager is safe for concurrent use from multiple goroutines after all
 // Register calls complete (typically at startup before any Dispatch calls).
 type Manager struct {
-	mu       sync.RWMutex
-	handlers map[HookEvent][]HookHandler
+	mu              sync.RWMutex
+	handlers        map[HookEvent][]HookHandler
+	dispatchTimeout time.Duration
+}
+
+// ManagerOption is a functional option for configuring a Manager at construction.
+type ManagerOption func(*Manager)
+
+// WithDispatchTimeout sets the per-handler deadline used by Dispatch.
+// If d is zero or negative, DefaultDispatchTimeout is used instead.
+func WithDispatchTimeout(d time.Duration) ManagerOption {
+	return func(m *Manager) {
+		if d > 0 {
+			m.dispatchTimeout = d
+		}
+	}
 }
 
 // NewManager creates an empty Manager with no registered handlers.
-func NewManager() *Manager {
-	return &Manager{
-		handlers: make(map[HookEvent][]HookHandler),
+// Callers may pass functional options to override defaults (e.g. WithDispatchTimeout).
+func NewManager(opts ...ManagerOption) *Manager {
+	m := &Manager{
+		handlers:        make(map[HookEvent][]HookHandler),
+		dispatchTimeout: DefaultDispatchTimeout,
 	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
 // Register subscribes h to all events returned by h.Events().
@@ -186,7 +207,7 @@ func (m *Manager) Dispatch(ctx context.Context, payload HookPayload) error {
 		wg.Add(1)
 		go func(handler HookHandler) {
 			defer wg.Done()
-			hCtx, cancel := context.WithTimeout(ctx, DefaultDispatchTimeout)
+			hCtx, cancel := context.WithTimeout(ctx, m.dispatchTimeout)
 			defer cancel()
 			if err := handler.Handle(hCtx, payload); err != nil {
 				errs <- dispatchErr{handler: handler, err: err}

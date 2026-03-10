@@ -92,7 +92,7 @@ func samplePayload(event hooks.HookEvent) hooks.HookPayload {
 	return hooks.HookPayload{
 		Event:   event,
 		EpochID: "test-epoch-001",
-		Phase:   protocol.P9_Slice,
+		Phase:   protocol.PhaseWorkerSlices,
 		Data:    map[string]any{"slice": "S4"},
 	}
 }
@@ -440,6 +440,59 @@ func TestHookPayload_ZeroPhase_IsAcceptable(t *testing.T) {
 	}
 	if p := h.payloads(); len(p) > 0 && p[0].Phase != "" {
 		t.Errorf("Phase should be empty for session event, got %q", p[0].Phase)
+	}
+}
+
+// ─── Manager — configurable dispatch timeout ──────────────────────────────────
+
+// TestManager_WithDispatchTimeout_CustomTimeoutUsed verifies that a Manager
+// created with WithDispatchTimeout uses that timeout instead of the default.
+// A handler that sleeps 80 ms should complete without error under a 200 ms
+// timeout, but time out (and return an error) under a 30 ms timeout.
+func TestManager_WithDispatchTimeout_CustomTimeoutUsed(t *testing.T) {
+	const handlerDelay = 80 * time.Millisecond
+
+	t.Run("custom timeout long enough — handler completes", func(t *testing.T) {
+		m := hooks.NewManager(hooks.WithDispatchTimeout(200 * time.Millisecond))
+		slow := newSlowHandler(handlerDelay, hooks.HookSliceStarted)
+		m.Register(slow)
+
+		err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceStarted))
+		if err != nil {
+			t.Errorf("expected no error with generous timeout, got: %v", err)
+		}
+		if slow.called.Load() != 1 {
+			t.Errorf("slow handler called %d times, want 1", slow.called.Load())
+		}
+	})
+
+	t.Run("custom timeout too short — handler times out", func(t *testing.T) {
+		m := hooks.NewManager(hooks.WithDispatchTimeout(30 * time.Millisecond))
+		slow := newSlowHandler(handlerDelay, hooks.HookSliceStarted)
+		m.Register(slow)
+
+		err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceStarted))
+		if err == nil {
+			t.Error("expected timeout error with tight dispatch timeout, got nil")
+		}
+	})
+}
+
+// TestNewManager_DefaultTimeout_IsFiveSeconds confirms that a Manager created
+// without options uses DefaultDispatchTimeout as its per-handler deadline.
+func TestNewManager_DefaultTimeout_IsFiveSeconds(t *testing.T) {
+	if hooks.DefaultDispatchTimeout != 5*time.Second {
+		t.Errorf("DefaultDispatchTimeout: want 5s, got %v", hooks.DefaultDispatchTimeout)
+	}
+
+	// A handler that completes well within 5 s should never time out on a
+	// default-timeout Manager.
+	m := hooks.NewManager()
+	fast := newRecordingHandler(hooks.HookEpochStarted)
+	m.Register(fast)
+
+	if err := m.Dispatch(context.Background(), samplePayload(hooks.HookEpochStarted)); err != nil {
+		t.Errorf("unexpected error with default timeout: %v", err)
 	}
 }
 

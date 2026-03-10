@@ -7,34 +7,45 @@ import (
 	"github.com/dayvidpham/pasture/internal/acp"
 )
 
-// stubAdapter is a minimal Adapter implementation for registry tests.
-type stubAdapter struct{ format string }
-
-func (s *stubAdapter) Format() string { return s.format }
-func (s *stubAdapter) Parse(_ []byte) (acp.SessionUpdate, error) {
-	return acp.SessionUpdate{SessionID: "stub"}, nil
+// TestStaticRegistry_ClaudeAdapterPresent verifies that the compile-time
+// registry contains the claude-jsonl adapter.
+func TestStaticRegistry_ClaudeAdapterPresent(t *testing.T) {
+	got, err := acp.GetAdapter("claude-jsonl")
+	if err != nil {
+		t.Fatalf("GetAdapter(\"claude-jsonl\"): unexpected error: %v", err)
+	}
+	if got.Format() != "claude-jsonl" {
+		t.Errorf("Format: got %q, want %q", got.Format(), "claude-jsonl")
+	}
 }
 
-// TestGetAdapter_RegisteredFormat verifies that a registered adapter can be
-// retrieved and returns a valid SessionUpdate.
-func TestGetAdapter_RegisteredFormat(t *testing.T) {
-	stub := &stubAdapter{format: "test-stub-format"}
-	acp.RegisterAdapter(stub)
-
-	got, err := acp.GetAdapter("test-stub-format")
+// TestStaticRegistry_OpenCodeAdapterPresent verifies that the compile-time
+// registry contains the opencode-json adapter.
+func TestStaticRegistry_OpenCodeAdapterPresent(t *testing.T) {
+	got, err := acp.GetAdapter("opencode-json")
 	if err != nil {
-		t.Fatalf("GetAdapter: unexpected error: %v", err)
+		t.Fatalf("GetAdapter(\"opencode-json\"): unexpected error: %v", err)
 	}
-	if got.Format() != "test-stub-format" {
-		t.Errorf("Format: got %q, want %q", got.Format(), "test-stub-format")
+	if got.Format() != "opencode-json" {
+		t.Errorf("Format: got %q, want %q", got.Format(), "opencode-json")
+	}
+}
+
+// TestStaticRegistry_AllExpectedFormats verifies that RegisteredFormats
+// contains all expected compile-time adapters.
+func TestStaticRegistry_AllExpectedFormats(t *testing.T) {
+	want := []string{"claude-jsonl", "opencode-json"}
+	formats := acp.RegisteredFormats()
+
+	formatSet := make(map[string]bool, len(formats))
+	for _, f := range formats {
+		formatSet[f] = true
 	}
 
-	update, parseErr := got.Parse([]byte(`{}`))
-	if parseErr != nil {
-		t.Fatalf("Parse: unexpected error: %v", parseErr)
-	}
-	if update.SessionID != "stub" {
-		t.Errorf("Parse: SessionID: got %q, want %q", update.SessionID, "stub")
+	for _, w := range want {
+		if !formatSet[w] {
+			t.Errorf("RegisteredFormats: missing expected format %q; got %v", w, formats)
+		}
 	}
 }
 
@@ -49,43 +60,56 @@ func TestGetAdapter_UnknownFormat(t *testing.T) {
 	if !strings.Contains(msg, "does-not-exist-xyz") {
 		t.Errorf("error message should contain the unknown format name: %q", msg)
 	}
-	// Error should mention how to fix it (registration instructions).
-	if !strings.Contains(msg, "RegisterAdapter") {
-		t.Errorf("error message should mention RegisterAdapter: %q", msg)
+	// Error should mention how to fix it (adding to static registry).
+	if !strings.Contains(msg, "adapter.go") {
+		t.Errorf("error message should mention adapter.go for static registration: %q", msg)
 	}
 }
 
-// TestRegisterAdapter_Overwrite verifies that re-registering with the same
-// format name replaces the previous adapter.
-func TestRegisterAdapter_Overwrite(t *testing.T) {
-	first := &stubAdapter{format: "overwrite-test"}
-	second := &stubAdapter{format: "overwrite-test"}
-	acp.RegisterAdapter(first)
-	acp.RegisterAdapter(second)
-
-	got, err := acp.GetAdapter("overwrite-test")
+// TestStaticRegistry_AdaptersAreReadOnly verifies that calling GetAdapter
+// multiple times returns a consistent result (registry is read-only / idempotent).
+func TestStaticRegistry_AdaptersAreReadOnly(t *testing.T) {
+	first, err := acp.GetAdapter("claude-jsonl")
 	if err != nil {
-		t.Fatalf("GetAdapter: unexpected error: %v", err)
+		t.Fatalf("first GetAdapter: %v", err)
 	}
-	// Both have the same format string; just ensure no error and retrieval works.
-	if got.Format() != "overwrite-test" {
-		t.Errorf("Format: got %q, want %q", got.Format(), "overwrite-test")
+	second, err := acp.GetAdapter("claude-jsonl")
+	if err != nil {
+		t.Fatalf("second GetAdapter: %v", err)
+	}
+	if first.Format() != second.Format() {
+		t.Errorf("successive GetAdapter calls returned different formats: %q vs %q",
+			first.Format(), second.Format())
 	}
 }
 
-// TestRegisteredFormats_IncludesRegistered verifies that RegisteredFormats
-// includes any format that has been registered.
-func TestRegisteredFormats_IncludesRegistered(t *testing.T) {
-	acp.RegisterAdapter(&stubAdapter{format: "list-check-format"})
-	formats := acp.RegisteredFormats()
-	found := false
-	for _, f := range formats {
-		if f == "list-check-format" {
-			found = true
-			break
-		}
+// TestStaticRegistry_AdaptersCanParse verifies that statically registered
+// adapters can perform a basic parse without error.
+func TestStaticRegistry_AdaptersCanParse(t *testing.T) {
+	cases := []struct {
+		format string
+		record []byte
+	}{
+		{
+			"claude-jsonl",
+			[]byte(`{"type":"message","role":"assistant","sessionId":"s","content":[]}`),
+		},
+		{
+			"opencode-json",
+			[]byte(`{"id":"x","sessionId":"s","role":"assistant"}`),
+		},
 	}
-	if !found {
-		t.Errorf("RegisteredFormats: expected to find %q in %v", "list-check-format", formats)
+
+	for _, c := range cases {
+		t.Run(c.format, func(t *testing.T) {
+			a, err := acp.GetAdapter(c.format)
+			if err != nil {
+				t.Fatalf("GetAdapter(%q): %v", c.format, err)
+			}
+			_, parseErr := a.Parse(c.record)
+			if parseErr != nil {
+				t.Errorf("Parse: unexpected error: %v", parseErr)
+			}
+		})
 	}
 }

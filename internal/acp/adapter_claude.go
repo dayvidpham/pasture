@@ -13,12 +13,11 @@ import (
 // blocks within the message may be "text", "thinking", "tool_use", or
 // "tool_result" typed.
 //
-// Registration: claudeAdapter is registered in init() so callers can retrieve
-// it via GetAdapter("claude-jsonl").
+// claudeAdapter is registered in the static compile-time registry in adapter.go
+// under the key "claude-jsonl".
 type claudeAdapter struct{}
 
-// NewClaudeAdapter returns a Claude JSONL adapter. The adapter is also
-// registered in the global registry automatically via init().
+// NewClaudeAdapter returns a Claude JSONL adapter instance.
 func NewClaudeAdapter() Adapter {
 	return &claudeAdapter{}
 }
@@ -242,6 +241,3 @@ func approxErrorOffset(record []byte, err error) int {
 	return len(record)
 }
 
-func init() {
-	RegisterAdapter(NewClaudeAdapter())
-}

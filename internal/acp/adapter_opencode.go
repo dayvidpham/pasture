@@ -12,12 +12,11 @@ import (
 // "toolCalls" array; text responses are in a "text" field. Token usage is
 // nested under a "tokens" object.
 //
-// Registration: openCodeAdapter is registered in init() so callers can retrieve
-// it via GetAdapter("opencode-json").
+// openCodeAdapter is registered in the static compile-time registry in adapter.go
+// under the key "opencode-json".
 type openCodeAdapter struct{}
 
-// NewOpenCodeAdapter returns an OpenCode JSON adapter. The adapter is also
-// registered in the global registry automatically via init().
+// NewOpenCodeAdapter returns an OpenCode JSON adapter instance.
 func NewOpenCodeAdapter() Adapter {
 	return &openCodeAdapter{}
 }
@@ -157,6 +156,3 @@ func openCodeToolKind(toolType string) ToolKind {
 	}
 }
 
-func init() {
-	RegisterAdapter(NewOpenCodeAdapter())
-}
