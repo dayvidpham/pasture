@@ -140,6 +140,12 @@ func ResolvePastureMsgConfig(cmd *cobra.Command) PastureMsgConfig {
 	return resolvePastureMsgConfigWithFile(cmd, DefaultConfigPath())
 }
 
+// ResolvePastureMsgConfigFromFile resolves PastureMsgConfig using an explicitly
+// provided config file path (e.g., from --config CLI flag).
+func ResolvePastureMsgConfigFromFile(cmd *cobra.Command, configFile string) PastureMsgConfig {
+	return resolvePastureMsgConfigWithFile(cmd, configFile)
+}
+
 // resolvePastureMsgConfigWithFile resolves PastureMsgConfig from the given file.
 func resolvePastureMsgConfigWithFile(cmd *cobra.Command, configFile string) PastureMsgConfig {
 	v := viper.New()
