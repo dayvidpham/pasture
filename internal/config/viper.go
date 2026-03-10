@@ -91,6 +91,12 @@ func ResolvePasturedConfig(cmd *cobra.Command) PasturedConfig {
 	return resolvePasturedConfigWithFile(cmd, DefaultConfigPath())
 }
 
+// ResolvePasturedConfigFromFile resolves the full PasturedConfig using an
+// explicitly provided config file path (e.g., from --config CLI flag).
+func ResolvePasturedConfigFromFile(cmd *cobra.Command, configFile string) PasturedConfig {
+	return resolvePasturedConfigWithFile(cmd, configFile)
+}
+
 // resolvePasturedConfigWithFile resolves PasturedConfig from the given file.
 func resolvePasturedConfigWithFile(cmd *cobra.Command, configFile string) PasturedConfig {
 	v := viper.New()
