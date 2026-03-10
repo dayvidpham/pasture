@@ -6,6 +6,7 @@ import (
 
 	"go.temporal.io/sdk/workflow"
 
+	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
@@ -53,6 +54,27 @@ func (sw *SliceWorkflow) CompleteSlice(_ workflow.Context, sig SliceCompleteSign
 	sw.completeSignal = &sig
 }
 
+// hookDispatchOptions returns short, non-retryable activity options for hook
+// dispatch activities. Hooks are best-effort — a single attempt with a 5 s
+// deadline; failure is logged and the workflow continues.
+var hookDispatchOptions = workflow.ActivityOptions{
+	StartToCloseTimeout: 5 * time.Second,
+}
+
+// dispatchHookActivity fires a DispatchHook activity in the workflow context.
+// Hook dispatch is best-effort: errors are logged but never propagated to the
+// caller. Workflows must not fail due to hook errors.
+func dispatchHookActivity(ctx workflow.Context, payload hooks.HookPayload) {
+	hookCtx := workflow.WithActivityOptions(ctx, hookDispatchOptions)
+	if err := workflow.ExecuteActivity(hookCtx, hooks.DispatchHook, payload).Get(hookCtx, nil); err != nil {
+		workflow.GetLogger(ctx).Warn("SliceWorkflow: DispatchHook activity failed (best-effort, non-fatal)",
+			"event", string(payload.Event),
+			"epochID", payload.EpochID,
+			"error", err,
+		)
+	}
+}
+
 // Run executes a single implementation slice.
 //
 // Execution modes (from SliceStartSignal, defaults to "mock"):
@@ -64,6 +86,10 @@ func (sw *SliceWorkflow) CompleteSlice(_ workflow.Context, sig SliceCompleteSign
 //
 // On completion, signals the parent EpochWorkflow via slice_progress.
 // Signal delivery failure is non-fatal (parent may have already completed).
+//
+// Hook dispatch (HookSliceStarted, HookSliceCompleted, HookSliceFailed) runs
+// via DispatchHook activity calls. Hook failures are logged but never fail the
+// workflow — hooks are optional, best-effort observability.
 func (sw *SliceWorkflow) Run(ctx workflow.Context, input SliceInput) (*SliceResult, error) {
 	// Register signal handlers via goroutine-per-channel pattern.
 	workflow.Go(ctx, func(ctx workflow.Context) {
@@ -95,6 +121,16 @@ func (sw *SliceWorkflow) Run(ctx workflow.Context, input SliceInput) (*SliceResu
 			timeoutSecs = sw.startSignal.TimeoutSeconds
 		}
 	}
+
+	// Best-effort: fire HookSliceStarted before slice execution begins.
+	dispatchHookActivity(ctx, hooks.HookPayload{
+		Event:   hooks.HookSliceStarted,
+		EpochID: input.EpochID,
+		Data: map[string]any{
+			"sliceId": input.SliceID,
+			"mode":    mode,
+		},
+	})
 
 	var result *SliceResult
 
@@ -148,6 +184,31 @@ func (sw *SliceWorkflow) Run(ctx workflow.Context, input SliceInput) (*SliceResu
 			Output:  cs.Output,
 			Error:   cs.Error,
 		}
+	}
+
+	// Best-effort: fire HookSliceCompleted or HookSliceFailed based on result.
+	if result.Success {
+		dispatchHookActivity(ctx, hooks.HookPayload{
+			Event:   hooks.HookSliceCompleted,
+			EpochID: input.EpochID,
+			Data: map[string]any{
+				"sliceId": input.SliceID,
+				"output":  result.Output,
+			},
+		})
+	} else {
+		errVal := ""
+		if result.Error != nil {
+			errVal = *result.Error
+		}
+		dispatchHookActivity(ctx, hooks.HookPayload{
+			Event:   hooks.HookSliceFailed,
+			EpochID: input.EpochID,
+			Data: map[string]any{
+				"sliceId": input.SliceID,
+				"error":   errVal,
+			},
+		})
 	}
 
 	// Signal parent EpochWorkflow with slice completion progress.

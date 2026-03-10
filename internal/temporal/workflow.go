@@ -13,6 +13,7 @@ import (
 	temporalsdk "go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
+	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
@@ -449,6 +450,7 @@ func RegisterWorkflows(r interface {
 	r.RegisterActivity(QueryAuditEvents)
 	r.RegisterActivity(RecordSessionEntries)
 	r.RegisterActivity(QuerySessionEntries)
+	r.RegisterActivity(hooks.DispatchHook)
 }
 
 // WorkflowName returns the Temporal workflow type name for a given function.
@@ -468,6 +470,7 @@ var ActivityFunctions = []interface{}{
 	QueryAuditEvents,
 	RecordSessionEntries,
 	QuerySessionEntries,
+	hooks.DispatchHook,
 }
 
 // ─── Activity options helper ──────────────────────────────────────────────────

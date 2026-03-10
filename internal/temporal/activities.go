@@ -9,6 +9,7 @@ import (
 	"go.temporal.io/sdk/temporal"
 
 	"github.com/dayvidpham/pasture/internal/audit"
+	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
@@ -70,6 +71,33 @@ func CheckConstraints(ctx context.Context, state types.EpochState, toPhase proto
 			Message:    v,
 		})
 	}
+
+	// Best-effort: fire HookConstraintViolation only when violations are found.
+	// Errors are logged but do not fail the activity — hooks are optional.
+	if len(result) > 0 {
+		msgs := make([]string, len(result))
+		for i, cv := range result {
+			msgs[i] = cv.Message
+		}
+		hookPayload := hooks.HookPayload{
+			Event:   hooks.HookConstraintViolation,
+			EpochID: state.EpochID,
+			Phase:   toPhase,
+			Data: map[string]any{
+				"from":       string(state.CurrentPhase),
+				"to":         string(toPhase),
+				"violations": msgs,
+			},
+		}
+		if err := hooks.DispatchHook(ctx, hookPayload); err != nil {
+			logger.Warn("CheckConstraints: hook dispatch failed (best-effort, non-fatal)",
+				"event", string(hooks.HookConstraintViolation),
+				"epochID", state.EpochID,
+				"error", err,
+			)
+		}
+	}
+
 	return result, nil
 }
 
@@ -120,6 +148,31 @@ func RecordTransition(ctx context.Context, epochID string, record types.Transiti
 			record.FromPhase, record.ToPhase, epochID, record.TriggeredBy, err,
 		)
 	}
+
+	// Best-effort: fire HookPhaseTransition after successful audit recording.
+	// Errors are logged but do not fail the activity — hooks are optional.
+	hookPayload := hooks.HookPayload{
+		Event:   hooks.HookPhaseTransition,
+		EpochID: epochID,
+		Phase:   record.ToPhase,
+		Data: map[string]any{
+			"from":         string(record.FromPhase),
+			"to":           string(record.ToPhase),
+			"triggeredBy":  record.TriggeredBy,
+			"conditionMet": record.ConditionMet,
+			"success":      record.Success,
+		},
+	}
+	if err := hooks.DispatchHook(ctx, hookPayload); err != nil {
+		logger.Warn("RecordTransition: hook dispatch failed (best-effort, non-fatal)",
+			"event", string(hooks.HookPhaseTransition),
+			"epochID", epochID,
+			"from", string(record.FromPhase),
+			"to", string(record.ToPhase),
+			"error", err,
+		)
+	}
+
 	return nil
 }
 

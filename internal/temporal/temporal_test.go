@@ -8,6 +8,7 @@ import (
 	"go.temporal.io/sdk/testsuite"
 
 	"github.com/dayvidpham/pasture/internal/audit"
+	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/temporal"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
@@ -667,9 +668,14 @@ func TestEpochWorkflow_SliceProgress_Signal(t *testing.T) {
 
 func TestSliceWorkflow_MockMode_Default(t *testing.T) {
 	t.Parallel()
+	// Reset hooks singleton so hook dispatch is a no-op in this test.
+	hooks.InitHooksManager(nil)
+	t.Cleanup(func() { hooks.InitHooksManager(nil) })
+
 	suite := &testsuite.WorkflowTestSuite{}
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflow(temporal.SliceWorkflowFn)
+	env.RegisterActivity(hooks.DispatchHook)
 
 	// Mock SignalExternalWorkflow to avoid error when parent workflow not present.
 	env.OnSignalExternalWorkflow("", "", "", temporal.SignalSliceProgress, nil).Return(nil).Maybe()
@@ -702,9 +708,14 @@ func TestSliceWorkflow_MockMode_Default(t *testing.T) {
 
 func TestSliceWorkflow_CompleteSliceOverride(t *testing.T) {
 	t.Parallel()
+	// Reset hooks singleton so hook dispatch is a no-op in this test.
+	hooks.InitHooksManager(nil)
+	t.Cleanup(func() { hooks.InitHooksManager(nil) })
+
 	suite := &testsuite.WorkflowTestSuite{}
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflow(temporal.SliceWorkflowFn)
+	env.RegisterActivity(hooks.DispatchHook)
 
 	// Send a complete_slice signal that overrides with success=false.
 	errMsg := "external override error"
