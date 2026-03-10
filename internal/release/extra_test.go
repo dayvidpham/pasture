@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/release"
+	"github.com/dayvidpham/pasture/internal/types"
 )
 
 // ─── VersionFile accessors ────────────────────────────────────────────────────
@@ -170,7 +171,7 @@ func TestMarketplaceVersionFile_Write_DryRun(t *testing.T) {
 func TestRunRelease_LivePatch_WithChangelog(t *testing.T) {
 	dir := setupRepoDir(t, "1.2.3")
 	opts := release.ReleaseOptions{
-		BumpKind:    "patch",
+		BumpKind:    types.BumpPatch,
 		DryRun:      false,
 		NoChangelog: false, // generate changelog
 		NoCommit:    true,

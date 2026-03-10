@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/release"
+	"github.com/dayvidpham/pasture/internal/types"
 )
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -45,7 +46,7 @@ func mustGit(t *testing.T, dir string, args ...string) {
 func TestRunRelease_DryRun_NoFiles(t *testing.T) {
 	dir := t.TempDir()
 	opts := release.ReleaseOptions{
-		BumpKind:    "patch",
+		BumpKind:    types.BumpPatch,
 		DryRun:      true,
 		NoChangelog: true,
 		NoCommit:    true,
@@ -64,7 +65,7 @@ func TestRunRelease_DryRun_NoFiles(t *testing.T) {
 func TestRunRelease_DryRun_PatchBump(t *testing.T) {
 	dir := setupRepoDir(t, "1.0.0")
 	opts := release.ReleaseOptions{
-		BumpKind:    "patch",
+		BumpKind:    types.BumpPatch,
 		DryRun:      true,
 		NoChangelog: true,
 		NoCommit:    true,
@@ -85,7 +86,7 @@ func TestRunRelease_DryRun_PatchBump(t *testing.T) {
 func TestRunRelease_DryRun_MinorBump(t *testing.T) {
 	dir := setupRepoDir(t, "2.3.4")
 	opts := release.ReleaseOptions{
-		BumpKind:    "minor",
+		BumpKind:    types.BumpMinor,
 		DryRun:      true,
 		NoChangelog: true,
 		NoCommit:    true,
@@ -100,7 +101,7 @@ func TestRunRelease_DryRun_MinorBump(t *testing.T) {
 func TestRunRelease_InvalidBumpKind(t *testing.T) {
 	dir := setupRepoDir(t, "1.0.0")
 	opts := release.ReleaseOptions{
-		BumpKind:    "invalid",
+		BumpKind:    types.BumpKind("invalid"),
 		DryRun:      true,
 		NoChangelog: true,
 		NoCommit:    true,
@@ -128,7 +129,7 @@ func TestRunRelease_VersionDrift_NoSync(t *testing.T) {
 	}
 
 	opts := release.ReleaseOptions{
-		BumpKind:    "patch",
+		BumpKind:    types.BumpPatch,
 		DryRun:      true,
 		NoChangelog: true,
 		NoCommit:    true,
@@ -156,7 +157,7 @@ func TestRunRelease_VersionDrift_WithSync(t *testing.T) {
 	}
 
 	opts := release.ReleaseOptions{
-		BumpKind:    "patch",
+		BumpKind:    types.BumpPatch,
 		DryRun:      true,
 		Sync:        true,
 		NoChangelog: true,
@@ -173,7 +174,7 @@ func TestRunRelease_VersionDrift_WithSync(t *testing.T) {
 func TestRunRelease_LivePatch(t *testing.T) {
 	dir := setupRepoDir(t, "0.1.0")
 	opts := release.ReleaseOptions{
-		BumpKind:    "patch",
+		BumpKind:    types.BumpPatch,
 		DryRun:      false,
 		NoChangelog: true,
 		NoCommit:    true,

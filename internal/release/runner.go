@@ -5,14 +5,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/dayvidpham/pasture/internal/types"
 )
 
 // ─── ReleaseOptions ──────────────────────────────────────────────────────────
 
 // ReleaseOptions controls the release workflow for a single repository.
 type ReleaseOptions struct {
-	// BumpKind is one of "major", "minor", "patch".
-	BumpKind string
+	// BumpKind specifies which semver component to increment (major, minor, patch).
+	BumpKind types.BumpKind
 	// DryRun, when true, prints what would happen without making changes.
 	DryRun bool
 	// Sync, when true, aligns all version files to the canonical before bumping.
@@ -106,13 +108,25 @@ func RunRelease(opts ReleaseOptions) error {
 	}
 
 	// 4. Bump version.
+	if !opts.BumpKind.IsValid() {
+		return fmt.Errorf(
+			"validation error: unknown bump kind %q — "+
+				"expected one of: major, minor, patch",
+			opts.BumpKind,
+		)
+	}
 	current, err := ParseSemVer(canonical)
 	if err != nil {
 		return err
 	}
-	bumped, err := bumpFromString(current, opts.BumpKind)
-	if err != nil {
-		return err
+	var bumped SemVer
+	switch opts.BumpKind {
+	case types.BumpMajor:
+		bumped = SemVer{Major: current.Major + 1, Minor: 0, Patch: 0}
+	case types.BumpMinor:
+		bumped = SemVer{Major: current.Major, Minor: current.Minor + 1, Patch: 0}
+	case types.BumpPatch:
+		bumped = SemVer{Major: current.Major, Minor: current.Minor, Patch: current.Patch + 1}
 	}
 	bumpedStr := bumped.String()
 	tagName := "v" + bumpedStr
@@ -222,23 +236,6 @@ func workingTreeDirty(status string) bool {
 		}
 	}
 	return false
-}
-
-func bumpFromString(v SemVer, kind string) (SemVer, error) {
-	switch kind {
-	case "major":
-		return SemVer{Major: v.Major + 1, Minor: 0, Patch: 0}, nil
-	case "minor":
-		return SemVer{Major: v.Major, Minor: v.Minor + 1, Patch: 0}, nil
-	case "patch":
-		return SemVer{Major: v.Major, Minor: v.Minor, Patch: v.Patch + 1}, nil
-	default:
-		return SemVer{}, fmt.Errorf(
-			"validation error: unknown bump kind %q — "+
-				"expected one of: major, minor, patch",
-			kind,
-		)
-	}
 }
 
 func buildChangelogEntry(repoRoot string, bumped SemVer) (string, error) {

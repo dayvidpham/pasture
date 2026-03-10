@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 
 	"github.com/dayvidpham/pasture/internal/release"
+	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/spf13/cobra"
 )
 
@@ -85,12 +86,21 @@ func newBumpCmd(kind string) *cobra.Command {
 		Use:   kind,
 		Short: fmt.Sprintf("Bump the %s version component", kind),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Parse string to typed BumpKind at the CLI boundary (D13).
+			bumpKind := types.BumpKind(kind)
+			if !bumpKind.IsValid() {
+				return fmt.Errorf(
+					"validation error: unknown bump kind %q — "+
+						"expected one of: major, minor, patch",
+					kind,
+				)
+			}
 			root, err := repoRoot()
 			if err != nil {
 				return err
 			}
 			return release.RunRelease(release.ReleaseOptions{
-				BumpKind:    kind,
+				BumpKind:    bumpKind,
 				DryRun:      dryRun,
 				Sync:        sync,
 				NoChangelog: noChangelog,
