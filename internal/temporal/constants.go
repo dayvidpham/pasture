@@ -21,4 +21,7 @@ const (
 	QueryCurrentState         = "current_state"
 	QueryAvailableTransitions = "available_transitions"
 	QueryFullState            = "full_state"
+	QuerySliceProgressState   = "slice_progress_state"
+	QueryActiveSessions       = "active_sessions"
 )
+
