@@ -103,6 +103,14 @@ func (e *errorTrail) QueryEvents(_ context.Context, _ string, _ *protocol.PhaseI
 	return nil, errors.New("stub: query failed")
 }
 
+func (e *errorTrail) RecordSessionEntries(_ context.Context, _ []protocol.SessionEntry) error {
+	return errors.New("stub: record session entries failed")
+}
+
+func (e *errorTrail) QuerySessionEntries(_ context.Context, _ string) ([]protocol.SessionEntry, error) {
+	return nil, errors.New("stub: query session entries failed")
+}
+
 func TestActivityRoundtrip_PropagatesTrailError(t *testing.T) {
 	audit.InitTrail(&errorTrail{})
 	t.Cleanup(func() { audit.InitTrail(nil) })

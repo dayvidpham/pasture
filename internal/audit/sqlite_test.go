@@ -138,6 +138,57 @@ func TestSqliteAuditTrail_ConcurrentAccess(t *testing.T) {
 	}
 }
 
+func TestSqliteAuditTrail_SessionEntrySuite(t *testing.T) {
+	trail, _ := newTestSqliteTrail(t)
+	runSessionEntrySuite(t, trail)
+}
+
+// TestSqliteAuditTrail_SessionEntryDurability verifies session entries survive
+// a close/reopen cycle — the SQLite-specific persistence contract.
+func TestSqliteAuditTrail_SessionEntryDurability(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "session_dur.db")
+	ctx := context.Background()
+
+	// Phase 1: write entries and close.
+	trail1, err := audit.NewSqliteAuditTrail(dbPath)
+	if err != nil {
+		t.Fatalf("NewSqliteAuditTrail: %v", err)
+	}
+
+	entries := []protocol.SessionEntry{
+		makeSessionEntry("dur-session", 0, "user"),
+		makeSessionEntry("dur-session", 1, "assistant"),
+	}
+	if err := trail1.RecordSessionEntries(ctx, entries); err != nil {
+		t.Fatalf("RecordSessionEntries: %v", err)
+	}
+	if err := trail1.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Phase 2: reopen and verify entries are present.
+	trail2, err := audit.NewSqliteAuditTrail(dbPath)
+	if err != nil {
+		t.Fatalf("NewSqliteAuditTrail (reopen): %v", err)
+	}
+	defer trail2.Close()
+
+	got, err := trail2.QuerySessionEntries(ctx, "dur-session")
+	if err != nil {
+		t.Fatalf("QuerySessionEntries: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 entries after reopen, got %d", len(got))
+	}
+	if got[0].Role != "user" {
+		t.Errorf("entry[0]: want role %q, got %q", "user", got[0].Role)
+	}
+	if got[1].Role != "assistant" {
+		t.Errorf("entry[1]: want role %q, got %q", "assistant", got[1].Role)
+	}
+}
+
 // TestSqliteAuditTrail_PreservesChronologicalOrder verifies that rows come back
 // in insertion order (ascending id), not arbitrary order.
 func TestSqliteAuditTrail_PreservesChronologicalOrder(t *testing.T) {

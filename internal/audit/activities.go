@@ -71,3 +71,33 @@ func QueryAuditEvents(ctx context.Context, epochID string, phase *protocol.Phase
 	}
 	return trail.QueryEvents(ctx, epochID, phase, role)
 }
+
+// RecordSessionEntries is a Temporal activity wrapper that persists a batch of
+// SessionEntry records via the injected Trail.
+//
+// Nil or empty slices are accepted as no-ops. All entries in the batch are
+// written atomically where the backend supports transactions (SQLite).
+//
+// Returns an error if:
+//   - InitTrail was not called before this activity ran.
+//   - The underlying Trail.RecordSessionEntries fails (e.g. I/O error).
+func RecordSessionEntries(ctx context.Context, entries []protocol.SessionEntry) error {
+	if trail == nil {
+		return fmt.Errorf(uninitializedMsg)
+	}
+	return trail.RecordSessionEntries(ctx, entries)
+}
+
+// QuerySessionEntries is a Temporal activity wrapper that retrieves all session
+// entries for the given sessionID via the injected Trail.
+//
+// Returns an empty (non-nil) slice when no entries exist for sessionID.
+// Returns (nil, error) if:
+//   - InitTrail was not called before this activity ran.
+//   - The underlying Trail.QuerySessionEntries fails.
+func QuerySessionEntries(ctx context.Context, sessionID string) ([]protocol.SessionEntry, error) {
+	if trail == nil {
+		return nil, fmt.Errorf(uninitializedMsg)
+	}
+	return trail.QuerySessionEntries(ctx, sessionID)
+}

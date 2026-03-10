@@ -447,6 +447,8 @@ func RegisterWorkflows(r interface {
 	r.RegisterActivity(RecordTransition)
 	r.RegisterActivity(RecordAuditEvent)
 	r.RegisterActivity(QueryAuditEvents)
+	r.RegisterActivity(RecordSessionEntries)
+	r.RegisterActivity(QuerySessionEntries)
 }
 
 // WorkflowName returns the Temporal workflow type name for a given function.
@@ -464,6 +466,8 @@ var ActivityFunctions = []interface{}{
 	RecordTransition,
 	RecordAuditEvent,
 	QueryAuditEvents,
+	RecordSessionEntries,
+	QuerySessionEntries,
 }
 
 // ─── Activity options helper ──────────────────────────────────────────────────

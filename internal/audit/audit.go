@@ -36,4 +36,22 @@ type Trail interface {
 	// returned in chronological order (insertion order for in-memory,
 	// ascending id order for SQLite).
 	QueryEvents(ctx context.Context, epochID string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error)
+
+	// RecordSessionEntries persists a batch of SessionEntry records.
+	//
+	// Entries are appended; existing entries for the same session are not
+	// replaced. The caller should pass all entries for a turn in a single call
+	// for efficient batch INSERT in the SQLite backend.
+	//
+	// Returns an error if the underlying store is unavailable or the write
+	// fails. The caller (Temporal activity) is responsible for retry policy.
+	RecordSessionEntries(ctx context.Context, entries []protocol.SessionEntry) error
+
+	// QuerySessionEntries returns all session entries for the given sessionID
+	// in insertion order (ascending entry_index for SQLite, insertion order
+	// for in-memory).
+	//
+	// Returns an empty (non-nil) slice when no entries exist for sessionID.
+	// Returns an error if the underlying store is unavailable.
+	QuerySessionEntries(ctx context.Context, sessionID string) ([]protocol.SessionEntry, error)
 }

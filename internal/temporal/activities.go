@@ -175,3 +175,50 @@ func QueryAuditEvents(ctx context.Context, epochID string, phase *protocol.Phase
 	}
 	return events, nil
 }
+
+// RecordSessionEntries persists a batch of SessionEntry records to the audit trail.
+//
+// Activity: non-deterministic I/O boundary.  Nil or empty slices are no-ops.
+// All entries are written atomically where the backend supports transactions.
+//
+// Returns a non-retryable ApplicationError if InitAuditTrail was never called.
+func RecordSessionEntries(ctx context.Context, entries []protocol.SessionEntry) error {
+	if auditTrail == nil {
+		return temporal.NewNonRetryableApplicationError(
+			uninitializedMsg,
+			"AuditTrailUninitialized",
+			nil,
+		)
+	}
+	if err := auditTrail.RecordSessionEntries(ctx, entries); err != nil {
+		return fmt.Errorf(
+			"temporal.RecordSessionEntries: batch write failed (%d entries): %w",
+			len(entries), err,
+		)
+	}
+	return nil
+}
+
+// QuerySessionEntries retrieves all session entries for the given sessionID.
+//
+// Activity: non-deterministic I/O boundary (reads from external store).
+//
+// Returns an empty (non-nil) slice when no entries exist for sessionID.
+// Returns a non-retryable ApplicationError if InitAuditTrail was never called.
+func QuerySessionEntries(ctx context.Context, sessionID string) ([]protocol.SessionEntry, error) {
+	if auditTrail == nil {
+		return nil, temporal.NewNonRetryableApplicationError(
+			uninitializedMsg,
+			"AuditTrailUninitialized",
+			nil,
+		)
+	}
+	entries, err := auditTrail.QuerySessionEntries(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"temporal.QuerySessionEntries: query failed for sessionID=%q: %w",
+			sessionID, err,
+		)
+	}
+	return entries, nil
+}

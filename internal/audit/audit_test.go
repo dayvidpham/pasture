@@ -21,6 +21,142 @@ func TestTrailInterface(t *testing.T) {
 	var _ audit.Trail = (*audit.SqliteAuditTrail)(nil)
 }
 
+// ─── Session Entry Helpers ────────────────────────────────────────────────────
+
+func strPtr(s string) *string { return &s }
+func intPtr(i int) *int       { return &i }
+func int64Ptr(i int64) *int64 { return &i }
+
+// makeSessionEntry constructs a minimal SessionEntry for use in tests.
+func makeSessionEntry(sessionID string, idx int, role string) protocol.SessionEntry {
+	return protocol.SessionEntry{
+		SessionID:      sessionID,
+		EntryIndex:     idx,
+		Provider:       "anthropic",
+		EntryType:      "message",
+		Role:           role,
+		TimestampMs:    int64Ptr(time.Now().UnixMilli()),
+		ContentPreview: strPtr("test content"),
+		TokensIn:       intPtr(10),
+		TokensOut:      intPtr(20),
+	}
+}
+
+// runSessionEntrySuite runs a standard suite of session entry behaviour tests
+// against any Trail implementation.
+func runSessionEntrySuite(t *testing.T, trail audit.Trail) {
+	t.Helper()
+	ctx := context.Background()
+
+	sessionA := "session-aaa"
+	sessionB := "session-bbb"
+
+	// ── Record multiple entries for session A ──────────────────────────────
+	t.Run("RecordMultipleEntries", func(t *testing.T) {
+		entries := []protocol.SessionEntry{
+			makeSessionEntry(sessionA, 0, "user"),
+			makeSessionEntry(sessionA, 1, "assistant"),
+			makeSessionEntry(sessionA, 2, "user"),
+		}
+		if err := trail.RecordSessionEntries(ctx, entries); err != nil {
+			t.Fatalf("RecordSessionEntries: unexpected error: %v", err)
+		}
+	})
+
+	// ── Query by sessionID returns correct entries ─────────────────────────
+	t.Run("QueryBySessionID", func(t *testing.T) {
+		got, err := trail.QuerySessionEntries(ctx, sessionA)
+		if err != nil {
+			t.Fatalf("QuerySessionEntries(%q): %v", sessionA, err)
+		}
+		if len(got) != 3 {
+			t.Fatalf("want 3 entries, got %d", len(got))
+		}
+		for i, e := range got {
+			if e.SessionID != sessionA {
+				t.Errorf("entry[%d]: want sessionID %q, got %q", i, sessionA, e.SessionID)
+			}
+		}
+	})
+
+	// ── Query preserves entry order ────────────────────────────────────────
+	t.Run("QueryPreservesOrder", func(t *testing.T) {
+		got, err := trail.QuerySessionEntries(ctx, sessionA)
+		if err != nil {
+			t.Fatalf("QuerySessionEntries: %v", err)
+		}
+		if len(got) < 3 {
+			t.Fatalf("want at least 3 entries, got %d", len(got))
+		}
+		for i := range 3 {
+			if got[i].EntryIndex != i {
+				t.Errorf("entry[%d]: want EntryIndex %d, got %d", i, i, got[i].EntryIndex)
+			}
+		}
+	})
+
+	// ── Empty query returns empty slice (not nil) ──────────────────────────
+	t.Run("QueryMissingSessionReturnsEmpty", func(t *testing.T) {
+		got, err := trail.QuerySessionEntries(ctx, "session-does-not-exist")
+		if err != nil {
+			t.Fatalf("QuerySessionEntries(missing): unexpected error: %v", err)
+		}
+		if got == nil {
+			t.Fatal("want empty slice, got nil")
+		}
+		if len(got) != 0 {
+			t.Fatalf("want 0 entries, got %d", len(got))
+		}
+	})
+
+	// ── Multiple sessions do not cross-contaminate ─────────────────────────
+	t.Run("MultipleSessionsNoContamination", func(t *testing.T) {
+		entriesB := []protocol.SessionEntry{
+			makeSessionEntry(sessionB, 0, "user"),
+			makeSessionEntry(sessionB, 1, "assistant"),
+		}
+		if err := trail.RecordSessionEntries(ctx, entriesB); err != nil {
+			t.Fatalf("RecordSessionEntries(sessionB): %v", err)
+		}
+
+		gotA, err := trail.QuerySessionEntries(ctx, sessionA)
+		if err != nil {
+			t.Fatalf("QuerySessionEntries(sessionA): %v", err)
+		}
+		gotB, err := trail.QuerySessionEntries(ctx, sessionB)
+		if err != nil {
+			t.Fatalf("QuerySessionEntries(sessionB): %v", err)
+		}
+
+		if len(gotA) != 3 {
+			t.Errorf("sessionA: want 3 entries, got %d", len(gotA))
+		}
+		if len(gotB) != 2 {
+			t.Errorf("sessionB: want 2 entries, got %d", len(gotB))
+		}
+		for _, e := range gotA {
+			if e.SessionID != sessionA {
+				t.Errorf("sessionA result contains entry with sessionID=%q", e.SessionID)
+			}
+		}
+		for _, e := range gotB {
+			if e.SessionID != sessionB {
+				t.Errorf("sessionB result contains entry with sessionID=%q", e.SessionID)
+			}
+		}
+	})
+
+	// ── Recording empty batch is a no-op ──────────────────────────────────
+	t.Run("RecordEmptyBatchNoOp", func(t *testing.T) {
+		if err := trail.RecordSessionEntries(ctx, nil); err != nil {
+			t.Fatalf("RecordSessionEntries(nil): unexpected error: %v", err)
+		}
+		if err := trail.RecordSessionEntries(ctx, []protocol.SessionEntry{}); err != nil {
+			t.Fatalf("RecordSessionEntries(empty): unexpected error: %v", err)
+		}
+	})
+}
+
 // ─── Shared Helpers ───────────────────────────────────────────────────────────
 
 // makeEvent constructs a minimal AuditEvent for use in tests.

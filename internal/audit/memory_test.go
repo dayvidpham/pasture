@@ -15,6 +15,11 @@ func TestInMemoryAuditTrail_Suite(t *testing.T) {
 	runTrailSuite(t, trail)
 }
 
+func TestInMemoryAuditTrail_SessionEntrySuite(t *testing.T) {
+	trail := audit.NewInMemoryAuditTrail()
+	runSessionEntrySuite(t, trail)
+}
+
 func TestInMemoryAuditTrail_ConcurrentAccess(t *testing.T) {
 	trail := audit.NewInMemoryAuditTrail()
 	ctx := context.Background()

@@ -221,7 +221,154 @@ func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochID string, phase 
 	return events, nil
 }
 
-// ensureSchema creates the audit_events table and indexes if they do not exist.
+// RecordSessionEntries persists a batch of SessionEntry records to the SQLite
+// database in a single transaction. Nil or empty slices are accepted as no-ops.
+//
+// All entries are written atomically; if any INSERT fails the entire batch is
+// rolled back so callers can retry safely.
+func (s *SqliteAuditTrail) RecordSessionEntries(_ context.Context, entries []protocol.SessionEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf(
+			"audit.SqliteAuditTrail.RecordSessionEntries: failed to begin transaction: %w — "+
+				"check that the database file is still accessible and not locked",
+			err,
+		)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO session_entries (
+			session_id, entry_index, provider, entry_type, role,
+			timestamp_ms, content_preview, tokens_in, tokens_out,
+			has_tool_use, tool_kind, tool_names_csv,
+			has_thinking, is_error, stop_reason, raw_byte_length,
+			tool_call_id, entry_id, parent_entry_id, depth,
+			parent_index, tool_input, tool_output, extra
+		) VALUES (
+			?, ?, ?, ?, ?,
+			?, ?, ?, ?,
+			?, ?, ?,
+			?, ?, ?, ?,
+			?, ?, ?, ?,
+			?, ?, ?, ?
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf(
+			"audit.SqliteAuditTrail.RecordSessionEntries: failed to prepare statement: %w",
+			err,
+		)
+	}
+	defer stmt.Close()
+
+	for i, e := range entries {
+		_, err = stmt.Exec(
+			e.SessionID, e.EntryIndex, e.Provider, e.EntryType, e.Role,
+			e.TimestampMs, e.ContentPreview, e.TokensIn, e.TokensOut,
+			boolToInt(e.HasToolUse), e.ToolKind, e.ToolNamesCsv,
+			boolToInt(e.HasThinking), boolToInt(e.IsError), e.StopReason, e.RawByteLength,
+			e.ToolCallID, e.EntryID, e.ParentEntryID, e.Depth,
+			e.ParentIndex, e.ToolInput, e.ToolOutput, e.Extra,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"audit.SqliteAuditTrail.RecordSessionEntries: INSERT failed for entry[%d] "+
+					"(sessionID=%q, entryIndex=%d): %w — "+
+					"check that the database file is still accessible",
+				i, e.SessionID, e.EntryIndex, err,
+			)
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf(
+			"audit.SqliteAuditTrail.RecordSessionEntries: commit failed: %w",
+			err,
+		)
+	}
+	return nil
+}
+
+// boolToInt converts a bool to its SQLite integer representation (0 or 1).
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// QuerySessionEntries returns all session entries for the given sessionID in
+// ascending entry_index order (matching insertion order for well-formed data).
+//
+// Returns an empty (non-nil) slice when no entries exist for sessionID.
+func (s *SqliteAuditTrail) QuerySessionEntries(_ context.Context, sessionID string) ([]protocol.SessionEntry, error) {
+	rows, err := s.db.Query(`
+		SELECT
+			session_id, entry_index, provider, entry_type, role,
+			timestamp_ms, content_preview, tokens_in, tokens_out,
+			has_tool_use, tool_kind, tool_names_csv,
+			has_thinking, is_error, stop_reason, raw_byte_length,
+			tool_call_id, entry_id, parent_entry_id, depth,
+			parent_index, tool_input, tool_output, extra
+		FROM session_entries
+		WHERE session_id = ?
+		ORDER BY id ASC
+	`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"audit.SqliteAuditTrail.QuerySessionEntries: query failed for sessionID=%q: %w — "+
+				"verify the database file is accessible and the schema is up to date",
+			sessionID, err,
+		)
+	}
+	defer rows.Close()
+
+	result := make([]protocol.SessionEntry, 0)
+	for rows.Next() {
+		var (
+			e           protocol.SessionEntry
+			hasToolUse  int
+			hasThinking int
+			isError     int
+		)
+		if err := rows.Scan(
+			&e.SessionID, &e.EntryIndex, &e.Provider, &e.EntryType, &e.Role,
+			&e.TimestampMs, &e.ContentPreview, &e.TokensIn, &e.TokensOut,
+			&hasToolUse, &e.ToolKind, &e.ToolNamesCsv,
+			&hasThinking, &isError, &e.StopReason, &e.RawByteLength,
+			&e.ToolCallID, &e.EntryID, &e.ParentEntryID, &e.Depth,
+			&e.ParentIndex, &e.ToolInput, &e.ToolOutput, &e.Extra,
+		); err != nil {
+			return nil, fmt.Errorf(
+				"audit.SqliteAuditTrail.QuerySessionEntries: row scan failed for sessionID=%q: %w",
+				sessionID, err,
+			)
+		}
+		e.HasToolUse = hasToolUse != 0
+		e.HasThinking = hasThinking != 0
+		e.IsError = isError != 0
+		result = append(result, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf(
+			"audit.SqliteAuditTrail.QuerySessionEntries: row iteration error for sessionID=%q: %w",
+			sessionID, err,
+		)
+	}
+	return result, nil
+}
+
+// ensureSchema creates the audit_events and session_entries tables (and indexes)
+// if they do not exist.
 func ensureSchema(db *sql.DB) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS audit_events (
@@ -246,6 +393,44 @@ func ensureSchema(db *sql.DB) error {
 	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_phase ON audit_events (phase)`)
 	if err != nil {
 		return fmt.Errorf("create index idx_phase: %w", err)
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS session_entries (
+			id               INTEGER PRIMARY KEY AUTOINCREMENT,
+			session_id       TEXT    NOT NULL,
+			entry_index      INTEGER NOT NULL,
+			provider         TEXT    NOT NULL,
+			entry_type       TEXT    NOT NULL,
+			role             TEXT    NOT NULL,
+			timestamp_ms     INTEGER,
+			content_preview  TEXT,
+			tokens_in        INTEGER,
+			tokens_out       INTEGER,
+			has_tool_use     INTEGER NOT NULL DEFAULT 0,
+			tool_kind        TEXT,
+			tool_names_csv   TEXT,
+			has_thinking     INTEGER NOT NULL DEFAULT 0,
+			is_error         INTEGER NOT NULL DEFAULT 0,
+			stop_reason      TEXT,
+			raw_byte_length  INTEGER,
+			tool_call_id     TEXT,
+			entry_id         TEXT,
+			parent_entry_id  TEXT,
+			depth            INTEGER NOT NULL DEFAULT 0,
+			parent_index     INTEGER,
+			tool_input       TEXT,
+			tool_output      TEXT,
+			extra            TEXT
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("create table session_entries: %w", err)
+	}
+
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_session_id ON session_entries (session_id)`)
+	if err != nil {
+		return fmt.Errorf("create index idx_session_id: %w", err)
 	}
 
 	return nil

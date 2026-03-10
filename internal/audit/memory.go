@@ -12,8 +12,9 @@ import (
 // Intended for testing and local development. Events are not persisted across
 // process restarts. All methods are safe for concurrent use.
 type InMemoryAuditTrail struct {
-	mu     sync.RWMutex
-	events []protocol.AuditEvent
+	mu             sync.RWMutex
+	events         []protocol.AuditEvent
+	sessionEntries []protocol.SessionEntry
 }
 
 // NewInMemoryAuditTrail returns an empty, ready-to-use InMemoryAuditTrail.
@@ -62,4 +63,32 @@ func (m *InMemoryAuditTrail) Events() []protocol.AuditEvent {
 	cp := make([]protocol.AuditEvent, len(m.events))
 	copy(cp, m.events)
 	return cp
+}
+
+// RecordSessionEntries appends the given entries to the in-memory session entry
+// list. Nil or empty slices are accepted as no-ops. Safe for concurrent use.
+func (m *InMemoryAuditTrail) RecordSessionEntries(_ context.Context, entries []protocol.SessionEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sessionEntries = append(m.sessionEntries, entries...)
+	return nil
+}
+
+// QuerySessionEntries returns all session entries for the given sessionID in
+// insertion order. Returns an empty (non-nil) slice when no entries exist.
+// Safe for concurrent use.
+func (m *InMemoryAuditTrail) QuerySessionEntries(_ context.Context, sessionID string) ([]protocol.SessionEntry, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	result := make([]protocol.SessionEntry, 0)
+	for _, e := range m.sessionEntries {
+		if e.SessionID == sessionID {
+			result = append(result, e)
+		}
+	}
+	return result, nil
 }
