@@ -1,6 +1,19 @@
 # If you prefer the allow list template instead of the deny list, see community template:
 # https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
 #
+# Built output directories
+bin/
+
+# Pasture binary names (built without -o flag land in repo root)
+# Leading slash anchors to repo root only, so cmd/pastured/ is not affected.
+/pastured
+/pasture-msg
+/pasture-release
+
+# Nix result symlinks
+result
+result-*
+
 # Binaries for programs and plugins
 *.exe
 *.exe~

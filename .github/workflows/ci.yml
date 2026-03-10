@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "develop", "feat/**", "fix/**"]
+  pull_request:
+    branches: ["main", "develop"]
+
+jobs:
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ["1.23", "1.24"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go ${{ matrix.go-version }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Build — pastured
+        env:
+          CGO_ENABLED: "0"
+        run: go build ./cmd/pastured
+
+      - name: Build — pasture-msg
+        env:
+          CGO_ENABLED: "0"
+        run: go build ./cmd/pasture-msg
+
+      - name: Build — pasture-release
+        env:
+          CGO_ENABLED: "0"
+        run: go build ./cmd/pasture-release
+
+      - name: Build — all (CGO_ENABLED=0)
+        env:
+          CGO_ENABLED: "0"
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        # CGO_ENABLED=0 enforces pure-Go build; -race requires CGo so it is
+        # omitted here. Use a separate job with CGO_ENABLED=1 if race
+        # detection is needed against a CGo-capable runner.
+        env:
+          CGO_ENABLED: "0"
+        run: go test ./...
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: gofmt check
+        run: |
+          files=$(gofmt -l .)
+          if [ -n "$files" ]; then
+            echo "The following files need formatting:"
+            echo "$files"
+            exit 1
+          fi
