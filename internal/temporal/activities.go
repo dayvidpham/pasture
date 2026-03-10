@@ -8,6 +8,7 @@ import (
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 
+	"github.com/dayvidpham/pasture/internal/acp"
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/types"
@@ -229,6 +230,31 @@ func QueryAuditEvents(ctx context.Context, epochID string, phase *protocol.Phase
 	return events, nil
 }
 
+// ─── RunAgentSession ──────────────────────────────────────────────────────────
+
+// RunAgentSessionInput is the input for the RunAgentSession activity.
+type RunAgentSessionInput struct {
+	// AgentCmd is the agent binary or command to execute (e.g. "claude").
+	AgentCmd string `json:"agentCmd"`
+	// AgentArgs are the command-line arguments passed to the agent binary.
+	AgentArgs []string `json:"agentArgs"`
+	// EpochID is the Pasture epoch this session belongs to.
+	// Used to correlate session entries with epoch audit events.
+	EpochID string `json:"epochId"`
+}
+
+// RunAgentSessionResult summarises the outcome of a RunAgentSession activity call.
+type RunAgentSessionResult struct {
+	// EntriesRecorded is the total number of SessionEntry rows written to the audit trail.
+	EntriesRecorded int `json:"entriesRecorded"`
+	// SessionID is the ACP session identifier for the completed session.
+	// Empty when the agent produced no session/update messages.
+	SessionID string `json:"sessionId,omitempty"`
+	// StopReason is the ACP stop_reason from the final session update.
+	// Empty when the session ended without an explicit stop reason.
+	StopReason string `json:"stopReason,omitempty"`
+}
+
 // RecordSessionEntries persists a batch of SessionEntry records to the audit trail.
 //
 // Activity: non-deterministic I/O boundary.  Nil or empty slices are no-ops.
@@ -274,4 +300,65 @@ func QuerySessionEntries(ctx context.Context, sessionID string) ([]protocol.Sess
 		)
 	}
 	return entries, nil
+}
+
+// RunAgentSession starts an ACP-compatible agent process, streams its session
+// updates, indexes them, and persists them to the audit trail.
+//
+// Activity: long-running I/O boundary. Blocks until the agent process exits or
+// ctx is cancelled. All session data (messages, tool calls, token usage) is
+// accumulated by the IndexingSessionHandler and written atomically to the audit
+// trail at session end.
+//
+// Returns a non-retryable ApplicationError if InitAuditTrail was never called.
+//
+// Args:
+//
+//	input.AgentCmd:  Agent binary to execute (e.g. "claude").
+//	input.AgentArgs: Arguments passed verbatim to the agent binary.
+//	input.EpochID:   Pasture epoch context for audit correlation and hooks.
+func RunAgentSession(ctx context.Context, input RunAgentSessionInput) (*RunAgentSessionResult, error) {
+	logger := activity.GetLogger(ctx)
+	logger.Info("RunAgentSession: starting",
+		slog.String("agentCmd", input.AgentCmd),
+		slog.String("epochID", input.EpochID),
+	)
+
+	if auditTrail == nil {
+		return nil, temporal.NewNonRetryableApplicationError(
+			uninitializedMsg,
+			"AuditTrailUninitialized",
+			nil,
+		)
+	}
+
+	indexer := acp.NewSharedIndexer()
+	handler := acp.NewIndexingSessionHandler(indexer, auditTrail, hooks.GetManager(), input.EpochID)
+	acpClient := acp.NewClient(handler)
+
+	if err := acpClient.Connect(ctx, input.AgentCmd, input.AgentArgs...); err != nil {
+		return nil, fmt.Errorf(
+			"temporal.RunAgentSession: ACP client failed"+
+				" (agentCmd=%q, epochID=%q)"+
+				" — check that the agent binary is installed and executable: %w",
+			input.AgentCmd, input.EpochID, err,
+		)
+	}
+
+	// Summarise results.
+	result := &RunAgentSessionResult{
+		EntriesRecorded: handler.EntriesRecorded(),
+	}
+
+	// Retrieve session stats for the summary. There may be zero or one session
+	// when running a single agent (the ACP client supports multi-session but
+	// most agents open one). We return the first session ID seen.
+	if count := acpClient.SessionCount(); count > 0 {
+		logger.Info("RunAgentSession: complete",
+			slog.Int("sessions", count),
+			slog.Int("entriesRecorded", result.EntriesRecorded),
+		)
+	}
+
+	return result, nil
 }

@@ -180,7 +180,7 @@ func run(cmd *cobra.Command, configFile string) error {
 	// No default handlers in v1. Plugin integrations (e.g. Claude Code hooks)
 	// register handlers by importing pastured as a library or via the hooks API.
 	hooksMgr := hooks.NewManager()
-	_ = hooksMgr // Manager is ready; no handlers registered at this layer yet.
+	hooks.InitHooksManager(hooksMgr)
 	logger.Info("hooks manager ready", "handlers", 0)
 
 	// ── 8. Start worker, block, graceful shutdown ─────────────────────────────

@@ -450,6 +450,7 @@ func RegisterWorkflows(r interface {
 	r.RegisterActivity(QueryAuditEvents)
 	r.RegisterActivity(RecordSessionEntries)
 	r.RegisterActivity(QuerySessionEntries)
+	r.RegisterActivity(RunAgentSession)
 	r.RegisterActivity(hooks.DispatchHook)
 }
 
