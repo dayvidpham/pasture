@@ -103,11 +103,11 @@ which point it drains in-flight tasks and exits cleanly.`,
 // Steps:
 //  1. Resolve full PasturedConfig (CLI > env > YAML > defaults).
 //  2. Initialise the audit trail backend.
-//  3. Inject trail into the temporal activities package.
-//  4. Connect to the Temporal server.
-//  5. Auto-register search attributes (idempotent).
-//  6. Create the Temporal worker and register workflows + activities.
-//  7. Initialise the hooks Manager (no default handlers in v1; plugins add them).
+//  3. Connect to the Temporal server.
+//  4. Auto-register search attributes (idempotent).
+//  5. Initialise the hooks Manager (no default handlers in v1; plugins add them).
+//  6. Construct Activities struct with injected trail and hooks Manager.
+//  7. Create the Temporal worker and register workflows + activities.
 //  8. Start the worker; block until SIGINT/SIGTERM; drain and shut down.
 func run(cmd *cobra.Command, configFile string) error {
 	logger := slog.Default()
@@ -140,11 +140,9 @@ func run(cmd *cobra.Command, configFile string) error {
 		}()
 	}
 
-	// ── 3. Inject trail into temporal activities ──────────────────────────────
-	temporal.InitAuditTrail(trail)
 	logger.Info("audit trail ready", "backend", cfg.AuditTrail)
 
-	// ── 4. Connect to Temporal ────────────────────────────────────────────────
+	// ── 3. Connect to Temporal ────────────────────────────────────────────────
 	temporalClient, err := client.Dial(client.Options{
 		HostPort:  cfg.Connection.ServerAddress,
 		Namespace: cfg.Connection.Namespace,
@@ -159,7 +157,7 @@ func run(cmd *cobra.Command, configFile string) error {
 	defer temporalClient.Close()
 	logger.Info("connected to Temporal", "address", cfg.Connection.ServerAddress)
 
-	// ── 5. Auto-register search attributes ───────────────────────────────────
+	// ── 4. Auto-register search attributes ───────────────────────────────────
 	ctx := context.Background()
 	if err := temporal.EnsureSearchAttributes(ctx, temporalClient, cfg.Connection.Namespace, logger); err != nil {
 		// Non-fatal: log and continue — search attributes may already exist or
@@ -169,18 +167,23 @@ func run(cmd *cobra.Command, configFile string) error {
 		)
 	}
 
-	// ── 6. Initialise hooks Manager ───────────────────────────────────────────
-	// Must be initialised before RegisterWorkflows so that activities dispatched
-	// during workflow execution (e.g. DispatchHook) have a manager available.
+	// ── 5. Initialise hooks Manager ───────────────────────────────────────────
 	// No default handlers in v1. Plugin integrations (e.g. Claude Code hooks)
 	// register handlers by importing pastured as a library or via the hooks API.
 	hooksMgr := hooks.NewManager()
-	hooks.InitHooksManager(hooksMgr)
 	logger.Info("hooks manager ready", "handlers", 0)
+
+	// ── 6. Construct Activities with injected dependencies ────────────────────
+	// Activities receives trail and hooksMgr via constructor injection rather
+	// than singletons — this makes the wiring explicit and testable.
+	acts := &temporal.Activities{
+		Trail:    trail,
+		HooksMgr: hooksMgr,
+	}
 
 	// ── 7. Create worker and register workflows + activities ──────────────────
 	w := worker.New(temporalClient, cfg.Connection.TaskQueue, worker.Options{})
-	temporal.RegisterWorkflows(w)
+	temporal.RegisterWorkflows(w, acts)
 	logger.Info("registered workflows and activities",
 		"taskQueue", cfg.Connection.TaskQueue,
 	)

@@ -64,9 +64,12 @@ var hookDispatchOptions = workflow.ActivityOptions{
 // dispatchHookActivity fires a DispatchHook activity in the workflow context.
 // Hook dispatch is best-effort: errors are logged but never propagated to the
 // caller. Workflows must not fail due to hook errors.
+//
+// ActivityDispatchHook is referenced by string name since the activity is
+// registered as a method on *Activities via RegisterWorkflows.
 func dispatchHookActivity(ctx workflow.Context, payload hooks.HookPayload) {
 	hookCtx := workflow.WithActivityOptions(ctx, hookDispatchOptions)
-	if err := workflow.ExecuteActivity(hookCtx, hooks.DispatchHook, payload).Get(hookCtx, nil); err != nil {
+	if err := workflow.ExecuteActivity(hookCtx, ActivityDispatchHook, payload).Get(hookCtx, nil); err != nil {
 		workflow.GetLogger(ctx).Warn("SliceWorkflow: DispatchHook activity failed (best-effort, non-fatal)",
 			"event", string(payload.Event),
 			"epochID", payload.EpochID,

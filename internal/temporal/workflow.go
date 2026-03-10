@@ -13,7 +13,6 @@ import (
 	temporalsdk "go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
-	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
@@ -175,7 +174,7 @@ func (w *EpochWorkflow) Run(ctx workflow.Context, input EpochInput) (*EpochResul
 		actCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 			StartToCloseTimeout: 10 * time.Second,
 		})
-		if err := workflow.ExecuteActivity(actCtx, CheckConstraints,
+		if err := workflow.ExecuteActivity(actCtx, ActivityCheckConstraints,
 			*w.sm.State(), sig.ToPhase,
 		).Get(actCtx, &violations); err != nil {
 			workflow.GetLogger(ctx).Warn("EpochWorkflow: CheckConstraints activity failed", "error", err)
@@ -203,7 +202,7 @@ func (w *EpochWorkflow) Run(ctx workflow.Context, input EpochInput) (*EpochResul
 
 		// 2c. Record transition (activity — I/O boundary).
 		// Pass epochID so audit events are queryable by epoch.
-		if actErr := workflow.ExecuteActivity(actCtx, RecordTransition, input.EpochID, *record).
+		if actErr := workflow.ExecuteActivity(actCtx, ActivityRecordTransition, input.EpochID, *record).
 			Get(actCtx, nil); actErr != nil {
 			workflow.GetLogger(ctx).Warn("EpochWorkflow: RecordTransition activity failed", "error", actErr)
 		}
@@ -220,7 +219,7 @@ func (w *EpochWorkflow) Run(ctx workflow.Context, input EpochInput) (*EpochResul
 			},
 			Timestamp: record.Timestamp,
 		}
-		if actErr := workflow.ExecuteActivity(actCtx, RecordAuditEvent, auditEvent).
+		if actErr := workflow.ExecuteActivity(actCtx, ActivityRecordAuditEvent, auditEvent).
 			Get(actCtx, nil); actErr != nil {
 			workflow.GetLogger(ctx).Warn("EpochWorkflow: RecordAuditEvent activity failed", "error", actErr)
 		}
@@ -351,6 +350,22 @@ func (w *EpochWorkflow) ActiveSessions() []types.RegisterSessionSignal {
 	return cp
 }
 
+// ─── Activity name constants ──────────────────────────────────────────────────
+
+// Activity type names used when referencing activities from workflow code via
+// workflow.ExecuteActivity. These must match the exported method names on
+// *Activities exactly, since Temporal registers struct methods by simple name.
+const (
+	ActivityCheckConstraints   = "CheckConstraints"
+	ActivityRecordTransition   = "RecordTransition"
+	ActivityRecordAuditEvent   = "RecordAuditEvent"
+	ActivityQueryAuditEvents   = "QueryAuditEvents"
+	ActivityRecordSessionEntries = "RecordSessionEntries"
+	ActivityQuerySessionEntries  = "QuerySessionEntries"
+	ActivityRunAgentSession    = "RunAgentSession"
+	ActivityDispatchHook       = "DispatchHook"
+)
+
 // ─── Temporal workflow registration ─────────────────────────────────────────
 
 // EpochWorkflowFn is the top-level function registered with Temporal worker.
@@ -435,23 +450,20 @@ func EpochWorkflowFn(ctx workflow.Context, input EpochInput) (*EpochResult, erro
 	return w.Run(ctx, input)
 }
 
-// RegisterWorkflows registers all Temporal workflows with the given registry.
-// Call this in pastured worker setup before starting the worker.
+// RegisterWorkflows registers all Temporal workflows and activities with the
+// given registry. Call this in pastured worker setup before starting the worker.
+//
+// acts must not be nil. All exported methods on *Activities are registered as
+// Temporal activities under their simple method names (e.g. "CheckConstraints").
 func RegisterWorkflows(r interface {
 	RegisterWorkflow(interface{})
 	RegisterActivity(interface{})
-}) {
+}, acts *Activities) {
 	r.RegisterWorkflow(EpochWorkflowFn)
 	r.RegisterWorkflow(SliceWorkflowFn)
 	r.RegisterWorkflow(reviewWorkflowFn)
-	r.RegisterActivity(CheckConstraints)
-	r.RegisterActivity(RecordTransition)
-	r.RegisterActivity(RecordAuditEvent)
-	r.RegisterActivity(QueryAuditEvents)
-	r.RegisterActivity(RecordSessionEntries)
-	r.RegisterActivity(QuerySessionEntries)
-	r.RegisterActivity(RunAgentSession)
-	r.RegisterActivity(hooks.DispatchHook)
+	// Register the struct — Temporal registers all exported methods automatically.
+	r.RegisterActivity(acts)
 }
 
 // WorkflowName returns the Temporal workflow type name for a given function.
@@ -461,20 +473,6 @@ const (
 	SliceWorkflowType  = "SliceWorkflowFn"
 	ReviewWorkflowType = "reviewWorkflowFn"
 )
-
-// ActivityFunctions lists all activity functions registered by RegisterWorkflows.
-// Must be kept in sync with the RegisterWorkflows call below. Used by callers
-// that need to enumerate or re-register activities (e.g. test harnesses).
-var ActivityFunctions = []interface{}{
-	CheckConstraints,
-	RecordTransition,
-	RecordAuditEvent,
-	QueryAuditEvents,
-	RecordSessionEntries,
-	QuerySessionEntries,
-	RunAgentSession,
-	hooks.DispatchHook,
-}
 
 // ─── Activity options helper ──────────────────────────────────────────────────
 

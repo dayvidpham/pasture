@@ -6,7 +6,6 @@ import (
 	"log/slog"
 
 	"go.temporal.io/sdk/activity"
-	"go.temporal.io/sdk/temporal"
 
 	"github.com/dayvidpham/pasture/internal/acp"
 	"github.com/dayvidpham/pasture/internal/audit"
@@ -15,19 +14,19 @@ import (
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
-// ─── Module-level singleton ───────────────────────────────────────────────────
+// ─── Activities struct ────────────────────────────────────────────────────────
 
-var auditTrail audit.Trail
-
-const uninitializedMsg = "AuditTrail not initialized — call InitAuditTrail() before starting pastured worker. " +
-	"Inject a concrete audit.Trail (e.g. audit.NewInMemoryAuditTrail()) via InitAuditTrail() in worker startup code."
-
-// InitAuditTrail injects the audit.Trail implementation for this worker process.
-// Must be called once before the Temporal worker starts. Safe to call multiple
-// times (e.g. between test cases). Passing nil resets the singleton (useful
-// in tests to isolate state between test cases).
-func InitAuditTrail(trail audit.Trail) {
-	auditTrail = trail
+// Activities bundles the dependencies required by all Pasture Temporal
+// activities. Register an instance with the worker via RegisterWorkflows(w, acts).
+//
+// All exported methods on *Activities are registered as Temporal activities.
+// Temporal uses the simple method name as the activity type (e.g. "CheckConstraints").
+//
+// Trail must not be nil. HooksMgr may be nil — all hook dispatch is best-effort
+// and a nil manager is a no-op.
+type Activities struct {
+	Trail    audit.Trail
+	HooksMgr *hooks.Manager
 }
 
 // ─── ConstraintViolation ──────────────────────────────────────────────────────
@@ -41,7 +40,7 @@ type ConstraintViolation struct {
 	Message string `json:"message"`
 }
 
-// ─── Activities ───────────────────────────────────────────────────────────────
+// ─── Activities methods ───────────────────────────────────────────────────────
 
 // CheckConstraints validates a proposed phase transition against current epoch
 // state and returns any constraint violations.
@@ -56,7 +55,7 @@ type ConstraintViolation struct {
 //
 //	state:   Current epoch state snapshot.
 //	toPhase: Proposed target phase.
-func CheckConstraints(ctx context.Context, state types.EpochState, toPhase protocol.PhaseId) ([]ConstraintViolation, error) {
+func (a *Activities) CheckConstraints(ctx context.Context, state types.EpochState, toPhase protocol.PhaseId) ([]ConstraintViolation, error) {
 	logger := activity.GetLogger(ctx)
 	logger.Info("CheckConstraints", "from", state.CurrentPhase, "to", toPhase)
 
@@ -90,11 +89,14 @@ func CheckConstraints(ctx context.Context, state types.EpochState, toPhase proto
 				"violations": msgs,
 			},
 		}
-		if err := hooks.DispatchHook(ctx, hookPayload); err != nil {
-			logger.Warn("CheckConstraints: hook dispatch failed (best-effort, non-fatal)",
+		if err := a.dispatchHookInternal(ctx, hookPayload); err != nil {
+			slog.Warn("hook dispatch failed",
+				"what", fmt.Sprintf("hook dispatch failed for event %s", hookPayload.Event),
+				"why", err.Error(),
+				"impact", "hook handlers for this event did not execute",
+				"fix", "check handler registration and handler implementation",
 				"event", string(hooks.HookConstraintViolation),
-				"epochID", state.EpochID,
-				"error", err,
+				"epochId", state.EpochID,
 			)
 		}
 	}
@@ -109,9 +111,7 @@ func CheckConstraints(ctx context.Context, state types.EpochState, toPhase proto
 //
 // epochID is required to make audit events queryable by epoch. Pass the workflow
 // input EpochID so events can be retrieved via QueryAuditEvents(epochID, ...).
-//
-// Returns a non-retryable ApplicationError if InitAuditTrail was never called.
-func RecordTransition(ctx context.Context, epochID string, record types.TransitionRecord) error {
+func (a *Activities) RecordTransition(ctx context.Context, epochID string, record types.TransitionRecord) error {
 	logger := activity.GetLogger(ctx)
 	logger.Info("RecordTransition",
 		slog.String("epochID", epochID),
@@ -120,14 +120,6 @@ func RecordTransition(ctx context.Context, epochID string, record types.Transiti
 		slog.String("triggeredBy", record.TriggeredBy),
 		slog.Bool("success", record.Success),
 	)
-
-	if auditTrail == nil {
-		return temporal.NewNonRetryableApplicationError(
-			uninitializedMsg,
-			"AuditTrailUninitialized",
-			nil,
-		)
-	}
 
 	event := protocol.AuditEvent{
 		EpochID:   epochID,
@@ -142,7 +134,7 @@ func RecordTransition(ctx context.Context, epochID string, record types.Transiti
 		},
 		Timestamp: record.Timestamp,
 	}
-	if err := auditTrail.RecordEvent(ctx, event); err != nil {
+	if err := a.Trail.RecordEvent(ctx, event); err != nil {
 		return fmt.Errorf(
 			"temporal.RecordTransition: failed to record audit event for %q → %q "+
 				"(epochID=%q, triggeredBy=%q): %w",
@@ -164,13 +156,14 @@ func RecordTransition(ctx context.Context, epochID string, record types.Transiti
 			"success":      record.Success,
 		},
 	}
-	if err := hooks.DispatchHook(ctx, hookPayload); err != nil {
-		logger.Warn("RecordTransition: hook dispatch failed (best-effort, non-fatal)",
+	if err := a.dispatchHookInternal(ctx, hookPayload); err != nil {
+		slog.Warn("hook dispatch failed",
+			"what", fmt.Sprintf("hook dispatch failed for event %s", hookPayload.Event),
+			"why", err.Error(),
+			"impact", "hook handlers for this event did not execute",
+			"fix", "check handler registration and handler implementation",
 			"event", string(hooks.HookPhaseTransition),
-			"epochID", epochID,
-			"from", string(record.FromPhase),
-			"to", string(record.ToPhase),
-			"error", err,
+			"epochId", epochID,
 		)
 	}
 
@@ -181,17 +174,8 @@ func RecordTransition(ctx context.Context, epochID string, record types.Transiti
 //
 // Activity: non-deterministic I/O boundary. Used for non-transition events
 // (vote recorded, session registered, etc.).
-//
-// Returns a non-retryable ApplicationError if InitAuditTrail was never called.
-func RecordAuditEvent(ctx context.Context, event protocol.AuditEvent) error {
-	if auditTrail == nil {
-		return temporal.NewNonRetryableApplicationError(
-			uninitializedMsg,
-			"AuditTrailUninitialized",
-			nil,
-		)
-	}
-	if err := auditTrail.RecordEvent(ctx, event); err != nil {
+func (a *Activities) RecordAuditEvent(ctx context.Context, event protocol.AuditEvent) error {
+	if err := a.Trail.RecordEvent(ctx, event); err != nil {
 		return fmt.Errorf(
 			"temporal.RecordAuditEvent: failed to record audit event "+
 				"(epochID=%q, eventType=%q, phase=%q): %w",
@@ -210,17 +194,8 @@ func RecordAuditEvent(ctx context.Context, event protocol.AuditEvent) error {
 //	epochID: Required — the epoch to query events for.
 //	phase:   Optional phase filter (nil = all phases).
 //	role:    Optional role filter (nil = all roles).
-//
-// Returns a non-retryable ApplicationError if InitAuditTrail was never called.
-func QueryAuditEvents(ctx context.Context, epochID string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
-	if auditTrail == nil {
-		return nil, temporal.NewNonRetryableApplicationError(
-			uninitializedMsg,
-			"AuditTrailUninitialized",
-			nil,
-		)
-	}
-	events, err := auditTrail.QueryEvents(ctx, epochID, phase, role)
+func (a *Activities) QueryAuditEvents(ctx context.Context, epochID string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
+	events, err := a.Trail.QueryEvents(ctx, epochID, phase, role)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"temporal.QueryAuditEvents: query failed for epochID=%q: %w",
@@ -259,17 +234,8 @@ type RunAgentSessionResult struct {
 //
 // Activity: non-deterministic I/O boundary.  Nil or empty slices are no-ops.
 // All entries are written atomically where the backend supports transactions.
-//
-// Returns a non-retryable ApplicationError if InitAuditTrail was never called.
-func RecordSessionEntries(ctx context.Context, entries []protocol.SessionEntry) error {
-	if auditTrail == nil {
-		return temporal.NewNonRetryableApplicationError(
-			uninitializedMsg,
-			"AuditTrailUninitialized",
-			nil,
-		)
-	}
-	if err := auditTrail.RecordSessionEntries(ctx, entries); err != nil {
+func (a *Activities) RecordSessionEntries(ctx context.Context, entries []protocol.SessionEntry) error {
+	if err := a.Trail.RecordSessionEntries(ctx, entries); err != nil {
 		return fmt.Errorf(
 			"temporal.RecordSessionEntries: batch write failed (%d entries): %w",
 			len(entries), err,
@@ -283,16 +249,8 @@ func RecordSessionEntries(ctx context.Context, entries []protocol.SessionEntry) 
 // Activity: non-deterministic I/O boundary (reads from external store).
 //
 // Returns an empty (non-nil) slice when no entries exist for sessionID.
-// Returns a non-retryable ApplicationError if InitAuditTrail was never called.
-func QuerySessionEntries(ctx context.Context, sessionID string) ([]protocol.SessionEntry, error) {
-	if auditTrail == nil {
-		return nil, temporal.NewNonRetryableApplicationError(
-			uninitializedMsg,
-			"AuditTrailUninitialized",
-			nil,
-		)
-	}
-	entries, err := auditTrail.QuerySessionEntries(ctx, sessionID)
+func (a *Activities) QuerySessionEntries(ctx context.Context, sessionID string) ([]protocol.SessionEntry, error) {
+	entries, err := a.Trail.QuerySessionEntries(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"temporal.QuerySessionEntries: query failed for sessionID=%q: %w",
@@ -303,37 +261,20 @@ func QuerySessionEntries(ctx context.Context, sessionID string) ([]protocol.Sess
 }
 
 // RunAgentSession starts an ACP-compatible agent process, streams its session
-// updates, indexes them, and persists them to the audit trail.
+// updates, indexes them, and persists them to the audit trail on every update.
 //
 // Activity: long-running I/O boundary. Blocks until the agent process exits or
-// ctx is cancelled. All session data (messages, tool calls, token usage) is
-// accumulated by the IndexingSessionHandler and written atomically to the audit
-// trail at session end.
-//
-// Returns a non-retryable ApplicationError if InitAuditTrail was never called.
-//
-// Args:
-//
-//	input.AgentCmd:  Agent binary to execute (e.g. "claude").
-//	input.AgentArgs: Arguments passed verbatim to the agent binary.
-//	input.EpochID:   Pasture epoch context for audit correlation and hooks.
-func RunAgentSession(ctx context.Context, input RunAgentSessionInput) (*RunAgentSessionResult, error) {
+// ctx is cancelled. Session entries are written incrementally on each update
+// via the IndexingSessionHandler (per-update flush mode).
+func (a *Activities) RunAgentSession(ctx context.Context, input RunAgentSessionInput) (*RunAgentSessionResult, error) {
 	logger := activity.GetLogger(ctx)
 	logger.Info("RunAgentSession: starting",
 		slog.String("agentCmd", input.AgentCmd),
 		slog.String("epochID", input.EpochID),
 	)
 
-	if auditTrail == nil {
-		return nil, temporal.NewNonRetryableApplicationError(
-			uninitializedMsg,
-			"AuditTrailUninitialized",
-			nil,
-		)
-	}
-
 	indexer := acp.NewSharedIndexer()
-	handler := acp.NewIndexingSessionHandler(indexer, auditTrail, hooks.GetManager(), input.EpochID)
+	handler := acp.NewIndexingSessionHandler(indexer, a.Trail, a.HooksMgr, input.EpochID)
 	acpClient := acp.NewClient(handler)
 
 	if err := acpClient.Connect(ctx, input.AgentCmd, input.AgentArgs...); err != nil {
@@ -363,3 +304,47 @@ func RunAgentSession(ctx context.Context, input RunAgentSessionInput) (*RunAgent
 
 	return result, nil
 }
+
+// DispatchHook is a Temporal activity that dispatches a HookPayload to all
+// registered handlers via the injected HooksMgr.
+//
+// Behaviour:
+//   - If HooksMgr is nil, returns nil immediately. Hooks are optional — their
+//     absence must not fail workflows.
+//   - Otherwise, delegates to HooksMgr.Dispatch(ctx, payload) and returns any
+//     combined handler errors so the caller can log them.
+//
+// Callers in activities and workflows should treat a non-nil return as a
+// best-effort log signal, not as a hard failure.
+func (a *Activities) DispatchHook(ctx context.Context, payload hooks.HookPayload) error {
+	if a.HooksMgr == nil {
+		return nil
+	}
+	if err := a.HooksMgr.Dispatch(ctx, payload); err != nil {
+		slog.Warn("hook dispatch failed",
+			"what", fmt.Sprintf("hook dispatch failed for event %s", payload.Event),
+			"why", err.Error(),
+			"impact", "hook handlers for this event did not execute",
+			"fix", "check handler registration and handler implementation",
+			"event", string(payload.Event),
+			"epochId", payload.EpochID,
+		)
+		return err
+	}
+	return nil
+}
+
+// dispatchHookInternal dispatches a hook payload without the structured slog.Warn
+// wrapper — it returns the raw error so callers can add their own context.
+// Used internally by activity methods that want to add activity-specific fields.
+func (a *Activities) dispatchHookInternal(ctx context.Context, payload hooks.HookPayload) error {
+	if a.HooksMgr == nil {
+		return nil
+	}
+	return a.HooksMgr.Dispatch(ctx, payload)
+}
+
+// ─── Compile-time assertion ───────────────────────────────────────────────────
+
+// Compile-time assertion: activity package is used for logger access.
+var _ = activity.GetLogger
