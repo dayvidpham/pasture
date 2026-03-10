@@ -161,8 +161,8 @@ func TestExitCode_Validation(t *testing.T) {
 
 func TestExitCode_Config(t *testing.T) {
 	err := &errors.StructuredError{Category: errors.CategoryConfig, What: "bad config"}
-	if got := errors.ExitCode(err); got != 1 {
-		t.Errorf("ExitCode(config) = %d, want 1", got)
+	if got := errors.ExitCode(err); got != 4 {
+		t.Errorf("ExitCode(config) = %d, want 4", got)
 	}
 }
 

@@ -222,8 +222,8 @@ func TestEventType_IsValid(t *testing.T) {
 	invalidCases := []protocol.EventType{
 		"",
 		"unknown",
-		"PhaseTransition", // PascalCase not valid
-		"phase-transition", // hyphen not valid
+		"phase_transition", // old snake_case not valid
+		"phase-transition",  // hyphen not valid
 	}
 	for _, e := range invalidCases {
 		e := e

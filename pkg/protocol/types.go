@@ -206,14 +206,14 @@ func ParsePhaseId(s string) (PhaseId, error) {
 type EventType string
 
 const (
-	EventPhaseTransition    EventType = "phase_transition"
-	EventPhaseAdvance       EventType = "phase_advance"
-	EventVoteRecorded       EventType = "vote_recorded"
-	EventConstraintChecked  EventType = "constraint_checked"
-	EventSliceStarted       EventType = "slice_started"
-	EventSliceCompleted     EventType = "slice_completed"
-	EventSessionRegistered  EventType = "session_registered"
-	EventReviewCycleStarted EventType = "review_cycle_started"
+	EventPhaseTransition    EventType = "PhaseTransition"
+	EventPhaseAdvance       EventType = "PhaseAdvance"
+	EventVoteRecorded       EventType = "VoteRecorded"
+	EventConstraintChecked  EventType = "ConstraintChecked"
+	EventSliceStarted       EventType = "SliceStarted"
+	EventSliceCompleted     EventType = "SliceCompleted"
+	EventSessionRegistered  EventType = "SessionRegistered"
+	EventReviewCycleStarted EventType = "ReviewCycleStarted"
 )
 
 // AllEventTypes is the ordered slice of all valid EventType values.

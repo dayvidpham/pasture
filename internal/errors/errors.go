@@ -68,9 +68,10 @@ func (e *StructuredError) Report(w io.Writer) {
 // ExitCode maps an error to a process exit code.
 //
 // Exit code mapping:
-//   - CategoryValidation, CategoryConfig → 1
+//   - CategoryValidation → 1
 //   - CategoryConnection → 2
 //   - CategoryWorkflow → 3
+//   - CategoryConfig → 4
 //   - any other error (or nil) → 1
 func ExitCode(err error) int {
 	if err == nil {
@@ -79,12 +80,14 @@ func ExitCode(err error) int {
 	var se *StructuredError
 	if stderrors.As(err, &se) {
 		switch se.Category {
-		case CategoryValidation, CategoryConfig:
+		case CategoryValidation:
 			return 1
 		case CategoryConnection:
 			return 2
 		case CategoryWorkflow:
 			return 3
+		case CategoryConfig:
+			return 4
 		}
 	}
 	return 1 // default for unknown error types
