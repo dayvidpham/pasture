@@ -315,6 +315,31 @@ func (sm *EpochStateMachine) RecordBlocker(resolved bool) {
 	}
 }
 
+// RecordFailedTransition appends a failed TransitionRecord to the transition
+// history and records the error message in LastError.
+//
+// This is the correct mutation path for failed advances in workflow.go — callers
+// must not mutate State() directly (see State() doc). fromPhase and toPhase
+// describe the attempted transition; err is the failure reason.
+func (sm *EpochStateMachine) RecordFailedTransition(
+	fromPhase, toPhase protocol.PhaseId,
+	timestamp time.Time,
+	triggeredBy string,
+	err error,
+) {
+	failedRecord := types.TransitionRecord{
+		FromPhase:    fromPhase,
+		ToPhase:      toPhase,
+		Timestamp:    timestamp,
+		TriggeredBy:  triggeredBy,
+		ConditionMet: fmt.Sprintf("FAILED: %s", err.Error()),
+		Success:      false,
+	}
+	sm.state.TransitionHistory = append(sm.state.TransitionHistory, failedRecord)
+	errMsg := err.Error()
+	sm.state.LastError = &errMsg
+}
+
 // hasAnyRevise returns true if any recorded vote is REVISE.
 func (sm *EpochStateMachine) hasAnyRevise() bool {
 	for _, v := range sm.state.ReviewVotes {

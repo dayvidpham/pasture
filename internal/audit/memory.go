@@ -51,3 +51,15 @@ func (m *InMemoryAuditTrail) QueryEvents(_ context.Context, epochID string, phas
 	}
 	return result, nil
 }
+
+// Events returns a defensive copy of all recorded events.
+//
+// Intended for use in tests and assertions — callers receive a snapshot that
+// is safe to inspect without holding the internal lock.
+func (m *InMemoryAuditTrail) Events() []protocol.AuditEvent {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	cp := make([]protocol.AuditEvent, len(m.events))
+	copy(cp, m.events)
+	return cp
+}

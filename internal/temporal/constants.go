@@ -14,6 +14,16 @@ const (
 	SignalRegisterSession = "register_session"
 )
 
+// Signal name constants for SliceWorkflow signal handlers.
+// These are the Temporal signal names for configuring and completing
+// individual implementation slices.
+const (
+	// SignalStartSlice configures the slice execution mode before run.
+	SignalStartSlice = "start_slice"
+	// SignalCompleteSlice provides an external completion override for the slice.
+	SignalCompleteSlice = "complete_slice"
+)
+
 // Query name constants for EpochWorkflow query handlers.
 // These are the Temporal query names — they must match exactly between
 // the querier (pasture-msg query subcommands) and the handler (pastured).

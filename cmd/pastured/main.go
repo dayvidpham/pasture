@@ -161,7 +161,7 @@ func run(cmd *cobra.Command, configFile string) error {
 
 	// ── 5. Auto-register search attributes ───────────────────────────────────
 	ctx := context.Background()
-	if err := temporal.EnsureSearchAttributes(ctx, temporalClient, logger); err != nil {
+	if err := temporal.EnsureSearchAttributes(ctx, temporalClient, cfg.Connection.Namespace, logger); err != nil {
 		// Non-fatal: log and continue — search attributes may already exist or
 		// the namespace may not support custom attributes in all Temporal versions.
 		logger.Warn("search attribute registration failed — some observability queries may not work",
@@ -220,10 +220,10 @@ func run(cmd *cobra.Command, configFile string) error {
 //
 // Returns the Trail, an optional closer func (non-nil for SQLite), and any
 // initialisation error.
-func initAuditTrail(cfg config.PasturedConfig) (temporal.AuditTrail, func() error, error) {
+func initAuditTrail(cfg config.PasturedConfig) (audit.Trail, func() error, error) {
 	switch cfg.AuditTrail {
 	case types.BackendMemory, "":
-		return temporal.NewInMemoryAuditTrail(), nil, nil
+		return audit.NewInMemoryAuditTrail(), nil, nil
 
 	case types.BackendSqlite:
 		dbPath := cfg.AuditDBPath

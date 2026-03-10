@@ -8,31 +8,23 @@ import (
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 
+	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
-// ─── AuditTrail interface ─────────────────────────────────────────────────────
-
-// AuditTrail is the dependency-injection interface for recording audit events.
-// Implemented by InMemoryAuditTrail (tests/dev) and future durable backends.
-// The worker injects a concrete implementation before starting via InitAuditTrail.
-type AuditTrail interface {
-	RecordEvent(ctx context.Context, event protocol.AuditEvent) error
-	QueryEvents(ctx context.Context, epochID string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error)
-}
-
 // ─── Module-level singleton ───────────────────────────────────────────────────
 
-var auditTrail AuditTrail
+var auditTrail audit.Trail
 
 const uninitializedMsg = "AuditTrail not initialized — call InitAuditTrail() before starting pastured worker. " +
-	"Inject a concrete AuditTrail (e.g. NewInMemoryAuditTrail()) via InitAuditTrail() in worker startup code."
+	"Inject a concrete audit.Trail (e.g. audit.NewInMemoryAuditTrail()) via InitAuditTrail() in worker startup code."
 
-// InitAuditTrail injects the AuditTrail implementation for this worker process.
+// InitAuditTrail injects the audit.Trail implementation for this worker process.
 // Must be called once before the Temporal worker starts. Safe to call multiple
-// times (e.g. between test cases).
-func InitAuditTrail(trail AuditTrail) {
+// times (e.g. between test cases). Passing nil resets the singleton (useful
+// in tests to isolate state between test cases).
+func InitAuditTrail(trail audit.Trail) {
 	auditTrail = trail
 }
 
@@ -84,12 +76,16 @@ func CheckConstraints(ctx context.Context, state types.EpochState, toPhase proto
 // RecordTransition persists a transition record to the audit trail.
 //
 // Activity: non-deterministic I/O boundary.  In v1 this logs the transition and
-// delegates to the injected AuditTrail; v2 may write to Beads or a durable DB.
+// delegates to the injected audit.Trail; v2 may write to Beads or a durable DB.
+//
+// epochID is required to make audit events queryable by epoch. Pass the workflow
+// input EpochID so events can be retrieved via QueryAuditEvents(epochID, ...).
 //
 // Returns a non-retryable ApplicationError if InitAuditTrail was never called.
-func RecordTransition(ctx context.Context, record types.TransitionRecord) error {
+func RecordTransition(ctx context.Context, epochID string, record types.TransitionRecord) error {
 	logger := activity.GetLogger(ctx)
 	logger.Info("RecordTransition",
+		slog.String("epochID", epochID),
 		slog.String("from", string(record.FromPhase)),
 		slog.String("to", string(record.ToPhase)),
 		slog.String("triggeredBy", record.TriggeredBy),
@@ -105,7 +101,7 @@ func RecordTransition(ctx context.Context, record types.TransitionRecord) error 
 	}
 
 	event := protocol.AuditEvent{
-		EpochID:   "",   // not available in TransitionRecord; set by caller if needed
+		EpochID:   epochID,
 		Phase:     record.ToPhase,
 		EventType: protocol.EventPhaseTransition,
 		Payload: map[string]any{
@@ -120,8 +116,8 @@ func RecordTransition(ctx context.Context, record types.TransitionRecord) error 
 	if err := auditTrail.RecordEvent(ctx, event); err != nil {
 		return fmt.Errorf(
 			"temporal.RecordTransition: failed to record audit event for %q → %q "+
-				"(triggeredBy=%q): %w",
-			record.FromPhase, record.ToPhase, record.TriggeredBy, err,
+				"(epochID=%q, triggeredBy=%q): %w",
+			record.FromPhase, record.ToPhase, epochID, record.TriggeredBy, err,
 		)
 	}
 	return nil
@@ -178,48 +174,4 @@ func QueryAuditEvents(ctx context.Context, epochID string, phase *protocol.Phase
 		)
 	}
 	return events, nil
-}
-
-// ─── InMemoryAuditTrail ───────────────────────────────────────────────────────
-
-// InMemoryAuditTrail is the test/dev AuditTrail implementation backed by an
-// in-memory slice. Does not persist across worker restarts.
-type InMemoryAuditTrail struct {
-	events []protocol.AuditEvent
-}
-
-// NewInMemoryAuditTrail returns an initialized InMemoryAuditTrail.
-func NewInMemoryAuditTrail() *InMemoryAuditTrail {
-	return &InMemoryAuditTrail{}
-}
-
-// RecordEvent appends the event to the in-memory list.
-func (t *InMemoryAuditTrail) RecordEvent(_ context.Context, event protocol.AuditEvent) error {
-	t.events = append(t.events, event)
-	return nil
-}
-
-// QueryEvents returns events matching the given filters, in insertion order.
-func (t *InMemoryAuditTrail) QueryEvents(_ context.Context, epochID string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
-	var result []protocol.AuditEvent
-	for _, e := range t.events {
-		if epochID != "" && e.EpochID != epochID {
-			continue
-		}
-		if phase != nil && e.Phase != *phase {
-			continue
-		}
-		if role != nil && e.Role != *role {
-			continue
-		}
-		result = append(result, e)
-	}
-	return result, nil
-}
-
-// Events returns a defensive copy of all recorded events (for assertions in tests).
-func (t *InMemoryAuditTrail) Events() []protocol.AuditEvent {
-	cp := make([]protocol.AuditEvent, len(t.events))
-	copy(cp, t.events)
-	return cp
 }

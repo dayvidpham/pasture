@@ -15,11 +15,13 @@ import (
 //
 // Using a narrow interface (instead of the full client.Client) makes handlers
 // trivially testable via mock injection without depending on the full SDK type.
+// ExecuteWorkflow accepts client.StartWorkflowOptions directly (not interface{})
+// so callers get compile-time type safety and no runtime type assertion is needed.
 type TemporalClient interface {
 	Close()
 	QueryWorkflow(ctx context.Context, workflowID, runID, queryType string, args ...interface{}) (converter.EncodedValue, error)
 	SignalWorkflow(ctx context.Context, workflowID, runID, signalName string, arg interface{}) error
-	ExecuteWorkflow(ctx context.Context, options interface{}, workflow interface{}, args ...interface{}) (TemporalWorkflowRun, error)
+	ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (TemporalWorkflowRun, error)
 	CancelWorkflow(ctx context.Context, workflowID, runID string) error
 	TerminateWorkflow(ctx context.Context, workflowID, runID, reason string, details ...interface{}) error
 }
@@ -68,18 +70,8 @@ func (r *realClient) SignalWorkflow(ctx context.Context, workflowID, runID, sign
 	return r.c.SignalWorkflow(ctx, workflowID, runID, signalName, arg)
 }
 
-func (r *realClient) ExecuteWorkflow(ctx context.Context, options interface{}, workflow interface{}, args ...interface{}) (TemporalWorkflowRun, error) {
-	opts, ok := options.(client.StartWorkflowOptions)
-	if !ok {
-		return nil, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryValidation,
-			What:     "invalid workflow options type",
-			Why:      fmt.Sprintf("expected client.StartWorkflowOptions, got %T", options),
-			Impact:   "workflow cannot be started",
-			Fix:      "pass client.StartWorkflowOptions to ExecuteWorkflow",
-		}
-	}
-	run, err := r.c.ExecuteWorkflow(ctx, opts, workflow, args...)
+func (r *realClient) ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (TemporalWorkflowRun, error) {
+	run, err := r.c.ExecuteWorkflow(ctx, options, workflow, args...)
 	if err != nil {
 		return nil, err
 	}

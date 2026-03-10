@@ -215,17 +215,20 @@ type dispatchErrors struct {
 	errs []error
 }
 
-// Error returns a summary of how many handlers failed.
+// Error returns a multi-line message listing each handler error.
 func (e *dispatchErrors) Error() string {
 	if len(e.errs) == 1 {
 		return "hooks.Manager: 1 handler returned an error: " + e.errs[0].Error()
 	}
 	msgs := make([]string, len(e.errs))
 	for i, err := range e.errs {
-		msgs[i] = err.Error()
+		msgs[i] = fmt.Sprintf("[%d] %s", i+1, err.Error())
 	}
-	// Build a compact summary rather than importing strings/fmt loops.
-	return fmt.Sprintf("hooks.Manager: %d handlers returned errors", len(e.errs))
+	result := fmt.Sprintf("hooks.Manager: %d handlers returned errors:", len(e.errs))
+	for _, m := range msgs {
+		result += "\n  " + m
+	}
+	return result
 }
 
 // Unwrap returns the slice of underlying errors for use with errors.As/Is.

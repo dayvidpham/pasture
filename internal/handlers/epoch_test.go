@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"go.temporal.io/sdk/client"
+
 	"github.com/dayvidpham/pasture/internal/config"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
@@ -84,14 +86,13 @@ func TestEpochStart_WorkflowError(t *testing.T) {
 }
 
 func TestEpochStart_UsesConnTaskQueueWhenEmpty(t *testing.T) {
-	var capturedOptions interface{}
+	var capturedOptions client.StartWorkflowOptions
 	factory := func(_ context.Context, _ config.ConnectionConfig) (handlers.TemporalClient, error) {
 		return &captureClient{
 			captureOptions: &capturedOptions,
 			run:            mockWorkflowRun{id: "e1", runID: "r1"},
 		}, nil
 	}
-	_ = capturedOptions // used below
 
 	conn := config.ConnectionConfig{TaskQueue: "my-queue"}
 	code, err := handlers.EpochStart(context.Background(), conn, "epoch-1", "", "", types.OutputText, factory)
@@ -259,11 +260,11 @@ func TestEpochStart_JSONFormat(t *testing.T) {
 // to satisfy all other TemporalClient methods.
 type captureClient struct {
 	mockClient
-	captureOptions *interface{}
+	captureOptions *client.StartWorkflowOptions
 	run            mockWorkflowRun
 }
 
-func (c *captureClient) ExecuteWorkflow(_ context.Context, opts interface{}, _ interface{}, _ ...interface{}) (handlers.TemporalWorkflowRun, error) {
+func (c *captureClient) ExecuteWorkflow(_ context.Context, opts client.StartWorkflowOptions, _ interface{}, _ ...interface{}) (handlers.TemporalWorkflowRun, error) {
 	if c.captureOptions != nil {
 		*c.captureOptions = opts
 	}

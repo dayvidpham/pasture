@@ -7,6 +7,7 @@ import (
 
 	"go.temporal.io/sdk/testsuite"
 
+	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/temporal"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
@@ -361,7 +362,7 @@ func TestRecordTransition_UninitializedTrail(t *testing.T) {
 		Timestamp: time.Now(),
 		Success:   true,
 	}
-	_, err := env.ExecuteActivity(temporal.RecordTransition, record)
+	_, err := env.ExecuteActivity(temporal.RecordTransition, "epoch-uninitialized", record)
 	// Expect a non-retryable ApplicationError.
 	if err == nil {
 		t.Error("expected error from RecordTransition with uninitialized trail, got nil")
@@ -370,7 +371,7 @@ func TestRecordTransition_UninitializedTrail(t *testing.T) {
 
 func TestRecordTransition_WithTrail(t *testing.T) {
 	// Not parallel: shares global auditTrail singleton.
-	trail := temporal.NewInMemoryAuditTrail()
+	trail := audit.NewInMemoryAuditTrail()
 	temporal.InitAuditTrail(trail)
 	t.Cleanup(func() { temporal.InitAuditTrail(nil) })
 
@@ -386,7 +387,7 @@ func TestRecordTransition_WithTrail(t *testing.T) {
 		ConditionMet: "test ok",
 		Success:      true,
 	}
-	_, err := env.ExecuteActivity(temporal.RecordTransition, record)
+	_, err := env.ExecuteActivity(temporal.RecordTransition, "epoch-test-trail", record)
 	if err != nil {
 		t.Fatalf("RecordTransition: unexpected error: %v", err)
 	}
@@ -395,12 +396,15 @@ func TestRecordTransition_WithTrail(t *testing.T) {
 	if len(events) != 1 {
 		t.Errorf("expected 1 audit event, got %d", len(events))
 	}
+	if events[0].EpochID != "epoch-test-trail" {
+		t.Errorf("audit event EpochID = %q, want %q", events[0].EpochID, "epoch-test-trail")
+	}
 }
 
 func TestInMemoryAuditTrail_RecordAndQuery(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	trail := temporal.NewInMemoryAuditTrail()
+	trail := audit.NewInMemoryAuditTrail()
 
 	event1 := protocol.AuditEvent{
 		EpochID:   "epoch-trail-1",
@@ -431,9 +435,9 @@ func TestInMemoryAuditTrail_RecordAndQuery(t *testing.T) {
 		t.Errorf("QueryEvents by epochId: got %d, want 1", len(results))
 	}
 
-	// Query by phase.
+	// Query by epoch ID and phase.
 	p2 := protocol.P2_Elicit
-	results, err = trail.QueryEvents(ctx, "", &p2, nil)
+	results, err = trail.QueryEvents(ctx, "epoch-trail-2", &p2, nil)
 	if err != nil {
 		t.Fatalf("QueryEvents by phase: %v", err)
 	}
@@ -452,7 +456,7 @@ func TestInMemoryAuditTrail_RecordAndQuery(t *testing.T) {
 
 func TestEpochWorkflow_P1ToP2_Signal(t *testing.T) {
 	// Not parallel: shares global auditTrail singleton.
-	trail := temporal.NewInMemoryAuditTrail()
+	trail := audit.NewInMemoryAuditTrail()
 	temporal.InitAuditTrail(trail)
 	t.Cleanup(func() { temporal.InitAuditTrail(nil) })
 
@@ -493,7 +497,7 @@ func TestEpochWorkflow_P1ToP2_Signal(t *testing.T) {
 
 func TestEpochWorkflow_AdvancePhase_InvalidIgnored(t *testing.T) {
 	// Not parallel: shares global auditTrail singleton.
-	trail := temporal.NewInMemoryAuditTrail()
+	trail := audit.NewInMemoryAuditTrail()
 	temporal.InitAuditTrail(trail)
 	t.Cleanup(func() { temporal.InitAuditTrail(nil) })
 
@@ -532,7 +536,7 @@ func TestEpochWorkflow_AdvancePhase_InvalidIgnored(t *testing.T) {
 
 func TestEpochWorkflow_SubmitVote_Signal(t *testing.T) {
 	// Not parallel: shares global auditTrail singleton.
-	trail := temporal.NewInMemoryAuditTrail()
+	trail := audit.NewInMemoryAuditTrail()
 	temporal.InitAuditTrail(trail)
 	t.Cleanup(func() { temporal.InitAuditTrail(nil) })
 
@@ -569,7 +573,7 @@ func TestEpochWorkflow_SubmitVote_Signal(t *testing.T) {
 
 func TestEpochWorkflow_RegisterSession_Idempotent(t *testing.T) {
 	// Not parallel: shares global auditTrail singleton.
-	trail := temporal.NewInMemoryAuditTrail()
+	trail := audit.NewInMemoryAuditTrail()
 	temporal.InitAuditTrail(trail)
 	t.Cleanup(func() { temporal.InitAuditTrail(nil) })
 
@@ -618,7 +622,7 @@ func TestEpochWorkflow_RegisterSession_Idempotent(t *testing.T) {
 
 func TestEpochWorkflow_SliceProgress_Signal(t *testing.T) {
 	// Not parallel: shares global auditTrail singleton.
-	trail := temporal.NewInMemoryAuditTrail()
+	trail := audit.NewInMemoryAuditTrail()
 	temporal.InitAuditTrail(trail)
 	t.Cleanup(func() { temporal.InitAuditTrail(nil) })
 
@@ -705,7 +709,7 @@ func TestSliceWorkflow_CompleteSliceOverride(t *testing.T) {
 	// Send a complete_slice signal that overrides with success=false.
 	errMsg := "external override error"
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("complete_slice", temporal.SliceCompleteSignal{
+		env.SignalWorkflow(temporal.SignalCompleteSlice, temporal.SliceCompleteSignal{
 			Success: false,
 			Error:   &errMsg,
 		})
@@ -802,7 +806,7 @@ func TestQueryAuditEvents_UninitializedTrail(t *testing.T) {
 
 func TestQueryAuditEvents_WithTrail(t *testing.T) {
 	ctx := context.Background()
-	trail := temporal.NewInMemoryAuditTrail()
+	trail := audit.NewInMemoryAuditTrail()
 	temporal.InitAuditTrail(trail)
 	t.Cleanup(func() { temporal.InitAuditTrail(nil) })
 
@@ -832,7 +836,7 @@ func TestQueryAuditEvents_WithTrail(t *testing.T) {
 }
 
 func TestRecordAuditEvent_WithTrail(t *testing.T) {
-	trail := temporal.NewInMemoryAuditTrail()
+	trail := audit.NewInMemoryAuditTrail()
 	temporal.InitAuditTrail(trail)
 	t.Cleanup(func() { temporal.InitAuditTrail(nil) })
 
@@ -940,7 +944,7 @@ func TestTransitionError_MultipleViolations(t *testing.T) {
 
 func TestEpochWorkflow_FullLifecycle_ThroughP2(t *testing.T) {
 	// Not parallel: shares global auditTrail singleton.
-	trail := temporal.NewInMemoryAuditTrail()
+	trail := audit.NewInMemoryAuditTrail()
 	temporal.InitAuditTrail(trail)
 	t.Cleanup(func() { temporal.InitAuditTrail(nil) })
 
@@ -979,5 +983,108 @@ func TestEpochWorkflow_FullLifecycle_ThroughP2(t *testing.T) {
 	env.ExecuteWorkflow(temporal.EpochWorkflowFn, temporal.EpochInput{
 		EpochID:            "epoch-lifecycle",
 		RequestDescription: "full lifecycle test",
+	})
+}
+
+// ─── RecordAuditEvent uninitialized error path ────────────────────────────────
+
+func TestRecordAuditEvent_UninitializedTrail(t *testing.T) {
+	// Not parallel: shares global auditTrail singleton.
+	temporal.InitAuditTrail(nil)
+	t.Cleanup(func() { temporal.InitAuditTrail(nil) })
+
+	suite := &testsuite.WorkflowTestSuite{}
+	env := suite.NewTestActivityEnvironment()
+	env.RegisterActivity(temporal.RecordAuditEvent)
+
+	event := protocol.AuditEvent{
+		EpochID:   "epoch-nil-trail",
+		Phase:     protocol.P1_Request,
+		EventType: protocol.EventPhaseTransition,
+		Timestamp: time.Now(),
+	}
+	_, err := env.ExecuteActivity(temporal.RecordAuditEvent, event)
+	if err == nil {
+		t.Error("expected non-retryable error from RecordAuditEvent with uninitialized trail, got nil")
+	}
+}
+
+// ─── AvailableTransitionsQuery and FullState workflow query handler tests ─────
+
+func TestEpochWorkflow_QueryAvailableTransitions(t *testing.T) {
+	// Not parallel: shares global auditTrail singleton.
+	trail := audit.NewInMemoryAuditTrail()
+	temporal.InitAuditTrail(trail)
+	t.Cleanup(func() { temporal.InitAuditTrail(nil) })
+
+	suite := &testsuite.WorkflowTestSuite{}
+	env := suite.NewTestWorkflowEnvironment()
+
+	env.RegisterWorkflow(temporal.EpochWorkflowFn)
+	env.RegisterActivity(temporal.CheckConstraints)
+	env.RegisterActivity(temporal.RecordTransition)
+	env.RegisterActivity(temporal.RecordAuditEvent)
+
+	env.RegisterDelayedCallback(func() {
+		// At p1, only p2 should be available.
+		val, err := env.QueryWorkflow(temporal.QueryAvailableTransitions)
+		if err != nil {
+			t.Errorf("QueryAvailableTransitions failed: %v", err)
+			return
+		}
+		var transitions []protocol.PhaseId
+		if decErr := val.Get(&transitions); decErr != nil {
+			t.Errorf("decode QueryAvailableTransitions: %v", decErr)
+			return
+		}
+		if len(transitions) != 1 || transitions[0] != protocol.P2_Elicit {
+			t.Errorf("QueryAvailableTransitions at p1 = %v, want [p2]", transitions)
+		}
+		env.CancelWorkflow()
+	}, time.Millisecond*50)
+
+	env.ExecuteWorkflow(temporal.EpochWorkflowFn, temporal.EpochInput{
+		EpochID:            "epoch-query-avail",
+		RequestDescription: "test available transitions query",
+	})
+}
+
+func TestEpochWorkflow_QueryFullState(t *testing.T) {
+	// Not parallel: shares global auditTrail singleton.
+	trail := audit.NewInMemoryAuditTrail()
+	temporal.InitAuditTrail(trail)
+	t.Cleanup(func() { temporal.InitAuditTrail(nil) })
+
+	suite := &testsuite.WorkflowTestSuite{}
+	env := suite.NewTestWorkflowEnvironment()
+
+	env.RegisterWorkflow(temporal.EpochWorkflowFn)
+	env.RegisterActivity(temporal.CheckConstraints)
+	env.RegisterActivity(temporal.RecordTransition)
+	env.RegisterActivity(temporal.RecordAuditEvent)
+
+	env.RegisterDelayedCallback(func() {
+		val, err := env.QueryWorkflow(temporal.QueryFullState)
+		if err != nil {
+			t.Errorf("QueryFullState failed: %v", err)
+			return
+		}
+		var result types.QueryStateResult
+		if decErr := val.Get(&result); decErr != nil {
+			t.Errorf("decode QueryFullState: %v", decErr)
+			return
+		}
+		if result.CurrentPhase != protocol.P1_Request {
+			t.Errorf("QueryFullState.CurrentPhase = %q, want %q", result.CurrentPhase, protocol.P1_Request)
+		}
+		if len(result.AvailableTransitions) == 0 {
+			t.Error("QueryFullState.AvailableTransitions is empty, want at least one transition")
+		}
+		env.CancelWorkflow()
+	}, time.Millisecond*50)
+
+	env.ExecuteWorkflow(temporal.EpochWorkflowFn, temporal.EpochInput{
+		EpochID:            "epoch-query-full",
+		RequestDescription: "test full state query",
 	})
 }

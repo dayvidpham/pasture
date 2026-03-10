@@ -189,23 +189,20 @@ func (w *EpochWorkflow) Run(ctx workflow.Context, input EpochInput) (*EpochResul
 			workflow.Now(ctx),
 		)
 		if err != nil {
-			// Record a failed attempt in transition history.
-			failedRecord := types.TransitionRecord{
-				FromPhase:    w.sm.State().CurrentPhase,
-				ToPhase:      sig.ToPhase,
-				Timestamp:    workflow.Now(ctx),
-				TriggeredBy:  sig.TriggeredBy,
-				ConditionMet: fmt.Sprintf("FAILED: %s", err.Error()),
-				Success:      false,
-			}
-			w.sm.State().TransitionHistory = append(w.sm.State().TransitionHistory, failedRecord)
-			errMsg := err.Error()
-			w.sm.State().LastError = &errMsg
+			// Record a failed attempt via the state machine method (never mutate State() directly).
+			w.sm.RecordFailedTransition(
+				w.sm.State().CurrentPhase,
+				sig.ToPhase,
+				workflow.Now(ctx),
+				sig.TriggeredBy,
+				err,
+			)
 			continue
 		}
 
 		// 2c. Record transition (activity — I/O boundary).
-		if actErr := workflow.ExecuteActivity(actCtx, RecordTransition, *record).
+		// Pass epochID so audit events are queryable by epoch.
+		if actErr := workflow.ExecuteActivity(actCtx, RecordTransition, input.EpochID, *record).
 			Get(actCtx, nil); actErr != nil {
 			workflow.GetLogger(ctx).Warn("EpochWorkflow: RecordTransition activity failed", "error", actErr)
 		}

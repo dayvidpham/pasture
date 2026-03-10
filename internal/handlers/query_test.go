@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
 
 	"github.com/dayvidpham/pasture/internal/config"
@@ -139,7 +140,7 @@ func (m *mockClient) SignalWorkflow(_ context.Context, _, _, _ string, _ interfa
 	return m.signalErr
 }
 
-func (m *mockClient) ExecuteWorkflow(_ context.Context, _ interface{}, _ interface{}, _ ...interface{}) (handlers.TemporalWorkflowRun, error) {
+func (m *mockClient) ExecuteWorkflow(_ context.Context, _ client.StartWorkflowOptions, _ interface{}, _ ...interface{}) (handlers.TemporalWorkflowRun, error) {
 	if m.executeErr != nil {
 		return nil, m.executeErr
 	}

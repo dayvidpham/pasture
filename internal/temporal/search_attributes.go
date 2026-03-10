@@ -34,12 +34,22 @@ const SALastEventType = "AuraLastEventType"
 // Temporal IndexedValueType. Used by EnsureSearchAttributes to auto-register
 // on pastured startup. Port of Python _REQUIRED_SEARCH_ATTRIBUTES.
 var requiredSearchAttributes = map[string]enumspb.IndexedValueType{
-	SAEpochID:     enumspb.INDEXED_VALUE_TYPE_TEXT,
-	SAPhase:       enumspb.INDEXED_VALUE_TYPE_KEYWORD,
-	SARole:        enumspb.INDEXED_VALUE_TYPE_KEYWORD,
-	SAStatus:      enumspb.INDEXED_VALUE_TYPE_KEYWORD,
-	SADomain:      enumspb.INDEXED_VALUE_TYPE_KEYWORD,
+	SAEpochID:       enumspb.INDEXED_VALUE_TYPE_TEXT,
+	SAPhase:         enumspb.INDEXED_VALUE_TYPE_KEYWORD,
+	SARole:          enumspb.INDEXED_VALUE_TYPE_KEYWORD,
+	SAStatus:        enumspb.INDEXED_VALUE_TYPE_KEYWORD,
+	SADomain:        enumspb.INDEXED_VALUE_TYPE_KEYWORD,
 	SALastEventType: enumspb.INDEXED_VALUE_TYPE_KEYWORD,
+}
+
+// OperatorServiceProvider is the narrow interface required by EnsureSearchAttributes.
+// client.Client from go.temporal.io/sdk/client satisfies this interface via its
+// OperatorService() method.
+//
+// Exposing only this narrow interface makes the function trivially testable
+// without depending on the full client.Client type.
+type OperatorServiceProvider interface {
+	OperatorService() operatorservice.OperatorServiceClient
 }
 
 // EnsureSearchAttributes idempotently registers all required Aura search
@@ -52,15 +62,17 @@ var requiredSearchAttributes = map[string]enumspb.IndexedValueType{
 //
 // Args:
 //
-//	ctx:    Context for the gRPC calls.
-//	c:      Temporal client. Must implement OperatorService() — the standard
-//	        client.Client from go.temporal.io/sdk/client satisfies this.
-//	logger: Logger for the "registered" info message. Pass slog.Default() if nil.
+//	ctx:       Context for the gRPC calls.
+//	c:         Temporal client providing OperatorService(). The standard
+//	           client.Client from go.temporal.io/sdk/client satisfies this.
+//	namespace: Temporal namespace name to register attributes in (e.g. "default").
+//	           Must match the namespace used by the pastured worker.
+//	logger:    Logger for the "registered" info message. Pass slog.Default() if nil.
 //
 // Returns an error if the ListSearchAttributes or AddSearchAttributes call fails.
 // A partial registration failure (adding one of N attributes) returns the error
 // without retrying; call EnsureSearchAttributes again on next startup to catch up.
-func EnsureSearchAttributes(ctx context.Context, c client.Client, logger *slog.Logger) error {
+func EnsureSearchAttributes(ctx context.Context, c OperatorServiceProvider, namespace string, logger *slog.Logger) error {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -68,14 +80,14 @@ func EnsureSearchAttributes(ctx context.Context, c client.Client, logger *slog.L
 	// Fetch existing custom attributes from the namespace.
 	listResp, err := c.OperatorService().ListSearchAttributes(ctx,
 		&operatorservice.ListSearchAttributesRequest{
-			Namespace: "default",
+			Namespace: namespace,
 		},
 	)
 	if err != nil {
 		return fmt.Errorf(
 			"temporal.EnsureSearchAttributes: ListSearchAttributes failed — "+
-				"check Temporal server connectivity and namespace 'default': %w",
-			err,
+				"check Temporal server connectivity and namespace %q: %w",
+			namespace, err,
 		)
 	}
 
@@ -96,7 +108,7 @@ func EnsureSearchAttributes(ctx context.Context, c client.Client, logger *slog.L
 	// Register missing attributes.
 	_, err = c.OperatorService().AddSearchAttributes(ctx,
 		&operatorservice.AddSearchAttributesRequest{
-			Namespace:        "default",
+			Namespace:        namespace,
 			SearchAttributes: missing,
 		},
 	)
@@ -108,11 +120,11 @@ func EnsureSearchAttributes(ctx context.Context, c client.Client, logger *slog.L
 		)
 	}
 
-	logger.Info("registered Temporal search attributes", "attributes", missingNames(missing))
+	logger.Info("registered Temporal search attributes", "namespace", namespace, "attributes", missingNames(missing))
 	return nil
 }
 
-// missingNames returns the sorted key slice of a map for log output.
+// missingNames returns the key slice of a map for log output.
 func missingNames(m map[string]enumspb.IndexedValueType) []string {
 	names := make([]string, 0, len(m))
 	for n := range m {
@@ -120,3 +132,6 @@ func missingNames(m map[string]enumspb.IndexedValueType) []string {
 	}
 	return names
 }
+
+// Compile-time assertion: client.Client satisfies OperatorServiceProvider.
+var _ OperatorServiceProvider = (client.Client)(nil)

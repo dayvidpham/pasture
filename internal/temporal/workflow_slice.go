@@ -67,7 +67,7 @@ func (sw *SliceWorkflow) CompleteSlice(_ workflow.Context, sig SliceCompleteSign
 func (sw *SliceWorkflow) Run(ctx workflow.Context, input SliceInput) (*SliceResult, error) {
 	// Register signal handlers via goroutine-per-channel pattern.
 	workflow.Go(ctx, func(ctx workflow.Context) {
-		ch := workflow.GetSignalChannel(ctx, "start_slice")
+		ch := workflow.GetSignalChannel(ctx, SignalStartSlice)
 		for {
 			var sig SliceStartSignal
 			ch.Receive(ctx, &sig)
@@ -75,7 +75,7 @@ func (sw *SliceWorkflow) Run(ctx workflow.Context, input SliceInput) (*SliceResu
 		}
 	})
 	workflow.Go(ctx, func(ctx workflow.Context) {
-		ch := workflow.GetSignalChannel(ctx, "complete_slice")
+		ch := workflow.GetSignalChannel(ctx, SignalCompleteSlice)
 		for {
 			var sig SliceCompleteSignal
 			ch.Receive(ctx, &sig)
