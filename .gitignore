@@ -14,6 +14,7 @@ dist/
 /pastured
 /pasture-msg
 /pasture-release
+/pasture-test-agent
 
 # Nix result symlinks
 result
