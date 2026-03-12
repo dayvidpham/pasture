@@ -33,6 +33,9 @@ const (
 
 	// ConfigLoading is used by S3 tests (config loading scenarios).
 	ConfigLoading FixtureName = "config_loading"
+
+	// CodegenMarkers is used by S3 codegen tests (marker parsing scenarios).
+	CodegenMarkers FixtureName = "markers"
 )
 
 // LoadFixtures reads testdata/<name>.yaml relative to the current working
