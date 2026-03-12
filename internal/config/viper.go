@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -87,18 +89,29 @@ func ResolveConnectionConfigFromFile(cmd *cobra.Command, configFile string) Conn
 
 // ResolvePasturedConfig resolves the full PasturedConfig, including audit-trail
 // settings, using the default config file path.
+//
+// Config-file read errors are silently ignored (missing default config file is
+// not fatal — defaults and environment variables still apply). Use
+// ResolvePasturedConfigFromFile for explicit paths where an error should be
+// surfaced to the caller.
 func ResolvePasturedConfig(cmd *cobra.Command) PasturedConfig {
-	return resolvePasturedConfigWithFile(cmd, DefaultConfigPath())
+	cfg, _ := resolvePasturedConfigWithFile(cmd, DefaultConfigPath())
+	return cfg
 }
 
 // ResolvePasturedConfigFromFile resolves the full PasturedConfig using an
 // explicitly provided config file path (e.g., from --config CLI flag).
-func ResolvePasturedConfigFromFile(cmd *cobra.Command, configFile string) PasturedConfig {
+//
+// The returned error indicates that the config file could not be read (missing
+// or malformed). The config is still populated with defaults, environment
+// variables, and CLI flags — callers should decide whether to fail-fast or
+// continue with the partial config.
+func ResolvePasturedConfigFromFile(cmd *cobra.Command, configFile string) (PasturedConfig, error) {
 	return resolvePasturedConfigWithFile(cmd, configFile)
 }
 
 // resolvePasturedConfigWithFile resolves PasturedConfig from the given file.
-func resolvePasturedConfigWithFile(cmd *cobra.Command, configFile string) PasturedConfig {
+func resolvePasturedConfigWithFile(cmd *cobra.Command, configFile string) (PasturedConfig, error) {
 	v := viper.New()
 
 	// --- Defaults ---
@@ -116,10 +129,19 @@ func resolvePasturedConfigWithFile(cmd *cobra.Command, configFile string) Pastur
 	v.BindEnv("audit_db_path", EnvAuditDBPath)         //nolint:errcheck
 
 	// --- Config file ---
+	var fileErr error
 	if configFile != "" {
 		v.SetConfigFile(configFile)
 		v.SetConfigType("yaml")
-		v.ReadInConfig() //nolint:errcheck
+		if err := v.ReadInConfig(); err != nil {
+			fileErr = fmt.Errorf(
+				"config: cannot read config file %q"+
+					" — ensure the file exists and is valid YAML"+
+					" (set via --config flag or the default ~/.config/pasture/config.yaml)"+
+					": %w",
+				configFile, err,
+			)
+		}
 	}
 
 	// --- CLI flags ---
@@ -129,7 +151,7 @@ func resolvePasturedConfigWithFile(cmd *cobra.Command, configFile string) Pastur
 	bindChangedFlag(v, "audit_trail", cmd, "audit-trail")
 	bindChangedFlag(v, "audit_db_path", cmd, "audit-db-path")
 
-	return PasturedConfig{
+	cfg := PasturedConfig{
 		Connection: ConnectionConfig{
 			Namespace:     v.GetString("connection.namespace"),
 			TaskQueue:     v.GetString("connection.task_queue"),
@@ -138,22 +160,34 @@ func resolvePasturedConfigWithFile(cmd *cobra.Command, configFile string) Pastur
 		AuditTrail:  types.AuditTrailBackend(v.GetString("audit_trail")),
 		AuditDBPath: v.GetString("audit_db_path"),
 	}
+	return cfg, fileErr
 }
 
 // ResolvePastureMsgConfig resolves the full PastureMsgConfig using the default
 // config file path.
+//
+// Config-file read errors are silently ignored (missing default config file is
+// not fatal — defaults and environment variables still apply). Use
+// ResolvePastureMsgConfigFromFile for explicit paths where an error should be
+// surfaced to the caller.
 func ResolvePastureMsgConfig(cmd *cobra.Command) PastureMsgConfig {
-	return resolvePastureMsgConfigWithFile(cmd, DefaultConfigPath())
+	cfg, _ := resolvePastureMsgConfigWithFile(cmd, DefaultConfigPath())
+	return cfg
 }
 
 // ResolvePastureMsgConfigFromFile resolves PastureMsgConfig using an explicitly
 // provided config file path (e.g., from --config CLI flag).
-func ResolvePastureMsgConfigFromFile(cmd *cobra.Command, configFile string) PastureMsgConfig {
+//
+// The returned error indicates that the config file could not be read (missing
+// or malformed). The config is still populated with defaults, environment
+// variables, and CLI flags — callers should decide whether to fail-fast or
+// continue with the partial config.
+func ResolvePastureMsgConfigFromFile(cmd *cobra.Command, configFile string) (PastureMsgConfig, error) {
 	return resolvePastureMsgConfigWithFile(cmd, configFile)
 }
 
 // resolvePastureMsgConfigWithFile resolves PastureMsgConfig from the given file.
-func resolvePastureMsgConfigWithFile(cmd *cobra.Command, configFile string) PastureMsgConfig {
+func resolvePastureMsgConfigWithFile(cmd *cobra.Command, configFile string) (PastureMsgConfig, error) {
 	v := viper.New()
 
 	// --- Defaults ---
@@ -168,10 +202,19 @@ func resolvePastureMsgConfigWithFile(cmd *cobra.Command, configFile string) Past
 	v.BindEnv("connection.server_address", EnvAddress) //nolint:errcheck
 
 	// --- Config file ---
+	var fileErr error
 	if configFile != "" {
 		v.SetConfigFile(configFile)
 		v.SetConfigType("yaml")
-		v.ReadInConfig() //nolint:errcheck
+		if err := v.ReadInConfig(); err != nil {
+			fileErr = fmt.Errorf(
+				"config: cannot read config file %q"+
+					" — ensure the file exists and is valid YAML"+
+					" (set via --config flag or the default ~/.config/pasture/config.yaml)"+
+					": %w",
+				configFile, err,
+			)
+		}
 	}
 
 	// --- CLI flags ---
@@ -180,7 +223,7 @@ func resolvePastureMsgConfigWithFile(cmd *cobra.Command, configFile string) Past
 	bindChangedFlag(v, "connection.server_address", cmd, "address")
 	bindChangedFlag(v, "default_format", cmd, "format")
 
-	return PastureMsgConfig{
+	cfg := PastureMsgConfig{
 		Connection: ConnectionConfig{
 			Namespace:     v.GetString("connection.namespace"),
 			TaskQueue:     v.GetString("connection.task_queue"),
@@ -188,4 +231,5 @@ func resolvePastureMsgConfigWithFile(cmd *cobra.Command, configFile string) Past
 		},
 		DefaultFormat: types.OutputFormat(v.GetString("default_format")),
 	}
+	return cfg, fileErr
 }
