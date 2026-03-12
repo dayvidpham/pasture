@@ -1,0 +1,33 @@
+# CLI smoke-test fixtures for pasture-release.
+# Each case is run as a subprocess (exec.Command) to test the compiled binary.
+# Fields:
+#   id:                    human-readable test name
+#   args:                  CLI arguments passed to the binary
+#   want_exit:             expected exit code (0 = success, non-zero = failure)
+#   want_stdout_contains:  substring that must appear in combined stdout+stderr
+#   want_stderr_contains:  substring that must appear in combined stdout+stderr
+tests:
+  - id: "help-exits-zero"
+    args: ["--help"]
+    want_exit: 0
+    want_stdout_contains: "pasture-release"
+
+  - id: "unknown-subcommand-exits-nonzero"
+    args: ["does-not-exist"]
+    want_exit: 1
+    want_stderr_contains: "unknown command"
+
+  - id: "check-help"
+    args: ["check", "--help"]
+    want_exit: 0
+    want_stdout_contains: "version consistency"
+
+  - id: "registry-help"
+    args: ["registry", "--help"]
+    want_exit: 0
+    want_stdout_contains: "registry"
+
+  - id: "patch-help"
+    args: ["patch", "--help"]
+    want_exit: 0
+    want_stdout_contains: "patch"
