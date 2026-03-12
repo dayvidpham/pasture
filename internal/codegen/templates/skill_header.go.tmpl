@@ -1,0 +1,190 @@
+---
+name: {{ .Role.ID }}
+description: {{ .Role.Description }}
+{{- if .SubSkills }}
+skills: {{ join .SubSkills ", " }}
+{{- end }}
+---
+
+# {{ .Role.Name }} Agent
+
+<!-- BEGIN GENERATED FROM aura schema -->
+**Role:** `{{ .Role.ID }}` | **Phases owned:** {{- $ownedPhases := .OwnedPhases }}{{- range $i, $p := $ownedPhases }} {{ index $.PhaseSlug $p }}{{- if not (last $i (len $ownedPhases)) }},{{- end }}{{- end }}
+
+
+## Protocol Context (generated from schema.xml)
+
+### Owned Phases
+
+{{- if .OwnedPhases }}
+
+| Phase | Name | Domain | Transitions |
+|-------|------|--------|-------------|
+{{- range .PhasesDetail }}
+{{- $ts := .Transitions }}
+| `{{ index $.PhaseSlug .ID }}` | {{ .Name }} | {{ .Domain }} | {{- range $i, $t := $ts }} → `{{ index $.PhaseSlug $t.ToPhase }}` ({{ $t.Condition }}){{- if not (last $i (len $ts)) }};{{- end }}{{- end }} |
+{{- end }}
+{{- else }}
+
+_(No phases owned)_
+{{- end }}
+
+### Commands
+
+{{- if .Commands }}
+
+| Command | Description | Phases |
+|---------|-------------|--------|
+{{- range .Commands }}
+{{- $ps := .Phases }}
+| `{{ .Name }}` | {{ .Description }} | {{- if $ps }}{{- range $i, $p := $ps }} {{ index $.PhaseSlug $p }}{{- if not (last $i (len $ps)) }},{{- end }}{{- end }}{{- else }} —{{- end }} |
+{{- end }}
+{{- else }}
+
+_(No commands assigned to this role)_
+{{- end }}
+
+### Constraints (Given/When/Then/Should Not)
+
+{{- if .Constraints }}
+{{- range .Constraints }}
+
+**[{{ .ID }}]**
+- Given: {{ .Given }}
+- When: {{ .When }}
+- Then: {{ .Then }}
+- Should not: {{ .ShouldNot }}
+{{- if .Examples }}
+{{- range .Examples }}
+
+```{{ .Lang }}
+{{ .Code }}
+```
+_Example ({{ .Label }})_{{- if .AlsoIllustrates }} — also illustrates: {{ .AlsoIllustrates }}{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- else }}
+
+_(No constraints defined)_
+{{- end }}
+
+### Handoffs
+
+{{- if .Handoffs }}
+
+| ID | Source | Target | Phase | Content Level | Required Fields |
+|----|--------|--------|-------|---------------|-----------------|
+{{- range .Handoffs }}
+| `{{ .ID }}` | `{{ .SourceRole }}` | `{{ .TargetRole }}` | `{{ index $.PhaseSlug .AtPhase }}` | {{ .ContentLevel }} | {{ join .RequiredFields ", " }} |
+{{- end }}
+{{- else }}
+
+_(No handoffs for this role)_
+{{- end }}
+
+### Startup Sequence
+
+{{- if .Steps }}
+{{- range .Steps }}
+
+**Step {{ .Order }}:** {{ .Instruction }}{{- if .Command }} (`{{ .Command }}`){{- end }}{{- if .Context }} — _{{ .Context }}_{{- end }}{{- if .NextState }} → `{{ .NextState }}`{{- end }}
+{{- end }}
+{{- else }}
+
+_(No startup sequence defined for this role)_
+{{- end }}
+{{- if .Introduction }}
+
+### Introduction
+
+{{ .Introduction }}
+{{- end }}
+{{- if .OwnershipNarrative }}
+
+### What You Own
+
+{{ .OwnershipNarrative }}
+{{- end }}
+{{- if .Behaviors }}
+
+### Role Behaviors (Given/When/Then/Should Not)
+{{- range .Behaviors }}
+
+**[{{ .ID }}]**
+- Given: {{ .Given }}
+- When: {{ .When }}
+- Then: {{ .Then }}
+- Should not: {{ .ShouldNot }}
+{{- end }}
+{{- end }}
+{{- if .Checklists }}
+
+### Completion Checklist
+{{- range .Checklists }}
+
+**{{ .Gate }} gates:**
+{{- range .Items }}
+- [ ] {{ .Text }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if .CoordinationCommands }}
+
+### Inter-Agent Coordination
+
+Agents coordinate through **beads** tasks and comments:
+
+| Action | Command |
+|--------|---------|
+{{- range .CoordinationCommands }}
+| {{ .Action }} | `{{ .Template }}` |
+{{- end }}
+{{- end }}
+{{- if .Workflows }}
+
+### Workflows
+{{- range .Workflows }}
+
+#### {{ .Name }}
+
+{{ .Description }}
+{{- range .Stages }}
+
+**Stage {{ .Order }}: {{ .Name }}** _({{ .Execution }})_
+{{- range .Actions }}
+
+- {{ .Instruction }}{{- if .Command }} (`{{ .Command }}`){{- end }}
+{{- end }}
+{{- if .ExitConditions }}
+
+Exit conditions:
+{{- range .ExitConditions }}
+- **{{ .Type }}**: {{ .Condition }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- with index $.FiguresByWorkflow .ID }}
+{{- range . }}
+
+##### {{ .Title }}
+
+```text
+{{ .Content }}
+```
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if .ReviewAxes }}
+
+### Review Axes
+
+| Axis | Name | Short | Key Questions |
+|------|------|-------|---------------|
+{{- range .ReviewAxes }}
+{{- $qs := .KeyQuestions }}
+| {{ .Letter }} | {{ .Name }} | {{ .Short }} | {{- range $i, $q := $qs }} {{ $q }}{{- if not (last $i (len $qs)) }};{{- end }}{{- end }} |
+{{- end }}
+{{- end }}
+<!-- END GENERATED FROM aura schema -->

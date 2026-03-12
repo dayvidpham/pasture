@@ -45,6 +45,9 @@ const (
 
 	// CodegenSkills is used by S4 codegen tests (SKILL.md generation scenarios).
 	CodegenSkills FixtureName = "skills"
+
+	// CodegenSchema is used by S5 codegen tests (schema.xml generation scenarios).
+	CodegenSchema FixtureName = "schema"
 )
 
 // LoadFixtures reads testdata/<name>.yaml relative to the current working

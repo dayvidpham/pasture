@@ -1,0 +1,56 @@
+# Fixture for SLICE-4: SKILL.md generation tests.
+#
+# Each case declares expected sections that must appear in the generated output.
+# Tests use contains-expected-sections strategy (not exact string matching).
+
+role_cases:
+  - role: "worker"
+    must_contain:
+      - "worker"
+      - "Owned Phases"
+      - "p9-worker-slices"
+      - "Commands"
+      - "Constraints (Given/When/Then/Should Not)"
+      - "C-worker-gates"
+      - "C-agent-commit"
+      - "C-actionable-errors"
+      - "Handoffs"
+      - "Startup Sequence"
+      - "Inter-Agent Coordination"
+      - "Workflows"
+
+  - role: "supervisor"
+    must_contain:
+      - "supervisor"
+      - "Owned Phases"
+      - "Commands"
+      - "C-supervisor-no-impl"
+      - "C-vertical-slices"
+      - "Handoffs"
+      - "Startup Sequence"
+      - "Workflows"
+
+  - role: "reviewer"
+    must_contain:
+      - "reviewer"
+      - "Owned Phases"
+      - "Commands"
+      - "C-review-binary"
+      - "C-severity-eager"
+      - "Handoffs"
+      - "Review Axes"
+
+  - role: "architect"
+    must_contain:
+      - "architect"
+      - "Owned Phases"
+      - "Commands"
+      - "C-proposal-naming"
+      - "Handoffs"
+      - "Startup Sequence"
+
+sub_skill_cases:
+  - command_id: "cmd-sup-plan"
+    must_contain:
+      - "aura:supervisor:plan-tasks"
+      - "Decompose ratified plan"
