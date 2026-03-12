@@ -1,0 +1,85 @@
+# Fixtures for TestRunAgentSession_YAML in internal/temporal/run_agent_session_test.go.
+#
+# Each case specifies:
+#   id:          Unique test case identifier used for t.Run().
+#   epoch_id:    Typed EpochID constant name (resolved in test to a typed string).
+#   updates:     List of ACP session updates the fake agent will emit.
+#   want:        Expected RunAgentSessionResult fields.
+#
+# update fields (AgentUpdateInput):
+#   session_id:  ACP session identifier.
+#   role:        Message role ("user" | "assistant" | "tool").
+#   stop_reason: Non-empty on the final update for a session (ends the session).
+#   content:     List of content blocks.
+#
+# content block fields (ContentInput):
+#   type:    Block type ("text" | "tool_use" | "tool_result" | "thinking").
+#   content: Text payload (canonical field).
+#   text:    Text payload (wire-format alias; used when content is empty).
+
+tests:
+  - id: "happy-path-single-update"
+    epoch_id: "EpochHappyPath"
+    updates:
+      - session_id: "sess-happy-1"
+        role: "assistant"
+        stop_reason: "end_turn"
+        content:
+          - type: "text"
+            content: "Hello from the fake agent"
+    want:
+      entries_recorded: 1
+      session_id: "sess-happy-1"
+      stop_reason: "end_turn"
+
+  - id: "multi-update-single-session"
+    epoch_id: "EpochMultiUpdate"
+    updates:
+      - session_id: "sess-multi-1"
+        role: "user"
+        stop_reason: ""
+        content:
+          - type: "text"
+            content: "User message"
+      - session_id: "sess-multi-1"
+        role: "assistant"
+        stop_reason: ""
+        content:
+          - type: "text"
+            content: "Assistant response"
+      - session_id: "sess-multi-1"
+        role: "assistant"
+        stop_reason: "end_turn"
+        content:
+          - type: "text"
+            content: "Final message"
+    want:
+      entries_recorded: 3
+      session_id: "sess-multi-1"
+      stop_reason: "end_turn"
+
+  - id: "tool-use-session"
+    epoch_id: "EpochToolUse"
+    updates:
+      - session_id: "sess-tool-1"
+        role: "assistant"
+        stop_reason: ""
+        content:
+          - type: "tool_use"
+            content: ""
+        tool_calls:
+          - tool_call_id: "tc-1"
+            tool_kind: "bash"
+            tool_name: "Bash"
+            tool_input: "{\"command\": \"ls\"}"
+            tool_output: ""
+      - session_id: "sess-tool-1"
+        role: "assistant"
+        stop_reason: "end_turn"
+        content:
+          - type: "text"
+            content: "Done"
+    want:
+      entries_recorded: 3
+      session_id: "sess-tool-1"
+      stop_reason: "end_turn"
