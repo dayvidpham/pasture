@@ -1,0 +1,5 @@
+# Sample fixture used by the testutil self-tests.
+# Represents a minimal content-block scenario used by S2-S3 packages.
+name: test-content-block
+value: hello-fixture
+count: 42
