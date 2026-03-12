@@ -61,11 +61,24 @@ func init() {
 
 // resolveConfig resolves the full PastureMsgConfig for the current command.
 // CLI flags override environment variables which override the YAML config file.
-func resolveConfig(cmd *cobra.Command) config.PastureMsgConfig {
+//
+// An error is returned when a config file was explicitly specified but could
+// not be read (missing or malformed). When no explicit --config flag is set,
+// the default path is attempted and errors are silently ignored (missing
+// default config is not fatal).
+func resolveConfig(cmd *cobra.Command) (config.PastureMsgConfig, error) {
 	if flagConfigFile != "" {
-		return config.ResolvePastureMsgConfigFromFile(cmd, flagConfigFile)
+		cfg, err := config.ResolvePastureMsgConfigFromFile(cmd, flagConfigFile)
+		if err != nil {
+			return cfg, fmt.Errorf(
+				"pasture-msg: could not load config file %q"+
+					" — check the path is correct and the file is valid YAML: %w",
+				flagConfigFile, err,
+			)
+		}
+		return cfg, nil
 	}
-	return config.ResolvePastureMsgConfig(cmd)
+	return config.ResolvePastureMsgConfig(cmd), nil
 }
 
 // resolveFormat resolves the output format from the --format flag or config default.

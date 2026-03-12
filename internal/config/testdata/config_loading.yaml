@@ -1,0 +1,46 @@
+# Fixture for config_yaml_test.go (S5 — config error returns + YAML loading tests).
+#
+# Each entry is a named test case loaded by LoadFixtures(t, testutil.ConfigLoading, &fixtures).
+# Fields:
+#   name:             human-readable test case label (must match Go test name)
+#   yaml_content:     inline YAML written to a temp file (empty string → use use_missing_path)
+#   use_missing_path: when true, pass a non-existent file path instead of yaml_content
+#   want_error:       whether ResolvePasture*ConfigFromFile should return a non-nil error
+#   want_namespace:   expected Connection.Namespace after resolution (defaults apply when file missing)
+#   want_task_queue:  expected Connection.TaskQueue after resolution
+#   want_format:      expected PastureMsgConfig.DefaultFormat (only for pasture-msg cases)
+
+- name: malformed-yaml-returns-error
+  yaml_content: "{{{"
+  use_missing_path: false
+  want_error: true
+  want_namespace: "default"
+  want_task_queue: "pasture"
+
+- name: missing-file-returns-error
+  yaml_content: ""
+  use_missing_path: true
+  want_error: true
+  want_namespace: "default"
+  want_task_queue: "pasture"
+
+- name: pasture-msg-yaml-loading
+  yaml_content: |
+    connection:
+      namespace: yaml-ns
+      task_queue: yaml-tq
+      server_address: yaml-host:7233
+    default_format: json
+  use_missing_path: false
+  want_error: false
+  want_namespace: "yaml-ns"
+  want_task_queue: "yaml-tq"
+  want_format: "json"
+
+- name: pasture-msg-missing-file-defaults
+  yaml_content: ""
+  use_missing_path: true
+  want_error: true
+  want_namespace: "default"
+  want_task_queue: "pasture"
+  want_format: "text"

@@ -25,7 +25,10 @@ Sends a full_state query to the Temporal workflow and prints the result.
 Output includes current phase, role, vote history, available transitions,
 and active session count.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg := resolveConfig(cmd)
+		cfg, err := resolveConfig(cmd)
+		if err != nil {
+			return err
+		}
 		format := resolveFormat(cmd, cfg)
 
 		epochID, _ := cmd.Flags().GetString("epoch-id")

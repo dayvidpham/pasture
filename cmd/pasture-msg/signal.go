@@ -29,7 +29,10 @@ Votes: ACCEPT, REVISE (case-insensitive)
 The reviewer-id identifies the agent submitting the vote. It is optional but
 recommended for audit trail completeness.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg := resolveConfig(cmd)
+		cfg, err := resolveConfig(cmd)
+		if err != nil {
+			return err
+		}
 		format := resolveFormat(cmd, cfg)
 
 		epochID, _ := cmd.Flags().GetString("epoch-id")
@@ -67,7 +70,10 @@ var signalCompleteCmd = &cobra.Command{
 Use --output for successful completion or --error for failed completion.
 These flags are mutually exclusive.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg := resolveConfig(cmd)
+		cfg, err := resolveConfig(cmd)
+		if err != nil {
+			return err
+		}
 		format := resolveFormat(cmd, cfg)
 
 		epochID, _ := cmd.Flags().GetString("epoch-id")

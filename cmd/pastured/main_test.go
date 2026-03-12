@@ -91,7 +91,10 @@ func TestResolvePasturedConfigFromFile(t *testing.T) {
 		t.Fatalf("ParseFlags: %v", err)
 	}
 
-	cfg := config.ResolvePasturedConfigFromFile(root, "")
+	cfg, err := config.ResolvePasturedConfigFromFile(root, "")
+	if err != nil {
+		t.Fatalf("ResolvePasturedConfigFromFile: unexpected error: %v", err)
+	}
 	if cfg.Connection.Namespace != "default" {
 		t.Errorf("Namespace = %q, want %q", cfg.Connection.Namespace, "default")
 	}
@@ -115,7 +118,10 @@ func TestResolvePasturedConfig_EnvOverride(t *testing.T) {
 		t.Fatalf("ParseFlags: %v", err)
 	}
 
-	cfg := config.ResolvePasturedConfigFromFile(root, "")
+	cfg, err := config.ResolvePasturedConfigFromFile(root, "")
+	if err != nil {
+		t.Fatalf("ResolvePasturedConfigFromFile: unexpected error: %v", err)
+	}
 	if cfg.Connection.Namespace != "test-ns" {
 		t.Errorf("Namespace = %q, want %q", cfg.Connection.Namespace, "test-ns")
 	}
@@ -138,7 +144,10 @@ func TestResolvePasturedConfig_CLIOverridesEnv(t *testing.T) {
 		t.Fatalf("ParseFlags: %v", err)
 	}
 
-	cfg := config.ResolvePasturedConfigFromFile(root, "")
+	cfg, err := config.ResolvePasturedConfigFromFile(root, "")
+	if err != nil {
+		t.Fatalf("ResolvePasturedConfigFromFile: unexpected error: %v", err)
+	}
 	if cfg.Connection.Namespace != "cli-ns" {
 		t.Errorf("Namespace = %q, want %q (CLI should override env)", cfg.Connection.Namespace, "cli-ns")
 	}

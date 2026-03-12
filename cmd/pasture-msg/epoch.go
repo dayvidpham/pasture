@@ -25,7 +25,10 @@ The epoch-id becomes the Temporal workflow ID, so it must be unique within
 the namespace. If an epoch with this ID is already running, the command fails
 with exit code 3.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg := resolveConfig(cmd)
+		cfg, err := resolveConfig(cmd)
+		if err != nil {
+			return err
+		}
 		format := resolveFormat(cmd, cfg)
 
 		epochID, _ := cmd.Flags().GetString("epoch-id")
@@ -58,7 +61,10 @@ var epochCancelCmd = &cobra.Command{
 The workflow receives a cancellation request and can perform cleanup before
 stopping. For immediate (non-graceful) termination, use "epoch terminate".`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg := resolveConfig(cmd)
+		cfg, err := resolveConfig(cmd)
+		if err != nil {
+			return err
+		}
 		format := resolveFormat(cmd, cfg)
 
 		epochID, _ := cmd.Flags().GetString("epoch-id")
@@ -90,7 +96,10 @@ Unlike "cancel", terminate stops the workflow immediately without giving it a
 chance to run cleanup handlers. Provide a descriptive reason so the audit trail
 is informative.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg := resolveConfig(cmd)
+		cfg, err := resolveConfig(cmd)
+		if err != nil {
+			return err
+		}
 		format := resolveFormat(cmd, cfg)
 
 		epochID, _ := cmd.Flags().GetString("epoch-id")

@@ -33,7 +33,10 @@ The triggered-by field identifies who sent the signal (e.g. a role name or
 automated trigger). The condition field describes the protocol transition
 condition that was satisfied.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg := resolveConfig(cmd)
+		cfg, err := resolveConfig(cmd)
+		if err != nil {
+			return err
+		}
 		format := resolveFormat(cmd, cfg)
 
 		epochID, _ := cmd.Flags().GetString("epoch-id")

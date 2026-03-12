@@ -113,7 +113,15 @@ func run(cmd *cobra.Command, configFile string) error {
 	logger := slog.Default()
 
 	// ── 1. Config resolution ─────────────────────────────────────────────────
-	cfg := config.ResolvePasturedConfigFromFile(cmd, configFile)
+	cfg, cfgErr := config.ResolvePasturedConfigFromFile(cmd, configFile)
+	if cfgErr != nil {
+		return fmt.Errorf(
+			"pastured: configuration error"+
+				" — falling back to defaults is not safe for a daemon"+
+				": %w",
+			cfgErr,
+		)
+	}
 	logger.Info("pastured starting",
 		"version", version,
 		"namespace", cfg.Connection.Namespace,

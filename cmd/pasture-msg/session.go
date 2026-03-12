@@ -27,7 +27,10 @@ registrations are silently ignored by the workflow (idempotent).
 The model-harness identifies the runtime harness (e.g., claude-code).
 The model identifies the specific model version (e.g., claude-sonnet-4-6).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg := resolveConfig(cmd)
+		cfg, err := resolveConfig(cmd)
+		if err != nil {
+			return err
+		}
 		format := resolveFormat(cmd, cfg)
 
 		epochID, _ := cmd.Flags().GetString("epoch-id")
