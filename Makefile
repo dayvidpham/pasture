@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt clean release-local release-all
+.PHONY: build test lint fmt clean release-local release-all generate
 
 VERSION ?= dev
 
@@ -6,6 +6,13 @@ VERSION ?= dev
 BINS := bin/pastured bin/pasture-msg bin/pasture-release
 
 all: build
+
+# --------------------------------------------------------------------------
+# Generate
+# --------------------------------------------------------------------------
+
+generate:
+	go generate ./internal/codegen/...
 
 # --------------------------------------------------------------------------
 # Build

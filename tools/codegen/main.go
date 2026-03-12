@@ -1,0 +1,144 @@
+// Command codegen is the go:generate entry point for the pasture codegen system.
+//
+// It is invoked by:
+//
+//	go generate ./internal/codegen/...
+//
+// which runs:
+//
+//	go run ../../tools/codegen
+//
+// from the internal/codegen/ package directory.
+//
+// This binary wires all three generators:
+//  1. GenerateSchemaToFile — writes schema.xml
+//  2. GenerateSkill — writes skills/{role}/SKILL.md headers (marker-bounded)
+//  3. GenerateSubSkill — writes skills/{dir}/SKILL.md sub-skill headers
+//  4. GenerateAgent — writes agents/{role}.md definitions (fully generated)
+//
+// Exits non-zero if any generator returns an error.
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/dayvidpham/pasture/internal/codegen"
+	"github.com/dayvidpham/pasture/internal/types"
+)
+
+// moduleRoot walks upward from the current working directory until it finds go.mod,
+// then returns that directory as the module (repo) root.
+//
+// When go:generate runs from internal/codegen/, the cwd is that package directory.
+// Walking upward finds the repo root regardless of the exact invocation method.
+func moduleRoot() (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("codegen: os.Getwd failed: %w", err)
+	}
+	dir := wd
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf(
+				"codegen: could not find go.mod walking up from %q — "+
+					"ensure the tool is run from inside the pasture module",
+				wd,
+			)
+		}
+		dir = parent
+	}
+}
+
+// roleSkillDirs maps each role to its skill directory name (relative to skills/).
+// Mirrors Python _ROLE_SKILL_DIRS in gen_skills.py.
+var roleSkillDirs = map[types.RoleId]string{
+	types.RoleSupervisor: "supervisor",
+	types.RoleWorker:     "worker",
+	types.RoleReviewer:   "reviewer",
+	types.RoleArchitect:  "architect",
+}
+
+// commandSkillDirs maps each command ID to its skill directory name (relative to skills/).
+// Only commands whose FigureSpecs entries have CommandRefs pointing at them need
+// sub-skill header generation. Mirrors Python _COMMAND_SKILL_DIRS in gen_skills.py.
+var commandSkillDirs = map[string]string{
+	"cmd-sup-plan":  "supervisor-plan-tasks",
+	"cmd-sup-spawn": "supervisor-spawn-worker",
+}
+
+func main() {
+	root, err := moduleRoot()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+		os.Exit(1)
+	}
+
+	opts := codegen.DefaultOptions // Diff: true, Write: true
+
+	var errors []error
+
+	// ── 1. Generate schema.xml ────────────────────────────────────────────────
+	schemaPath := filepath.Join(root, "schema.xml")
+	if _, err := codegen.GenerateSchemaToFile(schemaPath, opts); err != nil {
+		errors = append(errors, fmt.Errorf("schema: %w", err))
+	} else {
+		fmt.Printf("Generated %s\n", schemaPath)
+	}
+
+	// ── 2. Generate SKILL.md headers for each role ────────────────────────────
+	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
+	for roleID, dirName := range roleSkillDirs {
+		skillPath := filepath.Join(root, "skills", dirName, "SKILL.md")
+		if _, err := os.Stat(skillPath); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Skipping %s (not found)\n", skillPath)
+			continue
+		}
+		if _, err := codegen.GenerateSkill(roleID, skillPath, figuresDir, opts); err != nil {
+			errors = append(errors, fmt.Errorf("skill %s: %w", dirName, err))
+		} else {
+			fmt.Printf("Generated %s\n", skillPath)
+		}
+	}
+
+	// ── 3. Generate sub-skill headers (commands with figures) ─────────────────
+	for commandID, dirName := range commandSkillDirs {
+		skillPath := filepath.Join(root, "skills", dirName, "SKILL.md")
+		if _, err := os.Stat(skillPath); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Skipping sub-skill %s (not found)\n", skillPath)
+			continue
+		}
+		if _, err := codegen.GenerateSubSkill(commandID, skillPath, figuresDir, opts); err != nil {
+			errors = append(errors, fmt.Errorf("sub-skill %s: %w", dirName, err))
+		} else {
+			fmt.Printf("Generated sub-skill %s\n", skillPath)
+		}
+	}
+
+	// ── 4. Generate agent definitions for roles with tools ────────────────────
+	for roleID, roleSpec := range codegen.RoleSpecs {
+		if len(roleSpec.Tools) == 0 {
+			continue
+		}
+		agentPath := filepath.Join(root, "agents", fmt.Sprintf("%s.md", roleID))
+		if _, err := codegen.GenerateAgent(roleID, agentPath, opts); err != nil {
+			errors = append(errors, fmt.Errorf("agent %s: %w", roleID, err))
+		} else {
+			fmt.Printf("Generated %s\n", agentPath)
+		}
+	}
+
+	// ── Report errors and exit ────────────────────────────────────────────────
+	if len(errors) > 0 {
+		fmt.Fprintf(os.Stderr, "\n%d error(s) encountered:\n", len(errors))
+		for _, e := range errors {
+			fmt.Fprintf(os.Stderr, "  ERROR: %v\n", e)
+		}
+		os.Exit(1)
+	}
+}
