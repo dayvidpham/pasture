@@ -26,7 +26,7 @@
           CGO_ENABLED = "0";
 
           # modernc.org/sqlite requires no native deps; pure Go build
-          nativeBuildInputs = [];
+          nativeBuildInputs = [ ];
 
           doCheck = true;
           checkPhase = ''
@@ -64,6 +64,7 @@
         devShell = pkgs.mkShell {
           name = "pasture-dev";
           packages = with pkgs; [
+            gnumake
             go_1_24
             gopls
             gotools
@@ -79,7 +80,8 @@
           '';
         };
 
-      in {
+      in
+      {
         packages = {
           inherit pastured;
           inherit pasture-msg;
