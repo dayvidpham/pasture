@@ -1,0 +1,58 @@
+# agents.yaml — YAML fixtures for TestGenerateAgent_* tests.
+#
+# Each entry specifies a role to generate and the sections that must appear
+# in the generated markdown output (contains-expected-sections strategy).
+
+agent_checks:
+  - role: supervisor
+    must_contain:
+      - "name: supervisor"
+      - "model: opus"
+      - "thinking: medium"
+      - "tools: Read, Glob, Grep, Bash, Skill, Agent, Task"
+      - "# Supervisor Agent"
+      - "You are a **Supervisor** agent in the Aura Protocol."
+      - "## Owned Phases"
+      - "| Phase | Name | Domain |"
+      - "## Constraints"
+      - "## Behaviors"
+      - "## Completion Checklist"
+      - "## Workflows"
+
+  - role: worker
+    must_contain:
+      - "name: worker"
+      - "model: sonnet"
+      - "tools: Read, Glob, Grep, Bash, Skill, Edit, Write"
+      - "# Worker Agent"
+      - "You are a **Worker** agent in the Aura Protocol."
+      - "C-worker-gates"
+      - "C-agent-commit"
+      - "## Owned Phases"
+      - "## Constraints"
+      - "## Behaviors"
+      - "## Completion Checklist"
+      - "## Workflows"
+
+  - role: reviewer
+    must_contain:
+      - "name: reviewer"
+      - "model: sonnet"
+      - "tools: Read, Glob, Grep, Bash, Skill"
+      - "# Reviewer Agent"
+      - "You are a **Reviewer** agent in the Aura Protocol."
+      - "## Owned Phases"
+      - "## Constraints"
+      - "## Behaviors"
+
+# roles_with_tools lists roles expected to produce non-empty output.
+roles_with_tools:
+  - epoch
+  - architect
+  - reviewer
+  - supervisor
+  - worker
+
+# roles_without_tools would list roles expected to produce empty output.
+# Currently all roles in RoleSpecs have tools, so this is empty.
+roles_without_tools: []

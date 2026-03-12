@@ -39,6 +39,12 @@ const (
 
 	// CodegenContext is used by S2 codegen tests (context injection scenarios).
 	CodegenContext FixtureName = "context"
+
+	// CodegenAgents is used by S6 codegen tests (agent definition generation scenarios).
+	CodegenAgents FixtureName = "agents"
+
+	// CodegenSkills is used by S4 codegen tests (SKILL.md generation scenarios).
+	CodegenSkills FixtureName = "skills"
 )
 
 // LoadFixtures reads testdata/<name>.yaml relative to the current working
