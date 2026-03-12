@@ -36,6 +36,9 @@ const (
 
 	// CodegenMarkers is used by S3 codegen tests (marker parsing scenarios).
 	CodegenMarkers FixtureName = "markers"
+
+	// CodegenContext is used by S2 codegen tests (context injection scenarios).
+	CodegenContext FixtureName = "context"
 )
 
 // LoadFixtures reads testdata/<name>.yaml relative to the current working

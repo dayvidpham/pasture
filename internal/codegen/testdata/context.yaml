@@ -1,0 +1,180 @@
+# Fixtures for context_test.go — context injection constraint set assertions.
+#
+# role_constraint_checks: verifies that GetRoleContext returns the expected
+#   constraint IDs for each named role.
+#
+# phase_constraint_checks: verifies that GetPhaseContext returns the expected
+#   labels and constraint IDs for each named phase.
+
+role_constraint_checks:
+  - role: supervisor
+    must_contain:
+      - C-supervisor-no-impl
+      - C-vertical-slices
+      - C-review-consensus
+      - C-audit-never-delete  # general
+      - C-audit-dep-chain     # general
+      - C-dep-direction        # general
+      - C-frontmatter-refs     # general
+      - C-actionable-errors    # general
+      - C-agent-commit
+      - C-followup-timing
+      - C-followup-lifecycle
+      - C-followup-leaf-adoption
+      - C-slice-leaf-tasks
+      - C-handoff-skill-invocation
+      - C-supervisor-explore-ephemeral
+      - C-integration-points
+      - C-slice-review-before-close
+      - C-max-review-cycles
+    must_not_contain:
+      - C-review-binary        # reviewer only
+      - C-proposal-naming      # architect only
+      - C-ure-verbatim         # architect only
+      - C-worker-gates         # worker only
+
+  - role: reviewer
+    must_contain:
+      - C-review-binary
+      - C-severity-eager
+      - C-review-consensus
+      - C-audit-never-delete   # general
+      - C-audit-dep-chain      # general
+      - C-dep-direction         # general
+      - C-frontmatter-refs      # general
+      - C-actionable-errors     # general
+      - C-severity-not-plan
+      - C-blocker-dual-parent
+      - C-review-naming
+    must_not_contain:
+      - C-supervisor-no-impl
+      - C-vertical-slices
+      - C-proposal-naming
+      - C-ure-verbatim
+      - C-worker-gates
+      - C-agent-commit
+
+  - role: worker
+    must_contain:
+      - C-worker-gates
+      - C-agent-commit
+      - C-audit-never-delete   # general
+      - C-audit-dep-chain      # general
+      - C-dep-direction         # general
+      - C-frontmatter-refs      # general
+      - C-actionable-errors     # general
+    must_not_contain:
+      - C-supervisor-no-impl
+      - C-vertical-slices
+      - C-review-binary
+      - C-proposal-naming
+      - C-ure-verbatim
+
+  - role: architect
+    must_contain:
+      - C-proposal-naming
+      - C-ure-verbatim
+      - C-handoff-skill-invocation
+      - C-agent-commit
+      - C-audit-never-delete   # general
+      - C-audit-dep-chain      # general
+      - C-dep-direction         # general
+      - C-frontmatter-refs      # general
+      - C-actionable-errors     # general
+    must_not_contain:
+      - C-supervisor-no-impl
+      - C-vertical-slices
+      - C-review-binary
+      - C-severity-eager
+      - C-worker-gates
+
+  - role: epoch
+    must_contain:
+      - C-review-consensus
+      - C-handoff-skill-invocation
+      - C-supervisor-explore-ephemeral
+      - C-integration-points
+      - C-slice-review-before-close
+      - C-max-review-cycles
+      - C-audit-never-delete   # general
+      - C-audit-dep-chain      # general
+      - C-dep-direction         # general
+      - C-frontmatter-refs      # general
+      - C-actionable-errors     # general
+    must_not_contain:
+      - C-worker-gates
+      - C-proposal-naming
+      - C-review-binary
+
+phase_constraint_checks:
+  - phase: code-review
+    must_contain:
+      - C-review-consensus
+      - C-severity-eager
+      - C-followup-timing
+      - C-followup-lifecycle
+      - C-followup-leaf-adoption
+      - C-review-binary
+      - C-blocker-dual-parent
+      - C-review-naming
+      - C-supervisor-explore-ephemeral
+      - C-slice-review-before-close
+      - C-max-review-cycles
+      - C-audit-never-delete   # general
+      - C-audit-dep-chain      # general
+      - C-dep-direction         # general
+      - C-frontmatter-refs      # general
+      - C-actionable-errors     # general
+    must_not_contain:
+      - C-proposal-naming
+      - C-ure-verbatim
+      - C-worker-gates
+      - C-severity-not-plan
+
+  - phase: worker-slices
+    must_contain:
+      - C-worker-gates
+      - C-agent-commit
+      - C-vertical-slices
+      - C-supervisor-no-impl
+      - C-slice-leaf-tasks
+      - C-supervisor-explore-ephemeral
+      - C-slice-review-before-close
+      - C-audit-never-delete   # general
+    must_not_contain:
+      - C-proposal-naming
+      - C-ure-verbatim
+      - C-review-binary
+      - C-severity-eager
+      - C-followup-timing
+
+  - phase: propose
+    must_contain:
+      - C-proposal-naming
+      - C-audit-never-delete   # general
+      - C-audit-dep-chain      # general
+      - C-dep-direction         # general
+      - C-frontmatter-refs      # general
+      - C-actionable-errors     # general
+    must_not_contain:
+      - C-review-binary
+      - C-severity-eager
+      - C-ure-verbatim
+      - C-worker-gates
+      - C-agent-commit
+
+  - phase: request
+    must_contain:
+      - C-audit-never-delete
+      - C-audit-dep-chain
+      - C-dep-direction
+      - C-frontmatter-refs
+      - C-actionable-errors
+    must_not_contain:
+      - C-proposal-naming
+      - C-review-binary
+      - C-severity-eager
+      - C-ure-verbatim
+      - C-worker-gates
+      - C-agent-commit
+      - C-review-consensus
