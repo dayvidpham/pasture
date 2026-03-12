@@ -84,6 +84,7 @@ func TestFixtureNameConstants(t *testing.T) {
 		CLISmoke,
 		RunAgentSession,
 		ConfigLoading,
+		CodegenSchema,
 	}
 
 	seen := make(map[FixtureName]struct{}, len(names))

@@ -1,0 +1,68 @@
+# Schema generation test fixtures for S5 (schema.xml generation).
+#
+# Each section drives assertions in schema_test.go.
+
+# constraint_checks: verify role-ref and phase-ref attributes on constraints.
+constraint_checks:
+  # C-supervisor-no-impl is a supervisor-only constraint.
+  - constraint_id: "C-supervisor-no-impl"
+    role_ref_must_contain: ["supervisor"]
+    role_ref_must_not_contain: ["worker", "architect"]
+    phase_ref_must_contain: []   # phase-ref should be non-empty (p8,p9 at minimum)
+    phase_ref_must_not_contain: []
+
+  # C-audit-never-delete is a general constraint → no role-ref in XML.
+  - constraint_id: "C-audit-never-delete"
+    is_general: true             # general constraints omit role-ref and phase-ref
+    role_ref_must_contain: []
+    role_ref_must_not_contain: []
+
+  # C-severity-eager is a reviewer-only constraint active in p10.
+  - constraint_id: "C-severity-eager"
+    role_ref_must_contain: ["reviewer"]
+    role_ref_must_not_contain: ["supervisor", "worker", "architect"]
+    phase_ref_must_contain: ["p10"]
+    # Note: p1 not checked here — "p10" would match "p1" as substring in naive check
+    phase_ref_must_not_contain: ["p3", "p4"]
+
+  # C-agent-commit is a multi-role constraint (architect, supervisor, worker).
+  - constraint_id: "C-agent-commit"
+    role_ref_must_contain: ["architect", "supervisor", "worker"]
+    role_ref_must_not_contain: ["reviewer"]
+
+# role_checks: verify roles are present and have correct phases.
+role_checks:
+  - role_id: "epoch"
+    must_have_owned_phases: ["p1", "p9", "p12"]
+
+  - role_id: "architect"
+    must_have_owned_phases: ["p1", "p3", "p7"]
+    must_not_have_owned_phases: ["p9", "p10", "p12"]
+
+  - role_id: "reviewer"
+    must_have_owned_phases: ["p4", "p10"]
+    must_not_have_owned_phases: ["p1", "p8", "p12"]
+
+  - role_id: "supervisor"
+    must_have_owned_phases: ["p8", "p9", "p12"]
+    must_not_have_owned_phases: ["p1", "p3"]
+
+  - role_id: "worker"
+    must_have_owned_phases: ["p9"]
+    must_not_have_owned_phases: ["p1", "p4", "p8"]
+
+# phase_checks: verify phases contain expected elements.
+phase_checks:
+  - phase_id: "p10"
+    must_contain_elements:
+      - "severity-tree"
+      - "followup-epic"
+
+  - phase_id: "p1"
+    must_contain_elements:
+      - "substeps"
+      - "transitions"
+
+  - phase_id: "p7"
+    must_contain_transition_to: "p8"
+    must_have_skill_invocation: true
