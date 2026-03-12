@@ -118,7 +118,7 @@ func resolvePasturedConfigWithFile(cmd *cobra.Command, configFile string) (Pastu
 	v.SetDefault("connection.namespace", "default")
 	v.SetDefault("connection.task_queue", "pasture")
 	v.SetDefault("connection.server_address", "localhost:7233")
-	v.SetDefault("audit_trail", string(types.BackendSqlite))
+	v.SetDefault("audit_trail", string(types.BackendMemory))
 	v.SetDefault("audit_db_path", "")
 
 	// --- Environment variables ---

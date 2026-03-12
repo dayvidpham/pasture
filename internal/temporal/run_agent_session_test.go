@@ -35,9 +35,6 @@ import (
 type TestEpochID string
 
 const (
-	EpochHappyPath  TestEpochID = "epoch-happy-path"
-	EpochMultiUpdate TestEpochID = "epoch-multi-update"
-	EpochToolUse    TestEpochID = "epoch-tool-use"
 	EpochCancelTest TestEpochID = "epoch-cancel-test"
 )
 
@@ -79,9 +76,9 @@ type RunAgentSessionWant struct {
 
 // RunAgentSessionCase holds one row from run_agent_session.yaml.
 type RunAgentSessionCase struct {
-	ID      string             `yaml:"id"`
-	EpochID string             `yaml:"epoch_id"`
-	Updates []AgentUpdateInput `yaml:"updates"`
+	ID      string              `yaml:"id"`
+	EpochID TestEpochID         `yaml:"epoch_id"`
+	Updates []AgentUpdateInput  `yaml:"updates"`
 	Want    RunAgentSessionWant `yaml:"want"`
 }
 

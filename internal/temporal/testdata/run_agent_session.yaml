@@ -19,7 +19,7 @@
 
 tests:
   - id: "happy-path-single-update"
-    epoch_id: "EpochHappyPath"
+    epoch_id: "epoch-happy-path"
     updates:
       - session_id: "sess-happy-1"
         role: "assistant"
@@ -33,7 +33,7 @@ tests:
       stop_reason: "end_turn"
 
   - id: "multi-update-single-session"
-    epoch_id: "EpochMultiUpdate"
+    epoch_id: "epoch-multi-update"
     updates:
       - session_id: "sess-multi-1"
         role: "user"
@@ -59,7 +59,7 @@ tests:
       stop_reason: "end_turn"
 
   - id: "tool-use-session"
-    epoch_id: "EpochToolUse"
+    epoch_id: "epoch-tool-use"
     updates:
       - session_id: "sess-tool-1"
         role: "assistant"

@@ -182,8 +182,8 @@ func TestResolvePasturedConfig_Defaults(t *testing.T) {
 	if cfg.Connection.Namespace != "default" {
 		t.Errorf("Namespace = %q, want %q", cfg.Connection.Namespace, "default")
 	}
-	if cfg.AuditTrail != types.BackendSqlite {
-		t.Errorf("AuditTrail = %q, want %q", cfg.AuditTrail, types.BackendSqlite)
+	if cfg.AuditTrail != types.BackendMemory {
+		t.Errorf("AuditTrail = %q, want %q", cfg.AuditTrail, types.BackendMemory)
 	}
 }
 

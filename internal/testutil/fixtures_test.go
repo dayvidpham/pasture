@@ -15,7 +15,6 @@ package testutil
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -52,9 +51,9 @@ func TestReadFixture_MissingFile(t *testing.T) {
 
 	require.Error(t, err,
 		"readFixture must return an error for a missing fixture file")
-	assert.True(t, strings.Contains(err.Error(), "nonexistent_fixture_xyzzy"),
+	assert.Contains(t, err.Error(), "nonexistent_fixture_xyzzy",
 		"error message should name the missing fixture; got: %s", err)
-	assert.True(t, strings.Contains(err.Error(), "testdata"),
+	assert.Contains(t, err.Error(), "testdata",
 		"error message should mention the testdata directory; got: %s", err)
 }
 
@@ -73,7 +72,7 @@ func TestReadFixture_MalformedYAML(t *testing.T) {
 
 	require.Error(t, err,
 		"readFixture must return an error for malformed YAML")
-	assert.True(t, strings.Contains(err.Error(), "malformed_fixture"),
+	assert.Contains(t, err.Error(), "malformed_fixture",
 		"error message should name the malformed fixture; got: %s", err)
 }
 

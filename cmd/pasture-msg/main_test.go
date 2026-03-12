@@ -15,7 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
+
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -53,8 +53,6 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "pasture-msg smoke: could not create temp dir: %v\n", err)
 		os.Exit(1)
 	}
-	defer os.RemoveAll(tmpDir)
-
 	binaryName := "pasture-msg"
 	if runtime.GOOS == "windows" {
 		binaryName += ".exe"
@@ -78,7 +76,9 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	os.Exit(m.Run())
+	code := m.Run()
+	os.RemoveAll(tmpDir) // explicit cleanup before os.Exit (defer would be skipped)
+	os.Exit(code)
 }
 
 // moduleRoot returns the absolute path to the pasture module root by walking
@@ -153,16 +153,14 @@ func TestPastureMsgCLISmoke(t *testing.T) {
 			)
 
 			if tc.WantStdoutContains != "" {
-				assert.True(t,
-					strings.Contains(stdout.String(), tc.WantStdoutContains),
+				assert.Contains(t, stdout.String(), tc.WantStdoutContains,
 					"stdout missing expected substring %q for %q\n  stdout: %s",
 					tc.WantStdoutContains, tc.Name, stdout.String(),
 				)
 			}
 
 			if tc.WantStderrContains != "" {
-				assert.True(t,
-					strings.Contains(stderr.String(), tc.WantStderrContains),
+				assert.Contains(t, stderr.String(), tc.WantStderrContains,
 					"stderr missing expected substring %q for %q\n  stderr: %s",
 					tc.WantStderrContains, tc.Name, stderr.String(),
 				)

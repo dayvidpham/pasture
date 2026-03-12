@@ -5,13 +5,12 @@
 // UAT requirement: tests must use exec.Command (subprocess), not the
 // in-process newRootCmd() exported by this package, so that they exercise
 // the real production binary path end-to-end.
-package main
+package main_test
 
 import (
 	"bytes"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/testutil"
@@ -117,16 +116,14 @@ func TestCLISmoke(t *testing.T) {
 				tc.ID, tc.Args, output)
 
 			if tc.WantStdoutContains != "" {
-				assert.True(t,
-					strings.Contains(output, tc.WantStdoutContains),
+				assert.Contains(t, output, tc.WantStdoutContains,
 					"case %q: expected stdout to contain %q\nfull output:\n%s",
 					tc.ID, tc.WantStdoutContains, output,
 				)
 			}
 
 			if tc.WantStderrContains != "" {
-				assert.True(t,
-					strings.Contains(output, tc.WantStderrContains),
+				assert.Contains(t, output, tc.WantStderrContains,
 					"case %q: expected stderr to contain %q\nfull output:\n%s",
 					tc.ID, tc.WantStderrContains, output,
 				)
