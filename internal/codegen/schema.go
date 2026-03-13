@@ -6,6 +6,11 @@
 // CDATA sections for <code> elements and fine-grained indentation
 // control matching the Python output.
 //
+// 15 of 17 section builders use encoding/xml struct marshalling (SLICE-B).
+// The remaining 2 (buildConstraints, buildProcedureSteps) use manual
+// fmt.Fprintf because they contain CDATA sections that encoding/xml
+// cannot produce.
+//
 // Public API:
 //
 //	GenerateSchema(w io.Writer) error
@@ -14,6 +19,7 @@ package codegen
 
 import (
 	"bytes"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"os"
@@ -25,6 +31,23 @@ import (
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
+
+// marshalSection marshals v using encoding/xml.MarshalIndent with the given
+// depth for base indentation (2 spaces per depth level), and writes the
+// result followed by a newline to buf.
+//
+// This is the shared helper for all 15 non-CDATA section builders.
+func marshalSection(buf *bytes.Buffer, depth int, v interface{}) {
+	prefix := indent(depth)
+	data, err := xml.MarshalIndent(v, prefix, "  ")
+	if err != nil {
+		// Panic here since this is a code generation error in static data —
+		// it indicates a programming bug, not a runtime condition.
+		panic(fmt.Sprintf("marshalSection: xml.MarshalIndent failed: %v", err))
+	}
+	buf.Write(data)
+	buf.WriteByte('\n')
+}
 
 // ─── Constraint role/phase ref helpers ────────────────────────────────────────
 
@@ -175,93 +198,91 @@ func comment(text string) string {
 // ─── Section builders ─────────────────────────────────────────────────────────
 
 func buildEnums(buf *bytes.Buffer, depth int) {
-	w := func(s string) { buf.WriteString(s + "\n") }
-	d := indent(depth)
-	d1 := indent(depth + 1)
-	d2 := indent(depth + 2)
-
-	w(d + "<enums>")
-
-	// DomainType
-	w(d1 + `<enum name="DomainType">`)
-	w(d2 + selfCloseTag("value", xmlAttr("id", "user"), xmlAttr("description", "User-facing interaction (requests, elicitation, UAT)")))
-	w(d2 + selfCloseTag("value", xmlAttr("id", "plan"), xmlAttr("description", "Planning and design (proposals, reviews, ratification)")))
-	w(d2 + selfCloseTag("value", xmlAttr("id", "impl"), xmlAttr("description", "Implementation (slices, code review, landing)")))
-	w(d1 + "</enum>")
-
-	// VoteType
-	w(d1 + `<enum name="VoteType">`)
-	w(d2 + selfCloseTag("value", xmlAttr("id", "ACCEPT"), xmlAttr("description", "All review criteria satisfied; no BLOCKER items")))
-	w(d2 + selfCloseTag("value", xmlAttr("id", "REVISE"), xmlAttr("description", "BLOCKER issues found; must provide actionable feedback")))
-	w(d1 + "</enum>")
-
-	// SeverityLevel
-	w(d1 + `<enum name="SeverityLevel">`)
-	w(d2 + selfCloseTag("value", xmlAttr("id", "BLOCKER"), xmlAttr("blocks", "true"), xmlAttr("label", "aura:severity:blocker"), xmlAttr("description", "Security, type errors, test failures, broken production code paths")))
-	w(d2 + selfCloseTag("value", xmlAttr("id", "IMPORTANT"), xmlAttr("blocks", "false"), xmlAttr("label", "aura:severity:important"), xmlAttr("description", "Performance, missing validation, architectural concerns")))
-	w(d2 + selfCloseTag("value", xmlAttr("id", "MINOR"), xmlAttr("blocks", "false"), xmlAttr("label", "aura:severity:minor"), xmlAttr("description", "Style, optional optimizations, naming improvements")))
-	w(d1 + "</enum>")
-
-	// ExecutionMode
-	w(d1 + `<enum name="ExecutionMode">`)
-	w(d2 + selfCloseTag("value", xmlAttr("id", "sequential"), xmlAttr("description", "Must complete before next step starts")))
-	w(d2 + selfCloseTag("value", xmlAttr("id", "parallel"), xmlAttr("description", "Can run concurrently with sibling steps in same parallel-group")))
-	w(d1 + "</enum>")
-
-	// ContentLevel
-	w(d1 + `<enum name="ContentLevel">`)
-	w(d2 + selfCloseTag("value", xmlAttr("id", "full-provenance"), xmlAttr("description", "Full inline context with all decisions and rationale")))
-	w(d2 + selfCloseTag("value", xmlAttr("id", "summary-with-ids"), xmlAttr("description", "Summary with Beads task ID references")))
-	w(d1 + "</enum>")
-
-	// Classification axes comment
-	w(d1 + comment(" Classification axes (s1_1-classify) "))
-
-	// ClassificationScope
-	w(d1 + `<enum name="ClassificationScope">`)
-	w(d2 + selfCloseTag("value", xmlAttr("id", "single-file"), xmlAttr("description", "Change is isolated to a single file")))
-	w(d2 + selfCloseTag("value", xmlAttr("id", "module"), xmlAttr("description", "Change spans a module or package")))
-	w(d2 + selfCloseTag("value", xmlAttr("id", "cross-cutting"), xmlAttr("description", "Change affects multiple modules or subsystems")))
-	w(d1 + "</enum>")
-
-	// ClassificationComplexity
-	w(d1 + `<enum name="ClassificationComplexity">`)
-	w(d2 + selfCloseTag("value", xmlAttr("id", "low"), xmlAttr("description", "Straightforward implementation, familiar patterns")))
-	w(d2 + selfCloseTag("value", xmlAttr("id", "medium"), xmlAttr("description", "Some design decisions needed, moderate scope")))
-	w(d2 + selfCloseTag("value", xmlAttr("id", "high"), xmlAttr("description", "Significant design work, unfamiliar territory, or many moving parts")))
-	w(d1 + "</enum>")
-
-	// ClassificationRisk
-	w(d1 + `<enum name="ClassificationRisk">`)
-	w(d2 + selfCloseTag("value", xmlAttr("id", "internal-only"), xmlAttr("description", "No external API changes, no breaking changes")))
-	w(d2 + selfCloseTag("value", xmlAttr("id", "new-api"), xmlAttr("description", "Introduces new public interfaces or APIs")))
-	w(d2 + selfCloseTag("value", xmlAttr("id", "breaking-changes"), xmlAttr("description", "Modifies existing behavior or public contracts")))
-	w(d1 + "</enum>")
-
-	// ClassificationNovelty
-	w(d1 + `<enum name="ClassificationNovelty">`)
-	w(d2 + selfCloseTag("value", xmlAttr("id", "familiar"), xmlAttr("description", "Well-known patterns, team has done this before")))
-	w(d2 + selfCloseTag("value", xmlAttr("id", "new-territory"), xmlAttr("description", "Unfamiliar domain, requires research and exploration")))
-	w(d1 + "</enum>")
-
-	// ResearchDepth
-	w(d1 + `<enum name="ResearchDepth">`)
-	w(d2 + selfCloseTag("value", xmlAttr("id", "quick-scan"), xmlAttr("description", "Familiar domain, low complexity — brief prior art check (local only)")))
-	w(d2 + selfCloseTag("value", xmlAttr("id", "standard-research"), xmlAttr("description", "Moderate complexity or some novelty — find existing patterns and standards (local + docs)")))
-	w(d2 + selfCloseTag("value", xmlAttr("id", "deep-dive"), xmlAttr("description", "High complexity, new territory, or high risk — thorough domain analysis (local + web)")))
-	w(d1 + "</enum>")
-
-	w(d + "</enums>")
+	section := EnumsSection{
+		Enums: []EnumType{
+			{
+				Name: "DomainType",
+				Values: []EnumValue{
+					{ID: "user", Description: "User-facing interaction (requests, elicitation, UAT)"},
+					{ID: "plan", Description: "Planning and design (proposals, reviews, ratification)"},
+					{ID: "impl", Description: "Implementation (slices, code review, landing)"},
+				},
+			},
+			{
+				Name: "VoteType",
+				Values: []EnumValue{
+					{ID: "ACCEPT", Description: "All review criteria satisfied; no BLOCKER items"},
+					{ID: "REVISE", Description: "BLOCKER issues found; must provide actionable feedback"},
+				},
+			},
+			{
+				Name: "SeverityLevel",
+				Values: []EnumValue{
+					{ID: "BLOCKER", Blocks: "true", Label: "aura:severity:blocker", Description: "Security, type errors, test failures, broken production code paths"},
+					{ID: "IMPORTANT", Blocks: "false", Label: "aura:severity:important", Description: "Performance, missing validation, architectural concerns"},
+					{ID: "MINOR", Blocks: "false", Label: "aura:severity:minor", Description: "Style, optional optimizations, naming improvements"},
+				},
+			},
+			{
+				Name: "ExecutionMode",
+				Values: []EnumValue{
+					{ID: "sequential", Description: "Must complete before next step starts"},
+					{ID: "parallel", Description: "Can run concurrently with sibling steps in same parallel-group"},
+				},
+			},
+			{
+				Name: "ContentLevel",
+				Values: []EnumValue{
+					{ID: "full-provenance", Description: "Full inline context with all decisions and rationale"},
+					{ID: "summary-with-ids", Description: "Summary with Beads task ID references"},
+				},
+			},
+			// Classification axes (s1_1-classify)
+			{
+				Name: "ClassificationScope",
+				Values: []EnumValue{
+					{ID: "single-file", Description: "Change is isolated to a single file"},
+					{ID: "module", Description: "Change spans a module or package"},
+					{ID: "cross-cutting", Description: "Change affects multiple modules or subsystems"},
+				},
+			},
+			{
+				Name: "ClassificationComplexity",
+				Values: []EnumValue{
+					{ID: "low", Description: "Straightforward implementation, familiar patterns"},
+					{ID: "medium", Description: "Some design decisions needed, moderate scope"},
+					{ID: "high", Description: "Significant design work, unfamiliar territory, or many moving parts"},
+				},
+			},
+			{
+				Name: "ClassificationRisk",
+				Values: []EnumValue{
+					{ID: "internal-only", Description: "No external API changes, no breaking changes"},
+					{ID: "new-api", Description: "Introduces new public interfaces or APIs"},
+					{ID: "breaking-changes", Description: "Modifies existing behavior or public contracts"},
+				},
+			},
+			{
+				Name: "ClassificationNovelty",
+				Values: []EnumValue{
+					{ID: "familiar", Description: "Well-known patterns, team has done this before"},
+					{ID: "new-territory", Description: "Unfamiliar domain, requires research and exploration"},
+				},
+			},
+			{
+				Name: "ResearchDepth",
+				Values: []EnumValue{
+					{ID: "quick-scan", Description: "Familiar domain, low complexity — brief prior art check (local only)"},
+					{ID: "standard-research", Description: "Moderate complexity or some novelty — find existing patterns and standards (local + docs)"},
+					{ID: "deep-dive", Description: "High complexity, new territory, or high risk — thorough domain analysis (local + web)"},
+				},
+			},
+		},
+	}
+	marshalSection(buf, depth, section)
 }
 
 func buildLabels(buf *bytes.Buffer, depth int) {
-	w := func(s string) { buf.WriteString(s + "\n") }
-	d := indent(depth)
-	d1 := indent(depth + 1)
-
-	w(d + "<labels>")
-	w(d1 + comment(" Phase labels (one per substep) "))
-
 	phaseLabelIDs := []string{
 		"L-p1s1_1", "L-p1s1_2", "L-p1s1_3",
 		"L-p2s2_1", "L-p2s2_2",
@@ -274,64 +295,54 @@ func buildLabels(buf *bytes.Buffer, depth int) {
 		"L-followup",
 	}
 
+	section := LabelsSection{}
+
+	// Phase labels (one per substep)
 	for _, lid := range phaseLabelIDs {
 		spec := LabelSpecs[lid]
-		attrs := []string{xmlAttr("id", spec.ID), xmlAttr("value", spec.Value)}
-		if spec.PhaseRef != "" {
-			attrs = append(attrs, xmlAttr("phase-ref", spec.PhaseRef))
-		}
-		if spec.SubstepRef != "" {
-			attrs = append(attrs, xmlAttr("substep-ref", spec.SubstepRef))
-		}
-		w(d1 + selfCloseTag("label", attrs...))
+		section.Labels = append(section.Labels, LabelElem{
+			ID:         spec.ID,
+			Value:      spec.Value,
+			PhaseRef:   spec.PhaseRef,
+			SubstepRef: spec.SubstepRef,
+		})
 	}
 
-	w(d1 + comment(" Special labels (not phase-scoped) "))
+	// Special labels (not phase-scoped)
 	for _, lid := range specialLabelIDs {
 		spec := LabelSpecs[lid]
-		attrs := []string{xmlAttr("id", spec.ID), xmlAttr("value", spec.Value), xmlAttr("special", "true")}
-		if spec.Description != "" {
-			attrs = append(attrs, xmlAttr("description", spec.Description))
-		}
-		if spec.SeverityRef != "" {
-			attrs = append(attrs, xmlAttr("severity-ref", spec.SeverityRef))
-		}
-		w(d1 + selfCloseTag("label", attrs...))
+		section.Labels = append(section.Labels, LabelElem{
+			ID:          spec.ID,
+			Value:       spec.Value,
+			Special:     "true",
+			Description: spec.Description,
+			SeverityRef: spec.SeverityRef,
+		})
 	}
 
-	w(d + "</labels>")
+	marshalSection(buf, depth, section)
 }
 
 func buildReviewAxes(buf *bytes.Buffer, depth int) {
-	w := func(s string) { buf.WriteString(s + "\n") }
-	d := indent(depth)
-	d1 := indent(depth + 1)
-	d2 := indent(depth + 2)
-	d3 := indent(depth + 3)
-
-	w(d + "<review-axes>")
-
 	axisOrder := []string{"axis-correctness", "axis-test_quality", "axis-elegance"}
+	section := ReviewAxesSection{}
 	for _, axisID := range axisOrder {
 		spec, ok := ReviewAxisSpecs[axisID]
 		if !ok {
 			continue
 		}
-		w(d1 + openTag("axis",
-			xmlAttr("id", spec.ID),
-			xmlAttr("letter", spec.Letter),
-			xmlAttr("name", spec.Name),
-			xmlAttr("short", spec.Short),
-		))
-		w(d2 + "<key-questions>")
-		for _, q := range spec.KeyQuestions {
-			w(d3 + openTag("q") + xmlEscapeText(q) + "</q>")
+		axis := ReviewAxisElem{
+			ID:     spec.ID,
+			Letter: spec.Letter,
+			Name:   spec.Name,
+			Short:  spec.Short,
 		}
-		w(d2 + "</key-questions>")
-		w(d1 + "</axis>")
+		if len(spec.KeyQuestions) > 0 {
+			axis.KeyQuestions = &KeyQuestionsElem{Questions: spec.KeyQuestions}
+		}
+		section.Axes = append(section.Axes, axis)
 	}
-
-	w(d + "</review-axes>")
+	marshalSection(buf, depth, section)
 }
 
 // phaseDescriptions maps phase ID strings to their description text.
@@ -392,14 +403,6 @@ func buildPhaseTaskTitles() map[string][]map[string]string {
 }
 
 func buildPhases(buf *bytes.Buffer, depth int) {
-	w := func(s string) { buf.WriteString(s + "\n") }
-	d := indent(depth)
-	d1 := indent(depth + 1)
-	d2 := indent(depth + 2)
-	d3 := indent(depth + 3)
-	d4 := indent(depth + 4)
-	d5 := indent(depth + 5)
-
 	phaseTaskTitles := buildPhaseTaskTitles()
 
 	orderedPhaseIDs := []protocol.PhaseId{
@@ -409,7 +412,8 @@ func buildPhases(buf *bytes.Buffer, depth int) {
 		protocol.PhaseCodeReview, protocol.PhaseImplUAT, protocol.PhaseLanding,
 	}
 
-	w(d + "<phases>")
+	layerNames := []string{"Types", "Tests", "Implementation"}
+	section := PhasesSection{}
 
 	for _, phaseID := range orderedPhaseIDs {
 		spec, ok := PhaseSpecs[phaseID]
@@ -418,187 +422,153 @@ func buildPhases(buf *bytes.Buffer, depth int) {
 		}
 		pid := phaseXMLID(spec.ID)
 
-		w(d1 + openTag("phase",
-			xmlAttr("id", pid),
-			xmlAttr("number", strconv.Itoa(spec.Number)),
-			xmlAttr("domain", string(spec.Domain)),
-			xmlAttr("name", spec.Name),
-		))
+		phase := PhaseElem{
+			ID:     pid,
+			Number: strconv.Itoa(spec.Number),
+			Domain: string(spec.Domain),
+			Name:   spec.Name,
+		}
 
 		// Description
 		if desc, ok := phaseDescriptions[pid]; ok {
-			w(d2 + "<description>" + xmlEscapeText(desc) + "</description>")
+			phase.Description = desc
 		}
 
 		// Substeps
 		substeps := SubstepDataMap[pid]
 		if len(substeps) > 0 {
-			w(d2 + "<substeps>")
+			subElem := &SubstepsElem{}
 			for _, sd := range substeps {
-				attrs := []string{
-					xmlAttr("id", sd.ID),
-					xmlAttr("type", sd.Type),
-					xmlAttr("execution", sd.Execution),
-					xmlAttr("order", strconv.Itoa(sd.Order)),
+				substep := SubstepElem{
+					ID:            sd.ID,
+					Type:          sd.Type,
+					Execution:     sd.Execution,
+					Order:         strconv.Itoa(sd.Order),
+					ParallelGroup: sd.ParallelGroup,
+					LabelRef:      sd.LabelRef,
+					Description:   sd.Description,
 				}
-				if sd.ParallelGroup != "" {
-					attrs = append(attrs, xmlAttr("parallel-group", sd.ParallelGroup))
-				}
-				attrs = append(attrs, xmlAttr("label-ref", sd.LabelRef))
-
-				w(d3 + openTag("substep", attrs...))
-				w(d4 + "<description>" + xmlEscapeText(sd.Description) + "</description>")
-
 				if sd.ExtraLabel != "" {
-					w(d4 + selfCloseTag("extra-label", xmlAttr("ref", sd.ExtraLabel)))
+					substep.ExtraLabel = &ExtraLabelElem{Ref: sd.ExtraLabel}
 				}
-
 				if sd.Instances != nil {
-					w(d4 + selfCloseTag("instances",
-						xmlAttr("count", sd.Instances.Count),
-						xmlAttr("per", sd.Instances.Per),
-					))
+					substep.Instances = &InstancesElem{
+						Count: sd.Instances.Count,
+						Per:   sd.Instances.Per,
+					}
 				}
-
 				if sd.StartupSequence {
-					w(d4 + "<startup-sequence>")
 					supSteps := ProcedureSteps[types.RoleSupervisor]
-					layerNames := []string{"Types", "Tests", "Implementation"}
+					startup := &StartupSequenceElem{}
 					for _, step := range supSteps {
-						stepAttrs := []string{
-							xmlAttr("order", strconv.Itoa(step.Order)),
-							xmlAttr("id", step.ID),
+						pstep := ProcedureStepElem{
+							Order:       strconv.Itoa(step.Order),
+							ID:          step.ID,
+							Instruction: step.Instruction,
+							Command:     step.Command,
+							Context:     step.Context,
 						}
 						if step.NextState != "" {
-							stepAttrs = append(stepAttrs, xmlAttr("next-state", phaseXMLID(step.NextState)))
+							pstep.NextState = phaseXMLID(step.NextState)
 						}
-						w(d5 + openTag("step", stepAttrs...))
-						w(indent(depth+6) + "<instruction>" + xmlEscapeText(step.Instruction) + "</instruction>")
-						if step.Command != "" {
-							w(indent(depth+6) + "<command>" + xmlEscapeText(step.Command) + "</command>")
-						}
-						if step.Context != "" {
-							w(indent(depth+6) + "<context>" + xmlEscapeText(step.Context) + "</context>")
-						}
-						_ = layerNames
-						w(d5 + "</step>")
+						startup.Steps = append(startup.Steps, pstep)
 					}
-					w(d4 + "</startup-sequence>")
+					substep.Startup = startup
 				}
-
-				w(d3 + "</substep>")
+				subElem.Substeps = append(subElem.Substeps, substep)
 			}
-			w(d2 + "</substeps>")
+			phase.Substeps = subElem
 		}
 
-		// Task-title(s)
+		// Task-title(s) from phase task titles
 		if tts, ok := phaseTaskTitles[pid]; ok {
 			for _, tt := range tts {
-				ttAttrs := []string{xmlAttr("pattern", tt["pattern"])}
-				if sub, ok := tt["substep"]; ok {
-					ttAttrs = append(ttAttrs, xmlAttr("substep", sub))
+				ttElem := TaskTitleElem{
+					Pattern: tt["pattern"],
+					Substep: tt["substep"],
 				}
 				if conv, ok := tt["convention"]; ok {
-					w(d2 + openTag("task-title", ttAttrs...))
-					w(d3 + "<convention>" + xmlEscapeText(conv) + "</convention>")
-					w(d2 + "</task-title>")
-				} else {
-					w(d2 + selfCloseTag("task-title", ttAttrs...))
+					ttElem.Convention = conv
 				}
+				phase.TaskTitles = append(phase.TaskTitles, ttElem)
 			}
 		}
 
 		// Special phase elements
 		switch pid {
 		case "p4":
-			w(d2 + selfCloseTag("severity-tree",
-				xmlAttr("enabled", "false"),
-				xmlAttr("reason", "Plan reviews use binary ACCEPT/REVISE only"),
-			))
+			phase.SeverityTree = &SeverityTreeElem{
+				Enabled: "false",
+				Reason:  "Plan reviews use binary ACCEPT/REVISE only",
+			}
 		case "p6":
-			w(d2 + selfCloseTag("same-actor-as",
-				xmlAttr("phase-ref", "p5"),
-				xmlAttr("note", "Architect performs p5, p6, p7 — no handoff between them"),
-			))
+			phase.SameActorAs = &SameActorAsElem{
+				PhaseRef: "p5",
+				Note:     "Architect performs p5, p6, p7 — no handoff between them",
+			}
 		case "p9":
-			w(d2 + "<tdd-layers>")
 			workerSteps := ProcedureSteps[types.RoleWorker]
-			layerNames := []string{"Types", "Tests", "Implementation"}
+			tdd := &TDDLayersElem{}
 			for _, step := range workerSteps {
 				name := ""
 				if step.Order >= 1 && step.Order <= len(layerNames) {
 					name = layerNames[step.Order-1]
 				}
-				w(d3 + selfCloseTag("layer",
-					xmlAttr("number", strconv.Itoa(step.Order)),
-					xmlAttr("name", name),
-					xmlAttr("description", step.Instruction),
-				))
+				tdd.Layers = append(tdd.Layers, TDDLayerElem{
+					Number:      strconv.Itoa(step.Order),
+					Name:        name,
+					Description: step.Instruction,
+				})
 			}
-			w(d2 + "</tdd-layers>")
+			phase.TDDLayers = tdd
 		case "p10":
-			w(d2 + openTag("severity-tree",
-				xmlAttr("enabled", "true"),
-				xmlAttr("creation", "eager"),
-			))
-			w(d3 + "<rule>Always create 3 severity groups per review round, even if empty.</rule>")
-			w(d3 + "<rule>Empty groups have no children and are closed immediately.</rule>")
-			w(d3 + selfCloseTag("group",
-				xmlAttr("severity-ref", "BLOCKER"),
-				xmlAttr("label-ref", "L-sev-blocker"),
-				xmlAttr("dual-parent", "true"),
-			))
-			w(d3 + selfCloseTag("group",
-				xmlAttr("severity-ref", "IMPORTANT"),
-				xmlAttr("label-ref", "L-sev-import"),
-			))
-			w(d3 + selfCloseTag("group",
-				xmlAttr("severity-ref", "MINOR"),
-				xmlAttr("label-ref", "L-sev-minor"),
-			))
-			w(d2 + "</severity-tree>")
-			w(d2 + selfCloseTag("followup-epic",
-				xmlAttr("label-ref", "L-followup"),
-				xmlAttr("trigger", "review-completion AND (IMPORTANT OR MINOR findings exist)"),
-				xmlAttr("gated-on-blocker", "false"),
-				xmlAttr("owner-role", "supervisor"),
-			))
+			phase.SeverityTree = &SeverityTreeElem{
+				Enabled:  "true",
+				Creation: "eager",
+				Rules: []string{
+					"Always create 3 severity groups per review round, even if empty.",
+					"Empty groups have no children and are closed immediately.",
+				},
+				Groups: []SevGroupElem{
+					{SeverityRef: "BLOCKER", LabelRef: "L-sev-blocker", DualParent: "true"},
+					{SeverityRef: "IMPORTANT", LabelRef: "L-sev-import"},
+					{SeverityRef: "MINOR", LabelRef: "L-sev-minor"},
+				},
+			}
+			phase.FollowupEpic = &FollowupEpicElem{
+				LabelRef:       "L-followup",
+				Trigger:        "review-completion AND (IMPORTANT OR MINOR findings exist)",
+				GatedOnBlocker: "false",
+				OwnerRole:      "supervisor",
+			}
 		}
 
 		// Transitions
-		transitions := spec.Transitions
-		if len(transitions) > 0 {
-			w(d2 + "<transitions>")
-			for _, t := range transitions {
-				tAttrs := []string{
-					xmlAttr("to-phase", phaseXMLID(t.ToPhase)),
-					xmlAttr("condition", t.Condition),
+		if len(spec.Transitions) > 0 {
+			trans := &TransitionsElem{}
+			for _, t := range spec.Transitions {
+				tElem := TransitionElem{
+					ToPhase:   phaseXMLID(t.ToPhase),
+					Condition: t.Condition,
+					Action:    t.Action,
 				}
-				if t.Action != "" {
-					tAttrs = append(tAttrs, xmlAttr("action", t.Action))
+				// p7→p8 transition needs skill-invocation
+				if pid == "p7" && t.ToPhase == protocol.PhaseImplPlan {
+					tElem.SkillInvocation = &SkillInvocationElem{
+						TargetRole: p7SkillInvocation["target-role"],
+						CommandRef: p7SkillInvocation["command-ref"],
+						Directive:  p7SkillInvocation["directive"],
+					}
 				}
-
-				// Check if this is the p7→p8 transition needing skill-invocation.
-				isP7toP8 := pid == "p7" && t.ToPhase == protocol.PhaseImplPlan
-				if isP7toP8 {
-					w(d3 + openTag("transition", tAttrs...))
-					w(d4 + selfCloseTag("skill-invocation",
-						xmlAttr("target-role", p7SkillInvocation["target-role"]),
-						xmlAttr("command-ref", p7SkillInvocation["command-ref"]),
-						xmlAttr("directive", p7SkillInvocation["directive"]),
-					))
-					w(d3 + "</transition>")
-				} else {
-					w(d3 + selfCloseTag("transition", tAttrs...))
-				}
+				trans.Transitions = append(trans.Transitions, tElem)
 			}
-			w(d2 + "</transitions>")
+			phase.Transitions = trans
 		}
 
-		w(d1 + "</phase>")
+		section.Phases = append(section.Phases, phase)
 	}
 
-	w(d + "</phases>")
+	marshalSection(buf, depth, section)
 }
 
 // roleDelegates is the static delegate data for epoch role.
@@ -640,18 +610,12 @@ var roleUsesAxes = map[string][]string{
 }
 
 func buildRoles(buf *bytes.Buffer, depth int) {
-	w := func(s string) { buf.WriteString(s + "\n") }
-	d := indent(depth)
-	d1 := indent(depth + 1)
-	d2 := indent(depth + 2)
-	d3 := indent(depth + 3)
-
 	roleOrder := []types.RoleId{
 		types.RoleEpoch, types.RoleArchitect, types.RoleReviewer,
 		types.RoleSupervisor, types.RoleWorker,
 	}
 
-	w(d + "<roles>")
+	section := RolesSection{}
 
 	for _, roleID := range roleOrder {
 		spec, ok := RoleSpecs[roleID]
@@ -660,110 +624,90 @@ func buildRoles(buf *bytes.Buffer, depth int) {
 		}
 		rid := string(spec.ID)
 
-		w(d1 + openTag("role",
-			xmlAttr("id", rid),
-			xmlAttr("name", spec.Name),
-			xmlAttr("description", spec.Description),
-		))
+		role := RoleElem{
+			ID:          rid,
+			Name:        spec.Name,
+			Description: spec.Description,
+		}
 
 		// owns-phases: sort by phase number
 		sorted := make([]protocol.PhaseId, len(spec.OwnedPhases))
 		copy(sorted, spec.OwnedPhases)
 		sort.Slice(sorted, func(i, j int) bool {
-			pi := phaseNumber(sorted[i])
-			pj := phaseNumber(sorted[j])
-			return pi < pj
+			return phaseNumber(sorted[i]) < phaseNumber(sorted[j])
 		})
-		w(d2 + "<owns-phases>")
+		ownedPhases := &OwnedPhasesElem{}
 		for _, phaseRef := range sorted {
-			w(d3 + selfCloseTag("phase-ref", xmlAttr("ref", phaseXMLID(phaseRef))))
+			ownedPhases.PhaseRefs = append(ownedPhases.PhaseRefs, PhaseRefElem{Ref: phaseXMLID(phaseRef)})
 		}
-		w(d2 + "</owns-phases>")
+		role.OwnedPhases = ownedPhases
 
 		// Delegates (epoch only)
 		if delegates, ok := roleDelegates[rid]; ok {
-			w(d2 + "<delegates>")
+			delElem := &DelegatesElem{}
 			for _, del := range delegates {
-				w(d3 + selfCloseTag("delegate",
-					xmlAttr("to-role", del["to-role"]),
-					xmlAttr("phases", del["phases"]),
-				))
+				delElem.Delegates = append(delElem.Delegates, DelegateElem{
+					ToRole: del["to-role"],
+					Phases: del["phases"],
+				})
 			}
-			w(d2 + "</delegates>")
+			role.Delegates = delElem
 		}
 
 		// Label awareness
 		if la, ok := roleLabelAwareness[rid]; ok {
-			w(d2 + "<label-awareness>")
-			w("\n      " + la + "\n    ")
-			w(d2 + "</label-awareness>")
+			role.LabelAwareness = la
 		}
 
 		// Uses axes (reviewer)
 		if axes, ok := roleUsesAxes[rid]; ok {
-			w(d2 + "<uses-axes>")
+			usesAxes := &UsesAxesElem{}
 			for _, axRef := range axes {
-				w(d3 + selfCloseTag("axis-ref", xmlAttr("ref", axRef)))
+				usesAxes.AxisRefs = append(usesAxes.AxisRefs, AxisRefElem{Ref: axRef})
 			}
-			w(d2 + "</uses-axes>")
+			role.UsesAxes = usesAxes
 		}
 
 		// Invariants (supervisor)
 		if invs, ok := roleInvariants[rid]; ok {
-			w(d2 + "<invariants>")
-			for _, inv := range invs {
-				w(d3 + "<invariant>" + xmlEscapeText(inv) + "</invariant>")
-			}
-			w(d2 + "</invariants>")
+			role.Invariants = &InvariantsElem{Invariants: invs}
 		}
 
 		// Tools, model, thinking
 		if len(spec.Tools) > 0 {
-			w(d2 + "<tools>" + xmlEscapeText(strings.Join(spec.Tools, ", ")) + "</tools>")
+			role.Tools = strings.Join(spec.Tools, ", ")
 		}
-		if spec.Model != "" {
-			w(d2 + "<model>" + xmlEscapeText(spec.Model) + "</model>")
-		}
-		if spec.Thinking != "" {
-			w(d2 + "<thinking>" + xmlEscapeText(spec.Thinking) + "</thinking>")
-		}
+		role.Model = spec.Model
+		role.Thinking = spec.Thinking
 
 		// Ownership model (worker)
 		if om, ok := roleOwnershipModel[rid]; ok {
-			w(d2 + "<ownership-model>")
-			w("\n      " + om + "\n    ")
-			w(d2 + "</ownership-model>")
+			role.OwnershipModel = om
 		}
 
-		// Introduction
-		if spec.Introduction != "" {
-			w(d2 + "<introduction>" + xmlEscapeText(spec.Introduction) + "</introduction>")
-		}
-
-		// Ownership narrative
-		if spec.OwnershipNarrative != "" {
-			w(d2 + "<ownership-narrative>" + xmlEscapeText(spec.OwnershipNarrative) + "</ownership-narrative>")
-		}
+		// Introduction and ownership narrative
+		role.Introduction = spec.Introduction
+		role.OwnershipNarrative = spec.OwnershipNarrative
 
 		// Behaviors
 		if len(spec.Behaviors) > 0 {
-			w(d2 + "<behaviors>")
+			behaviors := &BehaviorsElem{}
 			for _, b := range spec.Behaviors {
-				w(d3 + selfCloseTag("behavior",
-					xmlAttr("id", b.ID),
-					xmlAttr("given", b.Given),
-					xmlAttr("when", b.When),
-					xmlAttr("then", b.Then),
-					xmlAttr("should-not", b.ShouldNot),
-				))
+				behaviors.Behaviors = append(behaviors.Behaviors, BehaviorElem{
+					ID:        b.ID,
+					Given:     b.Given,
+					When:      b.When,
+					Then:      b.Then,
+					ShouldNot: b.ShouldNot,
+				})
 			}
-			w(d2 + "</behaviors>")
+			role.Behaviors = behaviors
 		}
 
-		w(d1 + "</role>")
+		section.Roles = append(section.Roles, role)
 	}
 
-	w(d + "</roles>")
+	marshalSection(buf, depth, section)
 }
 
 // commandOrder is the canonical ordering of commands in schema.xml.
@@ -809,13 +753,7 @@ var commandGroupComments = map[string]string{
 }
 
 func buildCommands(buf *bytes.Buffer, depth int) {
-	w := func(s string) { buf.WriteString(s + "\n") }
-	d := indent(depth)
-	d1 := indent(depth + 1)
-	d2 := indent(depth + 2)
-	d3 := indent(depth + 3)
-
-	w(d + "<commands>")
+	section := CommandsSection{}
 
 	for _, cid := range commandOrder {
 		spec, ok := CommandSpecs[cid]
@@ -823,48 +761,43 @@ func buildCommands(buf *bytes.Buffer, depth int) {
 			continue
 		}
 
-		if grpComment, ok := commandGroupComments[cid]; ok {
-			w(d1 + comment(grpComment))
+		cmd := CommandElem{
+			ID:          spec.ID,
+			Name:        spec.Name,
+			RoleRef:     string(spec.RoleRef),
+			Description: spec.Description,
 		}
-
-		cmdAttrs := []string{xmlAttr("id", spec.ID), xmlAttr("name", spec.Name)}
-		if spec.RoleRef != "" {
-			cmdAttrs = append(cmdAttrs, xmlAttr("role-ref", string(spec.RoleRef)))
-		}
-		cmdAttrs = append(cmdAttrs, xmlAttr("description", spec.Description))
-
-		w(d1 + openTag("command", cmdAttrs...))
 
 		// phases
 		if len(spec.Phases) > 0 {
-			w(d2 + "<phases>")
+			phases := &CommandPhasesElem{}
 			for _, phaseRef := range spec.Phases {
-				w(d3 + selfCloseTag("phase-ref", xmlAttr("ref", phaseXMLID(phaseRef))))
+				phases.PhaseRefs = append(phases.PhaseRefs, PhaseRefElem{Ref: phaseXMLID(phaseRef)})
 			}
-			w(d2 + "</phases>")
+			cmd.Phases = phases
 		}
 
 		// creates-labels
 		if len(spec.CreatesLabels) > 0 {
-			w(d2 + "<creates-labels>")
+			labels := &CreatesLabelsElem{}
 			for _, labelRef := range spec.CreatesLabels {
-				w(d3 + selfCloseTag("label-ref", xmlAttr("ref", labelRef)))
+				labels.LabelRefs = append(labels.LabelRefs, LabelRefElem{Ref: labelRef})
 			}
-			w(d2 + "</creates-labels>")
+			cmd.CreatesLabels = labels
 		}
 
 		// file
-		w(d2 + "<file>" + xmlEscapeText(spec.File) + "</file>")
+		cmd.File = spec.File
 
 		// cmd-explore special note
 		if cid == "cmd-explore" {
-			w(d2 + "<note>Used in Phase 1 (s1_3) by architect, and in Phase 8 by supervisor&#39;s ephemeral Explore subagents.</note>")
+			cmd.Note = "Used in Phase 1 (s1_3) by architect, and in Phase 8 by supervisor&#39;s ephemeral Explore subagents."
 		}
 
-		w(d1 + "</command>")
+		section.Commands = append(section.Commands, cmd)
 	}
 
-	w(d + "</commands>")
+	marshalSection(buf, depth, section)
 }
 
 // handoffFilePatterns maps handoff IDs to their file pattern strings.
@@ -906,14 +839,9 @@ var handoffTriggers = map[string]string{
 }
 
 func buildHandoffs(buf *bytes.Buffer, depth int) {
-	w := func(s string) { buf.WriteString(s + "\n") }
-	d := indent(depth)
-	d1 := indent(depth + 1)
-	d2 := indent(depth + 2)
-
-	w(d + openTag("handoffs",
-		xmlAttr("storage-pattern", ".git/.aura/handoff/{request-task-id}/{source}-to-{target}.md"),
-	))
+	section := HandoffsSection{
+		StoragePattern: ".git/.aura/handoff/{request-task-id}/{source}-to-{target}.md",
+	}
 
 	handoffOrderList := []string{"h1", "h2", "h3", "h4", "h5", "h6"}
 
@@ -923,65 +851,59 @@ func buildHandoffs(buf *bytes.Buffer, depth int) {
 			continue
 		}
 
-		hAttrs := []string{
-			xmlAttr("id", spec.ID),
-			xmlAttr("source-role", string(spec.SourceRole)),
-			xmlAttr("target-role", string(spec.TargetRole)),
-			xmlAttr("at-phase", phaseXMLID(spec.AtPhase)),
-			xmlAttr("content-level", spec.ContentLevel),
+		handoff := HandoffElem{
+			ID:           spec.ID,
+			SourceRole:   string(spec.SourceRole),
+			TargetRole:   string(spec.TargetRole),
+			AtPhase:      phaseXMLID(spec.AtPhase),
+			ContentLevel: spec.ContentLevel,
 		}
+
 		if fp, ok := handoffFilePatterns[hid]; ok {
-			hAttrs = append(hAttrs, xmlAttr("file-pattern", fp))
+			handoff.FilePattern = fp
 		}
 		if trigger, ok := handoffTriggers[hid]; ok {
 			if hid == "h6" {
-				hAttrs = append(hAttrs, xmlAttr("context", trigger))
+				handoff.Context = trigger
 			} else {
-				hAttrs = append(hAttrs, xmlAttr("trigger", trigger))
+				handoff.Trigger = trigger
 			}
 		}
 
-		w(d1 + openTag("handoff", hAttrs...))
-
 		// required-fields
-		w(d2 + "<required-fields>")
-		w("\n      " + strings.Join(spec.RequiredFields, ", ") + "\n    ")
-		w(d2 + "</required-fields>")
+		handoff.RequiredFields = &RequiredFieldsElem{
+			Text: strings.Join(spec.RequiredFields, ", "),
+		}
 
 		// skill-invocation
 		if si, ok := handoffSkillInvocations[hid]; ok {
-			siAttrs := []string{xmlAttr("directive", si["directive"])}
-			if note, ok := si["note"]; ok {
-				siAttrs = append(siAttrs, xmlAttr("note", note))
+			siElem := &SkillInvocationElem{
+				Directive: si["directive"],
 			}
-			w(d2 + selfCloseTag("skill-invocation", siAttrs...))
+			if note, ok := si["note"]; ok {
+				siElem.Note = note
+			}
+			handoff.SkillInvocation = siElem
 		}
 
 		// notes
 		if note, ok := handoffNotes[hid]; ok {
-			w(d2 + "<note>")
-			w("\n      " + note + "\n    ")
-			w(d2 + "</note>")
+			handoff.Note = &HandoffNoteElem{Text: note}
 		}
 
-		w(d1 + "</handoff>")
+		section.Handoffs = append(section.Handoffs, handoff)
 	}
 
 	// same-actor-transitions
-	w(d1 + openTag("same-actor-transitions", xmlAttr("note", "No handoff document needed")))
-	w(d2 + selfCloseTag("transition",
-		xmlAttr("from-phase", "p5"),
-		xmlAttr("to-phase", "p6"),
-		xmlAttr("actor", "architect"),
-	))
-	w(d2 + selfCloseTag("transition",
-		xmlAttr("from-phase", "p6"),
-		xmlAttr("to-phase", "p7"),
-		xmlAttr("actor", "architect"),
-	))
-	w(d1 + "</same-actor-transitions>")
+	section.SameActorTransitions = &SameActorTransitionsElem{
+		Note: "No handoff document needed",
+		Transitions: []SameActorTransitionElem{
+			{FromPhase: "p5", ToPhase: "p6", Actor: "architect"},
+			{FromPhase: "p6", ToPhase: "p7", Actor: "architect"},
+		},
+	}
 
-	w(d + "</handoffs>")
+	marshalSection(buf, depth, section)
 }
 
 // constraintOrder is the canonical ordering of constraints matching Python CONSTRAINT_SPECS insertion order.
@@ -1095,31 +1017,18 @@ func buildConstraints(buf *bytes.Buffer, depth int) {
 }
 
 func buildTaskTitles(buf *bytes.Buffer, depth int) {
-	w := func(s string) { buf.WriteString(s + "\n") }
-	d := indent(depth)
-	d1 := indent(depth + 1)
-
-	w(d + "<task-titles>")
-
+	section := TaskTitlesSection{}
 	for _, tc := range TitleConventions {
-		attrs := []string{
-			xmlAttr("pattern", tc.Pattern),
-			xmlAttr("label-ref", tc.LabelRef),
-			xmlAttr("created-by", tc.CreatedBy),
-		}
-		if tc.PhaseRef != "" {
-			attrs = append(attrs, xmlAttr("phase-ref", tc.PhaseRef))
-		}
-		if tc.ExtraLabelRef != "" {
-			attrs = append(attrs, xmlAttr("extra-label-ref", tc.ExtraLabelRef))
-		}
-		if tc.Note != "" {
-			attrs = append(attrs, xmlAttr("note", tc.Note))
-		}
-		w(d1 + selfCloseTag("title-convention", attrs...))
+		section.Conventions = append(section.Conventions, TitleConventionElem{
+			Pattern:       tc.Pattern,
+			LabelRef:      tc.LabelRef,
+			CreatedBy:     tc.CreatedBy,
+			PhaseRef:      tc.PhaseRef,
+			ExtraLabelRef: tc.ExtraLabelRef,
+			Note:          tc.Note,
+		})
 	}
-
-	w(d + "</task-titles>")
+	marshalSection(buf, depth, section)
 }
 
 func buildDocuments(buf *bytes.Buffer, depth int) {
@@ -1272,190 +1181,90 @@ func buildDocuments(buf *bytes.Buffer, depth int) {
 		},
 	}
 
-	w := func(s string) { buf.WriteString(s + "\n") }
-	d := indent(depth)
-	d1 := indent(depth + 1)
-	d2 := indent(depth + 2)
-	d3 := indent(depth + 3)
-
-	w(d + "<documents>")
-
 	allDocs := append(docs, rootDocs...)
-
-	// Insert the root-docs comment before the root docs start.
-	rootDocsStart := len(docs)
-
-	for i, doc := range allDocs {
-		if i == rootDocsStart {
-			w(d1 + comment(" Root-level docs (project-specific, not protocol-reusable) "))
+	section := DocumentsSection{}
+	for _, doc := range allDocs {
+		docElem := DocumentElem{
+			ID:      doc.id,
+			Path:    doc.path,
+			Purpose: doc.purpose,
 		}
-		w(d1 + openTag("document",
-			xmlAttr("id", doc.id),
-			xmlAttr("path", doc.path),
-			xmlAttr("purpose", doc.purpose),
-		))
-		w(d2 + "<covers>")
+		covers := &CoversElem{}
 		for _, cover := range doc.covers {
-			attrs := []string{
-				xmlAttr("type", cover["type"]),
-				xmlAttr("depth", cover["depth"]),
+			entity := CoverEntityElem{
+				Type:  cover["type"],
+				Depth: cover["depth"],
 			}
 			if refs, ok := cover["refs"]; ok {
-				attrs = append(attrs, xmlAttr("refs", refs))
+				entity.Refs = refs
 			}
 			if note, ok := cover["note"]; ok {
-				attrs = append(attrs, xmlAttr("note", note))
+				entity.Note = note
 			}
-			w(d3 + selfCloseTag("entity", attrs...))
+			covers.Entities = append(covers.Entities, entity)
 		}
-		w(d2 + "</covers>")
-		w(d1 + "</document>")
+		docElem.Covers = covers
+		section.Documents = append(section.Documents, docElem)
 	}
-
-	w(d + "</documents>")
+	marshalSection(buf, depth, section)
 }
 
 func buildDependencyModel(buf *bytes.Buffer, depth int) {
-	w := func(s string) { buf.WriteString(s + "\n") }
-	d := indent(depth)
-	d1 := indent(depth + 1)
-	d2 := indent(depth + 2)
-
-	w(d + "<dependency-model>")
-	w(d1 + "<rule>")
-	w("    Parent (stays open) is blocked-by child (must finish first).")
-	w("    Work flows bottom-up; closure flows top-down.")
-	w("  ")
-	w(d1 + "</rule>")
-	w(d1 + "<canonical-chain>")
-	w("    REQUEST → blocked-by ELICIT → blocked-by PROPOSAL")
-	w("      → blocked-by IMPL_PLAN → blocked-by SLICE-N → blocked-by leaf tasks")
-	w("  ")
-	w(d1 + "</canonical-chain>")
-	w(d1 + "<command>bd dep add {parent-id} --blocked-by {child-id}</command>")
-	w(d1 + "<anti-pattern>bd dep add {child-id} --blocked-by {parent-id}</anti-pattern>")
-	w(d1 + openTag("reference-links", xmlAttr("note", "URD and other reference docs use frontmatter, not blocking deps")))
-	w(d2 + "<pattern>")
-	w("      description frontmatter:")
-	w("        references:")
-	w("          urd: {urd-task-id}")
-	w("          request: {request-task-id}")
-	w("    ")
-	w(d2 + "</pattern>")
-	w(d1 + "</reference-links>")
-	w(d + "</dependency-model>")
+	section := DependencyModelSection{
+		Rule: "Parent (stays open) is blocked-by child (must finish first). Work flows bottom-up; closure flows top-down.",
+		CanonicalChain: "REQUEST \u2192 blocked-by ELICIT \u2192 blocked-by PROPOSAL \u2192 blocked-by IMPL_PLAN \u2192 blocked-by SLICE-N \u2192 blocked-by leaf tasks",
+		Command:     "bd dep add {parent-id} --blocked-by {child-id}",
+		AntiPattern: "bd dep add {child-id} --blocked-by {parent-id}",
+		ReferenceLinks: &ReferenceLinksElem{
+			Note:    "URD and other reference docs use frontmatter, not blocking deps",
+			Pattern: "description frontmatter:\n  references:\n    urd: {urd-task-id}\n    request: {request-task-id}",
+		},
+	}
+	marshalSection(buf, depth, section)
 }
 
 func buildFollowupLifecycle(buf *bytes.Buffer, depth int) {
-	w := func(s string) { buf.WriteString(s + "\n") }
-	d := indent(depth)
-	d1 := indent(depth + 1)
-	d2 := indent(depth + 2)
-	d3 := indent(depth + 3)
-
-	w(d + "<followup-lifecycle>")
-	w(d1 + "<trigger>Code review completion AND (IMPORTANT OR MINOR findings exist)</trigger>")
-	w(d1 + "<owner-role>supervisor</owner-role>")
-	w(d1 + "<gated-on-blocker>false</gated-on-blocker>")
-
-	w(d1 + openTag("dependency-chain", xmlAttr("note", "Same protocol phases but with FOLLOWUP_ prefix")))
-	w(d2 + comment(
-		"\n      FOLLOWUP epic (aura:epic-followup)\n" +
-			"        ├── relates_to: original URD\n" +
-			"        ├── relates_to: original REVIEW-A/B/C tasks\n" +
-			"        └── blocked-by: FOLLOWUP_URE\n" +
-			"              └── blocked-by: FOLLOWUP_URD\n" +
-			"                    └── blocked-by: FOLLOWUP_PROPOSAL-1\n" +
-			"                          └── blocked-by: FOLLOWUP_IMPL_PLAN\n" +
-			"                                ├── blocked-by: FOLLOWUP_SLICE-1\n" +
-			"                                │     ├── blocked-by: important-leaf-task-...\n" +
-			"                                │     └── blocked-by: minor-leaf-task-...\n" +
-			"                                └── blocked-by: FOLLOWUP_SLICE-2\n" +
-			"                                      └── blocked-by: ...\n    ",
-	))
-
-	followupSteps := []map[string]string{
-		{"task-title": "FOLLOWUP: {description}", "phase-ref": "p10", "description": "Epic created by supervisor. References original URD and review tasks."},
-		{"task-title": "FOLLOWUP_URE: {description}", "phase-ref": "p2", "description": "Scoping URE with user to determine which findings to address."},
-		{"task-title": "FOLLOWUP_URD: {description}", "phase-ref": "p2", "description": "Requirements doc for follow-up scope. References original URD."},
-		{"task-title": "FOLLOWUP_PROPOSAL-{N}: {description}", "phase-ref": "p3", "description": "Proposal accounting for original URD + FOLLOWUP_URD + outstanding findings."},
-		{"task-title": "FOLLOWUP_IMPL_PLAN: {description}", "phase-ref": "p8", "description": "Supervisor decomposes follow-up into slices."},
-		{"task-title": "FOLLOWUP_SLICE-{N}: {description}", "phase-ref": "p9", "description": "Each slice adopts original IMPORTANT/MINOR leaf tasks as children."},
+	section := FollowupLifecycleSection{
+		Trigger:        "Code review completion AND (IMPORTANT OR MINOR findings exist)",
+		OwnerRole:      "supervisor",
+		GatedOnBlocker: "false",
+		DependencyChain: &DepChainElem{
+			Note: "Same protocol phases but with FOLLOWUP_ prefix",
+			Steps: []DepChainStepElem{
+				{TaskTitle: "FOLLOWUP: {description}", PhaseRef: "p10", Description: "Epic created by supervisor. References original URD and review tasks."},
+				{TaskTitle: "FOLLOWUP_URE: {description}", PhaseRef: "p2", Description: "Scoping URE with user to determine which findings to address."},
+				{TaskTitle: "FOLLOWUP_URD: {description}", PhaseRef: "p2", Description: "Requirements doc for follow-up scope. References original URD."},
+				{TaskTitle: "FOLLOWUP_PROPOSAL-{N}: {description}", PhaseRef: "p3", Description: "Proposal accounting for original URD + FOLLOWUP_URD + outstanding findings."},
+				{TaskTitle: "FOLLOWUP_IMPL_PLAN: {description}", PhaseRef: "p8", Description: "Supervisor decomposes follow-up into slices."},
+				{TaskTitle: "FOLLOWUP_SLICE-{N}: {description}", PhaseRef: "p9", Description: "Each slice adopts original IMPORTANT/MINOR leaf tasks as children."},
+			},
+		},
+		LeafTaskAdoption: &LeafTaskAdoptElem{
+			Rule:    "When supervisor creates FOLLOWUP_SLICE-N, the IMPORTANT/MINOR leaf tasks from the original review gain a second parent: the follow-up slice. This is the same dual-parent pattern as BLOCKER findings.",
+			Command: "bd dep add {followup-slice-id} --blocked-by {important-leaf-task-id}\nbd dep add {followup-slice-id} --blocked-by {minor-leaf-task-id}",
+			Note:    "Leaf tasks retain their original parent (the severity group from the original review) AND gain the follow-up slice as a second parent. Both must close for the leaf to be fully resolved.",
+		},
+		References: &FollowupRefsElem{
+			Refs: []FollowupRefElem{
+				{Type: "relates_to", Target: "original URD", Note: "Follow-up epic references original URD via frontmatter"},
+				{Type: "relates_to", Target: "original REVIEW tasks", Note: "Follow-up epic references review tasks via frontmatter"},
+			},
+		},
+		HandoffChain: &HandoffChainElem{
+			Note: "How handoffs flow through the follow-up lifecycle",
+			Transitions: []HandoffChainTransElem{
+				{Order: "1", HandoffRef: "h5", Description: "Reviewer \u2192 Followup: Bridge from original review to follow-up epic. Created by supervisor when IMPORTANT/MINOR findings exist. This handoff STARTS the follow-up lifecycle."},
+				{Order: "2", HandoffRef: "none", SameActor: "true", Description: "Supervisor creates FOLLOWUP_URE (same actor \u2014 supervisor owns follow-up epic and initiates scoping)"},
+				{Order: "3", HandoffRef: "none", SameActor: "true", Description: "Supervisor creates FOLLOWUP_URD (same actor within Phase 2 \u2014 supervisor synthesizes follow-up requirements)"},
+				{Order: "4", HandoffRef: "h6", Description: "Supervisor \u2192 Architect: Hands off completed FOLLOWUP_URE + FOLLOWUP_URD to architect for FOLLOWUP_PROPOSAL creation. Architect receives scoped findings and requirements."},
+				{Order: "5", HandoffRef: "h1", Description: "Architect \u2192 Supervisor: After FOLLOWUP_PROPOSAL is ratified, architect hands off to supervisor for FOLLOWUP_IMPL_PLAN. Handoff doc references original URD, FOLLOWUP_URD, and outstanding findings."},
+				{Order: "6", HandoffRef: "h2", Description: "Supervisor \u2192 Worker: FOLLOWUP_SLICE-N assignment. Worker receives both the follow-up slice spec AND the original leaf task IDs they must resolve."},
+				{Order: "7", HandoffRef: "h3", Description: "Supervisor \u2192 Reviewer: Code review of follow-up slices. Reviewer receives follow-up context + original findings being addressed."},
+				{Order: "8", HandoffRef: "h4", Description: "Worker \u2192 Reviewer: Worker completes follow-up slice. Handoff includes which original leaf tasks were resolved."},
+			},
+		},
 	}
-	for _, step := range followupSteps {
-		w(d2 + selfCloseTag("step",
-			xmlAttr("task-title", step["task-title"]),
-			xmlAttr("phase-ref", step["phase-ref"]),
-			xmlAttr("description", step["description"]),
-		))
-	}
-	w(d1 + "</dependency-chain>")
-
-	w(d1 + "<leaf-task-adoption>")
-	w(d2 + "<rule>")
-	w("      When supervisor creates FOLLOWUP_SLICE-N, the IMPORTANT/MINOR leaf tasks")
-	w("      from the original review gain a second parent: the follow-up slice.")
-	w("      This is the same dual-parent pattern as BLOCKER findings.")
-	w("    ")
-	w(d2 + "</rule>")
-	w(d2 + "<command>")
-	w("      bd dep add {followup-slice-id} --blocked-by {important-leaf-task-id}")
-	w("      bd dep add {followup-slice-id} --blocked-by {minor-leaf-task-id}")
-	w("    ")
-	w(d2 + "</command>")
-	w(d2 + "<note>")
-	w("      Leaf tasks retain their original parent (the severity group from the original review)")
-	w("      AND gain the follow-up slice as a second parent. Both must close for the leaf to be")
-	w("      fully resolved.")
-	w("    ")
-	w(d2 + "</note>")
-	w(d1 + "</leaf-task-adoption>")
-
-	w(d1 + "<references>")
-	w(d2 + selfCloseTag("ref",
-		xmlAttr("type", "relates_to"),
-		xmlAttr("target", "original URD"),
-		xmlAttr("note", "Follow-up epic references original URD via frontmatter"),
-	))
-	w(d2 + selfCloseTag("ref",
-		xmlAttr("type", "relates_to"),
-		xmlAttr("target", "original REVIEW tasks"),
-		xmlAttr("note", "Follow-up epic references review tasks via frontmatter"),
-	))
-	w(d1 + "</references>")
-
-	w(d1 + openTag("handoff-chain", xmlAttr("note", "How handoffs flow through the follow-up lifecycle")))
-	w(d2 + comment(
-		"\n      The follow-up lifecycle uses 6 handoff transitions (h1-h6), where h6 is unique to the follow-up lifecycle\n" +
-			"      but scoped to the follow-up epic. The storage path changes to use the\n" +
-			"      follow-up epic ID instead of the original request ID.\n\n" +
-			"      Storage: .git/.aura/handoff/{followup-epic-id}/{source}-to-{target}.md\n    ",
-	))
-
-	handoffChainSteps := []map[string]string{
-		{"order": "1", "handoff-ref": "h5", "description": "Reviewer → Followup: Bridge from original review to follow-up epic. Created by supervisor when IMPORTANT/MINOR findings exist. This handoff STARTS the follow-up lifecycle."},
-		{"order": "2", "handoff-ref": "none", "same-actor": "true", "description": "Supervisor creates FOLLOWUP_URE (same actor — supervisor owns follow-up epic and initiates scoping)"},
-		{"order": "3", "handoff-ref": "none", "same-actor": "true", "description": "Supervisor creates FOLLOWUP_URD (same actor within Phase 2 — supervisor synthesizes follow-up requirements)"},
-		{"order": "4", "handoff-ref": "h6", "description": "Supervisor → Architect: Hands off completed FOLLOWUP_URE + FOLLOWUP_URD to architect for FOLLOWUP_PROPOSAL creation. Architect receives scoped findings and requirements."},
-		{"order": "5", "handoff-ref": "h1", "description": "Architect → Supervisor: After FOLLOWUP_PROPOSAL is ratified, architect hands off to supervisor for FOLLOWUP_IMPL_PLAN. Handoff doc references original URD, FOLLOWUP_URD, and outstanding findings."},
-		{"order": "6", "handoff-ref": "h2", "description": "Supervisor → Worker: FOLLOWUP_SLICE-N assignment. Worker receives both the follow-up slice spec AND the original leaf task IDs they must resolve."},
-		{"order": "7", "handoff-ref": "h3", "description": "Supervisor → Reviewer: Code review of follow-up slices. Reviewer receives follow-up context + original findings being addressed."},
-		{"order": "8", "handoff-ref": "h4", "description": "Worker → Reviewer: Worker completes follow-up slice. Handoff includes which original leaf tasks were resolved."},
-	}
-	for _, step := range handoffChainSteps {
-		attrs := []string{
-			xmlAttr("order", step["order"]),
-			xmlAttr("handoff-ref", step["handoff-ref"]),
-			xmlAttr("description", step["description"]),
-		}
-		if sa, ok := step["same-actor"]; ok {
-			attrs = append(attrs, xmlAttr("same-actor", sa))
-		}
-		w(d3 + selfCloseTag("transition", attrs...))
-	}
-	w(d1 + "</handoff-chain>")
-
-	w(d + "</followup-lifecycle>")
+	marshalSection(buf, depth, section)
 }
 
 func buildProcedureSteps(buf *bytes.Buffer, depth int) {
@@ -1518,13 +1327,6 @@ func buildProcedureSteps(buf *bytes.Buffer, depth int) {
 }
 
 func buildChecklists(buf *bytes.Buffer, depth int) {
-	w := func(s string) { buf.WriteString(s + "\n") }
-	d := indent(depth)
-	d1 := indent(depth + 1)
-	d2 := indent(depth + 2)
-
-	w(d + "<checklists>")
-
 	// Stable ordering: sort by key
 	keys := make([]string, 0, len(ChecklistSpecs))
 	for k := range ChecklistSpecs {
@@ -1532,36 +1334,31 @@ func buildChecklists(buf *bytes.Buffer, depth int) {
 	}
 	sort.Strings(keys)
 
+	section := ChecklistsSection{}
 	for _, key := range keys {
 		cl := ChecklistSpecs[key]
-		w(d1 + openTag("checklist",
-			xmlAttr("id", key),
-			xmlAttr("role-ref", string(cl.RoleRef)),
-			xmlAttr("gate", cl.Gate),
-		))
+		checklistElem := ChecklistElem{
+			ID:      key,
+			RoleRef: string(cl.RoleRef),
+			Gate:    cl.Gate,
+		}
 		for _, item := range cl.Items {
 			required := "false"
 			if item.Required {
 				required = "true"
 			}
-			w(d2 + openTag("item",
-				xmlAttr("id", item.ID),
-				xmlAttr("required", required),
-			) + xmlEscapeText(item.Text) + "</item>")
+			checklistElem.Items = append(checklistElem.Items, ChecklistItemElem{
+				ID:       item.ID,
+				Required: required,
+				Text:     item.Text,
+			})
 		}
-		w(d1 + "</checklist>")
+		section.Checklists = append(section.Checklists, checklistElem)
 	}
-
-	w(d + "</checklists>")
+	marshalSection(buf, depth, section)
 }
 
 func buildCoordinationCommands(buf *bytes.Buffer, depth int) {
-	w := func(s string) { buf.WriteString(s + "\n") }
-	d := indent(depth)
-	d1 := indent(depth + 1)
-
-	w(d + "<coordination-commands>")
-
 	// Stable ordering: sort by ID
 	keys := make([]string, 0, len(CoordinationCommands))
 	for k := range CoordinationCommands {
@@ -1569,35 +1366,24 @@ func buildCoordinationCommands(buf *bytes.Buffer, depth int) {
 	}
 	sort.Strings(keys)
 
+	section := CoordinationCommandsSection{}
 	for _, key := range keys {
 		cmd := CoordinationCommands[key]
-		attrs := []string{
-			xmlAttr("id", cmd.ID),
-			xmlAttr("action", cmd.Action),
-			xmlAttr("template", cmd.Template),
-		}
-		if cmd.RoleRef != "" {
-			attrs = append(attrs, xmlAttr("role-ref", string(cmd.RoleRef)))
+		cmdElem := CoordCmdElem{
+			ID:       cmd.ID,
+			Action:   cmd.Action,
+			Template: cmd.Template,
+			RoleRef:  string(cmd.RoleRef),
 		}
 		if cmd.Shared {
-			attrs = append(attrs, xmlAttr("shared", "true"))
+			cmdElem.Shared = "true"
 		}
-		w(d1 + selfCloseTag("coord-cmd", attrs...))
+		section.Commands = append(section.Commands, cmdElem)
 	}
-
-	w(d + "</coordination-commands>")
+	marshalSection(buf, depth, section)
 }
 
 func buildWorkflows(buf *bytes.Buffer, depth int) {
-	w := func(s string) { buf.WriteString(s + "\n") }
-	d := indent(depth)
-	d1 := indent(depth + 1)
-	d2 := indent(depth + 2)
-	d3 := indent(depth + 3)
-	d4 := indent(depth + 4)
-
-	w(d + "<workflows>")
-
 	// Stable ordering: sort by ID
 	keys := make([]string, 0, len(WorkflowSpecs))
 	for k := range WorkflowSpecs {
@@ -1605,61 +1391,47 @@ func buildWorkflows(buf *bytes.Buffer, depth int) {
 	}
 	sort.Strings(keys)
 
+	section := WorkflowsSection{}
 	for _, key := range keys {
 		wf := WorkflowSpecs[key]
-		w(d1 + openTag("workflow",
-			xmlAttr("id", wf.ID),
-			xmlAttr("name", wf.Name),
-			xmlAttr("role-ref", string(wf.RoleRef)),
-			xmlAttr("description", wf.Description),
-		))
+		wfElem := WorkflowElem{
+			ID:          wf.ID,
+			Name:        wf.Name,
+			RoleRef:     string(wf.RoleRef),
+			Description: wf.Description,
+		}
 		for _, stage := range wf.Stages {
-			stageAttrs := []string{
-				xmlAttr("id", stage.ID),
-				xmlAttr("name", stage.Name),
-				xmlAttr("order", strconv.Itoa(stage.Order)),
-				xmlAttr("execution", stage.Execution),
+			stageElem := StageElem{
+				ID:        stage.ID,
+				Name:      stage.Name,
+				Order:     strconv.Itoa(stage.Order),
+				Execution: stage.Execution,
 			}
 			if stage.PhaseRef != "" {
-				stageAttrs = append(stageAttrs, xmlAttr("phase-ref", phaseXMLID(stage.PhaseRef)))
+				stageElem.PhaseRef = phaseXMLID(stage.PhaseRef)
 			}
-			w(d2 + openTag("stage", stageAttrs...))
 			for _, action := range stage.Actions {
-				actionAttrs := []string{
-					xmlAttr("id", action.ID),
-					xmlAttr("instruction", action.Instruction),
+				actionElem := ActionElem{
+					ID:          action.ID,
+					Instruction: action.Instruction,
+					Command:     action.Command,
 				}
-				if action.Command != "" {
-					actionAttrs = append(actionAttrs, xmlAttr("command", action.Command))
-				}
-				w(d3 + selfCloseTag("action", actionAttrs...))
+				stageElem.Actions = append(stageElem.Actions, actionElem)
 			}
 			for _, ec := range stage.ExitConditions {
-				w(d3 + selfCloseTag("exit-condition",
-					xmlAttr("type", ec.Type),
-					xmlAttr("condition", ec.Condition),
-				))
+				stageElem.ExitConditions = append(stageElem.ExitConditions, ExitCondElem{
+					Type:      ec.Type,
+					Condition: ec.Condition,
+				})
 			}
-			w(d2 + "</stage>")
+			wfElem.Stages = append(wfElem.Stages, stageElem)
 		}
-
-		// Per-workflow extra: checklist items embedded under certain workflows.
-		// (Handled in the stage loop above via actions/exit-conditions.)
-		_ = d4 // unused but may be needed for future nesting
-		w(d1 + "</workflow>")
+		section.Workflows = append(section.Workflows, wfElem)
 	}
-
-	w(d + "</workflows>")
+	marshalSection(buf, depth, section)
 }
 
 func buildFigures(buf *bytes.Buffer, depth int) {
-	w := func(s string) { buf.WriteString(s + "\n") }
-	d := indent(depth)
-	d1 := indent(depth + 1)
-	d2 := indent(depth + 2)
-
-	w(d + "<figures>")
-
 	// Stable ordering: sort by ID
 	keys := make([]string, 0, len(FigureSpecs))
 	for k := range FigureSpecs {
@@ -1667,14 +1439,15 @@ func buildFigures(buf *bytes.Buffer, depth int) {
 	}
 	sort.Strings(keys)
 
+	section := FiguresSection{}
 	for _, key := range keys {
 		fig := FigureSpecs[key]
-		w(d1 + openTag("figure",
-			xmlAttr("id", fig.ID),
-			xmlAttr("title", fig.Title),
-			xmlAttr("type", fig.Type),
-			xmlAttr("section-ref", fig.SectionRef),
-		))
+		figElem := FigureElem{
+			ID:         fig.ID,
+			Title:      fig.Title,
+			Type:       fig.Type,
+			SectionRef: fig.SectionRef,
+		}
 		// role-refs sorted
 		sortedRoles := make([]types.RoleId, len(fig.RoleRefs))
 		copy(sortedRoles, fig.RoleRefs)
@@ -1682,26 +1455,25 @@ func buildFigures(buf *bytes.Buffer, depth int) {
 			return string(sortedRoles[i]) < string(sortedRoles[j])
 		})
 		for _, rr := range sortedRoles {
-			w(d2 + selfCloseTag("role-ref", xmlAttr("ref", string(rr))))
+			figElem.RoleRefs = append(figElem.RoleRefs, FigRoleRef{Ref: string(rr)})
 		}
 		// workflow-refs sorted
 		sortedWF := make([]string, len(fig.WorkflowRefs))
 		copy(sortedWF, fig.WorkflowRefs)
 		sort.Strings(sortedWF)
 		for _, wr := range sortedWF {
-			w(d2 + selfCloseTag("workflow-ref", xmlAttr("ref", wr)))
+			figElem.WorkflowRefs = append(figElem.WorkflowRefs, FigWFRef{Ref: wr})
 		}
 		// command-refs sorted
 		sortedCR := make([]string, len(fig.CommandRefs))
 		copy(sortedCR, fig.CommandRefs)
 		sort.Strings(sortedCR)
 		for _, cr := range sortedCR {
-			w(d2 + selfCloseTag("command-ref", xmlAttr("ref", cr)))
+			figElem.CommandRefs = append(figElem.CommandRefs, FigCmdRef{Ref: cr})
 		}
-		w(d1 + "</figure>")
+		section.Figures = append(section.Figures, figElem)
 	}
-
-	w(d + "</figures>")
+	marshalSection(buf, depth, section)
 }
 
 // phaseNumber returns the phase number for a PhaseId for sorting.

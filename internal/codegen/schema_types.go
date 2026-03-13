@@ -180,10 +180,13 @@ type TransitionElem struct {
 }
 
 // SkillInvocationElem is <skill-invocation target-role="..." command-ref="..." directive="..."/>.
+// target-role and command-ref are omitempty so they can be omitted when only directive
+// (and optionally note) are needed (e.g., in handoff skill-invocation elements).
 type SkillInvocationElem struct {
-	TargetRole string `xml:"target-role,attr"`
-	CommandRef string `xml:"command-ref,attr"`
+	TargetRole string `xml:"target-role,attr,omitempty"`
+	CommandRef string `xml:"command-ref,attr,omitempty"`
 	Directive  string `xml:"directive,attr"`
+	Note       string `xml:"note,attr,omitempty"`
 }
 
 // SeverityTreeElem is the <severity-tree ...> element.
