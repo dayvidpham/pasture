@@ -11,7 +11,6 @@ package codegen
 
 import (
 	"bytes"
-	_ "embed"
 	"fmt"
 	"os"
 	"sort"
@@ -22,12 +21,6 @@ import (
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	"gopkg.in/yaml.v3"
 )
-
-//go:embed templates/skill_header.go.tmpl
-var skillHeaderTmpl string
-
-//go:embed templates/skill_sub_figure.go.tmpl
-var skillSubFigureTmpl string
 
 // ─── GenerateOptions ──────────────────────────────────────────────────────────
 
@@ -102,16 +95,25 @@ func buildFuncMap() template.FuncMap {
 
 // ─── Template loading ─────────────────────────────────────────────────────────
 
-// mustParseTemplate parses a named template string with the shared FuncMap and
-// missingkey=error option. Panics on parse error — templates are embedded
-// compile-time constants and a parse error is a programming error.
-func mustParseTemplate(name, src string) *template.Template {
-	t, err := template.New(name).
+// mustParseTemplateFS parses a named template from the shared embedded FS
+// (templatesFS, declared in embed.go) with the shared FuncMap and
+// missingkey=error option. The template is named by the base filename of the
+// pattern (e.g. "templates/skill_header.go.tmpl" → "skill_header.go.tmpl")
+// so callers can Execute it directly. Panics on parse error — templates are
+// embedded compile-time constants and a parse error is a programming error.
+func mustParseTemplateFS(pattern string) *template.Template {
+	// ParseFS names templates by their base filename, so we must use the same
+	// name in template.New for Execute() to find the right template.
+	base := pattern
+	if i := strings.LastIndex(pattern, "/"); i >= 0 {
+		base = pattern[i+1:]
+	}
+	t, err := template.New(base).
 		Option("missingkey=error").
 		Funcs(buildFuncMap()).
-		Parse(src)
+		ParseFS(templatesFS, pattern)
 	if err != nil {
-		panic(fmt.Sprintf("codegen: failed to parse embedded template %q: %v", name, err))
+		panic(fmt.Sprintf("codegen: failed to parse embedded template %q: %v", pattern, err))
 	}
 	return t
 }
@@ -432,7 +434,7 @@ func renderHeader(roleID types.RoleId, figuresDir string) (string, error) {
 		ReviewAxes:           roleCtx.ReviewAxes,
 	}
 
-	tmpl := mustParseTemplate("skill_header", skillHeaderTmpl)
+	tmpl := mustParseTemplateFS("templates/skill_header.go.tmpl")
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, ctx); err != nil {
 		return "", fmt.Errorf(
@@ -466,7 +468,7 @@ func renderSubSkillHeader(commandID, figuresDir string) (string, error) {
 		Figures:            figures,
 	}
 
-	tmpl := mustParseTemplate("skill_sub_figure", skillSubFigureTmpl)
+	tmpl := mustParseTemplateFS("templates/skill_sub_figure.go.tmpl")
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, ctx); err != nil {
 		return "", fmt.Errorf(

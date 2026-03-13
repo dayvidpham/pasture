@@ -844,6 +844,8 @@ func checkSemantics(root *XMLNode, index SchemaIndex) []ValidationError {
 		}
 	}
 
+	// Rules 7 and 8 are absent from the Python validate_schema.py and are not ported here.
+
 	// 9. Each role owns >= 1 phase
 	for rid, phases := range index.RolePhaseRefs {
 		if len(phases) == 0 {

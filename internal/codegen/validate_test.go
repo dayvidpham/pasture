@@ -91,8 +91,7 @@ func TestValidateTree_EmptyRoot(t *testing.T) {
 	// Must not panic.
 	errs := codegen.ValidateTree(&root)
 	// An empty root has no phases — that's handled gracefully.
-	// We only assert no panic and that errs is a valid value (nil or slice).
-	_ = errs
+	assert.Empty(t, errs, "empty root should produce no validation errors")
 }
 
 // ── TestValidateSchema_StructuralErrors ──────────────────────────────────────

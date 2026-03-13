@@ -313,7 +313,9 @@ var phaseConstraints = map[protocol.PhaseId]map[string]bool{
 		"C-agent-commit": true,
 	}),
 	// Terminal state — intentionally only general constraints: no additional constraints apply after landing.
-	protocol.PhaseComplete: copyConstraints(generalConstraints),
+	// Terminal state — intentionally empty: no constraints apply after landing.
+	// Matches Python: _PHASE_CONSTRAINTS[PhaseId.Complete] = frozenset()
+	protocol.PhaseComplete: {},
 }
 
 // ─── Map Helpers ──────────────────────────────────────────────────────────────

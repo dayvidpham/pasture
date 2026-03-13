@@ -2,9 +2,15 @@
 #
 # Each entry specifies a role to generate and the sections that must appear
 # in the generated markdown output (contains-expected-sections strategy).
+#
+# Note: must_have_figure_blocks is set to false because FigureSpec.Content
+# (which would contain ASCII diagrams with triple backticks) is not loaded into
+# agent definitions by design — Content is loaded at SKILL.md generation time
+# only, not agent generation time. See context.go:480-481.
 
 agent_checks:
   - role: supervisor
+    must_have_figure_blocks: false
     must_contain:
       - "name: supervisor"
       - "model: opus"
@@ -20,6 +26,7 @@ agent_checks:
       - "## Workflows"
 
   - role: worker
+    must_have_figure_blocks: false
     must_contain:
       - "name: worker"
       - "model: sonnet"
