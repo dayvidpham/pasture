@@ -51,6 +51,9 @@ role_checks:
     must_have_owned_phases: ["p9"]
     must_not_have_owned_phases: ["p1", "p4", "p8"]
 
+# must_have_cdata_code: when true, asserts that the generated XML contains CDATA sections.
+must_have_cdata_code: true
+
 # phase_checks: verify phases contain expected elements.
 phase_checks:
   - phase_id: "p10"

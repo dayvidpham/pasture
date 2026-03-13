@@ -17,8 +17,9 @@ import (
 
 // skillRoleCase mirrors one entry in testdata/skills.yaml role_cases.
 type skillRoleCase struct {
-	Role        string   `yaml:"role"`
-	MustContain []string `yaml:"must_contain"`
+	Role               string   `yaml:"role"`
+	MustContain        []string `yaml:"must_contain"`
+	MustContainHeaders []string `yaml:"must_contain_headers"`
 }
 
 // skillSubSkillCase mirrors one entry in testdata/skills.yaml sub_skill_cases.
@@ -80,6 +81,14 @@ func TestGenerateSkill_ContainsSections(t *testing.T) {
 					strings.Contains(result, expected),
 					"output for role %q should contain %q\n\nActual output (first 1000 chars):\n%s",
 					tc.Role, expected, truncate(result, 1000),
+				)
+			}
+
+			for _, header := range tc.MustContainHeaders {
+				assert.True(t,
+					strings.Contains(result, header),
+					"output for role %q should contain header %q\n\nActual output (first 1000 chars):\n%s",
+					tc.Role, header, truncate(result, 1000),
 				)
 			}
 		})
@@ -245,6 +254,32 @@ func TestGenerateSubSkill_MissingMarkersError(t *testing.T) {
 	var markerErr *codegen.MarkerError
 	require.ErrorAs(t, err, &markerErr,
 		"error should be a *MarkerError; got: %T: %v", err, err)
+}
+
+// ─── TestGenerateSubSkill_InitMode ─────────────────────────────────────────────
+
+// TestGenerateSubSkill_InitMode verifies that Init=true prepends markers to a
+// sub-skill file that lacks them, then generates the header successfully while
+// preserving the hand-authored heading prefix.
+func TestGenerateSubSkill_InitMode(t *testing.T) {
+	heading := "# Plan Tasks\n\nHand-authored body.\n"
+	skillPath := writeSkillFile(t, heading)
+	opts := codegen.GenerateOptions{Diff: false, Write: true, Init: true}
+
+	result, err := codegen.GenerateSubSkill("cmd-sup-plan", skillPath, "", opts)
+	require.NoError(t, err, "GenerateSubSkill with Init=true should not error")
+	require.NotEmpty(t, result, "GenerateSubSkill with Init=true should produce non-empty output")
+
+	// The hand-authored heading should be preserved (dropPrefix=false for sub-skills).
+	assert.Contains(t, result, "# Plan Tasks",
+		"generated output should preserve the hand-authored heading")
+	assert.Contains(t, result, "Hand-authored body.",
+		"generated output should preserve the hand-authored body below END marker")
+	// The generated section should contain the command description.
+	assert.Contains(t, result, codegen.GeneratedBegin,
+		"generated output should contain BEGIN marker")
+	assert.Contains(t, result, codegen.GeneratedEnd,
+		"generated output should contain END marker")
 }
 
 // ─── TestGenerateSubSkill_UnknownCommand ──────────────────────────────────────

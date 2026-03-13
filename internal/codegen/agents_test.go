@@ -17,8 +17,9 @@ import (
 
 // agentCheck mirrors one entry in testdata/agents.yaml agent_checks.
 type agentCheck struct {
-	Role        string   `yaml:"role"`
-	MustContain []string `yaml:"must_contain"`
+	Role                 string   `yaml:"role"`
+	MustContain          []string `yaml:"must_contain"`
+	MustHaveFigureBlocks bool     `yaml:"must_have_figure_blocks"`
 }
 
 // agentSuite is the top-level structure of testdata/agents.yaml.
@@ -61,6 +62,12 @@ func TestGenerateAgent_SectionChecks(t *testing.T) {
 				assert.True(t, strings.Contains(got, expected),
 					"generated agent for role %q must contain %q\n\nGenerated content:\n%s",
 					check.Role, expected, got)
+			}
+
+			if check.MustHaveFigureBlocks {
+				assert.True(t, strings.Contains(got, "```"),
+					"generated agent for role %q must contain code fence blocks (triple backticks)\n\nGenerated content:\n%s",
+					check.Role, got)
 			}
 		})
 	}

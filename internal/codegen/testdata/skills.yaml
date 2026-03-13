@@ -18,6 +18,11 @@ role_cases:
       - "Startup Sequence"
       - "Inter-Agent Coordination"
       - "Workflows"
+    must_contain_headers:
+      - "## Constraints (Given/When/Then/Should Not)"
+      - "## Handoffs"
+      - "## Startup Sequence"
+      - "## Workflows"
 
   - role: "supervisor"
     must_contain:
@@ -29,6 +34,10 @@ role_cases:
       - "Handoffs"
       - "Startup Sequence"
       - "Workflows"
+    must_contain_headers:
+      - "## Constraints (Given/When/Then/Should Not)"
+      - "## Handoffs"
+      - "## Startup Sequence"
 
   - role: "reviewer"
     must_contain:
@@ -39,6 +48,10 @@ role_cases:
       - "C-severity-eager"
       - "Handoffs"
       - "Review Axes"
+    must_contain_headers:
+      - "## Constraints (Given/When/Then/Should Not)"
+      - "## Handoffs"
+      - "## Review Axes"
 
   - role: "architect"
     must_contain:
@@ -48,6 +61,9 @@ role_cases:
       - "C-proposal-naming"
       - "Handoffs"
       - "Startup Sequence"
+    must_contain_headers:
+      - "## Constraints (Given/When/Then/Should Not)"
+      - "## Handoffs"
 
 sub_skill_cases:
   - command_id: "cmd-sup-plan"

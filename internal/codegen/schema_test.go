@@ -3,6 +3,8 @@ package codegen_test
 import (
 	"bytes"
 	"encoding/xml"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -44,6 +46,7 @@ type schemaSuite struct {
 	ConstraintChecks []schemaConstraintCheck `yaml:"constraint_checks"`
 	RoleChecks       []schemaRoleCheck       `yaml:"role_checks"`
 	PhaseChecks      []schemaPhaseCheck      `yaml:"phase_checks"`
+	MustHaveCDATACode bool                   `yaml:"must_have_cdata_code"`
 }
 
 // ─── Helper: generate and parse ───────────────────────────────────────────────
@@ -343,6 +346,110 @@ func TestGenerateSchema_AllSectionsPresent(t *testing.T) {
 		assert.Contains(t, output, sec,
 			"output must contain section %q", sec)
 	}
+}
+
+// ─── TestGenerateSchema_CDATACodeFixture ─────────────────────────────────────
+
+// TestGenerateSchema_CDATACodeFixture verifies CDATA sections are present in
+// the generated output when must_have_cdata_code is true in the fixture.
+func TestGenerateSchema_CDATACodeFixture(t *testing.T) {
+	var suite schemaSuite
+	testutil.LoadFixtures(t, testutil.CodegenSchema, &suite)
+
+	if !suite.MustHaveCDATACode {
+		t.Skip("must_have_cdata_code not set in schema.yaml fixture")
+	}
+
+	output := generateXML(t)
+	assert.Contains(t, output, "<![CDATA[",
+		"generated schema.xml must contain CDATA sections (must_have_cdata_code=true in fixture)")
+}
+
+// ─── TestGenerateSchema_ValidateMalformedXML ──────────────────────────────────
+
+// TestGenerateSchema_ValidateMalformedXML verifies that passing malformed XML to
+// ValidateSchema returns a Structural-layer ValidationError rather than an
+// error return value. Parse failures are reported as ValidationErrors so that
+// callers receive a consistent result type regardless of failure mode.
+func TestGenerateSchema_ValidateMalformedXML(t *testing.T) {
+	r := strings.NewReader("<aura-protocol><unclosed")
+	errs, err := codegen.ValidateSchema(r)
+	assert.NoError(t, err,
+		"ValidateSchema must return nil error for malformed XML — parse failures go to ValidationError")
+	require.GreaterOrEqual(t, len(errs), 1,
+		"ValidateSchema must return at least one ValidationError for malformed XML")
+	assert.Equal(t, codegen.LayerStructural, errs[0].Layer,
+		"malformed XML error must be classified as LayerStructural")
+}
+
+// ─── TestGenerateSchema_RoundTripValidation ───────────────────────────────────
+
+// TestGenerateSchema_RoundTripValidation verifies that the schema produced by
+// GenerateSchema is valid according to ValidateSchema. Each layer is checked
+// separately so that a single violation produces an actionable error message
+// naming the layer and listing the first 3 violations.
+//
+// If ValidateSchema is still a stub (returns nil, nil), this test trivially
+// passes with 0 errors in all layers. It will tighten once SLICE-C lands.
+func TestGenerateSchema_RoundTripValidation(t *testing.T) {
+	var buf bytes.Buffer
+	err := codegen.GenerateSchema(&buf)
+	require.NoError(t, err, "GenerateSchema must not error")
+
+	errs, validErr := codegen.ValidateSchema(strings.NewReader(buf.String()))
+	require.NoError(t, validErr,
+		"ValidateSchema must not return an error for well-formed generated XML")
+
+	// Group by layer.
+	byLayer := map[codegen.ErrorLayer][]codegen.ValidationError{}
+	for _, e := range errs {
+		byLayer[e.Layer] = append(byLayer[e.Layer], e)
+	}
+
+	// Assert per-layer counts independently for clear failure messages.
+	for _, layer := range []codegen.ErrorLayer{
+		codegen.LayerStructural,
+		codegen.LayerReferential,
+		codegen.LayerSemantic,
+	} {
+		layerErrs := byLayer[layer]
+		if len(layerErrs) > 0 {
+			msgs := make([]string, 0, 3)
+			for i, e := range layerErrs {
+				if i >= 3 {
+					break
+				}
+				msgs = append(msgs, "  "+e.ElementPath+": "+e.Message)
+			}
+			t.Errorf("%s layer errors: %d\n%s", layer, len(layerErrs), strings.Join(msgs, "\n"))
+		}
+	}
+}
+
+// ─── TestGenerateSchemaToFile_WriteMode ────────────────────────────────────────
+
+// TestGenerateSchemaToFile_WriteMode verifies that GenerateSchemaToFile with
+// Write=true creates the file on disk with valid XML content matching the
+// returned string.
+func TestGenerateSchemaToFile_WriteMode(t *testing.T) {
+	outPath := filepath.Join(t.TempDir(), "schema.xml")
+	opts := codegen.GenerateOptions{Diff: false, Write: true}
+
+	content, err := codegen.GenerateSchemaToFile(outPath, opts)
+	require.NoError(t, err, "GenerateSchemaToFile should not error")
+	require.NotEmpty(t, content, "GenerateSchemaToFile should return non-empty content")
+
+	// Read back from disk and verify it matches the returned content.
+	diskContent, err := os.ReadFile(outPath)
+	require.NoError(t, err, "should be able to read written schema.xml")
+	assert.Equal(t, content, string(diskContent),
+		"written file content should match returned content")
+
+	// Verify the written file is valid XML.
+	var doc interface{}
+	decoder := xml.NewDecoder(strings.NewReader(string(diskContent)))
+	err = decoder.Decode(&doc)
+	assert.NoError(t, err, "written file must be valid XML")
 }
 
 // ─── TestGenerateSchema_PrettyPrinted ─────────────────────────────────────────
