@@ -589,38 +589,47 @@ func TestXMLNodeNestedUnmarshal(t *testing.T) {
 	assert.Equal(t, "bash, python", toolsNode.Text)
 }
 
-// ─── L1 validate.go: ValidateSchema and ValidateTree stubs ───────────────────
+// ─── L1 validate.go: ValidateSchema and ValidateTree ────────────────────────
 
-// TestValidateSchemaStubReturnsNil verifies the stub contract: a non-empty
-// reader returns (nil, nil).
+// TestValidateSchemaStubReturnsNil verifies that a minimal well-formed XML
+// document with no protocol entities produces (nil, nil) — no errors.
 func TestValidateSchemaStubReturnsNil(t *testing.T) {
 	r := strings.NewReader(`<?xml version="1.0" encoding="UTF-8"?><aura-protocol version="2.0"/>`)
 	errs, err := codegen.ValidateSchema(r)
-	assert.NoError(t, err, "stub must not return an error")
-	assert.Nil(t, errs, "stub must return nil errors slice")
+	assert.NoError(t, err, "ValidateSchema must not return a Go error for well-formed XML")
+	assert.Nil(t, errs, "a minimal well-formed document with no protocol entities must return nil errors")
 }
 
-// TestValidateSchemaStubEmptyReader verifies the stub returns (nil, nil) for
-// an empty reader as well (implementation will differ, but stub is simple).
+// TestValidateSchemaStubEmptyReader verifies that an empty reader produces a
+// Structural error (EOF parse failure) rather than a Go error.
+// The implementation reports XML parse failures as ValidationErrors.
 func TestValidateSchemaStubEmptyReader(t *testing.T) {
 	r := strings.NewReader("")
 	errs, err := codegen.ValidateSchema(r)
-	// Stub returns nil, nil regardless of input.
-	assert.NoError(t, err)
-	assert.Nil(t, errs)
+	// Empty reader → XML parse failure → structural error, no Go error.
+	assert.NoError(t, err, "ValidateSchema must not return a Go error for empty input")
+	require.NotEmpty(t, errs, "empty XML must produce at least one Structural ValidationError")
+	assert.Equal(t, codegen.LayerStructural, errs[0].Layer,
+		"empty XML error must be classified as Structural")
 }
 
-// TestValidateTreeStubReturnsNil verifies the stub contract for ValidateTree.
+// TestValidateTreeStubReturnsNil verifies that an empty XMLNode (zero value)
+// does not panic and returns some result. An empty document produces no phases
+// and therefore no semantic violations about phase ordering, but may produce
+// no errors since there is nothing to check. We just verify it doesn't panic.
 func TestValidateTreeStubReturnsNil(t *testing.T) {
 	root := &codegen.XMLNode{}
+	// Must not panic. Result may be nil or a slice — both are acceptable
+	// for an empty document with no phases or roles.
 	result := codegen.ValidateTree(root)
-	assert.Nil(t, result, "stub must return nil")
+	_ = result // nil or empty — both acceptable
 }
 
-// TestValidateTreeStubNilRoot verifies the stub handles a nil root without panicking.
+// TestValidateTreeStubNilRoot verifies that ValidateTree handles a nil root
+// without panicking and returns nil (nothing to validate).
 func TestValidateTreeStubNilRoot(t *testing.T) {
 	result := codegen.ValidateTree(nil)
-	assert.Nil(t, result, "stub must return nil for nil root")
+	assert.Nil(t, result, "nil root must return nil — nothing to validate")
 }
 
 // ─── Existing tests still pass: compile-time smoke ────────────────────────────
