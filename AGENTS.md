@@ -177,3 +177,11 @@ chore: update go.sum after dependency bump
 ```bash
 git agent-commit -m "feat(pastured): add epoch start workflow"
 ```
+
+## Protocol Evolution
+
+For modifying or extending the protocol — adding or changing constraints, roles,
+phases, figures, schema sections, commands, or templates — see
+[CONTRIBUTING.md](CONTRIBUTING.md). That guide covers the `specs_data.go` →
+`go generate` workflow, file-level dependency graph, and step-by-step recipes
+for each operation.
