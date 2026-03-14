@@ -85,3 +85,10 @@ Exit conditions:
 {{- end }}
 {{- end }}
 {{- end }}
+{{- if .Figures }}
+
+## Figures
+{{- range .Figures }}
+- `{{ .ID }}`: {{ .Title }}
+{{- end }}
+{{- end }}

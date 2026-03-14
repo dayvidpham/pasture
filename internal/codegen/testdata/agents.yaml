@@ -7,6 +7,7 @@
 # (which would contain ASCII diagrams with triple backticks) is not loaded into
 # agent definitions by design — Content is loaded at SKILL.md generation time
 # only, not agent generation time. See context.go:480-481.
+# Agent definitions only include figure ID + Title in a ## Figures section.
 
 agent_checks:
   - role: supervisor
@@ -24,6 +25,8 @@ agent_checks:
       - "## Behaviors"
       - "## Completion Checklist"
       - "## Workflows"
+      - "## Figures"
+      - "`ride-the-wave`"
 
   - role: worker
     must_have_figure_blocks: false
@@ -40,6 +43,8 @@ agent_checks:
       - "## Behaviors"
       - "## Completion Checklist"
       - "## Workflows"
+      - "## Figures"
+      - "`layer-cake`"
 
   - role: reviewer
     must_contain:

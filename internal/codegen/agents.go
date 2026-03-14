@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/template"
 
@@ -46,6 +47,11 @@ type agentTemplateData struct {
 
 	// Workflows holds the role's workflow specifications from RoleContext.
 	Workflows []Workflow
+
+	// Figures holds the figure specs for this role (ID + Title references only).
+	// Full figure content is NOT included in agent definitions; it is loaded
+	// only during SKILL.md generation (see skills.go).
+	Figures []FigureSpec
 }
 
 // ─── Template rendering ───────────────────────────────────────────────────────
@@ -94,6 +100,7 @@ func renderAgent(roleID types.RoleId) (string, error) {
 		Behaviors:    roleSpec.Behaviors,
 		Checklists:   roleCtx.Checklists,
 		Workflows:    roleCtx.Workflows,
+		Figures:      roleCtx.Figures,
 	}
 
 	var buf bytes.Buffer
@@ -171,13 +178,7 @@ func GenerateAgent(roleID types.RoleId, agentPath string, opts GenerateOptions) 
 
 	// Write to disk when Write is enabled.
 	if opts.Write {
-		dir := agentPath
-		if idx := strings.LastIndex(agentPath, "/"); idx >= 0 {
-			dir = agentPath[:idx]
-		} else {
-			dir = ""
-		}
-		if dir != "" {
+		if dir := filepath.Dir(agentPath); dir != "." && dir != "" {
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				return "", fmt.Errorf(
 					"codegen.GenerateAgent: failed to create parent directory %q for role %q — "+
