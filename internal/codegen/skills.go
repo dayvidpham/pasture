@@ -19,6 +19,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
+	"github.com/pmezard/go-difflib/difflib"
 	"gopkg.in/yaml.v3"
 )
 
@@ -353,35 +354,25 @@ func loadFiguresForCommand(commandID, figuresDir string) []FigureSpec {
 
 // ─── Diff helper ─────────────────────────────────────────────────────────────
 
-// unifiedDiff returns a simple unified diff between old and new content.
+// unifiedDiff returns a contextual unified diff between old and new content.
 // Returns an empty string when the contents are identical.
-// This is a line-by-line diff that produces human-readable output.
+// Uses go-difflib to produce a proper unified diff with 3 lines of context.
 func unifiedDiff(fromFile, toFile, oldContent, newContent string) string {
 	if oldContent == newContent {
 		return ""
 	}
-	oldLines := strings.Split(oldContent, "\n")
-	newLines := strings.Split(newContent, "\n")
-
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("--- %s\n", fromFile))
-	sb.WriteString(fmt.Sprintf("+++ %s (generated)\n", toFile))
-
-	// Simple unified diff: show all old lines as removed and new lines as added.
-	// A full Myers diff is overkill for SKILL.md generation where the generated
-	// section is always completely replaced.
-	sb.WriteString(fmt.Sprintf("@@ -1,%d +1,%d @@\n", len(oldLines), len(newLines)))
-	for _, l := range oldLines {
-		sb.WriteString("-")
-		sb.WriteString(l)
-		sb.WriteString("\n")
+	diff, err := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
+		A:        difflib.SplitLines(oldContent),
+		B:        difflib.SplitLines(newContent),
+		FromFile: fromFile,
+		ToFile:   toFile + " (generated)",
+		Context:  3,
+	})
+	if err != nil {
+		// Fallback: return a simple message if diff fails
+		return fmt.Sprintf("--- %s\n+++ %s (generated)\n(diff generation failed: %v)\n", fromFile, toFile, err)
 	}
-	for _, l := range newLines {
-		sb.WriteString("+")
-		sb.WriteString(l)
-		sb.WriteString("\n")
-	}
-	return sb.String()
+	return diff
 }
 
 // ─── Render functions ─────────────────────────────────────────────────────────
