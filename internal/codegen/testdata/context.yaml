@@ -8,6 +8,7 @@
 
 role_constraint_checks:
   - role: supervisor
+    exact_count: 18
     must_contain:
       - C-supervisor-no-impl
       - C-vertical-slices
@@ -34,6 +35,7 @@ role_constraint_checks:
       - C-worker-gates         # worker only
 
   - role: reviewer
+    exact_count: 11
     must_contain:
       - C-review-binary
       - C-severity-eager
@@ -55,6 +57,7 @@ role_constraint_checks:
       - C-agent-commit
 
   - role: worker
+    exact_count: 7
     must_contain:
       - C-worker-gates
       - C-agent-commit
@@ -71,6 +74,7 @@ role_constraint_checks:
       - C-ure-verbatim
 
   - role: architect
+    exact_count: 9
     must_contain:
       - C-proposal-naming
       - C-ure-verbatim
@@ -89,6 +93,7 @@ role_constraint_checks:
       - C-worker-gates
 
   - role: epoch
+    exact_count: 11
     must_contain:
       - C-review-consensus
       - C-handoff-skill-invocation
@@ -108,6 +113,7 @@ role_constraint_checks:
 
 phase_constraint_checks:
   - phase: code-review
+    exact_count: 16
     must_contain:
       - C-review-consensus
       - C-severity-eager
@@ -132,6 +138,7 @@ phase_constraint_checks:
       - C-severity-not-plan
 
   - phase: worker-slices
+    exact_count: 12
     must_contain:
       - C-worker-gates
       - C-agent-commit
@@ -149,6 +156,7 @@ phase_constraint_checks:
       - C-followup-timing
 
   - phase: propose
+    exact_count: 6
     must_contain:
       - C-proposal-naming
       - C-audit-never-delete   # general
@@ -164,6 +172,7 @@ phase_constraint_checks:
       - C-agent-commit
 
   - phase: request
+    exact_count: 5
     must_contain:
       - C-audit-never-delete
       - C-audit-dep-chain

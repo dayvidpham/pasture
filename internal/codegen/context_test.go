@@ -18,6 +18,7 @@ type roleConstraintCheck struct {
 	Role           string   `yaml:"role"`
 	MustContain    []string `yaml:"must_contain"`
 	MustNotContain []string `yaml:"must_not_contain"`
+	ExactCount     int      `yaml:"exact_count"`
 }
 
 // phaseConstraintCheck mirrors one entry in testdata/context.yaml phase_constraint_checks.
@@ -25,6 +26,7 @@ type phaseConstraintCheck struct {
 	Phase          string   `yaml:"phase"`
 	MustContain    []string `yaml:"must_contain"`
 	MustNotContain []string `yaml:"must_not_contain"`
+	ExactCount     int      `yaml:"exact_count"`
 }
 
 // contextSuite is the top-level structure of testdata/context.yaml.
@@ -64,6 +66,11 @@ func TestGetRoleContext_ConstraintSets(t *testing.T) {
 			for _, id := range check.MustNotContain {
 				assert.False(t, gotIDs[id],
 					"role %q: GetRoleContext must NOT contain constraint %q", check.Role, id)
+			}
+
+			if check.ExactCount > 0 {
+				assert.Equal(t, check.ExactCount, len(gotIDs),
+					"role %q: exact constraint count mismatch", check.Role)
 			}
 		})
 	}
@@ -373,6 +380,11 @@ func TestGetPhaseContext_ConstraintSets(t *testing.T) {
 			for _, id := range check.MustNotContain {
 				assert.False(t, gotIDs[id],
 					"phase %q: GetPhaseContext must NOT contain constraint %q", check.Phase, id)
+			}
+
+			if check.ExactCount > 0 {
+				assert.Equal(t, check.ExactCount, len(gotIDs),
+					"phase %q: exact constraint count mismatch", check.Phase)
 			}
 		})
 	}
