@@ -126,7 +126,7 @@ func main() {
 			continue
 		}
 		agentPath := filepath.Join(root, "agents", fmt.Sprintf("%s.md", roleID))
-		if _, err := codegen.GenerateAgent(roleID, agentPath, opts); err != nil {
+		if _, err := codegen.GenerateAgent(roleID, agentPath, figuresDir, opts); err != nil {
 			errors = append(errors, fmt.Errorf("agent %s: %w", roleID, err))
 		} else {
 			fmt.Printf("Generated %s\n", agentPath)

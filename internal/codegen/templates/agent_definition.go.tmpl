@@ -89,6 +89,13 @@ Exit conditions:
 
 ## Figures
 {{- range .Figures }}
-- `{{ .ID }}`: {{ .Title }}
+
+### {{ .Title }}
+{{- if .Content }}
+
+```text
+{{ .Content }}
+```
+{{- end }}
 {{- end }}
 {{- end }}

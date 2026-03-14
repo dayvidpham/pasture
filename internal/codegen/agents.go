@@ -48,9 +48,9 @@ type agentTemplateData struct {
 	// Workflows holds the role's workflow specifications from RoleContext.
 	Workflows []Workflow
 
-	// Figures holds the figure specs for this role (ID + Title references only).
-	// Full figure content is NOT included in agent definitions; it is loaded
-	// only during SKILL.md generation (see skills.go).
+	// Figures holds the figure specs for this role, including full ASCII diagram
+	// content when figuresDir is provided to GenerateAgent. When figuresDir is
+	// empty, Content fields will be empty (ID + Title only).
 	Figures []FigureSpec
 }
 
@@ -63,11 +63,16 @@ type agentTemplateData struct {
 // GetRoleContext, and executes the template.
 // Returns the rendered string (including a trailing newline).
 //
+// figuresDir is the path to the directory containing figure YAML files
+// (e.g. skills/protocol/figures). When non-empty, figure content is loaded
+// from disk so the agent definition includes full ASCII diagram content.
+// When empty, figures are included as ID + Title references only.
+//
 // Returns an error if:
 //   - The role has no entry in RoleSpecs (programming error or invalid role ID).
 //   - The template file cannot be read from the embedded FS.
 //   - Template execution fails (e.g., missing key, rendering error).
-func renderAgent(roleID types.RoleId) (string, error) {
+func renderAgent(roleID types.RoleId, figuresDir string) (string, error) {
 	roleSpec, ok := RoleSpecs[roleID]
 	if !ok {
 		return "", fmt.Errorf(
@@ -92,6 +97,13 @@ func renderAgent(roleID types.RoleId) (string, error) {
 
 	roleCtx := GetRoleContext(roleID)
 
+	// Load figure content from disk when figuresDir is provided; otherwise
+	// fall back to the context figures (Content fields empty).
+	figures := roleCtx.Figures
+	if figuresDir != "" {
+		figures = loadFiguresForRole(roleID, figuresDir)
+	}
+
 	data := agentTemplateData{
 		Role:         roleSpec,
 		PhasesDetail: ownedPhaseDetails(roleSpec),
@@ -100,7 +112,7 @@ func renderAgent(roleID types.RoleId) (string, error) {
 		Behaviors:    roleSpec.Behaviors,
 		Checklists:   roleCtx.Checklists,
 		Workflows:    roleCtx.Workflows,
-		Figures:      roleCtx.Figures,
+		Figures:      figures,
 	}
 
 	var buf bytes.Buffer
@@ -131,9 +143,13 @@ func renderAgent(roleID types.RoleId) (string, error) {
 // The output file is fully generated — no marker-based partial replacement.
 //
 // Parameters:
-//   - roleID:    The role to generate for (must be in RoleSpecs).
-//   - agentPath: Path to write the generated .md file to.
-//   - opts:      Controls diff output and whether to write to disk.
+//   - roleID:     The role to generate for (must be in RoleSpecs).
+//   - agentPath:  Path to write the generated .md file to.
+//   - figuresDir: Path to the directory containing figure YAML files (e.g.
+//     skills/protocol/figures). When non-empty, figure content is loaded from
+//     disk and embedded in the output. When empty, figures are rendered as
+//     ID + Title references only.
+//   - opts:       Controls diff output and whether to write to disk.
 //     Note: opts.Init is not used by GenerateAgent (agents are fully generated).
 //
 // Returns:
@@ -145,7 +161,7 @@ func renderAgent(roleID types.RoleId) (string, error) {
 //   - Template parse/execution failure → error with template context.
 //   - Parent directory creation failure → error with OS error.
 //   - File write failure → error with OS error and path.
-func GenerateAgent(roleID types.RoleId, agentPath string, opts GenerateOptions) (string, error) {
+func GenerateAgent(roleID types.RoleId, agentPath string, figuresDir string, opts GenerateOptions) (string, error) {
 	roleSpec, ok := RoleSpecs[roleID]
 	if !ok {
 		return "", fmt.Errorf(
@@ -166,7 +182,7 @@ func GenerateAgent(roleID types.RoleId, agentPath string, opts GenerateOptions) 
 		oldContent = string(data)
 	}
 
-	newContent, err := renderAgent(roleID)
+	newContent, err := renderAgent(roleID, figuresDir)
 	if err != nil {
 		return "", err
 	}

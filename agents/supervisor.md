@@ -223,3 +223,42 @@ Exit conditions:
 - **continue**: BLOCKERs or IMPORTANTs remain, cycles < 3 per slice — workers fix, spawn new ephemeral reviewers
 - **proceed**: 3 cycles exhausted, IMPORTANT remain — track in FOLLOWUP, proceed to Phase 11
 - **escalate**: 3 cycles exhausted per slice, BLOCKERs remain — escalate to architect for re-planning
+
+## Figures
+
+### Ride the Wave — Coordinated Phase 8-10 Execution
+
+```text
+Phase 8: PLAN
+  ├─ Read RATIFIED_PLAN + URD
+  ├─ Spawn ephemeral Explore subagents (Task tool, scoped queries)
+  ├─ Use Explore findings to map codebase
+  ├─ Decompose into vertical slices + integration points
+  └─ Create leaf tasks for every slice
+
+Phase 9: BUILD
+  ├─ Spawn N Workers for parallel slice implementation
+  ├─ Workers implement their slices in parallel
+  └─ Workers do NOT shut down when finished
+
+Phase 10: REVIEW + FIX CYCLES (max 3 per slice)
+  ├─ Cycle 1:
+  │   ├─ Spawn ephemeral reviewers (Task tool, per-slice review)
+  │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
+  │   ├─ Create FOLLOWUP epic if ANY IMPORTANT/MINOR findings
+  │   ├─ Workers fix BLOCKERs + IMPORTANTs with atomic commits
+  │   └─ Spawn new ephemeral reviewers for re-review
+  ├─ Cycle 2 (if needed): same pattern
+  ├─ Cycle 3 (if needed): same pattern
+  └─ After 3 cycles per slice: escalate to architect for re-planning
+
+DONE → Phase 11 (UAT)
+  └─ Shut down Workers
+
+Cycle Exit Conditions:
+  All reviewers ACCEPT, 0 BLOCKERs + 0 IMPORTANTs     → Proceed to Phase 11 (UAT)
+  BLOCKERs or IMPORTANTs remain, cycles < 3 per slice → Workers fix, spawn new ephemeral reviewers
+  3 cycles exhausted, IMPORTANT remain                → Track in FOLLOWUP, proceed to Phase 11
+  3 cycles exhausted per slice, BLOCKERs remain       → Escalate to architect for re-planning
+
+```

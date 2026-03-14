@@ -29,16 +29,28 @@ type agentSuite struct {
 	RolesWithoutTools  []string     `yaml:"roles_without_tools"`
 }
 
+// testFiguresDir returns the path to the figures directory used by agent tests.
+// Go tests run with the package directory as the working directory, so this
+// resolves to <module_root>/skills/protocol/figures from internal/codegen/.
+func testFiguresDir() string {
+	return filepath.Join("..", "..", "skills", "protocol", "figures")
+}
+
 // ─── TestGenerateAgent_SectionChecks ─────────────────────────────────────────
 
 // TestGenerateAgent_SectionChecks verifies that each role listed in the YAML
 // fixture produces output containing all expected sections. This is the
 // contains-expected-sections test strategy: we do not snapshot the full output
 // but verify structural invariants that must hold for every generated agent.
+//
+// Uses the actual figures directory so that full ASCII diagram content is
+// embedded and must_have_figure_blocks assertions can pass.
 func TestGenerateAgent_SectionChecks(t *testing.T) {
 	var suite agentSuite
 	testutil.LoadFixtures(t, testutil.CodegenAgents, &suite)
 	require.NotEmpty(t, suite.AgentChecks, "agents.yaml must have agent_checks")
+
+	figuresDir := testFiguresDir()
 
 	for _, check := range suite.AgentChecks {
 		check := check
@@ -50,7 +62,7 @@ func TestGenerateAgent_SectionChecks(t *testing.T) {
 			tmpDir := t.TempDir()
 			agentPath := filepath.Join(tmpDir, check.Role+".md")
 
-			got, err := codegen.GenerateAgent(role, agentPath, codegen.GenerateOptions{
+			got, err := codegen.GenerateAgent(role, agentPath, figuresDir, codegen.GenerateOptions{
 				Diff:  false,
 				Write: false,
 			})
@@ -93,7 +105,7 @@ func TestGenerateAgent_OnlyRolesWithTools(t *testing.T) {
 				"fixture role %q is not a valid RoleId", roleStr)
 
 			agentPath := filepath.Join(tmpDir, roleStr+".md")
-			got, err := codegen.GenerateAgent(role, agentPath, codegen.GenerateOptions{})
+			got, err := codegen.GenerateAgent(role, agentPath, "", codegen.GenerateOptions{})
 			require.NoError(t, err)
 			assert.NotEmpty(t, got,
 				"GenerateAgent(%q) returned empty content — expected non-empty for role with tools", roleStr)
@@ -109,7 +121,7 @@ func TestGenerateAgent_OnlyRolesWithTools(t *testing.T) {
 				"fixture role %q is not a valid RoleId", roleStr)
 
 			agentPath := filepath.Join(tmpDir, roleStr+"-no-tools.md")
-			got, err := codegen.GenerateAgent(role, agentPath, codegen.GenerateOptions{})
+			got, err := codegen.GenerateAgent(role, agentPath, "", codegen.GenerateOptions{})
 			require.NoError(t, err)
 			assert.Empty(t, got,
 				"GenerateAgent(%q) returned non-empty content — expected empty for role without tools", roleStr)
@@ -126,7 +138,7 @@ func TestGenerateAgent_WorkerContent(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentPath := filepath.Join(tmpDir, "worker.md")
 
-	got, err := codegen.GenerateAgent(types.RoleWorker, agentPath, codegen.GenerateOptions{})
+	got, err := codegen.GenerateAgent(types.RoleWorker, agentPath, "", codegen.GenerateOptions{})
 	require.NoError(t, err)
 	require.NotEmpty(t, got)
 
@@ -156,7 +168,7 @@ func TestGenerateAgent_FrontmatterFormat(t *testing.T) {
 		role := role
 		t.Run(string(role), func(t *testing.T) {
 			agentPath := filepath.Join(tmpDir, string(role)+".md")
-			got, err := codegen.GenerateAgent(role, agentPath, codegen.GenerateOptions{})
+			got, err := codegen.GenerateAgent(role, agentPath, "", codegen.GenerateOptions{})
 			require.NoError(t, err)
 			require.NotEmpty(t, got)
 
@@ -185,7 +197,7 @@ func TestGenerateAgent_SupervisorContainsSections(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentPath := filepath.Join(tmpDir, "supervisor.md")
 
-	got, err := codegen.GenerateAgent(types.RoleSupervisor, agentPath, codegen.GenerateOptions{
+	got, err := codegen.GenerateAgent(types.RoleSupervisor, agentPath, "", codegen.GenerateOptions{
 		Diff:  false,
 		Write: false,
 	})
@@ -223,7 +235,7 @@ func TestGenerateAgent_WritesToDisk(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentPath := filepath.Join(tmpDir, "agents", "worker.md")
 
-	got, err := codegen.GenerateAgent(types.RoleWorker, agentPath, codegen.GenerateOptions{
+	got, err := codegen.GenerateAgent(types.RoleWorker, agentPath, "", codegen.GenerateOptions{
 		Write: true,
 	})
 	require.NoError(t, err)
@@ -254,7 +266,7 @@ func TestGenerateAgent_TrailingNewline(t *testing.T) {
 		role := role
 		t.Run(string(role), func(t *testing.T) {
 			agentPath := filepath.Join(tmpDir, string(role)+".md")
-			got, err := codegen.GenerateAgent(role, agentPath, codegen.GenerateOptions{})
+			got, err := codegen.GenerateAgent(role, agentPath, "", codegen.GenerateOptions{})
 			require.NoError(t, err)
 			require.NotEmpty(t, got)
 			assert.True(t, strings.HasSuffix(got, "\n"),
