@@ -805,15 +805,15 @@
   <handoffs storage-pattern=".git/.aura/handoff/{request-task-id}/{source}-to-{target}.md">
     <handoff id="h1" source-role="architect" target-role="supervisor" at-phase="p7" content-level="full-provenance" file-pattern="architect-to-supervisor.md">
       <required-fields>request, urd, proposal, ratified-plan, context, key-decisions, open-items, acceptance-criteria</required-fields>
-      <skill-invocation target-role="" command-ref="" directive="Skill(/aura:supervisor)"></skill-invocation>
+      <skill-invocation directive="Skill(/aura:supervisor)" note="Supervisor launch prompt MUST start with this invocation. Without it, supervisor skips leaf task creation."></skill-invocation>
     </handoff>
     <handoff id="h2" source-role="supervisor" target-role="worker" at-phase="p9" content-level="summary-with-ids" file-pattern="supervisor-to-worker.md">
       <required-fields>request, urd, proposal, ratified-plan, impl-plan, slice, context, key-decisions, open-items, acceptance-criteria</required-fields>
-      <skill-invocation target-role="" command-ref="" directive="Skill(/aura:worker)"></skill-invocation>
+      <skill-invocation directive="Skill(/aura:worker)" note="Worker message MUST include explicit instruction to call this skill."></skill-invocation>
     </handoff>
     <handoff id="h3" source-role="supervisor" target-role="reviewer" at-phase="p10" content-level="summary-with-ids" file-pattern="supervisor-to-reviewer.md">
       <required-fields>request, urd, proposal, ratified-plan, impl-plan, context, key-decisions, acceptance-criteria</required-fields>
-      <skill-invocation target-role="" command-ref="" directive="Skill(/aura:reviewer)"></skill-invocation>
+      <skill-invocation directive="Skill(/aura:reviewer)" note="Reviewer prompt MUST include instruction to call this skill."></skill-invocation>
     </handoff>
     <handoff id="h4" source-role="worker" target-role="reviewer" at-phase="p10" content-level="summary-with-ids" file-pattern="worker-to-reviewer.md">
       <required-fields>request, urd, impl-plan, slice, context, key-decisions, open-items</required-fields>
