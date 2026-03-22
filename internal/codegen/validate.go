@@ -778,15 +778,24 @@ func checkSemantics(root *XMLNode, index SchemaIndex) []ValidationError {
 	}
 
 	// 2. Phase domain consistency
-	for pid, num := range index.PhaseNumbers {
-		domain := index.PhaseDomains[pid]
-		expectedDomain := expectedDomains[num]
-		if domain != "" && expectedDomain != "" && domain != expectedDomain {
-			errors = append(errors, ValidationError{
-				Layer:       LayerSemantic,
-				ElementPath: fmt.Sprintf("phase[@id='%s']", pid),
-				Message:     fmt.Sprintf("domain='%s' but phase %d should be '%s'", domain, num, expectedDomain),
-			})
+	// Sort phase IDs so output is deterministic regardless of map iteration order.
+	{
+		sortedPhaseIDs2 := make([]string, 0, len(index.PhaseNumbers))
+		for pid := range index.PhaseNumbers {
+			sortedPhaseIDs2 = append(sortedPhaseIDs2, pid)
+		}
+		sort.Strings(sortedPhaseIDs2)
+		for _, pid := range sortedPhaseIDs2 {
+			num := index.PhaseNumbers[pid]
+			domain := index.PhaseDomains[pid]
+			expectedDomain := expectedDomains[num]
+			if domain != "" && expectedDomain != "" && domain != expectedDomain {
+				errors = append(errors, ValidationError{
+					Layer:       LayerSemantic,
+					ElementPath: fmt.Sprintf("phase[@id='%s']", pid),
+					Message:     fmt.Sprintf("domain='%s' but phase %d should be '%s'", domain, num, expectedDomain),
+				})
+			}
 		}
 	}
 
