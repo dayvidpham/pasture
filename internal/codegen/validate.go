@@ -228,7 +228,10 @@ func checkRequired(errors *[]ValidationError, elemPath string, node *XMLNode, at
 			*errors = append(*errors, ValidationError{
 				Layer:       LayerStructural,
 				ElementPath: elemPath,
-				Message:     fmt.Sprintf("missing required attribute '%s'", attr),
+				Message: fmt.Sprintf(
+					"<%s> is missing required attribute '%s' — add the '%s' attribute to this element",
+					elemPath, attr, attr,
+				),
 			})
 		}
 	}
@@ -239,7 +242,10 @@ func checkRef(errors *[]ValidationError, elemPath, attrName, attrVal string, tar
 		*errors = append(*errors, ValidationError{
 			Layer:       LayerReferential,
 			ElementPath: elemPath,
-			Message:     fmt.Sprintf("%s='%s': no %s with id '%s'", attrName, attrVal, targetName, attrVal),
+			Message: fmt.Sprintf(
+				"%s='%s' references an unknown %s — no %s with id '%s' exists in the document; define a <%s id='%s' .../> element or correct the reference",
+				attrName, attrVal, targetName, targetName, attrVal, targetName, attrVal,
+			),
 		})
 	}
 }
@@ -249,7 +255,10 @@ func checkIDUnique(errors *[]ValidationError, idVal string, idSet map[string]boo
 		*errors = append(*errors, ValidationError{
 			Layer:       LayerStructural,
 			ElementPath: elemPath,
-			Message:     fmt.Sprintf("duplicate %s id '%s'", typeName, idVal),
+			Message: fmt.Sprintf(
+				"duplicate %s id '%s' — each %s must have a unique id attribute; rename one of the <%s id='%s' .../> elements",
+				typeName, idVal, typeName, typeName, idVal,
+			),
 		})
 	}
 	idSet[idVal] = true
@@ -261,7 +270,10 @@ func checkIntAttr(errors *[]ValidationError, elemPath, attrName, attrVal string)
 		*errors = append(*errors, ValidationError{
 			Layer:       LayerStructural,
 			ElementPath: elemPath,
-			Message:     fmt.Sprintf("%s='%s' is not a valid integer", attrName, attrVal),
+			Message: fmt.Sprintf(
+				"%s='%s' is not a valid integer — the '%s' attribute on <%s> must be a whole number (e.g. 1, 2, 3); got %q which cannot be parsed as an integer",
+				attrName, attrVal, attrName, elemPath, attrVal,
+			),
 		})
 		return 0, false
 	}
@@ -552,6 +564,15 @@ func entityTypeToSet(typeAttr string, index SchemaIndex) map[string]bool {
 		return index.SeverityIDs
 	case "vote":
 		return index.EnumValueIDs["VoteType"]
+	case "document":
+		return index.DocumentIDs
+	case "team":
+		return index.TeamIDs
+	// "workflow" is intentionally absent: the current schema.xml does not
+	// define any <workflow> elements, so SchemaIndex carries no WorkflowIDs
+	// set. If workflow entities are added to the schema in a future iteration,
+	// add a WorkflowIDs map to SchemaIndex, populate it in buildIndex, and
+	// add a "workflow" case here.
 	}
 	return nil
 }
@@ -831,17 +852,33 @@ func checkSemantics(root *XMLNode, index SchemaIndex) []ValidationError {
 	}
 
 	// 6. Label value uniqueness
-	seenValues := make(map[string]string)
-	for lid, val := range index.LabelValues {
-		if first, exists := seenValues[val]; exists {
-			errors = append(errors, ValidationError{
-				Layer:       LayerSemantic,
-				ElementPath: fmt.Sprintf("label[@id='%s']", lid),
-				Message:     fmt.Sprintf("duplicate value '%s' (first seen on label[@id='%s'])", val, first),
-			})
-		} else {
-			seenValues[val] = lid
+	// Iterate label IDs in sorted order so that "first seen" attribution and
+	// the resulting error slice are deterministic regardless of map iteration
+	// order.
+	{
+		sortedLabelIDs := make([]string, 0, len(index.LabelValues))
+		for lid := range index.LabelValues {
+			sortedLabelIDs = append(sortedLabelIDs, lid)
 		}
+		sort.Strings(sortedLabelIDs)
+		seenValues := make(map[string]string)
+		var rule6Errors []ValidationError
+		for _, lid := range sortedLabelIDs {
+			val := index.LabelValues[lid]
+			if first, exists := seenValues[val]; exists {
+				rule6Errors = append(rule6Errors, ValidationError{
+					Layer:       LayerSemantic,
+					ElementPath: fmt.Sprintf("label[@id='%s']", lid),
+					Message:     fmt.Sprintf("duplicate value '%s' (first seen on label[@id='%s'])", val, first),
+				})
+			} else {
+				seenValues[val] = lid
+			}
+		}
+		sort.Slice(rule6Errors, func(i, j int) bool {
+			return rule6Errors[i].ElementPath < rule6Errors[j].ElementPath
+		})
+		errors = append(errors, rule6Errors...)
 	}
 
 	// Rules 7 and 8 are absent from the Python validate_schema.py and are not ported here.
@@ -928,22 +965,37 @@ func checkSemantics(root *XMLNode, index SchemaIndex) []ValidationError {
 	}
 
 	// 14. Domain enum values match phase domains
+	// Sort both the phase IDs being iterated and the resulting error slice so
+	// that output is deterministic regardless of map iteration order.
 	domainEnumValues := index.EnumValueIDs["DomainType"]
 	if len(domainEnumValues) > 0 {
-		var sortedDomains []string
+		var sortedDomainEnumKeys []string
 		for k := range domainEnumValues {
-			sortedDomains = append(sortedDomains, k)
+			sortedDomainEnumKeys = append(sortedDomainEnumKeys, k)
 		}
-		sort.Strings(sortedDomains)
-		for pid, domain := range index.PhaseDomains {
+		sort.Strings(sortedDomainEnumKeys)
+
+		sortedPhaseIDs := make([]string, 0, len(index.PhaseDomains))
+		for pid := range index.PhaseDomains {
+			sortedPhaseIDs = append(sortedPhaseIDs, pid)
+		}
+		sort.Strings(sortedPhaseIDs)
+
+		var rule14Errors []ValidationError
+		for _, pid := range sortedPhaseIDs {
+			domain := index.PhaseDomains[pid]
 			if !domainEnumValues[domain] {
-				errors = append(errors, ValidationError{
+				rule14Errors = append(rule14Errors, ValidationError{
 					Layer:       LayerSemantic,
 					ElementPath: fmt.Sprintf("phase[@id='%s']", pid),
-					Message:     fmt.Sprintf("domain='%s' not in DomainType enum %v", domain, sortedDomains),
+					Message:     fmt.Sprintf("domain='%s' not in DomainType enum %v", domain, sortedDomainEnumKeys),
 				})
 			}
 		}
+		sort.Slice(rule14Errors, func(i, j int) bool {
+			return rule14Errors[i].ElementPath < rule14Errors[j].ElementPath
+		})
+		errors = append(errors, rule14Errors...)
 	}
 
 	return errors

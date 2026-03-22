@@ -664,26 +664,19 @@ type FiguresSection struct {
 
 // FigureElem is a single <figure id="..." title="..." type="..." section-ref="..."> element.
 type FigureElem struct {
-	ID          string         `xml:"id,attr"`
-	Title       string         `xml:"title,attr"`
-	Type        string         `xml:"type,attr"`
-	SectionRef  string         `xml:"section-ref,attr"`
-	RoleRefs    []FigRoleRef   `xml:"role-ref"`
-	WorkflowRefs []FigWFRef    `xml:"workflow-ref"`
-	CommandRefs []FigCmdRef    `xml:"command-ref"`
+	ID           string     `xml:"id,attr"`
+	Title        string     `xml:"title,attr"`
+	Type         string     `xml:"type,attr"`
+	SectionRef   string     `xml:"section-ref,attr"`
+	RoleRefs     []RefElem  `xml:"role-ref"`
+	WorkflowRefs []RefElem  `xml:"workflow-ref"`
+	CommandRefs  []RefElem  `xml:"command-ref"`
 }
 
-// FigRoleRef is <role-ref ref="..."/> inside a figure.
-type FigRoleRef struct {
-	Ref string `xml:"ref,attr"`
-}
-
-// FigWFRef is <workflow-ref ref="..."/> inside a figure.
-type FigWFRef struct {
-	Ref string `xml:"ref,attr"`
-}
-
-// FigCmdRef is <command-ref ref="..."/> inside a figure.
-type FigCmdRef struct {
+// RefElem is a generic <*-ref ref="..."/> element used within a figure.
+// encoding/xml resolves the element tag name from the slice field struct tag
+// in FigureElem (role-ref, workflow-ref, or command-ref), so a single type
+// serves all three reference collections.
+type RefElem struct {
 	Ref string `xml:"ref,attr"`
 }

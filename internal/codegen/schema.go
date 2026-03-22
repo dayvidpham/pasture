@@ -385,7 +385,12 @@ func buildPhaseTaskTitles() map[string][]map[string]string {
 		for _, tc := range tcs {
 			entry := map[string]string{"pattern": tc.Pattern}
 			if multi {
-				// Extract substep id from label_ref: "L-p2s2_1" → "s2_1"
+				// LabelRef format: "L-p{N}s{step}" (e.g. "L-p2s2_1").
+				// Parsing steps:
+				//   1. Drop the "L-" prefix to get "p2s2_1".
+				//   2. Split on the first "s" to separate the phase token ("p2")
+				//      from the substep suffix ("2_1").
+				//   3. Prepend "s" to reconstruct the substep ID ("s2_1").
 				label := tc.LabelRef[2:] // drop "L-" prefix: "p2s2_1"
 				parts := strings.SplitN(label, "s", 2) // ["p2", "2_1"]
 				if len(parts) == 2 {
@@ -1455,21 +1460,21 @@ func buildFigures(buf *bytes.Buffer, depth int) {
 			return string(sortedRoles[i]) < string(sortedRoles[j])
 		})
 		for _, rr := range sortedRoles {
-			figElem.RoleRefs = append(figElem.RoleRefs, FigRoleRef{Ref: string(rr)})
+			figElem.RoleRefs = append(figElem.RoleRefs, RefElem{Ref: string(rr)})
 		}
 		// workflow-refs sorted
 		sortedWF := make([]string, len(fig.WorkflowRefs))
 		copy(sortedWF, fig.WorkflowRefs)
 		sort.Strings(sortedWF)
 		for _, wr := range sortedWF {
-			figElem.WorkflowRefs = append(figElem.WorkflowRefs, FigWFRef{Ref: wr})
+			figElem.WorkflowRefs = append(figElem.WorkflowRefs, RefElem{Ref: wr})
 		}
 		// command-refs sorted
 		sortedCR := make([]string, len(fig.CommandRefs))
 		copy(sortedCR, fig.CommandRefs)
 		sort.Strings(sortedCR)
 		for _, cr := range sortedCR {
-			figElem.CommandRefs = append(figElem.CommandRefs, FigCmdRef{Ref: cr})
+			figElem.CommandRefs = append(figElem.CommandRefs, RefElem{Ref: cr})
 		}
 		section.Figures = append(section.Figures, figElem)
 	}

@@ -188,6 +188,35 @@ func TestValidateSchema_SemanticErrors(t *testing.T) {
 	assert.True(t, hasSemantic, "expected Semantic error for non-sequential phase numbers")
 }
 
+// ── TestValidateSchema_DuplicateID ────────────────────────────────────────────
+
+// TestValidateSchema_DuplicateID verifies that the structural validation layer
+// (checkIDUnique inside buildIndex) catches duplicate element IDs and reports
+// a LayerStructural ValidationError naming the duplicated id.
+func TestValidateSchema_DuplicateID(t *testing.T) {
+	// Two phases with the same id "p1" — checkIDUnique must fire on the second.
+	const xmlDoc = `<aura-protocol>
+  <phases>
+    <phase id="p1" number="1" domain="user" name="Request"/>
+    <phase id="p1" number="2" domain="plan" name="Duplicate"/>
+  </phases>
+</aura-protocol>`
+
+	errs, err := codegen.ValidateSchema(strings.NewReader(xmlDoc))
+	assert.NoError(t, err, "ValidateSchema must not return a Go error for valid XML with duplicate IDs")
+	require.NotEmpty(t, errs, "ValidateSchema must return ValidationErrors for duplicate phase IDs")
+
+	hasDuplicate := false
+	for _, e := range errs {
+		if e.Layer == codegen.LayerStructural && strings.Contains(e.Message, "duplicate") && strings.Contains(e.Message, "p1") {
+			hasDuplicate = true
+			break
+		}
+	}
+	assert.True(t, hasDuplicate,
+		"expected a LayerStructural error with 'duplicate' and 'p1' in the message; got: %v", errs)
+}
+
 // ── Compile-time assertion ────────────────────────────────────────────────────
 
 // Verify ParseXMLNode is exported with correct signature.
