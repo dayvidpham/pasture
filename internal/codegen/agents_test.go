@@ -80,6 +80,12 @@ func TestGenerateAgent_SectionChecks(t *testing.T) {
 				assert.True(t, strings.Contains(got, "```"),
 					"generated agent for role %q must contain code fence blocks (triple backticks)\n\nGenerated content:\n%s",
 					check.Role, got)
+				assert.True(t, strings.Contains(got, "## Figures"),
+					"generated agent for role %q must contain a ## Figures section heading\n\nGenerated content:\n%s",
+					check.Role, got)
+				assert.True(t, strings.Contains(got, "### "),
+					"generated agent for role %q must contain at least one figure title (### heading inside ## Figures)\n\nGenerated content:\n%s",
+					check.Role, got)
 			}
 		})
 	}

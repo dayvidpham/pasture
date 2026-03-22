@@ -279,14 +279,14 @@ func TestGenerateSchema_PhaseChecks(t *testing.T) {
 
 // TestGenerateSchema_CDATAInCodeElements verifies that <code> elements use
 // CDATA sections to wrap their content, preserving angle brackets raw.
+//
+// buildConstraints always emits CDATA-wrapped code blocks, so the assertion
+// is unconditional — the conditional guard is unnecessary.
 func TestGenerateSchema_CDATAInCodeElements(t *testing.T) {
 	output := generateXML(t)
 
-	// Find any <code> element — there should be CDATA inside it.
-	if strings.Contains(output, "<code>") {
-		assert.Contains(t, output, "<![CDATA[",
-			"<code> elements must use CDATA sections")
-	}
+	assert.Contains(t, output, "<![CDATA[",
+		"generated schema must contain CDATA sections: buildConstraints always emits CDATA-wrapped <code> blocks")
 }
 
 // ─── TestGenerateSchema_AllConstraintsPresent ─────────────────────────────────
@@ -365,13 +365,13 @@ func TestGenerateSchema_CDATACodeFixture(t *testing.T) {
 		"generated schema.xml must contain CDATA sections (must_have_cdata_code=true in fixture)")
 }
 
-// ─── TestGenerateSchema_ValidateMalformedXML ──────────────────────────────────
+// ─── TestValidateSchema_MalformedXML ─────────────────────────────────────────
 
-// TestGenerateSchema_ValidateMalformedXML verifies that passing malformed XML to
+// TestValidateSchema_MalformedXML verifies that passing malformed XML to
 // ValidateSchema returns a Structural-layer ValidationError rather than an
 // error return value. Parse failures are reported as ValidationErrors so that
 // callers receive a consistent result type regardless of failure mode.
-func TestGenerateSchema_ValidateMalformedXML(t *testing.T) {
+func TestValidateSchema_MalformedXML(t *testing.T) {
 	r := strings.NewReader("<aura-protocol><unclosed")
 	errs, err := codegen.ValidateSchema(r)
 	assert.NoError(t, err,

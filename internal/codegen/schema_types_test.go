@@ -380,8 +380,8 @@ func TestXMLTagsFiguresSection(t *testing.T) {
 				Title:      "Workflow",
 				Type:       "ascii-diagram",
 				SectionRef: "workflows",
-				RoleRefs:   []codegen.FigRoleRef{{Ref: "worker"}},
-				WorkflowRefs: []codegen.FigWFRef{{Ref: "wf-layer-cake"}},
+				RoleRefs:     []codegen.RefElem{{Ref: "worker"}},
+				WorkflowRefs: []codegen.RefElem{{Ref: "wf-layer-cake"}},
 			},
 		},
 	}
@@ -680,9 +680,13 @@ func TestConstraintsSectionNotMarshalled(t *testing.T) {
 	out, err := xml.Marshal(s)
 	require.NoError(t, err)
 	xmlStr := string(out)
-	// encoding/xml uses struct name "ConstraintsSection" if no XMLName field.
+	// Negative check: no <constraints> element (would appear if XMLName were set).
 	assert.NotContains(t, xmlStr, "<constraints>",
 		"ConstraintsSection must not have XMLName so it won't accidentally be marshalled as root")
+	// Positive check: encoding/xml falls back to the struct name as the element
+	// name when no XMLName field is present, so we must see <ConstraintsSection>.
+	assert.Contains(t, xmlStr, "<ConstraintsSection>",
+		"ConstraintsSection without XMLName must marshal as <ConstraintsSection> (Go struct name fallback)")
 }
 
 // TestProcedureStepsSectionNotMarshalled mirrors TestConstraintsSectionNotMarshalled.
