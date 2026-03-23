@@ -86,8 +86,8 @@ func TestGenerateSkill_ContainsSections(t *testing.T) {
 
 			doc, src := parseMD(t, result)
 			for _, header := range tc.MustContainHeaders {
-				_, title := parseHeaderString(header)
-				assertAnySectionExists(t, doc, src, title)
+				level, title := parseHeaderString(header)
+				assertSectionExists(t, doc, src, level, title)
 			}
 		})
 	}
