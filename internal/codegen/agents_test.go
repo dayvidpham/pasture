@@ -78,6 +78,7 @@ func TestGenerateAgent_SectionChecks(t *testing.T) {
 
 			if check.MustHaveFigureBlocks {
 				doc, src := parseMD(t, got)
+				assertValidHeadingNesting(t, doc, src)
 				assertSectionExists(t, doc, src, 2, "Figures")
 				assert.True(t, hasCodeBlock(doc, src, 2, "Figures"),
 					"generated agent for role %q must contain code fence blocks inside ## Figures\n\nGenerated content:\n%s",
@@ -149,6 +150,7 @@ func TestGenerateAgent_WorkerContent(t *testing.T) {
 	require.NotEmpty(t, got)
 
 	doc, src := parseMD(t, got)
+	assertValidHeadingNesting(t, doc, src)
 	assertSectionContains(t, doc, src, 2, "Constraints", "C-worker-gates")
 	assertSectionContains(t, doc, src, 2, "Constraints", "C-agent-commit")
 }
@@ -188,6 +190,7 @@ func TestGenerateAgent_FrontmatterFormat(t *testing.T) {
 
 			// Verify the H1 heading appears after frontmatter.
 			docH1, srcH1 := parseMD(t, got)
+			assertValidHeadingNesting(t, docH1, srcH1)
 			assert.Greater(t, countHeadings(docH1, srcH1, 1), 0,
 				"generated agent for %q must contain an H1 heading after frontmatter\n\nContent:\n%s", role, got)
 		})
@@ -219,6 +222,7 @@ func TestGenerateAgent_SupervisorContainsSections(t *testing.T) {
 
 	// Parse document for structural assertions.
 	doc, src := parseMD(t, got)
+	assertValidHeadingNesting(t, doc, src)
 
 	// H1 heading.
 	assert.Greater(t, countHeadings(doc, src, 1), 0, "must have H1 heading")

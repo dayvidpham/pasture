@@ -85,6 +85,7 @@ func TestGenerateSkill_ContainsSections(t *testing.T) {
 			}
 
 			doc, src := parseMD(t, result)
+			assertValidHeadingNesting(t, doc, src)
 			for _, header := range tc.MustContainHeaders {
 				level, title := parseHeaderString(header)
 				assertSectionExists(t, doc, src, level, title)
@@ -270,6 +271,7 @@ func TestGenerateSubSkill_InitMode(t *testing.T) {
 
 	// The hand-authored heading should be preserved (dropPrefix=false for sub-skills).
 	doc, src := parseMD(t, result)
+	assertValidHeadingNesting(t, doc, src)
 	assertSectionExists(t, doc, src, 1, "Plan Tasks")
 	assertSectionContains(t, doc, src, 1, "Plan Tasks", "Hand-authored body.")
 	// The generated section should contain the markers (template markers, not markdown structure).
@@ -345,6 +347,7 @@ func TestGenerateSkill_BodyPreserved(t *testing.T) {
 	require.NoError(t, err)
 
 	doc, src := parseMD(t, result)
+	assertValidHeadingNesting(t, doc, src)
 	assertSectionExists(t, doc, src, 2, "My Custom Section")
 	assertSectionContains(t, doc, src, 2, "My Custom Section", "This is hand-authored.")
 }

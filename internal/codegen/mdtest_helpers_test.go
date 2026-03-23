@@ -278,3 +278,39 @@ func countHeadings(doc ast.Node, src []byte, level int) int {
 	})
 	return count
 }
+
+// assertValidHeadingNesting walks the parsed markdown AST and fails the test
+// if any heading skips a nesting level (e.g., H1 directly followed by H3
+// without an intervening H2).
+//
+// Algorithm: track the deepest heading level seen so far. If a new heading's
+// level is more than one greater than the deepest seen, a level was skipped.
+//
+//	maxLevelSeen = 0
+//	for each heading in document order:
+//	    if heading.Level > maxLevelSeen + 1 → FAIL
+//	    if heading.Level > maxLevelSeen     → update maxLevelSeen
+func assertValidHeadingNesting(t *testing.T, doc ast.Node, src []byte) {
+	t.Helper()
+	maxLevelSeen := 0
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		h, ok := n.(*ast.Heading)
+		if !ok {
+			return ast.WalkContinue, nil
+		}
+		if h.Level > maxLevelSeen+1 {
+			title := headingText(n, src)
+			t.Errorf(
+				"heading %q at level %d skips level %d — expected H%d before H%d",
+				title, h.Level, maxLevelSeen+1, maxLevelSeen+1, h.Level,
+			)
+		}
+		if h.Level > maxLevelSeen {
+			maxLevelSeen = h.Level
+		}
+		return ast.WalkContinue, nil
+	})
+}

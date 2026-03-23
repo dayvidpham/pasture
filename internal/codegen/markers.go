@@ -252,9 +252,10 @@ func ReplaceMarkerRegion(oldContent, rendered string, dropPrefix bool) (string, 
 // PrependMarkers adds the BEGIN/END marker pair to the top of content when
 // content does not already contain the markers.
 //
-// It is used by --init mode to prepare files before generation. The returned
-// string has the markers on the first two lines, followed by a blank line,
-// followed by the original content.
+// It is used by --init mode for role SKILL.md files (where GenerateSkill uses
+// dropPrefix=true, so the template owns the full heading and frontmatter).
+// The returned string has the markers on the first two lines, followed by a
+// blank line, followed by the original content.
 //
 // If content already contains both markers (as reported by HasMarkers),
 // it is returned unchanged to avoid double-prepending.
@@ -263,4 +264,25 @@ func PrependMarkers(content string) string {
 		return content
 	}
 	return GeneratedBegin + "\n" + GeneratedEnd + "\n\n" + content
+}
+
+// AppendMarkers adds the BEGIN/END marker pair to the end of content when
+// content does not already contain the markers.
+//
+// It is used by --init mode for sub-skill SKILL.md files (where GenerateSubSkill
+// uses dropPrefix=false, preserving the hand-authored H1 heading before BEGIN).
+// Appending keeps the hand-authored heading as the prefix so that the generated
+// section appears after it and heading nesting is valid.
+//
+// If content already contains both markers (as reported by HasMarkers),
+// it is returned unchanged to avoid double-appending.
+func AppendMarkers(content string) string {
+	if HasMarkers(content) {
+		return content
+	}
+	// Ensure content ends with a newline before appending markers.
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	return content + GeneratedBegin + "\n" + GeneratedEnd + "\n"
 }

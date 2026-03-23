@@ -572,13 +572,16 @@ func GenerateSubSkill(commandID string, skillPath string, figuresDir string, opt
 	}
 	content := string(oldContent)
 
-	// In Init mode, prepend markers if missing.
+	// In Init mode, append markers if missing. For sub-skills the hand-authored
+	// H1 heading is the prefix (preserved by dropPrefix=false), so markers must
+	// be appended after the existing content, not prepended, to keep the heading
+	// before the generated section and maintain valid heading nesting.
 	if opts.Init && !HasMarkers(content) {
-		content = PrependMarkers(content)
+		content = AppendMarkers(content)
 		if opts.Write {
 			if err := os.WriteFile(skillPath, []byte(content), 0o644); err != nil {
 				return "", fmt.Errorf(
-					"codegen.GenerateSubSkill: cannot write marker-prepended file %q: %w",
+					"codegen.GenerateSubSkill: cannot write marker-appended file %q: %w",
 					skillPath, err,
 				)
 			}
