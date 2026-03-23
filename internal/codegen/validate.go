@@ -74,6 +74,7 @@ type SchemaIndex struct {
 	ConstraintIDs map[string]bool
 	DocumentIDs   map[string]bool
 	TeamIDs       map[string]bool
+	WorkflowIDs   map[string]bool
 	SeverityIDs   map[string]bool
 
 	// EnumValueIDs maps enum name → set of value IDs defined within it.
@@ -294,6 +295,7 @@ func newSchemaIndex() SchemaIndex {
 		ConstraintIDs:      make(map[string]bool),
 		DocumentIDs:        make(map[string]bool),
 		TeamIDs:            make(map[string]bool),
+		WorkflowIDs:        make(map[string]bool),
 		SeverityIDs:        make(map[string]bool),
 		EnumValueIDs:       make(map[string]map[string]bool),
 		PhaseNumbers:       make(map[string]int),
@@ -521,6 +523,16 @@ func buildIndex(root *XMLNode) (SchemaIndex, []ValidationError) {
 		}
 	}
 
+	// Workflows
+	for _, wf := range root.Iter("workflow") {
+		desc := elemDesc(wf)
+		checkRequired(&errors, desc, wf, []string{"id", "name"})
+		wid := wf.Attr("id")
+		if wid != "" {
+			checkIDUnique(&errors, wid, idx.WorkflowIDs, desc, "workflow")
+		}
+	}
+
 	// Title conventions
 	for _, tc := range root.Iter("title-convention") {
 		desc := elemDesc(tc)
@@ -568,11 +580,8 @@ func entityTypeToSet(typeAttr string, index SchemaIndex) map[string]bool {
 		return index.DocumentIDs
 	case "team":
 		return index.TeamIDs
-	// "workflow" is intentionally absent: the current schema.xml does not
-	// define any <workflow> elements, so SchemaIndex carries no WorkflowIDs
-	// set. If workflow entities are added to the schema in a future iteration,
-	// add a WorkflowIDs map to SchemaIndex, populate it in buildIndex, and
-	// add a "workflow" case here.
+	case "workflow":
+		return index.WorkflowIDs
 	}
 	return nil
 }
@@ -893,14 +902,28 @@ func checkSemantics(root *XMLNode, index SchemaIndex) []ValidationError {
 	// Rules 7 and 8 are absent from the Python validate_schema.py and are not ported here.
 
 	// 9. Each role owns >= 1 phase
-	for rid, phases := range index.RolePhaseRefs {
-		if len(phases) == 0 {
-			errors = append(errors, ValidationError{
-				Layer:       LayerSemantic,
-				ElementPath: fmt.Sprintf("role[@id='%s']", rid),
-				Message:     "role owns no phases",
-			})
+	// Sort role IDs so output is deterministic regardless of map iteration order.
+	{
+		sortedRoleIDs9 := make([]string, 0, len(index.RolePhaseRefs))
+		for rid := range index.RolePhaseRefs {
+			sortedRoleIDs9 = append(sortedRoleIDs9, rid)
 		}
+		sort.Strings(sortedRoleIDs9)
+		var rule9Errors []ValidationError
+		for _, rid := range sortedRoleIDs9 {
+			phases := index.RolePhaseRefs[rid]
+			if len(phases) == 0 {
+				rule9Errors = append(rule9Errors, ValidationError{
+					Layer:       LayerSemantic,
+					ElementPath: fmt.Sprintf("role[@id='%s']", rid),
+					Message:     "role owns no phases",
+				})
+			}
+		}
+		sort.Slice(rule9Errors, func(i, j int) bool {
+			return rule9Errors[i].ElementPath < rule9Errors[j].ElementPath
+		})
+		errors = append(errors, rule9Errors...)
 	}
 
 	// 10. Each command with <phases> must have a <file> child
@@ -918,38 +941,66 @@ func checkSemantics(root *XMLNode, index SchemaIndex) []ValidationError {
 	}
 
 	// 11. Review axis letters unique
-	seenLetters := make(map[string]string)
-	for aid, letter := range index.AxisLetters {
-		if firstAid, exists := seenLetters[letter]; exists {
-			errors = append(errors, ValidationError{
-				Layer:       LayerSemantic,
-				ElementPath: fmt.Sprintf("axis[@id='%s']", aid),
-				Message:     fmt.Sprintf("duplicate letter '%s' (first seen on axis[@id='%s'])", letter, firstAid),
-			})
-		} else {
-			seenLetters[letter] = aid
+	// Sort axis IDs so output is deterministic regardless of map iteration order.
+	{
+		sortedAxisIDs11 := make([]string, 0, len(index.AxisLetters))
+		for aid := range index.AxisLetters {
+			sortedAxisIDs11 = append(sortedAxisIDs11, aid)
 		}
+		sort.Strings(sortedAxisIDs11)
+		seenLetters := make(map[string]string)
+		var rule11Errors []ValidationError
+		for _, aid := range sortedAxisIDs11 {
+			letter := index.AxisLetters[aid]
+			if firstAid, exists := seenLetters[letter]; exists {
+				rule11Errors = append(rule11Errors, ValidationError{
+					Layer:       LayerSemantic,
+					ElementPath: fmt.Sprintf("axis[@id='%s']", aid),
+					Message:     fmt.Sprintf("duplicate letter '%s' (first seen on axis[@id='%s'])", letter, firstAid),
+				})
+			} else {
+				seenLetters[letter] = aid
+			}
+		}
+		sort.Slice(rule11Errors, func(i, j int) bool {
+			return rule11Errors[i].ElementPath < rule11Errors[j].ElementPath
+		})
+		errors = append(errors, rule11Errors...)
 	}
 
 	// 12. Startup sequence step orders sequential
-	for sid, orders := range index.StartupStepOrders {
-		if len(orders) == 0 {
-			continue
+	// Sort substep IDs so output is deterministic regardless of map iteration order.
+	{
+		sortedSubstepIDs12 := make([]string, 0, len(index.StartupStepOrders))
+		for sid := range index.StartupStepOrders {
+			sortedSubstepIDs12 = append(sortedSubstepIDs12, sid)
 		}
-		sorted := make([]int, len(orders))
-		copy(sorted, orders)
-		sort.Ints(sorted)
-		expected := make([]int, len(orders))
-		for i := range expected {
-			expected[i] = i + 1
+		sort.Strings(sortedSubstepIDs12)
+		var rule12Errors []ValidationError
+		for _, sid := range sortedSubstepIDs12 {
+			orders := index.StartupStepOrders[sid]
+			if len(orders) == 0 {
+				continue
+			}
+			sorted := make([]int, len(orders))
+			copy(sorted, orders)
+			sort.Ints(sorted)
+			expected := make([]int, len(orders))
+			for i := range expected {
+				expected[i] = i + 1
+			}
+			if !intsEqual(sorted, expected) {
+				rule12Errors = append(rule12Errors, ValidationError{
+					Layer:       LayerSemantic,
+					ElementPath: fmt.Sprintf("substep[@id='%s']/startup-sequence", sid),
+					Message:     fmt.Sprintf("step orders not sequential: found %v, expected %v", sorted, expected),
+				})
+			}
 		}
-		if !intsEqual(sorted, expected) {
-			errors = append(errors, ValidationError{
-				Layer:       LayerSemantic,
-				ElementPath: fmt.Sprintf("substep[@id='%s']/startup-sequence", sid),
-				Message:     fmt.Sprintf("step orders not sequential: found %v, expected %v", sorted, expected),
-			})
-		}
+		sort.Slice(rule12Errors, func(i, j int) bool {
+			return rule12Errors[i].ElementPath < rule12Errors[j].ElementPath
+		})
+		errors = append(errors, rule12Errors...)
 	}
 
 	// 13. Agent template min-count <= max-count

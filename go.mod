@@ -9,6 +9,7 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.20.1
 	github.com/stretchr/testify v1.10.0
+	github.com/yuin/goldmark v1.7.17
 	go.temporal.io/api v1.46.0
 	go.temporal.io/sdk v1.34.0
 	google.golang.org/grpc v1.67.3
