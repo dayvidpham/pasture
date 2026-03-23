@@ -20,6 +20,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -73,10 +74,19 @@ var commandSkillDirs = map[string]string{
 }
 
 func main() {
-	root, err := moduleRoot()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
-		os.Exit(1)
+	outputRoot := flag.String("output-root", "", "output root directory (default: module root, found by walking up from cwd to go.mod)")
+	flag.Parse()
+
+	var root string
+	if *outputRoot != "" {
+		root = *outputRoot
+	} else {
+		var err error
+		root, err = moduleRoot()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	opts := codegen.DefaultOptions // Diff: true, Write: true
