@@ -201,11 +201,11 @@ Agents coordinate through **beads** tasks and comments:
 
 | Action | Command |
 |--------|---------|
-| Check task details | `bd show <task-id>` |
 | List blocked | `bd blocked` |
-| Update status | `bd update <task-id> --status=in_progress` |
 | Add progress note | `bd comments add <task-id> "Progress: ..."` |
 | List in-progress | `bd list --pretty --status=in_progress` |
+| Check task details | `bd show <task-id>` |
+| Update status | `bd update <task-id> --status=in_progress` |
 
 ### Workflows
 

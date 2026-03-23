@@ -17,6 +17,8 @@ package codegen
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 
 	"github.com/dayvidpham/pasture/internal/types"
@@ -442,24 +444,30 @@ func GetRoleContext(role types.RoleId) RoleContext {
 	roleSpec := RoleSpecs[role]
 
 	// Checklists filtered by role_ref matching this role.
+	// Sort keys for deterministic output order.
 	var checklists []Checklist
-	for _, spec := range ChecklistSpecs {
+	for _, id := range slices.Sorted(maps.Keys(ChecklistSpecs)) {
+		spec := ChecklistSpecs[id]
 		if spec.RoleRef == role {
 			checklists = append(checklists, spec)
 		}
 	}
 
 	// Coordination commands: role-specific (RoleRef == role) OR shared.
+	// Sort keys for deterministic output order.
 	var coordCommands []CoordinationCommand
-	for _, cmd := range CoordinationCommands {
+	for _, id := range slices.Sorted(maps.Keys(CoordinationCommands)) {
+		cmd := CoordinationCommands[id]
 		if cmd.RoleRef == role || cmd.Shared {
 			coordCommands = append(coordCommands, cmd)
 		}
 	}
 
 	// Workflows filtered by RoleRef matching this role.
+	// Sort keys for deterministic output order.
 	var workflows []Workflow
-	for _, wf := range WorkflowSpecs {
+	for _, id := range slices.Sorted(maps.Keys(WorkflowSpecs)) {
+		wf := WorkflowSpecs[id]
 		if wf.RoleRef == role {
 			workflows = append(workflows, wf)
 		}

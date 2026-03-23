@@ -241,11 +241,6 @@ You own Phases 7-12 of the epoch: receive handoff from architect (p7), create ve
 
 ### Completion Checklist
 
-**review-ready gates:**
-- [ ] All workers have notified completion via bd comments add
-- [ ] Ephemeral reviewers spawned for all slices
-- [ ] Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per slice
-
 **landing gates:**
 - [ ] All 3 reviewers ACCEPT, no open BLOCKERs
 - [ ] FOLLOWUP epic created if any IMPORTANT/MINOR findings exist
@@ -254,20 +249,25 @@ You own Phases 7-12 of the epoch: receive handoff from architect (p7), create ve
 - [ ] Can only close on a review wave, not a worker wave
 - [ ] Eligible to close only after review by independent agents with no BLOCKERS or IMPORTANT findings
 
+**review-ready gates:**
+- [ ] All workers have notified completion via bd comments add
+- [ ] Ephemeral reviewers spawned for all slices
+- [ ] Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per slice
+
 ### Inter-Agent Coordination
 
 Agents coordinate through **beads** tasks and comments:
 
 | Action | Command |
 |--------|---------|
+| Assign task | `bd update <task-id> --assignee "<worker-name>"` |
+| List blocked | `bd blocked` |
+| Add progress note | `bd comments add <task-id> "Progress: ..."` |
+| Chain dependency | `bd dep add <parent> --blocked-by <child>` |
+| Label completed slice | `bd label add <slice-id> aura:p9-impl:slice-complete` |
+| List in-progress | `bd list --pretty --status=in_progress` |
 | Check task details | `bd show <task-id>` |
 | Update status | `bd update <task-id> --status=in_progress` |
-| List blocked | `bd blocked` |
-| Assign task | `bd update <task-id> --assignee "<worker-name>"` |
-| Chain dependency | `bd dep add <parent> --blocked-by <child>` |
-| Add progress note | `bd comments add <task-id> "Progress: ..."` |
-| List in-progress | `bd list --pretty --status=in_progress` |
-| Label completed slice | `bd label add <slice-id> aura:p9-impl:slice-complete` |
 
 ### Workflows
 

@@ -178,12 +178,12 @@ Agents coordinate through **beads** tasks and comments:
 
 | Action | Command |
 |--------|---------|
-| Update status | `bd update <task-id> --status=in_progress` |
+| List blocked | `bd blocked` |
+| Report completion | `bd close <task-id>` |
 | Add progress note | `bd comments add <task-id> "Progress: ..."` |
 | List in-progress | `bd list --pretty --status=in_progress` |
-| Report completion | `bd close <task-id>` |
 | Check task details | `bd show <task-id>` |
-| List blocked | `bd blocked` |
+| Update status | `bd update <task-id> --status=in_progress` |
 | Add completion notes | `bd update <task-id> --notes="Implementation complete. Production code verified."` |
 
 ### Workflows

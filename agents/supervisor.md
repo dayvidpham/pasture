@@ -167,11 +167,6 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 
 ## Completion Checklist
 
-**review-ready gates:**
-- [ ] All workers have notified completion via bd comments add
-- [ ] Ephemeral reviewers spawned for all slices
-- [ ] Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per slice
-
 **landing gates:**
 - [ ] All 3 reviewers ACCEPT, no open BLOCKERs
 - [ ] FOLLOWUP epic created if any IMPORTANT/MINOR findings exist
@@ -179,6 +174,11 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 - [ ] All upstream tasks closed or dependency-resolved
 - [ ] Can only close on a review wave, not a worker wave
 - [ ] Eligible to close only after review by independent agents with no BLOCKERS or IMPORTANT findings
+
+**review-ready gates:**
+- [ ] All workers have notified completion via bd comments add
+- [ ] Ephemeral reviewers spawned for all slices
+- [ ] Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per slice
 
 ## Workflows
 
