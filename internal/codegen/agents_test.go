@@ -24,9 +24,9 @@ type agentCheck struct {
 
 // agentSuite is the top-level structure of testdata/agents.yaml.
 type agentSuite struct {
-	AgentChecks        []agentCheck `yaml:"agent_checks"`
-	RolesWithTools     []string     `yaml:"roles_with_tools"`
-	RolesWithoutTools  []string     `yaml:"roles_without_tools"`
+	AgentChecks       []agentCheck `yaml:"agent_checks"`
+	RolesWithTools    []string     `yaml:"roles_with_tools"`
+	RolesWithoutTools []string     `yaml:"roles_without_tools"`
 }
 
 // testFiguresDir returns the path to the figures directory used by agent tests.
