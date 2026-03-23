@@ -43,6 +43,8 @@ skills: aura:reviewer-comment, aura:reviewer-review-code, aura:reviewer-review-p
 - Then: chain dependency: bd dep add parent --blocked-by child
 - Should not: skip dependency chaining or invert direction
 
+_Example (correct)_
+
 ```bash
 # Full dependency chain: work flows bottom-up, closure flows top-down
 bd dep add request-id --blocked-by ure-id
@@ -51,7 +53,6 @@ bd dep add proposal-id --blocked-by impl-plan-id
 bd dep add impl-plan-id --blocked-by slice-1-id
 bd dep add slice-1-id --blocked-by leaf-task-a-id
 ```
-_Example (correct)_
 
 **[C-audit-never-delete]**
 - Given: any task or label
@@ -71,15 +72,17 @@ _Example (correct)_
 - Then: parent blocked-by child: bd dep add stays-open --blocked-by must-finish-first
 - Should not: invert (child blocked-by parent)
 
+_Example (correct)_ — also illustrates: C-audit-dep-chain
+
 ```bash
 bd dep add request-id --blocked-by ure-id
 ```
-_Example (correct)_ — also illustrates: C-audit-dep-chain
+
+_Example (anti-pattern)_
 
 ```bash
 bd dep add ure-id --blocked-by request-id
 ```
-_Example (anti-pattern)_
 
 **[C-frontmatter-refs]**
 - Given: cross-task references (URD, request, etc.)
@@ -111,6 +114,8 @@ _Example (anti-pattern)_
 - Then: ALWAYS create 3 severity group tasks (BLOCKER, IMPORTANT, MINOR) immediately
 - Should not: lazily create severity groups only when findings exist
 
+_Example (correct)_
+
 ```bash
 # Create all 3 severity groups immediately (even if empty)
 bd create --title "SLICE-1-REVIEW-A-1 BLOCKER" \
@@ -124,7 +129,8 @@ bd create --title "SLICE-1-REVIEW-A-1 MINOR" \
 bd close <empty-important-id>
 bd close <empty-minor-id>
 ```
-_Example (correct)_
+
+_Example (anti-pattern)_
 
 ```bash
 # WRONG: only creating groups when findings exist
@@ -132,7 +138,6 @@ _Example (correct)_
 if blocker_findings:
     bd create --title "BLOCKER" ...
 ```
-_Example (anti-pattern)_
 
 **[C-severity-not-plan]**
 - Given: plan review (p4)

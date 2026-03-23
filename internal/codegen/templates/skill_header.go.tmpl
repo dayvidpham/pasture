@@ -57,10 +57,11 @@ _(No commands assigned to this role)_
 {{- if .Examples }}
 {{- range .Examples }}
 
+_Example ({{ .Label }})_{{- if .AlsoIllustrates }} — also illustrates: {{ .AlsoIllustrates }}{{- end }}
+
 ```{{ .Lang }}
 {{ .Code }}
 ```
-_Example ({{ .Label }})_{{- if .AlsoIllustrates }} — also illustrates: {{ .AlsoIllustrates }}{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
