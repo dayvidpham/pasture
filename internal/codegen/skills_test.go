@@ -84,12 +84,10 @@ func TestGenerateSkill_ContainsSections(t *testing.T) {
 				)
 			}
 
+			doc, src := parseMD(t, result)
 			for _, header := range tc.MustContainHeaders {
-				assert.True(t,
-					strings.Contains(result, header),
-					"output for role %q should contain header %q\n\nActual output (first 1000 chars):\n%s",
-					tc.Role, header, truncate(result, 1000),
-				)
+				_, title := parseHeaderString(header)
+				assertAnySectionExists(t, doc, src, title)
 			}
 		})
 	}
@@ -271,11 +269,10 @@ func TestGenerateSubSkill_InitMode(t *testing.T) {
 	require.NotEmpty(t, result, "GenerateSubSkill with Init=true should produce non-empty output")
 
 	// The hand-authored heading should be preserved (dropPrefix=false for sub-skills).
-	assert.Contains(t, result, "# Plan Tasks",
-		"generated output should preserve the hand-authored heading")
-	assert.Contains(t, result, "Hand-authored body.",
-		"generated output should preserve the hand-authored body below END marker")
-	// The generated section should contain the command description.
+	doc, src := parseMD(t, result)
+	assertSectionExists(t, doc, src, 1, "Plan Tasks")
+	assertSectionContains(t, doc, src, 1, "Plan Tasks", "Hand-authored body.")
+	// The generated section should contain the markers (template markers, not markdown structure).
 	assert.Contains(t, result, codegen.GeneratedBegin,
 		"generated output should contain BEGIN marker")
 	assert.Contains(t, result, codegen.GeneratedEnd,
@@ -347,10 +344,9 @@ func TestGenerateSkill_BodyPreserved(t *testing.T) {
 	result, err := codegen.GenerateSkill(types.RoleWorker, skillPath, "", opts)
 	require.NoError(t, err)
 
-	assert.Contains(t, result, "My Custom Section",
-		"generated output should preserve hand-authored body below END marker")
-	assert.Contains(t, result, "This is hand-authored.",
-		"generated output should preserve hand-authored body content")
+	doc, src := parseMD(t, result)
+	assertSectionExists(t, doc, src, 2, "My Custom Section")
+	assertSectionContains(t, doc, src, 2, "My Custom Section", "This is hand-authored.")
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -369,4 +365,18 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// parseHeaderString parses a markdown header string like "## My Section" into
+// its level (number of leading '#' characters) and trimmed title text.
+// Panics if the string does not start with at least one '#'.
+func parseHeaderString(header string) (level int, title string) {
+	i := 0
+	for i < len(header) && header[i] == '#' {
+		i++
+	}
+	if i == 0 {
+		panic("parseHeaderString: header does not start with '#': " + header)
+	}
+	return i, strings.TrimSpace(header[i:])
 }

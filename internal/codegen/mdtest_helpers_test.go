@@ -249,6 +249,21 @@ func assertHasTable(t *testing.T, doc ast.Node, src []byte, sectionLevel int, se
 	}
 }
 
+// assertAnySectionExists fails the test if no heading with the given title
+// exists in doc at any heading level (H1–H6).
+// Use this when the fixture specifies a heading title without committing to a
+// specific depth (e.g., fixtures written as "## Title" where the actual
+// template may render it at H3).
+func assertAnySectionExists(t *testing.T, doc ast.Node, src []byte, title string) {
+	t.Helper()
+	for level := 1; level <= 6; level++ {
+		if findSection(doc, src, level, title) != nil {
+			return
+		}
+	}
+	t.Errorf("expected a heading %q at any level (H1–H6) but it was not found in the document", title)
+}
+
 // countHeadings counts the number of heading nodes at the given level in doc.
 func countHeadings(doc ast.Node, src []byte, level int) int {
 	count := 0
