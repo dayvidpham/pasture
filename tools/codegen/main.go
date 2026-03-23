@@ -74,7 +74,7 @@ var commandSkillDirs = map[string]string{
 }
 
 func main() {
-	outputRoot := flag.String("output-root", "", "output root directory (default: module root, found by walking up from cwd to go.mod)")
+	outputRoot := flag.String("output", "", "output root directory (default: module root, found by walking up from cwd to go.mod)")
 	flag.Parse()
 
 	var root string
