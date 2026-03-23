@@ -281,35 +281,25 @@ Agents coordinate through **beads** tasks and comments:
 Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full cycle: plan slices, launch workers, spawn reviewers for per-slice review, workers fix, repeat max 3 cycles per slice.
 
 **Stage 1: Plan** _(sequential)_
-
 - Read RATIFIED_PLAN and URD via bd show (`bd show <ratified-plan-id> && bd show <urd-id>`)
-
 - Spawn ephemeral Explore subagents via Task tool to map codebase areas
-
 - Use Explore findings to decompose into vertical slices with integration points
-
 - Create leaf tasks (L1/L2/L3) for every slice (`bd dep add <slice-id> --blocked-by <leaf-task-id>`)
 
 Exit conditions:
 - **proceed**: All slices created with leaf tasks, dependency-chained, assigned
 
 **Stage 2: Build** _(parallel)_
-
 - Spawn N workers for parallel slice implementation (`aura-swarm start --epic <epic-id>`)
-
 - Monitor worker progress via bd list and bd show (`bd list --labels="aura:p9-impl:s9-slice" --status=in_progress`)
 
 Exit conditions:
 - **proceed**: All workers have notified completion via bd comments add
 
 **Stage 3: Review + Fix Cycles** _(conditional-loop)_
-
 - Spawn reviewers via Task tool for per-slice code review
-
 - Reviewers create severity groups (BLOCKER/IMPORTANT/MINOR) per slice
-
 - Create FOLLOWUP epic if any IMPORTANT/MINOR findings exist
-
 - Workers fix BLOCKERs and IMPORTANT findings
 
 Exit conditions:

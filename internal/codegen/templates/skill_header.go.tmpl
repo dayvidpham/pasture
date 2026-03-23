@@ -153,8 +153,8 @@ Agents coordinate through **beads** tasks and comments:
 {{- range .Stages }}
 
 **Stage {{ .Order }}: {{ .Name }}** _({{ .Execution }})_
-{{- range .Actions }}
 
+{{- range .Actions }}
 - {{ .Instruction }}{{- if .Command }} (`{{ .Command }}`){{- end }}
 {{- end }}
 {{- if .ExitConditions }}

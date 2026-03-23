@@ -221,36 +221,28 @@ Agents coordinate through **beads** tasks and comments:
 Sequential planning phases 1-7. The architect captures requirements, writes proposals, coordinates review consensus, and hands off to supervisor.
 
 **Stage 1: Request** _(sequential)_
-
 - Capture user request verbatim via /aura:user-request
-
 - Classify request along 4 axes: scope, complexity, risk, domain novelty
 
 Exit conditions:
 - **proceed**: Classification confirmed, research and explore complete
 
 **Stage 2: Elicit** _(sequential)_
-
 - Run URE survey with user via /aura:user-elicit
-
 - Create URD as single source of truth for requirements
 
 Exit conditions:
 - **proceed**: URD created with structured requirements
 
 **Stage 3: Propose** _(sequential)_
-
 - Write full technical proposal: interfaces, approach, validation checklist, BDD criteria
-
 - Create PROPOSAL-N task via /aura:architect:propose-plan
 
 Exit conditions:
 - **proceed**: Proposal created
 
 **Stage 4: Review** _(conditional-loop)_
-
 - Spawn 3 axis-specific reviewers (A=Correctness, B=Test quality, C=Elegance)
-
 - Wait for all 3 reviewers to vote
 
 Exit conditions:
@@ -258,7 +250,6 @@ Exit conditions:
 - **continue**: Any reviewer votes REVISE — create PROPOSAL-N+1, mark old as superseded, re-spawn reviewers
 
 **Stage 5: Plan UAT** _(sequential)_
-
 - Present plan to user with demonstrative examples via /aura:user-uat
 
 Exit conditions:
@@ -266,20 +257,15 @@ Exit conditions:
 - **continue**: User requests changes — create PROPOSAL-N+1
 
 **Stage 6: Ratify** _(sequential)_
-
 - Add ratify label to accepted PROPOSAL-N
-
 - Mark all prior proposals aura:superseded
-
 - Create placeholder IMPL_PLAN task
 
 Exit conditions:
 - **proceed**: Proposal ratified, IMPL_PLAN placeholder created
 
 **Stage 7: Handoff** _(sequential)_
-
 - Create handoff document with full inline provenance at .git/.aura/handoff/
-
 - Transfer to supervisor via /aura:architect:handoff
 
 Exit conditions:
