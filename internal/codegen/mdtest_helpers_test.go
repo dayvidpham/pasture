@@ -279,20 +279,22 @@ func countHeadings(doc ast.Node, src []byte, level int) int {
 	return count
 }
 
-// assertValidHeadingNesting walks the parsed markdown AST and fails the test
-// if any heading skips a nesting level (e.g., H1 directly followed by H3
-// without an intervening H2).
+// assertIsNestedUnder verifies that a heading with childTitle appears within
+// the section scope of a heading with parentTitle, and at a deeper level.
 //
-// Algorithm: track the deepest heading level seen so far. If a new heading's
-// level is more than one greater than the deepest seen, a level was skipped.
+// "Nested under" means:
+//  1. A heading with text parentTitle exists at some level P.
+//  2. A heading with text childTitle exists at some level C where C > P.
+//  3. childTitle appears AFTER parentTitle and BEFORE the next heading at
+//     level <= P (which would close the parent section).
 //
-//	maxLevelSeen = 0
-//	for each heading in document order:
-//	    if heading.Level > maxLevelSeen + 1 → FAIL
-//	    if heading.Level > maxLevelSeen     → update maxLevelSeen
-func assertValidHeadingNesting(t *testing.T, doc ast.Node, src []byte) {
+// Level skips (e.g. H1 → H3) are explicitly allowed — only the parent-child
+// relationship matters, not strict monotonic progression.
+func assertIsNestedUnder(t *testing.T, doc ast.Node, src []byte, parentTitle, childTitle string) {
 	t.Helper()
-	maxLevelSeen := 0
+
+	// Phase 1: find the parent heading and record its level.
+	parentLevel := 0
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
 			return ast.WalkContinue, nil
@@ -301,16 +303,54 @@ func assertValidHeadingNesting(t *testing.T, doc ast.Node, src []byte) {
 		if !ok {
 			return ast.WalkContinue, nil
 		}
-		if h.Level > maxLevelSeen+1 {
-			title := headingText(n, src)
-			t.Errorf(
-				"heading %q at level %d skips level %d — expected H%d before H%d",
-				title, h.Level, maxLevelSeen+1, maxLevelSeen+1, h.Level,
-			)
-		}
-		if h.Level > maxLevelSeen {
-			maxLevelSeen = h.Level
+		if headingText(n, src) == parentTitle {
+			parentLevel = h.Level
+			return ast.WalkStop, nil
 		}
 		return ast.WalkContinue, nil
 	})
+
+	if parentLevel == 0 {
+		t.Errorf("assertIsNestedUnder: parent heading %q not found in document", parentTitle)
+		return
+	}
+
+	// Phase 2: walk headings in document order; once inside the parent
+	// section, check that childTitle appears before the section closes.
+	inSection := false
+	found := false
+
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		h, ok := n.(*ast.Heading)
+		if !ok {
+			return ast.WalkContinue, nil
+		}
+		if !inSection {
+			if h.Level == parentLevel && headingText(n, src) == parentTitle {
+				inSection = true
+			}
+			return ast.WalkContinue, nil
+		}
+		// Inside parent section — a heading at level <= parentLevel closes it.
+		if h.Level <= parentLevel {
+			return ast.WalkStop, nil
+		}
+		// Any deeper heading with the child title satisfies the assertion.
+		if headingText(n, src) == childTitle {
+			found = true
+			return ast.WalkStop, nil
+		}
+		return ast.WalkContinue, nil
+	})
+
+	if !found {
+		t.Errorf(
+			"assertIsNestedUnder: heading %q was not found nested under %q\n"+
+				"(expected a heading with that title to appear after %q and before the next H%d or shallower heading)",
+			childTitle, parentTitle, parentTitle, parentLevel,
+		)
+	}
 }

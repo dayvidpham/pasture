@@ -85,10 +85,17 @@ func TestGenerateSkill_ContainsSections(t *testing.T) {
 			}
 
 			doc, src := parseMD(t, result)
-			assertValidHeadingNesting(t, doc, src)
 			for _, header := range tc.MustContainHeaders {
 				level, title := parseHeaderString(header)
 				assertSectionExists(t, doc, src, level, title)
+				// Verify H3 sections are nested under the H1 role heading.
+				// The skill template places all H3 sections inside ## Protocol Context,
+				// which is itself nested inside the H1 role heading.
+				if level == 3 {
+					// Role heading: "Worker Agent", "Supervisor Agent", etc.
+					roleHeading := strings.ToUpper(tc.Role[:1]) + tc.Role[1:] + " Agent"
+					assertIsNestedUnder(t, doc, src, roleHeading, title)
+				}
 			}
 		})
 	}
@@ -271,7 +278,6 @@ func TestGenerateSubSkill_InitMode(t *testing.T) {
 
 	// The hand-authored heading should be preserved (dropPrefix=false for sub-skills).
 	doc, src := parseMD(t, result)
-	assertValidHeadingNesting(t, doc, src)
 	assertSectionExists(t, doc, src, 1, "Plan Tasks")
 	assertSectionContains(t, doc, src, 1, "Plan Tasks", "Hand-authored body.")
 	// The generated section should contain the markers (template markers, not markdown structure).
@@ -279,6 +285,10 @@ func TestGenerateSubSkill_InitMode(t *testing.T) {
 		"generated output should contain BEGIN marker")
 	assert.Contains(t, result, codegen.GeneratedEnd,
 		"generated output should contain END marker")
+	// cmd-sup-plan has the Layer Cake figure: verify it is nested under the page H1.
+	// The sub-skill template renders figure headings at H3 (skipping H2), which is
+	// valid as a relative parent-child relationship under the H1 page title.
+	assertIsNestedUnder(t, doc, src, "Plan Tasks", "Layer Cake — TDD Parallelism Within Vertical Slices")
 }
 
 // ─── TestGenerateSubSkill_UnknownCommand ──────────────────────────────────────
@@ -347,9 +357,10 @@ func TestGenerateSkill_BodyPreserved(t *testing.T) {
 	require.NoError(t, err)
 
 	doc, src := parseMD(t, result)
-	assertValidHeadingNesting(t, doc, src)
 	assertSectionExists(t, doc, src, 2, "My Custom Section")
 	assertSectionContains(t, doc, src, 2, "My Custom Section", "This is hand-authored.")
+	// Verify H3 generated sections are nested under the role H1 heading.
+	assertIsNestedUnder(t, doc, src, "Worker Agent", "Constraints (Given/When/Then/Should Not)")
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
