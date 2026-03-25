@@ -467,6 +467,7 @@ func TestGenerateIdempotent(t *testing.T) {
 	}{
 		{name: "cmd-sup-plan", commandID: "cmd-sup-plan", file: "skills/supervisor-plan-tasks/SKILL.md"},
 		{name: "cmd-sup-spawn", commandID: "cmd-sup-spawn", file: "skills/supervisor-spawn-worker/SKILL.md"},
+		{name: "cmd-impl-review", commandID: "cmd-impl-review", file: "skills/impl-review/SKILL.md"},
 	}
 
 	for _, tc := range subSkillTests {
@@ -513,8 +514,15 @@ func TestTwoPass_HeaderRegionUnchangedByBodyPass(t *testing.T) {
 			},
 		},
 	}
+	prev, hasPrev := codegen.SkillBodySpecs[string(types.RoleWorker)]
 	codegen.SkillBodySpecs[string(types.RoleWorker)] = testBody
-	t.Cleanup(func() { delete(codegen.SkillBodySpecs, string(types.RoleWorker)) })
+	t.Cleanup(func() {
+		if hasPrev {
+			codegen.SkillBodySpecs[string(types.RoleWorker)] = prev
+		} else {
+			delete(codegen.SkillBodySpecs, string(types.RoleWorker))
+		}
+	})
 
 	skillPath := writeSkillFile(t, skillFileWithMarkers())
 	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
@@ -547,8 +555,14 @@ func TestTwoPass_HeaderRegionUnchangedByBodyPass(t *testing.T) {
 // registered for a role, GenerateSkill produces output identical to the
 // header-only result (body pass is a no-op).
 func TestTwoPass_NoBodySpec_HeaderOnly(t *testing.T) {
-	// Ensure the worker role has no body spec for this test.
+	// Suppress body spec for worker to test header-only path.
+	prev, hasPrev := codegen.SkillBodySpecs[string(types.RoleWorker)]
 	delete(codegen.SkillBodySpecs, string(types.RoleWorker))
+	t.Cleanup(func() {
+		if hasPrev {
+			codegen.SkillBodySpecs[string(types.RoleWorker)] = prev
+		}
+	})
 
 	skillPath := writeSkillFile(t, skillFileWithMarkers())
 	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}

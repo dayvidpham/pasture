@@ -1,17 +1,14 @@
----
-name: impl-review
-description: Code review across all implementation slices (Phase 10)
----
-
 # Implementation Code Review (Phase 10)
+
+<!-- BEGIN GENERATED FROM aura schema -->
+**Command:** `aura:impl:review` — Code review coordination across all slices (Phase 10)
+<!-- END GENERATED FROM aura schema -->
 
 Conduct code review across ALL implementation slices. Each of 3 reviewers reviews every slice.
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-10-code-review)** <- Phase 10
 
 See `../protocol/CONSTRAINTS.md` for coding standards and severity definitions.
-
-## Given/When/Then/Should
 
 **Given** all slices complete **when** starting review **then** spawn 3 reviewers for ALL slices **should never** assign reviewers to single slices
 

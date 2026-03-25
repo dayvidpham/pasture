@@ -573,6 +573,11 @@ func GenerateSkill(roleID types.RoleId, skillPath string, figuresDir string, opt
 		}
 	}
 
+	// Pass 3: Validate the generated markdown structure.
+	if err := ValidateSkillStructure([]byte(newContent)); err != nil {
+		return "", fmt.Errorf("codegen.GenerateSkill: validate skill %q: %w", roleID, err)
+	}
+
 	// Print diff if requested and content changed.
 	if opts.Diff && newContent != content {
 		fmt.Print(unifiedDiff(skillPath, skillPath, content, newContent))
@@ -668,6 +673,11 @@ func GenerateSubSkill(commandID string, skillPath string, figuresDir string, opt
 				skillPath, commandID, err,
 			)
 		}
+	}
+
+	// Pass 3: Validate the generated markdown structure.
+	if err := ValidateSkillStructure([]byte(newContent)); err != nil {
+		return "", fmt.Errorf("codegen.GenerateSubSkill: validate sub-skill %q: %w", commandID, err)
 	}
 
 	// Print diff if requested and content changed.

@@ -327,18 +327,50 @@ func TestTitleConventionsNotEmpty(t *testing.T) {
 	}
 }
 
-// TestSkillBodySpecsCompleteness verifies the SkillBodySpecs map exists and is initialized.
+// TestSkillBodySpecsCompleteness verifies all 7 SkillBodySpecs entries exist
+// and each has non-empty Sections or Recipes (at least one must be populated).
 func TestSkillBodySpecsCompleteness(t *testing.T) {
 	expectedKeys := []string{
 		"supervisor", "supervisor-plan-tasks", "supervisor-spawn-worker",
 		"worker", "architect", "reviewer", "impl-review",
 	}
-	// For now, just verify the map exists and is initialized
-	// Content checks will be added after encoding slices complete
-	if codegen.SkillBodySpecs == nil {
-		t.Fatal("SkillBodySpecs is nil")
+
+	require.NotNil(t, codegen.SkillBodySpecs, "SkillBodySpecs must not be nil")
+	require.Len(t, codegen.SkillBodySpecs, len(expectedKeys),
+		"SkillBodySpecs should have exactly %d entries", len(expectedKeys))
+
+	for _, key := range expectedKeys {
+		t.Run(key, func(t *testing.T) {
+			body, ok := codegen.SkillBodySpecs[key]
+			require.True(t, ok,
+				"SkillBodySpecs missing entry for %q", key)
+
+			hasContent := len(body.Sections) > 0 || len(body.Recipes) > 0
+			assert.True(t, hasContent,
+				"SkillBodySpecs[%q] must have non-empty Sections or Recipes — "+
+					"found %d sections and %d recipes",
+				key, len(body.Sections), len(body.Recipes))
+
+			// Verify that sections have non-empty titles and content.
+			for i, section := range body.Sections {
+				assert.NotEmpty(t, section.Title,
+					"SkillBodySpecs[%q].Sections[%d].Title must not be empty", key, i)
+				// Content may be empty for pure-subsection parents, but
+				// if there are no subsections, content must be non-empty.
+				if len(section.Subsections) == 0 {
+					assert.NotEmpty(t, section.Content,
+						"SkillBodySpecs[%q].Sections[%d].Content must not be empty (no subsections)",
+						key, i)
+				}
+			}
+
+			// Verify that recipes have non-empty titles and code.
+			for i, recipe := range body.Recipes {
+				assert.NotEmpty(t, recipe.Title,
+					"SkillBodySpecs[%q].Recipes[%d].Title must not be empty", key, i)
+				assert.NotEmpty(t, recipe.Code,
+					"SkillBodySpecs[%q].Recipes[%d].Code must not be empty", key, i)
+			}
+		})
 	}
-	// NOTE: Map will be populated by init() functions in separate files.
-	// The full 7-entry check will be enforced after SLICE-3-6 complete.
-	_ = expectedKeys // Used in SLICE-7 for full verification
 }
