@@ -254,3 +254,227 @@ L2 Test File Requirements:
 
 ```
 <!-- END GENERATED FROM aura schema -->
+
+**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9
+
+## What You Own
+
+**NOT:** A single file or horizontal layer (e.g., "all types" or "all tests")
+**YES:** A full vertical slice (complete production code path end-to-end)
+
+**Example vertical slice: "CLI command with list subcommand"**
+- **Production code path:** `./bin/cli-tool command list` (what end users run)
+- **You own (within each file):**
+  - Types: `ListOptions`, `ListEntry` (in pkg/feature/types.go)
+  - Tests: list_test.go (importing actual CLI command package)
+  - Service: `ListItems()` method (in pkg/feature/service.go)
+  - CLI wiring: `listCmd` cobra command RunE handler (in cmd/feature/list.go)
+
+**Key insight:** You own the FEATURE end-to-end, not a layer or file.
+
+## Planning Backwards from Production Code Path
+
+**Start from the end, plan backwards:**
+
+1. **Identify your production code path:**
+   ```bash
+   bd show <task-id>  # Look for "productionCodePath" field
+   # Example: "pasture-msg epoch start"
+   # This is what end users will actually run
+   ```
+
+2. **Plan backwards from that end point:**
+   ```
+   End: User runs ./bin/pasture-msg epoch start --epoch-id my-epoch
+     |  (what code handles this?)
+   Entry: epochStartCmd.RunE in cmd/pasture-msg/epoch.go
+     |  (what handler does RunE delegate to?)
+   Handler: handlers.EpochStart(ctx, cfg.Connection, epochID, ...) in internal/handlers/epoch.go
+     |  (what service/workflow does handler call?)
+   Service: temporal.StartEpochWorkflow(...) or client.ExecuteWorkflow(...)
+     |  (what types does the handler need?)
+   Types: config.ConnectionConfig (input), types.OutputFormat (input), pasterrors.StructuredError (errors)
+   ```
+
+3. **Identify what you own in each layer:**
+   - **L1 Types:** Which types does your slice need?
+   - **L2 Tests:** How will you test the production code path?
+   - **L3 Implementation + Wiring:** What service methods + CLI wiring needed?
+
+4. **Verify no dual-export anti-pattern:**
+   - Your tests must import the same code users run
+   - Not a separate test-only function
+   - When tests pass, production must work (same code path)
+
+## Implementation Order (Layers Within Your Slice)
+
+You implement your vertical slice in layers (TDD approach):
+
+**Layer 1: Types** (only what your slice needs)
+```go
+// pkg/feature/types.go
+// Only add types for YOUR slice (e.g., list command)
+type ListOptions struct { /* ... */ }
+type ListEntry struct { /* ... */ }
+// Don't add types for other slices (e.g., DetailView for other commands)
+```
+
+**Layer 2: Tests** (importing production code)
+```go
+// cmd/feature/list_test.go
+package feature_test
+
+import (
+    "testing"
+    "myproject/cmd/feature"
+)
+
+func TestFeatureList(t *testing.T) {
+    // Test the actual CLI command
+    // This is what users will run
+    // Tests will FAIL - expected (no implementation yet)
+}
+```
+
+**CRITICAL:** Tests must import production code, not test-only export:
+```go
+// CORRECT: Import actual CLI package
+import "myproject/cmd/feature"
+
+// WRONG: Separate test-only handler (dual-export anti-pattern)
+import "myproject/internal/testhelpers/feature"
+```
+
+**Layer 3: Implementation + Wiring** (make tests pass)
+```go
+// internal/handlers/feature.go
+func FeatureList(
+    ctx context.Context,
+    conn config.ConnectionConfig,
+    limit int, format types.OutputFormat,
+    factory TemporalClientFactory,
+) (int, error) {
+    // Validate inputs (actionable errors)
+    if limit < 0 {
+        return int(ExitValidation), &pasterrors.StructuredError{
+            Category: pasterrors.CategoryValidation,
+            What:     "limit must be non-negative",
+            Why:      fmt.Sprintf("received limit=%d", limit),
+            Impact:   "cannot list items with invalid limit",
+            Fix:      "provide --limit with a value >= 0",
+        }
+    }
+    // Call service/workflow with real dependencies
+    return 0, nil
+}
+
+// cmd/pasture-msg/feature.go — thin RunE delegates to handler
+var featureListCmd = &cobra.Command{
+    Use:   "list",
+    Short: "List items",
+    RunE: func(cmd *cobra.Command, args []string) error {
+        cfg, err := resolveConfig(cmd)
+        if err != nil {
+            return err
+        }
+        format := resolveFormat(cmd, cfg)
+
+        limit, _ := cmd.Flags().GetInt("limit")
+
+        code, err := handlers.FeatureList(
+            context.Background(),
+            cfg.Connection,
+            limit, format,
+            nil, // DefaultClientFactory
+        )
+        if err != nil {
+            printError(err)
+        }
+        if code != 0 {
+            exitWithCode(code)
+        }
+        return nil
+    },
+}
+```
+
+**No TODO placeholders. No test-only exports. Production code wired and working.**
+
+## TDD Layer Awareness (Within Your Slice)
+
+**Layer 2 (your tests):**
+- Your tests WILL fail - implementation doesn't exist yet
+- This is correct and expected
+- Tests import actual production code (CLI command)
+- Test failure is OK in Layer 2; typecheck must pass
+
+**Layer 3 (your implementation + wiring):**
+- Failing tests from Layer 2 are your specification
+- Your job is to make those tests pass
+- Wire production code with real dependencies
+- Run tests - your tests should now PASS
+- If tests fail for unrelated code (other workers' slices), that's OK
+
+**Key insight:** A failing test for unimplemented code is NOT a blocker - it's the specification you're implementing against.
+
+## Reading from Beads
+
+Get your task details:
+```bash
+bd show <task-id>
+```
+
+Look for:
+- `productionCodePath`: What end users will run (e.g., "pasture-msg epoch start")
+- `validation_checklist`: Items you must satisfy
+- `acceptance_criteria`: BDD criteria (Given/When/Then/Should Not)
+- `workerOwns`: What parts of which files you own
+- `ratified_plan`: Link to parent RATIFIED_PLAN task
+
+Update status on start:
+```bash
+bd update <task-id> --status=in_progress
+```
+
+## Vertical Slice Fields (From Beads Task)
+
+- `slice`: Your slice identifier (e.g., "feature-list")
+- `productionCodePath`: What users run (e.g., "pasture-msg epoch start")
+- `workerOwns.types`: Which types you create
+- `workerOwns.tests`: Which test files you write
+- `workerOwns.implementation`: Which methods/actions you implement
+- `validation_checklist`: Items you must verify (includes production code works)
+- `acceptance_criteria`: BDD criteria for your slice
+- `ratified_plan`: Link to parent plan
+
+## Follow-up Slices (FOLLOWUP_SLICE-N)
+
+You may be assigned a `FOLLOWUP_SLICE-N` task instead of a `SLICE-N` task. The implementation procedure is identical, with these additions:
+
+- **Adopted leaf tasks**: Your slice task will list specific IMPORTANT/MINOR leaf tasks from the original code review that you must resolve. Check `bd show <task-id>` for an "Adopted Leaf Tasks" section.
+- **Dual-parent resolution**: The adopted leaf tasks are children of both the original severity group AND your FOLLOWUP_SLICE-N. Resolving the leaf task satisfies both parents.
+- **Completion handoff (h4)**: When completing a follow-up slice, your handoff to the reviewer must list which original leaf tasks were resolved.
+
+```bash
+# Completion comment for follow-up slices should include:
+bd comments add <task-id> "Implementation complete. Resolved leaf tasks: <leaf-task-id-1>, <leaf-task-id-2>"
+```
+
+## Updating Beads Status
+
+On start:
+```bash
+bd update <task-id> --status=in_progress
+```
+
+On complete:
+```bash
+bd update <task-id> --status=done
+bd update <task-id> --notes="Implementation complete. Production code verified working via code inspection."
+```
+
+On blocked:
+```bash
+bd update <task-id> --status=blocked
+bd update <task-id> --notes="Blocked: <reason>. Need: <dependency or clarification>"
+```
