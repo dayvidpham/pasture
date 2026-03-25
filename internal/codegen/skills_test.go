@@ -3,6 +3,7 @@ package codegen_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -361,6 +362,109 @@ func TestGenerateSkill_BodyPreserved(t *testing.T) {
 	assertSectionContains(t, doc, src, 2, "My Custom Section", "This is hand-authored.")
 	// Verify H3 generated sections are nested under the role H1 heading.
 	assertIsNestedUnder(t, doc, src, "Worker Agent", "Constraints (Given/When/Then/Should Not)")
+}
+
+// ─── TestGenerateIdempotent ──────────────────────────────────────────────────
+
+// repoRoot returns the absolute path to the repository root by navigating
+// up from the test file's directory (internal/codegen/) to the module root.
+// Panics if runtime.Caller fails — this is a programming error in tests.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("repoRoot: runtime.Caller(0) failed — cannot determine test file location")
+	}
+	// thisFile is .../internal/codegen/skills_test.go
+	// Navigate up two directories to reach the repo root.
+	return filepath.Join(filepath.Dir(thisFile), "..", "..")
+}
+
+// TestGenerateIdempotent verifies that running the code generator on the
+// checked-in SKILL.md files produces identical output (zero diff).
+//
+// If this test fails, it means the code generator output has drifted from
+// the on-disk files — run `go generate ./internal/codegen/...` (or the
+// equivalent make target) to regenerate, then commit the updated files.
+func TestGenerateIdempotent(t *testing.T) {
+	root := repoRoot(t)
+	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
+
+	// Verify figures directory exists.
+	_, err := os.Stat(figuresDir)
+	require.NoError(t, err,
+		"figures directory not found at %q — "+
+			"ensure the test is run from the correct working directory", figuresDir)
+
+	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
+
+	// ─── Role skills ────────────────────────────────────────────────────
+
+	roleTests := []struct {
+		name   string
+		roleID types.RoleId
+		file   string // relative path from repo root
+	}{
+		{name: "supervisor", roleID: types.RoleSupervisor, file: "skills/supervisor/SKILL.md"},
+		{name: "architect", roleID: types.RoleArchitect, file: "skills/architect/SKILL.md"},
+		{name: "worker", roleID: types.RoleWorker, file: "skills/worker/SKILL.md"},
+		{name: "reviewer", roleID: types.RoleReviewer, file: "skills/reviewer/SKILL.md"},
+	}
+
+	for _, tc := range roleTests {
+		tc := tc
+		t.Run("role/"+tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			skillPath := filepath.Join(root, tc.file)
+			onDisk, err := os.ReadFile(skillPath)
+			require.NoError(t, err,
+				"cannot read on-disk SKILL.md at %q — "+
+					"ensure the file exists in the repository", skillPath)
+
+			generated, err := codegen.GenerateSkill(tc.roleID, skillPath, figuresDir, opts)
+			require.NoError(t, err,
+				"GenerateSkill failed for role %q with skill file %q", tc.roleID, skillPath)
+
+			assert.Equal(t, string(onDisk), generated,
+				"GenerateSkill output for role %q differs from on-disk %q — "+
+					"run 'go generate ./internal/codegen/...' to regenerate, then commit the updated file",
+				tc.roleID, tc.file)
+		})
+	}
+
+	// ─── Sub-skills ─────────────────────────────────────────────────────
+
+	subSkillTests := []struct {
+		name      string
+		commandID string
+		file      string // relative path from repo root
+	}{
+		{name: "cmd-sup-plan", commandID: "cmd-sup-plan", file: "skills/supervisor-plan-tasks/SKILL.md"},
+		{name: "cmd-sup-spawn", commandID: "cmd-sup-spawn", file: "skills/supervisor-spawn-worker/SKILL.md"},
+	}
+
+	for _, tc := range subSkillTests {
+		tc := tc
+		t.Run("sub-skill/"+tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			skillPath := filepath.Join(root, tc.file)
+			onDisk, err := os.ReadFile(skillPath)
+			require.NoError(t, err,
+				"cannot read on-disk SKILL.md at %q — "+
+					"ensure the file exists in the repository", skillPath)
+
+			generated, err := codegen.GenerateSubSkill(tc.commandID, skillPath, figuresDir, opts)
+			require.NoError(t, err,
+				"GenerateSubSkill failed for command %q with skill file %q", tc.commandID, skillPath)
+
+			assert.Equal(t, string(onDisk), generated,
+				"GenerateSubSkill output for command %q differs from on-disk %q — "+
+					"run 'go generate ./internal/codegen/...' to regenerate, then commit the updated file",
+				tc.commandID, tc.file)
+		})
+	}
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
