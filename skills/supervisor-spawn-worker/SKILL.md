@@ -41,11 +41,25 @@ Cycle Exit Conditions:
 ```
 <!-- END GENERATED FROM aura schema -->
 
-# Supervisor: Spawn Worker — Ride the Wave
-
 Launch the wave of workers for parallel vertical slice implementation, reviewed by ephemeral reviewers.
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9
+
+**Given** implementation tasks **when** spawning **then** use Task tool with `run_in_background: true` **should never** block on worker completion
+
+**Given** multiple workers **when** launching **then** spawn all slices in parallel as a single wave **should never** spawn sequentially
+
+**Given** worker assignment **when** providing context **then** include Beads task ID, full context, and handoff document **should never** omit checklist or criteria
+
+**Given** worker handoff **when** creating **then** store at `.git/.aura/handoff/<request-task-id>/supervisor-to-worker-<N>.md` **should never** skip handoff document
+
+**Given** workers complete their slices **when** first wave finishes **then** do NOT close slices — ephemeral reviewers must review ALL slices first **should never** close a slice that has not been reviewed at least once
+
+**Given** reviewers finish reviewing **when** BLOCKERs or IMPORTANT findings exist **then** send findings to workers for fixing, then spawn new ephemeral reviewers for re-review **should never** skip re-review after fixes
+
+**Given** worker-reviewer cycle **when** counting iterations **then** limit to a MAXIMUM of 3 cycles **should never** exceed 3 cycles — if IMPORTANT findings remain after cycle 3, move to UAT and track remaining in FOLLOWUP epic
+
+**Given** IMPORTANT findings remain after 3 cycles **when** deciding next step **then** proceed to Phase 11 (UAT) — all remaining IMPORTANT and MINOR findings must be tracked in the FOLLOWUP Beads epic **should never** block UAT on non-BLOCKER findings after 3 cycles
 
 ## When to Use
 
@@ -71,24 +85,6 @@ The supervisor executes Phases 8-10 as a single coordinated cycle called **Ride 
 - Reviewers are ephemeral (spawned per review cycle via Task tool)
 - Slices are **never closed** until reviewed at least once
 - Max **3 review cycles per slice** — escalate to architect after cycle 3 if BLOCKERs remain
-
-## Given/When/Then/Should
-
-**Given** implementation tasks **when** spawning **then** use Task tool with `run_in_background: true` **should never** block on worker completion
-
-**Given** multiple workers **when** launching **then** spawn all slices in parallel as a single wave **should never** spawn sequentially
-
-**Given** worker assignment **when** providing context **then** include Beads task ID, full context, and handoff document **should never** omit checklist or criteria
-
-**Given** worker handoff **when** creating **then** store at `.git/.aura/handoff/<request-task-id>/supervisor-to-worker-<N>.md` **should never** skip handoff document
-
-**Given** workers complete their slices **when** first wave finishes **then** do NOT close slices — ephemeral reviewers must review ALL slices first **should never** close a slice that has not been reviewed at least once
-
-**Given** reviewers finish reviewing **when** BLOCKERs or IMPORTANT findings exist **then** send findings to workers for fixing, then spawn new ephemeral reviewers for re-review **should never** skip re-review after fixes
-
-**Given** worker-reviewer cycle **when** counting iterations **then** limit to a MAXIMUM of 3 cycles **should never** exceed 3 cycles — if IMPORTANT findings remain after cycle 3, move to UAT and track remaining in FOLLOWUP epic
-
-**Given** IMPORTANT findings remain after 3 cycles **when** deciding next step **then** proceed to Phase 11 (UAT) — all remaining IMPORTANT and MINOR findings must be tracked in the FOLLOWUP Beads epic **should never** block UAT on non-BLOCKER findings after 3 cycles
 
 ## Handoff Template (Supervisor → Worker)
 

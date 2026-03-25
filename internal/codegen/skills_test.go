@@ -125,7 +125,20 @@ func TestGenerateSkill_MissingMarkersError(t *testing.T) {
 
 // TestGenerateSkill_InitMode verifies that Init=true prepends markers to a
 // file that lacks them, then generates the header successfully.
+// The body pass is suppressed (no body spec for the role) so this test
+// focuses on marker initialization and header generation.
 func TestGenerateSkill_InitMode(t *testing.T) {
+	// Suppress any body spec for worker to isolate header-only Init behaviour.
+	prev, hasPrev := codegen.SkillBodySpecs[string(types.RoleWorker)]
+	delete(codegen.SkillBodySpecs, string(types.RoleWorker))
+	t.Cleanup(func() {
+		if hasPrev {
+			codegen.SkillBodySpecs[string(types.RoleWorker)] = prev
+		} else {
+			delete(codegen.SkillBodySpecs, string(types.RoleWorker))
+		}
+	})
+
 	// Write a file without markers.
 	skillPath := writeSkillFile(t, "# Worker Agent\n\nHand-authored content.\n")
 	opts := codegen.GenerateOptions{Diff: false, Write: true, Init: true}
@@ -137,9 +150,9 @@ func TestGenerateSkill_InitMode(t *testing.T) {
 	// The generated output should contain the worker role ID.
 	assert.Contains(t, result, "worker",
 		"generated output should contain the role name")
-	// The hand-authored content below the markers should be preserved.
+	// Without a body spec, hand-authored content below END must be preserved.
 	assert.Contains(t, result, "Hand-authored content.",
-		"generated output should preserve hand-authored body below END marker")
+		"generated output should preserve hand-authored body below END marker when no body spec exists")
 }
 
 // ─── TestGenerateSkill_WriteMode ──────────────────────────────────────────────
@@ -347,8 +360,20 @@ func TestGenerateSkill_TemplateOwnsBeginMarker(t *testing.T) {
 // ─── TestGenerateSkill_BodyPreserved ─────────────────────────────────────────
 
 // TestGenerateSkill_BodyPreserved verifies that hand-authored content below
-// the END marker is preserved after generation.
+// the END marker is preserved after generation when no body spec is registered.
+// When a body spec exists, the body pass intentionally replaces that content.
 func TestGenerateSkill_BodyPreserved(t *testing.T) {
+	// Suppress body spec so this test isolates header-pass preservation.
+	prev, hasPrev := codegen.SkillBodySpecs[string(types.RoleWorker)]
+	delete(codegen.SkillBodySpecs, string(types.RoleWorker))
+	t.Cleanup(func() {
+		if hasPrev {
+			codegen.SkillBodySpecs[string(types.RoleWorker)] = prev
+		} else {
+			delete(codegen.SkillBodySpecs, string(types.RoleWorker))
+		}
+	})
+
 	body := "\n\n## My Custom Section\n\nThis is hand-authored.\n"
 	content := skillFileWithMarkers() + body
 	skillPath := writeSkillFile(t, content)
@@ -465,6 +490,80 @@ func TestGenerateIdempotent(t *testing.T) {
 				tc.commandID, tc.file)
 		})
 	}
+}
+
+// ─── TestTwoPass_HeaderThenBody ───────────────────────────────────────────────
+
+// TestTwoPass_HeaderRegionUnchangedByBodyPass verifies the two-pass pipeline
+// interaction: after GenerateSkill runs (header pass + body pass), the
+// generated header region (BEGIN..END block) is untouched by the body pass.
+//
+// This test registers a temporary SkillBody entry so it exercises the body
+// path without depending on real content in SkillBodySpecs.
+func TestTwoPass_HeaderRegionUnchangedByBodyPass(t *testing.T) {
+	// Register a test body under a sentinel key that matches the worker role.
+	// We temporarily inject it into SkillBodySpecs and clean up after.
+	testBody := codegen.SkillBody{
+		Preamble: "Test preamble paragraph.",
+		Sections: []codegen.ProseSection{
+			{
+				ID:      "test-section",
+				Title:   "Test Section",
+				Content: "Test section content.",
+			},
+		},
+	}
+	codegen.SkillBodySpecs[string(types.RoleWorker)] = testBody
+	t.Cleanup(func() { delete(codegen.SkillBodySpecs, string(types.RoleWorker)) })
+
+	skillPath := writeSkillFile(t, skillFileWithMarkers())
+	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
+
+	result, err := codegen.GenerateSkill(types.RoleWorker, skillPath, "", opts)
+	require.NoError(t, err, "GenerateSkill with registered body should not error")
+
+	// The header region (BEGIN..END) must still be present and contain the
+	// role-specific generated content (not overwritten by the body pass).
+	assert.Contains(t, result, codegen.GeneratedBegin,
+		"BEGIN marker must be present after two-pass generation")
+	assert.Contains(t, result, codegen.GeneratedEnd,
+		"END marker must be present after two-pass generation")
+
+	// The generated header content (role ID) must be inside the marker region.
+	assert.Contains(t, result, "worker",
+		"generated header content (role ID) must survive the body pass")
+
+	// The body content must appear after the END marker.
+	endIdx := strings.Index(result, codegen.GeneratedEnd)
+	require.Greater(t, endIdx, 0, "END marker must be in the result")
+	afterEnd := result[endIdx+len(codegen.GeneratedEnd):]
+	assert.Contains(t, afterEnd, "Test Section",
+		"body section title must appear after the END marker")
+	assert.Contains(t, afterEnd, "Test preamble paragraph.",
+		"body preamble must appear after the END marker")
+}
+
+// TestTwoPass_NoBodySpec_HeaderOnly verifies that when no SkillBody is
+// registered for a role, GenerateSkill produces output identical to the
+// header-only result (body pass is a no-op).
+func TestTwoPass_NoBodySpec_HeaderOnly(t *testing.T) {
+	// Ensure the worker role has no body spec for this test.
+	delete(codegen.SkillBodySpecs, string(types.RoleWorker))
+
+	skillPath := writeSkillFile(t, skillFileWithMarkers())
+	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
+
+	result, err := codegen.GenerateSkill(types.RoleWorker, skillPath, "", opts)
+	require.NoError(t, err)
+
+	// Without a body spec the output ends at (or just after) the END marker.
+	// It must not contain any body-injected content.
+	endIdx := strings.Index(result, codegen.GeneratedEnd)
+	require.Greater(t, endIdx, 0)
+	afterEnd := result[endIdx+len(codegen.GeneratedEnd):]
+	// Only trailing newlines/whitespace should follow END — no body sections.
+	assert.Equal(t, strings.TrimSpace(afterEnd), "",
+		"without a body spec, nothing should appear after the END marker")
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

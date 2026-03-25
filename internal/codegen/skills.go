@@ -66,6 +66,13 @@ type skillHeaderContext struct {
 	ReviewAxes           []ReviewAxisSpec
 }
 
+// skillBodyContext is the data passed to skill_body.go.tmpl.
+// FiguresDir is reserved for future use (e.g. inline figure references).
+type skillBodyContext struct {
+	Body       *SkillBody
+	FiguresDir string
+}
+
 // skillSubFigureContext is the data passed to skill_sub_figure.go.tmpl.
 type skillSubFigureContext struct {
 	CommandName        string
@@ -473,6 +480,24 @@ func renderSubSkillHeader(commandID, figuresDir string) (string, error) {
 	return buf.String(), nil
 }
 
+// renderBody renders the body block for a skill using skill_body.go.tmpl.
+// body must not be nil. figuresDir is passed through for future figure
+// references; it is safe to pass an empty string.
+func renderBody(body *SkillBody, figuresDir string) (string, error) {
+	ctx := skillBodyContext{Body: body, FiguresDir: figuresDir}
+	tmpl := mustParseTemplateFS("templates/skill_body.go.tmpl")
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, ctx); err != nil {
+		return "", fmt.Errorf(
+			"codegen.renderBody: template execution failed — "+
+				"where: skill_body.go.tmpl — "+
+				"fix: check that skillBodyContext fields match template variables: %w",
+			err,
+		)
+	}
+	return buf.String(), nil
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 // GenerateSkill generates the SKILL.md header for a role and optionally writes it.
@@ -527,6 +552,25 @@ func GenerateSkill(roleID types.RoleId, skillPath string, figuresDir string, opt
 			"codegen.GenerateSkill: marker replacement failed for %q (role %q): %w",
 			skillPath, roleID, err,
 		)
+	}
+
+	// Pass 2: Body — replace everything after END with rendered body content,
+	// but only when a SkillBody entry exists for this role.
+	if body, ok := SkillBodySpecs[string(roleID)]; ok {
+		renderedBody, err := renderBody(&body, figuresDir)
+		if err != nil {
+			return "", fmt.Errorf(
+				"codegen.GenerateSkill: body render failed for role %q: %w",
+				roleID, err,
+			)
+		}
+		newContent, err = ReplaceBodyRegion(newContent, renderedBody)
+		if err != nil {
+			return "", fmt.Errorf(
+				"codegen.GenerateSkill: body region replacement failed for %q (role %q): %w",
+				skillPath, roleID, err,
+			)
+		}
 	}
 
 	// Print diff if requested and content changed.
@@ -603,6 +647,29 @@ func GenerateSubSkill(commandID string, skillPath string, figuresDir string, opt
 		)
 	}
 
+	// Pass 2: Body — replace everything after END with rendered body content.
+	// The SkillBodySpecs key is the skill directory name derived from the
+	// command's File field: "skills/supervisor-plan-tasks/SKILL.md" → "supervisor-plan-tasks".
+	// Re-look up cmdSpec here (already validated by renderSubSkillHeader above).
+	cmdSpecForBody := CommandSpecs[commandID]
+	skillDirKey := subSkillDirKey(cmdSpecForBody.File)
+	if body, ok := SkillBodySpecs[skillDirKey]; ok {
+		renderedBody, err := renderBody(&body, figuresDir)
+		if err != nil {
+			return "", fmt.Errorf(
+				"codegen.GenerateSubSkill: body render failed for command %q: %w",
+				commandID, err,
+			)
+		}
+		newContent, err = ReplaceBodyRegion(newContent, renderedBody)
+		if err != nil {
+			return "", fmt.Errorf(
+				"codegen.GenerateSubSkill: body region replacement failed for %q (command %q): %w",
+				skillPath, commandID, err,
+			)
+		}
+	}
+
 	// Print diff if requested and content changed.
 	if opts.Diff && newContent != content {
 		fmt.Print(unifiedDiff(skillPath, skillPath, content, newContent))
@@ -619,4 +686,15 @@ func GenerateSubSkill(commandID string, skillPath string, figuresDir string, opt
 	}
 
 	return newContent, nil
+}
+
+// subSkillDirKey extracts the skill directory name from a command's File path.
+// For example, "skills/supervisor-plan-tasks/SKILL.md" → "supervisor-plan-tasks".
+// Returns an empty string if the path does not match the expected format.
+func subSkillDirKey(filePath string) string {
+	parts := strings.Split(filePath, "/")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2]
+	}
+	return ""
 }

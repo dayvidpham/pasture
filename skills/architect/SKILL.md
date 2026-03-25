@@ -331,7 +331,10 @@ Idle → Eliciting → Drafting → AwaitingReview → AwaitingUAT → Ratified 
 
 ## Beads Task Creation (12-Phase)
 
+
+
 ### Phase 1: REQUEST Task
+
 Captures the original user prompt verbatim:
 ```bash
 bd create --labels "aura:p1-user:s1_1-classify" \
@@ -341,6 +344,7 @@ bd create --labels "aura:p1-user:s1_1-classify" \
 ```
 
 ### Phase 2: ELICIT Task
+
 Run `/aura:user-elicit` first, then capture results:
 ```bash
 bd create --labels "aura:p2-user:s2_1-elicit" \
@@ -351,6 +355,7 @@ bd dep add <request-id> --blocked-by <elicit-id>
 ```
 
 ### Phase 2.5: URD (User Requirements Document)
+
 Create the URD as the single source of truth after elicitation:
 ```bash
 bd create --labels "aura:urd,aura:p2-user:s2_2-urd" \
@@ -365,6 +370,7 @@ references:
 ```
 
 ### Phase 3: PROPOSAL-N Task
+
 Contains full plan with validation checklist and acceptance criteria:
 ```bash
 bd create --labels "aura:p3-plan:s3-propose" \
@@ -381,6 +387,7 @@ bd dep add <request-id> --blocked-by <proposal-id>
 ```
 
 ### Phase 4: REVIEW Tasks
+
 Each reviewer creates their own task:
 ```bash
 bd create --labels "aura:p4-plan:s4-review" \
@@ -390,6 +397,7 @@ bd dep add <proposal-id> --blocked-by <review-id>
 ```
 
 ### Phase 5: UAT Task
+
 After all 3 reviewers ACCEPT, run `/aura:user-uat`:
 ```bash
 bd create --labels "aura:p5-user:s5-uat" \
@@ -407,6 +415,7 @@ bd comments add <urd-id> "UAT results: <summary of user acceptance/feedback>"
 ```
 
 ### Phase 6: RATIFY
+
 Add label to proposal (DO NOT close, delete, or create new task):
 ```bash
 bd label add <proposal-id> aura:p6-plan:s6-ratify
@@ -421,6 +430,7 @@ bd comments add <urd-id> "Ratified: scope confirmed as <summary>"
 ```
 
 ### Phase 7: HANDOFF
+
 Create handoff document and task:
 ```bash
 bd create --type=task --priority=2 \

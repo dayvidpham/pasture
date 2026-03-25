@@ -348,7 +348,31 @@ Cycle Exit Conditions:
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-8-implementation-plan)** <- Phases 7-12
 
+**Given** slices created **when** assigning **then** use `bd update <slice-id> --assignee="worker-N"` for assignment **should never** leave slices unassigned
+
+**Given** worker assignments **when** spawning **then** use Task tool with `subagent_type: "general-purpose"` and `run_in_background: true`, worker MUST call `Skill(/aura:worker)` at start **should never** spawn workers sequentially or use specialized agent types
+
+**Given** teammates spawned via TeamCreate **when** assigning work via SendMessage **then** the message MUST include: (1) explicit instruction to call `Skill(/aura:worker)`, (2) the Beads task ID, (3) instruction to run `bd show <task-id>` for full context, and (4) the handoff document path **should never** send bare instructions without Beads context — teammates have no prior knowledge of the task
+
+**Given** multiple vertical slices **when** slices share types, interfaces, or data flows **then** identify horizontal Layer Integration Points and document them in the IMPL_PLAN (owner, consumers, shared contract, merge timing) **should never** leave cross-slice dependencies implicit — divergence grows when slices develop in isolation without clear merge points
+
+**Given** IMPORTANT or MINOR severity groups **when** linking dependencies **then** link them to the FOLLOWUP epic only: `bd dep add <followup-epic-id> --blocked-by <important-group-id>` **should never** link IMPORTANT or MINOR severity groups as blocking IMPL_PLAN or any slice — only BLOCKER findings block slices
+
+**Given** all slices complete **when** starting review **then** spawn 3 reviewers for ALL slices **should never** assign reviewers to single slices
+
+**Given** reviewer assigned **when** reviewing **then** check each slice against criteria **should never** skip any slice
+
+**Given** review round **when** creating severity groups **then** ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty **should never** lazily create groups only when findings exist
+
+**Given** BLOCKER finding **when** wiring dependencies **then** add dual-parent: blocks BOTH severity group AND slice **should never** wire BLOCKER to only one parent
+
+**Given** IMPORTANT or MINOR finding **when** categorizing **then** add to severity group only (NOT to slice) — these go to follow-up epic **should never** block slices on non-BLOCKER findings
+
+**Given** review complete with IMPORTANT/MINOR **when** finishing **then** supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution) **should never** wait for BLOCKERs to resolve before creating follow-up
+
 ## Ride the Wave — Operational Detail
+
+
 
 ### Stage 1: Plan _(sequential)_
 
@@ -403,18 +427,6 @@ Stage 3 Flow (per-slice):
                        │
           3 cycles exhausted → escalate to architect
 ```
-
-## Given/When/Then/Should
-
-**Given** slices created **when** assigning **then** use `bd update <slice-id> --assignee="worker-N"` for assignment **should never** leave slices unassigned
-
-**Given** worker assignments **when** spawning **then** use Task tool with `subagent_type: "general-purpose"` and `run_in_background: true`, worker MUST call `Skill(/aura:worker)` at start **should never** spawn workers sequentially or use specialized agent types
-
-**Given** teammates spawned via TeamCreate **when** assigning work via SendMessage **then** the message MUST include: (1) explicit instruction to call `Skill(/aura:worker)`, (2) the Beads task ID, (3) instruction to run `bd show <task-id>` for full context, and (4) the handoff document path **should never** send bare instructions without Beads context — teammates have no prior knowledge of the task
-
-**Given** multiple vertical slices **when** slices share types, interfaces, or data flows **then** identify horizontal Layer Integration Points and document them in the IMPL_PLAN (owner, consumers, shared contract, merge timing) **should never** leave cross-slice dependencies implicit — divergence grows when slices develop in isolation without clear merge points
-
-**Given** IMPORTANT or MINOR severity groups **when** linking dependencies **then** link them to the FOLLOWUP epic only: `bd dep add <followup-epic-id> --blocked-by <important-group-id>` **should never** link IMPORTANT or MINOR severity groups as blocking IMPL_PLAN or any slice — only BLOCKER findings block slices
 
 ## First Steps
 
@@ -522,6 +534,8 @@ type ImplementationTask struct {
 ```
 
 ## Creating Vertical Slices (Phase 8)
+
+
 
 ### Step 1: Create the IMPL_PLAN task
 

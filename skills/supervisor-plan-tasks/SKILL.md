@@ -36,17 +36,9 @@ L2 Test File Requirements:
 ```
 <!-- END GENERATED FROM aura schema -->
 
-# Supervisor: Plan Tasks
-
 Break RATIFIED_PLAN into vertical slice Implementation tasks for workers.
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-8-implementation-plan)** <- Phase 8
-
-## When to Use
-
-Received handoff from architect with RATIFIED_PLAN task ID and placeholder IMPL_PLAN task.
-
-## Given/When/Then/Should
 
 **Given** IMPL_PLAN placeholder **when** planning **then** decompose into vertical slices (production code paths) **should never** decompose into horizontal layers (files)
 
@@ -59,6 +51,10 @@ Received handoff from architect with RATIFIED_PLAN task ID and placeholder IMPL_
 **Given** multiple vertical slices **when** slices share types, interfaces, or data flows **then** identify horizontal Layer Integration Points where slices must inter-op and document them in the IMPL_PLAN with owning slice, consuming slices, and the shared contract (type, interface, or protocol) **should never** leave cross-slice dependencies implicit — divergence grows when slices develop in isolation without clear merge points
 
 **Given** integration points identified **when** creating slice tasks **then** include each integration point in the relevant slice descriptions so workers know what they must export and what they may import **should never** assume workers will discover cross-slice contracts on their own
+
+## When to Use
+
+Received handoff from architect with RATIFIED_PLAN task ID and placeholder IMPL_PLAN task.
 
 ## Critical: Vertical Slices, Not Horizontal Layers
 
@@ -121,7 +117,7 @@ SLICE-2: "feature detail command" (Worker B owns full vertical)
    ## Integration Points (example)
 
    | ID | Contract | Owner (exports) | Consumer(s) (imports) | Merge Timing |
-   |----|----------|-----------------|----------------------|--------------|
+   |----|----------|-----------------|-----------------------|--------------|
    | IP-1 | PhaseEnum type | SLICE-1 (foundation) | SLICE-2, SLICE-3, SLICE-4 | L1 (types) |
    | IP-2 | ConstraintContext interface | SLICE-1 (foundation) | SLICE-2 (gen_schema) | L1 (types) |
    | IP-3 | SkillRegistry protocol | SLICE-3 (gen_skills) | SLICE-4 (context_injection) | L3 (impl) |
@@ -254,7 +250,7 @@ SLICE-2: "feature detail command" (Worker B owns full vertical)
    Where slices must inter-op. Merge sooner, not later — divergence grows with delay.
 
    | ID | Contract | Owner (exports) | Consumer(s) (imports) | Merge Timing |
-   |----|----------|-----------------|----------------------|--------------|
+   |----|----------|-----------------|-----------------------|--------------|
    | IP-1 | FeatureError enum | SLICE-1 | SLICE-2, SLICE-3, SLICE-4 | L1 (types) |
    | IP-2 | BaseService interface | SLICE-1 | SLICE-2, SLICE-3 | L1 (types) |
 

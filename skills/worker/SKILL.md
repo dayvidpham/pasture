@@ -279,21 +279,21 @@ L2 Test File Requirements:
 1. **Identify your production code path:**
    ```bash
    bd show <task-id>  # Look for "productionCodePath" field
-   # Example: "pasture-msg epoch start"
+   # Example: "cli-tool command list"
    # This is what end users will actually run
    ```
 
 2. **Plan backwards from that end point:**
    ```
-   End: User runs ./bin/pasture-msg epoch start --epoch-id my-epoch
-     |  (what code handles this?)
-   Entry: epochStartCmd.RunE in cmd/pasture-msg/epoch.go
-     |  (what handler does RunE delegate to?)
-   Handler: handlers.EpochStart(ctx, cfg.Connection, epochID, ...) in internal/handlers/epoch.go
-     |  (what service/workflow does handler call?)
-   Service: temporal.StartEpochWorkflow(...) or client.ExecuteWorkflow(...)
-     |  (what types does the handler need?)
-   Types: config.ConnectionConfig (input), types.OutputFormat (input), pasterrors.StructuredError (errors)
+   End: User runs ./bin/cli-tool command list
+     ↓ (what code handles this?)
+   Entry: commandCli.command('list').action(async (options) => { ... })
+     ↓ (what service does this call?)
+   Service: createFeatureService({ fs, logger, parser, ... })
+     ↓ (what method?)
+   Method: await service.listItems(options)
+     ↓ (what types does method need?)
+   Types: ListOptions (input), ListEntry[] (output)
    ```
 
 3. **Identify what you own in each layer:**
@@ -338,61 +338,52 @@ func TestFeatureList(t *testing.T) {
 
 **CRITICAL:** Tests must import production code, not test-only export:
 ```go
-// CORRECT: Import actual CLI package
+// ✅ CORRECT: Import actual CLI package
 import "myproject/cmd/feature"
 
-// WRONG: Separate test-only handler (dual-export anti-pattern)
+// ❌ WRONG: Separate test-only handler (dual-export anti-pattern)
 import "myproject/internal/testhelpers/feature"
 ```
 
 **Layer 3: Implementation + Wiring** (make tests pass)
 ```go
-// internal/handlers/feature.go
-func FeatureList(
-    ctx context.Context,
-    conn config.ConnectionConfig,
-    limit int, format types.OutputFormat,
-    factory TemporalClientFactory,
-) (int, error) {
-    // Validate inputs (actionable errors)
-    if limit < 0 {
-        return int(ExitValidation), &pasterrors.StructuredError{
-            Category: pasterrors.CategoryValidation,
-            What:     "limit must be non-negative",
-            Why:      fmt.Sprintf("received limit=%d", limit),
-            Impact:   "cannot list items with invalid limit",
-            Fix:      "provide --limit with a value >= 0",
-        }
-    }
-    // Call service/workflow with real dependencies
-    return 0, nil
+// pkg/feature/service.go
+type FeatureServiceDeps struct {
+    FS     afero.Fs
+    Logger *slog.Logger
 }
 
-// cmd/pasture-msg/feature.go — thin RunE delegates to handler
-var featureListCmd = &cobra.Command{
+func NewFeatureService(deps FeatureServiceDeps) *FeatureService {
+    return &FeatureService{deps: deps}
+}
+
+func (s *FeatureService) ListItems(opts ListOptions) ([]ListEntry, error) {
+    // Implementation
+    return nil, nil
+}
+
+// cmd/feature/list.go
+var listCmd = &cobra.Command{
     Use:   "list",
     Short: "List items",
     RunE: func(cmd *cobra.Command, args []string) error {
-        cfg, err := resolveConfig(cmd)
+        // Wire service with REAL dependencies (not mocks)
+        service := feature.NewFeatureService(feature.FeatureServiceDeps{
+            FS:     osFS{},
+            Logger: slog.Default(),
+        })
+
+        limit, _ := cmd.Flags().GetInt("limit")
+        format, _ := cmd.Flags().GetString("format")
+        result, err := service.ListItems(feature.ListOptions{
+            Limit:  limit,
+            Format: format,
+        })
         if err != nil {
             return err
         }
-        format := resolveFormat(cmd, cfg)
 
-        limit, _ := cmd.Flags().GetInt("limit")
-
-        code, err := handlers.FeatureList(
-            context.Background(),
-            cfg.Connection,
-            limit, format,
-            nil, // DefaultClientFactory
-        )
-        if err != nil {
-            printError(err)
-        }
-        if code != 0 {
-            exitWithCode(code)
-        }
+        fmt.Println(formatList(result, format))
         return nil
     },
 }
@@ -425,7 +416,7 @@ bd show <task-id>
 ```
 
 Look for:
-- `productionCodePath`: What end users will run (e.g., "pasture-msg epoch start")
+- `productionCodePath`: What end users will run (e.g., "cli-tool command list")
 - `validation_checklist`: Items you must satisfy
 - `acceptance_criteria`: BDD criteria (Given/When/Then/Should Not)
 - `workerOwns`: What parts of which files you own
@@ -439,7 +430,7 @@ bd update <task-id> --status=in_progress
 ## Vertical Slice Fields (From Beads Task)
 
 - `slice`: Your slice identifier (e.g., "feature-list")
-- `productionCodePath`: What users run (e.g., "pasture-msg epoch start")
+- `productionCodePath`: What users run (e.g., "cli-tool command list")
 - `workerOwns.types`: Which types you create
 - `workerOwns.tests`: Which test files you write
 - `workerOwns.implementation`: Which methods/actions you implement
