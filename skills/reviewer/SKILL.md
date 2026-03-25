@@ -211,3 +211,78 @@ Agents coordinate through **beads** tasks and comments:
 | elegance | Elegance | Complexity matching | Design the API you know you will need?; No over-engineering (premature abstractions, plugin systems)?; No under-engineering (cutting corners on security or correctness)?; Complexity proportional to innate problem complexity? |
 | test_quality | Test quality | Test strategy adequacy | Favour integration tests over brittle unit tests?; System under test NOT mocked — mock dependencies only?; Shared fixtures for common test values?; Assert observable outcomes, not internal state? |
 <!-- END GENERATED FROM aura schema -->
+
+**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-4-plan-review)**
+
+## Plan Review vs Code Review
+
+| Aspect | Plan Review (Phase 4) | Code Review (Phase 10) |
+|--------|-----------------------|------------------------|
+| Label | `aura:p4-plan:s4-review` | `aura:p10-impl:s10-review` |
+| Vote | ACCEPT / REVISE (binary) | ACCEPT / REVISE (binary) |
+| Severity tree | **NO** — no severity groups | **YES** — EAGER creation (always 3 groups) |
+| Naming | PROPOSAL-N-REVIEW-{axis}-{round} | SLICE-N-REVIEW-{axis}-{round} |
+| Focus | End-user alignment, MVP scope | Production code paths, severity findings |
+
+**Given** review complete **when** documenting **then** create review task with dependency chain **should never** vote without creating task
+
+## End-User Alignment Criteria
+
+All reviewers also apply these general questions:
+
+1. **Who are the end-users?**
+2. **What would end-users want?**
+3. **How would this affect them?**
+4. **Are there implementation gaps?**
+5. **Does MVP scope make sense?**
+6. **Is validation checklist complete and correct?**
+
+## Vote Options
+
+| Vote | When |
+|------|------|
+| ACCEPT | All 6 criteria satisfied; no BLOCKER items |
+| REVISE | BLOCKER issues found; must provide actionable feedback |
+
+Binary only. No intermediate levels.
+
+## Severity Vocabulary (Code Review Only)
+
+| Severity | When to Use | Blocks Slice? |
+|----------|-------------|---------------|
+| BLOCKER | Security, type errors, test failures, broken production code paths | Yes |
+| IMPORTANT | Performance, missing validation, architectural concerns | No (follow-up epic) |
+| MINOR | Style, optional optimizations, naming improvements | No (follow-up epic) |
+
+## Follow-up Lifecycle Reviews
+
+Reviewers also participate in the follow-up lifecycle:
+
+- **FOLLOWUP_PROPOSAL review (Phase 4):** Same procedure as standard plan review. Task naming: `FOLLOWUP_PROPOSAL-N-REVIEW-{axis}-{round}`. Binary ACCEPT/REVISE, no severity tree.
+- **FOLLOWUP_SLICE code review (Phase 10):** Same procedure as standard code review. Task naming: `FOLLOWUP_SLICE-N-REVIEW-{axis}-{round}`. Full EAGER severity tree (BLOCKER/IMPORTANT/MINOR).
+- **No followup-of-followup:** IMPORTANT/MINOR findings from FOLLOWUP_SLICE code review are tracked on the existing follow-up epic. A nested follow-up epic is never created.
+
+## Beads Review Process
+
+Read the plan and URD:
+```bash
+bd show <task-id>
+bd show <urd-id>   # Read URD for user requirements context
+```
+
+Add review comment with vote:
+```bash
+# If accepting:
+bd comments add <task-id> "VOTE: ACCEPT - End-user impact clear. MVP scope appropriate. Checklist items verifiable."
+
+# If requesting revision:
+bd comments add <task-id> "VOTE: REVISE - Missing: what happens if X fails? Suggestion: add error handling to checklist."
+```
+
+## Consensus
+
+All 3 reviewers must vote ACCEPT for plan to be ratified. If any reviewer votes REVISE:
+1. Architect creates PROPOSAL-N+1 addressing feedback
+2. Old proposal marked `aura:superseded`
+3. Reviewers re-review new proposal
+4. Repeat until all ACCEPT
