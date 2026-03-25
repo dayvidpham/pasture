@@ -54,6 +54,41 @@ type BehaviorSpec struct {
 	ShouldNot string
 }
 
+// ─── ProseSection ─────────────────────────────────────────────────────────────
+
+// ProseSection is a titled block of markdown content for skill body rendering.
+// Sections are rendered in slice order. Heading level is determined by the
+// template (H2 for top-level, H3 for subsections).
+type ProseSection struct {
+	ID          string         // unique within skill body, e.g. "wrk-what-you-own"
+	Title       string         // heading text, e.g. "What You Own"
+	Content     string         // pre-formatted markdown content below the heading
+	Subsections []ProseSection // optional nested sections (rendered as H3 under H2)
+}
+
+// ─── RecipeBlock ──────────────────────────────────────────────────────────────
+
+// RecipeBlock is a bd command recipe with context and code example.
+type RecipeBlock struct {
+	ID          string // e.g. "arch-phase1-request"
+	Title       string // e.g. "Phase 1: REQUEST Task"
+	Description string // context paragraph before the code block
+	Lang        string // code block language, typically "bash"
+	Code        string // the actual bd command template
+}
+
+// ─── SkillBody ────────────────────────────────────────────────────────────────
+
+// SkillBody is the complete body content for a role or sub-skill.
+// Rendered by a separate template pass (skill_body.go.tmpl) using
+// ReplaceBodyRegion, preserving the header marker region independently.
+type SkillBody struct {
+	Preamble  string         // optional intro (e.g., PROCESS.md link)
+	Sections  []ProseSection // ordered prose sections (rendered as H2)
+	Recipes   []RecipeBlock  // ordered code recipes
+	Behaviors []BehaviorSpec // body-specific G/W/T behaviors (NOT ConstraintSpec)
+}
+
 // ─── RoleSpec ─────────────────────────────────────────────────────────────────
 
 // RoleSpec is the complete specification for an agent role.

@@ -326,3 +326,19 @@ func TestTitleConventionsNotEmpty(t *testing.T) {
 		assert.NotEmpty(t, tc.CreatedBy, "TitleConvention[%d]: CreatedBy must not be empty", i)
 	}
 }
+
+// TestSkillBodySpecsCompleteness verifies the SkillBodySpecs map exists and is initialized.
+func TestSkillBodySpecsCompleteness(t *testing.T) {
+	expectedKeys := []string{
+		"supervisor", "supervisor-plan-tasks", "supervisor-spawn-worker",
+		"worker", "architect", "reviewer", "impl-review",
+	}
+	// For now, just verify the map exists and is initialized
+	// Content checks will be added after encoding slices complete
+	if codegen.SkillBodySpecs == nil {
+		t.Fatal("SkillBodySpecs is nil")
+	}
+	// NOTE: Map will be populated by init() functions in separate files.
+	// The full 7-entry check will be enforced after SLICE-3-6 complete.
+	_ = expectedKeys // Used in SLICE-7 for full verification
+}

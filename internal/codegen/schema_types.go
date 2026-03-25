@@ -414,17 +414,7 @@ type ConstraintElem struct {
 	RoleRef   string
 	PhaseRef  string
 	Command   string
-	Examples  []ConstraintExampleElem
-}
-
-// ConstraintExampleElem documents a <example> with CDATA <code> child.
-// NOT used for xml.Marshal.
-type ConstraintExampleElem struct {
-	ID              string
-	Lang            string
-	Label           string
-	AlsoIllustrates string
-	Code            string // written as CDATA
+	Examples  []Example // see Example in specs.go
 }
 
 // ─── Task titles section ──────────────────────────────────────────────────────
