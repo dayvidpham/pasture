@@ -2030,11 +2030,3 @@ var SubstepDataMap = map[string][]SubstepData{
 	},
 }
 
-// ─── SkillBodySpecs ───────────────────────────────────────────────────────────
-
-// SkillBodySpecs maps skill directory names to their body content.
-// Keys are directory names (not types.RoleId) because sub-skills like
-// "supervisor-plan-tasks" have no RoleId equivalent.
-// Body vars are defined in separate specs_data_body_*.go files and
-// registered via init() functions.
-var SkillBodySpecs = map[string]SkillBody{}
