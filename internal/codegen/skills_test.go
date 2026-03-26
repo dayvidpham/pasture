@@ -341,6 +341,31 @@ func TestGenerateSubSkill_UnknownCommand(t *testing.T) {
 		"error should mention that the command was not found")
 }
 
+// ─── TestSubSkillDirKey ───────────────────────────────────────────────────────
+
+// TestSubSkillDirKey verifies that SubSkillDirKey extracts the skill directory
+// name from various path formats, including edge cases like single-component
+// paths, empty strings, and trailing slashes.
+func TestSubSkillDirKey(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{"normal path", "skills/supervisor-plan-tasks/SKILL.md", "supervisor-plan-tasks"},
+		{"impl-review", "skills/impl-review/SKILL.md", "impl-review"},
+		{"single component", "SKILL.md", ""},
+		{"empty string", "", ""},
+		{"trailing slash", "skills/foo/", "foo"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := codegen.SubSkillDirKey(tt.path)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 // ─── TestGenerateSkill_WithFiguresDir ─────────────────────────────────────────
 
 // TestGenerateSkill_WithFiguresDir verifies that GenerateSkill works when
