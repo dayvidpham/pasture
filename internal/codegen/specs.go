@@ -60,7 +60,7 @@ type BehaviorSpec struct {
 // Sections are rendered in slice order. Heading level is determined by the
 // template (H2 for top-level, H3 for subsections).
 type ProseSection struct {
-	ID          string         // unique within skill body, e.g. "wrk-what-you-own"
+	ID          string         // unique within skill body; not used during template rendering — available for programmatic lookup via ExtractSection or future ID-based access
 	Title       string         // heading text, e.g. "What You Own"
 	Content     string         // pre-formatted markdown content below the heading
 	Subsections []ProseSection // optional nested sections (rendered as H3 under H2)
@@ -70,7 +70,7 @@ type ProseSection struct {
 
 // RecipeBlock is a bd command recipe with context and code example.
 type RecipeBlock struct {
-	ID          string // e.g. "arch-phase1-request"
+	ID          string // unique within skill body; not used during template rendering — available for programmatic lookup
 	Title       string // e.g. "Phase 1: REQUEST Task"
 	Description string // context paragraph before the code block
 	Lang        string // code block language, typically "bash"
