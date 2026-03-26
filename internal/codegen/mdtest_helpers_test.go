@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dayvidpham/pasture/internal/codegen"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
@@ -51,19 +52,9 @@ func parseMD(t *testing.T, src string) (ast.Node, []byte) {
 	return doc, srcBytes
 }
 
-// headingText extracts the full text content of a heading node by
-// concatenating all Text and String segment values found in its children.
+// headingText delegates to the exported codegen.HeadingTextFromAST.
 func headingText(n ast.Node, src []byte) string {
-	var buf strings.Builder
-	for child := n.FirstChild(); child != nil; child = child.NextSibling() {
-		switch c := child.(type) {
-		case *ast.Text:
-			buf.Write(c.Value(src))
-		case *ast.String:
-			buf.Write(c.Value)
-		}
-	}
-	return buf.String()
+	return codegen.HeadingTextFromAST(n, src)
 }
 
 // findSection locates the first heading node at the given level whose text

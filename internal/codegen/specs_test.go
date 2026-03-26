@@ -335,6 +335,17 @@ func TestSkillBodySpecsCompleteness(t *testing.T) {
 		"worker", "architect", "reviewer", "impl-review",
 	}
 
+	// Skills known to have non-empty preambles.
+	skillsWithPreamble := map[string]bool{
+		"supervisor":              true,
+		"supervisor-plan-tasks":   true,
+		"supervisor-spawn-worker": true,
+		"worker":                  true,
+		"architect":               true,
+		"reviewer":                true,
+		"impl-review":             true,
+	}
+
 	require.NotNil(t, codegen.SkillBodySpecs, "SkillBodySpecs must not be nil")
 	require.Len(t, codegen.SkillBodySpecs, len(expectedKeys),
 		"SkillBodySpecs should have exactly %d entries", len(expectedKeys))
@@ -350,6 +361,12 @@ func TestSkillBodySpecsCompleteness(t *testing.T) {
 				"SkillBodySpecs[%q] must have non-empty Sections or Recipes — "+
 					"found %d sections and %d recipes",
 				key, len(body.Sections), len(body.Recipes))
+
+			// Verify preamble for skills known to have one.
+			if skillsWithPreamble[key] {
+				assert.NotEmpty(t, body.Preamble,
+					"SkillBodySpecs[%q].Preamble must not be empty (skill is expected to have a preamble)", key)
+			}
 
 			// Verify that sections have non-empty titles and content.
 			for i, section := range body.Sections {
@@ -370,6 +387,19 @@ func TestSkillBodySpecsCompleteness(t *testing.T) {
 					"SkillBodySpecs[%q].Recipes[%d].Title must not be empty", key, i)
 				assert.NotEmpty(t, recipe.Code,
 					"SkillBodySpecs[%q].Recipes[%d].Code must not be empty", key, i)
+			}
+
+			// Fix 8: Verify no subsection has its own subsections (max depth = 2 levels).
+			// The skill_body.go.tmpl template only renders 2 levels of sections;
+			// deeper nesting would be silently dropped.
+			for i, section := range body.Sections {
+				for j, sub := range section.Subsections {
+					assert.Empty(t, sub.Subsections,
+						"SkillBodySpecs[%q].Sections[%d].Subsections[%d] has nested Subsections — "+
+							"max depth is 2 levels (template only renders H2 and H3); "+
+							"deeper nesting would be silently lost",
+						key, i, j)
+				}
 			}
 		})
 	}

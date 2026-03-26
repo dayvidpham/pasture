@@ -77,7 +77,7 @@ func ValidateSkillStructure(markdown []byte) error {
 			return ast.WalkContinue, nil
 		}
 
-		title := headingTextFromAST(n, markdown)
+		title := HeadingTextFromAST(n, markdown)
 
 		if h.Level < shallowestSeen {
 			shallowestSeen = h.Level
@@ -134,9 +134,8 @@ func ExtractSection(markdown []byte, headingTitle string) ([]byte, error) {
 
 	// Phase 1: find the best match (shallowest level).
 	type match struct {
-		level    int
-		lineEnd  int // byte offset of heading's end in source
-		node     ast.Node
+		level int
+		node  ast.Node
 	}
 	var bestMatch *match
 
@@ -148,7 +147,7 @@ func ExtractSection(markdown []byte, headingTitle string) ([]byte, error) {
 		if !ok {
 			return ast.WalkContinue, nil
 		}
-		title := headingTextFromAST(n, markdown)
+		title := HeadingTextFromAST(n, markdown)
 		if title != headingTitle {
 			return ast.WalkContinue, nil
 		}
@@ -186,7 +185,7 @@ func ExtractSection(markdown []byte, headingTitle string) ([]byte, error) {
 			return ast.WalkContinue, nil
 		}
 
-		title := headingTextFromAST(n, markdown)
+		title := HeadingTextFromAST(n, markdown)
 
 		if !inSection {
 			if h.Level == targetLevel && title == headingTitle && n == bestMatch.node {
@@ -234,11 +233,9 @@ func ExtractSection(markdown []byte, headingTitle string) ([]byte, error) {
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
-// headingTextFromAST extracts the full text of a heading AST node by
+// HeadingTextFromAST extracts the full text of a heading AST node by
 // concatenating its child Text and String segment values.
-// This is the production equivalent of the test-only headingText helper
-// in mdtest_helpers_test.go.
-func headingTextFromAST(n ast.Node, src []byte) string {
+func HeadingTextFromAST(n ast.Node, src []byte) string {
 	var buf strings.Builder
 	for child := n.FirstChild(); child != nil; child = child.NextSibling() {
 		switch c := child.(type) {

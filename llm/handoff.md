@@ -68,7 +68,7 @@ tools/codegen/main.go  # go:generate entry point
 **Why**: User preference from UAT. Currently 2 of 17 sections use manual `fmt.Fprintf` because `encoding/xml` cannot emit `<![CDATA[...]]>` natively. A custom Marshaler could write CDATA by implementing `MarshalXML` and using `xml.Encoder.EncodeToken` with `xml.CharData` wrapped in raw `<![CDATA[` delimiters.
 
 **Scope**:
-- Implement `MarshalXML` on `ConstraintExampleElem` and `ProcedureStepExampleElem` (or their `Code` field wrapper)
+- Implement `MarshalXML` on the `Example` type from `specs.go` (or a wrapper for its `Code` field)
 - Convert `buildConstraints` and `buildProcedureSteps` from manual `fmt.Fprintf` to struct population + `marshalSection`
 - Verify CDATA output is preserved (existing `TestGenerateSchema_CDATAInCodeElements` must pass)
 - Remove the "NOT used for xml.Marshal" comments from `ConstraintsSection`/`ProcedureStepsSection`

@@ -279,7 +279,7 @@ func TestGenerateSubSkill_PreservesPrefix(t *testing.T) {
 	assert.True(t, strings.HasPrefix(result, heading),
 		"GenerateSubSkill should preserve the hand-authored heading prefix\n"+
 			"Expected prefix: %q\nActual start: %q",
-		heading, result[:minInt(len(result), 60)])
+		heading, result[:min(len(result), 60)])
 }
 
 // ─── TestGenerateSubSkill_MissingMarkersError ─────────────────────────────────
@@ -589,13 +589,6 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
-// minInt returns the smaller of a and b.
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
 
 // parseHeaderString parses a markdown header string like "## My Section" into
 // its level (number of leading '#' characters) and trimmed title text.

@@ -373,11 +373,3 @@ func splitKeepEnds(s string) []string {
 	}
 	return lines
 }
-
-// min returns the smaller of a and b.
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
