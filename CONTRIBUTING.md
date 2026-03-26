@@ -10,10 +10,11 @@ inspect the diff, run tests.
 The pipeline has four stages:
 
 1. **GenerateSchemaToFile** — marshals spec maps → `schema.xml` (17 sections)
-2. **GenerateSkill** — two-pass render → `skills/{role}/SKILL.md` (marker-bounded):
-   - *Header pass:* renders `templates/skill_header.go.tmpl` into the BEGIN..END marker region
-   - *Body pass:* if a `SkillBodySpecs` entry exists for the role, renders `templates/skill_body.go.tmpl` and calls `ReplaceBodyRegion` to replace everything after the END marker
-3. **GenerateSubSkill** — two-pass render → `skills/{dir}/SKILL.md` (for commands with figures); same header + body pipeline as stage 2
+2. **GenerateSkill** — three-pass render → `skills/{role}/SKILL.md` (marker-bounded):
+   - *Pass 1 (header):* `ReplaceMarkerRegion` renders `templates/skill_header.go.tmpl` between the BEGIN/END markers
+   - *Pass 2 (body):* if a `SkillBodySpecs` entry exists, `ReplaceBodyRegion` renders `templates/skill_body.go.tmpl` after the END marker
+   - *Pass 3 (validate):* `ValidateSkillStructure` validates heading hierarchy via goldmark (duplicate H2 titles, orphan H3 headings)
+3. **GenerateSubSkill** — same three-pass pipeline → `skills/{dir}/SKILL.md` (for commands with figures)
 4. **GenerateAgent** — renders `templates/agent_definition.go.tmpl` → `agents/{role}.md` (fully overwritten)
 
 The entry point is `tools/codegen/main.go`, invoked by:
