@@ -58,7 +58,7 @@ func headingText(n ast.Node, src []byte) string {
 	for child := n.FirstChild(); child != nil; child = child.NextSibling() {
 		switch c := child.(type) {
 		case *ast.Text:
-			buf.Write(c.Text(src))
+			buf.Write(c.Value(src))
 		case *ast.String:
 			buf.Write(c.Value)
 		}
@@ -202,7 +202,7 @@ func assertSectionContains(t *testing.T, doc ast.Node, src []byte, level int, se
 		}
 		switch c := n.(type) {
 		case *ast.Text:
-			buf.Write(c.Text(src))
+			buf.Write(c.Value(src))
 		case *ast.String:
 			buf.Write(c.Value)
 		}

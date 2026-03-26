@@ -54,6 +54,36 @@ func skillFileWithMarkers() string {
 	return codegen.GeneratedBegin + "\n" + codegen.GeneratedEnd + "\n"
 }
 
+// suppressBodySpec removes a SkillBodySpecs entry for the duration of the test,
+// restoring it via t.Cleanup.
+func suppressBodySpec(t *testing.T, key string) {
+	t.Helper()
+	prev, had := codegen.SkillBodySpecs[key]
+	delete(codegen.SkillBodySpecs, key)
+	t.Cleanup(func() {
+		if had {
+			codegen.SkillBodySpecs[key] = prev
+		} else {
+			delete(codegen.SkillBodySpecs, key)
+		}
+	})
+}
+
+// withBodySpec temporarily sets a SkillBodySpecs entry for the test duration,
+// restoring the previous value (or deleting the key) via t.Cleanup.
+func withBodySpec(t *testing.T, key string, body codegen.SkillBody) {
+	t.Helper()
+	prev, had := codegen.SkillBodySpecs[key]
+	codegen.SkillBodySpecs[key] = body
+	t.Cleanup(func() {
+		if had {
+			codegen.SkillBodySpecs[key] = prev
+		} else {
+			delete(codegen.SkillBodySpecs, key)
+		}
+	})
+}
+
 // ─── TestGenerateSkill_ContainsSections ───────────────────────────────────────
 
 // TestGenerateSkill_ContainsSections verifies that GenerateSkill produces
@@ -129,15 +159,7 @@ func TestGenerateSkill_MissingMarkersError(t *testing.T) {
 // focuses on marker initialization and header generation.
 func TestGenerateSkill_InitMode(t *testing.T) {
 	// Suppress any body spec for worker to isolate header-only Init behaviour.
-	prev, hasPrev := codegen.SkillBodySpecs[string(types.RoleWorker)]
-	delete(codegen.SkillBodySpecs, string(types.RoleWorker))
-	t.Cleanup(func() {
-		if hasPrev {
-			codegen.SkillBodySpecs[string(types.RoleWorker)] = prev
-		} else {
-			delete(codegen.SkillBodySpecs, string(types.RoleWorker))
-		}
-	})
+	suppressBodySpec(t, string(types.RoleWorker))
 
 	// Write a file without markers.
 	skillPath := writeSkillFile(t, "# Worker Agent\n\nHand-authored content.\n")
@@ -364,15 +386,7 @@ func TestGenerateSkill_TemplateOwnsBeginMarker(t *testing.T) {
 // When a body spec exists, the body pass intentionally replaces that content.
 func TestGenerateSkill_BodyPreserved(t *testing.T) {
 	// Suppress body spec so this test isolates header-pass preservation.
-	prev, hasPrev := codegen.SkillBodySpecs[string(types.RoleWorker)]
-	delete(codegen.SkillBodySpecs, string(types.RoleWorker))
-	t.Cleanup(func() {
-		if hasPrev {
-			codegen.SkillBodySpecs[string(types.RoleWorker)] = prev
-		} else {
-			delete(codegen.SkillBodySpecs, string(types.RoleWorker))
-		}
-	})
+	suppressBodySpec(t, string(types.RoleWorker))
 
 	body := "\n\n## My Custom Section\n\nThis is hand-authored.\n"
 	content := skillFileWithMarkers() + body
@@ -503,7 +517,6 @@ func TestGenerateIdempotent(t *testing.T) {
 // path without depending on real content in SkillBodySpecs.
 func TestTwoPass_HeaderRegionUnchangedByBodyPass(t *testing.T) {
 	// Register a test body under a sentinel key that matches the worker role.
-	// We temporarily inject it into SkillBodySpecs and clean up after.
 	testBody := codegen.SkillBody{
 		Preamble: "Test preamble paragraph.",
 		Sections: []codegen.ProseSection{
@@ -514,15 +527,7 @@ func TestTwoPass_HeaderRegionUnchangedByBodyPass(t *testing.T) {
 			},
 		},
 	}
-	prev, hasPrev := codegen.SkillBodySpecs[string(types.RoleWorker)]
-	codegen.SkillBodySpecs[string(types.RoleWorker)] = testBody
-	t.Cleanup(func() {
-		if hasPrev {
-			codegen.SkillBodySpecs[string(types.RoleWorker)] = prev
-		} else {
-			delete(codegen.SkillBodySpecs, string(types.RoleWorker))
-		}
-	})
+	withBodySpec(t, string(types.RoleWorker), testBody)
 
 	skillPath := writeSkillFile(t, skillFileWithMarkers())
 	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
@@ -556,13 +561,7 @@ func TestTwoPass_HeaderRegionUnchangedByBodyPass(t *testing.T) {
 // header-only result (body pass is a no-op).
 func TestTwoPass_NoBodySpec_HeaderOnly(t *testing.T) {
 	// Suppress body spec for worker to test header-only path.
-	prev, hasPrev := codegen.SkillBodySpecs[string(types.RoleWorker)]
-	delete(codegen.SkillBodySpecs, string(types.RoleWorker))
-	t.Cleanup(func() {
-		if hasPrev {
-			codegen.SkillBodySpecs[string(types.RoleWorker)] = prev
-		}
-	})
+	suppressBodySpec(t, string(types.RoleWorker))
 
 	skillPath := writeSkillFile(t, skillFileWithMarkers())
 	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
