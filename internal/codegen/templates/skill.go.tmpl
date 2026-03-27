@@ -11,7 +11,6 @@ skills: {{ join .SubSkills ", " }}
 <!-- BEGIN GENERATED FROM aura schema -->
 **Role:** `{{ .Role.ID }}` | **Phases owned:** {{- $ownedPhases := .OwnedPhases }}{{- range $i, $p := $ownedPhases }} {{ index $.PhaseSlug $p }}{{- if not (last $i (len $ownedPhases)) }},{{- end }}{{- end }}
 
-
 ## Protocol Context (generated from schema.xml)
 
 ### Owned Phases
@@ -147,15 +146,19 @@ Agents coordinate through **beads** tasks and comments:
 ### Workflows
 {{- range .Workflows }}
 
-#### {{ .Name }}
+## {{ .Name }}
 
 {{ .Description }}
 {{- range .Stages }}
 
-**Stage {{ .Order }}: {{ .Name }}** _({{ .Execution }})_
+## Stage {{ .Order }}: {{ .Name }} _({{ .Execution }})_
 
 {{- range .Actions }}
 - {{ .Instruction }}{{- if .Command }} (`{{ .Command }}`){{- end }}
+{{- end }}
+{{- if .OperationalDetail }}
+
+{{ .OperationalDetail }}
 {{- end }}
 {{- if .ExitConditions }}
 
@@ -187,5 +190,35 @@ Exit conditions:
 {{- $qs := .KeyQuestions }}
 | {{ .Letter }} | {{ .Name }} | {{ .Short }} | {{- range $i, $q := $qs }} {{ $q }}{{- if not (last $i (len $qs)) }};{{- end }}{{- end }} |
 {{- end }}
+{{- end }}
+{{- if .Preamble }}
+
+{{ .Preamble }}
+{{- end }}
+{{- range .BodyBehaviors }}
+
+**Given** {{ .Given }} **when** {{ .When }} **then** {{ .Then }} **should never** {{ .ShouldNot }}
+{{- end }}
+{{- range .BodySections }}
+
+## {{ .Title }}
+
+{{ .Content }}
+{{- range .Subsections }}
+
+### {{ .Title }}
+
+{{ .Content }}
+{{- end }}
+{{- end }}
+{{- range .BodyRecipes }}
+
+## {{ .Title }}
+
+{{ .Description }}
+
+```{{ .Lang }}
+{{ .Code }}
+```
 {{- end }}
 <!-- END GENERATED FROM aura schema -->

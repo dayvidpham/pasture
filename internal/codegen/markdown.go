@@ -6,7 +6,7 @@
 //   - ValidateSkillStructure — checks heading hierarchy for common errors
 //   - ExtractSection — extracts content under a heading by title
 //
-// These complement the two-pass pipeline (header + body render) by
+// These complement the unified skill generation pipeline by
 // providing post-render structural validation.
 package codegen
 

@@ -44,9 +44,12 @@ var DefaultOptions = GenerateOptions{Diff: true, Write: true}
 
 // ─── Template context types ───────────────────────────────────────────────────
 
-// skillHeaderContext is the data passed to skill_header.go.tmpl.
-// All fields are exported so text/template can access them.
-type skillHeaderContext struct {
+// skillContext is the unified data passed to skill.go.tmpl.
+// It merges the former skillHeaderContext and skillBodyContext into a single
+// struct for the single-pass pipeline. All fields are exported so
+// text/template can access them.
+type skillContext struct {
+	// Header fields (from role context and spec lookups)
 	Role                 RoleSpec
 	Commands             []CommandSpec
 	Constraints          []ConstraintSpec
@@ -64,20 +67,26 @@ type skillHeaderContext struct {
 	Workflows            []Workflow
 	FiguresByWorkflow    map[string][]FigureSpec
 	ReviewAxes           []ReviewAxisSpec
+
+	// Body fields (from SkillBody, nil/empty if no SkillBody)
+	Preamble       string
+	BodySections   []ProseSection
+	BodyRecipes    []RecipeBlock
+	BodyBehaviors  []BehaviorSpec
 }
 
-// skillBodyContext is the data passed to skill_body.go.tmpl.
-// FiguresDir is reserved for future use (e.g. inline figure references).
-type skillBodyContext struct {
-	Body       *SkillBody
-	FiguresDir string
-}
-
-// skillSubFigureContext is the data passed to skill_sub_figure.go.tmpl.
-type skillSubFigureContext struct {
+// skillSubContext is the unified data passed to skill_sub.go.tmpl.
+// It merges the former skillSubFigureContext with body fields.
+type skillSubContext struct {
 	CommandName        string
 	CommandDescription string
 	Figures            []FigureSpec
+
+	// Body fields (from SkillBody, empty if no SkillBody)
+	Preamble      string
+	BodySections  []ProseSection
+	BodyRecipes   []RecipeBlock
+	BodyBehaviors []BehaviorSpec
 }
 
 // ─── FuncMap ─────────────────────────────────────────────────────────────────
@@ -106,7 +115,7 @@ func buildFuncMap() template.FuncMap {
 // mustParseTemplateFS parses a named template from the shared embedded FS
 // (templatesFS, declared in embed.go) with the shared FuncMap and
 // missingkey=error option. The template is named by the base filename of the
-// pattern (e.g. "templates/skill_header.go.tmpl" → "skill_header.go.tmpl")
+// pattern (e.g. "templates/skill.go.tmpl" → "skill.go.tmpl")
 // so callers can Execute it directly. Panics on parse error — templates are
 // embedded compile-time constants and a parse error is a programming error.
 func mustParseTemplateFS(pattern string) *template.Template {
@@ -384,13 +393,15 @@ func unifiedDiff(fromFile, toFile, oldContent, newContent string) string {
 
 // ─── Render functions ─────────────────────────────────────────────────────────
 
-// renderHeader renders the generated header block for a role, including the
-// BEGIN and END marker lines.
-func renderHeader(roleID types.RoleId, figuresDir string) (string, error) {
+// renderSkill renders the complete generated content for a role SKILL.md file,
+// including both the header and body content inside BEGIN/END markers.
+// This is the single-pass replacement for the former renderHeader + renderBody
+// two-pass pipeline.
+func renderSkill(roleID types.RoleId, figuresDir string) (string, error) {
 	roleSpec, ok := RoleSpecs[roleID]
 	if !ok {
 		return "", fmt.Errorf(
-			"codegen.renderHeader: role %q not found in RoleSpecs — "+
+			"codegen.renderSkill: role %q not found in RoleSpecs — "+
 				"where: GenerateSkill called with unknown role ID — "+
 				"fix: add the role to RoleSpecs in specs_data.go",
 			roleID,
@@ -412,7 +423,7 @@ func renderHeader(roleID types.RoleId, figuresDir string) (string, error) {
 	figures := loadFiguresForRole(roleID, figuresDir)
 	fbw := figuresByWorkflow(figures)
 
-	ctx := skillHeaderContext{
+	ctx := skillContext{
 		Role:                 roleSpec,
 		Commands:             commands,
 		Constraints:          constraints,
@@ -432,13 +443,21 @@ func renderHeader(roleID types.RoleId, figuresDir string) (string, error) {
 		ReviewAxes:           roleCtx.ReviewAxes,
 	}
 
-	tmpl := mustParseTemplateFS("templates/skill_header.go.tmpl")
+	// Merge body content if a SkillBody entry exists.
+	if body, ok := SkillBodySpecs[string(roleID)]; ok {
+		ctx.Preamble = body.Preamble
+		ctx.BodySections = body.Sections
+		ctx.BodyRecipes = body.Recipes
+		ctx.BodyBehaviors = body.Behaviors
+	}
+
+	tmpl := mustParseTemplateFS("templates/skill.go.tmpl")
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, ctx); err != nil {
 		return "", fmt.Errorf(
-			"codegen.renderHeader: template execution failed for role %q — "+
-				"where: skill_header.go.tmpl — "+
-				"when: rendering SKILL.md header — "+
+			"codegen.renderSkill: template execution failed for role %q — "+
+				"where: skill.go.tmpl — "+
+				"when: rendering SKILL.md — "+
 				"fix: check that the template context matches the template variables: %w",
 			roleID, err,
 		)
@@ -446,12 +465,15 @@ func renderHeader(roleID types.RoleId, figuresDir string) (string, error) {
 	return buf.String(), nil
 }
 
-// renderSubSkillHeader renders the generated header block for a sub-skill command.
-func renderSubSkillHeader(commandID, figuresDir string) (string, error) {
+// renderSubSkill renders the complete generated content for a sub-skill
+// SKILL.md file, including both figures and body content inside BEGIN/END
+// markers. This is the single-pass replacement for the former
+// renderSubSkillHeader + renderBody two-pass pipeline.
+func renderSubSkill(commandID, figuresDir string) (string, error) {
 	cmdSpec, ok := CommandSpecs[commandID]
 	if !ok {
 		return "", fmt.Errorf(
-			"codegen.renderSubSkillHeader: command %q not found in CommandSpecs — "+
+			"codegen.renderSubSkill: command %q not found in CommandSpecs — "+
 				"where: GenerateSubSkill called with unknown command ID — "+
 				"fix: add the command to CommandSpecs in specs_data.go",
 			commandID,
@@ -460,19 +482,28 @@ func renderSubSkillHeader(commandID, figuresDir string) (string, error) {
 
 	figures := loadFiguresForCommand(commandID, figuresDir)
 
-	ctx := skillSubFigureContext{
+	ctx := skillSubContext{
 		CommandName:        cmdSpec.Name,
 		CommandDescription: cmdSpec.Description,
 		Figures:            figures,
 	}
 
-	tmpl := mustParseTemplateFS("templates/skill_sub_figure.go.tmpl")
+	// Merge body content if a SkillBody entry exists for this sub-skill directory.
+	skillDirKey := subSkillDirKey(cmdSpec.File)
+	if body, ok := SkillBodySpecs[skillDirKey]; ok {
+		ctx.Preamble = body.Preamble
+		ctx.BodySections = body.Sections
+		ctx.BodyRecipes = body.Recipes
+		ctx.BodyBehaviors = body.Behaviors
+	}
+
+	tmpl := mustParseTemplateFS("templates/skill_sub.go.tmpl")
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, ctx); err != nil {
 		return "", fmt.Errorf(
-			"codegen.renderSubSkillHeader: template execution failed for command %q — "+
-				"where: skill_sub_figure.go.tmpl — "+
-				"when: rendering sub-skill SKILL.md header — "+
+			"codegen.renderSubSkill: template execution failed for command %q — "+
+				"where: skill_sub.go.tmpl — "+
+				"when: rendering sub-skill SKILL.md — "+
 				"fix: check that the template context matches the template variables: %w",
 			commandID, err,
 		)
@@ -480,36 +511,23 @@ func renderSubSkillHeader(commandID, figuresDir string) (string, error) {
 	return buf.String(), nil
 }
 
-// renderBody renders the body block for a skill using skill_body.go.tmpl.
-// body must not be nil. figuresDir is passed through for future figure
-// references; it is safe to pass an empty string.
-func renderBody(body *SkillBody, figuresDir string) (string, error) {
-	ctx := skillBodyContext{Body: body, FiguresDir: figuresDir}
-	tmpl := mustParseTemplateFS("templates/skill_body.go.tmpl")
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, ctx); err != nil {
-		return "", fmt.Errorf(
-			"codegen.renderBody: template execution failed — "+
-				"where: skill_body.go.tmpl — "+
-				"fix: check that skillBodyContext fields match template variables: %w",
-			err,
-		)
-	}
-	return buf.String(), nil
-}
-
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-// GenerateSkill generates the SKILL.md header for a role and optionally writes it.
+// GenerateSkill generates the SKILL.md for a role and optionally writes it.
 //
-// It uses ReplaceMarkerRegion with dropPrefix=true — the template owns the
+// It uses a single-pass pipeline: the unified template (skill.go.tmpl) renders
+// ALL content (header + body) inside the BEGIN/END markers. After marker
+// replacement, any content after the END marker is explicitly truncated when
+// a SkillBody entry exists (R3: nothing after END).
+//
+// ReplaceMarkerRegion is called with dropPrefix=true — the template owns the
 // full frontmatter and heading (everything before BEGIN is dropped and replaced
 // by the rendered template output which starts with YAML frontmatter).
 //
 // figuresDir is an optional path to the directory containing figure YAML files.
 // When empty, figures will have no content (useful for testing without figure files).
 //
-// Returns the complete new file content (generated header + preserved body).
+// Returns the complete new file content.
 //
 // Returns a *MarkerError if skillPath is missing the BEGIN/END marker pair (and
 // Init is false), or if the markers are malformed.
@@ -539,8 +557,8 @@ func GenerateSkill(roleID types.RoleId, skillPath string, figuresDir string, opt
 		}
 	}
 
-	// Render the new header.
-	rendered, err := renderHeader(roleID, figuresDir)
+	// Single-pass render: template produces all content inside BEGIN/END.
+	rendered, err := renderSkill(roleID, figuresDir)
 	if err != nil {
 		return "", err
 	}
@@ -554,26 +572,16 @@ func GenerateSkill(roleID types.RoleId, skillPath string, figuresDir string, opt
 		)
 	}
 
-	// Pass 2: Body — replace everything after END with rendered body content,
-	// but only when a SkillBody entry exists for this role.
-	if body, ok := SkillBodySpecs[string(roleID)]; ok {
-		renderedBody, err := renderBody(&body, figuresDir)
-		if err != nil {
-			return "", fmt.Errorf(
-				"codegen.GenerateSkill: body render failed for role %q: %w",
-				roleID, err,
-			)
-		}
-		newContent, err = ReplaceBodyRegion(newContent, renderedBody)
-		if err != nil {
-			return "", fmt.Errorf(
-				"codegen.GenerateSkill: body region replacement failed for %q (role %q): %w",
-				skillPath, roleID, err,
-			)
+	// Explicit truncation: when a SkillBody exists, strip everything after END
+	// marker (R3: nothing after END). This handles the transition from the old
+	// two-pass pipeline where body content lived after END.
+	if _, ok := SkillBodySpecs[string(roleID)]; ok {
+		if endIdx := strings.Index(newContent, GeneratedEnd); endIdx >= 0 {
+			newContent = newContent[:endIdx+len(GeneratedEnd)] + "\n"
 		}
 	}
 
-	// Pass 3: Validate the generated markdown structure.
+	// Validate the generated markdown structure.
 	if err := ValidateSkillStructure([]byte(newContent)); err != nil {
 		return "", fmt.Errorf("codegen.GenerateSkill: validate skill %q: %w", roleID, err)
 	}
@@ -596,15 +604,20 @@ func GenerateSkill(roleID types.RoleId, skillPath string, figuresDir string, opt
 	return newContent, nil
 }
 
-// GenerateSubSkill generates the SKILL.md header for a sub-skill command.
+// GenerateSubSkill generates the SKILL.md for a sub-skill command.
 //
-// It uses ReplaceMarkerRegion with dropPrefix=false — the h1 heading before
+// It uses a single-pass pipeline: the unified template (skill_sub.go.tmpl)
+// renders ALL content (figures + body) inside the BEGIN/END markers. After
+// marker replacement, any content after END is truncated when a SkillBody
+// entry exists (R3: nothing after END).
+//
+// ReplaceMarkerRegion is called with dropPrefix=false — the h1 heading before
 // the BEGIN marker is hand-authored and preserved.
 //
 // figuresDir is an optional path to the directory containing figure YAML files.
 // When empty, figures will have no content (useful for testing without figure files).
 //
-// Returns the complete new file content (preserved prefix + generated header + preserved body).
+// Returns the complete new file content.
 //
 // Returns a *MarkerError if skillPath is missing the BEGIN/END marker pair (and
 // Init is false), or if the markers are malformed.
@@ -637,8 +650,8 @@ func GenerateSubSkill(commandID string, skillPath string, figuresDir string, opt
 		}
 	}
 
-	// Render the new sub-skill header.
-	rendered, err := renderSubSkillHeader(commandID, figuresDir)
+	// Single-pass render: template produces all content inside BEGIN/END.
+	rendered, err := renderSubSkill(commandID, figuresDir)
 	if err != nil {
 		return "", err
 	}
@@ -652,30 +665,16 @@ func GenerateSubSkill(commandID string, skillPath string, figuresDir string, opt
 		)
 	}
 
-	// Pass 2: Body — replace everything after END with rendered body content.
-	// The SkillBodySpecs key is the skill directory name derived from the
-	// command's File field: "skills/supervisor-plan-tasks/SKILL.md" → "supervisor-plan-tasks".
-	// Re-look up cmdSpec here (already validated by renderSubSkillHeader above).
+	// Explicit truncation: when a SkillBody exists, strip everything after END.
 	cmdSpecForBody := CommandSpecs[commandID]
 	skillDirKey := subSkillDirKey(cmdSpecForBody.File)
-	if body, ok := SkillBodySpecs[skillDirKey]; ok {
-		renderedBody, err := renderBody(&body, figuresDir)
-		if err != nil {
-			return "", fmt.Errorf(
-				"codegen.GenerateSubSkill: body render failed for command %q: %w",
-				commandID, err,
-			)
-		}
-		newContent, err = ReplaceBodyRegion(newContent, renderedBody)
-		if err != nil {
-			return "", fmt.Errorf(
-				"codegen.GenerateSubSkill: body region replacement failed for %q (command %q): %w",
-				skillPath, commandID, err,
-			)
+	if _, ok := SkillBodySpecs[skillDirKey]; ok {
+		if endIdx := strings.Index(newContent, GeneratedEnd); endIdx >= 0 {
+			newContent = newContent[:endIdx+len(GeneratedEnd)] + "\n"
 		}
 	}
 
-	// Pass 3: Validate the generated markdown structure.
+	// Validate the generated markdown structure.
 	if err := ValidateSkillStructure([]byte(newContent)); err != nil {
 		return "", fmt.Errorf("codegen.GenerateSubSkill: validate sub-skill %q: %w", commandID, err)
 	}

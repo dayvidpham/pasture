@@ -9,7 +9,6 @@ skills: aura:reviewer-comment, aura:reviewer-review-code, aura:reviewer-review-p
 <!-- BEGIN GENERATED FROM aura schema -->
 **Role:** `reviewer` | **Phases owned:** p4-review, p10-code-review
 
-
 ## Protocol Context (generated from schema.xml)
 
 ### Owned Phases
@@ -210,7 +209,6 @@ Agents coordinate through **beads** tasks and comments:
 | correctness | Correctness | Spirit and technicality | Does the implementation faithfully serve the user's original request?; Are technical decisions consistent with the rationale in the proposal?; Are there gaps where the proposal says one thing but the code does another? |
 | elegance | Elegance | Complexity matching | Design the API you know you will need?; No over-engineering (premature abstractions, plugin systems)?; No under-engineering (cutting corners on security or correctness)?; Complexity proportional to innate problem complexity? |
 | test_quality | Test quality | Test strategy adequacy | Favour integration tests over brittle unit tests?; System under test NOT mocked — mock dependencies only?; Shared fixtures for common test values?; Assert observable outcomes, not internal state? |
-<!-- END GENERATED FROM aura schema -->
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-4-plan-review)**
 
@@ -286,3 +284,4 @@ All 3 reviewers must vote ACCEPT for plan to be ratified. If any reviewer votes 
 2. Old proposal marked `aura:superseded`
 3. Reviewers re-review new proposal
 4. Repeat until all ACCEPT
+<!-- END GENERATED FROM aura schema -->

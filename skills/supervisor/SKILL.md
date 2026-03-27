@@ -9,7 +9,6 @@ skills: aura:impl-review, aura:impl-slice, aura:supervisor-commit, aura:supervis
 <!-- BEGIN GENERATED FROM aura schema -->
 **Role:** `supervisor` | **Phases owned:** p7-handoff, p8-impl-plan, p9-worker-slices, p10-code-review, p11-impl-uat, p12-landing
 
-
 ## Protocol Context (generated from schema.xml)
 
 ### Owned Phases
@@ -276,31 +275,70 @@ Agents coordinate through **beads** tasks and comments:
 
 ### Workflows
 
-#### Ride the Wave
+## Ride the Wave
 
 Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full cycle: plan slices, launch workers, spawn reviewers for per-slice review, workers fix, repeat max 3 cycles per slice.
 
-**Stage 1: Plan** _(sequential)_
+## Stage 1: Plan _(sequential)_
 - Read RATIFIED_PLAN and URD via bd show (`bd show <ratified-plan-id> && bd show <urd-id>`)
-- Spawn ephemeral Explore subagents via Task tool to map codebase areas
+- Spawn ephemeral Explore subagents (`subagent_type=Explore`) for scoped codebase queries — NOT standing teams
 - Use Explore findings to decompose into vertical slices with integration points
 - Create leaf tasks (L1/L2/L3) for every slice (`bd dep add <slice-id> --blocked-by <leaf-task-id>`)
 
 Exit conditions:
 - **proceed**: All slices created with leaf tasks, dependency-chained, assigned
 
-**Stage 2: Build** _(parallel)_
-- Spawn N workers for parallel slice implementation (`aura-swarm start --epic <epic-id>`)
+## Stage 2: Build _(parallel)_
+- Spawn workers as Agent tool subagents (`subagent_type: "general-purpose"`, `run_in_background: true`); use TeamCreate only for >=3 slices with shared integration points (`aura-swarm start --epic <epic-id>`)
 - Monitor worker progress via bd list and bd show (`bd list --labels="aura:p9-impl:s9-slice" --status=in_progress`)
+- Supervisor commits at integration points (atomic commits) — commit small, integrate early and often
 
 Exit conditions:
 - **proceed**: All workers have notified completion via bd comments add
 
-**Stage 3: Review + Fix Cycles** _(conditional-loop)_
+## Stage 3: Review + Fix Cycles _(conditional-loop)_
 - Spawn reviewers via Task tool for per-slice code review
 - Reviewers create severity groups (BLOCKER/IMPORTANT/MINOR) per slice
 - Create FOLLOWUP epic if any IMPORTANT/MINOR findings exist
 - Workers fix BLOCKERs and IMPORTANT findings
+
+- Spawn 3 ephemeral reviewer subagents per round (same pattern as Phase 4 plan review)
+- **CLEAN REVIEW** = 0 BLOCKERs + 0 IMPORTANTs from ALL reviewers
+- Per-slice fix+review with independent cycle counters per slice
+- Fix flow: Stage 3 (dirty review) -> Stage 2 (worker fixes) -> Stage 3 (re-review)
+- Max 3 cycles per slice, then escalate to architect for re-planning
+- **MUST end on a review wave** — cannot proceed after a worker wave without review
+
+```text
+Stage 3 Flow (per-slice):
+
+  ┌─────────────────────────────────────────┐
+  │ Spawn 3 ephemeral reviewers             │
+  │ Review slice (severity: BLOCKER/IMP/MIN)│
+  └──────────────┬──────────────────────────┘
+                 │
+          CLEAN? ├── YES → slice passes, proceed
+                 │
+                 └── NO (cycle < 3)
+                       │
+                       ▼
+              ┌────────────────────┐
+              │ Stage 2: worker    │
+              │ fixes BLOCKERs +   │
+              │ IMPORTANTs         │
+              └────────┬───────────┘
+                       │
+                       ▼
+              ┌────────────────────┐
+              │ Stage 3: re-review │
+              │ (new ephemeral     │
+              │  reviewers)        │
+              └────────┬───────────┘
+                       │
+                 cycle++ → loop
+                       │
+          3 cycles exhausted → escalate to architect
+```
 
 Exit conditions:
 - **success**: All reviewers ACCEPT, no open BLOCKERs — proceed to Phase 11 UAT
@@ -344,7 +382,6 @@ Cycle Exit Conditions:
   3 cycles exhausted per slice, BLOCKERs remain       → Escalate to architect for re-planning
 
 ```
-<!-- END GENERATED FROM aura schema -->
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-8-implementation-plan)** <- Phases 7-12
 
@@ -369,64 +406,6 @@ Cycle Exit Conditions:
 **Given** IMPORTANT or MINOR finding **when** categorizing **then** add to severity group only (NOT to slice) — these go to follow-up epic **should never** block slices on non-BLOCKER findings
 
 **Given** review complete with IMPORTANT/MINOR **when** finishing **then** supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution) **should never** wait for BLOCKERs to resolve before creating follow-up
-
-## Ride the Wave — Operational Detail
-
-
-
-### Stage 1: Plan _(sequential)_
-
-- Read RATIFIED_PLAN and URD via `bd show`
-- Spawn ephemeral Explore subagents (Agent tool, `subagent_type=Explore`) for scoped codebase queries — NOT standing teams
-- Decompose into vertical slices with integration points
-- Create leaf tasks (L1/L2/L3) for every slice
-
-### Spawning the Wave — Stage 2: Build _(parallel)_
-
-- Spawn workers as Agent tool subagents by default (`subagent_type: "general-purpose"`, `run_in_background: true`)
-- Use TeamCreate only for >=3 slices with shared integration points requiring SendMessage coordination
-- Supervisor commits at integration points (atomic commits) — commit small and often
-- Integrate early and often
-
-### Stage 3: Review _(conditional-loop, per-slice)_
-
-- Spawn 3 ephemeral reviewer subagents per round (same pattern as Phase 4 plan review)
-- **CLEAN REVIEW** = 0 BLOCKERs + 0 IMPORTANTs from ALL reviewers
-- Per-slice fix+review with independent cycle counters per slice
-- Fix flow: Stage 3 (dirty review) -> Stage 2 (worker fixes) -> Stage 3 (re-review)
-- Max 3 cycles per slice, then escalate to architect for re-planning
-- **MUST end on a review wave** — cannot proceed after a worker wave without review
-
-```text
-Stage 3 Flow (per-slice):
-
-  ┌─────────────────────────────────────────┐
-  │ Spawn 3 ephemeral reviewers             │
-  │ Review slice (severity: BLOCKER/IMP/MIN)│
-  └──────────────┬──────────────────────────┘
-                 │
-          CLEAN? ├── YES → slice passes, proceed
-                 │
-                 └── NO (cycle < 3)
-                       │
-                       ▼
-              ┌────────────────────┐
-              │ Stage 2: worker    │
-              │ fixes BLOCKERs +   │
-              │ IMPORTANTs         │
-              └────────┬───────────┘
-                       │
-                       ▼
-              ┌────────────────────┐
-              │ Stage 3: re-review │
-              │ (new ephemeral     │
-              │  reviewers)        │
-              └────────┬───────────┘
-                       │
-                 cycle++ → loop
-                       │
-          3 cycles exhausted → escalate to architect
-```
 
 ## First Steps
 
@@ -968,3 +947,4 @@ bd list --labels="aura:severity:minor"
 # Check follow-up epics
 bd list --labels="aura:epic-followup"
 ```
+<!-- END GENERATED FROM aura schema -->

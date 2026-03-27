@@ -3,6 +3,10 @@
 <!-- BEGIN GENERATED FROM aura schema -->
 **Command:** `aura:supervisor:plan-tasks` — Decompose ratified plan into vertical slices (SLICE-N)
 
+Break RATIFIED_PLAN into vertical slice Implementation tasks for workers.
+
+**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-8-implementation-plan)** <- Phase 8
+
 ### Layer Cake — TDD Parallelism Within Vertical Slices
 
 ```text
@@ -34,11 +38,6 @@ L2 Test File Requirements:
   4. Define expected API contracts — tests specify what the implementation should do
 
 ```
-<!-- END GENERATED FROM aura schema -->
-
-Break RATIFIED_PLAN into vertical slice Implementation tasks for workers.
-
-**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-8-implementation-plan)** <- Phase 8
 
 **Given** IMPL_PLAN placeholder **when** planning **then** decompose into vertical slices (production code paths) **should never** decompose into horizontal layers (files)
 
@@ -403,3 +402,4 @@ references:
 bd dep add <followup-slice-id> --blocked-by <leaf-task-id-1>
 bd dep add <followup-slice-id> --blocked-by <leaf-task-id-2>
 ```
+<!-- END GENERATED FROM aura schema -->

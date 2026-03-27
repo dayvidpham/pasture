@@ -3,6 +3,10 @@
 <!-- BEGIN GENERATED FROM aura schema -->
 **Command:** `aura:supervisor:spawn-worker` — Launch a worker agent for an assigned slice
 
+Launch the wave of workers for parallel vertical slice implementation, reviewed by ephemeral reviewers.
+
+**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9
+
 ### Ride the Wave — Coordinated Phase 8-10 Execution
 
 ```text
@@ -39,11 +43,6 @@ Cycle Exit Conditions:
   3 cycles exhausted per slice, BLOCKERs remain       → Escalate to architect for re-planning
 
 ```
-<!-- END GENERATED FROM aura schema -->
-
-Launch the wave of workers for parallel vertical slice implementation, reviewed by ephemeral reviewers.
-
-**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9
 
 **Given** implementation tasks **when** spawning **then** use Task tool with `run_in_background: true` **should never** block on worker completion
 
@@ -260,3 +259,4 @@ For follow-up slices, the handoff template extends with additional fields:
 - Both adopted leaf tasks resolved (tests pass, production code path verified)
 - See bd task <slice-task-id> for full validation_checklist
 ```
+<!-- END GENERATED FROM aura schema -->

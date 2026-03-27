@@ -532,15 +532,15 @@ func TestGenerateIdempotent(t *testing.T) {
 	}
 }
 
-// ─── TestTwoPass_HeaderThenBody ───────────────────────────────────────────────
+// ─── TestGenerateSkill_BodyInsideMarkers ─────────────────────────────────────
 
-// TestTwoPass_HeaderRegionUnchangedByBodyPass verifies the two-pass pipeline
-// interaction: after GenerateSkill runs (header pass + body pass), the
-// generated header region (BEGIN..END block) is untouched by the body pass.
+// TestGenerateSkill_BodyInsideMarkers verifies the unified single-pass pipeline:
+// after GenerateSkill runs, ALL body content (preamble, sections, recipes) is
+// rendered INSIDE the BEGIN/END markers, and NOTHING appears after END.
 //
 // This test registers a temporary SkillBody entry so it exercises the body
 // path without depending on real content in SkillBodySpecs.
-func TestTwoPass_HeaderRegionUnchangedByBodyPass(t *testing.T) {
+func TestGenerateSkill_BodyInsideMarkers(t *testing.T) {
 	// Register a test body under a sentinel key that matches the worker role.
 	testBody := codegen.SkillBody{
 		Preamble: "Test preamble paragraph.",
@@ -549,6 +549,24 @@ func TestTwoPass_HeaderRegionUnchangedByBodyPass(t *testing.T) {
 				ID:      "test-section",
 				Title:   "Test Section",
 				Content: "Test section content.",
+			},
+		},
+		Recipes: []codegen.RecipeBlock{
+			{
+				ID:          "test-recipe",
+				Title:       "Test Recipe",
+				Description: "Test recipe description.",
+				Lang:        "bash",
+				Code:        "echo hello",
+			},
+		},
+		Behaviors: []codegen.BehaviorSpec{
+			{
+				ID:        "test-behavior",
+				Given:     "test given",
+				When:      "test when",
+				Then:      "test then",
+				ShouldNot: "test should not",
 			},
 		},
 	}
@@ -560,31 +578,42 @@ func TestTwoPass_HeaderRegionUnchangedByBodyPass(t *testing.T) {
 	result, err := codegen.GenerateSkill(types.RoleWorker, skillPath, "", opts)
 	require.NoError(t, err, "GenerateSkill with registered body should not error")
 
-	// The header region (BEGIN..END) must still be present and contain the
-	// role-specific generated content (not overwritten by the body pass).
+	// Both markers must be present.
 	assert.Contains(t, result, codegen.GeneratedBegin,
-		"BEGIN marker must be present after two-pass generation")
+		"BEGIN marker must be present after generation")
 	assert.Contains(t, result, codegen.GeneratedEnd,
-		"END marker must be present after two-pass generation")
+		"END marker must be present after generation")
 
-	// The generated header content (role ID) must be inside the marker region.
+	// The generated header content (role ID) must be present.
 	assert.Contains(t, result, "worker",
-		"generated header content (role ID) must survive the body pass")
+		"generated header content (role ID) must be in the output")
 
-	// The body content must appear after the END marker.
+	// Body content must be INSIDE the markers (between BEGIN and END).
+	beginIdx := strings.Index(result, codegen.GeneratedBegin)
 	endIdx := strings.Index(result, codegen.GeneratedEnd)
-	require.Greater(t, endIdx, 0, "END marker must be in the result")
+	require.Greater(t, endIdx, beginIdx, "END must come after BEGIN")
+	markerRegion := result[beginIdx:endIdx]
+	assert.Contains(t, markerRegion, "Test Section",
+		"body section title must appear INSIDE the marker region (between BEGIN and END)")
+	assert.Contains(t, markerRegion, "Test preamble paragraph.",
+		"body preamble must appear INSIDE the marker region (between BEGIN and END)")
+	assert.Contains(t, markerRegion, "Test Recipe",
+		"body recipe title must appear INSIDE the marker region (between BEGIN and END)")
+	assert.Contains(t, markerRegion, "echo hello",
+		"body recipe code must appear INSIDE the marker region (between BEGIN and END)")
+	assert.Contains(t, markerRegion, "test given",
+		"body behavior must appear INSIDE the marker region (between BEGIN and END)")
+
+	// R3: NOTHING after END marker.
 	afterEnd := result[endIdx+len(codegen.GeneratedEnd):]
-	assert.Contains(t, afterEnd, "Test Section",
-		"body section title must appear after the END marker")
-	assert.Contains(t, afterEnd, "Test preamble paragraph.",
-		"body preamble must appear after the END marker")
+	assert.Equal(t, strings.TrimSpace(afterEnd), "",
+		"with a body spec, nothing should appear after the END marker (R3)")
 }
 
-// TestTwoPass_NoBodySpec_HeaderOnly verifies that when no SkillBody is
-// registered for a role, GenerateSkill produces output identical to the
-// header-only result (body pass is a no-op).
-func TestTwoPass_NoBodySpec_HeaderOnly(t *testing.T) {
+// TestGenerateSkill_NoBody_HeaderOnly verifies that when no SkillBody is
+// registered for a role, GenerateSkill produces output with no body content
+// and nothing after END.
+func TestGenerateSkill_NoBody_HeaderOnly(t *testing.T) {
 	// Suppress body spec for worker to test header-only path.
 	suppressBodySpec(t, string(types.RoleWorker))
 
@@ -606,7 +635,7 @@ func TestTwoPass_NoBodySpec_HeaderOnly(t *testing.T) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// truncate returns the first n runes of s, for use in error messages.
+// truncate returns the first n bytes of s, for use in error messages.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s

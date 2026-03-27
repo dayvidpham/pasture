@@ -1,0 +1,43 @@
+<!-- BEGIN GENERATED FROM aura schema -->
+**Command:** `{{ .CommandName }}` — {{ .CommandDescription }}
+{{- if .Preamble }}
+
+{{ .Preamble }}
+{{- end }}
+{{- if .Figures }}
+{{- range .Figures }}
+
+### {{ .Title }}
+
+```text
+{{ .Content }}
+```
+{{- end }}
+{{- end }}
+{{- range .BodyBehaviors }}
+
+**Given** {{ .Given }} **when** {{ .When }} **then** {{ .Then }} **should never** {{ .ShouldNot }}
+{{- end }}
+{{- range .BodySections }}
+
+## {{ .Title }}
+
+{{ .Content }}
+{{- range .Subsections }}
+
+### {{ .Title }}
+
+{{ .Content }}
+{{- end }}
+{{- end }}
+{{- range .BodyRecipes }}
+
+## {{ .Title }}
+
+{{ .Description }}
+
+```{{ .Lang }}
+{{ .Code }}
+```
+{{- end }}
+<!-- END GENERATED FROM aura schema -->

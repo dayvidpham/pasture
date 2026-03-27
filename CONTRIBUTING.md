@@ -10,11 +10,10 @@ inspect the diff, run tests.
 The pipeline has four stages:
 
 1. **GenerateSchemaToFile** — marshals spec maps → `schema.xml` (17 sections)
-2. **GenerateSkill** — three-pass render → `skills/{role}/SKILL.md` (marker-bounded):
-   - *Pass 1 (header):* `ReplaceMarkerRegion` renders `templates/skill_header.go.tmpl` between the BEGIN/END markers
-   - *Pass 2 (body):* if a `SkillBodySpecs` entry exists, `ReplaceBodyRegion` renders `templates/skill_body.go.tmpl` after the END marker
-   - *Pass 3 (validate):* `ValidateSkillStructure` validates heading hierarchy via goldmark (duplicate H2 titles, orphan H3 headings)
-3. **GenerateSubSkill** — same three-pass pipeline → `skills/{dir}/SKILL.md` (for commands with figures)
+2. **GenerateSkill** — single unified pass → `skills/{role}/SKILL.md` (marker-bounded):
+   - `ReplaceMarkerRegion` renders `templates/skill.go.tmpl` between the BEGIN/END markers (header + body in one pass)
+   - `ValidateSkillStructure` validates heading hierarchy via goldmark (duplicate H2 titles, orphan H3 headings)
+3. **GenerateSubSkill** — single unified pass → `skills/{dir}/SKILL.md` using `templates/skill_sub.go.tmpl`
 4. **GenerateAgent** — renders `templates/agent_definition.go.tmpl` → `agents/{role}.md` (fully overwritten)
 
 The entry point is `tools/codegen/main.go`, invoked by:
@@ -30,16 +29,15 @@ go generate ./internal/codegen/...
 | File | Purpose | When to touch it |
 |------|---------|-----------------|
 | `internal/codegen/specs_data.go` | All canonical data maps (`PhaseSpecs`, `ConstraintSpecs`, `RoleSpecs`, `CommandSpecs`, `HandoffSpecs`, `FigureSpecs`, `ChecklistSpecs`, `CoordinationCommands`, `WorkflowSpecs`, `ReviewAxisSpecs`, `ProcedureSteps`, `LabelSpecs`, `TitleConventions`, `SubstepDataMap`) | Adding/changing any protocol concept |
-| `internal/codegen/specs_data_body.go` | `SkillBodySpecs` map: body content for all skill SKILL.md files (preamble, sections, recipes, behaviors). Source of truth for everything after the END marker. | Adding/changing skill body prose |
+| `internal/codegen/specs_data_body.go` | `SkillBodySpecs` map: body content for all skill SKILL.md files (preamble, sections, recipes, behaviors). Source of truth for body content inside the BEGIN/END markers. | Adding/changing skill body prose |
 | `internal/codegen/specs.go` | Go type definitions for all spec structs (`ConstraintSpec`, `RoleSpec`, `PhaseSpec`, etc.) | Adding a new field to any spec struct |
 | `internal/codegen/context.go` | `generalConstraints`, `roleConstraints`, `phaseConstraints` maps; `GetRoleContext`, `GetPhaseContext` | Adding/removing a constraint-role or constraint-phase association |
 | `internal/codegen/schema.go` | `generateSchemaContent`, `sections` slice, `buildConstraints` and `buildProcedureSteps` (manual CDATA builders), `marshalSection` helper | Adding a new schema section or modifying CDATA sections |
 | `internal/codegen/schema_types.go` | `encoding/xml` annotated structs for 15 marshallable sections; doc-only structs for the 2 CDATA sections | Adding a new schema section's XML shape |
-| `internal/codegen/skills.go` | `GenerateSkill`, `GenerateSubSkill`, `skillHeaderContext`, figure-loading helpers | Changing SKILL.md generation logic or template context shape |
+| `internal/codegen/skills.go` | `GenerateSkill`, `GenerateSubSkill`, `skillContext`, `skillSubContext`, figure-loading helpers | Changing SKILL.md generation logic or template context shape |
 | `internal/codegen/agents.go` | `GenerateAgent`, `agentTemplateData`, `renderAgent` | Changing agent definition generation logic or template context shape |
-| `internal/codegen/templates/skill_header.go.tmpl` | SKILL.md header template (role commands, constraints, handoffs, phases, checklists, workflows, figures) | Changing the layout of generated SKILL.md headers |
-| `internal/codegen/templates/skill_body.go.tmpl` | SKILL.md body template (preamble, behaviors, sections, recipes) rendered via `ReplaceBodyRegion` after the END marker | Changing the layout of generated SKILL.md body content |
-| `internal/codegen/templates/skill_sub_figure.go.tmpl` | Sub-skill SKILL.md header template (command name, description, figures) | Changing sub-skill header layout |
+| `internal/codegen/templates/skill.go.tmpl` | Unified SKILL.md template (header + body: role commands, constraints, handoffs, phases, checklists, workflows, figures, preamble, behaviors, sections, recipes) | Changing the layout of generated SKILL.md files |
+| `internal/codegen/templates/skill_sub.go.tmpl` | Sub-skill SKILL.md template (command name, description, figures, preamble, behaviors, sections, recipes) | Changing sub-skill layout |
 | `internal/codegen/templates/agent_definition.go.tmpl` | Agent definition template (role spec, phases, constraints, behaviors, checklists, workflows, figure refs) | Changing agent definition layout |
 | `tools/codegen/main.go` | `go:generate` entry point; `roleSkillDirs` and `commandSkillDirs` maps | Adding a new role or command that needs skill generation |
 | `internal/codegen/testdata/context.yaml` | YAML fixture for `context_test.go` — exact constraint counts and must_contain/must_not_contain per role/phase | Any change to `roleConstraints` or `phaseConstraints` |
@@ -72,13 +70,12 @@ What it does, in order:
 | What you changed | Regenerates |
 |-----------------|-------------|
 | Any map in `specs_data.go` | schema.xml, SKILL.md headers, agent definitions (all 4 stages) |
-| `specs_data_body.go` (`SkillBodySpecs`) | SKILL.md body regions (stages 2–3 body pass only) |
+| `specs_data_body.go` (`SkillBodySpecs`) | SKILL.md body content (stages 2–3) |
 | `context.go` (`roleConstraints` / `phaseConstraints`) | SKILL.md headers, agent definitions (stages 2–4 only) |
 | `schema_types.go` | schema.xml only (stage 1) |
 | `schema.go` section builders | schema.xml only (stage 1) |
-| `templates/skill_header.go.tmpl` | SKILL.md role headers (stage 2) |
-| `templates/skill_body.go.tmpl` | SKILL.md body regions (stages 2–3 body pass) |
-| `templates/skill_sub_figure.go.tmpl` | SKILL.md sub-skill headers (stage 3) |
+| `templates/skill.go.tmpl` | SKILL.md role files (stage 2) |
+| `templates/skill_sub.go.tmpl` | SKILL.md sub-skill files (stage 3) |
 | `templates/agent_definition.go.tmpl` | agent definitions (stage 4) |
 | `tools/codegen/main.go` `roleSkillDirs` | which SKILL.md files are regenerated |
 | `tools/codegen/main.go` `commandSkillDirs` | which sub-skill SKILL.md files are regenerated |
@@ -126,7 +123,7 @@ This is a subset of the above when the `ConstraintSpec` already exists.
 
 2. Create a YAML file at `skills/protocol/figures/{id}.yaml` with a `content` key containing the ASCII diagram text. This is loaded at generation time by `loadFigureContent` in `skills.go`.
 
-3. Run `go generate ./internal/codegen/...`. The figure will appear automatically in SKILL.md headers (via `skill_header.go.tmpl`) and agent definition figure-ref lists (via `agent_definition.go.tmpl`) for the referenced roles.
+3. Run `go generate ./internal/codegen/...`. The figure will appear automatically in SKILL.md files (via `skill.go.tmpl`) and agent definition figure-ref lists (via `agent_definition.go.tmpl`) for the referenced roles.
 
 4. Run `go test ./internal/codegen/... -count=1`. Update `testdata/agents.yaml` if fixture checks figure references.
 
@@ -206,8 +203,8 @@ This is a subset of the above when the `ConstraintSpec` already exists.
 ### Modifying a Template
 
 1. Edit the `.go.tmpl` file in `internal/codegen/templates/`:
-   - `skill_header.go.tmpl` — role SKILL.md headers. Context type: `skillHeaderContext` (declared in `skills.go`). Available fields: `Role` (RoleSpec), `Commands` ([]CommandSpec), `Constraints` ([]ConstraintSpec), `Handoffs` ([]HandoffSpec), `OwnedPhases`, `PhasesDetail`, `Steps`, `PhaseSlug`, `SubSkills`, `Introduction`, `OwnershipNarrative`, `Behaviors`, `Checklists`, `CoordinationCommands`, `Workflows`, `FiguresByWorkflow`, `ReviewAxes`.
-   - `skill_sub_figure.go.tmpl` — sub-skill headers. Context type: `skillSubFigureContext`. Available fields: `CommandName`, `CommandDescription`, `Figures`.
+   - `skill.go.tmpl` — unified role SKILL.md template. Context type: `skillContext` (declared in `skills.go`). Available fields: `Role` (RoleSpec), `Commands` ([]CommandSpec), `Constraints` ([]ConstraintSpec), `Handoffs` ([]HandoffSpec), `OwnedPhases`, `PhasesDetail`, `Steps`, `PhaseSlug`, `SubSkills`, `Introduction`, `OwnershipNarrative`, `Behaviors`, `Checklists`, `CoordinationCommands`, `Workflows`, `FiguresByWorkflow`, `ReviewAxes`, `Preamble`, `BodyBehaviors`, `BodySections`, `BodyRecipes`.
+   - `skill_sub.go.tmpl` — sub-skill template. Context type: `skillSubContext`. Available fields: `CommandName`, `CommandDescription`, `Figures`, `Preamble`, `BodySections`, `BodyRecipes`, `BodyBehaviors`.
    - `agent_definition.go.tmpl` — agent definitions. Context type: `agentTemplateData`. Available fields: `Role` (RoleSpec), `PhasesDetail`, `PhaseSlug`, `Constraints`, `Behaviors`, `Checklists`, `Workflows`, `Figures`.
 
 2. Run `go generate ./internal/codegen/...` to preview the rendered output.

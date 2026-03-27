@@ -1301,14 +1301,15 @@ Layer 1: types and interfaces for <slice name>."]]></code>
     <workflow id="ride-the-wave" name="Ride the Wave" role-ref="supervisor" description="Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full cycle: plan slices, launch workers, spawn reviewers for per-slice review, workers fix, repeat max 3 cycles per slice.">
       <stage id="rtw-plan" name="Plan" order="1" execution="sequential" phase-ref="p8">
         <action id="rtw-plan-read" instruction="Read RATIFIED_PLAN and URD via bd show" command="bd show &lt;ratified-plan-id&gt; &amp;&amp; bd show &lt;urd-id&gt;"></action>
-        <action id="rtw-plan-explore" instruction="Spawn ephemeral Explore subagents via Task tool to map codebase areas"></action>
+        <action id="rtw-plan-explore" instruction="Spawn ephemeral Explore subagents (`subagent_type=Explore`) for scoped codebase queries — NOT standing teams"></action>
         <action id="rtw-plan-decompose" instruction="Use Explore findings to decompose into vertical slices with integration points"></action>
         <action id="rtw-plan-leaf-tasks" instruction="Create leaf tasks (L1/L2/L3) for every slice" command="bd dep add &lt;slice-id&gt; --blocked-by &lt;leaf-task-id&gt;"></action>
         <exit-condition type="proceed" condition="All slices created with leaf tasks, dependency-chained, assigned"></exit-condition>
       </stage>
       <stage id="rtw-build" name="Build" order="2" execution="parallel" phase-ref="p9">
-        <action id="rtw-build-spawn" instruction="Spawn N workers for parallel slice implementation" command="aura-swarm start --epic &lt;epic-id&gt;"></action>
+        <action id="rtw-build-spawn" instruction="Spawn workers as Agent tool subagents (`subagent_type: &#34;general-purpose&#34;`, `run_in_background: true`); use TeamCreate only for &gt;=3 slices with shared integration points" command="aura-swarm start --epic &lt;epic-id&gt;"></action>
         <action id="rtw-build-monitor" instruction="Monitor worker progress via bd list and bd show" command="bd list --labels=&#34;aura:p9-impl:s9-slice&#34; --status=in_progress"></action>
+        <action id="rtw-build-integrate" instruction="Supervisor commits at integration points (atomic commits) — commit small, integrate early and often"></action>
         <exit-condition type="proceed" condition="All workers have notified completion via bd comments add"></exit-condition>
       </stage>
       <stage id="rtw-review-fix" name="Review + Fix Cycles" order="3" execution="conditional-loop" phase-ref="p10">

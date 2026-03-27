@@ -190,7 +190,7 @@ Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full c
 
 - Read RATIFIED_PLAN and URD via bd show (`bd show <ratified-plan-id> && bd show <urd-id>`)
 
-- Spawn ephemeral Explore subagents via Task tool to map codebase areas
+- Spawn ephemeral Explore subagents (`subagent_type=Explore`) for scoped codebase queries — NOT standing teams
 
 - Use Explore findings to decompose into vertical slices with integration points
 
@@ -201,9 +201,11 @@ Exit conditions:
 
 **Stage 2: Build** _(parallel)_
 
-- Spawn N workers for parallel slice implementation (`aura-swarm start --epic <epic-id>`)
+- Spawn workers as Agent tool subagents (`subagent_type: "general-purpose"`, `run_in_background: true`); use TeamCreate only for >=3 slices with shared integration points (`aura-swarm start --epic <epic-id>`)
 
 - Monitor worker progress via bd list and bd show (`bd list --labels="aura:p9-impl:s9-slice" --status=in_progress`)
+
+- Supervisor commits at integration points (atomic commits) — commit small, integrate early and often
 
 Exit conditions:
 - **proceed**: All workers have notified completion via bd comments add

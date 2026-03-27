@@ -390,7 +390,7 @@ func TestSkillBodySpecsCompleteness(t *testing.T) {
 			}
 
 			// Fix 8: Verify no subsection has its own subsections (max depth = 2 levels).
-			// The skill_body.go.tmpl template only renders 2 levels of sections;
+			// The skill.go.tmpl / skill_sub.go.tmpl templates only render 2 levels of sections;
 			// deeper nesting would be silently dropped.
 			for i, section := range body.Sections {
 				for j, sub := range section.Subsections {

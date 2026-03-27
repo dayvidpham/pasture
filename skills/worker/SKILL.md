@@ -9,7 +9,6 @@ skills: aura:worker-blocked, aura:worker-complete, aura:worker-implement
 <!-- BEGIN GENERATED FROM aura schema -->
 **Role:** `worker` | **Phases owned:** p9-worker-slices
 
-
 ## Protocol Context (generated from schema.xml)
 
 ### Owned Phases
@@ -193,25 +192,25 @@ Agents coordinate through **beads** tasks and comments:
 
 ### Workflows
 
-#### Layer Cake
+## Layer Cake
 
 TDD layer-by-layer implementation within a vertical slice. Worker implements types first, then tests (will fail), then production code to make tests pass.
 
-**Stage 1: Types** _(sequential)_
+## Stage 1: Types _(sequential)_
 - Read slice task and identify required types (`bd show <slice-task-id>`)
 - Define types, interfaces, and schemas (no deps) — only types for YOUR slice
 
 Exit conditions:
 - **proceed**: All required types defined; file imports without error
 
-**Stage 2: Tests** _(sequential)_
+## Stage 2: Tests _(sequential)_
 - Write tests importing production code (CLI/API users will run) — tests WILL fail
 - Verify tests import actual production code, not test-only export
 
 Exit conditions:
 - **proceed**: Tests written and import production code; typecheck passes; tests fail (expected)
 
-**Stage 3: Implementation + Wiring** _(sequential)_
+## Stage 3: Implementation + Wiring _(sequential)_
 - Implement production code to make Layer 2 tests pass
 - Wire with real dependencies (not mocks in production code)
 - Run tests — all Layer 2 tests must pass
@@ -253,7 +252,6 @@ L2 Test File Requirements:
   4. Define expected API contracts — tests specify what the implementation should do
 
 ```
-<!-- END GENERATED FROM aura schema -->
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9
 
@@ -469,3 +467,4 @@ On blocked:
 bd update <task-id> --status=blocked
 bd update <task-id> --notes="Blocked: <reason>. Need: <dependency or clarification>"
 ```
+<!-- END GENERATED FROM aura schema -->

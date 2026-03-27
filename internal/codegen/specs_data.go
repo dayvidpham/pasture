@@ -1335,7 +1335,7 @@ var WorkflowSpecs = map[string]Workflow{
 					},
 					{
 						ID:          "rtw-plan-explore",
-						Instruction: "Spawn ephemeral Explore subagents via Task tool to map codebase areas",
+						Instruction: "Spawn ephemeral Explore subagents (`subagent_type=Explore`) for scoped codebase queries — NOT standing teams",
 					},
 					{
 						ID:          "rtw-plan-decompose",
@@ -1347,6 +1347,7 @@ var WorkflowSpecs = map[string]Workflow{
 						Command:     "bd dep add <slice-id> --blocked-by <leaf-task-id>",
 					},
 				},
+				OperationalDetail: "",
 				ExitConditions: []ExitCondition{
 					{
 						Type:      "proceed",
@@ -1363,7 +1364,7 @@ var WorkflowSpecs = map[string]Workflow{
 				Actions: []WorkflowAction{
 					{
 						ID:          "rtw-build-spawn",
-						Instruction: "Spawn N workers for parallel slice implementation",
+						Instruction: "Spawn workers as Agent tool subagents (`subagent_type: \"general-purpose\"`, `run_in_background: true`); use TeamCreate only for >=3 slices with shared integration points",
 						Command:     "aura-swarm start --epic <epic-id>",
 					},
 					{
@@ -1371,7 +1372,12 @@ var WorkflowSpecs = map[string]Workflow{
 						Instruction: "Monitor worker progress via bd list and bd show",
 						Command:     `bd list --labels="aura:p9-impl:s9-slice" --status=in_progress`,
 					},
+					{
+						ID:          "rtw-build-integrate",
+						Instruction: "Supervisor commits at integration points (atomic commits) — commit small, integrate early and often",
+					},
 				},
+				OperationalDetail: "",
 				ExitConditions: []ExitCondition{
 					{
 						Type:      "proceed",
@@ -1403,6 +1409,43 @@ var WorkflowSpecs = map[string]Workflow{
 						Instruction: "Workers fix BLOCKERs and IMPORTANT findings",
 					},
 				},
+				OperationalDetail: "- Spawn 3 ephemeral reviewer subagents per round (same pattern as Phase 4 plan review)\n" +
+					"- **CLEAN REVIEW** = 0 BLOCKERs + 0 IMPORTANTs from ALL reviewers\n" +
+					"- Per-slice fix+review with independent cycle counters per slice\n" +
+					"- Fix flow: Stage 3 (dirty review) -> Stage 2 (worker fixes) -> Stage 3 (re-review)\n" +
+					"- Max 3 cycles per slice, then escalate to architect for re-planning\n" +
+					"- **MUST end on a review wave** — cannot proceed after a worker wave without review\n" +
+					"\n" +
+					"```text\n" +
+					"Stage 3 Flow (per-slice):\n" +
+					"\n" +
+					"  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n" +
+					"  \u2502 Spawn 3 ephemeral reviewers             \u2502\n" +
+					"  \u2502 Review slice (severity: BLOCKER/IMP/MIN)\u2502\n" +
+					"  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n" +
+					"                 \u2502\n" +
+					"          CLEAN? \u251c\u2500\u2500 YES \u2192 slice passes, proceed\n" +
+					"                 \u2502\n" +
+					"                 \u2514\u2500\u2500 NO (cycle < 3)\n" +
+					"                       \u2502\n" +
+					"                       \u25bc\n" +
+					"              \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n" +
+					"              \u2502 Stage 2: worker    \u2502\n" +
+					"              \u2502 fixes BLOCKERs +   \u2502\n" +
+					"              \u2502 IMPORTANTs         \u2502\n" +
+					"              \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n" +
+					"                       \u2502\n" +
+					"                       \u25bc\n" +
+					"              \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n" +
+					"              \u2502 Stage 3: re-review \u2502\n" +
+					"              \u2502 (new ephemeral     \u2502\n" +
+					"              \u2502  reviewers)        \u2502\n" +
+					"              \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n" +
+					"                       \u2502\n" +
+					"                 cycle++ \u2192 loop\n" +
+					"                       \u2502\n" +
+					"          3 cycles exhausted \u2192 escalate to architect\n" +
+					"```",
 				ExitConditions: []ExitCondition{
 					{
 						Type:      "success",

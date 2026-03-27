@@ -80,8 +80,8 @@ type RecipeBlock struct {
 // ─── SkillBody ────────────────────────────────────────────────────────────────
 
 // SkillBody is the complete body content for a role or sub-skill.
-// Rendered by a separate template pass (skill_body.go.tmpl) using
-// ReplaceBodyRegion, preserving the header marker region independently.
+// Rendered inside the BEGIN/END marker region by the unified skill.go.tmpl
+// and skill_sub.go.tmpl templates.
 type SkillBody struct {
 	Preamble  string         // optional intro (e.g., PROCESS.md link)
 	Sections  []ProseSection // ordered prose sections (rendered as H2)
@@ -228,13 +228,14 @@ type ExitCondition struct {
 // WorkflowStage is a single stage in an agent workflow.
 // Mirrors Python WorkflowStage dataclass.
 type WorkflowStage struct {
-	ID             string
-	Name           string
-	Order          int
-	Execution      string // WorkflowExecution: "sequential", "parallel", "conditional-loop"
-	PhaseRef       protocol.PhaseId // optional phase this stage maps to
-	Actions        []WorkflowAction
-	ExitConditions []ExitCondition
+	ID                string
+	Name              string
+	Order             int
+	Execution         string // WorkflowExecution: "sequential", "parallel", "conditional-loop"
+	PhaseRef          protocol.PhaseId // optional phase this stage maps to
+	Actions           []WorkflowAction
+	ExitConditions    []ExitCondition
+	OperationalDetail string // optional prose rendered immediately after formal actions, before exit conditions
 }
 
 // ─── Workflow ─────────────────────────────────────────────────────────────────

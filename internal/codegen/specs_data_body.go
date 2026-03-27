@@ -1,8 +1,8 @@
 // Canonical body content for all skill SKILL.md files.
 //
 // This file consolidates body data for all 7 skills that have hand-authored
-// body sections (everything after the <!-- END GENERATED FROM aura schema -->
-// marker). Each var encodes the body content for one skill directory.
+// body sections (rendered inside the BEGIN/END marker region by the unified
+// templates). Each var encodes the body content for one skill directory.
 //
 // SkillBodySpecs maps skill directory names to their body content.
 // Keys are directory names (not types.RoleId) because sub-skills like
@@ -105,70 +105,6 @@ var supervisorBody = SkillBody{
 	},
 
 	Sections: []ProseSection{
-		{
-			ID:      "sup-ride-the-wave",
-			Title:   "Ride the Wave — Operational Detail",
-			Content: "",
-			Subsections: []ProseSection{
-				{
-					ID:    "sup-stage1-plan",
-					Title: "Stage 1: Plan _(sequential)_",
-					Content: `- Read RATIFIED_PLAN and URD via ` + "`bd show`" + `
-- Spawn ephemeral Explore subagents (Agent tool, ` + "`subagent_type=Explore`" + `) for scoped codebase queries — NOT standing teams
-- Decompose into vertical slices with integration points
-- Create leaf tasks (L1/L2/L3) for every slice`,
-				},
-				{
-					ID:    "sup-stage2-build",
-					Title: "Spawning the Wave — Stage 2: Build _(parallel)_",
-					Content: `- Spawn workers as Agent tool subagents by default (` + "`subagent_type: \"general-purpose\"`" + `, ` + "`run_in_background: true`" + `)
-- Use TeamCreate only for >=3 slices with shared integration points requiring SendMessage coordination
-- Supervisor commits at integration points (atomic commits) — commit small and often
-- Integrate early and often`,
-				},
-				{
-					ID:    "sup-stage3-review",
-					Title: "Stage 3: Review _(conditional-loop, per-slice)_",
-					Content: `- Spawn 3 ephemeral reviewer subagents per round (same pattern as Phase 4 plan review)
-- **CLEAN REVIEW** = 0 BLOCKERs + 0 IMPORTANTs from ALL reviewers
-- Per-slice fix+review with independent cycle counters per slice
-- Fix flow: Stage 3 (dirty review) -> Stage 2 (worker fixes) -> Stage 3 (re-review)
-- Max 3 cycles per slice, then escalate to architect for re-planning
-- **MUST end on a review wave** — cannot proceed after a worker wave without review
-
-` + "```" + `text
-Stage 3 Flow (per-slice):
-
-  ┌─────────────────────────────────────────┐
-  │ Spawn 3 ephemeral reviewers             │
-  │ Review slice (severity: BLOCKER/IMP/MIN)│
-  └──────────────┬──────────────────────────┘
-                 │
-          CLEAN? ├── YES → slice passes, proceed
-                 │
-                 └── NO (cycle < 3)
-                       │
-                       ▼
-              ┌────────────────────┐
-              │ Stage 2: worker    │
-              │ fixes BLOCKERs +   │
-              │ IMPORTANTs         │
-              └────────┬───────────┘
-                       │
-                       ▼
-              ┌────────────────────┐
-              │ Stage 3: re-review │
-              │ (new ephemeral     │
-              │  reviewers)        │
-              └────────┬───────────┘
-                       │
-                 cycle++ → loop
-                       │
-          3 cycles exhausted → escalate to architect
-` + "```",
-				},
-			},
-		},
 		{
 			ID:    "sup-first-steps",
 			Title: "First Steps",

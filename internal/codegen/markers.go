@@ -266,43 +266,6 @@ func PrependMarkers(content string) string {
 	return GeneratedBegin + "\n" + GeneratedEnd + "\n\n" + content
 }
 
-// ReplaceBodyRegion replaces everything after the END marker with new body
-// content. The header region (everything from the start of the file through
-// and including the END marker line) is preserved verbatim. This is the
-// second pass in the two-pass pipeline: the first pass (ReplaceMarkerRegion)
-// updates the generated header section; this pass writes the rendered body
-// below it.
-//
-// renderedBody is the complete markdown body to write after the END marker.
-// It replaces any existing content below END.
-//
-// Returns a *MarkerError if content does not contain the END marker.
-func ReplaceBodyRegion(content, renderedBody string) (string, error) {
-	endIdx := strings.Index(content, GeneratedEnd)
-	if endIdx < 0 {
-		return "", &MarkerError{
-			Path:    "",
-			Problem: "missing END marker",
-			Line:    0,
-			Fix: fmt.Sprintf(
-				"%q not found in content — "+
-					"ensure the file contains the END marker before calling ReplaceBodyRegion; "+
-					"use GenerateSkill/GenerateSubSkill (header pass) first",
-				GeneratedEnd,
-			),
-		}
-	}
-
-	// Include the END marker line and its trailing newline in the prefix.
-	markerLineEnd := endIdx + len(GeneratedEnd)
-	if nlIdx := strings.IndexByte(content[markerLineEnd:], '\n'); nlIdx >= 0 {
-		markerLineEnd += nlIdx + 1
-	}
-
-	prefix := content[:markerLineEnd]
-	return prefix + "\n" + renderedBody, nil
-}
-
 // AppendMarkers adds the BEGIN/END marker pair to the end of content when
 // content does not already contain the markers.
 //

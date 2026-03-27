@@ -9,7 +9,6 @@ skills: aura:architect-handoff, aura:architect-propose-plan, aura:architect-rati
 <!-- BEGIN GENERATED FROM aura schema -->
 **Role:** `architect` | **Phases owned:** p1-request, p2-elicit, p3-propose, p4-review, p5-plan-uat, p6-ratify, p7-handoff
 
-
 ## Protocol Context (generated from schema.xml)
 
 ### Owned Phases
@@ -216,32 +215,32 @@ Agents coordinate through **beads** tasks and comments:
 
 ### Workflows
 
-#### Architect State Flow
+## Architect State Flow
 
 Sequential planning phases 1-7. The architect captures requirements, writes proposals, coordinates review consensus, and hands off to supervisor.
 
-**Stage 1: Request** _(sequential)_
+## Stage 1: Request _(sequential)_
 - Capture user request verbatim via /aura:user-request
 - Classify request along 4 axes: scope, complexity, risk, domain novelty
 
 Exit conditions:
 - **proceed**: Classification confirmed, research and explore complete
 
-**Stage 2: Elicit** _(sequential)_
+## Stage 2: Elicit _(sequential)_
 - Run URE survey with user via /aura:user-elicit
 - Create URD as single source of truth for requirements
 
 Exit conditions:
 - **proceed**: URD created with structured requirements
 
-**Stage 3: Propose** _(sequential)_
+## Stage 3: Propose _(sequential)_
 - Write full technical proposal: interfaces, approach, validation checklist, BDD criteria
 - Create PROPOSAL-N task via /aura:architect:propose-plan
 
 Exit conditions:
 - **proceed**: Proposal created
 
-**Stage 4: Review** _(conditional-loop)_
+## Stage 4: Review _(conditional-loop)_
 - Spawn 3 axis-specific reviewers (A=Correctness, B=Test quality, C=Elegance)
 - Wait for all 3 reviewers to vote
 
@@ -249,14 +248,14 @@ Exit conditions:
 - **proceed**: All 3 reviewers vote ACCEPT
 - **continue**: Any reviewer votes REVISE — create PROPOSAL-N+1, mark old as superseded, re-spawn reviewers
 
-**Stage 5: Plan UAT** _(sequential)_
+## Stage 5: Plan UAT _(sequential)_
 - Present plan to user with demonstrative examples via /aura:user-uat
 
 Exit conditions:
 - **proceed**: User accepts plan
 - **continue**: User requests changes — create PROPOSAL-N+1
 
-**Stage 6: Ratify** _(sequential)_
+## Stage 6: Ratify _(sequential)_
 - Add ratify label to accepted PROPOSAL-N
 - Mark all prior proposals aura:superseded
 - Create placeholder IMPL_PLAN task
@@ -264,7 +263,7 @@ Exit conditions:
 Exit conditions:
 - **proceed**: Proposal ratified, IMPL_PLAN placeholder created
 
-**Stage 7: Handoff** _(sequential)_
+## Stage 7: Handoff _(sequential)_
 - Create handoff document with full inline provenance at .git/.aura/handoff/
 - Transfer to supervisor via /aura:architect:handoff
 
@@ -310,7 +309,6 @@ Sequential Flow:
 Exit: Supervisor receives ratified plan + handoff document
 
 ```
-<!-- END GENERATED FROM aura schema -->
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-3-proposal-n)**
 
@@ -524,3 +522,4 @@ The handoff skill guides you through:
 3. Include the handoff document path
 
 **DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks from the ratified plan.
+<!-- END GENERATED FROM aura schema -->

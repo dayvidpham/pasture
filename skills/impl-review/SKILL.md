@@ -2,7 +2,6 @@
 
 <!-- BEGIN GENERATED FROM aura schema -->
 **Command:** `aura:impl:review` — Code review coordination across all slices (Phase 10)
-<!-- END GENERATED FROM aura schema -->
 
 Conduct code review across ALL implementation slices. Each of 3 reviewers reviews every slice.
 
@@ -400,3 +399,4 @@ bd list --labels="aura:severity:blocker" --status=open
 # Proceed to Phase 11 (Implementation UAT)
 Skill(/aura:user-uat)
 ```
+<!-- END GENERATED FROM aura schema -->
