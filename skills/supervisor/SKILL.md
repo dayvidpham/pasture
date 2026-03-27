@@ -231,12 +231,6 @@ You own Phases 7-12 of the epoch: receive handoff from architect (p7), create ve
 - Then: prefer model: sonnet for the Task tool to ensure quality
 - Should not: default to haiku for complex work
 
-**[B-sup-explore-ephemeral]**
-- Given: codebase exploration needed
-- When: needing to understand a codebase area
-- Then: spawn an ephemeral Explore subagent via Task tool with a scoped query; each subagent is short-lived and returns findings
-- Should not: explore the codebase directly as supervisor or maintain a standing explore team
-
 **[B-sup-ride-the-wave]**
 - Given: Phase 8-10 execution
 - When: starting implementation
@@ -844,21 +838,7 @@ See `../protocol/HANDOFF_TEMPLATE.md` for full follow-up handoff examples, inclu
 
 ## Impl-Review Severity Tree Procedure
 
-The following describes the full severity tree procedure for code review (Phase 10).
-
-### Given/When/Then/Should
-
-**Given** all slices complete **when** starting review **then** spawn 3 reviewers for ALL slices **should never** assign reviewers to single slices
-
-**Given** reviewer assigned **when** reviewing **then** check each slice against criteria **should never** skip any slice
-
-**Given** review round **when** creating severity groups **then** ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty **should never** lazily create groups only when findings exist
-
-**Given** BLOCKER finding **when** wiring dependencies **then** add dual-parent: blocks BOTH severity group AND slice **should never** wire BLOCKER to only one parent
-
-**Given** IMPORTANT or MINOR finding **when** categorizing **then** add to severity group only (NOT to slice) — these go to follow-up epic **should never** block slices on non-BLOCKER findings
-
-**Given** review complete with IMPORTANT/MINOR **when** finishing **then** supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution) **should never** wait for BLOCKERs to resolve before creating follow-up
+The severity behaviors for code review (Phase 10) are defined above as structured behaviors (sup-review-all-slices through sup-followup-epic-timing). The following subsections describe the operational procedures.
 
 ### Severity Tree (EAGER Creation)
 

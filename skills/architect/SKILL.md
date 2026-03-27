@@ -312,6 +312,8 @@ Exit: Supervisor receives ratified plan + handoff document
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-3-proposal-n)**
 
+**Given** h6 handoff received (FOLLOWUP_URE + FOLLOWUP_URD) **when** starting follow-up proposal **then** create FOLLOWUP_PROPOSAL-N referencing both original URD and FOLLOWUP_URD **should never** create FOLLOWUP_PROPOSAL without reading the original URD
+
 ## PROPOSAL-N Naming
 
 Proposals are numbered incrementally: PROPOSAL-1, PROPOSAL-2, etc. When a revision is needed:
@@ -475,8 +477,6 @@ type Example interface { /* ... */ }
 ## Follow-up Lifecycle (Receiving h6)
 
 In the follow-up lifecycle, the architect receives a handoff (h6) from the supervisor containing FOLLOWUP_URE + FOLLOWUP_URD, and creates FOLLOWUP_PROPOSAL-N:
-
-**Given** h6 handoff received (FOLLOWUP_URE + FOLLOWUP_URD) **when** starting follow-up proposal **then** create FOLLOWUP_PROPOSAL-N referencing both original URD and FOLLOWUP_URD **should never** create FOLLOWUP_PROPOSAL without reading the original URD
 
 ```bash
 # After receiving h6 from supervisor:

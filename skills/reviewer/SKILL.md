@@ -212,6 +212,8 @@ Agents coordinate through **beads** tasks and comments:
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-4-plan-review)**
 
+**Given** review complete **when** documenting findings **then** create review task with dependency chain linking findings to the reviewed artifact **should never** vote without creating a review task
+
 ## Plan Review vs Code Review
 
 | Aspect | Plan Review (Phase 4) | Code Review (Phase 10) |
@@ -221,8 +223,6 @@ Agents coordinate through **beads** tasks and comments:
 | Severity tree | **NO** — no severity groups | **YES** — EAGER creation (always 3 groups) |
 | Naming | PROPOSAL-N-REVIEW-{axis}-{round} | SLICE-N-REVIEW-{axis}-{round} |
 | Focus | End-user alignment, MVP scope | Production code paths, severity findings |
-
-**Given** review complete **when** documenting **then** create review task with dependency chain **should never** vote without creating task
 
 ## End-User Alignment Criteria
 

@@ -83,9 +83,9 @@ You own a vertical slice (full production code path from CLI/API entry point →
 
 **[B-worker-verify-production]**
 - Given: implementation complete
-- When: verifying
-- Then: run actual production code path manually
-- Should not: rely only on unit tests passing
+- When: verifying before signaling done
+- Then: manually trace the production code path end-to-end (entry point → service → types) to confirm wiring, error handling, and no dead code — beyond what automated gates check
+- Should not: treat passing tests as sufficient verification without a manual walkthrough
 
 **[B-worker-blocker]**
 - Given: a blocker

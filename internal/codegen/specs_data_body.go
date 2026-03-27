@@ -566,23 +566,10 @@ See ` + "`../protocol/HANDOFF_TEMPLATE.md`" + ` for full follow-up handoff examp
 		{
 			ID:      "sup-impl-review-severity",
 			Title:   "Impl-Review Severity Tree Procedure",
-			Content: "The following describes the full severity tree procedure for code review (Phase 10).",
+			Content: "The severity behaviors for code review (Phase 10) are defined above as structured behaviors " +
+				"(sup-review-all-slices through sup-followup-epic-timing). " +
+				"The following subsections describe the operational procedures.",
 			Subsections: []ProseSection{
-				{
-					ID:    "sup-severity-gwts",
-					Title: "Given/When/Then/Should",
-					Content: `**Given** all slices complete **when** starting review **then** spawn 3 reviewers for ALL slices **should never** assign reviewers to single slices
-
-**Given** reviewer assigned **when** reviewing **then** check each slice against criteria **should never** skip any slice
-
-**Given** review round **when** creating severity groups **then** ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty **should never** lazily create groups only when findings exist
-
-**Given** BLOCKER finding **when** wiring dependencies **then** add dual-parent: blocks BOTH severity group AND slice **should never** wire BLOCKER to only one parent
-
-**Given** IMPORTANT or MINOR finding **when** categorizing **then** add to severity group only (NOT to slice) — these go to follow-up epic **should never** block slices on non-BLOCKER findings
-
-**Given** review complete with IMPORTANT/MINOR **when** finishing **then** supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution) **should never** wait for BLOCKERs to resolve before creating follow-up`,
-				},
 				{
 					ID:    "sup-severity-tree",
 					Title: "Severity Tree (EAGER Creation)",
@@ -1384,11 +1371,8 @@ var workerBody = SkillBody{
 	Sections: []ProseSection{
 		{
 			ID:    "wrk-what-you-own",
-			Title: "What You Own",
-			Content: `**NOT:** A single file or horizontal layer (e.g., "all types" or "all tests")
-**YES:** A full vertical slice (complete production code path end-to-end)
-
-**Example vertical slice: "CLI command with list subcommand"**
+			Title: "Vertical Slice Ownership in Practice",
+			Content: `**Example vertical slice: "CLI command with list subcommand"**
 - **Production code path:** ` + "`" + `./bin/cli-tool command list` + "`" + ` (what end users run)
 - **You own (within each file):**
   - Types: ` + "`" + `ListOptions` + "`" + `, ` + "`" + `ListEntry` + "`" + ` (in pkg/feature/types.go)
@@ -1768,8 +1752,6 @@ Storage: ` + "`.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`"
 			Title: "Follow-up Lifecycle (Receiving h6)",
 			Content: `In the follow-up lifecycle, the architect receives a handoff (h6) from the supervisor containing FOLLOWUP_URE + FOLLOWUP_URD, and creates FOLLOWUP_PROPOSAL-N:
 
-**Given** h6 handoff received (FOLLOWUP_URE + FOLLOWUP_URD) **when** starting follow-up proposal **then** create FOLLOWUP_PROPOSAL-N referencing both original URD and FOLLOWUP_URD **should never** create FOLLOWUP_PROPOSAL without reading the original URD
-
 ` + "```bash" + `
 # After receiving h6 from supervisor:
 bd create --labels "aura:p3-plan:s3-propose" \
@@ -1797,6 +1779,15 @@ The same review/ratify/UAT/handoff cycle (Phases 3-7) applies. After FOLLOWUP_PR
 			Content: "**DO NOT** spawn supervisor as a Task tool subagent. Instead, invoke:\n\n```\nSkill(skill: \"aura:architect-handoff\")\n```\n\nThe handoff skill guides you through:\n1. Creating the handoff document at `.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`\n2. Launching supervisor via `aura-swarm start --swarm-mode intree --role supervisor -n 1` or `aura-swarm start --epic <id>`\n\n**CRITICAL:** The supervisor launch prompt MUST:\n1. **Start with `Skill(/aura:supervisor)`** — this loads the supervisor's role instructions, including leaf task creation\n2. Include all Beads task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)\n3. Include the handoff document path\n\n**DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks from the ratified plan.",
 		},
 	},
+	Behaviors: []BehaviorSpec{
+		{
+			ID:        "arch-followup-h6",
+			Given:     "h6 handoff received (FOLLOWUP_URE + FOLLOWUP_URD)",
+			When:      "starting follow-up proposal",
+			Then:      "create FOLLOWUP_PROPOSAL-N referencing both original URD and FOLLOWUP_URD",
+			ShouldNot: "create FOLLOWUP_PROPOSAL without reading the original URD",
+		},
+	},
 }
 
 // ─── reviewerBody ────────────────────────────────────────────────────────────
@@ -1813,9 +1804,7 @@ var reviewerBody = SkillBody{
 | Vote | ACCEPT / REVISE (binary) | ACCEPT / REVISE (binary) |
 | Severity tree | **NO** — no severity groups | **YES** — EAGER creation (always 3 groups) |
 | Naming | PROPOSAL-N-REVIEW-{axis}-{round} | SLICE-N-REVIEW-{axis}-{round} |
-| Focus | End-user alignment, MVP scope | Production code paths, severity findings |
-
-**Given** review complete **when** documenting **then** create review task with dependency chain **should never** vote without creating task`,
+| Focus | End-user alignment, MVP scope | Production code paths, severity findings |`,
 		},
 		{
 			ID:    "rev-end-user-alignment",
@@ -1885,6 +1874,15 @@ bd comments add <task-id> "VOTE: REVISE - Missing: what happens if X fails? Sugg
 4. Repeat until all ACCEPT`,
 		},
 	},
+	Behaviors: []BehaviorSpec{
+		{
+			ID:        "rev-review-task-creation",
+			Given:     "review complete",
+			When:      "documenting findings",
+			Then:      "create review task with dependency chain linking findings to the reviewed artifact",
+			ShouldNot: "vote without creating a review task",
+		},
+	},
 }
 
 // ─── implReviewBody ──────────────────────────────────────────────────────────
@@ -1895,6 +1893,10 @@ var implReviewBody = SkillBody{
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-10-code-review)** <- Phase 10
 
 See ` + "`../protocol/CONSTRAINTS.md`" + ` for coding standards and severity definitions.`,
+	// Behaviors intentionally overlap with supervisor body behaviors (sup-review-all-slices,
+	// sup-review-check-each, sup-review-severity-groups, sup-blocker-dual-parent,
+	// sup-important-minor-followup, sup-followup-epic-timing) because impl-review is invoked
+	// as a self-contained sub-skill and must include its own behavioral directives.
 	Behaviors: []BehaviorSpec{
 		{
 			ID:    "impl-rev-b1",

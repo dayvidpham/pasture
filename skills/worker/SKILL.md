@@ -150,9 +150,9 @@ NOT: A single file or horizontal layer (e.g., 'all types' or 'all tests'). YES: 
 
 **[B-worker-verify-production]**
 - Given: implementation complete
-- When: verifying
-- Then: run actual production code path manually
-- Should not: rely only on unit tests passing
+- When: verifying before signaling done
+- Then: manually trace the production code path end-to-end (entry point → service → types) to confirm wiring, error handling, and no dead code — beyond what automated gates check
+- Should not: treat passing tests as sufficient verification without a manual walkthrough
 
 **[B-worker-blocker]**
 - Given: a blocker
@@ -255,10 +255,7 @@ L2 Test File Requirements:
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9
 
-## What You Own
-
-**NOT:** A single file or horizontal layer (e.g., "all types" or "all tests")
-**YES:** A full vertical slice (complete production code path end-to-end)
+## Vertical Slice Ownership in Practice
 
 **Example vertical slice: "CLI command with list subcommand"**
 - **Production code path:** `./bin/cli-tool command list` (what end users run)

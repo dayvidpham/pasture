@@ -153,12 +153,6 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 - Then: prefer model: sonnet for the Task tool to ensure quality
 - Should not: default to haiku for complex work
 
-**[B-sup-explore-ephemeral]**
-- Given: codebase exploration needed
-- When: needing to understand a codebase area
-- Then: spawn an ephemeral Explore subagent via Task tool with a scoped query; each subagent is short-lived and returns findings
-- Should not: explore the codebase directly as supervisor or maintain a standing explore team
-
 **[B-sup-ride-the-wave]**
 - Given: Phase 8-10 execution
 - When: starting implementation

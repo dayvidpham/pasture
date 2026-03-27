@@ -389,6 +389,20 @@ func TestSkillBodySpecsCompleteness(t *testing.T) {
 					"SkillBodySpecs[%q].Recipes[%d].Code must not be empty", key, i)
 			}
 
+			// Verify that body behaviors (if any) have non-empty GWT fields.
+			for i, b := range body.Behaviors {
+				assert.NotEmpty(t, b.ID,
+					"SkillBodySpecs[%q].Behaviors[%d].ID must not be empty", key, i)
+				assert.NotEmpty(t, b.Given,
+					"SkillBodySpecs[%q].Behaviors[%d].Given must not be empty", key, i)
+				assert.NotEmpty(t, b.When,
+					"SkillBodySpecs[%q].Behaviors[%d].When must not be empty", key, i)
+				assert.NotEmpty(t, b.Then,
+					"SkillBodySpecs[%q].Behaviors[%d].Then must not be empty", key, i)
+				assert.NotEmpty(t, b.ShouldNot,
+					"SkillBodySpecs[%q].Behaviors[%d].ShouldNot must not be empty", key, i)
+			}
+
 			// Fix 8: Verify no subsection has its own subsections (max depth = 2 levels).
 			// The skill.go.tmpl / skill_sub.go.tmpl templates only render 2 levels of sections;
 			// deeper nesting would be silently dropped.

@@ -709,14 +709,6 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 				ShouldNot: "default to haiku for complex work",
 			},
 			{
-				ID:    "B-sup-explore-ephemeral",
-				Given: "codebase exploration needed",
-				When:  "needing to understand a codebase area",
-				Then: "spawn an ephemeral Explore subagent via Task tool with a scoped query; " +
-					"each subagent is short-lived and returns findings",
-				ShouldNot: "explore the codebase directly as supervisor or maintain a standing explore team",
-			},
-			{
 				ID:    "B-sup-ride-the-wave",
 				Given: "Phase 8-10 execution",
 				When:  "starting implementation",
@@ -768,9 +760,9 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 			{
 				ID:        "B-worker-verify-production",
 				Given:     "implementation complete",
-				When:      "verifying",
-				Then:      "run actual production code path manually",
-				ShouldNot: "rely only on unit tests passing",
+				When:      "verifying before signaling done",
+				Then:      "manually trace the production code path end-to-end (entry point → service → types) to confirm wiring, error handling, and no dead code — beyond what automated gates check",
+				ShouldNot: "treat passing tests as sufficient verification without a manual walkthrough",
 			},
 			{
 				ID:        "B-worker-blocker",

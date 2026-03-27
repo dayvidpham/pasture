@@ -479,7 +479,6 @@
         <behavior id="B-sup-read-context" given="handoff received" when="starting" then="read ratified plan, URD, UAT, and elicit tasks for full context" should-not="start without reading all four"></behavior>
         <behavior id="B-sup-model-trivial" given="trivial changes (single-file edits, config tweaks, typo fixes)" when="spawning a worker" then="use model: haiku to minimize cost and latency" should-not="use a heavyweight model for trivial work"></behavior>
         <behavior id="B-sup-model-nontrivial" given="non-trivial changes (multi-file, architectural, logic-heavy)" when="spawning a worker" then="prefer model: sonnet for the Task tool to ensure quality" should-not="default to haiku for complex work"></behavior>
-        <behavior id="B-sup-explore-ephemeral" given="codebase exploration needed" when="needing to understand a codebase area" then="spawn an ephemeral Explore subagent via Task tool with a scoped query; each subagent is short-lived and returns findings" should-not="explore the codebase directly as supervisor or maintain a standing explore team"></behavior>
         <behavior id="B-sup-ride-the-wave" given="Phase 8-10 execution" when="starting implementation" then="follow the Ride the Wave cycle: plan tasks with integration points, launch the wave of workers, spawn reviewers for per-slice review (clean exit = 0 BLOCKERs + 0 IMPORTANTs), workers fix per-slice with atomic commits, max 3 cycles per slice, escalate to architect after cycle 3" should-not="skip any stage; batch review across slices; exceed 3 review cycles per slice"></behavior>
       </behaviors>
     </role>
@@ -498,7 +497,7 @@
         <behavior id="B-worker-vertical-ownership" given="vertical slice assignment" when="implementing" then="own full production code path (types → tests → impl → wiring)" should-not="implement only horizontal layer"></behavior>
         <behavior id="B-worker-plan-backwards" given="production code path" when="planning" then="plan backwards from end point to types" should-not="start with types without knowing the end"></behavior>
         <behavior id="B-worker-test-production-code" given="tests" when="writing" then="import actual production code (CLI/API users will run)" should-not="create test-only export or dual code paths"></behavior>
-        <behavior id="B-worker-verify-production" given="implementation complete" when="verifying" then="run actual production code path manually" should-not="rely only on unit tests passing"></behavior>
+        <behavior id="B-worker-verify-production" given="implementation complete" when="verifying before signaling done" then="manually trace the production code path end-to-end (entry point → service → types) to confirm wiring, error handling, and no dead code — beyond what automated gates check" should-not="treat passing tests as sufficient verification without a manual walkthrough"></behavior>
         <behavior id="B-worker-blocker" given="a blocker" when="unable to proceed" then="use /aura:worker-blocked with details" should-not="guess or work around"></behavior>
       </behaviors>
     </role>
