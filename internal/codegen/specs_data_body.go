@@ -102,6 +102,13 @@ var supervisorBody = SkillBody{
 			Then:      "supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution)",
 			ShouldNot: "wait for BLOCKERs to resolve before creating follow-up",
 		},
+		{
+			ID:        "sup-worker-persistence",
+			Given:     "worker completes initial implementation",
+			When:      "deciding whether to shut down the worker",
+			Then:      "keep workers alive for the review-fix cycle; workers notify supervisor via bd comments add but do NOT shut down",
+			ShouldNot: "shut down workers after first implementation pass; workers must stay alive to fix BLOCKERs and IMPORTANT findings",
+		},
 	},
 
 	Sections: []ProseSection{
@@ -162,7 +169,7 @@ See: [../supervisor-plan-tasks/SKILL.md](../supervisor-plan-tasks/SKILL.md) for 
 		{
 			ID:    "sup-exploration",
 			Title: "Exploration (Ephemeral Explore Subagents)",
-			Content: `**The supervisor MUST NOT perform deep codebase exploration directly.** Instead, spawn ephemeral Explore subagents (Agent tool, ` + "`subagent_type=Explore`" + `) for scoped codebase queries. These are short-lived — they explore, return findings, and terminate. The supervisor stays lean.
+			Content: `Per [C-supervisor-explore-ephemeral], spawn ephemeral Explore subagents (Agent tool, ` + "`subagent_type=Explore`" + `) for scoped codebase queries. These are short-lived — they explore, return findings, and terminate. The supervisor stays lean.
 
 ` + "```" + `
 // Explore subagent — ephemeral, scoped query
@@ -276,7 +283,7 @@ bd dep add <impl-plan-id> --blocked-by <slice-1-id>
 				{
 					ID:    "sup-step3-leaf-tasks",
 					Title: "Step 3: Create leaf tasks within each slice (CRITICAL)",
-					Content: `**A slice without leaf tasks is undecomposed.** The supervisor MUST create Beads tasks for each implementation unit within the slice, then chain them as dependencies. Leaf tasks are what workers actually implement.
+					Content: `Per [C-slice-leaf-tasks], create Beads tasks for each implementation unit within the slice, then chain them as dependencies. Leaf tasks are what workers actually implement.
 
 ` + "```" + `bash
 # L1: Types and interfaces for this slice
@@ -367,7 +374,7 @@ bd update <slice-3-id> --assignee="worker-3"
 		{
 			ID:    "sup-spawning-workers",
 			Title: "Spawning Workers",
-			Content: `**The supervisor NEVER implements changes directly.** All implementation work — no matter how small — is delegated to a worker agent. The supervisor's job is coordination, tracking, and quality control.
+			Content: `Per [C-supervisor-no-impl], all implementation work — no matter how small — is delegated to a worker agent. The supervisor's job is coordination, tracking, and quality control.
 
 Workers are **general-purpose agents** that call ` + "`/aura:worker`" + ` at the start. Select the model based on task complexity:
 
@@ -438,7 +445,7 @@ Read the handoff doc and your Beads task before starting implementation.` + "`" 
 })
 ` + "```" + `
 
-**Never assume teammates know anything.** They cannot see your conversation history, the Beads task tree, or any prior context. Every assignment must include actionable ` + "`bd show`" + ` commands.
+Per [sup-teamcreate-msg], every assignment must include actionable ` + "`bd show`" + ` commands. Teammates cannot see your conversation history, the Beads task tree, or any prior context.
 
 The worker skill provides:
 - File ownership validation
@@ -450,10 +457,7 @@ The worker skill provides:
 		{
 			ID:      "sup-epic-followup",
 			Title:   "EPIC_FOLLOWUP Creation (Phase 10)",
-			Content: `After code review completes, if ANY IMPORTANT or MINOR findings exist, create a follow-up epic.
-
-**Trigger:** Review round completion + ANY IMPORTANT or MINOR findings exist.
-**NOT gated on BLOCKER resolution.** Create as soon as review completes.`,
+			Content: `After code review completes, if ANY IMPORTANT or MINOR findings exist, create a follow-up epic. Per [sup-followup-epic-timing], create immediately after review completes.`,
 			Subsections: []ProseSection{
 				{
 					ID:    "sup-followup-step1",
@@ -475,12 +479,7 @@ bd dep add <followup-epic-id> --blocked-by <important-group-id>
 bd dep add <followup-epic-id> --blocked-by <minor-group-id>
 ` + "```" + `
 
-**Severity routing rules (CRITICAL):**
-- BLOCKER severity groups → block the **slice** they apply to: ` + "`bd dep add <slice-id> --blocked-by <blocker-group-id>`" + `
-- IMPORTANT severity groups → block the **FOLLOWUP epic** only: ` + "`bd dep add <followup-epic-id> --blocked-by <important-group-id>`" + `
-- MINOR severity groups → block the **FOLLOWUP epic** only: ` + "`bd dep add <followup-epic-id> --blocked-by <minor-group-id>`" + `
-
-**NEVER link IMPORTANT or MINOR severity groups as blocking IMPL_PLAN or any slice.** Only BLOCKER findings block the implementation path.`,
+Severity routing follows [sup-blocker-dual-parent] and [sup-important-minor-followup].`,
 				},
 				{
 					ID:    "sup-followup-step2",
@@ -573,7 +572,7 @@ See ` + "`../protocol/HANDOFF_TEMPLATE.md`" + ` for full follow-up handoff examp
 				{
 					ID:    "sup-severity-tree",
 					Title: "Severity Tree (EAGER Creation)",
-					Content: `**ALWAYS create 3 severity group tasks per review round**, even if some groups have no findings:
+					Content: `Per [sup-review-severity-groups], create all 3 severity groups immediately:
 
 ` + "```" + `bash
 # Step 1: Create all 3 severity groups immediately (EAGER)
@@ -1241,7 +1240,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"})\n" +
 				"```\n" +
 				"\n" +
-				"**Important:** Use `subagent_type: \"general-purpose\"`, not a custom agent type. The worker skill is invoked inside the agent via `Skill(/aura:worker)`.",
+				"Per [sup-spawn-workers], use `subagent_type: \"general-purpose\"`, not a custom agent type. The worker skill is invoked inside the agent via `Skill(/aura:worker)`.",
 		},
 		{
 			ID:    "sup-spawn-teamcreate-sendmessage",
@@ -1273,12 +1272,12 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"})\n" +
 				"```\n" +
 				"\n" +
-				"**Critical:** Never send bare instructions like \"implement SLICE-1\" without Beads task IDs and `bd show` commands. Teammates cannot see your conversation or task tree.",
+				"Per [sup-teamcreate-msg], include Beads task IDs and `bd show` commands in every assignment. Teammates cannot see your conversation or task tree.",
 		},
 		{
 			ID:    "sup-spawn-worker-persistence",
 			Title: "Worker Persistence (Ride the Wave)",
-			Content: "Workers are **never shut down** after completing their first implementation pass. They stay alive for the review-fix cycle:\n" +
+			Content: "Per [sup-worker-persistence], workers stay alive for the full review-fix cycle:\n" +
 				"\n" +
 				"1. Worker completes slice → notifies supervisor\n" +
 				"2. Supervisor does **NOT** close the slice or shut down the worker\n" +
@@ -1448,7 +1447,7 @@ func TestFeatureList(t *testing.T) {
 }
 ` + "```" + `
 
-**CRITICAL:** Tests must import production code, not test-only export:
+Per [B-worker-test-production-code]:
 ` + "```go" + `
 // ✅ CORRECT: Import actual CLI package
 import "myproject/cmd/feature"
@@ -1501,7 +1500,7 @@ var listCmd = &cobra.Command{
 }
 ` + "```" + `
 
-**No TODO placeholders. No test-only exports. Production code wired and working.**`,
+Per [wrk-no-stubs], deliver fully wired production code.`,
 		},
 		{
 			ID:    "wrk-tdd-layer-awareness",
@@ -1586,6 +1585,15 @@ On blocked:
 bd update <task-id> --status=blocked
 bd update <task-id> --notes="Blocked: <reason>. Need: <dependency or clarification>"
 ` + "```",
+		},
+	},
+	Behaviors: []BehaviorSpec{
+		{
+			ID:        "wrk-no-stubs",
+			Given:     "completing Layer 3 (implementation + wiring)",
+			When:      "finishing a vertical slice",
+			Then:      "deliver production code that is fully wired and working end-to-end",
+			ShouldNot: "leave TODO placeholders, test-only exports, or unimplemented stubs",
 		},
 	},
 }
@@ -1945,7 +1953,7 @@ See ` + "`../protocol/CONSTRAINTS.md`" + ` for coding standards and severity def
 		{
 			ID:    "impl-rev-severity-tree",
 			Title: "Severity Tree (EAGER Creation)",
-			Content: `**ALWAYS create 3 severity group tasks per review round**, even if some groups have no findings:
+			Content: `Per [impl-rev-b3], create all 3 severity groups immediately:
 
 ` + "```bash\n" +
 				`# Step 1: Create all 3 severity groups immediately (EAGER)
@@ -2034,7 +2042,7 @@ bd dep add $BLOCKER_ID --blocked-by $FINDING_ID
 bd dep add <slice-1-id> --blocked-by $FINDING_ID
 ` + "```\n" +
 				`
-**IMPORTANT and MINOR findings only block their severity group (NOT the slice):**
+Per [impl-rev-b5], IMPORTANT/MINOR findings route to severity group only:
 
 ` + "```bash\n" +
 				`# IMPORTANT finding — blocks severity group only
@@ -2199,8 +2207,7 @@ bd comments add <slice-id> "REVISION NEEDED: <specific issues>"
 		{
 			ID:    "impl-rev-followup-epic",
 			Title: "Follow-up Epic (EPIC_FOLLOWUP)",
-			Content: `**Trigger:** Review round completion + ANY IMPORTANT or MINOR findings exist.
-**NOT gated on BLOCKER resolution.** Supervisor creates it immediately.`,
+			Content: `Per [impl-rev-b6], create immediately after review completes.`,
 			Subsections: []ProseSection{
 				{
 					ID:    "impl-rev-followup-step1",

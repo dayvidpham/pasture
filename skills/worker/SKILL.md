@@ -255,6 +255,8 @@ L2 Test File Requirements:
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9
 
+**Given** completing Layer 3 (implementation + wiring) **when** finishing a vertical slice **then** deliver production code that is fully wired and working end-to-end **should never** leave TODO placeholders, test-only exports, or unimplemented stubs
+
 ## Vertical Slice Ownership in Practice
 
 **Example vertical slice: "CLI command with list subcommand"**
@@ -331,7 +333,7 @@ func TestFeatureList(t *testing.T) {
 }
 ```
 
-**CRITICAL:** Tests must import production code, not test-only export:
+Per [B-worker-test-production-code]:
 ```go
 // ✅ CORRECT: Import actual CLI package
 import "myproject/cmd/feature"
@@ -384,7 +386,7 @@ var listCmd = &cobra.Command{
 }
 ```
 
-**No TODO placeholders. No test-only exports. Production code wired and working.**
+Per [wrk-no-stubs], deliver fully wired production code.
 
 ## TDD Layer Awareness (Within Your Slice)
 

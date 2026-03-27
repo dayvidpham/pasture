@@ -401,6 +401,8 @@ Cycle Exit Conditions:
 
 **Given** review complete with IMPORTANT/MINOR **when** finishing **then** supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution) **should never** wait for BLOCKERs to resolve before creating follow-up
 
+**Given** worker completes initial implementation **when** deciding whether to shut down the worker **then** keep workers alive for the review-fix cycle; workers notify supervisor via bd comments add but do NOT shut down **should never** shut down workers after first implementation pass; workers must stay alive to fix BLOCKERs and IMPORTANT findings
+
 ## First Steps
 
 The architect creates a placeholder IMPL_PLAN task. Your first job is to fill it in:
@@ -456,7 +458,7 @@ See: [../supervisor-plan-tasks/SKILL.md](../supervisor-plan-tasks/SKILL.md) for 
 
 ## Exploration (Ephemeral Explore Subagents)
 
-**The supervisor MUST NOT perform deep codebase exploration directly.** Instead, spawn ephemeral Explore subagents (Agent tool, `subagent_type=Explore`) for scoped codebase queries. These are short-lived — they explore, return findings, and terminate. The supervisor stays lean.
+Per [C-supervisor-explore-ephemeral], spawn ephemeral Explore subagents (Agent tool, `subagent_type=Explore`) for scoped codebase queries. These are short-lived — they explore, return findings, and terminate. The supervisor stays lean.
 
 ```
 // Explore subagent — ephemeral, scoped query
@@ -564,7 +566,7 @@ bd dep add <impl-plan-id> --blocked-by <slice-1-id>
 
 ### Step 3: Create leaf tasks within each slice (CRITICAL)
 
-**A slice without leaf tasks is undecomposed.** The supervisor MUST create Beads tasks for each implementation unit within the slice, then chain them as dependencies. Leaf tasks are what workers actually implement.
+Per [C-slice-leaf-tasks], create Beads tasks for each implementation unit within the slice, then chain them as dependencies. Leaf tasks are what workers actually implement.
 
 ```bash
 # L1: Types and interfaces for this slice
@@ -651,7 +653,7 @@ bd update <slice-3-id> --assignee="worker-3"
 
 ## Spawning Workers
 
-**The supervisor NEVER implements changes directly.** All implementation work — no matter how small — is delegated to a worker agent. The supervisor's job is coordination, tracking, and quality control.
+Per [C-supervisor-no-impl], all implementation work — no matter how small — is delegated to a worker agent. The supervisor's job is coordination, tracking, and quality control.
 
 Workers are **general-purpose agents** that call `/aura:worker` at the start. Select the model based on task complexity:
 
@@ -720,7 +722,7 @@ Read the handoff doc and your Beads task before starting implementation.`,
 })
 ```
 
-**Never assume teammates know anything.** They cannot see your conversation history, the Beads task tree, or any prior context. Every assignment must include actionable `bd show` commands.
+Per [sup-teamcreate-msg], every assignment must include actionable `bd show` commands. Teammates cannot see your conversation history, the Beads task tree, or any prior context.
 
 The worker skill provides:
 - File ownership validation
@@ -729,10 +731,7 @@ The worker skill provides:
 
 ## EPIC_FOLLOWUP Creation (Phase 10)
 
-After code review completes, if ANY IMPORTANT or MINOR findings exist, create a follow-up epic.
-
-**Trigger:** Review round completion + ANY IMPORTANT or MINOR findings exist.
-**NOT gated on BLOCKER resolution.** Create as soon as review completes.
+After code review completes, if ANY IMPORTANT or MINOR findings exist, create a follow-up epic. Per [sup-followup-epic-timing], create immediately after review completes.
 
 ### Step 1: Create follow-up epic
 
@@ -753,12 +752,7 @@ bd dep add <followup-epic-id> --blocked-by <important-group-id>
 bd dep add <followup-epic-id> --blocked-by <minor-group-id>
 ```
 
-**Severity routing rules (CRITICAL):**
-- BLOCKER severity groups → block the **slice** they apply to: `bd dep add <slice-id> --blocked-by <blocker-group-id>`
-- IMPORTANT severity groups → block the **FOLLOWUP epic** only: `bd dep add <followup-epic-id> --blocked-by <important-group-id>`
-- MINOR severity groups → block the **FOLLOWUP epic** only: `bd dep add <followup-epic-id> --blocked-by <minor-group-id>`
-
-**NEVER link IMPORTANT or MINOR severity groups as blocking IMPL_PLAN or any slice.** Only BLOCKER findings block the implementation path.
+Severity routing follows [sup-blocker-dual-parent] and [sup-important-minor-followup].
 
 ### Step 2: Follow-up lifecycle (same protocol, FOLLOWUP_* prefix)
 
@@ -842,7 +836,7 @@ The severity behaviors for code review (Phase 10) are defined above as structure
 
 ### Severity Tree (EAGER Creation)
 
-**ALWAYS create 3 severity group tasks per review round**, even if some groups have no findings:
+Per [sup-review-severity-groups], create all 3 severity groups immediately:
 
 ```bash
 # Step 1: Create all 3 severity groups immediately (EAGER)

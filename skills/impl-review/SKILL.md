@@ -23,7 +23,7 @@ See `../protocol/CONSTRAINTS.md` for coding standards and severity definitions.
 
 ## Severity Tree (EAGER Creation)
 
-**ALWAYS create 3 severity group tasks per review round**, even if some groups have no findings:
+Per [impl-rev-b3], create all 3 severity groups immediately:
 
 ```bash
 # Step 1: Create all 3 severity groups immediately (EAGER)
@@ -108,7 +108,7 @@ bd dep add $BLOCKER_ID --blocked-by $FINDING_ID
 bd dep add <slice-1-id> --blocked-by $FINDING_ID
 ```
 
-**IMPORTANT and MINOR findings only block their severity group (NOT the slice):**
+Per [impl-rev-b5], IMPORTANT/MINOR findings route to severity group only:
 
 ```bash
 # IMPORTANT finding — blocks severity group only
@@ -263,8 +263,7 @@ bd comments add <slice-id> "REVISION NEEDED: <specific issues>"
 
 ## Follow-up Epic (EPIC_FOLLOWUP)
 
-**Trigger:** Review round completion + ANY IMPORTANT or MINOR findings exist.
-**NOT gated on BLOCKER resolution.** Supervisor creates it immediately.
+Per [impl-rev-b6], create immediately after review completes.
 
 ### Step 1: Create the follow-up epic
 

@@ -148,7 +148,7 @@ Do NOT shut down after implementation. You will receive review feedback and may 
 })
 ```
 
-**Important:** Use `subagent_type: "general-purpose"`, not a custom agent type. The worker skill is invoked inside the agent via `Skill(/aura:worker)`.
+Per [sup-spawn-workers], use `subagent_type: "general-purpose"`, not a custom agent type. The worker skill is invoked inside the agent via `Skill(/aura:worker)`.
 
 ## TeamCreate: SendMessage Assignment
 
@@ -179,11 +179,11 @@ findings. Stay alive for the full Ride the Wave cycle.`,
 })
 ```
 
-**Critical:** Never send bare instructions like "implement SLICE-1" without Beads task IDs and `bd show` commands. Teammates cannot see your conversation or task tree.
+Per [sup-teamcreate-msg], include Beads task IDs and `bd show` commands in every assignment. Teammates cannot see your conversation or task tree.
 
 ## Worker Persistence (Ride the Wave)
 
-Workers are **never shut down** after completing their first implementation pass. They stay alive for the review-fix cycle:
+Per [sup-worker-persistence], workers stay alive for the full review-fix cycle:
 
 1. Worker completes slice → notifies supervisor
 2. Supervisor does **NOT** close the slice or shut down the worker
