@@ -425,7 +425,7 @@ func TestGenerateSkill_BodyPreserved(t *testing.T) {
 	assertSectionExists(t, doc, src, 2, "My Custom Section")
 	assertSectionContains(t, doc, src, 2, "My Custom Section", "This is hand-authored.")
 	// Verify H3 generated sections are nested under the role H1 heading.
-	assertIsNestedUnder(t, doc, src, "Worker Agent", "Constraints (Given/When/Then/Should Not)")
+	assertIsNestedUnder(t, doc, src, "Worker Agent", "General Constraints")
 }
 
 // ─── TestGenerateIdempotent ──────────────────────────────────────────────────

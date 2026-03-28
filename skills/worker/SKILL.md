@@ -26,7 +26,7 @@ skills: aura:worker-blocked, aura:worker-complete, aura:worker-implement
 | `aura:worker:complete` | Signal slice completion after quality gates pass | p9-worker-slices |
 | `aura:worker:implement` | Implement assigned vertical slice following TDD layers | p9-worker-slices |
 
-### Constraints (Given/When/Then/Should Not)
+### General Constraints
 
 **[C-actionable-errors]**
 - Given: an error, exception, or user-facing message

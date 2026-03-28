@@ -157,8 +157,8 @@ func TestExtractSection(t *testing.T) {
 		generated, err := codegen.GenerateSkill(types.RoleSupervisor, skillPath, figuresDir, opts)
 		require.NoError(t, err, "GenerateSkill should succeed for supervisor")
 
-		// Extract the "Constraints (Given/When/Then/Should Not)" section.
-		content, err := codegen.ExtractSection([]byte(generated), "Constraints (Given/When/Then/Should Not)")
+		// Extract the "General Constraints" section.
+		content, err := codegen.ExtractSection([]byte(generated), "General Constraints")
 		require.NoError(t, err,
 			"ExtractSection should find 'Constraints' section in generated supervisor output")
 		assert.True(t, len(content) > 0,

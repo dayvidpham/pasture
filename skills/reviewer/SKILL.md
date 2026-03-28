@@ -28,7 +28,7 @@ skills: aura:reviewer-comment, aura:reviewer-review-code, aura:reviewer-review-p
 | `aura:reviewer:review-plan` | Evaluate proposal against one axis (binary ACCEPT/REVISE) | p4-review |
 | `aura:reviewer:vote` | Cast ACCEPT or REVISE vote (binary only) | p4-review, p10-code-review |
 
-### Constraints (Given/When/Then/Should Not)
+### General Constraints
 
 **[C-actionable-errors]**
 - Given: an error, exception, or user-facing message

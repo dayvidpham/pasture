@@ -36,7 +36,7 @@ skills: aura:architect-handoff, aura:architect-propose-plan, aura:architect-rati
 | `aura:user:elicit` | User Requirements Elicitation survey (Phase 2) | p2-elicit |
 | `aura:user:request` | Capture user feature request verbatim (Phase 1) | p1-request |
 
-### Constraints (Given/When/Then/Should Not)
+### General Constraints
 
 **[C-actionable-errors]**
 - Given: an error, exception, or user-facing message

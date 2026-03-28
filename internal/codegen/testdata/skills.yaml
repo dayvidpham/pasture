@@ -10,7 +10,7 @@ role_cases:
       - "Owned Phases"
       - "p9-worker-slices"
       - "Commands"
-      - "Constraints (Given/When/Then/Should Not)"
+      - "General Constraints"
       - "C-worker-gates"
       - "C-agent-commit"
       - "C-actionable-errors"
@@ -19,7 +19,7 @@ role_cases:
       - "Inter-Agent Coordination"
       - "Workflows"
     must_contain_headers:
-      - "### Constraints (Given/When/Then/Should Not)"
+      - "### General Constraints"
       - "### Handoffs"
       - "### Startup Sequence"
       - "### Workflows"
@@ -35,7 +35,7 @@ role_cases:
       - "Startup Sequence"
       - "Workflows"
     must_contain_headers:
-      - "### Constraints (Given/When/Then/Should Not)"
+      - "### General Constraints"
       - "### Handoffs"
       - "### Startup Sequence"
 
@@ -49,7 +49,7 @@ role_cases:
       - "Handoffs"
       - "Review Axes"
     must_contain_headers:
-      - "### Constraints (Given/When/Then/Should Not)"
+      - "### General Constraints"
       - "### Handoffs"
       - "### Review Axes"
 
@@ -62,7 +62,7 @@ role_cases:
       - "Handoffs"
       - "Startup Sequence"
     must_contain_headers:
-      - "### Constraints (Given/When/Then/Should Not)"
+      - "### General Constraints"
       - "### Handoffs"
 
 sub_skill_cases:

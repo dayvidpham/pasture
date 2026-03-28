@@ -34,7 +34,7 @@ skills: aura:impl-review, aura:impl-slice, aura:supervisor-commit, aura:supervis
 | `aura:supervisor:spawn-worker` | Launch a worker agent for an assigned slice | p9-worker-slices |
 | `aura:supervisor:track-progress` | Monitor worker status via Beads | p9-worker-slices, p10-code-review |
 
-### Constraints (Given/When/Then/Should Not)
+### General Constraints
 
 **[C-actionable-errors]**
 - Given: an error, exception, or user-facing message
