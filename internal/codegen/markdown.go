@@ -237,13 +237,19 @@ func ExtractSection(markdown []byte, headingTitle string) ([]byte, error) {
 // concatenating its child Text and String segment values.
 func HeadingTextFromAST(n ast.Node, src []byte) string {
 	var buf strings.Builder
-	for child := n.FirstChild(); child != nil; child = child.NextSibling() {
+	// Walk all descendants — not just direct children — so that text inside
+	// inline formatting nodes (bold, italic, code spans) is captured.
+	_ = ast.Walk(n, func(child ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
 		switch c := child.(type) {
 		case *ast.Text:
 			buf.Write(c.Value(src))
 		case *ast.String:
 			buf.Write(c.Value)
 		}
-	}
+		return ast.WalkContinue, nil
+	})
 	return buf.String()
 }

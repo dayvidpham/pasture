@@ -144,6 +144,22 @@ func TestExtractSection(t *testing.T) {
 			"should extract H1 section content")
 	})
 
+	t.Run("handles inline formatting in headings", func(t *testing.T) {
+		md := []byte("# Title\n\n## **Bold** Heading\n\nBold section content.\n\n## *Italic* Heading\n\nItalic section content.\n\n## Plain\n\nPlain content.\n")
+		content, err := codegen.ExtractSection(md, "Bold Heading")
+		require.NoError(t, err,
+			"should match heading text even when it contains bold formatting")
+		assert.Contains(t, string(content), "Bold section content.",
+			"extracted section should contain the section content")
+		assert.NotContains(t, string(content), "Italic section content.",
+			"should not include next section")
+
+		content2, err := codegen.ExtractSection(md, "Italic Heading")
+		require.NoError(t, err,
+			"should match heading text even when it contains italic formatting")
+		assert.Contains(t, string(content2), "Italic section content.")
+	})
+
 	// ─── Integration test: ExtractSection on real GenerateSkill output ────
 
 	t.Run("integration: extract section from real GenerateSkill output", func(t *testing.T) {
