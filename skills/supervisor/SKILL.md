@@ -267,13 +267,13 @@ Agents coordinate through **beads** tasks and comments:
 | Check task details | `bd show <task-id>` |
 | Update status | `bd update <task-id> --status=in_progress` |
 
-### Workflows
+## Workflows
 
-## Ride the Wave
+### Ride the Wave
 
 Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full cycle: plan slices, launch workers, spawn reviewers for per-slice review, workers fix, repeat max 3 cycles per slice.
 
-## Stage 1: Plan _(sequential)_
+### Stage 1: Plan _(sequential)_
 - Read RATIFIED_PLAN and URD via bd show (`bd show <ratified-plan-id> && bd show <urd-id>`)
 - Spawn ephemeral Explore subagents (`subagent_type=Explore`) for scoped codebase queries — NOT standing teams
 - Use Explore findings to decompose into vertical slices with integration points
@@ -282,7 +282,7 @@ Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full c
 Exit conditions:
 - **proceed**: All slices created with leaf tasks, dependency-chained, assigned
 
-## Stage 2: Build _(parallel)_
+### Stage 2: Build _(parallel)_
 - Spawn workers as Agent tool subagents (`subagent_type: "general-purpose"`, `run_in_background: true`); use TeamCreate only for >=3 slices with shared integration points (`aura-swarm start --epic <epic-id>`)
 - Monitor worker progress via bd list and bd show (`bd list --labels="aura:p9-impl:s9-slice" --status=in_progress`)
 - Supervisor commits at integration points (atomic commits) — commit small, integrate early and often
@@ -290,7 +290,7 @@ Exit conditions:
 Exit conditions:
 - **proceed**: All workers have notified completion via bd comments add
 
-## Stage 3: Review + Fix Cycles _(conditional-loop)_
+### Stage 3: Review + Fix Cycles _(conditional-loop)_
 - Spawn reviewers via Task tool for per-slice code review
 - Reviewers create severity groups (BLOCKER/IMPORTANT/MINOR) per slice
 - Create FOLLOWUP epic if any IMPORTANT/MINOR findings exist

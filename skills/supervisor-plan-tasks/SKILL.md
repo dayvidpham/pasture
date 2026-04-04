@@ -39,17 +39,41 @@ L2 Test File Requirements:
 
 ```
 
-**Given** IMPL_PLAN placeholder **when** planning **then** decompose into vertical slices (production code paths) **should never** decompose into horizontal layers (files)
+**[sup-plan-impl-plan-decompose]**
+- Given: IMPL_PLAN placeholder
+- When: planning
+- Then: decompose into vertical slices (production code paths)
+- Should not: decompose into horizontal layers (files)
 
-**Given** RATIFIED_PLAN features/commands **when** creating tasks **then** assign one vertical slice per worker (full end-to-end) **should never** assign horizontal layers (types worker, tests worker, impl worker)
+**[sup-plan-ratified-plan-tasks]**
+- Given: RATIFIED_PLAN features/commands
+- When: creating tasks
+- Then: assign one vertical slice per worker (full end-to-end)
+- Should not: assign horizontal layers (types worker, tests worker, impl worker)
 
-**Given** vertical slice **when** defining **then** specify production code path and backward planning approach **should never** leave workers guessing what end users will run
+**[sup-plan-vertical-slice-define]**
+- Given: vertical slice
+- When: defining
+- Then: specify production code path and backward planning approach
+- Should not: leave workers guessing what end users will run
 
-**Given** validation_checklist **when** distributing **then** include production code verification **should never** allow test-only validation
+**[sup-plan-validation-checklist]**
+- Given: validation_checklist
+- When: distributing
+- Then: include production code verification
+- Should not: allow test-only validation
 
-**Given** multiple vertical slices **when** slices share types, interfaces, or data flows **then** identify horizontal Layer Integration Points where slices must inter-op and document them in the IMPL_PLAN with owning slice, consuming slices, and the shared contract (type, interface, or protocol) **should never** leave cross-slice dependencies implicit — divergence grows when slices develop in isolation without clear merge points
+**[sup-plan-integration-points-identify]**
+- Given: multiple vertical slices
+- When: slices share types, interfaces, or data flows
+- Then: identify horizontal Layer Integration Points where slices must inter-op and document them in the IMPL_PLAN with owning slice, consuming slices, and the shared contract (type, interface, or protocol)
+- Should not: leave cross-slice dependencies implicit — divergence grows when slices develop in isolation without clear merge points
 
-**Given** integration points identified **when** creating slice tasks **then** include each integration point in the relevant slice descriptions so workers know what they must export and what they may import **should never** assume workers will discover cross-slice contracts on their own
+**[sup-plan-integration-points-include]**
+- Given: integration points identified
+- When: creating slice tasks
+- Then: include each integration point in the relevant slice descriptions so workers know what they must export and what they may import
+- Should not: assume workers will discover cross-slice contracts on their own
 
 ## When to Use
 

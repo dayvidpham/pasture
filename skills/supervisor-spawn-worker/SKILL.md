@@ -44,21 +44,53 @@ Cycle Exit Conditions:
 
 ```
 
-**Given** implementation tasks **when** spawning **then** use Task tool with `run_in_background: true` **should never** block on worker completion
+**[sup-spawn-task-tool]**
+- Given: implementation tasks
+- When: spawning
+- Then: use Task tool with `run_in_background: true`
+- Should not: block on worker completion
 
-**Given** multiple workers **when** launching **then** spawn all slices in parallel as a single wave **should never** spawn sequentially
+**[sup-spawn-parallel-wave]**
+- Given: multiple workers
+- When: launching
+- Then: spawn all slices in parallel as a single wave
+- Should not: spawn sequentially
 
-**Given** worker assignment **when** providing context **then** include Beads task ID, full context, and handoff document **should never** omit checklist or criteria
+**[sup-spawn-worker-context]**
+- Given: worker assignment
+- When: providing context
+- Then: include Beads task ID, full context, and handoff document
+- Should not: omit checklist or criteria
 
-**Given** worker handoff **when** creating **then** store at `.git/.aura/handoff/<request-task-id>/supervisor-to-worker-<N>.md` **should never** skip handoff document
+**[sup-spawn-handoff-doc]**
+- Given: worker handoff
+- When: creating
+- Then: store at `.git/.aura/handoff/<request-task-id>/supervisor-to-worker-<N>.md`
+- Should not: skip handoff document
 
-**Given** workers complete their slices **when** first wave finishes **then** do NOT close slices — ephemeral reviewers must review ALL slices first **should never** close a slice that has not been reviewed at least once
+**[sup-spawn-no-close-before-review]**
+- Given: workers complete their slices
+- When: first wave finishes
+- Then: do NOT close slices — ephemeral reviewers must review ALL slices first
+- Should not: close a slice that has not been reviewed at least once
 
-**Given** reviewers finish reviewing **when** BLOCKERs or IMPORTANT findings exist **then** send findings to workers for fixing, then spawn new ephemeral reviewers for re-review **should never** skip re-review after fixes
+**[sup-spawn-fix-and-rereview]**
+- Given: reviewers finish reviewing
+- When: BLOCKERs or IMPORTANT findings exist
+- Then: send findings to workers for fixing, then spawn new ephemeral reviewers for re-review
+- Should not: skip re-review after fixes
 
-**Given** worker-reviewer cycle **when** counting iterations **then** limit to a MAXIMUM of 3 cycles **should never** exceed 3 cycles — if IMPORTANT findings remain after cycle 3, move to UAT and track remaining in FOLLOWUP epic
+**[sup-spawn-max-cycles]**
+- Given: worker-reviewer cycle
+- When: counting iterations
+- Then: limit to a MAXIMUM of 3 cycles
+- Should not: exceed 3 cycles — if IMPORTANT findings remain after cycle 3, move to UAT and track remaining in FOLLOWUP epic
 
-**Given** IMPORTANT findings remain after 3 cycles **when** deciding next step **then** proceed to Phase 11 (UAT) — all remaining IMPORTANT and MINOR findings must be tracked in the FOLLOWUP Beads epic **should never** block UAT on non-BLOCKER findings after 3 cycles
+**[sup-spawn-important-after-cycles]**
+- Given: IMPORTANT findings remain after 3 cycles
+- When: deciding next step
+- Then: proceed to Phase 11 (UAT) — all remaining IMPORTANT and MINOR findings must be tracked in the FOLLOWUP Beads epic
+- Should not: block UAT on non-BLOCKER findings after 3 cycles
 
 ## When to Use
 

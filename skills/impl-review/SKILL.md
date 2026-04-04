@@ -9,17 +9,41 @@ Conduct code review across ALL implementation slices. Each of 3 reviewers review
 
 See `../protocol/CONSTRAINTS.md` for coding standards and severity definitions.
 
-**Given** all slices complete **when** starting review **then** spawn 3 reviewers for ALL slices **should never** assign reviewers to single slices
+**[impl-rev-b1]**
+- Given: all slices complete
+- When: starting review
+- Then: spawn 3 reviewers for ALL slices
+- Should not: assign reviewers to single slices
 
-**Given** reviewer assigned **when** reviewing **then** check each slice against criteria **should never** skip any slice
+**[impl-rev-b2]**
+- Given: reviewer assigned
+- When: reviewing
+- Then: check each slice against criteria
+- Should not: skip any slice
 
-**Given** review round **when** creating severity groups **then** ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty **should never** lazily create groups only when findings exist
+**[impl-rev-b3]**
+- Given: review round
+- When: creating severity groups
+- Then: ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty
+- Should not: lazily create groups only when findings exist
 
-**Given** BLOCKER finding **when** wiring dependencies **then** add dual-parent: blocks BOTH severity group AND slice **should never** wire BLOCKER to only one parent
+**[impl-rev-b4]**
+- Given: BLOCKER finding
+- When: wiring dependencies
+- Then: add dual-parent: blocks BOTH severity group AND slice
+- Should not: wire BLOCKER to only one parent
 
-**Given** IMPORTANT or MINOR finding **when** categorizing **then** add to severity group only (NOT to slice) — these go to follow-up epic **should never** block slices on non-BLOCKER findings
+**[impl-rev-b5]**
+- Given: IMPORTANT or MINOR finding
+- When: categorizing
+- Then: add to severity group only (NOT to slice) — these go to follow-up epic
+- Should not: block slices on non-BLOCKER findings
 
-**Given** review complete with IMPORTANT/MINOR **when** finishing **then** supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution) **should never** wait for BLOCKERs to resolve before creating follow-up
+**[impl-rev-b6]**
+- Given: review complete with IMPORTANT/MINOR
+- When: finishing
+- Then: supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution)
+- Should not: wait for BLOCKERs to resolve before creating follow-up
 
 ## Severity Tree (EAGER Creation)
 

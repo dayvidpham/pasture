@@ -143,15 +143,15 @@ Agents coordinate through **beads** tasks and comments:
 {{- end }}
 {{- if .Workflows }}
 
-### Workflows
+## Workflows
 {{- range .Workflows }}
 
-## {{ .Name }}
+### {{ .Name }}
 
 {{ .Description }}
 {{- range .Stages }}
 
-## Stage {{ .Order }}: {{ .Name }} _({{ .Execution }})_
+### Stage {{ .Order }}: {{ .Name }} _({{ .Execution }})_
 
 {{- range .Actions }}
 - {{ .Instruction }}{{- if .Command }} (`{{ .Command }}`){{- end }}
