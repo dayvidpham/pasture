@@ -212,7 +212,11 @@ Agents coordinate through **beads** tasks and comments:
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-4-plan-review)**
 
-**Given** review complete **when** documenting findings **then** create review task with dependency chain linking findings to the reviewed artifact **should never** vote without creating a review task
+**[rev-review-task-creation]**
+- Given: review complete
+- When: documenting findings
+- Then: create review task with dependency chain linking findings to the reviewed artifact
+- Should not: vote without creating a review task
 
 ## Plan Review vs Code Review
 

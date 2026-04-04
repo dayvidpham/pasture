@@ -197,7 +197,11 @@ Exit conditions:
 {{- end }}
 {{- range .BodyBehaviors }}
 
-**Given** {{ .Given }} **when** {{ .When }} **then** {{ .Then }} **should never** {{ .ShouldNot }}
+**[{{ .ID }}]**
+- Given: {{ .Given }}
+- When: {{ .When }}
+- Then: {{ .Then }}
+- Should not: {{ .ShouldNot }}
 {{- end }}
 {{- range .BodySections }}
 

@@ -379,29 +379,77 @@ Cycle Exit Conditions:
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-8-implementation-plan)** <- Phases 7-12
 
-**Given** slices created **when** assigning **then** use `bd update <slice-id> --assignee="worker-N"` for assignment **should never** leave slices unassigned
+**[sup-assign-slices]**
+- Given: slices created
+- When: assigning
+- Then: use `bd update <slice-id> --assignee="worker-N"` for assignment
+- Should not: leave slices unassigned
 
-**Given** worker assignments **when** spawning **then** use Task tool with `subagent_type: "general-purpose"` and `run_in_background: true`, worker MUST call `Skill(/aura:worker)` at start **should never** spawn workers sequentially or use specialized agent types
+**[sup-spawn-workers]**
+- Given: worker assignments
+- When: spawning
+- Then: use Task tool with `subagent_type: "general-purpose"` and `run_in_background: true`, worker MUST call `Skill(/aura:worker)` at start
+- Should not: spawn workers sequentially or use specialized agent types
 
-**Given** teammates spawned via TeamCreate **when** assigning work via SendMessage **then** the message MUST include: (1) explicit instruction to call `Skill(/aura:worker)`, (2) the Beads task ID, (3) instruction to run `bd show <task-id>` for full context, and (4) the handoff document path **should never** send bare instructions without Beads context — teammates have no prior knowledge of the task
+**[sup-teamcreate-msg]**
+- Given: teammates spawned via TeamCreate
+- When: assigning work via SendMessage
+- Then: the message MUST include: (1) explicit instruction to call `Skill(/aura:worker)`, (2) the Beads task ID, (3) instruction to run `bd show <task-id>` for full context, and (4) the handoff document path
+- Should not: send bare instructions without Beads context — teammates have no prior knowledge of the task
 
-**Given** multiple vertical slices **when** slices share types, interfaces, or data flows **then** identify horizontal Layer Integration Points and document them in the IMPL_PLAN (owner, consumers, shared contract, merge timing) **should never** leave cross-slice dependencies implicit — divergence grows when slices develop in isolation without clear merge points
+**[sup-layer-integration-points]**
+- Given: multiple vertical slices
+- When: slices share types, interfaces, or data flows
+- Then: identify horizontal Layer Integration Points and document them in the IMPL_PLAN (owner, consumers, shared contract, merge timing)
+- Should not: leave cross-slice dependencies implicit — divergence grows when slices develop in isolation without clear merge points
 
-**Given** IMPORTANT or MINOR severity groups **when** linking dependencies **then** link them to the FOLLOWUP epic only: `bd dep add <followup-epic-id> --blocked-by <important-group-id>` **should never** link IMPORTANT or MINOR severity groups as blocking IMPL_PLAN or any slice — only BLOCKER findings block slices
+**[sup-followup-deps]**
+- Given: IMPORTANT or MINOR severity groups
+- When: linking dependencies
+- Then: link them to the FOLLOWUP epic only: `bd dep add <followup-epic-id> --blocked-by <important-group-id>`
+- Should not: link IMPORTANT or MINOR severity groups as blocking IMPL_PLAN or any slice — only BLOCKER findings block slices
 
-**Given** all slices complete **when** starting review **then** spawn 3 reviewers for ALL slices **should never** assign reviewers to single slices
+**[sup-review-all-slices]**
+- Given: all slices complete
+- When: starting review
+- Then: spawn 3 reviewers for ALL slices
+- Should not: assign reviewers to single slices
 
-**Given** reviewer assigned **when** reviewing **then** check each slice against criteria **should never** skip any slice
+**[sup-review-check-each]**
+- Given: reviewer assigned
+- When: reviewing
+- Then: check each slice against criteria
+- Should not: skip any slice
 
-**Given** review round **when** creating severity groups **then** ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty **should never** lazily create groups only when findings exist
+**[sup-review-severity-groups]**
+- Given: review round
+- When: creating severity groups
+- Then: ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty
+- Should not: lazily create groups only when findings exist
 
-**Given** BLOCKER finding **when** wiring dependencies **then** add dual-parent: blocks BOTH severity group AND slice **should never** wire BLOCKER to only one parent
+**[sup-blocker-dual-parent]**
+- Given: BLOCKER finding
+- When: wiring dependencies
+- Then: add dual-parent: blocks BOTH severity group AND slice
+- Should not: wire BLOCKER to only one parent
 
-**Given** IMPORTANT or MINOR finding **when** categorizing **then** add to severity group only (NOT to slice) — these go to follow-up epic **should never** block slices on non-BLOCKER findings
+**[sup-important-minor-followup]**
+- Given: IMPORTANT or MINOR finding
+- When: categorizing
+- Then: add to severity group only (NOT to slice) — these go to follow-up epic
+- Should not: block slices on non-BLOCKER findings
 
-**Given** review complete with IMPORTANT/MINOR **when** finishing **then** supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution) **should never** wait for BLOCKERs to resolve before creating follow-up
+**[sup-followup-epic-timing]**
+- Given: review complete with IMPORTANT/MINOR
+- When: finishing
+- Then: supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution)
+- Should not: wait for BLOCKERs to resolve before creating follow-up
 
-**Given** worker completes initial implementation **when** deciding whether to shut down the worker **then** keep workers alive for the review-fix cycle; workers notify supervisor via bd comments add but do NOT shut down **should never** shut down workers after first implementation pass; workers must stay alive to fix BLOCKERs and IMPORTANT findings
+**[sup-worker-persistence]**
+- Given: worker completes initial implementation
+- When: deciding whether to shut down the worker
+- Then: keep workers alive for the review-fix cycle; workers notify supervisor via bd comments add but do NOT shut down
+- Should not: shut down workers after first implementation pass; workers must stay alive to fix BLOCKERs and IMPORTANT findings
 
 ## First Steps
 

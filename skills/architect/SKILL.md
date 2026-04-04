@@ -312,7 +312,11 @@ Exit: Supervisor receives ratified plan + handoff document
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-3-proposal-n)**
 
-**Given** h6 handoff received (FOLLOWUP_URE + FOLLOWUP_URD) **when** starting follow-up proposal **then** create FOLLOWUP_PROPOSAL-N referencing both original URD and FOLLOWUP_URD **should never** create FOLLOWUP_PROPOSAL without reading the original URD
+**[arch-followup-h6]**
+- Given: h6 handoff received (FOLLOWUP_URE + FOLLOWUP_URD)
+- When: starting follow-up proposal
+- Then: create FOLLOWUP_PROPOSAL-N referencing both original URD and FOLLOWUP_URD
+- Should not: create FOLLOWUP_PROPOSAL without reading the original URD
 
 ## PROPOSAL-N Naming
 

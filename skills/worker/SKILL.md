@@ -255,7 +255,11 @@ L2 Test File Requirements:
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9
 
-**Given** completing Layer 3 (implementation + wiring) **when** finishing a vertical slice **then** deliver production code that is fully wired and working end-to-end **should never** leave TODO placeholders, test-only exports, or unimplemented stubs
+**[wrk-no-stubs]**
+- Given: completing Layer 3 (implementation + wiring)
+- When: finishing a vertical slice
+- Then: deliver production code that is fully wired and working end-to-end
+- Should not: leave TODO placeholders, test-only exports, or unimplemented stubs
 
 ## Vertical Slice Ownership in Practice
 
