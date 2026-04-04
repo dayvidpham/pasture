@@ -76,21 +76,14 @@ func TestDefaultDBPath_XDGDataDir(t *testing.T) {
 	}
 }
 
-func TestDefaultDBPath_EnvOverride(t *testing.T) {
-	custom := "/tmp/custom/provenance.db"
-	t.Setenv(config.EnvProvenanceDBPath, custom)
+func TestDefaultDBPath_HomeUnset(t *testing.T) {
+	// Clear HOME and USERPROFILE (the two env vars os.UserHomeDir consults)
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
 	got := config.DefaultDBPath()
-	if got != custom {
-		t.Errorf("DefaultDBPath() with env override = %q, want %q", got, custom)
-	}
-}
-
-func TestDefaultDBPath_EnvOverrideEmpty(t *testing.T) {
-	// Explicitly set to empty — should fall back to XDG default
-	t.Setenv(config.EnvProvenanceDBPath, "")
-	got := config.DefaultDBPath()
-	if filepath.Base(got) != "provenance.db" {
-		t.Errorf("DefaultDBPath() with empty env = %q, expected base 'provenance.db'", got)
+	want := filepath.Join(".", ".local", "share", "pasture", "provenance.db")
+	if got != want {
+		t.Errorf("DefaultDBPath() with HOME unset = %q, want %q", got, want)
 	}
 }
 
@@ -170,7 +163,7 @@ func TestEnvConstants(t *testing.T) {
 	if config.EnvAuditDBPath != "PASTURE_AUDIT_DB_PATH" {
 		t.Errorf("EnvAuditDBPath = %q, want PASTURE_AUDIT_DB_PATH", config.EnvAuditDBPath)
 	}
-	if config.EnvProvenanceDBPath != "PROVENANCE_DB_PATH" {
-		t.Errorf("EnvProvenanceDBPath = %q, want PROVENANCE_DB_PATH", config.EnvProvenanceDBPath)
+	if config.EnvProvenanceDBPath != "PASTURE_PROVENANCE_DB_PATH" {
+		t.Errorf("EnvProvenanceDBPath = %q, want PASTURE_PROVENANCE_DB_PATH", config.EnvProvenanceDBPath)
 	}
 }

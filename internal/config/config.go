@@ -52,31 +52,31 @@ const (
 	// EnvAuditDBPath is the env var for the SQLite audit database path.
 	EnvAuditDBPath = "PASTURE_AUDIT_DB_PATH"
 	// EnvProvenanceDBPath is the env var for the provenance tracker database path.
-	EnvProvenanceDBPath = "PROVENANCE_DB_PATH"
+	EnvProvenanceDBPath = "PASTURE_PROVENANCE_DB_PATH"
 )
 
 // ProvenanceConfig holds configuration for the provenance task tracker.
 type ProvenanceConfig struct {
 	// DBPath is the filesystem path for the provenance SQLite database.
 	// Default: ~/.local/share/pasture/provenance.db
-	// Override via PROVENANCE_DB_PATH env var or [provenance] db_path in config.
+	// Override via PASTURE_PROVENANCE_DB_PATH env var or [provenance] db_path in config.
+	// NOTE: Viper resolver for [provenance] config section not yet wired —
+	// use DefaultDBPath() as the fallback until ResolveProvenanceConfig is added.
 	DBPath string `yaml:"db_path" mapstructure:"db_path"`
 }
 
 // DefaultDBPath returns the canonical location for the provenance database:
 // ~/.local/share/pasture/provenance.db
 //
-// The path follows the XDG Base Directory Specification for user data files.
-// Override at runtime via the PROVENANCE_DB_PATH environment variable or
-// the [provenance] db_path key in pasture's config file.
+// This function returns only the XDG default path. Environment variable
+// overrides (PASTURE_PROVENANCE_DB_PATH) and config file values
+// ([provenance] db_path) are resolved by the Viper layer, not by this
+// function — matching the pattern established by DefaultConfigPath.
 //
 // On systems where $HOME is unset the function falls back to
 // "./.local/share/pasture/provenance.db" so the caller always receives a
 // non-empty path.
 func DefaultDBPath() string {
-	if envPath := os.Getenv(EnvProvenanceDBPath); envPath != "" {
-		return envPath
-	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return filepath.Join(".", ".local", "share", "pasture", "provenance.db")
