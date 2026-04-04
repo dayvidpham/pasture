@@ -48,6 +48,61 @@ func TestDefaultConfigPath_FullPath(t *testing.T) {
 	}
 }
 
+// ---- DefaultDBPath() ---------------------------------------------------------
+
+func TestDefaultDBPath_ContainsPasture(t *testing.T) {
+	path := config.DefaultDBPath()
+	if !strings.Contains(path, "pasture") {
+		t.Errorf("DefaultDBPath() = %q, expected to contain 'pasture'", path)
+	}
+}
+
+func TestDefaultDBPath_EndsWithProvenanceDB(t *testing.T) {
+	path := config.DefaultDBPath()
+	if filepath.Base(path) != "provenance.db" {
+		t.Errorf("DefaultDBPath() = %q, expected base name 'provenance.db'", path)
+	}
+}
+
+func TestDefaultDBPath_XDGDataDir(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home directory, skipping")
+	}
+	expected := filepath.Join(home, ".local", "share", "pasture", "provenance.db")
+	got := config.DefaultDBPath()
+	if got != expected {
+		t.Errorf("DefaultDBPath() = %q, want %q", got, expected)
+	}
+}
+
+func TestDefaultDBPath_EnvOverride(t *testing.T) {
+	custom := "/tmp/custom/provenance.db"
+	t.Setenv(config.EnvProvenanceDBPath, custom)
+	got := config.DefaultDBPath()
+	if got != custom {
+		t.Errorf("DefaultDBPath() with env override = %q, want %q", got, custom)
+	}
+}
+
+func TestDefaultDBPath_EnvOverrideEmpty(t *testing.T) {
+	// Explicitly set to empty — should fall back to XDG default
+	t.Setenv(config.EnvProvenanceDBPath, "")
+	got := config.DefaultDBPath()
+	if filepath.Base(got) != "provenance.db" {
+		t.Errorf("DefaultDBPath() with empty env = %q, expected base 'provenance.db'", got)
+	}
+}
+
+// ---- ProvenanceConfig struct -------------------------------------------------
+
+func TestProvenanceConfig_ZeroValues(t *testing.T) {
+	var pc config.ProvenanceConfig
+	if pc.DBPath != "" {
+		t.Errorf("ProvenanceConfig.DBPath zero value = %q, want empty string", pc.DBPath)
+	}
+}
+
 // ---- ConnectionConfig struct -----------------------------------------------
 
 func TestConnectionConfig_ZeroValues(t *testing.T) {
@@ -93,6 +148,7 @@ func TestEnvConstants(t *testing.T) {
 		{"EnvAddress", config.EnvAddress},
 		{"EnvAuditTrail", config.EnvAuditTrail},
 		{"EnvAuditDBPath", config.EnvAuditDBPath},
+		{"EnvProvenanceDBPath", config.EnvProvenanceDBPath},
 	}
 	for _, tc := range cases {
 		if tc.val == "" {
@@ -113,5 +169,8 @@ func TestEnvConstants(t *testing.T) {
 	}
 	if config.EnvAuditDBPath != "PASTURE_AUDIT_DB_PATH" {
 		t.Errorf("EnvAuditDBPath = %q, want PASTURE_AUDIT_DB_PATH", config.EnvAuditDBPath)
+	}
+	if config.EnvProvenanceDBPath != "PROVENANCE_DB_PATH" {
+		t.Errorf("EnvProvenanceDBPath = %q, want PROVENANCE_DB_PATH", config.EnvProvenanceDBPath)
 	}
 }
