@@ -48,42 +48,42 @@ func TestDefaultConfigPath_FullPath(t *testing.T) {
 	}
 }
 
-// ---- DefaultDBPath() ---------------------------------------------------------
+// ---- DefaultProvenanceDBPath() ---------------------------------------------------------
 
-func TestDefaultDBPath_ContainsPasture(t *testing.T) {
-	path := config.DefaultDBPath()
+func TestDefaultProvenanceDBPath_ContainsPasture(t *testing.T) {
+	path := config.DefaultProvenanceDBPath()
 	if !strings.Contains(path, "pasture") {
-		t.Errorf("DefaultDBPath() = %q, expected to contain 'pasture'", path)
+		t.Errorf("DefaultProvenanceDBPath() = %q, expected to contain 'pasture'", path)
 	}
 }
 
-func TestDefaultDBPath_EndsWithProvenanceDB(t *testing.T) {
-	path := config.DefaultDBPath()
+func TestDefaultProvenanceDBPath_EndsWithProvenanceDB(t *testing.T) {
+	path := config.DefaultProvenanceDBPath()
 	if filepath.Base(path) != "provenance.db" {
-		t.Errorf("DefaultDBPath() = %q, expected base name 'provenance.db'", path)
+		t.Errorf("DefaultProvenanceDBPath() = %q, expected base name 'provenance.db'", path)
 	}
 }
 
-func TestDefaultDBPath_XDGDataDir(t *testing.T) {
+func TestDefaultProvenanceDBPath_XDGDataDir(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Skip("cannot determine home directory, skipping")
 	}
 	expected := filepath.Join(home, ".local", "share", "pasture", "provenance.db")
-	got := config.DefaultDBPath()
+	got := config.DefaultProvenanceDBPath()
 	if got != expected {
-		t.Errorf("DefaultDBPath() = %q, want %q", got, expected)
+		t.Errorf("DefaultProvenanceDBPath() = %q, want %q", got, expected)
 	}
 }
 
-func TestDefaultDBPath_HomeUnset(t *testing.T) {
+func TestDefaultProvenanceDBPath_HomeUnset(t *testing.T) {
 	// Clear HOME and USERPROFILE (the two env vars os.UserHomeDir consults)
 	t.Setenv("HOME", "")
 	t.Setenv("USERPROFILE", "")
-	got := config.DefaultDBPath()
+	got := config.DefaultProvenanceDBPath()
 	want := filepath.Join(".", ".local", "share", "pasture", "provenance.db")
 	if got != want {
-		t.Errorf("DefaultDBPath() with HOME unset = %q, want %q", got, want)
+		t.Errorf("DefaultProvenanceDBPath() with HOME unset = %q, want %q", got, want)
 	}
 }
 

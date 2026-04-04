@@ -61,11 +61,11 @@ type ProvenanceConfig struct {
 	// Default: ~/.local/share/pasture/provenance.db
 	// Override via PASTURE_PROVENANCE_DB_PATH env var or [provenance] db_path in config.
 	// NOTE: Viper resolver for [provenance] config section not yet wired —
-	// use DefaultDBPath() as the fallback until ResolveProvenanceConfig is added.
+	// use DefaultProvenanceDBPath() as the fallback until ResolveProvenanceConfig is added.
 	DBPath string `yaml:"db_path" mapstructure:"db_path"`
 }
 
-// DefaultDBPath returns the canonical location for the provenance database:
+// DefaultProvenanceDBPath returns the canonical location for the provenance database:
 // ~/.local/share/pasture/provenance.db
 //
 // This function returns only the XDG default path. Environment variable
@@ -76,7 +76,7 @@ type ProvenanceConfig struct {
 // On systems where $HOME is unset the function falls back to
 // "./.local/share/pasture/provenance.db" so the caller always receives a
 // non-empty path.
-func DefaultDBPath() string {
+func DefaultProvenanceDBPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return filepath.Join(".", ".local", "share", "pasture", "provenance.db")
