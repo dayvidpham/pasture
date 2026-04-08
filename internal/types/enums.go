@@ -53,6 +53,31 @@ func (a ReviewAxis) IsValid() bool {
 	return false
 }
 
+// ─── SeverityLevel ──────────────────────────────────────────────────────────
+
+// SeverityLevel classifies the severity of a code review finding.
+// Used as the key type for ReviewCycleRecord.FindingCounts to prevent
+// stringly-typed map access.
+type SeverityLevel string
+
+const (
+	SeverityBlocker   SeverityLevel = "blocker"
+	SeverityImportant SeverityLevel = "important"
+	SeverityMinor     SeverityLevel = "minor"
+)
+
+// AllSeverityLevels is the ordered slice of all valid SeverityLevel values.
+var AllSeverityLevels = []SeverityLevel{SeverityBlocker, SeverityImportant, SeverityMinor}
+
+// IsValid reports whether s is a known SeverityLevel value.
+func (s SeverityLevel) IsValid() bool {
+	switch s {
+	case SeverityBlocker, SeverityImportant, SeverityMinor:
+		return true
+	}
+	return false
+}
+
 // ─── OutputFormat ────────────────────────────────────────────────────────────
 
 // OutputFormat specifies the CLI output format for pasture-msg commands.

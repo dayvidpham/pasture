@@ -45,7 +45,7 @@ type EpochState struct {
 // The supervisor creates one record per (slice, round) pair. It captures
 // which reviewers participated, their votes, and the count of findings by
 // severity. This enables the supervisor to enforce the max-3-cycles constraint
-// and determine whether a clean exit (0 BLOCKERs + 0 IMPORTANTs) was reached.
+// and determine whether a clean exit was reached via IsCleanExit().
 type ReviewCycleRecord struct {
 	// SliceID is the Beads task ID of the slice being reviewed.
 	SliceID string `json:"sliceId"`
@@ -54,20 +54,21 @@ type ReviewCycleRecord struct {
 	// Votes maps each reviewer axis to its vote for this round.
 	Votes map[ReviewAxis]VoteType `json:"votes"`
 	// FindingCounts maps severity level to the number of findings.
-	// Keys: "blocker", "important", "minor".
-	FindingCounts map[string]int `json:"findingCounts"`
-	// Clean is true when all 3 axes voted ACCEPT and FindingCounts has
-	// 0 blockers and 0 importants. Computed by the supervisor after all
-	// votes are in — callers MUST use this field for programmatic checks.
-	Clean bool `json:"clean"`
+	FindingCounts map[SeverityLevel]int `json:"findingCounts"`
 	// Timestamp records when the review round completed.
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// IsCleanExit returns true if the review cycle had 0 BLOCKERs and 0 IMPORTANTs.
-// This is the "clean review" exit condition for the Ride the Wave workflow.
+// IsCleanExit returns true if the review cycle is clean: all 3 axes voted
+// ACCEPT AND there are 0 BLOCKERs and 0 IMPORTANTs.
+// This is the single authoritative check for the Ride the Wave workflow.
 func (r ReviewCycleRecord) IsCleanExit() bool {
-	return r.FindingCounts["blocker"] == 0 && r.FindingCounts["important"] == 0
+	for _, axis := range AllReviewAxes {
+		if r.Votes[axis] != VoteAccept {
+			return false
+		}
+	}
+	return r.FindingCounts[SeverityBlocker] == 0 && r.FindingCounts[SeverityImportant] == 0
 }
 
 // QueryStateResult is a serialization-safe snapshot of epoch state returned

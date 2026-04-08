@@ -7,40 +7,49 @@ import (
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
-func TestReviewCycleRecord_IsCleanExit(t *testing.T) {
+// allAcceptVotes returns a Votes map where all 3 axes voted ACCEPT.
+func allAcceptVotes() map[types.ReviewAxis]types.VoteType {
+	return map[types.ReviewAxis]types.VoteType{
+		types.AxisCorrectness: types.VoteAccept,
+		types.AxisTestQuality: types.VoteAccept,
+		types.AxisElegance:    types.VoteAccept,
+	}
+}
+
+func TestIsCleanExit_FindingCounts(t *testing.T) {
 	tests := []struct {
 		name     string
-		findings map[string]int
+		findings map[types.SeverityLevel]int
 		want     bool
 	}{
 		{
 			name:     "clean: all zeros",
-			findings: map[string]int{"blocker": 0, "important": 0, "minor": 0},
+			findings: map[types.SeverityLevel]int{types.SeverityBlocker: 0, types.SeverityImportant: 0, types.SeverityMinor: 0},
 			want:     true,
 		},
 		{
 			name:     "clean: minors only",
-			findings: map[string]int{"blocker": 0, "important": 0, "minor": 5},
+			findings: map[types.SeverityLevel]int{types.SeverityBlocker: 0, types.SeverityImportant: 0, types.SeverityMinor: 5},
 			want:     true,
 		},
 		{
 			name:     "dirty: has blocker",
-			findings: map[string]int{"blocker": 1, "important": 0, "minor": 0},
+			findings: map[types.SeverityLevel]int{types.SeverityBlocker: 1, types.SeverityImportant: 0, types.SeverityMinor: 0},
 			want:     false,
 		},
 		{
 			name:     "dirty: has important",
-			findings: map[string]int{"blocker": 0, "important": 2, "minor": 0},
+			findings: map[types.SeverityLevel]int{types.SeverityBlocker: 0, types.SeverityImportant: 2, types.SeverityMinor: 0},
 			want:     false,
 		},
 		{
 			name:     "dirty: has both",
-			findings: map[string]int{"blocker": 1, "important": 3, "minor": 7},
+			findings: map[types.SeverityLevel]int{types.SeverityBlocker: 1, types.SeverityImportant: 3, types.SeverityMinor: 7},
 			want:     false,
 		},
 		{
-			name:     "clean: empty map (no findings recorded)",
-			findings: map[string]int{},
+			name:     "clean: empty map",
+			findings: map[types.SeverityLevel]int{},
 			want:     true,
 		},
 		{
@@ -55,11 +64,83 @@ func TestReviewCycleRecord_IsCleanExit(t *testing.T) {
 			r := types.ReviewCycleRecord{
 				SliceID:       "slice-1",
 				Round:         1,
+				Votes:         allAcceptVotes(), // all ACCEPT — isolate finding counts
 				FindingCounts: tc.findings,
 				Timestamp:     time.Now(),
 			}
 			if got := r.IsCleanExit(); got != tc.want {
 				t.Errorf("IsCleanExit() = %v, want %v (findings: %v)", got, tc.want, tc.findings)
+			}
+		})
+	}
+}
+
+func TestIsCleanExit_VoteConsensus(t *testing.T) {
+	cleanFindings := map[types.SeverityLevel]int{
+		types.SeverityBlocker:   0,
+		types.SeverityImportant: 0,
+		types.SeverityMinor:     0,
+	}
+
+	tests := []struct {
+		name  string
+		votes map[types.ReviewAxis]types.VoteType
+		want  bool
+	}{
+		{
+			name:  "clean: all ACCEPT",
+			votes: allAcceptVotes(),
+			want:  true,
+		},
+		{
+			name: "dirty: one REVISE",
+			votes: map[types.ReviewAxis]types.VoteType{
+				types.AxisCorrectness: types.VoteAccept,
+				types.AxisTestQuality: types.VoteRevise,
+				types.AxisElegance:    types.VoteAccept,
+			},
+			want: false,
+		},
+		{
+			name: "dirty: all REVISE",
+			votes: map[types.ReviewAxis]types.VoteType{
+				types.AxisCorrectness: types.VoteRevise,
+				types.AxisTestQuality: types.VoteRevise,
+				types.AxisElegance:    types.VoteRevise,
+			},
+			want: false,
+		},
+		{
+			name:  "dirty: missing vote (nil map)",
+			votes: nil,
+			want:  false,
+		},
+		{
+			name:  "dirty: empty votes map",
+			votes: map[types.ReviewAxis]types.VoteType{},
+			want:  false,
+		},
+		{
+			name: "dirty: only 2 of 3 axes voted ACCEPT",
+			votes: map[types.ReviewAxis]types.VoteType{
+				types.AxisCorrectness: types.VoteAccept,
+				types.AxisTestQuality: types.VoteAccept,
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := types.ReviewCycleRecord{
+				SliceID:       "slice-1",
+				Round:         1,
+				Votes:         tc.votes,
+				FindingCounts: cleanFindings, // 0 findings — isolate vote check
+				Timestamp:     time.Now(),
+			}
+			if got := r.IsCleanExit(); got != tc.want {
+				t.Errorf("IsCleanExit() = %v, want %v (votes: %v)", got, tc.want, tc.votes)
 			}
 		})
 	}
@@ -75,9 +156,12 @@ func TestReviewCycleRecord_Fields(t *testing.T) {
 			types.AxisTestQuality: types.VoteAccept,
 			types.AxisElegance:    types.VoteRevise,
 		},
-		FindingCounts: map[string]int{"blocker": 0, "important": 1, "minor": 3},
-		Clean:         false,
-		Timestamp:     now,
+		FindingCounts: map[types.SeverityLevel]int{
+			types.SeverityBlocker:   0,
+			types.SeverityImportant: 1,
+			types.SeverityMinor:     3,
+		},
+		Timestamp: now,
 	}
 
 	if r.SliceID != "aura-plugins-abc123" {
@@ -92,11 +176,12 @@ func TestReviewCycleRecord_Fields(t *testing.T) {
 	if r.Votes[types.AxisElegance] != types.VoteRevise {
 		t.Errorf("Votes[Elegance] = %v, want VoteRevise", r.Votes[types.AxisElegance])
 	}
-	if r.Clean {
-		t.Error("Clean should be false (has 1 IMPORTANT)")
+	if r.Timestamp != now {
+		t.Errorf("Timestamp = %v, want %v", r.Timestamp, now)
 	}
+	// Not clean: has 1 IMPORTANT + 1 REVISE vote
 	if r.IsCleanExit() {
-		t.Error("IsCleanExit() should be false (has 1 IMPORTANT)")
+		t.Error("IsCleanExit() should be false (has IMPORTANT + REVISE vote)")
 	}
 }
 
@@ -105,11 +190,23 @@ func TestEpochState_ReviewCycles(t *testing.T) {
 		EpochID: "test-epoch",
 		ReviewCycles: map[string][]types.ReviewCycleRecord{
 			"slice-1": {
-				{SliceID: "slice-1", Round: 1, FindingCounts: map[string]int{"blocker": 1}, Clean: false},
-				{SliceID: "slice-1", Round: 2, FindingCounts: map[string]int{"blocker": 0, "important": 0}, Clean: true},
+				{
+					SliceID: "slice-1", Round: 1,
+					Votes:         allAcceptVotes(),
+					FindingCounts: map[types.SeverityLevel]int{types.SeverityBlocker: 1},
+				},
+				{
+					SliceID: "slice-1", Round: 2,
+					Votes:         allAcceptVotes(),
+					FindingCounts: map[types.SeverityLevel]int{types.SeverityBlocker: 0, types.SeverityImportant: 0},
+				},
 			},
 			"slice-2": {
-				{SliceID: "slice-2", Round: 1, FindingCounts: map[string]int{"blocker": 0, "important": 0}, Clean: true},
+				{
+					SliceID: "slice-2", Round: 1,
+					Votes:         allAcceptVotes(),
+					FindingCounts: map[types.SeverityLevel]int{types.SeverityBlocker: 0, types.SeverityImportant: 0},
+				},
 			},
 		},
 	}
@@ -125,5 +222,18 @@ func TestEpochState_ReviewCycles(t *testing.T) {
 	}
 	if !state.ReviewCycles["slice-1"][1].IsCleanExit() {
 		t.Error("slice-1 round 2 should be clean")
+	}
+}
+
+func TestSeverityLevel_IsValid(t *testing.T) {
+	valid := []types.SeverityLevel{types.SeverityBlocker, types.SeverityImportant, types.SeverityMinor}
+	for _, s := range valid {
+		if !s.IsValid() {
+			t.Errorf("%q.IsValid() = false, want true", s)
+		}
+	}
+	invalid := types.SeverityLevel("critical")
+	if invalid.IsValid() {
+		t.Errorf("%q.IsValid() = true, want false", invalid)
 	}
 }
