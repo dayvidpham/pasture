@@ -451,6 +451,12 @@ Cycle Exit Conditions:
 - Then: keep workers alive for the review-fix cycle; workers notify supervisor via bd comments add but do NOT shut down
 - Should not: shut down workers after first implementation pass; workers must stay alive to fix BLOCKERs and IMPORTANT findings
 
+**[sup-autonomous-progression]**
+- Given: non-user-gated phase completes
+- When: transitioning to next phase
+- Then: proceed autonomously without asking permission; user-gated phases are: Phase 2 (URE), Phase 5 (Plan UAT), Phase 11 (Impl UAT); all other phases (8 IMPL_PLAN, 9 SLICES, 10 CODE REVIEW, 12 LANDING) progress automatically
+- Should not: ask 'Should I proceed?' for autonomous phases; only pause for user-facing phases that require human input
+
 ## First Steps
 
 The architect creates a placeholder IMPL_PLAN task. Your first job is to fill it in:
