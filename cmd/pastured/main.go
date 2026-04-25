@@ -6,11 +6,12 @@
 // handling work until SIGINT or SIGTERM is received.
 //
 // Configuration resolution priority (highest → lowest):
-//  1. CLI flags
+//  1. CLI flags (--db is canonical; --audit-db-path is a deprecated alias)
 //  2. Environment variables (TEMPORAL_NAMESPACE, TEMPORAL_TASK_QUEUE, TEMPORAL_ADDRESS,
-//     PASTURE_AUDIT_TRAIL, PASTURE_AUDIT_DB_PATH)
+//     PASTURE_AUDIT_TRAIL, PASTURE_DB_PATH, PASTURE_AUDIT_DB_PATH)
 //  3. YAML config file (default: ~/.config/pasture/config.yaml)
-//  4. Built-in defaults
+//  4. Built-in defaults (database path: ~/.local/share/pasture/pasture.db, per
+//     PROPOSAL-2 §7.1 — both Provenance and audit subsystems open the same file)
 package main
 
 import (
@@ -19,7 +20,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -29,6 +29,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/config"
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/temporal"
@@ -82,8 +83,18 @@ which point it drains in-flight tasks and exits cleanly.`,
 	// Audit trail flags.
 	root.PersistentFlags().String("audit-trail", string(types.BackendMemory),
 		`audit persistence backend: "memory" (non-durable, default) or "sqlite" (env: PASTURE_AUDIT_TRAIL)`)
+
+	// --db is the canonical flag for the unified pasture database (PROPOSAL-2
+	// §7.1); --audit-db-path is preserved as a deprecated alias for backwards
+	// compatibility with pre-PROPOSAL-2 deployments. Both default to "" and
+	// resolve to tasks.DefaultDBPath() at consumption time. If both flags are
+	// set with different values the daemon prefers --db and emits a
+	// deprecation warning per Constraint C-actionable-errors. See run() for
+	// the resolveDBPath function that implements this policy.
+	root.PersistentFlags().String("db", "",
+		"Path to the unified pasture SQLite database (env: PASTURE_DB_PATH, default: ~/.local/share/pasture/pasture.db)")
 	root.PersistentFlags().String("audit-db-path", "",
-		"SQLite audit database path; defaults to ~/.local/share/pasture/audit.db (env: PASTURE_AUDIT_DB_PATH)")
+		"DEPRECATED alias for --db; prefer --db. SQLite audit database path; defaults to ~/.local/share/pasture/pasture.db (env: PASTURE_AUDIT_DB_PATH)")
 
 	// Idle-after-migrate flag (S7; unblocks S3's Scenario 12 concurrent-migrator
 	// race test). When set to a positive duration, after migration completes
@@ -138,12 +149,30 @@ func run(cmd *cobra.Command, configFile string) error {
 			cfgErr,
 		)
 	}
+
+	// ── 1a. Reconcile --db (canonical) vs --audit-db-path (deprecated alias).
+	// PROPOSAL-2 §7.1: `pastured`'s existing --audit-db-path becomes an alias
+	// for --db; if both are set with different values, prefer --db and emit a
+	// deprecation warning per Constraint C-actionable-errors. The viper layer
+	// reads --audit-db-path / PASTURE_AUDIT_DB_PATH into cfg.AuditDBPath; we
+	// fold --db / PASTURE_DB_PATH on top here so the resulting cfg.AuditDBPath
+	// reflects the precedence.
+	resolvedDBPath, dbWarning, dbErr := resolveDBPath(cmd, cfg.AuditDBPath)
+	if dbErr != nil {
+		return dbErr
+	}
+	if dbWarning != "" {
+		logger.Warn(dbWarning)
+	}
+	cfg.AuditDBPath = resolvedDBPath
+
 	logger.Info("pastured starting",
 		"version", version,
 		"namespace", cfg.Connection.Namespace,
 		"taskQueue", cfg.Connection.TaskQueue,
 		"serverAddress", cfg.Connection.ServerAddress,
 		"auditTrail", cfg.AuditTrail,
+		"dbPath", cfg.AuditDBPath,
 	)
 
 	// ── 2. Audit trail + well-known agent registration ──────────────────────
@@ -234,13 +263,14 @@ func run(cmd *cobra.Command, configFile string) error {
 	hooksMgr := hooks.NewManager()
 	registeredRecorders := 0
 	if tracker, ok := trail.(protocol.TaskTracker); ok && cfg.AuditTrail == types.BackendSqlite {
+		// Resolve the unified DB path the same way initAuditTrail did so the
+		// auxiliary handle attaches to the same on-disk file. After PROPOSAL-2
+		// §7.1 the default lives at tasks.DefaultDBPath(); pre-PROPOSAL-2 the
+		// fallback hard-coded "audit.db", which would attach a SECOND file
+		// under the unified-default scenario and silently split writes.
 		dbPath := cfg.AuditDBPath
 		if dbPath == "" {
-			home, herr := os.UserHomeDir()
-			if herr != nil {
-				home = "."
-			}
-			dbPath = filepath.Join(home, ".local", "share", "pasture", "audit.db")
+			dbPath = tasks.DefaultDBPath()
 		}
 		auditDB, derr := tasks.OpenAuditDBForFreeFloating(dbPath)
 		if derr != nil {
@@ -365,13 +395,14 @@ func initAuditTrail(cfg config.PasturedConfig) (audit.Trail, *tasks.WellKnownAge
 		return audit.NewInMemoryAuditTrail(), emptyCache, nil, nil
 
 	case types.BackendSqlite:
+		// Resolve the unified DB path. PROPOSAL-2 §7.1 binds the default to
+		// tasks.DefaultDBPath() (~/.local/share/pasture/pasture.db) and honours
+		// $PASTURE_DB_PATH / $XDG_DATA_HOME via the helper. The pre-PROPOSAL-2
+		// fallback used a hard-coded "audit.db" which would NOT route to the
+		// unified file and would silently break the single-file invariant.
 		dbPath := cfg.AuditDBPath
 		if dbPath == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				home = "."
-			}
-			dbPath = filepath.Join(home, ".local", "share", "pasture", "audit.db")
+			dbPath = tasks.DefaultDBPath()
 		}
 
 		// Open the unified TaskTracker. This runs the audit migrator (v1→v3)
@@ -424,4 +455,114 @@ func signalChannel() <-chan os.Signal {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 	return ch
+}
+
+// resolveDBPath reconciles the canonical --db flag against the deprecated
+// --audit-db-path alias and the PASTURE_DB_PATH env var (PROPOSAL-2 §7.1).
+//
+// existingAuditDBPath is the value already resolved by Viper from
+// --audit-db-path / PASTURE_AUDIT_DB_PATH / YAML — i.e., everything the
+// pre-PROPOSAL-2 daemon already considered. We layer the canonical flag /
+// env var on top and emit a deprecation warning if the user supplied both
+// flags with different values.
+//
+// Precedence (highest → lowest):
+//  1. --db CLI flag (when explicitly set by the user)
+//  2. $PASTURE_DB_PATH env var
+//  3. existingAuditDBPath (covers --audit-db-path / $PASTURE_AUDIT_DB_PATH /
+//     YAML audit_db_path — kept for backwards compatibility)
+//  4. empty string ("" → caller substitutes tasks.DefaultDBPath() at the
+//     consumption site so a single resolution rule applies everywhere)
+//
+// Returns:
+//   - resolved: the path to use for the unified pasture.db (may be "" — the
+//     caller MUST substitute tasks.DefaultDBPath() in that case).
+//   - warning: a non-empty deprecation/conflict message that the caller
+//     should log via slog.Warn. Empty when no warning applies.
+//   - err: a *pasterrors.StructuredError on flag-read failure (never on
+//     conflict — that is a warning, not an error, per §7.1's "prefer --db"
+//     directive).
+//
+// Conflict cases handled:
+//   - Both flags set with the SAME value: no warning, no error.
+//   - Both flags set with DIFFERENT values: warning ("--db wins"), no error.
+//   - Only --audit-db-path set: warning (deprecation reminder), no error.
+//   - --db set (with or without env): no warning, no error.
+//   - Neither set: returns "" with no warning; caller falls back to
+//     tasks.DefaultDBPath().
+func resolveDBPath(cmd *cobra.Command, existingAuditDBPath string) (resolved string, warning string, err error) {
+	dbFlag := cmd.PersistentFlags().Lookup("db")
+	auditFlag := cmd.PersistentFlags().Lookup("audit-db-path")
+
+	// Defensive: both flags are registered above in newRootCmd; a nil here
+	// means a programming error (someone removed a flag without removing
+	// this resolver). Surface it as an actionable storage-config error.
+	if dbFlag == nil || auditFlag == nil {
+		return "", "", &pasterrors.StructuredError{
+			Category: pasterrors.CategoryConfig,
+			What:     "pastured.resolveDBPath: --db or --audit-db-path flag is not registered on the root command",
+			Why:      "newRootCmd() must register both flags; one was removed without updating resolveDBPath",
+			Impact:   "the daemon cannot resolve the unified database path and would silently fall back to an unintended file",
+			Fix:      "re-register the missing flag in newRootCmd(), or update resolveDBPath to drop the dependency on the missing flag",
+		}
+	}
+
+	dbValue := dbFlag.Value.String()
+	dbChanged := dbFlag.Changed
+	auditValue := auditFlag.Value.String()
+	auditChanged := auditFlag.Changed
+
+	// --- Precedence rule 1: --db (or PASTURE_DB_PATH) wins. ---
+	//
+	// If --db was explicitly set OR $PASTURE_DB_PATH is non-empty, use that
+	// value. We honour the env var by reading it directly here so pastured
+	// shares semantics with the `pasture` CLI (which uses tasks.DefaultDBPath
+	// — that helper also reads PASTURE_DB_PATH). The env-var read is
+	// idempotent and side-effect-free.
+	envDBPath := os.Getenv(tasks.DBPathEnv)
+
+	if dbChanged {
+		// Direct conflict check: warn if --audit-db-path was ALSO set with a
+		// different value. The user's intent is ambiguous; --db wins per
+		// PROPOSAL-2 §7.1, but we make that visible.
+		if auditChanged && auditValue != dbValue {
+			warning = fmt.Sprintf(
+				"pastured: both --db (%q) and --audit-db-path (%q) were set with different values"+
+					" — preferring --db per PROPOSAL-2 §7.1; --audit-db-path is deprecated"+
+					" — drop the --audit-db-path flag to silence this warning",
+				dbValue, auditValue,
+			)
+		}
+		return dbValue, warning, nil
+	}
+
+	if envDBPath != "" {
+		// PASTURE_DB_PATH wins over --audit-db-path / PASTURE_AUDIT_DB_PATH
+		// per the same "canonical wins" rule. Surface a warning if the user
+		// also set --audit-db-path (to a different value than the env).
+		if auditChanged && auditValue != envDBPath {
+			warning = fmt.Sprintf(
+				"pastured: $%s=%q overrides --audit-db-path=%q"+
+					" — preferring the canonical env var per PROPOSAL-2 §7.1; --audit-db-path is deprecated"+
+					" — drop the --audit-db-path flag (and any $%s) to silence this warning",
+				tasks.DBPathEnv, envDBPath, auditValue, tasks.DBPathEnv,
+			)
+		}
+		return envDBPath, warning, nil
+	}
+
+	// --- Precedence rule 2: existing --audit-db-path / $PASTURE_AUDIT_DB_PATH / YAML. ---
+	if existingAuditDBPath != "" {
+		// User supplied the deprecated path; honour it but warn so they know
+		// to migrate to --db / PASTURE_DB_PATH on next deployment.
+		warning = fmt.Sprintf(
+			"pastured: --audit-db-path / PASTURE_AUDIT_DB_PATH (%q) is deprecated by PROPOSAL-2 §7.1"+
+				" — switch to --db / PASTURE_DB_PATH; the value is honoured for backwards compatibility",
+			existingAuditDBPath,
+		)
+		return existingAuditDBPath, warning, nil
+	}
+
+	// --- Precedence rule 3: empty → caller falls back to DefaultDBPath ---
+	return "", "", nil
 }

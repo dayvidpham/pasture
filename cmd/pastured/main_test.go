@@ -29,6 +29,10 @@ func TestVersionConstant(t *testing.T) {
 // registered on the root command. This exercises the production code path
 // (newRootCmd) and catches typos or missing flag registrations without
 // requiring a live Temporal server.
+//
+// PROPOSAL-2 §7.1: --db is the canonical flag for the unified pasture
+// database; --audit-db-path is preserved as a deprecated alias for
+// backwards compatibility with pre-PROPOSAL-2 deployments.
 func TestRootCmdFlagRegistration(t *testing.T) {
 	root := newRootCmd()
 
@@ -38,7 +42,8 @@ func TestRootCmdFlagRegistration(t *testing.T) {
 		"task-queue",
 		"address",
 		"audit-trail",
-		"audit-db-path",
+		"db",            // canonical (PROPOSAL-2 §7.1)
+		"audit-db-path", // deprecated alias
 		"idle-after-migrate",
 		"version",
 	}
@@ -65,6 +70,7 @@ func TestRootCmdFlagDefaults(t *testing.T) {
 		{"task-queue", "pasture"},
 		{"address", "localhost:7233"},
 		{"audit-trail", string(types.BackendMemory)},
+		{"db", ""},
 		{"audit-db-path", ""},
 		{"idle-after-migrate", "0s"},
 		{"config", config.DefaultConfigPath()},
@@ -242,16 +248,22 @@ func TestInitAuditTrail_Sqlite(t *testing.T) {
 }
 
 // TestInitAuditTrail_Sqlite_DefaultPath verifies that when AuditDBPath is empty
-// the default ~/.local/share/pasture/audit.db path is used (we verify the trail
-// is non-nil and the path contains "pasture/audit.db" by using env manipulation).
+// the unified default ~/.local/share/pasture/pasture.db path is used
+// (PROPOSAL-2 §7.1). Pre-PROPOSAL-2 the daemon defaulted to "audit.db" and
+// `pasture` defaulted to "provenance.db"; the unified default collapses both
+// to the single "pasture.db" file so OpenTaskTracker, OpenTracker, and the
+// daemon's audit handle all land on the same on-disk file.
 func TestInitAuditTrail_Sqlite_DefaultPath(t *testing.T) {
 	tmpDir := t.TempDir()
-	// Override HOME so the default path resolves inside our temp dir.
+	// Override HOME and unset PASTURE_DB_PATH / XDG_DATA_HOME so the default
+	// path resolves into our temp dir's $HOME-based fallback.
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("PASTURE_DB_PATH", "")
+	t.Setenv("XDG_DATA_HOME", "")
 
 	cfg := config.PasturedConfig{
 		AuditTrail:  types.BackendSqlite,
-		AuditDBPath: "", // empty → use default
+		AuditDBPath: "", // empty → use tasks.DefaultDBPath()
 	}
 	trail, cache, closer, err := initAuditTrail(cfg)
 	if err != nil {
@@ -266,10 +278,11 @@ func TestInitAuditTrail_Sqlite_DefaultPath(t *testing.T) {
 	if cache == nil || cache.Len() != 15 {
 		t.Errorf("cache is %v with len=%d; want non-nil with 15 entries", cache, cache.Len())
 	}
-	// Verify the default db file was created inside our temp HOME.
-	expectedPath := tmpDir + "/.local/share/pasture/audit.db"
+	// Verify the unified pasture.db file was created inside our temp HOME.
+	// PROPOSAL-2 §7.1 binds the filename to pasture.db.
+	expectedPath := tmpDir + "/.local/share/pasture/pasture.db"
 	if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
-		t.Errorf("SQLite database file not created at default path %q", expectedPath)
+		t.Errorf("unified pasture.db not created at default path %q", expectedPath)
 	}
 	if err := closer(); err != nil {
 		t.Errorf("closer: %v", err)
