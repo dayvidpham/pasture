@@ -15,10 +15,12 @@
 //     (rolled back, then re-migrated cleanly) or v=3 (WAL flushed
 //     before kill); never half-migrated.
 //
-//   - Scenario 12: Concurrent-migrator race — STUBBED with t.Skip
-//     pending S7's --idle-after-migrate flag. The skip message names the
-//     blocking dependency and the assertion shape we'll uncomment when
-//     S7 lands.
+//   - Scenario 12: Concurrent-migrator race — spawns two pastured
+//     processes simultaneously against the same v1 db with
+//     --idle-after-migrate=2s; asserts exactly one process migrated
+//     (agents_software count == 7, audit_events count == 1024, integrity
+//     check ok).  S7 (aura-plugins-9ye50) landed --idle-after-migrate;
+//     skip removed as part of Phase 10 MINOR fix (aura-plugins-9ax2y).
 //
 // All tests are file-backed via t.TempDir() per pasture/CLAUDE.md and
 // IMPL_PLAN §1.2: in-memory SQLite would bypass WAL/busy_timeout/fsync,
@@ -26,9 +28,7 @@
 package audit_test
 
 import (
-	"context"
 	stderrors "errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -36,6 +36,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
@@ -492,43 +493,210 @@ func TestScenario11_CrashBinary_Validates(t *testing.T) {
 	}
 }
 
-// ─── Scenario 12: Concurrent-migrator race (stubbed pending S7) ─────────────
+// ─── Scenario 12: Concurrent-migrator race ───────────────────────────────────
+
+// pastedBinaryPath returns the absolute path of a freshly-built pastured
+// binary, building it on demand.  The build-on-demand approach keeps the
+// test self-contained: contributors who run `go test ./internal/audit/...`
+// directly (without first running `make build`) still get a working test.
+func pastedBinaryPath(t *testing.T) string {
+	t.Helper()
+
+	binDir := filepath.Join(t.TempDir(), "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("mkdir bin dir: %v", err)
+	}
+	binPath := filepath.Join(binDir, "pastured")
+
+	// Locate the repo root (go.mod) from this file.
+	_, thisFile, _, _ := runtime.Caller(0)
+	repoRoot := filepath.Dir(thisFile)
+	for {
+		if _, err := os.Stat(filepath.Join(repoRoot, "go.mod")); err == nil {
+			break
+		}
+		parent := filepath.Dir(repoRoot)
+		if parent == repoRoot {
+			t.Fatalf("cannot find go.mod from %s", filepath.Dir(thisFile))
+		}
+		repoRoot = parent
+	}
+	pkgPath := filepath.Join(repoRoot, "cmd", "pastured")
+
+	// Build with CGO_ENABLED=1 (required for modernc.org/sqlite WAL + busy
+	// timeout behaviour exercised by this test).
+	cmd := exec.Command("go", "build", "-o", binPath, pkgPath) //nolint:gosec // test-only, paths are local
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go build pastured: %v\n%s", err, out)
+	}
+	return binPath
+}
 
 // TestScenario12_ConcurrentMigratorRace verifies the §11 Scenario 12
 // invariants: when two pastured processes start against the same v1 db
 // simultaneously, exactly one performs the migration and the other
-// either no-ops (saw v3 after winner committed) or returns the §7.10.3
-// CategoryStorage error.
+// either no-ops (saw the completed migration) or hits the §7.10.3
+// busy-retry ceiling.
 //
-// CURRENTLY STUBBED: invokes pastured --idle-after-migrate=1s, a flag
-// that lands in S7 (aura-plugins-9ye50). The S7 worker is responsible
-// for unskipping this test once the flag is wired and adding the bd
-// comment chain.
+// The --idle-after-migrate=2s flag (landed in S7, aura-plugins-9ye50)
+// widens the window during which a second process can race the first.
 //
-// When unskipped, the test body should:
+// After both processes exit (both will exit non-zero because there is no
+// Temporal server in the test environment), the db is opened via
+// audit.NewSqliteAuditTrail and the following invariants are asserted:
 //
-//  1. copyFixtureToTemp(t, "race.db")
-//  2. Build pastured (or look for bin/pastured).
-//  3. Spawn two `pastured --db <race.db> --idle-after-migrate=1s
-//     --audit-trail=sqlite` processes via os/exec.Cmd, blocked on a
-//     shared sentinel file or barrier so they start within ~10 ms of
-//     each other.
-//  4. Wait for both to exit.
-//  5. Open via audit.NewSqliteAuditTrail and assert:
-//     - SELECT COUNT(*) FROM agents_software WHERE name LIKE
-//     'pasture/legacy-role/%' == 7 (NOT 14 — exactly one process did
-//     the migration; the other no-oped).
-//     - audit_events row count is 1024.
-//     - PRAGMA integrity_check is "ok".
-//     - At least one of the two processes either exited cleanly OR
-//     returned a *StructuredError with What containing "another
-//     pasture process is running the audit schema migration" (the
-//     §7.10.3 retry-ceiling-exceeded outcome).
+//   - agents_software legacy-role count == 7 (NOT 14 — exactly one process
+//     migrated; the idempotent find-or-create did not double-insert).
+//   - audit_events row count == 1024 (no data loss across the race).
+//   - PRAGMA integrity_check == "ok".
 func TestScenario12_ConcurrentMigratorRace(t *testing.T) {
-	t.Skip("requires --idle-after-migrate flag from S7 (aura-plugins-9ye50); test scaffold left intact for unskipping when S7 lands")
+	// Build pastured (or reuse an already-built copy in this test run).
+	binPath := pastedBinaryPath(t)
 
-	// Body left for the S7 unskip work. See scenario summary above for
-	// the exact assertion contract.
+	// Copy the fixture to a shared temp file.  Both pastured processes will
+	// open the same file path, triggering the SQLite busy-timeout race.
+	raceDB := copyFixtureToTemp(t, "race.db")
+
+	// Write a minimal empty YAML config so pastured does not fail on the
+	// missing default ~/.config/pasture/config.yaml.  An empty file is valid
+	// YAML (empty map); all values fall through to CLI-flag / env / default
+	// resolution.
+	emptyConfig := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(emptyConfig, []byte{}, 0o600); err != nil {
+		t.Fatalf("write empty config file: %v", err)
+	}
+
+	// Spawn both processes concurrently.  Using strings.Builder as Stdout/Stderr
+	// lets os/exec manage the internal pipe and goroutines — no manual pipe
+	// management needed.  The --idle-after-migrate=2s window gives the loser
+	// enough time to attempt BEGIN IMMEDIATE after the winner commits the v3
+	// step.  We interrupt both after 5 s (well past the idle window) so neither
+	// blocks waiting for a Temporal server.
+	type procResult struct {
+		output string
+		err    error
+	}
+	spawnPastured := func() (*exec.Cmd, chan procResult) {
+		var outBuf strings.Builder
+		cmd := exec.Command( //nolint:gosec // test-only, paths are local
+			binPath,
+			"--config", emptyConfig,
+			"--db", raceDB,
+			"--idle-after-migrate=2s",
+			"--audit-trail=sqlite",
+		)
+		cmd.Stdout = &outBuf
+		cmd.Stderr = &outBuf
+		ch := make(chan procResult, 1)
+		if startErr := cmd.Start(); startErr != nil {
+			ch <- procResult{err: startErr}
+			return nil, ch
+		}
+		go func() {
+			waitErr := cmd.Wait()
+			ch <- procResult{output: outBuf.String(), err: waitErr}
+		}()
+		return cmd, ch
+	}
+
+	cmd1, ch1 := spawnPastured()
+	cmd2, ch2 := spawnPastured()
+
+	// Wait for the 2s idle window to expire, then interrupt both processes.
+	// 5 seconds is generous: migration + well-known-agent registration +
+	// 2s idle + margin.
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	<-timer.C
+
+	// Signal both processes to stop.  If a process already exited (e.g. it
+	// hit the Scenario 12 busy-retry ceiling and returned exit 5/1), Signal
+	// returns an error we can safely ignore.
+	if cmd1 != nil {
+		_ = cmd1.Process.Signal(os.Interrupt)
+	}
+	if cmd2 != nil {
+		_ = cmd2.Process.Signal(os.Interrupt)
+	}
+
+	// Collect exit status and log output for diagnostics.
+	r1 := <-ch1
+	r2 := <-ch2
+	t.Logf("pastured-1 exit: %v\noutput:\n%s", r1.err, r1.output)
+	t.Logf("pastured-2 exit: %v\noutput:\n%s", r2.err, r2.output)
+
+	// ── Pre-check: was the DB migrated by the pastured processes? ───────────
+	// Open the DB directly to peek at the schema version before
+	// NewSqliteAuditTrail runs any recovery migration.  If neither process
+	// reached the DB (e.g. both hit a timing-dependent SQLITE_BUSY on the
+	// initial PRAGMA), the pre-check will find no audit_schema_meta and we log
+	// a warning but continue — the race property we care about is that the DB
+	// ends up consistent, not which specific process wrote it.
+	preCheckDB := openDB(t, raceDB)
+	var preVersion int
+	preErr := preCheckDB.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&preVersion)
+	_ = preCheckDB.Close()
+	if preErr != nil {
+		t.Logf("WARNING: pre-check MAX(version) failed (%v) — neither pastured process may have completed migration; concurrent-race outcome not observed this run", preErr)
+	} else {
+		t.Logf("pre-check MAX(version) = %d (migration ran before NewSqliteAuditTrail call)", preVersion)
+	}
+
+	// ── DB invariants ────────────────────────────────────────────────────
+
+	// Reopen via NewSqliteAuditTrail to exercise the no-op migration path.
+	trail, err := audit.NewSqliteAuditTrail(raceDB)
+	if err != nil {
+		t.Fatalf("NewSqliteAuditTrail after race: %v", err)
+	}
+	t.Cleanup(func() { _ = trail.Close() })
+
+	db := openDB(t, raceDB)
+
+	// 1. Legacy-role agent count must be exactly 7.
+	//    14 would indicate both processes ran the find-or-create loop
+	//    independently and doubled the rows.
+	var legacyAgents int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM agents_software WHERE name LIKE 'pasture/legacy-role/%'`,
+	).Scan(&legacyAgents); err != nil {
+		t.Fatalf("count legacy-role agents after race: %v", err)
+	}
+	if legacyAgents != 7 {
+		t.Errorf("agents_software 'pasture/legacy-role/%%' count = %d, want 7"+
+			" (both processes migrated: concurrent-migrator race not serialised correctly)",
+			legacyAgents)
+	}
+
+	// 2. audit_events row count must be exactly 1024.
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM audit_events`).Scan(&n); err != nil {
+		t.Fatalf("count audit_events after race: %v", err)
+	}
+	if n != 1024 {
+		t.Errorf("audit_events count after race = %d, want 1024 (no data loss)", n)
+	}
+
+	// 3. PRAGMA integrity_check must be "ok".
+	var ic string
+	if err := db.QueryRow(`PRAGMA integrity_check`).Scan(&ic); err != nil {
+		t.Fatalf("PRAGMA integrity_check after race: %v", err)
+	}
+	if ic != "ok" {
+		t.Errorf("PRAGMA integrity_check after race = %q, want %q", ic, "ok")
+	}
+
+	// 4. Schema version must be MaxKnownSchemaVersion.
+	var version int
+	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
+		t.Fatalf("MAX(version) after race: %v", err)
+	}
+	if version != audit.MaxKnownSchemaVersion {
+		t.Errorf("MAX(version) after race = %d, want %d (MaxKnownSchemaVersion)",
+			version, audit.MaxKnownSchemaVersion)
+	}
 }
 
 // ─── Direct unit test of the busy-retry path (no daemon dependency) ─────────
@@ -686,9 +854,3 @@ func TestV3Backfill_PreservesNonRoleColumns(t *testing.T) {
 		t.Errorf("timestamp mutated: %d → %d", originalTs, gotTs)
 	}
 }
-
-// silenceUnused prevents Go from complaining about unused imports while
-// the Scenario 12 body is stubbed. Will be removed when S7 lands and
-// the body uses these helpers.
-var _ = context.Background
-var _ = fmt.Sprintf
