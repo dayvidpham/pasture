@@ -307,6 +307,166 @@ func TestInitAuditTrail_UnknownBackend(t *testing.T) {
 	}
 }
 
+// ─── resolveDBPath (PROPOSAL-2 §7.1 alias precedence) ─────────────────────────
+
+// TestResolveDBPath_NeitherSetReturnsEmpty — when no flag and no env is set,
+// resolveDBPath returns ("", "", nil). The caller falls back to
+// tasks.DefaultDBPath() so the single fallback policy lives in one place.
+func TestResolveDBPath_NeitherSetReturnsEmpty(t *testing.T) {
+	t.Setenv("PASTURE_DB_PATH", "")
+
+	root := newRootCmd()
+	if err := root.ParseFlags([]string{}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+
+	got, warn, err := resolveDBPath(root, "")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got != "" {
+		t.Errorf("path = %q, want empty (caller should fall back to DefaultDBPath)", got)
+	}
+	if warn != "" {
+		t.Errorf("warning = %q, want empty", warn)
+	}
+}
+
+// TestResolveDBPath_DBFlagWinsOverAlias — both --db and --audit-db-path
+// passed with different values: --db wins, deprecation warning emitted.
+func TestResolveDBPath_DBFlagWinsOverAlias(t *testing.T) {
+	t.Setenv("PASTURE_DB_PATH", "")
+
+	root := newRootCmd()
+	if err := root.ParseFlags([]string{
+		"--db", "/canonical/pasture.db",
+		"--audit-db-path", "/legacy/audit.db",
+	}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+
+	got, warn, err := resolveDBPath(root, "/legacy/audit.db")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got != "/canonical/pasture.db" {
+		t.Errorf("path = %q, want %q", got, "/canonical/pasture.db")
+	}
+	if warn == "" {
+		t.Error("expected deprecation warning when both flags are set with different values; got empty")
+	}
+	for _, want := range []string{"--db", "--audit-db-path", "deprecated"} {
+		if !strings.Contains(warn, want) {
+			t.Errorf("warning missing %q; got: %s", want, warn)
+		}
+	}
+}
+
+// TestResolveDBPath_DBFlagAndAliasSameValue_NoWarning — both flags set to
+// the SAME value: no warning, --db wins (silent).
+func TestResolveDBPath_DBFlagAndAliasSameValue_NoWarning(t *testing.T) {
+	t.Setenv("PASTURE_DB_PATH", "")
+
+	root := newRootCmd()
+	const path = "/same/pasture.db"
+	if err := root.ParseFlags([]string{
+		"--db", path,
+		"--audit-db-path", path,
+	}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+
+	got, warn, err := resolveDBPath(root, path)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got != path {
+		t.Errorf("path = %q, want %q", got, path)
+	}
+	if warn != "" {
+		t.Errorf("expected no warning when both flags agree; got: %s", warn)
+	}
+}
+
+// TestResolveDBPath_AliasOnly_EmitsDeprecationWarning — only the deprecated
+// --audit-db-path is set: honour it but warn that the flag is deprecated.
+func TestResolveDBPath_AliasOnly_EmitsDeprecationWarning(t *testing.T) {
+	t.Setenv("PASTURE_DB_PATH", "")
+
+	root := newRootCmd()
+	if err := root.ParseFlags([]string{
+		"--audit-db-path", "/legacy/audit.db",
+	}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+
+	got, warn, err := resolveDBPath(root, "/legacy/audit.db")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got != "/legacy/audit.db" {
+		t.Errorf("path = %q, want %q", got, "/legacy/audit.db")
+	}
+	if warn == "" {
+		t.Error("expected deprecation warning for --audit-db-path-only path; got empty")
+	}
+	for _, want := range []string{"deprecated", "--db"} {
+		if !strings.Contains(warn, want) {
+			t.Errorf("warning missing %q; got: %s", want, warn)
+		}
+	}
+}
+
+// TestResolveDBPath_EnvVarBeatsAlias — PASTURE_DB_PATH set, --audit-db-path
+// set to a different value: env wins, deprecation warning.
+func TestResolveDBPath_EnvVarBeatsAlias(t *testing.T) {
+	t.Setenv("PASTURE_DB_PATH", "/env/pasture.db")
+
+	root := newRootCmd()
+	if err := root.ParseFlags([]string{
+		"--audit-db-path", "/legacy/audit.db",
+	}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+
+	got, warn, err := resolveDBPath(root, "/legacy/audit.db")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got != "/env/pasture.db" {
+		t.Errorf("path = %q, want %q (PASTURE_DB_PATH should win)", got, "/env/pasture.db")
+	}
+	if warn == "" {
+		t.Error("expected warning when PASTURE_DB_PATH overrides --audit-db-path; got empty")
+	}
+	if !strings.Contains(warn, "PASTURE_DB_PATH") {
+		t.Errorf("warning should mention PASTURE_DB_PATH; got: %s", warn)
+	}
+}
+
+// TestResolveDBPath_DBFlagBeatsEnvVar — --db set, PASTURE_DB_PATH ALSO set
+// to a different value: --db (explicit CLI) wins. No warning needed because
+// CLI > env is the documented precedence; conflicts within the canonical
+// channel are not flagged.
+func TestResolveDBPath_DBFlagBeatsEnvVar(t *testing.T) {
+	t.Setenv("PASTURE_DB_PATH", "/env/pasture.db")
+
+	root := newRootCmd()
+	if err := root.ParseFlags([]string{
+		"--db", "/cli/pasture.db",
+	}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+
+	got, _, err := resolveDBPath(root, "")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got != "/cli/pasture.db" {
+		t.Errorf("path = %q, want %q (--db should win over PASTURE_DB_PATH)", got, "/cli/pasture.db")
+	}
+}
+
 // ─── newRootCmd output ─────────────────────────────────────────────────────────
 
 // TestRootCmdHelp verifies that the help output is well-formed and mentions key
