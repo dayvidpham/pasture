@@ -117,3 +117,22 @@ cases:
   - name: phase advance invalid phase
     args: ["phase", "advance", "--epoch-id", "test-epoch", "--to-phase", "not-a-real-phase"]
     want_exit: 1
+
+  # PROPOSAL-2 §11 Scenario 13 (S8 §7.12): epoch start with a malformed
+  # --epoch-id (free string that fails provenance.ParseTaskID) is rejected
+  # at the handler boundary BEFORE any signal/workflow start. Exit 1
+  # (CategoryValidation). The CLI's printError calls StructuredError.Report
+  # so the full diagnostic — including Why and Fix — appears on stderr.
+  - name: epoch start malformed epoch-id rejected
+    args: ["epoch", "start", "--epoch-id", "not-a-task-id"]
+    want_exit: 1
+    want_stderr_contains: "not a valid Provenance TaskID"
+
+  # PROPOSAL-2 §11 Scenario 13 (continued): the Fix substring on stderr
+  # nudges the operator toward the canonical recovery flow. The legacy
+  # "epoch-2026-04-22-mvp" shape is the canonical free-string example from
+  # the proposal's Scenario 4 fixture description.
+  - name: epoch start malformed epoch-id stderr has fix
+    args: ["epoch", "start", "--epoch-id", "epoch-2026-04-22-mvp"]
+    want_exit: 1
+    want_stderr_contains: "pasture task create REQUEST"

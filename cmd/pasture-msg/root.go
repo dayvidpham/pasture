@@ -12,12 +12,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/dayvidpham/pasture/internal/config"
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
@@ -95,6 +97,18 @@ func resolveFormat(cmd *cobra.Command, cfg config.PastureMsgConfig) types.Output
 
 // printError writes a structured error report to stderr and is used by RunE
 // handlers to produce actionable output before returning the error.
+//
+// When the error chain contains a *pasterrors.StructuredError, the full
+// Report (category, what, why, impact, fix) is written instead of just the
+// one-line Error() string. This is the §11 Scenario 13 binding: the CLI's
+// stderr must carry the StructuredError fields (especially Fix containing
+// "pasture task create REQUEST") so operators can recover from validation
+// errors without consulting the source.
 func printError(err error) {
+	var se *pasterrors.StructuredError
+	if errors.As(err, &se) {
+		se.Report(os.Stderr)
+		return
+	}
 	fmt.Fprintln(os.Stderr, err)
 }

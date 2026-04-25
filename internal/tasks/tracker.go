@@ -505,6 +505,32 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 	if err != nil {
 		return nil, err
 	}
+	hasEpochID, err := auditEventsHasColumn(ctx, t.auditDB, "epoch_id")
+	if err != nil {
+		return nil, err
+	}
+
+	// SELECT projection for epoch_id varies across schema versions:
+	//
+	//   - v1/v2:  audit_events.epoch_id is NOT NULL (legacy column).
+	//   - v3:     audit_events.epoch_id is still present but role is gone.
+	//   - v4:     audit_events.epoch_id is dropped; the canonical source is
+	//             context_edges.context_id where context_kind='EpochContext'.
+	//
+	// For the EpochContext lookup specifically, the epoch_id IS the
+	// `ce.context_id` value supplied as the WHERE arg — so when the column
+	// is gone we substitute `ce.context_id` (still the same epochID for
+	// every row matching the filter). For non-Epoch context kinds (Git,
+	// Skill, Session, etc.) the epoch_id is naturally empty since those
+	// events were never anchored to an epoch in the first place.
+	epochProj := "COALESCE(ae.epoch_id, '')"
+	if !hasEpochID {
+		// Use ce.context_id when the kind is EpochContext (it IS the
+		// epoch_id); for other context kinds, return empty string. SQLite
+		// CASE on the bound context_kind parameter is awkward so we use a
+		// CASE on the literal column compared to the canonical string.
+		epochProj = "CASE WHEN ce.context_kind = 'EpochContext' THEN ce.context_id ELSE '' END"
+	}
 
 	var query string
 	if hasRole {
@@ -522,7 +548,7 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 		// S7 carry their own pasture/automaton/... names). decodeAuditEvent
 		// strips the legacy prefix to recover the original role string,
 		// preserving the existing API contract for callers.
-		query = `SELECT COALESCE(ae.epoch_id, '') AS epoch_id, COALESCE(ae.phase, '') AS phase,
+		query = `SELECT ` + epochProj + ` AS epoch_id, COALESCE(ae.phase, '') AS phase,
 		                COALESCE(asw.name, ''), ae.event_type, ae.payload, ae.timestamp
 		         FROM context_edges ce
 		         JOIN audit_events ae ON ae.id = ce.event_id
