@@ -15,19 +15,19 @@ import (
 // provenance.Task JSON tags but render IDs as wire strings so consumers do
 // not have to understand the {Namespace, UUID} shape.
 type taskJSON struct {
-	ID          string     `json:"id"`
-	Title       string     `json:"title"`
-	Description string     `json:"description,omitempty"`
-	Status      string     `json:"status"`
-	Priority    string     `json:"priority"`
-	Type        string     `json:"type"`
-	Phase       string     `json:"phase"`
-	Owner       string     `json:"owner,omitempty"`
-	Notes       string     `json:"notes,omitempty"`
-	CreatedAt   string     `json:"createdAt"`
-	UpdatedAt   string     `json:"updatedAt"`
-	ClosedAt    *string    `json:"closedAt,omitempty"`
-	CloseReason string     `json:"closeReason,omitempty"`
+	ID          string  `json:"id"`
+	Title       string  `json:"title"`
+	Description string  `json:"description,omitempty"`
+	Status      string  `json:"status"`
+	Priority    string  `json:"priority"`
+	Type        string  `json:"type"`
+	Phase       string  `json:"phase"`
+	Owner       string  `json:"owner,omitempty"`
+	Notes       string  `json:"notes,omitempty"`
+	CreatedAt   string  `json:"createdAt"`
+	UpdatedAt   string  `json:"updatedAt"`
+	ClosedAt    *string `json:"closedAt,omitempty"`
+	CloseReason string  `json:"closeReason,omitempty"`
 }
 
 func toTaskJSON(t provenance.Task) taskJSON {
