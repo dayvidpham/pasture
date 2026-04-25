@@ -21,6 +21,27 @@ type depTreeJSON struct {
 	Edges []edgeJSON `json:"edges"`
 }
 
+// FormatEdge renders a single edge in the requested output format. Used by
+// `task dep add` to confirm the just-created edge.
+func FormatEdge(e provenance.Edge, format types.OutputFormat) (string, error) {
+	switch format {
+	case types.OutputJSON:
+		b, err := json.MarshalIndent(edgeJSON{
+			SourceID: e.SourceID,
+			TargetID: e.TargetID,
+			Kind:     e.Kind.String(),
+		}, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("formatters.FormatEdge: marshal failed: %w", err)
+		}
+		return string(b), nil
+	case types.OutputText:
+		return fmt.Sprintf("added edge: %s --[%s]--> %s", e.SourceID, e.Kind, e.TargetID), nil
+	default:
+		return "", fmt.Errorf("formatters.FormatEdge: unknown output format %q — valid values: json, text", format)
+	}
+}
+
 // FormatDepTree renders the blocked-by edges reachable from rootID. JSON
 // output preserves the DFS-ordered edge list so consumers can rebuild the
 // tree. Text output renders an indented tree, deduplicating shared subtrees

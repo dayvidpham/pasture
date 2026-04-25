@@ -1,11 +1,13 @@
 package tasks_test
 
 import (
+	stderrors "errors"
 	"os"
 	"path/filepath"
-	"strings"
+	"runtime"
 	"testing"
 
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/tasks"
 )
 
@@ -28,6 +30,11 @@ func TestDefaultDBPath_XDG(t *testing.T) {
 }
 
 func TestDefaultDBPath_HomeFallback(t *testing.T) {
+	// os.UserHomeDir honors HOME on linux/darwin and USERPROFILE on windows.
+	// Gating on linux keeps the assertion deterministic across CI platforms.
+	if runtime.GOOS != "linux" {
+		t.Skipf("HOME-based fallback test runs only on linux (got %s)", runtime.GOOS)
+	}
 	t.Setenv(tasks.DBPathEnv, "")
 	t.Setenv("XDG_DATA_HOME", "")
 	t.Setenv("HOME", "/home/test")
@@ -66,7 +73,12 @@ func TestOpenTracker_FailsForUnopenablePath(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when database parent path is not a directory")
 	}
-	if !strings.Contains(err.Error(), "connection error") {
-		t.Fatalf("expected CategoryConnection error, got %v", err)
+
+	var se *pasterrors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("expected *pasterrors.StructuredError, got %T: %v", err, err)
+	}
+	if se.Category != pasterrors.CategoryConnection {
+		t.Fatalf("expected CategoryConnection, got %q", se.Category)
 	}
 }

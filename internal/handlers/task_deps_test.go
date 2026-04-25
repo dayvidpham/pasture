@@ -2,7 +2,6 @@ package handlers_test
 
 import (
 	"bytes"
-	"strings"
 	"testing"
 
 	"github.com/dayvidpham/provenance"
@@ -10,24 +9,6 @@ import (
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/types"
 )
-
-// createTask is a small helper to keep dep-tests focused on dep logic.
-func createTask(t *testing.T, dbPath, title string) string {
-	t.Helper()
-	var buf bytes.Buffer
-	code, err := handlers.TaskCreate(&buf, handlers.TaskCreateInput{
-		DBPath:    dbPath,
-		Namespace: "test",
-		Title:     title,
-		Type:      provenance.TaskTypeTask,
-		Priority:  provenance.PriorityMedium,
-		Phase:     provenance.PhaseUnscoped,
-	}, types.OutputJSON)
-	if err != nil {
-		t.Fatalf("createTask(%q) failed: %v (code=%d)", title, err, code)
-	}
-	return extractIDFromJSON(t, buf.String())
-}
 
 func TestTaskReady_ExcludesBlocked(t *testing.T) {
 	path := dbPath(t)
@@ -41,23 +22,24 @@ func TestTaskReady_ExcludesBlocked(t *testing.T) {
 	}
 
 	var readyOut bytes.Buffer
-	if _, err := handlers.TaskReady(&readyOut, path, types.OutputText); err != nil {
+	if _, err := handlers.TaskReady(&readyOut, path, types.OutputJSON); err != nil {
 		t.Fatalf("ready failed: %v", err)
 	}
-	body := readyOut.String()
-	if !strings.Contains(body, "child") {
-		t.Fatalf("expected child to be ready, got %q", body)
+	ready := decodeTaskList(t, readyOut.String())
+	if !containsTask(ready, childID) {
+		t.Fatalf("expected child %q to be ready, got %+v", childID, ready)
 	}
-	if strings.Contains(body, "parent") {
-		t.Fatalf("expected parent to be blocked, got %q", body)
+	if containsTask(ready, parentID) {
+		t.Fatalf("expected parent %q to not appear in ready list, got %+v", parentID, ready)
 	}
 
 	var blockedOut bytes.Buffer
-	if _, err := handlers.TaskBlocked(&blockedOut, path, types.OutputText); err != nil {
+	if _, err := handlers.TaskBlocked(&blockedOut, path, types.OutputJSON); err != nil {
 		t.Fatalf("blocked failed: %v", err)
 	}
-	if !strings.Contains(blockedOut.String(), "parent") {
-		t.Fatalf("expected parent in blocked list, got %q", blockedOut.String())
+	blocked := decodeTaskList(t, blockedOut.String())
+	if !containsTask(blocked, parentID) {
+		t.Fatalf("expected parent %q in blocked list, got %+v", parentID, blocked)
 	}
 }
 
@@ -67,18 +49,37 @@ func TestTaskDepAdd_RejectsCycle(t *testing.T) {
 	a := createTask(t, path, "A")
 	b := createTask(t, path, "B")
 
-	// A blocked by B
 	if _, err := handlers.TaskDepAdd(&bytes.Buffer{}, path, a, b, provenance.EdgeBlockedBy, types.OutputText); err != nil {
 		t.Fatalf("first dep add failed: %v", err)
 	}
 
-	// B blocked by A would form a cycle
 	code, err := handlers.TaskDepAdd(&bytes.Buffer{}, path, b, a, provenance.EdgeBlockedBy, types.OutputText)
 	if err == nil {
 		t.Fatal("expected cycle rejection")
 	}
 	if code != 3 {
 		t.Fatalf("expected exit 3 (workflow), got %d", code)
+	}
+}
+
+func TestTaskDepAdd_JSONOutput(t *testing.T) {
+	path := dbPath(t)
+	a := createTask(t, path, "A")
+	b := createTask(t, path, "B")
+
+	var out bytes.Buffer
+	if _, err := handlers.TaskDepAdd(&out, path, a, b, provenance.EdgeBlockedBy, types.OutputJSON); err != nil {
+		t.Fatalf("dep add json: %v", err)
+	}
+	got := decodeEdge(t, out.String())
+	if got.SourceID != a {
+		t.Errorf("sourceId: got %q, want %q", got.SourceID, a)
+	}
+	if got.TargetID != b {
+		t.Errorf("targetId: got %q, want %q", got.TargetID, b)
+	}
+	if got.Kind != "blocked_by" {
+		t.Errorf("kind: got %q, want %q", got.Kind, "blocked_by")
 	}
 }
 
@@ -101,20 +102,23 @@ func TestTaskDepTree_RootWithChildren(t *testing.T) {
 	mustAdd(c1, gc)
 
 	var out bytes.Buffer
-	code, err := handlers.TaskDepTree(&out, path, root, types.OutputText)
+	code, err := handlers.TaskDepTree(&out, path, root, types.OutputJSON)
 	if err != nil {
 		t.Fatalf("dep tree failed: %v", err)
 	}
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d", code)
 	}
-	body := out.String()
-	if !strings.Contains(body, root) {
-		t.Fatalf("expected root in output: %q", body)
+	tree := decodeDepTree(t, out.String())
+	if tree.Root != root {
+		t.Errorf("root: got %q, want %q", tree.Root, root)
 	}
-	for _, want := range []string{c1, c2, gc} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("expected child %s in tree output: %q", want, body)
+	if len(tree.Edges) != 3 {
+		t.Fatalf("expected 3 edges, got %d (%+v)", len(tree.Edges), tree.Edges)
+	}
+	for _, want := range [][2]string{{root, c1}, {root, c2}, {c1, gc}} {
+		if !containsEdge(tree.Edges, want[0], want[1]) {
+			t.Errorf("missing edge %s -> %s in %+v", want[0], want[1], tree.Edges)
 		}
 	}
 }
@@ -124,14 +128,36 @@ func TestTaskDepTree_EmptyForLeaf(t *testing.T) {
 	leaf := createTask(t, path, "leaf")
 
 	var out bytes.Buffer
-	code, err := handlers.TaskDepTree(&out, path, leaf, types.OutputText)
+	code, err := handlers.TaskDepTree(&out, path, leaf, types.OutputJSON)
 	if err != nil {
 		t.Fatalf("dep tree failed: %v", err)
 	}
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d", code)
 	}
-	if !strings.Contains(out.String(), "no blocked-by edges") {
-		t.Fatalf("expected leaf message, got %q", out.String())
+	tree := decodeDepTree(t, out.String())
+	if tree.Root != leaf {
+		t.Errorf("root: got %q, want %q", tree.Root, leaf)
 	}
+	if len(tree.Edges) != 0 {
+		t.Errorf("expected zero edges for leaf, got %+v", tree.Edges)
+	}
+}
+
+func containsTask(list []taskJSONShape, id string) bool {
+	for _, t := range list {
+		if t.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func containsEdge(edges []edgeJSONShape, src, tgt string) bool {
+	for _, e := range edges {
+		if e.SourceID == src && e.TargetID == tgt {
+			return true
+		}
+	}
+	return false
 }

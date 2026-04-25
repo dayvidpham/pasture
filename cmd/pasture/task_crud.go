@@ -200,9 +200,9 @@ var taskListCmd = &cobra.Command{
 		if cmd.Flags().Changed("label") {
 			in.Label, _ = cmd.Flags().GetString("label")
 		}
-		if cmd.Flags().Changed("namespace") {
-			// list-level namespace overrides the global one when filtering.
-			in.Namespace, _ = cmd.Flags().GetString("namespace")
+		if flagNamespace != "" {
+			// Filter list results to the global --namespace when one was given.
+			in.Namespace = flagNamespace
 		}
 
 		code, err := handlers.TaskList(cmd.OutOrStdout(), in, resolveFormat())
@@ -241,8 +241,7 @@ func init() {
 	taskListCmd.Flags().String("type", "", "Filter by task type")
 	taskListCmd.Flags().String("phase", "", "Filter by phase")
 	taskListCmd.Flags().String("label", "", "Filter by label name")
-	// --namespace is also a global flag; the local one (when present) takes priority for list filtering.
-	taskListCmd.Flags().String("list-namespace", "", "Filter by namespace when not relying on the global --namespace")
+	// Namespace filtering is driven by the global --namespace flag (registered on rootCmd).
 
 	taskCmd.AddCommand(taskCreateCmd)
 	taskCmd.AddCommand(taskShowCmd)

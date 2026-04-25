@@ -74,12 +74,15 @@ func TaskDepAdd(w io.Writer, dbPath, sourceIDStr, targetIDStr string, kind prove
 		return wrapTaskOpError("dep add", err)
 	}
 
-	switch format {
-	case types.OutputJSON:
-		fmt.Fprintf(w, `{"sourceId":%q,"targetId":%q,"kind":%q}`+"\n", sourceID.String(), targetIDStr, kind.String())
-	default:
-		fmt.Fprintf(w, "added edge: %s --[%s]--> %s\n", sourceID.String(), kind, targetIDStr)
+	out, fErr := formatters.FormatEdge(provenance.Edge{
+		SourceID: sourceID.String(),
+		TargetID: targetIDStr,
+		Kind:     kind,
+	}, format)
+	if fErr != nil {
+		return pasterrors.ExitCode(fErr), fErr
 	}
+	fmt.Fprintln(w, out)
 	return 0, nil
 }
 

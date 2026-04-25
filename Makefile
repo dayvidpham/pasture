@@ -79,14 +79,14 @@ fmt:
 # Release
 # --------------------------------------------------------------------------
 
-# Build all 3 binaries for the current platform (stripped, no CGO).
+# Build all 4 binaries for the current platform (stripped, no CGO).
 # Outputs: dist/<binary>-<goos>-<goarch>
 release-local:
 	@GOOS=$$(go env GOOS); \
 	GOARCH=$$(go env GOARCH); \
 	SUFFIX="$${GOOS}-$${GOARCH}"; \
 	mkdir -p dist; \
-	for cmd in pastured pasture-msg pasture-release; do \
+	for cmd in pastured pasture-msg pasture-release pasture; do \
 		echo "Building $${cmd}-$${SUFFIX}..."; \
 		CGO_ENABLED=0 go build \
 			-ldflags "-s -w -X main.version=$(VERSION)" \
@@ -95,7 +95,7 @@ release-local:
 	done; \
 	echo "Binaries written to dist/"
 
-# Cross-compile all 3 binaries for all 4 supported release platforms.
+# Cross-compile all 4 binaries for all 4 supported release platforms.
 # Outputs: dist/<binary>-<platform>
 release-all:
 	@mkdir -p dist; \

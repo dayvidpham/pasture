@@ -2,13 +2,11 @@ package handlers_test
 
 import (
 	"bytes"
-	"strings"
 	"testing"
 
 	"github.com/dayvidpham/provenance"
 
 	"github.com/dayvidpham/pasture/internal/handlers"
-	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
@@ -17,19 +15,24 @@ func TestTaskLabelAddRemove_RoundTrip(t *testing.T) {
 	id := createTask(t, path, "labelable")
 
 	var addOut bytes.Buffer
-	if _, err := handlers.TaskLabelAdd(&addOut, path, id, "important", types.OutputText); err != nil {
+	if _, err := handlers.TaskLabelAdd(&addOut, path, id, "important", types.OutputJSON); err != nil {
 		t.Fatalf("label add failed: %v", err)
 	}
-	if !strings.Contains(addOut.String(), "important") {
-		t.Fatalf("expected label in output, got %q", addOut.String())
+	got := decodeLabels(t, addOut.String())
+	if got.TaskID != id {
+		t.Errorf("taskId: got %q, want %q", got.TaskID, id)
+	}
+	if !containsString(got.Labels, "important") {
+		t.Errorf("expected 'important' in labels, got %+v", got.Labels)
 	}
 
 	var rmOut bytes.Buffer
-	if _, err := handlers.TaskLabelRemove(&rmOut, path, id, "important", types.OutputText); err != nil {
+	if _, err := handlers.TaskLabelRemove(&rmOut, path, id, "important", types.OutputJSON); err != nil {
 		t.Fatalf("label remove failed: %v", err)
 	}
-	if strings.Contains(rmOut.String(), "important") {
-		t.Fatalf("expected label gone after remove, got %q", rmOut.String())
+	got = decodeLabels(t, rmOut.String())
+	if containsString(got.Labels, "important") {
+		t.Errorf("expected 'important' gone after remove, got %+v", got.Labels)
 	}
 }
 
@@ -50,43 +53,42 @@ func TestTaskLabelAdd_RejectsEmptyLabel(t *testing.T) {
 func TestTaskCommentAddAndList_RoundTrip(t *testing.T) {
 	path := dbPath(t)
 	id := createTask(t, path, "commentable")
-
-	// Register a human agent directly via the tracker — comment add requires a
-	// registered author. Mirrors how the future agent ergonomics layer will
-	// auto-resolve the CLI user.
-	tr, err := tasks.OpenTracker(path)
-	if err != nil {
-		t.Fatalf("open tracker: %v", err)
-	}
-	human, err := tr.RegisterHumanAgent("test", "Tester", "tester@example.com")
-	if err != nil {
-		t.Fatalf("register human agent: %v", err)
-	}
-	_ = tr.Close()
+	authorID := mustRegisterAgent(t, path, "Tester", "tester@example.com")
 
 	var addOut bytes.Buffer
 	code, err := handlers.TaskCommentAdd(&addOut, handlers.TaskCommentAddInput{
 		DBPath:   path,
 		IDStr:    id,
-		AuthorID: human.ID.String(),
+		AuthorID: authorID,
 		Body:     "first thoughts",
-	}, types.OutputText)
+	}, types.OutputJSON)
 	if err != nil {
 		t.Fatalf("comment add failed: %v", err)
 	}
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d", code)
 	}
-	if !strings.Contains(addOut.String(), "first thoughts") {
-		t.Fatalf("expected body in output, got %q", addOut.String())
+	added := decodeComment(t, addOut.String())
+	if added.Body != "first thoughts" {
+		t.Errorf("body: got %q, want %q", added.Body, "first thoughts")
+	}
+	if added.AuthorID != authorID {
+		t.Errorf("authorId: got %q, want %q", added.AuthorID, authorID)
+	}
+	if added.TaskID != id {
+		t.Errorf("taskId: got %q, want %q", added.TaskID, id)
 	}
 
 	var listOut bytes.Buffer
-	if _, err := handlers.TaskComments(&listOut, path, id, types.OutputText); err != nil {
+	if _, err := handlers.TaskComments(&listOut, path, id, types.OutputJSON); err != nil {
 		t.Fatalf("comments failed: %v", err)
 	}
-	if !strings.Contains(listOut.String(), "first thoughts") {
-		t.Fatalf("expected comment in list, got %q", listOut.String())
+	cs := decodeComments(t, listOut.String())
+	if len(cs) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(cs))
+	}
+	if cs[0].Body != "first thoughts" {
+		t.Errorf("body in list: got %q", cs[0].Body)
 	}
 }
 
@@ -112,9 +114,8 @@ func TestTaskCommentAdd_RejectsUnknownAuthor(t *testing.T) {
 	path := dbPath(t)
 	id := createTask(t, path, "ghost-author")
 
+	bogus := provenance.AgentID{Namespace: "test"}
 	var out bytes.Buffer
-	// Build a syntactically valid AgentID for an agent that does not exist.
-	bogus := provenance.AgentID{Namespace: "test"} // zero-UUID
 	code, err := handlers.TaskCommentAdd(&out, handlers.TaskCommentAddInput{
 		DBPath:   path,
 		IDStr:    id,
@@ -127,4 +128,13 @@ func TestTaskCommentAdd_RejectsUnknownAuthor(t *testing.T) {
 	if code != 3 {
 		t.Fatalf("expected exit 3 (workflow), got %d", code)
 	}
+}
+
+func containsString(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
