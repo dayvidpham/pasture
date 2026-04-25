@@ -4,7 +4,7 @@ Go implementation of the Aura Protocol codegen and workflow engine.
 
 ## What This Does
 
-Pasture provides the runtime infrastructure for the Aura Protocol: a Temporal workflow engine (`pastured` daemon), CLI for sending protocol messages (`pasture-msg`), and release tooling (`pasture-release`). The daemon orchestrates agent workflows with constraint validation, phase transitions, and audit trail logging.
+Pasture provides the runtime infrastructure for the Aura Protocol: a Temporal workflow engine (`pastured` daemon), CLI for sending protocol messages (`pasture-msg`), a local task + audit CLI (`pasture`), and release tooling (`pasture-release`). The daemon orchestrates agent workflows with constraint validation, phase transitions, and audit trail logging. All task and audit operations route through a single `protocol.TaskTracker` façade against one shared SQLite file at `~/.local/share/pasture/pasture.db`. See `AGENTS.md` for the full architectural overview and `docs/adr/0001-pasture-toolkit-integration-architecture.md` (in the parent repo) for the integration ADR.
 
 ## Quick Start
 
@@ -27,22 +27,38 @@ nix build .#pasture-msg
 
 ```
 cmd/
+  ├── pasture/         # Local task + audit CLI (pasture task + pasture migrate)
   ├── pastured/        # Temporal worker daemon entry point
   ├── pasture-msg/     # CLI for sending protocol messages
   └── pasture-release/ # Release and versioning tool
 internal/
   ├── acp/             # Agent Control Protocol client + adapter
-  ├── audit/           # Audit trail (SQLite-backed)
+  ├── audit/           # Audit trail + schema migrator (SQLite-backed)
   ├── config/          # Viper-based configuration
   ├── errors/          # Actionable error types
   ├── formatters/      # Output formatters (JSON, text, table)
   ├── handlers/        # Cobra RunE → standalone handler functions
   ├── hooks/           # Claude Code hook event handlers
+  ├── tasks/           # protocol.TaskTracker implementation + well-known agent registry
   ├── temporal/        # Temporal workflow/activity implementations
   └── types/           # Internal aggregate types
 pkg/
-  └── protocol/        # Public aura-protocol types (importable by other modules)
+  └── protocol/        # Public aura-protocol types — including protocol.TaskTracker
 ```
+
+## CLI Surface (`pasture`)
+
+The local `pasture` CLI hosts task verbs (`task create / show / update / close / list`,
+`task ready`, `task blocked`, `task dep add|tree`, `task label add|remove`,
+`task comment add`, `task comments`) and event/audit verbs added by PROPOSAL-2:
+
+| Subcommand | Purpose |
+|---|---|
+| `pasture task events [--epoch-id <id>] [--phase <p>] [--role <r>]` | Query audit events |
+| `pasture task timeline TASK-ID` | Show all events attached to a task |
+| `pasture task contexts EVENT-ID` | List context_edges attached to an event |
+| `pasture task agents [list\|show]` | List or inspect registered agents |
+| `pasture migrate [--dry-run]` | Run pending audit-database schema migrations (top-level — NOT under `pasture task`) |
 
 ## Key Conventions
 
