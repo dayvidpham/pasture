@@ -48,6 +48,22 @@ type trackerImpl struct {
 	auditDB   *sql.DB // shared with trail; used for pasture-only table writes
 	closeOnce sync.Once
 	closeErr  error
+
+	// pastureTablesOnce ensures ensurePastureTables runs at most once for the
+	// lifetime of this trackerImpl, even when test helpers construct the struct
+	// without going through openTaskTrackerImpl (which calls ensurePastureTables
+	// upfront). Methods that need the pasture tables call
+	// t.ensurePastureTablesOnce() instead of ensurePastureTables directly.
+	pastureTablesOnce sync.Once
+	pastureTablesErr  error
+
+	// Schema-awareness flags for the audit_events table. Probed once in
+	// newTrackerImpl via PRAGMA table_info and cached here so Timeline never
+	// issues PRAGMA table_info more than once per tracker lifetime. The flags
+	// are stable for the lifetime of the connection: pasture schema migrations
+	// are transactional and no DDL is applied while a tracker is open.
+	hasRoleColumn    bool // true when audit_events still has the legacy `role` column (pre-v3 schema)
+	hasEpochIDColumn bool // true when audit_events still has `epoch_id` (pre-v4 schema)
 }
 
 // newTrackerImpl wires up a trackerImpl. The caller (OpenTaskTracker) is
@@ -58,12 +74,54 @@ type trackerImpl struct {
 //
 // auditDB MUST be the same *sql.DB handle used by trail; the race test relies
 // on single-writer serialisation through this one handle.
+//
+// newTrackerImpl calls ensurePastureTables once and caches the
+// audit_events column-presence flags (hasRoleColumn, hasEpochIDColumn) so
+// that Timeline never issues PRAGMA table_info more than once per tracker
+// lifetime.
 func newTrackerImpl(prov provenance.Tracker, trail audit.Trail, auditDB *sql.DB) *trackerImpl {
-	return &trackerImpl{
+	t := &trackerImpl{
 		prov:    prov,
 		trail:   trail,
 		auditDB: auditDB,
 	}
+
+	// Prime the pasture tables and column-cache eagerly. openTaskTrackerImpl
+	// already called ensurePastureTables before reaching here, so this is
+	// effectively a no-op (the Once body runs but the DDL is idempotent and
+	// fast). For test helpers that bypass openTaskTrackerImpl the Once ensures
+	// the tables exist before any method body touches them.
+	t.pastureTablesOnce.Do(func() {
+		t.pastureTablesErr = ensurePastureTables(auditDB)
+	})
+
+	// Probe the audit_events schema once. If auditDB is nil or
+	// ensurePastureTables failed we leave both flags false (safe default:
+	// callers will receive a storage error when they actually try to query).
+	if auditDB != nil && t.pastureTablesErr == nil {
+		// Use a background context for the one-time probe; it is not
+		// cancellable by the caller because it happens at construction time.
+		ctx := context.Background()
+		if hasRole, err := auditEventsHasColumn(ctx, auditDB, "role"); err == nil {
+			t.hasRoleColumn = hasRole
+		}
+		if hasEpochID, err := auditEventsHasColumn(ctx, auditDB, "epoch_id"); err == nil {
+			t.hasEpochIDColumn = hasEpochID
+		}
+	}
+
+	return t
+}
+
+// ensurePastureTablesOnce is the in-method guard that replaces per-call
+// ensurePastureTables(t.auditDB) invocations. It delegates to the sync.Once
+// that was already fired in newTrackerImpl (so this is a no-op on the hot
+// path) and returns the cached error if the initial DDL call failed.
+func (t *trackerImpl) ensurePastureTablesOnce() error {
+	t.pastureTablesOnce.Do(func() {
+		t.pastureTablesErr = ensurePastureTables(t.auditDB)
+	})
+	return t.pastureTablesErr
 }
 
 // ─── Embedded forwarding: provenance.Tracker (28 methods) ────────────────────
@@ -291,7 +349,7 @@ func (t *trackerImpl) SetAgentCategories(id provenance.AgentID, automaton protoc
 		}
 	}
 
-	if err := ensurePastureTables(t.auditDB); err != nil {
+	if err := t.ensurePastureTablesOnce(); err != nil {
 		return err
 	}
 
@@ -316,7 +374,7 @@ func (t *trackerImpl) SetAgentCategories(id provenance.AgentID, automaton protoc
 // ("None","None", nil) when no row exists for id (this models "no category
 // has been set" rather than an error condition).
 func (t *trackerImpl) AgentCategories(id provenance.AgentID) (protocol.AutomatonRole, protocol.PastureRole, error) {
-	if err := ensurePastureTables(t.auditDB); err != nil {
+	if err := t.ensurePastureTablesOnce(); err != nil {
 		return "", "", err
 	}
 	var automatonStr, pastureRoleStr string
@@ -381,7 +439,7 @@ func (t *trackerImpl) AttachContext(ctx context.Context, eventID int64, kind pro
 		}
 	}
 
-	if err := ensurePastureTables(t.auditDB); err != nil {
+	if err := t.ensurePastureTablesOnce(); err != nil {
 		return err
 	}
 
@@ -408,7 +466,7 @@ func (t *trackerImpl) AttachContext(ctx context.Context, eventID int64, kind pro
 // insertion order (rowid ASC). Returns an empty (non-nil) slice when no
 // edges exist for eventID.
 func (t *trackerImpl) EventContexts(ctx context.Context, eventID int64) ([]protocol.Context, error) {
-	if err := ensurePastureTables(t.auditDB); err != nil {
+	if err := t.ensurePastureTablesOnce(); err != nil {
 		return nil, err
 	}
 
@@ -477,9 +535,9 @@ func (t *trackerImpl) EventContexts(ctx context.Context, eventID int64) ([]proto
 //     AgentID field will land alongside the audit_events.agent_id surface
 //     work). epoch_id is still present until v4 lands.
 //
-// We detect the post-v3 shape via a one-time PRAGMA table_info probe on the
-// audit_events table. Probe overhead is one extra round-trip per Timeline
-// call against the SAME *sql.DB; for the CLI this is invisible.
+// We detect the post-v3 shape via PRAGMA table_info probed once in
+// newTrackerImpl and cached as hasRoleColumn / hasEpochIDColumn on the
+// receiver. Timeline reads those cached flags with no per-call PRAGMA overhead.
 //
 // kind MUST be valid; contextID MUST be non-empty. An empty contextID returns
 // an empty slice (no error) since the lookup is well-defined but vacuous.
@@ -497,18 +555,14 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 		return []protocol.AuditEvent{}, nil
 	}
 
-	if err := ensurePastureTables(t.auditDB); err != nil {
+	if err := t.ensurePastureTablesOnce(); err != nil {
 		return nil, err
 	}
 
-	hasRole, err := auditEventsHasColumn(ctx, t.auditDB, "role")
-	if err != nil {
-		return nil, err
-	}
-	hasEpochID, err := auditEventsHasColumn(ctx, t.auditDB, "epoch_id")
-	if err != nil {
-		return nil, err
-	}
+	// Use the column-presence flags cached at construction time (probed once
+	// via PRAGMA table_info in newTrackerImpl). No per-call PRAGMA round-trips.
+	hasRole := t.hasRoleColumn
+	hasEpochID := t.hasEpochIDColumn
 
 	// SELECT projection for epoch_id varies across schema versions:
 	//
@@ -601,6 +655,14 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 	}
 	return events, nil
 }
+
+// auditDBHandle returns the audit *sql.DB handle used by this tracker for
+// pasture-only table writes (context_edges, pasture_agent_categories,
+// pasture_well_known_agents). It is the unexported accessor that satisfies
+// the auditDBHolder interface declared in well_known.go, allowing
+// RegisterWellKnownAgents to be called by any value that exposes its audit
+// DB handle — including test fakes — without a concrete *trackerImpl assertion.
+func (t *trackerImpl) auditDBHandle() *sql.DB { return t.auditDB }
 
 // auditEventsHasColumn returns true when audit_events has a column with the
 // given name. Used by Timeline (and any future column-aware query) to pick
