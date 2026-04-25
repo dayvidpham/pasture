@@ -252,6 +252,53 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentID(role string) (string, error)
 	}
 	s.roleMu.Unlock()
 
+	// Well-known direct lookup (PROPOSAL-2 §7.7.2 + S8 wiring): if the role
+	// string already names a registered well-known automaton (prefix
+	// "pasture/automaton/..." per the canonical registry in
+	// internal/tasks/well_known_registry.go), skip the legacy-role prefix
+	// dance and bind directly to the existing agents_software row. S7
+	// registered the well-known agent at daemon startup; S8's
+	// Activities.RecordTransition / RecordAuditEvent set
+	// event.Role = <well-known-name> so this branch fires for every workflow
+	// event from S8 onward, without producing the SHADOW
+	// "pasture/legacy-role/pasture/automaton/.." rows that would otherwise
+	// pollute agents_software and break the §11 Scenario 8a–8e attribution
+	// JOINs (which assert agents_software.name == "pasture/automaton/..").
+	//
+	// If the direct lookup misses (the role looks well-known but no row
+	// exists, e.g. tests with an unpopulated cache) we fall through to the
+	// legacy-role find-or-create path so the call still succeeds.
+	if strings.HasPrefix(role, "pasture/automaton/") {
+		var directExisting string
+		derr := s.db.QueryRow(
+			`SELECT a.id FROM agents a JOIN agents_software s ON a.id = s.agent_id
+			 WHERE a.kind_id = 2 AND s.name = ? LIMIT 1`,
+			role,
+		).Scan(&directExisting)
+		switch {
+		case derr == nil:
+			s.roleMu.Lock()
+			s.roleToAgentID[role] = directExisting
+			s.roleMu.Unlock()
+			return directExisting, nil
+		case derr != sql.ErrNoRows:
+			// Real DB error — surface it; do not silently fall through to
+			// the legacy-role path because that would mask storage problems.
+			return "", &pasterrors.StructuredError{
+				Category: pasterrors.CategoryStorage,
+				What:     fmt.Sprintf("audit.SqliteAuditTrail.resolveLegacyRoleAgentID: cannot search agents_software for well-known name %q", role),
+				Why:      derr.Error(),
+				Impact:   fmt.Sprintf("the event cannot be attributed; RecordEvent for well-known role %q is failing until the lookup recovers", role),
+				Fix:      "verify the SQLite file is readable and Provenance's agents/agents_software tables exist; run 'pasture migrate' if the schema is below v3",
+			}
+		}
+		// derr == sql.ErrNoRows: well-known name not in agents_software
+		// (e.g. tests that build Activities with WellKnownAgents but never
+		// run S7's RegisterWellKnownAgents against the same DB). Fall
+		// through to the legacy-role find-or-create — the resulting SHADOW
+		// agent is tagged by the prefix and is harmless in test contexts.
+	}
+
 	name := legacyRoleAgentNamePrefix + role
 
 	// Find branch — common case after the first write for this role across

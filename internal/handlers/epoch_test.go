@@ -3,33 +3,78 @@ package handlers_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"go.temporal.io/sdk/client"
 
 	"github.com/dayvidpham/pasture/internal/config"
-	"github.com/dayvidpham/pasture/internal/handlers"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/types"
 )
+
+// ─── Test fixtures ────────────────────────────────────────────────────────────
+
+// validEpochID is a syntactically valid Provenance TaskID
+// ("<namespace>--<uuid-v7>") used by EpochStart tests after PROPOSAL-2 §7.12
+// validation landed in S8. The wire form must satisfy
+// provenance.ParseTaskID; the UUID below is a stable test fixture (UUIDv7
+// generated for tests).
+const validEpochID = "aura-plugins--01956d2c-99fb-7700-8b49-1b07b9f8d100"
 
 // ─── EpochStart ──────────────────────────────────────────────────────────────
 
 func TestEpochStart_Success(t *testing.T) {
 	factory := func(_ context.Context, _ config.ConnectionConfig) (handlers.TemporalClient, error) {
 		return &mockClient{
-			executeWorkflow: mockWorkflowRun{id: "epoch-1", runID: "run-abc"},
+			executeWorkflow: mockWorkflowRun{id: validEpochID, runID: "run-abc"},
 		}, nil
 	}
 
 	conn := config.ConnectionConfig{ServerAddress: "localhost:7233", TaskQueue: "pasture"}
-	code, err := handlers.EpochStart(context.Background(), conn, "epoch-1", "test epoch", "", types.OutputText, factory)
+	code, err := handlers.EpochStart(context.Background(), conn, validEpochID, "test epoch", "", types.OutputText, factory)
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got: %d", code)
+	}
+}
+
+// TestEpochStart_MalformedEpochID_Rejected verifies PROPOSAL-2 §7.12 / Scenario
+// 13: a free-string --epoch-id (anything that fails provenance.ParseTaskID) is
+// rejected at the handler boundary with a CategoryValidation StructuredError
+// whose Fix string nudges the operator toward `pasture task create REQUEST`.
+// No workflow is started — the factory is wrapped to fail the test if it is
+// invoked.
+func TestEpochStart_MalformedEpochID_Rejected(t *testing.T) {
+	factory := func(_ context.Context, _ config.ConnectionConfig) (handlers.TemporalClient, error) {
+		t.Fatal("factory must not be invoked when --epoch-id fails ParseTaskID")
+		return nil, nil
+	}
+
+	conn := config.ConnectionConfig{TaskQueue: "pasture"}
+	code, err := handlers.EpochStart(context.Background(), conn, "not-a-task-id", "desc", "", types.OutputText, factory)
+	if err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+	if code != 1 {
+		t.Errorf("expected exit code 1 (validation), got %d", code)
+	}
+	var se *pasterrors.StructuredError
+	if !errors.As(err, &se) {
+		t.Fatalf("expected *pasterrors.StructuredError, got %T: %v", err, err)
+	}
+	if se.Category != pasterrors.CategoryValidation {
+		t.Errorf("Category = %q, want %q", se.Category, pasterrors.CategoryValidation)
+	}
+	if !strings.Contains(se.What, "not a valid Provenance TaskID") {
+		t.Errorf("What = %q, want substring %q", se.What, "not a valid Provenance TaskID")
+	}
+	if !strings.Contains(se.Fix, "pasture task create REQUEST") {
+		t.Errorf("Fix = %q, want substring %q", se.Fix, "pasture task create REQUEST")
 	}
 }
 
@@ -59,7 +104,7 @@ func TestEpochStart_ConnectionError(t *testing.T) {
 	}
 
 	conn := config.ConnectionConfig{}
-	code, err := handlers.EpochStart(context.Background(), conn, "epoch-1", "", "", types.OutputText, factory)
+	code, err := handlers.EpochStart(context.Background(), conn, validEpochID, "", "", types.OutputText, factory)
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -75,7 +120,7 @@ func TestEpochStart_WorkflowError(t *testing.T) {
 	}
 
 	conn := config.ConnectionConfig{TaskQueue: "pasture"}
-	code, err := handlers.EpochStart(context.Background(), conn, "epoch-1", "", "", types.OutputText, factory)
+	code, err := handlers.EpochStart(context.Background(), conn, validEpochID, "", "", types.OutputText, factory)
 
 	if err == nil {
 		t.Fatal("expected workflow error, got nil")
@@ -90,12 +135,12 @@ func TestEpochStart_UsesConnTaskQueueWhenEmpty(t *testing.T) {
 	factory := func(_ context.Context, _ config.ConnectionConfig) (handlers.TemporalClient, error) {
 		return &captureClient{
 			captureOptions: &capturedOptions,
-			run:            mockWorkflowRun{id: "e1", runID: "r1"},
+			run:            mockWorkflowRun{id: validEpochID, runID: "r1"},
 		}, nil
 	}
 
 	conn := config.ConnectionConfig{TaskQueue: "my-queue"}
-	code, err := handlers.EpochStart(context.Background(), conn, "epoch-1", "", "", types.OutputText, factory)
+	code, err := handlers.EpochStart(context.Background(), conn, validEpochID, "", "", types.OutputText, factory)
 
 	// Factory was called — task queue fallback behavior is validated by no error
 	if err != nil || code != 0 {
@@ -239,12 +284,12 @@ func TestEpochTerminate_ConnectionError(t *testing.T) {
 func TestEpochStart_JSONFormat(t *testing.T) {
 	factory := func(_ context.Context, _ config.ConnectionConfig) (handlers.TemporalClient, error) {
 		return &mockClient{
-			executeWorkflow: mockWorkflowRun{id: "epoch-2", runID: "run-def"},
+			executeWorkflow: mockWorkflowRun{id: validEpochID, runID: "run-def"},
 		}, nil
 	}
 
 	conn := config.ConnectionConfig{TaskQueue: "pasture"}
-	code, err := handlers.EpochStart(context.Background(), conn, "epoch-2", "desc", "", types.OutputJSON, factory)
+	code, err := handlers.EpochStart(context.Background(), conn, validEpochID, "desc", "", types.OutputJSON, factory)
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)

@@ -6,12 +6,47 @@ import (
 
 	"go.temporal.io/sdk/client"
 
+	"github.com/dayvidpham/provenance"
+
 	"github.com/dayvidpham/pasture/internal/config"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/formatters"
 	"github.com/dayvidpham/pasture/internal/temporal"
 	"github.com/dayvidpham/pasture/internal/types"
 )
+
+// validateEpochIDForHandler enforces PROPOSAL-2 §7.12 at the handler boundary:
+// the supplied --epoch-id MUST parse as a Provenance TaskID
+// ("<namespace>--<uuid>"). Free-string epoch IDs are rejected with a
+// CategoryValidation StructuredError per the §7.12 example, so no signal /
+// workflow start ever runs against an ID that cannot align with the audit /
+// Provenance / Temporal subsystems.
+//
+// The caller token (e.g. "EpochStart") appears in the error's What field so
+// users can attribute the failure to the right entry point. The Fix string
+// matches the §7.12 example verbatim ("pasture task create REQUEST ...") for
+// Scenario 13's substring assertion.
+func validateEpochIDForHandler(epochID, caller string) error {
+	if _, err := provenance.ParseTaskID(epochID); err != nil {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryValidation,
+			What: fmt.Sprintf(
+				"%s: epoch-id %q is not a valid Provenance TaskID",
+				caller, epochID,
+			),
+			Why: err.Error(),
+			Impact: "the workflow cannot be started without an epoch ID that aligns " +
+				"across the audit, Provenance, and Temporal subsystems (URD R5); " +
+				"a malformed epoch_id would produce dangling correlations in context_edges " +
+				"because no row in tasks.id matches the free string",
+			Fix: "create the REQUEST task first with " +
+				"`pasture task create REQUEST --type=feature \"<title>\"` and pass the " +
+				"returned ID as --epoch-id; or use " +
+				"`pasture task list --status=open --type=feature` to find an existing one",
+		}
+	}
+	return nil
+}
 
 // EpochStart starts a new EpochWorkflow with the given epochID and description.
 //
@@ -39,6 +74,15 @@ func EpochStart(
 			Fix:      "provide --epoch-id <id>",
 		}
 		return pasterrors.ExitCode(err), err
+	}
+
+	// PROPOSAL-2 §7.12 / Scenario 13: reject malformed epoch IDs before any
+	// signal/workflow start so no row leaks to audit_events, context_edges,
+	// or tasks for a malformed epoch_id. The activity entry in
+	// internal/temporal/activities.go enforces the same check as defence in
+	// depth against direct Temporal client calls that bypass this handler.
+	if vErr := validateEpochIDForHandler(epochID, "handlers.EpochStart"); vErr != nil {
+		return pasterrors.ExitCode(vErr), vErr
 	}
 
 	if taskQueue == "" {

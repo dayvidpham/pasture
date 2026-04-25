@@ -271,11 +271,29 @@ func run(cmd *cobra.Command, configFile string) error {
 	// Activities receives trail, hooksMgr, and the populated well-known agent
 	// cache (for S8 attribution) via constructor injection rather than
 	// singletons — this makes the wiring explicit and testable.
+	//
+	// S8 (PROPOSAL-2 §7.11): Tracker is the unified protocol.TaskTracker that
+	// activities use for the new RecordEvent → AttachContext path. We obtain
+	// it by type-asserting the trail returned by initAuditTrail — for the
+	// sqlite backend, initAuditTrail returns the unified tracker directly
+	// (which satisfies both audit.Trail and protocol.TaskTracker). For the
+	// in-memory backend the assertion fails (in-memory has no Provenance
+	// subsystem) and Tracker stays nil; activities fall back to the legacy
+	// Trail-only path with no AttachContext, which is correct for the memory
+	// backend (no context_edges table exists for it to write to).
+	var tracker protocol.TaskTracker
+	if t, ok := trail.(protocol.TaskTracker); ok {
+		tracker = t
+	}
 	acts := &temporal.Activities{
 		Trail:           trail,
+		Tracker:         tracker,
 		HooksMgr:        hooksMgr,
 		WellKnownAgents: wellKnownCache,
 	}
+	logger.Info("activities constructed",
+		"hasTracker", tracker != nil,
+	)
 
 	// ── 8. Create worker and register workflows + activities ──────────────────
 	w := worker.New(temporalClient, cfg.Connection.TaskQueue, worker.Options{})
