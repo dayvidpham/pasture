@@ -293,11 +293,18 @@ func (a *Activities) RecordTransition(ctx context.Context, epochID string, recor
 	} else {
 		// Legacy fallback (Trail-only path; tests that don't wire Tracker).
 		if err := a.Trail.RecordEvent(ctx, event); err != nil {
-			return fmt.Errorf(
-				"temporal.RecordTransition: failed to record audit event for %q → %q "+
-					"(epochID=%q, triggeredBy=%q): %w",
-				record.FromPhase, record.ToPhase, epochID, record.TriggeredBy, err,
-			)
+			return &pasterrors.StructuredError{
+				Category: pasterrors.CategoryStorage,
+				What: fmt.Sprintf(
+					"temporal.RecordTransition: failed to record audit event for %q → %q (epochID=%q, triggeredBy=%q)",
+					record.FromPhase, record.ToPhase, epochID, record.TriggeredBy,
+				),
+				Why: err.Error(),
+				Impact: "the phase-transition event was not persisted to the audit trail; " +
+					"QueryEvents and Timeline lookups for this transition will return incomplete results",
+				Fix: "check that the audit trail database is accessible and the schema is up to date; " +
+					"retry the transition after verifying `pasture audit status` shows no schema errors",
+			}
 		}
 	}
 
