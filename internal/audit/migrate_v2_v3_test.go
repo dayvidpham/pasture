@@ -387,10 +387,17 @@ func TestMigrateV2toV3_AgentCategories_Layout(t *testing.T) {
 
 // ---- Old-row preservation --------------------------------------------------
 
-// TestMigrateV2toV3_LegacyAuditEventsUntouched proves S2's scope boundary:
-// old audit_events rows survive verbatim. The audit_events column changes
-// (agent_id add + role drop) live in S3.
-func TestMigrateV2toV3_LegacyAuditEventsUntouched(t *testing.T) {
+// TestMigrateV2toV3_LegacyAuditEventsBackfilled proves S3's scope: old
+// audit_events rows survive the v3 migration with their non-role data
+// preserved AND get an agent_id populated by the find-or-create flow that
+// resolves "supervisor" → a SoftwareAgent named
+// "pasture/legacy-role/supervisor".
+//
+// History: this test was originally TestMigrateV2toV3_LegacyAuditEventsUntouched
+// (S2 scope) and asserted role + epoch_id columns still existed. S3 drops
+// the role column via table-rebuild; S4 will drop epoch_id later. Updated
+// here to reflect S3's actual end-state.
+func TestMigrateV2toV3_LegacyAuditEventsBackfilled(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "v3_legacy.db")
 	originalID := seedLegacyV1DB(t, dbPath)
 
@@ -399,7 +406,7 @@ func TestMigrateV2toV3_LegacyAuditEventsUntouched(t *testing.T) {
 		t.Fatalf("audit.Migrate: %v", err)
 	}
 
-	// Row count unchanged.
+	// Row count unchanged — every legacy row survives the table rebuild.
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM audit_events`).Scan(&count); err != nil {
 		t.Fatalf("audit_events count: %v", err)
@@ -408,45 +415,69 @@ func TestMigrateV2toV3_LegacyAuditEventsUntouched(t *testing.T) {
 		t.Errorf("audit_events count after Migrate = %d, want 1 (no data loss)", count)
 	}
 
-	// Row content preserved verbatim.
+	// Non-role columns preserved verbatim (epoch_id stays in v3; S4 drops
+	// it at v4). Phase, event_type, payload also untouched.
 	var (
-		gotEpoch, gotPhase, gotRole, gotType, gotPayload string
+		gotEpoch, gotPhase, gotType, gotPayload string
+		gotAgentID                              sql.NullString
 	)
 	err := db.QueryRow(
-		`SELECT epoch_id, phase, role, event_type, payload FROM audit_events WHERE id=?`,
+		`SELECT epoch_id, phase, event_type, payload, agent_id FROM audit_events WHERE id=?`,
 		originalID,
-	).Scan(&gotEpoch, &gotPhase, &gotRole, &gotType, &gotPayload)
+	).Scan(&gotEpoch, &gotPhase, &gotType, &gotPayload, &gotAgentID)
 	if err != nil {
 		t.Fatalf("legacy row probe: %v", err)
 	}
 	if gotEpoch != "epoch-pre-s2" {
 		t.Errorf("epoch_id = %q, want %q", gotEpoch, "epoch-pre-s2")
 	}
-	if gotRole != "supervisor" {
-		t.Errorf("role = %q, want %q (S2 scope: role column untouched)", gotRole, "supervisor")
-	}
 	if gotPayload != `{"note":"survives v2→v3"}` {
 		t.Errorf("payload mutated; got=%q", gotPayload)
 	}
 
-	// audit_events.role and audit_events.epoch_id columns must STILL exist
-	// in v3 (S3 drops role; S4 drops epoch_id). This test is the canary that
-	// fires if S3/S4 work accidentally lands in S2.
+	// agent_id MUST be populated by the v3 backfill — every legacy row
+	// gets attributed to a synthetic SoftwareAgent for its legacy role.
+	if !gotAgentID.Valid {
+		t.Fatal("audit_events.agent_id is NULL post-v3 Migrate; backfill failed")
+	}
+
+	// The agent_id MUST resolve to "pasture/legacy-role/supervisor" via
+	// agents_software (the role of the seeded row was "supervisor").
+	var agentName string
+	err = db.QueryRow(
+		`SELECT name FROM agents_software WHERE agent_id=?`,
+		gotAgentID.String,
+	).Scan(&agentName)
+	if err != nil {
+		t.Fatalf("resolve agent_id %q via agents_software: %v", gotAgentID.String, err)
+	}
+	if agentName != "pasture/legacy-role/supervisor" {
+		t.Errorf("agents_software.name = %q, want %q",
+			agentName, "pasture/legacy-role/supervisor")
+	}
+
+	// audit_events.role MUST be gone post-v3 (S3 drops it). audit_events.epoch_id
+	// MUST still exist (S4 drops it later).
 	cols := tableInfo(t, db, "audit_events")
-	hasRole, hasEpochID := false, false
+	hasRole, hasEpochID, hasAgentID := false, false, false
 	for _, c := range cols {
 		switch c.name {
 		case "role":
 			hasRole = true
 		case "epoch_id":
 			hasEpochID = true
+		case "agent_id":
+			hasAgentID = true
 		}
 	}
-	if !hasRole {
-		t.Error("audit_events.role column missing post-Migrate; S2 scope says it must remain (S3 drops it)")
+	if hasRole {
+		t.Error("audit_events.role column still present post-v3 Migrate; S3 must drop it via table-rebuild")
 	}
 	if !hasEpochID {
-		t.Error("audit_events.epoch_id column missing post-Migrate; S2 scope says it must remain (S4 drops it)")
+		t.Error("audit_events.epoch_id column missing post-v3 Migrate; S4 (not S3) drops it")
+	}
+	if !hasAgentID {
+		t.Error("audit_events.agent_id column missing post-v3 Migrate; S3 must add it")
 	}
 }
 

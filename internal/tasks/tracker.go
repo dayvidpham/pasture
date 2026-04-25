@@ -397,14 +397,23 @@ func (t *trackerImpl) EventContexts(ctx context.Context, eventID int64) ([]proto
 // an empty slice (no error) since the lookup is well-defined but vacuous.
 //
 // Timeline is the new query path that supersedes audit.Trail.QueryEvents for
-// non-epoch contexts. The columns selected match protocol.AuditEvent;
-// audit_events.role and audit_events.epoch_id are NOT projected here because
-// (a) v3+ drops audit_events.role in favor of agent_id, and (b) v4+ drops
-// audit_events.epoch_id in favor of context_edges (PROPOSAL-2 §7.2).
+// non-epoch contexts. It JOINs context_edges against audit_events on event_id.
 //
-// Until S3 (v3 backfill) lands the audit_events table still has role and
-// epoch_id columns; this Timeline query reads only the columns that survive
-// the v3+ migrations so it works against legacy v1/v2 databases too.
+// Schema-version awareness (S6 widening — owns this from S5's TODO):
+//   - v1/v2 schema: audit_events still has the `role` column; agent_id is
+//     absent. Project (epoch_id, phase, role, event_type, payload, timestamp).
+//   - v3+ schema:   audit_events.role is dropped; agent_id is NOT NULL. Read
+//     agent_id and surface it in protocol.AuditEvent.Role for one-line
+//     compatibility with the existing AuditEvent shape (the dedicated
+//     AgentID field will land alongside the audit_events.agent_id surface
+//     work). epoch_id is still present until v4 lands.
+//
+// We detect the post-v3 shape via a one-time PRAGMA table_info probe on the
+// audit_events table. Probe overhead is one extra round-trip per Timeline
+// call against the SAME *sql.DB; for the CLI this is invisible.
+//
+// kind MUST be valid; contextID MUST be non-empty. An empty contextID returns
+// an empty slice (no error) since the lookup is well-defined but vacuous.
 func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, contextID string) ([]protocol.AuditEvent, error) {
 	if !kind.IsValid() {
 		return nil, &pasterrors.StructuredError{
@@ -423,20 +432,37 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 		return nil, err
 	}
 
-	// JOIN context_edges → audit_events. We project the v1-stable columns
-	// (epoch_id, phase, role, event_type, payload, timestamp) so this query
-	// works on legacy databases that have not yet been migrated past v2.
-	// Once S3 + S4 land the SELECT clause will widen to include agent_id
-	// and drop epoch_id / role; that change is owned by S6 (CLI consumer),
-	// not S5 (interface + impl).
-	rows, err := t.auditDB.QueryContext(ctx,
-		`SELECT ae.epoch_id, ae.phase, ae.role, ae.event_type, ae.payload, ae.timestamp
-		 FROM context_edges ce
-		 JOIN audit_events ae ON ae.id = ce.event_id
-		 WHERE ce.context_kind = ? AND ce.context_id = ?
-		 ORDER BY ae.timestamp ASC, ae.id ASC`,
-		string(kind), contextID,
-	)
+	hasRole, err := auditEventsHasColumn(ctx, t.auditDB, "role")
+	if err != nil {
+		return nil, err
+	}
+
+	var query string
+	if hasRole {
+		// Pre-v3 shape (legacy db that has not yet been migrated past v2).
+		query = `SELECT ae.epoch_id, ae.phase, ae.role, ae.event_type, ae.payload, ae.timestamp
+		         FROM context_edges ce
+		         JOIN audit_events ae ON ae.id = ce.event_id
+		         WHERE ce.context_kind = ? AND ce.context_id = ?
+		         ORDER BY ae.timestamp ASC, ae.id ASC`
+	} else {
+		// Post-v3 shape: agent_id is the attribution column. LEFT JOIN
+		// agents_software so we can repopulate event.Role from the agent
+		// name (legacy-role agents carry the canonical
+		// "pasture/legacy-role/<role>" prefix; live well-known agents from
+		// S7 carry their own pasture/automaton/... names). decodeAuditEvent
+		// strips the legacy prefix to recover the original role string,
+		// preserving the existing API contract for callers.
+		query = `SELECT COALESCE(ae.epoch_id, '') AS epoch_id, COALESCE(ae.phase, '') AS phase,
+		                COALESCE(asw.name, ''), ae.event_type, ae.payload, ae.timestamp
+		         FROM context_edges ce
+		         JOIN audit_events ae ON ae.id = ce.event_id
+		         LEFT JOIN agents_software asw ON asw.agent_id = ae.agent_id
+		         WHERE ce.context_kind = ? AND ce.context_id = ?
+		         ORDER BY ae.timestamp ASC, ae.id ASC`
+	}
+
+	rows, err := t.auditDB.QueryContext(ctx, query, string(kind), contextID)
 	if err != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
@@ -451,10 +477,10 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 	events := make([]protocol.AuditEvent, 0)
 	for rows.Next() {
 		var (
-			epochID, phaseStr, role, eventTypeStr, payloadJSON string
-			tsNano                                             int64
+			epochID, phaseStr, roleOrAgent, eventTypeStr, payloadJSON string
+			tsNano                                                    int64
 		)
-		if err := rows.Scan(&epochID, &phaseStr, &role, &eventTypeStr, &payloadJSON, &tsNano); err != nil {
+		if err := rows.Scan(&epochID, &phaseStr, &roleOrAgent, &eventTypeStr, &payloadJSON, &tsNano); err != nil {
 			return nil, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What:     fmt.Sprintf("tasks.Timeline: row scan failed for kind=%s context=%q", kind, contextID),
@@ -463,7 +489,7 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 				Fix:      "re-run the query; if the error persists, inspect the audit_events row layout via 'sqlite3 <db> .schema audit_events'",
 			}
 		}
-		ev, perr := decodeAuditEvent(epochID, phaseStr, role, eventTypeStr, payloadJSON, tsNano)
+		ev, perr := decodeAuditEvent(epochID, phaseStr, roleOrAgent, eventTypeStr, payloadJSON, tsNano)
 		if perr != nil {
 			return nil, perr
 		}
@@ -479,6 +505,60 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 		}
 	}
 	return events, nil
+}
+
+// auditEventsHasColumn returns true when audit_events has a column with the
+// given name. Used by Timeline (and any future column-aware query) to pick
+// the right SELECT projection without parsing audit_schema_meta.
+//
+// We probe via PRAGMA table_info instead of reading audit_schema_meta because
+// the migrations that change audit_events shape may run partially across
+// concurrent processes (CLI dry-run vs daemon apply); the column-presence
+// check is the ground truth.
+func auditEventsHasColumn(ctx context.Context, db *sql.DB, column string) (bool, error) {
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(audit_events)`)
+	if err != nil {
+		return false, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     "tasks.auditEventsHasColumn: PRAGMA table_info(audit_events) failed",
+			Why:      err.Error(),
+			Impact:   "the schema-aware query path cannot decide whether the legacy `role` column is present; downstream Timeline / events queries cannot proceed safely",
+			Fix:      "verify the SQLite file is readable; if the file is intact, this is unexpected — file an issue against pasture/internal/tasks",
+		}
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			colType   string
+			notNull   int
+			dfltValue sql.NullString
+			pk        int
+		)
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			return false, &pasterrors.StructuredError{
+				Category: pasterrors.CategoryStorage,
+				What:     "tasks.auditEventsHasColumn: row scan failed for PRAGMA table_info(audit_events)",
+				Why:      err.Error(),
+				Impact:   "the schema-aware query path cannot proceed",
+				Fix:      "verify the SQLite file is not corrupt; run 'sqlite3 <db> \"PRAGMA table_info(audit_events)\"' to inspect manually",
+			}
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     "tasks.auditEventsHasColumn: row iteration failed for PRAGMA table_info(audit_events)",
+			Why:      err.Error(),
+			Impact:   "the schema-aware query path cannot proceed",
+			Fix:      "verify the SQLite file is readable and not concurrently being rewritten",
+		}
+	}
+	return false, nil
 }
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────

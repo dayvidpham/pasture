@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/dayvidpham/provenance"
@@ -284,10 +285,27 @@ func ensurePastureTables(db *sql.DB) error {
 
 // ─── decodeAuditEvent: shared row-scan helper for Timeline + future queries ──
 
+// legacyRoleAgentNamePrefix is the canonical prefix for SoftwareAgent names
+// minted from legacy audit_events.role values during the v3 backfill (see
+// audit/migrate_v3_backfill.go). decodeAuditEvent strips this prefix from
+// the joined agents_software.name when populating event.Role so callers
+// see the original role string ("supervisor") rather than the synthetic
+// fully-qualified name ("pasture/legacy-role/supervisor").
+const legacyRoleAgentNamePrefix = "pasture/legacy-role/"
+
 // decodeAuditEvent reconstructs a protocol.AuditEvent from raw row values.
 // Centralised here so Timeline, future event-listing queries, and any future
 // CLI-side decoders share the same JSON-unmarshal + UTC reconciliation logic.
-func decodeAuditEvent(epochID, phaseStr, role, eventTypeStr, payloadJSON string, tsNano int64) (protocol.AuditEvent, error) {
+//
+// The roleOrAgentName argument is either:
+//   - The legacy v1/v2 audit_events.role string (legacy DBs), or
+//   - The agents_software.name joined via audit_events.agent_id (post-v3).
+//
+// In the post-v3 case, names with the "pasture/legacy-role/" prefix are
+// stripped to recover the original free-string role; other names (S7
+// well-known automaton agents, future live SoftwareAgents) are returned
+// as-is so the caller still sees a stable, non-empty Role.
+func decodeAuditEvent(epochID, phaseStr, roleOrAgentName, eventTypeStr, payloadJSON string, tsNano int64) (protocol.AuditEvent, error) {
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
 		return protocol.AuditEvent{}, &pasterrors.StructuredError{
@@ -297,6 +315,10 @@ func decodeAuditEvent(epochID, phaseStr, role, eventTypeStr, payloadJSON string,
 			Impact:   "the row cannot be returned because its JSON payload is corrupt",
 			Fix:      "inspect the row directly via 'sqlite3 <db> \"SELECT payload FROM audit_events WHERE id = ...\"' and either repair the JSON or drop the row",
 		}
+	}
+	role := roleOrAgentName
+	if strings.HasPrefix(role, legacyRoleAgentNamePrefix) {
+		role = role[len(legacyRoleAgentNamePrefix):]
 	}
 	return protocol.AuditEvent{
 		EpochID:   epochID,

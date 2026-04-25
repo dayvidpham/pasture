@@ -160,14 +160,29 @@ func TestMigrate_LegacyV1Database_PromotedToV2(t *testing.T) {
 		t.Errorf("audit_events row count after Migrate = %d, want 1 (no data loss)", eventCount)
 	}
 
-	var epoch, role string
-	err = db.QueryRow(`SELECT epoch_id, role FROM audit_events`).Scan(&epoch, &role)
+	// Post-S3, audit_events.role is dropped via table-rebuild and replaced
+	// with agent_id (NOT NULL). The role string is recoverable by joining
+	// agents_software via agent_id; the v3 backfill mints one
+	// pasture/legacy-role/<role> agent per distinct legacy role.
+	var (
+		epoch     string
+		agentName string
+	)
+	err = db.QueryRow(
+		`SELECT ae.epoch_id, asw.name
+		 FROM audit_events ae
+		 JOIN agents_software asw ON asw.agent_id = ae.agent_id`,
+	).Scan(&epoch, &agentName)
 	if err != nil {
-		t.Fatalf("legacy-row probe: %v", err)
+		t.Fatalf("legacy-row probe (epoch_id + agents_software join): %v", err)
 	}
-	if epoch != "epoch-legacy-1" || role != "supervisor" {
-		t.Errorf("legacy row mutated: epoch=%q role=%q, want epoch=%q role=%q",
-			epoch, role, "epoch-legacy-1", "supervisor")
+	if epoch != "epoch-legacy-1" {
+		t.Errorf("legacy row epoch_id = %q, want %q (S3 must preserve epoch_id; S4 drops it)",
+			epoch, "epoch-legacy-1")
+	}
+	if agentName != "pasture/legacy-role/supervisor" {
+		t.Errorf("legacy row agent name = %q, want %q (S3 backfill maps role 'supervisor' to this synthetic agent)",
+			agentName, "pasture/legacy-role/supervisor")
 	}
 }
 

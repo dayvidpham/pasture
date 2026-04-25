@@ -113,23 +113,34 @@ ON context_edges (event_id)
 `
 
 // migrateV2toV3 advances the audit database from schema version 2 to
-// version 3 by creating context_edges, pasture_agent_categories, and
-// pasture_well_known_agents (plus the two context_edges indexes).
+// version 3 in a single BEGIN IMMEDIATE transaction (held by the caller,
+// see migrate.runStep). The full v2→v3 transition does TWO bodies of work:
 //
-// Each statement is wrapped with IF NOT EXISTS so a partial run that crashed
-// after some CREATE TABLEs but before the audit_schema_meta version bump
-// rolls back cleanly via the enclosing transaction; a re-run lands the
-// remaining DDL idempotently. The version bump is the LAST statement in the
-// step, per the migration framework contract (see migrate.go runStep doc).
+//  1. (S2 — landed at 7bee59e) Create context_edges,
+//     pasture_agent_categories, pasture_well_known_agents (plus the two
+//     context_edges indexes).
+//  2. (S3 — this slice) Add audit_events.agent_id, backfill from the
+//     legacy role column, then table-rebuild to drop role. See
+//     migrate_v3_backfill.go for the per-step implementations.
 //
-// Old audit_events rows are intentionally untouched in this slice: the
-// audit_events.agent_id column add + role backfill + role-drop triple is in
-// S3 (migrateV2toV3 will be extended there with that work, all under one
-// BEGIN IMMEDIATE per BLOCKER A1).
+// Both bodies share the same transaction. The audit_schema_meta version
+// bump from 2 to 3 is the LAST statement before the caller's commit, per
+// PROPOSAL-2 §7.10.2 BLOCKER A1: a crash mid-way leaves the file at v2 and
+// a retry runs the full v2→v3 fresh (the find branch in
+// findOrCreateLegacyRoleAgent reuses any orphan agents from a prior
+// rolled-back run).
 //
-// The transaction (tx) must already hold the SQLite write lock (BEGIN
+// Each statement in body (1) is wrapped with IF NOT EXISTS so a partial
+// run that crashed between body (1) and body (2) re-creates the tables as
+// no-ops on retry. Body (2)'s addAgentIDColumn is also tolerant of an
+// already-added column (idempotent). The table-rebuild in body (2) is NOT
+// individually idempotent but is safe under the whole-step rollback
+// guarantee.
+//
+// The transaction (tx) MUST already hold the SQLite write lock (BEGIN
 // IMMEDIATE in production paths). Caller commits.
 func migrateV2toV3(tx *sql.Tx, nowUnixNano int64) error {
+	// Body (1): new tables + indexes (S2 scope).
 	steps := []struct {
 		what string
 		ddl  string
@@ -153,6 +164,17 @@ func migrateV2toV3(tx *sql.Tx, nowUnixNano int64) error {
 		}
 	}
 
+	// Body (2): audit_events.agent_id add + role backfill + role drop
+	// (S3 scope; impl in migrate_v3_backfill.go).
+	if err := migrateV3Backfill(tx, nowUnixNano); err != nil {
+		// migrateV3Backfill already returns a *StructuredError.
+		return err
+	}
+
+	// Final statement before commit: bump audit_schema_meta to 3. A crash
+	// here, or any earlier point in this function, rolls back the entire
+	// transaction so the file remains observably at v2 (PROPOSAL-2
+	// §7.10.2 paragraph 4 + §11 Scenario 11).
 	if err := writeVersion(tx, 3, nowUnixNano); err != nil {
 		// writeVersion already returns a *StructuredError with full context.
 		return err
