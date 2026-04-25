@@ -30,7 +30,7 @@ func TaskLabelAdd(w io.Writer, dbPath, idStr, label string, format types.OutputF
 		return pasterrors.ExitCode(se), se
 	}
 
-	tr, err := tasks.OpenTracker(dbPath)
+	tr, err := tasks.OpenTaskTracker(dbPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
@@ -59,7 +59,7 @@ func TaskLabelRemove(w io.Writer, dbPath, idStr, label string, format types.Outp
 		return pasterrors.ExitCode(se), se
 	}
 
-	tr, err := tasks.OpenTracker(dbPath)
+	tr, err := tasks.OpenTaskTracker(dbPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
@@ -113,7 +113,7 @@ func TaskCommentAdd(w io.Writer, in TaskCommentAddInput, format types.OutputForm
 		return wrapInvalidID("task comment add (author)", in.AuthorID, err)
 	}
 
-	tr, err := tasks.OpenTracker(in.DBPath)
+	tr, err := tasks.OpenTaskTracker(in.DBPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
@@ -139,7 +139,7 @@ func TaskComments(w io.Writer, dbPath, idStr string, format types.OutputFormat) 
 		return wrapInvalidID("task comments", idStr, err)
 	}
 
-	tr, err := tasks.OpenTracker(dbPath)
+	tr, err := tasks.OpenTaskTracker(dbPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}

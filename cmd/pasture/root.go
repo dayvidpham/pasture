@@ -17,17 +17,23 @@ const version = "v0.1.0"
 var rootCmd = &cobra.Command{
 	Use:   "pasture",
 	Short: "Local task management for the Pasture toolkit",
-	Long: `pasture manages tasks, dependencies, labels, and comments backed by a
-local Provenance (PROV-O) SQLite database.
+	Long: `pasture manages tasks, dependencies, labels, comments, and the audit-event
+record backed by the unified Pasture SQLite database at
+~/.local/share/pasture/pasture.db (PROPOSAL-2 §7.1).
 
 Unlike pasture-msg (which sends Temporal signals to the pastured daemon),
-pasture operates entirely on the local task tracker — no daemon required.
+pasture operates entirely on the local task + audit tracker — no daemon
+required. The audit subsystem and Provenance subsystem share one file; the
+auto-on-open migrator brings legacy databases up to the current schema on
+first use (PROPOSAL-2 §7.10).
 
 Exit codes:
   0  success
   1  validation error (bad flags, missing arguments)
-  2  storage error (cannot open or read tracker database)
-  3  task error (not found, cycle detected, already closed, etc.)`,
+  2  connection error (cannot open the database file)
+  3  task error (not found, cycle detected, already closed, etc.)
+  4  config error
+  5  storage error (migration / schema failure)`,
 	Version: version,
 }
 
@@ -42,7 +48,7 @@ var (
 func init() {
 	pf := rootCmd.PersistentFlags()
 	pf.StringVar(&flagDBPath, "db", "",
-		"Path to provenance SQLite database (env: PASTURE_DB_PATH, default: ~/.local/share/pasture/provenance.db)")
+		"Path to the unified pasture SQLite database (env: PASTURE_DB_PATH, default: ~/.local/share/pasture/pasture.db)")
 	pf.StringVar(&flagFormat, "format", "text",
 		"Output format: text or json")
 	pf.StringVar(&flagNamespace, "namespace", "",

@@ -161,9 +161,16 @@ func createTask(t *testing.T, dbPath, title string) string {
 // mustRegisterAgent opens a tracker against dbPath, registers a human agent,
 // and returns the agent's wire-format ID. Tests use this to seed an author
 // before exercising comment-related handlers.
+//
+// Routes through OpenTaskTracker so the test fixture exercises the same
+// open-side path the production CLI uses (PROPOSAL-2 §7.4 / Slice S10): the
+// audit migrator runs on first open against an empty file (no-op for fresh
+// databases), and subsequent handler calls share the same on-disk layout.
+// RegisterHumanAgent is a method on the embedded provenance.Tracker so the
+// call site is unchanged from the legacy OpenTracker path.
 func mustRegisterAgent(t *testing.T, dbPath, name, contact string) string {
 	t.Helper()
-	tr, err := tasks.OpenTracker(dbPath)
+	tr, err := tasks.OpenTaskTracker(dbPath)
 	if err != nil {
 		t.Fatalf("open tracker for agent register: %v", err)
 	}

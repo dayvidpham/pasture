@@ -14,7 +14,7 @@ import (
 
 // TaskReady prints the set of tasks that are open and have no open blockers.
 func TaskReady(w io.Writer, dbPath string, format types.OutputFormat) (int, error) {
-	tr, err := tasks.OpenTracker(dbPath)
+	tr, err := tasks.OpenTaskTracker(dbPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
@@ -34,7 +34,7 @@ func TaskReady(w io.Writer, dbPath string, format types.OutputFormat) (int, erro
 
 // TaskBlocked prints the set of tasks that are open but have at least one open blocker.
 func TaskBlocked(w io.Writer, dbPath string, format types.OutputFormat) (int, error) {
-	tr, err := tasks.OpenTracker(dbPath)
+	tr, err := tasks.OpenTaskTracker(dbPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
@@ -64,7 +64,7 @@ func TaskDepAdd(w io.Writer, dbPath, sourceIDStr, targetIDStr string, kind prove
 		return wrapInvalidID("task dep add (source)", sourceIDStr, err)
 	}
 
-	tr, err := tasks.OpenTracker(dbPath)
+	tr, err := tasks.OpenTaskTracker(dbPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
@@ -93,7 +93,7 @@ func TaskDepTree(w io.Writer, dbPath, idStr string, format types.OutputFormat) (
 		return wrapInvalidID("task dep tree", idStr, err)
 	}
 
-	tr, err := tasks.OpenTracker(dbPath)
+	tr, err := tasks.OpenTaskTracker(dbPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}

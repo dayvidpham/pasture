@@ -44,7 +44,7 @@ func TaskCreate(w io.Writer, in TaskCreateInput, format types.OutputFormat) (int
 		return pasterrors.ExitCode(err), err
 	}
 
-	tr, err := tasks.OpenTracker(in.DBPath)
+	tr, err := tasks.OpenTaskTracker(in.DBPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
@@ -70,7 +70,7 @@ func TaskShow(w io.Writer, dbPath, idStr string, format types.OutputFormat) (int
 		return wrapInvalidID("task show", idStr, err)
 	}
 
-	tr, err := tasks.OpenTracker(dbPath)
+	tr, err := tasks.OpenTaskTracker(dbPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
@@ -108,7 +108,7 @@ func TaskUpdate(w io.Writer, in TaskUpdateInput, format types.OutputFormat) (int
 		return wrapInvalidID("task update", in.IDStr, err)
 	}
 
-	tr, err := tasks.OpenTracker(in.DBPath)
+	tr, err := tasks.OpenTaskTracker(in.DBPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
@@ -140,7 +140,7 @@ func TaskClose(w io.Writer, dbPath, idStr, reason string, format types.OutputFor
 		return wrapInvalidID("task close", idStr, err)
 	}
 
-	tr, err := tasks.OpenTracker(dbPath)
+	tr, err := tasks.OpenTaskTracker(dbPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
@@ -172,7 +172,7 @@ type TaskListInput struct {
 
 // TaskList prints tasks matching the given filter.
 func TaskList(w io.Writer, in TaskListInput, format types.OutputFormat) (int, error) {
-	tr, err := tasks.OpenTracker(in.DBPath)
+	tr, err := tasks.OpenTaskTracker(in.DBPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
