@@ -161,23 +161,26 @@ func TestMigrate_LegacyV1Database_PromotedToV2(t *testing.T) {
 	}
 
 	// Post-S3, audit_events.role is dropped via table-rebuild and replaced
-	// with agent_id (NOT NULL). The role string is recoverable by joining
-	// agents_software via agent_id; the v3 backfill mints one
-	// pasture/legacy-role/<role> agent per distinct legacy role.
+	// with agent_id (NOT NULL). Post-S4, audit_events.epoch_id is also
+	// dropped and the legacy epoch is migrated into context_edges with
+	// kind='EpochContext'. The role string and epoch are both recoverable
+	// by joining: epoch via context_edges.context_id; role via
+	// agents_software.name (stripping the "pasture/legacy-role/" prefix).
 	var (
 		epoch     string
 		agentName string
 	)
 	err = db.QueryRow(
-		`SELECT ae.epoch_id, asw.name
+		`SELECT ce.context_id, asw.name
 		 FROM audit_events ae
-		 JOIN agents_software asw ON asw.agent_id = ae.agent_id`,
+		 JOIN agents_software asw ON asw.agent_id = ae.agent_id
+		 JOIN context_edges ce ON ce.event_id = ae.id AND ce.context_kind = 'EpochContext'`,
 	).Scan(&epoch, &agentName)
 	if err != nil {
-		t.Fatalf("legacy-row probe (epoch_id + agents_software join): %v", err)
+		t.Fatalf("legacy-row probe (context_edges + agents_software join): %v", err)
 	}
 	if epoch != "epoch-legacy-1" {
-		t.Errorf("legacy row epoch_id = %q, want %q (S3 must preserve epoch_id; S4 drops it)",
+		t.Errorf("legacy row epoch_id (via context_edges) = %q, want %q (S4 must migrate epoch_id into context_edges as-is)",
 			epoch, "epoch-legacy-1")
 	}
 	if agentName != "pasture/legacy-role/supervisor" {

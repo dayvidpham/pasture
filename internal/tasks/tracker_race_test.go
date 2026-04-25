@@ -241,19 +241,27 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 			gotEvents, wantEvents, seedEventCount, succeededByOp[opRecordEvent])
 	}
 
-	// context_edges: opAttachContext successes (assumes no idempotent
-	// duplicates — but the random distribution may produce duplicate
-	// (event_id, kind, contextID) triples. AttachContext uses INSERT
-	// OR IGNORE so duplicates return nil and don't insert. We
-	// therefore assert >= rather than ==.)
+	// context_edges: opAttachContext successes + auto-EpochContext writes
+	// from RecordEvent (post-S4: SqliteAuditTrail.RecordEvent writes a
+	// context_edges (event_id, 'EpochContext', epochID) row whenever
+	// event.EpochID is non-empty). Both seed events and opRecordEvent
+	// successes contribute one EpochContext edge each.
+	//
+	// AttachContext uses INSERT OR IGNORE so duplicate
+	// (event_id, kind, contextID) triples are silently absorbed. The
+	// upper bound is therefore (seed RecordEvent calls) +
+	// (opRecordEvent successes) + (opAttachContext successes), with the
+	// actual count being lower whenever the random distribution
+	// produces a duplicate triple.
 	gotEdges := mustCountRows(t, verifyDB, "context_edges")
-	if gotEdges > succeededByOp[opAttachContext] {
-		t.Errorf("context_edges row count = %d > AttachContext successes=%d (impossible — only successful AttachContext can insert)",
-			gotEdges, succeededByOp[opAttachContext])
+	maxEdges := int64(seedEventCount) + succeededByOp[opRecordEvent] + succeededByOp[opAttachContext]
+	if gotEdges > maxEdges {
+		t.Errorf("context_edges row count = %d > max possible %d (seed=%d + RecordEvent=%d + AttachContext=%d) — impossible without phantom inserts",
+			gotEdges, maxEdges, seedEventCount, succeededByOp[opRecordEvent], succeededByOp[opAttachContext])
 	}
-	if gotEdges == 0 && succeededByOp[opAttachContext] > 0 {
-		t.Errorf("context_edges has 0 rows but AttachContext succeeded %d times — silent write loss",
-			succeededByOp[opAttachContext])
+	if gotEdges == 0 && (succeededByOp[opAttachContext] > 0 || succeededByOp[opRecordEvent] > 0) {
+		t.Errorf("context_edges has 0 rows but AttachContext succeeded %d times and RecordEvent succeeded %d times — silent write loss",
+			succeededByOp[opAttachContext], succeededByOp[opRecordEvent])
 	}
 
 	// tasks: opCreateTask successes (Provenance auto-creates a UUIDv7
@@ -372,9 +380,16 @@ func seedAuditEvents(ctx context.Context, tracker protocol.TaskTracker, dbPath s
 	}
 	defer db.Close()
 
+	// Post-S4 (v4 schema): audit_events.epoch_id is gone; epoch
+	// attachment lives in context_edges with kind='EpochContext'. The
+	// trail.RecordEvent call above writes the context_edges row so the
+	// JOIN below resolves the seeded events by their epoch correlation.
 	rows, err := db.QueryContext(ctx,
-		`SELECT id FROM audit_events WHERE epoch_id = ? ORDER BY id ASC`,
-		"epoch-race-seed",
+		`SELECT ae.id FROM audit_events ae
+		 INNER JOIN context_edges ce ON ce.event_id = ae.id
+		 WHERE ce.context_kind = ? AND ce.context_id = ?
+		 ORDER BY ae.id ASC`,
+		"EpochContext", "epoch-race-seed",
 	)
 	if err != nil {
 		return nil, fmt.Errorf("seedAuditEvents: read-back query failed: %w", err)

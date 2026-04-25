@@ -198,20 +198,31 @@ func TestScenario4_AutoMigrationOnOpen_FixtureBackfill(t *testing.T) {
 	}
 
 	// 6. audit_events.role column gone (S3 dropped it via table rebuild).
+	//    audit_events.epoch_id column gone (S4 dropped it via table rebuild).
 	cols := tableInfo(t, db, "audit_events")
 	for _, c := range cols {
 		if c.name == "role" {
-			t.Error("audit_events.role still present post-v3; table-rebuild failed to drop it")
+			t.Error("audit_events.role still present post-Migrate; S3 table-rebuild failed to drop it")
+		}
+		if c.name == "epoch_id" {
+			t.Error("audit_events.epoch_id still present post-Migrate; S4 table-rebuild failed to drop it")
 		}
 	}
 
-	// 7. Schema meta records v3.
+	// 7. Schema meta records the binary's MaxKnownSchemaVersion. Read from
+	//    the constant so this assertion follows the binary as new v* steps
+	//    land. Asserts >= 4 as the published guarantee from S4.
 	var version int
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		t.Fatalf("MAX(version): %v", err)
 	}
-	if version != 3 {
-		t.Errorf("audit_schema_meta MAX(version) = %d, want 3", version)
+	if version != audit.MaxKnownSchemaVersion {
+		t.Errorf("audit_schema_meta MAX(version) = %d, want %d (MaxKnownSchemaVersion)",
+			version, audit.MaxKnownSchemaVersion)
+	}
+	if audit.MaxKnownSchemaVersion < 4 {
+		t.Errorf("audit.MaxKnownSchemaVersion = %d, want >= 4 (S4 published guarantee)",
+			audit.MaxKnownSchemaVersion)
 	}
 
 	// 8. Per-role row counts in audit_events match the fixture distribution
@@ -392,14 +403,16 @@ func TestScenario11_CrashMidMigration_RolledBackCleanly(t *testing.T) {
 	db := openDB(t, dst)
 
 	// Read MAX(version). After the reopen, the migration framework should
-	// have brought the file up to v3 (either it was already there, or the
-	// recovery reset it to v2 and we re-ran the v3 step cleanly).
+	// have brought the file up to MaxKnownSchemaVersion (either it was
+	// already there, or the recovery reset it to v2 and we re-ran the
+	// remaining steps cleanly through to v4).
 	var version int
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		t.Fatalf("MAX(version) after reopen: %v", err)
 	}
-	if version != 3 {
-		t.Errorf("post-reopen MAX(version) = %d, want 3 (recovery + Migrate must bring it up to MaxKnownSchemaVersion)", version)
+	if version != audit.MaxKnownSchemaVersion {
+		t.Errorf("post-reopen MAX(version) = %d, want %d (recovery + Migrate must bring it up to MaxKnownSchemaVersion)",
+			version, audit.MaxKnownSchemaVersion)
 	}
 
 	// PRAGMA integrity_check is "ok".
@@ -590,14 +603,16 @@ func TestV3Backfill_FreshDB_NoOp(t *testing.T) {
 		t.Fatalf("Migrate on fresh DB: %v", err)
 	}
 
-	// Version should be at MaxKnownSchemaVersion (3) — the framework
-	// still bumps even though the v3 body was a bail-out no-op.
+	// Version should be at MaxKnownSchemaVersion — the framework still
+	// bumps each step even though the v3 + v4 bodies are bail-out no-ops
+	// (no audit_events table to backfill or rebuild).
 	var version int
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		t.Fatalf("MAX(version): %v", err)
 	}
-	if version != 3 {
-		t.Errorf("MAX(version) on fresh DB = %d, want 3", version)
+	if version != audit.MaxKnownSchemaVersion {
+		t.Errorf("MAX(version) on fresh DB = %d, want %d (MaxKnownSchemaVersion)",
+			version, audit.MaxKnownSchemaVersion)
 	}
 
 	// audit_events should NOT have been created by the migration (the

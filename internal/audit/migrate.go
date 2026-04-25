@@ -28,13 +28,15 @@
 //
 //   - v1 → v2: bootstrap audit_schema_meta (S1, landed).
 //   - v2 → v3: new tables context_edges, pasture_agent_categories,
-//     pasture_well_known_agents (S2, landed). Old audit_events untouched.
-//   - v3 → v4: EpochContext backfill into context_edges (S4; not yet wired).
+//     pasture_well_known_agents (S2, landed); audit_events.agent_id add +
+//     role-backfill + role-drop triple (S3, landed).
+//   - v3 → v4: EpochContext backfill from audit_events.epoch_id into
+//     context_edges; audit_events.epoch_id column dropped (S4, landed —
+//     migrate_v3_v4.go).
 //
-// S3 will extend migrate_v2_v3.go with the audit_events.agent_id add +
-// role-backfill + role-drop triple (one BEGIN IMMEDIATE per BLOCKER A1).
-// S4 will append a {fromVersion: 3, toVersion: 4} step. Until those land,
-// this binary tops out at v3.
+// This binary tops out at v4. Future slices (e.g. v4 → v5) extend the
+// dispatch table in migrationSteps() below by appending a new step and
+// bumping MaxKnownSchemaVersion.
 package audit
 
 import (
@@ -70,11 +72,13 @@ const busyRetryInitialDelay = 50 * time.Millisecond
 const busyRetryMaxDelay = 2 * time.Second
 
 // MaxKnownSchemaVersion is the highest schema version this binary can
-// produce. Bumped by S2 (→3, landed) and S4 (→4; not yet landed).
+// produce. Bumped by S2 (→3, landed) and S4 (→4, landed).
 //
 // Layer Integration Point owned by S1: any caller that needs to know "what
-// version does my binary support?" reads this constant.
-const MaxKnownSchemaVersion = 3
+// version does my binary support?" reads this constant. The §11 Scenario 5
+// newer-schema rejection error reports this value as the "supported
+// version" — bumping it here automatically updates the assertion.
+const MaxKnownSchemaVersion = 4
 
 // migrationStep applies a single forward migration. Each step receives an
 // open transaction (already holding the write lock via BEGIN IMMEDIATE)
@@ -93,15 +97,20 @@ type migrationStep struct {
 }
 
 // migrationSteps is the ordered registry of forward migrations this binary
-// knows how to apply. Slices S2/S3/S4 will append their steps here.
+// knows how to apply. Future slices append additional steps here.
 //
 // Order MUST be ascending by fromVersion. Migrate iterates this slice and
 // applies any step whose fromVersion equals the current on-disk version.
+//
+// Each step's apply function is responsible for performing its
+// schema/data work AND calling writeVersion(toVersion, ...) as the LAST
+// statement before returning nil. The migrate.runStep wrapper holds the
+// BEGIN IMMEDIATE transaction and commits only on a nil return.
 func migrationSteps() []migrationStep {
 	return []migrationStep{
 		{fromVersion: 1, toVersion: 2, apply: migrateV1toV2},
 		{fromVersion: 2, toVersion: 3, apply: migrateV2toV3},
-		// S4 will append: {fromVersion: 3, toVersion: 4, apply: migrateV3toV4}
+		{fromVersion: 3, toVersion: 4, apply: migrateV3toV4Step},
 	}
 }
 

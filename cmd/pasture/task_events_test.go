@@ -442,9 +442,12 @@ func TestCLI_TaskContexts_ListsAttachedEdges(t *testing.T) {
 	}
 	const epochID = "test-task-contexts-1"
 	const sha = "deadbeef"
+	// seedPostMigrationAuditEvent auto-writes the EpochContext row when
+	// epochID is non-empty (matching production RecordEvent semantics
+	// post-S4); we only need to attach the second context (GitContext)
+	// explicitly here.
 	eventID := seedPostMigrationAuditEvent(t, dbPath, epochID, "pasture--legacy-supervisor", "PhaseTransition",
 		map[string]any{"hello": "world"})
-	seedContextEdge(t, dbPath, eventID, "EpochContext", epochID)
 	seedContextEdge(t, dbPath, eventID, "GitContext", sha)
 
 	out := runCLI(t, "--db", dbPath, "--format", "json",
@@ -693,12 +696,22 @@ func seedV1AuditEventAt(t *testing.T, dbPath, epochID, role, eventType string, p
 	return id
 }
 
-// seedPostMigrationAuditEvent inserts one row into the post-v3 audit_events
-// shape (no `role` column; agent_id NOT NULL). Used by tests that ran the
-// migrator first and now need to inject events for context-edge linkage.
+// seedPostMigrationAuditEvent inserts one row into the post-v4
+// audit_events shape (no `role`, no `epoch_id`; agent_id NOT NULL).
+// Epoch attachment is recorded as a separate context_edges row with
+// kind='EpochContext' so the event is queryable via the post-v4 JOIN
+// path the production code uses.
 //
-// The agent_id is stored as an opaque string here; tests that don't care
-// about the FK to agents_software pass any non-empty value.
+// Used by tests that ran the migrator first and now need to inject
+// events for context-edge linkage.
+//
+// The agent_id is stored as an opaque string here; tests that don't
+// care about the FK to agents_software pass any non-empty value.
+//
+// History:
+//   - Post-S3: helper inserted into (epoch_id, phase, agent_id, ...).
+//   - Post-S4: helper inserts into (phase, agent_id, ...) and writes a
+//     context_edges row for the epoch attachment.
 func seedPostMigrationAuditEvent(t *testing.T, dbPath, epochID, agentID, eventType string, payload map[string]any) int64 {
 	t.Helper()
 	return seedPostMigrationAuditEventAt(t, dbPath, epochID, agentID, eventType, payload, time.Now().UTC())
@@ -717,9 +730,9 @@ func seedPostMigrationAuditEventAt(t *testing.T, dbPath, epochID, agentID, event
 		t.Fatalf("seedPostMigrationAuditEvent payload marshal: %v", err)
 	}
 	res, err := db.ExecContext(context.Background(),
-		`INSERT INTO audit_events (epoch_id, phase, agent_id, event_type, payload, timestamp)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		epochID, "p1-request", agentID, eventType, string(pj), ts.UnixNano(),
+		`INSERT INTO audit_events (phase, agent_id, event_type, payload, timestamp)
+		 VALUES (?, ?, ?, ?, ?)`,
+		"p1-request", agentID, eventType, string(pj), ts.UnixNano(),
 	)
 	if err != nil {
 		t.Fatalf("seedPostMigrationAuditEvent insert: %v", err)
@@ -727,6 +740,18 @@ func seedPostMigrationAuditEventAt(t *testing.T, dbPath, epochID, agentID, event
 	id, err := res.LastInsertId()
 	if err != nil {
 		t.Fatalf("seedPostMigrationAuditEvent lastInsertId: %v", err)
+	}
+
+	// Record the EpochContext attachment if the caller supplied an
+	// epochID. Post-v4, this is how events are correlated to an epoch.
+	if epochID != "" {
+		_, err := db.ExecContext(context.Background(),
+			`INSERT OR IGNORE INTO context_edges (event_id, context_kind, context_id) VALUES (?, ?, ?)`,
+			id, "EpochContext", epochID,
+		)
+		if err != nil {
+			t.Fatalf("seedPostMigrationAuditEvent context_edges insert: %v", err)
+		}
 	}
 	return id
 }

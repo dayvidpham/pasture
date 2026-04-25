@@ -135,6 +135,12 @@ func queryContextEdgesByEvent(t *testing.T, dbPath string, eventID int64, kind p
 }
 
 // queryAuditEvent returns the audit_events row by id; t.Fatal if missing.
+//
+// Post-S4 (v4 schema): audit_events.epoch_id is gone; epoch attachment is
+// recovered via context_edges with kind='EpochContext'. The LEFT JOIN
+// keeps row.epochID empty when the event has no epoch attachment (the
+// free-floating event case), preserving the assertion semantics this
+// helper supports.
 func queryAuditEvent(t *testing.T, dbPath string, eventID int64) auditEventRow {
 	t.Helper()
 	verifyDB, err := sql.Open("sqlite", dbPath)
@@ -144,12 +150,20 @@ func queryAuditEvent(t *testing.T, dbPath string, eventID int64) auditEventRow {
 	defer verifyDB.Close()
 
 	var r auditEventRow
+	var epochID sql.NullString
 	err = verifyDB.QueryRow(
-		`SELECT id, epoch_id, COALESCE(phase,''), event_type FROM audit_events WHERE id = ?`,
+		`SELECT ae.id, COALESCE(ce.context_id, ''), COALESCE(ae.phase,''), ae.event_type
+		 FROM audit_events ae
+		 LEFT JOIN context_edges ce
+		   ON ce.event_id = ae.id AND ce.context_kind = 'EpochContext'
+		 WHERE ae.id = ?`,
 		eventID,
-	).Scan(&r.id, &r.epochID, &r.phase, &r.eventType)
+	).Scan(&r.id, &epochID, &r.phase, &r.eventType)
 	if err != nil {
 		t.Fatalf("verify SELECT audit_events id=%d: %v", eventID, err)
+	}
+	if epochID.Valid {
+		r.epochID = epochID.String
 	}
 	return r
 }

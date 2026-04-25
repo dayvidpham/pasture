@@ -206,10 +206,32 @@ func (s *SqliteAuditTrail) RecordEvent(_ context.Context, event protocol.AuditEv
 		return err
 	}
 
-	_, err = s.db.Exec(
-		`INSERT INTO audit_events (epoch_id, phase, agent_id, event_type, payload, timestamp)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		event.EpochID,
+	// Post-v4 schema: audit_events.epoch_id is gone (dropped by S4's
+	// migrate_v3_v4.go). Epoch attachment is now expressed as a
+	// context_edges (event_id, 'EpochContext', epoch_id) row written
+	// inside the same transaction so a crash between INSERT and
+	// AttachContext cannot leave a row without its epoch correlation.
+	//
+	// Caller-side compatibility: protocol.AuditEvent still carries an
+	// EpochID field for the existing public API. SqliteAuditTrail
+	// bridges the two by writing the audit_events row first, then the
+	// context_edges row if EpochID is non-empty. QueryEvents recovers
+	// EpochID by joining context_edges with kind='EpochContext'.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     fmt.Sprintf("audit.SqliteAuditTrail.RecordEvent: cannot begin transaction for epoch=%q event_type=%q", event.EpochID, event.EventType),
+			Why:      err.Error(),
+			Impact:   "the event was not recorded; the audit trail for this epoch will be missing this entry",
+			Fix:      "verify the database file is accessible and not held by an exclusive writer; check 'PRAGMA integrity_check' returns ok",
+		}
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.Exec(
+		`INSERT INTO audit_events (phase, agent_id, event_type, payload, timestamp)
+		 VALUES (?, ?, ?, ?, ?)`,
 		string(event.Phase),
 		agentID,
 		string(event.EventType),
@@ -223,6 +245,47 @@ func (s *SqliteAuditTrail) RecordEvent(_ context.Context, event protocol.AuditEv
 			Why:      err.Error(),
 			Impact:   "the event was not recorded; the audit trail for this epoch will be missing this entry",
 			Fix:      "check that the database file is still accessible and not held by an exclusive writer; verify 'PRAGMA integrity_check' returns ok",
+		}
+	}
+
+	if event.EpochID != "" {
+		eventID, err := res.LastInsertId()
+		if err != nil {
+			return &pasterrors.StructuredError{
+				Category: pasterrors.CategoryStorage,
+				What:     fmt.Sprintf("audit.SqliteAuditTrail.RecordEvent: cannot read LastInsertId after INSERT for epoch=%q event_type=%q", event.EpochID, event.EventType),
+				Why:      err.Error(),
+				Impact:   "the audit_events row was inserted but its epoch correlation cannot be recorded; the event will not appear in epoch-scoped queries",
+				Fix:      "this is unexpected for SQLite (which always reports LastInsertId); verify the modernc.org/sqlite driver version and rerun; if it persists, file an issue against pasture/internal/audit/sqlite.go",
+			}
+		}
+
+		// INSERT OR IGNORE: a duplicate triple (event_id, 'EpochContext',
+		// epochID) is a no-op. Production never produces duplicates here
+		// because event_id is freshly minted; the OR IGNORE defends
+		// against future callers that may write multi-context events
+		// idempotently and still expect this method to succeed.
+		if _, err := tx.Exec(
+			`INSERT OR IGNORE INTO context_edges (event_id, context_kind, context_id) VALUES (?, ?, ?)`,
+			eventID, "EpochContext", event.EpochID,
+		); err != nil {
+			return &pasterrors.StructuredError{
+				Category: pasterrors.CategoryStorage,
+				What:     fmt.Sprintf("audit.SqliteAuditTrail.RecordEvent: cannot record EpochContext attachment for epoch=%q event_type=%q (event_id=%d)", event.EpochID, event.EventType, eventID),
+				Why:      err.Error(),
+				Impact:   "the audit_events row was inserted but its epoch correlation cannot be recorded; the event will not appear in epoch-scoped queries",
+				Fix:      "verify the context_edges table exists (created by v3 migration); run 'pasture migrate' if the schema is below v3",
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     fmt.Sprintf("audit.SqliteAuditTrail.RecordEvent: cannot commit transaction for epoch=%q event_type=%q", event.EpochID, event.EventType),
+			Why:      err.Error(),
+			Impact:   "the event was not recorded (transaction rolled back); the audit trail for this epoch will be missing this entry",
+			Fix:      "verify the SQLite file is writable and not corrupted; rerun the operation",
 		}
 	}
 	return nil
@@ -395,8 +458,13 @@ func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochID string, phase 
 	var clauses []string
 	var args []any
 
-	clauses = append(clauses, "ae.epoch_id = ?")
-	args = append(args, epochID)
+	// Post-v4 schema: audit_events.epoch_id is gone; epoch attachment is
+	// recorded in context_edges with kind='EpochContext'. We INNER JOIN
+	// context_edges to restrict the result to events tied to the
+	// requested epoch. Use the idx_context_edges_lookup index (created in
+	// v2→v3 by S2) for efficient (kind, id)-keyed lookups.
+	clauses = append(clauses, "ce.context_kind = ? AND ce.context_id = ?")
+	args = append(args, "EpochContext", epochID)
 
 	if phase != nil {
 		clauses = append(clauses, "ae.phase = ?")
@@ -407,8 +475,9 @@ func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochID string, phase 
 		args = append(args, legacyRoleAgentNamePrefix+*role)
 	}
 
-	query := `SELECT ae.epoch_id, ae.phase, COALESCE(asw.name, ''), ae.event_type, ae.payload, ae.timestamp
+	query := `SELECT ce.context_id, ae.phase, COALESCE(asw.name, ''), ae.event_type, ae.payload, ae.timestamp
 	          FROM audit_events ae
+	          INNER JOIN context_edges ce ON ce.event_id = ae.id
 	          LEFT JOIN agents_software asw ON asw.agent_id = ae.agent_id
 	          WHERE ` + strings.Join(clauses, " AND ") + `
 	          ORDER BY ae.id ASC`
@@ -420,7 +489,7 @@ func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochID string, phase 
 			What:     fmt.Sprintf("audit.SqliteAuditTrail.QueryEvents: query failed for epoch=%q", epochID),
 			Why:      err.Error(),
 			Impact:   "no events can be returned for this epoch",
-			Fix:      "verify the database file is accessible and the schema is at v3 or higher; run 'pasture migrate' if the schema is older",
+			Fix:      "verify the database file is accessible and the schema is at v4 or higher; run 'pasture migrate' if the schema is older (context_edges first appears in v3, EpochContext backfill completes in v4)",
 		}
 	}
 	defer rows.Close()
@@ -638,6 +707,36 @@ func (s *SqliteAuditTrail) QuerySessionEntries(_ context.Context, sessionID stri
 
 // ensureSchema creates the audit_events and session_entries tables (and indexes)
 // if they do not exist.
+//
+// # Why we still create the legacy v1 audit_events shape
+//
+// On a brand-new SQLite file, ensureSchema runs FIRST (before Migrate)
+// and seeds the table with the v1 layout (epoch_id NOT NULL, role NOT
+// NULL). Migrate then walks v1→v2→v3→v4 forward steps, dropping role
+// (in v3 via S3's table-rebuild) and dropping epoch_id (in v4 via
+// migrate_v3_v4.go's table-rebuild). The end-state on a fresh DB is
+// identical to the post-v4 reopen state.
+//
+// On a REOPEN of an already-migrated v4 file, the CREATE TABLE IF NOT
+// EXISTS is a no-op (the table exists with the post-v4 shape). Migrate
+// then observes MAX(version)=4 and exits without work.
+//
+// # Why the legacy idx_epoch_id and idx_phase indexes are NOT created here
+//
+// PROPOSAL-2 §7.10.1 v3 + v4 migrations drop these indexes implicitly
+// (the SQLite table-rebuild pattern drops the table along with its
+// attached indexes). The post-v3 schema replaces idx_epoch_id with
+// idx_audit_events_agent + idx_audit_events_timestamp; the post-v4
+// schema additionally relies on context_edges + idx_context_edges_lookup
+// for epoch-by-id queries.
+//
+// Recreating idx_epoch_id and idx_phase here would crash on the REOPEN
+// path of a post-v4 file because the underlying columns are gone. The
+// fresh-DB path doesn't need these legacy indexes either: any rows
+// written between ensureSchema and Migrate's first step would be
+// preserved through the table rebuild, and there is no production
+// caller that writes during this window (NewSqliteAuditTrail runs
+// ensureSchema then Migrate then returns the trail handle).
 func ensureSchema(db *sql.DB) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS audit_events (
@@ -652,16 +751,6 @@ func ensureSchema(db *sql.DB) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("create table audit_events: %w", err)
-	}
-
-	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_epoch_id ON audit_events (epoch_id)`)
-	if err != nil {
-		return fmt.Errorf("create index idx_epoch_id: %w", err)
-	}
-
-	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_phase ON audit_events (phase)`)
-	if err != nil {
-		return fmt.Errorf("create index idx_phase: %w", err)
 	}
 
 	_, err = db.Exec(`

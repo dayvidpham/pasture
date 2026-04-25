@@ -387,16 +387,19 @@ func TestMigrateV2toV3_AgentCategories_Layout(t *testing.T) {
 
 // ---- Old-row preservation --------------------------------------------------
 
-// TestMigrateV2toV3_LegacyAuditEventsBackfilled proves S3's scope: old
-// audit_events rows survive the v3 migration with their non-role data
-// preserved AND get an agent_id populated by the find-or-create flow that
-// resolves "supervisor" → a SoftwareAgent named
-// "pasture/legacy-role/supervisor".
+// TestMigrateV2toV3_LegacyAuditEventsBackfilled proves S3+S4's scope:
+// old audit_events rows survive the v3+v4 migration with their non-role,
+// non-epoch_id data preserved AND get an agent_id populated by S3's
+// find-or-create flow AND get a context_edges row with kind='EpochContext'
+// from S4's backfill.
 //
-// History: this test was originally TestMigrateV2toV3_LegacyAuditEventsUntouched
-// (S2 scope) and asserted role + epoch_id columns still existed. S3 drops
-// the role column via table-rebuild; S4 will drop epoch_id later. Updated
-// here to reflect S3's actual end-state.
+// History:
+//   - Originally TestMigrateV2toV3_LegacyAuditEventsUntouched (S2 scope):
+//     asserted role + epoch_id columns still existed.
+//   - Updated for S3: role column dropped via table-rebuild; agent_id
+//     populated; epoch_id still present.
+//   - Updated for S4: epoch_id column dropped via table-rebuild;
+//     epoch correlation now in context_edges with kind='EpochContext'.
 func TestMigrateV2toV3_LegacyAuditEventsBackfilled(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "v3_legacy.db")
 	originalID := seedLegacyV1DB(t, dbPath)
@@ -406,7 +409,7 @@ func TestMigrateV2toV3_LegacyAuditEventsBackfilled(t *testing.T) {
 		t.Fatalf("audit.Migrate: %v", err)
 	}
 
-	// Row count unchanged — every legacy row survives the table rebuild.
+	// Row count unchanged — every legacy row survives both table rebuilds.
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM audit_events`).Scan(&count); err != nil {
 		t.Fatalf("audit_events count: %v", err)
@@ -415,24 +418,34 @@ func TestMigrateV2toV3_LegacyAuditEventsBackfilled(t *testing.T) {
 		t.Errorf("audit_events count after Migrate = %d, want 1 (no data loss)", count)
 	}
 
-	// Non-role columns preserved verbatim (epoch_id stays in v3; S4 drops
-	// it at v4). Phase, event_type, payload also untouched.
+	// Non-{role, epoch_id} columns preserved verbatim. Phase, event_type,
+	// payload, agent_id all read from the post-v4 audit_events shape.
 	var (
-		gotEpoch, gotPhase, gotType, gotPayload string
-		gotAgentID                              sql.NullString
+		gotPhase, gotType, gotPayload string
+		gotAgentID                    sql.NullString
 	)
 	err := db.QueryRow(
-		`SELECT epoch_id, phase, event_type, payload, agent_id FROM audit_events WHERE id=?`,
+		`SELECT phase, event_type, payload, agent_id FROM audit_events WHERE id=?`,
 		originalID,
-	).Scan(&gotEpoch, &gotPhase, &gotType, &gotPayload, &gotAgentID)
+	).Scan(&gotPhase, &gotType, &gotPayload, &gotAgentID)
 	if err != nil {
 		t.Fatalf("legacy row probe: %v", err)
 	}
-	if gotEpoch != "epoch-pre-s2" {
-		t.Errorf("epoch_id = %q, want %q", gotEpoch, "epoch-pre-s2")
-	}
 	if gotPayload != `{"note":"survives v2→v3"}` {
 		t.Errorf("payload mutated; got=%q", gotPayload)
+	}
+
+	// epoch_id is recoverable via context_edges (S4 backfill).
+	var gotEpoch string
+	err = db.QueryRow(
+		`SELECT context_id FROM context_edges WHERE event_id=? AND context_kind='EpochContext'`,
+		originalID,
+	).Scan(&gotEpoch)
+	if err != nil {
+		t.Fatalf("epoch_id probe via context_edges: %v", err)
+	}
+	if gotEpoch != "epoch-pre-s2" {
+		t.Errorf("epoch_id (via context_edges) = %q, want %q (S4 must migrate epoch_id as-is)", gotEpoch, "epoch-pre-s2")
 	}
 
 	// agent_id MUST be populated by the v3 backfill — every legacy row
@@ -456,8 +469,8 @@ func TestMigrateV2toV3_LegacyAuditEventsBackfilled(t *testing.T) {
 			agentName, "pasture/legacy-role/supervisor")
 	}
 
-	// audit_events.role MUST be gone post-v3 (S3 drops it). audit_events.epoch_id
-	// MUST still exist (S4 drops it later).
+	// audit_events.role MUST be gone post-v3 (S3 drops it).
+	// audit_events.epoch_id MUST be gone post-v4 (S4 drops it).
 	cols := tableInfo(t, db, "audit_events")
 	hasRole, hasEpochID, hasAgentID := false, false, false
 	for _, c := range cols {
@@ -471,13 +484,13 @@ func TestMigrateV2toV3_LegacyAuditEventsBackfilled(t *testing.T) {
 		}
 	}
 	if hasRole {
-		t.Error("audit_events.role column still present post-v3 Migrate; S3 must drop it via table-rebuild")
+		t.Error("audit_events.role column still present post-Migrate; S3 must drop it via table-rebuild")
 	}
-	if !hasEpochID {
-		t.Error("audit_events.epoch_id column missing post-v3 Migrate; S4 (not S3) drops it")
+	if hasEpochID {
+		t.Error("audit_events.epoch_id column still present post-Migrate; S4 must drop it via table-rebuild")
 	}
 	if !hasAgentID {
-		t.Error("audit_events.agent_id column missing post-v3 Migrate; S3 must add it")
+		t.Error("audit_events.agent_id column missing post-Migrate; S3 must add it")
 	}
 }
 
@@ -489,6 +502,12 @@ func TestMigrateV2toV3_LegacyAuditEventsBackfilled(t *testing.T) {
 // AttachContext writes context_edges; S5 SetAgentCategories writes
 // pasture_agent_categories; S7 ensureWellKnownAgent writes
 // pasture_well_known_agents).
+//
+// Post-S4 note: S4's v3→v4 backfill auto-populates context_edges with one
+// row per legacy audit_events row (kind='EpochContext', context_id from
+// the legacy epoch_id). The seeded legacy row contributes one such
+// context_edges entry, so the user-inserted EpochContext row uses a
+// different context_id to avoid colliding with the auto-backfill.
 func TestMigrateV2toV3_NewTablesInsertable(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "v3_insert.db")
 	eventID := seedLegacyV1DB(t, dbPath)
@@ -498,10 +517,24 @@ func TestMigrateV2toV3_NewTablesInsertable(t *testing.T) {
 		t.Fatalf("audit.Migrate: %v", err)
 	}
 
-	// Insert one row in each of the three new tables.
+	// Snapshot context_edges row count after migration (S4 backfilled one
+	// row for the seeded legacy event); subsequent insertions are tested
+	// relative to this baseline.
+	var contextEdgesBaseline int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM context_edges`).Scan(&contextEdgesBaseline); err != nil {
+		t.Fatalf("count context_edges (post-Migrate baseline): %v", err)
+	}
+	if contextEdgesBaseline != 1 {
+		t.Fatalf("context_edges baseline post-Migrate = %d, want 1 (S4 backfills one row per legacy event with non-NULL epoch_id)", contextEdgesBaseline)
+	}
+
+	// Insert one new row in each of the three new tables. For
+	// context_edges, use a distinct context_id from the auto-backfilled
+	// row (whose context_id is "epoch-pre-s2", from seedLegacyV1DB).
+	const userContextID = "aura-plugins--01968a3c-1234-7000-8000-000000000001"
 	mustExec(t, db,
 		`INSERT INTO context_edges (event_id, context_kind, context_id) VALUES (?, ?, ?)`,
-		eventID, "EpochContext", "aura-plugins--01968a3c-1234-7000-8000-000000000001",
+		eventID, "SliceContext", userContextID,
 	)
 	mustExec(t, db,
 		`INSERT INTO pasture_agent_categories (agent_id, automaton_role, pasture_role) VALUES (?, ?, ?)`,
@@ -512,9 +545,10 @@ func TestMigrateV2toV3_NewTablesInsertable(t *testing.T) {
 		"01968a3c-1234-7000-8000-000000000003", "pasture/automaton/check-constraints",
 	)
 
-	// Each table now has exactly one row.
+	// pasture_agent_categories and pasture_well_known_agents start empty
+	// (S4 doesn't touch them); each now has exactly the one user row.
 	for _, table := range []string{
-		"context_edges", "pasture_agent_categories", "pasture_well_known_agents",
+		"pasture_agent_categories", "pasture_well_known_agents",
 	} {
 		var n int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
@@ -525,20 +559,32 @@ func TestMigrateV2toV3_NewTablesInsertable(t *testing.T) {
 		}
 	}
 
-	// Read-back a context_edges row to verify the composite PK round-trips.
+	// context_edges has the S4-backfilled row + the user row.
+	var contextEdgesNow int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM context_edges`).Scan(&contextEdgesNow); err != nil {
+		t.Fatalf("count context_edges (post-insert): %v", err)
+	}
+	if contextEdgesNow != contextEdgesBaseline+1 {
+		t.Errorf("count(context_edges) = %d, want %d (baseline %d + 1 user-inserted row)",
+			contextEdgesNow, contextEdgesBaseline+1, contextEdgesBaseline)
+	}
+
+	// Read-back the user-inserted context_edges row to verify the
+	// composite PK round-trips.
 	var (
 		gotEventID        int64
 		gotKind, gotCtxID string
 	)
 	err := db.QueryRow(
-		`SELECT event_id, context_kind, context_id FROM context_edges`,
+		`SELECT event_id, context_kind, context_id FROM context_edges WHERE context_id = ?`,
+		userContextID,
 	).Scan(&gotEventID, &gotKind, &gotCtxID)
 	if err != nil {
 		t.Fatalf("context_edges read-back: %v", err)
 	}
-	if gotEventID != eventID || gotKind != "EpochContext" {
+	if gotEventID != eventID || gotKind != "SliceContext" {
 		t.Errorf("context_edges row mismatch: event_id=%d kind=%q, want event_id=%d kind=%q",
-			gotEventID, gotKind, eventID, "EpochContext")
+			gotEventID, gotKind, eventID, "SliceContext")
 	}
 }
 
@@ -579,6 +625,12 @@ func TestMigrateV2toV3_WellKnownAgents_NameUniqueEnforced(t *testing.T) {
 
 // TestMigrateV2toV3_ContextEdges_PKEnforced verifies the composite PK on
 // context_edges rejects duplicate (event_id, context_kind, context_id).
+//
+// Post-S4 note: S4's v3→v4 backfill auto-populates context_edges with one
+// row per legacy audit_events row (kind='EpochContext', context_id from
+// the legacy epoch_id). The user-inserted rows in this test use
+// SliceContext (not EpochContext) on a distinct context_id from the
+// auto-backfill so the assertions measure only user-insert behaviour.
 func TestMigrateV2toV3_ContextEdges_PKEnforced(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "v3_pk.db")
 	eventID := seedLegacyV1DB(t, dbPath)
@@ -587,14 +639,21 @@ func TestMigrateV2toV3_ContextEdges_PKEnforced(t *testing.T) {
 		t.Fatalf("audit.Migrate: %v", err)
 	}
 
+	// Snapshot the post-S4 baseline: one row per legacy event with
+	// non-NULL epoch_id. The seedLegacyV1DB helper writes one row.
+	var baseline int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM context_edges`).Scan(&baseline); err != nil {
+		t.Fatalf("baseline COUNT(*): %v", err)
+	}
+
 	mustExec(t, db,
 		`INSERT INTO context_edges (event_id, context_kind, context_id) VALUES (?, ?, ?)`,
-		eventID, "EpochContext", "ctx-1",
+		eventID, "SliceContext", "ctx-1",
 	)
 	// Duplicate triple must fail.
 	_, err := db.Exec(
 		`INSERT INTO context_edges (event_id, context_kind, context_id) VALUES (?, ?, ?)`,
-		eventID, "EpochContext", "ctx-1",
+		eventID, "SliceContext", "ctx-1",
 	)
 	if err == nil {
 		t.Fatalf("expected PK violation on duplicate (event_id,kind,context_id), got nil")
@@ -608,15 +667,19 @@ func TestMigrateV2toV3_ContextEdges_PKEnforced(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM context_edges`).Scan(&n); err != nil {
 		t.Fatalf("COUNT(*): %v", err)
 	}
-	if n != 2 {
-		t.Errorf("context_edges count = %d, want 2 (different kinds on same event+context_id)", n)
+	if n != baseline+2 {
+		t.Errorf("context_edges count = %d, want %d (baseline %d + 2 user-inserted rows on different kinds)",
+			n, baseline+2, baseline)
 	}
 }
 
 // ---- Idempotency -----------------------------------------------------------
 
 // TestMigrateV2toV3_Idempotent_ReRunNoop verifies a second Migrate call on
-// an already-v3 database leaves the schema and audit_schema_meta unchanged.
+// an already-current database leaves the schema and audit_schema_meta
+// unchanged. (Asserts the post-MaxKnownSchemaVersion idempotency property
+// — read from the constant so the assertion follows the binary's
+// supported version, currently v4 after S4.)
 func TestMigrateV2toV3_Idempotent_ReRunNoop(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "v3_idemp.db")
 	_ = seedLegacyV1DB(t, dbPath)
@@ -643,13 +706,14 @@ func TestMigrateV2toV3_Idempotent_ReRunNoop(t *testing.T) {
 			firstCount, secondCount)
 	}
 
-	// Version still 3.
+	// Version still at MaxKnownSchemaVersion.
 	var version int
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		t.Fatalf("version probe: %v", err)
 	}
-	if version != 3 {
-		t.Errorf("MAX(version) after re-Migrate = %d, want 3", version)
+	if version != audit.MaxKnownSchemaVersion {
+		t.Errorf("MAX(version) after re-Migrate = %d, want %d (MaxKnownSchemaVersion)",
+			version, audit.MaxKnownSchemaVersion)
 	}
 
 	// Tables still present, indexes still present.
@@ -669,20 +733,25 @@ func TestMigrateV2toV3_Idempotent_ReRunNoop(t *testing.T) {
 
 // ---- Version bookkeeping ---------------------------------------------------
 
-// TestMigrateV2toV3_VersionBumpedTo3 verifies that after Migrate against a
-// legacy v1 database, audit_schema_meta records version=3 (the new
-// MaxKnownSchemaVersion after S2). Catches accidental regressions to the
-// constant or the migration step registry.
-func TestMigrateV2toV3_VersionBumpedTo3(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "v3_version.db")
+// TestMigrate_VersionBumpedToMaxKnown verifies that after Migrate against
+// a legacy v1 database, audit_schema_meta records the binary's
+// MaxKnownSchemaVersion (currently 4 after S4). Catches accidental
+// regressions to the constant or the migration step registry.
+//
+// History: this test was originally TestMigrateV2toV3_VersionBumpedTo3
+// and hard-coded "3". Updated to read from the constant so the assertion
+// follows the binary; explicitly asserts MaxKnownSchemaVersion >= 4 to
+// catch a regression below S4's published guarantee.
+func TestMigrate_VersionBumpedToMaxKnown(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "max_known_version.db")
 	_ = seedLegacyV1DB(t, dbPath)
 	db := openDB(t, dbPath)
 	if err := audit.Migrate(db); err != nil {
 		t.Fatalf("audit.Migrate: %v", err)
 	}
 
-	if audit.MaxKnownSchemaVersion != 3 {
-		t.Errorf("audit.MaxKnownSchemaVersion = %d, want 3 (S2 must bump)",
+	if audit.MaxKnownSchemaVersion < 4 {
+		t.Errorf("audit.MaxKnownSchemaVersion = %d, want >= 4 (S4 must bump to 4 or higher)",
 			audit.MaxKnownSchemaVersion)
 	}
 
@@ -690,19 +759,24 @@ func TestMigrateV2toV3_VersionBumpedTo3(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		t.Fatalf("version probe: %v", err)
 	}
-	if version != 3 {
-		t.Errorf("post-Migrate MAX(version) = %d, want 3", version)
+	if version != audit.MaxKnownSchemaVersion {
+		t.Errorf("post-Migrate MAX(version) = %d, want %d (MaxKnownSchemaVersion)",
+			version, audit.MaxKnownSchemaVersion)
 	}
 }
 
-// TestMigrateV2toV3_FreshV2DbAdvancesToV3 verifies the explicit v2→v3 step
-// alone (legacy v1 DB has been promoted to v2; we then exercise just the
-// v2→v3 hop on a synthetic v2 fixture).
-func TestMigrateV2toV3_FreshV2DbAdvancesToV3(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "v3_from_v2.db")
+// TestMigrate_FreshV2DbAdvancesToMaxKnown verifies the explicit v2→...→
+// MaxKnownSchemaVersion forward chain on a synthetic v2 fixture. Each
+// step in migrationSteps() is exercised in order from v2 onward.
+//
+// History: originally TestMigrateV2toV3_FreshV2DbAdvancesToV3 (hard-coded
+// "3"). Updated to read MaxKnownSchemaVersion so the assertion follows
+// the binary as new v* steps are added.
+func TestMigrate_FreshV2DbAdvancesToMaxKnown(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "fresh_v2_advances.db")
 
 	// Hand-build a v2-shaped database: audit_events + audit_schema_meta with
-	// version=2 row but none of the v3 tables.
+	// version=2 row but none of the v3+ tables.
 	{
 		db := openDB(t, dbPath)
 		mustExec(t, db, `
@@ -729,14 +803,15 @@ func TestMigrateV2toV3_FreshV2DbAdvancesToV3(t *testing.T) {
 	// Reopen and run Migrate.
 	db := openDB(t, dbPath)
 	if err := audit.Migrate(db); err != nil {
-		t.Fatalf("Migrate v2→v3: %v", err)
+		t.Fatalf("Migrate from v2: %v", err)
 	}
 
+	// All v3+-introduced tables must exist.
 	for _, table := range []string{
 		"context_edges", "pasture_agent_categories", "pasture_well_known_agents",
 	} {
 		if !tableExists(t, db, table) {
-			t.Errorf("table %q absent after v2→v3 Migrate", table)
+			t.Errorf("table %q absent after Migrate from v2", table)
 		}
 	}
 
@@ -744,8 +819,9 @@ func TestMigrateV2toV3_FreshV2DbAdvancesToV3(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		t.Fatalf("version probe: %v", err)
 	}
-	if version != 3 {
-		t.Errorf("post-Migrate MAX(version) = %d, want 3", version)
+	if version != audit.MaxKnownSchemaVersion {
+		t.Errorf("post-Migrate MAX(version) = %d, want %d (MaxKnownSchemaVersion)",
+			version, audit.MaxKnownSchemaVersion)
 	}
 }
 
