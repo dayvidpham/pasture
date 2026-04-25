@@ -21,6 +21,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.temporal.io/sdk/client"
@@ -29,8 +30,10 @@ import (
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/config"
 	"github.com/dayvidpham/pasture/internal/hooks"
+	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/temporal"
 	"github.com/dayvidpham/pasture/internal/types"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 const version = "v0.1.0"
@@ -82,6 +85,16 @@ which point it drains in-flight tasks and exits cleanly.`,
 	root.PersistentFlags().String("audit-db-path", "",
 		"SQLite audit database path; defaults to ~/.local/share/pasture/audit.db (env: PASTURE_AUDIT_DB_PATH)")
 
+	// Idle-after-migrate flag (S7; unblocks S3's Scenario 12 concurrent-migrator
+	// race test). When set to a positive duration, after migration completes
+	// (and after well-known automaton registration completes) the daemon idles
+	// for the duration before starting the Temporal worker. Default `0` means
+	// "no idle window — proceed straight to worker start", which is the
+	// production behaviour. Tests set this to e.g. `--idle-after-migrate=2s`
+	// to widen the window during which a second migrator can race the first.
+	root.PersistentFlags().Duration("idle-after-migrate", 0,
+		"after migration + well-known agent registration, idle for the given duration before starting the Temporal worker (default 0 = disabled; used by S3 Scenario 12 race test)")
+
 	// Version flag.
 	root.PersistentFlags().Bool("version", false, "print version and exit")
 
@@ -102,13 +115,16 @@ which point it drains in-flight tasks and exits cleanly.`,
 //
 // Steps:
 //  1. Resolve full PasturedConfig (CLI > env > YAML > defaults).
-//  2. Initialise the audit trail backend.
-//  3. Connect to the Temporal server.
-//  4. Auto-register search attributes (idempotent).
-//  5. Initialise the hooks Manager (no default handlers in v1; plugins add them).
-//  6. Construct Activities struct with injected trail and hooks Manager.
-//  7. Create the Temporal worker and register workflows + activities.
-//  8. Start the worker; block until SIGINT/SIGTERM; drain and shut down.
+//  2. Initialise the audit trail backend (and, for sqlite, the unified
+//     protocol.TaskTracker + well-known automaton-agent registration).
+//  3. Optional idle window (`--idle-after-migrate`) for race-test scenarios.
+//  4. Connect to the Temporal server.
+//  5. Auto-register search attributes (idempotent).
+//  6. Initialise the hooks Manager (no default handlers in v1; plugins add them).
+//  7. Construct Activities struct with injected trail, hooks Manager, and
+//     well-known agent cache.
+//  8. Create the Temporal worker and register workflows + activities.
+//  9. Start the worker; block until SIGINT/SIGTERM; drain and shut down.
 func run(cmd *cobra.Command, configFile string) error {
 	logger := slog.Default()
 
@@ -130,8 +146,12 @@ func run(cmd *cobra.Command, configFile string) error {
 		"auditTrail", cfg.AuditTrail,
 	)
 
-	// ── 2. Audit trail initialisation ────────────────────────────────────────
-	trail, closer, err := initAuditTrail(cfg)
+	// ── 2. Audit trail + well-known agent registration ──────────────────────
+	// initAuditTrail returns the audit.Trail (used by Activities) and, for
+	// the sqlite backend, also the populated WellKnownAgentCache (S7).
+	// For the in-memory backend the cache is empty (the in-memory trail
+	// does not back a Provenance subsystem so there are no AgentIDs to mint).
+	trail, wellKnownCache, closer, err := initAuditTrail(cfg)
 	if err != nil {
 		return fmt.Errorf(
 			"pastured: audit trail initialisation failed"+
@@ -148,9 +168,37 @@ func run(cmd *cobra.Command, configFile string) error {
 		}()
 	}
 
-	logger.Info("audit trail ready", "backend", cfg.AuditTrail)
+	logger.Info("audit trail ready",
+		"backend", cfg.AuditTrail,
+		"wellKnownAgents", wellKnownCache.Len(),
+	)
 
-	// ── 3. Connect to Temporal ────────────────────────────────────────────────
+	// ── 3. Optional idle-after-migrate window ────────────────────────────────
+	// Used by S3 Scenario 12 (concurrent-migrator race) to widen the window
+	// during which a second migrator can race the first. Production paths
+	// pass 0 (default) and skip this branch entirely.
+	idleDuration, err := cmd.Flags().GetDuration("idle-after-migrate")
+	if err != nil {
+		return fmt.Errorf(
+			"pastured: cannot read --idle-after-migrate flag value"+
+				" — this is a programming error in flag registration: %w",
+			err,
+		)
+	}
+	if idleDuration > 0 {
+		logger.Info("idling after migration as requested by --idle-after-migrate",
+			"duration", idleDuration,
+		)
+		select {
+		case <-time.After(idleDuration):
+			logger.Info("idle window elapsed; proceeding to worker start")
+		case sig := <-signalChannel():
+			logger.Info("shutdown signal during idle window; exiting before worker start", "signal", sig)
+			return nil
+		}
+	}
+
+	// ── 4. Connect to Temporal ────────────────────────────────────────────────
 	temporalClient, err := client.Dial(client.Options{
 		HostPort:  cfg.Connection.ServerAddress,
 		Namespace: cfg.Connection.Namespace,
@@ -165,7 +213,7 @@ func run(cmd *cobra.Command, configFile string) error {
 	defer temporalClient.Close()
 	logger.Info("connected to Temporal", "address", cfg.Connection.ServerAddress)
 
-	// ── 4. Auto-register search attributes ───────────────────────────────────
+	// ── 5. Auto-register search attributes ───────────────────────────────────
 	ctx := context.Background()
 	if err := temporal.EnsureSearchAttributes(ctx, temporalClient, cfg.Connection.Namespace, logger); err != nil {
 		// Non-fatal: log and continue — search attributes may already exist or
@@ -175,28 +223,68 @@ func run(cmd *cobra.Command, configFile string) error {
 		)
 	}
 
-	// ── 5. Initialise hooks Manager ───────────────────────────────────────────
-	// No default handlers in v1. Plugin integrations (e.g. Claude Code hooks)
-	// register handlers by importing pastured as a library or via the hooks API.
+	// ── 6. Initialise hooks Manager ───────────────────────────────────────────
+	// Plugin integrations (e.g. Claude Code hooks) register handlers by
+	// importing pastured as a library or via the hooks API. The in-tree
+	// free-floating event recorders (currently: GitRecorder, S9) are
+	// registered conditionally below — only when the audit backend is sqlite,
+	// because the recorders require a durable *sql.DB to recover the
+	// just-inserted audit_events row id (PROPOSAL-2 §7.11; see
+	// internal/tasks/free_floating.go for the rationale).
 	hooksMgr := hooks.NewManager()
-	logger.Info("hooks manager ready", "handlers", 0)
+	registeredRecorders := 0
+	if tracker, ok := trail.(protocol.TaskTracker); ok && cfg.AuditTrail == types.BackendSqlite {
+		dbPath := cfg.AuditDBPath
+		if dbPath == "" {
+			home, herr := os.UserHomeDir()
+			if herr != nil {
+				home = "."
+			}
+			dbPath = filepath.Join(home, ".local", "share", "pasture", "audit.db")
+		}
+		auditDB, derr := tasks.OpenAuditDBForFreeFloating(dbPath)
+		if derr != nil {
+			return fmt.Errorf(
+				"pastured: cannot open auxiliary audit handle for free-floating event recorders"+
+					" (path=%q)"+
+					" — the unified pasture.db opened cleanly but a second handle to the same file failed; verify the file is not held by another process: %w",
+				dbPath, derr,
+			)
+		}
+		defer func() {
+			if cerr := auditDB.Close(); cerr != nil {
+				logger.Error("auxiliary audit handle close error", "err", cerr)
+			}
+		}()
+		if _, err := hooks.RegisterDefaultRecorders(hooksMgr, tracker, auditDB); err != nil {
+			return fmt.Errorf(
+				"pastured: cannot register default free-floating event recorders"+
+					" — daemon startup cannot proceed with hooks half-wired: %w",
+				err,
+			)
+		}
+		registeredRecorders = 1
+	}
+	logger.Info("hooks manager ready", "handlers", registeredRecorders)
 
-	// ── 6. Construct Activities with injected dependencies ────────────────────
-	// Activities receives trail and hooksMgr via constructor injection rather
-	// than singletons — this makes the wiring explicit and testable.
+	// ── 7. Construct Activities with injected dependencies ────────────────────
+	// Activities receives trail, hooksMgr, and the populated well-known agent
+	// cache (for S8 attribution) via constructor injection rather than
+	// singletons — this makes the wiring explicit and testable.
 	acts := &temporal.Activities{
-		Trail:    trail,
-		HooksMgr: hooksMgr,
+		Trail:           trail,
+		HooksMgr:        hooksMgr,
+		WellKnownAgents: wellKnownCache,
 	}
 
-	// ── 7. Create worker and register workflows + activities ──────────────────
+	// ── 8. Create worker and register workflows + activities ──────────────────
 	w := worker.New(temporalClient, cfg.Connection.TaskQueue, worker.Options{})
 	temporal.RegisterWorkflows(w, acts)
 	logger.Info("registered workflows and activities",
 		"taskQueue", cfg.Connection.TaskQueue,
 	)
 
-	// ── 8. Start worker, block, graceful shutdown ─────────────────────────────
+	// ── 9. Start worker, block, graceful shutdown ─────────────────────────────
 	// worker.Run() blocks internally and stops when the interrupt channel fires.
 	// We use our own signal channel so we can log the shutdown reason.
 	stopCh := make(chan os.Signal, 1)
@@ -229,14 +317,34 @@ func run(cmd *cobra.Command, configFile string) error {
 	return nil
 }
 
-// initAuditTrail creates the appropriate Trail implementation from config.
+// initAuditTrail creates the appropriate Trail implementation from config and,
+// for the sqlite backend, also opens the unified protocol.TaskTracker and
+// runs the well-known automaton-agent registration (PROPOSAL-2 §7.7.3, S7).
 //
-// Returns the Trail, an optional closer func (non-nil for SQLite), and any
-// initialisation error.
-func initAuditTrail(cfg config.PasturedConfig) (audit.Trail, func() error, error) {
+// Return contract:
+//   - trail: the audit.Trail used by Activities. For sqlite this is the
+//     unified TaskTracker (which satisfies audit.Trail by exposing the four
+//     audit method signatures); for memory this is a fresh in-memory trail.
+//   - cache: a populated WellKnownAgentCache for sqlite (15 entries on
+//     successful registration), or an empty cache for memory (the in-memory
+//     trail does not back a Provenance subsystem so there are no AgentIDs
+//     to mint). The cache is always non-nil so Activities.WellKnownAgents
+//     may be safely dereferenced for length checks.
+//   - closer: a cleanup function that must be called on daemon shutdown.
+//     For sqlite this calls TaskTracker.Close (which releases both the
+//     audit and Provenance handles exactly once). For memory this is nil.
+//   - error: initialisation failure (CategoryStorage / CategoryConnection /
+//     CategoryConfig).
+func initAuditTrail(cfg config.PasturedConfig) (audit.Trail, *tasks.WellKnownAgentCache, func() error, error) {
+	emptyCache := tasks.NewWellKnownAgentCache()
+
 	switch cfg.AuditTrail {
 	case types.BackendMemory, "":
-		return audit.NewInMemoryAuditTrail(), nil, nil
+		// In-memory backend: no Provenance handle to mint AgentIDs against,
+		// so the cache stays empty. Activities that require attribution must
+		// either short-circuit on cache.Len() == 0 or skip the in-memory
+		// configuration in production deployments.
+		return audit.NewInMemoryAuditTrail(), emptyCache, nil, nil
 
 	case types.BackendSqlite:
 		dbPath := cfg.AuditDBPath
@@ -247,18 +355,55 @@ func initAuditTrail(cfg config.PasturedConfig) (audit.Trail, func() error, error
 			}
 			dbPath = filepath.Join(home, ".local", "share", "pasture", "audit.db")
 		}
-		sqliteTrail, err := audit.NewSqliteAuditTrail(dbPath)
+
+		// Open the unified TaskTracker. This runs the audit migrator (v1→v3)
+		// and creates the pasture-side tables. The returned tracker satisfies
+		// audit.Trail because its method set includes the four audit
+		// signatures inline.
+		tracker, err := tasks.OpenTaskTracker(dbPath)
 		if err != nil {
-			return nil, nil, err
+			return nil, emptyCache, nil, fmt.Errorf(
+				"pastured.initAuditTrail: cannot open unified TaskTracker at %q"+
+					" — verify the path is writable and the on-disk schema is at v3 or compatible: %w",
+				dbPath, err,
+			)
 		}
-		return sqliteTrail, sqliteTrail.Close, nil
+
+		// Register the canonical 15 well-known automaton agents (S7,
+		// idempotent across restarts). Run with a background context — the
+		// startup path is bounded (15 entries) and cancellation is signalled
+		// out-of-band via the OS signal handler in step 9.
+		cache := tasks.NewWellKnownAgentCache()
+		if err := tasks.RegisterWellKnownAgents(context.Background(), tracker, cache); err != nil {
+			// On failure, close the tracker we just opened so the file
+			// handle is released before propagating the error.
+			_ = tracker.Close()
+			return nil, emptyCache, nil, fmt.Errorf(
+				"pastured.initAuditTrail: well-known automaton agent registration failed at %q"+
+					" — daemon startup cannot proceed without the cache populated: %w",
+				dbPath, err,
+			)
+		}
+
+		return tracker, cache, tracker.Close, nil
 
 	default:
-		return nil, nil, fmt.Errorf(
+		return nil, emptyCache, nil, fmt.Errorf(
 			"unknown audit trail backend %q"+
 				" — valid values are %q and %q"+
 				" — set via --audit-trail flag or PASTURE_AUDIT_TRAIL env var",
 			cfg.AuditTrail, types.BackendMemory, types.BackendSqlite,
 		)
 	}
+}
+
+// signalChannel returns a buffered channel that fires on SIGINT/SIGTERM. It
+// is used by the optional --idle-after-migrate window so the daemon can exit
+// cleanly without proceeding to worker start if the operator hits Ctrl-C
+// during the idle period (the default worker-start path uses its own signal
+// channel — see step 9).
+func signalChannel() <-chan os.Signal {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	return ch
 }

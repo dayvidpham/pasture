@@ -10,6 +10,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/acp"
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/hooks"
+	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
@@ -24,9 +25,17 @@ import (
 //
 // Trail must not be nil. HooksMgr may be nil — all hook dispatch is best-effort
 // and a nil manager is a no-op.
+//
+// WellKnownAgents (PROPOSAL-2 §7.7.3, S7) holds the in-memory cache of
+// well-known automaton-name → provenance.AgentID minted at pastured startup.
+// S8 activities consult this cache to attribute audit events to the correct
+// SoftwareAgent (e.g. CheckConstraints uses the "pasture/automaton/check-constraints"
+// AgentID). May be nil when activities are constructed for tests that do not
+// exercise attribution; the activity must check before calling into the cache.
 type Activities struct {
-	Trail    audit.Trail
-	HooksMgr *hooks.Manager
+	Trail           audit.Trail
+	HooksMgr        *hooks.Manager
+	WellKnownAgents *tasks.WellKnownAgentCache
 }
 
 // ─── ConstraintViolation ──────────────────────────────────────────────────────

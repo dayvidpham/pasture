@@ -39,6 +39,7 @@ func TestRootCmdFlagRegistration(t *testing.T) {
 		"address",
 		"audit-trail",
 		"audit-db-path",
+		"idle-after-migrate",
 		"version",
 	}
 
@@ -65,6 +66,7 @@ func TestRootCmdFlagDefaults(t *testing.T) {
 		{"address", "localhost:7233"},
 		{"audit-trail", string(types.BackendMemory)},
 		{"audit-db-path", ""},
+		{"idle-after-migrate", "0s"},
 		{"config", config.DefaultConfigPath()},
 	}
 
@@ -156,12 +158,14 @@ func TestResolvePasturedConfig_CLIOverridesEnv(t *testing.T) {
 // ─── initAuditTrail ────────────────────────────────────────────────────────────
 
 // TestInitAuditTrail_Memory verifies that the memory backend is returned for
-// BackendMemory and that the closer is nil (no resource to release).
+// BackendMemory and that the closer is nil (no resource to release). The
+// well-known cache is empty for the in-memory backend (no Provenance subsystem
+// to mint AgentIDs against).
 func TestInitAuditTrail_Memory(t *testing.T) {
 	cfg := config.PasturedConfig{
 		AuditTrail: types.BackendMemory,
 	}
-	trail, closer, err := initAuditTrail(cfg)
+	trail, cache, closer, err := initAuditTrail(cfg)
 	if err != nil {
 		t.Fatalf("initAuditTrail(memory): unexpected error: %v", err)
 	}
@@ -171,6 +175,12 @@ func TestInitAuditTrail_Memory(t *testing.T) {
 	if closer != nil {
 		t.Error("initAuditTrail(memory): closer should be nil for in-memory backend")
 	}
+	if cache == nil {
+		t.Fatal("initAuditTrail(memory): cache is nil; expected an empty cache (defensive non-nil)")
+	}
+	if cache.Len() != 0 {
+		t.Errorf("initAuditTrail(memory): cache has %d entries, want 0 (no Provenance subsystem)", cache.Len())
+	}
 }
 
 // TestInitAuditTrail_EmptyFallsBackToMemory verifies that an empty string
@@ -179,7 +189,7 @@ func TestInitAuditTrail_EmptyFallsBackToMemory(t *testing.T) {
 	cfg := config.PasturedConfig{
 		AuditTrail: "",
 	}
-	trail, closer, err := initAuditTrail(cfg)
+	trail, cache, closer, err := initAuditTrail(cfg)
 	if err != nil {
 		t.Fatalf("initAuditTrail(empty): unexpected error: %v", err)
 	}
@@ -189,10 +199,14 @@ func TestInitAuditTrail_EmptyFallsBackToMemory(t *testing.T) {
 	if closer != nil {
 		t.Error("initAuditTrail(empty): closer should be nil for memory backend")
 	}
+	if cache == nil {
+		t.Fatal("initAuditTrail(empty): cache is nil; expected an empty cache")
+	}
 }
 
 // TestInitAuditTrail_Sqlite verifies that the SQLite backend creates a database
-// file at the specified path and returns a valid closer.
+// file at the specified path, returns a valid closer, and populates the
+// well-known agent cache with all 15 entries (S7 Scenario 14 round 1).
 func TestInitAuditTrail_Sqlite(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := tmpDir + "/audit.db"
@@ -201,7 +215,7 @@ func TestInitAuditTrail_Sqlite(t *testing.T) {
 		AuditTrail:  types.BackendSqlite,
 		AuditDBPath: dbPath,
 	}
-	trail, closer, err := initAuditTrail(cfg)
+	trail, cache, closer, err := initAuditTrail(cfg)
 	if err != nil {
 		t.Fatalf("initAuditTrail(sqlite): %v", err)
 	}
@@ -210,6 +224,12 @@ func TestInitAuditTrail_Sqlite(t *testing.T) {
 	}
 	if closer == nil {
 		t.Fatal("initAuditTrail(sqlite): closer is nil for SQLite backend")
+	}
+	if cache == nil {
+		t.Fatal("initAuditTrail(sqlite): cache is nil; expected populated cache")
+	}
+	if got, want := cache.Len(), 15; got != want {
+		t.Errorf("initAuditTrail(sqlite): cache has %d entries, want %d", got, want)
 	}
 	// Verify the database file was created.
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
@@ -233,7 +253,7 @@ func TestInitAuditTrail_Sqlite_DefaultPath(t *testing.T) {
 		AuditTrail:  types.BackendSqlite,
 		AuditDBPath: "", // empty → use default
 	}
-	trail, closer, err := initAuditTrail(cfg)
+	trail, cache, closer, err := initAuditTrail(cfg)
 	if err != nil {
 		t.Fatalf("initAuditTrail(sqlite, default path): %v", err)
 	}
@@ -242,6 +262,9 @@ func TestInitAuditTrail_Sqlite_DefaultPath(t *testing.T) {
 	}
 	if closer == nil {
 		t.Fatal("closer is nil")
+	}
+	if cache == nil || cache.Len() != 15 {
+		t.Errorf("cache is %v with len=%d; want non-nil with 15 entries", cache, cache.Len())
 	}
 	// Verify the default db file was created inside our temp HOME.
 	expectedPath := tmpDir + "/.local/share/pasture/audit.db"
@@ -259,7 +282,7 @@ func TestInitAuditTrail_UnknownBackend(t *testing.T) {
 	cfg := config.PasturedConfig{
 		AuditTrail: types.AuditTrailBackend("postgres"),
 	}
-	_, _, err := initAuditTrail(cfg)
+	_, _, _, err := initAuditTrail(cfg)
 	if err == nil {
 		t.Fatal("expected error for unknown backend, got nil")
 	}
