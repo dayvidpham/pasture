@@ -1,8 +1,8 @@
 package errors_test
 
 import (
-	stderrors "errors"
 	"bytes"
+	stderrors "errors"
 	"strings"
 	"testing"
 
@@ -20,6 +20,7 @@ func TestCategoryValues(t *testing.T) {
 		{errors.CategoryWorkflow, "workflow error"},
 		{errors.CategoryValidation, "validation error"},
 		{errors.CategoryConfig, "config error"},
+		{errors.CategoryStorage, "storage error"},
 	}
 	for _, tc := range cases {
 		if string(tc.cat) != tc.want {
@@ -177,6 +178,18 @@ func TestExitCode_Workflow(t *testing.T) {
 	err := &errors.StructuredError{Category: errors.CategoryWorkflow, What: "timed out"}
 	if got := errors.ExitCode(err); got != 3 {
 		t.Errorf("ExitCode(workflow) = %d, want 3", got)
+	}
+}
+
+// TestExitCode_Storage verifies that CategoryStorage maps to exit code 5
+// (PROPOSAL-2 §7.10.5 / IMPL_PLAN §1.4). Used by:
+//   - audit migration failures (Migrate)
+//   - newer-schema-than-binary rejection (Scenario 5)
+//   - SQLite open / write failures in the unified pasture.db
+func TestExitCode_Storage(t *testing.T) {
+	err := &errors.StructuredError{Category: errors.CategoryStorage, What: "schema migration failed"}
+	if got := errors.ExitCode(err); got != 5 {
+		t.Errorf("ExitCode(storage) = %d, want 5", got)
 	}
 }
 

@@ -25,6 +25,10 @@ const (
 	CategoryValidation Category = "validation error"
 	// CategoryConfig indicates a configuration file or environment variable problem.
 	CategoryConfig Category = "config error"
+	// CategoryStorage indicates a persistence-layer failure: SQLite open
+	// errors, schema migration failures, or schema-version mismatches between
+	// the binary and the on-disk database. See PROPOSAL-2 §7.10.5 for rationale.
+	CategoryStorage Category = "storage error"
 )
 
 // StructuredError implements the error interface with actionable diagnostic fields.
@@ -72,6 +76,7 @@ func (e *StructuredError) Report(w io.Writer) {
 //   - CategoryConnection → 2
 //   - CategoryWorkflow → 3
 //   - CategoryConfig → 4
+//   - CategoryStorage → 5
 //   - any other error (or nil) → 1
 func ExitCode(err error) int {
 	if err == nil {
@@ -88,6 +93,8 @@ func ExitCode(err error) int {
 			return 3
 		case CategoryConfig:
 			return 4
+		case CategoryStorage:
+			return 5
 		}
 	}
 	return 1 // default for unknown error types
