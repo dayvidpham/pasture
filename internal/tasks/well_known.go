@@ -53,6 +53,22 @@ import (
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
+// auditDBHolder is an unexported interface satisfied by any protocol.TaskTracker
+// implementation that exposes its underlying audit *sql.DB handle.
+//
+// Why an interface instead of a concrete type assertion to *trackerImpl:
+// RegisterWellKnownAgents only needs raw *sql.DB access for the per-name
+// BEGIN IMMEDIATE transaction. By asserting against this narrow interface we
+// decouple the function from the concrete implementation — any test fake or
+// future alternative tracker that wires up a *sql.DB and exposes it here can
+// be passed to RegisterWellKnownAgents without contributing a *trackerImpl.
+//
+// *trackerImpl satisfies this interface via its auditDBHandle() method in
+// tracker.go. Test fakes satisfy it by embedding or implementing auditDBHandle.
+type auditDBHolder interface {
+	auditDBHandle() *sql.DB
+}
+
 // RegisterWellKnownAgents mints (or recovers) every entry in
 // WellKnownAgents() against the supplied tracker and populates cache.
 //
@@ -62,11 +78,11 @@ import (
 // AND identical AgentIDs in `pasture_well_known_agents` (pointwise across
 // startups).
 //
-// tracker MUST be a *trackerImpl (the only protocol.TaskTracker implementation
-// pasture ships); the function uses an internal type assertion to recover the
-// audit `*sql.DB` handle for the per-name transaction. Callers that pass a
-// foreign implementation get a `CategoryConfig` *StructuredError pointing at
-// the wiring error.
+// tracker MUST implement auditDBHolder (i.e. it must expose an audit *sql.DB
+// handle via auditDBHandle). Both the production *trackerImpl and any test
+// fake that wires up a real *sql.DB satisfy this. Callers that pass a tracker
+// without the method get a CategoryConfig *StructuredError pointing at the
+// wiring error.
 //
 // cache MUST be non-nil. After successful return, cache contains exactly
 // WellKnownAgentCount entries; on any error, cache may contain a strict
@@ -77,7 +93,8 @@ import (
 //
 // Errors are *pasterrors.StructuredError categorised as:
 //
-//   - CategoryConfig (exit 4): tracker is nil or not a *trackerImpl; cache is nil.
+//   - CategoryConfig (exit 4): tracker is nil, does not implement auditDBHolder,
+//     or its auditDBHandle() returns nil; cache is nil.
 //   - CategoryStorage (exit 5): SQLite read/write or transaction failure.
 //   - CategoryWorkflow (exit 3): Provenance RegisterSoftwareAgent failure.
 //
@@ -105,23 +122,24 @@ func RegisterWellKnownAgents(ctx context.Context, tracker protocol.TaskTracker, 
 		}
 	}
 
-	impl, ok := tracker.(*trackerImpl)
+	dbHolder, ok := tracker.(auditDBHolder)
 	if !ok {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConfig,
-			What:     fmt.Sprintf("tasks.RegisterWellKnownAgents: tracker is %T, not *trackerImpl", tracker),
-			Why:      "the per-name registration step needs raw access to the audit *sql.DB to run a BEGIN IMMEDIATE transaction across `pasture_well_known_agents` and `pasture_agent_categories` — only the in-package *trackerImpl exposes that handle",
+			What:     fmt.Sprintf("tasks.RegisterWellKnownAgents: tracker (%T) does not implement auditDBHolder", tracker),
+			Why:      "the per-name registration step needs raw access to an audit *sql.DB to run a transaction across `pasture_well_known_agents` and `pasture_agent_categories`; the tracker must expose it via auditDBHandle()",
 			Impact:   "well-known agent registration cannot proceed and the daemon cannot guarantee the BCNF integrity of the pasture-side tables",
-			Fix:      "construct the tracker via tasks.OpenTaskTracker (or protocol.OpenTaskTracker — same constructor); do not pass test mocks or third-party TaskTracker implementations to RegisterWellKnownAgents",
+			Fix:      "construct the tracker via tasks.OpenTaskTracker (or protocol.OpenTaskTracker); test fakes must implement auditDBHandle() *sql.DB on their type",
 		}
 	}
-	if impl.auditDB == nil {
+	auditDB := dbHolder.auditDBHandle()
+	if auditDB == nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConfig,
-			What:     "tasks.RegisterWellKnownAgents: tracker has nil audit DB handle",
-			Why:      "the *trackerImpl was constructed without an auxiliary *sql.DB; this indicates a programming error in the constructor wiring",
+			What:     fmt.Sprintf("tasks.RegisterWellKnownAgents: tracker (%T).auditDBHandle() returned nil", tracker),
+			Why:      "the tracker was constructed without an auxiliary *sql.DB; this indicates a programming error in the constructor or test helper",
 			Impact:   "well-known agent registration cannot proceed; the daemon should fail fast rather than start without idempotent automaton attribution",
-			Fix:      "ensure the tracker was opened via tasks.OpenTaskTracker (which always wires auditDB) and not constructed by a test helper that bypasses openTaskTrackerImpl",
+			Fix:      "ensure the tracker is opened via tasks.OpenTaskTracker (which always wires auditDB); test fakes must return a non-nil *sql.DB from auditDBHandle()",
 		}
 	}
 
@@ -129,7 +147,7 @@ func RegisterWellKnownAgents(ctx context.Context, tracker protocol.TaskTracker, 
 	// this too (post-S2 via the migrator path; pre-S2 via ensurePastureTables);
 	// repeating here means RegisterWellKnownAgents is robust to future
 	// constructor refactors that drop the defensive call.
-	if err := ensurePastureTables(impl.auditDB); err != nil {
+	if err := ensurePastureTables(auditDB); err != nil {
 		return err
 	}
 
@@ -144,7 +162,7 @@ func RegisterWellKnownAgents(ctx context.Context, tracker protocol.TaskTracker, 
 			}
 		}
 
-		id, err := ensureWellKnownAgent(ctx, impl.auditDB, tracker, spec)
+		id, err := ensureWellKnownAgent(ctx, auditDB, tracker, spec)
 		if err != nil {
 			return err
 		}
