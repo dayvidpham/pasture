@@ -140,8 +140,8 @@ func TestScenario1_SingleDBFileWithEpochAlignment(t *testing.T) {
 		"aura-plugins-test",
 		"Build X",
 		"Scenario 1 test request",
-		provenance.TypeFeature,
-		provenance.PriorityP2,
+		provenance.TaskTypeFeature,
+		provenance.PriorityMedium,
 		provenance.PhaseRequest,
 	)
 	if err != nil {
@@ -558,7 +558,7 @@ func TestForwarding_ProvenanceCreateAndShow(t *testing.T) {
 	t.Parallel()
 	tracker, _ := openTrackerForTest(t)
 
-	task, err := tracker.Create("pasture-test", "fwd", "forward smoke", provenance.TypeFeature, provenance.PriorityP2, provenance.PhaseRequest)
+	task, err := tracker.Create("pasture-test", "fwd", "forward smoke", provenance.TaskTypeFeature, provenance.PriorityMedium, provenance.PhaseRequest)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
