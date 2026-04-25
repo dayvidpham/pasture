@@ -3,7 +3,7 @@
 VERSION ?= dev
 
 # Binaries produced by make build
-BINS := bin/pastured bin/pasture-msg bin/pasture-release
+BINS := bin/pastured bin/pasture-msg bin/pasture-release bin/pasture
 
 all: build
 
@@ -37,6 +37,12 @@ bin/pasture-release:
 	CGO_ENABLED=0 go build \
 		-ldflags "-X main.version=$(VERSION)" \
 		-o bin/pasture-release ./cmd/pasture-release
+
+bin/pasture:
+	@mkdir -p bin
+	CGO_ENABLED=0 go build \
+		-ldflags "-X main.version=$(VERSION)" \
+		-o bin/pasture ./cmd/pasture
 
 # --------------------------------------------------------------------------
 # Test
@@ -97,7 +103,7 @@ release-all:
 		GOOS=$$(echo $$target | cut -d/ -f1); \
 		GOARCH=$$(echo $$target | cut -d/ -f2); \
 		SUFFIX="$${GOOS}-$${GOARCH}"; \
-		for cmd in pastured pasture-msg pasture-release; do \
+		for cmd in pastured pasture-msg pasture-release pasture; do \
 			echo "Building $${cmd}-$${SUFFIX}..."; \
 			CGO_ENABLED=0 GOOS=$${GOOS} GOARCH=$${GOARCH} go build \
 				-ldflags "-s -w -X main.version=$(VERSION)" \

@@ -51,13 +51,20 @@
           subPackages = [ "cmd/pasture-release" ];
         });
 
-        # All three binaries in one derivation for convenience
-        pasture-all = pkgs.buildGoModule (commonAttrs // {
+        # The pasture CLI: local task management backed by Provenance.
+        pasture = pkgs.buildGoModule (commonAttrs // {
           pname = "pasture";
+          subPackages = [ "cmd/pasture" ];
+        });
+
+        # All four binaries in one derivation for convenience
+        pasture-bundle = pkgs.buildGoModule (commonAttrs // {
+          pname = "pasture-bundle";
           subPackages = [
             "cmd/pastured"
             "cmd/pasture-msg"
             "cmd/pasture-release"
+            "cmd/pasture"
           ];
         });
 
@@ -86,8 +93,9 @@
           inherit pastured;
           inherit pasture-msg;
           inherit pasture-release;
-          pasture = pasture-all;
-          default = pasture-all;
+          inherit pasture;
+          inherit pasture-bundle;
+          default = pasture-bundle;
         };
 
         devShells.default = devShell;
@@ -97,6 +105,7 @@
           inherit pastured;
           inherit pasture-msg;
           inherit pasture-release;
+          inherit pasture;
         };
       }
     );

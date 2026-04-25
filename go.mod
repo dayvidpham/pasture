@@ -1,10 +1,9 @@
 module github.com/dayvidpham/pasture
 
-go 1.24.0
-
-toolchain go1.24.13
+go 1.24.13
 
 require (
+	github.com/dayvidpham/provenance v0.0.0-00010101000000-000000000000
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.20.1
@@ -19,6 +18,8 @@ require (
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/dayvidpham/bestiary v0.1.0 // indirect
+	github.com/dominikbraun/graph v0.23.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/facebookgo/clock v0.0.0-20150410010913-600d898af40a // indirect
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
@@ -56,4 +57,7 @@ require (
 	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
+	zombiezen.com/go/sqlite v1.4.2 // indirect
 )
+
+replace github.com/dayvidpham/provenance => ../../../../provenance
