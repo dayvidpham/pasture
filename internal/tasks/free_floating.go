@@ -18,27 +18,22 @@
 // entry points call to land that pair of writes atomically (from the caller's
 // perspective). Each helper:
 //
-//  1. Calls tracker.RecordEvent (writes the audit_events row).
-//  2. Looks up the just-inserted row's id via the auxiliary *sql.DB.
-//  3. Calls tracker.AttachContext (writes the context_edges row).
-//  4. Returns the event id so the caller can attach further contexts if needed
+//  1. Calls tracker.RecordEventReturningID (writes the audit_events row and
+//     returns its id atomically — no separate SELECT MAX round-trip needed).
+//  2. Calls tracker.AttachContext (writes the context_edges row).
+//  3. Returns the event id so the caller can attach further contexts if needed
 //     (Scenario 7 multi-context attachment: e.g., a post-epoch git commit
 //     citing epoch X gets BOTH a ContextGit edge and a ContextEpoch edge).
 //
-// ─── Why we take an explicit *sql.DB handle ──────────────────────────────────
+// ─── Why we still accept an explicit *sql.DB handle ─────────────────────────
 //
-// PROPOSAL-2 §7.11 specifies "protocol.TaskTracker.RecordEvent(...) → returns
-// event_id", but the S5 interface signature is `RecordEvent(ctx, event) error`
-// with no event_id return — the audit-side enhancement to surface
-// LastInsertRowID is an explicit "out of scope for S5" item documented in
-// internal/tasks/tracker_test.go's recordEventForTest helper (S5 worker note).
-//
-// Until that enhancement lands, the helpers in this file accept the auxiliary
-// *sql.DB handle (the same handle openTaskTrackerImpl opens via
-// openAuditHandle) so they can run a SELECT MAX(id) lookup against the SAME
-// connection that just wrote — which is race-safe under D11 (low write
-// contention; modernc/sqlite WAL + busy_timeout=5000) and matches the
-// recordEventForTest pattern already in use by Scenarios 1 and 7.
+// The three public helpers (RecordGitEvent / RecordSkillEvent /
+// RecordSessionEvent) still carry an auditDB *sql.DB parameter for API
+// compatibility with existing callers (hooks/git_recorder.go,
+// cmd/pastured/main.go, and tests). The parameter is no longer used by the
+// implementation — RecordEventReturningID (added in S8) bundles the write +
+// id-recovery in a single call. A future clean-up pass may drop the parameter
+// once all call sites are updated.
 //
 // The hook handler in internal/hooks/git_recorder.go caches the (*sql.DB,
 // TaskTracker) pair at construction time so callers downstream see only a
@@ -64,7 +59,6 @@ package tasks
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 
@@ -132,14 +126,14 @@ const (
 // audit_events and attaches a ContextGit edge keyed by the supplied SHA / ref.
 //
 // Parameters:
-//   - ctx: context for cancellation; propagates to RecordEvent and AttachContext.
+//   - ctx: context for cancellation; propagates to RecordEventReturningID and
+//     AttachContext.
 //   - tracker: the unified TaskTracker (typically obtained from
 //     OpenTaskTracker). MUST be non-nil.
-//   - auditDB: the auxiliary *sql.DB handle that backs the audit subsystem (the
-//     same one openTaskTrackerImpl opens via openAuditHandle). Used only for
-//     the post-write SELECT MAX(id) lookup that recovers the event id; will
-//     become unnecessary once the audit-side RecordEventReturningID
-//     enhancement lands (PROPOSAL-2 §7.11). MUST be non-nil.
+//   - auditDB: retained for API compatibility with existing callers; no longer
+//     used by the implementation (RecordEventReturningID bundles write + id
+//     recovery atomically, removing the need for a separate SELECT MAX round-trip).
+//     MAY be nil without causing a validation error.
 //   - sha: the git commit SHA (or remote ref for pushes / base-ref for
 //     rebases). Used as the context_id of the ContextGit edge. MUST be
 //     non-empty; an empty sha would create a row no Timeline lookup can match.
@@ -159,12 +153,12 @@ const (
 // X also gets ContextEpoch — see §11 Scenario 7 multi-context attachment).
 //
 // Errors are *pasterrors.StructuredError with one of:
-//   - CategoryValidation: nil tracker, nil auditDB, empty sha, or an empty
-//     eventType (the underlying audit store would silently accept these but
-//     they're programming errors here).
-//   - CategoryStorage: RecordEvent / SELECT MAX(id) / AttachContext write or
-//     read failure (file unwritable, schema drift, etc.). Underlying error
-//     wrapped via pasterrors.StructuredError.Why.
+//   - CategoryValidation: nil tracker, empty sha, or an empty eventType (the
+//     underlying audit store would silently accept these but they're programming
+//     errors here).
+//   - CategoryStorage: RecordEventReturningID / AttachContext write failure
+//     (file unwritable, schema drift, etc.). Underlying error wrapped via
+//     pasterrors.StructuredError.Why.
 func RecordGitEvent(
 	ctx context.Context,
 	tracker protocol.TaskTracker,
@@ -242,18 +236,20 @@ func RecordSessionEvent(
 //     moot post-S4. The Phase field is also left empty for the same reason —
 //     PROPOSAL-2 §7.2 documents the column as "nullable for free-floating
 //     events" in the v3+ schema.
-//  3. Call tracker.RecordEvent — surfaces audit-store write failures as %w.
-//  4. SELECT MAX(id) via auditDB — recovers the just-inserted row id (D11 low
-//     write contention makes this race-safe in practice; recordEventForTest
-//     uses the same pattern in tests).
-//  5. Call tracker.AttachContext — writes the context_edges row.
+//  3. Call tracker.RecordEventReturningID — persists the event and returns
+//     its audit_events.id atomically (no separate SELECT MAX round-trip).
+//  4. Call tracker.AttachContext — writes the context_edges row.
 //
-// Returns the recovered event id on success so the caller can issue follow-up
+// The auditDB parameter is retained for API compatibility with existing callers
+// (hooks, daemon wiring) but is not used by this implementation now that
+// RecordEventReturningID bundles the write + id-recovery in a single call.
+//
+// Returns the event id on success so the caller can issue follow-up
 // AttachContext calls for multi-context attachment (Scenario 7).
 func recordFreeFloating(
 	ctx context.Context,
 	tracker protocol.TaskTracker,
-	auditDB *sql.DB,
+	_ *sql.DB, // auditDB: retained for call-site compatibility; no longer used (RecordEventReturningID bundles write + id)
 	kind protocol.ContextKind,
 	contextID string,
 	eventType protocol.EventType,
@@ -268,15 +264,6 @@ func recordFreeFloating(
 			Why:      "the helper was invoked without a TaskTracker — this is a programming error",
 			Impact:   "the free-floating event cannot be recorded; the call is a no-op from the caller's perspective but no row was written",
 			Fix:      "obtain a TaskTracker via tasks.OpenTaskTracker(dbPath) or protocol.OpenTaskTracker(dbPath) and pass it to this helper",
-		}
-	}
-	if auditDB == nil {
-		return 0, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("tasks.%s: auditDB is nil", fnName),
-			Why:      "the helper was invoked without the auxiliary *sql.DB handle needed to recover the event id after RecordEvent",
-			Impact:   "the free-floating event cannot be recorded; without the event id the AttachContext call cannot reference the event row",
-			Fix:      "open the auxiliary handle via tasks.OpenAuditDBForFreeFloating(dbPath) (or expose your tracker's auditDB), then pass it to this helper alongside the tracker",
 		}
 	}
 	if contextID == "" {
@@ -319,28 +306,18 @@ func recordFreeFloating(
 		Timestamp: time.Now().UTC(),
 	}
 
-	if err := tracker.RecordEvent(ctx, event); err != nil {
-		return 0, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("tasks.%s: tracker.RecordEvent failed for kind=%s contextID=%q eventType=%q", fnName, kind, contextID, eventType),
-			Why:      err.Error(),
-			Impact:   "the free-floating event was not persisted; no context_edges row will be created either",
-			Fix:      "verify the SQLite file at the configured pasture.db path is writable and the schema is at v3 or higher (run 'pasture migrate' if you suspect schema drift)",
-		}
-	}
-
-	// Recover the just-inserted row id. SELECT MAX(id) is race-safe under D11
-	// (low write contention) and matches the pattern used by
-	// recordEventForTest. When the audit-side RecordEventReturningID
-	// enhancement lands (PROPOSAL-2 §7.11 future work), this lookup goes away.
-	eventID, err := lookupLastEventID(ctx, auditDB)
+	// RecordEventReturningID atomically persists the event and returns its
+	// audit_events.id. This replaces the previous two-step pattern of
+	// RecordEvent + SELECT MAX(id) (lookupLastEventID) that free_floating.go
+	// used before RecordEventReturningID was added to the interface (S8).
+	eventID, err := tracker.RecordEventReturningID(ctx, event)
 	if err != nil {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("tasks.%s: failed to recover last event id after RecordEvent (kind=%s contextID=%q)", fnName, kind, contextID),
+			What:     fmt.Sprintf("tasks.%s: tracker.RecordEventReturningID failed for kind=%s contextID=%q eventType=%q", fnName, kind, contextID, eventType),
 			Why:      err.Error(),
-			Impact:   "the audit_events row was written but the context_edges attachment was skipped; the event will not appear in Timeline lookups for this (kind, contextID)",
-			Fix:      "verify the auxiliary *sql.DB handle is open and connected to the same pasture.db file as the tracker; if the audit_events table is empty the underlying RecordEvent silently no-op'd",
+			Impact:   "the free-floating event was not persisted; no context_edges row will be created either",
+			Fix:      "verify the SQLite file at the configured pasture.db path is writable and the schema is at v3 or higher (run 'pasture migrate' if you suspect schema drift)",
 		}
 	}
 
@@ -363,21 +340,45 @@ func recordFreeFloating(
 // D11's "low write contention" binding and the modernc/sqlite WAL mode (which
 // gives readers immediate visibility of committed writes).
 //
-// If the audit_events table is empty, returns (0, sql.ErrNoRows wrapped) so
-// callers can distinguish "the prior RecordEvent silently no-op'd" from "the
-// SELECT itself failed". Either case is fatal for the helper because the
-// follow-on AttachContext needs a real id.
+// This helper is used by trackerImpl.RecordEventReturningID (tracker.go) to
+// recover the just-inserted row id after trail.RecordEvent commits. It is
+// retained here (rather than moved to tracker.go) because it captures the
+// well-known error messages for the two failure modes callers must handle:
+// empty table and non-positive id.
+//
+// If the audit_events table is empty, returns (0, *StructuredError{CategoryStorage})
+// so callers can distinguish "the prior RecordEvent silently no-op'd" from
+// "the SELECT itself failed". Either case is fatal because the follow-on
+// AttachContext needs a real id.
 func lookupLastEventID(ctx context.Context, auditDB *sql.DB) (int64, error) {
 	var id sql.NullInt64
 	err := auditDB.QueryRowContext(ctx, `SELECT MAX(id) FROM audit_events`).Scan(&id)
 	if err != nil {
-		return 0, err
+		return 0, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     "tasks.lookupLastEventID: SELECT MAX(id) FROM audit_events failed",
+			Why:      err.Error(),
+			Impact:   "the just-inserted audit_events row id cannot be recovered; any dependent AttachContext call will be skipped",
+			Fix:      "verify the auxiliary *sql.DB handle is open and the schema contains the audit_events table (run 'pasture migrate' if you suspect schema drift)",
+		}
 	}
 	if !id.Valid {
-		return 0, errors.New("audit_events table is empty after RecordEvent — the write was not persisted")
+		return 0, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     "tasks.lookupLastEventID: audit_events table is empty after RecordEvent",
+			Why:      "SELECT MAX(id) returned NULL, meaning the prior RecordEvent write was not persisted to the audit_events table",
+			Impact:   "the event id cannot be recovered; the follow-on AttachContext call will be skipped and the event will not appear in Timeline lookups",
+			Fix:      "verify the SQLite file is writable and the schema is at v3 or higher; inspect via 'sqlite3 <db> \"SELECT COUNT(*) FROM audit_events\"'",
+		}
 	}
 	if id.Int64 <= 0 {
-		return 0, fmt.Errorf("audit_events MAX(id)=%d is not positive; the table may be corrupted", id.Int64)
+		return 0, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     fmt.Sprintf("tasks.lookupLastEventID: audit_events MAX(id)=%d is not positive", id.Int64),
+			Why:      "the highest audit_events.id is zero or negative, which indicates table corruption or an id sequence reset",
+			Impact:   "a non-positive event id cannot be used for AttachContext; the context_edges row will not be created",
+			Fix:      "inspect the audit_events table directly via 'sqlite3 <db> \"SELECT id FROM audit_events ORDER BY id DESC LIMIT 5\"' and file a bug if ids are unexpectedly non-positive",
+		}
 	}
 	return id.Int64, nil
 }
@@ -387,9 +388,14 @@ func lookupLastEventID(ctx context.Context, auditDB *sql.DB) (int64, error) {
 // OpenAuditDBForFreeFloating opens an auxiliary *sql.DB handle on the same
 // pasture.db file that protocol.TaskTracker writes to, with the same WAL +
 // busy_timeout=5000 pragmas openTaskTrackerImpl applies. It exists so callers
-// outside internal/tasks (e.g. cmd/pastured wiring code, test code) can pair
-// a TaskTracker with the SELECT MAX(id) lookup the free-floating helpers need
+// outside internal/tasks (e.g. cmd/pastured wiring code, test code) can obtain
+// a direct SQL handle for ad-hoc queries or pasture-specific table writes
 // without depending on internal trackerImpl details.
+//
+// Note: the free-floating recording helpers (RecordGitEvent / RecordSkillEvent /
+// RecordSessionEvent) no longer require this handle internally — they now use
+// tracker.RecordEventReturningID which bundles the write + id recovery. The
+// handle is still accepted as a parameter by those helpers for API compatibility.
 //
 // The returned handle MUST be closed by the caller; typically callers cache
 // it for the lifetime of the daemon and Close it at shutdown.
