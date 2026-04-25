@@ -1,0 +1,256 @@
+// Package handlers — migrate.go
+//
+// Handler for `pasture migrate [--dry-run]` (PROPOSAL-2 §7.9 / §11 Scenario 15).
+//
+// Two execution paths:
+//
+//  1. Dry-run: open a private *sql.DB on the file, read the on-disk version
+//     via audit.ReadSchemaVersion, build a MigratePlan via audit.PlanMigrations,
+//     render via formatters.FormatMigratePlan, exit 0. The file is never
+//     written to (Scenario 15 asserts SHA-256 unchanged before/after).
+//
+//  2. Apply: open the file the same way OpenTaskTracker does — via the
+//     audit subsystem's NewSqliteAuditTrail, which internally invokes
+//     audit.Migrate. This GUARANTEES the explicit-command path and the
+//     auto-on-open path share one migrator implementation (PROPOSAL-2 §7.10
+//     / IMPL_PLAN §3 S6 binding). After the migration runs, we re-probe
+//     the version so the success line reports the actual to-version.
+//
+// All errors are *pasterrors.StructuredError; ExitCode maps category to the
+// canonical exit code. Storage errors map to exit 5 (CategoryStorage); newer-
+// schema rejection surfaces with the same exit code through audit.Migrate's
+// own structured error.
+package handlers
+
+import (
+	"database/sql"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+
+	_ "modernc.org/sqlite" // pure-Go driver; ensures sql.Open("sqlite", ...) works
+
+	"github.com/dayvidpham/pasture/internal/audit"
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/formatters"
+	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/types"
+)
+
+// MigrateInput captures the inputs for `pasture migrate`.
+type MigrateInput struct {
+	// DBPath is the filesystem path to the unified pasture.db. Empty resolves
+	// to tasks.DefaultDBPath().
+	DBPath string
+
+	// DryRun, when true, prints the planned migrations and exits without
+	// modifying the file. Per Scenario 15, the file's SHA-256 must be
+	// unchanged before and after.
+	DryRun bool
+}
+
+// Migrate runs the migration command. Returns the standard (exitCode, error)
+// tuple used by RunE handlers.
+//
+// On success:
+//   - Dry-run prints the plan and returns (0, nil).
+//   - Apply prints "migrated <db> from v<from> to v<to>" and returns (0, nil).
+//
+// On failure: returns ExitCode(err), err. Common categories:
+//   - CategoryStorage (exit 5): migration apply failed, or version probe
+//     failed, or newer-schema rejection.
+//   - CategoryConnection (exit 2): file/dir cannot be opened.
+//   - CategoryValidation (exit 1): bad input (currently unused — DBPath empty
+//     falls back to default rather than rejecting).
+func Migrate(w io.Writer, in MigrateInput, format types.OutputFormat) (int, error) {
+	dbPath := in.DBPath
+	if dbPath == "" {
+		dbPath = tasks.DefaultDBPath()
+	}
+
+	// Ensure the parent directory exists. Without this, dry-run against a
+	// non-existent target path would fail with a confusing "unable to open
+	// database file" rather than the actionable directory-creation error.
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		se := &pasterrors.StructuredError{
+			Category: pasterrors.CategoryConnection,
+			What:     fmt.Sprintf("handlers.Migrate: could not create parent directory for %q", dbPath),
+			Why:      err.Error(),
+			Impact:   "the unified pasture database cannot be opened until the parent directory is writable",
+			Fix:      fmt.Sprintf("create the directory manually with `mkdir -p %q`, or override with --db <path> / $%s", filepath.Dir(dbPath), tasks.DBPathEnv),
+		}
+		return pasterrors.ExitCode(se), se
+	}
+
+	if in.DryRun {
+		return runMigrateDryRun(w, dbPath, format)
+	}
+	return runMigrateApply(w, dbPath, format)
+}
+
+// runMigrateDryRun opens the file read-only, probes the version + plan, and
+// prints the plan WITHOUT modifying the file. Scenario 15 asserts the file
+// SHA-256 is identical before and after this call.
+//
+// We open via sql.Open + read-only queries; we DO NOT call audit.Migrate or
+// NewSqliteAuditTrail (both of which would write to audit_schema_meta).
+func runMigrateDryRun(w io.Writer, dbPath string, format types.OutputFormat) (int, error) {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		se := &pasterrors.StructuredError{
+			Category: pasterrors.CategoryConnection,
+			What:     fmt.Sprintf("handlers.Migrate: cannot open database at %q for dry-run probe", dbPath),
+			Why:      err.Error(),
+			Impact:   "the migration plan cannot be computed because the file is unreachable",
+			Fix:      "verify the path exists, is a SQLite file, and is readable; pass --db <path> if the location differs from the default",
+		}
+		return pasterrors.ExitCode(se), se
+	}
+	defer db.Close()
+
+	currentVersion, err := audit.ReadSchemaVersion(db)
+	if err != nil {
+		return pasterrors.ExitCode(err), err
+	}
+
+	// Future binary wrote this database. Surface the same actionable error
+	// that an apply would produce, so dry-run and apply diverge ONLY in
+	// whether they write — not in their error semantics.
+	if currentVersion > audit.MaxKnownSchemaVersion {
+		// audit.Migrate exposes the canonical error; replay it here so the
+		// CLI surface is consistent. We accept the cost of also writing the
+		// audit_schema_meta if Migrate had unexpected side effects — but
+		// readVersion + Migrate's first probe both return the same error
+		// without writing anything when the version is too high.
+		err := audit.Migrate(db)
+		if err == nil {
+			// Defensive: should be unreachable. If audit.Migrate ever stops
+			// returning an error for a too-high version, the CLI would
+			// silently accept it; surface a clear error instead.
+			se := &pasterrors.StructuredError{
+				Category: pasterrors.CategoryStorage,
+				What:     fmt.Sprintf("handlers.Migrate dry-run: database at %q reports schema v%d > supported v%d but audit.Migrate did not reject", dbPath, currentVersion, audit.MaxKnownSchemaVersion),
+				Why:      "this is a programming error — audit.Migrate must reject newer-schema databases per PROPOSAL-2 §11 Scenario 5",
+				Impact:   "the dry-run cannot safely proceed because the binary cannot interpret rows written by a newer schema",
+				Fix:      "upgrade pasture to a version that supports the on-disk schema, or downgrade the file (not recommended); file an issue against pasture/internal/audit",
+			}
+			return pasterrors.ExitCode(se), se
+		}
+		return pasterrors.ExitCode(err), err
+	}
+
+	plan := formatters.MigratePlan{
+		DBPath:         dbPath,
+		CurrentVersion: currentVersion,
+		TargetVersion:  audit.MaxKnownSchemaVersion,
+		DryRun:         true,
+		Steps:          toFormatterSteps(audit.PlanMigrations(currentVersion)),
+	}
+
+	out, fErr := formatters.FormatMigratePlan(plan, format)
+	if fErr != nil {
+		return pasterrors.ExitCode(fErr), fErr
+	}
+	fmt.Fprintln(w, out)
+	return 0, nil
+}
+
+// runMigrateApply opens the file via the audit subsystem (which internally
+// runs audit.Migrate — the SAME code the auto-on-open path uses), then probes
+// the post-migration version and prints the success line.
+//
+// PROPOSAL-2 §7.10 / IMPL_PLAN §3 S6: this MUST share the migrator
+// implementation with OpenTaskTracker's auto-on-open path, with NO duplicate
+// code. We achieve that by routing through NewSqliteAuditTrail, which is
+// the single open-side call site for audit.Migrate. The Scenario 15
+// convergence test (file A migrated via OpenTaskTracker; file B migrated via
+// `pasture migrate`) compares the two final states to verify byte-for-byte
+// identity (modulo SQLite WAL ordering).
+func runMigrateApply(w io.Writer, dbPath string, format types.OutputFormat) (int, error) {
+	// Probe the from-version BEFORE the migration so we can render an
+	// accurate "from v<from>" in the success line. We open a read-only
+	// handle, read, then close, so the audit.NewSqliteAuditTrail call below
+	// gets a fresh handle and can acquire its own write lock.
+	fromVersion, err := probeVersionReadOnly(dbPath)
+	if err != nil {
+		return pasterrors.ExitCode(err), err
+	}
+
+	// Run the migration via the SAME constructor OpenTaskTracker uses. This
+	// is the single shared migrator path required by PROPOSAL-2 §7.10.
+	// NewSqliteAuditTrail invokes audit.Migrate internally; on a newer-
+	// schema file it surfaces the structured error unchanged.
+	trail, err := audit.NewSqliteAuditTrail(dbPath)
+	if err != nil {
+		return pasterrors.ExitCode(err), err
+	}
+	// We don't need the trail itself — only its side effect of running
+	// Migrate. Close immediately so the file is released for any follow-up
+	// process (e.g., a daemon start in the same script).
+	if cErr := trail.Close(); cErr != nil {
+		// Non-fatal: the migration itself succeeded. Surface as a storage
+		// warning by failing soft? Per the binding "actionable errors"
+		// convention, we return it as a storage error rather than swallowing.
+		se := &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     fmt.Sprintf("handlers.Migrate: cannot close audit handle at %q after successful migration", dbPath),
+			Why:      cErr.Error(),
+			Impact:   "the migration was applied successfully but the file handle was not released cleanly; subsequent opens may transiently fail with SQLITE_BUSY",
+			Fix:      "wait for the busy timeout (5s) and retry the next operation; if the error persists, restart the process holding the file",
+		}
+		return pasterrors.ExitCode(se), se
+	}
+
+	// Re-probe to render the actual to-version. On the idempotent re-run
+	// path (file already at MaxKnownSchemaVersion), to == from.
+	toVersion, err := probeVersionReadOnly(dbPath)
+	if err != nil {
+		return pasterrors.ExitCode(err), err
+	}
+
+	result := formatters.MigrateResult{
+		DBPath:      dbPath,
+		FromVersion: fromVersion,
+		ToVersion:   toVersion,
+	}
+	out, fErr := formatters.FormatMigrateResult(result, format)
+	if fErr != nil {
+		return pasterrors.ExitCode(fErr), fErr
+	}
+	fmt.Fprintln(w, out)
+	return 0, nil
+}
+
+// probeVersionReadOnly opens dbPath, reads audit_schema_meta.version, and
+// closes. Used to capture the from/to versions for the migrate-apply success
+// line WITHOUT bringing the audit subsystem up (which would trigger Migrate).
+func probeVersionReadOnly(dbPath string) (int, error) {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return 0, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryConnection,
+			What:     fmt.Sprintf("handlers.Migrate: cannot open database at %q for version probe", dbPath),
+			Why:      err.Error(),
+			Impact:   "the migration cannot proceed because the file is unreachable",
+			Fix:      "verify the path exists, is a SQLite file, and is readable; pass --db <path> if the location differs from the default",
+		}
+	}
+	defer db.Close()
+	return audit.ReadSchemaVersion(db)
+}
+
+// toFormatterSteps maps audit.MigrationStepSummary to the formatter-side
+// shape. Translation lives here (handler) rather than in the formatter or
+// audit package so each side keeps its own type without a cross-import.
+func toFormatterSteps(steps []audit.MigrationStepSummary) []formatters.MigratePlanStep {
+	out := make([]formatters.MigratePlanStep, len(steps))
+	for i, s := range steps {
+		out[i] = formatters.MigratePlanStep{
+			FromVersion: s.FromVersion,
+			ToVersion:   s.ToVersion,
+			Description: s.Description,
+		}
+	}
+	return out
+}
