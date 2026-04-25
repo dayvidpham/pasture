@@ -12,20 +12,33 @@ import (
 )
 
 func TestDefaultDBPath_EnvOverride(t *testing.T) {
-	t.Setenv(tasks.DBPathEnv, "/custom/path/provenance.db")
+	// $PASTURE_DB_PATH wins over both the unified default and any XDG path.
+	// The exact filename is whatever the caller passed — DefaultDBPath does
+	// not enforce DefaultDBFilename when the env var is set, because users
+	// pointing at a custom path know what file they want.
+	t.Setenv(tasks.DBPathEnv, "/custom/path/custom.db")
 	got := tasks.DefaultDBPath()
-	if got != "/custom/path/provenance.db" {
+	if got != "/custom/path/custom.db" {
 		t.Fatalf("expected env override to win, got %q", got)
 	}
 }
 
 func TestDefaultDBPath_XDG(t *testing.T) {
+	// PROPOSAL-2 §7.1: when XDG_DATA_HOME is set the unified database lives
+	// at $XDG_DATA_HOME/pasture/pasture.db (NOT provenance.db or audit.db,
+	// which were the pre-PROPOSAL-2 defaults for the two subsystems).
 	t.Setenv(tasks.DBPathEnv, "")
 	t.Setenv("XDG_DATA_HOME", "/xdg/data")
 	got := tasks.DefaultDBPath()
-	want := filepath.Join("/xdg/data", "pasture", "provenance.db")
+	want := filepath.Join("/xdg/data", "pasture", tasks.DefaultDBFilename)
 	if got != want {
 		t.Fatalf("expected XDG path %q, got %q", want, got)
+	}
+	// Belt-and-braces: the filename must literally be "pasture.db" so the
+	// hjsdt CLI tests (Scenario 9) and the unified pastured daemon both
+	// open the same on-disk file.
+	if filepath.Base(got) != "pasture.db" {
+		t.Fatalf("expected unified filename pasture.db, got %q", filepath.Base(got))
 	}
 }
 
@@ -39,9 +52,23 @@ func TestDefaultDBPath_HomeFallback(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", "")
 	t.Setenv("HOME", "/home/test")
 	got := tasks.DefaultDBPath()
-	want := filepath.Join("/home/test", ".local", "share", "pasture", "provenance.db")
+	want := filepath.Join("/home/test", ".local", "share", "pasture", tasks.DefaultDBFilename)
 	if got != want {
 		t.Fatalf("expected HOME fallback %q, got %q", want, got)
+	}
+	if filepath.Base(got) != "pasture.db" {
+		t.Fatalf("expected unified filename pasture.db, got %q", filepath.Base(got))
+	}
+}
+
+// TestDefaultDBFilename_IsUnified asserts the filename constant matches the
+// PROPOSAL-2 §7.1 binding. If this changes the hjsdt CLI tests (Scenario 9)
+// and the pastured daemon will silently diverge to different files, breaking
+// the single-file invariant.
+func TestDefaultDBFilename_IsUnified(t *testing.T) {
+	if tasks.DefaultDBFilename != "pasture.db" {
+		t.Fatalf("PROPOSAL-2 §7.1 binds DefaultDBFilename to %q; got %q",
+			"pasture.db", tasks.DefaultDBFilename)
 	}
 }
 
