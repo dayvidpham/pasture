@@ -182,45 +182,91 @@ type TaskTracker interface {
 // Callers map the returned error to a process exit code via
 // pasterrors.ExitCode and MUST call Close on the returned tracker.
 //
-// The implementation lives in internal/tasks (see OpenTaskTracker in
-// open_unified.go). This signature is published here so external modules can
-// program against the façade without taking a dependency on internal/.
+// # Wiring requirement
 //
-// Implementation note: a free function in an interface-only file is unusual
-// Go style — the alternative would be a separate constructor package, but
-// PROPOSAL-2 §7.4 binds the (TaskTracker, OpenTaskTracker) pair to live in
-// the same file for one-glance discoverability. The body lives in a
-// blank-import-style indirection: pkg/protocol declares the var below; the
-// internal/tasks package's init() assigns the real constructor. Callers see
-// only the published function.
+// This function delegates to an implementation registered by
+// internal/tasks.init(). The implementation is wired automatically when
+// internal/tasks is imported — all in-tree binaries (cmd/pasture,
+// cmd/pastured) and handler packages (internal/handlers) already import
+// internal/tasks directly and therefore satisfy this requirement without any
+// extra step.
+//
+// In-tree callers that do NOT go through internal/handlers should import
+// internal/tasks directly and call tasks.OpenTaskTracker — the direct call
+// is idiomatic Go and avoids the indirection entirely:
+//
+//	import "github.com/dayvidpham/pasture/internal/tasks"
+//	tracker, err := tasks.OpenTaskTracker("") // preferred in-tree pattern
+//
+// If you intend to call protocol.OpenTaskTracker directly (e.g. from a new
+// main package or an integration test), call MustHaveImpl() at program
+// startup to panic with a clear error rather than discovering the missing
+// wiring at the first open call:
+//
+//	import (
+//	    "github.com/dayvidpham/pasture/pkg/protocol"
+//	    _ "github.com/dayvidpham/pasture/internal/tasks" // wires the impl
+//	)
+//	func init() { protocol.MustHaveImpl() } // fail fast if wiring is absent
+//
+// Implementation note: the body lives in internal/tasks (UAT-1 placement
+// binding per PROPOSAL-2 §7.4). pkg/protocol cannot import internal/tasks
+// directly (import cycle: internal/tasks imports pkg/protocol for the
+// TaskTracker type). The registered-var indirection is the minimal fix that
+// keeps (TaskTracker, OpenTaskTracker) co-located in this file.
 var openTaskTrackerImpl func(dbPath string) (TaskTracker, error)
 
 // RegisterOpenTaskTracker is called by internal/tasks's init() to wire the
 // constructor implementation. It is exported only so the internal package can
-// assign through it; external packages MUST NOT call it (calling it is a
-// programming error and will overwrite the wired implementation).
+// assign through it; external packages MUST NOT call it directly (doing so is
+// a programming error and will overwrite the implementation).
 //
-// This indirection keeps the OpenTaskTracker symbol in pkg/protocol (per
-// PROPOSAL-2 §7.4) while the body lives in internal/tasks (UAT-1 placement
-// binding). Without it, OpenTaskTracker's body would have to import
-// internal/tasks, which is forbidden by Go's internal-package visibility.
+// This indirection keeps (TaskTracker, OpenTaskTracker) co-located in
+// pkg/protocol (PROPOSAL-2 §7.4) while the body lives in internal/tasks
+// (UAT-1 placement binding). Without it, OpenTaskTracker's body would import
+// internal/tasks — forbidden because internal/tasks already imports
+// pkg/protocol for the TaskTracker type, which would create an import cycle.
+//
+// See MustHaveImpl for a startup-time guard that panics if this function has
+// not been called.
 func RegisterOpenTaskTracker(impl func(dbPath string) (TaskTracker, error)) {
 	openTaskTrackerImpl = impl
 }
 
-// OpenTaskTracker opens the unified SQLite database at dbPath, runs the audit
-// migrator, and returns a wrapped TaskTracker. See the package-level doc
-// comment on the var openTaskTrackerImpl for the full constructor contract
-// (errors, side effects, lifecycle).
+// OpenTaskTracker opens the unified SQLite database at dbPath and returns a
+// wrapped TaskTracker. See the OpenTaskTracker var doc comment above for the
+// full contract (errors, side effects, lifecycle, wiring requirement).
 //
-// If the internal/tasks package has not been imported (so its init() has not
-// run), this function returns a CategoryConfig error directing the caller to
-// import the implementation package.
+// If the implementation has not been registered (internal/tasks not imported),
+// this function returns a descriptive error. Call MustHaveImpl() at startup to
+// catch this condition at init time rather than at the first call site.
 func OpenTaskTracker(dbPath string) (TaskTracker, error) {
 	if openTaskTrackerImpl == nil {
 		return nil, &openTaskTrackerNotWiredError{dbPath: dbPath}
 	}
 	return openTaskTrackerImpl(dbPath)
+}
+
+// MustHaveImpl panics if RegisterOpenTaskTracker has not yet been called.
+// Call this at program startup (e.g. in a TestMain or an init() of a top-level
+// package) to fail fast with a clear error rather than discovering the missing
+// wiring the first time OpenTaskTracker is called.
+//
+// Example — add this to your main package or TestMain:
+//
+//	func init() { protocol.MustHaveImpl() }
+//
+// In-tree callers (cmd/pasture, cmd/pastured, internal/handlers) already import
+// internal/tasks directly and therefore never need this guard. The guard exists
+// for completeness and for any future in-module integration tests that construct
+// main-like binaries without going through the handler layer.
+func MustHaveImpl() {
+	if openTaskTrackerImpl == nil {
+		panic("pasture/protocol: OpenTaskTracker implementation not registered — " +
+			"import github.com/dayvidpham/pasture/internal/tasks in your main package " +
+			"(its init() wires the constructor), or call tasks.OpenTaskTracker directly " +
+			"instead of protocol.OpenTaskTracker")
+	}
 }
 
 // openTaskTrackerNotWiredError is the structured error returned when
@@ -232,8 +278,8 @@ type openTaskTrackerNotWiredError struct {
 }
 
 func (e *openTaskTrackerNotWiredError) Error() string {
-	return "pasture/protocol: OpenTaskTracker called before " +
-		"github.com/dayvidpham/pasture/internal/tasks was imported — " +
-		"add a blank import `_ \"github.com/dayvidpham/pasture/internal/tasks\"` " +
-		"to your main package, or call tasks.OpenTaskTracker directly"
+	return "pasture/protocol: OpenTaskTracker called before the constructor was registered — " +
+		"import github.com/dayvidpham/pasture/internal/tasks in your main package " +
+		"(its init() calls RegisterOpenTaskTracker), or call tasks.OpenTaskTracker directly; " +
+		"call protocol.MustHaveImpl() at startup to catch this at init time rather than at open time"
 }

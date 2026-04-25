@@ -64,25 +64,45 @@ The interface composes three method families on a single shared SQLite file:
 3. **6 pasture-only methods** — `SetAgentCategories` / `AgentCategories` (R8),
    `AttachContext` / `EventContexts` / `Timeline` (R9), and `Close` (lifecycle).
 
-Open via the public constructor:
+**In-tree callers** (all `internal/handlers` packages, `cmd/pastured`, and
+transitively `cmd/pasture`) already import `internal/tasks` directly and call
+`tasks.OpenTaskTracker` — the idiomatic Go way:
+
+```go
+import "github.com/dayvidpham/pasture/internal/tasks"
+
+tracker, err := tasks.OpenTaskTracker("") // empty path → DefaultDBPath()
+if err != nil { /* StructuredError with CategoryConnection / CategoryStorage / CategoryValidation */ }
+defer tracker.Close()
+```
+
+**New in-tree main packages** that do NOT go through `internal/handlers` should
+follow the same pattern: import `internal/tasks` directly.
+
+If you ever need to call `protocol.OpenTaskTracker` (the façade form) from a
+new main package or integration test, add the blank import AND a startup guard:
 
 ```go
 import (
     "github.com/dayvidpham/pasture/pkg/protocol"
-    _ "github.com/dayvidpham/pasture/internal/tasks" // wires OpenTaskTracker
+    _ "github.com/dayvidpham/pasture/internal/tasks" // wires OpenTaskTracker via init()
 )
+
+func init() { protocol.MustHaveImpl() } // panics immediately if the blank import was forgotten
 
 tracker, err := protocol.OpenTaskTracker("") // empty path → DefaultDBPath()
 if err != nil { /* StructuredError with CategoryConnection / CategoryStorage / CategoryValidation */ }
 defer tracker.Close()
 ```
 
-The blank import of `internal/tasks` is required because the constructor body
-lives in the internal package (UAT-1 placement binding); `internal/tasks`'s
-`init()` calls `protocol.RegisterOpenTaskTracker` to wire the implementation.
-`pastured`'s `cmd/pastured/main.go` and the local `pasture` CLI's `cmd/pasture`
-both already perform this wiring. External Go consumers (e.g. agent-data-leverage)
-must do the same.
+The `MustHaveImpl()` guard catches a forgotten blank import at process startup
+rather than at the first `OpenTaskTracker` call. The blank import is required
+because the constructor body lives in `internal/tasks` (UAT-1 placement
+binding per PROPOSAL-2 §7.4); `internal/tasks`'s `init()` calls
+`protocol.RegisterOpenTaskTracker` to wire the implementation. The indirection
+is necessary because `pkg/protocol` cannot import `internal/tasks` directly
+(that would create an import cycle: `internal/tasks` already imports
+`pkg/protocol` for the `TaskTracker` type).
 
 `Close` is safe to call multiple times and closes both wrapped subsystems
 (the `provenance.Tracker` and the audit `*sql.DB`) exactly once.
