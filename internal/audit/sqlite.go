@@ -98,6 +98,19 @@ func NewSqliteAuditTrail(dbPath string) (*SqliteAuditTrail, error) {
 		)
 	}
 
+	// Run forward schema migrations to bring the file up to
+	// MaxKnownSchemaVersion. On a fresh database this seeds
+	// audit_schema_meta(version=2, applied_at=<now>); on an already-
+	// migrated database it is a no-op. On a database whose recorded
+	// version is higher than MaxKnownSchemaVersion (a future binary
+	// wrote it), Migrate returns a *pasterrors.StructuredError with
+	// Category=CategoryStorage — propagated unwrapped so callers can
+	// errors.As() it (PROPOSAL-2 §11 Scenario 5).
+	if err := Migrate(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	return &SqliteAuditTrail{db: db}, nil
 }
 
