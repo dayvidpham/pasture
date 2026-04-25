@@ -3,7 +3,15 @@
 VERSION ?= dev
 
 # Binaries produced by make build
-BINS := bin/pastured bin/pasture-msg bin/pasture-release bin/pasture
+#
+# pasture-migrate-crash is a TEST-ONLY binary used by the Scenario 11
+# crash-mid-migration recovery test (PROPOSAL-2 §11). It performs the
+# v2→v3 audit migration but os.Exit(137)s after staging
+# audit_schema_meta(version=3) and BEFORE tx.Commit, so the WAL recovery
+# on the next open is exercised. Built by the standard target per
+# HANDOFF §7 so the test can spawn it via os/exec.Cmd without a
+# build-time toggle.
+BINS := bin/pastured bin/pasture-msg bin/pasture-release bin/pasture bin/pasture-migrate-crash
 
 all: build
 
@@ -43,6 +51,13 @@ bin/pasture:
 	CGO_ENABLED=0 go build \
 		-ldflags "-X main.version=$(VERSION)" \
 		-o bin/pasture ./cmd/pasture
+
+# Test-only binary; see BINS comment above for rationale.
+bin/pasture-migrate-crash:
+	@mkdir -p bin
+	CGO_ENABLED=0 go build \
+		-ldflags "-X main.version=$(VERSION)" \
+		-o bin/pasture-migrate-crash ./cmd/pasture-migrate-crash
 
 # --------------------------------------------------------------------------
 # Test
