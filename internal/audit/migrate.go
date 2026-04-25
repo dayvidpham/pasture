@@ -26,14 +26,15 @@
 //
 // Migration table
 //
-//   - v1 → v2: bootstrap audit_schema_meta (this slice, S1).
+//   - v1 → v2: bootstrap audit_schema_meta (S1, landed).
 //   - v2 → v3: new tables context_edges, pasture_agent_categories,
-//     pasture_well_known_agents (S2; not yet wired here).
+//     pasture_well_known_agents (S2, landed). Old audit_events untouched.
 //   - v3 → v4: EpochContext backfill into context_edges (S4; not yet wired).
 //
-// Slices S2/S3/S4 will register their migration steps in the steps table
-// below and bump MaxKnownSchemaVersion accordingly. Until they land, this
-// binary tops out at v2.
+// S3 will extend migrate_v2_v3.go with the audit_events.agent_id add +
+// role-backfill + role-drop triple (one BEGIN IMMEDIATE per BLOCKER A1).
+// S4 will append a {fromVersion: 3, toVersion: 4} step. Until those land,
+// this binary tops out at v3.
 package audit
 
 import (
@@ -45,11 +46,11 @@ import (
 )
 
 // MaxKnownSchemaVersion is the highest schema version this binary can
-// produce. Bumped by S2 (→3) and S4 (→4); stays at 2 until those slices land.
+// produce. Bumped by S2 (→3, landed) and S4 (→4; not yet landed).
 //
 // Layer Integration Point owned by S1: any caller that needs to know "what
 // version does my binary support?" reads this constant.
-const MaxKnownSchemaVersion = 2
+const MaxKnownSchemaVersion = 3
 
 // migrationStep applies a single forward migration. Each step receives an
 // open transaction (already holding the write lock via BEGIN IMMEDIATE)
@@ -75,7 +76,7 @@ type migrationStep struct {
 func migrationSteps() []migrationStep {
 	return []migrationStep{
 		{fromVersion: 1, toVersion: 2, apply: migrateV1toV2},
-		// S2 will append: {fromVersion: 2, toVersion: 3, apply: migrateV2toV3}
+		{fromVersion: 2, toVersion: 3, apply: migrateV2toV3},
 		// S4 will append: {fromVersion: 3, toVersion: 4, apply: migrateV3toV4}
 	}
 }

@@ -71,12 +71,19 @@ func TestMigrate_RoundTrip_OpenMigrateReopen(t *testing.T) {
 			t.Errorf("schema version after reopen = %d, want %d", version, audit.MaxKnownSchemaVersion)
 		}
 
+		// One row per applied migration step. From a fresh DB the migrator
+		// applies steps v1→v2, v2→v3 (and v3→v4 once S4 lands), so the count
+		// equals MaxKnownSchemaVersion - 1. The reopen path must not add
+		// duplicate rows, so the count after reopen equals the count after
+		// the first migrate.
 		var rows int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM audit_schema_meta`).Scan(&rows); err != nil {
 			t.Fatalf("COUNT(*): %v", err)
 		}
-		if rows != 1 {
-			t.Errorf("audit_schema_meta row count after reopen = %d, want 1", rows)
+		wantRows := audit.MaxKnownSchemaVersion - 1
+		if rows != wantRows {
+			t.Errorf("audit_schema_meta row count after reopen = %d, want %d (one row per step from v1 to v%d)",
+				rows, wantRows, audit.MaxKnownSchemaVersion)
 		}
 	}
 }
@@ -141,8 +148,8 @@ func TestMigrate_LegacyV1Database_PromotedToV2(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		t.Fatalf("post-Migrate SELECT MAX(version): %v", err)
 	}
-	if version != 2 {
-		t.Errorf("post-Migrate version = %d, want 2", version)
+	if version != audit.MaxKnownSchemaVersion {
+		t.Errorf("post-Migrate version = %d, want %d", version, audit.MaxKnownSchemaVersion)
 	}
 
 	var eventCount int

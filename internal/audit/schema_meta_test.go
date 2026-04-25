@@ -35,26 +35,22 @@ func openTempDB(t *testing.T, name string) (*sql.DB, string) {
 
 // ---- audit.Migrate behaviour on a fresh DB ---------------------------------
 
-// TestMigrate_FreshDB_LandsAtV2 verifies that calling audit.Migrate on a
-// brand-new SQLite file lands at version 2 (the current
-// MaxKnownSchemaVersion at S1 time).
-func TestMigrate_FreshDB_LandsAtV2(t *testing.T) {
+// TestMigrate_FreshDB_LandsAtMaxKnownVersion verifies that calling
+// audit.Migrate on a brand-new SQLite file lands at MaxKnownSchemaVersion
+// (i.e. the highest version this binary supports).
+func TestMigrate_FreshDB_LandsAtMaxKnownVersion(t *testing.T) {
 	db, _ := openTempDB(t, "fresh.db")
 
 	if err := audit.Migrate(db); err != nil {
 		t.Fatalf("audit.Migrate on fresh DB: %v", err)
 	}
 
-	// audit_schema_meta must exist with exactly one row at version 2.
 	var version int
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		t.Fatalf("SELECT MAX(version) FROM audit_schema_meta: %v", err)
 	}
 	if version != audit.MaxKnownSchemaVersion {
 		t.Errorf("schema version after Migrate = %d, want %d", version, audit.MaxKnownSchemaVersion)
-	}
-	if version != 2 {
-		t.Errorf("schema version after Migrate = %d, want 2 (S1 ceiling)", version)
 	}
 }
 
@@ -82,26 +78,40 @@ func TestMigrate_AppliedAtIsRecent(t *testing.T) {
 // ---- Idempotency -----------------------------------------------------------
 
 // TestMigrate_Idempotent_SecondCallNoOp verifies that calling Migrate
-// twice in a row leaves audit_schema_meta with exactly one row — the
-// (version=2, applied_at=...) entry seeded by the first call. Idempotency
-// is required for the auto-on-open path: every NewSqliteAuditTrail open
-// re-runs Migrate.
+// twice in a row does NOT add duplicate audit_schema_meta rows: the row
+// count after the second call equals the count after the first call.
+// Idempotency is required for the auto-on-open path: every
+// NewSqliteAuditTrail open re-runs Migrate.
+//
+// (One row per applied step from v1 to MaxKnownSchemaVersion, so the first
+// Migrate seeds MaxKnownSchemaVersion-1 rows; the second is a no-op.)
 func TestMigrate_Idempotent_SecondCallNoOp(t *testing.T) {
 	db, _ := openTempDB(t, "idempotent.db")
 
 	if err := audit.Migrate(db); err != nil {
 		t.Fatalf("first Migrate: %v", err)
 	}
+	var firstRows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM audit_schema_meta`).Scan(&firstRows); err != nil {
+		t.Fatalf("first COUNT(*): %v", err)
+	}
+
 	if err := audit.Migrate(db); err != nil {
 		t.Fatalf("second Migrate: %v", err)
 	}
 
-	var rows int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM audit_schema_meta`).Scan(&rows); err != nil {
-		t.Fatalf("COUNT(*): %v", err)
+	var secondRows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM audit_schema_meta`).Scan(&secondRows); err != nil {
+		t.Fatalf("second COUNT(*): %v", err)
 	}
-	if rows != 1 {
-		t.Errorf("audit_schema_meta row count after two Migrate calls = %d, want 1", rows)
+	if firstRows != secondRows {
+		t.Errorf("audit_schema_meta row count changed across re-Migrate: first=%d, second=%d (want stable)",
+			firstRows, secondRows)
+	}
+	wantRows := audit.MaxKnownSchemaVersion - 1
+	if firstRows != wantRows {
+		t.Errorf("audit_schema_meta row count after first Migrate = %d, want %d (one row per step from v1 to v%d)",
+			firstRows, wantRows, audit.MaxKnownSchemaVersion)
 	}
 }
 
