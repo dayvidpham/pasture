@@ -343,11 +343,13 @@ func TestFormatError_StructuredError_Text(t *testing.T) {
 			"     $EDITOR ~/.config/pasture/pastured.toml",
 	}
 	got := formatters.FormatError(se, types.OutputText)
-	// Plain-language Stringer: the top "Error:" line + full English labels.
-	// The category literal must NOT appear in user-visible output.
+	// Plain-language Stringer: the top "Error:" line is now derived from
+	// Category (so it elaborates rather than duplicates Problem). The
+	// specific What value appears in the Problem: line. The category enum
+	// literal must NOT appear in user-visible output.
 	checks := []string{
-		"Error: The workflow ran past its timeout.",
-		"Problem:",
+		"Error: A workflow step failed.",
+		"Problem:    The workflow ran past its timeout.",
 		"Reason:",
 		"Impact:",
 		"How to fix:",

@@ -60,6 +60,7 @@ func TestStructuredError_Report_ContainsAllFields(t *testing.T) {
 		Category: errors.CategoryConfig,
 		What:     "The configuration file couldn't be loaded.",
 		Why:      "The YAML on line 5 is malformed.",
+		Where:    "Loading the daemon configuration (config/loader.go in config.Load)",
 		Impact:   "The daemon can't start without a valid configuration.",
 		Fix: "1. Open the file and fix the YAML syntax on line 5:\n" +
 			"     $EDITOR ~/.config/pasture/config.yaml",
@@ -70,18 +71,21 @@ func TestStructuredError_Report_ContainsAllFields(t *testing.T) {
 	out := buf.String()
 
 	checks := []string{
-		// Top "Error:" line surfaces the What as a plain sentence.
-		"Error: The configuration file couldn't be loaded.",
+		// Top "Error:" line surfaces the Category-derived header — NOT
+		// the specific What. The What appears in the Problem: line.
+		"Error: There's a problem with the configuration.",
 		// Full English labels, NOT lowercase shorthand.
 		"Problem:",
 		"Reason:",
+		"Where:",
 		"Impact:",
 		"How to fix:",
 		// Substantive content from each field.
+		"The configuration file couldn't be loaded.",
 		"The YAML on line 5 is malformed.",
+		"Loading the daemon configuration",
 		"The daemon can't start without a valid configuration.",
 		"$EDITOR ~/.config/pasture/config.yaml",
-		// Category MUST NOT appear in the user-visible output.
 	}
 	for _, want := range checks {
 		if !strings.Contains(out, want) {
@@ -93,6 +97,141 @@ func TestStructuredError_Report_ContainsAllFields(t *testing.T) {
 	// user-visible block — the prose conveys the category implicitly.
 	if strings.Contains(out, "config error") {
 		t.Errorf("Report() leaked the category literal into user-visible output:\n%s", out)
+	}
+}
+
+// TestStructuredError_Report_HeaderDoesNotDuplicateProblem guards against
+// the Drift 1 regression: the top "Error:" line was previously a verbatim
+// duplicate of the Problem: line, wasting vertical space and making the
+// block harder to scan. The headline must elaborate (Category-derived
+// summary) and the Problem: line must carry the specific What.
+func TestStructuredError_Report_HeaderDoesNotDuplicateProblem(t *testing.T) {
+	se := &errors.StructuredError{
+		Category: errors.CategoryValidation,
+		What:     `The task ID "bad-id-format" isn't in the expected format.`,
+		Why:      "It's missing the required separator.",
+		Impact:   "We can't look up the task.",
+		Fix:      "Pass an ID that includes a '--' separator.",
+	}
+
+	var buf bytes.Buffer
+	se.Report(&buf)
+	out := buf.String()
+	lines := strings.Split(out, "\n")
+
+	// Line 0 must be the Category-derived header, NOT the specific What.
+	if lines[0] != "Error: The input wasn't valid." {
+		t.Errorf("line 0 = %q, want %q", lines[0], "Error: The input wasn't valid.")
+	}
+	// The specific What must appear under Problem:.
+	if !strings.Contains(out, `Problem:    The task ID "bad-id-format" isn't in the expected format.`) {
+		t.Errorf("Problem: line missing the specific What. Output:\n%s", out)
+	}
+	// And it must NOT appear in the headline.
+	if strings.Contains(lines[0], "bad-id-format") {
+		t.Errorf("headline duplicates the specific What. Line 0: %q", lines[0])
+	}
+}
+
+// TestStructuredError_Report_CategoryHeaders verifies the headline mapping
+// for every recognised Category, plus the unknown-category fallback. The
+// header must be plain English and must NOT surface the raw enum string.
+func TestStructuredError_Report_CategoryHeaders(t *testing.T) {
+	cases := []struct {
+		name     string
+		cat      errors.Category
+		wantLine string
+	}{
+		{"connection", errors.CategoryConnection, "Error: Couldn't connect."},
+		{"workflow", errors.CategoryWorkflow, "Error: A workflow step failed."},
+		{"validation", errors.CategoryValidation, "Error: The input wasn't valid."},
+		{"config", errors.CategoryConfig, "Error: There's a problem with the configuration."},
+		{"storage", errors.CategoryStorage, "Error: A storage operation failed."},
+		{"unknown", errors.Category("mystery error"), "Error: Something went wrong."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			se := &errors.StructuredError{
+				Category: tc.cat,
+				What:     "specific situation",
+			}
+			var buf bytes.Buffer
+			se.Report(&buf)
+			out := buf.String()
+			firstLine := strings.SplitN(out, "\n", 2)[0]
+			if firstLine != tc.wantLine {
+				t.Errorf("Category %q headline = %q, want %q", tc.cat, firstLine, tc.wantLine)
+			}
+			// The raw category enum string must never leak.
+			if tc.cat != errors.Category("mystery error") && strings.Contains(out, string(tc.cat)) {
+				t.Errorf("Category %q leaked raw enum into output:\n%s", tc.cat, out)
+			}
+		})
+	}
+}
+
+// TestStructuredError_Report_WhereLineSuppressedWhenEmpty verifies that an
+// empty Where field results in NO Where: line in the output. A blank label
+// would waste a line and look broken.
+func TestStructuredError_Report_WhereLineSuppressedWhenEmpty(t *testing.T) {
+	se := &errors.StructuredError{
+		Category: errors.CategoryValidation,
+		What:     "missing flag",
+		Why:      "the --session-id flag wasn't provided",
+		Impact:   "the command can't run",
+		Fix:      "pass --session-id <id>",
+		// Where intentionally empty
+	}
+
+	var buf bytes.Buffer
+	se.Report(&buf)
+	out := buf.String()
+
+	if strings.Contains(out, "Where:") {
+		t.Errorf("Report() emitted a Where: line for an empty Where field. Output:\n%s", out)
+	}
+}
+
+// TestStructuredError_Report_WhereLineEmittedWhenSet verifies the positive
+// case: a non-empty Where field is rendered in the canonical position
+// (between Reason and Impact) with the standard alignment.
+func TestStructuredError_Report_WhereLineEmittedWhenSet(t *testing.T) {
+	se := &errors.StructuredError{
+		Category: errors.CategoryValidation,
+		What:     "missing flag",
+		Why:      "the --session-id flag wasn't provided",
+		Where:    "Starting a session (handlers/session.go in handlers.SessionStart)",
+		Impact:   "the command can't run",
+		Fix:      "pass --session-id <id>",
+	}
+
+	var buf bytes.Buffer
+	se.Report(&buf)
+	out := buf.String()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+
+	// Locate Reason, Where, Impact line indices and verify ordering.
+	idx := func(prefix string) int {
+		for i, l := range lines {
+			if strings.HasPrefix(l, prefix) {
+				return i
+			}
+		}
+		return -1
+	}
+	reasonIdx := idx("  Reason:")
+	whereIdx := idx("  Where:")
+	impactIdx := idx("  Impact:")
+
+	if whereIdx == -1 {
+		t.Fatalf("Where: line missing from output:\n%s", out)
+	}
+	if !(reasonIdx < whereIdx && whereIdx < impactIdx) {
+		t.Errorf("Where: line out of order: reason=%d where=%d impact=%d. Output:\n%s",
+			reasonIdx, whereIdx, impactIdx, out)
+	}
+	if !strings.Contains(out, "Where:      Starting a session") {
+		t.Errorf("Where: line not aligned to value column. Output:\n%s", out)
 	}
 }
 
@@ -117,9 +256,9 @@ func TestStructuredError_Report_Format(t *testing.T) {
 		t.Fatalf("Report() produced %d lines, want at least 6:\n%s", len(lines), out)
 	}
 
-	// Line 0: top "Error:" line with the plain-English What.
-	if !strings.HasPrefix(lines[0], "Error: ") {
-		t.Errorf("line 0 = %q, want prefix %q", lines[0], "Error: ")
+	// Line 0: top "Error:" line with the Category-derived header.
+	if lines[0] != "Error: A workflow step failed." {
+		t.Errorf("line 0 = %q, want %q", lines[0], "Error: A workflow step failed.")
 	}
 	// Line 1: blank separator between header and labelled block.
 	if lines[1] != "" {
@@ -127,7 +266,9 @@ func TestStructuredError_Report_Format(t *testing.T) {
 	}
 
 	// Locate each labelled line. Order is fixed: Problem, Reason, Impact,
-	// then "How to fix:" with the Fix body indented underneath.
+	// then "How to fix:" with the Fix body indented underneath. (Where is
+	// omitted here because the test doesn't set it; that case is covered
+	// by TestStructuredError_Report_WhereLineSuppressedWhenEmpty.)
 	wantLabels := []string{
 		"  Problem:",
 		"  Reason:",

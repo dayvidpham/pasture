@@ -1,19 +1,31 @@
 // Package errors provides structured, actionable error reporting for the pasture system.
 //
 // Every error carries a Category (connection, workflow, validation, config,
-// storage), a short plain-language What field, a Why/Impact/Fix triple
-// describing the cause/consequence/recovery, and implements the standard
-// error interface so it can be used anywhere Go errors are expected. Use
-// errors.As() to extract the full StructuredError from any wrapped error
-// chain.
+// storage), a short plain-language What field, a Why/Where/Impact/Fix tuple
+// describing the cause/location/consequence/recovery, and implements the
+// standard error interface so it can be used anywhere Go errors are
+// expected. Use errors.As() to extract the full StructuredError from any
+// wrapped error chain.
 //
 // User-facing output (Report and the Stringer) follows a plain-language
-// convention: a top "Error:" line summarising the problem in one short
-// sentence, then a vertically aligned block with full English labels
-// (Problem / Reason / Where / Impact / How to fix). Body text must avoid
-// project-internal jargon — translate code-level terms into ordinary
-// English. The "How to fix" section is numbered when there are multiple
-// alternatives, with concrete shell commands on indented lines.
+// convention: a top "Error:" line summarising the category in one short
+// sentence (Category-derived header), then a vertically aligned block with
+// full English labels (Problem / Reason / Where / Impact / How to fix). Body
+// text must avoid project-internal jargon — translate code-level terms into
+// ordinary English. The "How to fix" section is numbered when there are
+// multiple alternatives, with concrete shell commands on indented lines.
+//
+// Top-line headers per Category (see categoryHeader):
+//
+//	CategoryConnection  → "Error: Couldn't connect."
+//	CategoryWorkflow    → "Error: A workflow step failed."
+//	CategoryValidation  → "Error: The input wasn't valid."
+//	CategoryConfig      → "Error: There's a problem with the configuration."
+//	CategoryStorage     → "Error: A storage operation failed."
+//	(unrecognised)      → "Error: Something went wrong."
+//
+// The Problem: line then carries the SPECIFIC What value, so the headline
+// and Problem elaborate rather than duplicate.
 package errors
 
 import (
@@ -25,9 +37,11 @@ import (
 
 // Category classifies the error domain and drives exit-code selection.
 //
-// The category is intentionally NOT shown in the user-visible "Error:" line
-// — it remains available programmatically (via the Category field and via
-// ExitCode) for log lines, exit-code mapping, and forensic inspection.
+// The category is intentionally NOT shown verbatim in the user-visible
+// "Error:" line — it remains available programmatically (via the Category
+// field and via ExitCode) for log lines, exit-code mapping, and forensic
+// inspection. The user-visible header is derived from the category via
+// categoryHeader so the top line is plain English, not the raw enum string.
 type Category string
 
 const (
@@ -45,27 +59,60 @@ const (
 	CategoryStorage Category = "storage error"
 )
 
+// categoryHeader maps a Category to the plain-language top "Error:" line.
+//
+// The header is intentionally generic so the specific What can elaborate
+// underneath in the Problem: line without duplicating the headline. If the
+// category is not recognised, the caller falls back to a generic
+// "Error: Something went wrong." line — never the raw enum string, which
+// would leak internal jargon into user-visible output.
+var categoryHeader = map[Category]string{
+	CategoryConnection: "Couldn't connect.",
+	CategoryWorkflow:   "A workflow step failed.",
+	CategoryValidation: "The input wasn't valid.",
+	CategoryConfig:     "There's a problem with the configuration.",
+	CategoryStorage:    "A storage operation failed.",
+}
+
+// headerFor returns the plain-language top-line text for a category. Falls
+// back to "Something went wrong." for unrecognised categories rather than
+// surfacing the raw Category enum string (which is project-internal jargon).
+func headerFor(cat Category) string {
+	if h, ok := categoryHeader[cat]; ok {
+		return h
+	}
+	return "Something went wrong."
+}
+
 // StructuredError implements the error interface with actionable diagnostic fields.
 //
-// All four narrative fields (What, Why, Impact, Fix) must be filled in so
-// the reader can understand both the cause and the recovery without reading
-// source code. See package docs for the plain-language conventions all
-// callers must follow.
+// All narrative fields (What, Why, Where, Impact, Fix) should be filled in
+// so the reader can understand both the cause and the recovery without
+// reading source code. Where is optional — when empty the line is suppressed
+// in user-visible output. See package docs for the plain-language
+// conventions all callers must follow.
 type StructuredError struct {
 	// Category classifies the error domain (connection, workflow,
-	// validation, config, storage). Drives exit-code selection but is NOT
-	// surfaced in user-visible output — the prose itself must convey the
-	// category implicitly.
+	// validation, config, storage). Drives exit-code selection and the
+	// top-line header (via categoryHeader). The raw enum string is NOT
+	// surfaced in user-visible output.
 	Category Category
-	// What is one short plain-English sentence summarising what went wrong.
-	// Surfaced as the top "Error:" line. Avoid type names, SQL columns,
+	// What is one short plain-English sentence summarising what went wrong
+	// SPECIFICALLY (the value the user passed, the file that failed, etc.).
+	// Surfaced as the Problem: line. Avoid type names, SQL columns,
 	// and protocol references.
 	What string
 	// Why explains the underlying cause in plain English. Translate
 	// technical roots ("ParseTaskID returned ErrInvalidFormat" → "the ID
 	// didn't have the required separator") so a non-specialist can act on
-	// it.
+	// it. Surfaced as the Reason: line.
 	Why string
+	// Where describes what the user (or system) was doing when the error
+	// occurred, with the code location parenthetically. Example:
+	//   "Starting the epoch (handlers/epoch.go in handlers.EpochStart)"
+	// Optional — when empty the Where: line is suppressed in user-visible
+	// output. See package docs.
+	Where string
 	// Impact describes the consequence to the caller in plain English.
 	// "The workflow can't start," not "the workflow boundary cannot
 	// satisfy R5/D5 alignment."
@@ -90,38 +137,47 @@ func (e *StructuredError) Error() string {
 //
 // Output format (vertically aligned for visual parseability):
 //
-//	Error: <what>
+//	Error: <category-derived plain-language header>
 //
-//	  Problem:    <what, repeated for context>
+//	  Problem:    <what — specific to this occurrence>
 //	  Reason:     <why>
-//	  Where:      <impact-of-where, file:line is optional and goes inside the value>
+//	  Where:      <what was happening (file:line in code parenthetically)>
 //	  Impact:     <impact>
 //	  How to fix:
 //	    <fix body — already includes numbered steps and indented commands>
 //
-// The Where line is constructed from the Impact field by callers who want
-// to surface a code location. Callers who don't need a Where line simply
-// fold "what was happening" into Impact or Why.
+// The top "Error:" line is derived from Category via categoryHeader so it
+// is a generic plain-English summary; the specific situation appears in the
+// Problem: line. This avoids the headline-duplicates-Problem anti-pattern.
 //
-// Multi-line What/Why/Impact/Fix values are wrapped to align under the
-// label column so the whole block stays scannable.
+// The Where: line is suppressed entirely when StructuredError.Where is empty
+// — better than printing an empty label.
+//
+// Multi-line What/Why/Where/Impact/Fix values are wrapped to align under
+// the label column so the whole block stays scannable.
 func (e *StructuredError) Report(w io.Writer) {
 	const labelWidth = 12 // "How to fix:" + space, padded for alignment
 
-	fmt.Fprintf(w, "Error: %s\n\n", e.What)
+	fmt.Fprintf(w, "Error: %s\n\n", headerFor(e.Category))
 
 	writeAligned(w, "Problem:", labelWidth, e.What)
 	writeAligned(w, "Reason:", labelWidth, e.Why)
+	writeAligned(w, "Where:", labelWidth, e.Where)
 	writeAligned(w, "Impact:", labelWidth, e.Impact)
 
 	// "How to fix" is a label on its own line; the Fix body follows
 	// indented underneath so multi-step instructions remain readable.
-	fmt.Fprintf(w, "  %s\n", "How to fix:")
-	writeFixBody(w, e.Fix)
+	if e.Fix != "" {
+		fmt.Fprintf(w, "  %s\n", "How to fix:")
+		writeFixBody(w, e.Fix)
+	}
 }
 
 // writeAligned emits "  <label><padding><value>" with continuation lines
 // indented under the value column so multi-line values stay readable.
+//
+// When value is the empty string the entire line (label and all) is
+// suppressed — callers rely on this for the optional Where: field.
 func writeAligned(w io.Writer, label string, labelWidth int, value string) {
 	if value == "" {
 		return
