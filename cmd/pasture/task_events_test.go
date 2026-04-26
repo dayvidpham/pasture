@@ -264,8 +264,8 @@ func TestCLI_TaskEvents_RequiresTopLevelFilter(t *testing.T) {
 		t.Fatalf("expected exit 1 (validation), got %d; stdout=%q stderr=%q",
 			out.exitCode, out.stdout, out.stderr)
 	}
-	if !strings.Contains(out.stderr, "no top-level filter") {
-		t.Errorf("error message missing 'no top-level filter'; got: %q", out.stderr)
+	if !strings.Contains(out.stderr, "top-level filter is required") {
+		t.Errorf("error message missing 'top-level filter is required'; got: %q", out.stderr)
 	}
 }
 
@@ -293,8 +293,8 @@ func TestCLI_TaskEvents_UnknownContextKind(t *testing.T) {
 	if out.exitCode != 1 {
 		t.Fatalf("expected exit 1, got %d; stderr=%q", out.exitCode, out.stderr)
 	}
-	if !strings.Contains(out.stderr, "unknown --context-kind") {
-		t.Errorf("error message missing 'unknown --context-kind'; got: %q", out.stderr)
+	if !strings.Contains(out.stderr, "isn't a recognised value for --context-kind") {
+		t.Errorf("error message missing context-kind validation text; got: %q", out.stderr)
 	}
 }
 
@@ -489,7 +489,7 @@ func TestCLI_TaskContexts_InvalidEventID(t *testing.T) {
 	if out.exitCode != 1 {
 		t.Fatalf("expected exit 1 (validation), got %d; stderr=%q", out.exitCode, out.stderr)
 	}
-	if !strings.Contains(out.stderr, "cannot parse event ID") {
+	if !strings.Contains(out.stderr, "is not a valid event ID") {
 		t.Errorf("error message missing parse-error text; got: %q", out.stderr)
 	}
 }

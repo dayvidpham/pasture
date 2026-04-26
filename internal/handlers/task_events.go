@@ -71,10 +71,16 @@ func TaskEvents(w io.Writer, in TaskEventsInput, format types.OutputFormat) (int
 	if !hasEpoch && !hasContext {
 		se := &errors.StructuredError{
 			Category: errors.CategoryValidation,
-			What:     "pasture task events: no top-level filter supplied",
-			Why:      "the query is unbounded without --epoch-id or --context-kind+--context-id",
-			Impact:   "no events can be returned; the full event log is intentionally not exposed via this command",
-			Fix:      "pass --epoch-id <id> to query events for one epoch, or --context-kind <kind> --context-id <id> to query events attached to a specific context (kind in: " + listContextKindWireValues() + ")",
+			What:     "A top-level filter is required to list events — no top-level filter was supplied.",
+			Why:      "Neither --epoch-id nor the --context-kind + --context-id pair was passed.",
+			Impact:   "Without a filter the query would return the entire event log, so the command intentionally refuses to run.",
+			Fix: "1. Narrow the query to one epoch by passing its ID:\n" +
+				"     pasture task events --epoch-id <id>\n" +
+				"2. Or list events attached to a specific context (commit, skill, session, etc.):\n" +
+				"     pasture task events --context-kind <kind> --context-id <id>\n" +
+				"   Supported kinds: " + listContextKindWireValues() + "\n" +
+				"3. To find epoch IDs, list recent tasks:\n" +
+				"     pasture task list",
 		}
 		return errors.ExitCode(se), se
 	}
@@ -84,10 +90,14 @@ func TaskEvents(w io.Writer, in TaskEventsInput, format types.OutputFormat) (int
 	if (in.ContextKind != nil) != (in.ContextID != "") {
 		se := &errors.StructuredError{
 			Category: errors.CategoryValidation,
-			What:     "pasture task events: --context-kind and --context-id must be passed together",
-			Why:      "neither flag is meaningful in isolation: the kind names a column but not a row, and the id targets a row but not a column",
-			Impact:   "the context-edge query cannot be assembled",
-			Fix:      "pass both flags (e.g. --context-kind=GitContext --context-id=abc123), or omit both",
+			What:     "The --context-kind and --context-id flags must be passed together.",
+			Why:      "Only one of the pair was provided. Each flag is meaningless on its own — the kind names what type of context to look at, and the ID names which one.",
+			Impact:   "The contexts query can't be assembled with only half of the pair.",
+			Fix: "1. Pass both flags together:\n" +
+				"     pasture task events --context-kind=GitContext --context-id=abc123\n" +
+				"2. Or omit both and use --epoch-id instead:\n" +
+				"     pasture task events --epoch-id <id>\n" +
+				"3. Supported kinds: " + listContextKindWireValues(),
 		}
 		return errors.ExitCode(se), se
 	}
@@ -221,10 +231,14 @@ func ParseSinceFlag(raw string) (time.Time, error) {
 	if raw == "" {
 		return time.Time{}, &errors.StructuredError{
 			Category: errors.CategoryValidation,
-			What:     "handlers.ParseSinceFlag: --since value is empty",
-			Why:      "the flag was passed without a value",
-			Impact:   "the time filter cannot be constructed",
-			Fix:      "pass an RFC3339 timestamp like 2026-04-25T00:00:00Z, or a Unix epoch (seconds or nanoseconds)",
+			What:     "The --since flag needs a timestamp value.",
+			Why:      "The flag was passed without a value.",
+			Impact:   "The time filter can't be applied without knowing what cutoff to use.",
+			Fix: "1. Pass a timestamp in one of these formats:\n" +
+				"     --since=2026-04-25T00:00:00Z         (date and time)\n" +
+				"     --since=1745539200                   (Unix seconds)\n" +
+				"     --since=1745539200000000000          (Unix nanoseconds)\n" +
+				"2. Or omit --since to include events from any time.",
 		}
 	}
 	if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
@@ -244,10 +258,14 @@ func ParseSinceFlag(raw string) (time.Time, error) {
 	}
 	return time.Time{}, &errors.StructuredError{
 		Category: errors.CategoryValidation,
-		What:     fmt.Sprintf("handlers.ParseSinceFlag: cannot parse --since value %q", raw),
-		Why:      "the value is not RFC3339 and not a numeric Unix epoch",
-		Impact:   "the time filter cannot be constructed",
-		Fix:      "pass a value like 2026-04-25T00:00:00Z (RFC3339) or 1745539200 (Unix seconds) / 1745539200000000000 (Unix nanoseconds)",
+		What:     fmt.Sprintf("%q isn't a valid timestamp for --since.", raw),
+		Why:      "The value isn't a recognised date-time format and isn't a number we can read as a Unix epoch.",
+		Impact:   "The time filter can't be applied because we can't tell what cutoff you meant.",
+		Fix: "1. Pass a timestamp in one of these formats:\n" +
+			"     --since=2026-04-25T00:00:00Z         (date and time)\n" +
+			"     --since=1745539200                   (Unix seconds)\n" +
+			"     --since=1745539200000000000          (Unix nanoseconds)\n" +
+			"2. Or omit --since to include events from any time.",
 	}
 }
 
@@ -260,10 +278,13 @@ func ParseContextKindFlag(raw string) (protocol.ContextKind, error) {
 	if !k.IsValid() {
 		return "", &errors.StructuredError{
 			Category: errors.CategoryValidation,
-			What:     fmt.Sprintf("handlers.ParseContextKindFlag: unknown --context-kind %q", raw),
-			Why:      "the value is not a member of protocol.AllContextKinds",
-			Impact:   "the context-edge query cannot be assembled because the kind column would never match",
-			Fix:      "pass one of the supported kinds: " + listContextKindWireValues(),
+			What:     fmt.Sprintf("%q isn't a recognised value for --context-kind.", raw),
+			Why:      "The value doesn't match any of the supported context kinds.",
+			Impact:   "The contexts query can't be assembled because no events would ever match an unknown kind.",
+			Fix: "1. Pass one of the supported kinds (case-sensitive):\n" +
+				"     " + listContextKindWireValues() + "\n" +
+				"   For example:\n" +
+				"     pasture task events --context-kind=GitContext --context-id=<sha>",
 		}
 	}
 	return k, nil
@@ -276,10 +297,13 @@ func ParseEventTypeFlag(raw string) (protocol.EventType, error) {
 	if !et.IsValid() {
 		return "", &errors.StructuredError{
 			Category: errors.CategoryValidation,
-			What:     fmt.Sprintf("handlers.ParseEventTypeFlag: unknown --type %q", raw),
-			Why:      "the value is not a member of protocol.AllEventTypes",
-			Impact:   "the event-type filter cannot be applied because no row would ever match",
-			Fix:      "pass one of the supported event types: " + listEventTypeWireValues(),
+			What:     fmt.Sprintf("%q isn't a recognised value for --type.", raw),
+			Why:      "The value doesn't match any of the supported event types.",
+			Impact:   "The event-type filter can't be applied because no events would ever match an unknown type.",
+			Fix: "1. Pass one of the supported event types (case-sensitive):\n" +
+				"     " + listEventTypeWireValues() + "\n" +
+				"   For example:\n" +
+				"     pasture task events --epoch-id <id> --type=PhaseTransition",
 		}
 	}
 	return et, nil
