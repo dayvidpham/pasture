@@ -192,7 +192,7 @@ func run(cmd *cobra.Command, configFile string) error {
 	if closer != nil {
 		defer func() {
 			if cerr := closer(); cerr != nil {
-				logger.Error("audit trail close error", "err", cerr)
+				logger.Error("Couldn't cleanly close the audit-trail database on shutdown; the file may need a manual integrity check before next startup", "err", cerr)
 			}
 		}()
 	}
@@ -247,7 +247,7 @@ func run(cmd *cobra.Command, configFile string) error {
 	if err := temporal.EnsureSearchAttributes(ctx, temporalClient, cfg.Connection.Namespace, logger); err != nil {
 		// Non-fatal: log and continue — search attributes may already exist or
 		// the namespace may not support custom attributes in all Temporal versions.
-		logger.Warn("search attribute registration failed — some observability queries may not work",
+		logger.Warn("Couldn't register Temporal search attributes; observability queries that filter by epoch or phase may return empty results until the attributes are registered (this is non-fatal — the worker continues to start)",
 			"err", err,
 		)
 	}
@@ -283,7 +283,7 @@ func run(cmd *cobra.Command, configFile string) error {
 		}
 		defer func() {
 			if cerr := auditDB.Close(); cerr != nil {
-				logger.Error("auxiliary audit handle close error", "err", cerr)
+				logger.Error("Couldn't cleanly close the auxiliary audit-database handle on shutdown; the file may need a manual integrity check before next startup", "err", cerr)
 			}
 		}()
 		if _, err := hooks.RegisterDefaultRecorders(hooksMgr, tracker, auditDB); err != nil {
@@ -438,9 +438,9 @@ func initAuditTrail(cfg config.PasturedConfig) (audit.Trail, *tasks.WellKnownAge
 
 	default:
 		return nil, emptyCache, nil, fmt.Errorf(
-			"unknown audit trail backend %q"+
-				" — valid values are %q and %q"+
-				" — set via --audit-trail flag or PASTURE_AUDIT_TRAIL env var",
+			"%q is not a recognised audit-trail backend."+
+				" The supported values are %q (in-memory, non-durable) and %q (durable, on-disk)."+
+				" Pass one of these via --audit-trail or set PASTURE_AUDIT_TRAIL to switch backends.",
 			cfg.AuditTrail, types.BackendMemory, types.BackendSqlite,
 		)
 	}
@@ -500,10 +500,19 @@ func resolveDBPath(cmd *cobra.Command, existingAuditDBPath string) (resolved str
 	if dbFlag == nil || auditFlag == nil {
 		return "", "", &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConfig,
-			What:     "pastured.resolveDBPath: --db or --audit-db-path flag is not registered on the root command",
-			Why:      "newRootCmd() must register both flags; one was removed without updating resolveDBPath",
-			Impact:   "the daemon cannot resolve the unified database path and would silently fall back to an unintended file",
-			Fix:      "re-register the missing flag in newRootCmd(), or update resolveDBPath to drop the dependency on the missing flag",
+			What:     "The daemon can't decide which database file to open.",
+			Why: "Resolving the database path needs both the --db flag and the\n" +
+				"--audit-db-path flag to be registered on the root command, but at\n" +
+				"least one of them is missing. This is a programming mistake in the\n" +
+				"daemon's command setup, not something an operator can fix at runtime.",
+			Impact: "The daemon won't start. Continuing would risk silently writing to\n" +
+				"the wrong file and splitting the audit log across two databases.",
+			Fix: "1. Re-register the missing flag in cmd/pastured/main.go inside\n" +
+				"   newRootCmd, matching the registration of the other flag.\n" +
+				"2. If the flag was removed on purpose, also update resolveDBPath to\n" +
+				"   stop looking for it.\n" +
+				"3. Rebuild and restart the daemon:\n" +
+				"     make build && ./bin/pastured",
 		}
 	}
 
@@ -527,9 +536,9 @@ func resolveDBPath(cmd *cobra.Command, existingAuditDBPath string) (resolved str
 		// PROPOSAL-2 §7.1, but we make that visible.
 		if auditChanged && auditValue != dbValue {
 			warning = fmt.Sprintf(
-				"pastured: both --db (%q) and --audit-db-path (%q) were set with different values"+
-					" — preferring --db per PROPOSAL-2 §7.1; --audit-db-path is deprecated"+
-					" — drop the --audit-db-path flag to silence this warning",
+				"You passed both --db (%q) and --audit-db-path (%q) with different values."+
+					" The daemon is using --db; --audit-db-path is deprecated and is being phased out."+
+					" To silence this warning, drop the --audit-db-path flag from your command line.",
 				dbValue, auditValue,
 			)
 		}
@@ -542,9 +551,9 @@ func resolveDBPath(cmd *cobra.Command, existingAuditDBPath string) (resolved str
 		// also set --audit-db-path (to a different value than the env).
 		if auditChanged && auditValue != envDBPath {
 			warning = fmt.Sprintf(
-				"pastured: $%s=%q overrides --audit-db-path=%q"+
-					" — preferring the canonical env var per PROPOSAL-2 §7.1; --audit-db-path is deprecated"+
-					" — drop the --audit-db-path flag (and any $%s) to silence this warning",
+				"$%s=%q is overriding --audit-db-path=%q."+
+					" The daemon is using the value from $%s; --audit-db-path is the older name and is being phased out."+
+					" To silence this warning, drop the --audit-db-path flag from your command line.",
 				tasks.DBPathEnv, envDBPath, auditValue, tasks.DBPathEnv,
 			)
 		}
@@ -556,8 +565,9 @@ func resolveDBPath(cmd *cobra.Command, existingAuditDBPath string) (resolved str
 		// User supplied the deprecated path; honour it but warn so they know
 		// to migrate to --db / PASTURE_DB_PATH on next deployment.
 		warning = fmt.Sprintf(
-			"pastured: --audit-db-path / PASTURE_AUDIT_DB_PATH (%q) is deprecated by PROPOSAL-2 §7.1"+
-				" — switch to --db / PASTURE_DB_PATH; the value is honoured for backwards compatibility",
+			"You're using the deprecated --audit-db-path / PASTURE_AUDIT_DB_PATH (%q)."+
+				" The daemon honours it for backwards compatibility, but the supported names are now --db and PASTURE_DB_PATH."+
+				" Switch to --db (or set PASTURE_DB_PATH) on your next deployment to silence this warning.",
 			existingAuditDBPath,
 		)
 		return existingAuditDBPath, warning, nil

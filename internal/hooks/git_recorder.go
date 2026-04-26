@@ -109,19 +109,27 @@ func NewGitRecorder(
 	if tracker == nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "hooks.NewGitRecorder: tracker is nil",
-			Why:      "the recorder needs a protocol.TaskTracker to write audit_events and context_edges rows",
-			Impact:   "no GitRecorder can be constructed; git events would be dropped silently downstream",
-			Fix:      "obtain a TaskTracker via tasks.OpenTaskTracker(dbPath) and pass it to NewGitRecorder",
+			What:     "A git-event recorder can't be created without a task tracker.",
+			Why: "NewGitRecorder needs a task tracker so it can save commit events to\n" +
+				"the database. The tracker argument was nil.",
+			Impact: "The recorder wasn't created. Without it, git commit events from\n" +
+				"hooks would be silently dropped instead of saved to the audit log.",
+			Fix: "1. Open a task tracker against the database file:\n" +
+				"     tracker, err := tasks.OpenTaskTracker(dbPath)\n" +
+				"2. Pass the returned tracker to NewGitRecorder.",
 		}
 	}
 	if auditDB == nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "hooks.NewGitRecorder: auditDB is nil",
-			Why:      "the recorder needs the auxiliary *sql.DB handle to recover the audit_events row id after RecordEvent (until the audit-side RecordEventReturningID enhancement lands per PROPOSAL-2 §7.11)",
-			Impact:   "no GitRecorder can be constructed; git events would be dropped silently downstream",
-			Fix:      "open the auxiliary handle via tasks.OpenAuditDBForFreeFloating(dbPath) and pass it alongside the tracker",
+			What:     "A git-event recorder can't be created without an auxiliary database handle.",
+			Why: "NewGitRecorder needs a second database handle to look up the row ID\n" +
+				"of the event it just wrote. The auditDB argument was nil.",
+			Impact: "The recorder wasn't created. Without it, git commit events from\n" +
+				"hooks would be silently dropped instead of saved to the audit log.",
+			Fix: "1. Open the auxiliary database handle for the same file:\n" +
+				"     auditDB, err := tasks.OpenAuditDBForFreeFloating(dbPath)\n" +
+				"2. Pass the returned handle to NewGitRecorder alongside the tracker.",
 		}
 	}
 
@@ -268,10 +276,15 @@ func RegisterDefaultRecorders(
 	if mgr == nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "hooks.RegisterDefaultRecorders: mgr is nil",
-			Why:      "the helper was invoked without a hooks.Manager — this is a programming error in the caller",
-			Impact:   "no free-floating event recorders are registered; downstream hook dispatches will silently drop git events",
-			Fix:      "construct a hooks.Manager via hooks.NewManager() and pass it to this helper",
+			What:     "Default hook recorders can't be registered without a hook manager.",
+			Why: "RegisterDefaultRecorders needs a hook manager so it can attach the\n" +
+				"recorders to it. The mgr argument was nil.",
+			Impact: "No git-event recorders were registered. Hook events that fire after\n" +
+				"this point will be dispatched without anyone listening for git\n" +
+				"commits, so those commits won't reach the audit log.",
+			Fix: "1. Create a hook manager and pass it in:\n" +
+				"     mgr := hooks.NewManager()\n" +
+				"     gr, err := hooks.RegisterDefaultRecorders(mgr, tracker, auditDB)",
 		}
 	}
 	gr, err := NewGitRecorder(tracker, auditDB)

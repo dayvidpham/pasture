@@ -122,11 +122,14 @@ cases:
   # --epoch-id (free string that fails provenance.ParseTaskID) is rejected
   # at the handler boundary BEFORE any signal/workflow start. Exit 1
   # (CategoryValidation). The CLI's printError calls StructuredError.Report
-  # so the full diagnostic — including Why and Fix — appears on stderr.
+  # so the full diagnostic — including the plain-language Reason and the
+  # numbered "How to fix" steps — appears on stderr. The substring
+  # checked here is the "Error:" top line introduced by the Phase 11 R2
+  # plain-language Stringer overhaul (b75e273 + c76f398).
   - name: epoch start malformed epoch-id rejected
     args: ["epoch", "start", "--epoch-id", "not-a-task-id"]
     want_exit: 1
-    want_stderr_contains: "not a valid Provenance TaskID"
+    want_stderr_contains: "The epoch ID you provided is not valid"
 
   # PROPOSAL-2 §11 Scenario 13 (continued): the Fix substring on stderr
   # nudges the operator toward the canonical recovery flow. The legacy

@@ -161,13 +161,13 @@ type sessionState struct {
 
 // SessionStats is the public view of a session's state.
 type SessionStats struct {
-	SessionID    string
-	UpdateCount  int
-	StartTime    time.Time
-	LastUpdate   time.Time
-	Ended        bool
-	EndReason    StopReason // zero value if session is still active
-	EndTime      time.Time  // zero value if session is still active
+	SessionID   string
+	UpdateCount int
+	StartTime   time.Time
+	LastUpdate  time.Time
+	Ended       bool
+	EndReason   StopReason // zero value if session is still active
+	EndTime     time.Time  // zero value if session is still active
 }
 
 // ─── SessionHandler Interface ─────────────────────────────────────────────────
@@ -207,8 +207,8 @@ type Client struct {
 	mu       sync.RWMutex
 
 	// cmd is the running agent process; set by Connect, cleared by Disconnect.
-	cmd    *exec.Cmd
-	cmdMu  sync.Mutex
+	cmd   *exec.Cmd
+	cmdMu sync.Mutex
 
 	// cancel stops the Connect read loop.
 	cancel context.CancelFunc
@@ -244,10 +244,18 @@ func (c *Client) Connect(ctx context.Context, agentCmd string, agentArgs ...stri
 		c.cmdMu.Unlock()
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "Connect called on an already-connected ACP client",
-			Why:      "Client.cmd is non-nil, indicating a previous Connect call",
-			Impact:   "Cannot start a second agent connection on the same Client",
-			Fix:      "Create a new Client with NewClient for each agent connection",
+			What:     "This ACP client is already connected to an agent.",
+			Why: "Connect was called a second time on the same client. A client " +
+				"can only manage one agent process at a time, and the first " +
+				"connection is still active.",
+			Impact: "The second connection request was rejected. The first agent " +
+				"connection is unaffected and continues running.",
+			Fix: "1. To talk to a second agent, create a fresh client:\n" +
+				"     client := acp.NewClient(handler)\n" +
+				"2. To replace the existing connection, stop it first, then create\n" +
+				"   a new client:\n" +
+				"     existing.Disconnect()\n" +
+				"     client := acp.NewClient(handler)",
 		}
 	}
 
@@ -261,10 +269,19 @@ func (c *Client) Connect(ctx context.Context, agentCmd string, agentArgs ...stri
 		cancel()
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
-			What:     fmt.Sprintf("failed to attach stdout pipe to agent %q", agentCmd),
-			Why:      err.Error(),
-			Impact:   "ACP client cannot receive session updates from the agent",
-			Fix:      "Ensure the agent binary exists and is executable",
+			What:     "Couldn't connect to the agent's output stream.",
+			Why: fmt.Sprintf(
+				"Setting up the stdout pipe for the %q agent process failed: %s",
+				agentCmd, err,
+			),
+			Impact: "No session updates from the agent will reach this client, so the\n" +
+				"session can't be observed or recorded.",
+			Fix: fmt.Sprintf("1. Confirm the agent binary is installed and on PATH:\n"+
+				"     which %s\n"+
+				"2. Make sure the binary is executable:\n"+
+				"     test -x \"$(command -v %s)\" && echo OK\n"+
+				"3. Retry the connection once the binary is reachable.",
+				agentCmd, agentCmd),
 		}
 	}
 
@@ -273,10 +290,19 @@ func (c *Client) Connect(ctx context.Context, agentCmd string, agentArgs ...stri
 		cancel()
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
-			What:     fmt.Sprintf("failed to start agent process %q", agentCmd),
-			Why:      err.Error(),
-			Impact:   "ACP client cannot establish a session with the agent",
-			Fix:      "Ensure the agent binary exists at the given path and is executable",
+			What:     "Couldn't start the agent process.",
+			Why: fmt.Sprintf(
+				"Launching %q failed: %s",
+				agentCmd, err,
+			),
+			Impact: "No agent session can begin, so the client has nothing to observe\n" +
+				"or forward to its handler.",
+			Fix: fmt.Sprintf("1. Confirm the agent binary is installed and on PATH:\n"+
+				"     which %s\n"+
+				"2. Make sure the binary is executable:\n"+
+				"     test -x \"$(command -v %s)\" && echo OK\n"+
+				"3. Retry the connection once the binary is reachable.",
+				agentCmd, agentCmd),
 		}
 	}
 	c.cmd = cmd
@@ -414,10 +440,17 @@ func (c *Client) SessionStats(sessionID string) (*SessionStats, error) {
 	if !ok {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("session %q not found", sessionID),
-			Why:      "no updates have been received for this session ID",
-			Impact:   "session stats cannot be returned",
-			Fix:      "use a sessionID that has been observed by this Client",
+			What:     fmt.Sprintf("No session with the ID %q has been seen by this client.", sessionID),
+			Why: "The client only tracks sessions for which it has received at least one\n" +
+				"update from the agent. The ID you asked about hasn't appeared in any\n" +
+				"update yet.",
+			Impact: "Session statistics can't be returned because the client has no record\n" +
+				"of this session.",
+			Fix: "1. Double-check the session ID you passed — a typo or stale ID is the\n" +
+				"   most common cause.\n" +
+				"2. Make sure the agent has actually sent at least one update for this\n" +
+				"   session before you call SessionStats; new sessions only become\n" +
+				"   visible after their first update.",
 		}
 	}
 

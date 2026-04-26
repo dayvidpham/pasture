@@ -62,9 +62,13 @@ const crashExitCode = 137
 func main() {
 	if len(os.Args) != 2 {
 		fmt.Fprintf(os.Stderr,
-			"pasture-migrate-crash: usage: pasture-migrate-crash <dbPath>\n"+
-				"  why: this binary takes exactly one positional arg (the SQLite file to migrate).\n"+
-				"  fix: pass the absolute path to the .db file as the only argument.\n",
+			"Error: pasture-migrate-crash needs exactly one argument: the path to the database file to migrate.\n"+
+				"\n"+
+				"  Usage:    pasture-migrate-crash <dbPath>\n"+
+				"  Example:  pasture-migrate-crash /tmp/test-fixture.db\n"+
+				"\n"+
+				"How to fix:\n"+
+				"  1. Pass an absolute path to the .db file as the only argument.\n",
 		)
 		os.Exit(1)
 	}
@@ -72,9 +76,17 @@ func main() {
 
 	if _, err := os.Stat(dbPath); err != nil {
 		fmt.Fprintf(os.Stderr,
-			"pasture-migrate-crash: cannot stat %q: %s\n"+
-				"  why: the file path supplied to the crash binary does not exist or is not accessible.\n"+
-				"  fix: copy the legacy fixture (pasture/testdata/legacy_audit_v1.db) to a writable temp path and pass that path; ensure the calling test has set up t.TempDir() correctly.\n",
+			"Error: the file %q can't be opened.\n"+
+				"\n"+
+				"  Reason:  %s\n"+
+				"  Impact:  The crash test can't run because there's no database file to migrate.\n"+
+				"\n"+
+				"How to fix:\n"+
+				"  1. Copy the legacy fixture to a writable temp path:\n"+
+				"       cp pasture/testdata/legacy_audit_v1.db <your-temp-dir>/test.db\n"+
+				"  2. Pass the temp path as the only argument.\n"+
+				"  3. If the calling test created the path with t.TempDir(), confirm\n"+
+				"     the test wrote the fixture before spawning this binary.\n",
 			dbPath, err,
 		)
 		os.Exit(1)
@@ -93,7 +105,11 @@ func main() {
 			os.Exit(pasterrors.ExitCode(se))
 		}
 		fmt.Fprintf(os.Stderr,
-			"pasture-migrate-crash: migration failed before the planned crash point: %s\n",
+			"Error: the migration failed before the planned crash point.\n"+
+				"\n"+
+				"  Reason:  %s\n"+
+				"  Impact:  No crash was injected; the database is in whatever state the\n"+
+				"           failed migration left it.\n",
 			err,
 		)
 		os.Exit(int(pasterrors.CategoryStorage[0])) // fallback; should not reach
@@ -142,10 +158,12 @@ func runCrashMigration(dbPath string) (int, error) {
 	if err != nil {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("pasture-migrate-crash: cannot open %q", dbPath),
-			Why:      err.Error(),
-			Impact:   "the crash test cannot run; no migration was attempted",
-			Fix:      "verify the SQLite file is readable and the path is correct",
+			What:     fmt.Sprintf("The database file %q couldn't be opened.", dbPath),
+			Why:      fmt.Sprintf("SQLite reported: %s", err),
+			Impact:   "The crash test can't run because the file isn't reachable, so no migration was attempted.",
+			Fix: "1. Confirm the path is correct and the file exists:\n" +
+				fmt.Sprintf("     ls -l %q\n", dbPath) +
+				"2. Make sure the file is readable by the current user.",
 		}
 	}
 	defer db.Close()
@@ -159,10 +177,13 @@ func runCrashMigration(dbPath string) (int, error) {
 		if _, err := db.Exec(p); err != nil {
 			return 0, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
-				What:     fmt.Sprintf("pasture-migrate-crash: PRAGMA %q failed on %q", p, dbPath),
-				Why:      err.Error(),
-				Impact:   "the crash test cannot run with the production pragma set",
-				Fix:      "verify the SQLite file is writable and on a filesystem that supports WAL",
+				What:     fmt.Sprintf("Couldn't apply SQLite setting %q to %q.", p, dbPath),
+				Why:      fmt.Sprintf("SQLite reported: %s", err),
+				Impact:   "The crash test can't run with the same SQLite settings the daemon uses, so its result wouldn't be representative.",
+				Fix: "1. Confirm the file is writable by the current user.\n" +
+					"2. Confirm the file lives on a filesystem that supports SQLite's\n" +
+					"   write-ahead log (most local filesystems do; some networked\n" +
+					"   filesystems don't).",
 			}
 		}
 	}
@@ -183,10 +204,12 @@ func runCrashMigration(dbPath string) (int, error) {
 	if err != nil {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     "pasture-migrate-crash: cannot begin IMMEDIATE transaction for v2→v3",
-			Why:      err.Error(),
-			Impact:   "the crash test cannot proceed past the version-2 starting point",
-			Fix:      "verify the file is not held by another writer; rerun the test",
+			What:     "Couldn't open a write transaction for the v2-to-v3 migration step.",
+			Why:      fmt.Sprintf("SQLite reported: %s", err),
+			Impact:   "The crash test can't move past version 2 because it can't claim the write lock.",
+			Fix: "1. Make sure no other process is holding the database file open\n" +
+				"   (close any other pastured or sqlite processes pointing at it).\n" +
+				"2. Re-run the test once the file is free.",
 		}
 	}
 
@@ -210,7 +233,7 @@ func runCrashMigration(dbPath string) (int, error) {
 	// us before any cleanup runs. tx is a leaked *sql.Tx; the process
 	// exit reaps it.
 	fmt.Fprintf(os.Stderr,
-		"pasture-migrate-crash: v2→v3 migration staged (audit_schema_meta version=3 inserted, not committed); crashing now with exit %d\n",
+		"The v2-to-v3 migration is staged but not committed (the version=3 row is in the open transaction). Crashing now with exit %d to simulate a kernel-level kill in the middle of the migration.\n",
 		crashExitCode,
 	)
 	os.Exit(crashExitCode)
@@ -266,10 +289,12 @@ func promoteV1ToV2(db *sql.DB) error {
 	if err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     "pasture-migrate-crash: cannot begin transaction for v1→v2 promotion",
-			Why:      err.Error(),
-			Impact:   "the v1 fixture cannot be brought up to v2 before the crash test runs",
-			Fix:      "verify the file is writable and not held by another writer",
+			What:     "Couldn't open a transaction to bring the database from v1 up to v2.",
+			Why:      fmt.Sprintf("SQLite reported: %s", err),
+			Impact:   "The v1 fixture can't be promoted to v2, so the crash test (which targets the v2-to-v3 step) can't even reach its starting point.",
+			Fix: "1. Make sure the database file is writable by the current user.\n" +
+				"2. Make sure no other process is holding the file open.\n" +
+				"3. Re-run the test once the file is free.",
 		}
 	}
 	defer tx.Rollback() //nolint:errcheck // best-effort rollback on early returns
@@ -280,10 +305,11 @@ func promoteV1ToV2(db *sql.DB) error {
 	)`); err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     "pasture-migrate-crash: cannot create audit_schema_meta during v1→v2 promotion",
-			Why:      err.Error(),
-			Impact:   "the v1 fixture cannot be brought up to v2 before the crash test runs",
-			Fix:      "verify the file is writable",
+			What:     "Couldn't create the schema-version table while bringing the database from v1 up to v2.",
+			Why:      fmt.Sprintf("SQLite reported: %s", err),
+			Impact:   "The v1 fixture can't be promoted to v2, so the crash test can't reach its starting point.",
+			Fix: "1. Confirm the database file is writable by the current user.\n" +
+				"2. Confirm the disk has space for the new table.",
 		}
 	}
 	if _, err := tx.Exec(
@@ -292,19 +318,21 @@ func promoteV1ToV2(db *sql.DB) error {
 	); err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     "pasture-migrate-crash: cannot insert audit_schema_meta(version=2) during v1→v2 promotion",
-			Why:      err.Error(),
-			Impact:   "the v1 fixture cannot be brought up to v2 before the crash test runs",
-			Fix:      "verify the file is writable",
+			What:     "Couldn't record the v2 schema version while bringing the database from v1 up to v2.",
+			Why:      fmt.Sprintf("SQLite reported: %s", err),
+			Impact:   "The v1 fixture can't be promoted to v2, so the crash test can't reach its starting point.",
+			Fix: "1. Confirm the database file is writable by the current user.\n" +
+				"2. Confirm the disk has space for the row insert.",
 		}
 	}
 	if err := tx.Commit(); err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     "pasture-migrate-crash: cannot commit v1→v2 promotion",
-			Why:      err.Error(),
-			Impact:   "the v1 fixture cannot be brought up to v2 before the crash test runs",
-			Fix:      "verify the file is writable",
+			What:     "Couldn't commit the v1-to-v2 promotion transaction.",
+			Why:      fmt.Sprintf("SQLite reported: %s", err),
+			Impact:   "The v1 fixture can't be promoted to v2, so the crash test can't reach its starting point.",
+			Fix: "1. Confirm the database file is writable by the current user.\n" +
+				"2. Confirm the disk has space to commit pending changes.",
 		}
 	}
 	return nil
@@ -382,10 +410,14 @@ func executeV3Statements(ctx context.Context, tx *sql.Tx) error {
 func wrapStorageErr(what string, err error) error {
 	return &pasterrors.StructuredError{
 		Category: pasterrors.CategoryStorage,
-		What:     fmt.Sprintf("pasture-migrate-crash: %s failed", what),
-		Why:      err.Error(),
-		Impact:   "the crash test could not stage the v3 transaction; no crash injected",
-		Fix:      "fix the underlying SQL/DDL error and rerun; if this is a fixture mismatch, verify the input db is at v1 or v2",
+		What:     fmt.Sprintf("A step in the v2-to-v3 migration (%s) couldn't run.", what),
+		Why:      fmt.Sprintf("SQLite reported: %s", err),
+		Impact:   "The v3 transaction couldn't be staged, so no crash was injected and the test didn't get to exercise the recovery path.",
+		Fix: "1. Read the SQLite error above and fix the underlying SQL or DDL issue.\n" +
+			"2. If the error mentions an unexpected table or column, the input fixture is\n" +
+			"   probably at the wrong starting version. Confirm the file is at v1 or v2:\n" +
+			"     sqlite3 <dbPath> 'SELECT MAX(version) FROM audit_schema_meta;'\n" +
+			"3. Re-run the test once the underlying issue is resolved.",
 	}
 }
 
@@ -408,18 +440,23 @@ func tableExists(db *sql.DB, name string) (bool, error) {
 			// as a hard storage error.
 			return false, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
-				What:     "pasture-migrate-crash: sqlite_master is missing",
-				Why:      err.Error(),
-				Impact:   "the SQLite file is corrupt; the crash test cannot proceed",
-				Fix:      "regenerate the legacy_audit_v1.db fixture and retry",
+				What:     "The database file appears to be corrupt: it has no sqlite_master table.",
+				Why:      fmt.Sprintf("SQLite reported: %s. Every healthy SQLite file has a sqlite_master table; the file is unusable without it.", err),
+				Impact:   "The crash test can't proceed because it can't read the file's structure.",
+				Fix: "1. Regenerate the legacy fixture from a known-good source:\n" +
+					"     cp pasture/testdata/legacy_audit_v1.db <your-temp-dir>/test.db\n" +
+					"2. Re-run the test against the fresh copy.",
 			}
 		}
 		return false, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("pasture-migrate-crash: cannot query sqlite_master for %q", name),
-			Why:      err.Error(),
-			Impact:   "the crash test cannot determine the on-disk schema version",
-			Fix:      "verify the SQLite file is readable and not corrupted",
+			What:     fmt.Sprintf("Couldn't ask the database whether the table %q exists.", name),
+			Why:      fmt.Sprintf("SQLite reported: %s", err),
+			Impact:   "The crash test can't tell what schema version the file is at, so it doesn't know which migration step to run.",
+			Fix: "1. Confirm the file is readable by the current user:\n" +
+				"     ls -l <dbPath>\n" +
+				"2. If the file is unreadable or corrupt, copy a fresh fixture and retry:\n" +
+				"     cp pasture/testdata/legacy_audit_v1.db <your-temp-dir>/test.db",
 		}
 	}
 	return got == name, nil

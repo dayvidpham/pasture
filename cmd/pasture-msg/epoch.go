@@ -21,9 +21,9 @@ var epochStartCmd = &cobra.Command{
 	Short: "Start a new epoch workflow",
 	Long: `Start a new epoch workflow in the pastured daemon.
 
-The epoch-id becomes the Temporal workflow ID, so it must be unique within
-the namespace. If an epoch with this ID is already running, the command fails
-with exit code 3.`,
+The epoch-id becomes the workflow's ID, so it must be unique within the
+namespace. If an epoch with this ID is already running the command exits
+with code 3 and tells you how to resolve the conflict.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := resolveConfig(cmd)
 		if err != nil {
