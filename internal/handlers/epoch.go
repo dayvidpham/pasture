@@ -30,14 +30,11 @@ func validateEpochIDForHandler(epochID, caller string) error {
 	if _, err := provenance.ParseTaskID(epochID); err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "The epoch ID you provided is not valid.",
-			Why: fmt.Sprintf(
-				"%q doesn't match the required ID format. We expect IDs that look like\n"+
-					"\"yourproject--01968a3c-1234-...\" — a project name followed by \"--\"\n"+
-					"and a UUID. The separator \"--\" was not found in what you provided,\n"+
-					"so we couldn't split it into the two required parts.",
-				epochID,
-			),
+			What:     fmt.Sprintf("The epoch ID %q is not valid.", epochID),
+			Why: "Epoch IDs need the shape \"yourproject--01968a3c-...\" — a project name\n" +
+				"followed by \"--\" and a UUID. The value you passed couldn't be split\n" +
+				"into those two parts because the \"--\" separator was missing.",
+			Where: fmt.Sprintf("Starting the epoch (internal/handlers/epoch.go in %s).", caller),
 			Impact: "The epoch can't be started. Without a properly-formatted ID, the audit\n" +
 				"log can't link events back to any task, which would leave a broken trail.",
 			Fix: "1. Create a task first to get a valid ID:\n" +
@@ -45,6 +42,7 @@ func validateEpochIDForHandler(epochID, caller string) error {
 				"2. Or find one that already exists:\n" +
 				"     pasture task list --status=open --type=feature\n" +
 				"3. Pass the returned ID as --epoch-id when starting the epoch.",
+			Cause: err,
 		}
 	}
 	return nil
@@ -72,6 +70,7 @@ func EpochStart(
 			Category: pasterrors.CategoryValidation,
 			What:     "An epoch ID is required to start an epoch.",
 			Why:      "The --epoch-id flag was not provided.",
+			Where:    "Starting the epoch (internal/handlers/epoch.go in handlers.EpochStart).",
 			Impact:   "The epoch can't be started without an ID to identify it.",
 			Fix: "1. Pass an epoch ID when starting the epoch:\n" +
 				"     pasture-msg epoch start --epoch-id <id> ...\n" +
@@ -114,7 +113,8 @@ func EpochStart(
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("The epoch workflow %q couldn't be started.", epochID),
-			Why:      fmt.Sprintf("The Temporal server rejected the start request: %s", err),
+			Why:      "The workflow server rejected the start request.",
+			Where:    "Starting the epoch (internal/handlers/epoch.go in handlers.EpochStart).",
 			Impact:   "The epoch did not start, so no workflow steps will run for it.",
 			Fix: fmt.Sprintf("1. Check whether an epoch with this ID is already running:\n"+
 				"     pasture-msg epoch status --epoch-id %q\n"+
@@ -122,6 +122,7 @@ func EpochStart(
 				"     pastured --task-queue %s\n"+
 				"3. Retry the start once the queue is healthy.",
 				epochID, taskQueue, taskQueue),
+			Cause: err,
 		}
 	}
 
@@ -155,6 +156,7 @@ func EpochCancel(
 			Category: pasterrors.CategoryValidation,
 			What:     "An epoch ID is required to cancel an epoch.",
 			Why:      "The --epoch-id flag was not provided.",
+			Where:    "Cancelling an epoch (internal/handlers/epoch.go in handlers.EpochCancel).",
 			Impact:   "Without an ID, there's no way to know which epoch to cancel.",
 			Fix: "1. Pass the epoch's ID:\n" +
 				"     pasture-msg epoch cancel --epoch-id <id>\n" +
@@ -174,7 +176,8 @@ func EpochCancel(
 		return 3, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Couldn't cancel the epoch %q.", epochID),
-			Why:      fmt.Sprintf("The Temporal server rejected the cancel request: %s", err),
+			Why:      "The workflow server rejected the cancel request.",
+			Where:    "Cancelling an epoch (internal/handlers/epoch.go in handlers.EpochCancel).",
 			Impact:   "The epoch is still running. The cancellation request never reached it.",
 			Fix: fmt.Sprintf("1. Confirm the epoch is currently running:\n"+
 				"     pasture-msg epoch status --epoch-id %q\n"+
@@ -182,6 +185,7 @@ func EpochCancel(
 				"     pasture-msg epoch list\n"+
 				"3. Retry once you've confirmed the epoch exists.",
 				epochID),
+			Cause: err,
 		}
 	}
 
@@ -216,6 +220,7 @@ func EpochTerminate(
 			Category: pasterrors.CategoryValidation,
 			What:     "An epoch ID is required to terminate an epoch.",
 			Why:      "The --epoch-id flag was not provided.",
+			Where:    "Terminating an epoch (internal/handlers/epoch.go in handlers.EpochTerminate).",
 			Impact:   "Without an ID, there's no way to know which epoch to terminate.",
 			Fix: "1. Pass the epoch's ID:\n" +
 				"     pasture-msg epoch terminate --epoch-id <id> --reason \"<why>\"\n" +
@@ -235,7 +240,8 @@ func EpochTerminate(
 		return 3, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Couldn't terminate the epoch %q.", epochID),
-			Why:      fmt.Sprintf("The Temporal server rejected the terminate request: %s", err),
+			Why:      "The workflow server rejected the terminate request.",
+			Where:    "Terminating an epoch (internal/handlers/epoch.go in handlers.EpochTerminate).",
 			Impact:   "The epoch is still running. The terminate request never reached it.",
 			Fix: fmt.Sprintf("1. Confirm the epoch is currently running:\n"+
 				"     pasture-msg epoch status --epoch-id %q\n"+
@@ -243,6 +249,7 @@ func EpochTerminate(
 				"     pasture-msg epoch list\n"+
 				"3. Retry once you've confirmed the epoch exists.",
 				epochID),
+			Cause: err,
 		}
 	}
 

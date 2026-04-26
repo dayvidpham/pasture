@@ -86,7 +86,8 @@ func SignalVote(
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Couldn't record the vote for epoch %q.", epochID),
-			Why:      fmt.Sprintf("The Temporal server rejected the vote signal: %s", err),
+			Why:      "The workflow server rejected the vote signal.",
+			Where:    "Recording a review vote (internal/handlers/signal.go in handlers.SignalReviewVote).",
 			Impact:   "The vote was not recorded against this review.",
 			Fix: fmt.Sprintf("1. Confirm the epoch is currently running:\n"+
 				"     pasture-msg epoch status --epoch-id %q\n"+
@@ -94,6 +95,7 @@ func SignalVote(
 				"     pasture-msg epoch list\n"+
 				"3. Retry the vote once the epoch is healthy.",
 				epochID),
+			Cause: err,
 		}
 	}
 
@@ -186,7 +188,8 @@ func SignalComplete(
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Couldn't mark slice %q complete in epoch %q.", sliceID, epochID),
-			Why:      fmt.Sprintf("The Temporal server rejected the completion signal: %s", err),
+			Why:      "The workflow server rejected the completion signal.",
+			Where:    "Marking a slice complete (internal/handlers/signal.go in handlers.SignalComplete).",
 			Impact:   "The slice's completion isn't recorded, so the workflow can't move past it.",
 			Fix: fmt.Sprintf("1. Confirm the epoch is currently running:\n"+
 				"     pasture-msg epoch status --epoch-id %q\n"+
@@ -194,6 +197,7 @@ func SignalComplete(
 				"     pasture-msg epoch list\n"+
 				"3. Retry the completion once the epoch is healthy.",
 				epochID),
+			Cause: err,
 		}
 	}
 

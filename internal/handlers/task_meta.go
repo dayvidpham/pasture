@@ -24,6 +24,7 @@ func TaskLabelAdd(w io.Writer, dbPath, idStr, label string, format types.OutputF
 			Category: pasterrors.CategoryValidation,
 			What:     "A label name is required to attach a label.",
 			Why:      "No label was passed to `pasture task label add` as the second positional argument.",
+			Where:    "Adding a label (internal/handlers/task_meta.go in handlers.TaskLabelAdd).",
 			Impact:   "Nothing can be attached without knowing the label's name.",
 			Fix: "1. Pass the label as the second positional argument:\n" +
 				"     pasture task label add <task-id> <label>\n" +
@@ -56,6 +57,7 @@ func TaskLabelRemove(w io.Writer, dbPath, idStr, label string, format types.Outp
 			Category: pasterrors.CategoryValidation,
 			What:     "A label name is required to detach a label.",
 			Why:      "No label was passed to `pasture task label remove` as the second positional argument.",
+			Where:    "Removing a label (internal/handlers/task_meta.go in handlers.TaskLabelRemove).",
 			Impact:   "Nothing can be detached without knowing the label's name.",
 			Fix: "1. Pass the label as the second positional argument:\n" +
 				"     pasture task label remove <task-id> <label>\n" +
@@ -99,6 +101,7 @@ func TaskCommentAdd(w io.Writer, in TaskCommentAddInput, format types.OutputForm
 			Category: pasterrors.CategoryValidation,
 			What:     "Comment text is required to add a comment.",
 			Why:      "No comment text was passed to `pasture task comment add` as the last positional argument.",
+			Where:    "Adding a comment (internal/handlers/task_meta.go in handlers.TaskCommentAdd).",
 			Impact:   "An empty comment can't be added — there's nothing to record.",
 			Fix: "1. Pass the comment text as the last positional argument:\n" +
 				"     pasture task comment add <task-id> --author <agent-id> \"<text>\"\n" +
@@ -111,6 +114,7 @@ func TaskCommentAdd(w io.Writer, in TaskCommentAddInput, format types.OutputForm
 			Category: pasterrors.CategoryValidation,
 			What:     "An author is required to add a comment.",
 			Why:      "The --author flag was not provided.",
+			Where:    "Adding a comment (internal/handlers/task_meta.go in handlers.TaskCommentAdd).",
 			Impact:   "Comments must say who wrote them, so we know who to attribute the message to.",
 			Fix: "1. Pass --author with the ID of a registered agent:\n" +
 				"     pasture task comment add <task-id> --author <agent-id> \"<text>\"\n" +

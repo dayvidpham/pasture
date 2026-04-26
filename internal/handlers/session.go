@@ -34,6 +34,7 @@ func SessionRegister(
 			Category: pasterrors.CategoryValidation,
 			What:     "An epoch ID is required to register a session.",
 			Why:      "The --epoch-id flag was not provided.",
+			Where:    "Registering a session (internal/handlers/session.go in handlers.SessionRegister).",
 			Impact:   "Without an epoch ID, the session can't be linked to a running epoch.",
 			Fix: "1. Pass the epoch this session belongs to:\n" +
 				"     pasture-msg session register --epoch-id <id> --session-id <id> --role <role>\n" +
@@ -47,6 +48,7 @@ func SessionRegister(
 			Category: pasterrors.CategoryValidation,
 			What:     "A session ID is required to register a session.",
 			Why:      "The --session-id flag was not provided.",
+			Where:    "Registering a session (internal/handlers/session.go in handlers.SessionRegister).",
 			Impact:   "Without a session ID, there's nothing to register.",
 			Fix: "1. Pass the session ID supplied by Claude Code:\n" +
 				"     pasture-msg session register --session-id <id> --epoch-id <id> --role <role>",
@@ -58,6 +60,7 @@ func SessionRegister(
 			Category: pasterrors.CategoryValidation,
 			What:     "A role is required to register a session.",
 			Why:      "The --role flag was not provided.",
+			Where:    "Registering a session (internal/handlers/session.go in handlers.SessionRegister).",
 			Impact:   "The session can't be tracked without knowing what role it's playing.",
 			Fix: "1. Pass the role this session is playing (worker, supervisor, reviewer, ...):\n" +
 				"     pasture-msg session register --role <role> --epoch-id <id> --session-id <id>",
@@ -83,7 +86,8 @@ func SessionRegister(
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Couldn't register the session with epoch %q.", epochID),
-			Why:      fmt.Sprintf("The Temporal server rejected the register-session signal: %s", err),
+			Why:      "The workflow server rejected the register-session signal.",
+			Where:    "Registering a session (internal/handlers/session.go in handlers.SessionRegister).",
 			Impact:   "The session is not tracked by the epoch, so its events won't appear in the epoch's history.",
 			Fix: fmt.Sprintf("1. Confirm the epoch is currently running:\n"+
 				"     pasture-msg epoch status --epoch-id %q\n"+
@@ -91,6 +95,7 @@ func SessionRegister(
 				"     pasture-msg epoch list\n"+
 				"3. Retry the register once the epoch is healthy.",
 				epochID),
+			Cause: err,
 		}
 	}
 
