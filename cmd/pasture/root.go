@@ -1,11 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
@@ -65,9 +67,18 @@ func resolveFormat() types.OutputFormat {
 	return types.OutputText
 }
 
-// printError writes a structured error to stderr. RunE handlers call this
-// before returning the error so the user always sees a message even when the
-// cobra default error printer would otherwise truncate.
+// printError writes a structured error report to stderr and is used by RunE
+// handlers to produce actionable output before returning the error.
+//
+// When the error chain contains a *pasterrors.StructuredError, the full
+// Report (category, what, why, impact, fix) is written instead of just the
+// one-line Error() string. This ensures operators see the Problem / Reason /
+// Impact / How-to-fix body rather than a truncated single-line message.
 func printError(err error) {
+	var se *pasterrors.StructuredError
+	if errors.As(err, &se) {
+		se.Report(os.Stderr)
+		return
+	}
 	fmt.Fprintln(os.Stderr, err)
 }
