@@ -336,17 +336,32 @@ func TestFormatError_StructuredError_JSON(t *testing.T) {
 func TestFormatError_StructuredError_Text(t *testing.T) {
 	se := &errors.StructuredError{
 		Category: errors.CategoryWorkflow,
-		What:     "workflow timed out",
-		Why:      "activity exceeded deadline",
-		Impact:   "slice cannot complete",
-		Fix:      "increase activity timeout in pastured config",
+		What:     "The workflow ran past its timeout.",
+		Why:      "An activity didn't finish within the configured deadline.",
+		Impact:   "The slice can't complete until the activity is rerun.",
+		Fix: "1. Raise the activity timeout in your pastured config:\n" +
+			"     $EDITOR ~/.config/pasture/pastured.toml",
 	}
 	got := formatters.FormatError(se, types.OutputText)
-	checks := []string{"workflow error", "workflow timed out", "activity exceeded deadline", "slice cannot complete", "increase activity timeout"}
+	// Plain-language Stringer: the top "Error:" line + full English labels.
+	// The category literal must NOT appear in user-visible output.
+	checks := []string{
+		"Error: The workflow ran past its timeout.",
+		"Problem:",
+		"Reason:",
+		"Impact:",
+		"How to fix:",
+		"An activity didn't finish within the configured deadline.",
+		"The slice can't complete until the activity is rerun.",
+		"$EDITOR ~/.config/pasture/pastured.toml",
+	}
 	for _, s := range checks {
 		if !strings.Contains(got, s) {
 			t.Errorf("FormatError Text: output does not contain %q\nGot:\n%s", s, got)
 		}
+	}
+	if strings.Contains(got, "workflow error") {
+		t.Errorf("FormatError Text: output leaked category literal:\n%s", got)
 	}
 }
 

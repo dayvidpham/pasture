@@ -70,9 +70,16 @@ func TestEpochStart_MalformedEpochID_Rejected(t *testing.T) {
 	if se.Category != pasterrors.CategoryValidation {
 		t.Errorf("Category = %q, want %q", se.Category, pasterrors.CategoryValidation)
 	}
-	if !strings.Contains(se.What, "not a valid Provenance TaskID") {
-		t.Errorf("What = %q, want substring %q", se.What, "not a valid Provenance TaskID")
+	// What is the plain-language one-liner shown on the top "Error:" line.
+	if !strings.Contains(se.What, "not valid") {
+		t.Errorf("What = %q, want plain-language substring %q", se.What, "not valid")
 	}
+	// Why explains in plain English what about the ID is wrong (no
+	// project-internal jargon — no "ParseTaskID", no "TaskID" type name).
+	if !strings.Contains(se.Why, "\"--\"") {
+		t.Errorf("Why = %q, want substring %q (separator explanation)", se.Why, "\"--\"")
+	}
+	// Fix retains the actionable command suggestion users need to recover.
 	if !strings.Contains(se.Fix, "pasture task create REQUEST") {
 		t.Errorf("Fix = %q, want substring %q", se.Fix, "pasture task create REQUEST")
 	}

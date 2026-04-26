@@ -452,11 +452,13 @@ func TestActivities_RecordTransition_RejectsMalformedEpochID(t *testing.T) {
 	// type is encoded into the Type() field on ApplicationError, NOT
 	// preserved via Unwrap — see the Temporal SDK error.go doc comment).
 	// The serialised error message carries the StructuredError.Error() output
-	// (which is "<category>: <what>" — not the full Report). So we assert on:
+	// (which is "<category>: <what>" — not the full plain-language Report).
+	// We assert on:
 	//
-	//   1. "validation error" — the CategoryValidation marker (Category prefix).
-	//   2. "not a valid Provenance TaskID" — the load-bearing What substring
-	//      from §11 Scenario 13.
+	//   1. "validation error" — the CategoryValidation marker (Category
+	//      prefix on .Error()).
+	//   2. The plain-English What sentence from validateEpochID — the
+	//      load-bearing user-visible substring from §11 Scenario 13.
 	//   3. "type: StructuredError" — Temporal's record of the original Go
 	//      error type (lets workflow callers detect the wrapped shape via
 	//      applicationErr.Type() in production).
@@ -465,13 +467,13 @@ func TestActivities_RecordTransition_RejectsMalformedEpochID(t *testing.T) {
 	// TestEpochStart_MalformedEpochID_Rejected (handlers package) and the
 	// CLI subprocess test (cmd/pasture-msg/main_test.go) — both inspect the
 	// raw *StructuredError BEFORE Temporal serialises it through the activity
-	// boundary, so all five fields are visible.
+	// boundary, so all fields are visible via Report.
 	msg := err.Error()
 	if !strings.Contains(msg, "validation error") {
 		t.Errorf("error message %q missing 'validation error' (CategoryValidation marker)", msg)
 	}
-	if !strings.Contains(msg, "not a valid Provenance TaskID") {
-		t.Errorf("error message %q missing 'not a valid Provenance TaskID'", msg)
+	if !strings.Contains(msg, "The epoch ID you provided is not valid.") {
+		t.Errorf("error message %q missing the plain-language What sentence", msg)
 	}
 	if !strings.Contains(msg, "type: StructuredError") {
 		t.Errorf("error chain %q does not record 'type: StructuredError' (Temporal-side type identifier — workflow callers use applicationErr.Type() to detect the wrapped shape)", msg)
@@ -527,8 +529,8 @@ func TestActivities_RecordAuditEvent_RejectsMalformedEpochID(t *testing.T) {
 	if !strings.Contains(msg, "validation error") {
 		t.Errorf("error message %q missing 'validation error' (CategoryValidation marker)", msg)
 	}
-	if !strings.Contains(msg, "not a valid Provenance TaskID") {
-		t.Errorf("error message %q missing 'not a valid Provenance TaskID'", msg)
+	if !strings.Contains(msg, "The epoch ID you provided is not valid.") {
+		t.Errorf("error message %q missing the plain-language What sentence", msg)
 	}
 }
 
