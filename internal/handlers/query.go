@@ -67,20 +67,28 @@ func queryWorkflow[T any](ctx context.Context, c interface {
 	if err != nil {
 		return zero, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
-			What:     fmt.Sprintf("query %q failed for workflow %q", queryType, workflowID),
-			Why:      err.Error(),
-			Impact:   "cannot retrieve workflow state",
-			Fix:      fmt.Sprintf("verify that workflow %q exists and is running", workflowID),
+			What:     fmt.Sprintf("Couldn't read the state of epoch %q.", workflowID),
+			Why:      fmt.Sprintf("The Temporal server rejected the %q query: %s", queryType, err),
+			Impact:   "The current workflow state can't be returned, so commands depending on it have no view to act on.",
+			Fix: fmt.Sprintf("1. Confirm the epoch is currently running:\n"+
+				"     pasture-msg epoch status --epoch-id %q\n"+
+				"2. If the epoch isn't found, list active epochs to find the right ID:\n"+
+				"     pasture-msg epoch list\n"+
+				"3. Retry the query once the epoch is healthy.",
+				workflowID),
 		}
 	}
 	var result T
 	if err := val.Get(&result); err != nil {
 		return zero, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
-			What:     fmt.Sprintf("failed to decode query result for workflow %q", workflowID),
-			Why:      err.Error(),
-			Impact:   "query result cannot be read",
-			Fix:      "check that pastured and pasture-msg are on matching versions",
+			What:     fmt.Sprintf("The state returned for epoch %q couldn't be decoded.", workflowID),
+			Why:      fmt.Sprintf("Reading the Temporal query result failed: %s", err),
+			Impact:   "The state can't be displayed because pasture-msg can't interpret what pastured sent back.",
+			Fix: "1. Check the versions of pastured and pasture-msg — they must match:\n" +
+				"     pastured --version\n" +
+				"     pasture-msg --version\n" +
+				"2. If they differ, update both to the same release.",
 		}
 	}
 	return result, nil

@@ -22,10 +22,13 @@ func TaskLabelAdd(w io.Writer, dbPath, idStr, label string, format types.OutputF
 	if label == "" {
 		se := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "label name is required",
-			Why:      "no label argument was passed to `pasture task label add`",
-			Impact:   "no label can be added without a name",
-			Fix:      "supply the label as the second positional argument: pasture task label add ID LABEL",
+			What:     "A label name is required to attach a label.",
+			Why:      "No label was passed to `pasture task label add` as the second positional argument.",
+			Impact:   "Nothing can be attached without knowing the label's name.",
+			Fix: "1. Pass the label as the second positional argument:\n" +
+				"     pasture task label add <task-id> <label>\n" +
+				"2. For example:\n" +
+				"     pasture task label add aura-plugins-h4qnq important",
 		}
 		return pasterrors.ExitCode(se), se
 	}
@@ -51,10 +54,13 @@ func TaskLabelRemove(w io.Writer, dbPath, idStr, label string, format types.Outp
 	if label == "" {
 		se := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "label name is required",
-			Why:      "no label argument was passed to `pasture task label remove`",
-			Impact:   "no label can be removed without a name",
-			Fix:      "supply the label as the second positional argument: pasture task label remove ID LABEL",
+			What:     "A label name is required to detach a label.",
+			Why:      "No label was passed to `pasture task label remove` as the second positional argument.",
+			Impact:   "Nothing can be detached without knowing the label's name.",
+			Fix: "1. Pass the label as the second positional argument:\n" +
+				"     pasture task label remove <task-id> <label>\n" +
+				"2. To see which labels are currently attached:\n" +
+				"     pasture task show <task-id>",
 		}
 		return pasterrors.ExitCode(se), se
 	}
@@ -91,20 +97,25 @@ func TaskCommentAdd(w io.Writer, in TaskCommentAddInput, format types.OutputForm
 	if in.Body == "" {
 		se := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "comment body is required",
-			Why:      "no body argument was passed to `pasture task comment add`",
-			Impact:   "no comment can be added without a body",
-			Fix:      "supply the body as the last positional argument: pasture task comment add ID --author=AGENT \"text\"",
+			What:     "Comment text is required to add a comment.",
+			Why:      "No comment text was passed to `pasture task comment add` as the last positional argument.",
+			Impact:   "An empty comment can't be added — there's nothing to record.",
+			Fix: "1. Pass the comment text as the last positional argument:\n" +
+				"     pasture task comment add <task-id> --author <agent-id> \"<text>\"\n" +
+				"2. Use quotes if the text contains spaces.",
 		}
 		return pasterrors.ExitCode(se), se
 	}
 	if in.AuthorID == "" {
 		se := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "comment author is required",
-			Why:      "no --author flag was provided",
-			Impact:   "Provenance comments must reference a registered agent (PROV-O wasAttributedTo)",
-			Fix:      "pass --author <agent-id> with the wire-format ID of a registered agent",
+			What:     "An author is required to add a comment.",
+			Why:      "The --author flag was not provided.",
+			Impact:   "Comments must say who wrote them, so we know who to attribute the message to.",
+			Fix: "1. Pass --author with the ID of a registered agent:\n" +
+				"     pasture task comment add <task-id> --author <agent-id> \"<text>\"\n" +
+				"2. To find your agent ID, list registered agents:\n" +
+				"     pasture task agents list",
 		}
 		return pasterrors.ExitCode(se), se
 	}

@@ -34,20 +34,28 @@ func PhaseAdvance(
 	if epochID == "" {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "epoch-id is required",
-			Why:      "--epoch-id flag was not provided",
-			Impact:   "phase advance cannot be sent without an epoch ID",
-			Fix:      "provide --epoch-id <id>",
+			What:     "An epoch ID is required to advance the phase.",
+			Why:      "The --epoch-id flag was not provided.",
+			Impact:   "Without an epoch ID, there's no way to know which workflow to advance.",
+			Fix: "1. Pass the epoch's ID:\n" +
+				"     pasture-msg phase advance --epoch-id <id> --to <phase>\n" +
+				"2. If you don't know the epoch ID, list active epochs:\n" +
+				"     pasture-msg epoch list",
 		}
 		return pasterrors.ExitCode(err), err
 	}
 	if !toPhase.IsValid() {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("%q is not a valid phase", toPhase),
-			Why:      "PhaseId must be one of: request, elicit, propose, ..., landing, complete (or pX shorthand)",
-			Impact:   "phase advance cannot be sent with an unknown target phase",
-			Fix:      "use a valid phase name (e.g., request, elicit, code-review) or pX shorthand (p1..p12)",
+			What:     fmt.Sprintf("%q is not a recognised phase name.", toPhase),
+			Why: "The target phase must be one of the 12 protocol phase names\n" +
+				"(request, elicit, propose, ..., landing, complete) or the short\n" +
+				"form p1..p12.",
+			Impact: "The phase advance can't be sent because the target phase isn't recognised.",
+			Fix: "1. Use a recognised phase name, for example:\n" +
+				"     pasture-msg phase advance --to code-review --epoch-id <id>\n" +
+				"2. Or use the short form:\n" +
+				"     pasture-msg phase advance --to p10 --epoch-id <id>",
 		}
 		return pasterrors.ExitCode(err), err
 	}
@@ -67,10 +75,15 @@ func PhaseAdvance(
 	if err := c.SignalWorkflow(ctx, epochID, "", temporal.SignalAdvancePhase, payload); err != nil {
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
-			What:     fmt.Sprintf("phase advance signal failed for epoch %q", epochID),
-			Why:      err.Error(),
-			Impact:   "phase transition was not initiated",
-			Fix:      fmt.Sprintf("verify that epoch %q exists and is running", epochID),
+			What:     fmt.Sprintf("Couldn't send the phase-advance request to epoch %q.", epochID),
+			Why:      fmt.Sprintf("The Temporal server rejected the advance signal: %s", err),
+			Impact:   "The phase transition didn't start, so the workflow remains in its current phase.",
+			Fix: fmt.Sprintf("1. Confirm the epoch is currently running:\n"+
+				"     pasture-msg epoch status --epoch-id %q\n"+
+				"2. If the epoch isn't found, list active epochs to find the right ID:\n"+
+				"     pasture-msg epoch list\n"+
+				"3. Retry the phase advance once the epoch is healthy.",
+				epochID),
 		}
 	}
 

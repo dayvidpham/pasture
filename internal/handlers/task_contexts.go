@@ -63,29 +63,38 @@ func parseEventID(raw string) (int64, error) {
 	if raw == "" {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "pasture task contexts: missing event ID",
-			Why:      "the positional event-id argument was empty",
-			Impact:   "the context-edge query cannot be issued without a target event",
-			Fix:      "pass the integer audit_events.id as the first positional argument: pasture task contexts <integer-id>",
+			What:     "An event ID is required to look up its context links.",
+			Why:      "No event ID was passed as the first positional argument.",
+			Impact:   "The contexts query can't be issued without knowing which event to look up.",
+			Fix: "1. Pass the integer event ID as the first positional argument:\n" +
+				"     pasture task contexts <event-id>\n" +
+				"2. To find event IDs, list recent events first:\n" +
+				"     pasture task events",
 		}
 	}
 	n, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("pasture task contexts: cannot parse event ID %q", raw),
-			Why:      err.Error(),
-			Impact:   "the context-edge query cannot be issued because the event-id is not a valid integer",
-			Fix:      "pass the integer audit_events.id (a positive integer); use 'pasture task events' to discover event ids",
+			What:     fmt.Sprintf("%q is not a valid event ID — event IDs are positive whole numbers.", raw),
+			Why:      fmt.Sprintf("The value couldn't be parsed as an integer: %s", err),
+			Impact:   "The contexts query can't be issued because the event ID isn't a number.",
+			Fix: "1. Pass a positive whole number as the event ID:\n" +
+				"     pasture task contexts <event-id>\n" +
+				"2. To find valid event IDs, list recent events first:\n" +
+				"     pasture task events",
 		}
 	}
 	if n <= 0 {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("pasture task contexts: event ID %d is not positive", n),
-			Why:      "audit_events.id is AUTOINCREMENT and starts at 1; zero and negative ids are unreachable",
-			Impact:   "the context-edge query cannot be issued because no row would ever match",
-			Fix:      "pass a positive integer; use 'pasture task events' to discover valid event ids",
+			What:     fmt.Sprintf("Event ID %d isn't valid — event IDs start at 1.", n),
+			Why:      "Zero and negative numbers are never assigned to events, so no event would ever match.",
+			Impact:   "The contexts query can't be issued because no event has the ID you provided.",
+			Fix: "1. Pass a positive whole number as the event ID:\n" +
+				"     pasture task contexts <event-id>\n" +
+				"2. To find valid event IDs, list recent events first:\n" +
+				"     pasture task events",
 		}
 	}
 	return n, nil

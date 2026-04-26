@@ -6,9 +6,9 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
 
+	"fmt"
 	"github.com/dayvidpham/pasture/internal/config"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
-	"fmt"
 )
 
 // TemporalClient is the narrow Temporal client interface used by handlers.
@@ -45,10 +45,15 @@ func DefaultClientFactory(ctx context.Context, conn config.ConnectionConfig) (Te
 	if err != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
-			What:     fmt.Sprintf("failed to connect to Temporal at %s", conn.ServerAddress),
-			Why:      err.Error(),
-			Impact:   "command cannot reach the Temporal server",
-			Fix:      "ensure pastured is running and Temporal is reachable at the configured address",
+			What:     fmt.Sprintf("Couldn't connect to the Temporal server at %s.", conn.ServerAddress),
+			Why:      fmt.Sprintf("Dialling the server failed: %s", err),
+			Impact:   "No commands can be sent to running workflows until the connection is restored.",
+			Fix: fmt.Sprintf("1. Check that pastured is running and listening on the right address:\n"+
+				"     pastured --server-address %s\n"+
+				"2. Confirm the Temporal server itself is reachable:\n"+
+				"     nc -vz %s\n"+
+				"3. Retry the command once the connection is back.",
+				conn.ServerAddress, conn.ServerAddress),
 		}
 	}
 	return &realClient{c: c}, nil

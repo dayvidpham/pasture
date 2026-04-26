@@ -50,10 +50,13 @@ func TaskTimeline(w io.Writer, in TaskTimelineInput, format types.OutputFormat) 
 	if in.TaskIDStr == "" {
 		se := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "pasture task timeline: missing task ID",
-			Why:      "the positional task-id argument was empty",
-			Impact:   "the timeline query cannot be issued without a target task",
-			Fix:      "pass the wire-format task ID as the first positional argument: pasture task timeline <namespace--uuid>",
+			What:     "A task ID is required to show a timeline.",
+			Why:      "No task ID was passed as the first positional argument.",
+			Impact:   "The timeline can't be looked up without knowing which task to query.",
+			Fix: "1. Pass the task ID as the first positional argument:\n" +
+				"     pasture task timeline <task-id>\n" +
+				"2. To find a task ID, list tasks first:\n" +
+				"     pasture task list",
 		}
 		return pasterrors.ExitCode(se), se
 	}

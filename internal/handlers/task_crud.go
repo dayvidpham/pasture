@@ -31,10 +31,13 @@ func TaskCreate(w io.Writer, in TaskCreateInput, format types.OutputFormat) (int
 	if in.Title == "" {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "task title is required",
-			Why:      "no title argument was provided to `pasture task create`",
-			Impact:   "task cannot be created without a human-readable title",
-			Fix:      "pass the title as the first positional argument: pasture task create \"My title\"",
+			What:     "A title is required to create a task.",
+			Why:      "No title was passed to `pasture task create` as a positional argument.",
+			Impact:   "The task can't be created without a short, human-readable title to identify it by.",
+			Fix: "1. Pass the title as the first positional argument:\n" +
+				"     pasture task create \"<title>\"\n" +
+				"2. Use quotes if the title contains spaces:\n" +
+				"     pasture task create \"Add login screen\"",
 		}
 		return pasterrors.ExitCode(err), err
 	}
@@ -202,10 +205,14 @@ func TaskList(w io.Writer, in TaskListInput, format types.OutputFormat) (int, er
 func wrapInvalidID(op, id string, err error) (int, error) {
 	se := &pasterrors.StructuredError{
 		Category: pasterrors.CategoryValidation,
-		What:     fmt.Sprintf("%s: invalid task ID %q", op, id),
-		Why:      err.Error(),
-		Impact:   "the operation cannot proceed without a parseable task ID",
-		Fix:      "pass an ID in the form 'namespace--uuid' (e.g., aura-plugins-hjsdt)",
+		What:     fmt.Sprintf("The task ID %q isn't in the expected format.", id),
+		Why: fmt.Sprintf("Task IDs look like \"namespace--uuid\" (for example, aura-plugins-h4qnq).\n"+
+			"The value you passed couldn't be parsed: %s",
+			err),
+		Impact: fmt.Sprintf("The %q command can't run because there's no way to know which task you meant.", op),
+		Fix: "1. Pass a valid task ID. Use list to find one:\n" +
+			"     pasture task list\n" +
+			"2. Then retry your command with the correct ID.",
 	}
 	return pasterrors.ExitCode(se), se
 }
@@ -216,10 +223,17 @@ func wrapInvalidID(op, id string, err error) (int, error) {
 func wrapTaskOpError(op string, err error) (int, error) {
 	se := &pasterrors.StructuredError{
 		Category: pasterrors.CategoryWorkflow,
-		What:     fmt.Sprintf("task %s failed", op),
-		Why:      err.Error(),
-		Impact:   "the requested task operation could not be completed",
-		Fix:      "inspect the underlying error message above; common causes are missing tasks (run `pasture task list` to verify the ID), already-closed tasks, or cycles in the blocked-by graph",
+		What:     fmt.Sprintf("The task %q operation didn't complete.", op),
+		Why:      fmt.Sprintf("The task store rejected the request: %s", err),
+		Impact:   "The change you asked for wasn't applied.",
+		Fix: "1. Confirm the task exists and check its current state:\n" +
+			"     pasture task list\n" +
+			"     pasture task show <task-id>\n" +
+			"2. Common causes:\n" +
+			"   - The task ID doesn't exist (look it up with `pasture task list`).\n" +
+			"   - The task is already closed and can't be changed further.\n" +
+			"   - You tried to add a dependency that would create a cycle.\n" +
+			"3. Read the underlying message above for the specific reason, then retry.",
 	}
 	return pasterrors.ExitCode(se), se
 }

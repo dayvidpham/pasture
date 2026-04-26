@@ -75,10 +75,17 @@ func Migrate(w io.Writer, in MigrateInput, format types.OutputFormat) (int, erro
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		se := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
-			What:     fmt.Sprintf("handlers.Migrate: could not create parent directory for %q", dbPath),
-			Why:      err.Error(),
-			Impact:   "the unified pasture database cannot be opened until the parent directory is writable",
-			Fix:      fmt.Sprintf("create the directory manually with `mkdir -p %q`, or override with --db <path> / $%s", filepath.Dir(dbPath), tasks.DBPathEnv),
+			What:     fmt.Sprintf("Couldn't prepare the folder for the pasture database at %q.", dbPath),
+			Why:      fmt.Sprintf("Creating the parent directory failed: %s", err),
+			Impact:   "The migration can't run because the database file's folder doesn't exist and can't be created.",
+			Fix: fmt.Sprintf("1. Create the folder yourself and retry:\n"+
+				"     mkdir -p %q\n"+
+				"     pasture migrate\n"+
+				"2. Or pick a different database location:\n"+
+				"     pasture migrate --db <path>\n"+
+				"3. Or set the location via environment variable:\n"+
+				"     export %s=<path>",
+				filepath.Dir(dbPath), tasks.DBPathEnv),
 		}
 		return pasterrors.ExitCode(se), se
 	}
@@ -100,10 +107,15 @@ func runMigrateDryRun(w io.Writer, dbPath string, format types.OutputFormat) (in
 	if err != nil {
 		se := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
-			What:     fmt.Sprintf("handlers.Migrate: cannot open database at %q for dry-run probe", dbPath),
-			Why:      err.Error(),
-			Impact:   "the migration plan cannot be computed because the file is unreachable",
-			Fix:      "verify the path exists, is a SQLite file, and is readable; pass --db <path> if the location differs from the default",
+			What:     fmt.Sprintf("Couldn't open the pasture database at %q to preview the migration.", dbPath),
+			Why:      fmt.Sprintf("Opening the SQLite file failed: %s", err),
+			Impact:   "The dry-run can't show you what would change because the database file is unreachable.",
+			Fix: fmt.Sprintf("1. Confirm the file exists and is a SQLite database:\n"+
+				"     ls -l %q\n"+
+				"2. If the path is wrong, pass the right one:\n"+
+				"     pasture migrate --dry-run --db <path>\n"+
+				"3. Make sure the file is readable by your user.",
+				dbPath),
 		}
 		return pasterrors.ExitCode(se), se
 	}
@@ -130,10 +142,18 @@ func runMigrateDryRun(w io.Writer, dbPath string, format types.OutputFormat) (in
 			// silently accept it; surface a clear error instead.
 			se := &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
-				What:     fmt.Sprintf("handlers.Migrate dry-run: database at %q reports schema v%d > supported v%d but audit.Migrate did not reject", dbPath, currentVersion, audit.MaxKnownSchemaVersion),
-				Why:      "this is a programming error — audit.Migrate must reject newer-schema databases per PROPOSAL-2 §11 Scenario 5",
-				Impact:   "the dry-run cannot safely proceed because the binary cannot interpret rows written by a newer schema",
-				Fix:      "upgrade pasture to a version that supports the on-disk schema, or downgrade the file (not recommended); file an issue against pasture/internal/audit",
+				What:     fmt.Sprintf("The pasture database at %q was written by a newer version of pasture than this one.", dbPath),
+				Why: fmt.Sprintf("The file reports schema version %d, but this build of pasture only knows up\n"+
+					"to version %d. A newer-schema check inside pasture should have rejected this\n"+
+					"already; that it didn't suggests an internal bug.",
+					currentVersion, audit.MaxKnownSchemaVersion),
+				Impact: "The dry-run can't continue safely. This pasture build can't read rows written\n" +
+					"by the newer schema, so any preview it produced could be wrong.",
+				Fix: "1. Upgrade pasture to a version that supports the on-disk schema:\n" +
+					"     pasture --version          # check your current version\n" +
+					"     # then install the matching newer release\n" +
+					"2. If you can't upgrade, do not downgrade the file by hand — file an\n" +
+					"   issue at pasture/internal/audit instead.",
 			}
 			return pasterrors.ExitCode(se), se
 		}
@@ -194,10 +214,15 @@ func runMigrateApply(w io.Writer, dbPath string, format types.OutputFormat) (int
 		// convention, we return it as a storage error rather than swallowing.
 		se := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("handlers.Migrate: cannot close audit handle at %q after successful migration", dbPath),
-			Why:      cErr.Error(),
-			Impact:   "the migration was applied successfully but the file handle was not released cleanly; subsequent opens may transiently fail with SQLITE_BUSY",
-			Fix:      "wait for the busy timeout (5s) and retry the next operation; if the error persists, restart the process holding the file",
+			What:     fmt.Sprintf("The migration finished, but pasture couldn't release its handle on %q.", dbPath),
+			Why:      fmt.Sprintf("Closing the database handle after the migration failed: %s", cErr),
+			Impact: "The migration itself was applied successfully — your data is up-to-date. But the\n" +
+				"next command that opens the same file may transiently fail with a \"database is\n" +
+				"locked\" error until the leaked handle times out.",
+			Fix: "1. Wait about 5 seconds and try the next command — the busy timeout will clear.\n" +
+				"2. If the error keeps happening, find any process still holding the file open and\n" +
+				"   restart it (typically pastured):\n" +
+				"     pkill pastured && pastured",
 		}
 		return pasterrors.ExitCode(se), se
 	}
@@ -230,10 +255,15 @@ func probeVersionReadOnly(dbPath string) (int, error) {
 	if err != nil {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
-			What:     fmt.Sprintf("handlers.Migrate: cannot open database at %q for version probe", dbPath),
-			Why:      err.Error(),
-			Impact:   "the migration cannot proceed because the file is unreachable",
-			Fix:      "verify the path exists, is a SQLite file, and is readable; pass --db <path> if the location differs from the default",
+			What:     fmt.Sprintf("Couldn't open the pasture database at %q to read its current schema version.", dbPath),
+			Why:      fmt.Sprintf("Opening the SQLite file failed: %s", err),
+			Impact:   "The migration can't run because pasture doesn't know which version it's upgrading from.",
+			Fix: fmt.Sprintf("1. Confirm the file exists and is a SQLite database:\n"+
+				"     ls -l %q\n"+
+				"2. If the path is wrong, pass the right one:\n"+
+				"     pasture migrate --db <path>\n"+
+				"3. Make sure the file is readable by your user.",
+				dbPath),
 		}
 	}
 	defer db.Close()

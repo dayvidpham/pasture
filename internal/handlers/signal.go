@@ -34,30 +34,38 @@ func SignalVote(
 	if epochID == "" {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "epoch-id is required",
-			Why:      "--epoch-id flag was not provided",
-			Impact:   "vote signal cannot be sent without an epoch ID",
-			Fix:      "provide --epoch-id <id>",
+			What:     "An epoch ID is required to record a vote.",
+			Why:      "The --epoch-id flag was not provided.",
+			Impact:   "Without an epoch ID, the vote can't be associated with any review.",
+			Fix: "1. Pass the epoch's ID:\n" +
+				"     pasture-msg vote --epoch-id <id> --axis <axis> --vote <vote>\n" +
+				"2. If you don't know the epoch ID, list active epochs:\n" +
+				"     pasture-msg epoch list",
 		}
 		return pasterrors.ExitCode(err), err
 	}
 	if !axis.IsValid() {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("%q is not a valid review axis", axis),
-			Why:      "ReviewAxis must be one of: correctness, test_quality, elegance",
-			Impact:   "vote cannot be recorded with an unknown axis",
-			Fix:      "pass --axis correctness|test_quality|elegance",
+			What:     fmt.Sprintf("%q is not a recognised review axis.", axis),
+			Why:      "Reviews are scored along three named axes: correctness, test_quality, and elegance.",
+			Impact:   "The vote can't be recorded against an unknown axis.",
+			Fix: "1. Pick one of the three review axes and retry:\n" +
+				"     pasture-msg vote --axis correctness  --epoch-id <id> --vote <vote>\n" +
+				"     pasture-msg vote --axis test_quality --epoch-id <id> --vote <vote>\n" +
+				"     pasture-msg vote --axis elegance     --epoch-id <id> --vote <vote>",
 		}
 		return pasterrors.ExitCode(err), err
 	}
 	if !vote.IsValid() {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("%q is not a valid vote", vote),
-			Why:      "VoteType must be one of: ACCEPT, REVISE",
-			Impact:   "vote cannot be recorded with an unknown value",
-			Fix:      "pass --vote ACCEPT|REVISE",
+			What:     fmt.Sprintf("%q is not a recognised vote value.", vote),
+			Why:      "A vote must be either ACCEPT or REVISE.",
+			Impact:   "The vote can't be recorded with an unknown value.",
+			Fix: "1. Use one of the two recognised vote values:\n" +
+				"     pasture-msg vote --vote ACCEPT --epoch-id <id> --axis <axis>\n" +
+				"     pasture-msg vote --vote REVISE --epoch-id <id> --axis <axis>",
 		}
 		return pasterrors.ExitCode(err), err
 	}
@@ -77,10 +85,15 @@ func SignalVote(
 	if err := c.SignalWorkflow(ctx, epochID, "", temporal.SignalSubmitVote, payload); err != nil {
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
-			What:     fmt.Sprintf("vote signal failed for epoch %q", epochID),
-			Why:      err.Error(),
-			Impact:   "vote was not recorded",
-			Fix:      fmt.Sprintf("verify that epoch %q exists and is running", epochID),
+			What:     fmt.Sprintf("Couldn't record the vote for epoch %q.", epochID),
+			Why:      fmt.Sprintf("The Temporal server rejected the vote signal: %s", err),
+			Impact:   "The vote was not recorded against this review.",
+			Fix: fmt.Sprintf("1. Confirm the epoch is currently running:\n"+
+				"     pasture-msg epoch status --epoch-id %q\n"+
+				"2. If the epoch isn't found, list active epochs to find the right ID:\n"+
+				"     pasture-msg epoch list\n"+
+				"3. Retry the vote once the epoch is healthy.",
+				epochID),
 		}
 	}
 
@@ -114,30 +127,37 @@ func SignalComplete(
 	if epochID == "" {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "epoch-id is required",
-			Why:      "--epoch-id flag was not provided",
-			Impact:   "completion signal cannot be sent without an epoch ID",
-			Fix:      "provide --epoch-id <id>",
+			What:     "An epoch ID is required to mark a slice complete.",
+			Why:      "The --epoch-id flag was not provided.",
+			Impact:   "Without an epoch ID, the completion can't be linked to a workflow.",
+			Fix: "1. Pass the epoch's ID:\n" +
+				"     pasture-msg complete --epoch-id <id> --slice-id <id>\n" +
+				"2. If you don't know the epoch ID, list active epochs:\n" +
+				"     pasture-msg epoch list",
 		}
 		return pasterrors.ExitCode(err), err
 	}
 	if sliceID == "" {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "slice-id is required",
-			Why:      "--slice-id flag was not provided",
-			Impact:   "completion signal cannot be sent without a slice ID",
-			Fix:      "provide --slice-id <id>",
+			What:     "A slice ID is required to mark a slice complete.",
+			Why:      "The --slice-id flag was not provided.",
+			Impact:   "Without a slice ID, there's nothing to mark complete.",
+			Fix: "1. Pass the slice's ID:\n" +
+				"     pasture-msg complete --slice-id <id> --epoch-id <id>",
 		}
 		return pasterrors.ExitCode(err), err
 	}
 	if output != nil && errMsg != nil {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "--output and --error are mutually exclusive",
-			Why:      "a slice completion is either successful (--output) or failed (--error), not both",
-			Impact:   "completion signal cannot be sent with ambiguous result",
-			Fix:      "provide either --output <text> or --error <text>, not both",
+			What:     "Pass either --output or --error, not both.",
+			Why:      "A slice completion is either a success (with --output) or a failure (with --error). It can't be both at once.",
+			Impact:   "The completion can't be recorded because the result is ambiguous.",
+			Fix: "1. Pick one and retry. For success:\n" +
+				"     pasture-msg complete --output \"<result>\" --slice-id <id> --epoch-id <id>\n" +
+				"2. For failure:\n" +
+				"     pasture-msg complete --error \"<reason>\" --slice-id <id> --epoch-id <id>",
 		}
 		return pasterrors.ExitCode(err), err
 	}
@@ -165,10 +185,15 @@ func SignalComplete(
 	if err := c.SignalWorkflow(ctx, epochID, "", temporal.SignalSliceProgress, payload); err != nil {
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
-			What:     fmt.Sprintf("complete signal failed for slice %q in epoch %q", sliceID, epochID),
-			Why:      err.Error(),
-			Impact:   "slice completion was not signaled",
-			Fix:      fmt.Sprintf("verify that epoch %q exists and is running", epochID),
+			What:     fmt.Sprintf("Couldn't mark slice %q complete in epoch %q.", sliceID, epochID),
+			Why:      fmt.Sprintf("The Temporal server rejected the completion signal: %s", err),
+			Impact:   "The slice's completion isn't recorded, so the workflow can't move past it.",
+			Fix: fmt.Sprintf("1. Confirm the epoch is currently running:\n"+
+				"     pasture-msg epoch status --epoch-id %q\n"+
+				"2. If the epoch isn't found, list active epochs to find the right ID:\n"+
+				"     pasture-msg epoch list\n"+
+				"3. Retry the completion once the epoch is healthy.",
+				epochID),
 		}
 	}
 

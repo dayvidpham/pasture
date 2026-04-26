@@ -32,30 +32,35 @@ func SessionRegister(
 	if epochID == "" {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "epoch-id is required",
-			Why:      "--epoch-id flag was not provided",
-			Impact:   "session cannot be registered without an epoch ID",
-			Fix:      "provide --epoch-id <id>",
+			What:     "An epoch ID is required to register a session.",
+			Why:      "The --epoch-id flag was not provided.",
+			Impact:   "Without an epoch ID, the session can't be linked to a running epoch.",
+			Fix: "1. Pass the epoch this session belongs to:\n" +
+				"     pasture-msg session register --epoch-id <id> --session-id <id> --role <role>\n" +
+				"2. If you don't know the epoch ID, list active epochs:\n" +
+				"     pasture-msg epoch list",
 		}
 		return pasterrors.ExitCode(err), err
 	}
 	if sessionID == "" {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "session-id is required",
-			Why:      "--session-id flag was not provided",
-			Impact:   "session cannot be registered without a session ID",
-			Fix:      "provide --session-id <id>",
+			What:     "A session ID is required to register a session.",
+			Why:      "The --session-id flag was not provided.",
+			Impact:   "Without a session ID, there's nothing to register.",
+			Fix: "1. Pass the session ID supplied by Claude Code:\n" +
+				"     pasture-msg session register --session-id <id> --epoch-id <id> --role <role>",
 		}
 		return pasterrors.ExitCode(err), err
 	}
 	if role == "" {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "role is required",
-			Why:      "--role flag was not provided",
-			Impact:   "session cannot be registered without a role",
-			Fix:      "provide --role <role> (e.g., worker, supervisor, reviewer)",
+			What:     "A role is required to register a session.",
+			Why:      "The --role flag was not provided.",
+			Impact:   "The session can't be tracked without knowing what role it's playing.",
+			Fix: "1. Pass the role this session is playing (worker, supervisor, reviewer, ...):\n" +
+				"     pasture-msg session register --role <role> --epoch-id <id> --session-id <id>",
 		}
 		return pasterrors.ExitCode(err), err
 	}
@@ -77,10 +82,15 @@ func SessionRegister(
 	if err := c.SignalWorkflow(ctx, epochID, "", temporal.SignalRegisterSession, payload); err != nil {
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
-			What:     fmt.Sprintf("session register signal failed for epoch %q", epochID),
-			Why:      err.Error(),
-			Impact:   "session was not registered with the epoch",
-			Fix:      fmt.Sprintf("verify that epoch %q exists and is running", epochID),
+			What:     fmt.Sprintf("Couldn't register the session with epoch %q.", epochID),
+			Why:      fmt.Sprintf("The Temporal server rejected the register-session signal: %s", err),
+			Impact:   "The session is not tracked by the epoch, so its events won't appear in the epoch's history.",
+			Fix: fmt.Sprintf("1. Confirm the epoch is currently running:\n"+
+				"     pasture-msg epoch status --epoch-id %q\n"+
+				"2. If the epoch isn't found, list active epochs to find the right ID:\n"+
+				"     pasture-msg epoch list\n"+
+				"3. Retry the register once the epoch is healthy.",
+				epochID),
 		}
 	}
 
