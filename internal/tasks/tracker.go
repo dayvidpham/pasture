@@ -244,73 +244,25 @@ func (t *trackerImpl) RecordEvent(ctx context.Context, event protocol.AuditEvent
 	return t.trail.RecordEvent(ctx, event)
 }
 
-// RecordEventReturningID persists the event via the wrapped audit.Trail and
-// then recovers the just-inserted audit_events.id by issuing a SELECT MAX(id)
-// against the auxiliary auditDB handle. The handle is the SAME *sql.DB that
-// the trail writes through (newTrackerImpl wires them together) so the read
-// observes the write under modernc/sqlite WAL semantics + D11's "low write
-// contention" binding without any cross-connection visibility race.
+// RecordEventReturningID forwards to the wrapped audit.Trail's
+// RecordEventReturningID and returns the just-inserted audit_events.id.
 //
-// Why we do not push this down into the audit.Trail interface today: doing so
-// would force a signature change on every audit.Trail implementor (the
-// in-memory + sqlite trails plus any test mocks), which is out of scope for
-// S8. The trackerImpl is the only production caller that needs the id, so
-// keeping the recovery here matches the surface S9's free-floating helpers
-// already established (lookupLastEventID in free_floating.go) and the
-// audit-side RecordEventReturningID enhancement noted in PROPOSAL-2 §7.11
-// future work. When (if) audit.Trail grows the method natively, this body
-// can collapse into a one-line forwarder.
+// Race safety: the underlying audit.Trail recovers the id from
+// sql.Result.LastInsertId on the SAME INSERT statement that wrote the row
+// (per-statement, not per-connection — see audit/sqlite.go's
+// SqliteAuditTrail.RecordEventReturningID). This is race-free under any level
+// of write contention and replaces the older "trail.RecordEvent + SELECT
+// MAX(id) on auditDB" workaround that could return a row id belonging to a
+// concurrent writer (PROPOSAL-2 §7.11 future-work, realised in Phase 11 R1-B
+// per finding aura-plugins-d1h6y).
 //
-// Errors are *pasterrors.StructuredError. The RecordEvent call's error is
-// wrapped with CategoryStorage via the audit-side path (already structured);
-// the SELECT MAX(id) failure is wrapped here.
+// Errors are propagated unchanged from the trail (already shaped as
+// *pasterrors.StructuredError on the SQLite backend). Callers that need to
+// attribute the failure to the trackerImpl façade may inspect the error's
+// What field — the audit-side messages name the SqliteAuditTrail receiver
+// directly so the origin is clear without re-wrapping.
 func (t *trackerImpl) RecordEventReturningID(ctx context.Context, event protocol.AuditEvent) (int64, error) {
-	if err := t.trail.RecordEvent(ctx, event); err != nil {
-		// audit.Trail.RecordEvent already returns a *StructuredError shape
-		// (see internal/audit/sqlite.go); wrap once more with the trackerImpl
-		// origin so callers can attribute failures to this façade.
-		return 0, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What: fmt.Sprintf(
-				"tasks.trackerImpl.RecordEventReturningID: trail.RecordEvent failed for epoch=%q event_type=%q",
-				event.EpochID, event.EventType,
-			),
-			Why: err.Error(),
-			Impact: "the audit_events row was not written; downstream AttachContext " +
-				"calls cannot reference an id and the event is invisible to Timeline lookups",
-			Fix: "verify the SQLite file is writable and the schema is at v3 or higher " +
-				"(run 'pasture migrate' if you suspect schema drift); if the underlying error " +
-				"is a Validation issue (e.g. event.Role is empty), fix the event payload and retry",
-		}
-	}
-
-	// Recover the just-inserted row id from the same *sql.DB connection. Race
-	// safety: the trail's RecordEvent commits before returning (modernc/sqlite
-	// auto-commit + WAL); the subsequent SELECT MAX(id) on the same handle
-	// observes the committed write immediately. D11 ("low write contention")
-	// is the binding that keeps SELECT MAX(id) from racing a higher concurrent
-	// writer — under the deployment model only one workflow activity goroutine
-	// records to a given (epoch, table) pair at a time.
-	id, err := lookupLastEventID(ctx, t.auditDB)
-	if err != nil {
-		return 0, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What: fmt.Sprintf(
-				"tasks.trackerImpl.RecordEventReturningID: failed to recover last event id "+
-					"after trail.RecordEvent succeeded for epoch=%q event_type=%q",
-				event.EpochID, event.EventType,
-			),
-			Why: err.Error(),
-			Impact: "the audit_events row was written but its id could not be recovered; " +
-				"downstream AttachContext was skipped and the event will not appear in " +
-				"Timeline lookups for the intended (kind, contextID) pair",
-			Fix: "verify the auxiliary *sql.DB handle is open against the same pasture.db file " +
-				"as the trail and that the audit_events table exists; if MAX(id) returned NULL, " +
-				"the underlying RecordEvent silently no-op'd — inspect via " +
-				"'sqlite3 <db> \"SELECT COUNT(*) FROM audit_events\"'",
-		}
-	}
-	return id, nil
+	return t.trail.RecordEventReturningID(ctx, event)
 }
 func (t *trackerImpl) QueryEvents(ctx context.Context, epochID string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
 	return t.trail.QueryEvents(ctx, epochID, phase, role)

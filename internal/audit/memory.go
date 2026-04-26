@@ -11,10 +11,25 @@ import (
 //
 // Intended for testing and local development. Events are not persisted across
 // process restarts. All methods are safe for concurrent use.
+//
+// # Synthetic event ids
+//
+// RecordEventReturningID returns a synthetic monotonic counter value
+// (lastEventID, starting at 1 on the first call). The counter is per-trail
+// and increments under m.mu, so two concurrent callers always observe two
+// distinct ids — matching the SQLite-backed trail's per-statement-LastInsertId
+// guarantee. The id is NOT a real audit_events row id and MUST NOT be
+// persisted across processes; it exists so test code that exercises
+// AttachContext-style flows against the in-memory trail can rely on
+// per-call uniqueness.
 type InMemoryAuditTrail struct {
 	mu             sync.RWMutex
 	events         []protocol.AuditEvent
 	sessionEntries []protocol.SessionEntry
+	// lastEventID is the synthetic monotonic counter handed out by
+	// RecordEventReturningID. Guarded by mu (held in WRITE mode whenever the
+	// counter is read-and-incremented atomically).
+	lastEventID int64
 }
 
 // NewInMemoryAuditTrail returns an empty, ready-to-use InMemoryAuditTrail.
@@ -22,12 +37,28 @@ func NewInMemoryAuditTrail() *InMemoryAuditTrail {
 	return &InMemoryAuditTrail{}
 }
 
-// RecordEvent appends event to the in-memory list. It is safe for concurrent use.
-func (m *InMemoryAuditTrail) RecordEvent(_ context.Context, event protocol.AuditEvent) error {
+// RecordEvent appends event to the in-memory list, discarding the synthetic
+// row id. It is safe for concurrent use. See RecordEventReturningID for the
+// id-returning variant; callers that need the id MUST use that.
+func (m *InMemoryAuditTrail) RecordEvent(ctx context.Context, event protocol.AuditEvent) error {
+	_, err := m.RecordEventReturningID(ctx, event)
+	return err
+}
+
+// RecordEventReturningID appends event and returns a synthetic monotonic
+// id (per-trail, starting at 1, incremented on every successful call). The
+// id-and-append are performed atomically under m.mu so concurrent callers
+// always observe distinct ids — matching the SQLite-backed trail's
+// per-statement-LastInsertId race-safety guarantee.
+//
+// The returned id is NOT a real audit_events row id and is only meaningful
+// for the lifetime of this in-memory trail; do not persist it.
+func (m *InMemoryAuditTrail) RecordEventReturningID(_ context.Context, event protocol.AuditEvent) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.lastEventID++
 	m.events = append(m.events, event)
-	return nil
+	return m.lastEventID, nil
 }
 
 // QueryEvents returns all events matching the filters in insertion order.

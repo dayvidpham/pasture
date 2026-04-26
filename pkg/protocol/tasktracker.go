@@ -65,28 +65,32 @@ type TaskTracker interface {
 	RecordEvent(ctx context.Context, event AuditEvent) error
 
 	// RecordEventReturningID persists a single audit event and returns the
-	// audit_events.id of the just-inserted row. Equivalent to RecordEvent
-	// followed by recovery of the row id, but bundled atomically (the
-	// implementation uses INSERT-then-LastInsertId on the same connection,
-	// which is race-safe under D11 / WAL-mode). Returns the new id and a
-	// nil error on success; on failure returns 0 and an actionable
-	// *pasterrors.StructuredError.
+	// audit_events.id of the just-inserted row. The implementation reads the
+	// id from sql.Result.LastInsertId on the SAME INSERT statement that wrote
+	// the row, so the returned id is race-safe under any level of write
+	// contention — independent of the D11 "low write contention" deployment
+	// binding. Returns the new id and a nil error on success; on failure
+	// returns 0 and an actionable *pasterrors.StructuredError.
 	//
 	// This is the canonical RecordEvent entry point for workflow activities
 	// (PROPOSAL-2 §7.11): RecordTransition and RecordAuditEvent call this
 	// then immediately call AttachContext(eventID, ContextEpoch, epochID)
 	// to record the event-to-epoch correlation. Free-floating helpers
 	// (RecordGitEvent / RecordSkillEvent / RecordSessionEvent) also use it
-	// in place of their previous SELECT MAX(id) workaround.
+	// in place of the older SELECT MAX(id) workaround that this method
+	// supersedes (Phase 11 R1-B per finding aura-plugins-d1h6y).
 	//
 	// Behaviour for non-SQLite trail backends (e.g. *audit.InMemoryAuditTrail
-	// used in tests): the returned id is a synthetic monotonic counter
-	// scoped to the trail's lifetime — it is NOT a real audit_events row id
-	// and MUST NOT be persisted across processes. AttachContext on an
-	// in-memory trail is a no-op anyway (no context_edges table backing it),
-	// so the synthetic id is only meaningful for AttachContext-relative
-	// assertions in unit tests that exercise the workflow integration path
-	// without paying for a real SQLite file.
+	// used in tests): the returned id is a synthetic per-trail monotonic
+	// counter — it is NOT a real audit_events row id and MUST NOT be
+	// persisted across processes. The counter is incremented atomically per
+	// call so concurrent test goroutines always observe distinct ids,
+	// matching the SQLite trail's per-statement-LastInsertId guarantee.
+	// AttachContext on an in-memory trail is a no-op anyway (no
+	// context_edges table backing it), so the synthetic id is only
+	// meaningful for AttachContext-relative assertions in unit tests that
+	// exercise the workflow integration path without paying for a real
+	// SQLite file.
 	RecordEventReturningID(ctx context.Context, event AuditEvent) (int64, error)
 
 	// QueryEvents returns audit events filtered by epoch and (optionally)

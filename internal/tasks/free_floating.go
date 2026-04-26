@@ -307,9 +307,12 @@ func recordFreeFloating(
 	}
 
 	// RecordEventReturningID atomically persists the event and returns its
-	// audit_events.id. This replaces the previous two-step pattern of
-	// RecordEvent + SELECT MAX(id) (lookupLastEventID) that free_floating.go
-	// used before RecordEventReturningID was added to the interface (S8).
+	// audit_events.id. The trail-side implementation recovers the id from
+	// sql.Result.LastInsertId on the SAME INSERT statement, so the returned
+	// id is race-safe under any concurrency level (Phase 11 R1-B replaced the
+	// previous SELECT MAX(id) workaround that could return another goroutine's
+	// row id under concurrent writes — see audit/sqlite.go's
+	// RecordEventReturningID for the full guarantee).
 	eventID, err := tracker.RecordEventReturningID(ctx, event)
 	if err != nil {
 		return 0, &pasterrors.StructuredError{
@@ -332,55 +335,6 @@ func recordFreeFloating(
 	}
 
 	return eventID, nil
-}
-
-// lookupLastEventID returns the highest audit_events.id value visible to the
-// supplied auditDB connection. It is intentionally simple (a single SELECT
-// MAX(id)) — the race-window between RecordEvent and this read is guarded by
-// D11's "low write contention" binding and the modernc/sqlite WAL mode (which
-// gives readers immediate visibility of committed writes).
-//
-// This helper is used by trackerImpl.RecordEventReturningID (tracker.go) to
-// recover the just-inserted row id after trail.RecordEvent commits. It is
-// retained here (rather than moved to tracker.go) because it captures the
-// well-known error messages for the two failure modes callers must handle:
-// empty table and non-positive id.
-//
-// If the audit_events table is empty, returns (0, *StructuredError{CategoryStorage})
-// so callers can distinguish "the prior RecordEvent silently no-op'd" from
-// "the SELECT itself failed". Either case is fatal because the follow-on
-// AttachContext needs a real id.
-func lookupLastEventID(ctx context.Context, auditDB *sql.DB) (int64, error) {
-	var id sql.NullInt64
-	err := auditDB.QueryRowContext(ctx, `SELECT MAX(id) FROM audit_events`).Scan(&id)
-	if err != nil {
-		return 0, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What:     "tasks.lookupLastEventID: SELECT MAX(id) FROM audit_events failed",
-			Why:      err.Error(),
-			Impact:   "the just-inserted audit_events row id cannot be recovered; any dependent AttachContext call will be skipped",
-			Fix:      "verify the auxiliary *sql.DB handle is open and the schema contains the audit_events table (run 'pasture migrate' if you suspect schema drift)",
-		}
-	}
-	if !id.Valid {
-		return 0, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What:     "tasks.lookupLastEventID: audit_events table is empty after RecordEvent",
-			Why:      "SELECT MAX(id) returned NULL, meaning the prior RecordEvent write was not persisted to the audit_events table",
-			Impact:   "the event id cannot be recovered; the follow-on AttachContext call will be skipped and the event will not appear in Timeline lookups",
-			Fix:      "verify the SQLite file is writable and the schema is at v3 or higher; inspect via 'sqlite3 <db> \"SELECT COUNT(*) FROM audit_events\"'",
-		}
-	}
-	if id.Int64 <= 0 {
-		return 0, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("tasks.lookupLastEventID: audit_events MAX(id)=%d is not positive", id.Int64),
-			Why:      "the highest audit_events.id is zero or negative, which indicates table corruption or an id sequence reset",
-			Impact:   "a non-positive event id cannot be used for AttachContext; the context_edges row will not be created",
-			Fix:      "inspect the audit_events table directly via 'sqlite3 <db> \"SELECT id FROM audit_events ORDER BY id DESC LIMIT 5\"' and file a bug if ids are unexpectedly non-positive",
-		}
-	}
-	return id.Int64, nil
 }
 
 // ─── Auxiliary handle for free-floating writes (public) ──────────────────────

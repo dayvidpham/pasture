@@ -2,6 +2,7 @@ package audit_test
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"sync"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/pkg/protocol"
+	_ "modernc.org/sqlite" // pure-Go SQLite driver (registers "sqlite" with database/sql)
 )
 
 func newTestSqliteTrail(t *testing.T) (*audit.SqliteAuditTrail, string) {
@@ -186,6 +188,169 @@ func TestSqliteAuditTrail_SessionEntryDurability(t *testing.T) {
 	}
 	if got[1].Role != "assistant" {
 		t.Errorf("entry[1]: want role %q, got %q", "assistant", got[1].Role)
+	}
+}
+
+// TestSqliteAuditTrail_RecordEventReturningID_Suite runs the shared
+// RecordEventReturningID contract suite against the SQLite-backed trail.
+func TestSqliteAuditTrail_RecordEventReturningID_Suite(t *testing.T) {
+	trail, _ := newTestSqliteTrail(t)
+	runRecordEventReturningIDSuite(t, trail)
+}
+
+// TestSqliteAuditTrail_RecordEventReturningID_MatchesRowID verifies that the
+// id returned by RecordEventReturningID equals the actual id column of the
+// inserted audit_events row. This is the core LastInsertId guarantee.
+func TestSqliteAuditTrail_RecordEventReturningID_MatchesRowID(t *testing.T) {
+	trail, dbPath := newTestSqliteTrail(t)
+	ctx := context.Background()
+
+	ev := makeEvent("matchid-epoch", protocol.PhaseRequest, "supervisor", protocol.EventPhaseTransition)
+	returnedID, err := trail.RecordEventReturningID(ctx, ev)
+	if err != nil {
+		t.Fatalf("RecordEventReturningID: %v", err)
+	}
+
+	// Open a fresh handle on the same file and look the row up by id directly.
+	verifyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open verification handle: %v", err)
+	}
+	defer verifyDB.Close()
+
+	var actualID int64
+	var eventType string
+	err = verifyDB.QueryRow(
+		`SELECT id, event_type FROM audit_events WHERE id = ?`,
+		returnedID,
+	).Scan(&actualID, &eventType)
+	if err != nil {
+		t.Fatalf("verify row id=%d exists: %v", returnedID, err)
+	}
+	if actualID != returnedID {
+		t.Errorf("actual id %d != returned id %d", actualID, returnedID)
+	}
+	if eventType != string(protocol.EventPhaseTransition) {
+		t.Errorf("event_type for id=%d: got %q, want %q", returnedID, eventType, string(protocol.EventPhaseTransition))
+	}
+}
+
+// TestSqliteAuditTrail_RecordEventReturningID_ConcurrentUnique is the Phase
+// 11 R1-B regression test. Under N concurrent goroutines all calling
+// RecordEventReturningID against the SAME trail handle, EVERY returned id
+// MUST be unique AND MUST correspond to a real audit_events row with a
+// matching id column. This is the property that the SELECT MAX(id)
+// workaround (now removed) failed to provide — concurrent SELECT MAX(id)
+// after independent INSERTs could observe a row written by a DIFFERENT
+// goroutine and hand the same id to two callers.
+//
+// If this test ever fails, the LastInsertId path has regressed.
+func TestSqliteAuditTrail_RecordEventReturningID_ConcurrentUnique(t *testing.T) {
+	trail, dbPath := newTestSqliteTrail(t)
+	ctx := context.Background()
+
+	const N = 32
+	var wg sync.WaitGroup
+	idCh := make(chan int64, N)
+	errCh := make(chan error, N)
+
+	for i := range N {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			ev := protocol.AuditEvent{
+				EpochID:   "concurrent-unique-epoch",
+				Phase:     protocol.PhaseWorkerSlices,
+				Role:      "worker",
+				EventType: protocol.EventSliceStarted,
+				Payload:   map[string]any{"goroutine": idx},
+				Timestamp: time.Now().UTC(),
+			}
+			id, err := trail.RecordEventReturningID(ctx, ev)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			idCh <- id
+		}(i)
+	}
+	wg.Wait()
+	close(idCh)
+	close(errCh)
+
+	for err := range errCh {
+		t.Errorf("concurrent RecordEventReturningID error: %v", err)
+	}
+
+	// Collect ids and assert per-goroutine uniqueness — the property the
+	// SELECT MAX(id) workaround was unable to guarantee.
+	seen := make(map[int64]int)
+	var ids []int64
+	for id := range idCh {
+		if id <= 0 {
+			t.Errorf("RecordEventReturningID returned non-positive id %d", id)
+			continue
+		}
+		seen[id]++
+		ids = append(ids, id)
+	}
+	if len(ids) != N {
+		t.Fatalf("expected %d ids, got %d", N, len(ids))
+	}
+	for id, count := range seen {
+		if count > 1 {
+			t.Errorf("id %d returned to %d goroutines (must be unique per call)", id, count)
+		}
+	}
+
+	// And each returned id MUST resolve to a real row with the matching id
+	// in audit_events on disk. This rules out a scenario where the ids are
+	// unique but unrelated to the rows actually written.
+	verifyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open verification handle: %v", err)
+	}
+	defer verifyDB.Close()
+
+	var totalRows int
+	if err := verifyDB.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE event_type = ?`, string(protocol.EventSliceStarted)).Scan(&totalRows); err != nil {
+		t.Fatalf("count audit_events: %v", err)
+	}
+	if totalRows != N {
+		t.Errorf("audit_events count = %d, want %d", totalRows, N)
+	}
+	for _, id := range ids {
+		var rowExists int
+		if err := verifyDB.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE id = ?`, id).Scan(&rowExists); err != nil {
+			t.Fatalf("verify id %d exists: %v", id, err)
+		}
+		if rowExists != 1 {
+			t.Errorf("returned id %d resolves to %d rows in audit_events (want exactly 1)", id, rowExists)
+		}
+	}
+}
+
+// TestSqliteAuditTrail_RecordEventReturningID_RejectsEmptyRole verifies that
+// the new method preserves the validation contract from the original
+// RecordEvent — empty Role still returns CategoryValidation.
+func TestSqliteAuditTrail_RecordEventReturningID_RejectsEmptyRole(t *testing.T) {
+	trail, _ := newTestSqliteTrail(t)
+	ctx := context.Background()
+
+	ev := protocol.AuditEvent{
+		EpochID:   "validation-epoch",
+		Phase:     protocol.PhaseRequest,
+		Role:      "", // empty — must be rejected
+		EventType: protocol.EventPhaseTransition,
+		Payload:   map[string]any{},
+		Timestamp: time.Now().UTC(),
+	}
+	id, err := trail.RecordEventReturningID(ctx, ev)
+	if err == nil {
+		t.Fatalf("RecordEventReturningID with empty Role: want error, got id=%d nil", id)
+	}
+	if id != 0 {
+		t.Errorf("on validation failure want id=0, got id=%d", id)
 	}
 }
 

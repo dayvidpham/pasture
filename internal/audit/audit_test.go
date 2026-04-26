@@ -21,6 +21,67 @@ func TestTrailInterface(t *testing.T) {
 	var _ audit.Trail = (*audit.SqliteAuditTrail)(nil)
 }
 
+// runRecordEventReturningIDSuite exercises the RecordEventReturningID contract
+// against any Trail implementation. The contract:
+//
+//  1. A successful RecordEventReturningID returns (positiveID, nil).
+//  2. Two sequential calls return strictly-increasing ids (no collisions).
+//  3. The recorded events round-trip through QueryEvents in insertion order.
+//
+// The concurrent-uniqueness assertion lives in implementation-specific tests
+// (sqlite_test.go's TestSqliteAuditTrail_RecordEventReturningID_ConcurrentUnique
+// and memory_test.go's TestInMemoryAuditTrail_RecordEventReturningID_ConcurrentUnique)
+// because the implementations differ in the contention model (SQLite has a real
+// transaction commit; in-memory has a mutex-guarded counter).
+func runRecordEventReturningIDSuite(t *testing.T, trail audit.Trail) {
+	t.Helper()
+	ctx := context.Background()
+
+	const epoch = "id-suite-epoch"
+
+	t.Run("ReturnsPositiveID", func(t *testing.T) {
+		ev := makeEvent(epoch, protocol.PhaseRequest, "supervisor", protocol.EventPhaseTransition)
+		id, err := trail.RecordEventReturningID(ctx, ev)
+		if err != nil {
+			t.Fatalf("RecordEventReturningID: unexpected error: %v", err)
+		}
+		if id <= 0 {
+			t.Errorf("RecordEventReturningID returned non-positive id %d, want > 0", id)
+		}
+	})
+
+	t.Run("SequentialCallsReturnDistinctIDs", func(t *testing.T) {
+		ev1 := makeEvent(epoch, protocol.PhaseElicit, "supervisor", protocol.EventPhaseTransition)
+		ev2 := makeEvent(epoch, protocol.PhasePropose, "supervisor", protocol.EventPhaseTransition)
+		id1, err := trail.RecordEventReturningID(ctx, ev1)
+		if err != nil {
+			t.Fatalf("RecordEventReturningID(ev1): %v", err)
+		}
+		id2, err := trail.RecordEventReturningID(ctx, ev2)
+		if err != nil {
+			t.Fatalf("RecordEventReturningID(ev2): %v", err)
+		}
+		if id1 == id2 {
+			t.Errorf("RecordEventReturningID returned duplicate ids: id1=%d id2=%d (must be distinct)", id1, id2)
+		}
+		if id2 <= id1 {
+			t.Errorf("RecordEventReturningID ids not monotonically increasing: id1=%d id2=%d", id1, id2)
+		}
+	})
+
+	t.Run("RecordedEventsAreQueryable", func(t *testing.T) {
+		// Both events from the previous subtest are present, plus the one
+		// from ReturnsPositiveID. Verify the count by querying the epoch.
+		got, err := trail.QueryEvents(ctx, epoch, nil, nil)
+		if err != nil {
+			t.Fatalf("QueryEvents(%q): %v", epoch, err)
+		}
+		if len(got) != 3 {
+			t.Errorf("want 3 events recorded via RecordEventReturningID, got %d", len(got))
+		}
+	})
+}
+
 // ─── Session Entry Helpers ────────────────────────────────────────────────────
 
 func strPtr(s string) *string { return &s }
