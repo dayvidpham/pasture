@@ -212,6 +212,7 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 			Why: "Every audit event must be attributed to an agent (architect, supervisor, worker,\n" +
 				"reviewer, or one of pasture's built-in automaton agents). The event you sent has an\n" +
 				"empty role, so we can't link it to anyone.",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningID).",
 			Impact: "The event was not recorded. The audit trail for this epoch will be missing this entry\n" +
 				"until the caller resends it with the role filled in.",
 			Fix: "1. Set the event's role to the originating role name before sending it again, e.g.\n" +
@@ -229,17 +230,16 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 				"Couldn't convert this audit event's payload to JSON (epoch %q, event type %q).",
 				event.EpochID, event.EventType,
 			),
-			Why: fmt.Sprintf(
-				"The standard JSON encoder refused to serialise the payload: %s",
-				err,
-			),
+			Why:   "The payload contains a value that can't be encoded as JSON.",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningID).",
 			Impact: "The event was not recorded. The audit trail for this epoch will be missing this entry\n" +
 				"until the caller resends it with a serialisable payload.",
 			Fix: "1. Make sure the event's payload only contains values that can be encoded as JSON\n" +
 				"   (strings, numbers, booleans, lists, and maps). Channels, functions, and cyclic\n" +
 				"   data structures are not allowed.\n" +
-				"2. To pinpoint the bad field, serialise the payload yourself with json.Marshal in the\n" +
-				"   caller — the encoder will name the offending field.",
+				"2. To pinpoint the bad field, serialise the payload yourself in the caller — the\n" +
+				"   encoder will name the offending field.",
+			Cause: err,
 		}
 	}
 
@@ -267,10 +267,8 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 				"Couldn't start the database write that would record this audit event (epoch %q, event type %q).",
 				event.EpochID, event.EventType,
 			),
-			Why: fmt.Sprintf(
-				"SQLite refused to start the write transaction: %s",
-				err,
-			),
+			Why:   "The database refused to start the write transaction.",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningID).",
 			Impact: "The event was not recorded. The audit trail for this epoch will be missing this entry\n" +
 				"until the underlying database problem is fixed and the caller retries.",
 			Fix: "1. Confirm the audit database file is accessible and not locked by another writer:\n" +
@@ -279,6 +277,7 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 				"2. Check the file isn't corrupted:\n" +
 				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
 				"3. Retry the operation once the file is healthy and unlocked.",
+			Cause: err,
 		}
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -299,10 +298,8 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 				"Couldn't write this audit event into the database (epoch %q, event type %q).",
 				event.EpochID, event.EventType,
 			),
-			Why: fmt.Sprintf(
-				"SQLite refused our INSERT into the audit-events table: %s",
-				err,
-			),
+			Why:   "The database refused the write into the audit-events table.",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningID).",
 			Impact: "The event was not recorded. The audit trail for this epoch will be missing this entry\n" +
 				"until the underlying database problem is fixed and the caller retries.",
 			Fix: "1. Confirm the audit database file is accessible and not locked by another writer:\n" +
@@ -311,6 +308,7 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 				"2. Check the file isn't corrupted:\n" +
 				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
 				"3. Retry the operation once the file is healthy and unlocked.",
+			Cause: err,
 		}
 	}
 
@@ -328,18 +326,16 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 				"The audit event was written but we couldn't read back its row ID (epoch %q, event type %q).",
 				event.EpochID, event.EventType,
 			),
-			Why: fmt.Sprintf(
-				"SQLite refused to report the last inserted row ID: %s",
-				err,
-			),
+			Why:   "The database refused to report the last inserted row ID.",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningID).",
 			Impact: "The event itself was recorded, but anything that needs to attach extra context to it\n" +
 				"(linking it to a session, a workflow, or another event) can't proceed because that\n" +
 				"link requires the row ID.",
 			Fix: "1. SQLite normally always reports the last-inserted row ID, so this is unexpected.\n" +
 				"   Confirm the SQLite driver version is current:\n" +
 				"     pasture --version\n" +
-				"2. Retry the operation. If the error persists, file a bug against\n" +
-				"   pasture/internal/audit/sqlite.go.",
+				"2. Retry the operation. If the error persists, please file a bug.",
+			Cause: err,
 		}
 	}
 	if eventID <= 0 {
@@ -351,12 +347,12 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 			),
 			Why: "Row IDs in the audit-events table count up from 1. A value of zero or below means\n" +
 				"the table's auto-numbering has been reset or the table is corrupted.",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningID).",
 			Impact: "Anything that needs to link extra context to this event (sessions, workflow attachments,\n" +
 				"related events) can't proceed because the link requires a valid row ID.",
 			Fix: "1. Look at the most recent rows in the audit-events table to confirm the corruption:\n" +
 				"     sqlite3 <path-to-audit.db> 'SELECT id FROM audit_events ORDER BY id DESC LIMIT 5'\n" +
-				"2. If the IDs really are non-positive, restore from a backup and file a bug against\n" +
-				"   pasture/internal/audit/sqlite.go.",
+				"2. If the IDs really are non-positive, restore from a backup and please file a bug.",
 		}
 	}
 
@@ -376,10 +372,8 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 					"Couldn't link the audit event to its epoch (epoch %q, event type %q, event row %d).",
 					event.EpochID, event.EventType, eventID,
 				),
-				Why: fmt.Sprintf(
-					"SQLite refused our insert into the event-to-context table: %s",
-					err,
-				),
+				Why:   "The database refused the insert that links the event to its epoch.",
+				Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningID).",
 				Impact: "The event itself was written, but it can't be found by queries that filter by epoch.\n" +
 					"The audit trail for this epoch will be missing this entry.",
 				Fix: "1. Confirm the event-to-context table exists (it's created by the version 2 → 3\n" +
@@ -387,6 +381,7 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 					"     sqlite3 <path-to-audit.db> '.schema context_edges'\n" +
 					"2. If it's missing, the database is older than version 3 — upgrade it:\n" +
 					"     pasture migrate",
+				Cause: err,
 			}
 		}
 	}
@@ -398,16 +393,15 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 				"Couldn't save this audit event (epoch %q, event type %q).",
 				event.EpochID, event.EventType,
 			),
-			Why: fmt.Sprintf(
-				"SQLite refused to commit the write transaction: %s",
-				err,
-			),
+			Why:   "The database refused to commit the write transaction.",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningID).",
 			Impact: "The event was not recorded (everything was rolled back). The audit trail for this\n" +
 				"epoch will be missing this entry until the caller retries.",
 			Fix: "1. Confirm the audit database file is writable and not corrupted:\n" +
 				"     ls -l <path-to-audit.db>\n" +
 				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
 				"2. Retry the operation once the file is healthy.",
+			Cause: err,
 		}
 	}
 	return eventID, nil
@@ -475,22 +469,21 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentID(role string) (string, error)
 					"Couldn't look up the built-in agent %q in the agent registry.",
 					role,
 				),
-				Why: fmt.Sprintf(
-					"SQLite refused our query into the agent registry table: %s",
-					derr,
-				),
+				Why:   "The database refused the query into the agent registry table.",
+				Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.resolveLegacyRoleAgentID).",
 				Impact: fmt.Sprintf(
-					"The audit event can't be attributed to its agent. RecordEvent for the built-in role\n"+
-						"%q will keep failing until the lookup recovers.",
+					"The audit event can't be attributed to its agent. Recording events for the built-in\n"+
+						"role %q will keep failing until the lookup recovers.",
 					role,
 				),
 				Fix: "1. Confirm the audit database file is readable:\n" +
 					"     ls -l <path-to-audit.db>\n" +
-					"2. Confirm the agent registry tables (created by the Provenance library) still exist:\n" +
+					"2. Confirm the agent registry tables still exist:\n" +
 					"     sqlite3 <path-to-audit.db> '.schema agents'\n" +
 					"     sqlite3 <path-to-audit.db> '.schema agents_software'\n" +
 					"3. If they're missing, the database is older than version 3 — upgrade it:\n" +
 					"     pasture migrate",
+				Cause: derr,
 			}
 		}
 		// derr == sql.ErrNoRows: well-known name not in agents_software
@@ -523,22 +516,21 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentID(role string) (string, error)
 				"Couldn't look up the legacy-role agent named %q in the agent registry.",
 				name,
 			),
-			Why: fmt.Sprintf(
-				"SQLite refused our query into the agent registry table: %s",
-				err,
-			),
+			Why:   "The database refused the query into the agent registry table.",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.resolveLegacyRoleAgentID).",
 			Impact: fmt.Sprintf(
-				"The audit event can't be attributed to its agent. RecordEvent for role %q will keep\n"+
-					"failing until the lookup recovers.",
+				"The audit event can't be attributed to its agent. Recording events for role %q will\n"+
+					"keep failing until the lookup recovers.",
 				role,
 			),
 			Fix: "1. Confirm the audit database file is readable:\n" +
 				"     ls -l <path-to-audit.db>\n" +
-				"2. Confirm the agent registry tables (created by the Provenance library) still exist:\n" +
+				"2. Confirm the agent registry tables still exist:\n" +
 				"     sqlite3 <path-to-audit.db> '.schema agents'\n" +
 				"     sqlite3 <path-to-audit.db> '.schema agents_software'\n" +
 				"3. If they're missing, the database is older than version 3 — upgrade it:\n" +
 				"     pasture migrate",
+			Cause: err,
 		}
 	}
 
@@ -552,19 +544,18 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentID(role string) (string, error)
 				"Couldn't generate a unique ID for the new agent for role %q.",
 				role,
 			),
-			Why: fmt.Sprintf(
-				"The UUID generator returned an unexpected error: %s",
-				err,
-			),
+			Why:   "The unique-ID generator returned an unexpected error.",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.resolveLegacyRoleAgentID).",
 			Impact: fmt.Sprintf(
-				"The audit event can't be attributed to a new agent for role %q. RecordEvent for this\n"+
-					"role will keep failing until UUID generation recovers.",
+				"The audit event can't be attributed to a new agent for role %q. Recording events for\n"+
+					"this role will keep failing until ID generation recovers.",
 				role,
 			),
-			Fix: "1. UUID generation is built-in and almost never fails — this usually means the system\n" +
+			Fix: "1. ID generation is built-in and almost never fails — this usually means the system\n" +
 				"   clock is unreadable or set to a wildly invalid value. Check the clock:\n" +
 				"     date -u\n" +
 				"2. Fix any clock or NTP problems, then retry.",
+			Cause: err,
 		}
 	}
 	agentID := legacyRoleAgentNamespace + "--" + newUUID.String()
@@ -579,20 +570,19 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentID(role string) (string, error)
 				"Couldn't register a new agent for role %q.",
 				role,
 			),
-			Why: fmt.Sprintf(
-				"SQLite refused our insert into the agent registry (agent ID %q): %s",
-				agentID, err,
-			),
+			Why:   "The database refused the insert into the agent registry.",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.resolveLegacyRoleAgentID).",
 			Impact: "The new agent for this role couldn't be created, so audit events from this role can't\n" +
-				"be attributed. RecordEvent for this role will keep failing.",
+				"be attributed. Recording events for this role will keep failing.",
 			Fix: "1. Confirm the audit database file is writable:\n" +
 				"     ls -l <path-to-audit.db>\n" +
-				"2. Confirm the agent registry table (created by the Provenance library) still exists\n" +
-				"   and is intact:\n" +
+				"2. Confirm the agent registry table still exists and is intact:\n" +
 				"     sqlite3 <path-to-audit.db> '.schema agents'\n" +
 				"     pasture migrate\n" +
-				"3. If the SQLite error mentions UNIQUE, another writer beat us to creating this agent.\n" +
-				"   Retry the operation — the second attempt will find the existing agent and succeed.",
+				"3. If the underlying error mentions a uniqueness conflict, another writer beat us to\n" +
+				"   creating this agent. Retry — the second attempt will find the existing agent and\n" +
+				"   succeed.",
+			Cause: err,
 		}
 	}
 
@@ -606,20 +596,18 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentID(role string) (string, error)
 				"Couldn't record the new agent's name (%q) for role %q.",
 				name, role,
 			),
-			Why: fmt.Sprintf(
-				"SQLite refused our insert into the software-agent details table: %s",
-				err,
-			),
+			Why:   "The database refused the insert into the agent details table.",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.resolveLegacyRoleAgentID).",
 			Impact: "The agent registration is half-complete: the agent exists in the registry but has no\n" +
-				"name, so subsequent lookups by role won't find it. RecordEvent for this role will\n" +
-				"keep failing.",
+				"name, so subsequent lookups by role won't find it. Recording events for this role\n" +
+				"will keep failing.",
 			Fix: "1. Confirm the audit database file is writable:\n" +
 				"     ls -l <path-to-audit.db>\n" +
-				"2. Confirm the software-agent details table (created by the Provenance library) still\n" +
-				"   exists and is intact:\n" +
+				"2. Confirm the agent details table still exists and is intact:\n" +
 				"     sqlite3 <path-to-audit.db> '.schema agents_software'\n" +
 				"3. The orphan agent row is harmless, but if you want to clean it up:\n" +
 				"     sqlite3 <path-to-audit.db> 'DELETE FROM agents WHERE id NOT IN (SELECT agent_id FROM agents_software)'",
+			Cause: err,
 		}
 	}
 
@@ -685,10 +673,8 @@ func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochID string, phase 
 				"Couldn't read audit events for epoch %q.",
 				epochID,
 			),
-			Why: fmt.Sprintf(
-				"SQLite refused our query that joins audit events with their event-to-context links: %s",
-				err,
-			),
+			Why:   "The database refused the query that links audit events to their epochs.",
+			Where: "Reading audit events (internal/audit/sqlite.go in audit.SqliteAuditTrail.QueryEvents).",
 			Impact: "No audit events can be returned for this epoch until the underlying database problem\n" +
 				"is fixed.",
 			Fix: "1. Confirm the audit database file is accessible:\n" +
@@ -697,6 +683,7 @@ func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochID string, phase 
 				"   version 3, and the legacy epoch column is removed in version 4):\n" +
 				"     pasture migrate\n" +
 				"3. Retry the query once the upgrade has finished.",
+			Cause: err,
 		}
 	}
 	defer rows.Close()
@@ -718,10 +705,8 @@ func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochID string, phase 
 					"Couldn't decode an audit-event row for epoch %q.",
 					epochID,
 				),
-				Why: fmt.Sprintf(
-					"One of the columns from the audit-events table couldn't be read into the expected type: %s",
-					err,
-				),
+				Why:    "One of the columns from the audit-events table couldn't be read into the expected type.",
+				Where:  "Reading audit events (internal/audit/sqlite.go in audit.SqliteAuditTrail.QueryEvents).",
 				Impact: "The event listing for this epoch can't be returned reliably; results would be partial.",
 				Fix: "1. Retry the query.\n" +
 					"2. If the error persists, the audit-events table shape may not match what this build\n" +
@@ -729,6 +714,7 @@ func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochID string, phase 
 					"     sqlite3 <path-to-audit.db> '.schema audit_events'\n" +
 					"3. Run the migrator to bring the table to the latest shape:\n" +
 					"     pasture migrate",
+				Cause: err,
 			}
 		}
 
@@ -740,15 +726,14 @@ func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochID string, phase 
 					"An audit-event payload is invalid JSON (epoch %q, event type %q).",
 					epochIDCol, eventTypeCol,
 				),
-				Why: fmt.Sprintf(
-					"The standard JSON decoder refused to parse the payload column: %s",
-					err,
-				),
+				Why:   "The payload column couldn't be parsed as JSON — it's been corrupted.",
+				Where: "Reading audit events (internal/audit/sqlite.go in audit.SqliteAuditTrail.QueryEvents).",
 				Impact: "This row can't be returned because its payload is corrupt. The whole event listing\n" +
 					"for this epoch was abandoned.",
 				Fix: "1. Find and inspect the bad row's payload:\n" +
 					fmt.Sprintf("     sqlite3 <path-to-audit.db> 'SELECT id, payload FROM audit_events WHERE event_type = %q'\n", string(eventTypeCol)) +
 					"2. Either repair the payload (re-encode as valid JSON) or delete the row, then retry.",
+				Cause: err,
 			}
 		}
 
@@ -768,15 +753,14 @@ func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochID string, phase 
 				"Lost the connection to the audit-events table while listing events for epoch %q.",
 				epochID,
 			),
-			Why: fmt.Sprintf(
-				"SQLite reported an error part-way through reading the result rows: %s",
-				err,
-			),
+			Why:    "The database reported an error part-way through reading the result rows.",
+			Where:  "Reading audit events (internal/audit/sqlite.go in audit.SqliteAuditTrail.QueryEvents).",
 			Impact: "The event listing for this epoch can't be returned reliably; results would be partial.",
 			Fix: "1. Retry the query.\n" +
 				"2. If the error persists, the audit database file may be corrupt. Check it:\n" +
 				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
 				"3. If integrity_check reports problems, restore from a backup before retrying.",
+			Cause: err,
 		}
 	}
 	return events, nil

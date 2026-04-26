@@ -288,12 +288,11 @@ func (t *trackerImpl) SetAgentCategories(id provenance.AgentID, automaton protoc
 			What:     fmt.Sprintf("Pasture got an unknown automation role %q when setting an agent's category.", automaton),
 			Why: "Automation roles must be one of the names pasture knows about; this one\n" +
 				"isn't on the list. Either it's misspelled or it was made up.",
+			Where: "Setting an agent's category (internal/tasks/tracker.go in trackerImpl.SetAgentCategories).",
 			Impact: "The agent's category isn't saved. Anything that filters by automation\n" +
 				"role won't see this agent.",
-			Fix: "1. Pass one of the named automation roles defined in pkg/protocol, for\n" +
-				"   example:\n" +
-				"     AutomatonRoleNone, AutomatonRoleConstraintChecker,\n" +
-				"     AutomatonRoleHookHandler\n" +
+			Fix: "1. Pass one of the named automation roles, for example:\n" +
+				"     none, constraint-checker, hook-handler\n" +
 				"2. List the full set of valid roles to find the one you meant:\n" +
 				"     pasture task agents list --roles",
 		}
@@ -304,11 +303,11 @@ func (t *trackerImpl) SetAgentCategories(id provenance.AgentID, automaton protoc
 			What:     fmt.Sprintf("Pasture got an unknown pasture role %q when setting an agent's category.", pastureRole),
 			Why: "Pasture roles must be one of the names pasture knows about; this one\n" +
 				"isn't on the list. Either it's misspelled or it was made up.",
+			Where: "Setting an agent's category (internal/tasks/tracker.go in trackerImpl.SetAgentCategories).",
 			Impact: "The agent's category isn't saved. Anything that filters by pasture\n" +
 				"role won't see this agent.",
-			Fix: "1. Pass one of the named pasture roles defined in pkg/protocol, for\n" +
-				"   example:\n" +
-				"     PastureRoleNone, PastureRoleArchitect, PastureRoleWorker\n" +
+			Fix: "1. Pass one of the named pasture roles, for example:\n" +
+				"     none, architect, worker\n" +
 				"2. List the full set of valid roles to find the one you meant:\n" +
 				"     pasture task agents list --roles",
 		}
@@ -327,15 +326,14 @@ func (t *trackerImpl) SetAgentCategories(id provenance.AgentID, automaton protoc
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     fmt.Sprintf("Pasture couldn't save the category for agent %q.", id.String()),
-			Why: fmt.Sprintf(
-				"Tried to write the category row to the database but it failed: %s",
-				err,
-			),
+			Why:      "Tried to write the category to the database but the write failed.",
+			Where:    "Setting an agent's category (internal/tasks/tracker.go in trackerImpl.SetAgentCategories).",
 			Impact: "The agent's category isn't saved. Lookups will return the default\n" +
 				"\"None\" category until the row is written.",
 			Fix: "1. Confirm the database is writable and at the latest schema version:\n" +
 				"     pasture migrate\n" +
 				"2. Retry the operation once the database is healthy.",
+			Cause: err,
 		}
 	}
 	return nil
@@ -362,15 +360,14 @@ func (t *trackerImpl) AgentCategories(id provenance.AgentID) (protocol.Automaton
 		return "", "", &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     fmt.Sprintf("Pasture couldn't read the category for agent %q.", id.String()),
-			Why: fmt.Sprintf(
-				"Tried to look up the category row in the database but it failed: %s",
-				err,
-			),
+			Why:      "Tried to look up the category in the database but the read failed.",
+			Where:    "Reading an agent's category (internal/tasks/tracker.go in trackerImpl.AgentCategories).",
 			Impact: "The agent's category can't be returned. Anything that needs to filter\n" +
 				"by category will fall back to the default \"None\".",
 			Fix: "1. Confirm the database is readable and at the latest schema version:\n" +
 				"     pasture migrate\n" +
 				"2. Retry the operation once the database is healthy.",
+			Cause: err,
 		}
 	}
 	return protocol.AutomatonRole(automatonStr), protocol.PastureRole(pastureRoleStr), nil
@@ -394,12 +391,11 @@ func (t *trackerImpl) AttachContext(ctx context.Context, eventID int64, kind pro
 			What:     fmt.Sprintf("Pasture got an unknown context kind %q when linking an event.", kind),
 			Why: "Context kinds must be one of the names pasture knows about (such as\n" +
 				"epoch, slice, or git); this one isn't on the list.",
+			Where: "Linking an event to a context (internal/tasks/tracker.go in trackerImpl.AttachContext).",
 			Impact: "The event isn't linked to anything, so it won't show up when you ask\n" +
 				"for events by this kind of context.",
-			Fix: "1. Pass one of the named context kinds defined in pkg/protocol, for\n" +
-				"   example:\n" +
-				"     ContextEpoch, ContextSlice, ContextGit,\n" +
-				"     ContextSkill, ContextSession\n" +
+			Fix: "1. Pass one of the named context kinds, for example:\n" +
+				"     epoch, slice, git, skill, session\n" +
 				"2. List the full set of valid kinds to find the one you meant:\n" +
 				"     pasture task contexts list --kinds",
 		}
@@ -408,8 +404,9 @@ func (t *trackerImpl) AttachContext(ctx context.Context, eventID int64, kind pro
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     "Pasture tried to link an event to a context with no identifier.",
-			Why: "The context-id was an empty string. Without an identifier, no future\n" +
-				"lookup could find the event again.",
+			Why: "The context identifier was an empty string. Without an identifier,\n" +
+				"no future lookup could find the event again.",
+			Where:  "Linking an event to a context (internal/tasks/tracker.go in trackerImpl.AttachContext).",
 			Impact: "The event isn't linked, so it won't show up in any context-based query.",
 			Fix: "1. Pass a real identifier for the kind of context you're linking:\n" +
 				"     - for an epoch: the originating REQUEST task's id\n" +
@@ -427,10 +424,9 @@ func (t *trackerImpl) AttachContext(ctx context.Context, eventID int64, kind pro
 			Why: "Event ids are always positive numbers handed back when an event is\n" +
 				"saved. A zero or negative value means the caller never recorded the\n" +
 				"event before trying to link it. This is a bug in the calling code.",
+			Where:  "Linking an event to a context (internal/tasks/tracker.go in trackerImpl.AttachContext).",
 			Impact: "The event isn't linked to anything.",
-			Fix: "1. Save the event first and use the id that's returned:\n" +
-				"     id, err := tracker.RecordEventReturningID(ctx, event)\n" +
-				"     err = tracker.AttachContext(ctx, id, kind, contextID)\n" +
+			Fix: "1. Save the event first and use the id that's returned, then link it.\n" +
 				"2. If you hit this from the CLI rather than from your own code, please\n" +
 				"   file a bug — it shouldn't be reachable in normal use.",
 		}
@@ -452,9 +448,10 @@ func (t *trackerImpl) AttachContext(ctx context.Context, eventID int64, kind pro
 			Category: pasterrors.CategoryStorage,
 			What:     fmt.Sprintf("Pasture couldn't link event %d to its %s.", eventID, contextKindLabel(kind)),
 			Why: fmt.Sprintf(
-				"Tried to write the link to %s %q in the database but it failed: %s",
-				contextIDLabel(kind), contextID, err,
+				"Tried to write the link to %s %q in the database but the write failed.",
+				contextIDLabel(kind), contextID,
 			),
+			Where: "Linking an event to a context (internal/tasks/tracker.go in trackerImpl.AttachContext).",
 			Impact: fmt.Sprintf(
 				"The event is in the database but won't show up when you ask for events\n"+
 					"by %s, which leaves a gap in the recorded history.",
@@ -463,6 +460,7 @@ func (t *trackerImpl) AttachContext(ctx context.Context, eventID int64, kind pro
 			Fix: "1. Confirm the database is writable and at the latest schema version:\n" +
 				"     pasture migrate\n" +
 				"2. Retry the link once the database is healthy.",
+			Cause: err,
 		}
 	}
 	return nil
@@ -487,16 +485,15 @@ func (t *trackerImpl) EventContexts(ctx context.Context, eventID int64) ([]proto
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     fmt.Sprintf("Pasture couldn't read the contexts linked to event %d.", eventID),
-			Why: fmt.Sprintf(
-				"The database query asking which contexts (epoch, slice, git, ...) this\n"+
-					"event is linked to failed: %s",
-				err,
-			),
+			Why: "The database query asking which contexts (epoch, slice, git, ...) this\n" +
+				"event is linked to failed.",
+			Where: "Reading the contexts for an event (internal/tasks/tracker.go in trackerImpl.EventContexts).",
 			Impact: "The list of contexts for this event can't be returned, so anything that\n" +
 				"shows attribution for the event will be incomplete.",
 			Fix: "1. Confirm the database is readable and at the latest schema version:\n" +
 				"     pasture migrate\n" +
 				"2. Retry the query once the database is healthy.",
+			Cause: err,
 		}
 	}
 	defer rows.Close()
@@ -508,17 +505,16 @@ func (t *trackerImpl) EventContexts(ctx context.Context, eventID int64) ([]proto
 			return nil, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What:     fmt.Sprintf("Pasture couldn't read one of the context rows for event %d.", eventID),
-				Why: fmt.Sprintf(
-					"Reading a row's columns out of the result set failed: %s",
-					err,
-				),
+				Why:      "Reading the row's columns out of the result set failed.",
+				Where:    "Reading the contexts for an event (internal/tasks/tracker.go in trackerImpl.EventContexts).",
 				Impact: "Only some of the contexts for this event are readable; the result\n" +
 					"can't be returned reliably.",
 				Fix: "1. Retry the query — transient read errors usually resolve on their own.\n" +
-					"2. If the error keeps happening, check the table layout for drift:\n" +
-					"     sqlite3 <db-path> \".schema context_edges\"\n" +
+					"2. If the error keeps happening, check the database file for damage:\n" +
+					"     sqlite3 <db-path> \"PRAGMA integrity_check\"\n" +
 					"3. Run a migration to bring the schema up to date if needed:\n" +
 					"     pasture migrate",
+				Cause: err,
 			}
 		}
 		contexts = append(contexts, protocol.Context{
@@ -530,16 +526,15 @@ func (t *trackerImpl) EventContexts(ctx context.Context, eventID int64) ([]proto
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     fmt.Sprintf("Pasture stopped partway through reading the contexts for event %d.", eventID),
-			Why: fmt.Sprintf(
-				"The database stream ended with an error before all rows were read: %s",
-				err,
-			),
+			Why:      "The database stream ended with an error before all rows were read.",
+			Where:    "Reading the contexts for an event (internal/tasks/tracker.go in trackerImpl.EventContexts).",
 			Impact: "Only some of the contexts for this event are readable; the result\n" +
 				"can't be returned reliably.",
 			Fix: "1. Retry the query — transient read errors usually resolve on their own.\n" +
 				"2. If the error keeps happening, the database file may be damaged. Check\n" +
 				"   it for corruption (this can take a while on large files):\n" +
 				"     sqlite3 <db-path> \"PRAGMA integrity_check\"",
+			Cause: err,
 		}
 	}
 	return contexts, nil
@@ -576,12 +571,11 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 			What:     fmt.Sprintf("Pasture got an unknown context kind %q when reading a timeline.", kind),
 			Why: "Context kinds must be one of the names pasture knows about (such as\n" +
 				"epoch, slice, or git); this one isn't on the list.",
+			Where: "Reading a timeline (internal/tasks/tracker.go in trackerImpl.Timeline).",
 			Impact: "The timeline can't be returned because pasture doesn't know what kind\n" +
 				"of events to look for.",
-			Fix: "1. Pass one of the named context kinds defined in pkg/protocol, for\n" +
-				"   example:\n" +
-				"     ContextEpoch, ContextSlice, ContextGit,\n" +
-				"     ContextSkill, ContextSession\n" +
+			Fix: "1. Pass one of the named context kinds, for example:\n" +
+				"     epoch, slice, git, skill, session\n" +
 				"2. List the full set of valid kinds to find the one you meant:\n" +
 				"     pasture task contexts list --kinds",
 		}
@@ -652,9 +646,10 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 			Category: pasterrors.CategoryStorage,
 			What:     fmt.Sprintf("Pasture couldn't read the timeline for %s %q.", contextIDLabel(kind), contextID),
 			Why: fmt.Sprintf(
-				"The database query asking for events linked to this %s failed: %s",
-				contextIDLabel(kind), err,
+				"The database query asking for events linked to this %s failed.",
+				contextIDLabel(kind),
 			),
+			Where: "Reading a timeline (internal/tasks/tracker.go in trackerImpl.Timeline).",
 			Impact: fmt.Sprintf(
 				"The timeline can't be returned. This %s will look empty even if there\n"+
 					"really are events recorded for it.",
@@ -663,6 +658,7 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 			Fix: "1. Confirm the database is readable and at the latest schema version:\n" +
 				"     pasture migrate\n" +
 				"2. Retry the query once the database is healthy.",
+			Cause: err,
 		}
 	}
 	defer rows.Close()
@@ -677,17 +673,16 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 			return nil, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What:     fmt.Sprintf("Pasture couldn't read one of the timeline rows for %s %q.", contextIDLabel(kind), contextID),
-				Why: fmt.Sprintf(
-					"Reading a row's columns out of the result set failed: %s",
-					err,
-				),
+				Why:      "Reading the row's columns out of the result set failed.",
+				Where:    "Reading a timeline (internal/tasks/tracker.go in trackerImpl.Timeline).",
 				Impact: "Only some of the timeline is readable; the result can't be returned\n" +
 					"reliably.",
 				Fix: "1. Retry the query — transient read errors usually resolve on their own.\n" +
-					"2. If the error keeps happening, check the table layout for drift:\n" +
-					"     sqlite3 <db-path> \".schema audit_events\"\n" +
+					"2. If the error keeps happening, check the database for damage:\n" +
+					"     sqlite3 <db-path> \"PRAGMA integrity_check\"\n" +
 					"3. Run a migration to bring the schema up to date if needed:\n" +
 					"     pasture migrate",
+				Cause: err,
 			}
 		}
 		ev, perr := decodeAuditEvent(epochID, phaseStr, roleOrAgent, eventTypeStr, payloadJSON, tsNano)
@@ -700,16 +695,15 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     fmt.Sprintf("Pasture stopped partway through reading the timeline for %s %q.", contextIDLabel(kind), contextID),
-			Why: fmt.Sprintf(
-				"The database stream ended with an error before all rows were read: %s",
-				err,
-			),
+			Why:      "The database stream ended with an error before all rows were read.",
+			Where:    "Reading a timeline (internal/tasks/tracker.go in trackerImpl.Timeline).",
 			Impact: "Only some of the timeline is readable; the result can't be returned\n" +
 				"reliably.",
 			Fix: "1. Retry the query — transient read errors usually resolve on their own.\n" +
 				"2. If the error keeps happening, the database file may be damaged. Check\n" +
 				"   it for corruption (this can take a while on large files):\n" +
 				"     sqlite3 <db-path> \"PRAGMA integrity_check\"",
+			Cause: err,
 		}
 	}
 	return events, nil
@@ -737,15 +731,14 @@ func auditEventsHasColumn(ctx context.Context, db *sql.DB, column string) (bool,
 		return false, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     "Pasture couldn't inspect the layout of the audit-events table.",
-			Why: fmt.Sprintf(
-				"Asking the database for the audit-events table layout failed: %s",
-				err,
-			),
+			Why:      "Asking the database for the audit-events table layout failed.",
+			Where:    "Probing the database schema (internal/tasks/tracker.go in tasks.auditEventsHasColumn).",
 			Impact: "Pasture can't tell which schema version this database is on, so timeline\n" +
 				"and event queries can't safely run — they might read the wrong columns.",
 			Fix: "1. Confirm the database is readable:\n" +
 				"     sqlite3 <db-path> \".schema audit_events\"\n" +
 				"2. If the file is intact and you still see this error, please file a bug.",
+			Cause: err,
 		}
 	}
 	defer rows.Close()
@@ -762,15 +755,14 @@ func auditEventsHasColumn(ctx context.Context, db *sql.DB, column string) (bool,
 			return false, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What:     "Pasture couldn't read one of the column descriptions for the audit-events table.",
-				Why: fmt.Sprintf(
-					"Reading a row out of the table-layout result set failed: %s",
-					err,
-				),
+				Why:      "Reading a row out of the table-layout result set failed.",
+				Where:    "Probing the database schema (internal/tasks/tracker.go in tasks.auditEventsHasColumn).",
 				Impact: "Pasture can't tell which schema version this database is on, so timeline\n" +
 					"and event queries can't safely run.",
 				Fix: "1. Inspect the table layout by hand to see what's wrong:\n" +
 					"     sqlite3 <db-path> \"PRAGMA table_info(audit_events)\"\n" +
 					"2. If the file is intact and you still see this error, please file a bug.",
+				Cause: err,
 			}
 		}
 		if name == column {
@@ -781,17 +773,16 @@ func auditEventsHasColumn(ctx context.Context, db *sql.DB, column string) (bool,
 		return false, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     "Pasture stopped partway through reading the audit-events table layout.",
-			Why: fmt.Sprintf(
-				"The database stream ended with an error before all column descriptions\n"+
-					"were read: %s",
-				err,
-			),
+			Why: "The database stream ended with an error before all column descriptions\n" +
+				"were read.",
+			Where: "Probing the database schema (internal/tasks/tracker.go in tasks.auditEventsHasColumn).",
 			Impact: "Pasture can't tell which schema version this database is on, so timeline\n" +
 				"and event queries can't safely run.",
 			Fix: "1. Confirm nothing else is rewriting the database while you read it:\n" +
 				"     pgrep -af pastured\n" +
 				"     pgrep -af 'pasture migrate'\n" +
 				"2. Retry once any other writer has finished.",
+			Cause: err,
 		}
 	}
 	return false, nil
@@ -826,11 +817,9 @@ func (t *trackerImpl) Close() error {
 			t.closeErr = &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What:     "Pasture couldn't close the database cleanly.",
-				Why: fmt.Sprintf(
-					"Both halves of the database (the task store and the audit log) failed to\n"+
-						"close. Task store error: %v. Audit log error: %v.",
-					provErr, trailErr,
-				),
+				Why: "Both halves of the database (the task store and the audit log) failed\n" +
+					"to close.",
+				Where: "Closing the database (internal/tasks/tracker.go in trackerImpl.Close).",
 				Impact: "The database file may be left locked. The next process that tries to\n" +
 					"open it may have to wait or see a \"database is locked\" error briefly.",
 				Fix: "1. Wait about 5 seconds for the lock to clear, then retry.\n" +
@@ -838,15 +827,14 @@ func (t *trackerImpl) Close() error {
 					"   file open:\n" +
 					"     pgrep -af pastured\n" +
 					"     pkill -f pastured",
+				Cause: errors.Join(provErr, trailErr),
 			}
 		case provErr != nil:
 			t.closeErr = &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What:     "Pasture couldn't close the task store cleanly.",
-				Why: fmt.Sprintf(
-					"Closing the task-store half of the database failed: %s",
-					provErr,
-				),
+				Why:      "Closing the task-store half of the database failed.",
+				Where:    "Closing the database (internal/tasks/tracker.go in trackerImpl.Close).",
 				Impact: "The task-store connection may be left open. The next process that tries\n" +
 					"to open the database may have to wait or see a \"database is locked\"\n" +
 					"error briefly.",
@@ -855,15 +843,14 @@ func (t *trackerImpl) Close() error {
 					"   file open:\n" +
 					"     pgrep -af pastured\n" +
 					"     pkill -f pastured",
+				Cause: provErr,
 			}
 		case trailErr != nil:
 			t.closeErr = &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What:     "Pasture couldn't close the audit log cleanly.",
-				Why: fmt.Sprintf(
-					"Closing the audit-log half of the database failed: %s",
-					trailErr,
-				),
+				Why:      "Closing the audit-log half of the database failed.",
+				Where:    "Closing the database (internal/tasks/tracker.go in trackerImpl.Close).",
 				Impact: "The audit-log connection may be left open. The next process that tries\n" +
 					"to open the database may have to wait or see a \"database is locked\"\n" +
 					"error briefly.",
@@ -872,6 +859,7 @@ func (t *trackerImpl) Close() error {
 					"   file open:\n" +
 					"     pgrep -af pastured\n" +
 					"     pkill -f pastured",
+				Cause: trailErr,
 			}
 		}
 	})

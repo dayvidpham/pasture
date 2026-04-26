@@ -122,6 +122,19 @@ type StructuredError struct {
 	// helpers below for the canonical shape. Each step starts with a
 	// plain-English sentence followed by an indented shell command.
 	Fix string
+	// Cause optionally wraps the underlying error for log-debugging and for
+	// errors.Is / errors.As traversal. It is NOT surfaced in user-visible
+	// output (Report) — that prose must be plain English with no Go symbol
+	// names, package qualifiers, or SQL column references. Set Cause when a
+	// translated Why field would otherwise lose the underlying error
+	// information that operators need in logs.
+	Cause error
+}
+
+// Unwrap returns the optional underlying cause so errors.Is / errors.As can
+// traverse the chain without exposing the raw cause to user-visible output.
+func (e *StructuredError) Unwrap() error {
+	return e.Cause
 }
 
 // Error implements the error interface.
