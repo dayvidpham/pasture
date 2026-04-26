@@ -156,10 +156,22 @@ func migrateV2toV3(tx *sql.Tx, nowUnixNano int64) error {
 		if _, err := tx.Exec(step.ddl); err != nil {
 			return &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
-				What:     fmt.Sprintf("audit.migrateV2toV3: cannot %s", step.what),
-				Why:      err.Error(),
-				Impact:   "the v2→v3 schema migration cannot complete; the database remains at v2 and the unified-workflow-record tables are unavailable",
-				Fix:      "verify the SQLite file is writable and the disk has space; rerun 'pasture migrate' once the underlying problem is resolved",
+				What: fmt.Sprintf(
+					"Couldn't %s during the audit-database upgrade from version 2 to 3.",
+					step.what,
+				),
+				Why: fmt.Sprintf(
+					"SQLite refused the CREATE statement: %s",
+					err,
+				),
+				Impact: "The version 2 → 3 upgrade can't complete, so the audit database stays at version 2.\n" +
+					"The new tables that link audit events to tasks, agents, and contexts can't be created\n" +
+					"until this is fixed. No data was changed; the entire upgrade was rolled back.",
+				Fix: "1. Confirm the audit database file is writable and the disk has free space:\n" +
+					"     ls -l <path-to-audit.db>\n" +
+					"     df -h <path-to-audit.db>\n" +
+					"2. Re-run the migration once the underlying problem is resolved:\n" +
+					"     pasture migrate",
 			}
 		}
 	}

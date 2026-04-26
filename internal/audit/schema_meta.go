@@ -18,6 +18,7 @@ package audit
 
 import (
 	"database/sql"
+	"fmt"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 )
@@ -50,10 +51,18 @@ func schemaMetaTableExists(db *sql.DB) (bool, error) {
 	case err != nil:
 		return false, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     "audit.schemaMetaTableExists: cannot query sqlite_master for audit_schema_meta presence",
-			Why:      err.Error(),
-			Impact:   "the migrator cannot determine the on-disk schema version; the audit database cannot be opened",
-			Fix:      "verify the SQLite file is accessible, not corrupted, and that the process has read permission; run 'pasture migrate --dry-run' to retry the version probe",
+			What:     "Couldn't check whether the audit-database version-tracking table exists.",
+			Why: fmt.Sprintf(
+				"SQLite refused our query against its internal table catalog: %s",
+				err,
+			),
+			Impact: "Without knowing whether the version-tracking table is present, the migrator can't tell\n" +
+				"what version the audit database is at. The database can't be opened until this resolves.",
+			Fix: "1. Confirm the audit database file exists, is readable by this process, and isn't corrupted:\n" +
+				"     ls -l <path-to-audit.db>\n" +
+				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
+				"2. Re-check the version once the file is healthy:\n" +
+				"     pasture migrate --dry-run",
 		}
 	}
 	return true, nil
@@ -79,10 +88,19 @@ func readVersion(db *sql.DB) (int, error) {
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     "audit.readVersion: cannot read MAX(version) from audit_schema_meta",
-			Why:      err.Error(),
-			Impact:   "the migrator cannot determine the on-disk schema version; the audit database cannot be opened",
-			Fix:      "verify the SQLite file is accessible and not corrupted; if the file is intact, this may indicate concurrent corruption — back up the file and run 'pasture migrate --dry-run' to retry",
+			What:     "Couldn't read the audit database's current version.",
+			Why: fmt.Sprintf(
+				"SQLite refused our read of the schema-version table: %s",
+				err,
+			),
+			Impact: "Without knowing the current version, the migrator can't decide what (if anything)\n" +
+				"needs to be upgraded. The audit database can't be opened until this resolves.",
+			Fix: "1. Confirm the audit database file is accessible and not corrupted:\n" +
+				"     ls -l <path-to-audit.db>\n" +
+				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
+				"2. If the file looks intact, take a backup and re-check the version:\n" +
+				"     cp <path-to-audit.db> <path-to-audit.db>.backup\n" +
+				"     pasture migrate --dry-run",
 		}
 	}
 	if !version.Valid {
@@ -109,10 +127,18 @@ func writeVersion(tx *sql.Tx, version int, nowUnixNano int64) error {
 	if err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     "audit.writeVersion: cannot insert (version, applied_at) into audit_schema_meta",
-			Why:      err.Error(),
-			Impact:   "the migrator cannot record that schema migration completed; subsequent opens will retry the migration",
-			Fix:      "verify the SQLite file is writable and the transaction is still active; if the database is full or the disk is out of space, free space and retry 'pasture migrate'",
+			What:     "Couldn't record the new version after the audit-database upgrade ran.",
+			Why: fmt.Sprintf(
+				"SQLite refused our insert into the schema-version table: %s",
+				err,
+			),
+			Impact: "The upgrade itself is rolled back because the version stamp couldn't be saved. The\n" +
+				"next time you open the audit database, the same upgrade will be attempted again.",
+			Fix: "1. Confirm the audit database file is writable and the disk has free space:\n" +
+				"     ls -l <path-to-audit.db>\n" +
+				"     df -h <path-to-audit.db>\n" +
+				"2. Re-run the migration once the underlying problem is resolved:\n" +
+				"     pasture migrate",
 		}
 	}
 	return nil

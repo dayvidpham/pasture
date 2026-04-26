@@ -13,6 +13,7 @@ package audit
 
 import (
 	"database/sql"
+	"fmt"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 )
@@ -29,10 +30,18 @@ func migrateV1toV2(tx *sql.Tx, nowUnixNano int64) error {
 	if _, err := tx.Exec(schemaMetaDDL); err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     "audit.migrateV1toV2: cannot create audit_schema_meta table",
-			Why:      err.Error(),
-			Impact:   "the v1→v2 schema migration cannot complete; the database remains at v1",
-			Fix:      "verify the SQLite file is writable and the disk has space; rerun 'pasture migrate' once the underlying problem is resolved",
+			What:     "Couldn't create the audit-database version-tracking table during the upgrade from version 1 to 2.",
+			Why: fmt.Sprintf(
+				"SQLite refused our CREATE TABLE statement for the schema-version table: %s",
+				err,
+			),
+			Impact: "The version 1 → 2 upgrade can't complete, so the audit database stays at version 1.\n" +
+				"No data was changed; the entire upgrade was rolled back.",
+			Fix: "1. Confirm the audit database file is writable and the disk has free space:\n" +
+				"     ls -l <path-to-audit.db>\n" +
+				"     df -h <path-to-audit.db>\n" +
+				"2. Re-run the migration once the underlying problem is resolved:\n" +
+				"     pasture migrate",
 		}
 	}
 	if err := writeVersion(tx, 2, nowUnixNano); err != nil {

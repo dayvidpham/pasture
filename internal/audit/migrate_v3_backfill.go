@@ -204,10 +204,18 @@ func addAgentIDColumn(tx *sql.Tx) error {
 		}
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     "audit.migrateV3Backfill: cannot add agent_id column to audit_events",
-			Why:      err.Error(),
-			Impact:   "the v2→v3 backfill cannot proceed; the database remains at v2",
-			Fix:      "verify the SQLite file is writable and not corrupted; rerun 'pasture migrate' once the underlying problem is resolved",
+			What:     "Couldn't add the new agent column to the audit-events table during the version 2 → 3 upgrade.",
+			Why: fmt.Sprintf(
+				"SQLite refused our ALTER TABLE statement that adds the agent column: %s",
+				err,
+			),
+			Impact: "The version 2 → 3 upgrade can't move audit events from being labelled by role text\n" +
+				"to being attributed to specific agents. The audit database stays at version 2.",
+			Fix: "1. Confirm the audit database file is writable and not corrupted:\n" +
+				"     ls -l <path-to-audit.db>\n" +
+				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
+				"2. Re-run the migration once the underlying problem is resolved:\n" +
+				"     pasture migrate",
 		}
 	}
 	return nil
@@ -229,10 +237,18 @@ func distinctRoles(tx *sql.Tx) ([]string, error) {
 	if err != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     "audit.migrateV3Backfill: cannot scan audit_events for distinct roles",
-			Why:      err.Error(),
-			Impact:   "the v2→v3 backfill cannot enumerate the legacy roles to mint agents for; the database remains at v2",
-			Fix:      "verify the SQLite file is readable and not corrupted; rerun 'pasture migrate' once the underlying problem is resolved",
+			What:     "Couldn't list the unique role names in the audit-events table during the version 2 → 3 upgrade.",
+			Why: fmt.Sprintf(
+				"SQLite refused our query that reads the legacy role column from the audit-events table: %s",
+				err,
+			),
+			Impact: "The version 2 → 3 upgrade can't figure out which legacy roles need to become agents,\n" +
+				"so it was abandoned. The audit database stays at version 2.",
+			Fix: "1. Confirm the audit database file is readable and not corrupted:\n" +
+				"     ls -l <path-to-audit.db>\n" +
+				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
+				"2. Re-run the migration once the underlying problem is resolved:\n" +
+				"     pasture migrate",
 		}
 	}
 	defer rows.Close()
@@ -243,10 +259,18 @@ func distinctRoles(tx *sql.Tx) ([]string, error) {
 		if err := rows.Scan(&role); err != nil {
 			return nil, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
-				What:     "audit.migrateV3Backfill: cannot scan a distinct-role row from audit_events",
-				Why:      err.Error(),
-				Impact:   "the v2→v3 backfill cannot complete agent enumeration; the database remains at v2",
-				Fix:      "this likely indicates a row with a non-text role; inspect with 'sqlite3 <db> \"SELECT DISTINCT role, typeof(role) FROM audit_events\"' and repair before retrying",
+				What:     "Couldn't read one of the role names from the audit-events table during the version 2 → 3 upgrade.",
+				Why: fmt.Sprintf(
+					"A row in the legacy role column couldn't be decoded as text: %s",
+					err,
+				),
+				Impact: "The version 2 → 3 upgrade can't finish listing the legacy roles, so it was rolled\n" +
+					"back. The audit database stays at version 2.",
+				Fix: "1. This usually means a row has a role value that isn't plain text. Inspect the bad\n" +
+					"   rows directly:\n" +
+					"     sqlite3 <path-to-audit.db> 'SELECT DISTINCT role, typeof(role) FROM audit_events'\n" +
+					"2. Fix or delete the offending rows, then re-run the migration:\n" +
+					"     pasture migrate",
 			}
 		}
 		roles = append(roles, role)
@@ -254,10 +278,18 @@ func distinctRoles(tx *sql.Tx) ([]string, error) {
 	if err := rows.Err(); err != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     "audit.migrateV3Backfill: error iterating distinct-role rows from audit_events",
-			Why:      err.Error(),
-			Impact:   "the v2→v3 backfill cannot complete agent enumeration; the database remains at v2",
-			Fix:      "verify the SQLite file is readable and not corrupted; rerun 'pasture migrate' once the underlying problem is resolved",
+			What:     "Lost the connection to the audit-events table while listing role names during the version 2 → 3 upgrade.",
+			Why: fmt.Sprintf(
+				"SQLite reported an error part-way through reading the legacy role rows: %s",
+				err,
+			),
+			Impact: "The version 2 → 3 upgrade can't finish listing the legacy roles, so it was rolled\n" +
+				"back. The audit database stays at version 2.",
+			Fix: "1. Confirm the audit database file is readable and not corrupted:\n" +
+				"     ls -l <path-to-audit.db>\n" +
+				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
+				"2. Re-run the migration once the underlying problem is resolved:\n" +
+				"     pasture migrate",
 		}
 	}
 
@@ -302,10 +334,23 @@ func findOrCreateLegacyRoleAgent(tx *sql.Tx, role string) (string, error) {
 	case err != sql.ErrNoRows:
 		return "", &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("audit.migrateV3Backfill: cannot search agents_software for name %q", name),
-			Why:      err.Error(),
-			Impact:   "the v2→v3 backfill cannot determine whether a legacy-role agent already exists; the database remains at v2",
-			Fix:      "verify the SQLite file is readable and that Provenance's agents/agents_software tables have not been dropped; rerun 'pasture migrate' once verified",
+			What: fmt.Sprintf(
+				"Couldn't look up the agent named %q in the agent registry during the version 2 → 3 upgrade.",
+				name,
+			),
+			Why: fmt.Sprintf(
+				"SQLite refused our query into the agent registry table: %s",
+				err,
+			),
+			Impact: "The upgrade can't tell whether an agent for this legacy role already exists, so it\n" +
+				"can't safely create a new one. The audit database stays at version 2.",
+			Fix: "1. Confirm the audit database file is readable:\n" +
+				"     ls -l <path-to-audit.db>\n" +
+				"2. Confirm the agent registry tables (created by the Provenance library) still exist:\n" +
+				"     sqlite3 <path-to-audit.db> '.schema agents'\n" +
+				"     sqlite3 <path-to-audit.db> '.schema agents_software'\n" +
+				"3. Re-run the migration once verified:\n" +
+				"     pasture migrate",
 		}
 	}
 
@@ -314,10 +359,21 @@ func findOrCreateLegacyRoleAgent(tx *sql.Tx, role string) (string, error) {
 	if err != nil {
 		return "", &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("audit.migrateV3Backfill: cannot generate UUIDv7 for legacy role %q", role),
-			Why:      err.Error(),
-			Impact:   "the v2→v3 backfill cannot mint an AgentID; the database remains at v2",
-			Fix:      "this is unexpected — UUIDv7 generation has no external dependencies; check that the OS clock is not catastrophically broken and rerun",
+			What: fmt.Sprintf(
+				"Couldn't generate a unique ID for the legacy role %q during the version 2 → 3 upgrade.",
+				role,
+			),
+			Why: fmt.Sprintf(
+				"The UUID generator returned an unexpected error: %s",
+				err,
+			),
+			Impact: "The upgrade can't mint an agent ID for this legacy role, so it was abandoned. The\n" +
+				"audit database stays at version 2.",
+			Fix: "1. UUID generation is built-in and almost never fails — this usually means the system\n" +
+				"   clock is unreadable or set to a wildly invalid value. Check the clock:\n" +
+				"     date -u\n" +
+				"2. Fix any clock or NTP problems, then re-run:\n" +
+				"     pasture migrate",
 		}
 	}
 	agentID := legacyRoleAgentNamespace + "--" + newUUID.String()
@@ -328,10 +384,23 @@ func findOrCreateLegacyRoleAgent(tx *sql.Tx, role string) (string, error) {
 	); err != nil {
 		return "", &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("audit.migrateV3Backfill: cannot insert agents row for legacy role %q (agent_id=%q)", role, agentID),
-			Why:      err.Error(),
-			Impact:   "the v2→v3 backfill cannot register the legacy-role SoftwareAgent; the database remains at v2",
-			Fix:      "verify the SQLite file is writable and that Provenance's agents table is intact; rerun 'pasture migrate' once verified",
+			What: fmt.Sprintf(
+				"Couldn't register the agent for legacy role %q during the version 2 → 3 upgrade.",
+				role,
+			),
+			Why: fmt.Sprintf(
+				"SQLite refused our insert into the agent registry (agent ID %q): %s",
+				agentID, err,
+			),
+			Impact: "The upgrade can't add the new agent that legacy events will be attributed to, so it\n" +
+				"was abandoned. The audit database stays at version 2.",
+			Fix: "1. Confirm the audit database file is writable:\n" +
+				"     ls -l <path-to-audit.db>\n" +
+				"2. Confirm the agent registry table (created by the Provenance library) still exists\n" +
+				"   and is intact:\n" +
+				"     sqlite3 <path-to-audit.db> '.schema agents'\n" +
+				"3. Re-run the migration once verified:\n" +
+				"     pasture migrate",
 		}
 	}
 
@@ -341,10 +410,23 @@ func findOrCreateLegacyRoleAgent(tx *sql.Tx, role string) (string, error) {
 	); err != nil {
 		return "", &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("audit.migrateV3Backfill: cannot insert agents_software row for legacy role %q (name=%q)", role, name),
-			Why:      err.Error(),
-			Impact:   "the v2→v3 backfill cannot complete the legacy-role SoftwareAgent registration; the database remains at v2",
-			Fix:      "verify the SQLite file is writable and that Provenance's agents_software table is intact; rerun 'pasture migrate' once verified",
+			What: fmt.Sprintf(
+				"Couldn't record the agent's name (%q) for legacy role %q during the version 2 → 3 upgrade.",
+				name, role,
+			),
+			Why: fmt.Sprintf(
+				"SQLite refused our insert into the software-agent details table: %s",
+				err,
+			),
+			Impact: "The upgrade can't finish registering the agent for this legacy role, so it was\n" +
+				"rolled back. The audit database stays at version 2.",
+			Fix: "1. Confirm the audit database file is writable:\n" +
+				"     ls -l <path-to-audit.db>\n" +
+				"2. Confirm the software-agent details table (created by the Provenance library) still\n" +
+				"   exists and is intact:\n" +
+				"     sqlite3 <path-to-audit.db> '.schema agents_software'\n" +
+				"3. Re-run the migration once verified:\n" +
+				"     pasture migrate",
 		}
 	}
 
@@ -373,10 +455,20 @@ func backfillAgentIDByRole(tx *sql.Tx, roleToAgentID map[string]string) error {
 		); err != nil {
 			return &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
-				What:     fmt.Sprintf("audit.migrateV3Backfill: cannot UPDATE audit_events for role %q (agent_id=%q)", role, agentID),
-				Why:      err.Error(),
-				Impact:   "the v2→v3 backfill cannot finish populating agent_id; the database remains at v2",
-				Fix:      "verify the SQLite file is writable; rerun 'pasture migrate' once the underlying problem is resolved",
+				What: fmt.Sprintf(
+					"Couldn't attribute audit events for legacy role %q to its new agent during the version 2 → 3 upgrade.",
+					role,
+				),
+				Why: fmt.Sprintf(
+					"SQLite refused our update that points each event with role %q at agent ID %q: %s",
+					role, agentID, err,
+				),
+				Impact: "The upgrade can't finish linking legacy events to their new agent records, so it\n" +
+					"was rolled back. The audit database stays at version 2.",
+				Fix: "1. Confirm the audit database file is writable:\n" +
+					"     ls -l <path-to-audit.db>\n" +
+					"2. Re-run the migration once the underlying problem is resolved:\n" +
+					"     pasture migrate",
 			}
 		}
 	}
@@ -463,10 +555,25 @@ func rebuildAuditEventsWithoutRole(tx *sql.Tx) error {
 		if _, err := tx.Exec(s.sql); err != nil {
 			return &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
-				What:     fmt.Sprintf("audit.migrateV3Backfill: cannot %s during table rebuild", s.what),
-				Why:      err.Error(),
-				Impact:   "the v2→v3 table rebuild failed mid-step; the entire migration is rolled back and the database remains at v2",
-				Fix:      "verify the SQLite file is writable and that backfillAgentIDByRole populated agent_id for every row (the NOT NULL constraint on the new table catches missed rows); rerun 'pasture migrate' once verified",
+				What: fmt.Sprintf(
+					"Couldn't %s while rebuilding the audit-events table for the version 2 → 3 upgrade.",
+					s.what,
+				),
+				Why: fmt.Sprintf(
+					"SQLite refused one of the steps in the table-rebuild dance (create new table, copy\n"+
+						"rows, drop old, rename, recreate indexes): %s",
+					err,
+				),
+				Impact: "The audit-events table rebuild stopped midway, so the entire version 2 → 3 upgrade\n" +
+					"was rolled back. The audit database stays at version 2.",
+				Fix: "1. Confirm the audit database file is writable:\n" +
+					"     ls -l <path-to-audit.db>\n" +
+					"2. The new table requires every row to have an agent. If the previous step missed\n" +
+					"   any rows, the new table's not-null check on the agent column will reject the copy.\n" +
+					"   Look for orphan events:\n" +
+					"     sqlite3 <path-to-audit.db> 'SELECT id, role FROM audit_events WHERE agent_id IS NULL'\n" +
+					"3. Re-run the migration once verified:\n" +
+					"     pasture migrate",
 			}
 		}
 	}
@@ -504,10 +611,17 @@ func auditEventsTableExists(tx *sql.Tx) (bool, error) {
 	case err != nil:
 		return false, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     "audit.migrateV3Backfill: cannot probe sqlite_master for audit_events",
-			Why:      err.Error(),
-			Impact:   "the v3 backfill cannot determine whether audit_events exists; the migration is aborted defensively",
-			Fix:      "verify the SQLite file is not corrupted; rerun 'pasture migrate' to retry",
+			What:     "Couldn't check whether the audit-events table exists during the version 2 → 3 upgrade.",
+			Why: fmt.Sprintf(
+				"SQLite refused our query against its internal table catalog: %s",
+				err,
+			),
+			Impact: "We can't safely tell whether there are events to upgrade, so the migration was\n" +
+				"abandoned to avoid corrupting the database. The database itself is unchanged.",
+			Fix: "1. Check the audit database file isn't corrupted:\n" +
+				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
+				"2. Re-run the migration once the file is healthy:\n" +
+				"     pasture migrate",
 		}
 	}
 	return true, nil
@@ -579,10 +693,25 @@ func ensureProvenanceAgentTables(tx *sql.Tx) error {
 		if _, err := tx.Exec(s.sql); err != nil {
 			return &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
-				What:     fmt.Sprintf("audit.migrateV3Backfill: cannot %s", s.what),
-				Why:      err.Error(),
-				Impact:   "the v3 backfill cannot proceed because the Provenance-shaped agent tables are unavailable; the database remains at v2",
-				Fix:      "verify the SQLite file is writable; if Provenance owns the DB and is at an incompatible version, this DDL conflict will surface here — pin to compatible binaries",
+				What: fmt.Sprintf(
+					"Couldn't %s before starting the version 2 → 3 upgrade.",
+					s.what,
+				),
+				Why: fmt.Sprintf(
+					"SQLite refused our setup statement that ensures the agent registry tables exist: %s",
+					err,
+				),
+				Impact: "The version 2 → 3 upgrade can't start because the agent registry tables aren't\n" +
+					"available in the expected shape. The audit database stays at version 2.",
+				Fix: "1. Confirm the audit database file is writable:\n" +
+					"     ls -l <path-to-audit.db>\n" +
+					"2. If the agent registry tables already exist with a different shape (e.g. an older\n" +
+					"   or newer Provenance library wrote them), pin pasture to a version compatible\n" +
+					"   with the database file and try again.\n" +
+					"3. Inspect the existing tables to compare shapes:\n" +
+					"     sqlite3 <path-to-audit.db> '.schema agents'\n" +
+					"     sqlite3 <path-to-audit.db> '.schema agents_software'\n" +
+					"     sqlite3 <path-to-audit.db> '.schema agent_kinds'",
 			}
 		}
 	}

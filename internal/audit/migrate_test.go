@@ -277,22 +277,30 @@ func TestMigrate_NewerSchema_RejectedWithStructuredError(t *testing.T) {
 		t.Errorf("Category = %q, want %q", se.Category, pasterrors.CategoryStorage)
 	}
 
-	wantWhat := fmt.Sprintf("audit database schema version 99 is newer than supported version %d", audit.MaxKnownSchemaVersion)
+	wantWhat := fmt.Sprintf(
+		"This audit database was written by a newer pasture (version 99) than this build supports (version %d).",
+		audit.MaxKnownSchemaVersion,
+	)
 	if se.What != wantWhat {
 		t.Errorf("What = %q, want %q", se.What, wantWhat)
 	}
 
-	wantWhy := "this binary was built before the schema was bumped"
+	wantWhy := fmt.Sprintf(
+		"The database file says it's at audit-database version 99, but this build of pasture only\n"+
+			"knows how to read up to version %d. A newer pasture upgraded the file at some point.",
+		audit.MaxKnownSchemaVersion,
+	)
 	if se.Why != wantWhy {
 		t.Errorf("Why = %q, want %q", se.Why, wantWhy)
 	}
 
-	wantImpact := "no events can be read or written until the binary is upgraded"
+	wantImpact := "No audit events can be read or written through this build of pasture until you upgrade.\n" +
+		"The database itself is fine — it's just newer than this binary understands."
 	if se.Impact != wantImpact {
 		t.Errorf("Impact = %q, want %q", se.Impact, wantImpact)
 	}
 
-	wantFixSubstring := "upgrade pasture to a version that supports schema v99"
+	wantFixSubstring := "Upgrade pasture to a version that supports audit-database version 99"
 	if !strings.Contains(se.Fix, wantFixSubstring) {
 		t.Errorf("Fix = %q, want substring %q", se.Fix, wantFixSubstring)
 	}

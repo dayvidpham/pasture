@@ -139,10 +139,13 @@ func Migrate(db *sql.DB) error {
 	if db == nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     "audit.Migrate: db handle is nil",
-			Why:      "Migrate was called with a nil *sql.DB",
-			Impact:   "no migration can run; the audit database cannot be opened",
-			Fix:      "ensure NewSqliteAuditTrail (or another caller) successfully opened the SQLite file before invoking audit.Migrate",
+			What:     "The audit database can't be migrated because no database connection was provided.",
+			Why:      "audit.Migrate was called with a nil database handle (audit/migrate.go in audit.Migrate).",
+			Impact:   "No migration can run, and the audit database can't be opened until the caller provides a valid handle.",
+			Fix: "1. Open the audit database first, then pass the handle to audit.Migrate:\n" +
+				"     trail, err := audit.NewSqliteAuditTrail(\"<path-to-audit.db>\")\n" +
+				"2. Use the trail's connection for any subsequent migration calls.\n" +
+				"3. If you're calling Migrate directly from a test or tool, make sure sql.Open succeeded before invoking it.",
 		}
 	}
 
@@ -175,10 +178,21 @@ func Migrate(db *sql.DB) error {
 			// step without a v2→v3 step), and is not recoverable at runtime.
 			return &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
-				What:     fmt.Sprintf("audit.Migrate: missing migration step for version %d", currentVersion),
-				Why:      fmt.Sprintf("the next registered step starts at version %d but the database is at version %d", step.fromVersion, currentVersion),
-				Impact:   "the audit database cannot be brought up to the version this binary supports",
-				Fix:      "this is an audit-package bug — file an issue against pasture/internal/audit/migrate.go and pin to the previous binary",
+				What:     fmt.Sprintf("The audit database is at version %d but no upgrade step starts there.", currentVersion),
+				Why: fmt.Sprintf(
+					"The next migration step expects to start at version %d, but the database is currently\n"+
+						"at version %d. There's a gap in the upgrade sequence — the migration table\n"+
+						"is missing the step needed to move forward from here.",
+					step.fromVersion, currentVersion,
+				),
+				Impact: "The audit database can't be upgraded to the version this build of pasture supports,\n" +
+					"so it can't be opened until the gap is fixed.",
+				Fix: "1. This is a pasture bug — the migration table in audit/migrate.go is missing a step.\n" +
+					"2. Pin to the previous version of pasture (the one that wrote this database) so you\n" +
+					"   can keep working while the bug is fixed:\n" +
+					"     # downgrade or re-install the prior pasture release\n" +
+					"3. File an issue against pasture/internal/audit/migrate.go with this database's\n" +
+					fmt.Sprintf("   current version (%d) and the version this binary expected (%d).", currentVersion, step.fromVersion),
 			}
 		}
 
@@ -260,10 +274,21 @@ func runStep(db *sql.DB, step migrationStep) error {
 	if currentVersion != step.fromVersion {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("audit.runStep: on-disk schema version drifted to %d while waiting for the lock for v%d→v%d", currentVersion, step.fromVersion, step.toVersion),
-			Why:      "another process advanced the schema past this binary's planned step but not to the target version",
-			Impact:   "the migration cannot proceed because its starting point no longer exists",
-			Fix:      "rerun 'pasture migrate' to recompute the migration path from the current on-disk version",
+			What: fmt.Sprintf(
+				"The audit database changed underneath us while we were waiting for write access (now at version %d).",
+				currentVersion,
+			),
+			Why: fmt.Sprintf(
+				"While this process was waiting for the database write lock to upgrade from version %d to %d,\n"+
+					"another pasture process upgraded the database to version %d. That's not the version we\n"+
+					"expected to find when the lock finally became available.",
+				step.fromVersion, step.toVersion, currentVersion,
+			),
+			Impact: "This upgrade step can't continue because the database is no longer at the version it\n" +
+				"was planning to upgrade from. The database is intact — only this attempt was abandoned.",
+			Fix: "1. Re-run the migration so the upgrade path is recomputed from the current version:\n" +
+				"     pasture migrate\n" +
+				"2. If the database is already up to date, the rerun will be a no-op.",
 		}
 	}
 
@@ -276,10 +301,21 @@ func runStep(db *sql.DB, step migrationStep) error {
 	if err := tx.Commit(); err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("audit.runStep: cannot commit transaction for v%d→v%d", step.fromVersion, step.toVersion),
-			Why:      err.Error(),
-			Impact:   "the migration was rolled back; the database remains at the previous version",
-			Fix:      "verify the SQLite file is writable and the disk has space; rerun 'pasture migrate' once the underlying problem is resolved",
+			What: fmt.Sprintf(
+				"The upgrade from audit-database version %d to %d couldn't be saved.",
+				step.fromVersion, step.toVersion,
+			),
+			Why: fmt.Sprintf(
+				"SQLite refused to commit the upgrade transaction: %s",
+				err,
+			),
+			Impact: "The upgrade was rolled back — your audit database is unchanged and stays at the\n" +
+				"previous version. No data was lost; the upgrade simply didn't happen.",
+			Fix: "1. Confirm the audit database file is writable and the disk has free space:\n" +
+				"     ls -l <path-to-audit.db>\n" +
+				"     df -h <path-to-audit.db>\n" +
+				"2. Once the underlying problem is fixed, re-run the migration:\n" +
+				"     pasture migrate",
 		}
 	}
 	return nil
@@ -306,19 +342,43 @@ func beginImmediateWithRetry(ctx context.Context, db *sql.DB, fromVersion, toVer
 		if !isBusyError(err) {
 			return nil, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
-				What:     fmt.Sprintf("audit.beginImmediateWithRetry: cannot begin IMMEDIATE transaction for v%d→v%d", fromVersion, toVersion),
-				Why:      err.Error(),
-				Impact:   "the migration cannot acquire the write lock; the database remains at the current version",
-				Fix:      "verify the SQLite file is accessible and the process has read/write permission; rerun 'pasture migrate' once the underlying problem is resolved",
+				What: fmt.Sprintf(
+					"Couldn't start the database write for the audit-database upgrade from version %d to %d.",
+					fromVersion, toVersion,
+				),
+				Why: fmt.Sprintf(
+					"SQLite refused to start the upgrade transaction: %s",
+					err,
+				),
+				Impact: "The migration can't get exclusive write access to the database, so the upgrade\n" +
+					"can't run. The database remains at its current version.",
+				Fix: "1. Confirm the audit database file is readable and writable by this process:\n" +
+					"     ls -l <path-to-audit.db>\n" +
+					"2. If the file or its directory has restrictive permissions, fix them:\n" +
+					"     chmod u+rw <path-to-audit.db>\n" +
+					"3. Re-run the migration once the underlying problem is resolved:\n" +
+					"     pasture migrate",
 			}
 		}
 		if time.Now().After(deadline) {
 			return nil, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
-				What:     "another pasture process is running the audit schema migration",
-				Why:      fmt.Sprintf("BEGIN IMMEDIATE blocked by concurrent writer for >%s while attempting v%d→v%d", busyRetryCeiling, fromVersion, toVersion),
-				Impact:   "this process cannot open the unified database until the other migration completes",
-				Fix:      "wait for the other pasture/pastured process to finish, or kill it and re-run; check via 'pasture task agents list' once unblocked",
+				What:     "Another pasture process is already upgrading the audit database.",
+				Why: fmt.Sprintf(
+					"This process waited more than %s for write access to the audit database, but another\n"+
+						"pasture or pastured process held it the whole time. That other process is upgrading\n"+
+						"the database from version %d to %d, so we can't safely start the same upgrade in parallel.",
+					busyRetryCeiling, fromVersion, toVersion,
+				),
+				Impact: "This process can't open the audit database until the other migration finishes.\n" +
+					"No data was changed by this attempt — the wait simply timed out.",
+				Fix: "1. Wait for the other pasture or pastured process to finish, then re-run:\n" +
+					"     pasture migrate\n" +
+					"2. If the other process is stuck, find and stop it:\n" +
+					"     pgrep -fa 'pasture|pastured'\n" +
+					"     kill <pid-of-stuck-process>\n" +
+					"3. Once the lock is free, you can confirm the upgrade by listing agents:\n" +
+					"     pasture task agents list",
 			}
 		}
 		timer := time.NewTimer(delay)
@@ -327,10 +387,20 @@ func beginImmediateWithRetry(ctx context.Context, db *sql.DB, fromVersion, toVer
 			timer.Stop()
 			return nil, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
-				What:     fmt.Sprintf("audit.beginImmediateWithRetry: context cancelled while waiting for the write lock for v%d→v%d", fromVersion, toVersion),
-				Why:      ctx.Err().Error(),
-				Impact:   "the migration was abandoned mid-retry; the database is unchanged",
-				Fix:      "rerun 'pasture migrate' once the cancellation source has cleared",
+				What: fmt.Sprintf(
+					"The audit-database upgrade from version %d to %d was cancelled before it could start.",
+					fromVersion, toVersion,
+				),
+				Why: fmt.Sprintf(
+					"The cancellation came from the calling context: %s",
+					ctx.Err(),
+				),
+				Impact: "The upgrade was abandoned while waiting for write access. Your audit database is\n" +
+					"unchanged — nothing was committed.",
+				Fix: "1. Identify what cancelled the call (an interrupted CLI, a parent process timeout,\n" +
+					"   a pastured shutdown signal) and let it clear.\n" +
+					"2. Re-run the migration:\n" +
+					"     pasture migrate",
 			}
 		case <-timer.C:
 		}
@@ -376,10 +446,18 @@ func readVersionInTx(ctx context.Context, tx *sql.Tx) (int, error) {
 	case err != nil:
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     "audit.readVersionInTx: cannot probe sqlite_master under the active transaction",
-			Why:      err.Error(),
-			Impact:   "the migrator cannot re-confirm the on-disk schema version after acquiring the write lock; the migration is aborted defensively",
-			Fix:      "verify the SQLite file is not corrupted; rerun 'pasture migrate' to retry",
+			What:     "Couldn't re-check the audit database's version after taking the write lock.",
+			Why: fmt.Sprintf(
+				"SQLite refused our query against its internal table catalog: %s",
+				err,
+			),
+			Impact: "We can't safely confirm what version the database is at right now, so the upgrade\n" +
+				"was abandoned to avoid corrupting it. The database itself is unchanged.",
+			Fix: "1. Check the audit database file isn't corrupted:\n" +
+				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
+				"2. If the file is healthy, re-run the migration:\n" +
+				"     pasture migrate\n" +
+				"3. If integrity_check reports problems, restore from a backup before retrying.",
 		}
 	}
 
@@ -388,10 +466,18 @@ func readVersionInTx(ctx context.Context, tx *sql.Tx) (int, error) {
 		`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     "audit.readVersionInTx: cannot read MAX(version) under the active transaction",
-			Why:      err.Error(),
-			Impact:   "the migrator cannot determine whether a concurrent migrator already advanced the file; the migration is aborted defensively",
-			Fix:      "verify the SQLite file is accessible; rerun 'pasture migrate' to retry",
+			What:     "Couldn't read the audit database's current version after taking the write lock.",
+			Why: fmt.Sprintf(
+				"SQLite refused our read of the schema-version table: %s",
+				err,
+			),
+			Impact: "We can't tell whether another process already finished the upgrade we were about to\n" +
+				"run, so the migration was abandoned to avoid duplicate work. The database is unchanged.",
+			Fix: "1. Check the audit database file is readable:\n" +
+				"     ls -l <path-to-audit.db>\n" +
+				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
+				"2. Re-run the migration:\n" +
+				"     pasture migrate",
 		}
 	}
 	if !version.Valid {
@@ -407,9 +493,24 @@ func readVersionInTx(ctx context.Context, tx *sql.Tx) (int, error) {
 func newerSchemaError(dbVersion, maxKnownVersion int) error {
 	return &pasterrors.StructuredError{
 		Category: pasterrors.CategoryStorage,
-		What:     fmt.Sprintf("audit database schema version %d is newer than supported version %d", dbVersion, maxKnownVersion),
-		Why:      "this binary was built before the schema was bumped",
-		Impact:   "no events can be read or written until the binary is upgraded",
-		Fix:      fmt.Sprintf("upgrade pasture to a version that supports schema v%d, or pin to the older binary that wrote it; do NOT downgrade the database", dbVersion),
+		What: fmt.Sprintf(
+			"This audit database was written by a newer pasture (version %d) than this build supports (version %d).",
+			dbVersion, maxKnownVersion,
+		),
+		Why: fmt.Sprintf(
+			"The database file says it's at audit-database version %d, but this build of pasture only\n"+
+				"knows how to read up to version %d. A newer pasture upgraded the file at some point.",
+			dbVersion, maxKnownVersion,
+		),
+		Impact: "No audit events can be read or written through this build of pasture until you upgrade.\n" +
+			"The database itself is fine — it's just newer than this binary understands.",
+		Fix: fmt.Sprintf(
+			"1. Upgrade pasture to a version that supports audit-database version %d:\n"+
+				"     # install or switch to a newer pasture release\n"+
+				"2. Or, if you need to keep using this build for now, pin back to the older pasture\n"+
+				"   that wrote this database originally.\n"+
+				"3. Do NOT downgrade the database file itself — there's no safe way to undo an upgrade.",
+			dbVersion,
+		),
 	}
 }

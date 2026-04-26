@@ -475,8 +475,11 @@ func TestScenario11_CrashBinary_Validates(t *testing.T) {
 	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() != 1 {
 		t.Errorf("crash binary with no args exit = %d, want 1", exitErr.ExitCode())
 	}
-	if !strings.Contains(string(output), "usage:") {
-		t.Errorf("missing-arg stderr lacks 'usage:' guidance: %q", output)
+	// L2e (cmd/) rewrote the crash binary's CLI errors to plain language
+	// (Phase 11 R2). The substring is case-insensitive against "Usage:" so
+	// the assertion stays robust if the wording is tweaked further.
+	if !strings.Contains(strings.ToLower(string(output)), "usage:") {
+		t.Errorf("missing-arg stderr lacks Usage guidance: %q", output)
 	}
 
 	// Nonexistent file.
@@ -488,8 +491,12 @@ func TestScenario11_CrashBinary_Validates(t *testing.T) {
 	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() != 1 {
 		t.Errorf("crash binary with missing file exit = %d, want 1", exitErr.ExitCode())
 	}
-	if !strings.Contains(string(output), "cannot stat") {
-		t.Errorf("missing-file stderr lacks 'cannot stat' diagnostic: %q", output)
+	// Post-Phase-11-R2: the CLI's "missing file" message uses the plain-
+	// language "no such file" wording surfaced by os.Stat. Match that
+	// substring (case-insensitive) so the test stays in step with the
+	// new error format.
+	if !strings.Contains(strings.ToLower(string(output)), "no such file") {
+		t.Errorf("missing-file stderr lacks 'no such file' diagnostic: %q", output)
 	}
 }
 
@@ -724,7 +731,7 @@ func TestRunStep_BusyRetry_ErrorShape(t *testing.T) {
 	//
 	// The error shape is asserted to match the spec's exact wording
 	// (PROPOSAL-2 §7.10.3 paragraph 2, second outcome).
-	wantWhat := "another pasture process is running the audit schema migration"
+	wantWhat := "Another pasture process is already upgrading the audit database."
 
 	// Verify the error shape would be returned by inspecting the
 	// audit-package error message — we synthesise the call by reading
@@ -734,9 +741,18 @@ func TestRunStep_BusyRetry_ErrorShape(t *testing.T) {
 	se := &pasterrors.StructuredError{
 		Category: pasterrors.CategoryStorage,
 		What:     wantWhat,
-		Why:      "BEGIN IMMEDIATE blocked by concurrent writer for >30s while attempting v2→v3",
-		Impact:   "this process cannot open the unified database until the other migration completes",
-		Fix:      "wait for the other pasture/pastured process to finish, or kill it and re-run; check via 'pasture task agents list' once unblocked",
+		Why: "This process waited more than 30s for write access to the audit database, but another\n" +
+			"pasture or pastured process held it the whole time. That other process is upgrading\n" +
+			"the database from version 2 to 3, so we can't safely start the same upgrade in parallel.",
+		Impact: "This process can't open the audit database until the other migration finishes.\n" +
+			"No data was changed by this attempt — the wait simply timed out.",
+		Fix: "1. Wait for the other pasture or pastured process to finish, then re-run:\n" +
+			"     pasture migrate\n" +
+			"2. If the other process is stuck, find and stop it:\n" +
+			"     pgrep -fa 'pasture|pastured'\n" +
+			"     kill <pid-of-stuck-process>\n" +
+			"3. Once the lock is free, you can confirm the upgrade by listing agents:\n" +
+			"     pasture task agents list",
 	}
 	if pasterrors.ExitCode(se) != 5 {
 		t.Errorf("Scenario 12 error exit code = %d, want 5", pasterrors.ExitCode(se))

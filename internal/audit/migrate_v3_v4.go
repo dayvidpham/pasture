@@ -152,12 +152,20 @@ func backfillEpochContext(tx *sql.Tx) error {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What: fmt.Sprintf(
-				"audit.migrateV3toV4: protocol.ContextEpoch wire value drifted from %q to %q",
-				epochContextLiteral, string(protocol.ContextEpoch),
+				"The label this build uses for epoch contexts (%q) doesn't match what the upgrade expects (%q).",
+				string(protocol.ContextEpoch), epochContextLiteral,
 			),
-			Why:    "the v4 migration writes the literal 'EpochContext' into context_edges.context_kind so historical events remain queryable; a wire-value change here would silently make the legacy rows invisible to AttachContext queries",
-			Impact: "the v3→v4 backfill cannot proceed safely; the database remains at v3 to avoid corrupting query semantics",
-			Fix:    "either (a) revert protocol.ContextEpoch's wire value to 'EpochContext' so legacy and live events share a kind, or (b) add a v4→v5 migration that rewrites context_edges.context_kind from 'EpochContext' to the new value before bumping protocol.ContextEpoch — do NOT change the constant in isolation",
+			Why: "The version 3 → 4 upgrade tags every legacy epoch attachment with the literal label\n" +
+				"\"EpochContext\" so older audit events stay findable. Pasture's epoch-context label was\n" +
+				"changed in code, but no follow-up upgrade was added to relabel the existing rows.\n" +
+				"Running the upgrade as-is would orphan the legacy events.",
+			Impact: "The version 3 → 4 upgrade was stopped to avoid making old audit events invisible.\n" +
+				"The audit database stays at version 3.",
+			Fix: "1. Either revert the epoch-context label in code back to \"EpochContext\" so legacy and\n" +
+				"   live events share the same label.\n" +
+				"2. Or add a new version 4 → 5 upgrade that rewrites every existing\n" +
+				fmt.Sprintf("   context_edges row's label from \"EpochContext\" to %q before the new label\n", string(protocol.ContextEpoch)) +
+				"   takes effect. Don't change the constant on its own.",
 		}
 	}
 
@@ -168,10 +176,23 @@ func backfillEpochContext(tx *sql.Tx) error {
 	); err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     "audit.migrateV3toV4: cannot backfill context_edges from audit_events.epoch_id",
-			Why:      err.Error(),
-			Impact:   "the v3→v4 backfill cannot copy legacy epoch attachments into the normalised context_edges table; the migration is rolled back and the database remains at v3",
-			Fix:      "verify the SQLite file is writable, that context_edges exists (created in v3), and that audit_events still has its epoch_id column; rerun 'pasture migrate' once the underlying problem is resolved",
+			What:     "Couldn't copy legacy epoch attachments into the new event-to-context table during the version 3 → 4 upgrade.",
+			Why: fmt.Sprintf(
+				"SQLite refused the bulk-copy that moves each audit event's old epoch reference into the\n"+
+					"new context-edges table: %s",
+				err,
+			),
+			Impact: "The version 3 → 4 upgrade can't preserve the link between past audit events and the\n" +
+				"epochs they belong to, so it was rolled back. The audit database stays at version 3.",
+			Fix: "1. Confirm the audit database file is writable:\n" +
+				"     ls -l <path-to-audit.db>\n" +
+				"2. Confirm the upgrade chain ran cleanly up to version 3 — the new context-edges table\n" +
+				"   is created in version 2 → 3, and the legacy epoch column is still present until\n" +
+				"   this step finishes:\n" +
+				"     sqlite3 <path-to-audit.db> '.schema audit_events'\n" +
+				"     sqlite3 <path-to-audit.db> '.schema context_edges'\n" +
+				"3. Re-run the migration once the underlying problem is resolved:\n" +
+				"     pasture migrate",
 		}
 	}
 	return nil
@@ -261,10 +282,26 @@ func rebuildAuditEventsWithoutEpochID(tx *sql.Tx) error {
 		if _, err := tx.Exec(s.sql); err != nil {
 			return &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
-				What:     fmt.Sprintf("audit.migrateV3toV4: cannot %s during table rebuild", s.what),
-				Why:      err.Error(),
-				Impact:   "the v3→v4 table rebuild failed mid-step; the entire migration is rolled back and the database remains at v3",
-				Fix:      "verify the SQLite file is writable; this likely indicates a schema-shape mismatch (e.g. v3 did not produce the expected (id, epoch_id, phase, agent_id, event_type, payload, timestamp) layout) — inspect via 'sqlite3 <db> .schema audit_events' before rerunning 'pasture migrate'",
+				What: fmt.Sprintf(
+					"Couldn't %s while rebuilding the audit-events table for the version 3 → 4 upgrade.",
+					s.what,
+				),
+				Why: fmt.Sprintf(
+					"SQLite refused one of the steps in the table-rebuild dance (create new table, copy\n"+
+						"rows, drop old, rename, recreate indexes): %s",
+					err,
+				),
+				Impact: "The audit-events table rebuild stopped midway, so the entire version 3 → 4 upgrade\n" +
+					"was rolled back. The audit database stays at version 3.",
+				Fix: "1. Confirm the audit database file is writable:\n" +
+					"     ls -l <path-to-audit.db>\n" +
+					"2. This usually means the audit-events table is in an unexpected shape after version\n" +
+					"   3. Inspect it before retrying:\n" +
+					"     sqlite3 <path-to-audit.db> '.schema audit_events'\n" +
+					"   The expected version 3 columns are: id, epoch_id, phase, agent_id, event_type,\n" +
+					"   payload, timestamp.\n" +
+					"3. Re-run the migration once the table shape matches:\n" +
+					"     pasture migrate",
 			}
 		}
 	}
