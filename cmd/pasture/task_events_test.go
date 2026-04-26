@@ -72,8 +72,11 @@ func TestCLI_Migrate_DryRun_DoesNotModifyFile(t *testing.T) {
 
 	// Plan must contain at least one expected step. The exact wording comes
 	// from audit.PlanMigrations + stepDescription; we assert on the v1->v2
-	// description (which is independent of MaxKnownSchemaVersion).
-	if !strings.Contains(out.stdout, "v1->v2") || !strings.Contains(out.stdout, "audit_schema_meta") {
+	// description (which is independent of MaxKnownSchemaVersion). Phase 11
+	// R1-A rephrased the description to plain language ("add the schema-
+	// version tracker table") — we assert on the stable "schema-version
+	// tracker" token so future minor copy-edits don't churn this test.
+	if !strings.Contains(out.stdout, "v1->v2") || !strings.Contains(out.stdout, "schema-version tracker") {
 		t.Errorf("dry-run output missing v1->v2 step description; got: %q", out.stdout)
 	}
 	if !strings.Contains(out.stdout, "Dry run") {

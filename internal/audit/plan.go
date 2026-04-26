@@ -10,9 +10,16 @@
 // is the handlers package needs to call them from a different package.
 //
 // PROPOSAL-2 §7.9: `pasture migrate --dry-run` prints the planned migrations
-// (e.g. "v1->v2: add audit_schema_meta") and exits 0 without modifying the
-// file. PlanMigrations + ReadSchemaVersion give the handler everything it
-// needs to compose that output.
+// (e.g. "v1->v2: add the schema-version tracker table") and exits 0 without
+// modifying the file. PlanMigrations + ReadSchemaVersion give the handler
+// everything it needs to compose that output.
+//
+// Wording note (Phase 11 R1-A, 2026-04-25): step descriptions are written in
+// plain language for non-specialist users reading `pasture migrate --dry-run`.
+// When a step both moves data and removes structure, the description states
+// the backfill FIRST and the drop SECOND so users see what happens to their
+// data before what gets removed (avoids misreading "drop X, write Y" as
+// destructive-then-additive when the actual order is additive-then-destructive).
 
 package audit
 
@@ -36,19 +43,22 @@ type MigrationStepSummary struct {
 }
 
 // stepDescription returns the human-readable description for a (from, to)
-// migration pair. The wording matches PROPOSAL-2 §7.9 exactly.
+// migration pair. Wording is plain-language for non-specialist users (Phase
+// 11 R1-A, 2026-04-25) — when a step both backfills data AND drops a column,
+// the backfill is named FIRST so users see "your data is preserved into <new
+// table> before the old column is removed", not "drop happens first".
 //
-// When S4 lands its v3→v4 migration, append the corresponding entry here AND
-// register the step in migrationSteps() — the dry-run will then surface it
-// automatically without any extra wiring.
+// When workers land a new vN→vN+1 migration, append the corresponding entry
+// here AND register the step in migrationSteps() — the dry-run will then
+// surface it automatically without any extra wiring.
 func stepDescription(fromVersion, toVersion int) string {
 	switch {
 	case fromVersion == 1 && toVersion == 2:
-		return "add audit_schema_meta"
+		return "add the schema-version tracker table (no data is changed)"
 	case fromVersion == 2 && toVersion == 3:
-		return "add new tables, backfill agent_id"
+		return "add the context-edge, agent-category, and known-agent tables, then backfill agent IDs into audit events and drop the legacy role column"
 	case fromVersion == 3 && toVersion == 4:
-		return "drop epoch_id, write context_edges"
+		return "backfill epoch IDs into the context-edge table, then drop the legacy epoch_id column"
 	default:
 		// Forward-compatible default: workers who add a new step will see
 		// this generic text and know to add a tailored description here.

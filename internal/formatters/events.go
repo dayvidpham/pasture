@@ -340,9 +340,11 @@ type migratePlanStepJSON struct {
 
 // FormatMigratePlan renders the dry-run plan output for `pasture migrate`.
 //
-// JSON mode is a structured object so CI scripts can parse it; text mode is a
-// human-readable summary that matches the §7.9 example wording
-// ("v1→v2: add audit_schema_meta", etc.).
+// JSON mode is a structured object so CI scripts can parse it; text mode is
+// a human-readable summary keyed by audit.stepDescription (Phase 11 R1-A
+// uses plain-language, backfill-first phrasing — e.g. "v3->v4: backfill
+// epoch IDs into the context-edge table, then drop the legacy epoch_id
+// column").
 func FormatMigratePlan(plan MigratePlan, format types.OutputFormat) (string, error) {
 	switch format {
 	case types.OutputJSON:
