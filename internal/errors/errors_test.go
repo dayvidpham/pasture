@@ -3,6 +3,7 @@ package errors_test
 import (
 	"bytes"
 	stderrors "errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -423,5 +424,95 @@ func TestExitCode_WrappedStructuredError(t *testing.T) {
 	wrapped := stderrors.Join(stderrors.New("context"), inner)
 	if got := errors.ExitCode(wrapped); got != 3 {
 		t.Errorf("ExitCode(wrapped workflow) = %d, want 3", got)
+	}
+}
+
+// ---- StructuredError.Cause / Unwrap() ----------------------------------------
+
+// TestStructuredError_Unwrap_PreservesIsTraversal verifies that errors.Is can
+// traverse through a StructuredError's Cause field to find a sentinel error.
+// This guards the Unwrap() contract introduced in commit a1e97dd: if Unwrap()
+// ever stops returning Cause, errors.Is chains will silently break in log
+// pipelines that rely on sentinel matching.
+func TestStructuredError_Unwrap_PreservesIsTraversal(t *testing.T) {
+	sentinel := stderrors.New("sentinel error")
+	wrapped := &errors.StructuredError{
+		Category: errors.CategoryWorkflow,
+		What:     "activity timed out",
+		Why:      "no heartbeat received within the deadline",
+		Impact:   "the activity was abandoned",
+		Fix:      "retry with a longer heartbeat timeout",
+		Cause:    sentinel,
+	}
+
+	if !stderrors.Is(wrapped, sentinel) {
+		t.Error("errors.Is(wrapped, sentinel) returned false; Unwrap() must return Cause so the chain is traversable")
+	}
+}
+
+// customTestErr is a named error type used by TestStructuredError_Unwrap_PreservesAsTraversal
+// to verify errors.As traversal through a StructuredError's Cause chain.
+type customTestErr struct{ code int }
+
+func (e *customTestErr) Error() string { return fmt.Sprintf("custom error code=%d", e.code) }
+
+// TestStructuredError_Unwrap_PreservesAsTraversal verifies that errors.As can
+// extract a typed error from the Cause chain of a StructuredError. A depth > 1
+// chain is used so the test proves traversal, not just direct type assertion.
+func TestStructuredError_Unwrap_PreservesAsTraversal(t *testing.T) {
+	inner := &customTestErr{code: 42}
+
+	// Wrap inner inside a plain fmt-style error to create depth > 1.
+	midLayer := fmt.Errorf("mid layer: %w", inner)
+
+	wrapped := &errors.StructuredError{
+		Category: errors.CategoryConnection,
+		What:     "dial failed",
+		Why:      "connection refused",
+		Impact:   "no session can start",
+		Fix:      "check the server is running",
+		Cause:    midLayer,
+	}
+
+	var target *customTestErr
+	if !stderrors.As(wrapped, &target) {
+		t.Fatal("errors.As(wrapped, &target) returned false; Cause chain must be traversable")
+	}
+	if target.code != 42 {
+		t.Errorf("extracted customTestErr.code = %d, want 42", target.code)
+	}
+}
+
+// TestStructuredError_Report_SuppressesCause verifies that Report() does NOT
+// surface any Cause text in user-visible output. Cause contains internal
+// jargon (Go error messages, SQL column names, package qualifiers) that the
+// plain-English convention explicitly forbids from appearing in user output.
+func TestStructuredError_Report_SuppressesCause(t *testing.T) {
+	causeText := "internal: jargon-here sql=col_name pkg=temporal.activities"
+	se := &errors.StructuredError{
+		Category: errors.CategoryValidation,
+		What:     "The request ID wasn't valid.",
+		Why:      "plain reason visible to users",
+		Impact:   "the command can't run",
+		Fix:      "pass a valid ID",
+		Cause:    stderrors.New(causeText),
+	}
+
+	var buf bytes.Buffer
+	se.Report(&buf)
+	out := buf.String()
+
+	if !strings.Contains(out, "plain reason visible to users") {
+		t.Errorf("Report() is missing the Why text. Output:\n%s", out)
+	}
+	// None of the Cause text should leak into user-visible output.
+	if strings.Contains(out, "jargon-here") {
+		t.Errorf("Report() leaked Cause text %q into output:\n%s", "jargon-here", out)
+	}
+	if strings.Contains(out, "sql=col_name") {
+		t.Errorf("Report() leaked Cause text %q into output:\n%s", "sql=col_name", out)
+	}
+	if strings.Contains(out, "pkg=temporal.activities") {
+		t.Errorf("Report() leaked Cause text %q into output:\n%s", "pkg=temporal.activities", out)
 	}
 }

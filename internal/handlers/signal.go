@@ -36,6 +36,7 @@ func SignalVote(
 			Category: pasterrors.CategoryValidation,
 			What:     "An epoch ID is required to record a vote.",
 			Why:      "The --epoch-id flag was not provided.",
+			Where:    "Recording a phase-review vote (internal/handlers/signal.go in handlers.SignalVote).",
 			Impact:   "Without an epoch ID, the vote can't be associated with any review.",
 			Fix: "1. Pass the epoch's ID:\n" +
 				"     pasture-msg vote --epoch-id <id> --axis <axis> --vote <vote>\n" +
@@ -49,6 +50,7 @@ func SignalVote(
 			Category: pasterrors.CategoryValidation,
 			What:     fmt.Sprintf("%q is not a recognised review axis.", axis),
 			Why:      "Reviews are scored along three named axes: correctness, test_quality, and elegance.",
+			Where:    "Recording a phase-review vote (internal/handlers/signal.go in handlers.SignalVote).",
 			Impact:   "The vote can't be recorded against an unknown axis.",
 			Fix: "1. Pick one of the three review axes and retry:\n" +
 				"     pasture-msg vote --axis correctness  --epoch-id <id> --vote <vote>\n" +
@@ -62,6 +64,7 @@ func SignalVote(
 			Category: pasterrors.CategoryValidation,
 			What:     fmt.Sprintf("%q is not a recognised vote value.", vote),
 			Why:      "A vote must be either ACCEPT or REVISE.",
+			Where:    "Recording a phase-review vote (internal/handlers/signal.go in handlers.SignalVote).",
 			Impact:   "The vote can't be recorded with an unknown value.",
 			Fix: "1. Use one of the two recognised vote values:\n" +
 				"     pasture-msg vote --vote ACCEPT --epoch-id <id> --axis <axis>\n" +
@@ -131,6 +134,7 @@ func SignalComplete(
 			Category: pasterrors.CategoryValidation,
 			What:     "An epoch ID is required to mark a slice complete.",
 			Why:      "The --epoch-id flag was not provided.",
+			Where:    "Marking a slice complete (internal/handlers/signal.go in handlers.SignalComplete).",
 			Impact:   "Without an epoch ID, the completion can't be linked to a workflow.",
 			Fix: "1. Pass the epoch's ID:\n" +
 				"     pasture-msg complete --epoch-id <id> --slice-id <id>\n" +
@@ -144,6 +148,7 @@ func SignalComplete(
 			Category: pasterrors.CategoryValidation,
 			What:     "A slice ID is required to mark a slice complete.",
 			Why:      "The --slice-id flag was not provided.",
+			Where:    "Marking a slice complete (internal/handlers/signal.go in handlers.SignalComplete).",
 			Impact:   "Without a slice ID, there's nothing to mark complete.",
 			Fix: "1. Pass the slice's ID:\n" +
 				"     pasture-msg complete --slice-id <id> --epoch-id <id>",
@@ -155,6 +160,7 @@ func SignalComplete(
 			Category: pasterrors.CategoryValidation,
 			What:     "Pass either --output or --error, not both.",
 			Why:      "A slice completion is either a success (with --output) or a failure (with --error). It can't be both at once.",
+			Where:    "Marking a slice complete (internal/handlers/signal.go in handlers.SignalComplete).",
 			Impact:   "The completion can't be recorded because the result is ambiguous.",
 			Fix: "1. Pick one and retry. For success:\n" +
 				"     pasture-msg complete --output \"<result>\" --slice-id <id> --epoch-id <id>\n" +
