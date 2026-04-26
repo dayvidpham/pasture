@@ -93,14 +93,17 @@ func (c *WellKnownAgentCache) MustGet(name string) (provenance.AgentID, error) {
 	if !ok {
 		return provenance.AgentID{}, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("tasks.WellKnownAgentCache.MustGet: no entry for name=%q", name),
-			Why: "the cache does not contain this well-known agent name; either the registry " +
-				"does not include it or RegisterWellKnownAgents has not been called against this cache",
-			Impact: "the activity cannot resolve the agent_id needed to attribute its audit event " +
-				"to a Provenance SoftwareAgent; downstream JOINs against pasture_well_known_agents " +
-				"will not surface this attribution",
-			Fix: "verify that (a) the name is one of WellKnownAgents()' Name fields, and " +
-				"(b) RegisterWellKnownAgents was invoked at pastured startup before activities began running",
+			What:     fmt.Sprintf("Pasture asked for the built-in agent %q but it isn't registered.", name),
+			Why: "Either the name isn't one of the built-in agents pasture knows about, or\n" +
+				"the daemon didn't get a chance to register them at startup.",
+			Impact: "The action that needed this agent can't be attributed to anyone in the\n" +
+				"audit log, so it won't be recorded.",
+			Fix: "1. Confirm the name is spelled exactly as one of the built-in agents:\n" +
+				"     pasture task agents list --well-known\n" +
+				"2. Restart the daemon so it re-registers the built-in agents at startup:\n" +
+				"     pkill -f pastured && pastured\n" +
+				"3. If the name is from your own code, file a bug or add it to the built-in\n" +
+				"   registry before using it.",
 		}
 	}
 	return id, nil

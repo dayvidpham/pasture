@@ -78,10 +78,19 @@ func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
-			What:     fmt.Sprintf("tasks.OpenTaskTracker: could not create parent directory for %q", dbPath),
-			Why:      err.Error(),
-			Impact:   "the unified pasture database cannot be opened until the parent directory is writable",
-			Fix:      fmt.Sprintf("create the directory manually with `mkdir -p %q`, or override with --db <path> / $%s", filepath.Dir(dbPath), DBPathEnv),
+			What:     "Couldn't create the folder for the pasture database.",
+			Why: fmt.Sprintf(
+				"Tried to create %q so the database file %q could live there, but the\n"+
+					"operating system rejected it: %s",
+				filepath.Dir(dbPath), dbPath, err,
+			),
+			Impact: "The pasture database can't be opened until that folder exists and is writable.",
+			Fix: fmt.Sprintf("1. Create the folder yourself:\n"+
+				"     mkdir -p %q\n"+
+				"2. Or point pasture at a folder you can write to:\n"+
+				"     pasture task --db <writable-path> ...\n"+
+				"   You can also set the environment variable %s.",
+				filepath.Dir(dbPath), DBPathEnv),
 		}
 	}
 
@@ -128,10 +137,22 @@ func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
 		_ = trail.Close()
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
-			What:     fmt.Sprintf("tasks.OpenTaskTracker: could not open Provenance subsystem at %q", dbPath),
-			Why:      err.Error(),
-			Impact:   "the unified tracker cannot be returned because the Provenance task graph is unreachable",
-			Fix:      fmt.Sprintf("verify the file exists, is a valid SQLite database, and is not held open by another process; override the path with --db <path> or $%s", DBPathEnv),
+			What:     "Couldn't open the part of the database that holds your tasks.",
+			Why: fmt.Sprintf(
+				"Tried to open the SQLite file at %q for task storage, but it failed: %s",
+				dbPath, err,
+			),
+			Impact: "Without the task store, no task commands can run and the daemon can't start.",
+			Fix: fmt.Sprintf("1. Confirm the file is a valid SQLite database and isn't already open in\n"+
+				"   another pasture process:\n"+
+				"     sqlite3 %q .schema\n"+
+				"     pgrep -af pastured\n"+
+				"2. If the schema looks wrong, run a migration:\n"+
+				"     pasture migrate\n"+
+				"3. Or point pasture at a different file:\n"+
+				"     pasture task --db <path> ...\n"+
+				"   You can also set the environment variable %s.",
+				dbPath, DBPathEnv),
 		}
 	}
 
@@ -146,10 +167,20 @@ func openAuditHandle(dbPath string) (*sql.DB, error) {
 	if err != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
-			What:     fmt.Sprintf("tasks.OpenTaskTracker: could not open auxiliary sql.DB handle at %q", dbPath),
-			Why:      err.Error(),
-			Impact:   "the unified tracker's pasture-side methods (AttachContext, SetAgentCategories, Timeline) cannot reach the database",
-			Fix:      "verify the file exists and is readable; if the audit subsystem opened cleanly the same path should work here",
+			What:     "Couldn't open a second connection to the pasture database.",
+			Why: fmt.Sprintf(
+				"Tried to open another SQLite handle on %q (used for audit-context and\n"+
+					"agent-category writes), but it failed: %s",
+				dbPath, err,
+			),
+			Impact: "Some pasture features (linking events to epochs, recording agent categories,\n" +
+				"and reading back epoch timelines) won't work until this connection opens.",
+			Fix: fmt.Sprintf("1. Confirm the database file is readable:\n"+
+				"     ls -l %q\n"+
+				"     sqlite3 %q .schema\n"+
+				"2. If something else is holding it exclusively, stop that process and retry:\n"+
+				"     pgrep -af pastured",
+				dbPath, dbPath),
 		}
 	}
 
@@ -168,10 +199,21 @@ func openAuditHandle(dbPath string) (*sql.DB, error) {
 			db.Close()
 			return nil, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
-				What:     fmt.Sprintf("tasks.OpenTaskTracker: PRAGMA %q failed on %q", p, dbPath),
-				Why:      err.Error(),
-				Impact:   "the unified tracker's auxiliary handle does not have the expected concurrency settings; cross-subsystem writes may deadlock",
-				Fix:      "verify the SQLite file is writable; if this fails reproducibly the file may be on a filesystem that doesn't support WAL",
+				What:     "Couldn't configure the pasture database for safe concurrent writes.",
+				Why: fmt.Sprintf(
+					"Tried to apply the SQLite setting %q on %q, but it failed: %s\n"+
+						"This setting is what lets the daemon and the CLI write at the same time\n"+
+						"without one blocking the other for too long.",
+					p, dbPath, err,
+				),
+				Impact: "Without this setting, writes from different parts of pasture can stall or\n" +
+					"time out under load.",
+				Fix: fmt.Sprintf("1. Confirm the database file is writable:\n"+
+					"     ls -l %q\n"+
+					"2. If the file lives on a network or read-only filesystem, move it onto a\n"+
+					"   local writable disk and point pasture at the new location:\n"+
+					"     pasture task --db <local-path> ...",
+					dbPath),
 			}
 		}
 	}
@@ -193,10 +235,26 @@ func wrapOpenError(dbPath, subsystem string, err error) error {
 	}
 	return &pasterrors.StructuredError{
 		Category: pasterrors.CategoryConnection,
-		What:     fmt.Sprintf("tasks.OpenTaskTracker: could not open %s at %q", subsystem, dbPath),
-		Why:      err.Error(),
-		Impact:   fmt.Sprintf("the unified tracker cannot be returned because the %s is unreachable", subsystem),
-		Fix:      fmt.Sprintf("verify the file exists, the parent directory is writable, and no other pasture process is holding the file open; override the path with --db <path> or $%s", DBPathEnv),
+		What:     fmt.Sprintf("Couldn't open the %s in the pasture database.", subsystem),
+		Why: fmt.Sprintf(
+			"Tried to open the SQLite file at %q for the %s, but it failed: %s",
+			dbPath, subsystem, err,
+		),
+		Impact: fmt.Sprintf(
+			"Pasture needs the %s to function — no commands can run until it opens.",
+			subsystem,
+		),
+		Fix: fmt.Sprintf("1. Confirm the file exists and isn't held by another pasture process:\n"+
+			"     ls -l %q\n"+
+			"     pgrep -af pastured\n"+
+			"2. Make sure the folder it lives in is writable:\n"+
+			"     mkdir -p %q\n"+
+			"3. If the file looks corrupt, move it aside and let pasture rebuild it:\n"+
+			"     mv %q %q.broken\n"+
+			"4. Or point pasture at a different file:\n"+
+			"     pasture task --db <path> ...\n"+
+			"   You can also set the environment variable %s.",
+			dbPath, filepath.Dir(dbPath), dbPath, dbPath, DBPathEnv),
 	}
 }
 
@@ -224,10 +282,17 @@ func ensurePastureTables(db *sql.DB) error {
 	if db == nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     "tasks.ensurePastureTables: db handle is nil",
-			Why:      "the auxiliary *sql.DB was not opened before ensurePastureTables was called",
-			Impact:   "the pasture-side tables (context_edges, pasture_agent_categories, pasture_well_known_agents) cannot be created",
-			Fix:      "this is a programming error — open the database via OpenTaskTracker before calling pasture-side methods",
+			What:     "Pasture tried to set up its database tables without an open connection.",
+			Why: "An internal helper was called before the database was opened. This is a\n" +
+				"bug in the code that constructed the task tracker — a real connection\n" +
+				"should always be passed in first.",
+			Impact: "Pasture's audit-link, agent-category, and well-known-agent tables can't\n" +
+				"be created, so anything that writes to them will fail right after.",
+			Fix: "1. Open the database through the supported entry point first:\n" +
+				"     tracker, err := tasks.OpenTaskTracker(<db-path>)\n" +
+				"2. Then use that tracker for any pasture-side calls.\n" +
+				"   If you hit this from the CLI rather than from your own code, please\n" +
+				"   file a bug — it shouldn't be reachable in normal use.",
 		}
 	}
 
@@ -273,10 +338,19 @@ func ensurePastureTables(db *sql.DB) error {
 		if _, err := db.Exec(s.ddl); err != nil {
 			return &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
-				What:     fmt.Sprintf("tasks.ensurePastureTables: failed to create %s", s.name),
-				Why:      err.Error(),
-				Impact:   "pasture-side tables are not available; SetAgentCategories / AttachContext / EventContexts / Timeline will all fail with storage errors",
-				Fix:      "verify the SQLite file is writable and the disk has space; if the DDL itself is rejected, run 'pasture migrate' to apply the latest schema",
+				What:     fmt.Sprintf("Pasture couldn't create the %q table in the database.", s.name),
+				Why: fmt.Sprintf(
+					"Tried to create the table (or its index) but the database refused: %s",
+					err,
+				),
+				Impact: "Pasture features that depend on this table (linking events to epochs,\n" +
+					"recording agent categories, looking up well-known agents, and reading\n" +
+					"epoch timelines) will fail until the table can be created.",
+				Fix: "1. Make sure the database file is writable and the disk has free space:\n" +
+					"     df -h .\n" +
+					"2. If the schema looks out of date, run a migration:\n" +
+					"     pasture migrate\n" +
+					"3. Retry the command once the database is healthy.",
 			}
 		}
 	}
@@ -310,10 +384,19 @@ func decodeAuditEvent(epochID, phaseStr, roleOrAgentName, eventTypeStr, payloadJ
 	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
 		return protocol.AuditEvent{}, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("tasks.decodeAuditEvent: payload unmarshal failed for epoch=%q event_type=%q", epochID, eventTypeStr),
-			Why:      err.Error(),
-			Impact:   "the row cannot be returned because its JSON payload is corrupt",
-			Fix:      "inspect the row directly via 'sqlite3 <db> \"SELECT payload FROM audit_events WHERE id = ...\"' and either repair the JSON or drop the row",
+			What:     "An audit event in the database has a corrupted payload.",
+			Why: fmt.Sprintf(
+				"Reading an event of type %q for epoch %q from the database, the saved\n"+
+					"JSON payload couldn't be parsed: %s",
+				eventTypeStr, epochID, err,
+			),
+			Impact: "This event can't be returned in queries or timelines until the payload\n" +
+				"is repaired or the row is removed.",
+			Fix: "1. Look at the broken row directly to see what's stored:\n" +
+				"     sqlite3 <db> \"SELECT id, payload FROM audit_events \\\n" +
+				"                    WHERE event_type = '<event-type>'\"\n" +
+				"2. Either fix the JSON in place or remove the row, then retry the query.\n" +
+				"   Removing rows is destructive — back up the database file first.",
 		}
 	}
 	role := roleOrAgentName

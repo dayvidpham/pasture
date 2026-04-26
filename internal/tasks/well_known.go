@@ -106,19 +106,31 @@ func RegisterWellKnownAgents(ctx context.Context, tracker protocol.TaskTracker, 
 	if cache == nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConfig,
-			What:     "tasks.RegisterWellKnownAgents: cache is nil",
-			Why:      "callers must construct a WellKnownAgentCache via NewWellKnownAgentCache before invoking the registrar",
-			Impact:   "no AgentIDs would be cached; activities that consult the cache (S8) would all fail with CategoryValidation MustGet errors",
-			Fix:      "in cmd/pastured/main.go, instantiate `cache := tasks.NewWellKnownAgentCache()` before the call to RegisterWellKnownAgents",
+			What:     "Pasture tried to register its built-in agents but the cache is nil.",
+			Why: "The code that called the registrar didn't allocate a cache to put the\n" +
+				"results into. This is a wiring bug — a real cache must be passed in.",
+			Impact: "The daemon can't remember which agent ids belong to its built-in agents,\n" +
+				"so later steps that need them will fail.",
+			Fix: "1. In the daemon's startup code, allocate a cache before calling the\n" +
+				"   registrar:\n" +
+				"     cache := tasks.NewWellKnownAgentCache()\n" +
+				"     err := tasks.RegisterWellKnownAgents(ctx, tracker, cache)\n" +
+				"2. If you hit this from the CLI rather than from your own code, please\n" +
+				"   file a bug — it shouldn't be reachable in normal use.",
 		}
 	}
 	if tracker == nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConfig,
-			What:     "tasks.RegisterWellKnownAgents: tracker is nil",
-			Why:      "the unified protocol.TaskTracker must be opened (via tasks.OpenTaskTracker / protocol.OpenTaskTracker) before well-known agents can be registered",
-			Impact:   "no agents would be registered and no cache would be populated; pastured cannot start the worker safely",
-			Fix:      "open the tracker first (`tracker, err := tasks.OpenTaskTracker(dbPath)`); pass the resulting tracker to RegisterWellKnownAgents",
+			What:     "Pasture tried to register its built-in agents but the task store is nil.",
+			Why: "The code that called the registrar didn't open a task store first. We\n" +
+				"need a working store before we can register anything in it.",
+			Impact: "The daemon can't register its built-in agents and isn't safe to run.",
+			Fix: "1. Open the task store first, then pass it to the registrar:\n" +
+				"     tracker, err := tasks.OpenTaskTracker(<db-path>)\n" +
+				"     err = tasks.RegisterWellKnownAgents(ctx, tracker, cache)\n" +
+				"2. If you hit this from the CLI rather than from your own code, please\n" +
+				"   file a bug — it shouldn't be reachable in normal use.",
 		}
 	}
 
@@ -126,20 +138,39 @@ func RegisterWellKnownAgents(ctx context.Context, tracker protocol.TaskTracker, 
 	if !ok {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConfig,
-			What:     fmt.Sprintf("tasks.RegisterWellKnownAgents: tracker (%T) does not implement auditDBHolder", tracker),
-			Why:      "the per-name registration step needs raw access to an audit *sql.DB to run a transaction across `pasture_well_known_agents` and `pasture_agent_categories`; the tracker must expose it via auditDBHandle()",
-			Impact:   "well-known agent registration cannot proceed and the daemon cannot guarantee the BCNF integrity of the pasture-side tables",
-			Fix:      "construct the tracker via tasks.OpenTaskTracker (or protocol.OpenTaskTracker); test fakes must implement auditDBHandle() *sql.DB on their type",
+			What:     "Pasture got a task store that doesn't expose its database, so built-in agents can't be registered.",
+			Why: fmt.Sprintf(
+				"The task store passed in (a %T) doesn't have the internal hook the\n"+
+					"registrar uses to write its bookkeeping rows together in one go. The\n"+
+					"built-in task store opened via tasks.OpenTaskTracker has this hook;\n"+
+					"the value passed here doesn't.",
+				tracker,
+			),
+			Impact: "Built-in agents can't be registered, and the daemon shouldn't start\n" +
+				"without them — otherwise actions wouldn't be attributed correctly.",
+			Fix: "1. Open the task store through the supported entry point:\n" +
+				"     tracker, err := tasks.OpenTaskTracker(<db-path>)\n" +
+				"2. If this is happening from a test that builds its own task store, make\n" +
+				"   that test type expose the database the same way the built-in one does.",
 		}
 	}
 	auditDB := dbHolder.auditDBHandle()
 	if auditDB == nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConfig,
-			What:     fmt.Sprintf("tasks.RegisterWellKnownAgents: tracker (%T).auditDBHandle() returned nil", tracker),
-			Why:      "the tracker was constructed without an auxiliary *sql.DB; this indicates a programming error in the constructor or test helper",
-			Impact:   "well-known agent registration cannot proceed; the daemon should fail fast rather than start without idempotent automaton attribution",
-			Fix:      "ensure the tracker is opened via tasks.OpenTaskTracker (which always wires auditDB); test fakes must return a non-nil *sql.DB from auditDBHandle()",
+			What:     "Pasture got a task store with no open database connection, so built-in agents can't be registered.",
+			Why: fmt.Sprintf(
+				"The task store (a %T) was constructed without a database connection.\n"+
+					"This is a bug in the code that built it.",
+				tracker,
+			),
+			Impact: "Built-in agents can't be registered, and the daemon shouldn't start\n" +
+				"without them.",
+			Fix: "1. Open the task store through the supported entry point so the database\n" +
+				"   connection is wired up automatically:\n" +
+				"     tracker, err := tasks.OpenTaskTracker(<db-path>)\n" +
+				"2. If this is happening from a test that builds its own task store, make\n" +
+				"   sure that store opens a real database file.",
 		}
 	}
 
@@ -155,10 +186,19 @@ func RegisterWellKnownAgents(ctx context.Context, tracker protocol.TaskTracker, 
 		if err := ctx.Err(); err != nil {
 			return &pasterrors.StructuredError{
 				Category: pasterrors.CategoryConfig,
-				What:     fmt.Sprintf("tasks.RegisterWellKnownAgents: context cancelled after %d/%d entries (next was %q)", cache.Len(), WellKnownAgentCount, spec.Name),
-				Why:      err.Error(),
-				Impact:   "pastured startup was interrupted; some well-known agents are registered (cached entries) and some are not (will be retried on next start)",
-				Fix:      "this is normally a graceful shutdown — restart the daemon to complete registration",
+				What:     "Pasture stopped registering its built-in agents because the daemon was asked to shut down.",
+				Why: fmt.Sprintf(
+					"Registration was interrupted after %d of %d agents (the next one was\n"+
+						"%q). The reason was: %s",
+					cache.Len(), WellKnownAgentCount, spec.Name, err,
+				),
+				Impact: "Some built-in agents are registered and some are not. The remaining\n" +
+					"ones will be picked up the next time the daemon starts.",
+				Fix: "1. If this happened during a normal shutdown, just start the daemon\n" +
+					"   again when you're ready — registration will pick up where it left off:\n" +
+					"     pastured\n" +
+					"2. If you weren't expecting a shutdown, check the logs for the cause\n" +
+					"   before restarting.",
 			}
 		}
 
@@ -175,10 +215,19 @@ func RegisterWellKnownAgents(ctx context.Context, tracker protocol.TaskTracker, 
 		// it loudly rather than silently let activities miss attribution.
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("tasks.RegisterWellKnownAgents: cache populated %d entries; expected %d", cache.Len(), WellKnownAgentCount),
-			Why:      "the canonical registry returned a number of specs different from WellKnownAgentCount; this indicates a registry edit that did not update the count constant",
-			Impact:   "downstream activities that MustGet on a missing entry would return CategoryValidation; the daemon would not detect the registry/constant drift before workflows began running",
-			Fix:      "ensure WellKnownAgents() returns exactly WellKnownAgentCount entries; if the registry intentionally grew, bump the constant in well_known_registry.go",
+			What:     "Pasture registered a different number of built-in agents than expected.",
+			Why: fmt.Sprintf(
+				"The list of built-in agents has %d entries, but the count constant says\n"+
+					"there should be %d. Someone added or removed an entry without updating\n"+
+					"the count.",
+				cache.Len(), WellKnownAgentCount,
+			),
+			Impact: "Pasture can't tell whether the built-in agent registry is correct, so\n" +
+				"actions that look up an agent by name might silently fail later.",
+			Fix: "1. Decide whether the new total is correct.\n" +
+				"2. Update the count constant to match the registry, or fix the registry to\n" +
+				"   match the constant. Both live in:\n" +
+				"     internal/tasks/well_known_registry.go",
 		}
 	}
 
@@ -212,10 +261,18 @@ func ensureWellKnownAgent(
 	if !spec.Role.IsValid() {
 		return provenance.AgentID{}, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConfig,
-			What:     fmt.Sprintf("tasks.ensureWellKnownAgent: spec for %q has invalid AutomatonRole %q", spec.Name, spec.Role),
-			Why:      "the spec.Role value is not a member of protocol.AllAutomatonRoles; this is a registry-edit error",
-			Impact:   "the agent cannot be registered with a valid pasture-side category; downstream JOINs would return an unknown role string",
-			Fix:      "fix the WellKnownAgents() entry to use one of protocol.AllAutomatonRoles; AutomatonRoleNone is technically valid but semantically wrong for a well-known automaton — use a concrete role",
+			What:     fmt.Sprintf("Pasture's built-in agent %q is configured with an unknown role.", spec.Name),
+			Why: fmt.Sprintf(
+				"The role %q on this agent isn't one of the roles pasture knows about. The\n"+
+					"built-in agent registry has a typo or a stale entry.",
+				spec.Role,
+			),
+			Impact: "This agent can't be registered. Anything that tries to use it later\n" +
+				"will fail.",
+			Fix: "1. Open the built-in agent list and fix the role on this entry:\n" +
+				"     internal/tasks/well_known_registry.go\n" +
+				"2. Use one of the named roles defined in pkg/protocol (for example,\n" +
+				"   AutomatonRoleConstraintChecker or AutomatonRoleHookHandler).",
 		}
 	}
 
@@ -235,10 +292,23 @@ func ensureWellKnownAgent(
 		if perr != nil {
 			return provenance.AgentID{}, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
-				What:     fmt.Sprintf("tasks.ensureWellKnownAgent: pasture_well_known_agents.agent_id %q for name %q does not parse as a Provenance AgentID", agentIDStr, spec.Name),
-				Why:      perr.Error(),
-				Impact:   "the cached AgentID for this well-known name is unusable; downstream activities will fail to attribute audit events to this automaton",
-				Fix:      fmt.Sprintf("inspect the row directly: `sqlite3 <db> 'SELECT * FROM pasture_well_known_agents WHERE name = %q'` — if the agent_id is corrupt, delete the row and restart pastured to re-mint", spec.Name),
+				What:     fmt.Sprintf("The saved id for built-in agent %q is corrupted.", spec.Name),
+				Why: fmt.Sprintf(
+					"Pasture read %q out of the database for this agent, but it doesn't\n"+
+						"look like a valid agent id: %s",
+					agentIDStr, perr,
+				),
+				Impact: "Anything that tries to attribute an action to this agent will fail\n" +
+					"until the row is cleaned up.",
+				Fix: fmt.Sprintf("1. Look at the broken row directly:\n"+
+					"     sqlite3 <db-path> \\\n"+
+					"       \"SELECT * FROM pasture_well_known_agents WHERE name = %q\"\n"+
+					"2. Remove the broken row and restart pastured so a fresh id is created:\n"+
+					"     sqlite3 <db-path> \\\n"+
+					"       \"DELETE FROM pasture_well_known_agents WHERE name = %q\"\n"+
+					"     pkill -f pastured && pastured\n"+
+					"   Removing rows is destructive — back up the database file first.",
+					spec.Name, spec.Name),
 			}
 		}
 		return agentID, nil
@@ -247,10 +317,18 @@ func ensureWellKnownAgent(
 	default:
 		return provenance.AgentID{}, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("tasks.ensureWellKnownAgent: could not check pasture_well_known_agents for name=%q", spec.Name),
-			Why:      err.Error(),
-			Impact:   "daemon startup cannot guarantee idempotent automaton registration; restart will retry but may flap",
-			Fix:      "verify the SQLite file is accessible and the schema is at v3 or higher (run `pasture migrate --dry-run` to inspect the on-disk version)",
+			What:     fmt.Sprintf("Pasture couldn't check whether the built-in agent %q is already registered.", spec.Name),
+			Why: fmt.Sprintf(
+				"Reading from the database to look this agent up failed: %s",
+				err,
+			),
+			Impact: "The daemon can't safely finish startup. Restarting will retry but may\n" +
+				"hit the same error every time.",
+			Fix: "1. Confirm the database is reachable and at the latest schema version:\n" +
+				"     pasture migrate --dry-run\n" +
+				"     pasture migrate\n" +
+				"2. Restart the daemon once the database is healthy:\n" +
+				"     pkill -f pastured && pastured",
 		}
 	}
 
@@ -268,10 +346,20 @@ func ensureWellKnownAgent(
 	if err != nil {
 		return provenance.AgentID{}, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
-			What:     fmt.Sprintf("tasks.ensureWellKnownAgent: provenance.RegisterSoftwareAgent failed for name=%q", spec.Name),
-			Why:      err.Error(),
-			Impact:   "no Provenance SoftwareAgent was minted for this name; pasture-side mapping rows cannot be inserted; the activity that needs this AgentID will fail with CategoryValidation",
-			Fix:      "verify the unified pasture.db's `agents` and `agents_software` tables are writable and not corrupted; check Provenance logs for the underlying SQLite error",
+			What:     fmt.Sprintf("Pasture couldn't create a fresh agent record for the built-in agent %q.", spec.Name),
+			Why: fmt.Sprintf(
+				"Tried to register the built-in agent in the task store but it failed: %s",
+				err,
+			),
+			Impact: "This agent isn't registered, and any work attributed to it later will\n" +
+				"fail. The daemon shouldn't run without all built-in agents present.",
+			Fix: "1. Confirm the database is writable and at the latest schema version:\n" +
+				"     pasture migrate\n" +
+				"2. Look for a more specific cause in the daemon's log output for this\n" +
+				"   startup attempt — the line just before this error explains why the\n" +
+				"   underlying database write failed.\n" +
+				"3. Restart the daemon once the database is healthy:\n" +
+				"     pkill -f pastured && pastured",
 		}
 	}
 
@@ -284,10 +372,21 @@ func ensureWellKnownAgent(
 	if err != nil {
 		return provenance.AgentID{}, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("tasks.ensureWellKnownAgent: cannot begin transaction for name=%q (agent_id=%q)", spec.Name, sa.ID.String()),
-			Why:      err.Error(),
-			Impact:   "the pasture-side mapping rows cannot be written atomically; a Provenance SoftwareAgent has already been minted (orphan) and will not be referenced by `pasture_well_known_agents`",
-			Fix:      "verify the SQLite file is writable; the orphan SoftwareAgent will be re-attempted on next startup and another orphan minted — clean up via a future audit-tool if accumulation becomes a problem",
+			What:     fmt.Sprintf("Pasture couldn't start a transaction to register the built-in agent %q.", spec.Name),
+			Why: fmt.Sprintf(
+				"A fresh agent record (id %q) was just created, but starting the database\n"+
+					"transaction that would link the name to that id failed: %s",
+				sa.ID.String(), err,
+			),
+			Impact: "The agent isn't fully registered yet. The daemon will retry on the\n" +
+				"next startup and create another fresh agent record, leaving the first\n" +
+				"one unused in the database.",
+			Fix: "1. Confirm the database file is writable and the disk has free space:\n" +
+				"     df -h .\n" +
+				"2. Restart the daemon to retry registration:\n" +
+				"     pkill -f pastured && pastured\n" +
+				"3. The leftover agent record is harmless but accumulates over time. If\n" +
+				"   you see many of them, file an issue requesting a cleanup tool.",
 		}
 	}
 	// Best-effort rollback on any error path; safe to call after Commit
@@ -301,10 +400,20 @@ func ensureWellKnownAgent(
 	); err != nil {
 		return provenance.AgentID{}, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("tasks.ensureWellKnownAgent: INSERT into pasture_well_known_agents failed for name=%q (agent_id=%q)", spec.Name, sa.ID.String()),
-			Why:      err.Error(),
-			Impact:   "the well-known name is not bound to its AgentID on disk; the in-memory cache for this entry will be missing; downstream activities will fail with CategoryValidation",
-			Fix:      "verify the schema is at v3+ and the SQLite file is writable; inspect the row layout via `sqlite3 <db> .schema pasture_well_known_agents`",
+			What:     fmt.Sprintf("Pasture couldn't save the name-to-id mapping for the built-in agent %q.", spec.Name),
+			Why: fmt.Sprintf(
+				"Tried to write the row binding name %q to id %q but the database refused: %s",
+				spec.Name, sa.ID.String(), err,
+			),
+			Impact: "The name can't be looked up later, so anything that needs this agent\n" +
+				"by name will fail. The transaction is being rolled back so the database\n" +
+				"is not left half-written.",
+			Fix: "1. Confirm the database is writable and at the latest schema version:\n" +
+				"     pasture migrate\n" +
+				"2. Look at the table layout if you suspect schema drift:\n" +
+				"     sqlite3 <db-path> \".schema pasture_well_known_agents\"\n" +
+				"3. Restart the daemon once the database is healthy:\n" +
+				"     pkill -f pastured && pastured",
 		}
 	}
 
@@ -315,20 +424,44 @@ func ensureWellKnownAgent(
 	); err != nil {
 		return provenance.AgentID{}, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("tasks.ensureWellKnownAgent: INSERT into pasture_agent_categories failed for name=%q (agent_id=%q automaton_role=%q)", spec.Name, sa.ID.String(), spec.Role),
-			Why:      err.Error(),
-			Impact:   "the agent's pasture-side category is not persisted; the well-known mapping row will be rolled back so the category INSERT can be retried atomically on next startup",
-			Fix:      "verify the schema is at v3+; if the row already exists for a different agent_id, this indicates a registry/database mismatch — back up the file before running `pasture migrate` again",
+			What:     fmt.Sprintf("Pasture couldn't save the role for the built-in agent %q.", spec.Name),
+			Why: fmt.Sprintf(
+				"Tried to set this agent's role to %q but the database refused: %s",
+				spec.Role, err,
+			),
+			Impact: "The role isn't saved. The transaction is being rolled back so the\n" +
+				"name-to-id mapping is removed too, and the daemon can retry from a\n" +
+				"clean slate on the next startup.",
+			Fix: fmt.Sprintf("1. Confirm the database is at the latest schema version:\n"+
+				"     pasture migrate\n"+
+				"2. If a different id is already saved for this role, that's a registry vs.\n"+
+				"   database mismatch — back up the database before running migrate again:\n"+
+				"     cp <db-path> <db-path>.backup\n"+
+				"3. Restart the daemon once the database is healthy:\n"+
+				"     pkill -f pastured && pastured\n"+
+				"   (Built-in agent in question: %q)",
+				spec.Name),
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		return provenance.AgentID{}, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("tasks.ensureWellKnownAgent: COMMIT failed for name=%q (agent_id=%q)", spec.Name, sa.ID.String()),
-			Why:      err.Error(),
-			Impact:   "neither pasture_well_known_agents nor pasture_agent_categories rows were persisted; a fresh Provenance SoftwareAgent has been orphaned",
-			Fix:      "verify the SQLite file is writable and not held open by another writer; the orphan SoftwareAgent will be re-attempted on next startup",
+			What:     fmt.Sprintf("Pasture couldn't finalise the registration of the built-in agent %q.", spec.Name),
+			Why: fmt.Sprintf(
+				"The two registration rows (name-to-id and role) were ready, but committing\n"+
+					"them together failed: %s",
+				err,
+			),
+			Impact: "Neither row was saved. The fresh agent record (id %q) will sit unused\n" +
+				"in the database, and the daemon will retry registration on the next\n" +
+				"startup.",
+			Fix: "1. Confirm nothing else is holding the database open exclusively:\n" +
+				"     pgrep -af pastured\n" +
+				"2. Confirm the database is writable and the disk has free space:\n" +
+				"     df -h .\n" +
+				"3. Restart the daemon once the database is healthy:\n" +
+				"     pkill -f pastured && pastured",
 		}
 	}
 

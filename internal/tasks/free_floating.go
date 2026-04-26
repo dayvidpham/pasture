@@ -260,28 +260,59 @@ func recordFreeFloating(
 	if tracker == nil {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("tasks.%s: tracker is nil", fnName),
-			Why:      "the helper was invoked without a TaskTracker — this is a programming error",
-			Impact:   "the free-floating event cannot be recorded; the call is a no-op from the caller's perspective but no row was written",
-			Fix:      "obtain a TaskTracker via tasks.OpenTaskTracker(dbPath) or protocol.OpenTaskTracker(dbPath) and pass it to this helper",
+			What:     fmt.Sprintf("Pasture tried to record a %s event without an open task store.", contextKindLabel(kind)),
+			Why: fmt.Sprintf(
+				"The %s helper was called without a task store handle. This is a bug in the\n"+
+					"code that called it — a working task store is required.",
+				fnName,
+			),
+			Impact: fmt.Sprintf(
+				"The %s event isn't recorded, and nothing was written to the database.",
+				contextKindLabel(kind),
+			),
+			Fix: "1. Open a task store first, then pass it to the recorder:\n" +
+				"     tracker, err := tasks.OpenTaskTracker(<db-path>)\n" +
+				"2. If you hit this from the CLI rather than from your own code, please\n" +
+				"   file a bug — it shouldn't be reachable in normal use.",
 		}
 	}
 	if contextID == "" {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("tasks.%s: contextID is empty", fnName),
-			Why:      "an empty context_id would be persisted as a row that no Timeline lookup can find (kind=" + string(kind) + ", context_id=\"\")",
-			Impact:   "the free-floating event cannot be recorded with a useful context attachment",
-			Fix:      "pass the canonical id for the kind (for ContextGit: a commit SHA; for ContextSkill: the skill run id; for ContextSession: the session id)",
+			What:     fmt.Sprintf("Pasture tried to record a %s event with no identifier to attach it to.", contextKindLabel(kind)),
+			Why: fmt.Sprintf(
+				"The %s helper was called with an empty %s. We need a real identifier so\n"+
+					"the event can be looked up later.",
+				fnName, contextIDLabel(kind),
+			),
+			Impact: fmt.Sprintf(
+				"The %s event isn't recorded — without an identifier, nothing could find it again.",
+				contextKindLabel(kind),
+			),
+			Fix: fmt.Sprintf("1. Pass a real identifier when recording the event:\n"+
+				"     %s\n"+
+				"   For example, for a git commit use the full commit SHA; for a skill\n"+
+				"   invocation use the skill run id; for a Claude Code session use the\n"+
+				"   session id.",
+				contextIDExample(kind)),
 		}
 	}
 	if eventType == "" {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("tasks.%s: eventType is empty", fnName),
-			Why:      "an empty event_type would be persisted but cannot be filtered against in QueryEvents / Timeline",
-			Impact:   "the free-floating event cannot be classified at recall time",
-			Fix:      "pass one of the well-known constants in this package (EventGitCommit / EventGitPush / EventGitRebase / EventSkillInvoked / EventSessionRecorded) or a project-specific event type string",
+			What:     fmt.Sprintf("Pasture tried to record a %s event with no event type.", contextKindLabel(kind)),
+			Why: fmt.Sprintf(
+				"The %s helper was called with an empty event-type string. Event types are\n"+
+					"how we filter and look up events later, so they can't be blank.",
+				fnName,
+			),
+			Impact: "The event isn't recorded — there'd be no way to ask for events of this\n" +
+				"kind in queries or timelines.",
+			Fix: "1. Pass one of the built-in event type constants:\n" +
+				"     EventGitCommit, EventGitPush, EventGitRebase,\n" +
+				"     EventSkillInvoked, EventSessionRecorded\n" +
+				"2. Or pass your own short string (for example \"MyPluginAction\") if you\n" +
+				"   are recording a custom event type.",
 		}
 	}
 
@@ -317,24 +348,108 @@ func recordFreeFloating(
 	if err != nil {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("tasks.%s: tracker.RecordEventReturningID failed for kind=%s contextID=%q eventType=%q", fnName, kind, contextID, eventType),
-			Why:      err.Error(),
-			Impact:   "the free-floating event was not persisted; no context_edges row will be created either",
-			Fix:      "verify the SQLite file at the configured pasture.db path is writable and the schema is at v3 or higher (run 'pasture migrate' if you suspect schema drift)",
+			What:     fmt.Sprintf("Pasture couldn't save the %s event to the database.", contextKindLabel(kind)),
+			Why: fmt.Sprintf(
+				"Tried to write a %q event for %s %q to the audit log, but it failed: %s",
+				eventType, contextIDLabel(kind), contextID, err,
+			),
+			Impact: fmt.Sprintf(
+				"The %s event isn't recorded, and the link between this event and its\n"+
+					"%s won't be created either.",
+				contextKindLabel(kind), contextIDLabel(kind),
+			),
+			Fix: "1. Make sure the database is writable and at the latest schema version:\n" +
+				"     pasture migrate\n" +
+				"2. Retry the operation that produced this event.",
 		}
 	}
 
 	if err := tracker.AttachContext(ctx, eventID, kind, contextID); err != nil {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("tasks.%s: tracker.AttachContext failed for event %d kind=%s contextID=%q", fnName, eventID, kind, contextID),
-			Why:      err.Error(),
-			Impact:   "the audit_events row was written but no context_edges row exists; the event is reachable via QueryEvents but invisible to Timeline / 'pasture task events --context-kind=...' lookups",
-			Fix:      "the audit_events row already exists; re-call tracker.AttachContext(ctx, " + fmt.Sprintf("%d", eventID) + ", kind, contextID) directly to attach the context, or treat the event as orphaned and re-record it",
+			What:     fmt.Sprintf("Pasture saved the %s event but couldn't link it to its %s.", contextKindLabel(kind), contextIDLabel(kind)),
+			Why: fmt.Sprintf(
+				"The event (id %d, type %q) was written to the audit log, but linking it\n"+
+					"to %s %q failed: %s",
+				eventID, eventType, contextIDLabel(kind), contextID, err,
+			),
+			Impact: fmt.Sprintf(
+				"The event is in the database but won't show up when you ask for events\n"+
+					"by %s, which leaves a gap in the recorded history.",
+				contextIDLabel(kind),
+			),
+			Fix: fmt.Sprintf("1. Repair the link by re-attaching the event to its %s:\n"+
+				"     pasture task contexts attach %d %s %q\n"+
+				"2. If the repair keeps failing, run a migration to confirm the schema is\n"+
+				"   up to date:\n"+
+				"     pasture migrate",
+				contextIDLabel(kind), eventID, kind, contextID),
 		}
 	}
 
 	return eventID, nil
+}
+
+// ─── Plain-language labels for context kinds ─────────────────────────────────
+//
+// These helpers translate the protocol-internal ContextKind constants into
+// short ordinary-English phrases that read well inside an error message. They
+// are intentionally trivial (a switch + default) because the goal is to keep
+// user-facing strings out of the constants themselves — these labels are only
+// used in plain-language StructuredError construction.
+
+// contextKindLabel returns a short English label naming the kind of event,
+// e.g. "git" for ContextGit. Used at the start of error sentences.
+func contextKindLabel(kind protocol.ContextKind) string {
+	switch kind {
+	case protocol.ContextGit:
+		return "git"
+	case protocol.ContextSkill:
+		return "skill"
+	case protocol.ContextSession:
+		return "session"
+	case protocol.ContextEpoch:
+		return "epoch"
+	case protocol.ContextSlice:
+		return "slice"
+	default:
+		return string(kind)
+	}
+}
+
+// contextIDLabel returns a short English noun naming what the context-id
+// stands for, e.g. "commit SHA" for ContextGit. Used in "linked to its X"
+// phrases.
+func contextIDLabel(kind protocol.ContextKind) string {
+	switch kind {
+	case protocol.ContextGit:
+		return "commit SHA"
+	case protocol.ContextSkill:
+		return "skill run id"
+	case protocol.ContextSession:
+		return "session id"
+	case protocol.ContextEpoch:
+		return "epoch id"
+	case protocol.ContextSlice:
+		return "slice id"
+	default:
+		return "context id"
+	}
+}
+
+// contextIDExample returns a short, concrete example of how a caller would
+// pass the context-id for the given kind. Embedded in Fix bodies.
+func contextIDExample(kind protocol.ContextKind) string {
+	switch kind {
+	case protocol.ContextGit:
+		return "tasks.RecordGitEvent(ctx, tracker, db, \"<commit-sha>\", ...)"
+	case protocol.ContextSkill:
+		return "tasks.RecordSkillEvent(ctx, tracker, db, \"<skill-run-id>\", ...)"
+	case protocol.ContextSession:
+		return "tasks.RecordSessionEvent(ctx, tracker, db, \"<session-id>\", ...)"
+	default:
+		return "<helper>(ctx, tracker, db, \"<id>\", ...)"
+	}
 }
 
 // ─── Auxiliary handle for free-floating writes (public) ──────────────────────

@@ -98,7 +98,10 @@ type noAuditDBHolderFake struct {
 
 // TestRegisterWellKnownAgents_NoAuditDBHolderReturnsConfigError_WhiteBox
 // verifies that when the passed tracker does not implement auditDBHolder, the
-// function returns a CategoryConfig *StructuredError mentioning "auditDBHolder".
+// function returns a CategoryConfig *StructuredError. The user-facing What
+// message is plain-language (per the Phase 11 R2 plain-language pass), so we
+// look for the user-visible phrase explaining the failure rather than the
+// internal interface name.
 func TestRegisterWellKnownAgents_NoAuditDBHolderReturnsConfigError_WhiteBox(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	inner, err := OpenTaskTracker(dbPath)
@@ -121,7 +124,7 @@ func TestRegisterWellKnownAgents_NoAuditDBHolderReturnsConfigError_WhiteBox(t *t
 	if se.Category != pasterrors.CategoryConfig {
 		t.Errorf("Category = %q, want %q", se.Category, pasterrors.CategoryConfig)
 	}
-	if !strings.Contains(se.What, "auditDBHolder") {
-		t.Errorf("What = %q, want it to mention 'auditDBHolder'", se.What)
+	if !strings.Contains(se.What, "doesn't expose its database") {
+		t.Errorf("What = %q, want it to explain the task store doesn't expose its database", se.What)
 	}
 }
