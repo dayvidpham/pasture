@@ -458,26 +458,36 @@ func TestRecordSessionEvent_RejectsEmptySessionID(t *testing.T) {
 	requireValidationError(t, err)
 }
 
-// ─── Concurrent recording: D11 low-contention is enough ─────────────────────
+// ─── Concurrent recording: per-statement LastInsertId is race-safe ──────────
 //
 // A concurrent burst of N goroutines must produce exactly N rows in
-// audit_events and N rows in context_edges without errors. The important
-// invariant is correctness at the DB level (all rows written, all context edges
-// attached), not uniqueness of the returned event IDs.
+// audit_events and N rows in context_edges without errors AND each goroutine
+// must receive a UNIQUE event id. The unique-ID-per-goroutine invariant is
+// the property that distinguishes a correct context_edges attachment (the
+// edge for goroutine A is attached to A's audit event) from the broken
+// SELECT MAX(id) workaround (the edge could be attached to a different
+// goroutine's higher-id row, silently misattributing context).
 //
-// Note on returned IDs: tracker.RecordEventReturningID recovers the event id
-// via SELECT MAX(id) after the INSERT commits. Under concurrent writes this
-// SELECT MAX may observe a row from a different goroutine that committed between
-// the local INSERT and the SELECT — i.e., two goroutines may receive the same
-// id. This is a known limitation of the SELECT MAX workaround (D11 "low write
-// contention" binding). What we assert instead is that:
+// History: Phase 10 W3's free_floating.go fix had to drop this assertion
+// because tracker.RecordEventReturningID recovered the id via SELECT MAX(id)
+// after the INSERT, and concurrent writes really did return duplicate ids
+// to two callers (D11-bounded race, observable under -race in CI). Phase 11
+// R1-B (commit cf6c1a9) extended audit.Trail with RecordEventReturningID
+// that uses sql.Result.LastInsertId from the SAME INSERT statement, so the
+// returned id is now race-safe under any concurrency level. The
+// per-statement LastInsertId guarantee is regression-tested at the storage
+// boundary by TestSqliteAuditTrail_RecordEventReturningID_ConcurrentUnique
+// (sqlite_test.go) and TestInMemoryAuditTrail_RecordEventReturningID_ConcurrentUnique
+// (memory_test.go); this test re-verifies the same property surfaces
+// through the public tasks.RecordGitEvent boundary.
+//
+// What we assert:
 //  1. No errors occurred (all N writes+attaches succeeded).
 //  2. Exactly N audit_events rows and N context_edges rows exist on disk.
-//  3. Every returned id (even if duplicated across goroutines) is a valid
-//     positive event id that exists in audit_events.
-//
-// The unique-ID-per-goroutine invariant will hold once the trail's
-// RecordEventReturningID is backed by LastInsertId (PROPOSAL-2 §7.11 future).
+//  3. Every returned id is a positive, distinct event id that exists in
+//     audit_events. Distinctness is the property that guarantees each
+//     goroutine's AttachContext call landed on its OWN event row (not a
+//     peer's row that happened to commit at a higher id).
 
 func TestRecordGitEvent_ConcurrentBurst(t *testing.T) {
 	t.Parallel()
@@ -514,8 +524,43 @@ func TestRecordGitEvent_ConcurrentBurst(t *testing.T) {
 		t.Errorf("concurrent RecordGitEvent: %v", err)
 	}
 
-	// Verify the on-disk state agrees: N rows in audit_events, N rows in
-	// context_edges with kind=GitContext. This is the true correctness bar.
+	// Drain the id channel into a slice so we can iterate it for both the
+	// uniqueness check and the on-disk existence check below.
+	ids := make([]int64, 0, N)
+	for id := range idCh {
+		ids = append(ids, id)
+	}
+
+	// (1) Per-call uniqueness — every goroutine must have received a distinct
+	// event_id. This is the Phase 11 R1-C re-tightened assertion: pre-R1-B
+	// (when tracker.RecordEventReturningID used SELECT MAX(id) under the hood)
+	// this would intermittently fail because two goroutines could observe the
+	// same MAX(id) between their INSERT and SELECT. Post-R1-B (cf6c1a9) the
+	// per-statement sql.Result.LastInsertId guarantee makes this race-free.
+	//
+	// If this assertion fails, the per-statement LastInsertId guarantee from
+	// R1-B has regressed — first check audit.SqliteAuditTrail.RecordEventReturningID
+	// (sqlite.go) and its regression test
+	// TestSqliteAuditTrail_RecordEventReturningID_ConcurrentUnique.
+	seen := make(map[int64]int, N)
+	for _, id := range ids {
+		seen[id]++
+	}
+	for id, count := range seen {
+		if count > 1 {
+			t.Errorf("RecordGitEvent returned duplicate event_id %d to %d concurrent callers; "+
+				"the per-statement LastInsertId guarantee from Phase 11 R1-B (commit cf6c1a9) appears broken — "+
+				"re-check audit.SqliteAuditTrail.RecordEventReturningID and its regression test "+
+				"TestSqliteAuditTrail_RecordEventReturningID_ConcurrentUnique", id, count)
+		}
+	}
+	if len(seen) != len(ids) {
+		t.Errorf("expected %d distinct event_ids from %d concurrent RecordGitEvent calls, got %d distinct",
+			len(ids), len(ids), len(seen))
+	}
+
+	// (2) Verify the on-disk state agrees: N rows in audit_events, N rows in
+	// context_edges with kind=GitContext.
 	verifyDB, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("sql.Open verification handle: %v", err)
@@ -536,8 +581,8 @@ func TestRecordGitEvent_ConcurrentBurst(t *testing.T) {
 		t.Errorf("context_edges (GitContext) count = %d, want %d", edgeCount, N)
 	}
 
-	// Every returned id must be a valid positive event id that exists in audit_events.
-	for id := range idCh {
+	// (3) Every returned id must be a valid positive event id that exists in audit_events.
+	for _, id := range ids {
 		if id <= 0 {
 			t.Errorf("RecordGitEvent returned non-positive eventID %d", id)
 			continue
