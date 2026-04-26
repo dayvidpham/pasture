@@ -43,7 +43,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 
 // consensusGated is the set of (from, to) transitions requiring all-ACCEPT consensus.
 var consensusGated = map[[2]protocol.PhaseId]struct{}{
-	{protocol.PhaseReview, protocol.PhasePlanReview}:     {},
+	{protocol.PhaseReview, protocol.PhasePlanReview}:  {},
 	{protocol.PhaseCodeReview, protocol.PhaseImplUAT}: {},
 }
 

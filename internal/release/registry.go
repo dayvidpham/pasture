@@ -148,10 +148,10 @@ func (r *PluginRegistry) Exec(cmd string, args ...string) error {
 
 // VersionDrift describes a version mismatch detected in a plugin.
 type VersionDrift struct {
-	Plugin    string
-	File      string
-	Want      string // canonical version
-	Got       string // actual version in the file
+	Plugin string
+	File   string
+	Want   string // canonical version
+	Got    string // actual version in the file
 }
 
 // SyncVersions detects version drift across all plugins and files.

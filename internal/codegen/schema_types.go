@@ -58,7 +58,7 @@ type LabelElem struct {
 
 // ReviewAxesSection is the top-level <review-axes> element.
 type ReviewAxesSection struct {
-	XMLName xml.Name        `xml:"review-axes"`
+	XMLName xml.Name         `xml:"review-axes"`
 	Axes    []ReviewAxisElem `xml:"axis"`
 }
 
@@ -108,15 +108,15 @@ type SubstepsElem struct {
 
 // SubstepElem is a single <substep ...> element.
 type SubstepElem struct {
-	ID            string              `xml:"id,attr"`
-	Type          string              `xml:"type,attr"`
-	Execution     string              `xml:"execution,attr"`
-	Order         string              `xml:"order,attr"`
-	ParallelGroup string              `xml:"parallel-group,attr,omitempty"`
-	LabelRef      string              `xml:"label-ref,attr"`
-	Description   string              `xml:"description"`
-	ExtraLabel    *ExtraLabelElem     `xml:"extra-label"`
-	Instances     *InstancesElem      `xml:"instances"`
+	ID            string               `xml:"id,attr"`
+	Type          string               `xml:"type,attr"`
+	Execution     string               `xml:"execution,attr"`
+	Order         string               `xml:"order,attr"`
+	ParallelGroup string               `xml:"parallel-group,attr,omitempty"`
+	LabelRef      string               `xml:"label-ref,attr"`
+	Description   string               `xml:"description"`
+	ExtraLabel    *ExtraLabelElem      `xml:"extra-label"`
+	Instances     *InstancesElem       `xml:"instances"`
 	Startup       *StartupSequenceElem `xml:"startup-sequence"`
 }
 
@@ -225,10 +225,10 @@ type TDDLayerElem struct {
 
 // FollowupEpicElem is <followup-epic label-ref="..." trigger="..." .../>.
 type FollowupEpicElem struct {
-	LabelRef         string `xml:"label-ref,attr"`
-	Trigger          string `xml:"trigger,attr"`
-	GatedOnBlocker   string `xml:"gated-on-blocker,attr"`
-	OwnerRole        string `xml:"owner-role,attr"`
+	LabelRef       string `xml:"label-ref,attr"`
+	Trigger        string `xml:"trigger,attr"`
+	GatedOnBlocker string `xml:"gated-on-blocker,attr"`
+	OwnerRole      string `xml:"owner-role,attr"`
 }
 
 // ─── Roles section ────────────────────────────────────────────────────────────
@@ -241,21 +241,21 @@ type RolesSection struct {
 
 // RoleElem is a single <role id="..." name="..." description="..."> element.
 type RoleElem struct {
-	ID                 string              `xml:"id,attr"`
-	Name               string              `xml:"name,attr"`
-	Description        string              `xml:"description,attr"`
-	OwnedPhases        *OwnedPhasesElem    `xml:"owns-phases"`
-	Delegates          *DelegatesElem      `xml:"delegates"`
-	LabelAwareness     string              `xml:"label-awareness"`
-	UsesAxes           *UsesAxesElem       `xml:"uses-axes"`
-	Invariants         *InvariantsElem     `xml:"invariants"`
-	Tools              string              `xml:"tools"`
-	Model              string              `xml:"model"`
-	Thinking           string              `xml:"thinking"`
-	OwnershipModel     string              `xml:"ownership-model"`
-	Introduction       string              `xml:"introduction"`
-	OwnershipNarrative string              `xml:"ownership-narrative"`
-	Behaviors          *BehaviorsElem      `xml:"behaviors"`
+	ID                 string           `xml:"id,attr"`
+	Name               string           `xml:"name,attr"`
+	Description        string           `xml:"description,attr"`
+	OwnedPhases        *OwnedPhasesElem `xml:"owns-phases"`
+	Delegates          *DelegatesElem   `xml:"delegates"`
+	LabelAwareness     string           `xml:"label-awareness"`
+	UsesAxes           *UsesAxesElem    `xml:"uses-axes"`
+	Invariants         *InvariantsElem  `xml:"invariants"`
+	Tools              string           `xml:"tools"`
+	Model              string           `xml:"model"`
+	Thinking           string           `xml:"thinking"`
+	OwnershipModel     string           `xml:"ownership-model"`
+	Introduction       string           `xml:"introduction"`
+	OwnershipNarrative string           `xml:"ownership-narrative"`
+	Behaviors          *BehaviorsElem   `xml:"behaviors"`
 }
 
 // OwnedPhasesElem wraps <owns-phases>.
@@ -312,7 +312,7 @@ type BehaviorElem struct {
 
 // CommandsSection is the top-level <commands> element.
 type CommandsSection struct {
-	XMLName  xml.Name     `xml:"commands"`
+	XMLName  xml.Name      `xml:"commands"`
 	Commands []CommandElem `xml:"command"`
 }
 
@@ -347,9 +347,9 @@ type LabelRefElem struct {
 
 // HandoffsSection is the top-level <handoffs storage-pattern="..."> element.
 type HandoffsSection struct {
-	XMLName              xml.Name               `xml:"handoffs"`
-	StoragePattern       string                 `xml:"storage-pattern,attr"`
-	Handoffs             []HandoffElem          `xml:"handoff"`
+	XMLName              xml.Name                  `xml:"handoffs"`
+	StoragePattern       string                    `xml:"storage-pattern,attr"`
+	Handoffs             []HandoffElem             `xml:"handoff"`
 	SameActorTransitions *SameActorTransitionsElem `xml:"same-actor-transitions"`
 }
 
@@ -380,7 +380,7 @@ type HandoffNoteElem struct {
 
 // SameActorTransitionsElem wraps <same-actor-transitions>.
 type SameActorTransitionsElem struct {
-	Note        string                   `xml:"note,attr"`
+	Note        string                    `xml:"note,attr"`
 	Transitions []SameActorTransitionElem `xml:"transition"`
 }
 
@@ -421,7 +421,7 @@ type ConstraintElem struct {
 
 // TaskTitlesSection is the top-level <task-titles> element.
 type TaskTitlesSection struct {
-	XMLName    xml.Name          `xml:"task-titles"`
+	XMLName     xml.Name              `xml:"task-titles"`
 	Conventions []TitleConventionElem `xml:"title-convention"`
 }
 
@@ -445,10 +445,10 @@ type DocumentsSection struct {
 
 // DocumentElem is a single <document id="..." path="..." purpose="..."> element.
 type DocumentElem struct {
-	ID      string        `xml:"id,attr"`
-	Path    string        `xml:"path,attr"`
-	Purpose string        `xml:"purpose,attr"`
-	Covers  *CoversElem   `xml:"covers"`
+	ID      string      `xml:"id,attr"`
+	Path    string      `xml:"path,attr"`
+	Purpose string      `xml:"purpose,attr"`
+	Covers  *CoversElem `xml:"covers"`
 }
 
 // CoversElem wraps <covers>.
@@ -470,11 +470,11 @@ type CoverEntityElem struct {
 // Content is mixed text/element — kept as raw text since it uses free-form
 // prose and nested elements with no fixed structure.
 type DependencyModelSection struct {
-	XMLName        xml.Name           `xml:"dependency-model"`
-	Rule           string             `xml:"rule"`
-	CanonicalChain string             `xml:"canonical-chain"`
-	Command        string             `xml:"command"`
-	AntiPattern    string             `xml:"anti-pattern"`
+	XMLName        xml.Name            `xml:"dependency-model"`
+	Rule           string              `xml:"rule"`
+	CanonicalChain string              `xml:"canonical-chain"`
+	Command        string              `xml:"command"`
+	AntiPattern    string              `xml:"anti-pattern"`
 	ReferenceLinks *ReferenceLinksElem `xml:"reference-links"`
 }
 
@@ -488,19 +488,19 @@ type ReferenceLinksElem struct {
 
 // FollowupLifecycleSection is the top-level <followup-lifecycle> element.
 type FollowupLifecycleSection struct {
-	XMLName          xml.Name            `xml:"followup-lifecycle"`
-	Trigger          string              `xml:"trigger"`
-	OwnerRole        string              `xml:"owner-role"`
-	GatedOnBlocker   string              `xml:"gated-on-blocker"`
-	DependencyChain  *DepChainElem       `xml:"dependency-chain"`
-	LeafTaskAdoption *LeafTaskAdoptElem  `xml:"leaf-task-adoption"`
-	References       *FollowupRefsElem   `xml:"references"`
-	HandoffChain     *HandoffChainElem   `xml:"handoff-chain"`
+	XMLName          xml.Name           `xml:"followup-lifecycle"`
+	Trigger          string             `xml:"trigger"`
+	OwnerRole        string             `xml:"owner-role"`
+	GatedOnBlocker   string             `xml:"gated-on-blocker"`
+	DependencyChain  *DepChainElem      `xml:"dependency-chain"`
+	LeafTaskAdoption *LeafTaskAdoptElem `xml:"leaf-task-adoption"`
+	References       *FollowupRefsElem  `xml:"references"`
+	HandoffChain     *HandoffChainElem  `xml:"handoff-chain"`
 }
 
 // DepChainElem is <dependency-chain note="...">.
 type DepChainElem struct {
-	Note  string          `xml:"note,attr"`
+	Note  string             `xml:"note,attr"`
 	Steps []DepChainStepElem `xml:"step"`
 }
 
@@ -532,7 +532,7 @@ type FollowupRefElem struct {
 
 // HandoffChainElem is <handoff-chain note="...">.
 type HandoffChainElem struct {
-	Note        string               `xml:"note,attr"`
+	Note        string                  `xml:"note,attr"`
 	Transitions []HandoffChainTransElem `xml:"transition"`
 }
 
@@ -573,9 +573,9 @@ type ChecklistsSection struct {
 
 // ChecklistElem is a single <checklist id="..." role-ref="..." gate="..."> element.
 type ChecklistElem struct {
-	ID      string          `xml:"id,attr"`
-	RoleRef string          `xml:"role-ref,attr"`
-	Gate    string          `xml:"gate,attr"`
+	ID      string              `xml:"id,attr"`
+	RoleRef string              `xml:"role-ref,attr"`
+	Gate    string              `xml:"gate,attr"`
 	Items   []ChecklistItemElem `xml:"item"`
 }
 
@@ -590,8 +590,8 @@ type ChecklistItemElem struct {
 
 // CoordinationCommandsSection is the top-level <coordination-commands> element.
 type CoordinationCommandsSection struct {
-	XMLName  xml.Name         `xml:"coordination-commands"`
-	Commands []CoordCmdElem   `xml:"coord-cmd"`
+	XMLName  xml.Name       `xml:"coordination-commands"`
+	Commands []CoordCmdElem `xml:"coord-cmd"`
 }
 
 // CoordCmdElem is a single <coord-cmd id="..." action="..." template="..." .../> element.
@@ -613,22 +613,22 @@ type WorkflowsSection struct {
 
 // WorkflowElem is a single <workflow id="..." name="..." role-ref="..." description="..."> element.
 type WorkflowElem struct {
-	ID          string       `xml:"id,attr"`
-	Name        string       `xml:"name,attr"`
-	RoleRef     string       `xml:"role-ref,attr"`
-	Description string       `xml:"description,attr"`
-	Stages      []StageElem  `xml:"stage"`
+	ID          string      `xml:"id,attr"`
+	Name        string      `xml:"name,attr"`
+	RoleRef     string      `xml:"role-ref,attr"`
+	Description string      `xml:"description,attr"`
+	Stages      []StageElem `xml:"stage"`
 }
 
 // StageElem is a single <stage id="..." name="..." order="..." execution="..." ...> element.
 type StageElem struct {
-	ID             string           `xml:"id,attr"`
-	Name           string           `xml:"name,attr"`
-	Order          string           `xml:"order,attr"`
-	Execution      string           `xml:"execution,attr"`
-	PhaseRef       string           `xml:"phase-ref,attr,omitempty"`
-	Actions        []ActionElem     `xml:"action"`
-	ExitConditions []ExitCondElem   `xml:"exit-condition"`
+	ID             string         `xml:"id,attr"`
+	Name           string         `xml:"name,attr"`
+	Order          string         `xml:"order,attr"`
+	Execution      string         `xml:"execution,attr"`
+	PhaseRef       string         `xml:"phase-ref,attr,omitempty"`
+	Actions        []ActionElem   `xml:"action"`
+	ExitConditions []ExitCondElem `xml:"exit-condition"`
 }
 
 // ActionElem is <action id="..." instruction="..." .../> inside a stage.
@@ -648,19 +648,19 @@ type ExitCondElem struct {
 
 // FiguresSection is the top-level <figures> element.
 type FiguresSection struct {
-	XMLName xml.Name    `xml:"figures"`
+	XMLName xml.Name     `xml:"figures"`
 	Figures []FigureElem `xml:"figure"`
 }
 
 // FigureElem is a single <figure id="..." title="..." type="..." section-ref="..."> element.
 type FigureElem struct {
-	ID           string     `xml:"id,attr"`
-	Title        string     `xml:"title,attr"`
-	Type         string     `xml:"type,attr"`
-	SectionRef   string     `xml:"section-ref,attr"`
-	RoleRefs     []RefElem  `xml:"role-ref"`
-	WorkflowRefs []RefElem  `xml:"workflow-ref"`
-	CommandRefs  []RefElem  `xml:"command-ref"`
+	ID           string    `xml:"id,attr"`
+	Title        string    `xml:"title,attr"`
+	Type         string    `xml:"type,attr"`
+	SectionRef   string    `xml:"section-ref,attr"`
+	RoleRefs     []RefElem `xml:"role-ref"`
+	WorkflowRefs []RefElem `xml:"workflow-ref"`
+	CommandRefs  []RefElem `xml:"command-ref"`
 }
 
 // RefElem is a generic <*-ref ref="..."/> element used within a figure.

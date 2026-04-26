@@ -391,7 +391,7 @@ func buildPhaseTaskTitles() map[string][]map[string]string {
 				//   2. Split on the first "s" to separate the phase token ("p2")
 				//      from the substep suffix ("2_1").
 				//   3. Prepend "s" to reconstruct the substep ID ("s2_1").
-				label := tc.LabelRef[2:] // drop "L-" prefix: "p2s2_1"
+				label := tc.LabelRef[2:]               // drop "L-" prefix: "p2s2_1"
 				parts := strings.SplitN(label, "s", 2) // ["p2", "2_1"]
 				if len(parts) == 2 {
 					entry["substep"] = "s" + parts[1]
@@ -745,16 +745,16 @@ var commandOrder = []string{
 
 // commandGroupComments marks the start of each command group with a comment.
 var commandGroupComments = map[string]string{
-	"cmd-epoch":       " ── Orchestration ──────────────────────────────────────────────── ",
+	"cmd-epoch":        " ── Orchestration ──────────────────────────────────────────────── ",
 	"cmd-user-request": " ── User interaction ───────────────────────────────────────── ",
-	"cmd-architect":   " ── Architect ──────────────────────────────────────────────────── ",
-	"cmd-supervisor":  " ── Supervisor ─────────────────────────────────────────────────── ",
-	"cmd-worker":      " ── Worker ─────────────────────────────────────────────────────── ",
-	"cmd-reviewer":    " ── Reviewer ───────────────────────────────────────────────────── ",
-	"cmd-impl-slice":  " ── Implementation coordination ────────────────────────────────── ",
-	"cmd-msg-send":    " ── Messaging (Beads-based IPC) ────────────────────────────────── ",
-	"cmd-explore":     " ── Exploration ────────────────────────────────────────────────── ",
-	"cmd-test":        " ── Utilities ──────────────────────────────────────────────────── ",
+	"cmd-architect":    " ── Architect ──────────────────────────────────────────────────── ",
+	"cmd-supervisor":   " ── Supervisor ─────────────────────────────────────────────────── ",
+	"cmd-worker":       " ── Worker ─────────────────────────────────────────────────────── ",
+	"cmd-reviewer":     " ── Reviewer ───────────────────────────────────────────────────── ",
+	"cmd-impl-slice":   " ── Implementation coordination ────────────────────────────────── ",
+	"cmd-msg-send":     " ── Messaging (Beads-based IPC) ────────────────────────────────── ",
+	"cmd-explore":      " ── Exploration ────────────────────────────────────────────────── ",
+	"cmd-test":         " ── Utilities ──────────────────────────────────────────────────── ",
 }
 
 func buildCommands(buf *bytes.Buffer, depth int) {
@@ -1216,10 +1216,10 @@ func buildDocuments(buf *bytes.Buffer, depth int) {
 
 func buildDependencyModel(buf *bytes.Buffer, depth int) {
 	section := DependencyModelSection{
-		Rule: "Parent (stays open) is blocked-by child (must finish first). Work flows bottom-up; closure flows top-down.",
+		Rule:           "Parent (stays open) is blocked-by child (must finish first). Work flows bottom-up; closure flows top-down.",
 		CanonicalChain: "REQUEST \u2192 blocked-by ELICIT \u2192 blocked-by PROPOSAL \u2192 blocked-by IMPL_PLAN \u2192 blocked-by SLICE-N \u2192 blocked-by leaf tasks",
-		Command:     "bd dep add {parent-id} --blocked-by {child-id}",
-		AntiPattern: "bd dep add {child-id} --blocked-by {parent-id}",
+		Command:        "bd dep add {parent-id} --blocked-by {child-id}",
+		AntiPattern:    "bd dep add {child-id} --blocked-by {parent-id}",
 		ReferenceLinks: &ReferenceLinksElem{
 			Note:    "URD and other reference docs use frontmatter, not blocking deps",
 			Pattern: "description frontmatter:\n  references:\n    urd: {urd-task-id}\n    request: {request-task-id}",

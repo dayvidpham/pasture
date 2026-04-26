@@ -81,8 +81,8 @@ type claudeUsage struct {
 func (a *claudeAdapter) Parse(record []byte) (SessionUpdate, error) {
 	if len(record) == 0 {
 		return SessionUpdate{}, fmt.Errorf(
-			"claude-jsonl adapter: Parse: empty record — "+
-				"expected a non-empty JSON object (one Claude transcript line); "+
+			"claude-jsonl adapter: Parse: empty record — " +
+				"expected a non-empty JSON object (one Claude transcript line); " +
 				"check that the source file is not empty and the line was read correctly",
 		)
 	}
@@ -240,4 +240,3 @@ func approxErrorOffset(record []byte, err error) int {
 	}
 	return len(record)
 }
-

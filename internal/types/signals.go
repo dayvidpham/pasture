@@ -9,9 +9,9 @@ import "github.com/dayvidpham/pasture/pkg/protocol"
 // (e.g. a role name or external trigger). ConditionMet describes the
 // transition condition from the protocol table that was satisfied.
 type PhaseAdvanceSignal struct {
-	ToPhase     protocol.PhaseId `json:"toPhase"`
-	TriggeredBy string           `json:"triggeredBy"`
-	ConditionMet string          `json:"conditionMet"`
+	ToPhase      protocol.PhaseId `json:"toPhase"`
+	TriggeredBy  string           `json:"triggeredBy"`
+	ConditionMet string           `json:"conditionMet"`
 }
 
 // ReviewVoteSignal is the payload for the submit_vote Temporal signal.
@@ -31,10 +31,10 @@ type ReviewVoteSignal struct {
 // progress. Completed is true when the leaf task finishes, false for
 // in-progress heartbeat events.
 type SliceProgressSignal struct {
-	SliceID     string `json:"sliceId"`
-	LeafTaskID  string `json:"leafTaskId"`
-	StageName   string `json:"stageName"`
-	Completed   bool   `json:"completed"`
+	SliceID    string `json:"sliceId"`
+	LeafTaskID string `json:"leafTaskId"`
+	StageName  string `json:"stageName"`
+	Completed  bool   `json:"completed"`
 }
 
 // RegisterSessionSignal is the payload for the register_session Temporal signal.

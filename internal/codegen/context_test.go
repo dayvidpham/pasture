@@ -291,8 +291,8 @@ func TestGetPhaseContext_CompleteHasNoLabels(t *testing.T) {
 // correct transitions for each phase.
 func TestGetPhaseContext_Transitions(t *testing.T) {
 	tests := []struct {
-		phase         protocol.PhaseId
-		wantToPhase   protocol.PhaseId
+		phase          protocol.PhaseId
+		wantToPhase    protocol.PhaseId
 		minTransitions int
 	}{
 		{protocol.PhaseRequest, protocol.PhaseElicit, 1},
@@ -460,8 +460,8 @@ func TestConstraintInversion(t *testing.T) {
 
 	// Role-specific constraints must NOT appear in all roles.
 	roleSpecific := map[string][]types.RoleId{
-		"C-worker-gates": {types.RoleWorker},
-		"C-review-binary": {types.RoleReviewer},
+		"C-worker-gates":    {types.RoleWorker},
+		"C-review-binary":   {types.RoleReviewer},
 		"C-proposal-naming": {types.RoleArchitect},
 	}
 
@@ -520,9 +520,9 @@ func TestConstraintToPhaseRefs(t *testing.T) {
 
 	// Phase-specific constraints must appear only in their respective phases.
 	phaseSpecific := map[string]protocol.PhaseId{
-		"C-severity-eager":   protocol.PhaseCodeReview,
+		"C-severity-eager":    protocol.PhaseCodeReview,
 		"C-severity-not-plan": protocol.PhaseReview,
-		"C-proposal-naming":  protocol.PhasePropose,
+		"C-proposal-naming":   protocol.PhasePropose,
 	}
 
 	for cid, expectedPhase := range phaseSpecific {

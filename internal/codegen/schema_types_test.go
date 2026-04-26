@@ -376,10 +376,10 @@ func TestXMLTagsFiguresSection(t *testing.T) {
 	s := codegen.FiguresSection{
 		Figures: []codegen.FigureElem{
 			{
-				ID:         "fig-workflow",
-				Title:      "Workflow",
-				Type:       "ascii-diagram",
-				SectionRef: "workflows",
+				ID:           "fig-workflow",
+				Title:        "Workflow",
+				Type:         "ascii-diagram",
+				SectionRef:   "workflows",
 				RoleRefs:     []codegen.RefElem{{Ref: "worker"}},
 				WorkflowRefs: []codegen.RefElem{{Ref: "wf-layer-cake"}},
 			},

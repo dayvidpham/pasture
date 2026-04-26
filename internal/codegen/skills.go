@@ -69,10 +69,10 @@ type skillContext struct {
 	ReviewAxes           []ReviewAxisSpec
 
 	// Body fields (from SkillBody, nil/empty if no SkillBody)
-	Preamble       string
-	BodySections   []ProseSection
-	BodyRecipes    []RecipeBlock
-	BodyBehaviors  []BehaviorSpec
+	Preamble      string
+	BodySections  []ProseSection
+	BodyRecipes   []RecipeBlock
+	BodyBehaviors []BehaviorSpec
 }
 
 // skillSubContext is the unified data passed to skill_sub.go.tmpl.

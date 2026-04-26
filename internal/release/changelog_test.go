@@ -11,11 +11,11 @@ import (
 
 func TestParseConventionalCommit(t *testing.T) {
 	tests := []struct {
-		input       string
-		wantErr     bool
-		wantType    string
-		wantScope   string
-		wantDesc    string
+		input     string
+		wantErr   bool
+		wantType  string
+		wantScope string
+		wantDesc  string
 	}{
 		{"feat: add login", false, "feat", "", "add login"},
 		{"fix(auth): resolve token expiry", false, "fix", "auth", "resolve token expiry"},

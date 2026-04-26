@@ -29,11 +29,11 @@ type smokeFixtures struct {
 // Fields that are absent in the YAML are left as empty strings (no match
 // assertion is performed for empty fields).
 type smokeCaseFixture struct {
-	ID                   string   `yaml:"id"`
-	Args                 []string `yaml:"args"`
-	WantExit             int      `yaml:"want_exit"`
-	WantStdoutContains   string   `yaml:"want_stdout_contains"`
-	WantStderrContains   string   `yaml:"want_stderr_contains"`
+	ID                 string   `yaml:"id"`
+	Args               []string `yaml:"args"`
+	WantExit           int      `yaml:"want_exit"`
+	WantStdoutContains string   `yaml:"want_stdout_contains"`
+	WantStderrContains string   `yaml:"want_stderr_contains"`
 }
 
 // ─── Binary build helper ──────────────────────────────────────────────────────

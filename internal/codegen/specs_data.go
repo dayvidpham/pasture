@@ -20,10 +20,10 @@ import (
 // Mirrors Python PHASE_SPECS dict.
 var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 	protocol.PhaseRequest: {
-		ID:     protocol.PhaseRequest,
-		Name:   "Request",
-		Number: 1,
-		Domain: types.DomainUser,
+		ID:         protocol.PhaseRequest,
+		Name:       "Request",
+		Number:     1,
+		Domain:     types.DomainUser,
 		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleArchitect},
 		Transitions: []Transition{
 			{
@@ -33,10 +33,10 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhaseElicit: {
-		ID:     protocol.PhaseElicit,
-		Name:   "Elicit",
-		Number: 2,
-		Domain: types.DomainUser,
+		ID:         protocol.PhaseElicit,
+		Name:       "Elicit",
+		Number:     2,
+		Domain:     types.DomainUser,
 		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleArchitect},
 		Transitions: []Transition{
 			{
@@ -46,10 +46,10 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhasePropose: {
-		ID:     protocol.PhasePropose,
-		Name:   "Propose",
-		Number: 3,
-		Domain: types.DomainPlan,
+		ID:         protocol.PhasePropose,
+		Name:       "Propose",
+		Number:     3,
+		Domain:     types.DomainPlan,
 		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleArchitect},
 		Transitions: []Transition{
 			{
@@ -59,10 +59,10 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhaseReview: {
-		ID:     protocol.PhaseReview,
-		Name:   "Review",
-		Number: 4,
-		Domain: types.DomainPlan,
+		ID:         protocol.PhaseReview,
+		Name:       "Review",
+		Number:     4,
+		Domain:     types.DomainPlan,
 		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleArchitect, types.RoleReviewer},
 		Transitions: []Transition{
 			{
@@ -77,10 +77,10 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhasePlanReview: {
-		ID:     protocol.PhasePlanReview,
-		Name:   "Plan UAT",
-		Number: 5,
-		Domain: types.DomainUser,
+		ID:         protocol.PhasePlanReview,
+		Name:       "Plan UAT",
+		Number:     5,
+		Domain:     types.DomainUser,
 		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleArchitect},
 		Transitions: []Transition{
 			{
@@ -95,10 +95,10 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhaseRatify: {
-		ID:     protocol.PhaseRatify,
-		Name:   "Ratify",
-		Number: 6,
-		Domain: types.DomainPlan,
+		ID:         protocol.PhaseRatify,
+		Name:       "Ratify",
+		Number:     6,
+		Domain:     types.DomainPlan,
 		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleArchitect},
 		Transitions: []Transition{
 			{
@@ -108,10 +108,10 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhaseHandoff: {
-		ID:     protocol.PhaseHandoff,
-		Name:   "Handoff",
-		Number: 7,
-		Domain: types.DomainPlan,
+		ID:         protocol.PhaseHandoff,
+		Name:       "Handoff",
+		Number:     7,
+		Domain:     types.DomainPlan,
 		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleArchitect, types.RoleSupervisor},
 		Transitions: []Transition{
 			{
@@ -121,10 +121,10 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhaseImplPlan: {
-		ID:     protocol.PhaseImplPlan,
-		Name:   "Impl Plan",
-		Number: 8,
-		Domain: types.DomainImpl,
+		ID:         protocol.PhaseImplPlan,
+		Name:       "Impl Plan",
+		Number:     8,
+		Domain:     types.DomainImpl,
 		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleSupervisor},
 		Transitions: []Transition{
 			{
@@ -134,10 +134,10 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhaseWorkerSlices: {
-		ID:     protocol.PhaseWorkerSlices,
-		Name:   "Worker Slices",
-		Number: 9,
-		Domain: types.DomainImpl,
+		ID:         protocol.PhaseWorkerSlices,
+		Name:       "Worker Slices",
+		Number:     9,
+		Domain:     types.DomainImpl,
 		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleSupervisor, types.RoleWorker},
 		Transitions: []Transition{
 			{
@@ -147,10 +147,10 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhaseCodeReview: {
-		ID:     protocol.PhaseCodeReview,
-		Name:   "Code Review",
-		Number: 10,
-		Domain: types.DomainImpl,
+		ID:         protocol.PhaseCodeReview,
+		Name:       "Code Review",
+		Number:     10,
+		Domain:     types.DomainImpl,
 		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleSupervisor, types.RoleReviewer},
 		Transitions: []Transition{
 			{
@@ -165,10 +165,10 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhaseImplUAT: {
-		ID:     protocol.PhaseImplUAT,
-		Name:   "Impl UAT",
-		Number: 11,
-		Domain: types.DomainUser,
+		ID:         protocol.PhaseImplUAT,
+		Name:       "Impl UAT",
+		Number:     11,
+		Domain:     types.DomainUser,
 		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleSupervisor},
 		Transitions: []Transition{
 			{
@@ -183,10 +183,10 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhaseLanding: {
-		ID:     protocol.PhaseLanding,
-		Name:   "Landing",
-		Number: 12,
-		Domain: types.DomainImpl,
+		ID:         protocol.PhaseLanding,
+		Name:       "Landing",
+		Number:     12,
+		Domain:     types.DomainImpl,
 		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleSupervisor},
 		Transitions: []Transition{
 			{
@@ -1871,23 +1871,23 @@ var ProcedureSteps = map[types.RoleId][]ProcedureStep{
 // LabelSpecs maps label IDs to their full specifications.
 // Mirrors Python LABEL_SPECS dict.
 var LabelSpecs = map[string]LabelSpec{
-	"L-p1s1_1": {ID: "L-p1s1_1", Value: "aura:p1-user:s1_1-classify", Special: false, PhaseRef: "p1", SubstepRef: "s1_1"},
-	"L-p1s1_2": {ID: "L-p1s1_2", Value: "aura:p1-user:s1_2-research", Special: false, PhaseRef: "p1", SubstepRef: "s1_2"},
-	"L-p1s1_3": {ID: "L-p1s1_3", Value: "aura:p1-user:s1_3-explore", Special: false, PhaseRef: "p1", SubstepRef: "s1_3"},
-	"L-p2s2_1": {ID: "L-p2s2_1", Value: "aura:p2-user:s2_1-elicit", Special: false, PhaseRef: "p2", SubstepRef: "s2_1"},
-	"L-p2s2_2": {ID: "L-p2s2_2", Value: "aura:p2-user:s2_2-urd", Special: false, PhaseRef: "p2", SubstepRef: "s2_2"},
-	"L-p3s3":   {ID: "L-p3s3", Value: "aura:p3-plan:s3-propose", Special: false, PhaseRef: "p3", SubstepRef: "s3"},
-	"L-p4s4":   {ID: "L-p4s4", Value: "aura:p4-plan:s4-review", Special: false, PhaseRef: "p4", SubstepRef: "s4"},
-	"L-p5s5":   {ID: "L-p5s5", Value: "aura:p5-user:s5-uat", Special: false, PhaseRef: "p5", SubstepRef: "s5"},
-	"L-p6s6":   {ID: "L-p6s6", Value: "aura:p6-plan:s6-ratify", Special: false, PhaseRef: "p6", SubstepRef: "s6"},
-	"L-p7s7":   {ID: "L-p7s7", Value: "aura:p7-plan:s7-handoff", Special: false, PhaseRef: "p7", SubstepRef: "s7"},
-	"L-p8s8":   {ID: "L-p8s8", Value: "aura:p8-impl:s8-plan", Special: false, PhaseRef: "p8", SubstepRef: "s8"},
-	"L-p9s9":   {ID: "L-p9s9", Value: "aura:p9-impl:s9-slice", Special: false, PhaseRef: "p9", SubstepRef: "s9"},
-	"L-p10s10": {ID: "L-p10s10", Value: "aura:p10-impl:s10-review", Special: false, PhaseRef: "p10", SubstepRef: "s10"},
-	"L-p11s11": {ID: "L-p11s11", Value: "aura:p11-user:s11-uat", Special: false, PhaseRef: "p11", SubstepRef: "s11"},
-	"L-p12s12": {ID: "L-p12s12", Value: "aura:p12-impl:s12-landing", Special: false, PhaseRef: "p12", SubstepRef: "s12"},
-	"L-urd":        {ID: "L-urd", Value: "aura:urd", Special: true, Description: "User Requirements Document"},
-	"L-superseded": {ID: "L-superseded", Value: "aura:superseded", Special: true, Description: "Superseded proposal or plan"},
+	"L-p1s1_1":      {ID: "L-p1s1_1", Value: "aura:p1-user:s1_1-classify", Special: false, PhaseRef: "p1", SubstepRef: "s1_1"},
+	"L-p1s1_2":      {ID: "L-p1s1_2", Value: "aura:p1-user:s1_2-research", Special: false, PhaseRef: "p1", SubstepRef: "s1_2"},
+	"L-p1s1_3":      {ID: "L-p1s1_3", Value: "aura:p1-user:s1_3-explore", Special: false, PhaseRef: "p1", SubstepRef: "s1_3"},
+	"L-p2s2_1":      {ID: "L-p2s2_1", Value: "aura:p2-user:s2_1-elicit", Special: false, PhaseRef: "p2", SubstepRef: "s2_1"},
+	"L-p2s2_2":      {ID: "L-p2s2_2", Value: "aura:p2-user:s2_2-urd", Special: false, PhaseRef: "p2", SubstepRef: "s2_2"},
+	"L-p3s3":        {ID: "L-p3s3", Value: "aura:p3-plan:s3-propose", Special: false, PhaseRef: "p3", SubstepRef: "s3"},
+	"L-p4s4":        {ID: "L-p4s4", Value: "aura:p4-plan:s4-review", Special: false, PhaseRef: "p4", SubstepRef: "s4"},
+	"L-p5s5":        {ID: "L-p5s5", Value: "aura:p5-user:s5-uat", Special: false, PhaseRef: "p5", SubstepRef: "s5"},
+	"L-p6s6":        {ID: "L-p6s6", Value: "aura:p6-plan:s6-ratify", Special: false, PhaseRef: "p6", SubstepRef: "s6"},
+	"L-p7s7":        {ID: "L-p7s7", Value: "aura:p7-plan:s7-handoff", Special: false, PhaseRef: "p7", SubstepRef: "s7"},
+	"L-p8s8":        {ID: "L-p8s8", Value: "aura:p8-impl:s8-plan", Special: false, PhaseRef: "p8", SubstepRef: "s8"},
+	"L-p9s9":        {ID: "L-p9s9", Value: "aura:p9-impl:s9-slice", Special: false, PhaseRef: "p9", SubstepRef: "s9"},
+	"L-p10s10":      {ID: "L-p10s10", Value: "aura:p10-impl:s10-review", Special: false, PhaseRef: "p10", SubstepRef: "s10"},
+	"L-p11s11":      {ID: "L-p11s11", Value: "aura:p11-user:s11-uat", Special: false, PhaseRef: "p11", SubstepRef: "s11"},
+	"L-p12s12":      {ID: "L-p12s12", Value: "aura:p12-impl:s12-landing", Special: false, PhaseRef: "p12", SubstepRef: "s12"},
+	"L-urd":         {ID: "L-urd", Value: "aura:urd", Special: true, Description: "User Requirements Document"},
+	"L-superseded":  {ID: "L-superseded", Value: "aura:superseded", Special: true, Description: "Superseded proposal or plan"},
 	"L-sev-blocker": {ID: "L-sev-blocker", Value: "aura:severity:blocker", Special: true, SeverityRef: "BLOCKER"},
 	"L-sev-import":  {ID: "L-sev-import", Value: "aura:severity:important", Special: true, SeverityRef: "IMPORTANT"},
 	"L-sev-minor":   {ID: "L-sev-minor", Value: "aura:severity:minor", Special: true, SeverityRef: "MINOR"},
@@ -2064,4 +2064,3 @@ var SubstepDataMap = map[string][]SubstepData{
 		},
 	},
 }
-

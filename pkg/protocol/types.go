@@ -287,10 +287,10 @@ func (e EventType) IsValid() bool {
 // AuditEvent is a generic audit trail event emitted by epoch workflows and
 // activities. JSON tags use camelCase to match Python aura-protocol output.
 type AuditEvent struct {
-	EpochID   string            `json:"epochId"`
-	Phase     PhaseId           `json:"phase"`
-	Role      string            `json:"role"`
-	EventType EventType         `json:"eventType"`
-	Payload   map[string]any    `json:"payload"`
-	Timestamp time.Time         `json:"timestamp"`
+	EpochID   string         `json:"epochId"`
+	Phase     PhaseId        `json:"phase"`
+	Role      string         `json:"role"`
+	EventType EventType      `json:"eventType"`
+	Payload   map[string]any `json:"payload"`
+	Timestamp time.Time      `json:"timestamp"`
 }

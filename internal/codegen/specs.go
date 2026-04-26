@@ -32,13 +32,13 @@ type Example struct {
 // ConstraintSpec is a single protocol constraint in Given/When/Then/Should-Not
 // format. Mirrors Python ConstraintSpec dataclass.
 type ConstraintSpec struct {
-	ID       string
-	Given    string
-	When     string
-	Then     string
+	ID        string
+	Given     string
+	When      string
+	Then      string
 	ShouldNot string
-	Command  string    // optional primary command to run
-	Examples []Example // optional code examples
+	Command   string    // optional primary command to run
+	Examples  []Example // optional code examples
 }
 
 // ─── BehaviorSpec ─────────────────────────────────────────────────────────────
@@ -97,8 +97,8 @@ type RoleSpec struct {
 	ID                 types.RoleId
 	Name               string
 	Description        string
-	Model              string   // e.g. "opus", "sonnet", "haiku"
-	Thinking           string   // e.g. "medium"
+	Model              string // e.g. "opus", "sonnet", "haiku"
+	Thinking           string // e.g. "medium"
 	Tools              []string
 	OwnedPhases        []protocol.PhaseId
 	Introduction       string
@@ -114,7 +114,7 @@ type CommandSpec struct {
 	ID            string // CommandId wire value e.g. "cmd-worker"
 	Name          string // e.g. "aura:worker"
 	Description   string
-	RoleRef       types.RoleId      // may be zero value if unassigned
+	RoleRef       types.RoleId // may be zero value if unassigned
 	Phases        []protocol.PhaseId
 	File          string   // relative path to skill file
 	CreatesLabels []string // label IDs this command creates
@@ -152,7 +152,7 @@ type HandoffSpec struct {
 	SourceRole     types.RoleId
 	TargetRole     types.RoleId
 	AtPhase        protocol.PhaseId
-	ContentLevel   string   // ContentLevel wire value: "full-provenance", "summary-with-ids"
+	ContentLevel   string // ContentLevel wire value: "full-provenance", "summary-with-ids"
 	RequiredFields []string
 }
 
@@ -165,7 +165,7 @@ type FigureSpec struct {
 	Title        string
 	Type         string // FigureType wire value: "ascii-diagram"
 	RoleRefs     []types.RoleId
-	SectionRef   string   // SectionRef wire value: "workflows"
+	SectionRef   string // SectionRef wire value: "workflows"
 	WorkflowRefs []string
 	CommandRefs  []string
 	Content      string // loaded at generation time
@@ -196,11 +196,11 @@ type Checklist struct {
 // CoordinationCommand is a coordination command for inter-agent communication
 // via Beads. Mirrors Python CoordinationCommand dataclass.
 type CoordinationCommand struct {
-	ID      string
-	Action  string
+	ID       string
+	Action   string
 	Template string
-	RoleRef types.RoleId // zero value means shared across all roles
-	Shared  bool
+	RoleRef  types.RoleId // zero value means shared across all roles
+	Shared   bool
 }
 
 // ─── WorkflowAction ───────────────────────────────────────────────────────────
@@ -231,7 +231,7 @@ type WorkflowStage struct {
 	ID                string
 	Name              string
 	Order             int
-	Execution         string // WorkflowExecution: "sequential", "parallel", "conditional-loop"
+	Execution         string           // WorkflowExecution: "sequential", "parallel", "conditional-loop"
 	PhaseRef          protocol.PhaseId // optional phase this stage maps to
 	Actions           []WorkflowAction
 	ExitConditions    []ExitCondition
@@ -281,13 +281,13 @@ type ProcedureStep struct {
 // LabelSpec is the complete specification for a protocol label.
 // Mirrors Python LabelSpec dataclass.
 type LabelSpec struct {
-	ID           string
-	Value        string // the actual label string e.g. "aura:p9-impl:s9-slice"
-	Special      bool
-	PhaseRef     string // optional phase reference
-	SubstepRef   string // optional substep reference
-	SeverityRef  string // optional severity reference
-	Description  string // optional description
+	ID          string
+	Value       string // the actual label string e.g. "aura:p9-impl:s9-slice"
+	Special     bool
+	PhaseRef    string // optional phase reference
+	SubstepRef  string // optional substep reference
+	SeverityRef string // optional severity reference
+	Description string // optional description
 }
 
 // ─── TitleConvention ─────────────────────────────────────────────────────────
@@ -295,12 +295,12 @@ type LabelSpec struct {
 // TitleConvention is a task title naming convention for a phase/substep type.
 // Mirrors Python TitleConvention dataclass.
 type TitleConvention struct {
-	Pattern      string
-	LabelRef     string
-	CreatedBy    string
-	PhaseRef     string // optional phase reference
+	Pattern       string
+	LabelRef      string
+	CreatedBy     string
+	PhaseRef      string // optional phase reference
 	ExtraLabelRef string // optional extra label reference
-	Note         string // optional note
+	Note          string // optional note
 }
 
 // ─── SubstepData ──────────────────────────────────────────────────────────────

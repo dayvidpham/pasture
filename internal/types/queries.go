@@ -26,18 +26,18 @@ type TransitionRecord struct {
 // current role, and full transition history. Mutable — updated by signal
 // handlers within EpochWorkflow.
 type EpochState struct {
-	EpochID          string                        `json:"epochId"`
-	CurrentPhase     protocol.PhaseId              `json:"currentPhase"`
-	CurrentRole      RoleId                        `json:"currentRole"`
-	CompletedPhases  []protocol.PhaseId            `json:"completedPhases"`
-	ReviewVotes      map[ReviewAxis]VoteType        `json:"reviewVotes"`
-	BlockerCount     int                           `json:"blockerCount"`
-	TransitionHistory []TransitionRecord            `json:"transitionHistory"`
+	EpochID           string                  `json:"epochId"`
+	CurrentPhase      protocol.PhaseId        `json:"currentPhase"`
+	CurrentRole       RoleId                  `json:"currentRole"`
+	CompletedPhases   []protocol.PhaseId      `json:"completedPhases"`
+	ReviewVotes       map[ReviewAxis]VoteType `json:"reviewVotes"`
+	BlockerCount      int                     `json:"blockerCount"`
+	TransitionHistory []TransitionRecord      `json:"transitionHistory"`
 	// ReviewCycles tracks per-slice review-fix cycle history.
 	// Key: slice task ID. Value: ordered list of review rounds for that slice.
-	ReviewCycles    map[string][]ReviewCycleRecord `json:"reviewCycles,omitempty"`
-	LastError        *string                       `json:"lastError,omitempty"`
-	ActiveSessionCount int                         `json:"activeSessionCount"`
+	ReviewCycles       map[string][]ReviewCycleRecord `json:"reviewCycles,omitempty"`
+	LastError          *string                        `json:"lastError,omitempty"`
+	ActiveSessionCount int                            `json:"activeSessionCount"`
 }
 
 // ReviewCycleRecord tracks the state of a single review-fix cycle for one slice.
@@ -77,11 +77,11 @@ func (r ReviewCycleRecord) IsCleanExit() bool {
 // AvailableTransitions lists the target PhaseIds reachable from the current
 // phase given the current vote/blocker state.
 type QueryStateResult struct {
-	CurrentPhase         protocol.PhaseId   `json:"currentPhase"`
-	CurrentRole          RoleId             `json:"currentRole"`
-	TransitionHistory    []TransitionRecord `json:"transitionHistory"`
+	CurrentPhase         protocol.PhaseId        `json:"currentPhase"`
+	CurrentRole          RoleId                  `json:"currentRole"`
+	TransitionHistory    []TransitionRecord      `json:"transitionHistory"`
 	Votes                map[ReviewAxis]VoteType `json:"votes"`
-	LastError            *string            `json:"lastError,omitempty"`
-	AvailableTransitions []protocol.PhaseId `json:"availableTransitions"`
-	ActiveSessionCount   int                `json:"activeSessionCount"`
+	LastError            *string                 `json:"lastError,omitempty"`
+	AvailableTransitions []protocol.PhaseId      `json:"availableTransitions"`
+	ActiveSessionCount   int                     `json:"activeSessionCount"`
 }

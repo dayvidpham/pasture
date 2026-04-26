@@ -27,11 +27,11 @@ import (
 // smokeCase is the per-test-case schema that maps to each entry under
 // testdata/cli_smoke.yaml's "cases" list.
 type smokeCase struct {
-	Name                string   `yaml:"name"`
-	Args                []string `yaml:"args"`
-	WantExit            int      `yaml:"want_exit"`
-	WantStdoutContains  string   `yaml:"want_stdout_contains"`
-	WantStderrContains  string   `yaml:"want_stderr_contains"`
+	Name               string   `yaml:"name"`
+	Args               []string `yaml:"args"`
+	WantExit           int      `yaml:"want_exit"`
+	WantStdoutContains string   `yaml:"want_stdout_contains"`
+	WantStderrContains string   `yaml:"want_stderr_contains"`
 }
 
 // smokeSuite is the top-level YAML document: a list of cases.

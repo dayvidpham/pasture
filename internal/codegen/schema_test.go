@@ -18,12 +18,12 @@ import (
 
 // schemaConstraintCheck mirrors one entry in testdata/schema.yaml constraint_checks.
 type schemaConstraintCheck struct {
-	ConstraintID            string   `yaml:"constraint_id"`
-	IsGeneral               bool     `yaml:"is_general"`
-	RoleRefMustContain      []string `yaml:"role_ref_must_contain"`
-	RoleRefMustNotContain   []string `yaml:"role_ref_must_not_contain"`
-	PhaseRefMustContain     []string `yaml:"phase_ref_must_contain"`
-	PhaseRefMustNotContain  []string `yaml:"phase_ref_must_not_contain"`
+	ConstraintID           string   `yaml:"constraint_id"`
+	IsGeneral              bool     `yaml:"is_general"`
+	RoleRefMustContain     []string `yaml:"role_ref_must_contain"`
+	RoleRefMustNotContain  []string `yaml:"role_ref_must_not_contain"`
+	PhaseRefMustContain    []string `yaml:"phase_ref_must_contain"`
+	PhaseRefMustNotContain []string `yaml:"phase_ref_must_not_contain"`
 }
 
 // schemaRoleCheck mirrors one entry in testdata/schema.yaml role_checks.
@@ -43,10 +43,10 @@ type schemaPhaseCheck struct {
 
 // schemaSuite is the top-level structure of testdata/schema.yaml.
 type schemaSuite struct {
-	ConstraintChecks []schemaConstraintCheck `yaml:"constraint_checks"`
-	RoleChecks       []schemaRoleCheck       `yaml:"role_checks"`
-	PhaseChecks      []schemaPhaseCheck      `yaml:"phase_checks"`
-	MustHaveCDATACode bool                   `yaml:"must_have_cdata_code"`
+	ConstraintChecks  []schemaConstraintCheck `yaml:"constraint_checks"`
+	RoleChecks        []schemaRoleCheck       `yaml:"role_checks"`
+	PhaseChecks       []schemaPhaseCheck      `yaml:"phase_checks"`
+	MustHaveCDATACode bool                    `yaml:"must_have_cdata_code"`
 }
 
 // ─── Helper: generate and parse ───────────────────────────────────────────────

@@ -36,9 +36,9 @@ func (v VoteType) IsValid() bool {
 type ReviewAxis string
 
 const (
-	AxisCorrectness  ReviewAxis = "correctness"
-	AxisTestQuality  ReviewAxis = "test_quality"
-	AxisElegance     ReviewAxis = "elegance"
+	AxisCorrectness ReviewAxis = "correctness"
+	AxisTestQuality ReviewAxis = "test_quality"
+	AxisElegance    ReviewAxis = "elegance"
 )
 
 // AllReviewAxes is the ordered slice of all valid ReviewAxis values.

@@ -74,8 +74,8 @@ type openCodeToolCall struct {
 func (a *openCodeAdapter) Parse(record []byte) (SessionUpdate, error) {
 	if len(record) == 0 {
 		return SessionUpdate{}, fmt.Errorf(
-			"opencode-json adapter: Parse: empty record — "+
-				"expected a non-empty JSON object (one OpenCode session record); "+
+			"opencode-json adapter: Parse: empty record — " +
+				"expected a non-empty JSON object (one OpenCode session record); " +
 				"check that the source was not empty before calling Parse",
 		)
 	}
@@ -92,8 +92,8 @@ func (a *openCodeAdapter) Parse(record []byte) (SessionUpdate, error) {
 
 	if raw.SessionID == "" {
 		return SessionUpdate{}, fmt.Errorf(
-			"opencode-json adapter: Parse: missing required field \"sessionId\" — "+
-				"every OpenCode session record must include a non-empty sessionId; "+
+			"opencode-json adapter: Parse: missing required field \"sessionId\" — " +
+				"every OpenCode session record must include a non-empty sessionId; " +
 				"verify the record was captured from an active OpenCode session",
 		)
 	}
@@ -155,4 +155,3 @@ func openCodeToolKind(toolType string) ToolKind {
 		return ToolKindUnknown
 	}
 }
-

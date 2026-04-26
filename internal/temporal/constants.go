@@ -34,4 +34,3 @@ const (
 	QuerySliceProgressState   = "slice_progress_state"
 	QueryActiveSessions       = "active_sessions"
 )
-

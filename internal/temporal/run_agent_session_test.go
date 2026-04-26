@@ -126,11 +126,11 @@ type jsonRPCLine struct {
 // updateToWire converts an AgentUpdateInput into the JSON-RPC wire structure
 // used by the ACP client. This mirrors the acp.SessionUpdate wire format.
 type wireUpdate struct {
-	SessionID  string           `json:"sessionId"`
-	Role       string           `json:"role"`
-	Content    []wireContent    `json:"content,omitempty"`
-	ToolCalls  []wireToolCall   `json:"toolCalls,omitempty"`
-	StopReason string           `json:"stopReason,omitempty"`
+	SessionID  string         `json:"sessionId"`
+	Role       string         `json:"role"`
+	Content    []wireContent  `json:"content,omitempty"`
+	ToolCalls  []wireToolCall `json:"toolCalls,omitempty"`
+	StopReason string         `json:"stopReason,omitempty"`
 }
 
 type wireContent struct {

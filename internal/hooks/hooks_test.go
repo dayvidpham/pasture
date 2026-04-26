@@ -53,9 +53,9 @@ func (h *recordingHandler) payloads() []hooks.HookPayload {
 
 // slowHandler blocks for duration before completing, to test non-blocking semantics.
 type slowHandler struct {
-	delay    time.Duration
-	called   atomic.Int32
-	events   []hooks.HookEvent
+	delay  time.Duration
+	called atomic.Int32
+	events []hooks.HookEvent
 }
 
 func newSlowHandler(delay time.Duration, events ...hooks.HookEvent) *slowHandler {

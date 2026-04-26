@@ -16,13 +16,13 @@ func TestSharedIndexer_1000Updates(t *testing.T) {
 	updates := make([]acp.SessionUpdate, 1000)
 	for i := range updates {
 		updates[i] = acp.SessionUpdate{
-			SessionID:   fmt.Sprintf("session-%d", i),
-			Timestamp:   int64(1_000_000 + i),
-			Role:        "assistant",
-			Content:     []acp.ContentBlock{{Type: "text", Content: fmt.Sprintf("message %d", i)}},
-			StopReason:  acp.StopReasonEndTurn,
-			TokensIn:    10,
-			TokensOut:   20,
+			SessionID:  fmt.Sprintf("session-%d", i),
+			Timestamp:  int64(1_000_000 + i),
+			Role:       "assistant",
+			Content:    []acp.ContentBlock{{Type: "text", Content: fmt.Sprintf("message %d", i)}},
+			StopReason: acp.StopReasonEndTurn,
+			TokensIn:   10,
+			TokensOut:  20,
 		}
 	}
 

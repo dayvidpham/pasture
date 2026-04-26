@@ -316,9 +316,9 @@ func TestPipeline_Next(t *testing.T) {
 		{protocol.PhaseRequest, protocol.PhaseElicit},
 		{protocol.PhaseElicit, protocol.PhasePropose},
 		{protocol.PhaseWorkerSlices, protocol.PhaseCodeReview},
-		{protocol.PhaseLanding, protocol.PhaseComplete},    // last in pipeline → Complete
-		{protocol.PhaseComplete, protocol.PhaseComplete},   // not in pipeline → Complete
-		{"unknown", protocol.PhaseComplete},               // not in pipeline → Complete
+		{protocol.PhaseLanding, protocol.PhaseComplete},  // last in pipeline → Complete
+		{protocol.PhaseComplete, protocol.PhaseComplete}, // not in pipeline → Complete
+		{"unknown", protocol.PhaseComplete},              // not in pipeline → Complete
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -373,8 +373,8 @@ func TestEventType_IsValid(t *testing.T) {
 	invalidCases := []protocol.EventType{
 		"",
 		"unknown",
-		"phaseTransition",   // camelCase not valid (EventType values use PascalCase)
-		"phase-transition",  // hyphen not valid
+		"phaseTransition",  // camelCase not valid (EventType values use PascalCase)
+		"phase-transition", // hyphen not valid
 	}
 	for _, e := range invalidCases {
 		e := e

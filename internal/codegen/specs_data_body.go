@@ -570,8 +570,8 @@ See ` + "`../protocol/HANDOFF_TEMPLATE.md`" + ` for full follow-up handoff examp
 			},
 		},
 		{
-			ID:      "sup-impl-review-severity",
-			Title:   "Impl-Review Severity Tree Procedure",
+			ID:    "sup-impl-review-severity",
+			Title: "Impl-Review Severity Tree Procedure",
 			Content: "The severity behaviors for code review (Phase 10) are defined above as structured behaviors " +
 				"(sup-review-all-slices through sup-followup-epic-timing). " +
 				"The following subsections describe the operational procedures.",
@@ -727,8 +727,8 @@ var supervisorPlanTasksBody = SkillBody{
 	},
 	Sections: []ProseSection{
 		{
-			ID:    "sup-plan-when-to-use",
-			Title: "When to Use",
+			ID:      "sup-plan-when-to-use",
+			Title:   "When to Use",
 			Content: `Received handoff from architect with RATIFIED_PLAN task ID and placeholder IMPL_PLAN task.`,
 		},
 		{
@@ -1156,8 +1156,8 @@ var supervisorSpawnWorkerBody = SkillBody{
 	},
 	Sections: []ProseSection{
 		{
-			ID:    "sup-spawn-when-to-use",
-			Title: "When to Use",
+			ID:      "sup-spawn-when-to-use",
+			Title:   "When to Use",
 			Content: `Implementation tasks ready. Ephemeral reviewers will be spawned per-slice during review phase.`,
 		},
 		{
@@ -1758,8 +1758,8 @@ Storage: ` + "`.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`"
 			},
 		},
 		{
-			ID:    "arch-plan-structure",
-			Title: "Plan Structure",
+			ID:      "arch-plan-structure",
+			Title:   "Plan Structure",
 			Content: "```markdown\n## Problem Space\n**Axes:** parallelism, distribution, reliability\n**Has-a / Is-a:** relationships\n\n## Engineering Tradeoffs\n| Option | Pros | Cons | Decision |\n\n## MVP Milestone\nScope with tradeoff rationale\n\n## Public Interfaces\n```go\ntype Example interface { /* ... */ }\n```\n\n## Validation Checklist\n- [ ] Item 1\n- [ ] Item 2\n\n## BDD Acceptance Criteria\n**Given** X **When** Y **Then** Z **Should Not** W\n```",
 		},
 		{
@@ -1784,13 +1784,13 @@ references:
 The same review/ratify/UAT/handoff cycle (Phases 3-7) applies. After FOLLOWUP_PROPOSAL is ratified, hand off to supervisor via h1 for FOLLOWUP_IMPL_PLAN creation.`,
 		},
 		{
-			ID:    "arch-spawning-reviewers",
-			Title: "Spawning Reviewers",
+			ID:      "arch-spawning-reviewers",
+			Title:   "Spawning Reviewers",
 			Content: "Spawn 3 axis-specific reviewers (A=Correctness, B=Test quality, C=Elegance) as `general-purpose` subagents. Each reviewer must invoke the `/aura:reviewer` skill (via the Skill tool) to load its role instructions — `/aura:reviewer` is a **Skill**, not a subagent type.\n\n```\nTask(description: \"Reviewer A: correctness\", prompt: \"You are Reviewer A (Correctness). First invoke `/aura:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...\", subagent_type: \"general-purpose\")\nTask(description: \"Reviewer B: test quality\", prompt: \"You are Reviewer B (Test quality). First invoke `/aura:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...\", subagent_type: \"general-purpose\")\nTask(description: \"Reviewer C: elegance\", prompt: \"You are Reviewer C (Elegance). First invoke `/aura:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...\", subagent_type: \"general-purpose\")\n```",
 		},
 		{
-			ID:    "arch-supervisor-handoff",
-			Title: "Supervisor Handoff",
+			ID:      "arch-supervisor-handoff",
+			Title:   "Supervisor Handoff",
 			Content: "**DO NOT** spawn supervisor as a Task tool subagent. Instead, invoke:\n\n```\nSkill(skill: \"aura:architect-handoff\")\n```\n\nThe handoff skill guides you through:\n1. Creating the handoff document at `.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`\n2. Launching supervisor via `aura-swarm start --swarm-mode intree --role supervisor -n 1` or `aura-swarm start --epic <id>`\n\n**CRITICAL:** The supervisor launch prompt MUST:\n1. **Start with `Skill(/aura:supervisor)`** — this loads the supervisor's role instructions, including leaf task creation\n2. Include all Beads task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)\n3. Include the handoff document path\n\n**DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks from the ratified plan.",
 		},
 	},
@@ -1914,45 +1914,45 @@ See ` + "`../protocol/CONSTRAINTS.md`" + ` for coding standards and severity def
 	// as a self-contained sub-skill and must include its own behavioral directives.
 	Behaviors: []BehaviorSpec{
 		{
-			ID:    "impl-rev-b1",
-			Given: "all slices complete",
-			When:  "starting review",
-			Then:  "spawn 3 reviewers for ALL slices",
+			ID:        "impl-rev-b1",
+			Given:     "all slices complete",
+			When:      "starting review",
+			Then:      "spawn 3 reviewers for ALL slices",
 			ShouldNot: "assign reviewers to single slices",
 		},
 		{
-			ID:    "impl-rev-b2",
-			Given: "reviewer assigned",
-			When:  "reviewing",
-			Then:  "check each slice against criteria",
+			ID:        "impl-rev-b2",
+			Given:     "reviewer assigned",
+			When:      "reviewing",
+			Then:      "check each slice against criteria",
 			ShouldNot: "skip any slice",
 		},
 		{
-			ID:    "impl-rev-b3",
-			Given: "review round",
-			When:  "creating severity groups",
-			Then:  "ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty",
+			ID:        "impl-rev-b3",
+			Given:     "review round",
+			When:      "creating severity groups",
+			Then:      "ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty",
 			ShouldNot: "lazily create groups only when findings exist",
 		},
 		{
-			ID:    "impl-rev-b4",
-			Given: "BLOCKER finding",
-			When:  "wiring dependencies",
-			Then:  "add dual-parent: blocks BOTH severity group AND slice",
+			ID:        "impl-rev-b4",
+			Given:     "BLOCKER finding",
+			When:      "wiring dependencies",
+			Then:      "add dual-parent: blocks BOTH severity group AND slice",
 			ShouldNot: "wire BLOCKER to only one parent",
 		},
 		{
-			ID:    "impl-rev-b5",
-			Given: "IMPORTANT or MINOR finding",
-			When:  "categorizing",
-			Then:  "add to severity group only (NOT to slice) — these go to follow-up epic",
+			ID:        "impl-rev-b5",
+			Given:     "IMPORTANT or MINOR finding",
+			When:      "categorizing",
+			Then:      "add to severity group only (NOT to slice) — these go to follow-up epic",
 			ShouldNot: "block slices on non-BLOCKER findings",
 		},
 		{
-			ID:    "impl-rev-b6",
-			Given: "review complete with IMPORTANT/MINOR",
-			When:  "finishing",
-			Then:  "supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution)",
+			ID:        "impl-rev-b6",
+			Given:     "review complete with IMPORTANT/MINOR",
+			When:      "finishing",
+			Then:      "supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution)",
 			ShouldNot: "wait for BLOCKERs to resolve before creating follow-up",
 		},
 	},
@@ -2212,8 +2212,8 @@ bd comments add <slice-id> "REVISION NEEDED: <specific issues>"
 ` + "```",
 		},
 		{
-			ID:    "impl-rev-followup-epic",
-			Title: "Follow-up Epic (EPIC_FOLLOWUP)",
+			ID:      "impl-rev-followup-epic",
+			Title:   "Follow-up Epic (EPIC_FOLLOWUP)",
 			Content: `Per [impl-rev-b6], create immediately after review completes.`,
 			Subsections: []ProseSection{
 				{

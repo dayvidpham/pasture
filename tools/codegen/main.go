@@ -69,9 +69,9 @@ var roleSkillDirs = map[types.RoleId]string{
 // Only commands whose FigureSpecs entries have CommandRefs pointing at them need
 // sub-skill header generation. Mirrors Python _COMMAND_SKILL_DIRS in gen_skills.py.
 var commandSkillDirs = map[string]string{
-	"cmd-sup-plan":     "supervisor-plan-tasks",
-	"cmd-sup-spawn":    "supervisor-spawn-worker",
-	"cmd-impl-review":  "impl-review",
+	"cmd-sup-plan":    "supervisor-plan-tasks",
+	"cmd-sup-spawn":   "supervisor-spawn-worker",
+	"cmd-impl-review": "impl-review",
 }
 
 func main() {

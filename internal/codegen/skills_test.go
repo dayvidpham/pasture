@@ -31,7 +31,7 @@ type skillSubSkillCase struct {
 
 // skillsSuite is the top-level structure of testdata/skills.yaml.
 type skillsSuite struct {
-	RoleCases    []skillRoleCase    `yaml:"role_cases"`
+	RoleCases     []skillRoleCase     `yaml:"role_cases"`
 	SubSkillCases []skillSubSkillCase `yaml:"sub_skill_cases"`
 }
 
@@ -642,7 +642,6 @@ func truncate(s string, n int) string {
 	}
 	return s[:n] + "..."
 }
-
 
 // parseHeaderString parses a markdown header string like "## My Section" into
 // its level (number of leading '#' characters) and trimmed title text.

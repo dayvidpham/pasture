@@ -9,8 +9,8 @@
 package formatters
 
 import (
-	stderrors "errors"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"strings"
 
