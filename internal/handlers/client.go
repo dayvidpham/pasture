@@ -45,15 +45,17 @@ func DefaultClientFactory(ctx context.Context, conn config.ConnectionConfig) (Te
 	if err != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
-			What:     fmt.Sprintf("Couldn't connect to the Temporal server at %s.", conn.ServerAddress),
-			Why:      fmt.Sprintf("Dialling the server failed: %s", err),
+			What:     fmt.Sprintf("Couldn't connect to the workflow server at %s.", conn.ServerAddress),
+			Why:      "The connection attempt was refused or timed out.",
+			Where:    "Dialling the workflow server (internal/handlers/client.go in handlers.DefaultClientFactory).",
 			Impact:   "No commands can be sent to running workflows until the connection is restored.",
 			Fix: fmt.Sprintf("1. Check that pastured is running and listening on the right address:\n"+
 				"     pastured --server-address %s\n"+
-				"2. Confirm the Temporal server itself is reachable:\n"+
+				"2. Confirm the workflow server itself is reachable:\n"+
 				"     nc -vz %s\n"+
 				"3. Retry the command once the connection is back.",
 				conn.ServerAddress, conn.ServerAddress),
+			Cause: err,
 		}
 	}
 	return &realClient{c: c}, nil

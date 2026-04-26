@@ -65,6 +65,7 @@ func parseEventID(raw string) (int64, error) {
 			Category: pasterrors.CategoryValidation,
 			What:     "An event ID is required to look up its context links.",
 			Why:      "No event ID was passed as the first positional argument.",
+			Where:    "Looking up an event's contexts (internal/handlers/task_contexts.go in handlers.parseEventID).",
 			Impact:   "The contexts query can't be issued without knowing which event to look up.",
 			Fix: "1. Pass the integer event ID as the first positional argument:\n" +
 				"     pasture task contexts <event-id>\n" +
@@ -77,12 +78,14 @@ func parseEventID(raw string) (int64, error) {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     fmt.Sprintf("%q is not a valid event ID — event IDs are positive whole numbers.", raw),
-			Why:      fmt.Sprintf("The value couldn't be parsed as an integer: %s", err),
+			Why:      "The value isn't a number that pasture can parse.",
+			Where:    "Looking up an event's contexts (internal/handlers/task_contexts.go in handlers.parseEventID).",
 			Impact:   "The contexts query can't be issued because the event ID isn't a number.",
 			Fix: "1. Pass a positive whole number as the event ID:\n" +
 				"     pasture task contexts <event-id>\n" +
 				"2. To find valid event IDs, list recent events first:\n" +
 				"     pasture task events",
+			Cause: err,
 		}
 	}
 	if n <= 0 {
@@ -90,6 +93,7 @@ func parseEventID(raw string) (int64, error) {
 			Category: pasterrors.CategoryValidation,
 			What:     fmt.Sprintf("Event ID %d isn't valid — event IDs start at 1.", n),
 			Why:      "Zero and negative numbers are never assigned to events, so no event would ever match.",
+			Where:    "Looking up an event's contexts (internal/handlers/task_contexts.go in handlers.parseEventID).",
 			Impact:   "The contexts query can't be issued because no event has the ID you provided.",
 			Fix: "1. Pass a positive whole number as the event ID:\n" +
 				"     pasture task contexts <event-id>\n" +

@@ -64,6 +64,7 @@ func TaskAgentsList(w io.Writer, dbPath string, format types.OutputFormat) (int,
 				Category: pasterrors.CategoryConnection,
 				What:     fmt.Sprintf("No pasture database was found at %q.", dbPath),
 				Why:      "The file doesn't exist yet — pasture creates it the first time you run a command that needs it.",
+				Where:    "Listing agents (internal/handlers/task_agents.go in handlers.TaskAgentsList).",
 				Impact:   "No agents can be listed because there's no database to read from.",
 				Fix: fmt.Sprintf("1. Create the database by running any task command — it will be initialized automatically:\n"+
 					"     pasture task list\n"+
@@ -78,7 +79,8 @@ func TaskAgentsList(w io.Writer, dbPath string, format types.OutputFormat) (int,
 		se := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
 			What:     fmt.Sprintf("Couldn't check whether the pasture database exists at %q.", dbPath),
-			Why:      fmt.Sprintf("Reading the file's status failed: %s", err),
+			Why:      "Reading the file's status failed (it might exist but not be accessible).",
+			Where:    "Listing agents (internal/handlers/task_agents.go in handlers.TaskAgentsList).",
 			Impact:   "No agents can be listed because pasture can't tell whether the database is available.",
 			Fix: fmt.Sprintf("1. Check that the file is readable by your user:\n"+
 				"     ls -l %q\n"+
@@ -86,6 +88,7 @@ func TaskAgentsList(w io.Writer, dbPath string, format types.OutputFormat) (int,
 				"3. If the path is wrong, pass the right one:\n"+
 				"     pasture task agents list --db <path>",
 				dbPath),
+			Cause: err,
 		}
 		return pasterrors.ExitCode(se), se
 	}
@@ -99,7 +102,8 @@ func TaskAgentsList(w io.Writer, dbPath string, format types.OutputFormat) (int,
 		se := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
 			What:     fmt.Sprintf("Couldn't open the pasture database at %q.", dbPath),
-			Why:      fmt.Sprintf("Opening the SQLite file failed: %s", err),
+			Why:      "Opening the database file failed.",
+			Where:    "Listing agents (internal/handlers/task_agents.go in handlers.TaskAgentsList).",
 			Impact:   "No agents can be listed because the database is unreachable.",
 			Fix: fmt.Sprintf("1. Confirm the file exists and is a SQLite database:\n"+
 				"     ls -l %q\n"+
@@ -107,6 +111,7 @@ func TaskAgentsList(w io.Writer, dbPath string, format types.OutputFormat) (int,
 				"     pasture task agents list --db <path>\n"+
 				"3. Make sure the file is readable by your user.",
 				dbPath),
+			Cause: err,
 		}
 		return pasterrors.ExitCode(se), se
 	}
@@ -133,6 +138,7 @@ func TaskAgentsShow(w io.Writer, dbPath, agentIDStr string, format types.OutputF
 			Category: pasterrors.CategoryValidation,
 			What:     "An agent ID is required to show an agent.",
 			Why:      "No agent ID was passed as the first positional argument.",
+			Where:    "Showing an agent (internal/handlers/task_agents.go in handlers.TaskAgentsShow).",
 			Impact:   "The agent lookup can't run without knowing which agent to show.",
 			Fix: "1. Pass the agent ID as the first positional argument:\n" +
 				"     pasture task agents show <agent-id>\n" +
@@ -146,13 +152,14 @@ func TaskAgentsShow(w io.Writer, dbPath, agentIDStr string, format types.OutputF
 		se := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     fmt.Sprintf("The agent ID %q isn't in the expected format.", agentIDStr),
-			Why: fmt.Sprintf("Agent IDs look like \"namespace--uuid\" (for example, pasture--01HABC...).\n"+
-				"The value you passed couldn't be parsed: %s",
-				err),
+			Why: "Agent IDs need the shape \"namespace--uuid\" (for example, pasture--01HABC...).\n" +
+				"The value you passed couldn't be split into those two parts.",
+			Where:  "Showing an agent (internal/handlers/task_agents.go in handlers.TaskAgentsShow).",
 			Impact: "The agent lookup can't run because there's no way to know which agent you meant.",
 			Fix: "1. Pass a valid agent ID. Use list to find one:\n" +
 				"     pasture task agents list\n" +
 				"2. Then retry your command with the correct ID.",
+			Cause: err,
 		}
 		return pasterrors.ExitCode(se), se
 	}
@@ -251,7 +258,9 @@ func readAgentEntries(db *sql.DB) ([]formatters.AgentEntry, error) {
 			return nil, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What:     "Couldn't read the list of well-known agents from the pasture database.",
-				Why:      fmt.Sprintf("The SQL query against the well-known-agents table failed: %s", err),
+				Why:      "The query against the well-known-agents table failed.",
+				Where:    "Listing agents (internal/handlers/task_agents.go in handlers.readAgentEntries).",
+				Cause:    err,
 				Impact:   "No agents can be listed because pasture can't read its agent registry.",
 				Fix: "1. If the table is missing, your database is on an older schema — apply the\n" +
 					"   latest migration:\n" +
@@ -267,7 +276,9 @@ func readAgentEntries(db *sql.DB) ([]formatters.AgentEntry, error) {
 				return nil, &pasterrors.StructuredError{
 					Category: pasterrors.CategoryStorage,
 					What:     "A row in the well-known-agents table couldn't be read.",
-					Why:      fmt.Sprintf("Reading a row's fields failed: %s", err),
+					Why:      "Reading a row's fields failed.",
+					Where:    "Listing agents (internal/handlers/task_agents.go in handlers.readAgentEntries).",
+					Cause:    err,
 					Impact:   "The agent list can't be returned because part of the table couldn't be read.",
 					Fix: "1. The database file may be corrupted. Check its integrity:\n" +
 						"     sqlite3 <db> 'PRAGMA integrity_check'\n" +
@@ -282,7 +293,9 @@ func readAgentEntries(db *sql.DB) ([]formatters.AgentEntry, error) {
 			return nil, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What:     "Reading rows from the well-known-agents table stopped before all rows were processed.",
-				Why:      fmt.Sprintf("Iterating over the result set failed: %s", err),
+				Why:      "Iterating over the result set failed.",
+				Where:    "Listing agents (internal/handlers/task_agents.go in handlers.readAgentEntries).",
+				Cause:    err,
 				Impact:   "The agent list may be incomplete — some agents could be missing from the output.",
 				Fix: "1. Retry the command — the error may be transient:\n" +
 					"     pasture task agents list\n" +
@@ -304,7 +317,9 @@ func readAgentEntries(db *sql.DB) ([]formatters.AgentEntry, error) {
 			return nil, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What:     "Couldn't read the agent role assignments from the pasture database.",
-				Why:      fmt.Sprintf("The SQL query against the agent-categories table failed: %s", err),
+				Why:      "The query against the agent-categories table failed.",
+				Where:    "Listing agents (internal/handlers/task_agents.go in handlers.readAgentEntries).",
+				Cause:    err,
 				Impact:   "Agents can be listed but their role assignments will be missing from the output.",
 				Fix: "1. If the table is missing, your database is on an older schema — apply the\n" +
 					"   latest migration:\n" +
@@ -320,7 +335,9 @@ func readAgentEntries(db *sql.DB) ([]formatters.AgentEntry, error) {
 				return nil, &pasterrors.StructuredError{
 					Category: pasterrors.CategoryStorage,
 					What:     "A row in the agent-categories table couldn't be read.",
-					Why:      fmt.Sprintf("Reading a row's fields failed: %s", err),
+					Why:      "Reading a row's fields failed.",
+					Where:    "Listing agents (internal/handlers/task_agents.go in handlers.readAgentEntries).",
+					Cause:    err,
 					Impact:   "Role information for one or more agents can't be returned.",
 					Fix: "1. The database file may be corrupted. Check its integrity:\n" +
 						"     sqlite3 <db> 'PRAGMA integrity_check'\n" +
@@ -338,7 +355,9 @@ func readAgentEntries(db *sql.DB) ([]formatters.AgentEntry, error) {
 			return nil, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What:     "Reading rows from the agent-categories table stopped before all rows were processed.",
-				Why:      fmt.Sprintf("Iterating over the result set failed: %s", err),
+				Why:      "Iterating over the result set failed.",
+				Where:    "Listing agents (internal/handlers/task_agents.go in handlers.readAgentEntries).",
+				Cause:    err,
 				Impact:   "Some agents may be listed without their role assignments.",
 				Fix: "1. Retry the command — the error may be transient:\n" +
 					"     pasture task agents list\n" +
@@ -414,12 +433,14 @@ func tableExists(db *sql.DB, name string) (bool, error) {
 		return false, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     fmt.Sprintf("Couldn't check whether the %q table exists in the pasture database.", name),
-			Why:      fmt.Sprintf("Querying the database's table catalogue failed: %s", err),
+			Why:      "Querying the database's table catalogue failed.",
+			Where:    "Probing the database (internal/handlers/task_agents.go in handlers.tableExists).",
 			Impact:   "The agent listing can't proceed because pasture can't tell which tables are available.",
 			Fix: "1. Make sure the database file is readable and not corrupted:\n" +
 				"     sqlite3 <db> 'PRAGMA integrity_check'\n" +
 				"2. If the file is intact, your database may be on an older schema — run:\n" +
 				"     pasture migrate",
+			Cause: err,
 		}
 	}
 	return true, nil

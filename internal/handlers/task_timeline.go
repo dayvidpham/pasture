@@ -52,6 +52,7 @@ func TaskTimeline(w io.Writer, in TaskTimelineInput, format types.OutputFormat) 
 			Category: pasterrors.CategoryValidation,
 			What:     "A task ID is required to show a timeline.",
 			Why:      "No task ID was passed as the first positional argument.",
+			Where:    "Showing a timeline (internal/handlers/task_timeline.go in handlers.TaskTimeline).",
 			Impact:   "The timeline can't be looked up without knowing which task to query.",
 			Fix: "1. Pass the task ID as the first positional argument:\n" +
 				"     pasture task timeline <task-id>\n" +

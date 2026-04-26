@@ -68,7 +68,8 @@ func queryWorkflow[T any](ctx context.Context, c interface {
 		return zero, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Couldn't read the state of epoch %q.", workflowID),
-			Why:      fmt.Sprintf("The Temporal server rejected the %q query: %s", queryType, err),
+			Why:      fmt.Sprintf("The workflow server rejected the %q query.", queryType),
+			Where:    "Querying the workflow state (internal/handlers/query.go in handlers.queryWorkflow).",
 			Impact:   "The current workflow state can't be returned, so commands depending on it have no view to act on.",
 			Fix: fmt.Sprintf("1. Confirm the epoch is currently running:\n"+
 				"     pasture-msg epoch status --epoch-id %q\n"+
@@ -76,6 +77,7 @@ func queryWorkflow[T any](ctx context.Context, c interface {
 				"     pasture-msg epoch list\n"+
 				"3. Retry the query once the epoch is healthy.",
 				workflowID),
+			Cause: err,
 		}
 	}
 	var result T
@@ -83,12 +85,14 @@ func queryWorkflow[T any](ctx context.Context, c interface {
 		return zero, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("The state returned for epoch %q couldn't be decoded.", workflowID),
-			Why:      fmt.Sprintf("Reading the Temporal query result failed: %s", err),
+			Why:      "Reading the workflow query result failed — the daemon returned an unexpected shape.",
+			Where:    "Querying the workflow state (internal/handlers/query.go in handlers.queryWorkflow).",
 			Impact:   "The state can't be displayed because pasture-msg can't interpret what pastured sent back.",
 			Fix: "1. Check the versions of pastured and pasture-msg — they must match:\n" +
 				"     pastured --version\n" +
 				"     pasture-msg --version\n" +
 				"2. If they differ, update both to the same release.",
+			Cause: err,
 		}
 	}
 	return result, nil
