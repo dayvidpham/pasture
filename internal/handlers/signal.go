@@ -90,7 +90,7 @@ func SignalVote(
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Couldn't record the vote for epoch %q.", epochID),
 			Why:      "The workflow server rejected the vote signal.",
-			Where:    "Recording a review vote (internal/handlers/signal.go in handlers.SignalReviewVote).",
+			Where:    "Recording a review vote (internal/handlers/signal.go in handlers.SignalVote).",
 			Impact:   "The vote was not recorded against this review.",
 			Fix: fmt.Sprintf("1. Confirm the epoch is currently running:\n"+
 				"     pasture-msg epoch status --epoch-id %q\n"+
