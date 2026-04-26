@@ -27,9 +27,10 @@ func OpenTracker(dbPath string) (provenance.Tracker, error) {
 			What:     "Couldn't create the folder for the task database.",
 			Why: fmt.Sprintf(
 				"Tried to create %q so the database file %q could live there, but the\n"+
-					"operating system rejected it: %s",
-				filepath.Dir(dbPath), dbPath, err,
+					"operating system rejected it.",
+				filepath.Dir(dbPath), dbPath,
 			),
+			Where:  "Opening the task database (internal/tasks/open.go in tasks.OpenTracker).",
 			Impact: "No task commands will work until the folder exists and is writable.",
 			Fix: fmt.Sprintf("1. Create the folder yourself:\n"+
 				"     mkdir -p %q\n"+
@@ -37,6 +38,7 @@ func OpenTracker(dbPath string) (provenance.Tracker, error) {
 				"     pasture task --db <writable-path> ...\n"+
 				"   You can also set the environment variable %s.",
 				filepath.Dir(dbPath), DBPathEnv),
+			Cause: err,
 		}
 	}
 
@@ -46,9 +48,10 @@ func OpenTracker(dbPath string) (provenance.Tracker, error) {
 			Category: pasterrors.CategoryConnection,
 			What:     "Couldn't open the task database.",
 			Why: fmt.Sprintf(
-				"Tried to open the SQLite file at %q but it failed: %s",
-				dbPath, err,
+				"Tried to open the database file at %q but it failed.",
+				dbPath,
 			),
+			Where:  "Opening the task database (internal/tasks/open.go in tasks.OpenTracker).",
 			Impact: "Task commands need a working database — none will succeed until it opens.",
 			Fix: fmt.Sprintf("1. Confirm the file exists and is a valid SQLite database:\n"+
 				"     sqlite3 %q .schema\n"+
@@ -58,6 +61,7 @@ func OpenTracker(dbPath string) (provenance.Tracker, error) {
 				"     pasture task --db <path> ...\n"+
 				"   You can also set the environment variable %s.",
 				dbPath, dbPath, dbPath, DBPathEnv),
+			Cause: err,
 		}
 	}
 	return tr, nil
@@ -77,17 +81,16 @@ func ResolveNamespace(explicit string) (string, error) {
 		return "", &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     "Couldn't figure out which project this task belongs to.",
-			Why: fmt.Sprintf(
-				"You didn't pass --namespace, and we tried to guess one from the current\n"+
-					"folder's git remote (or its path) but couldn't: %s",
-				err,
-			),
+			Why: "You didn't pass --namespace, and we tried to guess one from the current\n" +
+				"folder's git remote (or its path) but couldn't.",
+			Where:  "Resolving the project namespace (internal/tasks/open.go in tasks.ResolveNamespace).",
 			Impact: "A task needs a project name, so creation can't continue without one.",
 			Fix: "1. Pass a project name explicitly when creating the task:\n" +
 				"     pasture task create --namespace <project> ...\n" +
 				"2. Or run the command from inside a git checkout that has a remote set,\n" +
 				"   so we can infer the project name from it:\n" +
 				"     git remote -v",
+			Cause: err,
 		}
 	}
 	return ns, nil

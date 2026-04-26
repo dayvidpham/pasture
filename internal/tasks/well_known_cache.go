@@ -96,6 +96,7 @@ func (c *WellKnownAgentCache) MustGet(name string) (provenance.AgentID, error) {
 			What:     fmt.Sprintf("Pasture asked for the built-in agent %q but it isn't registered.", name),
 			Why: "Either the name isn't one of the built-in agents pasture knows about, or\n" +
 				"the daemon didn't get a chance to register them at startup.",
+			Where: "Looking up a built-in agent (internal/tasks/well_known_cache.go in tasks.WellKnownAgentCache.MustGet).",
 			Impact: "The action that needed this agent can't be attributed to anyone in the\n" +
 				"audit log, so it won't be recorded.",
 			Fix: "1. Confirm the name is spelled exactly as one of the built-in agents:\n" +

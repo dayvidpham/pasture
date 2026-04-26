@@ -81,9 +81,10 @@ func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
 			What:     "Couldn't create the folder for the pasture database.",
 			Why: fmt.Sprintf(
 				"Tried to create %q so the database file %q could live there, but the\n"+
-					"operating system rejected it: %s",
-				filepath.Dir(dbPath), dbPath, err,
+					"operating system rejected it.",
+				filepath.Dir(dbPath), dbPath,
 			),
+			Where:  "Opening the pasture database (internal/tasks/open_unified.go in tasks.openTaskTrackerImpl).",
 			Impact: "The pasture database can't be opened until that folder exists and is writable.",
 			Fix: fmt.Sprintf("1. Create the folder yourself:\n"+
 				"     mkdir -p %q\n"+
@@ -91,6 +92,7 @@ func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
 				"     pasture task --db <writable-path> ...\n"+
 				"   You can also set the environment variable %s.",
 				filepath.Dir(dbPath), DBPathEnv),
+			Cause: err,
 		}
 	}
 
@@ -139,9 +141,10 @@ func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
 			Category: pasterrors.CategoryConnection,
 			What:     "Couldn't open the part of the database that holds your tasks.",
 			Why: fmt.Sprintf(
-				"Tried to open the SQLite file at %q for task storage, but it failed: %s",
-				dbPath, err,
+				"Tried to open the database file at %q for task storage, but it failed.",
+				dbPath,
 			),
+			Where:  "Opening the pasture database (internal/tasks/open_unified.go in tasks.openTaskTrackerImpl).",
 			Impact: "Without the task store, no task commands can run and the daemon can't start.",
 			Fix: fmt.Sprintf("1. Confirm the file is a valid SQLite database and isn't already open in\n"+
 				"   another pasture process:\n"+
@@ -153,6 +156,7 @@ func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
 				"     pasture task --db <path> ...\n"+
 				"   You can also set the environment variable %s.",
 				dbPath, DBPathEnv),
+			Cause: err,
 		}
 	}
 
@@ -169,10 +173,11 @@ func openAuditHandle(dbPath string) (*sql.DB, error) {
 			Category: pasterrors.CategoryConnection,
 			What:     "Couldn't open a second connection to the pasture database.",
 			Why: fmt.Sprintf(
-				"Tried to open another SQLite handle on %q (used for audit-context and\n"+
-					"agent-category writes), but it failed: %s",
-				dbPath, err,
+				"Tried to open another database handle on %q (used for audit-context and\n"+
+					"agent-category writes), but it failed.",
+				dbPath,
 			),
+			Where: "Opening the pasture database (internal/tasks/open_unified.go in tasks.openAuditHandle).",
 			Impact: "Some pasture features (linking events to epochs, recording agent categories,\n" +
 				"and reading back epoch timelines) won't work until this connection opens.",
 			Fix: fmt.Sprintf("1. Confirm the database file is readable:\n"+
@@ -181,6 +186,7 @@ func openAuditHandle(dbPath string) (*sql.DB, error) {
 				"2. If something else is holding it exclusively, stop that process and retry:\n"+
 				"     pgrep -af pastured",
 				dbPath, dbPath),
+			Cause: err,
 		}
 	}
 
@@ -201,11 +207,12 @@ func openAuditHandle(dbPath string) (*sql.DB, error) {
 				Category: pasterrors.CategoryStorage,
 				What:     "Couldn't configure the pasture database for safe concurrent writes.",
 				Why: fmt.Sprintf(
-					"Tried to apply the SQLite setting %q on %q, but it failed: %s\n"+
+					"Tried to apply the database setting %q on %q, but it failed.\n"+
 						"This setting is what lets the daemon and the CLI write at the same time\n"+
 						"without one blocking the other for too long.",
-					p, dbPath, err,
+					p, dbPath,
 				),
+				Where: "Opening the pasture database (internal/tasks/open_unified.go in tasks.openAuditHandle).",
 				Impact: "Without this setting, writes from different parts of pasture can stall or\n" +
 					"time out under load.",
 				Fix: fmt.Sprintf("1. Confirm the database file is writable:\n"+
@@ -214,6 +221,7 @@ func openAuditHandle(dbPath string) (*sql.DB, error) {
 					"   local writable disk and point pasture at the new location:\n"+
 					"     pasture task --db <local-path> ...",
 					dbPath),
+				Cause: err,
 			}
 		}
 	}
@@ -237,9 +245,10 @@ func wrapOpenError(dbPath, subsystem string, err error) error {
 		Category: pasterrors.CategoryConnection,
 		What:     fmt.Sprintf("Couldn't open the %s in the pasture database.", subsystem),
 		Why: fmt.Sprintf(
-			"Tried to open the SQLite file at %q for the %s, but it failed: %s",
-			dbPath, subsystem, err,
+			"Tried to open the database file at %q for the %s, but it failed.",
+			dbPath, subsystem,
 		),
+		Where: "Opening the pasture database (internal/tasks/open_unified.go in tasks.wrapOpenError).",
 		Impact: fmt.Sprintf(
 			"Pasture needs the %s to function — no commands can run until it opens.",
 			subsystem,
@@ -255,6 +264,7 @@ func wrapOpenError(dbPath, subsystem string, err error) error {
 			"     pasture task --db <path> ...\n"+
 			"   You can also set the environment variable %s.",
 			dbPath, filepath.Dir(dbPath), dbPath, dbPath, DBPathEnv),
+		Cause: err,
 	}
 }
 
@@ -286,10 +296,10 @@ func ensurePastureTables(db *sql.DB) error {
 			Why: "An internal helper was called before the database was opened. This is a\n" +
 				"bug in the code that constructed the task tracker — a real connection\n" +
 				"should always be passed in first.",
+			Where: "Setting up the pasture-side tables (internal/tasks/open_unified.go in tasks.ensurePastureTables).",
 			Impact: "Pasture's audit-link, agent-category, and well-known-agent tables can't\n" +
 				"be created, so anything that writes to them will fail right after.",
-			Fix: "1. Open the database through the supported entry point first:\n" +
-				"     tracker, err := tasks.OpenTaskTracker(<db-path>)\n" +
+			Fix: "1. Open the database through the supported entry point first.\n" +
 				"2. Then use that tracker for any pasture-side calls.\n" +
 				"   If you hit this from the CLI rather than from your own code, please\n" +
 				"   file a bug — it shouldn't be reachable in normal use.",
@@ -339,10 +349,8 @@ func ensurePastureTables(db *sql.DB) error {
 			return &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What:     fmt.Sprintf("Pasture couldn't create the %q table in the database.", s.name),
-				Why: fmt.Sprintf(
-					"Tried to create the table (or its index) but the database refused: %s",
-					err,
-				),
+				Why:      "Tried to create the table (or its index) but the database refused.",
+				Where:    "Setting up the pasture-side tables (internal/tasks/open_unified.go in tasks.ensurePastureTables).",
 				Impact: "Pasture features that depend on this table (linking events to epochs,\n" +
 					"recording agent categories, looking up well-known agents, and reading\n" +
 					"epoch timelines) will fail until the table can be created.",
@@ -351,6 +359,7 @@ func ensurePastureTables(db *sql.DB) error {
 					"2. If the schema looks out of date, run a migration:\n" +
 					"     pasture migrate\n" +
 					"3. Retry the command once the database is healthy.",
+				Cause: err,
 			}
 		}
 	}
@@ -387,9 +396,10 @@ func decodeAuditEvent(epochID, phaseStr, roleOrAgentName, eventTypeStr, payloadJ
 			What:     "An audit event in the database has a corrupted payload.",
 			Why: fmt.Sprintf(
 				"Reading an event of type %q for epoch %q from the database, the saved\n"+
-					"JSON payload couldn't be parsed: %s",
-				eventTypeStr, epochID, err,
+					"payload couldn't be parsed as JSON.",
+				eventTypeStr, epochID,
 			),
+			Where: "Decoding an audit event (internal/tasks/open_unified.go in tasks.decodeAuditEvent).",
 			Impact: "This event can't be returned in queries or timelines until the payload\n" +
 				"is repaired or the row is removed.",
 			Fix: "1. Look at the broken row directly to see what's stored:\n" +
@@ -397,6 +407,7 @@ func decodeAuditEvent(epochID, phaseStr, roleOrAgentName, eventTypeStr, payloadJ
 				"                    WHERE event_type = '<event-type>'\"\n" +
 				"2. Either fix the JSON in place or remove the row, then retry the query.\n" +
 				"   Removing rows is destructive — back up the database file first.",
+			Cause: err,
 		}
 	}
 	role := roleOrAgentName

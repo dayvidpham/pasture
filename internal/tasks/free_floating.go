@@ -261,17 +261,14 @@ func recordFreeFloating(
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     fmt.Sprintf("Pasture tried to record a %s event without an open task store.", contextKindLabel(kind)),
-			Why: fmt.Sprintf(
-				"The %s helper was called without a task store handle. This is a bug in the\n"+
-					"code that called it — a working task store is required.",
-				fnName,
-			),
+			Why: "The recorder was called without a task store handle. This is a bug in\n" +
+				"the code that called it — a working task store is required.",
+			Where: fmt.Sprintf("Recording a %s event (internal/tasks/free_floating.go in tasks.%s).", contextKindLabel(kind), fnName),
 			Impact: fmt.Sprintf(
 				"The %s event isn't recorded, and nothing was written to the database.",
 				contextKindLabel(kind),
 			),
-			Fix: "1. Open a task store first, then pass it to the recorder:\n" +
-				"     tracker, err := tasks.OpenTaskTracker(<db-path>)\n" +
+			Fix: "1. Open a task store first, then pass it to the recorder.\n" +
 				"2. If you hit this from the CLI rather than from your own code, please\n" +
 				"   file a bug — it shouldn't be reachable in normal use.",
 		}
@@ -281,10 +278,11 @@ func recordFreeFloating(
 			Category: pasterrors.CategoryValidation,
 			What:     fmt.Sprintf("Pasture tried to record a %s event with no identifier to attach it to.", contextKindLabel(kind)),
 			Why: fmt.Sprintf(
-				"The %s helper was called with an empty %s. We need a real identifier so\n"+
+				"The recorder was called with an empty %s. We need a real identifier so\n"+
 					"the event can be looked up later.",
-				fnName, contextIDLabel(kind),
+				contextIDLabel(kind),
 			),
+			Where: fmt.Sprintf("Recording a %s event (internal/tasks/free_floating.go in tasks.%s).", contextKindLabel(kind), fnName),
 			Impact: fmt.Sprintf(
 				"The %s event isn't recorded — without an identifier, nothing could find it again.",
 				contextKindLabel(kind),
@@ -301,16 +299,14 @@ func recordFreeFloating(
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     fmt.Sprintf("Pasture tried to record a %s event with no event type.", contextKindLabel(kind)),
-			Why: fmt.Sprintf(
-				"The %s helper was called with an empty event-type string. Event types are\n"+
-					"how we filter and look up events later, so they can't be blank.",
-				fnName,
-			),
+			Why: "The recorder was called with an empty event-type string. Event types are\n" +
+				"how we filter and look up events later, so they can't be blank.",
+			Where: fmt.Sprintf("Recording a %s event (internal/tasks/free_floating.go in tasks.%s).", contextKindLabel(kind), fnName),
 			Impact: "The event isn't recorded — there'd be no way to ask for events of this\n" +
 				"kind in queries or timelines.",
-			Fix: "1. Pass one of the built-in event type constants:\n" +
-				"     EventGitCommit, EventGitPush, EventGitRebase,\n" +
-				"     EventSkillInvoked, EventSessionRecorded\n" +
+			Fix: "1. Pass one of the built-in event type constants for the event you're\n" +
+				"   recording (for git: GitCommit, GitPush, GitRebase; for skills:\n" +
+				"   SkillInvoked; for sessions: SessionRecorded).\n" +
 				"2. Or pass your own short string (for example \"MyPluginAction\") if you\n" +
 				"   are recording a custom event type.",
 		}
@@ -350,9 +346,10 @@ func recordFreeFloating(
 			Category: pasterrors.CategoryStorage,
 			What:     fmt.Sprintf("Pasture couldn't save the %s event to the database.", contextKindLabel(kind)),
 			Why: fmt.Sprintf(
-				"Tried to write a %q event for %s %q to the audit log, but it failed: %s",
-				eventType, contextIDLabel(kind), contextID, err,
+				"Tried to write a %q event for %s %q to the audit log, but the write failed.",
+				eventType, contextIDLabel(kind), contextID,
 			),
+			Where: fmt.Sprintf("Recording a %s event (internal/tasks/free_floating.go in tasks.%s).", contextKindLabel(kind), fnName),
 			Impact: fmt.Sprintf(
 				"The %s event isn't recorded, and the link between this event and its\n"+
 					"%s won't be created either.",
@@ -361,6 +358,7 @@ func recordFreeFloating(
 			Fix: "1. Make sure the database is writable and at the latest schema version:\n" +
 				"     pasture migrate\n" +
 				"2. Retry the operation that produced this event.",
+			Cause: err,
 		}
 	}
 
@@ -370,9 +368,10 @@ func recordFreeFloating(
 			What:     fmt.Sprintf("Pasture saved the %s event but couldn't link it to its %s.", contextKindLabel(kind), contextIDLabel(kind)),
 			Why: fmt.Sprintf(
 				"The event (id %d, type %q) was written to the audit log, but linking it\n"+
-					"to %s %q failed: %s",
-				eventID, eventType, contextIDLabel(kind), contextID, err,
+					"to %s %q failed.",
+				eventID, eventType, contextIDLabel(kind), contextID,
 			),
+			Where: fmt.Sprintf("Recording a %s event (internal/tasks/free_floating.go in tasks.%s).", contextKindLabel(kind), fnName),
 			Impact: fmt.Sprintf(
 				"The event is in the database but won't show up when you ask for events\n"+
 					"by %s, which leaves a gap in the recorded history.",
@@ -384,6 +383,7 @@ func recordFreeFloating(
 				"   up to date:\n"+
 				"     pasture migrate",
 				contextIDLabel(kind), eventID, kind, contextID),
+			Cause: err,
 		}
 	}
 
