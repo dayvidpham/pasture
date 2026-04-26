@@ -160,10 +160,8 @@ func migrateV2toV3(tx *sql.Tx, nowUnixNano int64) error {
 					"Couldn't %s during the audit-database upgrade from version 2 to 3.",
 					step.what,
 				),
-				Why: fmt.Sprintf(
-					"SQLite refused the CREATE statement: %s",
-					err,
-				),
+				Why:   "The database refused the CREATE statement.",
+				Where: "Upgrading the audit database from version 2 to 3 (internal/audit/migrate_v2_v3.go in audit.migrateV2toV3).",
 				Impact: "The version 2 → 3 upgrade can't complete, so the audit database stays at version 2.\n" +
 					"The new tables that link audit events to tasks, agents, and contexts can't be created\n" +
 					"until this is fixed. No data was changed; the entire upgrade was rolled back.",
@@ -172,6 +170,7 @@ func migrateV2toV3(tx *sql.Tx, nowUnixNano int64) error {
 					"     df -h <path-to-audit.db>\n" +
 					"2. Re-run the migration once the underlying problem is resolved:\n" +
 					"     pasture migrate",
+				Cause: err,
 			}
 		}
 	}

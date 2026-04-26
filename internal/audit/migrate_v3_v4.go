@@ -177,11 +177,9 @@ func backfillEpochContext(tx *sql.Tx) error {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     "Couldn't copy legacy epoch attachments into the new event-to-context table during the version 3 → 4 upgrade.",
-			Why: fmt.Sprintf(
-				"SQLite refused the bulk-copy that moves each audit event's old epoch reference into the\n"+
-					"new context-edges table: %s",
-				err,
-			),
+			Why: "The database refused the bulk-copy that moves each audit event's old epoch reference\n" +
+				"into the new context-edges table.",
+			Where: "Upgrading the audit database from version 3 to 4 (internal/audit/migrate_v3_v4.go in audit.migrateV3toV4Step).",
 			Impact: "The version 3 → 4 upgrade can't preserve the link between past audit events and the\n" +
 				"epochs they belong to, so it was rolled back. The audit database stays at version 3.",
 			Fix: "1. Confirm the audit database file is writable:\n" +
@@ -193,6 +191,7 @@ func backfillEpochContext(tx *sql.Tx) error {
 				"     sqlite3 <path-to-audit.db> '.schema context_edges'\n" +
 				"3. Re-run the migration once the underlying problem is resolved:\n" +
 				"     pasture migrate",
+			Cause: err,
 		}
 	}
 	return nil
@@ -286,11 +285,9 @@ func rebuildAuditEventsWithoutEpochID(tx *sql.Tx) error {
 					"Couldn't %s while rebuilding the audit-events table for the version 3 → 4 upgrade.",
 					s.what,
 				),
-				Why: fmt.Sprintf(
-					"SQLite refused one of the steps in the table-rebuild dance (create new table, copy\n"+
-						"rows, drop old, rename, recreate indexes): %s",
-					err,
-				),
+				Why: "The database refused one of the steps in the table-rebuild dance (create new table,\n" +
+					"copy rows, drop old, rename, recreate indexes).",
+				Where: "Upgrading the audit database from version 3 to 4 (internal/audit/migrate_v3_v4.go in audit.rebuildAuditEventsWithoutEpochID).",
 				Impact: "The audit-events table rebuild stopped midway, so the entire version 3 → 4 upgrade\n" +
 					"was rolled back. The audit database stays at version 3.",
 				Fix: "1. Confirm the audit database file is writable:\n" +
@@ -302,6 +299,7 @@ func rebuildAuditEventsWithoutEpochID(tx *sql.Tx) error {
 					"   payload, timestamp.\n" +
 					"3. Re-run the migration once the table shape matches:\n" +
 					"     pasture migrate",
+				Cause: err,
 			}
 		}
 	}

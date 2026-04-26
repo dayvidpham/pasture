@@ -13,7 +13,6 @@ package audit
 
 import (
 	"database/sql"
-	"fmt"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 )
@@ -31,10 +30,8 @@ func migrateV1toV2(tx *sql.Tx, nowUnixNano int64) error {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     "Couldn't create the audit-database version-tracking table during the upgrade from version 1 to 2.",
-			Why: fmt.Sprintf(
-				"SQLite refused our CREATE TABLE statement for the schema-version table: %s",
-				err,
-			),
+			Why:      "The database refused the CREATE TABLE statement for the schema-version table.",
+			Where:    "Upgrading the audit database from version 1 to 2 (internal/audit/migrate_v1_v2.go in audit.migrateV1toV2).",
 			Impact: "The version 1 → 2 upgrade can't complete, so the audit database stays at version 1.\n" +
 				"No data was changed; the entire upgrade was rolled back.",
 			Fix: "1. Confirm the audit database file is writable and the disk has free space:\n" +
@@ -42,6 +39,7 @@ func migrateV1toV2(tx *sql.Tx, nowUnixNano int64) error {
 				"     df -h <path-to-audit.db>\n" +
 				"2. Re-run the migration once the underlying problem is resolved:\n" +
 				"     pasture migrate",
+			Cause: err,
 		}
 	}
 	if err := writeVersion(tx, 2, nowUnixNano); err != nil {

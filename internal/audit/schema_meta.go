@@ -18,7 +18,6 @@ package audit
 
 import (
 	"database/sql"
-	"fmt"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 )
@@ -52,10 +51,8 @@ func schemaMetaTableExists(db *sql.DB) (bool, error) {
 		return false, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     "Couldn't check whether the audit-database version-tracking table exists.",
-			Why: fmt.Sprintf(
-				"SQLite refused our query against its internal table catalog: %s",
-				err,
-			),
+			Why:      "The database refused the query against its internal table catalog.",
+			Where:    "Reading the audit-database schema version (internal/audit/schema_meta.go in audit.schemaMetaTableExists).",
 			Impact: "Without knowing whether the version-tracking table is present, the migrator can't tell\n" +
 				"what version the audit database is at. The database can't be opened until this resolves.",
 			Fix: "1. Confirm the audit database file exists, is readable by this process, and isn't corrupted:\n" +
@@ -63,6 +60,7 @@ func schemaMetaTableExists(db *sql.DB) (bool, error) {
 				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
 				"2. Re-check the version once the file is healthy:\n" +
 				"     pasture migrate --dry-run",
+			Cause: err,
 		}
 	}
 	return true, nil
@@ -89,10 +87,8 @@ func readVersion(db *sql.DB) (int, error) {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     "Couldn't read the audit database's current version.",
-			Why: fmt.Sprintf(
-				"SQLite refused our read of the schema-version table: %s",
-				err,
-			),
+			Why:      "The database refused the read of the schema-version table.",
+			Where:    "Reading the audit-database schema version (internal/audit/schema_meta.go in audit.readVersion).",
 			Impact: "Without knowing the current version, the migrator can't decide what (if anything)\n" +
 				"needs to be upgraded. The audit database can't be opened until this resolves.",
 			Fix: "1. Confirm the audit database file is accessible and not corrupted:\n" +
@@ -101,6 +97,7 @@ func readVersion(db *sql.DB) (int, error) {
 				"2. If the file looks intact, take a backup and re-check the version:\n" +
 				"     cp <path-to-audit.db> <path-to-audit.db>.backup\n" +
 				"     pasture migrate --dry-run",
+			Cause: err,
 		}
 	}
 	if !version.Valid {
@@ -128,10 +125,8 @@ func writeVersion(tx *sql.Tx, version int, nowUnixNano int64) error {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     "Couldn't record the new version after the audit-database upgrade ran.",
-			Why: fmt.Sprintf(
-				"SQLite refused our insert into the schema-version table: %s",
-				err,
-			),
+			Why:      "The database refused the insert into the schema-version table.",
+			Where:    "Stamping the new audit-database version (internal/audit/schema_meta.go in audit.writeVersion).",
 			Impact: "The upgrade itself is rolled back because the version stamp couldn't be saved. The\n" +
 				"next time you open the audit database, the same upgrade will be attempted again.",
 			Fix: "1. Confirm the audit database file is writable and the disk has free space:\n" +
@@ -139,6 +134,7 @@ func writeVersion(tx *sql.Tx, version int, nowUnixNano int64) error {
 				"     df -h <path-to-audit.db>\n" +
 				"2. Re-run the migration once the underlying problem is resolved:\n" +
 				"     pasture migrate",
+			Cause: err,
 		}
 	}
 	return nil

@@ -20,12 +20,12 @@ import (
 // ─── Search Attribute Keys (typed) ───────────────────────────────────────────
 
 var (
-	saEpochIDKey     = temporalsdk.NewSearchAttributeKeyString(SAEpochID)
-	saPhaseKey       = temporalsdk.NewSearchAttributeKeyKeyword(SAPhase)
-	saRoleKey        = temporalsdk.NewSearchAttributeKeyKeyword(SARole)
-	saStatusKey      = temporalsdk.NewSearchAttributeKeyKeyword(SAStatus)
-	saDomainKey      = temporalsdk.NewSearchAttributeKeyKeyword(SADomain)
-	saLastEventKey   = temporalsdk.NewSearchAttributeKeyKeyword(SALastEventType)
+	saEpochIDKey   = temporalsdk.NewSearchAttributeKeyString(SAEpochID)
+	saPhaseKey     = temporalsdk.NewSearchAttributeKeyKeyword(SAPhase)
+	saRoleKey      = temporalsdk.NewSearchAttributeKeyKeyword(SARole)
+	saStatusKey    = temporalsdk.NewSearchAttributeKeyKeyword(SAStatus)
+	saDomainKey    = temporalsdk.NewSearchAttributeKeyKeyword(SADomain)
+	saLastEventKey = temporalsdk.NewSearchAttributeKeyKeyword(SALastEventType)
 )
 
 // phaseDomain maps PhaseId to its protocol domain string.
@@ -55,18 +55,18 @@ type EpochInput struct {
 
 // EpochResult is the return value of EpochWorkflow when the epoch reaches COMPLETE.
 type EpochResult struct {
-	EpochID                    string           `json:"epochId"`
-	FinalPhase                 protocol.PhaseId `json:"finalPhase"`
-	TransitionCount            int              `json:"transitionCount"`
-	SuccessfulTransitionCount  int              `json:"successfulTransitionCount"`
-	ConstraintViolationsTotal  int              `json:"constraintViolationsTotal"`
+	EpochID                   string           `json:"epochId"`
+	FinalPhase                protocol.PhaseId `json:"finalPhase"`
+	TransitionCount           int              `json:"transitionCount"`
+	SuccessfulTransitionCount int              `json:"successfulTransitionCount"`
+	ConstraintViolationsTotal int              `json:"constraintViolationsTotal"`
 }
 
 // SliceInput is the workflow input for SliceWorkflow.
 type SliceInput struct {
 	EpochID          string `json:"epochId"`
 	SliceID          string `json:"sliceId"`
-	PhaseSpec        string `json:"phaseSpec"`         // human-readable; serializable future
+	PhaseSpec        string `json:"phaseSpec"` // human-readable; serializable future
 	ParentWorkflowID string `json:"parentWorkflowId"`
 }
 
@@ -86,8 +86,8 @@ type ReviewInput struct {
 
 // ReviewResult is the return value of ReviewPhaseWorkflow.
 type ReviewResult struct {
-	PhaseID    string                        `json:"phaseId"`
-	Success    bool                          `json:"success"`
+	PhaseID    string                              `json:"phaseId"`
+	Success    bool                                `json:"success"`
 	VoteResult map[types.ReviewAxis]types.VoteType `json:"voteResult"`
 }
 
@@ -116,12 +116,12 @@ type ReviewResult struct {
 //   - Signal handlers enqueue; transitions happen in the run loop.
 //   - Search attributes updated via UpsertTypedSearchAttributes on every transition.
 type EpochWorkflow struct {
-	pendingAdvance  []types.PhaseAdvanceSignal
-	pendingVotes    []types.ReviewVoteSignal
-	totalViolations int
-	sm              *EpochStateMachine
+	pendingAdvance   []types.PhaseAdvanceSignal
+	pendingVotes     []types.ReviewVoteSignal
+	totalViolations  int
+	sm               *EpochStateMachine
 	sliceProgressLog []types.SliceProgressSignal
-	activeSessions  []types.RegisterSessionSignal
+	activeSessions   []types.RegisterSessionSignal
 }
 
 // Run is the EpochWorkflow entry point. Initializes the state machine, sets
@@ -356,14 +356,14 @@ func (w *EpochWorkflow) ActiveSessions() []types.RegisterSessionSignal {
 // workflow.ExecuteActivity. These must match the exported method names on
 // *Activities exactly, since Temporal registers struct methods by simple name.
 const (
-	ActivityCheckConstraints   = "CheckConstraints"
-	ActivityRecordTransition   = "RecordTransition"
-	ActivityRecordAuditEvent   = "RecordAuditEvent"
-	ActivityQueryAuditEvents   = "QueryAuditEvents"
+	ActivityCheckConstraints     = "CheckConstraints"
+	ActivityRecordTransition     = "RecordTransition"
+	ActivityRecordAuditEvent     = "RecordAuditEvent"
+	ActivityQueryAuditEvents     = "QueryAuditEvents"
 	ActivityRecordSessionEntries = "RecordSessionEntries"
 	ActivityQuerySessionEntries  = "QuerySessionEntries"
-	ActivityRunAgentSession    = "RunAgentSession"
-	ActivityDispatchHook       = "DispatchHook"
+	ActivityRunAgentSession      = "RunAgentSession"
+	ActivityDispatchHook         = "DispatchHook"
 )
 
 // ─── Temporal workflow registration ─────────────────────────────────────────
