@@ -129,7 +129,7 @@ cases:
   - name: epoch start malformed epoch-id rejected
     args: ["epoch", "start", "--epoch-id", "not-a-task-id"]
     want_exit: 1
-    want_stderr_contains: "The epoch ID you provided is not valid"
+    want_stderr_contains: "The epoch ID \"not-a-task-id\" is not valid."
 
   # PROPOSAL-2 §11 Scenario 13 (continued): the Fix substring on stderr
   # nudges the operator toward the canonical recovery flow. The legacy

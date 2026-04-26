@@ -89,14 +89,11 @@ func validateEpochID(epochID, caller string) error {
 	if _, err := provenance.ParseTaskID(epochID); err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "The epoch ID you provided is not valid.",
-			Why: fmt.Sprintf(
-				"%q doesn't match the required ID format. We expect IDs that look like\n"+
-					"\"yourproject--01968a3c-1234-...\" — a project name followed by \"--\"\n"+
-					"and a UUID. The separator \"--\" was not found in what you provided,\n"+
-					"so we couldn't split it into the two required parts.",
-				epochID,
-			),
+			What:     fmt.Sprintf("The epoch ID %q is not valid.", epochID),
+			Why: "Epoch IDs need the shape \"yourproject--01968a3c-...\" — a project name\n" +
+				"followed by \"--\" and a UUID. The value you passed couldn't be split\n" +
+				"into those two parts because the \"--\" separator was missing.",
+			Where: fmt.Sprintf("Recording a workflow event (internal/temporal/activities.go in %s).", caller),
 			Impact: "The epoch can't be started. Without a properly-formatted ID, the audit\n" +
 				"log can't link events back to any task, which would leave a broken trail.",
 			Fix: "1. Create a task first to get a valid ID:\n" +
@@ -104,6 +101,7 @@ func validateEpochID(epochID, caller string) error {
 				"2. Or find one that already exists:\n" +
 				"     pasture task list --status=open --type=feature\n" +
 				"3. Pass the returned ID as --epoch-id when starting the epoch.",
+			Cause: err,
 		}
 	}
 	return nil
@@ -266,9 +264,11 @@ func (a *Activities) RecordTransition(ctx context.Context, epochID string, recor
 				What:     "The phase transition couldn't be saved to the audit log.",
 				Why: fmt.Sprintf(
 					"Writing the transition %q → %q (epoch %q, triggered by %q) to the\n"+
-						"database failed: %s",
-					record.FromPhase, record.ToPhase, epochID, record.TriggeredBy, err,
+						"database failed.",
+					record.FromPhase, record.ToPhase, epochID, record.TriggeredBy,
 				),
+				Where: "Recording a phase transition (internal/temporal/activities.go in Activities.RecordTransition).",
+				Cause: err,
 				Impact: "The workflow's transition history will diverge from the saved record,\n" +
 					"and later queries on this epoch's timeline will be incomplete.",
 				Fix: "1. Make sure the database is writable and at the latest schema version:\n" +
@@ -283,9 +283,10 @@ func (a *Activities) RecordTransition(ctx context.Context, epochID string, recor
 				Category: pasterrors.CategoryStorage,
 				What:     "The phase transition was saved but couldn't be linked to its epoch.",
 				Why: fmt.Sprintf(
-					"The audit event (id %d) was written, but linking it to epoch %q failed: %s",
-					eventID, epochID, attachErr,
+					"The audit event (id %d) was written, but linking it to epoch %q failed.",
+					eventID, epochID,
 				),
+				Where: "Recording a phase transition (internal/temporal/activities.go in Activities.RecordTransition).",
 				Impact: "The event is still in the database but won't show up when you ask for the\n" +
 					"epoch's timeline, which leaves a hole in the recorded history.",
 				Fix: "1. Repair the link by re-attaching the event to its epoch:\n" +
@@ -293,6 +294,7 @@ func (a *Activities) RecordTransition(ctx context.Context, epochID string, recor
 					"2. If repair keeps failing, run a migration to make sure the schema is up\n" +
 					"   to date:\n" +
 					"     pasture migrate",
+				Cause: attachErr,
 			}
 		}
 	} else {
@@ -303,9 +305,11 @@ func (a *Activities) RecordTransition(ctx context.Context, epochID string, recor
 				What:     "The phase transition couldn't be saved to the audit log.",
 				Why: fmt.Sprintf(
 					"Writing the transition %q → %q (epoch %q, triggered by %q) to the\n"+
-						"database failed: %s",
-					record.FromPhase, record.ToPhase, epochID, record.TriggeredBy, err,
+						"database failed.",
+					record.FromPhase, record.ToPhase, epochID, record.TriggeredBy,
 				),
+				Where: "Recording a phase transition (internal/temporal/activities.go in Activities.RecordTransition).",
+				Cause: err,
 				Impact: "The transition isn't in the audit log, so timeline queries for this\n" +
 					"epoch will be missing this entry.",
 				Fix: "1. Verify the audit database is reachable and at the latest schema:\n" +
@@ -386,9 +390,11 @@ func (a *Activities) RecordAuditEvent(ctx context.Context, event protocol.AuditE
 				Category: pasterrors.CategoryStorage,
 				What:     "An audit event couldn't be saved to the database.",
 				Why: fmt.Sprintf(
-					"Writing the %q event (epoch %q, phase %q) to the database failed: %s",
-					event.EventType, event.EpochID, event.Phase, err,
+					"Writing the %q event (epoch %q, phase %q) to the database failed.",
+					event.EventType, event.EpochID, event.Phase,
 				),
+				Where: "Recording an audit event (internal/temporal/activities.go in Activities.RecordAuditEvent).",
+				Cause: err,
 				Impact: "The event isn't in the audit log, so it won't show up in this epoch's\n" +
 					"timeline or in event queries for this epoch.",
 				Fix: "1. Make sure the database is writable and at the latest schema version:\n" +
@@ -408,15 +414,17 @@ func (a *Activities) RecordAuditEvent(ctx context.Context, event protocol.AuditE
 					Category: pasterrors.CategoryStorage,
 					What:     "The audit event was saved but couldn't be linked to its epoch.",
 					Why: fmt.Sprintf(
-						"The event (id %d) was written, but linking it to epoch %q failed: %s",
-						eventID, event.EpochID, attachErr,
+						"The event (id %d) was written, but linking it to epoch %q failed.",
+						eventID, event.EpochID,
 					),
+					Where: "Recording an audit event (internal/temporal/activities.go in Activities.RecordAuditEvent).",
 					Impact: "The event is in the database but won't appear in this epoch's timeline,\n" +
 						"which leaves a gap in the recorded history.",
 					Fix: "1. Repair the link by re-attaching the event to its epoch:\n" +
 						fmt.Sprintf("     pasture task contexts attach %d EpochContext %q\n", eventID, event.EpochID) +
 						"2. If repair keeps failing, run a migration:\n" +
 						"     pasture migrate",
+					Cause: attachErr,
 				}
 			}
 		}
@@ -502,14 +510,16 @@ func (a *Activities) QueryAuditEvents(ctx context.Context, epochID string, phase
 			Category: pasterrors.CategoryStorage,
 			What:     "The audit log couldn't be read for that epoch.",
 			Why: fmt.Sprintf(
-				"Looking up events for epoch %q from the database failed: %s",
-				epochID, err,
+				"Looking up events for epoch %q from the database failed.",
+				epochID,
 			),
+			Where: "Reading audit events (internal/temporal/activities.go in Activities.QueryAuditEvents).",
 			Impact: "Tools that show this epoch's history won't be able to display its events\n" +
 				"until the read succeeds.",
 			Fix: "1. Make sure the database is at the latest schema and is reachable:\n" +
 				"     pasture migrate\n" +
 				"2. Retry the query once the database is healthy.",
+			Cause: err,
 		}
 	}
 	return events, nil
@@ -550,14 +560,16 @@ func (a *Activities) RecordSessionEntries(ctx context.Context, entries []protoco
 			Category: pasterrors.CategoryStorage,
 			What:     "An agent session's entries couldn't be saved to the audit log.",
 			Why: fmt.Sprintf(
-				"Writing %d session entries to the database failed: %s",
-				len(entries), err,
+				"Writing %d session entries to the database failed.",
+				len(entries),
 			),
+			Where: "Recording agent session entries (internal/temporal/activities.go in Activities.RecordSessionEntries).",
 			Impact: "The agent's session history is missing from the audit log, so you won't\n" +
 				"be able to replay or inspect what happened in this session.",
 			Fix: "1. Make sure the database is writable and at the latest schema:\n" +
 				"     pasture migrate\n" +
 				"2. Re-run the agent session once the database is healthy.",
+			Cause: err,
 		}
 	}
 	return nil
@@ -575,14 +587,16 @@ func (a *Activities) QuerySessionEntries(ctx context.Context, sessionID string) 
 			Category: pasterrors.CategoryStorage,
 			What:     "An agent session's entries couldn't be read from the audit log.",
 			Why: fmt.Sprintf(
-				"Looking up entries for session %q from the database failed: %s",
-				sessionID, err,
+				"Looking up entries for session %q from the database failed.",
+				sessionID,
 			),
+			Where: "Reading agent session entries (internal/temporal/activities.go in Activities.QuerySessionEntries).",
 			Impact: "Tools that show this session's history won't be able to display it until\n" +
 				"the read succeeds.",
 			Fix: "1. Make sure the database is at the latest schema and is reachable:\n" +
 				"     pasture migrate\n" +
 				"2. Retry the query once the database is healthy.",
+			Cause: err,
 		}
 	}
 	return entries, nil
@@ -610,9 +624,10 @@ func (a *Activities) RunAgentSession(ctx context.Context, input RunAgentSessionI
 			Category: pasterrors.CategoryWorkflow,
 			What:     "The agent process couldn't be started.",
 			Why: fmt.Sprintf(
-				"Launching the %q agent for epoch %q failed: %s",
-				input.AgentCmd, input.EpochID, err,
+				"Launching the %q agent for epoch %q failed.",
+				input.AgentCmd, input.EpochID,
 			),
+			Where: "Running an agent session (internal/temporal/activities.go in Activities.RunAgentSession).",
 			Impact: "No agent session can run for this epoch until the agent binary is\n" +
 				"reachable, so the workflow step that needs the agent will not progress.",
 			Fix: "1. Check that the agent binary is installed and on PATH:\n" +
@@ -620,6 +635,7 @@ func (a *Activities) RunAgentSession(ctx context.Context, input RunAgentSessionI
 				"2. Confirm the binary is executable:\n" +
 				fmt.Sprintf("     test -x \"$(command -v %s)\" && echo OK\n", input.AgentCmd) +
 				"3. Re-run the workflow step once the agent is available.",
+			Cause: err,
 		}
 	}
 

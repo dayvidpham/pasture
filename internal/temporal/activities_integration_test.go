@@ -472,8 +472,8 @@ func TestActivities_RecordTransition_RejectsMalformedEpochID(t *testing.T) {
 	if !strings.Contains(msg, "validation error") {
 		t.Errorf("error message %q missing 'validation error' (CategoryValidation marker)", msg)
 	}
-	if !strings.Contains(msg, "The epoch ID you provided is not valid.") {
-		t.Errorf("error message %q missing the plain-language What sentence", msg)
+	if !strings.Contains(msg, "The epoch ID \"not-a-task-id\" is not valid.") {
+		t.Errorf("error message %q missing the plain-language What sentence (with the bad ID surfaced)", msg)
 	}
 	if !strings.Contains(msg, "type: StructuredError") {
 		t.Errorf("error chain %q does not record 'type: StructuredError' (Temporal-side type identifier — workflow callers use applicationErr.Type() to detect the wrapped shape)", msg)
@@ -529,8 +529,8 @@ func TestActivities_RecordAuditEvent_RejectsMalformedEpochID(t *testing.T) {
 	if !strings.Contains(msg, "validation error") {
 		t.Errorf("error message %q missing 'validation error' (CategoryValidation marker)", msg)
 	}
-	if !strings.Contains(msg, "The epoch ID you provided is not valid.") {
-		t.Errorf("error message %q missing the plain-language What sentence", msg)
+	if !strings.Contains(msg, "The epoch ID \"not-a-task-id\" is not valid.") {
+		t.Errorf("error message %q missing the plain-language What sentence (with the bad ID surfaced)", msg)
 	}
 }
 
