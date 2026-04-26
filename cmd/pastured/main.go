@@ -505,13 +505,12 @@ func resolveDBPath(cmd *cobra.Command, existingAuditDBPath string) (resolved str
 				"--audit-db-path flag to be registered on the root command, but at\n" +
 				"least one of them is missing. This is a programming mistake in the\n" +
 				"daemon's command setup, not something an operator can fix at runtime.",
+			Where: "Resolving the daemon database path (cmd/pastured/main.go in main.resolveDBPath).",
 			Impact: "The daemon won't start. Continuing would risk silently writing to\n" +
 				"the wrong file and splitting the audit log across two databases.",
-			Fix: "1. Re-register the missing flag in cmd/pastured/main.go inside\n" +
-				"   newRootCmd, matching the registration of the other flag.\n" +
-				"2. If the flag was removed on purpose, also update resolveDBPath to\n" +
-				"   stop looking for it.\n" +
-				"3. Rebuild and restart the daemon:\n" +
+			Fix: "1. This is a daemon bug — please file an issue.\n" +
+				"2. As a workaround, pin to a previous version of pastured that doesn't\n" +
+				"   have this problem and rebuild:\n" +
 				"     make build && ./bin/pastured",
 		}
 	}

@@ -244,18 +244,16 @@ func (c *Client) Connect(ctx context.Context, agentCmd string, agentArgs ...stri
 		c.cmdMu.Unlock()
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     "This ACP client is already connected to an agent.",
-			Why: "Connect was called a second time on the same client. A client " +
-				"can only manage one agent process at a time, and the first " +
-				"connection is still active.",
-			Impact: "The second connection request was rejected. The first agent " +
+			What:     "This agent client is already connected to an agent.",
+			Why: "The connect call was issued a second time on the same client. A client\n" +
+				"can only manage one agent process at a time, and the first connection\n" +
+				"is still active.",
+			Where: "Connecting to an agent (internal/acp/client.go in acp.Client.Connect).",
+			Impact: "The second connection request was rejected. The first agent\n" +
 				"connection is unaffected and continues running.",
-			Fix: "1. To talk to a second agent, create a fresh client:\n" +
-				"     client := acp.NewClient(handler)\n" +
-				"2. To replace the existing connection, stop it first, then create\n" +
-				"   a new client:\n" +
-				"     existing.Disconnect()\n" +
-				"     client := acp.NewClient(handler)",
+			Fix: "1. To talk to a second agent, create a fresh client.\n" +
+				"2. To replace the existing connection, stop it first, then create a new\n" +
+				"   client.",
 		}
 	}
 
@@ -271,9 +269,10 @@ func (c *Client) Connect(ctx context.Context, agentCmd string, agentArgs ...stri
 			Category: pasterrors.CategoryConnection,
 			What:     "Couldn't connect to the agent's output stream.",
 			Why: fmt.Sprintf(
-				"Setting up the stdout pipe for the %q agent process failed: %s",
-				agentCmd, err,
+				"Setting up the output pipe for the %q agent process failed.",
+				agentCmd,
 			),
+			Where: "Connecting to an agent (internal/acp/client.go in acp.Client.Connect).",
 			Impact: "No session updates from the agent will reach this client, so the\n" +
 				"session can't be observed or recorded.",
 			Fix: fmt.Sprintf("1. Confirm the agent binary is installed and on PATH:\n"+
@@ -282,6 +281,7 @@ func (c *Client) Connect(ctx context.Context, agentCmd string, agentArgs ...stri
 				"     test -x \"$(command -v %s)\" && echo OK\n"+
 				"3. Retry the connection once the binary is reachable.",
 				agentCmd, agentCmd),
+			Cause: err,
 		}
 	}
 
@@ -292,9 +292,10 @@ func (c *Client) Connect(ctx context.Context, agentCmd string, agentArgs ...stri
 			Category: pasterrors.CategoryConnection,
 			What:     "Couldn't start the agent process.",
 			Why: fmt.Sprintf(
-				"Launching %q failed: %s",
-				agentCmd, err,
+				"Launching %q failed.",
+				agentCmd,
 			),
+			Where: "Connecting to an agent (internal/acp/client.go in acp.Client.Connect).",
 			Impact: "No agent session can begin, so the client has nothing to observe\n" +
 				"or forward to its handler.",
 			Fix: fmt.Sprintf("1. Confirm the agent binary is installed and on PATH:\n"+
@@ -303,6 +304,7 @@ func (c *Client) Connect(ctx context.Context, agentCmd string, agentArgs ...stri
 				"     test -x \"$(command -v %s)\" && echo OK\n"+
 				"3. Retry the connection once the binary is reachable.",
 				agentCmd, agentCmd),
+			Cause: err,
 		}
 	}
 	c.cmd = cmd
@@ -444,12 +446,13 @@ func (c *Client) SessionStats(sessionID string) (*SessionStats, error) {
 			Why: "The client only tracks sessions for which it has received at least one\n" +
 				"update from the agent. The ID you asked about hasn't appeared in any\n" +
 				"update yet.",
+			Where: "Reading session statistics (internal/acp/client.go in acp.Client.SessionStats).",
 			Impact: "Session statistics can't be returned because the client has no record\n" +
 				"of this session.",
 			Fix: "1. Double-check the session ID you passed — a typo or stale ID is the\n" +
 				"   most common cause.\n" +
 				"2. Make sure the agent has actually sent at least one update for this\n" +
-				"   session before you call SessionStats; new sessions only become\n" +
+				"   session before asking for statistics; new sessions only become\n" +
 				"   visible after their first update.",
 		}
 	}
