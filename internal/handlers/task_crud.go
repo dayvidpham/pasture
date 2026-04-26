@@ -212,7 +212,7 @@ func wrapInvalidID(op, id string, err error) (int, error) {
 		Category: pasterrors.CategoryValidation,
 		What:     fmt.Sprintf("The task ID %q isn't in the expected format.", id),
 		Why: "Task IDs look like \"yourproject--01968a3c-...\" (a project name, " +
-			"two dashes, and a UUID — e.g., aura-plugins-h4qnq).\n" +
+			"two dashes, and a UUID — e.g., aura-plugins--01968a3c-9d4f-7c8a-bc12-feedfacecafe).\n" +
 			"The value you passed couldn't be split into those two parts.",
 		Where:  fmt.Sprintf("Running %q (handlers/task_crud.go in handlers.wrapInvalidID).", op),
 		Impact: fmt.Sprintf("The %q command can't run because there's no way to know which task you meant.", op),

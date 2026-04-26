@@ -29,7 +29,7 @@ func TaskLabelAdd(w io.Writer, dbPath, idStr, label string, format types.OutputF
 			Fix: "1. Pass the label as the second positional argument:\n" +
 				"     pasture task label add <task-id> <label>\n" +
 				"2. For example:\n" +
-				"     pasture task label add aura-plugins-h4qnq important",
+				"     pasture task label add aura-plugins--01968a3c-9d4f-7c8a-bc12-feedfacecafe important",
 		}
 		return pasterrors.ExitCode(se), se
 	}
