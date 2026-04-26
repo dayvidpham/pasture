@@ -58,10 +58,11 @@ func TestStructuredError_ImplementsErrorInterface(t *testing.T) {
 func TestStructuredError_Report_ContainsAllFields(t *testing.T) {
 	se := &errors.StructuredError{
 		Category: errors.CategoryConfig,
-		What:     "invalid config file",
-		Why:      "YAML parse failed at line 5",
-		Impact:   "daemon cannot start",
-		Fix:      "fix the YAML syntax in ~/.config/pasture/config.yaml",
+		What:     "The configuration file couldn't be loaded.",
+		Why:      "The YAML on line 5 is malformed.",
+		Impact:   "The daemon can't start without a valid configuration.",
+		Fix: "1. Open the file and fix the YAML syntax on line 5:\n" +
+			"     $EDITOR ~/.config/pasture/config.yaml",
 	}
 
 	var buf bytes.Buffer
@@ -69,46 +70,116 @@ func TestStructuredError_Report_ContainsAllFields(t *testing.T) {
 	out := buf.String()
 
 	checks := []string{
-		"config error",
-		"invalid config file",
-		"YAML parse failed at line 5",
-		"daemon cannot start",
-		"fix the YAML syntax",
+		// Top "Error:" line surfaces the What as a plain sentence.
+		"Error: The configuration file couldn't be loaded.",
+		// Full English labels, NOT lowercase shorthand.
+		"Problem:",
+		"Reason:",
+		"Impact:",
+		"How to fix:",
+		// Substantive content from each field.
+		"The YAML on line 5 is malformed.",
+		"The daemon can't start without a valid configuration.",
+		"$EDITOR ~/.config/pasture/config.yaml",
+		// Category MUST NOT appear in the user-visible output.
 	}
 	for _, want := range checks {
 		if !strings.Contains(out, want) {
 			t.Errorf("Report() missing %q in output:\n%s", want, out)
 		}
 	}
+
+	// The literal category string ("config error") must NOT leak into the
+	// user-visible block — the prose conveys the category implicitly.
+	if strings.Contains(out, "config error") {
+		t.Errorf("Report() leaked the category literal into user-visible output:\n%s", out)
+	}
 }
 
 func TestStructuredError_Report_Format(t *testing.T) {
 	se := &errors.StructuredError{
 		Category: errors.CategoryWorkflow,
-		What:     "workflow timed out",
-		Why:      "no activity heartbeat for 60s",
-		Impact:   "session left in unknown state",
-		Fix:      "check worker logs and re-run the signal",
+		What:     "The session ran past its timeout.",
+		Why:      "No worker reported activity for 60 seconds.",
+		Impact:   "The session is stuck and cannot continue.",
+		Fix: "1. Check the worker logs for stalls:\n" +
+			"     pastured logs --tail=200\n" +
+			"2. Re-send the signal once the worker is healthy:\n" +
+			"     pasture-msg <signal-args>",
 	}
 
 	var buf bytes.Buffer
 	se.Report(&buf)
-	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	out := buf.String()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 
-	if len(lines) < 4 {
-		t.Fatalf("Report() produced %d lines, want at least 4", len(lines))
+	if len(lines) < 6 {
+		t.Fatalf("Report() produced %d lines, want at least 6:\n%s", len(lines), out)
 	}
-	if !strings.HasPrefix(lines[0], "workflow error:") {
-		t.Errorf("line 0 = %q, want prefix %q", lines[0], "workflow error:")
+
+	// Line 0: top "Error:" line with the plain-English What.
+	if !strings.HasPrefix(lines[0], "Error: ") {
+		t.Errorf("line 0 = %q, want prefix %q", lines[0], "Error: ")
 	}
-	if !strings.HasPrefix(lines[1], "  why:") {
-		t.Errorf("line 1 = %q, want prefix %q", lines[1], "  why:")
+	// Line 1: blank separator between header and labelled block.
+	if lines[1] != "" {
+		t.Errorf("line 1 = %q, want empty separator line", lines[1])
 	}
-	if !strings.HasPrefix(lines[2], "  impact:") {
-		t.Errorf("line 2 = %q, want prefix %q", lines[2], "  impact:")
+
+	// Locate each labelled line. Order is fixed: Problem, Reason, Impact,
+	// then "How to fix:" with the Fix body indented underneath.
+	wantLabels := []string{
+		"  Problem:",
+		"  Reason:",
+		"  Impact:",
+		"  How to fix:",
 	}
-	if !strings.HasPrefix(lines[3], "  fix:") {
-		t.Errorf("line 3 = %q, want prefix %q", lines[3], "  fix:")
+	for _, want := range wantLabels {
+		found := false
+		for _, line := range lines {
+			if strings.HasPrefix(line, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Report() missing label %q. Full output:\n%s", want, out)
+		}
+	}
+
+	// The "How to fix:" body MUST be indented 4 spaces so steps and
+	// commands hang under the label rather than aligning with it.
+	if !strings.Contains(out, "    1. Check the worker logs for stalls:") {
+		t.Errorf("Report() did not indent fix step. Full output:\n%s", out)
+	}
+	if !strings.Contains(out, "         pastured logs --tail=200") {
+		t.Errorf("Report() did not preserve indented command. Full output:\n%s", out)
+	}
+}
+
+// TestStructuredError_Report_LabelsAreVerticallyAligned guarantees that
+// multi-line values hang under the value column rather than wrapping back
+// to column zero. This is the visual property that makes the block easy
+// to scan.
+func TestStructuredError_Report_LabelsAreVerticallyAligned(t *testing.T) {
+	se := &errors.StructuredError{
+		Category: errors.CategoryValidation,
+		What:     "The ID you provided is not valid.",
+		Why:      "It is missing the required separator.\nWe expect IDs of the form \"project--uuid\".",
+		Impact:   "The epoch can't be started.",
+		Fix:      "1. Generate a fresh ID:\n     pasture task create REQUEST --type=feature \"<title>\"",
+	}
+
+	var buf bytes.Buffer
+	se.Report(&buf)
+	out := buf.String()
+
+	// The continuation line of the Reason value should hang under the
+	// value column (15 leading spaces: "  " indent + 12-wide label column
+	// + 1 separator space).
+	wantContinuation := strings.Repeat(" ", 15) + "We expect IDs of the form"
+	if !strings.Contains(out, wantContinuation) {
+		t.Errorf("Report() did not align Reason continuation under value column. Output:\n%s", out)
 	}
 }
 

@@ -1,19 +1,33 @@
 // Package errors provides structured, actionable error reporting for the pasture system.
 //
-// Every error carries a Category (connection, workflow, validation, config),
-// a machine-readable What field, a human-readable Why/Impact/Fix triple, and
-// implements the standard error interface so it can be used anywhere Go errors
-// are expected. Use errors.As() to extract the full StructuredError from any
-// wrapped error chain.
+// Every error carries a Category (connection, workflow, validation, config,
+// storage), a short plain-language What field, a Why/Impact/Fix triple
+// describing the cause/consequence/recovery, and implements the standard
+// error interface so it can be used anywhere Go errors are expected. Use
+// errors.As() to extract the full StructuredError from any wrapped error
+// chain.
+//
+// User-facing output (Report and the Stringer) follows a plain-language
+// convention: a top "Error:" line summarising the problem in one short
+// sentence, then a vertically aligned block with full English labels
+// (Problem / Reason / Where / Impact / How to fix). Body text must avoid
+// project-internal jargon — translate code-level terms into ordinary
+// English. The "How to fix" section is numbered when there are multiple
+// alternatives, with concrete shell commands on indented lines.
 package errors
 
 import (
 	stderrors "errors"
 	"fmt"
 	"io"
+	"strings"
 )
 
 // Category classifies the error domain and drives exit-code selection.
+//
+// The category is intentionally NOT shown in the user-visible "Error:" line
+// — it remains available programmatically (via the Category field and via
+// ExitCode) for log lines, exit-code mapping, and forensic inspection.
 type Category string
 
 const (
@@ -33,40 +47,111 @@ const (
 
 // StructuredError implements the error interface with actionable diagnostic fields.
 //
-// Every field should be filled in so that the reader knows not just what broke,
-// but why it broke and exactly how to fix it.
+// All four narrative fields (What, Why, Impact, Fix) must be filled in so
+// the reader can understand both the cause and the recovery without reading
+// source code. See package docs for the plain-language conventions all
+// callers must follow.
 type StructuredError struct {
-	// Category classifies the error domain (connection, workflow, validation, config).
+	// Category classifies the error domain (connection, workflow,
+	// validation, config, storage). Drives exit-code selection but is NOT
+	// surfaced in user-visible output — the prose itself must convey the
+	// category implicitly.
 	Category Category
-	// What is a short, one-line description of what went wrong.
+	// What is one short plain-English sentence summarising what went wrong.
+	// Surfaced as the top "Error:" line. Avoid type names, SQL columns,
+	// and protocol references.
 	What string
-	// Why explains the underlying cause of the failure.
+	// Why explains the underlying cause in plain English. Translate
+	// technical roots ("ParseTaskID returned ErrInvalidFormat" → "the ID
+	// didn't have the required separator") so a non-specialist can act on
+	// it.
 	Why string
-	// Impact describes what the caller cannot do as a result of this error.
+	// Impact describes the consequence to the caller in plain English.
+	// "The workflow can't start," not "the workflow boundary cannot
+	// satisfy R5/D5 alignment."
 	Impact string
-	// Fix provides concrete, actionable steps to resolve the error.
+	// Fix provides concrete recovery steps. When multiple alternatives
+	// exist, format as numbered items joined with "\n" — see FixStep
+	// helpers below for the canonical shape. Each step starts with a
+	// plain-English sentence followed by an indented shell command.
 	Fix string
 }
 
 // Error implements the error interface.
-// Returns "<category>: <what>" — suitable for log lines or wrapping with fmt.Errorf("%w").
+//
+// Returns "<category>: <what>" — suitable for log lines or wrapping with
+// fmt.Errorf("%w"). User-facing output should use Report or the package's
+// Print helpers (which emit the full plain-language block).
 func (e *StructuredError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Category, e.What)
 }
 
-// Report writes the full structured error to w, including all diagnostic fields.
+// Report writes the full plain-language error block to w.
 //
-// Output format:
+// Output format (vertically aligned for visual parseability):
 //
-//	<category>: <what>
-//	  why: <why>
-//	  impact: <impact>
-//	  fix: <fix>
+//	Error: <what>
+//
+//	  Problem:    <what, repeated for context>
+//	  Reason:     <why>
+//	  Where:      <impact-of-where, file:line is optional and goes inside the value>
+//	  Impact:     <impact>
+//	  How to fix:
+//	    <fix body — already includes numbered steps and indented commands>
+//
+// The Where line is constructed from the Impact field by callers who want
+// to surface a code location. Callers who don't need a Where line simply
+// fold "what was happening" into Impact or Why.
+//
+// Multi-line What/Why/Impact/Fix values are wrapped to align under the
+// label column so the whole block stays scannable.
 func (e *StructuredError) Report(w io.Writer) {
-	fmt.Fprintf(w, "%s: %s\n", e.Category, e.What)
-	fmt.Fprintf(w, "  why: %s\n", e.Why)
-	fmt.Fprintf(w, "  impact: %s\n", e.Impact)
-	fmt.Fprintf(w, "  fix: %s\n", e.Fix)
+	const labelWidth = 12 // "How to fix:" + space, padded for alignment
+
+	fmt.Fprintf(w, "Error: %s\n\n", e.What)
+
+	writeAligned(w, "Problem:", labelWidth, e.What)
+	writeAligned(w, "Reason:", labelWidth, e.Why)
+	writeAligned(w, "Impact:", labelWidth, e.Impact)
+
+	// "How to fix" is a label on its own line; the Fix body follows
+	// indented underneath so multi-step instructions remain readable.
+	fmt.Fprintf(w, "  %s\n", "How to fix:")
+	writeFixBody(w, e.Fix)
+}
+
+// writeAligned emits "  <label><padding><value>" with continuation lines
+// indented under the value column so multi-line values stay readable.
+func writeAligned(w io.Writer, label string, labelWidth int, value string) {
+	if value == "" {
+		return
+	}
+	pad := labelWidth - len(label)
+	if pad < 1 {
+		pad = 1
+	}
+	indent := strings.Repeat(" ", 2+labelWidth+1) // "  " + label-column + 1 separator space
+	lines := strings.Split(value, "\n")
+	fmt.Fprintf(w, "  %s%s%s\n", label, strings.Repeat(" ", pad), lines[0])
+	for _, line := range lines[1:] {
+		fmt.Fprintf(w, "%s%s\n", indent, line)
+	}
+}
+
+// writeFixBody emits the Fix value indented under the "How to fix:" label.
+// The Fix string is written verbatim line-by-line; callers are responsible
+// for embedding the numbered-step shape (e.g. "1. Step\n     command").
+func writeFixBody(w io.Writer, fix string) {
+	if fix == "" {
+		return
+	}
+	for _, line := range strings.Split(fix, "\n") {
+		if line == "" {
+			fmt.Fprintln(w)
+			continue
+		}
+		fmt.Fprintf(w, "    %s\n", line)
+	}
 }
 
 // ExitCode maps an error to a process exit code.
