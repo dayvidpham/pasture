@@ -303,6 +303,32 @@ make test   # go test -race ./...
 make build  # CGO_ENABLED=0 go build ./...
 ```
 
+### Smoke tests
+
+The unit/integration suite (`make test`) runs in-process against mocked or
+in-memory backends. The smoke tests below exercise the production-shape path
+(real Temporal server, real SQLite file, real CLI invocations) and surface
+wiring bugs the test suite cannot see.
+
+```bash
+nix develop                          # devShell provides temporal-cli, sqlite3, jq
+make smoke-temporal                  # Temporal E2E smoke (aura-plugins-cn5ax)
+```
+
+`make smoke-temporal` boots a local Temporal dev server on ports 17233/18233
+(non-default so it doesn't collide with a long-running personal Temporal),
+starts `pastured` against a fresh sqlite db, creates a REQUEST task, kicks off
+an EpochWorkflow, advances one phase, and asserts:
+
+- `tasks` row exists for the REQUEST
+- `audit_events` rows recorded
+- `context_edges` rows link events to the epoch with `kind=EpochContext`
+- Temporal search attributes `AuraEpochId` / `AuraPhase` upserted on the workflow
+
+Set `KEEP_WORKDIR=1` to preserve the tempdir (db + logs) after the run for
+debugging. Override `TEMPORAL_PORT` / `TEMPORAL_UI_PORT` if 17233/18233 are
+taken. See `scripts/smoke/temporal-e2e.sh` for the full script.
+
 ## Build
 
 ```bash

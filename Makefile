@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt clean release-local release-all generate
+.PHONY: build test test-race lint fmt clean release-local release-all generate smoke-temporal
 
 VERSION ?= dev
 
@@ -127,6 +127,21 @@ release-all:
 		done; \
 	done; \
 	echo "All binaries written to dist/"
+
+# --------------------------------------------------------------------------
+# Smoke tests
+# --------------------------------------------------------------------------
+#
+# Run the production-shape Temporal end-to-end smoke. Brings up a local
+# Temporal dev server (docker), runs pastured against a fresh pasture.db,
+# exercises one epoch workflow start, and asserts that audit_events,
+# context_edges, and Temporal search attributes are populated as expected.
+#
+# Requires: docker, sqlite3, jq, all binaries built.
+# See: scripts/smoke/temporal-e2e.sh + aura-plugins-cn5ax.
+
+smoke-temporal: build
+	scripts/smoke/temporal-e2e.sh
 
 # --------------------------------------------------------------------------
 # Clean
