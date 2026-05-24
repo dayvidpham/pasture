@@ -13,22 +13,22 @@ import (
 // ─── Search Attribute Key Names ───────────────────────────────────────────────
 
 // SAEpochID is the Temporal search attribute name for epoch ID (TEXT — full-text search).
-const SAEpochID = "AuraEpochId"
+const SAEpochID = "PastureEpochId"
 
 // SAPhase is the Temporal search attribute name for the current phase (KEYWORD).
-const SAPhase = "AuraPhase"
+const SAPhase = "PasturePhase"
 
 // SARole is the Temporal search attribute name for the current role (KEYWORD).
-const SARole = "AuraRole"
+const SARole = "PastureRole"
 
 // SAStatus is the Temporal search attribute name for workflow status (KEYWORD).
-const SAStatus = "AuraStatus"
+const SAStatus = "PastureStatus"
 
 // SADomain is the Temporal search attribute name for phase domain (KEYWORD).
-const SADomain = "AuraDomain"
+const SADomain = "PastureDomain"
 
 // SALastEventType is the Temporal search attribute name for the last audit event type (KEYWORD).
-const SALastEventType = "AuraLastEventType"
+const SALastEventType = "PastureLastEventType"
 
 // requiredSearchAttributes maps each required search attribute name to its
 // Temporal IndexedValueType. Used by EnsureSearchAttributes to auto-register

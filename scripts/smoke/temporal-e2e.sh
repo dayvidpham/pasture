@@ -10,7 +10,7 @@
 #   - activities rows exist (phase brackets)
 #   - audit_events rows exist
 #   - context_edges rows with kind=EpochContext link events to the epoch task
-#   - Temporal search attributes (AuraEpochId, AuraPhase) upserted on the workflow
+#   - Temporal search attributes (PastureEpochId, PasturePhase) upserted on the workflow
 #
 # This complements the unit/integration test suite (PROPOSAL-2 §11 Scenarios
 # 1, 2, 8a-e, 13). Those run against the in-process memory audit trail; this
@@ -312,7 +312,7 @@ SA_OUT="$(temporal workflow describe \
     --namespace default \
     --address "localhost:$TEMPORAL_PORT" 2>&1 || true)"
 
-for sa in AuraEpochId AuraPhase; do
+for sa in PastureEpochId PasturePhase; do
     if ! printf '%s\n' "$SA_OUT" | grep -q "$sa"; then
         printf '%s\n' "$SA_OUT" >&2
         fail "Temporal search attribute $sa not found on workflow $TASK_ID" 5

@@ -323,7 +323,7 @@ an EpochWorkflow, advances one phase, and asserts:
 - `tasks` row exists for the REQUEST
 - `audit_events` rows recorded
 - `context_edges` rows link events to the epoch with `kind=EpochContext`
-- Temporal search attributes `AuraEpochId` / `AuraPhase` upserted on the workflow
+- Temporal search attributes `PastureEpochId` / `PasturePhase` upserted on the workflow
 
 Set `KEEP_WORKDIR=1` to preserve the tempdir (db + logs) after the run for
 debugging. Override `TEMPORAL_PORT` / `TEMPORAL_UI_PORT` if 17233/18233 are
@@ -362,9 +362,9 @@ already gives:
 - **Live state** — `pasture-msg query state --epoch-id <id>` queries the
   running workflow's current `EpochState` via Temporal's workflow-query API.
 - **Filterable cross-workflow listing** — six search attributes upserted by
-  every workflow (`AuraEpochId`, `AuraPhase`, `AuraRole`, `AuraStatus`,
-  `AuraDomain`, `AuraLastEventType`) make any open epoch greppable, e.g.
-  `temporal workflow list -q "AuraPhase = 'elicit'"`. The SA wire names are
+  every workflow (`PastureEpochId`, `PasturePhase`, `PastureRole`, `PastureStatus`,
+  `PastureDomain`, `PastureLastEventType`) make any open epoch greppable, e.g.
+  `temporal workflow list -q "PasturePhase = 'elicit'"`. The SA wire names are
   declared in `internal/temporal/search_attributes.go`.
 - **UI + history replay** — the Temporal UI on port 8233 (and
   `temporal workflow show`) provide per-workflow timelines, event histories,
@@ -384,7 +384,7 @@ When debugging "where am I in this workflow?", the layers map cleanly:
 | Question | Tool |
 |---|---|
 | What's the current phase / role / status? | `pasture-msg query state` (live, via Temporal query) |
-| Which workflows are currently in phase X? | `temporal workflow list -q "AuraPhase = 'X'"` |
+| Which workflows are currently in phase X? | `temporal workflow list -q "PasturePhase = 'X'"` |
 | What events have I emitted so far? | `pasture task events --epoch-id <id>` (durable, via `pasture.db`) |
 | Show the timeline for one task. | `pasture task timeline <task-id>` |
 | Visualise everything for one workflow. | Temporal UI at `localhost:8233` (or wherever `pastured --address` points) |
