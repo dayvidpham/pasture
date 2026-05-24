@@ -352,6 +352,66 @@ GOOS=windows GOARCH=amd64  CGO_ENABLED=0 go build ./cmd/pastured
 - Never hardcode signal/query name strings at call sites — always use the constants.
 - Workflow and activity implementations live in `internal/temporal/`.
 
+### Why Temporal: observability + introspection
+
+Temporal was chosen as the workflow substrate specifically because it
+*provides* the observability and introspection surface the toolkit needs.
+There is no separate Pasture-side "introspection layer" to build — Temporal
+already gives:
+
+- **Live state** — `pasture-msg query state --epoch-id <id>` queries the
+  running workflow's current `EpochState` via Temporal's workflow-query API.
+- **Filterable cross-workflow listing** — six search attributes upserted by
+  every workflow (`AuraEpochId`, `AuraPhase`, `AuraRole`, `AuraStatus`,
+  `AuraDomain`, `AuraLastEventType`) make any open epoch greppable, e.g.
+  `temporal workflow list -q "AuraPhase = 'elicit'"`. The SA wire names are
+  declared in `internal/temporal/search_attributes.go`.
+- **UI + history replay** — the Temporal UI on port 8233 (and
+  `temporal workflow show`) provide per-workflow timelines, event histories,
+  and replay tooling without any code on our side.
+- **Durable substrate** — `pasture.db` `audit_events` + `context_edges` hold
+  the canonical historical record outside of Temporal's retention window.
+
+The **join key** that makes these views coherent is the D5/R13 binding from
+PROPOSAL-2: `epoch-id = Provenance TaskID = Temporal workflow ID =
+audit_events context key`. A single string flows through the whole stack
+without translation. That's why §7.12 validation rejects malformed epoch-ids
+at workflow start — losing the alignment would break the introspection
+surface.
+
+When debugging "where am I in this workflow?", the layers map cleanly:
+
+| Question | Tool |
+|---|---|
+| What's the current phase / role / status? | `pasture-msg query state` (live, via Temporal query) |
+| Which workflows are currently in phase X? | `temporal workflow list -q "AuraPhase = 'X'"` |
+| What events have I emitted so far? | `pasture task events --epoch-id <id>` (durable, via `pasture.db`) |
+| Show the timeline for one task. | `pasture task timeline <task-id>` |
+| Visualise everything for one workflow. | Temporal UI at `localhost:8233` (or wherever `pastured --address` points) |
+
+A unified status command that joins all of these in one call is tracked as
+[`aura-plugins-punit`](beads://aura-plugins-punit); not yet built but not
+load-bearing — today's two-CLI path is functional.
+
+### Code generation vs runtime injection
+
+The skill bodies in `skills/*/SKILL.md` are *generated at build time* from
+the protocol schema. The generators live in two places that are still being
+disambiguated (audit pending, see
+[`aura-plugins-5wbhm`](beads://aura-plugins-5wbhm)):
+
+- `scripts/aura_protocol/gen_skills.py` (the original Python generator, in
+  the parent `aura-plugins/` repo)
+- `pasture/internal/codegen/skills.go` (the Go port, now live)
+
+The runtime equivalent — "load the right phase-context into a Claude session
+when the workflow is at phase X" — is **not** a separate Go layer. The
+context is loaded implicitly: the user (or a future SessionStart hook —
+tracked as [`aura-plugins-oo359`](beads://aura-plugins-oo359)) invokes the
+matching `/aura:*` skill for the current phase; Claude Code loads the
+generated SKILL.md into the session context. Temporal answers the *where*
+(via SAs); the skill system supplies the *what to do here*.
+
 ## Nix
 
 A `flake.nix` at the repo root provides:
