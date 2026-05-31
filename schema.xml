@@ -526,17 +526,6 @@
       </phases>
       <file>skills/epoch/SKILL.md</file>
     </command>
-    <command id="cmd-plan" name="aura:plan" role-ref="architect" description="Plan coordination across phases 1-6">
-      <phases>
-        <phase-ref ref="p1"></phase-ref>
-        <phase-ref ref="p2"></phase-ref>
-        <phase-ref ref="p3"></phase-ref>
-        <phase-ref ref="p4"></phase-ref>
-        <phase-ref ref="p5"></phase-ref>
-        <phase-ref ref="p6"></phase-ref>
-      </phases>
-      <file>skills/plan/SKILL.md</file>
-    </command>
     <command id="cmd-status" name="aura:status" description="Project status and monitoring via Beads queries">
       <file>skills/status/SKILL.md</file>
     </command>
@@ -756,18 +745,6 @@
       </creates-labels>
       <file>skills/impl-review/SKILL.md</file>
     </command>
-    <command id="cmd-msg-send" name="aura:msg:send" description="Send a message to another agent via Beads comment">
-      <file>skills/msg-send/SKILL.md</file>
-    </command>
-    <command id="cmd-msg-receive" name="aura:msg:receive" description="Check inbox for messages from other agents">
-      <file>skills/msg-receive/SKILL.md</file>
-    </command>
-    <command id="cmd-msg-broadcast" name="aura:msg:broadcast" description="Broadcast a message to multiple agents">
-      <file>skills/msg-broadcast/SKILL.md</file>
-    </command>
-    <command id="cmd-msg-ack" name="aura:msg:ack" description="Acknowledge received messages">
-      <file>skills/msg-ack/SKILL.md</file>
-    </command>
     <command id="cmd-explore" name="aura:explore" description="Codebase exploration — find integration points, existing patterns, and related code">
       <phases>
         <phase-ref ref="p1"></phase-ref>
@@ -787,12 +764,6 @@
         <label-ref ref="L-p1s1_2"></label-ref>
       </creates-labels>
       <file>skills/research/SKILL.md</file>
-    </command>
-    <command id="cmd-test" name="aura:test" description="Run tests using BDD patterns">
-      <file>skills/test/SKILL.md</file>
-    </command>
-    <command id="cmd-feedback" name="aura:feedback" description="Leave structured feedback on any Beads task">
-      <file>skills/feedback/SKILL.md</file>
     </command>
   </commands>
   <!-- ═══════════════════════════════════════════════════════════════════════

@@ -793,17 +793,6 @@ var CommandSpecs = map[string]CommandSpec{
 		},
 		File: "skills/epoch/SKILL.md",
 	},
-	"cmd-plan": {
-		ID:          "cmd-plan",
-		Name:        "aura:plan",
-		Description: "Plan coordination across phases 1-6",
-		RoleRef:     types.RoleArchitect,
-		Phases: []protocol.PhaseId{
-			protocol.PhaseRequest, protocol.PhaseElicit, protocol.PhasePropose,
-			protocol.PhaseReview, protocol.PhasePlanReview, protocol.PhaseRatify,
-		},
-		File: "skills/plan/SKILL.md",
-	},
 	"cmd-status": {
 		ID:          "cmd-status",
 		Name:        "aura:status",
@@ -1023,30 +1012,6 @@ var CommandSpecs = map[string]CommandSpec{
 		File:          "skills/impl-review/SKILL.md",
 		CreatesLabels: []string{"L-p10s10", "L-sev-blocker", "L-sev-import", "L-sev-minor"},
 	},
-	"cmd-msg-send": {
-		ID:          "cmd-msg-send",
-		Name:        "aura:msg:send",
-		Description: "Send a message to another agent via Beads comment",
-		File:        "skills/msg-send/SKILL.md",
-	},
-	"cmd-msg-receive": {
-		ID:          "cmd-msg-receive",
-		Name:        "aura:msg:receive",
-		Description: "Check inbox for messages from other agents",
-		File:        "skills/msg-receive/SKILL.md",
-	},
-	"cmd-msg-broadcast": {
-		ID:          "cmd-msg-broadcast",
-		Name:        "aura:msg:broadcast",
-		Description: "Broadcast a message to multiple agents",
-		File:        "skills/msg-broadcast/SKILL.md",
-	},
-	"cmd-msg-ack": {
-		ID:          "cmd-msg-ack",
-		Name:        "aura:msg:ack",
-		Description: "Acknowledge received messages",
-		File:        "skills/msg-ack/SKILL.md",
-	},
 	"cmd-explore": {
 		ID:            "cmd-explore",
 		Name:          "aura:explore",
@@ -1062,18 +1027,6 @@ var CommandSpecs = map[string]CommandSpec{
 		Phases:        []protocol.PhaseId{protocol.PhaseRequest},
 		File:          "skills/research/SKILL.md",
 		CreatesLabels: []string{"L-p1s1_2"},
-	},
-	"cmd-test": {
-		ID:          "cmd-test",
-		Name:        "aura:test",
-		Description: "Run tests using BDD patterns",
-		File:        "skills/test/SKILL.md",
-	},
-	"cmd-feedback": {
-		ID:          "cmd-feedback",
-		Name:        "aura:feedback",
-		Description: "Leave structured feedback on any Beads task",
-		File:        "skills/feedback/SKILL.md",
 	},
 }
 

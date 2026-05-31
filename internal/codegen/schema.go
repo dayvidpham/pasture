@@ -719,7 +719,7 @@ func buildRoles(buf *bytes.Buffer, depth int) {
 // Mirrors Python command_order list in _build_commands.
 var commandOrder = []string{
 	// Orchestration
-	"cmd-epoch", "cmd-plan", "cmd-status",
+	"cmd-epoch", "cmd-status",
 	// User interaction
 	"cmd-user-request", "cmd-user-elicit", "cmd-user-uat",
 	// Architect
@@ -735,12 +735,8 @@ var commandOrder = []string{
 	"cmd-rev-comment", "cmd-rev-vote",
 	// Implementation coordination
 	"cmd-impl-slice", "cmd-impl-review",
-	// Messaging
-	"cmd-msg-send", "cmd-msg-receive", "cmd-msg-broadcast", "cmd-msg-ack",
 	// Exploration
 	"cmd-explore", "cmd-research",
-	// Utilities
-	"cmd-test", "cmd-feedback",
 }
 
 // commandGroupComments marks the start of each command group with a comment.
@@ -752,9 +748,7 @@ var commandGroupComments = map[string]string{
 	"cmd-worker":       " ── Worker ─────────────────────────────────────────────────────── ",
 	"cmd-reviewer":     " ── Reviewer ───────────────────────────────────────────────────── ",
 	"cmd-impl-slice":   " ── Implementation coordination ────────────────────────────────── ",
-	"cmd-msg-send":     " ── Messaging (Beads-based IPC) ────────────────────────────────── ",
 	"cmd-explore":      " ── Exploration ────────────────────────────────────────────────── ",
-	"cmd-test":         " ── Utilities ──────────────────────────────────────────────────── ",
 }
 
 func buildCommands(buf *bytes.Buffer, depth int) {

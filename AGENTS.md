@@ -438,32 +438,26 @@ is the 8th overlapping skill and counts as verified. Residual
 [`aura-plugins-acroy`](beads://aura-plugins-acroy) tracks the doc/ROADMAP
 phrasing correction.
 
-**29 Python-only SKILL.md-bearing skills (not yet ported — `x5071` scope):**
+**22 Python-only SKILL.md-bearing skills (not yet ported — `x5071` scope):**
 
 `architect-handoff`, `architect-propose-plan`, `architect-ratify`,
-`architect-request-review`, `epoch`, `explore`, `feedback`, `impl-slice`,
-`msg-ack`, `msg-broadcast`, `msg-receive`, `msg-send`, `plan`, `research`,
+`architect-request-review`, `epoch`, `explore`, `impl-slice`, `research`,
 `reviewer-comment`, `reviewer-review-code`, `reviewer-review-plan`,
 `reviewer-vote`, `status`, `supervisor-commit`, `supervisor-track-progress`,
-`swarm`, `test`, `user-elicit`, `user-request`, `user-uat`, `worker-blocked`,
+`swarm`, `user-elicit`, `user-request`, `user-uat`, `worker-blocked`,
 `worker-complete`, `worker-implement`.
 
-These 29 exist only under `aura-plugins/skills/` and continue to use the
+These 22 exist only under `aura-plugins/skills/` and continue to use the
 Python pipeline as reference; no immediate action required until ported.
 
-**Count reconciliation (29, not 31 or 30):**
-- `aura-plugins/skills/` has 38 directories; 37 have a SKILL.md (`templates`
-  is an assets dir with no SKILL.md).
-- Overlapping (both homes have SKILL.md): 8.
-- Python-only with SKILL.md: 37 − 8 = **29**.
-- The PROPOSAL used "31" (= 38 − 7), computed before `protocol` was recognized
-  as the 8th overlapping skill. Correcting 7→8 necessarily corrects 31→30, and
-  excluding `templates` (no SKILL.md) corrects 30→**29**.
-- `x5071` description says "~30" and its enumerated list contains 30 entries,
-  but includes `protocol` (now in the overlapping-8, already ported) and omits
-  `templates` (no SKILL.md). `x5071`'s enumerated list is stale by one entry
-  (`protocol` should be removed); do NOT refile — note the discrepancy here and
-  let `acroy` absorb the doc-count fix.
+Note: `feedback`, `msg-ack`, `msg-broadcast`, `msg-receive`, `msg-send`,
+`plan`, `test` were deregistered (SKILL.md deleted); they are no longer
+tracked here.
+
+**Count reconciliation (22, previously 29):**
+- `aura-plugins/skills/` has 31 directories with SKILL.md (7 deleted).
+- Overlapping (both homes have SKILL.md): 8 (unchanged).
+- Python-only with SKILL.md: 31 − 8 = **22** (was 37 − 8 = 29 before deletions).
 - CI check for the 8 overlapping skills: tracked by
   [`aura-plugins-g8egz`](beads://aura-plugins-g8egz) (not yet filed as a
   working CI rule; filed as a follow-up task).

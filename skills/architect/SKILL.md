@@ -1,7 +1,7 @@
 ---
 name: architect
 description: Specification writer and implementation designer
-skills: aura:architect-handoff, aura:architect-propose-plan, aura:architect-ratify, aura:architect-request-review, aura:plan, aura:user-elicit, aura:user-request
+skills: aura:architect-handoff, aura:architect-propose-plan, aura:architect-ratify, aura:architect-request-review, aura:user-elicit, aura:user-request
 ---
 
 # Architect Agent
@@ -32,7 +32,6 @@ skills: aura:architect-handoff, aura:architect-propose-plan, aura:architect-rati
 | `aura:architect:propose-plan` | Create PROPOSAL-N task with full technical plan | p3-propose |
 | `aura:architect:ratify` | Ratify proposal, mark old proposals aura:superseded | p6-ratify |
 | `aura:architect:request-review` | Spawn 3 axis-specific reviewers (A/B/C) | p4-review |
-| `aura:plan` | Plan coordination across phases 1-6 | p1-request, p2-elicit, p3-propose, p4-review, p5-plan-uat, p6-ratify |
 | `aura:user:elicit` | User Requirements Elicitation survey (Phase 2) | p2-elicit |
 | `aura:user:request` | Capture user feature request verbatim (Phase 1) | p1-request |
 
