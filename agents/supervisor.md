@@ -195,7 +195,7 @@ Exit conditions:
 
 **Stage 2: Build** _(parallel)_
 
-- Spawn workers as Agent tool subagents (`subagent_type: "general-purpose"`, `run_in_background: true`); use TeamCreate only for >=3 slices with shared integration points (`aura-swarm start --epic <epic-id>`)
+- Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity.
 
 - Monitor worker progress via bd list and bd show (`bd list --labels="aura:p9-impl:s9-slice" --status=in_progress`)
 

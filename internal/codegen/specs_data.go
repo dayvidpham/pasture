@@ -1308,9 +1308,12 @@ var WorkflowSpecs = map[string]Workflow{
 				PhaseRef:  protocol.PhaseWorkerSlices,
 				Actions: []WorkflowAction{
 					{
-						ID:          "rtw-build-spawn",
-						Instruction: "Spawn workers as Agent tool subagents (`subagent_type: \"general-purpose\"`, `run_in_background: true`); use TeamCreate only for >=3 slices with shared integration points",
-						Command:     "aura-swarm start --epic <epic-id>",
+						ID: "rtw-build-spawn",
+						Instruction: "Spawn workers via the Agent tool — " +
+							"set `name` for a named teammate, leave `name` empty for a backgrounded subagent " +
+							"(NOT aura-swarm). " +
+							"Choose model: sonnet for non-trivial slices, haiku for trivial changes. " +
+							"Set thinking effort to match slice complexity.",
 					},
 					{
 						ID:          "rtw-build-monitor",
@@ -1751,8 +1754,8 @@ var ProcedureSteps = map[types.RoleId][]ProcedureStep{
 		{
 			ID:          "S-supervisor-read-plan",
 			Order:       2,
-			Instruction: "Read RATIFIED_PLAN and URD via bd show",
-			Command:     "bd show <ratified-plan-id> && bd show <urd-id>",
+			Instruction: "Read RATIFIED_PLAN, URD, UAT, and elicit tasks via bd show for full context",
+			Command:     "bd show <ratified-plan-id> && bd show <urd-id> && bd show <uat-id> && bd show <elicit-id>",
 		},
 		{
 			ID:          "S-supervisor-explore-ephemeral",
@@ -1792,11 +1795,14 @@ var ProcedureSteps = map[types.RoleId][]ProcedureStep{
 			},
 		},
 		{
-			ID:          "S-supervisor-spawn-workers",
-			Order:       6,
-			Instruction: "Spawn workers for leaf tasks",
-			Command:     "aura-swarm start --epic <epic-id>",
-			NextState:   protocol.PhaseWorkerSlices,
+			ID:    "S-supervisor-spawn-workers",
+			Order: 6,
+			Instruction: "Spawn workers via the Agent tool — " +
+				"set `name` for a named teammate, leave `name` empty for a backgrounded subagent " +
+				"(NOT aura-swarm). " +
+				"Choose model: sonnet for non-trivial slices, haiku for trivial changes. " +
+				"Set thinking effort to match slice complexity.",
+			NextState: protocol.PhaseWorkerSlices,
 		},
 	},
 	types.RoleWorker: {
