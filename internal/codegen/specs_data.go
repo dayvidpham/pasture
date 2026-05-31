@@ -1028,6 +1028,12 @@ var CommandSpecs = map[string]CommandSpec{
 		File:          "skills/research/SKILL.md",
 		CreatesLabels: []string{"L-p1s1_2"},
 	},
+	"cmd-swarm": {
+		ID:          "cmd-swarm",
+		Name:        "aura:swarm",
+		Description: "Launch worktree-based or intree agent workflows using aura-swarm",
+		File:        "skills/swarm/SKILL.md",
+	},
 }
 
 // ─── HandoffSpecs ─────────────────────────────────────────────────────────────

@@ -63,6 +63,7 @@ var roleSkillDirs = map[types.RoleId]string{
 	types.RoleWorker:     "worker",
 	types.RoleReviewer:   "reviewer",
 	types.RoleArchitect:  "architect",
+	types.RoleEpoch:      "epoch",
 }
 
 // commandSkillDirs maps each command ID to its skill directory name (relative to skills/).
@@ -72,6 +73,28 @@ var commandSkillDirs = map[string]string{
 	"cmd-sup-plan":    "supervisor-plan-tasks",
 	"cmd-sup-spawn":   "supervisor-spawn-worker",
 	"cmd-impl-review": "impl-review",
+	// Newly-ported commands (22 skills from aura-plugins/skills/).
+	"cmd-arch-handoff":  "architect-handoff",
+	"cmd-arch-propose":  "architect-propose-plan",
+	"cmd-arch-ratify":   "architect-ratify",
+	"cmd-arch-review":   "architect-request-review",
+	"cmd-explore":       "explore",
+	"cmd-impl-slice":    "impl-slice",
+	"cmd-research":      "research",
+	"cmd-rev-comment":   "reviewer-comment",
+	"cmd-rev-code":      "reviewer-review-code",
+	"cmd-rev-plan":      "reviewer-review-plan",
+	"cmd-rev-vote":      "reviewer-vote",
+	"cmd-status":        "status",
+	"cmd-sup-commit":    "supervisor-commit",
+	"cmd-sup-track":     "supervisor-track-progress",
+	"cmd-swarm":         "swarm",
+	"cmd-user-elicit":   "user-elicit",
+	"cmd-user-request":  "user-request",
+	"cmd-user-uat":      "user-uat",
+	"cmd-work-blocked":  "worker-blocked",
+	"cmd-work-complete": "worker-complete",
+	"cmd-work-impl":     "worker-implement",
 }
 
 func main() {

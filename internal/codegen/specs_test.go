@@ -327,12 +327,21 @@ func TestTitleConventionsNotEmpty(t *testing.T) {
 	}
 }
 
-// TestSkillBodySpecsCompleteness verifies all 7 SkillBodySpecs entries exist
+// TestSkillBodySpecsCompleteness verifies all 29 SkillBodySpecs entries exist
 // and each has non-empty Sections or Recipes (at least one must be populated).
 func TestSkillBodySpecsCompleteness(t *testing.T) {
 	expectedKeys := []string{
+		// Original 7 role/sub-skill bodies.
 		"supervisor", "supervisor-plan-tasks", "supervisor-spawn-worker",
 		"worker", "architect", "reviewer", "impl-review",
+		// Newly-ported 22 skill bodies.
+		"architect-handoff", "architect-propose-plan", "architect-ratify",
+		"architect-request-review", "epoch", "explore", "impl-slice",
+		"research", "reviewer-comment", "reviewer-review-code",
+		"reviewer-review-plan", "reviewer-vote", "status",
+		"supervisor-commit", "supervisor-track-progress", "swarm",
+		"user-elicit", "user-request", "user-uat",
+		"worker-blocked", "worker-complete", "worker-implement",
 	}
 
 	// Skills known to have non-empty preambles.
@@ -344,6 +353,29 @@ func TestSkillBodySpecsCompleteness(t *testing.T) {
 		"architect":               true,
 		"reviewer":                true,
 		"impl-review":             true,
+		// Newly-ported skills — preamble presence varies; include those that have one.
+		"architect-handoff":         true,
+		"architect-propose-plan":    true,
+		"architect-ratify":          true,
+		"architect-request-review":  true,
+		"epoch":                     true,
+		"explore":                   true,
+		"impl-slice":                true,
+		"research":                  true,
+		"reviewer-comment":          true,
+		"reviewer-review-code":      true,
+		"reviewer-review-plan":      true,
+		"reviewer-vote":             true,
+		"status":                    true,
+		"supervisor-commit":         true,
+		"supervisor-track-progress": true,
+		"swarm":                     true,
+		"user-elicit":               true,
+		"user-request":              true,
+		"user-uat":                  true,
+		"worker-blocked":            true,
+		"worker-complete":           true,
+		"worker-implement":          true,
 	}
 
 	require.NotNil(t, codegen.SkillBodySpecs, "SkillBodySpecs must not be nil")
