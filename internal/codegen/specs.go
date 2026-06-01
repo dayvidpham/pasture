@@ -46,12 +46,17 @@ type ConstraintSpec struct {
 // BehaviorSpec is a role-tactical behavior in Given/When/Then/Should-Not
 // format. Distinct from ConstraintSpec: behaviors are role-specific guidance,
 // not formal protocol constraints. Mirrors Python BehaviorSpec dataclass.
+//
+// A non-empty FragmentID marks this entry as a placement MARKER: all other
+// fields are left zero and the entry is resolved to the SharedFragment payload
+// pre-render by the resolution pass in skills.go.
 type BehaviorSpec struct {
-	ID        string
-	Given     string
-	When      string
-	Then      string
-	ShouldNot string
+	ID         string
+	Given      string
+	When       string
+	Then       string
+	ShouldNot  string
+	FragmentID string // non-empty → marker; resolved pre-render from SharedFragmentSpecs
 }
 
 // ─── ProseSection ─────────────────────────────────────────────────────────────
@@ -59,11 +64,45 @@ type BehaviorSpec struct {
 // ProseSection is a titled block of markdown content for skill body rendering.
 // Sections are rendered in slice order. Heading level is determined by the
 // template (H2 for top-level, H3 for subsections).
+//
+// A non-empty FragmentID marks this entry as a placement MARKER: all other
+// fields are left zero and the entry is resolved to the SharedFragment payload
+// pre-render by the resolution pass in skills.go.
 type ProseSection struct {
 	ID          string         // unique within skill body; not used during template rendering — available for programmatic lookup via ExtractSection or future ID-based access
 	Title       string         // heading text, e.g. "What You Own"
 	Content     string         // pre-formatted markdown content below the heading
 	Subsections []ProseSection // optional nested sections (rendered as H3 under H2)
+	FragmentID  string         // non-empty → marker; resolved pre-render from SharedFragmentSpecs
+}
+
+// ─── FragmentKind ─────────────────────────────────────────────────────────────
+
+// FragmentKind identifies the payload type stored in a SharedFragment.
+type FragmentKind string
+
+const (
+	// FragmentKindBehavior indicates the fragment holds a *BehaviorSpec payload.
+	FragmentKindBehavior FragmentKind = "behavior"
+
+	// FragmentKindProse indicates the fragment holds a *ProseSection payload.
+	FragmentKindProse FragmentKind = "prose"
+)
+
+// ─── SharedFragment ───────────────────────────────────────────────────────────
+
+// SharedFragment is a reusable payload (either a BehaviorSpec or a
+// ProseSection) stored in SharedFragmentSpecs and referenced by placement
+// markers in SkillBody entries.
+//
+// Exactly one of Behavior or Prose must be non-nil. Owners are not stored
+// directly — they are derived via FragmentToOwnerRefs() (D1: owners derived
+// from consumer markers, not embedded).
+type SharedFragment struct {
+	ID       string
+	Kind     FragmentKind
+	Behavior *BehaviorSpec // non-nil when Kind == FragmentKindBehavior
+	Prose    *ProseSection // non-nil when Kind == FragmentKindProse
 }
 
 // ─── RecipeBlock ──────────────────────────────────────────────────────────────

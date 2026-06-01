@@ -451,6 +451,20 @@ func renderSkill(roleID types.RoleId, figuresDir string) (string, error) {
 		ctx.BodyBehaviors = body.Behaviors
 	}
 
+	// Pre-render fragment resolution pass: replace placement markers with
+	// shared fragment payloads from SharedFragmentSpecs. Templates are unchanged
+	// (D5); this pass operates on the context before template execution.
+	// When SharedFragmentSpecs is empty (SLICE-1), this is a no-op.
+	skillFile := fmt.Sprintf("skills/%s/SKILL.md", roleID)
+	resolvedSections, resolvedBehaviors, err := resolveBodyFragments(
+		ctx.BodySections, ctx.BodyBehaviors, SharedFragmentSpecs, string(roleID), skillFile,
+	)
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderSkill: fragment resolution failed for role %q: %w", roleID, err)
+	}
+	ctx.BodySections = resolvedSections
+	ctx.BodyBehaviors = resolvedBehaviors
+
 	tmpl := mustParseTemplateFS("templates/skill.go.tmpl")
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, ctx); err != nil {
@@ -496,6 +510,20 @@ func renderSubSkill(commandID, figuresDir string) (string, error) {
 		ctx.BodyRecipes = body.Recipes
 		ctx.BodyBehaviors = body.Behaviors
 	}
+
+	// Pre-render fragment resolution pass: replace placement markers with
+	// shared fragment payloads from SharedFragmentSpecs. Templates are unchanged
+	// (D5); this pass operates on the context before template execution.
+	// When SharedFragmentSpecs is empty (SLICE-1), this is a no-op.
+	skillFile := cmdSpec.File
+	resolvedSections, resolvedBehaviors, err := resolveBodyFragments(
+		ctx.BodySections, ctx.BodyBehaviors, SharedFragmentSpecs, skillDirKey, skillFile,
+	)
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderSubSkill: fragment resolution failed for command %q: %w", commandID, err)
+	}
+	ctx.BodySections = resolvedSections
+	ctx.BodyBehaviors = resolvedBehaviors
 
 	tmpl := mustParseTemplateFS("templates/skill_sub.go.tmpl")
 	var buf bytes.Buffer
