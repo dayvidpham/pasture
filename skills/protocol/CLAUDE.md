@@ -324,7 +324,7 @@ Check **end-user alignment**, not technical specializations:
 
 | Vote | Requirement |
 |------|-------------|
-| **ACCEPT** | All 6 criteria satisfied; no BLOCKER items |
+| **ACCEPT** | All review criteria satisfied; no BLOCKER items |
 | **REVISE** | BLOCKER issues found; must provide actionable feedback |
 
 ### When Working

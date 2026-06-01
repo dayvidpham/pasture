@@ -231,7 +231,7 @@ Each reviewer assesses **end-user alignment**, not technical taste:
 
 | Vote | Requirement |
 |------|-------------|
-| **ACCEPT** | All 6 criteria satisfied; no BLOCKER items |
+| **ACCEPT** | All review criteria satisfied; no BLOCKER items |
 | **REVISE** | BLOCKER issues found; must provide actionable feedback (not just criticism) |
 
 **Plan reviews do NOT use a severity tree.** Plan reviews use binary ACCEPT/REVISE votes only. The severity tree is reserved for code reviews (Phase 10).
