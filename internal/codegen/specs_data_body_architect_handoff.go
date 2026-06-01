@@ -43,7 +43,7 @@ var architectHandoffBody = SkillBody{
 				"# Handoff: Architect → Supervisor\n" +
 				"\n" +
 				"## Supervisor Startup\n" +
-				"1. Call `Skill(/aura:supervisor)` to load your role instructions\n" +
+				"1. Call `Skill(/pasture:supervisor)` to load your role instructions\n" +
 				"2. Spawn ephemeral Explore subagents via Task tool when codebase exploration is needed\n" +
 				"3. Read the RATIFIED PROPOSAL and URD with `bd show` commands below\n" +
 				"4. Every vertical slice MUST have leaf tasks (L1: types, L2: tests, L3: impl)\n" +
@@ -89,7 +89,7 @@ var architectHandoffBody = SkillBody{
 				"   ---\n" +
 				"   Handoff from architect to supervisor. See handoff document at\n" +
 				"   .git/.aura/handoff/<request-task-id>/architect-to-supervisor.md\" \\\n" +
-				"     --add-label \"aura:p7-plan:s7-handoff\"\n" +
+				"     --add-label \"pasture:p7-plan:s7-handoff\"\n" +
 				"\n" +
 				"   bd dep add <request-id> --blocked-by <handoff-id>\n" +
 				"   ```" + "\n\n" +
@@ -113,9 +113,9 @@ var architectHandoffBody = SkillBody{
 		{
 			Id:    "arch-handoff-example-prompt",
 			Title: "Example Prompt",
-			Content: "**CRITICAL:** The prompt MUST instruct the supervisor to invoke `/aura:supervisor` as its first action. Without this, the supervisor agent starts without its role instructions and skips leaf task creation, ephemeral exploration, and other critical procedures.\n\n" +
+			Content: "**CRITICAL:** The prompt MUST instruct the supervisor to invoke `/pasture:supervisor` as its first action. Without this, the supervisor agent starts without its role instructions and skips leaf task creation, ephemeral exploration, and other critical procedures.\n\n" +
 				"```\n" +
-				"Start by calling `Skill(/aura:supervisor)` to load your role instructions.\n" +
+				"Start by calling `Skill(/pasture:supervisor)` to load your role instructions.\n" +
 				"\n" +
 				"Implement the ratified plan for <feature name>.\n" +
 				"\n" +
@@ -136,7 +136,7 @@ var architectHandoffBody = SkillBody{
 				"<Given/When/Then criteria from the ratified plan>\n" +
 				"\n" +
 				"## Reminders\n" +
-				"1. Call `Skill(/aura:supervisor)` FIRST — do not proceed without loading your role\n" +
+				"1. Call `Skill(/pasture:supervisor)` FIRST — do not proceed without loading your role\n" +
 				"2. Spawn ephemeral Explore subagents via Task tool when codebase exploration is needed\n" +
 				"3. Every vertical slice MUST have leaf tasks (L1: types, L2: tests, L3: impl) — a slice without leaf tasks is undecomposed\n" +
 				"4. Read the ratified plan with `bd show <ratified-proposal-id>` and the URD with `bd show <urd-id>`\n" +
@@ -144,7 +144,7 @@ var architectHandoffBody = SkillBody{
 				"Pass the prompt to the script:\n\n" +
 				"```bash\n" +
 				"aura-swarm start --swarm-mode intree --role supervisor -n 1 --prompt \"$(cat <<'EOF'\n" +
-				"Start by calling Skill(/aura:supervisor) to load your role instructions.\n" +
+				"Start by calling Skill(/pasture:supervisor) to load your role instructions.\n" +
 				"\n" +
 				"Implement the ratified plan for User Authentication.\n" +
 				"\n" +
@@ -167,7 +167,7 @@ var architectHandoffBody = SkillBody{
 				"Given an expired token when accessing protected routes then return 401\n" +
 				"\n" +
 				"## Reminders\n" +
-				"1. Call Skill(/aura:supervisor) FIRST\n" +
+				"1. Call Skill(/pasture:supervisor) FIRST\n" +
 				"2. Spawn ephemeral Explore subagents via Task tool when codebase exploration is needed\n" +
 				"3. Every slice MUST have leaf tasks (L1/L2/L3)\n" +
 				"4. Read ratified plan: bd show project-prop1 and URD: bd show project-xyz\n" +

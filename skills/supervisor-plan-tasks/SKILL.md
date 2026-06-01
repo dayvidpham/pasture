@@ -1,7 +1,7 @@
 # Supervisor Plan Tasks
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:supervisor:plan-tasks` — Decompose ratified plan into vertical slices (SLICE-N)
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:supervisor:plan-tasks` — Decompose ratified plan into vertical slices (SLICE-N)
 
 Break RATIFIED_PLAN into vertical slice Implementation tasks for workers.
 
@@ -149,7 +149,7 @@ SLICE-2: "feature detail command" (Worker B owns full vertical)
 6. **Create vertical slice tasks:**
    ```bash
    bd create --type=task \
-     --labels="aura:p9-impl:s9-slice" \
+     --labels="pasture:p9-impl:s9-slice" \
      --title="SLICE-1: Implement 'cli-tool feature list' command (full vertical)" \
      --description="$(cat <<'EOF'
    ---
@@ -387,7 +387,7 @@ When planning for a follow-up epic (after receiving h1 from architect post-FOLLO
 ```bash
 # Create FOLLOWUP_IMPL_PLAN
 bd create --type=epic --priority=2 \
-  --labels="aura:p8-impl:s8-plan" \
+  --labels="pasture:p8-impl:s8-plan" \
   --title="FOLLOWUP_IMPL_PLAN: <follow-up feature>" \
   --description="---
 references:
@@ -401,7 +401,7 @@ Vertical slice decomposition for follow-up epic."
 
 # Create FOLLOWUP_SLICE-N with adopted leaf tasks
 bd create --type=task \
-  --labels="aura:p9-impl:s9-slice" \
+  --labels="pasture:p9-impl:s9-slice" \
   --title="FOLLOWUP_SLICE-1: <description>" \
   --description="---
 references:
@@ -426,4 +426,4 @@ references:
 bd dep add <followup-slice-id> --blocked-by <leaf-task-id-1>
 bd dep add <followup-slice-id> --blocked-by <leaf-task-id-2>
 ```
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

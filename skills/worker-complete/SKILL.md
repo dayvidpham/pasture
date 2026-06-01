@@ -1,7 +1,7 @@
 # Worker: Signal Completion
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:worker:complete` — Signal slice completion after quality gates pass
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:worker:complete` — Signal slice completion after quality gates pass
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9
 
@@ -105,4 +105,4 @@ bd comments add <task-id> "Implementation complete. Resolved leaf tasks: <leaf-t
 ```
 
 The handoff to the reviewer (h4) must include which original leaf tasks were resolved so reviewers can verify.
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

@@ -1,7 +1,7 @@
 # Architect: Request Review
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:architect:request-review` — Spawn 3 axis-specific reviewers (A/B/C)
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:architect:request-review` — Spawn 3 axis-specific reviewers (A/B/C)
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-4-plan-review)** <- Phase 4
 
@@ -77,4 +77,4 @@ For FOLLOWUP_PROPOSAL-N reviews, use the same procedure:
 - Same 3 axes (A/B/C), same binary ACCEPT/REVISE vote
 - No severity tree for plan reviews (same as original plan reviews)
 - Reviewers should also verify that FOLLOWUP_PROPOSAL addresses the specific IMPORTANT/MINOR findings scoped in FOLLOWUP_URE/URD
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

@@ -1,7 +1,7 @@
 # User Acceptance Test (UAT)
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:user:uat` — User Acceptance Testing with demonstrative examples
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:user:uat` — User Acceptance Testing with demonstrative examples
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-5-plan-uat)** <- Phase 5 (Plan UAT) and Phase 11 (Impl UAT)
 
@@ -57,14 +57,14 @@
 
 
 
-### Plan UAT (Phase 5 — aura:p5-user:s5-uat)
+### Plan UAT (Phase 5 — pasture:p5-user:s5-uat)
 
 After 3 reviewers ACCEPT the proposal, present each major design decision to the user one at a time. For each component:
 1. Show the proposed interface definition (code snippet)
 2. Show a motivating example (how a user would use it)
 3. Ask about the specific design choices made (tradeoffs, alternatives considered)
 
-### Implementation UAT (Phase 11 — aura:p11-user:s11-uat)
+### Implementation UAT (Phase 11 — pasture:p11-user:s11-uat)
 
 After code review consensus, demonstrate what was actually built component by component. For each component:
 1. Run the actual command / show real output
@@ -243,7 +243,7 @@ Which of these verbose fields are useful?`,
 ### Plan UAT Task (Phase 5)
 
 ```bash
-bd create --labels "aura:p5-user:s5-uat" \
+bd create --labels "pasture:p5-user:s5-uat" \
   --title "UAT: Plan acceptance for <feature>" \
   --description "---
 references:
@@ -272,7 +272,7 @@ bd comments add <urd-id> "Plan UAT: <ACCEPT or REVISE> - <summary of key decisio
 ### Implementation UAT Task (Phase 11)
 
 ```bash
-bd create --labels "aura:p11-user:s11-uat" \
+bd create --labels "pasture:p11-user:s11-uat" \
   --title "UAT: Implementation acceptance for <feature>" \
   --description "---
 references:
@@ -303,4 +303,4 @@ If user selects REVISE:
 - **Impl UAT:** Return to relevant slice for implementation fixes
 
 Document the specific component and the user's verbatim feedback in the task description. Do not generalize.
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

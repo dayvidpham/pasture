@@ -1,7 +1,7 @@
 # Review Code Implementation
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:reviewer:review-code` — Review implementation slices with EAGER severity tree
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:reviewer:review-code` — Review implementation slices with EAGER severity tree
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-10-code-review)** <- Phase 10
 
@@ -41,7 +41,7 @@ Assigned to review code implementation after worker slices complete (Phase 10).
 
 ```bash
 # Step 1: Create all 3 severity groups immediately (EAGER, not lazy)
-bd create --labels "aura:severity:blocker,aura:p10-impl:s10-review" \
+bd create --labels "pasture:severity:blocker,pasture:p10-impl:s10-review" \
   --title "SLICE-1-REVIEW-A-1 BLOCKER" \
   --description "---
 references:
@@ -51,7 +51,7 @@ references:
 BLOCKER findings for this review round"
 # Result: <blocker-group-id>
 
-bd create --labels "aura:severity:important,aura:p10-impl:s10-review" \
+bd create --labels "pasture:severity:important,pasture:p10-impl:s10-review" \
   --title "SLICE-1-REVIEW-A-1 IMPORTANT" \
   --description "---
 references:
@@ -61,7 +61,7 @@ references:
 IMPORTANT findings for this review round"
 # Result: <important-group-id>
 
-bd create --labels "aura:severity:minor,aura:p10-impl:s10-review" \
+bd create --labels "pasture:severity:minor,pasture:p10-impl:s10-review" \
   --title "SLICE-1-REVIEW-A-1 MINOR" \
   --description "---
 references:
@@ -112,7 +112,7 @@ bd close <minor-group-id>
 ### Dual-Parent BLOCKER Relationship
 
 BLOCKER findings have **two parents**:
-1. The severity group task (`aura:severity:blocker`) — for categorization
+1. The severity group task (`pasture:severity:blocker`) — for categorization
 2. The slice they block — for dependency tracking
 
 This ensures BLOCKERs both categorize under the severity tree AND block the slice they apply to.
@@ -138,12 +138,12 @@ bd show <urd-id>   # Read URD for requirements context
 
 ### Step 3: Apply Review Criteria and Verify Production Code Paths
 
-Apply end-user alignment criteria (see `aura:reviewer`) and verify production code paths (see Verify Production Code Paths section below).
+Apply end-user alignment criteria (see `pasture:reviewer`) and verify production code paths (see Verify Production Code Paths section below).
 
 ### Step 4: Create Review Task
 
 ```bash
-bd create --labels "aura:p10-impl:s10-review" \
+bd create --labels "pasture:p10-impl:s10-review" \
   --title "SLICE-1-REVIEW-A-1: <feature>" \
   --description "---
 references:
@@ -219,7 +219,7 @@ grep -r "TODO" src/  # Should not find any in delivered code
 
 **Trigger:** Review completion + ANY IMPORTANT or MINOR findings exist.
 **NOT gated on BLOCKER resolution.**
-**Owner:** Supervisor creates the follow-up epic (label `aura:epic-followup`).
+**Owner:** Supervisor creates the follow-up epic (label `pasture:epic-followup`).
 
 ## Reviewing FOLLOWUP_SLICE-N (Follow-up Code Review)
 
@@ -238,4 +238,4 @@ bd comments add <review-id> "VOTE: ACCEPT - Implementation matches plan, tests c
 # Or
 bd comments add <review-id> "VOTE: REVISE - BLOCKERs found, see severity tree for details"
 ```
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

@@ -1,7 +1,7 @@
 # Explore
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:explore` — Codebase exploration — find integration points, existing patterns, and related code
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:explore` — Codebase exploration — find integration points, existing patterns, and related code
 
 General-purpose codebase exploration skill. Searches the codebase for integration points, existing patterns, data flow, dependencies, and potential conflicts relevant to a topic or feature.
 
@@ -45,7 +45,7 @@ See `../protocol/CONSTRAINTS.md` for coding standards.
 
 ## When to Use
 
-- **Phase 1 (s1_3-explore):** Spawned by `/aura:user-request` after user confirms research depth. Findings recorded as REQUEST task comment.
+- **Phase 1 (s1_3-explore):** Spawned by `/pasture:user-request` after user confirms research depth. Findings recorded as REQUEST task comment.
 - **Standalone:** Any agent needing to understand codebase structure for a topic. Invoke directly with a topic and depth.
 
 ## Inputs
@@ -188,10 +188,10 @@ bd comments add {{request-task-id}} \
 When used outside Phase 1, produce the structured findings directly as output. No beads comment is needed unless a task ID is provided.
 
 ```
-/aura:explore
+/pasture:explore
 Topic: "Nix flake module system"
 Depth: deep-dive
 ```
 
 This produces the full architectural map without requiring a REQUEST task context.
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

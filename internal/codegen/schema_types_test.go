@@ -34,7 +34,7 @@ func TestSectionStructsInstantiate(t *testing.T) {
 	t.Run("LabelsSection", func(t *testing.T) {
 		s := codegen.LabelsSection{
 			Labels: []codegen.LabelElem{
-				{Id: "L-p1s1_1", Value: "aura:p1-user:s1_1-request"},
+				{Id: "L-p1s1_1", Value: "pasture:p1-user:s1_1-request"},
 			},
 		}
 		assert.Equal(t, "L-p1s1_1", s.Labels[0].Id)
@@ -80,7 +80,7 @@ func TestSectionStructsInstantiate(t *testing.T) {
 	t.Run("CommandsSection", func(t *testing.T) {
 		s := codegen.CommandsSection{
 			Commands: []codegen.CommandElem{
-				{Id: "cmd-worker", Name: "aura:worker", Description: "Worker skill"},
+				{Id: "cmd-worker", Name: "pasture:worker", Description: "Worker skill"},
 			},
 		}
 		assert.Equal(t, "cmd-worker", s.Commands[0].Id)
@@ -238,7 +238,7 @@ func TestXMLTagsEnumsSection(t *testing.T) {
 func TestXMLTagsLabelsSection(t *testing.T) {
 	s := codegen.LabelsSection{
 		Labels: []codegen.LabelElem{
-			{Id: "L-urd", Value: "aura:urd", Special: "true", Description: "URD label"},
+			{Id: "L-urd", Value: "pasture:urd", Special: "true", Description: "URD label"},
 		},
 	}
 	out, err := xml.Marshal(s)
@@ -247,7 +247,7 @@ func TestXMLTagsLabelsSection(t *testing.T) {
 	assert.Contains(t, xmlStr, "<labels>")
 	assert.Contains(t, xmlStr, "<label")
 	assert.Contains(t, xmlStr, `id="L-urd"`)
-	assert.Contains(t, xmlStr, `value="aura:urd"`)
+	assert.Contains(t, xmlStr, `value="pasture:urd"`)
 	assert.Contains(t, xmlStr, `special="true"`)
 }
 
@@ -523,7 +523,7 @@ func TestSchemaIndexInstantiate(t *testing.T) {
 		PhaseNumbers:       map[string]int{"p1": 1},
 		PhaseDomains:       map[string]string{"p1": "user"},
 		PhaseSubstepOrders: map[string][]codegen.SubstepOrderEntry{},
-		LabelValues:        map[string]string{"L-p1s1_1": "aura:p1-user:s1_1-request"},
+		LabelValues:        map[string]string{"L-p1s1_1": "pasture:p1-user:s1_1-request"},
 		AxisLetters:        map[string]string{"axis-correctness": "A"},
 		RolePhaseRefs:      map[string]map[string]bool{"worker": {"p9": true}},
 		StartupStepOrders:  map[string][]int{},
@@ -594,7 +594,7 @@ func TestXMLNodeNestedUnmarshal(t *testing.T) {
 // TestValidateSchemaStubReturnsNil verifies that a minimal well-formed XML
 // document with no protocol entities produces (nil, nil) — no errors.
 func TestValidateSchemaStubReturnsNil(t *testing.T) {
-	r := strings.NewReader(`<?xml version="1.0" encoding="UTF-8"?><aura-protocol version="2.0"/>`)
+	r := strings.NewReader(`<?xml version="1.0" encoding="UTF-8"?><pasture-protocol version="2.0"/>`)
 	errs, err := codegen.ValidateSchema(r)
 	assert.NoError(t, err, "ValidateSchema must not return a Go error for well-formed XML")
 	assert.Nil(t, errs, "a minimal well-formed document with no protocol entities must return nil errors")
@@ -645,7 +645,7 @@ func TestSchemaTypesPackageImports(t *testing.T) {
 	var _ codegen.XMLNode
 
 	// Also verify the OmitEmpty fields on LabelElem don't produce spurious attrs.
-	label := codegen.LabelElem{Id: "L-urd", Value: "aura:urd", Special: "true"}
+	label := codegen.LabelElem{Id: "L-urd", Value: "pasture:urd", Special: "true"}
 	out, err := xml.Marshal(label)
 	require.NoError(t, err)
 	assert.NotContains(t, string(out), `phase-ref=""`, "empty optional attrs must be omitted")
@@ -654,7 +654,7 @@ func TestSchemaTypesPackageImports(t *testing.T) {
 
 // TestXMLNodeAttrsField verifies the Attrs field is []xml.Attr (not []xml.Attr pointer).
 func TestXMLNodeAttrsField(t *testing.T) {
-	xmlInput := `<label id="L-p1s1_1" value="aura:p1-user"/>`
+	xmlInput := `<label id="L-p1s1_1" value="pasture:p1-user"/>`
 	var node codegen.XMLNode
 	err := xml.Unmarshal([]byte(xmlInput), &node)
 	require.NoError(t, err)
@@ -666,7 +666,7 @@ func TestXMLNodeAttrsField(t *testing.T) {
 		m[a.Name.Local] = a.Value
 	}
 	assert.Equal(t, "L-p1s1_1", m["id"])
-	assert.Equal(t, "aura:p1-user", m["value"])
+	assert.Equal(t, "pasture:p1-user", m["value"])
 }
 
 // TestConstraintsSectionNotMarshalled verifies that ConstraintsSection is

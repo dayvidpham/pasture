@@ -5,7 +5,7 @@ description: Master orchestrator for full 12-phase workflow
 
 # Epoch Agent
 
-<!-- BEGIN GENERATED FROM aura schema -->
+<!-- BEGIN GENERATED FROM pasture schema -->
 **Role:** `epoch` | **Phases owned:** p1-request, p2-elicit, p3-propose, p4-review, p5-plan-uat, p6-ratify, p7-handoff, p8-impl-plan, p9-worker-slices, p10-code-review, p11-impl-uat, p12-landing
 
 ## Protocol Context (generated from schema.xml)
@@ -31,7 +31,7 @@ description: Master orchestrator for full 12-phase workflow
 
 | Command | Description | Phases |
 |---------|-------------|--------|
-| `aura:epoch` | Master orchestrator for full 12-phase workflow | p1-request, p2-elicit, p3-propose, p4-review, p5-plan-uat, p6-ratify, p7-handoff, p8-impl-plan, p9-worker-slices, p10-code-review, p11-impl-uat, p12-landing |
+| `pasture:epoch` | Master orchestrator for full 12-phase workflow | p1-request, p2-elicit, p3-propose, p4-review, p5-plan-uat, p6-ratify, p7-handoff, p8-impl-plan, p9-worker-slices, p10-code-review, p11-impl-uat, p12-landing |
 
 ### General Constraints
 
@@ -91,7 +91,7 @@ bd dep add ure-id --blocked-by request-id
 **[C-handoff-skill-invocation]**
 - Given: an agent is launched for a new phase (especially p7 to p8 handoff)
 - When: composing the launch prompt
-- Then: prompt MUST start with Skill(/aura:{role}) invocation directive so the agent loads its role instructions
+- Then: prompt MUST start with Skill(/pasture:{role}) invocation directive so the agent loads its role instructions
 - Should not: launch agents without skill invocation — they skip role-critical procedures like ephemeral exploration and leaf task creation
 
 **[C-integration-points]**
@@ -181,7 +181,7 @@ Agents coordinate through **beads** tasks and comments:
 **[epoch-followup-trigger]**
 - Given: code review completion
 - When: ANY IMPORTANT or MINOR findings exist
-- Then: Supervisor creates a follow-up epic (label aura:epic-followup)
+- Then: Supervisor creates a follow-up epic (label pasture:epic-followup)
 - Should not: gate follow-up epic creation on BLOCKER resolution
 
 **[epoch-autonomous-progression]**
@@ -215,20 +215,20 @@ Agents coordinate through **beads** tasks and comments:
 ## The 12-Phase Workflow
 
 ```
-Phase 1:  aura:p1-user       -> REQUEST (classify, research, explore)
+Phase 1:  pasture:p1-user       -> REQUEST (classify, research, explore)
             s1_1-classify -> s1_2-research || s1_3-explore
-Phase 2:  aura:p2-user       -> ELICIT (URE survey) + URD (single source of truth)
+Phase 2:  pasture:p2-user       -> ELICIT (URE survey) + URD (single source of truth)
             s2_1-elicit -> s2_2-urd
-Phase 3:  aura:p3-plan       -> PROPOSAL-N (architect proposes)
-Phase 4:  aura:p4-plan       -> REVIEW (3 parallel reviewers, ACCEPT/REVISE)
-Phase 5:  aura:p5-user       -> Plan UAT (user acceptance test)
-Phase 6:  aura:p6-plan       -> Ratification (supersede old proposals)
-Phase 7:  aura:p7-plan       -> Handoff (architect -> supervisor)
-Phase 8:  aura:p8-impl       -> IMPL_PLAN (supervisor decomposes into slices; Explore subagents)
-Phase 9:  aura:p9-impl       -> SLICE-N (parallel workers; Ride the Wave — workers persist for review)
-Phase 10: aura:p10-impl      -> Code Review (ephemeral reviewers review all slices; max 3 fix cycles per slice)
-Phase 11: aura:p11-user      -> Implementation UAT
-Phase 12: aura:p12-impl      -> Landing (commit, push, hand off)
+Phase 3:  pasture:p3-plan       -> PROPOSAL-N (architect proposes)
+Phase 4:  pasture:p4-plan       -> REVIEW (3 parallel reviewers, ACCEPT/REVISE)
+Phase 5:  pasture:p5-user       -> Plan UAT (user acceptance test)
+Phase 6:  pasture:p6-plan       -> Ratification (supersede old proposals)
+Phase 7:  pasture:p7-plan       -> Handoff (architect -> supervisor)
+Phase 8:  pasture:p8-impl       -> IMPL_PLAN (supervisor decomposes into slices; Explore subagents)
+Phase 9:  pasture:p9-impl       -> SLICE-N (parallel workers; Ride the Wave — workers persist for review)
+Phase 10: pasture:p10-impl      -> Code Review (ephemeral reviewers review all slices; max 3 fix cycles per slice)
+Phase 11: pasture:p11-user      -> Implementation UAT
+Phase 12: pasture:p12-impl      -> Landing (commit, push, hand off)
 ```
 
 ### Phase 1 Expanded: REQUEST
@@ -237,9 +237,9 @@ Phase 1 has 3 sub-steps:
 
 | Sub-step | Label | Description | Parallel? |
 |----------|-------|-------------|-----------|
-| s1_1-classify | `aura:p1-user:s1_1-classify` | Capture and classify request along 4 axes (scope, complexity, risk, domain novelty) | Sequential (first) |
-| s1_2-research | `aura:p1-user:s1_2-research` | Find domain standards, prior art | Parallel with s1_3 |
-| s1_3-explore | `aura:p1-user:s1_3-explore` | Codebase exploration for integration points | Parallel with s1_2 |
+| s1_1-classify | `pasture:p1-user:s1_1-classify` | Capture and classify request along 4 axes (scope, complexity, risk, domain novelty) | Sequential (first) |
+| s1_2-research | `pasture:p1-user:s1_2-research` | Find domain standards, prior art | Parallel with s1_3 |
+| s1_3-explore | `pasture:p1-user:s1_3-explore` | Codebase exploration for integration points | Parallel with s1_2 |
 
 After classification, user confirms research depth. Then s1_2 and s1_3 run in parallel.
 
@@ -248,7 +248,7 @@ After classification, user confirms research depth. Then s1_2 and s1_3 run in pa
 **Option 1: Manual Task Creation**
 ```bash
 # Phase 1: Capture user request
-bd create --labels "aura:p1-user:s1_1-classify" \
+bd create --labels "pasture:p1-user:s1_1-classify" \
   --title "REQUEST: {{feature}}" \
   --description "{{verbatim user request}}" \
   --assignee architect
@@ -298,7 +298,7 @@ references:
   review_round: <review-task-ids>
 ---
 Aggregated IMPORTANT and MINOR findings from code review." \
-  --labels "aura:epic-followup"
+  --labels "pasture:epic-followup"
 ```
 
 ### Follow-up lifecycle (same protocol, FOLLOWUP_* prefix)
@@ -315,7 +315,7 @@ FOLLOWUP → FOLLOWUP_URE → FOLLOWUP_URD → FOLLOWUP_PROPOSAL-1 → FOLLOWUP_
 - **FOLLOWUP_IMPL_PLAN**: Supervisor decomposes follow-up into slices
 - **FOLLOWUP_SLICE-{N}**: Each slice adopts original IMPORTANT/MINOR leaf tasks as children (dual-parent)
 
-See `/aura:supervisor` and `/aura:impl-review` for full creation commands and leaf task adoption.
+See `/pasture:supervisor` and `/pasture:impl-review` for full creation commands and leaf task adoption.
 
 ## EAGER Severity Tree (Phase 10)
 
@@ -324,11 +324,11 @@ Code reviews ALWAYS create 3 severity group tasks per review round, even if empt
 ```bash
 # Create all 3 severity groups immediately (EAGER, not lazy)
 bd create --title "SLICE-N-REVIEW-{axis}-{round} BLOCKER" \
-  --labels "aura:severity:blocker,aura:p10-impl:s10-review" ...
+  --labels "pasture:severity:blocker,pasture:p10-impl:s10-review" ...
 bd create --title "SLICE-N-REVIEW-{axis}-{round} IMPORTANT" \
-  --labels "aura:severity:important,aura:p10-impl:s10-review" ...
+  --labels "pasture:severity:important,pasture:p10-impl:s10-review" ...
 bd create --title "SLICE-N-REVIEW-{axis}-{round} MINOR" \
-  --labels "aura:severity:minor,aura:p10-impl:s10-review" ...
+  --labels "pasture:severity:minor,pasture:p10-impl:s10-review" ...
 
 # Empty groups are closed immediately
 bd close <empty-important-id>
@@ -353,10 +353,10 @@ bd dep tree {{latest-task-id}}
 bd blocked
 
 # See all epoch tasks by phase
-bd list --labels="aura:p1-user:s1_1-classify"    # REQUEST tasks
-bd list --labels="aura:p2-user:s2_1-elicit"      # ELICIT tasks
-bd list --labels="aura:p3-plan:s3-propose"        # PROPOSAL tasks
-bd list --labels="aura:p9-impl:s9-slice"          # Implementation slices
+bd list --labels="pasture:p1-user:s1_1-classify"    # REQUEST tasks
+bd list --labels="pasture:p2-user:s2_1-elicit"      # ELICIT tasks
+bd list --labels="pasture:p3-plan:s3-propose"        # PROPOSAL tasks
+bd list --labels="pasture:p9-impl:s9-slice"          # Implementation slices
 ```
 
 ## Skills to Invoke
@@ -365,16 +365,16 @@ Each phase transition MUST include an explicit `Skill(...)` invocation directive
 
 | Phase | Skill | Invocation Directive |
 |-------|-------|---------------------|
-| 1 (REQUEST: classify, research, explore) | `/aura:user-request` | `Skill(/aura:user-request)` |
-| 2 (ELICIT + URD) | `/aura:user-elicit` | `Skill(/aura:user-elicit)` |
-| 3-6 (PROPOSAL, REVIEW, UAT, RATIFY) | `/aura:architect` | `Skill(/aura:architect)` |
-| 5, 11 (UAT) | `/aura:user-uat` | `Skill(/aura:user-uat)` |
-| 7 (HANDOFF) | `/aura:architect-handoff` | Architect calls `Skill(/aura:architect-handoff)` after ratification |
-| 8-10 (IMPL_PLAN, SLICES, CODE REVIEW) | `/aura:supervisor` | Supervisor prompt MUST start with `Skill(/aura:supervisor)` |
+| 1 (REQUEST: classify, research, explore) | `/pasture:user-request` | `Skill(/pasture:user-request)` |
+| 2 (ELICIT + URD) | `/pasture:user-elicit` | `Skill(/pasture:user-elicit)` |
+| 3-6 (PROPOSAL, REVIEW, UAT, RATIFY) | `/pasture:architect` | `Skill(/pasture:architect)` |
+| 5, 11 (UAT) | `/pasture:user-uat` | `Skill(/pasture:user-uat)` |
+| 7 (HANDOFF) | `/pasture:architect-handoff` | Architect calls `Skill(/pasture:architect-handoff)` after ratification |
+| 8-10 (IMPL_PLAN, SLICES, CODE REVIEW) | `/pasture:supervisor` | Supervisor prompt MUST start with `Skill(/pasture:supervisor)` |
 | 12 (LANDING) | Manual git commit and push | N/A |
 
 **CRITICAL:** When the architect hands off to the supervisor (Phase 7 → 8), the supervisor launch prompt MUST:
-1. Start with `Skill(/aura:supervisor)` — without this, the supervisor skips role-critical procedures
+1. Start with `Skill(/pasture:supervisor)` — without this, the supervisor skips role-critical procedures
 2. Include all Beads task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)
 3. Include the handoff document path
 
@@ -385,10 +385,10 @@ Each phase transition MUST include an explicit `Skill(...)` invocation directive
 
 ```bash
 # Correct: Add ratify label
-bd label add task-prop aura:p6-plan:s6-ratify
+bd label add task-prop pasture:p6-plan:s6-ratify
 bd comments add task-prop "RATIFIED: All reviewers ACCEPT"
 
 # Wrong: Don't close
 # bd close task-prop  # NEVER DO THIS
 ```
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

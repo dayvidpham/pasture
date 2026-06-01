@@ -54,22 +54,22 @@ var supervisorTrackProgressBody = SkillBody{
 			Title: "Beads Status Queries",
 			Content: "```" + `bash
 # Check all implementation slices
-bd list --labels="aura:p9-impl:s9-slice" --status=in_progress
+bd list --labels="pasture:p9-impl:s9-slice" --status=in_progress
 
 # Check for blocked slices
-bd list --labels="aura:p9-impl:s9-slice" --status=blocked
+bd list --labels="pasture:p9-impl:s9-slice" --status=blocked
 
 # Check specific task
 bd show <task-id>
 
 # Check completed slices
-bd list --labels="aura:p9-impl:s9-slice" --status=done
+bd list --labels="pasture:p9-impl:s9-slice" --status=done
 
 # Check BLOCKER severity groups (during/after review)
-bd list --labels="aura:severity:blocker" --status=open
+bd list --labels="pasture:severity:blocker" --status=open
 
 # Check follow-up epic
-bd list --labels="aura:epic-followup"
+bd list --labels="pasture:epic-followup"
 ` + "```",
 		},
 		{
@@ -105,18 +105,18 @@ bd comments add <task-id> "All slices complete — proceeding to Phase 10 (code 
 | Severity | Blocks Slice? | Action |
 |----------|---------------|--------|
 | BLOCKER | Yes | Must resolve before proceeding to Phase 11 |
-| IMPORTANT | No | Goes to follow-up epic (` + "`aura:epic-followup`" + `) |
-| MINOR | No | Goes to follow-up epic (` + "`aura:epic-followup`" + `) |`,
+| IMPORTANT | No | Goes to follow-up epic (` + "`pasture:epic-followup`" + `) |
+| MINOR | No | Goes to follow-up epic (` + "`pasture:epic-followup`" + `) |`,
 		},
 		{
 			Id:    "sup-track-followup-lifecycle",
 			Title: "Follow-up Lifecycle Tracking",
 			Content: "```" + `bash
 # Track follow-up lifecycle progress
-bd list --labels="aura:epic-followup"
-bd list --labels="aura:p2-user:s2_1-elicit" --status=open   # FOLLOWUP_URE
-bd list --labels="aura:p3-plan:s3-propose" --status=open     # FOLLOWUP_PROPOSAL
-bd list --labels="aura:p9-impl:s9-slice" --status=in_progress  # FOLLOWUP_SLICE in progress
+bd list --labels="pasture:epic-followup"
+bd list --labels="pasture:p2-user:s2_1-elicit" --status=open   # FOLLOWUP_URE
+bd list --labels="pasture:p3-plan:s3-propose" --status=open     # FOLLOWUP_PROPOSAL
+bd list --labels="pasture:p9-impl:s9-slice" --status=in_progress  # FOLLOWUP_SLICE in progress
 ` + "```",
 		},
 	},

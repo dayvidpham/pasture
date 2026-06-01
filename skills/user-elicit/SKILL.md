@@ -1,7 +1,7 @@
 # User Requirements Elicitation (Phase 2)
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:user:elicit` — User Requirements Elicitation survey (Phase 2)
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:user:elicit` — User Requirements Elicitation survey (Phase 2)
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-2-elicit--urd-aurap2-user)** <- Phase 2
 
@@ -45,8 +45,8 @@
 
 | Sub-step | Label | Description |
 |----------|-------|-------------|
-| s2_1-elicit | `aura:p2-user:s2_1-elicit` | URE survey — structured requirements elicitation |
-| s2_2-urd | `aura:p2-user:s2_2-urd` (also `aura:urd`) | Create URD — single source of truth for requirements |
+| s2_1-elicit | `pasture:p2-user:s2_1-elicit` | URE survey — structured requirements elicitation |
+| s2_2-urd | `pasture:p2-user:s2_2-urd` (also `pasture:urd`) | Create URD — single source of truth for requirements |
 
 ## Elicitation Strategy (s2_1)
 
@@ -189,7 +189,7 @@ include the exact question text, ALL options with their descriptions, and the
 user's verbatim response.
 
 ```bash
-bd create --labels "aura:p2-user:s2_1-elicit" \
+bd create --labels "pasture:p2-user:s2_1-elicit" \
   --title "ELICIT: {{feature name}}" \
   --description "---
 references:
@@ -227,7 +227,7 @@ bd dep add {{request-task-id}} --blocked-by {{elicit-task-id}}
 After the elicit task is created, create the URD as the single source of truth for user requirements:
 
 ```bash
-bd create --labels "aura:urd,aura:p2-user:s2_2-urd" \
+bd create --labels "pasture:urd,pasture:p2-user:s2_2-urd" \
   --title "URD: {{feature name}}" \
   --description "---
 references:
@@ -256,10 +256,10 @@ Record the URD task ID — pass it to the architect for Phase 3.
 
 ## Next Phase
 
-After elicitation and URD creation, invoke `/aura:architect` to begin proposal creation (Phase 3). Pass the URD ID so the architect can reference it.
+After elicitation and URD creation, invoke `/pasture:architect` to begin proposal creation (Phase 3). Pass the URD ID so the architect can reference it.
 
 The proposal task will block the elicit task:
 ```bash
 bd dep add {{elicit-task-id}} --blocked-by {{proposal-task-id}}
 ```
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

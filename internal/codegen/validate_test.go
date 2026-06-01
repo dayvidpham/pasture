@@ -100,16 +100,16 @@ func TestValidateTree_EmptyRoot(t *testing.T) {
 // required attribute and expects a Structural error.
 func TestValidateSchema_StructuralErrors(t *testing.T) {
 	// A phase element without the required "number" attribute.
-	const xmlDoc = `<aura-protocol>
+	const xmlDoc = `<pasture-protocol>
   <phases>
     <phase id="p1" domain="user" name="Request">
       <substep id="s1" type="request" execution="sequential" order="1" label-ref="L-p1s1"/>
     </phase>
   </phases>
   <labels>
-    <label id="L-p1s1" value="aura:p1-user:s1-request" special="true"/>
+    <label id="L-p1s1" value="pasture:p1-user:s1-request" special="true"/>
   </labels>
-</aura-protocol>`
+</pasture-protocol>`
 
 	errs, err := codegen.ValidateSchema(strings.NewReader(xmlDoc))
 	assert.NoError(t, err)
@@ -130,14 +130,14 @@ func TestValidateSchema_StructuralErrors(t *testing.T) {
 // TestValidateSchema_ReferentialErrors feeds a document where a substep
 // label-ref points to a non-existent label ID.
 func TestValidateSchema_ReferentialErrors(t *testing.T) {
-	const xmlDoc = `<aura-protocol>
+	const xmlDoc = `<pasture-protocol>
   <phases>
     <phase id="p1" number="1" domain="user" name="Request">
       <substep id="s1" type="request" execution="sequential" order="1" label-ref="NONEXISTENT"/>
     </phase>
   </phases>
   <labels/>
-</aura-protocol>`
+</pasture-protocol>`
 
 	errs, err := codegen.ValidateSchema(strings.NewReader(xmlDoc))
 	assert.NoError(t, err)
@@ -159,7 +159,7 @@ func TestValidateSchema_ReferentialErrors(t *testing.T) {
 // produce a Semantic error.
 func TestValidateSchema_SemanticErrors(t *testing.T) {
 	// Two phases with numbers 1 and 3 (missing 2).
-	const xmlDoc = `<aura-protocol>
+	const xmlDoc = `<pasture-protocol>
   <phases>
     <phase id="p1" number="1" domain="user" name="Request">
       <substep id="s1_1" type="request" execution="sequential" order="1" label-ref="L-p1s1"/>
@@ -169,10 +169,10 @@ func TestValidateSchema_SemanticErrors(t *testing.T) {
     </phase>
   </phases>
   <labels>
-    <label id="L-p1s1" value="aura:p1-user:s1-request" special="true"/>
-    <label id="L-p3s1" value="aura:p3-plan:s1-propose" special="true"/>
+    <label id="L-p1s1" value="pasture:p1-user:s1-request" special="true"/>
+    <label id="L-p3s1" value="pasture:p3-plan:s1-propose" special="true"/>
   </labels>
-</aura-protocol>`
+</pasture-protocol>`
 
 	errs, err := codegen.ValidateSchema(strings.NewReader(xmlDoc))
 	assert.NoError(t, err)
@@ -195,12 +195,12 @@ func TestValidateSchema_SemanticErrors(t *testing.T) {
 // a LayerStructural ValidationError naming the duplicated id.
 func TestValidateSchema_DuplicateId(t *testing.T) {
 	// Two phases with the same id "p1" — checkIDUnique must fire on the second.
-	const xmlDoc = `<aura-protocol>
+	const xmlDoc = `<pasture-protocol>
   <phases>
     <phase id="p1" number="1" domain="user" name="Request"/>
     <phase id="p1" number="2" domain="plan" name="Duplicate"/>
   </phases>
-</aura-protocol>`
+</pasture-protocol>`
 
 	errs, err := codegen.ValidateSchema(strings.NewReader(xmlDoc))
 	assert.NoError(t, err, "ValidateSchema must not return a Go error for valid XML with duplicate IDs")
@@ -247,7 +247,7 @@ func semanticErrors(t *testing.T, xmlDoc string) []codegen.ValidationError {
 // TestSemanticRule1_PhaseNumbersNotSequential verifies that non-contiguous
 // phase numbers (e.g. 1, 3 — missing 2) produce a Semantic error at "phases".
 func TestSemanticRule1_PhaseNumbersNotSequential(t *testing.T) {
-	const xmlDoc = `<aura-protocol>
+	const xmlDoc = `<pasture-protocol>
   <phases>
     <phase id="p1" number="1" domain="user" name="A">
       <substep id="s1" type="request" execution="sequential" order="1" label-ref="L1"/>
@@ -257,10 +257,10 @@ func TestSemanticRule1_PhaseNumbersNotSequential(t *testing.T) {
     </phase>
   </phases>
   <labels>
-    <label id="L1" value="aura:p1-user:s1-request" special="true"/>
-    <label id="L3" value="aura:p3-plan:s1-propose" special="true"/>
+    <label id="L1" value="pasture:p1-user:s1-request" special="true"/>
+    <label id="L3" value="pasture:p3-plan:s1-propose" special="true"/>
   </labels>
-</aura-protocol>`
+</pasture-protocol>`
 
 	errs := semanticErrors(t, xmlDoc)
 	require.NotEmpty(t, errs, "expected a Semantic error for non-sequential phase numbers")
@@ -278,16 +278,16 @@ func TestSemanticRule1_PhaseNumbersNotSequential(t *testing.T) {
 // produces a Semantic error.
 func TestSemanticRule2_PhaseDomainInconsistency(t *testing.T) {
 	// Phase 1 should be domain "user" but we supply "plan".
-	const xmlDoc = `<aura-protocol>
+	const xmlDoc = `<pasture-protocol>
   <phases>
     <phase id="p1" number="1" domain="plan" name="Request">
       <substep id="s1" type="request" execution="sequential" order="1" label-ref="L1"/>
     </phase>
   </phases>
   <labels>
-    <label id="L1" value="aura:p1-user:s1-request" special="true"/>
+    <label id="L1" value="pasture:p1-user:s1-request" special="true"/>
   </labels>
-</aura-protocol>`
+</pasture-protocol>`
 
 	errs := semanticErrors(t, xmlDoc)
 	require.NotEmpty(t, errs, "expected a Semantic error for domain inconsistency")
@@ -303,13 +303,13 @@ func TestSemanticRule2_PhaseDomainInconsistency(t *testing.T) {
 // TestSemanticRule3_PhaseHasNoSubsteps verifies that a phase with no substeps
 // produces a Semantic error.
 func TestSemanticRule3_PhaseHasNoSubsteps(t *testing.T) {
-	const xmlDoc = `<aura-protocol>
+	const xmlDoc = `<pasture-protocol>
   <phases>
     <phase id="p1" number="1" domain="user" name="Request">
     </phase>
   </phases>
   <labels/>
-</aura-protocol>`
+</pasture-protocol>`
 
 	errs := semanticErrors(t, xmlDoc)
 	require.NotEmpty(t, errs, "expected a Semantic error for phase with no substeps")
@@ -326,7 +326,7 @@ func TestSemanticRule3_PhaseHasNoSubsteps(t *testing.T) {
 // substep order values within a phase produce a Semantic error.
 func TestSemanticRule4_SubstepOrdersNotSequential(t *testing.T) {
 	// Orders 1 and 3 — missing order 2.
-	const xmlDoc = `<aura-protocol>
+	const xmlDoc = `<pasture-protocol>
   <phases>
     <phase id="p1" number="1" domain="user" name="Request">
       <substep id="s1" type="request" execution="sequential" order="1" label-ref="L1"/>
@@ -334,10 +334,10 @@ func TestSemanticRule4_SubstepOrdersNotSequential(t *testing.T) {
     </phase>
   </phases>
   <labels>
-    <label id="L1" value="aura:p1-user:s1-request" special="true"/>
-    <label id="L3" value="aura:p1-user:s3-review"  special="true"/>
+    <label id="L1" value="pasture:p1-user:s1-request" special="true"/>
+    <label id="L3" value="pasture:p1-user:s3-review"  special="true"/>
   </labels>
-</aura-protocol>`
+</pasture-protocol>`
 
 	errs := semanticErrors(t, xmlDoc)
 	require.NotEmpty(t, errs, "expected a Semantic error for non-sequential substep orders")
@@ -354,16 +354,16 @@ func TestSemanticRule4_SubstepOrdersNotSequential(t *testing.T) {
 // substep without parallel-group or an <instances> child produces a Semantic
 // error.
 func TestSemanticRule5_ParallelSubstepMissingGroup(t *testing.T) {
-	const xmlDoc = `<aura-protocol>
+	const xmlDoc = `<pasture-protocol>
   <phases>
     <phase id="p1" number="1" domain="user" name="Request">
       <substep id="s1" type="review" execution="parallel" order="1" label-ref="L1"/>
     </phase>
   </phases>
   <labels>
-    <label id="L1" value="aura:p1-user:s1-review" special="true"/>
+    <label id="L1" value="pasture:p1-user:s1-review" special="true"/>
   </labels>
-</aura-protocol>`
+</pasture-protocol>`
 
 	errs := semanticErrors(t, xmlDoc)
 	require.NotEmpty(t, errs, "expected a Semantic error for parallel substep without parallel-group")
@@ -379,23 +379,23 @@ func TestSemanticRule5_ParallelSubstepMissingGroup(t *testing.T) {
 // TestSemanticRule6_DuplicateLabelValue verifies that two labels with the
 // same value attribute produce a Semantic error.
 func TestSemanticRule6_DuplicateLabelValue(t *testing.T) {
-	const xmlDoc = `<aura-protocol>
+	const xmlDoc = `<pasture-protocol>
   <phases>
     <phase id="p1" number="1" domain="user" name="Request">
       <substep id="s1" type="request" execution="sequential" order="1" label-ref="L1"/>
     </phase>
   </phases>
   <labels>
-    <label id="L1" value="aura:p1-user:s1-request" special="true"/>
-    <label id="L2" value="aura:p1-user:s1-request" special="true"/>
+    <label id="L1" value="pasture:p1-user:s1-request" special="true"/>
+    <label id="L2" value="pasture:p1-user:s1-request" special="true"/>
   </labels>
-</aura-protocol>`
+</pasture-protocol>`
 
 	errs := semanticErrors(t, xmlDoc)
 	require.NotEmpty(t, errs, "expected a Semantic error for duplicate label value")
 	found := false
 	for _, e := range errs {
-		if strings.Contains(e.Message, "duplicate value") && strings.Contains(e.Message, "aura:p1-user:s1-request") {
+		if strings.Contains(e.Message, "duplicate value") && strings.Contains(e.Message, "pasture:p1-user:s1-request") {
 			found = true
 		}
 	}
@@ -407,7 +407,7 @@ func TestSemanticRule6_DuplicateLabelValue(t *testing.T) {
 // affect output order).
 func TestSemanticRule6_DuplicateLabelValue_Deterministic(t *testing.T) {
 	// Four labels: L1 and L3 share "val-a", L2 and L4 share "val-b".
-	const xmlDoc = `<aura-protocol>
+	const xmlDoc = `<pasture-protocol>
   <phases>
     <phase id="p1" number="1" domain="user" name="Request">
       <substep id="s1" type="request" execution="sequential" order="1" label-ref="L1"/>
@@ -419,7 +419,7 @@ func TestSemanticRule6_DuplicateLabelValue_Deterministic(t *testing.T) {
     <label id="L3" value="val-a" special="true"/>
     <label id="L4" value="val-b" special="true"/>
   </labels>
-</aura-protocol>`
+</pasture-protocol>`
 
 	// Run 20 times and assert identical results each time.
 	var reference []codegen.ValidationError
@@ -438,21 +438,21 @@ func TestSemanticRule6_DuplicateLabelValue_Deterministic(t *testing.T) {
 // TestSemanticRule9_RoleOwnsNoPhases verifies that a role with an empty
 // <owns-phases> block produces a Semantic error.
 func TestSemanticRule9_RoleOwnsNoPhases(t *testing.T) {
-	const xmlDoc = `<aura-protocol>
+	const xmlDoc = `<pasture-protocol>
   <phases>
     <phase id="p1" number="1" domain="user" name="Request">
       <substep id="s1" type="request" execution="sequential" order="1" label-ref="L1"/>
     </phase>
   </phases>
   <labels>
-    <label id="L1" value="aura:p1-user:s1-request" special="true"/>
+    <label id="L1" value="pasture:p1-user:s1-request" special="true"/>
   </labels>
   <roles>
     <role id="r1" name="Worker">
       <owns-phases/>
     </role>
   </roles>
-</aura-protocol>`
+</pasture-protocol>`
 
 	errs := semanticErrors(t, xmlDoc)
 	require.NotEmpty(t, errs, "expected a Semantic error for role owning no phases")
@@ -468,21 +468,21 @@ func TestSemanticRule9_RoleOwnsNoPhases(t *testing.T) {
 // TestSemanticRule10_CommandHasPhasesButNoFile verifies that a command element
 // with a <phases> child but no <file> child produces a Semantic error.
 func TestSemanticRule10_CommandHasPhasesButNoFile(t *testing.T) {
-	const xmlDoc = `<aura-protocol>
+	const xmlDoc = `<pasture-protocol>
   <phases>
     <phase id="p1" number="1" domain="user" name="Request">
       <substep id="s1" type="request" execution="sequential" order="1" label-ref="L1"/>
     </phase>
   </phases>
   <labels>
-    <label id="L1" value="aura:p1-user:s1-request" special="true"/>
+    <label id="L1" value="pasture:p1-user:s1-request" special="true"/>
   </labels>
   <commands>
     <command id="cmd1" name="do-thing">
       <phases/>
     </command>
   </commands>
-</aura-protocol>`
+</pasture-protocol>`
 
 	errs := semanticErrors(t, xmlDoc)
 	require.NotEmpty(t, errs, "expected a Semantic error for command with phases but no file")
@@ -498,20 +498,20 @@ func TestSemanticRule10_CommandHasPhasesButNoFile(t *testing.T) {
 // TestSemanticRule11_DuplicateAxisLetter verifies that two review axes
 // sharing the same letter produce a Semantic error.
 func TestSemanticRule11_DuplicateAxisLetter(t *testing.T) {
-	const xmlDoc = `<aura-protocol>
+	const xmlDoc = `<pasture-protocol>
   <phases>
     <phase id="p1" number="1" domain="user" name="Request">
       <substep id="s1" type="request" execution="sequential" order="1" label-ref="L1"/>
     </phase>
   </phases>
   <labels>
-    <label id="L1" value="aura:p1-user:s1-request" special="true"/>
+    <label id="L1" value="pasture:p1-user:s1-request" special="true"/>
   </labels>
   <review-framework>
     <axis id="axis-a" letter="A" name="First"/>
     <axis id="axis-b" letter="A" name="Second"/>
   </review-framework>
-</aura-protocol>`
+</pasture-protocol>`
 
 	errs := semanticErrors(t, xmlDoc)
 	require.NotEmpty(t, errs, "expected a Semantic error for duplicate axis letter")
@@ -528,7 +528,7 @@ func TestSemanticRule11_DuplicateAxisLetter(t *testing.T) {
 // sequence with non-sequential step orders produces a Semantic error.
 func TestSemanticRule12_StartupSequenceNotSequential(t *testing.T) {
 	// Step orders 1 and 3 — missing 2.
-	const xmlDoc = `<aura-protocol>
+	const xmlDoc = `<pasture-protocol>
   <phases>
     <phase id="p1" number="1" domain="user" name="Request">
       <substep id="s1" type="request" execution="sequential" order="1" label-ref="L1">
@@ -540,9 +540,9 @@ func TestSemanticRule12_StartupSequenceNotSequential(t *testing.T) {
     </phase>
   </phases>
   <labels>
-    <label id="L1" value="aura:p1-user:s1-request" special="true"/>
+    <label id="L1" value="pasture:p1-user:s1-request" special="true"/>
   </labels>
-</aura-protocol>`
+</pasture-protocol>`
 
 	errs := semanticErrors(t, xmlDoc)
 	require.NotEmpty(t, errs, "expected a Semantic error for non-sequential startup sequence steps")
@@ -558,14 +558,14 @@ func TestSemanticRule12_StartupSequenceNotSequential(t *testing.T) {
 // TestSemanticRule13_AgentTemplateMinCountExceedsMax verifies that an
 // agent-template with min-count > max-count produces a Semantic error.
 func TestSemanticRule13_AgentTemplateMinCountExceedsMax(t *testing.T) {
-	const xmlDoc = `<aura-protocol>
+	const xmlDoc = `<pasture-protocol>
   <phases>
     <phase id="p1" number="1" domain="user" name="Request">
       <substep id="s1" type="request" execution="sequential" order="1" label-ref="L1"/>
     </phase>
   </phases>
   <labels>
-    <label id="L1" value="aura:p1-user:s1-request" special="true"/>
+    <label id="L1" value="pasture:p1-user:s1-request" special="true"/>
   </labels>
   <roles>
     <role id="r1" name="Worker">
@@ -579,7 +579,7 @@ func TestSemanticRule13_AgentTemplateMinCountExceedsMax(t *testing.T) {
       </standing-teams>
     </role>
   </roles>
-</aura-protocol>`
+</pasture-protocol>`
 
 	errs := semanticErrors(t, xmlDoc)
 	require.NotEmpty(t, errs, "expected a Semantic error for min-count > max-count")
@@ -596,14 +596,14 @@ func TestSemanticRule13_AgentTemplateMinCountExceedsMax(t *testing.T) {
 // value absent from the DomainType enum produces a Semantic error.
 func TestSemanticRule14_DomainNotInEnum(t *testing.T) {
 	// DomainType enum defines "user","plan","impl". "unknown" is not in it.
-	const xmlDoc = `<aura-protocol>
+	const xmlDoc = `<pasture-protocol>
   <phases>
     <phase id="p1" number="1" domain="unknown" name="Request">
       <substep id="s1" type="request" execution="sequential" order="1" label-ref="L1"/>
     </phase>
   </phases>
   <labels>
-    <label id="L1" value="aura:p1-user:s1-request" special="true"/>
+    <label id="L1" value="pasture:p1-user:s1-request" special="true"/>
   </labels>
   <enums>
     <enum name="DomainType">
@@ -612,7 +612,7 @@ func TestSemanticRule14_DomainNotInEnum(t *testing.T) {
       <value id="impl" description="Impl domain"/>
     </enum>
   </enums>
-</aura-protocol>`
+</pasture-protocol>`
 
 	errs := semanticErrors(t, xmlDoc)
 	require.NotEmpty(t, errs, "expected a Semantic error for domain not in DomainType enum")
@@ -633,7 +633,7 @@ func TestSemanticRule14_DomainNotInEnum_Deterministic(t *testing.T) {
 	// The document also triggers rule 2 (domain inconsistency) for each phase,
 	// so we filter to only rule 14 errors (containing "DomainType") when
 	// checking sort order.
-	const xmlDoc = `<aura-protocol>
+	const xmlDoc = `<pasture-protocol>
   <phases>
     <phase id="p1" number="1" domain="bogus" name="A">
       <substep id="s1" type="request" execution="sequential" order="1" label-ref="L1"/>
@@ -657,7 +657,7 @@ func TestSemanticRule14_DomainNotInEnum_Deterministic(t *testing.T) {
       <value id="impl" description="Impl domain"/>
     </enum>
   </enums>
-</aura-protocol>`
+</pasture-protocol>`
 
 	// rule14Only filters semantic errors to those produced by rule 14
 	// (domain not in DomainType enum).

@@ -72,7 +72,7 @@ var userUatBody = SkillBody{
 			Subsections: []ProseSection{
 				{
 					Id:    "uat-plan-phase",
-					Title: "Plan UAT (Phase 5 — aura:p5-user:s5-uat)",
+					Title: "Plan UAT (Phase 5 — pasture:p5-user:s5-uat)",
 					Content: `After 3 reviewers ACCEPT the proposal, present each major design decision to the user one at a time. For each component:
 1. Show the proposed interface definition (code snippet)
 2. Show a motivating example (how a user would use it)
@@ -80,7 +80,7 @@ var userUatBody = SkillBody{
 				},
 				{
 					Id:    "uat-impl-phase",
-					Title: "Implementation UAT (Phase 11 — aura:p11-user:s11-uat)",
+					Title: "Implementation UAT (Phase 11 — pasture:p11-user:s11-uat)",
 					Content: `After code review consensus, demonstrate what was actually built component by component. For each component:
 1. Run the actual command / show real output
 2. Compare against the original proposal
@@ -265,7 +265,7 @@ One open-ended question — "Is there anything from your original requirements t
 					Id:    "uat-plan-task",
 					Title: "Plan UAT Task (Phase 5)",
 					Content: "```bash\n" +
-						"bd create --labels \"aura:p5-user:s5-uat\" \\\n" +
+						"bd create --labels \"pasture:p5-user:s5-uat\" \\\n" +
 						"  --title \"UAT: Plan acceptance for <feature>\" \\\n" +
 						"  --description \"---\n" +
 						"references:\n" +
@@ -291,7 +291,7 @@ One open-ended question — "Is there anything from your original requirements t
 					Id:    "uat-impl-task",
 					Title: "Implementation UAT Task (Phase 11)",
 					Content: "```bash\n" +
-						"bd create --labels \"aura:p11-user:s11-uat\" \\\n" +
+						"bd create --labels \"pasture:p11-user:s11-uat\" \\\n" +
 						"  --title \"UAT: Implementation acceptance for <feature>\" \\\n" +
 						"  --description \"---\n" +
 						"references:\n" +

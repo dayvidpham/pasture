@@ -8,7 +8,7 @@ skills: {{ join .SubSkills ", " }}
 
 # {{ .Role.Name }} Agent
 
-<!-- BEGIN GENERATED FROM aura schema -->
+<!-- BEGIN GENERATED FROM pasture schema -->
 **Role:** `{{ .Role.Id }}` | **Phases owned:** {{- $ownedPhases := .OwnedPhases }}{{- range $i, $p := $ownedPhases }} {{ index $.PhaseSlug $p }}{{- if not (last $i (len $ownedPhases)) }},{{- end }}{{- end }}
 
 ## Protocol Context (generated from schema.xml)
@@ -225,4 +225,4 @@ Exit conditions:
 {{ .Code }}
 ```
 {{- end }}
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

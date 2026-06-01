@@ -7,9 +7,9 @@ cases:
       begin=1, end=3 (0-based indices).
     input: |
       # Title
-      <!-- BEGIN GENERATED FROM aura schema -->
+      <!-- BEGIN GENERATED FROM pasture schema -->
       old generated content
-      <!-- END GENERATED FROM aura schema -->
+      <!-- END GENERATED FROM pasture schema -->
       hand-authored body
     want_begin: 1
     want_end: 3
@@ -19,9 +19,9 @@ cases:
     description: |
       Both markers present; nothing after END. Still a valid document.
     input: |
-      <!-- BEGIN GENERATED FROM aura schema -->
+      <!-- BEGIN GENERATED FROM pasture schema -->
       generated content here
-      <!-- END GENERATED FROM aura schema -->
+      <!-- END GENERATED FROM pasture schema -->
     want_begin: 0
     want_end: 2
     want_error: ""
@@ -30,8 +30,8 @@ cases:
     description: |
       BEGIN and END are adjacent (empty generated section). Valid.
     input: |
-      <!-- BEGIN GENERATED FROM aura schema -->
-      <!-- END GENERATED FROM aura schema -->
+      <!-- BEGIN GENERATED FROM pasture schema -->
+      <!-- END GENERATED FROM pasture schema -->
     want_begin: 0
     want_end: 1
     want_error: ""
@@ -48,7 +48,7 @@ cases:
   - name: missing_begin
     description: END is present but BEGIN is absent.
     input: |
-      <!-- END GENERATED FROM aura schema -->
+      <!-- END GENERATED FROM pasture schema -->
       some body text
     want_error: "missing BEGIN"
 
@@ -56,30 +56,30 @@ cases:
     description: BEGIN is present but END is absent.
     input: |
       # Heading
-      <!-- BEGIN GENERATED FROM aura schema -->
+      <!-- BEGIN GENERATED FROM pasture schema -->
       some generated content
     want_error: "missing END"
 
   - name: duplicate_begin
     description: BEGIN appears twice; END appears once.
     input: |
-      <!-- BEGIN GENERATED FROM aura schema -->
-      <!-- BEGIN GENERATED FROM aura schema -->
-      <!-- END GENERATED FROM aura schema -->
+      <!-- BEGIN GENERATED FROM pasture schema -->
+      <!-- BEGIN GENERATED FROM pasture schema -->
+      <!-- END GENERATED FROM pasture schema -->
     want_error: "duplicate BEGIN"
 
   - name: duplicate_end
     description: BEGIN appears once; END appears twice.
     input: |
-      <!-- BEGIN GENERATED FROM aura schema -->
-      <!-- END GENERATED FROM aura schema -->
-      <!-- END GENERATED FROM aura schema -->
+      <!-- BEGIN GENERATED FROM pasture schema -->
+      <!-- END GENERATED FROM pasture schema -->
+      <!-- END GENERATED FROM pasture schema -->
     want_error: "duplicate END"
 
   - name: reversed_markers
     description: END appears before BEGIN (markers in wrong order).
     input: |
-      <!-- END GENERATED FROM aura schema -->
+      <!-- END GENERATED FROM pasture schema -->
       some content
-      <!-- BEGIN GENERATED FROM aura schema -->
+      <!-- BEGIN GENERATED FROM pasture schema -->
     want_error: "END marker"

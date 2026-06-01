@@ -1,7 +1,7 @@
 # Architect: Handoff to Supervisor
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:architect:handoff` — Create handoff document and transfer to supervisor
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:architect:handoff` — Create handoff document and transfer to supervisor
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-7-handoff)** <- Phase 7
 
@@ -35,7 +35,7 @@ Storage: `.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`
 # Handoff: Architect → Supervisor
 
 ## Supervisor Startup
-1. Call `Skill(/aura:supervisor)` to load your role instructions
+1. Call `Skill(/pasture:supervisor)` to load your role instructions
 2. Spawn ephemeral Explore subagents via Task tool when codebase exploration is needed
 3. Read the RATIFIED PROPOSAL and URD with `bd show` commands below
 4. Every vertical slice MUST have leaf tasks (L1: types, L2: tests, L3: impl)
@@ -81,7 +81,7 @@ Storage: `.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`
    ---
    Handoff from architect to supervisor. See handoff document at
    .git/.aura/handoff/<request-task-id>/architect-to-supervisor.md" \
-     --add-label "aura:p7-plan:s7-handoff"
+     --add-label "pasture:p7-plan:s7-handoff"
 
    bd dep add <request-id> --blocked-by <handoff-id>
    ```
@@ -106,10 +106,10 @@ Storage: `.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`
 
 ## Example Prompt
 
-**CRITICAL:** The prompt MUST instruct the supervisor to invoke `/aura:supervisor` as its first action. Without this, the supervisor agent starts without its role instructions and skips leaf task creation, ephemeral exploration, and other critical procedures.
+**CRITICAL:** The prompt MUST instruct the supervisor to invoke `/pasture:supervisor` as its first action. Without this, the supervisor agent starts without its role instructions and skips leaf task creation, ephemeral exploration, and other critical procedures.
 
 ```
-Start by calling `Skill(/aura:supervisor)` to load your role instructions.
+Start by calling `Skill(/pasture:supervisor)` to load your role instructions.
 
 Implement the ratified plan for <feature name>.
 
@@ -130,7 +130,7 @@ Implement the ratified plan for <feature name>.
 <Given/When/Then criteria from the ratified plan>
 
 ## Reminders
-1. Call `Skill(/aura:supervisor)` FIRST — do not proceed without loading your role
+1. Call `Skill(/pasture:supervisor)` FIRST — do not proceed without loading your role
 2. Spawn ephemeral Explore subagents via Task tool when codebase exploration is needed
 3. Every vertical slice MUST have leaf tasks (L1: types, L2: tests, L3: impl) — a slice without leaf tasks is undecomposed
 4. Read the ratified plan with `bd show <ratified-proposal-id>` and the URD with `bd show <urd-id>`
@@ -140,7 +140,7 @@ Pass the prompt to the script:
 
 ```bash
 aura-swarm start --swarm-mode intree --role supervisor -n 1 --prompt "$(cat <<'EOF'
-Start by calling Skill(/aura:supervisor) to load your role instructions.
+Start by calling Skill(/pasture:supervisor) to load your role instructions.
 
 Implement the ratified plan for User Authentication.
 
@@ -163,7 +163,7 @@ Given a valid JWT token when accessing protected routes then allow access
 Given an expired token when accessing protected routes then return 401
 
 ## Reminders
-1. Call Skill(/aura:supervisor) FIRST
+1. Call Skill(/pasture:supervisor) FIRST
 2. Spawn ephemeral Explore subagents via Task tool when codebase exploration is needed
 3. Every slice MUST have leaf tasks (L1/L2/L3)
 4. Read ratified plan: bd show project-prop1 and URD: bd show project-xyz
@@ -195,4 +195,4 @@ This handoff (h1: Architect → Supervisor) also occurs after FOLLOWUP_PROPOSAL 
 - **References:** Include both original URD and FOLLOWUP_URD task IDs
 - **Context:** Summary of FOLLOWUP_PROPOSAL ratification and outstanding leaf tasks from original review
 - **Next step:** Supervisor creates FOLLOWUP_IMPL_PLAN and FOLLOWUP_SLICE-N tasks, adopting original IMPORTANT/MINOR leaf tasks as dual-parent children
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

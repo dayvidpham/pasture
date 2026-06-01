@@ -1,7 +1,7 @@
 # User Request (Phase 1)
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:user:request` — Capture user feature request verbatim (Phase 1)
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:user:request` — Capture user feature request verbatim (Phase 1)
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-1-request-aurap1-user)** <- Phase 1
 
@@ -14,7 +14,7 @@
 **[user-req-classify-label]**
 - Given: request captured
 - When: classifying
-- Then: use `aura:p1-user:s1_1-classify` label
+- Then: use `pasture:p1-user:s1_1-classify` label
 - Should not: use other labels for the initial capture
 
 **[user-req-research-depth]**
@@ -26,16 +26,16 @@
 **[user-req-proceed-to-elicit]**
 - Given: Phase 1 complete
 - When: proceeding
-- Then: invoke `/aura:user-elicit` for Phase 2
+- Then: invoke `/pasture:user-elicit` for Phase 2
 - Should not: skip to proposal
 
 ## Phase 1 Sub-steps
 
 | Sub-step | Label | Description | Parallel? |
 |----------|-------|-------------|----------|
-| s1_1-classify | `aura:p1-user:s1_1-classify` | Capture verbatim + classify along 4 axes | Sequential (first) |
-| s1_2-research | `aura:p1-user:s1_2-research` | Find domain standards, prior art | Parallel with s1_3 |
-| s1_3-explore | `aura:p1-user:s1_3-explore` | Codebase exploration for integration points | Parallel with s1_2 |
+| s1_1-classify | `pasture:p1-user:s1_1-classify` | Capture verbatim + classify along 4 axes | Sequential (first) |
+| s1_2-research | `pasture:p1-user:s1_2-research` | Find domain standards, prior art | Parallel with s1_3 |
+| s1_3-explore | `pasture:p1-user:s1_3-explore` | Codebase exploration for integration points | Parallel with s1_2 |
 
 ## Step 1: Capture and Classify (s1_1)
 
@@ -50,7 +50,7 @@
 
 2. **Create the request task:**
    ```bash
-   bd create --labels "aura:p1-user:s1_1-classify" \
+   bd create --labels "pasture:p1-user:s1_1-classify" \
      --title "REQUEST: {{short summary}}" \
      --description "{{VERBATIM user request - do not edit}}" \
      --assignee architect
@@ -102,12 +102,12 @@ Spawn both agents in parallel (via Task tool with `run_in_background: true`). Ea
 
 ### s1_2-research: Domain Research
 
-Invoke `/aura:research` with:
+Invoke `/pasture:research` with:
 - **topic:** derived from the user's request
 - **depth:** the user-confirmed research depth
 - **request-task-id:** the REQUEST beads task ID
 
-The `/aura:research` skill handles the full research workflow: depth-scoped checklist, structured report written to `docs/research/<topic>.md`, and summary comment on the REQUEST task.
+The `/pasture:research` skill handles the full research workflow: depth-scoped checklist, structured report written to `docs/research/<topic>.md`, and summary comment on the REQUEST task.
 
 See [skills/research/SKILL.md](../research/SKILL.md) for full procedure, output format, and examples.
 
@@ -138,12 +138,12 @@ bd comments add {{request-task-id}} \
 
 ### s1_3-explore: Codebase Exploration
 
-Invoke `/aura:explore` with:
+Invoke `/pasture:explore` with:
 - **topic:** derived from the user's request
 - **depth:** the user-confirmed research depth (same depth applies)
 - **request-task-id:** the REQUEST beads task ID
 
-The `/aura:explore` skill handles the full exploration workflow: depth-scoped checklist, structured findings, and summary comment on the REQUEST task.
+The `/pasture:explore` skill handles the full exploration workflow: depth-scoped checklist, structured findings, and summary comment on the REQUEST task.
 
 See [skills/explore/SKILL.md](../explore/SKILL.md) for full procedure, output format, and examples.
 
@@ -182,7 +182,7 @@ Both agents must complete before proceeding to Phase 2. Their findings are recor
 User says: "I want to add a logout button to the header that clears the session and redirects to the login page"
 
 ```bash
-bd create --labels "aura:p1-user:s1_1-classify" \
+bd create --labels "pasture:p1-user:s1_1-classify" \
   --title "REQUEST: Add logout button to header" \
   --description "I want to add a logout button to the header that clears the session and redirects to the login page" \
   --assignee architect
@@ -194,10 +194,10 @@ bd comments add bd-abc123 \
 
 ## Next Phase
 
-After Phase 1 completes, invoke `/aura:user-elicit` to begin requirements elicitation (Phase 2).
+After Phase 1 completes, invoke `/pasture:user-elicit` to begin requirements elicitation (Phase 2).
 
 The elicit task will block this request task:
 ```bash
 bd dep add {{request-task-id}} --blocked-by {{elicit-task-id}}
 ```
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

@@ -59,14 +59,14 @@ var supervisorBody = SkillBody{
 			Id:        "sup-spawn-workers",
 			Given:     "worker assignments",
 			When:      "spawning",
-			Then:      "use Task tool with `subagent_type: \"general-purpose\"` and `run_in_background: true`, worker MUST call `Skill(/aura:worker)` at start",
+			Then:      "use Task tool with `subagent_type: \"general-purpose\"` and `run_in_background: true`, worker MUST call `Skill(/pasture:worker)` at start",
 			ShouldNot: "spawn workers sequentially or use specialized agent types",
 		},
 		{
 			Id:        "sup-teamcreate-msg",
 			Given:     "teammates spawned via TeamCreate",
 			When:      "assigning work via SendMessage",
-			Then:      "the message MUST include: (1) explicit instruction to call `Skill(/aura:worker)`, (2) the Beads task ID, (3) instruction to run `bd show <task-id>` for full context, and (4) the handoff document path",
+			Then:      "the message MUST include: (1) explicit instruction to call `Skill(/pasture:worker)`, (2) the Beads task ID, (3) instruction to run `bd show <task-id>` for full context, and (4) the handoff document path",
 			ShouldNot: "send bare instructions without Beads context — teammates have no prior knowledge of the task",
 		},
 		{
@@ -170,7 +170,7 @@ See: [../supervisor-plan-tasks/SKILL.md](../supervisor-plan-tasks/SKILL.md) for 
 Task({
   subagent_type: "Explore",
   run_in_background: true,
-  prompt: ` + "`" + `Call Skill(/aura:explore) to load your exploration role.
+  prompt: ` + "`" + `Call Skill(/pasture:explore) to load your exploration role.
 
 Query: <specific codebase question>
 Depth: standard-research
@@ -189,8 +189,8 @@ Spawn as many Explore subagents as needed — they are cheap and disposable. Use
 ` + "```" + `bash
 bd show <ratified-plan-id>
 bd show <urd-id>
-bd list --labels="aura:p6-plan:s6-ratify" --status=open
-bd list --labels="aura:urd"
+bd list --labels="pasture:p6-plan:s6-ratify" --status=open
+bd list --labels="pasture:urd"
 ` + "```",
 		},
 		{
@@ -224,7 +224,7 @@ type ImplementationTask struct {
 					Id:    "sup-step1-impl-plan",
 					Title: "Step 1: Create the IMPL_PLAN task",
 					Content: "```" + `bash
-bd create --labels "aura:p8-impl:s8-plan" \
+bd create --labels "pasture:p8-impl:s8-plan" \
   --title "IMPL_PLAN: <feature>" \
   --description "---
 references:
@@ -247,7 +247,7 @@ bd dep add <request-id> --blocked-by <impl-plan-id>
 					Id:    "sup-step2-create-slices",
 					Title: "Step 2: Create each slice",
 					Content: "```" + `bash
-bd create --labels "aura:p9-impl:s9-slice" \
+bd create --labels "pasture:p9-impl:s9-slice" \
   --title "SLICE-1: <slice name>" \
   --description "---
 references:
@@ -281,7 +281,7 @@ bd dep add <impl-plan-id> --blocked-by <slice-1-id>
 
 ` + "```" + `bash
 # L1: Types and interfaces for this slice
-LEAF_L1=$(bd create --labels "aura:p9-impl:s9-slice" \
+LEAF_L1=$(bd create --labels "pasture:p9-impl:s9-slice" \
   --title "SLICE-1-L1: Types — <slice name>" \
   --description "---
 references:
@@ -301,7 +301,7 @@ Given <context> when <action> then <outcome> should never <anti-pattern>")
 bd dep add <slice-1-id> --blocked-by $LEAF_L1
 
 # L2: Tests (import production code, will fail until L3)
-LEAF_L2=$(bd create --labels "aura:p9-impl:s9-slice" \
+LEAF_L2=$(bd create --labels "pasture:p9-impl:s9-slice" \
   --title "SLICE-1-L2: Tests — <slice name>" \
   --description "---
 references:
@@ -321,7 +321,7 @@ bd dep add <slice-1-id> --blocked-by $LEAF_L2
 bd dep add $LEAF_L2 --blocked-by $LEAF_L1
 
 # L3: Implementation (makes tests pass)
-LEAF_L3=$(bd create --labels "aura:p9-impl:s9-slice" \
+LEAF_L3=$(bd create --labels "pasture:p9-impl:s9-slice" \
   --title "SLICE-1-L3: Impl — <slice name>" \
   --description "---
 references:
@@ -370,7 +370,7 @@ bd update <slice-3-id> --assignee="worker-3"
 			Title: "Spawning Workers",
 			Content: `Per [C-supervisor-no-impl], all implementation work — no matter how small — is delegated to a worker agent. The supervisor's job is coordination, tracking, and quality control.
 
-Workers are **general-purpose agents** that call ` + "`/aura:worker`" + ` at the start. Select the model based on task complexity:
+Workers are **general-purpose agents** that call ` + "`/pasture:worker`" + ` at the start. Select the model based on task complexity:
 
 ` + "```" + `
 // Non-trivial work → sonnet model
@@ -378,7 +378,7 @@ Task({
   subagent_type: "general-purpose",
   model: "sonnet",
   run_in_background: true,
-  prompt: ` + "`" + `Call Skill(/aura:worker) and implement the assigned slice.\n\nBeads Task ID: ${taskId}...` + "`" + `
+  prompt: ` + "`" + `Call Skill(/pasture:worker) and implement the assigned slice.\n\nBeads Task ID: ${taskId}...` + "`" + `
 })
 
 // Trivial work (config tweak, typo fix, single-file edit) → haiku model
@@ -386,15 +386,15 @@ Task({
   subagent_type: "general-purpose",
   model: "haiku",
   run_in_background: true,
-  prompt: ` + "`" + `Call Skill(/aura:worker) and fix the typo in...\n\nBeads Task ID: ${taskId}...` + "`" + `
+  prompt: ` + "`" + `Call Skill(/pasture:worker) and fix the typo in...\n\nBeads Task ID: ${taskId}...` + "`" + `
 })
 
 // WRONG: Supervisor implementing changes directly
 Edit({ file_path: "src/foo.ts", ... })  // Supervisors coordinate, they don't implement!
 
-// WRONG: Do not use specialized agent types like "aura:worker" directly
+// WRONG: Do not use specialized agent types like "pasture:worker" directly
 Task({
-  subagent_type: "aura:worker",  // This doesn't exist!
+  subagent_type: "pasture:worker",  // This doesn't exist!
   ...
 })
 ` + "```",
@@ -423,7 +423,7 @@ See: [../supervisor-spawn-worker/SKILL.md](../supervisor-spawn-worker/SKILL.md) 
 SendMessage({
   type: "message",
   recipient: "worker-1",
-  content: ` + "`" + `You are assigned SLICE-1. Start by calling Skill(/aura:worker).
+  content: ` + "`" + `You are assigned SLICE-1. Start by calling Skill(/pasture:worker).
 
 Your Beads task ID: <slice-task-id>
 Run this to get full requirements: bd show <slice-task-id>
@@ -466,7 +466,7 @@ references:
   review_round: <review-task-ids>
 ---
 Aggregated IMPORTANT and MINOR findings from code review." \
-  --add-label "aura:epic-followup"
+  --add-label "pasture:epic-followup"
 
 # Link IMPORTANT/MINOR severity groups as children
 bd dep add <followup-epic-id> --blocked-by <important-group-id>
@@ -481,7 +481,7 @@ Severity routing follows [frag--sup-blocker-dual-parent] and [frag--sup-importan
 					Content: `The follow-up epic runs the same protocol phases with FOLLOWUP_* prefixed task types. The supervisor creates the initial lifecycle tasks:
 
 ` + "```" + `
-FOLLOWUP epic (aura:epic-followup)
+FOLLOWUP epic (pasture:epic-followup)
   ├── relates_to: original URD
   ├── relates_to: original REVIEW-A/B/C tasks
   └── blocked-by: FOLLOWUP_URE         (Phase 2: scope which findings to address)
@@ -498,7 +498,7 @@ FOLLOWUP epic (aura:epic-followup)
 # Create FOLLOWUP_URE — user scoping which findings to address
 FOLLOWUP_URE_ID=$(bd create \
   --title "FOLLOWUP_URE: Scope follow-up for <feature>" \
-  --labels "aura:p2-user:s2_1-elicit" \
+  --labels "pasture:p2-user:s2_1-elicit" \
   --description "---
 references:
   followup_epic: <followup-epic-id>
@@ -510,7 +510,7 @@ bd dep add <followup-epic-id> --blocked-by $FOLLOWUP_URE_ID
 # Create FOLLOWUP_URD — requirements for follow-up scope
 FOLLOWUP_URD_ID=$(bd create \
   --title "FOLLOWUP_URD: Requirements for <feature> follow-up" \
-  --labels "aura:p2-user:s2_2-urd,aura:urd" \
+  --labels "pasture:p2-user:s2_2-urd,pasture:urd" \
   --description "---
 references:
   followup_epic: <followup-epic-id>
@@ -572,24 +572,24 @@ See ` + "`../protocol/HANDOFF_TEMPLATE.md`" + ` for full follow-up handoff examp
 			Title: "Tracking Progress",
 			Content: "```" + `bash
 # Check all implementation slices
-bd list --labels="aura:p9-impl:s9-slice" --status=in_progress
+bd list --labels="pasture:p9-impl:s9-slice" --status=in_progress
 
 # Check for blocked tasks
-bd list --labels="aura:p9-impl:s9-slice" --status=blocked
+bd list --labels="pasture:p9-impl:s9-slice" --status=blocked
 
 # Check completed slices
-bd list --labels="aura:p9-impl:s9-slice" --status=done
+bd list --labels="pasture:p9-impl:s9-slice" --status=done
 
 # Check specific task
 bd show <task-id>
 
 # Check severity groups from review
-bd list --labels="aura:severity:blocker"
-bd list --labels="aura:severity:important"
-bd list --labels="aura:severity:minor"
+bd list --labels="pasture:severity:blocker"
+bd list --labels="pasture:severity:important"
+bd list --labels="pasture:severity:minor"
 
 # Check follow-up epics
-bd list --labels="aura:epic-followup"
+bd list --labels="pasture:epic-followup"
 ` + "```",
 		},
 	},
@@ -726,7 +726,7 @@ var supervisorPlanTasksBody = SkillBody{
 				"6. **Create vertical slice tasks:**\n" +
 				"   ```bash\n" +
 				"   bd create --type=task \\\n" +
-				"     --labels=\"aura:p9-impl:s9-slice\" \\\n" +
+				"     --labels=\"pasture:p9-impl:s9-slice\" \\\n" +
 				"     --title=\"SLICE-1: Implement 'cli-tool feature list' command (full vertical)\" \\\n" +
 				"     --description=\"$(cat <<'EOF'\n" +
 				"   ---\n" +
@@ -969,7 +969,7 @@ var supervisorPlanTasksBody = SkillBody{
 				"```bash\n" +
 				"# Create FOLLOWUP_IMPL_PLAN\n" +
 				"bd create --type=epic --priority=2 \\\n" +
-				"  --labels=\"aura:p8-impl:s8-plan\" \\\n" +
+				"  --labels=\"pasture:p8-impl:s8-plan\" \\\n" +
 				"  --title=\"FOLLOWUP_IMPL_PLAN: <follow-up feature>\" \\\n" +
 				"  --description=\"---\n" +
 				"references:\n" +
@@ -983,7 +983,7 @@ var supervisorPlanTasksBody = SkillBody{
 				"\n" +
 				"# Create FOLLOWUP_SLICE-N with adopted leaf tasks\n" +
 				"bd create --type=task \\\n" +
-				"  --labels=\"aura:p9-impl:s9-slice\" \\\n" +
+				"  --labels=\"pasture:p9-impl:s9-slice\" \\\n" +
 				"  --title=\"FOLLOWUP_SLICE-1: <description>\" \\\n" +
 				"  --description=\"---\n" +
 				"references:\n" +
@@ -1158,7 +1158,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 			Content: "```\n" +
 				"Task({\n" +
 				"  description: \"Worker: implement SLICE-N\",\n" +
-				"  prompt: `Call Skill(/aura:worker) and implement the assigned slice.\n" +
+				"  prompt: `Call Skill(/pasture:worker) and implement the assigned slice.\n" +
 				"\n" +
 				"Beads Task ID: <task-id>\n" +
 				"Read full requirements: bd show <task-id>\n" +
@@ -1170,7 +1170,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"})\n" +
 				"```\n" +
 				"\n" +
-				"Per [sup-spawn-workers], use `subagent_type: \"general-purpose\"`, not a custom agent type. The worker skill is invoked inside the agent via `Skill(/aura:worker)`.",
+				"Per [sup-spawn-workers], use `subagent_type: \"general-purpose\"`, not a custom agent type. The worker skill is invoked inside the agent via `Skill(/pasture:worker)`.",
 		},
 		{
 			Id:    "sup-spawn-teamcreate-sendmessage",
@@ -1181,7 +1181,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"SendMessage({\n" +
 				"  type: \"message\",\n" +
 				"  recipient: \"worker-1\",\n" +
-				"  content: `You are assigned SLICE-1. Start by calling Skill(/aura:worker).\n" +
+				"  content: `You are assigned SLICE-1. Start by calling Skill(/pasture:worker).\n" +
 				"\n" +
 				"Your Beads task ID: <slice-task-id>\n" +
 				"Run this to get full requirements: bd show <slice-task-id>\n" +
@@ -1540,7 +1540,7 @@ var architectBody = SkillBody{
 1. Create PROPOSAL-N+1 with fixes
 2. Mark PROPOSAL-N as superseded:
    ` + "```bash" + `
-   bd label add <old-proposal-id> aura:superseded
+   bd label add <old-proposal-id> pasture:superseded
    bd comments add <old-proposal-id> "Superseded by PROPOSAL-N+1 (<new-proposal-id>)"
    ` + "```" + `
 3. Re-spawn all 3 reviewers to assess PROPOSAL-N+1`,
@@ -1560,7 +1560,7 @@ var architectBody = SkillBody{
 					Title: "Phase 1: REQUEST Task",
 					Content: `Captures the original user prompt verbatim:
 ` + "```bash" + `
-bd create --labels "aura:p1-user:s1_1-classify" \
+bd create --labels "pasture:p1-user:s1_1-classify" \
   --title "REQUEST: <summary>" \
   --description "<verbatim user prompt - do not paraphrase>"
 # Result: task-req
@@ -1569,9 +1569,9 @@ bd create --labels "aura:p1-user:s1_1-classify" \
 				{
 					Id:    "arch-phase2-elicit",
 					Title: "Phase 2: ELICIT Task",
-					Content: `Run ` + "`/aura:user-elicit`" + ` first, then capture results:
+					Content: `Run ` + "`/pasture:user-elicit`" + ` first, then capture results:
 ` + "```bash" + `
-bd create --labels "aura:p2-user:s2_1-elicit" \
+bd create --labels "pasture:p2-user:s2_1-elicit" \
   --title "ELICIT: <feature>" \
   --description "<questions and user responses verbatim>"
 bd dep add <request-id> --blocked-by <elicit-id>
@@ -1583,7 +1583,7 @@ bd dep add <request-id> --blocked-by <elicit-id>
 					Title: "Phase 2.5: URD (User Requirements Document)",
 					Content: `Create the URD as the single source of truth after elicitation:
 ` + "```bash" + `
-bd create --labels "aura:urd,aura:p2-user:s2_2-urd" \
+bd create --labels "pasture:urd,pasture:p2-user:s2_2-urd" \
   --title "URD: <feature>" \
   --description "---
 references:
@@ -1599,7 +1599,7 @@ references:
 					Title: "Phase 3: PROPOSAL-N Task",
 					Content: `Contains full plan with validation checklist and acceptance criteria:
 ` + "```bash" + `
-bd create --labels "aura:p3-plan:s3-propose" \
+bd create --labels "pasture:p3-plan:s3-propose" \
   --title "PROPOSAL-1: <feature>" \
   --description "---
 references:
@@ -1617,7 +1617,7 @@ bd dep add <request-id> --blocked-by <proposal-id>
 					Title: "Phase 4: REVIEW Tasks",
 					Content: `Each reviewer creates their own task:
 ` + "```bash" + `
-bd create --labels "aura:p4-plan:s4-review" \
+bd create --labels "pasture:p4-plan:s4-review" \
   --title "PROPOSAL-1-REVIEW-A-1: <feature>" \
   --description "VOTE: <ACCEPT|REVISE> - <justification>"
 bd dep add <proposal-id> --blocked-by <review-id>
@@ -1626,9 +1626,9 @@ bd dep add <proposal-id> --blocked-by <review-id>
 				{
 					Id:    "arch-phase5-uat",
 					Title: "Phase 5: UAT Task",
-					Content: `After all 3 reviewers ACCEPT, run ` + "`/aura:user-uat`" + `:
+					Content: `After all 3 reviewers ACCEPT, run ` + "`/pasture:user-uat`" + `:
 ` + "```bash" + `
-bd create --labels "aura:p5-user:s5-uat" \
+bd create --labels "pasture:p5-user:s5-uat" \
   --title "UAT-1: <feature>" \
   --description "---
 references:
@@ -1647,11 +1647,11 @@ bd comments add <urd-id> "UAT results: <summary of user acceptance/feedback>"
 					Title: "Phase 6: RATIFY",
 					Content: `Add label to proposal (DO NOT close, delete, or create new task):
 ` + "```bash" + `
-bd label add <proposal-id> aura:p6-plan:s6-ratify
+bd label add <proposal-id> pasture:p6-plan:s6-ratify
 bd comments add <proposal-id> "RATIFIED: All 3 reviewers ACCEPT, UAT passed (<uat-task-id>)"
 
 # Mark all previous proposals as superseded
-bd label add <old-proposal-id> aura:superseded
+bd label add <old-proposal-id> pasture:superseded
 bd comments add <old-proposal-id> "Superseded by PROPOSAL-N (<ratified-proposal-id>)"
 
 # Update URD with ratification
@@ -1673,7 +1673,7 @@ references:
 ---
 Handoff from architect to supervisor. See handoff document at
 .git/.aura/handoff/<request-id>/architect-to-supervisor.md" \
-  --add-label "aura:p7-plan:s7-handoff"
+  --add-label "pasture:p7-plan:s7-handoff"
 ` + "```" + `
 
 Storage: ` + "`.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`",
@@ -1692,7 +1692,7 @@ Storage: ` + "`.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`"
 
 ` + "```bash" + `
 # After receiving h6 from supervisor:
-bd create --labels "aura:p3-plan:s3-propose" \
+bd create --labels "pasture:p3-plan:s3-propose" \
   --title "FOLLOWUP_PROPOSAL-1: <follow-up feature>" \
   --description "---
 references:
@@ -1709,12 +1709,12 @@ The same review/ratify/UAT/handoff cycle (Phases 3-7) applies. After FOLLOWUP_PR
 		{
 			Id:      "arch-spawning-reviewers",
 			Title:   "Spawning Reviewers",
-			Content: "Spawn 3 axis-specific reviewers (A=Correctness, B=Test quality, C=Elegance) as `general-purpose` subagents. Each reviewer must invoke the `/aura:reviewer` skill (via the Skill tool) to load its role instructions — `/aura:reviewer` is a **Skill**, not a subagent type.\n\n```\nTask(description: \"Reviewer A: correctness\", prompt: \"You are Reviewer A (Correctness). First invoke `/aura:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...\", subagent_type: \"general-purpose\")\nTask(description: \"Reviewer B: test quality\", prompt: \"You are Reviewer B (Test quality). First invoke `/aura:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...\", subagent_type: \"general-purpose\")\nTask(description: \"Reviewer C: elegance\", prompt: \"You are Reviewer C (Elegance). First invoke `/aura:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...\", subagent_type: \"general-purpose\")\n```",
+			Content: "Spawn 3 axis-specific reviewers (A=Correctness, B=Test quality, C=Elegance) as `general-purpose` subagents. Each reviewer must invoke the `/pasture:reviewer` skill (via the Skill tool) to load its role instructions — `/pasture:reviewer` is a **Skill**, not a subagent type.\n\n```\nTask(description: \"Reviewer A: correctness\", prompt: \"You are Reviewer A (Correctness). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...\", subagent_type: \"general-purpose\")\nTask(description: \"Reviewer B: test quality\", prompt: \"You are Reviewer B (Test quality). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...\", subagent_type: \"general-purpose\")\nTask(description: \"Reviewer C: elegance\", prompt: \"You are Reviewer C (Elegance). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...\", subagent_type: \"general-purpose\")\n```",
 		},
 		{
 			Id:      "arch-supervisor-handoff",
 			Title:   "Supervisor Handoff",
-			Content: "**DO NOT** spawn supervisor as a Task tool subagent. Instead, invoke:\n\n```\nSkill(skill: \"aura:architect-handoff\")\n```\n\nThe handoff skill guides you through:\n1. Creating the handoff document at `.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`\n2. Launching supervisor via `aura-swarm start --swarm-mode intree --role supervisor -n 1` or `aura-swarm start --epic <id>`\n\n**CRITICAL:** The supervisor launch prompt MUST:\n1. **Start with `Skill(/aura:supervisor)`** — this loads the supervisor's role instructions, including leaf task creation\n2. Include all Beads task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)\n3. Include the handoff document path\n\n**DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks from the ratified plan.",
+			Content: "**DO NOT** spawn supervisor as a Task tool subagent. Instead, invoke:\n\n```\nSkill(skill: \"pasture:architect-handoff\")\n```\n\nThe handoff skill guides you through:\n1. Creating the handoff document at `.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`\n2. Launching supervisor via `aura-swarm start --swarm-mode intree --role supervisor -n 1` or `aura-swarm start --epic <id>`\n\n**CRITICAL:** The supervisor launch prompt MUST:\n1. **Start with `Skill(/pasture:supervisor)`** — this loads the supervisor's role instructions, including leaf task creation\n2. Include all Beads task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)\n3. Include the handoff document path\n\n**DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks from the ratified plan.",
 		},
 	},
 	Behaviors: []BehaviorSpec{
@@ -1738,7 +1738,7 @@ var reviewerBody = SkillBody{
 			Title: "Plan Review vs Code Review",
 			Content: `| Aspect | Plan Review (Phase 4) | Code Review (Phase 10) |
 |--------|-----------------------|------------------------|
-| Label | ` + "`aura:p4-plan:s4-review`" + ` | ` + "`aura:p10-impl:s10-review`" + ` |
+| Label | ` + "`pasture:p4-plan:s4-review`" + ` | ` + "`pasture:p10-impl:s10-review`" + ` |
 | Vote | ACCEPT / REVISE (binary) | ACCEPT / REVISE (binary) |
 | Severity tree | **NO** — no severity groups | **YES** — EAGER creation (always 3 groups) |
 | Naming | PROPOSAL-N-REVIEW-{axis}-{round} | SLICE-N-REVIEW-{axis}-{round} |
@@ -1798,7 +1798,7 @@ bd comments add <task-id> "VOTE: REVISE - Missing: what happens if X fails? Sugg
 			Title: "Consensus",
 			Content: `All 3 reviewers must vote ACCEPT for plan to be ratified. If any reviewer votes REVISE:
 1. Architect creates PROPOSAL-N+1 addressing feedback
-2. Old proposal marked ` + "`aura:superseded`" + `
+2. Old proposal marked ` + "`pasture:superseded`" + `
 3. Reviewers re-review new proposal
 4. Repeat until all ACCEPT`,
 		},
@@ -1841,13 +1841,13 @@ See ` + "`../protocol/CONSTRAINTS.md`" + ` for coding standards and severity def
 			Id:    "impl-rev-dual-parent",
 			Title: "Dual-Parent BLOCKER Relationship",
 			Content: `BLOCKER findings have **two parents**:
-1. The severity group task (` + "`aura:severity:blocker`" + `) — for categorization
+1. The severity group task (` + "`pasture:severity:blocker`" + `) — for categorization
 2. The slice they block — for dependency tracking
 
 ` + "```bash\n" +
 				`# Create a BLOCKER finding
 FINDING_ID=$(bd create --title "BLOCKER: Missing error handling in auth flow" \
-  --labels "aura:p10-impl:s10-review" \
+  --labels "pasture:p10-impl:s10-review" \
   --description "---
 references:
   slice: <slice-1-id>
@@ -1866,7 +1866,7 @@ Per [frag--sup-important-minor-followup], IMPORTANT/MINOR findings route to seve
 ` + "```bash\n" +
 				`# IMPORTANT finding — blocks severity group only
 IMPORTANT_FINDING_ID=$(bd create --title "IMPORTANT: Add request timeout" \
-  --labels "aura:p10-impl:s10-review" \
+  --labels "pasture:p10-impl:s10-review" \
   --description "---
 references:
   slice: <slice-1-id>
@@ -1912,7 +1912,7 @@ Focus: Does implementation faithfully serve the user? Are technical decisions co
 Review ALL slices: <slice-1-id>, <slice-2-id>, <slice-3-id>
 For each slice, run: bd show <slice-id>
 Create severity groups (BLOCKER/IMPORTANT/MINOR) for each slice. Title: SLICE-N-REVIEW-A-1
-Call Skill(/aura:reviewer-review-code) for the review procedure.` + "`" + `
+Call Skill(/pasture:reviewer-review-code) for the review procedure.` + "`" + `
 })
 ` + "```\n" +
 				`
@@ -1997,10 +1997,10 @@ bd comments add <slice-id> "VOTE: REVISE - [specific issue]. Suggest: [fix]"
 
 ` + "```bash\n" +
 				`# Check for any REVISE votes
-bd list --labels="aura:p10-impl:s10-review" --desc-contains "VOTE: REVISE"
+bd list --labels="pasture:p10-impl:s10-review" --desc-contains "VOTE: REVISE"
 
 # Check for unresolved BLOCKERs
-bd list --labels="aura:severity:blocker" --status=open
+bd list --labels="pasture:severity:blocker" --status=open
 
 # If any REVISE or open BLOCKERs, return to implementation
 # If all ACCEPT and BLOCKERs resolved, proceed to Phase 11 (UAT)
@@ -2041,7 +2041,7 @@ references:
   review_round: <review-round-ids>
 ---
 Aggregated IMPORTANT and MINOR findings from code review." \
-  --add-label "aura:epic-followup"
+  --add-label "pasture:epic-followup"
 
 # Link IMPORTANT/MINOR severity groups
 bd dep add <followup-epic-id> --blocked-by <important-group-id>
@@ -2054,7 +2054,7 @@ bd dep add <followup-epic-id> --blocked-by <minor-group-id>
 					Content: `The follow-up epic runs the same protocol phases with FOLLOWUP_* prefixed task types:
 
 ` + "```\n" +
-						`FOLLOWUP epic (aura:epic-followup)
+						`FOLLOWUP epic (pasture:epic-followup)
   ├── relates_to: original URD
   ├── relates_to: original REVIEW-A/B/C tasks
   └── blocked-by: FOLLOWUP_URE         (Phase 2: scope which findings to address)
@@ -2071,7 +2071,7 @@ bd dep add <followup-epic-id> --blocked-by <minor-group-id>
 						`# Create follow-up lifecycle tasks
 FOLLOWUP_URE_ID=$(bd create \
   --title "FOLLOWUP_URE: Scope follow-up for <feature>" \
-  --labels "aura:p2-user:s2_1-elicit" \
+  --labels "pasture:p2-user:s2_1-elicit" \
   --description "---
 references:
   followup_epic: <followup-epic-id>
@@ -2082,7 +2082,7 @@ bd dep add <followup-epic-id> --blocked-by $FOLLOWUP_URE_ID
 
 FOLLOWUP_URD_ID=$(bd create \
   --title "FOLLOWUP_URD: Requirements for <feature> follow-up" \
-  --labels "aura:p2-user:s2_2-urd,aura:urd" \
+  --labels "pasture:p2-user:s2_2-urd,pasture:urd" \
   --description "---
 references:
   followup_epic: <followup-epic-id>
@@ -2163,11 +2163,11 @@ See ` + "`../protocol/HANDOFF_TEMPLATE.md`" + ` for full follow-up handoff examp
 
 ` + "```bash\n" +
 				`# Verify consensus — no open BLOCKERs
-bd list --labels="aura:severity:blocker" --status=open
+bd list --labels="pasture:severity:blocker" --status=open
 # Should return 0 results
 
 # Proceed to Phase 11 (Implementation UAT)
-Skill(/aura:user-uat)
+Skill(/pasture:user-uat)
 ` + "```",
 		},
 	},

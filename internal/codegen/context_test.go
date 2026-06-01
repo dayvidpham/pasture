@@ -107,17 +107,17 @@ func TestGetRoleContext_WorkerCommands(t *testing.T) {
 	require.NotEmpty(t, ctx.Commands,
 		"worker must have at least one command")
 
-	// Worker should have aura:worker command.
+	// Worker should have pasture:worker command.
 	found := false
 	for _, cmd := range ctx.Commands {
-		if cmd == "aura:worker" || cmd == "aura:worker:implement" ||
-			cmd == "aura:worker:complete" || cmd == "aura:worker:blocked" {
+		if cmd == "pasture:worker" || cmd == "pasture:worker:implement" ||
+			cmd == "pasture:worker:complete" || cmd == "pasture:worker:blocked" {
 			found = true
 			break
 		}
 	}
 	assert.True(t, found,
-		"worker must have at least one aura:worker:* command; got: %v", ctx.Commands)
+		"worker must have at least one pasture:worker:* command; got: %v", ctx.Commands)
 }
 
 // ─── TestGetRoleContext_Handoffs ──────────────────────────────────────────────
@@ -238,18 +238,18 @@ func TestGetPhaseContext_Labels(t *testing.T) {
 		phase     protocol.PhaseId
 		wantLabel string // a label value that must appear in the result
 	}{
-		{protocol.PhaseRequest, "aura:p1-user:s1_1-classify"},
-		{protocol.PhaseElicit, "aura:p2-user:s2_1-elicit"},
-		{protocol.PhasePropose, "aura:p3-plan:s3-propose"},
-		{protocol.PhaseReview, "aura:p4-plan:s4-review"},
-		{protocol.PhasePlanReview, "aura:p5-user:s5-uat"},
-		{protocol.PhaseRatify, "aura:p6-plan:s6-ratify"},
-		{protocol.PhaseHandoff, "aura:p7-plan:s7-handoff"},
-		{protocol.PhaseImplPlan, "aura:p8-impl:s8-plan"},
-		{protocol.PhaseWorkerSlices, "aura:p9-impl:s9-slice"},
-		{protocol.PhaseCodeReview, "aura:p10-impl:s10-review"},
-		{protocol.PhaseImplUAT, "aura:p11-user:s11-uat"},
-		{protocol.PhaseLanding, "aura:p12-impl:s12-landing"},
+		{protocol.PhaseRequest, "pasture:p1-user:s1_1-classify"},
+		{protocol.PhaseElicit, "pasture:p2-user:s2_1-elicit"},
+		{protocol.PhasePropose, "pasture:p3-plan:s3-propose"},
+		{protocol.PhaseReview, "pasture:p4-plan:s4-review"},
+		{protocol.PhasePlanReview, "pasture:p5-user:s5-uat"},
+		{protocol.PhaseRatify, "pasture:p6-plan:s6-ratify"},
+		{protocol.PhaseHandoff, "pasture:p7-plan:s7-handoff"},
+		{protocol.PhaseImplPlan, "pasture:p8-impl:s8-plan"},
+		{protocol.PhaseWorkerSlices, "pasture:p9-impl:s9-slice"},
+		{protocol.PhaseCodeReview, "pasture:p10-impl:s10-review"},
+		{protocol.PhaseImplUAT, "pasture:p11-user:s11-uat"},
+		{protocol.PhaseLanding, "pasture:p12-impl:s12-landing"},
 	}
 
 	for _, tt := range tests {

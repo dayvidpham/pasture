@@ -1,7 +1,7 @@
 # Review Plan
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:reviewer:review-plan` — Evaluate proposal against one axis (binary ACCEPT/REVISE)
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:reviewer:review-plan` — Evaluate proposal against one axis (binary ACCEPT/REVISE)
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-4-plan-review)** <- Phase 4
 
@@ -31,7 +31,7 @@
 
 ## When to Use
 
-Assigned to review a plan specification (Phase 4, `aura:p4-plan:s4-review`).
+Assigned to review a plan specification (Phase 4, `pasture:p4-plan:s4-review`).
 
 ## End-User Alignment Criteria
 
@@ -88,7 +88,7 @@ Apply end-user alignment criteria (check against URD requirements). Verify `vali
 ### Step 3: Create Review Task
 
 ```bash
-bd create --labels "aura:p4-plan:s4-review" \
+bd create --labels "pasture:p4-plan:s4-review" \
   --title "PROPOSAL-1-REVIEW-A-1: <feature>" \
   --description "---
 references:
@@ -128,4 +128,4 @@ The same procedure applies when reviewing FOLLOWUP_PROPOSAL-N:
 - **Task naming:** `FOLLOWUP_PROPOSAL-N-REVIEW-{axis}-{round}`
 - Same binary ACCEPT/REVISE vote (no severity tree)
 - Additionally verify that FOLLOWUP_PROPOSAL addresses the specific IMPORTANT/MINOR findings scoped in FOLLOWUP_URE/URD
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

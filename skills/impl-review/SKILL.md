@@ -1,7 +1,7 @@
 # Implementation Code Review (Phase 10)
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:impl:review` — Code review coordination across all slices (Phase 10)
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:impl:review` — Code review coordination across all slices (Phase 10)
 
 Conduct code review across ALL implementation slices. Each of 3 reviewers reviews every slice.
 
@@ -52,7 +52,7 @@ Per [frag--sup-review-severity-groups], create all 3 severity groups immediately
 ```bash
 # Step 1: Create all 3 severity groups immediately (EAGER)
 BLOCKER_ID=$(bd create --title "SLICE-1-REVIEW-A-1 BLOCKER" \
-  --labels "aura:severity:blocker,aura:p10-impl:s10-review" \
+  --labels "pasture:severity:blocker,pasture:p10-impl:s10-review" \
   --description "---
 references:
   slice: <slice-1-id>
@@ -61,7 +61,7 @@ references:
 BLOCKER findings from Reviewer A (Correctness) on SLICE-1.")
 
 IMPORTANT_ID=$(bd create --title "SLICE-1-REVIEW-A-1 IMPORTANT" \
-  --labels "aura:severity:important,aura:p10-impl:s10-review" \
+  --labels "pasture:severity:important,pasture:p10-impl:s10-review" \
   --description "---
 references:
   slice: <slice-1-id>
@@ -70,7 +70,7 @@ references:
 IMPORTANT findings from Reviewer A (Correctness) on SLICE-1.")
 
 MINOR_ID=$(bd create --title "SLICE-1-REVIEW-A-1 MINOR" \
-  --labels "aura:severity:minor,aura:p10-impl:s10-review" \
+  --labels "pasture:severity:minor,pasture:p10-impl:s10-review" \
   --description "---
 references:
   slice: <slice-1-id>
@@ -112,13 +112,13 @@ Severity groups:
 ## Dual-Parent BLOCKER Relationship
 
 BLOCKER findings have **two parents**:
-1. The severity group task (`aura:severity:blocker`) — for categorization
+1. The severity group task (`pasture:severity:blocker`) — for categorization
 2. The slice they block — for dependency tracking
 
 ```bash
 # Create a BLOCKER finding
 FINDING_ID=$(bd create --title "BLOCKER: Missing error handling in auth flow" \
-  --labels "aura:p10-impl:s10-review" \
+  --labels "pasture:p10-impl:s10-review" \
   --description "---
 references:
   slice: <slice-1-id>
@@ -137,7 +137,7 @@ Per [frag--sup-important-minor-followup], IMPORTANT/MINOR findings route to seve
 ```bash
 # IMPORTANT finding — blocks severity group only
 IMPORTANT_FINDING_ID=$(bd create --title "IMPORTANT: Add request timeout" \
-  --labels "aura:p10-impl:s10-review" \
+  --labels "pasture:p10-impl:s10-review" \
   --description "---
 references:
   slice: <slice-1-id>
@@ -181,7 +181,7 @@ Focus: Does implementation faithfully serve the user? Are technical decisions co
 Review ALL slices: <slice-1-id>, <slice-2-id>, <slice-3-id>
 For each slice, run: bd show <slice-id>
 Create severity groups (BLOCKER/IMPORTANT/MINOR) for each slice. Title: SLICE-N-REVIEW-A-1
-Call Skill(/aura:reviewer-review-code) for the review procedure.`
+Call Skill(/pasture:reviewer-review-code) for the review procedure.`
 })
 ```
 
@@ -260,10 +260,10 @@ All reviews across all slices must be ACCEPT:
 
 ```bash
 # Check for any REVISE votes
-bd list --labels="aura:p10-impl:s10-review" --desc-contains "VOTE: REVISE"
+bd list --labels="pasture:p10-impl:s10-review" --desc-contains "VOTE: REVISE"
 
 # Check for unresolved BLOCKERs
-bd list --labels="aura:severity:blocker" --status=open
+bd list --labels="pasture:severity:blocker" --status=open
 
 # If any REVISE or open BLOCKERs, return to implementation
 # If all ACCEPT and BLOCKERs resolved, proceed to Phase 11 (UAT)
@@ -301,7 +301,7 @@ references:
   review_round: <review-round-ids>
 ---
 Aggregated IMPORTANT and MINOR findings from code review." \
-  --add-label "aura:epic-followup"
+  --add-label "pasture:epic-followup"
 
 # Link IMPORTANT/MINOR severity groups
 bd dep add <followup-epic-id> --blocked-by <important-group-id>
@@ -313,7 +313,7 @@ bd dep add <followup-epic-id> --blocked-by <minor-group-id>
 The follow-up epic runs the same protocol phases with FOLLOWUP_* prefixed task types:
 
 ```
-FOLLOWUP epic (aura:epic-followup)
+FOLLOWUP epic (pasture:epic-followup)
   ├── relates_to: original URD
   ├── relates_to: original REVIEW-A/B/C tasks
   └── blocked-by: FOLLOWUP_URE         (Phase 2: scope which findings to address)
@@ -330,7 +330,7 @@ FOLLOWUP epic (aura:epic-followup)
 # Create follow-up lifecycle tasks
 FOLLOWUP_URE_ID=$(bd create \
   --title "FOLLOWUP_URE: Scope follow-up for <feature>" \
-  --labels "aura:p2-user:s2_1-elicit" \
+  --labels "pasture:p2-user:s2_1-elicit" \
   --description "---
 references:
   followup_epic: <followup-epic-id>
@@ -341,7 +341,7 @@ bd dep add <followup-epic-id> --blocked-by $FOLLOWUP_URE_ID
 
 FOLLOWUP_URD_ID=$(bd create \
   --title "FOLLOWUP_URD: Requirements for <feature> follow-up" \
-  --labels "aura:p2-user:s2_2-urd,aura:urd" \
+  --labels "pasture:p2-user:s2_2-urd,pasture:urd" \
   --description "---
 references:
   followup_epic: <followup-epic-id>
@@ -416,10 +416,10 @@ Only when ALL reviews are ACCEPT and all BLOCKERs are resolved:
 
 ```bash
 # Verify consensus — no open BLOCKERs
-bd list --labels="aura:severity:blocker" --status=open
+bd list --labels="pasture:severity:blocker" --status=open
 # Should return 0 results
 
 # Proceed to Phase 11 (Implementation UAT)
-Skill(/aura:user-uat)
+Skill(/pasture:user-uat)
 ```
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

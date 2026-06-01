@@ -59,14 +59,14 @@ Complete reference documentation for the Aura 12-phase workflow system.
 ### Label Format
 
 ```
-aura:p{phase}-{domain}:s{step}-{type}
+pasture:p{phase}-{domain}:s{step}-{type}
 ```
 
 ### Follow-up Lifecycle
 
 **Trigger:** Phase 10 code review completes with ANY IMPORTANT or MINOR findings (not gated on BLOCKER resolution).
 
-**Owner:** Supervisor creates follow-up epic (label `aura:epic-followup`).
+**Owner:** Supervisor creates follow-up epic (label `pasture:epic-followup`).
 
 **Flow:**
 ```

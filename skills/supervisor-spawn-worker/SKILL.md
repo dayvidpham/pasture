@@ -1,7 +1,7 @@
 # Supervisor Spawn Worker
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:supervisor:spawn-worker` — Launch a worker agent for an assigned slice
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:supervisor:spawn-worker` — Launch a worker agent for an assigned slice
 
 Launch the wave of workers for parallel vertical slice implementation, reviewed by ephemeral reviewers.
 
@@ -168,7 +168,7 @@ full Ride the Wave cycle.
 ```
 Task({
   description: "Worker: implement SLICE-N",
-  prompt: `Call Skill(/aura:worker) and implement the assigned slice.
+  prompt: `Call Skill(/pasture:worker) and implement the assigned slice.
 
 Beads Task ID: <task-id>
 Read full requirements: bd show <task-id>
@@ -180,7 +180,7 @@ Do NOT shut down after implementation. You will receive review feedback and may 
 })
 ```
 
-Per [sup-spawn-workers], use `subagent_type: "general-purpose"`, not a custom agent type. The worker skill is invoked inside the agent via `Skill(/aura:worker)`.
+Per [sup-spawn-workers], use `subagent_type: "general-purpose"`, not a custom agent type. The worker skill is invoked inside the agent via `Skill(/pasture:worker)`.
 
 ## TeamCreate: SendMessage Assignment
 
@@ -190,7 +190,7 @@ When workers are spawned via TeamCreate, they receive context through SendMessag
 SendMessage({
   type: "message",
   recipient: "worker-1",
-  content: `You are assigned SLICE-1. Start by calling Skill(/aura:worker).
+  content: `You are assigned SLICE-1. Start by calling Skill(/pasture:worker).
 
 Your Beads task ID: <slice-task-id>
 Run this to get full requirements: bd show <slice-task-id>
@@ -291,4 +291,4 @@ For follow-up slices, the handoff template extends with additional fields:
 - Both adopted leaf tasks resolved (tests pass, production code path verified)
 - See bd task <slice-task-id> for full validation_checklist
 ```
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

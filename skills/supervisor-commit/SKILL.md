@@ -1,7 +1,7 @@
 # Supervisor: Commit
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:supervisor:commit` — Atomic commit per completed layer/slice
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:supervisor:commit` — Atomic commit per completed layer/slice
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-12-landing)** <- Phase 12
 
@@ -74,4 +74,4 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 git add <files>
 git agent-commit -m "..."
 ```
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

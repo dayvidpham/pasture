@@ -17,7 +17,7 @@ var userRequestBody = SkillBody{
 			Id:        "user-req-classify-label",
 			Given:     "request captured",
 			When:      "classifying",
-			Then:      "use `aura:p1-user:s1_1-classify` label",
+			Then:      "use `pasture:p1-user:s1_1-classify` label",
 			ShouldNot: "use other labels for the initial capture",
 		},
 		{
@@ -31,7 +31,7 @@ var userRequestBody = SkillBody{
 			Id:        "user-req-proceed-to-elicit",
 			Given:     "Phase 1 complete",
 			When:      "proceeding",
-			Then:      "invoke `/aura:user-elicit` for Phase 2",
+			Then:      "invoke `/pasture:user-elicit` for Phase 2",
 			ShouldNot: "skip to proposal",
 		},
 	},
@@ -42,9 +42,9 @@ var userRequestBody = SkillBody{
 			Title: "Phase 1 Sub-steps",
 			Content: "| Sub-step | Label | Description | Parallel? |\n" +
 				"|----------|-------|-------------|----------|\n" +
-				"| s1_1-classify | `aura:p1-user:s1_1-classify` | Capture verbatim + classify along 4 axes | Sequential (first) |\n" +
-				"| s1_2-research | `aura:p1-user:s1_2-research` | Find domain standards, prior art | Parallel with s1_3 |\n" +
-				"| s1_3-explore | `aura:p1-user:s1_3-explore` | Codebase exploration for integration points | Parallel with s1_2 |",
+				"| s1_1-classify | `pasture:p1-user:s1_1-classify` | Capture verbatim + classify along 4 axes | Sequential (first) |\n" +
+				"| s1_2-research | `pasture:p1-user:s1_2-research` | Find domain standards, prior art | Parallel with s1_3 |\n" +
+				"| s1_3-explore | `pasture:p1-user:s1_3-explore` | Codebase exploration for integration points | Parallel with s1_2 |",
 		},
 		{
 			Id:      "user-req-step1",
@@ -61,7 +61,7 @@ var userRequestBody = SkillBody{
 						"\n" +
 						"2. **Create the request task:**\n" +
 						"   " + "```" + `bash` + "\n" +
-						"   bd create --labels \"aura:p1-user:s1_1-classify\" \\\n" +
+						"   bd create --labels \"pasture:p1-user:s1_1-classify\" \\\n" +
 						"     --title \"REQUEST: {{short summary}}\" \\\n" +
 						"     --description \"{{VERBATIM user request - do not edit}}\" \\\n" +
 						"     --assignee architect\n" +
@@ -119,12 +119,12 @@ var userRequestBody = SkillBody{
 				{
 					Id:    "user-req-step3-research",
 					Title: "s1_2-research: Domain Research",
-					Content: "Invoke `/aura:research` with:\n" +
+					Content: "Invoke `/pasture:research` with:\n" +
 						"- **topic:** derived from the user's request\n" +
 						"- **depth:** the user-confirmed research depth\n" +
 						"- **request-task-id:** the REQUEST beads task ID\n" +
 						"\n" +
-						"The `/aura:research` skill handles the full research workflow: depth-scoped checklist, structured report written to `docs/research/<topic>.md`, and summary comment on the REQUEST task.\n" +
+						"The `/pasture:research` skill handles the full research workflow: depth-scoped checklist, structured report written to `docs/research/<topic>.md`, and summary comment on the REQUEST task.\n" +
 						"\n" +
 						"See [skills/research/SKILL.md](../research/SKILL.md) for full procedure, output format, and examples.\n" +
 						"\n" +
@@ -156,12 +156,12 @@ var userRequestBody = SkillBody{
 				{
 					Id:    "user-req-step3-explore",
 					Title: "s1_3-explore: Codebase Exploration",
-					Content: "Invoke `/aura:explore` with:\n" +
+					Content: "Invoke `/pasture:explore` with:\n" +
 						"- **topic:** derived from the user's request\n" +
 						"- **depth:** the user-confirmed research depth (same depth applies)\n" +
 						"- **request-task-id:** the REQUEST beads task ID\n" +
 						"\n" +
-						"The `/aura:explore` skill handles the full exploration workflow: depth-scoped checklist, structured findings, and summary comment on the REQUEST task.\n" +
+						"The `/pasture:explore` skill handles the full exploration workflow: depth-scoped checklist, structured findings, and summary comment on the REQUEST task.\n" +
 						"\n" +
 						"See [skills/explore/SKILL.md](../explore/SKILL.md) for full procedure, output format, and examples.\n" +
 						"\n" +
@@ -204,7 +204,7 @@ var userRequestBody = SkillBody{
 			Content: "User says: \"I want to add a logout button to the header that clears the session and redirects to the login page\"\n" +
 				"\n" +
 				"```" + `bash` + "\n" +
-				"bd create --labels \"aura:p1-user:s1_1-classify\" \\\n" +
+				"bd create --labels \"pasture:p1-user:s1_1-classify\" \\\n" +
 				"  --title \"REQUEST: Add logout button to header\" \\\n" +
 				"  --description \"I want to add a logout button to the header that clears the session and redirects to the login page\" \\\n" +
 				"  --assignee architect\n" +
@@ -217,7 +217,7 @@ var userRequestBody = SkillBody{
 		{
 			Id:    "user-req-next-phase",
 			Title: "Next Phase",
-			Content: "After Phase 1 completes, invoke `/aura:user-elicit` to begin requirements elicitation (Phase 2).\n" +
+			Content: "After Phase 1 completes, invoke `/pasture:user-elicit` to begin requirements elicitation (Phase 2).\n" +
 				"\n" +
 				"The elicit task will block this request task:\n" +
 				"```" + `bash` + "\n" +

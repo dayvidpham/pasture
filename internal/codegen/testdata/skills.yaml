@@ -68,15 +68,15 @@ role_cases:
 sub_skill_cases:
   - command_id: "cmd-sup-plan"
     must_contain:
-      - "aura:supervisor:plan-tasks"
+      - "pasture:supervisor:plan-tasks"
       - "Decompose ratified plan"
 
   - command_id: "cmd-impl-review"
     must_contain:
-      - "aura:impl:review"
+      - "pasture:impl:review"
       - "Code review coordination"
 
   - command_id: "cmd-impl-slice"
     must_contain:
-      - "aura:impl:slice"
+      - "pasture:impl:slice"
       - "Vertical slice assignment"

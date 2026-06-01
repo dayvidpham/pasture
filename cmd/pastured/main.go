@@ -1,5 +1,5 @@
 // Command pastured is the Pasture daemon — a Temporal worker that runs
-// aura-protocol workflows and activities for multi-agent orchestration.
+// pasture-protocol workflows and activities for multi-agent orchestration.
 //
 // pastured connects to a Temporal server, auto-registers required search
 // attributes, registers all Pasture workflows and activities, and then blocks

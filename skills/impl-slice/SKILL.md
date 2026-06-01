@@ -1,7 +1,7 @@
 # Implementation Slice (Phase 9)
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:impl:slice` — Vertical slice assignment and tracking
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:impl:slice` — Vertical slice assignment and tracking
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9
 
@@ -43,7 +43,7 @@ After supervisor decomposes the ratified plan:
 
 ```bash
 # Create SLICE-1
-bd create --labels "aura:p9-impl:s9-slice" \
+bd create --labels "pasture:p9-impl:s9-slice" \
   --title "SLICE-1: <slice name>" \
   --description "---
 references:
@@ -86,12 +86,12 @@ bd update <slice-3-id> --assignee="worker-3"
 bd update <slice-id> --status in_progress
 
 # Check all slice status
-bd list --labels="aura:p9-impl:s9-slice" --status=open
-bd list --labels="aura:p9-impl:s9-slice" --status=in_progress
+bd list --labels="pasture:p9-impl:s9-slice" --status=open
+bd list --labels="pasture:p9-impl:s9-slice" --status=in_progress
 
 # Worker completes (add comment and label)
 bd comments add <slice-id> "COMPLETE: All checklist items verified. Production code path working."
-bd label add <slice-id> aura:p9-impl:slice-complete
+bd label add <slice-id> pasture:p9-impl:slice-complete
 ```
 
 ## Slice Dependencies
@@ -111,10 +111,10 @@ The aggregation step waits for all slices to complete before code review:
 
 ```bash
 # Check if all slices have complete label
-bd list --labels="aura:p9-impl:slice-complete"
+bd list --labels="pasture:p9-impl:slice-complete"
 
 # Compare to total slices
-bd list --labels="aura:p9-impl:s9-slice"
+bd list --labels="pasture:p9-impl:s9-slice"
 ```
 
 ## Follow-up Slices (FOLLOWUP_SLICE-N)
@@ -122,5 +122,5 @@ bd list --labels="aura:p9-impl:s9-slice"
 Follow-up slices use the same structure and tracking, with additional fields:
 - **Title prefix:** `FOLLOWUP_SLICE-N:` (e.g., `FOLLOWUP_SLICE-1: Add request-id correlation`)
 - **Adopted leaf tasks:** Original IMPORTANT/MINOR leaf tasks from review become dual-parent children (original severity group + follow-up slice)
-- **Tracking:** Same `bd list --labels="aura:p9-impl:s9-slice"` queries include both regular and follow-up slices
-<!-- END GENERATED FROM aura schema -->
+- **Tracking:** Same `bd list --labels="pasture:p9-impl:s9-slice"` queries include both regular and follow-up slices
+<!-- END GENERATED FROM pasture schema -->

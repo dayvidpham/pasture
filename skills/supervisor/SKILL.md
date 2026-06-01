@@ -1,12 +1,12 @@
 ---
 name: supervisor
 description: Task coordinator, spawns workers, manages parallel execution
-skills: aura:impl-review, aura:impl-slice, aura:supervisor-commit, aura:supervisor-plan-tasks, aura:supervisor-spawn-worker, aura:supervisor-track-progress
+skills: pasture:impl-review, pasture:impl-slice, pasture:supervisor-commit, pasture:supervisor-plan-tasks, pasture:supervisor-spawn-worker, pasture:supervisor-track-progress
 ---
 
 # Supervisor Agent
 
-<!-- BEGIN GENERATED FROM aura schema -->
+<!-- BEGIN GENERATED FROM pasture schema -->
 **Role:** `supervisor` | **Phases owned:** p7-handoff, p8-impl-plan, p9-worker-slices, p10-code-review, p11-impl-uat, p12-landing
 
 ## Protocol Context (generated from schema.xml)
@@ -26,13 +26,13 @@ skills: aura:impl-review, aura:impl-slice, aura:supervisor-commit, aura:supervis
 
 | Command | Description | Phases |
 |---------|-------------|--------|
-| `aura:impl:review` | Code review coordination across all slices (Phase 10) | p10-code-review |
-| `aura:impl:slice` | Vertical slice assignment and tracking | p9-worker-slices |
-| `aura:supervisor` | Task coordinator, spawns workers, manages parallel execution | p7-handoff, p8-impl-plan, p9-worker-slices, p10-code-review, p11-impl-uat, p12-landing |
-| `aura:supervisor:commit` | Atomic commit per completed layer/slice | p12-landing |
-| `aura:supervisor:plan-tasks` | Decompose ratified plan into vertical slices (SLICE-N) | p8-impl-plan |
-| `aura:supervisor:spawn-worker` | Launch a worker agent for an assigned slice | p9-worker-slices |
-| `aura:supervisor:track-progress` | Monitor worker status via Beads | p9-worker-slices, p10-code-review |
+| `pasture:impl:review` | Code review coordination across all slices (Phase 10) | p10-code-review |
+| `pasture:impl:slice` | Vertical slice assignment and tracking | p9-worker-slices |
+| `pasture:supervisor` | Task coordinator, spawns workers, manages parallel execution | p7-handoff, p8-impl-plan, p9-worker-slices, p10-code-review, p11-impl-uat, p12-landing |
+| `pasture:supervisor:commit` | Atomic commit per completed layer/slice | p12-landing |
+| `pasture:supervisor:plan-tasks` | Decompose ratified plan into vertical slices (SLICE-N) | p8-impl-plan |
+| `pasture:supervisor:spawn-worker` | Launch a worker agent for an assigned slice | p9-worker-slices |
+| `pasture:supervisor:track-progress` | Monitor worker status via Beads | p9-worker-slices, p10-code-review |
 
 ### General Constraints
 
@@ -128,7 +128,7 @@ bd dep add ure-id --blocked-by request-id
 **[C-handoff-skill-invocation]**
 - Given: an agent is launched for a new phase (especially p7 to p8 handoff)
 - When: composing the launch prompt
-- Then: prompt MUST start with Skill(/aura:{role}) invocation directive so the agent loads its role instructions
+- Then: prompt MUST start with Skill(/pasture:{role}) invocation directive so the agent loads its role instructions
 - Should not: launch agents without skill invocation — they skip role-critical procedures like ephemeral exploration and leaf task creation
 
 **[C-integration-points]**
@@ -191,7 +191,7 @@ bd dep add ure-id --blocked-by request-id
 
 ### Startup Sequence
 
-**Step 1:** Call Skill(/aura:supervisor) to load role instructions (`Skill(/aura:supervisor)`)
+**Step 1:** Call Skill(/pasture:supervisor) to load role instructions (`Skill(/pasture:supervisor)`)
 
 **Step 2:** Read RATIFIED_PLAN, URD, UAT, and elicit tasks via bd show for full context (`bd show <ratified-plan-id> && bd show <urd-id> && bd show <uat-id> && bd show <elicit-id>`)
 
@@ -199,7 +199,7 @@ bd dep add ure-id --blocked-by request-id
 
 **Step 4:** Decompose into vertical slices — _Vertical slices give one worker end-to-end ownership of a feature path (types → tests → impl → wiring) with clear file boundaries_ → `impl-plan`
 
-**Step 5:** Create leaf tasks (L1/L2/L3) for every slice (`bd create --labels aura:p9-impl:s9-slice --title "SLICE-{K}-L{1,2,3}: <description>" ...`)
+**Step 5:** Create leaf tasks (L1/L2/L3) for every slice (`bd create --labels pasture:p9-impl:s9-slice --title "SLICE-{K}-L{1,2,3}: <description>" ...`)
 
 **Step 6:** Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity. → `worker-slices`
 
@@ -262,7 +262,7 @@ Agents coordinate through **beads** tasks and comments:
 | List blocked | `bd blocked` |
 | Add progress note | `bd comments add <task-id> "Progress: ..."` |
 | Chain dependency | `bd dep add <parent> --blocked-by <child>` |
-| Label completed slice | `bd label add <slice-id> aura:p9-impl:slice-complete` |
+| Label completed slice | `bd label add <slice-id> pasture:p9-impl:slice-complete` |
 | List in-progress | `bd list --pretty --status=in_progress` |
 | Check task details | `bd show <task-id>` |
 | Update status | `bd update <task-id> --status=in_progress` |
@@ -284,7 +284,7 @@ Exit conditions:
 
 ### Stage 2: Build _(parallel)_
 - Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity.
-- Monitor worker progress via bd list and bd show (`bd list --labels="aura:p9-impl:s9-slice" --status=in_progress`)
+- Monitor worker progress via bd list and bd show (`bd list --labels="pasture:p9-impl:s9-slice" --status=in_progress`)
 - Supervisor commits at integration points (atomic commits) — commit small, integrate early and often
 
 Exit conditions:
@@ -388,13 +388,13 @@ Cycle Exit Conditions:
 **[sup-spawn-workers]**
 - Given: worker assignments
 - When: spawning
-- Then: use Task tool with `subagent_type: "general-purpose"` and `run_in_background: true`, worker MUST call `Skill(/aura:worker)` at start
+- Then: use Task tool with `subagent_type: "general-purpose"` and `run_in_background: true`, worker MUST call `Skill(/pasture:worker)` at start
 - Should not: spawn workers sequentially or use specialized agent types
 
 **[sup-teamcreate-msg]**
 - Given: teammates spawned via TeamCreate
 - When: assigning work via SendMessage
-- Then: the message MUST include: (1) explicit instruction to call `Skill(/aura:worker)`, (2) the Beads task ID, (3) instruction to run `bd show <task-id>` for full context, and (4) the handoff document path
+- Then: the message MUST include: (1) explicit instruction to call `Skill(/pasture:worker)`, (2) the Beads task ID, (3) instruction to run `bd show <task-id>` for full context, and (4) the handoff document path
 - Should not: send bare instructions without Beads context — teammates have no prior knowledge of the task
 
 **[sup-layer-integration-points]**
@@ -519,7 +519,7 @@ Per [C-supervisor-explore-ephemeral], spawn ephemeral Explore subagents (Agent t
 Task({
   subagent_type: "Explore",
   run_in_background: true,
-  prompt: `Call Skill(/aura:explore) to load your exploration role.
+  prompt: `Call Skill(/pasture:explore) to load your exploration role.
 
 Query: <specific codebase question>
 Depth: standard-research
@@ -537,8 +537,8 @@ Get the ratified plan and URD:
 ```bash
 bd show <ratified-plan-id>
 bd show <urd-id>
-bd list --labels="aura:p6-plan:s6-ratify" --status=open
-bd list --labels="aura:urd"
+bd list --labels="pasture:p6-plan:s6-ratify" --status=open
+bd list --labels="pasture:urd"
 ```
 
 ## Implementation Task Structure
@@ -569,7 +569,7 @@ type ImplementationTask struct {
 ### Step 1: Create the IMPL_PLAN task
 
 ```bash
-bd create --labels "aura:p8-impl:s8-plan" \
+bd create --labels "pasture:p8-impl:s8-plan" \
   --title "IMPL_PLAN: <feature>" \
   --description "---
 references:
@@ -591,7 +591,7 @@ bd dep add <request-id> --blocked-by <impl-plan-id>
 ### Step 2: Create each slice
 
 ```bash
-bd create --labels "aura:p9-impl:s9-slice" \
+bd create --labels "pasture:p9-impl:s9-slice" \
   --title "SLICE-1: <slice name>" \
   --description "---
 references:
@@ -624,7 +624,7 @@ Per [C-slice-leaf-tasks], create Beads tasks for each implementation unit within
 
 ```bash
 # L1: Types and interfaces for this slice
-LEAF_L1=$(bd create --labels "aura:p9-impl:s9-slice" \
+LEAF_L1=$(bd create --labels "pasture:p9-impl:s9-slice" \
   --title "SLICE-1-L1: Types — <slice name>" \
   --description "---
 references:
@@ -644,7 +644,7 @@ Given <context> when <action> then <outcome> should never <anti-pattern>")
 bd dep add <slice-1-id> --blocked-by $LEAF_L1
 
 # L2: Tests (import production code, will fail until L3)
-LEAF_L2=$(bd create --labels "aura:p9-impl:s9-slice" \
+LEAF_L2=$(bd create --labels "pasture:p9-impl:s9-slice" \
   --title "SLICE-1-L2: Tests — <slice name>" \
   --description "---
 references:
@@ -664,7 +664,7 @@ bd dep add <slice-1-id> --blocked-by $LEAF_L2
 bd dep add $LEAF_L2 --blocked-by $LEAF_L1
 
 # L3: Implementation (makes tests pass)
-LEAF_L3=$(bd create --labels "aura:p9-impl:s9-slice" \
+LEAF_L3=$(bd create --labels "pasture:p9-impl:s9-slice" \
   --title "SLICE-1-L3: Impl — <slice name>" \
   --description "---
 references:
@@ -709,7 +709,7 @@ bd update <slice-3-id> --assignee="worker-3"
 
 Per [C-supervisor-no-impl], all implementation work — no matter how small — is delegated to a worker agent. The supervisor's job is coordination, tracking, and quality control.
 
-Workers are **general-purpose agents** that call `/aura:worker` at the start. Select the model based on task complexity:
+Workers are **general-purpose agents** that call `/pasture:worker` at the start. Select the model based on task complexity:
 
 ```
 // Non-trivial work → sonnet model
@@ -717,7 +717,7 @@ Task({
   subagent_type: "general-purpose",
   model: "sonnet",
   run_in_background: true,
-  prompt: `Call Skill(/aura:worker) and implement the assigned slice.\n\nBeads Task ID: ${taskId}...`
+  prompt: `Call Skill(/pasture:worker) and implement the assigned slice.\n\nBeads Task ID: ${taskId}...`
 })
 
 // Trivial work (config tweak, typo fix, single-file edit) → haiku model
@@ -725,15 +725,15 @@ Task({
   subagent_type: "general-purpose",
   model: "haiku",
   run_in_background: true,
-  prompt: `Call Skill(/aura:worker) and fix the typo in...\n\nBeads Task ID: ${taskId}...`
+  prompt: `Call Skill(/pasture:worker) and fix the typo in...\n\nBeads Task ID: ${taskId}...`
 })
 
 // WRONG: Supervisor implementing changes directly
 Edit({ file_path: "src/foo.ts", ... })  // Supervisors coordinate, they don't implement!
 
-// WRONG: Do not use specialized agent types like "aura:worker" directly
+// WRONG: Do not use specialized agent types like "pasture:worker" directly
 Task({
-  subagent_type: "aura:worker",  // This doesn't exist!
+  subagent_type: "pasture:worker",  // This doesn't exist!
   ...
 })
 ```
@@ -760,7 +760,7 @@ When using TeamCreate instead of the Task tool, teammates have **zero prior cont
 SendMessage({
   type: "message",
   recipient: "worker-1",
-  content: `You are assigned SLICE-1. Start by calling Skill(/aura:worker).
+  content: `You are assigned SLICE-1. Start by calling Skill(/pasture:worker).
 
 Your Beads task ID: <slice-task-id>
 Run this to get full requirements: bd show <slice-task-id>
@@ -799,7 +799,7 @@ references:
   review_round: <review-task-ids>
 ---
 Aggregated IMPORTANT and MINOR findings from code review." \
-  --add-label "aura:epic-followup"
+  --add-label "pasture:epic-followup"
 
 # Link IMPORTANT/MINOR severity groups as children
 bd dep add <followup-epic-id> --blocked-by <important-group-id>
@@ -813,7 +813,7 @@ Severity routing follows [frag--sup-blocker-dual-parent] and [frag--sup-importan
 The follow-up epic runs the same protocol phases with FOLLOWUP_* prefixed task types. The supervisor creates the initial lifecycle tasks:
 
 ```
-FOLLOWUP epic (aura:epic-followup)
+FOLLOWUP epic (pasture:epic-followup)
   ├── relates_to: original URD
   ├── relates_to: original REVIEW-A/B/C tasks
   └── blocked-by: FOLLOWUP_URE         (Phase 2: scope which findings to address)
@@ -830,7 +830,7 @@ FOLLOWUP epic (aura:epic-followup)
 # Create FOLLOWUP_URE — user scoping which findings to address
 FOLLOWUP_URE_ID=$(bd create \
   --title "FOLLOWUP_URE: Scope follow-up for <feature>" \
-  --labels "aura:p2-user:s2_1-elicit" \
+  --labels "pasture:p2-user:s2_1-elicit" \
   --description "---
 references:
   followup_epic: <followup-epic-id>
@@ -842,7 +842,7 @@ bd dep add <followup-epic-id> --blocked-by $FOLLOWUP_URE_ID
 # Create FOLLOWUP_URD — requirements for follow-up scope
 FOLLOWUP_URD_ID=$(bd create \
   --title "FOLLOWUP_URD: Requirements for <feature> follow-up" \
-  --labels "aura:p2-user:s2_2-urd,aura:urd" \
+  --labels "pasture:p2-user:s2_2-urd,pasture:urd" \
   --description "---
 references:
   followup_epic: <followup-epic-id>
@@ -895,7 +895,7 @@ Per [frag--sup-review-severity-groups], create all 3 severity groups immediately
 ```bash
 # Step 1: Create all 3 severity groups immediately (EAGER)
 BLOCKER_ID=$(bd create --title "SLICE-1-REVIEW-A-1 BLOCKER" \
-  --labels "aura:severity:blocker,aura:p10-impl:s10-review" \
+  --labels "pasture:severity:blocker,pasture:p10-impl:s10-review" \
   --description "---
 references:
   slice: <slice-1-id>
@@ -904,7 +904,7 @@ references:
 BLOCKER findings from Reviewer A (Correctness) on SLICE-1.")
 
 IMPORTANT_ID=$(bd create --title "SLICE-1-REVIEW-A-1 IMPORTANT" \
-  --labels "aura:severity:important,aura:p10-impl:s10-review" \
+  --labels "pasture:severity:important,pasture:p10-impl:s10-review" \
   --description "---
 references:
   slice: <slice-1-id>
@@ -913,7 +913,7 @@ references:
 IMPORTANT findings from Reviewer A (Correctness) on SLICE-1.")
 
 MINOR_ID=$(bd create --title "SLICE-1-REVIEW-A-1 MINOR" \
-  --labels "aura:severity:minor,aura:p10-impl:s10-review" \
+  --labels "pasture:severity:minor,pasture:p10-impl:s10-review" \
   --description "---
 references:
   slice: <slice-1-id>
@@ -956,23 +956,23 @@ Severity groups:
 
 ```bash
 # Check all implementation slices
-bd list --labels="aura:p9-impl:s9-slice" --status=in_progress
+bd list --labels="pasture:p9-impl:s9-slice" --status=in_progress
 
 # Check for blocked tasks
-bd list --labels="aura:p9-impl:s9-slice" --status=blocked
+bd list --labels="pasture:p9-impl:s9-slice" --status=blocked
 
 # Check completed slices
-bd list --labels="aura:p9-impl:s9-slice" --status=done
+bd list --labels="pasture:p9-impl:s9-slice" --status=done
 
 # Check specific task
 bd show <task-id>
 
 # Check severity groups from review
-bd list --labels="aura:severity:blocker"
-bd list --labels="aura:severity:important"
-bd list --labels="aura:severity:minor"
+bd list --labels="pasture:severity:blocker"
+bd list --labels="pasture:severity:important"
+bd list --labels="pasture:severity:minor"
 
 # Check follow-up epics
-bd list --labels="aura:epic-followup"
+bd list --labels="pasture:epic-followup"
 ```
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

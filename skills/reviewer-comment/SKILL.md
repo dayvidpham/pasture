@@ -1,7 +1,7 @@
 # Leave Structured Review Comment
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:reviewer:comment` — Leave structured review comment via Beads
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:reviewer:comment` — Leave structured review comment via Beads
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-4-plan-review)** <- Phases 4 + 10
 
@@ -67,6 +67,6 @@ VOTE: {ACCEPT | REVISE}
 
 ## Plan Review vs Code Review
 
-- **Plan review (Phase 4, `aura:p4-plan:s4-review`):** ACCEPT/REVISE only. No severity tree. Findings are described inline in the vote comment.
-- **Code review (Phase 10, `aura:p10-impl:s10-review`):** ACCEPT/REVISE vote + full severity tree with EAGER creation (3 groups per round). Findings are tracked as child tasks of severity groups.
-<!-- END GENERATED FROM aura schema -->
+- **Plan review (Phase 4, `pasture:p4-plan:s4-review`):** ACCEPT/REVISE only. No severity tree. Findings are described inline in the vote comment.
+- **Code review (Phase 10, `pasture:p10-impl:s10-review`):** ACCEPT/REVISE vote + full severity tree with EAGER creation (3 groups per round). Findings are tracked as child tasks of severity groups.
+<!-- END GENERATED FROM pasture schema -->

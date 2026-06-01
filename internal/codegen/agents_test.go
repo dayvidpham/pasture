@@ -229,7 +229,7 @@ func TestGenerateAgent_SupervisorContainsSections(t *testing.T) {
 
 	// Protocol identity line (bold markers stripped by AST text extraction).
 	assertSectionContains(t, doc, src, 1, "Supervisor Agent",
-		"You are a Supervisor agent in the Aura Protocol.")
+		"You are a Supervisor agent in the Pasture Protocol.")
 
 	// Required sections.
 	assertSectionExists(t, doc, src, 2, "Owned Phases")

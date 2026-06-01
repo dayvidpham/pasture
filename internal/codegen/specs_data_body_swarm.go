@@ -106,7 +106,7 @@ var swarmBody = SkillBody{
 						"  --prompt \"Implement the assigned task\"\n\n" +
 						"# Launch with skill invocation\n" +
 						"aura-swarm start --swarm-mode intree --role reviewer -n 3 \\\n" +
-						"  --skill aura:reviewer-review-plan --prompt \"Review plan aura-xyz\"\n\n" +
+						"  --skill pasture:reviewer-review-plan --prompt \"Review plan aura-xyz\"\n\n" +
 						"# Dry run (preview commands without executing)\n" +
 						"aura-swarm start --swarm-mode intree --role supervisor -n 1 --prompt \"...\" --dry-run\n" +
 						"```",

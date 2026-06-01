@@ -1,12 +1,12 @@
 ---
 name: worker
 description: Vertical slice implementer (full production code path)
-skills: aura:worker-blocked, aura:worker-complete, aura:worker-implement
+skills: pasture:worker-blocked, pasture:worker-complete, pasture:worker-implement
 ---
 
 # Worker Agent
 
-<!-- BEGIN GENERATED FROM aura schema -->
+<!-- BEGIN GENERATED FROM pasture schema -->
 **Role:** `worker` | **Phases owned:** p9-worker-slices
 
 ## Protocol Context (generated from schema.xml)
@@ -21,10 +21,10 @@ skills: aura:worker-blocked, aura:worker-complete, aura:worker-implement
 
 | Command | Description | Phases |
 |---------|-------------|--------|
-| `aura:worker` | Vertical slice implementer (full production code path) | p9-worker-slices |
-| `aura:worker:blocked` | Report a blocker to supervisor via Beads | p9-worker-slices |
-| `aura:worker:complete` | Signal slice completion after quality gates pass | p9-worker-slices |
-| `aura:worker:implement` | Implement assigned vertical slice following TDD layers | p9-worker-slices |
+| `pasture:worker` | Vertical slice implementer (full production code path) | p9-worker-slices |
+| `pasture:worker:blocked` | Report a blocker to supervisor via Beads | p9-worker-slices |
+| `pasture:worker:complete` | Signal slice completion after quality gates pass | p9-worker-slices |
+| `pasture:worker:implement` | Implement assigned vertical slice following TDD layers | p9-worker-slices |
 
 ### General Constraints
 
@@ -157,7 +157,7 @@ NOT: A single file or horizontal layer (e.g., 'all types' or 'all tests'). YES: 
 **[B-worker-blocker]**
 - Given: a blocker
 - When: unable to proceed
-- Then: use /aura:worker-blocked with details
+- Then: use /pasture:worker-blocked with details
 - Should not: guess or work around
 
 ### Completion Checklist
@@ -219,7 +219,7 @@ Exit conditions:
 
 Exit conditions:
 - **success**: All tests pass; no TODO placeholders; real deps wired; production code path verified via code inspection
-- **escalate**: Blocker encountered — use /aura:worker-blocked with details
+- **escalate**: Blocker encountered — use /pasture:worker-blocked with details
 
 ##### Layer Cake — TDD Parallelism Within Vertical Slices
 
@@ -470,4 +470,4 @@ On blocked:
 bd update <task-id> --status=blocked
 bd update <task-id> --notes="Blocked: <reason>. Need: <dependency or clarification>"
 ```
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

@@ -272,11 +272,11 @@ func TestRecordSkillEvent_RecordsContextSkillEdge(t *testing.T) {
 
 	tracker, auditDB, dbPath := openFreeFloatingFixture(t)
 
-	const skillRunId = "aura:user-elicit-2026-04-25-run-001"
+	const skillRunId = "pasture:user-elicit-2026-04-25-run-001"
 
 	eventId, err := tasks.RecordSkillEvent(
 		ctx, tracker, auditDB, skillRunId, tasks.EventSkillInvoked,
-		map[string]any{"skill": "aura:user-elicit", "runId": skillRunId},
+		map[string]any{"skill": "pasture:user-elicit", "runId": skillRunId},
 	)
 	if err != nil {
 		t.Fatalf("RecordSkillEvent failed: %v", err)

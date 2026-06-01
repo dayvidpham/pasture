@@ -1,0 +1,23 @@
+{
+  "name": "pasture",
+  "description": "Pasture — the Pasture 12-phase protocol as Claude Code skills and agents (supervisor, worker, reviewer, architect, epoch + phase sub-skills), generated from the pasture Go codegen. Structured multi-agent software development with beads task tracking and vertical-slice TDD implementation.",
+  "version": "0.0.1",
+  "author": {
+    "name": "David Pham"
+  },
+  "repository": "https://github.com/dayvidpham/pasture",
+  "license": "MIT",
+  "keywords": [
+    "workflow",
+    "protocol",
+    "agents",
+    "planning",
+    "review",
+    "implementation",
+    "beads",
+    "vertical-slices",
+    "tdd",
+    "golang",
+    "codegen"
+  ]
+}

@@ -91,7 +91,7 @@ type SchemaIndex struct {
 	// PhaseSubstepOrders maps phase_id → ordered list of substep entries.
 	PhaseSubstepOrders map[string][]SubstepOrderEntry
 
-	// LabelValues maps label_id → value string (e.g. "L-p1s1_1" → "aura:p1-user:s1_1-request").
+	// LabelValues maps label_id → value string (e.g. "L-p1s1_1" → "pasture:p1-user:s1_1-request").
 	LabelValues map[string]string
 
 	// AxisLetters maps axis_id → letter string (e.g. "axis-correctness" → "A").
@@ -1130,7 +1130,7 @@ func ValidateTree(root *XMLNode) []ValidationError {
 }
 
 // ValidateSchema reads XML from r and validates it against the 3-layer
-// Aura Protocol schema rules.
+// Pasture Protocol schema rules.
 //
 // Error contract:
 //   - io.Reader read failure → (nil, error)

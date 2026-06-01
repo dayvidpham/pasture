@@ -56,8 +56,8 @@ var userElicitBody = SkillBody{
 			Title: "Sub-steps",
 			Content: "| Sub-step | Label | Description |\n" +
 				"|----------|-------|-------------|\n" +
-				"| s2_1-elicit | `aura:p2-user:s2_1-elicit` | URE survey — structured requirements elicitation |\n" +
-				"| s2_2-urd | `aura:p2-user:s2_2-urd` (also `aura:urd`) | Create URD — single source of truth for requirements |",
+				"| s2_1-elicit | `pasture:p2-user:s2_1-elicit` | URE survey — structured requirements elicitation |\n" +
+				"| s2_2-urd | `pasture:p2-user:s2_2-urd` (also `pasture:urd`) | Create URD — single source of truth for requirements |",
 		},
 		{
 			Id:      "user-elicit-strategy",
@@ -212,7 +212,7 @@ var userElicitBody = SkillBody{
 				"user's verbatim response.\n" +
 				"\n" +
 				"```" + `bash` + "\n" +
-				"bd create --labels \"aura:p2-user:s2_1-elicit\" \\\n" +
+				"bd create --labels \"pasture:p2-user:s2_1-elicit\" \\\n" +
 				"  --title \"ELICIT: {{feature name}}\" \\\n" +
 				"  --description \"---\n" +
 				"references:\n" +
@@ -251,7 +251,7 @@ var userElicitBody = SkillBody{
 			Content: "After the elicit task is created, create the URD as the single source of truth for user requirements:\n" +
 				"\n" +
 				"```" + `bash` + "\n" +
-				"bd create --labels \"aura:urd,aura:p2-user:s2_2-urd\" \\\n" +
+				"bd create --labels \"pasture:urd,pasture:p2-user:s2_2-urd\" \\\n" +
 				"  --title \"URD: {{feature name}}\" \\\n" +
 				"  --description \"---\n" +
 				"references:\n" +
@@ -281,7 +281,7 @@ var userElicitBody = SkillBody{
 		{
 			Id:    "user-elicit-next-phase",
 			Title: "Next Phase",
-			Content: "After elicitation and URD creation, invoke `/aura:architect` to begin proposal creation (Phase 3). Pass the URD ID so the architect can reference it.\n" +
+			Content: "After elicitation and URD creation, invoke `/pasture:architect` to begin proposal creation (Phase 3). Pass the URD ID so the architect can reference it.\n" +
 				"\n" +
 				"The proposal task will block the elicit task:\n" +
 				"```" + `bash` + "\n" +

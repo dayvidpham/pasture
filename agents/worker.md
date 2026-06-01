@@ -7,7 +7,7 @@ model: sonnet
 
 # Worker Agent
 
-You are a **Worker** agent in the Aura Protocol.
+You are a **Worker** agent in the Pasture Protocol.
 
 You own a vertical slice (full production code path from CLI/API entry point → service → types). See the project's AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.
 
@@ -90,7 +90,7 @@ You own a vertical slice (full production code path from CLI/API entry point →
 **[B-worker-blocker]**
 - Given: a blocker
 - When: unable to proceed
-- Then: use /aura:worker-blocked with details
+- Then: use /pasture:worker-blocked with details
 - Should not: guess or work around
 
 ## Completion Checklist
@@ -147,7 +147,7 @@ Exit conditions:
 
 Exit conditions:
 - **success**: All tests pass; no TODO placeholders; real deps wired; production code path verified via code inspection
-- **escalate**: Blocker encountered — use /aura:worker-blocked with details
+- **escalate**: Blocker encountered — use /pasture:worker-blocked with details
 
 ## Figures
 

@@ -1,12 +1,12 @@
 ---
 name: reviewer
 description: End-user alignment reviewer for plans and code
-skills: aura:reviewer-comment, aura:reviewer-review-code, aura:reviewer-review-plan, aura:reviewer-vote
+skills: pasture:reviewer-comment, pasture:reviewer-review-code, pasture:reviewer-review-plan, pasture:reviewer-vote
 ---
 
 # Reviewer Agent
 
-<!-- BEGIN GENERATED FROM aura schema -->
+<!-- BEGIN GENERATED FROM pasture schema -->
 **Role:** `reviewer` | **Phases owned:** p4-review, p10-code-review
 
 ## Protocol Context (generated from schema.xml)
@@ -22,11 +22,11 @@ skills: aura:reviewer-comment, aura:reviewer-review-code, aura:reviewer-review-p
 
 | Command | Description | Phases |
 |---------|-------------|--------|
-| `aura:reviewer` | End-user alignment reviewer for plans and code | p4-review, p10-code-review |
-| `aura:reviewer:comment` | Leave structured review comment via Beads | p4-review, p10-code-review |
-| `aura:reviewer:review-code` | Review implementation slices with EAGER severity tree | p10-code-review |
-| `aura:reviewer:review-plan` | Evaluate proposal against one axis (binary ACCEPT/REVISE) | p4-review |
-| `aura:reviewer:vote` | Cast ACCEPT or REVISE vote (binary only) | p4-review, p10-code-review |
+| `pasture:reviewer` | End-user alignment reviewer for plans and code | p4-review, p10-code-review |
+| `pasture:reviewer:comment` | Leave structured review comment via Beads | p4-review, p10-code-review |
+| `pasture:reviewer:review-code` | Review implementation slices with EAGER severity tree | p10-code-review |
+| `pasture:reviewer:review-plan` | Evaluate proposal against one axis (binary ACCEPT/REVISE) | p4-review |
+| `pasture:reviewer:vote` | Cast ACCEPT or REVISE vote (binary only) | p4-review, p10-code-review |
 
 ### General Constraints
 
@@ -118,11 +118,11 @@ _Example (correct)_
 ```bash
 # Create all 3 severity groups immediately (even if empty)
 bd create --title "SLICE-1-REVIEW-A-1 BLOCKER" \
-  --labels "aura:severity:blocker,aura:p10-impl:s10-review"
+  --labels "pasture:severity:blocker,pasture:p10-impl:s10-review"
 bd create --title "SLICE-1-REVIEW-A-1 IMPORTANT" \
-  --labels "aura:severity:important,aura:p10-impl:s10-review"
+  --labels "pasture:severity:important,pasture:p10-impl:s10-review"
 bd create --title "SLICE-1-REVIEW-A-1 MINOR" \
-  --labels "aura:severity:minor,aura:p10-impl:s10-review"
+  --labels "pasture:severity:minor,pasture:p10-impl:s10-review"
 
 # Close empty groups immediately
 bd close <empty-important-id>
@@ -222,7 +222,7 @@ Agents coordinate through **beads** tasks and comments:
 
 | Aspect | Plan Review (Phase 4) | Code Review (Phase 10) |
 |--------|-----------------------|------------------------|
-| Label | `aura:p4-plan:s4-review` | `aura:p10-impl:s10-review` |
+| Label | `pasture:p4-plan:s4-review` | `pasture:p10-impl:s10-review` |
 | Vote | ACCEPT / REVISE (binary) | ACCEPT / REVISE (binary) |
 | Severity tree | **NO** — no severity groups | **YES** — EAGER creation (always 3 groups) |
 | Naming | PROPOSAL-N-REVIEW-{axis}-{round} | SLICE-N-REVIEW-{axis}-{round} |
@@ -285,7 +285,7 @@ bd comments add <task-id> "VOTE: REVISE - Missing: what happens if X fails? Sugg
 
 All 3 reviewers must vote ACCEPT for plan to be ratified. If any reviewer votes REVISE:
 1. Architect creates PROPOSAL-N+1 addressing feedback
-2. Old proposal marked `aura:superseded`
+2. Old proposal marked `pasture:superseded`
 3. Reviewers re-review new proposal
 4. Repeat until all ACCEPT
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

@@ -1,7 +1,7 @@
 # Architect: Propose Plan
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:architect:propose-plan` — Create PROPOSAL-N task with full technical plan
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:architect:propose-plan` — Create PROPOSAL-N task with full technical plan
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-3-proposal-n)** <- Phase 3
 
@@ -20,7 +20,7 @@
 **[arch-propose-revision-history]**
 - Given: existing plan
 - When: revising
-- Then: create PROPOSAL-N+1 task and mark old as `aura:superseded`
+- Then: create PROPOSAL-N+1 task and mark old as `pasture:superseded`
 - Should not: lose history
 
 ## When to Use
@@ -29,13 +29,13 @@ Starting new feature design; creating formal plan for review.
 
 ## PROPOSAL-N Naming
 
-Proposals are numbered incrementally: PROPOSAL-1, PROPOSAL-2, etc. Each revision increments N. Old proposals are marked `aura:superseded` with a comment explaining why.
+Proposals are numbered incrementally: PROPOSAL-1, PROPOSAL-2, etc. Each revision increments N. Old proposals are marked `pasture:superseded` with a comment explaining why.
 
 ## Beads Task Creation
 
 ```bash
 bd create --type=feature \
-  --labels="aura:p3-plan:s3-propose" \
+  --labels="pasture:p3-plan:s3-propose" \
   --title="PROPOSAL-1: <feature name>" \
   --description="$(cat <<'EOF'
 ---
@@ -137,9 +137,9 @@ The URD contains the structured requirements, priorities, design choices, and MV
 ## Next Steps
 
 After creating PROPOSAL-N task:
-1. Run `/aura:architect-request-review` to spawn 3 reviewers
+1. Run `/pasture:architect-request-review` to spawn 3 reviewers
 2. Wait for all 3 reviewers to vote ACCEPT
-3. Run `/aura:architect-ratify` to add ratify label to PROPOSAL-N
+3. Run `/pasture:architect-ratify` to add ratify label to PROPOSAL-N
 
 ## Follow-up Proposals (FOLLOWUP_PROPOSAL-N)
 
@@ -148,4 +148,4 @@ When creating proposals for a follow-up epic (received via h6 from supervisor):
 - **References:** Include both `original_urd: <id>` and `followup_urd: <id>` in frontmatter
 - **Content:** Address specific IMPORTANT/MINOR findings scoped in FOLLOWUP_URE/URD
 - Same review/ratify/UAT lifecycle applies (3 reviewers, ACCEPT/REVISE, UAT, ratify, handoff)
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

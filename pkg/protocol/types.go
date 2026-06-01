@@ -76,7 +76,7 @@ func (p PhaseId) String() string { return string(p) }
 // terminal state and is NOT included in the pipeline itself.
 type Pipeline []PhaseId
 
-// DefaultPipeline is the standard 12-phase aura protocol pipeline.
+// DefaultPipeline is the standard 12-phase pasture protocol pipeline.
 // The index in this slice determines the pX number (0-based index + 1).
 var DefaultPipeline = Pipeline{
 	PhaseRequest,      // p1

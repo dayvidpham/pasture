@@ -1,7 +1,7 @@
 // Package codegen — encoding/xml annotated structs for schema.xml sections.
 //
 // These structs define the canonical XML shapes for all 17 sections of the
-// Aura Protocol schema. They are used by SLICE-B to replace manual fmt.Fprintf
+// Pasture Protocol schema. They are used by SLICE-B to replace manual fmt.Fprintf
 // calls with encoding/xml marshalling for 15 of the 17 sections.
 //
 // ConstraintsSection and ProcedureStepsSection are defined here for type

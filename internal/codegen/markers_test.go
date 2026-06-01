@@ -259,12 +259,12 @@ func TestPrependMarkers_InitModeRoundTrip(t *testing.T) {
 // that would break existing SKILL.md files in the repository.
 func TestConstants_Values(t *testing.T) {
 	assert.Equal(t,
-		"<!-- BEGIN GENERATED FROM aura schema -->",
+		"<!-- BEGIN GENERATED FROM pasture schema -->",
 		codegen.GeneratedBegin,
 		"GeneratedBegin value must not change (breaks existing SKILL.md files)",
 	)
 	assert.Equal(t,
-		"<!-- END GENERATED FROM aura schema -->",
+		"<!-- END GENERATED FROM pasture schema -->",
 		codegen.GeneratedEnd,
 		"GeneratedEnd value must not change (breaks existing SKILL.md files)",
 	)

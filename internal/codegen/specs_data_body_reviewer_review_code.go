@@ -48,7 +48,7 @@ var reviewerReviewCodeBody = SkillBody{
 					Title: "Step 1: Create All 3 Severity Groups Immediately",
 					Content: "```" + `bash` + "\n" +
 						`# Step 1: Create all 3 severity groups immediately (EAGER, not lazy)
-bd create --labels "aura:severity:blocker,aura:p10-impl:s10-review" \
+bd create --labels "pasture:severity:blocker,pasture:p10-impl:s10-review" \
   --title "SLICE-1-REVIEW-A-1 BLOCKER" \
   --description "---
 references:
@@ -58,7 +58,7 @@ references:
 BLOCKER findings for this review round"
 # Result: <blocker-group-id>
 
-bd create --labels "aura:severity:important,aura:p10-impl:s10-review" \
+bd create --labels "pasture:severity:important,pasture:p10-impl:s10-review" \
   --title "SLICE-1-REVIEW-A-1 IMPORTANT" \
   --description "---
 references:
@@ -68,7 +68,7 @@ references:
 IMPORTANT findings for this review round"
 # Result: <important-group-id>
 
-bd create --labels "aura:severity:minor,aura:p10-impl:s10-review" \
+bd create --labels "pasture:severity:minor,pasture:p10-impl:s10-review" \
   --title "SLICE-1-REVIEW-A-1 MINOR" \
   --description "---
 references:
@@ -122,7 +122,7 @@ bd close <minor-group-id>` + "\n" +
 					Id:    "rev-code-dual-parent-rule",
 					Title: "Dual-Parent BLOCKER Relationship",
 					Content: `BLOCKER findings have **two parents**:
-1. The severity group task (` + "`aura:severity:blocker`" + `) — for categorization
+1. The severity group task (` + "`pasture:severity:blocker`" + `) — for categorization
 2. The slice they block — for dependency tracking
 
 This ensures BLOCKERs both categorize under the severity tree AND block the slice they apply to.
@@ -154,13 +154,13 @@ bd show <urd-id>   # Read URD for requirements context` + "\n" +
 				{
 					Id:      "rev-code-step3-criteria",
 					Title:   "Step 3: Apply Review Criteria and Verify Production Code Paths",
-					Content: `Apply end-user alignment criteria (see ` + "`aura:reviewer`" + `) and verify production code paths (see Verify Production Code Paths section below).`,
+					Content: `Apply end-user alignment criteria (see ` + "`pasture:reviewer`" + `) and verify production code paths (see Verify Production Code Paths section below).`,
 				},
 				{
 					Id:    "rev-code-step4-create",
 					Title: "Step 4: Create Review Task",
 					Content: "```" + `bash` + "\n" +
-						`bd create --labels "aura:p10-impl:s10-review" \
+						`bd create --labels "pasture:p10-impl:s10-review" \
   --title "SLICE-1-REVIEW-A-1: <feature>" \
   --description "---
 references:
@@ -246,7 +246,7 @@ var commandCmd = &cobra.Command{
 			Title: "Follow-up Epic",
 			Content: `**Trigger:** Review completion + ANY IMPORTANT or MINOR findings exist.
 **NOT gated on BLOCKER resolution.**
-**Owner:** Supervisor creates the follow-up epic (label ` + "`aura:epic-followup`" + `).`,
+**Owner:** Supervisor creates the follow-up epic (label ` + "`pasture:epic-followup`" + `).`,
 		},
 		{
 			Id:    "rev-code-followup-slice",

@@ -39,8 +39,8 @@ var reviewerVoteBody = SkillBody{
 		{
 			Id:    "rev-vote-plan-vs-code",
 			Title: "Plan Review vs Code Review",
-			Content: `- **Plan review (Phase 4, ` + "`aura:p4-plan:s4-review`" + `):** ACCEPT/REVISE only. No severity tree.
-- **Code review (Phase 10, ` + "`aura:p10-impl:s10-review`" + `):** ACCEPT/REVISE vote. Findings tracked via severity tree (3 groups: BLOCKER, IMPORTANT, MINOR created per round).`,
+			Content: `- **Plan review (Phase 4, ` + "`pasture:p4-plan:s4-review`" + `):** ACCEPT/REVISE only. No severity tree.
+- **Code review (Phase 10, ` + "`pasture:p10-impl:s10-review`" + `):** ACCEPT/REVISE vote. Findings tracked via severity tree (3 groups: BLOCKER, IMPORTANT, MINOR created per round).`,
 		},
 		{
 			Id:      "rev-vote-consensus",

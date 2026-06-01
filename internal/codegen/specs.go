@@ -233,7 +233,7 @@ type RoleSpec struct {
 // Mirrors Python CommandSpec dataclass.
 type CommandSpec struct {
 	Id            string // CommandId wire value e.g. "cmd-worker"
-	Name          string // e.g. "aura:worker"
+	Name          string // e.g. "pasture:worker"
 	Description   string
 	RoleRef       types.RoleId // may be zero value if unassigned
 	Phases        []protocol.PhaseId
@@ -403,7 +403,7 @@ type ProcedureStep struct {
 // Mirrors Python LabelSpec dataclass.
 type LabelSpec struct {
 	Id          string
-	Value       string // the actual label string e.g. "aura:p9-impl:s9-slice"
+	Value       string // the actual label string e.g. "pasture:p9-impl:s9-slice"
 	Special     bool
 	PhaseRef    string // optional phase reference
 	SubstepRef  string // optional substep reference

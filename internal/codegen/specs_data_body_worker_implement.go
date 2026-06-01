@@ -144,7 +144,7 @@ they sweep peer-worker WIP into your commit.
 PreToolUse hook blocks these for worker agents; if you find peer
 work in your way, post ` + "`bd comments add`" + ` and wait for supervisor
 coordination instead. See **Shared-Worktree Git Discipline** in
-` + "`/aura:worker`" + ` for the full rationale and the escape hatch.`,
+` + "`/pasture:worker`" + ` for the full rationale and the escape hatch.`,
 				},
 			},
 		},
@@ -175,8 +175,8 @@ coordination instead. See **Shared-Worktree Git Discipline** in
 		{
 			Id:    "wimpl-next",
 			Title: "Next",
-			Content: `- Complete: ` + "`/aura:worker-complete`" + `
-- Blocked: ` + "`/aura:worker-blocked`",
+			Content: `- Complete: ` + "`/pasture:worker-complete`" + `
+- Blocked: ` + "`/pasture:worker-blocked`",
 		},
 	},
 

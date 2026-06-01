@@ -12,10 +12,10 @@ import (
 )
 
 // GeneratedBegin is the opening marker that delimits the generated section.
-const GeneratedBegin = "<!-- BEGIN GENERATED FROM aura schema -->"
+const GeneratedBegin = "<!-- BEGIN GENERATED FROM pasture schema -->"
 
 // GeneratedEnd is the closing marker that delimits the generated section.
-const GeneratedEnd = "<!-- END GENERATED FROM aura schema -->"
+const GeneratedEnd = "<!-- END GENERATED FROM pasture schema -->"
 
 // MarkerError is a typed error for marker validation failures.
 //

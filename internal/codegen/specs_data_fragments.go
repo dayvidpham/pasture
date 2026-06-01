@@ -159,7 +159,7 @@ Severity groups:
 ` + "```" + `bash
 # Step 1: Create all 3 severity groups immediately (EAGER)
 BLOCKER_ID=$(bd create --title "SLICE-1-REVIEW-A-1 BLOCKER" \
-  --labels "aura:severity:blocker,aura:p10-impl:s10-review" \
+  --labels "pasture:severity:blocker,pasture:p10-impl:s10-review" \
   --description "---
 references:
   slice: <slice-1-id>
@@ -168,7 +168,7 @@ references:
 BLOCKER findings from Reviewer A (Correctness) on SLICE-1.")
 
 IMPORTANT_ID=$(bd create --title "SLICE-1-REVIEW-A-1 IMPORTANT" \
-  --labels "aura:severity:important,aura:p10-impl:s10-review" \
+  --labels "pasture:severity:important,pasture:p10-impl:s10-review" \
   --description "---
 references:
   slice: <slice-1-id>
@@ -177,7 +177,7 @@ references:
 IMPORTANT findings from Reviewer A (Correctness) on SLICE-1.")
 
 MINOR_ID=$(bd create --title "SLICE-1-REVIEW-A-1 MINOR" \
-  --labels "aura:severity:minor,aura:p10-impl:s10-review" \
+  --labels "pasture:severity:minor,pasture:p10-impl:s10-review" \
   --description "---
 references:
   slice: <slice-1-id>

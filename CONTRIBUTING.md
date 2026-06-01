@@ -141,8 +141,8 @@ This is a subset of the above when the `ConstraintSpec` already exists.
 
 5. Create `skills/{dir}/SKILL.md` with at least the BEGIN/END marker pair:
    ```
-   <!-- BEGIN GENERATED FROM aura schema -->
-   <!-- END GENERATED FROM aura schema -->
+   <!-- BEGIN GENERATED FROM pasture schema -->
+   <!-- END GENERATED FROM pasture schema -->
    ```
 
 6. Update `testdata/context.yaml`: add a `role_constraint_checks` entry with `exact_count`, `must_contain`, and `must_not_contain`.
@@ -185,7 +185,7 @@ This is a subset of the above when the `ConstraintSpec` already exists.
 
 ### Adding a New Command / Skill
 
-1. Add an entry to `CommandSpecs` in `specs_data.go` (around line 786). Set `ID`, `Name` (e.g. `"aura:role:action"`), `Description`, `RoleRef`, `Phases`, `File`, and optionally `CreatesLabels`.
+1. Add an entry to `CommandSpecs` in `specs_data.go` (around line 786). Set `ID`, `Name` (e.g. `"pasture:role:action"`), `Description`, `RoleRef`, `Phases`, `File`, and optionally `CreatesLabels`.
 
 2. If the command has associated figures (i.e., a `FigureSpec` entry references this command via `CommandRefs`), add it to `commandSkillDirs` in `tools/codegen/main.go`:
    ```go

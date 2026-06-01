@@ -79,8 +79,8 @@ bd comments add <review-id> "VOTE: REVISE - 1 BLOCKER found (see severity tree).
 		{
 			Id:    "rev-comment-plan-vs-code",
 			Title: "Plan Review vs Code Review",
-			Content: `- **Plan review (Phase 4, ` + "`aura:p4-plan:s4-review`" + `):** ACCEPT/REVISE only. No severity tree. Findings are described inline in the vote comment.
-- **Code review (Phase 10, ` + "`aura:p10-impl:s10-review`" + `):** ACCEPT/REVISE vote + full severity tree with EAGER creation (3 groups per round). Findings are tracked as child tasks of severity groups.`,
+			Content: `- **Plan review (Phase 4, ` + "`pasture:p4-plan:s4-review`" + `):** ACCEPT/REVISE only. No severity tree. Findings are described inline in the vote comment.
+- **Code review (Phase 10, ` + "`pasture:p10-impl:s10-review`" + `):** ACCEPT/REVISE vote + full severity tree with EAGER creation (3 groups per round). Findings are tracked as child tasks of severity groups.`,
 		},
 	},
 }

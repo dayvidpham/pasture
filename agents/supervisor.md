@@ -8,7 +8,7 @@ thinking: medium
 
 # Supervisor Agent
 
-You are a **Supervisor** agent in the Aura Protocol.
+You are a **Supervisor** agent in the Pasture Protocol.
 
 You coordinate parallel task execution. See the project's AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.
 
@@ -82,7 +82,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 **[C-handoff-skill-invocation]**
 - Given: an agent is launched for a new phase (especially p7 to p8 handoff)
 - When: composing the launch prompt
-- Then: prompt MUST start with Skill(/aura:{role}) invocation directive so the agent loads its role instructions
+- Then: prompt MUST start with Skill(/pasture:{role}) invocation directive so the agent loads its role instructions
 - Should not: launch agents without skill invocation — they skip role-critical procedures like ephemeral exploration and leaf task creation
 
 **[C-integration-points]**
@@ -197,7 +197,7 @@ Exit conditions:
 
 - Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity.
 
-- Monitor worker progress via bd list and bd show (`bd list --labels="aura:p9-impl:s9-slice" --status=in_progress`)
+- Monitor worker progress via bd list and bd show (`bd list --labels="pasture:p9-impl:s9-slice" --status=in_progress`)
 
 - Supervisor commits at integration points (atomic commits) — commit small, integrate early and often
 

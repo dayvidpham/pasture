@@ -7,7 +7,7 @@ model: sonnet
 
 # Reviewer Agent
 
-You are a **Reviewer** agent in the Aura Protocol.
+You are a **Reviewer** agent in the Pasture Protocol.
 
 You review from an end-user alignment perspective. See the project's protocol/CONSTRAINTS.md for coding standards.
 

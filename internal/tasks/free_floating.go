@@ -2,7 +2,7 @@
 // §11 Scenario 6, §8 S9).
 //
 // "Free-floating" events are audit_events that are NOT anchored to an active
-// EpochWorkflow — git commits, /aura:* skill invocations outside an epoch, and
+// EpochWorkflow — git commits, /pasture:* skill invocations outside an epoch, and
 // Claude Code session boundaries. They live in the same audit_events table as
 // epoch-anchored events; what differentiates them is the context_edges row(s)
 // recorded alongside via protocol.TaskTracker.AttachContext: free-floating
@@ -85,8 +85,8 @@ const (
 	// contain at least {"onto": "<base-ref>", "head": "<head-ref>"}.
 	EventGitRebase protocol.EventType = "GitRebase"
 
-	// EventSkillInvoked fires when a /aura:* skill is invoked (per Pasture
-	// URD R9). Payload should contain at least {"skill": "aura:<name>"}.
+	// EventSkillInvoked fires when a /pasture:* skill is invoked (per Pasture
+	// URD R9). Payload should contain at least {"skill": "pasture:<name>"}.
 	EventSkillInvoked protocol.EventType = "SkillInvoked"
 
 	// EventSessionRecorded fires when a Claude Code session is recorded.
@@ -172,13 +172,13 @@ func RecordGitEvent(
 
 // RecordSkillEvent records a free-floating skill-invocation event to
 // audit_events and attaches a ContextSkill edge keyed by the supplied skill
-// run id (e.g., "aura:user-elicit-<run-id>").
+// run id (e.g., "pasture:user-elicit-<run-id>").
 //
 // See RecordGitEvent for the parameter / error contract; only the context kind
 // (ContextSkill) and the suggested EventType (EventSkillInvoked) differ.
 //
 // `skillRunId` is the canonical id of the skill invocation. Per PROPOSAL-2
-// §7.3 example: "aura:user-elicit-<run-id>" — the wire string is whatever the
+// §7.3 example: "pasture:user-elicit-<run-id>" — the wire string is whatever the
 // caller wants to use for Timeline lookups via
 // `pasture task events --context-kind=SkillContext --context-id=<run-id>`.
 func RecordSkillEvent(

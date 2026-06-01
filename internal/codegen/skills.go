@@ -179,9 +179,9 @@ func commandsForRole(roleId types.RoleId) []CommandSpec {
 }
 
 // subSkillsForRole returns skill invocation names for a role's sub-commands.
-// Converts aura:a:b → aura:a-b. Skips the main role command (e.g. aura:worker).
+// Converts pasture:a:b → pasture:a-b. Skips the main role command (e.g. pasture:worker).
 func subSkillsForRole(roleId types.RoleId) []string {
-	mainCmd := fmt.Sprintf("aura:%s", roleId)
+	mainCmd := fmt.Sprintf("pasture:%s", roleId)
 	var result []string
 	for _, cmd := range CommandSpecs {
 		if cmd.RoleRef != roleId {

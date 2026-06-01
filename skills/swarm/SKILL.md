@@ -1,7 +1,7 @@
 # Swarm — Unified Agent Orchestration
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:swarm` — Launch worktree-based or intree agent workflows using aura-swarm
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:swarm` — Launch worktree-based or intree agent workflows using aura-swarm
 
 Orchestrate Claude agent sessions in two modes:
 - **Worktree mode** (default): Isolated git worktrees per epic, with beads task discovery and rich prompt generation.
@@ -95,7 +95,7 @@ aura-swarm start --swarm-mode intree --role worker -n 3 \
 
 # Launch with skill invocation
 aura-swarm start --swarm-mode intree --role reviewer -n 3 \
-  --skill aura:reviewer-review-plan --prompt "Review plan aura-xyz"
+  --skill pasture:reviewer-review-plan --prompt "Review plan aura-xyz"
 
 # Dry run (preview commands without executing)
 aura-swarm start --swarm-mode intree --role supervisor -n 1 --prompt "..." --dry-run
@@ -171,4 +171,4 @@ aura-swarm start --swarm-mode intree --role worker -n 3 --prompt "..."
 ```
 
 The `aura-parallel` command still works as a thin wrapper but prints a deprecation warning.
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

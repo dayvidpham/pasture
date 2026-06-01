@@ -1,7 +1,7 @@
 # Worker: Handle Blockers
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:worker:blocked` — Report a blocker to supervisor via Beads
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:worker:blocked` — Report a blocker to supervisor via Beads
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9
 
@@ -44,4 +44,4 @@ Cannot proceed due to missing dependency, unclear requirement, or need changes i
 - Unclear requirement in acceptance_criteria
 - Need interface defined in dependent file
 - Conflicting constraints in validation_checklist
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

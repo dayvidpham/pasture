@@ -14,18 +14,18 @@ var statusBody = SkillBody{
 					Id:    "status-step1-plans",
 					Title: "1. Check for active plans",
 					Content: "```" + `bash
-bd list --labels="aura:p3-plan:s3-propose" --status=open
-bd list --labels="aura:p6-plan:s6-ratify" --status=open
+bd list --labels="pasture:p3-plan:s3-propose" --status=open
+bd list --labels="pasture:p6-plan:s6-ratify" --status=open
 ` + "```",
 				},
 				{
 					Id:    "status-step2-impl",
 					Title: "2. Check implementation progress",
 					Content: "```" + `bash
-bd list --labels="aura:p8-impl:s8-plan" --status=open
-bd list --labels="aura:p9-impl:s9-slice" --status=in_progress
-bd list --labels="aura:p9-impl:s9-slice" --status=blocked
-bd list --labels="aura:p9-impl:s9-slice" --status=done
+bd list --labels="pasture:p8-impl:s8-plan" --status=open
+bd list --labels="pasture:p9-impl:s9-slice" --status=in_progress
+bd list --labels="pasture:p9-impl:s9-slice" --status=blocked
+bd list --labels="pasture:p9-impl:s9-slice" --status=done
 ` + "```",
 				},
 				{
@@ -46,7 +46,7 @@ bd stats
 			Id:    "status-output-format",
 			Title: "Output Format",
 			Content: "```" + `
-## Aura Protocol Status
+## Pasture Protocol Status
 
 **Phase:** {Phase 1: Request | Phase 3: Propose | Phase 4: Review | Phase 6: Ratified | Phase 9: Implementation}
 **Active Plan:** {task-id or "None"}

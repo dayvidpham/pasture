@@ -218,9 +218,9 @@ func buildEnums(buf *bytes.Buffer, depth int) {
 			{
 				Name: "SeverityLevel",
 				Values: []EnumValue{
-					{Id: "BLOCKER", Blocks: "true", Label: "aura:severity:blocker", Description: "Security, type errors, test failures, broken production code paths"},
-					{Id: "IMPORTANT", Blocks: "false", Label: "aura:severity:important", Description: "Performance, missing validation, architectural concerns"},
-					{Id: "MINOR", Blocks: "false", Label: "aura:severity:minor", Description: "Style, optional optimizations, naming improvements"},
+					{Id: "BLOCKER", Blocks: "true", Label: "pasture:severity:blocker", Description: "Security, type errors, test failures, broken production code paths"},
+					{Id: "IMPORTANT", Blocks: "false", Label: "pasture:severity:important", Description: "Performance, missing validation, architectural concerns"},
+					{Id: "MINOR", Blocks: "false", Label: "pasture:severity:minor", Description: "Style, optional optimizations, naming improvements"},
 				},
 			},
 			{
@@ -366,7 +366,7 @@ var phaseDescriptions = map[string]string{
 var p7SkillInvocation = map[string]string{
 	"target-role": "supervisor",
 	"command-ref": "cmd-supervisor",
-	"directive":   "Supervisor launch prompt MUST start with Skill(/aura:supervisor)",
+	"directive":   "Supervisor launch prompt MUST start with Skill(/pasture:supervisor)",
 }
 
 // buildPhaseTaskTitles derives per-phase task-title hints from TitleConventions.
@@ -586,12 +586,12 @@ var roleDelegates = map[string][]map[string]string{
 
 // roleLabelAwareness is the static label-awareness text per role.
 var roleLabelAwareness = map[string]string{
-	"architect": "aura:p1-user, aura:p2-user, aura:p3-plan, aura:p4-plan, aura:p5-user, aura:p6-plan, aura:p7-plan",
-	"reviewer": "aura:p4-plan:s4-review, aura:p10-impl:s10-review, " +
-		"aura:severity:blocker, aura:severity:important, aura:severity:minor",
-	"supervisor": "aura:p7-plan, aura:p8-impl, aura:p9-impl, aura:p10-impl, " +
-		"aura:p11-user, aura:p12-impl, aura:epic-followup",
-	"worker": "aura:p9-impl:s9-slice",
+	"architect": "pasture:p1-user, pasture:p2-user, pasture:p3-plan, pasture:p4-plan, pasture:p5-user, pasture:p6-plan, pasture:p7-plan",
+	"reviewer": "pasture:p4-plan:s4-review, pasture:p10-impl:s10-review, " +
+		"pasture:severity:blocker, pasture:severity:important, pasture:severity:minor",
+	"supervisor": "pasture:p7-plan, pasture:p8-impl, pasture:p9-impl, pasture:p10-impl, " +
+		"pasture:p11-user, pasture:p12-impl, pasture:epic-followup",
+	"worker": "pasture:p9-impl:s9-slice",
 }
 
 // roleInvariants is the static invariants list per role.
@@ -812,15 +812,15 @@ var handoffFilePatterns = map[string]string{
 // handoffSkillInvocations maps handoff IDs to their skill invocation data.
 var handoffSkillInvocations = map[string]map[string]string{
 	"h1": {
-		"directive": "Skill(/aura:supervisor)",
+		"directive": "Skill(/pasture:supervisor)",
 		"note":      "Supervisor launch prompt MUST start with this invocation. Without it, supervisor skips leaf task creation.",
 	},
 	"h2": {
-		"directive": "Skill(/aura:worker)",
+		"directive": "Skill(/pasture:worker)",
 		"note":      "Worker message MUST include explicit instruction to call this skill.",
 	},
 	"h3": {
-		"directive": "Skill(/aura:reviewer)",
+		"directive": "Skill(/pasture:reviewer)",
 		"note":      "Reviewer prompt MUST include instruction to call this skill.",
 	},
 }
@@ -1104,7 +1104,7 @@ func buildDocuments(buf *bytes.Buffer, depth int) {
 		{
 			id:      "doc-skills",
 			path:    "protocol/SKILLS.md",
-			purpose: "Command reference: all /aura:* skills mapped to phase and role",
+			purpose: "Command reference: all /pasture:* skills mapped to phase and role",
 			covers: []map[string]string{
 				{"type": "command", "refs": "all", "depth": "full"},
 				{"type": "phase", "refs": "all", "depth": "command-mapping"},
@@ -1501,7 +1501,7 @@ func phaseXMLId(id protocol.PhaseId) string {
 //
 // The output matches the structure of the Python gen_schema.py output:
 //   - XML declaration with UTF-8 encoding
-//   - <aura-protocol version="2.0"> root element
+//   - <pasture-protocol version="2.0"> root element
 //   - All sections with section-divider comments
 //   - CDATA sections for <code> element content
 //   - 2-space indentation throughout
@@ -1557,12 +1557,12 @@ func generateSchemaContent() string {
 	var buf bytes.Buffer
 
 	buf.WriteString("<?xml version='1.0' encoding='UTF-8'?>\n")
-	buf.WriteString("<aura-protocol" + xmlAttr("version", "2.0") + ">\n")
+	buf.WriteString("<pasture-protocol" + xmlAttr("version", "2.0") + ">\n")
 
 	// Header comment
 	buf.WriteString("  <!--\n")
-	buf.WriteString("  Aura Protocol Schema v2.0\n\n")
-	buf.WriteString("  Canonical, machine-readable definition of the Aura multi-agent protocol.\n")
+	buf.WriteString("  Pasture Protocol Schema v2.0\n\n")
+	buf.WriteString("  Canonical, machine-readable definition of the Pasture multi-agent protocol.\n")
 	buf.WriteString("  All markdown documentation (PROCESS.md, AGENTS.md, SKILLS.md, etc.) is\n")
 	buf.WriteString("  derived from this schema. Changes to the protocol MUST be reflected here first.\n\n")
 	buf.WriteString("  Design: Boyce-Codd Normal Form (BCNF)\n")
@@ -1577,7 +1577,7 @@ func generateSchemaContent() string {
 		build   func(*bytes.Buffer, int)
 	}{
 		{"ENUMERATIONS", buildEnums},
-		{"LABELS (closed set)\n\n     Label schema: aura:p{phase}-{domain}:s{step}-{type}\n     Special labels do not follow the phase pattern.", buildLabels},
+		{"LABELS (closed set)\n\n     Label schema: pasture:p{phase}-{domain}:s{step}-{type}\n     Special labels do not follow the phase pattern.", buildLabels},
 		{"REVIEW AXES", buildReviewAxes},
 		{"PHASES (12-phase lifecycle)\n\n     Order of operations is defined by:\n       1. phase/@number (global ordering)\n       2. substep/@order within a phase\n       3. substep/@execution + @parallel-group (concurrency)\n       4. transition/@condition (gate to next phase)", buildPhases},
 		{"ROLES\n\n     Each role owns a set of phases and has access to specific commands.\n     The role-phase mapping is the primary relationship; commands are\n     grouped under their owning role.", buildRoles},
@@ -1600,7 +1600,7 @@ func generateSchemaContent() string {
 		sec.build(&buf, 1)
 	}
 
-	buf.WriteString("</aura-protocol>\n")
+	buf.WriteString("</pasture-protocol>\n")
 
 	return buf.String()
 }

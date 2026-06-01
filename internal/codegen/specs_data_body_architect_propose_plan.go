@@ -24,7 +24,7 @@ var architectProposePlanBody = SkillBody{
 			Id:        "arch-propose-revision-history",
 			Given:     "existing plan",
 			When:      "revising",
-			Then:      "create PROPOSAL-N+1 task and mark old as `aura:superseded`",
+			Then:      "create PROPOSAL-N+1 task and mark old as `pasture:superseded`",
 			ShouldNot: "lose history",
 		},
 	},
@@ -39,14 +39,14 @@ var architectProposePlanBody = SkillBody{
 			Id:    "arch-propose-naming",
 			Title: "PROPOSAL-N Naming",
 			Content: "Proposals are numbered incrementally: PROPOSAL-1, PROPOSAL-2, etc. Each revision increments N. " +
-				"Old proposals are marked `aura:superseded` with a comment explaining why.",
+				"Old proposals are marked `pasture:superseded` with a comment explaining why.",
 		},
 		{
 			Id:    "arch-propose-beads-task",
 			Title: "Beads Task Creation",
 			Content: "```bash\n" +
 				"bd create --type=feature \\\n" +
-				"  --labels=\"aura:p3-plan:s3-propose\" \\\n" +
+				"  --labels=\"pasture:p3-plan:s3-propose\" \\\n" +
 				"  --title=\"PROPOSAL-1: <feature name>\" \\\n" +
 				"  --description=\"$(cat <<'EOF'\n" +
 				"---\n" +
@@ -152,9 +152,9 @@ var architectProposePlanBody = SkillBody{
 			Id:    "arch-propose-next-steps",
 			Title: "Next Steps",
 			Content: "After creating PROPOSAL-N task:\n" +
-				"1. Run `/aura:architect-request-review` to spawn 3 reviewers\n" +
+				"1. Run `/pasture:architect-request-review` to spawn 3 reviewers\n" +
 				"2. Wait for all 3 reviewers to vote ACCEPT\n" +
-				"3. Run `/aura:architect-ratify` to add ratify label to PROPOSAL-N",
+				"3. Run `/pasture:architect-ratify` to add ratify label to PROPOSAL-N",
 		},
 		{
 			Id:    "arch-propose-followup",

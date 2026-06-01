@@ -1,7 +1,7 @@
 # Research
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:research` — Domain research — find standards, prior art, and competing approaches
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:research` — Domain research — find standards, prior art, and competing approaches
 
 General-purpose domain research skill. Finds standards, prior art, existing solutions, and established patterns for a given topic. Writes structured findings to `llm/research/<topic>.md`.
 
@@ -45,7 +45,7 @@ See `../protocol/CONSTRAINTS.md` for coding standards.
 
 ## When to Use
 
-- **Phase 1 (s1_2-research):** Spawned by `/aura:user-request` after user confirms research depth. Findings recorded as REQUEST task comment AND written to `llm/research/`.
+- **Phase 1 (s1_2-research):** Spawned by `/pasture:user-request` after user confirms research depth. Findings recorded as REQUEST task comment AND written to `llm/research/`.
 - **Standalone:** Any agent needing domain research outside the 12-phase workflow. Invoke directly with a topic and depth.
 
 ## Inputs
@@ -187,4 +187,4 @@ bd comments add {{request-task-id}} \
   - Recommendation: {{brief direction}}
   - Full report: llm/research/{{topic}}.md"
 ```
-<!-- END GENERATED FROM aura schema -->
+<!-- END GENERATED FROM pasture schema -->

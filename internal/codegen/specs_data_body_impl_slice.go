@@ -52,7 +52,7 @@ var implSliceBody = SkillBody{
 			Content: "After supervisor decomposes the ratified plan:\n\n" +
 				"```bash\n" +
 				"# Create SLICE-1\n" +
-				"bd create --labels \"aura:p9-impl:s9-slice\" \\\n" +
+				"bd create --labels \"pasture:p9-impl:s9-slice\" \\\n" +
 				"  --title \"SLICE-1: <slice name>\" \\\n" +
 				"  --description \"---\n" +
 				"references:\n" +
@@ -92,11 +92,11 @@ var implSliceBody = SkillBody{
 				"# Worker starts\n" +
 				"bd update <slice-id> --status in_progress\n\n" +
 				"# Check all slice status\n" +
-				"bd list --labels=\"aura:p9-impl:s9-slice\" --status=open\n" +
-				"bd list --labels=\"aura:p9-impl:s9-slice\" --status=in_progress\n\n" +
+				"bd list --labels=\"pasture:p9-impl:s9-slice\" --status=open\n" +
+				"bd list --labels=\"pasture:p9-impl:s9-slice\" --status=in_progress\n\n" +
 				"# Worker completes (add comment and label)\n" +
 				"bd comments add <slice-id> \"COMPLETE: All checklist items verified. Production code path working.\"\n" +
-				"bd label add <slice-id> aura:p9-impl:slice-complete\n" +
+				"bd label add <slice-id> pasture:p9-impl:slice-complete\n" +
 				"```",
 		},
 		{
@@ -115,9 +115,9 @@ var implSliceBody = SkillBody{
 			Content: "The aggregation step waits for all slices to complete before code review:\n\n" +
 				"```bash\n" +
 				"# Check if all slices have complete label\n" +
-				"bd list --labels=\"aura:p9-impl:slice-complete\"\n\n" +
+				"bd list --labels=\"pasture:p9-impl:slice-complete\"\n\n" +
 				"# Compare to total slices\n" +
-				"bd list --labels=\"aura:p9-impl:s9-slice\"\n" +
+				"bd list --labels=\"pasture:p9-impl:s9-slice\"\n" +
 				"```",
 		},
 		{
@@ -126,7 +126,7 @@ var implSliceBody = SkillBody{
 			Content: `Follow-up slices use the same structure and tracking, with additional fields:
 - **Title prefix:** ` + "`FOLLOWUP_SLICE-N:`" + ` (e.g., ` + "`FOLLOWUP_SLICE-1: Add request-id correlation`" + `)
 - **Adopted leaf tasks:** Original IMPORTANT/MINOR leaf tasks from review become dual-parent children (original severity group + follow-up slice)
-- **Tracking:** Same ` + "`bd list --labels=\"aura:p9-impl:s9-slice\"`" + ` queries include both regular and follow-up slices`,
+- **Tracking:** Same ` + "`bd list --labels=\"pasture:p9-impl:s9-slice\"`" + ` queries include both regular and follow-up slices`,
 		},
 	},
 

@@ -40,7 +40,7 @@ var reviewerReviewPlanBody = SkillBody{
 		{
 			Id:      "rev-plan-when-to-use",
 			Title:   "When to Use",
-			Content: `Assigned to review a plan specification (Phase 4, ` + "`aura:p4-plan:s4-review`" + `).`,
+			Content: `Assigned to review a plan specification (Phase 4, ` + "`pasture:p4-plan:s4-review`" + `).`,
 		},
 		{
 			Id:    "rev-plan-criteria",
@@ -103,7 +103,7 @@ bd show <urd-id>   # Read URD for user requirements context` + "\n" +
 					Id:    "rev-plan-step3-create",
 					Title: "Step 3: Create Review Task",
 					Content: "```" + `bash` + "\n" +
-						`bd create --labels "aura:p4-plan:s4-review" \
+						`bd create --labels "pasture:p4-plan:s4-review" \
   --title "PROPOSAL-1-REVIEW-A-1: <feature>" \
   --description "---
 references:

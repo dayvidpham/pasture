@@ -86,10 +86,10 @@ func TestGenerateSchema_HasXMLDeclaration(t *testing.T) {
 	)
 }
 
-// TestGenerateSchema_RootElement verifies the root element is <aura-protocol version="2.0">.
+// TestGenerateSchema_RootElement verifies the root element is <pasture-protocol version="2.0">.
 func TestGenerateSchema_RootElement(t *testing.T) {
 	output := generateXML(t)
-	assert.Contains(t, output, `<aura-protocol`, "output must have <aura-protocol> root")
+	assert.Contains(t, output, `<pasture-protocol`, "output must have <pasture-protocol> root")
 	assert.Contains(t, output, `version="2.0"`, "root must have version=2.0 attribute")
 }
 
@@ -372,7 +372,7 @@ func TestGenerateSchema_CDATACodeFixture(t *testing.T) {
 // error return value. Parse failures are reported as ValidationErrors so that
 // callers receive a consistent result type regardless of failure mode.
 func TestValidateSchema_MalformedXML(t *testing.T) {
-	r := strings.NewReader("<aura-protocol><unclosed")
+	r := strings.NewReader("<pasture-protocol><unclosed")
 	errs, err := codegen.ValidateSchema(r)
 	assert.NoError(t, err,
 		"ValidateSchema must return nil error for malformed XML — parse failures go to ValidationError")

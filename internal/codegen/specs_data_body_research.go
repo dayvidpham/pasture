@@ -56,7 +56,7 @@ var researchBody = SkillBody{
 		{
 			Id:    "research-when-to-use",
 			Title: "When to Use",
-			Content: "- **Phase 1 (s1_2-research):** Spawned by `/aura:user-request` after user confirms research depth. Findings recorded as REQUEST task comment AND written to `llm/research/`.\n" +
+			Content: "- **Phase 1 (s1_2-research):** Spawned by `/pasture:user-request` after user confirms research depth. Findings recorded as REQUEST task comment AND written to `llm/research/`.\n" +
 				"- **Standalone:** Any agent needing domain research outside the 12-phase workflow. Invoke directly with a topic and depth.",
 		},
 		{

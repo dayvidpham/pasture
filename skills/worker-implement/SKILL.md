@@ -1,7 +1,7 @@
 # Worker: Implement Vertical Slice
 
-<!-- BEGIN GENERATED FROM aura schema -->
-**Command:** `aura:worker:implement` — Implement assigned vertical slice following TDD layers
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:worker:implement` — Implement assigned vertical slice following TDD layers
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9
 
@@ -126,7 +126,7 @@ they sweep peer-worker WIP into your commit.
 PreToolUse hook blocks these for worker agents; if you find peer
 work in your way, post `bd comments add` and wait for supervisor
 coordination instead. See **Shared-Worktree Git Discipline** in
-`/aura:worker` for the full rationale and the escape hatch.
+`/pasture:worker` for the full rationale and the escape hatch.
 
 ## Checklist
 
@@ -152,6 +152,6 @@ If your Beads task is a `FOLLOWUP_SLICE-N`, the implementation procedure is iden
 
 ## Next
 
-- Complete: `/aura:worker-complete`
-- Blocked: `/aura:worker-blocked`
-<!-- END GENERATED FROM aura schema -->
+- Complete: `/pasture:worker-complete`
+- Blocked: `/pasture:worker-blocked`
+<!-- END GENERATED FROM pasture schema -->

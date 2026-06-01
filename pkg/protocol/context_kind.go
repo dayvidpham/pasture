@@ -44,7 +44,7 @@ const (
 	// using the commit SHA (or remote ref) as context_id.
 	ContextGit ContextKind = "GitContext"
 
-	// ContextSkill attaches a /aura:* skill invocation; context_id is the
+	// ContextSkill attaches a /pasture:* skill invocation; context_id is the
 	// skill run ID.
 	ContextSkill ContextKind = "SkillContext"
 

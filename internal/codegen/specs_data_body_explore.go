@@ -55,7 +55,7 @@ var exploreBody = SkillBody{
 		{
 			Id:    "explore-when-to-use",
 			Title: "When to Use",
-			Content: "- **Phase 1 (s1_3-explore):** Spawned by `/aura:user-request` after user confirms research depth. Findings recorded as REQUEST task comment.\n" +
+			Content: "- **Phase 1 (s1_3-explore):** Spawned by `/pasture:user-request` after user confirms research depth. Findings recorded as REQUEST task comment.\n" +
 				"- **Standalone:** Any agent needing to understand codebase structure for a topic. Invoke directly with a topic and depth.",
 		},
 		{
@@ -210,7 +210,7 @@ bd comments add {{request-task-id}} \
 			Title: "Standalone Use",
 			Content: "When used outside Phase 1, produce the structured findings directly as output. No beads comment is needed unless a task ID is provided.\n\n" +
 				"```" + `
-/aura:explore
+/pasture:explore
 Topic: "Nix flake module system"
 Depth: deep-dive
 ` + "```" + `
