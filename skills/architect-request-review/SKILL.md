@@ -1,3 +1,8 @@
+---
+name: architect-request-review
+description: Spawn 3 axis-specific reviewers (A/B/C)
+---
+
 # Architect: Request Review
 
 <!-- BEGIN GENERATED FROM pasture schema -->

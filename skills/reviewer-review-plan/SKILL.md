@@ -1,3 +1,8 @@
+---
+name: reviewer-review-plan
+description: Evaluate proposal against one axis (binary ACCEPT/REVISE)
+---
+
 # Review Plan
 
 <!-- BEGIN GENERATED FROM pasture schema -->

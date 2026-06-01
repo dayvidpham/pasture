@@ -1,3 +1,8 @@
+---
+name: architect-handoff
+description: Create handoff document and transfer to supervisor
+---
+
 # Architect: Handoff to Supervisor
 
 <!-- BEGIN GENERATED FROM pasture schema -->

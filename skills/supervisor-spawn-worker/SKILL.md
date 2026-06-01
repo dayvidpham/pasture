@@ -1,3 +1,8 @@
+---
+name: supervisor-spawn-worker
+description: Launch a worker agent for an assigned slice
+---
+
 # Supervisor Spawn Worker
 
 <!-- BEGIN GENERATED FROM pasture schema -->

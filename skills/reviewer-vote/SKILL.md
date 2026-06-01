@@ -1,3 +1,8 @@
+---
+name: reviewer-vote
+description: Cast ACCEPT or REVISE vote (binary only)
+---
+
 # Cast Review Vote
 
 <!-- BEGIN GENERATED FROM pasture schema -->

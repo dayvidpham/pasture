@@ -1,3 +1,8 @@
+---
+name: reviewer-review-code
+description: Review implementation slices with EAGER severity tree
+---
+
 # Review Code Implementation
 
 <!-- BEGIN GENERATED FROM pasture schema -->

@@ -1,3 +1,8 @@
+---
+name: status
+description: Project status and monitoring via Beads queries
+---
+
 # Pasture Status
 
 <!-- BEGIN GENERATED FROM pasture schema -->

@@ -1,3 +1,8 @@
+---
+name: worker-complete
+description: Signal slice completion after quality gates pass
+---
+
 # Worker: Signal Completion
 
 <!-- BEGIN GENERATED FROM pasture schema -->

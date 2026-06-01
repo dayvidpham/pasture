@@ -1,3 +1,8 @@
+---
+name: swarm
+description: Launch worktree-based or intree agent workflows using aura-swarm
+---
+
 # Swarm — Unified Agent Orchestration
 
 <!-- BEGIN GENERATED FROM pasture schema -->

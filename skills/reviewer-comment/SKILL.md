@@ -1,3 +1,8 @@
+---
+name: reviewer-comment
+description: Leave structured review comment via Beads
+---
+
 # Leave Structured Review Comment
 
 <!-- BEGIN GENERATED FROM pasture schema -->

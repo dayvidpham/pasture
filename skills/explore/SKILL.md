@@ -1,3 +1,8 @@
+---
+name: explore
+description: Codebase exploration — find integration points, existing patterns, and related code
+---
+
 # Explore
 
 <!-- BEGIN GENERATED FROM pasture schema -->

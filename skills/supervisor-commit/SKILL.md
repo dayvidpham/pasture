@@ -1,3 +1,8 @@
+---
+name: supervisor-commit
+description: Atomic commit per completed layer/slice
+---
+
 # Supervisor: Commit
 
 <!-- BEGIN GENERATED FROM pasture schema -->

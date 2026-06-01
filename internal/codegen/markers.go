@@ -269,10 +269,14 @@ func PrependMarkers(content string) string {
 // AppendMarkers adds the BEGIN/END marker pair to the end of content when
 // content does not already contain the markers.
 //
-// It is used by --init mode for sub-skill SKILL.md files (where GenerateSubSkill
-// uses dropPrefix=false, preserving the hand-authored H1 heading before BEGIN).
-// Appending keeps the hand-authored heading as the prefix so that the generated
-// section appears after it and heading nesting is valid.
+// Historically this was used by --init mode for sub-skill SKILL.md files when
+// GenerateSubSkill ran with dropPrefix=false (preserving a hand-authored H1
+// heading before BEGIN). Since D5/SLICE-3, sub-skills run with dropPrefix=true:
+// the generator owns the full header (frontmatter + curated H1), so
+// GenerateSubSkill now uses PrependMarkers (mirroring GenerateSkill for roles).
+// AppendMarkers is retained as a public helper for callers that still want
+// append-after-body marker insertion (e.g. appending a generated section below
+// existing hand-authored content).
 //
 // If content already contains both markers (as reported by HasMarkers),
 // it is returned unchanged to avoid double-appending.

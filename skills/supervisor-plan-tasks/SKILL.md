@@ -1,3 +1,8 @@
+---
+name: supervisor-plan-tasks
+description: Decompose ratified plan into vertical slices (SLICE-N)
+---
+
 # Supervisor Plan Tasks
 
 <!-- BEGIN GENERATED FROM pasture schema -->

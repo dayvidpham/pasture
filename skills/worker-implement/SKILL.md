@@ -1,3 +1,8 @@
+---
+name: worker-implement
+description: Implement assigned vertical slice following TDD layers
+---
+
 # Worker: Implement Vertical Slice
 
 <!-- BEGIN GENERATED FROM pasture schema -->

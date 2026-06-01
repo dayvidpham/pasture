@@ -1,3 +1,8 @@
+---
+name: supervisor-track-progress
+description: Monitor worker status via Beads
+---
+
 # Supervisor: Track Progress
 
 <!-- BEGIN GENERATED FROM pasture schema -->

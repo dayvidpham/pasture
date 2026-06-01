@@ -1,3 +1,8 @@
+---
+name: impl-review
+description: Code review coordination across all slices (Phase 10)
+---
+
 # Implementation Code Review (Phase 10)
 
 <!-- BEGIN GENERATED FROM pasture schema -->

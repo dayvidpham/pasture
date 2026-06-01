@@ -1,3 +1,8 @@
+---
+name: user-request
+description: Capture user feature request verbatim (Phase 1)
+---
+
 # User Request (Phase 1)
 
 <!-- BEGIN GENERATED FROM pasture schema -->

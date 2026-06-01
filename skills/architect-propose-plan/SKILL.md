@@ -1,3 +1,8 @@
+---
+name: architect-propose-plan
+description: Create PROPOSAL-N task with full technical plan
+---
+
 # Architect: Propose Plan
 
 <!-- BEGIN GENERATED FROM pasture schema -->

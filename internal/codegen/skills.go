@@ -77,7 +77,16 @@ type skillContext struct {
 
 // skillSubContext is the unified data passed to skill_sub.go.tmpl.
 // It merges the former skillSubFigureContext with body fields.
+//
+// SubSkillName and CommandTitle drive the YAML frontmatter + curated H1 that
+// skill_sub.go.tmpl now emits ABOVE the BEGIN marker (dropPrefix=true). The
+// frontmatter `name` is SubSkillName (the skill directory, e.g. "user-uat") so
+// the skill registers as an invocable /pasture:<name> command; the H1 heading
+// is CommandTitle (CommandSpec.Title, the curated on-disk H1) so the
+// hand-authored title is preserved verbatim.
 type skillSubContext struct {
+	SubSkillName       string
+	CommandTitle       string
 	CommandName        string
 	CommandDescription string
 	Figures            []FigureSpec
@@ -496,14 +505,35 @@ func renderSubSkill(commandId, figuresDir string) (string, error) {
 
 	figures := loadFiguresForCommand(commandId, figuresDir)
 
+	// skillDirKey is the sub-skill directory name (e.g. "user-uat"), used both
+	// as the frontmatter `name` (so the skill registers as /pasture:<name>) and
+	// to look up the SkillBody entry below.
+	skillDirKey := subSkillDirKey(cmdSpec.File)
+
+	// CommandSpec.Title carries the curated on-disk H1 (captured statically in
+	// specs_data.go) so the generator preserves it verbatim above the markers.
+	// Guard against an unpopulated Title — every sub-skill in commandSkillDirs
+	// must define one, so a zero value is a programming error in specs_data.go.
+	if strings.TrimSpace(cmdSpec.Title) == "" {
+		return "", fmt.Errorf(
+			"codegen.renderSubSkill: command %q (dir %q) has no Title — "+
+				"where: CommandSpecs entry in internal/codegen/specs_data.go — "+
+				"when: rendering sub-skill frontmatter+H1 (skill_sub.go.tmpl) — "+
+				"why: skill_sub.go.tmpl emits '# {{ .CommandTitle }}' above the BEGIN marker and an empty title would drop the curated heading — "+
+				"fix: set Title to the sub-skill's curated H1 (without the leading '# ') for command %q",
+			commandId, skillDirKey, commandId,
+		)
+	}
+
 	ctx := skillSubContext{
+		SubSkillName:       skillDirKey,
+		CommandTitle:       cmdSpec.Title,
 		CommandName:        cmdSpec.Name,
 		CommandDescription: cmdSpec.Description,
 		Figures:            figures,
 	}
 
 	// Merge body content if a SkillBody entry exists for this sub-skill directory.
-	skillDirKey := subSkillDirKey(cmdSpec.File)
 	if body, ok := SkillBodySpecs[skillDirKey]; ok {
 		ctx.Preamble = body.Preamble
 		ctx.BodySections = body.Sections
@@ -635,12 +665,17 @@ func GenerateSkill(roleId types.RoleId, skillPath string, figuresDir string, opt
 // GenerateSubSkill generates the SKILL.md for a sub-skill command.
 //
 // It uses a single-pass pipeline: the unified template (skill_sub.go.tmpl)
-// renders ALL content (figures + body) inside the BEGIN/END markers. After
-// marker replacement, any content after END is truncated when a SkillBody
-// entry exists (R3: nothing after END).
+// renders ALL content (YAML frontmatter + curated H1 + figures + body) starting
+// with the frontmatter ABOVE the BEGIN marker. After marker replacement, any
+// content after END is truncated when a SkillBody entry exists (R3: nothing
+// after END).
 //
-// ReplaceMarkerRegion is called with dropPrefix=false — the h1 heading before
-// the BEGIN marker is hand-authored and preserved.
+// ReplaceMarkerRegion is called with dropPrefix=true — the template owns the
+// full file header (frontmatter + H1), mirroring GenerateSkill for roles. The
+// frontmatter `name` is the sub-skill directory key (so the skill registers as
+// /pasture:<name>) and `description` is CommandSpec.Description; the curated H1
+// is CommandSpec.Title, captured statically so the hand-authored title is
+// preserved.
 //
 // figuresDir is an optional path to the directory containing figure YAML files.
 // When empty, figures will have no content (useful for testing without figure files).
@@ -662,30 +697,31 @@ func GenerateSubSkill(commandId string, skillPath string, figuresDir string, opt
 	}
 	content := string(oldContent)
 
-	// In Init mode, append markers if missing. For sub-skills the hand-authored
-	// H1 heading is the prefix (preserved by dropPrefix=false), so markers must
-	// be appended after the existing content, not prepended, to keep the heading
-	// before the generated section and maintain valid heading nesting.
+	// In Init mode, prepend markers if missing. The template now owns the full
+	// header (frontmatter + H1) via dropPrefix=true, so markers are prepended —
+	// the rendered output replaces everything before END, exactly as for role
+	// skills (GenerateSkill). Any pre-existing hand-authored prefix is dropped by
+	// the subsequent dropPrefix=true ReplaceMarkerRegion call.
 	if opts.Init && !HasMarkers(content) {
-		content = AppendMarkers(content)
+		content = PrependMarkers(content)
 		if opts.Write {
 			if err := os.WriteFile(skillPath, []byte(content), 0o644); err != nil {
 				return "", fmt.Errorf(
-					"codegen.GenerateSubSkill: cannot write marker-appended file %q: %w",
+					"codegen.GenerateSubSkill: cannot write marker-prepended file %q: %w",
 					skillPath, err,
 				)
 			}
 		}
 	}
 
-	// Single-pass render: template produces all content inside BEGIN/END.
+	// Single-pass render: template produces frontmatter + H1 + BEGIN/END content.
 	rendered, err := renderSubSkill(commandId, figuresDir)
 	if err != nil {
 		return "", err
 	}
 
-	// Replace the marker region (preserve prefix — h1 heading is hand-authored).
-	newContent, err := ReplaceMarkerRegion(content, rendered, false)
+	// Replace the marker region (drop prefix — template owns frontmatter + H1).
+	newContent, err := ReplaceMarkerRegion(content, rendered, true)
 	if err != nil {
 		return "", fmt.Errorf(
 			"codegen.GenerateSubSkill: marker replacement failed for %q (command %q): %w",

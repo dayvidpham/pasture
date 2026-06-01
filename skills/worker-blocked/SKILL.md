@@ -1,3 +1,8 @@
+---
+name: worker-blocked
+description: Report a blocker to supervisor via Beads
+---
+
 # Worker: Handle Blockers
 
 <!-- BEGIN GENERATED FROM pasture schema -->

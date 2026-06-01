@@ -1,3 +1,8 @@
+---
+name: user-uat
+description: User Acceptance Testing with demonstrative examples
+---
+
 # User Acceptance Test (UAT)
 
 <!-- BEGIN GENERATED FROM pasture schema -->

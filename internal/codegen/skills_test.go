@@ -12,6 +12,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // ─── Fixture types ────────────────────────────────────────────────────────────
@@ -263,23 +264,47 @@ func TestGenerateSubSkill_ContainsSections(t *testing.T) {
 	}
 }
 
-// ─── TestGenerateSubSkill_PreservesPrefix ─────────────────────────────────────
+// ─── TestGenerateSubSkill_OwnsHeader ──────────────────────────────────────────
 
-// TestGenerateSubSkill_PreservesPrefix verifies that GenerateSubSkill preserves
-// the hand-authored content before the BEGIN marker (the h1 heading).
-func TestGenerateSubSkill_PreservesPrefix(t *testing.T) {
-	heading := "# My Sub-Skill Command\n\n"
-	content := heading + skillFileWithMarkers()
+// TestGenerateSubSkill_OwnsHeader verifies the D5/SLICE-3 contract: the
+// generator OWNS the sub-skill header (dropPrefix=true). Any pre-existing
+// hand-authored prefix above the BEGIN marker is dropped and replaced by the
+// rendered YAML frontmatter (`name` = sub-skill dir key, `description` =
+// CommandSpec.Description) followed by the curated H1 (CommandSpec.Title),
+// mirroring GenerateSkill for roles. This is what makes the sub-skill register
+// as an invocable /pasture:<name> command.
+func TestGenerateSubSkill_OwnsHeader(t *testing.T) {
+	// A pre-existing hand-authored prefix that must be REPLACED, not preserved.
+	prefix := "# Stale Hand-Authored Title\n\n"
+	content := prefix + skillFileWithMarkers()
 	skillPath := writeSkillFile(t, content)
 	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
 
 	result, err := codegen.GenerateSubSkill("cmd-sup-plan", skillPath, "", opts)
 	require.NoError(t, err)
 
-	assert.True(t, strings.HasPrefix(result, heading),
-		"GenerateSubSkill should preserve the hand-authored heading prefix\n"+
+	// The stale prefix must be gone (dropPrefix=true drops everything before BEGIN).
+	assert.False(t, strings.Contains(result, "Stale Hand-Authored Title"),
+		"GenerateSubSkill (dropPrefix=true) should drop the pre-existing prefix\n"+
+			"Actual output:\n%s", truncate(result, 400))
+
+	// The output must START with the generated YAML frontmatter (name = dir key,
+	// description = CommandSpec.Description), exactly mirroring role skills.
+	wantFrontmatter := "---\nname: supervisor-plan-tasks\n" +
+		"description: Decompose ratified plan into vertical slices (SLICE-N)\n---\n"
+	assert.True(t, strings.HasPrefix(result, wantFrontmatter),
+		"GenerateSubSkill should emit YAML frontmatter at the top of the file\n"+
 			"Expected prefix: %q\nActual start: %q",
-		heading, result[:min(len(result), 60)])
+		wantFrontmatter, result[:min(len(result), 120)])
+
+	// The curated H1 (CommandSpec.Title) must appear ABOVE the BEGIN marker.
+	h1Idx := strings.Index(result, "# Supervisor Plan Tasks")
+	beginIdx := strings.Index(result, codegen.GeneratedBegin)
+	require.GreaterOrEqual(t, h1Idx, 0,
+		"curated H1 '# Supervisor Plan Tasks' (CommandSpec.Title) should be present")
+	require.GreaterOrEqual(t, beginIdx, 0, "BEGIN marker should be present")
+	assert.Less(t, h1Idx, beginIdx,
+		"curated H1 must appear ABOVE the BEGIN marker, not below it")
 }
 
 // ─── TestGenerateSubSkill_MissingMarkersError ─────────────────────────────────
@@ -301,10 +326,14 @@ func TestGenerateSubSkill_MissingMarkersError(t *testing.T) {
 // ─── TestGenerateSubSkill_InitMode ─────────────────────────────────────────────
 
 // TestGenerateSubSkill_InitMode verifies that Init=true prepends markers to a
-// sub-skill file that lacks them, then generates the header successfully while
-// preserving the hand-authored heading prefix.
+// sub-skill file that lacks them, then generates the header successfully.
+//
+// Under the D5/SLICE-3 contract (dropPrefix=true) the generator OWNS the header:
+// the hand-authored input prefix is dropped and replaced by the generated YAML
+// frontmatter + curated H1 (CommandSpec.Title), exactly like role skills.
 func TestGenerateSubSkill_InitMode(t *testing.T) {
-	heading := "# Plan Tasks\n\nHand-authored body.\n"
+	// Hand-authored input whose title differs from the curated CommandSpec.Title.
+	heading := "# Stale Title\n\nHand-authored body.\n"
 	skillPath := writeSkillFile(t, heading)
 	opts := codegen.GenerateOptions{Diff: false, Write: true, Init: true}
 
@@ -312,19 +341,25 @@ func TestGenerateSubSkill_InitMode(t *testing.T) {
 	require.NoError(t, err, "GenerateSubSkill with Init=true should not error")
 	require.NotEmpty(t, result, "GenerateSubSkill with Init=true should produce non-empty output")
 
-	// The hand-authored heading should be preserved (dropPrefix=false for sub-skills).
+	// The generated frontmatter must appear at the top (name = dir key).
+	assert.True(t, strings.HasPrefix(result, "---\nname: supervisor-plan-tasks\n"),
+		"Init-mode output should start with generated YAML frontmatter\nActual start: %q",
+		result[:min(len(result), 120)])
+
+	// The curated H1 (CommandSpec.Title) replaces the stale hand-authored title.
 	doc, src := parseMD(t, result)
-	assertSectionExists(t, doc, src, 1, "Plan Tasks")
-	assertSectionContains(t, doc, src, 1, "Plan Tasks", "Hand-authored body.")
-	// The generated section should contain the markers (template markers, not markdown structure).
+	assertSectionExists(t, doc, src, 1, "Supervisor Plan Tasks")
+	assert.False(t, strings.Contains(result, "Stale Title"),
+		"dropPrefix=true should drop the hand-authored input prefix/body")
+	// The generated section should contain the markers.
 	assert.Contains(t, result, codegen.GeneratedBegin,
 		"generated output should contain BEGIN marker")
 	assert.Contains(t, result, codegen.GeneratedEnd,
 		"generated output should contain END marker")
-	// cmd-sup-plan has the Layer Cake figure: verify it is nested under the page H1.
+	// cmd-sup-plan has the Layer Cake figure: verify it is nested under the curated H1.
 	// The sub-skill template renders figure headings at H3 (skipping H2), which is
 	// valid as a relative parent-child relationship under the H1 page title.
-	assertIsNestedUnder(t, doc, src, "Plan Tasks", "Layer Cake — TDD Parallelism Within Vertical Slices")
+	assertIsNestedUnder(t, doc, src, "Supervisor Plan Tasks", "Layer Cake — TDD Parallelism Within Vertical Slices")
 }
 
 // ─── TestGenerateSubSkill_UnknownCommand ──────────────────────────────────────
@@ -444,8 +479,159 @@ func repoRoot(t *testing.T) string {
 	return filepath.Join(filepath.Dir(thisFile), "..", "..")
 }
 
+// ─── Generated-skill enumeration (single source of truth for L3 tables) ──────
+
+// idempotentRoleSkill describes one role-level SKILL.md driven through
+// GenerateSkill. These 5 roles are exactly the keys of roleSkillDirs in
+// tools/codegen/main.go; the generator writes them on every `go generate`.
+type idempotentRoleSkill struct {
+	name   string
+	roleId types.RoleId
+}
+
+// allRoleSkills is the full set of generator-driven role SKILL.md files (5).
+// It mirrors roleSkillDirs in tools/codegen/main.go.
+var allRoleSkills = []idempotentRoleSkill{
+	{name: "supervisor", roleId: types.RoleSupervisor},
+	{name: "architect", roleId: types.RoleArchitect},
+	{name: "worker", roleId: types.RoleWorker},
+	{name: "reviewer", roleId: types.RoleReviewer},
+	{name: "epoch", roleId: types.RoleEpoch},
+}
+
+// allSubSkillCommandIds is the full set of generator-driven sub-skill command
+// IDs (24). It mirrors commandSkillDirs in tools/codegen/main.go exactly; these
+// are the commands GenerateSubSkill renders on every `go generate`. Each gains
+// YAML frontmatter (name = dir key, description = CommandSpec.Description) above
+// its curated H1 (CommandSpec.Title) per D5/SLICE-3.
+//
+// Together with allRoleSkills (5) this enumerates all 29 generator-managed
+// SKILL.md files. The remaining 2 on-disk skills (protocol, install-cli) are
+// hand-authored and carry no BEGIN/END markers, so they are NOT generated and
+// are intentionally excluded from these tables.
+var allSubSkillCommandIds = []string{
+	"cmd-sup-plan",
+	"cmd-sup-spawn",
+	"cmd-impl-review",
+	"cmd-arch-handoff",
+	"cmd-arch-propose",
+	"cmd-arch-ratify",
+	"cmd-arch-review",
+	"cmd-explore",
+	"cmd-impl-slice",
+	"cmd-research",
+	"cmd-rev-comment",
+	"cmd-rev-code",
+	"cmd-rev-plan",
+	"cmd-rev-vote",
+	"cmd-status",
+	"cmd-sup-commit",
+	"cmd-sup-track",
+	"cmd-swarm",
+	"cmd-user-elicit",
+	"cmd-user-request",
+	"cmd-user-uat",
+	"cmd-work-blocked",
+	"cmd-work-complete",
+	"cmd-work-impl",
+}
+
+// subSkillCommand resolves a sub-skill command ID to its CommandSpec, the
+// derived skill directory key (e.g. "user-uat"), and the repo-root-relative
+// SKILL.md path. It t.Fatal()s if the command is unknown so a typo in the table
+// surfaces as a clear failure rather than a silent skip.
+func subSkillCommand(t *testing.T, commandId string) (spec codegen.CommandSpec, dirKey, relPath string) {
+	t.Helper()
+	spec, ok := codegen.CommandSpecs[commandId]
+	require.True(t, ok,
+		"sub-skill command %q not found in CommandSpecs — "+
+			"the L3 table in skills_test.go is out of sync with specs_data.go", commandId)
+	dirKey = codegen.SubSkillDirKey(spec.File)
+	require.NotEmpty(t, dirKey,
+		"sub-skill command %q has an unparseable File %q — expected skills/<dir>/SKILL.md",
+		commandId, spec.File)
+	return spec, dirKey, spec.File
+}
+
+// ─── TestSubSkillFrontmatter ─────────────────────────────────────────────────
+
+// subSkillFrontmatter is the YAML frontmatter contract the generator emits for
+// every sub-skill (D5/SLICE-3). `name` makes the skill register as
+// /pasture:<name>; `description` is CommandSpec.Description.
+type subSkillFrontmatter struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+}
+
+// parseLeadingFrontmatter extracts and parses the YAML frontmatter block that
+// must lead a generated sub-skill SKILL.md. It requires the very first line to
+// be the "---" fence and parses up to the closing "---" fence.
+func parseLeadingFrontmatter(t *testing.T, content, label string) subSkillFrontmatter {
+	t.Helper()
+
+	require.True(t, strings.HasPrefix(content, "---\n"),
+		"%s: generated output must begin with a YAML frontmatter fence '---' so the "+
+			"skill registers as an invocable /pasture:* command; got start:\n%s",
+		label, truncate(content, 120))
+
+	// Find the closing fence: the next line that is exactly "---".
+	rest := content[len("---\n"):]
+	end := strings.Index(rest, "\n---")
+	require.GreaterOrEqual(t, end, 0,
+		"%s: frontmatter has no closing '---' fence — the block is malformed", label)
+	block := rest[:end]
+
+	var fm subSkillFrontmatter
+	require.NoError(t, yaml.Unmarshal([]byte(block), &fm),
+		"%s: frontmatter is not valid YAML:\n%s", label, block)
+	return fm
+}
+
+// TestSubSkillFrontmatter verifies the D5/SLICE-3 frontmatter contract for ALL
+// 24 generator-driven sub-skills: generating each from its on-disk SKILL.md
+// produces a leading YAML frontmatter block whose `name` equals the skill
+// directory key AND whose `description` equals CommandSpec.Description. This is
+// what makes each sub-skill register as an invocable /pasture:<name> command.
+func TestSubSkillFrontmatter(t *testing.T) {
+	root := repoRoot(t)
+	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
+	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
+
+	require.Len(t, allSubSkillCommandIds, 24,
+		"expected exactly 24 generator-driven sub-skills (mirrors commandSkillDirs); "+
+			"update the L3 table if the sub-skill set changed")
+
+	for _, commandId := range allSubSkillCommandIds {
+		commandId := commandId
+		t.Run(commandId, func(t *testing.T) {
+			t.Parallel()
+
+			spec, dirKey, relPath := subSkillCommand(t, commandId)
+			skillPath := filepath.Join(root, relPath)
+
+			generated, err := codegen.GenerateSubSkill(commandId, skillPath, figuresDir, opts)
+			require.NoError(t, err,
+				"GenerateSubSkill failed for command %q (%q)", commandId, relPath)
+
+			fm := parseLeadingFrontmatter(t, generated, commandId)
+
+			assert.Equal(t, dirKey, fm.Name,
+				"sub-skill %q frontmatter `name` must equal its directory key %q so it "+
+					"registers as /pasture:%s — got %q", commandId, dirKey, dirKey, fm.Name)
+			assert.Equal(t, spec.Description, fm.Description,
+				"sub-skill %q frontmatter `description` must equal CommandSpec.Description — "+
+					"got %q, want %q", commandId, fm.Description, spec.Description)
+		})
+	}
+}
+
 // TestGenerateIdempotent verifies that running the code generator on the
 // checked-in SKILL.md files produces identical output (zero diff).
+//
+// It table-drives ALL 29 generator-managed SKILL.md files (5 roles +
+// 24 sub-skills). The remaining 2 on-disk skills (protocol, install-cli) are
+// hand-authored and marker-less, so they are not generated and not asserted
+// here.
 //
 // If this test fails, it means the code generator output has drifted from
 // the on-disk files — run `go generate ./internal/codegen/...` (or the
@@ -462,25 +648,15 @@ func TestGenerateIdempotent(t *testing.T) {
 
 	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
 
-	// ─── Role skills ────────────────────────────────────────────────────
+	// ─── Role skills (5) ─────────────────────────────────────────────────
 
-	roleTests := []struct {
-		name   string
-		roleId types.RoleId
-		file   string // relative path from repo root
-	}{
-		{name: "supervisor", roleId: types.RoleSupervisor, file: "skills/supervisor/SKILL.md"},
-		{name: "architect", roleId: types.RoleArchitect, file: "skills/architect/SKILL.md"},
-		{name: "worker", roleId: types.RoleWorker, file: "skills/worker/SKILL.md"},
-		{name: "reviewer", roleId: types.RoleReviewer, file: "skills/reviewer/SKILL.md"},
-	}
-
-	for _, tc := range roleTests {
+	for _, tc := range allRoleSkills {
 		tc := tc
 		t.Run("role/"+tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			skillPath := filepath.Join(root, tc.file)
+			file := filepath.Join("skills", tc.name, "SKILL.md")
+			skillPath := filepath.Join(root, file)
 			onDisk, err := os.ReadFile(skillPath)
 			require.NoError(t, err,
 				"cannot read on-disk SKILL.md at %q — "+
@@ -493,42 +669,32 @@ func TestGenerateIdempotent(t *testing.T) {
 			assert.Equal(t, string(onDisk), generated,
 				"GenerateSkill output for role %q differs from on-disk %q — "+
 					"run 'go generate ./internal/codegen/...' to regenerate, then commit the updated file",
-				tc.roleId, tc.file)
+				tc.roleId, file)
 		})
 	}
 
-	// ─── Sub-skills ─────────────────────────────────────────────────────
+	// ─── Sub-skills (24) ─────────────────────────────────────────────────
 
-	subSkillTests := []struct {
-		name      string
-		commandId string
-		file      string // relative path from repo root
-	}{
-		{name: "cmd-sup-plan", commandId: "cmd-sup-plan", file: "skills/supervisor-plan-tasks/SKILL.md"},
-		{name: "cmd-sup-spawn", commandId: "cmd-sup-spawn", file: "skills/supervisor-spawn-worker/SKILL.md"},
-		{name: "cmd-impl-review", commandId: "cmd-impl-review", file: "skills/impl-review/SKILL.md"},
-		{name: "cmd-rev-code", commandId: "cmd-rev-code", file: "skills/reviewer-review-code/SKILL.md"},
-	}
-
-	for _, tc := range subSkillTests {
-		tc := tc
-		t.Run("sub-skill/"+tc.name, func(t *testing.T) {
+	for _, commandId := range allSubSkillCommandIds {
+		commandId := commandId
+		t.Run("sub-skill/"+commandId, func(t *testing.T) {
 			t.Parallel()
 
-			skillPath := filepath.Join(root, tc.file)
+			_, _, relPath := subSkillCommand(t, commandId)
+			skillPath := filepath.Join(root, relPath)
 			onDisk, err := os.ReadFile(skillPath)
 			require.NoError(t, err,
 				"cannot read on-disk SKILL.md at %q — "+
 					"ensure the file exists in the repository", skillPath)
 
-			generated, err := codegen.GenerateSubSkill(tc.commandId, skillPath, figuresDir, opts)
+			generated, err := codegen.GenerateSubSkill(commandId, skillPath, figuresDir, opts)
 			require.NoError(t, err,
-				"GenerateSubSkill failed for command %q with skill file %q", tc.commandId, skillPath)
+				"GenerateSubSkill failed for command %q with skill file %q", commandId, skillPath)
 
 			assert.Equal(t, string(onDisk), generated,
 				"GenerateSubSkill output for command %q differs from on-disk %q — "+
 					"run 'go generate ./internal/codegen/...' to regenerate, then commit the updated file",
-				tc.commandId, tc.file)
+				commandId, relPath)
 		})
 	}
 }

@@ -1,3 +1,8 @@
+---
+name: impl-slice
+description: Vertical slice assignment and tracking
+---
+
 # Implementation Slice (Phase 9)
 
 <!-- BEGIN GENERATED FROM pasture schema -->

@@ -1,3 +1,8 @@
+---
+name: architect-ratify
+description: Ratify proposal, mark old proposals pasture:superseded
+---
+
 # Architect: Ratify Plan
 
 <!-- BEGIN GENERATED FROM pasture schema -->

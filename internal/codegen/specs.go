@@ -232,9 +232,20 @@ type RoleSpec struct {
 // CommandSpec is the complete specification for a protocol command (skill).
 // Mirrors Python CommandSpec dataclass.
 type CommandSpec struct {
-	Id            string // CommandId wire value e.g. "cmd-worker"
-	Name          string // e.g. "pasture:worker"
-	Description   string
+	Id          string // CommandId wire value e.g. "cmd-worker"
+	Name        string // e.g. "pasture:worker"
+	Description string
+	// Title is the curated H1 heading text for the command's sub-skill SKILL.md
+	// (WITHOUT the leading "# "). It is captured statically from each sub-skill's
+	// curated on-disk H1 (e.g. "User Acceptance Test (UAT)" for cmd-user-uat) so
+	// that the generator can emit YAML frontmatter ABOVE the heading via
+	// skill_sub.go.tmpl while PRESERVING the hand-authored title verbatim.
+	//
+	// Only sub-skill commands (those listed in commandSkillDirs in
+	// tools/codegen/main.go) need Title populated; role-level commands
+	// (cmd-supervisor, cmd-worker, etc.) render through skill.go.tmpl which
+	// derives its H1 from RoleSpec.Name, so their Title is left empty.
+	Title         string
 	RoleRef       types.RoleId // may be zero value if unassigned
 	Phases        []protocol.PhaseId
 	File          string   // relative path to skill file

@@ -1,3 +1,8 @@
+---
+name: research
+description: Domain research — find standards, prior art, and competing approaches
+---
+
 # Research
 
 <!-- BEGIN GENERATED FROM pasture schema -->
