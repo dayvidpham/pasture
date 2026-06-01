@@ -83,48 +83,12 @@ var supervisorBody = SkillBody{
 			Then:      "link them to the FOLLOWUP epic only: `bd dep add <followup-epic-id> --blocked-by <important-group-id>`",
 			ShouldNot: "link IMPORTANT or MINOR severity groups as blocking IMPL_PLAN or any slice — only BLOCKER findings block slices",
 		},
-		{
-			Id:        "sup-review-all-slices",
-			Given:     "all slices complete",
-			When:      "starting review",
-			Then:      "spawn 3 reviewers for ALL slices",
-			ShouldNot: "assign reviewers to single slices",
-		},
-		{
-			Id:        "sup-review-check-each",
-			Given:     "reviewer assigned",
-			When:      "reviewing",
-			Then:      "check each slice against criteria",
-			ShouldNot: "skip any slice",
-		},
-		{
-			Id:        "sup-review-severity-groups",
-			Given:     "review round",
-			When:      "creating severity groups",
-			Then:      "ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty",
-			ShouldNot: "lazily create groups only when findings exist",
-		},
-		{
-			Id:        "sup-blocker-dual-parent",
-			Given:     "BLOCKER finding",
-			When:      "wiring dependencies",
-			Then:      "add dual-parent: blocks BOTH severity group AND slice",
-			ShouldNot: "wire BLOCKER to only one parent",
-		},
-		{
-			Id:        "sup-important-minor-followup",
-			Given:     "IMPORTANT or MINOR finding",
-			When:      "categorizing",
-			Then:      "add to severity group only (NOT to slice) — these go to follow-up epic",
-			ShouldNot: "block slices on non-BLOCKER findings",
-		},
-		{
-			Id:        "sup-followup-epic-timing",
-			Given:     "review complete with IMPORTANT/MINOR",
-			When:      "finishing",
-			Then:      "supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution)",
-			ShouldNot: "wait for BLOCKERs to resolve before creating follow-up",
-		},
+		behaviorRef(FragSupReviewAllSlices),
+		behaviorRef(FragSupReviewCheckEach),
+		behaviorRef(FragSupReviewSeverityGroups),
+		behaviorRef(FragSupBlockerDualParent),
+		behaviorRef(FragSupImportantMinorFollowup),
+		behaviorRef(FragSupFollowupEpicTiming),
 		{
 			Id:        "sup-worker-persistence",
 			Given:     "worker completes initial implementation",
@@ -235,7 +199,7 @@ bd list --labels="aura:urd"
 			Content: "```" + `go
 type ImplementationTask struct {
     File            string          // file path
-    TaskID          string          // Beads task ID (e.g., "aura-xxx")
+    TaskId          string          // Beads task ID (e.g., "aura-xxx")
     RequirementRef  string
     Prompt          string
     Context         struct {
@@ -487,7 +451,7 @@ The worker skill provides:
 		{
 			Id:      "sup-epic-followup",
 			Title:   "EPIC_FOLLOWUP Creation (Phase 10)",
-			Content: `After code review completes, if ANY IMPORTANT or MINOR findings exist, create a follow-up epic. Per [sup-followup-epic-timing], create immediately after review completes.`,
+			Content: `After code review completes, if ANY IMPORTANT or MINOR findings exist, create a follow-up epic. Per [frag--sup-followup-epic-timing], create immediately after review completes.`,
 			Subsections: []ProseSection{
 				{
 					Id:    "sup-followup-step1",
@@ -509,7 +473,7 @@ bd dep add <followup-epic-id> --blocked-by <important-group-id>
 bd dep add <followup-epic-id> --blocked-by <minor-group-id>
 ` + "```" + `
 
-Severity routing follows [sup-blocker-dual-parent] and [sup-important-minor-followup].`,
+Severity routing follows [frag--sup-blocker-dual-parent] and [frag--sup-important-minor-followup].`,
 				},
 				{
 					Id:    "sup-followup-step2",
@@ -596,75 +560,11 @@ See ` + "`../protocol/HANDOFF_TEMPLATE.md`" + ` for full follow-up handoff examp
 			Id:    "sup-impl-review-severity",
 			Title: "Impl-Review Severity Tree Procedure",
 			Content: "The severity behaviors for code review (Phase 10) are defined above as structured behaviors " +
-				"(sup-review-all-slices through sup-followup-epic-timing). " +
+				"(frag--sup-review-all-slices through frag--sup-followup-epic-timing). " +
 				"The following subsections describe the operational procedures.",
 			Subsections: []ProseSection{
-				{
-					Id:    "sup-severity-tree",
-					Title: "Severity Tree (EAGER Creation)",
-					Content: `Per [sup-review-severity-groups], create all 3 severity groups immediately:
-
-` + "```" + `bash
-# Step 1: Create all 3 severity groups immediately (EAGER)
-BLOCKER_ID=$(bd create --title "SLICE-1-REVIEW-A-1 BLOCKER" \
-  --labels "aura:severity:blocker,aura:p10-impl:s10-review" \
-  --description "---
-references:
-  slice: <slice-1-id>
-  review_round: 1
----
-BLOCKER findings from Reviewer A (Correctness) on SLICE-1.")
-
-IMPORTANT_ID=$(bd create --title "SLICE-1-REVIEW-A-1 IMPORTANT" \
-  --labels "aura:severity:important,aura:p10-impl:s10-review" \
-  --description "---
-references:
-  slice: <slice-1-id>
-  review_round: 1
----
-IMPORTANT findings from Reviewer A (Correctness) on SLICE-1.")
-
-MINOR_ID=$(bd create --title "SLICE-1-REVIEW-A-1 MINOR" \
-  --labels "aura:severity:minor,aura:p10-impl:s10-review" \
-  --description "---
-references:
-  slice: <slice-1-id>
-  review_round: 1
----
-MINOR findings from Reviewer A (Correctness) on SLICE-1.")
-
-# Step 2: Wire severity groups to the review round task
-bd dep add <review-round-id> --blocked-by $BLOCKER_ID
-bd dep add <review-round-id> --blocked-by $IMPORTANT_ID
-bd dep add <review-round-id> --blocked-by $MINOR_ID
-# NEVER wire severity groups to IMPL_PLAN or slices directly.
-# BLOCKER findings block slices via dual-parent (see below).
-# IMPORTANT/MINOR route to FOLLOWUP epic only (see Follow-up Epic section).
-
-# Step 3: Close empty groups immediately
-# If a group has no findings, close it right away
-bd close $IMPORTANT_ID   # if no IMPORTANT findings
-bd close $MINOR_ID        # if no MINOR findings
-` + "```",
-				},
-				{
-					Id:    "sup-naming-convention",
-					Title: "Naming Convention",
-					Content: "```" + `
-SLICE-{N}-REVIEW-{axis}-{round}
-` + "```" + `
-
-Where axis = A (Correctness), B (Test quality), C (Elegance).
-
-Examples:
-- ` + "`SLICE-1-REVIEW-A-1`" + ` — Reviewer A (Correctness), Round 1, SLICE-1
-- ` + "`SLICE-2-REVIEW-C-2`" + ` — Reviewer C (Elegance), Round 2, SLICE-2
-
-Severity groups:
-- ` + "`SLICE-1-REVIEW-A-1 BLOCKER`" + `
-- ` + "`SLICE-1-REVIEW-A-1 IMPORTANT`" + `
-- ` + "`SLICE-1-REVIEW-A-1 MINOR`",
-				},
+				fragRef(FragSupSeverityTree),
+				fragRef(FragSupNamingConvention),
 			},
 		},
 		{
@@ -1922,123 +1822,21 @@ var implReviewBody = SkillBody{
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-10-code-review)** <- Phase 10
 
 See ` + "`../protocol/CONSTRAINTS.md`" + ` for coding standards and severity definitions.`,
-	// Behaviors intentionally overlap with supervisor body behaviors (sup-review-all-slices,
-	// sup-review-check-each, sup-review-severity-groups, sup-blocker-dual-parent,
-	// sup-important-minor-followup, sup-followup-epic-timing) because impl-review is invoked
-	// as a self-contained sub-skill and must include its own behavioral directives.
+	// Behaviors shared with supervisor body via SharedFragmentSpecs (SLICE-3):
+	// all 6 review-wave behaviors are now fragments so the canonical text is
+	// single-sourced and both skill bodies render byte-identical content.
 	Behaviors: []BehaviorSpec{
-		{
-			Id:        "impl-rev-b1",
-			Given:     "all slices complete",
-			When:      "starting review",
-			Then:      "spawn 3 reviewers for ALL slices",
-			ShouldNot: "assign reviewers to single slices",
-		},
-		{
-			Id:        "impl-rev-b2",
-			Given:     "reviewer assigned",
-			When:      "reviewing",
-			Then:      "check each slice against criteria",
-			ShouldNot: "skip any slice",
-		},
-		{
-			Id:        "impl-rev-b3",
-			Given:     "review round",
-			When:      "creating severity groups",
-			Then:      "ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty",
-			ShouldNot: "lazily create groups only when findings exist",
-		},
-		{
-			Id:        "impl-rev-b4",
-			Given:     "BLOCKER finding",
-			When:      "wiring dependencies",
-			Then:      "add dual-parent: blocks BOTH severity group AND slice",
-			ShouldNot: "wire BLOCKER to only one parent",
-		},
-		{
-			Id:        "impl-rev-b5",
-			Given:     "IMPORTANT or MINOR finding",
-			When:      "categorizing",
-			Then:      "add to severity group only (NOT to slice) — these go to follow-up epic",
-			ShouldNot: "block slices on non-BLOCKER findings",
-		},
-		{
-			Id:        "impl-rev-b6",
-			Given:     "review complete with IMPORTANT/MINOR",
-			When:      "finishing",
-			Then:      "supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution)",
-			ShouldNot: "wait for BLOCKERs to resolve before creating follow-up",
-		},
+		behaviorRef(FragSupReviewAllSlices),
+		behaviorRef(FragSupReviewCheckEach),
+		behaviorRef(FragSupReviewSeverityGroups),
+		behaviorRef(FragSupBlockerDualParent),
+		behaviorRef(FragSupImportantMinorFollowup),
+		behaviorRef(FragSupFollowupEpicTiming),
 	},
 	Sections: []ProseSection{
-		{
-			Id:    "impl-rev-severity-tree",
-			Title: "Severity Tree (EAGER Creation)",
-			Content: `Per [impl-rev-b3], create all 3 severity groups immediately:
-
-` + "```bash\n" +
-				`# Step 1: Create all 3 severity groups immediately (EAGER)
-BLOCKER_ID=$(bd create --title "SLICE-1-REVIEW-A-1 BLOCKER" \
-  --labels "aura:severity:blocker,aura:p10-impl:s10-review" \
-  --description "---
-references:
-  slice: <slice-1-id>
-  review_round: 1
----
-BLOCKER findings from Reviewer A (Correctness) on SLICE-1.")
-
-IMPORTANT_ID=$(bd create --title "SLICE-1-REVIEW-A-1 IMPORTANT" \
-  --labels "aura:severity:important,aura:p10-impl:s10-review" \
-  --description "---
-references:
-  slice: <slice-1-id>
-  review_round: 1
----
-IMPORTANT findings from Reviewer A (Correctness) on SLICE-1.")
-
-MINOR_ID=$(bd create --title "SLICE-1-REVIEW-A-1 MINOR" \
-  --labels "aura:severity:minor,aura:p10-impl:s10-review" \
-  --description "---
-references:
-  slice: <slice-1-id>
-  review_round: 1
----
-MINOR findings from Reviewer A (Correctness) on SLICE-1.")
-
-# Step 2: Wire severity groups to the review round task
-bd dep add <review-round-id> --blocked-by $BLOCKER_ID
-bd dep add <review-round-id> --blocked-by $IMPORTANT_ID
-bd dep add <review-round-id> --blocked-by $MINOR_ID
-# NEVER wire severity groups to IMPL_PLAN or slices directly.
-# BLOCKER findings block slices via dual-parent (see below).
-# IMPORTANT/MINOR route to FOLLOWUP epic only (see Follow-up Epic section).
-
-# Step 3: Close empty groups immediately
-# If a group has no findings, close it right away
-bd close $IMPORTANT_ID   # if no IMPORTANT findings
-bd close $MINOR_ID        # if no MINOR findings
-` + "```",
-			Subsections: []ProseSection{
-				{
-					Id:    "impl-rev-naming-convention",
-					Title: "Naming Convention",
-					Content: "```\n" +
-						`SLICE-{N}-REVIEW-{axis}-{round}
-` + "```\n" +
-						`
-Where axis = A (Correctness), B (Test quality), C (Elegance).
-
-Examples:
-- ` + "`SLICE-1-REVIEW-A-1`" + ` — Reviewer A (Correctness), Round 1, SLICE-1
-- ` + "`SLICE-2-REVIEW-C-2`" + ` — Reviewer C (Elegance), Round 2, SLICE-2
-
-Severity groups:
-- ` + "`SLICE-1-REVIEW-A-1 BLOCKER`" + `
-- ` + "`SLICE-1-REVIEW-A-1 IMPORTANT`" + `
-- ` + "`SLICE-1-REVIEW-A-1 MINOR`",
-				},
-			},
-		},
+		// fragRef resolves to severity-tree prose; naming-convention is its embedded Subsection
+		// (renders as H3 via the template's Subsections iteration — see Part 6 of worker-b impl-plan).
+		fragRef(FragSupSeverityTree),
 		{
 			Id:    "impl-rev-dual-parent",
 			Title: "Dual-Parent BLOCKER Relationship",
@@ -2063,7 +1861,7 @@ bd dep add $BLOCKER_ID --blocked-by $FINDING_ID
 bd dep add <slice-1-id> --blocked-by $FINDING_ID
 ` + "```\n" +
 				`
-Per [impl-rev-b5], IMPORTANT/MINOR findings route to severity group only:
+Per [frag--sup-important-minor-followup], IMPORTANT/MINOR findings route to severity group only:
 
 ` + "```bash\n" +
 				`# IMPORTANT finding — blocks severity group only
@@ -2228,7 +2026,7 @@ bd comments add <slice-id> "REVISION NEEDED: <specific issues>"
 		{
 			Id:      "impl-rev-followup-epic",
 			Title:   "Follow-up Epic (EPIC_FOLLOWUP)",
-			Content: `Per [impl-rev-b6], create immediately after review completes.`,
+			Content: `Per [frag--sup-followup-epic-timing], create immediately after review completes.`,
 			Subsections: []ProseSection{
 				{
 					Id:    "impl-rev-followup-step1",

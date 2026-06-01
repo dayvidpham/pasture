@@ -105,14 +105,58 @@ type FragmentId string
 // Mirrors AllRoleIds in internal/types/enums.go.
 var AllFragmentIds = []FragmentId{
 	FragRevVoteOptions,
+	FragSupReviewAllSlices,
+	FragSupReviewCheckEach,
+	FragSupReviewSeverityGroups,
+	FragSupBlockerDualParent,
+	FragSupImportantMinorFollowup,
+	FragSupFollowupEpicTiming,
+	FragSupSeverityTree,
+	FragSupNamingConvention,
 }
 
-// SLICE-2 declares the sole fragment that exists at this point. SLICE-3 will
-// add 8 FragSup* constants; SLICE-4 adds FragRevPlanVoteOptions.
 const (
 	// FragRevVoteOptions is the canonical vote-options table shared between the
 	// reviewer and reviewer-vote skill bodies (D3-ratified ACCEPT row wording).
 	FragRevVoteOptions FragmentId = "frag--rev-vote-options"
+
+	// ── SLICE-3: supervisor review-wave behaviors (6) + severity-tree/naming prose (2) ──
+
+	// FragSupReviewAllSlices is the canonical "spawn 3 reviewers for ALL slices"
+	// behavior shared between the supervisor and impl-review skill bodies.
+	FragSupReviewAllSlices FragmentId = "frag--sup-review-all-slices"
+
+	// FragSupReviewCheckEach is the canonical "check each slice against criteria"
+	// behavior shared between the supervisor and impl-review skill bodies.
+	FragSupReviewCheckEach FragmentId = "frag--sup-review-check-each"
+
+	// FragSupReviewSeverityGroups is the canonical "ALWAYS create 3 severity groups"
+	// behavior shared between the supervisor and impl-review skill bodies.
+	FragSupReviewSeverityGroups FragmentId = "frag--sup-review-severity-groups"
+
+	// FragSupBlockerDualParent is the canonical "dual-parent: blocks BOTH severity
+	// group AND slice" behavior shared between the supervisor and impl-review skill
+	// bodies.
+	FragSupBlockerDualParent FragmentId = "frag--sup-blocker-dual-parent"
+
+	// FragSupImportantMinorFollowup is the canonical "add to severity group only —
+	// these go to follow-up epic" behavior shared between the supervisor and
+	// impl-review skill bodies.
+	FragSupImportantMinorFollowup FragmentId = "frag--sup-important-minor-followup"
+
+	// FragSupFollowupEpicTiming is the canonical "supervisor creates EPIC_FOLLOWUP
+	// immediately" behavior shared between the supervisor and impl-review skill
+	// bodies.
+	FragSupFollowupEpicTiming FragmentId = "frag--sup-followup-epic-timing"
+
+	// FragSupSeverityTree is the canonical Severity Tree (EAGER Creation) prose
+	// section shared between the supervisor and impl-review skill bodies.
+	FragSupSeverityTree FragmentId = "frag--sup-severity-tree"
+
+	// FragSupNamingConvention is the canonical Naming Convention prose section
+	// (SLICE-{N}-REVIEW-{axis}-{round} format) shared between the supervisor and
+	// impl-review skill bodies.
+	FragSupNamingConvention FragmentId = "frag--sup-naming-convention"
 )
 
 // ─── SharedFragment ───────────────────────────────────────────────────────────

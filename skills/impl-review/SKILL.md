@@ -9,37 +9,37 @@ Conduct code review across ALL implementation slices. Each of 3 reviewers review
 
 See `../protocol/CONSTRAINTS.md` for coding standards and severity definitions.
 
-**[impl-rev-b1]**
+**[frag--sup-review-all-slices]**
 - Given: all slices complete
 - When: starting review
 - Then: spawn 3 reviewers for ALL slices
 - Should not: assign reviewers to single slices
 
-**[impl-rev-b2]**
+**[frag--sup-review-check-each]**
 - Given: reviewer assigned
 - When: reviewing
 - Then: check each slice against criteria
 - Should not: skip any slice
 
-**[impl-rev-b3]**
+**[frag--sup-review-severity-groups]**
 - Given: review round
 - When: creating severity groups
 - Then: ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty
 - Should not: lazily create groups only when findings exist
 
-**[impl-rev-b4]**
+**[frag--sup-blocker-dual-parent]**
 - Given: BLOCKER finding
 - When: wiring dependencies
-- Then: add dual-parent: blocks BOTH severity group AND slice
+- Then: add dual-parent: blocks BOTH the severity group AND the slice
 - Should not: wire BLOCKER to only one parent
 
-**[impl-rev-b5]**
+**[frag--sup-important-minor-followup]**
 - Given: IMPORTANT or MINOR finding
 - When: categorizing
 - Then: add to severity group only (NOT to slice) — these go to follow-up epic
 - Should not: block slices on non-BLOCKER findings
 
-**[impl-rev-b6]**
+**[frag--sup-followup-epic-timing]**
 - Given: review complete with IMPORTANT/MINOR
 - When: finishing
 - Then: supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution)
@@ -47,7 +47,7 @@ See `../protocol/CONSTRAINTS.md` for coding standards and severity definitions.
 
 ## Severity Tree (EAGER Creation)
 
-Per [impl-rev-b3], create all 3 severity groups immediately:
+Per [frag--sup-review-severity-groups], create all 3 severity groups immediately:
 
 ```bash
 # Step 1: Create all 3 severity groups immediately (EAGER)
@@ -132,7 +132,7 @@ bd dep add $BLOCKER_ID --blocked-by $FINDING_ID
 bd dep add <slice-1-id> --blocked-by $FINDING_ID
 ```
 
-Per [impl-rev-b5], IMPORTANT/MINOR findings route to severity group only:
+Per [frag--sup-important-minor-followup], IMPORTANT/MINOR findings route to severity group only:
 
 ```bash
 # IMPORTANT finding — blocks severity group only
@@ -287,7 +287,7 @@ bd comments add <slice-id> "REVISION NEEDED: <specific issues>"
 
 ## Follow-up Epic (EPIC_FOLLOWUP)
 
-Per [impl-rev-b6], create immediately after review completes.
+Per [frag--sup-followup-epic-timing], create immediately after review completes.
 
 ### Step 1: Create the follow-up epic
 

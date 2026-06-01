@@ -409,37 +409,37 @@ Cycle Exit Conditions:
 - Then: link them to the FOLLOWUP epic only: `bd dep add <followup-epic-id> --blocked-by <important-group-id>`
 - Should not: link IMPORTANT or MINOR severity groups as blocking IMPL_PLAN or any slice — only BLOCKER findings block slices
 
-**[sup-review-all-slices]**
+**[frag--sup-review-all-slices]**
 - Given: all slices complete
 - When: starting review
 - Then: spawn 3 reviewers for ALL slices
 - Should not: assign reviewers to single slices
 
-**[sup-review-check-each]**
+**[frag--sup-review-check-each]**
 - Given: reviewer assigned
 - When: reviewing
 - Then: check each slice against criteria
 - Should not: skip any slice
 
-**[sup-review-severity-groups]**
+**[frag--sup-review-severity-groups]**
 - Given: review round
 - When: creating severity groups
 - Then: ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty
 - Should not: lazily create groups only when findings exist
 
-**[sup-blocker-dual-parent]**
+**[frag--sup-blocker-dual-parent]**
 - Given: BLOCKER finding
 - When: wiring dependencies
-- Then: add dual-parent: blocks BOTH severity group AND slice
+- Then: add dual-parent: blocks BOTH the severity group AND the slice
 - Should not: wire BLOCKER to only one parent
 
-**[sup-important-minor-followup]**
+**[frag--sup-important-minor-followup]**
 - Given: IMPORTANT or MINOR finding
 - When: categorizing
 - Then: add to severity group only (NOT to slice) — these go to follow-up epic
 - Should not: block slices on non-BLOCKER findings
 
-**[sup-followup-epic-timing]**
+**[frag--sup-followup-epic-timing]**
 - Given: review complete with IMPORTANT/MINOR
 - When: finishing
 - Then: supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution)
@@ -546,7 +546,7 @@ bd list --labels="aura:urd"
 ```go
 type ImplementationTask struct {
     File            string          // file path
-    TaskID          string          // Beads task ID (e.g., "aura-xxx")
+    TaskId          string          // Beads task ID (e.g., "aura-xxx")
     RequirementRef  string
     Prompt          string
     Context         struct {
@@ -785,7 +785,7 @@ The worker skill provides:
 
 ## EPIC_FOLLOWUP Creation (Phase 10)
 
-After code review completes, if ANY IMPORTANT or MINOR findings exist, create a follow-up epic. Per [sup-followup-epic-timing], create immediately after review completes.
+After code review completes, if ANY IMPORTANT or MINOR findings exist, create a follow-up epic. Per [frag--sup-followup-epic-timing], create immediately after review completes.
 
 ### Step 1: Create follow-up epic
 
@@ -806,7 +806,7 @@ bd dep add <followup-epic-id> --blocked-by <important-group-id>
 bd dep add <followup-epic-id> --blocked-by <minor-group-id>
 ```
 
-Severity routing follows [sup-blocker-dual-parent] and [sup-important-minor-followup].
+Severity routing follows [frag--sup-blocker-dual-parent] and [frag--sup-important-minor-followup].
 
 ### Step 2: Follow-up lifecycle (same protocol, FOLLOWUP_* prefix)
 
@@ -886,11 +886,11 @@ See `../protocol/HANDOFF_TEMPLATE.md` for full follow-up handoff examples, inclu
 
 ## Impl-Review Severity Tree Procedure
 
-The severity behaviors for code review (Phase 10) are defined above as structured behaviors (sup-review-all-slices through sup-followup-epic-timing). The following subsections describe the operational procedures.
+The severity behaviors for code review (Phase 10) are defined above as structured behaviors (frag--sup-review-all-slices through frag--sup-followup-epic-timing). The following subsections describe the operational procedures.
 
 ### Severity Tree (EAGER Creation)
 
-Per [sup-review-severity-groups], create all 3 severity groups immediately:
+Per [frag--sup-review-severity-groups], create all 3 severity groups immediately:
 
 ```bash
 # Step 1: Create all 3 severity groups immediately (EAGER)

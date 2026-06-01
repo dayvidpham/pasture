@@ -24,6 +24,13 @@ import (
 // bodies). Canonical content per D3 (UAT-ratified): ACCEPT row = "All review
 // criteria satisfied; no BLOCKER items". Both consumer bodies carry fragRef
 // markers. Set keys MUST equal AllFragmentIds (validated by ValidateGlobalIds).
+//
+// SLICE-3 adds: 6 supervisor review-wave behavior fragments (FragSupReview*,
+// FragSupBlockerDualParent, FragSupImportantMinorFollowup,
+// FragSupFollowupEpicTiming) and 2 prose fragments (FragSupSeverityTree,
+// FragSupNamingConvention). These replace identical inline definitions in both
+// the supervisor and impl-review skill bodies, eliminating the last same-id
+// collision group. Canonical content = supervisor text.
 var SharedFragmentSpecs = map[FragmentId]SharedFragment{
 	FragRevVoteOptions: func() SharedFragment {
 		prose := ProseSection{
@@ -38,6 +45,189 @@ Binary only. No intermediate levels.`,
 		}
 		return SharedFragment{
 			Id:    FragRevVoteOptions,
+			Kind:  FragmentKindProse,
+			Prose: &prose,
+		}
+	}(),
+
+	// ── SLICE-3 behavior fragments ─────────────────────────────────────────────
+
+	FragSupReviewAllSlices: {
+		Id:   FragSupReviewAllSlices,
+		Kind: FragmentKindBehavior,
+		Behavior: &BehaviorSpec{
+			Id:        string(FragSupReviewAllSlices),
+			Given:     "all slices complete",
+			When:      "starting review",
+			Then:      "spawn 3 reviewers for ALL slices",
+			ShouldNot: "assign reviewers to single slices",
+		},
+	},
+
+	FragSupReviewCheckEach: {
+		Id:   FragSupReviewCheckEach,
+		Kind: FragmentKindBehavior,
+		Behavior: &BehaviorSpec{
+			Id:        string(FragSupReviewCheckEach),
+			Given:     "reviewer assigned",
+			When:      "reviewing",
+			Then:      "check each slice against criteria",
+			ShouldNot: "skip any slice",
+		},
+	},
+
+	FragSupReviewSeverityGroups: {
+		Id:   FragSupReviewSeverityGroups,
+		Kind: FragmentKindBehavior,
+		Behavior: &BehaviorSpec{
+			Id:        string(FragSupReviewSeverityGroups),
+			Given:     "review round",
+			When:      "creating severity groups",
+			Then:      "ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty",
+			ShouldNot: "lazily create groups only when findings exist",
+		},
+	},
+
+	FragSupBlockerDualParent: {
+		Id:   FragSupBlockerDualParent,
+		Kind: FragmentKindBehavior,
+		Behavior: &BehaviorSpec{
+			Id:        string(FragSupBlockerDualParent),
+			Given:     "BLOCKER finding",
+			When:      "wiring dependencies",
+			Then:      "add dual-parent: blocks BOTH the severity group AND the slice",
+			ShouldNot: "wire BLOCKER to only one parent",
+		},
+	},
+
+	FragSupImportantMinorFollowup: {
+		Id:   FragSupImportantMinorFollowup,
+		Kind: FragmentKindBehavior,
+		Behavior: &BehaviorSpec{
+			Id:        string(FragSupImportantMinorFollowup),
+			Given:     "IMPORTANT or MINOR finding",
+			When:      "categorizing",
+			Then:      "add to severity group only (NOT to slice) — these go to follow-up epic",
+			ShouldNot: "block slices on non-BLOCKER findings",
+		},
+	},
+
+	FragSupFollowupEpicTiming: {
+		Id:   FragSupFollowupEpicTiming,
+		Kind: FragmentKindBehavior,
+		Behavior: &BehaviorSpec{
+			Id:        string(FragSupFollowupEpicTiming),
+			Given:     "review complete with IMPORTANT/MINOR",
+			When:      "finishing",
+			Then:      "supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution)",
+			ShouldNot: "wait for BLOCKERs to resolve before creating follow-up",
+		},
+	},
+
+	// ── SLICE-3 prose fragments ────────────────────────────────────────────────
+
+	FragSupSeverityTree: func() SharedFragment {
+		// Naming Convention is embedded as an inline Subsection so that
+		// impl-review can use a single fragRef(FragSupSeverityTree) at the top-level
+		// Sections list and still render ### Naming Convention (H3 via the template's
+		// Subsections iteration). The standalone FragSupNamingConvention fragment
+		// carries byte-identical content for supervisor's use as a sibling Subsection.
+		// See Part 6 of worker-b-SLICE-3-4-implplan.md for the full heading-level analysis.
+		namingConvention := ProseSection{
+			Id:    string(FragSupNamingConvention),
+			Title: "Naming Convention",
+			Content: "```" + `
+SLICE-{N}-REVIEW-{axis}-{round}
+` + "```" + `
+
+Where axis = A (Correctness), B (Test quality), C (Elegance).
+
+Examples:
+- ` + "`SLICE-1-REVIEW-A-1`" + ` — Reviewer A (Correctness), Round 1, SLICE-1
+- ` + "`SLICE-2-REVIEW-C-2`" + ` — Reviewer C (Elegance), Round 2, SLICE-2
+
+Severity groups:
+- ` + "`SLICE-1-REVIEW-A-1 BLOCKER`" + `
+- ` + "`SLICE-1-REVIEW-A-1 IMPORTANT`" + `
+- ` + "`SLICE-1-REVIEW-A-1 MINOR`",
+		}
+		prose := ProseSection{
+			Id:    string(FragSupSeverityTree),
+			Title: "Severity Tree (EAGER Creation)",
+			Content: `Per [frag--sup-review-severity-groups], create all 3 severity groups immediately:
+
+` + "```" + `bash
+# Step 1: Create all 3 severity groups immediately (EAGER)
+BLOCKER_ID=$(bd create --title "SLICE-1-REVIEW-A-1 BLOCKER" \
+  --labels "aura:severity:blocker,aura:p10-impl:s10-review" \
+  --description "---
+references:
+  slice: <slice-1-id>
+  review_round: 1
+---
+BLOCKER findings from Reviewer A (Correctness) on SLICE-1.")
+
+IMPORTANT_ID=$(bd create --title "SLICE-1-REVIEW-A-1 IMPORTANT" \
+  --labels "aura:severity:important,aura:p10-impl:s10-review" \
+  --description "---
+references:
+  slice: <slice-1-id>
+  review_round: 1
+---
+IMPORTANT findings from Reviewer A (Correctness) on SLICE-1.")
+
+MINOR_ID=$(bd create --title "SLICE-1-REVIEW-A-1 MINOR" \
+  --labels "aura:severity:minor,aura:p10-impl:s10-review" \
+  --description "---
+references:
+  slice: <slice-1-id>
+  review_round: 1
+---
+MINOR findings from Reviewer A (Correctness) on SLICE-1.")
+
+# Step 2: Wire severity groups to the review round task
+bd dep add <review-round-id> --blocked-by $BLOCKER_ID
+bd dep add <review-round-id> --blocked-by $IMPORTANT_ID
+bd dep add <review-round-id> --blocked-by $MINOR_ID
+# NEVER wire severity groups to IMPL_PLAN or slices directly.
+# BLOCKER findings block slices via dual-parent (see below).
+# IMPORTANT/MINOR route to FOLLOWUP epic only (see Follow-up Epic section).
+
+# Step 3: Close empty groups immediately
+# If a group has no findings, close it right away
+bd close $IMPORTANT_ID   # if no IMPORTANT findings
+bd close $MINOR_ID        # if no MINOR findings
+` + "```",
+			Subsections: []ProseSection{namingConvention},
+		}
+		return SharedFragment{
+			Id:    FragSupSeverityTree,
+			Kind:  FragmentKindProse,
+			Prose: &prose,
+		}
+	}(),
+
+	FragSupNamingConvention: func() SharedFragment {
+		prose := ProseSection{
+			Id:    string(FragSupNamingConvention),
+			Title: "Naming Convention",
+			Content: "```" + `
+SLICE-{N}-REVIEW-{axis}-{round}
+` + "```" + `
+
+Where axis = A (Correctness), B (Test quality), C (Elegance).
+
+Examples:
+- ` + "`SLICE-1-REVIEW-A-1`" + ` — Reviewer A (Correctness), Round 1, SLICE-1
+- ` + "`SLICE-2-REVIEW-C-2`" + ` — Reviewer C (Elegance), Round 2, SLICE-2
+
+Severity groups:
+- ` + "`SLICE-1-REVIEW-A-1 BLOCKER`" + `
+- ` + "`SLICE-1-REVIEW-A-1 IMPORTANT`" + `
+- ` + "`SLICE-1-REVIEW-A-1 MINOR`",
+		}
+		return SharedFragment{
+			Id:    FragSupNamingConvention,
 			Kind:  FragmentKindProse,
 			Prose: &prose,
 		}
