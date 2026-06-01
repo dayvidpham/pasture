@@ -1,3 +1,8 @@
+---
+name: install-cli
+description: Install Pasture binaries (pastured, pasture-msg, pasture-release) from GitHub Releases, go install, or Nix
+---
+
 # /pasture:install-cli
 
 Claude Code skill for automated Pasture binary installation.
