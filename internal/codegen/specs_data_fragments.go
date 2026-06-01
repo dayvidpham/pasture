@@ -1,13 +1,13 @@
 // Canonical SharedFragment registry and helper constructors.
 //
-// This file declares the SharedFragmentSpecs map (empty in SLICE-1 —
-// mechanism only, no dedup yet), fragRef/behaviorRef marker constructors, and
-// FragmentToOwnerRefs, which inverts the consumer-keyed SkillBodySpecs to
-// produce a map from fragment ID to sorted owner skill-dir keys.
+// This file declares the SharedFragmentSpecs map, fragRef/behaviorRef marker
+// constructors, and FragmentToOwnerRefs, which inverts the consumer-keyed
+// SkillBodySpecs to produce a map from FragmentId to sorted owner skill-dir
+// keys.
 //
-// Mirror: ConstraintToRoleRefs() at context.go:577-593 inverts the
-// consumer-keyed roleConstraints map; FragmentToOwnerRefs mirrors that
-// pattern exactly, operating over SkillBodySpecs instead.
+// Mirror: ConstraintToRoleRefs() at context.go inverts the consumer-keyed
+// roleConstraints map; FragmentToOwnerRefs mirrors that pattern exactly,
+// operating over SkillBodySpecs instead.
 package codegen
 
 import (
@@ -16,61 +16,81 @@ import (
 )
 
 // SharedFragmentSpecs is the canonical registry of reusable shared fragments.
-// Keyed by fragment ID (must match the FragmentId field used in marker entries).
+// Keyed by FragmentId typed constant (must match the FragRef field used in
+// placement marker entries).
 //
-// SLICE-1: empty — mechanism only. SLICE-2 onwards will populate this map
-// as actual fragments are extracted from SkillBodySpecs during dedup.
-var SharedFragmentSpecs = map[string]SharedFragment{}
+// SLICE-2 adds: FragRevVoteOptions (green-enabler; resolves the sole
+// pre-existing same-id collision between reviewer-vote and reviewer skill
+// bodies). Canonical content per D3 (UAT-ratified): ACCEPT row = "All review
+// criteria satisfied; no BLOCKER items". Both consumer bodies carry fragRef
+// markers. Set keys MUST equal AllFragmentIds (validated by ValidateGlobalIds).
+var SharedFragmentSpecs = map[FragmentId]SharedFragment{
+	FragRevVoteOptions: func() SharedFragment {
+		prose := ProseSection{
+			Id:    string(FragRevVoteOptions),
+			Title: "Vote Options",
+			Content: `| Vote | When |
+|------|------|
+| ACCEPT | All review criteria satisfied; no BLOCKER items |
+| REVISE | BLOCKER issues found; must provide actionable feedback |
+
+Binary only. No intermediate levels.`,
+		}
+		return SharedFragment{
+			Id:    FragRevVoteOptions,
+			Kind:  FragmentKindProse,
+			Prose: &prose,
+		}
+	}(),
+}
 
 // fragRef returns a ProseSection placement marker that references the given
-// fragment ID. All fields except FragmentId are left at their zero values;
-// the pre-render resolution pass in skills.go replaces the marker with the
-// actual ProseSection payload from SharedFragmentSpecs.
-func fragRef(id string) ProseSection {
-	return ProseSection{FragmentId: id}
+// fragment. All fields except FragRef are left at their zero values; the
+// pre-render resolution pass in skills.go replaces the marker with the actual
+// ProseSection payload from SharedFragmentSpecs.
+func fragRef(id FragmentId) ProseSection {
+	return ProseSection{FragRef: id}
 }
 
 // behaviorRef returns a BehaviorSpec placement marker that references the given
-// fragment ID. All fields except FragmentId are left at their zero values;
-// the pre-render resolution pass in skills.go replaces the marker with the
-// actual BehaviorSpec payload from SharedFragmentSpecs.
-func behaviorRef(id string) BehaviorSpec {
-	return BehaviorSpec{FragmentId: id}
+// fragment. All fields except FragRef are left at their zero values; the
+// pre-render resolution pass in skills.go replaces the marker with the actual
+// BehaviorSpec payload from SharedFragmentSpecs.
+func behaviorRef(id FragmentId) BehaviorSpec {
+	return BehaviorSpec{FragRef: id}
 }
 
-// FragmentToOwnerRefs returns a map from fragment ID to the sorted list of
+// FragmentToOwnerRefs returns a map from FragmentId to the sorted list of
 // skill-dir keys (SkillBodySpecs keys) whose body sections or behaviors
 // reference that fragment via a placement marker.
 //
-// It mirrors ConstraintToRoleRefs (context.go:577-593): iterate the
-// consumer-keyed map, invert to fragment-keyed, sort owner slices for
-// deterministic output.
-func FragmentToOwnerRefs() map[string][]string {
+// It mirrors ConstraintToRoleRefs: iterate the consumer-keyed map, invert to
+// fragment-keyed, sort owner slices for deterministic output.
+func FragmentToOwnerRefs() map[FragmentId][]string {
 	return fragmentToOwnerRefsFrom(SkillBodySpecs)
 }
 
 // fragmentToOwnerRefsFrom is the testable inner implementation of
 // FragmentToOwnerRefs. It accepts any SkillBody map so tests can pass a
 // fixture map without mutating the package-level SkillBodySpecs.
-func fragmentToOwnerRefsFrom(bodySpecs map[string]SkillBody) map[string][]string {
-	result := make(map[string][]string)
+func fragmentToOwnerRefsFrom(bodySpecs map[string]SkillBody) map[FragmentId][]string {
+	result := make(map[FragmentId][]string)
 	for skillDir, body := range bodySpecs {
-		// Collect fragment IDs referenced by top-level Sections.
+		// Collect fragment refs from top-level Sections (and their Subsections).
 		for _, sec := range body.Sections {
-			if sec.FragmentId != "" {
-				result[sec.FragmentId] = append(result[sec.FragmentId], skillDir)
+			if sec.FragRef != "" {
+				result[sec.FragRef] = append(result[sec.FragRef], skillDir)
 			}
-			// Collect fragment IDs referenced by nested Subsections.
 			for _, sub := range sec.Subsections {
-				if sub.FragmentId != "" {
-					result[sub.FragmentId] = append(result[sub.FragmentId], skillDir)
+				if sub.FragRef != "" {
+					result[sub.FragRef] = append(result[sub.FragRef], skillDir)
 				}
 			}
 		}
-		// Collect fragment IDs referenced by Behaviors.
+		// Collect fragment refs from Behaviors.
 		for _, beh := range body.Behaviors {
-			if beh.FragmentId != "" {
-				result[beh.FragmentId] = append(result[beh.FragmentId], skillDir)
+			if beh.FragRef != "" {
+				result[beh.FragRef] = append(result[beh.FragRef], skillDir)
 			}
 		}
 	}
@@ -84,24 +104,23 @@ func fragmentToOwnerRefsFrom(bodySpecs map[string]SkillBody) map[string][]string
 }
 
 // resolveBodyFragments resolves placement markers in sections and behaviors
-// using the provided registry. Entries without FragmentId pass through
-// unchanged. Entries with FragmentId are replaced with the fragment payload
-// from the registry. Nested ProseSection.Subsections are resolved recursively.
+// using the provided registry. Entries without FragRef pass through unchanged.
+// Entries with FragRef are replaced with the fragment payload from the registry.
+// Nested ProseSection.Subsections are resolved recursively.
 //
 // Parameters:
 //   - sections: top-level ProseSection slice (may contain markers)
 //   - behaviors: BehaviorSpec slice (may contain markers)
-//   - registry: fragment ID → SharedFragment map (use SharedFragmentSpecs in production)
+//   - registry: fragment registry (use SharedFragmentSpecs in production)
 //   - consumerSkill: skill-dir key for actionable error messages
 //   - consumerFile: file path for actionable error messages
 //
-// Returns an actionable error if a marker references a fragment ID not present
-// in the registry, describing what ID was missing, which consumer referenced
-// it, where the consumer file lives, and how to fix it.
+// Returns an actionable error if a marker references a FragmentId not present
+// in the registry.
 func resolveBodyFragments(
 	sections []ProseSection,
 	behaviors []BehaviorSpec,
-	registry map[string]SharedFragment,
+	registry map[FragmentId]SharedFragment,
 	consumerSkill, consumerFile string,
 ) ([]ProseSection, []BehaviorSpec, error) {
 	resolvedSections, err := resolveProseSections(sections, registry, consumerSkill, consumerFile)
@@ -119,7 +138,7 @@ func resolveBodyFragments(
 // including nested Subsections, using the provided registry.
 func resolveProseSections(
 	sections []ProseSection,
-	registry map[string]SharedFragment,
+	registry map[FragmentId]SharedFragment,
 	consumerSkill, consumerFile string,
 ) ([]ProseSection, error) {
 	if len(sections) == 0 {
@@ -127,7 +146,7 @@ func resolveProseSections(
 	}
 	result := make([]ProseSection, 0, len(sections))
 	for _, sec := range sections {
-		if sec.FragmentId == "" {
+		if sec.FragRef == "" {
 			// Non-marker: resolve subsections recursively, then pass through.
 			resolvedSubs, err := resolveProseSections(sec.Subsections, registry, consumerSkill, consumerFile)
 			if err != nil {
@@ -138,17 +157,17 @@ func resolveProseSections(
 			continue
 		}
 		// Marker: look up fragment in registry.
-		frag, ok := registry[sec.FragmentId]
+		frag, ok := registry[sec.FragRef]
 		if !ok {
 			return nil, fmt.Errorf(
 				"codegen.resolveBodyFragments: unresolvable prose marker %q in skill %q — "+
 					"where: %s — "+
 					"when: pre-render fragment resolution — "+
-					"what it means: a ProseSection with FragmentId=%q references a fragment "+
+					"what it means: a ProseSection with FragRef=%q references a fragment "+
 					"that does not exist in SharedFragmentSpecs — "+
 					"fix: add fragment %q to SharedFragmentSpecs in specs_data_fragments.go "+
 					"with Kind=FragmentKindProse and a non-nil Prose payload",
-				sec.FragmentId, consumerSkill, consumerFile, sec.FragmentId, sec.FragmentId,
+				sec.FragRef, consumerSkill, consumerFile, sec.FragRef, sec.FragRef,
 			)
 		}
 		if frag.Kind != FragmentKindProse || frag.Prose == nil {
@@ -156,7 +175,7 @@ func resolveProseSections(
 				"codegen.resolveBodyFragments: fragment %q has Kind=%q (not prose) or nil Prose in skill %q — "+
 					"where: %s — "+
 					"fix: set Kind=FragmentKindProse and a non-nil Prose pointer in SharedFragmentSpecs[%q]",
-				sec.FragmentId, frag.Kind, consumerSkill, consumerFile, sec.FragmentId,
+				sec.FragRef, frag.Kind, consumerSkill, consumerFile, sec.FragRef,
 			)
 		}
 		result = append(result, *frag.Prose)
@@ -168,7 +187,7 @@ func resolveProseSections(
 // using the provided registry.
 func resolveBehaviors(
 	behaviors []BehaviorSpec,
-	registry map[string]SharedFragment,
+	registry map[FragmentId]SharedFragment,
 	consumerSkill, consumerFile string,
 ) ([]BehaviorSpec, error) {
 	if len(behaviors) == 0 {
@@ -176,22 +195,22 @@ func resolveBehaviors(
 	}
 	result := make([]BehaviorSpec, 0, len(behaviors))
 	for _, beh := range behaviors {
-		if beh.FragmentId == "" {
+		if beh.FragRef == "" {
 			result = append(result, beh)
 			continue
 		}
 		// Marker: look up fragment in registry.
-		frag, ok := registry[beh.FragmentId]
+		frag, ok := registry[beh.FragRef]
 		if !ok {
 			return nil, fmt.Errorf(
 				"codegen.resolveBodyFragments: unresolvable behavior marker %q in skill %q — "+
 					"where: %s — "+
 					"when: pre-render fragment resolution — "+
-					"what it means: a BehaviorSpec with FragmentId=%q references a fragment "+
+					"what it means: a BehaviorSpec with FragRef=%q references a fragment "+
 					"that does not exist in SharedFragmentSpecs — "+
 					"fix: add fragment %q to SharedFragmentSpecs in specs_data_fragments.go "+
 					"with Kind=FragmentKindBehavior and a non-nil Behavior payload",
-				beh.FragmentId, consumerSkill, consumerFile, beh.FragmentId, beh.FragmentId,
+				beh.FragRef, consumerSkill, consumerFile, beh.FragRef, beh.FragRef,
 			)
 		}
 		if frag.Kind != FragmentKindBehavior || frag.Behavior == nil {
@@ -199,7 +218,7 @@ func resolveBehaviors(
 				"codegen.resolveBodyFragments: fragment %q has Kind=%q (not behavior) or nil Behavior in skill %q — "+
 					"where: %s — "+
 					"fix: set Kind=FragmentKindBehavior and a non-nil Behavior pointer in SharedFragmentSpecs[%q]",
-				beh.FragmentId, frag.Kind, consumerSkill, consumerFile, beh.FragmentId,
+				beh.FragRef, frag.Kind, consumerSkill, consumerFile, beh.FragRef,
 			)
 		}
 		result = append(result, *frag.Behavior)

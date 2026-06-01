@@ -167,6 +167,13 @@ func main() {
 		}
 	}
 
+	// ── 5. Global-ID uniqueness enforcement (SLICE-2, URD R5+R7) ─────────────
+	// Must run AFTER all generators so the full registry is assembled, and
+	// BEFORE exit so a violation causes go generate to fail immediately.
+	if err := codegen.ValidateGlobalIds(); err != nil {
+		errors = append(errors, fmt.Errorf("global-id validation: %w", err))
+	}
+
 	// ── Report errors and exit ────────────────────────────────────────────────
 	if len(errors) > 0 {
 		fmt.Fprintf(os.Stderr, "\n%d error(s) encountered:\n", len(errors))

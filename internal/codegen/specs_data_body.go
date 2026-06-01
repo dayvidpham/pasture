@@ -1856,16 +1856,7 @@ var reviewerBody = SkillBody{
 5. **Does MVP scope make sense?**
 6. **Is validation checklist complete and correct?**`,
 		},
-		{
-			Id:    "rev-vote-options",
-			Title: "Vote Options",
-			Content: `| Vote | When |
-|------|------|
-| ACCEPT | All 6 criteria satisfied; no BLOCKER items |
-| REVISE | BLOCKER issues found; must provide actionable feedback |
-
-Binary only. No intermediate levels.`,
-		},
+		fragRef(FragRevVoteOptions),
 		{
 			Id:    "rev-severity-vocab",
 			Title: "Severity Vocabulary (Code Review Only)",

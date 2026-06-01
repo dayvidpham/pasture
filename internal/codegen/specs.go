@@ -47,16 +47,16 @@ type ConstraintSpec struct {
 // format. Distinct from ConstraintSpec: behaviors are role-specific guidance,
 // not formal protocol constraints. Mirrors Python BehaviorSpec dataclass.
 //
-// A non-empty FragmentId marks this entry as a placement MARKER: all other
+// A non-zero FragRef marks this entry as a placement MARKER: all other
 // fields are left zero and the entry is resolved to the SharedFragment payload
 // pre-render by the resolution pass in skills.go.
 type BehaviorSpec struct {
-	Id         string
-	Given      string
-	When       string
-	Then       string
-	ShouldNot  string
-	FragmentId string // non-empty → marker; resolved pre-render from SharedFragmentSpecs
+	Id        string
+	Given     string
+	When      string
+	Then      string
+	ShouldNot string
+	FragRef   FragmentId // non-zero → marker; resolved pre-render from SharedFragmentSpecs
 }
 
 // ─── ProseSection ─────────────────────────────────────────────────────────────
@@ -65,7 +65,7 @@ type BehaviorSpec struct {
 // Sections are rendered in slice order. Heading level is determined by the
 // template (H2 for top-level, H3 for subsections).
 //
-// A non-empty FragmentId marks this entry as a placement MARKER: all other
+// A non-zero FragRef marks this entry as a placement MARKER: all other
 // fields are left zero and the entry is resolved to the SharedFragment payload
 // pre-render by the resolution pass in skills.go.
 type ProseSection struct {
@@ -73,7 +73,7 @@ type ProseSection struct {
 	Title       string         // heading text, e.g. "What You Own"
 	Content     string         // pre-formatted markdown content below the heading
 	Subsections []ProseSection // optional nested sections (rendered as H3 under H2)
-	FragmentId  string         // non-empty → marker; resolved pre-render from SharedFragmentSpecs
+	FragRef     FragmentId     // non-zero → marker; resolved pre-render from SharedFragmentSpecs
 }
 
 // ─── FragmentKind ─────────────────────────────────────────────────────────────
@@ -89,6 +89,32 @@ const (
 	FragmentKindProse FragmentKind = "prose"
 )
 
+// ─── FragmentId ───────────────────────────────────────────────────────────────
+
+// FragmentId is the strongly-typed key for shared fragment registrations.
+// Values match the frag--* canonical naming convention (e.g.
+// "frag--rev-vote-options"). PascalCase constants are derived by dropping the
+// "frag--" prefix, splitting on "-", and prefixing with "Frag".
+//
+// Mirrors the RoleId / PhaseId / CommandId convention.
+type FragmentId string
+
+// AllFragmentIds lists every declared FragmentId constant. It is maintained
+// in sync with the constant declarations below and validated by
+// ValidateGlobalIds (parity check: AllFragmentIds ↔ SharedFragmentSpecs keys).
+// Mirrors AllRoleIds in internal/types/enums.go.
+var AllFragmentIds = []FragmentId{
+	FragRevVoteOptions,
+}
+
+// SLICE-2 declares the sole fragment that exists at this point. SLICE-3 will
+// add 8 FragSup* constants; SLICE-4 adds FragRevPlanVoteOptions.
+const (
+	// FragRevVoteOptions is the canonical vote-options table shared between the
+	// reviewer and reviewer-vote skill bodies (D3-ratified ACCEPT row wording).
+	FragRevVoteOptions FragmentId = "frag--rev-vote-options"
+)
+
 // ─── SharedFragment ───────────────────────────────────────────────────────────
 
 // SharedFragment is a reusable payload (either a BehaviorSpec or a
@@ -99,7 +125,7 @@ const (
 // directly — they are derived via FragmentToOwnerRefs() (D1: owners derived
 // from consumer markers, not embedded).
 type SharedFragment struct {
-	Id       string
+	Id       FragmentId
 	Kind     FragmentKind
 	Behavior *BehaviorSpec // non-nil when Kind == FragmentKindBehavior
 	Prose    *ProseSection // non-nil when Kind == FragmentKindProse

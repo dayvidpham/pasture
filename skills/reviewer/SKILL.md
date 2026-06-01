@@ -243,7 +243,7 @@ All reviewers also apply these general questions:
 
 | Vote | When |
 |------|------|
-| ACCEPT | All 6 criteria satisfied; no BLOCKER items |
+| ACCEPT | All review criteria satisfied; no BLOCKER items |
 | REVISE | BLOCKER issues found; must provide actionable feedback |
 
 Binary only. No intermediate levels.

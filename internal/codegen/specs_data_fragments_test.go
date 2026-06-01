@@ -22,7 +22,7 @@ import (
 // only non-zero field is FragmentId.
 func TestFragRef_MarkerOnly(t *testing.T) {
 	ref := fragRef("my-frag")
-	assert.Equal(t, "my-frag", ref.FragmentId, "FragmentId must be set")
+	assert.Equal(t, FragmentId("my-frag"), ref.FragRef, "FragRef must be set")
 	assert.Empty(t, ref.Id, "ID must be zero")
 	assert.Empty(t, ref.Title, "Title must be zero")
 	assert.Empty(t, ref.Content, "Content must be zero")
@@ -33,7 +33,7 @@ func TestFragRef_MarkerOnly(t *testing.T) {
 // whose only non-zero field is FragmentId.
 func TestBehaviorRef_MarkerOnly(t *testing.T) {
 	ref := behaviorRef("my-beh")
-	assert.Equal(t, "my-beh", ref.FragmentId, "FragmentId must be set")
+	assert.Equal(t, FragmentId("my-beh"), ref.FragRef, "FragRef must be set")
 	assert.Empty(t, ref.Id, "ID must be zero")
 	assert.Empty(t, ref.Given, "Given must be zero")
 	assert.Empty(t, ref.When, "When must be zero")
@@ -46,7 +46,7 @@ func TestBehaviorRef_MarkerOnly(t *testing.T) {
 // fixtureRegistry returns a minimal SharedFragmentSpecs registry for testing.
 // It contains one prose fragment ("frag-prose") and one behavior fragment
 // ("frag-behavior") with recognisable payloads.
-func fixtureRegistry() map[string]SharedFragment {
+func fixtureRegistry() map[FragmentId]SharedFragment {
 	proseFrag := ProseSection{
 		Id:      "frag-prose",
 		Title:   "Shared Prose Title",
@@ -59,7 +59,7 @@ func fixtureRegistry() map[string]SharedFragment {
 		Then:      "both render byte-identical output",
 		ShouldNot: "diverge",
 	}
-	return map[string]SharedFragment{
+	return map[FragmentId]SharedFragment{
 		"frag-prose": {
 			Id:    "frag-prose",
 			Kind:  FragmentKindProse,
@@ -176,7 +176,7 @@ func TestResolveBodyFragments_Passthrough(t *testing.T) {
 // SharedFragmentSpecs registry, resolution is a no-op (no markers in input
 // means nothing to resolve; non-marker entries pass through).
 func TestResolveBodyFragments_EmptyRegistryNoOp(t *testing.T) {
-	emptyRegistry := map[string]SharedFragment{}
+	emptyRegistry := map[FragmentId]SharedFragment{}
 
 	sections := []ProseSection{
 		{Id: "sec1", Title: "Section 1", Content: "Content 1"},
@@ -274,14 +274,20 @@ func TestFragmentToOwnerRefs_SortedDeterministic(t *testing.T) {
 	assert.Equal(t, []string{"beta-skill"}, otherOwners)
 }
 
-// TestFragmentToOwnerRefs_EmptyWhenNoMarkers verifies that FragmentToOwnerRefs
-// returns an empty map when SkillBodySpecs contains no fragment markers (the
-// expected state in SLICE-1 with an empty SharedFragmentSpecs registry).
-func TestFragmentToOwnerRefs_EmptyWhenNoMarkers(t *testing.T) {
+// TestFragmentToOwnerRefs_RealRegistryHasRevVoteOptionsMarkers verifies that
+// FragmentToOwnerRefs returns the expected owner map for the real SkillBodySpecs
+// after the SLICE-2 rev-vote-options dedup: both "reviewer" and "reviewer-vote"
+// reference frag--rev-vote-options via placement markers.
+//
+// NOTE: In SLICE-1, when SharedFragmentSpecs was empty and no markers existed,
+// this map was expected to be empty. SLICE-2 introduces the first real markers.
+func TestFragmentToOwnerRefs_RealRegistryHasRevVoteOptionsMarkers(t *testing.T) {
 	result := FragmentToOwnerRefs()
-	// In SLICE-1 the real SkillBodySpecs has no FragmentId markers.
-	assert.Empty(t, result,
-		"FragmentToOwnerRefs must return empty map when no markers exist in SkillBodySpecs")
+	owners, ok := result[FragRevVoteOptions]
+	require.True(t, ok,
+		"FragmentToOwnerRefs must include FragRevVoteOptions after SLICE-2 dedup")
+	assert.Equal(t, []string{"reviewer", "reviewer-vote"}, owners,
+		"frag--rev-vote-options owners must be sorted: reviewer before reviewer-vote")
 }
 
 // TestFragmentToOwnerRefs_Deterministic verifies that calling FragmentToOwnerRefs

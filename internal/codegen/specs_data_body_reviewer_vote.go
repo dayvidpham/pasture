@@ -35,16 +35,7 @@ var reviewerVoteBody = SkillBody{
 			Title:   "When to Use",
 			Content: `Review complete and ready to cast a binary ACCEPT or REVISE vote.`,
 		},
-		{
-			Id:    "rev-vote-options",
-			Title: "Vote Options",
-			Content: `| Vote | When |
-|------|------|
-| ACCEPT | All review criteria satisfied; no BLOCKER items |
-| REVISE | BLOCKER issues found; must provide actionable feedback |
-
-Binary only. No intermediate levels.`,
-		},
+		fragRef(FragRevVoteOptions),
 		{
 			Id:    "rev-vote-plan-vs-code",
 			Title: "Plan Review vs Code Review",

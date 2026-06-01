@@ -78,6 +78,35 @@ func TestRoleSpecsCompleteness(t *testing.T) {
 		"RoleSpecs should have exactly %d entries (one per RoleId)", len(types.AllRoleIds))
 }
 
+// TestFragmentSpecsCompleteness verifies parity between AllFragmentIds (typed
+// constants) and SharedFragmentSpecs (registry entries):
+//   - every AllFragmentIds constant has a corresponding SharedFragmentSpecs entry
+//   - every SharedFragmentSpecs key has a corresponding AllFragmentIds constant
+//   - the Id field of each fragment matches its map key
+//
+// Mirrors TestRoleSpecsCompleteness. If this test fails, it means a FragmentId
+// constant was declared without a matching spec (or vice versa) — add the
+// missing entry to keep AllFragmentIds and SharedFragmentSpecs in sync.
+func TestFragmentSpecsCompleteness(t *testing.T) {
+	for _, fragId := range codegen.AllFragmentIds {
+		t.Run(string(fragId), func(t *testing.T) {
+			spec, ok := codegen.SharedFragmentSpecs[fragId]
+			require.True(t, ok,
+				"SharedFragmentSpecs missing entry for FragmentId constant %q — "+
+					"add a SharedFragmentSpecs entry or remove the constant from AllFragmentIds",
+				fragId)
+			assert.Equal(t, fragId, spec.Id,
+				"SharedFragmentSpecs[%q].Id mismatch: key %q has spec.Id %q",
+				fragId, fragId, spec.Id)
+		})
+	}
+
+	assert.Len(t, codegen.SharedFragmentSpecs, len(codegen.AllFragmentIds),
+		"SharedFragmentSpecs should have exactly %d entries (one per AllFragmentIds constant); "+
+			"a spec with no constant or a constant with no spec will fail ValidateGlobalIds",
+		len(codegen.AllFragmentIds))
+}
+
 // TestRoleSpecsBehaviors verifies that roles with expected behaviors have them populated.
 func TestRoleSpecsBehaviors(t *testing.T) {
 	rolesWithBehaviors := []types.RoleId{
@@ -401,7 +430,18 @@ func TestSkillBodySpecsCompleteness(t *testing.T) {
 			}
 
 			// Verify that sections have non-empty titles and content.
+			// Marker-aware: a section with FragRef set is a placement marker
+			// (all other fields are zero). For markers, assert the FragRef
+			// resolves in SharedFragmentSpecs; skip the non-empty-field checks.
 			for i, section := range body.Sections {
+				if section.FragRef != "" {
+					// Placement marker: verify it resolves.
+					_, ok := codegen.SharedFragmentSpecs[section.FragRef]
+					assert.True(t, ok,
+						"SkillBodySpecs[%q].Sections[%d].FragRef=%q must resolve in SharedFragmentSpecs",
+						key, i, section.FragRef)
+					continue
+				}
 				assert.NotEmpty(t, section.Title,
 					"SkillBodySpecs[%q].Sections[%d].Title must not be empty", key, i)
 				// Content may be empty for pure-subsection parents, but
@@ -423,6 +463,14 @@ func TestSkillBodySpecsCompleteness(t *testing.T) {
 
 			// Verify that body behaviors (if any) have non-empty GWT fields.
 			for i, b := range body.Behaviors {
+				if b.FragRef != "" {
+					// Placement marker: verify it resolves in SharedFragmentSpecs.
+					_, ok := codegen.SharedFragmentSpecs[b.FragRef]
+					assert.True(t, ok,
+						"SkillBodySpecs[%q].Behaviors[%d].FragRef=%q must resolve in SharedFragmentSpecs",
+						key, i, b.FragRef)
+					continue
+				}
 				assert.NotEmpty(t, b.Id,
 					"SkillBodySpecs[%q].Behaviors[%d].Id must not be empty", key, i)
 				assert.NotEmpty(t, b.Given,
