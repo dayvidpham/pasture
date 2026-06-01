@@ -1,6 +1,6 @@
 # Handoff Document Template
 
-Standardized template for all 6 actor-change transitions in the Aura protocol.
+Standardized template for all 6 actor-change transitions in the Pasture protocol.
 
 **Storage:** `.git/.aura/handoff/{request-task-id}/{source}-to-{target}.md`
 
@@ -249,7 +249,7 @@ Follow-up epic needed for non-blocking improvements.
 - All findings above should be tracked as tasks in the follow-up epic.
 
 ## Acceptance Criteria
-- Follow-up epic created with label `aura:epic-followup`.
+- Follow-up epic created with label `pasture:epic-followup`.
 - All IMPORTANT and MINOR findings captured as individual tasks.
 ```
 

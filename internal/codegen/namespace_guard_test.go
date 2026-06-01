@@ -1,19 +1,42 @@
 // Package codegen_test — namespace renamespace guard.
 //
-// This file contains the SLICE-2 guard test that enforces the pasture
+// This file contains the SLICE-2 guard tests that enforce the pasture
 // renamespace: after the aura:->pasture: sweep + marker rebrand + structural
 // rebrand, NO `aura:` colon-anchored namespace token may remain in the on-disk
-// generated/skill surface, and the pasture-branded marker pair must be intact
-// in every marker-bounded SKILL.md.
+// generated/skill surface or in the protocol documentation surface, and the
+// pasture-branded marker pair must be intact in every marker-bounded SKILL.md.
 //
-// The guard is colon-anchored: it matches the literal token prefix `aura:`
-// (skill commands like `aura:worker`, labels like `aura:p9-impl:s9-slice`,
-// severity tags like `aura:severity:blocker`). It deliberately does NOT match
-// the deferred, allowlisted tool/path references `aura-swarm`, `aura-parallel`,
-// or `.git/.aura/...` — those use a hyphen or a dot after `aura`, not a colon,
-// so the colon anchor already excludes them. The explicit allowlist below is
-// belt-and-suspenders documentation of that intent (D6: those renames are
-// deferred until the pasture tooling reaches parity).
+// Scope 1 (TestNamespaceGuard_NoStrayAuraRefs):
+//
+//	skills/*/SKILL.md + agents/*.md + ROOT schema.xml
+//
+// Scope 2 (TestNamespaceGuard_ProtocolDocs_NoStrayAuraRefs):
+//
+//	skills/protocol/*.md
+//
+// # Colon anchor
+//
+// Both guards match the literal token prefix "aura:" (skill commands like
+// `aura:worker`, labels like `aura:p9-impl:s9-slice`, severity tags). This
+// excludes the deferred tool/path references (aura-swarm, aura-parallel,
+// .git/.aura) by construction — those use a hyphen or a dot after "aura".
+//
+// # Allowlist
+//
+// The explicit allowlists document lines that are intentionally preserved as
+// "aura" references for cross-project or historical reasons (not pasture
+// identity). Current allowlist for protocol docs:
+//
+//   - MIGRATION_v1_to_v2.md:3 — "migrate existing Aura protocol usage from v1" —
+//     the word "Aura" (no colon) describes what is being migrated FROM; no `aura:`
+//     token, so the colon-anchored guard does not flag it.
+//   - user-request-revamp-v2.md:39-43 — task titles from the unified-schema-*
+//     beads project ("Aura ingest CLI command"); these reference a SEPARATE project
+//     with pre-existing task IDs. No `aura:` colon token; not flagged.
+//   - HANDOFF_EXAMPLE-*.md — "Aura web dashboard", `aura web` command from an
+//     example handoff of a separate project. No `aura:` colon token; not flagged.
+//   - CLAUDE.md references to `aura-swarm`, `aura-parallel` (deferred tools, D6).
+//   - All files: `.git/.aura/handoff/...` storage paths (deferred, D6).
 package codegen_test
 
 import (
@@ -37,11 +60,9 @@ import (
 const auraNamespaceToken = "aura:"
 
 // allowlistedAuraRefs are the deferred, non-colon tool/path references that are
-// intentionally NOT renamed in this slice (D6). They are listed here for
-// documentation and as a defensive filter: a line is exempt only if every
-// `aura:`-looking hit on it is actually part of one of these tokens. In
-// practice the colon anchor already excludes them (none contains "aura:"), so
-// this list is a guard against future drift, not a current escape hatch.
+// intentionally NOT renamed (D6). They are listed here for documentation and as
+// a defensive filter. In practice the colon anchor already excludes them (none
+// contains "aura:"), so this list is a guard against future drift.
 var allowlistedAuraRefs = []string{
 	"aura-swarm",
 	"aura-parallel",
@@ -55,7 +76,7 @@ type strayRef struct {
 	Text string // trimmed line text, for the failure report
 }
 
-// guardScopedFiles returns the on-disk files the namespace guard scans:
+// guardScopedFiles returns the on-disk files the primary namespace guard scans:
 //   - every skills/*/SKILL.md
 //   - every agents/*.md
 //   - the ROOT schema.xml
@@ -84,14 +105,38 @@ func guardScopedFiles(t *testing.T, root string) (files []string, relFor func(st
 		"namespace guard: no agents/*.md found under %q — "+
 			"the guard would vacuously pass; ensure the agents tree exists", root)
 
+	return files, relForRoot(root)
+}
+
+// guardProtocolDocFiles returns the on-disk files for the protocol docs guard:
+// every skills/protocol/*.md.
+//
+// This scope was added in cycle-1 of the SLICE-2 fix loop to enforce the
+// full-identity renamespace across the hand-authored protocol documentation.
+func guardProtocolDocFiles(t *testing.T, root string) (files []string, relFor func(string) string) {
+	t.Helper()
+
+	docGlob := filepath.Join(root, "skills", "protocol", "*.md")
+	docFiles, err := filepath.Glob(docGlob)
+	require.NoError(t, err, "namespace guard: globbing %q failed", docGlob)
+
+	require.NotEmpty(t, docFiles,
+		"namespace guard: no skills/protocol/*.md found under %q — "+
+			"the guard would vacuously pass; ensure the protocol docs tree exists", root)
+
+	return docFiles, relForRoot(root)
+}
+
+// relForRoot returns a closure that maps an absolute path to a path relative
+// to root (for readable error messages).
+func relForRoot(root string) func(string) string {
 	rootClean := filepath.Clean(root)
-	relFor = func(abs string) string {
+	return func(abs string) string {
 		if rel, err := filepath.Rel(rootClean, abs); err == nil {
 			return rel
 		}
 		return abs
 	}
-	return files, relFor
 }
 
 // lineHasOnlyAllowlistedAura reports whether every `aura`-rooted hyphen/dot
@@ -124,8 +169,9 @@ func scanStrayAuraRefs(t *testing.T, path, relPath string) []strayRef {
 
 	var strays []strayRef
 	scanner := bufio.NewScanner(f)
-	// SKILL.md/schema.xml lines can be long (embedded ASCII figures, label
-	// tables); raise the buffer ceiling so long lines are not truncated.
+	// SKILL.md/schema.xml/protocol-doc lines can be long (embedded ASCII
+	// figures, label tables); raise the buffer ceiling so long lines are not
+	// truncated.
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	lineNo := 0
@@ -149,16 +195,11 @@ func scanStrayAuraRefs(t *testing.T, path, relPath string) []strayRef {
 	return strays
 }
 
-// TestNamespaceGuard_NoStrayAuraRefs is the SLICE-2 renamespace guard.
-//
-// It scans the on-disk generated/skill surface (skills/*/SKILL.md, agents/*.md,
-// ROOT schema.xml) for any `aura:` colon-anchored namespace token. The expected
-// count of stray references is derived dynamically: the guard passes iff the
-// scan finds ZERO strays. On failure it prints every offending file:line so the
-// fix is a direct sweep, not a hunt.
-func TestNamespaceGuard_NoStrayAuraRefs(t *testing.T) {
-	root := repoRoot(t)
-	files, relFor := guardScopedFiles(t, root)
+// runGuardScan is the shared scan loop for both guard tests: it collects
+// stray refs across all files in scope and t.Fatal()s with a full file:line
+// report if any are found.
+func runGuardScan(t *testing.T, files []string, relFor func(string) string, scope string) {
+	t.Helper()
 
 	var strays []strayRef
 	for _, abs := range files {
@@ -176,18 +217,51 @@ func TestNamespaceGuard_NoStrayAuraRefs(t *testing.T) {
 		})
 		var b strings.Builder
 		fmt.Fprintf(&b,
-			"namespace guard: found %d stray `aura:` namespace reference(s) in the "+
-				"generated/skill surface (skills/*/SKILL.md, agents/*.md, schema.xml).\n"+
+			"namespace guard: found %d stray `aura:` namespace reference(s) in %s.\n"+
 				"The pasture renamespace requires zero `aura:` colon tokens (allowlist: %s).\n"+
-				"Fix: sweep the source that produces each line (specs_data*.go, figure YAML, "+
-				"or the hand-authored body) from `aura:` to `pasture:`, then re-run "+
-				"`go generate ./internal/codegen/...`.\nStray references:\n",
-			len(strays), strings.Join(allowlistedAuraRefs, ", "))
+				"Fix: sweep the source of each line from `aura:` to `pasture:` — for\n"+
+				"generated-output files run `go generate ./internal/codegen/...` afterward;\n"+
+				"for hand-authored docs edit directly. Allowlisted: %v.\n"+
+				"Stray references:\n",
+			len(strays), scope, strings.Join(allowlistedAuraRefs, ", "), allowlistedAuraRefs)
 		for _, s := range strays {
 			fmt.Fprintf(&b, "  %s:%d: %s\n", s.File, s.Line, s.Text)
 		}
 		t.Fatal(b.String())
 	}
+}
+
+// TestNamespaceGuard_NoStrayAuraRefs is the primary SLICE-2 renamespace guard.
+//
+// It scans the on-disk generated/skill surface (skills/*/SKILL.md, agents/*.md,
+// ROOT schema.xml) for any `aura:` colon-anchored namespace token. The expected
+// count of stray references is derived dynamically: the guard passes iff the
+// scan finds ZERO strays. On failure it prints every offending file:line so the
+// fix is a direct sweep, not a hunt.
+func TestNamespaceGuard_NoStrayAuraRefs(t *testing.T) {
+	root := repoRoot(t)
+	files, relFor := guardScopedFiles(t, root)
+	runGuardScan(t, files, relFor, "skills/*/SKILL.md, agents/*.md, schema.xml")
+}
+
+// TestNamespaceGuard_ProtocolDocs_NoStrayAuraRefs extends the primary guard to
+// the hand-authored protocol documentation (skills/protocol/*.md).
+//
+// These docs describe the pasture protocol and were swept in SLICE-2 cycle-1.
+// The allowlist is the same as the primary guard (aura-swarm, aura-parallel,
+// .git/.aura — all non-colon refs that the colon anchor already excludes).
+//
+// Preserved cross-project references in these docs (NOT flagged — no aura: colon):
+//   - MIGRATION_v1_to_v2.md: "migrate existing Aura protocol usage from v1"
+//     (word "Aura" with no colon; describes what is being migrated away from)
+//   - user-request-revamp-v2.md: "Aura ingest CLI command" task titles from a
+//     separate beads project (unified-schema-*; no aura: colon)
+//   - HANDOFF_EXAMPLE-*.md: "Aura web dashboard" / "aura web" command from an
+//     example handoff of a separate project (no aura: colon)
+func TestNamespaceGuard_ProtocolDocs_NoStrayAuraRefs(t *testing.T) {
+	root := repoRoot(t)
+	files, relFor := guardProtocolDocFiles(t, root)
+	runGuardScan(t, files, relFor, "skills/protocol/*.md")
 }
 
 // TestNamespaceGuard_PastureMarkerIntact asserts that the pasture-branded

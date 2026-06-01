@@ -1,4 +1,4 @@
-# Aura Status
+# Pasture Status
 
 <!-- BEGIN GENERATED FROM pasture schema -->
 **Command:** `pasture:status` — Project status and monitoring via Beads queries

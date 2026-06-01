@@ -16,7 +16,7 @@ Verbatim User Request: Implement a credential proxy security layer for the openc
 NOTES
 Reopened: REQUEST must remain open until user performs UAT. Depends on URE (whp) which is now open.
 
-LABELS: aura:user:request
+LABELS: pasture:user:request
 
 DEPENDS ON
   → ○ nix-openclaw-vm-coe: IMPL-UAT: Credential proxy end-to-end acceptance test ● P1
@@ -300,7 +300,7 @@ DESCRIPTION
 NOTES
 Reopened: URD must remain open until user performs UAT. Was closed without user review.
 
-LABELS: aura:user:elicit
+LABELS: pasture:user:elicit
 
 DEPENDS ON
   → ○ nix-openclaw-vm-35e: PROPOSAL: Credential proxy implementation plan ● P1
@@ -981,7 +981,7 @@ Data: {
 NOTES
 Reopened: Proposal must remain open until user performs UAT. Was closed without user review.
 
-LABELS: aura:plan:proposal
+LABELS: pasture:plan:proposal
 
 DEPENDS ON
   → ○ nix-openclaw-vm-7xk: CREDENTIAL-PROXY: Implement credential proxy security layer for openclaw-vm ● P1

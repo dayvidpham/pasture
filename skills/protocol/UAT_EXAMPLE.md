@@ -6,7 +6,7 @@
 
 ```bash
 # 1. Create the UAT task with labels and description
-bd create --labels "aura:user:uat,proposal-2:uat-1" \
+bd create --labels "pasture:user:uat,proposal-2:uat-1" \
   --title "UAT-1: Plan acceptance for aura-scripts Nix flake REVISION-2" \
   --description "<FULL_DESCRIPTION_BELOW>"
 
@@ -17,7 +17,7 @@ bd dep relate aura-scripts-ci4 aura-scripts-82l
 bd comments add aura-scripts-ci4 "UAT ADDENDUM (user-initiated, verbatim): ..."
 
 # 4. After UAT passes, ratify the proposal
-bd label add aura-scripts-82l aura:plan:ratify
+bd label add aura-scripts-82l pasture:plan:ratify
 bd comments add aura-scripts-82l "RATIFIED: All 3 reviewers ACCEPT on REVISION-2, UAT passed (aura-scripts-ci4)."
 ```
 
@@ -66,8 +66,8 @@ aura.config-sync.commands = {
 **Motivating example:** Worker-only machine with enableAll=false, worker.enable=true.
 
 **Q1: Currently epoch is classified as a role alongside architect/supervisor/worker/reviewer. But epoch orchestrates ALL roles — setting enableAll=false would hide it, which breaks orchestration. Should epoch be reclassified?**
-Core commands (always installed): aura:plan, aura:status, aura:test, aura:feedback, aura:msg:*, aura:impl:*, aura:user:*
-Role commands (togglable): aura:architect:*, aura:supervisor:*, aura:worker:*, aura:reviewer:*
+Core commands (always installed): pasture:plan, pasture:status, pasture:test, pasture:feedback, pasture:msg:*, pasture:impl:*, pasture:user:*
+Role commands (togglable): pasture:architect:*, pasture:supervisor:*, pasture:worker:*, pasture:reviewer:*
 Options:
 - Move epoch to core commands — Always installed regardless of enableAll. Epoch orchestrates all roles so it should always be available.
 - Keep epoch as a role — A machine running only workers doesn't need epoch. User can explicitly enable epoch alongside their chosen roles.

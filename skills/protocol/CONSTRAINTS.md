@@ -1,4 +1,4 @@
-# Aura Protocol Constraints
+# Pasture Protocol Constraints
 
 Common constraints referenced by all agent and skill files.
 
@@ -64,7 +64,7 @@ Binary only. No intermediate levels.
 
 **EAGER severity group creation:** For every code review round (Phase 10), ALWAYS create 3 severity group tasks (BLOCKER, IMPORTANT, MINOR) immediately. Empty groups have no children and are closed immediately. This is NOT lazy creation.
 
-**Follow-up epic:** When a review round completes and ANY IMPORTANT or MINOR findings exist, the Supervisor creates a follow-up epic (label `aura:epic-followup`). This is NOT gated on BLOCKER resolution — it triggers as soon as the review round completes.
+**Follow-up epic:** When a review round completes and ANY IMPORTANT or MINOR findings exist, the Supervisor creates a follow-up epic (label `pasture:epic-followup`). This is NOT gated on BLOCKER resolution — it triggers as soon as the review round completes.
 
 **Follow-up lifecycle:** The follow-up epic runs the same protocol phases with FOLLOWUP_* prefixed task types: FOLLOWUP_URE → FOLLOWUP_URD → FOLLOWUP_PROPOSAL → FOLLOWUP_IMPL_PLAN → FOLLOWUP_SLICE-N. The supervisor creates FOLLOWUP_URE and FOLLOWUP_URD, then hands off to architect via h6 for FOLLOWUP_PROPOSAL. Original IMPORTANT/MINOR leaf tasks are adopted by FOLLOWUP_SLICE-N (dual-parent: original severity group + follow-up slice).
 
@@ -77,46 +77,46 @@ All work flows through Beads with standardized titles and the v2 label schema:
 ### Label Schema
 
 ```
-Format: aura:p{phase}-{domain}:s{step}-{type}
+Format: pasture:p{phase}-{domain}:s{step}-{type}
 
 Phase-domain pairs (12 phases):
-  aura:p1-user     — Request + classify + research + explore
-  aura:p2-user     — Elicit + URD
-  aura:p3-plan     — Propose
-  aura:p4-plan     — Plan review
-  aura:p5-user     — Plan UAT
-  aura:p6-plan     — Ratify
-  aura:p7-plan     — Handoff
-  aura:p8-impl     — Impl plan
-  aura:p9-impl     — Worker slices
-  aura:p10-impl    — Code review
-  aura:p11-user    — Impl UAT
-  aura:p12-impl    — Landing
+  pasture:p1-user     — Request + classify + research + explore
+  pasture:p2-user     — Elicit + URD
+  pasture:p3-plan     — Propose
+  pasture:p4-plan     — Plan review
+  pasture:p5-user     — Plan UAT
+  pasture:p6-plan     — Ratify
+  pasture:p7-plan     — Handoff
+  pasture:p8-impl     — Impl plan
+  pasture:p9-impl     — Worker slices
+  pasture:p10-impl    — Code review
+  pasture:p11-user    — Impl UAT
+  pasture:p12-impl    — Landing
 
 Special labels:
-  aura:urd                  — User Requirements Document
-  aura:superseded           — Superseded proposal/plan
-  aura:severity:blocker     — Blocker severity group
-  aura:severity:important   — Important severity group
-  aura:severity:minor       — Minor severity group
-  aura:epic-followup        — Follow-up epic
+  pasture:urd                  — User Requirements Document
+  pasture:superseded           — Superseded proposal/plan
+  pasture:severity:blocker     — Blocker severity group
+  pasture:severity:important   — Important severity group
+  pasture:severity:minor       — Minor severity group
+  pasture:epic-followup        — Follow-up epic
 ```
 
 ### Planning Phase Tasks
 
 | Title Format | Label | Purpose | Created By |
 |---|---|---|---|
-| `REQUEST: Description` | `aura:p1-user:s1_1-classify` | Capture user's problem statement | User or Coordinator |
-| `PROPOSAL-N: Description` | `aura:p3-plan:s3-propose` | Architect's full technical proposal (N increments per revision) | Architect |
-| `PROPOSAL-N-REVIEW-{axis}-{round}: Description` | `aura:p4-plan:s4-review` | Reviewer assessment of proposal N (axis=A/B/C, round=1,2,...) | Reviewers (spawned by architect) |
-| `URD: Description` | `aura:urd` | Single source of truth for user requirements | Architect (after Phase 2 URE) |
+| `REQUEST: Description` | `pasture:p1-user:s1_1-classify` | Capture user's problem statement | User or Coordinator |
+| `PROPOSAL-N: Description` | `pasture:p3-plan:s3-propose` | Architect's full technical proposal (N increments per revision) | Architect |
+| `PROPOSAL-N-REVIEW-{axis}-{round}: Description` | `pasture:p4-plan:s4-review` | Reviewer assessment of proposal N (axis=A/B/C, round=1,2,...) | Reviewers (spawned by architect) |
+| `URD: Description` | `pasture:urd` | Single source of truth for user requirements | Architect (after Phase 2 URE) |
 
 ### Implementation Phase Tasks
 
 | Title Format | Label | Ownership |
 |---|---|---|
-| `IMPL_PLAN: Description` | `aura:p8-impl:s8-plan` | Supervisor |
-| `SLICE-N: Description` | `aura:p9-impl:s9-slice` | One worker per slice |
+| `IMPL_PLAN: Description` | `pasture:p8-impl:s8-plan` | Supervisor |
+| `SLICE-N: Description` | `pasture:p9-impl:s9-slice` | One worker per slice |
 
 **Vertical Slice Ownership Model:**
 - Each **production code path** is owned by exactly ONE worker
@@ -126,7 +126,7 @@ Special labels:
 
 ### Naming Conventions
 
-- **PROPOSAL-N:** N starts at 1 and increments with each revision. Old proposals are marked `aura:superseded`.
+- **PROPOSAL-N:** N starts at 1 and increments with each revision. Old proposals are marked `pasture:superseded`.
 - **PROPOSAL-N-REVIEW-{axis}-{round}:** Axis identifies the reviewer's criteria focus (A=Correctness, B=Test quality, C=Elegance). Round increments per re-review cycle.
 - **SLICE-N:** N identifies the slice number within the implementation plan.
 
@@ -134,12 +134,12 @@ Special labels:
 
 | Title Format | Label | Purpose | Created By |
 |---|---|---|---|
-| `FOLLOWUP: Description` | `aura:epic-followup` | Follow-up epic for non-blocking improvements | Supervisor |
-| `FOLLOWUP_URE: Description` | `aura:p2-user:s2_1-elicit` | Scoping URE: which IMPORTANT/MINOR findings to address | Supervisor |
-| `FOLLOWUP_URD: Description` | `aura:p2-user:s2_2-urd,aura:urd` | Requirements document for follow-up scope | Supervisor |
-| `FOLLOWUP_PROPOSAL-N: Description` | `aura:p3-plan:s3-propose` | Architect's follow-up proposal (accounts for original URD + FOLLOWUP_URD) | Architect (after h6) |
-| `FOLLOWUP_IMPL_PLAN: Description` | `aura:p8-impl:s8-plan` | Follow-up implementation plan | Supervisor (after follow-up h1) |
-| `FOLLOWUP_SLICE-N: Description` | `aura:p9-impl:s9-slice` | Follow-up slice (adopts original leaf tasks as dual-parent children) | Supervisor |
+| `FOLLOWUP: Description` | `pasture:epic-followup` | Follow-up epic for non-blocking improvements | Supervisor |
+| `FOLLOWUP_URE: Description` | `pasture:p2-user:s2_1-elicit` | Scoping URE: which IMPORTANT/MINOR findings to address | Supervisor |
+| `FOLLOWUP_URD: Description` | `pasture:p2-user:s2_2-urd,pasture:urd` | Requirements document for follow-up scope | Supervisor |
+| `FOLLOWUP_PROPOSAL-N: Description` | `pasture:p3-plan:s3-propose` | Architect's follow-up proposal (accounts for original URD + FOLLOWUP_URD) | Architect (after h6) |
+| `FOLLOWUP_IMPL_PLAN: Description` | `pasture:p8-impl:s8-plan` | Follow-up implementation plan | Supervisor (after follow-up h1) |
+| `FOLLOWUP_SLICE-N: Description` | `pasture:p9-impl:s9-slice` | Follow-up slice (adopts original leaf tasks as dual-parent children) | Supervisor |
 
 ### Frontmatter References
 
@@ -195,7 +195,7 @@ All implementation tasks use this structure in the `design` field:
 
 ## User Requirements Document (URD)
 
-**Given** Phase 2 (URE) completes **when** creating the URD **then** use label `aura:urd` and include structured requirements (priorities, design choices, MVP goals, end-vision goals) **should never** leave requirements scattered across REQUEST and ELICIT tasks without a URD
+**Given** Phase 2 (URE) completes **when** creating the URD **then** use label `pasture:urd` and include structured requirements (priorities, design choices, MVP goals, end-vision goals) **should never** leave requirements scattered across REQUEST and ELICIT tasks without a URD
 
 **Given** a URD exists **when** linking to other tasks **then** include the URD task ID in the description frontmatter of referencing tasks (e.g., `urd: <urd-id>`) **should never** use `--blocked-by` for URD links — it is a reference document, not a blocking dependency
 

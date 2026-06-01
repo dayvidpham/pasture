@@ -1,4 +1,4 @@
-/aura:epoch Should devise a new architectural approach to the commands, process, and constraints that make it harder for work to get lost or forgotten about, for certain recurring issues to be addressed via improved validation pipelines, and for better process management and handoff. Improved human handoff would look something like the @protocol/HANDOFF_EXAMPLE-*.md files. Want to also define an explicit Beads schema and taxonomy with with labels that apply to each phase, task, review, UAT, URE, URD, IMPL_PLAN. Labels are being applied non-uniformly, often forgotten about and in a non-standardized manner.
+/pasture:epoch Should devise a new architectural approach to the commands, process, and constraints that make it harder for work to get lost or forgotten about, for certain recurring issues to be addressed via improved validation pipelines, and for better process management and handoff. Improved human handoff would look something like the @protocol/HANDOFF_EXAMPLE-*.md files. Want to also define an explicit Beads schema and taxonomy with with labels that apply to each phase, task, review, UAT, URE, URD, IMPL_PLAN. Labels are being applied non-uniformly, often forgotten about and in a non-standardized manner.
 
 Should look something like this:
 
@@ -16,7 +16,7 @@ REQUEST
               └── blocked by PROPOSAL-{K}-REVIEW-A-1 (closed)
               └── blocked by PROPOSAL-{K}-REVIEW-B-1 (closed)
               └── blocked by PROPOSAL-{K}-REVIEW-C-1 (closed)
-        └── blocked by PROPOSAL-N (open, aura:plan:ratify)
+        └── blocked by PROPOSAL-N (open, pasture:plan:ratify)
               └── blocked by PROPOSAL-N-REVIEW-A-1 (closed)
               └── blocked by PROPOSAL-N-REVIEW-B-1 (closed)
               └── blocked by PROPOSAL-N-REVIEW-C-1 (closed)

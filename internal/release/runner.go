@@ -226,7 +226,7 @@ func workingTreeDirty(status string) bool {
 		if line == "" {
 			continue
 		}
-		// Ignore .beads/ paths (same convention as pasture-release).
+		// Ignore .beads/ paths — this is the pasture-release beads-ignore convention.
 		path := line
 		if len(line) > 3 {
 			path = line[3:]

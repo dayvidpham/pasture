@@ -98,7 +98,7 @@ Use this XML template to capture UAT results. Each component is presented one at
 #    - Labels link it to the proposal and UAT phase
 #    - Description contains the full XML-structured UAT record
 bd create \
-  --labels "aura:p5-user:s5-uat" \
+  --labels "pasture:p5-user:s5-uat" \
   --title "UAT: {{PLAN_OR_IMPL}} acceptance for {{FEATURE}}" \
   --description "---
 references:
@@ -115,7 +115,7 @@ bd comments add {{UAT_TASK_ID}} "UAT ADDENDUM (user-initiated, verbatim): {{VERB
 bd comments add {{URD_TASK_ID}} "UAT {{PHASE}}: {{VERDICT}} - {{key design decisions summary}}"
 
 # 4. After UAT passes, proceed to ratification (Phase 6)
-bd label add {{PROPOSAL_TASK_ID}} aura:p6-plan:s6-ratify
+bd label add {{PROPOSAL_TASK_ID}} pasture:p6-plan:s6-ratify
 bd comments add {{PROPOSAL_TASK_ID}} "RATIFIED: All 3 reviewers ACCEPT, UAT passed ({{UAT_TASK_ID}})."
 
 # 5. If UAT fails (REVISE), return to proposal phase

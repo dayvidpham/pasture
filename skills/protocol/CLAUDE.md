@@ -1,6 +1,6 @@
-# Aura Protocol - Agent Directive
+# Pasture Protocol - Agent Directive
 
-This is the reusable core agent directive for projects using the Aura protocol.
+This is the reusable core agent directive for projects using the Pasture protocol.
 Copy or include this file in your project's CLAUDE.md alongside project-specific instructions.
 
 ## System Philosophy
@@ -92,7 +92,7 @@ bd dep add ure-id --blocked-by request-id
 
 ### User Requirements Document (URD)
 
-**Given** Phase 2 (URE) completes **when** requirements are captured **then** create a URD task (label `aura:urd`) as the single source of truth for user requirements **should never** scatter requirements across multiple unlinked tasks
+**Given** Phase 2 (URE) completes **when** requirements are captured **then** create a URD task (label `pasture:urd`) as the single source of truth for user requirements **should never** scatter requirements across multiple unlinked tasks
 
 **Given** a URD exists **when** any phase creates or updates requirements **then** update the URD via `bd comments add <urd-id> "..."` **should never** leave the URD stale when scope changes
 
@@ -110,7 +110,7 @@ bd dep add ure-id --blocked-by request-id
 
 **Given** inter-agent communication is needed **then** use beads for coordination (`bd comments add`, `bd update --notes`, `bd show`). **SHOULD NOT** reference `aura agent send/broadcast/inbox` — that CLI does not exist.
 
-**Given** you are assigning work to a teammate via TeamCreate/SendMessage **when** composing the message **then** MUST include: (1) explicit skill invocation instruction (e.g., `Skill(/aura:worker)`), (2) all relevant Beads task IDs, (3) `bd show <task-id>` commands for each reference, and (4) the handoff document path if applicable. **SHOULD NEVER** send bare instructions without Beads context — teammates spawned via TeamCreate have zero prior context and cannot see your conversation history or task tree.
+**Given** you are assigning work to a teammate via TeamCreate/SendMessage **when** composing the message **then** MUST include: (1) explicit skill invocation instruction (e.g., `Skill(/pasture:worker)`), (2) all relevant Beads task IDs, (3) `bd show <task-id>` commands for each reference, and (4) the handoff document path if applicable. **SHOULD NEVER** send bare instructions without Beads context — teammates spawned via TeamCreate have zero prior context and cannot see your conversation history or task tree.
 
 **Given** you are a supervisor **when** implementation work is needed (code edits, file creation, config changes — no matter how small) **then** MUST delegate to a worker teammate or subagent. **MUST NEVER** use Edit, Write, or other file-modification tools directly. The supervisor's role is coordination, tracking, and quality control — never implementation.
 
@@ -171,10 +171,10 @@ Before claiming completion:
 
 | Role | Responsibility | Label Awareness |
 |------|----------------|-----------------|
-| Architect | Specs, tradeoffs, validation checklist, BDD criteria | `aura:p3-plan`, `aura:p4-plan`, `aura:p6-plan`, `aura:p7-plan` |
-| Reviewer | End-user alignment, implementation gaps, MVP impact | `aura:p4-plan`, `aura:p10-impl`, `aura:severity:*` |
-| Supervisor | Vertical-slice task decomposition, worker allocation, merge order, commits | `aura:p8-impl`, `aura:p9-impl`, `aura:epic-followup` |
-| Worker | Vertical slice implementation (full production code path) | `aura:p9-impl:s9-slice` |
+| Architect | Specs, tradeoffs, validation checklist, BDD criteria | `pasture:p3-plan`, `pasture:p4-plan`, `pasture:p6-plan`, `pasture:p7-plan` |
+| Reviewer | End-user alignment, implementation gaps, MVP impact | `pasture:p4-plan`, `pasture:p10-impl`, `pasture:severity:*` |
+| Supervisor | Vertical-slice task decomposition, worker allocation, merge order, commits | `pasture:p8-impl`, `pasture:p9-impl`, `pasture:epic-followup` |
+| Worker | Vertical slice implementation (full production code path) | `pasture:p9-impl:s9-slice` |
 
 **Consensus:** All 3 reviewers must ACCEPT. Revisions loop until consensus.
 
@@ -189,7 +189,7 @@ Phase 2:  ELICIT (URE survey, s2_1) → URD (s2_2, single source of truth)
 Phase 3:  PROPOSAL-N (architect proposes, s3-propose)
 Phase 4:  PROPOSAL-N-REVIEW-{axis}-{round} (3 axis-specific reviewers: A/B/C, ACCEPT/REVISE)
 Phase 5:  Plan UAT (user acceptance test on plan)
-Phase 6:  Ratification (aura:superseded marks old proposals)
+Phase 6:  Ratification (pasture:superseded marks old proposals)
 Phase 7:  Handoff (architect → supervisor, stored at .git/.aura/handoff/)
 Phase 8:  IMPL_PLAN (supervisor decomposes into slices + leaf tasks)
 Phase 9:  SLICE-N (parallel workers, each owns one production code path)
@@ -206,41 +206,41 @@ Phase 12: Landing (commit, push, hand off)
 ### Label Schema
 
 ```
-Format: aura:p{phase}-{domain}:s{step}-{type}
+Format: pasture:p{phase}-{domain}:s{step}-{type}
 
 Phase-domain pairs:
-  aura:p1-user     — Request + classify + research + explore
-  aura:p2-user     — Elicit + URD
-  aura:p3-plan     — Propose
-  aura:p4-plan     — Plan review
-  aura:p5-user     — Plan UAT
-  aura:p6-plan     — Ratify
-  aura:p7-plan     — Handoff
-  aura:p8-impl     — Impl plan
-  aura:p9-impl     — Worker slices
-  aura:p10-impl    — Code review
-  aura:p11-user    — Impl UAT
-  aura:p12-impl    — Landing
+  pasture:p1-user     — Request + classify + research + explore
+  pasture:p2-user     — Elicit + URD
+  pasture:p3-plan     — Propose
+  pasture:p4-plan     — Plan review
+  pasture:p5-user     — Plan UAT
+  pasture:p6-plan     — Ratify
+  pasture:p7-plan     — Handoff
+  pasture:p8-impl     — Impl plan
+  pasture:p9-impl     — Worker slices
+  pasture:p10-impl    — Code review
+  pasture:p11-user    — Impl UAT
+  pasture:p12-impl    — Landing
 
 Special labels:
-  aura:urd                  — User Requirements Document
-  aura:superseded           — Superseded proposal/plan
-  aura:severity:blocker     — Blocker severity group
-  aura:severity:important   — Important severity group
-  aura:severity:minor       — Minor severity group
-  aura:epic-followup        — Follow-up epic
+  pasture:urd                  — User Requirements Document
+  pasture:superseded           — Superseded proposal/plan
+  pasture:severity:blocker     — Blocker severity group
+  pasture:severity:important   — Important severity group
+  pasture:severity:minor       — Minor severity group
+  pasture:epic-followup        — Follow-up epic
 ```
 
 ### Task Title Conventions
 
 | Title Format | Label | Created By |
 |---|---|---|
-| `REQUEST: Description` | `aura:p1-user:s1_1-classify` | User or Coordinator |
-| `PROPOSAL-N: Description` | `aura:p3-plan:s3-propose` | Architect |
-| `PROPOSAL-N-REVIEW-{axis}-{round}: Description` | `aura:p4-plan:s4-review` | Reviewers |
-| `URD: Description` | `aura:urd` | Architect (after Phase 2) |
-| `IMPL_PLAN: Description` | `aura:p8-impl:s8-plan` | Supervisor |
-| `SLICE-N: Description` | `aura:p9-impl:s9-slice` | Workers |
+| `REQUEST: Description` | `pasture:p1-user:s1_1-classify` | User or Coordinator |
+| `PROPOSAL-N: Description` | `pasture:p3-plan:s3-propose` | Architect |
+| `PROPOSAL-N-REVIEW-{axis}-{round}: Description` | `pasture:p4-plan:s4-review` | Reviewers |
+| `URD: Description` | `pasture:urd` | Architect (after Phase 2) |
+| `IMPL_PLAN: Description` | `pasture:p8-impl:s8-plan` | Supervisor |
+| `SLICE-N: Description` | `pasture:p9-impl:s9-slice` | Workers |
 
 ### Frontmatter References
 
@@ -277,9 +277,9 @@ Code review rounds (Phase 10) use a severity tree with **EAGER creation**:
 
 ```bash
 # Create all 3 severity groups immediately (EAGER, not lazy)
-bd create --title "SLICE-1-REVIEW-A-1 BLOCKER" --labels "aura:severity:blocker" ...
-bd create --title "SLICE-1-REVIEW-A-1 IMPORTANT" --labels "aura:severity:important" ...
-bd create --title "SLICE-1-REVIEW-A-1 MINOR" --labels "aura:severity:minor" ...
+bd create --title "SLICE-1-REVIEW-A-1 BLOCKER" --labels "pasture:severity:blocker" ...
+bd create --title "SLICE-1-REVIEW-A-1 IMPORTANT" --labels "pasture:severity:important" ...
+bd create --title "SLICE-1-REVIEW-A-1 MINOR" --labels "pasture:severity:minor" ...
 
 # Empty groups have no children and are closed immediately
 bd close <empty-important-id>
@@ -287,7 +287,7 @@ bd close <empty-minor-id>
 ```
 
 **Dual-parent BLOCKER relationship:** BLOCKER findings have two parents:
-1. The severity group task (`aura:severity:blocker`)
+1. The severity group task (`pasture:severity:blocker`)
 2. The proposal or slice they block (via `bd dep add <slice-id> --blocked-by <blocker-finding-id>`)
 
 This ensures BLOCKERs both categorize under the severity tree AND block the artifact they apply to.
@@ -298,7 +298,7 @@ This ensures BLOCKERs both categorize under the severity tree AND block the arti
 
 **Trigger:** Review completion + ANY IMPORTANT or MINOR findings exist (NOT gated on BLOCKER resolution).
 
-**Owner:** Supervisor creates the follow-up epic (label `aura:epic-followup`).
+**Owner:** Supervisor creates the follow-up epic (label `pasture:epic-followup`).
 
 **Content:** Aggregated IMPORTANT and MINOR findings from the review round, organized by priority.
 
@@ -393,7 +393,7 @@ See [HANDOFF_TEMPLATE.md](HANDOFF_TEMPLATE.md) for the standardized template.
 - NEVER stop before pushing — that leaves work stranded locally
 - NEVER say "ready to push when you are" — YOU must push
 - If push fails, resolve and retry until it succeeds
-- Use new label format (`aura:p{N}-{domain}:s{M}-{type}`) for all beads operations
+- Use new label format (`pasture:p{N}-{domain}:s{M}-{type}`) for all beads operations
 
 ## References
 

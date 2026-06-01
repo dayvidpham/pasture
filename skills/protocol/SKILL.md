@@ -1,11 +1,11 @@
 ---
 name: protocol
-description: Aura protocol reference documentation — 12-phase workflow, agent roles, constraints, and coding standards. Read when you need to understand the full workflow or look up conventions.
+description: Pasture protocol reference documentation — 12-phase workflow, agent roles, constraints, and coding standards. Read when you need to understand the full workflow or look up conventions.
 ---
 
-# Aura Protocol Reference
+# Pasture Protocol Reference
 
-Complete reference documentation for the Aura 12-phase workflow system.
+Complete reference documentation for the Pasture 12-phase workflow system.
 
 ## Documents
 
@@ -16,7 +16,7 @@ Complete reference documentation for the Aura 12-phase workflow system.
 | [PROCESS.md](PROCESS.md) | Step-by-step workflow execution (single source of truth) |
 | [AGENTS.md](AGENTS.md) | Agent roles, phase ownership, and handoff procedures |
 | [CONSTRAINTS.md](CONSTRAINTS.md) | Coding standards, naming conventions, and checklists |
-| [CLAUDE.md](CLAUDE.md) | Reusable agent directive for projects using Aura |
+| [CLAUDE.md](CLAUDE.md) | Reusable agent directive for projects using Pasture |
 | [SKILLS.md](SKILLS.md) | Complete skill reference by role and phase |
 | [README.md](README.md) | Protocol overview and quick-start |
 | [schema.xml](schema.xml) | Beads label schema (XML format) |
