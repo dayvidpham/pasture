@@ -505,8 +505,9 @@ func TestSkillBodySpecsCompleteness(t *testing.T) {
 //  1. The section is now a fragment marker referencing FragRevPlanVoteOptions
 //     (SLICE-4 promotes it to a fragment for registry completeness).
 //  2. FragRevPlanVoteOptions content differs from FragRevVoteOptions (code-review
-//     vote table) in both the ACCEPT row wording and the final line — confirming
-//     the two vote tables are legitimately distinct and must not be merged (D2).
+//     vote table) in the final line — confirming the two vote tables are
+//     legitimately distinct and must not be merged (D2). The ACCEPT-row wording
+//     is shared (unified per UAT-2).
 func TestRevPlanVoteOptionsDistinct(t *testing.T) {
 	const planSkillKey = "reviewer-review-plan"
 
@@ -550,5 +551,5 @@ func TestRevPlanVoteOptionsDistinct(t *testing.T) {
 
 	assert.NotEqual(t, planFrag.Prose.Content, codeReviewFrag.Prose.Content,
 		"FragRevPlanVoteOptions content must differ from FragRevVoteOptions — "+
-			"ACCEPT row and final line are legitimately different; merging would be wrong")
+			"the final line is legitimately different; merging would be wrong")
 }

@@ -162,11 +162,12 @@ const (
 	// ── SLICE-4: plan-review vote options (DISTINCT from code-review fragment) ──
 
 	// FragRevPlanVoteOptions is the vote-options table for PLAN reviews (Phase 3
-	// architect-request-review). DISTINCT from FragRevVoteOptions (code review):
-	// - ACCEPT row: "All 6 criteria satisfied; no BLOCKER items"
-	// - Final line: "Binary only. No severity tree for plan reviews."
-	// Single-owner (reviewer-review-plan), but promoted to a fragment for
-	// registry completeness and D2 distinctness enforcement.
+	// architect-request-review). DISTINCT from FragRevVoteOptions (code review)
+	// by its final line: "Binary only. No severity tree for plan reviews."
+	// (vs code review's "Binary only. No intermediate levels."); the ACCEPT-row
+	// wording is shared (unified per UAT-2). Single-owner (reviewer-review-plan),
+	// but promoted to a fragment for registry completeness and D2 distinctness
+	// enforcement.
 	FragRevPlanVoteOptions FragmentId = "frag--rev-plan-vote-options"
 )
 

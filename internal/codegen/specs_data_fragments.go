@@ -235,22 +235,19 @@ Severity groups:
 
 	// ── SLICE-4 prose fragment ─────────────────────────────────────────────────
 
-	// FragRevPlanVoteOptions is DISTINCT from FragRevVoteOptions (code review).
-	// Two legitimate differences (D2 confirmed, worker-b 10.2):
-	//   - ACCEPT row: "All 6 criteria satisfied; no BLOCKER items"
-	//     vs code review: "All review criteria satisfied; no BLOCKER items"
-	//   - Final line: "Binary only. No severity tree for plan reviews."
-	//     vs code review: "Binary only. No intermediate levels."
-	// Single-owner (reviewer-review-plan), promoted for registry completeness
-	// and validator-enforced distinctness. Content preserved verbatim → golden
-	// for reviewer-review-plan/SKILL.md is byte-identical after the fragRef swap.
+	// FragRevPlanVoteOptions is DISTINCT from FragRevVoteOptions (code review) by
+	// its final line: "Binary only. No severity tree for plan reviews."
+	// (vs code review's "Binary only. No intermediate levels."). The ACCEPT-row
+	// wording is shared (unified per UAT-2). The two fragments must NOT be merged
+	// (D2). Single-owner (reviewer-review-plan), promoted for registry
+	// completeness and validator-enforced distinctness.
 	FragRevPlanVoteOptions: func() SharedFragment {
 		prose := ProseSection{
 			Id:    string(FragRevPlanVoteOptions),
 			Title: "Vote Options",
 			Content: `| Vote | When |
 |------|------|
-| ACCEPT | All 6 criteria satisfied; no BLOCKER items |
+| ACCEPT | All review criteria satisfied; no BLOCKER items |
 | REVISE | BLOCKER issues found; must provide actionable feedback |
 
 Binary only. No severity tree for plan reviews.`,
