@@ -80,6 +80,7 @@ func newBumpCmd(kind string) *cobra.Command {
 		noChangelog bool
 		noCommit    bool
 		noTag       bool
+		plugin      string
 	)
 
 	cmd := &cobra.Command{
@@ -107,6 +108,7 @@ func newBumpCmd(kind string) *cobra.Command {
 				NoCommit:    noCommit,
 				NoTag:       noTag,
 				RepoRoot:    root,
+				Plugin:      plugin,
 			})
 		},
 	}
@@ -116,6 +118,10 @@ func newBumpCmd(kind string) *cobra.Command {
 	cmd.Flags().BoolVar(&noChangelog, "no-changelog", false, "Skip changelog generation")
 	cmd.Flags().BoolVar(&noCommit, "no-commit", false, "Skip git commit")
 	cmd.Flags().BoolVar(&noTag, "no-tag", false, "Skip git tag")
+	cmd.Flags().StringVar(&plugin, "plugin", "",
+		"After commit/tag, sync this plugin's entry in its registered (cross-repo) "+
+			"marketplace.json to the new version (leaves that marketplace's "+
+			"metadata.version untouched)")
 	return cmd
 }
 

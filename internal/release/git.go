@@ -32,6 +32,48 @@ func GitStatus(dir string) (string, error) {
 	return gitRun(dir, "status", "--porcelain")
 }
 
+// GitIsDetachedHead reports whether the repository at dir has a detached HEAD
+// (i.e. HEAD points at a commit rather than a branch). It mirrors
+// aura-release's is_detached_head, which runs `git symbolic-ref --quiet HEAD`.
+//
+// The probe distinguishes three exit states, because not every non-zero exit
+// means "detached":
+//   - exit 0   → HEAD resolves to a branch ref            → (false, nil)
+//   - exit 1   → HEAD is valid but resolves to no branch  → (true, nil) detached
+//   - exit 128 → not a git repository (or git unusable)   → (false, nil)
+//
+// Exit 128 is deliberately treated as "not detached" rather than an error: the
+// caller's subsequent working-tree validation (GitStatus) surfaces genuine
+// "not a git repo" problems for real releases, while dry-run flows that operate
+// on a non-repo directory must not be blocked by this pre-flight guard. Only a
+// genuine detached HEAD (exit 1) should block a release.
+func GitIsDetachedHead(dir string) (bool, error) {
+	cmd := exec.Command("git", "symbolic-ref", "--quiet", "HEAD") //nolint:gosec
+	cmd.Dir = dir
+	var errOut bytes.Buffer
+	cmd.Stderr = &errOut
+	err := cmd.Run()
+	if err == nil {
+		// HEAD resolves to a branch ref → not detached.
+		return false, nil
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		// Exit 1 = valid repo, HEAD not a branch → genuinely detached.
+		// Any other non-zero (notably 128 = not a git repo) is NOT a detached
+		// HEAD; let the working-tree check handle non-repo errors instead.
+		if exitErr.ExitCode() == 1 {
+			return true, nil
+		}
+		return false, nil
+	}
+	// git could not be executed at all (missing binary, etc.).
+	return false, fmt.Errorf(
+		"workflow error: cannot determine HEAD state in %s — %w — stderr: %s — "+
+			"ensure git is installed and on PATH",
+		dir, err, errOut.String(),
+	)
+}
+
 // GitTag creates an annotated git tag at HEAD in dir.
 func GitTag(dir, tag, message string) error {
 	_, err := gitRun(dir, "tag", "-a", tag, "-m", message)

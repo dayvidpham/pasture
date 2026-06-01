@@ -1,8 +1,10 @@
 package release_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/release"
@@ -182,6 +184,125 @@ func TestMarketplaceVersionFile(t *testing.T) {
 	got, _ = vf.Read()
 	if got != "4.0.0" {
 		t.Errorf("after Write, Read() = %q, want %q", got, "4.0.0")
+	}
+}
+
+// ─── WritePluginVersion (plugins[].version by name) ───────────────────────────
+
+// populatedMarketplace is a marketplace.json fixture with a non-empty plugins[]
+// array. metadata.version is the marketplace's OWN version; each plugin entry
+// carries its own version. WritePluginVersion must touch only the named
+// plugin's version and leave metadata.version alone.
+const populatedMarketplace = `{
+  "metadata": {"version": "9.9.9"},
+  "plugins": [
+    {"name": "alpha", "source": "./alpha", "version": "1.0.0"},
+    {"name": "pasture", "source": "./pasture", "version": "0.0.1"}
+  ]
+}
+`
+
+func writeMarketplaceFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "marketplace.json")
+	if err := os.WriteFile(path, []byte(populatedMarketplace), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// readPluginVersion reads plugins[name].version out of a marketplace.json.
+func readPluginVersion(t *testing.T, path, name string) (string, bool) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var obj map[string]interface{}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		t.Fatal(err)
+	}
+	plugins, _ := obj["plugins"].([]interface{})
+	for _, p := range plugins {
+		entry, _ := p.(map[string]interface{})
+		if n, _ := entry["name"].(string); n == name {
+			v, ok := entry["version"].(string)
+			return v, ok
+		}
+	}
+	return "", false
+}
+
+func readMarketplaceMetaVersion(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var obj map[string]interface{}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		t.Fatal(err)
+	}
+	meta, _ := obj["metadata"].(map[string]interface{})
+	v, _ := meta["version"].(string)
+	return v
+}
+
+func TestWritePluginVersion_UpdatesNamedEntry(t *testing.T) {
+	path := writeMarketplaceFixture(t)
+
+	if err := release.WritePluginVersion(path, "pasture", "0.2.0", false); err != nil {
+		t.Fatalf("WritePluginVersion() error: %v", err)
+	}
+
+	// Named plugin updated.
+	got, ok := readPluginVersion(t, path, "pasture")
+	if !ok || got != "0.2.0" {
+		t.Errorf("plugins[pasture].version = %q (ok=%v), want %q", got, ok, "0.2.0")
+	}
+	// Other plugin untouched.
+	if got, _ := readPluginVersion(t, path, "alpha"); got != "1.0.0" {
+		t.Errorf("plugins[alpha].version = %q, want %q (should be untouched)", got, "1.0.0")
+	}
+	// metadata.version PRESERVED — this is the core invariant.
+	if got := readMarketplaceMetaVersion(t, path); got != "9.9.9" {
+		t.Errorf("metadata.version = %q, want %q (must be preserved)", got, "9.9.9")
+	}
+}
+
+func TestWritePluginVersion_AbsentName_ActionableError(t *testing.T) {
+	path := writeMarketplaceFixture(t)
+
+	err := release.WritePluginVersion(path, "nonexistent", "1.2.3", false)
+	if err == nil {
+		t.Fatal("expected error for absent plugin name, got nil")
+	}
+	msg := err.Error()
+	// Actionable: must name the missing plugin, the file, and list what IS there.
+	for _, want := range []string{"nonexistent", "marketplace", "alpha", "pasture"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message missing %q — not actionable: %v", want, err)
+		}
+	}
+	// The file must be unchanged after a failed lookup.
+	if got := readMarketplaceMetaVersion(t, path); got != "9.9.9" {
+		t.Errorf("metadata.version changed after failed write: %q", got)
+	}
+}
+
+func TestWritePluginVersion_DryRun_WritesNothing(t *testing.T) {
+	path := writeMarketplaceFixture(t)
+
+	if err := release.WritePluginVersion(path, "pasture", "0.2.0", true); err != nil {
+		t.Fatalf("WritePluginVersion(dryRun) error: %v", err)
+	}
+	// dry-run must not modify the file at all.
+	if got, _ := readPluginVersion(t, path, "pasture"); got != "0.0.1" {
+		t.Errorf("dry-run modified plugins[pasture].version to %q, want %q", got, "0.0.1")
+	}
+	if got := readMarketplaceMetaVersion(t, path); got != "9.9.9" {
+		t.Errorf("dry-run modified metadata.version to %q", got)
 	}
 }
 

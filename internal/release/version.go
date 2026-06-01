@@ -332,6 +332,128 @@ func (f *MarketplaceVersionFile) Write(version string, dryRun bool) error {
 	return nil
 }
 
+// WritePluginVersion sets the version of a single entry in a marketplace.json
+// "plugins" array, matched by plugin name, leaving "metadata.version" (the
+// marketplace's own version) completely untouched.
+//
+// This is the per-plugin counterpart to MarketplaceVersionFile.Write (which
+// only touches metadata.version). It exists so a release in one repository can
+// keep a CROSS-REPO marketplace's plugins[<name>] entry in sync — e.g. the
+// parent aura-plugins marketplace tracks pasture as plugins[pasture] while
+// pasture itself lives in a separate submodule.
+//
+// Parameters:
+//   - path:       absolute path to the marketplace.json to update.
+//   - pluginName: the "name" field of the plugins[] entry to update.
+//   - version:    the new version string to write into that entry.
+//   - dryRun:     when true, prints the intended change and writes nothing.
+//
+// It returns an actionable error when: the file cannot be read; the JSON is
+// malformed; the top-level "plugins" array is missing or not an array; or no
+// entry with the given name exists.
+func WritePluginVersion(path, pluginName, version string, dryRun bool) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf(
+			"validation error: cannot read marketplace file %s — %w — "+
+				"check the path exists and is readable, or register the correct "+
+				"marketplace path with 'pasture-release registry add'",
+			path, err,
+		)
+	}
+	var obj map[string]interface{}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return fmt.Errorf(
+			"validation error: marketplace file %s is not valid JSON — %w — "+
+				"fix the JSON syntax in %s before releasing",
+			path, err, path,
+		)
+	}
+	rawPlugins, ok := obj["plugins"]
+	if !ok {
+		return fmt.Errorf(
+			`validation error: marketplace file %s has no "plugins" array — `+
+				`cannot sync plugin %q because the marketplace declares no plugins — `+
+				`add a "plugins": [{"name": %q, "version": "X.Y.Z"}] array to %s`,
+			path, pluginName, pluginName, path,
+		)
+	}
+	plugins, ok := rawPlugins.([]interface{})
+	if !ok {
+		return fmt.Errorf(
+			`validation error: "plugins" in marketplace file %s is not an array `+
+				`(found %T) — cannot sync plugin %q — `+
+				`ensure "plugins" is a JSON array of plugin objects in %s`,
+			path, rawPlugins, pluginName, path,
+		)
+	}
+
+	found := false
+	for i := range plugins {
+		entry, ok := plugins[i].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _ := entry["name"].(string)
+		if name != pluginName {
+			continue
+		}
+		entry["version"] = version
+		plugins[i] = entry
+		found = true
+		break
+	}
+	if !found {
+		var names []string
+		for i := range plugins {
+			if entry, ok := plugins[i].(map[string]interface{}); ok {
+				if n, ok := entry["name"].(string); ok {
+					names = append(names, n)
+				}
+			}
+		}
+		available := "(none)"
+		if len(names) > 0 {
+			available = strings.Join(names, ", ")
+		}
+		return fmt.Errorf(
+			"validation error: marketplace file %s has no plugin entry named %q — "+
+				"cannot sync its version to %s because the registry pointed at a "+
+				"marketplace that does not list this plugin — "+
+				"available plugin entries: %s — "+
+				"add a {\"name\": %q, ...} entry to the \"plugins\" array in %s, or "+
+				"correct the --plugin name / registry path",
+			path, pluginName, version, available, pluginName, path,
+		)
+	}
+
+	obj["plugins"] = plugins
+	if dryRun {
+		fmt.Printf(
+			"[dry-run] would update marketplace %s: plugins[%s].version -> %s "+
+				"(metadata.version preserved)\n",
+			path, pluginName, version,
+		)
+		return nil
+	}
+	out, err := json.MarshalIndent(obj, "", "  ")
+	if err != nil {
+		return fmt.Errorf(
+			"validation error: cannot marshal updated marketplace %s — %w",
+			path, err,
+		)
+	}
+	out = append(out, '\n')
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		return fmt.Errorf(
+			"validation error: cannot write updated marketplace %s — %w — "+
+				"check file permissions",
+			path, err,
+		)
+	}
+	return nil
+}
+
 // ─── Discovery ───────────────────────────────────────────────────────────────
 
 // skipDirs lists directories that are excluded from version file scanning.

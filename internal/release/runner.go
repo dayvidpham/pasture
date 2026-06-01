@@ -27,18 +27,30 @@ type ReleaseOptions struct {
 	NoTag bool
 	// RepoRoot is the absolute path to the repository root.
 	RepoRoot string
+	// Plugin, when non-empty, names the plugin whose entry in a registered
+	// CROSS-REPO marketplace.json should be synced to the new version AFTER
+	// the in-repo commit/tag succeed (mirrors aura-release --plugin). The
+	// marketplace path is looked up via the plugin registry (see RegistryPath).
+	Plugin string
+	// RegistryPath overrides the plugin registry location used to resolve the
+	// cross-repo marketplace path for Plugin. When empty, DefaultRegistryPath()
+	// is used. Exposed primarily so integration tests can point at a temp
+	// registry; production callers leave it empty.
+	RegistryPath string
 }
 
 // RunRelease executes the full release workflow for a single repository.
 //
 // Workflow:
 //  1. Discover version files.
-//  2. Validate working tree (unless dry-run).
-//  3. Optionally sync version drift.
-//  4. Bump version across all files.
-//  5. Generate changelog.
-//  6. Git commit.
-//  7. Git tag.
+//  2. Pre-flight: refuse to release from a detached HEAD.
+//  3. Validate working tree (unless dry-run).
+//  4. Optionally sync version drift.
+//  5. Bump version across all files.
+//  6. Generate changelog.
+//  7. Git commit.
+//  8. Git tag.
+//  9. Optionally sync a plugin's entry in a cross-repo marketplace (--plugin).
 func RunRelease(opts ReleaseOptions) error {
 	prefix := ""
 	if opts.DryRun {
@@ -59,7 +71,25 @@ func RunRelease(opts ReleaseOptions) error {
 		)
 	}
 
-	// 2. Validate working tree.
+	// 2. Pre-flight: refuse to release from a detached HEAD (mirrors
+	// aura-release:617-621). A detached HEAD has no branch to advance, so a
+	// release commit/tag would be stranded. This guard runs even in dry-run so
+	// previews surface the same blocker an actual release would hit.
+	detached, err := GitIsDetachedHead(opts.RepoRoot)
+	if err != nil {
+		return err
+	}
+	if detached {
+		return fmt.Errorf(
+			"validation error: cannot release from a detached HEAD in %s — "+
+				"HEAD points at a commit, not a branch, so the release commit/tag "+
+				"would be stranded — "+
+				"switch to a branch first, e.g. 'git checkout main', then re-run",
+			opts.RepoRoot,
+		)
+	}
+
+	// 3. Validate working tree.
 	if !opts.DryRun {
 		status, err := GitStatus(opts.RepoRoot)
 		if err != nil {
@@ -74,7 +104,7 @@ func RunRelease(opts ReleaseOptions) error {
 		}
 	}
 
-	// 3. Read current versions and optionally sync.
+	// 4. Read current versions and optionally sync.
 	versions := make(map[string]string, len(files))
 	for _, vf := range files {
 		v, err := vf.Read()
@@ -107,7 +137,7 @@ func RunRelease(opts ReleaseOptions) error {
 		}
 	}
 
-	// 4. Bump version.
+	// 5. Bump version.
 	if !opts.BumpKind.IsValid() {
 		return fmt.Errorf(
 			"validation error: unknown bump kind %q — "+
@@ -141,7 +171,7 @@ func RunRelease(opts ReleaseOptions) error {
 		}
 	}
 
-	// 5. Changelog.
+	// 6. Changelog.
 	changelogPath := filepath.Join(opts.RepoRoot, "CHANGELOG.md")
 	if !opts.NoChangelog {
 		entry, err := buildChangelogEntry(opts.RepoRoot, bumped)
@@ -160,7 +190,7 @@ func RunRelease(opts ReleaseOptions) error {
 		}
 	}
 
-	// 6. Git commit.
+	// 7. Git commit.
 	if !opts.NoCommit {
 		var stageFiles []string
 		for _, vf := range files {
@@ -185,21 +215,113 @@ func RunRelease(opts ReleaseOptions) error {
 		}
 	}
 
-	// 7. Git tag.
+	// 8. Git tag.
 	if !opts.NoTag {
 		if opts.DryRun {
 			fmt.Printf("%sWould tag: %s\n", prefix, tagName)
 		} else {
 			if err := GitTag(opts.RepoRoot, tagName, "Release "+bumpedStr); err != nil {
+				// Roll back the in-repo commit + file writes if tagging fails,
+				// so a failed release does not leave a dangling commit.
+				_ = GitRollback(opts.RepoRoot, tagName)
 				return err
 			}
 			fmt.Printf("%sTagged: %s\n", prefix, tagName)
 		}
 	}
 
+	// 9. Cross-repo marketplace sync — AFTER commit/tag (mirrors aura-release).
+	// When --plugin is set, sync the named plugin's entry in a registered
+	// (possibly cross-repo) marketplace.json to the new version, leaving that
+	// marketplace's own metadata.version untouched.
+	if opts.Plugin != "" {
+		if err := syncCrossRepoMarketplace(opts, files, bumpedStr, prefix); err != nil {
+			return err
+		}
+	}
+
 	fmt.Printf("\n%sRelease %s complete!\n", prefix, tagName)
 	if !opts.DryRun && !opts.NoCommit {
 		fmt.Println("Next: git push && git push --tags")
+	}
+	return nil
+}
+
+// syncCrossRepoMarketplace resolves opts.Plugin to its registered marketplace
+// path and writes the new version into that marketplace's plugins[<name>]
+// entry. It runs AFTER the in-repo commit/tag so the cross-repo write does not
+// pollute this repo's release commit.
+//
+// Double-bump guard: if the resolved marketplace path is the SAME file that was
+// already discovered and bumped in step 4 (i.e. the marketplace lives inside
+// this repo and was bumped as part of the normal flow), the per-plugin write is
+// skipped — the in-repo bump already wrote metadata.version and re-writing
+// plugins[].version here would be redundant / conflicting. This mirrors
+// aura-release:734-743.
+//
+// discovered are the version files bumped in the main flow; bumpedStr is the
+// new version; prefix is the dry-run log prefix.
+func syncCrossRepoMarketplace(opts ReleaseOptions, discovered []VersionFile, bumpedStr, prefix string) error {
+	registryPath := opts.RegistryPath
+	if registryPath == "" {
+		registryPath = DefaultRegistryPath()
+	}
+
+	var registry PluginRegistry
+	if err := registry.Load(registryPath); err != nil {
+		return fmt.Errorf(
+			"workflow error: --plugin %q was requested but the plugin registry "+
+				"at %s could not be loaded — %w — "+
+				"create it with 'pasture-release registry init' and register the "+
+				"plugin with 'pasture-release registry add', or omit --plugin",
+			opts.Plugin, registryPath, err,
+		)
+	}
+
+	pluginEntry, marketplaceEntry := registry.FindPlugin(opts.Plugin, opts.RepoRoot)
+	if pluginEntry == nil || marketplaceEntry == nil {
+		return fmt.Errorf(
+			"workflow error: --plugin %q has no matching entry in the plugin "+
+				"registry at %s — cannot sync its cross-repo marketplace because "+
+				"the registry does not know where that marketplace lives — "+
+				"register it with 'pasture-release registry add %s --remote <url>', "+
+				"or omit --plugin to skip the cross-repo sync",
+			opts.Plugin, registryPath, opts.Plugin,
+		)
+	}
+
+	// Resolve the registered marketplace path to an absolute path for a
+	// reliable comparison against the discovered (already-bumped) files.
+	resolvedMarketplace, err := filepath.Abs(marketplaceEntry.Path)
+	if err != nil {
+		resolvedMarketplace = marketplaceEntry.Path
+	}
+
+	// Double-bump guard: skip if this marketplace was already bumped in-repo.
+	for _, vf := range discovered {
+		resolvedDiscovered, dErr := filepath.Abs(vf.Path())
+		if dErr != nil {
+			resolvedDiscovered = vf.Path()
+		}
+		if resolvedDiscovered == resolvedMarketplace {
+			fmt.Printf(
+				"%sSkipping cross-repo marketplace sync for plugin %q: %s was "+
+					"already bumped in this repo (double-bump guard)\n",
+				prefix, opts.Plugin, resolvedMarketplace,
+			)
+			return nil
+		}
+	}
+
+	fmt.Printf(
+		"%sSyncing marketplace %s: plugins[%s].version -> %s\n",
+		prefix, resolvedMarketplace, opts.Plugin, bumpedStr,
+	)
+	if err := WritePluginVersion(resolvedMarketplace, opts.Plugin, bumpedStr, opts.DryRun); err != nil {
+		return fmt.Errorf(
+			"workflow error: failed to sync plugin %q into marketplace %s — %w",
+			opts.Plugin, resolvedMarketplace, err,
+		)
 	}
 	return nil
 }
