@@ -1,6 +1,6 @@
 # Migration Procedure: Pasture Protocol v1 → v2
 
-This document describes how to migrate existing Aura protocol usage from v1 labels and conventions to v2.
+This document describes how to migrate existing Pasture protocol usage from v1 labels and conventions to v2.
 
 ## Principles
 
