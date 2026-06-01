@@ -19,7 +19,7 @@ import (
 // ─── Helper constructors ──────────────────────────────────────────────────────
 
 // TestFragRef_MarkerOnly verifies that fragRef returns a ProseSection whose
-// only non-zero field is FragmentId.
+// only non-zero field is FragRef.
 func TestFragRef_MarkerOnly(t *testing.T) {
 	ref := fragRef("my-frag")
 	assert.Equal(t, FragmentId("my-frag"), ref.FragRef, "FragRef must be set")
@@ -30,7 +30,7 @@ func TestFragRef_MarkerOnly(t *testing.T) {
 }
 
 // TestBehaviorRef_MarkerOnly verifies that behaviorRef returns a BehaviorSpec
-// whose only non-zero field is FragmentId.
+// whose only non-zero field is FragRef.
 func TestBehaviorRef_MarkerOnly(t *testing.T) {
 	ref := behaviorRef("my-beh")
 	assert.Equal(t, FragmentId("my-beh"), ref.FragRef, "FragRef must be set")
@@ -155,7 +155,7 @@ func TestResolveBodyFragments_BehaviorByteIdentical(t *testing.T) {
 }
 
 // TestResolveBodyFragments_Passthrough verifies that entries without a
-// FragmentId are passed through unchanged.
+// FragRef are passed through unchanged.
 func TestResolveBodyFragments_Passthrough(t *testing.T) {
 	registry := fixtureRegistry()
 
@@ -192,7 +192,7 @@ func TestResolveBodyFragments_EmptyRegistryNoOp(t *testing.T) {
 }
 
 // TestResolveBodyFragments_UnresolvableMarkerError verifies that a marker with
-// a FragmentId not present in the registry returns an actionable error.
+// a FragRef not present in the registry returns an actionable error.
 func TestResolveBodyFragments_UnresolvableMarkerError(t *testing.T) {
 	registry := fixtureRegistry()
 
@@ -207,7 +207,7 @@ func TestResolveBodyFragments_UnresolvableMarkerError(t *testing.T) {
 	assert.Contains(t, err.Error(), "consumer-x", "error must name the consumer skill")
 }
 
-// TestResolveBodyFragments_NestedSubsections verifies that FragmentId markers
+// TestResolveBodyFragments_NestedSubsections verifies that FragRef markers
 // in ProseSection.Subsections are also resolved.
 func TestResolveBodyFragments_NestedSubsections(t *testing.T) {
 	registry := fixtureRegistry()

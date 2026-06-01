@@ -6,7 +6,7 @@
 //
 // Coverage:
 //   - Duplicate ID in each namespace (6 namespaces × 1 test each)
-//   - Unresolved FragmentId marker (ProseSection + BehaviorSpec)
+//   - Unresolved FragRef marker (ProseSection + BehaviorSpec)
 //   - Invalid fragment (no payload / both payloads / kind mismatch)
 //   - Clean fixture → nil
 //   - Real registry (post rev-vote-options dedup) → nil
@@ -47,7 +47,7 @@ func minimalCommandSpecs() map[string]CommandSpec {
 }
 
 // minimalBodySpecs returns a SkillBodySpecs map with one skill that has
-// one inline ProseSection and no FragmentId markers.
+// one inline ProseSection and no FragRef markers.
 func minimalBodySpecs(prosId string) map[string]SkillBody {
 	return map[string]SkillBody{
 		"test-skill": {
@@ -231,7 +231,7 @@ func TestValidateGlobalIDs_DuplicateInlineAcrossSkills(t *testing.T) {
 // ─── Unresolved marker tests ─────────────────────────────────────────────────
 
 // TestValidateGlobalIDs_UnresolvedProseSectionMarker verifies that a ProseSection
-// marker whose FragmentId is absent from SharedFragmentSpecs returns an
+// marker whose FragRef is absent from SharedFragmentSpecs returns an
 // UnresolvedMarker error.
 func TestValidateGlobalIDs_UnresolvedProseSectionMarker(t *testing.T) {
 	bodySpecs := map[string]SkillBody{
@@ -245,7 +245,7 @@ func TestValidateGlobalIDs_UnresolvedProseSectionMarker(t *testing.T) {
 
 	var marker *UnresolvedMarker
 	require.True(t, errors.As(err, &marker), "error must be *UnresolvedMarker")
-	assert.Equal(t, FragmentId("frag--does-not-exist"), marker.FragmentId)
+	assert.Equal(t, FragmentId("frag--does-not-exist"), marker.FragRef)
 	assert.Equal(t, "skill-with-marker", marker.ConsumerSkill)
 	assert.Equal(t, "ProseSection", marker.MarkerKind)
 	assert.Contains(t, err.Error(), "frag--does-not-exist")
@@ -253,7 +253,7 @@ func TestValidateGlobalIDs_UnresolvedProseSectionMarker(t *testing.T) {
 }
 
 // TestValidateGlobalIDs_UnresolvedBehaviorMarker verifies that a BehaviorSpec
-// marker whose FragmentId is absent from SharedFragmentSpecs returns an error.
+// marker whose FragRef is absent from SharedFragmentSpecs returns an error.
 func TestValidateGlobalIDs_UnresolvedBehaviorMarker(t *testing.T) {
 	bodySpecs := map[string]SkillBody{
 		"skill-b": {
@@ -266,7 +266,7 @@ func TestValidateGlobalIDs_UnresolvedBehaviorMarker(t *testing.T) {
 
 	var marker *UnresolvedMarker
 	require.True(t, errors.As(err, &marker))
-	assert.Equal(t, FragmentId("frag--missing-behavior"), marker.FragmentId)
+	assert.Equal(t, FragmentId("frag--missing-behavior"), marker.FragRef)
 	assert.Equal(t, "BehaviorSpec", marker.MarkerKind)
 }
 
@@ -284,7 +284,7 @@ func TestValidateGlobalIDs_FragmentNoPayload(t *testing.T) {
 
 	var inv *InvalidFragment
 	require.True(t, errors.As(err, &inv))
-	assert.Equal(t, FragmentId("frag-empty"), inv.FragmentId)
+	assert.Equal(t, FragmentId("frag-empty"), inv.FragRef)
 	assert.Contains(t, err.Error(), "frag-empty")
 }
 
@@ -302,7 +302,7 @@ func TestValidateGlobalIDs_FragmentBothPayloads(t *testing.T) {
 
 	var inv *InvalidFragment
 	require.True(t, errors.As(err, &inv))
-	assert.Equal(t, FragmentId("frag-both"), inv.FragmentId)
+	assert.Equal(t, FragmentId("frag-both"), inv.FragRef)
 }
 
 // TestValidateGlobalIDs_FragmentKindMismatch verifies that a fragment where Kind
@@ -319,7 +319,7 @@ func TestValidateGlobalIDs_FragmentKindMismatch(t *testing.T) {
 
 	var inv *InvalidFragment
 	require.True(t, errors.As(err, &inv))
-	assert.Equal(t, FragmentId("frag-mismatch"), inv.FragmentId)
+	assert.Equal(t, FragmentId("frag-mismatch"), inv.FragRef)
 }
 
 // ─── Happy path ───────────────────────────────────────────────────────────────

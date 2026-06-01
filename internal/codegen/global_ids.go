@@ -56,7 +56,7 @@ func (e *IDCollision) Error() string {
 	return fmt.Sprintf(
 		"codegen.ValidateGlobalIds: duplicate ID %q in namespace %q — "+
 			"what: two specs share the same ID string; "+
-			"why: global-ID uniqueness is required (URD R5/R7) to prevent ambiguous cross-references; "+
+			"why: global-ID uniqueness is required to prevent ambiguous cross-references; "+
 			"first occurrence: %s; second occurrence: %s; "+
 			"when: codegen pre-flight validation (go generate); "+
 			"what it means: generated SKILL.md files would contain ambiguous cross-references; "+
@@ -70,8 +70,8 @@ func (e *IDCollision) Error() string {
 // UnresolvedMarker describes a FragRef placement marker that references a
 // fragment not present in SharedFragmentSpecs.
 type UnresolvedMarker struct {
-	// FragmentId is the unresolvable marker reference.
-	FragmentId FragmentId
+	// FragRef is the unresolvable marker reference.
+	FragRef FragmentId
 
 	// ConsumerSkill is the SkillBodySpecs key where the marker appears.
 	ConsumerSkill string
@@ -91,17 +91,17 @@ func (e *UnresolvedMarker) Error() string {
 			"what it means: go generate would error at render time; "+
 			"fix: add fragment %q to SharedFragmentSpecs in specs_data_fragments.go "+
 			"with the appropriate Kind and non-nil payload",
-		e.MarkerKind, e.FragmentId, e.ConsumerSkill,
-		e.ConsumerSkill, e.MarkerKind, e.FragmentId,
-		e.FragmentId,
+		e.MarkerKind, e.FragRef, e.ConsumerSkill,
+		e.ConsumerSkill, e.MarkerKind, e.FragRef,
+		e.FragRef,
 	)
 }
 
 // InvalidFragment describes a SharedFragmentSpecs entry that violates the
 // exactly-one-payload rule (must have Prose XOR Behavior, never both/neither).
 type InvalidFragment struct {
-	// FragmentId is the offending fragment's map key.
-	FragmentId FragmentId
+	// FragRef is the offending fragment's map key.
+	FragRef FragmentId
 
 	// Reason describes the specific violation.
 	Reason string
@@ -117,7 +117,7 @@ func (e *InvalidFragment) Error() string {
 			"when: codegen pre-flight validation (go generate); "+
 			"fix: set exactly one of Prose or Behavior (never both, never neither) and set "+
 			"Kind to the matching FragmentKind constant",
-		e.FragmentId, e.Reason, e.FragmentId,
+		e.FragRef, e.Reason, e.FragRef,
 	)
 }
 
@@ -140,7 +140,7 @@ func (e *FragmentParityError) Error() string {
 			"codegen.ValidateGlobalIds: FragmentId constant %q has no matching entry in SharedFragmentSpecs — "+
 				"what: AllFragmentIds contains a constant that is not backed by a SharedFragmentSpecs entry; "+
 				"why: every declared FragmentId constant must have a corresponding fragment spec "+
-				"(URD R5 parity: set(AllFragmentIds) == set(keys(SharedFragmentSpecs))); "+
+				"(parity: set(AllFragmentIds) == set(keys(SharedFragmentSpecs))); "+
 				"where: constant declared in specs.go, specs_data_fragments.go has no matching key; "+
 				"when: codegen pre-flight validation (go generate); "+
 				"fix: add a SharedFragmentSpecs entry with key %q, or remove the constant from AllFragmentIds",
@@ -151,7 +151,7 @@ func (e *FragmentParityError) Error() string {
 		"codegen.ValidateGlobalIds: SharedFragmentSpecs key %q has no matching FragmentId constant in AllFragmentIds — "+
 			"what: SharedFragmentSpecs contains an entry whose key is not listed in AllFragmentIds; "+
 			"why: every fragment spec must have a corresponding typed constant "+
-			"(URD R5 parity: set(AllFragmentIds) == set(keys(SharedFragmentSpecs))); "+
+			"(parity: set(AllFragmentIds) == set(keys(SharedFragmentSpecs))); "+
 			"where: key %q in SharedFragmentSpecs in specs_data_fragments.go; "+
 			"when: codegen pre-flight validation (go generate); "+
 			"fix: add FragmentId constant %q to specs.go and include it in AllFragmentIds, "+
@@ -222,23 +222,23 @@ func validateGlobalIdsFrom(
 		switch {
 		case !hasProse && !hasBehavior:
 			return &InvalidFragment{
-				FragmentId: fragId,
-				Reason:     "both Prose and Behavior are nil (no payload)",
+				FragRef: fragId,
+				Reason:  "both Prose and Behavior are nil (no payload)",
 			}
 		case hasProse && hasBehavior:
 			return &InvalidFragment{
-				FragmentId: fragId,
-				Reason:     "both Prose and Behavior are non-nil (ambiguous payload)",
+				FragRef: fragId,
+				Reason:  "both Prose and Behavior are non-nil (ambiguous payload)",
 			}
 		case hasProse && frag.Kind != FragmentKindProse:
 			return &InvalidFragment{
-				FragmentId: fragId,
-				Reason:     fmt.Sprintf("Prose is set but Kind=%q (want %q)", frag.Kind, FragmentKindProse),
+				FragRef: fragId,
+				Reason:  fmt.Sprintf("Prose is set but Kind=%q (want %q)", frag.Kind, FragmentKindProse),
 			}
 		case hasBehavior && frag.Kind != FragmentKindBehavior:
 			return &InvalidFragment{
-				FragmentId: fragId,
-				Reason:     fmt.Sprintf("Behavior is set but Kind=%q (want %q)", frag.Kind, FragmentKindBehavior),
+				FragRef: fragId,
+				Reason:  fmt.Sprintf("Behavior is set but Kind=%q (want %q)", frag.Kind, FragmentKindBehavior),
 			}
 		}
 	}
@@ -340,7 +340,7 @@ func validateGlobalIdsFrom(
 	for _, m := range markers {
 		if _, ok := fragmentSpecs[m.fragId]; !ok {
 			return &UnresolvedMarker{
-				FragmentId:    m.fragId,
+				FragRef:       m.fragId,
 				ConsumerSkill: m.skill,
 				MarkerKind:    m.kind,
 			}
