@@ -1,0 +1,54 @@
+---
+name: {{ .SubSkillName }}
+description: {{ .CommandDescription }}
+---
+
+# {{ .CommandTitle }}
+
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `{{ .CommandName }}` — {{ .CommandDescription }}
+{{- if .Preamble }}
+
+{{ .Preamble }}
+{{- end }}
+{{- if .Figures }}
+{{- range .Figures }}
+
+### {{ .Title }}
+
+```text
+{{ .Content }}
+```
+{{- end }}
+{{- end }}
+{{- range .BodyBehaviors }}
+
+**[{{ .Id }}]**
+- Given: {{ .Given }}
+- When: {{ .When }}
+- Then: {{ .Then }}
+- Should not: {{ .ShouldNot }}
+{{- end }}
+{{- range .BodySections }}
+
+## {{ .Title }}
+
+{{ .Content }}
+{{- range .Subsections }}
+
+### {{ .Title }}
+
+{{ .Content }}
+{{- end }}
+{{- end }}
+{{- range .BodyRecipes }}
+
+## {{ .Title }}
+
+{{ .Description }}
+
+```{{ .Lang }}
+{{ .Code }}
+```
+{{- end }}
+<!-- END GENERATED FROM pasture schema -->

@@ -1,0 +1,72 @@
+# agents.yaml — YAML fixtures for TestGenerateAgent_* tests.
+#
+# Each entry specifies a role to generate and the sections that must appear
+# in the generated markdown output (contains-expected-sections strategy).
+#
+# must_have_figure_blocks is set to true because full ASCII diagram content is
+# now embedded in agent definitions (loaded from skills/protocol/figures/*.yaml
+# at generation time). The ## Figures section renders each figure as an H3
+# heading followed by a ```text code block containing the diagram.
+# See agents.go:renderAgent and templates/agent_definition.go.tmpl.
+
+agent_checks:
+  - role: supervisor
+    must_have_figure_blocks: true
+    must_contain:
+      - "name: supervisor"
+      - "model: opus"
+      - "thinking: medium"
+      - "tools: Read, Glob, Grep, Bash, Skill, Agent, Task"
+      - "# Supervisor Agent"
+      - "You are a **Supervisor** agent in the Pasture Protocol."
+      - "## Owned Phases"
+      - "| Phase | Name | Domain |"
+      - "## Constraints"
+      - "## Behaviors"
+      - "## Completion Checklist"
+      - "## Workflows"
+      - "## Figures"
+      - "### Ride the Wave — Coordinated Phase 8-10 Execution"
+      - "Phase 8: PLAN"
+
+  - role: worker
+    must_have_figure_blocks: true
+    must_contain:
+      - "name: worker"
+      - "model: sonnet"
+      - "tools: Read, Glob, Grep, Bash, Skill, Edit, Write"
+      - "# Worker Agent"
+      - "You are a **Worker** agent in the Pasture Protocol."
+      - "C-worker-gates"
+      - "C-agent-commit"
+      - "## Owned Phases"
+      - "## Constraints"
+      - "## Behaviors"
+      - "## Completion Checklist"
+      - "## Workflows"
+      - "## Figures"
+      - "### Layer Cake — TDD Parallelism Within Vertical Slices"
+      - "Layer 0: Shared infrastructure"
+
+  - role: reviewer
+    must_contain:
+      - "name: reviewer"
+      - "model: sonnet"
+      - "tools: Read, Glob, Grep, Bash, Skill"
+      - "# Reviewer Agent"
+      - "You are a **Reviewer** agent in the Pasture Protocol."
+      - "## Owned Phases"
+      - "## Constraints"
+      - "## Behaviors"
+
+# roles_with_tools lists roles expected to produce non-empty output.
+roles_with_tools:
+  - epoch
+  - architect
+  - reviewer
+  - supervisor
+  - worker
+
+# roles_without_tools would list roles expected to produce empty output.
+# Currently all roles in RoleSpecs have tools, so this is empty.
+roles_without_tools: []

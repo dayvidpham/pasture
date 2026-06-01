@@ -1,0 +1,101 @@
+---
+name: {{ .Role.Id }}
+description: {{ .Role.Description }}
+tools: {{ join .Role.Tools ", " }}
+model: {{ .Role.Model }}
+{{- if .Role.Thinking }}
+thinking: {{ .Role.Thinking }}
+{{- end }}
+---
+
+# {{ .Role.Name }} Agent
+
+You are a **{{ .Role.Name }}** agent in the Pasture Protocol.
+{{- if .Role.Introduction }}
+
+{{ .Role.Introduction }}
+{{- end }}
+{{- if .PhasesDetail }}
+
+## Owned Phases
+
+| Phase | Name | Domain |
+|-------|------|--------|
+{{- range .PhasesDetail }}
+| `{{ index $.PhaseSlug .Id }}` | {{ .Name }} | {{ .Domain }} |
+{{- end }}
+{{- end }}
+{{- if .Constraints }}
+
+## Constraints
+{{- range .Constraints }}
+
+**[{{ .Id }}]**
+- Given: {{ .Given }}
+- When: {{ .When }}
+- Then: {{ .Then }}
+- Should not: {{ .ShouldNot }}
+{{- end }}
+{{- end }}
+{{- if .Behaviors }}
+
+## Behaviors
+{{- range .Behaviors }}
+
+**[{{ .Id }}]**
+- Given: {{ .Given }}
+- When: {{ .When }}
+- Then: {{ .Then }}
+- Should not: {{ .ShouldNot }}
+{{- end }}
+{{- end }}
+{{- if .Checklists }}
+
+## Completion Checklist
+{{- range .Checklists }}
+
+**{{ .Gate }} gates:**
+{{- range .Items }}
+- [ ] {{ .Text }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if .Workflows }}
+
+## Workflows
+{{- range .Workflows }}
+
+### {{ .Name }}
+
+{{ .Description }}
+{{- range .Stages }}
+
+**Stage {{ .Order }}: {{ .Name }}** _({{ .Execution }})_
+{{- range .Actions }}
+
+- {{ .Instruction }}{{- if .Command }} (`{{ .Command }}`){{- end }}
+{{- end }}
+{{- if .ExitConditions }}
+
+Exit conditions:
+{{- range .ExitConditions }}
+- **{{ .Type }}**: {{ .Condition }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if .Figures }}
+
+## Figures
+{{- range .Figures }}
+
+### {{ .Title }}
+{{- if .Content }}
+
+```text
+{{ .Content }}
+```
+{{- end }}
+{{- end }}
+{{- end }}
