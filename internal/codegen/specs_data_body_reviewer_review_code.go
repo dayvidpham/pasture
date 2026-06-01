@@ -27,13 +27,9 @@ var reviewerReviewCodeBody = SkillBody{
 			Then:      "use BLOCKER/IMPORTANT/MINOR severity with EAGER group creation",
 			ShouldNot: "skip creating empty severity groups",
 		},
-		{
-			Id:        "rev-code-blocker-dual-parent",
-			Given:     "BLOCKER finding",
-			When:      "wiring dependencies",
-			Then:      "add dual-parent relationship (severity group + slice)",
-			ShouldNot: "wire BLOCKER to only one parent",
-		},
+		// 3rd owner of frag--sup-blocker-dual-parent (SLICE-4): canonical Then
+		// "add dual-parent: blocks BOTH the severity group AND the slice".
+		behaviorRef(FragSupBlockerDualParent),
 	},
 
 	Sections: []ProseSection{

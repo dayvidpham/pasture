@@ -507,6 +507,7 @@ func TestGenerateIdempotent(t *testing.T) {
 		{name: "cmd-sup-plan", commandId: "cmd-sup-plan", file: "skills/supervisor-plan-tasks/SKILL.md"},
 		{name: "cmd-sup-spawn", commandId: "cmd-sup-spawn", file: "skills/supervisor-spawn-worker/SKILL.md"},
 		{name: "cmd-impl-review", commandId: "cmd-impl-review", file: "skills/impl-review/SKILL.md"},
+		{name: "cmd-rev-code", commandId: "cmd-rev-code", file: "skills/reviewer-review-code/SKILL.md"},
 	}
 
 	for _, tc := range subSkillTests {

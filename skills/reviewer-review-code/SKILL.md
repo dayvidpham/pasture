@@ -23,10 +23,10 @@
 - Then: use BLOCKER/IMPORTANT/MINOR severity with EAGER group creation
 - Should not: skip creating empty severity groups
 
-**[rev-code-blocker-dual-parent]**
+**[frag--sup-blocker-dual-parent]**
 - Given: BLOCKER finding
 - When: wiring dependencies
-- Then: add dual-parent relationship (severity group + slice)
+- Then: add dual-parent: blocks BOTH the severity group AND the slice
 - Should not: wire BLOCKER to only one parent
 
 ## When to Use

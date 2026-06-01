@@ -113,6 +113,7 @@ var AllFragmentIds = []FragmentId{
 	FragSupFollowupEpicTiming,
 	FragSupSeverityTree,
 	FragSupNamingConvention,
+	FragRevPlanVoteOptions,
 }
 
 const (
@@ -157,6 +158,16 @@ const (
 	// (SLICE-{N}-REVIEW-{axis}-{round} format) shared between the supervisor and
 	// impl-review skill bodies.
 	FragSupNamingConvention FragmentId = "frag--sup-naming-convention"
+
+	// ── SLICE-4: plan-review vote options (DISTINCT from code-review fragment) ──
+
+	// FragRevPlanVoteOptions is the vote-options table for PLAN reviews (Phase 3
+	// architect-request-review). DISTINCT from FragRevVoteOptions (code review):
+	// - ACCEPT row: "All 6 criteria satisfied; no BLOCKER items"
+	// - Final line: "Binary only. No severity tree for plan reviews."
+	// Single-owner (reviewer-review-plan), but promoted to a fragment for
+	// registry completeness and D2 distinctness enforcement.
+	FragRevPlanVoteOptions FragmentId = "frag--rev-plan-vote-options"
 )
 
 // ─── SharedFragment ───────────────────────────────────────────────────────────

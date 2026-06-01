@@ -127,16 +127,9 @@ bd comments add <proposal-id> "VOTE: REVISE - Missing: what happens if X fails? 
 				},
 			},
 		},
-		{
-			Id:    "rev-plan-vote-options",
-			Title: "Vote Options",
-			Content: `| Vote | When |
-|------|------|
-| ACCEPT | All 6 criteria satisfied; no BLOCKER items |
-| REVISE | BLOCKER issues found; must provide actionable feedback |
-
-Binary only. No severity tree for plan reviews.`,
-		},
+		// SLICE-4: promoted to fragment for registry completeness and D2
+		// distinctness enforcement. Content verbatim → golden byte-identical.
+		fragRef(FragRevPlanVoteOptions),
 		{
 			Id:      "rev-plan-consensus",
 			Title:   "Consensus",

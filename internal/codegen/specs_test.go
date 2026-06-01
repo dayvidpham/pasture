@@ -498,3 +498,57 @@ func TestSkillBodySpecsCompleteness(t *testing.T) {
 		})
 	}
 }
+
+// TestRevPlanVoteOptionsDistinct verifies the SLICE-4 distinctness invariants
+// for rev-plan-vote-options (reviewer-review-plan body):
+//
+//  1. The section is now a fragment marker referencing FragRevPlanVoteOptions
+//     (SLICE-4 promotes it to a fragment for registry completeness).
+//  2. FragRevPlanVoteOptions content differs from FragRevVoteOptions (code-review
+//     vote table) in both the ACCEPT row wording and the final line — confirming
+//     the two vote tables are legitimately distinct and must not be merged (D2).
+func TestRevPlanVoteOptionsDistinct(t *testing.T) {
+	const planSkillKey = "reviewer-review-plan"
+
+	body, ok := codegen.SkillBodySpecs[planSkillKey]
+	require.True(t, ok, "SkillBodySpecs must have entry for %q", planSkillKey)
+
+	// 1. Locate the fragRef marker for FragRevPlanVoteOptions in Sections.
+	var marker *codegen.ProseSection
+	for i := range body.Sections {
+		if body.Sections[i].FragRef == codegen.FragRevPlanVoteOptions {
+			s := body.Sections[i]
+			marker = &s
+			break
+		}
+	}
+	require.NotNil(t, marker,
+		"SkillBodySpecs[%q] must contain a fragRef(FragRevPlanVoteOptions) marker",
+		planSkillKey)
+
+	// Marker must NOT reference FragRevVoteOptions (wrong fragment).
+	assert.NotEqual(t, codegen.FragRevVoteOptions, marker.FragRef,
+		"rev-plan-vote-options marker must NOT reference FragRevVoteOptions — distinct fragment")
+
+	// 2. FragRevPlanVoteOptions must be in SharedFragmentSpecs and have a Prose payload.
+	planFrag, hasPlanFrag := codegen.SharedFragmentSpecs[codegen.FragRevPlanVoteOptions]
+	require.True(t, hasPlanFrag,
+		"SharedFragmentSpecs must have FragRevPlanVoteOptions (SLICE-4)")
+	require.NotNil(t, planFrag.Prose,
+		"FragRevPlanVoteOptions must have a Prose payload")
+
+	// The plan-review fragment payload Id must use the canonical string form.
+	assert.Equal(t, string(codegen.FragRevPlanVoteOptions), planFrag.Prose.Id,
+		"FragRevPlanVoteOptions.Prose.Id must equal string(FragRevPlanVoteOptions)")
+
+	// 3. Plan-review content must differ from code-review content (D2 — two distinct tables).
+	codeReviewFrag, hasCodeReviewFrag := codegen.SharedFragmentSpecs[codegen.FragRevVoteOptions]
+	require.True(t, hasCodeReviewFrag,
+		"SharedFragmentSpecs must have FragRevVoteOptions from SLICE-2")
+	require.NotNil(t, codeReviewFrag.Prose,
+		"FragRevVoteOptions must have a Prose payload")
+
+	assert.NotEqual(t, planFrag.Prose.Content, codeReviewFrag.Prose.Content,
+		"FragRevPlanVoteOptions content must differ from FragRevVoteOptions — "+
+			"ACCEPT row and final line are legitimately different; merging would be wrong")
+}
