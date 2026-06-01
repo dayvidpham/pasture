@@ -6,7 +6,7 @@
 // The flow per well-known name:
 //
 //  1. Lookup-by-name in `pasture_well_known_agents` (O(1) via the UNIQUE index
-//     on `name`). If found, recover the AgentID and skip steps 2-3 (idempotent
+//     on `name`). If found, recover the AgentId and skip steps 2-3 (idempotent
 //     fast path; second-and-subsequent restarts hit only this branch).
 //  2. If absent: call `provenance.Tracker.RegisterSoftwareAgent("pasture",
 //     name, version, source)` — this mints one fresh UUIDv7 in the
@@ -27,7 +27,7 @@
 //
 // Ordering rationale (Provenance call BEFORE audit transaction):
 //
-//   - We need a real AgentID before we can write the audit-side rows; the
+//   - We need a real AgentId before we can write the audit-side rows; the
 //     ID is what those rows store.
 //   - If Provenance succeeds and the audit transaction then fails, the
 //     SoftwareAgent is orphaned (mints a UUID with no pasture-side
@@ -229,7 +229,7 @@ func RegisterWellKnownAgents(ctx context.Context, tracker protocol.TaskTracker, 
 
 // ensureWellKnownAgent implements the lookup-then-register-then-insert flow
 // for a single well-known name (PROPOSAL-2 §7.7.3 pseudocode). It returns
-// the AgentID for the name (recovered from the database on a hit, freshly
+// the AgentId for the name (recovered from the database on a hit, freshly
 // minted on a miss) and a *StructuredError if any step fails.
 //
 // auditDB is the audit subsystem's *sql.DB; provTracker is the provenance
@@ -273,16 +273,16 @@ func ensureWellKnownAgent(
 	// 1. Fast-path lookup. Run on the auditDB (no transaction needed for a
 	//    single SELECT — the UNIQUE index on `name` is the consistency anchor).
 	//    If we find a row, the agent is already registered; recover the
-	//    AgentID and return without touching Provenance.
-	var agentIDStr string
+	//    AgentId and return without touching Provenance.
+	var agentIdStr string
 	err := auditDB.QueryRowContext(ctx,
 		`SELECT agent_id FROM pasture_well_known_agents WHERE name = ?`,
 		spec.Name,
-	).Scan(&agentIDStr)
+	).Scan(&agentIdStr)
 	switch {
 	case err == nil:
 		// Hit: parse and return.
-		agentID, perr := provenance.ParseAgentID(agentIDStr)
+		agentId, perr := provenance.ParseAgentID(agentIdStr)
 		if perr != nil {
 			return provenance.AgentID{}, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
@@ -290,7 +290,7 @@ func ensureWellKnownAgent(
 				Why: fmt.Sprintf(
 					"Pasture read %q out of the database for this agent, but it doesn't\n"+
 						"look like a valid agent id.",
-					agentIDStr,
+					agentIdStr,
 				),
 				Where: "Looking up a built-in agent (internal/tasks/well_known.go in tasks.ensureWellKnownAgent).",
 				Impact: "Anything that tries to attribute an action to this agent will fail\n" +
@@ -307,7 +307,7 @@ func ensureWellKnownAgent(
 				Cause: perr,
 			}
 		}
-		return agentID, nil
+		return agentId, nil
 	case stderrors.Is(err, sql.ErrNoRows):
 		// Miss: fall through to register + insert.
 	default:
@@ -329,7 +329,7 @@ func ensureWellKnownAgent(
 
 	// 2. Mint a fresh SoftwareAgent through Provenance. This call writes to
 	//    Provenance's *sql.DB (separate handle from auditDB on the same file).
-	//    On success we get an AgentID; on failure we abort without touching
+	//    On success we get an AgentId; on failure we abort without touching
 	//    the audit-side tables (so the next startup retries cleanly via the
 	//    fast-path miss).
 	sa, err := provTracker.RegisterSoftwareAgent(

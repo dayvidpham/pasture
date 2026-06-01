@@ -26,10 +26,10 @@
 //
 // Legacy audit_events.epoch_id values are migrated AS-IS into
 // context_edges, regardless of whether the string parses as a Provenance
-// TaskID. Free-string epoch IDs (e.g. "epoch-2026-04-22-mvp") and valid
+// TaskId. Free-string epoch IDs (e.g. "epoch-2026-04-22-mvp") and valid
 // TaskIDs (e.g. "aura-plugins--01968a3c-1234-7000-8000-...") are both
 // preserved because they are historical records and rejecting them would
-// lose audit data. The §7.12 ParseTaskID validation applies only to NEW
+// lose audit data. The §7.12 ParseTaskId validation applies only to NEW
 // workflow starts post-migration; that validation is owned by S8.
 //
 // Pseudocode parity with PROPOSAL-2 §7.10.1 v4 row:
@@ -109,7 +109,7 @@ func migrateV3toV4(tx *sql.Tx, _ int64) error {
 	}
 
 	// Step 2: SQLite table-rebuild to drop the epoch_id column.
-	if err := rebuildAuditEventsWithoutEpochID(tx); err != nil {
+	if err := rebuildAuditEventsWithoutEpochId(tx); err != nil {
 		return err
 	}
 
@@ -128,8 +128,8 @@ func migrateV3toV4(tx *sql.Tx, _ int64) error {
 //
 // Migration-note guarantee (PROPOSAL-2 §7.12 last paragraph): legacy
 // free-string epoch IDs (e.g. "epoch-2026-04-22-mvp-042") are copied as
-// the literal context_id without any TaskID validation. Rejecting them
-// would lose audit history. The §7.12 ParseTaskID validation applies
+// the literal context_id without any TaskId validation. Rejecting them
+// would lose audit history. The §7.12 ParseTaskId validation applies
 // only to NEW workflow starts; S8 owns that validation at the workflow
 // boundary.
 //
@@ -197,7 +197,7 @@ func backfillEpochContext(tx *sql.Tx) error {
 	return nil
 }
 
-// rebuildAuditEventsWithoutEpochID performs the SQLite table-rebuild
+// rebuildAuditEventsWithoutEpochId performs the SQLite table-rebuild
 // dance to drop the epoch_id column from audit_events, mirroring S3's
 // rebuildAuditEventsWithoutRole pattern (migrate_v3_backfill.go:422-474).
 //
@@ -238,7 +238,7 @@ func backfillEpochContext(tx *sql.Tx) error {
 // idx_context_edges_lookup (which S2 already created on
 // (context_kind, context_id) — the optimal lookup shape for "events
 // for epoch X").
-func rebuildAuditEventsWithoutEpochID(tx *sql.Tx) error {
+func rebuildAuditEventsWithoutEpochId(tx *sql.Tx) error {
 	statements := []struct {
 		what string
 		sql  string
@@ -287,7 +287,7 @@ func rebuildAuditEventsWithoutEpochID(tx *sql.Tx) error {
 				),
 				Why: "The database refused one of the steps in the table-rebuild dance (create new table,\n" +
 					"copy rows, drop old, rename, recreate indexes).",
-				Where: "Upgrading the audit database from version 3 to 4 (internal/audit/migrate_v3_v4.go in audit.rebuildAuditEventsWithoutEpochID).",
+				Where: "Upgrading the audit database from version 3 to 4 (internal/audit/migrate_v3_v4.go in audit.rebuildAuditEventsWithoutEpochId).",
 				Impact: "The audit-events table rebuild stopped midway, so the entire version 3 → 4 upgrade\n" +
 					"was rolled back. The audit database stays at version 3.",
 				Fix: "1. Confirm the audit database file is writable:\n" +

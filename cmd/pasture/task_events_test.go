@@ -269,9 +269,9 @@ func TestCLI_TaskEvents_RequiresTopLevelFilter(t *testing.T) {
 	}
 }
 
-// TestCLI_TaskEvents_ContextKindWithoutContextID — passing --context-kind
+// TestCLI_TaskEvents_ContextKindWithoutContextId — passing --context-kind
 // alone must reject with a paired-flags validation error.
-func TestCLI_TaskEvents_ContextKindWithoutContextID(t *testing.T) {
+func TestCLI_TaskEvents_ContextKindWithoutContextId(t *testing.T) {
 	dbPath := newLegacyV1DB(t)
 
 	out := runCLI(t, "--db", dbPath, "task", "events", "--context-kind=GitContext")
@@ -304,18 +304,18 @@ func TestCLI_TaskEvents_UnknownContextKind(t *testing.T) {
 // test does not depend on S8's workflow integration landing.
 func TestCLI_TaskEvents_EpochID_LegacyV1Path(t *testing.T) {
 	dbPath := newLegacyV1DB(t)
-	const epochID = "test-epoch-events-1"
-	seedV1AuditEvent(t, dbPath, epochID, "supervisor", "PhaseTransition",
+	const epochId = "test-epoch-events-1"
+	seedV1AuditEvent(t, dbPath, epochId, "supervisor", "PhaseTransition",
 		map[string]any{"note": "v1-row"})
 
 	out := runCLI(t, "--db", dbPath, "--format", "json",
-		"task", "events", "--epoch-id", epochID)
+		"task", "events", "--epoch-id", epochId)
 	if out.exitCode != 0 {
 		t.Fatalf("events --epoch-id exit %d; stderr=%q", out.exitCode, out.stderr)
 	}
 
 	var events []struct {
-		EpochID   string `json:"epochId"`
+		EpochId   string `json:"epochId"`
 		EventType string `json:"eventType"`
 		Role      string `json:"role"`
 	}
@@ -323,9 +323,9 @@ func TestCLI_TaskEvents_EpochID_LegacyV1Path(t *testing.T) {
 		t.Fatalf("decode events json: %v\nbody: %q", err, out.stdout)
 	}
 	if len(events) != 1 {
-		t.Fatalf("expected 1 event for epoch %q, got %d: %+v", epochID, len(events), events)
+		t.Fatalf("expected 1 event for epoch %q, got %d: %+v", epochId, len(events), events)
 	}
-	if events[0].EpochID != epochID || events[0].EventType != "PhaseTransition" || events[0].Role != "supervisor" {
+	if events[0].EpochId != epochId || events[0].EventType != "PhaseTransition" || events[0].Role != "supervisor" {
 		t.Errorf("event mismatch: %+v", events[0])
 	}
 }
@@ -338,7 +338,7 @@ func TestCLI_TaskEvents_EpochID_LegacyV1Path(t *testing.T) {
 func TestCLI_TaskEvents_GitContext_Scenario6(t *testing.T) {
 	dbPath := newLegacyV1DB(t)
 	const sha = "abc123def456"
-	const epochID = "" // free-floating events have empty/synthetic epoch_id
+	const epochId = "" // free-floating events have empty/synthetic epoch_id
 
 	// Migrate first so context_edges exists and audit_events has the post-v3
 	// shape (no `role` column). Then seed an audit_events row + context edge
@@ -348,9 +348,9 @@ func TestCLI_TaskEvents_GitContext_Scenario6(t *testing.T) {
 		t.Fatalf("migrate exit %d; stderr=%q", rc.exitCode, rc.stderr)
 	}
 
-	eventID := seedPostMigrationAuditEvent(t, dbPath, epochID, "pasture--legacy-git-recorder", "GitCommit",
+	eventId := seedPostMigrationAuditEvent(t, dbPath, epochId, "pasture--legacy-git-recorder", "GitCommit",
 		map[string]any{"sha": sha})
-	seedContextEdge(t, dbPath, eventID, "GitContext", sha)
+	seedContextEdge(t, dbPath, eventId, "GitContext", sha)
 
 	out := runCLI(t, "--db", dbPath, "--format", "json",
 		"task", "events", "--context-kind=GitContext", "--context-id="+sha)
@@ -359,7 +359,7 @@ func TestCLI_TaskEvents_GitContext_Scenario6(t *testing.T) {
 	}
 
 	var events []struct {
-		EpochID   string         `json:"epochId"`
+		EpochId   string         `json:"epochId"`
 		EventType string         `json:"eventType"`
 		Payload   map[string]any `json:"payload"`
 	}
@@ -383,19 +383,19 @@ func TestCLI_TaskEvents_GitContext_Scenario6(t *testing.T) {
 // back in timestamp ASC order even when seeded out of order.
 func TestCLI_TaskTimeline_ChronologicalOrder(t *testing.T) {
 	dbPath := newLegacyV1DB(t)
-	const epochID = "test-task-timeline-1"
+	const epochId = "test-task-timeline-1"
 
 	// Seed 3 events out of chronological order via raw INSERT with explicit
 	// timestamps so we control the ordering deterministically.
-	seedV1AuditEventAt(t, dbPath, epochID, "supervisor", "PhaseTransition",
+	seedV1AuditEventAt(t, dbPath, epochId, "supervisor", "PhaseTransition",
 		map[string]any{"order": 2}, time.Unix(0, 2_000_000_000).UTC())
-	seedV1AuditEventAt(t, dbPath, epochID, "supervisor", "PhaseTransition",
+	seedV1AuditEventAt(t, dbPath, epochId, "supervisor", "PhaseTransition",
 		map[string]any{"order": 0}, time.Unix(0, 0).UTC())
-	seedV1AuditEventAt(t, dbPath, epochID, "supervisor", "PhaseTransition",
+	seedV1AuditEventAt(t, dbPath, epochId, "supervisor", "PhaseTransition",
 		map[string]any{"order": 1}, time.Unix(0, 1_000_000_000).UTC())
 
 	out := runCLI(t, "--db", dbPath, "--format", "json",
-		"task", "timeline", epochID)
+		"task", "timeline", epochId)
 	if out.exitCode != 0 {
 		t.Fatalf("timeline exit %d; stderr=%q", out.exitCode, out.stderr)
 	}
@@ -423,9 +423,9 @@ func TestCLI_TaskTimeline_ChronologicalOrder(t *testing.T) {
 	}
 }
 
-// TestCLI_TaskTimeline_MissingTaskID — calling timeline without a task ID
+// TestCLI_TaskTimeline_MissingTaskId — calling timeline without a task ID
 // must reject with a validation error.
-func TestCLI_TaskTimeline_MissingTaskID(t *testing.T) {
+func TestCLI_TaskTimeline_MissingTaskId(t *testing.T) {
 	out := runCLI(t, "task", "timeline")
 	// Cobra's Args validator catches this BEFORE our handler runs; the
 	// resulting exit code is whatever Cobra picks. We just assert non-zero.
@@ -443,25 +443,25 @@ func TestCLI_TaskContexts_ListsAttachedEdges(t *testing.T) {
 	if rc := runCLI(t, "--db", dbPath, "migrate"); rc.exitCode != 0 {
 		t.Fatalf("migrate exit %d; stderr=%q", rc.exitCode, rc.stderr)
 	}
-	const epochID = "test-task-contexts-1"
+	const epochId = "test-task-contexts-1"
 	const sha = "deadbeef"
 	// seedPostMigrationAuditEvent auto-writes the EpochContext row when
-	// epochID is non-empty (matching production RecordEvent semantics
+	// epochId is non-empty (matching production RecordEvent semantics
 	// post-S4); we only need to attach the second context (GitContext)
 	// explicitly here.
-	eventID := seedPostMigrationAuditEvent(t, dbPath, epochID, "pasture--legacy-supervisor", "PhaseTransition",
+	eventId := seedPostMigrationAuditEvent(t, dbPath, epochId, "pasture--legacy-supervisor", "PhaseTransition",
 		map[string]any{"hello": "world"})
-	seedContextEdge(t, dbPath, eventID, "GitContext", sha)
+	seedContextEdge(t, dbPath, eventId, "GitContext", sha)
 
 	out := runCLI(t, "--db", dbPath, "--format", "json",
-		"task", "contexts", fmt.Sprintf("%d", eventID))
+		"task", "contexts", fmt.Sprintf("%d", eventId))
 	if out.exitCode != 0 {
 		t.Fatalf("contexts exit %d; stderr=%q", out.exitCode, out.stderr)
 	}
 
 	var contexts []struct {
 		Kind      string `json:"kind"`
-		ContextID string `json:"contextId"`
+		ContextId string `json:"contextId"`
 	}
 	if err := json.Unmarshal([]byte(out.stdout), &contexts); err != nil {
 		t.Fatalf("decode contexts json: %v\nbody: %q", err, out.stdout)
@@ -471,19 +471,19 @@ func TestCLI_TaskContexts_ListsAttachedEdges(t *testing.T) {
 	}
 	gotKinds := map[string]string{}
 	for _, c := range contexts {
-		gotKinds[c.Kind] = c.ContextID
+		gotKinds[c.Kind] = c.ContextId
 	}
-	if gotKinds["EpochContext"] != epochID {
-		t.Errorf("EpochContext context_id = %q, want %q", gotKinds["EpochContext"], epochID)
+	if gotKinds["EpochContext"] != epochId {
+		t.Errorf("EpochContext context_id = %q, want %q", gotKinds["EpochContext"], epochId)
 	}
 	if gotKinds["GitContext"] != sha {
 		t.Errorf("GitContext context_id = %q, want %q", gotKinds["GitContext"], sha)
 	}
 }
 
-// TestCLI_TaskContexts_InvalidEventID — non-integer event-id must reject
+// TestCLI_TaskContexts_InvalidEventId — non-integer event-id must reject
 // with a CategoryValidation error.
-func TestCLI_TaskContexts_InvalidEventID(t *testing.T) {
+func TestCLI_TaskContexts_InvalidEventId(t *testing.T) {
 	dbPath := newLegacyV1DB(t)
 	out := runCLI(t, "--db", dbPath, "task", "contexts", "not-a-number")
 	if out.exitCode != 1 {
@@ -494,8 +494,8 @@ func TestCLI_TaskContexts_InvalidEventID(t *testing.T) {
 	}
 }
 
-// TestCLI_TaskContexts_NegativeEventID — zero/negative event-id must reject.
-func TestCLI_TaskContexts_NegativeEventID(t *testing.T) {
+// TestCLI_TaskContexts_NegativeEventId — zero/negative event-id must reject.
+func TestCLI_TaskContexts_NegativeEventId(t *testing.T) {
 	dbPath := newLegacyV1DB(t)
 	out := runCLI(t, "--db", dbPath, "task", "contexts", "0")
 	if out.exitCode != 1 {
@@ -534,15 +534,15 @@ func TestCLI_TaskAgents_List_ShowsSeededRow(t *testing.T) {
 		t.Fatalf("migrate exit %d; stderr=%q", rc.exitCode, rc.stderr)
 	}
 
-	const agentID = "pasture--01935b3e-4cc1-7000-8000-000000000001"
+	const agentId = "pasture--01935b3e-4cc1-7000-8000-000000000001"
 	const wellKnown = "pasture/automaton/check-constraints"
 
 	mustExecOnDB(t, dbPath,
 		`INSERT INTO pasture_well_known_agents (agent_id, name) VALUES (?, ?)`,
-		agentID, wellKnown)
+		agentId, wellKnown)
 	mustExecOnDB(t, dbPath,
 		`INSERT INTO pasture_agent_categories (agent_id, automaton_role, pasture_role) VALUES (?, ?, ?)`,
-		agentID, "ConstraintChecker", "None")
+		agentId, "ConstraintChecker", "None")
 
 	out := runCLI(t, "--db", dbPath, "--format", "json", "task", "agents", "list")
 	if out.exitCode != 0 {
@@ -550,7 +550,7 @@ func TestCLI_TaskAgents_List_ShowsSeededRow(t *testing.T) {
 	}
 
 	var entries []struct {
-		AgentID       string `json:"agentId"`
+		AgentId       string `json:"agentId"`
 		WellKnownName string `json:"wellKnownName"`
 		AutomatonRole string `json:"automatonRole"`
 		PastureRole   string `json:"pastureRole"`
@@ -562,8 +562,8 @@ func TestCLI_TaskAgents_List_ShowsSeededRow(t *testing.T) {
 		t.Fatalf("expected 1 agent, got %d: %+v", len(entries), entries)
 	}
 	got := entries[0]
-	if got.AgentID != agentID {
-		t.Errorf("AgentID = %q, want %q", got.AgentID, agentID)
+	if got.AgentId != agentId {
+		t.Errorf("AgentId = %q, want %q", got.AgentId, agentId)
 	}
 	if got.WellKnownName != wellKnown {
 		t.Errorf("WellKnownName = %q, want %q", got.WellKnownName, wellKnown)
@@ -585,23 +585,23 @@ func TestCLI_TaskAgents_Show_NotFoundReturnsNoneNone(t *testing.T) {
 		t.Fatalf("migrate exit %d; stderr=%q", rc.exitCode, rc.stderr)
 	}
 
-	const agentID = "pasture--01935b3e-4cc1-7000-8000-0000000000ff"
+	const agentId = "pasture--01935b3e-4cc1-7000-8000-0000000000ff"
 	out := runCLI(t, "--db", dbPath, "--format", "json",
-		"task", "agents", "show", agentID)
+		"task", "agents", "show", agentId)
 	if out.exitCode != 0 {
 		t.Fatalf("agents show exit %d; stderr=%q", out.exitCode, out.stderr)
 	}
 
 	var entry struct {
-		AgentID       string `json:"agentId"`
+		AgentId       string `json:"agentId"`
 		AutomatonRole string `json:"automatonRole"`
 		PastureRole   string `json:"pastureRole"`
 	}
 	if err := json.Unmarshal([]byte(out.stdout), &entry); err != nil {
 		t.Fatalf("decode show json: %v\nbody: %q", err, out.stdout)
 	}
-	if entry.AgentID != agentID {
-		t.Errorf("AgentID = %q, want %q", entry.AgentID, agentID)
+	if entry.AgentId != agentId {
+		t.Errorf("AgentId = %q, want %q", entry.AgentId, agentId)
 	}
 	if entry.AutomatonRole != "None" || entry.PastureRole != "None" {
 		t.Errorf("expected default ('None','None') for unregistered agent; got (%q, %q)",
@@ -609,8 +609,8 @@ func TestCLI_TaskAgents_Show_NotFoundReturnsNoneNone(t *testing.T) {
 	}
 }
 
-// TestCLI_TaskAgents_Show_InvalidID — bad agent ID format must reject.
-func TestCLI_TaskAgents_Show_InvalidID(t *testing.T) {
+// TestCLI_TaskAgents_Show_InvalidId — bad agent ID format must reject.
+func TestCLI_TaskAgents_Show_InvalidId(t *testing.T) {
 	dbPath := newLegacyV1DB(t)
 	out := runCLI(t, "--db", dbPath, "task", "agents", "show", "not-an-agent-id")
 	if out.exitCode != 1 {
@@ -666,13 +666,13 @@ func newLegacyV1DB(t *testing.T) string {
 // seedV1AuditEvent inserts one row directly via raw SQL on the v1
 // audit_events shape (with `role` column) and returns the AUTOINCREMENT id.
 // Used by tests that pre-populate events BEFORE the migration runs.
-func seedV1AuditEvent(t *testing.T, dbPath, epochID, role, eventType string, payload map[string]any) int64 {
+func seedV1AuditEvent(t *testing.T, dbPath, epochId, role, eventType string, payload map[string]any) int64 {
 	t.Helper()
-	return seedV1AuditEventAt(t, dbPath, epochID, role, eventType, payload, time.Now().UTC())
+	return seedV1AuditEventAt(t, dbPath, epochId, role, eventType, payload, time.Now().UTC())
 }
 
 // seedV1AuditEventAt is seedV1AuditEvent with an explicit timestamp.
-func seedV1AuditEventAt(t *testing.T, dbPath, epochID, role, eventType string, payload map[string]any, ts time.Time) int64 {
+func seedV1AuditEventAt(t *testing.T, dbPath, epochId, role, eventType string, payload map[string]any, ts time.Time) int64 {
 	t.Helper()
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -687,7 +687,7 @@ func seedV1AuditEventAt(t *testing.T, dbPath, epochID, role, eventType string, p
 	res, err := db.ExecContext(context.Background(),
 		`INSERT INTO audit_events (epoch_id, phase, role, event_type, payload, timestamp)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
-		epochID, "p1-request", role, eventType, string(pj), ts.UnixNano(),
+		epochId, "p1-request", role, eventType, string(pj), ts.UnixNano(),
 	)
 	if err != nil {
 		t.Fatalf("seedV1AuditEvent insert: %v", err)
@@ -715,12 +715,12 @@ func seedV1AuditEventAt(t *testing.T, dbPath, epochID, role, eventType string, p
 //   - Post-S3: helper inserted into (epoch_id, phase, agent_id, ...).
 //   - Post-S4: helper inserts into (phase, agent_id, ...) and writes a
 //     context_edges row for the epoch attachment.
-func seedPostMigrationAuditEvent(t *testing.T, dbPath, epochID, agentID, eventType string, payload map[string]any) int64 {
+func seedPostMigrationAuditEvent(t *testing.T, dbPath, epochId, agentId, eventType string, payload map[string]any) int64 {
 	t.Helper()
-	return seedPostMigrationAuditEventAt(t, dbPath, epochID, agentID, eventType, payload, time.Now().UTC())
+	return seedPostMigrationAuditEventAt(t, dbPath, epochId, agentId, eventType, payload, time.Now().UTC())
 }
 
-func seedPostMigrationAuditEventAt(t *testing.T, dbPath, epochID, agentID, eventType string, payload map[string]any, ts time.Time) int64 {
+func seedPostMigrationAuditEventAt(t *testing.T, dbPath, epochId, agentId, eventType string, payload map[string]any, ts time.Time) int64 {
 	t.Helper()
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -735,7 +735,7 @@ func seedPostMigrationAuditEventAt(t *testing.T, dbPath, epochID, agentID, event
 	res, err := db.ExecContext(context.Background(),
 		`INSERT INTO audit_events (phase, agent_id, event_type, payload, timestamp)
 		 VALUES (?, ?, ?, ?, ?)`,
-		"p1-request", agentID, eventType, string(pj), ts.UnixNano(),
+		"p1-request", agentId, eventType, string(pj), ts.UnixNano(),
 	)
 	if err != nil {
 		t.Fatalf("seedPostMigrationAuditEvent insert: %v", err)
@@ -746,11 +746,11 @@ func seedPostMigrationAuditEventAt(t *testing.T, dbPath, epochID, agentID, event
 	}
 
 	// Record the EpochContext attachment if the caller supplied an
-	// epochID. Post-v4, this is how events are correlated to an epoch.
-	if epochID != "" {
+	// epochId. Post-v4, this is how events are correlated to an epoch.
+	if epochId != "" {
 		_, err := db.ExecContext(context.Background(),
 			`INSERT OR IGNORE INTO context_edges (event_id, context_kind, context_id) VALUES (?, ?, ?)`,
-			id, "EpochContext", epochID,
+			id, "EpochContext", epochId,
 		)
 		if err != nil {
 			t.Fatalf("seedPostMigrationAuditEvent context_edges insert: %v", err)
@@ -761,11 +761,11 @@ func seedPostMigrationAuditEventAt(t *testing.T, dbPath, epochID, agentID, event
 
 // seedContextEdge inserts a row into context_edges. The table must exist
 // (run `pasture migrate` first or rely on auto-migrate-on-open).
-func seedContextEdge(t *testing.T, dbPath string, eventID int64, kind, contextID string) {
+func seedContextEdge(t *testing.T, dbPath string, eventId int64, kind, contextId string) {
 	t.Helper()
 	mustExecOnDB(t, dbPath,
 		`INSERT INTO context_edges (event_id, context_kind, context_id) VALUES (?, ?, ?)`,
-		eventID, kind, contextID)
+		eventId, kind, contextId)
 }
 
 // mustExecOnDB opens dbPath, runs an Exec, and closes. Crashes the test on

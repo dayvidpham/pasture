@@ -9,42 +9,42 @@ var researchBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "research-topic-deliverable",
+			Id:        "research-topic-deliverable",
 			Given:     "a research topic",
 			When:      "investigating",
 			Then:      "follow the depth-scoped checklist and write findings to `llm/research/<topic>.md`",
 			ShouldNot: "skip writing the deliverable file",
 		},
 		{
-			ID:        "research-depth-quick-scan",
+			Id:        "research-depth-quick-scan",
 			Given:     "depth is quick-scan",
 			When:      "researching",
 			Then:      "search local project only (Grep, Glob, Read)",
 			ShouldNot: "make web requests",
 		},
 		{
-			ID:        "research-depth-standard",
+			Id:        "research-depth-standard",
 			Given:     "depth is standard-research",
 			When:      "researching",
 			Then:      "search local project AND web for domain standards and established patterns",
 			ShouldNot: "skip local analysis",
 		},
 		{
-			ID:        "research-depth-deep-dive",
+			Id:        "research-depth-deep-dive",
 			Given:     "depth is deep-dive",
 			When:      "researching",
 			Then:      "perform full local analysis, web search for competing solutions, RFCs, academic papers, and well-regarded projects",
 			ShouldNot: "produce an unstructured dump",
 		},
 		{
-			ID:        "research-findings-format",
+			Id:        "research-findings-format",
 			Given:     "findings exist",
 			When:      "writing deliverable",
 			Then:      "use the structured report format with per-topic sections, code citations (file:line), assessment tables, and adoption recommendations",
 			ShouldNot: "write a flat bullet list for standard-research or deep-dive depths",
 		},
 		{
-			ID:        "research-phase1-recording",
+			Id:        "research-phase1-recording",
 			Given:     "Phase 1 context",
 			When:      "recording findings",
 			Then:      "ALSO add a summary comment on the REQUEST task via `bd comments add`",
@@ -54,13 +54,13 @@ var researchBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:    "research-when-to-use",
+			Id:    "research-when-to-use",
 			Title: "When to Use",
 			Content: "- **Phase 1 (s1_2-research):** Spawned by `/aura:user-request` after user confirms research depth. Findings recorded as REQUEST task comment AND written to `llm/research/`.\n" +
 				"- **Standalone:** Any agent needing domain research outside the 12-phase workflow. Invoke directly with a topic and depth.",
 		},
 		{
-			ID:    "research-inputs",
+			Id:    "research-inputs",
 			Title: "Inputs",
 			Content: "| Parameter | Required | Description |\n" +
 				"|-----------|----------|--------------|\n" +
@@ -69,32 +69,32 @@ var researchBody = SkillBody{
 				"| `request-task-id` | Phase 1 only | Beads task ID to record findings as comment |",
 		},
 		{
-			ID:      "research-checklist",
+			Id:      "research-checklist",
 			Title:   "Research Checklist",
 			Content: "Apply all items appropriate to the depth level:",
 			Subsections: []ProseSection{
 				{
-					ID:    "research-checklist-standards",
+					Id:    "research-checklist-standards",
 					Title: "1. Domain Standards",
 					Content: "- What RFCs, specs, or community conventions exist?\n" +
 						"- Are there formal standards bodies or working groups?",
 				},
 				{
-					ID:    "research-checklist-prior-art",
+					Id:    "research-checklist-prior-art",
 					Title: "2. Prior Art",
 					Content: "- What well-regarded projects solve similar problems?\n" +
 						"- What is the maturity, adoption, and maintenance status of each?\n" +
 						"- Which approaches have been tried and abandoned (and why)?",
 				},
 				{
-					ID:    "research-checklist-patterns",
+					Id:    "research-checklist-patterns",
 					Title: "3. Established Patterns",
 					Content: "- What idioms and best practices are established in this domain?\n" +
 						"- Are there canonical implementations or reference architectures?\n" +
 						"- What do experienced practitioners recommend?",
 				},
 				{
-					ID:    "research-checklist-reusable",
+					Id:    "research-checklist-reusable",
 					Title: "4. Reusable Solutions",
 					Content: "- Are there existing libraries, frameworks, or tools that could be reused or adapted?\n" +
 						"- What are the tradeoffs of build-vs-buy for this domain?",
@@ -102,7 +102,7 @@ var researchBody = SkillBody{
 			},
 		},
 		{
-			ID:    "research-depth-scoping",
+			Id:    "research-depth-scoping",
 			Title: "Depth Scoping",
 			Content: "| Depth | Local | Web | Deliverable |\n" +
 				"|-------|-------|-----|-------------|\n" +
@@ -111,12 +111,12 @@ var researchBody = SkillBody{
 				"| **deep-dive** | Full local analysis + dependency tree, architectural trace | Search for competing solutions, RFCs, academic papers, canonical implementations | Full structured report (see format below) |",
 		},
 		{
-			ID:      "research-output-format",
+			Id:      "research-output-format",
 			Title:   "Output Format",
 			Content: "Write findings to `llm/research/<topic>.md` using the structured report format.",
 			Subsections: []ProseSection{
 				{
-					ID:    "research-file-structure",
+					Id:    "research-file-structure",
 					Title: "File Structure",
 					Content: "```" + `markdown
 ---
@@ -188,7 +188,7 @@ code snippet here
 ` + "```",
 				},
 				{
-					ID:    "research-adoption-categories",
+					Id:    "research-adoption-categories",
 					Title: "Adoption Categories",
 					Content: "| Category | Meaning |\n" +
 						"|----------|---------|\n" +
@@ -200,7 +200,7 @@ code snippet here
 			},
 		},
 		{
-			ID:    "research-phase1-integration",
+			Id:    "research-phase1-integration",
 			Title: "Phase 1 Integration",
 			Content: "When invoked as part of Phase 1 (s1_2-research), record a summary on the REQUEST task in addition to writing the full report:\n\n" +
 				"```" + `bash

@@ -16,14 +16,14 @@
 // Routing through protocol.TaskTracker:
 //
 //   - When --context-kind / --context-id are given, the handler uses
-//     TaskTracker.Timeline(ctx, kind, contextID) which JOINs context_edges
+//     TaskTracker.Timeline(ctx, kind, contextId) which JOINs context_edges
 //     against audit_events. This is the supported way to query Git, Skill,
 //     Session and (post-S4) Epoch contexts.
 //
 //   - When only --epoch-id is given, the handler uses TaskTracker.QueryEvents
 //     against the legacy v1 epoch_id column. After S4 lands and removes the
 //     epoch_id column, this branch will switch to Timeline(ContextEpoch,
-//     epochID) — same code path as the context-kind branch. The CLI surface
+//     epochId) — same code path as the context-kind branch. The CLI surface
 //     does not change.
 //
 // Post-fetch filtering (--phase, --agent, --type, --since) is done in Go
@@ -51,13 +51,13 @@ import (
 // TaskEventsInput captures the CLI inputs for `pasture task events`.
 type TaskEventsInput struct {
 	DBPath      string
-	EpochID     string                // empty when no --epoch-id flag
+	EpochId     string                // empty when no --epoch-id flag
 	Phase       *protocol.PhaseId     // nil when no --phase flag
 	Agent       string                // empty when no --agent flag (matched against AuditEvent.Role until v3 backfill lands)
 	EventType   *protocol.EventType   // nil when no --type flag
 	Since       *time.Time            // nil when no --since flag
 	ContextKind *protocol.ContextKind // nil when no --context-kind flag
-	ContextID   string                // empty when no --context-id flag
+	ContextId   string                // empty when no --context-id flag
 }
 
 // TaskEvents queries audit events and prints them. Returns the standard
@@ -65,8 +65,8 @@ type TaskEventsInput struct {
 func TaskEvents(w io.Writer, in TaskEventsInput, format types.OutputFormat) (int, error) {
 	// Validation: must have either an epoch-id OR a (context-kind +
 	// context-id) pair. Without one of these the query is unbounded.
-	hasEpoch := in.EpochID != ""
-	hasContext := in.ContextKind != nil || in.ContextID != ""
+	hasEpoch := in.EpochId != ""
+	hasContext := in.ContextKind != nil || in.ContextId != ""
 
 	if !hasEpoch && !hasContext {
 		se := &errors.StructuredError{
@@ -87,7 +87,7 @@ func TaskEvents(w io.Writer, in TaskEventsInput, format types.OutputFormat) (int
 
 	// Both --context-kind and --context-id must be paired; one without the
 	// other is ambiguous.
-	if (in.ContextKind != nil) != (in.ContextID != "") {
+	if (in.ContextKind != nil) != (in.ContextId != "") {
 		se := &errors.StructuredError{
 			Category: errors.CategoryValidation,
 			What:     "The --context-kind and --context-id flags must be passed together.",
@@ -115,18 +115,18 @@ func TaskEvents(w io.Writer, in TaskEventsInput, format types.OutputFormat) (int
 	case hasContext:
 		// Context-edge query takes precedence; after S4 the epoch path will
 		// fold into this branch via ContextEpoch.
-		events, err = tracker.Timeline(ctx, *in.ContextKind, in.ContextID)
+		events, err = tracker.Timeline(ctx, *in.ContextKind, in.ContextId)
 		if err != nil {
 			return errors.ExitCode(err), err
 		}
 		// If the user ALSO passed --epoch-id alongside the context filter,
-		// narrow the result to events whose EpochID matches. Useful for
+		// narrow the result to events whose EpochId matches. Useful for
 		// "events on commit X that happened during epoch Y".
 		if hasEpoch {
-			events = filterByEpoch(events, in.EpochID)
+			events = filterByEpoch(events, in.EpochId)
 		}
 	case hasEpoch:
-		events, err = tracker.QueryEvents(ctx, in.EpochID, in.Phase, agentRoleFilter(in.Agent))
+		events, err = tracker.QueryEvents(ctx, in.EpochId, in.Phase, agentRoleFilter(in.Agent))
 		if err != nil {
 			return errors.ExitCode(err), err
 		}
@@ -168,10 +168,10 @@ func agentRoleFilter(agent string) *string {
 	return &agent
 }
 
-func filterByEpoch(events []protocol.AuditEvent, epochID string) []protocol.AuditEvent {
+func filterByEpoch(events []protocol.AuditEvent, epochId string) []protocol.AuditEvent {
 	out := make([]protocol.AuditEvent, 0, len(events))
 	for _, e := range events {
-		if e.EpochID == epochID {
+		if e.EpochId == epochId {
 			out = append(out, e)
 		}
 	}
@@ -192,7 +192,7 @@ func filterByAgent(events []protocol.AuditEvent, agent string) []protocol.AuditE
 	out := make([]protocol.AuditEvent, 0, len(events))
 	for _, e := range events {
 		// Until S3 lands, Role is the attribution column. After S3, the
-		// filter will switch to AgentID resolved through agents_software.
+		// filter will switch to AgentId resolved through agents_software.
 		if e.Role == agent {
 			out = append(out, e)
 		}

@@ -237,14 +237,14 @@ func TestCLI_DepAddAndReady(t *testing.T) {
 		t.Fatalf("dep add exit %d stderr=%s", depOut.exitCode, depOut.stderr)
 	}
 	var edge struct {
-		SourceID string `json:"sourceId"`
-		TargetID string `json:"targetId"`
+		SourceId string `json:"sourceId"`
+		TargetId string `json:"targetId"`
 		Kind     string `json:"kind"`
 	}
 	if err := json.Unmarshal([]byte(depOut.stdout), &edge); err != nil {
 		t.Fatalf("decode edge: %v\nbody: %s", err, depOut.stdout)
 	}
-	if edge.SourceID != parent || edge.TargetID != child || edge.Kind != "blocked_by" {
+	if edge.SourceId != parent || edge.TargetId != child || edge.Kind != "blocked_by" {
 		t.Errorf("edge: %+v", edge)
 	}
 

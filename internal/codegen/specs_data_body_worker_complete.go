@@ -7,28 +7,28 @@ var workerCompleteBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "wcomp-quality-gates",
+			Id:        "wcomp-quality-gates",
 			Given:     "implementation done",
 			When:      "signaling",
 			Then:      "verify the project's quality gates pass",
 			ShouldNot: "report done with failing checks",
 		},
 		{
-			ID:        "wcomp-checklist",
+			Id:        "wcomp-checklist",
 			Given:     "validation_checklist",
 			When:      "completing",
 			Then:      "confirm all items satisfied",
 			ShouldNot: "complete with unchecked items",
 		},
 		{
-			ID:        "wcomp-beads-update",
+			Id:        "wcomp-beads-update",
 			Given:     "completion",
 			When:      "reporting",
 			Then:      "update Beads task status",
 			ShouldNot: "omit Beads update",
 		},
 		{
-			ID:        "wcomp-handoff-doc",
+			Id:        "wcomp-handoff-doc",
 			Given:     "completion",
 			When:      "handing off to reviewer",
 			Then:      "create handoff document at `.git/.aura/handoff/<request-task-id>/worker-<N>-to-reviewer.md`",
@@ -38,12 +38,12 @@ var workerCompleteBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:      "wcomp-when-to-use",
+			Id:      "wcomp-when-to-use",
 			Title:   "When to Use",
 			Content: `Implementation complete and all checks pass.`,
 		},
 		{
-			ID:    "wcomp-steps",
+			Id:    "wcomp-steps",
 			Title: "Steps",
 			Content: `1. Run the project's quality gates (type checking + tests) - must pass
 2. **Verify production code path via code inspection:**
@@ -63,17 +63,17 @@ var workerCompleteBody = SkillBody{
 5. Create handoff document for reviewer transition`,
 		},
 		{
-			ID:      "wcomp-handoff-template",
+			Id:      "wcomp-handoff-template",
 			Title:   "Handoff Template (Worker → Reviewer)",
 			Content: "",
 			Subsections: []ProseSection{
 				{
-					ID:      "wcomp-handoff-storage",
+					Id:      "wcomp-handoff-storage",
 					Title:   "Storage",
 					Content: `Path: ` + "`.git/.aura/handoff/<request-task-id>/worker-<N>-to-reviewer.md`",
 				},
 				{
-					ID:    "wcomp-handoff-content",
+					Id:    "wcomp-handoff-content",
 					Title: "Template",
 					Content: "```markdown" + `
 # Handoff: Worker <N> → Reviewer
@@ -104,7 +104,7 @@ var workerCompleteBody = SkillBody{
 			},
 		},
 		{
-			ID:    "wcomp-report-completion",
+			Id:    "wcomp-report-completion",
 			Title: "Report Completion",
 			Content: "```bash" + `
 # Close the task and add completion notes
@@ -113,7 +113,7 @@ bd comments add <task-id> "Implementation complete. Quality gates pass. Producti
 ` + "```",
 		},
 		{
-			ID:    "wcomp-followup-slice",
+			Id:    "wcomp-followup-slice",
 			Title: "Follow-up Slice Completion (FOLLOWUP_SLICE-N)",
 			Content: `When completing a FOLLOWUP_SLICE-N, additionally report which original leaf tasks were resolved:
 

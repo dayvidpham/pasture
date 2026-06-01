@@ -7,21 +7,21 @@ var architectRatifyBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "arch-ratify-all-accept",
+			Id:        "arch-ratify-all-accept",
 			Given:     "all 3 reviewers voted ACCEPT",
 			When:      "ratifying",
 			Then:      "add `aura:p6-plan:s6-ratify` label to PROPOSAL-N",
 			ShouldNot: "ratify with any REVISE votes outstanding",
 		},
 		{
-			ID:        "arch-ratify-audit-trail",
+			Id:        "arch-ratify-audit-trail",
 			Given:     "ratification",
 			When:      "documenting",
 			Then:      "add comment with reviewer sign-offs and UAT reference",
 			ShouldNot: "ratify without audit trail",
 		},
 		{
-			ID:        "arch-ratify-supersede-old",
+			Id:        "arch-ratify-supersede-old",
 			Given:     "previous proposals exist",
 			When:      "ratifying new version",
 			Then:      "mark old proposals as `aura:superseded`",
@@ -31,12 +31,12 @@ var architectRatifyBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:      "arch-ratify-when-to-use",
+			Id:      "arch-ratify-when-to-use",
 			Title:   "When to Use",
 			Content: "All 3 reviewers have voted ACCEPT on PROPOSAL-N and user has approved via UAT.",
 		},
 		{
-			ID:    "arch-ratify-consensus-requirement",
+			Id:    "arch-ratify-consensus-requirement",
 			Title: "Consensus Requirement",
 			Content: "**All 3 reviewers must vote ACCEPT.** If any reviewer votes REVISE:\n" +
 				"1. Architect creates PROPOSAL-N+1 addressing feedback\n" +
@@ -45,11 +45,11 @@ var architectRatifyBody = SkillBody{
 				"4. Repeat until all ACCEPT",
 		},
 		{
-			ID:    "arch-ratify-steps",
+			Id:    "arch-ratify-steps",
 			Title: "Steps",
 			Subsections: []ProseSection{
 				{
-					ID:    "arch-ratify-step1-check",
+					Id:    "arch-ratify-step1-check",
 					Title: "Step 1: Check all reviews",
 					Content: "```bash\n" +
 						"bd show <proposal-id>\n" +
@@ -57,12 +57,12 @@ var architectRatifyBody = SkillBody{
 						"```",
 				},
 				{
-					ID:      "arch-ratify-step2-verify",
+					Id:      "arch-ratify-step2-verify",
 					Title:   "Step 2: Verify all 3 votes are ACCEPT",
 					Content: "Confirm each of the three review tasks (Reviewer A, B, C) has a VOTE: ACCEPT comment before proceeding.",
 				},
 				{
-					ID:    "arch-ratify-step3-label",
+					Id:    "arch-ratify-step3-label",
 					Title: "Step 3: Add ratify label to PROPOSAL-N",
 					Content: "Do NOT create a new task — add label to the existing proposal:\n" +
 						"```bash\n" +
@@ -71,7 +71,7 @@ var architectRatifyBody = SkillBody{
 						"```",
 				},
 				{
-					ID:    "arch-ratify-step4-supersede",
+					Id:    "arch-ratify-step4-supersede",
 					Title: "Step 4: Mark all previous proposals as superseded",
 					Content: "```bash\n" +
 						"bd label add <old-proposal-id> aura:superseded\n" +
@@ -79,7 +79,7 @@ var architectRatifyBody = SkillBody{
 						"```",
 				},
 				{
-					ID:    "arch-ratify-step5-urd",
+					Id:    "arch-ratify-step5-urd",
 					Title: "Step 5: Update URD with ratification",
 					Content: "```bash\n" +
 						"bd comments add <urd-id> \"Ratified: scope confirmed. Ratified proposal: <ratified-proposal-id>\"\n" +
@@ -88,7 +88,7 @@ var architectRatifyBody = SkillBody{
 			},
 		},
 		{
-			ID:    "arch-ratify-next-steps",
+			Id:    "arch-ratify-next-steps",
 			Title: "Next Steps",
 			Content: "After ratifying PROPOSAL-N:\n" +
 				"1. **Prepare handoff** — Run `/aura:architect-handoff` to create handoff document and spawn supervisor\n\n" +
@@ -96,7 +96,7 @@ var architectRatifyBody = SkillBody{
 				"Implementation is handled by the supervisor and workers spawned during handoff.",
 		},
 		{
-			ID:    "arch-ratify-followup",
+			Id:    "arch-ratify-followup",
 			Title: "Follow-up Proposals (FOLLOWUP_PROPOSAL-N)",
 			Content: "When ratifying a FOLLOWUP_PROPOSAL-N, the next step is the same h1 handoff but scoped to the follow-up epic:\n" +
 				"- **Storage:** " + "`.git/.aura/handoff/{followup-epic-id}/architect-to-supervisor.md`" + "\n" +

@@ -88,7 +88,7 @@ func TestTaskShow_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestTaskShow_InvalidID(t *testing.T) {
+func TestTaskShow_InvalidId(t *testing.T) {
 	var out bytes.Buffer
 	code, err := handlers.TaskShow(&out, dbPath(t), "not-a-real-id", types.OutputText)
 	if err == nil {
@@ -113,7 +113,7 @@ func TestTaskUpdate_AllFields(t *testing.T) {
 	var out bytes.Buffer
 	if _, err := handlers.TaskUpdate(&out, handlers.TaskUpdateInput{
 		DBPath:      path,
-		IDStr:       id,
+		IdStr:       id,
 		Title:       &newTitle,
 		Description: &newDescription,
 		Status:      &inProgress,

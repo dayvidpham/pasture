@@ -209,7 +209,7 @@ func buildFixture(db *sql.DB) error {
 	for i, m := range rowMeta {
 		ts := baseTime.Add(time.Duration(i) * time.Second).UnixNano()
 		if _, err := stmt.Exec(
-			m.epochID, m.phase, m.role, m.eventType, m.payload, ts,
+			m.epochId, m.phase, m.role, m.eventType, m.payload, ts,
 		); err != nil {
 			return fmt.Errorf("INSERT row %d (role=%q, phase=%q): %w", i, m.role, m.phase, err)
 		}
@@ -223,7 +223,7 @@ func buildFixture(db *sql.DB) error {
 
 // rowMeta carries the planned column values for one audit_events row.
 type rowMeta struct {
-	epochID   string
+	epochId   string
 	phase     string
 	role      string
 	eventType string
@@ -282,7 +282,7 @@ func buildRowMetadata() []rowMeta {
 	return rows
 }
 
-// assignEpochIDs fills each rowMeta.epochID per the §11 Scenario 4
+// assignEpochIDs fills each rowMeta.epochId per the §11 Scenario 4
 // distribution. UUIDs are generated deterministically from (i, salt) so
 // regenerating the fixture produces the same id values — the WAL-level
 // byte equivalence is preserved across runs.
@@ -302,20 +302,20 @@ func assignEpochIDs(rows []rowMeta) {
 	// Block 1: 768 valid Provenance TaskIDs. Use a fixed namespace
 	// "aura-plugins" so the IDs round-trip through provenance.ParseTaskID.
 	for i := 0; i < validTaskIDCount; i++ {
-		rows[i].epochID = "aura-plugins--" + deterministicUUIDv7(uint64(i)+1)
+		rows[i].epochId = "aura-plugins--" + deterministicUUIDv7(uint64(i)+1)
 	}
 
-	// Block 2: 192 free strings (legacy non-TaskID epoch IDs). The §7.12
+	// Block 2: 192 free strings (legacy non-TaskId epoch IDs). The §7.12
 	// migration note explicitly preserves these as historical records.
 	for i := 0; i < freeStringCount; i++ {
-		rows[validTaskIDCount+i].epochID = fmt.Sprintf("epoch-2026-04-22-mvp-%03d", i)
+		rows[validTaskIDCount+i].epochId = fmt.Sprintf("epoch-2026-04-22-mvp-%03d", i)
 	}
 
 	// Block 3: 64 duplicates of block-1 epoch IDs (exercises EpochContext
 	// dedup pass during S4's v3→v4 migration). We grab IDs from the START
 	// of block 1 so the duplicate set is well-distributed.
 	for i := 0; i < duplicateCount; i++ {
-		rows[validTaskIDCount+freeStringCount+i].epochID = rows[i].epochID
+		rows[validTaskIDCount+freeStringCount+i].epochId = rows[i].epochId
 	}
 }
 

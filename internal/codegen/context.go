@@ -30,7 +30,7 @@ import (
 // ConstraintContext is a resolved constraint with its Given/When/Then/ShouldNot
 // fields populated from ConstraintSpecs. Used inside RoleContext and PhaseContext.
 type ConstraintContext struct {
-	ID        string
+	Id        string
 	Given     string
 	When      string
 	Then      string
@@ -365,7 +365,7 @@ func buildConstraintContexts(constraintIDs map[string]bool) ([]ConstraintContext
 			)
 		}
 		contexts = append(contexts, ConstraintContext{
-			ID:        spec.ID,
+			Id:        spec.Id,
 			Given:     spec.Given,
 			When:      spec.When,
 			Then:      spec.Then,
@@ -374,7 +374,7 @@ func buildConstraintContexts(constraintIDs map[string]bool) ([]ConstraintContext
 	}
 	// Sort by ID for deterministic output.
 	sort.Slice(contexts, func(i, j int) bool {
-		return contexts[i].ID < contexts[j].ID
+		return contexts[i].Id < contexts[j].Id
 	})
 	return contexts, nil
 }
@@ -403,10 +403,10 @@ func buildConstraintContexts(constraintIDs map[string]bool) ([]ConstraintContext
 func GetRoleContext(role types.RoleId) RoleContext {
 	// Invert PhaseSpecs[phase].OwnerRoles to find phases owned by this role.
 	var ownedPhases []protocol.PhaseId
-	for phaseID, spec := range PhaseSpecs {
+	for phaseId, spec := range PhaseSpecs {
 		for _, ownerRole := range spec.OwnerRoles {
 			if ownerRole == role {
-				ownedPhases = append(ownedPhases, phaseID)
+				ownedPhases = append(ownedPhases, phaseId)
 				break
 			}
 		}
@@ -435,7 +435,7 @@ func GetRoleContext(role types.RoleId) RoleContext {
 	var handoffs []string
 	for _, spec := range HandoffSpecs {
 		if spec.SourceRole == role || spec.TargetRole == role {
-			handoffs = append(handoffs, spec.ID)
+			handoffs = append(handoffs, spec.Id)
 		}
 	}
 	sort.Strings(handoffs)
@@ -480,7 +480,7 @@ func GetRoleContext(role types.RoleId) RoleContext {
 			reviewAxes = append(reviewAxes, axis)
 		}
 		sort.Slice(reviewAxes, func(i, j int) bool {
-			return reviewAxes[i].ID < reviewAxes[j].ID
+			return reviewAxes[i].Id < reviewAxes[j].Id
 		})
 	}
 
@@ -497,7 +497,7 @@ func GetRoleContext(role types.RoleId) RoleContext {
 		}
 	}
 	sort.Slice(figures, func(i, j int) bool {
-		return figures[i].ID < figures[j].ID
+		return figures[i].Id < figures[j].Id
 	})
 
 	return RoleContext{

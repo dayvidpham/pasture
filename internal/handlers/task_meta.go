@@ -17,7 +17,7 @@ import (
 func TaskLabelAdd(w io.Writer, dbPath, idStr, label string, format types.OutputFormat) (int, error) {
 	id, err := provenance.ParseTaskID(idStr)
 	if err != nil {
-		return wrapInvalidID("task label add", idStr, err)
+		return wrapInvalidId("task label add", idStr, err)
 	}
 	if label == "" {
 		se := &pasterrors.StructuredError{
@@ -50,7 +50,7 @@ func TaskLabelAdd(w io.Writer, dbPath, idStr, label string, format types.OutputF
 func TaskLabelRemove(w io.Writer, dbPath, idStr, label string, format types.OutputFormat) (int, error) {
 	id, err := provenance.ParseTaskID(idStr)
 	if err != nil {
-		return wrapInvalidID("task label remove", idStr, err)
+		return wrapInvalidId("task label remove", idStr, err)
 	}
 	if label == "" {
 		se := &pasterrors.StructuredError{
@@ -82,8 +82,8 @@ func TaskLabelRemove(w io.Writer, dbPath, idStr, label string, format types.Outp
 // TaskCommentAddInput captures the inputs for `pasture task comment add`.
 type TaskCommentAddInput struct {
 	DBPath   string
-	IDStr    string
-	AuthorID string // wire-format AgentID; required for now (see hjsdt follow-up)
+	IdStr    string
+	AuthorId string // wire-format AgentId; required for now (see hjsdt follow-up)
 	Body     string
 }
 
@@ -92,9 +92,9 @@ type TaskCommentAddInput struct {
 // The author must already be registered; agent registration ergonomics are
 // tracked as a follow-up to hjsdt.
 func TaskCommentAdd(w io.Writer, in TaskCommentAddInput, format types.OutputFormat) (int, error) {
-	id, err := provenance.ParseTaskID(in.IDStr)
+	id, err := provenance.ParseTaskID(in.IdStr)
 	if err != nil {
-		return wrapInvalidID("task comment add", in.IDStr, err)
+		return wrapInvalidId("task comment add", in.IdStr, err)
 	}
 	if in.Body == "" {
 		se := &pasterrors.StructuredError{
@@ -109,7 +109,7 @@ func TaskCommentAdd(w io.Writer, in TaskCommentAddInput, format types.OutputForm
 		}
 		return pasterrors.ExitCode(se), se
 	}
-	if in.AuthorID == "" {
+	if in.AuthorId == "" {
 		se := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     "An author is required to add a comment.",
@@ -123,9 +123,9 @@ func TaskCommentAdd(w io.Writer, in TaskCommentAddInput, format types.OutputForm
 		}
 		return pasterrors.ExitCode(se), se
 	}
-	authorID, err := provenance.ParseAgentID(in.AuthorID)
+	authorId, err := provenance.ParseAgentID(in.AuthorId)
 	if err != nil {
-		return wrapInvalidID("task comment add (author)", in.AuthorID, err)
+		return wrapInvalidId("task comment add (author)", in.AuthorId, err)
 	}
 
 	tr, err := tasks.OpenTaskTracker(in.DBPath)
@@ -134,7 +134,7 @@ func TaskCommentAdd(w io.Writer, in TaskCommentAddInput, format types.OutputForm
 	}
 	defer tr.Close()
 
-	c, err := tr.AddComment(id, authorID, in.Body)
+	c, err := tr.AddComment(id, authorId, in.Body)
 	if err != nil {
 		return wrapTaskOpError("comment add", err)
 	}
@@ -151,7 +151,7 @@ func TaskCommentAdd(w io.Writer, in TaskCommentAddInput, format types.OutputForm
 func TaskComments(w io.Writer, dbPath, idStr string, format types.OutputFormat) (int, error) {
 	id, err := provenance.ParseTaskID(idStr)
 	if err != nil {
-		return wrapInvalidID("task comments", idStr, err)
+		return wrapInvalidId("task comments", idStr, err)
 	}
 
 	tr, err := tasks.OpenTaskTracker(dbPath)

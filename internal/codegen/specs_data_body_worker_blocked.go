@@ -7,14 +7,14 @@ var workerBlockedBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "wblk-update-status",
+			Id:        "wblk-update-status",
 			Given:     "a blocker",
 			When:      "reporting",
 			Then:      "update Beads task status and document details",
 			ShouldNot: "guess or work around the blocker",
 		},
 		{
-			ID:        "wblk-wait-for-response",
+			Id:        "wblk-wait-for-response",
 			Given:     "blocker sent",
 			When:      "waiting",
 			Then:      "wait for supervisor response",
@@ -24,12 +24,12 @@ var workerBlockedBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:      "wblk-when-to-use",
+			Id:      "wblk-when-to-use",
 			Title:   "When to Use",
 			Content: `Cannot proceed due to missing dependency, unclear requirement, or need changes in another file.`,
 		},
 		{
-			ID:    "wblk-steps",
+			Id:    "wblk-steps",
 			Title: "Steps",
 			Content: `1. Identify what's blocking (missing type, unclear requirement, file dependency)
 
@@ -47,7 +47,7 @@ var workerBlockedBody = SkillBody{
 4. Wait for supervisor or dependency resolution — check with ` + "`bd show <task-id>`",
 		},
 		{
-			ID:    "wblk-common-blockers",
+			Id:    "wblk-common-blockers",
 			Title: "Common Blockers",
 			Content: `- Missing type definition from another file
 - Unclear requirement in acceptance_criteria

@@ -158,11 +158,11 @@ func (m *mockClient) TerminateWorkflow(_ context.Context, _, _, _ string, _ ...i
 // mockWorkflowRun implements handlers.TemporalWorkflowRun.
 type mockWorkflowRun struct {
 	id    string
-	runID string
+	runId string
 }
 
 func (m *mockWorkflowRun) GetID() string    { return m.id }
-func (m *mockWorkflowRun) GetRunID() string { return m.runID }
+func (m *mockWorkflowRun) GetRunID() string { return m.runId }
 
 // jsonEncodedValue implements converter.EncodedValue using raw JSON bytes.
 type jsonEncodedValue struct {

@@ -14,8 +14,8 @@ import (
 //
 // # Synthetic event ids
 //
-// RecordEventReturningID returns a synthetic monotonic counter value
-// (lastEventID, starting at 1 on the first call). The counter is per-trail
+// RecordEventReturningId returns a synthetic monotonic counter value
+// (lastEventId, starting at 1 on the first call). The counter is per-trail
 // and increments under m.mu, so two concurrent callers always observe two
 // distinct ids — matching the SQLite-backed trail's per-statement-LastInsertId
 // guarantee. The id is NOT a real audit_events row id and MUST NOT be
@@ -26,10 +26,10 @@ type InMemoryAuditTrail struct {
 	mu             sync.RWMutex
 	events         []protocol.AuditEvent
 	sessionEntries []protocol.SessionEntry
-	// lastEventID is the synthetic monotonic counter handed out by
-	// RecordEventReturningID. Guarded by mu (held in WRITE mode whenever the
+	// lastEventId is the synthetic monotonic counter handed out by
+	// RecordEventReturningId. Guarded by mu (held in WRITE mode whenever the
 	// counter is read-and-incremented atomically).
-	lastEventID int64
+	lastEventId int64
 }
 
 // NewInMemoryAuditTrail returns an empty, ready-to-use InMemoryAuditTrail.
@@ -38,14 +38,14 @@ func NewInMemoryAuditTrail() *InMemoryAuditTrail {
 }
 
 // RecordEvent appends event to the in-memory list, discarding the synthetic
-// row id. It is safe for concurrent use. See RecordEventReturningID for the
+// row id. It is safe for concurrent use. See RecordEventReturningId for the
 // id-returning variant; callers that need the id MUST use that.
 func (m *InMemoryAuditTrail) RecordEvent(ctx context.Context, event protocol.AuditEvent) error {
-	_, err := m.RecordEventReturningID(ctx, event)
+	_, err := m.RecordEventReturningId(ctx, event)
 	return err
 }
 
-// RecordEventReturningID appends event and returns a synthetic monotonic
+// RecordEventReturningId appends event and returns a synthetic monotonic
 // id (per-trail, starting at 1, incremented on every successful call). The
 // id-and-append are performed atomically under m.mu so concurrent callers
 // always observe distinct ids — matching the SQLite-backed trail's
@@ -53,24 +53,24 @@ func (m *InMemoryAuditTrail) RecordEvent(ctx context.Context, event protocol.Aud
 //
 // The returned id is NOT a real audit_events row id and is only meaningful
 // for the lifetime of this in-memory trail; do not persist it.
-func (m *InMemoryAuditTrail) RecordEventReturningID(_ context.Context, event protocol.AuditEvent) (int64, error) {
+func (m *InMemoryAuditTrail) RecordEventReturningId(_ context.Context, event protocol.AuditEvent) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.lastEventID++
+	m.lastEventId++
 	m.events = append(m.events, event)
-	return m.lastEventID, nil
+	return m.lastEventId, nil
 }
 
 // QueryEvents returns all events matching the filters in insertion order.
 //
-// epochID is required. phase and role are optional; nil means "no filter".
-func (m *InMemoryAuditTrail) QueryEvents(_ context.Context, epochID string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
+// epochId is required. phase and role are optional; nil means "no filter".
+func (m *InMemoryAuditTrail) QueryEvents(_ context.Context, epochId string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	var result []protocol.AuditEvent
 	for _, ev := range m.events {
-		if ev.EpochID != epochID {
+		if ev.EpochId != epochId {
 			continue
 		}
 		if phase != nil && ev.Phase != *phase {
@@ -108,16 +108,16 @@ func (m *InMemoryAuditTrail) RecordSessionEntries(_ context.Context, entries []p
 	return nil
 }
 
-// QuerySessionEntries returns all session entries for the given sessionID in
+// QuerySessionEntries returns all session entries for the given sessionId in
 // insertion order. Returns an empty (non-nil) slice when no entries exist.
 // Safe for concurrent use.
-func (m *InMemoryAuditTrail) QuerySessionEntries(_ context.Context, sessionID string) ([]protocol.SessionEntry, error) {
+func (m *InMemoryAuditTrail) QuerySessionEntries(_ context.Context, sessionId string) ([]protocol.SessionEntry, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	result := make([]protocol.SessionEntry, 0)
 	for _, e := range m.sessionEntries {
-		if e.SessionID == sessionID {
+		if e.SessionId == sessionId {
 			result = append(result, e)
 		}
 	}

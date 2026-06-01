@@ -35,7 +35,7 @@ func TestInMemoryAuditTrail_ConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			for j := range eventsPerGoroutine {
 				ev := protocol.AuditEvent{
-					EpochID:   "concurrent-epoch",
+					EpochId:   "concurrent-epoch",
 					Phase:     protocol.PhaseWorkerSlices,
 					Role:      "worker",
 					EventType: protocol.EventSliceStarted,
@@ -63,21 +63,21 @@ func TestInMemoryAuditTrail_ConcurrentAccess(t *testing.T) {
 	}
 }
 
-// TestInMemoryAuditTrail_RecordEventReturningID_Suite runs the shared
-// RecordEventReturningID contract suite against the in-memory trail. The
+// TestInMemoryAuditTrail_RecordEventReturningId_Suite runs the shared
+// RecordEventReturningId contract suite against the in-memory trail. The
 // in-memory trail uses a synthetic monotonic counter; the suite asserts
 // (positive id, distinct ids per call, queryable round-trip).
-func TestInMemoryAuditTrail_RecordEventReturningID_Suite(t *testing.T) {
+func TestInMemoryAuditTrail_RecordEventReturningId_Suite(t *testing.T) {
 	trail := audit.NewInMemoryAuditTrail()
-	runRecordEventReturningIDSuite(t, trail)
+	runRecordEventReturningIdSuite(t, trail)
 }
 
-// TestInMemoryAuditTrail_RecordEventReturningID_ConcurrentUnique verifies
-// that under N concurrent goroutines all calling RecordEventReturningID
+// TestInMemoryAuditTrail_RecordEventReturningId_ConcurrentUnique verifies
+// that under N concurrent goroutines all calling RecordEventReturningId
 // against the same in-memory trail, EVERY returned id is distinct. The
 // in-memory trail's counter is incremented under m.mu so this is the
 // straightforward "no two callers see the same value" property.
-func TestInMemoryAuditTrail_RecordEventReturningID_ConcurrentUnique(t *testing.T) {
+func TestInMemoryAuditTrail_RecordEventReturningId_ConcurrentUnique(t *testing.T) {
 	trail := audit.NewInMemoryAuditTrail()
 	ctx := context.Background()
 
@@ -91,14 +91,14 @@ func TestInMemoryAuditTrail_RecordEventReturningID_ConcurrentUnique(t *testing.T
 		go func(idx int) {
 			defer wg.Done()
 			ev := protocol.AuditEvent{
-				EpochID:   "concurrent-unique-mem",
+				EpochId:   "concurrent-unique-mem",
 				Phase:     protocol.PhaseWorkerSlices,
 				Role:      "worker",
 				EventType: protocol.EventSliceStarted,
 				Payload:   map[string]any{"goroutine": idx},
 				Timestamp: time.Now().UTC(),
 			}
-			id, err := trail.RecordEventReturningID(ctx, ev)
+			id, err := trail.RecordEventReturningId(ctx, ev)
 			if err != nil {
 				errCh <- err
 				return
@@ -111,13 +111,13 @@ func TestInMemoryAuditTrail_RecordEventReturningID_ConcurrentUnique(t *testing.T
 	close(errCh)
 
 	for err := range errCh {
-		t.Errorf("concurrent in-memory RecordEventReturningID: %v", err)
+		t.Errorf("concurrent in-memory RecordEventReturningId: %v", err)
 	}
 
 	seen := make(map[int64]int)
 	for id := range idCh {
 		if id <= 0 {
-			t.Errorf("in-memory RecordEventReturningID returned non-positive id %d", id)
+			t.Errorf("in-memory RecordEventReturningId returned non-positive id %d", id)
 			continue
 		}
 		seen[id]++

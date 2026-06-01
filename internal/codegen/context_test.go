@@ -56,7 +56,7 @@ func TestGetRoleContext_ConstraintSets(t *testing.T) {
 			// Build a set of returned constraint IDs for O(1) lookup.
 			gotIDs := make(map[string]bool, len(ctx.Constraints))
 			for _, c := range ctx.Constraints {
-				gotIDs[c.ID] = true
+				gotIDs[c.Id] = true
 			}
 
 			for _, id := range check.MustContain {
@@ -370,7 +370,7 @@ func TestGetPhaseContext_ConstraintSets(t *testing.T) {
 			// Build a set of returned constraint IDs for O(1) lookup.
 			gotIDs := make(map[string]bool, len(ctx.Constraints))
 			for _, c := range ctx.Constraints {
-				gotIDs[c.ID] = true
+				gotIDs[c.Id] = true
 			}
 
 			for _, id := range check.MustContain {
@@ -415,7 +415,7 @@ func TestGetPhaseContext_AllPipelinePhasesHaveGeneralConstraints(t *testing.T) {
 
 			gotIDs := make(map[string]bool, len(ctx.Constraints))
 			for _, c := range ctx.Constraints {
-				gotIDs[c.ID] = true
+				gotIDs[c.Id] = true
 			}
 
 			for _, id := range generalConstraintIDs {
@@ -597,17 +597,17 @@ func TestGetRoleContext_AllConstraintsResolvable(t *testing.T) {
 		t.Run(string(role), func(t *testing.T) {
 			ctx := codegen.GetRoleContext(role)
 			for _, c := range ctx.Constraints {
-				spec, ok := codegen.ConstraintSpecs[c.ID]
+				spec, ok := codegen.ConstraintSpecs[c.Id]
 				require.True(t, ok,
-					"role %q: constraint %q not found in ConstraintSpecs", role, c.ID)
+					"role %q: constraint %q not found in ConstraintSpecs", role, c.Id)
 				assert.Equal(t, spec.Given, c.Given,
-					"role %q constraint %q: Given mismatch", role, c.ID)
+					"role %q constraint %q: Given mismatch", role, c.Id)
 				assert.Equal(t, spec.When, c.When,
-					"role %q constraint %q: When mismatch", role, c.ID)
+					"role %q constraint %q: When mismatch", role, c.Id)
 				assert.Equal(t, spec.Then, c.Then,
-					"role %q constraint %q: Then mismatch", role, c.ID)
+					"role %q constraint %q: Then mismatch", role, c.Id)
 				assert.Equal(t, spec.ShouldNot, c.ShouldNot,
-					"role %q constraint %q: ShouldNot mismatch", role, c.ID)
+					"role %q constraint %q: ShouldNot mismatch", role, c.Id)
 			}
 		})
 	}

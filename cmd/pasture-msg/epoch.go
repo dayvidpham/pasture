@@ -31,14 +31,14 @@ with code 3 and tells you how to resolve the conflict.`,
 		}
 		format := resolveFormat(cmd, cfg)
 
-		epochID, _ := cmd.Flags().GetString("epoch-id")
+		epochId, _ := cmd.Flags().GetString("epoch-id")
 		description, _ := cmd.Flags().GetString("description")
 		taskQueue, _ := cmd.Flags().GetString("task-queue-override")
 
 		code, err := handlers.EpochStart(
 			context.Background(),
 			cfg.Connection,
-			epochID, description, taskQueue,
+			epochId, description, taskQueue,
 			format,
 			nil, // DefaultClientFactory
 		)
@@ -67,12 +67,12 @@ stopping. For immediate (non-graceful) termination, use "epoch terminate".`,
 		}
 		format := resolveFormat(cmd, cfg)
 
-		epochID, _ := cmd.Flags().GetString("epoch-id")
+		epochId, _ := cmd.Flags().GetString("epoch-id")
 
 		code, err := handlers.EpochCancel(
 			context.Background(),
 			cfg.Connection,
-			epochID,
+			epochId,
 			format,
 			nil,
 		)
@@ -102,13 +102,13 @@ is informative.`,
 		}
 		format := resolveFormat(cmd, cfg)
 
-		epochID, _ := cmd.Flags().GetString("epoch-id")
+		epochId, _ := cmd.Flags().GetString("epoch-id")
 		reason, _ := cmd.Flags().GetString("reason")
 
 		code, err := handlers.EpochTerminate(
 			context.Background(),
 			cfg.Connection,
-			epochID, reason,
+			epochId, reason,
 			format,
 			nil,
 		)

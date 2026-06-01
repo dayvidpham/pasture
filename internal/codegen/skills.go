@@ -145,12 +145,12 @@ func mustParseTemplateFS(pattern string) *template.Template {
 func buildPhaseSlug() map[protocol.PhaseId]string {
 	result := make(map[protocol.PhaseId]string, len(PhaseSpecs)+1)
 	// Build slugs for all known phases from PhaseSpecs.
-	for phaseID, spec := range PhaseSpecs {
+	for phaseId, spec := range PhaseSpecs {
 		// e.g. PhaseId("worker-slices") with Number=9 and Name="Worker Slices"
 		// → "p9-worker-slices"
 		namePart := strings.ToLower(strings.ReplaceAll(spec.Name, " ", "-"))
 		slug := fmt.Sprintf("p%d-%s", spec.Number, namePart)
-		result[phaseID] = slug
+		result[phaseId] = slug
 	}
 	// Add fallback for any PhaseId not in PhaseSpecs (e.g. PhaseComplete terminal state).
 	for _, p := range protocol.AllPhaseIds {
@@ -163,12 +163,12 @@ func buildPhaseSlug() map[protocol.PhaseId]string {
 
 // ─── Context builders ─────────────────────────────────────────────────────────
 
-// commandsForRole returns all CommandSpec entries whose RoleRef matches roleID,
+// commandsForRole returns all CommandSpec entries whose RoleRef matches roleId,
 // sorted by Name for deterministic output.
-func commandsForRole(roleID types.RoleId) []CommandSpec {
+func commandsForRole(roleId types.RoleId) []CommandSpec {
 	var result []CommandSpec
 	for _, cmd := range CommandSpecs {
-		if cmd.RoleRef == roleID {
+		if cmd.RoleRef == roleId {
 			result = append(result, cmd)
 		}
 	}
@@ -180,11 +180,11 @@ func commandsForRole(roleID types.RoleId) []CommandSpec {
 
 // subSkillsForRole returns skill invocation names for a role's sub-commands.
 // Converts aura:a:b → aura:a-b. Skips the main role command (e.g. aura:worker).
-func subSkillsForRole(roleID types.RoleId) []string {
-	mainCmd := fmt.Sprintf("aura:%s", roleID)
+func subSkillsForRole(roleId types.RoleId) []string {
+	mainCmd := fmt.Sprintf("aura:%s", roleId)
 	var result []string
 	for _, cmd := range CommandSpecs {
-		if cmd.RoleRef != roleID {
+		if cmd.RoleRef != roleId {
 			continue
 		}
 		if cmd.Name == mainCmd {
@@ -208,7 +208,7 @@ func subSkillsForRole(roleID types.RoleId) []string {
 func constraintsFromRoleContext(ctx RoleContext) []ConstraintSpec {
 	seen := make(map[string]bool, len(ctx.Constraints))
 	for _, cc := range ctx.Constraints {
-		seen[cc.ID] = true
+		seen[cc.Id] = true
 	}
 	var result []ConstraintSpec
 	for id, spec := range ConstraintSpecs {
@@ -217,22 +217,22 @@ func constraintsFromRoleContext(ctx RoleContext) []ConstraintSpec {
 		}
 	}
 	sort.Slice(result, func(i, j int) bool {
-		return result[i].ID < result[j].ID
+		return result[i].Id < result[j].Id
 	})
 	return result
 }
 
 // handoffsForRole returns HandoffSpec entries where the role is source or target,
 // sorted by ID.
-func handoffsForRole(roleID types.RoleId) []HandoffSpec {
+func handoffsForRole(roleId types.RoleId) []HandoffSpec {
 	var result []HandoffSpec
 	for _, h := range HandoffSpecs {
-		if h.SourceRole == roleID || h.TargetRole == roleID {
+		if h.SourceRole == roleId || h.TargetRole == roleId {
 			result = append(result, h)
 		}
 	}
 	sort.Slice(result, func(i, j int) bool {
-		return result[i].ID < result[j].ID
+		return result[i].Id < result[j].Id
 	})
 	return result
 }
@@ -241,8 +241,8 @@ func handoffsForRole(roleID types.RoleId) []HandoffSpec {
 // in protocol.PhaseId declaration order (by phase number).
 func ownedPhaseDetails(roleSpec RoleSpec) []PhaseSpec {
 	var result []PhaseSpec
-	for _, phaseID := range roleSpec.OwnedPhases {
-		if spec, ok := PhaseSpecs[phaseID]; ok {
+	for _, phaseId := range roleSpec.OwnedPhases {
+		if spec, ok := PhaseSpecs[phaseId]; ok {
 			result = append(result, spec)
 		}
 	}
@@ -288,15 +288,15 @@ type figureYAML struct {
 // content field. figuresDir must point to the directory containing these files.
 //
 // Returns an error if the file is missing, malformed, or has no content.
-func loadFigureContent(figureID, figuresDir string) (string, error) {
-	path := fmt.Sprintf("%s/%s.yaml", figuresDir, figureID)
+func loadFigureContent(figureId, figuresDir string) (string, error) {
+	path := fmt.Sprintf("%s/%s.yaml", figuresDir, figureId)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf(
 			"codegen.loadFigureContent: figure YAML not found at %q — "+
 				"where: figure ID %q, figures dir %q — "+
 				"fix: create %s with id, title, type, content fields: %w",
-			path, figureID, figuresDir, path, err,
+			path, figureId, figuresDir, path, err,
 		)
 	}
 	var fig figureYAML
@@ -321,12 +321,12 @@ func loadFigureContent(figureID, figuresDir string) (string, error) {
 // associated with the given role. Figures without content (not loadable)
 // are included with an empty Content field (non-fatal for generation).
 // figuresDir is the path to the directory containing figure YAML files.
-func loadFiguresForRole(roleID types.RoleId, figuresDir string) []FigureSpec {
+func loadFiguresForRole(roleId types.RoleId, figuresDir string) []FigureSpec {
 	var result []FigureSpec
 	for _, fig := range FigureSpecs {
 		for _, ref := range fig.RoleRefs {
-			if ref == roleID {
-				content, err := loadFigureContent(fig.ID, figuresDir)
+			if ref == roleId {
+				content, err := loadFigureContent(fig.Id, figuresDir)
 				if err != nil {
 					// Non-fatal: include with empty content.
 					content = ""
@@ -339,19 +339,19 @@ func loadFiguresForRole(roleID types.RoleId, figuresDir string) []FigureSpec {
 		}
 	}
 	sort.Slice(result, func(i, j int) bool {
-		return result[i].ID < result[j].ID
+		return result[i].Id < result[j].Id
 	})
 	return result
 }
 
 // loadFiguresForCommand loads figure content from disk for FigureSpecs
 // associated with the given command ID.
-func loadFiguresForCommand(commandID, figuresDir string) []FigureSpec {
+func loadFiguresForCommand(commandId, figuresDir string) []FigureSpec {
 	var result []FigureSpec
 	for _, fig := range FigureSpecs {
 		for _, ref := range fig.CommandRefs {
-			if ref == commandID {
-				content, err := loadFigureContent(fig.ID, figuresDir)
+			if ref == commandId {
+				content, err := loadFigureContent(fig.Id, figuresDir)
 				if err != nil {
 					content = ""
 				}
@@ -363,7 +363,7 @@ func loadFiguresForCommand(commandID, figuresDir string) []FigureSpec {
 		}
 	}
 	sort.Slice(result, func(i, j int) bool {
-		return result[i].ID < result[j].ID
+		return result[i].Id < result[j].Id
 	})
 	return result
 }
@@ -397,30 +397,30 @@ func unifiedDiff(fromFile, toFile, oldContent, newContent string) string {
 // including both the header and body content inside BEGIN/END markers.
 // This is the single-pass replacement for the former renderHeader + renderBody
 // two-pass pipeline.
-func renderSkill(roleID types.RoleId, figuresDir string) (string, error) {
-	roleSpec, ok := RoleSpecs[roleID]
+func renderSkill(roleId types.RoleId, figuresDir string) (string, error) {
+	roleSpec, ok := RoleSpecs[roleId]
 	if !ok {
 		return "", fmt.Errorf(
 			"codegen.renderSkill: role %q not found in RoleSpecs — "+
 				"where: GenerateSkill called with unknown role ID — "+
 				"fix: add the role to RoleSpecs in specs_data.go",
-			roleID,
+			roleId,
 		)
 	}
 
-	roleCtx := GetRoleContext(roleID)
+	roleCtx := GetRoleContext(roleId)
 
 	phaseSlug := buildPhaseSlug()
 	ownedPhases := ownedPhasesOrdered(roleSpec)
 	phasesDetail := ownedPhaseDetails(roleSpec)
-	commands := commandsForRole(roleID)
+	commands := commandsForRole(roleId)
 	constraints := constraintsFromRoleContext(roleCtx)
-	handoffs := handoffsForRole(roleID)
-	steps := ProcedureSteps[roleID]
-	subSkills := subSkillsForRole(roleID)
+	handoffs := handoffsForRole(roleId)
+	steps := ProcedureSteps[roleId]
+	subSkills := subSkillsForRole(roleId)
 
 	// Load figures with content from disk.
-	figures := loadFiguresForRole(roleID, figuresDir)
+	figures := loadFiguresForRole(roleId, figuresDir)
 	fbw := figuresByWorkflow(figures)
 
 	ctx := skillContext{
@@ -444,7 +444,7 @@ func renderSkill(roleID types.RoleId, figuresDir string) (string, error) {
 	}
 
 	// Merge body content if a SkillBody entry exists.
-	if body, ok := SkillBodySpecs[string(roleID)]; ok {
+	if body, ok := SkillBodySpecs[string(roleId)]; ok {
 		ctx.Preamble = body.Preamble
 		ctx.BodySections = body.Sections
 		ctx.BodyRecipes = body.Recipes
@@ -455,12 +455,12 @@ func renderSkill(roleID types.RoleId, figuresDir string) (string, error) {
 	// shared fragment payloads from SharedFragmentSpecs. Templates are unchanged
 	// (D5); this pass operates on the context before template execution.
 	// When SharedFragmentSpecs is empty (SLICE-1), this is a no-op.
-	skillFile := fmt.Sprintf("skills/%s/SKILL.md", roleID)
+	skillFile := fmt.Sprintf("skills/%s/SKILL.md", roleId)
 	resolvedSections, resolvedBehaviors, err := resolveBodyFragments(
-		ctx.BodySections, ctx.BodyBehaviors, SharedFragmentSpecs, string(roleID), skillFile,
+		ctx.BodySections, ctx.BodyBehaviors, SharedFragmentSpecs, string(roleId), skillFile,
 	)
 	if err != nil {
-		return "", fmt.Errorf("codegen.renderSkill: fragment resolution failed for role %q: %w", roleID, err)
+		return "", fmt.Errorf("codegen.renderSkill: fragment resolution failed for role %q: %w", roleId, err)
 	}
 	ctx.BodySections = resolvedSections
 	ctx.BodyBehaviors = resolvedBehaviors
@@ -473,7 +473,7 @@ func renderSkill(roleID types.RoleId, figuresDir string) (string, error) {
 				"where: skill.go.tmpl — "+
 				"when: rendering SKILL.md — "+
 				"fix: check that the template context matches the template variables: %w",
-			roleID, err,
+			roleId, err,
 		)
 	}
 	return buf.String(), nil
@@ -483,18 +483,18 @@ func renderSkill(roleID types.RoleId, figuresDir string) (string, error) {
 // SKILL.md file, including both figures and body content inside BEGIN/END
 // markers. This is the single-pass replacement for the former
 // renderSubSkillHeader + renderBody two-pass pipeline.
-func renderSubSkill(commandID, figuresDir string) (string, error) {
-	cmdSpec, ok := CommandSpecs[commandID]
+func renderSubSkill(commandId, figuresDir string) (string, error) {
+	cmdSpec, ok := CommandSpecs[commandId]
 	if !ok {
 		return "", fmt.Errorf(
 			"codegen.renderSubSkill: command %q not found in CommandSpecs — "+
 				"where: GenerateSubSkill called with unknown command ID — "+
 				"fix: add the command to CommandSpecs in specs_data.go",
-			commandID,
+			commandId,
 		)
 	}
 
-	figures := loadFiguresForCommand(commandID, figuresDir)
+	figures := loadFiguresForCommand(commandId, figuresDir)
 
 	ctx := skillSubContext{
 		CommandName:        cmdSpec.Name,
@@ -520,7 +520,7 @@ func renderSubSkill(commandID, figuresDir string) (string, error) {
 		ctx.BodySections, ctx.BodyBehaviors, SharedFragmentSpecs, skillDirKey, skillFile,
 	)
 	if err != nil {
-		return "", fmt.Errorf("codegen.renderSubSkill: fragment resolution failed for command %q: %w", commandID, err)
+		return "", fmt.Errorf("codegen.renderSubSkill: fragment resolution failed for command %q: %w", commandId, err)
 	}
 	ctx.BodySections = resolvedSections
 	ctx.BodyBehaviors = resolvedBehaviors
@@ -533,7 +533,7 @@ func renderSubSkill(commandID, figuresDir string) (string, error) {
 				"where: skill_sub.go.tmpl — "+
 				"when: rendering sub-skill SKILL.md — "+
 				"fix: check that the template context matches the template variables: %w",
-			commandID, err,
+			commandId, err,
 		)
 	}
 	return buf.String(), nil
@@ -559,7 +559,7 @@ func renderSubSkill(commandID, figuresDir string) (string, error) {
 //
 // Returns a *MarkerError if skillPath is missing the BEGIN/END marker pair (and
 // Init is false), or if the markers are malformed.
-func GenerateSkill(roleID types.RoleId, skillPath string, figuresDir string, opts GenerateOptions) (string, error) {
+func GenerateSkill(roleId types.RoleId, skillPath string, figuresDir string, opts GenerateOptions) (string, error) {
 	// Read existing file.
 	oldContent, err := os.ReadFile(skillPath)
 	if err != nil {
@@ -567,7 +567,7 @@ func GenerateSkill(roleID types.RoleId, skillPath string, figuresDir string, opt
 			"codegen.GenerateSkill: cannot read skill file %q — "+
 				"where: role %q — "+
 				"fix: ensure the file exists before calling GenerateSkill: %w",
-			skillPath, roleID, err,
+			skillPath, roleId, err,
 		)
 	}
 	content := string(oldContent)
@@ -586,7 +586,7 @@ func GenerateSkill(roleID types.RoleId, skillPath string, figuresDir string, opt
 	}
 
 	// Single-pass render: template produces all content inside BEGIN/END.
-	rendered, err := renderSkill(roleID, figuresDir)
+	rendered, err := renderSkill(roleId, figuresDir)
 	if err != nil {
 		return "", err
 	}
@@ -596,14 +596,14 @@ func GenerateSkill(roleID types.RoleId, skillPath string, figuresDir string, opt
 	if err != nil {
 		return "", fmt.Errorf(
 			"codegen.GenerateSkill: marker replacement failed for %q (role %q): %w",
-			skillPath, roleID, err,
+			skillPath, roleId, err,
 		)
 	}
 
 	// Explicit truncation: when a SkillBody exists, strip everything after END
 	// marker (R3: nothing after END). This handles the transition from the old
 	// two-pass pipeline where body content lived after END.
-	if _, ok := SkillBodySpecs[string(roleID)]; ok {
+	if _, ok := SkillBodySpecs[string(roleId)]; ok {
 		if endIdx := strings.Index(newContent, GeneratedEnd); endIdx >= 0 {
 			newContent = newContent[:endIdx+len(GeneratedEnd)] + "\n"
 		}
@@ -611,7 +611,7 @@ func GenerateSkill(roleID types.RoleId, skillPath string, figuresDir string, opt
 
 	// Validate the generated markdown structure.
 	if err := ValidateSkillStructure([]byte(newContent)); err != nil {
-		return "", fmt.Errorf("codegen.GenerateSkill: validate skill %q: %w", roleID, err)
+		return "", fmt.Errorf("codegen.GenerateSkill: validate skill %q: %w", roleId, err)
 	}
 
 	// Print diff if requested and content changed.
@@ -649,7 +649,7 @@ func GenerateSkill(roleID types.RoleId, skillPath string, figuresDir string, opt
 //
 // Returns a *MarkerError if skillPath is missing the BEGIN/END marker pair (and
 // Init is false), or if the markers are malformed.
-func GenerateSubSkill(commandID string, skillPath string, figuresDir string, opts GenerateOptions) (string, error) {
+func GenerateSubSkill(commandId string, skillPath string, figuresDir string, opts GenerateOptions) (string, error) {
 	// Read existing file.
 	oldContent, err := os.ReadFile(skillPath)
 	if err != nil {
@@ -657,7 +657,7 @@ func GenerateSubSkill(commandID string, skillPath string, figuresDir string, opt
 			"codegen.GenerateSubSkill: cannot read skill file %q — "+
 				"where: command %q — "+
 				"fix: ensure the file exists before calling GenerateSubSkill: %w",
-			skillPath, commandID, err,
+			skillPath, commandId, err,
 		)
 	}
 	content := string(oldContent)
@@ -679,7 +679,7 @@ func GenerateSubSkill(commandID string, skillPath string, figuresDir string, opt
 	}
 
 	// Single-pass render: template produces all content inside BEGIN/END.
-	rendered, err := renderSubSkill(commandID, figuresDir)
+	rendered, err := renderSubSkill(commandId, figuresDir)
 	if err != nil {
 		return "", err
 	}
@@ -689,12 +689,12 @@ func GenerateSubSkill(commandID string, skillPath string, figuresDir string, opt
 	if err != nil {
 		return "", fmt.Errorf(
 			"codegen.GenerateSubSkill: marker replacement failed for %q (command %q): %w",
-			skillPath, commandID, err,
+			skillPath, commandId, err,
 		)
 	}
 
 	// Explicit truncation: when a SkillBody exists, strip everything after END.
-	cmdSpecForBody := CommandSpecs[commandID]
+	cmdSpecForBody := CommandSpecs[commandId]
 	skillDirKey := subSkillDirKey(cmdSpecForBody.File)
 	if _, ok := SkillBodySpecs[skillDirKey]; ok {
 		if endIdx := strings.Index(newContent, GeneratedEnd); endIdx >= 0 {
@@ -704,7 +704,7 @@ func GenerateSubSkill(commandID string, skillPath string, figuresDir string, opt
 
 	// Validate the generated markdown structure.
 	if err := ValidateSkillStructure([]byte(newContent)); err != nil {
-		return "", fmt.Errorf("codegen.GenerateSubSkill: validate sub-skill %q: %w", commandID, err)
+		return "", fmt.Errorf("codegen.GenerateSubSkill: validate sub-skill %q: %w", commandId, err)
 	}
 
 	// Print diff if requested and content changed.

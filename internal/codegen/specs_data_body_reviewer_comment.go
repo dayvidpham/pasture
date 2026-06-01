@@ -7,14 +7,14 @@ var reviewerCommentBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "rev-comment-structured",
+			Id:        "rev-comment-structured",
 			Given:     "findings to document",
 			When:      "documenting",
 			Then:      "use structured format with severity levels",
 			ShouldNot: "leave unstructured feedback",
 		},
 		{
-			ID:        "rev-comment-beads",
+			Id:        "rev-comment-beads",
 			Given:     "comment to create",
 			When:      "creating",
 			Then:      "add via `bd comments add`",
@@ -24,19 +24,19 @@ var reviewerCommentBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:      "rev-comment-when-to-use",
+			Id:      "rev-comment-when-to-use",
 			Title:   "When to Use",
 			Content: `Documenting review findings for the permanent record. Applies to both plan reviews (Phase 4) and code reviews (Phase 10).`,
 		},
 		{
-			ID:    "rev-comment-steps",
+			Id:    "rev-comment-steps",
 			Title: "Steps",
 			Content: `1. Identify the task to comment on (` + "`bd show <task-id>`" + `)
 2. Categorize findings by severity
 3. Add structured comment via Beads`,
 		},
 		{
-			ID:    "rev-comment-beads-command",
+			Id:    "rev-comment-beads-command",
 			Title: "Comment via Beads",
 			Content: "```" + `bash` + "\n" +
 				`# Plan review comment (no severity tree)
@@ -47,7 +47,7 @@ bd comments add <review-id> "VOTE: REVISE - 1 BLOCKER found (see severity tree).
 				"```",
 		},
 		{
-			ID:    "rev-comment-format",
+			Id:    "rev-comment-format",
 			Title: "Format",
 			Content: "```" + `markdown` + "\n" +
 				`VOTE: {ACCEPT | REVISE}
@@ -68,7 +68,7 @@ bd comments add <review-id> "VOTE: REVISE - 1 BLOCKER found (see severity tree).
 				"```",
 		},
 		{
-			ID:    "rev-comment-severity",
+			Id:    "rev-comment-severity",
 			Title: "Severity Vocabulary",
 			Content: `| Severity | When to Use | Blocks? |
 |----------|-------------|---------|
@@ -77,7 +77,7 @@ bd comments add <review-id> "VOTE: REVISE - 1 BLOCKER found (see severity tree).
 | MINOR | Style, optional optimizations, naming improvements | No (follow-up epic) |`,
 		},
 		{
-			ID:    "rev-comment-plan-vs-code",
+			Id:    "rev-comment-plan-vs-code",
 			Title: "Plan Review vs Code Review",
 			Content: `- **Plan review (Phase 4, ` + "`aura:p4-plan:s4-review`" + `):** ACCEPT/REVISE only. No severity tree. Findings are described inline in the vote comment.
 - **Code review (Phase 10, ` + "`aura:p10-impl:s10-review`" + `):** ACCEPT/REVISE vote + full severity tree with EAGER creation (3 groups per round). Findings are tracked as child tasks of severity groups.`,

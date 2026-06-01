@@ -103,7 +103,7 @@ type StructuredError struct {
 	// and protocol references.
 	What string
 	// Why explains the underlying cause in plain English. Translate
-	// technical roots ("ParseTaskID returned ErrInvalidFormat" → "the ID
+	// technical roots ("ParseTaskId returned ErrInvalidFormat" → "the ID
 	// didn't have the required separator") so a non-specialist can act on
 	// it. Surfaced as the Reason: line.
 	Why string

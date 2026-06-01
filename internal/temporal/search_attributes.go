@@ -12,8 +12,8 @@ import (
 
 // ─── Search Attribute Key Names ───────────────────────────────────────────────
 
-// SAEpochID is the Temporal search attribute name for epoch ID (TEXT — full-text search).
-const SAEpochID = "PastureEpochId"
+// SAEpochId is the Temporal search attribute name for epoch ID (TEXT — full-text search).
+const SAEpochId = "PastureEpochId"
 
 // SAPhase is the Temporal search attribute name for the current phase (KEYWORD).
 const SAPhase = "PasturePhase"
@@ -34,7 +34,7 @@ const SALastEventType = "PastureLastEventType"
 // Temporal IndexedValueType. Used by EnsureSearchAttributes to auto-register
 // on pastured startup. Port of Python _REQUIRED_SEARCH_ATTRIBUTES.
 var requiredSearchAttributes = map[string]enumspb.IndexedValueType{
-	SAEpochID:       enumspb.INDEXED_VALUE_TYPE_TEXT,
+	SAEpochId:       enumspb.INDEXED_VALUE_TYPE_TEXT,
 	SAPhase:         enumspb.INDEXED_VALUE_TYPE_KEYWORD,
 	SARole:          enumspb.INDEXED_VALUE_TYPE_KEYWORD,
 	SAStatus:        enumspb.INDEXED_VALUE_TYPE_KEYWORD,

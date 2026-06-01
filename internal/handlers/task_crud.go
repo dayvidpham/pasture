@@ -70,7 +70,7 @@ func TaskCreate(w io.Writer, in TaskCreateInput, format types.OutputFormat) (int
 func TaskShow(w io.Writer, dbPath, idStr string, format types.OutputFormat) (int, error) {
 	id, err := provenance.ParseTaskID(idStr)
 	if err != nil {
-		return wrapInvalidID("task show", idStr, err)
+		return wrapInvalidId("task show", idStr, err)
 	}
 
 	tr, err := tasks.OpenTaskTracker(dbPath)
@@ -95,7 +95,7 @@ func TaskShow(w io.Writer, dbPath, idStr string, format types.OutputFormat) (int
 // Pointer fields are nil when the corresponding flag was not passed.
 type TaskUpdateInput struct {
 	DBPath      string
-	IDStr       string
+	IdStr       string
 	Title       *string
 	Description *string
 	Status      *provenance.Status
@@ -106,9 +106,9 @@ type TaskUpdateInput struct {
 
 // TaskUpdate applies partial updates to an existing task and prints the result.
 func TaskUpdate(w io.Writer, in TaskUpdateInput, format types.OutputFormat) (int, error) {
-	id, err := provenance.ParseTaskID(in.IDStr)
+	id, err := provenance.ParseTaskID(in.IdStr)
 	if err != nil {
-		return wrapInvalidID("task update", in.IDStr, err)
+		return wrapInvalidId("task update", in.IdStr, err)
 	}
 
 	tr, err := tasks.OpenTaskTracker(in.DBPath)
@@ -140,7 +140,7 @@ func TaskUpdate(w io.Writer, in TaskUpdateInput, format types.OutputFormat) (int
 func TaskClose(w io.Writer, dbPath, idStr, reason string, format types.OutputFormat) (int, error) {
 	id, err := provenance.ParseTaskID(idStr)
 	if err != nil {
-		return wrapInvalidID("task close", idStr, err)
+		return wrapInvalidId("task close", idStr, err)
 	}
 
 	tr, err := tasks.OpenTaskTracker(dbPath)
@@ -201,20 +201,20 @@ func TaskList(w io.Writer, in TaskListInput, format types.OutputFormat) (int, er
 	return 0, nil
 }
 
-// wrapInvalidID maps an ID parse failure to a CategoryValidation error.
+// wrapInvalidId maps an ID parse failure to a CategoryValidation error.
 //
 // The Why field translates the underlying parser error into plain English
-// rather than surfacing the raw "provenance: invalid ID format: ParseTaskID
+// rather than surfacing the raw "provenance: invalid ID format: ParseTaskId
 // — no '--' separator found in ..." chain. The user only needs to know that
 // IDs need a "--" separator and that the value they passed didn't have one.
-func wrapInvalidID(op, id string, err error) (int, error) {
+func wrapInvalidId(op, id string, err error) (int, error) {
 	se := &pasterrors.StructuredError{
 		Category: pasterrors.CategoryValidation,
 		What:     fmt.Sprintf("The task ID %q isn't in the expected format.", id),
 		Why: "Task IDs look like \"yourproject--01968a3c-...\" (a project name, " +
 			"two dashes, and a UUID — e.g., aura-plugins--01968a3c-9d4f-7c8a-bc12-feedfacecafe).\n" +
 			"The value you passed couldn't be split into those two parts.",
-		Where:  fmt.Sprintf("Running %q (handlers/task_crud.go in handlers.wrapInvalidID).", op),
+		Where:  fmt.Sprintf("Running %q (handlers/task_crud.go in handlers.wrapInvalidId).", op),
 		Impact: fmt.Sprintf("The %q command can't run because there's no way to know which task you meant.", op),
 		Fix: "1. Pass a valid task ID. Use list to find one:\n" +
 			"     pasture task list\n" +
@@ -223,7 +223,7 @@ func wrapInvalidID(op, id string, err error) (int, error) {
 	// Preserve the underlying parse error via the Cause field so logs and
 	// errors.Is/As can still inspect the raw failure, but keep it out of
 	// the user-visible Why above (which would otherwise surface package
-	// qualifiers and Go function names like "provenance: ... ParseTaskID").
+	// qualifiers and Go function names like "provenance: ... ParseTaskId").
 	se.Cause = err
 	return pasterrors.ExitCode(se), se
 }

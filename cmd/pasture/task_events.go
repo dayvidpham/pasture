@@ -35,7 +35,7 @@ GitContext, SkillContext, SessionContext.`,
 		}
 
 		if cmd.Flags().Changed("epoch-id") {
-			in.EpochID, _ = cmd.Flags().GetString("epoch-id")
+			in.EpochId, _ = cmd.Flags().GetString("epoch-id")
 		}
 		if cmd.Flags().Changed("phase") {
 			raw, _ := cmd.Flags().GetString("phase")
@@ -77,7 +77,7 @@ GitContext, SkillContext, SessionContext.`,
 			in.ContextKind = &k
 		}
 		if cmd.Flags().Changed("context-id") {
-			in.ContextID, _ = cmd.Flags().GetString("context-id")
+			in.ContextId, _ = cmd.Flags().GetString("context-id")
 		}
 
 		code, hErr := handlers.TaskEvents(cmd.OutOrStdout(), in, resolveFormat())
@@ -92,7 +92,7 @@ GitContext, SkillContext, SessionContext.`,
 }
 
 func init() {
-	taskEventsCmd.Flags().String("epoch-id", "", "Filter by epoch ID (wire-format Provenance TaskID)")
+	taskEventsCmd.Flags().String("epoch-id", "", "Filter by epoch ID (wire-format Provenance TaskId)")
 	taskEventsCmd.Flags().String("phase", "", "Filter by phase (e.g. p9, code-review)")
 	taskEventsCmd.Flags().String("agent", "", "Filter by agent (matched against Role until v3 backfill lands)")
 	taskEventsCmd.Flags().String("type", "", "Filter by EventType (e.g. PhaseTransition)")

@@ -62,7 +62,7 @@ func TestIsCleanExit_FindingCounts(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			r := types.ReviewCycleRecord{
-				SliceID:       "slice-1",
+				SliceId:       "slice-1",
 				Round:         1,
 				Votes:         allAcceptVotes(), // all ACCEPT — isolate finding counts
 				FindingCounts: tc.findings,
@@ -133,7 +133,7 @@ func TestIsCleanExit_VoteConsensus(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			r := types.ReviewCycleRecord{
-				SliceID:       "slice-1",
+				SliceId:       "slice-1",
 				Round:         1,
 				Votes:         tc.votes,
 				FindingCounts: cleanFindings, // 0 findings — isolate vote check
@@ -149,7 +149,7 @@ func TestIsCleanExit_VoteConsensus(t *testing.T) {
 func TestReviewCycleRecord_Fields(t *testing.T) {
 	now := time.Now()
 	r := types.ReviewCycleRecord{
-		SliceID: "aura-plugins-abc123",
+		SliceId: "aura-plugins-abc123",
 		Round:   2,
 		Votes: map[types.ReviewAxis]types.VoteType{
 			types.AxisCorrectness: types.VoteAccept,
@@ -164,8 +164,8 @@ func TestReviewCycleRecord_Fields(t *testing.T) {
 		Timestamp: now,
 	}
 
-	if r.SliceID != "aura-plugins-abc123" {
-		t.Errorf("SliceID = %q, want %q", r.SliceID, "aura-plugins-abc123")
+	if r.SliceId != "aura-plugins-abc123" {
+		t.Errorf("SliceId = %q, want %q", r.SliceId, "aura-plugins-abc123")
 	}
 	if r.Round != 2 {
 		t.Errorf("Round = %d, want 2", r.Round)
@@ -187,23 +187,23 @@ func TestReviewCycleRecord_Fields(t *testing.T) {
 
 func TestEpochState_ReviewCycles(t *testing.T) {
 	state := types.EpochState{
-		EpochID: "test-epoch",
+		EpochId: "test-epoch",
 		ReviewCycles: map[string][]types.ReviewCycleRecord{
 			"slice-1": {
 				{
-					SliceID: "slice-1", Round: 1,
+					SliceId: "slice-1", Round: 1,
 					Votes:         allAcceptVotes(),
 					FindingCounts: map[types.SeverityLevel]int{types.SeverityBlocker: 1},
 				},
 				{
-					SliceID: "slice-1", Round: 2,
+					SliceId: "slice-1", Round: 2,
 					Votes:         allAcceptVotes(),
 					FindingCounts: map[types.SeverityLevel]int{types.SeverityBlocker: 0, types.SeverityImportant: 0},
 				},
 			},
 			"slice-2": {
 				{
-					SliceID: "slice-2", Round: 1,
+					SliceId: "slice-2", Round: 1,
 					Votes:         allAcceptVotes(),
 					FindingCounts: map[types.SeverityLevel]int{types.SeverityBlocker: 0, types.SeverityImportant: 0},
 				},

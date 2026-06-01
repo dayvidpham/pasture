@@ -8,42 +8,42 @@ var exploreBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "explore-topic-structured",
+			Id:        "explore-topic-structured",
 			Given:     "a topic or feature",
 			When:      "exploring",
 			Then:      "follow the depth-scoped checklist and produce structured findings",
 			ShouldNot: "produce an unstructured list of file paths",
 		},
 		{
-			ID:        "explore-depth-quick-scan",
+			Id:        "explore-depth-quick-scan",
 			Given:     "depth is quick-scan",
 			When:      "exploring",
 			Then:      "grep for keywords, check obvious entry points",
 			ShouldNot: "read entire modules or trace full dependency graphs",
 		},
 		{
-			ID:        "explore-depth-standard-research",
+			Id:        "explore-depth-standard-research",
 			Given:     "depth is standard-research",
 			When:      "exploring",
 			Then:      "trace data flow, map dependencies, read related modules",
 			ShouldNot: "skip tracing how data flows through the relevant code paths",
 		},
 		{
-			ID:        "explore-depth-deep-dive",
+			Id:        "explore-depth-deep-dive",
 			Given:     "depth is deep-dive",
 			When:      "exploring",
 			Then:      "build full dependency graph, perform architectural analysis, identify all touchpoints",
 			ShouldNot: "miss transitive dependencies or indirect consumers",
 		},
 		{
-			ID:        "explore-code-refs",
+			Id:        "explore-code-refs",
 			Given:     "code references",
 			When:      "documenting",
 			Then:      "use `file:line` citation format",
 			ShouldNot: "reference files without line numbers for specific code",
 		},
 		{
-			ID:        "explore-phase1-recording",
+			Id:        "explore-phase1-recording",
 			Given:     "Phase 1 context",
 			When:      "recording findings",
 			Then:      "add a structured comment on the REQUEST task via `bd comments add`",
@@ -53,13 +53,13 @@ var exploreBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:    "explore-when-to-use",
+			Id:    "explore-when-to-use",
 			Title: "When to Use",
 			Content: "- **Phase 1 (s1_3-explore):** Spawned by `/aura:user-request` after user confirms research depth. Findings recorded as REQUEST task comment.\n" +
 				"- **Standalone:** Any agent needing to understand codebase structure for a topic. Invoke directly with a topic and depth.",
 		},
 		{
-			ID:    "explore-inputs",
+			Id:    "explore-inputs",
 			Title: "Inputs",
 			Content: "| Parameter | Required | Description |\n" +
 				"|-----------|----------|--------------|\n" +
@@ -68,11 +68,11 @@ var exploreBody = SkillBody{
 				"| `request-task-id` | Phase 1 only | Beads task ID to record findings as comment |",
 		},
 		{
-			ID:    "explore-checklist",
+			Id:    "explore-checklist",
 			Title: "Exploration Checklist",
 			Subsections: []ProseSection{
 				{
-					ID:    "explore-checklist-entry-points",
+					Id:    "explore-checklist-entry-points",
 					Title: "1. Entry Points",
 					Content: "Where would this feature plug in?\n" +
 						"- CLI commands, subcommands, flag definitions\n" +
@@ -81,7 +81,7 @@ var exploreBody = SkillBody{
 						"- Configuration loaders, init functions",
 				},
 				{
-					ID:    "explore-checklist-data-flow",
+					Id:    "explore-checklist-data-flow",
 					Title: "2. Data Flow",
 					Content: "What existing data structures, types, or schemas are relevant?\n" +
 						"- Type definitions, interfaces, structs\n" +
@@ -90,7 +90,7 @@ var exploreBody = SkillBody{
 						"- Configuration types",
 				},
 				{
-					ID:    "explore-checklist-dependencies",
+					Id:    "explore-checklist-dependencies",
 					Title: "3. Dependencies",
 					Content: "What modules/packages would this feature depend on or extend?\n" +
 						"- Direct imports and consumers\n" +
@@ -99,7 +99,7 @@ var exploreBody = SkillBody{
 						"- Build system integration (Nix flakes, package.json, go.mod)",
 				},
 				{
-					ID:    "explore-checklist-patterns",
+					Id:    "explore-checklist-patterns",
 					Title: "4. Existing Patterns",
 					Content: "How do similar features work in this codebase?\n" +
 						"- Naming conventions (files, functions, types, tests)\n" +
@@ -108,7 +108,7 @@ var exploreBody = SkillBody{
 						"- Test structure (fixtures, mocks, test helpers, BDD style)",
 				},
 				{
-					ID:    "explore-checklist-conflicts",
+					Id:    "explore-checklist-conflicts",
 					Title: "5. Conflicts",
 					Content: "Are there existing implementations that would need modification or could conflict?\n" +
 						"- Overlapping functionality that might be duplicated\n" +
@@ -119,7 +119,7 @@ var exploreBody = SkillBody{
 			},
 		},
 		{
-			ID:    "explore-depth-scoping",
+			Id:    "explore-depth-scoping",
 			Title: "Depth Scoping",
 			Content: "| Depth | Scope | Tools | Deliverable |\n" +
 				"|-------|-------|-------|-------------|\n" +
@@ -128,11 +128,11 @@ var exploreBody = SkillBody{
 				"| **deep-dive** | Full dependency graph, architectural analysis, identify all touchpoints, trace transitive consumers | Glob, Grep, Read, Bash (build/dep tools) | Complete architectural map with dependency diagram and risk assessment |",
 		},
 		{
-			ID:    "explore-output-format",
+			Id:    "explore-output-format",
 			Title: "Output Format",
 			Subsections: []ProseSection{
 				{
-					ID:    "explore-structured-findings",
+					Id:    "explore-structured-findings",
 					Title: "Structured Findings",
 					Content: "```" + `markdown
 ## Explore Findings: <topic>
@@ -192,7 +192,7 @@ User input → CLI parser (src/cli/parse.ts:30)
 			},
 		},
 		{
-			ID:    "explore-phase1-integration",
+			Id:    "explore-phase1-integration",
 			Title: "Phase 1 Integration",
 			Content: "When invoked as part of Phase 1 (s1_3-explore), record findings on the REQUEST task:\n\n" +
 				"```" + `bash
@@ -206,7 +206,7 @@ bd comments add {{request-task-id}} \
 ` + "```",
 		},
 		{
-			ID:    "explore-standalone",
+			Id:    "explore-standalone",
 			Title: "Standalone Use",
 			Content: "When used outside Phase 1, produce the structured findings directly as output. No beads comment is needed unless a task ID is provided.\n\n" +
 				"```" + `

@@ -21,63 +21,63 @@ func TestTrailInterface(t *testing.T) {
 	var _ audit.Trail = (*audit.SqliteAuditTrail)(nil)
 }
 
-// runRecordEventReturningIDSuite exercises the RecordEventReturningID contract
+// runRecordEventReturningIdSuite exercises the RecordEventReturningId contract
 // against any Trail implementation. The contract:
 //
-//  1. A successful RecordEventReturningID returns (positiveID, nil).
+//  1. A successful RecordEventReturningId returns (positiveId, nil).
 //  2. Two sequential calls return strictly-increasing ids (no collisions).
 //  3. The recorded events round-trip through QueryEvents in insertion order.
 //
 // The concurrent-uniqueness assertion lives in implementation-specific tests
-// (sqlite_test.go's TestSqliteAuditTrail_RecordEventReturningID_ConcurrentUnique
-// and memory_test.go's TestInMemoryAuditTrail_RecordEventReturningID_ConcurrentUnique)
+// (sqlite_test.go's TestSqliteAuditTrail_RecordEventReturningId_ConcurrentUnique
+// and memory_test.go's TestInMemoryAuditTrail_RecordEventReturningId_ConcurrentUnique)
 // because the implementations differ in the contention model (SQLite has a real
 // transaction commit; in-memory has a mutex-guarded counter).
-func runRecordEventReturningIDSuite(t *testing.T, trail audit.Trail) {
+func runRecordEventReturningIdSuite(t *testing.T, trail audit.Trail) {
 	t.Helper()
 	ctx := context.Background()
 
 	const epoch = "id-suite-epoch"
 
-	t.Run("ReturnsPositiveID", func(t *testing.T) {
+	t.Run("ReturnsPositiveId", func(t *testing.T) {
 		ev := makeEvent(epoch, protocol.PhaseRequest, "supervisor", protocol.EventPhaseTransition)
-		id, err := trail.RecordEventReturningID(ctx, ev)
+		id, err := trail.RecordEventReturningId(ctx, ev)
 		if err != nil {
-			t.Fatalf("RecordEventReturningID: unexpected error: %v", err)
+			t.Fatalf("RecordEventReturningId: unexpected error: %v", err)
 		}
 		if id <= 0 {
-			t.Errorf("RecordEventReturningID returned non-positive id %d, want > 0", id)
+			t.Errorf("RecordEventReturningId returned non-positive id %d, want > 0", id)
 		}
 	})
 
 	t.Run("SequentialCallsReturnDistinctIDs", func(t *testing.T) {
 		ev1 := makeEvent(epoch, protocol.PhaseElicit, "supervisor", protocol.EventPhaseTransition)
 		ev2 := makeEvent(epoch, protocol.PhasePropose, "supervisor", protocol.EventPhaseTransition)
-		id1, err := trail.RecordEventReturningID(ctx, ev1)
+		id1, err := trail.RecordEventReturningId(ctx, ev1)
 		if err != nil {
-			t.Fatalf("RecordEventReturningID(ev1): %v", err)
+			t.Fatalf("RecordEventReturningId(ev1): %v", err)
 		}
-		id2, err := trail.RecordEventReturningID(ctx, ev2)
+		id2, err := trail.RecordEventReturningId(ctx, ev2)
 		if err != nil {
-			t.Fatalf("RecordEventReturningID(ev2): %v", err)
+			t.Fatalf("RecordEventReturningId(ev2): %v", err)
 		}
 		if id1 == id2 {
-			t.Errorf("RecordEventReturningID returned duplicate ids: id1=%d id2=%d (must be distinct)", id1, id2)
+			t.Errorf("RecordEventReturningId returned duplicate ids: id1=%d id2=%d (must be distinct)", id1, id2)
 		}
 		if id2 <= id1 {
-			t.Errorf("RecordEventReturningID ids not monotonically increasing: id1=%d id2=%d", id1, id2)
+			t.Errorf("RecordEventReturningId ids not monotonically increasing: id1=%d id2=%d", id1, id2)
 		}
 	})
 
 	t.Run("RecordedEventsAreQueryable", func(t *testing.T) {
 		// Both events from the previous subtest are present, plus the one
-		// from ReturnsPositiveID. Verify the count by querying the epoch.
+		// from ReturnsPositiveId. Verify the count by querying the epoch.
 		got, err := trail.QueryEvents(ctx, epoch, nil, nil)
 		if err != nil {
 			t.Fatalf("QueryEvents(%q): %v", epoch, err)
 		}
 		if len(got) != 3 {
-			t.Errorf("want 3 events recorded via RecordEventReturningID, got %d", len(got))
+			t.Errorf("want 3 events recorded via RecordEventReturningId, got %d", len(got))
 		}
 	})
 }
@@ -89,9 +89,9 @@ func intPtr(i int) *int       { return &i }
 func int64Ptr(i int64) *int64 { return &i }
 
 // makeSessionEntry constructs a minimal SessionEntry for use in tests.
-func makeSessionEntry(sessionID string, idx int, role string) protocol.SessionEntry {
+func makeSessionEntry(sessionId string, idx int, role string) protocol.SessionEntry {
 	return protocol.SessionEntry{
-		SessionID:      sessionID,
+		SessionId:      sessionId,
 		EntryIndex:     idx,
 		Provider:       "anthropic",
 		EntryType:      "message",
@@ -124,8 +124,8 @@ func runSessionEntrySuite(t *testing.T, trail audit.Trail) {
 		}
 	})
 
-	// ── Query by sessionID returns correct entries ─────────────────────────
-	t.Run("QueryBySessionID", func(t *testing.T) {
+	// ── Query by sessionId returns correct entries ─────────────────────────
+	t.Run("QueryBySessionId", func(t *testing.T) {
 		got, err := trail.QuerySessionEntries(ctx, sessionA)
 		if err != nil {
 			t.Fatalf("QuerySessionEntries(%q): %v", sessionA, err)
@@ -134,8 +134,8 @@ func runSessionEntrySuite(t *testing.T, trail audit.Trail) {
 			t.Fatalf("want 3 entries, got %d", len(got))
 		}
 		for i, e := range got {
-			if e.SessionID != sessionA {
-				t.Errorf("entry[%d]: want sessionID %q, got %q", i, sessionA, e.SessionID)
+			if e.SessionId != sessionA {
+				t.Errorf("entry[%d]: want sessionId %q, got %q", i, sessionA, e.SessionId)
 			}
 		}
 	})
@@ -196,13 +196,13 @@ func runSessionEntrySuite(t *testing.T, trail audit.Trail) {
 			t.Errorf("sessionB: want 2 entries, got %d", len(gotB))
 		}
 		for _, e := range gotA {
-			if e.SessionID != sessionA {
-				t.Errorf("sessionA result contains entry with sessionID=%q", e.SessionID)
+			if e.SessionId != sessionA {
+				t.Errorf("sessionA result contains entry with sessionId=%q", e.SessionId)
 			}
 		}
 		for _, e := range gotB {
-			if e.SessionID != sessionB {
-				t.Errorf("sessionB result contains entry with sessionID=%q", e.SessionID)
+			if e.SessionId != sessionB {
+				t.Errorf("sessionB result contains entry with sessionId=%q", e.SessionId)
 			}
 		}
 	})
@@ -221,9 +221,9 @@ func runSessionEntrySuite(t *testing.T, trail audit.Trail) {
 // ─── Shared Helpers ───────────────────────────────────────────────────────────
 
 // makeEvent constructs a minimal AuditEvent for use in tests.
-func makeEvent(epochID string, phase protocol.PhaseId, role string, eventType protocol.EventType) protocol.AuditEvent {
+func makeEvent(epochId string, phase protocol.PhaseId, role string, eventType protocol.EventType) protocol.AuditEvent {
 	return protocol.AuditEvent{
-		EpochID:   epochID,
+		EpochId:   epochId,
 		Phase:     phase,
 		Role:      role,
 		EventType: eventType,
@@ -260,7 +260,7 @@ func runTrailSuite(t *testing.T, trail audit.Trail) {
 	}
 
 	// Query all events for ep1 — expect ev1, ev2.
-	t.Run("QueryByEpochID", func(t *testing.T) {
+	t.Run("QueryByEpochId", func(t *testing.T) {
 		got, err := trail.QueryEvents(ctx, ep1, nil, nil)
 		if err != nil {
 			t.Fatalf("QueryEvents(%q): %v", ep1, err)

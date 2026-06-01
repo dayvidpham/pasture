@@ -34,8 +34,8 @@ type claudeRecord struct {
 	Type string `json:"type"`
 	// Role is "user" or "assistant".
 	Role string `json:"role"`
-	// SessionID may be set by Claude Code wrappers; fallback to empty string.
-	SessionID string `json:"sessionId"`
+	// SessionId may be set by Claude Code wrappers; fallback to empty string.
+	SessionId string `json:"sessionId"`
 	// Timestamp is milliseconds since epoch (set by Claude Code integrations).
 	Timestamp int64 `json:"timestamp"`
 	// Content holds the ordered content blocks.
@@ -56,8 +56,8 @@ type claudeContentBlock struct {
 	Thinking string `json:"thinking,omitempty"`
 	// ID is the tool call correlation ID (type="tool_use" or "tool_result").
 	ID string `json:"id,omitempty"`
-	// ToolUseID is the ID for tool_result blocks linking back to a tool_use.
-	ToolUseID string `json:"tool_use_id,omitempty"`
+	// ToolUseId is the ID for tool_result blocks linking back to a tool_use.
+	ToolUseId string `json:"tool_use_id,omitempty"`
 	// Name is the tool name (type="tool_use").
 	Name string `json:"name,omitempty"`
 	// Input is the tool input object (type="tool_use").
@@ -113,7 +113,7 @@ func (a *claudeAdapter) Parse(record []byte) (SessionUpdate, error) {
 	}
 
 	update := SessionUpdate{
-		SessionID:  raw.SessionID,
+		SessionId:  raw.SessionId,
 		Role:       raw.Role,
 		Timestamp:  raw.Timestamp,
 		StopReason: parseStopReason(raw.StopReason),
@@ -145,18 +145,18 @@ func (a *claudeAdapter) Parse(record []byte) (SessionUpdate, error) {
 				inputStr = string(cb.Input)
 			}
 			update.ToolCalls = append(update.ToolCalls, ToolCall{
-				ToolCallID: cb.ID,
+				ToolCallId: cb.ID,
 				ToolKind:   inferToolKind(cb.Name),
 				ToolName:   cb.Name,
 				ToolInput:  inputStr,
 			})
 
 		case "tool_result":
-			// tool_result links back to a tool_use via ToolUseID.
+			// tool_result links back to a tool_use via ToolUseId.
 			// The content may be a plain string or a JSON array of sub-blocks.
 			outputStr := extractToolResultContent(cb.Content)
 			update.ToolCalls = append(update.ToolCalls, ToolCall{
-				ToolCallID: cb.ToolUseID,
+				ToolCallId: cb.ToolUseId,
 				ToolKind:   ToolKindFunction,
 				ToolName:   "", // tool_result does not repeat the tool name
 				ToolOutput: outputStr,

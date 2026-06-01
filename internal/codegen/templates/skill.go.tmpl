@@ -1,5 +1,5 @@
 ---
-name: {{ .Role.ID }}
+name: {{ .Role.Id }}
 description: {{ .Role.Description }}
 {{- if .SubSkills }}
 skills: {{ join .SubSkills ", " }}
@@ -9,7 +9,7 @@ skills: {{ join .SubSkills ", " }}
 # {{ .Role.Name }} Agent
 
 <!-- BEGIN GENERATED FROM aura schema -->
-**Role:** `{{ .Role.ID }}` | **Phases owned:** {{- $ownedPhases := .OwnedPhases }}{{- range $i, $p := $ownedPhases }} {{ index $.PhaseSlug $p }}{{- if not (last $i (len $ownedPhases)) }},{{- end }}{{- end }}
+**Role:** `{{ .Role.Id }}` | **Phases owned:** {{- $ownedPhases := .OwnedPhases }}{{- range $i, $p := $ownedPhases }} {{ index $.PhaseSlug $p }}{{- if not (last $i (len $ownedPhases)) }},{{- end }}{{- end }}
 
 ## Protocol Context (generated from schema.xml)
 
@@ -21,7 +21,7 @@ skills: {{ join .SubSkills ", " }}
 |-------|------|--------|-------------|
 {{- range .PhasesDetail }}
 {{- $ts := .Transitions }}
-| `{{ index $.PhaseSlug .ID }}` | {{ .Name }} | {{ .Domain }} | {{- range $i, $t := $ts }} → `{{ index $.PhaseSlug $t.ToPhase }}` ({{ $t.Condition }}){{- if not (last $i (len $ts)) }};{{- end }}{{- end }} |
+| `{{ index $.PhaseSlug .Id }}` | {{ .Name }} | {{ .Domain }} | {{- range $i, $t := $ts }} → `{{ index $.PhaseSlug $t.ToPhase }}` ({{ $t.Condition }}){{- if not (last $i (len $ts)) }};{{- end }}{{- end }} |
 {{- end }}
 {{- else }}
 
@@ -48,7 +48,7 @@ _(No commands assigned to this role)_
 {{- if .Constraints }}
 {{- range .Constraints }}
 
-**[{{ .ID }}]**
+**[{{ .Id }}]**
 - Given: {{ .Given }}
 - When: {{ .When }}
 - Then: {{ .Then }}
@@ -76,7 +76,7 @@ _(No constraints defined)_
 | ID | Source | Target | Phase | Content Level | Required Fields |
 |----|--------|--------|-------|---------------|-----------------|
 {{- range .Handoffs }}
-| `{{ .ID }}` | `{{ .SourceRole }}` | `{{ .TargetRole }}` | `{{ index $.PhaseSlug .AtPhase }}` | {{ .ContentLevel }} | {{ join .RequiredFields ", " }} |
+| `{{ .Id }}` | `{{ .SourceRole }}` | `{{ .TargetRole }}` | `{{ index $.PhaseSlug .AtPhase }}` | {{ .ContentLevel }} | {{ join .RequiredFields ", " }} |
 {{- end }}
 {{- else }}
 
@@ -111,7 +111,7 @@ _(No startup sequence defined for this role)_
 ### Role Behaviors (Given/When/Then/Should Not)
 {{- range .Behaviors }}
 
-**[{{ .ID }}]**
+**[{{ .Id }}]**
 - Given: {{ .Given }}
 - When: {{ .When }}
 - Then: {{ .Then }}
@@ -168,7 +168,7 @@ Exit conditions:
 {{- end }}
 {{- end }}
 {{- end }}
-{{- with index $.FiguresByWorkflow .ID }}
+{{- with index $.FiguresByWorkflow .Id }}
 {{- range . }}
 
 ##### {{ .Title }}
@@ -197,7 +197,7 @@ Exit conditions:
 {{- end }}
 {{- range .BodyBehaviors }}
 
-**[{{ .ID }}]**
+**[{{ .Id }}]**
 - Given: {{ .Given }}
 - When: {{ .When }}
 - Then: {{ .Then }}

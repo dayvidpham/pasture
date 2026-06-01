@@ -26,7 +26,7 @@ type TransitionRecord struct {
 // current role, and full transition history. Mutable — updated by signal
 // handlers within EpochWorkflow.
 type EpochState struct {
-	EpochID           string                  `json:"epochId"`
+	EpochId           string                  `json:"epochId"`
 	CurrentPhase      protocol.PhaseId        `json:"currentPhase"`
 	CurrentRole       RoleId                  `json:"currentRole"`
 	CompletedPhases   []protocol.PhaseId      `json:"completedPhases"`
@@ -47,8 +47,8 @@ type EpochState struct {
 // severity. This enables the supervisor to enforce the max-3-cycles constraint
 // and determine whether a clean exit was reached via IsCleanExit().
 type ReviewCycleRecord struct {
-	// SliceID is the Beads task ID of the slice being reviewed.
-	SliceID string `json:"sliceId"`
+	// SliceId is the Beads task ID of the slice being reviewed.
+	SliceId string `json:"sliceId"`
 	// Round is the 1-based review cycle number for this slice (max 3).
 	Round int `json:"round"`
 	// Votes maps each reviewer axis to its vote for this round.

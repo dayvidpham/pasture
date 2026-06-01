@@ -388,7 +388,7 @@ const legacyRoleAgentNamePrefix = "pasture/legacy-role/"
 // stripped to recover the original free-string role; other names (S7
 // well-known automaton agents, future live SoftwareAgents) are returned
 // as-is so the caller still sees a stable, non-empty Role.
-func decodeAuditEvent(epochID, phaseStr, roleOrAgentName, eventTypeStr, payloadJSON string, tsNano int64) (protocol.AuditEvent, error) {
+func decodeAuditEvent(epochId, phaseStr, roleOrAgentName, eventTypeStr, payloadJSON string, tsNano int64) (protocol.AuditEvent, error) {
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
 		return protocol.AuditEvent{}, &pasterrors.StructuredError{
@@ -397,7 +397,7 @@ func decodeAuditEvent(epochID, phaseStr, roleOrAgentName, eventTypeStr, payloadJ
 			Why: fmt.Sprintf(
 				"Reading an event of type %q for epoch %q from the database, the saved\n"+
 					"payload couldn't be parsed as JSON.",
-				eventTypeStr, epochID,
+				eventTypeStr, epochId,
 			),
 			Where: "Decoding an audit event (internal/tasks/open_unified.go in tasks.decodeAuditEvent).",
 			Impact: "This event can't be returned in queries or timelines until the payload\n" +
@@ -415,7 +415,7 @@ func decodeAuditEvent(epochID, phaseStr, roleOrAgentName, eventTypeStr, payloadJ
 		role = role[len(legacyRoleAgentNamePrefix):]
 	}
 	return protocol.AuditEvent{
-		EpochID:   epochID,
+		EpochId:   epochId,
 		Phase:     protocol.PhaseId(phaseStr),
 		Role:      role,
 		EventType: protocol.EventType(eventTypeStr),

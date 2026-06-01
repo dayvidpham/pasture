@@ -50,7 +50,7 @@ func TestContentBlock_DualFields(t *testing.T) {
 			}
 
 			update := acp.SessionUpdate{
-				SessionID: tc.ID,
+				SessionId: tc.ID,
 				Role:      "assistant",
 				Content:   []acp.ContentBlock{block},
 			}

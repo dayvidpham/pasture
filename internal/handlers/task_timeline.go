@@ -10,8 +10,8 @@
 // Returns all events tied to the given task ID, in chronological order. The
 // task ID is interpreted as an EpochContext (the originating REQUEST or
 // SLICE task ID); behind the scenes the handler calls
-// TaskTracker.Timeline(ctx, ContextEpoch, taskID) AND
-// TaskTracker.QueryEvents(ctx, taskID, nil, nil) and merges the result so
+// TaskTracker.Timeline(ctx, ContextEpoch, taskId) AND
+// TaskTracker.QueryEvents(ctx, taskId, nil, nil) and merges the result so
 // the timeline works against legacy-v1 databases too (where epoch attribution
 // lives in the audit_events.epoch_id column rather than context_edges).
 //
@@ -168,5 +168,5 @@ func mergeAuditEvents(a, b []protocol.AuditEvent) []protocol.AuditEvent {
 // writes at the same nanosecond, which is improbable in practice and would
 // only surface as a benign single-row drop in the timeline.
 func dedupKey(e protocol.AuditEvent) string {
-	return fmt.Sprintf("%s|%s|%s|%d|%v", e.EpochID, e.Phase, e.EventType, e.Timestamp.UnixNano(), e.Payload)
+	return fmt.Sprintf("%s|%s|%s|%d|%v", e.EpochId, e.Phase, e.EventType, e.Timestamp.UnixNano(), e.Payload)
 }

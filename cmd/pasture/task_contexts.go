@@ -10,7 +10,7 @@ import (
 var taskContextsCmd = &cobra.Command{
 	Use:   "contexts EVENT-ID",
 	Short: "List all context_edges attached to an audit event",
-	Long: `Show every (Kind, ContextID) edge attached to one audit event.
+	Long: `Show every (Kind, ContextId) edge attached to one audit event.
 
 EVENT-ID is the integer audit_events.id (the AUTOINCREMENT primary key);
 discover IDs via 'pasture task events'.`,

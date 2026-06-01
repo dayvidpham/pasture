@@ -7,35 +7,35 @@ var supervisorTrackProgressBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "sup-track-poll-rate",
+			Id:        "sup-track-poll-rate",
 			Given:     "workers running",
 			When:      "monitoring",
 			Then:      "check Beads status at natural intervals (when a worker signals completion or blocker)",
 			ShouldNot: "poll aggressively or busy-wait in a tight loop",
 		},
 		{
-			ID:        "sup-track-partial-commit",
+			Id:        "sup-track-partial-commit",
 			Given:     "worker complete",
 			When:      "all slices for a phase are done",
 			Then:      "proceed to code review or commit",
 			ShouldNot: "commit partial work — wait for all slices in the layer to complete",
 		},
 		{
-			ID:        "sup-track-resolve-blockers",
+			Id:        "sup-track-resolve-blockers",
 			Given:     "worker blocked",
 			When:      "handling",
 			Then:      "resolve or reassign immediately",
 			ShouldNot: "leave workers waiting on a blocker without action",
 		},
 		{
-			ID:        "sup-track-urd-source-of-truth",
+			Id:        "sup-track-urd-source-of-truth",
 			Given:     "requirements question arises",
 			When:      "resolving",
 			Then:      "consult the URD (" + "`bd show <urd-id>`" + ") as the single source of truth",
 			ShouldNot: "guess at user intent without checking the URD first",
 		},
 		{
-			ID:        "sup-track-severity-awareness",
+			Id:        "sup-track-severity-awareness",
 			Given:     "all slices complete",
 			When:      "transitioning to review",
 			Then:      "check for BLOCKER resolution tracking in the review severity groups",
@@ -45,12 +45,12 @@ var supervisorTrackProgressBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:      "sup-track-when-to-use",
+			Id:      "sup-track-when-to-use",
 			Title:   "When to Use",
 			Content: `Workers spawned and running — monitoring for completions and blockers until all slices reach ` + "`done`" + ` or a phase transition is warranted.`,
 		},
 		{
-			ID:    "sup-track-beads-queries",
+			Id:    "sup-track-beads-queries",
 			Title: "Beads Status Queries",
 			Content: "```" + `bash
 # Check all implementation slices
@@ -73,7 +73,7 @@ bd list --labels="aura:epic-followup"
 ` + "```",
 		},
 		{
-			ID:    "sup-track-coordination",
+			Id:    "sup-track-coordination",
 			Title: "Tracking via Beads",
 			Content: `All coordination happens through beads task status and comments:
 
@@ -89,7 +89,7 @@ bd comments add <task-id> "All slices complete — proceeding to Phase 10 (code 
 ` + "```",
 		},
 		{
-			ID:    "sup-track-status-patterns",
+			Id:    "sup-track-status-patterns",
 			Title: "Status Patterns",
 			Content: `| Status | Action |
 |--------|--------|
@@ -98,7 +98,7 @@ bd comments add <task-id> "All slices complete — proceeding to Phase 10 (code 
 | ` + "`in_progress`" + ` | Worker is actively working |`,
 		},
 		{
-			ID:    "sup-track-severity",
+			Id:    "sup-track-severity",
 			Title: "Severity Awareness (Phase 10)",
 			Content: `When tracking review progress, monitor severity groups:
 
@@ -109,7 +109,7 @@ bd comments add <task-id> "All slices complete — proceeding to Phase 10 (code 
 | MINOR | No | Goes to follow-up epic (` + "`aura:epic-followup`" + `) |`,
 		},
 		{
-			ID:    "sup-track-followup-lifecycle",
+			Id:    "sup-track-followup-lifecycle",
 			Title: "Follow-up Lifecycle Tracking",
 			Content: "```" + `bash
 # Track follow-up lifecycle progress

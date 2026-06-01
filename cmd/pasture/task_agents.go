@@ -16,7 +16,7 @@ pasture-side categories stored in pasture_agent_categories.
 
 Subcommands:
   list           list all registered agents
-  show <id>      show one agent by wire-format AgentID`,
+  show <id>      show one agent by wire-format AgentId`,
 }
 
 var taskAgentsListCmd = &cobra.Command{
@@ -37,7 +37,7 @@ var taskAgentsListCmd = &cobra.Command{
 
 var taskAgentsShowCmd = &cobra.Command{
 	Use:   "show AGENT-ID",
-	Short: "Show one agent by wire-format AgentID",
+	Short: "Show one agent by wire-format AgentId",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		code, hErr := handlers.TaskAgentsShow(cmd.OutOrStdout(), flagDBPath, args[0], resolveFormat())

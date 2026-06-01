@@ -35,10 +35,10 @@ recommended for audit trail completeness.`,
 		}
 		format := resolveFormat(cmd, cfg)
 
-		epochID, _ := cmd.Flags().GetString("epoch-id")
+		epochId, _ := cmd.Flags().GetString("epoch-id")
 		axisStr, _ := cmd.Flags().GetString("axis")
 		voteStr, _ := cmd.Flags().GetString("vote")
-		reviewerID, _ := cmd.Flags().GetString("reviewer-id")
+		reviewerId, _ := cmd.Flags().GetString("reviewer-id")
 
 		// Normalize vote to uppercase (D13: normalize at CLI boundary).
 		vote := types.VoteType(strings.ToUpper(voteStr))
@@ -47,7 +47,7 @@ recommended for audit trail completeness.`,
 		code, err := handlers.SignalVote(
 			context.Background(),
 			cfg.Connection,
-			epochID, axis, vote, reviewerID,
+			epochId, axis, vote, reviewerId,
 			format,
 			nil,
 		)
@@ -76,8 +76,8 @@ These flags are mutually exclusive.`,
 		}
 		format := resolveFormat(cmd, cfg)
 
-		epochID, _ := cmd.Flags().GetString("epoch-id")
-		sliceID, _ := cmd.Flags().GetString("slice-id")
+		epochId, _ := cmd.Flags().GetString("epoch-id")
+		sliceId, _ := cmd.Flags().GetString("slice-id")
 
 		var output *string
 		var errMsg *string
@@ -94,7 +94,7 @@ These flags are mutually exclusive.`,
 		code, err := handlers.SignalComplete(
 			context.Background(),
 			cfg.Connection,
-			epochID, sliceID,
+			epochId, sliceId,
 			output, errMsg,
 			format,
 			nil,

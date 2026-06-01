@@ -188,12 +188,12 @@ func TestValidateSchema_SemanticErrors(t *testing.T) {
 	assert.True(t, hasSemantic, "expected Semantic error for non-sequential phase numbers")
 }
 
-// ── TestValidateSchema_DuplicateID ────────────────────────────────────────────
+// ── TestValidateSchema_DuplicateId ────────────────────────────────────────────
 
-// TestValidateSchema_DuplicateID verifies that the structural validation layer
+// TestValidateSchema_DuplicateId verifies that the structural validation layer
 // (checkIDUnique inside buildIndex) catches duplicate element IDs and reports
 // a LayerStructural ValidationError naming the duplicated id.
-func TestValidateSchema_DuplicateID(t *testing.T) {
+func TestValidateSchema_DuplicateId(t *testing.T) {
 	// Two phases with the same id "p1" — checkIDUnique must fire on the second.
 	const xmlDoc = `<aura-protocol>
   <phases>

@@ -13,11 +13,11 @@ import (
 func TestTaskReady_ExcludesBlocked(t *testing.T) {
 	path := dbPath(t)
 
-	parentID := createTask(t, path, "parent")
-	childID := createTask(t, path, "child")
+	parentId := createTask(t, path, "parent")
+	childId := createTask(t, path, "child")
 
 	// "parent is blocked by child"
-	if _, err := handlers.TaskDepAdd(&bytes.Buffer{}, path, parentID, childID, provenance.EdgeBlockedBy, types.OutputText); err != nil {
+	if _, err := handlers.TaskDepAdd(&bytes.Buffer{}, path, parentId, childId, provenance.EdgeBlockedBy, types.OutputText); err != nil {
 		t.Fatalf("dep add failed: %v", err)
 	}
 
@@ -26,11 +26,11 @@ func TestTaskReady_ExcludesBlocked(t *testing.T) {
 		t.Fatalf("ready failed: %v", err)
 	}
 	ready := decodeTaskList(t, readyOut.String())
-	if !containsTask(ready, childID) {
-		t.Fatalf("expected child %q to be ready, got %+v", childID, ready)
+	if !containsTask(ready, childId) {
+		t.Fatalf("expected child %q to be ready, got %+v", childId, ready)
 	}
-	if containsTask(ready, parentID) {
-		t.Fatalf("expected parent %q to not appear in ready list, got %+v", parentID, ready)
+	if containsTask(ready, parentId) {
+		t.Fatalf("expected parent %q to not appear in ready list, got %+v", parentId, ready)
 	}
 
 	var blockedOut bytes.Buffer
@@ -38,8 +38,8 @@ func TestTaskReady_ExcludesBlocked(t *testing.T) {
 		t.Fatalf("blocked failed: %v", err)
 	}
 	blocked := decodeTaskList(t, blockedOut.String())
-	if !containsTask(blocked, parentID) {
-		t.Fatalf("expected parent %q in blocked list, got %+v", parentID, blocked)
+	if !containsTask(blocked, parentId) {
+		t.Fatalf("expected parent %q in blocked list, got %+v", parentId, blocked)
 	}
 }
 
@@ -72,11 +72,11 @@ func TestTaskDepAdd_JSONOutput(t *testing.T) {
 		t.Fatalf("dep add json: %v", err)
 	}
 	got := decodeEdge(t, out.String())
-	if got.SourceID != a {
-		t.Errorf("sourceId: got %q, want %q", got.SourceID, a)
+	if got.SourceId != a {
+		t.Errorf("sourceId: got %q, want %q", got.SourceId, a)
 	}
-	if got.TargetID != b {
-		t.Errorf("targetId: got %q, want %q", got.TargetID, b)
+	if got.TargetId != b {
+		t.Errorf("targetId: got %q, want %q", got.TargetId, b)
 	}
 	if got.Kind != "blocked_by" {
 		t.Errorf("kind: got %q, want %q", got.Kind, "blocked_by")
@@ -155,7 +155,7 @@ func containsTask(list []taskJSONShape, id string) bool {
 
 func containsEdge(edges []edgeJSONShape, src, tgt string) bool {
 	for _, e := range edges {
-		if e.SourceID == src && e.TargetID == tgt {
+		if e.SourceId == src && e.TargetId == tgt {
 			return true
 		}
 	}

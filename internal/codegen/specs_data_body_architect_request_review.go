@@ -7,14 +7,14 @@ var architectRequestReviewBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "arch-review-spawn-3-axes",
+			Id:        "arch-review-spawn-3-axes",
 			Given:     "plan ready",
 			When:      "requesting review",
 			Then:      "spawn 3 axis-specific reviewers (A=Correctness, B=Test quality, C=Elegance)",
 			ShouldNot: "spawn reviewers without axis assignment",
 		},
 		{
-			ID:        "arch-review-provide-context",
+			Id:        "arch-review-provide-context",
 			Given:     "reviewers",
 			When:      "assigning",
 			Then:      "provide Beads task ID and context",
@@ -24,12 +24,12 @@ var architectRequestReviewBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:      "arch-review-when-to-use",
+			Id:      "arch-review-when-to-use",
 			Title:   "When to Use",
 			Content: "Plan draft complete, ready for review.",
 		},
 		{
-			ID:    "arch-review-naming",
+			Id:    "arch-review-naming",
 			Title: "REVIEW Naming",
 			Content: "Reviews are named `PROPOSAL-N-REVIEW-{axis}-{round}` where:\n" +
 				"- N = proposal number (matches PROPOSAL-N)\n" +
@@ -37,7 +37,7 @@ var architectRequestReviewBody = SkillBody{
 				"- round = review round number (1, 2, ...)",
 			Subsections: []ProseSection{
 				{
-					ID:    "arch-review-axes",
+					Id:    "arch-review-axes",
 					Title: "Review Axes",
 					Content: "| Axis | Focus | Key Questions |\n" +
 						"|------|-------|---------------|\n" +
@@ -48,7 +48,7 @@ var architectRequestReviewBody = SkillBody{
 			},
 		},
 		{
-			ID:    "arch-review-steps",
+			Id:    "arch-review-steps",
 			Title: "Steps",
 			Content: "1. Verify PROPOSAL-N task is complete with all sections\n" +
 				"2. Spawn three reviewers with the task ID and URD reference:\n\n" +
@@ -60,12 +60,12 @@ var architectRequestReviewBody = SkillBody{
 				"3. Wait for all 3 reviewers to vote ACCEPT",
 		},
 		{
-			ID:      "arch-review-consensus",
+			Id:      "arch-review-consensus",
 			Title:   "Consensus",
 			Content: "**All 3 reviewers must vote ACCEPT.** Max revision rounds until consensus.",
 		},
 		{
-			ID:    "arch-review-checking",
+			Id:    "arch-review-checking",
 			Title: "Checking Reviews",
 			Content: "```bash\n" +
 				"bd show <proposal-id>\n" +
@@ -73,7 +73,7 @@ var architectRequestReviewBody = SkillBody{
 				"```",
 		},
 		{
-			ID:    "arch-review-coordination",
+			Id:    "arch-review-coordination",
 			Title: "Coordination",
 			Content: "```bash\n" +
 				"# Add comment to notify that review is ready\n" +
@@ -84,7 +84,7 @@ var architectRequestReviewBody = SkillBody{
 				"```",
 		},
 		{
-			ID:    "arch-review-followup",
+			Id:    "arch-review-followup",
 			Title: "Follow-up Proposal Reviews (FOLLOWUP_PROPOSAL-N)",
 			Content: "For FOLLOWUP_PROPOSAL-N reviews, use the same procedure:\n" +
 				"- **Review task naming:** `FOLLOWUP_PROPOSAL-N-REVIEW-{axis}-{round}`\n" +

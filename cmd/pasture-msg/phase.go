@@ -39,7 +39,7 @@ condition that was satisfied.`,
 		}
 		format := resolveFormat(cmd, cfg)
 
-		epochID, _ := cmd.Flags().GetString("epoch-id")
+		epochId, _ := cmd.Flags().GetString("epoch-id")
 		toPhaseStr, _ := cmd.Flags().GetString("to-phase")
 		triggeredBy, _ := cmd.Flags().GetString("triggered-by")
 		condition, _ := cmd.Flags().GetString("condition")
@@ -55,7 +55,7 @@ condition that was satisfied.`,
 		code, err := handlers.PhaseAdvance(
 			context.Background(),
 			cfg.Connection,
-			epochID, toPhase, triggeredBy, condition,
+			epochId, toPhase, triggeredBy, condition,
 			format,
 			nil,
 		)

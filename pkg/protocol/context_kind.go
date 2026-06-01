@@ -89,10 +89,10 @@ func (k ContextKind) IsValid() bool {
 // String returns the wire-format string value of k.
 func (k ContextKind) String() string { return string(k) }
 
-// Context carries a typed (Kind, ContextID) pair as returned by
+// Context carries a typed (Kind, ContextId) pair as returned by
 // TaskTracker.EventContexts. PROPOSAL-2 §7.5.
 //
-// ContextID's shape varies per Kind:
+// ContextId's shape varies per Kind:
 //   - ContextEpoch / ContextSlice / ContextReview / ContextFollowup: a
 //     Provenance TaskID string ("namespace--uuid").
 //   - ContextGit: a git commit SHA (or remote ref).
@@ -101,5 +101,5 @@ func (k ContextKind) String() string { return string(k) }
 //   - ContextNone: unused.
 type Context struct {
 	Kind      ContextKind `json:"kind"`
-	ContextID string      `json:"contextId"`
+	ContextId string      `json:"contextId"`
 }

@@ -105,8 +105,8 @@ func newTrackerImpl(prov provenance.Tracker, trail audit.Trail, auditDB *sql.DB)
 		if hasRole, err := auditEventsHasColumn(ctx, auditDB, "role"); err == nil {
 			t.hasRoleColumn = hasRole
 		}
-		if hasEpochID, err := auditEventsHasColumn(ctx, auditDB, "epoch_id"); err == nil {
-			t.hasEpochIDColumn = hasEpochID
+		if hasEpochId, err := auditEventsHasColumn(ctx, auditDB, "epoch_id"); err == nil {
+			t.hasEpochIDColumn = hasEpochId
 		}
 	}
 
@@ -159,11 +159,11 @@ func (t *trackerImpl) List(filter provenance.ListFilter) ([]provenance.Task, err
 
 // Edges.
 
-func (t *trackerImpl) AddEdge(sourceID provenance.TaskID, targetID string, kind provenance.EdgeKind) error {
-	return t.prov.AddEdge(sourceID, targetID, kind)
+func (t *trackerImpl) AddEdge(sourceId provenance.TaskID, targetId string, kind provenance.EdgeKind) error {
+	return t.prov.AddEdge(sourceId, targetId, kind)
 }
-func (t *trackerImpl) RemoveEdge(sourceID provenance.TaskID, targetID string, kind provenance.EdgeKind) error {
-	return t.prov.RemoveEdge(sourceID, targetID, kind)
+func (t *trackerImpl) RemoveEdge(sourceId provenance.TaskID, targetId string, kind provenance.EdgeKind) error {
+	return t.prov.RemoveEdge(sourceId, targetId, kind)
 }
 func (t *trackerImpl) Edges(id provenance.TaskID, kind *provenance.EdgeKind) ([]provenance.Edge, error) {
 	return t.prov.Edges(id, kind)
@@ -195,8 +195,8 @@ func (t *trackerImpl) Labels(id provenance.TaskID) ([]string, error) { return t.
 
 // Comments.
 
-func (t *trackerImpl) AddComment(id provenance.TaskID, authorID provenance.AgentID, body string) (provenance.Comment, error) {
-	return t.prov.AddComment(id, authorID, body)
+func (t *trackerImpl) AddComment(id provenance.TaskID, authorId provenance.AgentID, body string) (provenance.Comment, error) {
+	return t.prov.AddComment(id, authorId, body)
 }
 func (t *trackerImpl) Comments(id provenance.TaskID) ([]provenance.Comment, error) {
 	return t.prov.Comments(id)
@@ -228,14 +228,14 @@ func (t *trackerImpl) SoftwareAgent(id provenance.AgentID) (provenance.SoftwareA
 
 // Activities.
 
-func (t *trackerImpl) StartActivity(agentID provenance.AgentID, phase provenance.Phase, stage provenance.Stage, notes string) (provenance.Activity, error) {
-	return t.prov.StartActivity(agentID, phase, stage, notes)
+func (t *trackerImpl) StartActivity(agentId provenance.AgentID, phase provenance.Phase, stage provenance.Stage, notes string) (provenance.Activity, error) {
+	return t.prov.StartActivity(agentId, phase, stage, notes)
 }
 func (t *trackerImpl) EndActivity(id provenance.ActivityID) (provenance.Activity, error) {
 	return t.prov.EndActivity(id)
 }
-func (t *trackerImpl) Activities(agentID *provenance.AgentID) ([]provenance.Activity, error) {
-	return t.prov.Activities(agentID)
+func (t *trackerImpl) Activities(agentId *provenance.AgentID) ([]provenance.Activity, error) {
+	return t.prov.Activities(agentId)
 }
 
 // ─── Audit Trail surface (4 methods, signature-identical to audit.Trail) ─────
@@ -244,13 +244,13 @@ func (t *trackerImpl) RecordEvent(ctx context.Context, event protocol.AuditEvent
 	return t.trail.RecordEvent(ctx, event)
 }
 
-// RecordEventReturningID forwards to the wrapped audit.Trail's
-// RecordEventReturningID and returns the just-inserted audit_events.id.
+// RecordEventReturningId forwards to the wrapped audit.Trail's
+// RecordEventReturningId and returns the just-inserted audit_events.id.
 //
 // Race safety: the underlying audit.Trail recovers the id from
 // sql.Result.LastInsertId on the SAME INSERT statement that wrote the row
 // (per-statement, not per-connection — see audit/sqlite.go's
-// SqliteAuditTrail.RecordEventReturningID). This is race-free under any level
+// SqliteAuditTrail.RecordEventReturningId). This is race-free under any level
 // of write contention and replaces the older "trail.RecordEvent + SELECT
 // MAX(id) on auditDB" workaround that could return a row id belonging to a
 // concurrent writer (PROPOSAL-2 §7.11 future-work, realised in Phase 11 R1-B
@@ -261,17 +261,17 @@ func (t *trackerImpl) RecordEvent(ctx context.Context, event protocol.AuditEvent
 // attribute the failure to the trackerImpl façade may inspect the error's
 // What field — the audit-side messages name the SqliteAuditTrail receiver
 // directly so the origin is clear without re-wrapping.
-func (t *trackerImpl) RecordEventReturningID(ctx context.Context, event protocol.AuditEvent) (int64, error) {
-	return t.trail.RecordEventReturningID(ctx, event)
+func (t *trackerImpl) RecordEventReturningId(ctx context.Context, event protocol.AuditEvent) (int64, error) {
+	return t.trail.RecordEventReturningId(ctx, event)
 }
-func (t *trackerImpl) QueryEvents(ctx context.Context, epochID string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
-	return t.trail.QueryEvents(ctx, epochID, phase, role)
+func (t *trackerImpl) QueryEvents(ctx context.Context, epochId string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
+	return t.trail.QueryEvents(ctx, epochId, phase, role)
 }
 func (t *trackerImpl) RecordSessionEntries(ctx context.Context, entries []protocol.SessionEntry) error {
 	return t.trail.RecordSessionEntries(ctx, entries)
 }
-func (t *trackerImpl) QuerySessionEntries(ctx context.Context, sessionID string) ([]protocol.SessionEntry, error) {
-	return t.trail.QuerySessionEntries(ctx, sessionID)
+func (t *trackerImpl) QuerySessionEntries(ctx context.Context, sessionId string) ([]protocol.SessionEntry, error) {
+	return t.trail.QuerySessionEntries(ctx, sessionId)
 }
 
 // ─── Pasture-side category decoration (R8) ───────────────────────────────────
@@ -375,16 +375,16 @@ func (t *trackerImpl) AgentCategories(id provenance.AgentID) (protocol.Automaton
 
 // ─── Context attachment (R9) ─────────────────────────────────────────────────
 
-// AttachContext writes (eventID, kind, contextID) into context_edges.
+// AttachContext writes (eventId, kind, contextId) into context_edges.
 //
 // The (event_id, context_kind, context_id) triple is the BCNF composite
 // primary key — duplicate inserts are converted to no-ops via INSERT OR
 // IGNORE so the call is idempotent (repeated calls return nil and leave the
 // existing row untouched).
 //
-// kind MUST be valid; contextID MUST be non-empty (a zero-length context_id
+// kind MUST be valid; contextId MUST be non-empty (a zero-length context_id
 // is meaningless and would silently break Timeline lookups).
-func (t *trackerImpl) AttachContext(ctx context.Context, eventID int64, kind protocol.ContextKind, contextID string) error {
+func (t *trackerImpl) AttachContext(ctx context.Context, eventId int64, kind protocol.ContextKind, contextId string) error {
 	if !kind.IsValid() {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
@@ -400,7 +400,7 @@ func (t *trackerImpl) AttachContext(ctx context.Context, eventID int64, kind pro
 				"     pasture task contexts list --kinds",
 		}
 	}
-	if contextID == "" {
+	if contextId == "" {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     "Pasture tried to link an event to a context with no identifier.",
@@ -417,10 +417,10 @@ func (t *trackerImpl) AttachContext(ctx context.Context, eventID int64, kind pro
 				"     pasture task create REQUEST --type=feature \"<title>\"",
 		}
 	}
-	if eventID <= 0 {
+	if eventId <= 0 {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("Pasture got a non-positive event id (%d) when linking an event.", eventID),
+			What:     fmt.Sprintf("Pasture got a non-positive event id (%d) when linking an event.", eventId),
 			Why: "Event ids are always positive numbers handed back when an event is\n" +
 				"saved. A zero or negative value means the caller never recorded the\n" +
 				"event before trying to link it. This is a bug in the calling code.",
@@ -441,15 +441,15 @@ func (t *trackerImpl) AttachContext(ctx context.Context, eventID int64, kind pro
 	_, err := t.auditDB.ExecContext(ctx,
 		`INSERT OR IGNORE INTO context_edges (event_id, context_kind, context_id)
 		 VALUES (?, ?, ?)`,
-		eventID, string(kind), contextID,
+		eventId, string(kind), contextId,
 	)
 	if err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("Pasture couldn't link event %d to its %s.", eventID, contextKindLabel(kind)),
+			What:     fmt.Sprintf("Pasture couldn't link event %d to its %s.", eventId, contextKindLabel(kind)),
 			Why: fmt.Sprintf(
 				"Tried to write the link to %s %q in the database but the write failed.",
-				contextIDLabel(kind), contextID,
+				contextIDLabel(kind), contextId,
 			),
 			Where: "Linking an event to a context (internal/tasks/tracker.go in trackerImpl.AttachContext).",
 			Impact: fmt.Sprintf(
@@ -466,10 +466,10 @@ func (t *trackerImpl) AttachContext(ctx context.Context, eventID int64, kind pro
 	return nil
 }
 
-// EventContexts returns all (Kind, ContextID) edges attached to eventID, in
+// EventContexts returns all (Kind, ContextId) edges attached to eventId, in
 // insertion order (rowid ASC). Returns an empty (non-nil) slice when no
-// edges exist for eventID.
-func (t *trackerImpl) EventContexts(ctx context.Context, eventID int64) ([]protocol.Context, error) {
+// edges exist for eventId.
+func (t *trackerImpl) EventContexts(ctx context.Context, eventId int64) ([]protocol.Context, error) {
 	if err := t.ensurePastureTablesOnce(); err != nil {
 		return nil, err
 	}
@@ -479,12 +479,12 @@ func (t *trackerImpl) EventContexts(ctx context.Context, eventID int64) ([]proto
 		 FROM context_edges
 		 WHERE event_id = ?
 		 ORDER BY rowid ASC`,
-		eventID,
+		eventId,
 	)
 	if err != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("Pasture couldn't read the contexts linked to event %d.", eventID),
+			What:     fmt.Sprintf("Pasture couldn't read the contexts linked to event %d.", eventId),
 			Why: "The database query asking which contexts (epoch, slice, git, ...) this\n" +
 				"event is linked to failed.",
 			Where: "Reading the contexts for an event (internal/tasks/tracker.go in trackerImpl.EventContexts).",
@@ -500,11 +500,11 @@ func (t *trackerImpl) EventContexts(ctx context.Context, eventID int64) ([]proto
 
 	contexts := make([]protocol.Context, 0)
 	for rows.Next() {
-		var kind, contextID string
-		if err := rows.Scan(&kind, &contextID); err != nil {
+		var kind, contextId string
+		if err := rows.Scan(&kind, &contextId); err != nil {
 			return nil, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
-				What:     fmt.Sprintf("Pasture couldn't read one of the context rows for event %d.", eventID),
+				What:     fmt.Sprintf("Pasture couldn't read one of the context rows for event %d.", eventId),
 				Why:      "Reading the row's columns out of the result set failed.",
 				Where:    "Reading the contexts for an event (internal/tasks/tracker.go in trackerImpl.EventContexts).",
 				Impact: "Only some of the contexts for this event are readable; the result\n" +
@@ -519,13 +519,13 @@ func (t *trackerImpl) EventContexts(ctx context.Context, eventID int64) ([]proto
 		}
 		contexts = append(contexts, protocol.Context{
 			Kind:      protocol.ContextKind(kind),
-			ContextID: contextID,
+			ContextId: contextId,
 		})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("Pasture stopped partway through reading the contexts for event %d.", eventID),
+			What:     fmt.Sprintf("Pasture stopped partway through reading the contexts for event %d.", eventId),
 			Why:      "The database stream ended with an error before all rows were read.",
 			Where:    "Reading the contexts for an event (internal/tasks/tracker.go in trackerImpl.EventContexts).",
 			Impact: "Only some of the contexts for this event are readable; the result\n" +
@@ -541,9 +541,9 @@ func (t *trackerImpl) EventContexts(ctx context.Context, eventID int64) ([]proto
 }
 
 // Timeline returns all audit events whose context_edges row matches the
-// (kind, contextID) pair, in chronological order (timestamp ASC).
+// (kind, contextId) pair, in chronological order (timestamp ASC).
 //
-// kind MUST be valid; contextID MUST be non-empty. An empty contextID returns
+// kind MUST be valid; contextId MUST be non-empty. An empty contextId returns
 // an empty slice (no error) since the lookup is well-defined but vacuous.
 //
 // Timeline is the new query path that supersedes audit.Trail.QueryEvents for
@@ -555,16 +555,16 @@ func (t *trackerImpl) EventContexts(ctx context.Context, eventID int64) ([]proto
 //   - v3+ schema:   audit_events.role is dropped; agent_id is NOT NULL. Read
 //     agent_id and surface it in protocol.AuditEvent.Role for one-line
 //     compatibility with the existing AuditEvent shape (the dedicated
-//     AgentID field will land alongside the audit_events.agent_id surface
+//     AgentId field will land alongside the audit_events.agent_id surface
 //     work). epoch_id is still present until v4 lands.
 //
 // We detect the post-v3 shape via PRAGMA table_info probed once in
 // newTrackerImpl and cached as hasRoleColumn / hasEpochIDColumn on the
 // receiver. Timeline reads those cached flags with no per-call PRAGMA overhead.
 //
-// kind MUST be valid; contextID MUST be non-empty. An empty contextID returns
+// kind MUST be valid; contextId MUST be non-empty. An empty contextId returns
 // an empty slice (no error) since the lookup is well-defined but vacuous.
-func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, contextID string) ([]protocol.AuditEvent, error) {
+func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, contextId string) ([]protocol.AuditEvent, error) {
 	if !kind.IsValid() {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
@@ -580,7 +580,7 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 				"     pasture task contexts list --kinds",
 		}
 	}
-	if contextID == "" {
+	if contextId == "" {
 		return []protocol.AuditEvent{}, nil
 	}
 
@@ -591,7 +591,7 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 	// Use the column-presence flags cached at construction time (probed once
 	// via PRAGMA table_info in newTrackerImpl). No per-call PRAGMA round-trips.
 	hasRole := t.hasRoleColumn
-	hasEpochID := t.hasEpochIDColumn
+	hasEpochId := t.hasEpochIDColumn
 
 	// SELECT projection for epoch_id varies across schema versions:
 	//
@@ -602,12 +602,12 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 	//
 	// For the EpochContext lookup specifically, the epoch_id IS the
 	// `ce.context_id` value supplied as the WHERE arg — so when the column
-	// is gone we substitute `ce.context_id` (still the same epochID for
+	// is gone we substitute `ce.context_id` (still the same epochId for
 	// every row matching the filter). For non-Epoch context kinds (Git,
 	// Skill, Session, etc.) the epoch_id is naturally empty since those
 	// events were never anchored to an epoch in the first place.
 	epochProj := "COALESCE(ae.epoch_id, '')"
-	if !hasEpochID {
+	if !hasEpochId {
 		// Use ce.context_id when the kind is EpochContext (it IS the
 		// epoch_id); for other context kinds, return empty string. SQLite
 		// CASE on the bound context_kind parameter is awkward so we use a
@@ -640,11 +640,11 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 		         ORDER BY ae.timestamp ASC, ae.id ASC`
 	}
 
-	rows, err := t.auditDB.QueryContext(ctx, query, string(kind), contextID)
+	rows, err := t.auditDB.QueryContext(ctx, query, string(kind), contextId)
 	if err != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("Pasture couldn't read the timeline for %s %q.", contextIDLabel(kind), contextID),
+			What:     fmt.Sprintf("Pasture couldn't read the timeline for %s %q.", contextIDLabel(kind), contextId),
 			Why: fmt.Sprintf(
 				"The database query asking for events linked to this %s failed.",
 				contextIDLabel(kind),
@@ -666,13 +666,13 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 	events := make([]protocol.AuditEvent, 0)
 	for rows.Next() {
 		var (
-			epochID, phaseStr, roleOrAgent, eventTypeStr, payloadJSON string
+			epochId, phaseStr, roleOrAgent, eventTypeStr, payloadJSON string
 			tsNano                                                    int64
 		)
-		if err := rows.Scan(&epochID, &phaseStr, &roleOrAgent, &eventTypeStr, &payloadJSON, &tsNano); err != nil {
+		if err := rows.Scan(&epochId, &phaseStr, &roleOrAgent, &eventTypeStr, &payloadJSON, &tsNano); err != nil {
 			return nil, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
-				What:     fmt.Sprintf("Pasture couldn't read one of the timeline rows for %s %q.", contextIDLabel(kind), contextID),
+				What:     fmt.Sprintf("Pasture couldn't read one of the timeline rows for %s %q.", contextIDLabel(kind), contextId),
 				Why:      "Reading the row's columns out of the result set failed.",
 				Where:    "Reading a timeline (internal/tasks/tracker.go in trackerImpl.Timeline).",
 				Impact: "Only some of the timeline is readable; the result can't be returned\n" +
@@ -685,7 +685,7 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 				Cause: err,
 			}
 		}
-		ev, perr := decodeAuditEvent(epochID, phaseStr, roleOrAgent, eventTypeStr, payloadJSON, tsNano)
+		ev, perr := decodeAuditEvent(epochId, phaseStr, roleOrAgent, eventTypeStr, payloadJSON, tsNano)
 		if perr != nil {
 			return nil, perr
 		}
@@ -694,7 +694,7 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 	if err := rows.Err(); err != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("Pasture stopped partway through reading the timeline for %s %q.", contextIDLabel(kind), contextID),
+			What:     fmt.Sprintf("Pasture stopped partway through reading the timeline for %s %q.", contextIDLabel(kind), contextId),
 			Why:      "The database stream ended with an error before all rows were read.",
 			Where:    "Reading a timeline (internal/tasks/tracker.go in trackerImpl.Timeline).",
 			Impact: "Only some of the timeline is readable; the result can't be returned\n" +

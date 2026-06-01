@@ -82,13 +82,13 @@ type EpochStateMachine struct {
 // NewEpochStateMachine creates a new EpochStateMachine initialized to PhaseRequest.
 // Accepts an optional specs map for dependency injection in tests; pass nil to
 // use the canonical PhaseSpecs.
-func NewEpochStateMachine(epochID string, specs map[protocol.PhaseId]PhaseSpec) *EpochStateMachine {
+func NewEpochStateMachine(epochId string, specs map[protocol.PhaseId]PhaseSpec) *EpochStateMachine {
 	if specs == nil {
 		specs = PhaseSpecs
 	}
 	return &EpochStateMachine{
 		state: &types.EpochState{
-			EpochID:           epochID,
+			EpochId:           epochId,
 			CurrentPhase:      protocol.PhaseRequest,
 			CurrentRole:       types.RoleEpoch,
 			CompletedPhases:   []protocol.PhaseId{},

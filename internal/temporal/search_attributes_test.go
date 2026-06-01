@@ -128,7 +128,7 @@ func TestEnsureSearchAttributes_NoneToAdd(t *testing.T) {
 	t.Parallel()
 	// Populate all required attribute names.
 	existingAttrs := map[string]enumspb.IndexedValueType{
-		temporal.SAEpochID:       enumspb.INDEXED_VALUE_TYPE_TEXT,
+		temporal.SAEpochId:       enumspb.INDEXED_VALUE_TYPE_TEXT,
 		temporal.SAPhase:         enumspb.INDEXED_VALUE_TYPE_KEYWORD,
 		temporal.SARole:          enumspb.INDEXED_VALUE_TYPE_KEYWORD,
 		temporal.SAStatus:        enumspb.INDEXED_VALUE_TYPE_KEYWORD,
@@ -192,7 +192,7 @@ func TestEnsureSearchAttributes_PartialMissing(t *testing.T) {
 	t.Parallel()
 	// Provide some (but not all) required attributes.
 	existingAttrs := map[string]enumspb.IndexedValueType{
-		temporal.SAEpochID: enumspb.INDEXED_VALUE_TYPE_TEXT,
+		temporal.SAEpochId: enumspb.INDEXED_VALUE_TYPE_TEXT,
 		temporal.SAPhase:   enumspb.INDEXED_VALUE_TYPE_KEYWORD,
 	}
 	op := &mockOperatorServiceClient{listAttrs: existingAttrs}
@@ -210,8 +210,8 @@ func TestEnsureSearchAttributes_PartialMissing(t *testing.T) {
 		t.Errorf("expected 4 attributes added, got %d: %v", len(op.addedAttrs), op.addedAttrs)
 	}
 	// Existing attributes should NOT be re-added.
-	if _, ok := op.addedAttrs[temporal.SAEpochID]; ok {
-		t.Error("SAEpochID should not be re-added; it already existed")
+	if _, ok := op.addedAttrs[temporal.SAEpochId]; ok {
+		t.Error("SAEpochId should not be re-added; it already existed")
 	}
 	if _, ok := op.addedAttrs[temporal.SAPhase]; ok {
 		t.Error("SAPhase should not be re-added; it already existed")

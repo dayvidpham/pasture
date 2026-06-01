@@ -19,11 +19,11 @@ import (
 // so callers get compile-time type safety and no runtime type assertion is needed.
 type TemporalClient interface {
 	Close()
-	QueryWorkflow(ctx context.Context, workflowID, runID, queryType string, args ...interface{}) (converter.EncodedValue, error)
-	SignalWorkflow(ctx context.Context, workflowID, runID, signalName string, arg interface{}) error
+	QueryWorkflow(ctx context.Context, workflowId, runId, queryType string, args ...interface{}) (converter.EncodedValue, error)
+	SignalWorkflow(ctx context.Context, workflowId, runId, signalName string, arg interface{}) error
 	ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (TemporalWorkflowRun, error)
-	CancelWorkflow(ctx context.Context, workflowID, runID string) error
-	TerminateWorkflow(ctx context.Context, workflowID, runID, reason string, details ...interface{}) error
+	CancelWorkflow(ctx context.Context, workflowId, runId string) error
+	TerminateWorkflow(ctx context.Context, workflowId, runId, reason string, details ...interface{}) error
 }
 
 // TemporalWorkflowRun is the narrow workflow run interface used by handlers.
@@ -69,12 +69,12 @@ type realClient struct {
 
 func (r *realClient) Close() { r.c.Close() }
 
-func (r *realClient) QueryWorkflow(ctx context.Context, workflowID, runID, queryType string, args ...interface{}) (converter.EncodedValue, error) {
-	return r.c.QueryWorkflow(ctx, workflowID, runID, queryType, args...)
+func (r *realClient) QueryWorkflow(ctx context.Context, workflowId, runId, queryType string, args ...interface{}) (converter.EncodedValue, error) {
+	return r.c.QueryWorkflow(ctx, workflowId, runId, queryType, args...)
 }
 
-func (r *realClient) SignalWorkflow(ctx context.Context, workflowID, runID, signalName string, arg interface{}) error {
-	return r.c.SignalWorkflow(ctx, workflowID, runID, signalName, arg)
+func (r *realClient) SignalWorkflow(ctx context.Context, workflowId, runId, signalName string, arg interface{}) error {
+	return r.c.SignalWorkflow(ctx, workflowId, runId, signalName, arg)
 }
 
 func (r *realClient) ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (TemporalWorkflowRun, error) {
@@ -85,10 +85,10 @@ func (r *realClient) ExecuteWorkflow(ctx context.Context, options client.StartWo
 	return run, nil
 }
 
-func (r *realClient) CancelWorkflow(ctx context.Context, workflowID, runID string) error {
-	return r.c.CancelWorkflow(ctx, workflowID, runID)
+func (r *realClient) CancelWorkflow(ctx context.Context, workflowId, runId string) error {
+	return r.c.CancelWorkflow(ctx, workflowId, runId)
 }
 
-func (r *realClient) TerminateWorkflow(ctx context.Context, workflowID, runID, reason string, details ...interface{}) error {
-	return r.c.TerminateWorkflow(ctx, workflowID, runID, reason, details...)
+func (r *realClient) TerminateWorkflow(ctx context.Context, workflowId, runId, reason string, details ...interface{}) error {
+	return r.c.TerminateWorkflow(ctx, workflowId, runId, reason, details...)
 }

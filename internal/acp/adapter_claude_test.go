@@ -37,8 +37,8 @@ func TestClaudeAdapter_AssistantTextMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: unexpected error: %v", err)
 	}
-	if update.SessionID != "sess-claude-1" {
-		t.Errorf("SessionID: got %q, want %q", update.SessionID, "sess-claude-1")
+	if update.SessionId != "sess-claude-1" {
+		t.Errorf("SessionId: got %q, want %q", update.SessionId, "sess-claude-1")
 	}
 	if update.Role != "assistant" {
 		t.Errorf("Role: got %q, want %q", update.Role, "assistant")
@@ -96,8 +96,8 @@ func TestClaudeAdapter_ToolUseExtraction(t *testing.T) {
 		t.Fatalf("ToolCalls: expected 1, got %d", len(update.ToolCalls))
 	}
 	tc := update.ToolCalls[0]
-	if tc.ToolCallID != "toolu_01abc" {
-		t.Errorf("ToolCallID: got %q, want %q", tc.ToolCallID, "toolu_01abc")
+	if tc.ToolCallId != "toolu_01abc" {
+		t.Errorf("ToolCallId: got %q, want %q", tc.ToolCallId, "toolu_01abc")
 	}
 	if tc.ToolName != "Bash" {
 		t.Errorf("ToolName: got %q, want %q", tc.ToolName, "Bash")
@@ -115,7 +115,7 @@ func TestClaudeAdapter_ToolUseExtraction(t *testing.T) {
 }
 
 // TestClaudeAdapter_ToolResultMessage verifies that tool_result messages are
-// mapped with the correct EntryID / ParentEntryID linkage.
+// mapped with the correct EntryId / ParentEntryId linkage.
 func TestClaudeAdapter_ToolResultMessage(t *testing.T) {
 	a := acp.NewClaudeAdapter()
 
@@ -145,8 +145,8 @@ func TestClaudeAdapter_ToolResultMessage(t *testing.T) {
 		t.Fatalf("ToolCalls: expected 1 for tool_result, got %d", len(update.ToolCalls))
 	}
 	tc := update.ToolCalls[0]
-	if tc.ToolCallID != "toolu_01abc" {
-		t.Errorf("ToolCallID: got %q, want %q", tc.ToolCallID, "toolu_01abc")
+	if tc.ToolCallId != "toolu_01abc" {
+		t.Errorf("ToolCallId: got %q, want %q", tc.ToolCallId, "toolu_01abc")
 	}
 	if tc.ToolOutput == "" {
 		t.Error("ToolOutput: expected non-empty for tool_result")

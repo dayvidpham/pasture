@@ -18,7 +18,7 @@ import (
 
 // schemaConstraintCheck mirrors one entry in testdata/schema.yaml constraint_checks.
 type schemaConstraintCheck struct {
-	ConstraintID           string   `yaml:"constraint_id"`
+	ConstraintId           string   `yaml:"constraint_id"`
 	IsGeneral              bool     `yaml:"is_general"`
 	RoleRefMustContain     []string `yaml:"role_ref_must_contain"`
 	RoleRefMustNotContain  []string `yaml:"role_ref_must_not_contain"`
@@ -28,14 +28,14 @@ type schemaConstraintCheck struct {
 
 // schemaRoleCheck mirrors one entry in testdata/schema.yaml role_checks.
 type schemaRoleCheck struct {
-	RoleID                 string   `yaml:"role_id"`
+	RoleId                 string   `yaml:"role_id"`
 	MustHaveOwnedPhases    []string `yaml:"must_have_owned_phases"`
 	MustNotHaveOwnedPhases []string `yaml:"must_not_have_owned_phases"`
 }
 
 // schemaPhaseCheck mirrors one entry in testdata/schema.yaml phase_checks.
 type schemaPhaseCheck struct {
-	PhaseID                 string   `yaml:"phase_id"`
+	PhaseId                 string   `yaml:"phase_id"`
 	MustContainElements     []string `yaml:"must_contain_elements"`
 	MustContainTransitionTo string   `yaml:"must_contain_transition_to"`
 	MustHaveSkillInvocation bool     `yaml:"must_have_skill_invocation"`
@@ -115,11 +115,11 @@ func TestGenerateSchema_ContainsAllPhases(t *testing.T) {
 	output := generateXML(t)
 
 	// All 12 phases should appear as <phase id="p{N}" ...> elements.
-	expectedPhaseIDs := []string{
+	expectedPhaseIds := []string{
 		"p1", "p2", "p3", "p4", "p5", "p6",
 		"p7", "p8", "p9", "p10", "p11", "p12",
 	}
-	for _, pid := range expectedPhaseIDs {
+	for _, pid := range expectedPhaseIds {
 		assert.Contains(t, output, `id="`+pid+`"`,
 			"output must contain phase with id=%q", pid)
 	}
@@ -138,12 +138,12 @@ func TestGenerateSchema_ConstraintRoleRefs(t *testing.T) {
 
 	for _, check := range suite.ConstraintChecks {
 		check := check
-		t.Run(check.ConstraintID, func(t *testing.T) {
+		t.Run(check.ConstraintId, func(t *testing.T) {
 			// Find the constraint element in the XML output.
 			// Look for the constraint id= attribute to locate the constraint.
-			constraintTag := `id="` + check.ConstraintID + `"`
+			constraintTag := `id="` + check.ConstraintId + `"`
 			assert.Contains(t, output, constraintTag,
-				"output must contain constraint %q", check.ConstraintID)
+				"output must contain constraint %q", check.ConstraintId)
 
 			if check.IsGeneral {
 				// General constraints must NOT have a role-ref attribute.
@@ -152,17 +152,17 @@ func TestGenerateSchema_ConstraintRoleRefs(t *testing.T) {
 				// A simpler approach: general constraints are in generalConstraints → role-ref omitted.
 				// We verify by checking the output doesn't have both the constraint ID and role-ref
 				// on the same constraint element. We do this by finding the constraint block.
-				constraintBlock := extractConstraintBlock(output, check.ConstraintID)
+				constraintBlock := extractConstraintBlock(output, check.ConstraintId)
 				assert.NotContains(t, constraintBlock, `role-ref`,
-					"general constraint %q must not have role-ref", check.ConstraintID)
+					"general constraint %q must not have role-ref", check.ConstraintId)
 				return
 			}
 
-			constraintBlock := extractConstraintBlock(output, check.ConstraintID)
+			constraintBlock := extractConstraintBlock(output, check.ConstraintId)
 
 			for _, role := range check.RoleRefMustContain {
 				assert.Contains(t, constraintBlock, role,
-					"constraint %q role-ref must contain %q", check.ConstraintID, role)
+					"constraint %q role-ref must contain %q", check.ConstraintId, role)
 			}
 			for _, role := range check.RoleRefMustNotContain {
 				// The role ID must not appear in role-ref attribute value.
@@ -170,7 +170,7 @@ func TestGenerateSchema_ConstraintRoleRefs(t *testing.T) {
 				if strings.Contains(constraintBlock, `role-ref=`) {
 					roleRefVal := extractAttrValue(constraintBlock, "role-ref")
 					assert.NotContains(t, roleRefVal, role,
-						"constraint %q role-ref must not contain %q", check.ConstraintID, role)
+						"constraint %q role-ref must not contain %q", check.ConstraintId, role)
 				}
 			}
 		})
@@ -192,18 +192,18 @@ func TestGenerateSchema_ConstraintPhaseRefs(t *testing.T) {
 		if len(check.PhaseRefMustContain) == 0 {
 			continue
 		}
-		t.Run(check.ConstraintID+"_phase_ref", func(t *testing.T) {
-			constraintBlock := extractConstraintBlock(output, check.ConstraintID)
+		t.Run(check.ConstraintId+"_phase_ref", func(t *testing.T) {
+			constraintBlock := extractConstraintBlock(output, check.ConstraintId)
 			phaseRefVal := extractAttrValue(constraintBlock, "phase-ref")
 
 			for _, phase := range check.PhaseRefMustContain {
 				// Use comma-delimited exact match to avoid "p1" matching "p10".
 				assert.True(t, containsPhaseToken(phaseRefVal, phase),
-					"constraint %q phase-ref must contain %q (got %q)", check.ConstraintID, phase, phaseRefVal)
+					"constraint %q phase-ref must contain %q (got %q)", check.ConstraintId, phase, phaseRefVal)
 			}
 			for _, phase := range check.PhaseRefMustNotContain {
 				assert.False(t, containsPhaseToken(phaseRefVal, phase),
-					"constraint %q phase-ref must not contain %q (got %q)", check.ConstraintID, phase, phaseRefVal)
+					"constraint %q phase-ref must not contain %q (got %q)", check.ConstraintId, phase, phaseRefVal)
 			}
 		})
 	}
@@ -222,18 +222,18 @@ func TestGenerateSchema_RoleChecks(t *testing.T) {
 
 	for _, check := range suite.RoleChecks {
 		check := check
-		t.Run(check.RoleID, func(t *testing.T) {
-			roleBlock := extractElementBlock(output, "role", check.RoleID)
-			require.NotEmpty(t, roleBlock, "role %q must appear in output", check.RoleID)
+		t.Run(check.RoleId, func(t *testing.T) {
+			roleBlock := extractElementBlock(output, "role", check.RoleId)
+			require.NotEmpty(t, roleBlock, "role %q must appear in output", check.RoleId)
 
 			ownsBlock := extractSubBlock(roleBlock, "owns-phases")
 			for _, phase := range check.MustHaveOwnedPhases {
 				assert.Contains(t, ownsBlock, `ref="`+phase+`"`,
-					"role %q must own phase %q", check.RoleID, phase)
+					"role %q must own phase %q", check.RoleId, phase)
 			}
 			for _, phase := range check.MustNotHaveOwnedPhases {
 				assert.NotContains(t, ownsBlock, `ref="`+phase+`"`,
-					"role %q must NOT own phase %q", check.RoleID, phase)
+					"role %q must NOT own phase %q", check.RoleId, phase)
 			}
 		})
 	}
@@ -252,24 +252,24 @@ func TestGenerateSchema_PhaseChecks(t *testing.T) {
 
 	for _, check := range suite.PhaseChecks {
 		check := check
-		t.Run(check.PhaseID, func(t *testing.T) {
-			phaseBlock := extractElementBlock(output, "phase", check.PhaseID)
-			require.NotEmpty(t, phaseBlock, "phase %q must appear in output", check.PhaseID)
+		t.Run(check.PhaseId, func(t *testing.T) {
+			phaseBlock := extractElementBlock(output, "phase", check.PhaseId)
+			require.NotEmpty(t, phaseBlock, "phase %q must appear in output", check.PhaseId)
 
 			for _, elem := range check.MustContainElements {
 				assert.Contains(t, phaseBlock, "<"+elem,
-					"phase %q must contain element <%s>", check.PhaseID, elem)
+					"phase %q must contain element <%s>", check.PhaseId, elem)
 			}
 
 			if check.MustContainTransitionTo != "" {
 				assert.Contains(t, phaseBlock,
 					`to-phase="`+check.MustContainTransitionTo+`"`,
-					"phase %q must have transition to %q", check.PhaseID, check.MustContainTransitionTo)
+					"phase %q must have transition to %q", check.PhaseId, check.MustContainTransitionTo)
 			}
 
 			if check.MustHaveSkillInvocation {
 				assert.Contains(t, phaseBlock, "skill-invocation",
-					"phase %q must have a skill-invocation element", check.PhaseID)
+					"phase %q must have a skill-invocation element", check.PhaseId)
 			}
 		})
 	}

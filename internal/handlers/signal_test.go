@@ -71,7 +71,7 @@ func TestSignalVote_InvalidVote(t *testing.T) {
 	}
 }
 
-func TestSignalVote_MissingEpochID(t *testing.T) {
+func TestSignalVote_MissingEpochId(t *testing.T) {
 	factory := func(_ context.Context, _ config.ConnectionConfig) (handlers.TemporalClient, error) {
 		return &mockClient{}, nil
 	}
@@ -200,7 +200,7 @@ func TestSignalComplete_BothOutputAndError(t *testing.T) {
 	}
 }
 
-func TestSignalComplete_MissingEpochID(t *testing.T) {
+func TestSignalComplete_MissingEpochId(t *testing.T) {
 	factory := func(_ context.Context, _ config.ConnectionConfig) (handlers.TemporalClient, error) {
 		return &mockClient{}, nil
 	}
@@ -220,7 +220,7 @@ func TestSignalComplete_MissingEpochID(t *testing.T) {
 	}
 }
 
-func TestSignalComplete_MissingSliceID(t *testing.T) {
+func TestSignalComplete_MissingSliceId(t *testing.T) {
 	factory := func(_ context.Context, _ config.ConnectionConfig) (handlers.TemporalClient, error) {
 		return &mockClient{}, nil
 	}

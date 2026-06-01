@@ -24,14 +24,14 @@ import (
 
 // QueryState queries the full epoch state from the running EpochWorkflow.
 //
-// Sends a QueryFullState query to the workflow identified by epochID and
+// Sends a QueryFullState query to the workflow identified by epochId and
 // formats the result as either JSON or human-readable text.
 //
 // Exit codes: 0=success, 2=connection error, 3=workflow error.
 func QueryState(
 	ctx context.Context,
 	conn config.ConnectionConfig,
-	epochID string,
+	epochId string,
 	format types.OutputFormat,
 	factory TemporalClientFactory,
 ) (int, error) {
@@ -45,7 +45,7 @@ func QueryState(
 	}
 	defer c.Close()
 
-	result, err := queryWorkflow[types.QueryStateResult](ctx, c, epochID, temporal.QueryFullState)
+	result, err := queryWorkflow[types.QueryStateResult](ctx, c, epochId, temporal.QueryFullState)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
@@ -60,14 +60,14 @@ func QueryState(
 
 // queryWorkflow executes a typed Temporal query against the given workflow.
 func queryWorkflow[T any](ctx context.Context, c interface {
-	QueryWorkflow(ctx context.Context, workflowID, runID, queryType string, args ...interface{}) (converter.EncodedValue, error)
-}, workflowID, queryType string) (T, error) {
+	QueryWorkflow(ctx context.Context, workflowId, runId, queryType string, args ...interface{}) (converter.EncodedValue, error)
+}, workflowId, queryType string) (T, error) {
 	var zero T
-	val, err := c.QueryWorkflow(ctx, workflowID, "", queryType)
+	val, err := c.QueryWorkflow(ctx, workflowId, "", queryType)
 	if err != nil {
 		return zero, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
-			What:     fmt.Sprintf("Couldn't read the state of epoch %q.", workflowID),
+			What:     fmt.Sprintf("Couldn't read the state of epoch %q.", workflowId),
 			Why:      fmt.Sprintf("The workflow server rejected the %q query.", queryType),
 			Where:    "Querying the workflow state (internal/handlers/query.go in handlers.queryWorkflow).",
 			Impact:   "The current workflow state can't be returned, so commands depending on it have no view to act on.",
@@ -76,7 +76,7 @@ func queryWorkflow[T any](ctx context.Context, c interface {
 				"2. If the epoch isn't found, list active epochs to find the right ID:\n"+
 				"     pasture-msg epoch list\n"+
 				"3. Retry the query once the epoch is healthy.",
-				workflowID),
+				workflowId),
 			Cause: err,
 		}
 	}
@@ -84,7 +84,7 @@ func queryWorkflow[T any](ctx context.Context, c interface {
 	if err := val.Get(&result); err != nil {
 		return zero, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
-			What:     fmt.Sprintf("The state returned for epoch %q couldn't be decoded.", workflowID),
+			What:     fmt.Sprintf("The state returned for epoch %q couldn't be decoded.", workflowId),
 			Why:      "Reading the workflow query result failed — the daemon returned an unexpected shape.",
 			Where:    "Querying the workflow state (internal/handlers/query.go in handlers.queryWorkflow).",
 			Impact:   "The state can't be displayed because pasture-msg can't interpret what pastured sent back.",

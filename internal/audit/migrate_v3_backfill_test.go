@@ -820,7 +820,7 @@ func TestV3Backfill_FreshDB_NoOp(t *testing.T) {
 // legacy v1 DB from migrate_v2_v3_test.go's seedLegacyV1DB helper.
 func TestV3Backfill_PreservesNonRoleColumns(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "v3_preserve.db")
-	originalID := seedLegacyV1DB(t, dbPath)
+	originalId := seedLegacyV1DB(t, dbPath)
 
 	// Capture the original phase + event_type + payload + timestamp before
 	// the migration so we can compare post-migration.
@@ -832,7 +832,7 @@ func TestV3Backfill_PreservesNonRoleColumns(t *testing.T) {
 		db := openDB(t, dbPath)
 		err := db.QueryRow(
 			`SELECT phase, event_type, payload, timestamp FROM audit_events WHERE id = ?`,
-			originalID,
+			originalId,
 		).Scan(&originalPhase, &originalEventType, &originalPayload, &originalTs)
 		if err != nil {
 			t.Fatalf("capture original cols: %v", err)
@@ -852,7 +852,7 @@ func TestV3Backfill_PreservesNonRoleColumns(t *testing.T) {
 	)
 	err := db.QueryRow(
 		`SELECT phase, event_type, payload, timestamp FROM audit_events WHERE id = ?`,
-		originalID,
+		originalId,
 	).Scan(&gotPhase, &gotEventType, &gotPayload, &gotTs)
 	if err != nil {
 		t.Fatalf("post-migration scan: %v", err)

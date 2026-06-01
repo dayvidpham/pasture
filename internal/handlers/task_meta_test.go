@@ -19,8 +19,8 @@ func TestTaskLabelAddRemove_RoundTrip(t *testing.T) {
 		t.Fatalf("label add failed: %v", err)
 	}
 	got := decodeLabels(t, addOut.String())
-	if got.TaskID != id {
-		t.Errorf("taskId: got %q, want %q", got.TaskID, id)
+	if got.TaskId != id {
+		t.Errorf("taskId: got %q, want %q", got.TaskId, id)
 	}
 	if !containsString(got.Labels, "important") {
 		t.Errorf("expected 'important' in labels, got %+v", got.Labels)
@@ -53,13 +53,13 @@ func TestTaskLabelAdd_RejectsEmptyLabel(t *testing.T) {
 func TestTaskCommentAddAndList_RoundTrip(t *testing.T) {
 	path := dbPath(t)
 	id := createTask(t, path, "commentable")
-	authorID := mustRegisterAgent(t, path, "Tester", "tester@example.com")
+	authorId := mustRegisterAgent(t, path, "Tester", "tester@example.com")
 
 	var addOut bytes.Buffer
 	code, err := handlers.TaskCommentAdd(&addOut, handlers.TaskCommentAddInput{
 		DBPath:   path,
-		IDStr:    id,
-		AuthorID: authorID,
+		IdStr:    id,
+		AuthorId: authorId,
 		Body:     "first thoughts",
 	}, types.OutputJSON)
 	if err != nil {
@@ -72,11 +72,11 @@ func TestTaskCommentAddAndList_RoundTrip(t *testing.T) {
 	if added.Body != "first thoughts" {
 		t.Errorf("body: got %q, want %q", added.Body, "first thoughts")
 	}
-	if added.AuthorID != authorID {
-		t.Errorf("authorId: got %q, want %q", added.AuthorID, authorID)
+	if added.AuthorId != authorId {
+		t.Errorf("authorId: got %q, want %q", added.AuthorId, authorId)
 	}
-	if added.TaskID != id {
-		t.Errorf("taskId: got %q, want %q", added.TaskID, id)
+	if added.TaskId != id {
+		t.Errorf("taskId: got %q, want %q", added.TaskId, id)
 	}
 
 	var listOut bytes.Buffer
@@ -99,7 +99,7 @@ func TestTaskCommentAdd_RequiresAuthor(t *testing.T) {
 	var out bytes.Buffer
 	code, err := handlers.TaskCommentAdd(&out, handlers.TaskCommentAddInput{
 		DBPath: path,
-		IDStr:  id,
+		IdStr:  id,
 		Body:   "no author",
 	}, types.OutputText)
 	if err == nil {
@@ -118,8 +118,8 @@ func TestTaskCommentAdd_RejectsUnknownAuthor(t *testing.T) {
 	var out bytes.Buffer
 	code, err := handlers.TaskCommentAdd(&out, handlers.TaskCommentAddInput{
 		DBPath:   path,
-		IDStr:    id,
-		AuthorID: bogus.String(),
+		IdStr:    id,
+		AuthorId: bogus.String(),
 		Body:     "ghost",
 	}, types.OutputText)
 	if err == nil {

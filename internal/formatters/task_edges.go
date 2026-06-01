@@ -11,8 +11,8 @@ import (
 )
 
 type edgeJSON struct {
-	SourceID string `json:"sourceId"`
-	TargetID string `json:"targetId"`
+	SourceId string `json:"sourceId"`
+	TargetId string `json:"targetId"`
 	Kind     string `json:"kind"`
 }
 
@@ -27,8 +27,8 @@ func FormatEdge(e provenance.Edge, format types.OutputFormat) (string, error) {
 	switch format {
 	case types.OutputJSON:
 		b, err := json.MarshalIndent(edgeJSON{
-			SourceID: e.SourceID,
-			TargetID: e.TargetID,
+			SourceId: e.SourceID,
+			TargetId: e.TargetID,
 			Kind:     e.Kind.String(),
 		}, "", "  ")
 		if err != nil {
@@ -42,16 +42,16 @@ func FormatEdge(e provenance.Edge, format types.OutputFormat) (string, error) {
 	}
 }
 
-// FormatDepTree renders the blocked-by edges reachable from rootID. JSON
+// FormatDepTree renders the blocked-by edges reachable from rootId. JSON
 // output preserves the DFS-ordered edge list so consumers can rebuild the
 // tree. Text output renders an indented tree, deduplicating shared subtrees
 // the same way DFS visits them.
-func FormatDepTree(rootID string, edges []provenance.Edge, format types.OutputFormat) (string, error) {
+func FormatDepTree(rootId string, edges []provenance.Edge, format types.OutputFormat) (string, error) {
 	switch format {
 	case types.OutputJSON:
-		jt := depTreeJSON{Root: rootID, Edges: make([]edgeJSON, len(edges))}
+		jt := depTreeJSON{Root: rootId, Edges: make([]edgeJSON, len(edges))}
 		for i, e := range edges {
-			jt.Edges[i] = edgeJSON{SourceID: e.SourceID, TargetID: e.TargetID, Kind: e.Kind.String()}
+			jt.Edges[i] = edgeJSON{SourceId: e.SourceID, TargetId: e.TargetID, Kind: e.Kind.String()}
 		}
 		b, err := json.MarshalIndent(jt, "", "  ")
 		if err != nil {
@@ -60,7 +60,7 @@ func FormatDepTree(rootID string, edges []provenance.Edge, format types.OutputFo
 		return string(b), nil
 
 	case types.OutputText:
-		return renderDepTreeText(rootID, edges), nil
+		return renderDepTreeText(rootId, edges), nil
 
 	default:
 		return "", fmt.Errorf("formatters.FormatDepTree: unknown output format %q — valid values: json, text", format)
@@ -68,14 +68,14 @@ func FormatDepTree(rootID string, edges []provenance.Edge, format types.OutputFo
 }
 
 // renderDepTreeText walks the edge list and produces an indented blocked-by
-// tree starting at rootID.
+// tree starting at rootId.
 //
 // The Tracker returns edges in DFS order, but does not group them by parent
 // — we rebuild adjacency from the raw list and then print depth-first
 // ourselves. Cycles are broken on second visit (each node prints once).
-func renderDepTreeText(rootID string, edges []provenance.Edge) string {
+func renderDepTreeText(rootId string, edges []provenance.Edge) string {
 	if len(edges) == 0 {
-		return rootID + " (no blocked-by edges)"
+		return rootId + " (no blocked-by edges)"
 	}
 
 	adj := map[string][]string{}
@@ -110,6 +110,6 @@ func renderDepTreeText(rootID string, edges []provenance.Edge) string {
 			walk(child, nextPrefix, i == len(children)-1, depth+1)
 		}
 	}
-	walk(rootID, "", true, 0)
+	walk(rootId, "", true, 0)
 	return strings.TrimRight(b.String(), "\n")
 }

@@ -23,7 +23,7 @@ func TestSectionStructsInstantiate(t *testing.T) {
 				{
 					Name: "VoteType",
 					Values: []codegen.EnumValue{
-						{ID: "ACCEPT", Description: "All review criteria satisfied"},
+						{Id: "ACCEPT", Description: "All review criteria satisfied"},
 					},
 				},
 			},
@@ -34,17 +34,17 @@ func TestSectionStructsInstantiate(t *testing.T) {
 	t.Run("LabelsSection", func(t *testing.T) {
 		s := codegen.LabelsSection{
 			Labels: []codegen.LabelElem{
-				{ID: "L-p1s1_1", Value: "aura:p1-user:s1_1-request"},
+				{Id: "L-p1s1_1", Value: "aura:p1-user:s1_1-request"},
 			},
 		}
-		assert.Equal(t, "L-p1s1_1", s.Labels[0].ID)
+		assert.Equal(t, "L-p1s1_1", s.Labels[0].Id)
 	})
 
 	t.Run("ReviewAxesSection", func(t *testing.T) {
 		s := codegen.ReviewAxesSection{
 			Axes: []codegen.ReviewAxisElem{
 				{
-					ID:     "axis-correctness",
+					Id:     "axis-correctness",
 					Letter: "A",
 					Name:   "Correctness",
 					Short:  "Does it work?",
@@ -54,7 +54,7 @@ func TestSectionStructsInstantiate(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, "axis-correctness", s.Axes[0].ID)
+		assert.Equal(t, "axis-correctness", s.Axes[0].Id)
 		require.NotNil(t, s.Axes[0].KeyQuestions)
 		assert.Len(t, s.Axes[0].KeyQuestions.Questions, 1)
 	})
@@ -62,28 +62,28 @@ func TestSectionStructsInstantiate(t *testing.T) {
 	t.Run("PhasesSection", func(t *testing.T) {
 		s := codegen.PhasesSection{
 			Phases: []codegen.PhaseElem{
-				{ID: "p1", Number: "1", Domain: "user", Name: "Request"},
+				{Id: "p1", Number: "1", Domain: "user", Name: "Request"},
 			},
 		}
-		assert.Equal(t, "p1", s.Phases[0].ID)
+		assert.Equal(t, "p1", s.Phases[0].Id)
 	})
 
 	t.Run("RolesSection", func(t *testing.T) {
 		s := codegen.RolesSection{
 			Roles: []codegen.RoleElem{
-				{ID: "worker", Name: "Worker", Description: "Implements slices"},
+				{Id: "worker", Name: "Worker", Description: "Implements slices"},
 			},
 		}
-		assert.Equal(t, "worker", s.Roles[0].ID)
+		assert.Equal(t, "worker", s.Roles[0].Id)
 	})
 
 	t.Run("CommandsSection", func(t *testing.T) {
 		s := codegen.CommandsSection{
 			Commands: []codegen.CommandElem{
-				{ID: "cmd-worker", Name: "aura:worker", Description: "Worker skill"},
+				{Id: "cmd-worker", Name: "aura:worker", Description: "Worker skill"},
 			},
 		}
-		assert.Equal(t, "cmd-worker", s.Commands[0].ID)
+		assert.Equal(t, "cmd-worker", s.Commands[0].Id)
 	})
 
 	t.Run("HandoffsSection", func(t *testing.T) {
@@ -91,7 +91,7 @@ func TestSectionStructsInstantiate(t *testing.T) {
 			StoragePattern: ".git/.aura/handoff/{request-task-id}/{source}-to-{target}.md",
 			Handoffs: []codegen.HandoffElem{
 				{
-					ID:           "h2",
+					Id:           "h2",
 					SourceRole:   "supervisor",
 					TargetRole:   "worker",
 					AtPhase:      "p9",
@@ -99,17 +99,17 @@ func TestSectionStructsInstantiate(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, "h2", s.Handoffs[0].ID)
+		assert.Equal(t, "h2", s.Handoffs[0].Id)
 	})
 
 	t.Run("ConstraintsSection_typeOnly", func(t *testing.T) {
 		// ConstraintsSection is NOT used for xml.Marshal — just verify instantiation.
 		s := codegen.ConstraintsSection{
 			Constraints: []codegen.ConstraintElem{
-				{ID: "C-agent-commit", Given: "code is ready", When: "committing", Then: "use git agent-commit"},
+				{Id: "C-agent-commit", Given: "code is ready", When: "committing", Then: "use git agent-commit"},
 			},
 		}
-		assert.Equal(t, "C-agent-commit", s.Constraints[0].ID)
+		assert.Equal(t, "C-agent-commit", s.Constraints[0].Id)
 	})
 
 	t.Run("TaskTitlesSection", func(t *testing.T) {
@@ -124,10 +124,10 @@ func TestSectionStructsInstantiate(t *testing.T) {
 	t.Run("DocumentsSection", func(t *testing.T) {
 		s := codegen.DocumentsSection{
 			Documents: []codegen.DocumentElem{
-				{ID: "doc-readme", Path: "protocol/README.md", Purpose: "Entry point"},
+				{Id: "doc-readme", Path: "protocol/README.md", Purpose: "Entry point"},
 			},
 		}
-		assert.Equal(t, "doc-readme", s.Documents[0].ID)
+		assert.Equal(t, "doc-readme", s.Documents[0].Id)
 	})
 
 	t.Run("DependencyModelSection", func(t *testing.T) {
@@ -152,7 +152,7 @@ func TestSectionStructsInstantiate(t *testing.T) {
 		s := codegen.ProcedureStepsSection{
 			RoleGroups: []codegen.ProcedureRoleGroup{
 				{Ref: "worker", Steps: []codegen.ProcedureStepElem{
-					{Order: "1", ID: "s-types", Instruction: "Define types"},
+					{Order: "1", Id: "s-types", Instruction: "Define types"},
 				}},
 			},
 		}
@@ -163,53 +163,53 @@ func TestSectionStructsInstantiate(t *testing.T) {
 		s := codegen.ChecklistsSection{
 			Checklists: []codegen.ChecklistElem{
 				{
-					ID:      "worker-completion",
+					Id:      "worker-completion",
 					RoleRef: "worker",
 					Gate:    "completion",
 					Items: []codegen.ChecklistItemElem{
-						{ID: "no-todos", Required: "true", Text: "No TODO placeholders"},
+						{Id: "no-todos", Required: "true", Text: "No TODO placeholders"},
 					},
 				},
 			},
 		}
-		assert.Equal(t, "worker-completion", s.Checklists[0].ID)
+		assert.Equal(t, "worker-completion", s.Checklists[0].Id)
 	})
 
 	t.Run("CoordinationCommandsSection", func(t *testing.T) {
 		s := codegen.CoordinationCommandsSection{
 			Commands: []codegen.CoordCmdElem{
-				{ID: "bd-show", Action: "show", Template: "bd show {id}"},
+				{Id: "bd-show", Action: "show", Template: "bd show {id}"},
 			},
 		}
-		assert.Equal(t, "bd-show", s.Commands[0].ID)
+		assert.Equal(t, "bd-show", s.Commands[0].Id)
 	})
 
 	t.Run("WorkflowsSection", func(t *testing.T) {
 		s := codegen.WorkflowsSection{
 			Workflows: []codegen.WorkflowElem{
 				{
-					ID:          "wf-layer-cake",
+					Id:          "wf-layer-cake",
 					Name:        "Layer Cake",
 					RoleRef:     "worker",
 					Description: "TDD workflow",
 				},
 			},
 		}
-		assert.Equal(t, "wf-layer-cake", s.Workflows[0].ID)
+		assert.Equal(t, "wf-layer-cake", s.Workflows[0].Id)
 	})
 
 	t.Run("FiguresSection", func(t *testing.T) {
 		s := codegen.FiguresSection{
 			Figures: []codegen.FigureElem{
 				{
-					ID:         "fig-workflow",
+					Id:         "fig-workflow",
 					Title:      "Workflow Overview",
 					Type:       "ascii-diagram",
 					SectionRef: "workflows",
 				},
 			},
 		}
-		assert.Equal(t, "fig-workflow", s.Figures[0].ID)
+		assert.Equal(t, "fig-workflow", s.Figures[0].Id)
 	})
 }
 
@@ -221,7 +221,7 @@ func TestXMLTagsEnumsSection(t *testing.T) {
 	s := codegen.EnumsSection{
 		Enums: []codegen.EnumType{
 			{Name: "VoteType", Values: []codegen.EnumValue{
-				{ID: "ACCEPT", Description: "Accept vote"},
+				{Id: "ACCEPT", Description: "Accept vote"},
 			}},
 		},
 	}
@@ -238,7 +238,7 @@ func TestXMLTagsEnumsSection(t *testing.T) {
 func TestXMLTagsLabelsSection(t *testing.T) {
 	s := codegen.LabelsSection{
 		Labels: []codegen.LabelElem{
-			{ID: "L-urd", Value: "aura:urd", Special: "true", Description: "URD label"},
+			{Id: "L-urd", Value: "aura:urd", Special: "true", Description: "URD label"},
 		},
 	}
 	out, err := xml.Marshal(s)
@@ -256,7 +256,7 @@ func TestXMLTagsReviewAxesSection(t *testing.T) {
 	s := codegen.ReviewAxesSection{
 		Axes: []codegen.ReviewAxisElem{
 			{
-				ID:     "axis-correctness",
+				Id:     "axis-correctness",
 				Letter: "A",
 				Name:   "Correctness",
 				Short:  "Correct?",
@@ -283,7 +283,7 @@ func TestXMLTagsHandoffsSection(t *testing.T) {
 		StoragePattern: pattern,
 		Handoffs: []codegen.HandoffElem{
 			{
-				ID:           "h1",
+				Id:           "h1",
 				SourceRole:   "architect",
 				TargetRole:   "supervisor",
 				AtPhase:      "p7",
@@ -310,11 +310,11 @@ func TestXMLTagsChecklistsSection(t *testing.T) {
 	s := codegen.ChecklistsSection{
 		Checklists: []codegen.ChecklistElem{
 			{
-				ID:      "worker-completion",
+				Id:      "worker-completion",
 				RoleRef: "worker",
 				Gate:    "completion",
 				Items: []codegen.ChecklistItemElem{
-					{ID: "no-todos", Required: "true", Text: "No TODO placeholders"},
+					{Id: "no-todos", Required: "true", Text: "No TODO placeholders"},
 				},
 			},
 		},
@@ -336,18 +336,18 @@ func TestXMLTagsWorkflowsSection(t *testing.T) {
 	s := codegen.WorkflowsSection{
 		Workflows: []codegen.WorkflowElem{
 			{
-				ID:          "wf-layer-cake",
+				Id:          "wf-layer-cake",
 				Name:        "Layer Cake",
 				RoleRef:     "worker",
 				Description: "TDD layer workflow",
 				Stages: []codegen.StageElem{
 					{
-						ID:        "stage-types",
+						Id:        "stage-types",
 						Name:      "Types",
 						Order:     "1",
 						Execution: "sequential",
 						Actions: []codegen.ActionElem{
-							{ID: "a1", Instruction: "Define types"},
+							{Id: "a1", Instruction: "Define types"},
 						},
 						ExitConditions: []codegen.ExitCondElem{
 							{Type: "proceed", Condition: "All types compile"},
@@ -376,7 +376,7 @@ func TestXMLTagsFiguresSection(t *testing.T) {
 	s := codegen.FiguresSection{
 		Figures: []codegen.FigureElem{
 			{
-				ID:           "fig-workflow",
+				Id:           "fig-workflow",
 				Title:        "Workflow",
 				Type:         "ascii-diagram",
 				SectionRef:   "workflows",
@@ -399,7 +399,7 @@ func TestXMLTagsFiguresSection(t *testing.T) {
 func TestXMLTagsCoordCmdElem(t *testing.T) {
 	s := codegen.CoordinationCommandsSection{
 		Commands: []codegen.CoordCmdElem{
-			{ID: "bd-show", Action: "show", Template: "bd show {id}", Shared: "true"},
+			{Id: "bd-show", Action: "show", Template: "bd show {id}", Shared: "true"},
 		},
 	}
 	out, err := xml.Marshal(s)
@@ -432,7 +432,7 @@ func TestXMLTagsDocumentsSection(t *testing.T) {
 	s := codegen.DocumentsSection{
 		Documents: []codegen.DocumentElem{
 			{
-				ID:      "doc-readme",
+				Id:      "doc-readme",
 				Path:    "protocol/README.md",
 				Purpose: "Entry point",
 				Covers: &codegen.CoversElem{
@@ -508,11 +508,11 @@ func TestValidationErrorSlice(t *testing.T) {
 // and all map fields initialized.
 func TestSchemaIndexInstantiate(t *testing.T) {
 	idx := codegen.SchemaIndex{
-		PhaseIDs:           map[string]bool{"p1": true},
+		PhaseIds:           map[string]bool{"p1": true},
 		SubstepIDs:         map[string]bool{"s1_1": true},
 		LabelIDs:           map[string]bool{"L-p1s1_1": true},
-		RoleIDs:            map[string]bool{"worker": true},
-		CommandIDs:         map[string]bool{"cmd-worker": true},
+		RoleIds:            map[string]bool{"worker": true},
+		CommandIds:         map[string]bool{"cmd-worker": true},
 		AxisIDs:            map[string]bool{"axis-correctness": true},
 		HandoffIDs:         map[string]bool{"h2": true},
 		ConstraintIDs:      map[string]bool{"C-agent-commit": true},
@@ -528,8 +528,8 @@ func TestSchemaIndexInstantiate(t *testing.T) {
 		RolePhaseRefs:      map[string]map[string]bool{"worker": {"p9": true}},
 		StartupStepOrders:  map[string][]int{},
 	}
-	assert.True(t, idx.PhaseIDs["p1"])
-	assert.True(t, idx.RoleIDs["worker"])
+	assert.True(t, idx.PhaseIds["p1"])
+	assert.True(t, idx.RoleIds["worker"])
 	assert.Equal(t, 1, idx.PhaseNumbers["p1"])
 	assert.True(t, idx.EnumValueIDs["VoteType"]["ACCEPT"])
 	assert.True(t, idx.RolePhaseRefs["worker"]["p9"])
@@ -538,11 +538,11 @@ func TestSchemaIndexInstantiate(t *testing.T) {
 // TestSubstepOrderEntryFields verifies SubstepOrderEntry struct fields.
 func TestSubstepOrderEntryFields(t *testing.T) {
 	entry := codegen.SubstepOrderEntry{
-		ID:        "s1_1",
+		Id:        "s1_1",
 		Order:     1,
 		Execution: "sequential",
 	}
-	assert.Equal(t, "s1_1", entry.ID)
+	assert.Equal(t, "s1_1", entry.Id)
 	assert.Equal(t, 1, entry.Order)
 	assert.Equal(t, "sequential", entry.Execution)
 }
@@ -645,7 +645,7 @@ func TestSchemaTypesPackageImports(t *testing.T) {
 	var _ codegen.XMLNode
 
 	// Also verify the OmitEmpty fields on LabelElem don't produce spurious attrs.
-	label := codegen.LabelElem{ID: "L-urd", Value: "aura:urd", Special: "true"}
+	label := codegen.LabelElem{Id: "L-urd", Value: "aura:urd", Special: "true"}
 	out, err := xml.Marshal(label)
 	require.NoError(t, err)
 	assert.NotContains(t, string(out), `phase-ref=""`, "empty optional attrs must be omitted")

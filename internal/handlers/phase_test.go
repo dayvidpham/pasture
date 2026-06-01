@@ -52,7 +52,7 @@ func TestPhaseAdvance_InvalidPhase(t *testing.T) {
 	}
 }
 
-func TestPhaseAdvance_MissingEpochID(t *testing.T) {
+func TestPhaseAdvance_MissingEpochId(t *testing.T) {
 	factory := func(_ context.Context, _ config.ConnectionConfig) (handlers.TemporalClient, error) {
 		return &mockClient{}, nil
 	}

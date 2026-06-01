@@ -47,19 +47,19 @@ import (
 // agents_software to repopulate event.Role for the caller, preserving the
 // existing API byte-for-byte.
 //
-// The mapping is cached in roleToAgentID so a write-heavy workload pays
+// The mapping is cached in roleToAgentId so a write-heavy workload pays
 // the find-or-create cost only on the first event per role per process.
 //
 // All methods are safe for concurrent use; SQLite WAL mode is enabled to
-// allow concurrent readers alongside a single writer. The roleToAgentID
+// allow concurrent readers alongside a single writer. The roleToAgentId
 // cache is guarded by roleMu.
 type SqliteAuditTrail struct {
 	db *sql.DB
 
-	// roleMu guards roleToAgentID. The map is populated lazily on first
+	// roleMu guards roleToAgentId. The map is populated lazily on first
 	// RecordEvent for each distinct role (cache hit on subsequent writes).
 	roleMu        sync.Mutex
-	roleToAgentID map[string]string
+	roleToAgentId map[string]string
 }
 
 // NewSqliteAuditTrail opens (or creates) the SQLite database at dbPath,
@@ -152,7 +152,7 @@ func NewSqliteAuditTrail(dbPath string) (*SqliteAuditTrail, error) {
 
 	return &SqliteAuditTrail{
 		db:            db,
-		roleToAgentID: make(map[string]string),
+		roleToAgentId: make(map[string]string),
 	}, nil
 }
 
@@ -163,18 +163,18 @@ func (s *SqliteAuditTrail) Close() error {
 }
 
 // RecordEvent persists a single AuditEvent to the SQLite database, discarding
-// the inserted row id. It is a thin wrapper over RecordEventReturningID for
+// the inserted row id. It is a thin wrapper over RecordEventReturningId for
 // callers that record-and-forget; callers that need the inserted id (e.g. to
-// follow up with AttachContext) MUST use RecordEventReturningID directly.
+// follow up with AttachContext) MUST use RecordEventReturningId directly.
 //
-// See RecordEventReturningID for the full INSERT semantics, transaction
+// See RecordEventReturningId for the full INSERT semantics, transaction
 // boundary, validation rules, and error categories.
 func (s *SqliteAuditTrail) RecordEvent(ctx context.Context, event protocol.AuditEvent) error {
-	_, err := s.RecordEventReturningID(ctx, event)
+	_, err := s.RecordEventReturningId(ctx, event)
 	return err
 }
 
-// RecordEventReturningID persists a single AuditEvent and returns the
+// RecordEventReturningId persists a single AuditEvent and returns the
 // audit_events.id of the newly-inserted row.
 //
 // Race safety: the row id is recovered via sql.Result.LastInsertId on the SAME
@@ -195,24 +195,24 @@ func (s *SqliteAuditTrail) RecordEvent(ctx context.Context, event protocol.Audit
 // "pasture/legacy-role/<role>" via raw SQL on agents_software (find or
 // create) — the same shape the v3 migration uses — and writes that
 // agent_id into the new column. The role→agent_id mapping is cached in
-// s.roleToAgentID for write-amortised cost.
+// s.roleToAgentId for write-amortised cost.
 //
 // An empty event.Role is rejected with CategoryValidation; the v3 schema
 // requires a non-NULL agent_id and there is no sensible default.
 //
 // Returns (id, nil) on success or (0, *pasterrors.StructuredError) on failure.
-func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event protocol.AuditEvent) (int64, error) {
+func (s *SqliteAuditTrail) RecordEventReturningId(_ context.Context, event protocol.AuditEvent) (int64, error) {
 	if event.Role == "" {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What: fmt.Sprintf(
 				"This audit event has no role attached, so we can't tell who did it (epoch %q, event type %q).",
-				event.EpochID, event.EventType,
+				event.EpochId, event.EventType,
 			),
 			Why: "Every audit event must be attributed to an agent (architect, supervisor, worker,\n" +
 				"reviewer, or one of pasture's built-in automaton agents). The event you sent has an\n" +
 				"empty role, so we can't link it to anyone.",
-			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningID).",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
 			Impact: "The event was not recorded. The audit trail for this epoch will be missing this entry\n" +
 				"until the caller resends it with the role filled in.",
 			Fix: "1. Set the event's role to the originating role name before sending it again, e.g.\n" +
@@ -228,10 +228,10 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 			Category: pasterrors.CategoryStorage,
 			What: fmt.Sprintf(
 				"Couldn't convert this audit event's payload to JSON (epoch %q, event type %q).",
-				event.EpochID, event.EventType,
+				event.EpochId, event.EventType,
 			),
 			Why:   "The payload contains a value that can't be encoded as JSON.",
-			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningID).",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
 			Impact: "The event was not recorded. The audit trail for this epoch will be missing this entry\n" +
 				"until the caller resends it with a serialisable payload.",
 			Fix: "1. Make sure the event's payload only contains values that can be encoded as JSON\n" +
@@ -243,7 +243,7 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 		}
 	}
 
-	agentID, err := s.resolveLegacyRoleAgentID(event.Role)
+	agentId, err := s.resolveLegacyRoleAgentId(event.Role)
 	if err != nil {
 		return 0, err
 	}
@@ -255,20 +255,20 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 	// AttachContext cannot leave a row without its epoch correlation.
 	//
 	// Caller-side compatibility: protocol.AuditEvent still carries an
-	// EpochID field for the existing public API. SqliteAuditTrail
+	// EpochId field for the existing public API. SqliteAuditTrail
 	// bridges the two by writing the audit_events row first, then the
-	// context_edges row if EpochID is non-empty. QueryEvents recovers
-	// EpochID by joining context_edges with kind='EpochContext'.
+	// context_edges row if EpochId is non-empty. QueryEvents recovers
+	// EpochId by joining context_edges with kind='EpochContext'.
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What: fmt.Sprintf(
 				"Couldn't start the database write that would record this audit event (epoch %q, event type %q).",
-				event.EpochID, event.EventType,
+				event.EpochId, event.EventType,
 			),
 			Why:   "The database refused to start the write transaction.",
-			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningID).",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
 			Impact: "The event was not recorded. The audit trail for this epoch will be missing this entry\n" +
 				"until the underlying database problem is fixed and the caller retries.",
 			Fix: "1. Confirm the audit database file is accessible and not locked by another writer:\n" +
@@ -286,7 +286,7 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 		`INSERT INTO audit_events (phase, agent_id, event_type, payload, timestamp)
 		 VALUES (?, ?, ?, ?, ?)`,
 		string(event.Phase),
-		agentID,
+		agentId,
 		string(event.EventType),
 		string(payload),
 		event.Timestamp.UTC().UnixNano(),
@@ -296,10 +296,10 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 			Category: pasterrors.CategoryStorage,
 			What: fmt.Sprintf(
 				"Couldn't write this audit event into the database (epoch %q, event type %q).",
-				event.EpochID, event.EventType,
+				event.EpochId, event.EventType,
 			),
 			Why:   "The database refused the write into the audit-events table.",
-			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningID).",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
 			Impact: "The event was not recorded. The audit trail for this epoch will be missing this entry\n" +
 				"until the underlying database problem is fixed and the caller retries.",
 			Fix: "1. Confirm the audit database file is accessible and not locked by another writer:\n" +
@@ -316,18 +316,18 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 	// LastInsertId is per-statement on modernc.org/sqlite, so the returned
 	// value is always the rowid of the row this Exec wrote — independent of
 	// any concurrent INSERTs on the same connection. This is the property
-	// that makes RecordEventReturningID race-safe and allows it to replace
+	// that makes RecordEventReturningId race-safe and allows it to replace
 	// the older SELECT MAX(id) workaround in trackerImpl + free_floating.
-	eventID, err := res.LastInsertId()
+	eventId, err := res.LastInsertId()
 	if err != nil {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What: fmt.Sprintf(
 				"The audit event was written but we couldn't read back its row ID (epoch %q, event type %q).",
-				event.EpochID, event.EventType,
+				event.EpochId, event.EventType,
 			),
 			Why:   "The database refused to report the last inserted row ID.",
-			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningID).",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
 			Impact: "The event itself was recorded, but anything that needs to attach extra context to it\n" +
 				"(linking it to a session, a workflow, or another event) can't proceed because that\n" +
 				"link requires the row ID.",
@@ -338,16 +338,16 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 			Cause: err,
 		}
 	}
-	if eventID <= 0 {
+	if eventId <= 0 {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What: fmt.Sprintf(
 				"The audit event was written but came back with an invalid row ID (%d) for epoch %q, event type %q.",
-				eventID, event.EpochID, event.EventType,
+				eventId, event.EpochId, event.EventType,
 			),
 			Why: "Row IDs in the audit-events table count up from 1. A value of zero or below means\n" +
 				"the table's auto-numbering has been reset or the table is corrupted.",
-			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningID).",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
 			Impact: "Anything that needs to link extra context to this event (sessions, workflow attachments,\n" +
 				"related events) can't proceed because the link requires a valid row ID.",
 			Fix: "1. Look at the most recent rows in the audit-events table to confirm the corruption:\n" +
@@ -356,24 +356,24 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 		}
 	}
 
-	if event.EpochID != "" {
+	if event.EpochId != "" {
 		// INSERT OR IGNORE: a duplicate triple (event_id, 'EpochContext',
-		// epochID) is a no-op. Production never produces duplicates here
+		// epochId) is a no-op. Production never produces duplicates here
 		// because event_id is freshly minted; the OR IGNORE defends
 		// against future callers that may write multi-context events
 		// idempotently and still expect this method to succeed.
 		if _, err := tx.Exec(
 			`INSERT OR IGNORE INTO context_edges (event_id, context_kind, context_id) VALUES (?, ?, ?)`,
-			eventID, "EpochContext", event.EpochID,
+			eventId, "EpochContext", event.EpochId,
 		); err != nil {
 			return 0, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What: fmt.Sprintf(
 					"Couldn't link the audit event to its epoch (epoch %q, event type %q, event row %d).",
-					event.EpochID, event.EventType, eventID,
+					event.EpochId, event.EventType, eventId,
 				),
 				Why:   "The database refused the insert that links the event to its epoch.",
-				Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningID).",
+				Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
 				Impact: "The event itself was written, but it can't be found by queries that filter by epoch.\n" +
 					"The audit trail for this epoch will be missing this entry.",
 				Fix: "1. Confirm the event-to-context table exists (it's created by the version 2 → 3\n" +
@@ -391,10 +391,10 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 			Category: pasterrors.CategoryStorage,
 			What: fmt.Sprintf(
 				"Couldn't save this audit event (epoch %q, event type %q).",
-				event.EpochID, event.EventType,
+				event.EpochId, event.EventType,
 			),
 			Why:   "The database refused to commit the write transaction.",
-			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningID).",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
 			Impact: "The event was not recorded (everything was rolled back). The audit trail for this\n" +
 				"epoch will be missing this entry until the caller retries.",
 			Fix: "1. Confirm the audit database file is writable and not corrupted:\n" +
@@ -404,11 +404,11 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 			Cause: err,
 		}
 	}
-	return eventID, nil
+	return eventId, nil
 }
 
-// resolveLegacyRoleAgentID returns the agent_id for a given role, minting a
-// SoftwareAgent on first use. The mapping is cached in s.roleToAgentID so
+// resolveLegacyRoleAgentId returns the agent_id for a given role, minting a
+// SoftwareAgent on first use. The mapping is cached in s.roleToAgentId so
 // subsequent RecordEvent calls for the same role pay no DB lookup cost.
 //
 // Find-or-create semantics match the v3 migration's
@@ -423,9 +423,9 @@ func (s *SqliteAuditTrail) RecordEventReturningID(_ context.Context, event proto
 // for a given role pays the DB cost; subsequent writers race to populate
 // the cache and benefit from idempotent behaviour (find branch returns the
 // same id every time).
-func (s *SqliteAuditTrail) resolveLegacyRoleAgentID(role string) (string, error) {
+func (s *SqliteAuditTrail) resolveLegacyRoleAgentId(role string) (string, error) {
 	s.roleMu.Lock()
-	if cached, ok := s.roleToAgentID[role]; ok {
+	if cached, ok := s.roleToAgentId[role]; ok {
 		s.roleMu.Unlock()
 		return cached, nil
 	}
@@ -457,7 +457,7 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentID(role string) (string, error)
 		switch {
 		case derr == nil:
 			s.roleMu.Lock()
-			s.roleToAgentID[role] = directExisting
+			s.roleToAgentId[role] = directExisting
 			s.roleMu.Unlock()
 			return directExisting, nil
 		case derr != sql.ErrNoRows:
@@ -470,7 +470,7 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentID(role string) (string, error)
 					role,
 				),
 				Why:   "The database refused the query into the agent registry table.",
-				Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.resolveLegacyRoleAgentID).",
+				Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.resolveLegacyRoleAgentId).",
 				Impact: fmt.Sprintf(
 					"The audit event can't be attributed to its agent. Recording events for the built-in\n"+
 						"role %q will keep failing until the lookup recovers.",
@@ -506,7 +506,7 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentID(role string) (string, error)
 	switch {
 	case err == nil:
 		s.roleMu.Lock()
-		s.roleToAgentID[role] = existing
+		s.roleToAgentId[role] = existing
 		s.roleMu.Unlock()
 		return existing, nil
 	case err != sql.ErrNoRows:
@@ -517,7 +517,7 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentID(role string) (string, error)
 				name,
 			),
 			Why:   "The database refused the query into the agent registry table.",
-			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.resolveLegacyRoleAgentID).",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.resolveLegacyRoleAgentId).",
 			Impact: fmt.Sprintf(
 				"The audit event can't be attributed to its agent. Recording events for role %q will\n"+
 					"keep failing until the lookup recovers.",
@@ -545,7 +545,7 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentID(role string) (string, error)
 				role,
 			),
 			Why:   "The unique-ID generator returned an unexpected error.",
-			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.resolveLegacyRoleAgentID).",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.resolveLegacyRoleAgentId).",
 			Impact: fmt.Sprintf(
 				"The audit event can't be attributed to a new agent for role %q. Recording events for\n"+
 					"this role will keep failing until ID generation recovers.",
@@ -558,11 +558,11 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentID(role string) (string, error)
 			Cause: err,
 		}
 	}
-	agentID := legacyRoleAgentNamespace + "--" + newUUID.String()
+	agentId := legacyRoleAgentNamespace + "--" + newUUID.String()
 
 	if _, err := s.db.Exec(
 		`INSERT INTO agents (id, kind_id) VALUES (?, 2)`,
-		agentID,
+		agentId,
 	); err != nil {
 		return "", &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
@@ -571,7 +571,7 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentID(role string) (string, error)
 				role,
 			),
 			Why:   "The database refused the insert into the agent registry.",
-			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.resolveLegacyRoleAgentID).",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.resolveLegacyRoleAgentId).",
 			Impact: "The new agent for this role couldn't be created, so audit events from this role can't\n" +
 				"be attributed. Recording events for this role will keep failing.",
 			Fix: "1. Confirm the audit database file is writable:\n" +
@@ -588,7 +588,7 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentID(role string) (string, error)
 
 	if _, err := s.db.Exec(
 		`INSERT INTO agents_software (agent_id, name, version, source) VALUES (?, ?, ?, ?)`,
-		agentID, name, legacyRoleAgentVersion, legacyRoleAgentSource,
+		agentId, name, legacyRoleAgentVersion, legacyRoleAgentSource,
 	); err != nil {
 		return "", &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
@@ -597,7 +597,7 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentID(role string) (string, error)
 				name, role,
 			),
 			Why:   "The database refused the insert into the agent details table.",
-			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.resolveLegacyRoleAgentID).",
+			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.resolveLegacyRoleAgentId).",
 			Impact: "The agent registration is half-complete: the agent exists in the registry but has no\n" +
 				"name, so subsequent lookups by role won't find it. Recording events for this role\n" +
 				"will keep failing.",
@@ -612,15 +612,15 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentID(role string) (string, error)
 	}
 
 	s.roleMu.Lock()
-	s.roleToAgentID[role] = agentID
+	s.roleToAgentId[role] = agentId
 	s.roleMu.Unlock()
-	return agentID, nil
+	return agentId, nil
 }
 
 // QueryEvents returns audit events matching the given filters in chronological
 // order (ascending row id, which equals insertion order).
 //
-// epochID is required and is always part of the WHERE clause. phase and role
+// epochId is required and is always part of the WHERE clause. phase and role
 // are optional; nil means "no filter".
 //
 // Legacy-role compatibility: the v3 schema dropped audit_events.role and
@@ -637,7 +637,7 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentID(role string) (string, error)
 // LEFT JOIN (rather than INNER JOIN) defends against orphan agent_id values
 // that have no agents_software row — those rows are returned with an empty
 // Role rather than dropped silently.
-func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochID string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
+func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochId string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
 	var clauses []string
 	var args []any
 
@@ -647,7 +647,7 @@ func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochID string, phase 
 	// requested epoch. Use the idx_context_edges_lookup index (created in
 	// v2→v3 by S2) for efficient (kind, id)-keyed lookups.
 	clauses = append(clauses, "ce.context_kind = ? AND ce.context_id = ?")
-	args = append(args, "EpochContext", epochID)
+	args = append(args, "EpochContext", epochId)
 
 	if phase != nil {
 		clauses = append(clauses, "ae.phase = ?")
@@ -671,7 +671,7 @@ func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochID string, phase 
 			Category: pasterrors.CategoryStorage,
 			What: fmt.Sprintf(
 				"Couldn't read audit events for epoch %q.",
-				epochID,
+				epochId,
 			),
 			Why:   "The database refused the query that links audit events to their epochs.",
 			Where: "Reading audit events (internal/audit/sqlite.go in audit.SqliteAuditTrail.QueryEvents).",
@@ -703,7 +703,7 @@ func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochID string, phase 
 				Category: pasterrors.CategoryStorage,
 				What: fmt.Sprintf(
 					"Couldn't decode an audit-event row for epoch %q.",
-					epochID,
+					epochId,
 				),
 				Why:    "One of the columns from the audit-events table couldn't be read into the expected type.",
 				Where:  "Reading audit events (internal/audit/sqlite.go in audit.SqliteAuditTrail.QueryEvents).",
@@ -738,7 +738,7 @@ func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochID string, phase 
 		}
 
 		events = append(events, protocol.AuditEvent{
-			EpochID:   epochIDCol,
+			EpochId:   epochIDCol,
 			Phase:     protocol.PhaseId(phaseCol),
 			Role:      stripLegacyRolePrefix(agentName),
 			EventType: protocol.EventType(eventTypeCol),
@@ -751,7 +751,7 @@ func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochID string, phase 
 			Category: pasterrors.CategoryStorage,
 			What: fmt.Sprintf(
 				"Lost the connection to the audit-events table while listing events for epoch %q.",
-				epochID,
+				epochId,
 			),
 			Why:    "The database reported an error part-way through reading the result rows.",
 			Where:  "Reading audit events (internal/audit/sqlite.go in audit.SqliteAuditTrail.QueryEvents).",
@@ -830,19 +830,19 @@ func (s *SqliteAuditTrail) RecordSessionEntries(_ context.Context, entries []pro
 
 	for i, e := range entries {
 		_, err = stmt.Exec(
-			e.SessionID, e.EntryIndex, e.Provider, e.EntryType, e.Role,
+			e.SessionId, e.EntryIndex, e.Provider, e.EntryType, e.Role,
 			e.TimestampMs, e.ContentPreview, e.TokensIn, e.TokensOut,
 			boolToInt(e.HasToolUse), e.ToolKind, e.ToolNamesCsv,
 			boolToInt(e.HasThinking), boolToInt(e.IsError), e.StopReason, e.RawByteLength,
-			e.ToolCallID, e.EntryID, e.ParentEntryID, e.Depth,
+			e.ToolCallId, e.EntryId, e.ParentEntryId, e.Depth,
 			e.ParentIndex, e.ToolInput, e.ToolOutput, e.Extra,
 		)
 		if err != nil {
 			return fmt.Errorf(
 				"audit.SqliteAuditTrail.RecordSessionEntries: INSERT failed for entry[%d] "+
-					"(sessionID=%q, entryIndex=%d): %w — "+
+					"(sessionId=%q, entryIndex=%d): %w — "+
 					"check that the database file is still accessible",
-				i, e.SessionID, e.EntryIndex, err,
+				i, e.SessionId, e.EntryIndex, err,
 			)
 		}
 	}
@@ -864,11 +864,11 @@ func boolToInt(b bool) int {
 	return 0
 }
 
-// QuerySessionEntries returns all session entries for the given sessionID in
+// QuerySessionEntries returns all session entries for the given sessionId in
 // ascending entry_index order (matching insertion order for well-formed data).
 //
-// Returns an empty (non-nil) slice when no entries exist for sessionID.
-func (s *SqliteAuditTrail) QuerySessionEntries(_ context.Context, sessionID string) ([]protocol.SessionEntry, error) {
+// Returns an empty (non-nil) slice when no entries exist for sessionId.
+func (s *SqliteAuditTrail) QuerySessionEntries(_ context.Context, sessionId string) ([]protocol.SessionEntry, error) {
 	rows, err := s.db.Query(`
 		SELECT
 			session_id, entry_index, provider, entry_type, role,
@@ -880,12 +880,12 @@ func (s *SqliteAuditTrail) QuerySessionEntries(_ context.Context, sessionID stri
 		FROM session_entries
 		WHERE session_id = ?
 		ORDER BY id ASC
-	`, sessionID)
+	`, sessionId)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"audit.SqliteAuditTrail.QuerySessionEntries: query failed for sessionID=%q: %w — "+
+			"audit.SqliteAuditTrail.QuerySessionEntries: query failed for sessionId=%q: %w — "+
 				"verify the database file is accessible and the schema is up to date",
-			sessionID, err,
+			sessionId, err,
 		)
 	}
 	defer rows.Close()
@@ -899,16 +899,16 @@ func (s *SqliteAuditTrail) QuerySessionEntries(_ context.Context, sessionID stri
 			isError     int
 		)
 		if err := rows.Scan(
-			&e.SessionID, &e.EntryIndex, &e.Provider, &e.EntryType, &e.Role,
+			&e.SessionId, &e.EntryIndex, &e.Provider, &e.EntryType, &e.Role,
 			&e.TimestampMs, &e.ContentPreview, &e.TokensIn, &e.TokensOut,
 			&hasToolUse, &e.ToolKind, &e.ToolNamesCsv,
 			&hasThinking, &isError, &e.StopReason, &e.RawByteLength,
-			&e.ToolCallID, &e.EntryID, &e.ParentEntryID, &e.Depth,
+			&e.ToolCallId, &e.EntryId, &e.ParentEntryId, &e.Depth,
 			&e.ParentIndex, &e.ToolInput, &e.ToolOutput, &e.Extra,
 		); err != nil {
 			return nil, fmt.Errorf(
-				"audit.SqliteAuditTrail.QuerySessionEntries: row scan failed for sessionID=%q: %w",
-				sessionID, err,
+				"audit.SqliteAuditTrail.QuerySessionEntries: row scan failed for sessionId=%q: %w",
+				sessionId, err,
 			)
 		}
 		e.HasToolUse = hasToolUse != 0
@@ -918,8 +918,8 @@ func (s *SqliteAuditTrail) QuerySessionEntries(_ context.Context, sessionID stri
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf(
-			"audit.SqliteAuditTrail.QuerySessionEntries: row iteration error for sessionID=%q: %w",
-			sessionID, err,
+			"audit.SqliteAuditTrail.QuerySessionEntries: row iteration error for sessionId=%q: %w",
+			sessionId, err,
 		)
 	}
 	return result, nil

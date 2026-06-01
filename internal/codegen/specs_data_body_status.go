@@ -7,11 +7,11 @@ var statusBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:    "status-steps",
+			Id:    "status-steps",
 			Title: "Steps",
 			Subsections: []ProseSection{
 				{
-					ID:    "status-step1-plans",
+					Id:    "status-step1-plans",
 					Title: "1. Check for active plans",
 					Content: "```" + `bash
 bd list --labels="aura:p3-plan:s3-propose" --status=open
@@ -19,7 +19,7 @@ bd list --labels="aura:p6-plan:s6-ratify" --status=open
 ` + "```",
 				},
 				{
-					ID:    "status-step2-impl",
+					Id:    "status-step2-impl",
 					Title: "2. Check implementation progress",
 					Content: "```" + `bash
 bd list --labels="aura:p8-impl:s8-plan" --status=open
@@ -29,21 +29,21 @@ bd list --labels="aura:p9-impl:s9-slice" --status=done
 ` + "```",
 				},
 				{
-					ID:    "status-step3-stats",
+					Id:    "status-step3-stats",
 					Title: "3. Get project stats",
 					Content: "```" + `bash
 bd stats
 ` + "```",
 				},
 				{
-					ID:      "status-step4-report",
+					Id:      "status-step4-report",
 					Title:   "4. Report status",
 					Content: "Summarize findings across plans, implementation, and blocked tasks in the output format below.",
 				},
 			},
 		},
 		{
-			ID:    "status-output-format",
+			Id:    "status-output-format",
 			Title: "Output Format",
 			Content: "```" + `
 ## Aura Protocol Status
@@ -68,7 +68,7 @@ bd list --limit=5
 ` + "```",
 		},
 		{
-			ID:    "status-quick-status",
+			Id:    "status-quick-status",
 			Title: "Quick Status",
 			Content: "```" + `bash
 bd stats

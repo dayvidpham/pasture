@@ -137,7 +137,7 @@ func constraintPhaseRef(cid string) string {
 	})
 	parts := make([]string, len(phases))
 	for i, p := range phases {
-		parts[i] = phaseXMLID(p)
+		parts[i] = phaseXMLId(p)
 	}
 	return strings.Join(parts, ",")
 }
@@ -203,78 +203,78 @@ func buildEnums(buf *bytes.Buffer, depth int) {
 			{
 				Name: "DomainType",
 				Values: []EnumValue{
-					{ID: "user", Description: "User-facing interaction (requests, elicitation, UAT)"},
-					{ID: "plan", Description: "Planning and design (proposals, reviews, ratification)"},
-					{ID: "impl", Description: "Implementation (slices, code review, landing)"},
+					{Id: "user", Description: "User-facing interaction (requests, elicitation, UAT)"},
+					{Id: "plan", Description: "Planning and design (proposals, reviews, ratification)"},
+					{Id: "impl", Description: "Implementation (slices, code review, landing)"},
 				},
 			},
 			{
 				Name: "VoteType",
 				Values: []EnumValue{
-					{ID: "ACCEPT", Description: "All review criteria satisfied; no BLOCKER items"},
-					{ID: "REVISE", Description: "BLOCKER issues found; must provide actionable feedback"},
+					{Id: "ACCEPT", Description: "All review criteria satisfied; no BLOCKER items"},
+					{Id: "REVISE", Description: "BLOCKER issues found; must provide actionable feedback"},
 				},
 			},
 			{
 				Name: "SeverityLevel",
 				Values: []EnumValue{
-					{ID: "BLOCKER", Blocks: "true", Label: "aura:severity:blocker", Description: "Security, type errors, test failures, broken production code paths"},
-					{ID: "IMPORTANT", Blocks: "false", Label: "aura:severity:important", Description: "Performance, missing validation, architectural concerns"},
-					{ID: "MINOR", Blocks: "false", Label: "aura:severity:minor", Description: "Style, optional optimizations, naming improvements"},
+					{Id: "BLOCKER", Blocks: "true", Label: "aura:severity:blocker", Description: "Security, type errors, test failures, broken production code paths"},
+					{Id: "IMPORTANT", Blocks: "false", Label: "aura:severity:important", Description: "Performance, missing validation, architectural concerns"},
+					{Id: "MINOR", Blocks: "false", Label: "aura:severity:minor", Description: "Style, optional optimizations, naming improvements"},
 				},
 			},
 			{
 				Name: "ExecutionMode",
 				Values: []EnumValue{
-					{ID: "sequential", Description: "Must complete before next step starts"},
-					{ID: "parallel", Description: "Can run concurrently with sibling steps in same parallel-group"},
+					{Id: "sequential", Description: "Must complete before next step starts"},
+					{Id: "parallel", Description: "Can run concurrently with sibling steps in same parallel-group"},
 				},
 			},
 			{
 				Name: "ContentLevel",
 				Values: []EnumValue{
-					{ID: "full-provenance", Description: "Full inline context with all decisions and rationale"},
-					{ID: "summary-with-ids", Description: "Summary with Beads task ID references"},
+					{Id: "full-provenance", Description: "Full inline context with all decisions and rationale"},
+					{Id: "summary-with-ids", Description: "Summary with Beads task ID references"},
 				},
 			},
 			// Classification axes (s1_1-classify)
 			{
 				Name: "ClassificationScope",
 				Values: []EnumValue{
-					{ID: "single-file", Description: "Change is isolated to a single file"},
-					{ID: "module", Description: "Change spans a module or package"},
-					{ID: "cross-cutting", Description: "Change affects multiple modules or subsystems"},
+					{Id: "single-file", Description: "Change is isolated to a single file"},
+					{Id: "module", Description: "Change spans a module or package"},
+					{Id: "cross-cutting", Description: "Change affects multiple modules or subsystems"},
 				},
 			},
 			{
 				Name: "ClassificationComplexity",
 				Values: []EnumValue{
-					{ID: "low", Description: "Straightforward implementation, familiar patterns"},
-					{ID: "medium", Description: "Some design decisions needed, moderate scope"},
-					{ID: "high", Description: "Significant design work, unfamiliar territory, or many moving parts"},
+					{Id: "low", Description: "Straightforward implementation, familiar patterns"},
+					{Id: "medium", Description: "Some design decisions needed, moderate scope"},
+					{Id: "high", Description: "Significant design work, unfamiliar territory, or many moving parts"},
 				},
 			},
 			{
 				Name: "ClassificationRisk",
 				Values: []EnumValue{
-					{ID: "internal-only", Description: "No external API changes, no breaking changes"},
-					{ID: "new-api", Description: "Introduces new public interfaces or APIs"},
-					{ID: "breaking-changes", Description: "Modifies existing behavior or public contracts"},
+					{Id: "internal-only", Description: "No external API changes, no breaking changes"},
+					{Id: "new-api", Description: "Introduces new public interfaces or APIs"},
+					{Id: "breaking-changes", Description: "Modifies existing behavior or public contracts"},
 				},
 			},
 			{
 				Name: "ClassificationNovelty",
 				Values: []EnumValue{
-					{ID: "familiar", Description: "Well-known patterns, team has done this before"},
-					{ID: "new-territory", Description: "Unfamiliar domain, requires research and exploration"},
+					{Id: "familiar", Description: "Well-known patterns, team has done this before"},
+					{Id: "new-territory", Description: "Unfamiliar domain, requires research and exploration"},
 				},
 			},
 			{
 				Name: "ResearchDepth",
 				Values: []EnumValue{
-					{ID: "quick-scan", Description: "Familiar domain, low complexity — brief prior art check (local only)"},
-					{ID: "standard-research", Description: "Moderate complexity or some novelty — find existing patterns and standards (local + docs)"},
-					{ID: "deep-dive", Description: "High complexity, new territory, or high risk — thorough domain analysis (local + web)"},
+					{Id: "quick-scan", Description: "Familiar domain, low complexity — brief prior art check (local only)"},
+					{Id: "standard-research", Description: "Moderate complexity or some novelty — find existing patterns and standards (local + docs)"},
+					{Id: "deep-dive", Description: "High complexity, new territory, or high risk — thorough domain analysis (local + web)"},
 				},
 			},
 		},
@@ -301,7 +301,7 @@ func buildLabels(buf *bytes.Buffer, depth int) {
 	for _, lid := range phaseLabelIDs {
 		spec := LabelSpecs[lid]
 		section.Labels = append(section.Labels, LabelElem{
-			ID:         spec.ID,
+			Id:         spec.Id,
 			Value:      spec.Value,
 			PhaseRef:   spec.PhaseRef,
 			SubstepRef: spec.SubstepRef,
@@ -312,7 +312,7 @@ func buildLabels(buf *bytes.Buffer, depth int) {
 	for _, lid := range specialLabelIDs {
 		spec := LabelSpecs[lid]
 		section.Labels = append(section.Labels, LabelElem{
-			ID:          spec.ID,
+			Id:          spec.Id,
 			Value:       spec.Value,
 			Special:     "true",
 			Description: spec.Description,
@@ -326,13 +326,13 @@ func buildLabels(buf *bytes.Buffer, depth int) {
 func buildReviewAxes(buf *bytes.Buffer, depth int) {
 	axisOrder := []string{"axis-correctness", "axis-test_quality", "axis-elegance"}
 	section := ReviewAxesSection{}
-	for _, axisID := range axisOrder {
-		spec, ok := ReviewAxisSpecs[axisID]
+	for _, axisId := range axisOrder {
+		spec, ok := ReviewAxisSpecs[axisId]
 		if !ok {
 			continue
 		}
 		axis := ReviewAxisElem{
-			ID:     spec.ID,
+			Id:     spec.Id,
 			Letter: spec.Letter,
 			Name:   spec.Name,
 			Short:  spec.Short,
@@ -410,7 +410,7 @@ func buildPhaseTaskTitles() map[string][]map[string]string {
 func buildPhases(buf *bytes.Buffer, depth int) {
 	phaseTaskTitles := buildPhaseTaskTitles()
 
-	orderedPhaseIDs := []protocol.PhaseId{
+	orderedPhaseIds := []protocol.PhaseId{
 		protocol.PhaseRequest, protocol.PhaseElicit, protocol.PhasePropose,
 		protocol.PhaseReview, protocol.PhasePlanReview, protocol.PhaseRatify,
 		protocol.PhaseHandoff, protocol.PhaseImplPlan, protocol.PhaseWorkerSlices,
@@ -420,15 +420,15 @@ func buildPhases(buf *bytes.Buffer, depth int) {
 	layerNames := []string{"Types", "Tests", "Implementation"}
 	section := PhasesSection{}
 
-	for _, phaseID := range orderedPhaseIDs {
-		spec, ok := PhaseSpecs[phaseID]
+	for _, phaseId := range orderedPhaseIds {
+		spec, ok := PhaseSpecs[phaseId]
 		if !ok {
 			continue
 		}
-		pid := phaseXMLID(spec.ID)
+		pid := phaseXMLId(spec.Id)
 
 		phase := PhaseElem{
-			ID:     pid,
+			Id:     pid,
 			Number: strconv.Itoa(spec.Number),
 			Domain: string(spec.Domain),
 			Name:   spec.Name,
@@ -445,7 +445,7 @@ func buildPhases(buf *bytes.Buffer, depth int) {
 			subElem := &SubstepsElem{}
 			for _, sd := range substeps {
 				substep := SubstepElem{
-					ID:            sd.ID,
+					Id:            sd.Id,
 					Type:          sd.Type,
 					Execution:     sd.Execution,
 					Order:         strconv.Itoa(sd.Order),
@@ -468,13 +468,13 @@ func buildPhases(buf *bytes.Buffer, depth int) {
 					for _, step := range supSteps {
 						pstep := ProcedureStepElem{
 							Order:       strconv.Itoa(step.Order),
-							ID:          step.ID,
+							Id:          step.Id,
 							Instruction: step.Instruction,
 							Command:     step.Command,
 							Context:     step.Context,
 						}
 						if step.NextState != "" {
-							pstep.NextState = phaseXMLID(step.NextState)
+							pstep.NextState = phaseXMLId(step.NextState)
 						}
 						startup.Steps = append(startup.Steps, pstep)
 					}
@@ -553,7 +553,7 @@ func buildPhases(buf *bytes.Buffer, depth int) {
 			trans := &TransitionsElem{}
 			for _, t := range spec.Transitions {
 				tElem := TransitionElem{
-					ToPhase:   phaseXMLID(t.ToPhase),
+					ToPhase:   phaseXMLId(t.ToPhase),
 					Condition: t.Condition,
 					Action:    t.Action,
 				}
@@ -622,15 +622,15 @@ func buildRoles(buf *bytes.Buffer, depth int) {
 
 	section := RolesSection{}
 
-	for _, roleID := range roleOrder {
-		spec, ok := RoleSpecs[roleID]
+	for _, roleId := range roleOrder {
+		spec, ok := RoleSpecs[roleId]
 		if !ok {
 			continue
 		}
-		rid := string(spec.ID)
+		rid := string(spec.Id)
 
 		role := RoleElem{
-			ID:          rid,
+			Id:          rid,
 			Name:        spec.Name,
 			Description: spec.Description,
 		}
@@ -643,7 +643,7 @@ func buildRoles(buf *bytes.Buffer, depth int) {
 		})
 		ownedPhases := &OwnedPhasesElem{}
 		for _, phaseRef := range sorted {
-			ownedPhases.PhaseRefs = append(ownedPhases.PhaseRefs, PhaseRefElem{Ref: phaseXMLID(phaseRef)})
+			ownedPhases.PhaseRefs = append(ownedPhases.PhaseRefs, PhaseRefElem{Ref: phaseXMLId(phaseRef)})
 		}
 		role.OwnedPhases = ownedPhases
 
@@ -699,7 +699,7 @@ func buildRoles(buf *bytes.Buffer, depth int) {
 			behaviors := &BehaviorsElem{}
 			for _, b := range spec.Behaviors {
 				behaviors.Behaviors = append(behaviors.Behaviors, BehaviorElem{
-					ID:        b.ID,
+					Id:        b.Id,
 					Given:     b.Given,
 					When:      b.When,
 					Then:      b.Then,
@@ -761,7 +761,7 @@ func buildCommands(buf *bytes.Buffer, depth int) {
 		}
 
 		cmd := CommandElem{
-			ID:          spec.ID,
+			Id:          spec.Id,
 			Name:        spec.Name,
 			RoleRef:     string(spec.RoleRef),
 			Description: spec.Description,
@@ -771,7 +771,7 @@ func buildCommands(buf *bytes.Buffer, depth int) {
 		if len(spec.Phases) > 0 {
 			phases := &CommandPhasesElem{}
 			for _, phaseRef := range spec.Phases {
-				phases.PhaseRefs = append(phases.PhaseRefs, PhaseRefElem{Ref: phaseXMLID(phaseRef)})
+				phases.PhaseRefs = append(phases.PhaseRefs, PhaseRefElem{Ref: phaseXMLId(phaseRef)})
 			}
 			cmd.Phases = phases
 		}
@@ -851,10 +851,10 @@ func buildHandoffs(buf *bytes.Buffer, depth int) {
 		}
 
 		handoff := HandoffElem{
-			ID:           spec.ID,
+			Id:           spec.Id,
 			SourceRole:   string(spec.SourceRole),
 			TargetRole:   string(spec.TargetRole),
-			AtPhase:      phaseXMLID(spec.AtPhase),
+			AtPhase:      phaseXMLId(spec.AtPhase),
 			ContentLevel: spec.ContentLevel,
 		}
 
@@ -971,7 +971,7 @@ func buildConstraints(buf *bytes.Buffer, depth int) {
 		}
 
 		cAttrs := []string{
-			xmlAttr("id", spec.ID),
+			xmlAttr("id", spec.Id),
 			xmlAttr("given", spec.Given),
 			xmlAttr("when", spec.When),
 			xmlAttr("then", spec.Then),
@@ -996,7 +996,7 @@ func buildConstraints(buf *bytes.Buffer, depth int) {
 			w(d1 + openTag("constraint", cAttrs...))
 			for _, ex := range spec.Examples {
 				exAttrs := []string{
-					xmlAttr("id", ex.ID),
+					xmlAttr("id", ex.Id),
 					xmlAttr("lang", ex.Lang),
 					xmlAttr("label", ex.Label),
 				}
@@ -1184,7 +1184,7 @@ func buildDocuments(buf *bytes.Buffer, depth int) {
 	section := DocumentsSection{}
 	for _, doc := range allDocs {
 		docElem := DocumentElem{
-			ID:      doc.id,
+			Id:      doc.id,
 			Path:    doc.path,
 			Purpose: doc.purpose,
 		}
@@ -1281,20 +1281,20 @@ func buildProcedureSteps(buf *bytes.Buffer, depth int) {
 
 	w(d + "<procedure-steps>")
 
-	for _, roleID := range roleOrder {
-		steps, ok := ProcedureSteps[roleID]
+	for _, roleId := range roleOrder {
+		steps, ok := ProcedureSteps[roleId]
 		if !ok || len(steps) == 0 {
 			continue
 		}
 
-		w(d1 + openTag("role", xmlAttr("ref", string(roleID))))
+		w(d1 + openTag("role", xmlAttr("ref", string(roleId))))
 		for _, step := range steps {
 			stepAttrs := []string{
 				xmlAttr("order", strconv.Itoa(step.Order)),
-				xmlAttr("id", step.ID),
+				xmlAttr("id", step.Id),
 			}
 			if step.NextState != "" {
-				stepAttrs = append(stepAttrs, xmlAttr("next-state", phaseXMLID(step.NextState)))
+				stepAttrs = append(stepAttrs, xmlAttr("next-state", phaseXMLId(step.NextState)))
 			}
 			w(d2 + openTag("step", stepAttrs...))
 			w(d3 + "<instruction>" + xmlEscapeText(step.Instruction) + "</instruction>")
@@ -1306,7 +1306,7 @@ func buildProcedureSteps(buf *bytes.Buffer, depth int) {
 			}
 			for _, ex := range step.Examples {
 				exAttrs := []string{
-					xmlAttr("id", ex.ID),
+					xmlAttr("id", ex.Id),
 					xmlAttr("lang", ex.Lang),
 					xmlAttr("label", ex.Label),
 				}
@@ -1337,7 +1337,7 @@ func buildChecklists(buf *bytes.Buffer, depth int) {
 	for _, key := range keys {
 		cl := ChecklistSpecs[key]
 		checklistElem := ChecklistElem{
-			ID:      key,
+			Id:      key,
 			RoleRef: string(cl.RoleRef),
 			Gate:    cl.Gate,
 		}
@@ -1347,7 +1347,7 @@ func buildChecklists(buf *bytes.Buffer, depth int) {
 				required = "true"
 			}
 			checklistElem.Items = append(checklistElem.Items, ChecklistItemElem{
-				ID:       item.ID,
+				Id:       item.Id,
 				Required: required,
 				Text:     item.Text,
 			})
@@ -1369,7 +1369,7 @@ func buildCoordinationCommands(buf *bytes.Buffer, depth int) {
 	for _, key := range keys {
 		cmd := CoordinationCommands[key]
 		cmdElem := CoordCmdElem{
-			ID:       cmd.ID,
+			Id:       cmd.Id,
 			Action:   cmd.Action,
 			Template: cmd.Template,
 			RoleRef:  string(cmd.RoleRef),
@@ -1394,24 +1394,24 @@ func buildWorkflows(buf *bytes.Buffer, depth int) {
 	for _, key := range keys {
 		wf := WorkflowSpecs[key]
 		wfElem := WorkflowElem{
-			ID:          wf.ID,
+			Id:          wf.Id,
 			Name:        wf.Name,
 			RoleRef:     string(wf.RoleRef),
 			Description: wf.Description,
 		}
 		for _, stage := range wf.Stages {
 			stageElem := StageElem{
-				ID:        stage.ID,
+				Id:        stage.Id,
 				Name:      stage.Name,
 				Order:     strconv.Itoa(stage.Order),
 				Execution: stage.Execution,
 			}
 			if stage.PhaseRef != "" {
-				stageElem.PhaseRef = phaseXMLID(stage.PhaseRef)
+				stageElem.PhaseRef = phaseXMLId(stage.PhaseRef)
 			}
 			for _, action := range stage.Actions {
 				actionElem := ActionElem{
-					ID:          action.ID,
+					Id:          action.Id,
 					Instruction: action.Instruction,
 					Command:     action.Command,
 				}
@@ -1442,7 +1442,7 @@ func buildFigures(buf *bytes.Buffer, depth int) {
 	for _, key := range keys {
 		fig := FigureSpecs[key]
 		figElem := FigureElem{
-			ID:         fig.ID,
+			Id:         fig.Id,
 			Title:      fig.Title,
 			Type:       fig.Type,
 			SectionRef: fig.SectionRef,
@@ -1484,9 +1484,9 @@ func phaseNumber(id protocol.PhaseId) int {
 	return spec.Number
 }
 
-// phaseXMLID converts a PhaseId to its schema.xml id format (e.g. "p1", "p10").
+// phaseXMLId converts a PhaseId to its schema.xml id format (e.g. "p1", "p10").
 // The XML schema uses p{N} identifiers, while Go uses descriptive names.
-func phaseXMLID(id protocol.PhaseId) string {
+func phaseXMLId(id protocol.PhaseId) string {
 	n := phaseNumber(id)
 	if n == 0 {
 		return string(id)

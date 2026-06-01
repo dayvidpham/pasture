@@ -50,7 +50,7 @@ func (idx *SharedIndexer) Index(updates []SessionUpdate) ([]protocol.SessionEntr
 		if err != nil {
 			return nil, fmt.Errorf(
 				"acp.SharedIndexer.Index: update[%d] (sessionId=%q): %w",
-				i, u.SessionID, err,
+				i, u.SessionId, err,
 			)
 		}
 		entries = append(entries, msgEntry)
@@ -70,7 +70,7 @@ func (idx *SharedIndexer) Index(updates []SessionUpdate) ([]protocol.SessionEntr
 // messageEntry builds the depth=0 SessionEntry for a SessionUpdate.
 func messageEntry(u SessionUpdate, entryIndex int) (protocol.SessionEntry, error) {
 	e := protocol.SessionEntry{
-		SessionID:  u.SessionID,
+		SessionId:  u.SessionId,
 		EntryIndex: entryIndex,
 		Provider:   "acp",
 		EntryType:  "message",
@@ -134,14 +134,14 @@ func messageEntry(u SessionUpdate, entryIndex int) (protocol.SessionEntry, error
 		_ = kindSeen // available for future multi-kind aggregation
 	}
 
-	// EntryID / ParentEntryID
-	if u.EntryID != "" {
-		id := u.EntryID
-		e.EntryID = &id
+	// EntryId / ParentEntryId
+	if u.EntryId != "" {
+		id := u.EntryId
+		e.EntryId = &id
 	}
-	if u.ParentEntryID != "" {
-		pid := u.ParentEntryID
-		e.ParentEntryID = &pid
+	if u.ParentEntryId != "" {
+		pid := u.ParentEntryId
+		e.ParentEntryId = &pid
 	}
 
 	// Raw byte length: not available at this level without original bytes.
@@ -154,7 +154,7 @@ func messageEntry(u SessionUpdate, entryIndex int) (protocol.SessionEntry, error
 // toolCallEntry builds the depth=1 SessionEntry for a single ToolCall.
 func toolCallEntry(u SessionUpdate, tc ToolCall, parentIndex, entryIndex int) protocol.SessionEntry {
 	e := protocol.SessionEntry{
-		SessionID:   u.SessionID,
+		SessionId:   u.SessionId,
 		EntryIndex:  entryIndex,
 		Provider:    "acp",
 		EntryType:   "tool_call",
@@ -173,9 +173,9 @@ func toolCallEntry(u SessionUpdate, tc ToolCall, parentIndex, entryIndex int) pr
 	e.ToolKind = &tk
 	e.ToolNamesCsv = &tc.ToolName
 
-	if tc.ToolCallID != "" {
-		id := tc.ToolCallID
-		e.ToolCallID = &id
+	if tc.ToolCallId != "" {
+		id := tc.ToolCallId
+		e.ToolCallId = &id
 	}
 	if tc.ToolInput != "" {
 		inp := tc.ToolInput

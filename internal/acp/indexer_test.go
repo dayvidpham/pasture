@@ -16,7 +16,7 @@ func TestSharedIndexer_1000Updates(t *testing.T) {
 	updates := make([]acp.SessionUpdate, 1000)
 	for i := range updates {
 		updates[i] = acp.SessionUpdate{
-			SessionID:  fmt.Sprintf("session-%d", i),
+			SessionId:  fmt.Sprintf("session-%d", i),
 			Timestamp:  int64(1_000_000 + i),
 			Role:       "assistant",
 			Content:    []acp.ContentBlock{{Type: "text", Content: fmt.Sprintf("message %d", i)}},
@@ -43,7 +43,7 @@ func TestSharedIndexer_DepthZeroEntry(t *testing.T) {
 	ts := int64(1_700_000_000_000)
 	updates := []acp.SessionUpdate{
 		{
-			SessionID:  "sess-abc",
+			SessionId:  "sess-abc",
 			Timestamp:  ts,
 			Role:       "assistant",
 			Content:    []acp.ContentBlock{{Type: "text", Content: "hello world"}},
@@ -62,8 +62,8 @@ func TestSharedIndexer_DepthZeroEntry(t *testing.T) {
 	}
 
 	e := entries[0]
-	if e.SessionID != "sess-abc" {
-		t.Errorf("SessionID: got %q, want %q", e.SessionID, "sess-abc")
+	if e.SessionId != "sess-abc" {
+		t.Errorf("SessionId: got %q, want %q", e.SessionId, "sess-abc")
 	}
 	if e.Role != "assistant" {
 		t.Errorf("Role: got %q, want %q", e.Role, "assistant")
@@ -98,18 +98,18 @@ func TestSharedIndexer_ToolCallEntries(t *testing.T) {
 
 	updates := []acp.SessionUpdate{
 		{
-			SessionID: "sess-tool",
+			SessionId: "sess-tool",
 			Role:      "assistant",
 			ToolCalls: []acp.ToolCall{
 				{
-					ToolCallID: "tc-1",
+					ToolCallId: "tc-1",
 					ToolKind:   acp.ToolKindBash,
 					ToolName:   "Bash",
 					ToolInput:  `{"command":"ls"}`,
 					ToolOutput: `{"output":"file.go"}`,
 				},
 				{
-					ToolCallID: "tc-2",
+					ToolCallId: "tc-2",
 					ToolKind:   acp.ToolKindFile,
 					ToolName:   "Read",
 					ToolInput:  `{"path":"main.go"}`,
@@ -144,8 +144,8 @@ func TestSharedIndexer_ToolCallEntries(t *testing.T) {
 	if tc1.ParentIndex == nil || *tc1.ParentIndex != 0 {
 		t.Errorf("tool call entry: ParentIndex should be 0, got %v", tc1.ParentIndex)
 	}
-	if tc1.ToolCallID == nil || *tc1.ToolCallID != "tc-1" {
-		t.Errorf("tool call entry: ToolCallID should be tc-1, got %v", tc1.ToolCallID)
+	if tc1.ToolCallId == nil || *tc1.ToolCallId != "tc-1" {
+		t.Errorf("tool call entry: ToolCallId should be tc-1, got %v", tc1.ToolCallId)
 	}
 	if tc1.ToolInput == nil || *tc1.ToolInput != `{"command":"ls"}` {
 		t.Errorf("tool call entry: ToolInput mismatch, got %v", tc1.ToolInput)
@@ -171,7 +171,7 @@ func TestSharedIndexer_ContentPreviewTruncation(t *testing.T) {
 	longText := strings.Repeat("a", 600)
 	updates := []acp.SessionUpdate{
 		{
-			SessionID: "sess-trunc",
+			SessionId: "sess-trunc",
 			Role:      "assistant",
 			Content:   []acp.ContentBlock{{Type: "text", Content: longText}},
 		},
@@ -202,16 +202,16 @@ func TestSharedIndexer_EmptyUpdates(t *testing.T) {
 	}
 }
 
-// TestSharedIndexer_EntryIDPropagation verifies EntryID and ParentEntryID are
+// TestSharedIndexer_EntryIDPropagation verifies EntryId and ParentEntryId are
 // forwarded to the protocol.SessionEntry.
 func TestSharedIndexer_EntryIDPropagation(t *testing.T) {
 	idx := acp.NewSharedIndexer()
 	updates := []acp.SessionUpdate{
 		{
-			SessionID:     "sess-ids",
+			SessionId:     "sess-ids",
 			Role:          "assistant",
-			EntryID:       "msg-uuid-123",
-			ParentEntryID: "msg-uuid-000",
+			EntryId:       "msg-uuid-123",
+			ParentEntryId: "msg-uuid-000",
 			Content:       []acp.ContentBlock{{Type: "text", Content: "hi"}},
 		},
 	}
@@ -220,10 +220,10 @@ func TestSharedIndexer_EntryIDPropagation(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	e := entries[0]
-	if e.EntryID == nil || *e.EntryID != "msg-uuid-123" {
-		t.Errorf("EntryID: got %v, want %q", e.EntryID, "msg-uuid-123")
+	if e.EntryId == nil || *e.EntryId != "msg-uuid-123" {
+		t.Errorf("EntryId: got %v, want %q", e.EntryId, "msg-uuid-123")
 	}
-	if e.ParentEntryID == nil || *e.ParentEntryID != "msg-uuid-000" {
-		t.Errorf("ParentEntryID: got %v, want %q", e.ParentEntryID, "msg-uuid-000")
+	if e.ParentEntryId == nil || *e.ParentEntryId != "msg-uuid-000" {
+		t.Errorf("ParentEntryId: got %v, want %q", e.ParentEntryId, "msg-uuid-000")
 	}
 }

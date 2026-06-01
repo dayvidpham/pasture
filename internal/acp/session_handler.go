@@ -27,12 +27,12 @@ type IndexingSessionHandler struct {
 	indexer  *SharedIndexer
 	trail    audit.Trail
 	hooksMgr *hooks.Manager
-	epochID  string
+	epochId  string
 
 	mu             sync.Mutex
-	sessions       map[string]bool // sessionID → started (true once first update received)
+	sessions       map[string]bool // sessionId → started (true once first update received)
 	entriesWritten int             // total entries persisted across all sessions
-	lastSessionID  string          // last session ID seen via HandleSessionEnd
+	lastSessionId  string          // last session ID seen via HandleSessionEnd
 	lastStopReason StopReason      // stop reason from the last HandleSessionEnd call
 }
 
@@ -41,12 +41,12 @@ type IndexingSessionHandler struct {
 //   - indexer must not be nil.
 //   - trail must not be nil.
 //   - hooksMgr may be nil (hooks are optional; nil manager is a no-op).
-//   - epochID is embedded in every hook payload so consumers can correlate events.
+//   - epochId is embedded in every hook payload so consumers can correlate events.
 func NewIndexingSessionHandler(
 	indexer *SharedIndexer,
 	trail audit.Trail,
 	hooksMgr *hooks.Manager,
-	epochID string,
+	epochId string,
 ) *IndexingSessionHandler {
 	if indexer == nil {
 		panic("acp.NewIndexingSessionHandler: indexer must not be nil")
@@ -58,7 +58,7 @@ func NewIndexingSessionHandler(
 		indexer:  indexer,
 		trail:    trail,
 		hooksMgr: hooksMgr,
-		epochID:  epochID,
+		epochId:  epochId,
 		sessions: make(map[string]bool),
 	}
 }
@@ -78,29 +78,29 @@ func (h *IndexingSessionHandler) HandleUpdate(ctx context.Context, update Sessio
 
 	// Determine whether this is the first update for this session (under lock).
 	h.mu.Lock()
-	isFirst := !h.sessions[update.SessionID]
+	isFirst := !h.sessions[update.SessionId]
 	if isFirst {
-		h.sessions[update.SessionID] = true
+		h.sessions[update.SessionId] = true
 	}
 	h.mu.Unlock()
 
 	// Fire HookSessionStarted on the first update for this session (best-effort).
 	if isFirst {
-		h.dispatchHook(ctx, hooks.HookSessionStarted, update.SessionID, nil)
+		h.dispatchHook(ctx, hooks.HookSessionStarted, update.SessionId, nil)
 	}
 
 	// Index the single update → []protocol.SessionEntry.
 	entries, err := h.indexer.Index([]SessionUpdate{update})
 	if err != nil {
-		return fmt.Errorf("acp.IndexingSessionHandler.HandleUpdate: indexing failed (sessionID=%q): %w",
-			update.SessionID, err)
+		return fmt.Errorf("acp.IndexingSessionHandler.HandleUpdate: indexing failed (sessionId=%q): %w",
+			update.SessionId, err)
 	}
 
 	// Persist to audit trail immediately.
 	if len(entries) > 0 {
 		if err := h.trail.RecordSessionEntries(ctx, entries); err != nil {
-			return fmt.Errorf("acp.IndexingSessionHandler.HandleUpdate: trail write failed (sessionID=%q, entries=%d): %w",
-				update.SessionID, len(entries), err)
+			return fmt.Errorf("acp.IndexingSessionHandler.HandleUpdate: trail write failed (sessionId=%q, entries=%d): %w",
+				update.SessionId, len(entries), err)
 		}
 		h.mu.Lock()
 		h.entriesWritten += len(entries)
@@ -110,7 +110,7 @@ func (h *IndexingSessionHandler) HandleUpdate(ctx context.Context, update Sessio
 	return nil
 }
 
-// HandleSessionEnd finalises the session identified by sessionID.
+// HandleSessionEnd finalises the session identified by sessionId.
 //
 // Steps (in order):
 //  1. Dispatch HookSessionEnded (best-effort).
@@ -119,17 +119,17 @@ func (h *IndexingSessionHandler) HandleUpdate(ctx context.Context, update Sessio
 //
 // No bulk indexing occurs here — entries are already persisted by HandleUpdate.
 // Returns nil unless the context is cancelled.
-func (h *IndexingSessionHandler) HandleSessionEnd(ctx context.Context, sessionID string, reason StopReason) error {
+func (h *IndexingSessionHandler) HandleSessionEnd(ctx context.Context, sessionId string, reason StopReason) error {
 	// Read current entries count for the hook payload (under lock).
 	h.mu.Lock()
 	currentEntries := h.entriesWritten
-	h.lastSessionID = sessionID
+	h.lastSessionId = sessionId
 	h.lastStopReason = reason
-	delete(h.sessions, sessionID)
+	delete(h.sessions, sessionId)
 	h.mu.Unlock()
 
 	// Fire HookSessionEnded (best-effort; do not return hook errors).
-	h.dispatchHook(ctx, hooks.HookSessionEnded, sessionID, map[string]any{
+	h.dispatchHook(ctx, hooks.HookSessionEnded, sessionId, map[string]any{
 		"stopReason":      string(reason),
 		"entriesRecorded": currentEntries,
 	})
@@ -146,13 +146,13 @@ func (h *IndexingSessionHandler) EntriesRecorded() int {
 	return h.entriesWritten
 }
 
-// LastSessionID returns the session ID from the most recent HandleSessionEnd
+// LastSessionId returns the session ID from the most recent HandleSessionEnd
 // call. Returns an empty string if no session has ended yet.
 // Safe for concurrent use.
-func (h *IndexingSessionHandler) LastSessionID() string {
+func (h *IndexingSessionHandler) LastSessionId() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.lastSessionID
+	return h.lastSessionId
 }
 
 // LastStopReason returns the StopReason from the most recent HandleSessionEnd
@@ -170,7 +170,7 @@ func (h *IndexingSessionHandler) LastStopReason() StopReason {
 func (h *IndexingSessionHandler) dispatchHook(
 	ctx context.Context,
 	event hooks.HookEvent,
-	sessionID string,
+	sessionId string,
 	extra map[string]any,
 ) {
 	if h.hooksMgr == nil {
@@ -178,7 +178,7 @@ func (h *IndexingSessionHandler) dispatchHook(
 	}
 
 	data := map[string]any{
-		"sessionId": sessionID,
+		"sessionId": sessionId,
 	}
 	for k, v := range extra {
 		data[k] = v
@@ -186,7 +186,7 @@ func (h *IndexingSessionHandler) dispatchHook(
 
 	payload := hooks.HookPayload{
 		Event:   event,
-		EpochID: h.epochID,
+		EpochId: h.epochId,
 		Data:    data,
 	}
 	if err := h.hooksMgr.Dispatch(ctx, payload); err != nil {
@@ -196,8 +196,8 @@ func (h *IndexingSessionHandler) dispatchHook(
 			"impact", "hook handlers for this event did not execute",
 			"fix", "check handler registration and handler implementation",
 			"event", string(event),
-			"sessionId", sessionID,
-			"epochId", h.epochID,
+			"sessionId", sessionId,
+			"epochId", h.epochId,
 		)
 	}
 }

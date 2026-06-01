@@ -21,7 +21,7 @@ import (
 func PhaseAdvance(
 	ctx context.Context,
 	conn config.ConnectionConfig,
-	epochID string,
+	epochId string,
 	toPhase protocol.PhaseId,
 	triggeredBy, condition string,
 	format types.OutputFormat,
@@ -31,7 +31,7 @@ func PhaseAdvance(
 		factory = DefaultClientFactory
 	}
 
-	if epochID == "" {
+	if epochId == "" {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     "An epoch ID is required to advance the phase.",
@@ -74,10 +74,10 @@ func PhaseAdvance(
 		ConditionMet: condition,
 	}
 
-	if err := c.SignalWorkflow(ctx, epochID, "", temporal.SignalAdvancePhase, payload); err != nil {
+	if err := c.SignalWorkflow(ctx, epochId, "", temporal.SignalAdvancePhase, payload); err != nil {
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
-			What:     fmt.Sprintf("Couldn't send the phase-advance request to epoch %q.", epochID),
+			What:     fmt.Sprintf("Couldn't send the phase-advance request to epoch %q.", epochId),
 			Why:      "The workflow server rejected the advance signal.",
 			Where:    "Advancing the workflow phase (internal/handlers/phase.go in handlers.PhaseAdvance).",
 			Impact:   "The phase transition didn't start, so the workflow remains in its current phase.",
@@ -86,7 +86,7 @@ func PhaseAdvance(
 				"2. If the epoch isn't found, list active epochs to find the right ID:\n"+
 				"     pasture-msg epoch list\n"+
 				"3. Retry the phase advance once the epoch is healthy.",
-				epochID),
+				epochId),
 			Cause: err,
 		}
 	}

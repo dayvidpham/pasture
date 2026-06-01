@@ -31,7 +31,7 @@ func TestSessionRegister_Success(t *testing.T) {
 	}
 }
 
-func TestSessionRegister_MissingEpochID(t *testing.T) {
+func TestSessionRegister_MissingEpochId(t *testing.T) {
 	factory := func(_ context.Context, _ config.ConnectionConfig) (handlers.TemporalClient, error) {
 		return &mockClient{}, nil
 	}
@@ -51,7 +51,7 @@ func TestSessionRegister_MissingEpochID(t *testing.T) {
 	}
 }
 
-func TestSessionRegister_MissingSessionID(t *testing.T) {
+func TestSessionRegister_MissingSessionId(t *testing.T) {
 	factory := func(_ context.Context, _ config.ConnectionConfig) (handlers.TemporalClient, error) {
 		return &mockClient{}, nil
 	}

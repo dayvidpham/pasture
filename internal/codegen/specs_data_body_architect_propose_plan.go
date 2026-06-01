@@ -7,21 +7,21 @@ var architectProposePlanBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "arch-propose-bdd-format",
+			Id:        "arch-propose-bdd-format",
 			Given:     "feature request",
 			When:      "proposing",
 			Then:      "use BDD Given/When/Then format with acceptance criteria",
 			ShouldNot: "write vague requirements",
 		},
 		{
-			ID:        "arch-propose-checklist-required",
+			Id:        "arch-propose-checklist-required",
 			Given:     "plan",
 			When:      "creating task",
 			Then:      "include validation_checklist and tradeoffs in design field",
 			ShouldNot: "leave checklist empty",
 		},
 		{
-			ID:        "arch-propose-revision-history",
+			Id:        "arch-propose-revision-history",
 			Given:     "existing plan",
 			When:      "revising",
 			Then:      "create PROPOSAL-N+1 task and mark old as `aura:superseded`",
@@ -31,18 +31,18 @@ var architectProposePlanBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:      "arch-propose-when-to-use",
+			Id:      "arch-propose-when-to-use",
 			Title:   "When to Use",
 			Content: "Starting new feature design; creating formal plan for review.",
 		},
 		{
-			ID:    "arch-propose-naming",
+			Id:    "arch-propose-naming",
 			Title: "PROPOSAL-N Naming",
 			Content: "Proposals are numbered incrementally: PROPOSAL-1, PROPOSAL-2, etc. Each revision increments N. " +
 				"Old proposals are marked `aura:superseded` with a comment explaining why.",
 		},
 		{
-			ID:    "arch-propose-beads-task",
+			Id:    "arch-propose-beads-task",
 			Title: "Beads Task Creation",
 			Content: "```bash\n" +
 				"bd create --type=feature \\\n" +
@@ -121,7 +121,7 @@ var architectProposePlanBody = SkillBody{
 				"```",
 		},
 		{
-			ID:    "arch-propose-before-creating",
+			Id:    "arch-propose-before-creating",
 			Title: "Before Creating the Proposal",
 			Content: "Read the URD and Phase 1 outputs to understand full context before drafting:\n" +
 				"```bash\n" +
@@ -136,7 +136,7 @@ var architectProposePlanBody = SkillBody{
 				"- Reference explore findings (entry points, existing patterns) in the files affected section",
 		},
 		{
-			ID:    "arch-propose-plan-structure",
+			Id:    "arch-propose-plan-structure",
 			Title: "Plan Structure",
 			Content: "- **Requirements Traceability: URD:** `<urd-id>`\n" +
 				"- Problem Space (axes, has-a/is-a)\n" +
@@ -149,7 +149,7 @@ var architectProposePlanBody = SkillBody{
 				"- Files Affected",
 		},
 		{
-			ID:    "arch-propose-next-steps",
+			Id:    "arch-propose-next-steps",
 			Title: "Next Steps",
 			Content: "After creating PROPOSAL-N task:\n" +
 				"1. Run `/aura:architect-request-review` to spawn 3 reviewers\n" +
@@ -157,7 +157,7 @@ var architectProposePlanBody = SkillBody{
 				"3. Run `/aura:architect-ratify` to add ratify label to PROPOSAL-N",
 		},
 		{
-			ID:    "arch-propose-followup",
+			Id:    "arch-propose-followup",
 			Title: "Follow-up Proposals (FOLLOWUP_PROPOSAL-N)",
 			Content: "When creating proposals for a follow-up epic (received via h6 from supervisor):\n" +
 				"- **Title prefix:** `FOLLOWUP_PROPOSAL-N:` (e.g., `FOLLOWUP_PROPOSAL-1: Add request-id correlation`)\n" +

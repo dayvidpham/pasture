@@ -12,24 +12,24 @@ import (
 )
 
 type labelsJSON struct {
-	TaskID string   `json:"taskId"`
+	TaskId string   `json:"taskId"`
 	Labels []string `json:"labels"`
 }
 
 // FormatLabels prints the label set for a task.
-func FormatLabels(taskID string, labels []string, format types.OutputFormat) (string, error) {
+func FormatLabels(taskId string, labels []string, format types.OutputFormat) (string, error) {
 	switch format {
 	case types.OutputJSON:
-		b, err := json.MarshalIndent(labelsJSON{TaskID: taskID, Labels: labels}, "", "  ")
+		b, err := json.MarshalIndent(labelsJSON{TaskId: taskId, Labels: labels}, "", "  ")
 		if err != nil {
 			return "", fmt.Errorf("formatters.FormatLabels: marshal failed: %w", err)
 		}
 		return string(b), nil
 	case types.OutputText:
 		if len(labels) == 0 {
-			return fmt.Sprintf("%s\nlabels: (none)", taskID), nil
+			return fmt.Sprintf("%s\nlabels: (none)", taskId), nil
 		}
-		return fmt.Sprintf("%s\nlabels: %s", taskID, strings.Join(labels, ", ")), nil
+		return fmt.Sprintf("%s\nlabels: %s", taskId, strings.Join(labels, ", ")), nil
 	default:
 		return "", fmt.Errorf("formatters.FormatLabels: unknown output format %q — valid values: json, text", format)
 	}
@@ -37,8 +37,8 @@ func FormatLabels(taskID string, labels []string, format types.OutputFormat) (st
 
 type commentJSON struct {
 	ID        string `json:"id"`
-	TaskID    string `json:"taskId"`
-	AuthorID  string `json:"authorId"`
+	TaskId    string `json:"taskId"`
+	AuthorId  string `json:"authorId"`
 	Body      string `json:"body"`
 	CreatedAt string `json:"createdAt"`
 }
@@ -46,8 +46,8 @@ type commentJSON struct {
 func toCommentJSON(c provenance.Comment) commentJSON {
 	return commentJSON{
 		ID:        c.ID.String(),
-		TaskID:    c.TaskID.String(),
-		AuthorID:  c.AuthorID.String(),
+		TaskId:    c.TaskID.String(),
+		AuthorId:  c.AuthorID.String(),
 		Body:      c.Body,
 		CreatedAt: c.CreatedAt.UTC().Format(time.RFC3339),
 	}

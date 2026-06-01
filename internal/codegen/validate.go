@@ -64,11 +64,11 @@ type ValidationError struct {
 type SchemaIndex struct {
 	// ── ID sets ───────────────────────────────────────────────────────────
 
-	PhaseIDs      map[string]bool
+	PhaseIds      map[string]bool
 	SubstepIDs    map[string]bool
 	LabelIDs      map[string]bool
-	RoleIDs       map[string]bool
-	CommandIDs    map[string]bool
+	RoleIds       map[string]bool
+	CommandIds    map[string]bool
 	AxisIDs       map[string]bool
 	HandoffIDs    map[string]bool
 	ConstraintIDs map[string]bool
@@ -108,7 +108,7 @@ type SchemaIndex struct {
 // SubstepOrderEntry holds ordering metadata for a single substep within a
 // phase. Mirrors the Python tuple (id, order, execution) from phase_substep_orders.
 type SubstepOrderEntry struct {
-	ID        string
+	Id        string
 	Order     int
 	Execution string // "sequential" or "parallel"
 }
@@ -285,11 +285,11 @@ func checkIntAttr(errors *[]ValidationError, elemPath, attrName, attrVal string)
 
 func newSchemaIndex() SchemaIndex {
 	return SchemaIndex{
-		PhaseIDs:           make(map[string]bool),
+		PhaseIds:           make(map[string]bool),
 		SubstepIDs:         make(map[string]bool),
 		LabelIDs:           make(map[string]bool),
-		RoleIDs:            make(map[string]bool),
-		CommandIDs:         make(map[string]bool),
+		RoleIds:            make(map[string]bool),
+		CommandIds:         make(map[string]bool),
 		AxisIDs:            make(map[string]bool),
 		HandoffIDs:         make(map[string]bool),
 		ConstraintIDs:      make(map[string]bool),
@@ -378,7 +378,7 @@ func buildIndex(root *XMLNode) (SchemaIndex, []ValidationError) {
 		checkRequired(&errors, desc, phase, []string{"id", "number", "domain", "name"})
 		pid := phase.Attr("id")
 		if pid != "" {
-			checkIDUnique(&errors, pid, idx.PhaseIDs, desc, "phase")
+			checkIDUnique(&errors, pid, idx.PhaseIds, desc, "phase")
 			numStr := phase.Attr("number")
 			if numStr != "" {
 				if num, ok := checkIntAttr(&errors, desc, "number", numStr); ok {
@@ -426,7 +426,7 @@ func buildIndex(root *XMLNode) (SchemaIndex, []ValidationError) {
 			}
 			if sid != "" {
 				substepData = append(substepData, SubstepOrderEntry{
-					ID:        sid,
+					Id:        sid,
 					Order:     order,
 					Execution: execution,
 				})
@@ -445,7 +445,7 @@ func buildIndex(root *XMLNode) (SchemaIndex, []ValidationError) {
 			checkRequired(&errors, desc, role, []string{"id", "name"})
 			rid := role.Attr("id")
 			if rid != "" {
-				checkIDUnique(&errors, rid, idx.RoleIDs, desc, "role")
+				checkIDUnique(&errors, rid, idx.RoleIds, desc, "role")
 				phaseRefs := make(map[string]bool)
 				if ownsPhases := role.Find("owns-phases"); ownsPhases != nil {
 					for _, pr := range ownsPhases.FindAll("phase-ref") {
@@ -488,7 +488,7 @@ func buildIndex(root *XMLNode) (SchemaIndex, []ValidationError) {
 			checkRequired(&errors, desc, cmd, []string{"id", "name"})
 			cid := cmd.Attr("id")
 			if cid != "" {
-				checkIDUnique(&errors, cid, idx.CommandIDs, desc, "command")
+				checkIDUnique(&errors, cid, idx.CommandIds, desc, "command")
 			}
 		}
 	}
@@ -557,15 +557,15 @@ func buildIndex(root *XMLNode) (SchemaIndex, []ValidationError) {
 func entityTypeToSet(typeAttr string, index SchemaIndex) map[string]bool {
 	switch typeAttr {
 	case "phase":
-		return index.PhaseIDs
+		return index.PhaseIds
 	case "substep":
 		return index.SubstepIDs
 	case "label":
 		return index.LabelIDs
 	case "role":
-		return index.RoleIDs
+		return index.RoleIds
 	case "command":
-		return index.CommandIDs
+		return index.CommandIds
 	case "constraint":
 		return index.ConstraintIDs
 	case "handoff":
@@ -592,7 +592,7 @@ func checkRefs(root *XMLNode, index SchemaIndex) []ValidationError {
 	// Labels: phase-ref, substep-ref, severity-ref
 	for _, label := range root.Iter("label") {
 		desc := elemDesc(label)
-		checkRef(&errors, desc, "phase-ref", label.Attr("phase-ref"), index.PhaseIDs, "phase")
+		checkRef(&errors, desc, "phase-ref", label.Attr("phase-ref"), index.PhaseIds, "phase")
 		checkRef(&errors, desc, "substep-ref", label.Attr("substep-ref"), index.SubstepIDs, "substep")
 		checkRef(&errors, desc, "severity-ref", label.Attr("severity-ref"), index.SeverityIDs, "severity")
 	}
@@ -614,7 +614,7 @@ func checkRefs(root *XMLNode, index SchemaIndex) []ValidationError {
 	if commandsSection != nil {
 		for _, cmd := range commandsSection.FindAll("command") {
 			desc := elemDesc(cmd)
-			checkRef(&errors, desc, "role-ref", cmd.Attr("role-ref"), index.RoleIDs, "role")
+			checkRef(&errors, desc, "role-ref", cmd.Attr("role-ref"), index.RoleIds, "role")
 		}
 	}
 
@@ -622,7 +622,7 @@ func checkRefs(root *XMLNode, index SchemaIndex) []ValidationError {
 	for _, el := range root.Iter("phase-ref") {
 		ref := el.Attr("ref")
 		if ref != "" {
-			checkRef(&errors, fmt.Sprintf("phase-ref[@ref='%s']", ref), "ref", ref, index.PhaseIDs, "phase")
+			checkRef(&errors, fmt.Sprintf("phase-ref[@ref='%s']", ref), "ref", ref, index.PhaseIds, "phase")
 		}
 	}
 
@@ -645,9 +645,9 @@ func checkRefs(root *XMLNode, index SchemaIndex) []ValidationError {
 	// Handoffs: source-role, target-role, at-phase
 	for _, handoff := range root.Iter("handoff") {
 		desc := elemDesc(handoff)
-		checkRef(&errors, desc, "source-role", handoff.Attr("source-role"), index.RoleIDs, "role")
-		checkRef(&errors, desc, "target-role", handoff.Attr("target-role"), index.RoleIDs, "role")
-		checkRef(&errors, desc, "at-phase", handoff.Attr("at-phase"), index.PhaseIDs, "phase")
+		checkRef(&errors, desc, "source-role", handoff.Attr("source-role"), index.RoleIds, "role")
+		checkRef(&errors, desc, "target-role", handoff.Attr("target-role"), index.RoleIds, "role")
+		checkRef(&errors, desc, "at-phase", handoff.Attr("at-phase"), index.PhaseIds, "phase")
 	}
 
 	// Transitions: to-phase (skip "complete" as terminal sentinel)
@@ -657,21 +657,21 @@ func checkRefs(root *XMLNode, index SchemaIndex) []ValidationError {
 			checkRef(
 				&errors,
 				fmt.Sprintf("transition[@to-phase='%s']", toPhase),
-				"to-phase", toPhase, index.PhaseIDs, "phase",
+				"to-phase", toPhase, index.PhaseIds, "phase",
 			)
 		}
 	}
 
 	// same-actor-as: phase-ref
 	for _, el := range root.Iter("same-actor-as") {
-		checkRef(&errors, "same-actor-as", "phase-ref", el.Attr("phase-ref"), index.PhaseIDs, "phase")
+		checkRef(&errors, "same-actor-as", "phase-ref", el.Attr("phase-ref"), index.PhaseIds, "phase")
 	}
 
 	// Title conventions: label-ref, phase-ref, extra-label-ref
 	for _, tc := range root.Iter("title-convention") {
 		desc := elemDesc(tc)
 		checkRef(&errors, desc, "label-ref", tc.Attr("label-ref"), index.LabelIDs, "label")
-		checkRef(&errors, desc, "phase-ref", tc.Attr("phase-ref"), index.PhaseIDs, "phase")
+		checkRef(&errors, desc, "phase-ref", tc.Attr("phase-ref"), index.PhaseIds, "phase")
 		checkRef(&errors, desc, "extra-label-ref", tc.Attr("extra-label-ref"), index.LabelIDs, "label")
 	}
 
@@ -692,13 +692,13 @@ func checkRefs(root *XMLNode, index SchemaIndex) []ValidationError {
 	// delegate: to-role, phases (comma-separated)
 	for _, d := range root.Iter("delegate") {
 		dDesc := fmt.Sprintf("delegate[@to-role='%s']", d.Attr("to-role"))
-		checkRef(&errors, dDesc, "to-role", d.Attr("to-role"), index.RoleIDs, "role")
+		checkRef(&errors, dDesc, "to-role", d.Attr("to-role"), index.RoleIds, "role")
 		phasesStr := d.Attr("phases")
 		if phasesStr != "" {
 			for _, p := range strings.Split(phasesStr, ",") {
 				p = strings.TrimSpace(p)
 				if p != "" {
-					checkRef(&errors, dDesc, "phases", p, index.PhaseIDs, "phase")
+					checkRef(&errors, dDesc, "phases", p, index.PhaseIds, "phase")
 				}
 			}
 		}
@@ -711,13 +711,13 @@ func checkRefs(root *XMLNode, index SchemaIndex) []ValidationError {
 		if cmdRef != "" {
 			siDesc = fmt.Sprintf("skill-invocation[@command-ref='%s']", cmdRef)
 		}
-		checkRef(&errors, siDesc, "command-ref", cmdRef, index.CommandIDs, "command")
+		checkRef(&errors, siDesc, "command-ref", cmdRef, index.CommandIds, "command")
 	}
 
 	// Agent templates: skill-ref → command_ids
 	for _, at := range root.Iter("agent-template") {
 		atDesc := elemDesc(at)
-		checkRef(&errors, atDesc, "skill-ref", at.Attr("skill-ref"), index.CommandIDs, "command")
+		checkRef(&errors, atDesc, "skill-ref", at.Attr("skill-ref"), index.CommandIds, "command")
 	}
 
 	// Document entities: refs (comma-separated or wildcard)
@@ -789,12 +789,12 @@ func checkSemantics(root *XMLNode, index SchemaIndex) []ValidationError {
 	// 2. Phase domain consistency
 	// Sort phase IDs so output is deterministic regardless of map iteration order.
 	{
-		sortedPhaseIDs2 := make([]string, 0, len(index.PhaseNumbers))
+		sortedPhaseIds2 := make([]string, 0, len(index.PhaseNumbers))
 		for pid := range index.PhaseNumbers {
-			sortedPhaseIDs2 = append(sortedPhaseIDs2, pid)
+			sortedPhaseIds2 = append(sortedPhaseIds2, pid)
 		}
-		sort.Strings(sortedPhaseIDs2)
-		for _, pid := range sortedPhaseIDs2 {
+		sort.Strings(sortedPhaseIds2)
+		for _, pid := range sortedPhaseIds2 {
 			num := index.PhaseNumbers[pid]
 			domain := index.PhaseDomains[pid]
 			expectedDomain := expectedDomains[num]
@@ -809,7 +809,7 @@ func checkSemantics(root *XMLNode, index SchemaIndex) []ValidationError {
 	}
 
 	// 3. Each phase has >= 1 substep
-	for pid := range index.PhaseIDs {
+	for pid := range index.PhaseIds {
 		substeps := index.PhaseSubstepOrders[pid]
 		if len(substeps) == 0 {
 			errors = append(errors, ValidationError{
@@ -904,13 +904,13 @@ func checkSemantics(root *XMLNode, index SchemaIndex) []ValidationError {
 	// 9. Each role owns >= 1 phase
 	// Sort role IDs so output is deterministic regardless of map iteration order.
 	{
-		sortedRoleIDs9 := make([]string, 0, len(index.RolePhaseRefs))
+		sortedRoleIds9 := make([]string, 0, len(index.RolePhaseRefs))
 		for rid := range index.RolePhaseRefs {
-			sortedRoleIDs9 = append(sortedRoleIDs9, rid)
+			sortedRoleIds9 = append(sortedRoleIds9, rid)
 		}
-		sort.Strings(sortedRoleIDs9)
+		sort.Strings(sortedRoleIds9)
 		var rule9Errors []ValidationError
-		for _, rid := range sortedRoleIDs9 {
+		for _, rid := range sortedRoleIds9 {
 			phases := index.RolePhaseRefs[rid]
 			if len(phases) == 0 {
 				rule9Errors = append(rule9Errors, ValidationError{
@@ -1035,14 +1035,14 @@ func checkSemantics(root *XMLNode, index SchemaIndex) []ValidationError {
 		}
 		sort.Strings(sortedDomainEnumKeys)
 
-		sortedPhaseIDs := make([]string, 0, len(index.PhaseDomains))
+		sortedPhaseIds := make([]string, 0, len(index.PhaseDomains))
 		for pid := range index.PhaseDomains {
-			sortedPhaseIDs = append(sortedPhaseIDs, pid)
+			sortedPhaseIds = append(sortedPhaseIds, pid)
 		}
-		sort.Strings(sortedPhaseIDs)
+		sort.Strings(sortedPhaseIds)
 
 		var rule14Errors []ValidationError
-		for _, pid := range sortedPhaseIDs {
+		for _, pid := range sortedPhaseIds {
 			domain := index.PhaseDomains[pid]
 			if !domainEnumValues[domain] {
 				rule14Errors = append(rule14Errors, ValidationError{

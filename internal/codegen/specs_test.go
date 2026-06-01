@@ -29,16 +29,16 @@ func TestPhaseSpecsCompleteness(t *testing.T) {
 		protocol.PhaseLanding,
 	}
 
-	for _, phaseID := range pipelinePhases {
-		t.Run(string(phaseID), func(t *testing.T) {
-			spec, ok := codegen.PhaseSpecs[phaseID]
-			require.True(t, ok, "PhaseSpecs missing entry for phase %q", phaseID)
-			assert.Equal(t, phaseID, spec.ID, "PhaseSpec.ID mismatch for %q", phaseID)
-			assert.NotEmpty(t, spec.Name, "PhaseSpec.Name must not be empty for %q", phaseID)
-			assert.Greater(t, spec.Number, 0, "PhaseSpec.Number must be > 0 for %q", phaseID)
-			assert.NotEmpty(t, spec.Domain, "PhaseSpec.Domain must not be empty for %q", phaseID)
-			assert.NotEmpty(t, spec.OwnerRoles, "PhaseSpec.OwnerRoles must not be empty for %q", phaseID)
-			assert.NotEmpty(t, spec.Transitions, "PhaseSpec.Transitions must not be empty for %q", phaseID)
+	for _, phaseId := range pipelinePhases {
+		t.Run(string(phaseId), func(t *testing.T) {
+			spec, ok := codegen.PhaseSpecs[phaseId]
+			require.True(t, ok, "PhaseSpecs missing entry for phase %q", phaseId)
+			assert.Equal(t, phaseId, spec.Id, "PhaseSpec.Id mismatch for %q", phaseId)
+			assert.NotEmpty(t, spec.Name, "PhaseSpec.Name must not be empty for %q", phaseId)
+			assert.Greater(t, spec.Number, 0, "PhaseSpec.Number must be > 0 for %q", phaseId)
+			assert.NotEmpty(t, spec.Domain, "PhaseSpec.Domain must not be empty for %q", phaseId)
+			assert.NotEmpty(t, spec.OwnerRoles, "PhaseSpec.OwnerRoles must not be empty for %q", phaseId)
+			assert.NotEmpty(t, spec.Transitions, "PhaseSpec.Transitions must not be empty for %q", phaseId)
 		})
 	}
 
@@ -63,14 +63,14 @@ func TestPhaseSpecsNumbering(t *testing.T) {
 
 // TestRoleSpecsCompleteness verifies that every known RoleId has an entry in RoleSpecs.
 func TestRoleSpecsCompleteness(t *testing.T) {
-	for _, roleID := range types.AllRoleIds {
-		t.Run(string(roleID), func(t *testing.T) {
-			spec, ok := codegen.RoleSpecs[roleID]
-			require.True(t, ok, "RoleSpecs missing entry for role %q", roleID)
-			assert.Equal(t, roleID, spec.ID, "RoleSpec.ID mismatch for %q", roleID)
-			assert.NotEmpty(t, spec.Name, "RoleSpec.Name must not be empty for %q", roleID)
-			assert.NotEmpty(t, spec.Description, "RoleSpec.Description must not be empty for %q", roleID)
-			assert.NotEmpty(t, spec.OwnedPhases, "RoleSpec.OwnedPhases must not be empty for %q", roleID)
+	for _, roleId := range types.AllRoleIds {
+		t.Run(string(roleId), func(t *testing.T) {
+			spec, ok := codegen.RoleSpecs[roleId]
+			require.True(t, ok, "RoleSpecs missing entry for role %q", roleId)
+			assert.Equal(t, roleId, spec.Id, "RoleSpec.Id mismatch for %q", roleId)
+			assert.NotEmpty(t, spec.Name, "RoleSpec.Name must not be empty for %q", roleId)
+			assert.NotEmpty(t, spec.Description, "RoleSpec.Description must not be empty for %q", roleId)
+			assert.NotEmpty(t, spec.OwnedPhases, "RoleSpec.OwnedPhases must not be empty for %q", roleId)
 		})
 	}
 
@@ -86,15 +86,15 @@ func TestRoleSpecsBehaviors(t *testing.T) {
 		types.RoleSupervisor,
 		types.RoleWorker,
 	}
-	for _, roleID := range rolesWithBehaviors {
-		spec := codegen.RoleSpecs[roleID]
-		assert.NotEmpty(t, spec.Behaviors, "Role %q should have behaviors defined", roleID)
+	for _, roleId := range rolesWithBehaviors {
+		spec := codegen.RoleSpecs[roleId]
+		assert.NotEmpty(t, spec.Behaviors, "Role %q should have behaviors defined", roleId)
 		for i, b := range spec.Behaviors {
-			assert.NotEmpty(t, b.ID, "Behavior[%d].ID must not be empty for role %q", i, roleID)
-			assert.NotEmpty(t, b.Given, "Behavior[%d].Given must not be empty for role %q", i, roleID)
-			assert.NotEmpty(t, b.When, "Behavior[%d].When must not be empty for role %q", i, roleID)
-			assert.NotEmpty(t, b.Then, "Behavior[%d].Then must not be empty for role %q", i, roleID)
-			assert.NotEmpty(t, b.ShouldNot, "Behavior[%d].ShouldNot must not be empty for role %q", i, roleID)
+			assert.NotEmpty(t, b.Id, "Behavior[%d].Id must not be empty for role %q", i, roleId)
+			assert.NotEmpty(t, b.Given, "Behavior[%d].Given must not be empty for role %q", i, roleId)
+			assert.NotEmpty(t, b.When, "Behavior[%d].When must not be empty for role %q", i, roleId)
+			assert.NotEmpty(t, b.Then, "Behavior[%d].Then must not be empty for role %q", i, roleId)
+			assert.NotEmpty(t, b.ShouldNot, "Behavior[%d].ShouldNot must not be empty for role %q", i, roleId)
 		}
 	}
 }
@@ -105,7 +105,7 @@ func TestConstraintSpecsNotEmpty(t *testing.T) {
 
 	for id, spec := range codegen.ConstraintSpecs {
 		t.Run(id, func(t *testing.T) {
-			assert.Equal(t, id, spec.ID, "ConstraintSpec key %q must match spec.ID", id)
+			assert.Equal(t, id, spec.Id, "ConstraintSpec key %q must match spec.Id", id)
 			assert.NotEmpty(t, spec.Given, "ConstraintSpec %q: Given must not be empty", id)
 			assert.NotEmpty(t, spec.When, "ConstraintSpec %q: When must not be empty", id)
 			assert.NotEmpty(t, spec.Then, "ConstraintSpec %q: Then must not be empty", id)
@@ -141,7 +141,7 @@ func TestConstraintSpecsKnownEntries(t *testing.T) {
 func TestConstraintSpecsExamples(t *testing.T) {
 	for id, spec := range codegen.ConstraintSpecs {
 		for i, ex := range spec.Examples {
-			assert.NotEmpty(t, ex.ID, "Constraint %q example[%d]: ID must not be empty", id, i)
+			assert.NotEmpty(t, ex.Id, "Constraint %q example[%d]: ID must not be empty", id, i)
 			assert.NotEmpty(t, ex.Lang, "Constraint %q example[%d]: Lang must not be empty", id, i)
 			assert.NotEmpty(t, ex.Label, "Constraint %q example[%d]: Label must not be empty", id, i)
 			assert.NotEmpty(t, ex.Code, "Constraint %q example[%d]: Code must not be empty", id, i)
@@ -156,7 +156,7 @@ func TestHandoffSpecsCompleteness(t *testing.T) {
 		t.Run(id, func(t *testing.T) {
 			spec, ok := codegen.HandoffSpecs[id]
 			require.True(t, ok, "HandoffSpecs missing entry %q", id)
-			assert.Equal(t, id, spec.ID, "HandoffSpec key %q must match spec.ID", id)
+			assert.Equal(t, id, spec.Id, "HandoffSpec key %q must match spec.Id", id)
 			assert.True(t, spec.SourceRole.IsValid(), "HandoffSpec %q: SourceRole %q must be valid", id, spec.SourceRole)
 			assert.True(t, spec.TargetRole.IsValid(), "HandoffSpec %q: TargetRole %q must be valid", id, spec.TargetRole)
 			assert.True(t, spec.AtPhase.IsValid(), "HandoffSpec %q: AtPhase %q must be valid", id, spec.AtPhase)
@@ -172,7 +172,7 @@ func TestCommandSpecsNotEmpty(t *testing.T) {
 
 	for id, spec := range codegen.CommandSpecs {
 		t.Run(id, func(t *testing.T) {
-			assert.Equal(t, id, spec.ID, "CommandSpec key %q must match spec.ID", id)
+			assert.Equal(t, id, spec.Id, "CommandSpec key %q must match spec.Id", id)
 			assert.NotEmpty(t, spec.Name, "CommandSpec %q: Name must not be empty", id)
 			assert.NotEmpty(t, spec.Description, "CommandSpec %q: Description must not be empty", id)
 			assert.NotEmpty(t, spec.File, "CommandSpec %q: File must not be empty", id)
@@ -187,7 +187,7 @@ func TestReviewAxisSpecsCompleteness(t *testing.T) {
 		t.Run(id, func(t *testing.T) {
 			spec, ok := codegen.ReviewAxisSpecs[id]
 			require.True(t, ok, "ReviewAxisSpecs missing entry %q", id)
-			assert.Equal(t, id, spec.ID, "ReviewAxisSpec key %q must match spec.ID", id)
+			assert.Equal(t, id, spec.Id, "ReviewAxisSpec key %q must match spec.Id", id)
 			assert.NotEmpty(t, spec.Letter, "ReviewAxisSpec %q: Letter must not be empty", id)
 			assert.NotEmpty(t, spec.Name, "ReviewAxisSpec %q: Name must not be empty", id)
 			assert.NotEmpty(t, spec.Short, "ReviewAxisSpec %q: Short must not be empty", id)
@@ -222,14 +222,14 @@ func TestWorkflowSpecsCompleteness(t *testing.T) {
 		t.Run(id, func(t *testing.T) {
 			spec, ok := codegen.WorkflowSpecs[id]
 			require.True(t, ok, "WorkflowSpecs missing entry %q", id)
-			assert.Equal(t, id, spec.ID, "Workflow key %q must match spec.ID", id)
+			assert.Equal(t, id, spec.Id, "Workflow key %q must match spec.Id", id)
 			assert.NotEmpty(t, spec.Name, "Workflow %q: Name must not be empty", id)
 			assert.NotEmpty(t, spec.Description, "Workflow %q: Description must not be empty", id)
 			assert.True(t, spec.RoleRef.IsValid(), "Workflow %q: RoleRef %q must be valid", id, spec.RoleRef)
 			assert.NotEmpty(t, spec.Stages, "Workflow %q: Stages must not be empty", id)
 
 			for i, stage := range spec.Stages {
-				assert.NotEmpty(t, stage.ID, "Workflow %q stage[%d]: ID must not be empty", id, i)
+				assert.NotEmpty(t, stage.Id, "Workflow %q stage[%d]: ID must not be empty", id, i)
 				assert.NotEmpty(t, stage.Name, "Workflow %q stage[%d]: Name must not be empty", id, i)
 				assert.Greater(t, stage.Order, 0, "Workflow %q stage[%d]: Order must be > 0", id, i)
 				assert.NotEmpty(t, stage.Execution, "Workflow %q stage[%d]: Execution must not be empty", id, i)
@@ -240,19 +240,19 @@ func TestWorkflowSpecsCompleteness(t *testing.T) {
 
 // TestProcedureStepsCompleteness verifies all roles have entries (even if empty).
 func TestProcedureStepsCompleteness(t *testing.T) {
-	for _, roleID := range types.AllRoleIds {
-		_, ok := codegen.ProcedureSteps[roleID]
-		assert.True(t, ok, "ProcedureSteps missing entry for role %q", roleID)
+	for _, roleId := range types.AllRoleIds {
+		_, ok := codegen.ProcedureSteps[roleId]
+		assert.True(t, ok, "ProcedureSteps missing entry for role %q", roleId)
 	}
 }
 
 // TestProcedureStepsOrdering verifies that steps with multiple entries are monotonically ordered.
 func TestProcedureStepsOrdering(t *testing.T) {
-	for roleID, steps := range codegen.ProcedureSteps {
+	for roleId, steps := range codegen.ProcedureSteps {
 		for i := 1; i < len(steps); i++ {
 			assert.Greater(t, steps[i].Order, steps[i-1].Order,
 				"ProcedureSteps[%q]: step[%d].Order (%d) must be > step[%d].Order (%d)",
-				roleID, i, steps[i].Order, i-1, steps[i-1].Order)
+				roleId, i, steps[i].Order, i-1, steps[i-1].Order)
 		}
 	}
 }
@@ -262,7 +262,7 @@ func TestLabelSpecsNotEmpty(t *testing.T) {
 	require.NotEmpty(t, codegen.LabelSpecs, "LabelSpecs must not be empty")
 
 	for id, spec := range codegen.LabelSpecs {
-		assert.Equal(t, id, spec.ID, "LabelSpec key %q must match spec.ID", id)
+		assert.Equal(t, id, spec.Id, "LabelSpec key %q must match spec.Id", id)
 		assert.NotEmpty(t, spec.Value, "LabelSpec %q: Value must not be empty", id)
 	}
 }
@@ -276,7 +276,7 @@ func TestSubstepDataMapCompleteness(t *testing.T) {
 			require.True(t, ok, "SubstepDataMap missing entry for phase %q", phaseKey)
 			assert.NotEmpty(t, substeps, "SubstepDataMap[%q] must not be empty", phaseKey)
 			for i, s := range substeps {
-				assert.NotEmpty(t, s.ID, "SubstepData[%q][%d]: ID must not be empty", phaseKey, i)
+				assert.NotEmpty(t, s.Id, "SubstepData[%q][%d]: ID must not be empty", phaseKey, i)
 				assert.NotEmpty(t, s.Type, "SubstepData[%q][%d]: Type must not be empty", phaseKey, i)
 				assert.NotEmpty(t, s.Execution, "SubstepData[%q][%d]: Execution must not be empty", phaseKey, i)
 				assert.Greater(t, s.Order, 0, "SubstepData[%q][%d]: Order must be > 0", phaseKey, i)
@@ -292,7 +292,7 @@ func TestFigureSpecsCompleteness(t *testing.T) {
 	for _, id := range expectedFigures {
 		spec, ok := codegen.FigureSpecs[id]
 		require.True(t, ok, "FigureSpecs missing entry %q", id)
-		assert.Equal(t, id, spec.ID, "FigureSpec key %q must match spec.ID", id)
+		assert.Equal(t, id, spec.Id, "FigureSpec key %q must match spec.Id", id)
 		assert.NotEmpty(t, spec.Title, "FigureSpec %q: Title must not be empty", id)
 		assert.NotEmpty(t, spec.Type, "FigureSpec %q: Type must not be empty", id)
 		assert.NotEmpty(t, spec.RoleRefs, "FigureSpec %q: RoleRefs must not be empty", id)
@@ -306,7 +306,7 @@ func TestCoordinationCommandsNotEmpty(t *testing.T) {
 
 	sharedCount := 0
 	for id, cmd := range codegen.CoordinationCommands {
-		assert.Equal(t, id, cmd.ID, "CoordinationCommand key %q must match cmd.ID", id)
+		assert.Equal(t, id, cmd.Id, "CoordinationCommand key %q must match cmd.Id", id)
 		assert.NotEmpty(t, cmd.Action, "CoordinationCommand %q: Action must not be empty", id)
 		assert.NotEmpty(t, cmd.Template, "CoordinationCommand %q: Template must not be empty", id)
 		if cmd.Shared {
@@ -423,8 +423,8 @@ func TestSkillBodySpecsCompleteness(t *testing.T) {
 
 			// Verify that body behaviors (if any) have non-empty GWT fields.
 			for i, b := range body.Behaviors {
-				assert.NotEmpty(t, b.ID,
-					"SkillBodySpecs[%q].Behaviors[%d].ID must not be empty", key, i)
+				assert.NotEmpty(t, b.Id,
+					"SkillBodySpecs[%q].Behaviors[%d].Id must not be empty", key, i)
 				assert.NotEmpty(t, b.Given,
 					"SkillBodySpecs[%q].Behaviors[%d].Given must not be empty", key, i)
 				assert.NotEmpty(t, b.When,

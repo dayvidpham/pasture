@@ -59,7 +59,7 @@ func openTrackerForTest(t *testing.T) (protocol.TaskTracker, string) {
 }
 
 // registerSoftwareAgentForTest creates a SoftwareAgent for use in agent-side
-// tests. Returns the AgentID.
+// tests. Returns the AgentId.
 func registerSoftwareAgentForTest(t *testing.T, tracker protocol.TaskTracker, name string) provenance.AgentID {
 	t.Helper()
 	sa, err := tracker.RegisterSoftwareAgent("pasture-test", name, "0.0.0", "test")
@@ -147,24 +147,24 @@ func TestScenario1_SingleDBFileWithEpochAlignment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create REQUEST failed: %v", err)
 	}
-	epochID := req.ID.String()
+	epochId := req.ID.String()
 
 	// ─── When: record one audit event + attach EpochContext ────────────
 	now := time.Now().UTC()
 	ev := protocol.AuditEvent{
-		EpochID:   epochID,
+		EpochId:   epochId,
 		Phase:     protocol.PhaseRequest,
 		Role:      "human",
 		EventType: protocol.EventPhaseTransition,
 		Payload:   map[string]any{"to": "elicit"},
 		Timestamp: now,
 	}
-	eventID := recordEventForTest(t, ctx, tracker, dbPath, ev)
-	if eventID <= 0 {
-		t.Fatalf("recordEventForTest returned non-positive eventID %d", eventID)
+	eventId := recordEventForTest(t, ctx, tracker, dbPath, ev)
+	if eventId <= 0 {
+		t.Fatalf("recordEventForTest returned non-positive eventId %d", eventId)
 	}
 
-	if err := tracker.AttachContext(ctx, eventID, protocol.ContextEpoch, epochID); err != nil {
+	if err := tracker.AttachContext(ctx, eventId, protocol.ContextEpoch, epochId); err != nil {
 		t.Fatalf("AttachContext failed: %v", err)
 	}
 
@@ -178,7 +178,7 @@ func TestScenario1_SingleDBFileWithEpochAlignment(t *testing.T) {
 	}
 
 	// ─── Then: audit_events row exists ─────────────────────────────────
-	events, err := tracker.QueryEvents(ctx, epochID, nil, nil)
+	events, err := tracker.QueryEvents(ctx, epochId, nil, nil)
 	if err != nil {
 		t.Fatalf("QueryEvents failed: %v", err)
 	}
@@ -186,8 +186,8 @@ func TestScenario1_SingleDBFileWithEpochAlignment(t *testing.T) {
 		t.Fatalf("QueryEvents returned %d events, want 1", len(events))
 	}
 
-	// ─── Then: context_edges row exists for (event, ContextEpoch, epochID) ─
-	contexts, err := tracker.EventContexts(ctx, eventID)
+	// ─── Then: context_edges row exists for (event, ContextEpoch, epochId) ─
+	contexts, err := tracker.EventContexts(ctx, eventId)
 	if err != nil {
 		t.Fatalf("EventContexts failed: %v", err)
 	}
@@ -197,12 +197,12 @@ func TestScenario1_SingleDBFileWithEpochAlignment(t *testing.T) {
 	if contexts[0].Kind != protocol.ContextEpoch {
 		t.Errorf("context kind = %q, want %q", contexts[0].Kind, protocol.ContextEpoch)
 	}
-	if contexts[0].ContextID != epochID {
-		t.Errorf("context_id = %q, want %q", contexts[0].ContextID, epochID)
+	if contexts[0].ContextId != epochId {
+		t.Errorf("context_id = %q, want %q", contexts[0].ContextId, epochId)
 	}
 
 	// ─── Then: Timeline finds the event via the context edge ───────────
-	timeline, err := tracker.Timeline(ctx, protocol.ContextEpoch, epochID)
+	timeline, err := tracker.Timeline(ctx, protocol.ContextEpoch, epochId)
 	if err != nil {
 		t.Fatalf("Timeline failed: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestScenario1_SingleDBFileWithEpochAlignment(t *testing.T) {
 
 // ─── BDD Scenario 7: Multi-context attachment ────────────────────────────────
 //
-// Given a workflow running for epochID=E1 with active slice S1,
+// Given a workflow running for epochId=E1 with active slice S1,
 // When an event is recorded and attached to BOTH ContextEpoch=E1 and
 //   ContextSlice=S1 via two AttachContext calls,
 // Then Timeline(ContextEpoch, E1) AND Timeline(ContextSlice, S1) both include
@@ -229,30 +229,30 @@ func TestScenario7_MultiContextAttachment(t *testing.T) {
 
 	tracker, dbPath := openTrackerForTest(t)
 	const (
-		epochID = "aura-plugins--01968a3c-1234-7000-8000-000000000001"
-		sliceID = "aura-plugins--01968a3c-1234-7000-8000-000000000002"
+		epochId = "aura-plugins--01968a3c-1234-7000-8000-000000000001"
+		sliceId = "aura-plugins--01968a3c-1234-7000-8000-000000000002"
 	)
 
 	ev := protocol.AuditEvent{
-		EpochID:   epochID,
+		EpochId:   epochId,
 		Phase:     protocol.PhaseWorkerSlices,
 		Role:      "worker",
 		EventType: protocol.EventSliceStarted,
 		Payload:   map[string]any{"slice": "S5"},
 		Timestamp: time.Now().UTC(),
 	}
-	eventID := recordEventForTest(t, ctx, tracker, dbPath, ev)
+	eventId := recordEventForTest(t, ctx, tracker, dbPath, ev)
 
 	// ─── When: attach to both contexts ─────────────────────────────────
-	if err := tracker.AttachContext(ctx, eventID, protocol.ContextEpoch, epochID); err != nil {
+	if err := tracker.AttachContext(ctx, eventId, protocol.ContextEpoch, epochId); err != nil {
 		t.Fatalf("AttachContext(Epoch) failed: %v", err)
 	}
-	if err := tracker.AttachContext(ctx, eventID, protocol.ContextSlice, sliceID); err != nil {
+	if err := tracker.AttachContext(ctx, eventId, protocol.ContextSlice, sliceId); err != nil {
 		t.Fatalf("AttachContext(Slice) failed: %v", err)
 	}
 
 	// ─── Then: both timelines include the event ────────────────────────
-	epochEvents, err := tracker.Timeline(ctx, protocol.ContextEpoch, epochID)
+	epochEvents, err := tracker.Timeline(ctx, protocol.ContextEpoch, epochId)
 	if err != nil {
 		t.Fatalf("Timeline(Epoch) failed: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestScenario7_MultiContextAttachment(t *testing.T) {
 		t.Errorf("Timeline(Epoch) returned %d events, want 1", len(epochEvents))
 	}
 
-	sliceEvents, err := tracker.Timeline(ctx, protocol.ContextSlice, sliceID)
+	sliceEvents, err := tracker.Timeline(ctx, protocol.ContextSlice, sliceId)
 	if err != nil {
 		t.Fatalf("Timeline(Slice) failed: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestScenario7_MultiContextAttachment(t *testing.T) {
 	}
 
 	// ─── Then: EventContexts returns BOTH edges ────────────────────────
-	contexts, err := tracker.EventContexts(ctx, eventID)
+	contexts, err := tracker.EventContexts(ctx, eventId)
 	if err != nil {
 		t.Fatalf("EventContexts failed: %v", err)
 	}
@@ -305,14 +305,14 @@ func TestAttachContext_RejectsInvalidKind(t *testing.T) {
 	}
 }
 
-func TestAttachContext_RejectsEmptyContextID(t *testing.T) {
+func TestAttachContext_RejectsEmptyContextId(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	tracker, _ := openTrackerForTest(t)
 
 	err := tracker.AttachContext(ctx, 1, protocol.ContextEpoch, "")
 	if err == nil {
-		t.Fatal("AttachContext(empty contextID) returned nil, want validation error")
+		t.Fatal("AttachContext(empty contextId) returned nil, want validation error")
 	}
 	var se *pasterrors.StructuredError
 	if !errors.As(err, &se) {
@@ -323,14 +323,14 @@ func TestAttachContext_RejectsEmptyContextID(t *testing.T) {
 	}
 }
 
-func TestAttachContext_RejectsNonPositiveEventID(t *testing.T) {
+func TestAttachContext_RejectsNonPositiveEventId(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	tracker, _ := openTrackerForTest(t)
 
 	err := tracker.AttachContext(ctx, 0, protocol.ContextEpoch, "epoch-1")
 	if err == nil {
-		t.Fatal("AttachContext(eventID=0) returned nil, want validation error")
+		t.Fatal("AttachContext(eventId=0) returned nil, want validation error")
 	}
 	var se *pasterrors.StructuredError
 	if !errors.As(err, &se) {
@@ -347,22 +347,22 @@ func TestAttachContext_IsIdempotent(t *testing.T) {
 	tracker, dbPath := openTrackerForTest(t)
 
 	ev := protocol.AuditEvent{
-		EpochID:   "epoch-x",
+		EpochId:   "epoch-x",
 		Phase:     protocol.PhaseRequest,
 		Role:      "human",
 		EventType: protocol.EventPhaseTransition,
 		Payload:   map[string]any{},
 		Timestamp: time.Now().UTC(),
 	}
-	eventID := recordEventForTest(t, ctx, tracker, dbPath, ev)
+	eventId := recordEventForTest(t, ctx, tracker, dbPath, ev)
 
 	for i := 0; i < 3; i++ {
-		if err := tracker.AttachContext(ctx, eventID, protocol.ContextEpoch, "epoch-x"); err != nil {
+		if err := tracker.AttachContext(ctx, eventId, protocol.ContextEpoch, "epoch-x"); err != nil {
 			t.Fatalf("AttachContext call %d failed: %v", i, err)
 		}
 	}
 
-	contexts, err := tracker.EventContexts(ctx, eventID)
+	contexts, err := tracker.EventContexts(ctx, eventId)
 	if err != nil {
 		t.Fatalf("EventContexts failed: %v", err)
 	}
@@ -399,7 +399,7 @@ func TestAgentCategories_ReturnsNoneWhenNoRow(t *testing.T) {
 	t.Parallel()
 	tracker, _ := openTrackerForTest(t)
 
-	// Use a freshly-minted AgentID that we never SetAgentCategories on.
+	// Use a freshly-minted AgentId that we never SetAgentCategories on.
 	id := provenance.AgentID{Namespace: "pasture-test", UUID: uuid.Must(uuid.NewV7())}
 
 	auto, past, err := tracker.AgentCategories(id)
@@ -501,7 +501,7 @@ func TestTimeline_EmptyContextIDReturnsEmptySlice(t *testing.T) {
 
 	events, err := tracker.Timeline(ctx, protocol.ContextEpoch, "")
 	if err != nil {
-		t.Fatalf("Timeline(empty contextID) failed: %v", err)
+		t.Fatalf("Timeline(empty contextId) failed: %v", err)
 	}
 	if events == nil {
 		t.Error("Timeline returned nil slice; want empty non-nil slice")
@@ -577,7 +577,7 @@ func TestForwarding_AuditRecordAndQuery(t *testing.T) {
 	tracker, _ := openTrackerForTest(t)
 
 	ev := protocol.AuditEvent{
-		EpochID:   "epoch-fwd",
+		EpochId:   "epoch-fwd",
 		Phase:     protocol.PhaseRequest,
 		Role:      "test",
 		EventType: protocol.EventPhaseTransition,

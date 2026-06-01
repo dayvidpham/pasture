@@ -9,42 +9,42 @@ var swarmBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "swarm-epic-worktree",
+			Id:        "swarm-epic-worktree",
 			Given:     "an epic needs implementation",
 			When:      "launching agents",
 			Then:      "use `aura-swarm start --epic <id>` to create an isolated worktree",
 			ShouldNot: "launch long-running workers as Task tool subagents",
 		},
 		{
-			ID:        "swarm-intree-longrunning",
+			Id:        "swarm-intree-longrunning",
 			Given:     "a long-running agent is needed in-place",
 			When:      "launching",
 			Then:      "use `aura-swarm start --swarm-mode intree --role <role> -n 1 --prompt \"...\"`",
 			ShouldNot: "spawn long-running agents as Task tool subagents",
 		},
 		{
-			ID:        "swarm-task-assignment",
+			Id:        "swarm-task-assignment",
 			Given:     "multiple workers are needed in-place",
 			When:      "distributing tasks",
 			Then:      "use `--task-id` to assign one task per worker",
 			ShouldNot: "launch workers without task assignments",
 		},
 		{
-			ID:        "swarm-reviewer-subagents",
+			Id:        "swarm-reviewer-subagents",
 			Given:     "reviewers are needed",
 			When:      "spawning",
 			Then:      "use Task tool subagents or TeamCreate instead",
 			ShouldNot: "use `aura-swarm start` for reviewer rounds",
 		},
 		{
-			ID:        "swarm-status-check",
+			Id:        "swarm-status-check",
 			Given:     "agents are running",
 			When:      "checking progress",
 			Then:      "use `aura-swarm status` to see all active sessions",
 			ShouldNot: "try to inspect tmux sessions manually",
 		},
 		{
-			ID:        "swarm-cleanup",
+			Id:        "swarm-cleanup",
 			Given:     "an epic is complete",
 			When:      "cleaning up",
 			Then:      "use `aura-swarm cleanup <id>` or `aura-swarm cleanup --done`",
@@ -54,7 +54,7 @@ var swarmBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:    "swarm-when-to-use",
+			Id:    "swarm-when-to-use",
 			Title: "When to Use",
 			Content: `- Starting a new epic implementation (` + "`aura-swarm start --epic <id>`" + `)
 - Launching parallel in-place agents (` + "`aura-swarm start --swarm-mode intree -n N --prompt \"...\"`" + `)
@@ -65,7 +65,7 @@ var swarmBody = SkillBody{
 - Cleaning up finished worktrees (` + "`aura-swarm cleanup`" + `)`,
 		},
 		{
-			ID:    "swarm-branch-model",
+			Id:    "swarm-branch-model",
 			Title: "Branch Model (worktree mode)",
 			Content: "```\n" +
 				"main\n" +
@@ -76,12 +76,12 @@ var swarmBody = SkillBody{
 				"```",
 		},
 		{
-			ID:      "swarm-commands",
+			Id:      "swarm-commands",
 			Title:   "Commands",
 			Content: "",
 			Subsections: []ProseSection{
 				{
-					ID:    "swarm-cmd-worktree",
+					Id:    "swarm-cmd-worktree",
 					Title: "Worktree Mode (default)",
 					Content: "```bash\n" +
 						"# Start an epic (creates worktree, gathers beads context, launches Claude)\n" +
@@ -95,7 +95,7 @@ var swarmBody = SkillBody{
 						"```",
 				},
 				{
-					ID:    "swarm-cmd-intree",
+					Id:    "swarm-cmd-intree",
 					Title: "Intree Mode (replaces aura-parallel)",
 					Content: "```bash\n" +
 						"# Launch a single supervisor\n" +
@@ -112,7 +112,7 @@ var swarmBody = SkillBody{
 						"```",
 				},
 				{
-					ID:    "swarm-cmd-management",
+					Id:    "swarm-cmd-management",
 					Title: "Management",
 					Content: "```bash\n" +
 						"# Check status of all running agent sessions\n" +
@@ -136,7 +136,7 @@ var swarmBody = SkillBody{
 			},
 		},
 		{
-			ID:    "swarm-options",
+			Id:    "swarm-options",
 			Title: "Options",
 			Content: `| Flag | Description |
 |------|-------------|
@@ -159,7 +159,7 @@ var swarmBody = SkillBody{
 | ` + "`--working-dir`" + ` | Working directory (default: git root) |`,
 		},
 		{
-			ID:    "swarm-prerequisites",
+			Id:    "swarm-prerequisites",
 			Title: "Prerequisites",
 			Content: "- " + "`aura-swarm`" + " must be on PATH (installed via Nix or symlinked)\n" +
 				"- " + "`tmux`" + " and " + "`claude`" + " must be available\n" +
@@ -167,7 +167,7 @@ var swarmBody = SkillBody{
 				"- **Intree mode**: " + "`--prompt`" + " or " + "`--prompt-file`" + " required; " + "`bd`" + " only needed if " + "`--epic`" + " is provided",
 		},
 		{
-			ID:    "swarm-migration",
+			Id:    "swarm-migration",
 			Title: "Migration from aura-parallel",
 			Content: "`aura-parallel` is deprecated. All commands translate directly:\n\n" +
 				"```bash\n" +

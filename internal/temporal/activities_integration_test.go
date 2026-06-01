@@ -5,7 +5,7 @@
 //
 //   - TestActivities_RecordTransition_TaskTrackerPath (Scenario 1 layered):
 //     RecordTransition against a real unified tracker writes both an
-//     audit_events row AND a context_edges(EpochContext, epochID) row.
+//     audit_events row AND a context_edges(EpochContext, epochId) row.
 //
 //   - TestActivities_RecordTransition_AttributesToTransitionGate (Scenario 8b):
 //     the recorded event's agent_id resolves (via JOIN) to a SoftwareAgent
@@ -24,10 +24,10 @@
 //     parameterised over the 9 Claude Code hook events; each resolves to
 //     "pasture/automaton/hook/<name>".
 //
-//   - TestActivities_RecordTransition_RejectsMalformedEpochID (Scenario 13
-//     activity-level): direct activity invocation with a free-string epochID
+//   - TestActivities_RecordTransition_RejectsMalformedEpochId (Scenario 13
+//     activity-level): direct activity invocation with a free-string epochId
 //     returns *StructuredError (CategoryValidation, "not a valid Provenance
-//     TaskID" in What, "pasture task create REQUEST" in Fix), and no rows
+//     TaskId" in What, "pasture task create REQUEST" in Fix), and no rows
 //     leak to audit_events / context_edges / tasks.
 //
 //   - TestEpochWorkflow_SearchAttributes_R13Snapshot (Scenario 2): structural
@@ -122,11 +122,11 @@ func newUnifiedTrackerForTest(t *testing.T) (protocol.TaskTracker, *tasks.WellKn
 	return tracker, cache
 }
 
-// newRequestTaskID creates a REQUEST task in the unified tracker and returns
+// newRequestTaskId creates a REQUEST task in the unified tracker and returns
 // its ID as a string suitable for use as an epoch_id (i.e., satisfies
 // provenance.ParseTaskID). This mirrors the production flow where the user
 // runs `pasture task create REQUEST` before `pasture-msg epoch start`.
-func newRequestTaskID(t *testing.T, tracker protocol.TaskTracker) string {
+func newRequestTaskId(t *testing.T, tracker protocol.TaskTracker) string {
 	t.Helper()
 	req, err := tracker.Create(
 		"aura-plugins-s8-test",
@@ -149,7 +149,7 @@ func TestActivities_RecordTransition_TaskTrackerPath(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	tracker, cache := newUnifiedTrackerForTest(t)
-	epochID := newRequestTaskID(t, tracker)
+	epochId := newRequestTaskId(t, tracker)
 
 	acts := &temporal.Activities{
 		Tracker:         tracker,
@@ -165,12 +165,12 @@ func TestActivities_RecordTransition_TaskTrackerPath(t *testing.T) {
 		ConditionMet: "classification confirmed",
 		Success:      true,
 	}
-	if _, err := env.ExecuteActivity(acts.RecordTransition, epochID, rec); err != nil {
+	if _, err := env.ExecuteActivity(acts.RecordTransition, epochId, rec); err != nil {
 		t.Fatalf("RecordTransition: %v", err)
 	}
 
 	// Layer A: audit_events row exists.
-	events, err := tracker.QueryEvents(ctx, epochID, nil, nil)
+	events, err := tracker.QueryEvents(ctx, epochId, nil, nil)
 	if err != nil {
 		t.Fatalf("QueryEvents: %v", err)
 	}
@@ -181,14 +181,14 @@ func TestActivities_RecordTransition_TaskTrackerPath(t *testing.T) {
 		t.Errorf("event.EventType = %q, want %q", events[0].EventType, protocol.EventPhaseTransition)
 	}
 
-	// Layer B: context_edges row exists for (EpochContext, epochID) — verified
+	// Layer B: context_edges row exists for (EpochContext, epochId) — verified
 	// via Timeline lookup which JOINs context_edges with audit_events.
-	tlEvents, err := tracker.Timeline(ctx, protocol.ContextEpoch, epochID)
+	tlEvents, err := tracker.Timeline(ctx, protocol.ContextEpoch, epochId)
 	if err != nil {
 		t.Fatalf("Timeline: %s", debugErr(err))
 	}
 	if len(tlEvents) != 1 {
-		t.Errorf("Timeline(EpochContext, %q) returned %d events, want 1 (context_edges row missing — AttachContext did not run)", epochID, len(tlEvents))
+		t.Errorf("Timeline(EpochContext, %q) returned %d events, want 1 (context_edges row missing — AttachContext did not run)", epochId, len(tlEvents))
 	}
 }
 
@@ -198,7 +198,7 @@ func TestActivities_RecordTransition_AttributesToTransitionGate(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	tracker, cache := newUnifiedTrackerForTest(t)
-	epochID := newRequestTaskID(t, tracker)
+	epochId := newRequestTaskId(t, tracker)
 
 	acts := &temporal.Activities{
 		Tracker:         tracker,
@@ -213,12 +213,12 @@ func TestActivities_RecordTransition_AttributesToTransitionGate(t *testing.T) {
 		TriggeredBy: "architect",
 		Success:     true,
 	}
-	if _, err := env.ExecuteActivity(acts.RecordTransition, epochID, rec); err != nil {
+	if _, err := env.ExecuteActivity(acts.RecordTransition, epochId, rec); err != nil {
 		t.Fatalf("RecordTransition: %v", err)
 	}
 
 	// Timeline returns the event with Role populated from agents_software.name.
-	tlEvents, err := tracker.Timeline(ctx, protocol.ContextEpoch, epochID)
+	tlEvents, err := tracker.Timeline(ctx, protocol.ContextEpoch, epochId)
 	if err != nil {
 		t.Fatalf("Timeline: %s", debugErr(err))
 	}
@@ -231,13 +231,13 @@ func TestActivities_RecordTransition_AttributesToTransitionGate(t *testing.T) {
 		t.Errorf("event.Role (= agents_software.name) = %q, want %q (Scenario 8b: RecordTransition must attribute to the consensus transition-gate well-known agent)", tlEvents[0].Role, wantName)
 	}
 
-	// Cross-check: the well-known cache resolves the same name to a non-zero AgentID.
+	// Cross-check: the well-known cache resolves the same name to a non-zero AgentId.
 	id, ok := cache.Get(wantName)
 	if !ok {
 		t.Errorf("cache.Get(%q): missing — S7 well-known agent registration did not include this name", wantName)
 	}
 	if id.UUID.String() == "00000000-0000-0000-0000-000000000000" {
-		t.Errorf("cache.Get(%q) returned zero AgentID — registration failed silently", wantName)
+		t.Errorf("cache.Get(%q) returned zero AgentId — registration failed silently", wantName)
 	}
 }
 
@@ -247,7 +247,7 @@ func TestActivities_RecordAuditEvent_AttributesToConstraintChecker(t *testing.T)
 	t.Parallel()
 	ctx := context.Background()
 	tracker, cache := newUnifiedTrackerForTest(t)
-	epochID := newRequestTaskID(t, tracker)
+	epochId := newRequestTaskId(t, tracker)
 
 	acts := &temporal.Activities{
 		Tracker:         tracker,
@@ -258,7 +258,7 @@ func TestActivities_RecordAuditEvent_AttributesToConstraintChecker(t *testing.T)
 	// Empty Role → default to ConstraintChecker (the most common
 	// RecordAuditEvent caller is the constraint-violation path).
 	ev := protocol.AuditEvent{
-		EpochID:   epochID,
+		EpochId:   epochId,
 		Phase:     protocol.PhaseRequest,
 		EventType: protocol.EventConstraintChecked,
 		Payload:   map[string]any{"violation": "none"},
@@ -268,7 +268,7 @@ func TestActivities_RecordAuditEvent_AttributesToConstraintChecker(t *testing.T)
 		t.Fatalf("RecordAuditEvent: %v", err)
 	}
 
-	tlEvents, err := tracker.Timeline(ctx, protocol.ContextEpoch, epochID)
+	tlEvents, err := tracker.Timeline(ctx, protocol.ContextEpoch, epochId)
 	if err != nil {
 		t.Fatalf("Timeline: %s", debugErr(err))
 	}
@@ -288,7 +288,7 @@ func TestActivities_RecordAuditEvent_AttributesToConsensusReached(t *testing.T) 
 	t.Parallel()
 	ctx := context.Background()
 	tracker, cache := newUnifiedTrackerForTest(t)
-	epochID := newRequestTaskID(t, tracker)
+	epochId := newRequestTaskId(t, tracker)
 
 	acts := &temporal.Activities{
 		Tracker:         tracker,
@@ -298,7 +298,7 @@ func TestActivities_RecordAuditEvent_AttributesToConsensusReached(t *testing.T) 
 
 	wantName := "pasture/automaton/consensus-reached"
 	ev := protocol.AuditEvent{
-		EpochID:   epochID,
+		EpochId:   epochId,
 		Phase:     protocol.PhaseReview,
 		Role:      wantName, // Explicit attribution to the UAT-1 first-class category.
 		EventType: protocol.EventVoteRecorded,
@@ -309,7 +309,7 @@ func TestActivities_RecordAuditEvent_AttributesToConsensusReached(t *testing.T) 
 		t.Fatalf("RecordAuditEvent: %v", err)
 	}
 
-	tlEvents, err := tracker.Timeline(ctx, protocol.ContextEpoch, epochID)
+	tlEvents, err := tracker.Timeline(ctx, protocol.ContextEpoch, epochId)
 	if err != nil {
 		t.Fatalf("Timeline: %s", debugErr(err))
 	}
@@ -328,7 +328,7 @@ func TestActivities_RecordAuditEvent_AttributesToCreateFollowup(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	tracker, cache := newUnifiedTrackerForTest(t)
-	epochID := newRequestTaskID(t, tracker)
+	epochId := newRequestTaskId(t, tracker)
 
 	acts := &temporal.Activities{
 		Tracker:         tracker,
@@ -338,7 +338,7 @@ func TestActivities_RecordAuditEvent_AttributesToCreateFollowup(t *testing.T) {
 
 	wantName := "pasture/automaton/create-followup"
 	ev := protocol.AuditEvent{
-		EpochID:   epochID,
+		EpochId:   epochId,
 		Phase:     protocol.PhaseRatify,
 		Role:      wantName,
 		EventType: protocol.EventSliceStarted,
@@ -349,7 +349,7 @@ func TestActivities_RecordAuditEvent_AttributesToCreateFollowup(t *testing.T) {
 		t.Fatalf("RecordAuditEvent: %v", err)
 	}
 
-	tlEvents, err := tracker.Timeline(ctx, protocol.ContextEpoch, epochID)
+	tlEvents, err := tracker.Timeline(ctx, protocol.ContextEpoch, epochId)
 	if err != nil {
 		t.Fatalf("Timeline: %s", debugErr(err))
 	}
@@ -386,7 +386,7 @@ func TestActivities_RecordAuditEvent_AttributesToHookHandler(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
 			tracker, cache := newUnifiedTrackerForTest(t)
-			epochID := newRequestTaskID(t, tracker)
+			epochId := newRequestTaskId(t, tracker)
 
 			acts := &temporal.Activities{
 				Tracker:         tracker,
@@ -396,7 +396,7 @@ func TestActivities_RecordAuditEvent_AttributesToHookHandler(t *testing.T) {
 
 			wantName := "pasture/automaton/hook/" + hookName
 			ev := protocol.AuditEvent{
-				EpochID:   epochID,
+				EpochId:   epochId,
 				Phase:     protocol.PhaseWorkerSlices,
 				Role:      wantName,
 				EventType: protocol.EventSliceStarted,
@@ -407,7 +407,7 @@ func TestActivities_RecordAuditEvent_AttributesToHookHandler(t *testing.T) {
 				t.Fatalf("RecordAuditEvent: %v", err)
 			}
 
-			tlEvents, err := tracker.Timeline(ctx, protocol.ContextEpoch, epochID)
+			tlEvents, err := tracker.Timeline(ctx, protocol.ContextEpoch, epochId)
 			if err != nil {
 				t.Fatalf("Timeline: %+v", err)
 			}
@@ -421,9 +421,9 @@ func TestActivities_RecordAuditEvent_AttributesToHookHandler(t *testing.T) {
 	}
 }
 
-// ─── Scenario 13 activity-level: malformed epochID rejection ────────────────
+// ─── Scenario 13 activity-level: malformed epochId rejection ────────────────
 
-func TestActivities_RecordTransition_RejectsMalformedEpochID(t *testing.T) {
+func TestActivities_RecordTransition_RejectsMalformedEpochId(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	tracker, cache := newUnifiedTrackerForTest(t)
@@ -444,7 +444,7 @@ func TestActivities_RecordTransition_RejectsMalformedEpochID(t *testing.T) {
 	}
 	_, err := env.ExecuteActivity(acts.RecordTransition, "not-a-task-id", rec)
 	if err == nil {
-		t.Fatal("RecordTransition: expected validation error for malformed epochID, got nil")
+		t.Fatal("RecordTransition: expected validation error for malformed epochId, got nil")
 	}
 
 	// Temporal's TestActivityEnvironment wraps the activity's returned error
@@ -457,7 +457,7 @@ func TestActivities_RecordTransition_RejectsMalformedEpochID(t *testing.T) {
 	//
 	//   1. "validation error" — the CategoryValidation marker (Category
 	//      prefix on .Error()).
-	//   2. The plain-English What sentence from validateEpochID — the
+	//   2. The plain-English What sentence from validateEpochId — the
 	//      load-bearing user-visible substring from §11 Scenario 13.
 	//   3. "type: StructuredError" — Temporal's record of the original Go
 	//      error type (lets workflow callers detect the wrapped shape via
@@ -498,9 +498,9 @@ func TestActivities_RecordTransition_RejectsMalformedEpochID(t *testing.T) {
 	}
 }
 
-// ─── Scenario 13 activity-level: malformed epochID rejection at RecordAuditEvent ─
+// ─── Scenario 13 activity-level: malformed epochId rejection at RecordAuditEvent ─
 
-func TestActivities_RecordAuditEvent_RejectsMalformedEpochID(t *testing.T) {
+func TestActivities_RecordAuditEvent_RejectsMalformedEpochId(t *testing.T) {
 	t.Parallel()
 	tracker, cache := newUnifiedTrackerForTest(t)
 
@@ -511,7 +511,7 @@ func TestActivities_RecordAuditEvent_RejectsMalformedEpochID(t *testing.T) {
 	env := newTestActivityEnv(t, acts)
 
 	ev := protocol.AuditEvent{
-		EpochID:   "not-a-task-id",
+		EpochId:   "not-a-task-id",
 		Phase:     protocol.PhaseRequest,
 		EventType: protocol.EventVoteRecorded,
 		Payload:   map[string]any{},
@@ -519,9 +519,9 @@ func TestActivities_RecordAuditEvent_RejectsMalformedEpochID(t *testing.T) {
 	}
 	_, err := env.ExecuteActivity(acts.RecordAuditEvent, ev)
 	if err == nil {
-		t.Fatal("RecordAuditEvent: expected validation error for malformed epochID, got nil")
+		t.Fatal("RecordAuditEvent: expected validation error for malformed epochId, got nil")
 	}
-	// See TestActivities_RecordTransition_RejectsMalformedEpochID for the
+	// See TestActivities_RecordTransition_RejectsMalformedEpochId for the
 	// rationale on asserting against the serialised error message instead of
 	// errors.As (Temporal does not preserve the original Go error type
 	// through the activity-boundary wrap).
@@ -571,10 +571,10 @@ func TestEpochWorkflow_SearchAttributes_R13Snapshot(t *testing.T) {
 	}
 	got := string(src)
 
-	// Snapshot 1: initial-state SA upsert. Six keys (immutable EpochID set
+	// Snapshot 1: initial-state SA upsert. Six keys (immutable EpochId set
 	// once + the four phase-keyed ones).
 	wantInitial := `if err := workflow.UpsertTypedSearchAttributes(ctx,
-		saEpochIDKey.ValueSet(input.EpochID),
+		saEpochIDKey.ValueSet(input.EpochId),
 		saPhaseKey.ValueSet(string(initialPhase)),
 		saRoleKey.ValueSet(string(w.sm.State().CurrentRole)),
 		saStatusKey.ValueSet("running"),
@@ -584,7 +584,7 @@ func TestEpochWorkflow_SearchAttributes_R13Snapshot(t *testing.T) {
 		t.Errorf("R13 snapshot mismatch: workflow.go does not contain the expected initial UpsertTypedSearchAttributes block.\n\nWant (substring):\n%s\n\nIf the SA upsert was intentionally changed, update this snapshot AND verify the new wire format against a real Temporal cluster (PROPOSAL-2 §11 Scenario 2 'byte-identical' binding).", wantInitial)
 	}
 
-	// Snapshot 2: per-transition SA upsert. Five keys (EpochID is immutable
+	// Snapshot 2: per-transition SA upsert. Five keys (EpochId is immutable
 	// and not re-upserted; LastEventType is added).
 	wantTransition := `if upsertErr := workflow.UpsertTypedSearchAttributes(ctx,
 			saPhaseKey.ValueSet(string(current)),
@@ -600,7 +600,7 @@ func TestEpochWorkflow_SearchAttributes_R13Snapshot(t *testing.T) {
 	// Snapshot 3: the typed SA key declarations at file top (paranoid — if
 	// these change, the value types change and the wire format changes).
 	wantKeys := []string{
-		`saEpochIDKey   = temporalsdk.NewSearchAttributeKeyString(SAEpochID)`,
+		`saEpochIDKey   = temporalsdk.NewSearchAttributeKeyString(SAEpochId)`,
 		`saPhaseKey     = temporalsdk.NewSearchAttributeKeyKeyword(SAPhase)`,
 		`saRoleKey      = temporalsdk.NewSearchAttributeKeyKeyword(SARole)`,
 		`saStatusKey    = temporalsdk.NewSearchAttributeKeyKeyword(SAStatus)`,

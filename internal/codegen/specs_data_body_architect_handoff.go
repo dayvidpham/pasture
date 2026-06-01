@@ -7,21 +7,21 @@ var architectHandoffBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "arch-handoff-link-proposal",
+			Id:        "arch-handoff-link-proposal",
 			Given:     "ratified PROPOSAL-N task",
 			When:      "handing off",
 			Then:      "create handoff document and HANDOFF task, linking to ratified proposal",
 			ShouldNot: "hand off without linking to ratified proposal",
 		},
 		{
-			ID:        "arch-handoff-spawn-supervisor",
+			Id:        "arch-handoff-spawn-supervisor",
 			Given:     "handoff",
 			When:      "spawning supervisor",
 			Then:      "use `aura-swarm start --swarm-mode intree --role supervisor` or `aura-swarm start --epic <id>`",
 			ShouldNot: "spawn supervisor as Task tool subagent",
 		},
 		{
-			ID:        "arch-handoff-no-impl-tasks",
+			Id:        "arch-handoff-no-impl-tasks",
 			Given:     "implementation planning",
 			When:      "handing off",
 			Then:      "let supervisor create vertical slice tasks",
@@ -31,12 +31,12 @@ var architectHandoffBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:      "arch-handoff-when-to-use",
+			Id:      "arch-handoff-when-to-use",
 			Title:   "When to Use",
 			Content: "Plan ratified and user has approved proceeding with implementation.",
 		},
 		{
-			ID:    "arch-handoff-template",
+			Id:    "arch-handoff-template",
 			Title: "Handoff Template",
 			Content: "Storage: " + "`.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`" + "\n\n" +
 				"```" + `markdown` + "\n" +
@@ -70,7 +70,7 @@ var architectHandoffBody = SkillBody{
 				"```",
 		},
 		{
-			ID:    "arch-handoff-steps",
+			Id:    "arch-handoff-steps",
 			Title: "Steps",
 			Content: "1. Create the handoff document:\n" +
 				"   " + "```bash" + "\n" +
@@ -111,7 +111,7 @@ var architectHandoffBody = SkillBody{
 				"   ```",
 		},
 		{
-			ID:    "arch-handoff-example-prompt",
+			Id:    "arch-handoff-example-prompt",
 			Title: "Example Prompt",
 			Content: "**CRITICAL:** The prompt MUST instruct the supervisor to invoke `/aura:supervisor` as its first action. Without this, the supervisor agent starts without its role instructions and skips leaf task creation, ephemeral exploration, and other critical procedures.\n\n" +
 				"```\n" +
@@ -176,7 +176,7 @@ var architectHandoffBody = SkillBody{
 				"```",
 		},
 		{
-			ID:    "arch-handoff-script-options",
+			Id:    "arch-handoff-script-options",
 			Title: "Script Options",
 			Content: "```bash\n" +
 				"aura-swarm start --swarm-mode intree --role supervisor -n 1 --prompt \"...\"             # Launch supervisor\n" +
@@ -185,7 +185,7 @@ var architectHandoffBody = SkillBody{
 				"```",
 		},
 		{
-			ID:    "arch-handoff-important",
+			Id:    "arch-handoff-important",
 			Title: "IMPORTANT",
 			Content: "- **DO NOT** spawn supervisor as a Task tool subagent - use `aura-swarm start`\n" +
 				"- **DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks\n" +
@@ -194,7 +194,7 @@ var architectHandoffBody = SkillBody{
 				"- Architect monitors for blockers or escalations",
 		},
 		{
-			ID:    "arch-handoff-followup-lifecycle",
+			Id:    "arch-handoff-followup-lifecycle",
 			Title: "Follow-up Lifecycle (h1 Reuse)",
 			Content: "This handoff (h1: Architect → Supervisor) also occurs after FOLLOWUP_PROPOSAL is ratified. In follow-up context:\n\n" +
 				"- **Storage:** " + "`.git/.aura/handoff/{followup-epic-id}/architect-to-supervisor.md`" + "\n" +

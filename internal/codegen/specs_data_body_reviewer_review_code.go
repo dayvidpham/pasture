@@ -7,28 +7,28 @@ var reviewerReviewCodeBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "rev-code-quality-gates",
+			Id:        "rev-code-quality-gates",
 			Given:     "code assignment",
 			When:      "reviewing",
 			Then:      "apply end-user alignment criteria and verify production code paths",
 			ShouldNot: "approve without running quality gates",
 		},
 		{
-			ID:        "rev-code-verify-gates",
+			Id:        "rev-code-verify-gates",
 			Given:     "implementation",
 			When:      "verifying",
 			Then:      "run the project's quality gates",
 			ShouldNot: "approve without passing checks",
 		},
 		{
-			ID:        "rev-code-eager-severity",
+			Id:        "rev-code-eager-severity",
 			Given:     "issues found",
 			When:      "categorizing",
 			Then:      "use BLOCKER/IMPORTANT/MINOR severity with EAGER group creation",
 			ShouldNot: "skip creating empty severity groups",
 		},
 		{
-			ID:        "rev-code-blocker-dual-parent",
+			Id:        "rev-code-blocker-dual-parent",
 			Given:     "BLOCKER finding",
 			When:      "wiring dependencies",
 			Then:      "add dual-parent relationship (severity group + slice)",
@@ -38,17 +38,17 @@ var reviewerReviewCodeBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:      "rev-code-when-to-use",
+			Id:      "rev-code-when-to-use",
 			Title:   "When to Use",
 			Content: `Assigned to review code implementation after worker slices complete (Phase 10).`,
 		},
 		{
-			ID:      "rev-code-severity-tree",
+			Id:      "rev-code-severity-tree",
 			Title:   "Severity Tree: EAGER Creation",
 			Content: `**ALWAYS create 3 severity group tasks per review round**, even if some groups have no findings:`,
 			Subsections: []ProseSection{
 				{
-					ID:    "rev-code-create-groups",
+					Id:    "rev-code-create-groups",
 					Title: "Step 1: Create All 3 Severity Groups Immediately",
 					Content: "```" + `bash` + "\n" +
 						`# Step 1: Create all 3 severity groups immediately (EAGER, not lazy)
@@ -89,7 +89,7 @@ bd dep add <review-id> --blocked-by <minor-group-id>` + "\n" +
 						"```",
 				},
 				{
-					ID:    "rev-code-add-findings",
+					Id:    "rev-code-add-findings",
 					Title: "Adding Findings to Severity Groups",
 					Content: "```" + `bash` + "\n" +
 						`# BLOCKER finding — dual-parent relationship
@@ -110,7 +110,7 @@ bd dep add <minor-group-id> --blocked-by <minor-finding-id>` + "\n" +
 						"```",
 				},
 				{
-					ID:    "rev-code-close-empty",
+					Id:    "rev-code-close-empty",
 					Title: "Closing Empty Groups",
 					Content: `Empty severity groups (no findings) are closed immediately:
 
@@ -123,7 +123,7 @@ bd close <minor-group-id>` + "\n" +
 						"```",
 				},
 				{
-					ID:    "rev-code-dual-parent-rule",
+					Id:    "rev-code-dual-parent-rule",
 					Title: "Dual-Parent BLOCKER Relationship",
 					Content: `BLOCKER findings have **two parents**:
 1. The severity group task (` + "`aura:severity:blocker`" + `) — for categorization
@@ -136,12 +136,12 @@ IMPORTANT and MINOR findings do **NOT** block the slice — they are tracked in 
 			},
 		},
 		{
-			ID:      "rev-code-steps",
+			Id:      "rev-code-steps",
 			Title:   "Steps",
 			Content: "",
 			Subsections: []ProseSection{
 				{
-					ID:    "rev-code-step1-read",
+					Id:    "rev-code-step1-read",
 					Title: "Step 1: Read Code Changes and URD",
 					Content: "```" + `bash` + "\n" +
 						`bd show <slice-id>
@@ -149,19 +149,19 @@ bd show <urd-id>   # Read URD for requirements context` + "\n" +
 						"```",
 				},
 				{
-					ID:    "rev-code-step2-gates",
+					Id:    "rev-code-step2-gates",
 					Title: "Step 2: Run Quality Gates",
 					Content: "```" + `bash` + "\n" +
 						`# Run your project's type checking and test commands` + "\n" +
 						"```",
 				},
 				{
-					ID:      "rev-code-step3-criteria",
+					Id:      "rev-code-step3-criteria",
 					Title:   "Step 3: Apply Review Criteria and Verify Production Code Paths",
 					Content: `Apply end-user alignment criteria (see ` + "`aura:reviewer`" + `) and verify production code paths (see Verify Production Code Paths section below).`,
 				},
 				{
-					ID:    "rev-code-step4-create",
+					Id:    "rev-code-step4-create",
 					Title: "Step 4: Create Review Task",
 					Content: "```" + `bash` + "\n" +
 						`bd create --labels "aura:p10-impl:s10-review" \
@@ -176,7 +176,7 @@ bd dep add <slice-id> --blocked-by <review-id>` + "\n" +
 						"```",
 				},
 				{
-					ID:    "rev-code-step5-severity",
+					Id:    "rev-code-step5-severity",
 					Title: "Steps 5–8: Severity Tree and Vote",
 					Content: `5. Create severity tree (EAGER — all 3 groups immediately)
 6. Add findings to appropriate severity groups
@@ -186,12 +186,12 @@ bd dep add <slice-id> --blocked-by <review-id>` + "\n" +
 			},
 		},
 		{
-			ID:      "rev-code-verify-production",
+			Id:      "rev-code-verify-production",
 			Title:   "Verify Production Code Paths",
 			Content: "",
 			Subsections: []ProseSection{
 				{
-					ID:    "rev-code-dual-export",
+					Id:    "rev-code-dual-export",
 					Title: "Check for Dual-Export Anti-Pattern",
 					Content: `**Anti-pattern example:**
 ` + "```" + `go` + "\n" +
@@ -229,14 +229,14 @@ var commandCmd = &cobra.Command{
 						"```",
 				},
 				{
-					ID:    "rev-code-no-todos",
+					Id:    "rev-code-no-todos",
 					Title: "Verify No TODO Placeholders",
 					Content: "```" + `bash` + "\n" +
 						`grep -r "TODO" src/  # Should not find any in delivered code` + "\n" +
 						"```",
 				},
 				{
-					ID:    "rev-code-test-imports",
+					Id:    "rev-code-test-imports",
 					Title: "Check Tests Import Production Code",
 					Content: `- Test file should import the actual CLI command or API endpoint
 - Not a separate test harness function
@@ -246,14 +246,14 @@ var commandCmd = &cobra.Command{
 			},
 		},
 		{
-			ID:    "rev-code-followup-epic",
+			Id:    "rev-code-followup-epic",
 			Title: "Follow-up Epic",
 			Content: `**Trigger:** Review completion + ANY IMPORTANT or MINOR findings exist.
 **NOT gated on BLOCKER resolution.**
 **Owner:** Supervisor creates the follow-up epic (label ` + "`aura:epic-followup`" + `).`,
 		},
 		{
-			ID:    "rev-code-followup-slice",
+			Id:    "rev-code-followup-slice",
 			Title: "Reviewing FOLLOWUP_SLICE-N (Follow-up Code Review)",
 			Content: `When reviewing follow-up slices, use the same procedure:
 - **Review task naming:** ` + "`FOLLOWUP_SLICE-N-REVIEW-{axis}-{round}`" + `
@@ -262,7 +262,7 @@ var commandCmd = &cobra.Command{
 - The worker's completion handoff (h4) reports which original leaf tasks were resolved — verify these during review`,
 		},
 		{
-			ID:    "rev-code-report",
+			Id:    "rev-code-report",
 			Title: "Report Results",
 			Content: "```" + `bash` + "\n" +
 				`# Add vote comment to the review task

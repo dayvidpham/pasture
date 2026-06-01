@@ -7,7 +7,7 @@
 //
 // Design notes:
 //   - ACP wire protocol: newline-delimited JSON-RPC 2.0 over stdio
-//   - Session state is tracked per sessionID with goroutine-safe access
+//   - Session state is tracked per sessionId with goroutine-safe access
 //   - No leaked goroutines: context cancellation stops the read loop cleanly
 //   - All ACP types are defined here; acp-go-sdk is not a dependency (we define
 //     our own aligned types to avoid the external SDK requirement)
@@ -65,8 +65,8 @@ const (
 
 // ToolCall represents a tool invocation and its result within a SessionUpdate.
 type ToolCall struct {
-	// ToolCallID is the correlation ID linking tool_use to tool_result.
-	ToolCallID string `json:"toolCallId"`
+	// ToolCallId is the correlation ID linking tool_use to tool_result.
+	ToolCallId string `json:"toolCallId"`
 	// ToolKind classifies the tool category (function, bash, file, etc.).
 	ToolKind ToolKind `json:"toolKind"`
 	// ToolName is the name of the tool or function invoked.
@@ -105,8 +105,8 @@ type ContentBlock struct {
 // For adapter-parsed updates (Claude JSONL, OpenCode JSON), fields are
 // populated by the respective Adapter.Parse implementation.
 type SessionUpdate struct {
-	// SessionID uniquely identifies the agent session.
-	SessionID string `json:"sessionId"`
+	// SessionId uniquely identifies the agent session.
+	SessionId string `json:"sessionId"`
 	// Role is the message author: "user", "assistant", or "tool".
 	Role string `json:"role"`
 	// Content holds the ordered content blocks for this update.
@@ -127,10 +127,10 @@ type SessionUpdate struct {
 	Timestamp int64 `json:"timestamp,omitempty"`
 	// IsError signals that this update represents an error turn.
 	IsError bool `json:"isError,omitempty"`
-	// EntryID is the provider-native message ID.
-	EntryID string `json:"entryId,omitempty"`
-	// ParentEntryID links tool_result turns back to their tool_use origin.
-	ParentEntryID string `json:"parentEntryId,omitempty"`
+	// EntryId is the provider-native message ID.
+	EntryId string `json:"entryId,omitempty"`
+	// ParentEntryId links tool_result turns back to their tool_use origin.
+	ParentEntryId string `json:"parentEntryId,omitempty"`
 }
 
 // UsageStats holds token consumption for a session update.
@@ -151,7 +151,7 @@ type jsonRPCMessage struct {
 
 // sessionState tracks per-session lifecycle state.
 type sessionState struct {
-	sessionID   string
+	sessionId   string
 	updateCount int
 	startTime   time.Time
 	lastUpdate  time.Time
@@ -161,7 +161,7 @@ type sessionState struct {
 
 // SessionStats is the public view of a session's state.
 type SessionStats struct {
-	SessionID   string
+	SessionId   string
 	UpdateCount int
 	StartTime   time.Time
 	LastUpdate  time.Time
@@ -183,8 +183,8 @@ type SessionHandler interface {
 	HandleUpdate(ctx context.Context, update SessionUpdate) error
 
 	// HandleSessionEnd is called when a session ends (stop_reason present).
-	// sessionID is the session that ended. reason is the stop reason.
-	HandleSessionEnd(ctx context.Context, sessionID string, reason StopReason) error
+	// sessionId is the session that ended. reason is the stop reason.
+	HandleSessionEnd(ctx context.Context, sessionId string, reason StopReason) error
 }
 
 // ─── Client ──────────────────────────────────────────────────────────────────
@@ -377,13 +377,13 @@ func (c *Client) processUpdate(ctx context.Context, update SessionUpdate) error 
 	now := time.Now()
 
 	c.mu.Lock()
-	sess, exists := c.sessions[update.SessionID]
+	sess, exists := c.sessions[update.SessionId]
 	if !exists {
 		sess = &sessionState{
-			sessionID: update.SessionID,
+			sessionId: update.SessionId,
 			startTime: now,
 		}
-		c.sessions[update.SessionID] = sess
+		c.sessions[update.SessionId] = sess
 	}
 	sess.updateCount++
 	sess.lastUpdate = now
@@ -391,7 +391,7 @@ func (c *Client) processUpdate(ctx context.Context, update SessionUpdate) error 
 
 	// Forward to handler (outside lock to avoid deadlocks in handler implementations).
 	if err := c.handler.HandleUpdate(ctx, update); err != nil {
-		return fmt.Errorf("acp: SessionHandler.HandleUpdate for session %q: %w", update.SessionID, err)
+		return fmt.Errorf("acp: SessionHandler.HandleUpdate for session %q: %w", update.SessionId, err)
 	}
 
 	// If this update signals session end, record final state and notify handler.
@@ -403,8 +403,8 @@ func (c *Client) processUpdate(ctx context.Context, update SessionUpdate) error 
 		sess.endTime = &endTime
 		c.mu.Unlock()
 
-		if err := c.handler.HandleSessionEnd(ctx, update.SessionID, update.StopReason); err != nil {
-			return fmt.Errorf("acp: SessionHandler.HandleSessionEnd for session %q: %w", update.SessionID, err)
+		if err := c.handler.HandleSessionEnd(ctx, update.SessionId, update.StopReason); err != nil {
+			return fmt.Errorf("acp: SessionHandler.HandleSessionEnd for session %q: %w", update.SessionId, err)
 		}
 	}
 
@@ -432,17 +432,17 @@ func (c *Client) SessionCount() int {
 	return len(c.sessions)
 }
 
-// SessionStats returns a snapshot of the stats for the given sessionID.
+// SessionStats returns a snapshot of the stats for the given sessionId.
 // Returns an error if the session has not been observed.
-func (c *Client) SessionStats(sessionID string) (*SessionStats, error) {
+func (c *Client) SessionStats(sessionId string) (*SessionStats, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	sess, ok := c.sessions[sessionID]
+	sess, ok := c.sessions[sessionId]
 	if !ok {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("No session with the ID %q has been seen by this client.", sessionID),
+			What:     fmt.Sprintf("No session with the ID %q has been seen by this client.", sessionId),
 			Why: "The client only tracks sessions for which it has received at least one\n" +
 				"update from the agent. The ID you asked about hasn't appeared in any\n" +
 				"update yet.",
@@ -458,7 +458,7 @@ func (c *Client) SessionStats(sessionID string) (*SessionStats, error) {
 	}
 
 	stats := &SessionStats{
-		SessionID:   sess.sessionID,
+		SessionId:   sess.sessionId,
 		UpdateCount: sess.updateCount,
 		StartTime:   sess.startTime,
 		LastUpdate:  sess.lastUpdate,

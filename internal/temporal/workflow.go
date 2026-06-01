@@ -20,7 +20,7 @@ import (
 // ─── Search Attribute Keys (typed) ───────────────────────────────────────────
 
 var (
-	saEpochIDKey   = temporalsdk.NewSearchAttributeKeyString(SAEpochID)
+	saEpochIDKey   = temporalsdk.NewSearchAttributeKeyString(SAEpochId)
 	saPhaseKey     = temporalsdk.NewSearchAttributeKeyKeyword(SAPhase)
 	saRoleKey      = temporalsdk.NewSearchAttributeKeyKeyword(SARole)
 	saStatusKey    = temporalsdk.NewSearchAttributeKeyKeyword(SAStatus)
@@ -49,13 +49,13 @@ var phaseDomain = map[protocol.PhaseId]string{
 
 // EpochInput is the workflow input for EpochWorkflow.
 type EpochInput struct {
-	EpochID            string `json:"epochId"`
+	EpochId            string `json:"epochId"`
 	RequestDescription string `json:"requestDescription"`
 }
 
 // EpochResult is the return value of EpochWorkflow when the epoch reaches COMPLETE.
 type EpochResult struct {
-	EpochID                   string           `json:"epochId"`
+	EpochId                   string           `json:"epochId"`
 	FinalPhase                protocol.PhaseId `json:"finalPhase"`
 	TransitionCount           int              `json:"transitionCount"`
 	SuccessfulTransitionCount int              `json:"successfulTransitionCount"`
@@ -64,15 +64,15 @@ type EpochResult struct {
 
 // SliceInput is the workflow input for SliceWorkflow.
 type SliceInput struct {
-	EpochID          string `json:"epochId"`
-	SliceID          string `json:"sliceId"`
+	EpochId          string `json:"epochId"`
+	SliceId          string `json:"sliceId"`
 	PhaseSpec        string `json:"phaseSpec"` // human-readable; serializable future
-	ParentWorkflowID string `json:"parentWorkflowId"`
+	ParentWorkflowId string `json:"parentWorkflowId"`
 }
 
 // SliceResult is the return value of SliceWorkflow.
 type SliceResult struct {
-	SliceID string  `json:"sliceId"`
+	SliceId string  `json:"sliceId"`
 	Success bool    `json:"success"`
 	Output  string  `json:"output,omitempty"`
 	Error   *string `json:"error,omitempty"`
@@ -80,13 +80,13 @@ type SliceResult struct {
 
 // ReviewInput is the workflow input for ReviewPhaseWorkflow.
 type ReviewInput struct {
-	EpochID string `json:"epochId"`
-	PhaseID string `json:"phaseId"`
+	EpochId string `json:"epochId"`
+	PhaseId string `json:"phaseId"`
 }
 
 // ReviewResult is the return value of ReviewPhaseWorkflow.
 type ReviewResult struct {
-	PhaseID    string                              `json:"phaseId"`
+	PhaseId    string                              `json:"phaseId"`
 	Success    bool                                `json:"success"`
 	VoteResult map[types.ReviewAxis]types.VoteType `json:"voteResult"`
 }
@@ -127,13 +127,13 @@ type EpochWorkflow struct {
 // Run is the EpochWorkflow entry point. Initializes the state machine, sets
 // initial search attributes, then drives the main signal loop until COMPLETE.
 func (w *EpochWorkflow) Run(ctx workflow.Context, input EpochInput) (*EpochResult, error) {
-	w.sm = NewEpochStateMachine(input.EpochID, nil)
+	w.sm = NewEpochStateMachine(input.EpochId, nil)
 
-	// Set initial search attributes (immutable SA_EPOCH_ID set once).
+	// Set initial search attributes (immutable SA_EPOCH_Id set once).
 	initialPhase := w.sm.State().CurrentPhase
 	domain := phaseDomain[initialPhase]
 	if err := workflow.UpsertTypedSearchAttributes(ctx,
-		saEpochIDKey.ValueSet(input.EpochID),
+		saEpochIDKey.ValueSet(input.EpochId),
 		saPhaseKey.ValueSet(string(initialPhase)),
 		saRoleKey.ValueSet(string(w.sm.State().CurrentRole)),
 		saStatusKey.ValueSet("running"),
@@ -201,15 +201,15 @@ func (w *EpochWorkflow) Run(ctx workflow.Context, input EpochInput) (*EpochResul
 		}
 
 		// 2c. Record transition (activity — I/O boundary).
-		// Pass epochID so audit events are queryable by epoch.
-		if actErr := workflow.ExecuteActivity(actCtx, ActivityRecordTransition, input.EpochID, *record).
+		// Pass epochId so audit events are queryable by epoch.
+		if actErr := workflow.ExecuteActivity(actCtx, ActivityRecordTransition, input.EpochId, *record).
 			Get(actCtx, nil); actErr != nil {
 			workflow.GetLogger(ctx).Warn("EpochWorkflow: RecordTransition activity failed", "error", actErr)
 		}
 
 		// 2d. Record audit event (activity — I/O boundary).
 		auditEvent := protocol.AuditEvent{
-			EpochID:   input.EpochID,
+			EpochId:   input.EpochId,
 			Phase:     record.ToPhase,
 			Role:      string(w.sm.State().CurrentRole),
 			EventType: protocol.EventPhaseTransition,
@@ -249,7 +249,7 @@ func (w *EpochWorkflow) Run(ctx workflow.Context, input EpochInput) (*EpochResul
 		}
 	}
 	return &EpochResult{
-		EpochID:                   input.EpochID,
+		EpochId:                   input.EpochId,
 		FinalPhase:                w.sm.State().CurrentPhase,
 		TransitionCount:           len(history),
 		SuccessfulTransitionCount: successful,
@@ -278,7 +278,7 @@ func (w *EpochWorkflow) SliceProgress(ctx workflow.Context, sig types.SliceProgr
 // Idempotent: duplicate session IDs are silently ignored.
 func (w *EpochWorkflow) RegisterSession(ctx workflow.Context, sig types.RegisterSessionSignal) {
 	for _, s := range w.activeSessions {
-		if s.SessionID == sig.SessionID {
+		if s.SessionId == sig.SessionId {
 			return
 		}
 	}

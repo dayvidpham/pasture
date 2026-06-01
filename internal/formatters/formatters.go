@@ -125,25 +125,25 @@ func FormatEpochState(result types.QueryStateResult, format types.OutputFormat) 
 
 // startResultJSON is the JSON wire representation of a start result.
 type startResultJSON struct {
-	WorkflowID string `json:"workflowId"`
-	RunID      string `json:"runId"`
+	WorkflowId string `json:"workflowId"`
+	RunId      string `json:"runId"`
 }
 
 // FormatStartResult formats an epoch start result for CLI output.
 //
 // JSON mode: {"workflowId": "...", "runId": "..."}
 // Text mode: "Started epoch: workflow_id=..., run_id=..."
-func FormatStartResult(workflowID, runID string, format types.OutputFormat) (string, error) {
+func FormatStartResult(workflowId, runId string, format types.OutputFormat) (string, error) {
 	switch format {
 	case types.OutputJSON:
-		b, err := json.MarshalIndent(startResultJSON{WorkflowID: workflowID, RunID: runID}, "", "  ")
+		b, err := json.MarshalIndent(startResultJSON{WorkflowId: workflowId, RunId: runId}, "", "  ")
 		if err != nil {
 			return "", err
 		}
 		return string(b), nil
 
 	case types.OutputText:
-		return fmt.Sprintf("Started epoch: workflow_id=%s, run_id=%s", workflowID, runID), nil
+		return fmt.Sprintf("Started epoch: workflow_id=%s, run_id=%s", workflowId, runId), nil
 
 	default:
 		return "", &errors.StructuredError{

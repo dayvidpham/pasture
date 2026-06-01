@@ -57,8 +57,8 @@ func openRecorderFixture(t *testing.T) (*hooks.GitRecorder, protocol.TaskTracker
 }
 
 // countContextEdges returns the count of context_edges rows for the (kind,
-// contextID) pair via a fresh verification handle.
-func countContextEdges(t *testing.T, dbPath string, kind protocol.ContextKind, contextID string) int {
+// contextId) pair via a fresh verification handle.
+func countContextEdges(t *testing.T, dbPath string, kind protocol.ContextKind, contextId string) int {
 	t.Helper()
 	verifyDB, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -68,7 +68,7 @@ func countContextEdges(t *testing.T, dbPath string, kind protocol.ContextKind, c
 	var n int
 	if err := verifyDB.QueryRow(
 		`SELECT COUNT(*) FROM context_edges WHERE context_kind = ? AND context_id = ?`,
-		string(kind), contextID,
+		string(kind), contextId,
 	).Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestGitRecorder_RecordCommitDirect(t *testing.T) {
 		t.Fatalf("RecordCommit: %v", err)
 	}
 	if id <= 0 {
-		t.Fatalf("RecordCommit returned eventID %d, want > 0", id)
+		t.Fatalf("RecordCommit returned eventId %d, want > 0", id)
 	}
 
 	// SQL state: one ContextGit edge for this sha.
@@ -152,7 +152,7 @@ func TestGitRecorder_RecordCommitDirect(t *testing.T) {
 	if len(contexts) != 1 {
 		t.Fatalf("EventContexts = %d, want 1", len(contexts))
 	}
-	if contexts[0].Kind != protocol.ContextGit || contexts[0].ContextID != sha {
+	if contexts[0].Kind != protocol.ContextGit || contexts[0].ContextId != sha {
 		t.Errorf("EventContexts[0] = %v, want {ContextGit, %q}", contexts[0], sha)
 	}
 }
@@ -174,7 +174,7 @@ func TestGitRecorder_Handle_RecordsWhenSHAPresent(t *testing.T) {
 
 	payload := hooks.HookPayload{
 		Event:   hooks.HookSliceCompleted,
-		EpochID: "aura-plugins--01968a3c-1111-7000-8000-000000000123",
+		EpochId: "aura-plugins--01968a3c-1111-7000-8000-000000000123",
 		Phase:   protocol.PhaseWorkerSlices,
 		Data:    map[string]any{hooks.GitCommitDataKey: sha, "slice": "S9"},
 	}
@@ -195,7 +195,7 @@ func TestGitRecorder_Handle_NoOpWhenSHAAbsent(t *testing.T) {
 
 	payload := hooks.HookPayload{
 		Event:   hooks.HookSliceCompleted,
-		EpochID: "epoch-x",
+		EpochId: "epoch-x",
 		Data:    map[string]any{"slice": "S9"}, // no "sha" key
 	}
 	if err := gr.Handle(ctx, payload); err != nil {

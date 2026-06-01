@@ -11,7 +11,7 @@
 //
 //   - FormatAuditEvent      — single audit event.
 //   - FormatAuditEvents     — list of audit events (events / timeline output).
-//   - FormatContextList     — list of (Kind, ContextID) edges for one event.
+//   - FormatContextList     — list of (Kind, ContextId) edges for one event.
 //   - FormatAgentEntry      — single registered well-known agent + categories.
 //   - FormatAgentEntries    — list of registered agents (agents list).
 package formatters
@@ -31,7 +31,7 @@ import (
 // camelCase keys mirror protocol.AuditEvent's existing struct tags so the
 // formatter shape is byte-stable across the public façade.
 type auditEventJSON struct {
-	EpochID   string         `json:"epochId"`
+	EpochId   string         `json:"epochId"`
 	Phase     string         `json:"phase"`
 	Role      string         `json:"role"`
 	EventType string         `json:"eventType"`
@@ -41,7 +41,7 @@ type auditEventJSON struct {
 
 func toAuditEventJSON(e protocol.AuditEvent) auditEventJSON {
 	return auditEventJSON{
-		EpochID:   e.EpochID,
+		EpochId:   e.EpochId,
 		Phase:     string(e.Phase),
 		Role:      e.Role,
 		EventType: string(e.EventType),
@@ -113,7 +113,7 @@ func FormatAuditEvents(events []protocol.AuditEvent, format types.OutputFormat) 
 
 func renderAuditEventText(e protocol.AuditEvent) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "EpochID:   %s\n", e.EpochID)
+	fmt.Fprintf(&b, "EpochId:   %s\n", e.EpochId)
 	fmt.Fprintf(&b, "Phase:     %s\n", e.Phase)
 	fmt.Fprintf(&b, "Role:      %s\n", e.Role)
 	fmt.Fprintf(&b, "EventType: %s\n", e.EventType)
@@ -133,7 +133,7 @@ func renderAuditEventText(e protocol.AuditEvent) string {
 func renderAuditEventListLine(e protocol.AuditEvent) string {
 	ts := e.Timestamp.UTC().Format(time.RFC3339)
 	return fmt.Sprintf("%s [%s] [%s] %s/%s — %s",
-		ts, e.Phase, e.Role, e.EpochID, e.EventType, summarisePayload(e.Payload))
+		ts, e.Phase, e.Role, e.EpochId, e.EventType, summarisePayload(e.Payload))
 }
 
 // summarisePayload returns a one-line summary suitable for the list view.
@@ -155,17 +155,17 @@ func summarisePayload(payload map[string]any) string {
 	return s
 }
 
-// contextJSON is the JSON wire representation of one (Kind, ContextID) edge.
+// contextJSON is the JSON wire representation of one (Kind, ContextId) edge.
 // Mirrors protocol.Context's existing tags.
 type contextJSON struct {
 	Kind      string `json:"kind"`
-	ContextID string `json:"contextId"`
+	ContextId string `json:"contextId"`
 }
 
 func toContextJSON(c protocol.Context) contextJSON {
 	return contextJSON{
 		Kind:      string(c.Kind),
-		ContextID: c.ContextID,
+		ContextId: c.ContextId,
 	}
 }
 
@@ -196,7 +196,7 @@ func FormatContextList(contexts []protocol.Context, format types.OutputFormat) (
 		}
 		lines := make([]string, 0, len(contexts))
 		for _, c := range contexts {
-			lines = append(lines, fmt.Sprintf("%s: %s", c.Kind, c.ContextID))
+			lines = append(lines, fmt.Sprintf("%s: %s", c.Kind, c.ContextId))
 		}
 		return strings.Join(lines, "\n"), nil
 	default:
@@ -205,20 +205,20 @@ func FormatContextList(contexts []protocol.Context, format types.OutputFormat) (
 }
 
 // AgentEntry is the tuple presented by `pasture task agents list / show`. It
-// pairs a Provenance AgentID (wire string) with its registered well-known
+// pairs a Provenance AgentId (wire string) with its registered well-known
 // name (if any), and the AutomatonRole / PastureRole stored in
 // pasture_agent_categories. Lives in the formatters package because it is the
 // view-model for one CLI subcommand and has no business existing inside the
 // tracker (which deals in raw rows).
 type AgentEntry struct {
-	AgentID       string
+	AgentId       string
 	WellKnownName string // empty when no row exists in pasture_well_known_agents
 	AutomatonRole protocol.AutomatonRole
 	PastureRole   protocol.PastureRole
 }
 
 type agentEntryJSON struct {
-	AgentID       string `json:"agentId"`
+	AgentId       string `json:"agentId"`
 	WellKnownName string `json:"wellKnownName,omitempty"`
 	AutomatonRole string `json:"automatonRole"`
 	PastureRole   string `json:"pastureRole"`
@@ -226,7 +226,7 @@ type agentEntryJSON struct {
 
 func toAgentEntryJSON(a AgentEntry) agentEntryJSON {
 	return agentEntryJSON{
-		AgentID:       a.AgentID,
+		AgentId:       a.AgentId,
 		WellKnownName: a.WellKnownName,
 		AutomatonRole: string(a.AutomatonRole),
 		PastureRole:   string(a.PastureRole),
@@ -252,7 +252,7 @@ func FormatAgentEntry(a AgentEntry, format types.OutputFormat) (string, error) {
 		return string(b), nil
 	case types.OutputText:
 		var b strings.Builder
-		fmt.Fprintf(&b, "AgentID:        %s\n", a.AgentID)
+		fmt.Fprintf(&b, "AgentId:        %s\n", a.AgentId)
 		if a.WellKnownName != "" {
 			fmt.Fprintf(&b, "WellKnownName:  %s\n", a.WellKnownName)
 		}
@@ -296,7 +296,7 @@ func FormatAgentEntries(entries []AgentEntry, format types.OutputFormat) (string
 				name = "(unnamed)"
 			}
 			lines = append(lines, fmt.Sprintf("%s [%s/%s] %s",
-				e.AgentID, e.AutomatonRole, e.PastureRole, name))
+				e.AgentId, e.AutomatonRole, e.PastureRole, name))
 		}
 		return strings.Join(lines, "\n"), nil
 	default:

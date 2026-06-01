@@ -82,7 +82,7 @@ func captureRowCounts(t *testing.T, dbPath string) rowCountSnapshot {
 }
 
 // captureWellKnownMap returns the (name → agent_id) map currently stored in
-// pasture_well_known_agents. Used by Scenario 14 to assert pointwise AgentID
+// pasture_well_known_agents. Used by Scenario 14 to assert pointwise AgentId
 // identity across two daemon starts.
 func captureWellKnownMap(t *testing.T, dbPath string) map[string]string {
 	t.Helper()
@@ -100,11 +100,11 @@ func captureWellKnownMap(t *testing.T, dbPath string) map[string]string {
 
 	out := make(map[string]string)
 	for rows.Next() {
-		var name, agentID string
-		if err := rows.Scan(&name, &agentID); err != nil {
+		var name, agentId string
+		if err := rows.Scan(&name, &agentId); err != nil {
 			t.Fatalf("captureWellKnownMap: scan: %v", err)
 		}
-		out[name] = agentID
+		out[name] = agentId
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("captureWellKnownMap: rows.Err: %v", err)
@@ -131,11 +131,11 @@ func captureCategoriesMap(t *testing.T, dbPath string) map[string]string {
 
 	out := make(map[string]string)
 	for rows.Next() {
-		var agentID, role string
-		if err := rows.Scan(&agentID, &role); err != nil {
+		var agentId, role string
+		if err := rows.Scan(&agentId, &role); err != nil {
 			t.Fatalf("captureCategoriesMap: scan: %v", err)
 		}
-		out[agentID] = role
+		out[agentId] = role
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("captureCategoriesMap: rows.Err: %v", err)
@@ -232,7 +232,7 @@ func TestWellKnownAgents_RoleBreakdown(t *testing.T) {
 // side) asserts that after one RegisterWellKnownAgents call against a fresh
 // database, every well-known name from the registry has:
 //
-//   - A row in pasture_well_known_agents with the correct AgentID format.
+//   - A row in pasture_well_known_agents with the correct AgentId format.
 //   - A row in pasture_agent_categories with the correct AutomatonRole and
 //     pasture_role='None'.
 //   - A cached entry in WellKnownAgentCache that matches the disk row.
@@ -255,23 +255,23 @@ func TestRegisterWellKnownAgents_AllNamesPresent(t *testing.T) {
 
 	for _, spec := range tasks.WellKnownAgents() {
 		t.Run(spec.Name, func(t *testing.T) {
-			cachedID, ok := cache.Get(spec.Name)
+			cachedId, ok := cache.Get(spec.Name)
 			if !ok {
 				t.Fatalf("cache missing entry for %q", spec.Name)
 			}
 
-			diskID, ok := wellKnownOnDisk[spec.Name]
+			diskId, ok := wellKnownOnDisk[spec.Name]
 			if !ok {
 				t.Fatalf("pasture_well_known_agents missing row for %q", spec.Name)
 			}
 
-			if cachedID.String() != diskID {
-				t.Errorf("cache AgentID %q != disk AgentID %q for %q", cachedID.String(), diskID, spec.Name)
+			if cachedId.String() != diskId {
+				t.Errorf("cache AgentId %q != disk AgentId %q for %q", cachedId.String(), diskId, spec.Name)
 			}
 
-			roleOnDisk, ok := categoriesOnDisk[diskID]
+			roleOnDisk, ok := categoriesOnDisk[diskId]
 			if !ok {
-				t.Fatalf("pasture_agent_categories missing row for agent_id=%q (name=%q)", diskID, spec.Name)
+				t.Fatalf("pasture_agent_categories missing row for agent_id=%q (name=%q)", diskId, spec.Name)
 			}
 			if roleOnDisk != string(spec.Role) {
 				t.Errorf("automaton_role for %q = %q, want %q", spec.Name, roleOnDisk, spec.Role)
@@ -279,8 +279,8 @@ func TestRegisterWellKnownAgents_AllNamesPresent(t *testing.T) {
 
 			// Verify the namespace is "pasture" (worker agent registration
 			// path uses WellKnownAgentNamespace).
-			if !strings.HasPrefix(diskID, tasks.WellKnownAgentNamespace+"--") {
-				t.Errorf("AgentID %q for %q does not have %q-- namespace prefix", diskID, spec.Name, tasks.WellKnownAgentNamespace)
+			if !strings.HasPrefix(diskId, tasks.WellKnownAgentNamespace+"--") {
+				t.Errorf("AgentId %q for %q does not have %q-- namespace prefix", diskId, spec.Name, tasks.WellKnownAgentNamespace)
 			}
 		})
 	}
@@ -311,12 +311,12 @@ func TestRegisterWellKnownAgents_PastureRoleAlwaysNone(t *testing.T) {
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var agentID, pastureRole string
-		if err := rows.Scan(&agentID, &pastureRole); err != nil {
+		var agentId, pastureRole string
+		if err := rows.Scan(&agentId, &pastureRole); err != nil {
 			t.Fatalf("scan: %v", err)
 		}
 		if pastureRole != string(protocol.PastureRoleNone) {
-			t.Errorf("agent_id %q: pasture_role = %q, want %q", agentID, pastureRole, protocol.PastureRoleNone)
+			t.Errorf("agent_id %q: pasture_role = %q, want %q", agentId, pastureRole, protocol.PastureRoleNone)
 		}
 	}
 }
@@ -341,7 +341,7 @@ func TestRegisterWellKnownAgents_PastureRoleAlwaysNone(t *testing.T) {
 //     counts diverge.
 //   - Accidentally writing a new `agents_software` row even on a hit → only
 //     the agents counts diverge.
-//   - Caching the wrong AgentID → on-disk identical, in-memory cache wrong.
+//   - Caching the wrong AgentId → on-disk identical, in-memory cache wrong.
 func TestRegisterWellKnownAgents_TwoRestartsIdempotent(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 
@@ -419,10 +419,10 @@ func TestRegisterWellKnownAgents_TwoRestartsIdempotent(t *testing.T) {
 	// the second run (every cached entry must be the same as the recovered
 	// disk entry — this catches "cache silently re-mints" bugs).
 	for _, name := range cacheNames2 {
-		cachedID, _ := cache2.Get(name)
-		diskID := wellKnown2[name]
-		if cachedID.String() != diskID {
-			t.Errorf("name %q: cache AgentID %q != disk AgentID %q after second start", name, cachedID.String(), diskID)
+		cachedId, _ := cache2.Get(name)
+		diskId := wellKnown2[name]
+		if cachedId.String() != diskId {
+			t.Errorf("name %q: cache AgentId %q != disk AgentId %q after second start", name, cachedId.String(), diskId)
 		}
 	}
 }

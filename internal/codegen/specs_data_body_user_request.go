@@ -7,28 +7,28 @@ var userRequestBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "user-req-verbatim-capture",
+			Id:        "user-req-verbatim-capture",
 			Given:     "user provides request",
 			When:      "capturing",
 			Then:      "store verbatim without paraphrasing",
 			ShouldNot: "summarize or interpret",
 		},
 		{
-			ID:        "user-req-classify-label",
+			Id:        "user-req-classify-label",
 			Given:     "request captured",
 			When:      "classifying",
 			Then:      "use `aura:p1-user:s1_1-classify` label",
 			ShouldNot: "use other labels for the initial capture",
 		},
 		{
-			ID:        "user-req-research-depth",
+			Id:        "user-req-research-depth",
 			Given:     "classification complete",
 			When:      "user confirms research depth",
 			Then:      "run s1_2-research and s1_3-explore in parallel",
 			ShouldNot: "skip research depth confirmation",
 		},
 		{
-			ID:        "user-req-proceed-to-elicit",
+			Id:        "user-req-proceed-to-elicit",
 			Given:     "Phase 1 complete",
 			When:      "proceeding",
 			Then:      "invoke `/aura:user-elicit` for Phase 2",
@@ -38,7 +38,7 @@ var userRequestBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:    "user-req-substeps",
+			Id:    "user-req-substeps",
 			Title: "Phase 1 Sub-steps",
 			Content: "| Sub-step | Label | Description | Parallel? |\n" +
 				"|----------|-------|-------------|----------|\n" +
@@ -47,12 +47,12 @@ var userRequestBody = SkillBody{
 				"| s1_3-explore | `aura:p1-user:s1_3-explore` | Codebase exploration for integration points | Parallel with s1_2 |",
 		},
 		{
-			ID:      "user-req-step1",
+			Id:      "user-req-step1",
 			Title:   "Step 1: Capture and Classify (s1_1)",
 			Content: "",
 			Subsections: []ProseSection{
 				{
-					ID:    "user-req-step1-capture",
+					Id:    "user-req-step1-capture",
 					Title: "Capture verbatim and create the request task",
 					Content: "1. **Get the user's request verbatim:**\n" +
 						"   ```\n" +
@@ -82,7 +82,7 @@ var userRequestBody = SkillBody{
 			},
 		},
 		{
-			ID:    "user-req-step2",
+			Id:    "user-req-step2",
 			Title: "Step 2: Research Depth Confirmation",
 			Content: "After classification, confirm research depth with the user:\n" +
 				"\n" +
@@ -100,12 +100,12 @@ var userRequestBody = SkillBody{
 				"```",
 		},
 		{
-			ID:      "user-req-step3",
+			Id:      "user-req-step3",
 			Title:   "Step 3: Record Depth + Spawn Parallel Agents (s1_2 || s1_3)",
 			Content: "",
 			Subsections: []ProseSection{
 				{
-					ID:    "user-req-step3-record",
+					Id:    "user-req-step3-record",
 					Title: "Record depth and spawn agents",
 					Content: "Record the user's depth choice, then spawn two parallel agents:\n" +
 						"\n" +
@@ -117,7 +117,7 @@ var userRequestBody = SkillBody{
 						"Spawn both agents in parallel (via Task tool with `run_in_background: true`). Each agent invokes its dedicated skill.",
 				},
 				{
-					ID:    "user-req-step3-research",
+					Id:    "user-req-step3-research",
 					Title: "s1_2-research: Domain Research",
 					Content: "Invoke `/aura:research` with:\n" +
 						"- **topic:** derived from the user's request\n" +
@@ -154,7 +154,7 @@ var userRequestBody = SkillBody{
 						"```",
 				},
 				{
-					ID:    "user-req-step3-explore",
+					Id:    "user-req-step3-explore",
 					Title: "s1_3-explore: Codebase Exploration",
 					Content: "Invoke `/aura:explore` with:\n" +
 						"- **topic:** derived from the user's request\n" +
@@ -192,14 +192,14 @@ var userRequestBody = SkillBody{
 						"```",
 				},
 				{
-					ID:      "user-req-step3-completion",
+					Id:      "user-req-step3-completion",
 					Title:   "Completion",
 					Content: "Both agents must complete before proceeding to Phase 2. Their findings are recorded as comments on the REQUEST task, available for the elicitation survey and proposal phases.",
 				},
 			},
 		},
 		{
-			ID:    "user-req-example",
+			Id:    "user-req-example",
 			Title: "Example",
 			Content: "User says: \"I want to add a logout button to the header that clears the session and redirects to the login page\"\n" +
 				"\n" +
@@ -215,7 +215,7 @@ var userRequestBody = SkillBody{
 				"```",
 		},
 		{
-			ID:    "user-req-next-phase",
+			Id:    "user-req-next-phase",
 			Title: "Next Phase",
 			Content: "After Phase 1 completes, invoke `/aura:user-elicit` to begin requirements elicitation (Phase 2).\n" +
 				"\n" +

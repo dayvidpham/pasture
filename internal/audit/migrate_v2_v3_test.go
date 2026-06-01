@@ -402,7 +402,7 @@ func TestMigrateV2toV3_AgentCategories_Layout(t *testing.T) {
 //     epoch correlation now in context_edges with kind='EpochContext'.
 func TestMigrateV2toV3_LegacyAuditEventsBackfilled(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "v3_legacy.db")
-	originalID := seedLegacyV1DB(t, dbPath)
+	originalId := seedLegacyV1DB(t, dbPath)
 
 	db := openDB(t, dbPath)
 	if err := audit.Migrate(db); err != nil {
@@ -422,12 +422,12 @@ func TestMigrateV2toV3_LegacyAuditEventsBackfilled(t *testing.T) {
 	// payload, agent_id all read from the post-v4 audit_events shape.
 	var (
 		gotPhase, gotType, gotPayload string
-		gotAgentID                    sql.NullString
+		gotAgentId                    sql.NullString
 	)
 	err := db.QueryRow(
 		`SELECT phase, event_type, payload, agent_id FROM audit_events WHERE id=?`,
-		originalID,
-	).Scan(&gotPhase, &gotType, &gotPayload, &gotAgentID)
+		originalId,
+	).Scan(&gotPhase, &gotType, &gotPayload, &gotAgentId)
 	if err != nil {
 		t.Fatalf("legacy row probe: %v", err)
 	}
@@ -439,7 +439,7 @@ func TestMigrateV2toV3_LegacyAuditEventsBackfilled(t *testing.T) {
 	var gotEpoch string
 	err = db.QueryRow(
 		`SELECT context_id FROM context_edges WHERE event_id=? AND context_kind='EpochContext'`,
-		originalID,
+		originalId,
 	).Scan(&gotEpoch)
 	if err != nil {
 		t.Fatalf("epoch_id probe via context_edges: %v", err)
@@ -450,7 +450,7 @@ func TestMigrateV2toV3_LegacyAuditEventsBackfilled(t *testing.T) {
 
 	// agent_id MUST be populated by the v3 backfill — every legacy row
 	// gets attributed to a synthetic SoftwareAgent for its legacy role.
-	if !gotAgentID.Valid {
+	if !gotAgentId.Valid {
 		t.Fatal("audit_events.agent_id is NULL post-v3 Migrate; backfill failed")
 	}
 
@@ -459,10 +459,10 @@ func TestMigrateV2toV3_LegacyAuditEventsBackfilled(t *testing.T) {
 	var agentName string
 	err = db.QueryRow(
 		`SELECT name FROM agents_software WHERE agent_id=?`,
-		gotAgentID.String,
+		gotAgentId.String,
 	).Scan(&agentName)
 	if err != nil {
-		t.Fatalf("resolve agent_id %q via agents_software: %v", gotAgentID.String, err)
+		t.Fatalf("resolve agent_id %q via agents_software: %v", gotAgentId.String, err)
 	}
 	if agentName != "pasture/legacy-role/supervisor" {
 		t.Errorf("agents_software.name = %q, want %q",
@@ -472,24 +472,24 @@ func TestMigrateV2toV3_LegacyAuditEventsBackfilled(t *testing.T) {
 	// audit_events.role MUST be gone post-v3 (S3 drops it).
 	// audit_events.epoch_id MUST be gone post-v4 (S4 drops it).
 	cols := tableInfo(t, db, "audit_events")
-	hasRole, hasEpochID, hasAgentID := false, false, false
+	hasRole, hasEpochId, hasAgentId := false, false, false
 	for _, c := range cols {
 		switch c.name {
 		case "role":
 			hasRole = true
 		case "epoch_id":
-			hasEpochID = true
+			hasEpochId = true
 		case "agent_id":
-			hasAgentID = true
+			hasAgentId = true
 		}
 	}
 	if hasRole {
 		t.Error("audit_events.role column still present post-Migrate; S3 must drop it via table-rebuild")
 	}
-	if hasEpochID {
+	if hasEpochId {
 		t.Error("audit_events.epoch_id column still present post-Migrate; S4 must drop it via table-rebuild")
 	}
-	if !hasAgentID {
+	if !hasAgentId {
 		t.Error("audit_events.agent_id column missing post-Migrate; S3 must add it")
 	}
 }
@@ -510,7 +510,7 @@ func TestMigrateV2toV3_LegacyAuditEventsBackfilled(t *testing.T) {
 // different context_id to avoid colliding with the auto-backfill.
 func TestMigrateV2toV3_NewTablesInsertable(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "v3_insert.db")
-	eventID := seedLegacyV1DB(t, dbPath)
+	eventId := seedLegacyV1DB(t, dbPath)
 
 	db := openDB(t, dbPath)
 	if err := audit.Migrate(db); err != nil {
@@ -531,10 +531,10 @@ func TestMigrateV2toV3_NewTablesInsertable(t *testing.T) {
 	// Insert one new row in each of the three new tables. For
 	// context_edges, use a distinct context_id from the auto-backfilled
 	// row (whose context_id is "epoch-pre-s2", from seedLegacyV1DB).
-	const userContextID = "aura-plugins--01968a3c-1234-7000-8000-000000000001"
+	const userContextId = "aura-plugins--01968a3c-1234-7000-8000-000000000001"
 	mustExec(t, db,
 		`INSERT INTO context_edges (event_id, context_kind, context_id) VALUES (?, ?, ?)`,
-		eventID, "SliceContext", userContextID,
+		eventId, "SliceContext", userContextId,
 	)
 	mustExec(t, db,
 		`INSERT INTO pasture_agent_categories (agent_id, automaton_role, pasture_role) VALUES (?, ?, ?)`,
@@ -572,19 +572,19 @@ func TestMigrateV2toV3_NewTablesInsertable(t *testing.T) {
 	// Read-back the user-inserted context_edges row to verify the
 	// composite PK round-trips.
 	var (
-		gotEventID        int64
-		gotKind, gotCtxID string
+		gotEventId        int64
+		gotKind, gotCtxId string
 	)
 	err := db.QueryRow(
 		`SELECT event_id, context_kind, context_id FROM context_edges WHERE context_id = ?`,
-		userContextID,
-	).Scan(&gotEventID, &gotKind, &gotCtxID)
+		userContextId,
+	).Scan(&gotEventId, &gotKind, &gotCtxId)
 	if err != nil {
 		t.Fatalf("context_edges read-back: %v", err)
 	}
-	if gotEventID != eventID || gotKind != "SliceContext" {
+	if gotEventId != eventId || gotKind != "SliceContext" {
 		t.Errorf("context_edges row mismatch: event_id=%d kind=%q, want event_id=%d kind=%q",
-			gotEventID, gotKind, eventID, "SliceContext")
+			gotEventId, gotKind, eventId, "SliceContext")
 	}
 }
 
@@ -633,7 +633,7 @@ func TestMigrateV2toV3_WellKnownAgents_NameUniqueEnforced(t *testing.T) {
 // auto-backfill so the assertions measure only user-insert behaviour.
 func TestMigrateV2toV3_ContextEdges_PKEnforced(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "v3_pk.db")
-	eventID := seedLegacyV1DB(t, dbPath)
+	eventId := seedLegacyV1DB(t, dbPath)
 	db := openDB(t, dbPath)
 	if err := audit.Migrate(db); err != nil {
 		t.Fatalf("audit.Migrate: %v", err)
@@ -648,12 +648,12 @@ func TestMigrateV2toV3_ContextEdges_PKEnforced(t *testing.T) {
 
 	mustExec(t, db,
 		`INSERT INTO context_edges (event_id, context_kind, context_id) VALUES (?, ?, ?)`,
-		eventID, "SliceContext", "ctx-1",
+		eventId, "SliceContext", "ctx-1",
 	)
 	// Duplicate triple must fail.
 	_, err := db.Exec(
 		`INSERT INTO context_edges (event_id, context_kind, context_id) VALUES (?, ?, ?)`,
-		eventID, "SliceContext", "ctx-1",
+		eventId, "SliceContext", "ctx-1",
 	)
 	if err == nil {
 		t.Fatalf("expected PK violation on duplicate (event_id,kind,context_id), got nil")
@@ -661,7 +661,7 @@ func TestMigrateV2toV3_ContextEdges_PKEnforced(t *testing.T) {
 	// Different context_kind on the same (event_id, context_id) must succeed.
 	mustExec(t, db,
 		`INSERT INTO context_edges (event_id, context_kind, context_id) VALUES (?, ?, ?)`,
-		eventID, "GitContext", "ctx-1",
+		eventId, "GitContext", "ctx-1",
 	)
 	var n int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM context_edges`).Scan(&n); err != nil {

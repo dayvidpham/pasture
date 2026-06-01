@@ -82,7 +82,7 @@ var taskUpdateCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		in := handlers.TaskUpdateInput{
 			DBPath: flagDBPath,
-			IDStr:  args[0],
+			IdStr:  args[0],
 		}
 		if cmd.Flags().Changed("title") {
 			s, _ := cmd.Flags().GetString("title")

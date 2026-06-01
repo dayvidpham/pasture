@@ -177,8 +177,8 @@ func (g *GitRecorder) Handle(ctx context.Context, payload HookPayload) error {
 		"sha":       sha,
 		"hookEvent": string(payload.Event),
 	}
-	if payload.EpochID != "" {
-		auditPayload["epochId"] = payload.EpochID
+	if payload.EpochId != "" {
+		auditPayload["epochId"] = payload.EpochId
 	}
 	if payload.Phase != "" {
 		auditPayload["phase"] = string(payload.Phase)

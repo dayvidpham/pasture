@@ -66,7 +66,7 @@ func (rw *ReviewPhaseWorkflow) Run(ctx workflow.Context, input ReviewInput) (*Re
 	}
 
 	return &ReviewResult{
-		PhaseID:    input.PhaseID,
+		PhaseId:    input.PhaseId,
 		Success:    true,
 		VoteResult: result,
 	}, nil

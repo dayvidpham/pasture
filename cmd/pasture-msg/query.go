@@ -31,12 +31,12 @@ and active session count.`,
 		}
 		format := resolveFormat(cmd, cfg)
 
-		epochID, _ := cmd.Flags().GetString("epoch-id")
+		epochId, _ := cmd.Flags().GetString("epoch-id")
 
 		code, err := handlers.QueryState(
 			context.Background(),
 			cfg.Connection,
-			epochID,
+			epochId,
 			format,
 			nil,
 		)

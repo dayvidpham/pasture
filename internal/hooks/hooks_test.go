@@ -91,7 +91,7 @@ func (h *errorHandler) Events() []hooks.HookEvent                           { re
 func samplePayload(event hooks.HookEvent) hooks.HookPayload {
 	return hooks.HookPayload{
 		Event:   event,
-		EpochID: "test-epoch-001",
+		EpochId: "test-epoch-001",
 		Phase:   protocol.PhaseWorkerSlices,
 		Data:    map[string]any{"slice": "S4"},
 	}
@@ -282,8 +282,8 @@ func TestManager_Dispatch_Concurrent_AllHandlersReceivePayload(t *testing.T) {
 		if h.count() != 1 {
 			t.Errorf("handler[%d] called %d times, want 1", i, h.count())
 		}
-		if p := h.payloads(); len(p) > 0 && p[0].EpochID != "test-epoch-001" {
-			t.Errorf("handler[%d] received wrong EpochID: %q", i, p[0].EpochID)
+		if p := h.payloads(); len(p) > 0 && p[0].EpochId != "test-epoch-001" {
+			t.Errorf("handler[%d] received wrong EpochId: %q", i, p[0].EpochId)
 		}
 	}
 }
@@ -428,7 +428,7 @@ func TestHookPayload_ZeroPhase_IsAcceptable(t *testing.T) {
 
 	payload := hooks.HookPayload{
 		Event:   hooks.HookSessionStarted,
-		EpochID: "epoch-xyz",
+		EpochId: "epoch-xyz",
 		// Phase intentionally omitted (zero value "")
 		Data: map[string]any{"sessionId": "sess-001"},
 	}

@@ -28,7 +28,7 @@ type EnumType struct {
 
 // EnumValue is a single <value id="..." .../> element inside an <enum>.
 type EnumValue struct {
-	ID          string `xml:"id,attr"`
+	Id          string `xml:"id,attr"`
 	Description string `xml:"description,attr"`
 	// Optional attrs present on SeverityLevel values only.
 	Blocks string `xml:"blocks,attr,omitempty"`
@@ -45,7 +45,7 @@ type LabelsSection struct {
 
 // LabelElem is a single <label .../> element.
 type LabelElem struct {
-	ID          string `xml:"id,attr"`
+	Id          string `xml:"id,attr"`
 	Value       string `xml:"value,attr"`
 	Special     string `xml:"special,attr,omitempty"`
 	PhaseRef    string `xml:"phase-ref,attr,omitempty"`
@@ -64,7 +64,7 @@ type ReviewAxesSection struct {
 
 // ReviewAxisElem is a single <axis ...> element.
 type ReviewAxisElem struct {
-	ID           string            `xml:"id,attr"`
+	Id           string            `xml:"id,attr"`
 	Letter       string            `xml:"letter,attr"`
 	Name         string            `xml:"name,attr"`
 	Short        string            `xml:"short,attr"`
@@ -86,7 +86,7 @@ type PhasesSection struct {
 
 // PhaseElem is a single <phase id="..." number="..." domain="..." name="..."> element.
 type PhaseElem struct {
-	ID          string           `xml:"id,attr"`
+	Id          string           `xml:"id,attr"`
 	Number      string           `xml:"number,attr"`
 	Domain      string           `xml:"domain,attr"`
 	Name        string           `xml:"name,attr"`
@@ -108,7 +108,7 @@ type SubstepsElem struct {
 
 // SubstepElem is a single <substep ...> element.
 type SubstepElem struct {
-	ID            string               `xml:"id,attr"`
+	Id            string               `xml:"id,attr"`
 	Type          string               `xml:"type,attr"`
 	Execution     string               `xml:"execution,attr"`
 	Order         string               `xml:"order,attr"`
@@ -140,7 +140,7 @@ type StartupSequenceElem struct {
 // startup-sequence and procedure-steps sections.
 type ProcedureStepElem struct {
 	Order       string `xml:"order,attr"`
-	ID          string `xml:"id,attr"`
+	Id          string `xml:"id,attr"`
 	NextState   string `xml:"next-state,attr,omitempty"`
 	Instruction string `xml:"instruction"`
 	Command     string `xml:"command,omitempty"`
@@ -152,7 +152,7 @@ type ProcedureStepElem struct {
 // ExampleElem is an <example id="..." lang="..." label="..."> element.
 // The <code> child contains CDATA and is handled by manual fmt.Fprintf.
 type ExampleElem struct {
-	ID              string `xml:"id,attr"`
+	Id              string `xml:"id,attr"`
 	Lang            string `xml:"lang,attr"`
 	Label           string `xml:"label,attr"`
 	AlsoIllustrates string `xml:"also-illustrates,attr,omitempty"`
@@ -241,7 +241,7 @@ type RolesSection struct {
 
 // RoleElem is a single <role id="..." name="..." description="..."> element.
 type RoleElem struct {
-	ID                 string           `xml:"id,attr"`
+	Id                 string           `xml:"id,attr"`
 	Name               string           `xml:"name,attr"`
 	Description        string           `xml:"description,attr"`
 	OwnedPhases        *OwnedPhasesElem `xml:"owns-phases"`
@@ -301,7 +301,7 @@ type BehaviorsElem struct {
 
 // BehaviorElem is a single <behavior id="..." given="..." when="..." then="..." should-not="..."/> element.
 type BehaviorElem struct {
-	ID        string `xml:"id,attr"`
+	Id        string `xml:"id,attr"`
 	Given     string `xml:"given,attr"`
 	When      string `xml:"when,attr"`
 	Then      string `xml:"then,attr"`
@@ -318,7 +318,7 @@ type CommandsSection struct {
 
 // CommandElem is a single <command id="..." name="..." ...> element.
 type CommandElem struct {
-	ID            string             `xml:"id,attr"`
+	Id            string             `xml:"id,attr"`
 	Name          string             `xml:"name,attr"`
 	RoleRef       string             `xml:"role-ref,attr,omitempty"`
 	Description   string             `xml:"description,attr"`
@@ -355,7 +355,7 @@ type HandoffsSection struct {
 
 // HandoffElem is a single <handoff id="..." ...> element.
 type HandoffElem struct {
-	ID              string               `xml:"id,attr"`
+	Id              string               `xml:"id,attr"`
 	SourceRole      string               `xml:"source-role,attr"`
 	TargetRole      string               `xml:"target-role,attr"`
 	AtPhase         string               `xml:"at-phase,attr"`
@@ -406,7 +406,7 @@ type ConstraintsSection struct {
 // ConstraintElem documents a single <constraint ...> element.
 // NOT used for xml.Marshal.
 type ConstraintElem struct {
-	ID        string
+	Id        string
 	Given     string
 	When      string
 	Then      string
@@ -445,7 +445,7 @@ type DocumentsSection struct {
 
 // DocumentElem is a single <document id="..." path="..." purpose="..."> element.
 type DocumentElem struct {
-	ID      string      `xml:"id,attr"`
+	Id      string      `xml:"id,attr"`
 	Path    string      `xml:"path,attr"`
 	Purpose string      `xml:"purpose,attr"`
 	Covers  *CoversElem `xml:"covers"`
@@ -573,7 +573,7 @@ type ChecklistsSection struct {
 
 // ChecklistElem is a single <checklist id="..." role-ref="..." gate="..."> element.
 type ChecklistElem struct {
-	ID      string              `xml:"id,attr"`
+	Id      string              `xml:"id,attr"`
 	RoleRef string              `xml:"role-ref,attr"`
 	Gate    string              `xml:"gate,attr"`
 	Items   []ChecklistItemElem `xml:"item"`
@@ -581,7 +581,7 @@ type ChecklistElem struct {
 
 // ChecklistItemElem is an <item id="..." required="...">text</item> element.
 type ChecklistItemElem struct {
-	ID       string `xml:"id,attr"`
+	Id       string `xml:"id,attr"`
 	Required string `xml:"required,attr"`
 	Text     string `xml:",chardata"`
 }
@@ -596,7 +596,7 @@ type CoordinationCommandsSection struct {
 
 // CoordCmdElem is a single <coord-cmd id="..." action="..." template="..." .../> element.
 type CoordCmdElem struct {
-	ID       string `xml:"id,attr"`
+	Id       string `xml:"id,attr"`
 	Action   string `xml:"action,attr"`
 	Template string `xml:"template,attr"`
 	RoleRef  string `xml:"role-ref,attr,omitempty"`
@@ -613,7 +613,7 @@ type WorkflowsSection struct {
 
 // WorkflowElem is a single <workflow id="..." name="..." role-ref="..." description="..."> element.
 type WorkflowElem struct {
-	ID          string      `xml:"id,attr"`
+	Id          string      `xml:"id,attr"`
 	Name        string      `xml:"name,attr"`
 	RoleRef     string      `xml:"role-ref,attr"`
 	Description string      `xml:"description,attr"`
@@ -622,7 +622,7 @@ type WorkflowElem struct {
 
 // StageElem is a single <stage id="..." name="..." order="..." execution="..." ...> element.
 type StageElem struct {
-	ID             string         `xml:"id,attr"`
+	Id             string         `xml:"id,attr"`
 	Name           string         `xml:"name,attr"`
 	Order          string         `xml:"order,attr"`
 	Execution      string         `xml:"execution,attr"`
@@ -633,7 +633,7 @@ type StageElem struct {
 
 // ActionElem is <action id="..." instruction="..." .../> inside a stage.
 type ActionElem struct {
-	ID          string `xml:"id,attr"`
+	Id          string `xml:"id,attr"`
 	Instruction string `xml:"instruction,attr"`
 	Command     string `xml:"command,attr,omitempty"`
 }
@@ -654,7 +654,7 @@ type FiguresSection struct {
 
 // FigureElem is a single <figure id="..." title="..." type="..." section-ref="..."> element.
 type FigureElem struct {
-	ID           string    `xml:"id,attr"`
+	Id           string    `xml:"id,attr"`
 	Title        string    `xml:"title,attr"`
 	Type         string    `xml:"type,attr"`
 	SectionRef   string    `xml:"section-ref,attr"`

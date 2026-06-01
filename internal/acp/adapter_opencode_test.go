@@ -35,8 +35,8 @@ func TestOpenCodeAdapter_TextResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: unexpected error: %v", err)
 	}
-	if update.SessionID != "sess-oc-1" {
-		t.Errorf("SessionID: got %q, want %q", update.SessionID, "sess-oc-1")
+	if update.SessionId != "sess-oc-1" {
+		t.Errorf("SessionId: got %q, want %q", update.SessionId, "sess-oc-1")
 	}
 	if update.Role != "assistant" {
 		t.Errorf("Role: got %q, want %q", update.Role, "assistant")
@@ -50,8 +50,8 @@ func TestOpenCodeAdapter_TextResponse(t *testing.T) {
 	if update.TokensOut != 8 {
 		t.Errorf("TokensOut: got %d, want 8", update.TokensOut)
 	}
-	if update.EntryID != "msg-oc-001" {
-		t.Errorf("EntryID: got %q, want %q", update.EntryID, "msg-oc-001")
+	if update.EntryId != "msg-oc-001" {
+		t.Errorf("EntryId: got %q, want %q", update.EntryId, "msg-oc-001")
 	}
 	if len(update.Content) != 1 {
 		t.Fatalf("Content: expected 1 block, got %d", len(update.Content))
@@ -93,8 +93,8 @@ func TestOpenCodeAdapter_ToolCall(t *testing.T) {
 		t.Fatalf("ToolCalls: expected 1, got %d", len(update.ToolCalls))
 	}
 	tc := update.ToolCalls[0]
-	if tc.ToolCallID != "call-001" {
-		t.Errorf("ToolCallID: got %q, want %q", tc.ToolCallID, "call-001")
+	if tc.ToolCallId != "call-001" {
+		t.Errorf("ToolCallId: got %q, want %q", tc.ToolCallId, "call-001")
 	}
 	if tc.ToolKind != acp.ToolKindBash {
 		t.Errorf("ToolKind: got %q, want %q", tc.ToolKind, acp.ToolKindBash)

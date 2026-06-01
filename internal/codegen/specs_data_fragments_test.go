@@ -19,22 +19,22 @@ import (
 // ─── Helper constructors ──────────────────────────────────────────────────────
 
 // TestFragRef_MarkerOnly verifies that fragRef returns a ProseSection whose
-// only non-zero field is FragmentID.
+// only non-zero field is FragmentId.
 func TestFragRef_MarkerOnly(t *testing.T) {
 	ref := fragRef("my-frag")
-	assert.Equal(t, "my-frag", ref.FragmentID, "FragmentID must be set")
-	assert.Empty(t, ref.ID, "ID must be zero")
+	assert.Equal(t, "my-frag", ref.FragmentId, "FragmentId must be set")
+	assert.Empty(t, ref.Id, "ID must be zero")
 	assert.Empty(t, ref.Title, "Title must be zero")
 	assert.Empty(t, ref.Content, "Content must be zero")
 	assert.Empty(t, ref.Subsections, "Subsections must be zero")
 }
 
 // TestBehaviorRef_MarkerOnly verifies that behaviorRef returns a BehaviorSpec
-// whose only non-zero field is FragmentID.
+// whose only non-zero field is FragmentId.
 func TestBehaviorRef_MarkerOnly(t *testing.T) {
 	ref := behaviorRef("my-beh")
-	assert.Equal(t, "my-beh", ref.FragmentID, "FragmentID must be set")
-	assert.Empty(t, ref.ID, "ID must be zero")
+	assert.Equal(t, "my-beh", ref.FragmentId, "FragmentId must be set")
+	assert.Empty(t, ref.Id, "ID must be zero")
 	assert.Empty(t, ref.Given, "Given must be zero")
 	assert.Empty(t, ref.When, "When must be zero")
 	assert.Empty(t, ref.Then, "Then must be zero")
@@ -48,12 +48,12 @@ func TestBehaviorRef_MarkerOnly(t *testing.T) {
 // ("frag-behavior") with recognisable payloads.
 func fixtureRegistry() map[string]SharedFragment {
 	proseFrag := ProseSection{
-		ID:      "frag-prose",
+		Id:      "frag-prose",
 		Title:   "Shared Prose Title",
 		Content: "Shared prose content — byte-identical across all consumers.",
 	}
 	behFrag := BehaviorSpec{
-		ID:        "frag-behavior",
+		Id:        "frag-behavior",
 		Given:     "a shared behavior",
 		When:      "referenced by two consumers",
 		Then:      "both render byte-identical output",
@@ -61,12 +61,12 @@ func fixtureRegistry() map[string]SharedFragment {
 	}
 	return map[string]SharedFragment{
 		"frag-prose": {
-			ID:    "frag-prose",
+			Id:    "frag-prose",
 			Kind:  FragmentKindProse,
 			Prose: &proseFrag,
 		},
 		"frag-behavior": {
-			ID:       "frag-behavior",
+			Id:       "frag-behavior",
 			Kind:     FragmentKindBehavior,
 			Behavior: &behFrag,
 		},
@@ -81,12 +81,12 @@ func TestResolveBodyFragments_ProseSectionByteIdentical(t *testing.T) {
 
 	// Two consumers: each has one prose marker + one non-marker section.
 	sectionsA := []ProseSection{
-		{ID: "unique-a", Title: "Unique to A", Content: "Content A"},
+		{Id: "unique-a", Title: "Unique to A", Content: "Content A"},
 		fragRef("frag-prose"),
 	}
 	sectionsB := []ProseSection{
 		fragRef("frag-prose"),
-		{ID: "unique-b", Title: "Unique to B", Content: "Content B"},
+		{Id: "unique-b", Title: "Unique to B", Content: "Content B"},
 	}
 
 	resolvedA, _, err := resolveBodyFragments(sectionsA, nil, registry, "consumer-a", "skills/consumer-a/SKILL.md")
@@ -97,12 +97,12 @@ func TestResolveBodyFragments_ProseSectionByteIdentical(t *testing.T) {
 	// Locate the resolved fragment in each output slice.
 	var proseA, proseB *ProseSection
 	for i := range resolvedA {
-		if resolvedA[i].ID == "frag-prose" {
+		if resolvedA[i].Id == "frag-prose" {
 			proseA = &resolvedA[i]
 		}
 	}
 	for i := range resolvedB {
-		if resolvedB[i].ID == "frag-prose" {
+		if resolvedB[i].Id == "frag-prose" {
 			proseB = &resolvedB[i]
 		}
 	}
@@ -122,12 +122,12 @@ func TestResolveBodyFragments_BehaviorByteIdentical(t *testing.T) {
 	registry := fixtureRegistry()
 
 	behaviorsA := []BehaviorSpec{
-		{ID: "unique-a", Given: "only in A"},
+		{Id: "unique-a", Given: "only in A"},
 		behaviorRef("frag-behavior"),
 	}
 	behaviorsB := []BehaviorSpec{
 		behaviorRef("frag-behavior"),
-		{ID: "unique-b", Given: "only in B"},
+		{Id: "unique-b", Given: "only in B"},
 	}
 
 	_, resolvedA, err := resolveBodyFragments(nil, behaviorsA, registry, "consumer-a", "skills/consumer-a/SKILL.md")
@@ -137,12 +137,12 @@ func TestResolveBodyFragments_BehaviorByteIdentical(t *testing.T) {
 
 	var behA, behB *BehaviorSpec
 	for i := range resolvedA {
-		if resolvedA[i].ID == "frag-behavior" {
+		if resolvedA[i].Id == "frag-behavior" {
 			behA = &resolvedA[i]
 		}
 	}
 	for i := range resolvedB {
-		if resolvedB[i].ID == "frag-behavior" {
+		if resolvedB[i].Id == "frag-behavior" {
 			behB = &resolvedB[i]
 		}
 	}
@@ -155,15 +155,15 @@ func TestResolveBodyFragments_BehaviorByteIdentical(t *testing.T) {
 }
 
 // TestResolveBodyFragments_Passthrough verifies that entries without a
-// FragmentID are passed through unchanged.
+// FragmentId are passed through unchanged.
 func TestResolveBodyFragments_Passthrough(t *testing.T) {
 	registry := fixtureRegistry()
 
 	sections := []ProseSection{
-		{ID: "plain", Title: "Plain Section", Content: "No fragment reference"},
+		{Id: "plain", Title: "Plain Section", Content: "No fragment reference"},
 	}
 	behaviors := []BehaviorSpec{
-		{ID: "plain-beh", Given: "some input", When: "called", Then: "works"},
+		{Id: "plain-beh", Given: "some input", When: "called", Then: "works"},
 	}
 
 	resolvedSections, resolvedBehaviors, err := resolveBodyFragments(sections, behaviors, registry, "consumer", "skills/consumer/SKILL.md")
@@ -179,10 +179,10 @@ func TestResolveBodyFragments_EmptyRegistryNoOp(t *testing.T) {
 	emptyRegistry := map[string]SharedFragment{}
 
 	sections := []ProseSection{
-		{ID: "sec1", Title: "Section 1", Content: "Content 1"},
+		{Id: "sec1", Title: "Section 1", Content: "Content 1"},
 	}
 	behaviors := []BehaviorSpec{
-		{ID: "beh1", Given: "g", When: "w", Then: "t"},
+		{Id: "beh1", Given: "g", When: "w", Then: "t"},
 	}
 
 	resolvedSections, resolvedBehaviors, err := resolveBodyFragments(sections, behaviors, emptyRegistry, "consumer", "skills/consumer/SKILL.md")
@@ -192,7 +192,7 @@ func TestResolveBodyFragments_EmptyRegistryNoOp(t *testing.T) {
 }
 
 // TestResolveBodyFragments_UnresolvableMarkerError verifies that a marker with
-// a FragmentID not present in the registry returns an actionable error.
+// a FragmentId not present in the registry returns an actionable error.
 func TestResolveBodyFragments_UnresolvableMarkerError(t *testing.T) {
 	registry := fixtureRegistry()
 
@@ -207,7 +207,7 @@ func TestResolveBodyFragments_UnresolvableMarkerError(t *testing.T) {
 	assert.Contains(t, err.Error(), "consumer-x", "error must name the consumer skill")
 }
 
-// TestResolveBodyFragments_NestedSubsections verifies that FragmentID markers
+// TestResolveBodyFragments_NestedSubsections verifies that FragmentId markers
 // in ProseSection.Subsections are also resolved.
 func TestResolveBodyFragments_NestedSubsections(t *testing.T) {
 	registry := fixtureRegistry()
@@ -215,7 +215,7 @@ func TestResolveBodyFragments_NestedSubsections(t *testing.T) {
 	// Top-level section contains a nested subsection that is a marker.
 	sections := []ProseSection{
 		{
-			ID:    "parent",
+			Id:    "parent",
 			Title: "Parent Section",
 			Subsections: []ProseSection{
 				fragRef("frag-prose"),
@@ -227,7 +227,7 @@ func TestResolveBodyFragments_NestedSubsections(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, resolvedSections, 1, "one top-level section")
 	require.Len(t, resolvedSections[0].Subsections, 1, "one nested subsection")
-	assert.Equal(t, "frag-prose", resolvedSections[0].Subsections[0].ID,
+	assert.Equal(t, "frag-prose", resolvedSections[0].Subsections[0].Id,
 		"nested subsection marker must be resolved to the prose fragment")
 }
 
@@ -279,7 +279,7 @@ func TestFragmentToOwnerRefs_SortedDeterministic(t *testing.T) {
 // expected state in SLICE-1 with an empty SharedFragmentSpecs registry).
 func TestFragmentToOwnerRefs_EmptyWhenNoMarkers(t *testing.T) {
 	result := FragmentToOwnerRefs()
-	// In SLICE-1 the real SkillBodySpecs has no FragmentID markers.
+	// In SLICE-1 the real SkillBodySpecs has no FragmentId markers.
 	assert.Empty(t, result,
 		"FragmentToOwnerRefs must return empty map when no markers exist in SkillBodySpecs")
 }

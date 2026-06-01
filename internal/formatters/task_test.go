@@ -106,13 +106,13 @@ func TestFormatLabels_JSON(t *testing.T) {
 		t.Fatalf("FormatLabels json: %v", err)
 	}
 	var got struct {
-		TaskID string   `json:"taskId"`
+		TaskId string   `json:"taskId"`
 		Labels []string `json:"labels"`
 	}
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got.TaskID != "test--abc" || len(got.Labels) != 2 {
+	if got.TaskId != "test--abc" || len(got.Labels) != 2 {
 		t.Errorf("unexpected: %+v", got)
 	}
 }
@@ -157,14 +157,14 @@ func TestFormatEdge_JSON(t *testing.T) {
 		t.Fatalf("FormatEdge json: %v", err)
 	}
 	var got struct {
-		SourceID string `json:"sourceId"`
-		TargetID string `json:"targetId"`
+		SourceId string `json:"sourceId"`
+		TargetId string `json:"targetId"`
 		Kind     string `json:"kind"`
 	}
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got.SourceID != "test--a" || got.TargetID != "test--b" || got.Kind != "blocked_by" {
+	if got.SourceId != "test--a" || got.TargetId != "test--b" || got.Kind != "blocked_by" {
 		t.Errorf("unexpected: %+v", got)
 	}
 }
@@ -180,8 +180,8 @@ func TestFormatDepTree_JSONShape(t *testing.T) {
 	var got struct {
 		Root  string `json:"root"`
 		Edges []struct {
-			SourceID string `json:"sourceId"`
-			TargetID string `json:"targetId"`
+			SourceId string `json:"sourceId"`
+			TargetId string `json:"targetId"`
 			Kind     string `json:"kind"`
 		} `json:"edges"`
 	}

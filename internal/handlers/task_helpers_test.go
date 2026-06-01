@@ -43,22 +43,22 @@ type taskJSONShape struct {
 // commentJSONShape mirrors the comment formatter's JSON wire shape.
 type commentJSONShape struct {
 	ID        string `json:"id"`
-	TaskID    string `json:"taskId"`
-	AuthorID  string `json:"authorId"`
+	TaskId    string `json:"taskId"`
+	AuthorId  string `json:"authorId"`
 	Body      string `json:"body"`
 	CreatedAt string `json:"createdAt"`
 }
 
 // labelsJSONShape mirrors the labels formatter's JSON wire shape.
 type labelsJSONShape struct {
-	TaskID string   `json:"taskId"`
+	TaskId string   `json:"taskId"`
 	Labels []string `json:"labels"`
 }
 
 // edgeJSONShape mirrors the edge formatter's JSON wire shape.
 type edgeJSONShape struct {
-	SourceID string `json:"sourceId"`
-	TargetID string `json:"targetId"`
+	SourceId string `json:"sourceId"`
+	TargetId string `json:"targetId"`
 	Kind     string `json:"kind"`
 }
 

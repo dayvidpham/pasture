@@ -29,12 +29,12 @@ type Trail interface {
 	// fails. The caller (Temporal activity) is responsible for retry policy.
 	//
 	// Callers that need the inserted row id (so they can attach context_edges
-	// rows in the same logical step) MUST use RecordEventReturningID instead.
+	// rows in the same logical step) MUST use RecordEventReturningId instead.
 	// RecordEvent is retained for callers that record-and-forget; it is a
-	// thin wrapper over RecordEventReturningID that discards the id.
+	// thin wrapper over RecordEventReturningId that discards the id.
 	RecordEvent(ctx context.Context, event protocol.AuditEvent) error
 
-	// RecordEventReturningID persists a single audit event and returns the
+	// RecordEventReturningId persists a single audit event and returns the
 	// audit_events.id of the newly-inserted row.
 	//
 	// Implementations MUST recover the id from the same INSERT statement
@@ -54,15 +54,15 @@ type Trail interface {
 	// Returns the new id and a nil error on success; on failure returns 0
 	// and an error (typically *pasterrors.StructuredError on the SQLite
 	// backend so callers can errors.As() it for category-based handling).
-	RecordEventReturningID(ctx context.Context, event protocol.AuditEvent) (int64, error)
+	RecordEventReturningId(ctx context.Context, event protocol.AuditEvent) (int64, error)
 
 	// QueryEvents returns all audit events matching the given filters.
 	//
-	// epochID is required and filters by exact match. phase and role are
+	// epochId is required and filters by exact match. phase and role are
 	// optional; a nil pointer means "no filter on this field". Results are
 	// returned in chronological order (insertion order for in-memory,
 	// ascending id order for SQLite).
-	QueryEvents(ctx context.Context, epochID string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error)
+	QueryEvents(ctx context.Context, epochId string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error)
 
 	// RecordSessionEntries persists a batch of SessionEntry records.
 	//
@@ -74,11 +74,11 @@ type Trail interface {
 	// fails. The caller (Temporal activity) is responsible for retry policy.
 	RecordSessionEntries(ctx context.Context, entries []protocol.SessionEntry) error
 
-	// QuerySessionEntries returns all session entries for the given sessionID
+	// QuerySessionEntries returns all session entries for the given sessionId
 	// in insertion order (ascending entry_index for SQLite, insertion order
 	// for in-memory).
 	//
-	// Returns an empty (non-nil) slice when no entries exist for sessionID.
+	// Returns an empty (non-nil) slice when no entries exist for sessionId.
 	// Returns an error if the underlying store is unavailable.
-	QuerySessionEntries(ctx context.Context, sessionID string) ([]protocol.SessionEntry, error)
+	QuerySessionEntries(ctx context.Context, sessionId string) ([]protocol.SessionEntry, error)
 }

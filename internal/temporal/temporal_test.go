@@ -40,8 +40,8 @@ func TestStateMachine_InitialState(t *testing.T) {
 	if state.CurrentPhase != protocol.PhaseRequest {
 		t.Errorf("initial phase = %q, want %q", state.CurrentPhase, protocol.PhaseRequest)
 	}
-	if state.EpochID != "epoch-1" {
-		t.Errorf("epoch ID = %q, want %q", state.EpochID, "epoch-1")
+	if state.EpochId != "epoch-1" {
+		t.Errorf("epoch ID = %q, want %q", state.EpochId, "epoch-1")
 	}
 	if state.BlockerCount != 0 {
 		t.Errorf("initial blocker count = %d, want 0", state.BlockerCount)
@@ -325,7 +325,7 @@ func TestCheckConstraints_ValidTransition(t *testing.T) {
 	env.RegisterActivity(acts)
 
 	state := types.EpochState{
-		EpochID:      "epoch-act-1",
+		EpochId:      "epoch-act-1",
 		CurrentPhase: protocol.PhaseRequest,
 		ReviewVotes:  make(map[types.ReviewAxis]types.VoteType),
 	}
@@ -353,7 +353,7 @@ func TestCheckConstraints_InvalidTransition(t *testing.T) {
 	env.RegisterActivity(acts)
 
 	state := types.EpochState{
-		EpochID:      "epoch-act-2",
+		EpochId:      "epoch-act-2",
 		CurrentPhase: protocol.PhaseRequest,
 		ReviewVotes:  make(map[types.ReviewAxis]types.VoteType),
 	}
@@ -397,8 +397,8 @@ func TestRecordTransition_WithTrail(t *testing.T) {
 	if len(events) != 1 {
 		t.Errorf("expected 1 audit event, got %d", len(events))
 	}
-	if events[0].EpochID != "epoch-test-trail" {
-		t.Errorf("audit event EpochID = %q, want %q", events[0].EpochID, "epoch-test-trail")
+	if events[0].EpochId != "epoch-test-trail" {
+		t.Errorf("audit event EpochId = %q, want %q", events[0].EpochId, "epoch-test-trail")
 	}
 }
 
@@ -408,13 +408,13 @@ func TestInMemoryAuditTrail_RecordAndQuery(t *testing.T) {
 	trail := audit.NewInMemoryAuditTrail()
 
 	event1 := protocol.AuditEvent{
-		EpochID:   "epoch-trail-1",
+		EpochId:   "epoch-trail-1",
 		Phase:     protocol.PhaseRequest,
 		EventType: protocol.EventPhaseTransition,
 		Timestamp: time.Now(),
 	}
 	event2 := protocol.AuditEvent{
-		EpochID:   "epoch-trail-2",
+		EpochId:   "epoch-trail-2",
 		Phase:     protocol.PhaseElicit,
 		EventType: protocol.EventVoteRecorded,
 		Timestamp: time.Now(),
@@ -482,7 +482,7 @@ func TestEpochWorkflow_P1ToP2_Signal(t *testing.T) {
 	}, time.Millisecond*100)
 
 	env.ExecuteWorkflow(temporal.EpochWorkflowFn, temporal.EpochInput{
-		EpochID:            "epoch-wf-1",
+		EpochId:            "epoch-wf-1",
 		RequestDescription: "test workflow",
 	})
 
@@ -519,7 +519,7 @@ func TestEpochWorkflow_AdvancePhase_InvalidIgnored(t *testing.T) {
 	}, time.Millisecond*100)
 
 	env.ExecuteWorkflow(temporal.EpochWorkflowFn, temporal.EpochInput{
-		EpochID:            "epoch-wf-invalid",
+		EpochId:            "epoch-wf-invalid",
 		RequestDescription: "test invalid advance",
 	})
 
@@ -545,7 +545,7 @@ func TestEpochWorkflow_SubmitVote_Signal(t *testing.T) {
 		env.SignalWorkflow(temporal.SignalSubmitVote, types.ReviewVoteSignal{
 			Axis:       types.AxisCorrectness,
 			Vote:       types.VoteAccept,
-			ReviewerID: "reviewer-1",
+			ReviewerId: "reviewer-1",
 		})
 	}, time.Millisecond*10)
 
@@ -554,7 +554,7 @@ func TestEpochWorkflow_SubmitVote_Signal(t *testing.T) {
 	}, time.Millisecond*100)
 
 	env.ExecuteWorkflow(temporal.EpochWorkflowFn, temporal.EpochInput{
-		EpochID:            "epoch-wf-vote",
+		EpochId:            "epoch-wf-vote",
 		RequestDescription: "test vote signal",
 	})
 
@@ -577,13 +577,13 @@ func TestEpochWorkflow_RegisterSession_Idempotent(t *testing.T) {
 	// Send the same session registration twice.
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(temporal.SignalRegisterSession, types.RegisterSessionSignal{
-			EpochID:   "epoch-wf-session",
-			SessionID: "session-42",
+			EpochId:   "epoch-wf-session",
+			SessionId: "session-42",
 			Role:      "worker",
 		})
 		env.SignalWorkflow(temporal.SignalRegisterSession, types.RegisterSessionSignal{
-			EpochID:   "epoch-wf-session",
-			SessionID: "session-42", // duplicate
+			EpochId:   "epoch-wf-session",
+			SessionId: "session-42", // duplicate
 			Role:      "worker",
 		})
 	}, time.Millisecond*10)
@@ -604,7 +604,7 @@ func TestEpochWorkflow_RegisterSession_Idempotent(t *testing.T) {
 	}, time.Millisecond*100)
 
 	env.ExecuteWorkflow(temporal.EpochWorkflowFn, temporal.EpochInput{
-		EpochID:            "epoch-wf-session",
+		EpochId:            "epoch-wf-session",
 		RequestDescription: "test session registration",
 	})
 }
@@ -622,8 +622,8 @@ func TestEpochWorkflow_SliceProgress_Signal(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(temporal.SignalSliceProgress, types.SliceProgressSignal{
-			SliceID:    "slice-1",
-			LeafTaskID: "leaf-a",
+			SliceId:    "slice-1",
+			LeafTaskId: "leaf-a",
 			StageName:  "execute",
 			Completed:  true,
 		})
@@ -644,7 +644,7 @@ func TestEpochWorkflow_SliceProgress_Signal(t *testing.T) {
 	}, time.Millisecond*100)
 
 	env.ExecuteWorkflow(temporal.EpochWorkflowFn, temporal.EpochInput{
-		EpochID:            "epoch-wf-slice",
+		EpochId:            "epoch-wf-slice",
 		RequestDescription: "test slice progress",
 	})
 }
@@ -665,10 +665,10 @@ func TestSliceWorkflow_MockMode_Default(t *testing.T) {
 	env.OnSignalExternalWorkflow("", "", "", temporal.SignalSliceProgress, nil).Return(nil).Maybe()
 
 	env.ExecuteWorkflow(temporal.SliceWorkflowFn, temporal.SliceInput{
-		EpochID:          "epoch-slice-1",
-		SliceID:          "slice-1",
+		EpochId:          "epoch-slice-1",
+		SliceId:          "slice-1",
 		PhaseSpec:        "p9",
-		ParentWorkflowID: "", // empty: skip parent signaling
+		ParentWorkflowId: "", // empty: skip parent signaling
 	})
 
 	if !env.IsWorkflowCompleted() {
@@ -685,8 +685,8 @@ func TestSliceWorkflow_MockMode_Default(t *testing.T) {
 	if !result.Success {
 		t.Errorf("slice result.Success = false, want true")
 	}
-	if result.SliceID != "slice-1" {
-		t.Errorf("slice result.SliceID = %q, want %q", result.SliceID, "slice-1")
+	if result.SliceId != "slice-1" {
+		t.Errorf("slice result.SliceId = %q, want %q", result.SliceId, "slice-1")
 	}
 }
 
@@ -710,10 +710,10 @@ func TestSliceWorkflow_CompleteSliceOverride(t *testing.T) {
 	}, time.Millisecond*1)
 
 	env.ExecuteWorkflow(temporal.SliceWorkflowFn, temporal.SliceInput{
-		EpochID:          "epoch-slice-override",
-		SliceID:          "slice-override",
+		EpochId:          "epoch-slice-override",
+		SliceId:          "slice-override",
 		PhaseSpec:        "p9",
-		ParentWorkflowID: "",
+		ParentWorkflowId: "",
 	})
 
 	if !env.IsWorkflowCompleted() {
@@ -742,19 +742,19 @@ func TestReviewWorkflow_AllVotesReceived(t *testing.T) {
 	// Send all 3 votes.
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(temporal.SignalSubmitVote, types.ReviewVoteSignal{
-			Axis: types.AxisCorrectness, Vote: types.VoteAccept, ReviewerID: "r1",
+			Axis: types.AxisCorrectness, Vote: types.VoteAccept, ReviewerId: "r1",
 		})
 		env.SignalWorkflow(temporal.SignalSubmitVote, types.ReviewVoteSignal{
-			Axis: types.AxisTestQuality, Vote: types.VoteAccept, ReviewerID: "r2",
+			Axis: types.AxisTestQuality, Vote: types.VoteAccept, ReviewerId: "r2",
 		})
 		env.SignalWorkflow(temporal.SignalSubmitVote, types.ReviewVoteSignal{
-			Axis: types.AxisElegance, Vote: types.VoteRevise, ReviewerID: "r3",
+			Axis: types.AxisElegance, Vote: types.VoteRevise, ReviewerId: "r3",
 		})
 	}, time.Millisecond*10)
 
 	env.ExecuteWorkflow(temporal.ReviewWorkflowFn, temporal.ReviewInput{
-		EpochID: "epoch-review-1",
-		PhaseID: "p10",
+		EpochId: "epoch-review-1",
+		PhaseId: "p10",
 	})
 
 	if !env.IsWorkflowCompleted() {
@@ -771,8 +771,8 @@ func TestReviewWorkflow_AllVotesReceived(t *testing.T) {
 	if !result.Success {
 		t.Error("ReviewResult.Success = false, want true")
 	}
-	if result.PhaseID != "p10" {
-		t.Errorf("ReviewResult.PhaseID = %q, want %q", result.PhaseID, "p10")
+	if result.PhaseId != "p10" {
+		t.Errorf("ReviewResult.PhaseId = %q, want %q", result.PhaseId, "p10")
 	}
 	if len(result.VoteResult) != 3 {
 		t.Errorf("expected 3 votes in result, got %d", len(result.VoteResult))
@@ -792,7 +792,7 @@ func TestQueryAuditEvents_WithTrail(t *testing.T) {
 
 	// Pre-populate trail.
 	_ = trail.RecordEvent(ctx, protocol.AuditEvent{
-		EpochID:   "epoch-q-2",
+		EpochId:   "epoch-q-2",
 		Phase:     protocol.PhaseRequest,
 		EventType: protocol.EventPhaseTransition,
 		Timestamp: time.Now(),
@@ -825,7 +825,7 @@ func TestRecordAuditEvent_WithTrail(t *testing.T) {
 	env.RegisterActivity(acts)
 
 	event := protocol.AuditEvent{
-		EpochID:   "epoch-audit-1",
+		EpochId:   "epoch-audit-1",
 		Phase:     protocol.PhaseElicit,
 		EventType: protocol.EventVoteRecorded,
 		Timestamp: time.Now(),
@@ -958,7 +958,7 @@ func TestEpochWorkflow_FullLifecycle_ThroughP2(t *testing.T) {
 	}, time.Millisecond*200)
 
 	env.ExecuteWorkflow(temporal.EpochWorkflowFn, temporal.EpochInput{
-		EpochID:            "epoch-lifecycle",
+		EpochId:            "epoch-lifecycle",
 		RequestDescription: "full lifecycle test",
 	})
 }
@@ -1007,7 +1007,7 @@ func TestEpochWorkflow_QueryAvailableTransitions(t *testing.T) {
 	}, time.Millisecond*50)
 
 	env.ExecuteWorkflow(temporal.EpochWorkflowFn, temporal.EpochInput{
-		EpochID:            "epoch-query-avail",
+		EpochId:            "epoch-query-avail",
 		RequestDescription: "test available transitions query",
 	})
 }
@@ -1044,7 +1044,7 @@ func TestEpochWorkflow_QueryFullState(t *testing.T) {
 	}, time.Millisecond*50)
 
 	env.ExecuteWorkflow(temporal.EpochWorkflowFn, temporal.EpochInput{
-		EpochID:            "epoch-query-full",
+		EpochId:            "epoch-query-full",
 		RequestDescription: "test full state query",
 	})
 }
@@ -1066,7 +1066,7 @@ func TestRunAgentSession_ConnectError(t *testing.T) {
 	input := temporal.RunAgentSessionInput{
 		AgentCmd:  "/no-such-binary-pasture-test-xyz",
 		AgentArgs: []string{},
-		EpochID:   "epoch-connect-error",
+		EpochId:   "epoch-connect-error",
 	}
 	_, err := env.ExecuteActivity(acts.RunAgentSession, input)
 	if err == nil {
@@ -1088,7 +1088,7 @@ func TestRecordSessionEntries_WithTrail(t *testing.T) {
 	env.RegisterActivity(acts)
 
 	entries := []protocol.SessionEntry{
-		{SessionID: "s-test", EntryIndex: 0, Provider: "anthropic", EntryType: "message", Role: "user"},
+		{SessionId: "s-test", EntryIndex: 0, Provider: "anthropic", EntryType: "message", Role: "user"},
 	}
 	_, err := env.ExecuteActivity(acts.RecordSessionEntries, entries)
 	if err != nil {
@@ -1115,7 +1115,7 @@ func TestQuerySessionEntries_WithTrail(t *testing.T) {
 
 	// Pre-populate the trail.
 	_ = trail.RecordSessionEntries(ctx, []protocol.SessionEntry{
-		{SessionID: "s-query-test", EntryIndex: 0, Provider: "acp", EntryType: "message", Role: "assistant"},
+		{SessionId: "s-query-test", EntryIndex: 0, Provider: "acp", EntryType: "message", Role: "assistant"},
 	})
 
 	suite := &testsuite.WorkflowTestSuite{}

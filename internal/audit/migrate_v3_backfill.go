@@ -73,10 +73,10 @@ const (
 	legacyRoleAgentSource  = "pasture/internal/audit/migrate"
 )
 
-// legacyRoleAgentNamespace is the AgentID namespace minted for synthetic
+// legacyRoleAgentNamespace is the AgentId namespace minted for synthetic
 // legacy-role SoftwareAgents during the v3 backfill.
 //
-// Provenance's AgentID String() returns "<namespace>--<uuid>" (see
+// Provenance's AgentId String() returns "<namespace>--<uuid>" (see
 // provenance/pkg/ptypes/types.go:91). The migrator uses "pasture" as the
 // namespace because (a) the agent is owned by the pasture binary, not by
 // any external system, and (b) Provenance's RegisterSoftwareAgent
@@ -167,17 +167,17 @@ func migrateV3Backfill(tx *sql.Tx, _ int64) error {
 	}
 
 	// Step 3: find-or-create SoftwareAgent per role; map role → agent_id.
-	roleToAgentID := make(map[string]string, len(roles))
+	roleToAgentId := make(map[string]string, len(roles))
 	for _, role := range roles {
-		agentID, err := findOrCreateLegacyRoleAgent(tx, role)
+		agentId, err := findOrCreateLegacyRoleAgent(tx, role)
 		if err != nil {
 			return err
 		}
-		roleToAgentID[role] = agentID
+		roleToAgentId[role] = agentId
 	}
 
 	// Step 4: UPDATE audit_events SET agent_id by role.
-	if err := backfillAgentIDByRole(tx, roleToAgentID); err != nil {
+	if err := backfillAgentIdByRole(tx, roleToAgentId); err != nil {
 		return err
 	}
 
@@ -308,8 +308,8 @@ func distinctRoles(tx *sql.Tx) ([]string, error) {
 // databases. Future v* migrations could add an index but that lives in
 // Provenance, not here, per C4.
 //
-// AgentID format matches Provenance's mintage exactly:
-// "<namespace>--<uuid>" via ptypes.AgentID.String() — see
+// AgentId format matches Provenance's mintage exactly:
+// "<namespace>--<uuid>" via ptypes.AgentId.String() — see
 // provenance/pkg/ptypes/types.go:91. We use namespace "pasture" because
 // these agents are owned by the pasture binary and S7's live well-known
 // agents will use the same namespace.
@@ -370,11 +370,11 @@ func findOrCreateLegacyRoleAgent(tx *sql.Tx, role string) (string, error) {
 			Cause: err,
 		}
 	}
-	agentID := legacyRoleAgentNamespace + "--" + newUUID.String()
+	agentId := legacyRoleAgentNamespace + "--" + newUUID.String()
 
 	if _, err := tx.Exec(
 		`INSERT INTO agents (id, kind_id) VALUES (?, 2)`,
-		agentID,
+		agentId,
 	); err != nil {
 		return "", &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
@@ -398,7 +398,7 @@ func findOrCreateLegacyRoleAgent(tx *sql.Tx, role string) (string, error) {
 
 	if _, err := tx.Exec(
 		`INSERT INTO agents_software (agent_id, name, version, source) VALUES (?, ?, ?, ?)`,
-		agentID, name, legacyRoleAgentVersion, legacyRoleAgentSource,
+		agentId, name, legacyRoleAgentVersion, legacyRoleAgentSource,
 	); err != nil {
 		return "", &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
@@ -420,28 +420,28 @@ func findOrCreateLegacyRoleAgent(tx *sql.Tx, role string) (string, error) {
 		}
 	}
 
-	return agentID, nil
+	return agentId, nil
 }
 
-// backfillAgentIDByRole runs an UPDATE per role mapping audit_events.role to
+// backfillAgentIdByRole runs an UPDATE per role mapping audit_events.role to
 // the freshly-minted (or reused) agent_id. Only rows with NULL agent_id are
 // touched, so a partial-replay scenario where some rows already have an
 // attribution leaves them alone.
 //
 // Iteration order is the sorted slice from distinctRoles → deterministic
 // for reproducibility under -race.
-func backfillAgentIDByRole(tx *sql.Tx, roleToAgentID map[string]string) error {
-	roles := make([]string, 0, len(roleToAgentID))
-	for role := range roleToAgentID {
+func backfillAgentIdByRole(tx *sql.Tx, roleToAgentId map[string]string) error {
+	roles := make([]string, 0, len(roleToAgentId))
+	for role := range roleToAgentId {
 		roles = append(roles, role)
 	}
 	sort.Strings(roles)
 
 	for _, role := range roles {
-		agentID := roleToAgentID[role]
+		agentId := roleToAgentId[role]
 		if _, err := tx.Exec(
 			`UPDATE audit_events SET agent_id = ? WHERE role = ? AND agent_id IS NULL`,
-			agentID, role,
+			agentId, role,
 		); err != nil {
 			return &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
@@ -453,7 +453,7 @@ func backfillAgentIDByRole(tx *sql.Tx, roleToAgentID map[string]string) error {
 					"The database refused the update that points each event with role %q at its agent.",
 					role,
 				),
-				Where: "Upgrading the audit database from version 2 to 3 (internal/audit/migrate_v3_backfill.go in audit.backfillAgentIDByRole).",
+				Where: "Upgrading the audit database from version 2 to 3 (internal/audit/migrate_v3_backfill.go in audit.backfillAgentIdByRole).",
 				Impact: "The upgrade can't finish linking legacy events to their new agent records, so it\n" +
 					"was rolled back. The audit database stays at version 2.",
 				Fix: "1. Confirm the audit database file is writable:\n" +
@@ -481,7 +481,7 @@ func backfillAgentIDByRole(tx *sql.Tx, roleToAgentID map[string]string) error {
 //  4. ALTER TABLE audit_events_new RENAME TO audit_events.
 //  5. Recreate indexes on the renamed table.
 //
-// The new shape promotes agent_id to NOT NULL — backfillAgentIDByRole is
+// The new shape promotes agent_id to NOT NULL — backfillAgentIdByRole is
 // expected to have populated every row, and this constraint is the
 // safety net that fails the migration if any row was missed.
 //

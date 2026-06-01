@@ -14,7 +14,7 @@
 // hand-registered SoftwareAgents) are also listed, with WellKnownName empty.
 //
 // `show` returns a single agent + its categories. The agent-id is the
-// wire-format Provenance AgentID (e.g. "pasture--01HABC..."). Agents that
+// wire-format Provenance AgentId (e.g. "pasture--01HABC..."). Agents that
 // have no row in either pasture-side table return ("None","None") per the
 // AgentCategories contract — i.e., the agent IS valid but has no pasture
 // categorisation yet (this is the expected state for fresh humans/MLAgents
@@ -130,10 +130,10 @@ func TaskAgentsList(w io.Writer, dbPath string, format types.OutputFormat) (int,
 	return 0, nil
 }
 
-// TaskAgentsShow looks up one agent by its wire-format AgentID and prints
+// TaskAgentsShow looks up one agent by its wire-format AgentId and prints
 // its categories + well-known name (if any).
-func TaskAgentsShow(w io.Writer, dbPath, agentIDStr string, format types.OutputFormat) (int, error) {
-	if agentIDStr == "" {
+func TaskAgentsShow(w io.Writer, dbPath, agentIdStr string, format types.OutputFormat) (int, error) {
+	if agentIdStr == "" {
 		se := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     "An agent ID is required to show an agent.",
@@ -147,11 +147,11 @@ func TaskAgentsShow(w io.Writer, dbPath, agentIDStr string, format types.OutputF
 		}
 		return pasterrors.ExitCode(se), se
 	}
-	agentID, err := provenance.ParseAgentID(agentIDStr)
+	agentId, err := provenance.ParseAgentID(agentIdStr)
 	if err != nil {
 		se := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("The agent ID %q isn't in the expected format.", agentIDStr),
+			What:     fmt.Sprintf("The agent ID %q isn't in the expected format.", agentIdStr),
 			Why: "Agent IDs need the shape \"namespace--uuid\" (for example, pasture--01HABC...).\n" +
 				"The value you passed couldn't be split into those two parts.",
 			Where:  "Showing an agent (internal/handlers/task_agents.go in handlers.TaskAgentsShow).",
@@ -170,7 +170,7 @@ func TaskAgentsShow(w io.Writer, dbPath, agentIDStr string, format types.OutputF
 	}
 	defer tracker.Close()
 
-	automaton, pastureRole, err := tracker.AgentCategories(agentID)
+	automaton, pastureRole, err := tracker.AgentCategories(agentId)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
@@ -189,7 +189,7 @@ func TaskAgentsShow(w io.Writer, dbPath, agentIDStr string, format types.OutputF
 		var nameStr sql.NullString
 		qErr := probe.QueryRow(
 			`SELECT name FROM pasture_well_known_agents WHERE agent_id = ?`,
-			agentID.String(),
+			agentId.String(),
 		).Scan(&nameStr)
 		if qErr == nil && nameStr.Valid {
 			wellKnownName = nameStr.String
@@ -202,7 +202,7 @@ func TaskAgentsShow(w io.Writer, dbPath, agentIDStr string, format types.OutputF
 	}
 
 	entry := formatters.AgentEntry{
-		AgentID:       agentID.String(),
+		AgentId:       agentId.String(),
 		WellKnownName: wellKnownName,
 		AutomatonRole: automaton,
 		PastureRole:   pastureRole,
@@ -378,7 +378,7 @@ func readAgentEntries(db *sql.DB) ([]formatters.AgentEntry, error) {
 	entries := make([]formatters.AgentEntry, 0, len(allIDs))
 	for id := range allIDs {
 		entry := formatters.AgentEntry{
-			AgentID:       id,
+			AgentId:       id,
 			WellKnownName: wkRows[id], // empty when not present
 			AutomatonRole: protocol.AutomatonRoleNone,
 			PastureRole:   protocol.PastureRoleNone,
@@ -394,7 +394,7 @@ func readAgentEntries(db *sql.DB) ([]formatters.AgentEntry, error) {
 	return entries, nil
 }
 
-// sortAgentEntries orders entries by (WellKnownName ascending, then AgentID
+// sortAgentEntries orders entries by (WellKnownName ascending, then AgentId
 // ascending) so list output is stable across runs and easy to diff.
 func sortAgentEntries(entries []formatters.AgentEntry) {
 	// Local sort to avoid pulling sort into the file's import block twice.
@@ -417,7 +417,7 @@ func agentEntryLess(a, b formatters.AgentEntry) bool {
 			return a.WellKnownName < b.WellKnownName
 		}
 	}
-	return a.AgentID < b.AgentID
+	return a.AgentId < b.AgentId
 }
 
 // tableExists reports whether the given table is present. Used to tolerate

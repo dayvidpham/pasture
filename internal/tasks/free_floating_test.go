@@ -62,10 +62,10 @@ func openFreeFloatingFixture(t *testing.T) (protocol.TaskTracker, *sql.DB, strin
 	return tracker, auditDB, dbPath
 }
 
-// queryContextEdges returns all context_edges rows for the (kind, contextID)
+// queryContextEdges returns all context_edges rows for the (kind, contextId)
 // pair. Used by tests that want to verify the writer-side end state without
 // depending on the (not-yet-landed) S6 reader CLI.
-func queryContextEdges(t *testing.T, dbPath string, kind protocol.ContextKind, contextID string) []contextEdgeRow {
+func queryContextEdges(t *testing.T, dbPath string, kind protocol.ContextKind, contextId string) []contextEdgeRow {
 	t.Helper()
 	verifyDB, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -75,7 +75,7 @@ func queryContextEdges(t *testing.T, dbPath string, kind protocol.ContextKind, c
 
 	rows, err := verifyDB.Query(
 		`SELECT event_id, context_kind, context_id FROM context_edges WHERE context_kind = ? AND context_id = ? ORDER BY event_id ASC`,
-		string(kind), contextID,
+		string(kind), contextId,
 	)
 	if err != nil {
 		t.Fatalf("verify SELECT context_edges: %v", err)
@@ -85,7 +85,7 @@ func queryContextEdges(t *testing.T, dbPath string, kind protocol.ContextKind, c
 	var out []contextEdgeRow
 	for rows.Next() {
 		var r contextEdgeRow
-		if err := rows.Scan(&r.eventID, &r.kind, &r.contextID); err != nil {
+		if err := rows.Scan(&r.eventId, &r.kind, &r.contextId); err != nil {
 			t.Fatalf("scan context_edges: %v", err)
 		}
 		out = append(out, r)
@@ -97,16 +97,16 @@ func queryContextEdges(t *testing.T, dbPath string, kind protocol.ContextKind, c
 }
 
 type contextEdgeRow struct {
-	eventID   int64
+	eventId   int64
 	kind      string
-	contextID string
+	contextId string
 }
 
 // queryContextEdgesByEvent returns all context_edges rows for the given
-// (eventID, kind) pair via a fresh verification handle. Used to assert
+// (eventId, kind) pair via a fresh verification handle. Used to assert
 // non-existence of edges for a specific kind without depending on the
 // tracker.EventContexts code path (which is independently tested by S5).
-func queryContextEdgesByEvent(t *testing.T, dbPath string, eventID int64, kind protocol.ContextKind) []contextEdgeRow {
+func queryContextEdgesByEvent(t *testing.T, dbPath string, eventId int64, kind protocol.ContextKind) []contextEdgeRow {
 	t.Helper()
 	verifyDB, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -116,7 +116,7 @@ func queryContextEdgesByEvent(t *testing.T, dbPath string, eventID int64, kind p
 
 	rows, err := verifyDB.Query(
 		`SELECT event_id, context_kind, context_id FROM context_edges WHERE event_id = ? AND context_kind = ? ORDER BY rowid ASC`,
-		eventID, string(kind),
+		eventId, string(kind),
 	)
 	if err != nil {
 		t.Fatalf("verify SELECT context_edges by event: %v", err)
@@ -126,7 +126,7 @@ func queryContextEdgesByEvent(t *testing.T, dbPath string, eventID int64, kind p
 	var out []contextEdgeRow
 	for rows.Next() {
 		var r contextEdgeRow
-		if err := rows.Scan(&r.eventID, &r.kind, &r.contextID); err != nil {
+		if err := rows.Scan(&r.eventId, &r.kind, &r.contextId); err != nil {
 			t.Fatalf("scan context_edges by event: %v", err)
 		}
 		out = append(out, r)
@@ -138,10 +138,10 @@ func queryContextEdgesByEvent(t *testing.T, dbPath string, eventID int64, kind p
 //
 // Post-S4 (v4 schema): audit_events.epoch_id is gone; epoch attachment is
 // recovered via context_edges with kind='EpochContext'. The LEFT JOIN
-// keeps row.epochID empty when the event has no epoch attachment (the
+// keeps row.epochId empty when the event has no epoch attachment (the
 // free-floating event case), preserving the assertion semantics this
 // helper supports.
-func queryAuditEvent(t *testing.T, dbPath string, eventID int64) auditEventRow {
+func queryAuditEvent(t *testing.T, dbPath string, eventId int64) auditEventRow {
 	t.Helper()
 	verifyDB, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -150,27 +150,27 @@ func queryAuditEvent(t *testing.T, dbPath string, eventID int64) auditEventRow {
 	defer verifyDB.Close()
 
 	var r auditEventRow
-	var epochID sql.NullString
+	var epochId sql.NullString
 	err = verifyDB.QueryRow(
 		`SELECT ae.id, COALESCE(ce.context_id, ''), COALESCE(ae.phase,''), ae.event_type
 		 FROM audit_events ae
 		 LEFT JOIN context_edges ce
 		   ON ce.event_id = ae.id AND ce.context_kind = 'EpochContext'
 		 WHERE ae.id = ?`,
-		eventID,
-	).Scan(&r.id, &epochID, &r.phase, &r.eventType)
+		eventId,
+	).Scan(&r.id, &epochId, &r.phase, &r.eventType)
 	if err != nil {
-		t.Fatalf("verify SELECT audit_events id=%d: %v", eventID, err)
+		t.Fatalf("verify SELECT audit_events id=%d: %v", eventId, err)
 	}
-	if epochID.Valid {
-		r.epochID = epochID.String
+	if epochId.Valid {
+		r.epochId = epochId.String
 	}
 	return r
 }
 
 type auditEventRow struct {
 	id        int64
-	epochID   string
+	epochId   string
 	phase     string
 	eventType string
 }
@@ -196,25 +196,25 @@ func TestScenario6_FreeFloatingGitEventRecording(t *testing.T) {
 	const sha = "abc123def4567890abcdef1234567890abcdef12"
 
 	// ─── When: fire a git commit "hook" (direct helper call) ───────────
-	eventID, err := tasks.RecordGitEvent(
+	eventId, err := tasks.RecordGitEvent(
 		ctx, tracker, auditDB, sha, tasks.EventGitCommit,
 		map[string]any{"sha": sha, "branch": "feat--pasture--initial-golang-port"},
 	)
 	if err != nil {
 		t.Fatalf("RecordGitEvent failed: %v", err)
 	}
-	if eventID <= 0 {
-		t.Fatalf("RecordGitEvent returned non-positive eventID %d", eventID)
+	if eventId <= 0 {
+		t.Fatalf("RecordGitEvent returned non-positive eventId %d", eventId)
 	}
 
 	// ─── Then: audit_events row exists with eventType=GitCommit ────────
-	row := queryAuditEvent(t, dbPath, eventID)
+	row := queryAuditEvent(t, dbPath, eventId)
 	if row.eventType != string(tasks.EventGitCommit) {
 		t.Errorf("audit_events.event_type = %q, want %q", row.eventType, tasks.EventGitCommit)
 	}
 	// epoch_id should be empty (not NULL — NOT NULL constraint applies until S4 drops the column)
-	if row.epochID != "" {
-		t.Errorf("audit_events.epoch_id = %q, want \"\" (free-floating event)", row.epochID)
+	if row.epochId != "" {
+		t.Errorf("audit_events.epoch_id = %q, want \"\" (free-floating event)", row.epochId)
 	}
 
 	// ─── Then: context_edges row exists with (GitContext, sha) ─────────
@@ -222,8 +222,8 @@ func TestScenario6_FreeFloatingGitEventRecording(t *testing.T) {
 	if len(gitEdges) != 1 {
 		t.Fatalf("context_edges with (GitContext, %q) = %d rows, want 1", sha, len(gitEdges))
 	}
-	if gitEdges[0].eventID != eventID {
-		t.Errorf("context_edges.event_id = %d, want %d", gitEdges[0].eventID, eventID)
+	if gitEdges[0].eventId != eventId {
+		t.Errorf("context_edges.event_id = %d, want %d", gitEdges[0].eventId, eventId)
 	}
 
 	// ─── Then: NO context_edges row of kind=EpochContext exists ────────
@@ -231,13 +231,13 @@ func TestScenario6_FreeFloatingGitEventRecording(t *testing.T) {
 	// of kind=EpochContext exists for this event." We query the raw table
 	// rather than tracker.EventContexts to keep the assertion robust against
 	// other parallel slices (S3) that may rewrite SELECTed columns.
-	epochEdges := queryContextEdgesByEvent(t, dbPath, eventID, protocol.ContextEpoch)
+	epochEdges := queryContextEdgesByEvent(t, dbPath, eventId, protocol.ContextEpoch)
 	if len(epochEdges) != 0 {
-		t.Errorf("expected zero ContextEpoch edges for free-floating event %d, got %d", eventID, len(epochEdges))
+		t.Errorf("expected zero ContextEpoch edges for free-floating event %d, got %d", eventId, len(epochEdges))
 	}
 
 	// ─── Then: tracker.EventContexts agrees with the raw SQL. ───────────
-	contexts, err := tracker.EventContexts(ctx, eventID)
+	contexts, err := tracker.EventContexts(ctx, eventId)
 	if err != nil {
 		t.Fatalf("EventContexts failed: %v", err)
 	}
@@ -272,31 +272,31 @@ func TestRecordSkillEvent_RecordsContextSkillEdge(t *testing.T) {
 
 	tracker, auditDB, dbPath := openFreeFloatingFixture(t)
 
-	const skillRunID = "aura:user-elicit-2026-04-25-run-001"
+	const skillRunId = "aura:user-elicit-2026-04-25-run-001"
 
-	eventID, err := tasks.RecordSkillEvent(
-		ctx, tracker, auditDB, skillRunID, tasks.EventSkillInvoked,
-		map[string]any{"skill": "aura:user-elicit", "runId": skillRunID},
+	eventId, err := tasks.RecordSkillEvent(
+		ctx, tracker, auditDB, skillRunId, tasks.EventSkillInvoked,
+		map[string]any{"skill": "aura:user-elicit", "runId": skillRunId},
 	)
 	if err != nil {
 		t.Fatalf("RecordSkillEvent failed: %v", err)
 	}
 
-	skillEdges := queryContextEdges(t, dbPath, protocol.ContextSkill, skillRunID)
+	skillEdges := queryContextEdges(t, dbPath, protocol.ContextSkill, skillRunId)
 	if len(skillEdges) != 1 {
-		t.Fatalf("context_edges with (SkillContext, %q) = %d rows, want 1", skillRunID, len(skillEdges))
+		t.Fatalf("context_edges with (SkillContext, %q) = %d rows, want 1", skillRunId, len(skillEdges))
 	}
-	if skillEdges[0].eventID != eventID {
-		t.Errorf("context_edges.event_id = %d, want %d", skillEdges[0].eventID, eventID)
+	if skillEdges[0].eventId != eventId {
+		t.Errorf("context_edges.event_id = %d, want %d", skillEdges[0].eventId, eventId)
 	}
 
 	// Tracker.EventContexts agrees with the raw SQL.
-	contexts, err := tracker.EventContexts(ctx, eventID)
+	contexts, err := tracker.EventContexts(ctx, eventId)
 	if err != nil {
 		t.Fatalf("EventContexts: %v", err)
 	}
 	if len(contexts) != 1 || contexts[0].Kind != protocol.ContextSkill {
-		t.Errorf("EventContexts = %v, want [{Kind: SkillContext, ContextID: %q}]", contexts, skillRunID)
+		t.Errorf("EventContexts = %v, want [{Kind: SkillContext, ContextId: %q}]", contexts, skillRunId)
 	}
 }
 
@@ -308,22 +308,22 @@ func TestRecordSessionEvent_RecordsContextSessionEdge(t *testing.T) {
 
 	tracker, auditDB, dbPath := openFreeFloatingFixture(t)
 
-	const sessionID = "session-2026-04-25-T10-00-00-claude-code-001"
+	const sessionId = "session-2026-04-25-T10-00-00-claude-code-001"
 
-	eventID, err := tasks.RecordSessionEvent(
-		ctx, tracker, auditDB, sessionID, tasks.EventSessionRecorded,
-		map[string]any{"sessionId": sessionID, "durationSec": 300},
+	eventId, err := tasks.RecordSessionEvent(
+		ctx, tracker, auditDB, sessionId, tasks.EventSessionRecorded,
+		map[string]any{"sessionId": sessionId, "durationSec": 300},
 	)
 	if err != nil {
 		t.Fatalf("RecordSessionEvent failed: %v", err)
 	}
 
-	sessionEdges := queryContextEdges(t, dbPath, protocol.ContextSession, sessionID)
+	sessionEdges := queryContextEdges(t, dbPath, protocol.ContextSession, sessionId)
 	if len(sessionEdges) != 1 {
-		t.Fatalf("context_edges with (SessionContext, %q) = %d rows, want 1", sessionID, len(sessionEdges))
+		t.Fatalf("context_edges with (SessionContext, %q) = %d rows, want 1", sessionId, len(sessionEdges))
 	}
-	if sessionEdges[0].eventID != eventID {
-		t.Errorf("context_edges.event_id = %d, want %d", sessionEdges[0].eventID, eventID)
+	if sessionEdges[0].eventId != eventId {
+		t.Errorf("context_edges.event_id = %d, want %d", sessionEdges[0].eventId, eventId)
 	}
 }
 
@@ -342,10 +342,10 @@ func TestRecordGitEvent_PiggybackEpochContext(t *testing.T) {
 
 	const (
 		sha     = "deadbeefcafebabe1234567890abcdef12345678"
-		epochID = "aura-plugins--01968a3c-ffff-7000-8000-000000000099"
+		epochId = "aura-plugins--01968a3c-ffff-7000-8000-000000000099"
 	)
 
-	eventID, err := tasks.RecordGitEvent(
+	eventId, err := tasks.RecordGitEvent(
 		ctx, tracker, auditDB, sha, tasks.EventGitCommit,
 		map[string]any{"sha": sha},
 	)
@@ -354,12 +354,12 @@ func TestRecordGitEvent_PiggybackEpochContext(t *testing.T) {
 	}
 
 	// Caller adds the second context.
-	if err := tracker.AttachContext(ctx, eventID, protocol.ContextEpoch, epochID); err != nil {
+	if err := tracker.AttachContext(ctx, eventId, protocol.ContextEpoch, epochId); err != nil {
 		t.Fatalf("AttachContext(Epoch): %v", err)
 	}
 
 	// Both edges visible.
-	contexts, err := tracker.EventContexts(ctx, eventID)
+	contexts, err := tracker.EventContexts(ctx, eventId)
 	if err != nil {
 		t.Fatalf("EventContexts: %v", err)
 	}
@@ -377,16 +377,16 @@ func TestRecordGitEvent_PiggybackEpochContext(t *testing.T) {
 	// Both kinds visible at the SQL layer too (raw assertions don't depend
 	// on the SELECT projection that S3's WIP migration is reshaping).
 	gitRows := queryContextEdges(t, dbPath, protocol.ContextGit, sha)
-	if len(gitRows) != 1 || gitRows[0].eventID != eventID {
-		t.Errorf("context_edges (Git, %q) = %v, want one row with event_id=%d", sha, gitRows, eventID)
+	if len(gitRows) != 1 || gitRows[0].eventId != eventId {
+		t.Errorf("context_edges (Git, %q) = %v, want one row with event_id=%d", sha, gitRows, eventId)
 	}
-	epochRows := queryContextEdges(t, dbPath, protocol.ContextEpoch, epochID)
-	if len(epochRows) != 1 || epochRows[0].eventID != eventID {
-		t.Errorf("context_edges (Epoch, %q) = %v, want one row with event_id=%d", epochID, epochRows, eventID)
+	epochRows := queryContextEdges(t, dbPath, protocol.ContextEpoch, epochId)
+	if len(epochRows) != 1 || epochRows[0].eventId != eventId {
+		t.Errorf("context_edges (Epoch, %q) = %v, want one row with event_id=%d", epochId, epochRows, eventId)
 	}
 }
 
-// ─── Validation: nil tracker / nil auditDB / empty contextID / empty event ──
+// ─── Validation: nil tracker / nil auditDB / empty contextId / empty event ──
 
 func TestRecordGitEvent_RejectsNilTracker(t *testing.T) {
 	t.Parallel()
@@ -400,25 +400,25 @@ func TestRecordGitEvent_RejectsNilTracker(t *testing.T) {
 // TestRecordGitEvent_AcceptsNilAuditDB verifies that passing nil for the
 // auditDB parameter does not cause a validation error — the parameter is
 // retained only for API compatibility and is no longer used by the
-// implementation (tracker.RecordEventReturningID bundles write + id recovery).
+// implementation (tracker.RecordEventReturningId bundles write + id recovery).
 func TestRecordGitEvent_AcceptsNilAuditDB(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	tracker, _, dbPath := openFreeFloatingFixture(t)
 
 	const sha = "nilauditdb1234567890abcdef1234567890abcd"
-	eventID, err := tasks.RecordGitEvent(ctx, tracker, nil, sha, tasks.EventGitCommit, nil)
+	eventId, err := tasks.RecordGitEvent(ctx, tracker, nil, sha, tasks.EventGitCommit, nil)
 	if err != nil {
 		t.Fatalf("RecordGitEvent with nil auditDB returned unexpected error: %v", err)
 	}
-	if eventID <= 0 {
-		t.Fatalf("RecordGitEvent with nil auditDB returned non-positive eventID %d", eventID)
+	if eventId <= 0 {
+		t.Fatalf("RecordGitEvent with nil auditDB returned non-positive eventId %d", eventId)
 	}
 
 	// The event and context edge should still be persisted correctly.
 	gitEdges := queryContextEdges(t, dbPath, protocol.ContextGit, sha)
-	if len(gitEdges) != 1 || gitEdges[0].eventID != eventID {
-		t.Errorf("context_edges (GitContext, %q) = %v, want one row with event_id=%d", sha, gitEdges, eventID)
+	if len(gitEdges) != 1 || gitEdges[0].eventId != eventId {
+		t.Errorf("context_edges (GitContext, %q) = %v, want one row with event_id=%d", sha, gitEdges, eventId)
 	}
 }
 
@@ -440,7 +440,7 @@ func TestRecordGitEvent_RejectsEmptyEventType(t *testing.T) {
 	requireValidationError(t, err)
 }
 
-func TestRecordSkillEvent_RejectsEmptyRunID(t *testing.T) {
+func TestRecordSkillEvent_RejectsEmptyRunId(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	tracker, auditDB, _ := openFreeFloatingFixture(t)
@@ -449,7 +449,7 @@ func TestRecordSkillEvent_RejectsEmptyRunID(t *testing.T) {
 	requireValidationError(t, err)
 }
 
-func TestRecordSessionEvent_RejectsEmptySessionID(t *testing.T) {
+func TestRecordSessionEvent_RejectsEmptySessionId(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	tracker, auditDB, _ := openFreeFloatingFixture(t)
@@ -469,15 +469,15 @@ func TestRecordSessionEvent_RejectsEmptySessionID(t *testing.T) {
 // goroutine's higher-id row, silently misattributing context).
 //
 // History: Phase 10 W3's free_floating.go fix had to drop this assertion
-// because tracker.RecordEventReturningID recovered the id via SELECT MAX(id)
+// because tracker.RecordEventReturningId recovered the id via SELECT MAX(id)
 // after the INSERT, and concurrent writes really did return duplicate ids
 // to two callers (D11-bounded race, observable under -race in CI). Phase 11
-// R1-B (commit cf6c1a9) extended audit.Trail with RecordEventReturningID
+// R1-B (commit cf6c1a9) extended audit.Trail with RecordEventReturningId
 // that uses sql.Result.LastInsertId from the SAME INSERT statement, so the
 // returned id is now race-safe under any concurrency level. The
 // per-statement LastInsertId guarantee is regression-tested at the storage
-// boundary by TestSqliteAuditTrail_RecordEventReturningID_ConcurrentUnique
-// (sqlite_test.go) and TestInMemoryAuditTrail_RecordEventReturningID_ConcurrentUnique
+// boundary by TestSqliteAuditTrail_RecordEventReturningId_ConcurrentUnique
+// (sqlite_test.go) and TestInMemoryAuditTrail_RecordEventReturningId_ConcurrentUnique
 // (memory_test.go); this test re-verifies the same property surfaces
 // through the public tasks.RecordGitEvent boundary.
 //
@@ -533,15 +533,15 @@ func TestRecordGitEvent_ConcurrentBurst(t *testing.T) {
 
 	// (1) Per-call uniqueness — every goroutine must have received a distinct
 	// event_id. This is the Phase 11 R1-C re-tightened assertion: pre-R1-B
-	// (when tracker.RecordEventReturningID used SELECT MAX(id) under the hood)
+	// (when tracker.RecordEventReturningId used SELECT MAX(id) under the hood)
 	// this would intermittently fail because two goroutines could observe the
 	// same MAX(id) between their INSERT and SELECT. Post-R1-B (cf6c1a9) the
 	// per-statement sql.Result.LastInsertId guarantee makes this race-free.
 	//
 	// If this assertion fails, the per-statement LastInsertId guarantee from
-	// R1-B has regressed — first check audit.SqliteAuditTrail.RecordEventReturningID
+	// R1-B has regressed — first check audit.SqliteAuditTrail.RecordEventReturningId
 	// (sqlite.go) and its regression test
-	// TestSqliteAuditTrail_RecordEventReturningID_ConcurrentUnique.
+	// TestSqliteAuditTrail_RecordEventReturningId_ConcurrentUnique.
 	seen := make(map[int64]int, N)
 	for _, id := range ids {
 		seen[id]++
@@ -550,8 +550,8 @@ func TestRecordGitEvent_ConcurrentBurst(t *testing.T) {
 		if count > 1 {
 			t.Errorf("RecordGitEvent returned duplicate event_id %d to %d concurrent callers; "+
 				"the per-statement LastInsertId guarantee from Phase 11 R1-B (commit cf6c1a9) appears broken — "+
-				"re-check audit.SqliteAuditTrail.RecordEventReturningID and its regression test "+
-				"TestSqliteAuditTrail_RecordEventReturningID_ConcurrentUnique", id, count)
+				"re-check audit.SqliteAuditTrail.RecordEventReturningId and its regression test "+
+				"TestSqliteAuditTrail_RecordEventReturningId_ConcurrentUnique", id, count)
 		}
 	}
 	if len(seen) != len(ids) {
@@ -584,7 +584,7 @@ func TestRecordGitEvent_ConcurrentBurst(t *testing.T) {
 	// (3) Every returned id must be a valid positive event id that exists in audit_events.
 	for _, id := range ids {
 		if id <= 0 {
-			t.Errorf("RecordGitEvent returned non-positive eventID %d", id)
+			t.Errorf("RecordGitEvent returned non-positive eventId %d", id)
 			continue
 		}
 		var exists int
@@ -592,7 +592,7 @@ func TestRecordGitEvent_ConcurrentBurst(t *testing.T) {
 			t.Fatalf("verify event id %d exists: %v", id, err)
 		}
 		if exists == 0 {
-			t.Errorf("returned eventID %d does not exist in audit_events", id)
+			t.Errorf("returned eventId %d does not exist in audit_events", id)
 		}
 	}
 }

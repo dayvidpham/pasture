@@ -125,7 +125,7 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 
 	// ─── Pre-register one SoftwareAgent for the StartActivity op ──────
 	//
-	// StartActivity requires a registered AgentID. Registering once
+	// StartActivity requires a registered AgentId. Registering once
 	// outside the goroutines avoids forcing every concurrent op to
 	// also do an agent insert (which would mask the actual contention
 	// we want to measure on the 4 target tables).
@@ -133,7 +133,7 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterSoftwareAgent failed: %v", err)
 	}
-	agentID := agent.ID
+	agentId := agent.ID
 
 	// ─── Counters: atomic bookkeeping per op kind ─────────────────────
 	//
@@ -160,7 +160,7 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 		seed := int64(g)*1_000_003 + time.Now().UnixNano()
 		rng := rand.New(rand.NewSource(seed))
 
-		go func(goroutineID int, rng *rand.Rand) {
+		go func(goroutineId int, rng *rand.Rand) {
 			defer wg.Done()
 			<-startBarrier // unblock all goroutines simultaneously
 
@@ -170,7 +170,7 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 
 				err := runRaceOp(
 					ctx, tracker, op,
-					goroutineID, i, agentID,
+					goroutineId, i, agentId,
 					seedEventIDs, rng,
 				)
 
@@ -184,7 +184,7 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 					}
 					// Any other error is a hard failure.
 					t.Errorf("goroutine %d iter %d op %v: unexpected error: %v",
-						goroutineID, i, op, err)
+						goroutineId, i, op, err)
 					continue
 				}
 				atomic.AddInt64(&succeededByOp[op], 1)
@@ -243,12 +243,12 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 
 	// context_edges: opAttachContext successes + auto-EpochContext writes
 	// from RecordEvent (post-S4: SqliteAuditTrail.RecordEvent writes a
-	// context_edges (event_id, 'EpochContext', epochID) row whenever
-	// event.EpochID is non-empty). Both seed events and opRecordEvent
+	// context_edges (event_id, 'EpochContext', epochId) row whenever
+	// event.EpochId is non-empty). Both seed events and opRecordEvent
 	// successes contribute one EpochContext edge each.
 	//
 	// AttachContext uses INSERT OR IGNORE so duplicate
-	// (event_id, kind, contextID) triples are silently absorbed. The
+	// (event_id, kind, contextId) triples are silently absorbed. The
 	// upper bound is therefore (seed RecordEvent calls) +
 	// (opRecordEvent successes) + (opAttachContext successes), with the
 	// actual count being lower whenever the random distribution
@@ -288,19 +288,19 @@ func runRaceOp(
 	ctx context.Context,
 	tracker protocol.TaskTracker,
 	op raceOp,
-	goroutineID, iter int,
-	agentID provenance.AgentID,
+	goroutineId, iter int,
+	agentId provenance.AgentID,
 	seedEventIDs []int64,
 	rng *rand.Rand,
 ) error {
 	switch op {
 	case opRecordEvent:
 		ev := protocol.AuditEvent{
-			EpochID:   fmt.Sprintf("epoch-race-%d", goroutineID),
+			EpochId:   fmt.Sprintf("epoch-race-%d", goroutineId),
 			Phase:     protocol.PhaseWorkerSlices,
 			Role:      "race-test",
 			EventType: protocol.EventSliceStarted,
-			Payload:   map[string]any{"g": goroutineID, "i": iter},
+			Payload:   map[string]any{"g": goroutineId, "i": iter},
 			Timestamp: time.Now().UTC(),
 		}
 		return tracker.RecordEvent(ctx, ev)
@@ -309,7 +309,7 @@ func runRaceOp(
 		// Attach to a random pre-seeded event ID; pick a random
 		// ContextKind from the valid set (excluding ContextNone since
 		// it's the zero-value marker, not a meaningful attachment).
-		eventID := seedEventIDs[rng.Intn(len(seedEventIDs))]
+		eventId := seedEventIDs[rng.Intn(len(seedEventIDs))]
 		validKinds := []protocol.ContextKind{
 			protocol.ContextEpoch,
 			protocol.ContextSlice,
@@ -324,13 +324,13 @@ func runRaceOp(
 		// iter prevents BCNF idempotency from suppressing all writes
 		// (otherwise every goroutine using the same kind+id would
 		// collapse to one row).
-		contextID := fmt.Sprintf("ctx-%d-%d", goroutineID, iter)
-		return tracker.AttachContext(ctx, eventID, kind, contextID)
+		contextId := fmt.Sprintf("ctx-%d-%d", goroutineId, iter)
+		return tracker.AttachContext(ctx, eventId, kind, contextId)
 
 	case opCreateTask:
 		_, err := tracker.Create(
 			"pasture-race-test",
-			fmt.Sprintf("race-task-%d-%d", goroutineID, iter),
+			fmt.Sprintf("race-task-%d-%d", goroutineId, iter),
 			"race test task",
 			provenance.TaskTypeTask,
 			provenance.PriorityMedium,
@@ -340,10 +340,10 @@ func runRaceOp(
 
 	case opStartActivity:
 		_, err := tracker.StartActivity(
-			agentID,
+			agentId,
 			provenance.PhaseWorkerSlices,
 			provenance.StageInProgress,
-			fmt.Sprintf("race-activity-%d-%d", goroutineID, iter),
+			fmt.Sprintf("race-activity-%d-%d", goroutineId, iter),
 		)
 		return err
 	}
@@ -359,7 +359,7 @@ func runRaceOp(
 func seedAuditEvents(ctx context.Context, tracker protocol.TaskTracker, dbPath string, count int) ([]int64, error) {
 	for i := 0; i < count; i++ {
 		ev := protocol.AuditEvent{
-			EpochID:   "epoch-race-seed",
+			EpochId:   "epoch-race-seed",
 			Phase:     protocol.PhaseRequest,
 			Role:      "seed",
 			EventType: protocol.EventPhaseTransition,

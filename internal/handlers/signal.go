@@ -13,17 +13,17 @@ import (
 
 // SignalVote sends a ReviewVoteSignal to the EpochWorkflow.
 //
-// Validates axis and vote values before connecting to Temporal. The reviewerID
+// Validates axis and vote values before connecting to Temporal. The reviewerId
 // identifies the reviewer agent; it is optional but recommended for audit trail.
 //
 // Exit codes: 0=success, 1=validation error, 2=connection error, 3=workflow error.
 func SignalVote(
 	ctx context.Context,
 	conn config.ConnectionConfig,
-	epochID string,
+	epochId string,
 	axis types.ReviewAxis,
 	vote types.VoteType,
-	reviewerID string,
+	reviewerId string,
 	format types.OutputFormat,
 	factory TemporalClientFactory,
 ) (int, error) {
@@ -31,7 +31,7 @@ func SignalVote(
 		factory = DefaultClientFactory
 	}
 
-	if epochID == "" {
+	if epochId == "" {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     "An epoch ID is required to record a vote.",
@@ -82,13 +82,13 @@ func SignalVote(
 	payload := types.ReviewVoteSignal{
 		Axis:       axis,
 		Vote:       vote,
-		ReviewerID: reviewerID,
+		ReviewerId: reviewerId,
 	}
 
-	if err := c.SignalWorkflow(ctx, epochID, "", temporal.SignalSubmitVote, payload); err != nil {
+	if err := c.SignalWorkflow(ctx, epochId, "", temporal.SignalSubmitVote, payload); err != nil {
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
-			What:     fmt.Sprintf("Couldn't record the vote for epoch %q.", epochID),
+			What:     fmt.Sprintf("Couldn't record the vote for epoch %q.", epochId),
 			Why:      "The workflow server rejected the vote signal.",
 			Where:    "Recording a review vote (internal/handlers/signal.go in handlers.SignalVote).",
 			Impact:   "The vote was not recorded against this review.",
@@ -97,7 +97,7 @@ func SignalVote(
 				"2. If the epoch isn't found, list active epochs to find the right ID:\n"+
 				"     pasture-msg epoch list\n"+
 				"3. Retry the vote once the epoch is healthy.",
-				epochID),
+				epochId),
 			Cause: err,
 		}
 	}
@@ -120,7 +120,7 @@ func SignalVote(
 func SignalComplete(
 	ctx context.Context,
 	conn config.ConnectionConfig,
-	epochID, sliceID string,
+	epochId, sliceId string,
 	output, errMsg *string,
 	format types.OutputFormat,
 	factory TemporalClientFactory,
@@ -129,7 +129,7 @@ func SignalComplete(
 		factory = DefaultClientFactory
 	}
 
-	if epochID == "" {
+	if epochId == "" {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     "An epoch ID is required to mark a slice complete.",
@@ -143,7 +143,7 @@ func SignalComplete(
 		}
 		return pasterrors.ExitCode(err), err
 	}
-	if sliceID == "" {
+	if sliceId == "" {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     "A slice ID is required to mark a slice complete.",
@@ -184,16 +184,16 @@ func SignalComplete(
 	}
 
 	payload := types.SliceProgressSignal{
-		SliceID:    sliceID,
-		LeafTaskID: sliceID, // use sliceID as the leaf task identifier for top-level completion
+		SliceId:    sliceId,
+		LeafTaskId: sliceId, // use sliceId as the leaf task identifier for top-level completion
 		StageName:  stageName,
 		Completed:  completed,
 	}
 
-	if err := c.SignalWorkflow(ctx, epochID, "", temporal.SignalSliceProgress, payload); err != nil {
+	if err := c.SignalWorkflow(ctx, epochId, "", temporal.SignalSliceProgress, payload); err != nil {
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
-			What:     fmt.Sprintf("Couldn't mark slice %q complete in epoch %q.", sliceID, epochID),
+			What:     fmt.Sprintf("Couldn't mark slice %q complete in epoch %q.", sliceId, epochId),
 			Why:      "The workflow server rejected the completion signal.",
 			Where:    "Marking a slice complete (internal/handlers/signal.go in handlers.SignalComplete).",
 			Impact:   "The slice's completion isn't recorded, so the workflow can't move past it.",
@@ -202,7 +202,7 @@ func SignalComplete(
 				"2. If the epoch isn't found, list active epochs to find the right ID:\n"+
 				"     pasture-msg epoch list\n"+
 				"3. Retry the completion once the epoch is healthy.",
-				epochID),
+				epochId),
 			Cause: err,
 		}
 	}

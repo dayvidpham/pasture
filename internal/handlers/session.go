@@ -21,7 +21,7 @@ import (
 func SessionRegister(
 	ctx context.Context,
 	conn config.ConnectionConfig,
-	epochID, sessionID, role, modelHarness, model string,
+	epochId, sessionId, role, modelHarness, model string,
 	format types.OutputFormat,
 	factory TemporalClientFactory,
 ) (int, error) {
@@ -29,7 +29,7 @@ func SessionRegister(
 		factory = DefaultClientFactory
 	}
 
-	if epochID == "" {
+	if epochId == "" {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     "An epoch ID is required to register a session.",
@@ -43,7 +43,7 @@ func SessionRegister(
 		}
 		return pasterrors.ExitCode(err), err
 	}
-	if sessionID == "" {
+	if sessionId == "" {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     "A session ID is required to register a session.",
@@ -75,17 +75,17 @@ func SessionRegister(
 	defer c.Close()
 
 	payload := types.RegisterSessionSignal{
-		EpochID:      epochID,
-		SessionID:    sessionID,
+		EpochId:      epochId,
+		SessionId:    sessionId,
 		Role:         role,
 		ModelHarness: modelHarness,
 		Model:        model,
 	}
 
-	if err := c.SignalWorkflow(ctx, epochID, "", temporal.SignalRegisterSession, payload); err != nil {
+	if err := c.SignalWorkflow(ctx, epochId, "", temporal.SignalRegisterSession, payload); err != nil {
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
-			What:     fmt.Sprintf("Couldn't register the session with epoch %q.", epochID),
+			What:     fmt.Sprintf("Couldn't register the session with epoch %q.", epochId),
 			Why:      "The workflow server rejected the register-session signal.",
 			Where:    "Registering a session (internal/handlers/session.go in handlers.SessionRegister).",
 			Impact:   "The session is not tracked by the epoch, so its events won't appear in the epoch's history.",
@@ -94,7 +94,7 @@ func SessionRegister(
 				"2. If the epoch isn't found, list active epochs to find the right ID:\n"+
 				"     pasture-msg epoch list\n"+
 				"3. Retry the register once the epoch is healthy.",
-				epochID),
+				epochId),
 			Cause: err,
 		}
 	}

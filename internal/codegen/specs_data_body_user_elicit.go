@@ -7,42 +7,42 @@ var userElicitBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "user-elicit-plan-backwards",
+			Id:        "user-elicit-plan-backwards",
 			Given:     "user request captured",
 			When:      "eliciting",
 			Then:      "plan backwards from end vision to MVP",
 			ShouldNot: "start proposal without elicitation",
 		},
 		{
-			ID:        "user-elicit-read-phase1",
+			Id:        "user-elicit-read-phase1",
 			Given:     "Phase 1 complete",
 			When:      "starting elicitation",
 			Then:      "read Phase 1 outputs (classification, research findings, explore findings) from REQUEST task comments to scope URE questions",
 			ShouldNot: "ignore prior art discoveries or codebase exploration results",
 		},
 		{
-			ID:        "user-elicit-multiselect",
+			Id:        "user-elicit-multiselect",
 			Given:     "elicitation questions",
 			When:      "asking",
 			Then:      "use multiSelect: true for flexibility",
 			ShouldNot: "force single-choice answers",
 		},
 		{
-			ID:        "user-elicit-verbatim-responses",
+			Id:        "user-elicit-verbatim-responses",
 			Given:     "responses captured",
 			When:      "storing",
 			Then:      "record questions AND answers verbatim (including all options presented)",
 			ShouldNot: "summarize user responses or omit option text",
 		},
 		{
-			ID:        "user-elicit-chain-dep",
+			Id:        "user-elicit-chain-dep",
 			Given:     "elicitation complete",
 			When:      "creating task",
 			Then:      "chain dependency to request task",
 			ShouldNot: "skip dependency",
 		},
 		{
-			ID:        "user-elicit-urd-reference",
+			Id:        "user-elicit-urd-reference",
 			Given:     "URD created",
 			When:      "linking to other tasks",
 			Then:      "include URD ID in description frontmatter of referencing tasks",
@@ -52,7 +52,7 @@ var userElicitBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:    "user-elicit-substeps",
+			Id:    "user-elicit-substeps",
 			Title: "Sub-steps",
 			Content: "| Sub-step | Label | Description |\n" +
 				"|----------|-------|-------------|\n" +
@@ -60,12 +60,12 @@ var userElicitBody = SkillBody{
 				"| s2_2-urd | `aura:p2-user:s2_2-urd` (also `aura:urd`) | Create URD — single source of truth for requirements |",
 		},
 		{
-			ID:      "user-elicit-strategy",
+			Id:      "user-elicit-strategy",
 			Title:   "Elicitation Strategy (s2_1)",
 			Content: "",
 			Subsections: []ProseSection{
 				{
-					ID:    "user-elicit-end-vision",
+					Id:    "user-elicit-end-vision",
 					Title: "1. End Vision (Plan Backwards)",
 					Content: "Ask about the user's ultimate goal and what interfaces they envision:\n" +
 						"- What does the final feature look like?\n" +
@@ -73,7 +73,7 @@ var userElicitBody = SkillBody{
 						"- What other systems need to integrate?",
 				},
 				{
-					ID:    "user-elicit-mvp-scope",
+					Id:    "user-elicit-mvp-scope",
 					Title: "2. MVP Scope (Plan Forward)",
 					Content: "Jump to the starting point:\n" +
 						"- What's the minimum viable version?\n" +
@@ -81,7 +81,7 @@ var userElicitBody = SkillBody{
 						"- What are the must-have vs nice-to-have features?",
 				},
 				{
-					ID:    "user-elicit-engineering-dims",
+					Id:    "user-elicit-engineering-dims",
 					Title: "3. Engineering Dimensions",
 					Content: "Ask targeted questions to map the problem space:\n" +
 						"- Parallelism: Can operations run concurrently?\n" +
@@ -90,7 +90,7 @@ var userElicitBody = SkillBody{
 						"- Has-a / Is-a relationships in the domain",
 				},
 				{
-					ID:    "user-elicit-boundaries",
+					Id:    "user-elicit-boundaries",
 					Title: "4. Boundaries and Constraints",
 					Content: "- Performance requirements?\n" +
 						"- Security considerations?\n" +
@@ -98,12 +98,12 @@ var userElicitBody = SkillBody{
 						"- Error handling expectations?",
 				},
 				{
-					ID:      "user-elicit-catchall",
+					Id:      "user-elicit-catchall",
 					Title:   "5. Catch-All",
 					Content: "Final question to capture anything missed.",
 				},
 				{
-					ID:    "user-elicit-prereq",
+					Id:    "user-elicit-prereq",
 					Title: "Pre-requisite: Read Phase 1 Outputs",
 					Content: "Before designing URE questions, **read all Phase 1 outputs** (classification,\n" +
 						"research findings, codebase exploration) from the REQUEST task and its comments.\n" +
@@ -120,7 +120,7 @@ var userElicitBody = SkillBody{
 						"- Which dimensions the user **may not have considered** (surface these)",
 				},
 				{
-					ID:    "user-elicit-question-sequence",
+					Id:    "user-elicit-question-sequence",
 					Title: "Question Sequence (Decision Tree)",
 					Content: "Structure questions as a decision tree that progressively narrows the design\n" +
 						"space. Each question should depend on the answers to previous questions.\n" +
@@ -152,7 +152,7 @@ var userElicitBody = SkillBody{
 			},
 		},
 		{
-			ID:    "user-elicit-example-survey",
+			Id:    "user-elicit-example-survey",
 			Title: "Example Survey",
 			Content: "```\n" +
 				"AskUserQuestion(questions: [\n" +
@@ -204,7 +204,7 @@ var userElicitBody = SkillBody{
 				"```",
 		},
 		{
-			ID:    "user-elicit-create-task",
+			Id:    "user-elicit-create-task",
 			Title: "Creating the Elicit Task (s2_1)",
 			Content: "After survey completion, capture the full Q&A record using the same structured\n" +
 				"format as [UAT_TEMPLATE.md](../protocol/UAT_TEMPLATE.md). Each question must\n" +
@@ -246,7 +246,7 @@ var userElicitBody = SkillBody{
 				"```",
 		},
 		{
-			ID:    "user-elicit-create-urd",
+			Id:    "user-elicit-create-urd",
 			Title: "Creating the URD (s2_2)",
 			Content: "After the elicit task is created, create the URD as the single source of truth for user requirements:\n" +
 				"\n" +
@@ -279,7 +279,7 @@ var userElicitBody = SkillBody{
 				"Record the URD task ID — pass it to the architect for Phase 3.",
 		},
 		{
-			ID:    "user-elicit-next-phase",
+			Id:    "user-elicit-next-phase",
 			Title: "Next Phase",
 			Content: "After elicitation and URD creation, invoke `/aura:architect` to begin proposal creation (Phase 3). Pass the URD ID so the architect can reference it.\n" +
 				"\n" +

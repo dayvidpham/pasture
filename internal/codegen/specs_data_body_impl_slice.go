@@ -7,28 +7,28 @@ var implSliceBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "impl-slice-full-specs",
+			Id:        "impl-slice-full-specs",
 			Given:     "IMPL_PLAN complete",
 			When:      "assigning slices",
 			Then:      "create SLICE-N tasks with full specs",
 			ShouldNot: "leave specs vague",
 		},
 		{
-			ID:        "impl-slice-dep-chain",
+			Id:        "impl-slice-dep-chain",
 			Given:     "slice assigned",
 			When:      "creating task",
 			Then:      "chain dependency to IMPL_PLAN: bd dep add <impl-plan-id> --blocked-by <slice-id>",
 			ShouldNot: "create orphan slices",
 		},
 		{
-			ID:        "impl-slice-track-status",
+			Id:        "impl-slice-track-status",
 			Given:     "worker starts",
 			When:      "tracking",
 			Then:      "update task to in_progress",
 			ShouldNot: "leave status as open",
 		},
 		{
-			ID:        "impl-slice-complete-label",
+			Id:        "impl-slice-complete-label",
 			Given:     "slice complete",
 			When:      "verifying",
 			Then:      "add completion label and comments",
@@ -38,7 +38,7 @@ var implSliceBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:    "impl-slice-structure",
+			Id:    "impl-slice-structure",
 			Title: "Slice Structure",
 			Content: `Each vertical slice contains:
 - **slice_id**: Identifier (SLICE-1, SLICE-2, SLICE-3, ...)
@@ -47,7 +47,7 @@ var implSliceBody = SkillBody{
 - **slice_files**: Files owned by this slice`,
 		},
 		{
-			ID:    "impl-slice-creating",
+			Id:    "impl-slice-creating",
 			Title: "Creating Slices",
 			Content: "After supervisor decomposes the ratified plan:\n\n" +
 				"```bash\n" +
@@ -77,7 +77,7 @@ var implSliceBody = SkillBody{
 				"```",
 		},
 		{
-			ID:    "impl-slice-assigning",
+			Id:    "impl-slice-assigning",
 			Title: "Assigning Workers",
 			Content: "```bash\n" +
 				"bd update <slice-1-id> --assignee=\"worker-1\"\n" +
@@ -86,7 +86,7 @@ var implSliceBody = SkillBody{
 				"```",
 		},
 		{
-			ID:    "impl-slice-tracking",
+			Id:    "impl-slice-tracking",
 			Title: "Tracking Progress",
 			Content: "```bash\n" +
 				"# Worker starts\n" +
@@ -100,7 +100,7 @@ var implSliceBody = SkillBody{
 				"```",
 		},
 		{
-			ID:    "impl-slice-dependencies",
+			Id:    "impl-slice-dependencies",
 			Title: "Slice Dependencies",
 			Content: "Slices can have dependencies on each other (sync points):\n\n" +
 				"```bash\n" +
@@ -110,7 +110,7 @@ var implSliceBody = SkillBody{
 				"Minimize inter-slice dependencies when possible.",
 		},
 		{
-			ID:    "impl-slice-aggregation",
+			Id:    "impl-slice-aggregation",
 			Title: "Aggregation",
 			Content: "The aggregation step waits for all slices to complete before code review:\n\n" +
 				"```bash\n" +
@@ -121,7 +121,7 @@ var implSliceBody = SkillBody{
 				"```",
 		},
 		{
-			ID:    "impl-slice-followup",
+			Id:    "impl-slice-followup",
 			Title: "Follow-up Slices (FOLLOWUP_SLICE-N)",
 			Content: `Follow-up slices use the same structure and tracking, with additional fields:
 - **Title prefix:** ` + "`FOLLOWUP_SLICE-N:`" + ` (e.g., ` + "`FOLLOWUP_SLICE-1: Add request-id correlation`" + `)

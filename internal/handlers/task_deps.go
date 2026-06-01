@@ -52,16 +52,16 @@ func TaskBlocked(w io.Writer, dbPath string, format types.OutputFormat) (int, er
 	return 0, nil
 }
 
-// TaskDepAdd creates an edge sourceID --kind--> targetID. The default kind is
+// TaskDepAdd creates an edge sourceId --kind--> targetId. The default kind is
 // EdgeBlockedBy, which is what `--blocked-by` on the CLI maps to. Other edge
 // kinds can be specified by passing the wire-format string for the kind.
 //
 // Convention: `pasture task dep add A --blocked-by B` means "A is blocked by
 // B" — A cannot proceed until B closes. This matches the bd convention.
-func TaskDepAdd(w io.Writer, dbPath, sourceIDStr, targetIDStr string, kind provenance.EdgeKind, format types.OutputFormat) (int, error) {
-	sourceID, err := provenance.ParseTaskID(sourceIDStr)
+func TaskDepAdd(w io.Writer, dbPath, sourceIdStr, targetIdStr string, kind provenance.EdgeKind, format types.OutputFormat) (int, error) {
+	sourceId, err := provenance.ParseTaskID(sourceIdStr)
 	if err != nil {
-		return wrapInvalidID("task dep add (source)", sourceIDStr, err)
+		return wrapInvalidId("task dep add (source)", sourceIdStr, err)
 	}
 
 	tr, err := tasks.OpenTaskTracker(dbPath)
@@ -70,13 +70,13 @@ func TaskDepAdd(w io.Writer, dbPath, sourceIDStr, targetIDStr string, kind prove
 	}
 	defer tr.Close()
 
-	if err := tr.AddEdge(sourceID, targetIDStr, kind); err != nil {
+	if err := tr.AddEdge(sourceId, targetIdStr, kind); err != nil {
 		return wrapTaskOpError("dep add", err)
 	}
 
 	out, fErr := formatters.FormatEdge(provenance.Edge{
-		SourceID: sourceID.String(),
-		TargetID: targetIDStr,
+		SourceID: sourceId.String(),
+		TargetID: targetIdStr,
 		Kind:     kind,
 	}, format)
 	if fErr != nil {
@@ -90,7 +90,7 @@ func TaskDepAdd(w io.Writer, dbPath, sourceIDStr, targetIDStr string, kind prove
 func TaskDepTree(w io.Writer, dbPath, idStr string, format types.OutputFormat) (int, error) {
 	id, err := provenance.ParseTaskID(idStr)
 	if err != nil {
-		return wrapInvalidID("task dep tree", idStr, err)
+		return wrapInvalidId("task dep tree", idStr, err)
 	}
 
 	tr, err := tasks.OpenTaskTracker(dbPath)

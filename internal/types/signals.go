@@ -16,13 +16,13 @@ type PhaseAdvanceSignal struct {
 
 // ReviewVoteSignal is the payload for the submit_vote Temporal signal.
 //
-// ReviewerID must be the unique identifier for the reviewer agent submitting
+// ReviewerId must be the unique identifier for the reviewer agent submitting
 // the vote. Axis and Vote use their wire-format string values for
 // Temporal JSON round-trip safety.
 type ReviewVoteSignal struct {
 	Axis       ReviewAxis `json:"axis"`
 	Vote       VoteType   `json:"vote"`
-	ReviewerID string     `json:"reviewerId"`
+	ReviewerId string     `json:"reviewerId"`
 }
 
 // SliceProgressSignal is the payload for the slice_progress Temporal signal.
@@ -31,8 +31,8 @@ type ReviewVoteSignal struct {
 // progress. Completed is true when the leaf task finishes, false for
 // in-progress heartbeat events.
 type SliceProgressSignal struct {
-	SliceID    string `json:"sliceId"`
-	LeafTaskID string `json:"leafTaskId"`
+	SliceId    string `json:"sliceId"`
+	LeafTaskId string `json:"leafTaskId"`
 	StageName  string `json:"stageName"`
 	Completed  bool   `json:"completed"`
 }
@@ -43,8 +43,8 @@ type SliceProgressSignal struct {
 // permission tracking. Duplicate session_id registrations are silently ignored
 // (idempotent). ModelHarness identifies the runtime harness (e.g. "claude-code").
 type RegisterSessionSignal struct {
-	EpochID      string `json:"epochId"`
-	SessionID    string `json:"sessionId"`
+	EpochId      string `json:"epochId"`
+	SessionId    string `json:"sessionId"`
 	Role         string `json:"role"`
 	ModelHarness string `json:"modelHarness"`
 	Model        string `json:"model"`

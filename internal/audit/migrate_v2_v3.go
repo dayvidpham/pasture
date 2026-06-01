@@ -7,7 +7,7 @@
 //     (composite-key, no non-key columns; §7.8).
 //   - pasture_agent_categories — typed categorisation rows for Provenance
 //     agents (R8); written by SetAgentCategories.
-//   - pasture_well_known_agents — stable logical-name → AgentID mapping for
+//   - pasture_well_known_agents — stable logical-name → AgentId mapping for
 //     idempotent automaton registration at daemon
 //     startup (BLOCKER A2). UAT-1 schema invariant:
 //     (agent_id PK, name UNIQUE).
@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS pasture_agent_categories (
 )
 `
 
-// pastureWellKnownAgentsDDL creates the stable logical-name → AgentID
+// pastureWellKnownAgentsDDL creates the stable logical-name → AgentId
 // mapping consulted by ensureWellKnownAgent at daemon startup (BLOCKER A2).
 //
 // UAT-1 schema invariant (PROPOSAL-2 §7.2 + §7.7.1): agent_id is PK; name is

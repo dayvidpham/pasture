@@ -7,42 +7,42 @@ var workerImplementBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "wimpl-plan-backwards",
+			Id:        "wimpl-plan-backwards",
 			Given:     "vertical slice task",
 			When:      "implementing",
 			Then:      "plan backwards from production code path",
 			ShouldNot: "start with types without knowing the end",
 		},
 		{
-			ID:        "wimpl-vertical-ownership",
+			Id:        "wimpl-vertical-ownership",
 			Given:     "production code path",
 			When:      "implementing",
 			Then:      "own full vertical (types → tests → impl → wiring)",
 			ShouldNot: "implement only horizontal layer",
 		},
 		{
-			ID:        "wimpl-import-production",
+			Id:        "wimpl-import-production",
 			Given:     "tests",
 			When:      "writing",
 			Then:      "import actual production code",
 			ShouldNot: "create test-only export or dual code paths",
 		},
 		{
-			ID:        "wimpl-verify-production",
+			Id:        "wimpl-verify-production",
 			Given:     "implementation complete",
 			When:      "verifying",
 			Then:      "confirm production code path is wired (via code inspection or safe testing)",
 			ShouldNot: "rely only on unit tests passing",
 		},
 		{
-			ID:        "wimpl-inject-deps",
+			Id:        "wimpl-inject-deps",
 			Given:     "dependencies",
 			When:      "designing",
 			Then:      "inject all deps for testability",
 			ShouldNot: "hard-code `new`",
 		},
 		{
-			ID:        "wimpl-validate-input",
+			Id:        "wimpl-validate-input",
 			Given:     "external input",
 			When:      "processing",
 			Then:      "validate with schema/validation tooling",
@@ -52,17 +52,17 @@ var workerImplementBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:      "wimpl-when-to-use",
+			Id:      "wimpl-when-to-use",
 			Title:   "When to Use",
 			Content: `You have a Beads task ID for a vertical slice and are ready to implement end-to-end.`,
 		},
 		{
-			ID:      "wimpl-steps",
+			Id:      "wimpl-steps",
 			Title:   "Steps",
 			Content: "",
 			Subsections: []ProseSection{
 				{
-					ID:    "wimpl-step0-plan",
+					Id:    "wimpl-step0-plan",
 					Title: "Step 0: Plan backwards from production code path (before implementing)",
 					Content: `**Given** Beads task **when** starting **then** identify production code path first
 
@@ -85,21 +85,21 @@ End: User runs production command
 - **L3 Implementation:** Service method + wiring with real dependencies (not TODO)`,
 				},
 				{
-					ID:    "wimpl-step1-read",
+					Id:    "wimpl-step1-read",
 					Title: "Step 1: Read Beads task for full context",
 					Content: "```bash" + `
 bd show <task-id>
 ` + "```",
 				},
 				{
-					ID:    "wimpl-step2-status",
+					Id:    "wimpl-step2-status",
 					Title: "Step 2: Update status",
 					Content: "```bash" + `
 bd update <task-id> --status=in_progress
 ` + "```",
 				},
 				{
-					ID:    "wimpl-step3-layers",
+					Id:    "wimpl-step3-layers",
 					Title: "Step 3: Implement your vertical slice in layers",
 					Content: `**Layer 1: Types (your slice only)**
 - Create only types YOUR slice needs
@@ -121,13 +121,13 @@ Follow:
 - tradeoffs from ratified plan`,
 				},
 				{
-					ID:    "wimpl-step4-quality",
+					Id:    "wimpl-step4-quality",
 					Title: "Step 4: Verify quality gates",
 					Content: `- Type checking passes
 - Tests pass`,
 				},
 				{
-					ID:    "wimpl-step5-commit",
+					Id:    "wimpl-step5-commit",
 					Title: "Step 5: Commit safely in a shared worktree",
 					Content: `Stage **only** the files belonging to your slice, by name:
 ` + "```bash" + `
@@ -149,7 +149,7 @@ coordination instead. See **Shared-Worktree Git Discipline** in
 			},
 		},
 		{
-			ID:    "wimpl-checklist",
+			Id:    "wimpl-checklist",
 			Title: "Checklist",
 			Content: `- [ ] Planned backwards from production code path
 - [ ] Read Beads task for validation_checklist
@@ -165,7 +165,7 @@ coordination instead. See **Shared-Worktree Git Discipline** in
 - [ ] No destructive git operations (` + "`reset --hard`" + `, ` + "`checkout HEAD -- <path>`" + `, ` + "`stash pop/apply`" + `, ` + "`clean -fd`" + `, ` + "`branch -D`" + `) used on the shared worktree`,
 		},
 		{
-			ID:    "wimpl-followup-slices",
+			Id:    "wimpl-followup-slices",
 			Title: "Follow-up Slices (FOLLOWUP_SLICE-N)",
 			Content: `If your Beads task is a ` + "`FOLLOWUP_SLICE-N`" + `, the implementation procedure is identical. Additionally:
 - Check for an "Adopted Leaf Tasks" section in ` + "`bd show <task-id>`" + ` — these are IMPORTANT/MINOR findings you must resolve
@@ -173,7 +173,7 @@ coordination instead. See **Shared-Worktree Git Discipline** in
 - On completion, report which leaf tasks were resolved`,
 		},
 		{
-			ID:    "wimpl-next",
+			Id:    "wimpl-next",
 			Title: "Next",
 			Content: `- Complete: ` + "`/aura:worker-complete`" + `
 - Blocked: ` + "`/aura:worker-blocked`",

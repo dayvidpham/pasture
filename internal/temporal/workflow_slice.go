@@ -17,7 +17,7 @@ import (
 //  2. Workflow defaults to mock mode (immediate success) unless a SliceStartSignal
 //     is received before run begins.
 //  3. On completion, signals the parent EpochWorkflow via slice_progress using
-//     input.ParentWorkflowID. Signal delivery is best-effort; if the parent has
+//     input.ParentWorkflowId. Signal delivery is best-effort; if the parent has
 //     already completed, the exception is caught and ignored (non-fatal).
 //
 // Port of Python SliceWorkflow in scripts/aura_protocol/workflow.py.
@@ -72,7 +72,7 @@ func dispatchHookActivity(ctx workflow.Context, payload hooks.HookPayload) {
 	if err := workflow.ExecuteActivity(hookCtx, ActivityDispatchHook, payload).Get(hookCtx, nil); err != nil {
 		workflow.GetLogger(ctx).Warn("SliceWorkflow: DispatchHook activity failed (best-effort, non-fatal)",
 			"event", string(payload.Event),
-			"epochID", payload.EpochID,
+			"epochId", payload.EpochId,
 			"error", err,
 		)
 	}
@@ -128,9 +128,9 @@ func (sw *SliceWorkflow) Run(ctx workflow.Context, input SliceInput) (*SliceResu
 	// Best-effort: fire HookSliceStarted before slice execution begins.
 	dispatchHookActivity(ctx, hooks.HookPayload{
 		Event:   hooks.HookSliceStarted,
-		EpochID: input.EpochID,
+		EpochId: input.EpochId,
 		Data: map[string]any{
-			"sliceId": input.SliceID,
+			"sliceId": input.SliceId,
 			"mode":    mode,
 		},
 	})
@@ -139,7 +139,7 @@ func (sw *SliceWorkflow) Run(ctx workflow.Context, input SliceInput) (*SliceResu
 
 	switch mode {
 	case "mock":
-		result = &SliceResult{SliceID: input.SliceID, Success: true}
+		result = &SliceResult{SliceId: input.SliceId, Success: true}
 
 	case "tmux", "subprocess":
 		// Delegate to execute_slice_command activity.
@@ -148,11 +148,11 @@ func (sw *SliceWorkflow) Run(ctx workflow.Context, input SliceInput) (*SliceResu
 		})
 		var actResult SliceResult
 		if err := workflow.ExecuteActivity(actCtx, "execute_slice_command",
-			command, input.SliceID, input.EpochID,
+			command, input.SliceId, input.EpochId,
 		).Get(actCtx, &actResult); err != nil {
 			errMsg := err.Error()
 			result = &SliceResult{
-				SliceID: input.SliceID,
+				SliceId: input.SliceId,
 				Success: false,
 				Error:   &errMsg,
 			}
@@ -163,7 +163,7 @@ func (sw *SliceWorkflow) Run(ctx workflow.Context, input SliceInput) (*SliceResu
 	default:
 		errMsg := fmt.Sprintf("unknown execution mode %q; must be mock, tmux, or subprocess", mode)
 		result = &SliceResult{
-			SliceID: input.SliceID,
+			SliceId: input.SliceId,
 			Success: false,
 			Error:   &errMsg,
 		}
@@ -182,7 +182,7 @@ func (sw *SliceWorkflow) Run(ctx workflow.Context, input SliceInput) (*SliceResu
 	if sw.completeSignal != nil {
 		cs := sw.completeSignal
 		result = &SliceResult{
-			SliceID: input.SliceID,
+			SliceId: input.SliceId,
 			Success: cs.Success,
 			Output:  cs.Output,
 			Error:   cs.Error,
@@ -193,9 +193,9 @@ func (sw *SliceWorkflow) Run(ctx workflow.Context, input SliceInput) (*SliceResu
 	if result.Success {
 		dispatchHookActivity(ctx, hooks.HookPayload{
 			Event:   hooks.HookSliceCompleted,
-			EpochID: input.EpochID,
+			EpochId: input.EpochId,
 			Data: map[string]any{
-				"sliceId": input.SliceID,
+				"sliceId": input.SliceId,
 				"output":  result.Output,
 			},
 		})
@@ -206,28 +206,28 @@ func (sw *SliceWorkflow) Run(ctx workflow.Context, input SliceInput) (*SliceResu
 		}
 		dispatchHookActivity(ctx, hooks.HookPayload{
 			Event:   hooks.HookSliceFailed,
-			EpochID: input.EpochID,
+			EpochId: input.EpochId,
 			Data: map[string]any{
-				"sliceId": input.SliceID,
+				"sliceId": input.SliceId,
 				"error":   errVal,
 			},
 		})
 	}
 
 	// Signal parent EpochWorkflow with slice completion progress.
-	// Use input.ParentWorkflowID (explicit) for testability.
+	// Use input.ParentWorkflowId (explicit) for testability.
 	// Signal delivery failure is non-fatal: parent may have already completed.
-	if input.ParentWorkflowID != "" {
+	if input.ParentWorkflowId != "" {
 		progressSig := types.SliceProgressSignal{
-			SliceID:    input.SliceID,
-			LeafTaskID: input.SliceID,
+			SliceId:    input.SliceId,
+			LeafTaskId: input.SliceId,
 			StageName:  "execute",
 			Completed:  result.Success,
 		}
-		if sigErr := workflow.SignalExternalWorkflow(ctx, input.ParentWorkflowID, "", SignalSliceProgress, progressSig).Get(ctx, nil); sigErr != nil {
+		if sigErr := workflow.SignalExternalWorkflow(ctx, input.ParentWorkflowId, "", SignalSliceProgress, progressSig).Get(ctx, nil); sigErr != nil {
 			workflow.GetLogger(ctx).Warn("SliceWorkflow: parent signal delivery failed",
-				"sliceId", input.SliceID,
-				"parentWorkflowId", input.ParentWorkflowID,
+				"sliceId", input.SliceId,
+				"parentWorkflowId", input.ParentWorkflowId,
 				"error", sigErr)
 		}
 	}

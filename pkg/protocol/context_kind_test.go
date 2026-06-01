@@ -114,15 +114,15 @@ func TestContextKind_String_ReturnsWireFormat(t *testing.T) {
 func TestContext_StructFields(t *testing.T) {
 	t.Parallel()
 
-	// Smoke test that the Context struct carries (Kind, ContextID).
+	// Smoke test that the Context struct carries (Kind, ContextId).
 	c := protocol.Context{
 		Kind:      protocol.ContextEpoch,
-		ContextID: "aura-plugins--01968a3c-1234-7000-8000-000000000000",
+		ContextId: "aura-plugins--01968a3c-1234-7000-8000-000000000000",
 	}
 	if c.Kind != protocol.ContextEpoch {
 		t.Errorf("Context.Kind = %q, want %q", c.Kind, protocol.ContextEpoch)
 	}
-	if c.ContextID == "" {
-		t.Errorf("Context.ContextID is empty")
+	if c.ContextId == "" {
+		t.Errorf("Context.ContextId is empty")
 	}
 }

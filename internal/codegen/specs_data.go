@@ -20,7 +20,7 @@ import (
 // Mirrors Python PHASE_SPECS dict.
 var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 	protocol.PhaseRequest: {
-		ID:         protocol.PhaseRequest,
+		Id:         protocol.PhaseRequest,
 		Name:       "Request",
 		Number:     1,
 		Domain:     types.DomainUser,
@@ -33,7 +33,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhaseElicit: {
-		ID:         protocol.PhaseElicit,
+		Id:         protocol.PhaseElicit,
 		Name:       "Elicit",
 		Number:     2,
 		Domain:     types.DomainUser,
@@ -46,7 +46,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhasePropose: {
-		ID:         protocol.PhasePropose,
+		Id:         protocol.PhasePropose,
 		Name:       "Propose",
 		Number:     3,
 		Domain:     types.DomainPlan,
@@ -59,7 +59,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhaseReview: {
-		ID:         protocol.PhaseReview,
+		Id:         protocol.PhaseReview,
 		Name:       "Review",
 		Number:     4,
 		Domain:     types.DomainPlan,
@@ -77,7 +77,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhasePlanReview: {
-		ID:         protocol.PhasePlanReview,
+		Id:         protocol.PhasePlanReview,
 		Name:       "Plan UAT",
 		Number:     5,
 		Domain:     types.DomainUser,
@@ -95,7 +95,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhaseRatify: {
-		ID:         protocol.PhaseRatify,
+		Id:         protocol.PhaseRatify,
 		Name:       "Ratify",
 		Number:     6,
 		Domain:     types.DomainPlan,
@@ -108,7 +108,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhaseHandoff: {
-		ID:         protocol.PhaseHandoff,
+		Id:         protocol.PhaseHandoff,
 		Name:       "Handoff",
 		Number:     7,
 		Domain:     types.DomainPlan,
@@ -121,7 +121,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhaseImplPlan: {
-		ID:         protocol.PhaseImplPlan,
+		Id:         protocol.PhaseImplPlan,
 		Name:       "Impl Plan",
 		Number:     8,
 		Domain:     types.DomainImpl,
@@ -134,7 +134,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhaseWorkerSlices: {
-		ID:         protocol.PhaseWorkerSlices,
+		Id:         protocol.PhaseWorkerSlices,
 		Name:       "Worker Slices",
 		Number:     9,
 		Domain:     types.DomainImpl,
@@ -147,7 +147,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhaseCodeReview: {
-		ID:         protocol.PhaseCodeReview,
+		Id:         protocol.PhaseCodeReview,
 		Name:       "Code Review",
 		Number:     10,
 		Domain:     types.DomainImpl,
@@ -165,7 +165,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhaseImplUAT: {
-		ID:         protocol.PhaseImplUAT,
+		Id:         protocol.PhaseImplUAT,
 		Name:       "Impl UAT",
 		Number:     11,
 		Domain:     types.DomainUser,
@@ -183,7 +183,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		},
 	},
 	protocol.PhaseLanding: {
-		ID:         protocol.PhaseLanding,
+		Id:         protocol.PhaseLanding,
 		Name:       "Landing",
 		Number:     12,
 		Domain:     types.DomainImpl,
@@ -203,14 +203,14 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 // Mirrors Python CONSTRAINT_SPECS dict.
 var ConstraintSpecs = map[string]ConstraintSpec{
 	"C-audit-never-delete": {
-		ID:        "C-audit-never-delete",
+		Id:        "C-audit-never-delete",
 		Given:     "any task or label",
 		When:      "modifying",
 		Then:      "add labels and comments only",
 		ShouldNot: "delete or close tasks prematurely, remove labels",
 	},
 	"C-audit-dep-chain": {
-		ID:        "C-audit-dep-chain",
+		Id:        "C-audit-dep-chain",
 		Given:     "any phase transition",
 		When:      "creating new task",
 		Then:      "chain dependency: bd dep add parent --blocked-by child",
@@ -218,7 +218,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		Command:   "bd dep add <parent> --blocked-by <child>",
 		Examples: []Example{
 			{
-				ID:    "C-audit-dep-chain-full",
+				Id:    "C-audit-dep-chain-full",
 				Lang:  "bash",
 				Label: "correct",
 				Code: "# Full dependency chain: work flows bottom-up, closure flows top-down\n" +
@@ -231,28 +231,28 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		},
 	},
 	"C-review-consensus": {
-		ID:        "C-review-consensus",
+		Id:        "C-review-consensus",
 		Given:     "review cycle (p4 or p10)",
 		When:      "evaluating",
 		Then:      "all 3 reviewers must ACCEPT before proceeding",
 		ShouldNot: "proceed with any REVISE vote outstanding",
 	},
 	"C-review-binary": {
-		ID:        "C-review-binary",
+		Id:        "C-review-binary",
 		Given:     "a reviewer",
 		When:      "voting",
 		Then:      "use ACCEPT or REVISE only",
 		ShouldNot: "use APPROVE, APPROVE_WITH_COMMENTS, REQUEST_CHANGES, or REJECT",
 	},
 	"C-severity-eager": {
-		ID:        "C-severity-eager",
+		Id:        "C-severity-eager",
 		Given:     "code review round (p10 only)",
 		When:      "starting review",
 		Then:      "ALWAYS create 3 severity group tasks (BLOCKER, IMPORTANT, MINOR) immediately",
 		ShouldNot: "lazily create severity groups only when findings exist",
 		Examples: []Example{
 			{
-				ID:    "C-severity-eager-create",
+				Id:    "C-severity-eager-create",
 				Lang:  "bash",
 				Label: "correct",
 				Code: "# Create all 3 severity groups immediately (even if empty)\n" +
@@ -267,7 +267,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 					"bd close <empty-minor-id>",
 			},
 			{
-				ID:    "C-severity-eager-anti",
+				Id:    "C-severity-eager-anti",
 				Lang:  "bash",
 				Label: "anti-pattern",
 				Code: "# WRONG: only creating groups when findings exist\n" +
@@ -278,42 +278,42 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		},
 	},
 	"C-severity-not-plan": {
-		ID:        "C-severity-not-plan",
+		Id:        "C-severity-not-plan",
 		Given:     "plan review (p4)",
 		When:      "reviewing",
 		Then:      "use binary ACCEPT/REVISE only",
 		ShouldNot: "create severity tree for plan reviews",
 	},
 	"C-blocker-dual-parent": {
-		ID:        "C-blocker-dual-parent",
+		Id:        "C-blocker-dual-parent",
 		Given:     "a BLOCKER finding in code review",
 		When:      "recording",
 		Then:      "add as child of BOTH the severity group AND the slice it blocks",
 		ShouldNot: "add to severity group only",
 	},
 	"C-followup-timing": {
-		ID:        "C-followup-timing",
+		Id:        "C-followup-timing",
 		Given:     "code review completion with IMPORTANT or MINOR findings",
 		When:      "creating follow-up epic",
 		Then:      "create immediately upon review completion",
 		ShouldNot: "gate follow-up epic on BLOCKER resolution",
 	},
 	"C-vertical-slices": {
-		ID:        "C-vertical-slices",
+		Id:        "C-vertical-slices",
 		Given:     "implementation decomposition",
 		When:      "assigning work",
 		Then:      "each production code path owned by exactly ONE worker (full vertical)",
 		ShouldNot: "assign horizontal layers or same path to multiple workers",
 	},
 	"C-supervisor-no-impl": {
-		ID:        "C-supervisor-no-impl",
+		Id:        "C-supervisor-no-impl",
 		Given:     "supervisor role",
 		When:      "implementation phase",
 		Then:      "spawn workers for all code changes",
 		ShouldNot: "implement code directly",
 	},
 	"C-supervisor-explore-ephemeral": {
-		ID:    "C-supervisor-explore-ephemeral",
+		Id:    "C-supervisor-explore-ephemeral",
 		Given: "supervisor needs codebase exploration",
 		When:  "starting Phase 8 (IMPL_PLAN)",
 		Then: "spawn ephemeral Explore subagents via Task tool for scoped codebase queries; " +
@@ -322,7 +322,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 			"maintain a standing explore team",
 	},
 	"C-clean-review-exit": {
-		ID:    "C-clean-review-exit",
+		Id:    "C-clean-review-exit",
 		Given: "per-slice code review",
 		When:  "evaluating review results",
 		Then: "clean review exit requires 0 BLOCKERs AND 0 IMPORTANTs; " +
@@ -335,7 +335,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 			"escalate to user instead of architect",
 	},
 	"C-autonomous-progression": {
-		ID:    "C-autonomous-progression",
+		Id:    "C-autonomous-progression",
 		Given: "supervisor orchestrating phases",
 		When:  "deciding whether to proceed",
 		Then: "4 user-gated phases only: (1) research depth decision, (2) URE survey, " +
@@ -346,7 +346,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 			"require user approval for ratification after UAT ACCEPT",
 	},
 	"C-integration-points": {
-		ID:    "C-integration-points",
+		Id:    "C-integration-points",
 		Given: "multiple vertical slices share types, interfaces, or data flows",
 		When:  "decomposing IMPL_PLAN in Phase 8",
 		Then: "identify horizontal Layer Integration Points and document them in IMPL_PLAN; " +
@@ -356,7 +356,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 			"assume workers will discover contracts on their own",
 	},
 	"C-slice-review-before-close": {
-		ID:    "C-slice-review-before-close",
+		Id:    "C-slice-review-before-close",
 		Given: "workers complete their implementation slices",
 		When:  "slice implementation is done",
 		Then: "workers notify supervisor with bd comments add (not bd close); " +
@@ -366,7 +366,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 			"allow workers to close their own slices",
 	},
 	"C-max-review-cycles": {
-		ID:    "C-max-review-cycles",
+		Id:    "C-max-review-cycles",
 		Given: "per-slice review-fix cycles are ongoing",
 		When:  "counting review-fix iterations per slice",
 		Then: "limit to a maximum of 3 cycles per slice; " +
@@ -378,7 +378,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 			"batch review across multiple slices",
 	},
 	"C-slice-leaf-tasks": {
-		ID:    "C-slice-leaf-tasks",
+		Id:    "C-slice-leaf-tasks",
 		Given: "vertical slice created",
 		When:  "decomposing slice into implementation units",
 		Then: "create Beads leaf tasks (L1: types, L2: tests, L3: impl) within each slice " +
@@ -388,7 +388,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		Command: "bd dep add <slice-id> --blocked-by <leaf-task-id>",
 	},
 	"C-handoff-skill-invocation": {
-		ID:    "C-handoff-skill-invocation",
+		Id:    "C-handoff-skill-invocation",
 		Given: "an agent is launched for a new phase (especially p7 to p8 handoff)",
 		When:  "composing the launch prompt",
 		Then: "prompt MUST start with Skill(/aura:{role}) invocation directive " +
@@ -397,7 +397,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 			"they skip role-critical procedures like ephemeral exploration and leaf task creation",
 	},
 	"C-dep-direction": {
-		ID:        "C-dep-direction",
+		Id:        "C-dep-direction",
 		Given:     "adding a Beads dependency",
 		When:      "determining direction",
 		Then:      "parent blocked-by child: bd dep add stays-open --blocked-by must-finish-first",
@@ -405,14 +405,14 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		Command:   "bd dep add <stays-open> --blocked-by <must-finish-first>",
 		Examples: []Example{
 			{
-				ID:              "C-dep-direction-correct",
+				Id:              "C-dep-direction-correct",
 				Lang:            "bash",
 				Label:           "correct",
 				Code:            "bd dep add request-id --blocked-by ure-id",
 				AlsoIllustrates: "C-audit-dep-chain",
 			},
 			{
-				ID:    "C-dep-direction-anti",
+				Id:    "C-dep-direction-anti",
 				Lang:  "bash",
 				Label: "anti-pattern",
 				Code:  "bd dep add ure-id --blocked-by request-id",
@@ -420,14 +420,14 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		},
 	},
 	"C-frontmatter-refs": {
-		ID:        "C-frontmatter-refs",
+		Id:        "C-frontmatter-refs",
 		Given:     "cross-task references (URD, request, etc.)",
 		When:      "linking tasks",
 		Then:      "use description frontmatter references: block",
 		ShouldNot: "use bd dep relate (buggy) or blocking dependencies for reference docs",
 	},
 	"C-agent-commit": {
-		ID:        "C-agent-commit",
+		Id:        "C-agent-commit",
 		Given:     "code is ready to commit",
 		When:      "committing",
 		Then:      "use git agent-commit -m ...",
@@ -435,13 +435,13 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		Command:   "git agent-commit -m ...",
 		Examples: []Example{
 			{
-				ID:    "C-agent-commit-correct",
+				Id:    "C-agent-commit-correct",
 				Lang:  "bash",
 				Label: "correct",
 				Code:  `git agent-commit -m "feat: add login"`,
 			},
 			{
-				ID:    "C-agent-commit-anti",
+				Id:    "C-agent-commit-anti",
 				Lang:  "bash",
 				Label: "anti-pattern",
 				Code:  `git commit -m "feat: add login"`,
@@ -449,21 +449,21 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		},
 	},
 	"C-proposal-naming": {
-		ID:        "C-proposal-naming",
+		Id:        "C-proposal-naming",
 		Given:     "a new or revised proposal",
 		When:      "creating task",
 		Then:      "title PROPOSAL-{N} where N increments; mark old as aura:superseded",
 		ShouldNot: "reuse N or delete old proposals",
 	},
 	"C-review-naming": {
-		ID:        "C-review-naming",
+		Id:        "C-review-naming",
 		Given:     "a review task",
 		When:      "creating",
 		Then:      "title {SCOPE}-REVIEW-{axis}-{round} where axis=A|B|C, round starts at 1",
 		ShouldNot: "use numeric reviewer IDs (1/2/3) instead of axis letters",
 	},
 	"C-ure-verbatim": {
-		ID:    "C-ure-verbatim",
+		Id:    "C-ure-verbatim",
 		Given: "user interview (Request, URE, or UAT), URD update, or mid-implementation design decision",
 		When:  "recording in Beads",
 		Then: "capture full question text, ALL option descriptions, AND user's verbatim response; " +
@@ -472,7 +472,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		ShouldNot: "summarize options as (1)/(2)/(3) without option text, or paraphrase user responses",
 		Examples: []Example{
 			{
-				ID:    "C-ure-verbatim-correct",
+				Id:    "C-ure-verbatim-correct",
 				Lang:  "bash",
 				Label: "correct",
 				Code: "# Full question, all options with descriptions, verbatim response\n" +
@@ -487,7 +487,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 					"**Decision:** ACCEPT\"",
 			},
 			{
-				ID:    "C-ure-verbatim-anti",
+				Id:    "C-ure-verbatim-anti",
 				Lang:  "bash",
 				Label: "anti-pattern",
 				Code: "# WRONG: options summarized as numbers, response paraphrased\n" +
@@ -497,7 +497,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		},
 	},
 	"C-followup-lifecycle": {
-		ID:    "C-followup-lifecycle",
+		Id:    "C-followup-lifecycle",
 		Given: "follow-up epic created",
 		When:  "starting follow-up work",
 		Then: "run same protocol phases with FOLLOWUP_* prefix: " +
@@ -505,7 +505,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		ShouldNot: "skip the follow-up lifecycle or treat the follow-up epic as a flat task list",
 	},
 	"C-followup-leaf-adoption": {
-		ID:    "C-followup-leaf-adoption",
+		Id:    "C-followup-leaf-adoption",
 		Given: "supervisor creates FOLLOWUP_SLICE-N",
 		When:  "assigning original IMPORTANT/MINOR leaf tasks to follow-up slices",
 		Then: "add leaf task as child of follow-up slice " +
@@ -513,14 +513,14 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		ShouldNot: "remove the leaf task from its original severity group parent",
 	},
 	"C-worker-gates": {
-		ID:        "C-worker-gates",
+		Id:        "C-worker-gates",
 		Given:     "worker finishes implementation",
 		When:      "signaling completion",
 		Then:      "run quality gates (typecheck + tests) AND verify production code path (no TODOs, real deps)",
 		ShouldNot: "close with only 'tests pass' as completion gate",
 	},
 	"C-actionable-errors": {
-		ID:    "C-actionable-errors",
+		Id:    "C-actionable-errors",
 		Given: "an error, exception, or user-facing message",
 		When:  "creating or raising",
 		Then: "make it actionable: describe (1) what went wrong, (2) why it happened, " +
@@ -538,7 +538,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 // Mirrors Python ROLE_SPECS dict.
 var RoleSpecs = map[types.RoleId]RoleSpec{
 	types.RoleEpoch: {
-		ID:          types.RoleEpoch,
+		Id:          types.RoleEpoch,
 		Name:        "Epoch",
 		Description: "Master orchestrator for full 12-phase workflow",
 		Model:       "opus",
@@ -559,7 +559,7 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 			"that spans all phases.",
 	},
 	types.RoleArchitect: {
-		ID:          types.RoleArchitect,
+		Id:          types.RoleArchitect,
 		Name:        "Architect",
 		Description: "Specification writer and implementation designer",
 		Model:       "opus",
@@ -582,35 +582,35 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 			"create handoff document and transfer to supervisor (p7).",
 		Behaviors: []BehaviorSpec{
 			{
-				ID:        "B-arch-elicit",
+				Id:        "B-arch-elicit",
 				Given:     "user request captured",
 				When:      "starting",
 				Then:      "run /aura:user-elicit for URE survey",
 				ShouldNot: "skip elicitation phase",
 			},
 			{
-				ID:        "B-arch-bdd",
+				Id:        "B-arch-bdd",
 				Given:     "a feature request",
 				When:      "writing plan",
 				Then:      "use BDD Given/When/Then format with acceptance criteria",
 				ShouldNot: "write vague requirements",
 			},
 			{
-				ID:        "B-arch-reviewers",
+				Id:        "B-arch-reviewers",
 				Given:     "plan ready",
 				When:      "requesting review",
 				Then:      "spawn 3 axis-specific reviewers (A=Correctness, B=Test quality, C=Elegance)",
 				ShouldNot: "spawn reviewers without axis assignment",
 			},
 			{
-				ID:        "B-arch-uat",
+				Id:        "B-arch-uat",
 				Given:     "consensus reached (all 3 ACCEPT)",
 				When:      "proceeding",
 				Then:      "run /aura:user-uat before ratifying",
 				ShouldNot: "skip user acceptance test",
 			},
 			{
-				ID:        "B-arch-ratify",
+				Id:        "B-arch-ratify",
 				Given:     "UAT passed",
 				When:      "ratifying",
 				Then:      "add aura:p6-plan:s6-ratify label to PROPOSAL-N",
@@ -619,7 +619,7 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 		},
 	},
 	types.RoleReviewer: {
-		ID:          types.RoleReviewer,
+		Id:          types.RoleReviewer,
 		Name:        "Reviewer",
 		Description: "End-user alignment reviewer for plans and code",
 		Model:       "sonnet",
@@ -636,28 +636,28 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 			"full severity tree (BLOCKER/IMPORTANT/MINOR), EAGER creation of all 3 severity groups.",
 		Behaviors: []BehaviorSpec{
 			{
-				ID:        "B-rev-end-user",
+				Id:        "B-rev-end-user",
 				Given:     "a review assignment",
 				When:      "reviewing",
 				Then:      "apply end-user alignment criteria",
 				ShouldNot: "focus only on technical details",
 			},
 			{
-				ID:        "B-rev-revise-feedback",
+				Id:        "B-rev-revise-feedback",
 				Given:     "issues found",
 				When:      "voting",
 				Then:      "vote REVISE with specific actionable feedback",
 				ShouldNot: "vote REVISE without suggestions",
 			},
 			{
-				ID:        "B-rev-accept",
+				Id:        "B-rev-accept",
 				Given:     "all criteria met",
 				When:      "voting",
 				Then:      "vote ACCEPT with brief rationale",
 				ShouldNot: "delay consensus unnecessarily",
 			},
 			{
-				ID:        "B-rev-all-slices",
+				Id:        "B-rev-all-slices",
 				Given:     "impl review (Phase 10)",
 				When:      "assigned",
 				Then:      "review ALL slices (not just one)",
@@ -666,7 +666,7 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 		},
 	},
 	types.RoleSupervisor: {
-		ID:          types.RoleSupervisor,
+		Id:          types.RoleSupervisor,
 		Name:        "Supervisor",
 		Description: "Task coordinator, spawns workers, manages parallel execution",
 		Model:       "opus",
@@ -688,28 +688,28 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 			"You NEVER implement code directly — all implementation is delegated to workers.",
 		Behaviors: []BehaviorSpec{
 			{
-				ID:        "B-sup-read-context",
+				Id:        "B-sup-read-context",
 				Given:     "handoff received",
 				When:      "starting",
 				Then:      "read ratified plan, URD, UAT, and elicit tasks for full context",
 				ShouldNot: "start without reading all four",
 			},
 			{
-				ID:        "B-sup-model-trivial",
+				Id:        "B-sup-model-trivial",
 				Given:     "trivial changes (single-file edits, config tweaks, typo fixes)",
 				When:      "spawning a worker",
 				Then:      "use model: haiku to minimize cost and latency",
 				ShouldNot: "use a heavyweight model for trivial work",
 			},
 			{
-				ID:        "B-sup-model-nontrivial",
+				Id:        "B-sup-model-nontrivial",
 				Given:     "non-trivial changes (multi-file, architectural, logic-heavy)",
 				When:      "spawning a worker",
 				Then:      "prefer model: sonnet for the Task tool to ensure quality",
 				ShouldNot: "default to haiku for complex work",
 			},
 			{
-				ID:    "B-sup-ride-the-wave",
+				Id:    "B-sup-ride-the-wave",
 				Given: "Phase 8-10 execution",
 				When:  "starting implementation",
 				Then: "follow the Ride the Wave cycle: plan tasks with integration points, " +
@@ -721,7 +721,7 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 		},
 	},
 	types.RoleWorker: {
-		ID:          types.RoleWorker,
+		Id:          types.RoleWorker,
 		Name:        "Worker",
 		Description: "Vertical slice implementer (full production code path)",
 		Model:       "sonnet",
@@ -737,35 +737,35 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 			"that belong to your assigned slice.",
 		Behaviors: []BehaviorSpec{
 			{
-				ID:        "B-worker-vertical-ownership",
+				Id:        "B-worker-vertical-ownership",
 				Given:     "vertical slice assignment",
 				When:      "implementing",
 				Then:      "own full production code path (types → tests → impl → wiring)",
 				ShouldNot: "implement only horizontal layer",
 			},
 			{
-				ID:        "B-worker-plan-backwards",
+				Id:        "B-worker-plan-backwards",
 				Given:     "production code path",
 				When:      "planning",
 				Then:      "plan backwards from end point to types",
 				ShouldNot: "start with types without knowing the end",
 			},
 			{
-				ID:        "B-worker-test-production-code",
+				Id:        "B-worker-test-production-code",
 				Given:     "tests",
 				When:      "writing",
 				Then:      "import actual production code (CLI/API users will run)",
 				ShouldNot: "create test-only export or dual code paths",
 			},
 			{
-				ID:        "B-worker-verify-production",
+				Id:        "B-worker-verify-production",
 				Given:     "implementation complete",
 				When:      "verifying before signaling done",
 				Then:      "manually trace the production code path end-to-end (entry point → service → types) to confirm wiring, error handling, and no dead code — beyond what automated gates check",
 				ShouldNot: "treat passing tests as sufficient verification without a manual walkthrough",
 			},
 			{
-				ID:        "B-worker-blocker",
+				Id:        "B-worker-blocker",
 				Given:     "a blocker",
 				When:      "unable to proceed",
 				Then:      "use /aura:worker-blocked with details",
@@ -781,7 +781,7 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 // Mirrors Python COMMAND_SPECS dict.
 var CommandSpecs = map[string]CommandSpec{
 	"cmd-epoch": {
-		ID:          "cmd-epoch",
+		Id:          "cmd-epoch",
 		Name:        "aura:epoch",
 		Description: "Master orchestrator for full 12-phase workflow",
 		RoleRef:     types.RoleEpoch,
@@ -794,13 +794,13 @@ var CommandSpecs = map[string]CommandSpec{
 		File: "skills/epoch/SKILL.md",
 	},
 	"cmd-status": {
-		ID:          "cmd-status",
+		Id:          "cmd-status",
 		Name:        "aura:status",
 		Description: "Project status and monitoring via Beads queries",
 		File:        "skills/status/SKILL.md",
 	},
 	"cmd-user-request": {
-		ID:            "cmd-user-request",
+		Id:            "cmd-user-request",
 		Name:          "aura:user:request",
 		Description:   "Capture user feature request verbatim (Phase 1)",
 		RoleRef:       types.RoleArchitect,
@@ -809,7 +809,7 @@ var CommandSpecs = map[string]CommandSpec{
 		CreatesLabels: []string{"L-p1s1_1"},
 	},
 	"cmd-user-elicit": {
-		ID:            "cmd-user-elicit",
+		Id:            "cmd-user-elicit",
 		Name:          "aura:user:elicit",
 		Description:   "User Requirements Elicitation survey (Phase 2)",
 		RoleRef:       types.RoleArchitect,
@@ -818,7 +818,7 @@ var CommandSpecs = map[string]CommandSpec{
 		CreatesLabels: []string{"L-p2s2_1", "L-p2s2_2", "L-urd"},
 	},
 	"cmd-user-uat": {
-		ID:            "cmd-user-uat",
+		Id:            "cmd-user-uat",
 		Name:          "aura:user:uat",
 		Description:   "User Acceptance Testing with demonstrative examples",
 		Phases:        []protocol.PhaseId{protocol.PhasePlanReview, protocol.PhaseImplUAT},
@@ -826,7 +826,7 @@ var CommandSpecs = map[string]CommandSpec{
 		CreatesLabels: []string{"L-p5s5", "L-p11s11"},
 	},
 	"cmd-architect": {
-		ID:          "cmd-architect",
+		Id:          "cmd-architect",
 		Name:        "aura:architect",
 		Description: "Specification writer and implementation designer",
 		RoleRef:     types.RoleArchitect,
@@ -838,7 +838,7 @@ var CommandSpecs = map[string]CommandSpec{
 		File: "skills/architect/SKILL.md",
 	},
 	"cmd-arch-propose": {
-		ID:            "cmd-arch-propose",
+		Id:            "cmd-arch-propose",
 		Name:          "aura:architect:propose-plan",
 		Description:   "Create PROPOSAL-N task with full technical plan",
 		RoleRef:       types.RoleArchitect,
@@ -847,7 +847,7 @@ var CommandSpecs = map[string]CommandSpec{
 		CreatesLabels: []string{"L-p3s3"},
 	},
 	"cmd-arch-review": {
-		ID:            "cmd-arch-review",
+		Id:            "cmd-arch-review",
 		Name:          "aura:architect:request-review",
 		Description:   "Spawn 3 axis-specific reviewers (A/B/C)",
 		RoleRef:       types.RoleArchitect,
@@ -856,7 +856,7 @@ var CommandSpecs = map[string]CommandSpec{
 		CreatesLabels: []string{"L-p4s4"},
 	},
 	"cmd-arch-ratify": {
-		ID:            "cmd-arch-ratify",
+		Id:            "cmd-arch-ratify",
 		Name:          "aura:architect:ratify",
 		Description:   "Ratify proposal, mark old proposals aura:superseded",
 		RoleRef:       types.RoleArchitect,
@@ -865,7 +865,7 @@ var CommandSpecs = map[string]CommandSpec{
 		CreatesLabels: []string{"L-p6s6", "L-superseded"},
 	},
 	"cmd-arch-handoff": {
-		ID:            "cmd-arch-handoff",
+		Id:            "cmd-arch-handoff",
 		Name:          "aura:architect:handoff",
 		Description:   "Create handoff document and transfer to supervisor",
 		RoleRef:       types.RoleArchitect,
@@ -874,7 +874,7 @@ var CommandSpecs = map[string]CommandSpec{
 		CreatesLabels: []string{"L-p7s7"},
 	},
 	"cmd-supervisor": {
-		ID:          "cmd-supervisor",
+		Id:          "cmd-supervisor",
 		Name:        "aura:supervisor",
 		Description: "Task coordinator, spawns workers, manages parallel execution",
 		RoleRef:     types.RoleSupervisor,
@@ -885,7 +885,7 @@ var CommandSpecs = map[string]CommandSpec{
 		File: "skills/supervisor/SKILL.md",
 	},
 	"cmd-sup-plan": {
-		ID:            "cmd-sup-plan",
+		Id:            "cmd-sup-plan",
 		Name:          "aura:supervisor:plan-tasks",
 		Description:   "Decompose ratified plan into vertical slices (SLICE-N)",
 		RoleRef:       types.RoleSupervisor,
@@ -894,7 +894,7 @@ var CommandSpecs = map[string]CommandSpec{
 		CreatesLabels: []string{"L-p8s8", "L-p9s9"},
 	},
 	"cmd-sup-spawn": {
-		ID:            "cmd-sup-spawn",
+		Id:            "cmd-sup-spawn",
 		Name:          "aura:supervisor:spawn-worker",
 		Description:   "Launch a worker agent for an assigned slice",
 		RoleRef:       types.RoleSupervisor,
@@ -903,7 +903,7 @@ var CommandSpecs = map[string]CommandSpec{
 		CreatesLabels: []string{"L-p9s9"},
 	},
 	"cmd-sup-track": {
-		ID:          "cmd-sup-track",
+		Id:          "cmd-sup-track",
 		Name:        "aura:supervisor:track-progress",
 		Description: "Monitor worker status via Beads",
 		RoleRef:     types.RoleSupervisor,
@@ -911,7 +911,7 @@ var CommandSpecs = map[string]CommandSpec{
 		File:        "skills/supervisor-track-progress/SKILL.md",
 	},
 	"cmd-sup-commit": {
-		ID:            "cmd-sup-commit",
+		Id:            "cmd-sup-commit",
 		Name:          "aura:supervisor:commit",
 		Description:   "Atomic commit per completed layer/slice",
 		RoleRef:       types.RoleSupervisor,
@@ -920,7 +920,7 @@ var CommandSpecs = map[string]CommandSpec{
 		CreatesLabels: []string{"L-p12s12"},
 	},
 	"cmd-worker": {
-		ID:          "cmd-worker",
+		Id:          "cmd-worker",
 		Name:        "aura:worker",
 		Description: "Vertical slice implementer (full production code path)",
 		RoleRef:     types.RoleWorker,
@@ -928,7 +928,7 @@ var CommandSpecs = map[string]CommandSpec{
 		File:        "skills/worker/SKILL.md",
 	},
 	"cmd-work-impl": {
-		ID:            "cmd-work-impl",
+		Id:            "cmd-work-impl",
 		Name:          "aura:worker:implement",
 		Description:   "Implement assigned vertical slice following TDD layers",
 		RoleRef:       types.RoleWorker,
@@ -937,7 +937,7 @@ var CommandSpecs = map[string]CommandSpec{
 		CreatesLabels: []string{"L-p9s9"},
 	},
 	"cmd-work-complete": {
-		ID:          "cmd-work-complete",
+		Id:          "cmd-work-complete",
 		Name:        "aura:worker:complete",
 		Description: "Signal slice completion after quality gates pass",
 		RoleRef:     types.RoleWorker,
@@ -945,7 +945,7 @@ var CommandSpecs = map[string]CommandSpec{
 		File:        "skills/worker-complete/SKILL.md",
 	},
 	"cmd-work-blocked": {
-		ID:          "cmd-work-blocked",
+		Id:          "cmd-work-blocked",
 		Name:        "aura:worker:blocked",
 		Description: "Report a blocker to supervisor via Beads",
 		RoleRef:     types.RoleWorker,
@@ -953,7 +953,7 @@ var CommandSpecs = map[string]CommandSpec{
 		File:        "skills/worker-blocked/SKILL.md",
 	},
 	"cmd-reviewer": {
-		ID:          "cmd-reviewer",
+		Id:          "cmd-reviewer",
 		Name:        "aura:reviewer",
 		Description: "End-user alignment reviewer for plans and code",
 		RoleRef:     types.RoleReviewer,
@@ -961,7 +961,7 @@ var CommandSpecs = map[string]CommandSpec{
 		File:        "skills/reviewer/SKILL.md",
 	},
 	"cmd-rev-plan": {
-		ID:            "cmd-rev-plan",
+		Id:            "cmd-rev-plan",
 		Name:          "aura:reviewer:review-plan",
 		Description:   "Evaluate proposal against one axis (binary ACCEPT/REVISE)",
 		RoleRef:       types.RoleReviewer,
@@ -970,7 +970,7 @@ var CommandSpecs = map[string]CommandSpec{
 		CreatesLabels: []string{"L-p4s4"},
 	},
 	"cmd-rev-code": {
-		ID:            "cmd-rev-code",
+		Id:            "cmd-rev-code",
 		Name:          "aura:reviewer:review-code",
 		Description:   "Review implementation slices with EAGER severity tree",
 		RoleRef:       types.RoleReviewer,
@@ -979,7 +979,7 @@ var CommandSpecs = map[string]CommandSpec{
 		CreatesLabels: []string{"L-p10s10", "L-sev-blocker", "L-sev-import", "L-sev-minor"},
 	},
 	"cmd-rev-comment": {
-		ID:          "cmd-rev-comment",
+		Id:          "cmd-rev-comment",
 		Name:        "aura:reviewer:comment",
 		Description: "Leave structured review comment via Beads",
 		RoleRef:     types.RoleReviewer,
@@ -987,7 +987,7 @@ var CommandSpecs = map[string]CommandSpec{
 		File:        "skills/reviewer-comment/SKILL.md",
 	},
 	"cmd-rev-vote": {
-		ID:          "cmd-rev-vote",
+		Id:          "cmd-rev-vote",
 		Name:        "aura:reviewer:vote",
 		Description: "Cast ACCEPT or REVISE vote (binary only)",
 		RoleRef:     types.RoleReviewer,
@@ -995,7 +995,7 @@ var CommandSpecs = map[string]CommandSpec{
 		File:        "skills/reviewer-vote/SKILL.md",
 	},
 	"cmd-impl-slice": {
-		ID:            "cmd-impl-slice",
+		Id:            "cmd-impl-slice",
 		Name:          "aura:impl:slice",
 		Description:   "Vertical slice assignment and tracking",
 		RoleRef:       types.RoleSupervisor,
@@ -1004,7 +1004,7 @@ var CommandSpecs = map[string]CommandSpec{
 		CreatesLabels: []string{"L-p9s9"},
 	},
 	"cmd-impl-review": {
-		ID:            "cmd-impl-review",
+		Id:            "cmd-impl-review",
 		Name:          "aura:impl:review",
 		Description:   "Code review coordination across all slices (Phase 10)",
 		RoleRef:       types.RoleSupervisor,
@@ -1013,7 +1013,7 @@ var CommandSpecs = map[string]CommandSpec{
 		CreatesLabels: []string{"L-p10s10", "L-sev-blocker", "L-sev-import", "L-sev-minor"},
 	},
 	"cmd-explore": {
-		ID:            "cmd-explore",
+		Id:            "cmd-explore",
 		Name:          "aura:explore",
 		Description:   "Codebase exploration — find integration points, existing patterns, and related code",
 		Phases:        []protocol.PhaseId{protocol.PhaseRequest, protocol.PhaseImplPlan},
@@ -1021,7 +1021,7 @@ var CommandSpecs = map[string]CommandSpec{
 		CreatesLabels: []string{"L-p1s1_3"},
 	},
 	"cmd-research": {
-		ID:            "cmd-research",
+		Id:            "cmd-research",
 		Name:          "aura:research",
 		Description:   "Domain research — find standards, prior art, and competing approaches",
 		Phases:        []protocol.PhaseId{protocol.PhaseRequest},
@@ -1029,7 +1029,7 @@ var CommandSpecs = map[string]CommandSpec{
 		CreatesLabels: []string{"L-p1s1_2"},
 	},
 	"cmd-swarm": {
-		ID:          "cmd-swarm",
+		Id:          "cmd-swarm",
 		Name:        "aura:swarm",
 		Description: "Launch worktree-based or intree agent workflows using aura-swarm",
 		File:        "skills/swarm/SKILL.md",
@@ -1042,7 +1042,7 @@ var CommandSpecs = map[string]CommandSpec{
 // Mirrors Python HANDOFF_SPECS dict.
 var HandoffSpecs = map[string]HandoffSpec{
 	"h1": {
-		ID:           "h1",
+		Id:           "h1",
 		SourceRole:   types.RoleArchitect,
 		TargetRole:   types.RoleSupervisor,
 		AtPhase:      protocol.PhaseHandoff,
@@ -1053,7 +1053,7 @@ var HandoffSpecs = map[string]HandoffSpec{
 		},
 	},
 	"h2": {
-		ID:           "h2",
+		Id:           "h2",
 		SourceRole:   types.RoleSupervisor,
 		TargetRole:   types.RoleWorker,
 		AtPhase:      protocol.PhaseWorkerSlices,
@@ -1064,7 +1064,7 @@ var HandoffSpecs = map[string]HandoffSpec{
 		},
 	},
 	"h3": {
-		ID:           "h3",
+		Id:           "h3",
 		SourceRole:   types.RoleSupervisor,
 		TargetRole:   types.RoleReviewer,
 		AtPhase:      protocol.PhaseCodeReview,
@@ -1075,7 +1075,7 @@ var HandoffSpecs = map[string]HandoffSpec{
 		},
 	},
 	"h4": {
-		ID:           "h4",
+		Id:           "h4",
 		SourceRole:   types.RoleWorker,
 		TargetRole:   types.RoleReviewer,
 		AtPhase:      protocol.PhaseCodeReview,
@@ -1086,7 +1086,7 @@ var HandoffSpecs = map[string]HandoffSpec{
 		},
 	},
 	"h5": {
-		ID:           "h5",
+		Id:           "h5",
 		SourceRole:   types.RoleReviewer,
 		TargetRole:   types.RoleSupervisor,
 		AtPhase:      protocol.PhaseCodeReview,
@@ -1097,7 +1097,7 @@ var HandoffSpecs = map[string]HandoffSpec{
 		},
 	},
 	"h6": {
-		ID:           "h6",
+		Id:           "h6",
 		SourceRole:   types.RoleSupervisor,
 		TargetRole:   types.RoleArchitect,
 		AtPhase:      protocol.PhasePropose,
@@ -1115,7 +1115,7 @@ var HandoffSpecs = map[string]HandoffSpec{
 // Mirrors Python FIGURE_SPECS dict. Content is loaded at generation time.
 var FigureSpecs = map[string]FigureSpec{
 	"layer-cake": {
-		ID:           "layer-cake",
+		Id:           "layer-cake",
 		Title:        "Layer Cake — TDD Parallelism Within Vertical Slices",
 		Type:         "ascii-diagram",
 		RoleRefs:     []types.RoleId{types.RoleWorker},
@@ -1124,7 +1124,7 @@ var FigureSpecs = map[string]FigureSpec{
 		CommandRefs:  []string{"cmd-sup-plan"},
 	},
 	"ride-the-wave": {
-		ID:           "ride-the-wave",
+		Id:           "ride-the-wave",
 		Title:        "Ride the Wave — Coordinated Phase 8-10 Execution",
 		Type:         "ascii-diagram",
 		RoleRefs:     []types.RoleId{types.RoleSupervisor},
@@ -1133,7 +1133,7 @@ var FigureSpecs = map[string]FigureSpec{
 		CommandRefs:  []string{"cmd-sup-spawn"},
 	},
 	"architect-state-flow": {
-		ID:           "architect-state-flow",
+		Id:           "architect-state-flow",
 		Title:        "Architect State Flow — Sequential Planning Phases 1-7",
 		Type:         "ascii-diagram",
 		RoleRefs:     []types.RoleId{types.RoleArchitect},
@@ -1151,43 +1151,43 @@ var ChecklistSpecs = map[string]Checklist{
 		RoleRef: types.RoleWorker,
 		Gate:    "completion",
 		Items: []ChecklistItem{
-			{ID: "CL-worker-no-todos", Text: "No TODO placeholders in CLI/API actions", Required: true},
-			{ID: "CL-worker-real-deps", Text: "Real dependencies wired (not mocks in production code)", Required: true},
-			{ID: "CL-worker-test-import", Text: "Tests import production code (not test-only export)", Required: true},
-			{ID: "CL-worker-no-dual-export", Text: "No dual-export anti-pattern (one code path for tests and production)", Required: true},
-			{ID: "CL-worker-quality-gates", Text: "Quality gates pass (typecheck + tests)", Required: true},
-			{ID: "CL-worker-production-path", Text: "Production code path verified end-to-end via code inspection", Required: true},
+			{Id: "CL-worker-no-todos", Text: "No TODO placeholders in CLI/API actions", Required: true},
+			{Id: "CL-worker-real-deps", Text: "Real dependencies wired (not mocks in production code)", Required: true},
+			{Id: "CL-worker-test-import", Text: "Tests import production code (not test-only export)", Required: true},
+			{Id: "CL-worker-no-dual-export", Text: "No dual-export anti-pattern (one code path for tests and production)", Required: true},
+			{Id: "CL-worker-quality-gates", Text: "Quality gates pass (typecheck + tests)", Required: true},
+			{Id: "CL-worker-production-path", Text: "Production code path verified end-to-end via code inspection", Required: true},
 		},
 	},
 	"worker-slice-closure": {
 		RoleRef: types.RoleWorker,
 		Gate:    "slice-closure",
 		Items: []ChecklistItem{
-			{ID: "CL-worker-notified-supervisor", Text: "Supervisor notified via bd comments add (not bd close)", Required: true},
-			{ID: "CL-worker-completion-done", Text: "All completion-gate items passed", Required: true},
-			{ID: "CL-worker-close-on-review-wave", Text: "Can only close on a review wave, not a worker wave", Required: true},
-			{ID: "CL-worker-review-eligible", Text: "Eligible to close only after review by independent agents with no BLOCKERS or IMPORTANT findings", Required: true},
+			{Id: "CL-worker-notified-supervisor", Text: "Supervisor notified via bd comments add (not bd close)", Required: true},
+			{Id: "CL-worker-completion-done", Text: "All completion-gate items passed", Required: true},
+			{Id: "CL-worker-close-on-review-wave", Text: "Can only close on a review wave, not a worker wave", Required: true},
+			{Id: "CL-worker-review-eligible", Text: "Eligible to close only after review by independent agents with no BLOCKERS or IMPORTANT findings", Required: true},
 		},
 	},
 	"supervisor-review-ready": {
 		RoleRef: types.RoleSupervisor,
 		Gate:    "review-ready",
 		Items: []ChecklistItem{
-			{ID: "CL-sup-all-slices-notified", Text: "All workers have notified completion via bd comments add", Required: true},
-			{ID: "CL-sup-reviewers-assigned", Text: "Ephemeral reviewers spawned for all slices", Required: true},
-			{ID: "CL-sup-severity-groups-created", Text: "Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per slice", Required: true},
+			{Id: "CL-sup-all-slices-notified", Text: "All workers have notified completion via bd comments add", Required: true},
+			{Id: "CL-sup-reviewers-assigned", Text: "Ephemeral reviewers spawned for all slices", Required: true},
+			{Id: "CL-sup-severity-groups-created", Text: "Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per slice", Required: true},
 		},
 	},
 	"supervisor-landing": {
 		RoleRef: types.RoleSupervisor,
 		Gate:    "landing",
 		Items: []ChecklistItem{
-			{ID: "CL-sup-all-accept", Text: "All 3 reviewers ACCEPT, no open BLOCKERs", Required: true},
-			{ID: "CL-sup-followup-created", Text: "FOLLOWUP epic created if any IMPORTANT/MINOR findings exist", Required: true},
-			{ID: "CL-sup-agent-commit", Text: "git agent-commit used (not git commit -m)", Required: true},
-			{ID: "CL-sup-tasks-closed", Text: "All upstream tasks closed or dependency-resolved", Required: true},
-			{ID: "CL-sup-close-on-review-wave", Text: "Can only close on a review wave, not a worker wave", Required: true},
-			{ID: "CL-sup-review-eligible", Text: "Eligible to close only after review by independent agents with no BLOCKERS or IMPORTANT findings", Required: true},
+			{Id: "CL-sup-all-accept", Text: "All 3 reviewers ACCEPT, no open BLOCKERs", Required: true},
+			{Id: "CL-sup-followup-created", Text: "FOLLOWUP epic created if any IMPORTANT/MINOR findings exist", Required: true},
+			{Id: "CL-sup-agent-commit", Text: "git agent-commit used (not git commit -m)", Required: true},
+			{Id: "CL-sup-tasks-closed", Text: "All upstream tasks closed or dependency-resolved", Required: true},
+			{Id: "CL-sup-close-on-review-wave", Text: "Can only close on a review wave, not a worker wave", Required: true},
+			{Id: "CL-sup-review-eligible", Text: "Eligible to close only after review by independent agents with no BLOCKERS or IMPORTANT findings", Required: true},
 		},
 	},
 }
@@ -1198,61 +1198,61 @@ var ChecklistSpecs = map[string]Checklist{
 // Mirrors Python COORDINATION_COMMANDS dict.
 var CoordinationCommands = map[string]CoordinationCommand{
 	"cmd-coord-show": {
-		ID:       "cmd-coord-show",
+		Id:       "cmd-coord-show",
 		Action:   "Check task details",
 		Template: "bd show <task-id>",
 		Shared:   true,
 	},
 	"cmd-coord-status": {
-		ID:       "cmd-coord-status",
+		Id:       "cmd-coord-status",
 		Action:   "Update status",
 		Template: "bd update <task-id> --status=in_progress",
 		Shared:   true,
 	},
 	"cmd-coord-comment": {
-		ID:       "cmd-coord-comment",
+		Id:       "cmd-coord-comment",
 		Action:   "Add progress note",
 		Template: `bd comments add <task-id> "Progress: ..."`,
 		Shared:   true,
 	},
 	"cmd-coord-list": {
-		ID:       "cmd-coord-list",
+		Id:       "cmd-coord-list",
 		Action:   "List in-progress",
 		Template: "bd list --pretty --status=in_progress",
 		Shared:   true,
 	},
 	"cmd-coord-blocked": {
-		ID:       "cmd-coord-blocked",
+		Id:       "cmd-coord-blocked",
 		Action:   "List blocked",
 		Template: "bd blocked",
 		Shared:   true,
 	},
 	"cmd-coord-assign": {
-		ID:       "cmd-coord-assign",
+		Id:       "cmd-coord-assign",
 		Action:   "Assign task",
 		Template: `bd update <task-id> --assignee "<worker-name>"`,
 		RoleRef:  types.RoleSupervisor,
 	},
 	"cmd-coord-label": {
-		ID:       "cmd-coord-label",
+		Id:       "cmd-coord-label",
 		Action:   "Label completed slice",
 		Template: "bd label add <slice-id> aura:p9-impl:slice-complete",
 		RoleRef:  types.RoleSupervisor,
 	},
 	"cmd-coord-dep-add": {
-		ID:       "cmd-coord-dep-add",
+		Id:       "cmd-coord-dep-add",
 		Action:   "Chain dependency",
 		Template: "bd dep add <parent> --blocked-by <child>",
 		RoleRef:  types.RoleSupervisor,
 	},
 	"cmd-coord-close": {
-		ID:       "cmd-coord-close",
+		Id:       "cmd-coord-close",
 		Action:   "Report completion",
 		Template: "bd close <task-id>",
 		RoleRef:  types.RoleWorker,
 	},
 	"cmd-coord-worker-notes": {
-		ID:       "cmd-coord-worker-notes",
+		Id:       "cmd-coord-worker-notes",
 		Action:   "Add completion notes",
 		Template: `bd update <task-id> --notes="Implementation complete. Production code verified."`,
 		RoleRef:  types.RoleWorker,
@@ -1265,7 +1265,7 @@ var CoordinationCommands = map[string]CoordinationCommand{
 // Mirrors Python WORKFLOW_SPECS dict.
 var WorkflowSpecs = map[string]Workflow{
 	"ride-the-wave": {
-		ID:      "ride-the-wave",
+		Id:      "ride-the-wave",
 		Name:    "Ride the Wave",
 		RoleRef: types.RoleSupervisor,
 		Description: "Coordinated Phase 8-10 execution pattern. The supervisor orchestrates " +
@@ -1273,27 +1273,27 @@ var WorkflowSpecs = map[string]Workflow{
 			"spawn reviewers for per-slice review, workers fix, repeat max 3 cycles per slice.",
 		Stages: []WorkflowStage{
 			{
-				ID:        "rtw-plan",
+				Id:        "rtw-plan",
 				Name:      "Plan",
 				Order:     1,
 				Execution: "sequential",
 				PhaseRef:  protocol.PhaseImplPlan,
 				Actions: []WorkflowAction{
 					{
-						ID:          "rtw-plan-read",
+						Id:          "rtw-plan-read",
 						Instruction: "Read RATIFIED_PLAN and URD via bd show",
 						Command:     "bd show <ratified-plan-id> && bd show <urd-id>",
 					},
 					{
-						ID:          "rtw-plan-explore",
+						Id:          "rtw-plan-explore",
 						Instruction: "Spawn ephemeral Explore subagents (`subagent_type=Explore`) for scoped codebase queries — NOT standing teams",
 					},
 					{
-						ID:          "rtw-plan-decompose",
+						Id:          "rtw-plan-decompose",
 						Instruction: "Use Explore findings to decompose into vertical slices with integration points",
 					},
 					{
-						ID:          "rtw-plan-leaf-tasks",
+						Id:          "rtw-plan-leaf-tasks",
 						Instruction: "Create leaf tasks (L1/L2/L3) for every slice",
 						Command:     "bd dep add <slice-id> --blocked-by <leaf-task-id>",
 					},
@@ -1307,14 +1307,14 @@ var WorkflowSpecs = map[string]Workflow{
 				},
 			},
 			{
-				ID:        "rtw-build",
+				Id:        "rtw-build",
 				Name:      "Build",
 				Order:     2,
 				Execution: "parallel",
 				PhaseRef:  protocol.PhaseWorkerSlices,
 				Actions: []WorkflowAction{
 					{
-						ID: "rtw-build-spawn",
+						Id: "rtw-build-spawn",
 						Instruction: "Spawn workers via the Agent tool — " +
 							"set `name` for a named teammate, leave `name` empty for a backgrounded subagent " +
 							"(NOT aura-swarm). " +
@@ -1322,12 +1322,12 @@ var WorkflowSpecs = map[string]Workflow{
 							"Set thinking effort to match slice complexity.",
 					},
 					{
-						ID:          "rtw-build-monitor",
+						Id:          "rtw-build-monitor",
 						Instruction: "Monitor worker progress via bd list and bd show",
 						Command:     `bd list --labels="aura:p9-impl:s9-slice" --status=in_progress`,
 					},
 					{
-						ID:          "rtw-build-integrate",
+						Id:          "rtw-build-integrate",
 						Instruction: "Supervisor commits at integration points (atomic commits) — commit small, integrate early and often",
 					},
 				},
@@ -1340,26 +1340,26 @@ var WorkflowSpecs = map[string]Workflow{
 				},
 			},
 			{
-				ID:        "rtw-review-fix",
+				Id:        "rtw-review-fix",
 				Name:      "Review + Fix Cycles",
 				Order:     3,
 				Execution: "conditional-loop",
 				PhaseRef:  protocol.PhaseCodeReview,
 				Actions: []WorkflowAction{
 					{
-						ID:          "rtw-review-spawn",
+						Id:          "rtw-review-spawn",
 						Instruction: "Spawn reviewers via Task tool for per-slice code review",
 					},
 					{
-						ID:          "rtw-review-severity",
+						Id:          "rtw-review-severity",
 						Instruction: "Reviewers create severity groups (BLOCKER/IMPORTANT/MINOR) per slice",
 					},
 					{
-						ID:          "rtw-review-followup",
+						Id:          "rtw-review-followup",
 						Instruction: "Create FOLLOWUP epic if any IMPORTANT/MINOR findings exist",
 					},
 					{
-						ID:          "rtw-review-fix",
+						Id:          "rtw-review-fix",
 						Instruction: "Workers fix BLOCKERs and IMPORTANT findings",
 					},
 				},
@@ -1422,7 +1422,7 @@ var WorkflowSpecs = map[string]Workflow{
 		},
 	},
 	"layer-cake": {
-		ID:      "layer-cake",
+		Id:      "layer-cake",
 		Name:    "Layer Cake",
 		RoleRef: types.RoleWorker,
 		Description: "TDD layer-by-layer implementation within a vertical slice. " +
@@ -1430,19 +1430,19 @@ var WorkflowSpecs = map[string]Workflow{
 			"then production code to make tests pass.",
 		Stages: []WorkflowStage{
 			{
-				ID:        "lc-types",
+				Id:        "lc-types",
 				Name:      "Types",
 				Order:     1,
 				Execution: "sequential",
 				PhaseRef:  protocol.PhaseWorkerSlices,
 				Actions: []WorkflowAction{
 					{
-						ID:          "lc-types-read",
+						Id:          "lc-types-read",
 						Instruction: "Read slice task and identify required types",
 						Command:     "bd show <slice-task-id>",
 					},
 					{
-						ID:          "lc-types-define",
+						Id:          "lc-types-define",
 						Instruction: "Define types, interfaces, and schemas (no deps) — only types for YOUR slice",
 					},
 				},
@@ -1454,18 +1454,18 @@ var WorkflowSpecs = map[string]Workflow{
 				},
 			},
 			{
-				ID:        "lc-tests",
+				Id:        "lc-tests",
 				Name:      "Tests",
 				Order:     2,
 				Execution: "sequential",
 				PhaseRef:  protocol.PhaseWorkerSlices,
 				Actions: []WorkflowAction{
 					{
-						ID:          "lc-tests-write",
+						Id:          "lc-tests-write",
 						Instruction: "Write tests importing production code (CLI/API users will run) — tests WILL fail",
 					},
 					{
-						ID:          "lc-tests-verify-import",
+						Id:          "lc-tests-verify-import",
 						Instruction: "Verify tests import actual production code, not test-only export",
 					},
 				},
@@ -1477,31 +1477,31 @@ var WorkflowSpecs = map[string]Workflow{
 				},
 			},
 			{
-				ID:        "lc-impl",
+				Id:        "lc-impl",
 				Name:      "Implementation + Wiring",
 				Order:     3,
 				Execution: "sequential",
 				PhaseRef:  protocol.PhaseWorkerSlices,
 				Actions: []WorkflowAction{
 					{
-						ID:          "lc-impl-code",
+						Id:          "lc-impl-code",
 						Instruction: "Implement production code to make Layer 2 tests pass",
 					},
 					{
-						ID:          "lc-impl-wire",
+						Id:          "lc-impl-wire",
 						Instruction: "Wire with real dependencies (not mocks in production code)",
 					},
 					{
-						ID:          "lc-impl-run-tests",
+						Id:          "lc-impl-run-tests",
 						Instruction: "Run tests — all Layer 2 tests must pass",
 					},
 					{
-						ID:          "lc-impl-commit",
+						Id:          "lc-impl-commit",
 						Instruction: "Commit completed work",
 						Command:     "git agent-commit -m ...",
 					},
 					{
-						ID:          "lc-impl-notify",
+						Id:          "lc-impl-notify",
 						Instruction: "Notify supervisor of completion via bd comments add",
 						Command:     `bd comments add <slice-id> "Implementation complete"`,
 					},
@@ -1521,25 +1521,25 @@ var WorkflowSpecs = map[string]Workflow{
 		},
 	},
 	"architect-state-flow": {
-		ID:      "architect-state-flow",
+		Id:      "architect-state-flow",
 		Name:    "Architect State Flow",
 		RoleRef: types.RoleArchitect,
 		Description: "Sequential planning phases 1-7. The architect captures requirements, " +
 			"writes proposals, coordinates review consensus, and hands off to supervisor.",
 		Stages: []WorkflowStage{
 			{
-				ID:        "asf-request",
+				Id:        "asf-request",
 				Name:      "Request",
 				Order:     1,
 				Execution: "sequential",
 				PhaseRef:  protocol.PhaseRequest,
 				Actions: []WorkflowAction{
 					{
-						ID:          "asf-request-capture",
+						Id:          "asf-request-capture",
 						Instruction: "Capture user request verbatim via /aura:user-request",
 					},
 					{
-						ID:          "asf-request-classify",
+						Id:          "asf-request-classify",
 						Instruction: "Classify request along 4 axes: scope, complexity, risk, domain novelty",
 					},
 				},
@@ -1551,18 +1551,18 @@ var WorkflowSpecs = map[string]Workflow{
 				},
 			},
 			{
-				ID:        "asf-elicit",
+				Id:        "asf-elicit",
 				Name:      "Elicit",
 				Order:     2,
 				Execution: "sequential",
 				PhaseRef:  protocol.PhaseElicit,
 				Actions: []WorkflowAction{
 					{
-						ID:          "asf-elicit-ure",
+						Id:          "asf-elicit-ure",
 						Instruction: "Run URE survey with user via /aura:user-elicit",
 					},
 					{
-						ID:          "asf-elicit-urd",
+						Id:          "asf-elicit-urd",
 						Instruction: "Create URD as single source of truth for requirements",
 					},
 				},
@@ -1574,18 +1574,18 @@ var WorkflowSpecs = map[string]Workflow{
 				},
 			},
 			{
-				ID:        "asf-propose",
+				Id:        "asf-propose",
 				Name:      "Propose",
 				Order:     3,
 				Execution: "sequential",
 				PhaseRef:  protocol.PhasePropose,
 				Actions: []WorkflowAction{
 					{
-						ID:          "asf-propose-write",
+						Id:          "asf-propose-write",
 						Instruction: "Write full technical proposal: interfaces, approach, validation checklist, BDD criteria",
 					},
 					{
-						ID:          "asf-propose-create",
+						Id:          "asf-propose-create",
 						Instruction: "Create PROPOSAL-N task via /aura:architect:propose-plan",
 					},
 				},
@@ -1597,18 +1597,18 @@ var WorkflowSpecs = map[string]Workflow{
 				},
 			},
 			{
-				ID:        "asf-review",
+				Id:        "asf-review",
 				Name:      "Review",
 				Order:     4,
 				Execution: "conditional-loop",
 				PhaseRef:  protocol.PhaseReview,
 				Actions: []WorkflowAction{
 					{
-						ID:          "asf-review-spawn",
+						Id:          "asf-review-spawn",
 						Instruction: "Spawn 3 axis-specific reviewers (A=Correctness, B=Test quality, C=Elegance)",
 					},
 					{
-						ID:          "asf-review-wait",
+						Id:          "asf-review-wait",
 						Instruction: "Wait for all 3 reviewers to vote",
 					},
 				},
@@ -1624,14 +1624,14 @@ var WorkflowSpecs = map[string]Workflow{
 				},
 			},
 			{
-				ID:        "asf-uat",
+				Id:        "asf-uat",
 				Name:      "Plan UAT",
 				Order:     5,
 				Execution: "sequential",
 				PhaseRef:  protocol.PhasePlanReview,
 				Actions: []WorkflowAction{
 					{
-						ID:          "asf-uat-present",
+						Id:          "asf-uat-present",
 						Instruction: "Present plan to user with demonstrative examples via /aura:user-uat",
 					},
 				},
@@ -1647,22 +1647,22 @@ var WorkflowSpecs = map[string]Workflow{
 				},
 			},
 			{
-				ID:        "asf-ratify",
+				Id:        "asf-ratify",
 				Name:      "Ratify",
 				Order:     6,
 				Execution: "sequential",
 				PhaseRef:  protocol.PhaseRatify,
 				Actions: []WorkflowAction{
 					{
-						ID:          "asf-ratify-label",
+						Id:          "asf-ratify-label",
 						Instruction: "Add ratify label to accepted PROPOSAL-N",
 					},
 					{
-						ID:          "asf-ratify-supersede",
+						Id:          "asf-ratify-supersede",
 						Instruction: "Mark all prior proposals aura:superseded",
 					},
 					{
-						ID:          "asf-ratify-placeholder",
+						Id:          "asf-ratify-placeholder",
 						Instruction: "Create placeholder IMPL_PLAN task",
 					},
 				},
@@ -1674,18 +1674,18 @@ var WorkflowSpecs = map[string]Workflow{
 				},
 			},
 			{
-				ID:        "asf-handoff",
+				Id:        "asf-handoff",
 				Name:      "Handoff",
 				Order:     7,
 				Execution: "sequential",
 				PhaseRef:  protocol.PhaseHandoff,
 				Actions: []WorkflowAction{
 					{
-						ID:          "asf-handoff-doc",
+						Id:          "asf-handoff-doc",
 						Instruction: "Create handoff document with full inline provenance at .git/.aura/handoff/",
 					},
 					{
-						ID:          "asf-handoff-transfer",
+						Id:          "asf-handoff-transfer",
 						Instruction: "Transfer to supervisor via /aura:architect:handoff",
 					},
 				},
@@ -1706,7 +1706,7 @@ var WorkflowSpecs = map[string]Workflow{
 // Mirrors Python REVIEW_AXIS_SPECS dict.
 var ReviewAxisSpecs = map[string]ReviewAxisSpec{
 	"axis-correctness": {
-		ID:     "axis-correctness",
+		Id:     "axis-correctness",
 		Letter: "correctness",
 		Name:   "Correctness",
 		Short:  "Spirit and technicality",
@@ -1717,7 +1717,7 @@ var ReviewAxisSpecs = map[string]ReviewAxisSpec{
 		},
 	},
 	"axis-test_quality": {
-		ID:     "axis-test_quality",
+		Id:     "axis-test_quality",
 		Letter: "test_quality",
 		Name:   "Test quality",
 		Short:  "Test strategy adequacy",
@@ -1729,7 +1729,7 @@ var ReviewAxisSpecs = map[string]ReviewAxisSpec{
 		},
 	},
 	"axis-elegance": {
-		ID:     "axis-elegance",
+		Id:     "axis-elegance",
 		Letter: "elegance",
 		Name:   "Elegance",
 		Short:  "Complexity matching",
@@ -1752,25 +1752,25 @@ var ProcedureSteps = map[types.RoleId][]ProcedureStep{
 	types.RoleReviewer:  {},
 	types.RoleSupervisor: {
 		{
-			ID:          "S-supervisor-call-skill",
+			Id:          "S-supervisor-call-skill",
 			Order:       1,
 			Instruction: "Call Skill(/aura:supervisor) to load role instructions",
 			Command:     "Skill(/aura:supervisor)",
 		},
 		{
-			ID:          "S-supervisor-read-plan",
+			Id:          "S-supervisor-read-plan",
 			Order:       2,
 			Instruction: "Read RATIFIED_PLAN, URD, UAT, and elicit tasks via bd show for full context",
 			Command:     "bd show <ratified-plan-id> && bd show <urd-id> && bd show <uat-id> && bd show <elicit-id>",
 		},
 		{
-			ID:          "S-supervisor-explore-ephemeral",
+			Id:          "S-supervisor-explore-ephemeral",
 			Order:       3,
 			Instruction: "Spawn ephemeral Explore subagents via Task tool for scoped codebase queries",
 			Context:     "Each subagent is short-lived and returns findings; no standing team overhead",
 		},
 		{
-			ID:          "S-supervisor-decompose-slices",
+			Id:          "S-supervisor-decompose-slices",
 			Order:       4,
 			Instruction: "Decompose into vertical slices",
 			Context: "Vertical slices give one worker end-to-end ownership of a feature path " +
@@ -1778,13 +1778,13 @@ var ProcedureSteps = map[types.RoleId][]ProcedureStep{
 			NextState: protocol.PhaseImplPlan,
 		},
 		{
-			ID:          "S-supervisor-create-leaf-tasks",
+			Id:          "S-supervisor-create-leaf-tasks",
 			Order:       5,
 			Instruction: "Create leaf tasks (L1/L2/L3) for every slice",
 			Command:     `bd create --labels aura:p9-impl:s9-slice --title "SLICE-{K}-L{1,2,3}: <description>" ...`,
 			Examples: []Example{
 				{
-					ID:    "S-supervisor-create-leaf-tasks-frontmatter",
+					Id:    "S-supervisor-create-leaf-tasks-frontmatter",
 					Lang:  "bash",
 					Label: "template",
 					Code: "bd create --labels aura:p9-impl:s9-slice \\\n" +
@@ -1801,7 +1801,7 @@ var ProcedureSteps = map[types.RoleId][]ProcedureStep{
 			},
 		},
 		{
-			ID:    "S-supervisor-spawn-workers",
+			Id:    "S-supervisor-spawn-workers",
 			Order: 6,
 			Instruction: "Spawn workers via the Agent tool — " +
 				"set `name` for a named teammate, leave `name` empty for a backgrounded subagent " +
@@ -1813,17 +1813,17 @@ var ProcedureSteps = map[types.RoleId][]ProcedureStep{
 	},
 	types.RoleWorker: {
 		{
-			ID:          "S-worker-types",
+			Id:          "S-worker-types",
 			Order:       1,
 			Instruction: "Types, interfaces, schemas (no deps)",
 		},
 		{
-			ID:          "S-worker-tests",
+			Id:          "S-worker-tests",
 			Order:       2,
 			Instruction: "Tests importing production code (will fail initially)",
 		},
 		{
-			ID:          "S-worker-impl",
+			Id:          "S-worker-impl",
 			Order:       3,
 			Instruction: "Make tests pass. Wire with real dependencies. No TODOs.",
 			NextState:   protocol.PhaseWorkerSlices,
@@ -1836,27 +1836,27 @@ var ProcedureSteps = map[types.RoleId][]ProcedureStep{
 // LabelSpecs maps label IDs to their full specifications.
 // Mirrors Python LABEL_SPECS dict.
 var LabelSpecs = map[string]LabelSpec{
-	"L-p1s1_1":      {ID: "L-p1s1_1", Value: "aura:p1-user:s1_1-classify", Special: false, PhaseRef: "p1", SubstepRef: "s1_1"},
-	"L-p1s1_2":      {ID: "L-p1s1_2", Value: "aura:p1-user:s1_2-research", Special: false, PhaseRef: "p1", SubstepRef: "s1_2"},
-	"L-p1s1_3":      {ID: "L-p1s1_3", Value: "aura:p1-user:s1_3-explore", Special: false, PhaseRef: "p1", SubstepRef: "s1_3"},
-	"L-p2s2_1":      {ID: "L-p2s2_1", Value: "aura:p2-user:s2_1-elicit", Special: false, PhaseRef: "p2", SubstepRef: "s2_1"},
-	"L-p2s2_2":      {ID: "L-p2s2_2", Value: "aura:p2-user:s2_2-urd", Special: false, PhaseRef: "p2", SubstepRef: "s2_2"},
-	"L-p3s3":        {ID: "L-p3s3", Value: "aura:p3-plan:s3-propose", Special: false, PhaseRef: "p3", SubstepRef: "s3"},
-	"L-p4s4":        {ID: "L-p4s4", Value: "aura:p4-plan:s4-review", Special: false, PhaseRef: "p4", SubstepRef: "s4"},
-	"L-p5s5":        {ID: "L-p5s5", Value: "aura:p5-user:s5-uat", Special: false, PhaseRef: "p5", SubstepRef: "s5"},
-	"L-p6s6":        {ID: "L-p6s6", Value: "aura:p6-plan:s6-ratify", Special: false, PhaseRef: "p6", SubstepRef: "s6"},
-	"L-p7s7":        {ID: "L-p7s7", Value: "aura:p7-plan:s7-handoff", Special: false, PhaseRef: "p7", SubstepRef: "s7"},
-	"L-p8s8":        {ID: "L-p8s8", Value: "aura:p8-impl:s8-plan", Special: false, PhaseRef: "p8", SubstepRef: "s8"},
-	"L-p9s9":        {ID: "L-p9s9", Value: "aura:p9-impl:s9-slice", Special: false, PhaseRef: "p9", SubstepRef: "s9"},
-	"L-p10s10":      {ID: "L-p10s10", Value: "aura:p10-impl:s10-review", Special: false, PhaseRef: "p10", SubstepRef: "s10"},
-	"L-p11s11":      {ID: "L-p11s11", Value: "aura:p11-user:s11-uat", Special: false, PhaseRef: "p11", SubstepRef: "s11"},
-	"L-p12s12":      {ID: "L-p12s12", Value: "aura:p12-impl:s12-landing", Special: false, PhaseRef: "p12", SubstepRef: "s12"},
-	"L-urd":         {ID: "L-urd", Value: "aura:urd", Special: true, Description: "User Requirements Document"},
-	"L-superseded":  {ID: "L-superseded", Value: "aura:superseded", Special: true, Description: "Superseded proposal or plan"},
-	"L-sev-blocker": {ID: "L-sev-blocker", Value: "aura:severity:blocker", Special: true, SeverityRef: "BLOCKER"},
-	"L-sev-import":  {ID: "L-sev-import", Value: "aura:severity:important", Special: true, SeverityRef: "IMPORTANT"},
-	"L-sev-minor":   {ID: "L-sev-minor", Value: "aura:severity:minor", Special: true, SeverityRef: "MINOR"},
-	"L-followup":    {ID: "L-followup", Value: "aura:epic-followup", Special: true, Description: "Follow-up epic for non-blocking findings"},
+	"L-p1s1_1":      {Id: "L-p1s1_1", Value: "aura:p1-user:s1_1-classify", Special: false, PhaseRef: "p1", SubstepRef: "s1_1"},
+	"L-p1s1_2":      {Id: "L-p1s1_2", Value: "aura:p1-user:s1_2-research", Special: false, PhaseRef: "p1", SubstepRef: "s1_2"},
+	"L-p1s1_3":      {Id: "L-p1s1_3", Value: "aura:p1-user:s1_3-explore", Special: false, PhaseRef: "p1", SubstepRef: "s1_3"},
+	"L-p2s2_1":      {Id: "L-p2s2_1", Value: "aura:p2-user:s2_1-elicit", Special: false, PhaseRef: "p2", SubstepRef: "s2_1"},
+	"L-p2s2_2":      {Id: "L-p2s2_2", Value: "aura:p2-user:s2_2-urd", Special: false, PhaseRef: "p2", SubstepRef: "s2_2"},
+	"L-p3s3":        {Id: "L-p3s3", Value: "aura:p3-plan:s3-propose", Special: false, PhaseRef: "p3", SubstepRef: "s3"},
+	"L-p4s4":        {Id: "L-p4s4", Value: "aura:p4-plan:s4-review", Special: false, PhaseRef: "p4", SubstepRef: "s4"},
+	"L-p5s5":        {Id: "L-p5s5", Value: "aura:p5-user:s5-uat", Special: false, PhaseRef: "p5", SubstepRef: "s5"},
+	"L-p6s6":        {Id: "L-p6s6", Value: "aura:p6-plan:s6-ratify", Special: false, PhaseRef: "p6", SubstepRef: "s6"},
+	"L-p7s7":        {Id: "L-p7s7", Value: "aura:p7-plan:s7-handoff", Special: false, PhaseRef: "p7", SubstepRef: "s7"},
+	"L-p8s8":        {Id: "L-p8s8", Value: "aura:p8-impl:s8-plan", Special: false, PhaseRef: "p8", SubstepRef: "s8"},
+	"L-p9s9":        {Id: "L-p9s9", Value: "aura:p9-impl:s9-slice", Special: false, PhaseRef: "p9", SubstepRef: "s9"},
+	"L-p10s10":      {Id: "L-p10s10", Value: "aura:p10-impl:s10-review", Special: false, PhaseRef: "p10", SubstepRef: "s10"},
+	"L-p11s11":      {Id: "L-p11s11", Value: "aura:p11-user:s11-uat", Special: false, PhaseRef: "p11", SubstepRef: "s11"},
+	"L-p12s12":      {Id: "L-p12s12", Value: "aura:p12-impl:s12-landing", Special: false, PhaseRef: "p12", SubstepRef: "s12"},
+	"L-urd":         {Id: "L-urd", Value: "aura:urd", Special: true, Description: "User Requirements Document"},
+	"L-superseded":  {Id: "L-superseded", Value: "aura:superseded", Special: true, Description: "Superseded proposal or plan"},
+	"L-sev-blocker": {Id: "L-sev-blocker", Value: "aura:severity:blocker", Special: true, SeverityRef: "BLOCKER"},
+	"L-sev-import":  {Id: "L-sev-import", Value: "aura:severity:important", Special: true, SeverityRef: "IMPORTANT"},
+	"L-sev-minor":   {Id: "L-sev-minor", Value: "aura:severity:minor", Special: true, SeverityRef: "MINOR"},
+	"L-followup":    {Id: "L-followup", Value: "aura:epic-followup", Special: true, Description: "Follow-up epic for non-blocking findings"},
 }
 
 // ─── TitleConventions ─────────────────────────────────────────────────────────
@@ -1926,29 +1926,29 @@ var TitleConventions = []TitleConvention{
 var SubstepDataMap = map[string][]SubstepData{
 	"p1": {
 		{
-			ID: "s1_1", Type: "classify", Execution: "sequential", Order: 1,
+			Id: "s1_1", Type: "classify", Execution: "sequential", Order: 1,
 			LabelRef:    "L-p1s1_1",
 			Description: "Classify request along 4 axes: scope, complexity, risk, domain novelty",
 		},
 		{
-			ID: "s1_2", Type: "research", Execution: "parallel", Order: 2,
+			Id: "s1_2", Type: "research", Execution: "parallel", Order: 2,
 			ParallelGroup: "p1-discovery", LabelRef: "L-p1s1_2",
 			Description: "Find domain standards, prior art, relevant documentation",
 		},
 		{
-			ID: "s1_3", Type: "explore", Execution: "parallel", Order: 2,
+			Id: "s1_3", Type: "explore", Execution: "parallel", Order: 2,
 			ParallelGroup: "p1-discovery", LabelRef: "L-p1s1_3",
 			Description: "Codebase exploration for integration points",
 		},
 	},
 	"p2": {
 		{
-			ID: "s2_1", Type: "elicit", Execution: "sequential", Order: 1,
+			Id: "s2_1", Type: "elicit", Execution: "sequential", Order: 1,
 			LabelRef:    "L-p2s2_1",
 			Description: "URE survey: structured Q&A with user to capture requirements",
 		},
 		{
-			ID: "s2_2", Type: "urd", Execution: "sequential", Order: 2,
+			Id: "s2_2", Type: "urd", Execution: "sequential", Order: 2,
 			LabelRef:    "L-p2s2_2",
 			Description: "Create URD as single source of truth for requirements",
 			ExtraLabel:  "L-urd",
@@ -1956,14 +1956,14 @@ var SubstepDataMap = map[string][]SubstepData{
 	},
 	"p3": {
 		{
-			ID: "s3", Type: "propose", Execution: "sequential", Order: 1,
+			Id: "s3", Type: "propose", Execution: "sequential", Order: 1,
 			LabelRef:    "L-p3s3",
 			Description: "Full technical proposal: interfaces, approach, validation checklist, BDD criteria",
 		},
 	},
 	"p4": {
 		{
-			ID: "s4", Type: "review", Execution: "parallel", Order: 1,
+			Id: "s4", Type: "review", Execution: "parallel", Order: 1,
 			LabelRef:    "L-p4s4",
 			Description: "Each reviewer assesses one axis (A/B/C). All 3 must ACCEPT.",
 			Instances:   &SubstepInstances{Count: "3", Per: "review-axis"},
@@ -1971,28 +1971,28 @@ var SubstepDataMap = map[string][]SubstepData{
 	},
 	"p5": {
 		{
-			ID: "s5", Type: "uat", Execution: "sequential", Order: 1,
+			Id: "s5", Type: "uat", Execution: "sequential", Order: 1,
 			LabelRef:    "L-p5s5",
 			Description: "Present plan to user with demonstrative examples. User approves or requests changes.",
 		},
 	},
 	"p6": {
 		{
-			ID: "s6", Type: "ratify", Execution: "sequential", Order: 1,
+			Id: "s6", Type: "ratify", Execution: "sequential", Order: 1,
 			LabelRef:    "L-p6s6",
 			Description: "Add ratify label. Mark prior proposals aura:superseded. Create placeholder IMPL_PLAN.",
 		},
 	},
 	"p7": {
 		{
-			ID: "s7", Type: "handoff", Execution: "sequential", Order: 1,
+			Id: "s7", Type: "handoff", Execution: "sequential", Order: 1,
 			LabelRef:    "L-p7s7",
 			Description: "Create handoff document with full inline provenance. Transfer to supervisor.",
 		},
 	},
 	"p8": {
 		{
-			ID: "s8", Type: "plan", Execution: "sequential", Order: 1,
+			Id: "s8", Type: "plan", Execution: "sequential", Order: 1,
 			LabelRef:        "L-p8s8",
 			Description:     "Identify production code paths. Create SLICE-N tasks with leaf tasks. Assign workers.",
 			StartupSequence: true,
@@ -2000,7 +2000,7 @@ var SubstepDataMap = map[string][]SubstepData{
 	},
 	"p9": {
 		{
-			ID: "s9", Type: "slice", Execution: "parallel", Order: 1,
+			Id: "s9", Type: "slice", Execution: "parallel", Order: 1,
 			LabelRef:    "L-p9s9",
 			Description: "Each worker owns full vertical: types, tests, implementation, wiring",
 			Instances:   &SubstepInstances{Count: "N", Per: "production-code-path"},
@@ -2008,7 +2008,7 @@ var SubstepDataMap = map[string][]SubstepData{
 	},
 	"p10": {
 		{
-			ID: "s10", Type: "review", Execution: "parallel", Order: 1,
+			Id: "s10", Type: "review", Execution: "parallel", Order: 1,
 			LabelRef:    "L-p10s10",
 			Description: "Each reviewer reviews ALL slices against their axis. EAGER severity tree.",
 			Instances:   &SubstepInstances{Count: "3", Per: "review-axis"},
@@ -2016,14 +2016,14 @@ var SubstepDataMap = map[string][]SubstepData{
 	},
 	"p11": {
 		{
-			ID: "s11", Type: "uat", Execution: "sequential", Order: 1,
+			Id: "s11", Type: "uat", Execution: "sequential", Order: 1,
 			LabelRef:    "L-p11s11",
 			Description: "Present implementation to user. User approves or requests fixes.",
 		},
 	},
 	"p12": {
 		{
-			ID: "s12", Type: "landing", Execution: "sequential", Order: 1,
+			Id: "s12", Type: "landing", Execution: "sequential", Order: 1,
 			LabelRef:    "L-p12s12",
 			Description: "git agent-commit, bd sync, git push. Close upstream tasks.",
 		},

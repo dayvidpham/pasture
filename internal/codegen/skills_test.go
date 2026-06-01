@@ -25,7 +25,7 @@ type skillRoleCase struct {
 
 // skillSubSkillCase mirrors one entry in testdata/skills.yaml sub_skill_cases.
 type skillSubSkillCase struct {
-	CommandID   string   `yaml:"command_id"`
+	CommandId   string   `yaml:"command_id"`
 	MustContain []string `yaml:"must_contain"`
 }
 
@@ -239,7 +239,7 @@ func TestGenerateSubSkill_ContainsSections(t *testing.T) {
 
 	for _, tc := range suite.SubSkillCases {
 		tc := tc
-		t.Run(tc.CommandID, func(t *testing.T) {
+		t.Run(tc.CommandId, func(t *testing.T) {
 			t.Parallel()
 
 			// Sub-skill files preserve the prefix; write file with a heading before markers.
@@ -247,16 +247,16 @@ func TestGenerateSubSkill_ContainsSections(t *testing.T) {
 			skillPath := writeSkillFile(t, content)
 			opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
 
-			result, err := codegen.GenerateSubSkill(tc.CommandID, skillPath, "", opts)
+			result, err := codegen.GenerateSubSkill(tc.CommandId, skillPath, "", opts)
 			require.NoError(t, err,
-				"GenerateSubSkill should not error for command %q", tc.CommandID)
+				"GenerateSubSkill should not error for command %q", tc.CommandId)
 			require.NotEmpty(t, result)
 
 			for _, expected := range tc.MustContain {
 				assert.True(t,
 					strings.Contains(result, expected),
 					"output for command %q should contain %q\n\nActual output:\n%s",
-					tc.CommandID, expected, truncate(result, 1000),
+					tc.CommandId, expected, truncate(result, 1000),
 				)
 			}
 		})
@@ -466,13 +466,13 @@ func TestGenerateIdempotent(t *testing.T) {
 
 	roleTests := []struct {
 		name   string
-		roleID types.RoleId
+		roleId types.RoleId
 		file   string // relative path from repo root
 	}{
-		{name: "supervisor", roleID: types.RoleSupervisor, file: "skills/supervisor/SKILL.md"},
-		{name: "architect", roleID: types.RoleArchitect, file: "skills/architect/SKILL.md"},
-		{name: "worker", roleID: types.RoleWorker, file: "skills/worker/SKILL.md"},
-		{name: "reviewer", roleID: types.RoleReviewer, file: "skills/reviewer/SKILL.md"},
+		{name: "supervisor", roleId: types.RoleSupervisor, file: "skills/supervisor/SKILL.md"},
+		{name: "architect", roleId: types.RoleArchitect, file: "skills/architect/SKILL.md"},
+		{name: "worker", roleId: types.RoleWorker, file: "skills/worker/SKILL.md"},
+		{name: "reviewer", roleId: types.RoleReviewer, file: "skills/reviewer/SKILL.md"},
 	}
 
 	for _, tc := range roleTests {
@@ -486,14 +486,14 @@ func TestGenerateIdempotent(t *testing.T) {
 				"cannot read on-disk SKILL.md at %q — "+
 					"ensure the file exists in the repository", skillPath)
 
-			generated, err := codegen.GenerateSkill(tc.roleID, skillPath, figuresDir, opts)
+			generated, err := codegen.GenerateSkill(tc.roleId, skillPath, figuresDir, opts)
 			require.NoError(t, err,
-				"GenerateSkill failed for role %q with skill file %q", tc.roleID, skillPath)
+				"GenerateSkill failed for role %q with skill file %q", tc.roleId, skillPath)
 
 			assert.Equal(t, string(onDisk), generated,
 				"GenerateSkill output for role %q differs from on-disk %q — "+
 					"run 'go generate ./internal/codegen/...' to regenerate, then commit the updated file",
-				tc.roleID, tc.file)
+				tc.roleId, tc.file)
 		})
 	}
 
@@ -501,12 +501,12 @@ func TestGenerateIdempotent(t *testing.T) {
 
 	subSkillTests := []struct {
 		name      string
-		commandID string
+		commandId string
 		file      string // relative path from repo root
 	}{
-		{name: "cmd-sup-plan", commandID: "cmd-sup-plan", file: "skills/supervisor-plan-tasks/SKILL.md"},
-		{name: "cmd-sup-spawn", commandID: "cmd-sup-spawn", file: "skills/supervisor-spawn-worker/SKILL.md"},
-		{name: "cmd-impl-review", commandID: "cmd-impl-review", file: "skills/impl-review/SKILL.md"},
+		{name: "cmd-sup-plan", commandId: "cmd-sup-plan", file: "skills/supervisor-plan-tasks/SKILL.md"},
+		{name: "cmd-sup-spawn", commandId: "cmd-sup-spawn", file: "skills/supervisor-spawn-worker/SKILL.md"},
+		{name: "cmd-impl-review", commandId: "cmd-impl-review", file: "skills/impl-review/SKILL.md"},
 	}
 
 	for _, tc := range subSkillTests {
@@ -520,14 +520,14 @@ func TestGenerateIdempotent(t *testing.T) {
 				"cannot read on-disk SKILL.md at %q — "+
 					"ensure the file exists in the repository", skillPath)
 
-			generated, err := codegen.GenerateSubSkill(tc.commandID, skillPath, figuresDir, opts)
+			generated, err := codegen.GenerateSubSkill(tc.commandId, skillPath, figuresDir, opts)
 			require.NoError(t, err,
-				"GenerateSubSkill failed for command %q with skill file %q", tc.commandID, skillPath)
+				"GenerateSubSkill failed for command %q with skill file %q", tc.commandId, skillPath)
 
 			assert.Equal(t, string(onDisk), generated,
 				"GenerateSubSkill output for command %q differs from on-disk %q — "+
 					"run 'go generate ./internal/codegen/...' to regenerate, then commit the updated file",
-				tc.commandID, tc.file)
+				tc.commandId, tc.file)
 		})
 	}
 }
@@ -546,14 +546,14 @@ func TestGenerateSkill_BodyInsideMarkers(t *testing.T) {
 		Preamble: "Test preamble paragraph.",
 		Sections: []codegen.ProseSection{
 			{
-				ID:      "test-section",
+				Id:      "test-section",
 				Title:   "Test Section",
 				Content: "Test section content.",
 			},
 		},
 		Recipes: []codegen.RecipeBlock{
 			{
-				ID:          "test-recipe",
+				Id:          "test-recipe",
 				Title:       "Test Recipe",
 				Description: "Test recipe description.",
 				Lang:        "bash",
@@ -562,7 +562,7 @@ func TestGenerateSkill_BodyInsideMarkers(t *testing.T) {
 		},
 		Behaviors: []codegen.BehaviorSpec{
 			{
-				ID:        "test-behavior",
+				Id:        "test-behavior",
 				Given:     "test given",
 				When:      "test when",
 				Then:      "test then",

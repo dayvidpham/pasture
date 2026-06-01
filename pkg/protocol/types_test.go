@@ -407,7 +407,7 @@ func TestAuditEvent_JSONRoundTrip(t *testing.T) {
 
 	ts := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
 	event := protocol.AuditEvent{
-		EpochID:   "epoch-abc-123",
+		EpochId:   "epoch-abc-123",
 		Phase:     protocol.PhaseWorkerSlices,
 		Role:      "worker",
 		EventType: protocol.EventSliceCompleted,
@@ -428,8 +428,8 @@ func TestAuditEvent_JSONRoundTrip(t *testing.T) {
 		t.Fatalf("json.Unmarshal(AuditEvent) error: %v", err)
 	}
 
-	if decoded.EpochID != event.EpochID {
-		t.Errorf("EpochID round-trip mismatch: got %q, want %q", decoded.EpochID, event.EpochID)
+	if decoded.EpochId != event.EpochId {
+		t.Errorf("EpochId round-trip mismatch: got %q, want %q", decoded.EpochId, event.EpochId)
 	}
 	if decoded.Phase != event.Phase {
 		t.Errorf("Phase round-trip mismatch: got %q, want %q", decoded.Phase, event.Phase)
@@ -449,7 +449,7 @@ func TestAuditEvent_JSONKeys(t *testing.T) {
 	t.Parallel()
 
 	event := protocol.AuditEvent{
-		EpochID:   "epoch-1",
+		EpochId:   "epoch-1",
 		Phase:     protocol.PhaseRequest,
 		Role:      "epoch",
 		EventType: protocol.EventPhaseTransition,

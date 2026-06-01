@@ -49,91 +49,91 @@ var supervisorBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "sup-assign-slices",
+			Id:        "sup-assign-slices",
 			Given:     "slices created",
 			When:      "assigning",
 			Then:      "use `bd update <slice-id> --assignee=\"worker-N\"` for assignment",
 			ShouldNot: "leave slices unassigned",
 		},
 		{
-			ID:        "sup-spawn-workers",
+			Id:        "sup-spawn-workers",
 			Given:     "worker assignments",
 			When:      "spawning",
 			Then:      "use Task tool with `subagent_type: \"general-purpose\"` and `run_in_background: true`, worker MUST call `Skill(/aura:worker)` at start",
 			ShouldNot: "spawn workers sequentially or use specialized agent types",
 		},
 		{
-			ID:        "sup-teamcreate-msg",
+			Id:        "sup-teamcreate-msg",
 			Given:     "teammates spawned via TeamCreate",
 			When:      "assigning work via SendMessage",
 			Then:      "the message MUST include: (1) explicit instruction to call `Skill(/aura:worker)`, (2) the Beads task ID, (3) instruction to run `bd show <task-id>` for full context, and (4) the handoff document path",
 			ShouldNot: "send bare instructions without Beads context — teammates have no prior knowledge of the task",
 		},
 		{
-			ID:        "sup-layer-integration-points",
+			Id:        "sup-layer-integration-points",
 			Given:     "multiple vertical slices",
 			When:      "slices share types, interfaces, or data flows",
 			Then:      "identify horizontal Layer Integration Points and document them in the IMPL_PLAN (owner, consumers, shared contract, merge timing)",
 			ShouldNot: "leave cross-slice dependencies implicit — divergence grows when slices develop in isolation without clear merge points",
 		},
 		{
-			ID:        "sup-followup-deps",
+			Id:        "sup-followup-deps",
 			Given:     "IMPORTANT or MINOR severity groups",
 			When:      "linking dependencies",
 			Then:      "link them to the FOLLOWUP epic only: `bd dep add <followup-epic-id> --blocked-by <important-group-id>`",
 			ShouldNot: "link IMPORTANT or MINOR severity groups as blocking IMPL_PLAN or any slice — only BLOCKER findings block slices",
 		},
 		{
-			ID:        "sup-review-all-slices",
+			Id:        "sup-review-all-slices",
 			Given:     "all slices complete",
 			When:      "starting review",
 			Then:      "spawn 3 reviewers for ALL slices",
 			ShouldNot: "assign reviewers to single slices",
 		},
 		{
-			ID:        "sup-review-check-each",
+			Id:        "sup-review-check-each",
 			Given:     "reviewer assigned",
 			When:      "reviewing",
 			Then:      "check each slice against criteria",
 			ShouldNot: "skip any slice",
 		},
 		{
-			ID:        "sup-review-severity-groups",
+			Id:        "sup-review-severity-groups",
 			Given:     "review round",
 			When:      "creating severity groups",
 			Then:      "ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty",
 			ShouldNot: "lazily create groups only when findings exist",
 		},
 		{
-			ID:        "sup-blocker-dual-parent",
+			Id:        "sup-blocker-dual-parent",
 			Given:     "BLOCKER finding",
 			When:      "wiring dependencies",
 			Then:      "add dual-parent: blocks BOTH severity group AND slice",
 			ShouldNot: "wire BLOCKER to only one parent",
 		},
 		{
-			ID:        "sup-important-minor-followup",
+			Id:        "sup-important-minor-followup",
 			Given:     "IMPORTANT or MINOR finding",
 			When:      "categorizing",
 			Then:      "add to severity group only (NOT to slice) — these go to follow-up epic",
 			ShouldNot: "block slices on non-BLOCKER findings",
 		},
 		{
-			ID:        "sup-followup-epic-timing",
+			Id:        "sup-followup-epic-timing",
 			Given:     "review complete with IMPORTANT/MINOR",
 			When:      "finishing",
 			Then:      "supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution)",
 			ShouldNot: "wait for BLOCKERs to resolve before creating follow-up",
 		},
 		{
-			ID:        "sup-worker-persistence",
+			Id:        "sup-worker-persistence",
 			Given:     "worker completes initial implementation",
 			When:      "deciding whether to shut down the worker",
 			Then:      "keep workers alive for the review-fix cycle; workers notify supervisor via bd comments add but do NOT shut down",
 			ShouldNot: "shut down workers after first implementation pass; workers must stay alive to fix BLOCKERs and IMPORTANT findings",
 		},
 		{
-			ID:        "sup-autonomous-progression",
+			Id:        "sup-autonomous-progression",
 			Given:     "non-user-gated phase completes",
 			When:      "transitioning to next phase",
 			Then:      "proceed autonomously without asking permission; user-gated phases are: Phase 2 (URE), Phase 5 (Plan UAT), Phase 11 (Impl UAT); all other phases (8 IMPL_PLAN, 9 SLICES, 10 CODE REVIEW, 12 LANDING) progress automatically",
@@ -143,7 +143,7 @@ var supervisorBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:    "sup-first-steps",
+			Id:    "sup-first-steps",
 			Title: "First Steps",
 			Content: `The architect creates a placeholder IMPL_PLAN task. Your first job is to fill it in:
 
@@ -197,7 +197,7 @@ var supervisorBody = SkillBody{
 See: [../supervisor-plan-tasks/SKILL.md](../supervisor-plan-tasks/SKILL.md) for detailed vertical slice decomposition guidance.`,
 		},
 		{
-			ID:    "sup-exploration",
+			Id:    "sup-exploration",
 			Title: "Exploration (Ephemeral Explore Subagents)",
 			Content: `Per [C-supervisor-explore-ephemeral], spawn ephemeral Explore subagents (Agent tool, ` + "`subagent_type=Explore`" + `) for scoped codebase queries. These are short-lived — they explore, return findings, and terminate. The supervisor stays lean.
 
@@ -219,7 +219,7 @@ Explore the codebase for the requested topic. Produce structured findings
 Spawn as many Explore subagents as needed — they are cheap and disposable. Use them during Phase 8 (IMPL_PLAN) to understand codebase areas before decomposing into slices.`,
 		},
 		{
-			ID:    "sup-reading-from-beads",
+			Id:    "sup-reading-from-beads",
 			Title: "Reading from Beads",
 			Content: `Get the ratified plan and URD:
 ` + "```" + `bash
@@ -230,7 +230,7 @@ bd list --labels="aura:urd"
 ` + "```",
 		},
 		{
-			ID:    "sup-impl-task-structure",
+			Id:    "sup-impl-task-structure",
 			Title: "Implementation Task Structure",
 			Content: "```" + `go
 type ImplementationTask struct {
@@ -252,12 +252,12 @@ type ImplementationTask struct {
 ` + "```",
 		},
 		{
-			ID:      "sup-creating-vertical-slices",
+			Id:      "sup-creating-vertical-slices",
 			Title:   "Creating Vertical Slices (Phase 8)",
 			Content: "",
 			Subsections: []ProseSection{
 				{
-					ID:    "sup-step1-impl-plan",
+					Id:    "sup-step1-impl-plan",
 					Title: "Step 1: Create the IMPL_PLAN task",
 					Content: "```" + `bash
 bd create --labels "aura:p8-impl:s8-plan" \
@@ -280,7 +280,7 @@ bd dep add <request-id> --blocked-by <impl-plan-id>
 ` + "```",
 				},
 				{
-					ID:    "sup-step2-create-slices",
+					Id:    "sup-step2-create-slices",
 					Title: "Step 2: Create each slice",
 					Content: "```" + `bash
 bd create --labels "aura:p9-impl:s9-slice" \
@@ -311,7 +311,7 @@ bd dep add <impl-plan-id> --blocked-by <slice-1-id>
 ` + "```",
 				},
 				{
-					ID:    "sup-step3-leaf-tasks",
+					Id:    "sup-step3-leaf-tasks",
 					Title: "Step 3: Create leaf tasks within each slice (CRITICAL)",
 					Content: `Per [C-slice-leaf-tasks], create Beads tasks for each implementation unit within the slice, then chain them as dependencies. Leaf tasks are what workers actually implement.
 
@@ -392,7 +392,7 @@ Workers are assigned to leaf tasks, not slices. The slice closes when all its le
 			},
 		},
 		{
-			ID:    "sup-assigning-slices",
+			Id:    "sup-assigning-slices",
 			Title: "Assigning Slices",
 			Content: "```" + `bash
 # Assign slices to workers
@@ -402,7 +402,7 @@ bd update <slice-3-id> --assignee="worker-3"
 ` + "```",
 		},
 		{
-			ID:    "sup-spawning-workers",
+			Id:    "sup-spawning-workers",
 			Title: "Spawning Workers",
 			Content: `Per [C-supervisor-no-impl], all implementation work — no matter how small — is delegated to a worker agent. The supervisor's job is coordination, tracking, and quality control.
 
@@ -436,7 +436,7 @@ Task({
 ` + "```",
 			Subsections: []ProseSection{
 				{
-					ID:    "sup-model-selection",
+					Id:    "sup-model-selection",
 					Title: "Model Selection Guide",
 					Content: `| Complexity | Model | Examples |
 |------------|-------|----------|
@@ -451,7 +451,7 @@ Task({
 See: [../supervisor-spawn-worker/SKILL.md](../supervisor-spawn-worker/SKILL.md) for handoff template.`,
 				},
 				{
-					ID:    "sup-teamcreate-context",
+					Id:    "sup-teamcreate-context",
 					Title: "TeamCreate Context Requirements",
 					Content: `When using TeamCreate instead of the Task tool, teammates have **zero prior context**. Every SendMessage assigning work MUST be self-contained:
 
@@ -485,12 +485,12 @@ The worker skill provides:
 			},
 		},
 		{
-			ID:      "sup-epic-followup",
+			Id:      "sup-epic-followup",
 			Title:   "EPIC_FOLLOWUP Creation (Phase 10)",
 			Content: `After code review completes, if ANY IMPORTANT or MINOR findings exist, create a follow-up epic. Per [sup-followup-epic-timing], create immediately after review completes.`,
 			Subsections: []ProseSection{
 				{
-					ID:    "sup-followup-step1",
+					Id:    "sup-followup-step1",
 					Title: "Step 1: Create follow-up epic",
 					Content: "```" + `bash
 bd create --type=epic --priority=3 \
@@ -512,7 +512,7 @@ bd dep add <followup-epic-id> --blocked-by <minor-group-id>
 Severity routing follows [sup-blocker-dual-parent] and [sup-important-minor-followup].`,
 				},
 				{
-					ID:    "sup-followup-step2",
+					Id:    "sup-followup-step2",
 					Title: "Step 2: Follow-up lifecycle (same protocol, FOLLOWUP_* prefix)",
 					Content: `The follow-up epic runs the same protocol phases with FOLLOWUP_* prefixed task types. The supervisor creates the initial lifecycle tasks:
 
@@ -559,7 +559,7 @@ bd dep add $FOLLOWUP_URE_ID --blocked-by $FOLLOWUP_URD_ID
 The remaining lifecycle tasks (FOLLOWUP_PROPOSAL, FOLLOWUP_IMPL_PLAN, FOLLOWUP_SLICE) are created as the follow-up epic progresses through the protocol phases.`,
 				},
 				{
-					ID:    "sup-followup-step3",
+					Id:    "sup-followup-step3",
 					Title: "Step 3: Leaf task adoption (dual-parent)",
 					Content: `When the supervisor creates FOLLOWUP_SLICE-N tasks during the follow-up implementation phase, the IMPORTANT/MINOR leaf tasks from the original review gain a second parent:
 
@@ -571,7 +571,7 @@ bd dep add <followup-slice-id> --blocked-by <minor-leaf-task-id>
 ` + "```",
 				},
 				{
-					ID:    "sup-followup-handoff-chain",
+					Id:    "sup-followup-handoff-chain",
 					Title: "Follow-up Handoff Chain",
 					Content: `Inside the follow-up lifecycle, the same handoff types (h1-h4) reapply:
 
@@ -593,14 +593,14 @@ See ` + "`../protocol/HANDOFF_TEMPLATE.md`" + ` for full follow-up handoff examp
 			},
 		},
 		{
-			ID:    "sup-impl-review-severity",
+			Id:    "sup-impl-review-severity",
 			Title: "Impl-Review Severity Tree Procedure",
 			Content: "The severity behaviors for code review (Phase 10) are defined above as structured behaviors " +
 				"(sup-review-all-slices through sup-followup-epic-timing). " +
 				"The following subsections describe the operational procedures.",
 			Subsections: []ProseSection{
 				{
-					ID:    "sup-severity-tree",
+					Id:    "sup-severity-tree",
 					Title: "Severity Tree (EAGER Creation)",
 					Content: `Per [sup-review-severity-groups], create all 3 severity groups immediately:
 
@@ -648,7 +648,7 @@ bd close $MINOR_ID        # if no MINOR findings
 ` + "```",
 				},
 				{
-					ID:    "sup-naming-convention",
+					Id:    "sup-naming-convention",
 					Title: "Naming Convention",
 					Content: "```" + `
 SLICE-{N}-REVIEW-{axis}-{round}
@@ -668,7 +668,7 @@ Severity groups:
 			},
 		},
 		{
-			ID:    "sup-tracking-progress",
+			Id:    "sup-tracking-progress",
 			Title: "Tracking Progress",
 			Content: "```" + `bash
 # Check all implementation slices
@@ -706,42 +706,42 @@ var supervisorPlanTasksBody = SkillBody{
 		"**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-8-implementation-plan)** <- Phase 8",
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "sup-plan-impl-plan-decompose",
+			Id:        "sup-plan-impl-plan-decompose",
 			Given:     "IMPL_PLAN placeholder",
 			When:      "planning",
 			Then:      "decompose into vertical slices (production code paths)",
 			ShouldNot: "decompose into horizontal layers (files)",
 		},
 		{
-			ID:        "sup-plan-ratified-plan-tasks",
+			Id:        "sup-plan-ratified-plan-tasks",
 			Given:     "RATIFIED_PLAN features/commands",
 			When:      "creating tasks",
 			Then:      "assign one vertical slice per worker (full end-to-end)",
 			ShouldNot: "assign horizontal layers (types worker, tests worker, impl worker)",
 		},
 		{
-			ID:        "sup-plan-vertical-slice-define",
+			Id:        "sup-plan-vertical-slice-define",
 			Given:     "vertical slice",
 			When:      "defining",
 			Then:      "specify production code path and backward planning approach",
 			ShouldNot: "leave workers guessing what end users will run",
 		},
 		{
-			ID:        "sup-plan-validation-checklist",
+			Id:        "sup-plan-validation-checklist",
 			Given:     "validation_checklist",
 			When:      "distributing",
 			Then:      "include production code verification",
 			ShouldNot: "allow test-only validation",
 		},
 		{
-			ID:        "sup-plan-integration-points-identify",
+			Id:        "sup-plan-integration-points-identify",
 			Given:     "multiple vertical slices",
 			When:      "slices share types, interfaces, or data flows",
 			Then:      "identify horizontal Layer Integration Points where slices must inter-op and document them in the IMPL_PLAN with owning slice, consuming slices, and the shared contract (type, interface, or protocol)",
 			ShouldNot: "leave cross-slice dependencies implicit — divergence grows when slices develop in isolation without clear merge points",
 		},
 		{
-			ID:        "sup-plan-integration-points-include",
+			Id:        "sup-plan-integration-points-include",
 			Given:     "integration points identified",
 			When:      "creating slice tasks",
 			Then:      "include each integration point in the relevant slice descriptions so workers know what they must export and what they may import",
@@ -750,12 +750,12 @@ var supervisorPlanTasksBody = SkillBody{
 	},
 	Sections: []ProseSection{
 		{
-			ID:      "sup-plan-when-to-use",
+			Id:      "sup-plan-when-to-use",
 			Title:   "When to Use",
 			Content: `Received handoff from architect with RATIFIED_PLAN task ID and placeholder IMPL_PLAN task.`,
 		},
 		{
-			ID:    "sup-plan-critical-vertical-slices",
+			Id:    "sup-plan-critical-vertical-slices",
 			Title: "Critical: Vertical Slices, Not Horizontal Layers",
 			Content: "**ANTI-PATTERN (causes dual-export problem):**\n" +
 				"```\n" +
@@ -783,7 +783,7 @@ var supervisorPlanTasksBody = SkillBody{
 				"```",
 		},
 		{
-			ID:    "sup-plan-steps",
+			Id:    "sup-plan-steps",
 			Title: "Steps",
 			Content: "1. **Read RATIFIED_PLAN and URD tasks:**\n" +
 				"   ```bash\n" +
@@ -974,7 +974,7 @@ var supervisorPlanTasksBody = SkillBody{
 				"   ```",
 		},
 		{
-			ID:    "sup-plan-vertical-slice-task-structure",
+			Id:    "sup-plan-vertical-slice-task-structure",
 			Title: "Vertical Slice Task Structure",
 			Content: "```json\n" +
 				"{\n" +
@@ -1011,7 +1011,7 @@ var supervisorPlanTasksBody = SkillBody{
 				"```",
 		},
 		{
-			ID:    "sup-plan-layer-cake",
+			Id:    "sup-plan-layer-cake",
 			Title: "Layer Cake Within Each Vertical Slice",
 			Content: "Each worker implements their slice in layers (TDD approach):\n" +
 				"\n" +
@@ -1030,7 +1030,7 @@ var supervisorPlanTasksBody = SkillBody{
 				"**Important:** Layer 2 tests failing is expected. Worker knows tests define the contract, implementation comes in Layer 3.",
 		},
 		{
-			ID:    "sup-plan-red-green-flags",
+			Id:    "sup-plan-red-green-flags",
 			Title: "Red Flags vs Green Flags",
 			Content: "**Red flags (horizontal layer decomposition):**\n" +
 				"- Tasks organized by layer: \"Layer 1 all types\", \"Layer 2 all tests\"\n" +
@@ -1046,7 +1046,7 @@ var supervisorPlanTasksBody = SkillBody{
 				"- Workers can execute independently (parallel slices)",
 		},
 		{
-			ID:    "sup-plan-shared-infrastructure",
+			Id:    "sup-plan-shared-infrastructure",
 			Title: "Shared Infrastructure (Layer 0)",
 			Content: "If multiple slices share common infrastructure:\n" +
 				"\n" +
@@ -1062,7 +1062,7 @@ var supervisorPlanTasksBody = SkillBody{
 				"**Key insight:** Shared infrastructure is the exception, not the rule. Most types/logic belong to specific slices.",
 		},
 		{
-			ID:    "sup-plan-followup-impl-plan",
+			Id:    "sup-plan-followup-impl-plan",
 			Title: "Follow-up Implementation Plan (FOLLOWUP_IMPL_PLAN)",
 			Content: "When planning for a follow-up epic (after receiving h1 from architect post-FOLLOWUP_PROPOSAL ratification), the same vertical slice decomposition applies:\n" +
 				"\n" +
@@ -1121,56 +1121,56 @@ var supervisorSpawnWorkerBody = SkillBody{
 		"**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9",
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "sup-spawn-task-tool",
+			Id:        "sup-spawn-task-tool",
 			Given:     "implementation tasks",
 			When:      "spawning",
 			Then:      "use Task tool with `run_in_background: true`",
 			ShouldNot: "block on worker completion",
 		},
 		{
-			ID:        "sup-spawn-parallel-wave",
+			Id:        "sup-spawn-parallel-wave",
 			Given:     "multiple workers",
 			When:      "launching",
 			Then:      "spawn all slices in parallel as a single wave",
 			ShouldNot: "spawn sequentially",
 		},
 		{
-			ID:        "sup-spawn-worker-context",
+			Id:        "sup-spawn-worker-context",
 			Given:     "worker assignment",
 			When:      "providing context",
 			Then:      "include Beads task ID, full context, and handoff document",
 			ShouldNot: "omit checklist or criteria",
 		},
 		{
-			ID:        "sup-spawn-handoff-doc",
+			Id:        "sup-spawn-handoff-doc",
 			Given:     "worker handoff",
 			When:      "creating",
 			Then:      "store at `.git/.aura/handoff/<request-task-id>/supervisor-to-worker-<N>.md`",
 			ShouldNot: "skip handoff document",
 		},
 		{
-			ID:        "sup-spawn-no-close-before-review",
+			Id:        "sup-spawn-no-close-before-review",
 			Given:     "workers complete their slices",
 			When:      "first wave finishes",
 			Then:      "do NOT close slices — ephemeral reviewers must review ALL slices first",
 			ShouldNot: "close a slice that has not been reviewed at least once",
 		},
 		{
-			ID:        "sup-spawn-fix-and-rereview",
+			Id:        "sup-spawn-fix-and-rereview",
 			Given:     "reviewers finish reviewing",
 			When:      "BLOCKERs or IMPORTANT findings exist",
 			Then:      "send findings to workers for fixing, then spawn new ephemeral reviewers for re-review",
 			ShouldNot: "skip re-review after fixes",
 		},
 		{
-			ID:        "sup-spawn-max-cycles",
+			Id:        "sup-spawn-max-cycles",
 			Given:     "worker-reviewer cycle",
 			When:      "counting iterations",
 			Then:      "limit to a MAXIMUM of 3 cycles",
 			ShouldNot: "exceed 3 cycles — if IMPORTANT findings remain after cycle 3, move to UAT and track remaining in FOLLOWUP epic",
 		},
 		{
-			ID:        "sup-spawn-important-after-cycles",
+			Id:        "sup-spawn-important-after-cycles",
 			Given:     "IMPORTANT findings remain after 3 cycles",
 			When:      "deciding next step",
 			Then:      "proceed to Phase 11 (UAT) — all remaining IMPORTANT and MINOR findings must be tracked in the FOLLOWUP Beads epic",
@@ -1179,12 +1179,12 @@ var supervisorSpawnWorkerBody = SkillBody{
 	},
 	Sections: []ProseSection{
 		{
-			ID:      "sup-spawn-when-to-use",
+			Id:      "sup-spawn-when-to-use",
 			Title:   "When to Use",
 			Content: `Implementation tasks ready. Ephemeral reviewers will be spawned per-slice during review phase.`,
 		},
 		{
-			ID:    "sup-spawn-ride-the-wave-overview",
+			Id:    "sup-spawn-ride-the-wave-overview",
 			Title: "Ride the Wave — Overview",
 			Content: "The supervisor executes Phases 8-10 as a single coordinated cycle called **Ride the Wave**:\n" +
 				"\n" +
@@ -1206,7 +1206,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"- Max **3 review cycles per slice** — escalate to architect after cycle 3 if BLOCKERs remain",
 		},
 		{
-			ID:    "sup-spawn-handoff-template",
+			Id:    "sup-spawn-handoff-template",
 			Title: "Handoff Template (Supervisor → Worker)",
 			Content: "Before spawning each worker, create a handoff document:\n" +
 				"\n" +
@@ -1253,7 +1253,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"```",
 		},
 		{
-			ID:    "sup-spawn-task-call",
+			Id:    "sup-spawn-task-call",
 			Title: "Task Call",
 			Content: "```\n" +
 				"Task({\n" +
@@ -1273,7 +1273,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"Per [sup-spawn-workers], use `subagent_type: \"general-purpose\"`, not a custom agent type. The worker skill is invoked inside the agent via `Skill(/aura:worker)`.",
 		},
 		{
-			ID:    "sup-spawn-teamcreate-sendmessage",
+			Id:    "sup-spawn-teamcreate-sendmessage",
 			Title: "TeamCreate: SendMessage Assignment",
 			Content: "When workers are spawned via TeamCreate, they receive context through SendMessage instead of a Task prompt. The message MUST be self-contained — teammates have **no prior context**:\n" +
 				"\n" +
@@ -1305,7 +1305,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"Per [sup-teamcreate-msg], include Beads task IDs and `bd show` commands in every assignment. Teammates cannot see your conversation or task tree.",
 		},
 		{
-			ID:    "sup-spawn-worker-persistence",
+			Id:    "sup-spawn-worker-persistence",
 			Title: "Worker Persistence (Ride the Wave)",
 			Content: "Per [sup-worker-persistence], workers stay alive for the full review-fix cycle:\n" +
 				"\n" +
@@ -1319,7 +1319,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"8. After 3 cycles or all clean: supervisor shuts down worker",
 			Subsections: []ProseSection{
 				{
-					ID:    "sup-spawn-fix-assignment-template",
+					Id:    "sup-spawn-fix-assignment-template",
 					Title: "Fix Assignment Message Template",
 					Content: "```\n" +
 						"SendMessage({\n" +
@@ -1344,7 +1344,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 			},
 		},
 		{
-			ID:    "sup-spawn-beads-status",
+			Id:    "sup-spawn-beads-status",
 			Title: "Worker Should Update Beads Status",
 			Content: "- On start: `bd update <task-id> --status=in_progress`\n" +
 				"- On implementation complete (NOT slice close): `bd comments add <task-id> \"Implementation complete, awaiting review\"`\n" +
@@ -1352,7 +1352,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"- Slice closure: **only the supervisor** closes slices after review passes",
 		},
 		{
-			ID:    "sup-spawn-assign-via-beads",
+			Id:    "sup-spawn-assign-via-beads",
 			Title: "Assign via Beads",
 			Content: "```bash\n" +
 				"bd update <task-id> --assignee=\"<worker-agent-name>\"\n" +
@@ -1360,7 +1360,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"```",
 		},
 		{
-			ID:    "sup-spawn-followup-slice-handoff",
+			Id:    "sup-spawn-followup-slice-handoff",
 			Title: "Follow-up Slice Handoff (FOLLOWUP_SLICE-N)",
 			Content: "For follow-up slices, the handoff template extends with additional fields:\n" +
 				"\n" +
@@ -1399,7 +1399,7 @@ var workerBody = SkillBody{
 	Preamble: `**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9`,
 	Sections: []ProseSection{
 		{
-			ID:    "wrk-what-you-own",
+			Id:    "wrk-what-you-own",
 			Title: "Vertical Slice Ownership in Practice",
 			Content: `**Example vertical slice: "CLI command with list subcommand"**
 - **Production code path:** ` + "`" + `./bin/cli-tool command list` + "`" + ` (what end users run)
@@ -1412,7 +1412,7 @@ var workerBody = SkillBody{
 **Key insight:** You own the FEATURE end-to-end, not a layer or file.`,
 		},
 		{
-			ID:    "wrk-planning-backwards",
+			Id:    "wrk-planning-backwards",
 			Title: "Planning Backwards from Production Code Path",
 			Content: `**Start from the end, plan backwards:**
 
@@ -1447,7 +1447,7 @@ var workerBody = SkillBody{
    - When tests pass, production must work (same code path)`,
 		},
 		{
-			ID:    "wrk-implementation-order",
+			Id:    "wrk-implementation-order",
 			Title: "Implementation Order (Layers Within Your Slice)",
 			Content: `You implement your vertical slice in layers (TDD approach):
 
@@ -1533,7 +1533,7 @@ var listCmd = &cobra.Command{
 Per [wrk-no-stubs], deliver fully wired production code.`,
 		},
 		{
-			ID:    "wrk-tdd-layer-awareness",
+			Id:    "wrk-tdd-layer-awareness",
 			Title: "TDD Layer Awareness (Within Your Slice)",
 			Content: `**Layer 2 (your tests):**
 - Your tests WILL fail - implementation doesn't exist yet
@@ -1551,7 +1551,7 @@ Per [wrk-no-stubs], deliver fully wired production code.`,
 **Key insight:** A failing test for unimplemented code is NOT a blocker - it's the specification you're implementing against.`,
 		},
 		{
-			ID:    "wrk-reading-from-beads",
+			Id:    "wrk-reading-from-beads",
 			Title: "Reading from Beads",
 			Content: `Get your task details:
 ` + "```bash" + `
@@ -1571,7 +1571,7 @@ bd update <task-id> --status=in_progress
 ` + "```",
 		},
 		{
-			ID:    "wrk-vertical-slice-fields",
+			Id:    "wrk-vertical-slice-fields",
 			Title: "Vertical Slice Fields (From Beads Task)",
 			Content: `- ` + "`slice`" + `: Your slice identifier (e.g., "feature-list")
 - ` + "`productionCodePath`" + `: What users run (e.g., "cli-tool command list")
@@ -1583,7 +1583,7 @@ bd update <task-id> --status=in_progress
 - ` + "`ratified_plan`" + `: Link to parent plan`,
 		},
 		{
-			ID:    "wrk-followup-slices",
+			Id:    "wrk-followup-slices",
 			Title: "Follow-up Slices (FOLLOWUP_SLICE-N)",
 			Content: `You may be assigned a ` + "`FOLLOWUP_SLICE-N`" + ` task instead of a ` + "`SLICE-N`" + ` task. The implementation procedure is identical, with these additions:
 
@@ -1597,7 +1597,7 @@ bd comments add <task-id> "Implementation complete. Resolved leaf tasks: <leaf-t
 ` + "```",
 		},
 		{
-			ID:    "wrk-updating-beads-status",
+			Id:    "wrk-updating-beads-status",
 			Title: "Updating Beads Status",
 			Content: `On start:
 ` + "```bash" + `
@@ -1619,7 +1619,7 @@ bd update <task-id> --notes="Blocked: <reason>. Need: <dependency or clarificati
 	},
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "wrk-no-stubs",
+			Id:        "wrk-no-stubs",
 			Given:     "completing Layer 3 (implementation + wiring)",
 			When:      "finishing a vertical slice",
 			Then:      "deliver production code that is fully wired and working end-to-end",
@@ -1634,7 +1634,7 @@ var architectBody = SkillBody{
 	Preamble: `**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-3-proposal-n)**`,
 	Sections: []ProseSection{
 		{
-			ID:    "arch-proposal-naming",
+			Id:    "arch-proposal-naming",
 			Title: "PROPOSAL-N Naming",
 			Content: `Proposals are numbered incrementally: PROPOSAL-1, PROPOSAL-2, etc. When a revision is needed:
 1. Create PROPOSAL-N+1 with fixes
@@ -1646,17 +1646,17 @@ var architectBody = SkillBody{
 3. Re-spawn all 3 reviewers to assess PROPOSAL-N+1`,
 		},
 		{
-			ID:      "arch-state-flow",
+			Id:      "arch-state-flow",
 			Title:   "State Flow",
 			Content: `Idle → Eliciting → Drafting → AwaitingReview → AwaitingUAT → Ratified → HandoffToSupervisor → Idle`,
 		},
 		{
-			ID:      "arch-beads-task-creation",
+			Id:      "arch-beads-task-creation",
 			Title:   "Beads Task Creation (12-Phase)",
 			Content: "",
 			Subsections: []ProseSection{
 				{
-					ID:    "arch-phase1-request",
+					Id:    "arch-phase1-request",
 					Title: "Phase 1: REQUEST Task",
 					Content: `Captures the original user prompt verbatim:
 ` + "```bash" + `
@@ -1667,7 +1667,7 @@ bd create --labels "aura:p1-user:s1_1-classify" \
 ` + "```",
 				},
 				{
-					ID:    "arch-phase2-elicit",
+					Id:    "arch-phase2-elicit",
 					Title: "Phase 2: ELICIT Task",
 					Content: `Run ` + "`/aura:user-elicit`" + ` first, then capture results:
 ` + "```bash" + `
@@ -1679,7 +1679,7 @@ bd dep add <request-id> --blocked-by <elicit-id>
 ` + "```",
 				},
 				{
-					ID:    "arch-phase2-5-urd",
+					Id:    "arch-phase2-5-urd",
 					Title: "Phase 2.5: URD (User Requirements Document)",
 					Content: `Create the URD as the single source of truth after elicitation:
 ` + "```bash" + `
@@ -1695,7 +1695,7 @@ references:
 ` + "```",
 				},
 				{
-					ID:    "arch-phase3-proposal",
+					Id:    "arch-phase3-proposal",
 					Title: "Phase 3: PROPOSAL-N Task",
 					Content: `Contains full plan with validation checklist and acceptance criteria:
 ` + "```bash" + `
@@ -1713,7 +1713,7 @@ bd dep add <request-id> --blocked-by <proposal-id>
 ` + "```",
 				},
 				{
-					ID:    "arch-phase4-review",
+					Id:    "arch-phase4-review",
 					Title: "Phase 4: REVIEW Tasks",
 					Content: `Each reviewer creates their own task:
 ` + "```bash" + `
@@ -1724,7 +1724,7 @@ bd dep add <proposal-id> --blocked-by <review-id>
 ` + "```",
 				},
 				{
-					ID:    "arch-phase5-uat",
+					Id:    "arch-phase5-uat",
 					Title: "Phase 5: UAT Task",
 					Content: `After all 3 reviewers ACCEPT, run ` + "`/aura:user-uat`" + `:
 ` + "```bash" + `
@@ -1743,7 +1743,7 @@ bd comments add <urd-id> "UAT results: <summary of user acceptance/feedback>"
 ` + "```",
 				},
 				{
-					ID:    "arch-phase6-ratify",
+					Id:    "arch-phase6-ratify",
 					Title: "Phase 6: RATIFY",
 					Content: `Add label to proposal (DO NOT close, delete, or create new task):
 ` + "```bash" + `
@@ -1759,7 +1759,7 @@ bd comments add <urd-id> "Ratified: scope confirmed as <summary>"
 ` + "```",
 				},
 				{
-					ID:    "arch-phase7-handoff",
+					Id:    "arch-phase7-handoff",
 					Title: "Phase 7: HANDOFF",
 					Content: `Create handoff document and task:
 ` + "```bash" + `
@@ -1781,12 +1781,12 @@ Storage: ` + "`.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`"
 			},
 		},
 		{
-			ID:      "arch-plan-structure",
+			Id:      "arch-plan-structure",
 			Title:   "Plan Structure",
 			Content: "```markdown\n## Problem Space\n**Axes:** parallelism, distribution, reliability\n**Has-a / Is-a:** relationships\n\n## Engineering Tradeoffs\n| Option | Pros | Cons | Decision |\n\n## MVP Milestone\nScope with tradeoff rationale\n\n## Public Interfaces\n```go\ntype Example interface { /* ... */ }\n```\n\n## Validation Checklist\n- [ ] Item 1\n- [ ] Item 2\n\n## BDD Acceptance Criteria\n**Given** X **When** Y **Then** Z **Should Not** W\n```",
 		},
 		{
-			ID:    "arch-followup-lifecycle",
+			Id:    "arch-followup-lifecycle",
 			Title: "Follow-up Lifecycle (Receiving h6)",
 			Content: `In the follow-up lifecycle, the architect receives a handoff (h6) from the supervisor containing FOLLOWUP_URE + FOLLOWUP_URD, and creates FOLLOWUP_PROPOSAL-N:
 
@@ -1807,19 +1807,19 @@ references:
 The same review/ratify/UAT/handoff cycle (Phases 3-7) applies. After FOLLOWUP_PROPOSAL is ratified, hand off to supervisor via h1 for FOLLOWUP_IMPL_PLAN creation.`,
 		},
 		{
-			ID:      "arch-spawning-reviewers",
+			Id:      "arch-spawning-reviewers",
 			Title:   "Spawning Reviewers",
 			Content: "Spawn 3 axis-specific reviewers (A=Correctness, B=Test quality, C=Elegance) as `general-purpose` subagents. Each reviewer must invoke the `/aura:reviewer` skill (via the Skill tool) to load its role instructions — `/aura:reviewer` is a **Skill**, not a subagent type.\n\n```\nTask(description: \"Reviewer A: correctness\", prompt: \"You are Reviewer A (Correctness). First invoke `/aura:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...\", subagent_type: \"general-purpose\")\nTask(description: \"Reviewer B: test quality\", prompt: \"You are Reviewer B (Test quality). First invoke `/aura:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...\", subagent_type: \"general-purpose\")\nTask(description: \"Reviewer C: elegance\", prompt: \"You are Reviewer C (Elegance). First invoke `/aura:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...\", subagent_type: \"general-purpose\")\n```",
 		},
 		{
-			ID:      "arch-supervisor-handoff",
+			Id:      "arch-supervisor-handoff",
 			Title:   "Supervisor Handoff",
 			Content: "**DO NOT** spawn supervisor as a Task tool subagent. Instead, invoke:\n\n```\nSkill(skill: \"aura:architect-handoff\")\n```\n\nThe handoff skill guides you through:\n1. Creating the handoff document at `.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`\n2. Launching supervisor via `aura-swarm start --swarm-mode intree --role supervisor -n 1` or `aura-swarm start --epic <id>`\n\n**CRITICAL:** The supervisor launch prompt MUST:\n1. **Start with `Skill(/aura:supervisor)`** — this loads the supervisor's role instructions, including leaf task creation\n2. Include all Beads task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)\n3. Include the handoff document path\n\n**DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks from the ratified plan.",
 		},
 	},
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "arch-followup-h6",
+			Id:        "arch-followup-h6",
 			Given:     "h6 handoff received (FOLLOWUP_URE + FOLLOWUP_URD)",
 			When:      "starting follow-up proposal",
 			Then:      "create FOLLOWUP_PROPOSAL-N referencing both original URD and FOLLOWUP_URD",
@@ -1834,7 +1834,7 @@ var reviewerBody = SkillBody{
 	Preamble: "**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-4-plan-review)**",
 	Sections: []ProseSection{
 		{
-			ID:    "rev-plan-vs-code",
+			Id:    "rev-plan-vs-code",
 			Title: "Plan Review vs Code Review",
 			Content: `| Aspect | Plan Review (Phase 4) | Code Review (Phase 10) |
 |--------|-----------------------|------------------------|
@@ -1845,7 +1845,7 @@ var reviewerBody = SkillBody{
 | Focus | End-user alignment, MVP scope | Production code paths, severity findings |`,
 		},
 		{
-			ID:    "rev-end-user-alignment",
+			Id:    "rev-end-user-alignment",
 			Title: "End-User Alignment Criteria",
 			Content: `All reviewers also apply these general questions:
 
@@ -1857,7 +1857,7 @@ var reviewerBody = SkillBody{
 6. **Is validation checklist complete and correct?**`,
 		},
 		{
-			ID:    "rev-vote-options",
+			Id:    "rev-vote-options",
 			Title: "Vote Options",
 			Content: `| Vote | When |
 |------|------|
@@ -1867,7 +1867,7 @@ var reviewerBody = SkillBody{
 Binary only. No intermediate levels.`,
 		},
 		{
-			ID:    "rev-severity-vocab",
+			Id:    "rev-severity-vocab",
 			Title: "Severity Vocabulary (Code Review Only)",
 			Content: `| Severity | When to Use | Blocks Slice? |
 |----------|-------------|---------------|
@@ -1876,7 +1876,7 @@ Binary only. No intermediate levels.`,
 | MINOR | Style, optional optimizations, naming improvements | No (follow-up epic) |`,
 		},
 		{
-			ID:    "rev-followup-lifecycle",
+			Id:    "rev-followup-lifecycle",
 			Title: "Follow-up Lifecycle Reviews",
 			Content: `Reviewers also participate in the follow-up lifecycle:
 
@@ -1885,7 +1885,7 @@ Binary only. No intermediate levels.`,
 - **No followup-of-followup:** IMPORTANT/MINOR findings from FOLLOWUP_SLICE code review are tracked on the existing follow-up epic. A nested follow-up epic is never created.`,
 		},
 		{
-			ID:    "rev-beads-process",
+			Id:    "rev-beads-process",
 			Title: "Beads Review Process",
 			Content: `Read the plan and URD:
 ` + "```bash\n" +
@@ -1903,7 +1903,7 @@ bd comments add <task-id> "VOTE: REVISE - Missing: what happens if X fails? Sugg
 ` + "```",
 		},
 		{
-			ID:    "rev-consensus",
+			Id:    "rev-consensus",
 			Title: "Consensus",
 			Content: `All 3 reviewers must vote ACCEPT for plan to be ratified. If any reviewer votes REVISE:
 1. Architect creates PROPOSAL-N+1 addressing feedback
@@ -1914,7 +1914,7 @@ bd comments add <task-id> "VOTE: REVISE - Missing: what happens if X fails? Sugg
 	},
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "rev-review-task-creation",
+			Id:        "rev-review-task-creation",
 			Given:     "review complete",
 			When:      "documenting findings",
 			Then:      "create review task with dependency chain linking findings to the reviewed artifact",
@@ -1937,42 +1937,42 @@ See ` + "`../protocol/CONSTRAINTS.md`" + ` for coding standards and severity def
 	// as a self-contained sub-skill and must include its own behavioral directives.
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "impl-rev-b1",
+			Id:        "impl-rev-b1",
 			Given:     "all slices complete",
 			When:      "starting review",
 			Then:      "spawn 3 reviewers for ALL slices",
 			ShouldNot: "assign reviewers to single slices",
 		},
 		{
-			ID:        "impl-rev-b2",
+			Id:        "impl-rev-b2",
 			Given:     "reviewer assigned",
 			When:      "reviewing",
 			Then:      "check each slice against criteria",
 			ShouldNot: "skip any slice",
 		},
 		{
-			ID:        "impl-rev-b3",
+			Id:        "impl-rev-b3",
 			Given:     "review round",
 			When:      "creating severity groups",
 			Then:      "ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty",
 			ShouldNot: "lazily create groups only when findings exist",
 		},
 		{
-			ID:        "impl-rev-b4",
+			Id:        "impl-rev-b4",
 			Given:     "BLOCKER finding",
 			When:      "wiring dependencies",
 			Then:      "add dual-parent: blocks BOTH severity group AND slice",
 			ShouldNot: "wire BLOCKER to only one parent",
 		},
 		{
-			ID:        "impl-rev-b5",
+			Id:        "impl-rev-b5",
 			Given:     "IMPORTANT or MINOR finding",
 			When:      "categorizing",
 			Then:      "add to severity group only (NOT to slice) — these go to follow-up epic",
 			ShouldNot: "block slices on non-BLOCKER findings",
 		},
 		{
-			ID:        "impl-rev-b6",
+			Id:        "impl-rev-b6",
 			Given:     "review complete with IMPORTANT/MINOR",
 			When:      "finishing",
 			Then:      "supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution)",
@@ -1981,7 +1981,7 @@ See ` + "`../protocol/CONSTRAINTS.md`" + ` for coding standards and severity def
 	},
 	Sections: []ProseSection{
 		{
-			ID:    "impl-rev-severity-tree",
+			Id:    "impl-rev-severity-tree",
 			Title: "Severity Tree (EAGER Creation)",
 			Content: `Per [impl-rev-b3], create all 3 severity groups immediately:
 
@@ -2029,7 +2029,7 @@ bd close $MINOR_ID        # if no MINOR findings
 ` + "```",
 			Subsections: []ProseSection{
 				{
-					ID:    "impl-rev-naming-convention",
+					Id:    "impl-rev-naming-convention",
 					Title: "Naming Convention",
 					Content: "```\n" +
 						`SLICE-{N}-REVIEW-{axis}-{round}
@@ -2049,7 +2049,7 @@ Severity groups:
 			},
 		},
 		{
-			ID:    "impl-rev-dual-parent",
+			Id:    "impl-rev-dual-parent",
 			Title: "Dual-Parent BLOCKER Relationship",
 			Content: `BLOCKER findings have **two parents**:
 1. The severity group task (` + "`aura:severity:blocker`" + `) — for categorization
@@ -2091,7 +2091,7 @@ bd dep add $IMPORTANT_ID --blocked-by $IMPORTANT_FINDING_ID
 ` + "```",
 		},
 		{
-			ID:    "impl-rev-review-structure",
+			Id:    "impl-rev-review-structure",
 			Title: "Review Structure",
 			Content: `Each reviewer (A, B, C) reviews EVERY slice:
 
@@ -2108,7 +2108,7 @@ Reviewer C (Elegance): Reviews SLICE-1, SLICE-2, SLICE-3 →
 ` + "```",
 		},
 		{
-			ID:    "impl-rev-spawning",
+			Id:    "impl-rev-spawning",
 			Title: "Spawning Reviewers",
 			Content: `Supervisor spawns 3 parallel reviewers as **subagents** (via the Task tool) or via **TeamCreate**. Reviewers are short-lived — keep them in-session.
 
@@ -2133,7 +2133,7 @@ Call Skill(/aura:reviewer-review-code) for the review procedure.` + "`" + `
 ` + "```",
 			Subsections: []ProseSection{
 				{
-					ID:    "impl-rev-handoff-template",
+					Id:    "impl-rev-handoff-template",
 					Title: "Supervisor → Reviewer Handoff Template",
 					Content: "```markdown\n" +
 						`# Handoff: Supervisor → Reviewer <N>
@@ -2162,7 +2162,7 @@ Call Skill(/aura:reviewer-review-code) for the review procedure.` + "`" + `
 			},
 		},
 		{
-			ID:    "impl-rev-criteria",
+			Id:    "impl-rev-criteria",
 			Title: "Review Criteria",
 			Content: `Each reviewer checks each slice for:
 
@@ -2187,7 +2187,7 @@ Call Skill(/aura:reviewer-review-code) for the review procedure.` + "`" + `
    - All items from slice checklist verified?`,
 		},
 		{
-			ID:    "impl-rev-voting",
+			Id:    "impl-rev-voting",
 			Title: "Voting: ACCEPT vs REVISE (Binary Only)",
 			Content: `| Vote | Requirement |
 |------|-------------|
@@ -2202,7 +2202,7 @@ bd comments add <slice-id> "VOTE: REVISE - [specific issue]. Suggest: [fix]"
 ` + "```",
 		},
 		{
-			ID:    "impl-rev-consensus",
+			Id:    "impl-rev-consensus",
 			Title: "Consensus Check",
 			Content: `All reviews across all slices must be ACCEPT:
 
@@ -2218,7 +2218,7 @@ bd list --labels="aura:severity:blocker" --status=open
 ` + "```",
 		},
 		{
-			ID:    "impl-rev-handling-revise",
+			Id:    "impl-rev-handling-revise",
 			Title: "Handling REVISE",
 			Content: `If any reviewer votes REVISE on any slice:
 
@@ -2235,12 +2235,12 @@ bd comments add <slice-id> "REVISION NEEDED: <specific issues>"
 ` + "```",
 		},
 		{
-			ID:      "impl-rev-followup-epic",
+			Id:      "impl-rev-followup-epic",
 			Title:   "Follow-up Epic (EPIC_FOLLOWUP)",
 			Content: `Per [impl-rev-b6], create immediately after review completes.`,
 			Subsections: []ProseSection{
 				{
-					ID:    "impl-rev-followup-step1",
+					Id:    "impl-rev-followup-step1",
 					Title: "Step 1: Create the follow-up epic",
 					Content: "```bash\n" +
 						`bd create --type=epic --priority=3 \
@@ -2260,7 +2260,7 @@ bd dep add <followup-epic-id> --blocked-by <minor-group-id>
 ` + "```",
 				},
 				{
-					ID:    "impl-rev-followup-step2",
+					Id:    "impl-rev-followup-step2",
 					Title: "Step 2: Follow-up lifecycle (same protocol, FOLLOWUP_* prefix)",
 					Content: `The follow-up epic runs the same protocol phases with FOLLOWUP_* prefixed task types:
 
@@ -2304,7 +2304,7 @@ bd dep add $FOLLOWUP_URE_ID --blocked-by $FOLLOWUP_URD_ID
 ` + "```",
 				},
 				{
-					ID:    "impl-rev-followup-step3",
+					Id:    "impl-rev-followup-step3",
 					Title: "Step 3: Leaf task adoption (dual-parent)",
 					Content: `When the supervisor creates FOLLOWUP_SLICE-N tasks, the IMPORTANT/MINOR leaf tasks from the original review gain a second parent:
 
@@ -2316,7 +2316,7 @@ bd dep add <followup-slice-id> --blocked-by <minor-leaf-task-id>
 ` + "```",
 				},
 				{
-					ID:    "impl-rev-followup-handoff",
+					Id:    "impl-rev-followup-handoff",
 					Title: "Reviewer → Followup Handoff (h5)",
 					Content: `The h5 handoff **starts** the follow-up lifecycle. Create this handoff document:
 ` + "```\n" +
@@ -2346,7 +2346,7 @@ bd dep add <followup-slice-id> --blocked-by <minor-leaf-task-id>
 ` + "```",
 				},
 				{
-					ID:    "impl-rev-followup-chain",
+					Id:    "impl-rev-followup-chain",
 					Title: "Follow-up Handoff Chain",
 					Content: `Inside the follow-up lifecycle, the same handoff types (h1-h4) apply but scoped to the follow-up epic:
 
@@ -2368,7 +2368,7 @@ See ` + "`../protocol/HANDOFF_TEMPLATE.md`" + ` for full follow-up handoff examp
 			},
 		},
 		{
-			ID:    "impl-rev-proceed-uat",
+			Id:    "impl-rev-proceed-uat",
 			Title: "Proceeding to UAT",
 			Content: `Only when ALL reviews are ACCEPT and all BLOCKERs are resolved:
 

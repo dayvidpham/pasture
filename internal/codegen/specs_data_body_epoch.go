@@ -7,56 +7,56 @@ var epochBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "epoch-verbatim-capture",
+			Id:        "epoch-verbatim-capture",
 			Given:     "user provides request",
 			When:      "capturing",
 			Then:      "store verbatim without paraphrasing in Phase 1 REQUEST task",
 			ShouldNot: "summarize or interpret the user's words",
 		},
 		{
-			ID:        "epoch-dep-chain",
+			Id:        "epoch-dep-chain",
 			Given:     "any phase transition",
 			When:      "creating new task",
 			Then:      "add dependency to previous: bd dep add <parent> --blocked-by <child>",
 			ShouldNot: "skip dependency chaining",
 		},
 		{
-			ID:        "epoch-audit-never-delete",
+			Id:        "epoch-audit-never-delete",
 			Given:     "task completion",
 			When:      "updating",
 			Then:      "add comments and labels only",
 			ShouldNot: "close or delete tasks prematurely",
 		},
 		{
-			ID:        "epoch-consensus-required",
+			Id:        "epoch-consensus-required",
 			Given:     "review cycle",
 			When:      "any REVISE vote",
 			Then:      "create PROPOSAL-N+1 and repeat review",
 			ShouldNot: "proceed without full ACCEPT consensus from all 3 reviewers",
 		},
 		{
-			ID:        "epoch-followup-trigger",
+			Id:        "epoch-followup-trigger",
 			Given:     "code review completion",
 			When:      "ANY IMPORTANT or MINOR findings exist",
 			Then:      "Supervisor creates a follow-up epic (label aura:epic-followup)",
 			ShouldNot: "gate follow-up epic creation on BLOCKER resolution",
 		},
 		{
-			ID:        "epoch-autonomous-progression",
+			Id:        "epoch-autonomous-progression",
 			Given:     "non-user-gated phase completes",
 			When:      "transitioning",
 			Then:      "proceed autonomously; user-gated phases are: Phase 1 s1_1 (research depth), Phase 2 (URE), Phase 5 (Plan UAT), Phase 11 (Impl UAT)",
 			ShouldNot: "ask 'Should I proceed?' for autonomous phases",
 		},
 		{
-			ID:        "epoch-uat-auto-ratify",
+			Id:        "epoch-uat-auto-ratify",
 			Given:     "Phase 5 UAT ACCEPT",
 			When:      "transitioning to Phase 6",
 			Then:      "ratify automatically",
 			ShouldNot: "ask user for ratification confirmation",
 		},
 		{
-			ID:        "epoch-frontmatter-refs",
+			Id:        "epoch-frontmatter-refs",
 			Given:     "cross-task references",
 			When:      "linking related tasks (e.g. URD to REQUEST)",
 			Then:      "use description frontmatter references: block",
@@ -66,7 +66,7 @@ var epochBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:    "epoch-core-principles",
+			Id:    "epoch-core-principles",
 			Title: "Core Principles",
 			Content: `1. **AUDIT TRAIL PRESERVATION** — Never delete or destroy information, labels, or tasks
 2. **DEPENDENCY CHAINING** — Each task blocks its predecessor: ` + "`bd dep add <parent> --blocked-by <child>`" + `
@@ -77,7 +77,7 @@ var epochBody = SkillBody{
 7. **RIDE THE WAVE** — Phases 8-10 form one continuous cycle: Explore subagents (P8), workers implement (P9), ephemeral reviewers review (P10), max 3 fix cycles per slice; workers persist throughout`,
 		},
 		{
-			ID:    "epoch-12-phase-workflow",
+			Id:    "epoch-12-phase-workflow",
 			Title: "The 12-Phase Workflow",
 			Content: "```" + `
 Phase 1:  aura:p1-user       -> REQUEST (classify, research, explore)
@@ -109,7 +109,7 @@ Phase 1 has 3 sub-steps:
 After classification, user confirms research depth. Then s1_2 and s1_3 run in parallel.`,
 		},
 		{
-			ID:    "epoch-starting",
+			Id:    "epoch-starting",
 			Title: "Starting an Epoch",
 			Content: "**Option 1: Manual Task Creation**\n" +
 				"```bash\n" +
@@ -128,7 +128,7 @@ After classification, user confirms research depth. Then s1_2 and s1_3 run in pa
 				"```",
 		},
 		{
-			ID:    "epoch-phase-transitions",
+			Id:    "epoch-phase-transitions",
 			Title: "Phase Transitions",
 			Content: `Each phase creates a task and chains dependencies. Cross-references use description frontmatter instead of peer-reference commands.
 
@@ -149,7 +149,7 @@ bd comments add task-urd "Ratified: scope confirmed as {{summary}}"
 ` + "```",
 		},
 		{
-			ID:    "epoch-followup-epic",
+			Id:    "epoch-followup-epic",
 			Title: "Follow-up Epic",
 			Content: `**Trigger:** Code review (Phase 10) completion + ANY IMPORTANT or MINOR findings exist.
 **NOT** gated on BLOCKER resolution.
@@ -184,7 +184,7 @@ FOLLOWUP → FOLLOWUP_URE → FOLLOWUP_URD → FOLLOWUP_PROPOSAL-1 → FOLLOWUP_
 See ` + "`/aura:supervisor`" + ` and ` + "`/aura:impl-review`" + ` for full creation commands and leaf task adoption.`,
 		},
 		{
-			ID:    "epoch-eager-severity",
+			Id:    "epoch-eager-severity",
 			Title: "EAGER Severity Tree (Phase 10)",
 			Content: `Code reviews ALWAYS create 3 severity group tasks per review round, even if empty:
 
@@ -211,7 +211,7 @@ bd dep add <slice-id> --blocked-by <blocker-finding-id>
 See ` + "`../protocol/CONSTRAINTS.md`" + ` for full severity definitions.`,
 		},
 		{
-			ID:    "epoch-tracking",
+			Id:    "epoch-tracking",
 			Title: "Tracking Progress",
 			Content: "```bash\n" +
 				"# View dependency chain\n" +
@@ -226,7 +226,7 @@ See ` + "`../protocol/CONSTRAINTS.md`" + ` for full severity definitions.`,
 				"```",
 		},
 		{
-			ID:    "epoch-skills-table",
+			Id:    "epoch-skills-table",
 			Title: "Skills to Invoke",
 			Content: `Each phase transition MUST include an explicit ` + "`Skill(...)`" + ` invocation directive. When launching agents for a phase, the prompt MUST tell the agent to call the corresponding skill as its first action.
 
@@ -246,7 +246,7 @@ See ` + "`../protocol/CONSTRAINTS.md`" + ` for full severity definitions.`,
 3. Include the handoff document path`,
 		},
 		{
-			ID:    "epoch-never-delete",
+			Id:    "epoch-never-delete",
 			Title: "Never Delete Policy",
 			Content: "**DO:** Add labels, add comments, update status\n" +
 				"**DON'T:** Close tasks prematurely, delete tasks, remove labels\n\n" +

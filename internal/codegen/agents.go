@@ -72,13 +72,13 @@ type agentTemplateData struct {
 //   - The role has no entry in RoleSpecs (programming error or invalid role ID).
 //   - The template file cannot be read from the embedded FS.
 //   - Template execution fails (e.g., missing key, rendering error).
-func renderAgent(roleID types.RoleId, figuresDir string) (string, error) {
-	roleSpec, ok := RoleSpecs[roleID]
+func renderAgent(roleId types.RoleId, figuresDir string) (string, error) {
+	roleSpec, ok := RoleSpecs[roleId]
 	if !ok {
 		return "", fmt.Errorf(
 			"codegen.renderAgent: role %q not found in RoleSpecs — "+
 				"verify the role ID is defined in specs_data.go",
-			roleID,
+			roleId,
 		)
 	}
 
@@ -95,13 +95,13 @@ func renderAgent(roleID types.RoleId, figuresDir string) (string, error) {
 		)
 	}
 
-	roleCtx := GetRoleContext(roleID)
+	roleCtx := GetRoleContext(roleId)
 
 	// Load figure content from disk when figuresDir is provided; otherwise
 	// fall back to the context figures (Content fields empty).
 	figures := roleCtx.Figures
 	if figuresDir != "" {
-		figures = loadFiguresForRole(roleID, figuresDir)
+		figures = loadFiguresForRole(roleId, figuresDir)
 	}
 
 	data := agentTemplateData{
@@ -120,7 +120,7 @@ func renderAgent(roleID types.RoleId, figuresDir string) (string, error) {
 		return "", fmt.Errorf(
 			"codegen.renderAgent: template execution failed for role %q — "+
 				"check agent_definition.go.tmpl for undefined variables or type mismatches: %w",
-			roleID, err,
+			roleId, err,
 		)
 	}
 
@@ -143,7 +143,7 @@ func renderAgent(roleID types.RoleId, figuresDir string) (string, error) {
 // The output file is fully generated — no marker-based partial replacement.
 //
 // Parameters:
-//   - roleID:     The role to generate for (must be in RoleSpecs).
+//   - roleId:     The role to generate for (must be in RoleSpecs).
 //   - agentPath:  Path to write the generated .md file to.
 //   - figuresDir: Path to the directory containing figure YAML files (e.g.
 //     skills/protocol/figures). When non-empty, figure content is loaded from
@@ -161,13 +161,13 @@ func renderAgent(roleID types.RoleId, figuresDir string) (string, error) {
 //   - Template parse/execution failure → error with template context.
 //   - Parent directory creation failure → error with OS error.
 //   - File write failure → error with OS error and path.
-func GenerateAgent(roleID types.RoleId, agentPath string, figuresDir string, opts GenerateOptions) (string, error) {
-	roleSpec, ok := RoleSpecs[roleID]
+func GenerateAgent(roleId types.RoleId, agentPath string, figuresDir string, opts GenerateOptions) (string, error) {
+	roleSpec, ok := RoleSpecs[roleId]
 	if !ok {
 		return "", fmt.Errorf(
 			"codegen.GenerateAgent: role %q not found in RoleSpecs — "+
 				"verify the role ID is defined in specs_data.go",
-			roleID,
+			roleId,
 		)
 	}
 
@@ -182,7 +182,7 @@ func GenerateAgent(roleID types.RoleId, agentPath string, figuresDir string, opt
 		oldContent = string(data)
 	}
 
-	newContent, err := renderAgent(roleID, figuresDir)
+	newContent, err := renderAgent(roleId, figuresDir)
 	if err != nil {
 		return "", err
 	}
@@ -199,7 +199,7 @@ func GenerateAgent(roleID types.RoleId, agentPath string, figuresDir string, opt
 				return "", fmt.Errorf(
 					"codegen.GenerateAgent: failed to create parent directory %q for role %q — "+
 						"check filesystem permissions: %w",
-					dir, roleID, err,
+					dir, roleId, err,
 				)
 			}
 		}
@@ -207,7 +207,7 @@ func GenerateAgent(roleID types.RoleId, agentPath string, figuresDir string, opt
 			return "", fmt.Errorf(
 				"codegen.GenerateAgent: failed to write agent definition to %q for role %q — "+
 					"check filesystem permissions: %w",
-				agentPath, roleID, err,
+				agentPath, roleId, err,
 			)
 		}
 	}

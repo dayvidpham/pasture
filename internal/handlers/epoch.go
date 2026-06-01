@@ -16,7 +16,7 @@ import (
 )
 
 // validateEpochIDForHandler enforces PROPOSAL-2 §7.12 at the handler boundary:
-// the supplied --epoch-id MUST parse as a Provenance TaskID
+// the supplied --epoch-id MUST parse as a Provenance TaskId
 // ("<namespace>--<uuid>"). Free-string epoch IDs are rejected with a
 // CategoryValidation StructuredError per the §7.12 example, so no signal /
 // workflow start ever runs against an ID that cannot align with the audit /
@@ -26,11 +26,11 @@ import (
 // users can attribute the failure to the right entry point. The Fix string
 // matches the §7.12 example verbatim ("pasture task create REQUEST ...") for
 // Scenario 13's substring assertion.
-func validateEpochIDForHandler(epochID, caller string) error {
-	if _, err := provenance.ParseTaskID(epochID); err != nil {
+func validateEpochIDForHandler(epochId, caller string) error {
+	if _, err := provenance.ParseTaskID(epochId); err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("The epoch ID %q is not valid.", epochID),
+			What:     fmt.Sprintf("The epoch ID %q is not valid.", epochId),
 			Why: "Epoch IDs need the shape \"yourproject--01968a3c-...\" — a project name\n" +
 				"followed by \"--\" and a UUID. The value you passed couldn't be split\n" +
 				"into those two parts because the \"--\" separator was missing.",
@@ -48,16 +48,16 @@ func validateEpochIDForHandler(epochID, caller string) error {
 	return nil
 }
 
-// EpochStart starts a new EpochWorkflow with the given epochID and description.
+// EpochStart starts a new EpochWorkflow with the given epochId and description.
 //
-// The workflowID is set to epochID so callers can reference the workflow by a
+// The workflowId is set to epochId so callers can reference the workflow by a
 // human-readable name. taskQueue defaults to conn.TaskQueue when empty.
 //
 // Exit codes: 0=success, 1=validation error, 2=connection error, 3=workflow error.
 func EpochStart(
 	ctx context.Context,
 	conn config.ConnectionConfig,
-	epochID, description, taskQueue string,
+	epochId, description, taskQueue string,
 	format types.OutputFormat,
 	factory TemporalClientFactory,
 ) (int, error) {
@@ -65,7 +65,7 @@ func EpochStart(
 		factory = DefaultClientFactory
 	}
 
-	if epochID == "" {
+	if epochId == "" {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     "An epoch ID is required to start an epoch.",
@@ -85,7 +85,7 @@ func EpochStart(
 	// or tasks for a malformed epoch_id. The activity entry in
 	// internal/temporal/activities.go enforces the same check as defence in
 	// depth against direct Temporal client calls that bypass this handler.
-	if vErr := validateEpochIDForHandler(epochID, "handlers.EpochStart"); vErr != nil {
+	if vErr := validateEpochIDForHandler(epochId, "handlers.EpochStart"); vErr != nil {
 		return pasterrors.ExitCode(vErr), vErr
 	}
 
@@ -100,19 +100,19 @@ func EpochStart(
 	defer c.Close()
 
 	input := temporal.EpochInput{
-		EpochID:            epochID,
+		EpochId:            epochId,
 		RequestDescription: description,
 	}
 
 	opts := client.StartWorkflowOptions{
-		ID:        epochID,
+		ID:        epochId,
 		TaskQueue: taskQueue,
 	}
 	run, err := c.ExecuteWorkflow(ctx, opts, temporal.EpochWorkflowType, input)
 	if err != nil {
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
-			What:     fmt.Sprintf("The epoch workflow %q couldn't be started.", epochID),
+			What:     fmt.Sprintf("The epoch workflow %q couldn't be started.", epochId),
 			Why:      "The workflow server rejected the start request.",
 			Where:    "Starting the epoch (internal/handlers/epoch.go in handlers.EpochStart).",
 			Impact:   "The epoch did not start, so no workflow steps will run for it.",
@@ -121,7 +121,7 @@ func EpochStart(
 				"2. Confirm pastured is running and listening on the right task queue (%q):\n"+
 				"     pastured --task-queue %s\n"+
 				"3. Retry the start once the queue is healthy.",
-				epochID, taskQueue, taskQueue),
+				epochId, taskQueue, taskQueue),
 			Cause: err,
 		}
 	}
@@ -143,7 +143,7 @@ func EpochStart(
 func EpochCancel(
 	ctx context.Context,
 	conn config.ConnectionConfig,
-	epochID string,
+	epochId string,
 	format types.OutputFormat,
 	factory TemporalClientFactory,
 ) (int, error) {
@@ -151,7 +151,7 @@ func EpochCancel(
 		factory = DefaultClientFactory
 	}
 
-	if epochID == "" {
+	if epochId == "" {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     "An epoch ID is required to cancel an epoch.",
@@ -172,10 +172,10 @@ func EpochCancel(
 	}
 	defer c.Close()
 
-	if err := c.CancelWorkflow(ctx, epochID, ""); err != nil {
+	if err := c.CancelWorkflow(ctx, epochId, ""); err != nil {
 		return 3, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
-			What:     fmt.Sprintf("Couldn't cancel the epoch %q.", epochID),
+			What:     fmt.Sprintf("Couldn't cancel the epoch %q.", epochId),
 			Why:      "The workflow server rejected the cancel request.",
 			Where:    "Cancelling an epoch (internal/handlers/epoch.go in handlers.EpochCancel).",
 			Impact:   "The epoch is still running. The cancellation request never reached it.",
@@ -184,7 +184,7 @@ func EpochCancel(
 				"2. If the epoch isn't found, the ID may be wrong — list active epochs:\n"+
 				"     pasture-msg epoch list\n"+
 				"3. Retry once you've confirmed the epoch exists.",
-				epochID),
+				epochId),
 			Cause: err,
 		}
 	}
@@ -207,7 +207,7 @@ func EpochCancel(
 func EpochTerminate(
 	ctx context.Context,
 	conn config.ConnectionConfig,
-	epochID, reason string,
+	epochId, reason string,
 	format types.OutputFormat,
 	factory TemporalClientFactory,
 ) (int, error) {
@@ -215,7 +215,7 @@ func EpochTerminate(
 		factory = DefaultClientFactory
 	}
 
-	if epochID == "" {
+	if epochId == "" {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     "An epoch ID is required to terminate an epoch.",
@@ -236,10 +236,10 @@ func EpochTerminate(
 	}
 	defer c.Close()
 
-	if err := c.TerminateWorkflow(ctx, epochID, "", reason); err != nil {
+	if err := c.TerminateWorkflow(ctx, epochId, "", reason); err != nil {
 		return 3, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
-			What:     fmt.Sprintf("Couldn't terminate the epoch %q.", epochID),
+			What:     fmt.Sprintf("Couldn't terminate the epoch %q.", epochId),
 			Why:      "The workflow server rejected the terminate request.",
 			Where:    "Terminating an epoch (internal/handlers/epoch.go in handlers.EpochTerminate).",
 			Impact:   "The epoch is still running. The terminate request never reached it.",
@@ -248,7 +248,7 @@ func EpochTerminate(
 				"2. If the epoch isn't found, the ID may be wrong — list active epochs:\n"+
 				"     pasture-msg epoch list\n"+
 				"3. Retry once you've confirmed the epoch exists.",
-				epochID),
+				epochId),
 			Cause: err,
 		}
 	}

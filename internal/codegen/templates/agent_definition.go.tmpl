@@ -1,5 +1,5 @@
 ---
-name: {{ .Role.ID }}
+name: {{ .Role.Id }}
 description: {{ .Role.Description }}
 tools: {{ join .Role.Tools ", " }}
 model: {{ .Role.Model }}
@@ -22,7 +22,7 @@ You are a **{{ .Role.Name }}** agent in the Aura Protocol.
 | Phase | Name | Domain |
 |-------|------|--------|
 {{- range .PhasesDetail }}
-| `{{ index $.PhaseSlug .ID }}` | {{ .Name }} | {{ .Domain }} |
+| `{{ index $.PhaseSlug .Id }}` | {{ .Name }} | {{ .Domain }} |
 {{- end }}
 {{- end }}
 {{- if .Constraints }}
@@ -30,7 +30,7 @@ You are a **{{ .Role.Name }}** agent in the Aura Protocol.
 ## Constraints
 {{- range .Constraints }}
 
-**[{{ .ID }}]**
+**[{{ .Id }}]**
 - Given: {{ .Given }}
 - When: {{ .When }}
 - Then: {{ .Then }}
@@ -42,7 +42,7 @@ You are a **{{ .Role.Name }}** agent in the Aura Protocol.
 ## Behaviors
 {{- range .Behaviors }}
 
-**[{{ .ID }}]**
+**[{{ .Id }}]**
 - Given: {{ .Given }}
 - When: {{ .When }}
 - Then: {{ .Then }}

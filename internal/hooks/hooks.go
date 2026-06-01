@@ -92,7 +92,7 @@ var AllHookEvents = []HookEvent{
 // Data holds arbitrary event-specific key/value pairs.
 type HookPayload struct {
 	Event   HookEvent        `json:"event"`
-	EpochID string           `json:"epochId"`
+	EpochId string           `json:"epochId"`
 	Phase   protocol.PhaseId `json:"phase,omitempty"`
 	Data    map[string]any   `json:"data,omitempty"`
 }

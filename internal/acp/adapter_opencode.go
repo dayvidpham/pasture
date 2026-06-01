@@ -28,8 +28,8 @@ func (a *openCodeAdapter) Format() string { return "opencode-json" }
 type openCodeRecord struct {
 	// ID is the provider-native message identifier.
 	ID string `json:"id"`
-	// SessionID uniquely identifies the agent session.
-	SessionID string `json:"sessionId"`
+	// SessionId uniquely identifies the agent session.
+	SessionId string `json:"sessionId"`
 	// Timestamp is milliseconds since epoch.
 	Timestamp int64 `json:"timestamp"`
 	// Role is "user", "assistant", or "tool".
@@ -90,7 +90,7 @@ func (a *openCodeAdapter) Parse(record []byte) (SessionUpdate, error) {
 		)
 	}
 
-	if raw.SessionID == "" {
+	if raw.SessionId == "" {
 		return SessionUpdate{}, fmt.Errorf(
 			"opencode-json adapter: Parse: missing required field \"sessionId\" — " +
 				"every OpenCode session record must include a non-empty sessionId; " +
@@ -99,11 +99,11 @@ func (a *openCodeAdapter) Parse(record []byte) (SessionUpdate, error) {
 	}
 
 	update := SessionUpdate{
-		SessionID: raw.SessionID,
+		SessionId: raw.SessionId,
 		Role:      raw.Role,
 		Timestamp: raw.Timestamp,
 		IsError:   raw.Error,
-		EntryID:   raw.ID,
+		EntryId:   raw.ID,
 	}
 
 	if raw.Tokens != nil {
@@ -126,7 +126,7 @@ func (a *openCodeAdapter) Parse(record []byte) (SessionUpdate, error) {
 			inputStr = string(tc.Input)
 		}
 		update.ToolCalls = append(update.ToolCalls, ToolCall{
-			ToolCallID: tc.ID,
+			ToolCallId: tc.ID,
 			ToolKind:   openCodeToolKind(tc.Type),
 			ToolName:   tc.Name,
 			ToolInput:  inputStr,

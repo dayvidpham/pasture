@@ -13,9 +13,9 @@ import (
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-func makeUpdate(sessionID, role string, stopReason acp.StopReason) acp.SessionUpdate {
+func makeUpdate(sessionId, role string, stopReason acp.StopReason) acp.SessionUpdate {
 	return acp.SessionUpdate{
-		SessionID:  sessionID,
+		SessionId:  sessionId,
 		Role:       role,
 		StopReason: stopReason,
 		Timestamp:  time.Now().UnixMilli(),
@@ -124,18 +124,18 @@ func TestHandleUpdatePersistsImmediately(t *testing.T) {
 	h := acp.NewIndexingSessionHandler(indexer, trail, mgr, "epoch-persist")
 	ctx := context.Background()
 
-	const sessionID = "session-imm"
+	const sessionId = "session-imm"
 
 	// Send two updates but do NOT call HandleSessionEnd yet.
-	if err := h.HandleUpdate(ctx, makeUpdate(sessionID, "user", "")); err != nil {
+	if err := h.HandleUpdate(ctx, makeUpdate(sessionId, "user", "")); err != nil {
 		t.Fatalf("HandleUpdate/1: %v", err)
 	}
-	if err := h.HandleUpdate(ctx, makeUpdate(sessionID, "assistant", "")); err != nil {
+	if err := h.HandleUpdate(ctx, makeUpdate(sessionId, "assistant", "")); err != nil {
 		t.Fatalf("HandleUpdate/2: %v", err)
 	}
 
 	// Entries should already be in the trail without calling HandleSessionEnd.
-	entries, err := trail.QuerySessionEntries(ctx, sessionID)
+	entries, err := trail.QuerySessionEntries(ctx, sessionId)
 	if err != nil {
 		t.Fatalf("QuerySessionEntries: %v", err)
 	}
@@ -160,21 +160,21 @@ func TestHandleSessionEndIndexesAndPersists(t *testing.T) {
 	h := acp.NewIndexingSessionHandler(indexer, trail, mgr, "epoch-3")
 	ctx := context.Background()
 
-	const sessionID = "session-Y"
+	const sessionId = "session-Y"
 
 	// Send two updates, then end the session.
-	if err := h.HandleUpdate(ctx, makeUpdate(sessionID, "user", "")); err != nil {
+	if err := h.HandleUpdate(ctx, makeUpdate(sessionId, "user", "")); err != nil {
 		t.Fatalf("HandleUpdate: %v", err)
 	}
-	if err := h.HandleUpdate(ctx, makeUpdate(sessionID, "assistant", "")); err != nil {
+	if err := h.HandleUpdate(ctx, makeUpdate(sessionId, "assistant", "")); err != nil {
 		t.Fatalf("HandleUpdate: %v", err)
 	}
-	if err := h.HandleSessionEnd(ctx, sessionID, acp.StopReasonEndTurn); err != nil {
+	if err := h.HandleSessionEnd(ctx, sessionId, acp.StopReasonEndTurn); err != nil {
 		t.Fatalf("HandleSessionEnd: %v", err)
 	}
 
 	// Verify entries were written to the audit trail.
-	entries, err := trail.QuerySessionEntries(ctx, sessionID)
+	entries, err := trail.QuerySessionEntries(ctx, sessionId)
 	if err != nil {
 		t.Fatalf("QuerySessionEntries: %v", err)
 	}
@@ -182,8 +182,8 @@ func TestHandleSessionEndIndexesAndPersists(t *testing.T) {
 		t.Fatal("expected at least 1 session entry after HandleSessionEnd, got 0")
 	}
 	for _, e := range entries {
-		if e.SessionID != sessionID {
-			t.Errorf("entry has unexpected sessionID %q", e.SessionID)
+		if e.SessionId != sessionId {
+			t.Errorf("entry has unexpected sessionId %q", e.SessionId)
 		}
 	}
 
@@ -326,15 +326,15 @@ func TestHandlerImplementsInterface(t *testing.T) {
 	var _ acp.SessionHandler = acp.NewIndexingSessionHandler(indexer, trail, nil, "epoch-7")
 }
 
-// TestHandlerEpochIDInHookPayload verifies the epochID is propagated to hook payloads.
+// TestHandlerEpochIDInHookPayload verifies the epochId is propagated to hook payloads.
 func TestHandlerEpochIDInHookPayload(t *testing.T) {
 	t.Parallel()
 	trail := audit.NewInMemoryAuditTrail()
 	indexer := acp.NewSharedIndexer()
 	cap := &captureHandler{}
 	mgr := newManager(cap)
-	const epochID = "epoch-abc-123"
-	h := acp.NewIndexingSessionHandler(indexer, trail, mgr, epochID)
+	const epochId = "epoch-abc-123"
+	h := acp.NewIndexingSessionHandler(indexer, trail, mgr, epochId)
 	ctx := context.Background()
 
 	if err := h.HandleUpdate(ctx, makeUpdate("sess-epoch", "user", "")); err != nil {
@@ -342,8 +342,8 @@ func TestHandlerEpochIDInHookPayload(t *testing.T) {
 	}
 
 	for _, p := range cap.received {
-		if p.EpochID != epochID {
-			t.Errorf("hook payload has epochID=%q, want %q", p.EpochID, epochID)
+		if p.EpochId != epochId {
+			t.Errorf("hook payload has epochId=%q, want %q", p.EpochId, epochId)
 		}
 	}
 }
@@ -356,15 +356,15 @@ func TestTrailQueryAfterSessionEnd(t *testing.T) {
 	h := acp.NewIndexingSessionHandler(indexer, trail, nil, "epoch-8")
 	ctx := context.Background()
 
-	const sessionID = "sess-prov"
-	if err := h.HandleUpdate(ctx, makeUpdate(sessionID, "assistant", "")); err != nil {
+	const sessionId = "sess-prov"
+	if err := h.HandleUpdate(ctx, makeUpdate(sessionId, "assistant", "")); err != nil {
 		t.Fatalf("HandleUpdate: %v", err)
 	}
-	if err := h.HandleSessionEnd(ctx, sessionID, acp.StopReasonEndTurn); err != nil {
+	if err := h.HandleSessionEnd(ctx, sessionId, acp.StopReasonEndTurn); err != nil {
 		t.Fatalf("HandleSessionEnd: %v", err)
 	}
 
-	entries, err := trail.QuerySessionEntries(ctx, sessionID)
+	entries, err := trail.QuerySessionEntries(ctx, sessionId)
 	if err != nil {
 		t.Fatalf("QuerySessionEntries: %v", err)
 	}
@@ -385,7 +385,7 @@ func TestEntriesRecordedCountsAcrossUpdates(t *testing.T) {
 	h := acp.NewIndexingSessionHandler(indexer, trail, nil, "epoch-count")
 	ctx := context.Background()
 
-	const sessionID = "sess-count"
+	const sessionId = "sess-count"
 
 	// Initial count should be 0.
 	if h.EntriesRecorded() != 0 {
@@ -394,7 +394,7 @@ func TestEntriesRecordedCountsAcrossUpdates(t *testing.T) {
 
 	// Each update should increment the count.
 	for i := 1; i <= 3; i++ {
-		if err := h.HandleUpdate(ctx, makeUpdate(sessionID, "user", "")); err != nil {
+		if err := h.HandleUpdate(ctx, makeUpdate(sessionId, "user", "")); err != nil {
 			t.Fatalf("HandleUpdate #%d: %v", i, err)
 		}
 		if h.EntriesRecorded() < i {

@@ -31,7 +31,7 @@ type recordingHandler struct {
 }
 
 type sessionEndCall struct {
-	sessionID string
+	sessionId string
 	reason    acp.StopReason
 }
 
@@ -46,10 +46,10 @@ func (h *recordingHandler) HandleUpdate(_ context.Context, update acp.SessionUpd
 	return nil
 }
 
-func (h *recordingHandler) HandleSessionEnd(_ context.Context, sessionID string, reason acp.StopReason) error {
+func (h *recordingHandler) HandleSessionEnd(_ context.Context, sessionId string, reason acp.StopReason) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.ends = append(h.ends, sessionEndCall{sessionID: sessionID, reason: reason})
+	h.ends = append(h.ends, sessionEndCall{sessionId: sessionId, reason: reason})
 	return nil
 }
 
@@ -277,7 +277,7 @@ func TestConnect_SingleSessionUpdate(t *testing.T) {
 	c := acp.NewClient(h)
 
 	update := acp.SessionUpdate{
-		SessionID: "sess-1",
+		SessionId: "sess-1",
 		Role:      "assistant",
 		Content:   []acp.ContentBlock{{Type: "text", Content: "Hello!"}},
 	}
@@ -313,12 +313,12 @@ func TestConnect_SessionEndRecorded(t *testing.T) {
 
 	// Regular update followed by a terminal update.
 	update1 := acp.SessionUpdate{
-		SessionID: "sess-end-1",
+		SessionId: "sess-end-1",
 		Role:      "assistant",
 		Content:   []acp.ContentBlock{{Type: "text", Content: "Processing..."}},
 	}
 	update2 := acp.SessionUpdate{
-		SessionID:  "sess-end-1",
+		SessionId:  "sess-end-1",
 		Role:       "assistant",
 		StopReason: acp.StopReasonEndTurn,
 	}
@@ -360,11 +360,11 @@ func TestConnect_MultipleSessionsTrackedIndependently(t *testing.T) {
 	c := acp.NewClient(h)
 
 	updates := []acp.SessionUpdate{
-		{SessionID: "sess-A", Role: "user", Content: []acp.ContentBlock{{Type: "text", Content: "Hello"}}},
-		{SessionID: "sess-B", Role: "user", Content: []acp.ContentBlock{{Type: "text", Content: "World"}}},
-		{SessionID: "sess-A", Role: "assistant", StopReason: acp.StopReasonEndTurn},
-		{SessionID: "sess-B", Role: "assistant", Content: []acp.ContentBlock{{Type: "text", Content: "More"}}},
-		{SessionID: "sess-B", Role: "assistant", StopReason: acp.StopReasonMaxTokens},
+		{SessionId: "sess-A", Role: "user", Content: []acp.ContentBlock{{Type: "text", Content: "Hello"}}},
+		{SessionId: "sess-B", Role: "user", Content: []acp.ContentBlock{{Type: "text", Content: "World"}}},
+		{SessionId: "sess-A", Role: "assistant", StopReason: acp.StopReasonEndTurn},
+		{SessionId: "sess-B", Role: "assistant", Content: []acp.ContentBlock{{Type: "text", Content: "More"}}},
+		{SessionId: "sess-B", Role: "assistant", StopReason: acp.StopReasonMaxTokens},
 	}
 
 	args := make([]string, len(updates))
@@ -410,7 +410,7 @@ func TestConnect_HandlerErrorStopsProcessing(t *testing.T) {
 	c := acp.NewClient(h)
 
 	update := acp.SessionUpdate{
-		SessionID: "sess-err",
+		SessionId: "sess-err",
 		Role:      "assistant",
 	}
 	line := makeSessionUpdateLine(t, update)
@@ -430,7 +430,7 @@ func TestConnect_MalformedLinesSkipped(t *testing.T) {
 	c := acp.NewClient(h)
 
 	// Mix malformed lines with a valid session update.
-	validUpdate := acp.SessionUpdate{SessionID: "sess-ok", Role: "user"}
+	validUpdate := acp.SessionUpdate{SessionId: "sess-ok", Role: "user"}
 	validLine := makeSessionUpdateLine(t, validUpdate)
 
 	malformed1 := "not-json-at-all\n"
@@ -456,7 +456,7 @@ func TestSessionStats_TrackStartAndLastUpdate(t *testing.T) {
 
 	before := time.Now()
 
-	update := acp.SessionUpdate{SessionID: "sess-time", Role: "assistant"}
+	update := acp.SessionUpdate{SessionId: "sess-time", Role: "assistant"}
 	line := makeSessionUpdateLine(t, update)
 	if err := c.Connect(context.Background(), binPath, line); err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -484,7 +484,7 @@ func TestSessionStats_UpdateCountIncrements(t *testing.T) {
 	updates := make([]acp.SessionUpdate, 5)
 	args := make([]string, 5)
 	for i := range updates {
-		updates[i] = acp.SessionUpdate{SessionID: "sess-count", Role: "assistant"}
+		updates[i] = acp.SessionUpdate{SessionId: "sess-count", Role: "assistant"}
 		args[i] = makeSessionUpdateLine(t, updates[i])
 	}
 
@@ -514,7 +514,7 @@ func TestConcurrentSessionCountAndStats(t *testing.T) {
 	// a single update, then test concurrent reads.
 	binPath := buildFakeAgent(t)
 
-	update := acp.SessionUpdate{SessionID: "sess-concurrent", Role: "assistant"}
+	update := acp.SessionUpdate{SessionId: "sess-concurrent", Role: "assistant"}
 	line := makeSessionUpdateLine(t, update)
 	if err := c.Connect(context.Background(), binPath, line); err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -662,8 +662,8 @@ func TestHandleSessionEnd_FinalStateRecordedBeforeCallback(t *testing.T) {
 	var statsMu sync.Mutex
 
 	h := &inspectingHandler{
-		onEnd: func(c *acp.Client, sessionID string) {
-			stats, err := c.SessionStats(sessionID)
+		onEnd: func(c *acp.Client, sessionId string) {
+			stats, err := c.SessionStats(sessionId)
 			statsMu.Lock()
 			capturedStats = stats
 			capturedErr = err
@@ -674,7 +674,7 @@ func TestHandleSessionEnd_FinalStateRecordedBeforeCallback(t *testing.T) {
 	h.client = c
 
 	update := acp.SessionUpdate{
-		SessionID:  "sess-final",
+		SessionId:  "sess-final",
 		Role:       "assistant",
 		StopReason: acp.StopReasonEndTurn,
 	}
@@ -704,7 +704,7 @@ func TestHandleSessionEnd_FinalStateRecordedBeforeCallback(t *testing.T) {
 type inspectingHandler struct {
 	acp.SessionHandler // embed nil — only override the methods we need
 	client             *acp.Client
-	onEnd              func(c *acp.Client, sessionID string)
+	onEnd              func(c *acp.Client, sessionId string)
 	updateCount        atomic.Int64
 }
 
@@ -713,9 +713,9 @@ func (h *inspectingHandler) HandleUpdate(_ context.Context, _ acp.SessionUpdate)
 	return nil
 }
 
-func (h *inspectingHandler) HandleSessionEnd(_ context.Context, sessionID string, _ acp.StopReason) error {
+func (h *inspectingHandler) HandleSessionEnd(_ context.Context, sessionId string, _ acp.StopReason) error {
 	if h.onEnd != nil {
-		h.onEnd(h.client, sessionID)
+		h.onEnd(h.client, sessionId)
 	}
 	return nil
 }

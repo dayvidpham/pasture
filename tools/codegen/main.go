@@ -127,13 +127,13 @@ func main() {
 
 	// ── 2. Generate SKILL.md headers for each role ────────────────────────────
 	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
-	for roleID, dirName := range roleSkillDirs {
+	for roleId, dirName := range roleSkillDirs {
 		skillPath := filepath.Join(root, "skills", dirName, "SKILL.md")
 		if _, err := os.Stat(skillPath); os.IsNotExist(err) {
 			fmt.Fprintf(os.Stderr, "Skipping %s (not found)\n", skillPath)
 			continue
 		}
-		if _, err := codegen.GenerateSkill(roleID, skillPath, figuresDir, opts); err != nil {
+		if _, err := codegen.GenerateSkill(roleId, skillPath, figuresDir, opts); err != nil {
 			errors = append(errors, fmt.Errorf("skill %s: %w", dirName, err))
 		} else {
 			fmt.Printf("Generated %s\n", skillPath)
@@ -141,13 +141,13 @@ func main() {
 	}
 
 	// ── 3. Generate sub-skill headers (commands with figures) ─────────────────
-	for commandID, dirName := range commandSkillDirs {
+	for commandId, dirName := range commandSkillDirs {
 		skillPath := filepath.Join(root, "skills", dirName, "SKILL.md")
 		if _, err := os.Stat(skillPath); os.IsNotExist(err) {
 			fmt.Fprintf(os.Stderr, "Skipping sub-skill %s (not found)\n", skillPath)
 			continue
 		}
-		if _, err := codegen.GenerateSubSkill(commandID, skillPath, figuresDir, opts); err != nil {
+		if _, err := codegen.GenerateSubSkill(commandId, skillPath, figuresDir, opts); err != nil {
 			errors = append(errors, fmt.Errorf("sub-skill %s: %w", dirName, err))
 		} else {
 			fmt.Printf("Generated sub-skill %s\n", skillPath)
@@ -155,13 +155,13 @@ func main() {
 	}
 
 	// ── 4. Generate agent definitions for roles with tools ────────────────────
-	for roleID, roleSpec := range codegen.RoleSpecs {
+	for roleId, roleSpec := range codegen.RoleSpecs {
 		if len(roleSpec.Tools) == 0 {
 			continue
 		}
-		agentPath := filepath.Join(root, "agents", fmt.Sprintf("%s.md", roleID))
-		if _, err := codegen.GenerateAgent(roleID, agentPath, figuresDir, opts); err != nil {
-			errors = append(errors, fmt.Errorf("agent %s: %w", roleID, err))
+		agentPath := filepath.Join(root, "agents", fmt.Sprintf("%s.md", roleId))
+		if _, err := codegen.GenerateAgent(roleId, agentPath, figuresDir, opts); err != nil {
+			errors = append(errors, fmt.Errorf("agent %s: %w", roleId, err))
 		} else {
 			fmt.Printf("Generated %s\n", agentPath)
 		}

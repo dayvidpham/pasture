@@ -18,7 +18,7 @@
 // entry points call to land that pair of writes atomically (from the caller's
 // perspective). Each helper:
 //
-//  1. Calls tracker.RecordEventReturningID (writes the audit_events row and
+//  1. Calls tracker.RecordEventReturningId (writes the audit_events row and
 //     returns its id atomically — no separate SELECT MAX round-trip needed).
 //  2. Calls tracker.AttachContext (writes the context_edges row).
 //  3. Returns the event id so the caller can attach further contexts if needed
@@ -31,7 +31,7 @@
 // RecordSessionEvent) still carry an auditDB *sql.DB parameter for API
 // compatibility with existing callers (hooks/git_recorder.go,
 // cmd/pastured/main.go, and tests). The parameter is no longer used by the
-// implementation — RecordEventReturningID (added in S8) bundles the write +
+// implementation — RecordEventReturningId (added in S8) bundles the write +
 // id-recovery in a single call. A future clean-up pass may drop the parameter
 // once all call sites are updated.
 //
@@ -126,12 +126,12 @@ const (
 // audit_events and attaches a ContextGit edge keyed by the supplied SHA / ref.
 //
 // Parameters:
-//   - ctx: context for cancellation; propagates to RecordEventReturningID and
+//   - ctx: context for cancellation; propagates to RecordEventReturningId and
 //     AttachContext.
 //   - tracker: the unified TaskTracker (typically obtained from
 //     OpenTaskTracker). MUST be non-nil.
 //   - auditDB: retained for API compatibility with existing callers; no longer
-//     used by the implementation (RecordEventReturningID bundles write + id
+//     used by the implementation (RecordEventReturningId bundles write + id
 //     recovery atomically, removing the need for a separate SELECT MAX round-trip).
 //     MAY be nil without causing a validation error.
 //   - sha: the git commit SHA (or remote ref for pushes / base-ref for
@@ -156,7 +156,7 @@ const (
 //   - CategoryValidation: nil tracker, empty sha, or an empty eventType (the
 //     underlying audit store would silently accept these but they're programming
 //     errors here).
-//   - CategoryStorage: RecordEventReturningID / AttachContext write failure
+//   - CategoryStorage: RecordEventReturningId / AttachContext write failure
 //     (file unwritable, schema drift, etc.). Underlying error wrapped via
 //     pasterrors.StructuredError.Why.
 func RecordGitEvent(
@@ -177,7 +177,7 @@ func RecordGitEvent(
 // See RecordGitEvent for the parameter / error contract; only the context kind
 // (ContextSkill) and the suggested EventType (EventSkillInvoked) differ.
 //
-// `skillRunID` is the canonical id of the skill invocation. Per PROPOSAL-2
+// `skillRunId` is the canonical id of the skill invocation. Per PROPOSAL-2
 // §7.3 example: "aura:user-elicit-<run-id>" — the wire string is whatever the
 // caller wants to use for Timeline lookups via
 // `pasture task events --context-kind=SkillContext --context-id=<run-id>`.
@@ -185,11 +185,11 @@ func RecordSkillEvent(
 	ctx context.Context,
 	tracker protocol.TaskTracker,
 	auditDB *sql.DB,
-	skillRunID string,
+	skillRunId string,
 	eventType protocol.EventType,
 	payload map[string]any,
 ) (int64, error) {
-	return recordFreeFloating(ctx, tracker, auditDB, protocol.ContextSkill, skillRunID, eventType, payload, DefaultSkillRole, "RecordSkillEvent")
+	return recordFreeFloating(ctx, tracker, auditDB, protocol.ContextSkill, skillRunId, eventType, payload, DefaultSkillRole, "RecordSkillEvent")
 }
 
 // RecordSessionEvent records a free-floating Claude Code session event to
@@ -209,18 +209,18 @@ func RecordSessionEvent(
 	ctx context.Context,
 	tracker protocol.TaskTracker,
 	auditDB *sql.DB,
-	sessionID string,
+	sessionId string,
 	eventType protocol.EventType,
 	payload map[string]any,
 ) (int64, error) {
-	return recordFreeFloating(ctx, tracker, auditDB, protocol.ContextSession, sessionID, eventType, payload, DefaultSessionRole, "RecordSessionEvent")
+	return recordFreeFloating(ctx, tracker, auditDB, protocol.ContextSession, sessionId, eventType, payload, DefaultSessionRole, "RecordSessionEvent")
 }
 
 // ─── Internal: shared recording flow ─────────────────────────────────────────
 
 // recordFreeFloating is the shared implementation of RecordGitEvent /
 // RecordSkillEvent / RecordSessionEvent. It is package-private because:
-//   - Each public helper documents a specific (kind, ContextID-shape) contract
+//   - Each public helper documents a specific (kind, ContextId-shape) contract
 //     that callers depend on; collapsing them to a single Record(kind, id)
 //     surface would lose that documentation.
 //   - The "fnName" parameter is purely cosmetic (it appears in error.What for
@@ -229,29 +229,29 @@ func RecordSessionEvent(
 // The flow:
 //
 //  1. Validate inputs (early-return *StructuredError on any invalid input).
-//  2. Build the AuditEvent with EpochID="" (no epoch anchor — Scenario 6
+//  2. Build the AuditEvent with EpochId="" (no epoch anchor — Scenario 6
 //     "no `epoch_id` column or fail because no epoch is active"). The
 //     audit_events.epoch_id NOT NULL constraint accepts empty string at the
 //     SQL level; v4 migration (S4) drops the column entirely so this becomes
 //     moot post-S4. The Phase field is also left empty for the same reason —
 //     PROPOSAL-2 §7.2 documents the column as "nullable for free-floating
 //     events" in the v3+ schema.
-//  3. Call tracker.RecordEventReturningID — persists the event and returns
+//  3. Call tracker.RecordEventReturningId — persists the event and returns
 //     its audit_events.id atomically (no separate SELECT MAX round-trip).
 //  4. Call tracker.AttachContext — writes the context_edges row.
 //
 // The auditDB parameter is retained for API compatibility with existing callers
 // (hooks, daemon wiring) but is not used by this implementation now that
-// RecordEventReturningID bundles the write + id-recovery in a single call.
+// RecordEventReturningId bundles the write + id-recovery in a single call.
 //
 // Returns the event id on success so the caller can issue follow-up
 // AttachContext calls for multi-context attachment (Scenario 7).
 func recordFreeFloating(
 	ctx context.Context,
 	tracker protocol.TaskTracker,
-	_ *sql.DB, // auditDB: retained for call-site compatibility; no longer used (RecordEventReturningID bundles write + id)
+	_ *sql.DB, // auditDB: retained for call-site compatibility; no longer used (RecordEventReturningId bundles write + id)
 	kind protocol.ContextKind,
-	contextID string,
+	contextId string,
 	eventType protocol.EventType,
 	payload map[string]any,
 	defaultRole string,
@@ -273,7 +273,7 @@ func recordFreeFloating(
 				"   file a bug — it shouldn't be reachable in normal use.",
 		}
 	}
-	if contextID == "" {
+	if contextId == "" {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     fmt.Sprintf("Pasture tried to record a %s event with no identifier to attach it to.", contextKindLabel(kind)),
@@ -312,7 +312,7 @@ func recordFreeFloating(
 		}
 	}
 
-	// Build the AuditEvent. EpochID and Phase are intentionally left empty —
+	// Build the AuditEvent. EpochId and Phase are intentionally left empty —
 	// see Scenario 6 "no epoch_id column or fail because no epoch is active"
 	// and §7.2 "phase TEXT, -- nullable for free-floating events". The
 	// underlying SQLite NOT NULL on epoch_id is satisfied by the empty string
@@ -325,7 +325,7 @@ func recordFreeFloating(
 	// boundary will carry agent_id directly; for free-floating events the
 	// shim's role-based attribution is the right semantics.
 	event := protocol.AuditEvent{
-		EpochID:   "",
+		EpochId:   "",
 		Phase:     "",
 		Role:      defaultRole,
 		EventType: eventType,
@@ -333,21 +333,21 @@ func recordFreeFloating(
 		Timestamp: time.Now().UTC(),
 	}
 
-	// RecordEventReturningID atomically persists the event and returns its
+	// RecordEventReturningId atomically persists the event and returns its
 	// audit_events.id. The trail-side implementation recovers the id from
 	// sql.Result.LastInsertId on the SAME INSERT statement, so the returned
 	// id is race-safe under any concurrency level (Phase 11 R1-B replaced the
 	// previous SELECT MAX(id) workaround that could return another goroutine's
 	// row id under concurrent writes — see audit/sqlite.go's
-	// RecordEventReturningID for the full guarantee).
-	eventID, err := tracker.RecordEventReturningID(ctx, event)
+	// RecordEventReturningId for the full guarantee).
+	eventId, err := tracker.RecordEventReturningId(ctx, event)
 	if err != nil {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     fmt.Sprintf("Pasture couldn't save the %s event to the database.", contextKindLabel(kind)),
 			Why: fmt.Sprintf(
 				"Tried to write a %q event for %s %q to the audit log, but the write failed.",
-				eventType, contextIDLabel(kind), contextID,
+				eventType, contextIDLabel(kind), contextId,
 			),
 			Where: fmt.Sprintf("Recording a %s event (internal/tasks/free_floating.go in tasks.%s).", contextKindLabel(kind), fnName),
 			Impact: fmt.Sprintf(
@@ -362,14 +362,14 @@ func recordFreeFloating(
 		}
 	}
 
-	if err := tracker.AttachContext(ctx, eventID, kind, contextID); err != nil {
+	if err := tracker.AttachContext(ctx, eventId, kind, contextId); err != nil {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     fmt.Sprintf("Pasture saved the %s event but couldn't link it to its %s.", contextKindLabel(kind), contextIDLabel(kind)),
 			Why: fmt.Sprintf(
 				"The event (id %d, type %q) was written to the audit log, but linking it\n"+
 					"to %s %q failed.",
-				eventID, eventType, contextIDLabel(kind), contextID,
+				eventId, eventType, contextIDLabel(kind), contextId,
 			),
 			Where: fmt.Sprintf("Recording a %s event (internal/tasks/free_floating.go in tasks.%s).", contextKindLabel(kind), fnName),
 			Impact: fmt.Sprintf(
@@ -382,12 +382,12 @@ func recordFreeFloating(
 				"2. If the repair keeps failing, run a migration to confirm the schema is\n"+
 				"   up to date:\n"+
 				"     pasture migrate",
-				contextIDLabel(kind), eventID, kind, contextID),
+				contextIDLabel(kind), eventId, kind, contextId),
 			Cause: err,
 		}
 	}
 
-	return eventID, nil
+	return eventId, nil
 }
 
 // ─── Plain-language labels for context kinds ─────────────────────────────────
@@ -463,7 +463,7 @@ func contextIDExample(kind protocol.ContextKind) string {
 //
 // Note: the free-floating recording helpers (RecordGitEvent / RecordSkillEvent /
 // RecordSessionEvent) no longer require this handle internally — they now use
-// tracker.RecordEventReturningID which bundles the write + id recovery. The
+// tracker.RecordEventReturningId which bundles the write + id recovery. The
 // handle is still accepted as a parameter by those helpers for API compatibility.
 //
 // The returned handle MUST be closed by the caller; typically callers cache

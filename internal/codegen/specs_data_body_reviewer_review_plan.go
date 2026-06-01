@@ -7,28 +7,28 @@ var reviewerReviewPlanBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "rev-plan-alignment",
+			Id:        "rev-plan-alignment",
 			Given:     "plan assignment",
 			When:      "reviewing",
 			Then:      "apply end-user alignment criteria",
 			ShouldNot: "focus only on technical details",
 		},
 		{
-			ID:        "rev-plan-revise-actionable",
+			Id:        "rev-plan-revise-actionable",
 			Given:     "issues found",
 			When:      "voting",
 			Then:      "vote REVISE with specific feedback",
 			ShouldNot: "vote REVISE without actionable suggestions",
 		},
 		{
-			ID:        "rev-plan-document",
+			Id:        "rev-plan-document",
 			Given:     "review complete",
 			When:      "documenting",
 			Then:      "add comment to Beads task",
 			ShouldNot: "vote without written justification",
 		},
 		{
-			ID:        "rev-plan-binary-vote",
+			Id:        "rev-plan-binary-vote",
 			Given:     "plan review",
 			When:      "assessing",
 			Then:      "use ACCEPT/REVISE binary vote only",
@@ -38,12 +38,12 @@ var reviewerReviewPlanBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:      "rev-plan-when-to-use",
+			Id:      "rev-plan-when-to-use",
 			Title:   "When to Use",
 			Content: `Assigned to review a plan specification (Phase 4, ` + "`aura:p4-plan:s4-review`" + `).`,
 		},
 		{
-			ID:    "rev-plan-criteria",
+			Id:    "rev-plan-criteria",
 			Title: "End-User Alignment Criteria",
 			Content: `Ask these questions for every plan:
 
@@ -55,7 +55,7 @@ var reviewerReviewPlanBody = SkillBody{
 6. **Is validation checklist complete and correct?**`,
 		},
 		{
-			ID:    "rev-plan-production-code",
+			Id:    "rev-plan-production-code",
 			Title: "Production Code Path Questions",
 			Content: `When reviewing plans, explicitly ask:
 
@@ -82,12 +82,12 @@ var reviewerReviewPlanBody = SkillBody{
 **Green flag:** Plan shows "Layer 3: Wire cobra command with NewService(realDeps)"`,
 		},
 		{
-			ID:      "rev-plan-steps",
+			Id:      "rev-plan-steps",
 			Title:   "Steps",
 			Content: "",
 			Subsections: []ProseSection{
 				{
-					ID:    "rev-plan-step1-read",
+					Id:    "rev-plan-step1-read",
 					Title: "Step 1: Read PROPOSAL-N and URD",
 					Content: "```" + `bash` + "\n" +
 						`bd show <proposal-id>
@@ -95,12 +95,12 @@ bd show <urd-id>   # Read URD for user requirements context` + "\n" +
 						"```",
 				},
 				{
-					ID:      "rev-plan-step2-criteria",
+					Id:      "rev-plan-step2-criteria",
 					Title:   "Step 2: Apply Criteria",
 					Content: `Apply end-user alignment criteria (check against URD requirements). Verify ` + "`validation_checklist`" + ` items are verifiable and BDD acceptance criteria are complete.`,
 				},
 				{
-					ID:    "rev-plan-step3-create",
+					Id:    "rev-plan-step3-create",
 					Title: "Step 3: Create Review Task",
 					Content: "```" + `bash` + "\n" +
 						`bd create --labels "aura:p4-plan:s4-review" \
@@ -115,7 +115,7 @@ bd dep add <proposal-id> --blocked-by <review-id>` + "\n" +
 						"```",
 				},
 				{
-					ID:    "rev-plan-step4-vote",
+					Id:    "rev-plan-step4-vote",
 					Title: "Step 4: Add Vote Comment",
 					Content: "```" + `bash` + "\n" +
 						`# If accepting:
@@ -128,7 +128,7 @@ bd comments add <proposal-id> "VOTE: REVISE - Missing: what happens if X fails? 
 			},
 		},
 		{
-			ID:    "rev-plan-vote-options",
+			Id:    "rev-plan-vote-options",
 			Title: "Vote Options",
 			Content: `| Vote | When |
 |------|------|
@@ -138,12 +138,12 @@ bd comments add <proposal-id> "VOTE: REVISE - Missing: what happens if X fails? 
 Binary only. No severity tree for plan reviews.`,
 		},
 		{
-			ID:      "rev-plan-consensus",
+			Id:      "rev-plan-consensus",
 			Title:   "Consensus",
 			Content: `All 3 reviewers must vote ACCEPT for plan to be ratified.`,
 		},
 		{
-			ID:    "rev-plan-followup",
+			Id:    "rev-plan-followup",
 			Title: "Follow-up Proposal Reviews (FOLLOWUP_PROPOSAL-N)",
 			Content: `The same procedure applies when reviewing FOLLOWUP_PROPOSAL-N:
 - **Task naming:** ` + "`FOLLOWUP_PROPOSAL-N-REVIEW-{axis}-{round}`" + `

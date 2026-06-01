@@ -7,56 +7,56 @@ var userUatBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "uat-demonstrative-examples",
+			Id:        "uat-demonstrative-examples",
 			Given:     "reviewers reach consensus",
 			When:      "conducting UAT",
 			Then:      "show demonstrative examples",
 			ShouldNot: "ask abstract questions",
 		},
 		{
-			ID:        "uat-one-component-at-a-time",
+			Id:        "uat-one-component-at-a-time",
 			Given:     "UAT questions",
 			When:      "asking",
 			Then:      "present one component at a time with definition + implementation + example BEFORE asking",
 			ShouldNot: "dump all questions at once about all components simultaneously",
 		},
 		{
-			ID:        "uat-real-alternatives",
+			Id:        "uat-real-alternatives",
 			Given:     "UAT questions",
 			When:      "forming options",
 			Then:      "describe specific tradeoffs and design choices made",
 			ShouldNot: "use generic approval options like 'exactly matches', 'mostly matches', 'requires revisions'",
 		},
 		{
-			ID:        "uat-verbatim-feedback",
+			Id:        "uat-verbatim-feedback",
 			Given:     "user feedback",
 			When:      "storing",
 			Then:      "record verbatim with context",
 			ShouldNot: "paraphrase concerns",
 		},
 		{
-			ID:        "uat-plan-revise",
+			Id:        "uat-plan-revise",
 			Given:     "user rejects",
 			When:      "plan UAT",
 			Then:      "return to proposal phase",
 			ShouldNot: "proceed to implementation",
 		},
 		{
-			ID:        "uat-impl-revise",
+			Id:        "uat-impl-revise",
 			Given:     "user rejects",
 			When:      "impl UAT",
 			Then:      "return to relevant slice",
 			ShouldNot: "proceed to landing",
 		},
 		{
-			ID:        "uat-open-ended-alongside",
+			Id:        "uat-open-ended-alongside",
 			Given:     "component questions",
 			When:      "presenting",
 			Then:      "ALWAYS include an open-ended feedback question alongside the ACCEPT/REVISE decision so the user can raise related concerns",
 			ShouldNot: "present only the ACCEPT/REVISE decision without a free-text feedback opportunity",
 		},
 		{
-			ID:        "uat-update-urd",
+			Id:        "uat-update-urd",
 			Given:     "UAT completes",
 			When:      "results are captured",
 			Then:      "update the URD with UAT results via `bd comments add <urd-id> \"UAT: <summary>\"`",
@@ -66,12 +66,12 @@ var userUatBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:      "uat-phases",
+			Id:      "uat-phases",
 			Title:   "UAT Phases",
 			Content: "",
 			Subsections: []ProseSection{
 				{
-					ID:    "uat-plan-phase",
+					Id:    "uat-plan-phase",
 					Title: "Plan UAT (Phase 5 — aura:p5-user:s5-uat)",
 					Content: `After 3 reviewers ACCEPT the proposal, present each major design decision to the user one at a time. For each component:
 1. Show the proposed interface definition (code snippet)
@@ -79,7 +79,7 @@ var userUatBody = SkillBody{
 3. Ask about the specific design choices made (tradeoffs, alternatives considered)`,
 				},
 				{
-					ID:    "uat-impl-phase",
+					Id:    "uat-impl-phase",
 					Title: "Implementation UAT (Phase 11 — aura:p11-user:s11-uat)",
 					Content: `After code review consensus, demonstrate what was actually built component by component. For each component:
 1. Run the actual command / show real output
@@ -89,7 +89,7 @@ var userUatBody = SkillBody{
 			},
 		},
 		{
-			ID:    "uat-question-design",
+			Id:    "uat-question-design",
 			Title: "How to Structure UAT Questions",
 			Content: `**Critical:** Questions must split the engineering design space on its ambiguous boundaries to extract maximum information — like a decision tree, where each question bisects the remaining uncertainty.
 
@@ -104,7 +104,7 @@ The user needs to see the actual thing — definition, behavior, example — and
 5. **One component per AskUserQuestion call.** Never batch all components into one survey.`,
 		},
 		{
-			ID:    "uat-wrong-vs-right",
+			Id:    "uat-wrong-vs-right",
 			Title: "Wrong vs Right Question Patterns",
 			Content: "**WRONG — generic approval (DO NOT USE):**\n" +
 				"```\n" +
@@ -131,7 +131,7 @@ The user needs to see the actual thing — definition, behavior, example — and
 				"These work because each option is a real engineering alternative with clear tradeoffs.",
 		},
 		{
-			ID:    "uat-prerequisite-cross-ref",
+			Id:    "uat-prerequisite-cross-ref",
 			Title: "Pre-requisite: Cross-reference URE Against the Proposal",
 			Content: `UAT is the **second time** the user evaluates this feature. Before designing UAT questions, cross-reference the URE responses and URD against the proposal:
 
@@ -148,7 +148,7 @@ Look for:
 - **Gaps or drift:** Where the proposal may have diverged from, reinterpreted, or dropped a URE requirement — flag these explicitly`,
 		},
 		{
-			ID:    "uat-question-sequence",
+			Id:    "uat-question-sequence",
 			Title: "Question Sequence (Decision Tree)",
 			Content: `Structure questions to progressively validate the proposal against the user's original requirements.
 
@@ -172,12 +172,12 @@ Present engineering concerns that emerged after URE (from research, codebase exp
 One open-ended question — "Is there anything from your original requirements that you don't see reflected in this proposal?"`,
 		},
 		{
-			ID:      "uat-component-pattern",
+			Id:      "uat-component-pattern",
 			Title:   "Component-at-a-Time Pattern",
 			Content: "",
 			Subsections: []ProseSection{
 				{
-					ID:    "uat-show-definition",
+					Id:    "uat-show-definition",
 					Title: "Step 1: Show the definition and motivating example",
 					Content: "```\n" +
 						"Present the interface/type definition (e.g., the TypeScript type or function signature)\n" +
@@ -193,7 +193,7 @@ One open-ended question — "Is there anything from your original requirements t
 						"```",
 				},
 				{
-					ID:    "uat-ask-decisions",
+					Id:    "uat-ask-decisions",
 					Title: "Step 2: Ask about specific decisions",
 					Content: `Design-space questions to ask per component type:
 
@@ -216,7 +216,7 @@ One open-ended question — "Is there anything from your original requirements t
 			},
 		},
 		{
-			ID:    "uat-survey-template",
+			Id:    "uat-survey-template",
 			Title: "UAT Survey Template",
 			Content: "Use one AskUserQuestion call per component — do NOT batch all components into one survey.\n\n" +
 				"```\n" +
@@ -257,12 +257,12 @@ One open-ended question — "Is there anything from your original requirements t
 				"```",
 		},
 		{
-			ID:      "uat-creating-task",
+			Id:      "uat-creating-task",
 			Title:   "Creating UAT Task",
 			Content: "",
 			Subsections: []ProseSection{
 				{
-					ID:    "uat-plan-task",
+					Id:    "uat-plan-task",
 					Title: "Plan UAT Task (Phase 5)",
 					Content: "```bash\n" +
 						"bd create --labels \"aura:p5-user:s5-uat\" \\\n" +
@@ -288,7 +288,7 @@ One open-ended question — "Is there anything from your original requirements t
 						"```",
 				},
 				{
-					ID:    "uat-impl-task",
+					Id:    "uat-impl-task",
 					Title: "Implementation UAT Task (Phase 11)",
 					Content: "```bash\n" +
 						"bd create --labels \"aura:p11-user:s11-uat\" \\\n" +
@@ -314,7 +314,7 @@ One open-ended question — "Is there anything from your original requirements t
 			},
 		},
 		{
-			ID:    "uat-handling-revise",
+			Id:    "uat-handling-revise",
 			Title: "Handling REVISE",
 			Content: `If user selects REVISE:
 - **Plan UAT:** Return to architect for proposal revision on the specific component

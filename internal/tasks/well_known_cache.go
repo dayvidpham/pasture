@@ -35,7 +35,7 @@ import (
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 )
 
-// WellKnownAgentCache holds the well-known-name → AgentID mapping for use by
+// WellKnownAgentCache holds the well-known-name → AgentId mapping for use by
 // `temporal.Activities` (S8). Construct via NewWellKnownAgentCache; populate
 // via RegisterWellKnownAgents; inject into Activities. Cache lookups
 // (Get / MustGet / Names) are safe for concurrent use after population.
@@ -61,14 +61,14 @@ func NewWellKnownAgentCache() *WellKnownAgentCache {
 // to the cache. Idempotent: re-setting the same (name, id) pair is a no-op;
 // re-setting (name, different id) overwrites the previous value (this should
 // not happen in practice because the SQLite UNIQUE constraint on `name`
-// enforces a single AgentID per logical name).
+// enforces a single AgentId per logical name).
 func (c *WellKnownAgentCache) set(name string, id provenance.AgentID) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.entries[name] = id
 }
 
-// Get returns the AgentID for name. The boolean is true when name is a known
+// Get returns the AgentId for name. The boolean is true when name is a known
 // entry, false otherwise. Callers that have a static guarantee that name is
 // in the registry (e.g. a constant from well_known_registry.go) may prefer
 // MustGet; callers reading user-provided strings should prefer this method.
@@ -79,7 +79,7 @@ func (c *WellKnownAgentCache) Get(name string) (provenance.AgentID, bool) {
 	return id, ok
 }
 
-// MustGet returns the AgentID for name or returns a *StructuredError of
+// MustGet returns the AgentId for name or returns a *StructuredError of
 // CategoryValidation if name is not in the cache. Use from activity hot
 // paths where the caller statically knows which well-known name it wants
 // (e.g. CheckConstraints always wants check-constraints) — a missing entry

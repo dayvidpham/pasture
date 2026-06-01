@@ -7,14 +7,14 @@ var supervisorCommitBody = SkillBody{
 
 	Behaviors: []BehaviorSpec{
 		{
-			ID:        "sup-commit-gates-first",
+			Id:        "sup-commit-gates-first",
 			Given:     "all files ready",
 			When:      "committing",
 			Then:      "run quality gates (type checking + tests) first — must pass before staging or committing",
 			ShouldNot: "commit without quality gates passing",
 		},
 		{
-			ID:        "sup-commit-message-format",
+			Id:        "sup-commit-message-format",
 			Given:     "commit message",
 			When:      "formatting",
 			Then:      "reference Beads task IDs in the trailer (Task: aura-xxx, aura-yyy)",
@@ -24,12 +24,12 @@ var supervisorCommitBody = SkillBody{
 
 	Sections: []ProseSection{
 		{
-			ID:      "sup-commit-when-to-use",
+			Id:      "sup-commit-when-to-use",
 			Title:   "When to Use",
 			Content: `All workers for a layer have completed successfully — quality gates pass, Beads tasks updated, IMPL_PLAN ready for progress note.`,
 		},
 		{
-			ID:    "sup-commit-steps",
+			Id:    "sup-commit-steps",
 			Title: "Steps",
 			Content: `1. Run quality gates (type checking + tests) — must pass
 2. Stage changed files
@@ -38,7 +38,7 @@ var supervisorCommitBody = SkillBody{
 5. Update IMPL_PLAN progress`,
 		},
 		{
-			ID:    "sup-commit-format",
+			Id:    "sup-commit-format",
 			Title: "Commit Format",
 			Content: "```" + `
 feat|fix|docs|refactor(scope): Description
@@ -51,21 +51,21 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 ` + "```",
 		},
 		{
-			ID:    "sup-commit-close-beads",
+			Id:    "sup-commit-close-beads",
 			Title: "Close Beads Tasks",
 			Content: "```" + `bash
 bd close aura-xxx aura-yyy --reason="Committed in <commit-hash>"
 ` + "```",
 		},
 		{
-			ID:    "sup-commit-update-impl-plan",
+			Id:    "sup-commit-update-impl-plan",
 			Title: "Update IMPL_PLAN",
 			Content: "```" + `bash
 bd update <impl-plan-id> --notes="SLICE-N complete: aura-xxx, aura-yyy"
 ` + "```",
 		},
 		{
-			ID:    "sup-commit-followup",
+			Id:    "sup-commit-followup",
 			Title: "Follow-up Commits",
 			Content: `For follow-up slices, add ` + "`Followup-Epic:`" + ` to the commit message trailer:
 
@@ -81,7 +81,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 ` + "```",
 		},
 		{
-			ID:    "sup-commit-commands",
+			Id:    "sup-commit-commands",
 			Title: "Commands",
 			Content: "```" + `bash
 git add <files>

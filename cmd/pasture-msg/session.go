@@ -33,8 +33,8 @@ The model identifies the specific model version (e.g., claude-sonnet-4-6).`,
 		}
 		format := resolveFormat(cmd, cfg)
 
-		epochID, _ := cmd.Flags().GetString("epoch-id")
-		sessionID, _ := cmd.Flags().GetString("session-id")
+		epochId, _ := cmd.Flags().GetString("epoch-id")
+		sessionId, _ := cmd.Flags().GetString("session-id")
 		role, _ := cmd.Flags().GetString("role")
 		modelHarness, _ := cmd.Flags().GetString("model-harness")
 		model, _ := cmd.Flags().GetString("model")
@@ -42,7 +42,7 @@ The model identifies the specific model version (e.g., claude-sonnet-4-6).`,
 		code, err := handlers.SessionRegister(
 			context.Background(),
 			cfg.Connection,
-			epochID, sessionID, role, modelHarness, model,
+			epochId, sessionId, role, modelHarness, model,
 			format,
 			nil,
 		)

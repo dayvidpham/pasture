@@ -5,7 +5,7 @@ package temporal_test
 // This file owns:
 //   - Fixture types: AgentUpdateInput, ToolCallInput, ContentInput,
 //     RunAgentSessionWant, RunAgentSessionCase, RunAgentSessionFixtures.
-//   - EpochID typed string constant (test-only).
+//   - EpochId typed string constant (test-only).
 //   - buildFakeAgent — compiles pasture-test-agent via "go build" with its module path.
 //   - buildFakeAgentArgs — serializes []AgentUpdateInput to a temp JSON-RPC fixture file.
 //   - TestRunAgentSession_YAML — table-driven tests loaded from testdata/run_agent_session.yaml.
@@ -27,15 +27,15 @@ import (
 	"github.com/dayvidpham/pasture/internal/testutil"
 )
 
-// ─── EpochID typed constant ───────────────────────────────────────────────────
+// ─── EpochId typed constant ───────────────────────────────────────────────────
 
-// TestEpochID is a typed string to prevent raw string literals at test call sites.
-// This satisfies the UAT requirement: "EpochID values should be typed string
+// TestEpochId is a typed string to prevent raw string literals at test call sites.
+// This satisfies the UAT requirement: "EpochId values should be typed string
 // constants, not raw strings."
-type TestEpochID string
+type TestEpochId string
 
 const (
-	EpochCancelTest TestEpochID = "epoch-cancel-test"
+	EpochCancelTest TestEpochId = "epoch-cancel-test"
 )
 
 // ─── Fixture types ────────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ type ContentInput struct {
 
 // ToolCallInput mirrors the YAML structure of a single tool call in a fixture.
 type ToolCallInput struct {
-	ToolCallID string `yaml:"tool_call_id"`
+	ToolCallId string `yaml:"tool_call_id"`
 	ToolKind   string `yaml:"tool_kind"`
 	ToolName   string `yaml:"tool_name"`
 	ToolInput  string `yaml:"tool_input"`
@@ -60,7 +60,7 @@ type ToolCallInput struct {
 // fixture. Each update becomes one JSON-RPC "session/update" line emitted by
 // the fake agent.
 type AgentUpdateInput struct {
-	SessionID  string          `yaml:"session_id"`
+	SessionId  string          `yaml:"session_id"`
 	Role       string          `yaml:"role"`
 	StopReason string          `yaml:"stop_reason"`
 	Content    []ContentInput  `yaml:"content"`
@@ -70,14 +70,14 @@ type AgentUpdateInput struct {
 // RunAgentSessionWant holds the expected RunAgentSessionResult fields.
 type RunAgentSessionWant struct {
 	EntriesRecorded int    `yaml:"entries_recorded"`
-	SessionID       string `yaml:"session_id"`
+	SessionId       string `yaml:"session_id"`
 	StopReason      string `yaml:"stop_reason"`
 }
 
 // RunAgentSessionCase holds one row from run_agent_session.yaml.
 type RunAgentSessionCase struct {
 	ID      string              `yaml:"id"`
-	EpochID TestEpochID         `yaml:"epoch_id"`
+	EpochId TestEpochId         `yaml:"epoch_id"`
 	Updates []AgentUpdateInput  `yaml:"updates"`
 	Want    RunAgentSessionWant `yaml:"want"`
 }
@@ -126,7 +126,7 @@ type jsonRPCLine struct {
 // updateToWire converts an AgentUpdateInput into the JSON-RPC wire structure
 // used by the ACP client. This mirrors the acp.SessionUpdate wire format.
 type wireUpdate struct {
-	SessionID  string         `json:"sessionId"`
+	SessionId  string         `json:"sessionId"`
 	Role       string         `json:"role"`
 	Content    []wireContent  `json:"content,omitempty"`
 	ToolCalls  []wireToolCall `json:"toolCalls,omitempty"`
@@ -140,7 +140,7 @@ type wireContent struct {
 }
 
 type wireToolCall struct {
-	ToolCallID string `json:"toolCallId"`
+	ToolCallId string `json:"toolCallId"`
 	ToolKind   string `json:"toolKind"`
 	ToolName   string `json:"toolName"`
 	ToolInput  string `json:"toolInput,omitempty"`
@@ -162,7 +162,7 @@ func buildFakeAgentArgs(t *testing.T, updates []AgentUpdateInput) string {
 	var lines []byte
 	for _, u := range updates {
 		wire := wireUpdate{
-			SessionID:  u.SessionID,
+			SessionId:  u.SessionId,
 			Role:       u.Role,
 			StopReason: u.StopReason,
 		}
@@ -177,7 +177,7 @@ func buildFakeAgentArgs(t *testing.T, updates []AgentUpdateInput) string {
 
 		for _, tc := range u.ToolCalls {
 			wire.ToolCalls = append(wire.ToolCalls, wireToolCall{
-				ToolCallID: tc.ToolCallID,
+				ToolCallId: tc.ToolCallId,
 				ToolKind:   tc.ToolKind,
 				ToolName:   tc.ToolName,
 				ToolInput:  tc.ToolInput,
@@ -187,7 +187,7 @@ func buildFakeAgentArgs(t *testing.T, updates []AgentUpdateInput) string {
 
 		params, err := json.Marshal(wire)
 		if err != nil {
-			t.Fatalf("buildFakeAgentArgs: marshal update %q: %v", u.SessionID, err)
+			t.Fatalf("buildFakeAgentArgs: marshal update %q: %v", u.SessionId, err)
 		}
 
 		rpcLine := jsonRPCLine{
@@ -251,7 +251,7 @@ func TestRunAgentSession_YAML(t *testing.T) {
 			input := temporal.RunAgentSessionInput{
 				AgentCmd:  agentBin,
 				AgentArgs: []string{fixturePath},
-				EpochID:   string(tc.EpochID),
+				EpochId:   string(tc.EpochId),
 			}
 
 			val, err := env.ExecuteActivity(acts.RunAgentSession, input)
@@ -268,9 +268,9 @@ func TestRunAgentSession_YAML(t *testing.T) {
 				t.Errorf("EntriesRecorded: got %d, want %d",
 					result.EntriesRecorded, tc.Want.EntriesRecorded)
 			}
-			if result.SessionID != tc.Want.SessionID {
-				t.Errorf("SessionID: got %q, want %q",
-					result.SessionID, tc.Want.SessionID)
+			if result.SessionId != tc.Want.SessionId {
+				t.Errorf("SessionId: got %q, want %q",
+					result.SessionId, tc.Want.SessionId)
 			}
 			if result.StopReason != tc.Want.StopReason {
 				t.Errorf("StopReason: got %q, want %q",
@@ -310,7 +310,7 @@ func TestRunAgentSession_ContextCancellation(t *testing.T) {
 	}, time.Millisecond*10)
 
 	env.ExecuteWorkflow(temporal.EpochWorkflowFn, temporal.EpochInput{
-		EpochID:            string(EpochCancelTest),
+		EpochId:            string(EpochCancelTest),
 		RequestDescription: "context cancellation test",
 	})
 

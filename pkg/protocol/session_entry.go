@@ -8,7 +8,7 @@ package protocol
 //
 // Maps 1:1 to a row in the session_entries table in the audit SQLite backend.
 type SessionEntry struct {
-	SessionID      string  `json:"sessionId"`
+	SessionId      string  `json:"sessionId"`
 	EntryIndex     int     `json:"entryIndex"`
 	Provider       string  `json:"provider"`
 	EntryType      string  `json:"entryType"`
@@ -24,9 +24,9 @@ type SessionEntry struct {
 	IsError        bool    `json:"isError"`
 	StopReason     *string `json:"stopReason,omitempty"`    // ACP per-turn stop reason
 	RawByteLength  *int    `json:"rawByteLength,omitempty"` // raw JSON byte count
-	ToolCallID     *string `json:"toolCallId,omitempty"`    // MCP correlation
-	EntryID        *string `json:"entryId,omitempty"`       // provider-native ID
-	ParentEntryID  *string `json:"parentEntryId,omitempty"` // parent entry link
+	ToolCallId     *string `json:"toolCallId,omitempty"`    // MCP correlation
+	EntryId        *string `json:"entryId,omitempty"`       // provider-native ID
+	ParentEntryId  *string `json:"parentEntryId,omitempty"` // parent entry link
 	Depth          int     `json:"depth"`                   // 0 = message, 1 = content part
 	ParentIndex    *int    `json:"parentIndex,omitempty"`   // entryIndex of parent (nil for depth=0)
 	ToolInput      *string `json:"toolInput,omitempty"`     // tool_use input JSON

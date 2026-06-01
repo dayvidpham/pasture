@@ -59,12 +59,12 @@ type TaskTracker interface {
 	//
 	// Note: callers that need the inserted event_id (so they can attach
 	// context_edges rows in the same logical step) should prefer
-	// RecordEventReturningID — it bundles the write + id-recovery in a
+	// RecordEventReturningId — it bundles the write + id-recovery in a
 	// single call, removing the post-write SELECT MAX(id) round-trip the
 	// S9 free-floating helpers had to do as a workaround.
 	RecordEvent(ctx context.Context, event AuditEvent) error
 
-	// RecordEventReturningID persists a single audit event and returns the
+	// RecordEventReturningId persists a single audit event and returns the
 	// audit_events.id of the just-inserted row. The implementation reads the
 	// id from sql.Result.LastInsertId on the SAME INSERT statement that wrote
 	// the row, so the returned id is race-safe under any level of write
@@ -74,7 +74,7 @@ type TaskTracker interface {
 	//
 	// This is the canonical RecordEvent entry point for workflow activities
 	// (PROPOSAL-2 §7.11): RecordTransition and RecordAuditEvent call this
-	// then immediately call AttachContext(eventID, ContextEpoch, epochID)
+	// then immediately call AttachContext(eventId, ContextEpoch, epochId)
 	// to record the event-to-epoch correlation. Free-floating helpers
 	// (RecordGitEvent / RecordSkillEvent / RecordSessionEvent) also use it
 	// in place of the older SELECT MAX(id) workaround that this method
@@ -91,25 +91,25 @@ type TaskTracker interface {
 	// meaningful for AttachContext-relative assertions in unit tests that
 	// exercise the workflow integration path without paying for a real
 	// SQLite file.
-	RecordEventReturningID(ctx context.Context, event AuditEvent) (int64, error)
+	RecordEventReturningId(ctx context.Context, event AuditEvent) (int64, error)
 
 	// QueryEvents returns audit events filtered by epoch and (optionally)
-	// phase / role. Results are returned in chronological order. epochID
+	// phase / role. Results are returned in chronological order. epochId
 	// is required and is always part of the WHERE clause.
 	//
 	// Note: this is the legacy v1 query path; new callers should prefer
-	// Timeline(ctx, ContextEpoch, epochID) which uses the context_edges
+	// Timeline(ctx, ContextEpoch, epochId) which uses the context_edges
 	// JOIN and works for all ContextKind values, not just epoch.
-	QueryEvents(ctx context.Context, epochID string, phase *PhaseId, role *string) ([]AuditEvent, error)
+	QueryEvents(ctx context.Context, epochId string, phase *PhaseId, role *string) ([]AuditEvent, error)
 
 	// RecordSessionEntries persists a batch of SessionEntry records
 	// atomically (single transaction). Nil or empty slices are no-ops.
 	RecordSessionEntries(ctx context.Context, entries []SessionEntry) error
 
-	// QuerySessionEntries returns all session entries for sessionID in
+	// QuerySessionEntries returns all session entries for sessionId in
 	// insertion order. Returns an empty (non-nil) slice when no entries
-	// exist for sessionID.
-	QuerySessionEntries(ctx context.Context, sessionID string) ([]SessionEntry, error)
+	// exist for sessionId.
+	QuerySessionEntries(ctx context.Context, sessionId string) ([]SessionEntry, error)
 
 	// ─── Pasture-side category decoration (R8) ──────────────────────────
 
@@ -130,28 +130,28 @@ type TaskTracker interface {
 
 	// ─── Context attachment (R9) ────────────────────────────────────────
 
-	// AttachContext adds a row to context_edges binding eventID to the
-	// (kind, contextID) pair. The (event_id, context_kind, context_id)
+	// AttachContext adds a row to context_edges binding eventId to the
+	// (kind, contextId) pair. The (event_id, context_kind, context_id)
 	// triple is the BCNF composite primary key — duplicate inserts are
 	// idempotent (returns nil; the existing row is preserved).
 	//
-	// kind MUST be a valid ContextKind (kind.IsValid()); contextID MUST
+	// kind MUST be a valid ContextKind (kind.IsValid()); contextId MUST
 	// be non-empty. Validation failures return CategoryValidation.
-	AttachContext(ctx context.Context, eventID int64, kind ContextKind, contextID string) error
+	AttachContext(ctx context.Context, eventId int64, kind ContextKind, contextId string) error
 
-	// EventContexts returns the typed contexts attached to eventID, in
+	// EventContexts returns the typed contexts attached to eventId, in
 	// insertion order. Returns an empty (non-nil) slice when no edges
-	// exist for eventID.
-	EventContexts(ctx context.Context, eventID int64) ([]Context, error)
+	// exist for eventId.
+	EventContexts(ctx context.Context, eventId int64) ([]Context, error)
 
 	// Timeline returns all events whose context_edges row matches the
-	// (kind, contextID) pair, in chronological order. The intended usage:
+	// (kind, contextId) pair, in chronological order. The intended usage:
 	//
-	//   events := tracker.Timeline(ctx, ContextEpoch, epochID)
+	//   events := tracker.Timeline(ctx, ContextEpoch, epochId)
 	//   events := tracker.Timeline(ctx, ContextGit, "<sha>")
 	//
-	// A nil/empty contextID returns an empty slice (no error).
-	Timeline(ctx context.Context, kind ContextKind, contextID string) ([]AuditEvent, error)
+	// A nil/empty contextId returns an empty slice (no error).
+	Timeline(ctx context.Context, kind ContextKind, contextId string) ([]AuditEvent, error)
 
 	// ─── Lifecycle ──────────────────────────────────────────────────────
 

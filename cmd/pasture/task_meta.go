@@ -57,15 +57,15 @@ var taskCommentAddCmd = &cobra.Command{
 	Long: `Add a timestamped comment to a task.
 
 The author must be a registered Provenance agent. Pass --author with the
-wire-format AgentID. Auto-resolution of the current user via git config is
+wire-format AgentId. Auto-resolution of the current user via git config is
 tracked as a follow-up; for now agents must be registered out of band (see
 the provenance Tracker.RegisterHumanAgent / RegisterSoftwareAgent APIs).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		author, _ := cmd.Flags().GetString("author")
 		code, err := handlers.TaskCommentAdd(cmd.OutOrStdout(), handlers.TaskCommentAddInput{
 			DBPath:   flagDBPath,
-			IDStr:    args[0],
-			AuthorID: author,
+			IdStr:    args[0],
+			AuthorId: author,
 			Body:     args[1],
 		}, resolveFormat())
 		if err != nil {
@@ -97,7 +97,7 @@ var taskCommentsCmd = &cobra.Command{
 
 func init() {
 	taskCommentAddCmd.Flags().String("author", "",
-		"Wire-format AgentID of the comment author (required) — register agents via the Tracker API")
+		"Wire-format AgentId of the comment author (required) — register agents via the Tracker API")
 	_ = taskCommentAddCmd.MarkFlagRequired("author")
 
 	taskLabelCmd.AddCommand(taskLabelAddCmd)

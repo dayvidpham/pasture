@@ -20,7 +20,7 @@ import (
 // Example is a labeled code example for a constraint or procedure step.
 // Mirrors Python CodeExample dataclass.
 type Example struct {
-	ID              string
+	Id              string
 	Lang            string // ExampleLang wire value: "bash", "go", "python", etc.
 	Label           string // ExampleLabel wire value: "correct", "anti-pattern", etc.
 	Code            string
@@ -32,7 +32,7 @@ type Example struct {
 // ConstraintSpec is a single protocol constraint in Given/When/Then/Should-Not
 // format. Mirrors Python ConstraintSpec dataclass.
 type ConstraintSpec struct {
-	ID        string
+	Id        string
 	Given     string
 	When      string
 	Then      string
@@ -47,16 +47,16 @@ type ConstraintSpec struct {
 // format. Distinct from ConstraintSpec: behaviors are role-specific guidance,
 // not formal protocol constraints. Mirrors Python BehaviorSpec dataclass.
 //
-// A non-empty FragmentID marks this entry as a placement MARKER: all other
+// A non-empty FragmentId marks this entry as a placement MARKER: all other
 // fields are left zero and the entry is resolved to the SharedFragment payload
 // pre-render by the resolution pass in skills.go.
 type BehaviorSpec struct {
-	ID         string
+	Id         string
 	Given      string
 	When       string
 	Then       string
 	ShouldNot  string
-	FragmentID string // non-empty → marker; resolved pre-render from SharedFragmentSpecs
+	FragmentId string // non-empty → marker; resolved pre-render from SharedFragmentSpecs
 }
 
 // ─── ProseSection ─────────────────────────────────────────────────────────────
@@ -65,15 +65,15 @@ type BehaviorSpec struct {
 // Sections are rendered in slice order. Heading level is determined by the
 // template (H2 for top-level, H3 for subsections).
 //
-// A non-empty FragmentID marks this entry as a placement MARKER: all other
+// A non-empty FragmentId marks this entry as a placement MARKER: all other
 // fields are left zero and the entry is resolved to the SharedFragment payload
 // pre-render by the resolution pass in skills.go.
 type ProseSection struct {
-	ID          string         // unique within skill body; not used during template rendering — available for programmatic lookup via ExtractSection or future ID-based access
+	Id          string         // unique within skill body; not used during template rendering — available for programmatic lookup via ExtractSection or future ID-based access
 	Title       string         // heading text, e.g. "What You Own"
 	Content     string         // pre-formatted markdown content below the heading
 	Subsections []ProseSection // optional nested sections (rendered as H3 under H2)
-	FragmentID  string         // non-empty → marker; resolved pre-render from SharedFragmentSpecs
+	FragmentId  string         // non-empty → marker; resolved pre-render from SharedFragmentSpecs
 }
 
 // ─── FragmentKind ─────────────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ const (
 // directly — they are derived via FragmentToOwnerRefs() (D1: owners derived
 // from consumer markers, not embedded).
 type SharedFragment struct {
-	ID       string
+	Id       string
 	Kind     FragmentKind
 	Behavior *BehaviorSpec // non-nil when Kind == FragmentKindBehavior
 	Prose    *ProseSection // non-nil when Kind == FragmentKindProse
@@ -109,7 +109,7 @@ type SharedFragment struct {
 
 // RecipeBlock is a bd command recipe with context and code example.
 type RecipeBlock struct {
-	ID          string // unique within skill body; not used during template rendering — available for programmatic lookup
+	Id          string // unique within skill body; not used during template rendering — available for programmatic lookup
 	Title       string // e.g. "Phase 1: REQUEST Task"
 	Description string // context paragraph before the code block
 	Lang        string // code block language, typically "bash"
@@ -133,7 +133,7 @@ type SkillBody struct {
 // RoleSpec is the complete specification for an agent role.
 // Mirrors Python RoleSpec dataclass.
 type RoleSpec struct {
-	ID                 types.RoleId
+	Id                 types.RoleId
 	Name               string
 	Description        string
 	Model              string // e.g. "opus", "sonnet", "haiku"
@@ -150,7 +150,7 @@ type RoleSpec struct {
 // CommandSpec is the complete specification for a protocol command (skill).
 // Mirrors Python CommandSpec dataclass.
 type CommandSpec struct {
-	ID            string // CommandId wire value e.g. "cmd-worker"
+	Id            string // CommandId wire value e.g. "cmd-worker"
 	Name          string // e.g. "aura:worker"
 	Description   string
 	RoleRef       types.RoleId // may be zero value if unassigned
@@ -174,7 +174,7 @@ type Transition struct {
 // PhaseSpec is the complete specification for a single protocol phase.
 // Mirrors Python PhaseSpec dataclass.
 type PhaseSpec struct {
-	ID          protocol.PhaseId
+	Id          protocol.PhaseId
 	Name        string
 	Number      int
 	Domain      types.Domain
@@ -187,7 +187,7 @@ type PhaseSpec struct {
 // HandoffSpec specifies an actor-change transition handoff document.
 // Mirrors Python HandoffSpec dataclass.
 type HandoffSpec struct {
-	ID             string
+	Id             string
 	SourceRole     types.RoleId
 	TargetRole     types.RoleId
 	AtPhase        protocol.PhaseId
@@ -200,7 +200,7 @@ type HandoffSpec struct {
 // FigureSpec is a figure specification (ASCII diagram or other visual).
 // Mirrors Python Figure dataclass.
 type FigureSpec struct {
-	ID           string // FigureId wire value
+	Id           string // FigureId wire value
 	Title        string
 	Type         string // FigureType wire value: "ascii-diagram"
 	RoleRefs     []types.RoleId
@@ -215,7 +215,7 @@ type FigureSpec struct {
 // ChecklistItem is a single item in a completion checklist.
 // Mirrors Python ChecklistItem dataclass.
 type ChecklistItem struct {
-	ID       string
+	Id       string
 	Text     string
 	Required bool
 }
@@ -235,7 +235,7 @@ type Checklist struct {
 // CoordinationCommand is a coordination command for inter-agent communication
 // via Beads. Mirrors Python CoordinationCommand dataclass.
 type CoordinationCommand struct {
-	ID       string
+	Id       string
 	Action   string
 	Template string
 	RoleRef  types.RoleId // zero value means shared across all roles
@@ -247,7 +247,7 @@ type CoordinationCommand struct {
 // WorkflowAction is a single action within a workflow stage.
 // Mirrors Python WorkflowAction dataclass.
 type WorkflowAction struct {
-	ID          string
+	Id          string
 	Instruction string
 	Command     string // optional concrete shell/tool command
 }
@@ -267,7 +267,7 @@ type ExitCondition struct {
 // WorkflowStage is a single stage in an agent workflow.
 // Mirrors Python WorkflowStage dataclass.
 type WorkflowStage struct {
-	ID                string
+	Id                string
 	Name              string
 	Order             int
 	Execution         string           // WorkflowExecution: "sequential", "parallel", "conditional-loop"
@@ -282,7 +282,7 @@ type WorkflowStage struct {
 // Workflow is a complete workflow specification for an agent role.
 // Keyed in WorkflowSpecs by workflow id. Mirrors Python Workflow dataclass.
 type Workflow struct {
-	ID          string
+	Id          string
 	Name        string
 	Description string
 	RoleRef     types.RoleId
@@ -294,7 +294,7 @@ type Workflow struct {
 // ReviewAxisSpec is the complete specification for a code review axis.
 // Mirrors Python ReviewAxisSpec dataclass.
 type ReviewAxisSpec struct {
-	ID           string
+	Id           string
 	Letter       string // ReviewAxis wire value: "correctness", "test_quality", "elegance"
 	Name         string
 	Short        string
@@ -306,7 +306,7 @@ type ReviewAxisSpec struct {
 // ProcedureStep is a single step in a role's startup or operational procedure.
 // Mirrors Python ProcedureStep dataclass.
 type ProcedureStep struct {
-	ID          string
+	Id          string
 	Order       int
 	Instruction string
 	Command     string           // optional exact shell/bd command
@@ -320,7 +320,7 @@ type ProcedureStep struct {
 // LabelSpec is the complete specification for a protocol label.
 // Mirrors Python LabelSpec dataclass.
 type LabelSpec struct {
-	ID          string
+	Id          string
 	Value       string // the actual label string e.g. "aura:p9-impl:s9-slice"
 	Special     bool
 	PhaseRef    string // optional phase reference
@@ -347,7 +347,7 @@ type TitleConvention struct {
 // SubstepData holds canonical per-phase substep specifications.
 // Mirrors the inner dicts in Python SUBSTEP_DATA.
 type SubstepData struct {
-	ID            string
+	Id            string
 	Type          string // SubstepType wire value
 	Execution     string // ExecutionMode wire value
 	Order         int
