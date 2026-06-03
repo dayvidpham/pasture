@@ -69,21 +69,23 @@ var inlineFragTokenRe = regexp.MustCompile(`\[(frag--[a-z0-9-]+)\]`)
 
 // ─── G2: handoff storage path absence ────────────────────────────────────────
 
-// g2ScopedFiles returns the generated surface swept by G2: the root schema.xml,
-// every agents/*.md, and (SLICE-5 widening) every skills/*/SKILL.md.
+// g2ScopedFiles returns the full surface swept by G2: the root schema.xml,
+// every agents/*.md (SLICE-1), every skills/*/SKILL.md (SLICE-5 widening), and
+// every skills/protocol/*.md (UAT-2 widening).
 //
 // SLICE-1 authored this guard against the schema.xml + agents/*.md it owned and
 // documented the widening point (A3: "G2 widened [SLICE-1 guard; SLICE-5 final
-// sweep]"). SLICE-5 widens the scope to skills/*/SKILL.md now that SLICE-3
-// (bodies) and SLICE-4 (protocol docs) have dropped their handoff-path prose —
-// the generated SKILL.md outputs must be verified handoff-path-free too.
+// sweep]"). SLICE-5 widened the scope to skills/*/SKILL.md once SLICE-3 (bodies)
+// and SLICE-4 (protocol docs) dropped their handoff-path prose.
 //
-// The skills/*/SKILL.md glob deliberately matches ONLY the generated SKILL.md
-// in each skill directory (including skills/protocol/SKILL.md, which is clean).
-// It does NOT match the other hand-authored skills/protocol/*.md docs
-// (CLAUDE.md, CONSTRAINTS.md, AGENTS.md, PROCESS.md, HANDOFF_TEMPLATE.md), which
-// legitimately mention ".git/.aura/handoff" in EXPLANATORY "R8/A3 retired the
-// ... pattern" migration text — those are intentional and out of scope for G2.
+// UAT-2 dropped the LAST exclusion: the hand-authored skills/protocol/*.md docs
+// (CLAUDE.md, CONSTRAINTS.md, AGENTS.md, PROCESS.md, HANDOFF_TEMPLATE.md) were
+// previously left out because they carried legitimate retired-pattern migration
+// callouts (e.g. "R8/A3 retired the .git/.aura/handoff pattern"). The user chose
+// absolute cleanliness (UAT-2 FIX-NOW): the path must appear NOWHERE, so those
+// callouts were stripped and the protocol docs are now swept too. There is NO
+// allowlist and NO exclusion anywhere — zero-tolerance is durable across the
+// entire generated + hand-authored surface.
 func g2ScopedFiles(t *testing.T, root string) []string {
 	t.Helper()
 
@@ -117,8 +119,9 @@ func g2ScopedFiles(t *testing.T, root string) []string {
 }
 
 // TestG2_NoHandoffStoragePaths asserts that the retired `.git/.aura/handoff`
-// filesystem path appears NOWHERE in the SLICE-1-owned generated surface
-// (schema.xml + agents/*.md). No allowlist (R8/A3).
+// filesystem path appears NOWHERE across the full swept surface — schema.xml +
+// agents/*.md + skills/*/SKILL.md + skills/protocol/*.md (see g2ScopedFiles).
+// No allowlist and no exclusion (R8/A3; protocol-docs exclusion dropped at UAT-2).
 func TestG2_NoHandoffStoragePaths(t *testing.T) {
 	root := repoRoot(t)
 
