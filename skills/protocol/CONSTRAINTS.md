@@ -40,7 +40,7 @@ Common constraints referenced by all agent and skill files.
 
 **Given** a vertical slice **when** decomposing it into leaf tasks **then** create one or more leaves named after the real work units — a slice may have ANY number (the L1/L2/L3 triple is one illustrative shape, not a required count) **should never** force every slice into a fixed L1/L2/L3 triple, or create a slice with no leaf tasks
 
-**Given** an actor-change transition **when** authoring the handoff **then** author it inline in its own HANDOFF Beads task body and locate it by task ID **should never** write a `.git/.aura/handoff/...` file (that filesystem pattern is retired)
+**Given** an actor-change transition **when** authoring the handoff **then** author it inline in its own HANDOFF Beads task body and locate it by task ID **should never** write the handoff to a filesystem path
 
 ## Checklists
 

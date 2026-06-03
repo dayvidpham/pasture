@@ -357,7 +357,7 @@ See: [../architect-ratify/SKILL.md](../architect-ratify/SKILL.md)
 
 The architect authors the handoff with full inline provenance directly in the HANDOFF Beads task body and transfers ownership to the supervisor.
 
-**Storage:** the HANDOFF Beads task body (no filesystem path). R8/A3 retired the `.git/.aura/handoff/...` file pattern — every handoff is authored inline in its own HANDOFF Beads task and located by task ID.
+**Storage:** the HANDOFF Beads task body (no filesystem path). Every handoff is authored inline in its own HANDOFF Beads task and located by task ID.
 
 ```bash
 bd create --type=task --priority=2 \
@@ -387,7 +387,7 @@ referenced task IDs. See HANDOFF_TEMPLATE.md for the section structure." \
 | 5 | Reviewer | Followup | After Phase 10 | Summary + bd IDs |
 | 6 | Supervisor | Architect | Follow-up lifecycle (FOLLOWUP_URE/URD → FOLLOWUP_PROPOSAL) | Summary + bd IDs |
 
-Every handoff is authored inline in its own HANDOFF Beads task body (no `.git/.aura/handoff/...` files) and located by task ID.
+Every handoff is authored inline in its own HANDOFF Beads task body (no filesystem path) and located by task ID.
 
 **Same-actor transitions do NOT need handoff:** UAT → Ratify and Ratify → Handoff are performed by the same actor (architect).
 In the follow-up lifecycle, the supervisor creating FOLLOWUP_URE and then FOLLOWUP_URD are also same-actor transitions (no handoff needed).

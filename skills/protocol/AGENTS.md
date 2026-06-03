@@ -161,7 +161,7 @@ Empty groups are closed immediately. **No cycle cap:** iterate review â†’ fix â†
 
 ## Handoff Matrix
 
-Every handoff is **authored inline in its own HANDOFF Beads task body** (R8/A3 retired the `.git/.aura/handoff/...` file pattern) and located by task ID:
+Every handoff is **authored inline in its own HANDOFF Beads task body** (no filesystem path) and located by task ID:
 
 | # | From | To | Phase | Authored In | Content Level |
 |---|------|----|-------|-------------|--------------|

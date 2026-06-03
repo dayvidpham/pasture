@@ -364,7 +364,7 @@ Check **end-user alignment**, not technical specializations:
 
 ### Handoff Documents
 
-6 actor-change transitions require handoffs. Each handoff is **authored inline in its own HANDOFF Beads task body** (R8/A3 retired the `.git/.aura/handoff/...` file pattern) and located by task ID:
+6 actor-change transitions require handoffs. Each handoff is **authored inline in its own HANDOFF Beads task body** (no filesystem path) and located by task ID:
 
 | Transition | Authored In | Content Level |
 |---|---|---|

@@ -8,10 +8,12 @@
 // barrier, at which point SLICE-5 extends the file/target scope below.
 //
 //   - G2 (TestG2_NoHandoffStoragePaths): no `.git/.aura/handoff` filesystem path
-//     remains in the SLICE-1-owned generated surface (schema.xml + agents/*.md).
-//     R8/A3 retired the StoragePattern entirely — there is NO allowlist. SLICE-5
-//     widens the scope to skills/*/SKILL.md once SLICE-3 (bodies) and SLICE-4
-//     (protocol docs) drop their handoff-path prose.
+//     remains in ANY swept surface — schema.xml + agents/*.md (SLICE-1) +
+//     skills/*/SKILL.md (SLICE-5 widening) + skills/protocol/*.md (UAT-2
+//     widening). R8/A3 retired the StoragePattern entirely — there is NO
+//     allowlist and NO exclusion. The protocol-docs exclusion was dropped at
+//     UAT-2 once the last retired-pattern migration callouts were stripped, so
+//     zero-tolerance is now durable everywhere.
 //   - G3 (TestG3_SliceLeafTasksFlexibleCount): the C-slice-leaf-tasks constraint
 //     does not mandate a fixed L1/L2/L3 leaf triple (R9 — any number of leaves).
 //   - G4 (TestG4_FollowupRoutesDeferOnly): the FOLLOWUP-routing surface owned by
@@ -97,8 +99,19 @@ func g2ScopedFiles(t *testing.T, root string) []string {
 	require.NotEmpty(t, skillFiles,
 		"G2: no skills/*/SKILL.md found under %q — the SLICE-5 widening would vacuously pass", root)
 
+	// UAT-2 widening: the hand-authored protocol docs (skills/protocol/*.md) were
+	// previously excluded because they carried legitimate retired-pattern migration
+	// callouts. The user chose absolute cleanliness (UAT-2 FIX-NOW): the path must
+	// appear NOWHERE, so the exclusion is dropped and these are now swept too.
+	protocolGlob := filepath.Join(root, "skills", "protocol", "*.md")
+	protocolFiles, err := filepath.Glob(protocolGlob)
+	require.NoError(t, err, "G2: globbing %q failed", protocolGlob)
+	require.NotEmpty(t, protocolFiles,
+		"G2: no skills/protocol/*.md found under %q — the UAT-2 widening would vacuously pass", root)
+
 	files := append([]string{}, agentFiles...)
 	files = append(files, skillFiles...)
+	files = append(files, protocolFiles...)
 	files = append(files, filepath.Join(root, "schema.xml"))
 	return files
 }

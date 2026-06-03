@@ -2,7 +2,7 @@
 
 Standardized template for all 6 actor-change transitions in the Pasture protocol.
 
-**Storage:** the HANDOFF Beads task body (no filesystem path). R8/A3 retired the `.git/.aura/handoff/...` file pattern — author each handoff inline in its own dedicated HANDOFF Beads task and locate it by task ID. The template below describes the body content authored into that task's description.
+**Storage:** the HANDOFF Beads task body (no filesystem path). Author each handoff inline in its own dedicated HANDOFF Beads task and locate it by task ID. The template below describes the body content authored into that task's description.
 
 ---
 
