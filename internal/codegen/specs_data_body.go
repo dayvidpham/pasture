@@ -87,7 +87,7 @@ var supervisorBody = SkillBody{
 		behaviorRef(FragSupReviewCheckEach),
 		behaviorRef(FragSupReviewSeverityGroups),
 		behaviorRef(FragSupBlockerDualParent),
-		behaviorRef(FragSupImportantMinorFollowup),
+		behaviorRef(FragSupDeferredFollowup),
 		behaviorRef(FragSupFollowupEpicTiming),
 		{
 			Id:        "sup-worker-persistence",
@@ -473,7 +473,7 @@ bd dep add <followup-epic-id> --blocked-by <important-group-id>
 bd dep add <followup-epic-id> --blocked-by <minor-group-id>
 ` + "```" + `
 
-Severity routing follows [frag--sup-blocker-dual-parent] and [frag--sup-important-minor-followup].`,
+Severity routing follows [frag--sup-blocker-dual-parent] and [frag--sup-deferred-followup].`,
 				},
 				{
 					Id:    "sup-followup-step2",
@@ -1830,7 +1830,7 @@ See ` + "`../protocol/CONSTRAINTS.md`" + ` for coding standards and severity def
 		behaviorRef(FragSupReviewCheckEach),
 		behaviorRef(FragSupReviewSeverityGroups),
 		behaviorRef(FragSupBlockerDualParent),
-		behaviorRef(FragSupImportantMinorFollowup),
+		behaviorRef(FragSupDeferredFollowup),
 		behaviorRef(FragSupFollowupEpicTiming),
 	},
 	Sections: []ProseSection{
@@ -1861,7 +1861,7 @@ bd dep add $BLOCKER_ID --blocked-by $FINDING_ID
 bd dep add <slice-1-id> --blocked-by $FINDING_ID
 ` + "```\n" +
 				`
-Per [frag--sup-important-minor-followup], IMPORTANT/MINOR findings route to severity group only:
+Per [frag--sup-deferred-followup], IMPORTANT/MINOR findings route to severity group only:
 
 ` + "```bash\n" +
 				`# IMPORTANT finding — blocks severity group only

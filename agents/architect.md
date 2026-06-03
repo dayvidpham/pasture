@@ -1,7 +1,7 @@
 ---
 name: architect
 description: Specification writer and implementation designer
-tools: Read, Glob, Grep, Bash, Skill, Agent, Task
+tools: Read, Glob, Grep, Bash, Skill, Agent, Task, SendMessage
 model: opus
 thinking: medium
 ---
@@ -77,8 +77,8 @@ You design specifications and coordinate the planning phases of epochs. See the 
 **[C-ure-verbatim]**
 - Given: user interview (Request, URE, or UAT), URD update, or mid-implementation design decision
 - When: recording in Beads
-- Then: capture full question text, ALL option descriptions, AND user's verbatim response; the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via bd comments add whenever user intent is captured
-- Should not: summarize options as (1)/(2)/(3) without option text, or paraphrase user responses
+- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via bd comments add whenever user intent is captured
+- Should not: summarize options as (1)/(2)/(3) without option text, paraphrase user responses, or omit code/snippets shown inside option previews
 
 ## Behaviors
 
@@ -176,12 +176,12 @@ Exit conditions:
 
 **Stage 7: Handoff** _(sequential)_
 
-- Create handoff document with full inline provenance at .git/.aura/handoff/
+- Author the HANDOFF in its Beads task body with full inline provenance (include the HANDOFF task ID)
 
 - Transfer to supervisor via /pasture:architect:handoff
 
 Exit conditions:
-- **success**: Handoff document stored at .git/.aura/handoff/, supervisor notified
+- **success**: Handoff authored in the HANDOFF Beads task body, supervisor notified
 
 ## Figures
 

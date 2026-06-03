@@ -10,13 +10,30 @@
 # See agents.go:renderAgent and templates/agent_definition.go.tmpl.
 
 agent_checks:
+  - role: epoch
+    must_contain:
+      - "name: epoch"
+      - "tools: Read, Glob, Grep, Bash, Skill, Agent, Task, SendMessage"
+      - "# Epoch Agent"
+      - "## Owned Phases"
+      - "## Constraints"
+
+  - role: architect
+    must_contain:
+      - "name: architect"
+      - "tools: Read, Glob, Grep, Bash, Skill, Agent, Task, SendMessage"
+      - "# Architect Agent"
+      - "## Owned Phases"
+      - "## Constraints"
+      - "## Behaviors"
+
   - role: supervisor
     must_have_figure_blocks: true
     must_contain:
       - "name: supervisor"
       - "model: opus"
       - "thinking: medium"
-      - "tools: Read, Glob, Grep, Bash, Skill, Agent, Task"
+      - "tools: Read, Glob, Grep, Bash, Skill, Agent, Task, SendMessage"
       - "# Supervisor Agent"
       - "You are a **Supervisor** agent in the Pasture Protocol."
       - "## Owned Phases"
@@ -34,7 +51,7 @@ agent_checks:
     must_contain:
       - "name: worker"
       - "model: sonnet"
-      - "tools: Read, Glob, Grep, Bash, Skill, Edit, Write"
+      - "tools: Read, Glob, Grep, Bash, Skill, Edit, Write, SendMessage"
       - "# Worker Agent"
       - "You are a **Worker** agent in the Pasture Protocol."
       - "C-worker-gates"
@@ -52,7 +69,7 @@ agent_checks:
     must_contain:
       - "name: reviewer"
       - "model: sonnet"
-      - "tools: Read, Glob, Grep, Bash, Skill"
+      - "tools: Read, Glob, Grep, Bash, Skill, SendMessage"
       - "# Reviewer Agent"
       - "You are a **Reviewer** agent in the Pasture Protocol."
       - "## Owned Phases"

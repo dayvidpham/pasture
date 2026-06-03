@@ -27,7 +27,7 @@ role_constraint_checks:
       - C-supervisor-explore-ephemeral
       - C-integration-points
       - C-slice-review-before-close
-      - C-max-review-cycles
+      - C-clean-review-exit
     must_not_contain:
       - C-review-binary        # reviewer only
       - C-proposal-naming      # architect only
@@ -100,7 +100,7 @@ role_constraint_checks:
       - C-supervisor-explore-ephemeral
       - C-integration-points
       - C-slice-review-before-close
-      - C-max-review-cycles
+      - C-clean-review-exit
       - C-audit-never-delete   # general
       - C-audit-dep-chain      # general
       - C-dep-direction         # general
@@ -125,7 +125,7 @@ phase_constraint_checks:
       - C-review-naming
       - C-supervisor-explore-ephemeral
       - C-slice-review-before-close
-      - C-max-review-cycles
+      - C-clean-review-exit
       - C-audit-never-delete   # general
       - C-audit-dep-chain      # general
       - C-dep-direction         # general

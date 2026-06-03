@@ -827,19 +827,21 @@ var handoffSkillInvocations = map[string]map[string]string{
 
 // handoffNotes maps handoff IDs to extra notes.
 var handoffNotes = map[string]string{
-	"h5": "Reviewer hands IMPORTANT/MINOR findings to supervisor, who creates the follow-up epic",
+	"h5": "Reviewer hands code-review findings to supervisor; ALL severity groups must reach 0 before wave close (the FOLLOWUP epic is created later at UAT from user-DEFER'd items, never from review findings)",
 	"h6": "Follow-up specific. Supervisor completes FOLLOWUP_URE and FOLLOWUP_URD,\n      then hands off to architect with scoped findings and requirements\n      for FOLLOWUP_PROPOSAL creation.",
 }
 
 // handoffTriggers maps handoff IDs to trigger strings.
 var handoffTriggers = map[string]string{
-	"h5": "IMPORTANT or MINOR findings exist",
+	"h5": "code-review findings exist (all severities must reach 0 before wave close)",
 	"h6": "follow-up lifecycle only",
 }
 
 func buildHandoffs(buf *bytes.Buffer, depth int) {
 	section := HandoffsSection{
-		StoragePattern: ".git/.aura/handoff/{request-task-id}/{source}-to-{target}.md",
+		// R8/A3: the .git/.aura/handoff filesystem pattern is retired — every handoff
+		// is authored in its Beads task body. Sentinel records that retirement.
+		StoragePattern: "beads-task-body",
 	}
 
 	handoffOrderList := []string{"h1", "h2", "h3", "h4", "h5", "h6"}
@@ -921,16 +923,19 @@ var constraintOrder = []string{
 	"C-clean-review-exit",
 	"C-autonomous-progression",
 	"C-integration-points",
+	"C-interface-first-slices",
 	"C-slice-review-before-close",
-	"C-max-review-cycles",
 	"C-slice-leaf-tasks",
 	"C-handoff-skill-invocation",
+	"C-interview-skill-invocation",
 	"C-dep-direction",
 	"C-frontmatter-refs",
 	"C-agent-commit",
 	"C-proposal-naming",
 	"C-review-naming",
 	"C-ure-verbatim",
+	"C-fix-validation-cases",
+	"C-uat-feedback-disposition",
 	"C-followup-lifecycle",
 	"C-followup-leaf-adoption",
 	"C-worker-gates",

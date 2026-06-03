@@ -102,7 +102,7 @@ var generalConstraints = map[string]bool{
 //   C-supervisor-explore-ephemeral → SUPERVISOR (given: "supervisor needs codebase exploration")
 //   C-integration-points      → SUPERVISOR (given: "multiple vertical slices share types" when: "decomposing IMPL_PLAN")
 //   C-slice-review-before-close → SUPERVISOR (given: "workers complete their implementation slices")
-//   C-max-review-cycles       → SUPERVISOR (given: "per-slice review-fix cycles are ongoing")
+//   C-clean-review-exit       → EPOCH + SUPERVISOR (given: "per-slice code review" — no cycle cap until fix-free clean 0/0/0)
 //   C-slice-leaf-tasks        → SUPERVISOR (given: "vertical slice created" — supervisor creates slices)
 //   C-handoff-skill-invocation→ ARCHITECT + SUPERVISOR (both are sources of handoffs h1 and h2/h3)
 //   C-dep-direction           → ALL (see generalConstraints)
@@ -129,8 +129,8 @@ var roleConstraints = map[types.RoleId]map[string]bool{
 		"C-integration-points": true,
 		// Epoch enforces: slices reviewed before closure; supervisor closes, not workers
 		"C-slice-review-before-close": true,
-		// Epoch enforces: max 3 worker-reviewer cycles; remaining IMPORTANT → FOLLOWUP
-		"C-max-review-cycles": true,
+		// Epoch enforces: review->fix->re-review with no cycle cap until a fix-free clean round (0/0/0)
+		"C-clean-review-exit": true,
 	}),
 	types.RoleArchitect: mergeConstraints(generalConstraints, map[string]bool{
 		// Architect creates proposals → must follow naming convention
@@ -167,8 +167,8 @@ var roleConstraints = map[types.RoleId]map[string]bool{
 		"C-integration-points": true,
 		// Slices must be reviewed before closure
 		"C-slice-review-before-close": true,
-		// Worker-reviewer cycles capped at 3
-		"C-max-review-cycles": true,
+		// Review->fix->re-review with no cycle cap until a fix-free clean round (0/0/0)
+		"C-clean-review-exit": true,
 		// Supervisor assigns vertical slices to workers
 		"C-vertical-slices": true,
 		// Supervisor creates slices and must add leaf tasks
@@ -210,7 +210,7 @@ var roleConstraints = map[types.RoleId]map[string]bool{
 //   C-supervisor-explore-ephemeral → PhaseImplPlan, PhaseWorkerSlices, PhaseCodeReview (ephemeral explore + review)
 //   C-integration-points      → PhaseImplPlan (given: "decomposing IMPL_PLAN in Phase 8")
 //   C-slice-review-before-close → PhaseWorkerSlices, PhaseCodeReview (given: "slice implementation is done")
-//   C-max-review-cycles       → PhaseCodeReview (given: "counting review-fix iterations")
+//   C-clean-review-exit       → PhaseCodeReview (given: "per-slice code review" — no cycle cap until fix-free clean 0/0/0)
 //   C-slice-leaf-tasks        → PhaseImplPlan, PhaseWorkerSlices (vertical slices created in p8, tracked in p9)
 //   C-handoff-skill-invocation→ PhaseHandoff (given: "new phase (especially p7 to p8 handoff)")
 //   C-dep-direction           → ALL phases
@@ -303,8 +303,8 @@ var phaseConstraints = map[protocol.PhaseId]map[string]bool{
 		"C-supervisor-explore-ephemeral": true,
 		// Slices reviewed before closure — supervisor closes after review passes
 		"C-slice-review-before-close": true,
-		// Review-fix cycles capped at 3; remaining IMPORTANTs move to FOLLOWUP
-		"C-max-review-cycles": true,
+		// Review->fix->re-review with no cycle cap until a fix-free clean round (0/0/0)
+		"C-clean-review-exit": true,
 	}),
 	protocol.PhaseImplUAT: mergeConstraints(generalConstraints, map[string]bool{
 		// Implementation UAT → verbatim capture

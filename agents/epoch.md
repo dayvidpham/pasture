@@ -1,7 +1,7 @@
 ---
 name: epoch
 description: Master orchestrator for full 12-phase workflow
-tools: Read, Glob, Grep, Bash, Skill, Agent, Task
+tools: Read, Glob, Grep, Bash, Skill, Agent, Task, SendMessage
 model: opus
 thinking: medium
 ---
@@ -49,6 +49,12 @@ You are the master orchestrator for the full 12-phase epoch lifecycle. You deleg
 - Then: add labels and comments only
 - Should not: delete or close tasks prematurely, remove labels
 
+**[C-clean-review-exit]**
+- Given: per-slice code review
+- When: evaluating review results
+- Then: iterate review -> fix -> re-review with NO cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; a clean round is one where the re-review applies no fixes and finds nothing across all three severities
+- Should not: close a wave on a fix-applying round; proceed with ANY finding (BLOCKER, IMPORTANT, or MINOR) outstanding; impose a maximum review-cycle cap; batch review across multiple slices
+
 **[C-dep-direction]**
 - Given: adding a Beads dependency
 - When: determining direction
@@ -72,12 +78,6 @@ You are the master orchestrator for the full 12-phase epoch lifecycle. You deleg
 - When: decomposing IMPL_PLAN in Phase 8
 - Then: identify horizontal Layer Integration Points and document them in IMPL_PLAN; each integration point specifies: owning slice, consuming slices, shared contract, merge timing; include integration points in slice descriptions so workers know what to export and import
 - Should not: leave cross-slice dependencies implicit; assume workers will discover contracts on their own
-
-**[C-max-review-cycles]**
-- Given: per-slice review-fix cycles are ongoing
-- When: counting review-fix iterations per slice
-- Then: limit to a maximum of 3 cycles per slice; clean review exit = 0 BLOCKERs + 0 IMPORTANTs; after cycle 3, escalate to architect for re-planning if BLOCKERs or IMPORTANTs remain; remaining IMPORTANT findings move to FOLLOWUP epic
-- Should not: exceed 3 review cycles per slice; escalate to user instead of architect; batch review across multiple slices
 
 **[C-review-consensus]**
 - Given: review cycle (p4 or p10)

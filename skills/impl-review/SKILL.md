@@ -38,17 +38,17 @@ See `../protocol/CONSTRAINTS.md` for coding standards and severity definitions.
 - Then: add dual-parent: blocks BOTH the severity group AND the slice
 - Should not: wire BLOCKER to only one parent
 
-**[frag--sup-important-minor-followup]**
-- Given: IMPORTANT or MINOR finding
+**[frag--sup-deferred-followup]**
+- Given: a review finding (BLOCKER, IMPORTANT, or MINOR)
 - When: categorizing
-- Then: add to severity group only (NOT to slice) — these go to follow-up epic
-- Should not: block slices on non-BLOCKER findings
+- Then: track it in its severity group; ALL severity groups must reach 0 before wave close — the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by any review severity
+- Should not: route any review severity (BLOCKER/IMPORTANT/MINOR) to the FOLLOWUP epic; close a wave with any finding outstanding
 
 **[frag--sup-followup-epic-timing]**
-- Given: review complete with IMPORTANT/MINOR
-- When: finishing
-- Then: supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution)
-- Should not: wait for BLOCKERs to resolve before creating follow-up
+- Given: UAT (Phase 5 or 11) produces one or more user-DEFER'd items
+- When: finishing UAT
+- Then: supervisor creates the FOLLOWUP epic from the user-DEFER'd UAT items only
+- Should not: create a FOLLOWUP epic from any review severity (BLOCKER/IMPORTANT/MINOR)
 
 ## Severity Tree (EAGER Creation)
 
@@ -89,7 +89,8 @@ bd dep add <review-round-id> --blocked-by $IMPORTANT_ID
 bd dep add <review-round-id> --blocked-by $MINOR_ID
 # NEVER wire severity groups to IMPL_PLAN or slices directly.
 # BLOCKER findings block slices via dual-parent (see below).
-# IMPORTANT/MINOR route to FOLLOWUP epic only (see Follow-up Epic section).
+# IMPORTANT/MINOR must ALSO reach 0 before wave close — they are NOT routed to FOLLOWUP.
+# The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items (see Follow-up Epic section).
 
 # Step 3: Close empty groups immediately
 # If a group has no findings, close it right away
@@ -137,7 +138,7 @@ bd dep add $BLOCKER_ID --blocked-by $FINDING_ID
 bd dep add <slice-1-id> --blocked-by $FINDING_ID
 ```
 
-Per [frag--sup-important-minor-followup], IMPORTANT/MINOR findings route to severity group only:
+Per [frag--sup-deferred-followup], IMPORTANT/MINOR findings route to severity group only:
 
 ```bash
 # IMPORTANT finding — blocks severity group only

@@ -26,11 +26,18 @@ import (
 // markers. Set keys MUST equal AllFragmentIds (validated by ValidateGlobalIds).
 //
 // SLICE-3 adds: 6 supervisor review-wave behavior fragments (FragSupReview*,
-// FragSupBlockerDualParent, FragSupImportantMinorFollowup,
+// FragSupBlockerDualParent, FragSupDeferredFollowup,
 // FragSupFollowupEpicTiming) and 2 prose fragments (FragSupSeverityTree,
 // FragSupNamingConvention). These replace identical inline definitions in both
 // the supervisor and impl-review skill bodies, eliminating the last same-id
 // collision group. Canonical content = supervisor text.
+//
+// SLICE-1 (epoch improvements) adds: FragFixValidationCases (R6, wired into
+// user-elicit/user-uat/worker-implement bodies by SLICE-2) and FragReviewCleanExit
+// (R7, wired into supervisor/impl-review bodies by SLICE-3). It also renames
+// FragSupImportantMinorFollowup -> FragSupDeferredFollowup (R7/A1): review
+// severities no longer feed FOLLOWUP; the FOLLOWUP epic is fed solely by
+// user-DEFER'd UAT items.
 var SharedFragmentSpecs = map[FragmentId]SharedFragment{
 	FragRevVoteOptions: func() SharedFragment {
 		prose := ProseSection{
@@ -100,15 +107,15 @@ Binary only. No intermediate levels.`,
 		},
 	},
 
-	FragSupImportantMinorFollowup: {
-		Id:   FragSupImportantMinorFollowup,
+	FragSupDeferredFollowup: {
+		Id:   FragSupDeferredFollowup,
 		Kind: FragmentKindBehavior,
 		Behavior: &BehaviorSpec{
-			Id:        string(FragSupImportantMinorFollowup),
-			Given:     "IMPORTANT or MINOR finding",
+			Id:        string(FragSupDeferredFollowup),
+			Given:     "a review finding (BLOCKER, IMPORTANT, or MINOR)",
 			When:      "categorizing",
-			Then:      "add to severity group only (NOT to slice) — these go to follow-up epic",
-			ShouldNot: "block slices on non-BLOCKER findings",
+			Then:      "track it in its severity group; ALL severity groups must reach 0 before wave close — the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by any review severity",
+			ShouldNot: "route any review severity (BLOCKER/IMPORTANT/MINOR) to the FOLLOWUP epic; close a wave with any finding outstanding",
 		},
 	},
 
@@ -117,10 +124,10 @@ Binary only. No intermediate levels.`,
 		Kind: FragmentKindBehavior,
 		Behavior: &BehaviorSpec{
 			Id:        string(FragSupFollowupEpicTiming),
-			Given:     "review complete with IMPORTANT/MINOR",
-			When:      "finishing",
-			Then:      "supervisor creates EPIC_FOLLOWUP immediately (NOT gated on BLOCKER resolution)",
-			ShouldNot: "wait for BLOCKERs to resolve before creating follow-up",
+			Given:     "UAT (Phase 5 or 11) produces one or more user-DEFER'd items",
+			When:      "finishing UAT",
+			Then:      "supervisor creates the FOLLOWUP epic from the user-DEFER'd UAT items only",
+			ShouldNot: "create a FOLLOWUP epic from any review severity (BLOCKER/IMPORTANT/MINOR)",
 		},
 	},
 
@@ -191,7 +198,8 @@ bd dep add <review-round-id> --blocked-by $IMPORTANT_ID
 bd dep add <review-round-id> --blocked-by $MINOR_ID
 # NEVER wire severity groups to IMPL_PLAN or slices directly.
 # BLOCKER findings block slices via dual-parent (see below).
-# IMPORTANT/MINOR route to FOLLOWUP epic only (see Follow-up Epic section).
+# IMPORTANT/MINOR must ALSO reach 0 before wave close — they are NOT routed to FOLLOWUP.
+# The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items (see Follow-up Epic section).
 
 # Step 3: Close empty groups immediately
 # If a group has no findings, close it right away
@@ -258,6 +266,32 @@ Binary only. No severity tree for plan reviews.`,
 			Prose: &prose,
 		}
 	}(),
+
+	// ── SLICE-1 (epoch improvements) behavior fragments ────────────────────────
+
+	FragFixValidationCases: {
+		Id:   FragFixValidationCases,
+		Kind: FragmentKindBehavior,
+		Behavior: &BehaviorSpec{
+			Id:    string(FragFixValidationCases),
+			Given: "a REQUEST whose user intent is to FIX existing behavior",
+			When:  "eliciting (URE), acceptance-testing (UAT), or implementing the fix",
+			Then:  "elicit concrete validation cases (inputs/behaviors that currently fail or must pass), confirm the case set with the user in UAT, evaluate the fix against them, and store failing real-data cases as test fixtures",
+			ShouldNot: "ship a fix without validation cases; introduce a request-type axis or enum to detect fix-intent",
+		},
+	},
+
+	FragReviewCleanExit: {
+		Id:   FragReviewCleanExit,
+		Kind: FragmentKindBehavior,
+		Behavior: &BehaviorSpec{
+			Id:    string(FragReviewCleanExit),
+			Given: "per-slice code review",
+			When:  "evaluating review results",
+			Then:  "iterate review -> fix -> re-review with NO cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR",
+			ShouldNot: "close a wave on a fix-applying round, proceed with any finding outstanding, or impose a maximum cycle cap",
+		},
+	},
 }
 
 // fragRef returns a ProseSection placement marker that references the given

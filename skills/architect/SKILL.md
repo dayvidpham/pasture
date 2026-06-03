@@ -21,7 +21,7 @@ skills: pasture:architect-handoff, pasture:architect-propose-plan, pasture:archi
 | `p4-review` | Review | plan | → `p5-plan-uat` (all 3 reviewers vote ACCEPT); → `p3-propose` (any reviewer votes REVISE) |
 | `p5-plan-uat` | Plan UAT | user | → `p6-ratify` (user accepts plan); → `p3-propose` (user requests changes) |
 | `p6-ratify` | Ratify | plan | → `p7-handoff` (proposal ratified, IMPL_PLAN placeholder created) |
-| `p7-handoff` | Handoff | plan | → `p8-impl-plan` (handoff document stored at .git/.aura/handoff/) |
+| `p7-handoff` | Handoff | plan | → `p8-impl-plan` (handoff authored in the HANDOFF Beads task body) |
 
 ### Commands
 
@@ -123,8 +123,8 @@ bd dep add ure-id --blocked-by request-id
 **[C-ure-verbatim]**
 - Given: user interview (Request, URE, or UAT), URD update, or mid-implementation design decision
 - When: recording in Beads
-- Then: capture full question text, ALL option descriptions, AND user's verbatim response; the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via bd comments add whenever user intent is captured
-- Should not: summarize options as (1)/(2)/(3) without option text, or paraphrase user responses
+- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via bd comments add whenever user intent is captured
+- Should not: summarize options as (1)/(2)/(3) without option text, paraphrase user responses, or omit code/snippets shown inside option previews
 
 _Example (correct)_
 
@@ -263,11 +263,11 @@ Exit conditions:
 - **proceed**: Proposal ratified, IMPL_PLAN placeholder created
 
 ### Stage 7: Handoff _(sequential)_
-- Create handoff document with full inline provenance at .git/.aura/handoff/
+- Author the HANDOFF in its Beads task body with full inline provenance (include the HANDOFF task ID)
 - Transfer to supervisor via /pasture:architect:handoff
 
 Exit conditions:
-- **success**: Handoff document stored at .git/.aura/handoff/, supervisor notified
+- **success**: Handoff authored in the HANDOFF Beads task body, supervisor notified
 
 ##### Architect State Flow — Sequential Planning Phases 1-7
 

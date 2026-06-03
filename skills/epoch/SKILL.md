@@ -20,7 +20,7 @@ description: Master orchestrator for full 12-phase workflow
 | `p4-review` | Review | plan | → `p5-plan-uat` (all 3 reviewers vote ACCEPT); → `p3-propose` (any reviewer votes REVISE) |
 | `p5-plan-uat` | Plan UAT | user | → `p6-ratify` (user accepts plan); → `p3-propose` (user requests changes) |
 | `p6-ratify` | Ratify | plan | → `p7-handoff` (proposal ratified, IMPL_PLAN placeholder created) |
-| `p7-handoff` | Handoff | plan | → `p8-impl-plan` (handoff document stored at .git/.aura/handoff/) |
+| `p7-handoff` | Handoff | plan | → `p8-impl-plan` (handoff authored in the HANDOFF Beads task body) |
 | `p8-impl-plan` | Impl Plan | impl | → `p9-worker-slices` (all slices created with leaf tasks, assigned, and dependency-chained) |
 | `p9-worker-slices` | Worker Slices | impl | → `p10-code-review` (all slices complete, quality gates pass) |
 | `p10-code-review` | Code Review | impl | → `p11-impl-uat` (all 3 reviewers ACCEPT, all BLOCKERs resolved); → `p9-worker-slices` (any reviewer votes REVISE) |
@@ -64,6 +64,12 @@ bd dep add slice-1-id --blocked-by leaf-task-a-id
 - Then: add labels and comments only
 - Should not: delete or close tasks prematurely, remove labels
 
+**[C-clean-review-exit]**
+- Given: per-slice code review
+- When: evaluating review results
+- Then: iterate review -> fix -> re-review with NO cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; a clean round is one where the re-review applies no fixes and finds nothing across all three severities
+- Should not: close a wave on a fix-applying round; proceed with ANY finding (BLOCKER, IMPORTANT, or MINOR) outstanding; impose a maximum review-cycle cap; batch review across multiple slices
+
 **[C-dep-direction]**
 - Given: adding a Beads dependency
 - When: determining direction
@@ -99,12 +105,6 @@ bd dep add ure-id --blocked-by request-id
 - When: decomposing IMPL_PLAN in Phase 8
 - Then: identify horizontal Layer Integration Points and document them in IMPL_PLAN; each integration point specifies: owning slice, consuming slices, shared contract, merge timing; include integration points in slice descriptions so workers know what to export and import
 - Should not: leave cross-slice dependencies implicit; assume workers will discover contracts on their own
-
-**[C-max-review-cycles]**
-- Given: per-slice review-fix cycles are ongoing
-- When: counting review-fix iterations per slice
-- Then: limit to a maximum of 3 cycles per slice; clean review exit = 0 BLOCKERs + 0 IMPORTANTs; after cycle 3, escalate to architect for re-planning if BLOCKERs or IMPORTANTs remain; remaining IMPORTANT findings move to FOLLOWUP epic
-- Should not: exceed 3 review cycles per slice; escalate to user instead of architect; batch review across multiple slices
 
 **[C-review-consensus]**
 - Given: review cycle (p4 or p10)

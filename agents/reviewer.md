@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: End-user alignment reviewer for plans and code
-tools: Read, Glob, Grep, Bash, Skill
+tools: Read, Glob, Grep, Bash, Skill, SendMessage
 model: sonnet
 ---
 
