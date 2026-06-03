@@ -1,4 +1,4 @@
-// Package codegen_test — epoch-improvements guards (G2–G5).
+// Package codegen_test — epoch-improvements guards (G2–G6 + M2).
 //
 // These guards enforce the invariants introduced by the pasture epoch-protocol
 // improvements epoch (RATIFIED PROPOSAL-5, aura-plugins-v1xg8). They are
@@ -20,11 +20,24 @@
 //     ONLY and names NO review severity (BLOCKER/IMPORTANT/MINOR) as a
 //     FOLLOWUP source. SLICE-5 widens the target set to epoch-followup-trigger
 //     and the supervisor-body routing sites once SLICE-3 rewords them.
+//   - G4 (TestG4_SupervisorBodyNeverRoutesSeverityToFollowup): the SLICE-5
+//     widening of G4 — the supervisor-body + epoch-followup-trigger routing sites
+//     route the FOLLOWUP epic from user-DEFER'd UAT items ONLY and name NO review
+//     severity as a FOLLOWUP source.
 //   - G5 (TestG5_InlineFragmentTokensResolve): every inline `[frag--<kebab>]`
 //     token in any generated SKILL.md resolves to a live SharedFragmentSpecs
 //     kebab, and the retired token `frag--sup-important-minor-followup` appears
 //     in ZERO generated outputs (closes the inline-reference gap that structural
 //     fragRef/behaviorRef parity does not cover).
+//   - G6 (TestG6_NoStaleCycleCapOrSeverityRoutingProse): no retired pre-R7/A1
+//     regime prose (numeric cycle cap, or a review severity routed to a follow-up
+//     epic) remains in any generated skills/*/SKILL.md or agents/*.md — the
+//     recurrence guard for the free-text figure/ASCII/table surfaces that the
+//     structural guards above do not sweep (review round 1, finding B3).
+//   - M2 (TestR6FixValidationCasesRenders): the R6 FragFixValidationCases
+//     instruction actually renders into the generated worker-implement and
+//     reviewer-review-code SKILL.md (positive render-assertion; review round 1,
+//     finding M2).
 package codegen_test
 
 import (
