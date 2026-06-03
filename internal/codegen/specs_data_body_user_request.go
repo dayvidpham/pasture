@@ -35,10 +35,10 @@ var userRequestBody = SkillBody{
 			ShouldNot: "skip to proposal",
 		},
 		{
-			Id:    "user-req-fix-intent",
-			Given: "a request whose user intent is to FIX existing behavior (a bug, regression, or incorrect output)",
-			When:  "classifying in Phase 1",
-			Then: "recognize the fix-intent SEMANTICALLY during classification (record it in the classification comment) so the validation-case lifecycle is triggered downstream in URE/UAT/impl",
+			Id:        "user-req-fix-intent",
+			Given:     "a request whose user intent is to FIX existing behavior (a bug, regression, or incorrect output)",
+			When:      "classifying in Phase 1",
+			Then:      "recognize the fix-intent SEMANTICALLY during classification (record it in the classification comment) so the validation-case lifecycle is triggered downstream in URE/UAT/impl",
 			ShouldNot: "introduce a request-type axis or enum to detect fix-intent — recognition is semantic, not a fifth classification axis",
 		},
 		// R6/A2: surface the shared fix-validation-cases lifecycle at the

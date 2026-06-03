@@ -288,3 +288,125 @@ func TestG5_InlineFragmentTokensResolve(t *testing.T) {
 		}
 	}
 }
+
+// ─── G6: recurrence guard — no stale cap / severity-routing prose ─────────────
+//
+// B3 (review round 1): no guard swept free-text figure/ASCII/table surfaces, so
+// the pre-R7/A1 regime (3-cycle cap; review IMPORTANT/MINOR fed into FOLLOWUP)
+// survived in rendered outputs (ride-the-wave figure, supervisor body tables)
+// while structural guards G2-G5 stayed green. G6 sweeps every generated
+// skills/*/SKILL.md and agents/*.md for that retired prose.
+//
+// Each forbidden pattern is paired with a documented stale exemplar (the actual
+// pre-fix phrasing). TestG6 first asserts every pattern matches its own
+// exemplar — a non-vacuity check so a typo that silently disables a pattern is
+// itself caught (the same mutation discipline Reviewer B applied to G2-G5).
+
+// staleRegimePattern pairs a forbidden regex with the pre-fix phrasing it must catch.
+type staleRegimePattern struct {
+	name     string
+	re       *regexp.Regexp
+	exemplar string
+}
+
+// staleRegimePatterns enumerates the retired pre-R7/A1 prose forms. Patterns
+// require an affirmative routing target ("follow-up epic") or a numeric cycle
+// cap, so legitimate negated text ("NOT routed to FOLLOWUP", "no cycle cap")
+// and the DEFER'd-items tracking-group wording do NOT match.
+var staleRegimePatterns = []staleRegimePattern{
+	// Cycle-cap forms (a digit bound to cycles / per-slice).
+	{"cap-max-n", regexp.MustCompile(`(?i)max(imum)?(\s+of)?\s+\d+\s+(review\s+)?(cycles?|per slice)`), "Phase 10: REVIEW + FIX CYCLES (max 3 per slice)"},
+	{"cap-n-cycles", regexp.MustCompile(`(?i)\b\d+\s+(review\s+)?cycles?\s+(per slice|exhausted|total)`), "Repeat steps 4-6 up to 3 cycles total"},
+	{"cap-after-n", regexp.MustCompile(`(?i)after\s+\d+\s+cycles?`), "After 3 cycles per slice: escalate to architect"},
+	{"cap-exhausted", regexp.MustCompile(`(?i)cycles?\s+exhausted`), "3 cycles exhausted, IMPORTANT remain"},
+	// Review-severity-routed-to-FOLLOWUP forms (affirmative routing to a follow-up epic).
+	{"route-tracked-epic", regexp.MustCompile(`(?i)track(ed|s)?[^.\n]{0,40}follow-?up epic`), "findings are tracked on the existing follow-up epic"},
+	{"route-goes-to-epic", regexp.MustCompile(`(?i)goes to (the )?follow-?up epic`), "IMPORTANT | No | Goes to follow-up epic"},
+	{"route-epic-if-any", regexp.MustCompile(`(?i)follow-?up epic if any`), "Create FOLLOWUP epic if ANY IMPORTANT/MINOR findings"},
+	{"route-track-in-followup", regexp.MustCompile(`(?i)track in follow-?up`), "3 cycles exhausted, IMPORTANT remain -> Track in FOLLOWUP"},
+}
+
+// g6ScopedFiles returns every generated skills/*/SKILL.md and agents/*.md.
+func g6ScopedFiles(t *testing.T, root string) []string {
+	t.Helper()
+	var files []string
+	for _, glob := range []string{
+		filepath.Join(root, "skills", "*", "SKILL.md"),
+		filepath.Join(root, "agents", "*.md"),
+	} {
+		matched, err := filepath.Glob(glob)
+		require.NoError(t, err, "G6: globbing %q failed", glob)
+		files = append(files, matched...)
+	}
+	require.NotEmpty(t, files,
+		"G6: no generated skills/*/SKILL.md or agents/*.md found under %q — the guard would vacuously pass", root)
+	return files
+}
+
+// TestG6_NoStaleCycleCapOrSeverityRoutingProse asserts no retired pre-R7/A1
+// regime prose (cycle cap, or review severity routed to a follow-up epic)
+// remains in any generated skill/agent output.
+func TestG6_NoStaleCycleCapOrSeverityRoutingProse(t *testing.T) {
+	root := repoRoot(t)
+
+	// Non-vacuity: every pattern must match its own documented stale exemplar.
+	for _, p := range staleRegimePatterns {
+		require.Truef(t, p.re.MatchString(p.exemplar),
+			"G6: pattern %q does not match its own stale exemplar %q — the regex is broken/vacuous; fix the pattern before relying on the sweep",
+			p.name, p.exemplar)
+	}
+
+	for _, file := range g6ScopedFiles(t, root) {
+		data, err := os.ReadFile(file)
+		require.NoError(t, err, "G6: reading %q failed", file)
+		content := string(data)
+		rel, _ := filepath.Rel(root, file)
+
+		for _, p := range staleRegimePatterns {
+			loc := p.re.FindStringIndex(content)
+			if loc == nil {
+				continue
+			}
+			assert.Failf(t, "G6: stale pre-R7/A1 regime prose found",
+				"G6: generated file %q matches retired-regime pattern %q (matched text: %q) — "+
+					"R7/A1 retired the cycle-cap + severity-fed-FOLLOWUP regime. Fix: code review iterates "+
+					"review->fix->re-review with NO cycle cap until a fix-free clean round confirms 0/0/0, and "+
+					"the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items (never review severities). "+
+					"Update the source spec/figure (e.g. skills/protocol/figures/ride-the-wave.yaml or "+
+					"specs_data_body*.go) and regenerate.",
+				rel, p.name, content[loc[0]:loc[1]])
+		}
+	}
+}
+
+// ─── M2: positive render-assertion for the R6 FragFixValidationCases step ─────
+
+// TestR6FixValidationCasesRenders asserts the FragFixValidationCases (R6)
+// instruction actually renders into the generated worker-implement and
+// reviewer-review-code SKILL.md (the behaviorRef wiring is otherwise only
+// transitively covered).
+func TestR6FixValidationCasesRenders(t *testing.T) {
+	root := repoRoot(t)
+
+	frag, ok := codegen.SharedFragmentSpecs[codegen.FragFixValidationCases]
+	require.Truef(t, ok && frag.Behavior != nil,
+		"M2: FragFixValidationCases behavior fragment missing from SharedFragmentSpecs")
+
+	// Stable substring of the canonical Then that must render verbatim wherever
+	// the fragment is behaviorRef'd.
+	const needle = "store failing real-data cases as test fixtures"
+	require.Containsf(t, frag.Behavior.Then, needle,
+		"M2: FragFixValidationCases.Then no longer contains the assertion needle %q — update the needle to a current stable substring", needle)
+
+	for _, rel := range []string{
+		"skills/worker-implement/SKILL.md",
+		"skills/reviewer-review-code/SKILL.md",
+	} {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		require.NoErrorf(t, err, "M2: reading %q failed", rel)
+		assert.Containsf(t, string(data), needle,
+			"M2: generated %q does not render the FragFixValidationCases (R6) instruction %q — "+
+				"the behaviorRef(FragFixValidationCases) wiring is missing or the fragment was not embedded; "+
+				"re-add the behaviorRef in the body spec and regenerate.", rel, needle)
+	}
+}

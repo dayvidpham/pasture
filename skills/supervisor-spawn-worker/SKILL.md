@@ -27,25 +27,24 @@ Phase 9: BUILD
   ├─ Workers implement their slices in parallel
   └─ Workers do NOT shut down when finished
 
-Phase 10: REVIEW + FIX CYCLES (max 3 per slice)
+Phase 10: REVIEW + FIX CYCLES (no cycle cap — iterate until 0/0/0 clean)
   ├─ Cycle 1:
   │   ├─ Spawn ephemeral reviewers (Task tool, per-slice review)
   │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
-  │   ├─ Create FOLLOWUP epic if ANY IMPORTANT/MINOR findings
-  │   ├─ Workers fix BLOCKERs + IMPORTANTs with atomic commits
+  │   ├─ Workers fix ALL findings (BLOCKER + IMPORTANT + MINOR) with atomic commits
   │   └─ Spawn new ephemeral reviewers for re-review
   ├─ Cycle 2 (if needed): same pattern
-  ├─ Cycle 3 (if needed): same pattern
-  └─ After 3 cycles per slice: escalate to architect for re-planning
+  ├─ Cycle N (as many as needed): same pattern
+  └─ Continue until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR
 
 DONE → Phase 11 (UAT)
-  └─ Shut down Workers
+  ├─ Shut down Workers
+  └─ FOLLOWUP epic (if any) is created at UAT from user-DEFER'd items only
 
 Cycle Exit Conditions:
-  All reviewers ACCEPT, 0 BLOCKERs + 0 IMPORTANTs     → Proceed to Phase 11 (UAT)
-  BLOCKERs or IMPORTANTs remain, cycles < 3 per slice → Workers fix, spawn new ephemeral reviewers
-  3 cycles exhausted, IMPORTANT remain                → Track in FOLLOWUP, proceed to Phase 11
-  3 cycles exhausted per slice, BLOCKERs remain       → Escalate to architect for re-planning
+  Fix-free clean round: 0 BLOCKER + 0 IMPORTANT + 0 MINOR   → Proceed to Phase 11 (UAT)
+  ANY finding remains (BLOCKER/IMPORTANT/MINOR)             → Workers fix, spawn new ephemeral reviewers (no cap)
+  Genuinely stuck (cannot reach a clean round)             → Escalate to architect for re-planning
 
 ```
 

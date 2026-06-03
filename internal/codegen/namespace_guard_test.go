@@ -40,7 +40,7 @@
 // (The former `.git/.aura/handoff/...` storage-path allowlist entry was removed:
 // R8/A3 retired that filesystem pattern entirely — handoffs are authored in the
 // Beads task body — so no such path should remain in any generated output. The
-// G2 guard (TestHandoffPathGuard_NoStorageHandoffPaths) enforces its absence.)
+// G2 guard (TestG2_NoHandoffStoragePaths) enforces its absence.)
 package codegen_test
 
 import (

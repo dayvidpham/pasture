@@ -253,8 +253,8 @@ The FOLLOWUP epic is **not** created from review findings. ALL review severities
 When reviewing follow-up slices, use the same procedure:
 - **Review task naming:** `FOLLOWUP_SLICE-N-REVIEW-{axis}-{round}`
 - **Same EAGER severity tree** (BLOCKER/IMPORTANT/MINOR per review round)
-- **No followup-of-followup:** New IMPORTANT/MINOR findings from FOLLOWUP_SLICE review are tracked on the existing follow-up epic, not a new nested follow-up
-- The worker's completion handoff (h4) reports which original leaf tasks were resolved — verify these during review
+- **All severities reach 0:** ALL findings (BLOCKER/IMPORTANT/MINOR) in a FOLLOWUP_SLICE review must also reach 0 before the follow-up wave closes — they are **never** re-routed to a follow-up epic (no followup-of-followup; the FOLLOWUP epic is fed only by user-DEFER'd UAT items)
+- The worker's completion handoff (h4) reports which DEFER'd-item leaf tasks were resolved — verify these during review
 
 ## Report Results
 
