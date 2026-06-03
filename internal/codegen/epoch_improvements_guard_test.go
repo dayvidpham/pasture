@@ -54,10 +54,21 @@ var inlineFragTokenRe = regexp.MustCompile(`\[(frag--[a-z0-9-]+)\]`)
 
 // ─── G2: handoff storage path absence ────────────────────────────────────────
 
-// g2ScopedFiles returns the SLICE-1-owned generated surface swept by G2:
-// the root schema.xml and every agents/*.md. SLICE-5 widens this to include
-// skills/*/SKILL.md once SLICE-3 (bodies) and SLICE-4 (protocol docs) remove
-// their handoff-path prose (A3: "G2 widened [SLICE-1 guard; SLICE-5 final sweep]").
+// g2ScopedFiles returns the generated surface swept by G2: the root schema.xml,
+// every agents/*.md, and (SLICE-5 widening) every skills/*/SKILL.md.
+//
+// SLICE-1 authored this guard against the schema.xml + agents/*.md it owned and
+// documented the widening point (A3: "G2 widened [SLICE-1 guard; SLICE-5 final
+// sweep]"). SLICE-5 widens the scope to skills/*/SKILL.md now that SLICE-3
+// (bodies) and SLICE-4 (protocol docs) have dropped their handoff-path prose —
+// the generated SKILL.md outputs must be verified handoff-path-free too.
+//
+// The skills/*/SKILL.md glob deliberately matches ONLY the generated SKILL.md
+// in each skill directory (including skills/protocol/SKILL.md, which is clean).
+// It does NOT match the other hand-authored skills/protocol/*.md docs
+// (CLAUDE.md, CONSTRAINTS.md, AGENTS.md, PROCESS.md, HANDOFF_TEMPLATE.md), which
+// legitimately mention ".git/.aura/handoff" in EXPLANATORY "R8/A3 retired the
+// ... pattern" migration text — those are intentional and out of scope for G2.
 func g2ScopedFiles(t *testing.T, root string) []string {
 	t.Helper()
 
@@ -67,7 +78,14 @@ func g2ScopedFiles(t *testing.T, root string) []string {
 	require.NotEmpty(t, agentFiles,
 		"G2: no agents/*.md found under %q — the guard would vacuously pass", root)
 
+	skillGlob := filepath.Join(root, "skills", "*", "SKILL.md")
+	skillFiles, err := filepath.Glob(skillGlob)
+	require.NoError(t, err, "G2: globbing %q failed", skillGlob)
+	require.NotEmpty(t, skillFiles,
+		"G2: no skills/*/SKILL.md found under %q — the SLICE-5 widening would vacuously pass", root)
+
 	files := append([]string{}, agentFiles...)
+	files = append(files, skillFiles...)
 	files = append(files, filepath.Join(root, "schema.xml"))
 	return files
 }
@@ -115,8 +133,32 @@ func TestG3_SliceLeafTasksFlexibleCount(t *testing.T) {
 
 // ─── G4: FOLLOWUP routes DEFER-only ──────────────────────────────────────────
 
-// g4FollowupThens returns the resolved FOLLOWUP-routing texts owned by SLICE-1,
-// keyed by a human label for failure messages.
+// bodyBehaviorById returns the BehaviorSpec with the given Id from the named
+// SkillBodySpecs body, failing the test if either the body or the behavior is
+// absent. Used to reach SLICE-3-owned body-local routing behaviors that are not
+// shared fragments (e.g. epoch-followup-trigger, sup-followup-deps).
+func bodyBehaviorById(t *testing.T, skillKey, behaviorId string) codegen.BehaviorSpec {
+	t.Helper()
+
+	body, ok := codegen.SkillBodySpecs[skillKey]
+	require.Truef(t, ok, "G4: SkillBodySpecs[%q] body missing", skillKey)
+	for _, beh := range body.Behaviors {
+		if beh.Id == behaviorId {
+			return beh
+		}
+	}
+	t.Fatalf("G4: behavior %q not found in SkillBodySpecs[%q] — SLICE-3 reword target is missing", behaviorId, skillKey)
+	return codegen.BehaviorSpec{}
+}
+
+// g4FollowupThens returns the resolved positive FOLLOWUP-source routing texts,
+// keyed by a human label for failure messages. Each Then clause is a positive
+// statement of where the FOLLOWUP epic is sourced from, so it must name DEFER
+// and must NOT name any review severity.
+//
+// SLICE-1 owns the three shared fragments; SLICE-5 widens the set to include the
+// SLICE-3-reworded body-local routing behavior epoch-followup-trigger (epoch
+// body), whose Then clause is itself a positive DEFER-only source statement.
 func g4FollowupThens(t *testing.T) map[string]string {
 	t.Helper()
 
@@ -136,6 +178,10 @@ func g4FollowupThens(t *testing.T) map[string]string {
 	require.True(t, ok, "G4: C-followup-timing constraint missing")
 	out["C-followup-timing"] = timingC.Then
 
+	// SLICE-5 widening: epoch body's FOLLOWUP trigger (SLICE-3 reworded DEFER-only).
+	epochTrigger := bodyBehaviorById(t, "epoch", "epoch-followup-trigger")
+	out["epoch-followup-trigger"] = epochTrigger.Then
+
 	return out
 }
 
@@ -154,6 +200,40 @@ func TestG4_FollowupRoutesDeferOnly(t *testing.T) {
 		assert.NotContains(t, upper, "MINOR",
 			"G4: %s.Then must NOT name MINOR as a FOLLOWUP source (R7/A1: all review severities reach 0; FOLLOWUP is DEFER-fed) — got %q", label, then)
 	}
+}
+
+// TestG4_SupervisorBodyNeverRoutesSeverityToFollowup asserts the supervisor-body
+// severity-routing behavior (sup-followup-deps, SLICE-3-owned) keeps review
+// severities OUT of the FOLLOWUP epic. Unlike the positive DEFER-source texts in
+// g4FollowupThens, this behavior discusses IMPORTANT/MINOR explicitly — but only
+// to route them to the review round (Then) and to forbid routing them to the
+// FOLLOWUP epic (ShouldNot). The strict "no severity token" check therefore does
+// NOT apply; instead this asserts the spec invariant directly (R7/A1):
+//
+//   - the POSITIVE instruction (Then) routes severities to the review round and
+//     must NOT route any severity INTO a FOLLOWUP epic, so it must not mention
+//     "follow-up"/"followup"; and
+//   - the behavior must affirm that the FOLLOWUP epic is DEFER-fed and that
+//     severities are explicitly forbidden from it (ShouldNot names both DEFER
+//     and FOLLOWUP in a forbidding clause).
+//
+// This is the supervisor-body counterpart to epoch-followup-trigger (which is a
+// positive DEFER-source text and is checked by TestG4_FollowupRoutesDeferOnly).
+func TestG4_SupervisorBodyNeverRoutesSeverityToFollowup(t *testing.T) {
+	beh := bodyBehaviorById(t, "supervisor", "sup-followup-deps")
+
+	thenUpper := strings.ToUpper(beh.Then)
+	// The positive routing instruction sends severities to the review round,
+	// never to a follow-up epic — so it must not mention follow-up at all.
+	assert.NotContains(t, thenUpper, "FOLLOW",
+		"G4: sup-followup-deps.Then must route IMPORTANT/MINOR severity groups to their REVIEW ROUND only, "+
+			"never into a FOLLOWUP epic (R7/A1: all review severities reach 0 before wave close) — got %q", beh.Then)
+
+	shouldNotUpper := strings.ToUpper(beh.ShouldNot)
+	assert.Contains(t, shouldNotUpper, "DEFER",
+		"G4: sup-followup-deps.ShouldNot must affirm the FOLLOWUP epic is fed solely by user-DEFER'd UAT items (R7/A1) — got %q", beh.ShouldNot)
+	assert.Contains(t, shouldNotUpper, "FOLLOWUP",
+		"G4: sup-followup-deps.ShouldNot must explicitly forbid routing IMPORTANT/MINOR severity groups to the FOLLOWUP epic (R7/A1) — got %q", beh.ShouldNot)
 }
 
 // ─── G5: inline fragment-token resolvability + retired-token absence ──────────
