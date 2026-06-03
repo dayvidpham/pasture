@@ -80,6 +80,12 @@ L2 Test File Requirements:
 - Then: include each integration point in the relevant slice descriptions so workers know what they must export and what they may import
 - Should not: assume workers will discover cross-slice contracts on their own
 
+**[sup-plan-interface-first]**
+- Given: slices that share types, interfaces, or contracts (R3, per C-interface-first-slices)
+- When: deciding decomposition order
+- Then: prefer extracting a horizontal interface-first FOUNDATION slice (all public types/interfaces/contracts) that lands first, so the dependent implementation slices can compile against the contracts and run in PARALLEL
+- Should not: force a linear slice chain (A->B->C) when the runtime dependency is only on interfaces that could be exported up front
+
 ## When to Use
 
 Received handoff from architect with RATIFIED_PLAN task ID and placeholder IMPL_PLAN task.
@@ -150,6 +156,8 @@ SLICE-2: "feature detail command" (Worker B owns full vertical)
    | IP-2 | ConstraintContext interface | SLICE-1 (foundation) | SLICE-2 (gen_schema) | L1 (types) |
    | IP-3 | SkillRegistry protocol | SLICE-3 (gen_skills) | SLICE-4 (context_injection) | L3 (impl) |
    ```
+
+   **Interface-first decomposition (R3, Strong SHOULD — see `C-interface-first-slices`):** when slices share contracts, prefer extracting a horizontal **interface-first FOUNDATION slice** that exports ALL public types/interfaces/contracts and lands FIRST (a barrier). The dependent implementation slices then compile against those contracts and run in **parallel**, instead of being forced into a linear `A → B → C` chain whose only real coupling is at the interface boundary. Reserve a linear chain for cases where the runtime dependency genuinely exceeds the interface.
 
 6. **Create vertical slice tasks:**
    ```bash
@@ -404,7 +412,7 @@ references:
 ---
 Vertical slice decomposition for follow-up epic."
 
-# Create FOLLOWUP_SLICE-N with adopted leaf tasks
+# Create FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks
 bd create --type=task \
   --labels="pasture:p9-impl:s9-slice" \
   --title="FOLLOWUP_SLICE-1: <description>" \
@@ -413,21 +421,21 @@ references:
   followup_impl_plan: <followup-impl-plan-id>
   followup_urd: <followup-urd-id>
 ---
-## Adopted Leaf Tasks
-| Leaf Task ID | Severity | Original Slice | Description |
+## DEFER'd-Item Leaf Tasks
+| Leaf Task ID | Source UAT | DEFER'd Item | Description |
 |---|---|---|---|
-| <leaf-id-1> | IMPORTANT | SLICE-1 | <description> |
-| <leaf-id-2> | MINOR | SLICE-2 | <description> |
+| <leaf-id-1> | <uat-id> | <deferred-item-id> | <description> |
+| <leaf-id-2> | <uat-id> | <deferred-item-id> | <description> |
 
 ## Specification
 <detailed spec>
 
 ## Validation Checklist
-- [ ] All adopted leaf tasks resolved
+- [ ] All DEFER'd-item leaf tasks resolved
 - [ ] Tests pass
 - [ ] Production code path verified"
 
-# Wire dual-parent for adopted leaf tasks
+# Wire dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice
 bd dep add <followup-slice-id> --blocked-by <leaf-task-id-1>
 bd dep add <followup-slice-id> --blocked-by <leaf-task-id-2>
 ```

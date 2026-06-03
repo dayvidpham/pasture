@@ -434,7 +434,7 @@ bd comments add <urd-id> "Ratified: scope confirmed as <summary>"
 
 ### Phase 7: HANDOFF
 
-Create handoff document and task:
+Create the HANDOFF task — its body IS the handoff document:
 ```bash
 bd create --type=task --priority=2 \
   --title "HANDOFF: Architect → Supervisor for REQUEST" \
@@ -444,12 +444,12 @@ references:
   urd: <urd-id>
   proposal: <ratified-proposal-id>
 ---
-Handoff from architect to supervisor. See handoff document at
-.git/.aura/handoff/<request-id>/architect-to-supervisor.md" \
+# Handoff: Architect → Supervisor
+<full handoff body — the task body IS the handoff>" \
   --add-label "pasture:p7-plan:s7-handoff"
 ```
 
-Storage: `.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`
+Storage: the handoff is authored in this HANDOFF Beads task body (no filesystem path).
 
 ## Plan Structure
 
@@ -492,7 +492,7 @@ references:
   followup_urd: <followup-urd-id>
   followup_epic: <followup-epic-id>
 ---
-<proposal content addressing scoped IMPORTANT/MINOR findings>"
+<proposal content addressing the scoped user-DEFER'd UAT items>"
 ```
 
 The same review/ratify/UAT/handoff cycle (Phases 3-7) applies. After FOLLOWUP_PROPOSAL is ratified, hand off to supervisor via h1 for FOLLOWUP_IMPL_PLAN creation.
@@ -509,20 +509,22 @@ Task(description: "Reviewer C: elegance", prompt: "You are Reviewer C (Elegance)
 
 ## Supervisor Handoff
 
-**DO NOT** spawn supervisor as a Task tool subagent. Instead, invoke:
+**DO NOT** spawn the supervisor as a Task tool subagent or via `aura-swarm` for the IMPL_PLAN phase. Instead, invoke:
 
 ```
 Skill(skill: "pasture:architect-handoff")
 ```
 
 The handoff skill guides you through:
-1. Creating the handoff document at `.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`
-2. Launching supervisor via `aura-swarm start --swarm-mode intree --role supervisor -n 1` or `aura-swarm start --epic <id>`
+1. Authoring the handoff in a HANDOFF Beads task body (no filesystem path)
+2. Launching the supervisor (and workers) as **Opus** teammates via TeamCreate, then assigning work via SendMessage
 
-**CRITICAL:** The supervisor launch prompt MUST:
+**CRITICAL:** The supervisor assignment MUST:
 1. **Start with `Skill(/pasture:supervisor)`** — this loads the supervisor's role instructions, including leaf task creation
 2. Include all Beads task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)
-3. Include the handoff document path
+3. Reference the HANDOFF Beads task ID — the handoff is in that task body
+
+A supervisor that appears idle right after spawn is usually running Explore subagents — do **not** shut it down pre-emptively.
 
 **DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks from the ratified plan.
 <!-- END GENERATED FROM pasture schema -->

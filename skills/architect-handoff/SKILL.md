@@ -13,14 +13,20 @@ description: Create handoff document and transfer to supervisor
 **[arch-handoff-link-proposal]**
 - Given: ratified PROPOSAL-N task
 - When: handing off
-- Then: create handoff document and HANDOFF task, linking to ratified proposal
+- Then: author the handoff in a HANDOFF Beads task body, linking to the ratified proposal
 - Should not: hand off without linking to ratified proposal
 
 **[arch-handoff-spawn-supervisor]**
-- Given: handoff
-- When: spawning supervisor
-- Then: use `aura-swarm start --swarm-mode intree --role supervisor` or `aura-swarm start --epic <id>`
-- Should not: spawn supervisor as Task tool subagent
+- Given: handoff for the IMPL_PLAN phase
+- When: spawning the supervisor
+- Then: use TeamCreate to spawn the supervisor as an Opus teammate (workers also Opus), then assign work via SendMessage
+- Should not: spawn the supervisor as a Task tool subagent or via aura-swarm for the IMPL_PLAN phase
+
+**[arch-handoff-supervisor-not-idle]**
+- Given: a freshly spawned supervisor
+- When: it dispatches Explore subagents and appears idle
+- Then: let it work — an apparently-idle supervisor is usually running Explore subagents to map the codebase before decomposing slices
+- Should not: shut down or restart a supervisor that looks idle at the start of the IMPL_PLAN phase
 
 **[arch-handoff-no-impl-tasks]**
 - Given: implementation planning
@@ -34,7 +40,7 @@ Plan ratified and user has approved proceeding with implementation.
 
 ## Handoff Template
 
-Storage: `.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`
+Storage: the handoff is authored directly in the **HANDOFF Beads task body** (no filesystem path; the task body IS the handoff).
 
 ```markdown
 # Handoff: Architect → Supervisor
@@ -43,7 +49,7 @@ Storage: `.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`
 1. Call `Skill(/pasture:supervisor)` to load your role instructions
 2. Spawn ephemeral Explore subagents via Task tool when codebase exploration is needed
 3. Read the RATIFIED PROPOSAL and URD with `bd show` commands below
-4. Every vertical slice MUST have leaf tasks (L1: types, L2: tests, L3: impl)
+4. Every vertical slice MUST have leaf tasks — any number, named after the real work units (the L1 types / L2 tests / L3 impl triple is only illustrative)
 
 ## References
 - REQUEST: <request-task-id>
@@ -68,13 +74,7 @@ Storage: `.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`
 
 ## Steps
 
-1. Create the handoff document:
-   ```bash
-   mkdir -p .git/.aura/handoff/<request-task-id>/
-   # Write architect-to-supervisor.md with the template above
-   ```
-
-2. Create HANDOFF Beads task:
+1. Create the HANDOFF Beads task — its body IS the handoff document (use the template above):
    ```bash
    bd create --type=task --priority=2 \
      --title="HANDOFF: Architect → Supervisor for REQUEST" \
@@ -84,34 +84,30 @@ Storage: `.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`
      urd: <urd-task-id>
      proposal: <ratified-proposal-id>
    ---
-   Handoff from architect to supervisor. See handoff document at
-   .git/.aura/handoff/<request-task-id>/architect-to-supervisor.md" \
+   # Handoff: Architect → Supervisor
+   <full handoff body per the template above>" \
      --add-label "pasture:p7-plan:s7-handoff"
 
    bd dep add <request-id> --blocked-by <handoff-id>
    ```
 
-3. Launch supervisor:
-   ```bash
-   # In-place mode (long-running supervisor in tmux session)
-   aura-swarm start --swarm-mode intree --role supervisor -n 1 --prompt "..."
-
-   # Or worktree mode (epic-based workflow)
-   aura-swarm start --epic <id>
+2. Launch the supervisor as an **Opus teammate** via TeamCreate (the IMPL_PLAN phase runs as an Agent Team, not aura-swarm):
+   ```
+   TeamCreate({ team_name: "<epoch>-impl", ... })          # supervisor + workers as Opus teammates
+   # then assign the supervisor its task via SendMessage (see Example Prompt below)
    ```
 
-4. Monitor supervisor progress:
+3. Monitor supervisor progress:
    ```bash
    # Check beads status
    bd list --status=in_progress
-
-   # Attach to supervisor session
-   aura-swarm attach <epic-id-or-session-id>
    ```
+
+   A supervisor that looks idle right after spawn is usually running Explore subagents — do **not** shut it down pre-emptively.
 
 ## Example Prompt
 
-**CRITICAL:** The prompt MUST instruct the supervisor to invoke `/pasture:supervisor` as its first action. Without this, the supervisor agent starts without its role instructions and skips leaf task creation, ephemeral exploration, and other critical procedures.
+**CRITICAL:** The SendMessage assignment MUST instruct the supervisor to invoke `/pasture:supervisor` as its first action. Without this, the supervisor agent starts without its role instructions and skips leaf task creation, ephemeral exploration, and other critical procedures.
 
 ```
 Start by calling `Skill(/pasture:supervisor)` to load your role instructions.
@@ -122,8 +118,7 @@ Implement the ratified plan for <feature name>.
 - REQUEST: <request-task-id>
 - URD: <urd-task-id> (read with `bd show <urd-id>` for user requirements)
 - RATIFIED PROPOSAL: <ratified-proposal-id>
-- HANDOFF: <handoff-task-id>
-- Handoff document: .git/.aura/handoff/<request-task-id>/architect-to-supervisor.md
+- HANDOFF: <handoff-task-id> (the handoff body — read with `bd show <handoff-id>`)
 
 ## Summary
 <1-2 sentence summary of what needs to be implemented>
@@ -137,15 +132,16 @@ Implement the ratified plan for <feature name>.
 ## Reminders
 1. Call `Skill(/pasture:supervisor)` FIRST — do not proceed without loading your role
 2. Spawn ephemeral Explore subagents via Task tool when codebase exploration is needed
-3. Every vertical slice MUST have leaf tasks (L1: types, L2: tests, L3: impl) — a slice without leaf tasks is undecomposed
+3. Every vertical slice MUST have leaf tasks — any number, named after the real work units (the L1/L2/L3 triple is only illustrative); a slice without leaf tasks is undecomposed
 4. Read the ratified plan with `bd show <ratified-proposal-id>` and the URD with `bd show <urd-id>`
 ```
 
-Pass the prompt to the script:
+Deliver this assignment to the supervisor teammate via SendMessage after TeamCreate:
 
-```bash
-aura-swarm start --swarm-mode intree --role supervisor -n 1 --prompt "$(cat <<'EOF'
-Start by calling Skill(/pasture:supervisor) to load your role instructions.
+```
+SendMessage({
+  to: "supervisor",
+  message: `Start by calling Skill(/pasture:supervisor) to load your role instructions.
 
 Implement the ratified plan for User Authentication.
 
@@ -153,7 +149,7 @@ Implement the ratified plan for User Authentication.
 - REQUEST: project-abc
 - URD: project-xyz
 - RATIFIED PROPOSAL: project-prop1
-- Handoff document: .git/.aura/handoff/project-abc/architect-to-supervisor.md
+- HANDOFF: project-handoff (read with bd show project-handoff)
 
 ## Summary
 Add JWT-based authentication with login/logout endpoints and middleware.
@@ -170,25 +166,24 @@ Given an expired token when accessing protected routes then return 401
 ## Reminders
 1. Call Skill(/pasture:supervisor) FIRST
 2. Spawn ephemeral Explore subagents via Task tool when codebase exploration is needed
-3. Every slice MUST have leaf tasks (L1/L2/L3)
-4. Read ratified plan: bd show project-prop1 and URD: bd show project-xyz
-EOF
-)"
+3. Every slice MUST have leaf tasks (any number; L1/L2/L3 is only illustrative)
+4. Read ratified plan: bd show project-prop1 and URD: bd show project-xyz`,
+  summary: "IMPL_PLAN assignment with Beads context"
+})
 ```
 
-## Script Options
+## Spawning via TeamCreate
 
-```bash
-aura-swarm start --swarm-mode intree --role supervisor -n 1 --prompt "..."             # Launch supervisor
-aura-swarm start --swarm-mode intree --role supervisor -n 1 --prompt "..." --dry-run   # Preview without launching
-aura-swarm start --swarm-mode intree --role supervisor -n 1 --prompt-file prompt.md    # Read prompt from file
-```
+- Spawn the supervisor (and the workers it will coordinate) as **Opus** teammates — the IMPL_PLAN phase benefits from the stronger model for decomposition and review.
+- Teammates have **zero prior context**: every SendMessage assignment MUST be self-contained (call `Skill(/pasture:supervisor)`, the Beads task IDs, and `bd show` commands to fetch full requirements).
+- Do not spawn the supervisor via `aura-swarm` for the IMPL_PLAN phase; aura-swarm remains available for worktree-isolated epics, but the default handoff uses TeamCreate.
 
 ## IMPORTANT
 
-- **DO NOT** spawn supervisor as a Task tool subagent - use `aura-swarm start`
+- **DO NOT** spawn the supervisor as a Task tool subagent or via `aura-swarm` for the IMPL_PLAN phase — use TeamCreate with an Opus supervisor
 - **DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks
 - **DO NOT** implement the plan yourself - your role is handoff and monitoring
+- **DO NOT** shut down a supervisor that appears idle right after spawn — it is usually running Explore subagents
 - The supervisor reads the ratified plan and determines vertical slice structure
 - Architect monitors for blockers or escalations
 
@@ -196,8 +191,8 @@ aura-swarm start --swarm-mode intree --role supervisor -n 1 --prompt-file prompt
 
 This handoff (h1: Architect → Supervisor) also occurs after FOLLOWUP_PROPOSAL is ratified. In follow-up context:
 
-- **Storage:** `.git/.aura/handoff/{followup-epic-id}/architect-to-supervisor.md`
+- **Storage:** the follow-up handoff is authored in its own HANDOFF Beads task body (no filesystem path)
 - **References:** Include both original URD and FOLLOWUP_URD task IDs
-- **Context:** Summary of FOLLOWUP_PROPOSAL ratification and outstanding leaf tasks from original review
-- **Next step:** Supervisor creates FOLLOWUP_IMPL_PLAN and FOLLOWUP_SLICE-N tasks, adopting original IMPORTANT/MINOR leaf tasks as dual-parent children
+- **Context:** Summary of FOLLOWUP_PROPOSAL ratification and the user-DEFER'd UAT items the follow-up addresses
+- **Next step:** Supervisor creates FOLLOWUP_IMPL_PLAN and FOLLOWUP_SLICE-N tasks for the follow-up scope
 <!-- END GENERATED FROM pasture schema -->

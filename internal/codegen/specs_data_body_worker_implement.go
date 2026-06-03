@@ -48,6 +48,11 @@ var workerImplementBody = SkillBody{
 			Then:      "validate with schema/validation tooling",
 			ShouldNot: "trust raw input",
 		},
+		// R6 (FIX-intent): when the REQUEST is to fix existing behavior, evaluate
+		// the fix against the concrete validation cases captured in URE/UAT and
+		// store the failing real-data cases as test fixtures. Resolves to
+		// SharedFragmentSpecs[FragFixValidationCases] (SLICE-1).
+		behaviorRef(FragFixValidationCases),
 	},
 
 	Sections: []ProseSection{
@@ -121,6 +126,16 @@ Follow:
 - tradeoffs from ratified plan`,
 				},
 				{
+					Id:    "wimpl-step3b-validation-cases",
+					Title: "Step 3b: FIX intent — evaluate against validation cases (R6)",
+					Content: `If the REQUEST is to **fix existing behavior**, the URE/UAT captured concrete validation cases (inputs/behaviors that currently fail or must pass). Per [` + "frag--fix-validation-cases" + `]:
+- Evaluate your fix against each confirmed validation case.
+- Store the failing real-data cases as **test fixtures** so the regression is locked in.
+- A fix is not done until its validation cases pass.
+
+There is **no** request-type axis or enum to detect fix-intent — it is recognized from the REQUEST/URD, not classified.`,
+				},
+				{
 					Id:    "wimpl-step4-quality",
 					Title: "Step 4: Verify quality gates",
 					Content: `- Type checking passes
@@ -168,9 +183,14 @@ coordination instead. See **Shared-Worktree Git Discipline** in
 			Id:    "wimpl-followup-slices",
 			Title: "Follow-up Slices (FOLLOWUP_SLICE-N)",
 			Content: `If your Beads task is a ` + "`FOLLOWUP_SLICE-N`" + `, the implementation procedure is identical. Additionally:
-- Check for an "Adopted Leaf Tasks" section in ` + "`bd show <task-id>`" + ` — these are IMPORTANT/MINOR findings you must resolve
-- Your implementation must address each adopted leaf task's acceptance criteria
-- On completion, report which leaf tasks were resolved`,
+- Check for a "DEFER'd-Item Leaf Tasks" section in ` + "`bd show <task-id>`" + ` — these are user-DEFER'd UAT items you must resolve
+- Your implementation must address each DEFER'd-item leaf task's acceptance criteria
+- On completion, report which DEFER'd-item leaf tasks were resolved`,
+		},
+		{
+			Id:      "wimpl-review-fix-cycle",
+			Title:   "Review-Fix Cycle (no cap until clean)",
+			Content: `Your slice is not finished when the first pass lands. Code review iterates **review → fix → re-review with NO cycle cap** until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR**. Stay available to fix findings of every severity — IMPORTANT and MINOR must reach 0 too, not just BLOCKER. Do not treat "tests pass once" as wave completion.`,
 		},
 		{
 			Id:    "wimpl-next",

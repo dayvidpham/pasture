@@ -36,11 +36,22 @@ var epochBody = SkillBody{
 		},
 		{
 			Id:        "epoch-followup-trigger",
-			Given:     "code review completion",
-			When:      "ANY IMPORTANT or MINOR findings exist",
-			Then:      "Supervisor creates a follow-up epic (label pasture:epic-followup)",
-			ShouldNot: "gate follow-up epic creation on BLOCKER resolution",
+			Given:     "UAT (Phase 5 or 11) produces one or more user-DEFER'd items",
+			When:      "finishing UAT",
+			Then:      "Supervisor creates a follow-up epic (label pasture:epic-followup) from the user-DEFER'd UAT items only",
+			ShouldNot: "create a follow-up epic from any review severity (BLOCKER/IMPORTANT/MINOR) — all review severities must reach 0 before wave close",
 		},
+		{
+			Id:        "epoch-supervisor-not-idle",
+			Given:     "a freshly spawned supervisor (Phase 8 IMPL_PLAN)",
+			When:      "it dispatches Explore subagents and appears idle",
+			Then:      "let it work — an apparently-idle supervisor is usually running Explore subagents to map the codebase",
+			ShouldNot: "shut down or restart a supervisor that looks idle at the start of the IMPL_PLAN phase",
+		},
+		// R7/A1: Phase-10 code review has no cycle cap; iterate until a fix-free
+		// clean round confirms 0/0/0. Resolves to
+		// SharedFragmentSpecs[FragReviewCleanExit] (SLICE-1).
+		behaviorRef(FragReviewCleanExit),
 		{
 			Id:        "epoch-autonomous-progression",
 			Given:     "non-user-gated phase completes",
@@ -72,9 +83,9 @@ var epochBody = SkillBody{
 2. **DEPENDENCY CHAINING** — Each task blocks its predecessor: ` + "`bd dep add <parent> --blocked-by <child>`" + `
 3. **USER ENGAGEMENT** — URE and UAT at multiple checkpoints
 4. **CONSENSUS REQUIRED** — All 3 reviewers must ACCEPT before proceeding
-5. **EAGER SEVERITY TREE** — Code reviews (Phase 10) always create 3 severity groups (BLOCKER, IMPORTANT, MINOR); empty groups closed immediately
-6. **FOLLOW-UP EPIC** — Triggered by review completion + ANY IMPORTANT/MINOR findings; NOT gated on BLOCKER resolution
-7. **RIDE THE WAVE** — Phases 8-10 form one continuous cycle: Explore subagents (P8), workers implement (P9), ephemeral reviewers review (P10), max 3 fix cycles per slice; workers persist throughout`,
+5. **EAGER SEVERITY TREE** — Code reviews (Phase 10) always create 3 severity groups (BLOCKER, IMPORTANT, MINOR); empty groups closed immediately. ALL three groups must reach 0 before a review wave closes
+6. **FOLLOW-UP EPIC** — Fed ONLY by user-DEFER'd UAT items (Phase 5/11), never by any review severity; the Supervisor creates it from those DEFER'd items
+7. **RIDE THE WAVE** — Phases 8-10 form one continuous cycle: Explore subagents (P8), workers implement (P9), ephemeral reviewers review (P10), iterating review→fix→re-review with NO cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; workers persist throughout`,
 		},
 		{
 			Id:    "epoch-12-phase-workflow",
@@ -91,7 +102,7 @@ Phase 6:  pasture:p6-plan       -> Ratification (supersede old proposals)
 Phase 7:  pasture:p7-plan       -> Handoff (architect -> supervisor)
 Phase 8:  pasture:p8-impl       -> IMPL_PLAN (supervisor decomposes into slices; Explore subagents)
 Phase 9:  pasture:p9-impl       -> SLICE-N (parallel workers; Ride the Wave — workers persist for review)
-Phase 10: pasture:p10-impl      -> Code Review (ephemeral reviewers review all slices; max 3 fix cycles per slice)
+Phase 10: pasture:p10-impl      -> Code Review (ephemeral reviewers review all slices; review->fix->re-review with no cycle cap until 0/0/0 clean)
 Phase 11: pasture:p11-user      -> Implementation UAT
 Phase 12: pasture:p12-impl      -> Landing (commit, push, hand off)
 ` + "```" + `
@@ -151,19 +162,19 @@ bd comments add task-urd "Ratified: scope confirmed as {{summary}}"
 		{
 			Id:    "epoch-followup-epic",
 			Title: "Follow-up Epic",
-			Content: `**Trigger:** Code review (Phase 10) completion + ANY IMPORTANT or MINOR findings exist.
-**NOT** gated on BLOCKER resolution.
+			Content: `**Trigger:** UAT (Phase 5 or 11) produces one or more **user-DEFER'd items**.
+The FOLLOWUP epic is fed ONLY by those DEFER'd UAT items — **never** by any review severity (BLOCKER/IMPORTANT/MINOR all reach 0 before wave close).
 **Owner:** Supervisor creates the follow-up epic.
 
 ` + "```bash" + `
 bd create --type=epic --priority=3 \
-  --title "FOLLOWUP: Non-blocking improvements from code review" \
+  --title "FOLLOWUP: User-deferred improvements from UAT" \
   --description "---
 references:
   request: <request-task-id>
-  review_round: <review-task-ids>
+  uat: <uat-task-id>
 ---
-Aggregated IMPORTANT and MINOR findings from code review." \
+Aggregated user-DEFER'd items from UAT (Phase 5/11)." \
   --labels "pasture:epic-followup"
 ` + "```" + `
 
@@ -175,13 +186,13 @@ The follow-up epic runs the same protocol phases with FOLLOWUP_* prefixed task t
 FOLLOWUP → FOLLOWUP_URE → FOLLOWUP_URD → FOLLOWUP_PROPOSAL-1 → FOLLOWUP_IMPL_PLAN → FOLLOWUP_SLICE-N
 ` + "```" + `
 
-- **FOLLOWUP_URE**: Scoping URE with user to determine which findings to address
+- **FOLLOWUP_URE**: Scoping URE with user to determine which DEFER'd items to address
 - **FOLLOWUP_URD**: Requirements doc for follow-up scope (references original URD)
-- **FOLLOWUP_PROPOSAL-{N}**: Proposal accounting for original URD + FOLLOWUP_URD + outstanding findings
+- **FOLLOWUP_PROPOSAL-{N}**: Proposal accounting for original URD + FOLLOWUP_URD + the DEFER'd items
 - **FOLLOWUP_IMPL_PLAN**: Supervisor decomposes follow-up into slices
-- **FOLLOWUP_SLICE-{N}**: Each slice adopts original IMPORTANT/MINOR leaf tasks as children (dual-parent)
+- **FOLLOWUP_SLICE-{N}**: Each slice implements the DEFER'd-item work decomposed into leaf tasks
 
-See ` + "`/pasture:supervisor`" + ` and ` + "`/pasture:impl-review`" + ` for full creation commands and leaf task adoption.`,
+See ` + "`/pasture:supervisor`" + ` and ` + "`/pasture:impl-review`" + ` for full creation commands.`,
 		},
 		{
 			Id:    "epoch-eager-severity",
@@ -240,10 +251,14 @@ See ` + "`../protocol/CONSTRAINTS.md`" + ` for full severity definitions.`,
 | 8-10 (IMPL_PLAN, SLICES, CODE REVIEW) | ` + "`/pasture:supervisor`" + ` | Supervisor prompt MUST start with ` + "`Skill(/pasture:supervisor)`" + ` |
 | 12 (LANDING) | Manual git commit and push | N/A |
 
+**CRITICAL — interviewing phases:** The interviewing phases MUST explicitly invoke their skill. Do **not** improvise interview questions:
+- **Phase 2 (URE):** invoke ` + "`Skill(/pasture:user-elicit)`" + ` — skipping it produces low-quality elicitation.
+- **Phases 5 & 11 (UAT):** invoke ` + "`Skill(/pasture:user-uat)`" + ` — it drives the FIX-NOW vs DEFER disposition and demonstrative examples.
+
 **CRITICAL:** When the architect hands off to the supervisor (Phase 7 → 8), the supervisor launch prompt MUST:
 1. Start with ` + "`Skill(/pasture:supervisor)`" + ` — without this, the supervisor skips role-critical procedures
 2. Include all Beads task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)
-3. Include the handoff document path`,
+3. Include the HANDOFF Beads task ID — the handoff is authored in that task body (no filesystem path)`,
 		},
 		{
 			Id:    "epoch-never-delete",

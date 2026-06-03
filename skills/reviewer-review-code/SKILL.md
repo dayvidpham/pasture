@@ -34,6 +34,18 @@ description: Review implementation slices with EAGER severity tree
 - Then: add dual-parent: blocks BOTH the severity group AND the slice
 - Should not: wire BLOCKER to only one parent
 
+**[frag--review-clean-exit]**
+- Given: per-slice code review
+- When: evaluating review results
+- Then: iterate review -> fix -> re-review with NO cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR
+- Should not: close a wave on a fix-applying round, proceed with any finding outstanding, or impose a maximum cycle cap
+
+**[frag--fix-validation-cases]**
+- Given: a REQUEST whose user intent is to FIX existing behavior
+- When: eliciting (URE), acceptance-testing (UAT), or implementing the fix
+- Then: elicit concrete validation cases (inputs/behaviors that currently fail or must pass), confirm the case set with the user in UAT, evaluate the fix against them, and store failing real-data cases as test fixtures
+- Should not: ship a fix without validation cases; introduce a request-type axis or enum to detect fix-intent
+
 ## When to Use
 
 Assigned to review code implementation after worker slices complete (Phase 10).
@@ -122,7 +134,7 @@ BLOCKER findings have **two parents**:
 
 This ensures BLOCKERs both categorize under the severity tree AND block the slice they apply to.
 
-IMPORTANT and MINOR findings do **NOT** block the slice — they are tracked in the follow-up epic.
+IMPORTANT and MINOR findings do **NOT** block the slice via dual-parent (only BLOCKER does), but they are **not** routed to a follow-up epic either: ALL severity groups (BLOCKER, IMPORTANT, MINOR) must reach 0 before the review wave closes (R7/A1). The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by any review severity.
 
 ## Steps
 
@@ -220,11 +232,21 @@ grep -r "TODO" src/  # Should not find any in delivered code
 - No TODOs in CLI/API actions
 - Real dependencies wired (not mocks in production code)
 
+### Verify Fix Validation Cases (R6)
+
+When the REQUEST is to **fix existing behavior**, per [frag--fix-validation-cases] verify the implementation:
+- Carries **test fixtures** for the concrete validation cases captured in URE/UAT (the inputs/behaviors that currently fail or must pass).
+- Evaluates the fix against each confirmed validation case.
+
+A fix that ships without validation-case fixtures is an IMPORTANT finding. There is **no** request-type axis/enum to detect fix-intent — recognize it from the REQUEST/URD.
+
+## Clean-Review Exit (no cycle cap)
+
+Per [frag--review-clean-exit], do not impose a maximum cycle cap. Iterate **review → fix → re-review with NO cap** until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR**. A wave never closes on a fix-applying round, and never with any finding outstanding.
+
 ## Follow-up Epic
 
-**Trigger:** Review completion + ANY IMPORTANT or MINOR findings exist.
-**NOT gated on BLOCKER resolution.**
-**Owner:** Supervisor creates the follow-up epic (label `pasture:epic-followup`).
+The FOLLOWUP epic is **not** created from review findings. ALL review severities (BLOCKER/IMPORTANT/MINOR) must reach 0 before the wave closes (R7/A1). The FOLLOWUP epic is fed ONLY by **user-DEFER'd UAT items** (Phase 11), and the Supervisor creates it from those (label `pasture:epic-followup`).
 
 ## Reviewing FOLLOWUP_SLICE-N (Follow-up Code Review)
 

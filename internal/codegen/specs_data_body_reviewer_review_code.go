@@ -30,6 +30,13 @@ var reviewerReviewCodeBody = SkillBody{
 		// 3rd owner of frag--sup-blocker-dual-parent (SLICE-4): canonical Then
 		// "add dual-parent: blocks BOTH the severity group AND the slice".
 		behaviorRef(FragSupBlockerDualParent),
+		// R7/A1: code review iterates review->fix->re-review with NO cycle cap
+		// until a fix-free clean round confirms 0/0/0. Resolves to
+		// SharedFragmentSpecs[FragReviewCleanExit] (SLICE-1).
+		behaviorRef(FragReviewCleanExit),
+		// R6 (FIX-intent): verify the fix carries validation-case fixtures.
+		// Resolves to SharedFragmentSpecs[FragFixValidationCases] (SLICE-1).
+		behaviorRef(FragFixValidationCases),
 	},
 
 	Sections: []ProseSection{
@@ -127,7 +134,7 @@ bd close <minor-group-id>` + "\n" +
 
 This ensures BLOCKERs both categorize under the severity tree AND block the slice they apply to.
 
-IMPORTANT and MINOR findings do **NOT** block the slice — they are tracked in the follow-up epic.`,
+IMPORTANT and MINOR findings do **NOT** block the slice via dual-parent (only BLOCKER does), but they are **not** routed to a follow-up epic either: ALL severity groups (BLOCKER, IMPORTANT, MINOR) must reach 0 before the review wave closes (R7/A1). The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by any review severity.`,
 				},
 			},
 		},
@@ -239,14 +246,26 @@ var commandCmd = &cobra.Command{
 - No TODOs in CLI/API actions
 - Real dependencies wired (not mocks in production code)`,
 				},
+				{
+					Id:    "rev-code-fix-validation-cases",
+					Title: "Verify Fix Validation Cases (R6)",
+					Content: `When the REQUEST is to **fix existing behavior**, per [` + "frag--fix-validation-cases" + `] verify the implementation:
+- Carries **test fixtures** for the concrete validation cases captured in URE/UAT (the inputs/behaviors that currently fail or must pass).
+- Evaluates the fix against each confirmed validation case.
+
+A fix that ships without validation-case fixtures is an IMPORTANT finding. There is **no** request-type axis/enum to detect fix-intent — recognize it from the REQUEST/URD.`,
+				},
 			},
 		},
 		{
-			Id:    "rev-code-followup-epic",
-			Title: "Follow-up Epic",
-			Content: `**Trigger:** Review completion + ANY IMPORTANT or MINOR findings exist.
-**NOT gated on BLOCKER resolution.**
-**Owner:** Supervisor creates the follow-up epic (label ` + "`pasture:epic-followup`" + `).`,
+			Id:      "rev-code-clean-exit",
+			Title:   "Clean-Review Exit (no cycle cap)",
+			Content: `Per [` + "frag--review-clean-exit" + `], do not impose a maximum cycle cap. Iterate **review → fix → re-review with NO cap** until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR**. A wave never closes on a fix-applying round, and never with any finding outstanding.`,
+		},
+		{
+			Id:      "rev-code-followup-epic",
+			Title:   "Follow-up Epic",
+			Content: `The FOLLOWUP epic is **not** created from review findings. ALL review severities (BLOCKER/IMPORTANT/MINOR) must reach 0 before the wave closes (R7/A1). The FOLLOWUP epic is fed ONLY by **user-DEFER'd UAT items** (Phase 11), and the Supervisor creates it from those (label ` + "`pasture:epic-followup`" + `).`,
 		},
 		{
 			Id:    "rev-code-followup-slice",

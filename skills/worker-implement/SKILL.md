@@ -46,6 +46,12 @@ description: Implement assigned vertical slice following TDD layers
 - Then: validate with schema/validation tooling
 - Should not: trust raw input
 
+**[frag--fix-validation-cases]**
+- Given: a REQUEST whose user intent is to FIX existing behavior
+- When: eliciting (URE), acceptance-testing (UAT), or implementing the fix
+- Then: elicit concrete validation cases (inputs/behaviors that currently fail or must pass), confirm the case set with the user in UAT, evaluate the fix against them, and store failing real-data cases as test fixtures
+- Should not: ship a fix without validation cases; introduce a request-type axis or enum to detect fix-intent
+
 ## When to Use
 
 You have a Beads task ID for a vertical slice and are ready to implement end-to-end.
@@ -109,6 +115,15 @@ Follow:
 - acceptance_criteria (BDD Given/When/Then)
 - tradeoffs from ratified plan
 
+### Step 3b: FIX intent — evaluate against validation cases (R6)
+
+If the REQUEST is to **fix existing behavior**, the URE/UAT captured concrete validation cases (inputs/behaviors that currently fail or must pass). Per [frag--fix-validation-cases]:
+- Evaluate your fix against each confirmed validation case.
+- Store the failing real-data cases as **test fixtures** so the regression is locked in.
+- A fix is not done until its validation cases pass.
+
+There is **no** request-type axis or enum to detect fix-intent — it is recognized from the REQUEST/URD, not classified.
+
 ### Step 4: Verify quality gates
 
 - Type checking passes
@@ -151,9 +166,13 @@ coordination instead. See **Shared-Worktree Git Discipline** in
 ## Follow-up Slices (FOLLOWUP_SLICE-N)
 
 If your Beads task is a `FOLLOWUP_SLICE-N`, the implementation procedure is identical. Additionally:
-- Check for an "Adopted Leaf Tasks" section in `bd show <task-id>` — these are IMPORTANT/MINOR findings you must resolve
-- Your implementation must address each adopted leaf task's acceptance criteria
-- On completion, report which leaf tasks were resolved
+- Check for a "DEFER'd-Item Leaf Tasks" section in `bd show <task-id>` — these are user-DEFER'd UAT items you must resolve
+- Your implementation must address each DEFER'd-item leaf task's acceptance criteria
+- On completion, report which DEFER'd-item leaf tasks were resolved
+
+## Review-Fix Cycle (no cap until clean)
+
+Your slice is not finished when the first pass lands. Code review iterates **review → fix → re-review with NO cycle cap** until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR**. Stay available to fix findings of every severity — IMPORTANT and MINOR must reach 0 too, not just BLOCKER. Do not treat "tests pass once" as wave completion.
 
 ## Next
 

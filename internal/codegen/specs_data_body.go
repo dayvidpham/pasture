@@ -80,8 +80,8 @@ var supervisorBody = SkillBody{
 			Id:        "sup-followup-deps",
 			Given:     "IMPORTANT or MINOR severity groups",
 			When:      "linking dependencies",
-			Then:      "link them to the FOLLOWUP epic only: `bd dep add <followup-epic-id> --blocked-by <important-group-id>`",
-			ShouldNot: "link IMPORTANT or MINOR severity groups as blocking IMPL_PLAN or any slice — only BLOCKER findings block slices",
+			Then:      "wire each group to its review round only: `bd dep add <review-round-id> --blocked-by <important-group-id>` — ALL severity groups must reach 0 before the wave closes",
+			ShouldNot: "route IMPORTANT or MINOR severity groups to the FOLLOWUP epic, or wire them as blocking IMPL_PLAN/any slice — only BLOCKER findings block slices, and the FOLLOWUP epic is fed solely by user-DEFER'd UAT items",
 		},
 		behaviorRef(FragSupReviewAllSlices),
 		behaviorRef(FragSupReviewCheckEach),
@@ -103,6 +103,9 @@ var supervisorBody = SkillBody{
 			Then:      "proceed autonomously without asking permission; user-gated phases are: Phase 2 (URE), Phase 5 (Plan UAT), Phase 11 (Impl UAT); all other phases (8 IMPL_PLAN, 9 SLICES, 10 CODE REVIEW, 12 LANDING) progress automatically",
 			ShouldNot: "ask 'Should I proceed?' for autonomous phases; only pause for user-facing phases that require human input",
 		},
+		// R7/A1: code review iterates with NO cycle cap until 0/0/0 clean.
+		// Resolves to SharedFragmentSpecs[FragReviewCleanExit] (SLICE-1).
+		behaviorRef(FragReviewCleanExit),
 	},
 
 	Sections: []ProseSection{
@@ -407,10 +410,7 @@ Task({
 | Trivial | ` + "`haiku`" + ` | Single-file edit, config change, typo fix, renaming, adding a label |
 | Non-trivial | ` + "`sonnet`" + ` | Multi-file changes, new features, architectural work, complex logic, test suites |
 
-**Handoff:** Before spawning each worker, create a handoff document:
-` + "```" + `
-.git/.aura/handoff/<request-task-id>/supervisor-to-worker-<N>.md
-` + "```" + `
+**Handoff:** Before spawning each worker, author its handoff in the slice (or a dedicated handoff) Beads task body — the task body IS the handoff (no filesystem path).
 
 See: [../supervisor-spawn-worker/SKILL.md](../supervisor-spawn-worker/SKILL.md) for handoff template.`,
 				},
@@ -426,8 +426,7 @@ SendMessage({
   content: ` + "`" + `You are assigned SLICE-1. Start by calling Skill(/pasture:worker).
 
 Your Beads task ID: <slice-task-id>
-Run this to get full requirements: bd show <slice-task-id>
-Handoff document: .git/.aura/handoff/<request-task-id>/supervisor-to-worker-1.md
+Run this to get full requirements + handoff: bd show <slice-task-id>
 
 Key context:
 - Request: <request-task-id> (run: bd show <request-task-id>)
@@ -450,30 +449,30 @@ The worker skill provides:
 		},
 		{
 			Id:      "sup-epic-followup",
-			Title:   "EPIC_FOLLOWUP Creation (Phase 10)",
-			Content: `After code review completes, if ANY IMPORTANT or MINOR findings exist, create a follow-up epic. Per [frag--sup-followup-epic-timing], create immediately after review completes.`,
+			Title:   "EPIC_FOLLOWUP Creation (Phase 5/11)",
+			Content: `After UAT, if the user **DEFER'd** one or more items, create a follow-up epic from those DEFER'd items. Per [frag--sup-followup-epic-timing], create immediately after UAT completes. Review severities (BLOCKER/IMPORTANT/MINOR) are **never** routed here — they must all reach 0 before the review wave closes.`,
 			Subsections: []ProseSection{
 				{
 					Id:    "sup-followup-step1",
 					Title: "Step 1: Create follow-up epic",
 					Content: "```" + `bash
 bd create --type=epic --priority=3 \
-  --title="FOLLOWUP: Non-blocking improvements from code review" \
+  --title="FOLLOWUP: User-deferred improvements from UAT" \
   --description="---
 references:
   request: <request-task-id>
   urd: <urd-task-id>
-  review_round: <review-task-ids>
+  uat: <uat-task-ids>
 ---
-Aggregated IMPORTANT and MINOR findings from code review." \
+Aggregated user-DEFER'd items from UAT (Phase 5/11)." \
   --add-label "pasture:epic-followup"
 
-# Link IMPORTANT/MINOR severity groups as children
-bd dep add <followup-epic-id> --blocked-by <important-group-id>
-bd dep add <followup-epic-id> --blocked-by <minor-group-id>
+# Link the DEFER'd UAT items as children of the follow-up epic
+bd dep add <followup-epic-id> --blocked-by <deferred-item-id-1>
+bd dep add <followup-epic-id> --blocked-by <deferred-item-id-2>
 ` + "```" + `
 
-Severity routing follows [frag--sup-blocker-dual-parent] and [frag--sup-deferred-followup].`,
+Severity routing follows [frag--sup-blocker-dual-parent] and [frag--sup-deferred-followup]: all review severities reach 0; the FOLLOWUP epic is DEFER-fed only.`,
 				},
 				{
 					Id:    "sup-followup-step2",
@@ -484,13 +483,13 @@ Severity routing follows [frag--sup-blocker-dual-parent] and [frag--sup-deferred
 FOLLOWUP epic (pasture:epic-followup)
   ├── relates_to: original URD
   ├── relates_to: original REVIEW-A/B/C tasks
-  └── blocked-by: FOLLOWUP_URE         (Phase 2: scope which findings to address)
+  └── blocked-by: FOLLOWUP_URE         (Phase 2: scope which DEFER'd items to address)
         └── blocked-by: FOLLOWUP_URD   (Phase 2: requirements for follow-up)
               └── blocked-by: FOLLOWUP_PROPOSAL-1  (Phase 3: proposal for follow-up)
                     └── blocked-by: FOLLOWUP_IMPL_PLAN  (Phase 8: decompose into slices)
                           ├── blocked-by: FOLLOWUP_SLICE-1  (Phase 9)
-                          │     ├── blocked-by: important-leaf-task-...
-                          │     └── blocked-by: minor-leaf-task-...
+                          │     ├── blocked-by: deferred-item-leaf-task-...
+                          │     └── blocked-by: deferred-item-leaf-task-...
                           └── blocked-by: FOLLOWUP_SLICE-2
 ` + "```" + `
 
@@ -504,7 +503,7 @@ references:
   followup_epic: <followup-epic-id>
   original_urd: <original-urd-id>
 ---
-Scoping URE: determine which IMPORTANT/MINOR findings to address.")
+Scoping URE: determine which user-DEFER'd UAT items to address.")
 bd dep add <followup-epic-id> --blocked-by $FOLLOWUP_URE_ID
 
 # Create FOLLOWUP_URD — requirements for follow-up scope
@@ -524,14 +523,14 @@ The remaining lifecycle tasks (FOLLOWUP_PROPOSAL, FOLLOWUP_IMPL_PLAN, FOLLOWUP_S
 				},
 				{
 					Id:    "sup-followup-step3",
-					Title: "Step 3: Leaf task adoption (dual-parent)",
-					Content: `When the supervisor creates FOLLOWUP_SLICE-N tasks during the follow-up implementation phase, the IMPORTANT/MINOR leaf tasks from the original review gain a second parent:
+					Title: "Step 3: DEFER'd-item leaf adoption (dual-parent)",
+					Content: `When the supervisor creates FOLLOWUP_SLICE-N tasks during the follow-up implementation phase, the user-DEFER'd UAT-item leaf tasks gain a second parent (dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice):
 
 ` + "```" + `bash
-# Leaf task gets dual-parent: original severity group + follow-up slice
-bd dep add <followup-slice-id> --blocked-by <important-leaf-task-id>
-bd dep add <followup-slice-id> --blocked-by <minor-leaf-task-id>
-# Leaf task already has: bd dep add <severity-group-id> --blocked-by <leaf-task-id>
+# Leaf task gets dual-parent: DEFER'd-items tracking group + follow-up slice
+bd dep add <followup-slice-id> --blocked-by <deferred-item-leaf-id-1>
+bd dep add <followup-slice-id> --blocked-by <deferred-item-leaf-id-2>
+# Leaf task already has: bd dep add <deferred-items-tracking-group-id> --blocked-by <leaf-task-id>
 ` + "```",
 				},
 				{
@@ -546,13 +545,13 @@ bd dep add <followup-slice-id> --blocked-by <minor-leaf-task-id>
 | 3 | *(none)* | Supervisor creates FOLLOWUP_URD (same actor) |
 | 4 | h6 | Supervisor → Architect: Hands off FOLLOWUP_URE + FOLLOWUP_URD for FOLLOWUP_PROPOSAL |
 | 5 | h1 | Architect → Supervisor: After FOLLOWUP_PROPOSAL ratified |
-| 6 | h2 | Supervisor → Worker: FOLLOWUP_SLICE-N with adopted leaf task IDs |
+| 6 | h2 | Supervisor → Worker: FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks |
 | 7 | h3 | Supervisor → Reviewer: Code review of follow-up slices |
 | 8 | h4 | Worker → Reviewer: Follow-up slice completion |
 
-Follow-up handoff storage: ` + "`.git/.aura/handoff/{followup-epic-id}/{source}-to-{target}.md`" + `
+Follow-up handoff storage: each handoff is authored in its Beads task body (no filesystem path).
 
-See ` + "`../protocol/HANDOFF_TEMPLATE.md`" + ` for full follow-up handoff examples, including Supervisor → Worker with adopted leaf task IDs.`,
+See ` + "`../protocol/HANDOFF_TEMPLATE.md`" + ` for full follow-up handoff examples.`,
 				},
 			},
 		},
@@ -647,6 +646,13 @@ var supervisorPlanTasksBody = SkillBody{
 			Then:      "include each integration point in the relevant slice descriptions so workers know what they must export and what they may import",
 			ShouldNot: "assume workers will discover cross-slice contracts on their own",
 		},
+		{
+			Id:        "sup-plan-interface-first",
+			Given:     "slices that share types, interfaces, or contracts (R3, per C-interface-first-slices)",
+			When:      "deciding decomposition order",
+			Then:      "prefer extracting a horizontal interface-first FOUNDATION slice (all public types/interfaces/contracts) that lands first, so the dependent implementation slices can compile against the contracts and run in PARALLEL",
+			ShouldNot: "force a linear slice chain (A->B->C) when the runtime dependency is only on interfaces that could be exported up front",
+		},
 	},
 	Sections: []ProseSection{
 		{
@@ -722,6 +728,8 @@ var supervisorPlanTasksBody = SkillBody{
 				"   | IP-2 | ConstraintContext interface | SLICE-1 (foundation) | SLICE-2 (gen_schema) | L1 (types) |\n" +
 				"   | IP-3 | SkillRegistry protocol | SLICE-3 (gen_skills) | SLICE-4 (context_injection) | L3 (impl) |\n" +
 				"   ```\n" +
+				"\n" +
+				"   **Interface-first decomposition (R3, Strong SHOULD — see `C-interface-first-slices`):** when slices share contracts, prefer extracting a horizontal **interface-first FOUNDATION slice** that exports ALL public types/interfaces/contracts and lands FIRST (a barrier). The dependent implementation slices then compile against those contracts and run in **parallel**, instead of being forced into a linear `A → B → C` chain whose only real coupling is at the interface boundary. Reserve a linear chain for cases where the runtime dependency genuinely exceeds the interface.\n" +
 				"\n" +
 				"6. **Create vertical slice tasks:**\n" +
 				"   ```bash\n" +
@@ -981,7 +989,7 @@ var supervisorPlanTasksBody = SkillBody{
 				"---\n" +
 				"Vertical slice decomposition for follow-up epic.\"\n" +
 				"\n" +
-				"# Create FOLLOWUP_SLICE-N with adopted leaf tasks\n" +
+				"# Create FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks\n" +
 				"bd create --type=task \\\n" +
 				"  --labels=\"pasture:p9-impl:s9-slice\" \\\n" +
 				"  --title=\"FOLLOWUP_SLICE-1: <description>\" \\\n" +
@@ -990,21 +998,21 @@ var supervisorPlanTasksBody = SkillBody{
 				"  followup_impl_plan: <followup-impl-plan-id>\n" +
 				"  followup_urd: <followup-urd-id>\n" +
 				"---\n" +
-				"## Adopted Leaf Tasks\n" +
-				"| Leaf Task ID | Severity | Original Slice | Description |\n" +
+				"## DEFER'd-Item Leaf Tasks\n" +
+				"| Leaf Task ID | Source UAT | DEFER'd Item | Description |\n" +
 				"|---|---|---|---|\n" +
-				"| <leaf-id-1> | IMPORTANT | SLICE-1 | <description> |\n" +
-				"| <leaf-id-2> | MINOR | SLICE-2 | <description> |\n" +
+				"| <leaf-id-1> | <uat-id> | <deferred-item-id> | <description> |\n" +
+				"| <leaf-id-2> | <uat-id> | <deferred-item-id> | <description> |\n" +
 				"\n" +
 				"## Specification\n" +
 				"<detailed spec>\n" +
 				"\n" +
 				"## Validation Checklist\n" +
-				"- [ ] All adopted leaf tasks resolved\n" +
+				"- [ ] All DEFER'd-item leaf tasks resolved\n" +
 				"- [ ] Tests pass\n" +
 				"- [ ] Production code path verified\"\n" +
 				"\n" +
-				"# Wire dual-parent for adopted leaf tasks\n" +
+				"# Wire dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice\n" +
 				"bd dep add <followup-slice-id> --blocked-by <leaf-task-id-1>\n" +
 				"bd dep add <followup-slice-id> --blocked-by <leaf-task-id-2>\n" +
 				"```",
@@ -1045,8 +1053,8 @@ var supervisorSpawnWorkerBody = SkillBody{
 			Id:        "sup-spawn-handoff-doc",
 			Given:     "worker handoff",
 			When:      "creating",
-			Then:      "store at `.git/.aura/handoff/<request-task-id>/supervisor-to-worker-<N>.md`",
-			ShouldNot: "skip handoff document",
+			Then:      "author the supervisor→worker handoff in the slice (or a dedicated handoff) Beads task body",
+			ShouldNot: "skip the handoff or store it as a filesystem path",
 		},
 		{
 			Id:        "sup-spawn-no-close-before-review",
@@ -1066,16 +1074,19 @@ var supervisorSpawnWorkerBody = SkillBody{
 			Id:        "sup-spawn-max-cycles",
 			Given:     "worker-reviewer cycle",
 			When:      "counting iterations",
-			Then:      "limit to a MAXIMUM of 3 cycles",
-			ShouldNot: "exceed 3 cycles — if IMPORTANT findings remain after cycle 3, move to UAT and track remaining in FOLLOWUP epic",
+			Then:      "iterate review->fix->re-review with NO cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR",
+			ShouldNot: "impose a maximum cycle cap, close a wave on a fix-applying round, or proceed with any finding outstanding",
 		},
 		{
 			Id:        "sup-spawn-important-after-cycles",
-			Given:     "IMPORTANT findings remain after 3 cycles",
+			Given:     "IMPORTANT or MINOR findings remain",
 			When:      "deciding next step",
-			Then:      "proceed to Phase 11 (UAT) — all remaining IMPORTANT and MINOR findings must be tracked in the FOLLOWUP Beads epic",
-			ShouldNot: "block UAT on non-BLOCKER findings after 3 cycles",
+			Then:      "keep iterating review->fix->re-review until ALL severity groups reach 0 — every severity must be resolved before the wave closes",
+			ShouldNot: "proceed to UAT with non-zero findings or route any review severity (IMPORTANT/MINOR) to the FOLLOWUP epic",
 		},
+		// R7/A1: code review has no cycle cap; iterate until 0/0/0 clean.
+		// Resolves to SharedFragmentSpecs[FragReviewCleanExit] (SLICE-1).
+		behaviorRef(FragReviewCleanExit),
 	},
 	Sections: []ProseSection{
 		{
@@ -1095,22 +1106,23 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"4. REVIEW → Ephemeral reviewers (Task tool): review per-slice\n" +
 				"5. FIX   → Workers fix BLOCKERs + IMPORTANTs with atomic commits\n" +
 				"6. RE-REVIEW → Spawn new ephemeral reviewers for re-review\n" +
-				"7. REPEAT → Steps 5-6 up to MAX 3 cycles per slice\n" +
-				"8. TRACK → IMPORTANT/MINOR findings → FOLLOWUP epic\n" +
-				"9. NEXT  → If clean or 3 cycles exhausted → Phase 11 (UAT) or escalate to architect\n" +
+				"7. REPEAT → Steps 5-6 with NO cycle cap until a fix-free clean round confirms 0/0/0\n" +
+				"8. TRACK → ALL severities (BLOCKER/IMPORTANT/MINOR) must reach 0 — none route to FOLLOWUP\n" +
+				"9. NEXT  → When fix-free clean (0 BLOCKER + 0 IMPORTANT + 0 MINOR) → Phase 11 (UAT); escalate to architect only if genuinely stuck\n" +
 				"```\n" +
 				"\n" +
 				"**Key rules:**\n" +
 				"- Reviewers are ephemeral (spawned per review cycle via Task tool)\n" +
 				"- Slices are **never closed** until reviewed at least once\n" +
-				"- Max **3 review cycles per slice** — escalate to architect after cycle 3 if BLOCKERs remain",
+				"- **No cycle cap** — iterate review→fix→re-review until 0 BLOCKER + 0 IMPORTANT + 0 MINOR on a fix-free round; escalate to architect only if genuinely stuck\n" +
+				"- The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by review severities",
 		},
 		{
 			Id:    "sup-spawn-handoff-template",
 			Title: "Handoff Template (Supervisor → Worker)",
-			Content: "Before spawning each worker, create a handoff document:\n" +
+			Content: "Before spawning each worker, author its handoff in the slice (or a dedicated handoff) Beads task body:\n" +
 				"\n" +
-				"**Storage:** `.git/.aura/handoff/<request-task-id>/supervisor-to-worker-<N>.md`\n" +
+				"**Storage:** the Beads task body IS the handoff — no filesystem path.\n" +
 				"\n" +
 				"```markdown\n" +
 				"# Handoff: Supervisor → Worker <N>\n" +
@@ -1161,8 +1173,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"  prompt: `Call Skill(/pasture:worker) and implement the assigned slice.\n" +
 				"\n" +
 				"Beads Task ID: <task-id>\n" +
-				"Read full requirements: bd show <task-id>\n" +
-				"Handoff doc: .git/.aura/handoff/<request-task-id>/supervisor-to-worker-<N>.md\n" +
+				"Read full requirements + handoff: bd show <task-id>\n" +
 				"\n" +
 				"Do NOT shut down after implementation. You will receive review feedback and may need to fix issues.`,\n" +
 				"  subagent_type: \"general-purpose\",\n" +
@@ -1184,8 +1195,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"  content: `You are assigned SLICE-1. Start by calling Skill(/pasture:worker).\n" +
 				"\n" +
 				"Your Beads task ID: <slice-task-id>\n" +
-				"Run this to get full requirements: bd show <slice-task-id>\n" +
-				"Handoff document: .git/.aura/handoff/<request-task-id>/supervisor-to-worker-1.md\n" +
+				"Run this to get full requirements + handoff: bd show <slice-task-id>\n" +
 				"\n" +
 				"Key references (run bd show on each for full context):\n" +
 				"- Request: <request-task-id>\n" +
@@ -1212,11 +1222,11 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"1. Worker completes slice → notifies supervisor\n" +
 				"2. Supervisor does **NOT** close the slice or shut down the worker\n" +
 				"3. Ephemeral reviewers review the slice\n" +
-				"4. If BLOCKERs or IMPORTANT findings: supervisor sends fix assignment to worker\n" +
+				"4. If ANY findings (BLOCKER/IMPORTANT/MINOR): supervisor sends fix assignment to worker\n" +
 				"5. Worker fixes issues → notifies supervisor\n" +
 				"6. New ephemeral reviewers re-review\n" +
-				"7. Repeat steps 4-6 up to MAX 3 cycles total\n" +
-				"8. After 3 cycles or all clean: supervisor shuts down worker",
+				"7. Repeat steps 4-6 with NO cycle cap until a fix-free clean round confirms 0/0/0\n" +
+				"8. After a fix-free clean round (0 BLOCKER + 0 IMPORTANT + 0 MINOR): supervisor shuts down worker",
 			Subsections: []ProseSection{
 				{
 					Id:    "sup-spawn-fix-assignment-template",
@@ -1230,7 +1240,10 @@ var supervisorSpawnWorkerBody = SkillBody{
 						"BLOCKERs (must fix — blocks slice closure):\n" +
 						"- <finding-id>: <description> (bd show <finding-id>)\n" +
 						"\n" +
-						"IMPORTANT (must fix this cycle):\n" +
+						"IMPORTANT (must fix — must reach 0 before wave close):\n" +
+						"- <finding-id>: <description> (bd show <finding-id>)\n" +
+						"\n" +
+						"MINOR (must fix — must reach 0 before wave close):\n" +
 						"- <finding-id>: <description> (bd show <finding-id>)\n" +
 						"\n" +
 						"After fixing all items:\n" +
@@ -1262,9 +1275,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 		{
 			Id:    "sup-spawn-followup-slice-handoff",
 			Title: "Follow-up Slice Handoff (FOLLOWUP_SLICE-N)",
-			Content: "For follow-up slices, the handoff template extends with additional fields:\n" +
-				"\n" +
-				"**Storage:** `.git/.aura/handoff/{followup-epic-id}/supervisor-to-worker-<N>.md`\n" +
+			Content: "For follow-up slices, the handoff (authored in the Beads task body — no filesystem path) extends with additional fields:\n" +
 				"\n" +
 				"```markdown\n" +
 				"# Handoff: Supervisor → Worker <N> (Follow-up)\n" +
@@ -1279,14 +1290,14 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"- Slice: FOLLOWUP_SLICE-<N>\n" +
 				"- Task ID: <slice-task-id>\n" +
 				"\n" +
-				"## Adopted Leaf Tasks\n" +
-				"| Leaf Task ID | Severity | Original Slice | Description |\n" +
-				"|---|---|---|---|\n" +
-				"| <leaf-id-1> | IMPORTANT | SLICE-1 | <description> |\n" +
-				"| <leaf-id-2> | MINOR | SLICE-2 | <description> |\n" +
+				"## DEFER'd Items (from UAT)\n" +
+				"| Item Task ID | Source UAT | Description |\n" +
+				"|---|---|---|\n" +
+				"| <item-id-1> | <uat-id> | <user-DEFER'd item description> |\n" +
+				"| <item-id-2> | <uat-id> | <user-DEFER'd item description> |\n" +
 				"\n" +
 				"## Acceptance Criteria\n" +
-				"- Both adopted leaf tasks resolved (tests pass, production code path verified)\n" +
+				"- All DEFER'd items in this slice resolved (tests pass, production code path verified)\n" +
 				"- See bd task <slice-task-id> for full validation_checklist\n" +
 				"```",
 		},
@@ -1487,13 +1498,13 @@ bd update <task-id> --status=in_progress
 			Title: "Follow-up Slices (FOLLOWUP_SLICE-N)",
 			Content: `You may be assigned a ` + "`FOLLOWUP_SLICE-N`" + ` task instead of a ` + "`SLICE-N`" + ` task. The implementation procedure is identical, with these additions:
 
-- **Adopted leaf tasks**: Your slice task will list specific IMPORTANT/MINOR leaf tasks from the original code review that you must resolve. Check ` + "`bd show <task-id>`" + ` for an "Adopted Leaf Tasks" section.
-- **Dual-parent resolution**: The adopted leaf tasks are children of both the original severity group AND your FOLLOWUP_SLICE-N. Resolving the leaf task satisfies both parents.
-- **Completion handoff (h4)**: When completing a follow-up slice, your handoff to the reviewer must list which original leaf tasks were resolved.
+- **DEFER'd-item leaf tasks**: Your slice task will list specific user-DEFER'd UAT-item leaf tasks that you must resolve. Check ` + "`bd show <task-id>`" + ` for a "DEFER'd-Item Leaf Tasks" section.
+- **Dual-parent resolution**: Each leaf task is a child of both the DEFER'd-items tracking group AND your FOLLOWUP_SLICE-N. Resolving the leaf task satisfies both parents.
+- **Completion handoff (h4)**: When completing a follow-up slice, your handoff to the reviewer must list which DEFER'd-item leaf tasks were resolved.
 
 ` + "```bash" + `
 # Completion comment for follow-up slices should include:
-bd comments add <task-id> "Implementation complete. Resolved leaf tasks: <leaf-task-id-1>, <leaf-task-id-2>"
+bd comments add <task-id> "Implementation complete. Resolved DEFER'd-item leaf tasks: <leaf-task-id-1>, <leaf-task-id-2>"
 ` + "```",
 		},
 		{
@@ -1661,7 +1672,7 @@ bd comments add <urd-id> "Ratified: scope confirmed as <summary>"
 				{
 					Id:    "arch-phase7-handoff",
 					Title: "Phase 7: HANDOFF",
-					Content: `Create handoff document and task:
+					Content: `Create the HANDOFF task — its body IS the handoff document:
 ` + "```bash" + `
 bd create --type=task --priority=2 \
   --title "HANDOFF: Architect → Supervisor for REQUEST" \
@@ -1671,12 +1682,12 @@ references:
   urd: <urd-id>
   proposal: <ratified-proposal-id>
 ---
-Handoff from architect to supervisor. See handoff document at
-.git/.aura/handoff/<request-id>/architect-to-supervisor.md" \
+# Handoff: Architect → Supervisor
+<full handoff body — the task body IS the handoff>" \
   --add-label "pasture:p7-plan:s7-handoff"
 ` + "```" + `
 
-Storage: ` + "`.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`",
+Storage: the handoff is authored in this HANDOFF Beads task body (no filesystem path).`,
 				},
 			},
 		},
@@ -1701,7 +1712,7 @@ references:
   followup_urd: <followup-urd-id>
   followup_epic: <followup-epic-id>
 ---
-<proposal content addressing scoped IMPORTANT/MINOR findings>"
+<proposal content addressing the scoped user-DEFER'd UAT items>"
 ` + "```" + `
 
 The same review/ratify/UAT/handoff cycle (Phases 3-7) applies. After FOLLOWUP_PROPOSAL is ratified, hand off to supervisor via h1 for FOLLOWUP_IMPL_PLAN creation.`,
@@ -1714,7 +1725,7 @@ The same review/ratify/UAT/handoff cycle (Phases 3-7) applies. After FOLLOWUP_PR
 		{
 			Id:      "arch-supervisor-handoff",
 			Title:   "Supervisor Handoff",
-			Content: "**DO NOT** spawn supervisor as a Task tool subagent. Instead, invoke:\n\n```\nSkill(skill: \"pasture:architect-handoff\")\n```\n\nThe handoff skill guides you through:\n1. Creating the handoff document at `.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`\n2. Launching supervisor via `aura-swarm start --swarm-mode intree --role supervisor -n 1` or `aura-swarm start --epic <id>`\n\n**CRITICAL:** The supervisor launch prompt MUST:\n1. **Start with `Skill(/pasture:supervisor)`** — this loads the supervisor's role instructions, including leaf task creation\n2. Include all Beads task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)\n3. Include the handoff document path\n\n**DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks from the ratified plan.",
+			Content: "**DO NOT** spawn the supervisor as a Task tool subagent or via `aura-swarm` for the IMPL_PLAN phase. Instead, invoke:\n\n```\nSkill(skill: \"pasture:architect-handoff\")\n```\n\nThe handoff skill guides you through:\n1. Authoring the handoff in a HANDOFF Beads task body (no filesystem path)\n2. Launching the supervisor (and workers) as **Opus** teammates via TeamCreate, then assigning work via SendMessage\n\n**CRITICAL:** The supervisor assignment MUST:\n1. **Start with `Skill(/pasture:supervisor)`** — this loads the supervisor's role instructions, including leaf task creation\n2. Include all Beads task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)\n3. Reference the HANDOFF Beads task ID — the handoff is in that task body\n\nA supervisor that appears idle right after spawn is usually running Explore subagents — do **not** shut it down pre-emptively.\n\n**DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks from the ratified plan.",
 		},
 	},
 	Behaviors: []BehaviorSpec{
@@ -1861,10 +1872,10 @@ bd dep add $BLOCKER_ID --blocked-by $FINDING_ID
 bd dep add <slice-1-id> --blocked-by $FINDING_ID
 ` + "```\n" +
 				`
-Per [frag--sup-deferred-followup], IMPORTANT/MINOR findings route to severity group only:
+Per [frag--sup-deferred-followup], IMPORTANT/MINOR findings attach to their severity group only (they do **not** block the slice via dual-parent), but ALL severity groups (BLOCKER/IMPORTANT/MINOR) must reach 0 before the review wave closes — they are **never** routed to the FOLLOWUP epic. The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items.
 
 ` + "```bash\n" +
-				`# IMPORTANT finding — blocks severity group only
+				`# IMPORTANT finding — attaches to the IMPORTANT severity group (NOT the slice)
 IMPORTANT_FINDING_ID=$(bd create --title "IMPORTANT: Add request timeout" \
   --labels "pasture:p10-impl:s10-review" \
   --description "---
@@ -1875,7 +1886,7 @@ references:
 ---
 API calls should have configurable timeouts.")
 
-# Only blocks the IMPORTANT severity group (NOT the slice)
+# Attaches to the IMPORTANT severity group (NOT the slice); the group must still reach 0
 bd dep add $IMPORTANT_ID --blocked-by $IMPORTANT_FINDING_ID
 ` + "```",
 		},
@@ -1916,10 +1927,7 @@ Call Skill(/pasture:reviewer-review-code) for the review procedure.` + "`" + `
 })
 ` + "```\n" +
 				`
-**Handoff:** Before spawning each reviewer, create a handoff document:
-` + "```\n" +
-				`.git/.aura/handoff/<request-task-id>/supervisor-to-reviewer-<N>.md
-` + "```",
+**Handoff:** Before spawning each reviewer, author its handoff in a Beads task body (the task body IS the handoff — no filesystem path).`,
 			Subsections: []ProseSection{
 				{
 					Id:    "impl-rev-handoff-template",
@@ -2057,13 +2065,13 @@ bd dep add <followup-epic-id> --blocked-by <minor-group-id>
 						`FOLLOWUP epic (pasture:epic-followup)
   ├── relates_to: original URD
   ├── relates_to: original REVIEW-A/B/C tasks
-  └── blocked-by: FOLLOWUP_URE         (Phase 2: scope which findings to address)
+  └── blocked-by: FOLLOWUP_URE         (Phase 2: scope which DEFER'd items to address)
         └── blocked-by: FOLLOWUP_URD   (Phase 2: requirements for follow-up)
               └── blocked-by: FOLLOWUP_PROPOSAL-1  (Phase 3: proposal for follow-up)
                     └── blocked-by: FOLLOWUP_IMPL_PLAN  (Phase 8: decompose into slices)
                           ├── blocked-by: FOLLOWUP_SLICE-1  (Phase 9)
-                          │     ├── blocked-by: important-leaf-task-...
-                          │     └── blocked-by: minor-leaf-task-...
+                          │     ├── blocked-by: deferred-item-leaf-task-...
+                          │     └── blocked-by: deferred-item-leaf-task-...
                           └── blocked-by: FOLLOWUP_SLICE-2
 ` + "```\n" +
 						`
@@ -2077,7 +2085,7 @@ references:
   followup_epic: <followup-epic-id>
   original_urd: <original-urd-id>
 ---
-Scoping URE: determine which IMPORTANT/MINOR findings to address.")
+Scoping URE: determine which user-DEFER'd UAT items to address.")
 bd dep add <followup-epic-id> --blocked-by $FOLLOWUP_URE_ID
 
 FOLLOWUP_URD_ID=$(bd create \
@@ -2094,44 +2102,34 @@ bd dep add $FOLLOWUP_URE_ID --blocked-by $FOLLOWUP_URD_ID
 				},
 				{
 					Id:    "impl-rev-followup-step3",
-					Title: "Step 3: Leaf task adoption (dual-parent)",
-					Content: `When the supervisor creates FOLLOWUP_SLICE-N tasks, the IMPORTANT/MINOR leaf tasks from the original review gain a second parent:
+					Title: "Step 3: DEFER'd-item leaf adoption (dual-parent)",
+					Content: `When the supervisor creates FOLLOWUP_SLICE-N tasks, the user-DEFER'd UAT-item leaf tasks gain a second parent (dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice):
 
 ` + "```bash\n" +
-						`# Leaf task gets dual-parent: original severity group + follow-up slice
-bd dep add <followup-slice-id> --blocked-by <important-leaf-task-id>
-bd dep add <followup-slice-id> --blocked-by <minor-leaf-task-id>
-# Leaf task already has: bd dep add <severity-group-id> --blocked-by <leaf-task-id>
+						`# Leaf task gets dual-parent: DEFER'd-items tracking group + follow-up slice
+bd dep add <followup-slice-id> --blocked-by <deferred-item-leaf-id-1>
+bd dep add <followup-slice-id> --blocked-by <deferred-item-leaf-id-2>
+# Leaf task already has: bd dep add <deferred-items-tracking-group-id> --blocked-by <leaf-task-id>
 ` + "```",
 				},
 				{
 					Id:    "impl-rev-followup-handoff",
-					Title: "Reviewer → Followup Handoff (h5)",
-					Content: `The h5 handoff **starts** the follow-up lifecycle. Create this handoff document:
-` + "```\n" +
-						`.git/.aura/handoff/<request-task-id>/reviewer-to-followup.md
-` + "```\n" +
-						`
+					Title: "Followup Handoff (h5)",
+					Content: `The h5 handoff (Reviewer → Supervisor, summary-with-ids) closes out the review wave. The FOLLOWUP epic itself is created later, at UAT, from the user-DEFER'd UAT items — **not** from review findings (all review severities reach 0 before the wave closes). Author this handoff in its Beads task body (no filesystem path):
+
 ` + "```markdown\n" +
-						`# Handoff: Reviewer → Follow-up Epic
+						`# Handoff: Reviewer → Supervisor (review wave complete)
 
 ## Context
 - Request: <request-task-id>
-- Follow-up Epic: <followup-epic-id>
+- URD: <urd-task-id>
+- Ratified Proposal: <proposal-task-id>
 
-## IMPORTANT Findings
-| Finding | Slice | Severity Group | Description |
-|---------|-------|---------------|-------------|
-| <id> | SLICE-1 | <important-group-id> | <summary> |
+## Review Outcome
+- All slices reviewed; ALL severity groups (BLOCKER/IMPORTANT/MINOR) reached 0 on a fix-free clean round.
 
-## MINOR Findings
-| Finding | Slice | Severity Group | Description |
-|---------|-------|---------------|-------------|
-| <id> | SLICE-2 | <minor-group-id> | <summary> |
-
-## Recommended Priority Order
-1. <highest-priority IMPORTANT finding>
-2. <next>
+## Open Items
+- None for this wave. Any user-DEFER'd UAT items feed the FOLLOWUP epic at Phase 11.
 ` + "```",
 				},
 				{
@@ -2146,11 +2144,11 @@ bd dep add <followup-slice-id> --blocked-by <minor-leaf-task-id>
 | 3 | *(none)* | Supervisor creates FOLLOWUP_URD (same actor) |
 | 4 | h6 | Supervisor → Architect: Hands off FOLLOWUP_URE + FOLLOWUP_URD for FOLLOWUP_PROPOSAL |
 | 5 | h1 | Architect → Supervisor: After FOLLOWUP_PROPOSAL ratified |
-| 6 | h2 | Supervisor → Worker: FOLLOWUP_SLICE-N with adopted leaf task IDs |
+| 6 | h2 | Supervisor → Worker: FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks |
 | 7 | h3 | Supervisor → Reviewer: Code review of follow-up slices |
 | 8 | h4 | Worker → Reviewer: Follow-up slice completion |
 
-Follow-up handoff storage: ` + "`.git/.aura/handoff/{followup-epic-id}/{source}-to-{target}.md`" + `
+Follow-up handoff storage: each handoff is authored in its Beads task body (no filesystem path).
 
 See ` + "`../protocol/HANDOFF_TEMPLATE.md`" + ` for full follow-up handoff examples and field requirements.`,
 				},

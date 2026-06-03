@@ -138,10 +138,10 @@ bd dep add $BLOCKER_ID --blocked-by $FINDING_ID
 bd dep add <slice-1-id> --blocked-by $FINDING_ID
 ```
 
-Per [frag--sup-deferred-followup], IMPORTANT/MINOR findings route to severity group only:
+Per [frag--sup-deferred-followup], IMPORTANT/MINOR findings attach to their severity group only (they do **not** block the slice via dual-parent), but ALL severity groups (BLOCKER/IMPORTANT/MINOR) must reach 0 before the review wave closes — they are **never** routed to the FOLLOWUP epic. The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items.
 
 ```bash
-# IMPORTANT finding — blocks severity group only
+# IMPORTANT finding — attaches to the IMPORTANT severity group (NOT the slice)
 IMPORTANT_FINDING_ID=$(bd create --title "IMPORTANT: Add request timeout" \
   --labels "pasture:p10-impl:s10-review" \
   --description "---
@@ -152,7 +152,7 @@ references:
 ---
 API calls should have configurable timeouts.")
 
-# Only blocks the IMPORTANT severity group (NOT the slice)
+# Attaches to the IMPORTANT severity group (NOT the slice); the group must still reach 0
 bd dep add $IMPORTANT_ID --blocked-by $IMPORTANT_FINDING_ID
 ```
 
@@ -191,10 +191,7 @@ Call Skill(/pasture:reviewer-review-code) for the review procedure.`
 })
 ```
 
-**Handoff:** Before spawning each reviewer, create a handoff document:
-```
-.git/.aura/handoff/<request-task-id>/supervisor-to-reviewer-<N>.md
-```
+**Handoff:** Before spawning each reviewer, author its handoff in a Beads task body (the task body IS the handoff — no filesystem path).
 
 ### Supervisor → Reviewer Handoff Template
 
@@ -322,13 +319,13 @@ The follow-up epic runs the same protocol phases with FOLLOWUP_* prefixed task t
 FOLLOWUP epic (pasture:epic-followup)
   ├── relates_to: original URD
   ├── relates_to: original REVIEW-A/B/C tasks
-  └── blocked-by: FOLLOWUP_URE         (Phase 2: scope which findings to address)
+  └── blocked-by: FOLLOWUP_URE         (Phase 2: scope which DEFER'd items to address)
         └── blocked-by: FOLLOWUP_URD   (Phase 2: requirements for follow-up)
               └── blocked-by: FOLLOWUP_PROPOSAL-1  (Phase 3: proposal for follow-up)
                     └── blocked-by: FOLLOWUP_IMPL_PLAN  (Phase 8: decompose into slices)
                           ├── blocked-by: FOLLOWUP_SLICE-1  (Phase 9)
-                          │     ├── blocked-by: important-leaf-task-...
-                          │     └── blocked-by: minor-leaf-task-...
+                          │     ├── blocked-by: deferred-item-leaf-task-...
+                          │     └── blocked-by: deferred-item-leaf-task-...
                           └── blocked-by: FOLLOWUP_SLICE-2
 ```
 
@@ -342,7 +339,7 @@ references:
   followup_epic: <followup-epic-id>
   original_urd: <original-urd-id>
 ---
-Scoping URE: determine which IMPORTANT/MINOR findings to address.")
+Scoping URE: determine which user-DEFER'd UAT items to address.")
 bd dep add <followup-epic-id> --blocked-by $FOLLOWUP_URE_ID
 
 FOLLOWUP_URD_ID=$(bd create \
@@ -357,44 +354,34 @@ Follow-up requirements. References original URD.")
 bd dep add $FOLLOWUP_URE_ID --blocked-by $FOLLOWUP_URD_ID
 ```
 
-### Step 3: Leaf task adoption (dual-parent)
+### Step 3: DEFER'd-item leaf adoption (dual-parent)
 
-When the supervisor creates FOLLOWUP_SLICE-N tasks, the IMPORTANT/MINOR leaf tasks from the original review gain a second parent:
+When the supervisor creates FOLLOWUP_SLICE-N tasks, the user-DEFER'd UAT-item leaf tasks gain a second parent (dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice):
 
 ```bash
-# Leaf task gets dual-parent: original severity group + follow-up slice
-bd dep add <followup-slice-id> --blocked-by <important-leaf-task-id>
-bd dep add <followup-slice-id> --blocked-by <minor-leaf-task-id>
-# Leaf task already has: bd dep add <severity-group-id> --blocked-by <leaf-task-id>
+# Leaf task gets dual-parent: DEFER'd-items tracking group + follow-up slice
+bd dep add <followup-slice-id> --blocked-by <deferred-item-leaf-id-1>
+bd dep add <followup-slice-id> --blocked-by <deferred-item-leaf-id-2>
+# Leaf task already has: bd dep add <deferred-items-tracking-group-id> --blocked-by <leaf-task-id>
 ```
 
-### Reviewer → Followup Handoff (h5)
+### Followup Handoff (h5)
 
-The h5 handoff **starts** the follow-up lifecycle. Create this handoff document:
-```
-.git/.aura/handoff/<request-task-id>/reviewer-to-followup.md
-```
+The h5 handoff (Reviewer → Supervisor, summary-with-ids) closes out the review wave. The FOLLOWUP epic itself is created later, at UAT, from the user-DEFER'd UAT items — **not** from review findings (all review severities reach 0 before the wave closes). Author this handoff in its Beads task body (no filesystem path):
 
 ```markdown
-# Handoff: Reviewer → Follow-up Epic
+# Handoff: Reviewer → Supervisor (review wave complete)
 
 ## Context
 - Request: <request-task-id>
-- Follow-up Epic: <followup-epic-id>
+- URD: <urd-task-id>
+- Ratified Proposal: <proposal-task-id>
 
-## IMPORTANT Findings
-| Finding | Slice | Severity Group | Description |
-|---------|-------|---------------|-------------|
-| <id> | SLICE-1 | <important-group-id> | <summary> |
+## Review Outcome
+- All slices reviewed; ALL severity groups (BLOCKER/IMPORTANT/MINOR) reached 0 on a fix-free clean round.
 
-## MINOR Findings
-| Finding | Slice | Severity Group | Description |
-|---------|-------|---------------|-------------|
-| <id> | SLICE-2 | <minor-group-id> | <summary> |
-
-## Recommended Priority Order
-1. <highest-priority IMPORTANT finding>
-2. <next>
+## Open Items
+- None for this wave. Any user-DEFER'd UAT items feed the FOLLOWUP epic at Phase 11.
 ```
 
 ### Follow-up Handoff Chain
@@ -408,11 +395,11 @@ Inside the follow-up lifecycle, the same handoff types (h1-h4) apply but scoped 
 | 3 | *(none)* | Supervisor creates FOLLOWUP_URD (same actor) |
 | 4 | h6 | Supervisor → Architect: Hands off FOLLOWUP_URE + FOLLOWUP_URD for FOLLOWUP_PROPOSAL |
 | 5 | h1 | Architect → Supervisor: After FOLLOWUP_PROPOSAL ratified |
-| 6 | h2 | Supervisor → Worker: FOLLOWUP_SLICE-N with adopted leaf task IDs |
+| 6 | h2 | Supervisor → Worker: FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks |
 | 7 | h3 | Supervisor → Reviewer: Code review of follow-up slices |
 | 8 | h4 | Worker → Reviewer: Follow-up slice completion |
 
-Follow-up handoff storage: `.git/.aura/handoff/{followup-epic-id}/{source}-to-{target}.md`
+Follow-up handoff storage: each handoff is authored in its Beads task body (no filesystem path).
 
 See `../protocol/HANDOFF_TEMPLATE.md` for full follow-up handoff examples and field requirements.
 
