@@ -58,7 +58,7 @@ See [PROCESS.md](PROCESS.md) for the full step-by-step workflow. See [SKILLS.md]
 **Receives from:** User (Phase 1 request) OR Supervisor via h6 (follow-up lifecycle: FOLLOWUP_URE + FOLLOWUP_URD for FOLLOWUP_PROPOSAL creation)
 **Hands off to:** Supervisor (Phase 7 h1 handoff document, or follow-up h1 after FOLLOWUP_PROPOSAL ratified)
 
-**Handoff document:** Full inline provenance — includes all task references (REQUEST, URD, PROPOSAL, ratified plan), key decisions with rationale, open items, and acceptance criteria.
+**Handoff:** Authored in the HANDOFF Beads task body with full inline provenance — includes all task references (REQUEST, URD, PROPOSAL, ratified plan), key decisions with rationale, open items, and acceptance criteria.
 
 ---
 
@@ -89,11 +89,11 @@ Same 3 axes, applied to implementation slices.
 **Task title:** `SLICE-N-REVIEW-{axis}-{round}` (e.g., `SLICE-1-REVIEW-A-1`)
 
 **Severity tree (EAGER creation):** Always create 3 severity groups per review round:
-- `pasture:severity:blocker` — Blocks the slice
-- `pasture:severity:important` — Tracked in follow-up epic
-- `pasture:severity:minor` — Tracked in follow-up epic
+- `pasture:severity:blocker` — Blocks the slice (dual-parent); must reach 0
+- `pasture:severity:important` — Fixed in-wave; must reach 0 (NOT deferrable)
+- `pasture:severity:minor` — Fixed in-wave; must reach 0 (NOT deferrable)
 
-Empty groups are closed immediately.
+Empty groups are closed immediately. **No cycle cap:** iterate review → fix → re-review until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR. No review severity is routed to FOLLOWUP — the FOLLOWUP epic is fed only by user-DEFER'd UAT items.
 
 **Skills:** `/pasture:reviewer-review-plan`, `/pasture:reviewer-review-code`, `/pasture:reviewer-comment`, `/pasture:reviewer-vote`
 
@@ -124,7 +124,9 @@ Empty groups are closed immediately.
 **Key constraints:**
 - Never implements code — always spawns workers
 - Each production code path owned by exactly ONE worker
-- Creates follow-up epic (`pasture:epic-followup`) when code review has IMPORTANT/MINOR findings
+- Decomposes interface-first: prefers a FOUNDATION slice exporting shared identifiers before dependent slices (justifies any linear decomposition in the IMPL_PLAN)
+- Drives the code-review wave to a fix-free clean round (0 BLOCKER + 0 IMPORTANT + 0 MINOR, no cycle cap) before closing slices
+- Creates the follow-up epic (`pasture:epic-followup`) at **UAT** when the user DEFERs items — fed ONLY by user-DEFER'd UAT items, never by review severities
 - Initiates follow-up lifecycle: creates FOLLOWUP_URE, FOLLOWUP_URD, then hands off to Architect via h6 for FOLLOWUP_PROPOSAL
 
 ---
@@ -144,7 +146,7 @@ Empty groups are closed immediately.
 **Receives from:** Supervisor (Phase 9 slice assignment with handoff document, including FOLLOWUP_SLICE-N for follow-up lifecycle)
 **Hands off to:** Reviewer (Phase 10 via supervisor). For FOLLOWUP_SLICE-N, completion handoff reports which original leaf tasks were resolved.
 
-**Vertical slice ownership:** Worker owns the full vertical — types, tests, implementation, and wiring. Within the slice, follows TDD layers:
+**Vertical slice ownership:** Worker owns the full vertical — types, tests, implementation, and wiring. The slice's leaf tasks may take ANY shape (named after the real work units); the TDD layers below are one illustrative decomposition, not a required triple:
 1. Layer 1: Types and schemas
 2. Layer 2: Tests (import production code — will fail initially)
 3. Layer 3: Implementation + wiring (make tests pass)
@@ -159,14 +161,16 @@ Empty groups are closed immediately.
 
 ## Handoff Matrix
 
-| # | From | To | Phase | Document Location | Content Level |
-|---|------|----|-------|-------------------|--------------|
-| 1 | Architect | Supervisor | 7 | `.git/.aura/handoff/{request-id}/architect-to-supervisor.md` | Full inline provenance |
-| 2 | Supervisor | Worker | 9 | `.git/.aura/handoff/{request-id}/supervisor-to-worker.md` | Summary + bd IDs |
-| 3 | Supervisor | Reviewer | 10 | `.git/.aura/handoff/{request-id}/supervisor-to-reviewer.md` | Summary + bd IDs |
-| 4 | Worker | Reviewer | 10 | `.git/.aura/handoff/{request-id}/worker-to-reviewer.md` | Summary + bd IDs |
-| 5 | Reviewer | Followup | post-10 | `.git/.aura/handoff/{request-id}/reviewer-to-followup.md` | Summary + bd IDs |
-| 6 | Supervisor | Architect | Follow-up lifecycle | `.git/.aura/handoff/{followup-epic-id}/supervisor-to-architect.md` | Summary + bd IDs |
+Every handoff is **authored inline in its own HANDOFF Beads task body** (R8/A3 retired the `.git/.aura/handoff/...` file pattern) and located by task ID:
+
+| # | From | To | Phase | Authored In | Content Level |
+|---|------|----|-------|-------------|--------------|
+| 1 | Architect | Supervisor | 7 | HANDOFF Beads task body | Full inline provenance |
+| 2 | Supervisor | Worker | 9 | HANDOFF Beads task body | Summary + bd IDs |
+| 3 | Supervisor | Reviewer | 10 | HANDOFF Beads task body | Summary + bd IDs |
+| 4 | Worker | Reviewer | 10 | HANDOFF Beads task body | Summary + bd IDs |
+| 5 | Reviewer | Followup | post-10 | HANDOFF Beads task body | Summary + bd IDs |
+| 6 | Supervisor | Architect | Follow-up lifecycle | HANDOFF Beads task body | Summary + bd IDs |
 
 **Same-actor transitions** (no handoff needed): Plan UAT → Ratify (Phase 5→6), Ratify → Handoff (Phase 6→7) — both performed by the architect. In the follow-up lifecycle, Supervisor creating FOLLOWUP_URE and FOLLOWUP_URD are also same-actor transitions.
 

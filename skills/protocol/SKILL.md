@@ -28,6 +28,8 @@ Complete reference documentation for the Pasture 12-phase workflow system.
 | [HANDOFF_TEMPLATE.md](HANDOFF_TEMPLATE.md) | Standardized handoff document template |
 | [HANDOFF_EXAMPLE-web-command-impl.md](HANDOFF_EXAMPLE-web-command-impl.md) | Handoff example: web command implementation |
 | [HANDOFF_EXAMPLE-ingest-pipeline-impl.md](HANDOFF_EXAMPLE-ingest-pipeline-impl.md) | Handoff example: ingest pipeline implementation |
+| [MR_TEMPLATE.md](MR_TEMPLATE.md) | Reusable merge/pull request description skeleton |
+| [EXAMPLE_MR_DESCRIPTION.md](EXAMPLE_MR_DESCRIPTION.md) | Worked merge request description example |
 | [UAT_TEMPLATE.md](UAT_TEMPLATE.md) | User acceptance testing template |
 | [UAT_EXAMPLE.md](UAT_EXAMPLE.md) | UAT example with demonstrative scenarios |
 | [RESEARCH_EXAMPLE-nix-openclaw-req-ure-proposal.md](RESEARCH_EXAMPLE-nix-openclaw-req-ure-proposal.md) | Research example: Nix/OpenClaw request through proposal |
@@ -64,13 +66,13 @@ pasture:p{phase}-{domain}:s{step}-{type}
 
 ### Follow-up Lifecycle
 
-**Trigger:** Phase 10 code review completes with ANY IMPORTANT or MINOR findings (not gated on BLOCKER resolution).
+**Trigger:** UAT (Phase 5 or Phase 11) produces one or more user-DEFER'd items. Review severities never feed FOLLOWUP — all review findings reach 0 before wave close.
 
 **Owner:** Supervisor creates follow-up epic (label `pasture:epic-followup`).
 
 **Flow:**
 ```
-Code Review (Phase 10) finds IMPORTANT/MINOR findings
+UAT (Phase 5 or 11) produces user-DEFER'd items
   → Supervisor creates FOLLOWUP epic
     → FOLLOWUP_URE (supervisor, aggregated findings as requirements)
       → FOLLOWUP_URD (supervisor, single source of truth for follow-up)
@@ -83,7 +85,7 @@ Code Review (Phase 10) finds IMPORTANT/MINOR findings
                     → Code Review (severity tree, same process)
 ```
 
-Original IMPORTANT/MINOR leaf tasks are adopted as children of FOLLOWUP_SLICE-N (dual-parent). No followup-of-followup — findings from follow-up code review stay on the existing follow-up epic.
+User-DEFER'd UAT-item leaf tasks are adopted as children of FOLLOWUP_SLICE-N (dual-parent). No followup-of-followup — any DEFER'd items from a follow-up UAT stay on the existing follow-up epic.
 
 ### Agent Roles
 

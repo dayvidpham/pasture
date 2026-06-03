@@ -18,7 +18,9 @@ Multi-agent orchestration protocol for AI coding agents. Defines a 12-phase work
 | [PROCESS.md](PROCESS.md) | Step-by-step workflow execution for all 12 phases | When running or debugging a phase |
 | [AGENTS.md](AGENTS.md) | Role taxonomy: phases owned, tools, handoff procedures | When spawning agents or assigning work |
 | [SKILLS.md](SKILLS.md) | Command reference: every `/pasture:*` skill mapped to phase and role | When invoking a skill or looking up usage |
-| [HANDOFF_TEMPLATE.md](HANDOFF_TEMPLATE.md) | Standardized template for 5 actor-change transitions | When creating handoff documents |
+| [HANDOFF_TEMPLATE.md](HANDOFF_TEMPLATE.md) | Standardized template for 6 actor-change transitions (authored in the HANDOFF Beads task body) | When creating handoffs |
+| [MR_TEMPLATE.md](MR_TEMPLATE.md) | Reusable merge/pull request description skeleton | When opening a merge/pull request |
+| [EXAMPLE_MR_DESCRIPTION.md](EXAMPLE_MR_DESCRIPTION.md) | Worked merge request description example | Reference for MR_TEMPLATE |
 | [MIGRATION_v1_to_v2.md](MIGRATION_v1_to_v2.md) | Label and title migration from v1 to v2 | When updating old tasks |
 | [UAT_TEMPLATE.md](UAT_TEMPLATE.md) | User Acceptance Test structured output template | When running UAT (Phase 5 or 11) |
 | [UAT_EXAMPLE.md](UAT_EXAMPLE.md) | Worked UAT example | Reference for UAT format |
@@ -68,8 +70,9 @@ Special labels:
 - **Consensus required** — All 3 reviewers must ACCEPT before proceeding
 - **Binary votes** — ACCEPT or REVISE only (no intermediate levels)
 - **EAGER severity tree** — Always create 3 severity groups per code review round
-- **Follow-up epic** — Triggered by review completion + ANY IMPORTANT/MINOR findings
-- **Vertical slices** — Each worker owns one full production code path end-to-end
+- **Clean-review exit** — No cycle cap: iterate review → fix → re-review until a fix-free clean round (0 BLOCKER + 0 IMPORTANT + 0 MINOR); all severities are fixed in-wave
+- **Follow-up epic** — Created at UAT, fed ONLY by user-DEFER'd UAT items (never by review severities)
+- **Vertical slices** — Each worker owns one full production code path end-to-end; slices may have any number of leaf tasks
 
 ## References
 
