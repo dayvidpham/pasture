@@ -34,6 +34,17 @@ var userRequestBody = SkillBody{
 			Then:      "invoke `/pasture:user-elicit` for Phase 2",
 			ShouldNot: "skip to proposal",
 		},
+		{
+			Id:    "user-req-fix-intent",
+			Given: "a request whose user intent is to FIX existing behavior (a bug, regression, or incorrect output)",
+			When:  "classifying in Phase 1",
+			Then: "recognize the fix-intent SEMANTICALLY during classification (record it in the classification comment) so the validation-case lifecycle is triggered downstream in URE/UAT/impl",
+			ShouldNot: "introduce a request-type axis or enum to detect fix-intent — recognition is semantic, not a fifth classification axis",
+		},
+		// R6/A2: surface the shared fix-validation-cases lifecycle at the
+		// classification entry point. behaviorRef resolves to
+		// SharedFragmentSpecs[FragFixValidationCases] (SLICE-1).
+		behaviorRef(FragFixValidationCases),
 	},
 
 	Sections: []ProseSection{
@@ -78,6 +89,19 @@ var userRequestBody = SkillBody{
 						"   bd comments add {{request-task-id}} \\\n" +
 						"     \"Classification: scope={{scope}}, complexity={{complexity}}, risk={{risk}}, novelty={{novelty}}\"\n" +
 						"   " + "```",
+				},
+				{
+					Id:    "user-req-fix-intent-recognition",
+					Title: "Recognize fix-intent (semantic, NOT a classification axis)",
+					Content: "Separately from the 4 axes above, judge **semantically** whether the user's intent is to **FIX existing behavior** (a bug, regression, or wrong output) versus build something new. This is a recognition step, **not a fifth axis and not a `request-type` enum** — do not add a typed field for it.\n" +
+						"\n" +
+						"When the intent is to fix existing behavior, the **validation-case lifecycle** applies for the rest of the epoch: concrete failing/expected cases are elicited in URE (`/pasture:user-elicit`), confirmed with the user in UAT (`/pasture:user-uat`), evaluated against the fix, and the failing real-data cases are stored as test fixtures.\n" +
+						"\n" +
+						"Record the recognition in the same classification comment so downstream phases pick it up:\n" +
+						"```" + `bash` + "\n" +
+						"bd comments add {{request-task-id}} \\\n" +
+						"  \"Fix-intent: yes — validation-case lifecycle applies (elicit cases in URE, confirm in UAT, store as fixtures)\"\n" +
+						"```",
 				},
 			},
 		},

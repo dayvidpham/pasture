@@ -48,6 +48,24 @@ var userElicitBody = SkillBody{
 			Then:      "include URD ID in description frontmatter of referencing tasks",
 			ShouldNot: "use `bd dep add --blocked-by` for URD links (URD is a reference document, not a blocking dependency)",
 		},
+		{
+			Id:    "user-elicit-code-shown",
+			Given: "any definition, code snippet, interface, or before/after example shown to the user during elicitation (e.g. in an AskUserQuestion preview)",
+			When:  "recording the Q&A",
+			Then:  "capture the shown definition/code VERBATIM in the elicit task alongside the question and response (parity with UAT's 'Definition shown' / 'Command run' fields)",
+			ShouldNot: "record only the answer while dropping the code or definition the user was reacting to — the response is meaningless without what was shown",
+		},
+		{
+			Id:    "user-elicit-invoke-skill",
+			Given: "the Phase 2 URE interview",
+			When:  "conducting it",
+			Then:  "MUST invoke `Skill(/pasture:user-elicit)` so the verbatim-capture and (for fix-intent requests) validation-case elicitation procedures are loaded",
+			ShouldNot: "conduct the URE without invoking its skill — skipping it loses verbatim capture and the validation-case lifecycle",
+		},
+		// R6: fix-intent REQUESTs elicit concrete validation cases during URE.
+		// behaviorRef resolves to SharedFragmentSpecs[FragFixValidationCases]
+		// (SLICE-1) so the lifecycle renders into the generated SKILL.md.
+		behaviorRef(FragFixValidationCases),
 	},
 
 	Sections: []ProseSection{
@@ -101,6 +119,16 @@ var userElicitBody = SkillBody{
 					Id:      "user-elicit-catchall",
 					Title:   "5. Catch-All",
 					Content: "Final question to capture anything missed.",
+				},
+				{
+					Id:    "user-elicit-validation-cases",
+					Title: "6. Validation Cases (fix-intent requests only)",
+					Content: "If Phase 1 recognized the request as **fix-intent** (fixing existing behavior — see the REQUEST classification comment), elicit **concrete validation cases** during this URE:\n" +
+						"- The exact inputs/behaviors that currently FAIL (the bug as the user observes it).\n" +
+						"- The exact inputs/behaviors that MUST PASS after the fix (the expected correct output).\n" +
+						"- Any real data, commands, or reproduction steps the user can provide — capture these **verbatim**.\n" +
+						"\n" +
+						"These cases seed the fix's test fixtures and are the set confirmed with the user in UAT (`/pasture:user-uat`) and evaluated against the implemented fix. Do NOT introduce a `request-type` enum to gate this — fix-intent is recognized semantically. (Non-fix requests skip this subsection.)",
 				},
 				{
 					Id:    "user-elicit-prereq",
@@ -209,7 +237,10 @@ var userElicitBody = SkillBody{
 			Content: "After survey completion, capture the full Q&A record using the same structured\n" +
 				"format as [UAT_TEMPLATE.md](../protocol/UAT_TEMPLATE.md). Each question must\n" +
 				"include the exact question text, ALL options with their descriptions, and the\n" +
-				"user's verbatim response.\n" +
+				"user's verbatim response. When a definition, code snippet, or example was shown\n" +
+				"to the user before a question, capture it verbatim in a **Definition/code shown:**\n" +
+				"field (parity with UAT's 'Definition shown' / 'Command run' fields). For\n" +
+				"**fix-intent** requests, also record the elicited validation cases verbatim.\n" +
 				"\n" +
 				"```" + `bash` + "\n" +
 				"bd create --labels \"pasture:p2-user:s2_1-elicit\" \\\n" +
@@ -222,6 +253,7 @@ var userElicitBody = SkillBody{
 				"\n" +
 				"### End Vision\n" +
 				"Q: What is your end vision for this feature? How will users interact with it when complete?\n" +
+				"Definition/code shown: {{verbatim definition/snippet shown to user, or 'none'}}\n" +
 				"Options: Simple UI control (Button/link users click), Automated process (Happens without user action), API endpoint (Programmatic access), Background service (Runs continuously)\n" +
 				"A: {{user's verbatim selections and any custom input}}\n" +
 				"\n" +
@@ -238,7 +270,12 @@ var userElicitBody = SkillBody{
 				"### Other\n" +
 				"Q: Is there anything else we should know about this feature?\n" +
 				"Options: Related to existing feature (Connects to something), Inspired by another product (Has a reference), Urgent timeline (Needed soon), Nothing else (Covered everything)\n" +
-				"A: {{user's verbatim input}}\" \\\n" +
+				"A: {{user's verbatim input}}\n" +
+				"\n" +
+				"## Validation Cases (fix-intent requests only)\n" +
+				"- Currently failing: {{verbatim input/behavior that fails today}}\n" +
+				"- Must pass after fix: {{verbatim expected correct behavior}}\n" +
+				"- Repro / real data: {{verbatim commands, data, or steps — or 'none'}}\" \\\n" +
 				"  --assignee architect\n" +
 				"\n" +
 				"# Chain dependency: REQUEST blocked by ELICIT\n" +

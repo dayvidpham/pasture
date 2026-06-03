@@ -53,12 +53,16 @@ Use this XML template to capture UAT results. Each component is presented one at
           <user-response>
             <selected>{{OPTION_LABEL_OR_OTHER}}</selected>
             <verbatim>{{USER_RESPONSE_VERBATIM_INCLUDING_NOTES}}</verbatim>
+            <!-- Per-item disposition: FIX-NOW (resolve this wave) or DEFER
+                 (sole FOLLOWUP source). User-confirmed, echoed back. -->
+            <disposition>{{FIX-NOW | DEFER}}</disposition>
           </user-response>
         </question>
 
         <!-- User-initiated comments (not in response to a question) -->
         <user-comment>
           <verbatim>{{EXACT_USER_COMMENT}}</verbatim>
+          <disposition>{{FIX-NOW | DEFER}}</disposition>
         </user-comment>
 
       </questions>
@@ -74,6 +78,7 @@ Use this XML template to capture UAT results. Each component is presented one at
     <addendum>
       <verbatim>{{EXACT_USER_STATEMENT}}</verbatim>
       <design-implication>{{WHAT_THIS_MEANS_FOR_THE_DESIGN}}</design-implication>
+      <disposition>{{FIX-NOW | DEFER}}</disposition>
     </addendum>
   </addenda>
 
@@ -136,6 +141,7 @@ bd comments add {{PROPOSAL_TASK_ID}} "RATIFIED: All 3 reviewers ACCEPT, UAT pass
 8. **Final decision** summarizes all design changes relative to the proposal being UAT'd
 9. **Binary decisions only** — component decisions are ACCEPT or REVISE (no intermediate levels)
 10. **Findings tracked via severity tree** — if ACCEPT with minor concerns, track them as IMPORTANT/MINOR findings in the severity tree during code review (Phase 10), not at UAT time
+11. **Per-item disposition** — every feedback item gets a user-confirmed, echoed-back `FIX-NOW` or `DEFER`. FIX-NOW resolves this wave; DEFER is the **sole** source feeding the FOLLOWUP epic. Review severities (BLOCKER/IMPORTANT/MINOR) are never dispositioned here and never feed FOLLOWUP.
 
 ## See Also
 

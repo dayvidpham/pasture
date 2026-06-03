@@ -62,6 +62,24 @@ var userUatBody = SkillBody{
 			Then:      "update the URD with UAT results via `bd comments add <urd-id> \"UAT: <summary>\"`",
 			ShouldNot: "leave the URD out of date after UAT",
 		},
+		{
+			Id:    "uat-feedback-disposition",
+			Given: "each item of user feedback gathered during UAT (Phase 5 or Phase 11)",
+			When:  "recording it",
+			Then:  "assign every item an explicit, user-confirmed disposition of FIX-NOW or DEFER and echo the disposition back to the user for confirmation; FIX-NOW items are resolved in the current wave, DEFER'd items are the SOLE source feeding the FOLLOWUP epic",
+			ShouldNot: "leave a feedback item without a confirmed disposition, or route any review severity (BLOCKER/IMPORTANT/MINOR) into FOLLOWUP — only DEFER'd UAT items feed it",
+		},
+		{
+			Id:    "uat-invoke-skill",
+			Given: "the Phase 5 or Phase 11 UAT interview",
+			When:  "conducting it",
+			Then:  "MUST invoke `Skill(/pasture:user-uat)` so the verbatim-capture, FIX-NOW/DEFER disposition, and (for fix-intent requests) validation-case confirmation procedures are loaded",
+			ShouldNot: "conduct the UAT without invoking its skill — skipping it loses the disposition and verbatim-capture procedures",
+		},
+		// R6: for fix-intent REQUESTs, UAT confirms the validation-case set with
+		// the user and evaluates the fix against it. behaviorRef resolves to
+		// SharedFragmentSpecs[FragFixValidationCases] (SLICE-1).
+		behaviorRef(FragFixValidationCases),
 	},
 
 	Sections: []ProseSection{
@@ -257,6 +275,31 @@ One open-ended question — "Is there anything from your original requirements t
 				"```",
 		},
 		{
+			Id:    "uat-disposition",
+			Title: "Per-Item Disposition: FIX-NOW or DEFER",
+			Content: "Every piece of UAT feedback — whether a REVISE on a component or an open-ended concern — MUST be given an explicit, **user-confirmed** disposition. There is no third option.\n" +
+				"\n" +
+				"| Disposition | Meaning | Where it goes |\n" +
+				"|-------------|---------|----------------|\n" +
+				"| **FIX-NOW** | Resolve before this wave closes | Back to the architect (Plan UAT) or the relevant slice (Impl UAT) |\n" +
+				"| **DEFER** | Acceptable to ship now; track for later | The **sole** source feeding the FOLLOWUP epic |\n" +
+				"\n" +
+				"**Echo each disposition back to the user for confirmation** before recording it — e.g. \"Recording '{{feedback}}' as DEFER (tracked in follow-up, not fixed this wave) — confirm?\". Record the confirmed disposition verbatim alongside the feedback.\n" +
+				"\n" +
+				"Review severities (BLOCKER / IMPORTANT / MINOR) are **never** dispositioned here and **never** feed FOLLOWUP — they are resolved to zero during code review (Phase 10). FOLLOWUP is fed by DEFER'd UAT items only.",
+		},
+		{
+			Id:    "uat-validation-cases-confirm",
+			Title: "Validation-Case Confirmation (fix-intent requests only)",
+			Content: "If the REQUEST was recognized as **fix-intent** (see the Phase 1 classification and the URE validation cases), UAT MUST close the validation-case loop:\n" +
+				"1. **Show the user the validation case set** elicited in URE (the inputs/behaviors that were failing and those that must now pass).\n" +
+				"2. **Confirm the set is complete and correct** — ask whether any case is missing or wrong; capture additions verbatim.\n" +
+				"3. **Demonstrate the fix evaluated against each case** (Impl UAT: run them; Plan UAT: confirm the proposal covers them).\n" +
+				"4. The failing real-data cases become stored test fixtures for the fix.\n" +
+				"\n" +
+				"Do NOT mark a fix-intent component ACCEPT without confirming its validation cases pass.",
+		},
+		{
 			Id:      "uat-creating-task",
 			Title:   "Creating UAT Task",
 			Content: "",
@@ -279,7 +322,8 @@ One open-ended question — "Is there anything from your original requirements t
 						"**Motivating example shown:** <before/after or input/output example>\n" +
 						"**Question asked:** <exact question text>\n" +
 						"**Options presented:** <exact option labels and descriptions>\n" +
-						"**User response:** <verbatim selection(s)>\n\n" +
+						"**User response:** <verbatim selection(s)>\n" +
+						"**Disposition:** <FIX-NOW or DEFER — user-confirmed, echoed back>\n\n" +
 						"## Final Decision\n" +
 						"<ACCEPT or REVISE with verbatim reason>\"\n\n" +
 						"bd dep add <proposal-id> --blocked-by <uat-task-id>\n\n" +
@@ -303,7 +347,8 @@ One open-ended question — "Is there anything from your original requirements t
 						"### Component: <component-name>\n" +
 						"**Command run / output shown:** <actual terminal output shown to user>\n" +
 						"**Question asked:** <exact question>\n" +
-						"**User response:** <verbatim response>\n\n" +
+						"**User response:** <verbatim response>\n" +
+						"**Disposition:** <FIX-NOW or DEFER — user-confirmed, echoed back>\n\n" +
 						"## Final Decision\n" +
 						"<ACCEPT or REVISE>\"\n\n" +
 						"bd dep add <impl-plan-id> --blocked-by <impl-uat-task-id>\n\n" +

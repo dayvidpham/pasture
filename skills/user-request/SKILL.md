@@ -34,6 +34,18 @@ description: Capture user feature request verbatim (Phase 1)
 - Then: invoke `/pasture:user-elicit` for Phase 2
 - Should not: skip to proposal
 
+**[user-req-fix-intent]**
+- Given: a request whose user intent is to FIX existing behavior (a bug, regression, or incorrect output)
+- When: classifying in Phase 1
+- Then: recognize the fix-intent SEMANTICALLY during classification (record it in the classification comment) so the validation-case lifecycle is triggered downstream in URE/UAT/impl
+- Should not: introduce a request-type axis or enum to detect fix-intent — recognition is semantic, not a fifth classification axis
+
+**[frag--fix-validation-cases]**
+- Given: a REQUEST whose user intent is to FIX existing behavior
+- When: eliciting (URE), acceptance-testing (UAT), or implementing the fix
+- Then: elicit concrete validation cases (inputs/behaviors that currently fail or must pass), confirm the case set with the user in UAT, evaluate the fix against them, and store failing real-data cases as test fixtures
+- Should not: ship a fix without validation cases; introduce a request-type axis or enum to detect fix-intent
+
 ## Phase 1 Sub-steps
 
 | Sub-step | Label | Description | Parallel? |
@@ -72,6 +84,18 @@ description: Capture user feature request verbatim (Phase 1)
    bd comments add {{request-task-id}} \
      "Classification: scope={{scope}}, complexity={{complexity}}, risk={{risk}}, novelty={{novelty}}"
    ```
+
+### Recognize fix-intent (semantic, NOT a classification axis)
+
+Separately from the 4 axes above, judge **semantically** whether the user's intent is to **FIX existing behavior** (a bug, regression, or wrong output) versus build something new. This is a recognition step, **not a fifth axis and not a `request-type` enum** — do not add a typed field for it.
+
+When the intent is to fix existing behavior, the **validation-case lifecycle** applies for the rest of the epoch: concrete failing/expected cases are elicited in URE (`/pasture:user-elicit`), confirmed with the user in UAT (`/pasture:user-uat`), evaluated against the fix, and the failing real-data cases are stored as test fixtures.
+
+Record the recognition in the same classification comment so downstream phases pick it up:
+```bash
+bd comments add {{request-task-id}} \
+  "Fix-intent: yes — validation-case lifecycle applies (elicit cases in URE, confirm in UAT, store as fixtures)"
+```
 
 ## Step 2: Research Depth Confirmation
 
