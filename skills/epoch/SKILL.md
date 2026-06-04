@@ -190,6 +190,12 @@ Agents coordinate through **beads** tasks and comments:
 - Then: Supervisor creates a follow-up epic (label pasture:epic-followup) from the user-DEFER'd UAT items only
 - Should not: create a follow-up epic from any review severity (BLOCKER/IMPORTANT/MINOR) — all review severities must reach 0 before wave close
 
+**[epoch-deferral-raised-at-gate]**
+- Given: a deferred item (flagged by the user OR proposed by the architect/supervisor) outstanding at any phase
+- When: orchestrating toward the next user gate
+- Then: ensure ALL deferred items — whoever proposed them — are raised to the user at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation; DEFER'd items are the SOLE source feeding the FOLLOWUP epic
+- Should not: let any item be silently deferred without raising it to the user at the next gate; route any review severity into FOLLOWUP
+
 **[epoch-supervisor-not-idle]**
 - Given: a freshly spawned supervisor (Phase 8 IMPL_PLAN)
 - When: it dispatches Explore subagents and appears idle

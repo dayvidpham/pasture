@@ -243,6 +243,12 @@ You own Phases 7-12 of the epoch: receive handoff from architect (p7), create ve
 - Then: follow the Ride the Wave cycle: plan tasks with integration points, launch the wave of workers, spawn reviewers for per-slice review (clean exit = 0 BLOCKER + 0 IMPORTANT + 0 MINOR), workers fix per-slice with atomic commits, and iterate review -> fix -> re-review up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface outstanding findings to the user at a gate
 - Should not: skip any stage; batch review across slices; hardcode the budget; proceed past the chosen budget without surfacing to the user; close a wave with any finding silently outstanding
 
+**[B-sup-enforce-tdd-contract]**
+- Given: workers implementing vertical slices (Phase 9)
+- When: coordinating implementation
+- Then: enforce tests-first TDD: the tests are written FIRST as the executable verification of the URE/Plan-UAT-agreed validation-case contract (C-validation-cases / [frag--validation-cases]); expect red-first, then progressively green as the implementation lands
+- Should not: let workers write implementation before the contract tests; accept a slice whose tests were retrofitted after the code (tests must encode the agreed validation cases)
+
 ### Completion Checklist
 
 **landing gates:**

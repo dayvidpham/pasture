@@ -770,6 +770,16 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 				ShouldNot: "skip any stage; batch review across slices; hardcode the budget; proceed past the chosen budget without surfacing to the user; " +
 					"close a wave with any finding silently outstanding",
 			},
+			{
+				Id:    "B-sup-enforce-tdd-contract",
+				Given: "workers implementing vertical slices (Phase 9)",
+				When:  "coordinating implementation",
+				Then: "enforce tests-first TDD: the tests are written FIRST as the executable verification of the " +
+					"URE/Plan-UAT-agreed validation-case contract (C-validation-cases / [frag--validation-cases]); " +
+					"expect red-first, then progressively green as the implementation lands",
+				ShouldNot: "let workers write implementation before the contract tests; " +
+					"accept a slice whose tests were retrofitted after the code (tests must encode the agreed validation cases)",
+			},
 		},
 	},
 	types.RoleWorker: {

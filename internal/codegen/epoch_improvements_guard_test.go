@@ -1,4 +1,4 @@
-// Package codegen_test — epoch-improvements guards (G2–G7 + M2–M3).
+// Package codegen_test — epoch-improvements guards (G2–G7 + M2–M4).
 //
 // These guards enforce the invariants introduced by the pasture epoch-protocol
 // improvements epoch (RATIFIED PROPOSAL-5, aura-plugins-v1xg8). They are
@@ -47,7 +47,11 @@
 //     worker-implement and reviewer-review-code SKILL.md (positive render-assertion).
 //   - M3 (TestV2DeferralRaisedAtNextGateRenders): the V2 expanded-deferral model
 //     (agent-proposed deferrals; ALL deferred items raised to the user at the next
-//     user gate) renders into both user-elicit and user-uat SKILL.md (v2-2 V2).
+//     user gate) renders into user-elicit, user-uat, AND epoch SKILL.md (v2-2 V2 +
+//     re-UAT V2-PROP epoch propagation).
+//   - M4 (TestV4SupervisorEnforcesTddContract): the V4 tests-first=validation-case
+//     contract (propagated to the supervisor role, re-UAT V4-PROP) renders into
+//     agents/supervisor.md and skills/supervisor/SKILL.md.
 package codegen_test
 
 import (
@@ -533,12 +537,13 @@ func TestR6ValidationCasesRenders(t *testing.T) {
 // v2-2 V2 (B-4): deferrals may be proposed by the architect/supervisor (not only
 // flagged by the user), and ALL deferred items must be raised to the user at the
 // next user gate. M3 asserts that prose renders into BOTH user-gate skills
-// (user-elicit and user-uat), so a regression that drops the agent-proposed or
-// raise-at-next-gate semantics is caught.
+// (user-elicit and user-uat) AND the epoch orchestrator (re-UAT V2-PROP), so a
+// regression that drops the agent-proposed or raise-at-next-gate semantics is
+// caught.
 func TestV2DeferralRaisedAtNextGateRenders(t *testing.T) {
 	root := repoRoot(t)
 
-	// Stable substrings of the V2 behavior that must render in both user gates.
+	// Stable substrings of the V2 behavior that must render in every surface.
 	const (
 		raiseNeedle = "raised to the user at the next user gate (URE, Plan UAT, or Impl UAT)"
 		agentNeedle = "proposed by the architect/supervisor"
@@ -547,6 +552,7 @@ func TestV2DeferralRaisedAtNextGateRenders(t *testing.T) {
 	for _, rel := range []string{
 		"skills/user-elicit/SKILL.md",
 		"skills/user-uat/SKILL.md",
+		"skills/epoch/SKILL.md",
 	} {
 		data, err := os.ReadFile(filepath.Join(root, rel))
 		require.NoErrorf(t, err, "M3: reading %q failed", rel)
@@ -559,5 +565,33 @@ func TestV2DeferralRaisedAtNextGateRenders(t *testing.T) {
 			"M3: generated %q does not render the agent-proposed-deferral needle %q — "+
 				"V2 allows the architect/supervisor to propose deferrals (not only the user); "+
 				"re-add the behavior in the body spec and regenerate.", rel, agentNeedle)
+	}
+}
+
+// ─── M4: positive render-assertion for the V4 supervisor tests-first contract ──
+//
+// re-UAT V4-PROP: the V4 TDD discipline (tests written FIRST = executable
+// verification of the URE/Plan-UAT validation-case contract, red→green) was
+// propagated from worker-implement into the SUPERVISOR role definition
+// (B-sup-enforce-tdd-contract). M4 asserts it renders into BOTH the supervisor
+// agent definition (agents/supervisor.md) and the supervisor skill header
+// (skills/supervisor/SKILL.md), so a regression that drops the supervisor-side
+// enforcement is caught.
+func TestV4SupervisorEnforcesTddContract(t *testing.T) {
+	root := repoRoot(t)
+
+	// Stable substring of the B-sup-enforce-tdd-contract behavior Then.
+	const needle = "written FIRST as the executable verification of the"
+
+	for _, rel := range []string{
+		"agents/supervisor.md",
+		"skills/supervisor/SKILL.md",
+	} {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		require.NoErrorf(t, err, "M4: reading %q failed", rel)
+		assert.Containsf(t, string(data), needle,
+			"M4: generated %q does not render the supervisor tests-first contract needle %q — "+
+				"V4-PROP requires the supervisor to enforce tests-first=validation-case-contract "+
+				"(B-sup-enforce-tdd-contract); re-add the behavior to the supervisor RoleSpec and regenerate.", rel, needle)
 	}
 }

@@ -68,6 +68,8 @@ pasture:p{phase}-{domain}:s{step}-{type}
 
 **Trigger:** UAT (Phase 5 or Phase 11) produces one or more user-DEFER'd items. Review severities never feed FOLLOWUP — all review findings reach 0 before wave close.
 
+**Deferral rule:** Deferrals may be flagged by the user OR proposed by the architect/supervisor; whoever proposes one, **ALL deferred items MUST be raised to the user at the next user gate** (URE, Plan UAT, or Impl UAT) for confirmation — nothing is silently deferred. Only user-confirmed DEFER'd items feed FOLLOWUP.
+
 **Owner:** Supervisor creates follow-up epic (label `pasture:epic-followup`).
 
 **Flow:**

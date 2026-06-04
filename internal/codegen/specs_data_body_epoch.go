@@ -42,6 +42,13 @@ var epochBody = SkillBody{
 			ShouldNot: "create a follow-up epic from any review severity (BLOCKER/IMPORTANT/MINOR) — all review severities must reach 0 before wave close",
 		},
 		{
+			Id:        "epoch-deferral-raised-at-gate",
+			Given:     "a deferred item (flagged by the user OR proposed by the architect/supervisor) outstanding at any phase",
+			When:      "orchestrating toward the next user gate",
+			Then:      "ensure ALL deferred items — whoever proposed them — are raised to the user at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation; DEFER'd items are the SOLE source feeding the FOLLOWUP epic",
+			ShouldNot: "let any item be silently deferred without raising it to the user at the next gate; route any review severity into FOLLOWUP",
+		},
+		{
 			Id:        "epoch-supervisor-not-idle",
 			Given:     "a freshly spawned supervisor (Phase 8 IMPL_PLAN)",
 			When:      "it dispatches Explore subagents and appears idle",
