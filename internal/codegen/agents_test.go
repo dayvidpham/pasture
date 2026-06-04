@@ -217,8 +217,8 @@ func TestGenerateAgent_SupervisorContainsSections(t *testing.T) {
 	assert.True(t, strings.Contains(got, "name: supervisor"), "must have name: supervisor")
 	assert.True(t, strings.Contains(got, "model: opus"), "must have model: opus")
 	assert.True(t, strings.Contains(got, "thinking: medium"), "must have thinking: medium")
-	assert.True(t, strings.Contains(got, "tools: Read, Glob, Grep, Bash, Skill, Agent, Task"),
-		"must have correct tools list")
+	assert.True(t, strings.Contains(got, "tools: Read, Glob, Grep, Bash, Skill, Agent, Task, SendMessage"),
+		"must have correct tools list including SendMessage (R10)")
 
 	// Parse document for structural assertions.
 	doc, src := parseMD(t, got)

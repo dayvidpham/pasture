@@ -1,7 +1,7 @@
 ---
 name: worker
 description: Vertical slice implementer (full production code path)
-tools: Read, Glob, Grep, Bash, Skill, Edit, Write
+tools: Read, Glob, Grep, Bash, Skill, Edit, Write, SendMessage
 model: sonnet
 ---
 

@@ -88,7 +88,7 @@ func TestSectionStructsInstantiate(t *testing.T) {
 
 	t.Run("HandoffsSection", func(t *testing.T) {
 		s := codegen.HandoffsSection{
-			StoragePattern: ".git/.aura/handoff/{request-task-id}/{source}-to-{target}.md",
+			StoragePattern: "beads-task-body",
 			Handoffs: []codegen.HandoffElem{
 				{
 					Id:           "h2",
@@ -278,7 +278,7 @@ func TestXMLTagsReviewAxesSection(t *testing.T) {
 
 // TestXMLTagsHandoffsSection verifies <handoffs> element with storage-pattern attr.
 func TestXMLTagsHandoffsSection(t *testing.T) {
-	pattern := ".git/.aura/handoff/{id}/{source}-to-{target}.md"
+	pattern := "beads-task-body"
 	s := codegen.HandoffsSection{
 		StoragePattern: pattern,
 		Handoffs: []codegen.HandoffElem{

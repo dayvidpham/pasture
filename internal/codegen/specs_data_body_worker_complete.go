@@ -31,7 +31,7 @@ var workerCompleteBody = SkillBody{
 			Id:        "wcomp-handoff-doc",
 			Given:     "completion",
 			When:      "handing off to reviewer",
-			Then:      "create handoff document at `.git/.aura/handoff/<request-task-id>/worker-<N>-to-reviewer.md`",
+			Then:      "author the worker→reviewer handoff in the Beads task body (the slice/handoff task body IS the handoff)",
 			ShouldNot: "skip handoff for actor transitions",
 		},
 	},
@@ -60,7 +60,7 @@ var workerCompleteBody = SkillBody{
    bd update <task-id> --status=done
    bd update <task-id> --notes="Implementation complete. Production code verified working."
    ` + "```" + `
-5. Create handoff document for reviewer transition`,
+5. Author the worker→reviewer handoff in the Beads task body (see template below)`,
 		},
 		{
 			Id:      "wcomp-handoff-template",
@@ -70,7 +70,7 @@ var workerCompleteBody = SkillBody{
 				{
 					Id:      "wcomp-handoff-storage",
 					Title:   "Storage",
-					Content: `Path: ` + "`.git/.aura/handoff/<request-task-id>/worker-<N>-to-reviewer.md`",
+					Content: `Authored in the Beads task body — the slice (or a dedicated handoff) task body IS the handoff. No filesystem path.`,
 				},
 				{
 					Id:    "wcomp-handoff-content",

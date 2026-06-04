@@ -95,9 +95,9 @@ When tracking review progress, monitor severity groups:
 
 | Severity | Blocks Slice? | Action |
 |----------|---------------|--------|
-| BLOCKER | Yes | Must resolve before proceeding to Phase 11 |
-| IMPORTANT | No | Goes to follow-up epic (`pasture:epic-followup`) |
-| MINOR | No | Goes to follow-up epic (`pasture:epic-followup`) |
+| BLOCKER | Yes | Must reach 0 before wave close (dual-parent: also blocks the slice) |
+| IMPORTANT | No (not via dual-parent) | Must reach 0 before wave close (never routed to FOLLOWUP) |
+| MINOR | No (not via dual-parent) | Must reach 0 before wave close (never routed to FOLLOWUP) |
 
 ## Follow-up Lifecycle Tracking
 

@@ -109,11 +109,13 @@ var AllFragmentIds = []FragmentId{
 	FragSupReviewCheckEach,
 	FragSupReviewSeverityGroups,
 	FragSupBlockerDualParent,
-	FragSupImportantMinorFollowup,
+	FragSupDeferredFollowup,
 	FragSupFollowupEpicTiming,
 	FragSupSeverityTree,
 	FragSupNamingConvention,
 	FragRevPlanVoteOptions,
+	FragValidationCases,
+	FragReviewCleanExit,
 }
 
 const (
@@ -140,10 +142,12 @@ const (
 	// bodies.
 	FragSupBlockerDualParent FragmentId = "frag--sup-blocker-dual-parent"
 
-	// FragSupImportantMinorFollowup is the canonical "add to severity group only —
-	// these go to follow-up epic" behavior shared between the supervisor and
-	// impl-review skill bodies.
-	FragSupImportantMinorFollowup FragmentId = "frag--sup-important-minor-followup"
+	// FragSupDeferredFollowup is the canonical "route ONLY user-DEFER'd UAT items
+	// to the FOLLOWUP epic; all review severities must reach 0 before wave close"
+	// behavior shared between the supervisor and impl-review skill bodies.
+	// (Renamed from FragSupImportantMinorFollowup per R7/A1: review severities are
+	// no longer deferrable; the FOLLOWUP epic is fed solely by DEFER'd UAT items.)
+	FragSupDeferredFollowup FragmentId = "frag--sup-deferred-followup"
 
 	// FragSupFollowupEpicTiming is the canonical "supervisor creates EPIC_FOLLOWUP
 	// immediately" behavior shared between the supervisor and impl-review skill
@@ -169,6 +173,24 @@ const (
 	// but promoted to a fragment for registry completeness and D2 distinctness
 	// enforcement.
 	FragRevPlanVoteOptions FragmentId = "frag--rev-plan-vote-options"
+
+	// ── SLICE-1 (epoch improvements R6/R7): validation-cases + clean-review-exit ──
+
+	// FragValidationCases is the canonical "elicit/confirm/evaluate concrete
+	// validation cases for EVERY REQUEST — a definition of done plus correct and
+	// incorrect behaviours, user-confirmed, with failing real-data cases stored as
+	// test fixtures" behavior (R6/A2, generalized from fix-intent-only at v2-2).
+	// Referenced via behaviorRef from the user-elicit, user-uat, and
+	// worker-implement skill bodies (wired in SLICE-2).
+	FragValidationCases FragmentId = "frag--validation-cases"
+
+	// FragReviewCleanExit is the canonical "iterate review->fix->re-review up to the
+	// chosen review-effort budget; clean = 0 BLOCKER + 0 IMPORTANT + 0 MINOR within
+	// budget; on budget exhaustion without clean, surface outstanding findings to
+	// the user at a gate" behavior (R7/A1, reworked to a configurable budget at
+	// v2-2). Referenced via behaviorRef from the supervisor and impl-review skill
+	// bodies (wired in SLICE-3).
+	FragReviewCleanExit FragmentId = "frag--review-clean-exit"
 )
 
 // ─── SharedFragment ───────────────────────────────────────────────────────────

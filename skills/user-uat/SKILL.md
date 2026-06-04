@@ -58,6 +58,24 @@ description: User Acceptance Testing with demonstrative examples
 - Then: update the URD with UAT results via `bd comments add <urd-id> "UAT: <summary>"`
 - Should not: leave the URD out of date after UAT
 
+**[uat-feedback-disposition]**
+- Given: each item of feedback or proposed deferral (deferrals may be flagged by the user OR proposed by the architect/supervisor) gathered during UAT (Phase 5 or Phase 11)
+- When: recording it
+- Then: assign every item an explicit, user-confirmed disposition of FIX-NOW or DEFER and echo it back for confirmation; ALL deferred items — whoever proposed them — MUST be raised to the user at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation; FIX-NOW items are resolved in the current wave, DEFER'd items are the SOLE source feeding the FOLLOWUP epic
+- Should not: leave a feedback item without a confirmed disposition; silently defer any item without raising it to the user at the next gate; route any review severity (BLOCKER/IMPORTANT/MINOR) into FOLLOWUP — only DEFER'd UAT items feed it
+
+**[uat-invoke-skill]**
+- Given: the Phase 5 or Phase 11 UAT interview
+- When: conducting it
+- Then: MUST invoke `Skill(/pasture:user-uat)` so the verbatim-capture, FIX-NOW/DEFER disposition, and validation-case confirmation procedures are loaded
+- Should not: conduct the UAT without invoking its skill — skipping it loses the disposition and verbatim-capture procedures
+
+**[frag--validation-cases]**
+- Given: any REQUEST (every request, not only fix-intent ones)
+- When: eliciting (URE), acceptance-testing (UAT), or implementing
+- Then: elicit concrete validation cases — a definition of done plus correct and incorrect behaviours (inputs/behaviors that must pass or must fail), confirm the case set with the user in UAT, evaluate the implementation against them, and store failing real-data cases as test fixtures
+- Should not: ship without validation cases; treat validation cases as applying to fix-intent requests only; introduce a request-type axis or enum to gate them
+
 ## UAT Phases
 
 
@@ -241,6 +259,31 @@ Which of these verbose fields are useful?`,
 })
 ```
 
+## Per-Item Disposition: FIX-NOW or DEFER
+
+Every piece of UAT feedback — whether a REVISE on a component or an open-ended concern — MUST be given an explicit, **user-confirmed** disposition. There is no third option.
+
+| Disposition | Meaning | Where it goes |
+|-------------|---------|----------------|
+| **FIX-NOW** | Resolve before this wave closes | Back to the architect (Plan UAT) or the relevant slice (Impl UAT) |
+| **DEFER** | Acceptable to ship now; track for later | The **sole** source feeding the FOLLOWUP epic |
+
+**Echo each disposition back to the user for confirmation** before recording it — e.g. "Recording '{{feedback}}' as DEFER (tracked in follow-up, not fixed this wave) — confirm?". Record the confirmed disposition verbatim alongside the feedback.
+
+**Deferrals may be proposed by the architect or supervisor**, not only flagged by the user. Whoever proposes a deferral, **all deferred items MUST be raised to the user at the next user gate** (URE, Plan UAT, or Impl UAT) for confirmation — nothing is silently deferred. At each gate, present the complete outstanding deferral set and let the user confirm or override each item before it is recorded as DEFER.
+
+Review severities (BLOCKER / IMPORTANT / MINOR) are **never** dispositioned here and **never** feed FOLLOWUP — they are resolved to zero during code review (Phase 10). FOLLOWUP is fed by DEFER'd UAT items only.
+
+## Validation-Case Confirmation (EVERY request)
+
+For **every** REQUEST (not only fix-intent ones — see the URE validation cases), UAT MUST close the validation-case loop:
+1. **Show the user the validation case set** elicited in URE (the definition of done plus the correct/incorrect behaviours that must pass or must fail; for fix-intent requests this includes the inputs/behaviors that were failing).
+2. **Confirm the set is complete and correct** — ask whether any case is missing or wrong; capture additions verbatim.
+3. **Demonstrate the implementation evaluated against each case** (Impl UAT: run them; Plan UAT: confirm the proposal covers them).
+4. The failing real-data cases become stored test fixtures.
+
+Do NOT mark a component ACCEPT without confirming its validation cases pass.
+
 ## Creating UAT Task
 
 
@@ -264,6 +307,7 @@ references:
 **Question asked:** <exact question text>
 **Options presented:** <exact option labels and descriptions>
 **User response:** <verbatim selection(s)>
+**Disposition:** <FIX-NOW or DEFER — user-confirmed, echoed back>
 
 ## Final Decision
 <ACCEPT or REVISE with verbatim reason>"
@@ -291,6 +335,7 @@ references:
 **Command run / output shown:** <actual terminal output shown to user>
 **Question asked:** <exact question>
 **User response:** <verbatim response>
+**Disposition:** <FIX-NOW or DEFER — user-confirmed, echoed back>
 
 ## Final Decision
 <ACCEPT or REVISE>"

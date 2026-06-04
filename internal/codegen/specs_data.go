@@ -116,7 +116,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		Transitions: []Transition{
 			{
 				ToPhase:   protocol.PhaseImplPlan,
-				Condition: "handoff document stored at .git/.aura/handoff/",
+				Condition: "handoff authored in the HANDOFF Beads task body",
 			},
 		},
 	},
@@ -292,11 +292,13 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		ShouldNot: "add to severity group only",
 	},
 	"C-followup-timing": {
-		Id:        "C-followup-timing",
-		Given:     "code review completion with IMPORTANT or MINOR findings",
-		When:      "creating follow-up epic",
-		Then:      "create immediately upon review completion",
-		ShouldNot: "gate follow-up epic on BLOCKER resolution",
+		Id:    "C-followup-timing",
+		Given: "UAT (Phase 5 or Phase 11) produces one or more user-DEFER'd items",
+		When:  "creating the FOLLOWUP epic",
+		Then: "create the FOLLOWUP epic at UAT when user-DEFER'd items exist; " +
+			"the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items",
+		ShouldNot: "trigger FOLLOWUP from any review severity (BLOCKER/IMPORTANT/MINOR) — " +
+			"all review findings must reach 0 before wave close, no severity is deferrable to FOLLOWUP",
 	},
 	"C-vertical-slices": {
 		Id:        "C-vertical-slices",
@@ -325,24 +327,37 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		Id:    "C-clean-review-exit",
 		Given: "per-slice code review",
 		When:  "evaluating review results",
-		Then: "clean review exit requires 0 BLOCKERs AND 0 IMPORTANTs; " +
-			"MINORs are acceptable and tracked in FOLLOWUP epic; " +
-			"each slice has its own independent review cycle counter (max 3 cycles); " +
-			"after 3 failed cycles, escalate to architect for re-planning",
-		ShouldNot: "accept review with open BLOCKERs or IMPORTANTs; " +
-			"batch review across multiple slices; " +
-			"exceed 3 cycles without escalating; " +
-			"escalate to user instead of architect",
+		Then: "iterate review -> fix -> re-review up to the chosen review-effort budget until a fix-free clean round " +
+			"confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; " +
+			"a clean round is one where the re-review applies no fixes and finds nothing across all three severities; " +
+			"on budget exhaustion without a clean round, SURFACE the outstanding findings to the user at a gate for a decision",
+		ShouldNot: "close a wave on a fix-applying round; " +
+			"proceed with ANY finding (BLOCKER, IMPORTANT, or MINOR) outstanding without surfacing it to the user; " +
+			"hardcode the budget; proceed past the chosen budget without surfacing to the user; " +
+			"batch review across multiple slices",
+	},
+	"C-review-effort-budget": {
+		Id:    "C-review-effort-budget",
+		Given: "the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate",
+		When:  "deciding how much review-and-fix effort to spend per slice",
+		Then: "request a configurable review-effort budget from the user — defaults: " +
+			"(1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; " +
+			"the review->fix->re-review loop iterates up to the chosen budget; " +
+			"on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision",
+		ShouldNot: "hardcode the review-cycle budget (e.g. an unconditional fixed cap baked into the prose instead of asked); " +
+			"proceed past the chosen budget without surfacing outstanding findings to the user; " +
+			"loop forever when a finite budget was chosen",
 	},
 	"C-autonomous-progression": {
 		Id:    "C-autonomous-progression",
 		Given: "supervisor orchestrating phases",
 		When:  "deciding whether to proceed",
-		Then: "4 user-gated phases only: (1) research depth decision, (2) URE survey, " +
-			"(3) Plan UAT, (4) Impl UAT; all other phase transitions are auto-ratified " +
+		Then: "5 user-gated phases only: (1) research depth decision, (2) URE survey, " +
+			"(3) Plan UAT, (4) Phase 8 implementation-effort / review-effort budget request, " +
+			"(5) Impl UAT; all other phase transitions are auto-ratified " +
 			"by the supervisor; after Plan UAT ACCEPT, proceed directly to ratification " +
 			"without user gate",
-		ShouldNot: "add additional user gates beyond the 4 defined; " +
+		ShouldNot: "add additional user gates beyond the 5 defined; " +
 			"require user approval for ratification after UAT ACCEPT",
 	},
 	"C-integration-points": {
@@ -365,26 +380,16 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		ShouldNot: "close slices immediately upon worker completion; " +
 			"allow workers to close their own slices",
 	},
-	"C-max-review-cycles": {
-		Id:    "C-max-review-cycles",
-		Given: "per-slice review-fix cycles are ongoing",
-		When:  "counting review-fix iterations per slice",
-		Then: "limit to a maximum of 3 cycles per slice; " +
-			"clean review exit = 0 BLOCKERs + 0 IMPORTANTs; " +
-			"after cycle 3, escalate to architect for re-planning if BLOCKERs or IMPORTANTs remain; " +
-			"remaining IMPORTANT findings move to FOLLOWUP epic",
-		ShouldNot: "exceed 3 review cycles per slice; " +
-			"escalate to user instead of architect; " +
-			"batch review across multiple slices",
-	},
 	"C-slice-leaf-tasks": {
 		Id:    "C-slice-leaf-tasks",
 		Given: "vertical slice created",
 		When:  "decomposing slice into implementation units",
-		Then: "create Beads leaf tasks (L1: types, L2: tests, L3: impl) within each slice " +
-			"with bd dep add slice-id --blocked-by leaf-task-id",
+		Then: "create one or more Beads leaf tasks per slice, named after the real work units they represent, " +
+			"with bd dep add slice-id --blocked-by leaf-task-id; a slice may have ANY number of leaves " +
+			"(the L1: types / L2: tests / L3: impl triple is ONE illustrative shape, not a required count)",
 		ShouldNot: "create slices without leaf tasks — " +
-			"a slice with no children is undecomposed and cannot be tracked",
+			"a slice with no children is undecomposed and cannot be tracked; " +
+			"force every slice into a fixed L1/L2/L3 triple when the real work units differ",
 		Command: "bd dep add <slice-id> --blocked-by <leaf-task-id>",
 	},
 	"C-handoff-skill-invocation": {
@@ -466,10 +471,13 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		Id:    "C-ure-verbatim",
 		Given: "user interview (Request, URE, or UAT), URD update, or mid-implementation design decision",
 		When:  "recording in Beads",
-		Then: "capture full question text, ALL option descriptions, AND user's verbatim response; " +
+		Then: "capture full question text, ALL option descriptions, AND user's verbatim response, " +
+			"INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, " +
+			"or definition blocks (the preview/stimulus the user actually saw); " +
 			"the URD is the living document of ALL user requests, URE, UAT, and mid-implementation " +
 			"design decisions and feedback — update it via bd comments add whenever user intent is captured",
-		ShouldNot: "summarize options as (1)/(2)/(3) without option text, or paraphrase user responses",
+		ShouldNot: "summarize options as (1)/(2)/(3) without option text, paraphrase user responses, " +
+			"or omit code/snippets shown inside option previews",
 		Examples: []Example{
 			{
 				Id:    "C-ure-verbatim-correct",
@@ -507,10 +515,10 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 	"C-followup-leaf-adoption": {
 		Id:    "C-followup-leaf-adoption",
 		Given: "supervisor creates FOLLOWUP_SLICE-N",
-		When:  "assigning original IMPORTANT/MINOR leaf tasks to follow-up slices",
+		When:  "assigning user-DEFER'd UAT-item leaf tasks to follow-up slices",
 		Then: "add leaf task as child of follow-up slice " +
-			"(dual-parent: leaf blocks both severity group AND follow-up slice)",
-		ShouldNot: "remove the leaf task from its original severity group parent",
+			"(dual-parent: leaf blocks both the DEFER'd-items tracking group AND follow-up slice)",
+		ShouldNot: "remove the leaf task from its original DEFER'd-items tracking parent",
 	},
 	"C-worker-gates": {
 		Id:        "C-worker-gates",
@@ -530,6 +538,49 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		ShouldNot: "raise generic or opaque error messages (e.g. 'invalid input', 'operation failed') " +
 			"that don't guide the user toward resolution",
 	},
+	"C-validation-cases": {
+		Id:    "C-validation-cases",
+		Given: "any REQUEST (every request, not only fix-intent ones)",
+		When:  "eliciting (URE), acceptance-testing (UAT), or implementing",
+		Then: "elicit concrete validation cases for the request — a definition of done plus correct and " +
+			"incorrect behaviours (inputs/behaviors that must pass or must fail), " +
+			"confirm the case set with the user in UAT, evaluate the implementation against them, " +
+			"and store failing real-data cases as test fixtures",
+		ShouldNot: "ship without validation cases; " +
+			"treat validation cases as applying to fix-intent requests only; " +
+			"introduce a request-type axis or enum to gate them (recognize what a request needs semantically instead)",
+	},
+	"C-interview-skill-invocation": {
+		Id:    "C-interview-skill-invocation",
+		Given: "a user-interview phase (Phase 2 URE, Phase 5 Plan UAT, or Phase 11 Impl UAT)",
+		When:  "conducting the phase",
+		Then: "the agent MUST invoke the matching interview skill (Skill(/pasture:user-elicit) for URE, " +
+			"Skill(/pasture:user-uat) for UAT) so the verbatim-capture and disposition procedures are loaded",
+		ShouldNot: "conduct an interview phase without invoking its skill — " +
+			"skipping it loses the verbatim-capture and FIX-NOW/DEFER disposition procedures",
+	},
+	"C-uat-feedback-disposition": {
+		Id:    "C-uat-feedback-disposition",
+		Given: "any UAT feedback item (Phase 5 or Phase 11) — flagged by the user OR a deferral proposed by the architect/supervisor",
+		When:  "recording each item",
+		Then: "assign every item an explicit, user-confirmed disposition of FIX-NOW or DEFER; " +
+			"deferrals may be agent-proposed, but ALL deferred items — whoever proposed them — MUST be raised to the user " +
+			"at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation; " +
+			"FIX-NOW items are resolved in the current wave, DEFER'd items are the SOLE source feeding the FOLLOWUP epic",
+		ShouldNot: "leave a feedback item without a confirmed disposition; " +
+			"silently defer any item without raising it to the user at the next gate; " +
+			"route any review severity (BLOCKER/IMPORTANT/MINOR) into FOLLOWUP — only DEFER'd UAT items feed it",
+	},
+	"C-interface-first-slices": {
+		Id:    "C-interface-first-slices",
+		Given: "decomposing a RATIFIED plan into vertical slices (Phase 8 IMPL_PLAN)",
+		When:  "ordering the slices",
+		Then: "prefer an interface-first FOUNDATION slice that exports all shared identifiers " +
+			"(types, constraints, fragments) and lands green BEFORE dependent slices (Strong SHOULD); " +
+			"if a linear (non-interface-first) decomposition is chosen instead, justify it explicitly in the IMPL_PLAN",
+		ShouldNot: "leave cross-slice contracts implicit; " +
+			"choose a linear decomposition without recording the justification in the IMPL_PLAN",
+	},
 }
 
 // ─── RoleSpecs ────────────────────────────────────────────────────────────────
@@ -543,7 +594,7 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 		Description: "Master orchestrator for full 12-phase workflow",
 		Model:       "opus",
 		Thinking:    "medium",
-		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "Agent", "Task"},
+		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "Agent", "Task", "SendMessage"},
 		OwnedPhases: []protocol.PhaseId{
 			protocol.PhaseRequest, protocol.PhaseElicit, protocol.PhasePropose,
 			protocol.PhaseReview, protocol.PhasePlanReview, protocol.PhaseRatify,
@@ -564,7 +615,7 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 		Description: "Specification writer and implementation designer",
 		Model:       "opus",
 		Thinking:    "medium",
-		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "Agent", "Task"},
+		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "Agent", "Task", "SendMessage"},
 		OwnedPhases: []protocol.PhaseId{
 			protocol.PhaseRequest, protocol.PhaseElicit, protocol.PhasePropose,
 			protocol.PhaseReview, protocol.PhasePlanReview, protocol.PhaseRatify,
@@ -623,7 +674,7 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 		Name:        "Reviewer",
 		Description: "End-user alignment reviewer for plans and code",
 		Model:       "sonnet",
-		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill"},
+		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "SendMessage"},
 		OwnedPhases: []protocol.PhaseId{
 			protocol.PhaseReview, protocol.PhaseCodeReview,
 		},
@@ -671,7 +722,7 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 		Description: "Task coordinator, spawns workers, manages parallel execution",
 		Model:       "opus",
 		Thinking:    "medium",
-		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "Agent", "Task"},
+		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "Agent", "Task", "SendMessage"},
 		OwnedPhases: []protocol.PhaseId{
 			protocol.PhaseHandoff, protocol.PhaseImplPlan, protocol.PhaseWorkerSlices,
 			protocol.PhaseCodeReview, protocol.PhaseImplUAT, protocol.PhaseLanding,
@@ -714,9 +765,10 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 				When:  "starting implementation",
 				Then: "follow the Ride the Wave cycle: plan tasks with integration points, " +
 					"launch the wave of workers, spawn reviewers for per-slice review " +
-					"(clean exit = 0 BLOCKERs + 0 IMPORTANTs), workers fix per-slice with atomic commits, " +
-					"max 3 cycles per slice, escalate to architect after cycle 3",
-				ShouldNot: "skip any stage; batch review across slices; exceed 3 review cycles per slice",
+					"(clean exit = 0 BLOCKER + 0 IMPORTANT + 0 MINOR), workers fix per-slice with atomic commits, " +
+					"and iterate review -> fix -> re-review up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface outstanding findings to the user at a gate",
+				ShouldNot: "skip any stage; batch review across slices; hardcode the budget; proceed past the chosen budget without surfacing to the user; " +
+					"close a wave with any finding silently outstanding",
 			},
 		},
 	},
@@ -725,7 +777,7 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 		Name:        "Worker",
 		Description: "Vertical slice implementer (full production code path)",
 		Model:       "sonnet",
-		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "Edit", "Write"},
+		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "Edit", "Write", "SendMessage"},
 		OwnedPhases: []protocol.PhaseId{protocol.PhaseWorkerSlices},
 		Introduction: "You own a vertical slice (full production code path from CLI/API entry point " +
 			"→ service → types). " +
@@ -1206,12 +1258,12 @@ var ChecklistSpecs = map[string]Checklist{
 		RoleRef: types.RoleSupervisor,
 		Gate:    "landing",
 		Items: []ChecklistItem{
-			{Id: "CL-sup-all-accept", Text: "All 3 reviewers ACCEPT, no open BLOCKERs", Required: true},
-			{Id: "CL-sup-followup-created", Text: "FOLLOWUP epic created if any IMPORTANT/MINOR findings exist", Required: true},
+			{Id: "CL-sup-all-accept", Text: "Fix-free clean re-review: 0 BLOCKER + 0 IMPORTANT + 0 MINOR from all 3 reviewers", Required: true},
+			{Id: "CL-sup-followup-created", Text: "FOLLOWUP epic created at UAT only if user-DEFER'd items exist (never from review severities)", Required: true},
 			{Id: "CL-sup-agent-commit", Text: "git agent-commit used (not git commit -m)", Required: true},
 			{Id: "CL-sup-tasks-closed", Text: "All upstream tasks closed or dependency-resolved", Required: true},
 			{Id: "CL-sup-close-on-review-wave", Text: "Can only close on a review wave, not a worker wave", Required: true},
-			{Id: "CL-sup-review-eligible", Text: "Eligible to close only after review by independent agents with no BLOCKERS or IMPORTANT findings", Required: true},
+			{Id: "CL-sup-review-eligible", Text: "Eligible to close only after review by independent agents with 0 BLOCKER + 0 IMPORTANT + 0 MINOR findings", Required: true},
 		},
 	},
 }
@@ -1294,7 +1346,8 @@ var WorkflowSpecs = map[string]Workflow{
 		RoleRef: types.RoleSupervisor,
 		Description: "Coordinated Phase 8-10 execution pattern. The supervisor orchestrates " +
 			"the full cycle: plan slices, launch workers, " +
-			"spawn reviewers for per-slice review, workers fix, repeat max 3 cycles per slice.",
+			"spawn reviewers for per-slice review, workers fix, and re-review up to the chosen review-effort budget " +
+			"until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; on budget exhaustion without clean, surface outstanding findings to the user at a gate.",
 		Stages: []WorkflowStage{
 			{
 				Id:        "rtw-plan",
@@ -1379,19 +1432,19 @@ var WorkflowSpecs = map[string]Workflow{
 						Instruction: "Reviewers create severity groups (BLOCKER/IMPORTANT/MINOR) per slice",
 					},
 					{
-						Id:          "rtw-review-followup",
-						Instruction: "Create FOLLOWUP epic if any IMPORTANT/MINOR findings exist",
+						Id:          "rtw-review-severity-track",
+						Instruction: "Track findings in the 3 severity groups; ALL groups must reach 0 before wave close (FOLLOWUP is created later at UAT, fed only by user-DEFER'd items)",
 					},
 					{
 						Id:          "rtw-review-fix",
-						Instruction: "Workers fix BLOCKERs and IMPORTANT findings",
+						Instruction: "Workers fix ALL findings (BLOCKER, IMPORTANT, and MINOR)",
 					},
 				},
 				OperationalDetail: "- Spawn 3 ephemeral reviewer subagents per round (same pattern as Phase 4 plan review)\n" +
-					"- **CLEAN REVIEW** = 0 BLOCKERs + 0 IMPORTANTs from ALL reviewers\n" +
-					"- Per-slice fix+review with independent cycle counters per slice\n" +
+					"- **CLEAN REVIEW** = 0 BLOCKER + 0 IMPORTANT + 0 MINOR from ALL reviewers on a fix-free round\n" +
+					"- Per-slice fix+review; iterate up to the chosen review-effort budget\n" +
 					"- Fix flow: Stage 3 (dirty review) -> Stage 2 (worker fixes) -> Stage 3 (re-review)\n" +
-					"- Max 3 cycles per slice, then escalate to architect for re-planning\n" +
+					"- Configurable review-effort budget (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — repeat review -> fix -> re-review until the slice is clean (0/0/0); on budget exhaustion without clean, surface outstanding findings to the user at a gate\n" +
 					"- **MUST end on a review wave** — cannot proceed after a worker wave without review\n" +
 					"\n" +
 					"```text\n" +
@@ -1402,15 +1455,15 @@ var WorkflowSpecs = map[string]Workflow{
 					"  \u2502 Review slice (severity: BLOCKER/IMP/MIN)\u2502\n" +
 					"  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n" +
 					"                 \u2502\n" +
-					"          CLEAN? \u251c\u2500\u2500 YES \u2192 slice passes, proceed\n" +
+					"          CLEAN? \u251c\u2500\u2500 YES (0/0/0) \u2192 slice passes, proceed\n" +
 					"                 \u2502\n" +
-					"                 \u2514\u2500\u2500 NO (cycle < 3)\n" +
+					"                 \u2514\u2500\u2500 NO (any finding remains)\n" +
 					"                       \u2502\n" +
 					"                       \u25bc\n" +
 					"              \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n" +
 					"              \u2502 Stage 2: worker    \u2502\n" +
-					"              \u2502 fixes BLOCKERs +   \u2502\n" +
-					"              \u2502 IMPORTANTs         \u2502\n" +
+					"              \u2502 fixes ALL findings \u2502\n" +
+					"              \u2502 (BLOCK/IMP/MINOR)  \u2502\n" +
 					"              \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n" +
 					"                       \u2502\n" +
 					"                       \u25bc\n" +
@@ -1420,26 +1473,18 @@ var WorkflowSpecs = map[string]Workflow{
 					"              \u2502  reviewers)        \u2502\n" +
 					"              \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n" +
 					"                       \u2502\n" +
-					"                 cycle++ \u2192 loop\n" +
+					"                 loop (re-review)\n" +
 					"                       \u2502\n" +
-					"          3 cycles exhausted \u2192 escalate to architect\n" +
+					"          repeat until clean (0/0/0) \u2014 up to the chosen budget, else surface to user\n" +
 					"```",
 				ExitConditions: []ExitCondition{
 					{
 						Type:      "success",
-						Condition: "All reviewers ACCEPT, no open BLOCKERs — proceed to Phase 11 UAT",
+						Condition: "All reviewers report 0 BLOCKER + 0 IMPORTANT + 0 MINOR on a fix-free clean round — proceed to Phase 11 UAT",
 					},
 					{
 						Type:      "continue",
-						Condition: "BLOCKERs or IMPORTANTs remain, cycles < 3 per slice — workers fix, spawn new ephemeral reviewers",
-					},
-					{
-						Type:      "proceed",
-						Condition: "3 cycles exhausted, IMPORTANT remain — track in FOLLOWUP, proceed to Phase 11",
-					},
-					{
-						Type:      "escalate",
-						Condition: "3 cycles exhausted per slice, BLOCKERs remain — escalate to architect for re-planning",
+						Condition: "Any finding (BLOCKER, IMPORTANT, or MINOR) remains within budget — workers fix, spawn new ephemeral reviewers (up to the chosen review-effort budget; on exhaustion, surface to the user)",
 					},
 				},
 			},
@@ -1706,7 +1751,7 @@ var WorkflowSpecs = map[string]Workflow{
 				Actions: []WorkflowAction{
 					{
 						Id:          "asf-handoff-doc",
-						Instruction: "Create handoff document with full inline provenance at .git/.aura/handoff/",
+						Instruction: "Author the HANDOFF in its Beads task body with full inline provenance (include the HANDOFF task ID)",
 					},
 					{
 						Id:          "asf-handoff-transfer",
@@ -1716,7 +1761,7 @@ var WorkflowSpecs = map[string]Workflow{
 				ExitConditions: []ExitCondition{
 					{
 						Type:      "success",
-						Condition: "Handoff document stored at .git/.aura/handoff/, supervisor notified",
+						Condition: "Handoff authored in the HANDOFF Beads task body, supervisor notified",
 					},
 				},
 			},
@@ -1916,12 +1961,13 @@ var TitleConventions = []TitleConvention{
 	},
 	{
 		Pattern: "FOLLOWUP: {description}", LabelRef: "L-followup", CreatedBy: "supervisor",
-		Note: "Follow-up epic created after code review with IMPORTANT/MINOR findings. " +
+		Note: "Follow-up epic created at UAT when user-DEFER'd items exist (never from review severities; " +
+			"all review findings must reach 0 before wave close). " +
 			"Single-parent epic relationship — no followup-of-followup.",
 	},
 	{
 		Pattern: "FOLLOWUP_URE: {description}", LabelRef: "L-p2s2_1", CreatedBy: "supervisor", PhaseRef: "p2",
-		Note: "Scoping URE to determine which IMPORTANT/MINOR findings to address",
+		Note: "Scoping URE to determine which user-DEFER'd UAT items to address",
 	},
 	{
 		Pattern: "FOLLOWUP_URD: {description}", LabelRef: "L-p2s2_2", CreatedBy: "supervisor", PhaseRef: "p2",
@@ -1938,8 +1984,8 @@ var TitleConventions = []TitleConvention{
 	},
 	{
 		Pattern: "FOLLOWUP_SLICE-{N}: {description}", LabelRef: "L-p9s9", CreatedBy: "supervisor", PhaseRef: "p9",
-		Note: "Follow-up slice. Adopts IMPORTANT/MINOR leaf tasks from original review as children " +
-			"(dual-parent: leaf blocks both original severity group AND follow-up slice).",
+		Note: "Follow-up slice. Adopts user-DEFER'd UAT-item leaf tasks as children " +
+			"(dual-parent: leaf blocks both the DEFER'd-items tracking group AND follow-up slice).",
 	},
 }
 

@@ -36,7 +36,11 @@
 //   - HANDOFF_EXAMPLE-*.md — "Aura web dashboard", `aura web` command from an
 //     example handoff of a separate project. No `aura:` colon token; not flagged.
 //   - CLAUDE.md references to `aura-swarm`, `aura-parallel` (deferred tools, D6).
-//   - All files: `.git/.aura/handoff/...` storage paths (deferred, D6).
+//
+// (The former `.git/.aura/handoff/...` storage-path allowlist entry was removed:
+// R8/A3 retired that filesystem pattern entirely — handoffs are authored in the
+// Beads task body — so no such path should remain in any generated output. The
+// G2 guard (TestG2_NoHandoffStoragePaths) enforces its absence.)
 package codegen_test
 
 import (

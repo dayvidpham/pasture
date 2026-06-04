@@ -102,6 +102,8 @@ bd dep add ure-id --blocked-by request-id
 
 ### Agent Orchestration
 
+**Given** the **IMPL_PLAN phase** **then** **SHOULD** prefer **TeamCreate with the supervisor as an Opus model and workers also as Opus** (not `aura-swarm`). A supervisor that has just dispatched Explore subagents may *appear* idle while they work — **SHOULD NOT** shut it down pre-emptively.
+
 **Given** you need to launch parallel agents for an epic **then** use `aura-swarm start --epic <id>` to create worktree-based agent sessions. Use `aura-swarm status` to monitor. **SHOULD NOT** launch long-running supervisors or workers as Task tool subagents.
 
 **Given** you need a separate supervisor or architect to plan a new epic **then** use `aura-swarm start --swarm-mode intree --role <role> -n 1 --prompt "..."` to launch in a tmux session. **SHOULD** only use `aura-swarm` for long-running supervisor/architect agents that need persistent context. **SHOULD NOT** use `aura-swarm start` for reviewer rounds.
@@ -110,7 +112,7 @@ bd dep add ure-id --blocked-by request-id
 
 **Given** inter-agent communication is needed **then** use beads for coordination (`bd comments add`, `bd update --notes`, `bd show`). **SHOULD NOT** reference `aura agent send/broadcast/inbox` — that CLI does not exist.
 
-**Given** you are assigning work to a teammate via TeamCreate/SendMessage **when** composing the message **then** MUST include: (1) explicit skill invocation instruction (e.g., `Skill(/pasture:worker)`), (2) all relevant Beads task IDs, (3) `bd show <task-id>` commands for each reference, and (4) the handoff document path if applicable. **SHOULD NEVER** send bare instructions without Beads context — teammates spawned via TeamCreate have zero prior context and cannot see your conversation history or task tree.
+**Given** you are assigning work to a teammate via TeamCreate/SendMessage **when** composing the message **then** MUST include: (1) explicit skill invocation instruction (e.g., `Skill(/pasture:worker)`), (2) all relevant Beads task IDs, (3) `bd show <task-id>` commands for each reference, and (4) the HANDOFF Beads task ID if applicable (handoffs are authored in their task body, not a file path). **SHOULD NEVER** send bare instructions without Beads context — teammates spawned via TeamCreate have zero prior context and cannot see your conversation history or task tree.
 
 **Given** you are a supervisor **when** implementation work is needed (code edits, file creation, config changes — no matter how small) **then** MUST delegate to a worker teammate or subagent. **MUST NEVER** use Edit, Write, or other file-modification tools directly. The supervisor's role is coordination, tracking, and quality control — never implementation.
 
@@ -129,7 +131,13 @@ bd dep add ure-id --blocked-by request-id
 
 ### User Interviews (URE/UAT)
 
+**Given** a user-interview phase (Phase 2 URE, Phase 5 Plan UAT, or Phase 11 Impl UAT) **when** conducting the phase **then** the agent **MUST** invoke the matching interview skill (`Skill(/pasture:user-elicit)` for URE, `Skill(/pasture:user-uat)` for UAT) so the verbatim-capture and disposition procedures are loaded. **SHOULD NEVER** conduct an interview phase without invoking its skill — skipping it loses the verbatim-capture and FIX-NOW/DEFER disposition procedures and yields shallow questions.
+
 **Given** a user interview (requirements elicitation or UAT) **when** capturing the Q&A in a Beads task **then** you **MUST** record the full question, ALL options presented with their descriptions, AND the user's verbatim response. **SHOULD NEVER** summarize options as "(1)", "(2)", "(3)" without the option text — the user's answer referencing option numbers is meaningless without the full options.
+
+**Given** feedback or a proposed deferral gathered during UAT (Phase 5 or Phase 11) — deferrals may be flagged by the user OR **proposed by the architect/supervisor** **when** recording each item **then** assign every item an explicit, user-confirmed disposition of **FIX-NOW** or **DEFER**; ALL deferred items — whoever proposed them — **MUST be raised to the user at the next user gate** (URE, Plan UAT, or Impl UAT) for confirmation; FIX-NOW items are resolved in the current wave, and DEFER'd items are the **SOLE** source feeding the FOLLOWUP epic. **SHOULD NEVER** leave UAT feedback without a confirmed disposition, silently defer any item without raising it to the user at the next gate, or route any review severity (BLOCKER/IMPORTANT/MINOR) into FOLLOWUP — only DEFER'd UAT items feed it.
+
+**Given** **any** REQUEST (every request, not only fix-intent ones — what a request needs is recognized *semantically*, with no request-type axis or enum) **when** eliciting (URE), acceptance-testing (UAT), or implementing **then** elicit concrete **validation cases** — a definition of done plus correct and incorrect behaviours (inputs/behaviors that must pass or must fail; for fix-intent requests this includes what currently fails), confirm the case set with the user in UAT, evaluate the implementation against them, and store failing real-data cases as test fixtures. **SHOULD NEVER** ship without validation cases, treat them as applying to fix-intent requests only, or introduce a request-type axis/enum to gate them.
 
 ### Worker Completion
 
@@ -143,7 +151,7 @@ bd dep add ure-id --blocked-by request-id
 
 ### Slice Reviews
 
-**Given** a slice implementation is complete (tests + typecheck pass) **when** considering closing the bead **then** you **MUST** launch a code review before closing the bead, **MUST** resolve all BLOCKER findings before closing, **SHOULD NEVER** close a slice bead with only "tests pass" as the completion gate.
+**Given** a slice implementation is complete (tests + typecheck pass) **when** considering closing the bead **then** you **MUST** launch a code review before closing the bead, and **MUST** iterate review → fix → re-review **up to the configurable review-effort budget** chosen at Phase 8 (defaults: 3 rounds / 1 round / 0 rounds / unlimited / custom) until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** within budget (all three severities reach 0 — none is deferrable); on **budget exhaustion without a clean round**, surface the outstanding findings to the user at a gate for a decision. **SHOULD NEVER** close a slice bead with only "tests pass" as the completion gate, close on a fix-applying round, hardcode the budget, or proceed past the chosen budget without surfacing to the user.
 
 ## Behavior
 
@@ -190,16 +198,19 @@ Phase 3:  PROPOSAL-N (architect proposes, s3-propose)
 Phase 4:  PROPOSAL-N-REVIEW-{axis}-{round} (3 axis-specific reviewers: A/B/C, ACCEPT/REVISE)
 Phase 5:  Plan UAT (user acceptance test on plan)
 Phase 6:  Ratification (pasture:superseded marks old proposals)
-Phase 7:  Handoff (architect → supervisor, stored at .git/.aura/handoff/)
-Phase 8:  IMPL_PLAN (supervisor decomposes into slices + leaf tasks)
+Phase 7:  Handoff (architect → supervisor, authored in the HANDOFF Beads task body)
+Phase 8:  IMPL_PLAN (supervisor decomposes into slices + leaf tasks; interface-first FOUNDATION slice preferred)
 Phase 9:  SLICE-N (parallel workers, each owns one production code path)
-            Each slice MUST have leaf tasks (L1: types, L2: tests, L3: impl)
+            Each slice MUST have leaf tasks — ANY number, named after real work
+            units (L1: types / L2: tests / L3: impl is one illustrative shape)
             Workers are assigned to leaf tasks, not slices
 Phase 10: Code review (3x reviewers, full severity tree with EAGER creation)
             Severity tree: BLOCKER / IMPORTANT / MINOR (always 3 groups)
-            BLOCKER → blocks slice | IMPORTANT/MINOR → blocks FOLLOWUP only
-            Dual-parent BLOCKER relationship
-Phase 11: Implementation UAT
+            ALL three severities must reach 0 — iterate review→fix→re-review up to
+            the chosen review-effort budget until a fix-free clean round (0/0/0);
+            on budget exhaustion without clean, surface to the user. Dual-parent
+            BLOCKER. FOLLOWUP is NOT fed by review severities.
+Phase 11: Implementation UAT (FIX-NOW / DEFER disposition; DEFER'd items feed FOLLOWUP)
 Phase 12: Landing (commit, push, hand off)
 ```
 
@@ -292,22 +303,24 @@ bd close <empty-minor-id>
 
 This ensures BLOCKERs both categorize under the severity tree AND block the artifact they apply to.
 
+**ALL three severities must reach 0 (within the chosen review-effort budget):** Under the clean-review-exit regime, IMPORTANT and MINOR findings are NOT deferrable — every finding (BLOCKER, IMPORTANT, and MINOR) is fixed in-wave, and the slice is re-reviewed (review → fix → re-review, up to the configurable review-effort budget chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR from all reviewers. On budget exhaustion without a clean round, the outstanding findings are surfaced to the user at a gate for a decision (never proceed-dirty, never loop forever). **No review severity is ever routed to the FOLLOWUP epic** — the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items (Phase 5 or 11).
+
 **Plan reviews (Phase 4) do NOT use a severity tree.** Plan reviews use binary ACCEPT/REVISE votes only.
 
 ### Follow-up Epic
 
-**Trigger:** Review completion + ANY IMPORTANT or MINOR findings exist (NOT gated on BLOCKER resolution).
+**Trigger:** UAT (Phase 5 or Phase 11) produces one or more **user-DEFER'd** items.
 
 **Owner:** Supervisor creates the follow-up epic (label `pasture:epic-followup`).
 
-**Content:** Aggregated IMPORTANT and MINOR findings from the review round, organized by priority.
+**Content:** The user-DEFER'd UAT items only. **Never** a review severity (BLOCKER/IMPORTANT/MINOR) — all review findings must reach 0 before wave close, so none is deferrable from code review.
 
-**Timing:** Created as soon as the review round completes, regardless of whether BLOCKERs are still being resolved. This ensures non-blocking improvements are tracked and not lost.
+**Timing:** Created at UAT, when user-DEFER'd items exist. FIX-NOW items are resolved in the current wave; only DEFER'd items land in the FOLLOWUP epic.
 
 **Follow-up lifecycle:** The follow-up epic runs the same protocol phases with FOLLOWUP_* prefixed task types:
 FOLLOWUP_URE → FOLLOWUP_URD → (h6 to architect) → FOLLOWUP_PROPOSAL → (h1 back to supervisor) → FOLLOWUP_IMPL_PLAN → FOLLOWUP_SLICE-N.
-Original IMPORTANT/MINOR leaf tasks are adopted as children of FOLLOWUP_SLICE-N (dual-parent).
-No followup-of-followup — findings from follow-up code review stay on the existing follow-up epic.
+User-DEFER'd UAT-item leaf tasks are adopted as children of FOLLOWUP_SLICE-N (dual-parent: original DEFER'd-items tracking group AND follow-up slice).
+No followup-of-followup — any DEFER'd items from a follow-up UAT stay on the existing follow-up epic.
 
 ### When Reviewing
 
@@ -337,8 +350,10 @@ Check **end-user alignment**, not technical specializations:
 - Validation checklist items per task
 - BDD acceptance criteria (Given/When/Then/Should Not)
 - Explicit file ownership boundaries within each slice
-- Leaf tasks (L1: types, L2: tests, L3: impl) within each slice — a slice without leaf tasks is undecomposed
+- Leaf tasks within each slice — ANY number, named after the real work units (L1: types / L2: tests / L3: impl is one illustrative shape, not a required triple); a slice without leaf tasks is undecomposed
 - Workers are assigned to leaf tasks, not slices
+- Prefers an **interface-first FOUNDATION slice** that exports all shared identifiers (types, constraints, fragments) and lands green BEFORE dependent slices, so they build in parallel against the frozen contract (Strong SHOULD); if a linear decomposition is chosen instead, justifies it explicitly in the IMPL_PLAN
+- Enforces the validation-case contract workers' tests verify (tests-first, red→green) — per `C-validation-cases`
 - NEVER implements code themselves — ALWAYS spawns workers
 
 **Worker** implements by:
@@ -351,16 +366,16 @@ Check **end-user alignment**, not technical specializations:
 
 ### Handoff Documents
 
-6 actor-change transitions require handoff documents, stored at `.git/.aura/handoff/{request-task-id}/` (or `{followup-epic-id}/` for follow-up lifecycle):
+6 actor-change transitions require handoffs. Each handoff is **authored inline in its own HANDOFF Beads task body** (no filesystem path) and located by task ID:
 
-| Transition | File | Content Level |
+| Transition | Authored In | Content Level |
 |---|---|---|
-| Architect → Supervisor | `architect-to-supervisor.md` | Full inline provenance |
-| Supervisor → Worker | `supervisor-to-worker.md` | Summary + bd IDs |
-| Supervisor → Reviewer | `supervisor-to-reviewer.md` | Summary + bd IDs |
-| Worker → Reviewer | `worker-to-reviewer.md` | Summary + bd IDs |
-| Reviewer → Followup | `reviewer-to-followup.md` | Summary + bd IDs |
-| Supervisor → Architect | `supervisor-to-architect.md` | Summary + bd IDs |
+| Architect → Supervisor | HANDOFF Beads task body | Full inline provenance |
+| Supervisor → Worker | HANDOFF Beads task body | Summary + bd IDs |
+| Supervisor → Reviewer | HANDOFF Beads task body | Summary + bd IDs |
+| Worker → Reviewer | HANDOFF Beads task body | Summary + bd IDs |
+| Reviewer → Followup | HANDOFF Beads task body | Summary + bd IDs |
+| Supervisor → Architect | HANDOFF Beads task body | Summary + bd IDs |
 
 **Same-actor transitions do NOT need handoff:** UAT → Ratify and Ratify → Handoff are performed by the same actor (architect), so no handoff document is needed.
 

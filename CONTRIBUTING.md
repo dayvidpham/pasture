@@ -213,6 +213,44 @@ This is a subset of the above when the `ConstraintSpec` already exists.
 
 ---
 
+## Repeating a constraint or prose fragment across multiple skills/agents (define once, reference by ID)
+
+When the same rule must appear in more than one role, phase, or skill body, **define it once and reference it by ID** — never copy the text. Duplicated prose drifts: each copy must be hand-updated and one always gets missed. This caused review findings **C-MIN-1, C-MIN-2, and A-IMP-1** in the epoch-protocol-improvements epoch (a constraint reworked in one place but stale in its duplicates). Define-once-by-ID keeps a single source of truth, and the `global_ids` parity check + `context_test` exact-count assertions enforce consistency.
+
+### To make the SAME constraint appear in additional roles/phases
+
+Add the constraint's **ID** to the relevant set in `internal/codegen/context.go`:
+
+- `roleConstraints[types.RoleXxx]` — to attach it to a role
+- `phaseConstraints[protocol.PhaseXxx]` — to attach it to a phase
+
+The single `ConstraintSpecs` definition (in `specs_data.go`) then renders into each target's generated `skills/<role>/SKILL.md` **and** `agents/<role>.md`. Do **not** restate the rule as a fresh role/phase behavior.
+
+Then update `testdata/context.yaml` in lockstep (`context_test` asserts **exact** equality):
+
+- increment `exact_count` by 1 for each role/phase you attached it to
+- add the ID to that entry's `must_contain`
+- remove it from `must_not_contain` if listed
+
+This is the subset recipe documented above under [Adding a Constraint to an Existing Role](#adding-a-constraint-to-an-existing-role).
+
+**Worked examples (v2-2 re-UAT propagation):**
+
+- **V2-PROP** — the deferral rule lives once in `ConstraintSpecs["C-uat-feedback-disposition"]`. To make the epoch orchestrator carry it, add `"C-uat-feedback-disposition": true` to `roleConstraints[types.RoleEpoch]` and bump the epoch `context.yaml` entry (`exact_count` +1, add to `must_contain`). It now renders into `skills/epoch/SKILL.md` + `agents/epoch.md` — no new epoch-body prose.
+- **V4-PROP** — the validation-case contract lives once in `ConstraintSpecs["C-validation-cases"]`. To make the supervisor carry it, add `"C-validation-cases": true` to `roleConstraints[types.RoleSupervisor]` and bump the supervisor `context.yaml` entry. It now renders into `skills/supervisor/SKILL.md` + `agents/supervisor.md` — no duplicated TDD paragraph.
+
+### To reuse the SAME prose/behaviour across multiple skill BODIES
+
+Define it once in `SharedFragmentSpecs` (`specs_data_fragments.go`) and register its ID in `AllFragmentIds` (`specs.go`), then reference it from each consuming body via `fragRef(<id>)` (a `ProseSection`) or `behaviorRef(<id>)` (a `BehaviorSpec`) in `specs_data_body*.go`. Never copy the fragment text into a second body. The `global_ids` parity check enforces `AllFragmentIds` ↔ `SharedFragmentSpecs` agreement, and guard G5 fails on any inline `[frag--…]` token that does not resolve to a live fragment.
+
+> Note: `fragRef`/`behaviorRef` reach skill **bodies** (`skills/<dir>/SKILL.md`) only. Agent definitions (`agents/<role>.md`) render only RoleSpec behaviors and attached constraints — to repeat a rule into an agent definition, use the constraint-attachment path above.
+
+### Hand-authored protocol docs (`skills/protocol/*.md`)
+
+`CONSTRAINTS.md` is the single constraint catalog — **one entry per constraint ID**. `PROCESS.md`, `CLAUDE.md`, `AGENTS.md`, and `SKILL.md` **reference** constraints by ID (e.g. "per `C-uat-feedback-disposition`") rather than restating their Given/When/Then. This mirrors the codegen rule: one definition, many references.
+
+---
+
 ## The CDATA Exception
 
 Two of the 17 schema sections cannot use `encoding/xml` marshalling:

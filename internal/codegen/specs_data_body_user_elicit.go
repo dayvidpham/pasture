@@ -48,6 +48,32 @@ var userElicitBody = SkillBody{
 			Then:      "include URD ID in description frontmatter of referencing tasks",
 			ShouldNot: "use `bd dep add --blocked-by` for URD links (URD is a reference document, not a blocking dependency)",
 		},
+		{
+			Id:        "user-elicit-code-shown",
+			Given:     "any definition, code snippet, interface, or before/after example shown to the user during elicitation (e.g. in an AskUserQuestion preview)",
+			When:      "recording the Q&A",
+			Then:      "capture the shown definition/code VERBATIM in the elicit task alongside the question and response (parity with UAT's 'Definition shown' / 'Command run' fields)",
+			ShouldNot: "record only the answer while dropping the code or definition the user was reacting to — the response is meaningless without what was shown",
+		},
+		{
+			Id:        "user-elicit-invoke-skill",
+			Given:     "the Phase 2 URE interview",
+			When:      "conducting it",
+			Then:      "MUST invoke `Skill(/pasture:user-elicit)` so the verbatim-capture and validation-case elicitation procedures are loaded",
+			ShouldNot: "conduct the URE without invoking its skill — skipping it loses verbatim capture and the validation-case lifecycle",
+		},
+		{
+			Id:        "user-elicit-raise-deferrals",
+			Given:     "deferred items outstanding from a prior phase (flagged by the user OR proposed by the architect/supervisor)",
+			When:      "conducting this URE gate (a user gate)",
+			Then:      "ALL deferred items, whoever proposed them, MUST be raised to the user at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation — present the complete outstanding deferral set and let the user confirm or override each item; nothing is silently deferred",
+			ShouldNot: "silently carry a deferral forward without raising it to the user at this gate",
+		},
+		// R6: EVERY REQUEST elicits concrete validation cases during URE (generalized
+		// from fix-intent-only at v2-2). behaviorRef resolves to
+		// SharedFragmentSpecs[FragValidationCases] (SLICE-1) so the lifecycle renders
+		// into the generated SKILL.md.
+		behaviorRef(FragValidationCases),
 	},
 
 	Sections: []ProseSection{
@@ -101,6 +127,17 @@ var userElicitBody = SkillBody{
 					Id:      "user-elicit-catchall",
 					Title:   "5. Catch-All",
 					Content: "Final question to capture anything missed.",
+				},
+				{
+					Id:    "user-elicit-validation-cases",
+					Title: "6. Validation Cases (EVERY request)",
+					Content: "Elicit **concrete validation cases** during this URE — for **every** request, not only fix-intent ones. We always need to know what \"done\" means, and what correct vs incorrect behaviour looks like:\n" +
+						"- The **definition of done** — what observable outcome means the request is satisfied.\n" +
+						"- The exact inputs/behaviors that MUST PASS (the expected correct output).\n" +
+						"- The exact inputs/behaviors that MUST FAIL or are explicitly out of scope (incorrect behaviour). For fix-intent requests this includes the inputs/behaviors that currently FAIL (the bug as the user observes it).\n" +
+						"- Any real data, commands, or reproduction steps the user can provide — capture these **verbatim**.\n" +
+						"\n" +
+						"These cases seed the request's test fixtures and are the set confirmed with the user in UAT (`/pasture:user-uat`) and evaluated against the implementation. Do NOT introduce a `request-type` enum to gate this — what a request needs is recognized semantically.",
 				},
 				{
 					Id:    "user-elicit-prereq",
@@ -209,7 +246,10 @@ var userElicitBody = SkillBody{
 			Content: "After survey completion, capture the full Q&A record using the same structured\n" +
 				"format as [UAT_TEMPLATE.md](../protocol/UAT_TEMPLATE.md). Each question must\n" +
 				"include the exact question text, ALL options with their descriptions, and the\n" +
-				"user's verbatim response.\n" +
+				"user's verbatim response. When a definition, code snippet, or example was shown\n" +
+				"to the user before a question, capture it verbatim in a **Definition/code shown:**\n" +
+				"field (parity with UAT's 'Definition shown' / 'Command run' fields). For\n" +
+				"**every** request, also record the elicited validation cases verbatim.\n" +
 				"\n" +
 				"```" + `bash` + "\n" +
 				"bd create --labels \"pasture:p2-user:s2_1-elicit\" \\\n" +
@@ -222,6 +262,7 @@ var userElicitBody = SkillBody{
 				"\n" +
 				"### End Vision\n" +
 				"Q: What is your end vision for this feature? How will users interact with it when complete?\n" +
+				"Definition/code shown: {{verbatim definition/snippet shown to user, or 'none'}}\n" +
 				"Options: Simple UI control (Button/link users click), Automated process (Happens without user action), API endpoint (Programmatic access), Background service (Runs continuously)\n" +
 				"A: {{user's verbatim selections and any custom input}}\n" +
 				"\n" +
@@ -238,7 +279,13 @@ var userElicitBody = SkillBody{
 				"### Other\n" +
 				"Q: Is there anything else we should know about this feature?\n" +
 				"Options: Related to existing feature (Connects to something), Inspired by another product (Has a reference), Urgent timeline (Needed soon), Nothing else (Covered everything)\n" +
-				"A: {{user's verbatim input}}\" \\\n" +
+				"A: {{user's verbatim input}}\n" +
+				"\n" +
+				"## Validation Cases (EVERY request)\n" +
+				"- Definition of done: {{verbatim observable outcome that means the request is satisfied}}\n" +
+				"- Must pass (correct behaviour): {{verbatim expected correct behavior}}\n" +
+				"- Must fail / out of scope (incorrect behaviour): {{verbatim — for fix-intent, the input/behavior that fails today}}\n" +
+				"- Repro / real data: {{verbatim commands, data, or steps — or 'none'}}\" \\\n" +
 				"  --assignee architect\n" +
 				"\n" +
 				"# Chain dependency: REQUEST blocked by ELICIT\n" +

@@ -26,6 +26,24 @@ Common constraints referenced by all agent and skill files.
 
 **Given** you want to execute Beads **when** you are about to call `bd <command> ...` **then** you **should never** `cd <repo_root> && bd <command> ...`, instead you **should** always just call `bd <command> ...`
 
+## Workflow Constraints
+
+**Given** per-slice code review **when** evaluating review results **then** iterate review → fix → re-review **up to the chosen review-effort budget** until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; on budget exhaustion without a clean round, surface the outstanding findings to the user at a gate **should never** close a wave on a fix-applying round, proceed with ANY finding outstanding without surfacing it, hardcode the budget, or proceed past the chosen budget without surfacing to the user
+
+**Given** the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate **when** deciding how much review-and-fix effort to spend per slice **then** request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review → fix → re-review loop iterates up to the chosen budget; on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision **should never** hardcode the review-cycle budget, proceed past the chosen budget without surfacing, or loop forever when a finite budget was chosen
+
+**Given** UAT (Phase 5 or Phase 11) feedback or a proposed deferral (deferrals may be flagged by the user OR proposed by the architect/supervisor) **when** recording each item **then** assign an explicit, user-confirmed FIX-NOW or DEFER disposition — ALL deferred items, whoever proposed them, MUST be raised to the user at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation; DEFER'd items are the SOLE source feeding the FOLLOWUP epic **should never** leave a UAT item without a confirmed disposition, silently defer an item without raising it at the next gate, or route a review severity into FOLLOWUP
+
+**Given** a user-interview phase (URE, Plan UAT, Impl UAT) **when** conducting it **then** invoke the matching interview skill (`Skill(/pasture:user-elicit)` or `Skill(/pasture:user-uat)`) so verbatim-capture and disposition procedures load **should never** conduct an interview phase without invoking its skill
+
+**Given** **any** REQUEST (every request, not only fix-intent ones — recognized semantically, no request-type axis/enum) **when** eliciting, acceptance-testing, or implementing **then** elicit concrete validation cases (a definition of done plus correct/incorrect behaviours that must pass or must fail), confirm them with the user in UAT, evaluate the implementation against them, and store failing real-data cases as fixtures **should never** ship without validation cases, treat them as fix-intent-only, or introduce a request-type axis/enum to gate them
+
+**Given** decomposing a RATIFIED plan into slices (Phase 8) **when** ordering them **then** prefer an interface-first FOUNDATION slice exporting all shared identifiers that lands green before dependent slices (Strong SHOULD); justify any linear decomposition explicitly in the IMPL_PLAN **should never** leave cross-slice contracts implicit
+
+**Given** a vertical slice **when** decomposing it into leaf tasks **then** create one or more leaves named after the real work units — a slice may have ANY number (the L1/L2/L3 triple is one illustrative shape, not a required count) **should never** force every slice into a fixed L1/L2/L3 triple, or create a slice with no leaf tasks
+
+**Given** an actor-change transition **when** authoring the handoff **then** author it inline in its own HANDOFF Beads task body and locate it by task ID **should never** write the handoff to a filesystem path
+
 ## Checklists
 
 ### Security
@@ -56,19 +74,21 @@ Binary only. No intermediate levels.
 
 ## Issue Severity
 
-| Severity | When to Use | Blocks |
-|----------|-------------|--------|
-| BLOCKER | Security, type errors, test failures, broken production code paths | Yes |
-| IMPORTANT | Performance, missing validation, architectural concerns | No (tracked in follow-up epic) |
-| MINOR | Style, optional optimizations, naming improvements | No (tracked in follow-up epic) |
+| Severity | When to Use | Must reach 0 before wave close? |
+|----------|-------------|--------------------------------|
+| BLOCKER | Security, type errors, test failures, broken production code paths | Yes (also blocks the slice — dual-parent) |
+| IMPORTANT | Performance, missing validation, architectural concerns | Yes — fixed in-wave, NOT deferrable |
+| MINOR | Style, optional optimizations, naming improvements | Yes — fixed in-wave, NOT deferrable |
+
+**Clean-review exit (within the chosen review-effort budget):** A code-review wave iterates review → fix → re-review **up to the configurable review-effort budget** chosen at Phase 8 (3 rounds / 1 round / 0 rounds / unlimited / custom) until a **fix-free clean round** confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** from all reviewers within budget. A clean round applies no fixes and finds nothing across all three severities. On budget exhaustion without a clean round, the outstanding findings are surfaced to the user at a gate for a decision (never proceed-dirty, never loop forever, never hardcode the budget). The wave MUST end on a review wave or a surface-to-user gate (never proceed silently after a worker wave without a clean re-review). No review severity is deferrable to FOLLOWUP.
 
 **EAGER severity group creation:** For every code review round (Phase 10), ALWAYS create 3 severity group tasks (BLOCKER, IMPORTANT, MINOR) immediately. Empty groups have no children and are closed immediately. This is NOT lazy creation.
 
-**Follow-up epic:** When a review round completes and ANY IMPORTANT or MINOR findings exist, the Supervisor creates a follow-up epic (label `pasture:epic-followup`). This is NOT gated on BLOCKER resolution — it triggers as soon as the review round completes.
+**Follow-up epic:** Created at **UAT (Phase 5 or Phase 11)** when the user DEFERs one or more items. The FOLLOWUP epic is fed **ONLY** by user-DEFER'd UAT items — **never** by a review severity (BLOCKER/IMPORTANT/MINOR), since all review findings must reach 0 before wave close. FIX-NOW items are resolved in the current wave. Owner: Supervisor (label `pasture:epic-followup`).
 
-**Follow-up lifecycle:** The follow-up epic runs the same protocol phases with FOLLOWUP_* prefixed task types: FOLLOWUP_URE → FOLLOWUP_URD → FOLLOWUP_PROPOSAL → FOLLOWUP_IMPL_PLAN → FOLLOWUP_SLICE-N. The supervisor creates FOLLOWUP_URE and FOLLOWUP_URD, then hands off to architect via h6 for FOLLOWUP_PROPOSAL. Original IMPORTANT/MINOR leaf tasks are adopted by FOLLOWUP_SLICE-N (dual-parent: original severity group + follow-up slice).
+**Follow-up lifecycle:** The follow-up epic runs the same protocol phases with FOLLOWUP_* prefixed task types: FOLLOWUP_URE → FOLLOWUP_URD → FOLLOWUP_PROPOSAL → FOLLOWUP_IMPL_PLAN → FOLLOWUP_SLICE-N. The supervisor creates FOLLOWUP_URE and FOLLOWUP_URD, then hands off to architect via h6 for FOLLOWUP_PROPOSAL. User-DEFER'd UAT-item leaf tasks are adopted by FOLLOWUP_SLICE-N (dual-parent: original DEFER'd-items tracking group + follow-up slice).
 
-**No followup-of-followup:** IMPORTANT/MINOR findings from FOLLOWUP_SLICE code review are tracked on the existing follow-up epic as tasks. A nested follow-up-of-followup epic is never created.
+**No followup-of-followup:** Any user-DEFER'd items from a follow-up UAT are tracked on the existing follow-up epic as tasks. A nested follow-up-of-followup epic is never created.
 
 ## Beads Task Naming & Tagging Standards
 
@@ -134,12 +154,12 @@ Special labels:
 
 | Title Format | Label | Purpose | Created By |
 |---|---|---|---|
-| `FOLLOWUP: Description` | `pasture:epic-followup` | Follow-up epic for non-blocking improvements | Supervisor |
-| `FOLLOWUP_URE: Description` | `pasture:p2-user:s2_1-elicit` | Scoping URE: which IMPORTANT/MINOR findings to address | Supervisor |
+| `FOLLOWUP: Description` | `pasture:epic-followup` | Follow-up epic for user-DEFER'd UAT items | Supervisor |
+| `FOLLOWUP_URE: Description` | `pasture:p2-user:s2_1-elicit` | Scoping URE: which user-DEFER'd UAT items to address | Supervisor |
 | `FOLLOWUP_URD: Description` | `pasture:p2-user:s2_2-urd,pasture:urd` | Requirements document for follow-up scope | Supervisor |
 | `FOLLOWUP_PROPOSAL-N: Description` | `pasture:p3-plan:s3-propose` | Architect's follow-up proposal (accounts for original URD + FOLLOWUP_URD) | Architect (after h6) |
 | `FOLLOWUP_IMPL_PLAN: Description` | `pasture:p8-impl:s8-plan` | Follow-up implementation plan | Supervisor (after follow-up h1) |
-| `FOLLOWUP_SLICE-N: Description` | `pasture:p9-impl:s9-slice` | Follow-up slice (adopts original leaf tasks as dual-parent children) | Supervisor |
+| `FOLLOWUP_SLICE-N: Description` | `pasture:p9-impl:s9-slice` | Follow-up slice (adopts user-DEFER'd UAT-item leaf tasks as dual-parent children) | Supervisor |
 
 ### Frontmatter References
 

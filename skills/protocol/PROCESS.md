@@ -85,13 +85,15 @@ See: [../user-request/SKILL.md](../user-request/SKILL.md)
 
 ### URE Survey (s2_1)
 
-Architect runs `/pasture:user-elicit` for structured requirements elicitation.
+**The architect MUST invoke `Skill(/pasture:user-elicit)`** before conducting the URE (R2) — the skill loads the verbatim-capture and disposition procedures. Skipping it produces shallow, low-quality interview questions and loses the verbatim record.
 
 Capture results using the same structured format as
 [UAT_TEMPLATE.md](UAT_TEMPLATE.md) — each question must include the exact
 question text, ALL options with their descriptions, and the user's verbatim
 response. See [UAT_EXAMPLE.md](UAT_EXAMPLE.md) for an example of the recording
 quality expected.
+
+**Validation cases (R6 — EVERY request):** Elicit concrete **validation cases** for every request during the URE — per `C-validation-cases` (full Given/When/Then in [CONSTRAINTS.md](CONSTRAINTS.md), the constraint catalog). In short: capture the definition of done plus correct/incorrect behaviours, confirm the set with the user in UAT, and store failing real-data cases as test fixtures. These validation cases are the contract the worker's tests are written against (tests-first; see the Phase 9 TDD note below).
 
 ### User Requirements Document (s2_2)
 
@@ -265,7 +267,11 @@ See: [../reviewer/SKILL.md](../reviewer/SKILL.md)
 
 ### User Approval (Required!)
 
+**The architect MUST invoke `Skill(/pasture:user-uat)`** before running the UAT (R2) — the skill loads the verbatim-capture and FIX-NOW/DEFER disposition procedures.
+
 **DO NOT auto-proceed.** Present the accepted proposal to the user for explicit approval.
+
+**Disposition every feedback item (R2):** Assign each UAT feedback item (and any architect/supervisor-proposed deferral) an explicit, user-confirmed **FIX-NOW** or **DEFER** disposition — per `C-uat-feedback-disposition` (full Given/When/Then in [CONSTRAINTS.md](CONSTRAINTS.md), the constraint catalog). In short: all deferred items, whoever proposed them, are raised to the user at the next user gate for confirmation; FIX-NOW items are resolved in the current wave; DEFER'd items are the sole source feeding the FOLLOWUP epic.
 
 The idea here is: the plan and the implementation MUST match with the user's end vision for the project.
 The architect should also plan out several MVP milestones, in order to reach the user's vision.
@@ -349,9 +355,9 @@ See: [../architect-ratify/SKILL.md](../architect-ratify/SKILL.md)
 
 ### Architect → Supervisor Handoff
 
-The architect creates a handoff document with full inline provenance and transfers ownership to the supervisor.
+The architect authors the handoff with full inline provenance directly in the HANDOFF Beads task body and transfers ownership to the supervisor.
 
-**Storage:** `.git/.aura/handoff/{request-task-id}/architect-to-supervisor.md`
+**Storage:** the HANDOFF Beads task body (no filesystem path). Every handoff is authored inline in its own HANDOFF Beads task and located by task ID.
 
 ```bash
 bd create --type=task --priority=2 \
@@ -362,8 +368,11 @@ references:
   urd: <urd-task-id>
   proposal: <ratified-proposal-id>
 ---
-Handoff from architect to supervisor. See handoff document at
-.git/.aura/handoff/<request-task-id>/architect-to-supervisor.md" \
+# Handoff: Architect → Supervisor
+
+Full inline provenance authored here in the task body (no external file):
+key decisions with rationale, open items, acceptance criteria, and all
+referenced task IDs. See HANDOFF_TEMPLATE.md for the section structure." \
   --add-label "pasture:p7-plan:s7-handoff"
 ```
 
@@ -377,6 +386,8 @@ Handoff from architect to supervisor. See handoff document at
 | 4 | Worker | Reviewer | Phase 10 (code review) | Summary + bd IDs |
 | 5 | Reviewer | Followup | After Phase 10 | Summary + bd IDs |
 | 6 | Supervisor | Architect | Follow-up lifecycle (FOLLOWUP_URE/URD → FOLLOWUP_PROPOSAL) | Summary + bd IDs |
+
+Every handoff is authored inline in its own HANDOFF Beads task body (no filesystem path) and located by task ID.
 
 **Same-actor transitions do NOT need handoff:** UAT → Ratify and Ratify → Handoff are performed by the same actor (architect).
 In the follow-up lifecycle, the supervisor creating FOLLOWUP_URE and then FOLLOWUP_URD are also same-actor transitions (no handoff needed).
@@ -393,13 +404,17 @@ Supervisor takes the ratified proposal and decomposes into **vertical slices** (
 
 **Key Principle:** Each worker owns a full vertical slice — types, tests, implementation, and wiring for one production code path.
 
+**Review-Effort Budget (R7 — Phase 8 user gate):** At the **start of Phase 8** — like the Phase-1 research-depth gate, and one of the 5 user-gated phases — request a **configurable review-effort budget** from the user. Present the default choices: **(1) three rounds**, **(2) one round**, **(3) zero rounds**, **(4) unlimited**, **(5) custom**. The Phase-10 review → fix → re-review loop iterates **up to the chosen budget** until a fix-free clean 0/0/0 round; on **budget exhaustion without a clean round**, surface the outstanding findings to the user for a decision (never proceed-dirty, never loop forever, never hardcode the budget). Record the chosen budget in the IMPL_PLAN so workers and reviewers know the bound.
+
+**Launch model (R1):** For the IMPL_PLAN phase prefer **TeamCreate with the supervisor as an Opus model and workers also as Opus** — not `aura-swarm`. A supervisor that has just spawned Explore subagents may *look* idle while those subagents do work; **do not shut it down pre-emptively.**
+
 **Supervisor startup sequence:**
 1. Call `Skill(/pasture:supervisor)` to load role instructions
 2. Read RATIFIED_PLAN and URD via `bd show`
 3. **Spawn ephemeral Explore subagents** via Task tool for scoped codebase queries — each subagent is short-lived and returns findings
-4. Decompose into vertical slices
+4. Decompose into vertical slices, **preferring an interface-first FOUNDATION slice** (R3) that exports all shared identifiers (types, constraints, fragments) and lands green BEFORE dependent slices so they can be built in parallel against the frozen contract — a Strong SHOULD. If a linear (non-interface-first) decomposition is chosen instead, **justify it explicitly in the IMPL_PLAN.**
 5. **Identify horizontal Layer Integration Points** — contracts shared across slices (see Layer Integration Points below)
-6. **Create leaf tasks (L1/L2/L3) for every slice** — a slice without leaf tasks is undecomposed
+6. **Create leaf tasks for every slice** — a slice may have ANY number of leaves, named after the real work units they represent. The L1: types / L2: tests / L3: impl triple is ONE illustrative shape, not a required count. A slice without leaf tasks is undecomposed.
 7. Spawn workers for leaf tasks
 
 ```
@@ -486,9 +501,10 @@ bd dep add <impl-plan-id> --blocked-by <slice-id>
 
 ### Creating Leaf Tasks Within Each Slice
 
-**A slice without leaf tasks is undecomposed.** The supervisor MUST create Beads leaf tasks for each horizontal layer within the slice. Workers are assigned to leaf tasks, not slices directly.
+**A slice without leaf tasks is undecomposed.** The supervisor MUST create one or more Beads leaf tasks per slice, **named after the real work units they represent**. A slice may have ANY number of leaves — the L1: types / L2: tests / L3: impl triple below is ONE illustrative shape, not a required count. Do NOT force every slice into a fixed L1/L2/L3 triple when the real work units differ. Workers are assigned to leaf tasks, not slices directly.
 
 ```bash
+# Illustrative TDD-shaped leaves (use real work-unit names instead when they differ).
 # L1: Types for this slice
 LEAF_L1=$(bd create --type=task --priority=2 \
   --title="SLICE-1-L1: Types — <slice name>" \
@@ -568,11 +584,13 @@ Workers are assigned to leaf tasks. The slice closes when all its leaf tasks clo
 
 **CRITICAL:** Tests will FAIL in Layer 2. This is **correct and expected**.
 
+**Test-Driven Development — tests written FIRST = the agreed contract (V4):** Write the tests **before** the implementation. The tests ARE the executable verification of the validation-case contract agreed with the user during URE and Plan UAT (the universal validation cases from Phase 2 — see `C-validation-cases`): a definition of done plus correct/incorrect behaviours. Expect them all to fail initially — **red-first** — then, as Layer 3 implements production code, progressively fewer tests fail until all are green (**red → green**). A test that passes before any implementation exists is suspect.
+
 **Tests must import production code paths:**
 
 **Given** Layer 2 tests **when** writing **then** import actual production code (CLI/API/entry points) **should never** create test-only exports or dual code paths
 
-Tests define what production code should do. When Layer 3 implements production code, these tests should pass.
+Tests define what production code should do — they encode the URE/Plan-UAT-agreed validation cases. When Layer 3 implements production code, these tests should pass (red → green).
 
 **CORRECT — import actual production code:**
 ```
@@ -631,7 +649,7 @@ mock out the system under test
 
 - Slices **MUST NOT** be closed by workers immediately upon implementation completion
 - A slice must be reviewed **at least once** by ephemeral reviewers before it can close
-- **Only the supervisor closes slices**, after review passes (Phase 10) or after 3 review-fix cycles complete
+- **Only the supervisor closes slices**, after a fix-free clean re-review passes (Phase 10): 0 BLOCKER + 0 IMPORTANT + 0 MINOR from all reviewers
 - Workers who finish implementation stay alive and await review feedback before the session ends
 
 ---
@@ -642,29 +660,27 @@ mock out the system under test
 
 After all slices complete, the supervisor spawns **ephemeral reviewers** via the Task tool for per-slice code review. Each reviewer handles one or more slices, produces severity groups using the **full severity tree** with EAGER creation, and terminates. The supervisor then coordinates the review-fix cycle with workers.
 
-### Review-Fix Cycle (Max 3 per Slice)
+### Review-Fix Cycle (Within the Chosen Review-Effort Budget)
 
-Phase 10 runs up to **3 review-fix cycles per slice**. Workers do not shut down — they await findings and fix them in-place.
+Phase 10 iterates **review → fix → re-review up to the configurable review-effort budget** chosen at Phase 8 (3 rounds / 1 round / 0 rounds / unlimited / custom — see "Review-Effort Budget" in Phase 8 below) until a **fix-free clean round** confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** across all reviewers within budget. A clean round is one where the re-review applies no fixes and finds nothing across all three severities. On **budget exhaustion without a clean round**, the outstanding findings are surfaced to the user at a gate for a decision (never proceed-dirty, never loop forever, never hardcode the budget). This epoch eats its own dogfood: the wave closes only when it is genuinely clean (or the user decides at the surface-to-user gate). Workers do not shut down — they await findings and fix them in-place.
 
-**Cycle procedure:**
+**Cycle procedure (per slice):**
 
-1. **Ephemeral reviewers review all slices** — create severity groups (BLOCKER/IMPORTANT/MINOR) for each slice per the EAGER creation protocol
-2. **Supervisor collects findings** — aggregates BLOCKERs and IMPORTANTs across all slices; sends findings to the relevant workers
-3. **Workers fix BLOCKERs + IMPORTANTs** — workers address assigned findings with atomic commits and notify the supervisor when done
-4. **New ephemeral reviewers re-review fixed slices** — create new severity groups for the new round (round suffix increments: `-1`, `-2`, `-3`)
-5. **Repeat** — max 3 cycles per slice
+1. **Ephemeral reviewers review the slice** — create severity groups (BLOCKER/IMPORTANT/MINOR) per the EAGER creation protocol
+2. **Supervisor collects findings** — aggregates ALL findings (BLOCKER, IMPORTANT, and MINOR); sends them to the relevant workers
+3. **Workers fix ALL findings** — BLOCKER, IMPORTANT, *and* MINOR — with atomic commits, and notify the supervisor when done
+4. **New ephemeral reviewers re-review the fixed slice** — create new severity groups for the new round (round suffix increments: `-1`, `-2`, `-3`, … up to the chosen budget)
+5. **Repeat** up to the chosen review-effort budget until a fix-free clean round (0/0/0); on budget exhaustion without clean, surface the outstanding findings to the user at a gate
 
 **Cycle exit conditions:**
 
 | Condition | Action |
 |-----------|--------|
-| All slices ACCEPT, 0 BLOCKERs + 0 IMPORTANTs | Proceed to Phase 11 (Implementation UAT) |
-| BLOCKERs or IMPORTANTs remain, cycles < 3 per slice | Workers fix, spawn new ephemeral reviewers (next cycle) |
-| 3 cycles exhausted, IMPORTANT remain | Track in FOLLOWUP epic; proceed to Phase 11 |
-| 3 cycles exhausted, only MINOR remain | Track in FOLLOWUP epic; proceed to Phase 11 |
-| 3 cycles exhausted per slice, BLOCKERs remain | **Escalate to architect** for re-planning |
+| Fix-free clean round: 0 BLOCKER + 0 IMPORTANT + 0 MINOR from all reviewers | Slice passes — proceed to Phase 11 (Implementation UAT) |
+| ANY finding (BLOCKER, IMPORTANT, or MINOR) remains within budget | Workers fix it, spawn new ephemeral reviewers (next round — up to the chosen review-effort budget) |
+| Budget exhausted without a clean round | Surface the outstanding findings to the user at a gate for a decision (never proceed-dirty, never loop forever) |
 
-After cycle 3: UAT is **NOT blocked** on remaining IMPORTANT or MINOR findings. The supervisor creates the FOLLOWUP epic to track them, then proceeds to Phase 11.
+The wave **MUST end on a review wave or a surface-to-user gate** (cannot proceed silently after a worker wave without a clean re-review). The review loop runs up to the chosen review-effort budget; on exhaustion without a clean round, the outstanding findings are surfaced to the user rather than proceeding dirty or looping forever — and the budget is never hardcoded. **The FOLLOWUP epic is NOT fed by review severities** — it is created later, at UAT (Phase 5 or 11), and fed ONLY by user-DEFER'd items (see Follow-up Epic below).
 
 ### Severity Tree (EAGER Creation)
 
@@ -698,41 +714,39 @@ bd dep add <slice-id> --blocked-by <blocker-finding-id>
 
 ### Severity Group Dependency Routing (CRITICAL)
 
-Each severity group is linked to exactly one parent based on its level:
+Under the no-cap clean-review regime, **ALL three severity groups must reach 0 before the slice passes review** — no severity is deferrable to FOLLOWUP. Each group blocks the slice it applies to:
 
 | Severity | Blocks | Command |
 |----------|--------|---------|
-| BLOCKER | The **slice** it applies to | `bd dep add <slice-id> --blocked-by <blocker-group-id>` |
-| IMPORTANT | The **FOLLOWUP epic** only | `bd dep add <followup-epic-id> --blocked-by <important-group-id>` |
-| MINOR | The **FOLLOWUP epic** only | `bd dep add <followup-epic-id> --blocked-by <minor-group-id>` |
+| BLOCKER | The **slice** it applies to (dual-parent) | `bd dep add <slice-id> --blocked-by <blocker-group-id>` |
+| IMPORTANT | The **slice** it applies to (must reach 0) | `bd dep add <slice-id> --blocked-by <important-group-id>` |
+| MINOR | The **slice** it applies to (must reach 0) | `bd dep add <slice-id> --blocked-by <minor-group-id>` |
 
-**NEVER link IMPORTANT or MINOR severity groups as blocking IMPL_PLAN or any slice.** Only BLOCKER findings block the implementation path. IMPORTANT and MINOR findings are non-blocking improvements tracked in the follow-up epic.
+**NEVER route a review severity (BLOCKER/IMPORTANT/MINOR) into the FOLLOWUP epic.** All review findings are fixed in-wave and re-reviewed until the slice is clean (0/0/0). The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items (Phase 5 or 11), never by a review severity.
 
 ### Follow-up Epic
 
-**Trigger:** Review completion + ANY IMPORTANT or MINOR findings exist.
-**NOT gated on BLOCKER resolution.**
-**Owner:** Supervisor creates it.
+**Trigger:** UAT (Phase 5 or Phase 11) produces one or more **user-DEFER'd** items.
+**Source:** The FOLLOWUP epic is fed **ONLY** by user-DEFER'd UAT items — **never** by a review severity (BLOCKER/IMPORTANT/MINOR). All review findings must reach 0 before wave close.
+**Owner:** Supervisor creates it (at UAT, when DEFER'd items exist).
 
 ```bash
 bd create --type=epic --priority=3 \
-  --title="FOLLOWUP: Non-blocking improvements from code review" \
+  --title="FOLLOWUP: User-DEFER'd UAT items" \
   --description="---
 references:
   request: <request-task-id>
-  review_round: <review-task-ids>
+  uat: <uat-task-id>
 ---
-Aggregated IMPORTANT and MINOR findings from code review." \
+Aggregated user-DEFER'd items from UAT (Phase 5 or 11). FIX-NOW items were
+resolved in the current wave; only DEFER'd items land here." \
   --add-label "pasture:epic-followup"
 
-# Route IMPORTANT and MINOR to FOLLOWUP (NOT to IMPL_PLAN or slices)
-bd dep add <followup-epic-id> --blocked-by <important-group-id>
-bd dep add <followup-epic-id> --blocked-by <minor-group-id>
+# Route user-DEFER'd UAT-item tracking groups to FOLLOWUP (NEVER review severities)
+bd dep add <followup-epic-id> --blocked-by <deferred-items-group-id>
 ```
 
-The follow-up epic is created as soon as the review round completes, regardless of whether BLOCKERs are still being resolved. This ensures non-blocking improvements are tracked and not lost.
-
-**After 3 review-fix cycles:** Any remaining IMPORTANT and MINOR findings both route to the FOLLOWUP epic. UAT proceeds immediately — it is NOT blocked on IMPORTANT or MINOR findings after cycle 3. The supervisor creates the FOLLOWUP epic and then advances to Phase 11.
+The follow-up epic is created at UAT when user-DEFER'd items exist. Review severities are **not** a source: a slice cannot pass review with any finding outstanding, so there is nothing to defer from code review.
 
 ### Follow-up Lifecycle (FOLLOWUP_* Phases)
 
@@ -740,37 +754,37 @@ The follow-up epic runs the same protocol phases with FOLLOWUP_* prefixed task t
 
 ```
 FOLLOWUP epic (pasture:epic-followup)
-  └── blocked-by: FOLLOWUP_URE         (Phase 2: scope which findings to address)
+  └── blocked-by: FOLLOWUP_URE         (Phase 2: scope which DEFER'd items to address)
         └── blocked-by: FOLLOWUP_URD   (Phase 2: requirements for follow-up)
               └── blocked-by: FOLLOWUP_PROPOSAL-1  (Phase 3: proposal for follow-up)
                     └── blocked-by: FOLLOWUP_IMPL_PLAN  (Phase 8: decompose into slices)
                           ├── blocked-by: FOLLOWUP_SLICE-1  (Phase 9)
-                          │     ├── blocked-by: important-leaf-task-...
-                          │     └── blocked-by: minor-leaf-task-...
+                          │     ├── blocked-by: deferred-item-leaf-task-...
+                          │     └── blocked-by: deferred-item-leaf-task-...
                           └── blocked-by: FOLLOWUP_SLICE-2
 ```
 
 **Lifecycle steps:**
-1. **Supervisor** creates FOLLOWUP_URE (same actor — scoping URE with user to determine which findings to address)
+1. **Supervisor** creates FOLLOWUP_URE (same actor — scoping URE with user to determine which DEFER'd UAT items to address)
 2. **Supervisor** creates FOLLOWUP_URD (same actor — requirements for follow-up scope)
 3. **Supervisor → Architect (h6):** Hands off FOLLOWUP_URE + FOLLOWUP_URD to architect for FOLLOWUP_PROPOSAL creation
 4. **Architect** creates FOLLOWUP_PROPOSAL-N (same review/ratify/UAT cycle applies)
 5. **Architect → Supervisor (h1):** After FOLLOWUP_PROPOSAL ratified, hands off for FOLLOWUP_IMPL_PLAN
 6. **Supervisor → Worker (h2):** FOLLOWUP_SLICE-N assignment with adopted leaf task IDs
 7. **Supervisor → Reviewer (h3):** Code review of follow-up slices
-8. **Worker → Reviewer (h4):** Follow-up slice completion, reports which original leaf tasks resolved
+8. **Worker → Reviewer (h4):** Follow-up slice completion, reports which DEFER'd-item leaf tasks resolved
 
-**Leaf task adoption (dual-parent):** When the supervisor creates FOLLOWUP_SLICE-N, the original IMPORTANT/MINOR leaf tasks gain a second parent — they are children of both the original severity group AND the follow-up slice.
+**Leaf task adoption (dual-parent):** When the supervisor creates FOLLOWUP_SLICE-N, the user-DEFER'd UAT-item leaf tasks gain a second parent — they are children of both the original DEFER'd-items tracking group AND the follow-up slice.
 
-**No followup-of-followup:** IMPORTANT/MINOR findings from follow-up code review are tracked on the existing follow-up epic. A nested follow-up epic is never created.
+**No followup-of-followup:** Any user-DEFER'd items from a follow-up UAT are tracked on the existing follow-up epic. A nested follow-up epic is never created.
 
 ### Voting
 
 Same binary voting as plan review: ACCEPT or REVISE.
 
-All BLOCKERs and IMPORTANTs must be resolved before proceeding (clean exit = 0 BLOCKERs + 0 IMPORTANTs). MINOR findings go to follow-up epic.
+A slice passes only on a **fix-free clean re-review = 0 BLOCKER + 0 IMPORTANT + 0 MINOR** from all reviewers (iterate up to the chosen review-effort budget; on exhaustion without clean, surface to the user). No severity is deferrable.
 
-**Next (0 BLOCKERs + 0 IMPORTANTs, all reviewers ACCEPT):** Proceed to Phase 11 (Implementation UAT)
+**Next (fix-free clean round 0/0/0, all reviewers ACCEPT):** Proceed to Phase 11 (Implementation UAT)
 
 ---
 
@@ -778,7 +792,11 @@ All BLOCKERs and IMPORTANTs must be resolved before proceeding (clean exit = 0 B
 
 ### User Approval
 
+**The supervisor MUST invoke `Skill(/pasture:user-uat)`** before running the implementation UAT (R2) — the skill loads the verbatim-capture and FIX-NOW/DEFER disposition procedures.
+
 Present the completed implementation to the user for explicit approval, similar to Phase 5 but for code.
+
+**Disposition every feedback item (R2):** Assign each item an explicit, user-confirmed **FIX-NOW** or **DEFER** disposition. FIX-NOW items are resolved before landing; **DEFER'd items are the SOLE source feeding the FOLLOWUP epic** — the supervisor creates the FOLLOWUP epic here (Phase 11) when DEFER'd items exist, never from a review severity.
 
 ```bash
 bd create --type=task --priority=2 \
@@ -1169,8 +1187,13 @@ Create handoff document if actor transition occurs (see [HANDOFF_TEMPLATE.md](HA
 | Skill: pasture:supervisor:commit | Atomic commit per layer (Phase 12) |
 
 **Agent launching:**
+
+For the **IMPL_PLAN phase (R1)**, prefer **TeamCreate with the supervisor as an Opus model and workers also as Opus** — not `aura-swarm`. A supervisor that has just dispatched Explore subagents may *appear* idle while they work; **do not shut it down pre-emptively.**
+
 ```bash
-# Launch supervisor/architect in-place (long-running, needs own tmux session)
+# Preferred for IMPL_PLAN: TeamCreate — supervisor (Opus) + workers (Opus), in-session
+
+# Long-running supervisor/architect in their own tmux session (alternative)
 aura-swarm start --swarm-mode intree --role supervisor -n 1 --prompt "..."
 
 # Or use worktree mode for epic-based workflow

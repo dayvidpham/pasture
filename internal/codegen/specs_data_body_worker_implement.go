@@ -48,6 +48,11 @@ var workerImplementBody = SkillBody{
 			Then:      "validate with schema/validation tooling",
 			ShouldNot: "trust raw input",
 		},
+		// R6: for EVERY request (generalized from fix-intent-only at v2-2), evaluate
+		// the implementation against the concrete validation cases captured in
+		// URE/UAT and store the failing real-data cases as test fixtures. Resolves to
+		// SharedFragmentSpecs[FragValidationCases] (SLICE-1). See C-validation-cases.
+		behaviorRef(FragValidationCases),
 	},
 
 	Sections: []ProseSection{
@@ -105,10 +110,15 @@ bd update <task-id> --status=in_progress
 - Create only types YOUR slice needs
 - Don't add types for other slices
 
-**Layer 2: Tests (import production code)**
+**Layer 2: Tests FIRST (import production code)**
+- Write the tests **before** the implementation. The tests ARE the executable
+  verification of the validation-case contract agreed with the user during URE
+  and Plan UAT (the universal validation cases — see [` + "frag--validation-cases" + `]
+  and ` + "`C-validation-cases`" + `): definition of done plus correct/incorrect behaviours.
 - Import actual CLI/API package: ` + "`import \"myproject/cmd/feature\"`" + `
 - NOT test-only handler: ~~` + "`import \"myproject/internal/testhelpers/feature\"`" + `~~
-- Tests will FAIL - expected (no impl yet)
+- Tests will FAIL initially — **red-first** is expected (no impl yet). As you
+  implement Layer 3, progressively fewer tests fail until all are green.
 
 **Layer 3: Implementation + Wiring**
 - Service method for your slice
@@ -119,6 +129,16 @@ Follow:
 - validation_checklist items
 - acceptance_criteria (BDD Given/When/Then)
 - tradeoffs from ratified plan`,
+				},
+				{
+					Id:    "wimpl-step3b-validation-cases",
+					Title: "Step 3b: Evaluate against validation cases (R6, every request)",
+					Content: `For **every** request (not only fix-intent ones), the URE/UAT captured concrete validation cases — the definition of done plus the correct/incorrect behaviours that must pass or must fail. Per [` + "frag--validation-cases" + `] and ` + "`C-validation-cases`" + `:
+- These validation cases are the contract you wrote your Layer-2 tests against (tests-first); evaluate the implementation against each confirmed case.
+- Store the failing real-data cases as **test fixtures** so the behaviour is locked in.
+- The slice is not done until its validation cases pass (red → green).
+
+There is **no** request-type axis or enum gating this — what a request needs is recognized from the REQUEST/URD, not classified.`,
 				},
 				{
 					Id:    "wimpl-step4-quality",
@@ -168,9 +188,14 @@ coordination instead. See **Shared-Worktree Git Discipline** in
 			Id:    "wimpl-followup-slices",
 			Title: "Follow-up Slices (FOLLOWUP_SLICE-N)",
 			Content: `If your Beads task is a ` + "`FOLLOWUP_SLICE-N`" + `, the implementation procedure is identical. Additionally:
-- Check for an "Adopted Leaf Tasks" section in ` + "`bd show <task-id>`" + ` — these are IMPORTANT/MINOR findings you must resolve
-- Your implementation must address each adopted leaf task's acceptance criteria
-- On completion, report which leaf tasks were resolved`,
+- Check for a "DEFER'd-Item Leaf Tasks" section in ` + "`bd show <task-id>`" + ` — these are user-DEFER'd UAT items you must resolve
+- Your implementation must address each DEFER'd-item leaf task's acceptance criteria
+- On completion, report which DEFER'd-item leaf tasks were resolved`,
+		},
+		{
+			Id:      "wimpl-review-fix-cycle",
+			Title:   "Review-Fix Cycle (within the chosen review-effort budget)",
+			Content: `Your slice is not finished when the first pass lands. Code review iterates **review → fix → re-review** up to the **review-effort budget chosen at Phase 8** until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** within budget. Stay available to fix findings of every severity — IMPORTANT and MINOR must reach 0 too, not just BLOCKER. If the budget is exhausted before a clean round, the outstanding findings are surfaced to the user at a gate (not proceeded-past silently). Do not treat "tests pass once" as wave completion.`,
 		},
 		{
 			Id:    "wimpl-next",

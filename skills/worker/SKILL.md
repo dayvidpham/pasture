@@ -443,13 +443,13 @@ bd update <task-id> --status=in_progress
 
 You may be assigned a `FOLLOWUP_SLICE-N` task instead of a `SLICE-N` task. The implementation procedure is identical, with these additions:
 
-- **Adopted leaf tasks**: Your slice task will list specific IMPORTANT/MINOR leaf tasks from the original code review that you must resolve. Check `bd show <task-id>` for an "Adopted Leaf Tasks" section.
-- **Dual-parent resolution**: The adopted leaf tasks are children of both the original severity group AND your FOLLOWUP_SLICE-N. Resolving the leaf task satisfies both parents.
-- **Completion handoff (h4)**: When completing a follow-up slice, your handoff to the reviewer must list which original leaf tasks were resolved.
+- **DEFER'd-item leaf tasks**: Your slice task will list specific user-DEFER'd UAT-item leaf tasks that you must resolve. Check `bd show <task-id>` for a "DEFER'd-Item Leaf Tasks" section.
+- **Dual-parent resolution**: Each leaf task is a child of both the DEFER'd-items tracking group AND your FOLLOWUP_SLICE-N. Resolving the leaf task satisfies both parents.
+- **Completion handoff (h4)**: When completing a follow-up slice, your handoff to the reviewer must list which DEFER'd-item leaf tasks were resolved.
 
 ```bash
 # Completion comment for follow-up slices should include:
-bd comments add <task-id> "Implementation complete. Resolved leaf tasks: <leaf-task-id-1>, <leaf-task-id-2>"
+bd comments add <task-id> "Implementation complete. Resolved DEFER'd-item leaf tasks: <leaf-task-id-1>, <leaf-task-id-2>"
 ```
 
 ## Updating Beads Status

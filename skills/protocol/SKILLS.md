@@ -33,7 +33,7 @@ See [AGENTS.md](AGENTS.md) for role definitions and phase ownership.
 | `/pasture:architect-propose-plan` | 3 | `pasture:p3-plan:s3-propose` | Create a PROPOSAL-N task with full technical plan. Includes public interfaces, implementation approach, validation checklist, and BDD acceptance criteria. |
 | `/pasture:architect-request-review` | 4 | `pasture:p4-plan:s4-review` | Spawn 3 parallel reviewers with axis-specific focus. Creates PROPOSAL-N-REVIEW-{axis}-{round} tasks (A=Correctness, B=Test quality, C=Elegance). |
 | `/pasture:architect-ratify` | 6 | `pasture:p6-plan:s6-ratify` | Ratify proposal after all 3 reviewers ACCEPT. Marks old proposals as `pasture:superseded`. Creates placeholder IMPL_PLAN task for supervisor. |
-| `/pasture:architect-handoff` | 7 | `pasture:p7-plan:s7-handoff` | Create handoff document (full inline provenance) and store at `.git/.aura/handoff/`. Transfers ownership to supervisor. |
+| `/pasture:architect-handoff` | 7 | `pasture:p7-plan:s7-handoff` | Author the handoff (full inline provenance) inline in the HANDOFF Beads task body. Transfers ownership to supervisor. |
 
 ---
 

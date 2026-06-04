@@ -2,7 +2,7 @@
 
 Standardized template for all 6 actor-change transitions in the Pasture protocol.
 
-**Storage:** `.git/.aura/handoff/{request-task-id}/{source}-to-{target}.md`
+**Storage:** the HANDOFF Beads task body (no filesystem path). Author each handoff inline in its own dedicated HANDOFF Beads task and locate it by task ID. The template below describes the body content authored into that task's description.
 
 ---
 
@@ -14,7 +14,7 @@ Standardized template for all 6 actor-change transitions in the Pasture protocol
 | 2 | Supervisor | Worker | Phase 9 (Slice assignment) | Summary + bd IDs |
 | 3 | Supervisor | Reviewer | Phase 10 (Code review) | Summary + bd IDs |
 | 4 | Worker | Reviewer | Phase 10 (Code review) | Summary + bd IDs |
-| 5 | Reviewer | Followup | After Phase 10 (Follow-up epic) | Summary + bd IDs |
+| 5 | Reviewer | Followup | After Phase 10 (code-review results to supervisor) | Summary + bd IDs |
 | 6 | Supervisor | Architect | Follow-up lifecycle (FOLLOWUP_URE/URD → FOLLOWUP_PROPOSAL) | Summary + bd IDs |
 
 ### Same-Actor Transitions (NO Handoff Needed)
@@ -237,20 +237,21 @@ SLICE-1 implements the core logging infrastructure. All quality gates pass
 - **Proposal:** aura-scripts-ghi
 
 ## Context
-Code review complete. 0 BLOCKERs, 2 IMPORTANT, 1 MINOR findings.
-Follow-up epic needed for non-blocking improvements.
+Code review reached a fix-free clean round: 0 BLOCKER + 0 IMPORTANT + 0 MINOR
+across all reviewers (within the chosen review-effort budget; all findings were
+fixed in-wave and re-reviewed). Slice passes — handing results to the supervisor.
 
 ## Key Decisions
-1. IMPORTANT: Add request-id correlation to all log entries (cross-cutting).
-2. IMPORTANT: Add performance benchmark for high-throughput logging paths.
-3. MINOR: Rename LogConfig → LoggingConfig for consistency with project naming.
+1. All earlier IMPORTANT and MINOR findings were fixed in-wave, not deferred.
+2. The FOLLOWUP epic is NOT fed by review severities — it is created later, at
+   UAT (Phase 5 or 11), and only from user-DEFER'd items.
 
 ## Open Items
-- All findings above should be tracked as tasks in the follow-up epic.
+- None from code review (clean exit). Any deferrals will originate at UAT.
 
 ## Acceptance Criteria
-- Follow-up epic created with label `pasture:epic-followup`.
-- All IMPORTANT and MINOR findings captured as individual tasks.
+- Slice passed on a fix-free clean re-review (0/0/0) from all reviewers.
+- No review severity routed to a FOLLOWUP epic.
 ```
 
 ---
@@ -259,14 +260,14 @@ Follow-up epic needed for non-blocking improvements.
 
 The follow-up epic runs the same protocol phases using 6 handoff types (h1-h5 reused from the main lifecycle, plus h6 unique to the follow-up lifecycle), scoped to the follow-up epic.
 
-**Storage:** `.git/.aura/handoff/{followup-epic-id}/{source}-to-{target}.md`
+**Storage:** the HANDOFF Beads task body (no filesystem path) — same convention as the main lifecycle; each follow-up handoff is authored inline in its own HANDOFF Beads task and located by task ID.
 
 ### Handoff Chain Through Follow-up Lifecycle
 
 | Order | Handoff | Description |
 |-------|---------|-------------|
-| 1 | **Reviewer → Followup (h5)** | Bridge from original review. Created by supervisor when IMPORTANT/MINOR findings exist. **Starts** the follow-up lifecycle. |
-| 2 | *(same actor — no handoff)* | Supervisor creates FOLLOWUP_URE (scoping which findings to address). |
+| 1 | **Reviewer → Followup (h5)** | Conveys code-review results to the supervisor (all severities reached 0 before wave close). The FOLLOWUP epic itself is created later, at UAT, from user-DEFER'd items — which **starts** the follow-up lifecycle. |
+| 2 | *(same actor — no handoff)* | Supervisor creates FOLLOWUP_URE (scoping which user-DEFER'd UAT items to address). |
 | 3 | *(same actor — no handoff)* | Supervisor creates FOLLOWUP_URD (synthesizes follow-up requirements). |
 | 4 | **Supervisor → Architect (h6)** | Supervisor hands off completed FOLLOWUP_URE + FOLLOWUP_URD to architect for FOLLOWUP_PROPOSAL creation. Follow-up specific handoff. |
 | 5 | **Architect → Supervisor (h1)** | After FOLLOWUP_PROPOSAL is ratified, architect hands off to supervisor for FOLLOWUP_IMPL_PLAN. References original URD + FOLLOWUP_URD + outstanding findings. |
@@ -281,7 +282,7 @@ The follow-up epic runs the same protocol phases using 6 handoff types (h1-h5 re
 
 ## Metadata
 - **Request:** aura-scripts-abc — REQUEST: Add structured logging
-- **Follow-up Epic:** aura-scripts-xyz — FOLLOWUP: Non-blocking improvements
+- **Follow-up Epic:** aura-scripts-xyz — FOLLOWUP: User-DEFER'd UAT items
 - **Date:** 2026-02-25
 - **Source:** Supervisor
 - **Target:** Architect
@@ -294,36 +295,38 @@ The follow-up epic runs the same protocol phases using 6 handoff types (h1-h5 re
 - **FOLLOWUP_URD:** aura-scripts-uvw
 
 ## Context
-Supervisor completed FOLLOWUP_URE with user (scoped 2 IMPORTANT findings
-for this cycle) and synthesized FOLLOWUP_URD. Handing off to architect
+Supervisor completed FOLLOWUP_URE with user (scoped 2 of the user-DEFER'd UAT
+items for this cycle) and synthesized FOLLOWUP_URD. Handing off to architect
 for FOLLOWUP_PROPOSAL creation.
 
-## Findings Summary
-| Finding ID | Severity | Original Slice | Scoped? | Description |
-|-----------|----------|----------------|---------|-------------|
-| aura-scripts-111 | IMPORTANT | SLICE-1 | Yes | Request-id correlation |
-| aura-scripts-222 | IMPORTANT | SLICE-2 | Yes | Performance benchmark |
-| aura-scripts-333 | MINOR | SLICE-1 | No (deferred) | Rename LogConfig |
+## Deferred-Item Summary
+| Item ID | Source | UAT Phase | Scoped? | Description |
+|---------|--------|-----------|---------|-------------|
+| aura-scripts-111 | DEFER'd UAT item | Phase 11 | Yes | Request-id correlation |
+| aura-scripts-222 | DEFER'd UAT item | Phase 11 | Yes | Performance benchmark |
+| aura-scripts-333 | DEFER'd UAT item | Phase 11 | No (deferred again) | Rename LogConfig |
+
+(All code-review severities had already reached 0 in-wave — none appears here.)
 
 ## Key Decisions
-1. User scoped 2 of 3 findings for this follow-up cycle.
-2. MINOR finding deferred — user considers it low-priority.
+1. User scoped 2 of 3 DEFER'd UAT items for this follow-up cycle.
+2. The third DEFER'd item is held for a future follow-up — user considers it low-priority.
 
 ## Open Items
-- MINOR finding aura-scripts-333 remains unscoped for future follow-up.
+- DEFER'd item aura-scripts-333 remains unscoped for future follow-up.
 
 ## Acceptance Criteria
 - FOLLOWUP_PROPOSAL accounts for original URD + FOLLOWUP_URD.
-- Proposal covers both scoped IMPORTANT findings.
+- Proposal covers both scoped DEFER'd items.
 - Standard review process (3 reviewers) applies.
 ```
 
 ### Key Differences from Original Handoffs
 
-- **h5 is the entry point**: The Reviewer → Followup handoff bridges the original epic to the follow-up lifecycle. It provides the initial context.
+- **h5 conveys code-review results**: The Reviewer → Followup handoff reports the clean (0/0/0) code-review outcome to the supervisor. The follow-up lifecycle itself begins from user-DEFER'd UAT items, not from review findings.
 - **Follow-up handoffs reference both epics**: Task References section includes both the original request/URD and the follow-up epic/FOLLOWUP_URD.
-- **Worker handoff (h2) includes leaf task IDs**: The Supervisor → Worker handoff for FOLLOWUP_SLICE-N must list the specific IMPORTANT/MINOR leaf tasks the worker is adopting.
-- **Worker completion (h4) reports resolution**: The Worker → Reviewer handoff for follow-up slices reports which original leaf tasks were resolved.
+- **Worker handoff (h2) includes leaf task IDs**: The Supervisor → Worker handoff for FOLLOWUP_SLICE-N must list the specific user-DEFER'd UAT-item leaf tasks the worker is adopting.
+- **Worker completion (h4) reports resolution**: The Worker → Reviewer handoff for follow-up slices reports which DEFER'd-item leaf tasks were resolved.
 
 ### Example: Supervisor → Worker for Follow-up Slice
 
@@ -332,7 +335,7 @@ for FOLLOWUP_PROPOSAL creation.
 
 ## Metadata
 - **Request:** aura-scripts-abc — REQUEST: Add structured logging
-- **Follow-up Epic:** aura-scripts-xyz — FOLLOWUP: Non-blocking improvements
+- **Follow-up Epic:** aura-scripts-xyz — FOLLOWUP: User-DEFER'd UAT items
 - **Date:** 2026-02-25
 - **Source:** Supervisor
 - **Target:** Worker (FOLLOWUP_SLICE-1 owner)
@@ -346,14 +349,14 @@ for FOLLOWUP_PROPOSAL creation.
 - **Slice:** aura-scripts-pqr (FOLLOWUP_SLICE-1)
 
 ## Context
-FOLLOWUP_SLICE-1 addresses 2 IMPORTANT findings from the original code review:
-request-id correlation and performance benchmarking.
+FOLLOWUP_SLICE-1 addresses 2 user-DEFER'd UAT items: request-id correlation
+and performance benchmarking.
 
 ## Adopted Leaf Tasks
-| Leaf Task ID | Severity | Original Slice | Description |
-|-------------|----------|----------------|-------------|
-| aura-scripts-111 | IMPORTANT | SLICE-1 | Add request-id correlation to log entries |
-| aura-scripts-222 | IMPORTANT | SLICE-2 | Performance benchmark for high-throughput paths |
+| Leaf Task ID | Source | UAT Phase | Description |
+|-------------|--------|-----------|-------------|
+| aura-scripts-111 | DEFER'd UAT item | Phase 11 | Add request-id correlation to log entries |
+| aura-scripts-222 | DEFER'd UAT item | Phase 11 | Performance benchmark for high-throughput paths |
 
 ## Key Decisions
 1. Correlation ID passed via context.Context (not global state).

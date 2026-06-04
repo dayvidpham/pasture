@@ -30,6 +30,15 @@ var reviewerReviewCodeBody = SkillBody{
 		// 3rd owner of frag--sup-blocker-dual-parent (SLICE-4): canonical Then
 		// "add dual-parent: blocks BOTH the severity group AND the slice".
 		behaviorRef(FragSupBlockerDualParent),
+		// R7/A1: code review iterates review->fix->re-review up to the chosen
+		// review-effort budget until a fix-free clean round confirms 0/0/0; on budget
+		// exhaustion without clean, surface outstanding findings to the user. Resolves
+		// to SharedFragmentSpecs[FragReviewCleanExit] (SLICE-1).
+		behaviorRef(FragReviewCleanExit),
+		// R6: verify EVERY request carries validation-case fixtures (generalized
+		// from fix-intent-only at v2-2). Resolves to
+		// SharedFragmentSpecs[FragValidationCases] (SLICE-1).
+		behaviorRef(FragValidationCases),
 	},
 
 	Sections: []ProseSection{
@@ -127,7 +136,7 @@ bd close <minor-group-id>` + "\n" +
 
 This ensures BLOCKERs both categorize under the severity tree AND block the slice they apply to.
 
-IMPORTANT and MINOR findings do **NOT** block the slice — they are tracked in the follow-up epic.`,
+IMPORTANT and MINOR findings do **NOT** block the slice via dual-parent (only BLOCKER does), but they are **not** routed to a follow-up epic either: ALL severity groups (BLOCKER, IMPORTANT, MINOR) must reach 0 before the review wave closes (R7/A1). The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by any review severity.`,
 				},
 			},
 		},
@@ -239,14 +248,26 @@ var commandCmd = &cobra.Command{
 - No TODOs in CLI/API actions
 - Real dependencies wired (not mocks in production code)`,
 				},
+				{
+					Id:    "rev-code-validation-cases",
+					Title: "Verify Validation Cases (R6)",
+					Content: `For **every** REQUEST (not only fix-intent ones), per [` + "frag--validation-cases" + `] verify the implementation:
+- Carries **test fixtures** for the concrete validation cases captured in URE/UAT (the definition of done plus the correct/incorrect behaviours that must pass or must fail).
+- Evaluates the implementation against each confirmed validation case.
+
+An implementation that ships without validation-case fixtures is an IMPORTANT finding. There is **no** request-type axis/enum gating this — recognize what a request needs from the REQUEST/URD.`,
+				},
 			},
 		},
 		{
-			Id:    "rev-code-followup-epic",
-			Title: "Follow-up Epic",
-			Content: `**Trigger:** Review completion + ANY IMPORTANT or MINOR findings exist.
-**NOT gated on BLOCKER resolution.**
-**Owner:** Supervisor creates the follow-up epic (label ` + "`pasture:epic-followup`" + `).`,
+			Id:      "rev-code-clean-exit",
+			Title:   "Clean-Review Exit (within the chosen review-effort budget)",
+			Content: `Per [` + "frag--review-clean-exit" + `] and ` + "`C-review-effort-budget`" + `, iterate **review → fix → re-review** up to the **review-effort budget chosen at Phase 8** (defaults: 3 rounds / 1 round / 0 rounds / unlimited / custom) until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** within budget. On **budget exhaustion without a clean round**, SURFACE the outstanding findings to the user at a gate for a decision — do not proceed dirty and do not loop forever. The budget is never hardcoded. A wave never closes on a fix-applying round, and never with any finding silently outstanding.`,
+		},
+		{
+			Id:      "rev-code-followup-epic",
+			Title:   "Follow-up Epic",
+			Content: `The FOLLOWUP epic is **not** created from review findings. ALL review severities (BLOCKER/IMPORTANT/MINOR) must reach 0 before the wave closes (R7/A1). The FOLLOWUP epic is fed ONLY by **user-DEFER'd UAT items** (Phase 11), and the Supervisor creates it from those (label ` + "`pasture:epic-followup`" + `).`,
 		},
 		{
 			Id:    "rev-code-followup-slice",
@@ -254,8 +275,8 @@ var commandCmd = &cobra.Command{
 			Content: `When reviewing follow-up slices, use the same procedure:
 - **Review task naming:** ` + "`FOLLOWUP_SLICE-N-REVIEW-{axis}-{round}`" + `
 - **Same EAGER severity tree** (BLOCKER/IMPORTANT/MINOR per review round)
-- **No followup-of-followup:** New IMPORTANT/MINOR findings from FOLLOWUP_SLICE review are tracked on the existing follow-up epic, not a new nested follow-up
-- The worker's completion handoff (h4) reports which original leaf tasks were resolved — verify these during review`,
+- **All severities reach 0:** ALL findings (BLOCKER/IMPORTANT/MINOR) in a FOLLOWUP_SLICE review must also reach 0 before the follow-up wave closes — they are **never** re-routed to a follow-up epic (no followup-of-followup; the FOLLOWUP epic is fed only by user-DEFER'd UAT items)
+- The worker's completion handoff (h4) reports which DEFER'd-item leaf tasks were resolved — verify these during review`,
 		},
 		{
 			Id:    "rev-code-report",
