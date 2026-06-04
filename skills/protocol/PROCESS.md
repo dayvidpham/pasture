@@ -93,7 +93,7 @@ question text, ALL options with their descriptions, and the user's verbatim
 response. See [UAT_EXAMPLE.md](UAT_EXAMPLE.md) for an example of the recording
 quality expected.
 
-**Validation cases (R6 — EVERY request):** For **every** REQUEST (not only fix-intent ones — what a request needs is recognized *semantically*, with no request-type axis or enum), elicit concrete **validation cases**: a definition of done plus correct and incorrect behaviours (inputs/behaviors that must pass or must fail; for fix-intent requests this includes what currently fails). Confirm the case set with the user in UAT, evaluate the implementation against them during implementation, and store failing real-data cases as test fixtures. Never ship without validation cases. These validation cases are the contract the worker's tests are written against (tests-first; see the Phase 9 TDD note below).
+**Validation cases (R6 — EVERY request):** Elicit concrete **validation cases** for every request during the URE — per `C-validation-cases` (full Given/When/Then in [CONSTRAINTS.md](CONSTRAINTS.md), the constraint catalog). In short: capture the definition of done plus correct/incorrect behaviours, confirm the set with the user in UAT, and store failing real-data cases as test fixtures. These validation cases are the contract the worker's tests are written against (tests-first; see the Phase 9 TDD note below).
 
 ### User Requirements Document (s2_2)
 
@@ -271,7 +271,7 @@ See: [../reviewer/SKILL.md](../reviewer/SKILL.md)
 
 **DO NOT auto-proceed.** Present the accepted proposal to the user for explicit approval.
 
-**Disposition every feedback item (R2):** Each item of feedback gathered during UAT MUST be assigned an explicit, user-confirmed disposition of **FIX-NOW** or **DEFER**. **Deferrals may be proposed by the architect or supervisor**, not only flagged by the user; whoever proposes a deferral, **ALL deferred items MUST be raised to the user at the next user gate** (URE, Plan UAT, or Impl UAT) for confirmation — nothing is silently deferred. FIX-NOW items are resolved in the current wave; **DEFER'd items are the SOLE source feeding the FOLLOWUP epic**. Never leave a UAT item without a confirmed disposition, never silently defer an item without raising it at the next gate, and never route a review severity into FOLLOWUP — only DEFER'd UAT items feed it.
+**Disposition every feedback item (R2):** Assign each UAT feedback item (and any architect/supervisor-proposed deferral) an explicit, user-confirmed **FIX-NOW** or **DEFER** disposition — per `C-uat-feedback-disposition` (full Given/When/Then in [CONSTRAINTS.md](CONSTRAINTS.md), the constraint catalog). In short: all deferred items, whoever proposed them, are raised to the user at the next user gate for confirmation; FIX-NOW items are resolved in the current wave; DEFER'd items are the sole source feeding the FOLLOWUP epic.
 
 The idea here is: the plan and the implementation MUST match with the user's end vision for the project.
 The architect should also plan out several MVP milestones, in order to reach the user's vision.
