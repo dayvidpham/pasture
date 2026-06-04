@@ -104,6 +104,8 @@ var generalConstraints = map[string]bool{
 //   C-slice-review-before-close → SUPERVISOR (given: "workers complete their implementation slices")
 //   C-clean-review-exit       → EPOCH + SUPERVISOR (given: "per-slice code review" — review loop within chosen budget; surface on exhaustion)
 //   C-review-effort-budget    → EPOCH + SUPERVISOR + REVIEWER (given: "start of Phase 8" — request configurable review-effort budget)
+//   C-uat-feedback-disposition → EPOCH (V2-PROP: epoch orchestrates ALL deferred items raised to the user at the next gate)
+//   C-validation-cases        → SUPERVISOR (V4-PROP: supervisor enforces the validation-case contract workers' tests verify)
 //   C-slice-leaf-tasks        → SUPERVISOR (given: "vertical slice created" — supervisor creates slices)
 //   C-handoff-skill-invocation→ ARCHITECT + SUPERVISOR (both are sources of handoffs h1 and h2/h3)
 //   C-dep-direction           → ALL (see generalConstraints)
@@ -134,6 +136,8 @@ var roleConstraints = map[types.RoleId]map[string]bool{
 		"C-clean-review-exit": true,
 		// Epoch requests the configurable review-effort budget at Phase 8 (IMPL_PLAN start)
 		"C-review-effort-budget": true,
+		// Epoch orchestrates toward user gates: ALL deferred items raised to the user at the next gate (V2-PROP)
+		"C-uat-feedback-disposition": true,
 	}),
 	types.RoleArchitect: mergeConstraints(generalConstraints, map[string]bool{
 		// Architect creates proposals → must follow naming convention
@@ -176,6 +180,8 @@ var roleConstraints = map[types.RoleId]map[string]bool{
 		"C-clean-review-exit": true,
 		// Supervisor requests the configurable review-effort budget at Phase 8 (IMPL_PLAN start)
 		"C-review-effort-budget": true,
+		// Supervisor enforces the validation-case contract workers' tests verify (tests-first) (V4-PROP)
+		"C-validation-cases": true,
 		// Supervisor assigns vertical slices to workers
 		"C-vertical-slices": true,
 		// Supervisor creates slices and must add leaf tasks

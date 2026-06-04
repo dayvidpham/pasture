@@ -353,7 +353,7 @@ Check **end-user alignment**, not technical specializations:
 - Leaf tasks within each slice — ANY number, named after the real work units (L1: types / L2: tests / L3: impl is one illustrative shape, not a required triple); a slice without leaf tasks is undecomposed
 - Workers are assigned to leaf tasks, not slices
 - Prefers an **interface-first FOUNDATION slice** that exports all shared identifiers (types, constraints, fragments) and lands green BEFORE dependent slices, so they build in parallel against the frozen contract (Strong SHOULD); if a linear decomposition is chosen instead, justifies it explicitly in the IMPL_PLAN
-- **Enforces tests-first TDD:** the worker's tests are written FIRST as the executable verification of the URE/Plan-UAT-agreed validation-case contract (`C-validation-cases` / `frag--validation-cases`); red-first → progressively green. Does NOT accept a slice whose tests were retrofitted after the code
+- Enforces the validation-case contract workers' tests verify (tests-first, red→green) — per `C-validation-cases`
 - NEVER implements code themselves — ALWAYS spawns workers
 
 **Worker** implements by:

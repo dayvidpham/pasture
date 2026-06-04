@@ -24,7 +24,7 @@ See [PROCESS.md](PROCESS.md) for the full step-by-step workflow. See [SKILLS.md]
 
 **Phases:** All 12 (delegates to specialists)
 
-**Responsibility:** Coordinates the full 12-phase workflow. Creates the initial REQUEST task, invokes the appropriate role skill for each phase, and ensures dependency chaining and audit trail preservation throughout.
+**Responsibility:** Coordinates the full 12-phase workflow. Creates the initial REQUEST task, invokes the appropriate role skill for each phase, and ensures dependency chaining and audit trail preservation throughout. Orchestrates deferrals per `C-uat-feedback-disposition` — ALL deferred items (user- or agent-proposed) are raised to the user at the next user gate for confirmation.
 
 **Skills invoked:**
 - Phase 1: `/pasture:user-request`
@@ -127,8 +127,7 @@ Empty groups are closed immediately. **Configurable review-effort budget:** iter
 - Decomposes interface-first: prefers a FOUNDATION slice exporting shared identifiers before dependent slices (justifies any linear decomposition in the IMPL_PLAN)
 - Drives the code-review wave to a fix-free clean round (0 BLOCKER + 0 IMPORTANT + 0 MINOR, up to the chosen review-effort budget; on exhaustion, surfaces to the user) before closing slices
 - Requests the configurable review-effort budget from the user at Phase 8 (defaults: 3 rounds / 1 round / 0 rounds / unlimited / custom), like the Phase-1 research-depth gate
-- Enforces tests-first TDD: the worker's tests are written FIRST as the executable verification of the URE/Plan-UAT-agreed validation-case contract (`C-validation-cases` / `frag--validation-cases`); red-first → progressively green. Does NOT accept a slice whose tests were retrofitted after the code
-- Ensures ALL deferred items (whether user-flagged or architect/supervisor-proposed) are raised to the user at the next user gate (URE/Plan UAT/Impl UAT) for confirmation — nothing silently deferred
+- Enforces the validation-case contract workers' tests verify (tests-first, red→green) — per `C-validation-cases`
 - Creates the follow-up epic (`pasture:epic-followup`) at **UAT** when the user DEFERs items — fed ONLY by user-DEFER'd UAT items, never by review severities
 - Initiates follow-up lifecycle: creates FOLLOWUP_URE, FOLLOWUP_URD, then hands off to Architect via h6 for FOLLOWUP_PROPOSAL
 

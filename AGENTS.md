@@ -502,3 +502,34 @@ phases, figures, schema sections, commands, or templates — see
 [CONTRIBUTING.md](CONTRIBUTING.md). That guide covers the `specs_data.go` →
 `go generate` workflow, file-level dependency graph, and step-by-step recipes
 for each operation.
+
+### Repeating a constraint or prose fragment across multiple skills/agents (define once, reference by ID)
+
+When the same rule must appear in more than one role, phase, or skill, **define
+it once and reference it by ID** — never copy the text. Duplicated prose drifts:
+each copy must be hand-updated and one always gets missed (this caused review
+findings **C-MIN-1, C-MIN-2, A-IMP-1** this epoch). Define-once-by-ID keeps a
+single source of truth; the `global_ids` parity check and `context_test`
+exact-count assertions enforce consistency.
+
+- **Same constraint into more roles/phases** — add its **ID** to the set in
+  `internal/codegen/context.go` (`roleConstraints` / `phaseConstraints`). The one
+  `ConstraintSpecs` definition then renders into each target's generated
+  `skills/<role>/SKILL.md` **and** `agents/<role>.md`. Update
+  `testdata/context.yaml` (`exact_count` +1, add to `must_contain`) in lockstep —
+  `context_test` asserts exact equality. Do **not** restate the rule as new prose.
+  - *Example:* `C-uat-feedback-disposition` attached to `RoleEpoch` (V2-PROP);
+    `C-validation-cases` attached to `RoleSupervisor` (V4-PROP).
+- **Same prose/behaviour into more skill bodies** — define it once in
+  `SharedFragmentSpecs` (`specs_data_fragments.go`) + `AllFragmentIds`, and
+  reference it via `fragRef()` / `behaviorRef()` in each consuming body. Never
+  copy the text. (Fragments reach skill bodies only; agent definitions render
+  only RoleSpec behaviors + attached constraints — use the constraint path for
+  those.)
+- **Hand-authored `skills/protocol/*.md`** — `CONSTRAINTS.md` is the single
+  constraint catalog (one entry per ID); `PROCESS.md` / `CLAUDE.md` / `AGENTS.md`
+  / `SKILL.md` **reference** constraints by ID (e.g. "per
+  `C-uat-feedback-disposition`"), never restate them.
+
+See the full recipe and worked examples in
+[CONTRIBUTING.md](CONTRIBUTING.md#repeating-a-constraint-or-prose-fragment-across-multiple-skillsagents-define-once-reference-by-id).

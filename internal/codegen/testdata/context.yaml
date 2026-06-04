@@ -8,9 +8,10 @@
 
 role_constraint_checks:
   - role: supervisor
-    exact_count: 19
+    exact_count: 20
     must_contain:
       - C-review-effort-budget
+      - C-validation-cases
       - C-supervisor-no-impl
       - C-vertical-slices
       - C-review-consensus
@@ -95,9 +96,10 @@ role_constraint_checks:
       - C-worker-gates
 
   - role: epoch
-    exact_count: 12
+    exact_count: 13
     must_contain:
       - C-review-effort-budget
+      - C-uat-feedback-disposition
       - C-review-consensus
       - C-handoff-skill-invocation
       - C-supervisor-explore-ephemeral

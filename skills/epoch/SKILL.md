@@ -130,6 +130,12 @@ bd dep add ure-id --blocked-by request-id
 - Then: spawn ephemeral Explore subagents via Task tool for scoped codebase queries; each subagent is short-lived and returns findings; no standing team overhead
 - Should not: explore the codebase directly as supervisor; maintain a standing explore team
 
+**[C-uat-feedback-disposition]**
+- Given: any UAT feedback item (Phase 5 or Phase 11) — flagged by the user OR a deferral proposed by the architect/supervisor
+- When: recording each item
+- Then: assign every item an explicit, user-confirmed disposition of FIX-NOW or DEFER; deferrals may be agent-proposed, but ALL deferred items — whoever proposed them — MUST be raised to the user at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation; FIX-NOW items are resolved in the current wave, DEFER'd items are the SOLE source feeding the FOLLOWUP epic
+- Should not: leave a feedback item without a confirmed disposition; silently defer any item without raising it to the user at the next gate; route any review severity (BLOCKER/IMPORTANT/MINOR) into FOLLOWUP — only DEFER'd UAT items feed it
+
 ### Handoffs
 
 _(No handoffs for this role)_
@@ -189,12 +195,6 @@ Agents coordinate through **beads** tasks and comments:
 - When: finishing UAT
 - Then: Supervisor creates a follow-up epic (label pasture:epic-followup) from the user-DEFER'd UAT items only
 - Should not: create a follow-up epic from any review severity (BLOCKER/IMPORTANT/MINOR) — all review severities must reach 0 before wave close
-
-**[epoch-deferral-raised-at-gate]**
-- Given: a deferred item (flagged by the user OR proposed by the architect/supervisor) outstanding at any phase
-- When: orchestrating toward the next user gate
-- Then: ensure ALL deferred items — whoever proposed them — are raised to the user at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation; DEFER'd items are the SOLE source feeding the FOLLOWUP epic
-- Should not: let any item be silently deferred without raising it to the user at the next gate; route any review severity into FOLLOWUP
 
 **[epoch-supervisor-not-idle]**
 - Given: a freshly spawned supervisor (Phase 8 IMPL_PLAN)
