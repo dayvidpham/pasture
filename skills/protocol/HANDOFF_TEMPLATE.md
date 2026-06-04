@@ -238,8 +238,8 @@ SLICE-1 implements the core logging infrastructure. All quality gates pass
 
 ## Context
 Code review reached a fix-free clean round: 0 BLOCKER + 0 IMPORTANT + 0 MINOR
-across all reviewers (no cycle cap; all findings were fixed in-wave and
-re-reviewed). Slice passes — handing results to the supervisor.
+across all reviewers (within the chosen review-effort budget; all findings were
+fixed in-wave and re-reviewed). Slice passes — handing results to the supervisor.
 
 ## Key Decisions
 1. All earlier IMPORTANT and MINOR findings were fixed in-wave, not deferred.

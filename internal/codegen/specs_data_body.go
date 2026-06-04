@@ -100,10 +100,11 @@ var supervisorBody = SkillBody{
 			Id:        "sup-autonomous-progression",
 			Given:     "non-user-gated phase completes",
 			When:      "transitioning to next phase",
-			Then:      "proceed autonomously without asking permission; user-gated phases are: Phase 2 (URE), Phase 5 (Plan UAT), Phase 11 (Impl UAT); all other phases (8 IMPL_PLAN, 9 SLICES, 10 CODE REVIEW, 12 LANDING) progress automatically",
-			ShouldNot: "ask 'Should I proceed?' for autonomous phases; only pause for user-facing phases that require human input",
+			Then:      "proceed autonomously without asking permission; the 5 user-gated phases are: Phase 1 s1_1 (research depth), Phase 2 (URE), Phase 5 (Plan UAT), Phase 8 (implementation-effort / review-effort budget request), Phase 11 (Impl UAT); all other phase transitions (9 SLICES, 10 CODE REVIEW, 12 LANDING) progress automatically",
+			ShouldNot: "ask 'Should I proceed?' for autonomous phases; add user gates beyond the 5 defined; only pause for user-facing phases that require human input",
 		},
-		// R7/A1: code review iterates with NO cycle cap until 0/0/0 clean.
+		// R7/A1: code review iterates up to the chosen review-effort budget until
+		// 0/0/0 clean; on exhaustion, surface outstanding findings to the user.
 		// Resolves to SharedFragmentSpecs[FragReviewCleanExit] (SLICE-1).
 		behaviorRef(FragReviewCleanExit),
 	},
@@ -653,12 +654,34 @@ var supervisorPlanTasksBody = SkillBody{
 			Then:      "prefer extracting a horizontal interface-first FOUNDATION slice (all public types/interfaces/contracts) that lands first, so the dependent implementation slices can compile against the contracts and run in PARALLEL",
 			ShouldNot: "force a linear slice chain (A->B->C) when the runtime dependency is only on interfaces that could be exported up front",
 		},
+		{
+			Id:        "sup-plan-review-effort-budget",
+			Given:     "the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate (per C-review-effort-budget)",
+			When:      "deciding how much review-and-fix effort to spend per slice",
+			Then:      "request a configurable review-effort budget from the user (defaults: 3 rounds, 1 round, 0 rounds, unlimited, custom); the Phase-10 review->fix->re-review loop iterates up to the chosen budget; on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision",
+			ShouldNot: "hardcode the review-cycle budget; proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen",
+		},
 	},
 	Sections: []ProseSection{
 		{
 			Id:      "sup-plan-when-to-use",
 			Title:   "When to Use",
 			Content: `Received handoff from architect with RATIFIED_PLAN task ID and placeholder IMPL_PLAN task.`,
+		},
+		{
+			Id:    "sup-plan-review-effort-budget-gate",
+			Title: "Request the Review-Effort Budget (Phase 8 user gate)",
+			Content: "At the **start of Phase 8** — like the Phase-1 research-depth gate — request a **configurable review-effort budget** from the user (per `C-review-effort-budget`). This is one of the 5 user-gated phases. Present the default choices:\n" +
+				"\n" +
+				"| Option | Meaning |\n" +
+				"|--------|---------|\n" +
+				"| **3 rounds** | Up to three review -> fix -> re-review cycles per slice |\n" +
+				"| **1 round** | A single review + one fix pass |\n" +
+				"| **0 rounds** | No review-fix iteration (review once, surface anything found) |\n" +
+				"| **unlimited** | Iterate until a fix-free clean 0/0/0 round (no upper bound) |\n" +
+				"| **custom** | A user-specified number of rounds |\n" +
+				"\n" +
+				"The Phase-10 review->fix->re-review loop iterates **up to the chosen budget** until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR. On **budget exhaustion WITHOUT a clean round**, SURFACE the outstanding findings to the user for a decision — never proceed dirty, never loop forever, and never hardcode the budget. Record the chosen budget in the IMPL_PLAN so workers and reviewers know the bound.",
 		},
 		{
 			Id:    "sup-plan-critical-vertical-slices",
@@ -1074,8 +1097,8 @@ var supervisorSpawnWorkerBody = SkillBody{
 			Id:        "sup-spawn-max-cycles",
 			Given:     "worker-reviewer cycle",
 			When:      "counting iterations",
-			Then:      "iterate review->fix->re-review with NO cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR",
-			ShouldNot: "impose a maximum cycle cap, close a wave on a fix-applying round, or proceed with any finding outstanding",
+			Then:      "iterate review->fix->re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; on budget exhaustion without clean, surface outstanding findings to the user at a gate",
+			ShouldNot: "hardcode the budget, proceed past the chosen budget without surfacing to the user, close a wave on a fix-applying round, or proceed with any finding silently outstanding",
 		},
 		{
 			Id:        "sup-spawn-important-after-cycles",
@@ -1084,7 +1107,8 @@ var supervisorSpawnWorkerBody = SkillBody{
 			Then:      "keep iterating review->fix->re-review until ALL severity groups reach 0 — every severity must be resolved before the wave closes",
 			ShouldNot: "proceed to UAT with non-zero findings or route any review severity (IMPORTANT/MINOR) to the FOLLOWUP epic",
 		},
-		// R7/A1: code review has no cycle cap; iterate until 0/0/0 clean.
+		// R7/A1: code review iterates up to the chosen review-effort budget until
+		// 0/0/0 clean; on exhaustion, surface outstanding findings to the user.
 		// Resolves to SharedFragmentSpecs[FragReviewCleanExit] (SLICE-1).
 		behaviorRef(FragReviewCleanExit),
 	},
@@ -1106,7 +1130,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"4. REVIEW → Ephemeral reviewers (Task tool): review per-slice\n" +
 				"5. FIX   → Workers fix BLOCKERs + IMPORTANTs with atomic commits\n" +
 				"6. RE-REVIEW → Spawn new ephemeral reviewers for re-review\n" +
-				"7. REPEAT → Steps 5-6 with NO cycle cap until a fix-free clean round confirms 0/0/0\n" +
+				"7. REPEAT → Steps 5-6 up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface to the user\n" +
 				"8. TRACK → ALL severities (BLOCKER/IMPORTANT/MINOR) must reach 0 — none route to FOLLOWUP\n" +
 				"9. NEXT  → When fix-free clean (0 BLOCKER + 0 IMPORTANT + 0 MINOR) → Phase 11 (UAT); escalate to architect only if genuinely stuck\n" +
 				"```\n" +
@@ -1114,7 +1138,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"**Key rules:**\n" +
 				"- Reviewers are ephemeral (spawned per review cycle via Task tool)\n" +
 				"- Slices are **never closed** until reviewed at least once\n" +
-				"- **No cycle cap** — iterate review→fix→re-review until 0 BLOCKER + 0 IMPORTANT + 0 MINOR on a fix-free round; escalate to architect only if genuinely stuck\n" +
+				"- **Configurable review-effort budget** (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — iterate review→fix→re-review up to the budget until 0 BLOCKER + 0 IMPORTANT + 0 MINOR on a fix-free round; on budget exhaustion without clean, surface outstanding findings to the user at a gate; escalate to architect only if genuinely stuck\n" +
 				"- The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by review severities",
 		},
 		{
@@ -1225,7 +1249,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"4. If ANY findings (BLOCKER/IMPORTANT/MINOR): supervisor sends fix assignment to worker\n" +
 				"5. Worker fixes issues → notifies supervisor\n" +
 				"6. New ephemeral reviewers re-review\n" +
-				"7. Repeat steps 4-6 with NO cycle cap until a fix-free clean round confirms 0/0/0\n" +
+				"7. Repeat steps 4-6 up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface outstanding findings to the user at a gate\n" +
 				"8. After a fix-free clean round (0 BLOCKER + 0 IMPORTANT + 0 MINOR): supervisor shuts down worker",
 			Subsections: []ProseSection{
 				{

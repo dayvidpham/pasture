@@ -93,7 +93,7 @@ Same 3 axes, applied to implementation slices.
 - `pasture:severity:important` — Fixed in-wave; must reach 0 (NOT deferrable)
 - `pasture:severity:minor` — Fixed in-wave; must reach 0 (NOT deferrable)
 
-Empty groups are closed immediately. **No cycle cap:** iterate review → fix → re-review until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR. No review severity is routed to FOLLOWUP — the FOLLOWUP epic is fed only by user-DEFER'd UAT items.
+Empty groups are closed immediately. **Configurable review-effort budget:** iterate review → fix → re-review up to the budget chosen at Phase 8 (3 rounds / 1 round / 0 rounds / unlimited / custom) until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; on budget exhaustion without clean, surface the outstanding findings to the user at a gate. No review severity is routed to FOLLOWUP — the FOLLOWUP epic is fed only by user-DEFER'd UAT items.
 
 **Skills:** `/pasture:reviewer-review-plan`, `/pasture:reviewer-review-code`, `/pasture:reviewer-comment`, `/pasture:reviewer-vote`
 
@@ -125,7 +125,8 @@ Empty groups are closed immediately. **No cycle cap:** iterate review → fix �
 - Never implements code — always spawns workers
 - Each production code path owned by exactly ONE worker
 - Decomposes interface-first: prefers a FOUNDATION slice exporting shared identifiers before dependent slices (justifies any linear decomposition in the IMPL_PLAN)
-- Drives the code-review wave to a fix-free clean round (0 BLOCKER + 0 IMPORTANT + 0 MINOR, no cycle cap) before closing slices
+- Drives the code-review wave to a fix-free clean round (0 BLOCKER + 0 IMPORTANT + 0 MINOR, up to the chosen review-effort budget; on exhaustion, surfaces to the user) before closing slices
+- Requests the configurable review-effort budget from the user at Phase 8 (defaults: 3 rounds / 1 round / 0 rounds / unlimited / custom), like the Phase-1 research-depth gate
 - Creates the follow-up epic (`pasture:epic-followup`) at **UAT** when the user DEFERs items — fed ONLY by user-DEFER'd UAT items, never by review severities
 - Initiates follow-up lifecycle: creates FOLLOWUP_URE, FOLLOWUP_URD, then hands off to Architect via h6 for FOLLOWUP_PROPOSAL
 
@@ -148,8 +149,8 @@ Empty groups are closed immediately. **No cycle cap:** iterate review → fix �
 
 **Vertical slice ownership:** Worker owns the full vertical — types, tests, implementation, and wiring. The slice's leaf tasks may take ANY shape (named after the real work units); the TDD layers below are one illustrative decomposition, not a required triple:
 1. Layer 1: Types and schemas
-2. Layer 2: Tests (import production code — will fail initially)
-3. Layer 3: Implementation + wiring (make tests pass)
+2. Layer 2: Tests **written FIRST** (import production code — will fail initially). The tests ARE the executable verification of the validation-case contract agreed with the user during URE and Plan UAT (the universal validation cases — see `C-validation-cases`): definition of done plus correct/incorrect behaviours. **Red-first** is expected.
+3. Layer 3: Implementation + wiring — drive the red Layer-2 tests **progressively green** (fewer failing each step) until all pass
 
 **Completion gates:**
 1. Type checking passes

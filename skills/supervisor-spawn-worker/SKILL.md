@@ -27,7 +27,7 @@ Phase 9: BUILD
   ├─ Workers implement their slices in parallel
   └─ Workers do NOT shut down when finished
 
-Phase 10: REVIEW + FIX CYCLES (no cycle cap — iterate until 0/0/0 clean)
+Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget — iterate until 0/0/0 clean, else surface to user)
   ├─ Cycle 1:
   │   ├─ Spawn ephemeral reviewers (Task tool, per-slice review)
   │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
@@ -43,7 +43,7 @@ DONE → Phase 11 (UAT)
 
 Cycle Exit Conditions:
   Fix-free clean round: 0 BLOCKER + 0 IMPORTANT + 0 MINOR   → Proceed to Phase 11 (UAT)
-  ANY finding remains (BLOCKER/IMPORTANT/MINOR)             → Workers fix, spawn new ephemeral reviewers (no cap)
+  ANY finding remains (BLOCKER/IMPORTANT/MINOR)             → Workers fix, spawn new ephemeral reviewers (up to chosen budget; on exhaustion, surface to user)
   Genuinely stuck (cannot reach a clean round)             → Escalate to architect for re-planning
 
 ```
@@ -87,8 +87,8 @@ Cycle Exit Conditions:
 **[sup-spawn-max-cycles]**
 - Given: worker-reviewer cycle
 - When: counting iterations
-- Then: iterate review->fix->re-review with NO cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR
-- Should not: impose a maximum cycle cap, close a wave on a fix-applying round, or proceed with any finding outstanding
+- Then: iterate review->fix->re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; on budget exhaustion without clean, surface outstanding findings to the user at a gate
+- Should not: hardcode the budget, proceed past the chosen budget without surfacing to the user, close a wave on a fix-applying round, or proceed with any finding silently outstanding
 
 **[sup-spawn-important-after-cycles]**
 - Given: IMPORTANT or MINOR findings remain
@@ -99,8 +99,8 @@ Cycle Exit Conditions:
 **[frag--review-clean-exit]**
 - Given: per-slice code review
 - When: evaluating review results
-- Then: iterate review -> fix -> re-review with NO cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR
-- Should not: close a wave on a fix-applying round, proceed with any finding outstanding, or impose a maximum cycle cap
+- Then: iterate review -> fix -> re-review up to the chosen review-effort budget; clean = 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; on budget exhaustion without clean, SURFACE the outstanding findings to the user at a gate for a decision
+- Should not: hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
 
 ## When to Use
 
@@ -117,7 +117,7 @@ The supervisor executes Phases 8-10 as a single coordinated cycle called **Ride 
 4. REVIEW → Ephemeral reviewers (Task tool): review per-slice
 5. FIX   → Workers fix BLOCKERs + IMPORTANTs with atomic commits
 6. RE-REVIEW → Spawn new ephemeral reviewers for re-review
-7. REPEAT → Steps 5-6 with NO cycle cap until a fix-free clean round confirms 0/0/0
+7. REPEAT → Steps 5-6 up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface to the user
 8. TRACK → ALL severities (BLOCKER/IMPORTANT/MINOR) must reach 0 — none route to FOLLOWUP
 9. NEXT  → When fix-free clean (0 BLOCKER + 0 IMPORTANT + 0 MINOR) → Phase 11 (UAT); escalate to architect only if genuinely stuck
 ```
@@ -125,7 +125,7 @@ The supervisor executes Phases 8-10 as a single coordinated cycle called **Ride 
 **Key rules:**
 - Reviewers are ephemeral (spawned per review cycle via Task tool)
 - Slices are **never closed** until reviewed at least once
-- **No cycle cap** — iterate review→fix→re-review until 0 BLOCKER + 0 IMPORTANT + 0 MINOR on a fix-free round; escalate to architect only if genuinely stuck
+- **Configurable review-effort budget** (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — iterate review→fix→re-review up to the budget until 0 BLOCKER + 0 IMPORTANT + 0 MINOR on a fix-free round; on budget exhaustion without clean, surface outstanding findings to the user at a gate; escalate to architect only if genuinely stuck
 - The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by review severities
 
 ## Handoff Template (Supervisor → Worker)
@@ -232,7 +232,7 @@ Per [sup-worker-persistence], workers stay alive for the full review-fix cycle:
 4. If ANY findings (BLOCKER/IMPORTANT/MINOR): supervisor sends fix assignment to worker
 5. Worker fixes issues → notifies supervisor
 6. New ephemeral reviewers re-review
-7. Repeat steps 4-6 with NO cycle cap until a fix-free clean round confirms 0/0/0
+7. Repeat steps 4-6 up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface outstanding findings to the user at a gate
 8. After a fix-free clean round (0 BLOCKER + 0 IMPORTANT + 0 MINOR): supervisor shuts down worker
 
 ### Fix Assignment Message Template

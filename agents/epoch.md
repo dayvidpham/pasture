@@ -52,8 +52,8 @@ You are the master orchestrator for the full 12-phase epoch lifecycle. You deleg
 **[C-clean-review-exit]**
 - Given: per-slice code review
 - When: evaluating review results
-- Then: iterate review -> fix -> re-review with NO cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; a clean round is one where the re-review applies no fixes and finds nothing across all three severities
-- Should not: close a wave on a fix-applying round; proceed with ANY finding (BLOCKER, IMPORTANT, or MINOR) outstanding; impose a maximum review-cycle cap; batch review across multiple slices
+- Then: iterate review -> fix -> re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; a clean round is one where the re-review applies no fixes and finds nothing across all three severities; on budget exhaustion without a clean round, SURFACE the outstanding findings to the user at a gate for a decision
+- Should not: close a wave on a fix-applying round; proceed with ANY finding (BLOCKER, IMPORTANT, or MINOR) outstanding without surfacing it to the user; hardcode the budget; proceed past the chosen budget without surfacing to the user; batch review across multiple slices
 
 **[C-dep-direction]**
 - Given: adding a Beads dependency
@@ -84,6 +84,12 @@ You are the master orchestrator for the full 12-phase epoch lifecycle. You deleg
 - When: evaluating
 - Then: all 3 reviewers must ACCEPT before proceeding
 - Should not: proceed with any REVISE vote outstanding
+
+**[C-review-effort-budget]**
+- Given: the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate
+- When: deciding how much review-and-fix effort to spend per slice
+- Then: request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review->fix->re-review loop iterates up to the chosen budget; on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision
+- Should not: hardcode the review-cycle budget (e.g. an unconditional fixed cap baked into the prose instead of asked); proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
 
 **[C-slice-review-before-close]**
 - Given: workers complete their implementation slices

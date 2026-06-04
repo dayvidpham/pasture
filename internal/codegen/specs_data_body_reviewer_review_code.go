@@ -30,13 +30,15 @@ var reviewerReviewCodeBody = SkillBody{
 		// 3rd owner of frag--sup-blocker-dual-parent (SLICE-4): canonical Then
 		// "add dual-parent: blocks BOTH the severity group AND the slice".
 		behaviorRef(FragSupBlockerDualParent),
-		// R7/A1: code review iterates review->fix->re-review with NO cycle cap
-		// until a fix-free clean round confirms 0/0/0. Resolves to
-		// SharedFragmentSpecs[FragReviewCleanExit] (SLICE-1).
+		// R7/A1: code review iterates review->fix->re-review up to the chosen
+		// review-effort budget until a fix-free clean round confirms 0/0/0; on budget
+		// exhaustion without clean, surface outstanding findings to the user. Resolves
+		// to SharedFragmentSpecs[FragReviewCleanExit] (SLICE-1).
 		behaviorRef(FragReviewCleanExit),
-		// R6 (FIX-intent): verify the fix carries validation-case fixtures.
-		// Resolves to SharedFragmentSpecs[FragFixValidationCases] (SLICE-1).
-		behaviorRef(FragFixValidationCases),
+		// R6: verify EVERY request carries validation-case fixtures (generalized
+		// from fix-intent-only at v2-2). Resolves to
+		// SharedFragmentSpecs[FragValidationCases] (SLICE-1).
+		behaviorRef(FragValidationCases),
 	},
 
 	Sections: []ProseSection{
@@ -248,19 +250,19 @@ var commandCmd = &cobra.Command{
 				},
 				{
 					Id:    "rev-code-fix-validation-cases",
-					Title: "Verify Fix Validation Cases (R6)",
-					Content: `When the REQUEST is to **fix existing behavior**, per [` + "frag--fix-validation-cases" + `] verify the implementation:
-- Carries **test fixtures** for the concrete validation cases captured in URE/UAT (the inputs/behaviors that currently fail or must pass).
-- Evaluates the fix against each confirmed validation case.
+					Title: "Verify Validation Cases (R6)",
+					Content: `For **every** REQUEST (not only fix-intent ones), per [` + "frag--validation-cases" + `] verify the implementation:
+- Carries **test fixtures** for the concrete validation cases captured in URE/UAT (the definition of done plus the correct/incorrect behaviours that must pass or must fail).
+- Evaluates the implementation against each confirmed validation case.
 
-A fix that ships without validation-case fixtures is an IMPORTANT finding. There is **no** request-type axis/enum to detect fix-intent — recognize it from the REQUEST/URD.`,
+An implementation that ships without validation-case fixtures is an IMPORTANT finding. There is **no** request-type axis/enum gating this — recognize what a request needs from the REQUEST/URD.`,
 				},
 			},
 		},
 		{
 			Id:      "rev-code-clean-exit",
-			Title:   "Clean-Review Exit (no cycle cap)",
-			Content: `Per [` + "frag--review-clean-exit" + `], do not impose a maximum cycle cap. Iterate **review → fix → re-review with NO cap** until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR**. A wave never closes on a fix-applying round, and never with any finding outstanding.`,
+			Title:   "Clean-Review Exit (within the chosen review-effort budget)",
+			Content: `Per [` + "frag--review-clean-exit" + `] and ` + "`C-review-effort-budget`" + `, iterate **review → fix → re-review** up to the **review-effort budget chosen at Phase 8** (defaults: 3 rounds / 1 round / 0 rounds / unlimited / custom) until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** within budget. On **budget exhaustion without a clean round**, SURFACE the outstanding findings to the user at a gate for a decision — do not proceed dirty and do not loop forever. The budget is never hardcoded. A wave never closes on a fix-applying round, and never with any finding silently outstanding.`,
 		},
 		{
 			Id:      "rev-code-followup-epic",

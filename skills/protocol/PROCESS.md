@@ -93,7 +93,7 @@ question text, ALL options with their descriptions, and the user's verbatim
 response. See [UAT_EXAMPLE.md](UAT_EXAMPLE.md) for an example of the recording
 quality expected.
 
-**Fix requests (R6):** If the REQUEST's user intent is to **FIX existing behavior** (recognized *semantically* during Phase 1 / URE — there is no request-type axis or enum), elicit concrete **validation cases** (inputs/behaviors that currently fail or must pass). Confirm the case set with the user in UAT, evaluate the fix against them during implementation, and store failing real-data cases as test fixtures. Never ship a fix without validation cases.
+**Validation cases (R6 — EVERY request):** For **every** REQUEST (not only fix-intent ones — what a request needs is recognized *semantically*, with no request-type axis or enum), elicit concrete **validation cases**: a definition of done plus correct and incorrect behaviours (inputs/behaviors that must pass or must fail; for fix-intent requests this includes what currently fails). Confirm the case set with the user in UAT, evaluate the implementation against them during implementation, and store failing real-data cases as test fixtures. Never ship without validation cases. These validation cases are the contract the worker's tests are written against (tests-first; see the Phase 9 TDD note below).
 
 ### User Requirements Document (s2_2)
 
@@ -271,7 +271,7 @@ See: [../reviewer/SKILL.md](../reviewer/SKILL.md)
 
 **DO NOT auto-proceed.** Present the accepted proposal to the user for explicit approval.
 
-**Disposition every feedback item (R2):** Each item of user feedback gathered during UAT MUST be assigned an explicit, user-confirmed disposition of **FIX-NOW** or **DEFER**. FIX-NOW items are resolved in the current wave; **DEFER'd items are the SOLE source feeding the FOLLOWUP epic**. Never leave a UAT item without a confirmed disposition, and never route a review severity into FOLLOWUP — only DEFER'd UAT items feed it.
+**Disposition every feedback item (R2):** Each item of feedback gathered during UAT MUST be assigned an explicit, user-confirmed disposition of **FIX-NOW** or **DEFER**. **Deferrals may be proposed by the architect or supervisor**, not only flagged by the user; whoever proposes a deferral, **ALL deferred items MUST be raised to the user at the next user gate** (URE, Plan UAT, or Impl UAT) for confirmation — nothing is silently deferred. FIX-NOW items are resolved in the current wave; **DEFER'd items are the SOLE source feeding the FOLLOWUP epic**. Never leave a UAT item without a confirmed disposition, never silently defer an item without raising it at the next gate, and never route a review severity into FOLLOWUP — only DEFER'd UAT items feed it.
 
 The idea here is: the plan and the implementation MUST match with the user's end vision for the project.
 The architect should also plan out several MVP milestones, in order to reach the user's vision.
@@ -403,6 +403,8 @@ See: [HANDOFF_TEMPLATE.md](HANDOFF_TEMPLATE.md) for the standardized template.
 Supervisor takes the ratified proposal and decomposes into **vertical slices** (production code paths).
 
 **Key Principle:** Each worker owns a full vertical slice — types, tests, implementation, and wiring for one production code path.
+
+**Review-Effort Budget (R7 — Phase 8 user gate):** At the **start of Phase 8** — like the Phase-1 research-depth gate, and one of the 5 user-gated phases — request a **configurable review-effort budget** from the user. Present the default choices: **(1) three rounds**, **(2) one round**, **(3) zero rounds**, **(4) unlimited**, **(5) custom**. The Phase-10 review → fix → re-review loop iterates **up to the chosen budget** until a fix-free clean 0/0/0 round; on **budget exhaustion without a clean round**, surface the outstanding findings to the user for a decision (never proceed-dirty, never loop forever, never hardcode the budget). Record the chosen budget in the IMPL_PLAN so workers and reviewers know the bound.
 
 **Launch model (R1):** For the IMPL_PLAN phase prefer **TeamCreate with the supervisor as an Opus model and workers also as Opus** — not `aura-swarm`. A supervisor that has just spawned Explore subagents may *look* idle while those subagents do work; **do not shut it down pre-emptively.**
 
@@ -582,11 +584,13 @@ Workers are assigned to leaf tasks. The slice closes when all its leaf tasks clo
 
 **CRITICAL:** Tests will FAIL in Layer 2. This is **correct and expected**.
 
+**Test-Driven Development — tests written FIRST = the agreed contract (V4):** Write the tests **before** the implementation. The tests ARE the executable verification of the validation-case contract agreed with the user during URE and Plan UAT (the universal validation cases from Phase 2 — see `C-validation-cases`): a definition of done plus correct/incorrect behaviours. Expect them all to fail initially — **red-first** — then, as Layer 3 implements production code, progressively fewer tests fail until all are green (**red → green**). A test that passes before any implementation exists is suspect.
+
 **Tests must import production code paths:**
 
 **Given** Layer 2 tests **when** writing **then** import actual production code (CLI/API/entry points) **should never** create test-only exports or dual code paths
 
-Tests define what production code should do. When Layer 3 implements production code, these tests should pass.
+Tests define what production code should do — they encode the URE/Plan-UAT-agreed validation cases. When Layer 3 implements production code, these tests should pass (red → green).
 
 **CORRECT — import actual production code:**
 ```
@@ -656,26 +660,27 @@ mock out the system under test
 
 After all slices complete, the supervisor spawns **ephemeral reviewers** via the Task tool for per-slice code review. Each reviewer handles one or more slices, produces severity groups using the **full severity tree** with EAGER creation, and terminates. The supervisor then coordinates the review-fix cycle with workers.
 
-### Review-Fix Cycle (No Cycle Cap — Iterate Until Clean)
+### Review-Fix Cycle (Within the Chosen Review-Effort Budget)
 
-Phase 10 iterates **review → fix → re-review with NO maximum cycle cap** until a **fix-free clean round** confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** across all reviewers. A clean round is one where the re-review applies no fixes and finds nothing across all three severities. This epoch eats its own dogfood: the wave closes only when it is genuinely clean. Workers do not shut down — they await findings and fix them in-place.
+Phase 10 iterates **review → fix → re-review up to the configurable review-effort budget** chosen at Phase 8 (3 rounds / 1 round / 0 rounds / unlimited / custom — see "Review-Effort Budget" in Phase 8 below) until a **fix-free clean round** confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** across all reviewers within budget. A clean round is one where the re-review applies no fixes and finds nothing across all three severities. On **budget exhaustion without a clean round**, the outstanding findings are surfaced to the user at a gate for a decision (never proceed-dirty, never loop forever, never hardcode the budget). This epoch eats its own dogfood: the wave closes only when it is genuinely clean (or the user decides at the surface-to-user gate). Workers do not shut down — they await findings and fix them in-place.
 
 **Cycle procedure (per slice):**
 
 1. **Ephemeral reviewers review the slice** — create severity groups (BLOCKER/IMPORTANT/MINOR) per the EAGER creation protocol
 2. **Supervisor collects findings** — aggregates ALL findings (BLOCKER, IMPORTANT, and MINOR); sends them to the relevant workers
 3. **Workers fix ALL findings** — BLOCKER, IMPORTANT, *and* MINOR — with atomic commits, and notify the supervisor when done
-4. **New ephemeral reviewers re-review the fixed slice** — create new severity groups for the new round (round suffix increments: `-1`, `-2`, `-3`, … no cap)
-5. **Repeat** until a fix-free clean round (0/0/0)
+4. **New ephemeral reviewers re-review the fixed slice** — create new severity groups for the new round (round suffix increments: `-1`, `-2`, `-3`, … up to the chosen budget)
+5. **Repeat** up to the chosen review-effort budget until a fix-free clean round (0/0/0); on budget exhaustion without clean, surface the outstanding findings to the user at a gate
 
 **Cycle exit conditions:**
 
 | Condition | Action |
 |-----------|--------|
 | Fix-free clean round: 0 BLOCKER + 0 IMPORTANT + 0 MINOR from all reviewers | Slice passes — proceed to Phase 11 (Implementation UAT) |
-| ANY finding (BLOCKER, IMPORTANT, or MINOR) remains | Workers fix it, spawn new ephemeral reviewers (next round — NO cycle cap) |
+| ANY finding (BLOCKER, IMPORTANT, or MINOR) remains within budget | Workers fix it, spawn new ephemeral reviewers (next round — up to the chosen review-effort budget) |
+| Budget exhausted without a clean round | Surface the outstanding findings to the user at a gate for a decision (never proceed-dirty, never loop forever) |
 
-The wave **MUST end on a review wave** (cannot proceed after a worker wave without a clean re-review). There is no cycle cap and no "exhausted cycles" escape hatch: every finding is fixed and re-reviewed until the slice is clean. **The FOLLOWUP epic is NOT fed by review severities** — it is created later, at UAT (Phase 5 or 11), and fed ONLY by user-DEFER'd items (see Follow-up Epic below).
+The wave **MUST end on a review wave or a surface-to-user gate** (cannot proceed silently after a worker wave without a clean re-review). The review loop runs up to the chosen review-effort budget; on exhaustion without a clean round, the outstanding findings are surfaced to the user rather than proceeding dirty or looping forever — and the budget is never hardcoded. **The FOLLOWUP epic is NOT fed by review severities** — it is created later, at UAT (Phase 5 or 11), and fed ONLY by user-DEFER'd items (see Follow-up Epic below).
 
 ### Severity Tree (EAGER Creation)
 
@@ -777,7 +782,7 @@ FOLLOWUP epic (pasture:epic-followup)
 
 Same binary voting as plan review: ACCEPT or REVISE.
 
-A slice passes only on a **fix-free clean re-review = 0 BLOCKER + 0 IMPORTANT + 0 MINOR** from all reviewers (no cycle cap; iterate until clean). No severity is deferrable.
+A slice passes only on a **fix-free clean re-review = 0 BLOCKER + 0 IMPORTANT + 0 MINOR** from all reviewers (iterate up to the chosen review-effort budget; on exhaustion without clean, surface to the user). No severity is deferrable.
 
 **Next (fix-free clean round 0/0/0, all reviewers ACCEPT):** Proceed to Phase 11 (Implementation UAT)
 

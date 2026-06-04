@@ -67,8 +67,8 @@ bd dep add slice-1-id --blocked-by leaf-task-a-id
 **[C-clean-review-exit]**
 - Given: per-slice code review
 - When: evaluating review results
-- Then: iterate review -> fix -> re-review with NO cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; a clean round is one where the re-review applies no fixes and finds nothing across all three severities
-- Should not: close a wave on a fix-applying round; proceed with ANY finding (BLOCKER, IMPORTANT, or MINOR) outstanding; impose a maximum review-cycle cap; batch review across multiple slices
+- Then: iterate review -> fix -> re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; a clean round is one where the re-review applies no fixes and finds nothing across all three severities; on budget exhaustion without a clean round, SURFACE the outstanding findings to the user at a gate for a decision
+- Should not: close a wave on a fix-applying round; proceed with ANY finding (BLOCKER, IMPORTANT, or MINOR) outstanding without surfacing it to the user; hardcode the budget; proceed past the chosen budget without surfacing to the user; batch review across multiple slices
 
 **[C-dep-direction]**
 - Given: adding a Beads dependency
@@ -111,6 +111,12 @@ bd dep add ure-id --blocked-by request-id
 - When: evaluating
 - Then: all 3 reviewers must ACCEPT before proceeding
 - Should not: proceed with any REVISE vote outstanding
+
+**[C-review-effort-budget]**
+- Given: the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate
+- When: deciding how much review-and-fix effort to spend per slice
+- Then: request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review->fix->re-review loop iterates up to the chosen budget; on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision
+- Should not: hardcode the review-cycle budget (e.g. an unconditional fixed cap baked into the prose instead of asked); proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
 
 **[C-slice-review-before-close]**
 - Given: workers complete their implementation slices
@@ -193,14 +199,14 @@ Agents coordinate through **beads** tasks and comments:
 **[frag--review-clean-exit]**
 - Given: per-slice code review
 - When: evaluating review results
-- Then: iterate review -> fix -> re-review with NO cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR
-- Should not: close a wave on a fix-applying round, proceed with any finding outstanding, or impose a maximum cycle cap
+- Then: iterate review -> fix -> re-review up to the chosen review-effort budget; clean = 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; on budget exhaustion without clean, SURFACE the outstanding findings to the user at a gate for a decision
+- Should not: hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
 
 **[epoch-autonomous-progression]**
 - Given: non-user-gated phase completes
 - When: transitioning
-- Then: proceed autonomously; user-gated phases are: Phase 1 s1_1 (research depth), Phase 2 (URE), Phase 5 (Plan UAT), Phase 11 (Impl UAT)
-- Should not: ask 'Should I proceed?' for autonomous phases
+- Then: proceed autonomously; the 5 user-gated phases are: Phase 1 s1_1 (research depth), Phase 2 (URE), Phase 5 (Plan UAT), Phase 8 (implementation-effort / review-effort budget request), Phase 11 (Impl UAT)
+- Should not: ask 'Should I proceed?' for autonomous phases; add user gates beyond the 5 defined
 
 **[epoch-uat-auto-ratify]**
 - Given: Phase 5 UAT ACCEPT
@@ -222,7 +228,7 @@ Agents coordinate through **beads** tasks and comments:
 4. **CONSENSUS REQUIRED** — All 3 reviewers must ACCEPT before proceeding
 5. **EAGER SEVERITY TREE** — Code reviews (Phase 10) always create 3 severity groups (BLOCKER, IMPORTANT, MINOR); empty groups closed immediately. ALL three groups must reach 0 before a review wave closes
 6. **FOLLOW-UP EPIC** — Fed ONLY by user-DEFER'd UAT items (Phase 5/11), never by any review severity; the Supervisor creates it from those DEFER'd items
-7. **RIDE THE WAVE** — Phases 8-10 form one continuous cycle: Explore subagents (P8), workers implement (P9), ephemeral reviewers review (P10), iterating review→fix→re-review with NO cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; workers persist throughout
+7. **RIDE THE WAVE** — Phases 8-10 form one continuous cycle: Explore subagents (P8), workers implement (P9), ephemeral reviewers review (P10), iterating review→fix→re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; on budget exhaustion without clean, surface outstanding findings to the user at a gate; workers persist throughout
 
 ## The 12-Phase Workflow
 
@@ -238,7 +244,7 @@ Phase 6:  pasture:p6-plan       -> Ratification (supersede old proposals)
 Phase 7:  pasture:p7-plan       -> Handoff (architect -> supervisor)
 Phase 8:  pasture:p8-impl       -> IMPL_PLAN (supervisor decomposes into slices; Explore subagents)
 Phase 9:  pasture:p9-impl       -> SLICE-N (parallel workers; Ride the Wave — workers persist for review)
-Phase 10: pasture:p10-impl      -> Code Review (ephemeral reviewers review all slices; review->fix->re-review with no cycle cap until 0/0/0 clean)
+Phase 10: pasture:p10-impl      -> Code Review (ephemeral reviewers review all slices; review->fix->re-review up to the chosen review-effort budget until 0/0/0 clean, else surface to user)
 Phase 11: pasture:p11-user      -> Implementation UAT
 Phase 12: pasture:p12-impl      -> Landing (commit, push, hand off)
 ```

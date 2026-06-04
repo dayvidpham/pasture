@@ -141,7 +141,7 @@ bd comments add {{PROPOSAL_TASK_ID}} "RATIFIED: All 3 reviewers ACCEPT, UAT pass
 8. **Final decision** summarizes all design changes relative to the proposal being UAT'd
 9. **Binary decisions only** — component decisions are ACCEPT or REVISE (no intermediate levels)
 10. **Findings tracked via severity tree** — if ACCEPT with minor concerns, track them as IMPORTANT/MINOR findings in the severity tree during code review (Phase 10), not at UAT time
-11. **Per-item disposition** — every feedback item gets a user-confirmed, echoed-back `FIX-NOW` or `DEFER`. FIX-NOW resolves this wave; DEFER is the **sole** source feeding the FOLLOWUP epic. Review severities (BLOCKER/IMPORTANT/MINOR) are never dispositioned here and never feed FOLLOWUP.
+11. **Per-item disposition** — every feedback item gets a user-confirmed, echoed-back `FIX-NOW` or `DEFER`. Deferrals may be flagged by the user OR proposed by the architect/supervisor; whoever proposes one, **all deferred items MUST be raised to the user at the next user gate** (URE, Plan UAT, or Impl UAT) for confirmation — nothing is silently deferred. FIX-NOW resolves this wave; DEFER is the **sole** source feeding the FOLLOWUP epic. Review severities (BLOCKER/IMPORTANT/MINOR) are never dispositioned here and never feed FOLLOWUP.
 
 ## See Also
 

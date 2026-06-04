@@ -1,4 +1,4 @@
-// Package codegen_test — epoch-improvements guards (G2–G6 + M2).
+// Package codegen_test — epoch-improvements guards (G2–G7 + M2–M3).
 //
 // These guards enforce the invariants introduced by the pasture epoch-protocol
 // improvements epoch (RATIFIED PROPOSAL-5, aura-plugins-v1xg8). They are
@@ -32,14 +32,22 @@
 //     in ZERO generated outputs (closes the inline-reference gap that structural
 //     fragRef/behaviorRef parity does not cover).
 //   - G6 (TestG6_NoStaleCycleCapOrSeverityRoutingProse): no retired pre-R7/A1
-//     regime prose (numeric cycle cap, or a review severity routed to a follow-up
-//     epic) remains in any generated skills/*/SKILL.md or agents/*.md — the
-//     recurrence guard for the free-text figure/ASCII/table surfaces that the
-//     structural guards above do not sweep (review round 1, finding B3).
-//   - M2 (TestR6FixValidationCasesRenders): the R6 FragFixValidationCases
-//     instruction actually renders into the generated worker-implement and
-//     reviewer-review-code SKILL.md (positive render-assertion; review round 1,
-//     finding M2).
+//     HARDCODED-regime prose (an unconditional numeric cycle cap, or a review
+//     severity routed to a follow-up epic) remains in any generated
+//     skills/*/SKILL.md or agents/*.md. v2-2 retune: the cap-* patterns are now
+//     budget-exempt — a numeric value stated alongside configurable review-effort
+//     budget vocabulary is allowed (a user-chosen budget, not a baked-in cap);
+//     the severity-routing half is unchanged.
+//   - G7 (TestG7_ReviewLoopReferencesConfigurableBudget): positive complement to
+//     G6 — the review-loop prose in the surfaces that own it DOES reference the
+//     configurable review-effort budget AND a surface-to-user-on-exhaustion
+//     fallback. Must-fails on a hardcoded-unlimited-only mutation (v2-2 V1).
+//   - M2 (TestR6ValidationCasesRenders): the R6 FragValidationCases instruction
+//     (universal validation cases, v2-2 V3) actually renders into the generated
+//     worker-implement and reviewer-review-code SKILL.md (positive render-assertion).
+//   - M3 (TestV2DeferralRaisedAtNextGateRenders): the V2 expanded-deferral model
+//     (agent-proposed deferrals; ALL deferred items raised to the user at the next
+//     user gate) renders into both user-elicit and user-uat SKILL.md (v2-2 V2).
 package codegen_test
 
 import (
@@ -332,27 +340,48 @@ func TestG5_InlineFragmentTokensResolve(t *testing.T) {
 // itself caught (the same mutation discipline Reviewer B applied to G2-G5).
 
 // staleRegimePattern pairs a forbidden regex with the pre-fix phrasing it must catch.
+//
+// budgetExempt marks the cap-* patterns whose numeric match is legitimate when
+// it appears alongside configurable-budget vocabulary (budgetAllowRe). The
+// route-* patterns are never exempt — review severities still never feed
+// FOLLOWUP.
 type staleRegimePattern struct {
-	name     string
-	re       *regexp.Regexp
-	exemplar string
+	name         string
+	re           *regexp.Regexp
+	exemplar     string
+	budgetExempt bool
 }
+
+// budgetAllowRe recognizes configurable-budget vocabulary (v2-2 V1 regime). A
+// cap-* match on a line that also carries this vocabulary is the user-chosen
+// review-effort budget, not a hardcoded cap, and is allowed.
+var budgetAllowRe = regexp.MustCompile(`(?i)review-effort budget|chosen .{0,30}budget|configurable .{0,20}budget|budget .{0,30}(chosen|exhaust|surface|user)|up to the chosen|surface .{0,40}to the user`)
 
 // staleRegimePatterns enumerates the retired pre-R7/A1 prose forms. Patterns
 // require an affirmative routing target ("follow-up epic") or a numeric cycle
 // cap, so legitimate negated text ("NOT routed to FOLLOWUP", "no cycle cap")
 // and the DEFER'd-items tracking-group wording do NOT match.
+//
+// v2-2 retune (V1 reconciliation): R7 replaced the hardcoded "unlimited" review
+// regime with a CONFIGURABLE review-effort budget ({3/1/0/unlimited/custom}
+// requested at Phase 8). G6 must forbid only HARDCODED/stale-regime caps (an
+// unconditional "maximum of 3 cycles per slice", "3 cycles exhausted") while
+// ALLOWING the configurable-budget vocabulary. The cap-* patterns are therefore
+// budgetExempt: a match is permitted when its line also carries budget-context
+// vocabulary (budgetAllowRe) — the numeric value is then a user-chosen budget,
+// not a baked-in cap. The route-* (severity-routing) half is NOT exempt.
 var staleRegimePatterns = []staleRegimePattern{
-	// Cycle-cap forms (a digit bound to cycles / per-slice).
-	{"cap-max-n", regexp.MustCompile(`(?i)max(imum)?(\s+of)?\s+\d+\s+(review\s+)?(cycles?|per slice)`), "Phase 10: REVIEW + FIX CYCLES (max 3 per slice)"},
-	{"cap-n-cycles", regexp.MustCompile(`(?i)\b\d+\s+(review\s+)?cycles?\s+(per slice|exhausted|total)`), "Repeat steps 4-6 up to 3 cycles total"},
-	{"cap-after-n", regexp.MustCompile(`(?i)after\s+\d+\s+cycles?`), "After 3 cycles per slice: escalate to architect"},
-	{"cap-exhausted", regexp.MustCompile(`(?i)cycles?\s+exhausted`), "3 cycles exhausted, IMPORTANT remain"},
-	// Review-severity-routed-to-FOLLOWUP forms (affirmative routing to a follow-up epic).
-	{"route-tracked-epic", regexp.MustCompile(`(?i)track(ed|s)?[^.\n]{0,40}follow-?up epic`), "findings are tracked on the existing follow-up epic"},
-	{"route-goes-to-epic", regexp.MustCompile(`(?i)goes to (the )?follow-?up epic`), "IMPORTANT | No | Goes to follow-up epic"},
-	{"route-epic-if-any", regexp.MustCompile(`(?i)follow-?up epic if any`), "Create FOLLOWUP epic if ANY IMPORTANT/MINOR findings"},
-	{"route-track-in-followup", regexp.MustCompile(`(?i)track in follow-?up`), "3 cycles exhausted, IMPORTANT remain -> Track in FOLLOWUP"},
+	// Cycle-cap forms (a digit bound to cycles / per-slice). budgetExempt: allowed
+	// when the line carries configurable-budget vocabulary.
+	{"cap-max-n", regexp.MustCompile(`(?i)max(imum)?(\s+of)?\s+\d+\s+(review\s+)?(cycles?|per slice)`), "Phase 10: REVIEW + FIX CYCLES (max 3 per slice)", true},
+	{"cap-n-cycles", regexp.MustCompile(`(?i)\b\d+\s+(review\s+)?cycles?\s+(per slice|exhausted|total)`), "Repeat steps 4-6 up to 3 cycles total", true},
+	{"cap-after-n", regexp.MustCompile(`(?i)after\s+\d+\s+cycles?`), "After 3 cycles per slice: escalate to architect", true},
+	{"cap-exhausted", regexp.MustCompile(`(?i)cycles?\s+exhausted`), "3 cycles exhausted, IMPORTANT remain", true},
+	// Review-severity-routed-to-FOLLOWUP forms (affirmative routing to a follow-up epic). Never budget-exempt.
+	{"route-tracked-epic", regexp.MustCompile(`(?i)track(ed|s)?[^.\n]{0,40}follow-?up epic`), "findings are tracked on the existing follow-up epic", false},
+	{"route-goes-to-epic", regexp.MustCompile(`(?i)goes to (the )?follow-?up epic`), "IMPORTANT | No | Goes to follow-up epic", false},
+	{"route-epic-if-any", regexp.MustCompile(`(?i)follow-?up epic if any`), "Create FOLLOWUP epic if ANY IMPORTANT/MINOR findings", false},
+	{"route-track-in-followup", regexp.MustCompile(`(?i)track in follow-?up`), "3 cycles exhausted, IMPORTANT remain -> Track in FOLLOWUP", false},
 }
 
 // g6ScopedFiles returns every generated skills/*/SKILL.md and agents/*.md.
@@ -388,44 +417,103 @@ func TestG6_NoStaleCycleCapOrSeverityRoutingProse(t *testing.T) {
 	for _, file := range g6ScopedFiles(t, root) {
 		data, err := os.ReadFile(file)
 		require.NoError(t, err, "G6: reading %q failed", file)
-		content := string(data)
 		rel, _ := filepath.Rel(root, file)
 
-		for _, p := range staleRegimePatterns {
-			loc := p.re.FindStringIndex(content)
-			if loc == nil {
-				continue
+		// Scan line-by-line so the configurable-budget exemption is scoped to the
+		// matched line (a hardcoded cap and a budget mention never share a line).
+		for _, line := range strings.Split(string(data), "\n") {
+			for _, p := range staleRegimePatterns {
+				loc := p.re.FindStringIndex(line)
+				if loc == nil {
+					continue
+				}
+				// v2-2: a cap-* match is allowed when its line carries
+				// configurable-budget vocabulary (a user-chosen budget value, not a
+				// baked-in cap). route-* matches are never exempt.
+				if p.budgetExempt && budgetAllowRe.MatchString(line) {
+					continue
+				}
+				assert.Failf(t, "G6: stale pre-R7/A1 regime prose found",
+					"G6: generated file %q matches retired-regime pattern %q (matched text: %q) on line %q — "+
+						"R7/A1 retired the HARDCODED cycle-cap + severity-fed-FOLLOWUP regime. Fix: code review iterates "+
+						"review->fix->re-review up to the CONFIGURABLE review-effort budget until a fix-free clean round confirms 0/0/0 "+
+						"(on budget exhaustion without clean, surface to the user), and the FOLLOWUP epic is fed ONLY by "+
+						"user-DEFER'd UAT items (never review severities). A numeric cap is allowed only as a chosen budget value "+
+						"(state it alongside budget vocabulary). Update the source spec/figure (e.g. "+
+						"skills/protocol/figures/ride-the-wave.yaml or specs_data_body*.go) and regenerate.",
+					rel, p.name, line[loc[0]:loc[1]], line)
 			}
-			assert.Failf(t, "G6: stale pre-R7/A1 regime prose found",
-				"G6: generated file %q matches retired-regime pattern %q (matched text: %q) — "+
-					"R7/A1 retired the cycle-cap + severity-fed-FOLLOWUP regime. Fix: code review iterates "+
-					"review->fix->re-review with NO cycle cap until a fix-free clean round confirms 0/0/0, and "+
-					"the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items (never review severities). "+
-					"Update the source spec/figure (e.g. skills/protocol/figures/ride-the-wave.yaml or "+
-					"specs_data_body*.go) and regenerate.",
-				rel, p.name, content[loc[0]:loc[1]])
 		}
 	}
 }
 
-// ─── M2: positive render-assertion for the R6 FragFixValidationCases step ─────
+// ─── G7: positive — review-loop prose references the configurable budget ──────
+//
+// v2-2 (V1 reconciliation): R7 replaced the hardcoded "unlimited" review regime
+// with a CONFIGURABLE review-effort budget that surfaces to the user on
+// exhaustion. G7 is the positive complement to the retuned G6: it asserts the
+// review-loop prose in the role/command surfaces that own it DOES reference a
+// configurable budget AND a surface-to-user fallback. It must-fail if that prose
+// is mutated back to a hardcoded-unlimited-only form (the budget/surface needles
+// disappear).
 
-// TestR6FixValidationCasesRenders asserts the FragFixValidationCases (R6)
+// surfaceToUserRe recognizes the surface-on-exhaustion fallback prose.
+var surfaceToUserRe = regexp.MustCompile(`(?i)surface[sd]?\s+.{0,60}user`)
+
+// TestG7_ReviewLoopReferencesConfigurableBudget asserts every generated surface
+// that describes the Phase-10 review loop references the configurable
+// review-effort budget AND the surface-to-user-on-exhaustion fallback.
+func TestG7_ReviewLoopReferencesConfigurableBudget(t *testing.T) {
+	root := repoRoot(t)
+
+	// Non-vacuity: the allow/needle regexes must match their own canonical phrasing.
+	require.True(t, budgetAllowRe.MatchString("iterate up to the chosen review-effort budget"),
+		"G7: budgetAllowRe does not match its own canonical phrasing — fix the regex before relying on it")
+	require.True(t, surfaceToUserRe.MatchString("on budget exhaustion, surface outstanding findings to the user"),
+		"G7: surfaceToUserRe does not match its own canonical phrasing — fix the regex before relying on it")
+
+	// Generated surfaces that own review-loop prose and must reference the budget.
+	for _, rel := range []string{
+		"skills/supervisor-spawn-worker/SKILL.md",
+		"skills/supervisor-plan-tasks/SKILL.md",
+		"skills/epoch/SKILL.md",
+		"skills/reviewer-review-code/SKILL.md",
+		"skills/worker-implement/SKILL.md",
+	} {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		require.NoErrorf(t, err, "G7: reading %q failed", rel)
+		content := string(data)
+
+		assert.Truef(t, budgetAllowRe.MatchString(content),
+			"G7: generated %q does not reference the configurable review-effort budget — "+
+				"R7/A1 (v2-2) replaced the hardcoded 'unlimited' regime with a configurable budget; "+
+				"the review-loop prose must say it iterates up to the chosen review-effort budget. "+
+				"Re-add the budget vocabulary in the source body spec and regenerate.", rel)
+		assert.Truef(t, surfaceToUserRe.MatchString(content),
+			"G7: generated %q does not reference the surface-to-user-on-exhaustion fallback — "+
+				"on budget exhaustion without a clean 0/0/0 round, outstanding findings must be surfaced to the user "+
+				"(never proceed-dirty, never loop forever). Re-add the surface-to-user prose and regenerate.", rel)
+	}
+}
+
+// ─── M2: positive render-assertion for the R6 FragValidationCases step ─────
+
+// TestR6ValidationCasesRenders asserts the FragValidationCases (R6)
 // instruction actually renders into the generated worker-implement and
 // reviewer-review-code SKILL.md (the behaviorRef wiring is otherwise only
 // transitively covered).
-func TestR6FixValidationCasesRenders(t *testing.T) {
+func TestR6ValidationCasesRenders(t *testing.T) {
 	root := repoRoot(t)
 
-	frag, ok := codegen.SharedFragmentSpecs[codegen.FragFixValidationCases]
+	frag, ok := codegen.SharedFragmentSpecs[codegen.FragValidationCases]
 	require.Truef(t, ok && frag.Behavior != nil,
-		"M2: FragFixValidationCases behavior fragment missing from SharedFragmentSpecs")
+		"M2: FragValidationCases behavior fragment missing from SharedFragmentSpecs")
 
 	// Stable substring of the canonical Then that must render verbatim wherever
 	// the fragment is behaviorRef'd.
 	const needle = "store failing real-data cases as test fixtures"
 	require.Containsf(t, frag.Behavior.Then, needle,
-		"M2: FragFixValidationCases.Then no longer contains the assertion needle %q — update the needle to a current stable substring", needle)
+		"M2: FragValidationCases.Then no longer contains the assertion needle %q — update the needle to a current stable substring", needle)
 
 	for _, rel := range []string{
 		"skills/worker-implement/SKILL.md",
@@ -434,8 +522,42 @@ func TestR6FixValidationCasesRenders(t *testing.T) {
 		data, err := os.ReadFile(filepath.Join(root, rel))
 		require.NoErrorf(t, err, "M2: reading %q failed", rel)
 		assert.Containsf(t, string(data), needle,
-			"M2: generated %q does not render the FragFixValidationCases (R6) instruction %q — "+
-				"the behaviorRef(FragFixValidationCases) wiring is missing or the fragment was not embedded; "+
+			"M2: generated %q does not render the FragValidationCases (R6) instruction %q — "+
+				"the behaviorRef(FragValidationCases) wiring is missing or the fragment was not embedded; "+
 				"re-add the behaviorRef in the body spec and regenerate.", rel, needle)
+	}
+}
+
+// ─── M3: positive render-assertion for the V2 expanded-deferral model ─────────
+//
+// v2-2 V2 (B-4): deferrals may be proposed by the architect/supervisor (not only
+// flagged by the user), and ALL deferred items must be raised to the user at the
+// next user gate. M3 asserts that prose renders into BOTH user-gate skills
+// (user-elicit and user-uat), so a regression that drops the agent-proposed or
+// raise-at-next-gate semantics is caught.
+func TestV2DeferralRaisedAtNextGateRenders(t *testing.T) {
+	root := repoRoot(t)
+
+	// Stable substrings of the V2 behavior that must render in both user gates.
+	const (
+		raiseNeedle = "raised to the user at the next user gate (URE, Plan UAT, or Impl UAT)"
+		agentNeedle = "proposed by the architect/supervisor"
+	)
+
+	for _, rel := range []string{
+		"skills/user-elicit/SKILL.md",
+		"skills/user-uat/SKILL.md",
+	} {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		require.NoErrorf(t, err, "M3: reading %q failed", rel)
+		content := string(data)
+		assert.Containsf(t, content, raiseNeedle,
+			"M3: generated %q does not render the raise-deferred-items-at-next-gate needle %q — "+
+				"V2 requires ALL deferred items be raised to the user at the next user gate; "+
+				"re-add the behavior in the body spec and regenerate.", rel, raiseNeedle)
+		assert.Containsf(t, content, agentNeedle,
+			"M3: generated %q does not render the agent-proposed-deferral needle %q — "+
+				"V2 allows the architect/supervisor to propose deferrals (not only the user); "+
+				"re-add the behavior in the body spec and regenerate.", rel, agentNeedle)
 	}
 }

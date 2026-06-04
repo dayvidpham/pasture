@@ -48,16 +48,17 @@ var epochBody = SkillBody{
 			Then:      "let it work — an apparently-idle supervisor is usually running Explore subagents to map the codebase",
 			ShouldNot: "shut down or restart a supervisor that looks idle at the start of the IMPL_PLAN phase",
 		},
-		// R7/A1: Phase-10 code review has no cycle cap; iterate until a fix-free
-		// clean round confirms 0/0/0. Resolves to
+		// R7/A1: Phase-10 code review iterates up to the chosen review-effort budget
+		// until a fix-free clean round confirms 0/0/0; on budget exhaustion without
+		// clean, surface outstanding findings to the user at a gate. Resolves to
 		// SharedFragmentSpecs[FragReviewCleanExit] (SLICE-1).
 		behaviorRef(FragReviewCleanExit),
 		{
 			Id:        "epoch-autonomous-progression",
 			Given:     "non-user-gated phase completes",
 			When:      "transitioning",
-			Then:      "proceed autonomously; user-gated phases are: Phase 1 s1_1 (research depth), Phase 2 (URE), Phase 5 (Plan UAT), Phase 11 (Impl UAT)",
-			ShouldNot: "ask 'Should I proceed?' for autonomous phases",
+			Then:      "proceed autonomously; the 5 user-gated phases are: Phase 1 s1_1 (research depth), Phase 2 (URE), Phase 5 (Plan UAT), Phase 8 (implementation-effort / review-effort budget request), Phase 11 (Impl UAT)",
+			ShouldNot: "ask 'Should I proceed?' for autonomous phases; add user gates beyond the 5 defined",
 		},
 		{
 			Id:        "epoch-uat-auto-ratify",
@@ -85,7 +86,7 @@ var epochBody = SkillBody{
 4. **CONSENSUS REQUIRED** — All 3 reviewers must ACCEPT before proceeding
 5. **EAGER SEVERITY TREE** — Code reviews (Phase 10) always create 3 severity groups (BLOCKER, IMPORTANT, MINOR); empty groups closed immediately. ALL three groups must reach 0 before a review wave closes
 6. **FOLLOW-UP EPIC** — Fed ONLY by user-DEFER'd UAT items (Phase 5/11), never by any review severity; the Supervisor creates it from those DEFER'd items
-7. **RIDE THE WAVE** — Phases 8-10 form one continuous cycle: Explore subagents (P8), workers implement (P9), ephemeral reviewers review (P10), iterating review→fix→re-review with NO cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; workers persist throughout`,
+7. **RIDE THE WAVE** — Phases 8-10 form one continuous cycle: Explore subagents (P8), workers implement (P9), ephemeral reviewers review (P10), iterating review→fix→re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; on budget exhaustion without clean, surface outstanding findings to the user at a gate; workers persist throughout`,
 		},
 		{
 			Id:    "epoch-12-phase-workflow",
@@ -102,7 +103,7 @@ Phase 6:  pasture:p6-plan       -> Ratification (supersede old proposals)
 Phase 7:  pasture:p7-plan       -> Handoff (architect -> supervisor)
 Phase 8:  pasture:p8-impl       -> IMPL_PLAN (supervisor decomposes into slices; Explore subagents)
 Phase 9:  pasture:p9-impl       -> SLICE-N (parallel workers; Ride the Wave — workers persist for review)
-Phase 10: pasture:p10-impl      -> Code Review (ephemeral reviewers review all slices; review->fix->re-review with no cycle cap until 0/0/0 clean)
+Phase 10: pasture:p10-impl      -> Code Review (ephemeral reviewers review all slices; review->fix->re-review up to the chosen review-effort budget until 0/0/0 clean, else surface to user)
 Phase 11: pasture:p11-user      -> Implementation UAT
 Phase 12: pasture:p12-impl      -> Landing (commit, push, hand off)
 ` + "```" + `

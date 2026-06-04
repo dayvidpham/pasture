@@ -52,8 +52,8 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 **[C-clean-review-exit]**
 - Given: per-slice code review
 - When: evaluating review results
-- Then: iterate review -> fix -> re-review with NO cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; a clean round is one where the re-review applies no fixes and finds nothing across all three severities
-- Should not: close a wave on a fix-applying round; proceed with ANY finding (BLOCKER, IMPORTANT, or MINOR) outstanding; impose a maximum review-cycle cap; batch review across multiple slices
+- Then: iterate review -> fix -> re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; a clean round is one where the re-review applies no fixes and finds nothing across all three severities; on budget exhaustion without a clean round, SURFACE the outstanding findings to the user at a gate for a decision
+- Should not: close a wave on a fix-applying round; proceed with ANY finding (BLOCKER, IMPORTANT, or MINOR) outstanding without surfacing it to the user; hardcode the budget; proceed past the chosen budget without surfacing to the user; batch review across multiple slices
 
 **[C-dep-direction]**
 - Given: adding a Beads dependency
@@ -102,6 +102,12 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 - When: evaluating
 - Then: all 3 reviewers must ACCEPT before proceeding
 - Should not: proceed with any REVISE vote outstanding
+
+**[C-review-effort-budget]**
+- Given: the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate
+- When: deciding how much review-and-fix effort to spend per slice
+- Then: request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review->fix->re-review loop iterates up to the chosen budget; on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision
+- Should not: hardcode the review-cycle budget (e.g. an unconditional fixed cap baked into the prose instead of asked); proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
 
 **[C-slice-leaf-tasks]**
 - Given: vertical slice created
@@ -156,8 +162,8 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 **[B-sup-ride-the-wave]**
 - Given: Phase 8-10 execution
 - When: starting implementation
-- Then: follow the Ride the Wave cycle: plan tasks with integration points, launch the wave of workers, spawn reviewers for per-slice review (clean exit = 0 BLOCKER + 0 IMPORTANT + 0 MINOR), workers fix per-slice with atomic commits, and iterate review -> fix -> re-review with NO cycle cap until a fix-free clean round confirms 0/0/0
-- Should not: skip any stage; batch review across slices; impose a maximum review-cycle cap; close a wave with any finding outstanding
+- Then: follow the Ride the Wave cycle: plan tasks with integration points, launch the wave of workers, spawn reviewers for per-slice review (clean exit = 0 BLOCKER + 0 IMPORTANT + 0 MINOR), workers fix per-slice with atomic commits, and iterate review -> fix -> re-review up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface outstanding findings to the user at a gate
+- Should not: skip any stage; batch review across slices; hardcode the budget; proceed past the chosen budget without surfacing to the user; close a wave with any finding silently outstanding
 
 ## Completion Checklist
 
@@ -178,7 +184,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 
 ### Ride the Wave
 
-Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full cycle: plan slices, launch workers, spawn reviewers for per-slice review, workers fix, and re-review with NO cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR.
+Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full cycle: plan slices, launch workers, spawn reviewers for per-slice review, workers fix, and re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; on budget exhaustion without clean, surface outstanding findings to the user at a gate.
 
 **Stage 1: Plan** _(sequential)_
 
@@ -216,7 +222,7 @@ Exit conditions:
 
 Exit conditions:
 - **success**: All reviewers report 0 BLOCKER + 0 IMPORTANT + 0 MINOR on a fix-free clean round — proceed to Phase 11 UAT
-- **continue**: Any finding (BLOCKER, IMPORTANT, or MINOR) remains — workers fix, spawn new ephemeral reviewers (NO cycle cap)
+- **continue**: Any finding (BLOCKER, IMPORTANT, or MINOR) remains within budget — workers fix, spawn new ephemeral reviewers (up to the chosen review-effort budget; on exhaustion, surface to the user)
 
 ## Figures
 
@@ -235,7 +241,7 @@ Phase 9: BUILD
   ├─ Workers implement their slices in parallel
   └─ Workers do NOT shut down when finished
 
-Phase 10: REVIEW + FIX CYCLES (no cycle cap — iterate until 0/0/0 clean)
+Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget — iterate until 0/0/0 clean, else surface to user)
   ├─ Cycle 1:
   │   ├─ Spawn ephemeral reviewers (Task tool, per-slice review)
   │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
@@ -251,7 +257,7 @@ DONE → Phase 11 (UAT)
 
 Cycle Exit Conditions:
   Fix-free clean round: 0 BLOCKER + 0 IMPORTANT + 0 MINOR   → Proceed to Phase 11 (UAT)
-  ANY finding remains (BLOCKER/IMPORTANT/MINOR)             → Workers fix, spawn new ephemeral reviewers (no cap)
+  ANY finding remains (BLOCKER/IMPORTANT/MINOR)             → Workers fix, spawn new ephemeral reviewers (up to chosen budget; on exhaustion, surface to user)
   Genuinely stuck (cannot reach a clean round)             → Escalate to architect for re-planning
 
 ```

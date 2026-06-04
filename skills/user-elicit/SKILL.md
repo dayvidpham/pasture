@@ -55,14 +55,20 @@ description: User Requirements Elicitation survey (Phase 2)
 **[user-elicit-invoke-skill]**
 - Given: the Phase 2 URE interview
 - When: conducting it
-- Then: MUST invoke `Skill(/pasture:user-elicit)` so the verbatim-capture and (for fix-intent requests) validation-case elicitation procedures are loaded
+- Then: MUST invoke `Skill(/pasture:user-elicit)` so the verbatim-capture and validation-case elicitation procedures are loaded
 - Should not: conduct the URE without invoking its skill — skipping it loses verbatim capture and the validation-case lifecycle
 
-**[frag--fix-validation-cases]**
-- Given: a REQUEST whose user intent is to FIX existing behavior
-- When: eliciting (URE), acceptance-testing (UAT), or implementing the fix
-- Then: elicit concrete validation cases (inputs/behaviors that currently fail or must pass), confirm the case set with the user in UAT, evaluate the fix against them, and store failing real-data cases as test fixtures
-- Should not: ship a fix without validation cases; introduce a request-type axis or enum to detect fix-intent
+**[user-elicit-raise-deferrals]**
+- Given: deferred items outstanding from a prior phase (flagged by the user OR proposed by the architect/supervisor)
+- When: conducting this URE gate (a user gate)
+- Then: ALL deferred items, whoever proposed them, MUST be raised to the user at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation — present the complete outstanding deferral set and let the user confirm or override each item; nothing is silently deferred
+- Should not: silently carry a deferral forward without raising it to the user at this gate
+
+**[frag--validation-cases]**
+- Given: any REQUEST (every request, not only fix-intent ones)
+- When: eliciting (URE), acceptance-testing (UAT), or implementing
+- Then: elicit concrete validation cases — a definition of done plus correct and incorrect behaviours (inputs/behaviors that must pass or must fail), confirm the case set with the user in UAT, evaluate the implementation against them, and store failing real-data cases as test fixtures
+- Should not: ship without validation cases; treat validation cases as applying to fix-intent requests only; introduce a request-type axis or enum to gate them
 
 ## Sub-steps
 
@@ -108,14 +114,15 @@ Ask targeted questions to map the problem space:
 
 Final question to capture anything missed.
 
-### 6. Validation Cases (fix-intent requests only)
+### 6. Validation Cases (EVERY request)
 
-If Phase 1 recognized the request as **fix-intent** (fixing existing behavior — see the REQUEST classification comment), elicit **concrete validation cases** during this URE:
-- The exact inputs/behaviors that currently FAIL (the bug as the user observes it).
-- The exact inputs/behaviors that MUST PASS after the fix (the expected correct output).
+Elicit **concrete validation cases** during this URE — for **every** request, not only fix-intent ones. We always need to know what "done" means, and what correct vs incorrect behaviour looks like:
+- The **definition of done** — what observable outcome means the request is satisfied.
+- The exact inputs/behaviors that MUST PASS (the expected correct output).
+- The exact inputs/behaviors that MUST FAIL or are explicitly out of scope (incorrect behaviour). For fix-intent requests this includes the inputs/behaviors that currently FAIL (the bug as the user observes it).
 - Any real data, commands, or reproduction steps the user can provide — capture these **verbatim**.
 
-These cases seed the fix's test fixtures and are the set confirmed with the user in UAT (`/pasture:user-uat`) and evaluated against the implemented fix. Do NOT introduce a `request-type` enum to gate this — fix-intent is recognized semantically. (Non-fix requests skip this subsection.)
+These cases seed the request's test fixtures and are the set confirmed with the user in UAT (`/pasture:user-uat`) and evaluated against the implementation. Do NOT introduce a `request-type` enum to gate this — what a request needs is recognized semantically.
 
 ### Pre-requisite: Read Phase 1 Outputs
 
@@ -221,7 +228,7 @@ include the exact question text, ALL options with their descriptions, and the
 user's verbatim response. When a definition, code snippet, or example was shown
 to the user before a question, capture it verbatim in a **Definition/code shown:**
 field (parity with UAT's 'Definition shown' / 'Command run' fields). For
-**fix-intent** requests, also record the elicited validation cases verbatim.
+**every** request, also record the elicited validation cases verbatim.
 
 ```bash
 bd create --labels "pasture:p2-user:s2_1-elicit" \
@@ -253,9 +260,10 @@ Q: Is there anything else we should know about this feature?
 Options: Related to existing feature (Connects to something), Inspired by another product (Has a reference), Urgent timeline (Needed soon), Nothing else (Covered everything)
 A: {{user's verbatim input}}
 
-## Validation Cases (fix-intent requests only)
-- Currently failing: {{verbatim input/behavior that fails today}}
-- Must pass after fix: {{verbatim expected correct behavior}}
+## Validation Cases (EVERY request)
+- Definition of done: {{verbatim observable outcome that means the request is satisfied}}
+- Must pass (correct behaviour): {{verbatim expected correct behavior}}
+- Must fail / out of scope (incorrect behaviour): {{verbatim — for fix-intent, the input/behavior that fails today}}
 - Repro / real data: {{verbatim commands, data, or steps — or 'none'}}" \
   --assignee architect
 

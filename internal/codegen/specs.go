@@ -114,7 +114,7 @@ var AllFragmentIds = []FragmentId{
 	FragSupSeverityTree,
 	FragSupNamingConvention,
 	FragRevPlanVoteOptions,
-	FragFixValidationCases,
+	FragValidationCases,
 	FragReviewCleanExit,
 }
 
@@ -174,18 +174,22 @@ const (
 	// enforcement.
 	FragRevPlanVoteOptions FragmentId = "frag--rev-plan-vote-options"
 
-	// ── SLICE-1 (epoch improvements R6/R7): fix-validation + clean-review-exit ──
+	// ── SLICE-1 (epoch improvements R6/R7): validation-cases + clean-review-exit ──
 
-	// FragFixValidationCases is the canonical "elicit/confirm/evaluate concrete
-	// validation cases for a fix-intent REQUEST, storing failing real-data cases
-	// as test fixtures" behavior (R6/A2). Referenced via behaviorRef from the
-	// user-elicit, user-uat, and worker-implement skill bodies (wired in SLICE-2).
-	FragFixValidationCases FragmentId = "frag--fix-validation-cases"
+	// FragValidationCases is the canonical "elicit/confirm/evaluate concrete
+	// validation cases for EVERY REQUEST — a definition of done plus correct and
+	// incorrect behaviours, user-confirmed, with failing real-data cases stored as
+	// test fixtures" behavior (R6/A2, generalized from fix-intent-only at v2-2).
+	// Referenced via behaviorRef from the user-elicit, user-uat, and
+	// worker-implement skill bodies (wired in SLICE-2).
+	FragValidationCases FragmentId = "frag--validation-cases"
 
-	// FragReviewCleanExit is the canonical "iterate review->fix->re-review with no
-	// cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT +
-	// 0 MINOR" behavior (R7/A1). Referenced via behaviorRef from the supervisor
-	// and impl-review skill bodies (wired in SLICE-3).
+	// FragReviewCleanExit is the canonical "iterate review->fix->re-review up to the
+	// chosen review-effort budget; clean = 0 BLOCKER + 0 IMPORTANT + 0 MINOR within
+	// budget; on budget exhaustion without clean, surface outstanding findings to
+	// the user at a gate" behavior (R7/A1, reworked to a configurable budget at
+	// v2-2). Referenced via behaviorRef from the supervisor and impl-review skill
+	// bodies (wired in SLICE-3).
 	FragReviewCleanExit FragmentId = "frag--review-clean-exit"
 )
 

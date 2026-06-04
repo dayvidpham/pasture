@@ -327,23 +327,37 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		Id:    "C-clean-review-exit",
 		Given: "per-slice code review",
 		When:  "evaluating review results",
-		Then: "iterate review -> fix -> re-review with NO cycle cap until a fix-free clean round " +
-			"confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; " +
-			"a clean round is one where the re-review applies no fixes and finds nothing across all three severities",
+		Then: "iterate review -> fix -> re-review up to the chosen review-effort budget until a fix-free clean round " +
+			"confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; " +
+			"a clean round is one where the re-review applies no fixes and finds nothing across all three severities; " +
+			"on budget exhaustion without a clean round, SURFACE the outstanding findings to the user at a gate for a decision",
 		ShouldNot: "close a wave on a fix-applying round; " +
-			"proceed with ANY finding (BLOCKER, IMPORTANT, or MINOR) outstanding; " +
-			"impose a maximum review-cycle cap; " +
+			"proceed with ANY finding (BLOCKER, IMPORTANT, or MINOR) outstanding without surfacing it to the user; " +
+			"hardcode the budget; proceed past the chosen budget without surfacing to the user; " +
 			"batch review across multiple slices",
+	},
+	"C-review-effort-budget": {
+		Id:    "C-review-effort-budget",
+		Given: "the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate",
+		When:  "deciding how much review-and-fix effort to spend per slice",
+		Then: "request a configurable review-effort budget from the user — defaults: " +
+			"(1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; " +
+			"the review->fix->re-review loop iterates up to the chosen budget; " +
+			"on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision",
+		ShouldNot: "hardcode the review-cycle budget (e.g. an unconditional fixed cap baked into the prose instead of asked); " +
+			"proceed past the chosen budget without surfacing outstanding findings to the user; " +
+			"loop forever when a finite budget was chosen",
 	},
 	"C-autonomous-progression": {
 		Id:    "C-autonomous-progression",
 		Given: "supervisor orchestrating phases",
 		When:  "deciding whether to proceed",
-		Then: "4 user-gated phases only: (1) research depth decision, (2) URE survey, " +
-			"(3) Plan UAT, (4) Impl UAT; all other phase transitions are auto-ratified " +
+		Then: "5 user-gated phases only: (1) research depth decision, (2) URE survey, " +
+			"(3) Plan UAT, (4) Phase 8 implementation-effort / review-effort budget request, " +
+			"(5) Impl UAT; all other phase transitions are auto-ratified " +
 			"by the supervisor; after Plan UAT ACCEPT, proceed directly to ratification " +
 			"without user gate",
-		ShouldNot: "add additional user gates beyond the 4 defined; " +
+		ShouldNot: "add additional user gates beyond the 5 defined; " +
 			"require user approval for ratification after UAT ACCEPT",
 	},
 	"C-integration-points": {
@@ -524,15 +538,17 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		ShouldNot: "raise generic or opaque error messages (e.g. 'invalid input', 'operation failed') " +
 			"that don't guide the user toward resolution",
 	},
-	"C-fix-validation-cases": {
-		Id:    "C-fix-validation-cases",
-		Given: "a REQUEST whose user intent is to FIX existing behavior (recognized semantically during Phase 1 / URE)",
-		When:  "eliciting (URE), acceptance-testing (UAT), or implementing the fix",
-		Then: "elicit concrete validation cases (inputs/behaviors that currently fail or must pass), " +
-			"confirm the case set with the user in UAT, evaluate the fix against them, " +
+	"C-validation-cases": {
+		Id:    "C-validation-cases",
+		Given: "any REQUEST (every request, not only fix-intent ones)",
+		When:  "eliciting (URE), acceptance-testing (UAT), or implementing",
+		Then: "elicit concrete validation cases for the request — a definition of done plus correct and " +
+			"incorrect behaviours (inputs/behaviors that must pass or must fail), " +
+			"confirm the case set with the user in UAT, evaluate the implementation against them, " +
 			"and store failing real-data cases as test fixtures",
-		ShouldNot: "ship a fix without validation cases; " +
-			"introduce a request-type axis or enum to detect fix-intent (recognize intent semantically instead)",
+		ShouldNot: "ship without validation cases; " +
+			"treat validation cases as applying to fix-intent requests only; " +
+			"introduce a request-type axis or enum to gate them (recognize what a request needs semantically instead)",
 	},
 	"C-interview-skill-invocation": {
 		Id:    "C-interview-skill-invocation",
@@ -747,9 +763,9 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 				Then: "follow the Ride the Wave cycle: plan tasks with integration points, " +
 					"launch the wave of workers, spawn reviewers for per-slice review " +
 					"(clean exit = 0 BLOCKER + 0 IMPORTANT + 0 MINOR), workers fix per-slice with atomic commits, " +
-					"and iterate review -> fix -> re-review with NO cycle cap until a fix-free clean round confirms 0/0/0",
-				ShouldNot: "skip any stage; batch review across slices; impose a maximum review-cycle cap; " +
-					"close a wave with any finding outstanding",
+					"and iterate review -> fix -> re-review up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface outstanding findings to the user at a gate",
+				ShouldNot: "skip any stage; batch review across slices; hardcode the budget; proceed past the chosen budget without surfacing to the user; " +
+					"close a wave with any finding silently outstanding",
 			},
 		},
 	},
@@ -1327,8 +1343,8 @@ var WorkflowSpecs = map[string]Workflow{
 		RoleRef: types.RoleSupervisor,
 		Description: "Coordinated Phase 8-10 execution pattern. The supervisor orchestrates " +
 			"the full cycle: plan slices, launch workers, " +
-			"spawn reviewers for per-slice review, workers fix, and re-review with NO cycle cap " +
-			"until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR.",
+			"spawn reviewers for per-slice review, workers fix, and re-review up to the chosen review-effort budget " +
+			"until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; on budget exhaustion without clean, surface outstanding findings to the user at a gate.",
 		Stages: []WorkflowStage{
 			{
 				Id:        "rtw-plan",
@@ -1423,9 +1439,9 @@ var WorkflowSpecs = map[string]Workflow{
 				},
 				OperationalDetail: "- Spawn 3 ephemeral reviewer subagents per round (same pattern as Phase 4 plan review)\n" +
 					"- **CLEAN REVIEW** = 0 BLOCKER + 0 IMPORTANT + 0 MINOR from ALL reviewers on a fix-free round\n" +
-					"- Per-slice fix+review; iterate with NO cycle cap\n" +
+					"- Per-slice fix+review; iterate up to the chosen review-effort budget\n" +
 					"- Fix flow: Stage 3 (dirty review) -> Stage 2 (worker fixes) -> Stage 3 (re-review)\n" +
-					"- NO maximum cycle cap — repeat review -> fix -> re-review until the slice is clean (0/0/0)\n" +
+					"- Configurable review-effort budget (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — repeat review -> fix -> re-review until the slice is clean (0/0/0); on budget exhaustion without clean, surface outstanding findings to the user at a gate\n" +
 					"- **MUST end on a review wave** — cannot proceed after a worker wave without review\n" +
 					"\n" +
 					"```text\n" +
@@ -1456,7 +1472,7 @@ var WorkflowSpecs = map[string]Workflow{
 					"                       \u2502\n" +
 					"                 loop (re-review)\n" +
 					"                       \u2502\n" +
-					"          repeat until clean (0/0/0) \u2014 no cycle cap\n" +
+					"          repeat until clean (0/0/0) \u2014 up to the chosen budget, else surface to user\n" +
 					"```",
 				ExitConditions: []ExitCondition{
 					{
@@ -1465,7 +1481,7 @@ var WorkflowSpecs = map[string]Workflow{
 					},
 					{
 						Type:      "continue",
-						Condition: "Any finding (BLOCKER, IMPORTANT, or MINOR) remains — workers fix, spawn new ephemeral reviewers (NO cycle cap)",
+						Condition: "Any finding (BLOCKER, IMPORTANT, or MINOR) remains within budget — workers fix, spawn new ephemeral reviewers (up to the chosen review-effort budget; on exhaustion, surface to the user)",
 					},
 				},
 			},

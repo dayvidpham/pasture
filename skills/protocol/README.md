@@ -70,7 +70,8 @@ Special labels:
 - **Consensus required** — All 3 reviewers must ACCEPT before proceeding
 - **Binary votes** — ACCEPT or REVISE only (no intermediate levels)
 - **EAGER severity tree** — Always create 3 severity groups per code review round
-- **Clean-review exit** — No cycle cap: iterate review → fix → re-review until a fix-free clean round (0 BLOCKER + 0 IMPORTANT + 0 MINOR); all severities are fixed in-wave
+- **Configurable review-effort budget** — Requested from the user at Phase 8 (3 rounds / 1 round / 0 rounds / unlimited / custom), like the Phase-1 research-depth gate
+- **Clean-review exit** — Iterate review → fix → re-review up to the chosen review-effort budget until a fix-free clean round (0 BLOCKER + 0 IMPORTANT + 0 MINOR); all severities are fixed in-wave; on budget exhaustion without clean, surface the outstanding findings to the user
 - **Follow-up epic** — Created at UAT, fed ONLY by user-DEFER'd UAT items (never by review severities)
 - **Vertical slices** — Each worker owns one full production code path end-to-end; slices may have any number of leaf tasks
 

@@ -86,9 +86,29 @@ L2 Test File Requirements:
 - Then: prefer extracting a horizontal interface-first FOUNDATION slice (all public types/interfaces/contracts) that lands first, so the dependent implementation slices can compile against the contracts and run in PARALLEL
 - Should not: force a linear slice chain (A->B->C) when the runtime dependency is only on interfaces that could be exported up front
 
+**[sup-plan-review-effort-budget]**
+- Given: the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate (per C-review-effort-budget)
+- When: deciding how much review-and-fix effort to spend per slice
+- Then: request a configurable review-effort budget from the user (defaults: 3 rounds, 1 round, 0 rounds, unlimited, custom); the Phase-10 review->fix->re-review loop iterates up to the chosen budget; on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision
+- Should not: hardcode the review-cycle budget; proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
+
 ## When to Use
 
 Received handoff from architect with RATIFIED_PLAN task ID and placeholder IMPL_PLAN task.
+
+## Request the Review-Effort Budget (Phase 8 user gate)
+
+At the **start of Phase 8** — like the Phase-1 research-depth gate — request a **configurable review-effort budget** from the user (per `C-review-effort-budget`). This is one of the 5 user-gated phases. Present the default choices:
+
+| Option | Meaning |
+|--------|---------|
+| **3 rounds** | Up to three review -> fix -> re-review cycles per slice |
+| **1 round** | A single review + one fix pass |
+| **0 rounds** | No review-fix iteration (review once, surface anything found) |
+| **unlimited** | Iterate until a fix-free clean 0/0/0 round (no upper bound) |
+| **custom** | A user-specified number of rounds |
+
+The Phase-10 review->fix->re-review loop iterates **up to the chosen budget** until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR. On **budget exhaustion WITHOUT a clean round**, SURFACE the outstanding findings to the user for a decision — never proceed dirty, never loop forever, and never hardcode the budget. Record the chosen budget in the IMPL_PLAN so workers and reviewers know the bound.
 
 ## Critical: Vertical Slices, Not Horizontal Layers
 

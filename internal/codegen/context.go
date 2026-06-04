@@ -102,7 +102,8 @@ var generalConstraints = map[string]bool{
 //   C-supervisor-explore-ephemeral → SUPERVISOR (given: "supervisor needs codebase exploration")
 //   C-integration-points      → SUPERVISOR (given: "multiple vertical slices share types" when: "decomposing IMPL_PLAN")
 //   C-slice-review-before-close → SUPERVISOR (given: "workers complete their implementation slices")
-//   C-clean-review-exit       → EPOCH + SUPERVISOR (given: "per-slice code review" — no cycle cap until fix-free clean 0/0/0)
+//   C-clean-review-exit       → EPOCH + SUPERVISOR (given: "per-slice code review" — review loop within chosen budget; surface on exhaustion)
+//   C-review-effort-budget    → EPOCH + SUPERVISOR + REVIEWER (given: "start of Phase 8" — request configurable review-effort budget)
 //   C-slice-leaf-tasks        → SUPERVISOR (given: "vertical slice created" — supervisor creates slices)
 //   C-handoff-skill-invocation→ ARCHITECT + SUPERVISOR (both are sources of handoffs h1 and h2/h3)
 //   C-dep-direction           → ALL (see generalConstraints)
@@ -129,8 +130,10 @@ var roleConstraints = map[types.RoleId]map[string]bool{
 		"C-integration-points": true,
 		// Epoch enforces: slices reviewed before closure; supervisor closes, not workers
 		"C-slice-review-before-close": true,
-		// Epoch enforces: review->fix->re-review with no cycle cap until a fix-free clean round (0/0/0)
+		// Epoch enforces: review->fix->re-review up to the chosen budget until a fix-free clean round (0/0/0), else surface
 		"C-clean-review-exit": true,
+		// Epoch requests the configurable review-effort budget at Phase 8 (IMPL_PLAN start)
+		"C-review-effort-budget": true,
 	}),
 	types.RoleArchitect: mergeConstraints(generalConstraints, map[string]bool{
 		// Architect creates proposals → must follow naming convention
@@ -155,6 +158,8 @@ var roleConstraints = map[types.RoleId]map[string]bool{
 		"C-blocker-dual-parent": true,
 		// Reviewer creates review task names
 		"C-review-naming": true,
+		// Reviewer iterates within the chosen review-effort budget; surfaces on exhaustion
+		"C-review-effort-budget": true,
 	}),
 	types.RoleSupervisor: mergeConstraints(generalConstraints, map[string]bool{
 		// Supervisor gates transition on consensus
@@ -167,8 +172,10 @@ var roleConstraints = map[types.RoleId]map[string]bool{
 		"C-integration-points": true,
 		// Slices must be reviewed before closure
 		"C-slice-review-before-close": true,
-		// Review->fix->re-review with no cycle cap until a fix-free clean round (0/0/0)
+		// Review->fix->re-review up to the chosen budget until a fix-free clean round (0/0/0), else surface
 		"C-clean-review-exit": true,
+		// Supervisor requests the configurable review-effort budget at Phase 8 (IMPL_PLAN start)
+		"C-review-effort-budget": true,
 		// Supervisor assigns vertical slices to workers
 		"C-vertical-slices": true,
 		// Supervisor creates slices and must add leaf tasks
@@ -210,7 +217,8 @@ var roleConstraints = map[types.RoleId]map[string]bool{
 //   C-supervisor-explore-ephemeral → PhaseImplPlan, PhaseWorkerSlices, PhaseCodeReview (ephemeral explore + review)
 //   C-integration-points      → PhaseImplPlan (given: "decomposing IMPL_PLAN in Phase 8")
 //   C-slice-review-before-close → PhaseWorkerSlices, PhaseCodeReview (given: "slice implementation is done")
-//   C-clean-review-exit       → PhaseCodeReview (given: "per-slice code review" — no cycle cap until fix-free clean 0/0/0)
+//   C-clean-review-exit       → PhaseCodeReview (given: "per-slice code review" — review loop within chosen budget; surface on exhaustion)
+//   C-review-effort-budget    → PhaseCodeReview (given: "start of Phase 8" — configurable review-effort budget governs the review loop)
 //   C-slice-leaf-tasks        → PhaseImplPlan, PhaseWorkerSlices (vertical slices created in p8, tracked in p9)
 //   C-handoff-skill-invocation→ PhaseHandoff (given: "new phase (especially p7 to p8 handoff)")
 //   C-dep-direction           → ALL phases
@@ -303,8 +311,10 @@ var phaseConstraints = map[protocol.PhaseId]map[string]bool{
 		"C-supervisor-explore-ephemeral": true,
 		// Slices reviewed before closure — supervisor closes after review passes
 		"C-slice-review-before-close": true,
-		// Review->fix->re-review with no cycle cap until a fix-free clean round (0/0/0)
+		// Review->fix->re-review up to the chosen budget until a fix-free clean round (0/0/0), else surface
 		"C-clean-review-exit": true,
+		// Configurable review-effort budget governs the per-slice review loop
+		"C-review-effort-budget": true,
 	}),
 	protocol.PhaseImplUAT: mergeConstraints(generalConstraints, map[string]bool{
 		// Implementation UAT → verbatim capture

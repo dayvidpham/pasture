@@ -32,7 +32,7 @@ import (
 // the supervisor and impl-review skill bodies, eliminating the last same-id
 // collision group. Canonical content = supervisor text.
 //
-// SLICE-1 (epoch improvements) adds: FragFixValidationCases (R6, wired into
+// SLICE-1 (epoch improvements) adds: FragValidationCases (R6, wired into
 // user-elicit/user-uat/worker-implement bodies by SLICE-2) and FragReviewCleanExit
 // (R7, wired into supervisor/impl-review bodies by SLICE-3). It also renames
 // FragSupImportantMinorFollowup -> FragSupDeferredFollowup (R7/A1): review
@@ -269,15 +269,15 @@ Binary only. No severity tree for plan reviews.`,
 
 	// ── SLICE-1 (epoch improvements) behavior fragments ────────────────────────
 
-	FragFixValidationCases: {
-		Id:   FragFixValidationCases,
+	FragValidationCases: {
+		Id:   FragValidationCases,
 		Kind: FragmentKindBehavior,
 		Behavior: &BehaviorSpec{
-			Id:        string(FragFixValidationCases),
-			Given:     "a REQUEST whose user intent is to FIX existing behavior",
-			When:      "eliciting (URE), acceptance-testing (UAT), or implementing the fix",
-			Then:      "elicit concrete validation cases (inputs/behaviors that currently fail or must pass), confirm the case set with the user in UAT, evaluate the fix against them, and store failing real-data cases as test fixtures",
-			ShouldNot: "ship a fix without validation cases; introduce a request-type axis or enum to detect fix-intent",
+			Id:        string(FragValidationCases),
+			Given:     "any REQUEST (every request, not only fix-intent ones)",
+			When:      "eliciting (URE), acceptance-testing (UAT), or implementing",
+			Then:      "elicit concrete validation cases — a definition of done plus correct and incorrect behaviours (inputs/behaviors that must pass or must fail), confirm the case set with the user in UAT, evaluate the implementation against them, and store failing real-data cases as test fixtures",
+			ShouldNot: "ship without validation cases; treat validation cases as applying to fix-intent requests only; introduce a request-type axis or enum to gate them",
 		},
 	},
 
@@ -288,8 +288,8 @@ Binary only. No severity tree for plan reviews.`,
 			Id:        string(FragReviewCleanExit),
 			Given:     "per-slice code review",
 			When:      "evaluating review results",
-			Then:      "iterate review -> fix -> re-review with NO cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR",
-			ShouldNot: "close a wave on a fix-applying round, proceed with any finding outstanding, or impose a maximum cycle cap",
+			Then:      "iterate review -> fix -> re-review up to the chosen review-effort budget; clean = 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; on budget exhaustion without clean, SURFACE the outstanding findings to the user at a gate for a decision",
+			ShouldNot: "hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen",
 		},
 	},
 }

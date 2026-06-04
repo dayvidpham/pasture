@@ -37,14 +37,14 @@ description: Review implementation slices with EAGER severity tree
 **[frag--review-clean-exit]**
 - Given: per-slice code review
 - When: evaluating review results
-- Then: iterate review -> fix -> re-review with NO cycle cap until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR
-- Should not: close a wave on a fix-applying round, proceed with any finding outstanding, or impose a maximum cycle cap
+- Then: iterate review -> fix -> re-review up to the chosen review-effort budget; clean = 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; on budget exhaustion without clean, SURFACE the outstanding findings to the user at a gate for a decision
+- Should not: hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
 
-**[frag--fix-validation-cases]**
-- Given: a REQUEST whose user intent is to FIX existing behavior
-- When: eliciting (URE), acceptance-testing (UAT), or implementing the fix
-- Then: elicit concrete validation cases (inputs/behaviors that currently fail or must pass), confirm the case set with the user in UAT, evaluate the fix against them, and store failing real-data cases as test fixtures
-- Should not: ship a fix without validation cases; introduce a request-type axis or enum to detect fix-intent
+**[frag--validation-cases]**
+- Given: any REQUEST (every request, not only fix-intent ones)
+- When: eliciting (URE), acceptance-testing (UAT), or implementing
+- Then: elicit concrete validation cases — a definition of done plus correct and incorrect behaviours (inputs/behaviors that must pass or must fail), confirm the case set with the user in UAT, evaluate the implementation against them, and store failing real-data cases as test fixtures
+- Should not: ship without validation cases; treat validation cases as applying to fix-intent requests only; introduce a request-type axis or enum to gate them
 
 ## When to Use
 
@@ -232,17 +232,17 @@ grep -r "TODO" src/  # Should not find any in delivered code
 - No TODOs in CLI/API actions
 - Real dependencies wired (not mocks in production code)
 
-### Verify Fix Validation Cases (R6)
+### Verify Validation Cases (R6)
 
-When the REQUEST is to **fix existing behavior**, per [frag--fix-validation-cases] verify the implementation:
-- Carries **test fixtures** for the concrete validation cases captured in URE/UAT (the inputs/behaviors that currently fail or must pass).
-- Evaluates the fix against each confirmed validation case.
+For **every** REQUEST (not only fix-intent ones), per [frag--validation-cases] verify the implementation:
+- Carries **test fixtures** for the concrete validation cases captured in URE/UAT (the definition of done plus the correct/incorrect behaviours that must pass or must fail).
+- Evaluates the implementation against each confirmed validation case.
 
-A fix that ships without validation-case fixtures is an IMPORTANT finding. There is **no** request-type axis/enum to detect fix-intent — recognize it from the REQUEST/URD.
+An implementation that ships without validation-case fixtures is an IMPORTANT finding. There is **no** request-type axis/enum gating this — recognize what a request needs from the REQUEST/URD.
 
-## Clean-Review Exit (no cycle cap)
+## Clean-Review Exit (within the chosen review-effort budget)
 
-Per [frag--review-clean-exit], do not impose a maximum cycle cap. Iterate **review → fix → re-review with NO cap** until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR**. A wave never closes on a fix-applying round, and never with any finding outstanding.
+Per [frag--review-clean-exit] and `C-review-effort-budget`, iterate **review → fix → re-review** up to the **review-effort budget chosen at Phase 8** (defaults: 3 rounds / 1 round / 0 rounds / unlimited / custom) until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** within budget. On **budget exhaustion without a clean round**, SURFACE the outstanding findings to the user at a gate for a decision — do not proceed dirty and do not loop forever. The budget is never hardcoded. A wave never closes on a fix-applying round, and never with any finding silently outstanding.
 
 ## Follow-up Epic
 

@@ -135,9 +135,9 @@ bd dep add ure-id --blocked-by request-id
 
 **Given** a user interview (requirements elicitation or UAT) **when** capturing the Q&A in a Beads task **then** you **MUST** record the full question, ALL options presented with their descriptions, AND the user's verbatim response. **SHOULD NEVER** summarize options as "(1)", "(2)", "(3)" without the option text — the user's answer referencing option numbers is meaningless without the full options.
 
-**Given** user feedback gathered during UAT (Phase 5 or Phase 11) **when** recording each feedback item **then** assign every item an explicit, user-confirmed disposition of **FIX-NOW** or **DEFER**; FIX-NOW items are resolved in the current wave, and DEFER'd items are the **SOLE** source feeding the FOLLOWUP epic. **SHOULD NEVER** leave UAT feedback without a confirmed disposition, or route any review severity (BLOCKER/IMPORTANT/MINOR) into FOLLOWUP — only DEFER'd UAT items feed it.
+**Given** feedback or a proposed deferral gathered during UAT (Phase 5 or Phase 11) — deferrals may be flagged by the user OR **proposed by the architect/supervisor** **when** recording each item **then** assign every item an explicit, user-confirmed disposition of **FIX-NOW** or **DEFER**; ALL deferred items — whoever proposed them — **MUST be raised to the user at the next user gate** (URE, Plan UAT, or Impl UAT) for confirmation; FIX-NOW items are resolved in the current wave, and DEFER'd items are the **SOLE** source feeding the FOLLOWUP epic. **SHOULD NEVER** leave UAT feedback without a confirmed disposition, silently defer any item without raising it to the user at the next gate, or route any review severity (BLOCKER/IMPORTANT/MINOR) into FOLLOWUP — only DEFER'd UAT items feed it.
 
-**Given** a REQUEST whose user intent is to **FIX existing behavior** (recognized *semantically* during Phase 1 / URE — no request-type axis or enum) **when** eliciting (URE), acceptance-testing (UAT), or implementing the fix **then** elicit concrete **validation cases** (inputs/behaviors that currently fail or must pass), confirm the case set with the user in UAT, evaluate the fix against them, and store failing real-data cases as test fixtures. **SHOULD NEVER** ship a fix without validation cases, or introduce a request-type axis/enum to detect fix-intent.
+**Given** **any** REQUEST (every request, not only fix-intent ones — what a request needs is recognized *semantically*, with no request-type axis or enum) **when** eliciting (URE), acceptance-testing (UAT), or implementing **then** elicit concrete **validation cases** — a definition of done plus correct and incorrect behaviours (inputs/behaviors that must pass or must fail; for fix-intent requests this includes what currently fails), confirm the case set with the user in UAT, evaluate the implementation against them, and store failing real-data cases as test fixtures. **SHOULD NEVER** ship without validation cases, treat them as applying to fix-intent requests only, or introduce a request-type axis/enum to gate them.
 
 ### Worker Completion
 
@@ -151,7 +151,7 @@ bd dep add ure-id --blocked-by request-id
 
 ### Slice Reviews
 
-**Given** a slice implementation is complete (tests + typecheck pass) **when** considering closing the bead **then** you **MUST** launch a code review before closing the bead, and **MUST** iterate review → fix → re-review with **NO cycle cap** until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** (all three severities reach 0 — none is deferrable). **SHOULD NEVER** close a slice bead with only "tests pass" as the completion gate, close on a fix-applying round, or impose a maximum review-cycle cap.
+**Given** a slice implementation is complete (tests + typecheck pass) **when** considering closing the bead **then** you **MUST** launch a code review before closing the bead, and **MUST** iterate review → fix → re-review **up to the configurable review-effort budget** chosen at Phase 8 (defaults: 3 rounds / 1 round / 0 rounds / unlimited / custom) until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** within budget (all three severities reach 0 — none is deferrable); on **budget exhaustion without a clean round**, surface the outstanding findings to the user at a gate for a decision. **SHOULD NEVER** close a slice bead with only "tests pass" as the completion gate, close on a fix-applying round, hardcode the budget, or proceed past the chosen budget without surfacing to the user.
 
 ## Behavior
 
@@ -206,9 +206,10 @@ Phase 9:  SLICE-N (parallel workers, each owns one production code path)
             Workers are assigned to leaf tasks, not slices
 Phase 10: Code review (3x reviewers, full severity tree with EAGER creation)
             Severity tree: BLOCKER / IMPORTANT / MINOR (always 3 groups)
-            ALL three severities must reach 0 — no cycle cap, iterate review→fix
-            →re-review until a fix-free clean round (0/0/0). Dual-parent BLOCKER.
-            FOLLOWUP is NOT fed by review severities.
+            ALL three severities must reach 0 — iterate review→fix→re-review up to
+            the chosen review-effort budget until a fix-free clean round (0/0/0);
+            on budget exhaustion without clean, surface to the user. Dual-parent
+            BLOCKER. FOLLOWUP is NOT fed by review severities.
 Phase 11: Implementation UAT (FIX-NOW / DEFER disposition; DEFER'd items feed FOLLOWUP)
 Phase 12: Landing (commit, push, hand off)
 ```
@@ -302,7 +303,7 @@ bd close <empty-minor-id>
 
 This ensures BLOCKERs both categorize under the severity tree AND block the artifact they apply to.
 
-**ALL three severities must reach 0 (no cycle cap):** Under the clean-review-exit regime, IMPORTANT and MINOR findings are NOT deferrable — every finding (BLOCKER, IMPORTANT, and MINOR) is fixed in-wave, and the slice is re-reviewed (review → fix → re-review, no maximum cycle cap) until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR from all reviewers. **No review severity is ever routed to the FOLLOWUP epic** — the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items (Phase 5 or 11).
+**ALL three severities must reach 0 (within the chosen review-effort budget):** Under the clean-review-exit regime, IMPORTANT and MINOR findings are NOT deferrable — every finding (BLOCKER, IMPORTANT, and MINOR) is fixed in-wave, and the slice is re-reviewed (review → fix → re-review, up to the configurable review-effort budget chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR from all reviewers. On budget exhaustion without a clean round, the outstanding findings are surfaced to the user at a gate for a decision (never proceed-dirty, never loop forever). **No review severity is ever routed to the FOLLOWUP epic** — the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items (Phase 5 or 11).
 
 **Plan reviews (Phase 4) do NOT use a severity tree.** Plan reviews use binary ACCEPT/REVISE votes only.
 

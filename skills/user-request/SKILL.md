@@ -37,14 +37,14 @@ description: Capture user feature request verbatim (Phase 1)
 **[user-req-fix-intent]**
 - Given: a request whose user intent is to FIX existing behavior (a bug, regression, or incorrect output)
 - When: classifying in Phase 1
-- Then: recognize the fix-intent SEMANTICALLY during classification (record it in the classification comment) so the validation-case lifecycle is triggered downstream in URE/UAT/impl
-- Should not: introduce a request-type axis or enum to detect fix-intent — recognition is semantic, not a fifth classification axis
+- Then: recognize the fix-intent SEMANTICALLY during classification (record it in the classification comment) so the downstream URE/UAT/impl validation cases capture the currently-failing behaviours; validation cases themselves are elicited for EVERY request regardless
+- Should not: introduce a request-type axis or enum to detect fix-intent — recognition is semantic, not a fifth classification axis; gate validation cases on fix-intent
 
-**[frag--fix-validation-cases]**
-- Given: a REQUEST whose user intent is to FIX existing behavior
-- When: eliciting (URE), acceptance-testing (UAT), or implementing the fix
-- Then: elicit concrete validation cases (inputs/behaviors that currently fail or must pass), confirm the case set with the user in UAT, evaluate the fix against them, and store failing real-data cases as test fixtures
-- Should not: ship a fix without validation cases; introduce a request-type axis or enum to detect fix-intent
+**[frag--validation-cases]**
+- Given: any REQUEST (every request, not only fix-intent ones)
+- When: eliciting (URE), acceptance-testing (UAT), or implementing
+- Then: elicit concrete validation cases — a definition of done plus correct and incorrect behaviours (inputs/behaviors that must pass or must fail), confirm the case set with the user in UAT, evaluate the implementation against them, and store failing real-data cases as test fixtures
+- Should not: ship without validation cases; treat validation cases as applying to fix-intent requests only; introduce a request-type axis or enum to gate them
 
 ## Phase 1 Sub-steps
 

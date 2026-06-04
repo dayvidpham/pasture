@@ -8,8 +8,9 @@
 
 role_constraint_checks:
   - role: supervisor
-    exact_count: 18
+    exact_count: 19
     must_contain:
+      - C-review-effort-budget
       - C-supervisor-no-impl
       - C-vertical-slices
       - C-review-consensus
@@ -35,8 +36,9 @@ role_constraint_checks:
       - C-worker-gates         # worker only
 
   - role: reviewer
-    exact_count: 11
+    exact_count: 12
     must_contain:
+      - C-review-effort-budget
       - C-review-binary
       - C-severity-eager
       - C-review-consensus
@@ -93,8 +95,9 @@ role_constraint_checks:
       - C-worker-gates
 
   - role: epoch
-    exact_count: 11
+    exact_count: 12
     must_contain:
+      - C-review-effort-budget
       - C-review-consensus
       - C-handoff-skill-invocation
       - C-supervisor-explore-ephemeral
@@ -113,8 +116,9 @@ role_constraint_checks:
 
 phase_constraint_checks:
   - phase: code-review
-    exact_count: 16
+    exact_count: 17
     must_contain:
+      - C-review-effort-budget
       - C-review-consensus
       - C-severity-eager
       - C-followup-timing

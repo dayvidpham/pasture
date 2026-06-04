@@ -18,7 +18,7 @@ content: |
     ├─ Workers implement their slices in parallel
     └─ Workers do NOT shut down when finished
 
-  Phase 10: REVIEW + FIX CYCLES (no cycle cap — iterate until 0/0/0 clean)
+  Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget — iterate until 0/0/0 clean, else surface to user)
     ├─ Cycle 1:
     │   ├─ Spawn ephemeral reviewers (Task tool, per-slice review)
     │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
@@ -34,5 +34,5 @@ content: |
 
   Cycle Exit Conditions:
     Fix-free clean round: 0 BLOCKER + 0 IMPORTANT + 0 MINOR   → Proceed to Phase 11 (UAT)
-    ANY finding remains (BLOCKER/IMPORTANT/MINOR)             → Workers fix, spawn new ephemeral reviewers (no cap)
+    ANY finding remains (BLOCKER/IMPORTANT/MINOR)             → Workers fix, spawn new ephemeral reviewers (up to chosen budget; on exhaustion, surface to user)
     Genuinely stuck (cannot reach a clean round)             → Escalate to architect for re-planning

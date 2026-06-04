@@ -38,13 +38,14 @@ var userRequestBody = SkillBody{
 			Id:        "user-req-fix-intent",
 			Given:     "a request whose user intent is to FIX existing behavior (a bug, regression, or incorrect output)",
 			When:      "classifying in Phase 1",
-			Then:      "recognize the fix-intent SEMANTICALLY during classification (record it in the classification comment) so the validation-case lifecycle is triggered downstream in URE/UAT/impl",
-			ShouldNot: "introduce a request-type axis or enum to detect fix-intent — recognition is semantic, not a fifth classification axis",
+			Then:      "recognize the fix-intent SEMANTICALLY during classification (record it in the classification comment) so the downstream URE/UAT/impl validation cases capture the currently-failing behaviours; validation cases themselves are elicited for EVERY request regardless",
+			ShouldNot: "introduce a request-type axis or enum to detect fix-intent — recognition is semantic, not a fifth classification axis; gate validation cases on fix-intent",
 		},
-		// R6/A2: surface the shared fix-validation-cases lifecycle at the
-		// classification entry point. behaviorRef resolves to
-		// SharedFragmentSpecs[FragFixValidationCases] (SLICE-1).
-		behaviorRef(FragFixValidationCases),
+		// R6/A2: surface the shared validation-cases lifecycle at the classification
+		// entry point — it applies to EVERY request (generalized from fix-intent-only
+		// at v2-2). behaviorRef resolves to SharedFragmentSpecs[FragValidationCases]
+		// (SLICE-1).
+		behaviorRef(FragValidationCases),
 	},
 
 	Sections: []ProseSection{
