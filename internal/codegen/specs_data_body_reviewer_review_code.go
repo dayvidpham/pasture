@@ -249,7 +249,7 @@ var commandCmd = &cobra.Command{
 - Real dependencies wired (not mocks in production code)`,
 				},
 				{
-					Id:    "rev-code-fix-validation-cases",
+					Id:    "rev-code-validation-cases",
 					Title: "Verify Validation Cases (R6)",
 					Content: `For **every** REQUEST (not only fix-intent ones), per [` + "frag--validation-cases" + `] verify the implementation:
 - Carries **test fixtures** for the concrete validation cases captured in URE/UAT (the definition of done plus the correct/incorrect behaviours that must pass or must fail).

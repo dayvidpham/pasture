@@ -561,11 +561,14 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 	},
 	"C-uat-feedback-disposition": {
 		Id:    "C-uat-feedback-disposition",
-		Given: "user feedback gathered during UAT (Phase 5 or Phase 11)",
-		When:  "recording each feedback item",
+		Given: "any UAT feedback item (Phase 5 or Phase 11) — flagged by the user OR a deferral proposed by the architect/supervisor",
+		When:  "recording each item",
 		Then: "assign every item an explicit, user-confirmed disposition of FIX-NOW or DEFER; " +
+			"deferrals may be agent-proposed, but ALL deferred items — whoever proposed them — MUST be raised to the user " +
+			"at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation; " +
 			"FIX-NOW items are resolved in the current wave, DEFER'd items are the SOLE source feeding the FOLLOWUP epic",
-		ShouldNot: "leave UAT feedback without a confirmed disposition; " +
+		ShouldNot: "leave a feedback item without a confirmed disposition; " +
+			"silently defer any item without raising it to the user at the next gate; " +
 			"route any review severity (BLOCKER/IMPORTANT/MINOR) into FOLLOWUP — only DEFER'd UAT items feed it",
 	},
 	"C-interface-first-slices": {
