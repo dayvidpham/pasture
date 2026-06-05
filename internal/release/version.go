@@ -63,6 +63,58 @@ func (v SemVer) String() string {
 	return fmt.Sprintf("%d.%d.%d", v.Major, v.Minor, v.Patch)
 }
 
+// Compare orders v against o by (Major, Minor, Patch).
+// It returns -1 when v < o, 0 when equal, and +1 when v > o.
+func (v SemVer) Compare(o SemVer) int {
+	switch {
+	case v.Major != o.Major:
+		if v.Major < o.Major {
+			return -1
+		}
+		return 1
+	case v.Minor != o.Minor:
+		if v.Minor < o.Minor {
+			return -1
+		}
+		return 1
+	case v.Patch != o.Patch:
+		if v.Patch < o.Patch {
+			return -1
+		}
+		return 1
+	default:
+		return 0
+	}
+}
+
+// CompareVersions parses two bare "X.Y.Z" semver strings and compares them.
+// It returns -1 when a < b, 0 when equal, and +1 when a > b.
+//
+// It returns an actionable error naming WHICH side failed to parse when either
+// string is not a valid semver, so callers reconciling a plugin.json version
+// against a marketplace entry can report exactly which manifest is malformed.
+func CompareVersions(a, b string) (int, error) {
+	av, err := ParseSemVer(a)
+	if err != nil {
+		return 0, fmt.Errorf(
+			"validation error: cannot compare versions because the left-hand "+
+				"value %q is not a valid semver — %w — fix that version field "+
+				"(expected X.Y.Z) and retry",
+			a, err,
+		)
+	}
+	bv, err := ParseSemVer(b)
+	if err != nil {
+		return 0, fmt.Errorf(
+			"validation error: cannot compare versions because the right-hand "+
+				"value %q is not a valid semver — %w — fix that version field "+
+				"(expected X.Y.Z) and retry",
+			b, err,
+		)
+	}
+	return av.Compare(bv), nil
+}
+
 // ─── VersionFile interface ────────────────────────────────────────────────────
 
 // VersionFile is implemented by any file that stores a semver version string.
@@ -452,6 +504,98 @@ func WritePluginVersion(path, pluginName, version string, dryRun bool) error {
 		)
 	}
 	return nil
+}
+
+// ReadPluginVersion reads the version of a single entry in a marketplace.json
+// "plugins" array, matched by plugin name, WITHOUT touching "metadata.version"
+// (the marketplace's own version).
+//
+// It is the read-side counterpart to WritePluginVersion: sync-versions uses it
+// to learn the version the cross-repo marketplace currently advertises for a
+// plugin (mv) so it can be compared against the plugin's own
+// .claude-plugin/plugin.json version (pv).
+//
+// Parameters:
+//   - path:       absolute path to the marketplace.json to read.
+//   - pluginName: the "name" field of the plugins[] entry to read.
+//
+// It returns an actionable error when: the file cannot be read; the JSON is
+// malformed; the top-level "plugins" array is missing or not an array; the
+// matched entry has no string "version" field; or no entry with the given name
+// exists (the absent-name error lists the available entries).
+func ReadPluginVersion(path, pluginName string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf(
+			"validation error: cannot read marketplace file %s — %w — "+
+				"check the path exists and is readable, or register the correct "+
+				"marketplace path with 'pasture-release registry add'",
+			path, err,
+		)
+	}
+	var obj map[string]interface{}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return "", fmt.Errorf(
+			"validation error: marketplace file %s is not valid JSON — %w — "+
+				"fix the JSON syntax in %s before reconciling versions",
+			path, err, path,
+		)
+	}
+	rawPlugins, ok := obj["plugins"]
+	if !ok {
+		return "", fmt.Errorf(
+			`validation error: marketplace file %s has no "plugins" array — `+
+				`cannot read the version for plugin %q — `+
+				`add a "plugins": [{"name": %q, "version": "X.Y.Z"}] array to %s`,
+			path, pluginName, pluginName, path,
+		)
+	}
+	plugins, ok := rawPlugins.([]interface{})
+	if !ok {
+		return "", fmt.Errorf(
+			`validation error: "plugins" in marketplace file %s is not an array `+
+				`(found %T) — cannot read the version for plugin %q — `+
+				`ensure "plugins" is a JSON array of plugin objects in %s`,
+			path, rawPlugins, pluginName, path,
+		)
+	}
+
+	var names []string
+	for i := range plugins {
+		entry, ok := plugins[i].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _ := entry["name"].(string)
+		if name != "" {
+			names = append(names, name)
+		}
+		if name != pluginName {
+			continue
+		}
+		ver, ok := entry["version"].(string)
+		if !ok {
+			return "", fmt.Errorf(
+				`validation error: plugin entry %q in marketplace file %s has no `+
+					`string "version" field — add "version": "X.Y.Z" to that entry in %s`,
+				pluginName, path, path,
+			)
+		}
+		return ver, nil
+	}
+
+	available := "(none)"
+	if len(names) > 0 {
+		available = strings.Join(names, ", ")
+	}
+	return "", fmt.Errorf(
+		"validation error: marketplace file %s has no plugin entry named %q — "+
+			"cannot read its version to reconcile against the plugin's "+
+			"plugin.json — available plugin entries: %s — "+
+			"add a {\"name\": %q, ...} entry to the \"plugins\" array in %s, or "+
+			"correct the registered --plugin name / marketplace path",
+		path, pluginName, available, pluginName, path,
+	)
 }
 
 // ─── Discovery ───────────────────────────────────────────────────────────────

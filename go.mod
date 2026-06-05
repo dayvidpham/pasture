@@ -12,6 +12,7 @@ require (
 	github.com/yuin/goldmark v1.7.17
 	go.temporal.io/api v1.46.0
 	go.temporal.io/sdk v1.34.0
+	golang.org/x/term v0.35.0
 	google.golang.org/grpc v1.67.3
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.46.1

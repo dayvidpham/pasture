@@ -206,6 +206,7 @@ Existing `pasture task` verbs (`create`, `show`, `update`, `close`, `list`,
 | `github.com/spf13/viper` | Configuration loading (TOML/YAML/env) |
 | `go.temporal.io/sdk` | Temporal workflow orchestration |
 | `modernc.org/sqlite` | Pure-Go SQLite (audit trail, local state) |
+| `golang.org/x/term` | Cross-platform terminal/isatty detection (sync-versions non-TTY guard) |
 
 No other external dependencies may be added without supervisor approval.
 
