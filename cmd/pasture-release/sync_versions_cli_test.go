@@ -103,6 +103,66 @@ func runSyncVersions(t *testing.T, registryPath string, stdin string, tty bool, 
 	return out.String(), err
 }
 
+// setupIntraPluginDriftFixture creates a plugin dir with two disagreeing
+// version files (pyproject.toml canonical vs package.json drifted) and NO
+// .claude-plugin/plugin.json, so the marketplace reconciliation is skipped and
+// the only pending change is an intra-plugin DriftWriteFile. Returns the
+// registry path and the plugin name.
+func setupIntraPluginDriftFixture(t *testing.T, canonicalVer, driftedVer string) (registryPath, pluginName string) {
+	t.Helper()
+	base := t.TempDir()
+	pluginName = "intra-plugin"
+	pluginDir := filepath.Join(base, pluginName)
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pyproj := "[project]\nversion = \"" + canonicalVer + "\"\n"
+	if err := os.WriteFile(filepath.Join(pluginDir, "pyproject.toml"), []byte(pyproj), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pkg, _ := json.MarshalIndent(map[string]interface{}{"name": pluginName, "version": driftedVer}, "", "  ")
+	if err := os.WriteFile(filepath.Join(pluginDir, "package.json"), append(pkg, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, _ := json.MarshalIndent(map[string]interface{}{
+		"marketplaces": []interface{}{
+			map[string]interface{}{
+				// marketplace path need not exist: no plugin.json → reconciliation skipped.
+				"path": filepath.Join(base, "marketplace", "marketplace.json"),
+				"plugins": []interface{}{
+					map[string]interface{}{"name": pluginName, "path": pluginDir},
+				},
+			},
+		},
+	}, "", "  ")
+	registryPath = filepath.Join(base, "registry.json")
+	if err := os.WriteFile(registryPath, append(reg, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return registryPath, pluginName
+}
+
+// ─── DriftWriteFile renders inside the unified preview (B-MIN aura-plugins-pwmhr) ─
+
+func TestCLISyncVersions_OutputFormat_WriteFile(t *testing.T) {
+	reg, name := setupIntraPluginDriftFixture(t, "1.0.0", "2.0.0")
+	out, err := runSyncVersions(t, reg, "", false, "--dry-run")
+	if err != nil {
+		t.Fatalf("dry-run error: %v\noutput:\n%s", err, out)
+	}
+	for _, want := range []string{
+		"Reconciling registered plugins (plugin.json  ⟷  marketplace entry):",
+		// canonical intra-plugin file-fix line: <plugin>  <file>  <got>  →  <want>
+		name + "  package.json  2.0.0  →  1.0.0   (sync intra-plugin version file)",
+		"1 change(s) pending  ·  dry-run: nothing written, no repos pulled",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("preview missing %q\nfull output:\n%s", want, out)
+		}
+	}
+}
+
 // ─── output-format ─────────────────────────────────────────────────────────────
 
 func TestCLISyncVersions_OutputFormat_WriteMarketplace(t *testing.T) {

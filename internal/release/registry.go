@@ -207,20 +207,6 @@ const (
 	DriftPullPlugin
 )
 
-// String returns a stable identifier for the action.
-func (a DriftAction) String() string {
-	switch a {
-	case DriftWriteFile:
-		return "write-file"
-	case DriftWriteMarketplace:
-		return "write-marketplace"
-	case DriftPullPlugin:
-		return "pull-plugin"
-	default:
-		return fmt.Sprintf("DriftAction(%d)", int(a))
-	}
-}
-
 // VersionDrift describes a single pending change detected by SyncVersions.
 //
 // For DriftWriteFile (intra-plugin), File is the drifted version file, Got its
