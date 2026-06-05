@@ -62,6 +62,66 @@ func setupReconcileFixture(t *testing.T, pluginVer, entryVer string) (registryPa
 	return registryPath, mpPath
 }
 
+// setupRosterFixture wires TWO plugins into one marketplace: a DRIFTED plugin
+// (plugin.json driftedPV > marketplace driftedMV → DriftWriteMarketplace) and a
+// CONSISTENT plugin (plugin.json == marketplace at consistentV → DriftConsistent,
+// display-only). It exists to assert the full-roster preview renders a
+// `consistent` row alongside a drift row (Impl-UAT C1). Returns the registry
+// path plus the two plugin names (drifted, consistent).
+func setupRosterFixture(t *testing.T, driftedPV, driftedMV, consistentV string) (registryPath, driftedName, consistentName string) {
+	t.Helper()
+	base := t.TempDir()
+	driftedName, consistentName = "drifted-plugin", "steady-plugin"
+
+	writePluginJSON := func(dir, name, ver string) string {
+		cpDir := filepath.Join(dir, ".claude-plugin")
+		if err := os.MkdirAll(cpDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		pj, _ := json.MarshalIndent(map[string]interface{}{"name": name, "version": ver}, "", "  ")
+		if err := os.WriteFile(filepath.Join(cpDir, "plugin.json"), append(pj, '\n'), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	driftedDir := writePluginJSON(filepath.Join(base, driftedName), driftedName, driftedPV)
+	consistentDir := writePluginJSON(filepath.Join(base, consistentName), consistentName, consistentV)
+
+	mpDir := filepath.Join(base, "marketplace")
+	if err := os.MkdirAll(mpDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mp, _ := json.MarshalIndent(map[string]interface{}{
+		"name":     "test-marketplace",
+		"metadata": map[string]interface{}{"version": "9.9.9"},
+		"plugins": []interface{}{
+			map[string]interface{}{"name": driftedName, "version": driftedMV, "source": "./" + driftedName},
+			map[string]interface{}{"name": consistentName, "version": consistentV, "source": "./" + consistentName},
+		},
+	}, "", "  ")
+	mpPath := filepath.Join(mpDir, "marketplace.json")
+	if err := os.WriteFile(mpPath, append(mp, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, _ := json.MarshalIndent(map[string]interface{}{
+		"marketplaces": []interface{}{
+			map[string]interface{}{
+				"path": mpPath,
+				"plugins": []interface{}{
+					map[string]interface{}{"name": driftedName, "path": driftedDir},
+					map[string]interface{}{"name": consistentName, "path": consistentDir},
+				},
+			},
+		},
+	}, "", "  ")
+	registryPath = filepath.Join(base, "registry.json")
+	if err := os.WriteFile(registryPath, append(reg, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return registryPath, driftedName, consistentName
+}
+
 func entryVersion(t *testing.T, mpPath string) string {
 	t.Helper()
 	data, err := os.ReadFile(mpPath)
@@ -183,6 +243,31 @@ func TestCLISyncVersions_OutputFormat_WriteMarketplace(t *testing.T) {
 	}
 }
 
+// ─── C1 full roster: consistent row renders alongside a drift row ─────────────
+
+func TestCLISyncVersions_OutputFormat_FullRoster(t *testing.T) {
+	// drifted-plugin: 0.2.0 > 0.1.0 (DriftWriteMarketplace);
+	// steady-plugin: 0.5.0 == 0.5.0 (DriftConsistent, display-only).
+	reg, drifted, consistent := setupRosterFixture(t, "0.2.0", "0.1.0", "0.5.0")
+	out, err := runSyncVersions(t, reg, "", false, "--dry-run")
+	if err != nil {
+		t.Fatalf("dry-run error: %v\noutput:\n%s", err, out)
+	}
+	for _, want := range []string{
+		"Reconciling registered plugins (plugin.json  ⟷  marketplace entry):",
+		// drift row (action)
+		drifted + "  plugin.json 0.2.0  >  marketplace 0.1.0   → UPDATE marketplace entry → 0.2.0",
+		// consistent row (display-only, full-roster) — Impl-UAT C1
+		consistent + "  plugin.json 0.5.0  ==  marketplace 0.5.0   consistent",
+		// footer counts ACTIONABLE changes only (1), not the 2-plugin roster
+		"1 change(s) pending  ·  dry-run: nothing written, no repos pulled",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("full-roster preview missing %q\nfull output:\n%s", want, out)
+		}
+	}
+}
+
 func TestCLISyncVersions_OutputFormat_PullPlugin(t *testing.T) {
 	reg, _ := setupReconcileFixture(t, "0.0.2", "0.0.3")
 	out, err := runSyncVersions(t, reg, "", false, "--dry-run")
@@ -272,8 +357,16 @@ func TestCLISyncVersions_NonTTY_RequiresFlag(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error on a non-interactive terminal; output:\n%s", out)
 	}
-	if !strings.Contains(err.Error(), "--non-interactive") || !strings.Contains(err.Error(), "--dry-run") {
-		t.Errorf("error should suggest --non-interactive / --dry-run; got: %v", err)
+	// Exact user-facing wording (Impl-UAT C2): no internal 'workflow error:' wrap.
+	const wantMsg = "refusing to run `registry sync-versions` on a non-interactive " +
+		"terminal (non-TTY), command needs user confirmation by default. " +
+		"Re-run command with `--non-interactive` flag to run on non-TTY " +
+		"with no confirmations, or run with `--dry-run` to preview changes."
+	if err.Error() != wantMsg {
+		t.Errorf("non-TTY error message mismatch:\n got: %q\nwant: %q", err.Error(), wantMsg)
+	}
+	if strings.Contains(err.Error(), "workflow error:") {
+		t.Errorf("non-TTY error must not carry the internal 'workflow error:' wrap; got: %v", err)
 	}
 	if got := entryVersion(t, mp); got != "0.0.1" {
 		t.Errorf("non-TTY error path must not write; entry = %q", got)

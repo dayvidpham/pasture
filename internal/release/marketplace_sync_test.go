@@ -238,13 +238,15 @@ func TestSyncVersions_Idempotent_MetadataConstant(t *testing.T) {
 	if _, err := r.SyncVersions(false); err != nil {
 		t.Fatalf("first apply: %v", err)
 	}
-	// Second run is a no-op.
+	// Second run is a no-op: no ACTIONABLE drift. The plan now carries a
+	// display-only DriftConsistent row for the now-aligned plugin (full-roster
+	// preview support), so count actionable changes rather than total rows.
 	plan, err := r.SyncVersions(false)
 	if err != nil {
 		t.Fatalf("second apply: %v", err)
 	}
-	if len(plan) != 0 {
-		t.Errorf("second run should be a no-op, got %d change(s): %+v", len(plan), plan)
+	if n := actionableDriftCount(plan); n != 0 {
+		t.Errorf("second run should be a no-op, got %d actionable change(s): %+v", n, plan)
 	}
 	if got := readMetaVersion(t, mpPath); got != "9.9.9" {
 		t.Errorf("metadata.version = %q, must stay 9.9.9", got)
@@ -266,12 +268,33 @@ func TestSyncVersions_NoFalsePositive_WhenEqual(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SyncVersions: %v", err)
 	}
-	if len(plan) != 0 {
-		t.Errorf("equal versions should yield no drift; got %+v", plan)
+	// Equal versions yield NO actionable drift, but the plan does carry one
+	// display-only DriftConsistent row so the CLI can render the full roster.
+	if n := actionableDriftCount(plan); n != 0 {
+		t.Errorf("equal versions should yield no actionable drift; got %d: %+v", n, plan)
+	}
+	if len(plan) != 1 || plan[0].Action != release.DriftConsistent {
+		t.Fatalf("expected exactly one display-only DriftConsistent row; got %+v", plan)
+	}
+	if plan[0].PluginVersion != "0.0.2" || plan[0].MarketplaceVersion != "0.0.2" {
+		t.Errorf("consistent row pv/mv = %q/%q, want 0.0.2/0.0.2",
+			plan[0].PluginVersion, plan[0].MarketplaceVersion)
 	}
 	if len(pulled) != 0 {
 		t.Errorf("equal versions should not pull; pulled=%v", pulled)
 	}
+}
+
+// actionableDriftCount returns the number of plan entries that represent a real
+// pending change, excluding display-only DriftConsistent rows.
+func actionableDriftCount(plan []release.VersionDrift) int {
+	n := 0
+	for _, d := range plan {
+		if d.Action.IsChange() {
+			n++
+		}
+	}
+	return n
 }
 
 // ─── ff-only failure: error names plugin + abs repo path ──────────────────────

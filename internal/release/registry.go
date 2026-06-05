@@ -205,7 +205,21 @@ const (
 	// DriftPullPlugin git-pulls the plugin repo because the marketplace
 	// advertises a newer released version than the local checkout (mv > pv).
 	DriftPullPlugin
+	// DriftConsistent is a display-only, no-op entry: the plugin's plugin.json
+	// version already matches its marketplace entry (pv == mv). It is emitted so
+	// the reconciliation preview can render the FULL roster (every registered
+	// plugin, not just drifted ones), but it is NEVER an action — it is excluded
+	// from the pending-change count and is never written or pulled.
+	DriftConsistent
 )
+
+// IsChange reports whether a VersionDrift represents an actionable pending
+// change (a marketplace write, a plugin pull, or an intra-plugin file fix) as
+// opposed to a display-only DriftConsistent row. The CLI counts only changes
+// for the "N change(s) pending" footer and the apply/no-op gating.
+func (a DriftAction) IsChange() bool {
+	return a != DriftConsistent
+}
 
 // VersionDrift describes a single pending change detected by SyncVersions.
 //
@@ -424,8 +438,16 @@ func reconcileMarketplace(
 		}
 		return drift, nil
 
-	default: // pv == mv → consistent, nothing to do
-		return nil, nil
+	default: // pv == mv → consistent: emit a display-only no-op row (never applied)
+		return &VersionDrift{
+			Plugin:             p.Name,
+			File:               m.Path,
+			Want:               pv,
+			Got:                mv,
+			Action:             DriftConsistent,
+			PluginVersion:      pv,
+			MarketplaceVersion: mv,
+		}, nil
 	}
 }
 

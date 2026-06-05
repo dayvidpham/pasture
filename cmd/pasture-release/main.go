@@ -416,14 +416,31 @@ func newRegistryExecCmd() *cobra.Command {
 	}
 }
 
+// driftChangeCount returns the number of actionable pending changes in plan,
+// excluding display-only DriftConsistent rows. The "N change(s) pending" footer
+// and the apply/no-op gating count changes only — never the full roster.
+func driftChangeCount(plan []release.VersionDrift) int {
+	n := 0
+	for _, d := range plan {
+		if d.Action.IsChange() {
+			n++
+		}
+	}
+	return n
+}
+
 // printReconcilePreview renders the canonical, user-approved reconciliation
-// table for the pending changes. The middle comparison glyph ({>,==,<}) between
+// table over the FULL roster — every registered plugin, including the ones that
+// are already consistent. The middle comparison glyph ({>,==,<}) between
 // plugin.json and the marketplace is retained; the leading ACTION arrow is
 // directional — → to push a version into the marketplace, ← to pull a plugin
-// repo. When dryRun is true a footer notes that nothing was written or pulled.
-func printReconcilePreview(w io.Writer, drift []release.VersionDrift, dryRun bool) {
+// repo; a consistent plugin prints `consistent` with no arrow (display only,
+// never an action). The footer counts only actionable changes (DriftConsistent
+// rows are excluded). When dryRun is true the footer notes that nothing was
+// written or pulled.
+func printReconcilePreview(w io.Writer, plan []release.VersionDrift, dryRun bool) {
 	fmt.Fprintln(w, "Reconciling registered plugins (plugin.json  ⟷  marketplace entry):")
-	for _, d := range drift {
+	for _, d := range plan {
 		switch d.Action {
 		case release.DriftWriteMarketplace:
 			fmt.Fprintf(w,
@@ -435,6 +452,11 @@ func printReconcilePreview(w io.Writer, drift []release.VersionDrift, dryRun boo
 				"   %s  plugin.json %s  <  marketplace %s   ← GIT PULL plugin repo (local behind released %s)\n",
 				d.Plugin, d.PluginVersion, d.MarketplaceVersion, d.MarketplaceVersion,
 			)
+		case release.DriftConsistent:
+			fmt.Fprintf(w,
+				"   %s  plugin.json %s  ==  marketplace %s   consistent\n",
+				d.Plugin, d.PluginVersion, d.MarketplaceVersion,
+			)
 		case release.DriftWriteFile:
 			fmt.Fprintf(w,
 				"   %s  %s  %s  →  %s   (sync intra-plugin version file)\n",
@@ -442,13 +464,14 @@ func printReconcilePreview(w io.Writer, drift []release.VersionDrift, dryRun boo
 			)
 		}
 	}
+	changes := driftChangeCount(plan)
 	if dryRun {
 		fmt.Fprintf(w,
 			"%d change(s) pending  ·  dry-run: nothing written, no repos pulled\n",
-			len(drift),
+			changes,
 		)
 	} else {
-		fmt.Fprintf(w, "%d change(s) pending\n", len(drift))
+		fmt.Fprintf(w, "%d change(s) pending\n", changes)
 	}
 }
 
@@ -482,16 +505,23 @@ with a single [y/N] prompt. Use --non-interactive to apply without prompting
 			out := cmd.OutOrStdout()
 			r.WithOutput(out)
 
-			// Plan: detect all pending changes with NO side effects.
+			// Plan: detect all pending changes with NO side effects. The plan
+			// holds the FULL roster — actionable drift AND display-only
+			// DriftConsistent rows — so the preview shows every registered plugin.
 			plan, err := r.SyncVersions(true)
 			if err != nil {
 				return err
 			}
-			if len(plan) == 0 {
+			// Gate on the count of ACTIONABLE changes only; consistent rows are
+			// display-only and never warrant a preview/prompt on their own.
+			changes := driftChangeCount(plan)
+			if changes == 0 {
 				fmt.Fprintln(out, "All plugins are version-consistent.")
 				return nil
 			}
 
+			// Render the FULL-roster preview: every registered plugin, drift rows
+			// and display-only `consistent` rows together (Impl-UAT C1).
 			printReconcilePreview(out, plan, dryRun)
 
 			// --dry-run: preview only — no writes, no pulls, no prompt.
@@ -503,9 +533,10 @@ with a single [y/N] prompt. Use --non-interactive to apply without prompting
 			if !nonInteractive {
 				if !stdinIsTTY(cmd.InOrStdin()) {
 					return fmt.Errorf(
-						"workflow error: refusing to prompt on a non-interactive " +
-							"terminal — pass --non-interactive to apply, or --dry-run " +
-							"to preview",
+						"refusing to run `registry sync-versions` on a non-interactive " +
+							"terminal (non-TTY), command needs user confirmation by default. " +
+							"Re-run command with `--non-interactive` flag to run on non-TTY " +
+							"with no confirmations, or run with `--dry-run` to preview changes.",
 					)
 				}
 				fmt.Fprint(out, "Apply these change(s)? [y/N]: ")
@@ -524,7 +555,7 @@ with a single [y/N] prompt. Use --non-interactive to apply without prompting
 			if _, err := r.SyncVersions(false); err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "Applied %d change(s).\n", len(plan))
+			fmt.Fprintf(out, "Applied %d change(s).\n", changes)
 			return nil
 		},
 	}
