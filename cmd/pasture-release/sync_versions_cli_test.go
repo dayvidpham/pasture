@@ -385,3 +385,40 @@ func TestCLISyncVersions_AllConsistent(t *testing.T) {
 		t.Errorf("expected consistent message; output:\n%s", out)
 	}
 }
+
+// ─── real default stdinIsTTY (isatty) regression ──────────────────────────────
+
+// TestDefaultStdinIsTTY_NonTTY exercises the REAL default stdinIsTTY (not the
+// test stub other tests inject). It is the regression guard for the bug where
+// the old os.ModeCharDevice check misclassified /dev/null as a TTY: /dev/null
+// is a character device, so `sync-versions </dev/null` was treated as
+// interactive and prompted+aborted (exit 0) instead of erroring (exit 1) per
+// the ratified non-TTY design. Both load-bearing non-TTY cases — an *os.File on
+// /dev/null and an os.Pipe() read end — must report false.
+func TestDefaultStdinIsTTY_NonTTY(t *testing.T) {
+	// /dev/null — a character device that is NOT a terminal (the exact case
+	// the old ModeCharDevice check got wrong).
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatalf("open %s: %v", os.DevNull, err)
+	}
+	t.Cleanup(func() { devNull.Close() })
+	if stdinIsTTY(devNull) {
+		t.Errorf("stdinIsTTY(%s) = true; want false (not a terminal)", os.DevNull)
+	}
+
+	// os.Pipe() read end — a pipe, also not a terminal.
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	t.Cleanup(func() { pr.Close(); pw.Close() })
+	if stdinIsTTY(pr) {
+		t.Error("stdinIsTTY(pipe-read-end) = true; want false (not a terminal)")
+	}
+
+	// A non-*os.File reader must also report false (type-assert fallback).
+	if stdinIsTTY(strings.NewReader("")) {
+		t.Error("stdinIsTTY(strings.Reader) = true; want false (not an *os.File)")
+	}
+}

@@ -20,22 +20,23 @@ import (
 	"github.com/dayvidpham/pasture/internal/release"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // stdinIsTTY reports whether r is an interactive terminal. It is a package
 // variable so tests can override it to exercise the interactive-prompt path
-// with an injected (non-file) reader. The default inspects the underlying
-// *os.File mode for a character device.
+// with an injected (non-file) reader. The default uses a proper isatty check
+// (golang.org/x/term.IsTerminal) on the underlying file descriptor. A plain
+// os.ModeCharDevice check is insufficient: /dev/null is also a character
+// device, so `sync-versions </dev/null` would be misdetected as a TTY and
+// prompt+abort (exit 0) instead of erroring (exit 1) per the ratified non-TTY
+// design.
 var stdinIsTTY = func(r io.Reader) bool {
 	f, ok := r.(*os.File)
 	if !ok {
 		return false
 	}
-	info, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return info.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(f.Fd()))
 }
 
 // repoRoot resolves the git repository root from the current working directory.

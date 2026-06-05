@@ -1,6 +1,6 @@
 module github.com/dayvidpham/pasture
 
-go 1.24.13
+go 1.25.0
 
 require (
 	github.com/dayvidpham/provenance v0.0.0-20260426043732-93ef75b5b735
@@ -12,6 +12,7 @@ require (
 	github.com/yuin/goldmark v1.7.17
 	go.temporal.io/api v1.46.0
 	go.temporal.io/sdk v1.34.0
+	golang.org/x/term v0.43.0
 	google.golang.org/grpc v1.67.3
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.46.1
@@ -48,7 +49,7 @@ require (
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/net v0.36.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
-	golang.org/x/sys v0.37.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
 	golang.org/x/time v0.8.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20241209162323-e6fa225c2576 // indirect
