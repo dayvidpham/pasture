@@ -11,7 +11,7 @@ project. All contributors (human and AI) must follow these standards.
   - `pasture-msg` (Temporal-control CLI)
   - `pasture` (local task + audit CLI; routes through `protocol.TaskTracker`)
   - `pasture-release` (versioning)
-- **Language:** Go 1.23+
+- **Language:** Go 1.25+
 - **CGo:** disabled (`CGO_ENABLED=0`) — all dependencies must be pure Go
 
 ## Directory Structure

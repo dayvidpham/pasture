@@ -72,7 +72,7 @@
           name = "pasture-dev";
           packages = with pkgs; [
             gnumake
-            go_1_24
+            go_1_26
             gopls
             gotools
             go-tools
