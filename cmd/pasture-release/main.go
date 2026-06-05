@@ -9,15 +9,34 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/dayvidpham/pasture/internal/release"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/spf13/cobra"
 )
+
+// stdinIsTTY reports whether r is an interactive terminal. It is a package
+// variable so tests can override it to exercise the interactive-prompt path
+// with an injected (non-file) reader. The default inspects the underlying
+// *os.File mode for a character device.
+var stdinIsTTY = func(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
 
 // repoRoot resolves the git repository root from the current working directory.
 func repoRoot() (string, error) {
@@ -397,36 +416,121 @@ func newRegistryExecCmd() *cobra.Command {
 	}
 }
 
+// printReconcilePreview renders the canonical, user-approved reconciliation
+// table for the pending changes. The middle comparison glyph ({>,==,<}) between
+// plugin.json and the marketplace is retained; the leading ACTION arrow is
+// directional — → to push a version into the marketplace, ← to pull a plugin
+// repo. When dryRun is true a footer notes that nothing was written or pulled.
+func printReconcilePreview(w io.Writer, drift []release.VersionDrift, dryRun bool) {
+	fmt.Fprintln(w, "Reconciling registered plugins (plugin.json  ⟷  marketplace entry):")
+	for _, d := range drift {
+		switch d.Action {
+		case release.DriftWriteMarketplace:
+			fmt.Fprintf(w,
+				"   %s  plugin.json %s  >  marketplace %s   → UPDATE marketplace entry → %s\n",
+				d.Plugin, d.PluginVersion, d.MarketplaceVersion, d.PluginVersion,
+			)
+		case release.DriftPullPlugin:
+			fmt.Fprintf(w,
+				"   %s  plugin.json %s  <  marketplace %s   ← GIT PULL plugin repo (local behind released %s)\n",
+				d.Plugin, d.PluginVersion, d.MarketplaceVersion, d.MarketplaceVersion,
+			)
+		case release.DriftWriteFile:
+			fmt.Fprintf(w,
+				"   %s  %s  %s  →  %s   (sync intra-plugin version file)\n",
+				d.Plugin, d.File, d.Got, d.Want,
+			)
+		}
+	}
+	if dryRun {
+		fmt.Fprintf(w,
+			"%d change(s) pending  ·  dry-run: nothing written, no repos pulled\n",
+			len(drift),
+		)
+	} else {
+		fmt.Fprintf(w, "%d change(s) pending\n", len(drift))
+	}
+}
+
 func newRegistrySyncVersionsCmd() *cobra.Command {
 	var dryRun bool
+	var nonInteractive bool
+	var registryPath string
 	cmd := &cobra.Command{
 		Use:   "sync-versions",
-		Short: "Detect and fix version drift across registered plugins",
+		Short: "Reconcile plugin versions against the registry's marketplaces",
+		Long: `Detect and apply version drift across registered plugins.
+
+For each plugin this reconciles two things:
+  • intra-plugin version files (pyproject.toml, package.json, plugin.json …)
+  • the cross-repo marketplace entry, NEWEST-WINS: a newer plugin.json pushes
+    its version into the marketplace entry (→); a newer marketplace pulls the
+    plugin repo to catch up (←). The marketplace's own metadata.version is
+    never touched.
+
+By default, if any change is pending the full set is previewed and confirmed
+with a single [y/N] prompt. Use --non-interactive to apply without prompting
+(scripts/CI) or --dry-run to preview only.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if registryPath == "" {
+				registryPath = release.DefaultRegistryPath()
+			}
 			var r release.PluginRegistry
-			if err := r.Load(release.DefaultRegistryPath()); err != nil {
+			if err := r.Load(registryPath); err != nil {
 				return err
 			}
-			drift, err := r.SyncVersions(dryRun)
-			prefix := ""
-			if dryRun {
-				prefix = "[dry-run] "
+			out := cmd.OutOrStdout()
+			r.WithOutput(out)
+
+			// Plan: detect all pending changes with NO side effects.
+			plan, err := r.SyncVersions(true)
+			if err != nil {
+				return err
 			}
-			if len(drift) == 0 {
-				fmt.Println("All plugins are version-consistent.")
-			} else {
-				for _, d := range drift {
-					action := "fixed"
-					if dryRun {
-						action = "would fix"
-					}
-					fmt.Printf("%s%s: %s %s %s → %s\n", prefix, d.Plugin, d.File, action, d.Got, d.Want)
+			if len(plan) == 0 {
+				fmt.Fprintln(out, "All plugins are version-consistent.")
+				return nil
+			}
+
+			printReconcilePreview(out, plan, dryRun)
+
+			// --dry-run: preview only — no writes, no pulls, no prompt.
+			if dryRun {
+				return nil
+			}
+
+			// Interactive confirmation (unless --non-interactive).
+			if !nonInteractive {
+				if !stdinIsTTY(cmd.InOrStdin()) {
+					return fmt.Errorf(
+						"workflow error: refusing to prompt on a non-interactive " +
+							"terminal — pass --non-interactive to apply, or --dry-run " +
+							"to preview",
+					)
+				}
+				fmt.Fprint(out, "Apply these change(s)? [y/N]: ")
+				reader := bufio.NewReader(cmd.InOrStdin())
+				line, _ := reader.ReadString('\n')
+				switch strings.ToLower(strings.TrimSpace(line)) {
+				case "y", "yes":
+					// proceed
+				default:
+					fmt.Fprintln(out, "Aborted; no changes written, no repos pulled.")
+					return nil
 				}
 			}
-			return err
+
+			// Apply.
+			if _, err := r.SyncVersions(false); err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "Applied %d change(s).\n", len(plan))
+			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report drift without writing")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview pending changes without writing or pulling")
+	cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false, "Apply changes without prompting (scripts/CI)")
+	cmd.Flags().StringVar(&registryPath, "registry", "", "Path to the plugin registry (default: user-global registry)")
 	return cmd
 }
 
