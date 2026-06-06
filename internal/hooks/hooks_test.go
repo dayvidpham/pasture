@@ -74,6 +74,34 @@ func (h *slowHandler) Handle(ctx context.Context, _ hooks.HookPayload) error {
 
 func (h *slowHandler) Events() []hooks.HookEvent { return h.events }
 
+// gateHandler signals when Handle is entered and then blocks until released, so
+// tests can assert dispatch ordering deterministically (handler ran; dispatch
+// waited for it; dispatch returned once it completed) without wall-clock thresholds.
+type gateHandler struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+	called  atomic.Int32
+	events  []hooks.HookEvent
+}
+
+func newGateHandler(events ...hooks.HookEvent) *gateHandler {
+	return &gateHandler{started: make(chan struct{}), release: make(chan struct{}), events: events}
+}
+
+func (h *gateHandler) Handle(ctx context.Context, _ hooks.HookPayload) error {
+	h.called.Add(1)
+	h.once.Do(func() { close(h.started) })
+	select {
+	case <-h.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (h *gateHandler) Events() []hooks.HookEvent { return h.events }
+
 // errorHandler always returns a fixed error.
 type errorHandler struct {
 	err    error
@@ -214,29 +242,44 @@ func TestManager_Dispatch_EmptyManager_NoError(t *testing.T) {
 
 // ─── Manager.Dispatch — non-blocking ─────────────────────────────────────────
 
-func TestManager_Dispatch_NonBlocking_FastReturn(t *testing.T) {
+func TestManager_Dispatch_WaitsForHandlerThenReturns(t *testing.T) {
 	m := hooks.NewManager()
-	// Register a handler that sleeps longer than our test timeout budget.
-	slow := newSlowHandler(200*time.Millisecond, hooks.HookReviewCycle)
-	m.Register(slow)
+	h := newGateHandler(hooks.HookReviewCycle)
+	m.Register(h)
 
-	start := time.Now()
-	// Dispatch must return before slow handler completes.
-	// We run Dispatch with a very short deadline on the returned goroutines
-	// — actually Dispatch waits for all handlers (with per-handler timeout).
-	// What we test: Dispatch respects handler timeout so it doesn't block forever.
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	// Generous ctx — this test asserts causal ordering via channels, not a deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_ = m.Dispatch(ctx, samplePayload(hooks.HookReviewCycle))
-	elapsed := time.Since(start)
+	done := make(chan error, 1)
+	go func() { done <- m.Dispatch(ctx, samplePayload(hooks.HookReviewCycle)) }()
 
-	// Handler takes 200ms; dispatch should return within 500ms budget.
-	if elapsed > 450*time.Millisecond {
-		t.Errorf("Dispatch took %v, expected completion within 450ms", elapsed)
+	// 1. The handler must actually be invoked.
+	select {
+	case <-h.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler was never invoked")
 	}
-	if slow.called.Load() != 1 {
-		t.Errorf("slow handler was not called, want called=1, got=%d", slow.called.Load())
+
+	// 2. Dispatch must still be in-flight while the handler is blocked — it waits
+	//    for its handlers rather than returning early.
+	select {
+	case <-done:
+		t.Fatal("Dispatch returned before the handler completed; it must wait for handlers")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// 3. Releasing the handler lets Dispatch return — driven by handler completion,
+	//    not a wall-clock budget.
+	close(h.release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Dispatch did not return after the handler completed")
+	}
+
+	if h.called.Load() != 1 {
+		t.Errorf("handler called %d times, want 1", h.called.Load())
 	}
 }
 
