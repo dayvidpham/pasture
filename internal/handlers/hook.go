@@ -31,9 +31,11 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -84,10 +86,14 @@ const (
 )
 
 // GitMetaGatherer derives commit metadata for a sha. Returns a map keyed by the
-// meta* constants above. Implementations MUST be best-effort: a missing key is
-// fine (the corresponding flag, if set, wins anyway), and the error is advisory
-// — the handler proceeds with whatever keys are present. Injectable so tests can
-// supply a fake without shelling git.
+// meta* constants above. A returned non-nil error is FATAL to the operation: the
+// handler consults the gatherer only when at least one metadata flag is absent,
+// and if that attempt fails it records nothing and returns an actionable error
+// (C4). Implementations should therefore return an error when they cannot
+// resolve metadata for the sha (e.g. not in a git repo / sha not found); an
+// individual missing key within a successful gather is fine (the corresponding
+// flag, if set, wins anyway). Injectable so tests can supply a fake — including
+// a failing fake to exercise the fail-hard path — without shelling git.
 type GitMetaGatherer func(sha string) (map[string]string, error)
 
 // HookRecordInput captures the CLI inputs for `pasture hook record`.
@@ -162,13 +168,42 @@ func HookRecord(w io.Writer, in HookRecordInput) (int, error) {
 		return errors.ExitCode(err), err
 	}
 
-	// 5. Assemble metadata. Explicit flags override git-derived values; git
-	//    fills only the absent flags (best-effort — gather errors are advisory).
-	gather := in.Gatherer
-	if gather == nil {
-		gather = gatherGitMeta
+	// 5. Assemble metadata. Explicit flags override git-derived values. Git is
+	//    consulted ONLY when at least one metadata field is absent. If that
+	//    gather is attempted and fails (not in a git repo / sha not found / git
+	//    error), we FAIL HARD and record nothing (C4) — recording an event with
+	//    missing or wrong metadata is worse than refusing. When all four fields
+	//    are supplied explicitly, git is never consulted, so there is no failure
+	//    path.
+	var gitMeta map[string]string
+	if in.Message == nil || in.Author == nil || in.Branch == nil || in.Timestamp == nil {
+		gather := in.Gatherer
+		if gather == nil {
+			gather = gatherGitMeta
+		}
+		m, gErr := gather(sha)
+		if gErr != nil {
+			se := &errors.StructuredError{
+				Category: errors.CategoryValidation,
+				What:     "Couldn't read git metadata for the commit being recorded.",
+				Why: fmt.Sprintf(
+					"One or more metadata flags were omitted, so pasture tried to read them\n"+
+						"from git for sha %q — but the git lookup failed. This usually means the\n"+
+						"command wasn't run inside the commit's git repository, or the SHA\n"+
+						"doesn't exist there.", sha),
+				Where:  "Recording a hook event (internal/handlers/hook.go in handlers.HookRecord, git-metadata gather step).",
+				Impact: "Nothing was recorded — to avoid writing an event with missing or wrong\nmetadata, pasture stops instead of guessing.",
+				Fix: "1. Run inside the commit's git repo:\n" +
+					"     cd <repo> && pasture hook record --event git-commit --sha " + sha + "\n" +
+					"2. Or pass every metadata field explicitly so git isn't consulted:\n" +
+					"     pasture hook record --event git-commit --sha " + sha + " \\\n" +
+					"       --message <m> --author <a> --branch <b> --timestamp <t>",
+				Cause: gErr,
+			}
+			return errors.ExitCode(se), se
+		}
+		gitMeta = m
 	}
-	gitMeta, _ := gather(sha) // best-effort: ignore error, fall back to flags
 
 	data := map[string]any{hooks.GitCommitDataKey: sha}
 	mergeMeta(data, metaMessage, in.Message, gitMeta)
@@ -240,25 +275,26 @@ func listSupportedHookEvents() string {
 	return strings.Join(parts, ", ")
 }
 
-// gatherGitMeta is the default GitMetaGatherer: it best-effort-derives commit
-// metadata by shelling `git` in the current working directory. It NEVER returns
-// an error — any git failure simply yields fewer (or no) keys, and the handler
-// falls back to whatever metadata flags were supplied. This keeps the handler
-// logic testable without a git repo (tests inject a fake gatherer) while the
-// real path Just Works when run inside a checkout.
+// gatherGitMeta is the default GitMetaGatherer: it derives commit metadata by
+// shelling `git` in the current working directory. It FAILS HARD — when the
+// `git show` lookup for `sha` fails, it returns an actionable error and the
+// handler records nothing (C4). This is only ever called when at least one
+// metadata flag was omitted; supply all four flags to skip git entirely.
 //
 // CWD-relative (A2): the git commands run in the PROCESS working directory, not
 // in the repository that actually contains `sha`. If the CLI is invoked from
-// outside a git repo, or from a different repo that doesn't know `sha`, the
-// `git show` lookup simply fails and those keys are omitted (best-effort). To
-// record metadata for a commit in another repo, either run `pasture hook
-// record` from inside that repo or pass the metadata explicitly via flags.
+// outside a git repo, or from a repo that doesn't know `sha`, `git show` fails
+// and this returns an error (the handler then fails hard rather than recording
+// partial data). To record metadata for a commit in another repo, run from
+// inside that repo or pass the metadata explicitly via flags.
 //
 // Branch semantics (A3): the "branch" key is the CURRENT HEAD's branch
 // (`git rev-parse --abbrev-ref HEAD`), NOT the branch that `sha` belongs to.
 // git has no single answer for "the branch of a commit" (a commit can be on
 // many branches or none), so this records "the branch checked out when the
-// commit was recorded". Pass --branch explicitly to override.
+// commit was recorded". Pass --branch explicitly to override. Branch resolution
+// is the one best-effort step: once `git show` has confirmed a valid repo + sha,
+// a missing/detached branch is omitted rather than treated as fatal.
 func gatherGitMeta(sha string) (map[string]string, error) {
 	meta := make(map[string]string)
 
@@ -266,23 +302,30 @@ func gatherGitMeta(sha string) (map[string]string, error) {
 	// separated by an ASCII unit-separator (0x1f) that can't appear in any field.
 	const sep = "\x1f"
 	format := "--format=%s" + sep + "%an <%ae>" + sep + "%cI"
-	if out, err := exec.Command("git", "show", "-s", format, sha).Output(); err == nil {
-		fields := strings.SplitN(strings.TrimRight(string(out), "\n"), sep, 3)
-		if len(fields) == 3 {
-			if fields[0] != "" {
-				meta[metaMessage] = fields[0]
-			}
-			if fields[1] != "" {
-				meta[metaAuthor] = fields[1]
-			}
-			if fields[2] != "" {
-				meta[metaTimestamp] = fields[2]
-			}
+	showCmd := exec.Command("git", "show", "-s", format, sha)
+	var stderr bytes.Buffer
+	showCmd.Stderr = &stderr
+	out, err := showCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("`git show -s %s` failed in %s: %w — %s",
+			sha, cwdForError(), err, strings.TrimSpace(stderr.String()))
+	}
+
+	fields := strings.SplitN(strings.TrimRight(string(out), "\n"), sep, 3)
+	if len(fields) == 3 {
+		if fields[0] != "" {
+			meta[metaMessage] = fields[0]
+		}
+		if fields[1] != "" {
+			meta[metaAuthor] = fields[1]
+		}
+		if fields[2] != "" {
+			meta[metaTimestamp] = fields[2]
 		}
 	}
 
-	// Branch is the current HEAD's branch name (best-effort; "HEAD" means a
-	// detached checkout, which we skip rather than record).
+	// Branch is the current HEAD's branch name (best-effort within a confirmed
+	// repo; "HEAD" means a detached checkout, which we skip rather than record).
 	if out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
 		if branch := strings.TrimSpace(string(out)); branch != "" && branch != "HEAD" {
 			meta[metaBranch] = branch
@@ -290,4 +333,14 @@ func gatherGitMeta(sha string) (map[string]string, error) {
 	}
 
 	return meta, nil
+}
+
+// cwdForError returns the process working directory for inclusion in the
+// gather-failure error (so the user can see WHERE git was run). Falls back to a
+// placeholder if the cwd can't be determined — never fatal.
+func cwdForError() string {
+	if wd, err := os.Getwd(); err == nil {
+		return wd
+	}
+	return "the current directory"
 }
