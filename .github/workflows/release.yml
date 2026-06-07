@@ -33,6 +33,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 2   # HEAD + parent, to diff the version
+          # Don't persist the default GITHUB_TOKEN as a git credential — its
+          # http.extraheader would override the App token in the tag-push URL
+          # below (causing a 403 as github-actions[bot]). With this false, the
+          # App token minted next is the only credential used for the push.
+          persist-credentials: false
 
       - name: Mint GitHub App token
         id: app-token
