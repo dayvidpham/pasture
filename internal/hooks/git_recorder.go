@@ -288,7 +288,13 @@ func RegisterDefaultRecorders(
 				"   file a bug.",
 		}
 	}
-	gr, err := NewGitRecorder(tracker, auditDB)
+	// Subscribe the recorder to HookGitCommit ONLY, replacing the constructor
+	// default (HookSliceCompleted). RATIFIED decision (PROPOSAL-1, plan-UAT):
+	// the git-commit recording path is keyed on a dedicated event so the CLI
+	// (`pasture hook record --event git-commit`) and any future Claude Code
+	// Stop-hook bridge dispatch the SAME HookGitCommit payload through this one
+	// recorder. WithSubscribedEvents REPLACES (does not append to) the default.
+	gr, err := NewGitRecorder(tracker, auditDB, WithSubscribedEvents(HookGitCommit))
 	if err != nil {
 		return nil, err
 	}

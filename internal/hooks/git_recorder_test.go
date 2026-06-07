@@ -49,11 +49,35 @@ func openRecorderFixture(t *testing.T) (*hooks.GitRecorder, protocol.TaskTracker
 		}
 	})
 
-	gr, err := hooks.NewGitRecorder(tracker, auditDB)
+	// Subscribe to HookGitCommit to mirror production wiring
+	// (RegisterDefaultRecorders subscribes the recorder to HookGitCommit only,
+	// replacing the constructor default). The dispatch-path tests below rely on
+	// this so they exercise the same event the CLI handler dispatches.
+	gr, err := hooks.NewGitRecorder(tracker, auditDB, hooks.WithSubscribedEvents(hooks.HookGitCommit))
 	if err != nil {
 		t.Fatalf("NewGitRecorder: %v", err)
 	}
 	return gr, tracker, auditDB, dbPath
+}
+
+// countAuditEventsByType returns the count of audit_events rows with the given
+// event_type via a fresh verification handle. Used to assert a GitCommit row
+// landed (not just a context_edges edge).
+func countAuditEventsByType(t *testing.T, dbPath string, eventType protocol.EventType) int {
+	t.Helper()
+	verifyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open verify: %v", err)
+	}
+	defer verifyDB.Close()
+	var n int
+	if err := verifyDB.QueryRow(
+		`SELECT COUNT(*) FROM audit_events WHERE event_type = ?`,
+		string(eventType),
+	).Scan(&n); err != nil {
+		t.Fatalf("count audit_events: %v", err)
+	}
+	return n
 }
 
 // countContextEdges returns the count of context_edges rows for the (kind,
@@ -173,7 +197,7 @@ func TestGitRecorder_Handle_RecordsWhenSHAPresent(t *testing.T) {
 	const sha = "ab1234567890abcdef1234567890abcdef123456"
 
 	payload := hooks.HookPayload{
-		Event:   hooks.HookSliceCompleted,
+		Event:   hooks.HookGitCommit,
 		EpochId: "aura-plugins--01968a3c-1111-7000-8000-000000000123",
 		Phase:   protocol.PhaseWorkerSlices,
 		Data:    map[string]any{hooks.GitCommitDataKey: sha, "slice": "S9"},
@@ -194,7 +218,7 @@ func TestGitRecorder_Handle_NoOpWhenSHAAbsent(t *testing.T) {
 	gr, _, _, dbPath := openRecorderFixture(t)
 
 	payload := hooks.HookPayload{
-		Event:   hooks.HookSliceCompleted,
+		Event:   hooks.HookGitCommit,
 		EpochId: "epoch-x",
 		Data:    map[string]any{"slice": "S9"}, // no "sha" key
 	}
@@ -224,7 +248,7 @@ func TestGitRecorder_Handle_NoOpWhenSHAEmptyString(t *testing.T) {
 	gr, _, _, dbPath := openRecorderFixture(t)
 
 	payload := hooks.HookPayload{
-		Event: hooks.HookSliceCompleted,
+		Event: hooks.HookGitCommit,
 		Data:  map[string]any{hooks.GitCommitDataKey: ""}, // empty value
 	}
 	if err := gr.Handle(ctx, payload); err != nil {
@@ -242,7 +266,7 @@ func TestGitRecorder_Handle_NoOpWhenSHAWrongType(t *testing.T) {
 	gr, _, _, dbPath := openRecorderFixture(t)
 
 	payload := hooks.HookPayload{
-		Event: hooks.HookSliceCompleted,
+		Event: hooks.HookGitCommit,
 		Data:  map[string]any{hooks.GitCommitDataKey: 12345}, // wrong type
 	}
 	if err := gr.Handle(ctx, payload); err != nil {
@@ -264,9 +288,10 @@ func TestGitRecorder_Handle_NoOpWhenSHAWrongType(t *testing.T) {
 
 // ─── Events() / hooks.Manager dispatch wiring ────────────────────────────────
 //
-// The recorder subscribes to HookSliceCompleted by default. When registered
-// with a hooks.Manager and the manager dispatches a matching payload, the
-// recorder receives it via the Manager (not just via direct call).
+// The recorder subscribes to HookGitCommit (production wiring). When registered
+// with a hooks.Manager and the manager dispatches a matching HookGitCommit
+// payload, the recorder receives it via the Manager (not just via direct call)
+// and writes exactly one EventGitCommit audit row keyed on the sha.
 
 func TestGitRecorder_DispatchesViaManager(t *testing.T) {
 	t.Parallel()
@@ -280,12 +305,17 @@ func TestGitRecorder_DispatchesViaManager(t *testing.T) {
 	const sha = "managerdispatch1234567890abcdef0123456789"
 
 	payload := hooks.HookPayload{
-		Event: hooks.HookSliceCompleted,
+		Event: hooks.HookGitCommit,
 		Data:  map[string]any{hooks.GitCommitDataKey: sha},
 	}
 	if err := mgr.Dispatch(ctx, payload); err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
+	// Exactly one GitCommit audit row was written...
+	if got := countAuditEventsByType(t, dbPath, tasks.EventGitCommit); got != 1 {
+		t.Errorf("after Manager.Dispatch(HookGitCommit), audit_events(GitCommit) = %d, want 1", got)
+	}
+	// ...and it is linked to the sha via a ContextGit edge.
 	if got := countContextEdges(t, dbPath, protocol.ContextGit, sha); got != 1 {
 		t.Errorf("after Manager.Dispatch, context_edges (GitContext, %q) = %d, want 1", sha, got)
 	}
@@ -350,7 +380,7 @@ func TestRegisterDefaultRecorders_HappyPath(t *testing.T) {
 	// Dispatch a matching payload — the registered recorder should pick it up.
 	const sha = "regdef1234567890abcdef1234567890abcdef12"
 	if err := mgr.Dispatch(context.Background(), hooks.HookPayload{
-		Event: hooks.HookSliceCompleted,
+		Event: hooks.HookGitCommit,
 		Data:  map[string]any{hooks.GitCommitDataKey: sha},
 	}); err != nil {
 		t.Fatalf("Dispatch: %v", err)

@@ -64,6 +64,16 @@ const (
 	HookSessionStarted HookEvent = "session_started"
 	// HookSessionEnded fires when a Claude Code agent session ends.
 	HookSessionEnded HookEvent = "session_ended"
+
+	// Free-floating events (1)
+
+	// HookGitCommit fires after a git commit completes (e.g. from a Claude
+	// Code Stop hook firing after `git agent-commit`, or directly via
+	// `pasture hook record --event git-commit --sha <sha>`). The payload's
+	// Data map carries the commit SHA under GitCommitDataKey ("sha") plus
+	// optional metadata (message, author, branch, timestamp). GitRecorder
+	// subscribes to this event to write a free-floating GitCommit audit row.
+	HookGitCommit HookEvent = "git_commit"
 )
 
 // AllHookEvents is the ordered slice of all valid HookEvent values.
@@ -81,6 +91,7 @@ var AllHookEvents = []HookEvent{
 	HookConnectionLost,
 	HookSessionStarted,
 	HookSessionEnded,
+	HookGitCommit,
 }
 
 // ─── HookPayload ─────────────────────────────────────────────────────────────

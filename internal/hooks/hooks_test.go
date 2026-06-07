@@ -2,6 +2,7 @@ package hooks_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -128,8 +129,8 @@ func samplePayload(event hooks.HookEvent) hooks.HookPayload {
 // ─── AllHookEvents ───────────────────────────────────────────────────────────
 
 func TestAllHookEvents_Count(t *testing.T) {
-	if len(hooks.AllHookEvents) != 12 {
-		t.Errorf("AllHookEvents: want 12 events, got %d", len(hooks.AllHookEvents))
+	if len(hooks.AllHookEvents) != 13 {
+		t.Errorf("AllHookEvents: want 13 events, got %d", len(hooks.AllHookEvents))
 	}
 }
 
@@ -157,6 +158,7 @@ func TestAllHookEvents_ContainsExpected(t *testing.T) {
 		hooks.HookConnectionLost,
 		hooks.HookSessionStarted,
 		hooks.HookSessionEnded,
+		hooks.HookGitCommit,
 	}
 	set := make(map[hooks.HookEvent]bool)
 	for _, e := range hooks.AllHookEvents {
@@ -166,6 +168,19 @@ func TestAllHookEvents_ContainsExpected(t *testing.T) {
 		if !set[e] {
 			t.Errorf("AllHookEvents: missing expected event %q", e)
 		}
+	}
+}
+
+// TestHookGitCommit_WireValueAndMembership pins the wire value of the
+// free-floating git-commit event and asserts it is a member of AllHookEvents
+// (L1 — the shared contract consumed by GitRecorder's subscription, the CLI
+// handler's payload Event, and the dispatch tests).
+func TestHookGitCommit_WireValueAndMembership(t *testing.T) {
+	if hooks.HookGitCommit != "git_commit" {
+		t.Errorf("HookGitCommit wire value = %q, want %q", hooks.HookGitCommit, "git_commit")
+	}
+	if !slices.Contains(hooks.AllHookEvents, hooks.HookGitCommit) {
+		t.Errorf("AllHookEvents does not contain HookGitCommit (%q)", hooks.HookGitCommit)
 	}
 }
 
