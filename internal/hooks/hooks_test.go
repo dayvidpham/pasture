@@ -420,7 +420,7 @@ func TestManager_Dispatch_Concurrent_MultipleDispatches(t *testing.T) {
 
 // TestManager_Dispatch_NonRecordingHandler_EmptyResult asserts that when a
 // registered handler returns a zero HandleOutcome, DispatchResult.RecordedEventIDs
-// is empty — no phantom ids are injected (FIX-1 hooks-layer property test).
+// is empty — no phantom ids are injected.
 func TestManager_Dispatch_NonRecordingHandler_EmptyResult(t *testing.T) {
 	m := hooks.NewManager()
 	// recordingHandler returns a zero HandleOutcome (no ids).
@@ -438,7 +438,7 @@ func TestManager_Dispatch_NonRecordingHandler_EmptyResult(t *testing.T) {
 
 // TestManager_Dispatch_MultiHandler_AggregatesAllIDs registers two id-generating
 // handlers for the same event and asserts the DispatchResult contains BOTH ids
-// (FIX-3: proves the append(..., oc.RecordedEventIDs...) concatenation across
+// (proves the append(..., oc.RecordedEventIDs...) concatenation across
 // handlers). The two handlers share neither state nor a common id space, so
 // only the count (not the specific values) is asserted here; per-backend id
 // uniqueness is tested by the real-recorder tests in git_recorder_test.go.
