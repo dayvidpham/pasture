@@ -118,6 +118,25 @@ func (h *errorHandler) Handle(_ context.Context, _ hooks.HookPayload) (hooks.Han
 }
 func (h *errorHandler) Events() []hooks.HookEvent { return h.events }
 
+// idGeneratingHandler returns a unique int64 id per Handle call, simulating a
+// handler that records one audit row per invocation. Used to assert per-dispatch
+// id partitioning without a real SQLite backend.
+type idGeneratingHandler struct {
+	counter atomic.Int64
+	events  []hooks.HookEvent
+}
+
+func newIDGeneratingHandler(events ...hooks.HookEvent) *idGeneratingHandler {
+	return &idGeneratingHandler{events: events}
+}
+
+func (h *idGeneratingHandler) Handle(_ context.Context, _ hooks.HookPayload) (hooks.HandleOutcome, error) {
+	id := h.counter.Add(1)
+	return hooks.HandleOutcome{RecordedEventIDs: []int64{id}}, nil
+}
+
+func (h *idGeneratingHandler) Events() []hooks.HookEvent { return h.events }
+
 // samplePayload builds a HookPayload for the given event.
 func samplePayload(event hooks.HookEvent) hooks.HookPayload {
 	return hooks.HookPayload{
@@ -353,22 +372,90 @@ func TestManager_Dispatch_Concurrent_AllHandlersReceivePayload(t *testing.T) {
 
 func TestManager_Dispatch_Concurrent_MultipleDispatches(t *testing.T) {
 	m := hooks.NewManager()
-	h := newRecordingHandler(hooks.HookVoteRecorded)
+	// Use an id-generating handler so each dispatch produces a distinct id,
+	// letting us verify per-dispatch partitioning (no cross-dispatch carry-over).
+	h := newIDGeneratingHandler(hooks.HookVoteRecorded)
 	m.Register(h)
 
 	const numDispatches = 50
+	results := make([]hooks.DispatchResult, numDispatches)
 	var wg sync.WaitGroup
 	for i := 0; i < numDispatches; i++ {
 		wg.Add(1)
-		go func() {
+		go func(idx int) {
 			defer wg.Done()
-			m.Dispatch(context.Background(), samplePayload(hooks.HookVoteRecorded)) //nolint
-		}()
+			res, err := m.Dispatch(context.Background(), samplePayload(hooks.HookVoteRecorded))
+			if err != nil {
+				t.Errorf("Dispatch[%d]: unexpected error: %v", idx, err)
+			}
+			results[idx] = res
+		}(i)
 	}
 	wg.Wait()
 
-	if h.count() != numDispatches {
-		t.Errorf("handler called %d times, want %d", h.count(), numDispatches)
+	// 1. Every dispatch must carry exactly one id (one handler, one Handle call).
+	for i, res := range results {
+		if len(res.RecordedEventIDs) != 1 {
+			t.Errorf("dispatch[%d]: RecordedEventIDs = %v, want exactly one id", i, res.RecordedEventIDs)
+		}
+	}
+
+	// 2. All ids across the 50 dispatches must be distinct — no cross-dispatch
+	//    carry-over or id sharing between results.
+	seen := make(map[int64]int, numDispatches)
+	for i, res := range results {
+		for _, id := range res.RecordedEventIDs {
+			if prev, dup := seen[id]; dup {
+				t.Errorf("id %d appears in both dispatch[%d] and dispatch[%d] — cross-dispatch carry-over", id, prev, i)
+			}
+			seen[id] = i
+		}
+	}
+	if len(seen) != numDispatches {
+		t.Errorf("union of ids = %d distinct, want %d (one unique id per dispatch)", len(seen), numDispatches)
+	}
+}
+
+// ─── Manager.Dispatch — DispatchResult aggregation ───────────────────────────
+
+// TestManager_Dispatch_NonRecordingHandler_EmptyResult asserts that when a
+// registered handler returns a zero HandleOutcome, DispatchResult.RecordedEventIDs
+// is empty — no phantom ids are injected (FIX-1 hooks-layer property test).
+func TestManager_Dispatch_NonRecordingHandler_EmptyResult(t *testing.T) {
+	m := hooks.NewManager()
+	// recordingHandler returns a zero HandleOutcome (no ids).
+	h := newRecordingHandler(hooks.HookEpochStarted)
+	m.Register(h)
+
+	res, err := m.Dispatch(context.Background(), samplePayload(hooks.HookEpochStarted))
+	if err != nil {
+		t.Fatalf("Dispatch: unexpected error: %v", err)
+	}
+	if len(res.RecordedEventIDs) != 0 {
+		t.Errorf("DispatchResult.RecordedEventIDs = %v, want empty for a non-recording handler", res.RecordedEventIDs)
+	}
+}
+
+// TestManager_Dispatch_MultiHandler_AggregatesAllIDs registers two id-generating
+// handlers for the same event and asserts the DispatchResult contains BOTH ids
+// (FIX-3: proves the append(..., oc.RecordedEventIDs...) concatenation across
+// handlers). The two handlers share neither state nor a common id space, so
+// only the count (not the specific values) is asserted here; per-backend id
+// uniqueness is tested by the real-recorder tests in git_recorder_test.go.
+func TestManager_Dispatch_MultiHandler_AggregatesAllIDs(t *testing.T) {
+	m := hooks.NewManager()
+	h1 := newIDGeneratingHandler(hooks.HookSliceCompleted)
+	h2 := newIDGeneratingHandler(hooks.HookSliceCompleted)
+	m.Register(h1)
+	m.Register(h2)
+
+	res, err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceCompleted))
+	if err != nil {
+		t.Fatalf("Dispatch: unexpected error: %v", err)
+	}
+	// Both handlers contribute exactly one id each → the aggregated result has 2.
+	if len(res.RecordedEventIDs) != 2 {
+		t.Fatalf("DispatchResult.RecordedEventIDs = %v (len %d), want exactly 2 ids (one per handler)", res.RecordedEventIDs, len(res.RecordedEventIDs))
 	}
 }
 

@@ -112,13 +112,9 @@ type HookPayload struct {
 
 // HandleOutcome is the per-handler result of a single Handle invocation.
 //
-// RecordedEventIDs holds the audit_events row ids this handler wrote while
-// processing the payload, in write order. A handler that wrote nothing (for
-// example, a payload it chose to ignore) returns the zero value
-// (RecordedEventIDs == nil). The ids are correlated to THIS Handle call by
-// construction — the handler returns exactly the ids it produced for the
-// payload it was given, with no shared mutable state, so the value is race-free
-// even when the same handler instance services concurrent dispatches.
+// A handler that wrote nothing (for example, a payload it chose to ignore)
+// returns the zero value (RecordedEventIDs == nil). See DispatchResult for the
+// race-safety rationale that applies equally here.
 type HandleOutcome struct {
 	// RecordedEventIDs are the audit_events row ids written during this Handle
 	// call, in write order. Nil/empty means the handler recorded nothing.

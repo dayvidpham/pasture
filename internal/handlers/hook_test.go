@@ -11,6 +11,7 @@ package handlers_test
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	stderrors "errors"
@@ -22,6 +23,7 @@ import (
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -536,6 +538,110 @@ func TestHookRecord_MissingSHA_ActionableError(t *testing.T) {
 	}
 	_, code, err := handlers.HookRecord(in)
 	requireValidationError(t, code, err)
+}
+
+// ─── (FIX-5) Cause preservation on gather failure ─────────────────────────────
+
+// TestHookRecord_GatherFails_CauseIsReachable asserts that the wrapped
+// underlying gather error is reachable via errors.As/Unwrap, so a regression
+// that drops Cause: is caught.
+func TestHookRecord_GatherFails_CauseIsReachable(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	const sha = "cafebabedeadbeefcafebabedeadbeef0badcafe"
+
+	sentinel := stderrors.New("sentinel gather failure")
+	failing := func(string) (map[string]string, error) { return nil, sentinel }
+
+	in := handlers.HookRecordInput{
+		DBPath:   dbPath,
+		Event:    string(handlers.HookEventGitCommit),
+		SHA:      sha,
+		Gatherer: failing,
+	}
+
+	_, _, err := handlers.HookRecord(in)
+	if err == nil {
+		t.Fatal("expected error from failing gatherer, got nil")
+	}
+	// The sentinel gather error must be reachable through the StructuredError chain.
+	if !stderrors.Is(err, sentinel) {
+		t.Errorf("errors.Is(err, sentinel) = false; Cause field is not wired through the error chain: %v", err)
+	}
+}
+
+// ─── (FIX-1) Empty-RecordedEventIDs guard — DI seam + test ───────────────────
+
+// nonRecordingHandler is a hook handler that subscribes to HookGitCommit but
+// returns a zero HandleOutcome (never records anything). Used to exercise the
+// post-dispatch empty-guard in HookRecord without a real recorder.
+type nonRecordingHandler struct{}
+
+func (h *nonRecordingHandler) Handle(_ context.Context, _ hooks.HookPayload) (hooks.HandleOutcome, error) {
+	return hooks.HandleOutcome{}, nil // zero outcome — no ids
+}
+
+func (h *nonRecordingHandler) Events() []hooks.HookEvent {
+	return []hooks.HookEvent{hooks.HookGitCommit}
+}
+
+// requireStorageError asserts err is a *StructuredError with CategoryStorage
+// (exit 5). Used to verify the empty-guard branch (FIX-6 reclassification).
+func requireStorageError(t *testing.T, code int, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected storage error, got nil")
+	}
+	var se *pasterrors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("error is not *StructuredError: %v", err)
+	}
+	if se.Category != pasterrors.CategoryStorage {
+		t.Errorf("Category = %q, want %q", se.Category, pasterrors.CategoryStorage)
+	}
+	if code != 5 {
+		t.Errorf("exit code = %d, want 5 (storage)", code)
+	}
+}
+
+// TestHookRecord_EmptyGuard_NoRecorderReported exercises the post-dispatch
+// guard that fires when all handlers returned a zero HandleOutcome (no ids).
+// A non-recording handler is injected via the Registrar seam so this branch
+// is reached without bypassing the Manager pipeline.
+func TestHookRecord_EmptyGuard_NoRecorderReported(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	const sha = "abababababababababababababababababababababab"
+
+	empty := func(string) (map[string]string, error) { return map[string]string{}, nil }
+
+	// Registrar that registers a non-recording handler instead of the real GitRecorder.
+	nonRecorder := &nonRecordingHandler{}
+	injectRegistrar := func(mgr *hooks.Manager, _ protocol.TaskTracker, _ *sql.DB) (*hooks.GitRecorder, error) {
+		mgr.Register(nonRecorder)
+		return nil, nil // no GitRecorder returned; handler is subscribed via Register
+	}
+
+	in := handlers.HookRecordInput{
+		DBPath:    dbPath,
+		Event:     string(handlers.HookEventGitCommit),
+		SHA:       sha,
+		Gatherer:  empty,
+		Registrar: injectRegistrar,
+	}
+
+	_, code, err := handlers.HookRecord(in)
+	requireStorageError(t, code, err)
+
+	// What + Fix text must be present and actionable.
+	var se *pasterrors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("error is not *StructuredError: %v", err)
+	}
+	if !bytesContains(se.What, "no recorder reported") {
+		t.Errorf("What should mention 'no recorder reported'; got:\n%s", se.What)
+	}
+	if !bytesContains(se.Fix, "wiring bug") {
+		t.Errorf("Fix should mention 'wiring bug'; got:\n%s", se.Fix)
+	}
 }
 
 // bytesContains reports whether s contains substr (avoids importing strings

@@ -41,6 +41,10 @@ func TestCLI_HookRecord_FlagWiring_RoundTrips(t *testing.T) {
 	if !strings.Contains(out.stdout, "recorded git-commit event for sha "+sha) {
 		t.Errorf("success line missing; stdout=%q", out.stdout)
 	}
+	// FIX-4: assert the event-id suffix is present end-to-end through the real binary.
+	if !strings.Contains(out.stdout, "(event #") {
+		t.Errorf("event-id suffix '(event #' missing from success line; stdout=%q", out.stdout)
+	}
 
 	// Read the stored payload directly so the assertion isn't subject to the
 	// text formatter's payload truncation. The flags must have reached the

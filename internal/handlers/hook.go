@@ -33,6 +33,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"os/exec"
@@ -41,6 +42,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // SupportedHookEvent is a CLI-facing event name accepted by
@@ -95,11 +97,18 @@ const (
 // a failing fake to exercise the fail-hard path — without shelling git.
 type GitMetaGatherer func(sha string) (map[string]string, error)
 
+// RecorderRegistrar is the function that registers hook handlers onto a
+// Manager. It mirrors hooks.RegisterDefaultRecorders so callers can inject an
+// alternative registration for testing purposes (e.g. a non-recording handler
+// to exercise the empty-guard branch). nil → hooks.RegisterDefaultRecorders.
+type RecorderRegistrar func(mgr *hooks.Manager, tracker protocol.TaskTracker, auditDB *sql.DB) (*hooks.GitRecorder, error)
+
 // HookRecordInput captures the CLI inputs for `pasture hook record`.
 //
 // The optional metadata fields are pointers so the handler can distinguish
 // "flag absent" (nil → git may fill it) from "flag set to empty" (non-nil ""
 // → explicit override). Gatherer is injectable; nil defaults to gatherGitMeta.
+// Registrar is injectable; nil defaults to hooks.RegisterDefaultRecorders.
 type HookRecordInput struct {
 	DBPath string
 	Event  string
@@ -113,6 +122,12 @@ type HookRecordInput struct {
 	// Gatherer derives metadata from git when a flag is absent. nil → the real
 	// git-backed gatherGitMeta.
 	Gatherer GitMetaGatherer
+
+	// Registrar registers hook handlers onto the in-process Manager. nil →
+	// hooks.RegisterDefaultRecorders, which subscribes the GitRecorder to
+	// HookGitCommit. Inject an alternative to unit-test the post-dispatch guard
+	// without standing up a real recorder.
+	Registrar RecorderRegistrar
 }
 
 // HookRecordResult is the success outcome of HookRecord, handed back to the CLI
@@ -173,11 +188,16 @@ func HookRecord(in HookRecordInput) (HookRecordResult, int, error) {
 	}
 	defer auditDB.Close()
 
-	// 4. Build an in-process Manager and register the default recorders
-	//    (GitRecorder subscribed to HookGitCommit). This is the same pipeline
-	//    pastured wires — the CLI just constructs it locally.
+	// 4. Build an in-process Manager and register the recorders. The injectable
+	//    Registrar (default: hooks.RegisterDefaultRecorders) subscribes the
+	//    GitRecorder to HookGitCommit. This is the same pipeline pastured wires —
+	//    the CLI just constructs it locally.
+	registrar := in.Registrar
+	if registrar == nil {
+		registrar = hooks.RegisterDefaultRecorders
+	}
 	mgr := hooks.NewManager()
-	if _, err := hooks.RegisterDefaultRecorders(mgr, tracker, auditDB); err != nil {
+	if _, err := registrar(mgr, tracker, auditDB); err != nil {
 		return HookRecordResult{}, errors.ExitCode(err), err
 	}
 
@@ -244,14 +264,15 @@ func HookRecord(in HookRecordInput) (HookRecordResult, int, error) {
 	//    case a future wiring change leaves no recorder subscribed.
 	if len(res.RecordedEventIDs) == 0 {
 		se := &errors.StructuredError{
-			Category: errors.CategoryValidation,
+			Category: errors.CategoryStorage,
 			What:     "The git-commit event was dispatched but no recorder reported saving it.",
 			Why: "The in-process hook Manager dispatched the event but returned no\n" +
 				"recorded-event ids. This means no handler was subscribed to the\n" +
-				"git-commit hook event when the dispatch ran — a wiring bug.",
+				"git-commit hook event when the dispatch ran, or the subscribed handler\n" +
+				"returned a zero outcome — a wiring bug, not a user input error.",
 			Where:  "Recording a hook event (internal/handlers/hook.go in handlers.HookRecord, post-dispatch step).",
 			Impact: "It is not possible to confirm the event reached the audit trail; treat the record as not durably written.",
-			Fix: "1. This indicates the default recorders were not registered.\n" +
+			Fix: "1. This indicates the default recorders were not registered correctly.\n" +
 				"2. If you hit this from production code, this is a wiring bug — please\n" +
 				"   file a bug.",
 		}
