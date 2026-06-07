@@ -124,24 +124,38 @@ func FormatEpochState(result types.QueryStateResult, format types.OutputFormat) 
 }
 
 // hookRecordJSON is the JSON wire representation of a recorded hook event.
-// camelCase keys match the package convention.
+// camelCase keys match the package convention. Metadata fields use omitempty
+// so keys absent from the recording (e.g. branch on a detached HEAD) are
+// omitted rather than emitted as empty strings.
 type hookRecordJSON struct {
 	EventType string `json:"eventType"`
 	SHA       string `json:"sha"`
 	EventID   int64  `json:"eventId"`
+	Message   string `json:"message,omitempty"`
+	Author    string `json:"author,omitempty"`
+	Branch    string `json:"branch,omitempty"`
+	Timestamp string `json:"timestamp,omitempty"`
 }
 
 // FormatHookRecord formats the result of `pasture hook record` for CLI output.
 //
-// JSON mode: {"eventType": "...", "sha": "...", "eventId": N}
-// Text mode: "recorded <eventType> event for sha <sha> (event #N)"
-func FormatHookRecord(eventType, sha string, eventID int64, format types.OutputFormat) (string, error) {
+// JSON mode: {"eventType": "...", "sha": "...", "eventId": N, "message": "...",
+//
+//	"author": "...", "branch": "...", "timestamp": "..."} — metadata fields
+//	are omitted (omitempty) when not recorded (e.g. branch on detached HEAD).
+//
+// Text mode: "recorded <eventType> event for sha <sha> (event #N)" (unchanged).
+func FormatHookRecord(eventType, sha string, eventID int64, message, author, branch, timestamp string, format types.OutputFormat) (string, error) {
 	switch format {
 	case types.OutputJSON:
 		b, err := json.MarshalIndent(hookRecordJSON{
 			EventType: eventType,
 			SHA:       sha,
 			EventID:   eventID,
+			Message:   message,
+			Author:    author,
+			Branch:    branch,
+			Timestamp: timestamp,
 		}, "", "  ")
 		if err != nil {
 			return "", err

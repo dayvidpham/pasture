@@ -83,7 +83,7 @@ The recorded event is queryable via:
 		}
 
 		// Render the success result under the global --format flag (text or json).
-		out, fErr := formatters.FormatHookRecord(result.EventType, result.SHA, result.EventID, resolveFormat())
+		out, fErr := formatters.FormatHookRecord(result.EventType, result.SHA, result.EventID, result.Message, result.Author, result.Branch, result.Timestamp, resolveFormat())
 		if fErr != nil {
 			printError(fErr)
 			exitWithCode(pasterrors.ExitCode(fErr))

@@ -133,7 +133,9 @@ type HookRecordInput struct {
 // HookRecordResult is the success outcome of HookRecord, handed back to the CLI
 // so it (not the handler) decides how to render — text vs JSON — via the global
 // --format flag. EventID is the audit_events row id of the recorded event,
-// surfaced from the Manager dispatch result.
+// surfaced from the Manager dispatch result. The metadata fields (Message,
+// Author, Branch, Timestamp) carry the actual merged values that were recorded,
+// empty string when that field was absent after flag-over-git merging.
 type HookRecordResult struct {
 	// EventType is the CLI event name that was recorded (e.g. "git-commit").
 	EventType string
@@ -141,6 +143,14 @@ type HookRecordResult struct {
 	SHA string
 	// EventID is the audit_events row id of the recorded event.
 	EventID int64
+	// Message is the commit message that was recorded (empty if absent).
+	Message string
+	// Author is the commit author that was recorded (empty if absent).
+	Author string
+	// Branch is the branch name that was recorded (empty if absent).
+	Branch string
+	// Timestamp is the commit timestamp that was recorded (empty if absent).
+	Timestamp string
 }
 
 // HookRecord validates the requested hook event, opens the unified task tracker,
@@ -226,11 +236,24 @@ func HookRecord(in HookRecordInput) (HookRecordResult, int, error) {
 						"doesn't exist there.", sha),
 				Where:  "Recording a hook event (internal/handlers/hook.go in handlers.HookRecord, git-metadata gather step).",
 				Impact: "Nothing was recorded — to avoid writing an event with missing or wrong\nmetadata, pasture stops instead of guessing.",
-				Fix: "1. Run inside the commit's git repo:\n" +
-					"     cd <repo> && pasture hook record --event git-commit --sha " + sha + "\n" +
-					"2. Or pass every metadata field explicitly so git isn't consulted:\n" +
+				Fix: "1. Run pasture from inside the commit's git repository so it can read the metadata:\n" +
+					"     cd <path-to-repo>\n" +
+					"     pasture hook record --event git-commit --sha <commit-sha>\n" +
+					"   Example:\n" +
+					"     cd ~/dev/myproject\n" +
+					"     pasture hook record --event git-commit --sha " + sha + "\n" +
+					"2. Or supply every metadata field explicitly so git is never consulted:\n" +
+					"     pasture hook record --event git-commit --sha <commit-sha> \\\n" +
+					"       --message \"<commit message>\" \\\n" +
+					"       --author \"<name> <email>\" \\\n" +
+					"       --branch \"<branch>\" \\\n" +
+					"       --timestamp \"<ISO-8601 timestamp>\"\n" +
+					"   Example:\n" +
 					"     pasture hook record --event git-commit --sha " + sha + " \\\n" +
-					"       --message <m> --author <a> --branch <b> --timestamp <t>",
+					"       --message \"fix: handle nil config\" \\\n" +
+					"       --author \"Jane Dev <jane@example.com>\" \\\n" +
+					"       --branch main \\\n" +
+					"       --timestamp 2026-06-07T12:00:00Z",
 				Cause: gErr,
 			}
 			return HookRecordResult{}, errors.ExitCode(se), se
@@ -279,10 +302,21 @@ func HookRecord(in HookRecordInput) (HookRecordResult, int, error) {
 		return HookRecordResult{}, errors.ExitCode(se), se
 	}
 
+	// 8. Populate metadata from the merged data map (flag-over-git values that
+	//    were dispatched). Values are always strings when present; absent keys
+	//    yield the empty string, which callers render with omitempty.
+	strVal := func(key string) string {
+		v, _ := data[key].(string)
+		return v
+	}
 	return HookRecordResult{
 		EventType: strings.TrimSpace(in.Event),
 		SHA:       sha,
 		EventID:   res.RecordedEventIDs[0],
+		Message:   strVal(metaMessage),
+		Author:    strVal(metaAuthor),
+		Branch:    strVal(metaBranch),
+		Timestamp: strVal(metaTimestamp),
 	}, 0, nil
 }
 

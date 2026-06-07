@@ -430,8 +430,19 @@ func TestHookRecord_GatherFails_FailsHardRecordsNothing(t *testing.T) {
 	if !stderrors.As(err, &se) {
 		t.Fatalf("gather-failure error is not *StructuredError: %v", err)
 	}
-	if !bytesContains(se.Fix, "--message") || !bytesContains(se.Fix, "git repo") {
-		t.Errorf("gather-failure Fix should mention running inside the repo and passing flags; got:\n%s", se.Fix)
+	// UAT-FIX-1: Fix must show full commands with readable placeholders and
+	// concrete examples (not cryptic shorthands like <m>/<a>/<b>/<t>).
+	for _, want := range []string{
+		"cd <path-to-repo>",              // remedy 1 placeholder
+		"--message \"<commit message>\"", // remedy 2 readable placeholder
+		"--author \"<name> <email>\"",    // remedy 2 readable placeholder
+		"--branch \"<branch>\"",          // remedy 2 readable placeholder
+		"jane@example.com",               // concrete example (author)
+		"fix: handle nil config",         // concrete example (message)
+	} {
+		if !bytesContains(se.Fix, want) {
+			t.Errorf("gather-failure Fix missing %q; got:\n%s", want, se.Fix)
+		}
 	}
 
 	// NOTHING recorded: zero GitCommit rows and zero ContextGit edges for the sha.

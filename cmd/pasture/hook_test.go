@@ -58,10 +58,11 @@ func TestCLI_HookRecord_FlagWiring_RoundTrips(t *testing.T) {
 	}
 }
 
-// TestCLI_HookRecord_FormatJSON_EmitsThreeKeys asserts the global --format json
-// flag is honored: success output is a JSON object with exactly the eventType,
-// sha, and eventId keys (and a positive eventId).
-func TestCLI_HookRecord_FormatJSON_EmitsThreeKeys(t *testing.T) {
+// TestCLI_HookRecord_FormatJSON_EmitsMetadata asserts the global --format json
+// flag is honored and the JSON output includes all seven camelCase keys
+// (eventType, sha, eventId, message, author, branch, timestamp) when all
+// metadata flags are supplied.
+func TestCLI_HookRecord_FormatJSON_EmitsMetadata(t *testing.T) {
 	db := newDB(t)
 	const sha = "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b"
 
@@ -84,8 +85,8 @@ func TestCLI_HookRecord_FormatJSON_EmitsThreeKeys(t *testing.T) {
 	if err := json.Unmarshal([]byte(out.stdout), &decoded); err != nil {
 		t.Fatalf("stdout is not valid JSON: %v; stdout=%q", err, out.stdout)
 	}
-	if len(decoded) != 3 {
-		t.Errorf("JSON output has %d keys, want exactly 3 (eventType, sha, eventId); got %v", len(decoded), decoded)
+	if len(decoded) != 7 {
+		t.Errorf("JSON output has %d keys, want exactly 7 (eventType, sha, eventId, message, author, branch, timestamp); got %v", len(decoded), decoded)
 	}
 	if decoded["eventType"] != "git-commit" {
 		t.Errorf("eventType = %v, want %q", decoded["eventType"], "git-commit")
@@ -100,6 +101,18 @@ func TestCLI_HookRecord_FormatJSON_EmitsThreeKeys(t *testing.T) {
 	}
 	if id <= 0 {
 		t.Errorf("eventId = %v, want a positive audit_events row id", id)
+	}
+	if decoded["message"] != "fix: json" {
+		t.Errorf("message = %v, want %q", decoded["message"], "fix: json")
+	}
+	if decoded["author"] != "JSON Person <json@example.com>" {
+		t.Errorf("author = %v, want %q", decoded["author"], "JSON Person <json@example.com>")
+	}
+	if decoded["branch"] != "json-branch" {
+		t.Errorf("branch = %v, want %q", decoded["branch"], "json-branch")
+	}
+	if decoded["timestamp"] != "2026-05-05T05:05:05Z" {
+		t.Errorf("timestamp = %v, want %q", decoded["timestamp"], "2026-05-05T05:05:05Z")
 	}
 }
 
