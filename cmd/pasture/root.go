@@ -21,13 +21,13 @@ var rootCmd = &cobra.Command{
 	Short: "Local task management for the Pasture toolkit",
 	Long: `pasture manages tasks, dependencies, labels, comments, and the audit-event
 record backed by the unified Pasture SQLite database at
-~/.local/share/pasture/pasture.db (PROPOSAL-2 §7.1).
+~/.local/share/pasture/pasture.db.
 
 Unlike pasture-msg (which sends Temporal signals to the pastured daemon),
 pasture operates entirely on the local task + audit tracker — no daemon
 required. The audit subsystem and Provenance subsystem share one file; the
 auto-on-open migrator brings legacy databases up to the current schema on
-first use (PROPOSAL-2 §7.10).
+first use.
 
 Exit codes:
   0  success

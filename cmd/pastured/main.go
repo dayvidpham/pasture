@@ -104,7 +104,7 @@ which point it drains in-flight tasks and exits cleanly.`,
 	// production behaviour. Tests set this to e.g. `--idle-after-migrate=2s`
 	// to widen the window during which a second migrator can race the first.
 	root.PersistentFlags().Duration("idle-after-migrate", 0,
-		"after migration + well-known agent registration, idle for the given duration before starting the Temporal worker (default 0 = disabled; used by S3 Scenario 12 race test)")
+		"after migration + well-known agent registration, idle for the given duration before starting the Temporal worker (default 0 = disabled; used by the concurrent-migrator race test)")
 
 	// Version flag.
 	root.PersistentFlags().Bool("version", false, "print version and exit")

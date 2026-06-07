@@ -12,13 +12,12 @@ var taskTimelineCmd = &cobra.Command{
 	Short: "Show all events for a task in chronological order",
 	Long: `Show all audit events tied to a task ID, ordered by timestamp.
 
-The handler queries both the new context_edges JOIN (post-S4 source of truth)
+The handler queries both the context_edges JOIN (current source of truth)
 AND the legacy audit_events.epoch_id column (v1/v2 fallback) and merges the
 result, so the timeline works against any database version.
 
 --include-children and --depth are accepted for forward compatibility but are
-currently no-op; child-task traversal lands when S8 wires epoch contexts onto
-SLICE tasks.`,
+currently no-op; child-task traversal is not yet implemented.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		in := handlers.TaskTimelineInput{
@@ -45,9 +44,9 @@ SLICE tasks.`,
 
 func init() {
 	taskTimelineCmd.Flags().Bool("include-children", false,
-		"Include events for child tasks (currently no-op; lands with S8)")
+		"Include events for child tasks (currently no-op; not yet implemented)")
 	taskTimelineCmd.Flags().Int("depth", 0,
-		"Max child traversal depth (currently no-op; lands with S8)")
+		"Max child traversal depth (currently no-op; not yet implemented)")
 
 	taskCmd.AddCommand(taskTimelineCmd)
 }

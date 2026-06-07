@@ -22,7 +22,7 @@ At least one top-level filter must be supplied:
 
 Optional filters narrow the result further:
   --phase <p>      filter by phase (e.g. p9, code-review)
-  --agent <name>   filter by agent (matched against AuditEvent.Role until S3)
+  --agent <name>   filter by agent (matched against the event's recording role)
   --type <T>       filter by EventType (e.g. PhaseTransition)
   --since <ts>     RFC3339 timestamp or Unix epoch (seconds or nanoseconds)
 

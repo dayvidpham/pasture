@@ -283,6 +283,65 @@ func runStart(cmd *cobra.Command, args []string) error {
 - `pkg/protocol` is the public API — import it directly; do NOT create aliases in `internal/types/`.
 - `internal/` packages are private; only importable within the module.
 
+## References & Internal Identifiers
+
+Project-internal identifiers are meaningless to end users and external
+contributors, and they rot over time (tasks close, proposals are superseded,
+slices merge). They must never leak into shipped or external-facing artefacts.
+
+**Rule — do NOT place either of the following in source code, user-facing
+strings, or any external-facing artefact:**
+
+1. **Beads task identifiers** — `<project>-xxxxx` task IDs, `beads://…` URIs, or
+   any bare task reference.
+2. **Pasture Protocol process artefacts** — phase/step names (`p3-propose`,
+   `s10-review`), `PROPOSAL-N` / `URD` / `URE` / `SLICE-N` / `RATIFIED`,
+   schema-section citations (`§7.1`), review labels (`BLOCKER B3`,
+   `Scenario 14`), and decision/requirement codes (`D5`, `R13`).
+
+The rule targets **source code** (comments and string literals) and anything an
+**end user or downstream consumer** sees: CLI command help (`Use` / `Short` /
+`Long`), flag descriptions, error messages (`StructuredError` What/Why/Impact/Fix
+— the `Where` field may cite a source location), and log/CLI output.
+
+**When you need to cite a document or decision, reference something durable and
+resolvable:**
+
+- an **actual file path** — e.g. `docs/proposals/PROPOSAL-2-pasture-workflow-record.md`,
+  `docs/adr/0001-pasture-toolkit-integration-architecture.md`, `internal/tasks/paths.go`;
+- or a **GitHub issue / PR URL** — e.g. `https://github.com/dayvidpham/pasture/issues/13`.
+
+Never a bare task ID or a `beads://` URI.
+
+**Exception — the protocol as subject matter.** Referencing the Pasture
+Protocol's own vocabulary (phases, roles, constraints, slices) is legitimate
+ONLY where the protocol *is* the domain being implemented:
+
+- the code-generation / generation pipeline (`internal/codegen/`,
+  `specs_data*.go`, templates, and the generated `skills/**` + `agents/**`);
+- the multi-agent orchestration features that implement the protocol (the
+  workflow / hooks / signal surfaces that drive epochs);
+- **internal contributor & design documentation** — this file (`AGENTS.md`),
+  `CONTRIBUTING.md`, `docs/proposals/**`, `docs/adr/**`, and similar. These
+  documents exist to explain the system and its protocol, so citing proposals,
+  slices, ADRs, decisions, BDD scenarios, and tracking tasks (including bare IDs
+  and `beads://` links) is normal design rationale, not leakage. They are read
+  by contributors, never shipped to end users.
+
+There, phase and role names are domain terms, not process leakage. Everywhere
+else — the local task CLI help, the audit/migrate commands, storage layers,
+ordinary code comments — they are leakage and are forbidden.
+
+```go
+// Wrong — internal artefact in user-facing help / comment
+Long: `…backed by the SQLite database at ~/.local/share/pasture/pasture.db (PROPOSAL-2 §7.1).`
+// the daemon prefers --db (SLICE-10 collapsed the two files into one)
+
+// Correct — durable reference, or none at all
+Long: `…backed by the SQLite database at ~/.local/share/pasture/pasture.db.`
+// the daemon prefers --db; rationale in docs/proposals/PROPOSAL-2-pasture-workflow-record.md
+```
+
 ## Testing
 
 ### Mandatory flags
