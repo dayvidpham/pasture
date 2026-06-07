@@ -169,9 +169,9 @@ type HookRecordInput struct {
 	// Repo overrides the git-derived owner/name slug. nil → git-derived (or
 	// absent when git was not consulted).
 	Repo *string
-	// Remotes overrides the gathered remotes map (name → URL). nil → git-derived
-	// (or absent when git was not consulted). A non-nil but empty map explicitly
-	// records an empty remotes set.
+	// Remotes overrides the gathered remotes map (name → URL). When non-empty it
+	// replaces the gathered remotes entirely. An empty or nil map records no
+	// remotes (the field is omitted from the payload and JSON output).
 	Remotes map[string]string
 
 	// Gatherer derives metadata from git when a flag is absent. nil → the real
