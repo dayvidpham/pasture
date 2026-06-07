@@ -673,7 +673,7 @@ func (a *Activities) DispatchHook(ctx context.Context, payload hooks.HookPayload
 	if a.HooksMgr == nil {
 		return nil
 	}
-	if err := a.HooksMgr.Dispatch(ctx, payload); err != nil {
+	if _, err := a.HooksMgr.Dispatch(ctx, payload); err != nil {
 		slog.Warn("hook dispatch failed",
 			"what", fmt.Sprintf("hook dispatch failed for event %s", payload.Event),
 			"why", err.Error(),
@@ -694,7 +694,8 @@ func (a *Activities) dispatchHookInternal(ctx context.Context, payload hooks.Hoo
 	if a.HooksMgr == nil {
 		return nil
 	}
-	return a.HooksMgr.Dispatch(ctx, payload)
+	_, err := a.HooksMgr.Dispatch(ctx, payload)
+	return err
 }
 
 // ─── Compile-time assertion ───────────────────────────────────────────────────

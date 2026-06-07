@@ -29,11 +29,11 @@ func newRecordingHandler(events ...hooks.HookEvent) *recordingHandler {
 	return &recordingHandler{events: events}
 }
 
-func (h *recordingHandler) Handle(_ context.Context, payload hooks.HookPayload) error {
+func (h *recordingHandler) Handle(_ context.Context, payload hooks.HookPayload) (hooks.HandleOutcome, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.received = append(h.received, payload)
-	return h.err
+	return hooks.HandleOutcome{}, h.err
 }
 
 func (h *recordingHandler) Events() []hooks.HookEvent { return h.events }
@@ -63,13 +63,13 @@ func newSlowHandler(delay time.Duration, events ...hooks.HookEvent) *slowHandler
 	return &slowHandler{delay: delay, events: events}
 }
 
-func (h *slowHandler) Handle(ctx context.Context, _ hooks.HookPayload) error {
+func (h *slowHandler) Handle(ctx context.Context, _ hooks.HookPayload) (hooks.HandleOutcome, error) {
 	h.called.Add(1)
 	select {
 	case <-time.After(h.delay):
-		return nil
+		return hooks.HandleOutcome{}, nil
 	case <-ctx.Done():
-		return ctx.Err()
+		return hooks.HandleOutcome{}, ctx.Err()
 	}
 }
 
@@ -90,14 +90,14 @@ func newGateHandler(events ...hooks.HookEvent) *gateHandler {
 	return &gateHandler{started: make(chan struct{}), release: make(chan struct{}), events: events}
 }
 
-func (h *gateHandler) Handle(ctx context.Context, _ hooks.HookPayload) error {
+func (h *gateHandler) Handle(ctx context.Context, _ hooks.HookPayload) (hooks.HandleOutcome, error) {
 	h.called.Add(1)
 	h.once.Do(func() { close(h.started) })
 	select {
 	case <-h.release:
-		return nil
+		return hooks.HandleOutcome{}, nil
 	case <-ctx.Done():
-		return ctx.Err()
+		return hooks.HandleOutcome{}, ctx.Err()
 	}
 }
 
@@ -113,8 +113,10 @@ func newErrorHandler(err error, events ...hooks.HookEvent) *errorHandler {
 	return &errorHandler{err: err, events: events}
 }
 
-func (h *errorHandler) Handle(_ context.Context, _ hooks.HookPayload) error { return h.err }
-func (h *errorHandler) Events() []hooks.HookEvent                           { return h.events }
+func (h *errorHandler) Handle(_ context.Context, _ hooks.HookPayload) (hooks.HandleOutcome, error) {
+	return hooks.HandleOutcome{}, h.err
+}
+func (h *errorHandler) Events() []hooks.HookEvent { return h.events }
 
 // samplePayload builds a HookPayload for the given event.
 func samplePayload(event hooks.HookEvent) hooks.HookPayload {
@@ -192,7 +194,7 @@ func TestManager_Register_SingleHandler(t *testing.T) {
 	m.Register(h)
 
 	payload := samplePayload(hooks.HookEpochStarted)
-	if err := m.Dispatch(context.Background(), payload); err != nil {
+	if _, err := m.Dispatch(context.Background(), payload); err != nil {
 		t.Fatalf("Dispatch: unexpected error: %v", err)
 	}
 	if h.count() != 1 {
@@ -208,7 +210,7 @@ func TestManager_Register_MultipleHandlersSameEvent(t *testing.T) {
 	m.Register(h2)
 
 	payload := samplePayload(hooks.HookSliceStarted)
-	if err := m.Dispatch(context.Background(), payload); err != nil {
+	if _, err := m.Dispatch(context.Background(), payload); err != nil {
 		t.Fatalf("Dispatch: unexpected error: %v", err)
 	}
 	if h1.count() != 1 {
@@ -240,7 +242,7 @@ func TestManager_Dispatch_UnsubscribedEvent_NoError(t *testing.T) {
 	m.Register(h)
 
 	// Dispatch an event that h is NOT subscribed to.
-	if err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceFailed)); err != nil {
+	if _, err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceFailed)); err != nil {
 		t.Fatalf("Dispatch unsubscribed event: want nil error, got %v", err)
 	}
 	if h.count() != 0 {
@@ -250,7 +252,7 @@ func TestManager_Dispatch_UnsubscribedEvent_NoError(t *testing.T) {
 
 func TestManager_Dispatch_EmptyManager_NoError(t *testing.T) {
 	m := hooks.NewManager()
-	if err := m.Dispatch(context.Background(), samplePayload(hooks.HookEpochCompleted)); err != nil {
+	if _, err := m.Dispatch(context.Background(), samplePayload(hooks.HookEpochCompleted)); err != nil {
 		t.Fatalf("Dispatch on empty manager: want nil, got %v", err)
 	}
 }
@@ -267,7 +269,10 @@ func TestManager_Dispatch_WaitsForHandlerThenReturns(t *testing.T) {
 	defer cancel()
 
 	done := make(chan error, 1)
-	go func() { done <- m.Dispatch(ctx, samplePayload(hooks.HookReviewCycle)) }()
+	go func() {
+		_, dErr := m.Dispatch(ctx, samplePayload(hooks.HookReviewCycle))
+		done <- dErr
+	}()
 
 	// 1. The handler must actually be invoked.
 	select {
@@ -311,7 +316,7 @@ func TestManager_Dispatch_HandlerTimedOut_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err := m.Dispatch(ctx, samplePayload(hooks.HookConnectionLost))
+	_, err := m.Dispatch(ctx, samplePayload(hooks.HookConnectionLost))
 	// Expect an error since the handler's context was cancelled.
 	if err == nil {
 		t.Fatal("expected error when handler context is cancelled, got nil")
@@ -332,7 +337,7 @@ func TestManager_Dispatch_Concurrent_AllHandlersReceivePayload(t *testing.T) {
 	}
 
 	payload := samplePayload(hooks.HookPhaseTransition)
-	if err := m.Dispatch(context.Background(), payload); err != nil {
+	if _, err := m.Dispatch(context.Background(), payload); err != nil {
 		t.Fatalf("Dispatch: unexpected error: %v", err)
 	}
 
@@ -375,7 +380,7 @@ func TestManager_Dispatch_HandlerError_ReturnedToDispatch(t *testing.T) {
 	eh := newErrorHandler(handlerErr, hooks.HookSliceFailed)
 	m.Register(eh)
 
-	err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceFailed))
+	_, err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceFailed))
 	if err == nil {
 		t.Fatal("expected error from handler, got nil")
 	}
@@ -389,7 +394,7 @@ func TestManager_Dispatch_OneHandlerErrors_OtherStillCalled(t *testing.T) {
 	m.Register(eh)
 	m.Register(good)
 
-	err := m.Dispatch(context.Background(), samplePayload(hooks.HookConstraintViolation))
+	_, err := m.Dispatch(context.Background(), samplePayload(hooks.HookConstraintViolation))
 	if err == nil {
 		t.Error("expected error from failing handler, got nil")
 	}
@@ -412,7 +417,7 @@ func TestDispatchErrors_Error_MultipleHandlers(t *testing.T) {
 	m.Register(h2)
 
 	// Dispatch the event; expect a combined error with both handler errors.
-	err := m.Dispatch(context.Background(), samplePayload(hooks.HookEpochStarted))
+	_, err := m.Dispatch(context.Background(), samplePayload(hooks.HookEpochStarted))
 	if err == nil {
 		t.Fatal("expected error from handlers, got nil")
 	}
@@ -445,7 +450,7 @@ func TestDispatchErrors_Unwrap(t *testing.T) {
 	m.Register(h2)
 
 	// Dispatch and get the combined error.
-	combinedErr := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceCompleted))
+	_, combinedErr := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceCompleted))
 	if combinedErr == nil {
 		t.Fatal("expected error from handlers, got nil")
 	}
@@ -490,7 +495,7 @@ func TestHookPayload_ZeroPhase_IsAcceptable(t *testing.T) {
 		// Phase intentionally omitted (zero value "")
 		Data: map[string]any{"sessionId": "sess-001"},
 	}
-	if err := m.Dispatch(context.Background(), payload); err != nil {
+	if _, err := m.Dispatch(context.Background(), payload); err != nil {
 		t.Fatalf("Dispatch with zero Phase: unexpected error: %v", err)
 	}
 	if h.count() != 1 {
@@ -515,7 +520,7 @@ func TestManager_WithDispatchTimeout_CustomTimeoutUsed(t *testing.T) {
 		slow := newSlowHandler(handlerDelay, hooks.HookSliceStarted)
 		m.Register(slow)
 
-		err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceStarted))
+		_, err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceStarted))
 		if err != nil {
 			t.Errorf("expected no error with generous timeout, got: %v", err)
 		}
@@ -529,7 +534,7 @@ func TestManager_WithDispatchTimeout_CustomTimeoutUsed(t *testing.T) {
 		slow := newSlowHandler(handlerDelay, hooks.HookSliceStarted)
 		m.Register(slow)
 
-		err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceStarted))
+		_, err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceStarted))
 		if err == nil {
 			t.Error("expected timeout error with tight dispatch timeout, got nil")
 		}
@@ -549,7 +554,7 @@ func TestNewManager_DefaultTimeout_IsFiveSeconds(t *testing.T) {
 	fast := newRecordingHandler(hooks.HookEpochStarted)
 	m.Register(fast)
 
-	if err := m.Dispatch(context.Background(), samplePayload(hooks.HookEpochStarted)); err != nil {
+	if _, err := m.Dispatch(context.Background(), samplePayload(hooks.HookEpochStarted)); err != nil {
 		t.Errorf("unexpected error with default timeout: %v", err)
 	}
 }

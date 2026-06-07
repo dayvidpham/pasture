@@ -1,7 +1,6 @@
 package main_test
 
-// hook_test.go — Cobra-layer wiring tests for `pasture hook record`
-// (PROPOSAL-1, aura-plugins-3lzsc, SLICE-1 review round-1 B3).
+// hook_test.go — Cobra-layer wiring tests for `pasture hook record`.
 //
 // These run the compiled binary (TestMain) so the cobra RunE wiring — flag
 // registration, Changed()->&v pointer conversion, cobra.NoArgs, and the
@@ -11,6 +10,7 @@ package main_test
 
 import (
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -51,6 +51,51 @@ func TestCLI_HookRecord_FlagWiring_RoundTrips(t *testing.T) {
 		if !strings.Contains(payload, want) {
 			t.Errorf("recorded payload missing %q; payload=%s", want, payload)
 		}
+	}
+}
+
+// TestCLI_HookRecord_FormatJSON_EmitsThreeKeys asserts the global --format json
+// flag is honored: success output is a JSON object with exactly the eventType,
+// sha, and eventId keys (and a positive eventId).
+func TestCLI_HookRecord_FormatJSON_EmitsThreeKeys(t *testing.T) {
+	db := newDB(t)
+	const sha = "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b"
+
+	out := runCLI(t,
+		"--db", db,
+		"--format", "json",
+		"hook", "record",
+		"--event", "git-commit",
+		"--sha", sha,
+		"--message", "fix: json",
+		"--author", "JSON Person <json@example.com>",
+		"--branch", "json-branch",
+		"--timestamp", "2026-05-05T05:05:05Z",
+	)
+	if out.exitCode != 0 {
+		t.Fatalf("hook record --format json exit %d; stdout=%q stderr=%q", out.exitCode, out.stdout, out.stderr)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(out.stdout), &decoded); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v; stdout=%q", err, out.stdout)
+	}
+	if len(decoded) != 3 {
+		t.Errorf("JSON output has %d keys, want exactly 3 (eventType, sha, eventId); got %v", len(decoded), decoded)
+	}
+	if decoded["eventType"] != "git-commit" {
+		t.Errorf("eventType = %v, want %q", decoded["eventType"], "git-commit")
+	}
+	if decoded["sha"] != sha {
+		t.Errorf("sha = %v, want %q", decoded["sha"], sha)
+	}
+	// JSON numbers decode to float64; assert eventId is present and positive.
+	id, ok := decoded["eventId"].(float64)
+	if !ok {
+		t.Fatalf("eventId missing or not a number: %v", decoded["eventId"])
+	}
+	if id <= 0 {
+		t.Errorf("eventId = %v, want a positive audit_events row id", id)
 	}
 }
 

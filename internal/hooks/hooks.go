@@ -110,6 +110,21 @@ type HookPayload struct {
 
 // ─── HookHandler ─────────────────────────────────────────────────────────────
 
+// HandleOutcome is the per-handler result of a single Handle invocation.
+//
+// RecordedEventIDs holds the audit_events row ids this handler wrote while
+// processing the payload, in write order. A handler that wrote nothing (for
+// example, a payload it chose to ignore) returns the zero value
+// (RecordedEventIDs == nil). The ids are correlated to THIS Handle call by
+// construction — the handler returns exactly the ids it produced for the
+// payload it was given, with no shared mutable state, so the value is race-free
+// even when the same handler instance services concurrent dispatches.
+type HandleOutcome struct {
+	// RecordedEventIDs are the audit_events row ids written during this Handle
+	// call, in write order. Nil/empty means the handler recorded nothing.
+	RecordedEventIDs []int64
+}
+
 // HookHandler is the interface that hook consumers must implement.
 //
 // Events returns the set of HookEvent values this handler is interested in.
@@ -118,10 +133,12 @@ type HookPayload struct {
 // Handle is called with the payload and a context that carries the dispatch
 // deadline set on the Manager (see WithDispatchTimeout; default is
 // DefaultDispatchTimeout). Implementations should respect ctx.Done() and
-// return promptly when the context is cancelled.
+// return promptly when the context is cancelled. Handle returns a HandleOutcome
+// describing any audit rows it recorded for this payload (zero value if none).
 type HookHandler interface {
-	// Handle processes a hook payload. Must respect ctx cancellation.
-	Handle(ctx context.Context, payload HookPayload) error
+	// Handle processes a hook payload. Must respect ctx cancellation. The
+	// returned HandleOutcome reports any audit rows recorded for this payload.
+	Handle(ctx context.Context, payload HookPayload) (HandleOutcome, error)
 	// Events returns the set of HookEvent values this handler subscribes to.
 	Events() []HookEvent
 }
@@ -189,17 +206,35 @@ type dispatchErr struct {
 	err     error
 }
 
+// DispatchResult aggregates the outcomes of every handler invoked for a single
+// Dispatch call.
+//
+// RecordedEventIDs is the concatenation of each handler's
+// HandleOutcome.RecordedEventIDs for THIS dispatch only. Because every id is
+// produced by a handler from the one payload passed to Dispatch (no shared
+// mutable slot, no cross-dispatch carry-over), the ids are correlated to this
+// specific dispatch by construction — safe to read even when the same Manager
+// services concurrent dispatches from many goroutines. Handlers that recorded
+// nothing contribute no ids. Order across handlers is not significant (handlers
+// run concurrently); order WITHIN a handler is that handler's write order.
+type DispatchResult struct {
+	// RecordedEventIDs are the audit_events row ids written by all handlers
+	// during this dispatch. Nil/empty means nothing was recorded.
+	RecordedEventIDs []int64
+}
+
 // Dispatch sends payload to all handlers registered for payload.Event.
 //
 // Each handler is invoked in its own goroutine under a context derived from
 // ctx, with a hard deadline of DefaultDispatchTimeout. Dispatch blocks until
-// ALL handler goroutines have returned (or timed out), then returns a combined
+// ALL handler goroutines have returned (or timed out), then returns a
+// DispatchResult aggregating every handler's recorded-event ids plus a combined
 // error if any handler failed.
 //
 // "Non-blocking" here means: Dispatch does not block the CALLER indefinitely —
 // handlers run with bounded timeouts. The caller must still await Dispatch's
 // return to learn of errors. To fire-and-forget, wrap Dispatch in a goroutine.
-func (m *Manager) Dispatch(ctx context.Context, payload HookPayload) error {
+func (m *Manager) Dispatch(ctx context.Context, payload HookPayload) (DispatchResult, error) {
 	m.mu.RLock()
 	handlers := m.handlers[payload.Event]
 	// Copy slice to avoid holding the lock during dispatch.
@@ -208,10 +243,11 @@ func (m *Manager) Dispatch(ctx context.Context, payload HookPayload) error {
 	m.mu.RUnlock()
 
 	if len(snapshot) == 0 {
-		return nil
+		return DispatchResult{}, nil
 	}
 
 	errs := make(chan dispatchErr, len(snapshot))
+	outcomes := make(chan HandleOutcome, len(snapshot))
 	var wg sync.WaitGroup
 
 	for _, h := range snapshot {
@@ -220,14 +256,28 @@ func (m *Manager) Dispatch(ctx context.Context, payload HookPayload) error {
 			defer wg.Done()
 			hCtx, cancel := context.WithTimeout(ctx, m.dispatchTimeout)
 			defer cancel()
-			if err := handler.Handle(hCtx, payload); err != nil {
+			outcome, err := handler.Handle(hCtx, payload)
+			if err != nil {
 				errs <- dispatchErr{handler: handler, err: err}
 			}
+			// Always collect the outcome (a handler may record rows even on a
+			// partial/secondary error); empty outcomes contribute no ids.
+			outcomes <- outcome
 		}(h)
 	}
 
 	wg.Wait()
 	close(errs)
+	close(outcomes)
+
+	// Aggregate recorded-event ids from every handler outcome (race-free: each
+	// goroutine wrote to the buffered channel, drained here after wg.Wait).
+	var result DispatchResult
+	for oc := range outcomes {
+		if len(oc.RecordedEventIDs) > 0 {
+			result.RecordedEventIDs = append(result.RecordedEventIDs, oc.RecordedEventIDs...)
+		}
+	}
 
 	// Collect errors (if any).
 	var combined []error
@@ -235,9 +285,9 @@ func (m *Manager) Dispatch(ctx context.Context, payload HookPayload) error {
 		combined = append(combined, de.err)
 	}
 	if len(combined) == 0 {
-		return nil
+		return result, nil
 	}
-	return &dispatchErrors{errs: combined}
+	return result, &dispatchErrors{errs: combined}
 }
 
 // ─── dispatchErrors ──────────────────────────────────────────────────────────

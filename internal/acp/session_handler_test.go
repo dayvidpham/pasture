@@ -35,11 +35,11 @@ type captureHandler struct {
 	received []hooks.HookPayload
 }
 
-func (c *captureHandler) Handle(_ context.Context, payload hooks.HookPayload) error {
+func (c *captureHandler) Handle(_ context.Context, payload hooks.HookPayload) (hooks.HandleOutcome, error) {
 	c.mu.Lock()
 	c.received = append(c.received, payload)
 	c.mu.Unlock()
-	return nil
+	return hooks.HandleOutcome{}, nil
 }
 
 func (c *captureHandler) Events() []hooks.HookEvent {

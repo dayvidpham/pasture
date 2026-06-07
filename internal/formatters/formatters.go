@@ -123,6 +123,45 @@ func FormatEpochState(result types.QueryStateResult, format types.OutputFormat) 
 	}
 }
 
+// hookRecordJSON is the JSON wire representation of a recorded hook event.
+// camelCase keys match the package convention.
+type hookRecordJSON struct {
+	EventType string `json:"eventType"`
+	SHA       string `json:"sha"`
+	EventID   int64  `json:"eventId"`
+}
+
+// FormatHookRecord formats the result of `pasture hook record` for CLI output.
+//
+// JSON mode: {"eventType": "...", "sha": "...", "eventId": N}
+// Text mode: "recorded <eventType> event for sha <sha> (event #N)"
+func FormatHookRecord(eventType, sha string, eventID int64, format types.OutputFormat) (string, error) {
+	switch format {
+	case types.OutputJSON:
+		b, err := json.MarshalIndent(hookRecordJSON{
+			EventType: eventType,
+			SHA:       sha,
+			EventID:   eventID,
+		}, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+
+	case types.OutputText:
+		return fmt.Sprintf("recorded %s event for sha %s (event #%d)", eventType, sha, eventID), nil
+
+	default:
+		return "", &errors.StructuredError{
+			Category: errors.CategoryValidation,
+			What:     fmt.Sprintf("unrecognized output format %q", format),
+			Why:      "OutputFormat must be one of: json, text",
+			Impact:   "Output cannot be rendered",
+			Fix:      "Pass --format json or --format text (or omit for default text)",
+		}
+	}
+}
+
 // startResultJSON is the JSON wire representation of a start result.
 type startResultJSON struct {
 	WorkflowId string `json:"workflowId"`

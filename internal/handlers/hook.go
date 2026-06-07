@@ -1,6 +1,6 @@
 // Package handlers — hook.go
 //
-// Handler for `pasture hook record` (PROPOSAL-1, aura-plugins-3lzsc).
+// Handler for `pasture hook record`.
 //
 // Surface:
 //
@@ -34,7 +34,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -116,16 +115,30 @@ type HookRecordInput struct {
 	Gatherer GitMetaGatherer
 }
 
+// HookRecordResult is the success outcome of HookRecord, handed back to the CLI
+// so it (not the handler) decides how to render — text vs JSON — via the global
+// --format flag. EventID is the audit_events row id of the recorded event,
+// surfaced from the Manager dispatch result.
+type HookRecordResult struct {
+	// EventType is the CLI event name that was recorded (e.g. "git-commit").
+	EventType string
+	// SHA is the recorded commit SHA.
+	SHA string
+	// EventID is the audit_events row id of the recorded event.
+	EventID int64
+}
+
 // HookRecord validates the requested hook event, opens the unified task tracker,
 // builds an in-process hooks.Manager, and dispatches a HookPayload through the
-// Manager path (→ GitRecorder.Handle → tasks.RecordGitEvent). Returns the
-// standard (exitCode, error) tuple; exitCode is derived via errors.ExitCode so
-// the caller never hand-rolls a 0/1/5 switch.
-func HookRecord(w io.Writer, in HookRecordInput) (int, error) {
+// Manager path (→ GitRecorder.Handle → tasks.RecordGitEvent). On success it
+// returns a HookRecordResult (event type, sha, recorded row id) so the caller
+// can render it under the global --format flag. The exit code is derived via
+// errors.ExitCode so the caller never hand-rolls a 0/1/5 switch.
+func HookRecord(in HookRecordInput) (HookRecordResult, int, error) {
 	// 1. Validate --event against the typed supported-set (the extensible seam).
 	hookEvent, err := parseSupportedHookEvent(in.Event)
 	if err != nil {
-		return errors.ExitCode(err), err
+		return HookRecordResult{}, errors.ExitCode(err), err
 	}
 
 	// 2. Require --sha (git-commit cannot be keyed without it).
@@ -141,7 +154,7 @@ func HookRecord(w io.Writer, in HookRecordInput) (int, error) {
 				"     pasture hook record --event git-commit --sha <commit-sha>\n" +
 				"2. To get the SHA of the latest commit: git rev-parse HEAD",
 		}
-		return errors.ExitCode(se), se
+		return HookRecordResult{}, errors.ExitCode(se), se
 	}
 
 	// 3. Open the unified tracker + auxiliary audit handle (short-lived CLI;
@@ -150,13 +163,13 @@ func HookRecord(w io.Writer, in HookRecordInput) (int, error) {
 	//    though RecordGitEvent ignores it — pass the real handle (least change).
 	tracker, err := tasks.OpenTaskTracker(in.DBPath)
 	if err != nil {
-		return errors.ExitCode(err), err
+		return HookRecordResult{}, errors.ExitCode(err), err
 	}
 	defer tracker.Close()
 
 	auditDB, err := tasks.OpenAuditDBForFreeFloating(in.DBPath)
 	if err != nil {
-		return errors.ExitCode(err), err
+		return HookRecordResult{}, errors.ExitCode(err), err
 	}
 	defer auditDB.Close()
 
@@ -165,7 +178,7 @@ func HookRecord(w io.Writer, in HookRecordInput) (int, error) {
 	//    pastured wires — the CLI just constructs it locally.
 	mgr := hooks.NewManager()
 	if _, err := hooks.RegisterDefaultRecorders(mgr, tracker, auditDB); err != nil {
-		return errors.ExitCode(err), err
+		return HookRecordResult{}, errors.ExitCode(err), err
 	}
 
 	// 5. Assemble metadata. Explicit flags override git-derived values. Git is
@@ -200,7 +213,7 @@ func HookRecord(w io.Writer, in HookRecordInput) (int, error) {
 					"       --message <m> --author <a> --branch <b> --timestamp <t>",
 				Cause: gErr,
 			}
-			return errors.ExitCode(se), se
+			return HookRecordResult{}, errors.ExitCode(se), se
 		}
 		gitMeta = m
 	}
@@ -216,16 +229,40 @@ func HookRecord(w io.Writer, in HookRecordInput) (int, error) {
 		Event: hookEvent,
 		Data:  data,
 	}
-	if err := mgr.Dispatch(context.Background(), payload); err != nil {
+	res, err := mgr.Dispatch(context.Background(), payload)
+	if err != nil {
 		// The Manager returns a *dispatchErrors aggregate (it has Unwrap()
 		// []error); errors.ExitCode uses errors.As to reach the underlying
 		// *StructuredError Category, so storage failures map to exit 5 and
 		// validation failures to exit 1 without a hand-rolled switch.
-		return errors.ExitCode(err), err
+		return HookRecordResult{}, errors.ExitCode(err), err
 	}
 
-	fmt.Fprintf(w, "recorded %s event for sha %s\n", strings.TrimSpace(in.Event), sha)
-	return 0, nil
+	// 7. Read the recorded row id back from this dispatch. Exactly one handler
+	//    (the GitRecorder) is registered for git-commit and it records exactly
+	//    one event, so res.RecordedEventIDs[0] is that id. Guard defensively in
+	//    case a future wiring change leaves no recorder subscribed.
+	if len(res.RecordedEventIDs) == 0 {
+		se := &errors.StructuredError{
+			Category: errors.CategoryValidation,
+			What:     "The git-commit event was dispatched but no recorder reported saving it.",
+			Why: "The in-process hook Manager dispatched the event but returned no\n" +
+				"recorded-event ids. This means no handler was subscribed to the\n" +
+				"git-commit hook event when the dispatch ran — a wiring bug.",
+			Where:  "Recording a hook event (internal/handlers/hook.go in handlers.HookRecord, post-dispatch step).",
+			Impact: "It is not possible to confirm the event reached the audit trail; treat the record as not durably written.",
+			Fix: "1. This indicates the default recorders were not registered.\n" +
+				"2. If you hit this from production code, this is a wiring bug — please\n" +
+				"   file a bug.",
+		}
+		return HookRecordResult{}, errors.ExitCode(se), se
+	}
+
+	return HookRecordResult{
+		EventType: strings.TrimSpace(in.Event),
+		SHA:       sha,
+		EventID:   res.RecordedEventIDs[0],
+	}, 0, nil
 }
 
 // mergeMeta applies the flag-over-git precedence for one metadata key. When the

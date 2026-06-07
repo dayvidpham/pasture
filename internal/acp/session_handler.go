@@ -189,7 +189,7 @@ func (h *IndexingSessionHandler) dispatchHook(
 		EpochId: h.epochId,
 		Data:    data,
 	}
-	if err := h.hooksMgr.Dispatch(ctx, payload); err != nil {
+	if _, err := h.hooksMgr.Dispatch(ctx, payload); err != nil {
 		slog.Warn("hook dispatch failed",
 			"what", fmt.Sprintf("hook dispatch failed for event %s", payload.Event),
 			"why", err.Error(),

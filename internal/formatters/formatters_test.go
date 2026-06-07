@@ -381,3 +381,54 @@ func TestFormatError_Nil_ReturnsEmpty(t *testing.T) {
 		t.Errorf("FormatError nil: want empty string, got %q", got)
 	}
 }
+
+// ─── FormatHookRecord ─────────────────────────────────────────────────────────
+
+func TestFormatHookRecord_JSON_EmitsThreeCamelCaseKeys(t *testing.T) {
+	got, err := formatters.FormatHookRecord("git-commit", "abc123", 42, types.OutputJSON)
+	if err != nil {
+		t.Fatalf("FormatHookRecord JSON: unexpected error: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(got), &decoded); err != nil {
+		t.Fatalf("FormatHookRecord JSON: output is not valid JSON: %v\n%s", err, got)
+	}
+	if len(decoded) != 3 {
+		t.Errorf("JSON has %d keys, want exactly 3 (eventType, sha, eventId); got %v", len(decoded), decoded)
+	}
+	if decoded["eventType"] != "git-commit" {
+		t.Errorf("eventType = %v, want %q", decoded["eventType"], "git-commit")
+	}
+	if decoded["sha"] != "abc123" {
+		t.Errorf("sha = %v, want %q", decoded["sha"], "abc123")
+	}
+	if id, _ := decoded["eventId"].(float64); id != 42 {
+		t.Errorf("eventId = %v, want 42", decoded["eventId"])
+	}
+}
+
+func TestFormatHookRecord_Text_MatchesContract(t *testing.T) {
+	got, err := formatters.FormatHookRecord("git-commit", "abc123", 42, types.OutputText)
+	if err != nil {
+		t.Fatalf("FormatHookRecord Text: unexpected error: %v", err)
+	}
+	want := "recorded git-commit event for sha abc123 (event #42)"
+	if got != want {
+		t.Errorf("FormatHookRecord Text:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestFormatHookRecord_UnknownFormat_ActionableError(t *testing.T) {
+	_, err := formatters.FormatHookRecord("git-commit", "abc123", 42, types.OutputFormat("xml"))
+	if err == nil {
+		t.Fatal("FormatHookRecord with unknown format: want error, got nil")
+	}
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("error is not *StructuredError: %v", err)
+	}
+	if se.Category != errors.CategoryValidation {
+		t.Errorf("category = %v, want CategoryValidation", se.Category)
+	}
+}

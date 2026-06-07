@@ -1,14 +1,18 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/formatters"
 	"github.com/dayvidpham/pasture/internal/handlers"
 )
 
 // hookCmd is the parent for hook-event recording subcommands. It records
 // Claude Code / git lifecycle hook events into the unified pasture audit trail
-// WITHOUT requiring the pastured daemon (PROPOSAL-1, aura-plugins-3lzsc).
+// WITHOUT requiring the pastured daemon.
 var hookCmd = &cobra.Command{
 	Use:   "hook",
 	Short: "Record lifecycle hook events into the audit trail",
@@ -67,13 +71,25 @@ The recorded event is queryable via:
 			in.Timestamp = &v
 		}
 
-		code, hErr := handlers.HookRecord(cmd.OutOrStdout(), in)
+		result, code, hErr := handlers.HookRecord(in)
 		if hErr != nil {
 			printError(hErr)
 		}
 		if code != 0 {
 			exitWithCode(code)
 		}
+		if hErr != nil {
+			return nil
+		}
+
+		// Render the success result under the global --format flag (text or json).
+		out, fErr := formatters.FormatHookRecord(result.EventType, result.SHA, result.EventID, resolveFormat())
+		if fErr != nil {
+			printError(fErr)
+			exitWithCode(pasterrors.ExitCode(fErr))
+			return nil
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), out)
 		return nil
 	},
 }

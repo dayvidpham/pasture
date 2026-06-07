@@ -1,7 +1,6 @@
 package handlers_test
 
-// hook_test.go — Tests for `pasture hook record` (PROPOSAL-1, aura-plugins-3lzsc,
-// SLICE-1 L4).
+// hook_test.go — Tests for `pasture hook record`.
 //
 // The system under test is handlers.HookRecord + the full Manager-path wire
 // (hooks.Manager.Dispatch → GitRecorder.Handle → tasks.RecordGitEvent →
@@ -165,8 +164,7 @@ func TestHookRecord_MergePrecedence_FlagsOverrideGit(t *testing.T) {
 		Gatherer: fake,
 	}
 
-	var out bytes.Buffer
-	code, err := handlers.HookRecord(&out, in)
+	_, code, err := handlers.HookRecord(in)
 	if err != nil {
 		t.Fatalf("HookRecord: %v (code %d)", err, code)
 	}
@@ -204,8 +202,7 @@ func TestHookRecord_MergePrecedence_GitFillsWhenFlagsAbsent(t *testing.T) {
 		Gatherer: fake, // no metadata flags at all
 	}
 
-	var out bytes.Buffer
-	if code, err := handlers.HookRecord(&out, in); err != nil || code != 0 {
+	if _, code, err := handlers.HookRecord(in); err != nil || code != 0 {
 		t.Fatalf("HookRecord: err=%v code=%d", err, code)
 	}
 
@@ -244,8 +241,7 @@ func TestHookRecord_MergePrecedence_ExplicitEmptyOverridesGit(t *testing.T) {
 		Gatherer: fake,
 	}
 
-	var out bytes.Buffer
-	if code, err := handlers.HookRecord(&out, in); err != nil || code != 0 {
+	if _, code, err := handlers.HookRecord(in); err != nil || code != 0 {
 		t.Fatalf("HookRecord: err=%v code=%d", err, code)
 	}
 
@@ -273,8 +269,7 @@ func TestHookRecord_WritesOneGitCommitRowAndEdge(t *testing.T) {
 		Gatherer: empty,
 	}
 
-	var out bytes.Buffer
-	if code, err := handlers.HookRecord(&out, in); err != nil || code != 0 {
+	if _, code, err := handlers.HookRecord(in); err != nil || code != 0 {
 		t.Fatalf("HookRecord: err=%v code=%d", err, code)
 	}
 
@@ -284,6 +279,58 @@ func TestHookRecord_WritesOneGitCommitRowAndEdge(t *testing.T) {
 	// ...linked to the sha via exactly one ContextGit edge.
 	if got := countContextEdges(t, dbPath, protocol.ContextGit, sha); got != 1 {
 		t.Errorf("context_edges (GitContext, %q) = %d, want 1", sha, got)
+	}
+}
+
+// ─── (02qmh) Surface the recorded audit_events row id ─────────────────────────
+
+// TestHookRecord_SurfacesRecordedEventID asserts the success result carries the
+// audit_events row id of the event just recorded, and that the id matches the
+// row actually written. This is the dispatch-tied event-id contract: the id is
+// read back from the Manager dispatch result, not from a stateful "last id".
+func TestHookRecord_SurfacesRecordedEventID(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	const sha = "1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d"
+
+	empty := func(string) (map[string]string, error) { return map[string]string{}, nil }
+
+	in := handlers.HookRecordInput{
+		DBPath:   dbPath,
+		Event:    string(handlers.HookEventGitCommit),
+		SHA:      sha,
+		Gatherer: empty,
+	}
+
+	result, code, err := handlers.HookRecord(in)
+	if err != nil || code != 0 {
+		t.Fatalf("HookRecord: err=%v code=%d", err, code)
+	}
+
+	if result.EventType != "git-commit" {
+		t.Errorf("result.EventType = %q, want %q", result.EventType, "git-commit")
+	}
+	if result.SHA != sha {
+		t.Errorf("result.SHA = %q, want %q", result.SHA, sha)
+	}
+	if result.EventID <= 0 {
+		t.Fatalf("result.EventID = %d, want a positive audit_events row id", result.EventID)
+	}
+
+	// The surfaced id must be the id of the row that was actually written.
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer db.Close()
+	var gotID int64
+	if err := db.QueryRow(
+		`SELECT id FROM audit_events WHERE event_type = ?`,
+		string(protocol.EventType("GitCommit")),
+	).Scan(&gotID); err != nil {
+		t.Fatalf("select recorded row id: %v", err)
+	}
+	if gotID != result.EventID {
+		t.Errorf("surfaced EventID = %d, but audit_events row id = %d", result.EventID, gotID)
 	}
 }
 
@@ -337,8 +384,7 @@ func TestHookRecord_RealGit_DerivesMetadataFromCommit(t *testing.T) {
 		// Gatherer nil → the production gatherGitMeta path.
 	}
 
-	var out bytes.Buffer
-	if code, err := handlers.HookRecord(&out, in); err != nil || code != 0 {
+	if _, code, err := handlers.HookRecord(in); err != nil || code != 0 {
 		t.Fatalf("HookRecord: err=%v code=%d", err, code)
 	}
 
@@ -374,8 +420,7 @@ func TestHookRecord_GatherFails_FailsHardRecordsNothing(t *testing.T) {
 		Gatherer: failing, // --sha only → all four fields absent → gather attempted
 	}
 
-	var out bytes.Buffer
-	code, err := handlers.HookRecord(&out, in)
+	_, code, err := handlers.HookRecord(in)
 	requireValidationError(t, code, err)
 
 	// Actionable Fix must guide the user (run inside the repo / pass flags).
@@ -416,8 +461,7 @@ func TestHookRecord_RealGit_OutsideRepo_FailsHard(t *testing.T) {
 		// Gatherer nil → real gatherGitMeta, which fails outside a repo.
 	}
 
-	var out bytes.Buffer
-	code, err := handlers.HookRecord(&out, in)
+	_, code, err := handlers.HookRecord(in)
 	requireValidationError(t, code, err)
 
 	if got := countAuditEventsByType(t, dbPath, protocol.EventType("GitCommit")); got != 0 {
@@ -448,8 +492,7 @@ func TestHookRecord_AllFlagsSupplied_SkipsGather(t *testing.T) {
 		Gatherer:  mustNotBeCalled,
 	}
 
-	var out bytes.Buffer
-	if code, err := handlers.HookRecord(&out, in); err != nil || code != 0 {
+	if _, code, err := handlers.HookRecord(in); err != nil || code != 0 {
 		t.Fatalf("HookRecord: err=%v code=%d (all-flags path must not consult git)", err, code)
 	}
 
@@ -469,8 +512,7 @@ func TestHookRecord_UnknownEvent_ActionableError(t *testing.T) {
 		Event:  "git-push", // not supported in this slice
 		SHA:    "deadbeef",
 	}
-	var out bytes.Buffer
-	code, err := handlers.HookRecord(&out, in)
+	_, code, err := handlers.HookRecord(in)
 	requireValidationError(t, code, err)
 
 	// The error must list the supported events so the user can self-correct.
@@ -492,8 +534,7 @@ func TestHookRecord_MissingSHA_ActionableError(t *testing.T) {
 		Event:  string(handlers.HookEventGitCommit),
 		SHA:    "   ", // whitespace-only → treated as empty
 	}
-	var out bytes.Buffer
-	code, err := handlers.HookRecord(&out, in)
+	_, code, err := handlers.HookRecord(in)
 	requireValidationError(t, code, err)
 }
 
