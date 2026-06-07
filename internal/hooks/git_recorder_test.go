@@ -203,7 +203,7 @@ func TestGitRecorder_Handle_RecordsWhenSHAPresent(t *testing.T) {
 		Data:    map[string]any{hooks.GitCommitDataKey: sha, "slice": "S9"},
 	}
 
-	if err := gr.Handle(ctx, payload); err != nil {
+	if _, err := gr.Handle(ctx, payload); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 	if got := countContextEdges(t, dbPath, protocol.ContextGit, sha); got != 1 {
@@ -222,7 +222,7 @@ func TestGitRecorder_Handle_NoOpWhenSHAAbsent(t *testing.T) {
 		EpochId: "epoch-x",
 		Data:    map[string]any{"slice": "S9"}, // no "sha" key
 	}
-	if err := gr.Handle(ctx, payload); err != nil {
+	if _, err := gr.Handle(ctx, payload); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 
@@ -251,7 +251,7 @@ func TestGitRecorder_Handle_NoOpWhenSHAEmptyString(t *testing.T) {
 		Event: hooks.HookGitCommit,
 		Data:  map[string]any{hooks.GitCommitDataKey: ""}, // empty value
 	}
-	if err := gr.Handle(ctx, payload); err != nil {
+	if _, err := gr.Handle(ctx, payload); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 	if got := countContextEdges(t, dbPath, protocol.ContextGit, ""); got != 0 {
@@ -269,7 +269,7 @@ func TestGitRecorder_Handle_NoOpWhenSHAWrongType(t *testing.T) {
 		Event: hooks.HookGitCommit,
 		Data:  map[string]any{hooks.GitCommitDataKey: 12345}, // wrong type
 	}
-	if err := gr.Handle(ctx, payload); err != nil {
+	if _, err := gr.Handle(ctx, payload); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 	verifyDB, err := sql.Open("sqlite", dbPath)
@@ -308,7 +308,7 @@ func TestGitRecorder_DispatchesViaManager(t *testing.T) {
 		Event: hooks.HookGitCommit,
 		Data:  map[string]any{hooks.GitCommitDataKey: sha},
 	}
-	if err := mgr.Dispatch(ctx, payload); err != nil {
+	if _, err := mgr.Dispatch(ctx, payload); err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
 	// Exactly one GitCommit audit row was written...
@@ -318,6 +318,83 @@ func TestGitRecorder_DispatchesViaManager(t *testing.T) {
 	// ...and it is linked to the sha via a ContextGit edge.
 	if got := countContextEdges(t, dbPath, protocol.ContextGit, sha); got != 1 {
 		t.Errorf("after Manager.Dispatch, context_edges (GitContext, %q) = %d, want 1", sha, got)
+	}
+}
+
+// ─── Dispatch-tied recorded-event id (typed outcome) ─────────────────────────
+//
+// The whole point of HandleOutcome / DispatchResult is to surface the
+// audit_events row id that a Handle call produced, correlated to that one
+// dispatch. These tests assert the id flows back through both the direct
+// Handle path and the Manager.Dispatch aggregation.
+
+func TestGitRecorder_Handle_OutcomeCarriesRecordedEventID(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	gr, _, _, _ := openRecorderFixture(t)
+
+	const sha = "outcome1234567890abcdef1234567890abcdef12"
+	payload := hooks.HookPayload{
+		Event: hooks.HookGitCommit,
+		Data:  map[string]any{hooks.GitCommitDataKey: sha},
+	}
+
+	outcome, err := gr.Handle(ctx, payload)
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if len(outcome.RecordedEventIDs) != 1 {
+		t.Fatalf("HandleOutcome.RecordedEventIDs = %v, want exactly one id", outcome.RecordedEventIDs)
+	}
+	if outcome.RecordedEventIDs[0] <= 0 {
+		t.Errorf("recorded event id = %d, want a positive audit_events row id", outcome.RecordedEventIDs[0])
+	}
+}
+
+func TestGitRecorder_Handle_OutcomeEmptyWhenSHAAbsent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	gr, _, _, _ := openRecorderFixture(t)
+
+	payload := hooks.HookPayload{
+		Event: hooks.HookGitCommit,
+		Data:  map[string]any{"slice": "S9"}, // no sha → no-op
+	}
+	outcome, err := gr.Handle(ctx, payload)
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if len(outcome.RecordedEventIDs) != 0 {
+		t.Errorf("HandleOutcome.RecordedEventIDs = %v, want empty for a non-git payload", outcome.RecordedEventIDs)
+	}
+}
+
+func TestGitRecorder_Dispatch_ResultAggregatesRecordedEventID(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	gr, _, _, _ := openRecorderFixture(t)
+
+	mgr := hooks.NewManager()
+	mgr.Register(gr)
+
+	const sha = "dispatchid7890abcdef1234567890abcdef0123"
+	payload := hooks.HookPayload{
+		Event: hooks.HookGitCommit,
+		Data:  map[string]any{hooks.GitCommitDataKey: sha},
+	}
+
+	res, err := mgr.Dispatch(ctx, payload)
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if len(res.RecordedEventIDs) != 1 {
+		t.Fatalf("DispatchResult.RecordedEventIDs = %v, want exactly one id from the single GitRecorder", res.RecordedEventIDs)
+	}
+	if res.RecordedEventIDs[0] <= 0 {
+		t.Errorf("dispatch recorded event id = %d, want a positive audit_events row id", res.RecordedEventIDs[0])
 	}
 }
 
@@ -379,7 +456,7 @@ func TestRegisterDefaultRecorders_HappyPath(t *testing.T) {
 
 	// Dispatch a matching payload — the registered recorder should pick it up.
 	const sha = "regdef1234567890abcdef1234567890abcdef12"
-	if err := mgr.Dispatch(context.Background(), hooks.HookPayload{
+	if _, err := mgr.Dispatch(context.Background(), hooks.HookPayload{
 		Event: hooks.HookGitCommit,
 		Data:  map[string]any{hooks.GitCommitDataKey: sha},
 	}); err != nil {

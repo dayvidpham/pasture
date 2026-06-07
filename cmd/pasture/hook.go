@@ -1,14 +1,18 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/formatters"
 	"github.com/dayvidpham/pasture/internal/handlers"
 )
 
 // hookCmd is the parent for hook-event recording subcommands. It records
 // Claude Code / git lifecycle hook events into the unified pasture audit trail
-// WITHOUT requiring the pastured daemon (PROPOSAL-1, aura-plugins-3lzsc).
+// WITHOUT requiring the pastured daemon.
 var hookCmd = &cobra.Command{
 	Use:   "hook",
 	Short: "Record lifecycle hook events into the audit trail",
@@ -31,9 +35,16 @@ git-commit, --sha is required and identifies the commit; the optional metadata
 flags (--message, --author, --branch, --timestamp) override values otherwise
 derived best-effort from git.
 
+When git is consulted (i.e. at least one of the four commit flags is omitted),
+the repository identity is also captured: --repo overrides the derived
+owner/name slug, and --remote supplies remotes instead of the git-derived map.
+
 Example:
   pasture hook record --event git-commit --sha $(git rev-parse HEAD)
   pasture hook record --event git-commit --sha abc123 --message "fix: bug" --branch main
+  pasture hook record --event git-commit --sha abc123 \
+    --repo myorg/myrepo \
+    --remote origin=git@github.com:myorg/myrepo.git
 
 The recorded event is queryable via:
   pasture task events --context-kind GitContext --context-id <sha>`,
@@ -66,14 +77,39 @@ The recorded event is queryable via:
 			v, _ := cmd.Flags().GetString("timestamp")
 			in.Timestamp = &v
 		}
+		if cmd.Flags().Changed("repo") {
+			v, _ := cmd.Flags().GetString("repo")
+			in.Repo = &v
+		}
+		if cmd.Flags().Changed("remote") {
+			v, _ := cmd.Flags().GetStringToString("remote")
+			in.Remotes = v
+		}
 
-		code, hErr := handlers.HookRecord(cmd.OutOrStdout(), in)
+		result, code, hErr := handlers.HookRecord(in)
 		if hErr != nil {
 			printError(hErr)
 		}
 		if code != 0 {
 			exitWithCode(code)
 		}
+		if hErr != nil {
+			return nil
+		}
+
+		// Render the success result under the global --format flag (text or json).
+		out, fErr := formatters.FormatHookRecord(
+			result.EventType, result.SHA, result.EventID,
+			result.Message, result.Author, result.Branch, result.Timestamp,
+			result.Repo, result.Remotes,
+			resolveFormat(),
+		)
+		if fErr != nil {
+			printError(fErr)
+			exitWithCode(pasterrors.ExitCode(fErr))
+			return nil
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), out)
 		return nil
 	},
 }
@@ -86,6 +122,8 @@ func init() {
 	f.String("author", "", "Commit author (optional; overrides git-derived value)")
 	f.String("branch", "", "Branch name (optional; overrides git-derived value)")
 	f.String("timestamp", "", "Commit timestamp (optional; overrides git-derived value)")
+	f.String("repo", "", "Repository slug owner/name (optional; overrides git-derived value)")
+	f.StringToString("remote", nil, "Remote name and URL as name=url (repeatable; overrides git-derived remotes)")
 
 	hookCmd.AddCommand(hookRecordCmd)
 	rootCmd.AddCommand(hookCmd)

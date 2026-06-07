@@ -1,11 +1,12 @@
 // Package handlers — hook.go
 //
-// Handler for `pasture hook record` (PROPOSAL-1, aura-plugins-3lzsc).
+// Handler for `pasture hook record`.
 //
 // Surface:
 //
 //	pasture hook record --event git-commit --sha <sha>
 //	                    [--message M] [--author A] [--branch B] [--timestamp T]
+//	                    [--repo owner/name] [--remote name=url ...]
 //
 // This is the CLI-direct path that graduates internal/hooks/git_recorder.go
 // from a wire-demonstration stub to a production entry point. It records a
@@ -13,8 +14,8 @@
 //
 // ─── Why the Manager path (not a direct tasks.RecordGitEvent call) ────────────
 //
-// The RATIFIED design (URE Q-seam = "Manager path (unified pipeline)") routes
-// the CLI through the SAME hooks.Manager.Dispatch → GitRecorder.Handle →
+// The design routes the CLI through the same hooks.Manager.Dispatch →
+// GitRecorder.Handle →
 // tasks.RecordGitEvent pipeline that pastured uses. The handler builds its own
 // in-process hooks.Manager and registers the default recorders, so CLI-now and
 // daemon-later feed one pipeline. The seam is extensible: new --event values
@@ -28,18 +29,35 @@
 // override git-derived values; git fills only the absent flags. The gatherer is
 // injectable so merge precedence is unit-testable with a fake — no git repo
 // required.
+//
+// ─── Repo + remotes (best-effort, non-trigger) ───────────────────────────────
+//
+// When git IS consulted (at least one commit field absent), the gatherer also
+// derives:
+//   - Repo: owner/name slug parsed from the origin remote URL, with a fallback
+//     to the repository directory basename if the origin is absent or unparseable.
+//   - Remotes: a map of every configured remote name → URL.
+//
+// These two fields are ALWAYS best-effort: individual absence is not fatal.
+// Only a `git show` failure fails hard (unchanged). When git is NOT consulted
+// (all four commit flags supplied), repo+remotes come only from --repo/--remote
+// override flags (if given), else they are absent from the recorded payload.
 package handlers
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
 	"fmt"
-	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // SupportedHookEvent is a CLI-facing event name accepted by
@@ -81,20 +99,63 @@ const (
 	metaAuthor    = "author"
 	metaBranch    = "branch"
 	metaTimestamp = "timestamp"
+	metaRepo      = "repo"
+	metaRemotes   = "remotes"
 )
 
-// GitMetaGatherer derives commit metadata for a sha. Returns a map keyed by the
-// meta* constants above. Implementations MUST be best-effort: a missing key is
-// fine (the corresponding flag, if set, wins anyway), and the error is advisory
-// — the handler proceeds with whatever keys are present. Injectable so tests can
-// supply a fake without shelling git.
-type GitMetaGatherer func(sha string) (map[string]string, error)
+// GitMeta holds the metadata derived from a git repository for one commit SHA.
+// Commit fields (Message, Author, Branch, Timestamp) are gathered via `git show`;
+// repo-context fields (Repo, Remotes) are gathered best-effort after the commit
+// lookup succeeds. Individual absent fields are represented as zero values; the
+// caller applies flag-over-git merge precedence.
+type GitMeta struct {
+	// Commit fields — gathered via `git show -s`.
+	Message   string
+	Author    string
+	Branch    string // current HEAD branch; empty on detached HEAD
+	Timestamp string
+
+	// Repo-context fields — best-effort, not fail-hard.
+	//
+	// Repo is the owner/name slug derived from the origin remote URL (SSH or
+	// HTTPS form), falling back to the repository directory basename when the
+	// origin is absent or unparseable.
+	Repo string
+	// Remotes maps every configured remote name → URL. Empty when the repo has
+	// no configured remotes.
+	Remotes map[string]string
+}
+
+// GitMetaGatherer derives commit metadata for a sha. A returned non-nil error
+// is FATAL to the operation: the handler consults the gatherer only when at
+// least one commit metadata flag is absent, and if that attempt fails it
+// records nothing and returns an actionable error. Implementations should
+// return an error when they cannot resolve the commit (e.g. not in a git repo
+// or sha not found); individual absent fields within a successful gather are
+// fine (the corresponding flag, if set, wins anyway). Injectable so tests can
+// supply a fake — including a failing fake to exercise the fail-hard path —
+// without shelling git.
+type GitMetaGatherer func(sha string) (GitMeta, error)
+
+// RecorderRegistrar is the function that registers hook handlers onto a
+// Manager. It mirrors hooks.RegisterDefaultRecorders so callers can inject an
+// alternative registration for testing purposes (e.g. a non-recording handler
+// to exercise the empty-guard branch). nil → hooks.RegisterDefaultRecorders.
+type RecorderRegistrar func(mgr *hooks.Manager, tracker protocol.TaskTracker, auditDB *sql.DB) (*hooks.GitRecorder, error)
 
 // HookRecordInput captures the CLI inputs for `pasture hook record`.
 //
 // The optional metadata fields are pointers so the handler can distinguish
 // "flag absent" (nil → git may fill it) from "flag set to empty" (non-nil ""
 // → explicit override). Gatherer is injectable; nil defaults to gatherGitMeta.
+// Registrar is injectable; nil defaults to hooks.RegisterDefaultRecorders.
+//
+// Repo and Remotes are override flags for the repo-context fields. When Repo
+// is non-nil it wins over the git-derived slug. When Remotes is non-nil it
+// replaces the gathered remotes map entirely. Both are only consulted when the
+// repo-context gather runs (i.e. when at least one commit field is absent and
+// git is consulted); when all four commit fields are supplied explicitly, git
+// is never consulted and Repo/Remotes come only from these fields if non-nil.
 type HookRecordInput struct {
 	DBPath string
 	Event  string
@@ -105,21 +166,62 @@ type HookRecordInput struct {
 	Branch    *string
 	Timestamp *string
 
+	// Repo overrides the git-derived owner/name slug. nil → git-derived (or
+	// absent when git was not consulted).
+	Repo *string
+	// Remotes overrides the gathered remotes map (name → URL). When non-empty it
+	// replaces the gathered remotes entirely. An empty or nil map records no
+	// remotes (the field is omitted from the payload and JSON output).
+	Remotes map[string]string
+
 	// Gatherer derives metadata from git when a flag is absent. nil → the real
 	// git-backed gatherGitMeta.
 	Gatherer GitMetaGatherer
+
+	// Registrar registers hook handlers onto the in-process Manager. nil →
+	// hooks.RegisterDefaultRecorders, which subscribes the GitRecorder to
+	// HookGitCommit. Inject an alternative to unit-test the post-dispatch guard
+	// without standing up a real recorder.
+	Registrar RecorderRegistrar
+}
+
+// HookRecordResult is the success outcome of HookRecord, handed back to the CLI
+// so it (not the handler) decides how to render — text vs JSON — via the global
+// --format flag. EventID is the audit_events row id of the recorded event,
+// surfaced from the Manager dispatch result. The metadata fields carry the
+// actual merged values that were recorded, zero value when absent.
+type HookRecordResult struct {
+	// EventType is the CLI event name that was recorded (e.g. "git-commit").
+	EventType string
+	// SHA is the recorded commit SHA.
+	SHA string
+	// EventID is the audit_events row id of the recorded event.
+	EventID int64
+	// Message is the commit message that was recorded (empty if absent).
+	Message string
+	// Author is the commit author that was recorded (empty if absent).
+	Author string
+	// Branch is the branch name that was recorded (empty if absent).
+	Branch string
+	// Timestamp is the commit timestamp that was recorded (empty if absent).
+	Timestamp string
+	// Repo is the owner/name slug that was recorded (empty if absent).
+	Repo string
+	// Remotes is the map of remote name → URL that was recorded (nil if absent).
+	Remotes map[string]string
 }
 
 // HookRecord validates the requested hook event, opens the unified task tracker,
 // builds an in-process hooks.Manager, and dispatches a HookPayload through the
-// Manager path (→ GitRecorder.Handle → tasks.RecordGitEvent). Returns the
-// standard (exitCode, error) tuple; exitCode is derived via errors.ExitCode so
-// the caller never hand-rolls a 0/1/5 switch.
-func HookRecord(w io.Writer, in HookRecordInput) (int, error) {
+// Manager path (→ GitRecorder.Handle → tasks.RecordGitEvent). On success it
+// returns a HookRecordResult (event type, sha, recorded row id) so the caller
+// can render it under the global --format flag. The exit code is derived via
+// errors.ExitCode so the caller never hand-rolls a 0/1/5 switch.
+func HookRecord(in HookRecordInput) (HookRecordResult, int, error) {
 	// 1. Validate --event against the typed supported-set (the extensible seam).
 	hookEvent, err := parseSupportedHookEvent(in.Event)
 	if err != nil {
-		return errors.ExitCode(err), err
+		return HookRecordResult{}, errors.ExitCode(err), err
 	}
 
 	// 2. Require --sha (git-commit cannot be keyed without it).
@@ -135,7 +237,7 @@ func HookRecord(w io.Writer, in HookRecordInput) (int, error) {
 				"     pasture hook record --event git-commit --sha <commit-sha>\n" +
 				"2. To get the SHA of the latest commit: git rev-parse HEAD",
 		}
-		return errors.ExitCode(se), se
+		return HookRecordResult{}, errors.ExitCode(se), se
 	}
 
 	// 3. Open the unified tracker + auxiliary audit handle (short-lived CLI;
@@ -144,65 +246,173 @@ func HookRecord(w io.Writer, in HookRecordInput) (int, error) {
 	//    though RecordGitEvent ignores it — pass the real handle (least change).
 	tracker, err := tasks.OpenTaskTracker(in.DBPath)
 	if err != nil {
-		return errors.ExitCode(err), err
+		return HookRecordResult{}, errors.ExitCode(err), err
 	}
 	defer tracker.Close()
 
 	auditDB, err := tasks.OpenAuditDBForFreeFloating(in.DBPath)
 	if err != nil {
-		return errors.ExitCode(err), err
+		return HookRecordResult{}, errors.ExitCode(err), err
 	}
 	defer auditDB.Close()
 
-	// 4. Build an in-process Manager and register the default recorders
-	//    (GitRecorder subscribed to HookGitCommit). This is the same pipeline
-	//    pastured wires — the CLI just constructs it locally.
+	// 4. Build an in-process Manager and register the recorders. The injectable
+	//    Registrar (default: hooks.RegisterDefaultRecorders) subscribes the
+	//    GitRecorder to HookGitCommit. This is the same pipeline pastured wires —
+	//    the CLI just constructs it locally.
+	registrar := in.Registrar
+	if registrar == nil {
+		registrar = hooks.RegisterDefaultRecorders
+	}
 	mgr := hooks.NewManager()
-	if _, err := hooks.RegisterDefaultRecorders(mgr, tracker, auditDB); err != nil {
-		return errors.ExitCode(err), err
+	if _, err := registrar(mgr, tracker, auditDB); err != nil {
+		return HookRecordResult{}, errors.ExitCode(err), err
 	}
 
-	// 5. Assemble metadata. Explicit flags override git-derived values; git
-	//    fills only the absent flags (best-effort — gather errors are advisory).
-	gather := in.Gatherer
-	if gather == nil {
-		gather = gatherGitMeta
+	// 5. Assemble metadata. Explicit flags override git-derived values. Git is
+	//    consulted ONLY when at least one commit metadata field is absent. If
+	//    that gather is attempted and fails (not in a git repo / sha not found /
+	//    git error), we FAIL HARD and record nothing — recording an event with
+	//    missing or wrong metadata is worse than refusing. When all four commit
+	//    fields are supplied explicitly, git is never consulted, so there is no
+	//    failure path for the commit fields. Repo + remotes are gathered
+	//    best-effort alongside the commit fields when git is consulted; their
+	//    individual absence is not fail-hard.
+	var gitMeta GitMeta
+	if in.Message == nil || in.Author == nil || in.Branch == nil || in.Timestamp == nil {
+		gather := in.Gatherer
+		if gather == nil {
+			gather = gatherGitMeta
+		}
+		m, gErr := gather(sha)
+		if gErr != nil {
+			se := &errors.StructuredError{
+				Category: errors.CategoryValidation,
+				What:     "Couldn't read git metadata for the commit being recorded.",
+				Why: fmt.Sprintf(
+					"One or more metadata flags were omitted, so pasture tried to read them\n"+
+						"from git for sha %q — but the git lookup failed. This usually means the\n"+
+						"command wasn't run inside the commit's git repository, or the SHA\n"+
+						"doesn't exist there.", sha),
+				Where:  "Recording a hook event (internal/handlers/hook.go in handlers.HookRecord, git-metadata gather step).",
+				Impact: "Nothing was recorded — to avoid writing an event with missing or wrong\nmetadata, pasture stops instead of guessing.",
+				Fix: "1. Run pasture from inside the commit's git repository so it can read the metadata:\n" +
+					"     cd <path-to-repo>\n" +
+					"     pasture hook record --event git-commit --sha <commit-sha>\n" +
+					"   Example:\n" +
+					"     cd ~/dev/myproject\n" +
+					"     pasture hook record --event git-commit --sha " + sha + "\n" +
+					"2. Or supply every metadata field explicitly so git is never consulted:\n" +
+					"     pasture hook record --event git-commit --sha <commit-sha> \\\n" +
+					"       --message \"<commit message>\" \\\n" +
+					"       --author \"<name> <email>\" \\\n" +
+					"       --branch \"<branch>\" \\\n" +
+					"       --timestamp \"<ISO-8601 timestamp>\"\n" +
+					"   Example:\n" +
+					"     pasture hook record --event git-commit --sha " + sha + " \\\n" +
+					"       --message \"fix: handle nil config\" \\\n" +
+					"       --author \"Jane Dev <jane@example.com>\" \\\n" +
+					"       --branch main \\\n" +
+					"       --timestamp 2026-06-07T12:00:00Z",
+				Cause: gErr,
+			}
+			return HookRecordResult{}, errors.ExitCode(se), se
+		}
+		gitMeta = m
 	}
-	gitMeta, _ := gather(sha) // best-effort: ignore error, fall back to flags
 
 	data := map[string]any{hooks.GitCommitDataKey: sha}
-	mergeMeta(data, metaMessage, in.Message, gitMeta)
-	mergeMeta(data, metaAuthor, in.Author, gitMeta)
-	mergeMeta(data, metaBranch, in.Branch, gitMeta)
-	mergeMeta(data, metaTimestamp, in.Timestamp, gitMeta)
+	mergeMetaString(data, metaMessage, in.Message, gitMeta.Message)
+	mergeMetaString(data, metaAuthor, in.Author, gitMeta.Author)
+	mergeMetaString(data, metaBranch, in.Branch, gitMeta.Branch)
+	mergeMetaString(data, metaTimestamp, in.Timestamp, gitMeta.Timestamp)
+
+	// Repo: flag wins over git-derived via the same mergeMetaString helper
+	// used for the commit fields. The helper only writes non-empty values, so
+	// an absent repo (neither flag nor git-derived) leaves the key absent.
+	mergeMetaString(data, metaRepo, in.Repo, gitMeta.Repo)
+
+	// Remotes: flag wins (replaces gathered map when non-nil); fall back to
+	// git-derived; omit if nil/empty.
+	var resolvedRemotes map[string]string
+	if in.Remotes != nil {
+		resolvedRemotes = in.Remotes
+	} else {
+		resolvedRemotes = gitMeta.Remotes
+	}
+	if len(resolvedRemotes) > 0 {
+		data[metaRemotes] = resolvedRemotes
+	}
 
 	// 6. Dispatch through the Manager path.
 	payload := hooks.HookPayload{
 		Event: hookEvent,
 		Data:  data,
 	}
-	if err := mgr.Dispatch(context.Background(), payload); err != nil {
+	res, err := mgr.Dispatch(context.Background(), payload)
+	if err != nil {
 		// The Manager returns a *dispatchErrors aggregate (it has Unwrap()
 		// []error); errors.ExitCode uses errors.As to reach the underlying
 		// *StructuredError Category, so storage failures map to exit 5 and
 		// validation failures to exit 1 without a hand-rolled switch.
-		return errors.ExitCode(err), err
+		return HookRecordResult{}, errors.ExitCode(err), err
 	}
 
-	fmt.Fprintf(w, "recorded %s event for sha %s\n", strings.TrimSpace(in.Event), sha)
-	return 0, nil
+	// 7. Read the recorded row id back from this dispatch. Exactly one handler
+	//    (the GitRecorder) is registered for git-commit and it records exactly
+	//    one event, so res.RecordedEventIDs[0] is that id. Guard defensively in
+	//    case a future wiring change leaves no recorder subscribed.
+	if len(res.RecordedEventIDs) == 0 {
+		se := &errors.StructuredError{
+			Category: errors.CategoryStorage,
+			What:     "The git-commit event was dispatched but no recorder reported saving it.",
+			Why: "The in-process hook Manager dispatched the event but returned no\n" +
+				"recorded-event ids. This means no handler was subscribed to the\n" +
+				"git-commit hook event when the dispatch ran, or the subscribed handler\n" +
+				"returned a zero outcome — a wiring bug, not a user input error.",
+			Where:  "Recording a hook event (internal/handlers/hook.go in handlers.HookRecord, post-dispatch step).",
+			Impact: "It is not possible to confirm the event reached the audit trail; treat the record as not durably written.",
+			Fix: "1. This indicates the default recorders were not registered correctly.\n" +
+				"2. If you hit this from production code, this is a wiring bug — please\n" +
+				"   file a bug.",
+		}
+		return HookRecordResult{}, errors.ExitCode(se), se
+	}
+
+	// 8. Populate the result from the merged data map (flag-over-git values
+	//    actually dispatched). String values are cast directly; absent keys
+	//    yield zero values which callers render with omitempty.
+	strVal := func(key string) string {
+		v, _ := data[key].(string)
+		return v
+	}
+	mapVal := func(key string) map[string]string {
+		v, _ := data[key].(map[string]string)
+		return v
+	}
+	return HookRecordResult{
+		EventType: strings.TrimSpace(in.Event),
+		SHA:       sha,
+		EventID:   res.RecordedEventIDs[0],
+		Message:   strVal(metaMessage),
+		Author:    strVal(metaAuthor),
+		Branch:    strVal(metaBranch),
+		Timestamp: strVal(metaTimestamp),
+		Repo:      strVal(metaRepo),
+		Remotes:   mapVal(metaRemotes),
+	}, 0, nil
 }
 
-// mergeMeta applies the flag-over-git precedence for one metadata key. When the
-// flag pointer is non-nil it wins (even if empty — an explicit override). When
-// it is nil, the git-derived value fills in if present and non-empty.
-func mergeMeta(data map[string]any, key string, flag *string, gitMeta map[string]string) {
+// mergeMetaString applies flag-over-git precedence for one string metadata key.
+// When the flag pointer is non-nil it wins (even if empty — an explicit
+// override). When it is nil, the git-derived value fills in if non-empty.
+func mergeMetaString(data map[string]any, key string, flag *string, gitVal string) {
 	if flag != nil {
 		data[key] = *flag
 		return
 	}
-	if v, ok := gitMeta[key]; ok && v != "" {
-		data[key] = v
+	if gitVal != "" {
+		data[key] = gitVal
 	}
 }
 
@@ -240,54 +450,162 @@ func listSupportedHookEvents() string {
 	return strings.Join(parts, ", ")
 }
 
-// gatherGitMeta is the default GitMetaGatherer: it best-effort-derives commit
-// metadata by shelling `git` in the current working directory. It NEVER returns
-// an error — any git failure simply yields fewer (or no) keys, and the handler
-// falls back to whatever metadata flags were supplied. This keeps the handler
-// logic testable without a git repo (tests inject a fake gatherer) while the
-// real path Just Works when run inside a checkout.
+// gatherGitMeta is the default GitMetaGatherer: it derives commit metadata by
+// shelling `git` in the current working directory. It FAILS HARD — when the
+// `git show` lookup for `sha` fails, it returns an actionable error and the
+// handler records nothing. This is only ever called when at least one commit
+// metadata flag was omitted; supply all four flags to skip git entirely.
 //
-// CWD-relative (A2): the git commands run in the PROCESS working directory, not
-// in the repository that actually contains `sha`. If the CLI is invoked from
-// outside a git repo, or from a different repo that doesn't know `sha`, the
-// `git show` lookup simply fails and those keys are omitted (best-effort). To
-// record metadata for a commit in another repo, either run `pasture hook
-// record` from inside that repo or pass the metadata explicitly via flags.
+// CWD-relative: the git commands run in the PROCESS working directory. If the
+// CLI is invoked from outside a git repo, or from a repo that doesn't know
+// `sha`, `git show` fails and this returns an error (the handler then fails
+// hard rather than recording partial data). To record metadata for a commit in
+// another repo, run from inside that repo or pass the metadata explicitly.
 //
-// Branch semantics (A3): the "branch" key is the CURRENT HEAD's branch
-// (`git rev-parse --abbrev-ref HEAD`), NOT the branch that `sha` belongs to.
-// git has no single answer for "the branch of a commit" (a commit can be on
+// Branch semantics: "branch" is the CURRENT HEAD's branch
+// (`git rev-parse --abbrev-ref HEAD`), not the branch the sha belongs to.
+// git has no single answer for "the branch of a commit" (a commit may be on
 // many branches or none), so this records "the branch checked out when the
-// commit was recorded". Pass --branch explicitly to override.
-func gatherGitMeta(sha string) (map[string]string, error) {
-	meta := make(map[string]string)
+// event was recorded". Pass --branch explicitly to override. Branch resolution
+// is best-effort: once `git show` confirms a valid repo + sha, a
+// missing/detached branch is omitted rather than treated as fatal.
+//
+// Repo and Remotes are also best-effort: gathered after the commit lookup
+// succeeds, but their individual failure is not fatal.
+func gatherGitMeta(sha string) (GitMeta, error) {
+	var meta GitMeta
 
 	// One call yields subject, "author <email>", and committer ISO-8601 date,
 	// separated by an ASCII unit-separator (0x1f) that can't appear in any field.
 	const sep = "\x1f"
 	format := "--format=%s" + sep + "%an <%ae>" + sep + "%cI"
-	if out, err := exec.Command("git", "show", "-s", format, sha).Output(); err == nil {
-		fields := strings.SplitN(strings.TrimRight(string(out), "\n"), sep, 3)
-		if len(fields) == 3 {
-			if fields[0] != "" {
-				meta[metaMessage] = fields[0]
-			}
-			if fields[1] != "" {
-				meta[metaAuthor] = fields[1]
-			}
-			if fields[2] != "" {
-				meta[metaTimestamp] = fields[2]
-			}
+	showCmd := exec.Command("git", "show", "-s", format, sha)
+	var stderr bytes.Buffer
+	showCmd.Stderr = &stderr
+	out, err := showCmd.Output()
+	if err != nil {
+		return GitMeta{}, fmt.Errorf("`git show -s %s` failed in %s: %w — %s",
+			sha, cwdForError(), err, strings.TrimSpace(stderr.String()))
+	}
+
+	fields := strings.SplitN(strings.TrimRight(string(out), "\n"), sep, 3)
+	if len(fields) == 3 {
+		meta.Message = fields[0]
+		meta.Author = fields[1]
+		meta.Timestamp = fields[2]
+	}
+
+	// Branch is the current HEAD's branch name (best-effort; "HEAD" = detached
+	// checkout, which we skip rather than record).
+	if branchOut, bErr := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output(); bErr == nil {
+		if branch := strings.TrimSpace(string(branchOut)); branch != "" && branch != "HEAD" {
+			meta.Branch = branch
 		}
 	}
 
-	// Branch is the current HEAD's branch name (best-effort; "HEAD" means a
-	// detached checkout, which we skip rather than record).
-	if out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
-		if branch := strings.TrimSpace(string(out)); branch != "" && branch != "HEAD" {
-			meta[metaBranch] = branch
+	// Repo: parse origin remote URL → owner/name slug; fall back to repo
+	// directory basename. Best-effort: failure leaves Repo empty.
+	if originURL, oErr := exec.Command("git", "remote", "get-url", "origin").Output(); oErr == nil {
+		meta.Repo = ParseRepoSlug(strings.TrimSpace(string(originURL)))
+	}
+	if meta.Repo == "" {
+		// Fallback: use the repository's top-level directory basename.
+		if toplevel, tErr := exec.Command("git", "rev-parse", "--show-toplevel").Output(); tErr == nil {
+			meta.Repo = filepath.Base(strings.TrimSpace(string(toplevel)))
+		}
+	}
+
+	// Remotes: gather all configured remotes (name → URL). Best-effort.
+	if namesOut, nErr := exec.Command("git", "remote").Output(); nErr == nil {
+		names := strings.Fields(strings.TrimSpace(string(namesOut)))
+		if len(names) > 0 {
+			remotes := make(map[string]string, len(names))
+			for _, name := range names {
+				if urlOut, uErr := exec.Command("git", "remote", "get-url", name).Output(); uErr == nil {
+					remotes[name] = strings.TrimSpace(string(urlOut))
+				}
+			}
+			if len(remotes) > 0 {
+				meta.Remotes = remotes
+			}
 		}
 	}
 
 	return meta, nil
+}
+
+// ParseRepoSlug extracts an owner/name slug from a git remote URL. It
+// supports all common remote URL forms:
+//
+//   - SCP (SSH shorthand): git@host:owner/name.git
+//   - HTTPS/HTTP:          https://host/owner/name.git
+//   - ssh:// URL:          ssh://git@host[:port]/owner/name.git
+//   - git:// URL:          git://host/owner/name.git
+//
+// A trailing ".git" suffix is stripped before extracting the slug. For
+// repositories under nested namespaces (e.g. GitLab groups), the last two
+// path components are returned (e.g. "group/subgroup/name" → "subgroup/name").
+// Local paths and unrecognized forms return "". Exported for unit testing.
+func ParseRepoSlug(remoteURL string) string {
+	if remoteURL == "" {
+		return ""
+	}
+
+	var path string
+	if schemeIdx := strings.Index(remoteURL, "://"); schemeIdx != -1 {
+		// URL with an explicit scheme (https://, http://, ssh://, git://, …).
+		// Strip "scheme://", then optional "user@", then "host[:port]" up to
+		// the first "/".
+		afterScheme := remoteURL[schemeIdx+3:]
+		// Strip optional "user@"
+		if atIdx := strings.Index(afterScheme, "@"); atIdx != -1 {
+			afterScheme = afterScheme[atIdx+1:]
+		}
+		// Strip "host[:port]" — everything up to and including the first "/"
+		slashIdx := strings.Index(afterScheme, "/")
+		if slashIdx == -1 {
+			return ""
+		}
+		path = afterScheme[slashIdx+1:]
+	} else if colonIdx := strings.Index(remoteURL, ":"); colonIdx != -1 {
+		// SCP form: [user@]host:path — colon separates host from path and
+		// there is no "://" substring (checked above). Reject local absolute
+		// paths such as "/path/to/repo" (no ":" present, guarded by else branch).
+		path = remoteURL[colonIdx+1:]
+	} else {
+		// No scheme, no "host:path" colon — local path or unrecognized form.
+		return ""
+	}
+
+	// Normalize: strip leading "/", trailing "/", ".git" suffix, then another
+	// trailing "/" (handles "owner/name.git/" with a trailing slash).
+	path = strings.TrimPrefix(path, "/")
+	path = strings.TrimSuffix(path, "/")
+	path = strings.TrimSuffix(path, ".git")
+	path = strings.TrimSuffix(path, "/")
+
+	parts := strings.Split(path, "/")
+	// Remove empty components produced by consecutive slashes.
+	var nonEmpty []string
+	for _, p := range parts {
+		if p != "" {
+			nonEmpty = append(nonEmpty, p)
+		}
+	}
+	if len(nonEmpty) < 2 {
+		return ""
+	}
+	// Take the last two components so nested namespaces (group/subgroup/name)
+	// collapse to the canonical "parent/name" slug.
+	return nonEmpty[len(nonEmpty)-2] + "/" + nonEmpty[len(nonEmpty)-1]
+}
+
+// cwdForError returns the process working directory for inclusion in the
+// gather-failure error (so the user can see WHERE git was run). Falls back to a
+// placeholder if the cwd can't be determined — never fatal.
+func cwdForError() string {
+	if wd, err := os.Getwd(); err == nil {
+		return wd
+	}
+	return "the current directory"
 }

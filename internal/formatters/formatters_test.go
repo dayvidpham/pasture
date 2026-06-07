@@ -381,3 +381,120 @@ func TestFormatError_Nil_ReturnsEmpty(t *testing.T) {
 		t.Errorf("FormatError nil: want empty string, got %q", got)
 	}
 }
+
+// ─── FormatHookRecord ─────────────────────────────────────────────────────────
+
+// TestFormatHookRecord_JSON_AllMetadataPresent asserts the JSON output includes
+// all nine camelCase keys when every metadata field (including repo+remotes) is
+// supplied.
+func TestFormatHookRecord_JSON_AllMetadataPresent(t *testing.T) {
+	remotes := map[string]string{"origin": "git@github.com:dayvidpham/pasture.git"}
+	got, err := formatters.FormatHookRecord(
+		"git-commit", "abc123", 42,
+		"fix: handle nil config", "Jane Dev <jane@example.com>", "main", "2026-06-07T12:00:00Z",
+		"dayvidpham/pasture", remotes,
+		types.OutputJSON,
+	)
+	if err != nil {
+		t.Fatalf("FormatHookRecord JSON: unexpected error: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(got), &decoded); err != nil {
+		t.Fatalf("FormatHookRecord JSON: output is not valid JSON: %v\n%s", err, got)
+	}
+	// 9 keys: eventType, sha, eventId, message, author, branch, timestamp, repo, remotes
+	if len(decoded) != 9 {
+		t.Errorf("JSON has %d keys, want exactly 9; got %v", len(decoded), decoded)
+	}
+	if decoded["eventType"] != "git-commit" {
+		t.Errorf("eventType = %v, want %q", decoded["eventType"], "git-commit")
+	}
+	if decoded["sha"] != "abc123" {
+		t.Errorf("sha = %v, want %q", decoded["sha"], "abc123")
+	}
+	if id, _ := decoded["eventId"].(float64); id != 42 {
+		t.Errorf("eventId = %v, want 42", decoded["eventId"])
+	}
+	if decoded["message"] != "fix: handle nil config" {
+		t.Errorf("message = %v, want %q", decoded["message"], "fix: handle nil config")
+	}
+	if decoded["author"] != "Jane Dev <jane@example.com>" {
+		t.Errorf("author = %v, want %q", decoded["author"], "Jane Dev <jane@example.com>")
+	}
+	if decoded["branch"] != "main" {
+		t.Errorf("branch = %v, want %q", decoded["branch"], "main")
+	}
+	if decoded["timestamp"] != "2026-06-07T12:00:00Z" {
+		t.Errorf("timestamp = %v, want %q", decoded["timestamp"], "2026-06-07T12:00:00Z")
+	}
+	if decoded["repo"] != "dayvidpham/pasture" {
+		t.Errorf("repo = %v, want %q", decoded["repo"], "dayvidpham/pasture")
+	}
+	// remotes decodes as map[string]any
+	gotRemotes, _ := decoded["remotes"].(map[string]any)
+	if gotRemotes["origin"] != "git@github.com:dayvidpham/pasture.git" {
+		t.Errorf("remotes[origin] = %v, want %q", gotRemotes["origin"], "git@github.com:dayvidpham/pasture.git")
+	}
+}
+
+// TestFormatHookRecord_JSON_AbsentFieldOmitted asserts that metadata fields
+// absent from the recording (empty string / nil map) are omitted from the JSON
+// output via omitempty. Covers branch (empty), repo (empty), and remotes (nil).
+func TestFormatHookRecord_JSON_AbsentFieldOmitted(t *testing.T) {
+	// branch is empty (e.g. detached HEAD); repo and remotes also absent.
+	got, err := formatters.FormatHookRecord(
+		"git-commit", "abc123", 42,
+		"fix: detached HEAD commit", "Jane Dev <jane@example.com>", "", "2026-06-07T12:00:00Z",
+		"", nil,
+		types.OutputJSON,
+	)
+	if err != nil {
+		t.Fatalf("FormatHookRecord JSON: unexpected error: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(got), &decoded); err != nil {
+		t.Fatalf("FormatHookRecord JSON: output is not valid JSON: %v\n%s", err, got)
+	}
+	// branch, repo, remotes absent → 6 keys (not 9)
+	if len(decoded) != 6 {
+		t.Errorf("JSON has %d keys, want 6 (branch/repo/remotes absent via omitempty); got %v", len(decoded), decoded)
+	}
+	for _, absent := range []string{"branch", "repo", "remotes"} {
+		if _, present := decoded[absent]; present {
+			t.Errorf("%q key should be absent when empty (omitempty); got: %v", absent, decoded)
+		}
+	}
+	// The other keys must still be present.
+	for _, key := range []string{"eventType", "sha", "eventId", "message", "author", "timestamp"} {
+		if _, ok := decoded[key]; !ok {
+			t.Errorf("expected key %q to be present; got: %v", key, decoded)
+		}
+	}
+}
+
+func TestFormatHookRecord_Text_MatchesContract(t *testing.T) {
+	got, err := formatters.FormatHookRecord("git-commit", "abc123", 42, "msg", "auth", "main", "ts", "owner/repo", nil, types.OutputText)
+	if err != nil {
+		t.Fatalf("FormatHookRecord Text: unexpected error: %v", err)
+	}
+	want := "recorded git-commit event for sha abc123 (event #42)"
+	if got != want {
+		t.Errorf("FormatHookRecord Text:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestFormatHookRecord_UnknownFormat_ActionableError(t *testing.T) {
+	_, err := formatters.FormatHookRecord("git-commit", "abc123", 42, "", "", "", "", "", nil, types.OutputFormat("xml"))
+	if err == nil {
+		t.Fatal("FormatHookRecord with unknown format: want error, got nil")
+	}
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("error is not *StructuredError: %v", err)
+	}
+	if se.Category != errors.CategoryValidation {
+		t.Errorf("category = %v, want CategoryValidation", se.Category)
+	}
+}

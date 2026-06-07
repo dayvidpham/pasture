@@ -123,6 +123,61 @@ func FormatEpochState(result types.QueryStateResult, format types.OutputFormat) 
 	}
 }
 
+// hookRecordJSON is the JSON wire representation of a recorded hook event.
+// camelCase keys match the package convention. Metadata fields use omitempty
+// so keys absent from the recording (e.g. branch on a detached HEAD, or
+// remotes in a repo-less context) are omitted rather than emitted as zero values.
+type hookRecordJSON struct {
+	EventType string            `json:"eventType"`
+	SHA       string            `json:"sha"`
+	EventID   int64             `json:"eventId"`
+	Message   string            `json:"message,omitempty"`
+	Author    string            `json:"author,omitempty"`
+	Branch    string            `json:"branch,omitempty"`
+	Timestamp string            `json:"timestamp,omitempty"`
+	Repo      string            `json:"repo,omitempty"`
+	Remotes   map[string]string `json:"remotes,omitempty"`
+}
+
+// FormatHookRecord formats the result of `pasture hook record` for CLI output.
+//
+// JSON mode: camelCase keys for all recorded fields; metadata fields (including
+// repo and remotes) are omitted via omitempty when absent.
+//
+// Text mode: "recorded <eventType> event for sha <sha> (event #N)" (unchanged).
+func FormatHookRecord(eventType, sha string, eventID int64, message, author, branch, timestamp, repo string, remotes map[string]string, format types.OutputFormat) (string, error) {
+	switch format {
+	case types.OutputJSON:
+		b, err := json.MarshalIndent(hookRecordJSON{
+			EventType: eventType,
+			SHA:       sha,
+			EventID:   eventID,
+			Message:   message,
+			Author:    author,
+			Branch:    branch,
+			Timestamp: timestamp,
+			Repo:      repo,
+			Remotes:   remotes,
+		}, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+
+	case types.OutputText:
+		return fmt.Sprintf("recorded %s event for sha %s (event #%d)", eventType, sha, eventID), nil
+
+	default:
+		return "", &errors.StructuredError{
+			Category: errors.CategoryValidation,
+			What:     fmt.Sprintf("unrecognized output format %q", format),
+			Why:      "OutputFormat must be one of: json, text",
+			Impact:   "Output cannot be rendered",
+			Fix:      "Pass --format json or --format text (or omit for default text)",
+		}
+	}
+}
+
 // startResultJSON is the JSON wire representation of a start result.
 type startResultJSON struct {
 	WorkflowId string `json:"workflowId"`

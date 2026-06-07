@@ -160,18 +160,20 @@ func (g *GitRecorder) Events() []HookEvent {
 // Handle is called by hooks.Manager when one of the subscribed HookEvents
 // fires. The recorder looks for a string SHA at payload.Data[GitCommitDataKey];
 // if present and non-empty, it records a free-floating git commit event via
-// tasks.RecordGitEvent. If the key is absent / not a string / empty, Handle
-// returns nil (the hook fired for a non-git reason, which is normal).
+// tasks.RecordGitEvent and returns a HandleOutcome carrying the new
+// audit_events row id. If the key is absent / not a string / empty, Handle
+// returns a zero HandleOutcome and nil error (the hook fired for a non-git
+// reason, which is normal).
 //
 // Implements the HookHandler interface.
-func (g *GitRecorder) Handle(ctx context.Context, payload HookPayload) error {
+func (g *GitRecorder) Handle(ctx context.Context, payload HookPayload) (HandleOutcome, error) {
 	sha, ok := extractSHA(payload.Data)
 	if !ok {
-		// Not a git-bearing payload; nothing to do. Returning nil here is
-		// intentional — the hook fired for a different reason and
-		// returning an error would surface in dispatchErrors and
+		// Not a git-bearing payload; nothing to do. Returning a zero outcome
+		// and nil error here is intentional — the hook fired for a different
+		// reason and returning an error would surface in dispatchErrors and
 		// confuse operators.
-		return nil
+		return HandleOutcome{}, nil
 	}
 
 	// Build the audit-event payload from the hook data so the recorded row
@@ -195,12 +197,12 @@ func (g *GitRecorder) Handle(ctx context.Context, payload HookPayload) error {
 		auditPayload[k] = v
 	}
 
-	_, err := g.RecordCommit(ctx, sha, auditPayload)
+	id, err := g.RecordCommit(ctx, sha, auditPayload)
 	if err != nil {
 		// Wrap so dispatchErrors shows the hook origin.
-		return fmt.Errorf("hooks.GitRecorder.Handle: failed to record git commit (sha=%q event=%q): %w", sha, payload.Event, err)
+		return HandleOutcome{}, fmt.Errorf("hooks.GitRecorder.Handle: failed to record git commit (sha=%q event=%q): %w", sha, payload.Event, err)
 	}
-	return nil
+	return HandleOutcome{RecordedEventIDs: []int64{id}}, nil
 }
 
 // RecordCommit records a free-floating git commit event directly, bypassing
@@ -263,8 +265,7 @@ var _ HookHandler = (*GitRecorder)(nil)
 //
 // This helper exists so cmd/pastured/main.go can wire the recorder with a
 // single line of glue, keeping the daemon's main.go change minimal — the goal
-// is to avoid stepping on S7's parallel modifications to the same file (per
-// SLICE-9 coordination plan with aura-plugins-9ye50).
+// is to avoid stepping on S7's parallel modifications to the same file.
 //
 // Both `tracker` and `auditDB` MUST be non-nil; this function returns the
 // underlying *pasterrors.StructuredError surface from NewGitRecorder when

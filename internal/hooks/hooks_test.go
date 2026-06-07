@@ -29,11 +29,11 @@ func newRecordingHandler(events ...hooks.HookEvent) *recordingHandler {
 	return &recordingHandler{events: events}
 }
 
-func (h *recordingHandler) Handle(_ context.Context, payload hooks.HookPayload) error {
+func (h *recordingHandler) Handle(_ context.Context, payload hooks.HookPayload) (hooks.HandleOutcome, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.received = append(h.received, payload)
-	return h.err
+	return hooks.HandleOutcome{}, h.err
 }
 
 func (h *recordingHandler) Events() []hooks.HookEvent { return h.events }
@@ -63,13 +63,13 @@ func newSlowHandler(delay time.Duration, events ...hooks.HookEvent) *slowHandler
 	return &slowHandler{delay: delay, events: events}
 }
 
-func (h *slowHandler) Handle(ctx context.Context, _ hooks.HookPayload) error {
+func (h *slowHandler) Handle(ctx context.Context, _ hooks.HookPayload) (hooks.HandleOutcome, error) {
 	h.called.Add(1)
 	select {
 	case <-time.After(h.delay):
-		return nil
+		return hooks.HandleOutcome{}, nil
 	case <-ctx.Done():
-		return ctx.Err()
+		return hooks.HandleOutcome{}, ctx.Err()
 	}
 }
 
@@ -90,14 +90,14 @@ func newGateHandler(events ...hooks.HookEvent) *gateHandler {
 	return &gateHandler{started: make(chan struct{}), release: make(chan struct{}), events: events}
 }
 
-func (h *gateHandler) Handle(ctx context.Context, _ hooks.HookPayload) error {
+func (h *gateHandler) Handle(ctx context.Context, _ hooks.HookPayload) (hooks.HandleOutcome, error) {
 	h.called.Add(1)
 	h.once.Do(func() { close(h.started) })
 	select {
 	case <-h.release:
-		return nil
+		return hooks.HandleOutcome{}, nil
 	case <-ctx.Done():
-		return ctx.Err()
+		return hooks.HandleOutcome{}, ctx.Err()
 	}
 }
 
@@ -113,8 +113,29 @@ func newErrorHandler(err error, events ...hooks.HookEvent) *errorHandler {
 	return &errorHandler{err: err, events: events}
 }
 
-func (h *errorHandler) Handle(_ context.Context, _ hooks.HookPayload) error { return h.err }
-func (h *errorHandler) Events() []hooks.HookEvent                           { return h.events }
+func (h *errorHandler) Handle(_ context.Context, _ hooks.HookPayload) (hooks.HandleOutcome, error) {
+	return hooks.HandleOutcome{}, h.err
+}
+func (h *errorHandler) Events() []hooks.HookEvent { return h.events }
+
+// idGeneratingHandler returns a unique int64 id per Handle call, simulating a
+// handler that records one audit row per invocation. Used to assert per-dispatch
+// id partitioning without a real SQLite backend.
+type idGeneratingHandler struct {
+	counter atomic.Int64
+	events  []hooks.HookEvent
+}
+
+func newIDGeneratingHandler(events ...hooks.HookEvent) *idGeneratingHandler {
+	return &idGeneratingHandler{events: events}
+}
+
+func (h *idGeneratingHandler) Handle(_ context.Context, _ hooks.HookPayload) (hooks.HandleOutcome, error) {
+	id := h.counter.Add(1)
+	return hooks.HandleOutcome{RecordedEventIDs: []int64{id}}, nil
+}
+
+func (h *idGeneratingHandler) Events() []hooks.HookEvent { return h.events }
 
 // samplePayload builds a HookPayload for the given event.
 func samplePayload(event hooks.HookEvent) hooks.HookPayload {
@@ -192,7 +213,7 @@ func TestManager_Register_SingleHandler(t *testing.T) {
 	m.Register(h)
 
 	payload := samplePayload(hooks.HookEpochStarted)
-	if err := m.Dispatch(context.Background(), payload); err != nil {
+	if _, err := m.Dispatch(context.Background(), payload); err != nil {
 		t.Fatalf("Dispatch: unexpected error: %v", err)
 	}
 	if h.count() != 1 {
@@ -208,7 +229,7 @@ func TestManager_Register_MultipleHandlersSameEvent(t *testing.T) {
 	m.Register(h2)
 
 	payload := samplePayload(hooks.HookSliceStarted)
-	if err := m.Dispatch(context.Background(), payload); err != nil {
+	if _, err := m.Dispatch(context.Background(), payload); err != nil {
 		t.Fatalf("Dispatch: unexpected error: %v", err)
 	}
 	if h1.count() != 1 {
@@ -240,7 +261,7 @@ func TestManager_Dispatch_UnsubscribedEvent_NoError(t *testing.T) {
 	m.Register(h)
 
 	// Dispatch an event that h is NOT subscribed to.
-	if err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceFailed)); err != nil {
+	if _, err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceFailed)); err != nil {
 		t.Fatalf("Dispatch unsubscribed event: want nil error, got %v", err)
 	}
 	if h.count() != 0 {
@@ -250,7 +271,7 @@ func TestManager_Dispatch_UnsubscribedEvent_NoError(t *testing.T) {
 
 func TestManager_Dispatch_EmptyManager_NoError(t *testing.T) {
 	m := hooks.NewManager()
-	if err := m.Dispatch(context.Background(), samplePayload(hooks.HookEpochCompleted)); err != nil {
+	if _, err := m.Dispatch(context.Background(), samplePayload(hooks.HookEpochCompleted)); err != nil {
 		t.Fatalf("Dispatch on empty manager: want nil, got %v", err)
 	}
 }
@@ -267,7 +288,10 @@ func TestManager_Dispatch_WaitsForHandlerThenReturns(t *testing.T) {
 	defer cancel()
 
 	done := make(chan error, 1)
-	go func() { done <- m.Dispatch(ctx, samplePayload(hooks.HookReviewCycle)) }()
+	go func() {
+		_, dErr := m.Dispatch(ctx, samplePayload(hooks.HookReviewCycle))
+		done <- dErr
+	}()
 
 	// 1. The handler must actually be invoked.
 	select {
@@ -311,7 +335,7 @@ func TestManager_Dispatch_HandlerTimedOut_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err := m.Dispatch(ctx, samplePayload(hooks.HookConnectionLost))
+	_, err := m.Dispatch(ctx, samplePayload(hooks.HookConnectionLost))
 	// Expect an error since the handler's context was cancelled.
 	if err == nil {
 		t.Fatal("expected error when handler context is cancelled, got nil")
@@ -332,7 +356,7 @@ func TestManager_Dispatch_Concurrent_AllHandlersReceivePayload(t *testing.T) {
 	}
 
 	payload := samplePayload(hooks.HookPhaseTransition)
-	if err := m.Dispatch(context.Background(), payload); err != nil {
+	if _, err := m.Dispatch(context.Background(), payload); err != nil {
 		t.Fatalf("Dispatch: unexpected error: %v", err)
 	}
 
@@ -348,22 +372,90 @@ func TestManager_Dispatch_Concurrent_AllHandlersReceivePayload(t *testing.T) {
 
 func TestManager_Dispatch_Concurrent_MultipleDispatches(t *testing.T) {
 	m := hooks.NewManager()
-	h := newRecordingHandler(hooks.HookVoteRecorded)
+	// Use an id-generating handler so each dispatch produces a distinct id,
+	// letting us verify per-dispatch partitioning (no cross-dispatch carry-over).
+	h := newIDGeneratingHandler(hooks.HookVoteRecorded)
 	m.Register(h)
 
 	const numDispatches = 50
+	results := make([]hooks.DispatchResult, numDispatches)
 	var wg sync.WaitGroup
 	for i := 0; i < numDispatches; i++ {
 		wg.Add(1)
-		go func() {
+		go func(idx int) {
 			defer wg.Done()
-			m.Dispatch(context.Background(), samplePayload(hooks.HookVoteRecorded)) //nolint
-		}()
+			res, err := m.Dispatch(context.Background(), samplePayload(hooks.HookVoteRecorded))
+			if err != nil {
+				t.Errorf("Dispatch[%d]: unexpected error: %v", idx, err)
+			}
+			results[idx] = res
+		}(i)
 	}
 	wg.Wait()
 
-	if h.count() != numDispatches {
-		t.Errorf("handler called %d times, want %d", h.count(), numDispatches)
+	// 1. Every dispatch must carry exactly one id (one handler, one Handle call).
+	for i, res := range results {
+		if len(res.RecordedEventIDs) != 1 {
+			t.Errorf("dispatch[%d]: RecordedEventIDs = %v, want exactly one id", i, res.RecordedEventIDs)
+		}
+	}
+
+	// 2. All ids across the 50 dispatches must be distinct — no cross-dispatch
+	//    carry-over or id sharing between results.
+	seen := make(map[int64]int, numDispatches)
+	for i, res := range results {
+		for _, id := range res.RecordedEventIDs {
+			if prev, dup := seen[id]; dup {
+				t.Errorf("id %d appears in both dispatch[%d] and dispatch[%d] — cross-dispatch carry-over", id, prev, i)
+			}
+			seen[id] = i
+		}
+	}
+	if len(seen) != numDispatches {
+		t.Errorf("union of ids = %d distinct, want %d (one unique id per dispatch)", len(seen), numDispatches)
+	}
+}
+
+// ─── Manager.Dispatch — DispatchResult aggregation ───────────────────────────
+
+// TestManager_Dispatch_NonRecordingHandler_EmptyResult asserts that when a
+// registered handler returns a zero HandleOutcome, DispatchResult.RecordedEventIDs
+// is empty — no phantom ids are injected.
+func TestManager_Dispatch_NonRecordingHandler_EmptyResult(t *testing.T) {
+	m := hooks.NewManager()
+	// recordingHandler returns a zero HandleOutcome (no ids).
+	h := newRecordingHandler(hooks.HookEpochStarted)
+	m.Register(h)
+
+	res, err := m.Dispatch(context.Background(), samplePayload(hooks.HookEpochStarted))
+	if err != nil {
+		t.Fatalf("Dispatch: unexpected error: %v", err)
+	}
+	if len(res.RecordedEventIDs) != 0 {
+		t.Errorf("DispatchResult.RecordedEventIDs = %v, want empty for a non-recording handler", res.RecordedEventIDs)
+	}
+}
+
+// TestManager_Dispatch_MultiHandler_AggregatesAllIDs registers two id-generating
+// handlers for the same event and asserts the DispatchResult contains BOTH ids
+// (proves the append(..., oc.RecordedEventIDs...) concatenation across
+// handlers). The two handlers share neither state nor a common id space, so
+// only the count (not the specific values) is asserted here; per-backend id
+// uniqueness is tested by the real-recorder tests in git_recorder_test.go.
+func TestManager_Dispatch_MultiHandler_AggregatesAllIDs(t *testing.T) {
+	m := hooks.NewManager()
+	h1 := newIDGeneratingHandler(hooks.HookSliceCompleted)
+	h2 := newIDGeneratingHandler(hooks.HookSliceCompleted)
+	m.Register(h1)
+	m.Register(h2)
+
+	res, err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceCompleted))
+	if err != nil {
+		t.Fatalf("Dispatch: unexpected error: %v", err)
+	}
+	// Both handlers contribute exactly one id each → the aggregated result has 2.
+	if len(res.RecordedEventIDs) != 2 {
+		t.Fatalf("DispatchResult.RecordedEventIDs = %v (len %d), want exactly 2 ids (one per handler)", res.RecordedEventIDs, len(res.RecordedEventIDs))
 	}
 }
 
@@ -375,7 +467,7 @@ func TestManager_Dispatch_HandlerError_ReturnedToDispatch(t *testing.T) {
 	eh := newErrorHandler(handlerErr, hooks.HookSliceFailed)
 	m.Register(eh)
 
-	err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceFailed))
+	_, err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceFailed))
 	if err == nil {
 		t.Fatal("expected error from handler, got nil")
 	}
@@ -389,7 +481,7 @@ func TestManager_Dispatch_OneHandlerErrors_OtherStillCalled(t *testing.T) {
 	m.Register(eh)
 	m.Register(good)
 
-	err := m.Dispatch(context.Background(), samplePayload(hooks.HookConstraintViolation))
+	_, err := m.Dispatch(context.Background(), samplePayload(hooks.HookConstraintViolation))
 	if err == nil {
 		t.Error("expected error from failing handler, got nil")
 	}
@@ -412,7 +504,7 @@ func TestDispatchErrors_Error_MultipleHandlers(t *testing.T) {
 	m.Register(h2)
 
 	// Dispatch the event; expect a combined error with both handler errors.
-	err := m.Dispatch(context.Background(), samplePayload(hooks.HookEpochStarted))
+	_, err := m.Dispatch(context.Background(), samplePayload(hooks.HookEpochStarted))
 	if err == nil {
 		t.Fatal("expected error from handlers, got nil")
 	}
@@ -445,7 +537,7 @@ func TestDispatchErrors_Unwrap(t *testing.T) {
 	m.Register(h2)
 
 	// Dispatch and get the combined error.
-	combinedErr := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceCompleted))
+	_, combinedErr := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceCompleted))
 	if combinedErr == nil {
 		t.Fatal("expected error from handlers, got nil")
 	}
@@ -490,7 +582,7 @@ func TestHookPayload_ZeroPhase_IsAcceptable(t *testing.T) {
 		// Phase intentionally omitted (zero value "")
 		Data: map[string]any{"sessionId": "sess-001"},
 	}
-	if err := m.Dispatch(context.Background(), payload); err != nil {
+	if _, err := m.Dispatch(context.Background(), payload); err != nil {
 		t.Fatalf("Dispatch with zero Phase: unexpected error: %v", err)
 	}
 	if h.count() != 1 {
@@ -515,7 +607,7 @@ func TestManager_WithDispatchTimeout_CustomTimeoutUsed(t *testing.T) {
 		slow := newSlowHandler(handlerDelay, hooks.HookSliceStarted)
 		m.Register(slow)
 
-		err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceStarted))
+		_, err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceStarted))
 		if err != nil {
 			t.Errorf("expected no error with generous timeout, got: %v", err)
 		}
@@ -529,7 +621,7 @@ func TestManager_WithDispatchTimeout_CustomTimeoutUsed(t *testing.T) {
 		slow := newSlowHandler(handlerDelay, hooks.HookSliceStarted)
 		m.Register(slow)
 
-		err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceStarted))
+		_, err := m.Dispatch(context.Background(), samplePayload(hooks.HookSliceStarted))
 		if err == nil {
 			t.Error("expected timeout error with tight dispatch timeout, got nil")
 		}
@@ -549,7 +641,7 @@ func TestNewManager_DefaultTimeout_IsFiveSeconds(t *testing.T) {
 	fast := newRecordingHandler(hooks.HookEpochStarted)
 	m.Register(fast)
 
-	if err := m.Dispatch(context.Background(), samplePayload(hooks.HookEpochStarted)); err != nil {
+	if _, err := m.Dispatch(context.Background(), samplePayload(hooks.HookEpochStarted)); err != nil {
 		t.Errorf("unexpected error with default timeout: %v", err)
 	}
 }
