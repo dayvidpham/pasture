@@ -86,6 +86,24 @@ func countContextEdges(t *testing.T, dbPath string, kind protocol.ContextKind, c
 	return n
 }
 
+// countAuditEventsByType counts audit_events rows of the given event_type.
+func countAuditEventsByType(t *testing.T, dbPath string, eventType protocol.EventType) int {
+	t.Helper()
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open verify: %v", err)
+	}
+	defer db.Close()
+	var n int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM audit_events WHERE event_type = ?`,
+		string(eventType),
+	).Scan(&n); err != nil {
+		t.Fatalf("count audit_events: %v", err)
+	}
+	return n
+}
+
 // assertString fails unless decoded[key] equals want.
 func assertString(t *testing.T, decoded map[string]any, key, want string) {
 	t.Helper()
@@ -333,6 +351,113 @@ func TestHookRecord_RealGit_DerivesMetadataFromCommit(t *testing.T) {
 	if ts, _ := decoded["timestamp"].(string); ts == "" {
 		t.Errorf("payload[timestamp] missing or empty; want git-derived committer date")
 	}
+}
+
+// ─── (c4) Fail-hard git gather — attempted+failed → record nothing ────────────
+
+// TestHookRecord_GatherFails_FailsHardRecordsNothing (C4): when a metadata flag
+// is absent the gatherer is consulted, and if it FAILS the handler must return
+// an actionable validation error (exit 1) and record NOTHING. Uses an injected
+// failing fake so the failure-propagation path is unit-testable without git.
+func TestHookRecord_GatherFails_FailsHardRecordsNothing(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	const sha = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+	failing := func(string) (map[string]string, error) {
+		return nil, stderrors.New("simulated: not a git repository")
+	}
+
+	in := handlers.HookRecordInput{
+		DBPath:   dbPath,
+		Event:    string(handlers.HookEventGitCommit),
+		SHA:      sha,
+		Gatherer: failing, // --sha only → all four fields absent → gather attempted
+	}
+
+	var out bytes.Buffer
+	code, err := handlers.HookRecord(&out, in)
+	requireValidationError(t, code, err)
+
+	// Actionable Fix must guide the user (run inside the repo / pass flags).
+	var se *pasterrors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("gather-failure error is not *StructuredError: %v", err)
+	}
+	if !bytesContains(se.Fix, "--message") || !bytesContains(se.Fix, "git repo") {
+		t.Errorf("gather-failure Fix should mention running inside the repo and passing flags; got:\n%s", se.Fix)
+	}
+
+	// NOTHING recorded: zero GitCommit rows and zero ContextGit edges for the sha.
+	if got := countAuditEventsByType(t, dbPath, protocol.EventType("GitCommit")); got != 0 {
+		t.Errorf("audit_events(GitCommit) = %d, want 0 (must record nothing on fail-hard)", got)
+	}
+	if got := countContextEdges(t, dbPath, protocol.ContextGit, sha); got != 0 {
+		t.Errorf("context_edges (GitContext, %q) = %d, want 0", sha, got)
+	}
+}
+
+// TestHookRecord_RealGit_OutsideRepo_FailsHard exercises the DEFAULT gatherer's
+// fail-hard behaviour: running with --sha only from a directory that is not a
+// git repo must fail non-zero and record nothing.
+func TestHookRecord_RealGit_OutsideRepo_FailsHard(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH; skipping real-git fail-hard test")
+	}
+	nonRepo := t.TempDir()
+	dbPath := filepath.Join(t.TempDir(), "pasture.db") // absolute → cwd-independent
+	const sha = "0000000000000000000000000000000000000000"
+
+	t.Chdir(nonRepo) // git commands now run outside any repo
+
+	in := handlers.HookRecordInput{
+		DBPath: dbPath,
+		Event:  string(handlers.HookEventGitCommit),
+		SHA:    sha,
+		// Gatherer nil → real gatherGitMeta, which fails outside a repo.
+	}
+
+	var out bytes.Buffer
+	code, err := handlers.HookRecord(&out, in)
+	requireValidationError(t, code, err)
+
+	if got := countAuditEventsByType(t, dbPath, protocol.EventType("GitCommit")); got != 0 {
+		t.Errorf("audit_events(GitCommit) = %d, want 0 (outside-repo gather must record nothing)", got)
+	}
+}
+
+// TestHookRecord_AllFlagsSupplied_SkipsGather: when ALL four metadata fields are
+// supplied explicitly, the gatherer is NEVER consulted — proven by injecting a
+// gatherer that would FAIL if called, yet the record still succeeds (exit 0).
+func TestHookRecord_AllFlagsSupplied_SkipsGather(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	const sha = "9999999999999999999999999999999999999999"
+
+	mustNotBeCalled := func(string) (map[string]string, error) {
+		t.Errorf("gatherer must NOT be called when all metadata flags are supplied")
+		return nil, stderrors.New("should not happen")
+	}
+
+	in := handlers.HookRecordInput{
+		DBPath:    dbPath,
+		Event:     string(handlers.HookEventGitCommit),
+		SHA:       sha,
+		Message:   strptr("explicit msg"),
+		Author:    strptr("Explicit <e@example.com>"),
+		Branch:    strptr("explicit-branch"),
+		Timestamp: strptr("2026-04-04T04:04:04Z"),
+		Gatherer:  mustNotBeCalled,
+	}
+
+	var out bytes.Buffer
+	if code, err := handlers.HookRecord(&out, in); err != nil || code != 0 {
+		t.Fatalf("HookRecord: err=%v code=%d (all-flags path must not consult git)", err, code)
+	}
+
+	decoded := decodeAuditPayload(t, dbPath, protocol.EventType("GitCommit"))
+	assertString(t, decoded, "message", "explicit msg")
+	assertString(t, decoded, "author", "Explicit <e@example.com>")
+	assertString(t, decoded, "branch", "explicit-branch")
+	assertString(t, decoded, "timestamp", "2026-04-04T04:04:04Z")
 }
 
 // ─── (d) Error cases — unknown --event and missing --sha (actionable) ─────────
