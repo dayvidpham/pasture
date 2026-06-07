@@ -87,15 +87,12 @@ func messageEntry(u SessionUpdate, entryIndex int) (protocol.SessionEntry, error
 	}
 
 	// Content preview (first text block, max 500 chars).
-	// ContentBlock.Content is the canonical field; Text is the live-wire alias.
+	// ContentBlock.Text is the single canonical field — the spec wire key
+	// "text" decodes into it directly, so no per-call fallback is needed here.
 	for _, cb := range u.Content {
 		if cb.Type == "text" || cb.Type == "thinking" {
-			raw := cb.Content
-			if raw == "" {
-				raw = cb.Text
-			}
-			if raw != "" {
-				preview := truncate(raw, 500)
+			if cb.Text != "" {
+				preview := truncate(cb.Text, 500)
 				e.ContentPreview = &preview
 			}
 			break

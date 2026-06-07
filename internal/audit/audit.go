@@ -75,8 +75,10 @@ type Trail interface {
 	RecordSessionEntries(ctx context.Context, entries []protocol.SessionEntry) error
 
 	// QuerySessionEntries returns all session entries for the given sessionId
-	// in insertion order (ascending entry_index for SQLite, insertion order
-	// for in-memory).
+	// in ascending entry_index order (ties broken by insertion order). Both
+	// backends honor this contract identically: SQLite via
+	// "ORDER BY entry_index ASC, id ASC" and in-memory via a stable sort
+	// (previously the two backends diverged).
 	//
 	// Returns an empty (non-nil) slice when no entries exist for sessionId.
 	// Returns an error if the underlying store is unavailable.

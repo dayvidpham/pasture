@@ -129,14 +129,14 @@ func (a *claudeAdapter) Parse(record []byte) (SessionUpdate, error) {
 		switch cb.Type {
 		case "text":
 			update.Content = append(update.Content, ContentBlock{
-				Type:    "text",
-				Content: cb.Text,
+				Type: "text",
+				Text: cb.Text,
 			})
 
 		case "thinking":
 			update.Content = append(update.Content, ContentBlock{
-				Type:    "thinking",
-				Content: cb.Thinking,
+				Type: "thinking",
+				Text: cb.Thinking,
 			})
 
 		case "tool_use":

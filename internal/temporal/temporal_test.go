@@ -961,6 +961,27 @@ func TestEpochWorkflow_FullLifecycle_ThroughP2(t *testing.T) {
 		EpochId:            "epoch-lifecycle",
 		RequestDescription: "full lifecycle test",
 	})
+
+	// Regression guard for the double-write defect: the single p1→p2 advance must
+	// produce EXACTLY ONE EventPhaseTransition audit row through the full
+	// EpochWorkflow.Run path. A re-introduced second RecordAuditEvent write
+	// (the removed step 2d) would double this and silently double-count every
+	// transition in forensic queries — the isolated RecordTransition activity
+	// test (activities_integration_test.go) cannot catch a workflow-level
+	// regression, so we assert it here against the real Run path.
+	events, qErr := trail.QueryEvents(context.Background(), "epoch-lifecycle", nil, nil)
+	if qErr != nil {
+		t.Fatalf("QueryEvents(epoch-lifecycle): %v", qErr)
+	}
+	transitions := 0
+	for _, e := range events {
+		if e.EventType == protocol.EventPhaseTransition {
+			transitions++
+		}
+	}
+	if transitions != 1 {
+		t.Errorf("EventPhaseTransition rows = %d, want 1 (one p1→p2 advance; >1 means the double-write regressed)", transitions)
+	}
 }
 
 // ─── RecordAuditEvent uninitialized error path ────────────────────────────────

@@ -61,8 +61,8 @@ func TestClaudeAdapter_AssistantTextMessage(t *testing.T) {
 	if update.Content[0].Type != "text" {
 		t.Errorf("Content[0].Type: got %q, want %q", update.Content[0].Type, "text")
 	}
-	if update.Content[0].Content != "Hello from Claude" {
-		t.Errorf("Content[0].Content: got %q, want %q", update.Content[0].Content, "Hello from Claude")
+	if update.Content[0].Text != "Hello from Claude" {
+		t.Errorf("Content[0].Text: got %q, want %q", update.Content[0].Text, "Hello from Claude")
 	}
 }
 
@@ -302,8 +302,8 @@ func TestClaudeAdapter_ThinkingBlock(t *testing.T) {
 	for _, cb := range update.Content {
 		if cb.Type == "thinking" {
 			found = true
-			if cb.Content == "" {
-				t.Error("thinking ContentBlock: Content should not be empty")
+			if cb.Text == "" {
+				t.Error("thinking ContentBlock: Text should not be empty")
 			}
 		}
 	}

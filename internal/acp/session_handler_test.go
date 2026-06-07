@@ -2,6 +2,8 @@ package acp_test
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,18 +22,23 @@ func makeUpdate(sessionId, role string, stopReason acp.StopReason) acp.SessionUp
 		StopReason: stopReason,
 		Timestamp:  time.Now().UnixMilli(),
 		Content: []acp.ContentBlock{
-			{Type: "text", Content: "hello from " + role},
+			{Type: "text", Text: "hello from " + role},
 		},
 	}
 }
 
 // captureHandler records which HookEvents it received, for assertion.
+// mu guards received so the handler is safe under the Manager's concurrent
+// fan-out dispatch (exercised by TestIndexingSessionHandler_ConcurrentSessions).
 type captureHandler struct {
+	mu       sync.Mutex
 	received []hooks.HookPayload
 }
 
 func (c *captureHandler) Handle(_ context.Context, payload hooks.HookPayload) error {
+	c.mu.Lock()
 	c.received = append(c.received, payload)
+	c.mu.Unlock()
 	return nil
 }
 
@@ -251,6 +258,63 @@ func TestMultipleSessionsAreIndependent(t *testing.T) {
 	}
 	if len(e2After) != len(e2) {
 		t.Errorf("sess-2 entries changed after sess-1 ended: was %d, now %d", len(e2), len(e2After))
+	}
+}
+
+// TestIndexingSessionHandler_ConcurrentSessions exercises HandleUpdate from many
+// goroutines at once. Each goroutine drives its own session
+// against one shared handler/indexer/trail; the test asserts every session's
+// updates were persisted independently with no lost or cross-attributed writes.
+// Run under `go test -race` (CGO_ENABLED=1) to catch data races in the handler's
+// per-session bookkeeping or the trail.
+func TestIndexingSessionHandler_ConcurrentSessions(t *testing.T) {
+	t.Parallel()
+	trail := audit.NewInMemoryAuditTrail()
+	indexer := acp.NewSharedIndexer()
+	cap := &captureHandler{}
+	mgr := newManager(cap)
+	h := acp.NewIndexingSessionHandler(indexer, trail, mgr, "epoch-concurrent")
+	ctx := context.Background()
+
+	const sessions = 16
+	const updatesPer = 8
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, sessions*updatesPer)
+	for s := 0; s < sessions; s++ {
+		wg.Add(1)
+		go func(s int) {
+			defer wg.Done()
+			sid := fmt.Sprintf("sess-%02d", s)
+			for u := 0; u < updatesPer; u++ {
+				role := "user"
+				if u%2 == 1 {
+					role = "assistant"
+				}
+				if err := h.HandleUpdate(ctx, makeUpdate(sid, role, "")); err != nil {
+					errCh <- fmt.Errorf("%s update %d: %w", sid, u, err)
+					return
+				}
+			}
+		}(s)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatalf("concurrent HandleUpdate: %v", err)
+	}
+
+	// Every session must have exactly updatesPer entries — proving concurrent
+	// updates were neither lost nor mis-attributed across sessions.
+	for s := 0; s < sessions; s++ {
+		sid := fmt.Sprintf("sess-%02d", s)
+		got, err := trail.QuerySessionEntries(ctx, sid)
+		if err != nil {
+			t.Fatalf("QuerySessionEntries(%q): %v", sid, err)
+		}
+		if len(got) != updatesPer {
+			t.Errorf("%s: got %d entries, want %d", sid, len(got), updatesPer)
+		}
 	}
 }
 

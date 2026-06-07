@@ -1,19 +1,13 @@
 tests:
-  - id: "content-field-only"
-    block: { type: "text", content: "hello from Content", text: "" }
-    want_text: "hello from Content"
-  - id: "text-field-only"
-    block: { type: "text", content: "", text: "hello from Text" }
-    want_text: "hello from Text"
-  - id: "both-fields-content-wins"
-    block: { type: "text", content: "canonical value", text: "wire value" }
-    want_text: "canonical value"
-  - id: "both-empty"
-    block: { type: "text", content: "", text: "" }
+  - id: "text-block"
+    block: { type: "text", text: "hello from text block" }
+    want_text: "hello from text block"
+  - id: "empty-text"
+    block: { type: "text", text: "" }
     want_text: ""
-  - id: "thinking-block-uses-content"
-    block: { type: "thinking", content: "inner monologue", text: "" }
+  - id: "thinking-block"
+    block: { type: "thinking", text: "inner monologue" }
     want_text: "inner monologue"
   - id: "tool-use-block-no-text"
-    block: { type: "tool_use", content: "", text: "" }
+    block: { type: "tool_use", text: "" }
     want_text: ""

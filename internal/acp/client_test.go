@@ -279,7 +279,7 @@ func TestConnect_SingleSessionUpdate(t *testing.T) {
 	update := acp.SessionUpdate{
 		SessionId: "sess-1",
 		Role:      "assistant",
-		Content:   []acp.ContentBlock{{Type: "text", Content: "Hello!"}},
+		Content:   []acp.ContentBlock{{Type: "text", Text: "Hello!"}},
 	}
 	line := makeSessionUpdateLine(t, update)
 
@@ -315,7 +315,7 @@ func TestConnect_SessionEndRecorded(t *testing.T) {
 	update1 := acp.SessionUpdate{
 		SessionId: "sess-end-1",
 		Role:      "assistant",
-		Content:   []acp.ContentBlock{{Type: "text", Content: "Processing..."}},
+		Content:   []acp.ContentBlock{{Type: "text", Text: "Processing..."}},
 	}
 	update2 := acp.SessionUpdate{
 		SessionId:  "sess-end-1",
@@ -360,10 +360,10 @@ func TestConnect_MultipleSessionsTrackedIndependently(t *testing.T) {
 	c := acp.NewClient(h)
 
 	updates := []acp.SessionUpdate{
-		{SessionId: "sess-A", Role: "user", Content: []acp.ContentBlock{{Type: "text", Content: "Hello"}}},
-		{SessionId: "sess-B", Role: "user", Content: []acp.ContentBlock{{Type: "text", Content: "World"}}},
+		{SessionId: "sess-A", Role: "user", Content: []acp.ContentBlock{{Type: "text", Text: "Hello"}}},
+		{SessionId: "sess-B", Role: "user", Content: []acp.ContentBlock{{Type: "text", Text: "World"}}},
 		{SessionId: "sess-A", Role: "assistant", StopReason: acp.StopReasonEndTurn},
-		{SessionId: "sess-B", Role: "assistant", Content: []acp.ContentBlock{{Type: "text", Content: "More"}}},
+		{SessionId: "sess-B", Role: "assistant", Content: []acp.ContentBlock{{Type: "text", Text: "More"}}},
 		{SessionId: "sess-B", Role: "assistant", StopReason: acp.StopReasonMaxTokens},
 	}
 

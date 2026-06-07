@@ -879,7 +879,7 @@ func (s *SqliteAuditTrail) QuerySessionEntries(_ context.Context, sessionId stri
 			parent_index, tool_input, tool_output, extra
 		FROM session_entries
 		WHERE session_id = ?
-		ORDER BY id ASC
+		ORDER BY entry_index ASC, id ASC
 	`, sessionId)
 	if err != nil {
 		return nil, fmt.Errorf(

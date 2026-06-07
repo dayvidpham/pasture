@@ -241,6 +241,3 @@ func SliceWorkflowFn(ctx workflow.Context, input SliceInput) (*SliceResult, erro
 	sw := &SliceWorkflow{}
 	return sw.Run(ctx, input)
 }
-
-// sliceWorkflowFn is an alias for RegisterWorkflows backward compatibility.
-var sliceWorkflowFn = SliceWorkflowFn
