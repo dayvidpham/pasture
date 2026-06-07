@@ -124,6 +124,37 @@ func runSessionEntrySuite(t *testing.T, trail audit.Trail) {
 		}
 	})
 
+	// ── Large batch, recorded out of entry_index order ─────────────────────
+	// Large-batch INSERT path + ordering: record
+	// a 150-entry batch whose EntryIndex values are inserted in REVERSE order,
+	// then assert QuerySessionEntries returns them sorted by entry_index — not
+	// by insertion order. Exercises the batch INSERT path and the unified
+	// ascending-entry_index contract across both backends.
+	t.Run("RecordLargeBatchOrderedByEntryIndex", func(t *testing.T) {
+		const n = 150
+		sessionLarge := "session-large-batch"
+		entries := make([]protocol.SessionEntry, 0, n)
+		for i := n - 1; i >= 0; i-- { // reverse insertion order
+			entries = append(entries, makeSessionEntry(sessionLarge, i, "assistant"))
+		}
+		if err := trail.RecordSessionEntries(ctx, entries); err != nil {
+			t.Fatalf("RecordSessionEntries(large batch n=%d): %v", n, err)
+		}
+		got, err := trail.QuerySessionEntries(ctx, sessionLarge)
+		if err != nil {
+			t.Fatalf("QuerySessionEntries(%q): %v", sessionLarge, err)
+		}
+		if len(got) != n {
+			t.Fatalf("large batch: want %d entries, got %d", n, len(got))
+		}
+		for i, e := range got {
+			if e.EntryIndex != i {
+				t.Fatalf("large-batch ordering: got[%d].EntryIndex = %d, want %d "+
+					"(QuerySessionEntries must sort by entry_index, not insertion order)", i, e.EntryIndex, i)
+			}
+		}
+	})
+
 	// ── Query by sessionId returns correct entries ─────────────────────────
 	t.Run("QueryBySessionId", func(t *testing.T) {
 		got, err := trail.QuerySessionEntries(ctx, sessionA)

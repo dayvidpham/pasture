@@ -59,8 +59,8 @@ func TestOpenCodeAdapter_TextResponse(t *testing.T) {
 	if update.Content[0].Type != "text" {
 		t.Errorf("Content[0].Type: got %q, want %q", update.Content[0].Type, "text")
 	}
-	if update.Content[0].Content != "Hello from OpenCode" {
-		t.Errorf("Content[0].Content: got %q, want %q", update.Content[0].Content, "Hello from OpenCode")
+	if update.Content[0].Text != "Hello from OpenCode" {
+		t.Errorf("Content[0].Text: got %q, want %q", update.Content[0].Text, "Hello from OpenCode")
 	}
 }
 

@@ -78,15 +78,18 @@ type ToolCall struct {
 }
 
 // ContentBlock represents a single piece of content in a session update.
-// Aligned with the ACP content block model.
+// Aligned with the ACP content block model, whose text blocks are
+// {"type":"text","text":"..."} — i.e. the spec wire key is "text".
+//
+// Text is the single canonical field, named for the ACP/Anthropic spec wire key
+// "text", so it decodes and round-trips with the standard library: no custom
+// UnmarshalJSON/MarshalJSON. This replaced an earlier dual Content/Text pair
+// that left callers (e.g. the indexer) guessing which field held the payload.
 type ContentBlock struct {
 	// Type identifies the block type (e.g. "text", "tool_use", "tool_result", "thinking").
 	Type string `json:"type"`
-	// Content holds the text payload for "text" and "thinking" blocks.
-	// For "text" blocks parsed from Claude format, the "text" field is mapped here.
-	Content string `json:"content,omitempty"`
-	// Text holds the text content for "text" blocks in the ACP live-stream format.
-	// Adapters should populate Content; the live client uses Text from wire format.
+	// Text holds the text payload for "text" and "thinking" blocks, matching the
+	// ACP spec wire key "text".
 	Text string `json:"text,omitempty"`
 	// ID is the tool call identifier for "tool_use" and "tool_result" blocks.
 	ID string `json:"id,omitempty"`

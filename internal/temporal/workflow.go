@@ -202,29 +202,24 @@ func (w *EpochWorkflow) Run(ctx workflow.Context, input EpochInput) (*EpochResul
 
 		// 2c. Record transition (activity — I/O boundary).
 		// Pass epochId so audit events are queryable by epoch.
+		//
+		// RecordTransition is the SINGLE canonical EventPhaseTransition record:
+		// it writes one audit_events row (rich payload — from/to/triggeredBy/
+		// conditionMet/success, attributed to the transition-gate/consensus
+		// automaton) and attaches the EpochContext edge (see
+		// activities.go RecordTransition; asserted as exactly-one-row by
+		// TestActivities_RecordTransition_* in activities_integration_test.go).
+		// We deliberately do NOT emit a second RecordAuditEvent with the same
+		// EventType here — doing so produced two EventPhaseTransition rows per
+		// transition, double-counting in forensic queries. RecordAuditEvent
+		// stays the entry point for genuinely distinct events (e.g. the
+		// constraint-violation path).
 		if actErr := workflow.ExecuteActivity(actCtx, ActivityRecordTransition, input.EpochId, *record).
 			Get(actCtx, nil); actErr != nil {
 			workflow.GetLogger(ctx).Warn("EpochWorkflow: RecordTransition activity failed", "error", actErr)
 		}
 
-		// 2d. Record audit event (activity — I/O boundary).
-		auditEvent := protocol.AuditEvent{
-			EpochId:   input.EpochId,
-			Phase:     record.ToPhase,
-			Role:      string(w.sm.State().CurrentRole),
-			EventType: protocol.EventPhaseTransition,
-			Payload: map[string]any{
-				"from": string(record.FromPhase),
-				"to":   string(record.ToPhase),
-			},
-			Timestamp: record.Timestamp,
-		}
-		if actErr := workflow.ExecuteActivity(actCtx, ActivityRecordAuditEvent, auditEvent).
-			Get(actCtx, nil); actErr != nil {
-			workflow.GetLogger(ctx).Warn("EpochWorkflow: RecordAuditEvent activity failed", "error", actErr)
-		}
-
-		// 2e. Upsert search attributes atomically with the transition.
+		// 2d. Upsert search attributes atomically with the transition.
 		current := w.sm.State().CurrentPhase
 		status := "running"
 		if current == protocol.PhaseComplete {

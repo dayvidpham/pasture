@@ -114,8 +114,8 @@ func (a *openCodeAdapter) Parse(record []byte) (SessionUpdate, error) {
 	// Text response → ContentBlock.
 	if raw.Text != "" {
 		update.Content = append(update.Content, ContentBlock{
-			Type:    "text",
-			Content: raw.Text,
+			Type: "text",
+			Text: raw.Text,
 		})
 	}
 

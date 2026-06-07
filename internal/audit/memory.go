@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"github.com/dayvidpham/pasture/pkg/protocol"
@@ -109,8 +110,10 @@ func (m *InMemoryAuditTrail) RecordSessionEntries(_ context.Context, entries []p
 }
 
 // QuerySessionEntries returns all session entries for the given sessionId in
-// insertion order. Returns an empty (non-nil) slice when no entries exist.
-// Safe for concurrent use.
+// ascending entry_index order (ties broken by insertion order). This matches
+// the SqliteAuditTrail contract (ORDER BY entry_index ASC, id ASC) so callers
+// get the same ordering regardless of backend. Returns an
+// empty (non-nil) slice when no entries exist. Safe for concurrent use.
 func (m *InMemoryAuditTrail) QuerySessionEntries(_ context.Context, sessionId string) ([]protocol.SessionEntry, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -121,5 +124,10 @@ func (m *InMemoryAuditTrail) QuerySessionEntries(_ context.Context, sessionId st
 			result = append(result, e)
 		}
 	}
+	// Stable sort by EntryIndex preserves insertion order for equal indices,
+	// mirroring SQLite's "ORDER BY entry_index ASC, id ASC".
+	sort.SliceStable(result, func(i, j int) bool {
+		return result[i].EntryIndex < result[j].EntryIndex
+	})
 	return result, nil
 }

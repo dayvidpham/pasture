@@ -19,7 +19,7 @@ func TestSharedIndexer_1000Updates(t *testing.T) {
 			SessionId:  fmt.Sprintf("session-%d", i),
 			Timestamp:  int64(1_000_000 + i),
 			Role:       "assistant",
-			Content:    []acp.ContentBlock{{Type: "text", Content: fmt.Sprintf("message %d", i)}},
+			Content:    []acp.ContentBlock{{Type: "text", Text: fmt.Sprintf("message %d", i)}},
 			StopReason: acp.StopReasonEndTurn,
 			TokensIn:   10,
 			TokensOut:  20,
@@ -46,7 +46,7 @@ func TestSharedIndexer_DepthZeroEntry(t *testing.T) {
 			SessionId:  "sess-abc",
 			Timestamp:  ts,
 			Role:       "assistant",
-			Content:    []acp.ContentBlock{{Type: "text", Content: "hello world"}},
+			Content:    []acp.ContentBlock{{Type: "text", Text: "hello world"}},
 			StopReason: acp.StopReasonEndTurn,
 			TokensIn:   5,
 			TokensOut:  10,
@@ -173,7 +173,7 @@ func TestSharedIndexer_ContentPreviewTruncation(t *testing.T) {
 		{
 			SessionId: "sess-trunc",
 			Role:      "assistant",
-			Content:   []acp.ContentBlock{{Type: "text", Content: longText}},
+			Content:   []acp.ContentBlock{{Type: "text", Text: longText}},
 		},
 	}
 
@@ -212,7 +212,7 @@ func TestSharedIndexer_EntryIDPropagation(t *testing.T) {
 			Role:          "assistant",
 			EntryId:       "msg-uuid-123",
 			ParentEntryId: "msg-uuid-000",
-			Content:       []acp.ContentBlock{{Type: "text", Content: "hi"}},
+			Content:       []acp.ContentBlock{{Type: "text", Text: "hi"}},
 		},
 	}
 	entries, err := idx.Index(updates)
