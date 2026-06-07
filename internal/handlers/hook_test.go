@@ -198,6 +198,47 @@ func TestHookRecord_MergePrecedence_GitFillsWhenFlagsAbsent(t *testing.T) {
 	assertString(t, decoded, "timestamp", "2026-02-02T12:34:56Z")
 }
 
+// TestHookRecord_MergePrecedence_ExplicitEmptyOverridesGit asserts the
+// documented contract that a flag set to the EMPTY string (non-nil pointer)
+// overrides the git-derived value — i.e. "absent" (nil → git fills) and
+// "explicitly empty" (override to "") are distinct, observable in the payload.
+func TestHookRecord_MergePrecedence_ExplicitEmptyOverridesGit(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	const sha = "1111111111111111111111111111111111111111"
+
+	// Git would supply non-empty message AND branch...
+	fake := func(string) (map[string]string, error) {
+		return map[string]string{
+			"message": "git message that must be overridden",
+			"branch":  "git-branch-that-must-be-overridden",
+			"author":  "Kept Author <kept@example.com>",
+		}, nil
+	}
+
+	// ...but the caller explicitly clears message + branch (empty-string flags),
+	// while leaving author absent (git fills it).
+	in := handlers.HookRecordInput{
+		DBPath:   dbPath,
+		Event:    string(handlers.HookEventGitCommit),
+		SHA:      sha,
+		Message:  strptr(""),
+		Branch:   strptr(""),
+		Gatherer: fake,
+	}
+
+	var out bytes.Buffer
+	if code, err := handlers.HookRecord(&out, in); err != nil || code != 0 {
+		t.Fatalf("HookRecord: err=%v code=%d", err, code)
+	}
+
+	decoded := decodeAuditPayload(t, dbPath, protocol.EventType("GitCommit"))
+	// Explicit empty wins over git's non-empty value (observable as "").
+	assertString(t, decoded, "message", "")
+	assertString(t, decoded, "branch", "")
+	// Absent flag still lets git fill in.
+	assertString(t, decoded, "author", "Kept Author <kept@example.com>")
+}
+
 // ─── (b) Lightweight integration smoke — one GitCommit row + ContextGit edge ──
 
 func TestHookRecord_WritesOneGitCommitRowAndEdge(t *testing.T) {
@@ -308,11 +349,14 @@ func TestHookRecord_UnknownEvent_ActionableError(t *testing.T) {
 	requireValidationError(t, code, err)
 
 	// The error must list the supported events so the user can self-correct.
+	// As() is REQUIRED to succeed — a failed type assertion must fail the test,
+	// not silently skip the Fix-content assertion.
 	var se *pasterrors.StructuredError
-	if stderrors.As(err, &se) {
-		if !bytesContains(se.Fix, "git-commit") {
-			t.Errorf("unknown-event Fix should list supported events incl. git-commit; got:\n%s", se.Fix)
-		}
+	if !stderrors.As(err, &se) {
+		t.Fatalf("unknown-event error is not *StructuredError: %v", err)
+	}
+	if !bytesContains(se.Fix, "git-commit") {
+		t.Errorf("unknown-event Fix should list supported events incl. git-commit; got:\n%s", se.Fix)
 	}
 }
 

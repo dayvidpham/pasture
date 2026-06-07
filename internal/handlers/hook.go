@@ -53,23 +53,24 @@ type SupportedHookEvent string
 const (
 	// HookEventGitCommit records a git commit. Maps to hooks.HookGitCommit and
 	// requires --sha. This is the only event supported in this slice; the
-	// supported-set is the extensible seam for future events (push, rebase, …).
+	// supported-set (hookEventBindings) is the extensible seam for future
+	// events (push, rebase, …).
 	HookEventGitCommit SupportedHookEvent = "git-commit"
 )
 
-// supportedHookEvents is the ordered set of CLI event names, used to render the
-// actionable "supported events" list in validation errors and help text. A new
-// SupportedHookEvent constant must be appended here AND bound in
-// hookEventBindings below.
-var supportedHookEvents = []SupportedHookEvent{
-	HookEventGitCommit,
+// hookEventBinding ties a CLI event name to the internal hooks.HookEvent the
+// in-process Manager dispatches for it.
+type hookEventBinding struct {
+	cli  SupportedHookEvent
+	hook hooks.HookEvent
 }
 
-// hookEventBindings maps each CLI event name to the internal hooks.HookEvent
-// the in-process Manager dispatches. Single source of truth for the
-// CLI-event → hook-event correspondence.
-var hookEventBindings = map[SupportedHookEvent]hooks.HookEvent{
-	HookEventGitCommit: hooks.HookGitCommit,
+// hookEventBindings is the SINGLE ordered source of truth for the supported
+// CLI events: both the supported-list (for help text / errors) and the
+// event→hook lookup are derived from it. Adding a new recordable event is a
+// one-place edit — append a {cli, hook} pair here.
+var hookEventBindings = []hookEventBinding{
+	{cli: HookEventGitCommit, hook: hooks.HookGitCommit},
 }
 
 // Metadata payload keys. These are the well-known keys carried in the
@@ -116,7 +117,7 @@ type HookRecordInput struct {
 // the caller never hand-rolls a 0/1/5 switch.
 func HookRecord(w io.Writer, in HookRecordInput) (int, error) {
 	// 1. Validate --event against the typed supported-set (the extensible seam).
-	cliEvent, hookEvent, err := parseSupportedHookEvent(in.Event)
+	hookEvent, err := parseSupportedHookEvent(in.Event)
 	if err != nil {
 		return errors.ExitCode(err), err
 	}
@@ -169,7 +170,7 @@ func HookRecord(w io.Writer, in HookRecordInput) (int, error) {
 	}
 	gitMeta, _ := gather(sha) // best-effort: ignore error, fall back to flags
 
-	data := map[string]any{"sha": sha}
+	data := map[string]any{hooks.GitCommitDataKey: sha}
 	mergeMeta(data, metaMessage, in.Message, gitMeta)
 	mergeMeta(data, metaAuthor, in.Author, gitMeta)
 	mergeMeta(data, metaBranch, in.Branch, gitMeta)
@@ -188,7 +189,7 @@ func HookRecord(w io.Writer, in HookRecordInput) (int, error) {
 		return errors.ExitCode(err), err
 	}
 
-	fmt.Fprintf(w, "recorded %s event for sha %s\n", cliEvent, sha)
+	fmt.Fprintf(w, "recorded %s event for sha %s\n", strings.TrimSpace(in.Event), sha)
 	return 0, nil
 }
 
@@ -205,36 +206,36 @@ func mergeMeta(data map[string]any, key string, flag *string, gitMeta map[string
 	}
 }
 
-// parseSupportedHookEvent resolves a CLI --event value to its internal
-// hooks.HookEvent, returning an actionable validation error (listing the
-// supported events) when the value is unknown or empty.
-func parseSupportedHookEvent(raw string) (SupportedHookEvent, hooks.HookEvent, error) {
+// parseSupportedHookEvent resolves a CLI --event value to the internal
+// hooks.HookEvent the Manager dispatches, returning an actionable validation
+// error (listing the supported events) when the value is unknown or empty.
+func parseSupportedHookEvent(raw string) (hooks.HookEvent, error) {
 	cliEvent := SupportedHookEvent(strings.TrimSpace(raw))
-	hookEvent, ok := hookEventBindings[cliEvent]
-	if !ok {
-		se := &errors.StructuredError{
-			Category: errors.CategoryValidation,
-			What:     fmt.Sprintf("%q isn't a supported value for --event.", raw),
-			Why:      "The --event flag must name one of the hook events pasture knows how to record. The value given didn't match any of them.",
-			Where:    "Recording a hook event (internal/handlers/hook.go in handlers.HookRecord).",
-			Impact:   "Nothing was recorded — pasture can't dispatch an event type it doesn't recognise.",
-			Fix: "1. Pass one of the supported events (case-sensitive):\n" +
-				"     " + listSupportedHookEvents() + "\n" +
-				"   For example:\n" +
-				"     pasture hook record --event git-commit --sha <commit-sha>",
+	for _, b := range hookEventBindings {
+		if b.cli == cliEvent {
+			return b.hook, nil
 		}
-		return "", "", se
 	}
-	return cliEvent, hookEvent, nil
+	return "", &errors.StructuredError{
+		Category: errors.CategoryValidation,
+		What:     fmt.Sprintf("%q isn't a supported value for --event.", raw),
+		Why:      "The --event flag must name one of the hook events pasture knows how to record. The value given didn't match any of them.",
+		Where:    "Recording a hook event (internal/handlers/hook.go in handlers.HookRecord).",
+		Impact:   "Nothing was recorded — pasture can't dispatch an event type it doesn't recognise.",
+		Fix: "1. Pass one of the supported events (case-sensitive):\n" +
+			"     " + listSupportedHookEvents() + "\n" +
+			"   For example:\n" +
+			"     pasture hook record --event git-commit --sha <commit-sha>",
+	}
 }
 
 // listSupportedHookEvents renders the comma-separated supported CLI event names
-// for help text and error messages. Centralised so a new SupportedHookEvent
-// constant appears here automatically.
+// for help text and error messages. Derived from hookEventBindings so a new
+// pair appears here automatically.
 func listSupportedHookEvents() string {
-	parts := make([]string, len(supportedHookEvents))
-	for i, e := range supportedHookEvents {
-		parts[i] = string(e)
+	parts := make([]string, len(hookEventBindings))
+	for i, b := range hookEventBindings {
+		parts[i] = string(b.cli)
 	}
 	return strings.Join(parts, ", ")
 }
@@ -245,6 +246,19 @@ func listSupportedHookEvents() string {
 // falls back to whatever metadata flags were supplied. This keeps the handler
 // logic testable without a git repo (tests inject a fake gatherer) while the
 // real path Just Works when run inside a checkout.
+//
+// CWD-relative (A2): the git commands run in the PROCESS working directory, not
+// in the repository that actually contains `sha`. If the CLI is invoked from
+// outside a git repo, or from a different repo that doesn't know `sha`, the
+// `git show` lookup simply fails and those keys are omitted (best-effort). To
+// record metadata for a commit in another repo, either run `pasture hook
+// record` from inside that repo or pass the metadata explicitly via flags.
+//
+// Branch semantics (A3): the "branch" key is the CURRENT HEAD's branch
+// (`git rev-parse --abbrev-ref HEAD`), NOT the branch that `sha` belongs to.
+// git has no single answer for "the branch of a commit" (a commit can be on
+// many branches or none), so this records "the branch checked out when the
+// commit was recorded". Pass --branch explicitly to override.
 func gatherGitMeta(sha string) (map[string]string, error) {
 	meta := make(map[string]string)
 

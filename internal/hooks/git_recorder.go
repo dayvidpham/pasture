@@ -23,18 +23,19 @@
 // (slice-body verbatim). It exposes two paths:
 //
 //  1. The HookHandler interface (Events / Handle), so the hooks.Manager can
-//     dispatch to it when an upstream Claude Code → pasture mapping (S7+)
-//     fires a HookPayload with Data["sha"] populated. The handler subscribes
-//     to HookSliceCompleted (the closest existing internal event that could
-//     plausibly carry a commit SHA — slice completion frequently follows a
-//     commit). Subscribing here is purely defensive: in the wire-test we
-//     verify dispatch end-to-end against this surface, but production
-//     callers that want to record a git commit directly should prefer
+//     dispatch to it when a HookPayload with Data["sha"] populated fires. In
+//     production this is the PRIMARY path: RegisterDefaultRecorders subscribes
+//     the recorder to HookGitCommit, and both the `pasture hook record` CLI
+//     (handlers.HookRecord) and any future Claude Code Stop-hook bridge build a
+//     HookPayload{Event: HookGitCommit, Data: {sha, …}} and dispatch it through
+//     the Manager. The subscription is configurable via WithSubscribedEvents
+//     (the bare constructor default remains HookSliceCompleted for backward
+//     compatibility; RegisterDefaultRecorders overrides it to HookGitCommit).
 //
 //  2. RecordCommit(ctx, sha, payload) — the direct method that bypasses the
-//     hooks.Manager and writes straight to the audit trail. This is what
-//     `cmd/pastured` will call when a Claude Code Stop hook arrives via
-//     whatever mechanism S7+ delivers it (Temporal signal, IPC, etc.).
+//     hooks.Manager and writes straight to the audit trail. Retained for
+//     callers that already hold a *GitRecorder and want to record without
+//     constructing a HookPayload.
 //
 // Both paths funnel through tasks.RecordGitEvent so the storage contract is
 // identical. RecordCommit returns the int64 event id so callers can attach
@@ -72,18 +73,20 @@ type GitRecorder struct {
 	tracker protocol.TaskTracker
 	auditDB *sql.DB
 	// subscribed is the set of pasture-internal HookEvents this recorder
-	// listens to. We default to HookSliceCompleted (the closest existing
-	// internal event that could plausibly carry a commit SHA in Data["sha"]).
-	// Tests / future S7 wiring may pass an explicit set via WithSubscribedEvents.
+	// listens to. The bare constructor default is HookSliceCompleted (kept for
+	// backward compatibility), but production wiring (RegisterDefaultRecorders)
+	// replaces it with HookGitCommit via WithSubscribedEvents — that is the
+	// event the `pasture hook record` CLI and the Stop-hook bridge dispatch.
 	subscribed []HookEvent
 }
 
 // GitRecorderOption is a functional option for NewGitRecorder.
 type GitRecorderOption func(*GitRecorder)
 
-// WithSubscribedEvents replaces the default subscription set. Used by S7+ when
-// the Claude Code hook → pasture mapping introduces a new HookEvent (e.g.
-// HookGitCommit) — until that lands, callers stick with the default.
+// WithSubscribedEvents replaces (does NOT append to) the default subscription
+// set. This is how production wiring points the recorder at HookGitCommit:
+// RegisterDefaultRecorders passes WithSubscribedEvents(HookGitCommit) so the
+// recorder handles the event the CLI and Stop-hook bridge dispatch.
 func WithSubscribedEvents(events ...HookEvent) GitRecorderOption {
 	return func(g *GitRecorder) {
 		g.subscribed = append([]HookEvent(nil), events...)
@@ -99,8 +102,10 @@ func WithSubscribedEvents(events ...HookEvent) GitRecorderOption {
 // The auditDB handle is used only for the post-write SELECT MAX(id) lookup
 // inside tasks.RecordGitEvent — see free_floating.go for the rationale.
 //
-// By default, the recorder subscribes to HookSliceCompleted (see the package
-// doc comment); pass WithSubscribedEvents to override.
+// The bare constructor default subscription is HookSliceCompleted (backward
+// compatibility); production callers use RegisterDefaultRecorders, which passes
+// WithSubscribedEvents(HookGitCommit). Pass WithSubscribedEvents to override
+// (see the package doc comment).
 func NewGitRecorder(
 	tracker protocol.TaskTracker,
 	auditDB *sql.DB,
