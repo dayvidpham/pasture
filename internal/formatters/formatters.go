@@ -125,27 +125,27 @@ func FormatEpochState(result types.QueryStateResult, format types.OutputFormat) 
 
 // hookRecordJSON is the JSON wire representation of a recorded hook event.
 // camelCase keys match the package convention. Metadata fields use omitempty
-// so keys absent from the recording (e.g. branch on a detached HEAD) are
-// omitted rather than emitted as empty strings.
+// so keys absent from the recording (e.g. branch on a detached HEAD, or
+// remotes in a repo-less context) are omitted rather than emitted as zero values.
 type hookRecordJSON struct {
-	EventType string `json:"eventType"`
-	SHA       string `json:"sha"`
-	EventID   int64  `json:"eventId"`
-	Message   string `json:"message,omitempty"`
-	Author    string `json:"author,omitempty"`
-	Branch    string `json:"branch,omitempty"`
-	Timestamp string `json:"timestamp,omitempty"`
+	EventType string            `json:"eventType"`
+	SHA       string            `json:"sha"`
+	EventID   int64             `json:"eventId"`
+	Message   string            `json:"message,omitempty"`
+	Author    string            `json:"author,omitempty"`
+	Branch    string            `json:"branch,omitempty"`
+	Timestamp string            `json:"timestamp,omitempty"`
+	Repo      string            `json:"repo,omitempty"`
+	Remotes   map[string]string `json:"remotes,omitempty"`
 }
 
 // FormatHookRecord formats the result of `pasture hook record` for CLI output.
 //
-// JSON mode: {"eventType": "...", "sha": "...", "eventId": N, "message": "...",
-//
-//	"author": "...", "branch": "...", "timestamp": "..."} — metadata fields
-//	are omitted (omitempty) when not recorded (e.g. branch on detached HEAD).
+// JSON mode: camelCase keys for all recorded fields; metadata fields (including
+// repo and remotes) are omitted via omitempty when absent.
 //
 // Text mode: "recorded <eventType> event for sha <sha> (event #N)" (unchanged).
-func FormatHookRecord(eventType, sha string, eventID int64, message, author, branch, timestamp string, format types.OutputFormat) (string, error) {
+func FormatHookRecord(eventType, sha string, eventID int64, message, author, branch, timestamp, repo string, remotes map[string]string, format types.OutputFormat) (string, error) {
 	switch format {
 	case types.OutputJSON:
 		b, err := json.MarshalIndent(hookRecordJSON{
@@ -156,6 +156,8 @@ func FormatHookRecord(eventType, sha string, eventID int64, message, author, bra
 			Author:    author,
 			Branch:    branch,
 			Timestamp: timestamp,
+			Repo:      repo,
+			Remotes:   remotes,
 		}, "", "  ")
 		if err != nil {
 			return "", err

@@ -11,6 +11,7 @@ package main_test
 import (
 	"database/sql"
 	"encoding/json"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -59,9 +60,10 @@ func TestCLI_HookRecord_FlagWiring_RoundTrips(t *testing.T) {
 }
 
 // TestCLI_HookRecord_FormatJSON_EmitsMetadata asserts the global --format json
-// flag is honored and the JSON output includes all seven camelCase keys
-// (eventType, sha, eventId, message, author, branch, timestamp) when all
-// metadata flags are supplied.
+// flag is honored and the JSON output includes the seven commit camelCase keys
+// (eventType, sha, eventId, message, author, branch, timestamp) when all four
+// metadata flags are supplied. Because all four commit flags are set, git is
+// NOT consulted, so repo/remotes are absent and the count stays at 7.
 func TestCLI_HookRecord_FormatJSON_EmitsMetadata(t *testing.T) {
 	db := newDB(t)
 	const sha = "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b"
@@ -85,6 +87,7 @@ func TestCLI_HookRecord_FormatJSON_EmitsMetadata(t *testing.T) {
 	if err := json.Unmarshal([]byte(out.stdout), &decoded); err != nil {
 		t.Fatalf("stdout is not valid JSON: %v; stdout=%q", err, out.stdout)
 	}
+	// All four commit flags supplied → git not consulted → repo/remotes absent → 7 keys.
 	if len(decoded) != 7 {
 		t.Errorf("JSON output has %d keys, want exactly 7 (eventType, sha, eventId, message, author, branch, timestamp); got %v", len(decoded), decoded)
 	}
@@ -114,6 +117,74 @@ func TestCLI_HookRecord_FormatJSON_EmitsMetadata(t *testing.T) {
 	if decoded["timestamp"] != "2026-05-05T05:05:05Z" {
 		t.Errorf("timestamp = %v, want %q", decoded["timestamp"], "2026-05-05T05:05:05Z")
 	}
+}
+
+// TestCLI_HookRecord_FormatJSON_EmitsRepoAndRemotes asserts that when git IS
+// consulted (a commit field omitted), the JSON output includes "repo" and
+// "remotes" keys. The --repo and --remote override flags are used to supply
+// deterministic values without depending on the test environment's git state.
+func TestCLI_HookRecord_FormatJSON_EmitsRepoAndRemotes(t *testing.T) {
+	db := newDB(t)
+	const sha = "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
+
+	// Run from the pasture repo root so the real git gatherer can find the sha.
+	// We also supply --repo and --remote to get deterministic JSON output,
+	// because the actual git state of the test environment may vary.
+	// Only THREE commit flags are supplied (branch absent) so git IS consulted
+	// and the --repo/--remote overrides take effect.
+	repoRoot, err := runGitCmd("rev-parse", "--show-toplevel")
+	if err != nil {
+		t.Skip("not inside a git repo; skipping repo+remotes CLI test")
+	}
+	t.Chdir(strings.TrimSpace(repoRoot))
+
+	realSHAOut, err := runGitCmd("rev-parse", "HEAD")
+	if err != nil {
+		t.Skip("git rev-parse HEAD failed; skipping repo+remotes CLI test")
+	}
+	realSHA := strings.TrimSpace(realSHAOut)
+
+	out := runCLI(t,
+		"--db", db,
+		"--format", "json",
+		"hook", "record",
+		"--event", "git-commit",
+		"--sha", realSHA,
+		"--message", "fix: repo-remotes test",
+		"--author", "Test Person <test@example.com>",
+		"--timestamp", "2026-06-07T12:00:00Z",
+		// branch is ABSENT → git consulted → --repo/--remote overrides take effect
+		"--repo", "dayvidpham/pasture",
+		"--remote", "origin=git@github.com:dayvidpham/pasture.git",
+	)
+	_ = sha // sha const defined above but we use realSHA for the actual run
+	if out.exitCode != 0 {
+		t.Fatalf("hook record exit %d; stdout=%q stderr=%q", out.exitCode, out.stdout, out.stderr)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(out.stdout), &decoded); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v; stdout=%q", err, out.stdout)
+	}
+
+	// repo must be present with the override value.
+	if decoded["repo"] != "dayvidpham/pasture" {
+		t.Errorf("repo = %v, want %q", decoded["repo"], "dayvidpham/pasture")
+	}
+	// remotes must be a map containing origin.
+	gotRemotes, _ := decoded["remotes"].(map[string]any)
+	if gotRemotes == nil {
+		t.Fatalf("remotes key missing or not a map in JSON; got %v", decoded)
+	}
+	if gotRemotes["origin"] != "git@github.com:dayvidpham/pasture.git" {
+		t.Errorf("remotes[origin] = %v, want %q", gotRemotes["origin"], "git@github.com:dayvidpham/pasture.git")
+	}
+}
+
+// runGitCmd runs git with the given args and returns (stdout, error).
+func runGitCmd(args ...string) (string, error) {
+	out, err := exec.Command("git", args...).Output()
+	return string(out), err
 }
 
 // selectGitCommitPayload returns the JSON payload of the single GitCommit

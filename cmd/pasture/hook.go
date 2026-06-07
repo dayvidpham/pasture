@@ -35,9 +35,16 @@ git-commit, --sha is required and identifies the commit; the optional metadata
 flags (--message, --author, --branch, --timestamp) override values otherwise
 derived best-effort from git.
 
+When git is consulted (i.e. at least one of the four commit flags is omitted),
+the repository identity is also captured: --repo overrides the derived
+owner/name slug, and --remote supplies remotes instead of the git-derived map.
+
 Example:
   pasture hook record --event git-commit --sha $(git rev-parse HEAD)
   pasture hook record --event git-commit --sha abc123 --message "fix: bug" --branch main
+  pasture hook record --event git-commit --sha abc123 \
+    --repo myorg/myrepo \
+    --remote origin=git@github.com:myorg/myrepo.git
 
 The recorded event is queryable via:
   pasture task events --context-kind GitContext --context-id <sha>`,
@@ -70,6 +77,14 @@ The recorded event is queryable via:
 			v, _ := cmd.Flags().GetString("timestamp")
 			in.Timestamp = &v
 		}
+		if cmd.Flags().Changed("repo") {
+			v, _ := cmd.Flags().GetString("repo")
+			in.Repo = &v
+		}
+		if cmd.Flags().Changed("remote") {
+			v, _ := cmd.Flags().GetStringToString("remote")
+			in.Remotes = v
+		}
 
 		result, code, hErr := handlers.HookRecord(in)
 		if hErr != nil {
@@ -83,7 +98,12 @@ The recorded event is queryable via:
 		}
 
 		// Render the success result under the global --format flag (text or json).
-		out, fErr := formatters.FormatHookRecord(result.EventType, result.SHA, result.EventID, result.Message, result.Author, result.Branch, result.Timestamp, resolveFormat())
+		out, fErr := formatters.FormatHookRecord(
+			result.EventType, result.SHA, result.EventID,
+			result.Message, result.Author, result.Branch, result.Timestamp,
+			result.Repo, result.Remotes,
+			resolveFormat(),
+		)
 		if fErr != nil {
 			printError(fErr)
 			exitWithCode(pasterrors.ExitCode(fErr))
@@ -102,6 +122,8 @@ func init() {
 	f.String("author", "", "Commit author (optional; overrides git-derived value)")
 	f.String("branch", "", "Branch name (optional; overrides git-derived value)")
 	f.String("timestamp", "", "Commit timestamp (optional; overrides git-derived value)")
+	f.String("repo", "", "Repository slug owner/name (optional; overrides git-derived value)")
+	f.StringToString("remote", nil, "Remote name and URL as name=url (repeatable; overrides git-derived remotes)")
 
 	hookCmd.AddCommand(hookRecordCmd)
 	rootCmd.AddCommand(hookCmd)
