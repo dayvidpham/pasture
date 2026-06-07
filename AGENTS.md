@@ -455,6 +455,9 @@ load-bearing — today's two-CLI path is functional.
 
 ### Code generation vs runtime injection
 
+> Pipeline architecture + data-flow diagram: [docs/codegen.md](docs/codegen.md).
+> Step-by-step change recipes: [CONTRIBUTING.md](CONTRIBUTING.md).
+
 The skill bodies in `skills/*/SKILL.md` are *generated at build time* from
 the protocol schema. The generators live in two places:
 
@@ -554,6 +557,26 @@ chore: update go.sum after dependency bump
 ```bash
 git agent-commit -m "feat(pastured): add epoch start workflow"
 ```
+
+## Releasing
+
+Releases are cut by `pasture-release` and **tagged automatically on merge** (a git
+tag is the unit of release). The short form:
+
+```bash
+git checkout -b chore/release-vX.Y.Z main   # NOT release/* — that pattern is ruleset-protected
+pasture-release patch --no-tag              # bump plugin.json + CHANGELOG, commit (no local tag)
+# → PR → merge to main → release.yml tags vX.Y.Z, builds the static binaries, publishes the Release
+```
+
+The tag-on-merge workflow needs the release GitHub App secrets (`RELEASE_APP_ID`,
+`RELEASE_APP_PRIVATE_KEY`, `Contents: write`). After releasing, bump the pasture
+entry in the parent `aura-plugins/.claude-plugin/marketplace.json`.
+
+- **Full recipe** (flags, marketplace sync, `workflow_dispatch` recovery,
+  troubleshooting the App-token push): [CONTRIBUTING.md](CONTRIBUTING.md#releasing).
+- **Versioning policy** (MAJOR/MINOR/PATCH per consumption channel):
+  [docs/VERSIONING.md](docs/VERSIONING.md).
 
 ## Protocol Evolution
 

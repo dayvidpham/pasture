@@ -50,7 +50,7 @@ pkg/
 
 The local `pasture` CLI hosts task verbs (`task create / show / update / close / list`,
 `task ready`, `task blocked`, `task dep add|tree`, `task label add|remove`,
-`task comment add`, `task comments`) and event/audit verbs added by PROPOSAL-2:
+`task comment add`, `task comments`) and event/audit verbs:
 
 | Subcommand | Purpose |
 |---|---|
@@ -67,6 +67,46 @@ The local `pasture` CLI hosts task verbs (`task create / show / update / close /
 - **Actionable errors:** Every error describes what, why, where, when, and how to fix.
 - **Test pattern:** `*_test.go` files import actual production code with dependency injection for mocks.
 
+## Code Generation
+
+The skill files (`skills/*/SKILL.md`), agent definitions (`agents/*.md`), and the
+protocol `schema.xml` are **generated**, not hand-maintained. The protocol facts
+(phases, roles, constraints, commands, figures, skill bodies) are declared once as
+typed Go values in `internal/codegen/` and rendered into all three artefacts, so
+they can never drift out of sync.
+
+```bash
+go generate ./internal/codegen/...   # regenerate schema.xml + skills/ + agents/
+go test ./internal/codegen/...       # completeness + sync guards
+```
+
+The data flows `specs_data*.go` (source of truth) → `tools/codegen` (4 stages) →
+`schema.xml` + `skills/<dir>/SKILL.md` + `agents/<role>.md`. SKILL.md files keep
+a hand-authored tail below a `<!-- END GENERATED ... -->` marker that the
+generator preserves.
+
+- **Architecture + data-flow diagram:** [docs/codegen.md](docs/codegen.md)
+- **How to add a constraint / role / phase / section / command:** [CONTRIBUTING.md](CONTRIBUTING.md)
+
+## Releasing
+
+Releases are cut with `pasture-release` and tagged automatically on merge.
+
+```bash
+# On a non-`release/*` branch (the `release/**` pattern is ruleset-protected):
+pasture-release patch --no-tag      # bump plugin.json + CHANGELOG, commit (no tag)
+# → open a PR → merge to main → release.yml tags vX.Y.Z, builds the static
+#   binaries (linux/darwin × amd64/arm64), and publishes the GitHub Release.
+```
+
+The tag-on-merge workflow needs the release GitHub App secrets (`RELEASE_APP_ID`,
+`RELEASE_APP_PRIVATE_KEY`, with `Contents: write`). Full recipe (bump levels,
+`--plugin` marketplace sync, troubleshooting) in
+[CONTRIBUTING.md](CONTRIBUTING.md#releasing); versioning policy (what is
+MAJOR/MINOR/PATCH per channel) in [docs/VERSIONING.md](docs/VERSIONING.md).
+
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how to evolve protocol concepts (adding constraints, roles, phases, etc.).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to evolve protocol concepts (adding
+constraints, roles, phases, etc.) and how to release. See
+[docs/codegen.md](docs/codegen.md) for the codegen pipeline architecture.

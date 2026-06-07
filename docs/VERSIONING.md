@@ -1,9 +1,13 @@
 # Pasture Versioning & Consumption Policy
 
-> **Status: `v0.x` (pre-1.0).** Pasture is **unversioned** — 0 git tags as of 2026-05-31.
-> This document specifies how pasture is (and will be) consumed across its channels,
-> and the versioning policy for each. Authored by audit `aura-plugins-h2zd9` (spec audit;
-> elicit `aura-plugins-bb2om`, URD `aura-plugins-oy9s7`).
+> **Status: `v0.x` (pre-1.0).** Pasture is now **released**: latest tag `v0.0.4`,
+> a plugin manifest (`.claude-plugin/plugin.json`), a `pasture` entry in the
+> `aura-plugins` marketplace, and an automated **tag-on-merge** release flow are
+> all in place. The R5 plugin-distribution residual (`76qby`) is closed. This
+> document specifies the versioning **policy** per consumption channel; the
+> operational **release recipe** lives in
+> [CONTRIBUTING.md](../CONTRIBUTING.md#releasing). Authored by audit
+> `aura-plugins-h2zd9` (elicit `aura-plugins-bb2om`, URD `aura-plugins-oy9s7`).
 
 Pasture is consumed through **three channels**. The Claude Code **plugin** channel is the
 primary, imminent driver of versioning; the **inter-tool** channel is the real *current*
@@ -22,10 +26,12 @@ consumer; the **external Go** channel is deferred-but-plausible.
 Pasture generates `skills/*/SKILL.md` and `agents/*.md` that are consumed as a **Claude Code
 plugin**. This is the channel that needs versioning *now*.
 
-- **Current state:** the content exists (`pasture/skills/`, `pasture/agents/`) and the release
-  machinery exists (`pasture-release`: `SemVer`, `GenerateChangelog`, `GitLatestVersionTag`,
-  `GitCommitsSince`). **Missing:** pasture's own plugin manifest, its marketplace entry, and any
-  git tags. → tracked as a residual (see R5).
+- **Current state: shipped.** The content exists (`pasture/skills/`, `pasture/agents/`), the
+  release machinery exists (`pasture-release`: `SemVer`, `GenerateChangelog`,
+  `GitLatestVersionTag`, `GitCommitsSince`), and the channel is now live: pasture has its own
+  `.claude-plugin/plugin.json`, a `pasture` entry in `aura-plugins/.claude-plugin/marketplace.json`,
+  semver tags (latest `v0.0.4`), and an automated tag-on-merge release flow
+  (see [CONTRIBUTING.md](../CONTRIBUTING.md#releasing)).
 - **Distribution mechanism:** pasture is published as a **separate-repo plugin within the
   `aura-plugins` Claude Code marketplace** — it does **not** host its own marketplace. The glue
   mirrors the existing `agentfilter` plugin entry:
@@ -103,13 +109,14 @@ purpose is **drift-prevention**.
 
 ## R5 verdict (`jbnx3` R5 — "Shared Go Library")
 
-**`R5 status: NOT-DONE` (residuals block R5).** The shared library exists and is internally
-consumed (channel ③), but R5 is not complete until the **plugin-distribution versioning lands**:
-a plugin manifest + the first semver tag (channel ①). External Go consumption (②) is deferred by
-design and does not block R5.
+**`R5 status: DONE`.** The shared library exists and is internally consumed
+(channel ③), and the plugin-distribution versioning has now landed: a plugin
+manifest, a marketplace entry, and semver tags (latest `v0.0.4`) cut by
+`pasture-release` via the tag-on-merge flow (channel ①). External Go consumption
+(②) remains deferred by design and never blocked R5.
 
 ### Residuals appendix
 
-| bd task | summary | severity |
+| bd task | summary | status |
 |---|---|---|
-| `aura-plugins-76qby` | Add pasture's `.claude-plugin/plugin.json`, register a `pasture` github-source entry in `aura-plugins/.claude-plugin/marketplace.json` (mirroring `agentfilter`), and cut the first `pasture-release` semver tag — unblocks the Claude Code plugin channel + R5 | important |
+| `aura-plugins-76qby` | Add pasture's `.claude-plugin/plugin.json`, register a `pasture` github-source entry in `aura-plugins/.claude-plugin/marketplace.json` (mirroring `agentfilter`), and cut the first `pasture-release` semver tag — unblocks the Claude Code plugin channel + R5 | **DONE** (closed) |
