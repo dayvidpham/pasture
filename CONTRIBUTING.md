@@ -1,5 +1,11 @@
 # Contributing to Pasture Codegen
 
+> **New here?** Read [docs/codegen.md](docs/codegen.md) first — it is the
+> conceptual overview (what the pipeline is, why it exists, a data-flow diagram,
+> and the marker-region model). This file is the operational cookbook: the
+> step-by-step recipes for changing each protocol concept. Releasing is covered
+> at the [bottom of this file](#releasing).
+
 ## Architecture Overview
 
 `specs_data.go` is the single source of truth. All three generators — schema.xml,
@@ -299,3 +305,94 @@ These tests act as compile-time-equivalent completeness guards for the data maps
 ```bash
 nix-shell -p go --run "go test ./internal/codegen/... -count=1"
 ```
+
+---
+
+## Releasing
+
+Releases are cut by `pasture-release` and **tagged automatically on merge** by the
+`Release` workflow (`.github/workflows/release.yml`). A git tag is the unit of
+release. For the **versioning policy** — what counts as MAJOR / MINOR / PATCH on
+each consumption channel — see [docs/VERSIONING.md](docs/VERSIONING.md). This
+section is the operational how-to.
+
+### The flow (tag-on-merge)
+
+```bash
+# 1. Branch off main. Do NOT use a release/* name — the `release/**` ref pattern
+#    is ruleset-protected (creation restricted). Use chore/* (or any other prefix).
+git checkout -b chore/release-vX.Y.Z main
+
+# 2. Bump + changelog + commit, but DO NOT tag locally (the tag is created on the
+#    merged commit by CI). Preview first with --dry-run.
+pasture-release patch --dry-run        # preview
+pasture-release patch --no-tag         # writes .claude-plugin/plugin.json + CHANGELOG.md, commits
+
+# 3. Push, open a PR, merge to main (any merge method is allowed).
+git push -u origin chore/release-vX.Y.Z
+gh pr create --base main --fill
+#   → merge the PR
+
+# 4. On merge, release.yml fires (it triggers on a push to main that changes
+#    .claude-plugin/plugin.json): it tags vX.Y.Z on the merged commit, builds the
+#    static binaries (linux/darwin × amd64/arm64 for pastured/pasture-msg/
+#    pasture-release), and publishes the GitHub Release with those assets.
+```
+
+Replace `patch` with `minor` / `major` as the change warrants (policy in
+docs/VERSIONING.md).
+
+### `pasture-release` flags
+
+| Flag | Effect |
+|------|--------|
+| `--dry-run` | print the bump, changelog entry, and planned commit/tag without writing |
+| `--no-tag` | bump + changelog + commit, but skip the local tag (**required** for the PR flow — CI tags the merged commit) |
+| `--no-commit` | skip the git commit (write files only) |
+| `--no-changelog` | skip `CHANGELOG.md` generation |
+| `--sync` | reconcile version drift across manifests before bumping |
+| `--plugin <name>` | after the bump, sync that plugin's entry in its registered (cross-repo) marketplace.json to the new version |
+
+### Prerequisites (one-time)
+
+The tag-on-merge workflow pushes the tag using a **GitHub App token**, so the
+repo needs two secrets:
+
+- `RELEASE_APP_ID` — the release App's ID
+- `RELEASE_APP_PRIVATE_KEY` — the App's private key (PEM)
+
+The App must have **`Contents: write`** on the repo and be installed on it. (An
+App token is used instead of the default `GITHUB_TOKEN` so the tag is created
+under a real bot identity and can fire other tag-watchers / survive future
+tag-ref protection.)
+
+### Marketplace mirror (parent repo)
+
+pasture is distributed as a github-source plugin inside the `aura-plugins`
+marketplace. After a pasture release, bump the pasture entry's `version` in the
+parent `aura-plugins/.claude-plugin/marketplace.json` to match the new tag (this
+is a change in the **parent** repo, committed there). `pasture-release
+--plugin pasture` can perform this sync if the registry is configured.
+
+### Re-running / recovering a release
+
+The workflow is idempotent and also accepts `workflow_dispatch`:
+
+- If `plugin.json` is already at the new version on `main` but the tag is missing
+  (e.g. the first run failed), re-run with `gh workflow run release.yml --ref main`
+  — on manual dispatch it tags whenever the tag is absent.
+- If `vX.Y.Z` is already tagged, the workflow detects it and skips (safe re-runs).
+
+### Troubleshooting
+
+- **Tag push fails `403 ... denied to github-actions[bot]`** — the checkout
+  persisted the default `GITHUB_TOKEN` as a git `http.extraheader`, which
+  overrides the App token in the push URL. The detect job's `actions/checkout`
+  must set `persist-credentials: false` so the minted App token is the only
+  credential. (If it instead 403s as the *App* identity, the App is missing
+  `Contents: write`.)
+- **Branch push rejected "creations being restricted"** — you used a `release/*`
+  branch name, which the ruleset blocks. Rename to `chore/*`.
+- **No release fired after merge** — the trigger is a change to
+  `.claude-plugin/plugin.json` on `main`. A merge that didn't change that file
+  (e.g. a workflow-only fix) won't trigger; use `workflow_dispatch`.
