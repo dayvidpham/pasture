@@ -402,11 +402,11 @@ func TestHookRecord_RealGit_DerivesMetadataFromCommit(t *testing.T) {
 	}
 }
 
-// ─── (c4) Fail-hard git gather — attempted+failed → record nothing ────────────
+// ─── Fail-hard git gather — attempted+failed → record nothing ─────────────────
 
-// TestHookRecord_GatherFails_FailsHardRecordsNothing (C4): when a metadata flag
-// is absent the gatherer is consulted, and if it FAILS the handler must return
-// an actionable validation error (exit 1) and record NOTHING. Uses an injected
+// TestHookRecord_GatherFails_FailsHardRecordsNothing: when a metadata flag is
+// absent the gatherer is consulted, and if it FAILS the handler must return an
+// actionable validation error (exit 1) and record NOTHING. Uses an injected
 // failing fake so the failure-propagation path is unit-testable without git.
 func TestHookRecord_GatherFails_FailsHardRecordsNothing(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
@@ -431,8 +431,8 @@ func TestHookRecord_GatherFails_FailsHardRecordsNothing(t *testing.T) {
 	if !stderrors.As(err, &se) {
 		t.Fatalf("gather-failure error is not *StructuredError: %v", err)
 	}
-	// UAT-FIX-1: Fix must show full commands with readable placeholders and
-	// concrete examples (not cryptic shorthands like <m>/<a>/<b>/<t>).
+	// The Fix field must guide the user with full commands, readable
+	// placeholders, and a concrete worked example — not cryptic shorthands.
 	for _, want := range []string{
 		"cd <path-to-repo>",              // remedy 1 placeholder
 		"--message \"<commit message>\"", // remedy 2 readable placeholder
@@ -552,7 +552,7 @@ func TestHookRecord_MissingSHA_ActionableError(t *testing.T) {
 	requireValidationError(t, code, err)
 }
 
-// ─── (FIX-5) Cause preservation on gather failure ─────────────────────────────
+// ─── Cause preservation on gather failure ─────────────────────────────────────
 
 // TestHookRecord_GatherFails_CauseIsReachable asserts that the wrapped
 // underlying gather error is reachable via errors.As/Unwrap, so a regression
@@ -581,7 +581,7 @@ func TestHookRecord_GatherFails_CauseIsReachable(t *testing.T) {
 	}
 }
 
-// ─── (FIX-1) Empty-RecordedEventIDs guard — DI seam + test ───────────────────
+// ─── Empty-RecordedEventIDs guard — injectable registrar seam + test ──────────
 
 // nonRecordingHandler is a hook handler that subscribes to HookGitCommit but
 // returns a zero HandleOutcome (never records anything). Used to exercise the
@@ -597,7 +597,7 @@ func (h *nonRecordingHandler) Events() []hooks.HookEvent {
 }
 
 // requireStorageError asserts err is a *StructuredError with CategoryStorage
-// (exit 5). Used to verify the empty-guard branch (FIX-6 reclassification).
+// and exit code 5. Used to verify the post-dispatch empty-guard branch.
 func requireStorageError(t *testing.T, code int, err error) {
 	t.Helper()
 	if err == nil {
@@ -671,44 +671,68 @@ func TestParseRepoSlug(t *testing.T) {
 		remoteURL string
 		want      string
 	}{
+		// ── SCP / SSH shorthand ─────────────────────────────────────────────
 		{
-			name:      "SSH with .git suffix",
-			remoteURL: "git@github.com:dayvidpham/pasture.git",
-			want:      "dayvidpham/pasture",
+			name:      "SCP with .git suffix",
+			remoteURL: "git@github.com:owner/name.git",
+			want:      "owner/name",
 		},
 		{
-			name:      "SSH without .git suffix",
-			remoteURL: "git@github.com:dayvidpham/pasture",
-			want:      "dayvidpham/pasture",
+			name:      "SCP without .git suffix",
+			remoteURL: "git@github.com:owner/name",
+			want:      "owner/name",
 		},
+		{
+			name:      "SCP nested namespace takes last two components",
+			remoteURL: "git@gitlab.com:group/subgroup/name.git",
+			want:      "subgroup/name",
+		},
+		{
+			name:      "SCP trailing slash before .git stripped correctly",
+			remoteURL: "git@github.com:owner/name.git/",
+			want:      "owner/name",
+		},
+		// ── HTTPS / HTTP ────────────────────────────────────────────────────
 		{
 			name:      "HTTPS with .git suffix",
-			remoteURL: "https://github.com/dayvidpham/pasture.git",
-			want:      "dayvidpham/pasture",
+			remoteURL: "https://github.com/owner/name.git",
+			want:      "owner/name",
 		},
 		{
 			name:      "HTTPS without .git suffix",
-			remoteURL: "https://github.com/dayvidpham/pasture",
-			want:      "dayvidpham/pasture",
+			remoteURL: "https://github.com/owner/name",
+			want:      "owner/name",
 		},
 		{
-			name:      "SSH with different host",
-			remoteURL: "git@gitlab.example.com:org/repo.git",
-			want:      "org/repo",
-		},
-		{
-			name:      "HTTPS with http (not https)",
+			name:      "HTTP with .git suffix",
 			remoteURL: "http://github.com/owner/name.git",
 			want:      "owner/name",
 		},
+		// ── ssh:// and git:// URL forms ─────────────────────────────────────
+		{
+			name:      "ssh:// URL form with user",
+			remoteURL: "ssh://git@github.com/owner/name.git",
+			want:      "owner/name",
+		},
+		{
+			name:      "ssh:// URL form with user and port",
+			remoteURL: "ssh://git@github.com:22/owner/name.git",
+			want:      "owner/name",
+		},
+		{
+			name:      "git:// URL form",
+			remoteURL: "git://github.com/owner/name.git",
+			want:      "owner/name",
+		},
+		// ── Unrecognized / local ────────────────────────────────────────────
 		{
 			name:      "empty URL returns empty",
 			remoteURL: "",
 			want:      "",
 		},
 		{
-			name:      "unrecognized form returns empty",
-			remoteURL: "/local/path/to/repo",
+			name:      "local absolute path returns empty",
+			remoteURL: "/local/path/repo",
 			want:      "",
 		},
 	}
@@ -886,12 +910,22 @@ func TestHookRecord_RealGit_RepoAndRemotes(t *testing.T) {
 		t.Fatalf("HookRecord: err=%v code=%d", err, code)
 	}
 
-	// repo must be "dayvidpham/pasture" (from origin remote or dir-basename fallback).
-	if result.Repo != "dayvidpham/pasture" {
-		t.Errorf("result.Repo = %q, want %q", result.Repo, "dayvidpham/pasture")
-	}
 	// remotes must contain "origin" with a URL containing "pasture".
-	if !strings.Contains(result.Remotes["origin"], "pasture") {
-		t.Errorf("result.Remotes[origin] = %q, want URL containing 'pasture'", result.Remotes["origin"])
+	originURL := result.Remotes["origin"]
+	if !strings.Contains(originURL, "pasture") {
+		t.Errorf("result.Remotes[origin] = %q, want URL containing 'pasture'", originURL)
+	}
+
+	// repo must equal the slug parsed from the origin URL, making the
+	// origin-parse path load-bearing (a dir-basename fallback would not
+	// satisfy this equality).
+	wantRepo := handlers.ParseRepoSlug(originURL)
+	if result.Repo != wantRepo {
+		t.Errorf("result.Repo = %q, want ParseRepoSlug(origin) = %q", result.Repo, wantRepo)
+	}
+	// Cross-check the expected value so a wrong ParseRepoSlug doesn't mask
+	// a wrong result.Repo.
+	if wantRepo != "dayvidpham/pasture" {
+		t.Errorf("ParseRepoSlug(origin=%q) = %q, want %q (origin URL may have changed)", originURL, wantRepo, "dayvidpham/pasture")
 	}
 }

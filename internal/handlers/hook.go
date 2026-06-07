@@ -14,8 +14,8 @@
 //
 // ─── Why the Manager path (not a direct tasks.RecordGitEvent call) ────────────
 //
-// The RATIFIED design (URE Q-seam = "Manager path (unified pipeline)") routes
-// the CLI through the SAME hooks.Manager.Dispatch → GitRecorder.Handle →
+// The design routes the CLI through the same hooks.Manager.Dispatch →
+// GitRecorder.Handle →
 // tasks.RecordGitEvent pipeline that pastured uses. The handler builds its own
 // in-process hooks.Manager and registers the default recorders, so CLI-now and
 // daemon-later feed one pipeline. The seam is extensible: new --event values
@@ -327,16 +327,10 @@ func HookRecord(in HookRecordInput) (HookRecordResult, int, error) {
 	mergeMetaString(data, metaBranch, in.Branch, gitMeta.Branch)
 	mergeMetaString(data, metaTimestamp, in.Timestamp, gitMeta.Timestamp)
 
-	// Repo: flag wins; fall back to git-derived; omit if absent.
-	var resolvedRepo string
-	if in.Repo != nil {
-		resolvedRepo = *in.Repo
-	} else {
-		resolvedRepo = gitMeta.Repo
-	}
-	if resolvedRepo != "" {
-		data[metaRepo] = resolvedRepo
-	}
+	// Repo: flag wins over git-derived via the same mergeMetaString helper
+	// used for the commit fields. The helper only writes non-empty values, so
+	// an absent repo (neither flag nor git-derived) leaves the key absent.
+	mergeMetaString(data, metaRepo, in.Repo, gitMeta.Repo)
 
 	// Remotes: flag wins (replaces gathered map when non-nil); fall back to
 	// git-derived; omit if nil/empty.
@@ -540,43 +534,70 @@ func gatherGitMeta(sha string) (GitMeta, error) {
 	return meta, nil
 }
 
-// ParseRepoSlug extracts an owner/name slug from a git remote URL. It handles
-// both SSH form (git@host:owner/name.git) and HTTPS form
-// (https://host/owner/name.git), stripping a trailing ".git" suffix. When the
-// URL cannot be parsed into an owner/name pair, it returns an empty string and
-// the caller can fall back to the repository directory basename.
-// Exported for unit testing.
+// ParseRepoSlug extracts an owner/name slug from a git remote URL. It
+// supports all common remote URL forms:
+//
+//   - SCP (SSH shorthand): git@host:owner/name.git
+//   - HTTPS/HTTP:          https://host/owner/name.git
+//   - ssh:// URL:          ssh://git@host[:port]/owner/name.git
+//   - git:// URL:          git://host/owner/name.git
+//
+// A trailing ".git" suffix is stripped before extracting the slug. For
+// repositories under nested namespaces (e.g. GitLab groups), the last two
+// path components are returned (e.g. "group/subgroup/name" → "subgroup/name").
+// Local paths and unrecognized forms return "". Exported for unit testing.
 func ParseRepoSlug(remoteURL string) string {
 	if remoteURL == "" {
 		return ""
 	}
+
 	var path string
-	if strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://") {
-		// HTTPS: https://host/owner/name(.git)
-		// Strip scheme + host to get the path component.
-		rest := strings.SplitN(remoteURL, "/", 4)
-		// rest[0]="https:", rest[1]="", rest[2]=host, rest[3]=owner/name(.git)
-		if len(rest) < 4 {
+	if schemeIdx := strings.Index(remoteURL, "://"); schemeIdx != -1 {
+		// URL with an explicit scheme (https://, http://, ssh://, git://, …).
+		// Strip "scheme://", then optional "user@", then "host[:port]" up to
+		// the first "/".
+		afterScheme := remoteURL[schemeIdx+3:]
+		// Strip optional "user@"
+		if atIdx := strings.Index(afterScheme, "@"); atIdx != -1 {
+			afterScheme = afterScheme[atIdx+1:]
+		}
+		// Strip "host[:port]" — everything up to and including the first "/"
+		slashIdx := strings.Index(afterScheme, "/")
+		if slashIdx == -1 {
 			return ""
 		}
-		path = rest[3]
-	} else if strings.Contains(remoteURL, "@") && strings.Contains(remoteURL, ":") {
-		// SSH: git@host:owner/name(.git)
-		colonIdx := strings.Index(remoteURL, ":")
+		path = afterScheme[slashIdx+1:]
+	} else if colonIdx := strings.Index(remoteURL, ":"); colonIdx != -1 {
+		// SCP form: [user@]host:path — colon separates host from path and
+		// there is no "://" substring (checked above). Reject local absolute
+		// paths such as "/path/to/repo" (no ":" present, guarded by else branch).
 		path = remoteURL[colonIdx+1:]
 	} else {
+		// No scheme, no "host:path" colon — local path or unrecognized form.
 		return ""
 	}
 
-	// Strip trailing ".git" (case-sensitive, as git itself treats it).
+	// Normalize: strip leading "/", trailing "/", ".git" suffix, then another
+	// trailing "/" (handles "owner/name.git/" with a trailing slash).
+	path = strings.TrimPrefix(path, "/")
+	path = strings.TrimSuffix(path, "/")
 	path = strings.TrimSuffix(path, ".git")
+	path = strings.TrimSuffix(path, "/")
 
-	// Validate: must be exactly owner/name (two components).
-	parts := strings.SplitN(path, "/", 3)
-	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+	parts := strings.Split(path, "/")
+	// Remove empty components produced by consecutive slashes.
+	var nonEmpty []string
+	for _, p := range parts {
+		if p != "" {
+			nonEmpty = append(nonEmpty, p)
+		}
+	}
+	if len(nonEmpty) < 2 {
 		return ""
 	}
-	return parts[0] + "/" + parts[1]
+	// Take the last two components so nested namespaces (group/subgroup/name)
+	// collapse to the canonical "parent/name" slug.
+	return nonEmpty[len(nonEmpty)-2] + "/" + nonEmpty[len(nonEmpty)-1]
 }
 
 // cwdForError returns the process working directory for inclusion in the
