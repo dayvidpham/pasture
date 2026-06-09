@@ -187,7 +187,7 @@ func TestEpochWorkflow_P1ToP2_Signal(t *testing.T) {
 
 	// Register a delayed signal to advance from p1 to p2.
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(protocol.SignalAdvancePhase, protocol.PhaseAdvanceSignal{
+		env.SignalWorkflow(string(protocol.SignalAdvancePhase), protocol.PhaseAdvanceSignal{
 			ToPhase:      protocol.PhaseElicit,
 			TriggeredBy:  "architect",
 			ConditionMet: "classification confirmed",
@@ -225,7 +225,7 @@ func TestEpochWorkflow_AdvancePhase_InvalidIgnored(t *testing.T) {
 
 	// Send an invalid advance signal (p3 from p1 is invalid).
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(protocol.SignalAdvancePhase, protocol.PhaseAdvanceSignal{
+		env.SignalWorkflow(string(protocol.SignalAdvancePhase), protocol.PhaseAdvanceSignal{
 			ToPhase:      protocol.PhasePropose, // invalid from p1
 			TriggeredBy:  "bad-actor",
 			ConditionMet: "skipping elicit",
@@ -261,7 +261,7 @@ func TestEpochWorkflow_SubmitVote_Signal(t *testing.T) {
 
 	// Submit a vote signal.
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(protocol.SignalSubmitVote, protocol.ReviewVoteSignal{
+		env.SignalWorkflow(string(protocol.SignalSubmitVote), protocol.ReviewVoteSignal{
 			Axis:       protocol.AxisCorrectness,
 			Vote:       protocol.VoteAccept,
 			ReviewerId: "reviewer-1",
@@ -295,12 +295,12 @@ func TestEpochWorkflow_RegisterSession_Idempotent(t *testing.T) {
 
 	// Send the same session registration twice.
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(protocol.SignalRegisterSession, protocol.RegisterSessionSignal{
+		env.SignalWorkflow(string(protocol.SignalRegisterSession), protocol.RegisterSessionSignal{
 			EpochId:   "epoch-wf-session",
 			SessionId: "session-42",
 			Role:      "worker",
 		})
-		env.SignalWorkflow(protocol.SignalRegisterSession, protocol.RegisterSessionSignal{
+		env.SignalWorkflow(string(protocol.SignalRegisterSession), protocol.RegisterSessionSignal{
 			EpochId:   "epoch-wf-session",
 			SessionId: "session-42", // duplicate
 			Role:      "worker",
@@ -309,7 +309,7 @@ func TestEpochWorkflow_RegisterSession_Idempotent(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		// Query active sessions before cancel.
-		val, err := env.QueryWorkflow(protocol.QueryActiveSessions)
+		val, err := env.QueryWorkflow(string(protocol.QueryActiveSessions))
 		if err == nil {
 			var sessions []protocol.RegisterSessionSignal
 			if decErr := val.Get(&sessions); decErr == nil {
@@ -340,7 +340,7 @@ func TestEpochWorkflow_SliceProgress_Signal(t *testing.T) {
 	env.RegisterActivity(acts)
 
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(protocol.SignalSliceProgress, protocol.SliceProgressSignal{
+		env.SignalWorkflow(string(protocol.SignalSliceProgress), protocol.SliceProgressSignal{
 			SliceId:    "slice-1",
 			LeafTaskId: "leaf-a",
 			StageName:  "execute",
@@ -350,7 +350,7 @@ func TestEpochWorkflow_SliceProgress_Signal(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		// Query slice progress.
-		val, err := env.QueryWorkflow(protocol.QuerySliceProgressState)
+		val, err := env.QueryWorkflow(string(protocol.QuerySliceProgressState))
 		if err == nil {
 			var log []protocol.SliceProgressSignal
 			if decErr := val.Get(&log); decErr == nil {
@@ -422,7 +422,7 @@ func TestSliceWorkflow_CompleteSliceOverride(t *testing.T) {
 	// Send a complete_slice signal that overrides with success=false.
 	errMsg := "external override error"
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(protocol.SignalCompleteSlice, temporal.SliceCompleteSignal{
+		env.SignalWorkflow(string(protocol.SignalCompleteSlice), temporal.SliceCompleteSignal{
 			Success: false,
 			Error:   &errMsg,
 		})
@@ -460,13 +460,13 @@ func TestReviewWorkflow_AllVotesReceived(t *testing.T) {
 
 	// Send all 3 votes.
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(protocol.SignalSubmitVote, protocol.ReviewVoteSignal{
+		env.SignalWorkflow(string(protocol.SignalSubmitVote), protocol.ReviewVoteSignal{
 			Axis: protocol.AxisCorrectness, Vote: protocol.VoteAccept, ReviewerId: "r1",
 		})
-		env.SignalWorkflow(protocol.SignalSubmitVote, protocol.ReviewVoteSignal{
+		env.SignalWorkflow(string(protocol.SignalSubmitVote), protocol.ReviewVoteSignal{
 			Axis: protocol.AxisTestQuality, Vote: protocol.VoteAccept, ReviewerId: "r2",
 		})
-		env.SignalWorkflow(protocol.SignalSubmitVote, protocol.ReviewVoteSignal{
+		env.SignalWorkflow(string(protocol.SignalSubmitVote), protocol.ReviewVoteSignal{
 			Axis: protocol.AxisElegance, Vote: protocol.VoteRevise, ReviewerId: "r3",
 		})
 	}, time.Millisecond*10)
@@ -576,7 +576,7 @@ func TestEpochWorkflow_FullLifecycle_ThroughP2(t *testing.T) {
 
 	// Advance p1→p2, then cancel.
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(protocol.SignalAdvancePhase, protocol.PhaseAdvanceSignal{
+		env.SignalWorkflow(string(protocol.SignalAdvancePhase), protocol.PhaseAdvanceSignal{
 			ToPhase:      protocol.PhaseElicit,
 			TriggeredBy:  "architect",
 			ConditionMet: "classification confirmed",
@@ -585,7 +585,7 @@ func TestEpochWorkflow_FullLifecycle_ThroughP2(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		// Query current state after advance.
-		val, qErr := env.QueryWorkflow(protocol.QueryCurrentState)
+		val, qErr := env.QueryWorkflow(string(protocol.QueryCurrentState))
 		if qErr == nil {
 			var state protocol.EpochState
 			if decErr := val.Get(&state); decErr == nil {
@@ -652,7 +652,7 @@ func TestEpochWorkflow_QueryAvailableTransitions(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		// At p1, only p2 should be available.
-		val, err := env.QueryWorkflow(protocol.QueryAvailableTransitions)
+		val, err := env.QueryWorkflow(string(protocol.QueryAvailableTransitions))
 		if err != nil {
 			t.Errorf("protocol.QueryAvailableTransitions failed: %v", err)
 			return
@@ -686,7 +686,7 @@ func TestEpochWorkflow_QueryFullState(t *testing.T) {
 	env.RegisterActivity(acts)
 
 	env.RegisterDelayedCallback(func() {
-		val, err := env.QueryWorkflow(protocol.QueryFullState)
+		val, err := env.QueryWorkflow(string(protocol.QueryFullState))
 		if err != nil {
 			t.Errorf("protocol.QueryFullState failed: %v", err)
 			return

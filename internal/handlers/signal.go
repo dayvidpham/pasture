@@ -85,7 +85,7 @@ func SignalVote(
 		ReviewerId: reviewerId,
 	}
 
-	if err := c.SignalWorkflow(ctx, epochId, "", protocol.SignalSubmitVote, payload); err != nil {
+	if err := c.SignalWorkflow(ctx, epochId, "", string(protocol.SignalSubmitVote), payload); err != nil {
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Couldn't record the vote for epoch %q.", epochId),
@@ -190,7 +190,7 @@ func SignalComplete(
 		Completed:  completed,
 	}
 
-	if err := c.SignalWorkflow(ctx, epochId, "", protocol.SignalSliceProgress, payload); err != nil {
+	if err := c.SignalWorkflow(ctx, epochId, "", string(protocol.SignalSliceProgress), payload); err != nil {
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Couldn't mark slice %q complete in epoch %q.", sliceId, epochId),

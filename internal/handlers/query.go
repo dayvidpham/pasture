@@ -45,7 +45,7 @@ func QueryState(
 	}
 	defer c.Close()
 
-	result, err := queryWorkflow[protocol.QueryStateResult](ctx, c, epochId, protocol.QueryFullState)
+	result, err := queryWorkflow[protocol.QueryStateResult](ctx, c, epochId, string(protocol.QueryFullState))
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}

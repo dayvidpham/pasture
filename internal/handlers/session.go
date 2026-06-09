@@ -82,7 +82,7 @@ func SessionRegister(
 		Model:        model,
 	}
 
-	if err := c.SignalWorkflow(ctx, epochId, "", protocol.SignalRegisterSession, payload); err != nil {
+	if err := c.SignalWorkflow(ctx, epochId, "", string(protocol.SignalRegisterSession), payload); err != nil {
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Couldn't register the session with epoch %q.", epochId),

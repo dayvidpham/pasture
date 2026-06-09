@@ -37,7 +37,7 @@ func (rw *ReviewPhaseWorkflow) Run(ctx workflow.Context, input ReviewInput) (*Re
 
 	// Register signal handler via goroutine-per-channel pattern.
 	workflow.Go(ctx, func(ctx workflow.Context) {
-		ch := workflow.GetSignalChannel(ctx, protocol.SignalSubmitVote)
+		ch := workflow.GetSignalChannel(ctx, string(protocol.SignalSubmitVote))
 		for {
 			var sig protocol.ReviewVoteSignal
 			ch.Receive(ctx, &sig)

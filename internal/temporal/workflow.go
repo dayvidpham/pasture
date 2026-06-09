@@ -377,7 +377,7 @@ func EpochWorkflowFn(ctx workflow.Context, input EpochInput) (*EpochResult, erro
 	// Register signal handlers via goroutine-per-channel pattern.
 	// Each goroutine drains its channel for the full lifecycle of the workflow.
 	workflow.Go(ctx, func(ctx workflow.Context) {
-		ch := workflow.GetSignalChannel(ctx, protocol.SignalAdvancePhase)
+		ch := workflow.GetSignalChannel(ctx, string(protocol.SignalAdvancePhase))
 		for {
 			var sig protocol.PhaseAdvanceSignal
 			ch.Receive(ctx, &sig)
@@ -385,7 +385,7 @@ func EpochWorkflowFn(ctx workflow.Context, input EpochInput) (*EpochResult, erro
 		}
 	})
 	workflow.Go(ctx, func(ctx workflow.Context) {
-		ch := workflow.GetSignalChannel(ctx, protocol.SignalSubmitVote)
+		ch := workflow.GetSignalChannel(ctx, string(protocol.SignalSubmitVote))
 		for {
 			var sig protocol.ReviewVoteSignal
 			ch.Receive(ctx, &sig)
@@ -393,7 +393,7 @@ func EpochWorkflowFn(ctx workflow.Context, input EpochInput) (*EpochResult, erro
 		}
 	})
 	workflow.Go(ctx, func(ctx workflow.Context) {
-		ch := workflow.GetSignalChannel(ctx, protocol.SignalSliceProgress)
+		ch := workflow.GetSignalChannel(ctx, string(protocol.SignalSliceProgress))
 		for {
 			var sig protocol.SliceProgressSignal
 			ch.Receive(ctx, &sig)
@@ -401,7 +401,7 @@ func EpochWorkflowFn(ctx workflow.Context, input EpochInput) (*EpochResult, erro
 		}
 	})
 	workflow.Go(ctx, func(ctx workflow.Context) {
-		ch := workflow.GetSignalChannel(ctx, protocol.SignalRegisterSession)
+		ch := workflow.GetSignalChannel(ctx, string(protocol.SignalRegisterSession))
 		for {
 			var sig protocol.RegisterSessionSignal
 			ch.Receive(ctx, &sig)
@@ -410,31 +410,31 @@ func EpochWorkflowFn(ctx workflow.Context, input EpochInput) (*EpochResult, erro
 	})
 
 	// Register query handlers. SetQueryHandler does not pass ctx to the handler.
-	if err := workflow.SetQueryHandler(ctx, protocol.QueryCurrentState,
+	if err := workflow.SetQueryHandler(ctx, string(protocol.QueryCurrentState),
 		func() (*protocol.EpochState, error) {
 			return w.CurrentState()
 		}); err != nil {
 		return nil, fmt.Errorf("EpochWorkflow: failed to register query %q: %w", protocol.QueryCurrentState, err)
 	}
-	if err := workflow.SetQueryHandler(ctx, protocol.QueryAvailableTransitions,
+	if err := workflow.SetQueryHandler(ctx, string(protocol.QueryAvailableTransitions),
 		func() ([]protocol.PhaseId, error) {
 			return w.AvailableTransitionsQuery(), nil
 		}); err != nil {
 		return nil, fmt.Errorf("EpochWorkflow: failed to register query %q: %w", protocol.QueryAvailableTransitions, err)
 	}
-	if err := workflow.SetQueryHandler(ctx, protocol.QueryFullState,
+	if err := workflow.SetQueryHandler(ctx, string(protocol.QueryFullState),
 		func() (*protocol.QueryStateResult, error) {
 			return w.FullState()
 		}); err != nil {
 		return nil, fmt.Errorf("EpochWorkflow: failed to register query %q: %w", protocol.QueryFullState, err)
 	}
-	if err := workflow.SetQueryHandler(ctx, protocol.QuerySliceProgressState,
+	if err := workflow.SetQueryHandler(ctx, string(protocol.QuerySliceProgressState),
 		func() ([]protocol.SliceProgressSignal, error) {
 			return w.SliceProgressState(), nil
 		}); err != nil {
 		return nil, fmt.Errorf("EpochWorkflow: failed to register query %q: %w", protocol.QuerySliceProgressState, err)
 	}
-	if err := workflow.SetQueryHandler(ctx, protocol.QueryActiveSessions,
+	if err := workflow.SetQueryHandler(ctx, string(protocol.QueryActiveSessions),
 		func() ([]protocol.RegisterSessionSignal, error) {
 			return w.ActiveSessions(), nil
 		}); err != nil {

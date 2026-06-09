@@ -96,7 +96,7 @@ func dispatchHookActivity(ctx workflow.Context, payload hooks.HookPayload) {
 func (sw *SliceWorkflow) Run(ctx workflow.Context, input SliceInput) (*SliceResult, error) {
 	// Register signal handlers via goroutine-per-channel pattern.
 	workflow.Go(ctx, func(ctx workflow.Context) {
-		ch := workflow.GetSignalChannel(ctx, protocol.SignalStartSlice)
+		ch := workflow.GetSignalChannel(ctx, string(protocol.SignalStartSlice))
 		for {
 			var sig SliceStartSignal
 			ch.Receive(ctx, &sig)
@@ -104,7 +104,7 @@ func (sw *SliceWorkflow) Run(ctx workflow.Context, input SliceInput) (*SliceResu
 		}
 	})
 	workflow.Go(ctx, func(ctx workflow.Context) {
-		ch := workflow.GetSignalChannel(ctx, protocol.SignalCompleteSlice)
+		ch := workflow.GetSignalChannel(ctx, string(protocol.SignalCompleteSlice))
 		for {
 			var sig SliceCompleteSignal
 			ch.Receive(ctx, &sig)
@@ -224,7 +224,7 @@ func (sw *SliceWorkflow) Run(ctx workflow.Context, input SliceInput) (*SliceResu
 			StageName:  "execute",
 			Completed:  result.Success,
 		}
-		if sigErr := workflow.SignalExternalWorkflow(ctx, input.ParentWorkflowId, "", protocol.SignalSliceProgress, progressSig).Get(ctx, nil); sigErr != nil {
+		if sigErr := workflow.SignalExternalWorkflow(ctx, input.ParentWorkflowId, "", string(protocol.SignalSliceProgress), progressSig).Get(ctx, nil); sigErr != nil {
 			workflow.GetLogger(ctx).Warn("SliceWorkflow: parent signal delivery failed",
 				"sliceId", input.SliceId,
 				"parentWorkflowId", input.ParentWorkflowId,

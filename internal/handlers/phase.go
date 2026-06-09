@@ -73,7 +73,7 @@ func PhaseAdvance(
 		ConditionMet: condition,
 	}
 
-	if err := c.SignalWorkflow(ctx, epochId, "", protocol.SignalAdvancePhase, payload); err != nil {
+	if err := c.SignalWorkflow(ctx, epochId, "", string(protocol.SignalAdvancePhase), payload); err != nil {
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Couldn't send the phase-advance request to epoch %q.", epochId),
