@@ -54,7 +54,7 @@ func main() {
 	e, err := engine.New(context.Background(), engine.Config{
 		DBPath:             dbPath,
 		ApplicationVersion: pinnedAppVersion,
-		OnTransition: func(_ context.Context, _ string, rec *protocol.TransitionRecord) error {
+		OnTransition: func(_ context.Context, _ string, rec *protocol.TransitionRecord, _ string) error {
 			// Fires AFTER the forensic row is written, BEFORE the step returns.
 			// The stall lives here (process-local), NOT in the persisted workflow
 			// input, so a recovering process with PROBE_STALL=0 re-runs this step

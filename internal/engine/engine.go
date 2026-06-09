@@ -55,12 +55,19 @@ type Config struct {
 	Logger *slog.Logger
 	// OnTransition, when set, runs INSIDE the durable step for each successful
 	// transition, AFTER the projection + forensic audit row are written and
-	// BEFORE the step returns. It is the step-bracketing seam: a later slice
-	// wires deterministic, idempotent activity recording here (it shares the
-	// step's replay semantics, so any external write it makes must be
-	// idempotent — e.g. a deterministic-id ON CONFLICT insert). Returning an
-	// error fails the step (and so the transition's durable commit).
-	OnTransition func(ctx context.Context, epochId string, rec *protocol.TransitionRecord) error
+	// BEFORE the step returns. It is the step-bracketing seam: idempotent
+	// activity recording wires here (it shares the step's replay semantics, so
+	// any external write it makes must be idempotent — e.g. a deterministic-id
+	// ON CONFLICT insert). Returning an error fails the step (and so the
+	// transition's durable commit).
+	//
+	// stepSeq is the deterministic per-transition step sequence (the same value
+	// the audit dedup key is derived from). It is threaded in from the workflow
+	// body because it cannot be recovered inside the hook: DBOS exposes it only
+	// in the workflow body, and a replay re-runs only the crashed step, so a
+	// hook-local counter would not be replay-stable. Hooks derive their own
+	// deterministic keys from it via protocol.DedupKey.
+	OnTransition func(ctx context.Context, epochId string, rec *protocol.TransitionRecord, stepSeq string) error
 }
 
 // Engine owns the shared modernc handle, the DBOS context, and the forensic

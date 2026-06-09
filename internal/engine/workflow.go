@@ -102,7 +102,7 @@ func (e *Engine) EpochWorkflow(ctx dbos.DBOSContext, in EpochInput) (protocol.Ep
 			// hook is process-local (not part of the persisted workflow input), a
 			// recovering process supplies its own non-stalling hook and completes.
 			if e.cfg.OnTransition != nil {
-				if err := e.cfg.OnTransition(c, in.EpochId, rec); err != nil {
+				if err := e.cfg.OnTransition(c, in.EpochId, rec, stepSeq); err != nil {
 					return struct{}{}, err
 				}
 			}
