@@ -1,11 +1,9 @@
-// Package engine is the durable-execution adapter for the pasture epoch
-// lifecycle. It owns the shared modernc SQLite handle, registers and drives the
-// pure-Go EpochStateMachine over durable steps, persists an EpochState
-// projection each transition, and records forensic rows exactly once.
-//
-// The state machine itself lives in pkg/protocol and has no substrate
-// dependency; this package is the impure adapter around it.
-package engine
+// Package dbconn centralizes how every pasture component opens a modernc
+// SQLite handle on the shared pasture.db file. Putting the connection-string
+// contract in one leaf package (no pasture deps beyond errors) lets the audit
+// trail, the task tracker, and the durable engine all open the file with the
+// identical WAL/concurrency configuration without an import cycle.
+package dbconn
 
 import (
 	"database/sql"

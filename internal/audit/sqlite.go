@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	_ "modernc.org/sqlite" // pure-Go SQLite driver, CGO_ENABLED=0 compatible
@@ -96,7 +97,10 @@ func NewSqliteAuditTrail(dbPath string) (*SqliteAuditTrail, error) {
 	// methods) is a write transaction that should hold the lock from
 	// statement one. The cost is negligible — IMMEDIATE acquires the same
 	// lock DEFERRED would have lazily, just earlier.
-	db, err := sql.Open("sqlite", dbPath+"?_txlock=immediate")
+	// The shared DSN encodes the full concurrency contract as connection-string
+	// params (WAL, busy_timeout=5000, synchronous=NORMAL, foreign_keys=ON,
+	// _txlock=immediate), applied to every connection in the pool.
+	db, err := sql.Open("sqlite", dbconn.SharedDSN(dbPath))
 	if err != nil {
 		return nil, fmt.Errorf(
 			"audit.NewSqliteAuditTrail: cannot open database at %q: %w — "+
@@ -105,28 +109,32 @@ func NewSqliteAuditTrail(dbPath string) (*SqliteAuditTrail, error) {
 		)
 	}
 
-	// SQLite only supports one writer at a time. Limiting the pool to one
-	// connection prevents "database is locked" (SQLITE_BUSY) errors when
-	// multiple goroutines call RecordEvent concurrently. All writes are
-	// serialised through this single connection; reads share it too since
-	// the Temporal worker I/O pattern is write-heavy, not query-heavy.
+	// This is a pasture-owned WRITE handle: every audit transaction (RecordEvent,
+	// RecordSessionEntries, the migrator's BEGIN IMMEDIATE) is a writer. Capping
+	// the pool to one connection serializes those writers at the Go level, which
+	// is the proven model the cross-subsystem race test exercises. The shared
+	// DSN supplies the same WAL/busy_timeout pragmas the DBOS engine handle uses,
+	// but the engine handle is intentionally UNcapped because the DBOS
+	// notification poller needs a second concurrent connection to make progress;
+	// pasture's own audit writes do not, and removing the cap reintroduces the
+	// SQLITE_BUSY contention busy_timeout cannot always absorb under the file's
+	// multi-handle write load.
 	db.SetMaxOpenConns(1)
 
-	// Enable WAL mode so concurrent readers don't block the writer,
-	// and set a busy timeout so transient SQLITE_BUSY errors retry
-	// automatically for up to 5 seconds before returning an error.
-	pragmas := []string{
-		`PRAGMA journal_mode=WAL`,
-		`PRAGMA busy_timeout=5000`,
-	}
-	for _, p := range pragmas {
-		if _, err := db.Exec(p); err != nil {
-			db.Close()
-			return nil, fmt.Errorf(
-				"audit.NewSqliteAuditTrail: failed to apply %q on %q: %w",
-				p, dbPath, err,
-			)
-		}
+	// Disable foreign-key enforcement for the migration window. The DSN turns
+	// foreign_keys ON, but the v3→v4 migration rebuilds audit_events by DROP +
+	// RENAME, and with enforcement ON that DROP would cascade-delete the
+	// context_edges rows that reference audit_events(id) ON DELETE CASCADE —
+	// silently discarding every epoch↔event link. Toggling enforcement off for
+	// the rebuild and back on afterward is the documented SQLite procedure for
+	// ALTER-by-rebuild. Safe here because this handle is single-connection, so
+	// the PRAGMA and the migration run on the same connection.
+	if _, err := db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf(
+			"audit.NewSqliteAuditTrail: cannot relax foreign-key enforcement for migration on %q: %w",
+			dbPath, err,
+		)
 	}
 
 	if err := ensureSchema(db); err != nil {
@@ -148,6 +156,15 @@ func NewSqliteAuditTrail(dbPath string) (*SqliteAuditTrail, error) {
 	if err := Migrate(db); err != nil {
 		db.Close()
 		return nil, err
+	}
+
+	// Restore foreign-key enforcement now that the rebuild migrations are done.
+	if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf(
+			"audit.NewSqliteAuditTrail: cannot restore foreign-key enforcement after migration on %q: %w",
+			dbPath, err,
+		)
 	}
 
 	return &SqliteAuditTrail{

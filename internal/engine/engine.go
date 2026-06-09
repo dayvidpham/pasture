@@ -1,3 +1,10 @@
+// Package engine is the durable-execution adapter for the pasture epoch
+// lifecycle. It owns the shared modernc SQLite handle, registers and drives the
+// pure-Go EpochStateMachine over durable steps, persists an EpochState
+// projection each transition, and records forensic rows exactly once.
+//
+// The state machine itself lives in pkg/protocol and has no substrate
+// dependency; this package is the impure adapter around it.
 package engine
 
 import (
@@ -11,6 +18,7 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	"github.com/dayvidpham/pasture/internal/audit"
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
@@ -127,7 +135,7 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		trailCloser = st
 	}
 
-	db, err := OpenSharedDB(cfg.DBPath)
+	db, err := dbconn.OpenSharedDB(cfg.DBPath)
 	if err != nil {
 		if trailCloser != nil {
 			_ = trailCloser.Close()
