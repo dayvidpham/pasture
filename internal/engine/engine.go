@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/dayvidpham/provenance"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	"github.com/dayvidpham/pasture/internal/audit"
@@ -68,6 +69,24 @@ type Config struct {
 	// hook-local counter would not be replay-stable. Hooks derive their own
 	// deterministic keys from it via protocol.DedupKey.
 	OnTransition func(ctx context.Context, epochId string, rec *protocol.TransitionRecord, stepSeq string) error
+	// Tracker, when set, makes the engine record one PROV-O activity per
+	// transition with a deterministic id (exactly-once across replay). nil ⇒
+	// activities are not recorded and the engine behaves as it did without this
+	// field. The engine resolves a stable software-agent id at New() so the
+	// deterministic insert always references a present agent row.
+	Tracker ActivitySink
+}
+
+// ActivitySink is the narrow provenance surface the engine needs to record
+// activities idempotently. protocol.TaskTracker satisfies it (via the embedded
+// provenance.Tracker), as does provenance.Tracker directly.
+type ActivitySink interface {
+	// RegisterSoftwareAgent find-or-creates is the caller's concern; the engine
+	// only registers its own stable agent once if absent.
+	RegisterSoftwareAgent(namespace, name, version, source string) (provenance.SoftwareAgent, error)
+	// StartActivityWithID records an activity under a caller-supplied id with
+	// ON CONFLICT(id) DO NOTHING, so a replayed emission collapses to one row.
+	StartActivityWithID(id provenance.ActivityID, agentID provenance.AgentID, phase provenance.Phase, stage provenance.Stage, notes string) (provenance.Activity, error)
 }
 
 // Engine owns the shared modernc handle, the DBOS context, and the forensic
@@ -75,13 +94,14 @@ type Config struct {
 //
 // Lifecycle: New → Launch → (run workflows) → Shutdown.
 type Engine struct {
-	cfg         Config
-	db          *sql.DB
-	dbosCtx     dbos.DBOSContext
-	trail       audit.Trail
-	trailCloser io.Closer
-	specs       map[protocol.PhaseId]protocol.PhaseSpec
-	launched    bool
+	cfg             Config
+	db              *sql.DB
+	dbosCtx         dbos.DBOSContext
+	trail           audit.Trail
+	trailCloser     io.Closer
+	specs           map[protocol.PhaseId]protocol.PhaseSpec
+	activityAgentID provenance.AgentID
+	launched        bool
 }
 
 // New constructs an Engine: opens the shared handle with the WAL/busy-timeout
@@ -197,6 +217,34 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		trail:       trail,
 		trailCloser: trailCloser,
 		specs:       specs,
+	}
+
+	// When an activity sink is configured, resolve the engine's stable agent id
+	// once (so every deterministic activity insert references a present agent
+	// row) and compose activity recording into the OnTransition seam. The
+	// activity write runs BEFORE any caller-supplied hook, so a consumer's own
+	// hook (e.g. the recovery probe's stall) still runs afterward.
+	if cfg.Tracker != nil {
+		agentID, err := resolveEngineAgentID(db, cfg.Tracker)
+		if err != nil {
+			_ = db.Close()
+			if trailCloser != nil {
+				_ = trailCloser.Close()
+			}
+			return nil, err
+		}
+		e.activityAgentID = agentID
+
+		userHook := e.cfg.OnTransition
+		e.cfg.OnTransition = func(c context.Context, epochId string, rec *protocol.TransitionRecord, stepSeq string) error {
+			if err := e.recordActivity(c, epochId, rec, stepSeq); err != nil {
+				return err
+			}
+			if userHook != nil {
+				return userHook(c, epochId, rec, stepSeq)
+			}
+			return nil
+		}
 	}
 
 	// Register the durable workflow before Launch so the recovery sweep can
