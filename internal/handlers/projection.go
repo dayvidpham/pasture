@@ -4,12 +4,20 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/engine"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/formatters"
+	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
+
+// projectionTable is the name of the table the engine writes the EpochState
+// projection into. Read paths probe for it so a database on which no epoch has
+// ever run (the projection table absent) reads as "no such epoch" rather than a
+// raw missing-table error.
+const projectionTable = "epoch_state_projection"
 
 // ProjectionReader reads the persisted EpochState projection for an epoch.
 //
@@ -30,7 +38,56 @@ type ProjectionReader interface {
 type dbProjectionReader struct{ db *sql.DB }
 
 func (r dbProjectionReader) ReadProjection(epochId string) (*protocol.EpochState, error) {
+	var name string
+	switch err := r.db.QueryRow(
+		`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, projectionTable,
+	).Scan(&name); {
+	case err == sql.ErrNoRows:
+		// No epoch has ever advanced on this database, so there is no projection
+		// to read. Report "unknown epoch" (nil), not a missing-table error.
+		return nil, nil
+	case err != nil:
+		return nil, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     "Couldn't check whether the epoch-state projection exists.",
+			Why:      "The database refused the read from sqlite_master.",
+			Where:    "Reading the epoch projection (internal/handlers/projection.go in handlers.dbProjectionReader.ReadProjection).",
+			Impact:   "Epoch state can't be reported.",
+			Fix:      "Confirm the database file is readable, then retry.",
+			Cause:    err,
+		}
+	}
 	return engine.ReadProjection(r.db, epochId)
+}
+
+// QueryEpochInput captures the inputs for the projection-backed CLI query verbs.
+type QueryEpochInput struct {
+	// DBPath is the unified pasture.db path. Empty resolves to
+	// tasks.DefaultDBPath().
+	DBPath string
+	// EpochId identifies the epoch whose state is read.
+	EpochId string
+	// Query selects which slice of the state to render.
+	Query protocol.QueryName
+}
+
+// QueryEpoch opens the shared handle at the resolved path and answers a
+// projection-backed query. A query is a pure read, so it opens the file
+// directly rather than launching a durable context (which would run a recovery
+// sweep). Empty DBPath → tasks.DefaultDBPath().
+//
+// Exit codes: 0=success, 1=validation, 2=connection (open failed), 3=not found.
+func QueryEpoch(in QueryEpochInput, format types.OutputFormat) (int, error) {
+	dbPath := in.DBPath
+	if dbPath == "" {
+		dbPath = tasks.DefaultDBPath()
+	}
+	db, err := dbconn.OpenSharedDB(dbPath)
+	if err != nil {
+		return pasterrors.ExitCode(err), err
+	}
+	defer db.Close()
+	return QueryEpochState(NewDBProjectionReader(db), in.EpochId, in.Query, format)
 }
 
 // NewDBProjectionReader returns a ProjectionReader over an already-open shared
@@ -116,7 +173,7 @@ func QueryEpochState(
 				"carries directly.",
 			Where:  "Querying epoch state (internal/handlers/projection.go in handlers.QueryEpochState).",
 			Impact: "The query can't run because its name isn't one this command serves.",
-			Fix: "1. Use one of: current_state, available_transitions, full_state.",
+			Fix:    "1. Use one of: current_state, available_transitions, full_state.",
 		}
 		return pasterrors.ExitCode(err), err
 	}
