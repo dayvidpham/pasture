@@ -254,7 +254,8 @@ func TestEngine_CyclicBounce_DistinctKeys(t *testing.T) {
 		t.Fatalf("final phase = %q, want %q", final.CurrentPhase, protocol.PhasePlanReview)
 	}
 
-	// B-IMP-1: review was entered twice → exactly 2 forensic rows, distinct keys.
+	// Re-entered review phase → 2 distinct forensic rows (cyclic distinctness
+	// via distinct step_seq per durable step).
 	reviewKeys := dedupKeysForPhase(t, e, "review")
 	if len(reviewKeys) != 2 {
 		t.Errorf("review dedup rows = %d, want 2 (one per re-entry)", len(reviewKeys))
@@ -263,7 +264,7 @@ func TestEngine_CyclicBounce_DistinctKeys(t *testing.T) {
 		t.Errorf("review re-entries collapsed to one row: keys=%v — cyclic false-dedup", reviewKeys)
 	}
 
-	// B-IMP-2: every PhaseTransition across distinct steps is a distinct row.
+	// Every PhaseTransition across distinct steps gets a distinct dedup_key.
 	all := allDedupKeys(t, e)
 	if len(all) != 6 {
 		t.Errorf("total engine-emitted rows = %d, want 6 (one per transition)", len(all))
@@ -273,9 +274,9 @@ func TestEngine_CyclicBounce_DistinctKeys(t *testing.T) {
 	}
 }
 
-// TestEngine_CrossEpochDistinctKeys (B-MIN-1): two epochs driven to the same
-// step produce distinct rows — the epoch id is hashed into the key, so no
-// cross-epoch false dedup even at identical (phase, step_seq).
+// TestEngine_CrossEpochDistinctKeys: two epochs driven to the same step produce
+// distinct rows — the epoch id is hashed into the key, so two epochs at the same
+// (phase, step_seq) get distinct keys (no cross-epoch false dedup).
 func TestEngine_CrossEpochDistinctKeys(t *testing.T) {
 	e := newEngine(t)
 
