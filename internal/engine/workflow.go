@@ -29,9 +29,6 @@ type AdvanceStep struct {
 	// value records that many new blockers, a negative value resolves that
 	// many. Used to exercise the p10 blocker gate.
 	BlockerDelta int
-	// StallSeconds, when > 0, makes the durable step sleep before returning —
-	// a deterministic mid-step window for the kill-9 recovery test to crash in.
-	StallSeconds int
 }
 
 // EpochInput is the EpochWorkflow input: the epoch id and the ordered plan of
@@ -90,14 +87,24 @@ func (e *Engine) EpochWorkflow(ctx dbos.DBOSContext, in EpochInput) (protocol.Ep
 		snapshot := *sm.State()
 		dedupKey := protocol.DedupKey(in.EpochId, string(rec.ToPhase), string(protocol.EventPhaseTransition), stepSeq)
 		if _, err := dbos.RunAsStep(ctx, func(c context.Context) (struct{}, error) {
-			if adv.StallSeconds > 0 {
-				time.Sleep(time.Duration(adv.StallSeconds) * time.Second)
-			}
 			if err := WriteProjection(c, e.db, &snapshot, time.Now().UTC().UnixNano()); err != nil {
 				return struct{}{}, err
 			}
 			if err := e.emitTransition(c, in.EpochId, triggeredBy, rec, dedupKey); err != nil {
 				return struct{}{}, err
+			}
+			// OnTransition runs AFTER the side-effect writes but BEFORE the step
+			// returns — the deterministic partial-step-failure window. A later
+			// slice records activities here; the recovery test stalls here so a
+			// kill -9 lands after the audit row is written but before DBOS records
+			// the step complete, so the resumed run re-executes the step and the
+			// dedup key collapses the second write onto the same row. Because the
+			// hook is process-local (not part of the persisted workflow input), a
+			// recovering process supplies its own non-stalling hook and completes.
+			if e.cfg.OnTransition != nil {
+				if err := e.cfg.OnTransition(c, in.EpochId, rec); err != nil {
+					return struct{}{}, err
+				}
 			}
 			return struct{}{}, nil
 		}); err != nil {

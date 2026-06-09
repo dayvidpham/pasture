@@ -53,6 +53,14 @@ type Config struct {
 	Specs map[protocol.PhaseId]protocol.PhaseSpec
 	// Logger is the DBOS logger. nil → slog.Default().
 	Logger *slog.Logger
+	// OnTransition, when set, runs INSIDE the durable step for each successful
+	// transition, AFTER the projection + forensic audit row are written and
+	// BEFORE the step returns. It is the step-bracketing seam: a later slice
+	// wires deterministic, idempotent activity recording here (it shares the
+	// step's replay semantics, so any external write it makes must be
+	// idempotent — e.g. a deterministic-id ON CONFLICT insert). Returning an
+	// error fails the step (and so the transition's durable commit).
+	OnTransition func(ctx context.Context, epochId string, rec *protocol.TransitionRecord) error
 }
 
 // Engine owns the shared modernc handle, the DBOS context, and the forensic
