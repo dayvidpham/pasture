@@ -1,14 +1,12 @@
-// Package temporal implements the Temporal workflow layer for the Pasture epoch
-// protocol. This file defines EpochStateMachine — a pure Go port of the Python
-// state_machine.py.  No Temporal SDK dependency; pure state transitions only.
-package temporal
+package protocol
+
+// This file defines EpochStateMachine — the pure-Go 12-phase epoch lifecycle.
+// It has no durable-substrate dependency; the engine drives it from durable
+// steps. Pure state transitions and gate checks only.
 
 import (
 	"fmt"
 	"time"
-
-	"github.com/dayvidpham/pasture/internal/types"
-	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // ─── Phase transition table ───────────────────────────────────────────────────
@@ -16,92 +14,104 @@ import (
 // PhaseSpec describes the allowed forward/backward transitions from one phase.
 type PhaseSpec struct {
 	// Transitions lists all target PhaseIds reachable from this phase.
-	Transitions []protocol.PhaseId
+	Transitions []PhaseId
 }
 
 // PhaseSpecs is the canonical transition table for the 12-phase epoch lifecycle.
-// Port of Python PHASE_SPECS from scripts/aura_protocol/types.py.
 //
 // Gate rules (enforced by EpochStateMachine, not by this table):
 //   - PhaseReview→PhasePlanReview and PhaseCodeReview→PhaseImplUAT require all 3 review axes to ACCEPT (consensus gate).
 //   - PhaseCodeReview→PhaseImplUAT additionally requires blocker_count == 0 (BLOCKER gate).
 //   - At PhaseReview/PhaseCodeReview with any REVISE vote, only the backward transition is available.
-var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
-	protocol.PhaseRequest:      {Transitions: []protocol.PhaseId{protocol.PhaseElicit}},
-	protocol.PhaseElicit:       {Transitions: []protocol.PhaseId{protocol.PhasePropose}},
-	protocol.PhasePropose:      {Transitions: []protocol.PhaseId{protocol.PhaseReview}},
-	protocol.PhaseReview:       {Transitions: []protocol.PhaseId{protocol.PhasePlanReview, protocol.PhasePropose}},
-	protocol.PhasePlanReview:   {Transitions: []protocol.PhaseId{protocol.PhaseRatify}},
-	protocol.PhaseRatify:       {Transitions: []protocol.PhaseId{protocol.PhaseHandoff}},
-	protocol.PhaseHandoff:      {Transitions: []protocol.PhaseId{protocol.PhaseImplPlan}},
-	protocol.PhaseImplPlan:     {Transitions: []protocol.PhaseId{protocol.PhaseWorkerSlices}},
-	protocol.PhaseWorkerSlices: {Transitions: []protocol.PhaseId{protocol.PhaseCodeReview}},
-	protocol.PhaseCodeReview:   {Transitions: []protocol.PhaseId{protocol.PhaseImplUAT, protocol.PhaseWorkerSlices}},
-	protocol.PhaseImplUAT:      {Transitions: []protocol.PhaseId{protocol.PhaseLanding}},
-	protocol.PhaseLanding:      {Transitions: []protocol.PhaseId{protocol.PhaseComplete}},
+var PhaseSpecs = map[PhaseId]PhaseSpec{
+	PhaseRequest:      {Transitions: []PhaseId{PhaseElicit}},
+	PhaseElicit:       {Transitions: []PhaseId{PhasePropose}},
+	PhasePropose:      {Transitions: []PhaseId{PhaseReview}},
+	PhaseReview:       {Transitions: []PhaseId{PhasePlanReview, PhasePropose}},
+	PhasePlanReview:   {Transitions: []PhaseId{PhaseRatify}},
+	PhaseRatify:       {Transitions: []PhaseId{PhaseHandoff}},
+	PhaseHandoff:      {Transitions: []PhaseId{PhaseImplPlan}},
+	PhaseImplPlan:     {Transitions: []PhaseId{PhaseWorkerSlices}},
+	PhaseWorkerSlices: {Transitions: []PhaseId{PhaseCodeReview}},
+	PhaseCodeReview:   {Transitions: []PhaseId{PhaseImplUAT, PhaseWorkerSlices}},
+	PhaseImplUAT:      {Transitions: []PhaseId{PhaseLanding}},
+	PhaseLanding:      {Transitions: []PhaseId{PhaseComplete}},
 }
 
 // consensusGated is the set of (from, to) transitions requiring all-ACCEPT consensus.
-var consensusGated = map[[2]protocol.PhaseId]struct{}{
-	{protocol.PhaseReview, protocol.PhasePlanReview}:  {},
-	{protocol.PhaseCodeReview, protocol.PhaseImplUAT}: {},
+var consensusGated = map[[2]PhaseId]struct{}{
+	{PhaseReview, PhasePlanReview}:  {},
+	{PhaseCodeReview, PhaseImplUAT}: {},
 }
 
 // blockerGated is the set of (from, to) transitions blocked when blocker_count > 0.
-var blockerGated = map[[2]protocol.PhaseId]struct{}{
-	{protocol.PhaseCodeReview, protocol.PhaseImplUAT}: {},
+var blockerGated = map[[2]PhaseId]struct{}{
+	{PhaseCodeReview, PhaseImplUAT}: {},
 }
 
 // reviseDrivesBackPhases are review phases where a REVISE vote forces only the
 // backward transition (revision loop).
-var reviseDrivesBackPhases = map[protocol.PhaseId]struct{}{
-	protocol.PhaseReview:     {},
-	protocol.PhaseCodeReview: {},
+var reviseDrivesBackPhases = map[PhaseId]struct{}{
+	PhaseReview:     {},
+	PhaseCodeReview: {},
 }
 
 // ─── EpochStateMachine ────────────────────────────────────────────────────────
 
 // EpochStateMachine manages the 12-phase epoch lifecycle with phase transition
-// validation and vote/blocker gate checks.  Pure Go — no Temporal dependency.
-//
-// Port of Python EpochStateMachine in scripts/aura_protocol/state_machine.py.
+// validation and vote/blocker gate checks. Pure Go — no substrate dependency.
 //
 // Usage:
 //
-//	sm := NewEpochStateMachine("epoch-123")
-//	record, err := sm.Advance(protocol.P2_Elicit, "architect", "classification confirmed")
-//	sm.RecordVote(types.AxisCorrectness, types.VoteAccept)
-//	sm.RecordVote(types.AxisTestQuality, types.VoteAccept)
-//	sm.RecordVote(types.AxisElegance, types.VoteAccept)
-//	record, err = sm.Advance(protocol.P5_Uat, "reviewer", "all 3 vote ACCEPT")
+//	sm := NewEpochStateMachine("epoch-123", nil)
+//	record, err := sm.Advance(PhaseElicit, "architect", "classification confirmed", time.Now())
+//	sm.RecordVote(AxisCorrectness, VoteAccept)
+//	sm.RecordVote(AxisTestQuality, VoteAccept)
+//	sm.RecordVote(AxisElegance, VoteAccept)
+//	record, err = sm.Advance(PhasePlanReview, "reviewer", "all 3 vote ACCEPT", time.Now())
 type EpochStateMachine struct {
-	state *types.EpochState
-	specs map[protocol.PhaseId]PhaseSpec
+	state *EpochState
+	specs map[PhaseId]PhaseSpec
 }
 
 // NewEpochStateMachine creates a new EpochStateMachine initialized to PhaseRequest.
 // Accepts an optional specs map for dependency injection in tests; pass nil to
 // use the canonical PhaseSpecs.
-func NewEpochStateMachine(epochId string, specs map[protocol.PhaseId]PhaseSpec) *EpochStateMachine {
+func NewEpochStateMachine(epochId string, specs map[PhaseId]PhaseSpec) *EpochStateMachine {
 	if specs == nil {
 		specs = PhaseSpecs
 	}
 	return &EpochStateMachine{
-		state: &types.EpochState{
+		state: &EpochState{
 			EpochId:           epochId,
-			CurrentPhase:      protocol.PhaseRequest,
-			CurrentRole:       types.RoleEpoch,
-			CompletedPhases:   []protocol.PhaseId{},
-			ReviewVotes:       make(map[types.ReviewAxis]types.VoteType),
-			TransitionHistory: []types.TransitionRecord{},
+			CurrentPhase:      PhaseRequest,
+			CurrentRole:       RoleEpoch,
+			CompletedPhases:   []PhaseId{},
+			ReviewVotes:       make(map[ReviewAxis]VoteType),
+			TransitionHistory: []TransitionRecord{},
 		},
 		specs: specs,
 	}
 }
 
+// NewEpochStateMachineFromState rebuilds an EpochStateMachine around an existing
+// EpochState snapshot — for validation or recompute paths that already hold a
+// state (e.g. constraint checks, query recompute) and must not start from
+// PhaseRequest. The state pointer is adopted, not copied; pass a snapshot you
+// own. specs is the transition table; pass nil for the canonical PhaseSpecs.
+func NewEpochStateMachineFromState(state *EpochState, specs map[PhaseId]PhaseSpec) *EpochStateMachine {
+	if specs == nil {
+		specs = PhaseSpecs
+	}
+	if state.ReviewVotes == nil {
+		state.ReviewVotes = make(map[ReviewAxis]VoteType)
+	}
+	return &EpochStateMachine{state: state, specs: specs}
+}
+
 // State returns the current epoch state. Callers must not modify the returned
 // pointer directly; use RecordVote, RecordBlocker, and Advance instead.
-func (sm *EpochStateMachine) State() *types.EpochState {
+func (sm *EpochStateMachine) State() *EpochState {
 	return sm.state
 }
 
@@ -114,9 +124,9 @@ func (sm *EpochStateMachine) State() *types.EpochState {
 //  3. BLOCKER gate: p10→p11 excluded while blocker_count > 0.
 //
 // Returns empty slice when current phase is Complete or has no spec.
-func (sm *EpochStateMachine) AvailableTransitions() []protocol.PhaseId {
+func (sm *EpochStateMachine) AvailableTransitions() []PhaseId {
 	current := sm.state.CurrentPhase
-	if current == protocol.PhaseComplete {
+	if current == PhaseComplete {
 		return nil
 	}
 	spec, ok := sm.specs[current]
@@ -124,14 +134,14 @@ func (sm *EpochStateMachine) AvailableTransitions() []protocol.PhaseId {
 		return nil
 	}
 
-	all := make([]protocol.PhaseId, len(spec.Transitions))
+	all := make([]PhaseId, len(spec.Transitions))
 	copy(all, spec.Transitions)
 
 	// Rule 1: REVISE gate — at a review phase with any REVISE vote, only backward.
 	if _, isReviewPhase := reviseDrivesBackPhases[current]; isReviewPhase && sm.hasAnyRevise() {
-		var backward []protocol.PhaseId
+		var backward []PhaseId
 		for _, to := range all {
-			key := [2]protocol.PhaseId{current, to}
+			key := [2]PhaseId{current, to}
 			_, isCons := consensusGated[key]
 			_, isBlock := blockerGated[key]
 			if !isCons && !isBlock {
@@ -142,9 +152,9 @@ func (sm *EpochStateMachine) AvailableTransitions() []protocol.PhaseId {
 	}
 
 	// Rule 2: Consensus gate.
-	var filtered []protocol.PhaseId
+	var filtered []PhaseId
 	for _, to := range all {
-		key := [2]protocol.PhaseId{current, to}
+		key := [2]PhaseId{current, to}
 		if _, gated := consensusGated[key]; gated && !sm.HasConsensus() {
 			continue
 		}
@@ -154,9 +164,9 @@ func (sm *EpochStateMachine) AvailableTransitions() []protocol.PhaseId {
 
 	// Rule 3: BLOCKER gate.
 	if sm.state.BlockerCount > 0 {
-		var noBlock []protocol.PhaseId
+		var noBlock []PhaseId
 		for _, to := range all {
-			key := [2]protocol.PhaseId{current, to}
+			key := [2]PhaseId{current, to}
 			if _, gated := blockerGated[key]; !gated {
 				noBlock = append(noBlock, to)
 			}
@@ -175,11 +185,11 @@ func (sm *EpochStateMachine) AvailableTransitions() []protocol.PhaseId {
 //  2. to_phase is in the transition table for the current phase.
 //  3. Consensus gate: p4→p5 / p10→p11 require HasConsensus().
 //  4. BLOCKER gate: p10→p11 requires BlockerCount == 0.
-func (sm *EpochStateMachine) ValidateAdvance(toPhase protocol.PhaseId) []string {
+func (sm *EpochStateMachine) ValidateAdvance(toPhase PhaseId) []string {
 	var violations []string
 	current := sm.state.CurrentPhase
 
-	if current == protocol.PhaseComplete {
+	if current == PhaseComplete {
 		violations = append(violations,
 			"epoch is already COMPLETE; no further transitions are possible")
 		return violations
@@ -192,7 +202,7 @@ func (sm *EpochStateMachine) ValidateAdvance(toPhase protocol.PhaseId) []string 
 		return violations
 	}
 
-	validTargets := make(map[protocol.PhaseId]struct{})
+	validTargets := make(map[PhaseId]struct{})
 	for _, t := range spec.Transitions {
 		validTargets[t] = struct{}{}
 	}
@@ -209,11 +219,11 @@ func (sm *EpochStateMachine) ValidateAdvance(toPhase protocol.PhaseId) []string 
 	}
 
 	// Consensus gate.
-	key := [2]protocol.PhaseId{current, toPhase}
+	key := [2]PhaseId{current, toPhase}
 	if _, gated := consensusGated[key]; gated && !sm.HasConsensus() {
 		var accepted []string
 		for ax, v := range sm.state.ReviewVotes {
-			if v == types.VoteAccept {
+			if v == VoteAccept {
 				accepted = append(accepted, string(ax))
 			}
 		}
@@ -238,24 +248,24 @@ func (sm *EpochStateMachine) ValidateAdvance(toPhase protocol.PhaseId) []string 
 //   - Appends the current phase to CompletedPhases.
 //   - Sets CurrentPhase = toPhase.
 //   - Appends a TransitionRecord to TransitionHistory.
-//   - When entering P10_CodeReview, initializes severity tracking (not in Python; handled by S7).
 //   - Clears ReviewVotes (votes are phase-scoped).
 //   - Clears LastError.
 //
 // timestamp is used for the record; pass time.Now() for production or a fixed
-// time for determinism in tests. In the Temporal workflow, pass workflow.Now().
+// time for determinism in tests. In a durable step, pass the deterministic
+// step time so replays record an identical timestamp.
 func (sm *EpochStateMachine) Advance(
-	toPhase protocol.PhaseId,
+	toPhase PhaseId,
 	triggeredBy string,
 	conditionMet string,
 	timestamp time.Time,
-) (*types.TransitionRecord, error) {
+) (*TransitionRecord, error) {
 	violations := sm.ValidateAdvance(toPhase)
 	if len(violations) > 0 {
 		return nil, &TransitionError{Violations: violations}
 	}
 
-	record := types.TransitionRecord{
+	record := TransitionRecord{
 		FromPhase:    sm.state.CurrentPhase,
 		ToPhase:      toPhase,
 		Timestamp:    timestamp,
@@ -269,7 +279,7 @@ func (sm *EpochStateMachine) Advance(
 	sm.state.TransitionHistory = append(sm.state.TransitionHistory, record)
 
 	// Clear votes — they are scoped to the phase in which they were cast.
-	sm.state.ReviewVotes = make(map[types.ReviewAxis]types.VoteType)
+	sm.state.ReviewVotes = make(map[ReviewAxis]VoteType)
 	sm.state.LastError = nil
 
 	return &record, nil
@@ -279,12 +289,12 @@ func (sm *EpochStateMachine) Advance(
 // Overwrites any previous vote for the same axis.
 //
 // Returns an error if axis is not a valid ReviewAxis value.
-func (sm *EpochStateMachine) RecordVote(axis types.ReviewAxis, vote types.VoteType) error {
+func (sm *EpochStateMachine) RecordVote(axis ReviewAxis, vote VoteType) error {
 	if !axis.IsValid() {
 		return fmt.Errorf(
 			"invalid review axis %q; must be one of %v — "+
-				"use types.AxisCorrectness, types.AxisTestQuality, or types.AxisElegance",
-			axis, types.AllReviewAxes,
+				"use AxisCorrectness, AxisTestQuality, or AxisElegance",
+			axis, AllReviewAxes,
 		)
 	}
 	sm.state.ReviewVotes[axis] = vote
@@ -293,9 +303,9 @@ func (sm *EpochStateMachine) RecordVote(axis types.ReviewAxis, vote types.VoteTy
 
 // HasConsensus returns true if all 3 review axes have ACCEPT votes.
 func (sm *EpochStateMachine) HasConsensus() bool {
-	for _, ax := range types.AllReviewAxes {
+	for _, ax := range AllReviewAxes {
 		v, ok := sm.state.ReviewVotes[ax]
-		if !ok || v != types.VoteAccept {
+		if !ok || v != VoteAccept {
 			return false
 		}
 	}
@@ -318,16 +328,16 @@ func (sm *EpochStateMachine) RecordBlocker(resolved bool) {
 // RecordFailedTransition appends a failed TransitionRecord to the transition
 // history and records the error message in LastError.
 //
-// This is the correct mutation path for failed advances in workflow.go — callers
-// must not mutate State() directly (see State() doc). fromPhase and toPhase
-// describe the attempted transition; err is the failure reason.
+// This is the correct mutation path for failed advances — callers must not
+// mutate State() directly (see State() doc). fromPhase and toPhase describe the
+// attempted transition; err is the failure reason.
 func (sm *EpochStateMachine) RecordFailedTransition(
-	fromPhase, toPhase protocol.PhaseId,
+	fromPhase, toPhase PhaseId,
 	timestamp time.Time,
 	triggeredBy string,
 	err error,
 ) {
-	failedRecord := types.TransitionRecord{
+	failedRecord := TransitionRecord{
 		FromPhase:    fromPhase,
 		ToPhase:      toPhase,
 		Timestamp:    timestamp,
@@ -343,7 +353,7 @@ func (sm *EpochStateMachine) RecordFailedTransition(
 // hasAnyRevise returns true if any recorded vote is REVISE.
 func (sm *EpochStateMachine) hasAnyRevise() bool {
 	for _, v := range sm.state.ReviewVotes {
-		if v == types.VoteRevise {
+		if v == VoteRevise {
 			return true
 		}
 	}

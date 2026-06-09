@@ -7,8 +7,8 @@ import (
 	"github.com/dayvidpham/pasture/internal/config"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/formatters"
-	"github.com/dayvidpham/pasture/internal/temporal"
 	"github.com/dayvidpham/pasture/internal/types"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // SignalVote sends a ReviewVoteSignal to the EpochWorkflow.
@@ -21,8 +21,8 @@ func SignalVote(
 	ctx context.Context,
 	conn config.ConnectionConfig,
 	epochId string,
-	axis types.ReviewAxis,
-	vote types.VoteType,
+	axis protocol.ReviewAxis,
+	vote protocol.VoteType,
 	reviewerId string,
 	format types.OutputFormat,
 	factory TemporalClientFactory,
@@ -79,13 +79,13 @@ func SignalVote(
 	}
 	defer c.Close()
 
-	payload := types.ReviewVoteSignal{
+	payload := protocol.ReviewVoteSignal{
 		Axis:       axis,
 		Vote:       vote,
 		ReviewerId: reviewerId,
 	}
 
-	if err := c.SignalWorkflow(ctx, epochId, "", temporal.SignalSubmitVote, payload); err != nil {
+	if err := c.SignalWorkflow(ctx, epochId, "", protocol.SignalSubmitVote, payload); err != nil {
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Couldn't record the vote for epoch %q.", epochId),
@@ -183,14 +183,14 @@ func SignalComplete(
 		stageName = "error"
 	}
 
-	payload := types.SliceProgressSignal{
+	payload := protocol.SliceProgressSignal{
 		SliceId:    sliceId,
 		LeafTaskId: sliceId, // use sliceId as the leaf task identifier for top-level completion
 		StageName:  stageName,
 		Completed:  completed,
 	}
 
-	if err := c.SignalWorkflow(ctx, epochId, "", temporal.SignalSliceProgress, payload); err != nil {
+	if err := c.SignalWorkflow(ctx, epochId, "", protocol.SignalSliceProgress, payload); err != nil {
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Couldn't mark slice %q complete in epoch %q.", sliceId, epochId),

@@ -14,7 +14,6 @@ import (
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/tasks"
-	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -133,13 +132,13 @@ type ConstraintViolation struct {
 //
 //	state:   Current epoch state snapshot.
 //	toPhase: Proposed target phase.
-func (a *Activities) CheckConstraints(ctx context.Context, state types.EpochState, toPhase protocol.PhaseId) ([]ConstraintViolation, error) {
+func (a *Activities) CheckConstraints(ctx context.Context, state protocol.EpochState, toPhase protocol.PhaseId) ([]ConstraintViolation, error) {
 	logger := activity.GetLogger(ctx)
 	logger.Info("CheckConstraints", "from", state.CurrentPhase, "to", toPhase)
 
 	// Reconstruct a temporary state machine to run ValidateAdvance.
 	// We do not call Advance — only validation.
-	sm := &EpochStateMachine{state: &state, specs: PhaseSpecs}
+	sm := protocol.NewEpochStateMachineFromState(&state, nil)
 	violations := sm.ValidateAdvance(toPhase)
 
 	result := make([]ConstraintViolation, 0, len(violations))
@@ -210,7 +209,7 @@ func (a *Activities) CheckConstraints(ctx context.Context, state types.EpochStat
 //
 // epochId is required to make audit events queryable by epoch. Pass the workflow
 // input EpochId so events can be retrieved via QueryAuditEvents(epochId, ...).
-func (a *Activities) RecordTransition(ctx context.Context, epochId string, record types.TransitionRecord) error {
+func (a *Activities) RecordTransition(ctx context.Context, epochId string, record protocol.TransitionRecord) error {
 	logger := activity.GetLogger(ctx)
 	logger.Info("RecordTransition",
 		slog.String("epochId", epochId),

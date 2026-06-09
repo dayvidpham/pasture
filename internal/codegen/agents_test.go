@@ -8,7 +8,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen"
 	"github.com/dayvidpham/pasture/internal/testutil"
-	"github.com/dayvidpham/pasture/internal/types"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -55,7 +55,7 @@ func TestGenerateAgent_SectionChecks(t *testing.T) {
 	for _, check := range suite.AgentChecks {
 		check := check
 		t.Run(check.Role, func(t *testing.T) {
-			role := types.RoleId(check.Role)
+			role := protocol.RoleId(check.Role)
 			require.True(t, role.IsValid(),
 				"fixture role %q is not a valid RoleId — update agents.yaml to use a valid role", check.Role)
 
@@ -109,7 +109,7 @@ func TestGenerateAgent_OnlyRolesWithTools(t *testing.T) {
 	for _, roleStr := range suite.RolesWithTools {
 		roleStr := roleStr
 		t.Run("has_tools/"+roleStr, func(t *testing.T) {
-			role := types.RoleId(roleStr)
+			role := protocol.RoleId(roleStr)
 			require.True(t, role.IsValid(),
 				"fixture role %q is not a valid RoleId", roleStr)
 
@@ -125,7 +125,7 @@ func TestGenerateAgent_OnlyRolesWithTools(t *testing.T) {
 	for _, roleStr := range suite.RolesWithoutTools {
 		roleStr := roleStr
 		t.Run("no_tools/"+roleStr, func(t *testing.T) {
-			role := types.RoleId(roleStr)
+			role := protocol.RoleId(roleStr)
 			require.True(t, role.IsValid(),
 				"fixture role %q is not a valid RoleId", roleStr)
 
@@ -147,7 +147,7 @@ func TestGenerateAgent_WorkerContent(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentPath := filepath.Join(tmpDir, "worker.md")
 
-	got, err := codegen.GenerateAgent(types.RoleWorker, agentPath, "", codegen.GenerateOptions{})
+	got, err := codegen.GenerateAgent(protocol.RoleWorker, agentPath, "", codegen.GenerateOptions{})
 	require.NoError(t, err)
 	require.NotEmpty(t, got)
 
@@ -162,12 +162,12 @@ func TestGenerateAgent_WorkerContent(t *testing.T) {
 // definition starts with "---" (YAML frontmatter open) and has a second "---"
 // closing the frontmatter block before the H1 heading.
 func TestGenerateAgent_FrontmatterFormat(t *testing.T) {
-	roles := []types.RoleId{
-		types.RoleWorker,
-		types.RoleSupervisor,
-		types.RoleReviewer,
-		types.RoleArchitect,
-		types.RoleEpoch,
+	roles := []protocol.RoleId{
+		protocol.RoleWorker,
+		protocol.RoleSupervisor,
+		protocol.RoleReviewer,
+		protocol.RoleArchitect,
+		protocol.RoleEpoch,
 	}
 
 	tmpDir := t.TempDir()
@@ -206,7 +206,7 @@ func TestGenerateAgent_SupervisorContainsSections(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentPath := filepath.Join(tmpDir, "supervisor.md")
 
-	got, err := codegen.GenerateAgent(types.RoleSupervisor, agentPath, "", codegen.GenerateOptions{
+	got, err := codegen.GenerateAgent(protocol.RoleSupervisor, agentPath, "", codegen.GenerateOptions{
 		Diff:  false,
 		Write: false,
 	})
@@ -248,7 +248,7 @@ func TestGenerateAgent_WritesToDisk(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentPath := filepath.Join(tmpDir, "agents", "worker.md")
 
-	got, err := codegen.GenerateAgent(types.RoleWorker, agentPath, "", codegen.GenerateOptions{
+	got, err := codegen.GenerateAgent(protocol.RoleWorker, agentPath, "", codegen.GenerateOptions{
 		Write: true,
 	})
 	require.NoError(t, err)
@@ -267,10 +267,10 @@ func TestGenerateAgent_WritesToDisk(t *testing.T) {
 // definitions end with a single trailing newline, consistent with the
 // Python generate_agent() behaviour.
 func TestGenerateAgent_TrailingNewline(t *testing.T) {
-	roles := []types.RoleId{
-		types.RoleWorker,
-		types.RoleSupervisor,
-		types.RoleReviewer,
+	roles := []protocol.RoleId{
+		protocol.RoleWorker,
+		protocol.RoleSupervisor,
+		protocol.RoleReviewer,
 	}
 
 	tmpDir := t.TempDir()

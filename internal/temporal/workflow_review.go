@@ -1,9 +1,8 @@
 package temporal
 
 import (
+	"github.com/dayvidpham/pasture/pkg/protocol"
 	"go.temporal.io/sdk/workflow"
-
-	"github.com/dayvidpham/pasture/internal/types"
 )
 
 // ReviewPhaseWorkflow is the child workflow for P4_Review or P10_CodeReview.
@@ -19,12 +18,12 @@ import (
 //
 // Port of Python ReviewPhaseWorkflow in scripts/aura_protocol/workflow.py.
 type ReviewPhaseWorkflow struct {
-	votes map[types.ReviewAxis]types.VoteType
+	votes map[protocol.ReviewAxis]protocol.VoteType
 }
 
 // SubmitVote is the signal handler for reviewer votes.
 // Idempotent: if the same axis votes again, the later vote overwrites.
-func (rw *ReviewPhaseWorkflow) SubmitVote(_ workflow.Context, sig types.ReviewVoteSignal) {
+func (rw *ReviewPhaseWorkflow) SubmitVote(_ workflow.Context, sig protocol.ReviewVoteSignal) {
 	rw.votes[sig.Axis] = sig.Vote
 }
 
@@ -34,13 +33,13 @@ func (rw *ReviewPhaseWorkflow) SubmitVote(_ workflow.Context, sig types.ReviewVo
 // Elegance) have submitted votes. Returns a ReviewResult with the full
 // vote mapping.
 func (rw *ReviewPhaseWorkflow) Run(ctx workflow.Context, input ReviewInput) (*ReviewResult, error) {
-	rw.votes = make(map[types.ReviewAxis]types.VoteType)
+	rw.votes = make(map[protocol.ReviewAxis]protocol.VoteType)
 
 	// Register signal handler via goroutine-per-channel pattern.
 	workflow.Go(ctx, func(ctx workflow.Context) {
-		ch := workflow.GetSignalChannel(ctx, SignalSubmitVote)
+		ch := workflow.GetSignalChannel(ctx, protocol.SignalSubmitVote)
 		for {
-			var sig types.ReviewVoteSignal
+			var sig protocol.ReviewVoteSignal
 			ch.Receive(ctx, &sig)
 			rw.SubmitVote(ctx, sig)
 		}
@@ -48,7 +47,7 @@ func (rw *ReviewPhaseWorkflow) Run(ctx workflow.Context, input ReviewInput) (*Re
 
 	// Wait until all 3 ReviewAxis members have voted.
 	_ = workflow.Await(ctx, func() bool {
-		for _, ax := range types.AllReviewAxes {
+		for _, ax := range protocol.AllReviewAxes {
 			if _, ok := rw.votes[ax]; !ok {
 				return false
 			}
@@ -60,7 +59,7 @@ func (rw *ReviewPhaseWorkflow) Run(ctx workflow.Context, input ReviewInput) (*Re
 	}
 
 	// Defensive copy of votes.
-	result := make(map[types.ReviewAxis]types.VoteType, len(rw.votes))
+	result := make(map[protocol.ReviewAxis]protocol.VoteType, len(rw.votes))
 	for k, v := range rw.votes {
 		result[k] = v
 	}

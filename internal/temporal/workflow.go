@@ -1,6 +1,6 @@
 // Package temporal implements the Temporal workflow layer for the Pasture epoch
 // protocol. EpochWorkflow is the durable top-level workflow; it wraps
-// EpochStateMachine with signal/query handlers and Temporal search attributes.
+// protocol.EpochStateMachine with signal/query handlers and Temporal search attributes.
 //
 // Port of Python EpochWorkflow in scripts/aura_protocol/workflow.py.
 package temporal
@@ -13,7 +13,6 @@ import (
 	temporalsdk "go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
-	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -86,15 +85,15 @@ type ReviewInput struct {
 
 // ReviewResult is the return value of ReviewPhaseWorkflow.
 type ReviewResult struct {
-	PhaseId    string                              `json:"phaseId"`
-	Success    bool                                `json:"success"`
-	VoteResult map[types.ReviewAxis]types.VoteType `json:"voteResult"`
+	PhaseId    string                                    `json:"phaseId"`
+	Success    bool                                      `json:"success"`
+	VoteResult map[protocol.ReviewAxis]protocol.VoteType `json:"voteResult"`
 }
 
 // ─── EpochWorkflow ────────────────────────────────────────────────────────────
 
 // EpochWorkflow is the durable Temporal workflow that drives the 12-phase epoch
-// lifecycle.  It wraps EpochStateMachine with Temporal signal/query handlers and
+// lifecycle.  It wraps protocol.EpochStateMachine with Temporal signal/query handlers and
 // updates search attributes on every phase transition for forensic queryability.
 //
 // Signals (4):
@@ -104,11 +103,11 @@ type ReviewResult struct {
 //   - register_session (RegisterSessionSignal) — register a Claude Code session
 //
 // Queries (5):
-//   - current_state  → *types.EpochState
+//   - current_state  → *protocol.EpochState
 //   - available_transitions → []protocol.PhaseId
-//   - full_state → *types.QueryStateResult
-//   - slice_progress_state → []types.SliceProgressSignal
-//   - active_sessions → []types.RegisterSessionSignal
+//   - full_state → *protocol.QueryStateResult
+//   - slice_progress_state → []protocol.SliceProgressSignal
+//   - active_sessions → []protocol.RegisterSessionSignal
 //
 // Design invariants:
 //   - No time.Now() in workflow code — use workflow.Now().
@@ -116,18 +115,18 @@ type ReviewResult struct {
 //   - Signal handlers enqueue; transitions happen in the run loop.
 //   - Search attributes updated via UpsertTypedSearchAttributes on every transition.
 type EpochWorkflow struct {
-	pendingAdvance   []types.PhaseAdvanceSignal
-	pendingVotes     []types.ReviewVoteSignal
+	pendingAdvance   []protocol.PhaseAdvanceSignal
+	pendingVotes     []protocol.ReviewVoteSignal
 	totalViolations  int
-	sm               *EpochStateMachine
-	sliceProgressLog []types.SliceProgressSignal
-	activeSessions   []types.RegisterSessionSignal
+	sm               *protocol.EpochStateMachine
+	sliceProgressLog []protocol.SliceProgressSignal
+	activeSessions   []protocol.RegisterSessionSignal
 }
 
 // Run is the EpochWorkflow entry point. Initializes the state machine, sets
 // initial search attributes, then drives the main signal loop until COMPLETE.
 func (w *EpochWorkflow) Run(ctx workflow.Context, input EpochInput) (*EpochResult, error) {
-	w.sm = NewEpochStateMachine(input.EpochId, nil)
+	w.sm = protocol.NewEpochStateMachine(input.EpochId, nil)
 
 	// Set initial search attributes (immutable SA_EPOCH_Id set once).
 	initialPhase := w.sm.State().CurrentPhase
@@ -255,23 +254,23 @@ func (w *EpochWorkflow) Run(ctx workflow.Context, input EpochInput) (*EpochResul
 // ── Signal handlers ─────────────────────────────────────────────────────────
 
 // AdvancePhase is the signal handler for advance_phase signals.
-func (w *EpochWorkflow) AdvancePhase(ctx workflow.Context, sig types.PhaseAdvanceSignal) {
+func (w *EpochWorkflow) AdvancePhase(ctx workflow.Context, sig protocol.PhaseAdvanceSignal) {
 	w.pendingAdvance = append(w.pendingAdvance, sig)
 }
 
 // SubmitVote is the signal handler for submit_vote signals.
-func (w *EpochWorkflow) SubmitVote(ctx workflow.Context, sig types.ReviewVoteSignal) {
+func (w *EpochWorkflow) SubmitVote(ctx workflow.Context, sig protocol.ReviewVoteSignal) {
 	w.pendingVotes = append(w.pendingVotes, sig)
 }
 
 // SliceProgress is the signal handler for slice_progress signals from child SliceWorkflows.
-func (w *EpochWorkflow) SliceProgress(ctx workflow.Context, sig types.SliceProgressSignal) {
+func (w *EpochWorkflow) SliceProgress(ctx workflow.Context, sig protocol.SliceProgressSignal) {
 	w.sliceProgressLog = append(w.sliceProgressLog, sig)
 }
 
 // RegisterSession is the signal handler for register_session signals.
 // Idempotent: duplicate session IDs are silently ignored.
-func (w *EpochWorkflow) RegisterSession(ctx workflow.Context, sig types.RegisterSessionSignal) {
+func (w *EpochWorkflow) RegisterSession(ctx workflow.Context, sig protocol.RegisterSessionSignal) {
 	for _, s := range w.activeSessions {
 		if s.SessionId == sig.SessionId {
 			return
@@ -283,7 +282,7 @@ func (w *EpochWorkflow) RegisterSession(ctx workflow.Context, sig types.Register
 // ── Query handlers ──────────────────────────────────────────────────────────
 
 // CurrentState returns a snapshot of the current epoch runtime state.
-func (w *EpochWorkflow) CurrentState() (*types.EpochState, error) {
+func (w *EpochWorkflow) CurrentState() (*protocol.EpochState, error) {
 	if w.sm == nil {
 		return nil, fmt.Errorf("EpochWorkflow: workflow not yet initialized — run() has not started")
 	}
@@ -299,7 +298,7 @@ func (w *EpochWorkflow) AvailableTransitionsQuery() []protocol.PhaseId {
 }
 
 // FullState returns a serialization-safe snapshot of epoch state for CLI consumers.
-func (w *EpochWorkflow) FullState() (*types.QueryStateResult, error) {
+func (w *EpochWorkflow) FullState() (*protocol.QueryStateResult, error) {
 	if w.sm == nil {
 		return nil, fmt.Errorf("EpochWorkflow: workflow not yet initialized — run() has not started")
 	}
@@ -311,16 +310,16 @@ func (w *EpochWorkflow) FullState() (*types.QueryStateResult, error) {
 	}
 
 	// Defensive copy of transition history.
-	history := make([]types.TransitionRecord, len(state.TransitionHistory))
+	history := make([]protocol.TransitionRecord, len(state.TransitionHistory))
 	copy(history, state.TransitionHistory)
 
 	// Defensive copy of votes.
-	votes := make(map[types.ReviewAxis]types.VoteType, len(state.ReviewVotes))
+	votes := make(map[protocol.ReviewAxis]protocol.VoteType, len(state.ReviewVotes))
 	for k, v := range state.ReviewVotes {
 		votes[k] = v
 	}
 
-	return &types.QueryStateResult{
+	return &protocol.QueryStateResult{
 		CurrentPhase:         state.CurrentPhase,
 		CurrentRole:          state.CurrentRole,
 		TransitionHistory:    history,
@@ -332,15 +331,15 @@ func (w *EpochWorkflow) FullState() (*types.QueryStateResult, error) {
 }
 
 // SliceProgressState returns all accumulated slice progress signals.
-func (w *EpochWorkflow) SliceProgressState() []types.SliceProgressSignal {
-	cp := make([]types.SliceProgressSignal, len(w.sliceProgressLog))
+func (w *EpochWorkflow) SliceProgressState() []protocol.SliceProgressSignal {
+	cp := make([]protocol.SliceProgressSignal, len(w.sliceProgressLog))
 	copy(cp, w.sliceProgressLog)
 	return cp
 }
 
 // ActiveSessions returns all registered sessions for this epoch.
-func (w *EpochWorkflow) ActiveSessions() []types.RegisterSessionSignal {
-	cp := make([]types.RegisterSessionSignal, len(w.activeSessions))
+func (w *EpochWorkflow) ActiveSessions() []protocol.RegisterSessionSignal {
+	cp := make([]protocol.RegisterSessionSignal, len(w.activeSessions))
 	copy(cp, w.activeSessions)
 	return cp
 }
@@ -378,68 +377,68 @@ func EpochWorkflowFn(ctx workflow.Context, input EpochInput) (*EpochResult, erro
 	// Register signal handlers via goroutine-per-channel pattern.
 	// Each goroutine drains its channel for the full lifecycle of the workflow.
 	workflow.Go(ctx, func(ctx workflow.Context) {
-		ch := workflow.GetSignalChannel(ctx, SignalAdvancePhase)
+		ch := workflow.GetSignalChannel(ctx, protocol.SignalAdvancePhase)
 		for {
-			var sig types.PhaseAdvanceSignal
+			var sig protocol.PhaseAdvanceSignal
 			ch.Receive(ctx, &sig)
 			w.AdvancePhase(ctx, sig)
 		}
 	})
 	workflow.Go(ctx, func(ctx workflow.Context) {
-		ch := workflow.GetSignalChannel(ctx, SignalSubmitVote)
+		ch := workflow.GetSignalChannel(ctx, protocol.SignalSubmitVote)
 		for {
-			var sig types.ReviewVoteSignal
+			var sig protocol.ReviewVoteSignal
 			ch.Receive(ctx, &sig)
 			w.SubmitVote(ctx, sig)
 		}
 	})
 	workflow.Go(ctx, func(ctx workflow.Context) {
-		ch := workflow.GetSignalChannel(ctx, SignalSliceProgress)
+		ch := workflow.GetSignalChannel(ctx, protocol.SignalSliceProgress)
 		for {
-			var sig types.SliceProgressSignal
+			var sig protocol.SliceProgressSignal
 			ch.Receive(ctx, &sig)
 			w.SliceProgress(ctx, sig)
 		}
 	})
 	workflow.Go(ctx, func(ctx workflow.Context) {
-		ch := workflow.GetSignalChannel(ctx, SignalRegisterSession)
+		ch := workflow.GetSignalChannel(ctx, protocol.SignalRegisterSession)
 		for {
-			var sig types.RegisterSessionSignal
+			var sig protocol.RegisterSessionSignal
 			ch.Receive(ctx, &sig)
 			w.RegisterSession(ctx, sig)
 		}
 	})
 
 	// Register query handlers. SetQueryHandler does not pass ctx to the handler.
-	if err := workflow.SetQueryHandler(ctx, QueryCurrentState,
-		func() (*types.EpochState, error) {
+	if err := workflow.SetQueryHandler(ctx, protocol.QueryCurrentState,
+		func() (*protocol.EpochState, error) {
 			return w.CurrentState()
 		}); err != nil {
-		return nil, fmt.Errorf("EpochWorkflow: failed to register query %q: %w", QueryCurrentState, err)
+		return nil, fmt.Errorf("EpochWorkflow: failed to register query %q: %w", protocol.QueryCurrentState, err)
 	}
-	if err := workflow.SetQueryHandler(ctx, QueryAvailableTransitions,
+	if err := workflow.SetQueryHandler(ctx, protocol.QueryAvailableTransitions,
 		func() ([]protocol.PhaseId, error) {
 			return w.AvailableTransitionsQuery(), nil
 		}); err != nil {
-		return nil, fmt.Errorf("EpochWorkflow: failed to register query %q: %w", QueryAvailableTransitions, err)
+		return nil, fmt.Errorf("EpochWorkflow: failed to register query %q: %w", protocol.QueryAvailableTransitions, err)
 	}
-	if err := workflow.SetQueryHandler(ctx, QueryFullState,
-		func() (*types.QueryStateResult, error) {
+	if err := workflow.SetQueryHandler(ctx, protocol.QueryFullState,
+		func() (*protocol.QueryStateResult, error) {
 			return w.FullState()
 		}); err != nil {
-		return nil, fmt.Errorf("EpochWorkflow: failed to register query %q: %w", QueryFullState, err)
+		return nil, fmt.Errorf("EpochWorkflow: failed to register query %q: %w", protocol.QueryFullState, err)
 	}
-	if err := workflow.SetQueryHandler(ctx, QuerySliceProgressState,
-		func() ([]types.SliceProgressSignal, error) {
+	if err := workflow.SetQueryHandler(ctx, protocol.QuerySliceProgressState,
+		func() ([]protocol.SliceProgressSignal, error) {
 			return w.SliceProgressState(), nil
 		}); err != nil {
-		return nil, fmt.Errorf("EpochWorkflow: failed to register query %q: %w", QuerySliceProgressState, err)
+		return nil, fmt.Errorf("EpochWorkflow: failed to register query %q: %w", protocol.QuerySliceProgressState, err)
 	}
-	if err := workflow.SetQueryHandler(ctx, QueryActiveSessions,
-		func() ([]types.RegisterSessionSignal, error) {
+	if err := workflow.SetQueryHandler(ctx, protocol.QueryActiveSessions,
+		func() ([]protocol.RegisterSessionSignal, error) {
 			return w.ActiveSessions(), nil
 		}); err != nil {
-		return nil, fmt.Errorf("EpochWorkflow: failed to register query %q: %w", QueryActiveSessions, err)
+		return nil, fmt.Errorf("EpochWorkflow: failed to register query %q: %w", protocol.QueryActiveSessions, err)
 	}
 
 	return w.Run(ctx, input)

@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/codegen"
-	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -63,7 +62,7 @@ func TestPhaseSpecsNumbering(t *testing.T) {
 
 // TestRoleSpecsCompleteness verifies that every known RoleId has an entry in RoleSpecs.
 func TestRoleSpecsCompleteness(t *testing.T) {
-	for _, roleId := range types.AllRoleIds {
+	for _, roleId := range protocol.AllRoleIds {
 		t.Run(string(roleId), func(t *testing.T) {
 			spec, ok := codegen.RoleSpecs[roleId]
 			require.True(t, ok, "RoleSpecs missing entry for role %q", roleId)
@@ -74,8 +73,8 @@ func TestRoleSpecsCompleteness(t *testing.T) {
 		})
 	}
 
-	assert.Len(t, codegen.RoleSpecs, len(types.AllRoleIds),
-		"RoleSpecs should have exactly %d entries (one per RoleId)", len(types.AllRoleIds))
+	assert.Len(t, codegen.RoleSpecs, len(protocol.AllRoleIds),
+		"RoleSpecs should have exactly %d entries (one per RoleId)", len(protocol.AllRoleIds))
 }
 
 // TestFragmentSpecsCompleteness verifies parity between AllFragmentIds (typed
@@ -109,11 +108,11 @@ func TestFragmentSpecsCompleteness(t *testing.T) {
 
 // TestRoleSpecsBehaviors verifies that roles with expected behaviors have them populated.
 func TestRoleSpecsBehaviors(t *testing.T) {
-	rolesWithBehaviors := []types.RoleId{
-		types.RoleArchitect,
-		types.RoleReviewer,
-		types.RoleSupervisor,
-		types.RoleWorker,
+	rolesWithBehaviors := []protocol.RoleId{
+		protocol.RoleArchitect,
+		protocol.RoleReviewer,
+		protocol.RoleSupervisor,
+		protocol.RoleWorker,
 	}
 	for _, roleId := range rolesWithBehaviors {
 		spec := codegen.RoleSpecs[roleId]
@@ -269,7 +268,7 @@ func TestWorkflowSpecsCompleteness(t *testing.T) {
 
 // TestProcedureStepsCompleteness verifies all roles have entries (even if empty).
 func TestProcedureStepsCompleteness(t *testing.T) {
-	for _, roleId := range types.AllRoleIds {
+	for _, roleId := range protocol.AllRoleIds {
 		_, ok := codegen.ProcedureSteps[roleId]
 		assert.True(t, ok, "ProcedureSteps missing entry for role %q", roleId)
 	}

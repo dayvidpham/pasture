@@ -1,33 +1,31 @@
-package types
+package protocol
 
-import "github.com/dayvidpham/pasture/pkg/protocol"
-
-// PhaseAdvanceSignal is the payload for the advance_phase Temporal signal.
+// PhaseAdvanceSignal is the payload for the advance_phase signal.
 //
-// Sent by pasture-msg (or any authorized caller) to transition the epoch
-// workflow to a new phase. TriggeredBy identifies who or what sent the signal
-// (e.g. a role name or external trigger). ConditionMet describes the
-// transition condition from the protocol table that was satisfied.
+// Sent by any authorized caller to transition the epoch to a new phase.
+// TriggeredBy identifies who or what sent the signal (e.g. a role name or
+// external trigger). ConditionMet describes the transition condition from the
+// protocol table that was satisfied.
 type PhaseAdvanceSignal struct {
-	ToPhase      protocol.PhaseId `json:"toPhase"`
-	TriggeredBy  string           `json:"triggeredBy"`
-	ConditionMet string           `json:"conditionMet"`
+	ToPhase      PhaseId `json:"toPhase"`
+	TriggeredBy  string  `json:"triggeredBy"`
+	ConditionMet string  `json:"conditionMet"`
 }
 
-// ReviewVoteSignal is the payload for the submit_vote Temporal signal.
+// ReviewVoteSignal is the payload for the submit_vote signal.
 //
 // ReviewerId must be the unique identifier for the reviewer agent submitting
-// the vote. Axis and Vote use their wire-format string values for
-// Temporal JSON round-trip safety.
+// the vote. Axis and Vote use their wire-format string values for JSON
+// round-trip safety.
 type ReviewVoteSignal struct {
 	Axis       ReviewAxis `json:"axis"`
 	Vote       VoteType   `json:"vote"`
 	ReviewerId string     `json:"reviewerId"`
 }
 
-// SliceProgressSignal is the payload for the slice_progress Temporal signal.
+// SliceProgressSignal is the payload for the slice_progress signal.
 //
-// Sent by a SliceWorkflow to its parent EpochWorkflow to report per-leaf-task
+// Sent by a slice sub-workflow to its parent epoch to report per-leaf-task
 // progress. Completed is true when the leaf task finishes, false for
 // in-progress heartbeat events.
 type SliceProgressSignal struct {
@@ -37,7 +35,7 @@ type SliceProgressSignal struct {
 	Completed  bool   `json:"completed"`
 }
 
-// RegisterSessionSignal is the payload for the register_session Temporal signal.
+// RegisterSessionSignal is the payload for the register_session signal.
 //
 // Registers a Claude Code session with the active epoch for observability and
 // permission tracking. Duplicate session_id registrations are silently ignored

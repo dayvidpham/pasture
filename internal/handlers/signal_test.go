@@ -7,6 +7,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/config"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/types"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // ─── SignalVote ───────────────────────────────────────────────────────────────
@@ -19,7 +20,7 @@ func TestSignalVote_Success(t *testing.T) {
 	conn := config.ConnectionConfig{}
 	code, err := handlers.SignalVote(
 		context.Background(), conn,
-		"epoch-1", types.AxisCorrectness, types.VoteAccept, "reviewer-1",
+		"epoch-1", protocol.AxisCorrectness, protocol.VoteAccept, "reviewer-1",
 		types.OutputText, factory,
 	)
 
@@ -39,7 +40,7 @@ func TestSignalVote_InvalidAxis(t *testing.T) {
 	conn := config.ConnectionConfig{}
 	code, err := handlers.SignalVote(
 		context.Background(), conn,
-		"epoch-1", types.ReviewAxis("invalid"), types.VoteAccept, "",
+		"epoch-1", protocol.ReviewAxis("invalid"), protocol.VoteAccept, "",
 		types.OutputText, factory,
 	)
 
@@ -59,7 +60,7 @@ func TestSignalVote_InvalidVote(t *testing.T) {
 	conn := config.ConnectionConfig{}
 	code, err := handlers.SignalVote(
 		context.Background(), conn,
-		"epoch-1", types.AxisCorrectness, types.VoteType("MAYBE"), "",
+		"epoch-1", protocol.AxisCorrectness, protocol.VoteType("MAYBE"), "",
 		types.OutputText, factory,
 	)
 
@@ -79,7 +80,7 @@ func TestSignalVote_MissingEpochId(t *testing.T) {
 	conn := config.ConnectionConfig{}
 	code, err := handlers.SignalVote(
 		context.Background(), conn,
-		"", types.AxisCorrectness, types.VoteAccept, "",
+		"", protocol.AxisCorrectness, protocol.VoteAccept, "",
 		types.OutputText, factory,
 	)
 
@@ -99,7 +100,7 @@ func TestSignalVote_WorkflowError(t *testing.T) {
 	conn := config.ConnectionConfig{}
 	code, err := handlers.SignalVote(
 		context.Background(), conn,
-		"epoch-1", types.AxisCorrectness, types.VoteAccept, "",
+		"epoch-1", protocol.AxisCorrectness, protocol.VoteAccept, "",
 		types.OutputText, factory,
 	)
 
@@ -119,7 +120,7 @@ func TestSignalVote_JSONFormat(t *testing.T) {
 	conn := config.ConnectionConfig{}
 	code, err := handlers.SignalVote(
 		context.Background(), conn,
-		"epoch-1", types.AxisTestQuality, types.VoteRevise, "",
+		"epoch-1", protocol.AxisTestQuality, protocol.VoteRevise, "",
 		types.OutputJSON, factory,
 	)
 

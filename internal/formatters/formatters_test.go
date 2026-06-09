@@ -17,13 +17,13 @@ import (
 // ─── Test helpers ────────────────────────────────────────────────────────────
 
 // sampleQueryStateResult builds a QueryStateResult suitable for formatter tests.
-func sampleQueryStateResult() types.QueryStateResult {
+func sampleQueryStateResult() protocol.QueryStateResult {
 	lastErr := "constraint check failed"
 	ts := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
-	return types.QueryStateResult{
+	return protocol.QueryStateResult{
 		CurrentPhase: protocol.PhaseWorkerSlices,
-		CurrentRole:  types.RoleWorker,
-		TransitionHistory: []types.TransitionRecord{
+		CurrentRole:  protocol.RoleWorker,
+		TransitionHistory: []protocol.TransitionRecord{
 			{
 				FromPhase:    protocol.PhaseImplPlan,
 				ToPhase:      protocol.PhaseWorkerSlices,
@@ -33,9 +33,9 @@ func sampleQueryStateResult() types.QueryStateResult {
 				Success:      true,
 			},
 		},
-		Votes: map[types.ReviewAxis]types.VoteType{
-			types.AxisCorrectness: types.VoteAccept,
-			types.AxisTestQuality: types.VoteRevise,
+		Votes: map[protocol.ReviewAxis]protocol.VoteType{
+			protocol.AxisCorrectness: protocol.VoteAccept,
+			protocol.AxisTestQuality: protocol.VoteRevise,
 		},
 		LastError:            &lastErr,
 		AvailableTransitions: []protocol.PhaseId{protocol.PhaseCodeReview},

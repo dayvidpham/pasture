@@ -17,7 +17,6 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -72,7 +71,7 @@ type agentTemplateData struct {
 //   - The role has no entry in RoleSpecs (programming error or invalid role ID).
 //   - The template file cannot be read from the embedded FS.
 //   - Template execution fails (e.g., missing key, rendering error).
-func renderAgent(roleId types.RoleId, figuresDir string) (string, error) {
+func renderAgent(roleId protocol.RoleId, figuresDir string) (string, error) {
 	roleSpec, ok := RoleSpecs[roleId]
 	if !ok {
 		return "", fmt.Errorf(
@@ -161,7 +160,7 @@ func renderAgent(roleId types.RoleId, figuresDir string) (string, error) {
 //   - Template parse/execution failure → error with template context.
 //   - Parent directory creation failure → error with OS error.
 //   - File write failure → error with OS error and path.
-func GenerateAgent(roleId types.RoleId, agentPath string, figuresDir string, opts GenerateOptions) (string, error) {
+func GenerateAgent(roleId protocol.RoleId, agentPath string, figuresDir string, opts GenerateOptions) (string, error) {
 	roleSpec, ok := RoleSpecs[roleId]
 	if !ok {
 		return "", fmt.Errorf(

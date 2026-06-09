@@ -1,55 +1,55 @@
-package types_test
+package protocol_test
 
 import (
 	"testing"
 	"time"
 
-	"github.com/dayvidpham/pasture/internal/types"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // allAcceptVotes returns a Votes map where all 3 axes voted ACCEPT.
-func allAcceptVotes() map[types.ReviewAxis]types.VoteType {
-	return map[types.ReviewAxis]types.VoteType{
-		types.AxisCorrectness: types.VoteAccept,
-		types.AxisTestQuality: types.VoteAccept,
-		types.AxisElegance:    types.VoteAccept,
+func allAcceptVotes() map[protocol.ReviewAxis]protocol.VoteType {
+	return map[protocol.ReviewAxis]protocol.VoteType{
+		protocol.AxisCorrectness: protocol.VoteAccept,
+		protocol.AxisTestQuality: protocol.VoteAccept,
+		protocol.AxisElegance:    protocol.VoteAccept,
 	}
 }
 
 func TestIsCleanExit_FindingCounts(t *testing.T) {
 	tests := []struct {
 		name     string
-		findings map[types.SeverityLevel]int
+		findings map[protocol.SeverityLevel]int
 		want     bool
 	}{
 		{
 			name:     "clean: all zeros",
-			findings: map[types.SeverityLevel]int{types.SeverityBlocker: 0, types.SeverityImportant: 0, types.SeverityMinor: 0},
+			findings: map[protocol.SeverityLevel]int{protocol.SeverityBlocker: 0, protocol.SeverityImportant: 0, protocol.SeverityMinor: 0},
 			want:     true,
 		},
 		{
 			name:     "clean: minors only",
-			findings: map[types.SeverityLevel]int{types.SeverityBlocker: 0, types.SeverityImportant: 0, types.SeverityMinor: 5},
+			findings: map[protocol.SeverityLevel]int{protocol.SeverityBlocker: 0, protocol.SeverityImportant: 0, protocol.SeverityMinor: 5},
 			want:     true,
 		},
 		{
 			name:     "dirty: has blocker",
-			findings: map[types.SeverityLevel]int{types.SeverityBlocker: 1, types.SeverityImportant: 0, types.SeverityMinor: 0},
+			findings: map[protocol.SeverityLevel]int{protocol.SeverityBlocker: 1, protocol.SeverityImportant: 0, protocol.SeverityMinor: 0},
 			want:     false,
 		},
 		{
 			name:     "dirty: has important",
-			findings: map[types.SeverityLevel]int{types.SeverityBlocker: 0, types.SeverityImportant: 2, types.SeverityMinor: 0},
+			findings: map[protocol.SeverityLevel]int{protocol.SeverityBlocker: 0, protocol.SeverityImportant: 2, protocol.SeverityMinor: 0},
 			want:     false,
 		},
 		{
 			name:     "dirty: has both",
-			findings: map[types.SeverityLevel]int{types.SeverityBlocker: 1, types.SeverityImportant: 3, types.SeverityMinor: 7},
+			findings: map[protocol.SeverityLevel]int{protocol.SeverityBlocker: 1, protocol.SeverityImportant: 3, protocol.SeverityMinor: 7},
 			want:     false,
 		},
 		{
 			name:     "clean: empty map",
-			findings: map[types.SeverityLevel]int{},
+			findings: map[protocol.SeverityLevel]int{},
 			want:     true,
 		},
 		{
@@ -61,7 +61,7 @@ func TestIsCleanExit_FindingCounts(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			r := types.ReviewCycleRecord{
+			r := protocol.ReviewCycleRecord{
 				SliceId:       "slice-1",
 				Round:         1,
 				Votes:         allAcceptVotes(), // all ACCEPT — isolate finding counts
@@ -76,15 +76,15 @@ func TestIsCleanExit_FindingCounts(t *testing.T) {
 }
 
 func TestIsCleanExit_VoteConsensus(t *testing.T) {
-	cleanFindings := map[types.SeverityLevel]int{
-		types.SeverityBlocker:   0,
-		types.SeverityImportant: 0,
-		types.SeverityMinor:     0,
+	cleanFindings := map[protocol.SeverityLevel]int{
+		protocol.SeverityBlocker:   0,
+		protocol.SeverityImportant: 0,
+		protocol.SeverityMinor:     0,
 	}
 
 	tests := []struct {
 		name  string
-		votes map[types.ReviewAxis]types.VoteType
+		votes map[protocol.ReviewAxis]protocol.VoteType
 		want  bool
 	}{
 		{
@@ -94,19 +94,19 @@ func TestIsCleanExit_VoteConsensus(t *testing.T) {
 		},
 		{
 			name: "dirty: one REVISE",
-			votes: map[types.ReviewAxis]types.VoteType{
-				types.AxisCorrectness: types.VoteAccept,
-				types.AxisTestQuality: types.VoteRevise,
-				types.AxisElegance:    types.VoteAccept,
+			votes: map[protocol.ReviewAxis]protocol.VoteType{
+				protocol.AxisCorrectness: protocol.VoteAccept,
+				protocol.AxisTestQuality: protocol.VoteRevise,
+				protocol.AxisElegance:    protocol.VoteAccept,
 			},
 			want: false,
 		},
 		{
 			name: "dirty: all REVISE",
-			votes: map[types.ReviewAxis]types.VoteType{
-				types.AxisCorrectness: types.VoteRevise,
-				types.AxisTestQuality: types.VoteRevise,
-				types.AxisElegance:    types.VoteRevise,
+			votes: map[protocol.ReviewAxis]protocol.VoteType{
+				protocol.AxisCorrectness: protocol.VoteRevise,
+				protocol.AxisTestQuality: protocol.VoteRevise,
+				protocol.AxisElegance:    protocol.VoteRevise,
 			},
 			want: false,
 		},
@@ -117,14 +117,14 @@ func TestIsCleanExit_VoteConsensus(t *testing.T) {
 		},
 		{
 			name:  "dirty: empty votes map",
-			votes: map[types.ReviewAxis]types.VoteType{},
+			votes: map[protocol.ReviewAxis]protocol.VoteType{},
 			want:  false,
 		},
 		{
 			name: "dirty: only 2 of 3 axes voted ACCEPT",
-			votes: map[types.ReviewAxis]types.VoteType{
-				types.AxisCorrectness: types.VoteAccept,
-				types.AxisTestQuality: types.VoteAccept,
+			votes: map[protocol.ReviewAxis]protocol.VoteType{
+				protocol.AxisCorrectness: protocol.VoteAccept,
+				protocol.AxisTestQuality: protocol.VoteAccept,
 			},
 			want: false,
 		},
@@ -132,7 +132,7 @@ func TestIsCleanExit_VoteConsensus(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			r := types.ReviewCycleRecord{
+			r := protocol.ReviewCycleRecord{
 				SliceId:       "slice-1",
 				Round:         1,
 				Votes:         tc.votes,
@@ -148,18 +148,18 @@ func TestIsCleanExit_VoteConsensus(t *testing.T) {
 
 func TestReviewCycleRecord_Fields(t *testing.T) {
 	now := time.Now()
-	r := types.ReviewCycleRecord{
+	r := protocol.ReviewCycleRecord{
 		SliceId: "aura-plugins-abc123",
 		Round:   2,
-		Votes: map[types.ReviewAxis]types.VoteType{
-			types.AxisCorrectness: types.VoteAccept,
-			types.AxisTestQuality: types.VoteAccept,
-			types.AxisElegance:    types.VoteRevise,
+		Votes: map[protocol.ReviewAxis]protocol.VoteType{
+			protocol.AxisCorrectness: protocol.VoteAccept,
+			protocol.AxisTestQuality: protocol.VoteAccept,
+			protocol.AxisElegance:    protocol.VoteRevise,
 		},
-		FindingCounts: map[types.SeverityLevel]int{
-			types.SeverityBlocker:   0,
-			types.SeverityImportant: 1,
-			types.SeverityMinor:     3,
+		FindingCounts: map[protocol.SeverityLevel]int{
+			protocol.SeverityBlocker:   0,
+			protocol.SeverityImportant: 1,
+			protocol.SeverityMinor:     3,
 		},
 		Timestamp: now,
 	}
@@ -173,8 +173,8 @@ func TestReviewCycleRecord_Fields(t *testing.T) {
 	if len(r.Votes) != 3 {
 		t.Errorf("Votes count = %d, want 3", len(r.Votes))
 	}
-	if r.Votes[types.AxisElegance] != types.VoteRevise {
-		t.Errorf("Votes[Elegance] = %v, want VoteRevise", r.Votes[types.AxisElegance])
+	if r.Votes[protocol.AxisElegance] != protocol.VoteRevise {
+		t.Errorf("Votes[Elegance] = %v, want VoteRevise", r.Votes[protocol.AxisElegance])
 	}
 	if r.Timestamp != now {
 		t.Errorf("Timestamp = %v, want %v", r.Timestamp, now)
@@ -186,26 +186,26 @@ func TestReviewCycleRecord_Fields(t *testing.T) {
 }
 
 func TestEpochState_ReviewCycles(t *testing.T) {
-	state := types.EpochState{
+	state := protocol.EpochState{
 		EpochId: "test-epoch",
-		ReviewCycles: map[string][]types.ReviewCycleRecord{
+		ReviewCycles: map[string][]protocol.ReviewCycleRecord{
 			"slice-1": {
 				{
 					SliceId: "slice-1", Round: 1,
 					Votes:         allAcceptVotes(),
-					FindingCounts: map[types.SeverityLevel]int{types.SeverityBlocker: 1},
+					FindingCounts: map[protocol.SeverityLevel]int{protocol.SeverityBlocker: 1},
 				},
 				{
 					SliceId: "slice-1", Round: 2,
 					Votes:         allAcceptVotes(),
-					FindingCounts: map[types.SeverityLevel]int{types.SeverityBlocker: 0, types.SeverityImportant: 0},
+					FindingCounts: map[protocol.SeverityLevel]int{protocol.SeverityBlocker: 0, protocol.SeverityImportant: 0},
 				},
 			},
 			"slice-2": {
 				{
 					SliceId: "slice-2", Round: 1,
 					Votes:         allAcceptVotes(),
-					FindingCounts: map[types.SeverityLevel]int{types.SeverityBlocker: 0, types.SeverityImportant: 0},
+					FindingCounts: map[protocol.SeverityLevel]int{protocol.SeverityBlocker: 0, protocol.SeverityImportant: 0},
 				},
 			},
 		},
@@ -222,18 +222,5 @@ func TestEpochState_ReviewCycles(t *testing.T) {
 	}
 	if !state.ReviewCycles["slice-1"][1].IsCleanExit() {
 		t.Error("slice-1 round 2 should be clean")
-	}
-}
-
-func TestSeverityLevel_IsValid(t *testing.T) {
-	valid := []types.SeverityLevel{types.SeverityBlocker, types.SeverityImportant, types.SeverityMinor}
-	for _, s := range valid {
-		if !s.IsValid() {
-			t.Errorf("%q.IsValid() = false, want true", s)
-		}
-	}
-	invalid := types.SeverityLevel("critical")
-	if invalid.IsValid() {
-		t.Errorf("%q.IsValid() = true, want false", invalid)
 	}
 }

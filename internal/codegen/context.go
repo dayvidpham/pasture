@@ -21,7 +21,6 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -41,7 +40,7 @@ type ConstraintContext struct {
 // Populated by GetRoleContext and used by prompt construction to embed
 // role-appropriate constraints, phases, commands, and handoffs.
 type RoleContext struct {
-	Role                 types.RoleId
+	Role                 protocol.RoleId
 	Phases               []protocol.PhaseId
 	Constraints          []ConstraintContext
 	Commands             []string
@@ -120,8 +119,8 @@ var generalConstraints = map[string]bool{
 //   C-actionable-errors       → ALL (see generalConstraints)
 
 // roleConstraints is the hand-authored mapping of RoleId → set of constraint IDs.
-var roleConstraints = map[types.RoleId]map[string]bool{
-	types.RoleEpoch: mergeConstraints(generalConstraints, map[string]bool{
+var roleConstraints = map[protocol.RoleId]map[string]bool{
+	protocol.RoleEpoch: mergeConstraints(generalConstraints, map[string]bool{
 		// Epoch orchestrates all phases — review consensus gating applies to advance
 		"C-review-consensus": true,
 		// Epoch creates handoffs as master orchestrator
@@ -139,7 +138,7 @@ var roleConstraints = map[types.RoleId]map[string]bool{
 		// Epoch orchestrates toward user gates: ALL deferred items raised to the user at the next gate (V2-PROP)
 		"C-uat-feedback-disposition": true,
 	}),
-	types.RoleArchitect: mergeConstraints(generalConstraints, map[string]bool{
+	protocol.RoleArchitect: mergeConstraints(generalConstraints, map[string]bool{
 		// Architect creates proposals → must follow naming convention
 		"C-proposal-naming": true,
 		// Architect runs user interviews (URE/UAT) → must capture verbatim
@@ -149,7 +148,7 @@ var roleConstraints = map[types.RoleId]map[string]bool{
 		// Architect commits code outputs occasionally (ratified docs)
 		"C-agent-commit": true,
 	}),
-	types.RoleReviewer: mergeConstraints(generalConstraints, map[string]bool{
+	protocol.RoleReviewer: mergeConstraints(generalConstraints, map[string]bool{
 		// Reviewer checks consensus in review phases
 		"C-review-consensus": true,
 		// Reviewer must use binary ACCEPT/REVISE
@@ -165,7 +164,7 @@ var roleConstraints = map[types.RoleId]map[string]bool{
 		// Reviewer iterates within the chosen review-effort budget; surfaces on exhaustion
 		"C-review-effort-budget": true,
 	}),
-	types.RoleSupervisor: mergeConstraints(generalConstraints, map[string]bool{
+	protocol.RoleSupervisor: mergeConstraints(generalConstraints, map[string]bool{
 		// Supervisor gates transition on consensus
 		"C-review-consensus": true,
 		// Supervisor must not implement code directly
@@ -197,7 +196,7 @@ var roleConstraints = map[types.RoleId]map[string]bool{
 		// Supervisor adopts leaf tasks into follow-up slices
 		"C-followup-leaf-adoption": true,
 	}),
-	types.RoleWorker: mergeConstraints(generalConstraints, map[string]bool{
+	protocol.RoleWorker: mergeConstraints(generalConstraints, map[string]bool{
 		// Worker must pass quality gates before closing slice
 		"C-worker-gates": true,
 		// Worker commits code with agent-commit
@@ -416,7 +415,7 @@ func buildConstraintContexts(constraintIDs map[string]bool) ([]ConstraintContext
 // Panics if any constraint ID in roleConstraints[role] is not found in
 // ConstraintSpecs. This is a programming error (stale mapping) that must be
 // fixed in the source, not handled at runtime.
-func GetRoleContext(role types.RoleId) RoleContext {
+func GetRoleContext(role protocol.RoleId) RoleContext {
 	// Invert PhaseSpecs[phase].OwnerRoles to find phases owned by this role.
 	var ownedPhases []protocol.PhaseId
 	for phaseId, spec := range PhaseSpecs {
@@ -491,7 +490,7 @@ func GetRoleContext(role types.RoleId) RoleContext {
 
 	// Review axes only for reviewer role; empty for all others.
 	var reviewAxes []ReviewAxisSpec
-	if role == types.RoleReviewer {
+	if role == protocol.RoleReviewer {
 		for _, axis := range ReviewAxisSpecs {
 			reviewAxes = append(reviewAxes, axis)
 		}
@@ -590,8 +589,8 @@ func GetPhaseContext(phase protocol.PhaseId) PhaseContext {
 //
 // This inversion is used by S5 schema generation to emit role-ref attributes
 // into schema.xml for each constraint element.
-func ConstraintToRoleRefs() map[string][]types.RoleId {
-	result := make(map[string][]types.RoleId)
+func ConstraintToRoleRefs() map[string][]protocol.RoleId {
+	result := make(map[string][]protocol.RoleId)
 	for role, ids := range roleConstraints {
 		for cid := range ids {
 			result[cid] = append(result[cid], role)

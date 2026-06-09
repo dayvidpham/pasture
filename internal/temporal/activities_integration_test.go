@@ -54,7 +54,6 @@ import (
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/temporal"
-	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -157,7 +156,7 @@ func TestActivities_RecordTransition_TaskTrackerPath(t *testing.T) {
 	}
 	env := newTestActivityEnv(t, acts)
 
-	rec := types.TransitionRecord{
+	rec := protocol.TransitionRecord{
 		FromPhase:    protocol.PhaseRequest,
 		ToPhase:      protocol.PhaseElicit,
 		Timestamp:    time.Now().UTC(),
@@ -206,7 +205,7 @@ func TestActivities_RecordTransition_AttributesToTransitionGate(t *testing.T) {
 	}
 	env := newTestActivityEnv(t, acts)
 
-	rec := types.TransitionRecord{
+	rec := protocol.TransitionRecord{
 		FromPhase:   protocol.PhaseRequest,
 		ToPhase:     protocol.PhaseElicit,
 		Timestamp:   time.Now().UTC(),
@@ -434,7 +433,7 @@ func TestActivities_RecordTransition_RejectsMalformedEpochId(t *testing.T) {
 	}
 	env := newTestActivityEnv(t, acts)
 
-	rec := types.TransitionRecord{
+	rec := protocol.TransitionRecord{
 		FromPhase:    protocol.PhaseRequest,
 		ToPhase:      protocol.PhaseElicit,
 		Timestamp:    time.Now().UTC(),

@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dayvidpham/pasture/internal/handlers"
-	"github.com/dayvidpham/pasture/internal/types"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // signalCmd is the "signal" subcommand group.
@@ -41,8 +41,8 @@ recommended for audit trail completeness.`,
 		reviewerId, _ := cmd.Flags().GetString("reviewer-id")
 
 		// Normalize vote to uppercase (D13: normalize at CLI boundary).
-		vote := types.VoteType(strings.ToUpper(voteStr))
-		axis := types.ReviewAxis(axisStr)
+		vote := protocol.VoteType(strings.ToUpper(voteStr))
+		axis := protocol.ReviewAxis(axisStr)
 
 		code, err := handlers.SignalVote(
 			context.Background(),

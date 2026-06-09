@@ -1,10 +1,6 @@
-package types
+package protocol
 
-import (
-	"time"
-
-	"github.com/dayvidpham/pasture/pkg/protocol"
-)
+import "time"
 
 // TransitionRecord is an immutable audit entry for a single phase transition.
 //
@@ -12,24 +8,24 @@ import (
 // (e.g. constraint violation). All programmatic success/failure checks MUST
 // use this boolean field, not any string prefix in ConditionMet.
 type TransitionRecord struct {
-	FromPhase    protocol.PhaseId `json:"fromPhase"`
-	ToPhase      protocol.PhaseId `json:"toPhase"`
-	Timestamp    time.Time        `json:"timestamp"`
-	TriggeredBy  string           `json:"triggeredBy"`
-	ConditionMet string           `json:"conditionMet"`
-	Success      bool             `json:"success"`
+	FromPhase    PhaseId   `json:"fromPhase"`
+	ToPhase      PhaseId   `json:"toPhase"`
+	Timestamp    time.Time `json:"timestamp"`
+	TriggeredBy  string    `json:"triggeredBy"`
+	ConditionMet string    `json:"conditionMet"`
+	Success      bool      `json:"success"`
 }
 
 // EpochState holds the runtime state of a single epoch workflow.
 //
 // Tracks the current phase, completed phases, review votes, blocker count,
-// current role, and full transition history. Mutable — updated by signal
-// handlers within EpochWorkflow.
+// current role, and full transition history. Mutable — updated by the durable
+// engine on each transition; serialized into the projection that queries read.
 type EpochState struct {
 	EpochId           string                  `json:"epochId"`
-	CurrentPhase      protocol.PhaseId        `json:"currentPhase"`
+	CurrentPhase      PhaseId                 `json:"currentPhase"`
 	CurrentRole       RoleId                  `json:"currentRole"`
-	CompletedPhases   []protocol.PhaseId      `json:"completedPhases"`
+	CompletedPhases   []PhaseId               `json:"completedPhases"`
 	ReviewVotes       map[ReviewAxis]VoteType `json:"reviewVotes"`
 	BlockerCount      int                     `json:"blockerCount"`
 	TransitionHistory []TransitionRecord      `json:"transitionHistory"`
@@ -47,7 +43,7 @@ type EpochState struct {
 // severity. This enables the supervisor to enforce the max-3-cycles constraint
 // and determine whether a clean exit was reached via IsCleanExit().
 type ReviewCycleRecord struct {
-	// SliceId is the Beads task ID of the slice being reviewed.
+	// SliceId is the task ID of the slice being reviewed.
 	SliceId string `json:"sliceId"`
 	// Round is the 1-based review cycle number for this slice (max 3).
 	Round int `json:"round"`
@@ -61,7 +57,7 @@ type ReviewCycleRecord struct {
 
 // IsCleanExit returns true if the review cycle is clean: all 3 axes voted
 // ACCEPT AND there are 0 BLOCKERs and 0 IMPORTANTs.
-// This is the single authoritative check for the Ride the Wave workflow.
+// This is the single authoritative check for the review-wave workflow.
 func (r ReviewCycleRecord) IsCleanExit() bool {
 	for _, axis := range AllReviewAxes {
 		if r.Votes[axis] != VoteAccept {
@@ -72,16 +68,16 @@ func (r ReviewCycleRecord) IsCleanExit() bool {
 }
 
 // QueryStateResult is a serialization-safe snapshot of epoch state returned
-// by the full_state Temporal query. Designed for CLI consumers (pasture-msg).
+// by the full-state query. Designed for CLI consumers.
 //
 // AvailableTransitions lists the target PhaseIds reachable from the current
 // phase given the current vote/blocker state.
 type QueryStateResult struct {
-	CurrentPhase         protocol.PhaseId        `json:"currentPhase"`
+	CurrentPhase         PhaseId                 `json:"currentPhase"`
 	CurrentRole          RoleId                  `json:"currentRole"`
 	TransitionHistory    []TransitionRecord      `json:"transitionHistory"`
 	Votes                map[ReviewAxis]VoteType `json:"votes"`
 	LastError            *string                 `json:"lastError,omitempty"`
-	AvailableTransitions []protocol.PhaseId      `json:"availableTransitions"`
+	AvailableTransitions []PhaseId               `json:"availableTransitions"`
 	ActiveSessionCount   int                     `json:"activeSessionCount"`
 }

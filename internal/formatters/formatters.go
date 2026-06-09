@@ -16,6 +16,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/types"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // epochStateJSON is the JSON wire representation of a QueryStateResult.
@@ -43,7 +44,7 @@ type transitionRecordJSON struct {
 //
 // JSON mode: json.MarshalIndent with camelCase keys.
 // Text mode: human-readable multi-line with labeled sections.
-func FormatEpochState(result types.QueryStateResult, format types.OutputFormat) (string, error) {
+func FormatEpochState(result protocol.QueryStateResult, format types.OutputFormat) (string, error) {
 	switch format {
 	case types.OutputJSON:
 		history := make([]transitionRecordJSON, len(result.TransitionHistory))

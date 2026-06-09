@@ -17,7 +17,6 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/pmezard/go-difflib/difflib"
 	"gopkg.in/yaml.v3"
@@ -174,7 +173,7 @@ func buildPhaseSlug() map[protocol.PhaseId]string {
 
 // commandsForRole returns all CommandSpec entries whose RoleRef matches roleId,
 // sorted by Name for deterministic output.
-func commandsForRole(roleId types.RoleId) []CommandSpec {
+func commandsForRole(roleId protocol.RoleId) []CommandSpec {
 	var result []CommandSpec
 	for _, cmd := range CommandSpecs {
 		if cmd.RoleRef == roleId {
@@ -189,7 +188,7 @@ func commandsForRole(roleId types.RoleId) []CommandSpec {
 
 // subSkillsForRole returns skill invocation names for a role's sub-commands.
 // Converts pasture:a:b → pasture:a-b. Skips the main role command (e.g. pasture:worker).
-func subSkillsForRole(roleId types.RoleId) []string {
+func subSkillsForRole(roleId protocol.RoleId) []string {
 	mainCmd := fmt.Sprintf("pasture:%s", roleId)
 	var result []string
 	for _, cmd := range CommandSpecs {
@@ -233,7 +232,7 @@ func constraintsFromRoleContext(ctx RoleContext) []ConstraintSpec {
 
 // handoffsForRole returns HandoffSpec entries where the role is source or target,
 // sorted by ID.
-func handoffsForRole(roleId types.RoleId) []HandoffSpec {
+func handoffsForRole(roleId protocol.RoleId) []HandoffSpec {
 	var result []HandoffSpec
 	for _, h := range HandoffSpecs {
 		if h.SourceRole == roleId || h.TargetRole == roleId {
@@ -330,7 +329,7 @@ func loadFigureContent(figureId, figuresDir string) (string, error) {
 // associated with the given role. Figures without content (not loadable)
 // are included with an empty Content field (non-fatal for generation).
 // figuresDir is the path to the directory containing figure YAML files.
-func loadFiguresForRole(roleId types.RoleId, figuresDir string) []FigureSpec {
+func loadFiguresForRole(roleId protocol.RoleId, figuresDir string) []FigureSpec {
 	var result []FigureSpec
 	for _, fig := range FigureSpecs {
 		for _, ref := range fig.RoleRefs {
@@ -406,7 +405,7 @@ func unifiedDiff(fromFile, toFile, oldContent, newContent string) string {
 // including both the header and body content inside BEGIN/END markers.
 // This is the single-pass replacement for the former renderHeader + renderBody
 // two-pass pipeline.
-func renderSkill(roleId types.RoleId, figuresDir string) (string, error) {
+func renderSkill(roleId protocol.RoleId, figuresDir string) (string, error) {
 	roleSpec, ok := RoleSpecs[roleId]
 	if !ok {
 		return "", fmt.Errorf(
@@ -589,7 +588,7 @@ func renderSubSkill(commandId, figuresDir string) (string, error) {
 //
 // Returns a *MarkerError if skillPath is missing the BEGIN/END marker pair (and
 // Init is false), or if the markers are malformed.
-func GenerateSkill(roleId types.RoleId, skillPath string, figuresDir string, opts GenerateOptions) (string, error) {
+func GenerateSkill(roleId protocol.RoleId, skillPath string, figuresDir string, opts GenerateOptions) (string, error) {
 	// Read existing file.
 	oldContent, err := os.ReadFile(skillPath)
 	if err != nil {

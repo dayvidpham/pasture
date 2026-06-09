@@ -18,8 +18,8 @@ import (
 	"github.com/dayvidpham/pasture/internal/config"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/formatters"
-	"github.com/dayvidpham/pasture/internal/temporal"
 	"github.com/dayvidpham/pasture/internal/types"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // QueryState queries the full epoch state from the running EpochWorkflow.
@@ -45,7 +45,7 @@ func QueryState(
 	}
 	defer c.Close()
 
-	result, err := queryWorkflow[types.QueryStateResult](ctx, c, epochId, temporal.QueryFullState)
+	result, err := queryWorkflow[protocol.QueryStateResult](ctx, c, epochId, protocol.QueryFullState)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}

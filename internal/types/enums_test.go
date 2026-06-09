@@ -6,86 +6,6 @@ import (
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
-// ─── VoteType ────────────────────────────────────────────────────────────────
-
-func TestVoteType_IsValid(t *testing.T) {
-	t.Parallel()
-
-	valid := []types.VoteType{types.VoteAccept, types.VoteRevise}
-	for _, v := range valid {
-		v := v
-		t.Run("valid_"+string(v), func(t *testing.T) {
-			t.Parallel()
-			if !v.IsValid() {
-				t.Errorf("VoteType(%q).IsValid() = false, want true", v)
-			}
-		})
-	}
-
-	invalid := []types.VoteType{"", "accept", "ACCEPT_ALL", "revise"}
-	for _, v := range invalid {
-		v := v
-		t.Run("invalid_"+string(v), func(t *testing.T) {
-			t.Parallel()
-			if v.IsValid() {
-				t.Errorf("VoteType(%q).IsValid() = true, want false", v)
-			}
-		})
-	}
-}
-
-func TestAllVoteTypes_Completeness(t *testing.T) {
-	t.Parallel()
-	if got := len(types.AllVoteTypes); got != 2 {
-		t.Errorf("len(AllVoteTypes) = %d, want 2", got)
-	}
-	for _, v := range types.AllVoteTypes {
-		if !v.IsValid() {
-			t.Errorf("AllVoteTypes contains invalid VoteType %q", v)
-		}
-	}
-}
-
-// ─── ReviewAxis ──────────────────────────────────────────────────────────────
-
-func TestReviewAxis_IsValid(t *testing.T) {
-	t.Parallel()
-
-	valid := []types.ReviewAxis{types.AxisCorrectness, types.AxisTestQuality, types.AxisElegance}
-	for _, a := range valid {
-		a := a
-		t.Run("valid_"+string(a), func(t *testing.T) {
-			t.Parallel()
-			if !a.IsValid() {
-				t.Errorf("ReviewAxis(%q).IsValid() = false, want true", a)
-			}
-		})
-	}
-
-	invalid := []types.ReviewAxis{"", "A", "B", "C", "Correctness", "TEST_QUALITY"}
-	for _, a := range invalid {
-		a := a
-		t.Run("invalid_"+string(a), func(t *testing.T) {
-			t.Parallel()
-			if a.IsValid() {
-				t.Errorf("ReviewAxis(%q).IsValid() = true, want false", a)
-			}
-		})
-	}
-}
-
-func TestAllReviewAxes_Completeness(t *testing.T) {
-	t.Parallel()
-	if got := len(types.AllReviewAxes); got != 3 {
-		t.Errorf("len(AllReviewAxes) = %d, want 3", got)
-	}
-	for _, a := range types.AllReviewAxes {
-		if !a.IsValid() {
-			t.Errorf("AllReviewAxes contains invalid ReviewAxis %q", a)
-		}
-	}
-}
-
 // ─── OutputFormat ────────────────────────────────────────────────────────────
 
 func TestOutputFormat_IsValid(t *testing.T) {
@@ -242,52 +162,6 @@ func TestAllDomains_Completeness(t *testing.T) {
 	for _, d := range types.AllDomains {
 		if !d.IsValid() {
 			t.Errorf("AllDomains contains invalid Domain %q", d)
-		}
-	}
-}
-
-// ─── RoleId ──────────────────────────────────────────────────────────────────
-
-func TestRoleId_IsValid(t *testing.T) {
-	t.Parallel()
-
-	valid := []types.RoleId{
-		types.RoleEpoch,
-		types.RoleArchitect,
-		types.RoleReviewer,
-		types.RoleSupervisor,
-		types.RoleWorker,
-	}
-	for _, r := range valid {
-		r := r
-		t.Run("valid_"+string(r), func(t *testing.T) {
-			t.Parallel()
-			if !r.IsValid() {
-				t.Errorf("RoleId(%q).IsValid() = false, want true", r)
-			}
-		})
-	}
-
-	invalid := []types.RoleId{"", "EPOCH", "Architect", "lead", "manager"}
-	for _, r := range invalid {
-		r := r
-		t.Run("invalid_"+string(r), func(t *testing.T) {
-			t.Parallel()
-			if r.IsValid() {
-				t.Errorf("RoleId(%q).IsValid() = true, want false", r)
-			}
-		})
-	}
-}
-
-func TestAllRoleIds_Completeness(t *testing.T) {
-	t.Parallel()
-	if got := len(types.AllRoleIds); got != 5 {
-		t.Errorf("len(AllRoleIds) = %d, want 5", got)
-	}
-	for _, r := range types.AllRoleIds {
-		if !r.IsValid() {
-			t.Errorf("AllRoleIds contains invalid RoleId %q", r)
 		}
 	}
 }

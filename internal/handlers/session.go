@@ -7,8 +7,8 @@ import (
 	"github.com/dayvidpham/pasture/internal/config"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/formatters"
-	"github.com/dayvidpham/pasture/internal/temporal"
 	"github.com/dayvidpham/pasture/internal/types"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // SessionRegister sends a RegisterSessionSignal to the EpochWorkflow.
@@ -74,7 +74,7 @@ func SessionRegister(
 	}
 	defer c.Close()
 
-	payload := types.RegisterSessionSignal{
+	payload := protocol.RegisterSessionSignal{
 		EpochId:      epochId,
 		SessionId:    sessionId,
 		Role:         role,
@@ -82,7 +82,7 @@ func SessionRegister(
 		Model:        model,
 	}
 
-	if err := c.SignalWorkflow(ctx, epochId, "", temporal.SignalRegisterSession, payload); err != nil {
+	if err := c.SignalWorkflow(ctx, epochId, "", protocol.SignalRegisterSession, payload); err != nil {
 		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Couldn't register the session with epoch %q.", epochId),

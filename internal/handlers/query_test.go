@@ -18,7 +18,7 @@ import (
 
 // newQueryOKFactory returns a TemporalClientFactory that returns a mock client
 // which answers the full_state query with the provided result.
-func newQueryOKFactory(result types.QueryStateResult) handlers.TemporalClientFactory {
+func newQueryOKFactory(result protocol.QueryStateResult) handlers.TemporalClientFactory {
 	return func(_ context.Context, _ config.ConnectionConfig) (handlers.TemporalClient, error) {
 		return &mockClient{queryResult: result}, nil
 	}
@@ -39,9 +39,9 @@ func (e *connErr) Error() string { return e.msg }
 // ─── QueryState tests ─────────────────────────────────────────────────────────
 
 func TestQueryState_Success(t *testing.T) {
-	result := types.QueryStateResult{
+	result := protocol.QueryStateResult{
 		CurrentPhase:       protocol.PhaseWorkerSlices,
-		CurrentRole:        types.RoleWorker,
+		CurrentRole:        protocol.RoleWorker,
 		ActiveSessionCount: 2,
 	}
 
@@ -96,9 +96,9 @@ func TestQueryState_WorkflowNotFound(t *testing.T) {
 }
 
 func TestQueryState_JSONFormat(t *testing.T) {
-	result := types.QueryStateResult{
+	result := protocol.QueryStateResult{
 		CurrentPhase: protocol.PhaseRequest,
-		CurrentRole:  types.RoleEpoch,
+		CurrentRole:  protocol.RoleEpoch,
 	}
 
 	factory := newQueryOKFactory(result)
@@ -117,7 +117,7 @@ func TestQueryState_JSONFormat(t *testing.T) {
 
 // mockClient implements handlers.TemporalClient for testing.
 type mockClient struct {
-	queryResult     types.QueryStateResult
+	queryResult     protocol.QueryStateResult
 	queryErr        error
 	signalErr       error
 	executeWorkflow mockWorkflowRun

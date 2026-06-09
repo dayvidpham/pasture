@@ -27,7 +27,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dayvidpham/pasture/internal/types"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // ─── Error types ──────────────────────────────────────────────────────────────
@@ -190,7 +190,7 @@ func validateGlobalIdsFrom(
 	bodySpecs map[string]SkillBody,
 	fragmentSpecs map[FragmentId]SharedFragment,
 	allFragmentIds []FragmentId,
-	roleSpecs map[types.RoleId]RoleSpec,
+	roleSpecs map[protocol.RoleId]RoleSpec,
 	handoffSpecs map[string]HandoffSpec,
 	commandSpecs map[string]CommandSpec,
 ) error {
@@ -405,9 +405,9 @@ func sortedFragmentIds(m map[FragmentId]SharedFragment) []FragmentId {
 	return ids
 }
 
-// sortedRoleIds returns sorted RoleId values from a map[types.RoleId]RoleSpec.
-func sortedRoleIds(m map[types.RoleId]RoleSpec) []types.RoleId {
-	ids := make([]types.RoleId, 0, len(m))
+// sortedRoleIds returns sorted RoleId values from a map[protocol.RoleId]RoleSpec.
+func sortedRoleIds(m map[protocol.RoleId]RoleSpec) []protocol.RoleId {
+	ids := make([]protocol.RoleId, 0, len(m))
 	for k := range m {
 		ids = append(ids, k)
 	}
