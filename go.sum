@@ -10,8 +10,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dayvidpham/bestiary v0.1.0 h1:5ovdxMlRgssn3+oJCZqjbhlhX6aQwbYFf981LbMAhII=
 github.com/dayvidpham/bestiary v0.1.0/go.mod h1:Z2/Ax6PmmBqhHomuLDjvf+JQBo0K7TFyrQN7pOCOpKs=
-github.com/dayvidpham/provenance v0.0.0-20260426043732-93ef75b5b735 h1:r7i1Ba6n/MtYeY1LZiNzPXSaHtj/K8/6lYB1Uu32MSg=
-github.com/dayvidpham/provenance v0.0.0-20260426043732-93ef75b5b735/go.mod h1:I2VvA5RMcg+/Audz7Kg0Haio8emNe87wVK20RT2xW1g=
+github.com/dayvidpham/provenance v0.0.2 h1:/yMGw9YCdBZT0SnyEM9XskL1Qj2pB5P4686algdgSGI=
+github.com/dayvidpham/provenance v0.0.2/go.mod h1:I2VvA5RMcg+/Audz7Kg0Haio8emNe87wVK20RT2xW1g=
 github.com/dominikbraun/graph v0.23.0 h1:TdZB4pPqCLFxYhdyMFb1TBdFxp8XLcJfTTBQucVPgCo=
 github.com/dominikbraun/graph v0.23.0/go.mod h1:yOjYyogZLY1LSG9E33JWZJiq5k83Qy2C6POAuiViluc=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=

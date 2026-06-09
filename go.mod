@@ -3,7 +3,7 @@ module github.com/dayvidpham/pasture
 go 1.25.0
 
 require (
-	github.com/dayvidpham/provenance v0.0.0-20260426043732-93ef75b5b735
+	github.com/dayvidpham/provenance v0.0.2
 	github.com/google/uuid v1.6.0
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/spf13/cobra v1.9.1

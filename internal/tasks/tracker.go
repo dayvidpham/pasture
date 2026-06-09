@@ -231,6 +231,9 @@ func (t *trackerImpl) SoftwareAgent(id provenance.AgentID) (provenance.SoftwareA
 func (t *trackerImpl) StartActivity(agentId provenance.AgentID, phase provenance.Phase, stage provenance.Stage, notes string) (provenance.Activity, error) {
 	return t.prov.StartActivity(agentId, phase, stage, notes)
 }
+func (t *trackerImpl) StartActivityWithID(id provenance.ActivityID, agentId provenance.AgentID, phase provenance.Phase, stage provenance.Stage, notes string) (provenance.Activity, error) {
+	return t.prov.StartActivityWithID(id, agentId, phase, stage, notes)
+}
 func (t *trackerImpl) EndActivity(id provenance.ActivityID) (provenance.Activity, error) {
 	return t.prov.EndActivity(id)
 }
