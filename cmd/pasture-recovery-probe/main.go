@@ -23,6 +23,7 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	"github.com/dayvidpham/pasture/internal/engine"
+	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -51,9 +52,23 @@ func main() {
 	// The stall phase is the mid-epoch transition the test crashes in.
 	const stallPhase = protocol.PhasePropose
 
+	// Open the unified tracker so the engine records BOTH forensic tiers — the
+	// audit_events row (via the audit methods) and the PROV-O activity (via the
+	// provenance methods). The crash window (the stall below) lands after BOTH
+	// writes, so resume exercises exactly-once on the activities tier too, not
+	// just audit_events.
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "OpenTaskTracker:", err)
+		os.Exit(1)
+	}
+	defer tracker.Close()
+
 	e, err := engine.New(context.Background(), engine.Config{
 		DBPath:             dbPath,
 		ApplicationVersion: pinnedAppVersion,
+		Trail:              tracker,
+		Tracker:            tracker,
 		OnTransition: func(_ context.Context, _ string, rec *protocol.TransitionRecord, _ string) error {
 			// Fires AFTER the forensic row is written, BEFORE the step returns.
 			// The stall lives here (process-local), NOT in the persisted workflow

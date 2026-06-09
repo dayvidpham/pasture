@@ -146,16 +146,40 @@ func phaseRowCounts(t *testing.T, dbPath string) map[string]int {
 	return counts
 }
 
+// activityCount returns the total number of PROV-O activity rows in the file.
+func activityCount(t *testing.T, dbPath string) int {
+	t.Helper()
+	db, err := sql.Open("sqlite", dbconn.SharedDSN(dbPath))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM activities`).Scan(&n); err != nil {
+		t.Fatalf("count activities: %v", err)
+	}
+	return n
+}
+
 // assertExactlyOnce checks that each completed transition produced exactly one
-// engine-emitted row despite the killed step replaying on resume.
+// engine-emitted row in BOTH forensic tiers despite the killed step replaying on
+// resume — audit_events (via dedup_key) and activities (via ON CONFLICT(id)).
+// This completes the "both tables" exactly-once recovery guarantee (the
+// activities half was deferred from the audit-only S1 recovery test).
 func assertExactlyOnce(t *testing.T, dbPath string) {
 	t.Helper()
 	counts := phaseRowCounts(t, dbPath)
 	if counts["elicit"] != 1 {
-		t.Errorf("elicit row count = %d, want 1", counts["elicit"])
+		t.Errorf("elicit audit row count = %d, want 1", counts["elicit"])
 	}
 	if counts["propose"] != 1 {
-		t.Errorf("propose row count = %d, want 1 (the killed+replayed step must not duplicate)", counts["propose"])
+		t.Errorf("propose audit row count = %d, want 1 (the killed+replayed step must not duplicate)", counts["propose"])
+	}
+	// Activities tier: the epoch drove 2 transitions (elicit, propose), each
+	// recording one activity; the killed propose step replayed on resume but the
+	// deterministic id collapsed it, so the total is exactly 2.
+	if got := activityCount(t, dbPath); got != 2 {
+		t.Errorf("activities count = %d, want 2 (one per transition; replay must not duplicate)", got)
 	}
 }
 
