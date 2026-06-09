@@ -33,10 +33,13 @@
 //   - v3 → v4: EpochContext backfill from audit_events.epoch_id into
 //     context_edges; audit_events.epoch_id column dropped (S4, landed —
 //     migrate_v3_v4.go).
+//   - v4 → v5: additive dedup_key TEXT column on audit_events + a partial
+//     unique index over its non-NULL values, for engine exactly-once
+//     (migrate_v4_v5.go).
 //
-// This binary tops out at v4. Future slices (e.g. v4 → v5) extend the
-// dispatch table in migrationSteps() below by appending a new step and
-// bumping MaxKnownSchemaVersion.
+// This binary tops out at v5. Future migrations extend the dispatch table in
+// migrationSteps() below by appending a new step and bumping
+// MaxKnownSchemaVersion.
 package audit
 
 import (
@@ -78,7 +81,7 @@ const busyRetryMaxDelay = 2 * time.Second
 // version does my binary support?" reads this constant. The §11 Scenario 5
 // newer-schema rejection error reports this value as the "supported
 // version" — bumping it here automatically updates the assertion.
-const MaxKnownSchemaVersion = 4
+const MaxKnownSchemaVersion = 5
 
 // migrationStep applies a single forward migration. Each step receives an
 // open transaction (already holding the write lock via BEGIN IMMEDIATE)
@@ -111,6 +114,7 @@ func migrationSteps() []migrationStep {
 		{fromVersion: 1, toVersion: 2, apply: migrateV1toV2},
 		{fromVersion: 2, toVersion: 3, apply: migrateV2toV3},
 		{fromVersion: 3, toVersion: 4, apply: migrateV3toV4Step},
+		{fromVersion: 4, toVersion: 5, apply: migrateV4toV5Step},
 	}
 }
 

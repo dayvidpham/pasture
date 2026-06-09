@@ -282,14 +282,25 @@ func (s *SqliteAuditTrail) RecordEventReturningId(_ context.Context, event proto
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// dedup_key is NULL for ordinary callers (the partial unique index ignores
+	// NULLs, so every legacy write inserts a fresh row as before). The durable
+	// engine supplies a deterministic key; the ON CONFLICT clause targets the
+	// partial index (matched by repeating its WHERE predicate) so a replayed
+	// emission is a silent no-op instead of a duplicate row.
+	var dedupKey any
+	if event.DedupKey != "" {
+		dedupKey = event.DedupKey
+	}
 	res, err := tx.Exec(
-		`INSERT INTO audit_events (phase, agent_id, event_type, payload, timestamp)
-		 VALUES (?, ?, ?, ?, ?)`,
+		`INSERT INTO audit_events (phase, agent_id, event_type, payload, timestamp, dedup_key)
+		 VALUES (?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(dedup_key) WHERE dedup_key IS NOT NULL DO NOTHING`,
 		string(event.Phase),
 		agentId,
 		string(event.EventType),
 		string(payload),
 		event.Timestamp.UTC().UnixNano(),
+		dedupKey,
 	)
 	if err != nil {
 		return 0, &pasterrors.StructuredError{
@@ -309,6 +320,52 @@ func (s *SqliteAuditTrail) RecordEventReturningId(_ context.Context, event proto
 				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
 				"3. Retry the operation once the file is healthy and unlocked.",
 			Cause: err,
+		}
+	}
+
+	// Exactly-once dedup path: when the engine supplied a dedup_key and the
+	// ON CONFLICT clause skipped the insert (a replay), no new row was written.
+	// LastInsertId would then report a stale rowid, so recover the canonical
+	// id from the already-present row by its dedup_key and commit without
+	// re-attaching context (the original write already linked the epoch).
+	if dedupKey != nil {
+		if affected, aerr := res.RowsAffected(); aerr == nil && affected == 0 {
+			var existingId int64
+			if serr := tx.QueryRow(
+				`SELECT id FROM audit_events WHERE dedup_key = ?`, event.DedupKey,
+			).Scan(&existingId); serr != nil {
+				return 0, &pasterrors.StructuredError{
+					Category: pasterrors.CategoryStorage,
+					What: fmt.Sprintf(
+						"An audit event was deduplicated but its existing row couldn't be found (epoch %q, event type %q).",
+						event.EpochId, event.EventType,
+					),
+					Why: "The durable engine re-emitted an event whose deduplication key already exists, so the\n" +
+						"insert was skipped, but the lookup for the original row then failed.",
+					Where:  "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
+					Impact: "The replayed emission can't return the original row id, so the caller can't correlate it.",
+					Fix: "1. Confirm the partial unique index exists (added by the version 4 → 5 upgrade):\n" +
+						"     sqlite3 <path-to-pasture.db> '.indexes audit_events'\n" +
+						"2. Re-run the migration if it is missing:\n" +
+						"     pasture migrate",
+					Cause: serr,
+				}
+			}
+			if err := tx.Commit(); err != nil {
+				return 0, &pasterrors.StructuredError{
+					Category: pasterrors.CategoryStorage,
+					What: fmt.Sprintf(
+						"Couldn't finalize a deduplicated audit event (epoch %q, event type %q).",
+						event.EpochId, event.EventType,
+					),
+					Why:    "The database refused to commit the read-only transaction that resolved the existing row.",
+					Where:  "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
+					Impact: "The original row is intact; only this replayed call could not complete cleanly.",
+					Fix:    "Retry the operation once the database is healthy.",
+					Cause:  err,
+				}
+			}
+			return existingId, nil
 		}
 	}
 

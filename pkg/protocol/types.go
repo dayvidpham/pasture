@@ -286,6 +286,13 @@ func (e EventType) IsValid() bool {
 
 // AuditEvent is a generic audit trail event emitted by epoch workflows and
 // activities. JSON tags use camelCase to match Python aura-protocol output.
+//
+// DedupKey is the OPTIONAL deterministic deduplication key (see DedupKey).
+// When set, the SQLite trail writes it into the dedup_key column with an
+// ON CONFLICT … DO NOTHING upsert, so a crash-replay of the emitting durable
+// step records the row exactly once. Ordinary (non-engine) callers leave it
+// empty; the column is then NULL and the partial unique index ignores the row,
+// preserving the legacy insert-always behaviour.
 type AuditEvent struct {
 	EpochId   string         `json:"epochId"`
 	Phase     PhaseId        `json:"phase"`
@@ -293,4 +300,5 @@ type AuditEvent struct {
 	EventType EventType      `json:"eventType"`
 	Payload   map[string]any `json:"payload"`
 	Timestamp time.Time      `json:"timestamp"`
+	DedupKey  string         `json:"dedupKey,omitempty"`
 }
