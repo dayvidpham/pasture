@@ -101,6 +101,32 @@ introspects `sqlite_master` after `Launch()`.
 | **Provenance** | zombiezen | `tasks, context_edges, agents, agents_software, agent_kinds, activities, session_entries, comments, labels` |
 | **Audit / pasture** | modernc | `audit_events, audit_schema_meta` |
 
+> **The DBOS table set is empirical, not a magic number.** The list above is the
+> v0.16.0 set as documented; a Phase-8 reading of the migrations counted **10** created
+> on the SQLite path (`workflow_events_history` may be Postgres-only / created lazily).
+> The reserved set is the substrate's contract — it can shift across DBOS versions and
+> backends. The boundary test therefore enumerates whatever DBOS created by
+> introspecting `sqlite_master` after `Launch()` and asserts that set is **disjoint**
+> from the Provenance and Audit sets — it never asserts a hardcoded count.
+>
+> **Observed v0.16.0 set (modernc/SQLite path).** Derived empirically by the
+> boundary test (`internal/engine/boundary_test.go`) as the tables that appear
+> only after `Launch()`, minus the one pasture-owned table the engine adds
+> (`epoch_state_projection`). On the SQLite path, DBOS v0.16.0 creates **11**
+> tables — `workflow_events_history` *is* created here, contrary to the Phase-8
+> migration-reading guess of 10:
+>
+> ```
+> application_versions   dbos_migrations        event_dispatch_kv
+> notifications          operation_outputs      queues
+> streams                workflow_events        workflow_events_history
+> workflow_schedules     workflow_status
+> ```
+>
+> This is recorded as the observation as of v0.16.0, not as an assertion: the
+> test pins the *boundary* (disjoint from + co-present with the pasture/Provenance
+> sets), so a future DBOS version that shifts this set does not break it.
+
 **Two-driver reality:** `pasture.db` is opened by **two different pure-Go SQLite
 libraries** — pasture/DBOS use `modernc.org/sqlite` (standard `database/sql`),
 Provenance uses `zombiezen.com/go/sqlite` (its own API). Both are CGO-free. They
@@ -190,11 +216,45 @@ key on the same connection as the write** — never a cross-connection transacti
 | Tier | Mechanism | Guarantee |
 |------|-----------|-----------|
 | Orchestration state (phases, votes) | DBOS's own tables (`workflow_status`, `operation_outputs`) | exactly-once, native |
-| `audit_events` (pasture, modernc) | `step_seq` column + `UNIQUE(epoch_id, phase, event_type, step_seq)` + `ON CONFLICT DO NOTHING` | exactly-once |
-| `activities` (Provenance, zombiezen) | `StartActivityIdempotent` + deterministic UUIDv5 id + `ON CONFLICT(id) DO NOTHING` | exactly-once |
+| `audit_events` (pasture, modernc) | new `dedup_key TEXT` column + **partial unique index** `… WHERE dedup_key IS NOT NULL` holding the **same deterministic UUIDv5**; `INSERT … ON CONFLICT(dedup_key) DO NOTHING` | exactly-once |
+| `activities` (Provenance, zombiezen) | `StartActivityWithID` + deterministic UUIDv5 id (reuses existing TEXT PK) + `ON CONFLICT(id) DO NOTHING` | exactly-once |
 
 Each is a single idempotent statement on its own connection, so a crash-replay yields
-exactly one row in every tier.
+exactly one row in every tier. **Both** forensic tables key off the **identical**
+deterministic UUIDv5, produced by one pinned function in `pkg/protocol`:
+`DedupKey(epochID, phase, kind, stepSeq) → UUIDv5(ns, "<epoch_id>/<phase>/<kind>/<step_seq>")`.
+Each tier passes its own discriminator as `kind` (audit → `event_type`, activities →
+`activity_kind`); they differ only in **storage** (activities reuses its TEXT PK; audit
+adds the sidecar `dedup_key` column because its PK is an autoincrement INTEGER). This
+holds exactly-once **only** under the invariant *at most one forensic emission of a given
+kind per DBOS step* — two same-kind rows in one step would collide on the key; S1/S4 pin
+and test that invariant. See the amendment note below.
+
+> **Amendment (2026-06-09, Phase-8 IMPL_PLAN; hardened after a 3-reviewer re-review).** The `audit_events` mechanism was
+> originally specified as `UNIQUE(epoch_id, phase, event_type, step_seq)`. That key is
+> **not constructible on today's schema**: `audit_events.epoch_id` was dropped in the
+> v3→v4 table-rebuild (`internal/audit/migrate_v3_v4.go::rebuildAuditEventsWithoutEpochId`; the epoch lives in
+> `context_edges` as `EpochContext` edges, joined by `event_id`). `step_seq` alone
+> (`dbos.GetStepID`) resets per-workflow, so a tuple without an epoch scope would
+> false-dedup across epochs. Resolution: add a `dedup_key TEXT` column holding the
+> **same UUIDv5** the `activities` tier already uses (the epoch is hashed *into* the
+> id, so no `epoch_id` column is needed, and v4's table shape is untouched).
+> **Realization:** land it as a versioned **v4→v5 migration** (`migrate_v4_v5.go`:
+> `ALTER TABLE audit_events ADD COLUMN dedup_key TEXT` then
+> `CREATE UNIQUE INDEX idx_audit_events_dedup ON audit_events(dedup_key) WHERE dedup_key IS NOT NULL`;
+> bump `MaxKnownSchemaVersion=5`) — **not** a column `UNIQUE` constraint, which SQLite's
+> `ALTER TABLE ADD COLUMN` forbids and which would force a full table rebuild. The
+> partial index is self-documenting (uniqueness applies only to engine-emitted rows).
+> `dedup_key` is `NULL`
+> for legacy/non-engine rows; the partial index ignores NULLs, so the column
+> is additive and back-compatible.
+
+> **Why UUIDv5, not v7** (restated here because it's the crux): v7 embeds random bits,
+> so a crash-replay of the emitting step would mint a *different* id and insert a
+> duplicate. v5 is a pure SHA-1 of (namespace, name) — identical inputs always yield
+> the identical id, so the replay collapses onto the same row via `ON CONFLICT`. The
+> normal, non-replayed creation paths (`StartActivity`, task/agent ids) keep v7; only
+> the durable-engine emission path uses v5.
 
 ## 8. Explicitly NOT in scope (this epoch)
 
@@ -215,7 +275,7 @@ recording. This is the one ordering dependency the design introduces, traded for
 permanently simpler runtime (no sidecar, symmetric idempotency across both forensic
 tables).
 ```
-github.com/dayvidpham/provenance  (add StartActivityIdempotent + test → release)
+github.com/dayvidpham/provenance  (add StartActivityWithID + test → release)
         ▲ go.mod bump
 github.com/dayvidpham/pasture     (engine consumes the new method)
 ```
