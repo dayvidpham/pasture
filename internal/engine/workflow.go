@@ -84,35 +84,54 @@ func (e *Engine) EpochWorkflow(ctx dbos.DBOSContext, in EpochInput) (protocol.Ep
 			continue
 		}
 
-		snapshot := *sm.State()
-		dedupKey := protocol.DedupKey(in.EpochId, string(rec.ToPhase), string(protocol.EventPhaseTransition), stepSeq)
-		if _, err := dbos.RunAsStep(ctx, func(c context.Context) (struct{}, error) {
-			if err := WriteProjection(c, e.db, &snapshot, time.Now().UTC().UnixNano()); err != nil {
-				return struct{}{}, err
-			}
-			if err := e.emitTransition(c, in.EpochId, triggeredBy, rec, dedupKey); err != nil {
-				return struct{}{}, err
-			}
-			// OnTransition runs AFTER the side-effect writes but BEFORE the step
-			// returns — the deterministic partial-step-failure window. A later
-			// slice records activities here; the recovery test stalls here so a
-			// kill -9 lands after the audit row is written but before DBOS records
-			// the step complete, so the resumed run re-executes the step and the
-			// dedup key collapses the second write onto the same row. Because the
-			// hook is process-local (not part of the persisted workflow input), a
-			// recovering process supplies its own non-stalling hook and completes.
-			if e.cfg.OnTransition != nil {
-				if err := e.cfg.OnTransition(c, in.EpochId, rec, stepSeq); err != nil {
-					return struct{}{}, err
-				}
-			}
-			return struct{}{}, nil
-		}); err != nil {
+		if err := e.commitTransition(ctx, in.EpochId, triggeredBy, rec, sm.State(), stepSeq); err != nil {
 			return *sm.State(), err
 		}
 	}
 
 	return *sm.State(), nil
+}
+
+// commitTransition performs the durable I/O for one successful transition in a
+// SINGLE step: persist the EpochState projection, record exactly one forensic
+// audit row (idempotent via the deterministic dedup key), then invoke the
+// OnTransition seam. Both the scripted EpochWorkflow and the signal-driven
+// EpochControlWorkflow funnel every successful transition through here, so the
+// projection, the forensic emit, and the activity hook stay identical across
+// the two drivers.
+//
+// stepSeq is the DBOS step ordinal captured by the caller (deterministic across
+// replay); the dedup key folds it so a crash-replay of this step collapses onto
+// the same rows. The OnTransition hook runs AFTER the side-effect writes but
+// BEFORE the step returns — the deterministic partial-step-failure window the
+// recovery test exercises (a kill -9 there lands after the audit row is written
+// but before DBOS records the step complete, so the resumed run re-executes and
+// the dedup key collapses the retry onto one row). The hook is process-local,
+// so a recovering process supplies its own non-stalling hook and completes.
+func (e *Engine) commitTransition(
+	ctx dbos.DBOSContext,
+	epochId, role string,
+	rec *protocol.TransitionRecord,
+	state *protocol.EpochState,
+	stepSeq string,
+) error {
+	snapshot := *state
+	dedupKey := protocol.DedupKey(epochId, string(rec.ToPhase), string(protocol.EventPhaseTransition), stepSeq)
+	_, err := dbos.RunAsStep(ctx, func(c context.Context) (struct{}, error) {
+		if err := WriteProjection(c, e.db, &snapshot, time.Now().UTC().UnixNano()); err != nil {
+			return struct{}{}, err
+		}
+		if err := e.emitTransition(c, epochId, role, rec, dedupKey); err != nil {
+			return struct{}{}, err
+		}
+		if e.cfg.OnTransition != nil {
+			if err := e.cfg.OnTransition(c, epochId, rec, stepSeq); err != nil {
+				return struct{}{}, err
+			}
+		}
+		return struct{}{}, nil
+	})
+	return err
 }
 
 // emitTransition records exactly one forensic audit row for a completed

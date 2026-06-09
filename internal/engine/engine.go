@@ -247,11 +247,13 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		}
 	}
 
-	// Register the durable workflow before Launch so the recovery sweep can
-	// resume in-flight epochs. The method value is stable across builds, which
+	// Register the durable workflows before Launch so the recovery sweep can
+	// resume in-flight epochs. The method values are stable across builds, which
 	// (with the pinned ApplicationVersion) is what makes recovery survive
-	// rebuilds.
+	// rebuilds. EpochWorkflow drives a scripted plan; EpochControlWorkflow is the
+	// signal-driven driver the lifecycle/signal CLI verbs start and send to.
 	dbos.RegisterWorkflow(dbosCtx, e.EpochWorkflow)
+	dbos.RegisterWorkflow(dbosCtx, e.EpochControlWorkflow)
 
 	return e, nil
 }
