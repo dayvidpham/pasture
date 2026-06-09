@@ -165,7 +165,7 @@ func activityCount(t *testing.T, dbPath string) int {
 // engine-emitted row in BOTH forensic tiers despite the killed step replaying on
 // resume — audit_events (via dedup_key) and activities (via ON CONFLICT(id)).
 // This completes the "both tables" exactly-once recovery guarantee (the
-// activities half was deferred from the audit-only S1 recovery test).
+// activities half was deferred from the earlier audit-only recovery test).
 func assertExactlyOnce(t *testing.T, dbPath string) {
 	t.Helper()
 	counts := phaseRowCounts(t, dbPath)

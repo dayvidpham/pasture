@@ -162,7 +162,7 @@ func findEngineAgentID(db *sql.DB) (provenance.AgentID, bool, error) {
 	var idStr string
 	err := db.QueryRow(
 		`SELECT a.id FROM agents a JOIN agents_software s ON a.id = s.agent_id
-		 WHERE a.kind_id = 2 AND s.name = ? LIMIT 1`,
+		 WHERE s.name = ? LIMIT 1`,
 		engineAgentName,
 	).Scan(&idStr)
 	switch {
