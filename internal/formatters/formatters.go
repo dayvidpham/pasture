@@ -124,6 +124,86 @@ func FormatEpochState(result protocol.QueryStateResult, format types.OutputForma
 	}
 }
 
+// FormatEpochQuery renders the slice of a QueryStateResult selected by query.
+//
+// full_state renders the complete view (via FormatEpochState); current_state
+// renders only the phase + role; available_transitions renders only the
+// reachable transitions. JSON keys stay camelCase and consistent with
+// FormatEpochState so consumers parse one shape.
+func FormatEpochQuery(result protocol.QueryStateResult, query protocol.QueryName, format types.OutputFormat) (string, error) {
+	switch query {
+	case protocol.QueryFullState:
+		return FormatEpochState(result, format)
+
+	case protocol.QueryCurrentState:
+		switch format {
+		case types.OutputJSON:
+			b, err := json.MarshalIndent(struct {
+				CurrentPhase string `json:"currentPhase"`
+				CurrentRole  string `json:"currentRole"`
+			}{string(result.CurrentPhase), string(result.CurrentRole)}, "", "  ")
+			if err != nil {
+				return "", err
+			}
+			return string(b), nil
+		case types.OutputText:
+			return fmt.Sprintf("Phase: %s\nRole:  %s", result.CurrentPhase, result.CurrentRole), nil
+		default:
+			return "", unrecognizedFormat(format)
+		}
+
+	case protocol.QueryAvailableTransitions:
+		avail := make([]string, len(result.AvailableTransitions))
+		for i, p := range result.AvailableTransitions {
+			avail[i] = string(p)
+		}
+		switch format {
+		case types.OutputJSON:
+			b, err := json.MarshalIndent(struct {
+				AvailableTransitions []string `json:"availableTransitions"`
+			}{avail}, "", "  ")
+			if err != nil {
+				return "", err
+			}
+			return string(b), nil
+		case types.OutputText:
+			if len(avail) == 0 {
+				return "Available Transitions: (none)", nil
+			}
+			var lines []string
+			lines = append(lines, "Available Transitions:")
+			for _, p := range avail {
+				lines = append(lines, fmt.Sprintf("  -> %s", p))
+			}
+			return strings.Join(lines, "\n"), nil
+		default:
+			return "", unrecognizedFormat(format)
+		}
+
+	default:
+		return "", &errors.StructuredError{
+			Category: errors.CategoryValidation,
+			What:     fmt.Sprintf("%q is not a state query this formatter renders.", query),
+			Why:      "FormatEpochQuery renders current_state, available_transitions, and full_state.",
+			Where:    "Formatting an epoch query (internal/formatters/formatters.go in formatters.FormatEpochQuery).",
+			Impact:   "The query result can't be rendered.",
+			Fix:      "Pass current_state, available_transitions, or full_state.",
+		}
+	}
+}
+
+// unrecognizedFormat builds the standard actionable error for an unknown
+// OutputFormat, shared by the per-query renderers above.
+func unrecognizedFormat(format types.OutputFormat) error {
+	return &errors.StructuredError{
+		Category: errors.CategoryValidation,
+		What:     fmt.Sprintf("unrecognized output format %q", format),
+		Why:      "OutputFormat must be one of: json, text",
+		Impact:   "Output cannot be rendered",
+		Fix:      "Pass --format json or --format text (or omit for default text)",
+	}
+}
+
 // hookRecordJSON is the JSON wire representation of a recorded hook event.
 // camelCase keys match the package convention. Metadata fields use omitempty
 // so keys absent from the recording (e.g. branch on a detached HEAD, or
