@@ -183,6 +183,120 @@ func TestEngine_BlockerGateAtCodeReview(t *testing.T) {
 	}
 }
 
+// dedupKeysForPhase returns the engine-emitted (dedup_key NOT NULL) keys for a
+// given phase across all epochs in the file, read through the shared handle.
+func dedupKeysForPhase(t *testing.T, e *engine.Engine, phase string) []string {
+	t.Helper()
+	rows, err := e.DB().Query(
+		`SELECT dedup_key FROM audit_events WHERE phase = ? AND dedup_key IS NOT NULL ORDER BY id`, phase)
+	if err != nil {
+		t.Fatalf("query dedup keys for phase %q: %v", phase, err)
+	}
+	defer rows.Close()
+	var keys []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func allDedupKeys(t *testing.T, e *engine.Engine) []string {
+	t.Helper()
+	rows, err := e.DB().Query(`SELECT dedup_key FROM audit_events WHERE dedup_key IS NOT NULL ORDER BY id`)
+	if err != nil {
+		t.Fatalf("query all dedup keys: %v", err)
+	}
+	defer rows.Close()
+	var keys []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func distinct(keys []string) int {
+	set := map[string]struct{}{}
+	for _, k := range keys {
+		set[k] = struct{}{}
+	}
+	return len(set)
+}
+
+// TestEngine_CyclicBounce_DistinctKeys exercises the headline dedup property at
+// the ENGINE level (not the pure DedupKey hash): a p4→p3→p4 bounce re-enters the
+// review phase, and each re-entry MUST produce a distinct forensic row/key. This
+// is what the step_seq basis buys — a re-entered phase is a new durable step, so
+// its key differs from the first entry's. It also verifies same-kind multiplicity
+// (every PhaseTransition across distinct steps yields a distinct key).
+func TestEngine_CyclicBounce_DistinctKeys(t *testing.T) {
+	e := newEngine(t)
+	const epochId = "epoch-bounce"
+
+	// request → elicit → propose → review → (bounce) propose → review → plan-review
+	plan := []engine.AdvanceStep{
+		{ToPhase: protocol.PhaseElicit, TriggeredBy: "epoch"},
+		{ToPhase: protocol.PhasePropose, TriggeredBy: "architect"},
+		{ToPhase: protocol.PhaseReview, TriggeredBy: "architect"}, // review entry #1
+		{ToPhase: protocol.PhasePropose, TriggeredBy: "reviewer"}, // bounce back (ungated)
+		{ToPhase: protocol.PhaseReview, TriggeredBy: "architect"}, // review entry #2
+		{ToPhase: protocol.PhasePlanReview, TriggeredBy: "reviewer", Votes: allAccept()},
+	}
+	final := runEpoch(t, e, epochId, plan)
+	if final.CurrentPhase != protocol.PhasePlanReview {
+		t.Fatalf("final phase = %q, want %q", final.CurrentPhase, protocol.PhasePlanReview)
+	}
+
+	// B-IMP-1: review was entered twice → exactly 2 forensic rows, distinct keys.
+	reviewKeys := dedupKeysForPhase(t, e, "review")
+	if len(reviewKeys) != 2 {
+		t.Errorf("review dedup rows = %d, want 2 (one per re-entry)", len(reviewKeys))
+	}
+	if distinct(reviewKeys) != len(reviewKeys) {
+		t.Errorf("review re-entries collapsed to one row: keys=%v — cyclic false-dedup", reviewKeys)
+	}
+
+	// B-IMP-2: every PhaseTransition across distinct steps is a distinct row.
+	all := allDedupKeys(t, e)
+	if len(all) != 6 {
+		t.Errorf("total engine-emitted rows = %d, want 6 (one per transition)", len(all))
+	}
+	if distinct(all) != len(all) {
+		t.Errorf("same-kind multiplicity violated: %d rows but only %d distinct keys", len(all), distinct(all))
+	}
+}
+
+// TestEngine_CrossEpochDistinctKeys (B-MIN-1): two epochs driven to the same
+// step produce distinct rows — the epoch id is hashed into the key, so no
+// cross-epoch false dedup even at identical (phase, step_seq).
+func TestEngine_CrossEpochDistinctKeys(t *testing.T) {
+	e := newEngine(t)
+
+	shortPlan := []engine.AdvanceStep{
+		{ToPhase: protocol.PhaseElicit, TriggeredBy: "epoch"},
+		{ToPhase: protocol.PhasePropose, TriggeredBy: "architect"},
+	}
+	runEpoch(t, e, "epoch-x", shortPlan)
+	runEpoch(t, e, "epoch-y", shortPlan)
+
+	// Each epoch emits a 'propose' transition at the same step_seq; the two keys
+	// must differ.
+	proposeKeys := dedupKeysForPhase(t, e, "propose")
+	if len(proposeKeys) != 2 {
+		t.Fatalf("propose dedup rows = %d, want 2 (one per epoch)", len(proposeKeys))
+	}
+	if proposeKeys[0] == proposeKeys[1] {
+		t.Errorf("two epochs at the same (phase, step) produced the same key %q — cross-epoch false dedup", proposeKeys[0])
+	}
+}
+
 func TestEngine_ReadProjectionUnknownEpoch(t *testing.T) {
 	e := newEngine(t)
 	proj, err := e.ReadProjection("never-ran")

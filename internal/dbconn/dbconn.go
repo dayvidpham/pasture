@@ -50,7 +50,7 @@ func OpenSharedDB(path string) (*sql.DB, error) {
 				"Tried to open %q with the WAL/busy-timeout connection string the engine and DBOS share, but it failed.",
 				path,
 			),
-			Where:  "Opening the engine database handle (internal/engine/dsn.go in engine.OpenSharedDB).",
+			Where:  "Opening the shared database handle (internal/dbconn/dbconn.go in dbconn.OpenSharedDB).",
 			Impact: "The durable engine can't start, so epochs can't run or resume until the handle opens.",
 			Fix: fmt.Sprintf("1. Confirm the database file and its folder are writable:\n"+
 				"     ls -l %q\n"+

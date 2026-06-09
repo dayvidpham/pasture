@@ -204,11 +204,20 @@ Existing `pasture task` verbs (`create`, `show`, `update`, `close`, `list`,
 |---------|---------|
 | `github.com/spf13/cobra` | CLI framework |
 | `github.com/spf13/viper` | Configuration loading (TOML/YAML/env) |
-| `go.temporal.io/sdk` | Temporal workflow orchestration |
-| `modernc.org/sqlite` | Pure-Go SQLite (audit trail, local state) |
+| `go.temporal.io/sdk` | Temporal workflow orchestration (being replaced by DBOS) |
+| `github.com/dbos-inc/dbos-transact-golang` | Durable-execution substrate (DBOS Transact, SQLite backend) |
+| `modernc.org/sqlite` | Pure-Go SQLite (audit trail, local state, DBOS system DB) |
 | `golang.org/x/term` | Cross-platform terminal/isatty detection (sync-versions non-TTY guard) |
 
 No other external dependencies may be added without supervisor approval.
+
+**Temporary `replace` directive (`go.mod`).** While both the Temporal SDK and
+DBOS are in the module graph, a `replace` forces the post-split
+`google.golang.org/genproto` monolith: the Temporal SDK's `grpc-middleware`
+pins the pre-split monolith, which collides with the split `genproto/googleapis`
+modules that `grpc-gateway` (a DBOS dependency) requires. Remove the `replace`
+once the Temporal SDK leaves the module graph. Tracking:
+<https://github.com/dayvidpham/pasture/issues/13>.
 
 ## Go Conventions
 

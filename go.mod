@@ -66,4 +66,10 @@ require (
 	zombiezen.com/go/sqlite v1.4.2 // indirect
 )
 
+// TEMPORARY bridge: the Temporal SDK's grpc-middleware pins the pre-split
+// google.golang.org/genproto monolith, which collides with the split
+// genproto/googleapis modules that grpc-gateway (pulled in by DBOS) needs.
+// Forcing the post-split monolith resolves the ambiguous import. Remove this
+// replace once the Temporal SDK is removed from the module graph.
+// See https://github.com/dayvidpham/pasture/issues/13
 replace google.golang.org/genproto v0.0.0-20200423170343-7949de9c1215 => google.golang.org/genproto v0.0.0-20241223144023-3abc09e42ca8
