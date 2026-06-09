@@ -94,16 +94,6 @@ func QueryEpoch(in QueryEpochInput, format types.OutputFormat) (int, error) {
 // handle. The caller owns the handle's lifecycle.
 func NewDBProjectionReader(db *sql.DB) ProjectionReader { return dbProjectionReader{db: db} }
 
-// stateQuerySupported reports whether query is one the projection serves
-// directly from the EpochState view (phase/role/votes/transitions/history).
-func stateQuerySupported(query protocol.QueryName) bool {
-	switch query {
-	case protocol.QueryCurrentState, protocol.QueryAvailableTransitions, protocol.QueryFullState:
-		return true
-	}
-	return false
-}
-
 // QueryStateFromProjection builds the serialization-safe QueryStateResult from a
 // projected EpochState, recomputing AvailableTransitions from the current
 // vote/blocker state via the FSM. The projection stores raw state; the derived
@@ -138,13 +128,13 @@ func epochNotFoundError(epochId, caller string) error {
 	}
 }
 
-// QueryEpochState answers a projection-backed epoch query.
-//
-// All three supported queries read the same projection and the same recomputed
-// QueryStateResult; they differ only in which slice of it is rendered:
+// QueryEpochState answers a projection-backed epoch query. Every query reads the
+// same EpochState projection; each renders a different slice of it:
 //   - QueryCurrentState         → current phase + role.
 //   - QueryAvailableTransitions → the transitions reachable from the current phase.
 //   - QueryFullState            → the complete state view.
+//   - QueryActiveSessions       → the registered sessions.
+//   - QuerySliceProgressState   → the reported slice-progress events.
 //
 // Exit codes: 0=success, 1=validation error, 3=workflow error (epoch not found).
 func QueryEpochState(
@@ -165,15 +155,15 @@ func QueryEpochState(
 		}
 		return pasterrors.ExitCode(err), err
 	}
-	if !stateQuerySupported(query) {
+	if !query.IsValid() {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("%q is not an epoch-state query.", query),
-			Why: "This reader answers the state queries that the EpochState projection\n" +
-				"carries directly.",
-			Where:  "Querying epoch state (internal/handlers/projection.go in handlers.QueryEpochState).",
-			Impact: "The query can't run because its name isn't one this command serves.",
-			Fix:    "1. Use one of: current_state, available_transitions, full_state.",
+			What:     fmt.Sprintf("%q is not a recognized epoch query.", query),
+			Why:      "The query name must be one of the known epoch-state queries.",
+			Where:    "Querying epoch state (internal/handlers/projection.go in handlers.QueryEpochState).",
+			Impact:   "The query can't run because its name isn't recognized.",
+			Fix: "1. Use one of: current_state, available_transitions, full_state,\n" +
+				"   active_sessions, slice_progress_state.",
 		}
 		return pasterrors.ExitCode(err), err
 	}
@@ -187,12 +177,22 @@ func QueryEpochState(
 		return pasterrors.ExitCode(e), e
 	}
 
-	result := QueryStateFromProjection(state)
-
-	out, fmtErr := formatters.FormatEpochQuery(result, query, format)
+	out, fmtErr := renderEpochQuery(state, query, format)
 	if fmtErr != nil {
 		return pasterrors.ExitCode(fmtErr), fmtErr
 	}
 	fmt.Println(out)
 	return 0, nil
+}
+
+// renderEpochQuery selects and renders the slice of state the query asks for.
+func renderEpochQuery(state *protocol.EpochState, query protocol.QueryName, format types.OutputFormat) (string, error) {
+	switch query {
+	case protocol.QueryActiveSessions:
+		return formatters.FormatActiveSessions(state.ActiveSessions, format)
+	case protocol.QuerySliceProgressState:
+		return formatters.FormatSliceProgressState(state.SliceProgress, format)
+	default:
+		return formatters.FormatEpochQuery(QueryStateFromProjection(state), query, format)
+	}
 }

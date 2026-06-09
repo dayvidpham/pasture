@@ -104,6 +104,20 @@ func TestCLI_QueryCurrentAndTransitions(t *testing.T) {
 	}
 }
 
+// TestCLI_QuerySessionsAndSliceProgress checks the two detail verbs are wired
+// and read the projection (empty lists render cleanly with a clean exit).
+func TestCLI_QuerySessionsAndSliceProgress(t *testing.T) {
+	const epochId = "demo--query-detail"
+	db := seedEpochDB(t, epochId)
+
+	for _, verb := range []string{"sessions", "slice-progress"} {
+		out := runCLI(t, "--db", db, "--format", "json", "query", verb, "--epoch-id", epochId)
+		if out.exitCode != 0 {
+			t.Fatalf("query %s exit %d; stdout=%s stderr=%s", verb, out.exitCode, out.stdout, out.stderr)
+		}
+	}
+}
+
 // TestCLI_QueryUnknownEpoch covers the fresh-database path: opening a db on
 // which no epoch ran must report a not-found (exit 3), not a raw SQL error.
 func TestCLI_QueryUnknownEpoch(t *testing.T) {

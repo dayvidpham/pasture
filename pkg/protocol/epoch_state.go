@@ -34,6 +34,14 @@ type EpochState struct {
 	ReviewCycles       map[string][]ReviewCycleRecord `json:"reviewCycles,omitempty"`
 	LastError          *string                        `json:"lastError,omitempty"`
 	ActiveSessionCount int                            `json:"activeSessionCount"`
+	// ActiveSessions holds the sessions registered with this epoch, in
+	// registration order, de-duplicated by SessionId. ActiveSessionCount stays
+	// equal to len(ActiveSessions); both are maintained together. omitempty so
+	// epochs driven without the signal-driven control loop serialize unchanged.
+	ActiveSessions []RegisterSessionSignal `json:"activeSessions,omitempty"`
+	// SliceProgress holds the slice-progress events reported to this epoch, in
+	// arrival order. omitempty for backward-compatible serialization.
+	SliceProgress []SliceProgressSignal `json:"sliceProgress,omitempty"`
 }
 
 // ReviewCycleRecord tracks the state of a single review-fix cycle for one slice.

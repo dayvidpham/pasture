@@ -192,6 +192,99 @@ func FormatEpochQuery(result protocol.QueryStateResult, query protocol.QueryName
 	}
 }
 
+// activeSessionJSON is the JSON wire representation of a registered session.
+type activeSessionJSON struct {
+	EpochId      string `json:"epochId,omitempty"`
+	SessionId    string `json:"sessionId"`
+	Role         string `json:"role"`
+	ModelHarness string `json:"modelHarness,omitempty"`
+	Model        string `json:"model,omitempty"`
+}
+
+// FormatActiveSessions renders the sessions registered with an epoch (the
+// active_sessions query). JSON mode emits an array; text mode lists one session
+// per line, or a "(none)" marker when empty.
+func FormatActiveSessions(sessions []protocol.RegisterSessionSignal, format types.OutputFormat) (string, error) {
+	switch format {
+	case types.OutputJSON:
+		out := make([]activeSessionJSON, len(sessions))
+		for i, s := range sessions {
+			out[i] = activeSessionJSON{
+				EpochId:      s.EpochId,
+				SessionId:    s.SessionId,
+				Role:         s.Role,
+				ModelHarness: s.ModelHarness,
+				Model:        s.Model,
+			}
+		}
+		b, err := json.MarshalIndent(struct {
+			ActiveSessions []activeSessionJSON `json:"activeSessions"`
+		}{out}, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	case types.OutputText:
+		if len(sessions) == 0 {
+			return "Active Sessions: (none)", nil
+		}
+		var lines []string
+		lines = append(lines, fmt.Sprintf("Active Sessions: %d", len(sessions)))
+		for _, s := range sessions {
+			lines = append(lines, fmt.Sprintf("  %s  role=%s  model=%s", s.SessionId, s.Role, s.Model))
+		}
+		return strings.Join(lines, "\n"), nil
+	default:
+		return "", unrecognizedFormat(format)
+	}
+}
+
+// sliceProgressJSON is the JSON wire representation of a slice-progress event.
+type sliceProgressJSON struct {
+	SliceId    string `json:"sliceId"`
+	LeafTaskId string `json:"leafTaskId"`
+	StageName  string `json:"stageName"`
+	Completed  bool   `json:"completed"`
+}
+
+// FormatSliceProgressState renders the slice-progress events reported to an
+// epoch (the slice_progress_state query). JSON mode emits an array; text mode
+// lists one event per line, or a "(none)" marker when empty.
+func FormatSliceProgressState(events []protocol.SliceProgressSignal, format types.OutputFormat) (string, error) {
+	switch format {
+	case types.OutputJSON:
+		out := make([]sliceProgressJSON, len(events))
+		for i, p := range events {
+			out[i] = sliceProgressJSON{
+				SliceId:    p.SliceId,
+				LeafTaskId: p.LeafTaskId,
+				StageName:  p.StageName,
+				Completed:  p.Completed,
+			}
+		}
+		b, err := json.MarshalIndent(struct {
+			SliceProgress []sliceProgressJSON `json:"sliceProgress"`
+		}{out}, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	case types.OutputText:
+		if len(events) == 0 {
+			return "Slice Progress: (none)", nil
+		}
+		var lines []string
+		lines = append(lines, fmt.Sprintf("Slice Progress: %d", len(events)))
+		for _, p := range events {
+			lines = append(lines, fmt.Sprintf("  slice=%s leaf=%s stage=%s completed=%t",
+				p.SliceId, p.LeafTaskId, p.StageName, p.Completed))
+		}
+		return strings.Join(lines, "\n"), nil
+	default:
+		return "", unrecognizedFormat(format)
+	}
+}
+
 // unrecognizedFormat builds the standard actionable error for an unknown
 // OutputFormat, shared by the per-query renderers above.
 func unrecognizedFormat(format types.OutputFormat) error {

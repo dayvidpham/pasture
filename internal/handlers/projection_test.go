@@ -102,6 +102,66 @@ func TestQueryEpochState_SupportedQueries(t *testing.T) {
 	}
 }
 
+// seedProjection launches an engine and writes a projection row carrying the
+// given sessions + slice-progress, so the session/progress query paths can be
+// exercised without driving the signal loop. Returns the engine (a reader).
+func seedProjection(t *testing.T, epochId string, sessions []protocol.RegisterSessionSignal, progress []protocol.SliceProgressSignal) *engine.Engine {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	e, err := engine.New(context.Background(), engine.Config{DBPath: dbPath, ApplicationVersion: "test-v1"})
+	if err != nil {
+		t.Fatalf("engine.New: %v", err)
+	}
+	if err := e.Launch(); err != nil {
+		t.Fatalf("engine.Launch: %v", err)
+	}
+	t.Cleanup(func() { e.Shutdown(5 * time.Second) })
+
+	state := &protocol.EpochState{
+		EpochId:            epochId,
+		CurrentPhase:       protocol.PhaseWorkerSlices,
+		CurrentRole:        protocol.RoleSupervisor,
+		ActiveSessions:     sessions,
+		ActiveSessionCount: len(sessions),
+		SliceProgress:      progress,
+	}
+	if err := engine.WriteProjection(context.Background(), e.DB(), state, time.Now().UnixNano()); err != nil {
+		t.Fatalf("WriteProjection: %v", err)
+	}
+	return e
+}
+
+func TestQueryEpochState_ActiveSessions(t *testing.T) {
+	const epochId = "proj--sessions"
+	e := seedProjection(t, epochId, []protocol.RegisterSessionSignal{
+		{EpochId: epochId, SessionId: "s1", Role: "worker"},
+		{EpochId: epochId, SessionId: "s2", Role: "reviewer"},
+	}, nil)
+
+	code, err := handlers.QueryEpochState(e, epochId, protocol.QueryActiveSessions, types.OutputText)
+	if err != nil {
+		t.Fatalf("active_sessions query err = %v", err)
+	}
+	if code != 0 {
+		t.Errorf("exit = %d, want 0", code)
+	}
+}
+
+func TestQueryEpochState_SliceProgress(t *testing.T) {
+	const epochId = "proj--progress"
+	e := seedProjection(t, epochId, nil, []protocol.SliceProgressSignal{
+		{SliceId: "slice-1", LeafTaskId: "leaf-1", StageName: "impl", Completed: true},
+	})
+
+	code, err := handlers.QueryEpochState(e, epochId, protocol.QuerySliceProgressState, types.OutputText)
+	if err != nil {
+		t.Fatalf("slice_progress_state query err = %v", err)
+	}
+	if code != 0 {
+		t.Errorf("exit = %d, want 0", code)
+	}
+}
+
 func TestQueryEpochState_UnknownEpoch(t *testing.T) {
 	e := newQueryEngine(t, "proj--query-3")
 	code, err := handlers.QueryEpochState(e, "proj--does-not-exist", protocol.QueryFullState, types.OutputText)
@@ -124,13 +184,11 @@ func TestQueryEpochState_MissingEpochId(t *testing.T) {
 	}
 }
 
-func TestQueryEpochState_RejectsNonStateQuery(t *testing.T) {
+func TestQueryEpochState_RejectsUnknownQuery(t *testing.T) {
 	e := newQueryEngine(t, "proj--query-5")
-	// Sessions/slice-progress detail isn't carried by the state projection, so
-	// this reader rejects those query names rather than return a partial answer.
-	code, err := handlers.QueryEpochState(e, "proj--query-5", protocol.QueryActiveSessions, types.OutputText)
+	code, err := handlers.QueryEpochState(e, "proj--query-5", protocol.QueryName("bogus_query"), types.OutputText)
 	if err == nil {
-		t.Fatal("expected a validation error for an unsupported query")
+		t.Fatal("expected a validation error for an unrecognized query name")
 	}
 	if code != 1 {
 		t.Errorf("exit = %d, want 1 (validation)", code)

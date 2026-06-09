@@ -70,8 +70,29 @@ consensus, revise, and blocker gates to its current vote and blocker state.`,
 	},
 }
 
+var querySessionsCmd = &cobra.Command{
+	Use:   "sessions",
+	Short: "Show the sessions registered with an epoch",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runQuery(cmd, protocol.QueryActiveSessions)
+	},
+}
+
+var querySliceProgressCmd = &cobra.Command{
+	Use:   "slice-progress",
+	Short: "Show the slice-progress events reported to an epoch",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runQuery(cmd, protocol.QuerySliceProgressState)
+	},
+}
+
 func init() {
-	for _, c := range []*cobra.Command{queryStateCmd, queryCurrentCmd, queryTransitionsCmd} {
+	for _, c := range []*cobra.Command{
+		queryStateCmd, queryCurrentCmd, queryTransitionsCmd,
+		querySessionsCmd, querySliceProgressCmd,
+	} {
 		c.Flags().String("epoch-id", "", "Epoch ID to query (required)")
 		_ = c.MarkFlagRequired("epoch-id")
 		queryCmd.AddCommand(c)
