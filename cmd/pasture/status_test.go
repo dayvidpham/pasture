@@ -4,21 +4,28 @@ package main_test
 //
 // Tests exercise the production binary via subprocess (same idiom as
 // signals_test.go), asserting:
+//   - `pasture status` (no flags) on a path where no db exists shows an
+//     actionable message; no database file is created.
 //   - `pasture status` (no flags) on an empty db shows the actionable
 //     empty-state message.
-//   - `pasture status --epoch <id>` returns exit 3 (workflow/not-found) for
-//     an epoch that has no projection row.
-//   - After driving an epoch through phases, `pasture status --epoch <id>`
+//   - `pasture status --epoch-id <id>` returns exit 3 (workflow/not-found) for
+//     an epoch that has no projection row (both when the table exists and when
+//     the database file is absent entirely).
+//   - After driving an epoch through phases, `pasture status --epoch-id <id>`
 //     reports the current phase correctly in both text and JSON modes.
-//   - After a crash+resume cycle (the engine is shut down and a second process
-//     opens the same db cold), status reflects durable state, not in-memory state.
-//   - `pasture status --epoch <id>` flags a terminated epoch's cancel reason.
+//   - A cold durable read (engine shut down, second process opens the same db)
+//     reflects durable state, not in-memory state.
+//   - `pasture status --epoch-id <id>` flags a terminated epoch's cancel reason
+//     in both JSON and text modes.
+//   - An EpochCancelled event pushed beyond the 10-event display window is
+//     still surfaced in the cancel reason.
 //   - `pasture status` appears in the top-level help output.
 
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -26,15 +33,17 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	"github.com/dayvidpham/pasture/internal/engine"
+	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 // seedProjectionDB drives an epoch through two phase advances (p0 → elicit →
-// propose) using a real engine on dbPath, then shuts the engine down. The
-// caller can then re-open the database cold (simulating a crash+resume cycle)
-// to test that status reads durable projection state.
+// propose) using a real engine on dbPath, then shuts the engine down gracefully.
+// The caller can then re-open the database cold (a fresh process reads durable
+// state from SQLite, not in-memory engine state) to verify the status surface
+// reflects persisted data.
 func seedProjectionDB(t *testing.T, dbPath, epochId string) {
 	t.Helper()
 	e, err := engine.New(context.Background(), engine.Config{
@@ -61,6 +70,33 @@ func seedProjectionDB(t *testing.T, dbPath, epochId string) {
 	}
 	if _, err := h.GetResult(dbos.WithHandleTimeout(30 * time.Second)); err != nil {
 		t.Fatalf("status_test seedProjectionDB: GetResult: %v", err)
+	}
+}
+
+// recordAuditEvents opens the task tracker and appends n extra audit events
+// to epochId. It is used to push an EpochCancelled event outside the 10-event
+// display window so the cancel-reason regression test can confirm the full
+// event list is still scanned for the cancel reason before display truncation.
+func recordAuditEvents(t *testing.T, dbPath, epochId string, n int) {
+	t.Helper()
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	if err != nil {
+		t.Fatalf("status_test recordAuditEvents: OpenTaskTracker: %v", err)
+	}
+	defer tracker.Close()
+	ctx := context.Background()
+	for i := 0; i < n; i++ {
+		ev := protocol.AuditEvent{
+			EpochId:   epochId,
+			Phase:     protocol.PhasePropose,
+			Role:      "supervisor",
+			EventType: "PhaseAdvanced",
+			Payload:   map[string]any{"step": fmt.Sprintf("post-cancel-%d", i)},
+			Timestamp: time.Now().UTC(),
+		}
+		if err := tracker.RecordEvent(ctx, ev); err != nil {
+			t.Fatalf("status_test recordAuditEvents: RecordEvent[%d]: %v", i, err)
+		}
 	}
 }
 
@@ -93,14 +129,60 @@ func TestCLI_TopLevelHelp_ContainsStatus(t *testing.T) {
 	}
 }
 
-// TestCLI_Status_EmptyDB_ShowsActionableMessage verifies that running `pasture
-// status` against a fresh database (no epochs yet) returns exit 0 and prints
-// the actionable empty-state message guiding users how to start an epoch.
-func TestCLI_Status_EmptyDB_ShowsActionableMessage(t *testing.T) {
+// TestCLI_Status_AbsentDB_NoFileCreated verifies that running `pasture status`
+// against a path where the database does not exist returns a non-zero exit with
+// an actionable message and does NOT create the file. Status is a pure-read
+// command — it must never create or migrate the database.
+func TestCLI_Status_AbsentDB_NoFileCreated(t *testing.T) {
+	dbPath := newDB(t) // returns a path to a file that does not yet exist
+	out := runCLI(t, "--db", dbPath, "status")
+	// Must fail: no db = no epochs, and the absent-db path is an error, not
+	// an empty listing.
+	if out.exitCode == 0 {
+		t.Fatalf("expected non-zero exit for absent db; stdout=%s", out.stdout)
+	}
+	// Stderr must contain an actionable message directing the user.
+	combined := out.stdout + out.stderr
+	if !strings.Contains(combined, "daemon") && !strings.Contains(combined, "pastured") {
+		t.Errorf("absent-db message should mention daemon/pastured; got: %s", combined)
+	}
+	// The file must NOT have been created.
+	if _, err := os.Stat(dbPath); err == nil {
+		t.Errorf("status on absent db created the database file at %q — must not modify any state", dbPath)
+	}
+}
+
+// TestCLI_Status_AbsentDB_EpochId_NoFileCreated verifies that
+// `pasture status --epoch-id <id>` against a path where the database does not
+// exist also fails with an actionable message and does NOT create the file.
+func TestCLI_Status_AbsentDB_EpochId_NoFileCreated(t *testing.T) {
+	dbPath := newDB(t)
+	const epochId = "demo--01960000-0000-7000-8000-000000000399"
+	out := runCLI(t, "--db", dbPath, "status", "--epoch-id", epochId)
+	if out.exitCode == 0 {
+		t.Fatalf("expected non-zero exit for absent db with --epoch-id; stdout=%s", out.stdout)
+	}
+	if _, err := os.Stat(dbPath); err == nil {
+		t.Errorf("status --epoch-id on absent db created the database file at %q — must not modify any state", dbPath)
+	}
+}
+
+// TestCLI_Status_ExistingDB_NoEpochs_ShowsActionableMessage verifies that
+// running `pasture status` against a database that exists but has no recorded
+// epochs returns exit 0 and prints the actionable empty-state message. The
+// database is pre-created by running `pasture migrate` so the file exists.
+func TestCLI_Status_ExistingDB_NoEpochs_ShowsActionableMessage(t *testing.T) {
 	db := newDB(t)
+	// Create and migrate the database via the migrate command so it exists and
+	// has a valid schema, but has no epoch projection rows.
+	migrateOut := runCLI(t, "--db", db, "migrate")
+	if migrateOut.exitCode != 0 {
+		t.Fatalf("migrate to pre-create db: exit %d; stderr=%s", migrateOut.exitCode, migrateOut.stderr)
+	}
+
 	out := runCLI(t, "--db", db, "status")
 	if out.exitCode != 0 {
-		t.Fatalf("status on empty db exit %d; stderr=%s", out.exitCode, out.stderr)
+		t.Fatalf("status on existing db with no epochs: exit %d; stderr=%s", out.exitCode, out.stderr)
 	}
 	combined := out.stdout + out.stderr
 	// Must tell the user how to start an epoch.
@@ -111,13 +193,20 @@ func TestCLI_Status_EmptyDB_ShowsActionableMessage(t *testing.T) {
 	}
 }
 
-// TestCLI_Status_EmptyDB_JSON_EmptyArray verifies that --format json on an
-// empty db returns a JSON empty array (not an error).
-func TestCLI_Status_EmptyDB_JSON_EmptyArray(t *testing.T) {
+// TestCLI_Status_ExistingDB_NoEpochs_JSON_EmptyArray verifies that --format
+// json on an existing database with no recorded epochs returns a JSON empty
+// array (not an error). The database is pre-created by running `pasture migrate`.
+func TestCLI_Status_ExistingDB_NoEpochs_JSON_EmptyArray(t *testing.T) {
 	db := newDB(t)
+	// Pre-create the database with a valid schema.
+	migrateOut := runCLI(t, "--db", db, "migrate")
+	if migrateOut.exitCode != 0 {
+		t.Fatalf("migrate to pre-create db: exit %d; stderr=%s", migrateOut.exitCode, migrateOut.stderr)
+	}
+
 	out := runCLI(t, "--db", db, "--format", "json", "status")
 	if out.exitCode != 0 {
-		t.Fatalf("status --format json on empty db exit %d; stderr=%s",
+		t.Fatalf("status --format json on existing db with no epochs: exit %d; stderr=%s",
 			out.exitCode, out.stderr)
 	}
 	var epochs []interface{}
@@ -129,9 +218,39 @@ func TestCLI_Status_EmptyDB_JSON_EmptyArray(t *testing.T) {
 	}
 }
 
+// TestCLI_Status_FreshDB_EpochId_ReturnsExit3 verifies that
+// `pasture status --epoch-id <id>` against a fresh database (projection table
+// absent) returns exit 3 with a structured error — no seeding required. This
+// covers the table-absent branch separately from the table-present/row-absent
+// branch in TestCLI_Status_UnknownEpoch_ReturnsExit3.
+func TestCLI_Status_FreshDB_EpochId_ReturnsExit3(t *testing.T) {
+	db := newDB(t)
+	// Pre-create and migrate the database so it exists with a valid schema but
+	// no epoch projection rows ("fresh" = migrated, not absent).
+	migrateOut := runCLI(t, "--db", db, "migrate")
+	if migrateOut.exitCode != 0 {
+		t.Fatalf("migrate to pre-create db: exit %d; stderr=%s", migrateOut.exitCode, migrateOut.stderr)
+	}
+	const epochId = "demo--01960000-0000-7000-8000-000000000398"
+	out := runCLI(t, "--db", db, "status", "--epoch-id", epochId)
+	if out.exitCode != 3 {
+		t.Fatalf("expected exit 3 for fresh db with --epoch-id; exit=%d stdout=%s stderr=%s",
+			out.exitCode, out.stdout, out.stderr)
+	}
+	for _, want := range []string{
+		"Problem:",
+		"How to fix:",
+	} {
+		if !strings.Contains(out.stderr, want) {
+			t.Errorf("stderr missing structured error section %q; stderr=%s", want, out.stderr)
+		}
+	}
+}
+
 // TestCLI_Status_UnknownEpoch_ReturnsExit3 verifies that `pasture status
-// --epoch <id>` returns exit 3 (workflow/not-found) for an epoch that has no
-// projection row, and that stderr contains the actionable structured error.
+// --epoch-id <id>` returns exit 3 (workflow/not-found) for an epoch that has
+// no projection row when the table already exists (another epoch was seeded),
+// and that stderr contains the actionable structured error.
 func TestCLI_Status_UnknownEpoch_ReturnsExit3(t *testing.T) {
 	db := newDB(t)
 	// Seed a different epoch so the projection table exists.
@@ -139,7 +258,7 @@ func TestCLI_Status_UnknownEpoch_ReturnsExit3(t *testing.T) {
 	seedProjectionDB(t, db, seedId)
 
 	const unknownId = "demo--01960000-0000-7000-8000-000000009999"
-	out := runCLI(t, "--db", db, "status", "--epoch", unknownId)
+	out := runCLI(t, "--db", db, "status", "--epoch-id", unknownId)
 	if out.exitCode != 3 {
 		t.Fatalf("expected exit 3 for unknown epoch; exit=%d stdout=%s stderr=%s",
 			out.exitCode, out.stdout, out.stderr)
@@ -162,7 +281,7 @@ func TestCLI_Status_EpochMidFlight_ReportsCurrentPhase_Text(t *testing.T) {
 	const epochId = "demo--01960000-0000-7000-8000-000000000302"
 	seedProjectionDB(t, db, epochId)
 
-	out := runCLI(t, "--db", db, "status", "--epoch", epochId)
+	out := runCLI(t, "--db", db, "status", "--epoch-id", epochId)
 	if out.exitCode != 0 {
 		t.Fatalf("status exit %d; stdout=%s stderr=%s", out.exitCode, out.stdout, out.stderr)
 	}
@@ -184,7 +303,7 @@ func TestCLI_Status_EpochMidFlight_ReportsCurrentPhase_JSON(t *testing.T) {
 	const epochId = "demo--01960000-0000-7000-8000-000000000303"
 	seedProjectionDB(t, db, epochId)
 
-	out := runCLI(t, "--db", db, "--format", "json", "status", "--epoch", epochId)
+	out := runCLI(t, "--db", db, "--format", "json", "status", "--epoch-id", epochId)
 	if out.exitCode != 0 {
 		t.Fatalf("status --format json exit %d; stdout=%s stderr=%s",
 			out.exitCode, out.stdout, out.stderr)
@@ -209,24 +328,27 @@ func TestCLI_Status_EpochMidFlight_ReportsCurrentPhase_JSON(t *testing.T) {
 	}
 }
 
-// TestCLI_Status_AfterCrashResume_ReflectsDurableState is the crash+resume test:
-// it drives an epoch with one engine instance (writes to disk), shuts it down,
-// then opens the same database cold in a subprocess and asserts that `pasture
-// status --epoch <id>` still reports the durable projected phase. This proves
-// the status surface reads durable state from SQLite, not in-memory state.
-func TestCLI_Status_AfterCrashResume_ReflectsDurableState(t *testing.T) {
+// TestCLI_Status_ColdDurableRead_ReflectsPersistedState drives an epoch with
+// one engine instance (writes to SQLite), shuts it down gracefully, then reads
+// status in a fresh subprocess that has no in-memory engine state. This proves
+// the status surface reads durable projection state from SQLite, not cached
+// in-memory state from a still-running engine.
+//
+// This is a cold-read test, not a crash-recovery test. Real kill-9 recovery
+// mechanics are covered by the build-tagged engine recovery tests in
+// internal/engine/recovery_test.go.
+func TestCLI_Status_ColdDurableRead_ReflectsPersistedState(t *testing.T) {
 	db := newDB(t)
 	const epochId = "demo--01960000-0000-7000-8000-000000000304"
 
-	// Step 1: seed the epoch (engine drives it to 'propose', then shuts down —
-	// simulating a process crash after the work is durably persisted).
+	// Step 1: seed the epoch (engine drives it to 'propose', then shuts down).
 	seedProjectionDB(t, db, epochId)
 
 	// Step 2: open the db COLD (no engine running) and read status via the CLI
-	// binary. The binary is a fresh process that has never seen in-memory state.
-	out := runCLI(t, "--db", db, "--format", "json", "status", "--epoch", epochId)
+	// binary. The binary is a fresh process with no in-memory state.
+	out := runCLI(t, "--db", db, "--format", "json", "status", "--epoch-id", epochId)
 	if out.exitCode != 0 {
-		t.Fatalf("status after crash exit %d; stdout=%s stderr=%s",
+		t.Fatalf("cold durable read: exit %d; stdout=%s stderr=%s",
 			out.exitCode, out.stdout, out.stderr)
 	}
 	var status struct {
@@ -234,17 +356,17 @@ func TestCLI_Status_AfterCrashResume_ReflectsDurableState(t *testing.T) {
 		CurrentPhase string `json:"currentPhase"`
 	}
 	if err := json.Unmarshal([]byte(out.stdout), &status); err != nil {
-		t.Fatalf("decode status json after crash: %v\nbody: %s", err, out.stdout)
+		t.Fatalf("cold durable read: decode json: %v\nbody: %s", err, out.stdout)
 	}
 	if status.CurrentPhase != "propose" {
-		t.Errorf("crash+resume: currentPhase = %q, want %q", status.CurrentPhase, "propose")
+		t.Errorf("cold durable read: currentPhase = %q, want %q", status.CurrentPhase, "propose")
 	}
 }
 
 // TestCLI_Status_AfterTerminate_ShowsCancelReason verifies that after
-// `pasture epoch terminate --reason <msg>`, running `pasture status --epoch <id>`
-// surfaces the cancel reason in the output. Uses the text path so the search
-// is format-agnostic.
+// `pasture epoch terminate --reason <msg>`, running
+// `pasture status --epoch-id <id>` surfaces the cancel reason in both JSON
+// and text output.
 func TestCLI_Status_AfterTerminate_ShowsCancelReason(t *testing.T) {
 	db := newDB(t)
 	const epochId = "demo--01960000-0000-7000-8000-000000000305"
@@ -253,54 +375,135 @@ func TestCLI_Status_AfterTerminate_ShowsCancelReason(t *testing.T) {
 	// Seed the epoch so the projection exists.
 	seedProjectionDB(t, db, epochId)
 
-	// Terminate the epoch (records the audit event, the cancel itself may fail
-	// since the workflow is no longer running after seedProjectionDB shuts it
-	// down — that's OK; the audit record is written before the cancel attempt).
+	// Terminate the epoch (records the audit event; the workflow cancellation
+	// may fail since seedProjectionDB shuts down the engine, but the audit
+	// record is written before the cancel attempt — that is the record we read).
 	runCLI(t, "--db", db, "epoch", "terminate",
 		"--epoch-id", epochId,
 		"--reason", reason)
-	// We accept any exit code here: exit 3 is expected when the workflow is no
+	// We accept any exit code: exit 3 is expected when the workflow is no
 	// longer addressable. What matters is the audit event was written.
 
-	// Now status must surface the cancel reason.
-	out := runCLI(t, "--db", db, "--format", "json", "status", "--epoch", epochId)
-	if out.exitCode != 0 {
-		t.Fatalf("status after terminate exit %d; stdout=%s stderr=%s",
-			out.exitCode, out.stdout, out.stderr)
+	// ── JSON check ─────────────────────────────────────────────────────────
+	outJSON := runCLI(t, "--db", db, "--format", "json", "status", "--epoch-id", epochId)
+	if outJSON.exitCode != 0 {
+		t.Fatalf("status --format json after terminate exit %d; stdout=%s stderr=%s",
+			outJSON.exitCode, outJSON.stdout, outJSON.stderr)
 	}
-	var status struct {
+	var jsonStatus struct {
 		CancelReason *string `json:"cancelReason"`
 		RecentEvents []struct {
 			EventType string `json:"eventType"`
 		} `json:"recentEvents"`
 	}
-	if err := json.Unmarshal([]byte(out.stdout), &status); err != nil {
-		t.Fatalf("decode status json after terminate: %v\nbody: %s", err, out.stdout)
+	if err := json.Unmarshal([]byte(outJSON.stdout), &jsonStatus); err != nil {
+		t.Fatalf("decode status json after terminate: %v\nbody: %s", err, outJSON.stdout)
+	}
+	if jsonStatus.CancelReason == nil {
+		t.Fatal("JSON: expected non-nil cancelReason in status after terminate")
+	}
+	if !strings.Contains(*jsonStatus.CancelReason, reason) {
+		t.Errorf("JSON: cancelReason = %q, want to contain %q", *jsonStatus.CancelReason, reason)
+	}
+	var foundInJSON bool
+	for _, ev := range jsonStatus.RecentEvents {
+		if ev.EventType == "EpochCancelled" {
+			foundInJSON = true
+			break
+		}
+	}
+	if !foundInJSON {
+		t.Errorf("JSON: expected EpochCancelled in recentEvents; events: %+v", jsonStatus.RecentEvents)
 	}
 
-	// The cancel reason must be present and carry the expected text.
+	// ── Text check — the populated-reason branch ────────────────────────────
+	// The text output must contain "CANCELLED" and the reason string.
+	outText := runCLI(t, "--db", db, "status", "--epoch-id", epochId)
+	if outText.exitCode != 0 {
+		t.Fatalf("status text after terminate exit %d; stdout=%s stderr=%s",
+			outText.exitCode, outText.stdout, outText.stderr)
+	}
+	combinedText := outText.stdout + outText.stderr
+	if !strings.Contains(combinedText, "CANCELLED") {
+		t.Errorf("text output missing 'CANCELLED'; got: %s", combinedText)
+	}
+	if !strings.Contains(combinedText, reason) {
+		t.Errorf("text output missing cancel reason %q; got: %s", reason, combinedText)
+	}
+}
+
+// TestCLI_Status_AfterTerminate_EmptyReason_ShowsCancelledNoReason verifies
+// that a terminate with no --reason flag renders the empty-reason branch
+// ("CANCELLED (no reason recorded)") in text mode.
+func TestCLI_Status_AfterTerminate_EmptyReason_ShowsCancelledNoReason(t *testing.T) {
+	db := newDB(t)
+	const epochId = "demo--01960000-0000-7000-8000-000000000310"
+	seedProjectionDB(t, db, epochId)
+
+	// Terminate without a reason.
+	runCLI(t, "--db", db, "epoch", "terminate", "--epoch-id", epochId)
+
+	outText := runCLI(t, "--db", db, "status", "--epoch-id", epochId)
+	if outText.exitCode != 0 {
+		t.Fatalf("status text after empty-reason terminate exit %d; stdout=%s stderr=%s",
+			outText.exitCode, outText.stdout, outText.stderr)
+	}
+	combinedText := outText.stdout + outText.stderr
+	if !strings.Contains(combinedText, "CANCELLED") {
+		t.Errorf("text output missing 'CANCELLED'; got: %s", combinedText)
+	}
+	if !strings.Contains(combinedText, "no reason recorded") {
+		t.Errorf("text output missing 'no reason recorded'; got: %s", combinedText)
+	}
+}
+
+// TestCLI_Status_CancelReasonSurvivedTruncation verifies that an EpochCancelled
+// event is still surfaced in the cancel reason even when 10+ subsequent events
+// have been written after it (pushing it outside the most-recent-10 display
+// window). The full event list must be scanned for the cancel reason before
+// display truncation.
+func TestCLI_Status_CancelReasonSurvivedTruncation(t *testing.T) {
+	db := newDB(t)
+	const epochId = "demo--01960000-0000-7000-8000-000000000311"
+	const reason = "deliberate cancellation for truncation regression test"
+
+	// Seed the epoch.
+	seedProjectionDB(t, db, epochId)
+
+	// Record the EpochCancelled event.
+	runCLI(t, "--db", db, "epoch", "terminate",
+		"--epoch-id", epochId,
+		"--reason", reason)
+
+	// Append 11 more events so the EpochCancelled is pushed out of the
+	// most-recent-10 display window.
+	recordAuditEvents(t, db, epochId, 11)
+
+	// Status must still surface the cancel reason even though EpochCancelled
+	// is not in the most recent 10 events.
+	out := runCLI(t, "--db", db, "--format", "json", "status", "--epoch-id", epochId)
+	if out.exitCode != 0 {
+		t.Fatalf("status after truncation exit %d; stdout=%s stderr=%s",
+			out.exitCode, out.stdout, out.stderr)
+	}
+	var status struct {
+		CancelReason *string `json:"cancelReason"`
+	}
+	if err := json.Unmarshal([]byte(out.stdout), &status); err != nil {
+		t.Fatalf("decode status json after truncation: %v\nbody: %s", err, out.stdout)
+	}
 	if status.CancelReason == nil {
-		t.Fatal("expected non-nil cancelReason in status after terminate")
+		t.Fatal("cancelReason is nil even though EpochCancelled event exists beyond the display window — the full event list must be scanned before truncation")
 	}
 	if !strings.Contains(*status.CancelReason, reason) {
 		t.Errorf("cancelReason = %q, want to contain %q", *status.CancelReason, reason)
 	}
-
-	// The EpochCancelled event must also appear in recentEvents.
-	var found bool
-	for _, ev := range status.RecentEvents {
-		if ev.EventType == "EpochCancelled" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected EpochCancelled in recentEvents; events: %+v", status.RecentEvents)
-	}
 }
 
 // TestCLI_Status_List_ShowsAllEpochs verifies that `pasture status` (no
-// --epoch) lists all recorded epochs, including one seeded by the test.
+// --epoch-id) lists all recorded epochs, including ones seeded by the test,
+// and that the event count is greater than zero for seeded epochs (proving
+// the enrichment is real, not always-zero).
 func TestCLI_Status_List_ShowsAllEpochs(t *testing.T) {
 	db := newDB(t)
 	const epochId1 = "demo--01960000-0000-7000-8000-000000000306"
@@ -317,6 +520,7 @@ func TestCLI_Status_List_ShowsAllEpochs(t *testing.T) {
 	var epochs []struct {
 		EpochId      string `json:"epochId"`
 		CurrentPhase string `json:"currentPhase"`
+		EventCount   int    `json:"eventCount"`
 	}
 	if err := json.Unmarshal([]byte(out.stdout), &epochs); err != nil {
 		t.Fatalf("decode status list json: %v\nbody: %s", err, out.stdout)
@@ -325,9 +529,15 @@ func TestCLI_Status_List_ShowsAllEpochs(t *testing.T) {
 	for _, e := range epochs {
 		if e.EpochId == epochId1 {
 			found1 = true
+			if e.EventCount == 0 {
+				t.Errorf("epoch %s has eventCount=0; expected >0 after seedProjectionDB (seeding writes audit events)", epochId1)
+			}
 		}
 		if e.EpochId == epochId2 {
 			found2 = true
+			if e.EventCount == 0 {
+				t.Errorf("epoch %s has eventCount=0; expected >0 after seedProjectionDB (seeding writes audit events)", epochId2)
+			}
 		}
 	}
 	if !found1 {
@@ -357,10 +567,3 @@ func TestCLI_Status_List_ShowsAllEpochs_Text(t *testing.T) {
 		t.Errorf("text listing missing phase 'propose'; got: %s", combined)
 	}
 }
-
-// ─── unused import guard ──────────────────────────────────────────────────────
-
-// Ensure the engine + dbos imports (used in seedProjectionDB) don't get
-// pruned by a linter's dead-import check. The functions above reference them
-// directly, so this is a documentation marker only.
-var _ = filepath.Join

@@ -38,24 +38,14 @@ type ProjectionReader interface {
 type dbProjectionReader struct{ db *sql.DB }
 
 func (r dbProjectionReader) ReadProjection(epochId string) (*protocol.EpochState, error) {
-	var name string
-	switch err := r.db.QueryRow(
-		`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, projectionTable,
-	).Scan(&name); {
-	case err == sql.ErrNoRows:
+	exists, err := projectionTableExists(r.db)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
 		// No epoch has ever advanced on this database, so there is no projection
 		// to read. Report "unknown epoch" (nil), not a missing-table error.
 		return nil, nil
-	case err != nil:
-		return nil, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What:     "Couldn't check whether the epoch-state projection exists.",
-			Why:      "The database refused the read from sqlite_master.",
-			Where:    "Reading the epoch projection (internal/handlers/projection.go in handlers.dbProjectionReader.ReadProjection).",
-			Impact:   "Epoch state can't be reported.",
-			Fix:      "Confirm the database file is readable, then retry.",
-			Cause:    err,
-		}
 	}
 	return engine.ReadProjection(r.db, epochId)
 }
@@ -110,6 +100,34 @@ func QueryStateFromProjection(state *protocol.EpochState) protocol.QueryStateRes
 		AvailableTransitions: sm.AvailableTransitions(),
 		ActiveSessionCount:   state.ActiveSessionCount,
 	}
+}
+
+// projectionTableExists reports whether the epoch_state_projection table is
+// present in the database. Returns (false, nil) on a fresh database (no epoch
+// has ever run), (false, err) on a storage failure, and (true, nil) when the
+// table exists.
+//
+// Both listEpochs (internal/handlers/status.go) and dbProjectionReader.ReadProjection
+// need this probe; centralising it here eliminates the duplication.
+func projectionTableExists(db *sql.DB) (bool, error) {
+	var name string
+	switch err := db.QueryRow(
+		`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, projectionTable,
+	).Scan(&name); {
+	case err == sql.ErrNoRows:
+		return false, nil
+	case err != nil:
+		return false, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     "Couldn't check whether the epoch-state projection table exists.",
+			Why:      "The database refused the read from sqlite_master.",
+			Where:    "Checking for the projection table (internal/handlers/projection.go in handlers.projectionTableExists).",
+			Impact:   "Epoch status can't be determined.",
+			Fix:      "Confirm the database file is readable, then retry.",
+			Cause:    err,
+		}
+	}
+	return true, nil
 }
 
 // epochNotFoundError reports that no projected state exists for epochId.

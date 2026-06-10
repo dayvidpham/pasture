@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
@@ -37,16 +38,40 @@ type EpochStatusInput struct {
 // the FSM), slice progress, active sessions, and the N most recent audit events
 // (flagging any EpochCancelled event with its operator reason).
 //
-// The function is a pure read: it never starts a durable workflow.
+// The function is a pure read: it never starts a durable workflow, creates
+// files, or modifies the database.
 //
-// Exit codes: 0=success, 1=validation, 3=workflow/not-found, 5=storage.
+// Exit codes: 0=success, 2=connection (open failed), 3=workflow/not-found, 5=storage.
 func EpochStatus(in EpochStatusInput, format types.OutputFormat) (int, error) {
 	dbPath := in.DBPath
 	if dbPath == "" {
 		dbPath = tasks.DefaultDBPath()
 	}
 
-	db, err := dbconn.OpenSharedDB(dbPath)
+	// Check file existence before opening. SQLite with a standard DSN creates
+	// the file automatically; the read-only path below avoids that, but an
+	// explicit existence check makes the error message exact and actionable.
+	if !fileExistsAt(dbPath) {
+		e := &pasterrors.StructuredError{
+			Category: pasterrors.CategoryConnection,
+			What:     fmt.Sprintf("No pasture database found at %q.", dbPath),
+			Why:      "The database file has not been created yet.",
+			Where:    "Opening the database for status (internal/handlers/status.go in handlers.EpochStatus).",
+			Impact:   "No epoch state or audit history can be read — no epochs have run, or the daemon has not started yet.",
+			Fix: fmt.Sprintf("1. Start the daemon to create and initialize the database:\n"+
+				"     pastured\n"+
+				"2. Then run an epoch:\n"+
+				"     pasture epoch start --epoch-id <id>\n"+
+				"3. To use a different database path, pass --db or set PASTURE_DB_PATH.\n"+
+				"   Expected location: %q", dbPath),
+		}
+		return pasterrors.ExitCode(e), e
+	}
+
+	// Open the database read-only. Status never migrates the schema: if the
+	// schema is mismatched the error directs the operator to upgrade or
+	// downgrade. The read-only DSN prevents any unintended writes.
+	db, err := dbconn.OpenReadOnlyDB(dbPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
@@ -62,30 +87,20 @@ func EpochStatus(in EpochStatusInput, format types.OutputFormat) (int, error) {
 // listing. If the projection table does not yet exist (no epoch has ever run),
 // the listing is empty — not an error.
 func listEpochs(db *sql.DB, dbPath string, format types.OutputFormat) (int, error) {
-	// Probe for the projection table. If absent the db is fresh; return an
-	// informative empty listing rather than a raw missing-table error.
-	var tableName string
-	switch err := db.QueryRow(
-		`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, projectionTable,
-	).Scan(&tableName); {
-	case err == sql.ErrNoRows:
+	// Probe for the projection table using the shared helper. If absent the db
+	// is fresh; return an informative empty listing rather than a raw
+	// missing-table error.
+	exists, probeErr := projectionTableExists(db)
+	if probeErr != nil {
+		return pasterrors.ExitCode(probeErr), probeErr
+	}
+	if !exists {
 		out, fmtErr := formatters.FormatEpochList(nil, format)
 		if fmtErr != nil {
 			return pasterrors.ExitCode(fmtErr), fmtErr
 		}
 		fmt.Println(out)
 		return 0, nil
-	case err != nil:
-		se := &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What:     "Couldn't check whether the epoch-state projection table exists.",
-			Why:      "The database refused the read from sqlite_master.",
-			Where:    "Listing epochs (internal/handlers/status.go in handlers.listEpochs).",
-			Impact:   "The epoch list can't be shown.",
-			Fix:      "Confirm the database file is readable, then retry.",
-			Cause:    err,
-		}
-		return pasterrors.ExitCode(se), se
 	}
 
 	// Read every row from the projection. Each row carries epoch_id and
@@ -140,23 +155,26 @@ func listEpochs(db *sql.DB, dbPath string, format types.OutputFormat) (int, erro
 		return pasterrors.ExitCode(se), se
 	}
 
-	// Enrich with event counts via the task tracker (which handles the post-v4
-	// context_edges join for epoch-to-event linkage). Best-effort: any failure
-	// leaves EventCount=0 rather than aborting the listing.
+	// Enrich with event counts via a single grouped COUNT query on the
+	// read-only handle. Best-effort: any failure emits a warning to stderr
+	// and leaves EventCount=0 rather than aborting the listing.
 	if len(summaries) > 0 {
-		tracker, tErr := tasks.OpenTaskTracker(dbPath)
-		if tErr == nil {
-			defer tracker.Close()
+		reader, roErr := tasks.OpenStatusReader(dbPath)
+		if roErr != nil {
+			// Best-effort enrichment: warn but continue.
+			fmt.Fprintf(os.Stderr, "warning: couldn't open database to read event counts: %v\n", roErr)
+		} else {
+			defer reader.Close()
 			ctx := context.Background()
-			for i, s := range summaries {
-				evts, qErr := tracker.QueryEvents(ctx, s.EpochId, nil, nil)
-				if qErr == nil {
-					summaries[i].EventCount = len(evts)
+			counts, cErr := reader.CountEventsByEpoch(ctx)
+			if cErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: couldn't read event counts: %v\n", cErr)
+			} else {
+				for i, s := range summaries {
+					summaries[i].EventCount = counts[s.EpochId]
 				}
 			}
 		}
-		// If tracker failed to open (fresh db, not yet migrated), silently leave
-		// counts as zero — the listing is still useful without event counts.
 	}
 
 	out, fmtErr := formatters.FormatEpochList(summaries, format)
@@ -182,20 +200,23 @@ func showEpoch(db *sql.DB, dbPath, epochId string, format types.OutputFormat) (i
 	// Recompute available transitions via the FSM (not stored, always current).
 	sm := protocol.NewEpochStateMachineFromState(state, nil)
 
-	// Fetch recent audit events via the task tracker, which correctly handles
-	// the post-v4 context_edges JOIN for epoch-to-event linkage.
-	events, err := recentEventsForEpoch(dbPath, epochId)
-	if err != nil {
-		return pasterrors.ExitCode(err), err
+	// Fetch recent audit events via the read-only status reader, which handles
+	// the post-v4 context_edges JOIN for epoch-to-event linkage without
+	// modifying the database.
+	events, evErr := recentEventsForEpoch(dbPath, epochId)
+	if evErr != nil {
+		return pasterrors.ExitCode(evErr), evErr
 	}
 
-	// Truncate to the most recent N (QueryEvents returns oldest-first).
+	// Scan the FULL event list for a cancel reason BEFORE truncating for
+	// display. An EpochCancelled event pushed outside the display window by
+	// subsequent events must still be surfaced.
+	cancelReason := findCancelReason(events)
+
+	// Truncate to the most recent N for display (QueryEvents returns oldest-first).
 	if len(events) > recentEventLimit {
 		events = events[len(events)-recentEventLimit:]
 	}
-
-	// Scan for a cancel reason so the status view can flag a terminated epoch.
-	cancelReason := findCancelReason(events)
 
 	result := formatters.EpochStatusResult{
 		EpochId:              state.EpochId,
@@ -217,24 +238,39 @@ func showEpoch(db *sql.DB, dbPath, epochId string, format types.OutputFormat) (i
 	return 0, nil
 }
 
-// recentEventsForEpoch opens a task tracker (which handles schema migrations +
-// the post-v4 context_edges epoch join) and returns the N most recent audit
-// events for the epoch, oldest-first.
+// recentEventsForEpoch opens a read-only status reader and returns all audit
+// events for the epoch, oldest-first. The caller truncates the list for display
+// after scanning for cancel reasons.
 //
-// Returns an empty slice (not an error) when no events exist or when the
-// tracker can't open (fresh database).
+// Returns a StructuredError when the reader can't open (e.g. schema mismatch
+// or a genuine I/O failure). A projection row exists here, meaning the engine
+// has run and migrated the database — any open failure is a real error, not a
+// fresh-database non-event.
 func recentEventsForEpoch(dbPath, epochId string) ([]protocol.AuditEvent, error) {
-	tracker, err := tasks.OpenTaskTracker(dbPath)
+	reader, err := tasks.OpenStatusReader(dbPath)
 	if err != nil {
-		// Fresh database or pre-migration: no events to show. Return empty, not
-		// an error, because the projection may exist while the audit schema is
-		// still at v0 (the migrator runs at open, so a successful open implies
-		// the schema is current — if it fails, there are no events).
-		return nil, nil
+		return nil, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What: fmt.Sprintf(
+				"Couldn't open the database to read audit events for epoch %q.", epochId,
+			),
+			Why: "Opening the database in read-only mode failed. A projection row exists for\n" +
+				"this epoch, so the database was created by the daemon — the open failure is\n" +
+				"a genuine error (schema mismatch, lock, or file damage), not a fresh-db case.",
+			Where: "Reading recent audit events (internal/handlers/status.go in handlers.recentEventsForEpoch).",
+			Impact: "The recent-events section of the status view will be empty. The epoch's\n" +
+				"cancellation reason (if any) will also be missing.",
+			Fix: "1. Confirm the database file is readable:\n" +
+				"     ls -l " + dbPath + "\n" +
+				"2. Check whether the schema needs upgrading:\n" +
+				"     pasture migrate\n" +
+				"3. Retry the status command.",
+			Cause: err,
+		}
 	}
-	defer tracker.Close()
+	defer reader.Close()
 
-	events, qErr := tracker.QueryEvents(context.Background(), epochId, nil, nil)
+	events, qErr := reader.QueryEvents(context.Background(), epochId, nil, nil)
 	if qErr != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
@@ -242,11 +278,20 @@ func recentEventsForEpoch(dbPath, epochId string) ([]protocol.AuditEvent, error)
 			Why:      "The audit trail query returned an error.",
 			Where:    "Reading recent audit events (internal/handlers/status.go in handlers.recentEventsForEpoch).",
 			Impact:   "The recent-events section of the status view will be empty.",
-			Fix:      "1. Confirm the database file is readable.\n2. Run 'pasture migrate' if the database schema may be out of date.",
-			Cause:    qErr,
+			Fix: "1. Confirm the database file is readable.\n" +
+				"2. Run 'pasture migrate' if the database schema may be out of date.",
+			Cause: qErr,
 		}
 	}
 	return events, nil
+}
+
+// fileExistsAt reports whether a regular file (or any non-directory entry)
+// exists at path. It returns false on any OS error, including permission
+// errors — the caller will get a more specific error when it tries to open.
+func fileExistsAt(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // findCancelReason scans events for an EpochCancelled record. Returns a pointer
