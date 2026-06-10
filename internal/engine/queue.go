@@ -103,27 +103,16 @@ func ResolveSliceConcurrency(flagVal int) (int, error) {
 }
 
 // newSliceQueue registers the pasture-slice-queue with the given DBOS context
-// and returns the WorkflowQueue. concurrency must be > 0; it bounds the number
-// of slice/review sub-workflows the local executor runs concurrently.
+// and returns the WorkflowQueue. concurrency must be > 0; Engine.New enforces
+// this by clamping any <= 0 value to DefaultSliceQueueConcurrency before
+// calling here, so an invalid concurrency is a programming error, not a
+// user-facing case.
 //
 // This must be called before dbos.Launch. Engine.New calls it as part of
 // construction, so callers that use Engine.New do not need to call it directly.
 // (Note: the function is intentionally unexported; see Engine.SliceQueue for
 // the public accessor.)
 func newSliceQueue(ctx dbos.DBOSContext, concurrency int) (dbos.WorkflowQueue, error) {
-	if concurrency <= 0 {
-		return dbos.WorkflowQueue{}, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("The slice queue concurrency limit must be a positive integer, got %d.", concurrency),
-			Why:      "A concurrency of 0 or below would prevent any sub-workflows from running.",
-			Where:    "Creating the slice queue (internal/engine/queue.go in engine.newSliceQueue).",
-			Impact:   "No slice or review sub-workflows would ever execute.",
-			Fix: "1. Set a positive value (default is 8):\n" +
-				"     pastured --slice-concurrency 8\n" +
-				"   Or set the environment variable:\n" +
-				"     PASTURE_SLICE_CONCURRENCY=8 pastured",
-		}
-	}
 	q := dbos.NewWorkflowQueue(ctx, SliceQueueName,
 		dbos.WithWorkerConcurrency(concurrency),
 	)

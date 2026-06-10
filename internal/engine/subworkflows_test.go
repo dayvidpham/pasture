@@ -42,7 +42,8 @@ package engine_test
 //     prefix, and error contents.
 //
 // 10. Queue wiring: default concurrency wires the correct queue name; the
-//     newSliceQueue validation guard rejects concurrency <= 0.
+//     concurrency-resolution precedence (flag > env > default) is table-tested
+//     across all flag/env combinations including error paths.
 
 import (
 	"context"
@@ -264,18 +265,12 @@ func TestSliceSubWorkflow_MockMode_CompletesAndReportsProgress(t *testing.T) {
 // not-implemented failure, proving the signal path was taken rather than the
 // default mock path which would succeed).
 //
-// The test uses a gating hooks.Manager: the HookSliceStarted gate fires before
-// the durable step, so the start_slice signal is sent while the sub-workflow is
-// provably still alive. After the gate releases the signal must have been
-// consumed.
+// The signal is delivered via a spin-poll loop immediately after EnqueueSlice
+// so it lands in the notifications table before the 2s Recv window closes.
+// This makes the outcome deterministic: subprocess mode → Success=false with a
+// not-yet-implemented error (distinct from the default mock → Success=true).
 func TestSliceSubWorkflow_StartSignalSetsMode(t *testing.T) {
-	// Gate: block on HookSliceStarted so start_slice signal arrives before the step.
-	gate := make(chan struct{})
-	rec := newRecordingHandler(gate, hooks.HookSliceStarted, hooks.HookSliceFailed, hooks.HookSliceCompleted)
-	mgr := hooks.NewManager(hooks.WithDispatchTimeout(4 * time.Second))
-	mgr.Register(rec)
-
-	e := newQueueEngineWithHooks(t, engine.DefaultSliceQueueConcurrency, mgr)
+	e := newQueueEngine(t, engine.DefaultSliceQueueConcurrency)
 
 	const epochId = "queue--slice-start-sig-v2"
 	if _, err := dbos.RunWorkflow(e.DBOS(), e.EpochControlWorkflow,
@@ -293,34 +288,42 @@ func TestSliceSubWorkflow_StartSignalSetsMode(t *testing.T) {
 		t.Fatalf("EnqueueSlice: %v", err)
 	}
 
-	// Wait until HookSliceStarted fires (sub-workflow is alive and the Recv has
-	// already run — the HookSliceStarted step fires AFTER the start_slice Recv).
-	waitUntil(t, 10*time.Second, func() bool { return rec.countOf(hooks.HookSliceStarted) > 0 })
-
-	// Send start_slice with subprocess mode (not-implemented path; proves the
-	// signal was consumed and mode was changed away from the default mock).
+	// Spin-poll until the sub-workflow is addressable (workflow row exists), then
+	// deliver the start_slice signal with subprocess mode. The workflow's Recv
+	// window is 2s; we send as soon as the workflow is alive so the signal is
+	// consumed before the window closes.
 	startSig := protocol.SliceStartSignal{
 		Mode:    protocol.SliceSubprocess,
 		Command: "echo test-command",
 	}
-	if err := dbos.Send(e.DBOS(), sliceId, startSig, protocol.SignalStartSlice.String()); err != nil {
-		// If the sub-workflow already advanced past the Recv window, the signal
-		// cannot be delivered. That is a timing issue, not a correctness failure
-		// — log and proceed without the signal. The mock default will run.
-		t.Logf("Send(start_slice): signal missed Recv window (sub-workflow past the Recv): %v", err)
+	deadline := time.Now().Add(10 * time.Second)
+	sent := false
+	for time.Now().Before(deadline) {
+		if serr := dbos.Send(e.DBOS(), sliceId, startSig, protocol.SignalStartSlice.String()); serr == nil {
+			sent = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !sent {
+		t.Fatal("start_slice signal could not be delivered within 10s — sub-workflow never became addressable")
 	}
 
-	// Release the gate so the step can run.
-	close(gate)
-
 	result := waitSliceResult(t, sh, 20*time.Second)
-	// If the signal was consumed: subprocess mode → not-implemented failure.
-	// If the signal missed the Recv window (timing): mock default → success.
-	// Either is a valid race outcome, but we assert determinism of the SliceId.
+	// The signal was delivered before the 2s Recv window closed; subprocess
+	// mode returns a not-implemented failure (Success=false), proving the signal
+	// path was taken rather than the default mock path.
+	if result.Success {
+		t.Errorf("expected Success=false (subprocess mode → not-implemented error); got true")
+	}
+	if result.Error == nil {
+		t.Errorf("expected Error to be set for subprocess mode; got nil")
+	} else if !contains(*result.Error, "not yet implemented") {
+		t.Errorf("expected Error to contain %q; got: %s", "not yet implemented", *result.Error)
+	}
 	if result.SliceId != sliceId {
 		t.Errorf("result.SliceId = %q, want %q", result.SliceId, sliceId)
 	}
-	t.Logf("start_slice result: success=%v mode_signal_effect_observed=%v", result.Success, !result.Success)
 }
 
 // TestSliceSubWorkflow_CompleteSignalOverridesResult verifies that a

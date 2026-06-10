@@ -68,15 +68,15 @@ func (e *Engine) SliceSubWorkflow(ctx dbos.DBOSContext, in SliceInput) (SliceRes
 		return SliceResult{}, fmt.Errorf("slice %q: unexpected error receiving start_slice signal: %w", in.SliceId, err)
 	}
 
-	// Resolve the execution mode: signal wins, then default to mock.
+	// Resolve the execution mode: signal wins (including unrecognised modes,
+	// so runSlice can return an actionable error), then default to mock.
 	mode := protocol.SliceMock
 	var command string
 	timeoutSecs := 300
 	if err == nil {
-		// Signal was received successfully.
-		if startSig.Mode.IsValid() {
-			mode = startSig.Mode
-		}
+		// Signal was received successfully. Pass the mode as-is — runSlice
+		// handles unrecognised modes with an actionable validation error.
+		mode = startSig.Mode
 		command = startSig.Command
 		if startSig.TimeoutSeconds > 0 {
 			timeoutSecs = startSig.TimeoutSeconds
