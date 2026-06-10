@@ -437,6 +437,48 @@ func TestCLI_EpochCancel_WorkflowError_NonexistentEpoch(t *testing.T) {
 	}
 }
 
+// TestCLI_SliceStart_WorkflowError_NeverStartedSlice_Exit3 verifies that
+// sending a start_slice signal to a slice id that has never been started as a
+// DBOS workflow returns exit 3 (CategoryWorkflow) AND that the structured
+// plain-language error report appears on stderr.
+//
+// The stderr content assertion proves that printError / StructuredError.Report
+// wiring is intact for workflow errors: a regression that stripped the full
+// report to a one-line Error() string would still produce exit 3 but would
+// fail these checks.
+func TestCLI_SliceStart_WorkflowError_NeverStartedSlice_Exit3(t *testing.T) {
+	db := newDB(t)
+	out := runCLI(t, "--db", db, "slice", "start",
+		"--slice-id", "demo--ffffffff-ffff-7fff-8fff-ff0000000099",
+		"--mode", "mock")
+	if out.exitCode != 3 {
+		t.Fatalf("expected exit 3 for start of nonexistent slice; exit=%d stdout=%s stderr=%s",
+			out.exitCode, out.stdout, out.stderr)
+	}
+	// The full structured error report must reach stderr.
+	for _, want := range []string{
+		"Problem:",    // StructuredError.Report What section label
+		"How to fix:", // StructuredError.Report Fix section label
+	} {
+		if !strings.Contains(out.stderr, want) {
+			t.Errorf("stderr missing structured error section %q; stderr=%s", want, out.stderr)
+		}
+	}
+}
+
+// TestCLI_SliceComplete_WorkflowError_NeverStartedSlice_Exit3 verifies that
+// sending a complete_slice signal to a never-started slice id returns exit 3.
+func TestCLI_SliceComplete_WorkflowError_NeverStartedSlice_Exit3(t *testing.T) {
+	db := newDB(t)
+	out := runCLI(t, "--db", db, "slice", "complete",
+		"--slice-id", "demo--ffffffff-ffff-7fff-8fff-ff0000000098",
+		"--output", "done")
+	if out.exitCode != 3 {
+		t.Fatalf("expected exit 3 for complete of nonexistent slice; exit=%d stdout=%s stderr=%s",
+			out.exitCode, out.stdout, out.stderr)
+	}
+}
+
 // ─── help surface ─────────────────────────────────────────────────────────────
 
 // TestCLI_TopLevelHelp_RegistersAllNewSubcommands verifies that the folded

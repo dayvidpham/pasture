@@ -81,17 +81,17 @@ type Config struct {
 	// local executor runs concurrently, providing backpressure on the single
 	// SQLite WAL writer bottleneck. <= 0 uses DefaultSliceQueueConcurrency.
 	//
-	// Trade-off: higher K allows more parallel sub-workflows, increasing
-	// throughput when sub-workflows are I/O-bound; but each concurrent
-	// sub-workflow holds a write transaction slot, and SQLite WAL serialises
-	// commits, so K beyond the disk's commit throughput causes busy_timeout
-	// backpressure. Start with the default (8) and tune upward on SSDs or
-	// downward on spinning disks or network-attached storage.
+	// See DefaultSliceQueueConcurrency in internal/engine/queue.go for the
+	// full trade-off rationale and tuning guidance.
 	SliceConcurrency int
 	// HooksMgr, when set, receives slice lifecycle events (SliceStarted,
 	// SliceCompleted, SliceFailed) dispatched by slice sub-workflows. nil ⇒
 	// hook dispatch is skipped (no observability events; the sub-workflow still
 	// runs correctly).
+	//
+	// HooksMgr is wired by the daemon at startup. Callers that don't need
+	// slice lifecycle observability (e.g. the local CLI, unit tests) may
+	// leave this nil.
 	HooksMgr *hooks.Manager
 }
 
@@ -112,15 +112,16 @@ type ActivitySink interface {
 //
 // Lifecycle: New → Launch → (run workflows) → Shutdown.
 type Engine struct {
-	cfg             Config
-	db              *sql.DB
-	dbosCtx         dbos.DBOSContext
-	trail           audit.Trail
-	trailCloser     io.Closer
-	specs           map[protocol.PhaseId]protocol.PhaseSpec
-	activityAgentID provenance.AgentID
-	launched        bool
-	sliceQueue      dbos.WorkflowQueue
+	cfg              Config
+	db               *sql.DB
+	dbosCtx          dbos.DBOSContext
+	trail            audit.Trail
+	trailCloser      io.Closer
+	specs            map[protocol.PhaseId]protocol.PhaseSpec
+	activityAgentID  provenance.AgentID
+	launched         bool
+	sliceQueue       dbos.WorkflowQueue
+	sliceConcurrency int // resolved value stored once in New; returned by SliceConcurrency()
 }
 
 // New constructs an Engine: opens the shared handle with the WAL/busy-timeout
@@ -280,8 +281,10 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 	dbos.RegisterWorkflow(dbosCtx, e.ReviewSubWorkflow)
 
 	// Create the slice queue BEFORE Launch (NewWorkflowQueue panics after Launch).
-	// The concurrency limit K defaults to DefaultSliceQueueConcurrency when the
-	// config value is 0 or negative.
+	// Resolve the concurrency limit K once here; store it on the Engine so
+	// SliceConcurrency() can return the actual configured value without
+	// re-deriving it from the config (two copies of the <=0 fallback logic
+	// would drift independently).
 	k := cfg.SliceConcurrency
 	if k <= 0 {
 		k = DefaultSliceQueueConcurrency
@@ -295,6 +298,7 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		return nil, err
 	}
 	e.sliceQueue = sliceQueue
+	e.sliceConcurrency = k
 
 	return e, nil
 }
@@ -354,10 +358,9 @@ func (e *Engine) SliceQueue() dbos.WorkflowQueue { return e.sliceQueue }
 
 // SliceConcurrency returns the effective per-executor concurrency limit K that
 // was used to configure the slice queue. This is the resolved value (after
-// applying the DefaultSliceQueueConcurrency fallback).
+// applying the DefaultSliceQueueConcurrency fallback) stored once in New —
+// not re-derived from the config to avoid having two copies of the fallback
+// logic that could drift.
 func (e *Engine) SliceConcurrency() int {
-	if e.cfg.SliceConcurrency <= 0 {
-		return DefaultSliceQueueConcurrency
-	}
-	return e.cfg.SliceConcurrency
+	return e.sliceConcurrency
 }

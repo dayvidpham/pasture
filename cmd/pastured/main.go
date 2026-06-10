@@ -29,6 +29,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/config"
+	"github.com/dayvidpham/pasture/internal/engine"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/tasks"
@@ -98,16 +99,9 @@ which point it drains in-flight tasks and exits cleanly.`,
 
 	// --slice-concurrency sets the per-executor concurrency limit K for the
 	// DBOS WorkflowQueue that dispatches slice and review sub-workflows.
-	// K bounds the number of sub-workflows the local executor runs
-	// concurrently, providing backpressure on the single SQLite WAL writer
-	// bottleneck.
-	//
-	// Trade-off: higher K allows more parallel sub-workflows (better throughput
-	// when sub-workflows are I/O-bound) but every concurrent sub-workflow
-	// holds a write transaction slot; SQLite WAL serialises commits, so K
-	// above the disk's commit throughput produces busy_timeout errors. The
-	// default (8) works well on SSD-backed hosts; lower to 4 on spinning
-	// disks or network-attached storage, or raise to 16 on fast NVMe.
+	// K bounds the number of sub-workflows the local executor runs concurrently,
+	// providing backpressure on the single SQLite WAL writer bottleneck.
+	// See engine.DefaultSliceQueueConcurrency for the full trade-off rationale.
 	// Override via env var PASTURE_SLICE_CONCURRENCY.
 	root.PersistentFlags().Int("slice-concurrency", 0,
 		"max concurrent slice/review sub-workflows per executor (0 = default 8; env: PASTURE_SLICE_CONCURRENCY)")
@@ -164,6 +158,27 @@ func run(cmd *cobra.Command, configFile string) error {
 			cfgErr,
 		)
 	}
+
+	// ── 1b. Resolve the slice-queue concurrency limit (--slice-concurrency flag >
+	//        $PASTURE_SLICE_CONCURRENCY env > default 8). Read the flag value here
+	//        so the flag is consumed; the resolved value is logged for operator
+	//        visibility and will be passed to engine.Config.SliceConcurrency when
+	//        the daemon constructs its own Engine (tracked in the DBOS migration).
+	sliceConcurrencyFlag, scErr := cmd.Flags().GetInt("slice-concurrency")
+	if scErr != nil {
+		return fmt.Errorf(
+			"pastured: cannot read --slice-concurrency flag value"+
+				" — this is a programming error in flag registration: %w",
+			scErr,
+		)
+	}
+	sliceConcurrency, scResolveErr := engine.ResolveSliceConcurrency(sliceConcurrencyFlag)
+	if scResolveErr != nil {
+		return scResolveErr
+	}
+	logger.Info("slice queue concurrency resolved",
+		"sliceConcurrency", sliceConcurrency,
+	)
 
 	// ── 1a. Reconcile --db (canonical) vs --audit-db-path (deprecated alias).
 	// PROPOSAL-2 §7.1: `pastured`'s existing --audit-db-path becomes an alias

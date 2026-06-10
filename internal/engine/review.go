@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
@@ -15,6 +16,18 @@ type ReviewInput struct {
 	EpochId string `json:"epochId"`
 	// PhaseId identifies which review phase this is (e.g. "review" or "code-review").
 	PhaseId string `json:"phaseId"`
+	// Round is the review-cycle counter for this (epochId, phaseId) pair. It
+	// starts at 1 and increments each time a review returns REVISE and the
+	// protocol re-enters the review phase. Supplying the round ensures each
+	// re-review runs a fresh DBOS sub-workflow (a different id) rather than
+	// returning the memoized result of a prior round.
+	//
+	// The round value MUST come from a deterministic, replay-stable counter
+	// tracked in workflow state, NOT from wall-clock time or a random value.
+	// Default 0 is treated as round 1 by EnqueueReview for backwards
+	// compatibility (existing callers that don't set Round still get the
+	// correct first-round workflow id).
+	Round int `json:"round,omitempty"`
 }
 
 // ReviewResult is the output of a review sub-workflow.
@@ -28,8 +41,22 @@ type ReviewResult struct {
 }
 
 // reviewVotePollInterval is the Recv timeout for each vote-wait iteration.
-// Short enough to check cancellation frequently; long enough not to spin.
-const reviewVotePollInterval = 5 * time.Second
+//
+// Human review phases wait hours-to-days for votes. Each Recv iteration
+// consumes durable step storage regardless of whether a vote arrived (the
+// DBOS SDK records a row per iteration on timeout). At 5 s, a 24-hour
+// idle review accumulates ~17,280 timeout-operation rows, adding constant
+// write-transaction pressure to the shared SQLite WAL — exactly the
+// bottleneck the slice-queue concurrency limit exists to protect.
+//
+// The long interval is safe because dbos.Send wakes the Recv goroutine
+// immediately via the notification condvar — response latency to an
+// arriving vote is independent of this timeout. The timeout only bounds
+// how often we re-check ctx.Done() for cancellation, which the SDK's
+// recv select already handles internally.
+//
+// 1 hour → ~24 iterations/day per idle review, vs ~17,280 at 5 s.
+const reviewVotePollInterval = 1 * time.Hour
 
 // ReviewSubWorkflow is the DBOS sub-workflow for a single P4/P10 review phase.
 //
@@ -70,31 +97,45 @@ func (e *Engine) ReviewSubWorkflow(ctx dbos.DBOSContext, in ReviewInput) (Review
 				in.EpochId, in.PhaseId, err)
 		}
 
-		// Record the vote; later votes for the same axis overwrite earlier ones.
-		if sig.Axis != "" {
-			votes[sig.Axis] = sig.Vote
+		// Validate the axis and vote before recording. Signals arrive via raw
+		// dbos.Send payloads and any non-empty string is accepted at the transport
+		// layer. A junk axis ("corectness") stored in the votes map would be
+		// iterated by the success computation, potentially flipping Success=false
+		// even when all canonical axes voted ACCEPT. Drop invalid signals and log
+		// them so the sender can diagnose the issue.
+		if !sig.Axis.IsValid() || !sig.Vote.IsValid() {
+			slog.Default().Warn("review sub-workflow dropped invalid vote signal",
+				"epochId", in.EpochId,
+				"phaseId", in.PhaseId,
+				"axis", string(sig.Axis),
+				"vote", string(sig.Vote),
+				"reason", "axis or vote value is not in the canonical set; check the ReviewAxis and VoteType constants",
+			)
+			continue
 		}
+		// Record the vote; later votes for the same axis overwrite earlier ones
+		// (last-writer-wins per ReviewAxis key). This makes round-2 re-votes
+		// after a REVISE deterministic.
+		votes[sig.Axis] = sig.Vote
 	}
 
-	// Determine overall success: all-ACCEPT means the review passes.
-	success := true
-	for _, v := range votes {
-		if v != protocol.VoteAccept {
-			success = false
-			break
+	// Determine overall success: all canonical axes must have an ACCEPT vote.
+	// We iterate AllReviewAxes (not the votes map) so that a junk axis that
+	// somehow survived the validation guard above cannot flip the verdict.
+	success := allAxesVoted(votes)
+	if success {
+		for _, ax := range protocol.AllReviewAxes {
+			if votes[ax] != protocol.VoteAccept {
+				success = false
+				break
+			}
 		}
-	}
-
-	// Defensive copy.
-	result := make(map[protocol.ReviewAxis]protocol.VoteType, len(votes))
-	for k, v := range votes {
-		result[k] = v
 	}
 
 	return ReviewResult{
 		PhaseId:    in.PhaseId,
 		Success:    success,
-		VoteResult: result,
+		VoteResult: votes,
 	}, nil
 }
 

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
@@ -44,13 +45,14 @@ type SliceResult struct {
 //     slot is free (bounded by the configured concurrency limit K).
 //  2. Receives a start_slice signal (SliceStartSignal) via dbos.Recv before
 //     deciding the execution mode. Defaults to mock if no signal arrives within
-//     the configured timeout.
+//     a brief fixed deadline (2s).
 //  3. Executes the slice in the chosen mode (mock / tmux / subprocess) inside a
 //     durable step.
 //  4. Receives an optional complete_slice signal (SliceCompleteSignal) that
 //     overrides the computed outcome.
 //  5. Dispatches hook events (SliceStarted / SliceCompleted / SliceFailed)
-//     through the engine's hook manager.
+//     through the engine's hook manager inside durable steps (memoized; not
+//     re-fired on crash recovery).
 //  6. Sends a slice_progress signal to the parent epoch workflow.
 //
 // The start_slice and complete_slice signals are addressed to the sub-workflow
@@ -143,7 +145,11 @@ func (e *Engine) SliceSubWorkflow(ctx dbos.DBOSContext, in SliceInput) (SliceRes
 			protocol.SignalSliceProgress.String()); serr != nil {
 			// Log but do not fail the sub-workflow: the parent may have finished
 			// or been cancelled. The slice's own result is still durable.
-			_ = serr
+			slog.Default().Warn("slice progress signal not delivered to parent",
+				"sliceId", in.SliceId,
+				"parentWorkflowId", in.ParentWorkflowId,
+				"err", serr,
+			)
 		}
 	}
 
@@ -152,44 +158,79 @@ func (e *Engine) SliceSubWorkflow(ctx dbos.DBOSContext, in SliceInput) (SliceRes
 
 // runSlice executes the slice in the given mode and returns the result.
 // Called inside a durable step so its effect is checkpointed by DBOS.
-func runSlice(_ context.Context, sliceId, _ string, mode protocol.SliceExecutionMode, command string, timeoutSecs int) (SliceResult, error) {
+//
+// Modes:
+//   - mock: no-op stub; always returns Success=true. Used for testing and dry-runs.
+//   - tmux / subprocess: real agent execution is not yet implemented in the DBOS
+//     adapter; returns an actionable not-implemented error with Success=false. The
+//     operator can still report an outcome via the complete_slice signal override.
+//     Full agent execution is tracked as a separate follow-up epic.
+//   - any other value: validation error with Success=false.
+func runSlice(_ context.Context, sliceId, _ string, mode protocol.SliceExecutionMode, _ string, _ int) (SliceResult, error) {
 	switch mode {
 	case protocol.SliceMock:
 		return SliceResult{SliceId: sliceId, Success: true, Output: "mock: completed"}, nil
 
 	case protocol.SliceTmux, protocol.SliceSubprocess:
-		// Execute the slice command. In the DBOS adapter the activity-level
-		// execution of external commands is a future integration point; for
-		// the current scope the step records the intent and the operator
-		// observes the result via the complete_slice signal override.
-		if command == "" {
-			errMsg := fmt.Sprintf("slice %q: mode %q requires a non-empty command", sliceId, mode)
-			return SliceResult{SliceId: sliceId, Success: false, Error: &errMsg}, nil
-		}
-		// The timeout is available for future integration with an actual
-		// exec-with-timeout helper; record it for replay fidelity.
-		_ = timeoutSecs
-		msg := fmt.Sprintf("%s: launched %s", mode, command)
-		return SliceResult{SliceId: sliceId, Success: true, Output: msg}, nil
+		// Real agent execution is not yet implemented in the DBOS adapter.
+		// Returning Success=false (not Success=true) preserves forensic integrity:
+		// a fabricated success would write a false completed-projection record and
+		// fire HookSliceCompleted without any execution having occurred.
+		// Use the complete_slice signal override to report the real outcome once
+		// the agent finishes externally. Wired by the daemon at startup.
+		errMsg := fmt.Sprintf(
+			"slice %q: execution mode %q is not yet implemented.\n"+
+				"Problem: the DBOS adapter cannot launch tmux sessions or subprocesses directly.\n"+
+				"Why: real agent execution is a tracked follow-up; the current adapter supports mock mode only.\n"+
+				"How to fix:\n"+
+				"  1. Re-enqueue with mode=mock if you only need to test the signal path.\n"+
+				"  2. Run the slice externally and report the outcome with:\n"+
+				"       pasture slice complete --slice-id %s --output \"<result>\"\n"+
+				"     or, on failure:\n"+
+				"       pasture slice complete --slice-id %s --error \"<reason>\"",
+			sliceId, mode, sliceId, sliceId,
+		)
+		return SliceResult{SliceId: sliceId, Success: false, Error: &errMsg}, nil
 
 	default:
-		errMsg := fmt.Sprintf("slice %q: unrecognised execution mode %q; valid modes are mock, tmux, subprocess", sliceId, mode)
+		errMsg := fmt.Sprintf(
+			"slice %q: unrecognised execution mode %q.\n"+
+				"How to fix: pass one of the supported modes: mock, tmux, subprocess.",
+			sliceId, mode,
+		)
 		return SliceResult{SliceId: sliceId, Success: false, Error: &errMsg}, nil
 	}
 }
 
-// dispatchHook fires a hook event best-effort through the engine's hook manager.
-// Hook failures are logged (when a manager is available) but never propagate to
-// the caller — hooks are optional observability, not control flow.
-func (e *Engine) dispatchHook(_ dbos.DBOSContext, event hooks.HookEvent, epochId string, data map[string]any) {
+// dispatchHook fires a hook event through the engine's hook manager inside a
+// durable DBOS step (memoized — not re-executed on crash recovery). If the
+// manager is nil (Config.HooksMgr was not set), the call is a no-op.
+//
+// The step is identified by the event name + epoch id, making each dispatch
+// deterministic and replay-stable. Hook failures are logged but never
+// propagated: hooks are optional observability, not control flow.
+//
+// Config.HooksMgr is wired by the daemon at startup; callers that omit it
+// (e.g. tests that don't need observability) see no dispatches.
+func (e *Engine) dispatchHook(ctx dbos.DBOSContext, event hooks.HookEvent, epochId string, data map[string]any) {
 	if e.cfg.HooksMgr == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_, _ = e.cfg.HooksMgr.Dispatch(ctx, hooks.HookPayload{
+	mgr := e.cfg.HooksMgr
+	payload := hooks.HookPayload{
 		Event:   event,
 		EpochId: epochId,
 		Data:    data,
+	}
+	_, _ = dbos.RunAsStep(ctx, func(stepCtx context.Context) (struct{}, error) {
+		if _, err := mgr.Dispatch(stepCtx, payload); err != nil {
+			// Log but do not fail the step: hook dispatch is best-effort.
+			slog.Default().Warn("hook dispatch error",
+				"event", string(event),
+				"epochId", epochId,
+				"err", err,
+			)
+		}
+		return struct{}{}, nil
 	})
 }

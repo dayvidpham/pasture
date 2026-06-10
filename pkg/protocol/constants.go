@@ -1,5 +1,7 @@
 package protocol
 
+import "fmt"
+
 // Signal and query names for the epoch control surface. Defined once here, as
 // distinct named types, so senders and receivers share a single source of truth
 // and a topic/query name is never written as a bare string literal at a call
@@ -95,9 +97,24 @@ func ParseQueryName(s string) (QueryName, bool) {
 }
 
 // ReviewWorkflowID derives the deterministic DBOS workflow id for a review
-// sub-workflow from the epoch id and the phase id. The format is stable and
-// must be used by both the enqueue side (engine.EnqueueReview) and the send
-// side (any caller that submits a vote to the review sub-workflow).
-func ReviewWorkflowID(epochId, phaseId string) string {
-	return epochId + "-review-" + phaseId
+// sub-workflow from the epoch id, phase id, and round number.
+//
+// The round component is required because DBOS workflow ids are idempotent:
+// a second call with the same id returns the already-completed first workflow
+// and its memoized result. Without the round, a REVISE outcome on round 1
+// would prevent round 2 from running — EnqueueReview would silently return
+// the stale round-1 REVISE result forever, breaking the iterate-until-ACCEPT
+// loop.
+//
+// The round value MUST come from a deterministic, replay-stable counter
+// tracked in workflow state (the FSM-tracked review-cycle counter), NOT from
+// wall-clock time or a random value — replay-stability is required because
+// DBOS re-executes the workflow body on crash recovery, and a non-deterministic
+// id would produce a different workflow address on each replay.
+//
+// Both the enqueue side (engine.EnqueueReview) and the send side (any caller
+// that submits a vote via submit_vote) MUST use this function to compute the
+// workflow id.
+func ReviewWorkflowID(epochId, phaseId string, round int) string {
+	return fmt.Sprintf("%s-review-%s-r%d", epochId, phaseId, round)
 }

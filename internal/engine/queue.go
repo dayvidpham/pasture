@@ -9,16 +9,20 @@
 // pasture.db file.
 //
 // Queue lifecycle:
-//   - NewSliceQueue must be called BEFORE dbos.Launch (NewWorkflowQueue panics
+//   - newSliceQueue must be called BEFORE dbos.Launch (NewWorkflowQueue panics
 //     after Launch). Engine.New calls it as part of construction.
 //   - Sub-workflows are enqueued via Engine.EnqueueSlice / Engine.EnqueueReview,
 //     each of which calls dbos.RunWorkflow with dbos.WithQueue(SliceQueueName).
 //   - DBOS dequeues and starts sub-workflows up to K at a time; excess are
-//     durably backlogged in the queues table and retried automatically.
+//     held in the queues table until a running sub-workflow completes and frees
+//     a slot. Multi-process crash recovery and automatic retry across restarts
+//     are tracked as a separate follow-up item.
 package engine
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
@@ -39,12 +43,13 @@ const SliceQueueName = "pasture-slice-queue"
 //   - SQLite WAL serialises writers: only one write transaction commits at a
 //     time. Under 30+ unbounded writers the commit queue grows faster than it
 //     drains and busy_timeout errors accumulate.
-//   - K=8 allows up to 8 sub-workflows to hold a write transaction concurrently;
-//     empirically, 8 provides near-linear throughput on a single-disk host with
-//     a 5 s busy_timeout, while 16+ shows diminishing returns and higher latency.
-//   - Lower K (e.g. 4) is safer on slower storage (HDD, networked FS) or with
-//     a stricter latency SLA; higher K (e.g. 16) is appropriate for an SSD-backed
-//     host with idle I/O headroom.
+//   - K=8 allows up to 8 sub-workflows to hold a write transaction concurrently.
+//     This is a conservative default chosen to stay within the WAL commit
+//     throughput of a typical single-disk host; the right value depends on
+//     your storage — lower K (e.g. 4) on HDD or network-attached storage,
+//     higher K (e.g. 16) on NVMe-backed hosts with idle I/O headroom.
+//   - A benchmark validating a specific K for your setup is the authoritative
+//     guide; measure with your actual storage before changing this default.
 //
 // Override via --slice-concurrency / PASTURE_SLICE_CONCURRENCY or the engine
 // Config.SliceConcurrency field.
@@ -55,12 +60,56 @@ const DefaultSliceQueueConcurrency = 8
 // value is used instead of DefaultSliceQueueConcurrency.
 const SliceConcurrencyEnv = "PASTURE_SLICE_CONCURRENCY"
 
+// ResolveSliceConcurrency resolves the effective per-executor concurrency limit K
+// from the three override sources, highest-priority first:
+//
+//  1. flagVal > 0: the caller-supplied CLI flag value (--slice-concurrency).
+//  2. $PASTURE_SLICE_CONCURRENCY env var (non-empty, parses as a positive int).
+//  3. DefaultSliceQueueConcurrency (8).
+//
+// If the env var is set but not a valid positive integer, the function returns
+// an actionable validation error (the caller should surface it and exit 1).
+// A zero or negative flagVal is treated as "not set" (fall through to env/default).
+//
+// This function is the single resolution rule shared by pastured and any other
+// process that constructs an Engine; call it once at startup and pass the
+// result to engine.Config.SliceConcurrency.
+func ResolveSliceConcurrency(flagVal int) (int, error) {
+	if flagVal > 0 {
+		return flagVal, nil
+	}
+	envStr := os.Getenv(SliceConcurrencyEnv)
+	if envStr != "" {
+		v, err := strconv.Atoi(envStr)
+		if err != nil || v <= 0 {
+			return 0, &pasterrors.StructuredError{
+				Category: pasterrors.CategoryValidation,
+				What:     fmt.Sprintf("$%s=%q is not a valid concurrency limit.", SliceConcurrencyEnv, envStr),
+				Why:      "The environment variable must be a positive integer.",
+				Where:    "Resolving the slice-queue concurrency limit (internal/engine/queue.go in engine.ResolveSliceConcurrency).",
+				Impact:   "The daemon cannot start without a valid concurrency limit for the slice queue.",
+				Fix: fmt.Sprintf(
+					"Set $%s to a positive integer (default is %d):\n"+
+						"  export %s=8\n"+
+						"Or unset it to use the default:\n"+
+						"  unset %s",
+					SliceConcurrencyEnv, DefaultSliceQueueConcurrency, SliceConcurrencyEnv, SliceConcurrencyEnv,
+				),
+			}
+		}
+		return v, nil
+	}
+	return DefaultSliceQueueConcurrency, nil
+}
+
 // newSliceQueue registers the pasture-slice-queue with the given DBOS context
 // and returns the WorkflowQueue. concurrency must be > 0; it bounds the number
 // of slice/review sub-workflows the local executor runs concurrently.
 //
 // This must be called before dbos.Launch. Engine.New calls it as part of
 // construction, so callers that use Engine.New do not need to call it directly.
+// (Note: the function is intentionally unexported; see Engine.SliceQueue for
+// the public accessor.)
 func newSliceQueue(ctx dbos.DBOSContext, concurrency int) (dbos.WorkflowQueue, error) {
 	if concurrency <= 0 {
 		return dbos.WorkflowQueue{}, &pasterrors.StructuredError{
@@ -87,6 +136,26 @@ func newSliceQueue(ctx dbos.DBOSContext, concurrency int) (dbos.WorkflowQueue, e
 // parent progress signalling. The returned handle is live; callers may call
 // GetResult to wait for the slice to complete.
 func (e *Engine) EnqueueSlice(in SliceInput) (dbos.WorkflowHandle[SliceResult], error) {
+	if in.SliceId == "" {
+		return nil, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryValidation,
+			What:     "A non-empty slice ID is required to enqueue a slice sub-workflow.",
+			Why:      "SliceInput.SliceId was empty; the workflow id and the start_slice/complete_slice signal address are both derived from it.",
+			Where:    "Enqueuing a slice sub-workflow (internal/engine/queue.go in engine.EnqueueSlice).",
+			Impact:   "Without a slice ID the sub-workflow cannot be addressed by signals, so the slice cannot be started or completed.",
+			Fix:      "Set SliceInput.SliceId to the unique identifier for this slice before calling EnqueueSlice.",
+		}
+	}
+	if in.EpochId == "" {
+		return nil, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryValidation,
+			What:     "A non-empty epoch ID is required to enqueue a slice sub-workflow.",
+			Why:      "SliceInput.EpochId was empty; the epoch ID is needed for hook dispatch and the parent progress signal.",
+			Where:    "Enqueuing a slice sub-workflow (internal/engine/queue.go in engine.EnqueueSlice).",
+			Impact:   "Without an epoch ID, hook events and progress signals cannot be correlated with the parent epoch.",
+			Fix:      "Set SliceInput.EpochId to the ID of the epoch that owns this slice.",
+		}
+	}
 	h, err := dbos.RunWorkflow(e.dbosCtx, e.SliceSubWorkflow, in,
 		dbos.WithWorkflowID(in.SliceId),
 		dbos.WithQueue(SliceQueueName),
@@ -109,11 +178,40 @@ func (e *Engine) EnqueueSlice(in SliceInput) (dbos.WorkflowHandle[SliceResult], 
 	return h, nil
 }
 
-// EnqueueReview dispatches a ReviewSubWorkflow via the slice queue, giving it a
-// workflow id formed from "<epochId>-review-<phaseId>". The caller should retain
-// the returned handle to send submit_vote signals and to wait for the result.
+// EnqueueReview dispatches a ReviewSubWorkflow via the slice queue. The
+// workflow id is derived from the epoch id, phase id, and review round so
+// that each round of a review cycle runs a fresh sub-workflow rather than
+// returning the memoized result of a prior round.
+//
+// The caller should retain the returned handle to send submit_vote signals
+// and to wait for the result. To compute the same workflow id for vote
+// delivery, call protocol.ReviewWorkflowID(epochId, phaseId, round).
 func (e *Engine) EnqueueReview(in ReviewInput) (dbos.WorkflowHandle[ReviewResult], error) {
-	wfID := protocol.ReviewWorkflowID(in.EpochId, in.PhaseId)
+	if in.EpochId == "" {
+		return nil, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryValidation,
+			What:     "A non-empty epoch ID is required to enqueue a review sub-workflow.",
+			Why:      "ReviewInput.EpochId was empty; the epoch ID is part of the deterministic review workflow id.",
+			Where:    "Enqueuing a review sub-workflow (internal/engine/queue.go in engine.EnqueueReview).",
+			Impact:   "An empty epoch ID produces a degenerate workflow id that cannot be addressed by vote signals.",
+			Fix:      "Set ReviewInput.EpochId to the ID of the epoch that owns this review phase.",
+		}
+	}
+	if in.PhaseId == "" {
+		return nil, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryValidation,
+			What:     "A non-empty phase ID is required to enqueue a review sub-workflow.",
+			Why:      "ReviewInput.PhaseId was empty; the phase ID is part of the deterministic review workflow id.",
+			Where:    "Enqueuing a review sub-workflow (internal/engine/queue.go in engine.EnqueueReview).",
+			Impact:   "An empty phase ID produces a degenerate workflow id ('-review-') that cannot be uniquely addressed.",
+			Fix:      "Set ReviewInput.PhaseId to the review phase identifier (e.g. \"review\" or \"code-review\").",
+		}
+	}
+	round := in.Round
+	if round <= 0 {
+		round = 1
+	}
+	wfID := protocol.ReviewWorkflowID(in.EpochId, in.PhaseId, round)
 	h, err := dbos.RunWorkflow(e.dbosCtx, e.ReviewSubWorkflow, in,
 		dbos.WithWorkflowID(wfID),
 		dbos.WithQueue(SliceQueueName),
