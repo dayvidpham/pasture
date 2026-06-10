@@ -696,29 +696,10 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentId(role string) (string, error)
 // epochId is required and is always part of the WHERE clause. phase and role
 // are optional; nil means "no filter".
 //
-// Legacy-role compatibility: the v3 schema dropped audit_events.role and
-// replaced it with agent_id. To preserve the existing API where callers
-// filter by role and read event.Role on the result, this method LEFT JOINs
-// audit_events with agents_software (via agent_id) and:
-//
-//   - When role != nil, restricts the JOIN target to s.name = "pasture/legacy-role/<role>".
-//   - When reading rows, strips the "pasture/legacy-role/" prefix from the
-//     joined name to repopulate event.Role. Agents whose name does not match
-//     the legacy prefix (e.g. S7 well-known automaton agents) report the
-//     full name as-is so the caller still gets a non-empty Role.
-//
-// LEFT JOIN (rather than INNER JOIN) defends against orphan agent_id values
-// that have no agents_software row — those rows are returned with an empty
-// Role rather than dropped silently.
-// QueryEvents returns audit events matching the given filters in chronological
-// order (ascending row id, which equals insertion order).
-//
-// epochId is required and is always part of the WHERE clause. phase and role
-// are optional; nil means "no filter".
-//
-// Delegates to audit.QueryEventsOn, the single canonical query implementation.
+// Delegates to QueryEventsOn, the single canonical query implementation.
 // Both SqliteAuditTrail.QueryEvents and StatusReader.QueryEvents use the same
-// shared function so any schema change is applied in one place.
+// shared function so any schema change (v5+) is applied in one place. See
+// QueryEventsOn for the legacy-role compatibility and LEFT JOIN mechanics.
 func (s *SqliteAuditTrail) QueryEvents(ctx context.Context, epochId string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
 	return QueryEventsOn(ctx, s.db, epochId, phase, role)
 }

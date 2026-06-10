@@ -23,9 +23,11 @@ package main_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -162,8 +164,11 @@ func TestCLI_Status_AbsentDB_NoFileCreated(t *testing.T) {
 	}
 	// No sidecar files should appear in the directory (no -wal, -shm or other
 	// artifacts from a failed open attempt).
-	dir := dbPath[:len(dbPath)-len("pasture.db")-1]
-	entries, _ := os.ReadDir(dir)
+	dir := filepath.Dir(dbPath)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir %q: %v", dir, err)
+	}
 	for _, e := range entries {
 		t.Errorf("unexpected file in db dir after absent-db run: %s", e.Name())
 	}
@@ -597,12 +602,16 @@ func TestCLI_Status_List_ShowsAllEpochs_Text(t *testing.T) {
 	}
 }
 
-// ─── sidecar test (item 5: zpnv7) ─────────────────────────────────────────────
+// ─── sidecar test ─────────────────────────────────────────────────────────────
 
 // TestCLI_Status_ReadOnly_NoUnexpectedSidecars verifies that running
 // `pasture status` on an existing database leaves no unexpected sidecar files
 // (beyond the standard SQLite -wal and -shm work files). The main database
 // file hash must be unchanged, confirming no data was written.
+//
+// SHA-256 is taken of the main db file before and after the status run. Under
+// WAL mode any write lands in the -wal file first, so an unchanged main-file
+// hash confirms that the read-only open did not flush any data into the main db.
 func TestCLI_Status_ReadOnly_NoUnexpectedSidecars(t *testing.T) {
 	db := newDB(t)
 	// Pre-create and migrate the database so it exists with a valid schema.
@@ -611,18 +620,25 @@ func TestCLI_Status_ReadOnly_NoUnexpectedSidecars(t *testing.T) {
 		t.Fatalf("migrate to pre-create db: exit %d; stderr=%s", migrateOut.exitCode, migrateOut.stderr)
 	}
 
-	// Snapshot directory contents before the status run.
+	// Snapshot directory contents and main-file hash before the status run.
 	dbDir := filepath.Dir(db)
 	dbBase := filepath.Base(db)
 	beforeEntries := dirEntryNames(t, dbDir)
+	hashBefore := fileHash(t, db)
 
 	out := runCLI(t, "--db", db, "status")
 	if out.exitCode != 0 {
 		t.Fatalf("status exit %d; stderr=%s", out.exitCode, out.stderr)
 	}
 
-	// Snapshot directory contents after.
+	// Snapshot directory contents and main-file hash after.
 	afterEntries := dirEntryNames(t, dbDir)
+	hashAfter := fileHash(t, db)
+
+	// The main database file must not have been modified.
+	if hashBefore != hashAfter {
+		t.Errorf("main database file %q changed after status run — read-only open must not write to the main db file", db)
+	}
 
 	// Allowed sidecar names: SQLite WAL and shared-memory files. The main db file
 	// itself is always present.
@@ -648,6 +664,21 @@ func TestCLI_Status_ReadOnly_NoUnexpectedSidecars(t *testing.T) {
 	}
 }
 
+// fileHash returns the hex-encoded SHA-256 hash of the file at path.
+func fileHash(t *testing.T, path string) string {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("fileHash: open %q: %v", path, err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		t.Fatalf("fileHash: read %q: %v", path, err)
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
 // dirEntryNames returns the names of all entries in dir.
 func dirEntryNames(t *testing.T, dir string) []string {
 	t.Helper()
@@ -662,11 +693,13 @@ func dirEntryNames(t *testing.T, dir string) []string {
 	return names
 }
 
-// ─── never-migrate regression tests (item 1: kjtvw) ──────────────────────────
+// ─── never-migrate regression tests ───────────────────────────────────────────
 
 // readSchemaVersionDirect opens the database at dbPath with the shared WAL DSN
 // (NOT read-only, so it can be used for setup writes) and returns
-// MAX(version) from audit_schema_meta. Returns 0 if the table is absent.
+// MAX(version) from audit_schema_meta. Returns 0 if the table is absent or
+// empty. Calls t.Fatalf for any other scan error so a corrupted schema does
+// not silently produce a vacuously-passing never-migrate comparison.
 // Uses an INDEPENDENT connection so any cached state from a prior open is gone.
 func readSchemaVersionDirect(t *testing.T, dbPath string) int {
 	t.Helper()
@@ -676,11 +709,20 @@ func readSchemaVersionDirect(t *testing.T, dbPath string) int {
 	}
 	defer db.Close()
 
-	var version sql.NullInt64
-	row := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`)
-	if err := row.Scan(&version); err != nil {
-		// Table might not exist or be empty; treat as 0.
+	// Check whether the table exists first; absent table means version 0.
+	var tableName string
+	switch err := db.QueryRow(
+		`SELECT name FROM sqlite_master WHERE type='table' AND name='audit_schema_meta'`,
+	).Scan(&tableName); {
+	case err == sql.ErrNoRows:
 		return 0
+	case err != nil:
+		t.Fatalf("readSchemaVersionDirect: checking for audit_schema_meta: %v", err)
+	}
+
+	var version sql.NullInt64
+	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
+		t.Fatalf("readSchemaVersionDirect: scanning MAX(version): %v", err)
 	}
 	if !version.Valid {
 		return 0

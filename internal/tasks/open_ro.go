@@ -1,19 +1,16 @@
 // Package tasks — open_ro.go
 //
 // StatusReader is a lightweight, read-only reader for the audit trail used
-// exclusively by the `pasture status` verb. It deliberately does NOT open a
-// full protocol.TaskTracker (which runs schema migrations and creates
-// directories): a pure-read status view must never modify the database.
+// by the `pasture status` verb. It deliberately does NOT open a full
+// protocol.TaskTracker (which runs schema migrations and creates directories):
+// a pure-read status view must never modify the database.
 //
-// Behaviour:
-//   - If the database file is absent, Open returns an actionable error
-//     naming the path — no file is created.
-//   - If the database file is present, Open opens it read-only (SQLite
-//     mode=ro) and verifies that its audit schema version matches
-//     audit.MaxKnownSchemaVersion. A mismatch in either direction returns an
-//     actionable error directing the operator to use the correct binary or
-//     run `pasture migrate` — the status reader never migrates.
-//   - All queries are forwarded to the underlying *sql.DB in read-only mode.
+// Callers open the database themselves (typically via dbconn.OpenReadOnlyDB),
+// verify the schema version with CheckSchemaVersion, and then wrap the handle
+// with NewStatusReaderFromDB. The caller retains ownership of the *sql.DB
+// and is responsible for closing it; StatusReader.Close is a no-op.
+//
+// All queries are forwarded to the underlying *sql.DB in read-only mode.
 package tasks
 
 import (
@@ -22,59 +19,28 @@ import (
 	"fmt"
 
 	"github.com/dayvidpham/pasture/internal/audit"
-	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // StatusReader is a read-only audit-trail reader for the status verb. The
-// zero value is invalid; use OpenStatusReader or NewStatusReaderFromDB to
-// construct one.
+// zero value is invalid; use NewStatusReaderFromDB to construct one.
 type StatusReader struct {
-	db    *sql.DB
-	owned bool // true when this reader owns db (must Close it); false for borrowed handles
-}
-
-// OpenStatusReader opens the database at dbPath in read-only mode for the
-// status verb. Empty dbPath resolves to DefaultDBPath.
-//
-// Returns a CategoryConnection error when the file is absent (no daemon has
-// run yet), and a CategoryStorage error when the on-disk schema version does
-// not match what this binary supports.
-func OpenStatusReader(dbPath string) (*StatusReader, error) {
-	if dbPath == "" {
-		dbPath = DefaultDBPath()
-	}
-
-	db, err := dbconn.OpenReadOnlyDB(dbPath)
-	if err != nil {
-		return nil, err
-	}
-
-	// Verify the schema version without migrating. A status read against a
-	// database that belongs to a running daemon must not alter its schema.
-	if verErr := CheckSchemaVersion(db, dbPath); verErr != nil {
-		db.Close()
-		return nil, verErr
-	}
-
-	return &StatusReader{db: db, owned: true}, nil
+	db *sql.DB
 }
 
 // NewStatusReaderFromDB wraps an already-open *sql.DB as a StatusReader. The
-// caller retains ownership of db — Close on the returned reader is a no-op.
-// This constructor exists so callers that have already verified the schema
-// version and opened the database (e.g. EpochStatus) can reuse the handle
-// for enrichment queries without a second open.
+// caller retains ownership of db and is responsible for closing it; Close on
+// the returned reader is a no-op. This constructor exists so callers that have
+// already verified the schema version and opened the database (e.g. EpochStatus)
+// can reuse the handle for enrichment queries without a second open.
 func NewStatusReaderFromDB(db *sql.DB) *StatusReader {
-	return &StatusReader{db: db, owned: false}
+	return &StatusReader{db: db}
 }
 
 // CheckSchemaVersion reads the audit schema version from an already-open
 // read-only handle and returns a CategoryStorage error when it does not match
-// audit.MaxKnownSchemaVersion. The error messages are identical to those in
-// OpenStatusReader so operators see a uniform mismatch message regardless of
-// which code path triggered the check.
+// audit.MaxKnownSchemaVersion.
 //
 // This function is SELECT-only: it issues no writes, DDL, migration, or any
 // operation that could alter the database. It is safe to call on a read-only
@@ -192,13 +158,11 @@ func (r *StatusReader) CountEventsByEpoch(ctx context.Context) (map[string]int, 
 	return counts, nil
 }
 
-// Close releases the underlying database handle when this reader owns it.
-// It is a no-op for readers created via NewStatusReaderFromDB (borrowed handles).
+// Close is a no-op. StatusReader does not own its database handle — the
+// caller that constructed it via NewStatusReaderFromDB retains ownership
+// and is responsible for closing the underlying *sql.DB.
 // Safe to call multiple times.
 func (r *StatusReader) Close() error {
-	if r.owned && r.db != nil {
-		return r.db.Close()
-	}
 	return nil
 }
 

@@ -24,6 +24,21 @@ import (
 //
 // epochId is required and always part of the WHERE clause. phase and role are
 // optional; nil means "no filter". Results are returned oldest-first.
+//
+// Legacy-role compatibility: the v3 schema dropped audit_events.role and
+// replaced it with agent_id. To preserve the existing API where callers filter
+// by role and read event.Role on the result, this function LEFT JOINs
+// audit_events with agents_software (via agent_id) and:
+//
+//   - When role != nil, restricts the JOIN target to asw.name = "pasture/legacy-role/<role>".
+//   - When reading rows, strips the "pasture/legacy-role/" prefix from the
+//     joined name to repopulate event.Role. Agents whose name does not match
+//     the legacy prefix (e.g. well-known automaton agents) report the full name
+//     as-is so the caller still gets a non-empty Role for those events.
+//
+// LEFT JOIN (rather than INNER JOIN) defends against orphan agent_id values
+// that have no agents_software row — those rows are returned with an empty
+// Role rather than dropped silently.
 func QueryEventsOn(ctx context.Context, db *sql.DB, epochId string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
 	var clauses []string
 	var args []any
@@ -58,13 +73,12 @@ func QueryEventsOn(ctx context.Context, db *sql.DB, epochId string, phase *proto
 			What: fmt.Sprintf(
 				"Couldn't read audit events for epoch %q.", epochId,
 			),
-			Why:   "The query linking audit events to their epoch returned an error.",
-			Where: "Reading audit events (internal/audit/query.go in audit.QueryEventsOn).",
-			Impact: "The recent-events section of the status view will be empty. The epoch's\n" +
-				"cancellation reason (if any) may also be missing.",
+			Why:    "The query linking audit events to their epoch returned an error.",
+			Where:  "Reading audit events (internal/audit/query.go in audit.QueryEventsOn).",
+			Impact: "No audit events can be returned for this epoch until the problem is fixed.",
 			Fix: "1. Confirm the database is readable and at the latest schema version:\n" +
 				"     pasture migrate\n" +
-				"2. Retry the status command once the database is healthy.",
+				"2. Retry the query once the database is healthy.",
 			Cause: err,
 		}
 	}
@@ -83,7 +97,7 @@ func QueryEventsOn(ctx context.Context, db *sql.DB, epochId string, phase *proto
 				Why:    "Scanning a result row from the audit-events query failed.",
 				Where:  "Reading audit events (internal/audit/query.go in audit.QueryEventsOn).",
 				Impact: "The event listing is incomplete.",
-				Fix: "1. Retry the status command.\n" +
+				Fix: "1. Retry the query.\n" +
 					"2. If the error persists, check the database integrity.",
 				Cause: err,
 			}
@@ -121,7 +135,7 @@ func QueryEventsOn(ctx context.Context, db *sql.DB, epochId string, phase *proto
 			Why:    "The result iterator returned an error before all rows were read.",
 			Where:  "Reading audit events (internal/audit/query.go in audit.QueryEventsOn).",
 			Impact: "The event listing may be incomplete.",
-			Fix: "1. Retry the status command.\n" +
+			Fix: "1. Retry the query.\n" +
 				"2. If the error persists, check the database integrity.",
 			Cause: err,
 		}
