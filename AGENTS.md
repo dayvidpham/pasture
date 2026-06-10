@@ -375,33 +375,22 @@ make build  # CGO_ENABLED=0 go build ./...
 ### Smoke tests
 
 The unit/integration suite (`make test`) runs in-process against mocked or
-in-memory backends. The smoke tests below exercise the production-shape path
-(real Temporal server, real SQLite file, real CLI invocations) and surface
-wiring bugs the test suite cannot see.
+in-memory backends and is the primary quality gate.
 
-```bash
-nix develop                          # devShell provides temporal-cli, sqlite3, jq
-make smoke-temporal                  # Temporal E2E smoke (aura-plugins-cn5ax)
-```
+`make smoke-temporal` **now fails immediately** — the Temporal control CLI
+(`pasture-msg`) that the smoke harness (`scripts/smoke/temporal-e2e.sh`)
+depended on was removed as part of the migration off Temporal. Running the
+target prints an actionable message explaining what was removed and why, then
+exits non-zero. Do not attempt to run it.
 
-`make smoke-temporal` boots a local Temporal dev server on ports 17233/18233
-(non-default so it doesn't collide with a long-running personal Temporal),
-starts `pastured` against a fresh sqlite db, creates a REQUEST task, kicks off
-an EpochWorkflow, advances one phase, and asserts:
-
-- `tasks` row exists for the REQUEST
-- `audit_events` rows recorded
-- `context_edges` rows link events to the epoch with `kind=EpochContext`
-- Temporal search attributes `PastureEpochId` / `PasturePhase` upserted on the workflow
-
-Set `KEEP_WORKDIR=1` to preserve the tempdir (db + logs) after the run for
-debugging. Override `TEMPORAL_PORT` / `TEMPORAL_UI_PORT` if 17233/18233 are
-taken. See `scripts/smoke/temporal-e2e.sh` for the full script.
+Run `make test` instead. Production-shape Temporal E2E smoke coverage is
+planned as part of the DBOS migration; track progress at
+https://github.com/dayvidpham/pasture/issues/13.
 
 ## Build
 
 ```bash
-make build          # produces bin/pastured, bin/pasture-msg, bin/pasture-release
+make build          # produces bin/pastured, bin/pasture, bin/pasture-release
 make test           # go test -race ./...
 make lint           # go vet ./...
 make fmt            # gofmt -w .

@@ -124,16 +124,30 @@ release-all:
 # Smoke tests
 # --------------------------------------------------------------------------
 #
-# Run the production-shape Temporal end-to-end smoke. Brings up a local
-# Temporal dev server (docker), runs pastured against a fresh pasture.db,
-# exercises one epoch workflow start, and asserts that audit_events,
-# context_edges, and Temporal search attributes are populated as expected.
+# smoke-temporal is no longer runnable: the Temporal control CLI (pasture-msg)
+# that scripts/smoke/temporal-e2e.sh depends on was removed as part of the
+# migration off Temporal (see https://github.com/dayvidpham/pasture/issues/13).
+# This target now fails immediately with an actionable message rather than
+# silently producing a "binary not found" failure midway through the script.
 #
-# Requires: docker, sqlite3, jq, all binaries built.
-# See: scripts/smoke/temporal-e2e.sh + aura-plugins-cn5ax.
+# To verify the current production-shape path, run the standard test suite:
+#   make test
+#
+# Full Temporal E2E smoke coverage is planned as part of the DBOS migration;
+# track progress at https://github.com/dayvidpham/pasture/issues/13.
 
-smoke-temporal: build
-	scripts/smoke/temporal-e2e.sh
+smoke-temporal:
+	@echo ""
+	@echo "smoke-temporal is not available."
+	@echo ""
+	@echo "  What was removed: the Temporal control CLI (pasture-msg) and its"
+	@echo "    end-to-end smoke harness."
+	@echo "  Why: removed as part of the migration off Temporal."
+	@echo "  Impact: this smoke path cannot run until the DBOS migration is complete."
+	@echo "  What to do instead: run the standard test suite with 'make test'."
+	@echo "    Track progress: https://github.com/dayvidpham/pasture/issues/13"
+	@echo ""
+	@exit 1
 
 # --------------------------------------------------------------------------
 # Clean
