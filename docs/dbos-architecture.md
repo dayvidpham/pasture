@@ -177,10 +177,10 @@ and is deliberately not added.
 
 No `activities` schema change (`id` is already `TEXT PRIMARY KEY`); it matches
 Provenance's own `INSERT OR IGNORE` idiom (`edges`, `labels`). The engine supplies a
-**deterministic UUIDv5** id derived from a fixed namespace constant + the name
-`"<epoch_id>/<phase>/<activity_kind>/<step_seq>"` (`step_seq = dbos.GetStepID(ctx)`,
-which DBOS re-derives identically on replay). The namespace constant and name encoding
-are pinned once in `pkg/protocol` so the engine and tests compute byte-identical ids.
+**deterministic UUIDv5** id = `DedupKey(epochID, phase, activity_kind, stepSeq)` where
+`stepSeq = dbos.GetStepID(ctx)` (AMENDMENT-3, positional). The namespace constant and
+encoder are pinned once in `pkg/protocol` so the engine and tests compute byte-identical
+ids, and DBOS re-derives the same step ordinal on replay (hence the same id).
 
 > **Why UUIDv5, not v7:** v7 is random — a crash-replay would mint a *different* id and
 > duplicate the row. v5 is **derived** from the activity's logical identity, so a replay
@@ -220,15 +220,21 @@ key on the same connection as the write** — never a cross-connection transacti
 | `activities` (Provenance, zombiezen) | `StartActivityWithID` + deterministic UUIDv5 id (reuses existing TEXT PK) + `ON CONFLICT(id) DO NOTHING` | exactly-once |
 
 Each is a single idempotent statement on its own connection, so a crash-replay yields
-exactly one row in every tier. **Both** forensic tables key off the **identical**
-deterministic UUIDv5, produced by one pinned function in `pkg/protocol`:
-`DedupKey(epochID, phase, kind, stepSeq) → UUIDv5(ns, "<epoch_id>/<phase>/<kind>/<step_seq>")`.
-Each tier passes its own discriminator as `kind` (audit → `event_type`, activities →
-`activity_kind`); they differ only in **storage** (activities reuses its TEXT PK; audit
-adds the sidecar `dedup_key` column because its PK is an autoincrement INTEGER). This
-holds exactly-once **only** under the invariant *at most one forensic emission of a given
-kind per DBOS step* — two same-kind rows in one step would collide on the key; S1/S4 pin
-and test that invariant. See the amendment note below.
+exactly one row in every tier. **Both** forensic tables key off the **identical
+mechanism** — one pinned **positional** encoder in `pkg/protocol` (AMENDMENT-3):
+`DedupKey(epochID, phase, kind, stepSeq) → UUIDv5(ns, "<epoch>/<phase>/<kind>/<step_seq>")`,
+where `stepSeq = dbos.GetStepID(ctx)` (DBOS re-derives the same step ordinal on replay).
+Each tier passes its own **distinctly-namespaced** discriminator as `kind` (audit →
+`event_type`; activities → a namespaced `activity_kind`, e.g. `"activity:…"`), so the two
+tiers produce **distinct id values** for the same transition — they are different entities
+(a system event record vs a PROV-O agent Activity, with different agent attribution) and
+must not share a primary identity by construction. (Cross-tier correlation, if needed, is
+via the shared `(epoch, phase, step)` coordinates, not id-equality.) They also differ in
+**storage** (activities reuses its TEXT PK; audit
+adds the sidecar `dedup_key` column because its PK is an autoincrement INTEGER).
+- **Cross-epoch:** `epochID` is in the key → distinct epochs at the same `step_seq` get distinct keys.
+- **Cyclic re-entries** (`p4→p3→p4`, `p10→p9→p10`) emit their two `PhaseTransition` rows at **different** `step_seq` → distinct keys → both survive, with no content analysis. (This is why the positional basis was restored over the semantic one — it handles cyclic repeats for free.)
+- **One-emission-per-(kind, step) invariant:** the engine emits each forensic row in its **own** `RunAsStep`, so same-`kind` logically-simultaneous rows (e.g. 3 `VoteRecorded` for 3 reviewers) land at distinct `step_seq` → 3 rows. A test asserts a step never emits two same-`kind` rows.
 
 > **Amendment (2026-06-09, Phase-8 IMPL_PLAN; hardened after a 3-reviewer re-review).** The `audit_events` mechanism was
 > originally specified as `UNIQUE(epoch_id, phase, event_type, step_seq)`. That key is
@@ -248,6 +254,34 @@ and test that invariant. See the amendment note below.
 > `dedup_key` is `NULL`
 > for legacy/non-engine rows; the partial index ignores NULLs, so the column
 > is additive and back-compatible.
+
+> **Amendment-3 (2026-06-09, Plan UAT round 2 — user-directed) — ACTIVE.** AMENDMENT-2 (below)
+> is **WITHDRAWN**. After seeing the full semantic-key design, the user reverted to the
+> **positional `step_seq`** basis (*"This is quite crazy. Let's just do the step_seq."*): it is
+> simpler and handles cyclic re-entries for free (distinct step ordinals), with epoch-in-key for
+> cross-epoch and the one-emission-per-step discipline for same-`kind` multiples. The active §7
+> mechanism above reflects this. AMENDMENT-2 is retained below as superseded history only.
+>
+> **Amendment-2 (2026-06-09, Plan UAT — WITHDRAWN by Amendment-3, retained as history).** The key basis (briefly) changed from the
+> **positional** `step_seq` (`dbos.GetStepID`) to the row's **semantic natural key** (its
+> content). Two reasons: (1) it removes the fragile "one-emission-per-step" requirement —
+> several same-`event_type` rows in one step (e.g. 3 `VoteRecorded` by `reviewerId`) now get
+> distinct keys by identity, not by being in separate steps; (2) **fail-safe** — an
+> under-specified key silently *drops* a legitimate forensic row (data loss), the malign
+> direction. So `DedupKey` hashes `(epoch, phase, kind, naturalKey)` where `naturalKey` is a
+> canonical serialization of the row's identifying payload, built by
+> `AuditNaturalKey`/`ActivityNaturalKey` in `pkg/protocol`.
+>
+> **Correction (after correctness re-review F1):** content alone is NOT sufficient. The FSM
+> has **cyclic transitions** (`p4→p3→p4`, `p10→p9→p10`); a re-entry emits a `PhaseTransition`
+> with byte-identical payload `{from,to,conditionMet}`, so a pure-content key would silently
+> drop the second legitimate row. Therefore the identity of any **recurrent-within-epoch**
+> event type also folds in a **replay-deterministic domain occurrence/round** (the review
+> round / transition index from `EpochState` — a domain fact, *not* the rejected DBOS
+> `step_seq`). Each emitted type is classified singleton-vs-recurrent at S4 with a
+> same-content-recurrence test; default recurrent when unsure. Serialization is pinned to
+> `encoding/json` Marshal (sorted keys; computed pre-insert from the in-memory event, never
+> recomputed from a DB-read row; `Timestamp` excluded).
 
 > **Why UUIDv5, not v7** (restated here because it's the crux): v7 embeds random bits,
 > so a crash-replay of the emitting step would mint a *different* id and insert a
