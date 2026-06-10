@@ -234,31 +234,22 @@ func TestHandler_EpochCancel_CancelsRunningWorkflow(t *testing.T) {
 		t.Fatalf("EpochCancel exit = %d, want 0", code)
 	}
 
-	// Observable effect: after cancellation the control workflow is no longer
-	// processing signals. Send a PhaseAdvance (best-effort, returns nil); then
-	// poll the projection for 500 ms. Because the workflow is cancelled, it will
-	// not write a new projection row, so the phase must NOT advance to elicit.
-	code, hErr = handlers.PhaseAdvance(ctrl, epochId, protocol.PhaseElicit, "test", "probe", types.OutputJSON)
-	if hErr != nil {
-		// PhaseAdvance via Send is best-effort; it should still return nil.
-		t.Logf("PhaseAdvance after cancel returned err (unexpected but tolerated): %v", hErr)
+	// Observable effect: retrieve the workflow status directly from the substrate
+	// and confirm it is CANCELLED. A cancelled workflow keeps its workflow_status
+	// row (the FK on notifications.destination_uuid still resolves), so
+	// dbos.Send to it returns nil; only RetrieveWorkflow + GetStatus reveals the
+	// true terminal state.
+	handle, hErr2 := dbos.RetrieveWorkflow[protocol.EpochState](seedEngine.DBOS(), epochId)
+	if hErr2 != nil {
+		t.Fatalf("RetrieveWorkflow after cancel: %v", hErr2)
 	}
-	_ = code
-
-	// Poll briefly; the projection must NOT advance, confirming the workflow
-	// stopped processing before the cancel.
-	end := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(end) {
-		st, readErr := seedEngine.ReadProjection(epochId)
-		if readErr != nil {
-			t.Fatalf("ReadProjection: %v", readErr)
-		}
-		if st != nil && st.CurrentPhase == protocol.PhaseElicit {
-			t.Fatalf("projection advanced to elicit after cancel — workflow was not stopped")
-		}
-		time.Sleep(20 * time.Millisecond)
+	wfStatus, statusErr := handle.GetStatus()
+	if statusErr != nil {
+		t.Fatalf("GetStatus after cancel: %v", statusErr)
 	}
-	// Reaching here means the projection stayed at its pre-cancel phase.
+	if wfStatus.Status != dbos.WorkflowStatusCancelled {
+		t.Fatalf("workflow status after EpochCancel = %q, want %q", wfStatus.Status, dbos.WorkflowStatusCancelled)
+	}
 }
 
 // ─── PhaseAdvance ─────────────────────────────────────────────────────────────
@@ -609,18 +600,49 @@ func TestHandler_SliceComplete_RejectsConflictingOutputAndError(t *testing.T) {
 	}
 }
 
+// ─── EpochTerminate validation ────────────────────────────────────────────────
+
+// TestHandler_EpochTerminate_RejectsMalformedEpochId verifies that EpochTerminate
+// returns exit 1 (CategoryValidation) for a malformed epoch id and does not
+// write any audit event. The validation guard must fire before RecordEvent so
+// a typo'd id can never produce an unjoinable audit row.
+func TestHandler_EpochTerminate_RejectsMalformedEpochId(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	ctrl, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController: %v", err)
+	}
+	defer ctrl.Close()
+
+	code, hErr := handlers.EpochTerminate(ctrl, "not-a-task-id", "test reason", types.OutputText)
+	if hErr == nil {
+		t.Fatal("expected a validation error for malformed epoch id; got nil")
+	}
+	if code != 1 {
+		t.Fatalf("EpochTerminate exit = %d, want 1 (validation error); err = %v", code, hErr)
+	}
+}
+
 // ─── WorkflowError → exit 3 ──────────────────────────────────────────────────
 //
 // These tests exercise the CategoryWorkflow → exit 3 path on the handlers
 // that interact with the durable engine in a way that can fail at the
-// engine boundary (not just at the signal queue level).
+// engine boundary.
 //
-// Note on dbos.Send semantics: Send is a best-effort notification insert.
-// A nonexistent destination logs a FK error on the DBOS side but returns nil
-// to the caller, so signal handlers (PhaseAdvance, SignalVote, etc.) cannot
-// surface a workflow error via Send alone. EpochCancel (CancelWorkflow) is
-// the lifecycle verb that blocks on engine state and reliably returns an error
-// for a nonexistent or already-completed workflow id.
+// Note on dbos.Send semantics: Send inserts into the notifications table, which
+// has a FOREIGN KEY on destination_uuid referencing workflow_status. Connections
+// use PRAGMA foreign_keys = ON, so sending to an id whose workflow was NEVER
+// STARTED violates the FK and returns a nonexistent-workflow error to the
+// caller (it is not swallowed). A cancelled or finished workflow keeps its
+// workflow_status row, so Send to those ids returns nil — the error only fires
+// for ids that were never registered in workflow_status at all.
+//
+// Use only never-started ids in these tests (e.g. "demo--ffffffff-..."). Do
+// not reuse ids from tests that started and then cancelled a workflow; the
+// cancelled workflow's status row still exists and Send would return nil.
+//
+// These tests double as a substrate canary: if a future version changes Send
+// semantics, the exit-3 assertions fail visibly.
 
 // TestHandler_EpochCancel_WorkflowError_NonexistentWorkflow proves that
 // EpochCancel returns exit 3 (CategoryWorkflow) when no workflow with the
@@ -640,5 +662,141 @@ func TestHandler_EpochCancel_WorkflowError_NonexistentWorkflow(t *testing.T) {
 	}
 	if code != 3 {
 		t.Fatalf("EpochCancel exit = %d, want 3 (workflow error); err = %v", code, hErr)
+	}
+}
+
+// TestHandler_PhaseAdvance_WorkflowError_NeverStartedEpoch verifies that
+// PhaseAdvance returns exit 3 (CategoryWorkflow) when the target epoch was
+// never started. dbos.Send to a never-started id violates the FK on
+// notifications.destination_uuid and returns a nonexistent-workflow error via
+// the sendSignal path, which the handler surfaces as exit 3.
+func TestHandler_PhaseAdvance_WorkflowError_NeverStartedEpoch(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	ctrl, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController: %v", err)
+	}
+	defer ctrl.Close()
+
+	code, hErr := handlers.PhaseAdvance(ctrl,
+		"demo--ffffffff-ffff-7fff-8fff-ff0000000001",
+		protocol.PhaseElicit, "test", "probe", types.OutputText)
+	if hErr == nil {
+		t.Fatal("expected a workflow error for a never-started epoch; got nil")
+	}
+	if code != 3 {
+		t.Fatalf("PhaseAdvance exit = %d, want 3 (workflow error); err = %v", code, hErr)
+	}
+}
+
+// TestHandler_SignalVote_WorkflowError_NeverStartedEpoch verifies that
+// SignalVote returns exit 3 (CategoryWorkflow) for a never-started epoch id.
+// This exercises the sendSignal → SubmitVote path with a valid axis and vote.
+func TestHandler_SignalVote_WorkflowError_NeverStartedEpoch(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	ctrl, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController: %v", err)
+	}
+	defer ctrl.Close()
+
+	code, hErr := handlers.SignalVote(ctrl,
+		"demo--ffffffff-ffff-7fff-8fff-ff0000000002",
+		protocol.AxisCorrectness, protocol.VoteAccept, "r-test", types.OutputText)
+	if hErr == nil {
+		t.Fatal("expected a workflow error for a never-started epoch; got nil")
+	}
+	if code != 3 {
+		t.Fatalf("SignalVote exit = %d, want 3 (workflow error); err = %v", code, hErr)
+	}
+}
+
+// TestHandler_SignalComplete_WorkflowError_NeverStartedEpoch verifies that
+// SignalComplete returns exit 3 (CategoryWorkflow) for a never-started epoch
+// id. This exercises the sendSignal → ReportSliceProgress path.
+func TestHandler_SignalComplete_WorkflowError_NeverStartedEpoch(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	ctrl, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController: %v", err)
+	}
+	defer ctrl.Close()
+
+	out := "done"
+	code, hErr := handlers.SignalComplete(ctrl,
+		"demo--ffffffff-ffff-7fff-8fff-ff0000000003",
+		"slice-x", &out, nil, types.OutputText)
+	if hErr == nil {
+		t.Fatal("expected a workflow error for a never-started epoch; got nil")
+	}
+	if code != 3 {
+		t.Fatalf("SignalComplete exit = %d, want 3 (workflow error); err = %v", code, hErr)
+	}
+}
+
+// TestHandler_SessionRegister_WorkflowError_NeverStartedEpoch verifies that
+// SessionRegister returns exit 3 (CategoryWorkflow) for a never-started epoch
+// id. This exercises the sendSignal → RegisterSession path.
+func TestHandler_SessionRegister_WorkflowError_NeverStartedEpoch(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	ctrl, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController: %v", err)
+	}
+	defer ctrl.Close()
+
+	code, hErr := handlers.SessionRegister(ctrl,
+		"demo--ffffffff-ffff-7fff-8fff-ff0000000004",
+		"sess-x", "worker", "claude-code", "claude-sonnet", types.OutputText)
+	if hErr == nil {
+		t.Fatal("expected a workflow error for a never-started epoch; got nil")
+	}
+	if code != 3 {
+		t.Fatalf("SessionRegister exit = %d, want 3 (workflow error); err = %v", code, hErr)
+	}
+}
+
+// TestHandler_SliceStart_WorkflowError_NeverStartedSlice verifies that
+// SliceStart returns exit 3 (CategoryWorkflow) for a never-started slice id.
+// This exercises the sendSignal → StartSlice path (slice-addressed signals).
+func TestHandler_SliceStart_WorkflowError_NeverStartedSlice(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	ctrl, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController: %v", err)
+	}
+	defer ctrl.Close()
+
+	code, hErr := handlers.SliceStart(ctrl,
+		"demo--ffffffff-ffff-7fff-8fff-ff0000000005",
+		protocol.SliceMock, "", 0, types.OutputText)
+	if hErr == nil {
+		t.Fatal("expected a workflow error for a never-started slice; got nil")
+	}
+	if code != 3 {
+		t.Fatalf("SliceStart exit = %d, want 3 (workflow error); err = %v", code, hErr)
+	}
+}
+
+// TestHandler_SliceComplete_WorkflowError_NeverStartedSlice verifies that
+// SliceComplete returns exit 3 (CategoryWorkflow) for a never-started slice
+// id. This exercises the sendSignal → CompleteSlice path.
+func TestHandler_SliceComplete_WorkflowError_NeverStartedSlice(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	ctrl, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController: %v", err)
+	}
+	defer ctrl.Close()
+
+	out := "done"
+	code, hErr := handlers.SliceComplete(ctrl,
+		"demo--ffffffff-ffff-7fff-8fff-ff0000000006",
+		&out, nil, types.OutputText)
+	if hErr == nil {
+		t.Fatal("expected a workflow error for a never-started slice; got nil")
+	}
+	if code != 3 {
+		t.Fatalf("SliceComplete exit = %d, want 3 (workflow error); err = %v", code, hErr)
 	}
 }

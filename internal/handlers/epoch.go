@@ -122,6 +122,9 @@ func EpochTerminate(ctrl EpochController, epochId, reason string, format types.O
 		"pasture epoch terminate --epoch-id <id>"); err != nil {
 		return pasterrors.ExitCode(err), err
 	}
+	if vErr := validateEpochID(epochId, "handlers.EpochTerminate"); vErr != nil {
+		return pasterrors.ExitCode(vErr), vErr
+	}
 
 	if err := ctrl.TerminateEpoch(context.Background(), epochId, reason); err != nil {
 		return pasterrors.ExitCode(err), err

@@ -188,6 +188,39 @@ func TestCLI_EpochTerminate_EmptyReason_StillRecordsEvent(t *testing.T) {
 	}
 }
 
+// TestCLI_EpochTerminate_MalformedEpochId_RejectsWithExit1_NoAuditRow verifies
+// that a malformed --epoch-id (missing the "<namespace>--<uuid>" shape) is
+// rejected before any audit event is written. The exit code must be 1
+// (validation), and the audit trail must contain no EpochCancelled event.
+func TestCLI_EpochTerminate_MalformedEpochId_RejectsWithExit1_NoAuditRow(t *testing.T) {
+	db := newDB(t)
+	const malformedId = "not-a-task-id"
+
+	out := runCLI(t, "--db", db, "epoch", "terminate",
+		"--epoch-id", malformedId,
+		"--reason", "should never reach audit trail")
+	if out.exitCode != 1 {
+		t.Fatalf("expected exit 1 for malformed epoch id; exit=%d stdout=%s stderr=%s",
+			out.exitCode, out.stdout, out.stderr)
+	}
+
+	// The audit trail must be empty: validateEpochID fires before RecordEvent.
+	evOut := runCLI(t, "--db", db, "--format", "json",
+		"task", "events", "--epoch-id", malformedId)
+	if evOut.exitCode != 0 {
+		t.Fatalf("task events exit %d; stderr=%s", evOut.exitCode, evOut.stderr)
+	}
+	var events []struct {
+		EventType string `json:"eventType"`
+	}
+	if err := json.Unmarshal([]byte(evOut.stdout), &events); err != nil {
+		t.Fatalf("decode events json: %v\nbody: %s", err, evOut.stdout)
+	}
+	if len(events) != 0 {
+		t.Errorf("expected no audit events for a rejected malformed epoch id; got: %+v", events)
+	}
+}
+
 // ─── phase ────────────────────────────────────────────────────────────────────
 
 // TestCLI_PhaseHelp verifies the phase subcommand is registered.
