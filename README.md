@@ -4,13 +4,13 @@ Go implementation of the Aura Protocol codegen and workflow engine.
 
 ## What This Does
 
-Pasture provides the runtime infrastructure for the Aura Protocol: a Temporal workflow engine (`pastured` daemon), CLI for sending protocol messages (`pasture-msg`), a local task + audit CLI (`pasture`), and release tooling (`pasture-release`). The daemon orchestrates agent workflows with constraint validation, phase transitions, and audit trail logging. All task and audit operations route through a single `protocol.TaskTracker` façade against one shared SQLite file at `~/.local/share/pasture/pasture.db`. See `AGENTS.md` for the full architectural overview and `docs/adr/0001-pasture-toolkit-integration-architecture.md` (in the parent repo) for the integration ADR.
+Pasture provides the runtime infrastructure for the Aura Protocol: a Temporal workflow engine (`pastured` daemon), a unified local CLI (`pasture`) for task management, epoch lifecycle, signals, and queries, and release tooling (`pasture-release`). The daemon orchestrates agent workflows with constraint validation, phase transitions, and audit trail logging. All task and audit operations route through a single `protocol.TaskTracker` façade against one shared SQLite file at `~/.local/share/pasture/pasture.db`. See `AGENTS.md` for the full architectural overview and `docs/adr/0001-pasture-toolkit-integration-architecture.md` (in the parent repo) for the integration ADR.
 
 ## Quick Start
 
 Build and test:
 ```bash
-make build          # produces bin/pastured, bin/pasture-msg, bin/pasture-release
+make build          # produces bin/pastured, bin/pasture, bin/pasture-release
 make test           # go test -race ./...
 make lint           # go vet ./...
 make fmt            # gofmt -w .
@@ -20,16 +20,15 @@ Or use Nix:
 ```bash
 nix develop         # dev shell with Go, gopls, sqlite, temporal-cli
 nix build .#pastured
-nix build .#pasture-msg
+nix build .#pasture
 ```
 
 ## Project Structure
 
 ```
 cmd/
-  ├── pasture/         # Local task + audit CLI (pasture task + pasture migrate)
+  ├── pasture/         # Unified CLI: task management, epoch lifecycle, signals, queries, migrate
   ├── pastured/        # Temporal worker daemon entry point
-  ├── pasture-msg/     # CLI for sending protocol messages
   └── pasture-release/ # Release and versioning tool
 internal/
   ├── acp/             # Agent Control Protocol client + adapter
