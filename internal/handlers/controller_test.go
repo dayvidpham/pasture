@@ -1,7 +1,7 @@
 package handlers_test
 
-// L6 round-trip tests: signals delivered via handlers.EpochController durably
-// mutate epoch state; queries read the resulting projection correctly.
+// Round-trip tests: signals delivered via the EpochController durably mutate
+// epoch state; queries read the resulting projection correctly.
 //
 // Each test follows the spec invariant:
 //   - signals change state → the projection reflects the change.
@@ -26,10 +26,40 @@ import (
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
-// openController opens a DBOS-backed EpochController on a fresh temp-db
-// and advances the epoch's control workflow with the given seed steps.
-// The engine is shut down after cleanup; the controller keeps its own handle.
-func openController(t *testing.T, epochId string, seedPhases []protocol.PhaseId) handlers.EpochController {
+// controllerRig holds the seed engine (for projection reads) and the
+// controller (for handler calls) opened on the same database.
+type controllerRig struct {
+	engine *engine.Engine
+	ctrl   handlers.EpochController
+}
+
+// waitProjection polls the seed engine's projection until the epoch reaches
+// want or the deadline expires. Unlike the engine-internal waitPhase helper,
+// this reads through the seed engine so it works across process boundaries.
+func (r *controllerRig) waitProjection(t *testing.T, epochId string, want protocol.PhaseId) *protocol.EpochState {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		st, err := r.engine.ReadProjection(epochId)
+		if err != nil {
+			t.Fatalf("ReadProjection: %v", err)
+		}
+		if st != nil && st.CurrentPhase == want {
+			return st
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	st, _ := r.engine.ReadProjection(epochId)
+	t.Fatalf("epoch %q did not reach phase %q in 15s; last projection = %+v", epochId, want, st)
+	return nil
+}
+
+// openController opens a DBOS-backed EpochController on a fresh temp-db,
+// advances the epoch's control workflow with the given seed steps, and returns
+// both the seed engine (for projection reads) and the controller (for handler
+// calls). Both are registered for cleanup; the controller keeps its own engine
+// context pointing at the same db.
+func openController(t *testing.T, epochId string, seedPhases []protocol.PhaseId) controllerRig {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 
@@ -55,20 +85,26 @@ func openController(t *testing.T, epochId string, seedPhases []protocol.PhaseId)
 	}
 	_ = h // handle not waited here; workflow stays running
 
-	// Advance through the seed phases.
+	// Advance through the seed phases; fatal on timeout so a stuck seed does not
+	// silently continue into an assertion that has no meaning.
 	for _, phase := range seedPhases {
 		sig := protocol.PhaseAdvanceSignal{ToPhase: phase, TriggeredBy: "test-seed", ConditionMet: "ok"}
 		if err := dbos.Send(seedEngine.DBOS(), epochId, sig, protocol.SignalAdvancePhase.String()); err != nil {
 			t.Fatalf("Send(advance_phase=%s): %v", phase, err)
 		}
-		// Wait for the projection to reflect the phase before proceeding.
 		deadline := time.Now().Add(15 * time.Second)
+		reached := false
 		for time.Now().Before(deadline) {
 			st, _ := seedEngine.ReadProjection(epochId)
 			if st != nil && st.CurrentPhase == phase {
+				reached = true
 				break
 			}
 			time.Sleep(15 * time.Millisecond)
+		}
+		if !reached {
+			st, _ := seedEngine.ReadProjection(epochId)
+			t.Fatalf("seed: epoch %q did not reach %q in 15s; last projection = %+v", epochId, phase, st)
 		}
 	}
 
@@ -83,7 +119,7 @@ func openController(t *testing.T, epochId string, seedPhases []protocol.PhaseId)
 			t.Logf("ctrl.Close: %v", err)
 		}
 	})
-	return ctrl
+	return controllerRig{engine: seedEngine, ctrl: ctrl}
 }
 
 // ─── EpochStart / EpochCancel ─────────────────────────────────────────────────
@@ -150,23 +186,105 @@ func TestHandler_EpochStart_RejectsMalformedEpochId(t *testing.T) {
 	}
 }
 
+// TestHandler_EpochCancel_CancelsRunningWorkflow verifies the EpochCancel
+// success path: EpochCancel on a running epoch returns exit 0. The observable
+// effect is that the durable workflow stops processing signals after
+// cancellation: an advance_phase signal sent after cancel does not appear
+// in the projection within the polling window.
+func TestHandler_EpochCancel_CancelsRunningWorkflow(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+
+	// Use a seed engine for projection reads.
+	seedEngine, err := engine.New(context.Background(), engine.Config{
+		DBPath:             dbPath,
+		ApplicationVersion: "test-v1",
+	})
+	if err != nil {
+		t.Fatalf("engine.New: %v", err)
+	}
+	if err := seedEngine.Launch(); err != nil {
+		t.Fatalf("engine.Launch: %v", err)
+	}
+	t.Cleanup(func() { seedEngine.Shutdown(5 * time.Second) })
+
+	ctrl, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController: %v", err)
+	}
+	defer ctrl.Close()
+
+	// Must be a valid provenance task id.
+	const epochId = "demo--01960000-0000-7000-8000-000000000010"
+
+	// Start the epoch so there is something to cancel.
+	code, hErr := handlers.EpochStart(ctrl, epochId, types.OutputJSON)
+	if hErr != nil {
+		t.Fatalf("EpochStart err = %v", hErr)
+	}
+	if code != 0 {
+		t.Fatalf("EpochStart exit = %d, want 0", code)
+	}
+
+	// Cancel it — must succeed (exit 0).
+	code, hErr = handlers.EpochCancel(ctrl, epochId, types.OutputJSON)
+	if hErr != nil {
+		t.Fatalf("EpochCancel err = %v", hErr)
+	}
+	if code != 0 {
+		t.Fatalf("EpochCancel exit = %d, want 0", code)
+	}
+
+	// Observable effect: after cancellation the control workflow is no longer
+	// processing signals. Send a PhaseAdvance (best-effort, returns nil); then
+	// poll the projection for 500 ms. Because the workflow is cancelled, it will
+	// not write a new projection row, so the phase must NOT advance to elicit.
+	code, hErr = handlers.PhaseAdvance(ctrl, epochId, protocol.PhaseElicit, "test", "probe", types.OutputJSON)
+	if hErr != nil {
+		// PhaseAdvance via Send is best-effort; it should still return nil.
+		t.Logf("PhaseAdvance after cancel returned err (unexpected but tolerated): %v", hErr)
+	}
+	_ = code
+
+	// Poll briefly; the projection must NOT advance, confirming the workflow
+	// stopped processing before the cancel.
+	end := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(end) {
+		st, readErr := seedEngine.ReadProjection(epochId)
+		if readErr != nil {
+			t.Fatalf("ReadProjection: %v", readErr)
+		}
+		if st != nil && st.CurrentPhase == protocol.PhaseElicit {
+			t.Fatalf("projection advanced to elicit after cancel — workflow was not stopped")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	// Reaching here means the projection stayed at its pre-cancel phase.
+}
+
 // ─── PhaseAdvance ─────────────────────────────────────────────────────────────
 
 // TestHandler_PhaseAdvance_MutatesProjection verifies that delivering an
 // advance_phase signal via the handler causes the projected state to change.
-// This is the end-to-end spec invariant for "phase advance → Send durably
-// mutates state".
+// Proves the controller topic/payload mapping: the handler must address the
+// advance_phase topic (not a wrong topic) and marshal a PhaseAdvanceSignal
+// (not a wrong type) for the projection to update.
 func TestHandler_PhaseAdvance_MutatesProjection(t *testing.T) {
 	const epochId = "ctl--advance-1"
-	ctrl := openController(t, epochId, nil) // no seed phases; start at request
+	rig := openController(t, epochId, nil) // no seed phases; start at request
 
-	// Deliver the advance to elicit.
-	code, err := handlers.PhaseAdvance(ctrl, epochId, protocol.PhaseElicit, "worker", "elicited", types.OutputJSON)
+	// Deliver the advance to elicit via the handler under test.
+	code, err := handlers.PhaseAdvance(rig.ctrl, epochId, protocol.PhaseElicit, "worker", "elicited", types.OutputJSON)
 	if err != nil {
 		t.Fatalf("PhaseAdvance err = %v", err)
 	}
 	if code != 0 {
 		t.Fatalf("PhaseAdvance exit = %d, want 0", code)
+	}
+
+	// Observable outcome: projection must reflect the new phase.
+	st := rig.waitProjection(t, epochId, protocol.PhaseElicit)
+	if st.CurrentPhase != protocol.PhaseElicit {
+		t.Fatalf("projection CurrentPhase = %q, want %q", st.CurrentPhase, protocol.PhaseElicit)
 	}
 }
 
@@ -192,23 +310,49 @@ func TestHandler_PhaseAdvance_RejectsUnknownPhase(t *testing.T) {
 
 // ─── SignalVote ────────────────────────────────────────────────────────────────
 
-// TestHandler_SignalVote_MutatesProjection delivers a submit_vote signal via the
-// handler and confirms the vote appears in the projected state.
+// TestHandler_SignalVote_MutatesProjection delivers all 3 review-axis votes via
+// the handler and confirms they satisfy the consensus gate on a subsequent
+// advance. Proving the advance completes confirms the handler used the correct
+// submit_vote topic with a well-formed ReviewVoteSignal: a wrong topic or
+// wrong payload would leave the gate unsatisfied and the advance would stall.
 func TestHandler_SignalVote_MutatesProjection(t *testing.T) {
 	const epochId = "ctl--vote-1"
-	ctrl := openController(t, epochId, []protocol.PhaseId{
+	rig := openController(t, epochId, []protocol.PhaseId{
 		protocol.PhaseElicit,
 		protocol.PhasePropose,
 		protocol.PhaseReview,
 	})
 
-	code, err := handlers.SignalVote(ctrl, epochId,
-		protocol.AxisCorrectness, protocol.VoteAccept, "r-1", types.OutputJSON)
+	// Submit all three axes via the handler under test.
+	for _, axis := range protocol.AllReviewAxes {
+		reviewerId := "r-" + string(axis)
+		code, err := handlers.SignalVote(rig.ctrl, epochId, axis, protocol.VoteAccept, reviewerId, types.OutputJSON)
+		if err != nil {
+			t.Fatalf("SignalVote(%s) err = %v", axis, err)
+		}
+		if code != 0 {
+			t.Fatalf("SignalVote(%s) exit = %d, want 0", axis, code)
+		}
+	}
+
+	// Advance through the consensus gate; it passes only if all 3 votes
+	// arrived on the correct topic with the correct payload.
+	code, err := handlers.PhaseAdvance(rig.ctrl, epochId, protocol.PhasePlanReview, "test", "votes-cast", types.OutputJSON)
 	if err != nil {
-		t.Fatalf("SignalVote err = %v", err)
+		t.Fatalf("PhaseAdvance(plan-review) err = %v", err)
 	}
 	if code != 0 {
-		t.Fatalf("SignalVote exit = %d, want 0", code)
+		t.Fatalf("PhaseAdvance(plan-review) exit = %d, want 0", code)
+	}
+
+	// Observable outcome: projection must have advanced past the gate.
+	st := rig.waitProjection(t, epochId, protocol.PhasePlanReview)
+	if st.CurrentPhase != protocol.PhasePlanReview {
+		t.Fatalf("projection CurrentPhase = %q, want %q", st.CurrentPhase, protocol.PhasePlanReview)
+	}
+	// Votes are phase-scoped: drained after the advance.
+	if len(st.ReviewVotes) != 0 {
+		t.Errorf("ReviewVotes not cleared after advance: %v", st.ReviewVotes)
 	}
 }
 
@@ -253,17 +397,42 @@ func TestHandler_SignalVote_RejectsInvalidVote(t *testing.T) {
 // ─── SessionRegister ──────────────────────────────────────────────────────────
 
 // TestHandler_SessionRegister_MutatesProjection delivers a register_session
-// signal via the handler and asserts the session count grows.
+// signal via the handler and asserts the session appears in the projection
+// after a subsequent advance. The advance drains side-channel signals (sessions
+// are buffered), so a successful session count proves the handler reached the
+// correct register_session topic with a well-formed RegisterSessionSignal.
 func TestHandler_SessionRegister_MutatesProjection(t *testing.T) {
 	const epochId = "ctl--sess-1"
-	ctrl := openController(t, epochId, nil)
+	rig := openController(t, epochId, nil)
 
-	code, err := handlers.SessionRegister(ctrl, epochId, "sess-abc", "worker", "claude-code", "claude-sonnet", types.OutputJSON)
+	code, err := handlers.SessionRegister(rig.ctrl, epochId, "sess-abc", "worker", "claude-code", "claude-sonnet", types.OutputJSON)
 	if err != nil {
 		t.Fatalf("SessionRegister err = %v", err)
 	}
 	if code != 0 {
 		t.Fatalf("SessionRegister exit = %d, want 0", code)
+	}
+
+	// Advance to elicit: the control workflow drains side-channel signals
+	// (sessions) before committing each transition, so the post-advance
+	// projection must reflect the registered session.
+	code, err = handlers.PhaseAdvance(rig.ctrl, epochId, protocol.PhaseElicit, "test", "ok", types.OutputJSON)
+	if err != nil {
+		t.Fatalf("PhaseAdvance err = %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("PhaseAdvance exit = %d, want 0", code)
+	}
+
+	st := rig.waitProjection(t, epochId, protocol.PhaseElicit)
+	if st.ActiveSessionCount != 1 {
+		t.Errorf("ActiveSessionCount = %d, want 1", st.ActiveSessionCount)
+	}
+	if len(st.ActiveSessions) != 1 {
+		t.Errorf("ActiveSessions = %d entries, want 1", len(st.ActiveSessions))
+	}
+	if len(st.ActiveSessions) > 0 && st.ActiveSessions[0].SessionId != "sess-abc" {
+		t.Errorf("ActiveSessions[0].SessionId = %q, want %q", st.ActiveSessions[0].SessionId, "sess-abc")
 	}
 }
 
@@ -306,18 +475,39 @@ func TestHandler_SessionRegister_RejectsEmptyRole(t *testing.T) {
 // ─── SignalComplete ────────────────────────────────────────────────────────────
 
 // TestHandler_SignalComplete_MutatesProjection delivers a slice_progress signal
-// marking a slice complete.
+// via the handler and asserts the entry appears in the projection after a
+// subsequent advance. The advance drains side-channel signals (slice progress
+// is buffered), so a successful SliceProgress entry proves the handler reached
+// the correct slice_progress topic with a well-formed SliceProgressSignal.
 func TestHandler_SignalComplete_MutatesProjection(t *testing.T) {
 	const epochId = "ctl--complete-1"
-	ctrl := openController(t, epochId, nil)
+	rig := openController(t, epochId, nil)
 
 	output := "tests passed"
-	code, err := handlers.SignalComplete(ctrl, epochId, "slice-1", &output, nil, types.OutputJSON)
+	code, err := handlers.SignalComplete(rig.ctrl, epochId, "slice-1", &output, nil, types.OutputJSON)
 	if err != nil {
 		t.Fatalf("SignalComplete err = %v", err)
 	}
 	if code != 0 {
 		t.Fatalf("SignalComplete exit = %d, want 0", code)
+	}
+
+	// Advance to elicit: the control workflow drains side-channel signals
+	// (slice progress) before committing the transition.
+	code, err = handlers.PhaseAdvance(rig.ctrl, epochId, protocol.PhaseElicit, "test", "ok", types.OutputJSON)
+	if err != nil {
+		t.Fatalf("PhaseAdvance err = %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("PhaseAdvance exit = %d, want 0", code)
+	}
+
+	st := rig.waitProjection(t, epochId, protocol.PhaseElicit)
+	if len(st.SliceProgress) != 1 {
+		t.Fatalf("SliceProgress = %d entries, want 1", len(st.SliceProgress))
+	}
+	if st.SliceProgress[0].SliceId != "slice-1" {
+		t.Errorf("SliceProgress[0].SliceId = %q, want %q", st.SliceProgress[0].SliceId, "slice-1")
 	}
 }
 
@@ -353,7 +543,7 @@ func TestHandler_SliceStart_RejectsEmptySliceId(t *testing.T) {
 	}
 	defer ctrl.Close()
 
-	code, hErr := handlers.SliceStart(ctrl, "", "mock", "", 0, types.OutputText)
+	code, hErr := handlers.SliceStart(ctrl, "", protocol.SliceMock, "", 0, types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a validation error for empty slice id")
 	}
@@ -371,7 +561,7 @@ func TestHandler_SliceStart_RejectsUnknownMode(t *testing.T) {
 	}
 	defer ctrl.Close()
 
-	code, hErr := handlers.SliceStart(ctrl, "slice-1", "docker", "", 0, types.OutputText)
+	code, hErr := handlers.SliceStart(ctrl, "slice-1", protocol.SliceExecutionMode("docker"), "", 0, types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a validation error for an unknown execution mode")
 	}
@@ -416,5 +606,39 @@ func TestHandler_SliceComplete_RejectsConflictingOutputAndError(t *testing.T) {
 	}
 	if code != 1 {
 		t.Errorf("SliceComplete exit = %d, want 1", code)
+	}
+}
+
+// ─── WorkflowError → exit 3 ──────────────────────────────────────────────────
+//
+// These tests exercise the CategoryWorkflow → exit 3 path on the handlers
+// that interact with the durable engine in a way that can fail at the
+// engine boundary (not just at the signal queue level).
+//
+// Note on dbos.Send semantics: Send is a best-effort notification insert.
+// A nonexistent destination logs a FK error on the DBOS side but returns nil
+// to the caller, so signal handlers (PhaseAdvance, SignalVote, etc.) cannot
+// surface a workflow error via Send alone. EpochCancel (CancelWorkflow) is
+// the lifecycle verb that blocks on engine state and reliably returns an error
+// for a nonexistent or already-completed workflow id.
+
+// TestHandler_EpochCancel_WorkflowError_NonexistentWorkflow proves that
+// EpochCancel returns exit 3 (CategoryWorkflow) when no workflow with the
+// given id has been started. This covers the CategoryWorkflow → exit 3
+// mapping for the cancel lifecycle verb.
+func TestHandler_EpochCancel_WorkflowError_NonexistentWorkflow(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	ctrl, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController: %v", err)
+	}
+	defer ctrl.Close()
+
+	code, hErr := handlers.EpochCancel(ctrl, "demo--01960000-0000-7000-8000-000099999999", types.OutputText)
+	if hErr == nil {
+		t.Fatal("expected a workflow error for nonexistent epoch; got nil")
+	}
+	if code != 3 {
+		t.Fatalf("EpochCancel exit = %d, want 3 (workflow error); err = %v", code, hErr)
 	}
 }
