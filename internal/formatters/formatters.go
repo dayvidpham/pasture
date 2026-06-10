@@ -1,4 +1,4 @@
-// Package formatters provides output formatting functions for pasture-msg CLI commands.
+// Package formatters provides output formatting functions for pasture CLI commands.
 //
 // Each formatter supports two output modes:
 //   - OutputJSON: json.MarshalIndent with camelCase keys

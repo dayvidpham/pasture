@@ -41,11 +41,6 @@
           subPackages = [ "cmd/pastured" ];
         });
 
-        pasture-msg = pkgs.buildGoModule (commonAttrs // {
-          pname = "pasture-msg";
-          subPackages = [ "cmd/pasture-msg" ];
-        });
-
         pasture-release = pkgs.buildGoModule (commonAttrs // {
           pname = "pasture-release";
           subPackages = [ "cmd/pasture-release" ];
@@ -57,12 +52,11 @@
           subPackages = [ "cmd/pasture" ];
         });
 
-        # All four binaries in one derivation for convenience
+        # All three binaries in one derivation for convenience
         pasture-bundle = pkgs.buildGoModule (commonAttrs // {
           pname = "pasture-bundle";
           subPackages = [
             "cmd/pastured"
-            "cmd/pasture-msg"
             "cmd/pasture-release"
             "cmd/pasture"
           ];
@@ -91,7 +85,6 @@
       {
         packages = {
           inherit pastured;
-          inherit pasture-msg;
           inherit pasture-release;
           inherit pasture;
           inherit pasture-bundle;
@@ -103,7 +96,6 @@
         # nix flake check runs builds
         checks = {
           inherit pastured;
-          inherit pasture-msg;
           inherit pasture-release;
           inherit pasture;
         };

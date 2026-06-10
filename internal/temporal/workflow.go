@@ -461,7 +461,7 @@ func RegisterWorkflows(r interface {
 }
 
 // WorkflowName returns the Temporal workflow type name for a given function.
-// Used by pasture-msg signal/query commands to address the workflow.
+// Used by signal/query commands to address the workflow.
 const (
 	EpochWorkflowType  = "EpochWorkflowFn"
 	SliceWorkflowType  = "SliceWorkflowFn"

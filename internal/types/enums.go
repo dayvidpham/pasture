@@ -10,7 +10,7 @@ package types
 
 // ─── OutputFormat ────────────────────────────────────────────────────────────
 
-// OutputFormat specifies the CLI output format for pasture-msg commands.
+// OutputFormat specifies the CLI output format for pasture commands.
 type OutputFormat string
 
 const (

@@ -47,3 +47,26 @@ type RegisterSessionSignal struct {
 	ModelHarness string `json:"modelHarness"`
 	Model        string `json:"model"`
 }
+
+// SliceStartSignal is the payload for the start_slice signal.
+//
+// Sent to a slice sub-workflow to configure how it executes before it runs. Mode
+// selects the execution strategy ("mock", "tmux", or "subprocess"); Command is
+// the shell command for the tmux/subprocess strategies; TimeoutSeconds overrides
+// the default start-to-close timeout when non-zero.
+type SliceStartSignal struct {
+	Mode           string `json:"mode"`
+	Command        string `json:"command,omitempty"`
+	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
+}
+
+// SliceCompleteSignal is the payload for the complete_slice signal.
+//
+// Sent to a slice sub-workflow to override its outcome with an externally
+// reported result. Success is true for a successful completion; Output carries a
+// success message; Error carries the failure reason when Success is false.
+type SliceCompleteSignal struct {
+	Success bool    `json:"success"`
+	Output  string  `json:"output,omitempty"`
+	Error   *string `json:"error,omitempty"`
+}

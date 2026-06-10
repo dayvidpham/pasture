@@ -124,7 +124,7 @@ func newUnifiedTrackerForTest(t *testing.T) (protocol.TaskTracker, *tasks.WellKn
 // newRequestTaskId creates a REQUEST task in the unified tracker and returns
 // its ID as a string suitable for use as an epoch_id (i.e., satisfies
 // provenance.ParseTaskID). This mirrors the production flow where the user
-// runs `pasture task create REQUEST` before `pasture-msg epoch start`.
+// runs `pasture task create REQUEST` before `pasture epoch start`.
 func newRequestTaskId(t *testing.T, tracker protocol.TaskTracker) string {
 	t.Helper()
 	req, err := tracker.Create(

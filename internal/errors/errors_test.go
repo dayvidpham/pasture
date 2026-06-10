@@ -245,7 +245,7 @@ func TestStructuredError_Report_Format(t *testing.T) {
 		Fix: "1. Check the worker logs for stalls:\n" +
 			"     pastured logs --tail=200\n" +
 			"2. Re-send the signal once the worker is healthy:\n" +
-			"     pasture-msg <signal-args>",
+			"     pasture signal vote --epoch-id <id> --axis correctness --vote ACCEPT",
 	}
 
 	var buf bytes.Buffer

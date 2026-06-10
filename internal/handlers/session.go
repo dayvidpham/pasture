@@ -4,43 +4,25 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/dayvidpham/pasture/internal/config"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/formatters"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
-// SessionRegister sends a RegisterSessionSignal to the EpochWorkflow.
+// SessionRegister delivers a register-session signal to the epoch's control
+// workflow. Duplicate session_id registrations are ignored by the workflow
+// (idempotent).
 //
-// Registers a Claude Code session with the running epoch for observability
-// and permission tracking. Duplicate session_id registrations are silently
-// ignored by the workflow (idempotent).
-//
-// Exit codes: 0=success, 1=validation error, 2=connection error, 3=workflow error.
+// Exit codes: 0=success, 1=validation error, 3=workflow error.
 func SessionRegister(
-	ctx context.Context,
-	conn config.ConnectionConfig,
+	ctrl EpochController,
 	epochId, sessionId, role, modelHarness, model string,
 	format types.OutputFormat,
-	factory TemporalClientFactory,
 ) (int, error) {
-	if factory == nil {
-		factory = DefaultClientFactory
-	}
-
-	if epochId == "" {
-		err := &pasterrors.StructuredError{
-			Category: pasterrors.CategoryValidation,
-			What:     "An epoch ID is required to register a session.",
-			Why:      "The --epoch-id flag was not provided.",
-			Where:    "Registering a session (internal/handlers/session.go in handlers.SessionRegister).",
-			Impact:   "Without an epoch ID, the session can't be linked to a running epoch.",
-			Fix: "1. Pass the epoch this session belongs to:\n" +
-				"     pasture-msg session register --epoch-id <id> --session-id <id> --role <role>\n" +
-				"2. If you don't know the epoch ID, list active epochs:\n" +
-				"     pasture-msg epoch list",
-		}
+	if err := requireEpochID(epochId, "register a session",
+		"Registering a session (internal/handlers/session.go in handlers.SessionRegister).",
+		"pasture session register --epoch-id <id> --session-id <id> --role <role>"); err != nil {
 		return pasterrors.ExitCode(err), err
 	}
 	if sessionId == "" {
@@ -51,7 +33,7 @@ func SessionRegister(
 			Where:    "Registering a session (internal/handlers/session.go in handlers.SessionRegister).",
 			Impact:   "Without a session ID, there's nothing to register.",
 			Fix: "1. Pass the session ID supplied by Claude Code:\n" +
-				"     pasture-msg session register --session-id <id> --epoch-id <id> --role <role>",
+				"     pasture session register --session-id <id> --epoch-id <id> --role <role>",
 		}
 		return pasterrors.ExitCode(err), err
 	}
@@ -63,40 +45,20 @@ func SessionRegister(
 			Where:    "Registering a session (internal/handlers/session.go in handlers.SessionRegister).",
 			Impact:   "The session can't be tracked without knowing what role it's playing.",
 			Fix: "1. Pass the role this session is playing (worker, supervisor, reviewer, ...):\n" +
-				"     pasture-msg session register --role <role> --epoch-id <id> --session-id <id>",
+				"     pasture session register --role <role> --epoch-id <id> --session-id <id>",
 		}
 		return pasterrors.ExitCode(err), err
 	}
 
-	c, err := factory(ctx, conn)
-	if err != nil {
-		return pasterrors.ExitCode(err), err
-	}
-	defer c.Close()
-
-	payload := protocol.RegisterSessionSignal{
+	sig := protocol.RegisterSessionSignal{
 		EpochId:      epochId,
 		SessionId:    sessionId,
 		Role:         role,
 		ModelHarness: modelHarness,
 		Model:        model,
 	}
-
-	if err := c.SignalWorkflow(ctx, epochId, "", string(protocol.SignalRegisterSession), payload); err != nil {
-		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
-			Category: pasterrors.CategoryWorkflow,
-			What:     fmt.Sprintf("Couldn't register the session with epoch %q.", epochId),
-			Why:      "The workflow server rejected the register-session signal.",
-			Where:    "Registering a session (internal/handlers/session.go in handlers.SessionRegister).",
-			Impact:   "The session is not tracked by the epoch, so its events won't appear in the epoch's history.",
-			Fix: fmt.Sprintf("1. Confirm the epoch is currently running:\n"+
-				"     pasture-msg epoch status --epoch-id %q\n"+
-				"2. If the epoch isn't found, list active epochs to find the right ID:\n"+
-				"     pasture-msg epoch list\n"+
-				"3. Retry the register once the epoch is healthy.",
-				epochId),
-			Cause: err,
-		}
+	if err := ctrl.RegisterSession(context.Background(), epochId, sig); err != nil {
+		return pasterrors.ExitCode(err), err
 	}
 
 	out, fmtErr := formatters.FormatSignalResult(true, format)
