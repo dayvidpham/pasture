@@ -13,6 +13,7 @@ package main_test
 // this file focuses on the lifecycle + signal surface.
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -44,13 +45,29 @@ func TestCLI_EpochStart_MissingEpochIdRejectsWithExit1(t *testing.T) {
 }
 
 // TestCLI_EpochStart_MalformedEpochIdRejectsWithExit1 verifies the epoch-id
-// validation guard (must be "<namespace>--<uuid>" shape).
+// validation guard (must be "<namespace>--<uuid>" shape) AND that the
+// structured plain-language error report appears on stderr.
+//
+// The stderr content assertions prove that printError / StructuredError.Report
+// wiring is intact for validation errors: a regression that stripped the full
+// report to a one-line Error() string would still produce exit 1 but would
+// fail these checks.
 func TestCLI_EpochStart_MalformedEpochIdRejectsWithExit1(t *testing.T) {
 	db := newDB(t)
 	out := runCLI(t, "--db", db, "epoch", "start", "--epoch-id", "not-a-valid-task-id")
 	if out.exitCode != 1 {
 		t.Fatalf("expected exit 1 for malformed epoch id; exit=%d stdout=%s stderr=%s",
 			out.exitCode, out.stdout, out.stderr)
+	}
+	// The full structured error report must reach stderr. Assert on stable section
+	// labels that StructuredError.Report always emits, not on exact error text.
+	for _, want := range []string{
+		"Problem:",    // StructuredError.Report What section label
+		"How to fix:", // StructuredError.Report Fix section label
+	} {
+		if !strings.Contains(out.stderr, want) {
+			t.Errorf("stderr missing structured error section %q; stderr=%s", want, out.stderr)
+		}
 	}
 }
 
@@ -75,12 +92,99 @@ func TestCLI_EpochCancel_MissingEpochIdRejectsWithExit1(t *testing.T) {
 	}
 }
 
-// TestCLI_EpochTerminate_IsAliasForCancel verifies the terminate alias is
-// registered.
-func TestCLI_EpochTerminate_IsAliasForCancel(t *testing.T) {
+// TestCLI_EpochTerminate_IsRegistered verifies the terminate subcommand is
+// registered and documents its purpose.
+func TestCLI_EpochTerminate_IsRegistered(t *testing.T) {
 	out := runCLI(t, "epoch", "terminate", "--help")
 	if out.exitCode != 0 {
 		t.Fatalf("epoch terminate --help exit %d; stderr=%s", out.exitCode, out.stderr)
+	}
+}
+
+// TestCLI_EpochTerminate_WithReason_RecordsAuditEvent verifies that running
+// "epoch terminate --reason <msg>" records an EpochCancelled audit event
+// containing the reason in its payload before attempting cancellation.
+//
+// The epoch used here was never started, so CancelWorkflow returns a workflow
+// error (exit 3). We assert exit 3 AND that the audit event was written —
+// confirming record-before-cancel order.
+func TestCLI_EpochTerminate_WithReason_RecordsAuditEvent(t *testing.T) {
+	db := newDB(t)
+	const epochId = "demo--01960000-0000-7000-8000-000000000201"
+	const reason = "test termination reason"
+
+	out := runCLI(t, "--db", db, "epoch", "terminate",
+		"--epoch-id", epochId,
+		"--reason", reason)
+	// Cancel of a nonexistent workflow → exit 3 (workflow error).
+	if out.exitCode != 3 {
+		t.Fatalf("expected exit 3 for terminate of nonexistent epoch; exit=%d stdout=%s stderr=%s",
+			out.exitCode, out.stdout, out.stderr)
+	}
+
+	// Query the audit trail: the EpochCancelled event must have been written
+	// before the cancel was attempted.
+	evOut := runCLI(t, "--db", db, "--format", "json",
+		"task", "events", "--epoch-id", epochId)
+	if evOut.exitCode != 0 {
+		t.Fatalf("task events exit %d; stderr=%s", evOut.exitCode, evOut.stderr)
+	}
+	var events []struct {
+		EventType string         `json:"eventType"`
+		Payload   map[string]any `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(evOut.stdout), &events); err != nil {
+		t.Fatalf("decode events json: %v\nbody: %s", err, evOut.stdout)
+	}
+	var found bool
+	for _, ev := range events {
+		if ev.EventType == "EpochCancelled" {
+			if got, ok := ev.Payload["reason"].(string); ok && got == reason {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected EpochCancelled event with reason=%q; events: %+v", reason, events)
+	}
+}
+
+// TestCLI_EpochTerminate_EmptyReason_StillRecordsEvent verifies that omitting
+// --reason (empty reason) still writes the EpochCancelled audit event.
+func TestCLI_EpochTerminate_EmptyReason_StillRecordsEvent(t *testing.T) {
+	db := newDB(t)
+	const epochId = "demo--01960000-0000-7000-8000-000000000202"
+
+	out := runCLI(t, "--db", db, "epoch", "terminate",
+		"--epoch-id", epochId)
+	// Cancel of a nonexistent workflow → exit 3 (workflow error).
+	if out.exitCode != 3 {
+		t.Fatalf("expected exit 3 for terminate of nonexistent epoch; exit=%d stderr=%s",
+			out.exitCode, out.stderr)
+	}
+
+	// The event must exist even with no reason supplied.
+	evOut := runCLI(t, "--db", db, "--format", "json",
+		"task", "events", "--epoch-id", epochId)
+	if evOut.exitCode != 0 {
+		t.Fatalf("task events exit %d; stderr=%s", evOut.exitCode, evOut.stderr)
+	}
+	var events []struct {
+		EventType string `json:"eventType"`
+	}
+	if err := json.Unmarshal([]byte(evOut.stdout), &events); err != nil {
+		t.Fatalf("decode events json: %v\nbody: %s", err, evOut.stdout)
+	}
+	var found bool
+	for _, ev := range events {
+		if ev.EventType == "EpochCancelled" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected EpochCancelled event even with empty reason; events: %+v", events)
 	}
 }
 
@@ -275,10 +379,12 @@ func TestCLI_SliceComplete_MissingSliceIdRejectsWithExit1(t *testing.T) {
 // ─── workflow-error → exit 3 ──────────────────────────────────────────────────
 
 // TestCLI_EpochCancel_WorkflowError_NonexistentEpoch verifies that cancelling
-// an epoch that was never started returns exit 3 (CategoryWorkflow). This is
-// the CLI-level proof of the CategoryWorkflow → exit 3 mapping:
-// EpochCancel calls CancelWorkflow, which blocks on engine state and returns
-// an error for a nonexistent workflow id.
+// an epoch that was never started returns exit 3 (CategoryWorkflow) AND that
+// the structured plain-language error report appears on stderr.
+//
+// The stderr content assertion proves that printError / StructuredError.Report
+// wiring is intact: a regression that stripped the full report to a one-line
+// Error() string would still produce exit 3 but would fail this check.
 func TestCLI_EpochCancel_WorkflowError_NonexistentEpoch(t *testing.T) {
 	db := newDB(t)
 	out := runCLI(t, "--db", db, "epoch", "cancel",
@@ -286,6 +392,15 @@ func TestCLI_EpochCancel_WorkflowError_NonexistentEpoch(t *testing.T) {
 	if out.exitCode != 3 {
 		t.Fatalf("expected exit 3 for cancel of nonexistent epoch; exit=%d stdout=%s stderr=%s",
 			out.exitCode, out.stdout, out.stderr)
+	}
+	// The full structured error report must reach stderr.
+	for _, want := range []string{
+		"Problem:",    // StructuredError.Report What section label
+		"How to fix:", // StructuredError.Report Fix section label
+	} {
+		if !strings.Contains(out.stderr, want) {
+			t.Errorf("stderr missing structured error section %q; stderr=%s", want, out.stderr)
+		}
 	}
 }
 
