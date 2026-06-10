@@ -23,15 +23,20 @@ package main_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
+	_ "modernc.org/sqlite" // pure-Go SQLite driver for schema-manipulation helpers
 
+	"github.com/dayvidpham/pasture/internal/audit"
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/engine"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/pkg/protocol"
@@ -136,19 +141,31 @@ func TestCLI_TopLevelHelp_ContainsStatus(t *testing.T) {
 func TestCLI_Status_AbsentDB_NoFileCreated(t *testing.T) {
 	dbPath := newDB(t) // returns a path to a file that does not yet exist
 	out := runCLI(t, "--db", dbPath, "status")
-	// Must fail: no db = no epochs, and the absent-db path is an error, not
-	// an empty listing.
-	if out.exitCode == 0 {
-		t.Fatalf("expected non-zero exit for absent db; stdout=%s", out.stdout)
+	// Must fail with CategoryConnection exit code (2): absent db = connection error.
+	if out.exitCode != 2 {
+		t.Fatalf("expected exit 2 (connection) for absent db; got %d; stdout=%s stderr=%s",
+			out.exitCode, out.stdout, out.stderr)
 	}
-	// Stderr must contain an actionable message directing the user.
+	// Stderr must contain an actionable message directing the user to start the daemon.
 	combined := out.stdout + out.stderr
 	if !strings.Contains(combined, "daemon") && !strings.Contains(combined, "pastured") {
 		t.Errorf("absent-db message should mention daemon/pastured; got: %s", combined)
 	}
+	for _, want := range []string{"Problem:", "How to fix:"} {
+		if !strings.Contains(combined, want) {
+			t.Errorf("absent-db message missing structured error section %q; got: %s", want, combined)
+		}
+	}
 	// The file must NOT have been created.
 	if _, err := os.Stat(dbPath); err == nil {
 		t.Errorf("status on absent db created the database file at %q — must not modify any state", dbPath)
+	}
+	// No sidecar files should appear in the directory (no -wal, -shm or other
+	// artifacts from a failed open attempt).
+	dir := dbPath[:len(dbPath)-len("pasture.db")-1]
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		t.Errorf("unexpected file in db dir after absent-db run: %s", e.Name())
 	}
 }
 
@@ -159,8 +176,20 @@ func TestCLI_Status_AbsentDB_EpochId_NoFileCreated(t *testing.T) {
 	dbPath := newDB(t)
 	const epochId = "demo--01960000-0000-7000-8000-000000000399"
 	out := runCLI(t, "--db", dbPath, "status", "--epoch-id", epochId)
-	if out.exitCode == 0 {
-		t.Fatalf("expected non-zero exit for absent db with --epoch-id; stdout=%s", out.stdout)
+	// Must fail with CategoryConnection exit code (2).
+	if out.exitCode != 2 {
+		t.Fatalf("expected exit 2 (connection) for absent db with --epoch-id; got %d; stdout=%s stderr=%s",
+			out.exitCode, out.stdout, out.stderr)
+	}
+	// Same structured actionable message as the listing variant.
+	combined := out.stdout + out.stderr
+	if !strings.Contains(combined, "daemon") && !strings.Contains(combined, "pastured") {
+		t.Errorf("absent-db --epoch-id message should mention daemon/pastured; got: %s", combined)
+	}
+	for _, want := range []string{"Problem:", "How to fix:"} {
+		if !strings.Contains(combined, want) {
+			t.Errorf("absent-db --epoch-id message missing structured error section %q; got: %s", want, combined)
+		}
 	}
 	if _, err := os.Stat(dbPath); err == nil {
 		t.Errorf("status --epoch-id on absent db created the database file at %q — must not modify any state", dbPath)
@@ -565,5 +594,313 @@ func TestCLI_Status_List_ShowsAllEpochs_Text(t *testing.T) {
 	}
 	if !strings.Contains(combined, "propose") {
 		t.Errorf("text listing missing phase 'propose'; got: %s", combined)
+	}
+}
+
+// ─── sidecar test (item 5: zpnv7) ─────────────────────────────────────────────
+
+// TestCLI_Status_ReadOnly_NoUnexpectedSidecars verifies that running
+// `pasture status` on an existing database leaves no unexpected sidecar files
+// (beyond the standard SQLite -wal and -shm work files). The main database
+// file hash must be unchanged, confirming no data was written.
+func TestCLI_Status_ReadOnly_NoUnexpectedSidecars(t *testing.T) {
+	db := newDB(t)
+	// Pre-create and migrate the database so it exists with a valid schema.
+	migrateOut := runCLI(t, "--db", db, "migrate")
+	if migrateOut.exitCode != 0 {
+		t.Fatalf("migrate to pre-create db: exit %d; stderr=%s", migrateOut.exitCode, migrateOut.stderr)
+	}
+
+	// Snapshot directory contents before the status run.
+	dbDir := filepath.Dir(db)
+	dbBase := filepath.Base(db)
+	beforeEntries := dirEntryNames(t, dbDir)
+
+	out := runCLI(t, "--db", db, "status")
+	if out.exitCode != 0 {
+		t.Fatalf("status exit %d; stderr=%s", out.exitCode, out.stderr)
+	}
+
+	// Snapshot directory contents after.
+	afterEntries := dirEntryNames(t, dbDir)
+
+	// Allowed sidecar names: SQLite WAL and shared-memory files. The main db file
+	// itself is always present.
+	allowed := map[string]bool{
+		dbBase:          true,
+		dbBase + "-wal": true,
+		dbBase + "-shm": true,
+	}
+	for _, name := range afterEntries {
+		if !allowed[name] {
+			// Only flag entries that didn't exist before the status run.
+			newEntry := true
+			for _, b := range beforeEntries {
+				if b == name {
+					newEntry = false
+					break
+				}
+			}
+			if newEntry {
+				t.Errorf("unexpected file %q appeared in db dir after status run (expected only db, -wal, -shm)", name)
+			}
+		}
+	}
+}
+
+// dirEntryNames returns the names of all entries in dir.
+func dirEntryNames(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir %q: %v", dir, err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+// ─── never-migrate regression tests (item 1: kjtvw) ──────────────────────────
+
+// readSchemaVersionDirect opens the database at dbPath with the shared WAL DSN
+// (NOT read-only, so it can be used for setup writes) and returns
+// MAX(version) from audit_schema_meta. Returns 0 if the table is absent.
+// Uses an INDEPENDENT connection so any cached state from a prior open is gone.
+func readSchemaVersionDirect(t *testing.T, dbPath string) int {
+	t.Helper()
+	db, err := sql.Open("sqlite", dbconn.SharedDSN(dbPath))
+	if err != nil {
+		t.Fatalf("readSchemaVersionDirect: sql.Open: %v", err)
+	}
+	defer db.Close()
+
+	var version sql.NullInt64
+	row := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`)
+	if err := row.Scan(&version); err != nil {
+		// Table might not exist or be empty; treat as 0.
+		return 0
+	}
+	if !version.Valid {
+		return 0
+	}
+	return int(version.Int64)
+}
+
+// downgradeSchemaMeta opens the database at dbPath and deletes the latest
+// version row from audit_schema_meta so MAX(version) drops by 1.
+// Uses an independent connection so no other handle is sharing the file.
+func downgradeSchemaMeta(t *testing.T, dbPath string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", dbconn.SharedDSN(dbPath))
+	if err != nil {
+		t.Fatalf("downgradeSchemaMeta: sql.Open: %v", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`DELETE FROM audit_schema_meta
+		WHERE version = (SELECT MAX(version) FROM audit_schema_meta)`)
+	if err != nil {
+		t.Fatalf("downgradeSchemaMeta: DELETE: %v", err)
+	}
+}
+
+// upgradeSchemaMeta opens the database at dbPath and inserts a synthetic future
+// version row so MAX(version) exceeds audit.MaxKnownSchemaVersion. This
+// simulates a database written by a newer binary.
+func upgradeSchemaMeta(t *testing.T, dbPath string, futureVersion int) {
+	t.Helper()
+	db, err := sql.Open("sqlite", dbconn.SharedDSN(dbPath))
+	if err != nil {
+		t.Fatalf("upgradeSchemaMeta: sql.Open: %v", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`INSERT INTO audit_schema_meta (version, applied_at) VALUES (?, datetime('now'))`, futureVersion)
+	if err != nil {
+		t.Fatalf("upgradeSchemaMeta: INSERT: %v", err)
+	}
+}
+
+// insertSyntheticProjectionRow inserts a minimal row into epoch_state_projection
+// so the status command has something to look up (tests the populated-detail
+// path, not just the empty-listing path).
+func insertSyntheticProjectionRow(t *testing.T, dbPath, epochId string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", dbconn.SharedDSN(dbPath))
+	if err != nil {
+		t.Fatalf("insertSyntheticProjectionRow: sql.Open: %v", err)
+	}
+	defer db.Close()
+
+	// Ensure the table exists (it may not if no engine ran).
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS epoch_state_projection (
+		epoch_id      TEXT    PRIMARY KEY,
+		current_phase TEXT    NOT NULL,
+		state_json    TEXT    NOT NULL,
+		updated_at    INTEGER NOT NULL
+	)`)
+	if err != nil {
+		t.Fatalf("insertSyntheticProjectionRow: CREATE TABLE: %v", err)
+	}
+
+	_, err = db.Exec(`INSERT OR IGNORE INTO epoch_state_projection
+		(epoch_id, current_phase, state_json, updated_at) VALUES (?, ?, ?, ?)`,
+		epochId, "elicit", `{"epochId":"`+epochId+`","currentPhase":"elicit"}`, time.Now().UnixNano())
+	if err != nil {
+		t.Fatalf("insertSyntheticProjectionRow: INSERT: %v", err)
+	}
+}
+
+// TestCLI_Status_StaleSchema_OlderDB_ErrorsAndNeverMigrates verifies that when
+// the database schema is OLDER than the binary expects, `pasture status` returns
+// exit 5 with an actionable mismatch error, and DOES NOT migrate the database
+// (the MAX(version) in audit_schema_meta is unchanged before and after the run).
+//
+// Uses an independent database/sql connection to read the schema version, not
+// the same handle used by the status command, to rule out any caching effect.
+func TestCLI_Status_StaleSchema_OlderDB_ErrorsAndNeverMigrates(t *testing.T) {
+	dbPath := newDB(t)
+
+	// Step 1: create a fully-migrated database.
+	migrateOut := runCLI(t, "--db", dbPath, "migrate")
+	if migrateOut.exitCode != 0 {
+		t.Fatalf("migrate: exit %d; stderr=%s", migrateOut.exitCode, migrateOut.stderr)
+	}
+
+	// Step 2: downgrade the meta version via an independent connection
+	// (simulate a database that was only partially migrated).
+	downgradeSchemaMeta(t, dbPath)
+	downgradedVersion := readSchemaVersionDirect(t, dbPath)
+	if downgradedVersion >= audit.MaxKnownSchemaVersion {
+		t.Fatalf("expected version < %d after downgrade, got %d", audit.MaxKnownSchemaVersion, downgradedVersion)
+	}
+
+	// Step 3: insert a synthetic projection row so the detail path is exercised.
+	const epochId = "demo--01960000-0000-7000-8000-000000000381"
+	insertSyntheticProjectionRow(t, dbPath, epochId)
+
+	// Step 4: run status — must exit 5 with actionable mismatch message.
+	out := runCLI(t, "--db", dbPath, "status", "--epoch-id", epochId)
+	if out.exitCode != 5 {
+		t.Fatalf("expected exit 5 for stale schema (db older); got %d; stdout=%s stderr=%s",
+			out.exitCode, out.stdout, out.stderr)
+	}
+	combined := out.stdout + out.stderr
+	for _, want := range []string{"Problem:", "How to fix:", "pasture migrate"} {
+		if !strings.Contains(combined, want) {
+			t.Errorf("stale-schema error missing %q; got: %s", want, combined)
+		}
+	}
+
+	// Step 5: re-read version via a NEW independent connection — must be unchanged.
+	versionAfter := readSchemaVersionDirect(t, dbPath)
+	if versionAfter != downgradedVersion {
+		t.Errorf("schema version changed during status run: before=%d after=%d (status MUST NOT migrate)",
+			downgradedVersion, versionAfter)
+	}
+}
+
+// TestCLI_Status_StaleSchema_NewerDB_ErrorsAndNeverMigrates verifies that when
+// the database schema is NEWER than the binary (a newer daemon upgraded it),
+// `pasture status` returns exit 5 with an actionable mismatch error, and does
+// NOT alter the database (MAX(version) unchanged).
+func TestCLI_Status_StaleSchema_NewerDB_ErrorsAndNeverMigrates(t *testing.T) {
+	dbPath := newDB(t)
+
+	// Step 1: create a fully-migrated database.
+	migrateOut := runCLI(t, "--db", dbPath, "migrate")
+	if migrateOut.exitCode != 0 {
+		t.Fatalf("migrate: exit %d; stderr=%s", migrateOut.exitCode, migrateOut.stderr)
+	}
+
+	// Step 2: insert a synthetic future-version row via an independent connection.
+	const futureVersion = 99
+	upgradeSchemaMeta(t, dbPath, futureVersion)
+	versionBefore := readSchemaVersionDirect(t, dbPath)
+	if versionBefore != futureVersion {
+		t.Fatalf("expected version %d after synthetic upgrade, got %d", futureVersion, versionBefore)
+	}
+
+	// Step 3: insert a synthetic projection row.
+	const epochId = "demo--01960000-0000-7000-8000-000000000382"
+	insertSyntheticProjectionRow(t, dbPath, epochId)
+
+	// Step 4: run status — must exit 5 with actionable mismatch message.
+	out := runCLI(t, "--db", dbPath, "status", "--epoch-id", epochId)
+	if out.exitCode != 5 {
+		t.Fatalf("expected exit 5 for stale schema (db newer); got %d; stdout=%s stderr=%s",
+			out.exitCode, out.stdout, out.stderr)
+	}
+	combined := out.stdout + out.stderr
+	for _, want := range []string{"Problem:", "How to fix:"} {
+		if !strings.Contains(combined, want) {
+			t.Errorf("newer-schema error missing %q; got: %s", want, combined)
+		}
+	}
+	// The newer-binary message should mention upgrading pasture, not migrating.
+	if !strings.Contains(combined, "Upgrade") && !strings.Contains(combined, "upgrade") {
+		t.Errorf("newer-schema error should mention upgrading pasture; got: %s", combined)
+	}
+
+	// Step 5: re-read version via a NEW independent connection — must be unchanged.
+	versionAfter := readSchemaVersionDirect(t, dbPath)
+	if versionAfter != futureVersion {
+		t.Errorf("schema version changed during status run: before=%d after=%d (status MUST NOT migrate)",
+			versionBefore, versionAfter)
+	}
+}
+
+// TestCLI_Status_StaleSchema_OlderDB_ListPath_ErrorsNotSilent verifies that a
+// mismatched database with 0 epochs returns exit 5 (NOT exit 0 with an empty
+// listing). The schema-version gate must fire on the listing path, not just
+// the populated-detail path.
+func TestCLI_Status_StaleSchema_OlderDB_ListPath_ErrorsNotSilent(t *testing.T) {
+	dbPath := newDB(t)
+
+	// Create a migrated database (no epochs) and downgrade its version.
+	migrateOut := runCLI(t, "--db", dbPath, "migrate")
+	if migrateOut.exitCode != 0 {
+		t.Fatalf("migrate: exit %d; stderr=%s", migrateOut.exitCode, migrateOut.stderr)
+	}
+	downgradeSchemaMeta(t, dbPath)
+
+	// status (list, no --epoch-id) on a mismatched db must fail, not silently succeed.
+	out := runCLI(t, "--db", dbPath, "status")
+	if out.exitCode != 5 {
+		t.Fatalf("expected exit 5 for stale schema on list path; got %d; stdout=%s stderr=%s",
+			out.exitCode, out.stdout, out.stderr)
+	}
+	if !strings.Contains(out.stdout+out.stderr, "Problem:") {
+		t.Errorf("list-path mismatch error missing Problem: section; got: %s", out.stderr)
+	}
+}
+
+// TestCLI_Status_StaleSchema_OlderDB_UnknownEpoch_ErrorsMismatchNotMisspelled
+// verifies that on a mismatched db, asking for an unknown epoch returns exit 5
+// (schema mismatch) NOT exit 3 (epoch not found / misspelled ID). This
+// guards against the bug where version skew was misdiagnosed as a bad epoch ID.
+func TestCLI_Status_StaleSchema_OlderDB_UnknownEpoch_ErrorsMismatchNotMisspelled(t *testing.T) {
+	dbPath := newDB(t)
+
+	// Create a migrated database and downgrade.
+	migrateOut := runCLI(t, "--db", dbPath, "migrate")
+	if migrateOut.exitCode != 0 {
+		t.Fatalf("migrate: exit %d; stderr=%s", migrateOut.exitCode, migrateOut.stderr)
+	}
+	downgradeSchemaMeta(t, dbPath)
+
+	const unknownId = "demo--01960000-0000-7000-8000-000000000383"
+	out := runCLI(t, "--db", dbPath, "status", "--epoch-id", unknownId)
+	// Must be exit 5 (schema mismatch), NOT exit 3 (epoch not found).
+	if out.exitCode != 5 {
+		t.Fatalf("expected exit 5 for stale schema + unknown epoch; got %d — version mismatch must be diagnosed before epoch lookup; stdout=%s stderr=%s",
+			out.exitCode, out.stdout, out.stderr)
+	}
+	// Must NOT claim the epoch is misspelled.
+	combined := out.stdout + out.stderr
+	if strings.Contains(combined, "misspelled") || strings.Contains(combined, "not found") {
+		t.Errorf("mismatch error should not mention misspelled/not-found; got: %s", combined)
 	}
 }
