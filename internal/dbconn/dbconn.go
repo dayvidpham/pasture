@@ -38,9 +38,17 @@ func SharedDSN(path string) string {
 // ReadOnlyDSN builds a connection string that opens the file without creating
 // it and without modifying any data. mode=ro prevents any write and prevents
 // file creation (SQLite returns SQLITE_CANTOPEN if the file does not exist).
+//
+// busy_timeout mirrors the writer DSN's 5 s auto-retry. WAL readers normally
+// don't block on writers, but they can receive SQLITE_BUSY during wal-index
+// recovery or a checkpoint restart. The primary use case — reading status
+// while the daemon is actively writing — demands the same retry window as the
+// shared path; without it, those rare contention windows surface as raw lock
+// errors instead of a transparent 5 s retry.
 func ReadOnlyDSN(path string) string {
 	return "file:" + path +
-		"?mode=ro"
+		"?mode=ro" +
+		"&_pragma=busy_timeout(5000)"
 }
 
 // OpenSharedDB opens a modernc *sql.DB on path using SharedDSN. Unlike the

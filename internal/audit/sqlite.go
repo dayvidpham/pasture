@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -711,133 +710,17 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentId(role string) (string, error)
 // LEFT JOIN (rather than INNER JOIN) defends against orphan agent_id values
 // that have no agents_software row — those rows are returned with an empty
 // Role rather than dropped silently.
-func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochId string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
-	var clauses []string
-	var args []any
-
-	// Post-v4 schema: audit_events.epoch_id is gone; epoch attachment is
-	// recorded in context_edges with kind='EpochContext'. We INNER JOIN
-	// context_edges to restrict the result to events tied to the
-	// requested epoch. Use the idx_context_edges_lookup index (created in
-	// v2→v3 by S2) for efficient (kind, id)-keyed lookups.
-	clauses = append(clauses, "ce.context_kind = ? AND ce.context_id = ?")
-	args = append(args, "EpochContext", epochId)
-
-	if phase != nil {
-		clauses = append(clauses, "ae.phase = ?")
-		args = append(args, string(*phase))
-	}
-	if role != nil {
-		clauses = append(clauses, "asw.name = ?")
-		args = append(args, legacyRoleAgentNamePrefix+*role)
-	}
-
-	query := `SELECT ce.context_id, ae.phase, COALESCE(asw.name, ''), ae.event_type, ae.payload, ae.timestamp
-	          FROM audit_events ae
-	          INNER JOIN context_edges ce ON ce.event_id = ae.id
-	          LEFT JOIN agents_software asw ON asw.agent_id = ae.agent_id
-	          WHERE ` + strings.Join(clauses, " AND ") + `
-	          ORDER BY ae.id ASC`
-
-	rows, err := s.db.Query(query, args...)
-	if err != nil {
-		return nil, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What: fmt.Sprintf(
-				"Couldn't read audit events for epoch %q.",
-				epochId,
-			),
-			Why:   "The database refused the query that links audit events to their epochs.",
-			Where: "Reading audit events (internal/audit/sqlite.go in audit.SqliteAuditTrail.QueryEvents).",
-			Impact: "No audit events can be returned for this epoch until the underlying database problem\n" +
-				"is fixed.",
-			Fix: "1. Confirm the audit database file is accessible:\n" +
-				"     ls -l <path-to-audit.db>\n" +
-				"2. Confirm the database is at version 4 or higher (the event-to-context table appears in\n" +
-				"   version 3, and the legacy epoch column is removed in version 4):\n" +
-				"     pasture migrate\n" +
-				"3. Retry the query once the upgrade has finished.",
-			Cause: err,
-		}
-	}
-	defer rows.Close()
-
-	var events []protocol.AuditEvent
-	for rows.Next() {
-		var (
-			epochIDCol   string
-			phaseCol     string
-			agentName    string
-			eventTypeCol string
-			payloadCol   string
-			tsNano       int64
-		)
-		if err := rows.Scan(&epochIDCol, &phaseCol, &agentName, &eventTypeCol, &payloadCol, &tsNano); err != nil {
-			return nil, &pasterrors.StructuredError{
-				Category: pasterrors.CategoryStorage,
-				What: fmt.Sprintf(
-					"Couldn't decode an audit-event row for epoch %q.",
-					epochId,
-				),
-				Why:    "One of the columns from the audit-events table couldn't be read into the expected type.",
-				Where:  "Reading audit events (internal/audit/sqlite.go in audit.SqliteAuditTrail.QueryEvents).",
-				Impact: "The event listing for this epoch can't be returned reliably; results would be partial.",
-				Fix: "1. Retry the query.\n" +
-					"2. If the error persists, the audit-events table shape may not match what this build\n" +
-					"   of pasture expects. Inspect it:\n" +
-					"     sqlite3 <path-to-audit.db> '.schema audit_events'\n" +
-					"3. Run the migrator to bring the table to the latest shape:\n" +
-					"     pasture migrate",
-				Cause: err,
-			}
-		}
-
-		var payload map[string]any
-		if err := json.Unmarshal([]byte(payloadCol), &payload); err != nil {
-			return nil, &pasterrors.StructuredError{
-				Category: pasterrors.CategoryStorage,
-				What: fmt.Sprintf(
-					"An audit-event payload is invalid JSON (epoch %q, event type %q).",
-					epochIDCol, eventTypeCol,
-				),
-				Why:   "The payload column couldn't be parsed as JSON — it's been corrupted.",
-				Where: "Reading audit events (internal/audit/sqlite.go in audit.SqliteAuditTrail.QueryEvents).",
-				Impact: "This row can't be returned because its payload is corrupt. The whole event listing\n" +
-					"for this epoch was abandoned.",
-				Fix: "1. Find and inspect the bad row's payload:\n" +
-					fmt.Sprintf("     sqlite3 <path-to-audit.db> 'SELECT id, payload FROM audit_events WHERE event_type = %q'\n", string(eventTypeCol)) +
-					"2. Either repair the payload (re-encode as valid JSON) or delete the row, then retry.",
-				Cause: err,
-			}
-		}
-
-		events = append(events, protocol.AuditEvent{
-			EpochId:   epochIDCol,
-			Phase:     protocol.PhaseId(phaseCol),
-			Role:      stripLegacyRolePrefix(agentName),
-			EventType: protocol.EventType(eventTypeCol),
-			Payload:   payload,
-			Timestamp: time.Unix(0, tsNano).UTC(),
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What: fmt.Sprintf(
-				"Lost the connection to the audit-events table while listing events for epoch %q.",
-				epochId,
-			),
-			Why:    "The database reported an error part-way through reading the result rows.",
-			Where:  "Reading audit events (internal/audit/sqlite.go in audit.SqliteAuditTrail.QueryEvents).",
-			Impact: "The event listing for this epoch can't be returned reliably; results would be partial.",
-			Fix: "1. Retry the query.\n" +
-				"2. If the error persists, the audit database file may be corrupt. Check it:\n" +
-				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
-				"3. If integrity_check reports problems, restore from a backup before retrying.",
-			Cause: err,
-		}
-	}
-	return events, nil
+// QueryEvents returns audit events matching the given filters in chronological
+// order (ascending row id, which equals insertion order).
+//
+// epochId is required and is always part of the WHERE clause. phase and role
+// are optional; nil means "no filter".
+//
+// Delegates to audit.QueryEventsOn, the single canonical query implementation.
+// Both SqliteAuditTrail.QueryEvents and StatusReader.QueryEvents use the same
+// shared function so any schema change is applied in one place.
+func (s *SqliteAuditTrail) QueryEvents(ctx context.Context, epochId string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
+	return QueryEventsOn(ctx, s.db, epochId, phase, role)
 }
 
 // stripLegacyRolePrefix returns the role substring from a synthetic

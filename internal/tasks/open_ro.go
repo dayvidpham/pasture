@@ -19,10 +19,7 @@ package tasks
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
-	"strings"
-	"time"
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/dbconn"
@@ -31,9 +28,11 @@ import (
 )
 
 // StatusReader is a read-only audit-trail reader for the status verb. The
-// zero value is invalid; use OpenStatusReader to construct one.
+// zero value is invalid; use OpenStatusReader or NewStatusReaderFromDB to
+// construct one.
 type StatusReader struct {
-	db *sql.DB
+	db    *sql.DB
+	owned bool // true when this reader owns db (must Close it); false for borrowed handles
 }
 
 // OpenStatusReader opens the database at dbPath in read-only mode for the
@@ -54,14 +53,39 @@ func OpenStatusReader(dbPath string) (*StatusReader, error) {
 
 	// Verify the schema version without migrating. A status read against a
 	// database that belongs to a running daemon must not alter its schema.
-	version, verErr := readSchemaVersion(db)
-	if verErr != nil {
+	if verErr := CheckSchemaVersion(db, dbPath); verErr != nil {
 		db.Close()
 		return nil, verErr
 	}
+
+	return &StatusReader{db: db, owned: true}, nil
+}
+
+// NewStatusReaderFromDB wraps an already-open *sql.DB as a StatusReader. The
+// caller retains ownership of db — Close on the returned reader is a no-op.
+// This constructor exists so callers that have already verified the schema
+// version and opened the database (e.g. EpochStatus) can reuse the handle
+// for enrichment queries without a second open.
+func NewStatusReaderFromDB(db *sql.DB) *StatusReader {
+	return &StatusReader{db: db, owned: false}
+}
+
+// CheckSchemaVersion reads the audit schema version from an already-open
+// read-only handle and returns a CategoryStorage error when it does not match
+// audit.MaxKnownSchemaVersion. The error messages are identical to those in
+// OpenStatusReader so operators see a uniform mismatch message regardless of
+// which code path triggered the check.
+//
+// This function is SELECT-only: it issues no writes, DDL, migration, or any
+// operation that could alter the database. It is safe to call on a read-only
+// handle opened next to a running daemon.
+func CheckSchemaVersion(db *sql.DB, dbPath string) error {
+	version, verErr := readSchemaVersion(db)
+	if verErr != nil {
+		return verErr
+	}
 	if version < audit.MaxKnownSchemaVersion {
-		db.Close()
-		return nil, &pasterrors.StructuredError{
+		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What: fmt.Sprintf(
 				"The database at %q is at schema version %d, but this build of pasture requires version %d.",
@@ -69,7 +93,7 @@ func OpenStatusReader(dbPath string) (*StatusReader, error) {
 			),
 			Why: "The on-disk schema is older than what this binary supports. The database may need " +
 				"to be migrated.",
-			Where:  "Opening the database for status reading (internal/tasks/open_ro.go in tasks.OpenStatusReader).",
+			Where:  "Checking database schema version (internal/tasks/open_ro.go in tasks.CheckSchemaVersion).",
 			Impact: "Status can't read audit events until the schema is upgraded.",
 			Fix: fmt.Sprintf(
 				"1. Run the migration to upgrade the schema:\n"+
@@ -79,8 +103,7 @@ func OpenStatusReader(dbPath string) (*StatusReader, error) {
 		}
 	}
 	if version > audit.MaxKnownSchemaVersion {
-		db.Close()
-		return nil, &pasterrors.StructuredError{
+		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What: fmt.Sprintf(
 				"The database at %q was written by a newer pasture (schema version %d) than this build supports (version %d).",
@@ -91,7 +114,7 @@ func OpenStatusReader(dbPath string) (*StatusReader, error) {
 					"up to version %d and cannot safely read a schema it does not know.",
 				version, audit.MaxKnownSchemaVersion,
 			),
-			Where:  "Opening the database for status reading (internal/tasks/open_ro.go in tasks.OpenStatusReader).",
+			Where:  "Checking database schema version (internal/tasks/open_ro.go in tasks.CheckSchemaVersion).",
 			Impact: "Status can't read audit events until you run a matching binary.",
 			Fix: fmt.Sprintf(
 				"1. Upgrade pasture to a version that supports schema version %d.\n"+
@@ -99,117 +122,17 @@ func OpenStatusReader(dbPath string) (*StatusReader, error) {
 					"   Database: %q", version, dbPath),
 		}
 	}
-
-	return &StatusReader{db: db}, nil
+	return nil
 }
 
 // QueryEvents returns all audit events for epochId, oldest first, filtered
 // optionally by phase and role (nil = no filter).
 //
-// Uses the same post-v4 JOIN as SqliteAuditTrail.QueryEvents — epoch
-// attachment lives in context_edges (EpochContext kind), not in
-// audit_events.epoch_id (dropped at v4).
+// Delegates to audit.QueryEventsOn, the single canonical query implementation.
+// Both StatusReader and SqliteAuditTrail use the same shared function so any
+// schema change (v5+) is applied in one place.
 func (r *StatusReader) QueryEvents(ctx context.Context, epochId string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
-	var clauses []string
-	var args []any
-
-	clauses = append(clauses, "ce.context_kind = ? AND ce.context_id = ?")
-	args = append(args, "EpochContext", epochId)
-
-	if phase != nil {
-		clauses = append(clauses, "ae.phase = ?")
-		args = append(args, string(*phase))
-	}
-	if role != nil {
-		clauses = append(clauses, "asw.name = ?")
-		args = append(args, legacyRoleAgentNamePrefix+*role)
-	}
-
-	query := `SELECT ce.context_id, ae.phase, COALESCE(asw.name, ''), ae.event_type, ae.payload, ae.timestamp
-	          FROM audit_events ae
-	          INNER JOIN context_edges ce ON ce.event_id = ae.id
-	          LEFT JOIN agents_software asw ON asw.agent_id = ae.agent_id
-	          WHERE ` + strings.Join(clauses, " AND ") + `
-	          ORDER BY ae.id ASC`
-
-	rows, err := r.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What: fmt.Sprintf(
-				"Couldn't read audit events for epoch %q.", epochId,
-			),
-			Why:   "The query linking audit events to their epoch returned an error.",
-			Where: "Reading audit events (internal/tasks/open_ro.go in tasks.StatusReader.QueryEvents).",
-			Impact: "The recent-events section of the status view will be empty. The epoch's\n" +
-				"cancellation reason (if any) may also be missing.",
-			Fix: "1. Confirm the database is readable and at the latest schema version:\n" +
-				"     pasture migrate\n" +
-				"2. Retry the status command once the database is healthy.",
-			Cause: err,
-		}
-	}
-	defer rows.Close()
-
-	var events []protocol.AuditEvent
-	for rows.Next() {
-		var epochIDCol, phaseCol, agentName, eventTypeCol, payloadCol string
-		var tsNano int64
-		if err := rows.Scan(&epochIDCol, &phaseCol, &agentName, &eventTypeCol, &payloadCol, &tsNano); err != nil {
-			return nil, &pasterrors.StructuredError{
-				Category: pasterrors.CategoryStorage,
-				What: fmt.Sprintf(
-					"Couldn't decode an audit-event row for epoch %q.", epochId,
-				),
-				Why:    "Scanning a result row from the audit-events query failed.",
-				Where:  "Reading audit events (internal/tasks/open_ro.go in tasks.StatusReader.QueryEvents).",
-				Impact: "The event listing is incomplete.",
-				Fix:    "1. Retry the status command.\n2. If the error persists, check the database integrity.",
-				Cause:  err,
-			}
-		}
-		var payload map[string]any
-		if err := json.Unmarshal([]byte(payloadCol), &payload); err != nil {
-			return nil, &pasterrors.StructuredError{
-				Category: pasterrors.CategoryStorage,
-				What: fmt.Sprintf(
-					"An audit-event payload is invalid JSON (epoch %q, event type %q).",
-					epochIDCol, eventTypeCol,
-				),
-				Why:    "The payload column could not be parsed as JSON — it may be corrupted.",
-				Where:  "Reading audit events (internal/tasks/open_ro.go in tasks.StatusReader.QueryEvents).",
-				Impact: "This event can't be returned; the event listing may be incomplete.",
-				Fix:    "1. Inspect the row directly and repair or remove the bad payload.",
-				Cause:  err,
-			}
-		}
-		role := agentName
-		if strings.HasPrefix(role, legacyRoleAgentNamePrefix) {
-			role = role[len(legacyRoleAgentNamePrefix):]
-		}
-		events = append(events, protocol.AuditEvent{
-			EpochId:   epochIDCol,
-			Phase:     protocol.PhaseId(phaseCol),
-			Role:      role,
-			EventType: protocol.EventType(eventTypeCol),
-			Payload:   payload,
-			Timestamp: time.Unix(0, tsNano).UTC(),
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What: fmt.Sprintf(
-				"Lost the database stream while reading audit events for epoch %q.", epochId,
-			),
-			Why:    "The result iterator returned an error before all rows were read.",
-			Where:  "Reading audit events (internal/tasks/open_ro.go in tasks.StatusReader.QueryEvents).",
-			Impact: "The event listing may be incomplete.",
-			Fix:    "1. Retry the status command. If the error persists, check the database integrity.",
-			Cause:  err,
-		}
-	}
-	return events, nil
+	return audit.QueryEventsOn(ctx, r.db, epochId, phase, role)
 }
 
 // CountEventsByEpoch returns a map from epochId to event count for all epochs
@@ -269,9 +192,11 @@ func (r *StatusReader) CountEventsByEpoch(ctx context.Context) (map[string]int, 
 	return counts, nil
 }
 
-// Close releases the underlying database handle.
+// Close releases the underlying database handle when this reader owns it.
+// It is a no-op for readers created via NewStatusReaderFromDB (borrowed handles).
+// Safe to call multiple times.
 func (r *StatusReader) Close() error {
-	if r.db != nil {
+	if r.owned && r.db != nil {
 		return r.db.Close()
 	}
 	return nil
