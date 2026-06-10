@@ -96,11 +96,26 @@ which point it drains in-flight tasks and exits cleanly.`,
 	root.PersistentFlags().String("audit-db-path", "",
 		"DEPRECATED alias for --db; prefer --db. SQLite audit database path; defaults to ~/.local/share/pasture/pasture.db (env: PASTURE_AUDIT_DB_PATH)")
 
-	// Idle-after-migrate flag (S7; unblocks S3's Scenario 12 concurrent-migrator
-	// race test). When set to a positive duration, after migration completes
-	// (and after well-known automaton registration completes) the daemon idles
-	// for the duration before starting the Temporal worker. Default `0` means
-	// "no idle window — proceed straight to worker start", which is the
+	// --slice-concurrency sets the per-executor concurrency limit K for the
+	// DBOS WorkflowQueue that dispatches slice and review sub-workflows.
+	// K bounds the number of sub-workflows the local executor runs
+	// concurrently, providing backpressure on the single SQLite WAL writer
+	// bottleneck.
+	//
+	// Trade-off: higher K allows more parallel sub-workflows (better throughput
+	// when sub-workflows are I/O-bound) but every concurrent sub-workflow
+	// holds a write transaction slot; SQLite WAL serialises commits, so K
+	// above the disk's commit throughput produces busy_timeout errors. The
+	// default (8) works well on SSD-backed hosts; lower to 4 on spinning
+	// disks or network-attached storage, or raise to 16 on fast NVMe.
+	// Override via env var PASTURE_SLICE_CONCURRENCY.
+	root.PersistentFlags().Int("slice-concurrency", 0,
+		"max concurrent slice/review sub-workflows per executor (0 = default 8; env: PASTURE_SLICE_CONCURRENCY)")
+
+	// Idle-after-migrate flag. When set to a positive duration, after migration
+	// completes (and after well-known automaton registration completes) the daemon
+	// idles for the duration before starting the Temporal worker. Default `0`
+	// means "no idle window — proceed straight to worker start", which is the
 	// production behaviour. Tests set this to e.g. `--idle-after-migrate=2s`
 	// to widen the window during which a second migrator can race the first.
 	root.PersistentFlags().Duration("idle-after-migrate", 0,
