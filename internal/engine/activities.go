@@ -17,11 +17,13 @@ const (
 	// ActivityID and of the engine's stable software agent.
 	activityNamespace = "pasture"
 
-	// engineAgentName is the stable software-agent name the engine attributes
-	// its phase-transition activities to. It is deliberately NOT one of the
-	// well-known automaton agents, so adding it does not change the well-known
-	// agent count or its registration tests.
-	engineAgentName    = "pasture/automaton/epoch-engine"
+	// EngineAgentName is the stable software-agent name the engine attributes
+	// its phase-transition activities to. It is exported so callers that record
+	// audit events attributed to the engine (e.g. the terminate handler) can
+	// use the same stable name without duplicating the string. It is deliberately
+	// NOT one of the well-known automaton agents, so adding it does not change
+	// the well-known agent count or its registration tests.
+	EngineAgentName    = "pasture/automaton/epoch-engine"
 	engineAgentVersion = "0"
 	engineAgentSource  = "internal/engine"
 
@@ -134,7 +136,7 @@ func resolveEngineAgentID(db *sql.DB, sink ActivitySink) (provenance.AgentID, er
 		return id, nil
 	}
 
-	sa, err := sink.RegisterSoftwareAgent(activityNamespace, engineAgentName, engineAgentVersion, engineAgentSource)
+	sa, err := sink.RegisterSoftwareAgent(activityNamespace, EngineAgentName, engineAgentVersion, engineAgentSource)
 	if err != nil {
 		// A concurrent opener may have registered the agent between our find
 		// and our create (agents_software.name is unique). Re-find before
@@ -163,7 +165,7 @@ func findEngineAgentID(db *sql.DB) (provenance.AgentID, bool, error) {
 	err := db.QueryRow(
 		`SELECT a.id FROM agents a JOIN agents_software s ON a.id = s.agent_id
 		 WHERE s.name = ? LIMIT 1`,
-		engineAgentName,
+		EngineAgentName,
 	).Scan(&idStr)
 	switch {
 	case err == sql.ErrNoRows:

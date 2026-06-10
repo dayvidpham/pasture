@@ -23,9 +23,14 @@ type EpochController interface {
 	// StartEpoch launches the durable control workflow for epochId (its
 	// workflow id is the epoch id, so signals address it by that id).
 	StartEpoch(ctx context.Context, epochId string) error
-	// CancelEpoch requests cancellation of the running epoch workflow. Both the
-	// cancel and terminate verbs map here (the substrate has one stop path).
+	// CancelEpoch requests cancellation of the running epoch workflow.
 	CancelEpoch(ctx context.Context, epochId string) error
+	// TerminateEpoch records an EpochCancelled audit event carrying the
+	// operator's reason, then requests cancellation of the running epoch
+	// workflow. reason may be empty (event is still recorded, with an empty
+	// reason payload). Record-before-cancel order is intentional: cancel often
+	// targets a wedged workflow where a subsequent signal would not fire.
+	TerminateEpoch(ctx context.Context, epochId, reason string) error
 	// AdvancePhase delivers an advance-phase signal.
 	AdvancePhase(ctx context.Context, epochId string, sig protocol.PhaseAdvanceSignal) error
 	// SubmitVote delivers a review-vote signal.
@@ -106,6 +111,56 @@ func (c *dbosController) CancelEpoch(ctx context.Context, epochId string) error 
 			Why:      "The durable engine rejected the cancellation (the epoch may not be running).",
 			Where:    "Cancelling the epoch (internal/handlers/controller.go in dbosController.CancelEpoch).",
 			Impact:   "The epoch is unchanged; the cancellation did not take effect.",
+			Fix: "1. Confirm the epoch is running:\n" +
+				"     pasture query state --epoch-id " + epochId + "\n" +
+				"2. Retry once you've confirmed the epoch id.",
+			Cause: err,
+		}
+	}
+	return nil
+}
+
+// TerminateEpoch records an EpochCancelled audit event carrying the operator's
+// reason (empty string is allowed — the payload will contain key "reason" with
+// an empty value), then requests cancellation of the running epoch workflow.
+//
+// The event is written via the non-dedup RecordEvent path (NULL dedup_key)
+// because a CLI terminate is a one-shot action, not a replayed durable step.
+// Record-before-cancel order is deliberate: cancel often targets a wedged
+// workflow where a subsequent signal would not fire; the audit record must
+// survive even when cancellation itself fails.
+//
+// The event is attributed to the engine automaton agent (find-or-created by
+// the legacy-role bridge inside the audit trail). If recording fails, the
+// method returns the record error without attempting cancellation.
+func (c *dbosController) TerminateEpoch(ctx context.Context, epochId, reason string) error {
+	ev := protocol.AuditEvent{
+		EpochId:   epochId,
+		Role:      engine.EngineAgentName,
+		EventType: protocol.EventEpochCancelled,
+		Payload:   map[string]any{"reason": reason},
+		Timestamp: time.Now().UTC(),
+	}
+	if err := c.e.Trail().RecordEvent(ctx, ev); err != nil {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     fmt.Sprintf("Couldn't record the cancellation event for epoch %q before stopping it.", epochId),
+			Why:      "The audit trail rejected the write (storage error or database not accessible).",
+			Where:    "Terminating the epoch (internal/handlers/controller.go in dbosController.TerminateEpoch).",
+			Impact:   "The epoch was not cancelled. No audit record was written.",
+			Fix: "1. Confirm the database is readable and writable:\n" +
+				"     ls -l ~/.local/share/pasture/pasture.db\n" +
+				"2. Retry once the database is healthy.",
+			Cause: err,
+		}
+	}
+	if err := dbos.CancelWorkflow(c.e.DBOS(), epochId); err != nil {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryWorkflow,
+			What:     fmt.Sprintf("Couldn't stop the epoch %q (the cancellation event was recorded).", epochId),
+			Why:      "The durable engine rejected the cancellation (the epoch may not be running).",
+			Where:    "Terminating the epoch (internal/handlers/controller.go in dbosController.TerminateEpoch).",
+			Impact:   "The epoch is unchanged; the cancellation did not take effect. The audit record was written.",
 			Fix: "1. Confirm the epoch is running:\n" +
 				"     pasture query state --epoch-id " + epochId + "\n" +
 				"2. Retry once you've confirmed the epoch id.",

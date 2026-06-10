@@ -105,3 +105,32 @@ func EpochCancel(ctrl EpochController, epochId string, format types.OutputFormat
 	fmt.Println(out)
 	return 0, nil
 }
+
+// EpochTerminate records an EpochCancelled audit event carrying the operator's
+// reason, then requests cancellation of a running epoch. reason may be empty
+// (the event is still recorded with an empty reason payload).
+//
+// If reason is empty, the event is recorded without a reason and the cancel
+// proceeds normally. The distinction between cancel (no record) and terminate
+// (record + cancel) allows operators to attach an explanation to the audit
+// trail.
+//
+// Exit codes: 0=success, 1=validation error, 3=workflow error, 5=storage error.
+func EpochTerminate(ctrl EpochController, epochId, reason string, format types.OutputFormat) (int, error) {
+	if err := requireEpochID(epochId, "terminate an epoch",
+		"Terminating the epoch (internal/handlers/epoch.go in handlers.EpochTerminate).",
+		"pasture epoch terminate --epoch-id <id>"); err != nil {
+		return pasterrors.ExitCode(err), err
+	}
+
+	if err := ctrl.TerminateEpoch(context.Background(), epochId, reason); err != nil {
+		return pasterrors.ExitCode(err), err
+	}
+
+	out, fmtErr := formatters.FormatSignalResult(true, format)
+	if fmtErr != nil {
+		return pasterrors.ExitCode(fmtErr), fmtErr
+	}
+	fmt.Println(out)
+	return 0, nil
+}

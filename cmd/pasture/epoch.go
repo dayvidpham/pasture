@@ -68,17 +68,27 @@ var epochCancelCmd = &cobra.Command{
 	},
 }
 
-// epochTerminateCmd is retained for parity with the previous control CLI; the
-// durable substrate has a single stop path, so it routes to the same handler as
-// cancel. --reason is accepted for operator notes.
+// epochTerminateCmd stops a running epoch and records an operator note (reason)
+// in the audit trail before cancelling. When --reason is not provided, the
+// audit event is still written with an empty reason.
 var epochTerminateCmd = &cobra.Command{
 	Use:   "terminate",
-	Short: "Terminate a running epoch (alias of cancel)",
-	Args:  cobra.NoArgs,
+	Short: "Terminate a running epoch with an optional operator reason",
+	Long: `Stop a running epoch and record the reason in the audit trail.
+
+The --reason flag lets the operator attach a plain-language note explaining why
+the epoch was stopped. The note is written to the audit trail before the epoch
+is cancelled, so it is preserved even when the cancellation targets a wedged
+workflow. When --reason is omitted, the audit event is still written (with an
+empty reason).
+
+For a plain cancel without an audit record, use "pasture epoch cancel".`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		epochId, _ := cmd.Flags().GetString("epoch-id")
+		reason, _ := cmd.Flags().GetString("reason")
 		return runWithController(func(ctrl handlers.EpochController) (int, error) {
-			return handlers.EpochCancel(ctrl, epochId, resolveFormat())
+			return handlers.EpochTerminate(ctrl, epochId, reason, resolveFormat())
 		})
 	},
 }

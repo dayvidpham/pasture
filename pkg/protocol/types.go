@@ -257,6 +257,12 @@ const (
 	EventSliceCompleted     EventType = "SliceCompleted"
 	EventSessionRegistered  EventType = "SessionRegistered"
 	EventReviewCycleStarted EventType = "ReviewCycleStarted"
+	// EventEpochCancelled records that an operator explicitly cancelled a
+	// running epoch via the CLI. The event payload carries the operator's
+	// reason (key "reason", empty string when no reason was given). Unlike
+	// engine-emitted transition events, this event is a one-shot CLI action
+	// and is written via the non-dedup RecordEvent path (NULL dedup_key).
+	EventEpochCancelled EventType = "EpochCancelled"
 )
 
 // AllEventTypes is the ordered slice of all valid EventType values.
@@ -269,6 +275,7 @@ var AllEventTypes = []EventType{
 	EventSliceCompleted,
 	EventSessionRegistered,
 	EventReviewCycleStarted,
+	EventEpochCancelled,
 }
 
 // IsValid reports whether e is a known EventType value.
@@ -276,7 +283,7 @@ func (e EventType) IsValid() bool {
 	switch e {
 	case EventPhaseTransition, EventPhaseAdvance, EventVoteRecorded,
 		EventConstraintChecked, EventSliceStarted, EventSliceCompleted,
-		EventSessionRegistered, EventReviewCycleStarted:
+		EventSessionRegistered, EventReviewCycleStarted, EventEpochCancelled:
 		return true
 	}
 	return false
