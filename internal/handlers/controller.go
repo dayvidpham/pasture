@@ -85,12 +85,13 @@ func (c *dbosController) StartEpoch(ctx context.Context, epochId string) error {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("The epoch %q couldn't be started.", epochId),
-			Why:      "The durable engine rejected the start request (an epoch with this id may already be running).",
+			Why:      "The durable engine rejected the start request — likely a storage or engine initialisation failure.",
 			Where:    "Starting the epoch (internal/handlers/controller.go in dbosController.StartEpoch).",
 			Impact:   "The epoch did not start, so no phase transitions will run for it.",
-			Fix: "1. Check whether an epoch with this id already exists:\n" +
-				"     pasture query state --epoch-id " + epochId + "\n" +
-				"2. If so, use a different epoch id; otherwise retry.",
+			Fix: "1. Confirm the database is readable and writable:\n" +
+				"     ls -l ~/.local/share/pasture/pasture.db\n" +
+				"2. Retry once you've confirmed the database is healthy.\n" +
+				"   Note: starting an epoch with an id that is already running is an idempotent no-op.",
 			Cause: err,
 		}
 	}

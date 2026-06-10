@@ -15,7 +15,7 @@
 //	0  success
 //	1  validation error (bad flags, missing arguments)
 //	2  connection error (cannot open the database file)
-//	3  task error (not found, cycle detected, already closed, etc.)
+//	3  task or workflow error (task not found, cycle detected; epoch start rejected, signal undeliverable)
 //	4  config error
 //	5  storage error (migration / schema failure)
 package main

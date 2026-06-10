@@ -70,7 +70,7 @@ type Activities struct {
 //
 // Used at three boundaries:
 //
-//   - cmd/pasture-msg/epoch.go (CLI entry — rejects malformed --epoch-id
+//   - cmd/pasture/epoch.go (CLI entry — rejects malformed --epoch-id
 //     before any signal/workflow start);
 //   - internal/handlers/epoch.go EpochStart (handler boundary — rejects
 //     malformed epochId before c.ExecuteWorkflow is called);

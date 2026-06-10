@@ -1,6 +1,6 @@
 package main_test
 
-// L6 CLI-level round-trip tests for the folded epoch/signal/session/slice/phase
+// CLI-level subprocess tests for the folded epoch/signal/session/slice/phase
 // verbs. Each test runs the compiled pasture binary through subprocess calls and
 // asserts spec invariants (not implementation snapshots):
 //
@@ -269,6 +269,23 @@ func TestCLI_SliceComplete_MissingSliceIdRejectsWithExit1(t *testing.T) {
 	out := runCLI(t, "--db", db, "slice", "complete")
 	if out.exitCode == 0 {
 		t.Fatalf("expected non-zero exit for missing --slice-id; stdout=%s", out.stdout)
+	}
+}
+
+// ─── workflow-error → exit 3 ──────────────────────────────────────────────────
+
+// TestCLI_EpochCancel_WorkflowError_NonexistentEpoch verifies that cancelling
+// an epoch that was never started returns exit 3 (CategoryWorkflow). This is
+// the CLI-level proof of the CategoryWorkflow → exit 3 mapping:
+// EpochCancel calls CancelWorkflow, which blocks on engine state and returns
+// an error for a nonexistent workflow id.
+func TestCLI_EpochCancel_WorkflowError_NonexistentEpoch(t *testing.T) {
+	db := newDB(t)
+	out := runCLI(t, "--db", db, "epoch", "cancel",
+		"--epoch-id", "demo--01960000-0000-7000-8000-000000000099")
+	if out.exitCode != 3 {
+		t.Fatalf("expected exit 3 for cancel of nonexistent epoch; exit=%d stdout=%s stderr=%s",
+			out.exitCode, out.stdout, out.stderr)
 	}
 }
 

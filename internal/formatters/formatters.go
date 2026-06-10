@@ -355,24 +355,23 @@ func FormatHookRecord(eventType, sha string, eventID int64, message, author, bra
 // startResultJSON is the JSON wire representation of a start result.
 type startResultJSON struct {
 	WorkflowId string `json:"workflowId"`
-	RunId      string `json:"runId"`
 }
 
 // FormatStartResult formats an epoch start result for CLI output.
 //
-// JSON mode: {"workflowId": "...", "runId": "..."}
-// Text mode: "Started epoch: workflow_id=..., run_id=..."
-func FormatStartResult(workflowId, runId string, format types.OutputFormat) (string, error) {
+// JSON mode: {"workflowId": "..."}
+// Text mode: "Started epoch: workflow_id=..."
+func FormatStartResult(workflowId string, format types.OutputFormat) (string, error) {
 	switch format {
 	case types.OutputJSON:
-		b, err := json.MarshalIndent(startResultJSON{WorkflowId: workflowId, RunId: runId}, "", "  ")
+		b, err := json.MarshalIndent(startResultJSON{WorkflowId: workflowId}, "", "  ")
 		if err != nil {
 			return "", err
 		}
 		return string(b), nil
 
 	case types.OutputText:
-		return fmt.Sprintf("Started epoch: workflow_id=%s, run_id=%s", workflowId, runId), nil
+		return fmt.Sprintf("Started epoch: workflow_id=%s", workflowId), nil
 
 	default:
 		return "", &errors.StructuredError{

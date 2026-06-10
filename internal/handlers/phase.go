@@ -12,14 +12,16 @@ import (
 
 // PhaseAdvance delivers an advance-phase signal to the epoch's control workflow.
 //
-// toPhase must be a valid PhaseId. triggeredBy identifies the sender (e.g. a
-// role name); condition describes the protocol condition that was satisfied.
+// toPhaseStr is the raw phase name or pX shorthand from the CLI flag; this
+// handler parses and validates it so RunE can forward the string directly.
+// triggeredBy identifies the sender (e.g. a role name); condition describes
+// the protocol condition that was satisfied.
 //
 // Exit codes: 0=success, 1=validation error, 3=workflow error.
 func PhaseAdvance(
 	ctrl EpochController,
 	epochId string,
-	toPhase protocol.PhaseId,
+	toPhaseStr protocol.PhaseId,
 	triggeredBy, condition string,
 	format types.OutputFormat,
 ) (int, error) {
@@ -28,10 +30,12 @@ func PhaseAdvance(
 		"pasture phase advance --epoch-id <id> --to <phase>"); err != nil {
 		return pasterrors.ExitCode(err), err
 	}
-	if !toPhase.IsValid() {
+
+	toPhase, parseErr := protocol.ParsePhaseId(string(toPhaseStr))
+	if parseErr != nil {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("%q is not a recognised phase name.", toPhase),
+			What:     fmt.Sprintf("%q is not a recognised phase name.", toPhaseStr),
 			Why: "The target phase must be one of the 12 protocol phase names\n" +
 				"(request, elicit, propose, ..., landing, complete) or the short\n" +
 				"form p1..p12.",
@@ -41,6 +45,7 @@ func PhaseAdvance(
 				"     pasture phase advance --to code-review --epoch-id <id>\n" +
 				"2. Or use the short form:\n" +
 				"     pasture phase advance --to p10 --epoch-id <id>",
+			Cause: parseErr,
 		}
 		return pasterrors.ExitCode(err), err
 	}

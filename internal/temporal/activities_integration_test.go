@@ -464,7 +464,7 @@ func TestActivities_RecordTransition_RejectsMalformedEpochId(t *testing.T) {
 	//
 	// The Fix field assertion ("pasture task create REQUEST") lives in
 	// TestEpochStart_MalformedEpochID_Rejected (handlers package) and the
-	// CLI subprocess test (cmd/pasture-msg/main_test.go) — both inspect the
+	// CLI subprocess test (cmd/pasture/main_test.go) — both inspect the
 	// raw *StructuredError BEFORE Temporal serialises it through the activity
 	// boundary, so all fields are visible via Report.
 	msg := err.Error()

@@ -1,9 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/spf13/cobra"
 
 	"github.com/dayvidpham/pasture/internal/handlers"
@@ -31,16 +28,8 @@ the pX shorthand (p1..p12).`,
 		triggeredBy, _ := cmd.Flags().GetString("triggered-by")
 		condition, _ := cmd.Flags().GetString("condition")
 
-		toPhase, err := protocol.ParsePhaseId(toPhaseStr)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "validation error: invalid phase %q: %v\n", toPhaseStr, err)
-			fmt.Fprintln(os.Stderr, "  fix: use a phase name (e.g. code-review) or pX shorthand (p1..p12)")
-			exitWithCode(1)
-			return nil
-		}
-
 		return runWithController(func(ctrl handlers.EpochController) (int, error) {
-			return handlers.PhaseAdvance(ctrl, epochId, toPhase, triggeredBy, condition, resolveFormat())
+			return handlers.PhaseAdvance(ctrl, epochId, protocol.PhaseId(toPhaseStr), triggeredBy, condition, resolveFormat())
 		})
 	},
 }

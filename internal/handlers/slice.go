@@ -10,16 +10,15 @@ import (
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
-// validSliceModes are the execution strategies a slice sub-workflow accepts.
-var validSliceModes = map[string]struct{}{"mock": {}, "tmux": {}, "subprocess": {}}
-
 // SliceStart delivers a start-slice configuration signal to a slice sub-workflow
 // (addressed by its slice workflow id).
 //
 // Exit codes: 0=success, 1=validation error, 3=workflow error.
 func SliceStart(
 	ctrl EpochController,
-	sliceId, mode, command string,
+	sliceId string,
+	mode protocol.SliceExecutionMode,
+	command string,
 	timeoutSeconds int,
 	format types.OutputFormat,
 ) (int, error) {
@@ -34,7 +33,7 @@ func SliceStart(
 		}
 		return pasterrors.ExitCode(err), err
 	}
-	if _, ok := validSliceModes[mode]; !ok {
+	if !mode.IsValid() {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     fmt.Sprintf("%q is not a recognised slice execution mode.", mode),

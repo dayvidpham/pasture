@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // sliceCmd groups slice sub-workflow configuration and completion override verbs.
@@ -32,11 +33,11 @@ For tmux and subprocess modes, --command provides the command to run.
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sliceId, _ := cmd.Flags().GetString("slice-id")
-		mode, _ := cmd.Flags().GetString("mode")
+		modeStr, _ := cmd.Flags().GetString("mode")
 		command, _ := cmd.Flags().GetString("command")
 		timeout, _ := cmd.Flags().GetInt("timeout")
 		return runWithController(func(ctrl handlers.EpochController) (int, error) {
-			return handlers.SliceStart(ctrl, sliceId, mode, command, timeout, resolveFormat())
+			return handlers.SliceStart(ctrl, sliceId, protocol.SliceExecutionMode(modeStr), command, timeout, resolveFormat())
 		})
 	},
 }

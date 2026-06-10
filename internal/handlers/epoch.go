@@ -75,7 +75,7 @@ func EpochStart(ctrl EpochController, epochId string, format types.OutputFormat)
 		return pasterrors.ExitCode(err), err
 	}
 
-	out, fmtErr := formatters.FormatStartResult(epochId, "", format)
+	out, fmtErr := formatters.FormatStartResult(epochId, format)
 	if fmtErr != nil {
 		return pasterrors.ExitCode(fmtErr), fmtErr
 	}

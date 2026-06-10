@@ -1,5 +1,29 @@
 package protocol
 
+// SliceExecutionMode is the execution strategy a slice sub-workflow uses.
+type SliceExecutionMode string
+
+const (
+	// SliceMock runs the slice as a no-op stub (for testing and dry-runs).
+	SliceMock SliceExecutionMode = "mock"
+	// SliceTmux launches the slice command inside a tmux session.
+	SliceTmux SliceExecutionMode = "tmux"
+	// SliceSubprocess runs the slice command as a direct child process.
+	SliceSubprocess SliceExecutionMode = "subprocess"
+)
+
+// IsValid reports whether m is one of the recognised execution modes.
+func (m SliceExecutionMode) IsValid() bool {
+	switch m {
+	case SliceMock, SliceTmux, SliceSubprocess:
+		return true
+	}
+	return false
+}
+
+// AllSliceExecutionModes is the ordered set of every valid SliceExecutionMode.
+var AllSliceExecutionModes = []SliceExecutionMode{SliceMock, SliceTmux, SliceSubprocess}
+
 // PhaseAdvanceSignal is the payload for the advance_phase signal.
 //
 // Sent by any authorized caller to transition the epoch to a new phase.
@@ -51,13 +75,13 @@ type RegisterSessionSignal struct {
 // SliceStartSignal is the payload for the start_slice signal.
 //
 // Sent to a slice sub-workflow to configure how it executes before it runs. Mode
-// selects the execution strategy ("mock", "tmux", or "subprocess"); Command is
-// the shell command for the tmux/subprocess strategies; TimeoutSeconds overrides
-// the default start-to-close timeout when non-zero.
+// selects the execution strategy (SliceMock, SliceTmux, or SliceSubprocess);
+// Command is the shell command for the tmux/subprocess strategies; TimeoutSeconds
+// overrides the default start-to-close timeout when non-zero.
 type SliceStartSignal struct {
-	Mode           string `json:"mode"`
-	Command        string `json:"command,omitempty"`
-	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
+	Mode           SliceExecutionMode `json:"mode"`
+	Command        string             `json:"command,omitempty"`
+	TimeoutSeconds int                `json:"timeoutSeconds,omitempty"`
 }
 
 // SliceCompleteSignal is the payload for the complete_slice signal.

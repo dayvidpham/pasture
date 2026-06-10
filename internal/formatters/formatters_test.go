@@ -203,7 +203,7 @@ func TestFormatEpochState_InvalidFormat(t *testing.T) {
 // ─── FormatStartResult ───────────────────────────────────────────────────────
 
 func TestFormatStartResult_JSON(t *testing.T) {
-	got, err := formatters.FormatStartResult("epoch-123", "run-abc", types.OutputJSON)
+	got, err := formatters.FormatStartResult("epoch-123", types.OutputJSON)
 	if err != nil {
 		t.Fatalf("FormatStartResult JSON: unexpected error: %v", err)
 	}
@@ -214,24 +214,24 @@ func TestFormatStartResult_JSON(t *testing.T) {
 	if m["workflowId"] != "epoch-123" {
 		t.Errorf("workflowId: want %q, got %v", "epoch-123", m["workflowId"])
 	}
-	if m["runId"] != "run-abc" {
-		t.Errorf("runId: want %q, got %v", "run-abc", m["runId"])
+	if _, hasRunId := m["runId"]; hasRunId {
+		t.Errorf("runId should be absent from start result; got %v", m["runId"])
 	}
 }
 
 func TestFormatStartResult_Text(t *testing.T) {
-	got, err := formatters.FormatStartResult("epoch-123", "run-abc", types.OutputText)
+	got, err := formatters.FormatStartResult("epoch-123", types.OutputText)
 	if err != nil {
 		t.Fatalf("FormatStartResult Text: unexpected error: %v", err)
 	}
-	want := "Started epoch: workflow_id=epoch-123, run_id=run-abc"
+	want := "Started epoch: workflow_id=epoch-123"
 	if got != want {
 		t.Errorf("FormatStartResult Text:\n  want: %q\n  got:  %q", want, got)
 	}
 }
 
 func TestFormatStartResult_InvalidFormat(t *testing.T) {
-	_, err := formatters.FormatStartResult("id", "run", types.OutputFormat("yaml"))
+	_, err := formatters.FormatStartResult("id", types.OutputFormat("yaml"))
 	if err == nil {
 		t.Fatal("expected error for unknown format, got nil")
 	}
