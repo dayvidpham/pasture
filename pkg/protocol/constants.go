@@ -93,3 +93,11 @@ func ParseQueryName(s string) (QueryName, bool) {
 	q := QueryName(s)
 	return q, q.IsValid()
 }
+
+// ReviewWorkflowID derives the deterministic DBOS workflow id for a review
+// sub-workflow from the epoch id and the phase id. The format is stable and
+// must be used by both the enqueue side (engine.EnqueueReview) and the send
+// side (any caller that submits a vote to the review sub-workflow).
+func ReviewWorkflowID(epochId, phaseId string) string {
+	return epochId + "-review-" + phaseId
+}

@@ -21,6 +21,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -75,6 +76,23 @@ type Config struct {
 	// field. The engine resolves a stable software-agent id at New() so the
 	// deterministic insert always references a present agent row.
 	Tracker ActivitySink
+	// SliceConcurrency is the per-executor concurrency limit K for the slice
+	// queue. It bounds the number of slice and review sub-workflows that the
+	// local executor runs concurrently, providing backpressure on the single
+	// SQLite WAL writer bottleneck. <= 0 uses DefaultSliceQueueConcurrency.
+	//
+	// Trade-off: higher K allows more parallel sub-workflows, increasing
+	// throughput when sub-workflows are I/O-bound; but each concurrent
+	// sub-workflow holds a write transaction slot, and SQLite WAL serialises
+	// commits, so K beyond the disk's commit throughput causes busy_timeout
+	// backpressure. Start with the default (8) and tune upward on SSDs or
+	// downward on spinning disks or network-attached storage.
+	SliceConcurrency int
+	// HooksMgr, when set, receives slice lifecycle events (SliceStarted,
+	// SliceCompleted, SliceFailed) dispatched by slice sub-workflows. nil ⇒
+	// hook dispatch is skipped (no observability events; the sub-workflow still
+	// runs correctly).
+	HooksMgr *hooks.Manager
 }
 
 // ActivitySink is the narrow provenance surface the engine needs to record
@@ -102,6 +120,7 @@ type Engine struct {
 	specs           map[protocol.PhaseId]protocol.PhaseSpec
 	activityAgentID provenance.AgentID
 	launched        bool
+	sliceQueue      dbos.WorkflowQueue
 }
 
 // New constructs an Engine: opens the shared handle with the WAL/busy-timeout
@@ -255,6 +274,28 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 	dbos.RegisterWorkflow(dbosCtx, e.EpochWorkflow)
 	dbos.RegisterWorkflow(dbosCtx, e.EpochControlWorkflow)
 
+	// Register sub-workflows for slice and review dispatch. These are queued via
+	// the slice queue (registered below) so they execute with bounded concurrency.
+	dbos.RegisterWorkflow(dbosCtx, e.SliceSubWorkflow)
+	dbos.RegisterWorkflow(dbosCtx, e.ReviewSubWorkflow)
+
+	// Create the slice queue BEFORE Launch (NewWorkflowQueue panics after Launch).
+	// The concurrency limit K defaults to DefaultSliceQueueConcurrency when the
+	// config value is 0 or negative.
+	k := cfg.SliceConcurrency
+	if k <= 0 {
+		k = DefaultSliceQueueConcurrency
+	}
+	sliceQueue, err := newSliceQueue(dbosCtx, k)
+	if err != nil {
+		_ = db.Close()
+		if trailCloser != nil {
+			_ = trailCloser.Close()
+		}
+		return nil, err
+	}
+	e.sliceQueue = sliceQueue
+
 	return e, nil
 }
 
@@ -305,4 +346,18 @@ func (e *Engine) Trail() audit.Trail { return e.trail }
 // query and status surfaces consume.
 func (e *Engine) ReadProjection(epochId string) (*protocol.EpochState, error) {
 	return ReadProjection(e.db, epochId)
+}
+
+// SliceQueue returns the DBOS WorkflowQueue used for slice and review
+// sub-workflow dispatch. Tests may inspect the queue name to verify wiring.
+func (e *Engine) SliceQueue() dbos.WorkflowQueue { return e.sliceQueue }
+
+// SliceConcurrency returns the effective per-executor concurrency limit K that
+// was used to configure the slice queue. This is the resolved value (after
+// applying the DefaultSliceQueueConcurrency fallback).
+func (e *Engine) SliceConcurrency() int {
+	if e.cfg.SliceConcurrency <= 0 {
+		return DefaultSliceQueueConcurrency
+	}
+	return e.cfg.SliceConcurrency
 }
