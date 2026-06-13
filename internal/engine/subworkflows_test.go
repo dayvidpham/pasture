@@ -1185,6 +1185,9 @@ func TestSliceQueue_DefaultConcurrency(t *testing.T) {
 	if e.SliceQueue().Name != engine.SliceQueueName {
 		t.Errorf("SliceQueue().Name = %q, want %q", e.SliceQueue().Name, engine.SliceQueueName)
 	}
+	if e.ControlQueue().Name != engine.ControlQueueName {
+		t.Errorf("ControlQueue().Name = %q, want %q", e.ControlQueue().Name, engine.ControlQueueName)
+	}
 }
 
 // TestResolveSliceConcurrency_Precedence table-tests the flag > env > default
@@ -1481,41 +1484,19 @@ func TestReviewSubWorkflow_JunkVoteDropped(t *testing.T) {
 	}
 }
 
-// ── Test 13: OpenEpochController respects PASTURE_SLICE_CONCURRENCY ───────────
+// ── Test 13: OpenEpochController does not own engine queue config ─────────────
 
-// TestOpenEpochController_SliceConcurrencyFromEnv verifies that
-// OpenEpochController consumes the PASTURE_SLICE_CONCURRENCY env var: an
-// invalid value (non-integer) must be rejected with a validation error before
-// the engine is opened, proving the env is resolved — not ignored.
-//
-// This is the tightest observable invariant reachable through the EpochController
-// interface: if the env var were ignored, an invalid value would silently fall
-// through to the default and Open would succeed instead of failing.
-func TestOpenEpochController_SliceConcurrencyFromEnv(t *testing.T) {
-	// An invalid env value must propagate as a validation error.
+// TestOpenEpochController_DoesNotResolveSliceConcurrency verifies the CLI
+// controller no longer constructs an engine or owns slice-queue configuration.
+// Invalid PASTURE_SLICE_CONCURRENCY values belong to pastured startup, not
+// client-backed signal submission.
+func TestOpenEpochController_DoesNotResolveSliceConcurrency(t *testing.T) {
 	t.Setenv(engine.SliceConcurrencyEnv, "not-a-number")
 
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
-	if err == nil {
-		ctrl.Close()
-		t.Fatalf("OpenEpochController with invalid %s must return an error; got nil", engine.SliceConcurrencyEnv)
-	}
-	if !strings.Contains(err.Error(), engine.SliceConcurrencyEnv) {
-		t.Errorf("error must mention %s; got: %v", engine.SliceConcurrencyEnv, err)
-	}
-}
-
-// TestOpenEpochController_SliceConcurrencyDefaultWhenUnset verifies that
-// OpenEpochController succeeds (does not fail) when PASTURE_SLICE_CONCURRENCY
-// is unset, falling through to the default concurrency.
-func TestOpenEpochController_SliceConcurrencyDefaultWhenUnset(t *testing.T) {
-	t.Setenv(engine.SliceConcurrencyEnv, "") // explicitly unset
-
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
-	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
-		t.Fatalf("OpenEpochController with unset %s must succeed; got: %v", engine.SliceConcurrencyEnv, err)
+		t.Fatalf("OpenEpochController must ignore %s because it no longer owns engine queues; got: %v", engine.SliceConcurrencyEnv, err)
 	}
 	defer ctrl.Close()
 }

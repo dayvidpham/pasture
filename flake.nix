@@ -23,7 +23,7 @@
           # null = use vendor directory; set to a sha256 for module proxy mode
           vendorHash = null;
 
-          CGO_ENABLED = "0";
+          env.CGO_ENABLED = "0";
 
           # modernc.org/sqlite requires no native deps; pure Go build
           nativeBuildInputs = [ ];

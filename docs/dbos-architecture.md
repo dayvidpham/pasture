@@ -142,8 +142,8 @@ with deterministic keys, never with a cross-connection transaction (§7).
 | Verb | DBOS mapping |
 |------|--------------|
 | `submit_vote`, `advance_phase`, `slice_progress`, `register_session`, `start_slice`, `complete_slice` | `Send` / `Recv` (one topic per signal name) |
-| `epoch start` | `RunWorkflow` |
-| `epoch cancel` / `terminate` | `CancelWorkflow` |
+| `epoch start` | DBOS client `Enqueue` of `pasture.epoch_control.v1` onto `pasture-control-queue` with workflow ID = epoch ID |
+| `epoch cancel` / `terminate` | DBOS client `CancelWorkflow` (`terminate` records the audit cancellation event first) |
 | queries: `current_state`, `available_transitions`, `full_state`, `slice_progress_state`, `active_sessions` | **SQL read** of the persisted `EpochState` projection + recompute transitions via the FSM |
 
 **Slice/review dispatch:** worker-slice and review sub-workflows are dispatched via DBOS

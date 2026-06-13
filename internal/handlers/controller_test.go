@@ -31,6 +31,7 @@ import (
 type controllerRig struct {
 	engine *engine.Engine
 	ctrl   handlers.EpochController
+	dbPath string
 }
 
 // waitProjection polls the seed engine's projection until the epoch reaches
@@ -119,7 +120,7 @@ func openController(t *testing.T, epochId string, seedPhases []protocol.PhaseId)
 			t.Logf("ctrl.Close: %v", err)
 		}
 	})
-	return controllerRig{engine: seedEngine, ctrl: ctrl}
+	return controllerRig{engine: seedEngine, ctrl: ctrl, dbPath: dbPath}
 }
 
 // ─── EpochStart / EpochCancel ─────────────────────────────────────────────────
@@ -145,6 +146,146 @@ func TestHandler_EpochStart_LaunchesControlWorkflow(t *testing.T) {
 	}
 	if code != 0 {
 		t.Fatalf("EpochStart exit = %d, want 0", code)
+	}
+}
+
+// TestHandler_EpochStart_EnqueuesForHostedEngine verifies the production
+// lifecycle boundary: the controller only writes durable DBOS records/signals,
+// while a hosted engine dequeues and executes EpochControlWorkflow.
+func TestHandler_EpochStart_EnqueuesForHostedEngine(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	host, err := engine.New(context.Background(), engine.Config{
+		DBPath:             dbPath,
+		ApplicationVersion: engine.DefaultApplicationVersion,
+	})
+	if err != nil {
+		t.Fatalf("host engine.New: %v", err)
+	}
+	if err := host.Launch(); err != nil {
+		t.Fatalf("host engine.Launch: %v", err)
+	}
+	t.Cleanup(func() { host.Shutdown(5 * time.Second) })
+
+	ctrl, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := ctrl.Close(); err != nil {
+			t.Logf("ctrl.Close: %v", err)
+		}
+	})
+
+	const epochId = "demo--01960000-0000-7000-8000-000000000002"
+	code, hErr := handlers.EpochStart(ctrl, epochId, types.OutputJSON)
+	if hErr != nil {
+		t.Fatalf("EpochStart err = %v", hErr)
+	}
+	if code != 0 {
+		t.Fatalf("EpochStart exit = %d, want 0", code)
+	}
+
+	code, hErr = handlers.PhaseAdvance(ctrl, epochId, protocol.PhaseElicit, "worker", "elicited", types.OutputJSON)
+	if hErr != nil {
+		t.Fatalf("PhaseAdvance err = %v", hErr)
+	}
+	if code != 0 {
+		t.Fatalf("PhaseAdvance exit = %d, want 0", code)
+	}
+
+	rig := controllerRig{engine: host, ctrl: ctrl, dbPath: dbPath}
+	st := rig.waitProjection(t, epochId, protocol.PhaseElicit)
+	if st.CurrentPhase != protocol.PhaseElicit {
+		t.Fatalf("projection CurrentPhase = %q, want %q", st.CurrentPhase, protocol.PhaseElicit)
+	}
+
+	code, hErr = handlers.QueryEpoch(handlers.QueryEpochInput{
+		DBPath:  dbPath,
+		EpochId: epochId,
+		Query:   protocol.QueryCurrentState,
+	}, types.OutputJSON)
+	if hErr != nil {
+		t.Fatalf("QueryEpoch(current) err = %v", hErr)
+	}
+	if code != 0 {
+		t.Fatalf("QueryEpoch(current) exit = %d, want 0", code)
+	}
+
+	code, hErr = handlers.EpochStatus(handlers.EpochStatusInput{
+		DBPath:  dbPath,
+		EpochId: epochId,
+	}, types.OutputJSON)
+	if hErr != nil {
+		t.Fatalf("EpochStatus err = %v", hErr)
+	}
+	if code != 0 {
+		t.Fatalf("EpochStatus exit = %d, want 0", code)
+	}
+}
+
+// TestHandler_EpochStart_CloseDoesNotCancelHostedWorkflow proves closing the
+// short-lived CLI controller immediately after StartEpoch does not cancel or
+// error the hosted epoch workflow.
+func TestHandler_EpochStart_CloseDoesNotCancelHostedWorkflow(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	host, err := engine.New(context.Background(), engine.Config{
+		DBPath:             dbPath,
+		ApplicationVersion: engine.DefaultApplicationVersion,
+	})
+	if err != nil {
+		t.Fatalf("host engine.New: %v", err)
+	}
+	if err := host.Launch(); err != nil {
+		t.Fatalf("host engine.Launch: %v", err)
+	}
+	t.Cleanup(func() { host.Shutdown(5 * time.Second) })
+
+	const epochId = "demo--01960000-0000-7000-8000-000000000003"
+	ctrl, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController(start): %v", err)
+	}
+	code, hErr := handlers.EpochStart(ctrl, epochId, types.OutputJSON)
+	if hErr != nil {
+		t.Fatalf("EpochStart err = %v", hErr)
+	}
+	if code != 0 {
+		t.Fatalf("EpochStart exit = %d, want 0", code)
+	}
+	if err := ctrl.Close(); err != nil {
+		t.Fatalf("closing the CLI controller after StartEpoch: %v", err)
+	}
+
+	signalCtrl, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController(signal): %v", err)
+	}
+	t.Cleanup(func() {
+		if err := signalCtrl.Close(); err != nil {
+			t.Logf("signalCtrl.Close: %v", err)
+		}
+	})
+	code, hErr = handlers.PhaseAdvance(signalCtrl, epochId, protocol.PhaseElicit, "worker", "elicited", types.OutputJSON)
+	if hErr != nil {
+		t.Fatalf("PhaseAdvance err = %v", hErr)
+	}
+	if code != 0 {
+		t.Fatalf("PhaseAdvance exit = %d, want 0", code)
+	}
+
+	rig := controllerRig{engine: host, ctrl: signalCtrl, dbPath: dbPath}
+	rig.waitProjection(t, epochId, protocol.PhaseElicit)
+
+	handle, err := dbos.RetrieveWorkflow[protocol.EpochState](host.DBOS(), epochId)
+	if err != nil {
+		t.Fatalf("RetrieveWorkflow: %v", err)
+	}
+	status, err := handle.GetStatus()
+	if err != nil {
+		t.Fatalf("GetStatus: %v", err)
+	}
+	if status.Status == dbos.WorkflowStatusError {
+		t.Fatalf("workflow was marked ERROR after CLI close; error=%v", status.Error)
 	}
 }
 

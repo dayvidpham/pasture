@@ -67,19 +67,26 @@ $ pasture --db "$PASTURE_DB_PATH" task create "Demo DBOS epoch" --type task --pr
 }
 
 $ pasture --db "$PASTURE_DB_PATH" epoch start --epoch-id https://github.com/dayvidpham/pasture--019ebe5f-8047-7f26-b00a-89a1ce877392
-2026/06/12 17:26:35 INFO Initializing DBOS context app_name=pasture dbos_version=v0.16.0
+2026/06/12 17:26:35 INFO Initializing DBOS context app_name=dbos-client dbos_version=v0.16.0
 2026/06/12 17:26:35 INFO Using custom SQLite system database handle
-2026/06/12 17:26:35 INFO DBOS launched app_version=1 executor_id=pasture
 Started epoch: workflow_id=https://github.com/dayvidpham/pasture--019ebe5f-8047-7f26-b00a-89a1ce877392
+
+$ pasture --db "$PASTURE_DB_PATH" phase advance --epoch-id https://github.com/dayvidpham/pasture--019ebe5f-8047-7f26-b00a-89a1ce877392 --to elicit --triggered-by worker --condition "request classified"
+2026/06/12 17:26:37 INFO Initializing DBOS context app_name=dbos-client dbos_version=v0.16.0
+2026/06/12 17:26:37 INFO Using custom SQLite system database handle
+Signal delivered successfully
+
+$ pasture --db "$PASTURE_DB_PATH" query current --epoch-id https://github.com/dayvidpham/pasture--019ebe5f-8047-7f26-b00a-89a1ce877392
+Phase: elicit
+Role:  user
 ```
 
-Operational note: task, audit, migration, and read-only status/query commands use
-the unified DBOS-backed SQLite file today. The long-running epoch lifecycle
-dispatch path is still being tightened so `pasture epoch start` submits cleanly
-to an already-running `pastured` host instead of doing work in a short-lived CLI
-DBOS context. Until that lands, treat `pastured` as the durable recovery/queue
-host and use the focused recovery tests as the authoritative end-to-end DBOS
-workflow proof.
+Operational note: task, audit, migration, and read-only status/query commands
+use the unified DBOS-backed SQLite file directly. Epoch lifecycle commands use a
+lightweight DBOS client: `epoch start` enqueues the control workflow on
+`pasture-control-queue`, and signal/cancel verbs write durable DBOS records for
+the target workflow ID. `pastured` remains the long-running host that dequeues
+and executes epoch control, slice/review queues, hooks, and recovery work.
 
 ## Project Structure
 

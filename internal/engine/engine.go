@@ -120,6 +120,7 @@ type Engine struct {
 	specs            map[protocol.PhaseId]protocol.PhaseSpec
 	activityAgentID  provenance.AgentID
 	launched         bool
+	controlQueue     dbos.WorkflowQueue
 	sliceQueue       dbos.WorkflowQueue
 	sliceConcurrency int // resolved value stored once in New; returned by SliceConcurrency()
 }
@@ -273,12 +274,17 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 	// rebuilds. EpochWorkflow drives a scripted plan; EpochControlWorkflow is the
 	// signal-driven driver the lifecycle/signal CLI verbs start and send to.
 	dbos.RegisterWorkflow(dbosCtx, e.EpochWorkflow)
-	dbos.RegisterWorkflow(dbosCtx, e.EpochControlWorkflow)
+	dbos.RegisterWorkflow(dbosCtx, e.EpochControlWorkflow, dbos.WithWorkflowName(EpochControlWorkflowName))
 
 	// Register sub-workflows for slice and review dispatch. These are queued via
 	// the slice queue (registered below) so they execute with bounded concurrency.
 	dbos.RegisterWorkflow(dbosCtx, e.SliceSubWorkflow)
 	dbos.RegisterWorkflow(dbosCtx, e.ReviewSubWorkflow)
+
+	// Create queues BEFORE Launch (NewWorkflowQueue panics after Launch). The
+	// control queue is where CLI clients submit epoch-control workflows for the
+	// hosted pastured process to execute.
+	e.controlQueue = newControlQueue(dbosCtx)
 
 	// Create the slice queue BEFORE Launch (NewWorkflowQueue panics after Launch).
 	// Resolve the concurrency limit K once here; store it on the Engine so
@@ -347,6 +353,9 @@ func (e *Engine) ReadProjection(epochId string) (*protocol.EpochState, error) {
 // SliceQueue returns the DBOS WorkflowQueue used for slice and review
 // sub-workflow dispatch. Tests may inspect the queue name to verify wiring.
 func (e *Engine) SliceQueue() dbos.WorkflowQueue { return e.sliceQueue }
+
+// ControlQueue returns the DBOS WorkflowQueue used for epoch control workflows.
+func (e *Engine) ControlQueue() dbos.WorkflowQueue { return e.controlQueue }
 
 // SliceConcurrency returns the effective per-executor concurrency limit K that
 // was used to configure the slice queue. This is the resolved value (after

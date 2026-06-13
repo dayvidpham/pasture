@@ -36,6 +36,15 @@ import (
 // same K slots, so the total in-flight count across both is bounded by K.
 const SliceQueueName = "pasture-slice-queue"
 
+// ControlQueueName is the canonical DBOS queue name for epoch control
+// workflows. CLI lifecycle commands enqueue onto this queue through a DBOS
+// client; pastured hosts the registered workflow and dequeues it.
+const ControlQueueName = "pasture-control-queue"
+
+// EpochControlWorkflowName is the stable DBOS workflow name used by clients
+// that enqueue epoch control work without linking to the engine implementation.
+const EpochControlWorkflowName = "pasture.epoch_control.v1"
+
 // DefaultSliceQueueConcurrency is the default per-executor concurrency limit
 // for the slice queue. The value balances SQLite WAL write throughput against
 // parallel-agent utilisation:
@@ -115,6 +124,12 @@ func ResolveSliceConcurrency(flagVal int) (int, error) {
 func newSliceQueue(ctx dbos.DBOSContext, concurrency int) dbos.WorkflowQueue {
 	return dbos.NewWorkflowQueue(ctx, SliceQueueName,
 		dbos.WithWorkerConcurrency(concurrency),
+	)
+}
+
+func newControlQueue(ctx dbos.DBOSContext) dbos.WorkflowQueue {
+	return dbos.NewWorkflowQueue(ctx, ControlQueueName,
+		dbos.WithWorkerConcurrency(1),
 	)
 }
 

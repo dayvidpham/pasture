@@ -2,11 +2,14 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
+	"github.com/dayvidpham/pasture/internal/audit"
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/engine"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/tasks"
@@ -49,55 +52,53 @@ type EpochController interface {
 	Close() error
 }
 
-// dbosController is the DBOS-backed EpochController. It owns an engine and maps
-// each operation onto the durable substrate.
+// dbosController is the DBOS-backed EpochController. It owns a lightweight
+// database-backed client and maps each operation onto durable DBOS records.
 type dbosController struct {
-	e *engine.Engine
+	client      dbos.Client
+	db          *sql.DB
+	trail       audit.Trail
+	trailCloser interface{ Close() error }
 }
 
 // OpenEpochController opens a DBOS-backed controller on the unified database.
-// Empty dbPath resolves to tasks.DefaultDBPath(). The returned controller owns
-// an engine launched with the pinned executor id and application version, so a
-// later daemon recovers any epoch this controller starts; Close releases it.
-//
-// The slice-queue concurrency limit is resolved from PASTURE_SLICE_CONCURRENCY
-// (flag > env > default). An invalid env value returns an actionable error
-// before the engine is opened.
-//
-// The durable epoch runs on the substrate; a single-shot CLI process starts or
-// signals it and exits. The long-running daemon that hosts and recovers the
-// workflow across process lifetimes is wired when the legacy workflow server is
-// removed (see https://github.com/dayvidpham/pasture/issues/13).
+// Empty dbPath resolves to tasks.DefaultDBPath(). The returned controller does
+// not construct or launch an engine: lifecycle verbs enqueue durable DBOS
+// records and signals against the shared SQLite file, while pastured hosts and
+// executes the registered workflows.
 func OpenEpochController(dbPath string) (EpochController, error) {
 	if dbPath == "" {
 		dbPath = tasks.DefaultDBPath()
 	}
-	// Resolve the slice-queue concurrency limit from the environment so that
-	// PASTURE_SLICE_CONCURRENCY takes effect for any engine this controller
-	// constructs (flag value 0 → env > default precedence applies).
-	sliceConcurrency, err := engine.ResolveSliceConcurrency(0)
+
+	trail, err := audit.NewSqliteAuditTrail(dbPath)
 	if err != nil {
 		return nil, err
 	}
-	e, err := engine.New(context.Background(), engine.Config{
-		DBPath:             dbPath,
-		ExecutorID:         engine.DefaultExecutorID,
-		ApplicationVersion: engine.DefaultApplicationVersion,
-		SliceConcurrency:   sliceConcurrency,
+	db, err := dbconn.OpenSharedDB(dbPath)
+	if err != nil {
+		_ = trail.Close()
+		return nil, err
+	}
+	client, err := dbos.NewClient(context.Background(), dbos.ClientConfig{
+		SqliteSystemDB: db,
 	})
 	if err != nil {
+		_ = db.Close()
+		_ = trail.Close()
 		return nil, err
 	}
-	if err := e.Launch(); err != nil {
-		e.Shutdown(5 * time.Second)
-		return nil, err
-	}
-	return &dbosController{e: e}, nil
+	return &dbosController{client: client, db: db, trail: trail, trailCloser: trail}, nil
 }
 
 func (c *dbosController) StartEpoch(ctx context.Context, epochId string) error {
-	_, err := dbos.RunWorkflow(c.e.DBOS(), c.e.EpochControlWorkflow,
-		engine.ControlInput{EpochId: epochId}, dbos.WithWorkflowID(epochId))
+	_, err := dbos.Enqueue[engine.ControlInput, protocol.EpochState](c.client,
+		engine.ControlQueueName,
+		engine.EpochControlWorkflowName,
+		engine.ControlInput{EpochId: epochId},
+		dbos.WithEnqueueWorkflowID(epochId),
+		dbos.WithEnqueueApplicationVersion(engine.DefaultApplicationVersion),
+	)
 	if err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
@@ -116,7 +117,7 @@ func (c *dbosController) StartEpoch(ctx context.Context, epochId string) error {
 }
 
 func (c *dbosController) CancelEpoch(ctx context.Context, epochId string) error {
-	if err := dbos.CancelWorkflow(c.e.DBOS(), epochId); err != nil {
+	if err := c.client.CancelWorkflow(epochId); err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Couldn't stop the epoch %q.", epochId),
@@ -153,7 +154,7 @@ func (c *dbosController) TerminateEpoch(ctx context.Context, epochId, reason str
 		Payload:   map[string]any{"reason": reason},
 		Timestamp: time.Now().UTC(),
 	}
-	if err := c.e.Trail().RecordEvent(ctx, ev); err != nil {
+	if err := c.trail.RecordEvent(ctx, ev); err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     fmt.Sprintf("Couldn't record the cancellation event for epoch %q before stopping it.", epochId),
@@ -166,7 +167,7 @@ func (c *dbosController) TerminateEpoch(ctx context.Context, epochId, reason str
 			Cause: err,
 		}
 	}
-	if err := dbos.CancelWorkflow(c.e.DBOS(), epochId); err != nil {
+	if err := c.client.CancelWorkflow(epochId); err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Couldn't stop the epoch %q (the cancellation event was recorded).", epochId),
@@ -202,41 +203,46 @@ func (c *dbosController) sendSignal(epochId string, topic protocol.SignalTopic, 
 
 func (c *dbosController) AdvancePhase(ctx context.Context, epochId string, sig protocol.PhaseAdvanceSignal) error {
 	return c.sendSignal(epochId, protocol.SignalAdvancePhase, func() error {
-		return dbos.Send(c.e.DBOS(), epochId, sig, protocol.SignalAdvancePhase.String())
+		return c.client.Send(epochId, sig, protocol.SignalAdvancePhase.String())
 	})
 }
 
 func (c *dbosController) SubmitVote(ctx context.Context, epochId string, sig protocol.ReviewVoteSignal) error {
 	return c.sendSignal(epochId, protocol.SignalSubmitVote, func() error {
-		return dbos.Send(c.e.DBOS(), epochId, sig, protocol.SignalSubmitVote.String())
+		return c.client.Send(epochId, sig, protocol.SignalSubmitVote.String())
 	})
 }
 
 func (c *dbosController) ReportSliceProgress(ctx context.Context, epochId string, sig protocol.SliceProgressSignal) error {
 	return c.sendSignal(epochId, protocol.SignalSliceProgress, func() error {
-		return dbos.Send(c.e.DBOS(), epochId, sig, protocol.SignalSliceProgress.String())
+		return c.client.Send(epochId, sig, protocol.SignalSliceProgress.String())
 	})
 }
 
 func (c *dbosController) RegisterSession(ctx context.Context, epochId string, sig protocol.RegisterSessionSignal) error {
 	return c.sendSignal(epochId, protocol.SignalRegisterSession, func() error {
-		return dbos.Send(c.e.DBOS(), epochId, sig, protocol.SignalRegisterSession.String())
+		return c.client.Send(epochId, sig, protocol.SignalRegisterSession.String())
 	})
 }
 
 func (c *dbosController) StartSlice(ctx context.Context, sliceId string, sig protocol.SliceStartSignal) error {
 	return c.sendSignal(sliceId, protocol.SignalStartSlice, func() error {
-		return dbos.Send(c.e.DBOS(), sliceId, sig, protocol.SignalStartSlice.String())
+		return c.client.Send(sliceId, sig, protocol.SignalStartSlice.String())
 	})
 }
 
 func (c *dbosController) CompleteSlice(ctx context.Context, sliceId string, sig protocol.SliceCompleteSignal) error {
 	return c.sendSignal(sliceId, protocol.SignalCompleteSlice, func() error {
-		return dbos.Send(c.e.DBOS(), sliceId, sig, protocol.SignalCompleteSlice.String())
+		return c.client.Send(sliceId, sig, protocol.SignalCompleteSlice.String())
 	})
 }
 
 func (c *dbosController) Close() error {
-	c.e.Shutdown(5 * time.Second)
+	if c.client != nil {
+		c.client.Shutdown(5 * time.Second)
+	}
+	if c.trailCloser != nil {
+		return c.trailCloser.Close()
+	}
 	return nil
 }
