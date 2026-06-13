@@ -44,8 +44,9 @@ type SliceResult struct {
 //  1. Dispatched via Engine.EnqueueSlice to the slice queue; starts when a queue
 //     slot is free (bounded by the configured concurrency limit K).
 //  2. Receives a start_slice signal (SliceStartSignal) via dbos.Recv before
-//     deciding the execution mode. Defaults to mock if no signal arrives within
-//     a brief fixed deadline (2s).
+//     deciding the execution mode. If no signal arrives within the deadline the
+//     sub-workflow records an honest failure (Success=false) and returns; no
+//     completion hook fires and the parent projection receives Completed=false.
 //  3. Executes the slice in the chosen mode (mock / tmux / subprocess) inside a
 //     durable step.
 //  4. Receives an optional complete_slice signal (SliceCompleteSignal) that
@@ -59,8 +60,8 @@ type SliceResult struct {
 // by its sliceId (which is its DBOS workflow id).
 func (e *Engine) SliceSubWorkflow(ctx dbos.DBOSContext, in SliceInput) (SliceResult, error) {
 	// ── 1. Receive the start_slice configuration signal (non-blocking with
-	//       a brief deadline so the sub-workflow doesn't park forever waiting
-	//       for a signal that may never arrive in mock/CI mode).
+	//       a brief deadline). If no signal arrives, record an honest failure:
+	//       the slice was enqueued but never started.
 	const startSignalTimeout = 2 * time.Second
 	startSig, err := dbos.Recv[protocol.SliceStartSignal](ctx,
 		protocol.SignalStartSlice.String(), startSignalTimeout)
@@ -68,19 +69,60 @@ func (e *Engine) SliceSubWorkflow(ctx dbos.DBOSContext, in SliceInput) (SliceRes
 		return SliceResult{}, fmt.Errorf("slice %q: unexpected error receiving start_slice signal: %w", in.SliceId, err)
 	}
 
-	// Resolve the execution mode: signal wins (including unrecognised modes,
-	// so runSlice can return an actionable error), then default to mock.
-	mode := protocol.SliceMock
-	var command string
-	timeoutSecs := 300
-	if err == nil {
-		// Signal was received successfully. Pass the mode as-is — runSlice
-		// handles unrecognised modes with an actionable validation error.
-		mode = startSig.Mode
-		command = startSig.Command
-		if startSig.TimeoutSeconds > 0 {
-			timeoutSecs = startSig.TimeoutSeconds
+	// If no signal arrived within the window, return an honest failure.
+	// Recording a fabricated success for a slice that was never started
+	// would corrupt the completion projection and the audit record.
+	// The caller must send a start_slice signal at or before enqueue.
+	if isRecvTimeout(err) {
+		errMsg := fmt.Sprintf(
+			"no start_slice signal received for slice %q within %s — "+
+				"the slice was enqueued but never started.\n"+
+				"Problem: the start_slice signal did not arrive before the %s deadline.\n"+
+				"Why: the signal must be delivered at or shortly after EnqueueSlice returns "+
+				"(before the %s window closes).\n"+
+				"How to fix:\n"+
+				"  1. Send the signal immediately after enqueueing:\n"+
+				"       pasture slice start --slice-id %s --mode mock\n"+
+				"  2. Or re-enqueue and send the signal within %s.",
+			in.SliceId, startSignalTimeout,
+			startSignalTimeout, startSignalTimeout,
+			in.SliceId, startSignalTimeout,
+		)
+		noStartResult := SliceResult{SliceId: in.SliceId, Success: false, Error: &errMsg}
+
+		// Fire the SliceFailed hook (not SliceCompleted — the slice never ran).
+		e.dispatchHook(ctx, hooks.HookSliceFailed, in.EpochId, map[string]any{
+			"sliceId": in.SliceId,
+			"error":   errMsg,
+		})
+
+		// Report Completed=false to the parent.
+		if in.ParentWorkflowId != "" {
+			progressSig := protocol.SliceProgressSignal{
+				SliceId:    in.SliceId,
+				LeafTaskId: in.SliceId,
+				StageName:  "execute",
+				Completed:  false,
+			}
+			if serr := dbos.Send(ctx, in.ParentWorkflowId, progressSig,
+				protocol.SignalSliceProgress.String()); serr != nil {
+				slog.Default().Warn("slice progress signal not delivered to parent",
+					"sliceId", in.SliceId,
+					"parentWorkflowId", in.ParentWorkflowId,
+					"err", serr,
+				)
+			}
 		}
+		return noStartResult, nil
+	}
+
+	// Signal was received. Pass the mode as-is — runSlice handles unrecognised
+	// modes with an actionable validation error.
+	mode := startSig.Mode
+	command := startSig.Command
+	timeoutSecs := 300
+	if startSig.TimeoutSeconds > 0 {
+		timeoutSecs = startSig.TimeoutSeconds
 	}
 
 	// ── 2. Dispatch HookSliceStarted (best-effort; hooks are non-fatal).
@@ -177,7 +219,7 @@ func runSlice(_ context.Context, sliceId, _ string, mode protocol.SliceExecution
 		// a fabricated success would write a false completed-projection record and
 		// fire HookSliceCompleted without any execution having occurred.
 		// Use the complete_slice signal override to report the real outcome once
-		// the agent finishes externally. Wired by the daemon at startup.
+		// the agent finishes externally.
 		errMsg := fmt.Sprintf(
 			"slice %q: execution mode %q is not yet implemented.\n"+
 				"Problem: the DBOS adapter cannot launch tmux sessions or subprocesses directly.\n"+
@@ -203,15 +245,17 @@ func runSlice(_ context.Context, sliceId, _ string, mode protocol.SliceExecution
 }
 
 // dispatchHook fires a hook event through the engine's hook manager inside a
-// durable DBOS step (memoized — not re-executed on crash recovery). If the
-// manager is nil (Config.HooksMgr was not set), the call is a no-op.
+// durable DBOS step (memoized by positional replay order — not re-executed on
+// crash recovery). If the manager is nil (Config.HooksMgr was not set), the
+// call is a no-op.
 //
-// The step is identified by the event name + epoch id, making each dispatch
-// deterministic and replay-stable. Hook failures are logged but never
-// propagated: hooks are optional observability, not control flow.
+// Hook failures are logged but never propagated: hooks are optional
+// observability, not control flow.
 //
-// Config.HooksMgr is wired by the daemon at startup; callers that omit it
-// (e.g. tests that don't need observability) see no dispatches.
+// Config.HooksMgr will be wired by the daemon when it hosts the engine
+// (an explicit acceptance item for the daemon rewiring); until then no
+// production caller sets it. Callers that omit it (e.g. tests that don't need
+// observability) see no dispatches.
 func (e *Engine) dispatchHook(ctx dbos.DBOSContext, event hooks.HookEvent, epochId string, data map[string]any) {
 	if e.cfg.HooksMgr == nil {
 		return

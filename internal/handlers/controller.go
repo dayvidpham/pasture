@@ -60,6 +60,10 @@ type dbosController struct {
 // an engine launched with the pinned executor id and application version, so a
 // later daemon recovers any epoch this controller starts; Close releases it.
 //
+// The slice-queue concurrency limit is resolved from PASTURE_SLICE_CONCURRENCY
+// (flag > env > default). An invalid env value returns an actionable error
+// before the engine is opened.
+//
 // The durable epoch runs on the substrate; a single-shot CLI process starts or
 // signals it and exits. The long-running daemon that hosts and recovers the
 // workflow across process lifetimes is wired when the legacy workflow server is
@@ -68,10 +72,18 @@ func OpenEpochController(dbPath string) (EpochController, error) {
 	if dbPath == "" {
 		dbPath = tasks.DefaultDBPath()
 	}
+	// Resolve the slice-queue concurrency limit from the environment so that
+	// PASTURE_SLICE_CONCURRENCY takes effect for any engine this controller
+	// constructs (flag value 0 → env > default precedence applies).
+	sliceConcurrency, err := engine.ResolveSliceConcurrency(0)
+	if err != nil {
+		return nil, err
+	}
 	e, err := engine.New(context.Background(), engine.Config{
 		DBPath:             dbPath,
 		ExecutorID:         engine.DefaultExecutorID,
 		ApplicationVersion: engine.DefaultApplicationVersion,
+		SliceConcurrency:   sliceConcurrency,
 	})
 	if err != nil {
 		return nil, err

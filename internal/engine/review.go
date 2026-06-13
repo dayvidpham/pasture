@@ -68,7 +68,7 @@ const reviewVotePollInterval = 1 * time.Hour
 //  3. Returns a ReviewResult with the collected per-axis vote map.
 //
 // The submit_vote signals are addressed to this sub-workflow by the id assigned
-// by Engine.EnqueueReview (protocol.ReviewWorkflowID(epochId, phaseId)).
+// by Engine.EnqueueReview (protocol.ReviewWorkflowID(epochId, phaseId, round)).
 //
 // Idempotency: if the same axis votes twice, the later vote overwrites the
 // earlier one (last-writer-wins per ReviewAxis key).

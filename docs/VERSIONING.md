@@ -73,17 +73,18 @@ plugin**. This is the channel that needs versioning *now*.
 
 ## ③ Inter-tool channel (the pasture binaries) — REAL CURRENT consumer
 
-`pastured` (Temporal worker daemon), `pasture` (unified CLI for tasks, epoch lifecycle, signals,
+`pastured` (DBOS engine-host daemon), `pasture` (unified CLI for tasks, epoch lifecycle, signals,
 and queries), and `pasture-release` all import `pkg/protocol`. This is the **real, present**
 consumption — and its purpose is **drift-prevention**.
 
 - **The contract:** the shared single-source-of-truth is **`pkg/protocol`** (types: `PhaseId`,
   `AuditEvent`, `TaskTracker`, `VoteType`, `SignalTopic`, `QueryName`, …). Signal and query topic
   constants are declared once in `pkg/protocol`; all binaries reference them directly.
-- **Why it matters:** `pastured` *registers* the workflow's signals/queries; `pasture` *sends*
-  them. If either hardcoded a name or redefined a type, they would **drift** and silently fail to
-  communicate. Both referencing the same constants/types makes drift a compile error, not a runtime
-  surprise.
+- **Why it matters:** `pastured` hosts the DBOS engine that registers durable workflows and
+  consumes signals; `pasture` starts, signals, and queries those workflows through the shared
+  database-backed protocol. If either hardcoded a name or redefined a type, they would **drift**
+  and silently fail to communicate. Both referencing the same constants/types makes drift a compile
+  error, not a runtime surprise.
 - **Convention:** in-tree binaries **import `pkg/protocol` directly** (never via `internal/types`
   aliases — see `pasture/CLAUDE.md`) and **never hardcode** a signal/query string — always use the
   typed constants in `pkg/protocol`.

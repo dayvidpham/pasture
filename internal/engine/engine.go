@@ -89,9 +89,9 @@ type Config struct {
 	// hook dispatch is skipped (no observability events; the sub-workflow still
 	// runs correctly).
 	//
-	// HooksMgr is wired by the daemon at startup. Callers that don't need
-	// slice lifecycle observability (e.g. the local CLI, unit tests) may
-	// leave this nil.
+	// HooksMgr will be wired by the daemon when it hosts the engine (an explicit
+	// acceptance item for the daemon rewiring). Callers that don't need slice
+	// lifecycle observability (e.g. the local CLI, unit tests) may leave this nil.
 	HooksMgr *hooks.Manager
 }
 
@@ -289,15 +289,7 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 	if k <= 0 {
 		k = DefaultSliceQueueConcurrency
 	}
-	sliceQueue, err := newSliceQueue(dbosCtx, k)
-	if err != nil {
-		_ = db.Close()
-		if trailCloser != nil {
-			_ = trailCloser.Close()
-		}
-		return nil, err
-	}
-	e.sliceQueue = sliceQueue
+	e.sliceQueue = newSliceQueue(dbosCtx, k)
 	e.sliceConcurrency = k
 
 	return e, nil

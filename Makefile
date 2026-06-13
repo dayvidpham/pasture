@@ -1,4 +1,4 @@
-.PHONY: build test test-race lint fmt clean release-local release-all generate smoke-temporal
+.PHONY: build test test-race lint fmt clean release-local release-all generate
 
 VERSION ?= dev
 
@@ -119,35 +119,6 @@ release-all:
 		done; \
 	done; \
 	echo "All binaries written to dist/"
-
-# --------------------------------------------------------------------------
-# Smoke tests
-# --------------------------------------------------------------------------
-#
-# smoke-temporal is no longer runnable: the Temporal control CLI (pasture-msg)
-# that scripts/smoke/temporal-e2e.sh depends on was removed as part of the
-# migration off Temporal (see https://github.com/dayvidpham/pasture/issues/13).
-# This target now fails immediately with an actionable message rather than
-# silently producing a "binary not found" failure midway through the script.
-#
-# To verify the current production-shape path, run the standard test suite:
-#   make test
-#
-# Full Temporal E2E smoke coverage is planned as part of the DBOS migration;
-# track progress at https://github.com/dayvidpham/pasture/issues/13.
-
-smoke-temporal:
-	@echo ""
-	@echo "smoke-temporal is not available."
-	@echo ""
-	@echo "  What was removed: the Temporal control CLI (pasture-msg) and its"
-	@echo "    end-to-end smoke harness."
-	@echo "  Why: removed as part of the migration off Temporal."
-	@echo "  Impact: this smoke path cannot run until the DBOS migration is complete."
-	@echo "  What to do instead: run the standard test suite with 'make test'."
-	@echo "    Track progress: https://github.com/dayvidpham/pasture/issues/13"
-	@echo ""
-	@exit 1
 
 # --------------------------------------------------------------------------
 # Clean

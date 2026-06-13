@@ -73,7 +73,6 @@
             delve
             golangci-lint
             sqlite
-            temporal-cli
           ];
           shellHook = ''
             echo "Pasture dev shell (Go $(go version | cut -d' ' -f3))"

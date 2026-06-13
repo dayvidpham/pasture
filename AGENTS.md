@@ -7,8 +7,7 @@ project. All contributors (human and AI) must follow these standards.
 
 - **Module:** `github.com/dayvidpham/pasture`
 - **Binaries:**
-  - `pastured` (Temporal worker daemon)
-  - `pasture-msg` (Temporal-control CLI)
+  - `pastured` (DBOS engine-host daemon)
   - `pasture` (local task + audit CLI; routes through `protocol.TaskTracker`)
   - `pasture-release` (versioning)
 - **Language:** Go 1.25+
@@ -20,8 +19,7 @@ project. All contributors (human and AI) must follow these standards.
 pasture/
 ├── cmd/
 │   ├── pasture/         # Local Pasture CLI (task verbs + top-level migrate)
-│   ├── pastured/        # Temporal worker daemon entry point
-│   ├── pasture-msg/     # CLI for sending protocol messages
+│   ├── pastured/        # DBOS engine-host daemon entry point
 │   └── pasture-release/ # Release and versioning tool
 ├── internal/
 │   ├── acp/             # Agent Control Protocol client + adapter
@@ -34,8 +32,10 @@ pasture/
 │   ├── release/         # pasture-release internals
 │   ├── tasks/           # protocol.TaskTracker implementation +
 │   │                    #   well-known agent registry + free-floating recorders
-│   ├── temporal/        # Temporal workflow/activity implementations
+│   ├── engine/          # DBOS durable engine, projection, queues, recovery
 │   └── types/           # Internal aggregate types (not for export)
+├── legacy/
+│   └── temporal/        # Deprecated nested module preserving old Temporal code
 ├── pkg/
 │   └── protocol/        # Public aura-protocol types — including the
 │                        #   protocol.TaskTracker façade interface
@@ -130,12 +130,10 @@ with `busy_timeout=5000`; the cross-subsystem race test in
 `internal/tasks/tracker_race_test.go` (BLOCKER B3) exercises this path.
 
 Pre-PROPOSAL-2 deployments used two separate files (`provenance.db` for the
-`pasture` CLI, `audit.db` for `pastured`); SLICE-10 collapses both to
-`pasture.db`. The `pastured --audit-db-path` flag and `PASTURE_AUDIT_DB_PATH`
-environment variable are preserved as **deprecated aliases** for `--db` and
-`PASTURE_DB_PATH`. If both `--db` and `--audit-db-path` are set with different
-values, the daemon prefers `--db` and emits a deprecation warning (see
-`resolveDBPath` in `cmd/pastured/main.go`).
+`pasture` CLI, `audit.db` for `pastured`); the current DBOS runtime collapses
+both to `pasture.db`. `pastured` accepts `--db`, and the shared fallback remains
+`PASTURE_DB_PATH` / `tasks.DefaultDBPath()`. The old `--audit-db-path` alias has
+been retired with the Temporal daemon role.
 
 ### Schema migration (`pasture migrate`)
 
@@ -175,15 +173,6 @@ are: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
 `Notification`, `Stop`, `SubagentStop`, `PreCompact`, `SessionEnd`. List the
 registered agents with `pasture task agents list`.
 
-### `pastured --idle-after-migrate <duration>`
-
-A test-mode flag on `pastured` that, after migration + well-known agent
-registration completes, idles the daemon for the given duration before
-starting the Temporal worker. Default `0` disables the idle window
-(production behaviour). Used by the S3 Scenario 12 concurrent-migrator race
-test to widen the window during which a second migrator can race the first.
-Not for production use.
-
 ### `pasture task` subcommands (added by PROPOSAL-2)
 
 | Subcommand | Purpose |
@@ -204,20 +193,11 @@ Existing `pasture task` verbs (`create`, `show`, `update`, `close`, `list`,
 |---------|---------|
 | `github.com/spf13/cobra` | CLI framework |
 | `github.com/spf13/viper` | Configuration loading (TOML/YAML/env) |
-| `go.temporal.io/sdk` | Temporal workflow orchestration (being replaced by DBOS) |
 | `github.com/dbos-inc/dbos-transact-golang` | Durable-execution substrate (DBOS Transact, SQLite backend) |
 | `modernc.org/sqlite` | Pure-Go SQLite (audit trail, local state, DBOS system DB) |
 | `golang.org/x/term` | Cross-platform terminal/isatty detection (sync-versions non-TTY guard) |
 
 No other external dependencies may be added without supervisor approval.
-
-**Temporary `replace` directive (`go.mod`).** While both the Temporal SDK and
-DBOS are in the module graph, a `replace` forces the post-split
-`google.golang.org/genproto` monolith: the Temporal SDK's `grpc-middleware`
-pins the pre-split monolith, which collides with the split `genproto/googleapis`
-modules that `grpc-gateway` (a DBOS dependency) requires. Remove the `replace`
-once the Temporal SDK leaves the module graph. Tracking:
-<https://github.com/dayvidpham/pasture/issues/13>.
 
 ## Go Conventions
 
@@ -362,7 +342,7 @@ The `-race` flag is mandatory for all test runs.
 ### Test file conventions
 - Test files: `*_test.go` using `package foo_test` (black-box) or `package foo` (white-box).
 - Import the actual production package — never a test-only re-export.
-- Use dependency injection (interface mocks) for external services (Temporal, SQLite).
+- Use dependency injection (interface mocks) for external services (DBOS, SQLite).
 
 ### Quality gates (must pass before every commit)
 ```bash
@@ -374,18 +354,9 @@ make build  # CGO_ENABLED=0 go build ./...
 
 ### Smoke tests
 
-The unit/integration suite (`make test`) runs in-process against mocked or
-in-memory backends and is the primary quality gate.
-
-`make smoke-temporal` **now fails immediately** — the Temporal control CLI
-(`pasture-msg`) that the smoke harness (`scripts/smoke/temporal-e2e.sh`)
-depended on was removed as part of the migration off Temporal. Running the
-target prints an actionable message explaining what was removed and why, then
-exits non-zero. Do not attempt to run it.
-
-Run `make test` instead. Production-shape Temporal E2E smoke coverage is
-planned as part of the DBOS migration; track progress at
-https://github.com/dayvidpham/pasture/issues/13.
+The unit/integration suite (`make test`) runs against the DBOS/SQLite runtime
+and is the primary quality gate. The old Temporal smoke harness is preserved
+only inside `legacy/temporal/` with the deprecated Temporal substrate.
 
 ## Build
 
@@ -404,52 +375,26 @@ GOOS=darwin  GOARCH=arm64  CGO_ENABLED=0 go build ./cmd/pastured
 GOOS=windows GOARCH=amd64  CGO_ENABLED=0 go build ./cmd/pastured
 ```
 
-## Temporal Conventions
+## DBOS Engine Conventions
 
-- Signal and query names live in `internal/temporal/constants.go` as typed constants.
-- Never hardcode signal/query name strings at call sites — always use the constants.
-- Workflow and activity implementations live in `internal/temporal/`.
-
-### Why Temporal: observability + introspection
-
-Temporal was chosen as the workflow substrate specifically because it
-*provides* the observability and introspection surface the toolkit needs.
-There is no separate Pasture-side "introspection layer" to build — Temporal
-already gives:
-
-- **Live state** — `pasture-msg query state --epoch-id <id>` queries the
-  running workflow's current `EpochState` via Temporal's workflow-query API.
-- **Filterable cross-workflow listing** — six search attributes upserted by
-  every workflow (`PastureEpochId`, `PasturePhase`, `PastureRole`, `PastureStatus`,
-  `PastureDomain`, `PastureLastEventType`) make any open epoch greppable, e.g.
-  `temporal workflow list -q "PasturePhase = 'elicit'"`. The SA wire names are
-  declared in `internal/temporal/search_attributes.go`.
-- **UI + history replay** — the Temporal UI on port 8233 (and
-  `temporal workflow show`) provide per-workflow timelines, event histories,
-  and replay tooling without any code on our side.
-- **Durable substrate** — `pasture.db` `audit_events` + `context_edges` hold
-  the canonical historical record outside of Temporal's retention window.
-
-The **join key** that makes these views coherent is the D5/R13 binding from
-PROPOSAL-2: `epoch-id = Provenance TaskID = Temporal workflow ID =
-audit_events context key`. A single string flows through the whole stack
-without translation. That's why §7.12 validation rejects malformed epoch-ids
-at workflow start — losing the alignment would break the introspection
-surface.
+- Signal/query topic names and payload types live in `pkg/protocol` as typed constants.
+- Workflow implementations live in `internal/engine`.
+- `pastured` is the long-running DBOS host. It wires `engine.Config` with
+  `engine.DefaultExecutorID`, `engine.DefaultAppName`,
+  `engine.DefaultApplicationVersion`, `HooksMgr`, tracker/trail, and the
+  resolved slice queue concurrency.
+- The root module must not require `go.temporal.io/*`. The old Temporal
+  substrate is preserved only as the isolated deprecated nested module under
+  `legacy/temporal/`.
 
 When debugging "where am I in this workflow?", the layers map cleanly:
 
 | Question | Tool |
 |---|---|
-| What's the current phase / role / status? | `pasture-msg query state` (live, via Temporal query) |
-| Which workflows are currently in phase X? | `temporal workflow list -q "PasturePhase = 'X'"` |
-| What events have I emitted so far? | `pasture task events --epoch-id <id>` (durable, via `pasture.db`) |
+| What's the current phase / role / status? | `pasture status --epoch-id <id>` |
+| What events have I emitted so far? | `pasture task events --epoch-id <id>` |
 | Show the timeline for one task. | `pasture task timeline <task-id>` |
-| Visualise everything for one workflow. | Temporal UI at `localhost:8233` (or wherever `pastured --address` points) |
-
-A unified status command that joins all of these in one call is tracked as
-[`aura-plugins-punit`](beads://aura-plugins-punit); not yet built but not
-load-bearing — today's two-CLI path is functional.
+| Inspect durable engine state directly. | SQLite tables in the shared `pasture.db` DBOS/projection/audit store |
 
 ### Code generation vs runtime injection
 

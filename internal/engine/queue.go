@@ -112,11 +112,10 @@ func ResolveSliceConcurrency(flagVal int) (int, error) {
 // construction, so callers that use Engine.New do not need to call it directly.
 // (Note: the function is intentionally unexported; see Engine.SliceQueue for
 // the public accessor.)
-func newSliceQueue(ctx dbos.DBOSContext, concurrency int) (dbos.WorkflowQueue, error) {
-	q := dbos.NewWorkflowQueue(ctx, SliceQueueName,
+func newSliceQueue(ctx dbos.DBOSContext, concurrency int) dbos.WorkflowQueue {
+	return dbos.NewWorkflowQueue(ctx, SliceQueueName,
 		dbos.WithWorkerConcurrency(concurrency),
 	)
-	return q, nil
 }
 
 // EnqueueSlice dispatches a SliceSubWorkflow via the slice queue, giving it the

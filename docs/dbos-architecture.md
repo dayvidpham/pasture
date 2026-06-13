@@ -1,37 +1,38 @@
 # Pasture Durable-Execution Architecture (DBOS substrate)
 
-> **Status: design — ratified at Plan UAT, implementation pending.** This document
-> describes the **target** architecture for pasture's durable-execution substrate
-> after migrating off Temporal onto **DBOS Transact (Go + SQLite)**. It is the
-> durable reference for the design decisions and integration surfaces; the
-> blow-by-blow planning history lives in the parent repo's
+> **Status: implementation in progress.** This document describes pasture's
+> durable-execution substrate after migrating off Temporal onto **DBOS Transact
+> (Go + SQLite)**. It is the durable reference for the design decisions and
+> integration surfaces; the blow-by-blow planning history lives in the parent repo's
 > `docs/proposals/PROPOSAL-{1..5}-dbos-substrate-migration.md`.
 
 ## 1. What changes, in one paragraph
 
-Pasture's orchestrator currently runs the 12-phase epoch workflow on **Temporal**,
-which requires a separate Temporal **server process** plus the `pastured` **daemon**.
-This migration replaces that with **DBOS Transact** — an *embedded* durable-execution
-library (Go SDK, SQLite backend) that runs **in-process**, with **no separate server
-and no daemon**. The 12-phase state machine itself is unchanged; only the wrapper that
-drives it durably is swapped. The result is a single statically-compiled binary
-(`CGO_ENABLED=0`) that durably runs epochs and resumes them after a crash.
+Pasture's orchestrator previously ran the 12-phase epoch workflow on **Temporal**,
+which required a separate Temporal **server process** plus a Temporal-flavoured
+`pastured` worker. This migration replaces that with **DBOS Transact** — an
+embedded durable-execution library (Go SDK, SQLite backend) that runs in the
+Pasture process with **no external workflow server**. The 12-phase state machine
+itself is unchanged; only the wrapper that drives it durably is swapped. The
+`pastured` binary remains as the long-running DBOS engine host for recovery,
+queue dispatch, hooks, and background epoch work.
 
 ## 2. Why (the core decision)
 
 | | Temporal (before) | DBOS Transact (after) |
 |---|---|---|
 | Durable execution | Yes (retry/replay, signals) | Yes (durable steps, automatic recovery) |
-| Operational weight | **Server process + `pastured` daemon** | **In-process library — nothing extra to run** |
+| Operational weight | **Temporal server process + Temporal worker** | **No external workflow server; `pastured` hosts DBOS for background work** |
 | Storage | Temporal's store (its dev server on SQLite) | **The same `pasture.db`** (modernc SQLite) |
 | Build | CGO-free already | CGO-free preserved (`modernc.org/sqlite`) |
-| Single static binary | Undermined by the server requirement | **Achieved** |
+| Static binaries | Undermined by the server requirement | **Preserved** (`pasture` CLI and `pastured` host) |
 
 The decision space evaluated three substrates: keep Temporal, **DBOS Transact (chosen)**,
 or a plain state-machine-over-SQLite with no framework. DBOS was chosen because the
 orchestrator genuinely needs **automatic crash recovery** (resume an in-flight epoch
-after a `kill -9`), which the plain-SQLite option does not provide, while still meeting
-the single-binary goal that Temporal defeats. DBOS is **pre-1.0 (v0.16.0)**; that risk
+after a `kill -9`), which the plain-SQLite option does not provide, while still removing
+the external workflow server that made Temporal operationally heavy. DBOS is
+**pre-1.0 (v0.16.0)**; that risk
 is de-risked by a kill-9 resume spike that becomes a permanent regression test, and the
 version is pinned.
 

@@ -53,7 +53,7 @@ import (
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/tasks"
-	"github.com/dayvidpham/pasture/internal/temporal"
+	"github.com/dayvidpham/pasture/legacy/temporal/internal/temporal"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 

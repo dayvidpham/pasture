@@ -17,8 +17,10 @@ import (
 	"database/sql"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -63,19 +65,41 @@ func buildProbe(t *testing.T, root, ldflags string) string {
 	return bin
 }
 
+func armProbeReadySignal(t *testing.T) chan os.Signal {
+	t.Helper()
+	ready := make(chan os.Signal, 1)
+	signal.Notify(ready, syscall.SIGUSR1)
+	t.Cleanup(func() {
+		signal.Stop(ready)
+	})
+	return ready
+}
+
+func waitForProbeReadySignal(t *testing.T, ready chan os.Signal, timeout time.Duration) {
+	t.Helper()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case <-ready:
+		return
+	case <-timer.C:
+		t.Fatal("victim never signalled readiness within timeout")
+	}
+}
+
 // killCycle runs the victim (which stalls mid-step and is SIGKILLed once it
 // signals readiness) then the resumer (which recovers and completes). The two
 // may be different binaries to exercise the recompiled-binary tier. dbPath is
 // shared between them.
 func killCycle(t *testing.T, victimBin, resumerBin, dbPath, wfID string) {
 	t.Helper()
-	readyFile := filepath.Join(t.TempDir(), "ready")
+	ready := armProbeReadySignal(t)
 
 	victim := exec.Command(victimBin)
 	victim.Env = append(os.Environ(),
 		"PROBE_DB="+dbPath,
 		"PROBE_WFID="+wfID,
-		"PROBE_READY="+readyFile,
 		"PROBE_STALL=120",
 	)
 	victim.Stderr = os.Stderr
@@ -83,19 +107,7 @@ func killCycle(t *testing.T, victimBin, resumerBin, dbPath, wfID string) {
 		t.Fatalf("start victim: %v", err)
 	}
 
-	// Wait until the victim has written the mid-step forensic row (it creates
-	// readyFile from inside the durable step, after the write, before sleeping).
-	deadline := time.Now().Add(60 * time.Second)
-	for {
-		if _, err := os.Stat(readyFile); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			_ = victim.Process.Kill()
-			t.Fatal("victim never signalled readiness within 60s")
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	waitForProbeReadySignal(t, ready, 60*time.Second)
 
 	// kill -9 the victim mid-step (after the side-effect write, before return).
 	if err := victim.Process.Kill(); err != nil {
@@ -116,6 +128,45 @@ func killCycle(t *testing.T, victimBin, resumerBin, dbPath, wfID string) {
 	}
 	if !strings.Contains(string(out), "COMPLETE propose") {
 		t.Fatalf("resumer did not complete the recovered epoch; output:\n%s", out)
+	}
+}
+
+func queuedSliceRecoveryCycle(t *testing.T, victimBin, resumerBin, dbPath, wfID string) {
+	t.Helper()
+	ready := armProbeReadySignal(t)
+
+	victim := exec.Command(victimBin)
+	victim.Env = append(os.Environ(),
+		"PROBE_MODE=queue",
+		"PROBE_DB="+dbPath,
+		"PROBE_WFID="+wfID,
+		"PROBE_STALL=120",
+	)
+	victim.Stderr = os.Stderr
+	if err := victim.Start(); err != nil {
+		t.Fatalf("start queue victim: %v", err)
+	}
+
+	waitForProbeReadySignal(t, ready, 60*time.Second)
+
+	if err := victim.Process.Kill(); err != nil {
+		t.Fatalf("kill queue victim: %v", err)
+	}
+	_ = victim.Wait()
+
+	resumer := exec.Command(resumerBin)
+	resumer.Env = append(os.Environ(),
+		"PROBE_MODE=queue",
+		"PROBE_DB="+dbPath,
+		"PROBE_WFID="+wfID,
+		"PROBE_STALL=0",
+	)
+	out, err := resumer.CombinedOutput()
+	if err != nil {
+		t.Fatalf("queue resumer failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "QUEUE COMPLETE") {
+		t.Fatalf("queue resumer did not complete recovered queued slices; output:\n%s", out)
 	}
 }
 
@@ -247,4 +298,12 @@ func TestRecovery_LegacyNullCoexistence(t *testing.T) {
 	if nullCount != 2 {
 		t.Errorf("legacy NULL-keyed row count = %d, want 2 (partial index must allow multiple NULLs)", nullCount)
 	}
+}
+
+func TestRecovery_QueuedSliceSurvivesDaemonRestart(t *testing.T) {
+	root := moduleRoot(t)
+	bin := buildProbe(t, root, "")
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+
+	queuedSliceRecoveryCycle(t, bin, bin, dbPath, "epoch-recover-queued-slice")
 }

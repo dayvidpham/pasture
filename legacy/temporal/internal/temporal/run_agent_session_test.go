@@ -23,7 +23,7 @@ import (
 	"go.temporal.io/sdk/testsuite"
 
 	"github.com/dayvidpham/pasture/internal/audit"
-	"github.com/dayvidpham/pasture/internal/temporal"
+	"github.com/dayvidpham/pasture/legacy/temporal/internal/temporal"
 	"github.com/dayvidpham/pasture/internal/testutil"
 )
 

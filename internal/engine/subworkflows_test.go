@@ -4,20 +4,21 @@ package engine_test
 //
 // Test plan:
 //
-//  1. SliceSubWorkflow round-trips: mock-mode slice completes and the parent
-//     receives a slice_progress signal (basic round-trip + row-count invariant).
+//  1. SliceSubWorkflow round-trips: mock-mode slice (with explicit start_slice
+//     signal) completes and the parent receives a slice_progress signal (basic
+//     round-trip + row-count invariant).
 //
 //  2. SliceSubWorkflow signal integration: start_slice sets a non-default mode
 //     (subprocess with a command) and the result reflects it; complete_slice
 //     overrides the computed result and the assert is deterministic (the gate
 //     hook holds the slice until the override signal is delivered).
 //
-//  3. Bounded concurrency: with K=2 and N=4 enqueued slices, the high-water-
-//     mark of concurrent in-flight slices is exactly K and never exceeds K.
-//     Measured via a gating hooks.Manager: HookSliceStarted increments an
-//     atomic counter, records the high-water mark, and blocks on a release
-//     channel; the test verifies HWM==K while N-K remain unstarted, then
-//     releases and asserts all N complete.
+//  3. Bounded concurrency: with K=2 and N=4 enqueued slices (all with explicit
+//     mock start signals), the high-water-mark of concurrent in-flight slices
+//     is exactly K and never exceeds K. Measured via a gating hooks.Manager:
+//     HookSliceStarted increments an atomic counter, records the high-water
+//     mark, and blocks on a release channel; the test verifies HWM==K while
+//     N-K remain unstarted, then releases and asserts all N complete.
 //
 //  4. ReviewSubWorkflow round-trips: submitting all three review-axis votes
 //     unblocks the sub-workflow; a REVISE vote sets Success=false.
@@ -34,21 +35,27 @@ package engine_test
 //     has never been created as a DBOS workflow).
 //
 //  8. Hook surface: SliceStarted/SliceCompleted/SliceFailed fire exactly when
-//     specified; the not-implemented (tmux/subprocess) path fires SliceFailed
-//     and NOT SliceCompleted.
+//     specified; a failing slice (via complete_slice override Success=false)
+//     fires SliceFailed and NOT SliceCompleted.
 //
 //  9. runSlice mode table-test: all four branches (mock success, tmux/subprocess
 //     not-implemented failure, unrecognised-mode failure) assert Success, output
-//     prefix, and error contents.
+//     prefix, and error contents. Each branch is exercised by delivering an
+//     explicit start_slice signal with the target mode.
 //
 // 10. Queue wiring: default concurrency wires the correct queue name; the
 //     concurrency-resolution precedence (flag > env > default) is table-tested
 //     across all flag/env combinations including error paths.
+//
+// 11. No-signal failure: a slice enqueued with no start_slice signal within the
+//     2s window returns Success=false with an actionable error message, fires
+//     SliceFailed (not SliceCompleted), and the parent receives Completed=false.
 
 import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -210,6 +217,9 @@ func (h *gatingConcurrencyHandler) Handle(ctx context.Context, p hooks.HookPaylo
 // TestSliceSubWorkflow_MockMode_CompletesAndReportsProgress verifies that a
 // mock-mode slice enqueued via Engine.EnqueueSlice completes successfully and
 // the sub-workflow delivers a slice_progress signal to the parent epoch workflow.
+// A start_slice signal with mode=mock is delivered explicitly: without it the
+// sub-workflow returns an honest failure (no-signal path), which is pinned by
+// TestSliceSubWorkflow_NoStartSignal_FailsHonestly.
 func TestSliceSubWorkflow_MockMode_CompletesAndReportsProgress(t *testing.T) {
 	e := newQueueEngine(t, engine.DefaultSliceQueueConcurrency)
 
@@ -230,6 +240,10 @@ func TestSliceSubWorkflow_MockMode_CompletesAndReportsProgress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnqueueSlice: %v", err)
 	}
+
+	// Deliver an explicit mock start_slice signal so the sub-workflow takes the
+	// mock-success path rather than the no-signal failure path.
+	sendMockStartSignal(t, e, sliceId, 10*time.Second)
 
 	result := waitSliceResult(t, sh, 20*time.Second)
 	if !result.Success {
@@ -318,7 +332,7 @@ func TestSliceSubWorkflow_StartSignalSetsMode(t *testing.T) {
 	}
 	if result.Error == nil {
 		t.Errorf("expected Error to be set for subprocess mode; got nil")
-	} else if !contains(*result.Error, "not yet implemented") {
+	} else if !strings.Contains(*result.Error, "not yet implemented") {
 		t.Errorf("expected Error to contain %q; got: %s", "not yet implemented", *result.Error)
 	}
 	if result.SliceId != sliceId {
@@ -358,6 +372,8 @@ func TestSliceSubWorkflow_CompleteSignalOverridesResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnqueueSlice: %v", err)
 	}
+
+	sendMockStartSignal(t, e, sliceId, 10*time.Second)
 
 	// Wait until the sub-workflow fires HookSliceStarted (it is gated here).
 	waitUntil(t, 10*time.Second, func() bool { return rec.countOf(hooks.HookSliceStarted) > 0 })
@@ -403,6 +419,10 @@ func TestSliceSubWorkflow_CompleteSignalOverridesResult(t *testing.T) {
 //   - while K sub-workflows are gated, N-K have NOT reached HookSliceStarted
 //   - after release, all N complete successfully
 //   - exactly N SliceProgress rows reach the parent epoch (no drops, no doubles)
+//
+// All slices receive explicit mock start_slice signals; the no-signal failure
+// path (pinned by TestSliceSubWorkflow_NoStartSignal_FailsHonestly) is not
+// exercised here.
 func TestSliceQueue_BoundedConcurrency(t *testing.T) {
 	const K = 2
 	const N = 4
@@ -420,8 +440,10 @@ func TestSliceQueue_BoundedConcurrency(t *testing.T) {
 	}
 
 	handles := make([]dbos.WorkflowHandle[engine.SliceResult], N)
+	sliceIds := make([]string, N)
 	for i := 0; i < N; i++ {
 		sliceId := epochId + "--cc-" + fmt.Sprintf("%02x", i)
+		sliceIds[i] = sliceId
 		h, err := e.EnqueueSlice(engine.SliceInput{
 			EpochId:          epochId,
 			SliceId:          sliceId,
@@ -431,6 +453,13 @@ func TestSliceQueue_BoundedConcurrency(t *testing.T) {
 			t.Fatalf("EnqueueSlice[%d]: %v", i, err)
 		}
 		handles[i] = h
+	}
+
+	// Deliver explicit mock start_slice signals to all N slices concurrently so
+	// each sub-workflow takes the mock-success path when its queue slot opens.
+	for _, sliceId := range sliceIds {
+		sliceId := sliceId
+		go sendMockStartSignal(t, e, sliceId, 30*time.Second)
 	}
 
 	// Wait until exactly K sub-workflows are gated at HookSliceStarted.
@@ -479,6 +508,10 @@ func TestSliceQueue_BoundedConcurrency(t *testing.T) {
 // all eventually complete exactly once when dispatched via the slice queue, even
 // when K < 30. Excess slices are held in the DBOS queues table and dequeued as
 // earlier ones finish. This is the single-process drain invariant.
+//
+// All slices receive explicit mock start_slice signals dispatched concurrently.
+// The signals are pre-populated in the DBOS notifications table; each slice
+// consumes its signal when its queue slot opens.
 func TestSliceQueue_BackpressureAllEventuallyComplete(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping 30-slice backpressure test in short mode")
@@ -495,8 +528,10 @@ func TestSliceQueue_BackpressureAllEventuallyComplete(t *testing.T) {
 	}
 
 	handles := make([]dbos.WorkflowHandle[engine.SliceResult], N)
+	sliceIds := make([]string, N)
 	for i := 0; i < N; i++ {
 		sliceId := epochId + "--bp-" + fmt.Sprintf("%02x", i)
+		sliceIds[i] = sliceId
 		h, err := e.EnqueueSlice(engine.SliceInput{
 			EpochId:          epochId,
 			SliceId:          sliceId,
@@ -506,6 +541,20 @@ func TestSliceQueue_BackpressureAllEventuallyComplete(t *testing.T) {
 			t.Fatalf("EnqueueSlice[%d]: %v", i, err)
 		}
 		handles[i] = h
+	}
+
+	// Deliver explicit mock start_slice signals to all N slices concurrently.
+	// The spin-poll inside sendMockStartSignal handles the timing window: each
+	// sub-workflow consumes its signal when its queue slot opens (DBOS holds
+	// the signal in the notifications table until the workflow dequeues).
+	var sigWg sync.WaitGroup
+	for _, sliceId := range sliceIds {
+		sliceId := sliceId
+		sigWg.Add(1)
+		go func() {
+			defer sigWg.Done()
+			sendMockStartSignal(t, e, sliceId, 90*time.Second)
+		}()
 	}
 
 	var wg sync.WaitGroup
@@ -531,6 +580,7 @@ func TestSliceQueue_BackpressureAllEventuallyComplete(t *testing.T) {
 		}(i, h)
 	}
 	wg.Wait()
+	sigWg.Wait()
 
 	if got := failures.Load(); got != 0 {
 		t.Errorf("%d of %d slices failed", got, N)
@@ -860,7 +910,8 @@ func TestHandler_SliceComplete_WorkflowError_NeverStartedSlice_Exit3(t *testing.
 
 // TestSliceSubWorkflow_HookSliceStartedAndCompleted verifies that a successful
 // mock slice fires exactly HookSliceStarted then HookSliceCompleted, and NOT
-// HookSliceFailed.
+// HookSliceFailed. An explicit mock start_slice signal is delivered so the
+// sub-workflow takes the mock-success path.
 func TestSliceSubWorkflow_HookSliceStartedAndCompleted(t *testing.T) {
 	rec := newRecordingHandler(nil,
 		hooks.HookSliceStarted, hooks.HookSliceCompleted, hooks.HookSliceFailed)
@@ -884,6 +935,9 @@ func TestSliceSubWorkflow_HookSliceStartedAndCompleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnqueueSlice: %v", err)
 	}
+
+	sendMockStartSignal(t, e, sliceId, 10*time.Second)
+
 	res := waitSliceResult(t, sh, 20*time.Second)
 	if !res.Success {
 		t.Fatalf("expected Success=true; err=%v", res.Error)
@@ -945,6 +999,8 @@ func TestSliceSubWorkflow_HookSliceFailed(t *testing.T) {
 		t.Fatalf("EnqueueSlice: %v", err)
 	}
 
+	sendMockStartSignal(t, e, sliceId, 10*time.Second)
+
 	// Wait until HookSliceStarted fires (rec handler is gated here).
 	waitUntil(t, 10*time.Second, func() bool { return rec.countOf(hooks.HookSliceStarted) > 0 })
 
@@ -978,6 +1034,8 @@ func TestSliceSubWorkflow_HookSliceFailed(t *testing.T) {
 
 // TestSliceSubWorkflow_HookNilManagerIsNoop verifies that a nil HooksMgr
 // causes no panics and the slice completes normally (best-effort, non-fatal).
+// An explicit mock start_slice signal is delivered so the sub-workflow takes
+// the mock-success path.
 func TestSliceSubWorkflow_HookNilManagerIsNoop(t *testing.T) {
 	e := newQueueEngine(t, engine.DefaultSliceQueueConcurrency) // no HooksMgr
 
@@ -996,6 +1054,9 @@ func TestSliceSubWorkflow_HookNilManagerIsNoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnqueueSlice: %v", err)
 	}
+
+	sendMockStartSignal(t, e, sliceId, 10*time.Second)
+
 	res := waitSliceResult(t, sh, 20*time.Second)
 	if !res.Success {
 		t.Fatalf("expected Success=true with nil HooksMgr; err=%v", res.Error)
@@ -1004,8 +1065,11 @@ func TestSliceSubWorkflow_HookNilManagerIsNoop(t *testing.T) {
 
 // ── Test 9: runSlice mode table-test ─────────────────────────────────────────
 
-// TestRunSlice_AllModes is a white-box table-test for the runSlice function
-// exported for testing. It covers all four behavioural branches:
+// TestRunSlice_AllModes is a table-test for all four runSlice mode branches,
+// exercised through the full sub-workflow dispatch path (EnqueueSlice +
+// start_slice signal + GetResult). Each sub-test enqueues a slice and delivers
+// an explicit start_slice signal with the target mode; the result reflects the
+// mode-specific branch without relying on any default fallback.
 //
 //   - mock → Success=true, Output="mock: completed"
 //   - tmux with command → Success=false, Error mentions not-yet-implemented
@@ -1060,9 +1124,6 @@ func TestRunSlice_AllModes(t *testing.T) {
 			}
 
 			sliceId := epochId + "--" + string(tc.mode)
-			if tc.mode == protocol.SliceExecutionMode("docker") {
-				sliceId = epochId + "--docker"
-			}
 
 			// Set the mode via start_slice signal BEFORE the sub-workflow dequeues.
 			// Pre-populate the notifications table by spinning until send succeeds.
@@ -1075,16 +1136,16 @@ func TestRunSlice_AllModes(t *testing.T) {
 				t.Fatalf("EnqueueSlice: %v", err)
 			}
 
-			if tc.mode != protocol.SliceMock {
-				// Send the start_slice signal to override from mock default.
-				startSig := protocol.SliceStartSignal{Mode: tc.mode, Command: tc.command}
-				deadline := time.Now().Add(10 * time.Second)
-				for time.Now().Before(deadline) {
-					if serr := dbos.Send(e.DBOS(), sliceId, startSig, protocol.SignalStartSlice.String()); serr == nil {
-						break
-					}
-					time.Sleep(10 * time.Millisecond)
+			// Always deliver an explicit start_slice signal for the target mode.
+			// Every sub-test requires a signal — without it the sub-workflow returns
+			// the no-signal failure (pinned by TestSliceSubWorkflow_NoStartSignal_FailsHonestly).
+			startSig := protocol.SliceStartSignal{Mode: tc.mode, Command: tc.command}
+			deadline := time.Now().Add(10 * time.Second)
+			for time.Now().Before(deadline) {
+				if serr := dbos.Send(e.DBOS(), sliceId, startSig, protocol.SignalStartSlice.String()); serr == nil {
+					break
 				}
+				time.Sleep(10 * time.Millisecond)
 			}
 
 			res := waitSliceResult(t, sh, 25*time.Second)
@@ -1099,7 +1160,7 @@ func TestRunSlice_AllModes(t *testing.T) {
 					t.Errorf("expected Error to contain %v; got nil", tc.wantErrSubs)
 				} else {
 					for _, sub := range tc.wantErrSubs {
-						if !contains(*res.Error, sub) {
+						if !strings.Contains(*res.Error, sub) {
 							t.Errorf("Error does not contain %q; got: %s", sub, *res.Error)
 						}
 					}
@@ -1254,15 +1315,207 @@ func waitUntil(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Fatalf("condition not met within %s", timeout)
 }
 
-// contains reports whether s contains substr.
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		func() bool {
-			for i := 0; i <= len(s)-len(substr); i++ {
-				if s[i:i+len(substr)] == substr {
-					return true
-				}
-			}
-			return false
-		}())
+// Note: use strings.Contains from the standard library for substring checks
+// in this file. The hand-rolled contains helper has been removed.
+
+// sendMockStartSignal spin-polls until the slice sub-workflow at sliceId is
+// addressable, then delivers a start_slice signal with mode=mock. It reports
+// failure via t.Errorf (safe to call from goroutines) if the workflow does not
+// become addressable within timeout.
+func sendMockStartSignal(t *testing.T, e *engine.Engine, sliceId string, timeout time.Duration) {
+	t.Helper()
+	sig := protocol.SliceStartSignal{Mode: protocol.SliceMock}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if err := dbos.Send(e.DBOS(), sliceId, sig, protocol.SignalStartSlice.String()); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Errorf("start_slice(mock) signal for %q not delivered within %s — sub-workflow never became addressable", sliceId, timeout)
+}
+
+// ── Test 11: No-signal honest failure ─────────────────────────────────────────
+
+// TestSliceSubWorkflow_NoStartSignal_FailsHonestly pins the no-signal failure
+// path: a slice enqueued with no start_slice signal within the 2s window must
+// return Success=false with an actionable error message, fire HookSliceFailed
+// (not HookSliceCompleted), and deliver Completed=false to the parent.
+//
+// This test deliberately does NOT send a start_slice signal.
+func TestSliceSubWorkflow_NoStartSignal_FailsHonestly(t *testing.T) {
+	recFail := newRecordingHandler(nil,
+		hooks.HookSliceCompleted, hooks.HookSliceFailed)
+	mgr := hooks.NewManager(hooks.WithDispatchTimeout(4 * time.Second))
+	mgr.Register(recFail)
+
+	e := newQueueEngineWithHooks(t, engine.DefaultSliceQueueConcurrency, mgr)
+
+	const epochId = "queue--no-signal-fail"
+	if _, err := dbos.RunWorkflow(e.DBOS(), e.EpochControlWorkflow,
+		engine.ControlInput{EpochId: epochId}, dbos.WithWorkflowID(epochId)); err != nil {
+		t.Fatalf("RunWorkflow(control): %v", err)
+	}
+
+	sliceId := epochId + "--no-sig"
+	sh, err := e.EnqueueSlice(engine.SliceInput{
+		EpochId:          epochId,
+		SliceId:          sliceId,
+		ParentWorkflowId: epochId,
+	})
+	if err != nil {
+		t.Fatalf("EnqueueSlice: %v", err)
+	}
+
+	// Do NOT send a start_slice signal. The sub-workflow must time out and
+	// record an honest failure within the 2s window + execution time.
+	// Allow a generous 15s for the sub-workflow to reach the timeout and complete.
+	res := waitSliceResult(t, sh, 15*time.Second)
+
+	if res.Success {
+		t.Errorf("expected Success=false when no start_slice signal is sent; got true")
+	}
+	if res.Error == nil {
+		t.Fatalf("expected Error to be set for no-signal failure; got nil")
+	}
+	if !strings.Contains(*res.Error, "no start_slice signal received") {
+		t.Errorf("Error must contain %q; got: %s", "no start_slice signal received", *res.Error)
+	}
+	if !strings.Contains(*res.Error, sliceId) {
+		t.Errorf("Error must mention the slice id %q; got: %s", sliceId, *res.Error)
+	}
+	if res.SliceId != sliceId {
+		t.Errorf("result.SliceId = %q, want %q", res.SliceId, sliceId)
+	}
+
+	// Give hooks a moment to be recorded.
+	waitUntil(t, 5*time.Second, func() bool {
+		return recFail.countOf(hooks.HookSliceFailed) > 0
+	})
+
+	if recFail.countOf(hooks.HookSliceFailed) != 1 {
+		t.Errorf("HookSliceFailed count = %d, want 1 (no-signal failure must fire SliceFailed)", recFail.countOf(hooks.HookSliceFailed))
+	}
+	if recFail.countOf(hooks.HookSliceCompleted) != 0 {
+		t.Errorf("HookSliceCompleted count = %d, want 0 (no-signal failure must NOT fire SliceCompleted)", recFail.countOf(hooks.HookSliceCompleted))
+	}
+
+	// Verify Completed=false reached the parent: advance_phase unblocks the
+	// control workflow, then inspect SliceProgress.
+	sig := protocol.PhaseAdvanceSignal{ToPhase: protocol.PhaseElicit, TriggeredBy: "test", ConditionMet: "ok"}
+	if err := dbos.Send(e.DBOS(), epochId, sig, protocol.SignalAdvancePhase.String()); err != nil {
+		t.Fatalf("Send(advance_phase): %v", err)
+	}
+	st := waitPhase(t, e, epochId, protocol.PhaseElicit)
+	if len(st.SliceProgress) != 1 {
+		t.Errorf("SliceProgress entries = %d, want 1", len(st.SliceProgress))
+	}
+	if len(st.SliceProgress) > 0 && st.SliceProgress[0].Completed {
+		t.Errorf("SliceProgress[0].Completed = true, want false (no-signal failure must report Completed=false)")
+	}
+}
+
+// ── Test 12: Junk-vote guard does not poison consensus ────────────────────────
+
+// TestReviewSubWorkflow_JunkVoteDropped verifies that an invalid-axis or
+// invalid-vote signal sent mid-review does not flip or poison the consensus
+// verdict. After the junk vote, three canonical ACCEPT votes must produce
+// Success=true with exactly three canonical axes in VoteResult (junk key absent).
+//
+// This test pins the workflow-level validation guard in review.go that drops
+// signals where !sig.Axis.IsValid() || !sig.Vote.IsValid().
+func TestReviewSubWorkflow_JunkVoteDropped(t *testing.T) {
+	e := newQueueEngine(t, engine.DefaultSliceQueueConcurrency)
+
+	const epochId = "queue--review-junk-vote"
+	const phaseId = "code-review"
+
+	rh, err := e.EnqueueReview(engine.ReviewInput{
+		EpochId: epochId,
+		PhaseId: phaseId,
+	})
+	if err != nil {
+		t.Fatalf("EnqueueReview: %v", err)
+	}
+
+	reviewWfID := protocol.ReviewWorkflowID(epochId, phaseId, 1)
+
+	// Poll until addressable, delivering a junk-axis REVISE as the first vote.
+	// The guard at review.go must drop it (axis "bad_axis" is not in AllReviewAxes).
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		junkSig := protocol.ReviewVoteSignal{
+			Axis:       protocol.ReviewAxis("bad_axis"),
+			Vote:       protocol.VoteRevise,
+			ReviewerId: "r-junk",
+		}
+		if err := dbos.Send(e.DBOS(), reviewWfID, junkSig, protocol.SignalSubmitVote.String()); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Now send the three canonical ACCEPT votes.
+	for _, ax := range protocol.AllReviewAxes {
+		sig := protocol.ReviewVoteSignal{
+			Axis:       ax,
+			Vote:       protocol.VoteAccept,
+			ReviewerId: "r-" + string(ax),
+		}
+		if err := dbos.Send(e.DBOS(), reviewWfID, sig, protocol.SignalSubmitVote.String()); err != nil {
+			t.Fatalf("Send(submit_vote %s): %v", ax, err)
+		}
+	}
+
+	result := waitReviewResult(t, rh, 20*time.Second)
+	if !result.Success {
+		t.Errorf("expected Success=true after three canonical ACCEPTs following a junk vote; got false; votes=%v", result.VoteResult)
+	}
+	// The junk axis must not appear in VoteResult.
+	if _, ok := result.VoteResult[protocol.ReviewAxis("bad_axis")]; ok {
+		t.Errorf("junk axis %q must not appear in VoteResult; got %v", "bad_axis", result.VoteResult)
+	}
+	// Exactly the three canonical axes must be present.
+	if len(result.VoteResult) != len(protocol.AllReviewAxes) {
+		t.Errorf("VoteResult len = %d, want %d (canonical axes only)", len(result.VoteResult), len(protocol.AllReviewAxes))
+	}
+}
+
+// ── Test 13: OpenEpochController respects PASTURE_SLICE_CONCURRENCY ───────────
+
+// TestOpenEpochController_SliceConcurrencyFromEnv verifies that
+// OpenEpochController consumes the PASTURE_SLICE_CONCURRENCY env var: an
+// invalid value (non-integer) must be rejected with a validation error before
+// the engine is opened, proving the env is resolved — not ignored.
+//
+// This is the tightest observable invariant reachable through the EpochController
+// interface: if the env var were ignored, an invalid value would silently fall
+// through to the default and Open would succeed instead of failing.
+func TestOpenEpochController_SliceConcurrencyFromEnv(t *testing.T) {
+	// An invalid env value must propagate as a validation error.
+	t.Setenv(engine.SliceConcurrencyEnv, "not-a-number")
+
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	ctrl, err := handlers.OpenEpochController(dbPath)
+	if err == nil {
+		ctrl.Close()
+		t.Fatalf("OpenEpochController with invalid %s must return an error; got nil", engine.SliceConcurrencyEnv)
+	}
+	if !strings.Contains(err.Error(), engine.SliceConcurrencyEnv) {
+		t.Errorf("error must mention %s; got: %v", engine.SliceConcurrencyEnv, err)
+	}
+}
+
+// TestOpenEpochController_SliceConcurrencyDefaultWhenUnset verifies that
+// OpenEpochController succeeds (does not fail) when PASTURE_SLICE_CONCURRENCY
+// is unset, falling through to the default concurrency.
+func TestOpenEpochController_SliceConcurrencyDefaultWhenUnset(t *testing.T) {
+	t.Setenv(engine.SliceConcurrencyEnv, "") // explicitly unset
+
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	ctrl, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController with unset %s must succeed; got: %v", engine.SliceConcurrencyEnv, err)
+	}
+	defer ctrl.Close()
 }

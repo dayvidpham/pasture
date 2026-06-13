@@ -9,7 +9,7 @@ import (
 	"go.temporal.io/api/operatorservice/v1"
 	"google.golang.org/grpc"
 
-	"github.com/dayvidpham/pasture/internal/temporal"
+	"github.com/dayvidpham/pasture/legacy/temporal/internal/temporal"
 )
 
 // ─── Mock types ───────────────────────────────────────────────────────────────
