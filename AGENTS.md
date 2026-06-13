@@ -254,7 +254,7 @@ Use the hybrid pattern: Cobra `RunE` delegates to a standalone handler function.
 This keeps `RunE` thin and makes handlers independently testable.
 
 ```go
-// cmd/pasture-msg/start.go
+// cmd/pasture/epoch.go
 var startCmd = &cobra.Command{
     Use:   "start",
     Short: "Start a new agent session",
@@ -483,16 +483,16 @@ generated SKILL.md into the session context. Temporal answers the *where*
 
 A `flake.nix` at the repo root provides:
 - `nix build .#pastured` — build the daemon
-- `nix build .#pasture-msg` — build the CLI
+- `nix build .#pasture` — build the CLI
 - `nix build .#pasture-release` — build the release tool
-- `nix develop` — dev shell with Go toolchain, gopls, sqlite, temporal-cli
+- `nix develop` — dev shell with Go toolchain, gopls, sqlite
 
 ## Commit Convention
 
 Use Conventional Commits:
 ```
 feat(pastured): add epoch start workflow
-fix(pasture-msg): handle missing --session-id flag gracefully
+fix(pasture): handle missing --session-id flag gracefully
 chore: update go.sum after dependency bump
 ```
 

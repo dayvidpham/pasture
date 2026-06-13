@@ -33,8 +33,8 @@ import (
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/tasks"
-	"github.com/dayvidpham/pasture/legacy/temporal/internal/temporal"
 	"github.com/dayvidpham/pasture/internal/types"
+	"github.com/dayvidpham/pasture/legacy/temporal/internal/temporal"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
