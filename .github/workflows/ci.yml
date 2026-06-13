@@ -32,10 +32,10 @@ jobs:
           CGO_ENABLED: "0"
         run: go build ./cmd/pastured
 
-      - name: Build — pasture-msg
+      - name: Build — pasture
         env:
           CGO_ENABLED: "0"
-        run: go build ./cmd/pasture-msg
+        run: go build ./cmd/pasture
 
       - name: Build — pasture-release
         env:

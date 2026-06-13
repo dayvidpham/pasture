@@ -237,7 +237,7 @@ type SkillBody struct {
 // RoleSpec is the complete specification for an agent role.
 // Mirrors Python RoleSpec dataclass.
 type RoleSpec struct {
-	Id                 types.RoleId
+	Id                 protocol.RoleId
 	Name               string
 	Description        string
 	Model              string // e.g. "opus", "sonnet", "haiku"
@@ -268,7 +268,7 @@ type CommandSpec struct {
 	// (cmd-supervisor, cmd-worker, etc.) render through skill.go.tmpl which
 	// derives its H1 from RoleSpec.Name, so their Title is left empty.
 	Title         string
-	RoleRef       types.RoleId // may be zero value if unassigned
+	RoleRef       protocol.RoleId // may be zero value if unassigned
 	Phases        []protocol.PhaseId
 	File          string   // relative path to skill file
 	CreatesLabels []string // label IDs this command creates
@@ -293,7 +293,7 @@ type PhaseSpec struct {
 	Name        string
 	Number      int
 	Domain      types.Domain
-	OwnerRoles  []types.RoleId
+	OwnerRoles  []protocol.RoleId
 	Transitions []Transition
 }
 
@@ -303,8 +303,8 @@ type PhaseSpec struct {
 // Mirrors Python HandoffSpec dataclass.
 type HandoffSpec struct {
 	Id             string
-	SourceRole     types.RoleId
-	TargetRole     types.RoleId
+	SourceRole     protocol.RoleId
+	TargetRole     protocol.RoleId
 	AtPhase        protocol.PhaseId
 	ContentLevel   string // ContentLevel wire value: "full-provenance", "summary-with-ids"
 	RequiredFields []string
@@ -318,7 +318,7 @@ type FigureSpec struct {
 	Id           string // FigureId wire value
 	Title        string
 	Type         string // FigureType wire value: "ascii-diagram"
-	RoleRefs     []types.RoleId
+	RoleRefs     []protocol.RoleId
 	SectionRef   string // SectionRef wire value: "workflows"
 	WorkflowRefs []string
 	CommandRefs  []string
@@ -341,7 +341,7 @@ type ChecklistItem struct {
 // Keyed in ChecklistSpecs by "{role}-{gate}". Mirrors Python Checklist dataclass.
 type Checklist struct {
 	Gate    string // GateType wire value: "completion", "slice-closure", etc.
-	RoleRef types.RoleId
+	RoleRef protocol.RoleId
 	Items   []ChecklistItem
 }
 
@@ -353,7 +353,7 @@ type CoordinationCommand struct {
 	Id       string
 	Action   string
 	Template string
-	RoleRef  types.RoleId // zero value means shared across all roles
+	RoleRef  protocol.RoleId // zero value means shared across all roles
 	Shared   bool
 }
 
@@ -400,7 +400,7 @@ type Workflow struct {
 	Id          string
 	Name        string
 	Description string
-	RoleRef     types.RoleId
+	RoleRef     protocol.RoleId
 	Stages      []WorkflowStage
 }
 

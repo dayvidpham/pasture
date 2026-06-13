@@ -24,7 +24,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		Name:       "Request",
 		Number:     1,
 		Domain:     types.DomainUser,
-		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleArchitect},
+		OwnerRoles: []protocol.RoleId{protocol.RoleEpoch, protocol.RoleArchitect},
 		Transitions: []Transition{
 			{
 				ToPhase:   protocol.PhaseElicit,
@@ -37,7 +37,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		Name:       "Elicit",
 		Number:     2,
 		Domain:     types.DomainUser,
-		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleArchitect},
+		OwnerRoles: []protocol.RoleId{protocol.RoleEpoch, protocol.RoleArchitect},
 		Transitions: []Transition{
 			{
 				ToPhase:   protocol.PhasePropose,
@@ -50,7 +50,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		Name:       "Propose",
 		Number:     3,
 		Domain:     types.DomainPlan,
-		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleArchitect},
+		OwnerRoles: []protocol.RoleId{protocol.RoleEpoch, protocol.RoleArchitect},
 		Transitions: []Transition{
 			{
 				ToPhase:   protocol.PhaseReview,
@@ -63,7 +63,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		Name:       "Review",
 		Number:     4,
 		Domain:     types.DomainPlan,
-		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleArchitect, types.RoleReviewer},
+		OwnerRoles: []protocol.RoleId{protocol.RoleEpoch, protocol.RoleArchitect, protocol.RoleReviewer},
 		Transitions: []Transition{
 			{
 				ToPhase:   protocol.PhasePlanReview,
@@ -81,7 +81,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		Name:       "Plan UAT",
 		Number:     5,
 		Domain:     types.DomainUser,
-		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleArchitect},
+		OwnerRoles: []protocol.RoleId{protocol.RoleEpoch, protocol.RoleArchitect},
 		Transitions: []Transition{
 			{
 				ToPhase:   protocol.PhaseRatify,
@@ -99,7 +99,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		Name:       "Ratify",
 		Number:     6,
 		Domain:     types.DomainPlan,
-		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleArchitect},
+		OwnerRoles: []protocol.RoleId{protocol.RoleEpoch, protocol.RoleArchitect},
 		Transitions: []Transition{
 			{
 				ToPhase:   protocol.PhaseHandoff,
@@ -112,7 +112,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		Name:       "Handoff",
 		Number:     7,
 		Domain:     types.DomainPlan,
-		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleArchitect, types.RoleSupervisor},
+		OwnerRoles: []protocol.RoleId{protocol.RoleEpoch, protocol.RoleArchitect, protocol.RoleSupervisor},
 		Transitions: []Transition{
 			{
 				ToPhase:   protocol.PhaseImplPlan,
@@ -125,7 +125,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		Name:       "Impl Plan",
 		Number:     8,
 		Domain:     types.DomainImpl,
-		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleSupervisor},
+		OwnerRoles: []protocol.RoleId{protocol.RoleEpoch, protocol.RoleSupervisor},
 		Transitions: []Transition{
 			{
 				ToPhase:   protocol.PhaseWorkerSlices,
@@ -138,7 +138,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		Name:       "Worker Slices",
 		Number:     9,
 		Domain:     types.DomainImpl,
-		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleSupervisor, types.RoleWorker},
+		OwnerRoles: []protocol.RoleId{protocol.RoleEpoch, protocol.RoleSupervisor, protocol.RoleWorker},
 		Transitions: []Transition{
 			{
 				ToPhase:   protocol.PhaseCodeReview,
@@ -151,7 +151,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		Name:       "Code Review",
 		Number:     10,
 		Domain:     types.DomainImpl,
-		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleSupervisor, types.RoleReviewer},
+		OwnerRoles: []protocol.RoleId{protocol.RoleEpoch, protocol.RoleSupervisor, protocol.RoleReviewer},
 		Transitions: []Transition{
 			{
 				ToPhase:   protocol.PhaseImplUAT,
@@ -169,7 +169,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		Name:       "Impl UAT",
 		Number:     11,
 		Domain:     types.DomainUser,
-		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleSupervisor},
+		OwnerRoles: []protocol.RoleId{protocol.RoleEpoch, protocol.RoleSupervisor},
 		Transitions: []Transition{
 			{
 				ToPhase:   protocol.PhaseLanding,
@@ -187,7 +187,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		Name:       "Landing",
 		Number:     12,
 		Domain:     types.DomainImpl,
-		OwnerRoles: []types.RoleId{types.RoleEpoch, types.RoleSupervisor},
+		OwnerRoles: []protocol.RoleId{protocol.RoleEpoch, protocol.RoleSupervisor},
 		Transitions: []Transition{
 			{
 				ToPhase:   protocol.PhaseComplete,
@@ -587,9 +587,9 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 
 // RoleSpecs maps each RoleId to its full specification.
 // Mirrors Python ROLE_SPECS dict.
-var RoleSpecs = map[types.RoleId]RoleSpec{
-	types.RoleEpoch: {
-		Id:          types.RoleEpoch,
+var RoleSpecs = map[protocol.RoleId]RoleSpec{
+	protocol.RoleEpoch: {
+		Id:          protocol.RoleEpoch,
 		Name:        "Epoch",
 		Description: "Master orchestrator for full 12-phase workflow",
 		Model:       "opus",
@@ -609,8 +609,8 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 			"The epoch role coordinates the complete workflow end-to-end and is the only role " +
 			"that spans all phases.",
 	},
-	types.RoleArchitect: {
-		Id:          types.RoleArchitect,
+	protocol.RoleArchitect: {
+		Id:          protocol.RoleArchitect,
 		Name:        "Architect",
 		Description: "Specification writer and implementation designer",
 		Model:       "opus",
@@ -669,8 +669,8 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 			},
 		},
 	},
-	types.RoleReviewer: {
-		Id:          types.RoleReviewer,
+	protocol.RoleReviewer: {
+		Id:          protocol.RoleReviewer,
 		Name:        "Reviewer",
 		Description: "End-user alignment reviewer for plans and code",
 		Model:       "sonnet",
@@ -716,8 +716,8 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 			},
 		},
 	},
-	types.RoleSupervisor: {
-		Id:          types.RoleSupervisor,
+	protocol.RoleSupervisor: {
+		Id:          protocol.RoleSupervisor,
 		Name:        "Supervisor",
 		Description: "Task coordinator, spawns workers, manages parallel execution",
 		Model:       "opus",
@@ -772,8 +772,8 @@ var RoleSpecs = map[types.RoleId]RoleSpec{
 			},
 		},
 	},
-	types.RoleWorker: {
-		Id:          types.RoleWorker,
+	protocol.RoleWorker: {
+		Id:          protocol.RoleWorker,
 		Name:        "Worker",
 		Description: "Vertical slice implementer (full production code path)",
 		Model:       "sonnet",
@@ -836,7 +836,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Id:          "cmd-epoch",
 		Name:        "pasture:epoch",
 		Description: "Master orchestrator for full 12-phase workflow",
-		RoleRef:     types.RoleEpoch,
+		RoleRef:     protocol.RoleEpoch,
 		Phases: []protocol.PhaseId{
 			protocol.PhaseRequest, protocol.PhaseElicit, protocol.PhasePropose,
 			protocol.PhaseReview, protocol.PhasePlanReview, protocol.PhaseRatify,
@@ -857,7 +857,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:          "pasture:user:request",
 		Description:   "Capture user feature request verbatim (Phase 1)",
 		Title:         "User Request (Phase 1)",
-		RoleRef:       types.RoleArchitect,
+		RoleRef:       protocol.RoleArchitect,
 		Phases:        []protocol.PhaseId{protocol.PhaseRequest},
 		File:          "skills/user-request/SKILL.md",
 		CreatesLabels: []string{"L-p1s1_1"},
@@ -867,7 +867,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:          "pasture:user:elicit",
 		Description:   "User Requirements Elicitation survey (Phase 2)",
 		Title:         "User Requirements Elicitation (Phase 2)",
-		RoleRef:       types.RoleArchitect,
+		RoleRef:       protocol.RoleArchitect,
 		Phases:        []protocol.PhaseId{protocol.PhaseElicit},
 		File:          "skills/user-elicit/SKILL.md",
 		CreatesLabels: []string{"L-p2s2_1", "L-p2s2_2", "L-urd"},
@@ -885,7 +885,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Id:          "cmd-architect",
 		Name:        "pasture:architect",
 		Description: "Specification writer and implementation designer",
-		RoleRef:     types.RoleArchitect,
+		RoleRef:     protocol.RoleArchitect,
 		Phases: []protocol.PhaseId{
 			protocol.PhaseRequest, protocol.PhaseElicit, protocol.PhasePropose,
 			protocol.PhaseReview, protocol.PhasePlanReview, protocol.PhaseRatify,
@@ -898,7 +898,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:          "pasture:architect:propose-plan",
 		Description:   "Create PROPOSAL-N task with full technical plan",
 		Title:         "Architect: Propose Plan",
-		RoleRef:       types.RoleArchitect,
+		RoleRef:       protocol.RoleArchitect,
 		Phases:        []protocol.PhaseId{protocol.PhasePropose},
 		File:          "skills/architect-propose-plan/SKILL.md",
 		CreatesLabels: []string{"L-p3s3"},
@@ -908,7 +908,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:          "pasture:architect:request-review",
 		Description:   "Spawn 3 axis-specific reviewers (A/B/C)",
 		Title:         "Architect: Request Review",
-		RoleRef:       types.RoleArchitect,
+		RoleRef:       protocol.RoleArchitect,
 		Phases:        []protocol.PhaseId{protocol.PhaseReview},
 		File:          "skills/architect-request-review/SKILL.md",
 		CreatesLabels: []string{"L-p4s4"},
@@ -918,7 +918,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:          "pasture:architect:ratify",
 		Description:   "Ratify proposal, mark old proposals pasture:superseded",
 		Title:         "Architect: Ratify Plan",
-		RoleRef:       types.RoleArchitect,
+		RoleRef:       protocol.RoleArchitect,
 		Phases:        []protocol.PhaseId{protocol.PhaseRatify},
 		File:          "skills/architect-ratify/SKILL.md",
 		CreatesLabels: []string{"L-p6s6", "L-superseded"},
@@ -928,7 +928,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:          "pasture:architect:handoff",
 		Description:   "Create handoff document and transfer to supervisor",
 		Title:         "Architect: Handoff to Supervisor",
-		RoleRef:       types.RoleArchitect,
+		RoleRef:       protocol.RoleArchitect,
 		Phases:        []protocol.PhaseId{protocol.PhaseHandoff},
 		File:          "skills/architect-handoff/SKILL.md",
 		CreatesLabels: []string{"L-p7s7"},
@@ -937,7 +937,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Id:          "cmd-supervisor",
 		Name:        "pasture:supervisor",
 		Description: "Task coordinator, spawns workers, manages parallel execution",
-		RoleRef:     types.RoleSupervisor,
+		RoleRef:     protocol.RoleSupervisor,
 		Phases: []protocol.PhaseId{
 			protocol.PhaseHandoff, protocol.PhaseImplPlan, protocol.PhaseWorkerSlices,
 			protocol.PhaseCodeReview, protocol.PhaseImplUAT, protocol.PhaseLanding,
@@ -949,7 +949,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:          "pasture:supervisor:plan-tasks",
 		Description:   "Decompose ratified plan into vertical slices (SLICE-N)",
 		Title:         "Supervisor Plan Tasks",
-		RoleRef:       types.RoleSupervisor,
+		RoleRef:       protocol.RoleSupervisor,
 		Phases:        []protocol.PhaseId{protocol.PhaseImplPlan},
 		File:          "skills/supervisor-plan-tasks/SKILL.md",
 		CreatesLabels: []string{"L-p8s8", "L-p9s9"},
@@ -959,7 +959,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:          "pasture:supervisor:spawn-worker",
 		Description:   "Launch a worker agent for an assigned slice",
 		Title:         "Supervisor Spawn Worker",
-		RoleRef:       types.RoleSupervisor,
+		RoleRef:       protocol.RoleSupervisor,
 		Phases:        []protocol.PhaseId{protocol.PhaseWorkerSlices},
 		File:          "skills/supervisor-spawn-worker/SKILL.md",
 		CreatesLabels: []string{"L-p9s9"},
@@ -969,7 +969,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:        "pasture:supervisor:track-progress",
 		Description: "Monitor worker status via Beads",
 		Title:       "Supervisor: Track Progress",
-		RoleRef:     types.RoleSupervisor,
+		RoleRef:     protocol.RoleSupervisor,
 		Phases:      []protocol.PhaseId{protocol.PhaseWorkerSlices, protocol.PhaseCodeReview},
 		File:        "skills/supervisor-track-progress/SKILL.md",
 	},
@@ -978,7 +978,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:          "pasture:supervisor:commit",
 		Description:   "Atomic commit per completed layer/slice",
 		Title:         "Supervisor: Commit",
-		RoleRef:       types.RoleSupervisor,
+		RoleRef:       protocol.RoleSupervisor,
 		Phases:        []protocol.PhaseId{protocol.PhaseLanding},
 		File:          "skills/supervisor-commit/SKILL.md",
 		CreatesLabels: []string{"L-p12s12"},
@@ -987,7 +987,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Id:          "cmd-worker",
 		Name:        "pasture:worker",
 		Description: "Vertical slice implementer (full production code path)",
-		RoleRef:     types.RoleWorker,
+		RoleRef:     protocol.RoleWorker,
 		Phases:      []protocol.PhaseId{protocol.PhaseWorkerSlices},
 		File:        "skills/worker/SKILL.md",
 	},
@@ -996,7 +996,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:          "pasture:worker:implement",
 		Description:   "Implement assigned vertical slice following TDD layers",
 		Title:         "Worker: Implement Vertical Slice",
-		RoleRef:       types.RoleWorker,
+		RoleRef:       protocol.RoleWorker,
 		Phases:        []protocol.PhaseId{protocol.PhaseWorkerSlices},
 		File:          "skills/worker-implement/SKILL.md",
 		CreatesLabels: []string{"L-p9s9"},
@@ -1006,7 +1006,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:        "pasture:worker:complete",
 		Description: "Signal slice completion after quality gates pass",
 		Title:       "Worker: Signal Completion",
-		RoleRef:     types.RoleWorker,
+		RoleRef:     protocol.RoleWorker,
 		Phases:      []protocol.PhaseId{protocol.PhaseWorkerSlices},
 		File:        "skills/worker-complete/SKILL.md",
 	},
@@ -1015,7 +1015,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:        "pasture:worker:blocked",
 		Description: "Report a blocker to supervisor via Beads",
 		Title:       "Worker: Handle Blockers",
-		RoleRef:     types.RoleWorker,
+		RoleRef:     protocol.RoleWorker,
 		Phases:      []protocol.PhaseId{protocol.PhaseWorkerSlices},
 		File:        "skills/worker-blocked/SKILL.md",
 	},
@@ -1023,7 +1023,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Id:          "cmd-reviewer",
 		Name:        "pasture:reviewer",
 		Description: "End-user alignment reviewer for plans and code",
-		RoleRef:     types.RoleReviewer,
+		RoleRef:     protocol.RoleReviewer,
 		Phases:      []protocol.PhaseId{protocol.PhaseReview, protocol.PhaseCodeReview},
 		File:        "skills/reviewer/SKILL.md",
 	},
@@ -1032,7 +1032,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:          "pasture:reviewer:review-plan",
 		Description:   "Evaluate proposal against one axis (binary ACCEPT/REVISE)",
 		Title:         "Review Plan",
-		RoleRef:       types.RoleReviewer,
+		RoleRef:       protocol.RoleReviewer,
 		Phases:        []protocol.PhaseId{protocol.PhaseReview},
 		File:          "skills/reviewer-review-plan/SKILL.md",
 		CreatesLabels: []string{"L-p4s4"},
@@ -1042,7 +1042,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:          "pasture:reviewer:review-code",
 		Description:   "Review implementation slices with EAGER severity tree",
 		Title:         "Review Code Implementation",
-		RoleRef:       types.RoleReviewer,
+		RoleRef:       protocol.RoleReviewer,
 		Phases:        []protocol.PhaseId{protocol.PhaseCodeReview},
 		File:          "skills/reviewer-review-code/SKILL.md",
 		CreatesLabels: []string{"L-p10s10", "L-sev-blocker", "L-sev-import", "L-sev-minor"},
@@ -1052,7 +1052,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:        "pasture:reviewer:comment",
 		Description: "Leave structured review comment via Beads",
 		Title:       "Leave Structured Review Comment",
-		RoleRef:     types.RoleReviewer,
+		RoleRef:     protocol.RoleReviewer,
 		Phases:      []protocol.PhaseId{protocol.PhaseReview, protocol.PhaseCodeReview},
 		File:        "skills/reviewer-comment/SKILL.md",
 	},
@@ -1061,7 +1061,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:        "pasture:reviewer:vote",
 		Description: "Cast ACCEPT or REVISE vote (binary only)",
 		Title:       "Cast Review Vote",
-		RoleRef:     types.RoleReviewer,
+		RoleRef:     protocol.RoleReviewer,
 		Phases:      []protocol.PhaseId{protocol.PhaseReview, protocol.PhaseCodeReview},
 		File:        "skills/reviewer-vote/SKILL.md",
 	},
@@ -1070,7 +1070,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:          "pasture:impl:slice",
 		Description:   "Vertical slice assignment and tracking",
 		Title:         "Implementation Slice (Phase 9)",
-		RoleRef:       types.RoleSupervisor,
+		RoleRef:       protocol.RoleSupervisor,
 		Phases:        []protocol.PhaseId{protocol.PhaseWorkerSlices},
 		File:          "skills/impl-slice/SKILL.md",
 		CreatesLabels: []string{"L-p9s9"},
@@ -1080,7 +1080,7 @@ var CommandSpecs = map[string]CommandSpec{
 		Name:          "pasture:impl:review",
 		Description:   "Code review coordination across all slices (Phase 10)",
 		Title:         "Implementation Code Review (Phase 10)",
-		RoleRef:       types.RoleSupervisor,
+		RoleRef:       protocol.RoleSupervisor,
 		Phases:        []protocol.PhaseId{protocol.PhaseCodeReview},
 		File:          "skills/impl-review/SKILL.md",
 		CreatesLabels: []string{"L-p10s10", "L-sev-blocker", "L-sev-import", "L-sev-minor"},
@@ -1119,8 +1119,8 @@ var CommandSpecs = map[string]CommandSpec{
 var HandoffSpecs = map[string]HandoffSpec{
 	"h1": {
 		Id:           "h1",
-		SourceRole:   types.RoleArchitect,
-		TargetRole:   types.RoleSupervisor,
+		SourceRole:   protocol.RoleArchitect,
+		TargetRole:   protocol.RoleSupervisor,
 		AtPhase:      protocol.PhaseHandoff,
 		ContentLevel: "full-provenance",
 		RequiredFields: []string{
@@ -1130,8 +1130,8 @@ var HandoffSpecs = map[string]HandoffSpec{
 	},
 	"h2": {
 		Id:           "h2",
-		SourceRole:   types.RoleSupervisor,
-		TargetRole:   types.RoleWorker,
+		SourceRole:   protocol.RoleSupervisor,
+		TargetRole:   protocol.RoleWorker,
 		AtPhase:      protocol.PhaseWorkerSlices,
 		ContentLevel: "summary-with-ids",
 		RequiredFields: []string{
@@ -1141,8 +1141,8 @@ var HandoffSpecs = map[string]HandoffSpec{
 	},
 	"h3": {
 		Id:           "h3",
-		SourceRole:   types.RoleSupervisor,
-		TargetRole:   types.RoleReviewer,
+		SourceRole:   protocol.RoleSupervisor,
+		TargetRole:   protocol.RoleReviewer,
 		AtPhase:      protocol.PhaseCodeReview,
 		ContentLevel: "summary-with-ids",
 		RequiredFields: []string{
@@ -1152,8 +1152,8 @@ var HandoffSpecs = map[string]HandoffSpec{
 	},
 	"h4": {
 		Id:           "h4",
-		SourceRole:   types.RoleWorker,
-		TargetRole:   types.RoleReviewer,
+		SourceRole:   protocol.RoleWorker,
+		TargetRole:   protocol.RoleReviewer,
 		AtPhase:      protocol.PhaseCodeReview,
 		ContentLevel: "summary-with-ids",
 		RequiredFields: []string{
@@ -1163,8 +1163,8 @@ var HandoffSpecs = map[string]HandoffSpec{
 	},
 	"h5": {
 		Id:           "h5",
-		SourceRole:   types.RoleReviewer,
-		TargetRole:   types.RoleSupervisor,
+		SourceRole:   protocol.RoleReviewer,
+		TargetRole:   protocol.RoleSupervisor,
 		AtPhase:      protocol.PhaseCodeReview,
 		ContentLevel: "summary-with-ids",
 		RequiredFields: []string{
@@ -1174,8 +1174,8 @@ var HandoffSpecs = map[string]HandoffSpec{
 	},
 	"h6": {
 		Id:           "h6",
-		SourceRole:   types.RoleSupervisor,
-		TargetRole:   types.RoleArchitect,
+		SourceRole:   protocol.RoleSupervisor,
+		TargetRole:   protocol.RoleArchitect,
 		AtPhase:      protocol.PhasePropose,
 		ContentLevel: "summary-with-ids",
 		RequiredFields: []string{
@@ -1194,7 +1194,7 @@ var FigureSpecs = map[string]FigureSpec{
 		Id:           "layer-cake",
 		Title:        "Layer Cake — TDD Parallelism Within Vertical Slices",
 		Type:         "ascii-diagram",
-		RoleRefs:     []types.RoleId{types.RoleWorker},
+		RoleRefs:     []protocol.RoleId{protocol.RoleWorker},
 		SectionRef:   "workflows",
 		WorkflowRefs: []string{"layer-cake"},
 		CommandRefs:  []string{"cmd-sup-plan"},
@@ -1203,7 +1203,7 @@ var FigureSpecs = map[string]FigureSpec{
 		Id:           "ride-the-wave",
 		Title:        "Ride the Wave — Coordinated Phase 8-10 Execution",
 		Type:         "ascii-diagram",
-		RoleRefs:     []types.RoleId{types.RoleSupervisor},
+		RoleRefs:     []protocol.RoleId{protocol.RoleSupervisor},
 		SectionRef:   "workflows",
 		WorkflowRefs: []string{"ride-the-wave"},
 		CommandRefs:  []string{"cmd-sup-spawn"},
@@ -1212,7 +1212,7 @@ var FigureSpecs = map[string]FigureSpec{
 		Id:           "architect-state-flow",
 		Title:        "Architect State Flow — Sequential Planning Phases 1-7",
 		Type:         "ascii-diagram",
-		RoleRefs:     []types.RoleId{types.RoleArchitect},
+		RoleRefs:     []protocol.RoleId{protocol.RoleArchitect},
 		SectionRef:   "workflows",
 		WorkflowRefs: []string{"architect-state-flow"},
 	},
@@ -1224,7 +1224,7 @@ var FigureSpecs = map[string]FigureSpec{
 // Mirrors Python CHECKLIST_SPECS dict.
 var ChecklistSpecs = map[string]Checklist{
 	"worker-completion": {
-		RoleRef: types.RoleWorker,
+		RoleRef: protocol.RoleWorker,
 		Gate:    "completion",
 		Items: []ChecklistItem{
 			{Id: "CL-worker-no-todos", Text: "No TODO placeholders in CLI/API actions", Required: true},
@@ -1236,7 +1236,7 @@ var ChecklistSpecs = map[string]Checklist{
 		},
 	},
 	"worker-slice-closure": {
-		RoleRef: types.RoleWorker,
+		RoleRef: protocol.RoleWorker,
 		Gate:    "slice-closure",
 		Items: []ChecklistItem{
 			{Id: "CL-worker-notified-supervisor", Text: "Supervisor notified via bd comments add (not bd close)", Required: true},
@@ -1246,7 +1246,7 @@ var ChecklistSpecs = map[string]Checklist{
 		},
 	},
 	"supervisor-review-ready": {
-		RoleRef: types.RoleSupervisor,
+		RoleRef: protocol.RoleSupervisor,
 		Gate:    "review-ready",
 		Items: []ChecklistItem{
 			{Id: "CL-sup-all-slices-notified", Text: "All workers have notified completion via bd comments add", Required: true},
@@ -1255,7 +1255,7 @@ var ChecklistSpecs = map[string]Checklist{
 		},
 	},
 	"supervisor-landing": {
-		RoleRef: types.RoleSupervisor,
+		RoleRef: protocol.RoleSupervisor,
 		Gate:    "landing",
 		Items: []ChecklistItem{
 			{Id: "CL-sup-all-accept", Text: "Fix-free clean re-review: 0 BLOCKER + 0 IMPORTANT + 0 MINOR from all 3 reviewers", Required: true},
@@ -1307,31 +1307,31 @@ var CoordinationCommands = map[string]CoordinationCommand{
 		Id:       "cmd-coord-assign",
 		Action:   "Assign task",
 		Template: `bd update <task-id> --assignee "<worker-name>"`,
-		RoleRef:  types.RoleSupervisor,
+		RoleRef:  protocol.RoleSupervisor,
 	},
 	"cmd-coord-label": {
 		Id:       "cmd-coord-label",
 		Action:   "Label completed slice",
 		Template: "bd label add <slice-id> pasture:p9-impl:slice-complete",
-		RoleRef:  types.RoleSupervisor,
+		RoleRef:  protocol.RoleSupervisor,
 	},
 	"cmd-coord-dep-add": {
 		Id:       "cmd-coord-dep-add",
 		Action:   "Chain dependency",
 		Template: "bd dep add <parent> --blocked-by <child>",
-		RoleRef:  types.RoleSupervisor,
+		RoleRef:  protocol.RoleSupervisor,
 	},
 	"cmd-coord-close": {
 		Id:       "cmd-coord-close",
 		Action:   "Report completion",
 		Template: "bd close <task-id>",
-		RoleRef:  types.RoleWorker,
+		RoleRef:  protocol.RoleWorker,
 	},
 	"cmd-coord-worker-notes": {
 		Id:       "cmd-coord-worker-notes",
 		Action:   "Add completion notes",
 		Template: `bd update <task-id> --notes="Implementation complete. Production code verified."`,
-		RoleRef:  types.RoleWorker,
+		RoleRef:  protocol.RoleWorker,
 	},
 }
 
@@ -1343,7 +1343,7 @@ var WorkflowSpecs = map[string]Workflow{
 	"ride-the-wave": {
 		Id:      "ride-the-wave",
 		Name:    "Ride the Wave",
-		RoleRef: types.RoleSupervisor,
+		RoleRef: protocol.RoleSupervisor,
 		Description: "Coordinated Phase 8-10 execution pattern. The supervisor orchestrates " +
 			"the full cycle: plan slices, launch workers, " +
 			"spawn reviewers for per-slice review, workers fix, and re-review up to the chosen review-effort budget " +
@@ -1493,7 +1493,7 @@ var WorkflowSpecs = map[string]Workflow{
 	"layer-cake": {
 		Id:      "layer-cake",
 		Name:    "Layer Cake",
-		RoleRef: types.RoleWorker,
+		RoleRef: protocol.RoleWorker,
 		Description: "TDD layer-by-layer implementation within a vertical slice. " +
 			"Worker implements types first, then tests (will fail), " +
 			"then production code to make tests pass.",
@@ -1592,7 +1592,7 @@ var WorkflowSpecs = map[string]Workflow{
 	"architect-state-flow": {
 		Id:      "architect-state-flow",
 		Name:    "Architect State Flow",
-		RoleRef: types.RoleArchitect,
+		RoleRef: protocol.RoleArchitect,
 		Description: "Sequential planning phases 1-7. The architect captures requirements, " +
 			"writes proposals, coordinates review consensus, and hands off to supervisor.",
 		Stages: []WorkflowStage{
@@ -1815,11 +1815,11 @@ var ReviewAxisSpecs = map[string]ReviewAxisSpec{
 
 // ProcedureSteps maps each RoleId to its ordered startup procedure steps.
 // Mirrors Python PROCEDURE_STEPS dict.
-var ProcedureSteps = map[types.RoleId][]ProcedureStep{
-	types.RoleEpoch:     {},
-	types.RoleArchitect: {},
-	types.RoleReviewer:  {},
-	types.RoleSupervisor: {
+var ProcedureSteps = map[protocol.RoleId][]ProcedureStep{
+	protocol.RoleEpoch:     {},
+	protocol.RoleArchitect: {},
+	protocol.RoleReviewer:  {},
+	protocol.RoleSupervisor: {
 		{
 			Id:          "S-supervisor-call-skill",
 			Order:       1,
@@ -1880,7 +1880,7 @@ var ProcedureSteps = map[types.RoleId][]ProcedureStep{
 			NextState: protocol.PhaseWorkerSlices,
 		},
 	},
-	types.RoleWorker: {
+	protocol.RoleWorker: {
 		{
 			Id:          "S-worker-types",
 			Order:       1,

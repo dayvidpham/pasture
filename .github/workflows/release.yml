@@ -127,7 +127,7 @@ jobs:
         run: |
           TAG="v${{ needs.detect.outputs.version }}"
           LDFLAGS="-s -w -X main.version=${TAG}"
-          for cmd in pastured pasture-msg pasture-release; do
+          for cmd in pastured pasture pasture-release; do
             go build -ldflags "${LDFLAGS}" -o "${cmd}-${{ matrix.suffix }}" ./cmd/${cmd}
           done
 
@@ -161,7 +161,7 @@ jobs:
           tag_name: v${{ needs.detect.outputs.version }}
           files: |
             pastured-*
-            pasture-msg-*
+            pasture-*
             pasture-release-*
           generate_release_notes: true
           fail_on_unmatched_files: true

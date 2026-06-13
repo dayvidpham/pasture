@@ -1,4 +1,4 @@
-// Package formatters provides output formatting functions for pasture-msg CLI commands.
+// Package formatters provides output formatting functions for pasture CLI commands.
 //
 // Each formatter supports two output modes:
 //   - OutputJSON: json.MarshalIndent with camelCase keys
@@ -16,6 +16,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/types"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // epochStateJSON is the JSON wire representation of a QueryStateResult.
@@ -43,7 +44,7 @@ type transitionRecordJSON struct {
 //
 // JSON mode: json.MarshalIndent with camelCase keys.
 // Text mode: human-readable multi-line with labeled sections.
-func FormatEpochState(result types.QueryStateResult, format types.OutputFormat) (string, error) {
+func FormatEpochState(result protocol.QueryStateResult, format types.OutputFormat) (string, error) {
 	switch format {
 	case types.OutputJSON:
 		history := make([]transitionRecordJSON, len(result.TransitionHistory))
@@ -123,6 +124,179 @@ func FormatEpochState(result types.QueryStateResult, format types.OutputFormat) 
 	}
 }
 
+// FormatEpochQuery renders the slice of a QueryStateResult selected by query.
+//
+// full_state renders the complete view (via FormatEpochState); current_state
+// renders only the phase + role; available_transitions renders only the
+// reachable transitions. JSON keys stay camelCase and consistent with
+// FormatEpochState so consumers parse one shape.
+func FormatEpochQuery(result protocol.QueryStateResult, query protocol.QueryName, format types.OutputFormat) (string, error) {
+	switch query {
+	case protocol.QueryFullState:
+		return FormatEpochState(result, format)
+
+	case protocol.QueryCurrentState:
+		switch format {
+		case types.OutputJSON:
+			b, err := json.MarshalIndent(struct {
+				CurrentPhase string `json:"currentPhase"`
+				CurrentRole  string `json:"currentRole"`
+			}{string(result.CurrentPhase), string(result.CurrentRole)}, "", "  ")
+			if err != nil {
+				return "", err
+			}
+			return string(b), nil
+		case types.OutputText:
+			return fmt.Sprintf("Phase: %s\nRole:  %s", result.CurrentPhase, result.CurrentRole), nil
+		default:
+			return "", unrecognizedFormat(format)
+		}
+
+	case protocol.QueryAvailableTransitions:
+		avail := make([]string, len(result.AvailableTransitions))
+		for i, p := range result.AvailableTransitions {
+			avail[i] = string(p)
+		}
+		switch format {
+		case types.OutputJSON:
+			b, err := json.MarshalIndent(struct {
+				AvailableTransitions []string `json:"availableTransitions"`
+			}{avail}, "", "  ")
+			if err != nil {
+				return "", err
+			}
+			return string(b), nil
+		case types.OutputText:
+			if len(avail) == 0 {
+				return "Available Transitions: (none)", nil
+			}
+			var lines []string
+			lines = append(lines, "Available Transitions:")
+			for _, p := range avail {
+				lines = append(lines, fmt.Sprintf("  -> %s", p))
+			}
+			return strings.Join(lines, "\n"), nil
+		default:
+			return "", unrecognizedFormat(format)
+		}
+
+	default:
+		return "", &errors.StructuredError{
+			Category: errors.CategoryValidation,
+			What:     fmt.Sprintf("%q is not a state query this formatter renders.", query),
+			Why:      "FormatEpochQuery renders current_state, available_transitions, and full_state.",
+			Where:    "Formatting an epoch query (internal/formatters/formatters.go in formatters.FormatEpochQuery).",
+			Impact:   "The query result can't be rendered.",
+			Fix:      "Pass current_state, available_transitions, or full_state.",
+		}
+	}
+}
+
+// activeSessionJSON is the JSON wire representation of a registered session.
+type activeSessionJSON struct {
+	EpochId      string `json:"epochId,omitempty"`
+	SessionId    string `json:"sessionId"`
+	Role         string `json:"role"`
+	ModelHarness string `json:"modelHarness,omitempty"`
+	Model        string `json:"model,omitempty"`
+}
+
+// FormatActiveSessions renders the sessions registered with an epoch (the
+// active_sessions query). JSON mode emits an array; text mode lists one session
+// per line, or a "(none)" marker when empty.
+func FormatActiveSessions(sessions []protocol.RegisterSessionSignal, format types.OutputFormat) (string, error) {
+	switch format {
+	case types.OutputJSON:
+		out := make([]activeSessionJSON, len(sessions))
+		for i, s := range sessions {
+			out[i] = activeSessionJSON{
+				EpochId:      s.EpochId,
+				SessionId:    s.SessionId,
+				Role:         s.Role,
+				ModelHarness: s.ModelHarness,
+				Model:        s.Model,
+			}
+		}
+		b, err := json.MarshalIndent(struct {
+			ActiveSessions []activeSessionJSON `json:"activeSessions"`
+		}{out}, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	case types.OutputText:
+		if len(sessions) == 0 {
+			return "Active Sessions: (none)", nil
+		}
+		var lines []string
+		lines = append(lines, fmt.Sprintf("Active Sessions: %d", len(sessions)))
+		for _, s := range sessions {
+			lines = append(lines, fmt.Sprintf("  %s  role=%s  model=%s", s.SessionId, s.Role, s.Model))
+		}
+		return strings.Join(lines, "\n"), nil
+	default:
+		return "", unrecognizedFormat(format)
+	}
+}
+
+// sliceProgressJSON is the JSON wire representation of a slice-progress event.
+type sliceProgressJSON struct {
+	SliceId    string `json:"sliceId"`
+	LeafTaskId string `json:"leafTaskId"`
+	StageName  string `json:"stageName"`
+	Completed  bool   `json:"completed"`
+}
+
+// FormatSliceProgressState renders the slice-progress events reported to an
+// epoch (the slice_progress_state query). JSON mode emits an array; text mode
+// lists one event per line, or a "(none)" marker when empty.
+func FormatSliceProgressState(events []protocol.SliceProgressSignal, format types.OutputFormat) (string, error) {
+	switch format {
+	case types.OutputJSON:
+		out := make([]sliceProgressJSON, len(events))
+		for i, p := range events {
+			out[i] = sliceProgressJSON{
+				SliceId:    p.SliceId,
+				LeafTaskId: p.LeafTaskId,
+				StageName:  p.StageName,
+				Completed:  p.Completed,
+			}
+		}
+		b, err := json.MarshalIndent(struct {
+			SliceProgress []sliceProgressJSON `json:"sliceProgress"`
+		}{out}, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	case types.OutputText:
+		if len(events) == 0 {
+			return "Slice Progress: (none)", nil
+		}
+		var lines []string
+		lines = append(lines, fmt.Sprintf("Slice Progress: %d", len(events)))
+		for _, p := range events {
+			lines = append(lines, fmt.Sprintf("  slice=%s leaf=%s stage=%s completed=%t",
+				p.SliceId, p.LeafTaskId, p.StageName, p.Completed))
+		}
+		return strings.Join(lines, "\n"), nil
+	default:
+		return "", unrecognizedFormat(format)
+	}
+}
+
+// unrecognizedFormat builds the standard actionable error for an unknown
+// OutputFormat, shared by the per-query renderers above.
+func unrecognizedFormat(format types.OutputFormat) error {
+	return &errors.StructuredError{
+		Category: errors.CategoryValidation,
+		What:     fmt.Sprintf("unrecognized output format %q", format),
+		Why:      "OutputFormat must be one of: json, text",
+		Impact:   "Output cannot be rendered",
+		Fix:      "Pass --format json or --format text (or omit for default text)",
+	}
+}
+
 // hookRecordJSON is the JSON wire representation of a recorded hook event.
 // camelCase keys match the package convention. Metadata fields use omitempty
 // so keys absent from the recording (e.g. branch on a detached HEAD, or
@@ -181,24 +355,23 @@ func FormatHookRecord(eventType, sha string, eventID int64, message, author, bra
 // startResultJSON is the JSON wire representation of a start result.
 type startResultJSON struct {
 	WorkflowId string `json:"workflowId"`
-	RunId      string `json:"runId"`
 }
 
 // FormatStartResult formats an epoch start result for CLI output.
 //
-// JSON mode: {"workflowId": "...", "runId": "..."}
-// Text mode: "Started epoch: workflow_id=..., run_id=..."
-func FormatStartResult(workflowId, runId string, format types.OutputFormat) (string, error) {
+// JSON mode: {"workflowId": "..."}
+// Text mode: "Started epoch: workflow_id=..."
+func FormatStartResult(workflowId string, format types.OutputFormat) (string, error) {
 	switch format {
 	case types.OutputJSON:
-		b, err := json.MarshalIndent(startResultJSON{WorkflowId: workflowId, RunId: runId}, "", "  ")
+		b, err := json.MarshalIndent(startResultJSON{WorkflowId: workflowId}, "", "  ")
 		if err != nil {
 			return "", err
 		}
 		return string(b), nil
 
 	case types.OutputText:
-		return fmt.Sprintf("Started epoch: workflow_id=%s, run_id=%s", workflowId, runId), nil
+		return fmt.Sprintf("Started epoch: workflow_id=%s", workflowId), nil
 
 	default:
 		return "", &errors.StructuredError{

@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	_ "modernc.org/sqlite" // pure-Go SQLite driver, CGO_ENABLED=0 compatible
@@ -96,7 +96,10 @@ func NewSqliteAuditTrail(dbPath string) (*SqliteAuditTrail, error) {
 	// methods) is a write transaction that should hold the lock from
 	// statement one. The cost is negligible — IMMEDIATE acquires the same
 	// lock DEFERRED would have lazily, just earlier.
-	db, err := sql.Open("sqlite", dbPath+"?_txlock=immediate")
+	// The shared DSN encodes the full concurrency contract as connection-string
+	// params (WAL, busy_timeout=5000, synchronous=NORMAL, foreign_keys=ON,
+	// _txlock=immediate), applied to every connection in the pool.
+	db, err := sql.Open("sqlite", dbconn.SharedDSN(dbPath))
 	if err != nil {
 		return nil, fmt.Errorf(
 			"audit.NewSqliteAuditTrail: cannot open database at %q: %w — "+
@@ -105,28 +108,32 @@ func NewSqliteAuditTrail(dbPath string) (*SqliteAuditTrail, error) {
 		)
 	}
 
-	// SQLite only supports one writer at a time. Limiting the pool to one
-	// connection prevents "database is locked" (SQLITE_BUSY) errors when
-	// multiple goroutines call RecordEvent concurrently. All writes are
-	// serialised through this single connection; reads share it too since
-	// the Temporal worker I/O pattern is write-heavy, not query-heavy.
+	// This is a pasture-owned WRITE handle: every audit transaction (RecordEvent,
+	// RecordSessionEntries, the migrator's BEGIN IMMEDIATE) is a writer. Capping
+	// the pool to one connection serializes those writers at the Go level, which
+	// is the proven model the cross-subsystem race test exercises. The shared
+	// DSN supplies the same WAL/busy_timeout pragmas the DBOS engine handle uses,
+	// but the engine handle is intentionally UNcapped because the DBOS
+	// notification poller needs a second concurrent connection to make progress;
+	// pasture's own audit writes do not, and removing the cap reintroduces the
+	// SQLITE_BUSY contention busy_timeout cannot always absorb under the file's
+	// multi-handle write load.
 	db.SetMaxOpenConns(1)
 
-	// Enable WAL mode so concurrent readers don't block the writer,
-	// and set a busy timeout so transient SQLITE_BUSY errors retry
-	// automatically for up to 5 seconds before returning an error.
-	pragmas := []string{
-		`PRAGMA journal_mode=WAL`,
-		`PRAGMA busy_timeout=5000`,
-	}
-	for _, p := range pragmas {
-		if _, err := db.Exec(p); err != nil {
-			db.Close()
-			return nil, fmt.Errorf(
-				"audit.NewSqliteAuditTrail: failed to apply %q on %q: %w",
-				p, dbPath, err,
-			)
-		}
+	// Disable foreign-key enforcement for the migration window. The DSN turns
+	// foreign_keys ON, but the v3→v4 migration rebuilds audit_events by DROP +
+	// RENAME, and with enforcement ON that DROP would cascade-delete the
+	// context_edges rows that reference audit_events(id) ON DELETE CASCADE —
+	// silently discarding every epoch↔event link. Toggling enforcement off for
+	// the rebuild and back on afterward is the documented SQLite procedure for
+	// ALTER-by-rebuild. Safe here because this handle is single-connection, so
+	// the PRAGMA and the migration run on the same connection.
+	if _, err := db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf(
+			"audit.NewSqliteAuditTrail: cannot relax foreign-key enforcement for migration on %q: %w",
+			dbPath, err,
+		)
 	}
 
 	if err := ensureSchema(db); err != nil {
@@ -148,6 +155,15 @@ func NewSqliteAuditTrail(dbPath string) (*SqliteAuditTrail, error) {
 	if err := Migrate(db); err != nil {
 		db.Close()
 		return nil, err
+	}
+
+	// Restore foreign-key enforcement now that the rebuild migrations are done.
+	if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf(
+			"audit.NewSqliteAuditTrail: cannot restore foreign-key enforcement after migration on %q: %w",
+			dbPath, err,
+		)
 	}
 
 	return &SqliteAuditTrail{
@@ -282,14 +298,25 @@ func (s *SqliteAuditTrail) RecordEventReturningId(_ context.Context, event proto
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// dedup_key is NULL for ordinary callers (the partial unique index ignores
+	// NULLs, so every legacy write inserts a fresh row as before). The durable
+	// engine supplies a deterministic key; the ON CONFLICT clause targets the
+	// partial index (matched by repeating its WHERE predicate) so a replayed
+	// emission is a silent no-op instead of a duplicate row.
+	var dedupKey any
+	if event.DedupKey != "" {
+		dedupKey = event.DedupKey
+	}
 	res, err := tx.Exec(
-		`INSERT INTO audit_events (phase, agent_id, event_type, payload, timestamp)
-		 VALUES (?, ?, ?, ?, ?)`,
+		`INSERT INTO audit_events (phase, agent_id, event_type, payload, timestamp, dedup_key)
+		 VALUES (?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(dedup_key) WHERE dedup_key IS NOT NULL DO NOTHING`,
 		string(event.Phase),
 		agentId,
 		string(event.EventType),
 		string(payload),
 		event.Timestamp.UTC().UnixNano(),
+		dedupKey,
 	)
 	if err != nil {
 		return 0, &pasterrors.StructuredError{
@@ -309,6 +336,52 @@ func (s *SqliteAuditTrail) RecordEventReturningId(_ context.Context, event proto
 				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
 				"3. Retry the operation once the file is healthy and unlocked.",
 			Cause: err,
+		}
+	}
+
+	// Exactly-once dedup path: when the engine supplied a dedup_key and the
+	// ON CONFLICT clause skipped the insert (a replay), no new row was written.
+	// LastInsertId would then report a stale rowid, so recover the canonical
+	// id from the already-present row by its dedup_key and commit without
+	// re-attaching context (the original write already linked the epoch).
+	if dedupKey != nil {
+		if affected, aerr := res.RowsAffected(); aerr == nil && affected == 0 {
+			var existingId int64
+			if serr := tx.QueryRow(
+				`SELECT id FROM audit_events WHERE dedup_key = ?`, event.DedupKey,
+			).Scan(&existingId); serr != nil {
+				return 0, &pasterrors.StructuredError{
+					Category: pasterrors.CategoryStorage,
+					What: fmt.Sprintf(
+						"An audit event was deduplicated but its existing row couldn't be found (epoch %q, event type %q).",
+						event.EpochId, event.EventType,
+					),
+					Why: "The durable engine re-emitted an event whose deduplication key already exists, so the\n" +
+						"insert was skipped, but the lookup for the original row then failed.",
+					Where:  "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
+					Impact: "The replayed emission can't return the original row id, so the caller can't correlate it.",
+					Fix: "1. Confirm the partial unique index exists (added by the version 4 → 5 upgrade):\n" +
+						"     sqlite3 <path-to-pasture.db> '.indexes audit_events'\n" +
+						"2. Re-run the migration if it is missing:\n" +
+						"     pasture migrate",
+					Cause: serr,
+				}
+			}
+			if err := tx.Commit(); err != nil {
+				return 0, &pasterrors.StructuredError{
+					Category: pasterrors.CategoryStorage,
+					What: fmt.Sprintf(
+						"Couldn't finalize a deduplicated audit event (epoch %q, event type %q).",
+						event.EpochId, event.EventType,
+					),
+					Why:    "The database refused to commit the read-only transaction that resolved the existing row.",
+					Where:  "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
+					Impact: "The original row is intact; only this replayed call could not complete cleanly.",
+					Fix:    "Retry the operation once the database is healthy.",
+					Cause:  err,
+				}
+			}
+			return existingId, nil
 		}
 	}
 
@@ -623,147 +696,12 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentId(role string) (string, error)
 // epochId is required and is always part of the WHERE clause. phase and role
 // are optional; nil means "no filter".
 //
-// Legacy-role compatibility: the v3 schema dropped audit_events.role and
-// replaced it with agent_id. To preserve the existing API where callers
-// filter by role and read event.Role on the result, this method LEFT JOINs
-// audit_events with agents_software (via agent_id) and:
-//
-//   - When role != nil, restricts the JOIN target to s.name = "pasture/legacy-role/<role>".
-//   - When reading rows, strips the "pasture/legacy-role/" prefix from the
-//     joined name to repopulate event.Role. Agents whose name does not match
-//     the legacy prefix (e.g. S7 well-known automaton agents) report the
-//     full name as-is so the caller still gets a non-empty Role.
-//
-// LEFT JOIN (rather than INNER JOIN) defends against orphan agent_id values
-// that have no agents_software row — those rows are returned with an empty
-// Role rather than dropped silently.
-func (s *SqliteAuditTrail) QueryEvents(_ context.Context, epochId string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
-	var clauses []string
-	var args []any
-
-	// Post-v4 schema: audit_events.epoch_id is gone; epoch attachment is
-	// recorded in context_edges with kind='EpochContext'. We INNER JOIN
-	// context_edges to restrict the result to events tied to the
-	// requested epoch. Use the idx_context_edges_lookup index (created in
-	// v2→v3 by S2) for efficient (kind, id)-keyed lookups.
-	clauses = append(clauses, "ce.context_kind = ? AND ce.context_id = ?")
-	args = append(args, "EpochContext", epochId)
-
-	if phase != nil {
-		clauses = append(clauses, "ae.phase = ?")
-		args = append(args, string(*phase))
-	}
-	if role != nil {
-		clauses = append(clauses, "asw.name = ?")
-		args = append(args, legacyRoleAgentNamePrefix+*role)
-	}
-
-	query := `SELECT ce.context_id, ae.phase, COALESCE(asw.name, ''), ae.event_type, ae.payload, ae.timestamp
-	          FROM audit_events ae
-	          INNER JOIN context_edges ce ON ce.event_id = ae.id
-	          LEFT JOIN agents_software asw ON asw.agent_id = ae.agent_id
-	          WHERE ` + strings.Join(clauses, " AND ") + `
-	          ORDER BY ae.id ASC`
-
-	rows, err := s.db.Query(query, args...)
-	if err != nil {
-		return nil, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What: fmt.Sprintf(
-				"Couldn't read audit events for epoch %q.",
-				epochId,
-			),
-			Why:   "The database refused the query that links audit events to their epochs.",
-			Where: "Reading audit events (internal/audit/sqlite.go in audit.SqliteAuditTrail.QueryEvents).",
-			Impact: "No audit events can be returned for this epoch until the underlying database problem\n" +
-				"is fixed.",
-			Fix: "1. Confirm the audit database file is accessible:\n" +
-				"     ls -l <path-to-audit.db>\n" +
-				"2. Confirm the database is at version 4 or higher (the event-to-context table appears in\n" +
-				"   version 3, and the legacy epoch column is removed in version 4):\n" +
-				"     pasture migrate\n" +
-				"3. Retry the query once the upgrade has finished.",
-			Cause: err,
-		}
-	}
-	defer rows.Close()
-
-	var events []protocol.AuditEvent
-	for rows.Next() {
-		var (
-			epochIDCol   string
-			phaseCol     string
-			agentName    string
-			eventTypeCol string
-			payloadCol   string
-			tsNano       int64
-		)
-		if err := rows.Scan(&epochIDCol, &phaseCol, &agentName, &eventTypeCol, &payloadCol, &tsNano); err != nil {
-			return nil, &pasterrors.StructuredError{
-				Category: pasterrors.CategoryStorage,
-				What: fmt.Sprintf(
-					"Couldn't decode an audit-event row for epoch %q.",
-					epochId,
-				),
-				Why:    "One of the columns from the audit-events table couldn't be read into the expected type.",
-				Where:  "Reading audit events (internal/audit/sqlite.go in audit.SqliteAuditTrail.QueryEvents).",
-				Impact: "The event listing for this epoch can't be returned reliably; results would be partial.",
-				Fix: "1. Retry the query.\n" +
-					"2. If the error persists, the audit-events table shape may not match what this build\n" +
-					"   of pasture expects. Inspect it:\n" +
-					"     sqlite3 <path-to-audit.db> '.schema audit_events'\n" +
-					"3. Run the migrator to bring the table to the latest shape:\n" +
-					"     pasture migrate",
-				Cause: err,
-			}
-		}
-
-		var payload map[string]any
-		if err := json.Unmarshal([]byte(payloadCol), &payload); err != nil {
-			return nil, &pasterrors.StructuredError{
-				Category: pasterrors.CategoryStorage,
-				What: fmt.Sprintf(
-					"An audit-event payload is invalid JSON (epoch %q, event type %q).",
-					epochIDCol, eventTypeCol,
-				),
-				Why:   "The payload column couldn't be parsed as JSON — it's been corrupted.",
-				Where: "Reading audit events (internal/audit/sqlite.go in audit.SqliteAuditTrail.QueryEvents).",
-				Impact: "This row can't be returned because its payload is corrupt. The whole event listing\n" +
-					"for this epoch was abandoned.",
-				Fix: "1. Find and inspect the bad row's payload:\n" +
-					fmt.Sprintf("     sqlite3 <path-to-audit.db> 'SELECT id, payload FROM audit_events WHERE event_type = %q'\n", string(eventTypeCol)) +
-					"2. Either repair the payload (re-encode as valid JSON) or delete the row, then retry.",
-				Cause: err,
-			}
-		}
-
-		events = append(events, protocol.AuditEvent{
-			EpochId:   epochIDCol,
-			Phase:     protocol.PhaseId(phaseCol),
-			Role:      stripLegacyRolePrefix(agentName),
-			EventType: protocol.EventType(eventTypeCol),
-			Payload:   payload,
-			Timestamp: time.Unix(0, tsNano).UTC(),
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What: fmt.Sprintf(
-				"Lost the connection to the audit-events table while listing events for epoch %q.",
-				epochId,
-			),
-			Why:    "The database reported an error part-way through reading the result rows.",
-			Where:  "Reading audit events (internal/audit/sqlite.go in audit.SqliteAuditTrail.QueryEvents).",
-			Impact: "The event listing for this epoch can't be returned reliably; results would be partial.",
-			Fix: "1. Retry the query.\n" +
-				"2. If the error persists, the audit database file may be corrupt. Check it:\n" +
-				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
-				"3. If integrity_check reports problems, restore from a backup before retrying.",
-			Cause: err,
-		}
-	}
-	return events, nil
+// Delegates to QueryEventsOn, the single canonical query implementation.
+// Both SqliteAuditTrail.QueryEvents and StatusReader.QueryEvents use the same
+// shared function so any schema change (v5+) is applied in one place. See
+// QueryEventsOn for the legacy-role compatibility and LEFT JOIN mechanics.
+func (s *SqliteAuditTrail) QueryEvents(ctx context.Context, epochId string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
+	return QueryEventsOn(ctx, s.db, epochId, phase, role)
 }
 
 // stripLegacyRolePrefix returns the role substring from a synthetic

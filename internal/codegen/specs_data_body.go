@@ -5,7 +5,7 @@
 // templates). Each var encodes the body content for one skill directory.
 //
 // SkillBodySpecs maps skill directory names to their body content.
-// Keys are directory names (not types.RoleId) because sub-skills like
+// Keys are directory names (not protocol.RoleId) because sub-skills like
 // "supervisor-plan-tasks" have no RoleId equivalent.
 package codegen
 

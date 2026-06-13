@@ -21,19 +21,18 @@ var rootCmd = &cobra.Command{
 	Short: "Local task management for the Pasture toolkit",
 	Long: `pasture manages tasks, dependencies, labels, comments, and the audit-event
 record backed by the unified Pasture SQLite database at
-~/.local/share/pasture/pasture.db.
+~/.local/share/pasture/pasture.db. It also starts, signals, and queries
+durable epoch workflows directly — no separately running daemon required for
+CLI usage.
 
-Unlike pasture-msg (which sends Temporal signals to the pastured daemon),
-pasture operates entirely on the local task + audit tracker — no daemon
-required. The audit subsystem and Provenance subsystem share one file; the
-auto-on-open migrator brings legacy databases up to the current schema on
-first use.
+The audit subsystem and Provenance subsystem share one file; the auto-on-open
+migrator brings legacy databases up to the current schema on first use.
 
 Exit codes:
   0  success
   1  validation error (bad flags, missing arguments)
   2  connection error (cannot open the database file)
-  3  task error (not found, cycle detected, already closed, etc.)
+  3  task or workflow error (task not found, cycle detected; epoch start rejected, signal undeliverable)
   4  config error
   5  storage error (migration / schema failure)`,
 	Version: version,

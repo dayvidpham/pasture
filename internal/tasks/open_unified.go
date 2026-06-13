@@ -35,6 +35,7 @@ import (
 	_ "modernc.org/sqlite" // pure-Go driver; CGO_ENABLED=0 compatible
 
 	"github.com/dayvidpham/pasture/internal/audit"
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
@@ -109,8 +110,8 @@ func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
 	// fresh handle (not reuse trail's) to avoid taking a hidden reference
 	// into audit's struct internals — the modernc.org/sqlite driver shares
 	// the underlying file (via WAL) so writes through either handle hit the
-	// same disk state. SetMaxOpenConns(1) on this handle plus busy_timeout
-	// gives us the same single-writer serialisation as the audit handle.
+	// same disk state. The shared DSN (WAL + busy_timeout + _txlock=immediate)
+	// gives this handle the same write serialisation as the audit handle.
 	auditDB, err := openAuditHandle(dbPath)
 	if err != nil {
 		_ = trail.Close()
@@ -131,8 +132,8 @@ func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
 	// Open Provenance on the same file. provenance.OpenSQLite manages its
 	// own *sql.DB handle (separate from auditDB). Both handles target the
 	// same on-disk file via the modernc/sqlite driver; WAL mode + a
-	// 5000ms busy_timeout (set by NewSqliteAuditTrail's pragmas) provide
-	// cross-handle serialisation.
+	// 5000ms busy_timeout (applied via the shared DSN on the pasture handles)
+	// provide cross-handle serialisation.
 	prov, err := provenance.OpenSQLite(dbPath)
 	if err != nil {
 		_ = auditDB.Close()
@@ -164,10 +165,12 @@ func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
 }
 
 // openAuditHandle opens a private *sql.DB on the same SQLite file used by
-// audit and applies the same pragmas (WAL + busy_timeout=5000) so writes
-// from this handle serialise correctly against audit and Provenance writes.
+// audit, configured via the shared DSN (WAL + busy_timeout=5000 +
+// synchronous=NORMAL + foreign_keys=ON + _txlock=immediate) so writes from this
+// handle serialise correctly against audit and Provenance writes. The WAL
+// multi-writer model + busy_timeout replaces the former single-connection cap.
 func openAuditHandle(dbPath string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite", dbconn.SharedDSN(dbPath))
 	if err != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
@@ -190,41 +193,14 @@ func openAuditHandle(dbPath string) (*sql.DB, error) {
 		}
 	}
 
-	// Single-writer serialisation. Multiple handles into modernc/sqlite share
-	// the file via WAL, so this max-conns=1 prevents *this* handle from
-	// queuing writers against itself. Cross-handle (this vs audit vs
-	// Provenance) serialisation comes from SQLite's file lock + WAL.
+	// The shared DSN already applied WAL + busy_timeout + synchronous +
+	// foreign_keys + _txlock=immediate to every connection in the pool, so no
+	// runtime PRAGMAs are needed. This pasture-owned write handle keeps the
+	// single-connection cap (like the audit handle) to serialise its writers at
+	// the Go level — the proven model the cross-subsystem race test exercises.
+	// Only the DBOS engine handle is uncapped, because its poller needs a second
+	// concurrent connection.
 	db.SetMaxOpenConns(1)
-
-	pragmas := []string{
-		`PRAGMA journal_mode=WAL`,
-		`PRAGMA busy_timeout=5000`,
-	}
-	for _, p := range pragmas {
-		if _, err := db.Exec(p); err != nil {
-			db.Close()
-			return nil, &pasterrors.StructuredError{
-				Category: pasterrors.CategoryStorage,
-				What:     "Couldn't configure the pasture database for safe concurrent writes.",
-				Why: fmt.Sprintf(
-					"Tried to apply the database setting %q on %q, but it failed.\n"+
-						"This setting is what lets the daemon and the CLI write at the same time\n"+
-						"without one blocking the other for too long.",
-					p, dbPath,
-				),
-				Where: "Opening the pasture database (internal/tasks/open_unified.go in tasks.openAuditHandle).",
-				Impact: "Without this setting, writes from different parts of pasture can stall or\n" +
-					"time out under load.",
-				Fix: fmt.Sprintf("1. Confirm the database file is writable:\n"+
-					"     ls -l %q\n"+
-					"2. If the file lives on a network or read-only filesystem, move it onto a\n"+
-					"   local writable disk and point pasture at the new location:\n"+
-					"     pasture task --db <local-path> ...",
-					dbPath),
-				Cause: err,
-			}
-		}
-	}
 	return db, nil
 }
 

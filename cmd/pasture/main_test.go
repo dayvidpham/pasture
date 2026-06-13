@@ -1,6 +1,6 @@
 // Package main_test contains end-to-end CLI smoke tests for the `pasture`
 // binary. Tests compile pasture once via `go build` in TestMain and exercise
-// it through subprocess calls, mirroring the pasture-msg smoke-test pattern.
+// it through subprocess calls.
 //
 // Subprocess execution is the right model here because the production code
 // path uses os.Exit (via exitWithCode) for non-zero exit codes; running the
