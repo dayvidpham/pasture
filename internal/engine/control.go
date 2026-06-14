@@ -60,7 +60,7 @@ func (e *Engine) EpochControlWorkflow(ctx dbos.DBOSContext, in ControlInput) (pr
 			}
 			// Idle: no advance pending. Drain side channels so sessions/slice
 			// progress reported while parked still reach the projection.
-			changed, derr := e.drainSideChannels(ctx, sm)
+			changed, derr := e.drainSideChannels(ctx, in.EpochId, sm)
 			if derr != nil {
 				return *sm.State(), derr
 			}
@@ -74,7 +74,7 @@ func (e *Engine) EpochControlWorkflow(ctx dbos.DBOSContext, in ControlInput) (pr
 
 		// An advance arrived: drain the votes/sessions/progress queued ahead of
 		// it BEFORE applying, so a gated advance sees the votes that preceded it.
-		if _, derr := e.drainSideChannels(ctx, sm); derr != nil {
+		if _, derr := e.drainSideChannels(ctx, in.EpochId, sm); derr != nil {
 			return *sm.State(), derr
 		}
 
@@ -95,7 +95,10 @@ func (e *Engine) EpochControlWorkflow(ctx dbos.DBOSContext, in ControlInput) (pr
 		// Capture the step ordinal for the dedup key before the (pure) advance.
 		// DBOS re-derives the same ordinal on replay, so the same transition
 		// always yields the same key.
-		stepSeqInt, _ := dbos.GetStepID(ctx)
+		stepSeqInt, err := dbos.GetStepID(ctx)
+		if err != nil {
+			return *sm.State(), err
+		}
 		stepSeq := strconv.Itoa(stepSeqInt)
 
 		rec, err := sm.Advance(adv.ToPhase, triggeredBy, adv.ConditionMet, time.Now().UTC())
@@ -122,7 +125,7 @@ func (e *Engine) EpochControlWorkflow(ctx dbos.DBOSContext, in ControlInput) (pr
 // reports whether any signal mutated the state (so the caller can persist a
 // fresh projection). Votes are drained before the caller blocks for an advance,
 // guaranteeing the consensus gate sees every vote sent ahead of the advance.
-func (e *Engine) drainSideChannels(ctx dbos.DBOSContext, sm *protocol.EpochStateMachine) (bool, error) {
+func (e *Engine) drainSideChannels(ctx dbos.DBOSContext, epochId string, sm *protocol.EpochStateMachine) (bool, error) {
 	changed := false
 
 	for {
@@ -136,7 +139,17 @@ func (e *Engine) drainSideChannels(ctx dbos.DBOSContext, sm *protocol.EpochState
 		if vote.Axis == "" { // zero value: queue drained
 			break
 		}
-		_ = sm.RecordVote(vote.Axis, vote.Vote)
+		if err := sm.RecordVote(vote.Axis, vote.Vote); err != nil {
+			continue
+		}
+		stepSeqInt, err := dbos.GetStepID(ctx)
+		if err != nil {
+			return changed, err
+		}
+		stepSeq := strconv.Itoa(stepSeqInt)
+		if err := e.emitVoteRecorded(ctx, epochId, sm.State().CurrentPhase, vote, stepSeq); err != nil {
+			return changed, err
+		}
 		changed = true
 	}
 

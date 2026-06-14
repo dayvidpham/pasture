@@ -35,15 +35,15 @@ func TestCategoryValues(t *testing.T) {
 func TestStructuredError_ErrorFormat(t *testing.T) {
 	se := &errors.StructuredError{
 		Category: errors.CategoryConnection,
-		What:     "cannot reach Temporal",
-		Why:      "TCP refused on localhost:7233",
+		What:     "cannot open DBOS system database",
+		Why:      "SQLite refused the configured database path",
 		Impact:   "no workflows can be started",
-		Fix:      "start temporal server or set TEMPORAL_ADDRESS",
+		Fix:      "verify the path exists and set PASTURE_DB_PATH if needed",
 	}
 
 	got := se.Error()
-	if got != "connection error: cannot reach Temporal" {
-		t.Errorf("Error() = %q, want %q", got, "connection error: cannot reach Temporal")
+	if got != "connection error: cannot open DBOS system database" {
+		t.Errorf("Error() = %q, want %q", got, "connection error: cannot open DBOS system database")
 	}
 }
 

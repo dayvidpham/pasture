@@ -68,7 +68,10 @@ func (e *Engine) EpochWorkflow(ctx dbos.DBOSContext, in EpochInput) (protocol.Ep
 		// Capture the deterministic step sequence for the dedup key. DBOS
 		// re-derives step ids identically on replay, so the same transition
 		// always yields the same key.
-		stepSeqInt, _ := dbos.GetStepID(ctx)
+		stepSeqInt, err := dbos.GetStepID(ctx)
+		if err != nil {
+			return *sm.State(), err
+		}
 		stepSeq := strconv.Itoa(stepSeqInt)
 
 		rec, err := sm.Advance(adv.ToPhase, triggeredBy, adv.ConditionMet, time.Now().UTC())
@@ -152,6 +155,40 @@ func (e *Engine) emitTransition(ctx context.Context, epochId, role string, rec *
 		DedupKey:  dedupKey,
 	}
 	_, err := e.trail.RecordEventReturningId(ctx, ev)
+	return err
+}
+
+// emitVoteRecorded records one forensic row for one accepted review vote. Each
+// vote is emitted in its own DBOS step by the caller so replay uses a stable
+// step sequence and produces one idempotent row per vote signal.
+func (e *Engine) emitVoteRecorded(
+	ctx dbos.DBOSContext,
+	epochId string,
+	phase protocol.PhaseId,
+	vote protocol.ReviewVoteSignal,
+	stepSeq string,
+) error {
+	reviewer := vote.ReviewerId
+	if reviewer == "" {
+		reviewer = string(protocol.RoleReviewer)
+	}
+	dedupKey := protocol.DedupKey(epochId, string(phase), string(protocol.EventVoteRecorded), stepSeq)
+	_, err := dbos.RunAsStep(ctx, func(c context.Context) (struct{}, error) {
+		_, err := e.trail.RecordEventReturningId(c, protocol.AuditEvent{
+			EpochId:   epochId,
+			Phase:     phase,
+			Role:      reviewer,
+			EventType: protocol.EventVoteRecorded,
+			Payload: map[string]any{
+				"axis":       string(vote.Axis),
+				"vote":       string(vote.Vote),
+				"reviewerId": reviewer,
+			},
+			Timestamp: time.Now().UTC(),
+			DedupKey:  dedupKey,
+		})
+		return struct{}{}, err
+	})
 	return err
 }
 

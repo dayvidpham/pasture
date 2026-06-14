@@ -12,6 +12,16 @@ import (
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
+func countEvents(rows []protocol.AuditEvent, eventType protocol.EventType) int {
+	count := 0
+	for _, row := range rows {
+		if row.EventType == eventType {
+			count++
+		}
+	}
+	return count
+}
+
 // newControlEngine launches an engine for the signal-driven control workflow.
 // engine.New registers EpochControlWorkflow, so no test-side registration is
 // needed.
@@ -144,6 +154,71 @@ func TestControl_VotesSatisfyConsensusGate(t *testing.T) {
 	}
 }
 
+// TestControl_VoteRecordedAuditRows proves each accepted review vote emits its
+// own durable forensic row with reviewer identity and vote value preserved.
+func TestControl_VoteRecordedAuditRows(t *testing.T) {
+	e := newControlEngine(t)
+	const epochId = "ctl--vote-audit"
+	startControl(t, e, epochId)
+
+	advanceTo(t, e, epochId, protocol.PhaseElicit)
+	advanceTo(t, e, epochId, protocol.PhasePropose)
+	advanceTo(t, e, epochId, protocol.PhaseReview)
+
+	sendAllVotes(t, e, epochId)
+	advanceTo(t, e, epochId, protocol.PhasePlanReview)
+
+	rows, err := e.Trail().QueryEvents(context.Background(), epochId, nil, nil)
+	if err != nil {
+		t.Fatalf("QueryEvents: %v", err)
+	}
+
+	seen := map[string]bool{}
+	for _, row := range rows {
+		if row.EventType != protocol.EventVoteRecorded {
+			continue
+		}
+		axis, _ := row.Payload["axis"].(string)
+		vote, _ := row.Payload["vote"].(string)
+		reviewerId, _ := row.Payload["reviewerId"].(string)
+		if vote != string(protocol.VoteAccept) {
+			t.Errorf("VoteRecorded payload vote = %q, want %q", vote, protocol.VoteAccept)
+		}
+		if reviewerId == "" {
+			t.Errorf("VoteRecorded payload missing reviewerId: %#v", row.Payload)
+		}
+		if row.Role != reviewerId {
+			t.Errorf("VoteRecorded role = %q, want reviewerId %q", row.Role, reviewerId)
+		}
+		seen[axis] = true
+	}
+
+	if len(seen) != len(protocol.AllReviewAxes) {
+		t.Fatalf("VoteRecorded rows covered %d axes, want %d: %v", len(seen), len(protocol.AllReviewAxes), seen)
+	}
+	for _, axis := range protocol.AllReviewAxes {
+		if !seen[string(axis)] {
+			t.Errorf("missing VoteRecorded row for axis %q", axis)
+		}
+	}
+	if got := countEvents(rows, protocol.EventVoteRecorded); got != 3 {
+		t.Errorf("VoteRecorded rows = %d, want 3", got)
+	}
+
+	var dedupRows, distinctKeys int
+	if err := e.DB().QueryRow(
+		`SELECT COUNT(*), COUNT(DISTINCT dedup_key)
+		   FROM audit_events
+		  WHERE event_type = ? AND dedup_key IS NOT NULL`,
+		string(protocol.EventVoteRecorded),
+	).Scan(&dedupRows, &distinctKeys); err != nil {
+		t.Fatalf("count VoteRecorded dedup keys: %v", err)
+	}
+	if dedupRows != 3 || distinctKeys != 3 {
+		t.Fatalf("VoteRecorded dedup rows = %d distinct keys = %d, want 3/3", dedupRows, distinctKeys)
+	}
+}
+
 // TestControl_RegisterSessionIsIdempotent proves register_session accumulates
 // distinct sessions and ignores duplicate session ids.
 func TestControl_RegisterSessionIsIdempotent(t *testing.T) {
@@ -195,7 +270,8 @@ func TestControl_SliceProgressAccumulates(t *testing.T) {
 }
 
 // TestControl_FullEpochDurableRoundTrip drives all 12 phases purely via signals
-// and asserts the workflow completes with one forensic row per transition.
+// and asserts the workflow completes with one forensic row per transition plus
+// one row per accepted review vote.
 func TestControl_FullEpochDurableRoundTrip(t *testing.T) {
 	e := newControlEngine(t)
 	const epochId = "ctl--full"
@@ -227,7 +303,10 @@ func TestControl_FullEpochDurableRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("QueryEvents: %v", err)
 	}
-	if len(rows) != 12 {
-		t.Errorf("audit rows = %d, want 12 (one per transition)", len(rows))
+	if got := countEvents(rows, protocol.EventPhaseTransition); got != 12 {
+		t.Errorf("PhaseTransition rows = %d, want 12", got)
+	}
+	if got := countEvents(rows, protocol.EventVoteRecorded); got != 6 {
+		t.Errorf("VoteRecorded rows = %d, want 6", got)
 	}
 }

@@ -1,4 +1,4 @@
-.PHONY: build test test-race lint fmt clean release-local release-all generate
+.PHONY: build test test-recovery test-race test-race-ci lint fmt clean release-local release-all generate
 
 VERSION ?= dev
 
@@ -60,8 +60,14 @@ bin/pasture-migrate-crash:
 test:
 	CGO_ENABLED=0 go test ./...
 
+test-recovery:
+	CGO_ENABLED=0 go test -tags recovery ./internal/engine/ -run Recovery -v
+
 test-race:
 	CGO_ENABLED=1 go test -race ./...
+
+test-race-ci:
+	CGO_ENABLED=1 go test -race ./internal/engine/ ./internal/handlers/ ./internal/tasks/
 
 # --------------------------------------------------------------------------
 # Lint / Vet

@@ -4,7 +4,8 @@
 // It manages tasks, dependencies, labels, comments, and the audit-event record
 // backed by the unified Pasture SQLite database
 // (~/.local/share/pasture/pasture.db). It also starts, signals, and queries
-// durable epoch workflows without requiring a separately running daemon.
+// durable epoch workflow requests. A running pastured process hosts long-lived
+// workflow execution, queue dispatch, and crash recovery.
 //
 // Task commands route through the unified protocol.TaskTracker constructor
 // (tasks.OpenTaskTracker) so the auto-on-open audit migrator runs against

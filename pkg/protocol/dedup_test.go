@@ -81,13 +81,7 @@ func TestDedupKey_IsUUIDv5(t *testing.T) {
 func TestDedupKey_PinnedGolden(t *testing.T) {
 	t.Parallel()
 	got := protocol.DedupKey("epoch-1", "code-review", "PhaseTransition", "3")
-	// Pin the namespace literal + name shape: if the namespace constant or the
-	// name encoding in dedup.go changes, this recomputed expectation diverges
-	// and the test fails, flagging that already-recorded keys would break.
-	exp := uuid.NewSHA1(
-		uuid.MustParse("8b1d6e2a-3c47-5f90-a1b2-c3d4e5f60718"),
-		[]byte("epoch-1/code-review/PhaseTransition/3"),
-	).String()
+	const exp = "a5e53398-e14b-560f-a24b-d6895c3e16d1"
 	if got != exp {
 		t.Fatalf("DedupKey derivation drifted: got %q, want %q", got, exp)
 	}

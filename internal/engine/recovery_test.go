@@ -15,6 +15,7 @@ package engine_test
 
 import (
 	"database/sql"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -61,6 +62,18 @@ func buildProbe(t *testing.T, root, ldflags string) string {
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build probe: %v\n%s", err, out)
+	}
+	return bin
+}
+
+func buildPastureCLI(t *testing.T, root string) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "pasture")
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/pasture")
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build pasture CLI: %v\n%s", err, out)
 	}
 	return bin
 }
@@ -234,6 +247,24 @@ func assertExactlyOnce(t *testing.T, dbPath string) {
 	}
 }
 
+func assertCLIStatusPhase(t *testing.T, pastureBin, dbPath, epochId string, want protocol.PhaseId) {
+	t.Helper()
+	cmd := exec.Command(pastureBin, "--db", dbPath, "--format", "json", "status", "--epoch-id", epochId)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("pasture status failed: %v\n%s", err, out)
+	}
+	var status struct {
+		CurrentPhase string `json:"currentPhase"`
+	}
+	if err := json.Unmarshal(out, &status); err != nil {
+		t.Fatalf("decode pasture status json: %v\nbody:\n%s", err, out)
+	}
+	if status.CurrentPhase != string(want) {
+		t.Fatalf("status currentPhase = %q, want %q", status.CurrentPhase, want)
+	}
+}
+
 // TestRecovery_SameBinaryResume: kill -9 mid-step, resume with the SAME binary.
 func TestRecovery_SameBinaryResume(t *testing.T) {
 	root := moduleRoot(t)
@@ -303,7 +334,10 @@ func TestRecovery_LegacyNullCoexistence(t *testing.T) {
 func TestRecovery_QueuedSliceSurvivesDaemonRestart(t *testing.T) {
 	root := moduleRoot(t)
 	bin := buildProbe(t, root, "")
+	pastureBin := buildPastureCLI(t, root)
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	epochId := "epoch-recover-queued-slice"
 
-	queuedSliceRecoveryCycle(t, bin, bin, dbPath, "epoch-recover-queued-slice")
+	queuedSliceRecoveryCycle(t, bin, bin, dbPath, epochId)
+	assertCLIStatusPhase(t, pastureBin, dbPath, epochId, protocol.PhasePropose)
 }

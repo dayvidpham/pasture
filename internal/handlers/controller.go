@@ -239,6 +239,8 @@ func (c *dbosController) CompleteSlice(ctx context.Context, sliceId string, sig 
 
 func (c *dbosController) Close() error {
 	if c.client != nil {
+		// The DBOS client owns and closes the SqliteSystemDB handle supplied at
+		// construction; closing c.db separately would double-close the same DB.
 		c.client.Shutdown(5 * time.Second)
 	}
 	if c.trailCloser != nil {

@@ -204,6 +204,20 @@ func runQueueProbe(dbPath, wfID string, stall int) error {
 	}
 
 	if stall > 0 {
+		plan := []engine.AdvanceStep{
+			{ToPhase: protocol.PhaseElicit, TriggeredBy: "epoch", ConditionMet: "classified"},
+			{ToPhase: protocol.PhasePropose, TriggeredBy: "architect", ConditionMet: "elicited"},
+		}
+		epoch, err := dbos.RunWorkflow(e.DBOS(), e.EpochWorkflow,
+			engine.EpochInput{EpochId: wfID, Advances: plan},
+			dbos.WithWorkflowID(wfID))
+		if err != nil {
+			return fmt.Errorf("RunWorkflow(epoch): %w", err)
+		}
+		if _, err := epoch.GetResult(dbos.WithHandleTimeout(30 * time.Second)); err != nil {
+			return fmt.Errorf("epoch did not reach propose before queue probe: %w", err)
+		}
+
 		first, err := e.EnqueueSlice(engine.SliceInput{
 			EpochId: wfID,
 			SliceId: firstSliceID,
