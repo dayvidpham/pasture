@@ -3,13 +3,13 @@ package main_test
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	"github.com/dayvidpham/pasture/internal/engine"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -19,10 +19,12 @@ import (
 // the production fold end-to-end (binary → projection reader → SQL read).
 func seedEpochDB(t *testing.T, epochId string) string {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	dbPath := testutil.GoldenUnifiedDBPath(t)
 	e, err := engine.New(context.Background(), engine.Config{
-		DBPath:             dbPath,
-		ApplicationVersion: "test-v1",
+		DBPath:                   dbPath,
+		ApplicationVersion:       "test-v1",
+		SkipMigrations:           true,
+		QueueBasePollingInterval: 100 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("engine.New: %v", err)

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
@@ -121,16 +122,24 @@ func ResolveSliceConcurrency(flagVal int) (int, error) {
 // construction, so callers that use Engine.New do not need to call it directly.
 // (Note: the function is intentionally unexported; see Engine.SliceQueue for
 // the public accessor.)
-func newSliceQueue(ctx dbos.DBOSContext, concurrency int) dbos.WorkflowQueue {
-	return dbos.NewWorkflowQueue(ctx, SliceQueueName,
+func newSliceQueue(ctx dbos.DBOSContext, concurrency int, basePollingInterval time.Duration) dbos.WorkflowQueue {
+	opts := []dbos.QueueOption{
 		dbos.WithWorkerConcurrency(concurrency),
-	)
+	}
+	if basePollingInterval > 0 {
+		opts = append(opts, dbos.WithQueueBasePollingInterval(basePollingInterval))
+	}
+	return dbos.NewWorkflowQueue(ctx, SliceQueueName, opts...)
 }
 
-func newControlQueue(ctx dbos.DBOSContext) dbos.WorkflowQueue {
-	return dbos.NewWorkflowQueue(ctx, ControlQueueName,
+func newControlQueue(ctx dbos.DBOSContext, basePollingInterval time.Duration) dbos.WorkflowQueue {
+	opts := []dbos.QueueOption{
 		dbos.WithWorkerConcurrency(1),
-	)
+	}
+	if basePollingInterval > 0 {
+		opts = append(opts, dbos.WithQueueBasePollingInterval(basePollingInterval))
+	}
+	return dbos.NewWorkflowQueue(ctx, ControlQueueName, opts...)
 }
 
 // EnqueueSlice dispatches a SliceSubWorkflow via the slice queue, giving it the

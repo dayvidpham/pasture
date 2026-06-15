@@ -141,7 +141,7 @@ func TestCLI_TopLevelHelp_ContainsStatus(t *testing.T) {
 // an actionable message and does NOT create the file. Status is a pure-read
 // command — it must never create or migrate the database.
 func TestCLI_Status_AbsentDB_NoFileCreated(t *testing.T) {
-	dbPath := newDB(t) // returns a path to a file that does not yet exist
+	dbPath := absentDB(t)
 	out := runCLI(t, "--db", dbPath, "status")
 	// Must fail with CategoryConnection exit code (2): absent db = connection error.
 	if out.exitCode != 2 {
@@ -178,7 +178,7 @@ func TestCLI_Status_AbsentDB_NoFileCreated(t *testing.T) {
 // `pasture status --epoch-id <id>` against a path where the database does not
 // exist also fails with an actionable message and does NOT create the file.
 func TestCLI_Status_AbsentDB_EpochId_NoFileCreated(t *testing.T) {
-	dbPath := newDB(t)
+	dbPath := absentDB(t)
 	const epochId = "demo--01960000-0000-7000-8000-000000000399"
 	out := runCLI(t, "--db", dbPath, "status", "--epoch-id", epochId)
 	// Must fail with CategoryConnection exit code (2).

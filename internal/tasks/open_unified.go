@@ -68,10 +68,40 @@ func OpenTaskTracker(dbPath string) (protocol.TaskTracker, error) {
 	return openTaskTrackerImpl(dbPath)
 }
 
+type openTaskTrackerOptions struct {
+	skipMigrations bool
+}
+
+// OpenTaskTrackerOption configures OpenTaskTrackerWithOptions.
+type OpenTaskTrackerOption func(*openTaskTrackerOptions)
+
+// WithSkipMigrations opens a pre-migrated database without running the audit
+// migrator. The audit layer still asserts the schema version loudly. This is an
+// opt-in test performance hook; production callers should use OpenTaskTracker.
+func WithSkipMigrations() OpenTaskTrackerOption {
+	return func(o *openTaskTrackerOptions) {
+		o.skipMigrations = true
+	}
+}
+
+// OpenTaskTrackerWithOptions opens the unified tracker with explicit opt-in
+// behavior for tests that copy a current golden database.
+func OpenTaskTrackerWithOptions(dbPath string, opts ...OpenTaskTrackerOption) (protocol.TaskTracker, error) {
+	cfg := openTaskTrackerOptions{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	return openTaskTrackerWithOptions(dbPath, cfg)
+}
+
 // openTaskTrackerImpl is the actual constructor. Split out so init() can
 // register it without recursive resolution of the public OpenTaskTracker
 // symbol via the protocol package.
 func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
+	return openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{})
+}
+
+func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (protocol.TaskTracker, error) {
 	if dbPath == "" {
 		dbPath = DefaultDBPath()
 	}
@@ -101,7 +131,13 @@ func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
 	// (and any of its own tables). NewSqliteAuditTrail invokes audit.Migrate
 	// internally; if Migrate returns a CategoryStorage / CategoryValidation
 	// error (newer-schema rejection), it propagates out unchanged via %w.
-	trail, err := audit.NewSqliteAuditTrail(dbPath)
+	var trail *audit.SqliteAuditTrail
+	var err error
+	if cfg.skipMigrations {
+		trail, err = audit.NewSqliteAuditTrailWithOptions(dbPath, audit.WithSkipMigrations())
+	} else {
+		trail, err = audit.NewSqliteAuditTrail(dbPath)
+	}
 	if err != nil {
 		return nil, wrapOpenError(dbPath, "audit subsystem", err)
 	}

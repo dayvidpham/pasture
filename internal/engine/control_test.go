@@ -2,15 +2,18 @@ package engine_test
 
 import (
 	"context"
-	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	"github.com/dayvidpham/pasture/internal/engine"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
+
+var controlPhaseEvents sync.Map
 
 func countEvents(rows []protocol.AuditEvent, eventType protocol.EventType) int {
 	count := 0
@@ -27,10 +30,20 @@ func countEvents(rows []protocol.AuditEvent, eventType protocol.EventType) int {
 // needed.
 func newControlEngine(t *testing.T) *engine.Engine {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	dbPath := testutil.GoldenUnifiedDBPath(t)
+	phaseEvents := make(chan protocol.PhaseId, 32)
 	e, err := engine.New(context.Background(), engine.Config{
-		DBPath:             dbPath,
-		ApplicationVersion: "test-v1",
+		DBPath:                   dbPath,
+		ApplicationVersion:       "test-v1",
+		SkipMigrations:           true,
+		QueueBasePollingInterval: 100 * time.Millisecond,
+		OnTransition: func(_ context.Context, _ string, rec *protocol.TransitionRecord, _ string) error {
+			select {
+			case phaseEvents <- rec.ToPhase:
+			default:
+			}
+			return nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("engine.New: %v", err)
@@ -38,7 +51,11 @@ func newControlEngine(t *testing.T) *engine.Engine {
 	if err := e.Launch(); err != nil {
 		t.Fatalf("engine.Launch: %v", err)
 	}
-	t.Cleanup(func() { e.Shutdown(5 * time.Second) })
+	controlPhaseEvents.Store(e, phaseEvents)
+	t.Cleanup(func() {
+		controlPhaseEvents.Delete(e)
+		e.Shutdown(5 * time.Second)
+	})
 	return e
 }
 
@@ -81,8 +98,15 @@ func sendAllVotes(t *testing.T, e *engine.Engine, epochId string) {
 // so observation is by polling the durable projection the workflow writes.
 func waitPhase(t *testing.T, e *engine.Engine, epochId string, want protocol.PhaseId) *protocol.EpochState {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
+	deadline := time.NewTimer(15 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	var phaseEvents <-chan protocol.PhaseId
+	if ch, ok := controlPhaseEvents.Load(e); ok {
+		phaseEvents = ch.(chan protocol.PhaseId)
+	}
+	for {
 		st, err := e.ReadProjection(epochId)
 		if err != nil {
 			t.Fatalf("ReadProjection: %v", err)
@@ -90,11 +114,23 @@ func waitPhase(t *testing.T, e *engine.Engine, epochId string, want protocol.Pha
 		if st != nil && st.CurrentPhase == want {
 			return st
 		}
-		time.Sleep(15 * time.Millisecond)
+		if phaseEvents == nil {
+			select {
+			case <-tick.C:
+			case <-deadline.C:
+				st, _ := e.ReadProjection(epochId)
+				t.Fatalf("epoch %q did not reach %q in time; last projection = %+v", epochId, want, st)
+			}
+			continue
+		}
+		select {
+		case <-phaseEvents:
+		case <-tick.C:
+		case <-deadline.C:
+			st, _ := e.ReadProjection(epochId)
+			t.Fatalf("epoch %q did not reach %q in time; last projection = %+v", epochId, want, st)
+		}
 	}
-	st, _ := e.ReadProjection(epochId)
-	t.Fatalf("epoch %q did not reach %q in time; last projection = %+v", epochId, want, st)
-	return nil
 }
 
 // advanceTo sends the advance and waits for the projection to reflect it.

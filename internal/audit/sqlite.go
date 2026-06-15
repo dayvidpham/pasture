@@ -62,6 +62,23 @@ type SqliteAuditTrail struct {
 	roleToAgentId map[string]string
 }
 
+type sqliteAuditTrailOptions struct {
+	skipMigrations bool
+}
+
+// SqliteAuditTrailOption configures NewSqliteAuditTrailWithOptions.
+type SqliteAuditTrailOption func(*sqliteAuditTrailOptions)
+
+// WithSkipMigrations skips audit DDL/migration and asserts that the file is
+// already at MaxKnownSchemaVersion. It is intended for tests that copy a
+// pre-migrated golden database; migration tests should keep using
+// NewSqliteAuditTrail so they exercise the real migrator.
+func WithSkipMigrations() SqliteAuditTrailOption {
+	return func(o *sqliteAuditTrailOptions) {
+		o.skipMigrations = true
+	}
+}
+
 // NewSqliteAuditTrail opens (or creates) the SQLite database at dbPath,
 // applies the schema, and enables WAL mode for concurrent access.
 //
@@ -75,6 +92,18 @@ type SqliteAuditTrail struct {
 //
 // The caller must call Close when done to release the file handle.
 func NewSqliteAuditTrail(dbPath string) (*SqliteAuditTrail, error) {
+	return NewSqliteAuditTrailWithOptions(dbPath)
+}
+
+// NewSqliteAuditTrailWithOptions opens the SQLite audit trail with explicit
+// opt-in behavior for tests that need to bypass migrations on a known-current
+// golden database.
+func NewSqliteAuditTrailWithOptions(dbPath string, opts ...SqliteAuditTrailOption) (*SqliteAuditTrail, error) {
+	cfg := sqliteAuditTrailOptions{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, fmt.Errorf(
 			"audit.NewSqliteAuditTrail: cannot create parent directory for %q: %w — "+
@@ -119,6 +148,17 @@ func NewSqliteAuditTrail(dbPath string) (*SqliteAuditTrail, error) {
 	// SQLITE_BUSY contention busy_timeout cannot always absorb under the file's
 	// multi-handle write load.
 	db.SetMaxOpenConns(1)
+
+	if cfg.skipMigrations {
+		if err := assertCurrentSchema(db); err != nil {
+			db.Close()
+			return nil, err
+		}
+		return &SqliteAuditTrail{
+			db:            db,
+			roleToAgentId: make(map[string]string),
+		}, nil
+	}
 
 	// Disable foreign-key enforcement for the migration window. The DSN turns
 	// foreign_keys ON, but the v3→v4 migration rebuilds audit_events by DROP +
@@ -170,6 +210,24 @@ func NewSqliteAuditTrail(dbPath string) (*SqliteAuditTrail, error) {
 		db:            db,
 		roleToAgentId: make(map[string]string),
 	}, nil
+}
+
+func assertCurrentSchema(db *sql.DB) error {
+	version, err := ReadSchemaVersion(db)
+	if err != nil {
+		return err
+	}
+	if version != MaxKnownSchemaVersion {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     fmt.Sprintf("The copied pasture database is at schema version %d, not %d.", version, MaxKnownSchemaVersion),
+			Why:      "A caller opened the database with migrations explicitly disabled, so the file must already be current.",
+			Where:    "Opening a pre-migrated audit database (internal/audit/sqlite.go in audit.assertCurrentSchema).",
+			Impact:   "The database was not opened; continuing could make tests pass against the wrong schema.",
+			Fix:      "Rebuild the golden database through the normal migrator, or open this file without WithSkipMigrations.",
+		}
+	}
+	return nil
 }
 
 // Close releases the underlying database connection. Must be called when the

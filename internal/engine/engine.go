@@ -50,6 +50,11 @@ type Config struct {
 	// New opens an owned SQLite trail on DBPath (also migrating the file to the
 	// current schema, which creates the dedup_key column).
 	Trail audit.Trail
+	// SkipMigrations opens DBPath as a pre-migrated database when Trail is nil.
+	// The audit layer still asserts the schema version. This is intended for
+	// tests that copy a current golden database; production callers should leave
+	// it false so the real migrator runs.
+	SkipMigrations bool
 	// Specs overrides the canonical phase transition table (for tests). nil →
 	// protocol.PhaseSpecs.
 	Specs map[protocol.PhaseId]protocol.PhaseSpec
@@ -84,14 +89,19 @@ type Config struct {
 	// See DefaultSliceQueueConcurrency in internal/engine/queue.go for the
 	// full trade-off rationale and tuning guidance.
 	SliceConcurrency int
+	// QueueBasePollingInterval overrides the DBOS queue base polling interval.
+	// Zero keeps the DBOS production default. Tests may set a shorter interval
+	// to keep bounded-concurrency assertions fast without changing production
+	// queue cadence.
+	QueueBasePollingInterval time.Duration
 	// HooksMgr, when set, receives slice lifecycle events (SliceStarted,
 	// SliceCompleted, SliceFailed) dispatched by slice sub-workflows. nil ⇒
 	// hook dispatch is skipped (no observability events; the sub-workflow still
 	// runs correctly).
 	//
-	// HooksMgr will be wired by the daemon when it hosts the engine (an explicit
-	// acceptance item for the daemon rewiring). Callers that don't need slice
-	// lifecycle observability (e.g. the local CLI, unit tests) may leave this nil.
+	// pastured wires HooksMgr when it hosts the engine. Callers that don't need
+	// slice lifecycle observability (e.g. the local CLI, unit tests) may leave
+	// this nil.
 	HooksMgr *hooks.Manager
 }
 
@@ -179,7 +189,13 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 	trail := cfg.Trail
 	var trailCloser io.Closer
 	if trail == nil {
-		st, err := audit.NewSqliteAuditTrail(cfg.DBPath)
+		var st *audit.SqliteAuditTrail
+		var err error
+		if cfg.SkipMigrations {
+			st, err = audit.NewSqliteAuditTrailWithOptions(cfg.DBPath, audit.WithSkipMigrations())
+		} else {
+			st, err = audit.NewSqliteAuditTrail(cfg.DBPath)
+		}
 		if err != nil {
 			return nil, fmt.Errorf(
 				"engine.New: failed to open the forensic audit trail on %q: %w — "+
@@ -284,7 +300,7 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 	// Create queues BEFORE Launch (NewWorkflowQueue panics after Launch). The
 	// control queue is where CLI clients submit epoch-control workflows for the
 	// hosted pastured process to execute.
-	e.controlQueue = newControlQueue(dbosCtx)
+	e.controlQueue = newControlQueue(dbosCtx, cfg.QueueBasePollingInterval)
 
 	// Create the slice queue BEFORE Launch (NewWorkflowQueue panics after Launch).
 	// Resolve the concurrency limit K once here; store it on the Engine so
@@ -295,7 +311,7 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 	if k <= 0 {
 		k = DefaultSliceQueueConcurrency
 	}
-	e.sliceQueue = newSliceQueue(dbosCtx, k)
+	e.sliceQueue = newSliceQueue(dbosCtx, k, cfg.QueueBasePollingInterval)
 	e.sliceConcurrency = k
 
 	return e, nil

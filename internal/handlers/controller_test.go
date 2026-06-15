@@ -29,9 +29,10 @@ import (
 // controllerRig holds the seed engine (for projection reads) and the
 // controller (for handler calls) opened on the same database.
 type controllerRig struct {
-	engine *engine.Engine
-	ctrl   handlers.EpochController
-	dbPath string
+	engine      *engine.Engine
+	ctrl        handlers.EpochController
+	dbPath      string
+	phaseEvents chan protocol.PhaseId
 }
 
 // waitProjection polls the seed engine's projection until the epoch reaches
@@ -39,8 +40,11 @@ type controllerRig struct {
 // this reads through the seed engine so it works across process boundaries.
 func (r *controllerRig) waitProjection(t *testing.T, epochId string, want protocol.PhaseId) *protocol.EpochState {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
+	deadline := time.NewTimer(15 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
 		st, err := r.engine.ReadProjection(epochId)
 		if err != nil {
 			t.Fatalf("ReadProjection: %v", err)
@@ -48,11 +52,14 @@ func (r *controllerRig) waitProjection(t *testing.T, epochId string, want protoc
 		if st != nil && st.CurrentPhase == want {
 			return st
 		}
-		time.Sleep(15 * time.Millisecond)
+		select {
+		case <-r.phaseEvents:
+		case <-tick.C:
+		case <-deadline.C:
+			st, _ := r.engine.ReadProjection(epochId)
+			t.Fatalf("epoch %q did not reach phase %q in 15s; last projection = %+v", epochId, want, st)
+		}
 	}
-	st, _ := r.engine.ReadProjection(epochId)
-	t.Fatalf("epoch %q did not reach phase %q in 15s; last projection = %+v", epochId, want, st)
-	return nil
 }
 
 // openController opens a DBOS-backed EpochController on a fresh temp-db,
@@ -63,11 +70,19 @@ func (r *controllerRig) waitProjection(t *testing.T, epochId string, want protoc
 func openController(t *testing.T, epochId string, seedPhases []protocol.PhaseId) controllerRig {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	phaseEvents := make(chan protocol.PhaseId, 32)
 
 	// Seed the projection by running the control workflow to a known state.
 	seedEngine, err := engine.New(context.Background(), engine.Config{
 		DBPath:             dbPath,
 		ApplicationVersion: "test-v1",
+		OnTransition: func(_ context.Context, _ string, rec *protocol.TransitionRecord, _ string) error {
+			select {
+			case phaseEvents <- rec.ToPhase:
+			default:
+			}
+			return nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("seed engine.New: %v", err)
@@ -93,20 +108,8 @@ func openController(t *testing.T, epochId string, seedPhases []protocol.PhaseId)
 		if err := dbos.Send(seedEngine.DBOS(), epochId, sig, protocol.SignalAdvancePhase.String()); err != nil {
 			t.Fatalf("Send(advance_phase=%s): %v", phase, err)
 		}
-		deadline := time.Now().Add(15 * time.Second)
-		reached := false
-		for time.Now().Before(deadline) {
-			st, _ := seedEngine.ReadProjection(epochId)
-			if st != nil && st.CurrentPhase == phase {
-				reached = true
-				break
-			}
-			time.Sleep(15 * time.Millisecond)
-		}
-		if !reached {
-			st, _ := seedEngine.ReadProjection(epochId)
-			t.Fatalf("seed: epoch %q did not reach %q in 15s; last projection = %+v", epochId, phase, st)
-		}
+		rig := controllerRig{engine: seedEngine, phaseEvents: phaseEvents}
+		rig.waitProjection(t, epochId, phase)
 	}
 
 	// Open the controller pointing at the same db. It launches its own engine
@@ -120,7 +123,7 @@ func openController(t *testing.T, epochId string, seedPhases []protocol.PhaseId)
 			t.Logf("ctrl.Close: %v", err)
 		}
 	})
-	return controllerRig{engine: seedEngine, ctrl: ctrl, dbPath: dbPath}
+	return controllerRig{engine: seedEngine, ctrl: ctrl, dbPath: dbPath, phaseEvents: phaseEvents}
 }
 
 // ─── EpochStart / EpochCancel ─────────────────────────────────────────────────

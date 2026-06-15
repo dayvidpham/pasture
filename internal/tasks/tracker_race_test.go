@@ -40,7 +40,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -54,6 +53,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/engine"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -149,8 +149,8 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 		seedEventCount = 50
 	)
 
-	dbPath := filepath.Join(t.TempDir(), "race.db")
-	tracker, err := tasks.OpenTaskTracker(dbPath)
+	dbPath := testutil.GoldenUnifiedDBPath(t)
+	tracker, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("OpenTaskTracker(%q) failed: %v", dbPath, err)
 	}
@@ -349,8 +349,8 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 // forensic tables (audit_events via the dedup_key partial index, activities via
 // ON CONFLICT(id)). This is what makes a crash-replay of the engine's step safe.
 func TestDBOSWriterEmit_ReplayExactlyOnce(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "replay.db")
-	tracker, err := tasks.OpenTaskTracker(dbPath)
+	dbPath := testutil.GoldenUnifiedDBPath(t)
+	tracker, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("OpenTaskTracker: %v", err)
 	}

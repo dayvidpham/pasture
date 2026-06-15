@@ -27,7 +27,6 @@ package tasks_test
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -37,6 +36,7 @@ import (
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -147,7 +147,7 @@ func captureCategoriesMap(t *testing.T, dbPath string) map[string]string {
 // cleanup that closes it. Used by every test that needs a tracker.
 func openTrackerOrFatal(t *testing.T, dbPath string) protocol.TaskTracker {
 	t.Helper()
-	tracker, err := tasks.OpenTaskTracker(dbPath)
+	tracker, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("OpenTaskTracker(%q): %v", dbPath, err)
 	}
@@ -237,7 +237,7 @@ func TestWellKnownAgents_RoleBreakdown(t *testing.T) {
 //     pasture_role='None'.
 //   - A cached entry in WellKnownAgentCache that matches the disk row.
 func TestRegisterWellKnownAgents_AllNamesPresent(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	dbPath := testutil.GoldenUnifiedDBPath(t)
 	tracker := openTrackerOrFatal(t, dbPath)
 
 	cache := tasks.NewWellKnownAgentCache()
@@ -291,7 +291,7 @@ func TestRegisterWellKnownAgents_AllNamesPresent(t *testing.T) {
 // §7.7.2). Workflow-role agents (Architect, Supervisor, Worker, Reviewer)
 // are NOT well-known automata and are not registered by this slice.
 func TestRegisterWellKnownAgents_PastureRoleAlwaysNone(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	dbPath := testutil.GoldenUnifiedDBPath(t)
 	tracker := openTrackerOrFatal(t, dbPath)
 
 	cache := tasks.NewWellKnownAgentCache()
@@ -343,10 +343,10 @@ func TestRegisterWellKnownAgents_PastureRoleAlwaysNone(t *testing.T) {
 //     the agents counts diverge.
 //   - Caching the wrong AgentId → on-disk identical, in-memory cache wrong.
 func TestRegisterWellKnownAgents_TwoRestartsIdempotent(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	dbPath := testutil.GoldenUnifiedDBPath(t)
 
 	// First start.
-	tracker1, err := tasks.OpenTaskTracker(dbPath)
+	tracker1, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("OpenTaskTracker (first start): %v", err)
 	}
@@ -374,7 +374,7 @@ func TestRegisterWellKnownAgents_TwoRestartsIdempotent(t *testing.T) {
 	}
 
 	// Second start.
-	tracker2, err := tasks.OpenTaskTracker(dbPath)
+	tracker2, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("OpenTaskTracker (second start): %v", err)
 	}
@@ -446,7 +446,7 @@ func equalStringSlices(a, b []string) bool {
 // TestRegisterWellKnownAgents_NilCacheReturnsConfigError catches the wiring
 // error where main.go forgets to allocate the cache.
 func TestRegisterWellKnownAgents_NilCacheReturnsConfigError(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	dbPath := testutil.GoldenUnifiedDBPath(t)
 	tracker := openTrackerOrFatal(t, dbPath)
 
 	err := tasks.RegisterWellKnownAgents(context.Background(), tracker, nil)
@@ -487,7 +487,7 @@ func TestRegisterWellKnownAgents_NilTrackerReturnsConfigError(t *testing.T) {
 // pre-cancelled context aborts registration before any rows land. This is
 // the daemon-shutdown-during-startup safety property.
 func TestRegisterWellKnownAgents_CancelledContextStopsEarly(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	dbPath := testutil.GoldenUnifiedDBPath(t)
 	tracker := openTrackerOrFatal(t, dbPath)
 
 	cache := tasks.NewWellKnownAgentCache()
@@ -538,7 +538,7 @@ func TestWellKnownAgentCache_LenOnNilReceiver(t *testing.T) {
 // TestWellKnownAgentCache_NamesAfterRegistration asserts Names() is sorted
 // (test-stable) and contains exactly the registered names.
 func TestWellKnownAgentCache_NamesAfterRegistration(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	dbPath := testutil.GoldenUnifiedDBPath(t)
 	tracker := openTrackerOrFatal(t, dbPath)
 
 	cache := tasks.NewWellKnownAgentCache()

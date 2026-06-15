@@ -17,6 +17,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/dayvidpham/pasture/internal/testutil"
 )
 
 // binaryPath holds the compiled pasture binary, built once for the test run.
@@ -106,6 +108,11 @@ func runCLI(t *testing.T, args ...string) runOutcome {
 }
 
 func newDB(t *testing.T) string {
+	t.Helper()
+	return testutil.GoldenUnifiedDBPath(t)
+}
+
+func absentDB(t *testing.T) string {
 	t.Helper()
 	return filepath.Join(t.TempDir(), "pasture.db")
 }

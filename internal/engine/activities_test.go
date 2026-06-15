@@ -3,7 +3,6 @@ package engine_test
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/engine"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -20,16 +20,17 @@ import (
 // pasture.db. Returns the engine and the db path for direct verification reads.
 func newEngineWithTracker(t *testing.T) (*engine.Engine, string) {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
-	tracker, err := tasks.OpenTaskTracker(dbPath)
+	dbPath := testutil.GoldenUnifiedDBPath(t)
+	tracker, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("OpenTaskTracker: %v", err)
 	}
 	t.Cleanup(func() { _ = tracker.Close() })
 
 	e, err := engine.New(context.Background(), engine.Config{
-		DBPath:             dbPath,
-		ApplicationVersion: "activities-v1",
+		DBPath:                   dbPath,
+		ApplicationVersion:       "activities-v1",
+		QueueBasePollingInterval: 100 * time.Millisecond,
 		// Route BOTH forensic tiers through the one tracker: audit_events via
 		// the audit methods, activities via the provenance methods.
 		Trail:   tracker,

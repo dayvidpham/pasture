@@ -66,6 +66,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/engine"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/hooks"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
@@ -76,11 +77,13 @@ import (
 // k <= 0 uses the default (DefaultSliceQueueConcurrency).
 func newQueueEngine(t *testing.T, k int) *engine.Engine {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	dbPath := testutil.GoldenUnifiedDBPath(t)
 	e, err := engine.New(context.Background(), engine.Config{
-		DBPath:             dbPath,
-		ApplicationVersion: "test-v1",
-		SliceConcurrency:   k,
+		DBPath:                   dbPath,
+		ApplicationVersion:       "test-v1",
+		SliceConcurrency:         k,
+		SkipMigrations:           true,
+		QueueBasePollingInterval: 100 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("engine.New: %v", err)
@@ -96,12 +99,14 @@ func newQueueEngine(t *testing.T, k int) *engine.Engine {
 // manager so dispatchHook delivers events to it.
 func newQueueEngineWithHooks(t *testing.T, k int, mgr *hooks.Manager) *engine.Engine {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	dbPath := testutil.GoldenUnifiedDBPath(t)
 	e, err := engine.New(context.Background(), engine.Config{
-		DBPath:             dbPath,
-		ApplicationVersion: "test-v1",
-		SliceConcurrency:   k,
-		HooksMgr:           mgr,
+		DBPath:                   dbPath,
+		ApplicationVersion:       "test-v1",
+		SliceConcurrency:         k,
+		HooksMgr:                 mgr,
+		SkipMigrations:           true,
+		QueueBasePollingInterval: 100 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("engine.New: %v", err)

@@ -252,10 +252,8 @@ func runSlice(_ context.Context, sliceId, _ string, mode protocol.SliceExecution
 // Hook failures are logged but never propagated: hooks are optional
 // observability, not control flow.
 //
-// Config.HooksMgr will be wired by the daemon when it hosts the engine
-// (an explicit acceptance item for the daemon rewiring); until then no
-// production caller sets it. Callers that omit it (e.g. tests that don't need
-// observability) see no dispatches.
+// pastured wires Config.HooksMgr when it hosts the engine. Callers that omit it
+// (e.g. CLI paths and tests that don't need observability) see no dispatches.
 func (e *Engine) dispatchHook(ctx dbos.DBOSContext, event hooks.HookEvent, epochId string, data map[string]any) {
 	if e.cfg.HooksMgr == nil {
 		return

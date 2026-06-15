@@ -2,13 +2,13 @@ package engine_test
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	"github.com/dayvidpham/pasture/internal/engine"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -16,10 +16,12 @@ import (
 // launches it; the engine is shut down on cleanup.
 func newEngine(t *testing.T) *engine.Engine {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	dbPath := testutil.GoldenUnifiedDBPath(t)
 	e, err := engine.New(context.Background(), engine.Config{
-		DBPath:             dbPath,
-		ApplicationVersion: "test-v1",
+		DBPath:                   dbPath,
+		ApplicationVersion:       "test-v1",
+		SkipMigrations:           true,
+		QueueBasePollingInterval: 100 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("engine.New: %v", err)
