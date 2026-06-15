@@ -27,6 +27,7 @@ func newTestSqliteTrail(t *testing.T) (*audit.SqliteAuditTrail, string) {
 }
 
 func TestSqliteAuditTrail_Suite(t *testing.T) {
+	t.Parallel()
 	trail, _ := newTestSqliteTrail(t)
 	runTrailSuite(t, trail)
 }
@@ -34,6 +35,7 @@ func TestSqliteAuditTrail_Suite(t *testing.T) {
 // TestSqliteAuditTrail_Durability verifies that events survive a close/reopen
 // cycle — the core "survives kill-restart" acceptance criterion.
 func TestSqliteAuditTrail_Durability(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "durable.db")
 	ctx := context.Background()
@@ -82,6 +84,7 @@ func TestSqliteAuditTrail_Durability(t *testing.T) {
 // TestSqliteAuditTrail_ParentDirCreation verifies that NewSqliteAuditTrail
 // creates intermediate directories when the parent does not exist.
 func TestSqliteAuditTrail_ParentDirCreation(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "nested", "sub", "audit.db")
 
@@ -99,6 +102,7 @@ func TestSqliteAuditTrail_ParentDirCreation(t *testing.T) {
 // TestSqliteAuditTrail_ConcurrentAccess verifies thread-safety under parallel
 // writes. SQLite with WAL mode serialises writers without data loss.
 func TestSqliteAuditTrail_ConcurrentAccess(t *testing.T) {
+	t.Parallel()
 	trail, _ := newTestSqliteTrail(t)
 	ctx := context.Background()
 
@@ -141,6 +145,7 @@ func TestSqliteAuditTrail_ConcurrentAccess(t *testing.T) {
 }
 
 func TestSqliteAuditTrail_SessionEntrySuite(t *testing.T) {
+	t.Parallel()
 	trail, _ := newTestSqliteTrail(t)
 	runSessionEntrySuite(t, trail)
 }
@@ -148,6 +153,7 @@ func TestSqliteAuditTrail_SessionEntrySuite(t *testing.T) {
 // TestSqliteAuditTrail_SessionEntryDurability verifies session entries survive
 // a close/reopen cycle — the SQLite-specific persistence contract.
 func TestSqliteAuditTrail_SessionEntryDurability(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "session_dur.db")
 	ctx := context.Background()
@@ -194,6 +200,7 @@ func TestSqliteAuditTrail_SessionEntryDurability(t *testing.T) {
 // TestSqliteAuditTrail_RecordEventReturningId_Suite runs the shared
 // RecordEventReturningId contract suite against the SQLite-backed trail.
 func TestSqliteAuditTrail_RecordEventReturningId_Suite(t *testing.T) {
+	t.Parallel()
 	trail, _ := newTestSqliteTrail(t)
 	runRecordEventReturningIdSuite(t, trail)
 }
@@ -202,6 +209,7 @@ func TestSqliteAuditTrail_RecordEventReturningId_Suite(t *testing.T) {
 // id returned by RecordEventReturningId equals the actual id column of the
 // inserted audit_events row. This is the core LastInsertId guarantee.
 func TestSqliteAuditTrail_RecordEventReturningId_MatchesRowId(t *testing.T) {
+	t.Parallel()
 	trail, dbPath := newTestSqliteTrail(t)
 	ctx := context.Background()
 
@@ -246,6 +254,7 @@ func TestSqliteAuditTrail_RecordEventReturningId_MatchesRowId(t *testing.T) {
 //
 // If this test ever fails, the LastInsertId path has regressed.
 func TestSqliteAuditTrail_RecordEventReturningId_ConcurrentUnique(t *testing.T) {
+	t.Parallel()
 	trail, dbPath := newTestSqliteTrail(t)
 	ctx := context.Background()
 
@@ -334,6 +343,7 @@ func TestSqliteAuditTrail_RecordEventReturningId_ConcurrentUnique(t *testing.T) 
 // the new method preserves the validation contract from the original
 // RecordEvent — empty Role still returns CategoryValidation.
 func TestSqliteAuditTrail_RecordEventReturningId_RejectsEmptyRole(t *testing.T) {
+	t.Parallel()
 	trail, _ := newTestSqliteTrail(t)
 	ctx := context.Background()
 
@@ -357,6 +367,7 @@ func TestSqliteAuditTrail_RecordEventReturningId_RejectsEmptyRole(t *testing.T) 
 // TestSqliteAuditTrail_PreservesChronologicalOrder verifies that rows come back
 // in insertion order (ascending id), not arbitrary order.
 func TestSqliteAuditTrail_PreservesChronologicalOrder(t *testing.T) {
+	t.Parallel()
 	trail, _ := newTestSqliteTrail(t)
 	ctx := context.Background()
 

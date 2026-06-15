@@ -1,6 +1,6 @@
 ---
 name: install-cli
-description: Install Pasture binaries (pastured, pasture-msg, pasture-release) from GitHub Releases, go install, or Nix
+description: Install Pasture binaries (pastured, pasture, pasture-release) from GitHub Releases, go install, or Nix
 ---
 
 # /pasture:install-cli
@@ -54,7 +54,7 @@ BASE_URL="https://github.com/dayvidpham/pasture/releases/download/${TAG}"
 INSTALL_DIR="${HOME}/.local/bin"
 mkdir -p "${INSTALL_DIR}"
 
-for cmd in pastured pasture-msg pasture-release; do
+for cmd in pastured pasture pasture-release; do
   curl -fsSL "${BASE_URL}/${cmd}-${SUFFIX}" -o "${INSTALL_DIR}/${cmd}"
   chmod +x "${INSTALL_DIR}/${cmd}"
 done
@@ -64,7 +64,7 @@ done
 
 ```bash
 pastured --version
-pasture-msg --version
+pasture --version
 pasture-release --version
 ```
 
@@ -81,11 +81,16 @@ or the repository is not yet public), install from source with Go:
 
 ```bash
 go install github.com/dayvidpham/pasture/cmd/pastured@latest
-go install github.com/dayvidpham/pasture/cmd/pasture-msg@latest
+go install github.com/dayvidpham/pasture/cmd/pasture@latest
 go install github.com/dayvidpham/pasture/cmd/pasture-release@latest
 ```
 
 Requires Go 1.24+ and access to the Go module proxy (proxy.golang.org).
+
+The retired message CLI is folded into `pasture`: use `pasture task ...` for task
+CRUD, `pasture migrate` for schema upgrades, and the `pasture epoch`, `pasture
+phase`, `pasture signal`, `pasture query`, `pasture session`, and `pasture slice`
+verbs for durable workflow control.
 
 ## Fallback: Nix
 
@@ -93,7 +98,7 @@ If a Nix-enabled system is available:
 
 ```bash
 nix profile install github:dayvidpham/pasture#pastured
-nix profile install github:dayvidpham/pasture#pasture-msg
+nix profile install github:dayvidpham/pasture#pasture
 nix profile install github:dayvidpham/pasture#pasture-release
 # or install all at once:
 nix profile install github:dayvidpham/pasture

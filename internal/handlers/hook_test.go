@@ -141,6 +141,7 @@ func requireValidationError(t *testing.T, code int, err error) {
 // ─── (a) Injectable gatherer — merge precedence (no git required) ─────────────
 
 func TestHookRecord_MergePrecedence_FlagsOverrideGit(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	const sha = "0123456789abcdef0123456789abcdef01234567"
 
@@ -186,6 +187,7 @@ func TestHookRecord_MergePrecedence_FlagsOverrideGit(t *testing.T) {
 }
 
 func TestHookRecord_MergePrecedence_GitFillsWhenFlagsAbsent(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	const sha = "ffffffffffffffffffffffffffffffffffffffff"
 
@@ -221,6 +223,7 @@ func TestHookRecord_MergePrecedence_GitFillsWhenFlagsAbsent(t *testing.T) {
 // overrides the git-derived value — i.e. "absent" (nil → git fills) and
 // "explicitly empty" (override to "") are distinct, observable in the payload.
 func TestHookRecord_MergePrecedence_ExplicitEmptyOverridesGit(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	const sha = "1111111111111111111111111111111111111111"
 
@@ -259,6 +262,7 @@ func TestHookRecord_MergePrecedence_ExplicitEmptyOverridesGit(t *testing.T) {
 // ─── (b) Lightweight integration smoke — one GitCommit row + ContextGit edge ──
 
 func TestHookRecord_WritesOneGitCommitRowAndEdge(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	const sha = "abc1230000000000000000000000000000000000"
 
@@ -292,6 +296,7 @@ func TestHookRecord_WritesOneGitCommitRowAndEdge(t *testing.T) {
 // row actually written. This is the dispatch-tied event-id contract: the id is
 // read back from the Manager dispatch result, not from a stateful "last id".
 func TestHookRecord_SurfacesRecordedEventID(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	const sha = "1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d"
 
@@ -409,6 +414,7 @@ func TestHookRecord_RealGit_DerivesMetadataFromCommit(t *testing.T) {
 // actionable validation error (exit 1) and record NOTHING. Uses an injected
 // failing fake so the failure-propagation path is unit-testable without git.
 func TestHookRecord_GatherFails_FailsHardRecordsNothing(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	const sha = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 
@@ -487,6 +493,7 @@ func TestHookRecord_RealGit_OutsideRepo_FailsHard(t *testing.T) {
 // supplied explicitly, the gatherer is NEVER consulted — proven by injecting a
 // gatherer that would FAIL if called, yet the record still succeeds (exit 0).
 func TestHookRecord_AllFlagsSupplied_SkipsGather(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	const sha = "9999999999999999999999999999999999999999"
 
@@ -520,6 +527,7 @@ func TestHookRecord_AllFlagsSupplied_SkipsGather(t *testing.T) {
 // ─── (d) Error cases — unknown --event and missing --sha (actionable) ─────────
 
 func TestHookRecord_UnknownEvent_ActionableError(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	in := handlers.HookRecordInput{
 		DBPath: dbPath,
@@ -542,6 +550,7 @@ func TestHookRecord_UnknownEvent_ActionableError(t *testing.T) {
 }
 
 func TestHookRecord_MissingSHA_ActionableError(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	in := handlers.HookRecordInput{
 		DBPath: dbPath,
@@ -558,6 +567,7 @@ func TestHookRecord_MissingSHA_ActionableError(t *testing.T) {
 // underlying gather error is reachable via errors.As/Unwrap, so a regression
 // that drops Cause: is caught.
 func TestHookRecord_GatherFails_CauseIsReachable(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	const sha = "cafebabedeadbeefcafebabedeadbeef0badcafe"
 
@@ -620,6 +630,7 @@ func requireStorageError(t *testing.T, code int, err error) {
 // A non-recording handler is injected via the Registrar seam so this branch
 // is reached without bypassing the Manager pipeline.
 func TestHookRecord_EmptyGuard_NoRecorderReported(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	const sha = "abababababababababababababababababababababab"
 
@@ -666,6 +677,7 @@ func bytesContains(s, substr string) bool {
 
 // TestParseRepoSlug exercises the slug parser for all documented URL forms.
 func TestParseRepoSlug(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		remoteURL string
@@ -752,6 +764,7 @@ func TestParseRepoSlug(t *testing.T) {
 // --remote override the git-derived values, even when git IS consulted (a
 // commit field is absent).
 func TestHookRecord_RepoRemotes_FlagOverridesGitDerived(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	const sha = "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a"
 
@@ -797,6 +810,7 @@ func TestHookRecord_RepoRemotes_FlagOverridesGitDerived(t *testing.T) {
 // TestHookRecord_RepoRemotes_LandInPayload asserts that repo and remotes
 // derived from git (via the fake gatherer) appear in the recorded audit payload.
 func TestHookRecord_RepoRemotes_LandInPayload(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	const sha = "3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b"
 
@@ -834,6 +848,7 @@ func TestHookRecord_RepoRemotes_LandInPayload(t *testing.T) {
 // when all four commit metadata flags are supplied, git is not consulted, so
 // repo+remotes are absent from the recorded payload (git never ran).
 func TestHookRecord_AllFlagsSupplied_RepoRemotesAbsent(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	const sha = "4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c"
 

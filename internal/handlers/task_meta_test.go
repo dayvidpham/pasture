@@ -11,6 +11,7 @@ import (
 )
 
 func TestTaskLabelAddRemove_RoundTrip(t *testing.T) {
+	t.Parallel()
 	path := dbPath(t)
 	id := createTask(t, path, "labelable")
 
@@ -37,6 +38,7 @@ func TestTaskLabelAddRemove_RoundTrip(t *testing.T) {
 }
 
 func TestTaskLabelAdd_RejectsEmptyLabel(t *testing.T) {
+	t.Parallel()
 	path := dbPath(t)
 	id := createTask(t, path, "x")
 
@@ -51,6 +53,7 @@ func TestTaskLabelAdd_RejectsEmptyLabel(t *testing.T) {
 }
 
 func TestTaskCommentAddAndList_RoundTrip(t *testing.T) {
+	t.Parallel()
 	path := dbPath(t)
 	id := createTask(t, path, "commentable")
 	authorId := mustRegisterAgent(t, path, "Tester", "tester@example.com")
@@ -93,6 +96,7 @@ func TestTaskCommentAddAndList_RoundTrip(t *testing.T) {
 }
 
 func TestTaskCommentAdd_RequiresAuthor(t *testing.T) {
+	t.Parallel()
 	path := dbPath(t)
 	id := createTask(t, path, "needs-author")
 
@@ -111,6 +115,7 @@ func TestTaskCommentAdd_RequiresAuthor(t *testing.T) {
 }
 
 func TestTaskCommentAdd_RejectsUnknownAuthor(t *testing.T) {
+	t.Parallel()
 	path := dbPath(t)
 	id := createTask(t, path, "ghost-author")
 

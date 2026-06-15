@@ -156,6 +156,7 @@ func tableInfo(t *testing.T, db *sql.DB, table string) []columnInfo {
 // freshly-seeded legacy v1 database creates all three new tables required by
 // PROPOSAL-2 §7.2.
 func TestMigrateV2toV3_TablesExist(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "v3_tables.db")
 	_ = seedLegacyV1DB(t, dbPath)
 
@@ -178,6 +179,7 @@ func TestMigrateV2toV3_TablesExist(t *testing.T) {
 // TestMigrateV2toV3_IndexesExist verifies the two context_edges helper
 // indexes are present per §7.2.
 func TestMigrateV2toV3_IndexesExist(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "v3_indexes.db")
 	_ = seedLegacyV1DB(t, dbPath)
 
@@ -240,6 +242,7 @@ func TestMigrateV2toV3_IndexesExist(t *testing.T) {
 // key, no non-key columns. This test is the regression guard against
 // downstream slices accidentally adding a payload column or similar.
 func TestMigrateV2toV3_ContextEdges_BCNF(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "v3_bcnf.db")
 	_ = seedLegacyV1DB(t, dbPath)
 	db := openDB(t, dbPath)
@@ -287,6 +290,7 @@ func TestMigrateV2toV3_ContextEdges_BCNF(t *testing.T) {
 // invariant for pasture_well_known_agents: agent_id is PK, name is UNIQUE
 // (NOT inverted). This is a binding contract from PROPOSAL-2 §7.2 + §7.7.1.
 func TestMigrateV2toV3_WellKnownAgents_UAT1Layout(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "v3_uat1.db")
 	_ = seedLegacyV1DB(t, dbPath)
 	db := openDB(t, dbPath)
@@ -355,6 +359,7 @@ func TestMigrateV2toV3_WellKnownAgents_UAT1Layout(t *testing.T) {
 // TestMigrateV2toV3_AgentCategories_Layout asserts the column layout for
 // pasture_agent_categories per §7.2.
 func TestMigrateV2toV3_AgentCategories_Layout(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "v3_categories.db")
 	_ = seedLegacyV1DB(t, dbPath)
 	db := openDB(t, dbPath)
@@ -401,6 +406,7 @@ func TestMigrateV2toV3_AgentCategories_Layout(t *testing.T) {
 //   - Updated for S4: epoch_id column dropped via table-rebuild;
 //     epoch correlation now in context_edges with kind='EpochContext'.
 func TestMigrateV2toV3_LegacyAuditEventsBackfilled(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "v3_legacy.db")
 	originalId := seedLegacyV1DB(t, dbPath)
 
@@ -509,6 +515,7 @@ func TestMigrateV2toV3_LegacyAuditEventsBackfilled(t *testing.T) {
 // context_edges entry, so the user-inserted EpochContext row uses a
 // different context_id to avoid colliding with the auto-backfill.
 func TestMigrateV2toV3_NewTablesInsertable(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "v3_insert.db")
 	eventId := seedLegacyV1DB(t, dbPath)
 
@@ -592,6 +599,7 @@ func TestMigrateV2toV3_NewTablesInsertable(t *testing.T) {
 // constraint on pasture_well_known_agents.name (the idempotency anchor used
 // by S7's ensureWellKnownAgent flow).
 func TestMigrateV2toV3_WellKnownAgents_NameUniqueEnforced(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "v3_unique.db")
 	_ = seedLegacyV1DB(t, dbPath)
 	db := openDB(t, dbPath)
@@ -632,6 +640,7 @@ func TestMigrateV2toV3_WellKnownAgents_NameUniqueEnforced(t *testing.T) {
 // SliceContext (not EpochContext) on a distinct context_id from the
 // auto-backfill so the assertions measure only user-insert behaviour.
 func TestMigrateV2toV3_ContextEdges_PKEnforced(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "v3_pk.db")
 	eventId := seedLegacyV1DB(t, dbPath)
 	db := openDB(t, dbPath)
@@ -681,6 +690,7 @@ func TestMigrateV2toV3_ContextEdges_PKEnforced(t *testing.T) {
 // — read from the constant so the assertion follows the binary's
 // supported version, currently v4 after S4.)
 func TestMigrateV2toV3_Idempotent_ReRunNoop(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "v3_idemp.db")
 	_ = seedLegacyV1DB(t, dbPath)
 	db := openDB(t, dbPath)
@@ -743,6 +753,7 @@ func TestMigrateV2toV3_Idempotent_ReRunNoop(t *testing.T) {
 // follows the binary; explicitly asserts MaxKnownSchemaVersion >= 4 to
 // catch a regression below S4's published guarantee.
 func TestMigrate_VersionBumpedToMaxKnown(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "max_known_version.db")
 	_ = seedLegacyV1DB(t, dbPath)
 	db := openDB(t, dbPath)
@@ -773,6 +784,7 @@ func TestMigrate_VersionBumpedToMaxKnown(t *testing.T) {
 // "3"). Updated to read MaxKnownSchemaVersion so the assertion follows
 // the binary as new v* steps are added.
 func TestMigrate_FreshV2DbAdvancesToMaxKnown(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "fresh_v2_advances.db")
 
 	// Hand-build a v2-shaped database: audit_events + audit_schema_meta with

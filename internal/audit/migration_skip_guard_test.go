@@ -8,6 +8,7 @@ import (
 )
 
 func TestMigrationTestsDoNotUseSkipMigrations(t *testing.T) {
+	t.Parallel()
 	files := []string{
 		"migrate_v4_v5_test.go",
 		"migrate_test.go",

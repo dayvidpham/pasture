@@ -16,6 +16,7 @@ import (
 // TestTrailInterface verifies that both implementations satisfy the Trail interface
 // at compile time. If either assignment fails to compile, the interface is broken.
 func TestTrailInterface(t *testing.T) {
+	t.Parallel()
 	t.Helper()
 	var _ audit.Trail = &audit.InMemoryAuditTrail{}
 	var _ audit.Trail = (*audit.SqliteAuditTrail)(nil)

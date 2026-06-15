@@ -203,10 +203,10 @@ func (e *Engine) SliceSubWorkflow(ctx dbos.DBOSContext, in SliceInput) (SliceRes
 //
 // Modes:
 //   - mock: no-op stub; always returns Success=true. Used for testing and dry-runs.
-//   - tmux / subprocess: real agent execution is not yet implemented in the DBOS
-//     adapter; returns an actionable not-implemented error with Success=false. The
-//     operator can still report an outcome via the complete_slice signal override.
-//     Full agent execution is tracked as a separate follow-up epic.
+//   - tmux / subprocess: deliberate stub. The command and timeoutSecs parameters
+//     are the seams for real agent execution, but the DBOS adapter does not
+//     launch them yet. Returns an actionable not-implemented error with
+//     Success=false so no reader or audit record mistakes it for finished work.
 //   - any other value: validation error with Success=false.
 func runSlice(_ context.Context, sliceId, _ string, mode protocol.SliceExecutionMode, _ string, _ int) (SliceResult, error) {
 	switch mode {
@@ -214,16 +214,32 @@ func runSlice(_ context.Context, sliceId, _ string, mode protocol.SliceExecution
 		return SliceResult{SliceId: sliceId, Success: true, Output: "mock: completed"}, nil
 
 	case protocol.SliceTmux, protocol.SliceSubprocess:
-		// Real agent execution is not yet implemented in the DBOS adapter.
-		// Returning Success=false (not Success=true) preserves forensic integrity:
-		// a fabricated success would write a false completed-projection record and
-		// fire HookSliceCompleted without any execution having occurred.
-		// Use the complete_slice signal override to report the real outcome once
-		// the agent finishes externally.
+		// DELIBERATE STUB (pending real-exec integration).
+		// This branch is a placeholder to be filled in at a later date; it does
+		// not yet run the slice command.
+		//
+		// WHAT TO IMPLEMENT: the real tmux/subprocess agent-exec path: launch
+		// the slice command in the chosen execution mode, stream/capture its
+		// output, honor timeoutSecs by killing and failing on overrun, and
+		// surface the true process outcome.
+		//
+		// EXPECTED BEHAVIOUR ONCE IMPLEMENTED: return an honest SliceResult that
+		// reflects the actual process result. Success=true only if the command
+		// genuinely ran and exited 0; fire HookSliceCompleted and write the
+		// completed projection only on real completion. Never fabricate success.
+		//
+		// FEATURE ENABLED: real multi-agent slice execution under the DBOS
+		// substrate, driving actual agent/subprocess work per slice instead of
+		// mock-only mode.
+		//
+		// Until then we return Success=false with an actionable not-implemented
+		// error so no reader or audit record mistakes this for finished work.
 		errMsg := fmt.Sprintf(
 			"slice %q: execution mode %q is not yet implemented.\n"+
 				"Problem: the DBOS adapter cannot launch tmux sessions or subprocesses directly.\n"+
-				"Why: real agent execution is a tracked follow-up; the current adapter supports mock mode only.\n"+
+				"Why: this execution mode is a deliberate stub pending real tmux/subprocess agent-exec; the current adapter supports mock mode only.\n"+
+				"Where: running a slice workflow in internal/engine/slice.go.\n"+
+				"Impact: no slice command was run, no completion hook was fired, and no completed projection was written.\n"+
 				"How to fix:\n"+
 				"  1. Re-enqueue with mode=mock if you only need to test the signal path.\n"+
 				"  2. Run the slice externally and report the outcome with:\n"+

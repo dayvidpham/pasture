@@ -32,6 +32,7 @@ import (
 // This is the property NewSqliteAuditTrail relies on for the
 // "auto-migrate-on-open" semantics (§7.10).
 func TestMigrate_RoundTrip_OpenMigrateReopen(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "roundtrip.db")
 
@@ -95,6 +96,7 @@ func TestMigrate_RoundTrip_OpenMigrateReopen(t *testing.T) {
 // migrator should detect this as version 1, run v1→v2, and leave the file
 // at version 2 — without touching the existing audit_events rows.
 func TestMigrate_LegacyV1Database_PromotedToV2(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "legacy_v1.db")
 
@@ -197,6 +199,7 @@ func TestMigrate_LegacyV1Database_PromotedToV2(t *testing.T) {
 // current schema version. This is the contract S5 (OpenTaskTracker)
 // relies on.
 func TestNewSqliteAuditTrail_RunsMigrate(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "wired.db")
 
@@ -239,6 +242,7 @@ func TestNewSqliteAuditTrail_RunsMigrate(t *testing.T) {
 // constant rather than hard-coding a literal so the assertion follows
 // the binary.
 func TestMigrate_NewerSchema_RejectedWithStructuredError(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "future.db")
 
@@ -316,6 +320,7 @@ func TestMigrate_NewerSchema_RejectedWithStructuredError(t *testing.T) {
 // not just direct audit.Migrate calls. This is the path S5 will exercise
 // via OpenTaskTracker.
 func TestNewSqliteAuditTrail_NewerSchema_Rejected(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "future_via_constructor.db")
 

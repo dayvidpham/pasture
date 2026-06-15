@@ -39,6 +39,7 @@ func openTempDB(t *testing.T, name string) (*sql.DB, string) {
 // audit.Migrate on a brand-new SQLite file lands at MaxKnownSchemaVersion
 // (i.e. the highest version this binary supports).
 func TestMigrate_FreshDB_LandsAtMaxKnownVersion(t *testing.T) {
+	t.Parallel()
 	db, _ := openTempDB(t, "fresh.db")
 
 	if err := audit.Migrate(db); err != nil {
@@ -57,6 +58,7 @@ func TestMigrate_FreshDB_LandsAtMaxKnownVersion(t *testing.T) {
 // TestMigrate_AppliedAtIsRecent verifies the seeded applied_at column is
 // a sane Unix nanosecond timestamp close to wall-clock now.
 func TestMigrate_AppliedAtIsRecent(t *testing.T) {
+	t.Parallel()
 	db, _ := openTempDB(t, "applied_at.db")
 
 	before := time.Now().UTC().UnixNano()
@@ -86,6 +88,7 @@ func TestMigrate_AppliedAtIsRecent(t *testing.T) {
 // (One row per applied step from v1 to MaxKnownSchemaVersion, so the first
 // Migrate seeds MaxKnownSchemaVersion-1 rows; the second is a no-op.)
 func TestMigrate_Idempotent_SecondCallNoOp(t *testing.T) {
+	t.Parallel()
 	db, _ := openTempDB(t, "idempotent.db")
 
 	if err := audit.Migrate(db); err != nil {
@@ -120,6 +123,7 @@ func TestMigrate_Idempotent_SecondCallNoOp(t *testing.T) {
 // timestamp set by the first call. This proves the v1→v2 step uses
 // INSERT OR IGNORE (not REPLACE) and respects existing data.
 func TestMigrate_Idempotent_AppliedAtUnchanged(t *testing.T) {
+	t.Parallel()
 	db, _ := openTempDB(t, "applied_at_stable.db")
 
 	if err := audit.Migrate(db); err != nil {
@@ -154,6 +158,7 @@ func TestMigrate_Idempotent_AppliedAtUnchanged(t *testing.T) {
 // TestMigrate_NilDB_StructuredError verifies the actionable error returned
 // when a caller passes a nil *sql.DB. CategoryStorage per PROPOSAL-2 §7.10.5.
 func TestMigrate_NilDB_StructuredError(t *testing.T) {
+	t.Parallel()
 	err := audit.Migrate(nil)
 	if err == nil {
 		t.Fatal("Migrate(nil) returned nil, want *StructuredError")
