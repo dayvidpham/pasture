@@ -136,8 +136,8 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 	// muddy the SQLITE_BUSY assertion.
 
 	const (
-		// N goroutines per the proposal spec. If you change N, also update
-		// the bd comment on aura-plugins-mbkfi documenting the choice.
+		// N goroutines per the concurrency spec. If you change N, also update
+		// the durable design note documenting the choice.
 		N = 64
 		// Iterations per goroutine. N * iterPerGoroutine must exceed 1000
 		// per the proposal spec.
@@ -260,7 +260,7 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 	// SQLITE_BUSY indicates the proposal's D11 / C5 binding is
 	// violated and a message queue (or other interposition) is needed.
 	if busyErrors > 0 {
-		t.Errorf("BLOCKER B3 failure: observed %d SQLITE_BUSY/SQLITE_LOCKED errors that escaped busy_timeout — D11 binding violated, see PROPOSAL-2 §10.3", busyErrors)
+		t.Errorf("concurrent-writer race: observed %d SQLITE_BUSY/SQLITE_LOCKED errors that escaped busy_timeout — the unified-DB WAL busy_timeout guarantee is violated", busyErrors)
 	}
 
 	totalAttempted := int64(0)
@@ -270,7 +270,7 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 		totalSucceeded += succeededByOp[op]
 	}
 	if totalAttempted < 1000 {
-		t.Errorf("PROPOSAL-2 §10.3 spec requires >1000 ops; only attempted %d", totalAttempted)
+		t.Errorf("the concurrency spec requires >1000 ops; only attempted %d", totalAttempted)
 	}
 	t.Logf("race ops: attempted=%d succeeded=%d (per-op succeeded: record=%d attach=%d create=%d activity=%d dbos=%d); busy_errors=%d",
 		totalAttempted, totalSucceeded,

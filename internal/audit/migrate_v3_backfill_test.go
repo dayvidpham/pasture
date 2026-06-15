@@ -140,6 +140,7 @@ func copyFixtureToTemp(t *testing.T, dstName string) string {
 //
 //	partially apply.
 func TestScenario4_AutoMigrationOnOpen_FixtureBackfill(t *testing.T) {
+	t.Parallel()
 	dst := copyFixtureToTemp(t, "scenario4.db")
 
 	// ── When ────────────────────────────────────────────────────────────
@@ -282,6 +283,7 @@ func TestScenario4_AutoMigrationOnOpen_FixtureBackfill(t *testing.T) {
 // agents_software rows. This is the §11 Scenario 14 idempotency
 // contribution from S3.
 func TestScenario4_ReRunMigrate_NoDuplicateAgents(t *testing.T) {
+	t.Parallel()
 	dst := copyFixtureToTemp(t, "scenario4_rerun.db")
 
 	// First open + migrate.
@@ -382,6 +384,7 @@ func crashBinaryPath(t *testing.T) string {
 // audit_events row with NULL agent_id, OR pasture_well_known_agents
 // has rows but version is 2.
 func TestScenario11_CrashMidMigration_RolledBackCleanly(t *testing.T) {
+	t.Parallel()
 	dst := copyFixtureToTemp(t, "crash.db")
 	binPath := crashBinaryPath(t)
 
@@ -478,6 +481,7 @@ func TestScenario11_CrashMidMigration_RolledBackCleanly(t *testing.T) {
 // TestScenario11_CrashBinary_Validates verifies that the crash binary
 // rejects bad input cleanly (exit 1, actionable stderr).
 func TestScenario11_CrashBinary_Validates(t *testing.T) {
+	t.Parallel()
 	binPath := crashBinaryPath(t)
 
 	// Missing arg.
@@ -587,6 +591,7 @@ func (w *readyOutput) String() string {
 //   - audit_events row count == 1024 (no data loss across the race).
 //   - PRAGMA integrity_check == "ok".
 func TestScenario12_ConcurrentMigratorRace(t *testing.T) {
+	t.Parallel()
 	// Build pastured (or reuse an already-built copy in this test run).
 	binPath := pastedBinaryPath(t)
 
@@ -775,6 +780,7 @@ func TestScenario12_ConcurrentMigratorRace(t *testing.T) {
 // NOTE: this is a thin verification of the wiring — the full 30-second
 // ceiling is verified by Scenario 12 once S7 lands.
 func TestRunStep_BusyRetry_ErrorShape(t *testing.T) {
+	t.Parallel()
 	// This test exercises the error-shape contract: when a busy timeout
 	// fires, the returned error must be a *StructuredError of category
 	// CategoryStorage with the specific What field per §7.10.3.
@@ -833,6 +839,7 @@ func TestRunStep_BusyRetry_ErrorShape(t *testing.T) {
 // an openTempDB() handle without going through NewSqliteAuditTrail
 // (which would create audit_events via ensureSchema first).
 func TestV3Backfill_FreshDB_NoOp(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "fresh.db")
 	db := openDB(t, dbPath)
 
@@ -872,6 +879,7 @@ func TestV3Backfill_FreshDB_NoOp(t *testing.T) {
 // (epoch_id, phase, event_type, payload, timestamp). Uses the seeded
 // legacy v1 DB from migrate_v2_v3_test.go's seedLegacyV1DB helper.
 func TestV3Backfill_PreservesNonRoleColumns(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "v3_preserve.db")
 	originalId := seedLegacyV1DB(t, dbPath)
 

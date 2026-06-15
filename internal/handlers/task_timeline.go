@@ -40,7 +40,7 @@ import (
 // TaskTimelineInput captures the CLI inputs for `pasture task timeline`.
 type TaskTimelineInput struct {
 	DBPath          string
-	TaskIDStr       string // wire-format task ID (e.g. "aura-plugins--01968a3c-9d4f-7c8a-bc12-feedfacecafe")
+	TaskIDStr       string // wire-format task ID (e.g. "yourproject--01968a3c-9d4f-7c8a-bc12-feedfacecafe")
 	IncludeChildren bool   // accepted but currently no-op (see file-level doc)
 	Depth           int    // accepted but currently no-op
 }

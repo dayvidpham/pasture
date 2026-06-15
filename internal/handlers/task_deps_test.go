@@ -11,6 +11,7 @@ import (
 )
 
 func TestTaskReady_ExcludesBlocked(t *testing.T) {
+	t.Parallel()
 	path := dbPath(t)
 
 	parentId := createTask(t, path, "parent")
@@ -44,6 +45,7 @@ func TestTaskReady_ExcludesBlocked(t *testing.T) {
 }
 
 func TestTaskDepAdd_RejectsCycle(t *testing.T) {
+	t.Parallel()
 	path := dbPath(t)
 
 	a := createTask(t, path, "A")
@@ -63,6 +65,7 @@ func TestTaskDepAdd_RejectsCycle(t *testing.T) {
 }
 
 func TestTaskDepAdd_JSONOutput(t *testing.T) {
+	t.Parallel()
 	path := dbPath(t)
 	a := createTask(t, path, "A")
 	b := createTask(t, path, "B")
@@ -84,6 +87,7 @@ func TestTaskDepAdd_JSONOutput(t *testing.T) {
 }
 
 func TestTaskDepTree_RootWithChildren(t *testing.T) {
+	t.Parallel()
 	path := dbPath(t)
 
 	root := createTask(t, path, "root")
@@ -124,6 +128,7 @@ func TestTaskDepTree_RootWithChildren(t *testing.T) {
 }
 
 func TestTaskDepTree_EmptyForLeaf(t *testing.T) {
+	t.Parallel()
 	path := dbPath(t)
 	leaf := createTask(t, path, "leaf")
 

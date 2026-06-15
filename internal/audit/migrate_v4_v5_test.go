@@ -76,6 +76,7 @@ func seedV4DB(t *testing.T, dbPath string) (int64, int64) {
 }
 
 func TestMigrateV4toV5_NonDestructive(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	id1, id2 := seedV4DB(t, dbPath)
 
@@ -111,6 +112,7 @@ func TestMigrateV4toV5_NonDestructive(t *testing.T) {
 }
 
 func TestMigrateV4toV5_LegacyNullCoexistence(t *testing.T) {
+	t.Parallel()
 	// A fresh file migrates v1→v5, creating the full schema (incl. the agent
 	// registry RecordEvent attributes through). The dedup_key column + partial
 	// index land in the v4→v5 step.
@@ -152,6 +154,7 @@ func TestMigrateV4toV5_LegacyNullCoexistence(t *testing.T) {
 }
 
 func TestMigrateV4toV5_EngineDedupExactlyOnce(t *testing.T) {
+	t.Parallel()
 	// A fresh file migrates v1→v5, creating the full schema (incl. the agent
 	// registry RecordEvent attributes through). The dedup_key column + partial
 	// index land in the v4→v5 step.

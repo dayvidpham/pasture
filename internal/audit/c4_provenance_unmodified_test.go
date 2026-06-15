@@ -92,6 +92,7 @@ var c4PastureKeywords = []string{
 // Commits from unrelated concurrent epochs are logged informatively but
 // do not cause a failure.
 func TestC4_ProvenanceLibraryUnmodified(t *testing.T) {
+	t.Parallel()
 	t.Helper()
 
 	// ── 1. Locate provenance source ────────────────────────────────────────

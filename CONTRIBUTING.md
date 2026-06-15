@@ -335,7 +335,7 @@ gh pr create --base main --fill
 
 # 4. On merge, release.yml fires (it triggers on a push to main that changes
 #    .claude-plugin/plugin.json): it tags vX.Y.Z on the merged commit, builds the
-#    static binaries (linux/darwin × amd64/arm64 for pastured/pasture-msg/
+#    static binaries (linux/darwin × amd64/arm64 for pastured/pasture/
 #    pasture-release), and publishes the GitHub Release with those assets.
 ```
 

@@ -21,9 +21,10 @@ var rootCmd = &cobra.Command{
 	Short: "Local task management for the Pasture toolkit",
 	Long: `pasture manages tasks, dependencies, labels, comments, and the audit-event
 record backed by the unified Pasture SQLite database at
-~/.local/share/pasture/pasture.db. It also starts, signals, and queries
-durable epoch workflows directly — no separately running daemon required for
-CLI usage.
+~/.local/share/pasture/pasture.db. Task, dependency, label, comment, and audit
+CRUD runs directly from the CLI. Durable epoch workflows run on the hosted
+pastured DBOS engine; the CLI starts, signals, and queries those workflows by
+writing to the shared database.
 
 The audit subsystem and Provenance subsystem share one file; the auto-on-open
 migrator brings legacy databases up to the current schema on first use.

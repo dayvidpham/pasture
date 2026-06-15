@@ -134,6 +134,7 @@ func openController(t *testing.T, epochId string, seedPhases []protocol.PhaseId)
 // The epoch id must have the "<namespace>--<uuid>" shape required by the
 // validator (provenance.ParseTaskID).
 func TestHandler_EpochStart_LaunchesControlWorkflow(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -156,6 +157,7 @@ func TestHandler_EpochStart_LaunchesControlWorkflow(t *testing.T) {
 // lifecycle boundary: the controller only writes durable DBOS records/signals,
 // while a hosted engine dequeues and executes EpochControlWorkflow.
 func TestHandler_EpochStart_EnqueuesForHostedEngine(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	host, err := engine.New(context.Background(), engine.Config{
 		DBPath:             dbPath,
@@ -230,6 +232,7 @@ func TestHandler_EpochStart_EnqueuesForHostedEngine(t *testing.T) {
 // short-lived CLI controller immediately after StartEpoch does not cancel or
 // error the hosted epoch workflow.
 func TestHandler_EpochStart_CloseDoesNotCancelHostedWorkflow(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	host, err := engine.New(context.Background(), engine.Config{
 		DBPath:             dbPath,
@@ -295,6 +298,7 @@ func TestHandler_EpochStart_CloseDoesNotCancelHostedWorkflow(t *testing.T) {
 // TestHandler_EpochStart_RejectsEmptyEpochId verifies that a missing epoch id
 // is rejected with exit 1.
 func TestHandler_EpochStart_RejectsEmptyEpochId(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -314,6 +318,7 @@ func TestHandler_EpochStart_RejectsEmptyEpochId(t *testing.T) {
 // TestHandler_EpochStart_RejectsMalformedEpochId verifies that an epoch id
 // without the "<namespace>--<uuid>" shape is rejected with exit 1.
 func TestHandler_EpochStart_RejectsMalformedEpochId(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -336,6 +341,7 @@ func TestHandler_EpochStart_RejectsMalformedEpochId(t *testing.T) {
 // cancellation: an advance_phase signal sent after cancel does not appear
 // in the projection within the polling window.
 func TestHandler_EpochCancel_CancelsRunningWorkflow(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 
 	// Use a seed engine for projection reads.
@@ -404,6 +410,7 @@ func TestHandler_EpochCancel_CancelsRunningWorkflow(t *testing.T) {
 // advance_phase topic (not a wrong topic) and marshal a PhaseAdvanceSignal
 // (not a wrong type) for the projection to update.
 func TestHandler_PhaseAdvance_MutatesProjection(t *testing.T) {
+	t.Parallel()
 	const epochId = "ctl--advance-1"
 	rig := openController(t, epochId, nil) // no seed phases; start at request
 
@@ -426,6 +433,7 @@ func TestHandler_PhaseAdvance_MutatesProjection(t *testing.T) {
 // TestHandler_PhaseAdvance_RejectsUnknownPhase validates that a bad --to value
 // produces exit 1.
 func TestHandler_PhaseAdvance_RejectsUnknownPhase(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -451,6 +459,7 @@ func TestHandler_PhaseAdvance_RejectsUnknownPhase(t *testing.T) {
 // submit_vote topic with a well-formed ReviewVoteSignal: a wrong topic or
 // wrong payload would leave the gate unsatisfied and the advance would stall.
 func TestHandler_SignalVote_MutatesProjection(t *testing.T) {
+	t.Parallel()
 	const epochId = "ctl--vote-1"
 	rig := openController(t, epochId, []protocol.PhaseId{
 		protocol.PhaseElicit,
@@ -493,6 +502,7 @@ func TestHandler_SignalVote_MutatesProjection(t *testing.T) {
 
 // TestHandler_SignalVote_RejectsInvalidAxis proves axis validation.
 func TestHandler_SignalVote_RejectsInvalidAxis(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -512,6 +522,7 @@ func TestHandler_SignalVote_RejectsInvalidAxis(t *testing.T) {
 
 // TestHandler_SignalVote_RejectsInvalidVote proves vote value validation.
 func TestHandler_SignalVote_RejectsInvalidVote(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -537,6 +548,7 @@ func TestHandler_SignalVote_RejectsInvalidVote(t *testing.T) {
 // are buffered), so a successful session count proves the handler reached the
 // correct register_session topic with a well-formed RegisterSessionSignal.
 func TestHandler_SessionRegister_MutatesProjection(t *testing.T) {
+	t.Parallel()
 	const epochId = "ctl--sess-1"
 	rig := openController(t, epochId, nil)
 
@@ -573,6 +585,7 @@ func TestHandler_SessionRegister_MutatesProjection(t *testing.T) {
 
 // TestHandler_SessionRegister_RejectsEmptySessionId validates required flag.
 func TestHandler_SessionRegister_RejectsEmptySessionId(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -591,6 +604,7 @@ func TestHandler_SessionRegister_RejectsEmptySessionId(t *testing.T) {
 
 // TestHandler_SessionRegister_RejectsEmptyRole validates required flag.
 func TestHandler_SessionRegister_RejectsEmptyRole(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -615,6 +629,7 @@ func TestHandler_SessionRegister_RejectsEmptyRole(t *testing.T) {
 // is buffered), so a successful SliceProgress entry proves the handler reached
 // the correct slice_progress topic with a well-formed SliceProgressSignal.
 func TestHandler_SignalComplete_MutatesProjection(t *testing.T) {
+	t.Parallel()
 	const epochId = "ctl--complete-1"
 	rig := openController(t, epochId, nil)
 
@@ -649,6 +664,7 @@ func TestHandler_SignalComplete_MutatesProjection(t *testing.T) {
 // TestHandler_SignalComplete_RejectsConflictingOutputAndError validates mutual
 // exclusion between --output and --error.
 func TestHandler_SignalComplete_RejectsConflictingOutputAndError(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -671,6 +687,7 @@ func TestHandler_SignalComplete_RejectsConflictingOutputAndError(t *testing.T) {
 
 // TestHandler_SliceStart_RejectsEmptySliceId validates required --slice-id.
 func TestHandler_SliceStart_RejectsEmptySliceId(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -689,6 +706,7 @@ func TestHandler_SliceStart_RejectsEmptySliceId(t *testing.T) {
 
 // TestHandler_SliceStart_RejectsUnknownMode validates the mode allow-list.
 func TestHandler_SliceStart_RejectsUnknownMode(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -707,6 +725,7 @@ func TestHandler_SliceStart_RejectsUnknownMode(t *testing.T) {
 
 // TestHandler_SliceComplete_RejectsEmptySliceId validates required --slice-id.
 func TestHandler_SliceComplete_RejectsEmptySliceId(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -726,6 +745,7 @@ func TestHandler_SliceComplete_RejectsEmptySliceId(t *testing.T) {
 // TestHandler_SliceComplete_RejectsConflictingOutputAndError validates mutual
 // exclusion between --output and --error on the slice path.
 func TestHandler_SliceComplete_RejectsConflictingOutputAndError(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -751,6 +771,7 @@ func TestHandler_SliceComplete_RejectsConflictingOutputAndError(t *testing.T) {
 // write any audit event. The validation guard must fire before RecordEvent so
 // a typo'd id can never produce an unjoinable audit row.
 func TestHandler_EpochTerminate_RejectsMalformedEpochId(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -793,6 +814,7 @@ func TestHandler_EpochTerminate_RejectsMalformedEpochId(t *testing.T) {
 // given id has been started. This covers the CategoryWorkflow → exit 3
 // mapping for the cancel lifecycle verb.
 func TestHandler_EpochCancel_WorkflowError_NonexistentWorkflow(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -815,6 +837,7 @@ func TestHandler_EpochCancel_WorkflowError_NonexistentWorkflow(t *testing.T) {
 // notifications.destination_uuid and returns a nonexistent-workflow error via
 // the sendSignal path, which the handler surfaces as exit 3.
 func TestHandler_PhaseAdvance_WorkflowError_NeverStartedEpoch(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -837,6 +860,7 @@ func TestHandler_PhaseAdvance_WorkflowError_NeverStartedEpoch(t *testing.T) {
 // SignalVote returns exit 3 (CategoryWorkflow) for a never-started epoch id.
 // This exercises the sendSignal → SubmitVote path with a valid axis and vote.
 func TestHandler_SignalVote_WorkflowError_NeverStartedEpoch(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -859,6 +883,7 @@ func TestHandler_SignalVote_WorkflowError_NeverStartedEpoch(t *testing.T) {
 // SignalComplete returns exit 3 (CategoryWorkflow) for a never-started epoch
 // id. This exercises the sendSignal → ReportSliceProgress path.
 func TestHandler_SignalComplete_WorkflowError_NeverStartedEpoch(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -882,6 +907,7 @@ func TestHandler_SignalComplete_WorkflowError_NeverStartedEpoch(t *testing.T) {
 // SessionRegister returns exit 3 (CategoryWorkflow) for a never-started epoch
 // id. This exercises the sendSignal → RegisterSession path.
 func TestHandler_SessionRegister_WorkflowError_NeverStartedEpoch(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -904,6 +930,7 @@ func TestHandler_SessionRegister_WorkflowError_NeverStartedEpoch(t *testing.T) {
 // SliceStart returns exit 3 (CategoryWorkflow) for a never-started slice id.
 // This exercises the sendSignal → StartSlice path (slice-addressed signals).
 func TestHandler_SliceStart_WorkflowError_NeverStartedSlice(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -926,6 +953,7 @@ func TestHandler_SliceStart_WorkflowError_NeverStartedSlice(t *testing.T) {
 // SliceComplete returns exit 3 (CategoryWorkflow) for a never-started slice
 // id. This exercises the sendSignal → CompleteSlice path.
 func TestHandler_SliceComplete_WorkflowError_NeverStartedSlice(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {

@@ -11,16 +11,19 @@ import (
 )
 
 func TestInMemoryAuditTrail_Suite(t *testing.T) {
+	t.Parallel()
 	trail := audit.NewInMemoryAuditTrail()
 	runTrailSuite(t, trail)
 }
 
 func TestInMemoryAuditTrail_SessionEntrySuite(t *testing.T) {
+	t.Parallel()
 	trail := audit.NewInMemoryAuditTrail()
 	runSessionEntrySuite(t, trail)
 }
 
 func TestInMemoryAuditTrail_ConcurrentAccess(t *testing.T) {
+	t.Parallel()
 	trail := audit.NewInMemoryAuditTrail()
 	ctx := context.Background()
 
@@ -68,6 +71,7 @@ func TestInMemoryAuditTrail_ConcurrentAccess(t *testing.T) {
 // in-memory trail uses a synthetic monotonic counter; the suite asserts
 // (positive id, distinct ids per call, queryable round-trip).
 func TestInMemoryAuditTrail_RecordEventReturningId_Suite(t *testing.T) {
+	t.Parallel()
 	trail := audit.NewInMemoryAuditTrail()
 	runRecordEventReturningIdSuite(t, trail)
 }
@@ -78,6 +82,7 @@ func TestInMemoryAuditTrail_RecordEventReturningId_Suite(t *testing.T) {
 // in-memory trail's counter is incremented under m.mu so this is the
 // straightforward "no two callers see the same value" property.
 func TestInMemoryAuditTrail_RecordEventReturningId_ConcurrentUnique(t *testing.T) {
+	t.Parallel()
 	trail := audit.NewInMemoryAuditTrail()
 	ctx := context.Background()
 
@@ -133,6 +138,7 @@ func TestInMemoryAuditTrail_RecordEventReturningId_ConcurrentUnique(t *testing.T
 }
 
 func TestInMemoryAuditTrail_PreservesInsertionOrder(t *testing.T) {
+	t.Parallel()
 	trail := audit.NewInMemoryAuditTrail()
 	ctx := context.Background()
 

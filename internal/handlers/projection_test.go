@@ -52,6 +52,7 @@ func newQueryEngine(t *testing.T, epochId string) *engine.Engine {
 // the projected state and recomputes the available transitions via the FSM
 // (rather than returning a value frozen at write time).
 func TestQueryStateFromProjection_RecomputesTransitions(t *testing.T) {
+	t.Parallel()
 	const epochId = "proj--query-1"
 	e := newQueryEngine(t, epochId)
 
@@ -84,6 +85,7 @@ func TestQueryStateFromProjection_RecomputesTransitions(t *testing.T) {
 // TestQueryEpochState_SupportedQueries exercises the production handler for each
 // projection-serviceable query against a real engine, asserting a clean exit.
 func TestQueryEpochState_SupportedQueries(t *testing.T) {
+	t.Parallel()
 	const epochId = "proj--query-2"
 	e := newQueryEngine(t, epochId)
 
@@ -132,6 +134,7 @@ func seedProjection(t *testing.T, epochId string, sessions []protocol.RegisterSe
 }
 
 func TestQueryEpochState_ActiveSessions(t *testing.T) {
+	t.Parallel()
 	const epochId = "proj--sessions"
 	e := seedProjection(t, epochId, []protocol.RegisterSessionSignal{
 		{EpochId: epochId, SessionId: "s1", Role: "worker"},
@@ -148,6 +151,7 @@ func TestQueryEpochState_ActiveSessions(t *testing.T) {
 }
 
 func TestQueryEpochState_SliceProgress(t *testing.T) {
+	t.Parallel()
 	const epochId = "proj--progress"
 	e := seedProjection(t, epochId, nil, []protocol.SliceProgressSignal{
 		{SliceId: "slice-1", LeafTaskId: "leaf-1", StageName: "impl", Completed: true},
@@ -163,6 +167,7 @@ func TestQueryEpochState_SliceProgress(t *testing.T) {
 }
 
 func TestQueryEpochState_UnknownEpoch(t *testing.T) {
+	t.Parallel()
 	e := newQueryEngine(t, "proj--query-3")
 	code, err := handlers.QueryEpochState(e, "proj--does-not-exist", protocol.QueryFullState, types.OutputText)
 	if err == nil {
@@ -174,6 +179,7 @@ func TestQueryEpochState_UnknownEpoch(t *testing.T) {
 }
 
 func TestQueryEpochState_MissingEpochId(t *testing.T) {
+	t.Parallel()
 	e := newQueryEngine(t, "proj--query-4")
 	code, err := handlers.QueryEpochState(e, "", protocol.QueryFullState, types.OutputText)
 	if err == nil {
@@ -185,6 +191,7 @@ func TestQueryEpochState_MissingEpochId(t *testing.T) {
 }
 
 func TestQueryEpochState_RejectsUnknownQuery(t *testing.T) {
+	t.Parallel()
 	e := newQueryEngine(t, "proj--query-5")
 	code, err := handlers.QueryEpochState(e, "proj--query-5", protocol.QueryName("bogus_query"), types.OutputText)
 	if err == nil {

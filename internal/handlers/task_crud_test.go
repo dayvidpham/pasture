@@ -12,6 +12,7 @@ import (
 )
 
 func TestTaskCreate_PopulatesAllFields(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	code, err := handlers.TaskCreate(&out, handlers.TaskCreateInput{
 		DBPath:      dbPath(t),
@@ -54,6 +55,7 @@ func TestTaskCreate_PopulatesAllFields(t *testing.T) {
 }
 
 func TestTaskCreate_RejectsEmptyTitle(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	code, err := handlers.TaskCreate(&out, handlers.TaskCreateInput{
 		DBPath:    dbPath(t),
@@ -68,6 +70,7 @@ func TestTaskCreate_RejectsEmptyTitle(t *testing.T) {
 }
 
 func TestTaskShow_RoundTrip(t *testing.T) {
+	t.Parallel()
 	path := dbPath(t)
 	id := createTask(t, path, "Round trip")
 
@@ -89,6 +92,7 @@ func TestTaskShow_RoundTrip(t *testing.T) {
 }
 
 func TestTaskShow_InvalidId(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	code, err := handlers.TaskShow(&out, dbPath(t), "not-a-real-id", types.OutputText)
 	if err == nil {
@@ -100,6 +104,7 @@ func TestTaskShow_InvalidId(t *testing.T) {
 }
 
 func TestTaskUpdate_AllFields(t *testing.T) {
+	t.Parallel()
 	path := dbPath(t)
 	id := createTask(t, path, "Original")
 
@@ -146,6 +151,7 @@ func TestTaskUpdate_AllFields(t *testing.T) {
 }
 
 func TestTaskClose_AndDoubleCloseRejected(t *testing.T) {
+	t.Parallel()
 	path := dbPath(t)
 	id := createTask(t, path, "To be closed")
 
@@ -175,6 +181,7 @@ func TestTaskClose_AndDoubleCloseRejected(t *testing.T) {
 }
 
 func TestTaskList_NoFilter(t *testing.T) {
+	t.Parallel()
 	path := dbPath(t)
 	for _, title := range []string{"alpha", "beta", "gamma"} {
 		_ = createTask(t, path, title)
@@ -204,6 +211,7 @@ func TestTaskList_NoFilter(t *testing.T) {
 }
 
 func TestTaskList_FilterByStatus(t *testing.T) {
+	t.Parallel()
 	path := dbPath(t)
 	open := createTask(t, path, "still open")
 	toClose := createTask(t, path, "will close")
@@ -235,6 +243,7 @@ func TestTaskList_FilterByStatus(t *testing.T) {
 }
 
 func TestTaskList_FilterByType(t *testing.T) {
+	t.Parallel()
 	path := dbPath(t)
 
 	mkType := func(title string, tt provenance.TaskType) string {
@@ -269,6 +278,7 @@ func TestTaskList_FilterByType(t *testing.T) {
 }
 
 func TestTaskList_FilterByLabel(t *testing.T) {
+	t.Parallel()
 	path := dbPath(t)
 	flagged := createTask(t, path, "flagged")
 	unflagged := createTask(t, path, "unflagged")
