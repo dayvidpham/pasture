@@ -28,7 +28,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -53,9 +52,9 @@ func marshalSection(buf *bytes.Buffer, depth int, v interface{}) {
 
 // rolePriority is the canonical sort order for role-ref attributes on
 // <constraint> elements. Mirrors Python _ROLE_PRIORITY.
-var rolePriority = []types.RoleId{
-	types.RoleEpoch, types.RoleReviewer, types.RoleArchitect,
-	types.RoleSupervisor, types.RoleWorker,
+var rolePriority = []protocol.RoleId{
+	protocol.RoleEpoch, protocol.RoleReviewer, protocol.RoleArchitect,
+	protocol.RoleSupervisor, protocol.RoleWorker,
 }
 
 // phaseOrder is the canonical sort order for phase-ref attributes on
@@ -80,7 +79,7 @@ func constraintRoleRef(cid string) string {
 		return ""
 	}
 	// Sort by rolePriority order.
-	priorityIdx := make(map[types.RoleId]int, len(rolePriority))
+	priorityIdx := make(map[protocol.RoleId]int, len(rolePriority))
 	for i, r := range rolePriority {
 		priorityIdx[r] = i
 	}
@@ -463,7 +462,7 @@ func buildPhases(buf *bytes.Buffer, depth int) {
 					}
 				}
 				if sd.StartupSequence {
-					supSteps := ProcedureSteps[types.RoleSupervisor]
+					supSteps := ProcedureSteps[protocol.RoleSupervisor]
 					startup := &StartupSequenceElem{}
 					for _, step := range supSteps {
 						pstep := ProcedureStepElem{
@@ -512,7 +511,7 @@ func buildPhases(buf *bytes.Buffer, depth int) {
 				Note:     "Architect performs p5, p6, p7 — no handoff between them",
 			}
 		case "p9":
-			workerSteps := ProcedureSteps[types.RoleWorker]
+			workerSteps := ProcedureSteps[protocol.RoleWorker]
 			tdd := &TDDLayersElem{}
 			for _, step := range workerSteps {
 				name := ""
@@ -615,9 +614,9 @@ var roleUsesAxes = map[string][]string{
 }
 
 func buildRoles(buf *bytes.Buffer, depth int) {
-	roleOrder := []types.RoleId{
-		types.RoleEpoch, types.RoleArchitect, types.RoleReviewer,
-		types.RoleSupervisor, types.RoleWorker,
+	roleOrder := []protocol.RoleId{
+		protocol.RoleEpoch, protocol.RoleArchitect, protocol.RoleReviewer,
+		protocol.RoleSupervisor, protocol.RoleWorker,
 	}
 
 	section := RolesSection{}
@@ -1280,9 +1279,9 @@ func buildProcedureSteps(buf *bytes.Buffer, depth int) {
 	d3 := indent(depth + 3)
 	d4 := indent(depth + 4)
 
-	roleOrder := []types.RoleId{
-		types.RoleEpoch, types.RoleArchitect, types.RoleReviewer,
-		types.RoleSupervisor, types.RoleWorker,
+	roleOrder := []protocol.RoleId{
+		protocol.RoleEpoch, protocol.RoleArchitect, protocol.RoleReviewer,
+		protocol.RoleSupervisor, protocol.RoleWorker,
 	}
 
 	w(d + "<procedure-steps>")
@@ -1454,7 +1453,7 @@ func buildFigures(buf *bytes.Buffer, depth int) {
 			SectionRef: fig.SectionRef,
 		}
 		// role-refs sorted
-		sortedRoles := make([]types.RoleId, len(fig.RoleRefs))
+		sortedRoles := make([]protocol.RoleId, len(fig.RoleRefs))
 		copy(sortedRoles, fig.RoleRefs)
 		sort.Slice(sortedRoles, func(i, j int) bool {
 			return string(sortedRoles[i]) < string(sortedRoles[j])

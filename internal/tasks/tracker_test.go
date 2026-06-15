@@ -26,6 +26,7 @@ import (
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -45,17 +46,7 @@ func tempDBPath(t *testing.T, name string) string {
 // (the wrapper struct is unexported by design).
 func openTrackerForTest(t *testing.T) (protocol.TaskTracker, string) {
 	t.Helper()
-	dbPath := tempDBPath(t, "pasture.db")
-	tracker, err := tasks.OpenTaskTracker(dbPath)
-	if err != nil {
-		t.Fatalf("OpenTaskTracker(%q) failed: %v", dbPath, err)
-	}
-	t.Cleanup(func() {
-		if err := tracker.Close(); err != nil {
-			t.Errorf("Close failed during cleanup: %v", err)
-		}
-	})
-	return tracker, dbPath
+	return testutil.OpenGoldenTaskTracker(t)
 }
 
 // registerSoftwareAgentForTest creates a SoftwareAgent for use in agent-side

@@ -5,7 +5,6 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen"
 	"github.com/dayvidpham/pasture/internal/testutil"
-	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -48,7 +47,7 @@ func TestGetRoleContext_ConstraintSets(t *testing.T) {
 	for _, check := range suite.RoleConstraintChecks {
 		check := check
 		t.Run(check.Role, func(t *testing.T) {
-			role := types.RoleId(check.Role)
+			role := protocol.RoleId(check.Role)
 			require.True(t, role.IsValid(), "fixture role %q is not a valid RoleId", check.Role)
 
 			ctx := codegen.GetRoleContext(role)
@@ -81,7 +80,7 @@ func TestGetRoleContext_ConstraintSets(t *testing.T) {
 // TestGetRoleContext_Commands verifies that GetRoleContext returns the
 // expected command names for the supervisor role.
 func TestGetRoleContext_Commands(t *testing.T) {
-	ctx := codegen.GetRoleContext(types.RoleSupervisor)
+	ctx := codegen.GetRoleContext(protocol.RoleSupervisor)
 
 	require.NotEmpty(t, ctx.Commands,
 		"supervisor must have at least one command")
@@ -102,7 +101,7 @@ func TestGetRoleContext_Commands(t *testing.T) {
 
 // TestGetRoleContext_WorkerCommands verifies that the worker role has the expected commands.
 func TestGetRoleContext_WorkerCommands(t *testing.T) {
-	ctx := codegen.GetRoleContext(types.RoleWorker)
+	ctx := codegen.GetRoleContext(protocol.RoleWorker)
 
 	require.NotEmpty(t, ctx.Commands,
 		"worker must have at least one command")
@@ -125,7 +124,7 @@ func TestGetRoleContext_WorkerCommands(t *testing.T) {
 // TestGetRoleContext_Handoffs verifies that GetRoleContext returns handoff IDs
 // for the supervisor role (which should appear in h2, h3, h4).
 func TestGetRoleContext_Handoffs(t *testing.T) {
-	ctx := codegen.GetRoleContext(types.RoleSupervisor)
+	ctx := codegen.GetRoleContext(protocol.RoleSupervisor)
 
 	require.NotEmpty(t, ctx.Handoffs,
 		"supervisor must have at least one handoff")
@@ -148,12 +147,12 @@ func TestGetRoleContext_Handoffs(t *testing.T) {
 // both as source and target.
 func TestGetRoleContext_HandoffBidirectional(t *testing.T) {
 	// Architect is source of h1 and target of h2+ for some flows.
-	architectCtx := codegen.GetRoleContext(types.RoleArchitect)
+	architectCtx := codegen.GetRoleContext(protocol.RoleArchitect)
 	assert.NotEmpty(t, architectCtx.Handoffs,
 		"architect must appear in at least one handoff as source or target")
 
 	// Worker is target of h2 (supervisor → worker).
-	workerCtx := codegen.GetRoleContext(types.RoleWorker)
+	workerCtx := codegen.GetRoleContext(protocol.RoleWorker)
 	assert.NotEmpty(t, workerCtx.Handoffs,
 		"worker must appear in at least one handoff as source or target")
 }
@@ -163,7 +162,7 @@ func TestGetRoleContext_HandoffBidirectional(t *testing.T) {
 // TestGetRoleContext_Phases verifies that GetRoleContext returns the owned
 // phases for the worker role (should own exactly worker-slices).
 func TestGetRoleContext_Phases(t *testing.T) {
-	ctx := codegen.GetRoleContext(types.RoleWorker)
+	ctx := codegen.GetRoleContext(protocol.RoleWorker)
 
 	require.NotEmpty(t, ctx.Phases,
 		"worker must have at least one owned phase")
@@ -181,7 +180,7 @@ func TestGetRoleContext_Phases(t *testing.T) {
 
 // TestGetRoleContext_SupervisorPhases verifies supervisor owns multiple phases.
 func TestGetRoleContext_SupervisorPhases(t *testing.T) {
-	ctx := codegen.GetRoleContext(types.RoleSupervisor)
+	ctx := codegen.GetRoleContext(protocol.RoleSupervisor)
 
 	// Supervisor owns p7-p12 (6 phases).
 	assert.GreaterOrEqual(t, len(ctx.Phases), 5,
@@ -193,12 +192,12 @@ func TestGetRoleContext_SupervisorPhases(t *testing.T) {
 // TestGetRoleContext_RoleSpecFields verifies that Introduction and OwnershipNarrative
 // are populated from RoleSpecs.
 func TestGetRoleContext_RoleSpecFields(t *testing.T) {
-	rolesWithIntro := []types.RoleId{
-		types.RoleEpoch,
-		types.RoleArchitect,
-		types.RoleReviewer,
-		types.RoleSupervisor,
-		types.RoleWorker,
+	rolesWithIntro := []protocol.RoleId{
+		protocol.RoleEpoch,
+		protocol.RoleArchitect,
+		protocol.RoleReviewer,
+		protocol.RoleSupervisor,
+		protocol.RoleWorker,
 	}
 	for _, role := range rolesWithIntro {
 		t.Run(string(role), func(t *testing.T) {
@@ -214,13 +213,13 @@ func TestGetRoleContext_RoleSpecFields(t *testing.T) {
 // TestGetRoleContext_ReviewerAxes verifies that reviewer gets review axes
 // and all other roles get an empty slice.
 func TestGetRoleContext_ReviewerAxes(t *testing.T) {
-	reviewerCtx := codegen.GetRoleContext(types.RoleReviewer)
+	reviewerCtx := codegen.GetRoleContext(protocol.RoleReviewer)
 	assert.NotEmpty(t, reviewerCtx.ReviewAxes,
 		"reviewer must have ReviewAxes populated")
 
-	otherRoles := []types.RoleId{
-		types.RoleEpoch, types.RoleArchitect,
-		types.RoleSupervisor, types.RoleWorker,
+	otherRoles := []protocol.RoleId{
+		protocol.RoleEpoch, protocol.RoleArchitect,
+		protocol.RoleSupervisor, protocol.RoleWorker,
 	}
 	for _, role := range otherRoles {
 		ctx := codegen.GetRoleContext(role)
@@ -444,9 +443,9 @@ func TestConstraintInversion(t *testing.T) {
 		"C-frontmatter-refs",
 		"C-actionable-errors",
 	}
-	allRoles := []types.RoleId{
-		types.RoleEpoch, types.RoleArchitect, types.RoleReviewer,
-		types.RoleSupervisor, types.RoleWorker,
+	allRoles := []protocol.RoleId{
+		protocol.RoleEpoch, protocol.RoleArchitect, protocol.RoleReviewer,
+		protocol.RoleSupervisor, protocol.RoleWorker,
 	}
 
 	for _, cid := range generalConstraintIDs {
@@ -459,10 +458,10 @@ func TestConstraintInversion(t *testing.T) {
 	}
 
 	// Role-specific constraints must NOT appear in all roles.
-	roleSpecific := map[string][]types.RoleId{
-		"C-worker-gates":    {types.RoleWorker},
-		"C-review-binary":   {types.RoleReviewer},
-		"C-proposal-naming": {types.RoleArchitect},
+	roleSpecific := map[string][]protocol.RoleId{
+		"C-worker-gates":    {protocol.RoleWorker},
+		"C-review-binary":   {protocol.RoleReviewer},
+		"C-proposal-naming": {protocol.RoleArchitect},
 	}
 
 	for cid, expectedRoles := range roleSpecific {
@@ -471,7 +470,7 @@ func TestConstraintInversion(t *testing.T) {
 			"ConstraintToRoleRefs must contain constraint %q", cid)
 
 		// Build a set for lookup.
-		refSet := make(map[types.RoleId]bool, len(refs))
+		refSet := make(map[protocol.RoleId]bool, len(refs))
 		for _, r := range refs {
 			refSet[r] = true
 		}
@@ -553,7 +552,7 @@ func TestConstraintToPhaseRefs(t *testing.T) {
 // TestGetRoleContext_AllRolesReturnValid verifies that GetRoleContext can be
 // called for every role without panic and returns a populated context.
 func TestGetRoleContext_AllRolesReturnValid(t *testing.T) {
-	for _, role := range types.AllRoleIds {
+	for _, role := range protocol.AllRoleIds {
 		role := role
 		t.Run(string(role), func(t *testing.T) {
 			// Must not panic.
@@ -592,7 +591,7 @@ func TestGetPhaseContext_AllPhasesReturnValid(t *testing.T) {
 // TestGetRoleContext_AllConstraintsResolvable verifies that every constraint ID
 // in the role constraint maps resolves to a valid entry in ConstraintSpecs.
 func TestGetRoleContext_AllConstraintsResolvable(t *testing.T) {
-	for _, role := range types.AllRoleIds {
+	for _, role := range protocol.AllRoleIds {
 		role := role
 		t.Run(string(role), func(t *testing.T) {
 			ctx := codegen.GetRoleContext(role)

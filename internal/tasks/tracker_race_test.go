@@ -40,7 +40,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -48,9 +48,12 @@ import (
 	"time"
 
 	"github.com/dayvidpham/provenance"
+	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 
+	"github.com/dayvidpham/pasture/internal/engine"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -65,8 +68,58 @@ const (
 	opAttachContext               // protocol.TaskTracker.AttachContext
 	opCreateTask                  // provenance.Tracker.Create
 	opStartActivity               // provenance.Tracker.StartActivity
+	opDBOSWriter                  // engine-style emit: keyed audit row + deterministic-id activity
 	numRaceOps                    // sentinel: count of op kinds
 )
+
+// dbosEpochId is the per-goroutine epoch id used by opDBOSWriter, so each
+// goroutine's deterministic keys are epoch-distinct.
+func dbosEpochId(goroutineId int) string {
+	return fmt.Sprintf("epoch-dbos-%d", goroutineId)
+}
+
+// dbosWriterEmit replays the engine's per-step forensic write through the
+// tracker directly: one keyed audit_events row (dedup_key) plus one
+// deterministic-id activity, both derived from the single pinned encoder
+// protocol.DedupKey(epochId, phase, kind, stepSeq). Identical inputs yield
+// identical keys, so a re-emission collapses onto one row in BOTH tables —
+// the same exactly-once mechanism the durable engine relies on.
+func dbosWriterEmit(ctx context.Context, tracker protocol.TaskTracker, agentId provenance.AgentID, epochId, stepSeq string) error {
+	const phase = protocol.PhaseCodeReview
+	// The two tiers pass DISTINCT kinds to the one DedupKey encoder, so the audit
+	// dedup_key and the activity id are different values (different id-spaces) for
+	// the same logical step — exactly as the engine emits them. Each is keyed and
+	// deduped independently within its own table.
+	auditKey := protocol.DedupKey(epochId, string(phase), string(protocol.EventPhaseTransition), stepSeq)
+	activityKey := protocol.DedupKey(epochId, string(phase), engine.ActivityKindPhaseTransition, stepSeq)
+
+	if _, err := tracker.RecordEventReturningId(ctx, protocol.AuditEvent{
+		EpochId:   epochId,
+		Phase:     phase,
+		Role:      "dbos-writer",
+		EventType: protocol.EventPhaseTransition,
+		Payload:   map[string]any{"step": stepSeq},
+		Timestamp: time.Now().UTC(),
+		DedupKey:  auditKey,
+	}); err != nil {
+		return err
+	}
+
+	u, err := uuid.Parse(activityKey)
+	if err != nil {
+		return fmt.Errorf("dbosWriterEmit: activity DedupKey is not a UUID: %w", err)
+	}
+	if _, err := tracker.StartActivityWithID(
+		provenance.ActivityID{Namespace: "pasture", UUID: u},
+		agentId,
+		provenance.PhaseCodeReview,
+		provenance.StageInProgress,
+		"dbos-activity-"+stepSeq,
+	); err != nil {
+		return err
+	}
+	return nil
+}
 
 // TestRaceCrossSubsystem_FileBacked is the cross-subsystem race test.
 //
@@ -96,8 +149,8 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 		seedEventCount = 50
 	)
 
-	dbPath := filepath.Join(t.TempDir(), "race.db")
-	tracker, err := tasks.OpenTaskTracker(dbPath)
+	dbPath := testutil.GoldenUnifiedDBPath(t)
+	tracker, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("OpenTaskTracker(%q) failed: %v", dbPath, err)
 	}
@@ -182,9 +235,13 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 						// if any busy errors slipped through.
 						continue
 					}
-					// Any other error is a hard failure.
-					t.Errorf("goroutine %d iter %d op %v: unexpected error: %v",
-						goroutineId, i, op, err)
+					// Any other error is a hard failure. Print the unwrapped
+					// cause alongside the top-level message so future
+					// busy-vs-fatal triage has the raw driver text to work
+					// with (StructuredError.Error() returns "category: what"
+					// and hides the cause; Unwrap reaches the driver string).
+					t.Errorf("goroutine %d iter %d op %v: unexpected error: %v; underlying cause: %+v",
+						goroutineId, i, op, err, errors.Unwrap(err))
 					continue
 				}
 				atomic.AddInt64(&succeededByOp[op], 1)
@@ -215,10 +272,10 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 	if totalAttempted < 1000 {
 		t.Errorf("PROPOSAL-2 §10.3 spec requires >1000 ops; only attempted %d", totalAttempted)
 	}
-	t.Logf("race ops: attempted=%d succeeded=%d (per-op succeeded: record=%d attach=%d create=%d activity=%d); busy_errors=%d",
+	t.Logf("race ops: attempted=%d succeeded=%d (per-op succeeded: record=%d attach=%d create=%d activity=%d dbos=%d); busy_errors=%d",
 		totalAttempted, totalSucceeded,
 		succeededByOp[opRecordEvent], succeededByOp[opAttachContext],
-		succeededByOp[opCreateTask], succeededByOp[opStartActivity],
+		succeededByOp[opCreateTask], succeededByOp[opStartActivity], succeededByOp[opDBOSWriter],
 		busyErrors)
 
 	// ─── Assertion 2-5: row counts match successful op counts ────────
@@ -233,12 +290,22 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 	}
 	defer verifyDB.Close()
 
-	// audit_events: seedEventCount + opRecordEvent successes
+	// audit_events: seedEventCount + opRecordEvent successes + opDBOSWriter
+	// successes (each DBOS writer writes one keyed audit row; every key is
+	// distinct under the unique per-(goroutine,iter) inputs, so none dedup).
 	gotEvents := mustCountRows(t, verifyDB, "audit_events")
-	wantEvents := int64(seedEventCount) + succeededByOp[opRecordEvent]
+	wantEvents := int64(seedEventCount) + succeededByOp[opRecordEvent] + succeededByOp[opDBOSWriter]
 	if gotEvents != wantEvents {
-		t.Errorf("audit_events row count = %d, want %d (seed=%d + RecordEvent successes=%d)",
-			gotEvents, wantEvents, seedEventCount, succeededByOp[opRecordEvent])
+		t.Errorf("audit_events row count = %d, want %d (seed=%d + RecordEvent=%d + DBOSWriter=%d)",
+			gotEvents, wantEvents, seedEventCount, succeededByOp[opRecordEvent], succeededByOp[opDBOSWriter])
+	}
+
+	// dedup_key rows: exactly one per successful opDBOSWriter (distinct keys,
+	// no contention loss). This is the audit half of the exactly-once invariant.
+	gotKeyed := mustCountRows(t, verifyDB, "audit_events WHERE dedup_key IS NOT NULL")
+	if gotKeyed != succeededByOp[opDBOSWriter] {
+		t.Errorf("keyed audit_events row count = %d, want %d (one per DBOSWriter success)",
+			gotKeyed, succeededByOp[opDBOSWriter])
 	}
 
 	// context_edges: opAttachContext successes + auto-EpochContext writes
@@ -254,7 +321,7 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 	// actual count being lower whenever the random distribution
 	// produces a duplicate triple.
 	gotEdges := mustCountRows(t, verifyDB, "context_edges")
-	maxEdges := int64(seedEventCount) + succeededByOp[opRecordEvent] + succeededByOp[opAttachContext]
+	maxEdges := int64(seedEventCount) + succeededByOp[opRecordEvent] + succeededByOp[opDBOSWriter] + succeededByOp[opAttachContext]
 	if gotEdges > maxEdges {
 		t.Errorf("context_edges row count = %d > max possible %d (seed=%d + RecordEvent=%d + AttachContext=%d) — impossible without phantom inserts",
 			gotEdges, maxEdges, seedEventCount, succeededByOp[opRecordEvent], succeededByOp[opAttachContext])
@@ -271,10 +338,63 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 		t.Errorf("tasks row count = %d, want %d (Create successes)", gotTasks, succeededByOp[opCreateTask])
 	}
 
-	// activities: opStartActivity successes.
+	// activities: opStartActivity successes (random ids) + opDBOSWriter
+	// successes (deterministic ids; all distinct under the unique inputs).
 	gotActs := mustCountRows(t, verifyDB, "activities")
-	if gotActs != succeededByOp[opStartActivity] {
-		t.Errorf("activities row count = %d, want %d (StartActivity successes)", gotActs, succeededByOp[opStartActivity])
+	wantActs := succeededByOp[opStartActivity] + succeededByOp[opDBOSWriter]
+	if gotActs != wantActs {
+		t.Errorf("activities row count = %d, want %d (StartActivity=%d + DBOSWriter=%d)",
+			gotActs, wantActs, succeededByOp[opStartActivity], succeededByOp[opDBOSWriter])
+	}
+}
+
+// TestDBOSWriterEmit_ReplayExactlyOnce proves the exactly-once half directly: a
+// re-emission with the SAME deterministic inputs collapses onto ONE row in both
+// forensic tables (audit_events via the dedup_key partial index, activities via
+// ON CONFLICT(id)). This is what makes a crash-replay of the engine's step safe.
+func TestDBOSWriterEmit_ReplayExactlyOnce(t *testing.T) {
+	dbPath := testutil.GoldenUnifiedDBPath(t)
+	tracker, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithSkipMigrations())
+	if err != nil {
+		t.Fatalf("OpenTaskTracker: %v", err)
+	}
+	t.Cleanup(func() { _ = tracker.Close() })
+
+	ctx := context.Background()
+	agent, err := tracker.RegisterSoftwareAgent("pasture-replay-test", "replay-runner", "0.0.0", "test")
+	if err != nil {
+		t.Fatalf("RegisterSoftwareAgent: %v", err)
+	}
+
+	// Emit the same (epoch, step) three times — modelling two crash-replays.
+	for i := 0; i < 3; i++ {
+		if err := dbosWriterEmit(ctx, tracker, agent.ID, "epoch-replay", "7"); err != nil {
+			t.Fatalf("emit %d: %v", i, err)
+		}
+	}
+
+	verifyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer verifyDB.Close()
+
+	if n := mustCountRows(t, verifyDB, "audit_events WHERE dedup_key IS NOT NULL"); n != 1 {
+		t.Errorf("keyed audit_events = %d, want 1 (replays must collapse)", n)
+	}
+	if n := mustCountRows(t, verifyDB, "activities"); n != 1 {
+		t.Errorf("activities = %d, want 1 (replays must collapse via ON CONFLICT(id))", n)
+	}
+
+	// A different step → a distinct key → a second row in each table.
+	if err := dbosWriterEmit(ctx, tracker, agent.ID, "epoch-replay", "8"); err != nil {
+		t.Fatalf("distinct-step emit: %v", err)
+	}
+	if n := mustCountRows(t, verifyDB, "audit_events WHERE dedup_key IS NOT NULL"); n != 2 {
+		t.Errorf("keyed audit_events = %d, want 2 after a distinct step", n)
+	}
+	if n := mustCountRows(t, verifyDB, "activities"); n != 2 {
+		t.Errorf("activities = %d, want 2 after a distinct step", n)
 	}
 }
 
@@ -346,6 +466,12 @@ func runRaceOp(
 			fmt.Sprintf("race-activity-%d-%d", goroutineId, iter),
 		)
 		return err
+
+	case opDBOSWriter:
+		// Per-goroutine epoch + per-iteration step → a unique deterministic key
+		// per call, so this op contributes N keyed audit rows + N activities
+		// (one each) and the row-count invariant holds under contention.
+		return dbosWriterEmit(ctx, tracker, agentId, dbosEpochId(goroutineId), strconv.Itoa(iter))
 	}
 	return fmt.Errorf("runRaceOp: unhandled op %v — bug in the race test", op)
 }
@@ -424,10 +550,13 @@ func mustCountRows(t *testing.T, db *sql.DB, table string) int64 {
 	return n
 }
 
-// isBusyOrLockedErr reports whether err contains a SQLite contention
-// signature (SQLITE_BUSY or SQLITE_LOCKED). Substring match is sufficient
-// because modernc.org/sqlite formats both as "database is locked
-// (SQLITE_BUSY)" or "(SQLITE_LOCKED)" in the underlying driver error chain.
+// isBusyOrLockedErr reports whether err (or any error in its Unwrap chain)
+// contains a SQLite contention signature (SQLITE_BUSY or SQLITE_LOCKED).
+//
+// Walking the full chain is required because pasture wraps driver errors
+// inside *pasterrors.StructuredError: StructuredError.Error() returns
+// "category: what" which hides the raw driver message. The SQLite busy/locked
+// text lives in StructuredError.Cause, which is reachable via Unwrap().
 //
 // Centralised so the test's busy-error assertion has one definition; new
 // SQLite contention signatures can be added here without touching the test
@@ -438,12 +567,20 @@ func isBusyOrLockedErr(err error) bool {
 	}
 	// Fast path: errors.Is against any sentinel the driver might export.
 	// modernc.org/sqlite doesn't yet export sentinel busy errors, so we
-	// fall through to substring matching on the message.
+	// fall through to substring matching on the unwrapped chain.
 	if errors.Is(err, sql.ErrConnDone) {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "SQLITE_BUSY") ||
-		strings.Contains(msg, "SQLITE_LOCKED") ||
-		strings.Contains(msg, "database is locked")
+	// Walk every level of the error chain. StructuredError.Unwrap() returns
+	// .Cause, so a wrapped driver "database is locked" is reached here even
+	// though the top-level .Error() string wouldn't show it.
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		msg := e.Error()
+		if strings.Contains(msg, "SQLITE_BUSY") ||
+			strings.Contains(msg, "SQLITE_LOCKED") ||
+			strings.Contains(msg, "database is locked") {
+			return true
+		}
+	}
+	return false
 }

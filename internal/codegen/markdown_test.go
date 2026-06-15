@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/codegen"
-	"github.com/dayvidpham/pasture/internal/types"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -170,7 +170,7 @@ func TestExtractSection(t *testing.T) {
 		skillPath := writeSkillFile(t, skillFileWithMarkers())
 		opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
 
-		generated, err := codegen.GenerateSkill(types.RoleSupervisor, skillPath, figuresDir, opts)
+		generated, err := codegen.GenerateSkill(protocol.RoleSupervisor, skillPath, figuresDir, opts)
 		require.NoError(t, err, "GenerateSkill should succeed for supervisor")
 
 		// Extract the "General Constraints" section.

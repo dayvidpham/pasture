@@ -23,6 +23,7 @@ import (
 // `task events` and asserts the flag values reached the recorded payload —
 // proving the cobra flag binding (incl. the optional-pointer conversion) works.
 func TestCLI_HookRecord_FlagWiring_RoundTrips(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	const sha = "facefeed00000000000000000000000000001234"
 
@@ -65,6 +66,7 @@ func TestCLI_HookRecord_FlagWiring_RoundTrips(t *testing.T) {
 // metadata flags are supplied. Because all four commit flags are set, git is
 // NOT consulted, so repo/remotes are absent and the count stays at 7.
 func TestCLI_HookRecord_FormatJSON_EmitsMetadata(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	const sha = "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b"
 
@@ -212,6 +214,7 @@ func selectGitCommitPayload(t *testing.T, dbPath, sha string) string {
 // TestCLI_HookRecord_UnknownEvent_Exit1 asserts the cobra path surfaces the
 // handler's actionable validation error (exit 1) for an unsupported --event.
 func TestCLI_HookRecord_UnknownEvent_Exit1(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	out := runCLI(t,
 		"--db", db,
@@ -230,6 +233,7 @@ func TestCLI_HookRecord_UnknownEvent_Exit1(t *testing.T) {
 // TestCLI_HookRecord_MissingSHA_Exit1 asserts the cobra path surfaces the
 // handler's actionable validation error (exit 1) when --sha is omitted.
 func TestCLI_HookRecord_MissingSHA_Exit1(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	out := runCLI(t,
 		"--db", db,
@@ -247,6 +251,7 @@ func TestCLI_HookRecord_MissingSHA_Exit1(t *testing.T) {
 // TestCLI_HookRecord_RejectsPositionalArgs asserts cobra.NoArgs is wired —
 // an unexpected positional argument is rejected.
 func TestCLI_HookRecord_RejectsPositionalArgs(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	out := runCLI(t,
 		"--db", db,

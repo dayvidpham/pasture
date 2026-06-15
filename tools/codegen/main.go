@@ -26,7 +26,7 @@ import (
 	"path/filepath"
 
 	"github.com/dayvidpham/pasture/internal/codegen"
-	"github.com/dayvidpham/pasture/internal/types"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // moduleRoot walks upward from the current working directory until it finds go.mod,
@@ -58,12 +58,12 @@ func moduleRoot() (string, error) {
 
 // roleSkillDirs maps each role to its skill directory name (relative to skills/).
 // Mirrors Python _ROLE_SKILL_DIRS in gen_skills.py.
-var roleSkillDirs = map[types.RoleId]string{
-	types.RoleSupervisor: "supervisor",
-	types.RoleWorker:     "worker",
-	types.RoleReviewer:   "reviewer",
-	types.RoleArchitect:  "architect",
-	types.RoleEpoch:      "epoch",
+var roleSkillDirs = map[protocol.RoleId]string{
+	protocol.RoleSupervisor: "supervisor",
+	protocol.RoleWorker:     "worker",
+	protocol.RoleReviewer:   "reviewer",
+	protocol.RoleArchitect:  "architect",
+	protocol.RoleEpoch:      "epoch",
 }
 
 // commandSkillDirs maps each command ID to its skill directory name (relative to skills/).

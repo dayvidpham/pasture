@@ -9,7 +9,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen"
 	"github.com/dayvidpham/pasture/internal/testutil"
-	"github.com/dayvidpham/pasture/internal/types"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -104,7 +104,7 @@ func TestGenerateSkill_ContainsSections(t *testing.T) {
 			skillPath := writeSkillFile(t, skillFileWithMarkers())
 			opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
 
-			result, err := codegen.GenerateSkill(types.RoleId(tc.Role), skillPath, "", opts)
+			result, err := codegen.GenerateSkill(protocol.RoleId(tc.Role), skillPath, "", opts)
 			require.NoError(t, err, "GenerateSkill should not error for role %q", tc.Role)
 			require.NotEmpty(t, result, "GenerateSkill should produce non-empty output")
 
@@ -142,7 +142,7 @@ func TestGenerateSkill_MissingMarkersError(t *testing.T) {
 	skillPath := writeSkillFile(t, "# Worker Agent\n\nHand-authored content only.\n")
 	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
 
-	_, err := codegen.GenerateSkill(types.RoleWorker, skillPath, "", opts)
+	_, err := codegen.GenerateSkill(protocol.RoleWorker, skillPath, "", opts)
 	require.Error(t, err, "GenerateSkill should error when markers are missing")
 
 	var markerErr *codegen.MarkerError
@@ -160,13 +160,13 @@ func TestGenerateSkill_MissingMarkersError(t *testing.T) {
 // focuses on marker initialization and header generation.
 func TestGenerateSkill_InitMode(t *testing.T) {
 	// Suppress any body spec for worker to isolate header-only Init behaviour.
-	suppressBodySpec(t, string(types.RoleWorker))
+	suppressBodySpec(t, string(protocol.RoleWorker))
 
 	// Write a file without markers.
 	skillPath := writeSkillFile(t, "# Worker Agent\n\nHand-authored content.\n")
 	opts := codegen.GenerateOptions{Diff: false, Write: true, Init: true}
 
-	result, err := codegen.GenerateSkill(types.RoleWorker, skillPath, "", opts)
+	result, err := codegen.GenerateSkill(protocol.RoleWorker, skillPath, "", opts)
 	require.NoError(t, err, "GenerateSkill with Init=true should not error")
 	require.NotEmpty(t, result, "GenerateSkill with Init=true should produce non-empty output")
 
@@ -186,7 +186,7 @@ func TestGenerateSkill_WriteMode(t *testing.T) {
 	skillPath := writeSkillFile(t, skillFileWithMarkers())
 	opts := codegen.GenerateOptions{Diff: false, Write: true, Init: false}
 
-	result, err := codegen.GenerateSkill(types.RoleWorker, skillPath, "", opts)
+	result, err := codegen.GenerateSkill(protocol.RoleWorker, skillPath, "", opts)
 	require.NoError(t, err)
 
 	// Read back from disk and verify it matches the returned content.
@@ -205,7 +205,7 @@ func TestGenerateSkill_NoDiff_NoWrite(t *testing.T) {
 	skillPath := writeSkillFile(t, originalContent)
 	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
 
-	_, err := codegen.GenerateSkill(types.RoleWorker, skillPath, "", opts)
+	_, err := codegen.GenerateSkill(protocol.RoleWorker, skillPath, "", opts)
 	require.NoError(t, err)
 
 	// File on disk should be unchanged.
@@ -223,7 +223,7 @@ func TestGenerateSkill_UnknownRole(t *testing.T) {
 	skillPath := writeSkillFile(t, skillFileWithMarkers())
 	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
 
-	_, err := codegen.GenerateSkill(types.RoleId("nonexistent-role"), skillPath, "", opts)
+	_, err := codegen.GenerateSkill(protocol.RoleId("nonexistent-role"), skillPath, "", opts)
 	require.Error(t, err, "GenerateSkill should error for unknown role")
 	assert.Contains(t, strings.ToLower(err.Error()), "not found",
 		"error should mention that the role was not found")
@@ -416,7 +416,7 @@ func TestGenerateSkill_WithFiguresDir(t *testing.T) {
 	skillPath := writeSkillFile(t, skillFileWithMarkers())
 	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
 
-	result, err := codegen.GenerateSkill(types.RoleWorker, skillPath, figuresDir, opts)
+	result, err := codegen.GenerateSkill(protocol.RoleWorker, skillPath, figuresDir, opts)
 	require.NoError(t, err)
 
 	// The figure content should appear in the generated output.
@@ -432,7 +432,7 @@ func TestGenerateSkill_TemplateOwnsBeginMarker(t *testing.T) {
 	skillPath := writeSkillFile(t, skillFileWithMarkers())
 	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
 
-	result, err := codegen.GenerateSkill(types.RoleWorker, skillPath, "", opts)
+	result, err := codegen.GenerateSkill(protocol.RoleWorker, skillPath, "", opts)
 	require.NoError(t, err)
 
 	assert.Contains(t, result, codegen.GeneratedBegin)
@@ -446,14 +446,14 @@ func TestGenerateSkill_TemplateOwnsBeginMarker(t *testing.T) {
 // When a body spec exists, the body pass intentionally replaces that content.
 func TestGenerateSkill_BodyPreserved(t *testing.T) {
 	// Suppress body spec so this test isolates header-pass preservation.
-	suppressBodySpec(t, string(types.RoleWorker))
+	suppressBodySpec(t, string(protocol.RoleWorker))
 
 	body := "\n\n## My Custom Section\n\nThis is hand-authored.\n"
 	content := skillFileWithMarkers() + body
 	skillPath := writeSkillFile(t, content)
 	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
 
-	result, err := codegen.GenerateSkill(types.RoleWorker, skillPath, "", opts)
+	result, err := codegen.GenerateSkill(protocol.RoleWorker, skillPath, "", opts)
 	require.NoError(t, err)
 
 	doc, src := parseMD(t, result)
@@ -486,17 +486,17 @@ func repoRoot(t *testing.T) string {
 // tools/codegen/main.go; the generator writes them on every `go generate`.
 type idempotentRoleSkill struct {
 	name   string
-	roleId types.RoleId
+	roleId protocol.RoleId
 }
 
 // allRoleSkills is the full set of generator-driven role SKILL.md files (5).
 // It mirrors roleSkillDirs in tools/codegen/main.go.
 var allRoleSkills = []idempotentRoleSkill{
-	{name: "supervisor", roleId: types.RoleSupervisor},
-	{name: "architect", roleId: types.RoleArchitect},
-	{name: "worker", roleId: types.RoleWorker},
-	{name: "reviewer", roleId: types.RoleReviewer},
-	{name: "epoch", roleId: types.RoleEpoch},
+	{name: "supervisor", roleId: protocol.RoleSupervisor},
+	{name: "architect", roleId: protocol.RoleArchitect},
+	{name: "worker", roleId: protocol.RoleWorker},
+	{name: "reviewer", roleId: protocol.RoleReviewer},
+	{name: "epoch", roleId: protocol.RoleEpoch},
 }
 
 // allSubSkillCommandIds is the full set of generator-driven sub-skill command
@@ -798,12 +798,12 @@ func TestGenerateSkill_BodyInsideMarkers(t *testing.T) {
 			},
 		},
 	}
-	withBodySpec(t, string(types.RoleWorker), testBody)
+	withBodySpec(t, string(protocol.RoleWorker), testBody)
 
 	skillPath := writeSkillFile(t, skillFileWithMarkers())
 	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
 
-	result, err := codegen.GenerateSkill(types.RoleWorker, skillPath, "", opts)
+	result, err := codegen.GenerateSkill(protocol.RoleWorker, skillPath, "", opts)
 	require.NoError(t, err, "GenerateSkill with registered body should not error")
 
 	// Both markers must be present.
@@ -843,12 +843,12 @@ func TestGenerateSkill_BodyInsideMarkers(t *testing.T) {
 // and nothing after END.
 func TestGenerateSkill_NoBody_HeaderOnly(t *testing.T) {
 	// Suppress body spec for worker to test header-only path.
-	suppressBodySpec(t, string(types.RoleWorker))
+	suppressBodySpec(t, string(protocol.RoleWorker))
 
 	skillPath := writeSkillFile(t, skillFileWithMarkers())
 	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
 
-	result, err := codegen.GenerateSkill(types.RoleWorker, skillPath, "", opts)
+	result, err := codegen.GenerateSkill(protocol.RoleWorker, skillPath, "", opts)
 	require.NoError(t, err)
 
 	// Without a body spec the output ends at (or just after) the END marker.

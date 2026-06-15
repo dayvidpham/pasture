@@ -56,6 +56,7 @@ func provenanceOpenSQLite(path string) (provenance.Tracker, error) {
 // file's SHA-256 must be byte-identical before and after `pasture migrate
 // --dry-run`. Plan must be printed, exit code 0.
 func TestCLI_Migrate_DryRun_DoesNotModifyFile(t *testing.T) {
+	t.Parallel()
 	dbPath := newLegacyV1DB(t)
 
 	beforeSHA := mustSHA256(t, dbPath)
@@ -87,6 +88,7 @@ func TestCLI_Migrate_DryRun_DoesNotModifyFile(t *testing.T) {
 // TestCLI_Migrate_DryRun_JSON exercises the --format=json branch and asserts
 // the structured output shape, so CI scripts can parse the plan.
 func TestCLI_Migrate_DryRun_JSON(t *testing.T) {
+	t.Parallel()
 	dbPath := newLegacyV1DB(t)
 
 	out := runCLI(t, "--db", dbPath, "--format", "json", "migrate", "--dry-run")
@@ -129,6 +131,7 @@ func TestCLI_Migrate_DryRun_JSON(t *testing.T) {
 // TestCLI_Migrate_Apply (Scenario 15, apply leg) — `pasture migrate` brings
 // a v1 db up to MaxKnownSchemaVersion and prints the success line.
 func TestCLI_Migrate_Apply(t *testing.T) {
+	t.Parallel()
 	dbPath := newLegacyV1DB(t)
 
 	out := runCLI(t, "--db", dbPath, "migrate")
@@ -152,6 +155,7 @@ func TestCLI_Migrate_Apply(t *testing.T) {
 // migrate a second time on an already-migrated db is a no-op and reports
 // "from v<n> to v<n>".
 func TestCLI_Migrate_Idempotent_ReRun(t *testing.T) {
+	t.Parallel()
 	dbPath := newLegacyV1DB(t)
 
 	// First apply.
@@ -178,6 +182,7 @@ func TestCLI_Migrate_Idempotent_ReRun(t *testing.T) {
 // identical modulo SQLite WAL ordering. We compare table-by-table contents
 // of the user-visible tables.
 func TestCLI_Migrate_ConvergesWithAutoOnOpen(t *testing.T) {
+	t.Parallel()
 	// Path A: migrate via auto-on-open. Run a command that goes through
 	// tasks.OpenTaskTracker (NOT tasks.OpenTracker, which is Provenance-only
 	// and does not invoke the audit migrator). `pasture task events
@@ -234,6 +239,7 @@ func TestCLI_Migrate_ConvergesWithAutoOnOpen(t *testing.T) {
 // against a missing parent dir should NOT panic; it should surface a clean
 // CategoryConnection error and exit 2.
 func TestCLI_Migrate_NoSuchFile_DryRun(t *testing.T) {
+	t.Parallel()
 	// Use a path under a parent dir we DO have permission to create. The
 	// dry-run handler creates the parent dir but then opens the file —
 	// modernc.org/sqlite happily creates an empty file rather than failing,
@@ -257,6 +263,7 @@ func TestCLI_Migrate_NoSuchFile_DryRun(t *testing.T) {
 // --context-kind+--context-id, the command must reject with a
 // CategoryValidation error (exit 1).
 func TestCLI_TaskEvents_RequiresTopLevelFilter(t *testing.T) {
+	t.Parallel()
 	dbPath := newLegacyV1DB(t)
 
 	out := runCLI(t, "--db", dbPath, "task", "events")
@@ -272,6 +279,7 @@ func TestCLI_TaskEvents_RequiresTopLevelFilter(t *testing.T) {
 // TestCLI_TaskEvents_ContextKindWithoutContextId — passing --context-kind
 // alone must reject with a paired-flags validation error.
 func TestCLI_TaskEvents_ContextKindWithoutContextId(t *testing.T) {
+	t.Parallel()
 	dbPath := newLegacyV1DB(t)
 
 	out := runCLI(t, "--db", dbPath, "task", "events", "--context-kind=GitContext")
@@ -286,6 +294,7 @@ func TestCLI_TaskEvents_ContextKindWithoutContextId(t *testing.T) {
 // TestCLI_TaskEvents_UnknownContextKind — invalid --context-kind value must
 // reject with an actionable error listing valid kinds.
 func TestCLI_TaskEvents_UnknownContextKind(t *testing.T) {
+	t.Parallel()
 	dbPath := newLegacyV1DB(t)
 
 	out := runCLI(t, "--db", dbPath, "task", "events",
@@ -303,6 +312,7 @@ func TestCLI_TaskEvents_UnknownContextKind(t *testing.T) {
 // `pasture task events --epoch-id <id>`. We seed the row directly so the
 // test does not depend on S8's workflow integration landing.
 func TestCLI_TaskEvents_EpochID_LegacyV1Path(t *testing.T) {
+	t.Parallel()
 	dbPath := newLegacyV1DB(t)
 	const epochId = "test-epoch-events-1"
 	seedV1AuditEvent(t, dbPath, epochId, "supervisor", "PhaseTransition",
@@ -336,6 +346,7 @@ func TestCLI_TaskEvents_EpochID_LegacyV1Path(t *testing.T) {
 // seed the row + context_edge directly so the test does not depend on S9's
 // hook handler landing.
 func TestCLI_TaskEvents_GitContext_Scenario6(t *testing.T) {
+	t.Parallel()
 	dbPath := newLegacyV1DB(t)
 	const sha = "abc123def456"
 	const epochId = "" // free-floating events have empty/synthetic epoch_id
@@ -382,6 +393,7 @@ func TestCLI_TaskEvents_GitContext_Scenario6(t *testing.T) {
 // TestCLI_TaskTimeline_ChronologicalOrder — events for one task must come
 // back in timestamp ASC order even when seeded out of order.
 func TestCLI_TaskTimeline_ChronologicalOrder(t *testing.T) {
+	t.Parallel()
 	dbPath := newLegacyV1DB(t)
 	const epochId = "test-task-timeline-1"
 
@@ -426,6 +438,7 @@ func TestCLI_TaskTimeline_ChronologicalOrder(t *testing.T) {
 // TestCLI_TaskTimeline_MissingTaskId — calling timeline without a task ID
 // must reject with a validation error.
 func TestCLI_TaskTimeline_MissingTaskId(t *testing.T) {
+	t.Parallel()
 	out := runCLI(t, "task", "timeline")
 	// Cobra's Args validator catches this BEFORE our handler runs; the
 	// resulting exit code is whatever Cobra picks. We just assert non-zero.
@@ -439,6 +452,7 @@ func TestCLI_TaskTimeline_MissingTaskId(t *testing.T) {
 // TestCLI_TaskContexts_ListsAttachedEdges — given an event with two attached
 // contexts, the contexts subcommand returns both.
 func TestCLI_TaskContexts_ListsAttachedEdges(t *testing.T) {
+	t.Parallel()
 	dbPath := newLegacyV1DB(t)
 	if rc := runCLI(t, "--db", dbPath, "migrate"); rc.exitCode != 0 {
 		t.Fatalf("migrate exit %d; stderr=%q", rc.exitCode, rc.stderr)
@@ -484,6 +498,7 @@ func TestCLI_TaskContexts_ListsAttachedEdges(t *testing.T) {
 // TestCLI_TaskContexts_InvalidEventId — non-integer event-id must reject
 // with a CategoryValidation error.
 func TestCLI_TaskContexts_InvalidEventId(t *testing.T) {
+	t.Parallel()
 	dbPath := newLegacyV1DB(t)
 	out := runCLI(t, "--db", dbPath, "task", "contexts", "not-a-number")
 	if out.exitCode != 1 {
@@ -496,6 +511,7 @@ func TestCLI_TaskContexts_InvalidEventId(t *testing.T) {
 
 // TestCLI_TaskContexts_NegativeEventId — zero/negative event-id must reject.
 func TestCLI_TaskContexts_NegativeEventId(t *testing.T) {
+	t.Parallel()
 	dbPath := newLegacyV1DB(t)
 	out := runCLI(t, "--db", dbPath, "task", "contexts", "0")
 	if out.exitCode != 1 {
@@ -509,6 +525,7 @@ func TestCLI_TaskContexts_NegativeEventId(t *testing.T) {
 // migrated db with no registered agents should return "(no registered agents)".
 // Until S7 lands, the well-known table is empty after migration.
 func TestCLI_TaskAgents_List_EmptyOnFreshDB(t *testing.T) {
+	t.Parallel()
 	dbPath := newLegacyV1DB(t)
 	if rc := runCLI(t, "--db", dbPath, "migrate"); rc.exitCode != 0 {
 		t.Fatalf("migrate exit %d; stderr=%q", rc.exitCode, rc.stderr)
@@ -529,6 +546,7 @@ func TestCLI_TaskAgents_List_EmptyOnFreshDB(t *testing.T) {
 // pasture_well_known_agents + pasture_agent_categories and verify the list
 // surfaces it. This is the read-side contract S7's writer will hit.
 func TestCLI_TaskAgents_List_ShowsSeededRow(t *testing.T) {
+	t.Parallel()
 	dbPath := newLegacyV1DB(t)
 	if rc := runCLI(t, "--db", dbPath, "migrate"); rc.exitCode != 0 {
 		t.Fatalf("migrate exit %d; stderr=%q", rc.exitCode, rc.stderr)
@@ -580,6 +598,7 @@ func TestCLI_TaskAgents_List_ShowsSeededRow(t *testing.T) {
 // unregistered agent ID returns ("None","None") via the AgentCategories
 // contract; exit 0.
 func TestCLI_TaskAgents_Show_NotFoundReturnsNoneNone(t *testing.T) {
+	t.Parallel()
 	dbPath := newLegacyV1DB(t)
 	if rc := runCLI(t, "--db", dbPath, "migrate"); rc.exitCode != 0 {
 		t.Fatalf("migrate exit %d; stderr=%q", rc.exitCode, rc.stderr)
@@ -611,6 +630,7 @@ func TestCLI_TaskAgents_Show_NotFoundReturnsNoneNone(t *testing.T) {
 
 // TestCLI_TaskAgents_Show_InvalidId — bad agent ID format must reject.
 func TestCLI_TaskAgents_Show_InvalidId(t *testing.T) {
+	t.Parallel()
 	dbPath := newLegacyV1DB(t)
 	out := runCLI(t, "--db", dbPath, "task", "agents", "show", "not-an-agent-id")
 	if out.exitCode != 1 {

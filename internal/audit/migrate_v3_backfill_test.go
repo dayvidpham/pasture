@@ -16,11 +16,10 @@
 //     before kill); never half-migrated.
 //
 //   - Scenario 12: Concurrent-migrator race — spawns two pastured
-//     processes simultaneously against the same v1 db with
-//     --idle-after-migrate=2s; asserts exactly one process migrated
+//     processes simultaneously against the same v1 db, waits until both emit
+//     the daemon-ready log, and asserts exactly one process migrated
 //     (agents_software count == 7, audit_events count == 1024, integrity
-//     check ok).  S7 (aura-plugins-9ye50) landed --idle-after-migrate;
-//     skip removed as part of Phase 10 MINOR fix (aura-plugins-9ax2y).
+//     check ok).
 //
 // All tests are file-backed via t.TempDir() per pasture/CLAUDE.md and
 // IMPL_PLAN §1.2: in-memory SQLite would bypass WAL/busy_timeout/fsync,
@@ -29,12 +28,14 @@ package audit_test
 
 import (
 	stderrors "errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,6 +44,28 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+var crashBinaryCache struct {
+	once sync.Once
+	path string
+	err  error
+}
+
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, _ := runtime.Caller(0)
+	root := filepath.Dir(thisFile)
+	for {
+		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+			return root
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			t.Fatalf("cannot find go.mod from %s", filepath.Dir(thisFile))
+		}
+		root = parent
+	}
+}
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
 
@@ -315,37 +338,28 @@ func TestScenario4_ReRunMigrate_NoDuplicateAgents(t *testing.T) {
 func crashBinaryPath(t *testing.T) string {
 	t.Helper()
 
-	// Use a stable cache directory so repeated test runs don't re-build
-	// the binary every invocation.
-	binDir := filepath.Join(t.TempDir(), "bin")
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		t.Fatalf("mkdir bin dir: %v", err)
-	}
-	binPath := filepath.Join(binDir, "pasture-migrate-crash")
-
-	// Find the cmd/pasture-migrate-crash package by walking up from this
-	// file to the repo root.
-	_, thisFile, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Dir(thisFile)
-	for {
-		if _, err := os.Stat(filepath.Join(repoRoot, "go.mod")); err == nil {
-			break
+	crashBinaryCache.once.Do(func() {
+		binDir := filepath.Join(os.TempDir(), fmt.Sprintf("pasture-migrate-crash-%d", os.Getpid()))
+		if err := os.MkdirAll(binDir, 0o755); err != nil {
+			crashBinaryCache.err = fmt.Errorf("mkdir bin dir: %w", err)
+			return
 		}
-		parent := filepath.Dir(repoRoot)
-		if parent == repoRoot {
-			t.Fatalf("cannot find go.mod from %s", filepath.Dir(thisFile))
-		}
-		repoRoot = parent
-	}
-	pkgPath := filepath.Join(repoRoot, "cmd", "pasture-migrate-crash")
+		binPath := filepath.Join(binDir, "pasture-migrate-crash")
+		pkgPath := filepath.Join(repoRoot(t), "cmd", "pasture-migrate-crash")
 
-	cmd := exec.Command("go", "build", "-o", binPath, pkgPath) //nolint:gosec // test-only, paths are local
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("go build pasture-migrate-crash: %v\n%s", err, out)
+		cmd := exec.Command("go", "build", "-o", binPath, pkgPath) //nolint:gosec // test-only, paths are local
+		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			crashBinaryCache.err = fmt.Errorf("go build pasture-migrate-crash: %w\n%s", err, out)
+			return
+		}
+		crashBinaryCache.path = binPath
+	})
+	if crashBinaryCache.err != nil {
+		t.Fatalf("%v", crashBinaryCache.err)
 	}
-	return binPath
+	return crashBinaryCache.path
 }
 
 // TestScenario11_CrashMidMigration_RolledBackCleanly verifies the §11
@@ -515,20 +529,7 @@ func pastedBinaryPath(t *testing.T) string {
 	}
 	binPath := filepath.Join(binDir, "pastured")
 
-	// Locate the repo root (go.mod) from this file.
-	_, thisFile, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Dir(thisFile)
-	for {
-		if _, err := os.Stat(filepath.Join(repoRoot, "go.mod")); err == nil {
-			break
-		}
-		parent := filepath.Dir(repoRoot)
-		if parent == repoRoot {
-			t.Fatalf("cannot find go.mod from %s", filepath.Dir(thisFile))
-		}
-		repoRoot = parent
-	}
-	pkgPath := filepath.Join(repoRoot, "cmd", "pastured")
+	pkgPath := filepath.Join(repoRoot(t), "cmd", "pastured")
 
 	// Build with CGO_ENABLED=1 (required for modernc.org/sqlite WAL + busy
 	// timeout behaviour exercised by this test).
@@ -539,6 +540,33 @@ func pastedBinaryPath(t *testing.T) string {
 		t.Fatalf("go build pastured: %v\n%s", err, out)
 	}
 	return binPath
+}
+
+type readyOutput struct {
+	mu    sync.Mutex
+	buf   strings.Builder
+	ready chan struct{}
+	once  sync.Once
+}
+
+func newReadyOutput() *readyOutput {
+	return &readyOutput{ready: make(chan struct{})}
+}
+
+func (w *readyOutput) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, err := w.buf.Write(p)
+	if strings.Contains(w.buf.String(), "daemon runtime ready") {
+		w.once.Do(func() { close(w.ready) })
+	}
+	return n, err
+}
+
+func (w *readyOutput) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
 }
 
 // TestScenario12_ConcurrentMigratorRace verifies the §11 Scenario 12
@@ -575,27 +603,24 @@ func TestScenario12_ConcurrentMigratorRace(t *testing.T) {
 		t.Fatalf("write empty config file: %v", err)
 	}
 
-	// Spawn both processes concurrently.  Using strings.Builder as Stdout/Stderr
-	// lets os/exec manage the internal pipe and goroutines — no manual pipe
-	// management needed.  The --idle-after-migrate=2s window gives the loser
-	// enough time to attempt BEGIN IMMEDIATE after the winner commits the v3
-	// step.  We interrupt both after 5 s (well past the idle window) so neither
-	// blocks waiting for a Temporal server.
+	// Spawn both processes concurrently and wait until each emits the daemon
+	// runtime-ready log. That log is produced only after the unified database
+	// has been opened/migrated and the engine constructed, so it is a real
+	// cross-process readiness signal rather than a fixed sleep.
 	type procResult struct {
 		output string
 		err    error
 	}
 	spawnPastured := func() (*exec.Cmd, chan procResult) {
-		var outBuf strings.Builder
+		outBuf := newReadyOutput()
 		cmd := exec.Command( //nolint:gosec // test-only, paths are local
 			binPath,
 			"--config", emptyConfig,
 			"--db", raceDB,
-			"--idle-after-migrate=2s",
 			"--audit-trail=sqlite",
 		)
-		cmd.Stdout = &outBuf
-		cmd.Stderr = &outBuf
+		cmd.Stdout = outBuf
+		cmd.Stderr = outBuf
 		ch := make(chan procResult, 1)
 		if startErr := cmd.Start(); startErr != nil {
 			ch <- procResult{err: startErr}
@@ -611,12 +636,31 @@ func TestScenario12_ConcurrentMigratorRace(t *testing.T) {
 	cmd1, ch1 := spawnPastured()
 	cmd2, ch2 := spawnPastured()
 
-	// Wait for the 2s idle window to expire, then interrupt both processes.
-	// 5 seconds is generous: migration + well-known-agent registration +
-	// 2s idle + margin.
-	timer := time.NewTimer(5 * time.Second)
-	defer timer.Stop()
-	<-timer.C
+	waitReady := func(name string, ch chan procResult, cmd *exec.Cmd) *procResult {
+		t.Helper()
+		if cmd == nil {
+			r := <-ch
+			t.Fatalf("%s failed to start: %v\n%s", name, r.err, r.output)
+		}
+		out := cmd.Stdout.(*readyOutput)
+		timer := time.NewTimer(30 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-out.ready:
+			return nil
+		case r := <-ch:
+			if strings.Contains(r.output, "audit trail initialisation failed") ||
+				strings.Contains(r.output, "Couldn't open the audit subsystem") {
+				return &r
+			}
+			t.Fatalf("%s exited before readiness: %v\n%s", name, r.err, r.output)
+		case <-timer.C:
+			t.Fatalf("%s did not emit daemon runtime readiness within 30s; output:\n%s", name, out.String())
+		}
+		return nil
+	}
+	early1 := waitReady("pastured-1", ch1, cmd1)
+	early2 := waitReady("pastured-2", ch2, cmd2)
 
 	// Signal both processes to stop.  If a process already exited (e.g. it
 	// hit the Scenario 12 busy-retry ceiling and returned exit 5/1), Signal
@@ -629,8 +673,17 @@ func TestScenario12_ConcurrentMigratorRace(t *testing.T) {
 	}
 
 	// Collect exit status and log output for diagnostics.
-	r1 := <-ch1
-	r2 := <-ch2
+	var r1, r2 procResult
+	if early1 != nil {
+		r1 = *early1
+	} else {
+		r1 = <-ch1
+	}
+	if early2 != nil {
+		r2 = *early2
+	} else {
+		r2 = <-ch2
+	}
 	t.Logf("pastured-1 exit: %v\noutput:\n%s", r1.err, r1.output)
 	t.Logf("pastured-2 exit: %v\noutput:\n%s", r2.err, r2.output)
 

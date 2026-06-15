@@ -25,6 +25,7 @@ import (
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -37,9 +38,9 @@ import (
 // without going through the tracker.
 func openFreeFloatingFixture(t *testing.T) (protocol.TaskTracker, *sql.DB, string) {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	dbPath := testutil.GoldenUnifiedDBPath(t)
 
-	tracker, err := tasks.OpenTaskTracker(dbPath)
+	tracker, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("OpenTaskTracker(%q) failed: %v", dbPath, err)
 	}

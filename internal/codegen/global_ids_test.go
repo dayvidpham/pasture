@@ -17,17 +17,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/dayvidpham/pasture/internal/types"
 )
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
 // minimalRoleSpecs returns a role-specs map with one role and no behaviors.
-func minimalRoleSpecs() map[types.RoleId]RoleSpec {
-	return map[types.RoleId]RoleSpec{
+func minimalRoleSpecs() map[protocol.RoleId]RoleSpec {
+	return map[protocol.RoleId]RoleSpec{
 		"test-role": {Id: "test-role", Behaviors: nil},
 	}
 }
@@ -93,7 +92,7 @@ func allFragmentIdsForFragSpecs(m map[FragmentId]SharedFragment) []FragmentId {
 // the same RoleId key produce an actionable IDCollision error naming "agent".
 func TestValidateGlobalIDs_DuplicateInAgentNamespace(t *testing.T) {
 	// Inject a body-spec whose inline id collides with an agent id.
-	roleSpecs := map[types.RoleId]RoleSpec{
+	roleSpecs := map[protocol.RoleId]RoleSpec{
 		"my-agent": {Id: "my-agent"},
 	}
 	bodySpecs := map[string]SkillBody{
@@ -116,7 +115,7 @@ func TestValidateGlobalIDs_DuplicateInAgentNamespace(t *testing.T) {
 // TestValidateGlobalIDs_DuplicateInRoleBehaviorNamespace verifies that a
 // role-behavior B-* ID colliding with an inline skill-body ID is detected.
 func TestValidateGlobalIDs_DuplicateInRoleBehaviorNamespace(t *testing.T) {
-	roleSpecs := map[types.RoleId]RoleSpec{
+	roleSpecs := map[protocol.RoleId]RoleSpec{
 		"role-a": {Id: "role-a", Behaviors: []BehaviorSpec{
 			{Id: "B-shared-behavior", Given: "g", When: "w", Then: "t"},
 		}},
@@ -331,7 +330,7 @@ func TestValidateGlobalIDs_CleanFixture(t *testing.T) {
 	fragmentSpecs := map[FragmentId]SharedFragment{
 		"frag--clean": {Id: "frag--clean", Kind: FragmentKindProse, Prose: &p},
 	}
-	roleSpecs := map[types.RoleId]RoleSpec{
+	roleSpecs := map[protocol.RoleId]RoleSpec{
 		"clean-role": {Id: "clean-role", Behaviors: []BehaviorSpec{
 			{Id: "B-clean-behavior", Given: "g", When: "w", Then: "t"},
 		}},

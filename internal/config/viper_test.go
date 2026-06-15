@@ -8,244 +8,95 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dayvidpham/pasture/internal/config"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
-// newTestCmd builds a minimal cobra.Command with the standard connection flags
-// registered, matching the flags that ResolveConnectionConfig expects.
-func newTestCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "test"}
-	cmd.PersistentFlags().String("namespace", "", "Temporal namespace")
-	cmd.PersistentFlags().String("task-queue", "", "Temporal task queue")
-	cmd.PersistentFlags().String("address", "", "Temporal server address")
-	return cmd
-}
-
-// newPasturedTestCmd adds pastured-specific flags.
 func newPasturedTestCmd() *cobra.Command {
-	cmd := newTestCmd()
+	cmd := &cobra.Command{Use: "test"}
 	cmd.PersistentFlags().String("audit-trail", "", "Audit trail backend")
 	cmd.PersistentFlags().String("audit-db-path", "", "Audit database path")
 	return cmd
 }
 
-// newPastureMsgTestCmd adds pasture-msg-specific flags.
-func newPastureMsgTestCmd() *cobra.Command {
-	cmd := newTestCmd()
-	cmd.PersistentFlags().String("format", "", "Default output format")
-	return cmd
-}
-
-// ---- ResolveConnectionConfig — defaults ------------------------------------
-
-func TestResolveConnectionConfig_Defaults(t *testing.T) {
-	clearConnectionEnvVars(t)
-
-	cmd := newTestCmd()
-	cc := config.ResolveConnectionConfig(cmd)
-
-	if cc.Namespace != "default" {
-		t.Errorf("Namespace = %q, want %q", cc.Namespace, "default")
-	}
-	if cc.TaskQueue != "pasture" {
-		t.Errorf("TaskQueue = %q, want %q", cc.TaskQueue, "pasture")
-	}
-	if cc.ServerAddress != "localhost:7233" {
-		t.Errorf("ServerAddress = %q, want %q", cc.ServerAddress, "localhost:7233")
-	}
-}
-
-// ---- ResolveConnectionConfig — environment variables override defaults -----
-
-func TestResolveConnectionConfig_EnvVarsOverrideDefaults(t *testing.T) {
-	t.Setenv(config.EnvNamespace, "env-namespace")
-	t.Setenv(config.EnvTaskQueue, "env-queue")
-	t.Setenv(config.EnvAddress, "env-host:7233")
-
-	cmd := newTestCmd()
-	cc := config.ResolveConnectionConfig(cmd)
-
-	if cc.Namespace != "env-namespace" {
-		t.Errorf("Namespace = %q, want %q", cc.Namespace, "env-namespace")
-	}
-	if cc.TaskQueue != "env-queue" {
-		t.Errorf("TaskQueue = %q, want %q", cc.TaskQueue, "env-queue")
-	}
-	if cc.ServerAddress != "env-host:7233" {
-		t.Errorf("ServerAddress = %q, want %q", cc.ServerAddress, "env-host:7233")
-	}
-}
-
-// ---- ResolveConnectionConfig — CLI flags override env vars -----------------
-
-func TestResolveConnectionConfig_CLIFlagsOverrideEnvVars(t *testing.T) {
-	t.Setenv(config.EnvNamespace, "env-namespace")
-	t.Setenv(config.EnvTaskQueue, "env-queue")
-	t.Setenv(config.EnvAddress, "env-host:7233")
-
-	cmd := newTestCmd()
-	// Simulate the user passing flags explicitly.
-	if err := cmd.PersistentFlags().Set("namespace", "cli-namespace"); err != nil {
-		t.Fatalf("setting --namespace flag: %v", err)
-	}
-	if err := cmd.PersistentFlags().Set("task-queue", "cli-queue"); err != nil {
-		t.Fatalf("setting --task-queue flag: %v", err)
-	}
-	if err := cmd.PersistentFlags().Set("address", "cli-host:7233"); err != nil {
-		t.Fatalf("setting --address flag: %v", err)
-	}
-
-	cc := config.ResolveConnectionConfig(cmd)
-
-	if cc.Namespace != "cli-namespace" {
-		t.Errorf("Namespace = %q, want %q", cc.Namespace, "cli-namespace")
-	}
-	if cc.TaskQueue != "cli-queue" {
-		t.Errorf("TaskQueue = %q, want %q", cc.TaskQueue, "cli-queue")
-	}
-	if cc.ServerAddress != "cli-host:7233" {
-		t.Errorf("ServerAddress = %q, want %q", cc.ServerAddress, "cli-host:7233")
-	}
-}
-
-// ---- ResolveConnectionConfig — YAML config file ----------------------------
-
-func TestResolveConnectionConfig_YAMLOverridesDefaults(t *testing.T) {
-	clearConnectionEnvVars(t)
-
-	// Write a temporary YAML config file.
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.yaml")
-	yamlContent := `
-connection:
-  namespace: yaml-namespace
-  task_queue: yaml-queue
-  server_address: yaml-host:7233
-`
-	if err := os.WriteFile(cfgPath, []byte(yamlContent), 0o644); err != nil {
-		t.Fatalf("writing config file: %v", err)
-	}
-
-	cmd := newTestCmd()
-	cc := config.ResolveConnectionConfigFromFile(cmd, cfgPath)
-
-	if cc.Namespace != "yaml-namespace" {
-		t.Errorf("Namespace = %q, want %q", cc.Namespace, "yaml-namespace")
-	}
-	if cc.TaskQueue != "yaml-queue" {
-		t.Errorf("TaskQueue = %q, want %q", cc.TaskQueue, "yaml-queue")
-	}
-	if cc.ServerAddress != "yaml-host:7233" {
-		t.Errorf("ServerAddress = %q, want %q", cc.ServerAddress, "yaml-host:7233")
-	}
-}
-
-func TestResolveConnectionConfig_CLIWinsOverYAML(t *testing.T) {
-	clearConnectionEnvVars(t)
-
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.yaml")
-	yamlContent := `
-connection:
-  namespace: yaml-namespace
-  task_queue: yaml-queue
-  server_address: yaml-host:7233
-`
-	if err := os.WriteFile(cfgPath, []byte(yamlContent), 0o644); err != nil {
-		t.Fatalf("writing config file: %v", err)
-	}
-
-	cmd := newTestCmd()
-	if err := cmd.PersistentFlags().Set("namespace", "cli-namespace"); err != nil {
-		t.Fatalf("setting --namespace flag: %v", err)
-	}
-
-	cc := config.ResolveConnectionConfigFromFile(cmd, cfgPath)
-
-	if cc.Namespace != "cli-namespace" {
-		t.Errorf("Namespace = %q, want %q (CLI must win over YAML)", cc.Namespace, "cli-namespace")
-	}
-	// Other fields should still come from YAML
-	if cc.TaskQueue != "yaml-queue" {
-		t.Errorf("TaskQueue = %q, want %q (YAML for unflagged field)", cc.TaskQueue, "yaml-queue")
-	}
-}
-
-// ---- ResolvePasturedConfig -------------------------------------------------
-
 func TestResolvePasturedConfig_Defaults(t *testing.T) {
 	clearAllEnvVars(t)
 
-	cmd := newPasturedTestCmd()
-	cfg := config.ResolvePasturedConfig(cmd)
+	cfg := config.ResolvePasturedConfig(newPasturedTestCmd())
 
-	if cfg.Connection.Namespace != "default" {
-		t.Errorf("Namespace = %q, want %q", cfg.Connection.Namespace, "default")
+	if cfg.AuditTrail != types.BackendSqlite {
+		t.Errorf("AuditTrail = %q, want %q", cfg.AuditTrail, types.BackendSqlite)
 	}
-	if cfg.AuditTrail != types.BackendMemory {
-		t.Errorf("AuditTrail = %q, want %q", cfg.AuditTrail, types.BackendMemory)
+	if cfg.AuditDBPath != "" {
+		t.Errorf("AuditDBPath = %q, want empty", cfg.AuditDBPath)
 	}
 }
 
 func TestResolvePasturedConfig_EnvOverride(t *testing.T) {
-	t.Setenv(config.EnvAuditTrail, string(types.BackendMemory))
+	testutil.SetEnv(t, config.EnvAuditTrail, string(types.BackendMemory))
+	testutil.SetEnv(t, config.EnvAuditDBPath, "/tmp/env-audit.db")
 
-	cmd := newPasturedTestCmd()
-	cfg := config.ResolvePasturedConfig(cmd)
+	cfg := config.ResolvePasturedConfig(newPasturedTestCmd())
 
 	if cfg.AuditTrail != types.BackendMemory {
 		t.Errorf("AuditTrail = %q, want %q", cfg.AuditTrail, types.BackendMemory)
 	}
+	if cfg.AuditDBPath != "/tmp/env-audit.db" {
+		t.Errorf("AuditDBPath = %q, want /tmp/env-audit.db", cfg.AuditDBPath)
+	}
 }
 
-// ---- ResolvePastureMsgConfig -----------------------------------------------
+func TestResolvePasturedConfig_CLIFlagsOverrideEnvVars(t *testing.T) {
+	testutil.SetEnv(t, config.EnvAuditTrail, string(types.BackendMemory))
+	testutil.SetEnv(t, config.EnvAuditDBPath, "/tmp/env-audit.db")
 
-func TestResolvePastureMsgConfig_Defaults(t *testing.T) {
+	cmd := newPasturedTestCmd()
+	if err := cmd.PersistentFlags().Set("audit-trail", string(types.BackendSqlite)); err != nil {
+		t.Fatalf("setting --audit-trail flag: %v", err)
+	}
+	if err := cmd.PersistentFlags().Set("audit-db-path", "/tmp/cli-audit.db"); err != nil {
+		t.Fatalf("setting --audit-db-path flag: %v", err)
+	}
+
+	cfg := config.ResolvePasturedConfig(cmd)
+
+	if cfg.AuditTrail != types.BackendSqlite {
+		t.Errorf("AuditTrail = %q, want %q", cfg.AuditTrail, types.BackendSqlite)
+	}
+	if cfg.AuditDBPath != "/tmp/cli-audit.db" {
+		t.Errorf("AuditDBPath = %q, want /tmp/cli-audit.db", cfg.AuditDBPath)
+	}
+}
+
+func TestResolvePasturedConfig_YAMLOverridesDefaults(t *testing.T) {
 	clearAllEnvVars(t)
 
-	cmd := newPastureMsgTestCmd()
-	cfg := config.ResolvePastureMsgConfig(cmd)
-
-	if cfg.Connection.Namespace != "default" {
-		t.Errorf("Namespace = %q, want %q", cfg.Connection.Namespace, "default")
-	}
-	if cfg.DefaultFormat != types.OutputText {
-		t.Errorf("DefaultFormat = %q, want %q", cfg.DefaultFormat, types.OutputText)
-	}
-}
-
-func TestResolvePastureMsgConfig_CLIFormatFlag(t *testing.T) {
-	clearAllEnvVars(t)
-
-	cmd := newPastureMsgTestCmd()
-	if err := cmd.PersistentFlags().Set("format", string(types.OutputJSON)); err != nil {
-		t.Fatalf("setting --format flag: %v", err)
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	yamlContent := `
+audit_trail: memory
+audit_db_path: /tmp/yaml-audit.db
+`
+	if err := os.WriteFile(cfgPath, []byte(yamlContent), 0o644); err != nil {
+		t.Fatalf("writing config file: %v", err)
 	}
 
-	cfg := config.ResolvePastureMsgConfig(cmd)
-
-	if cfg.DefaultFormat != types.OutputJSON {
-		t.Errorf("DefaultFormat = %q, want %q", cfg.DefaultFormat, types.OutputJSON)
+	cfg, err := config.ResolvePasturedConfigFromFile(newPasturedTestCmd(), cfgPath)
+	if err != nil {
+		t.Fatalf("ResolvePasturedConfigFromFile: %v", err)
 	}
-}
 
-// ---- helpers ---------------------------------------------------------------
-
-func clearConnectionEnvVars(t *testing.T) {
-	t.Helper()
-	for _, key := range []string{config.EnvNamespace, config.EnvTaskQueue, config.EnvAddress} {
-		t.Setenv(key, "")
-		os.Unsetenv(key) //nolint:errcheck
+	if cfg.AuditTrail != types.BackendMemory {
+		t.Errorf("AuditTrail = %q, want %q", cfg.AuditTrail, types.BackendMemory)
+	}
+	if cfg.AuditDBPath != "/tmp/yaml-audit.db" {
+		t.Errorf("AuditDBPath = %q, want /tmp/yaml-audit.db", cfg.AuditDBPath)
 	}
 }
 
 func clearAllEnvVars(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{
-		config.EnvNamespace, config.EnvTaskQueue, config.EnvAddress,
-		config.EnvAuditTrail, config.EnvAuditDBPath,
-	} {
-		t.Setenv(key, "")
-		os.Unsetenv(key) //nolint:errcheck
+	for _, key := range []string{config.EnvAuditTrail, config.EnvAuditDBPath} {
+		testutil.UnsetEnv(t, key)
 	}
 }

@@ -17,13 +17,13 @@ import (
 // ─── Test helpers ────────────────────────────────────────────────────────────
 
 // sampleQueryStateResult builds a QueryStateResult suitable for formatter tests.
-func sampleQueryStateResult() types.QueryStateResult {
+func sampleQueryStateResult() protocol.QueryStateResult {
 	lastErr := "constraint check failed"
 	ts := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
-	return types.QueryStateResult{
+	return protocol.QueryStateResult{
 		CurrentPhase: protocol.PhaseWorkerSlices,
-		CurrentRole:  types.RoleWorker,
-		TransitionHistory: []types.TransitionRecord{
+		CurrentRole:  protocol.RoleWorker,
+		TransitionHistory: []protocol.TransitionRecord{
 			{
 				FromPhase:    protocol.PhaseImplPlan,
 				ToPhase:      protocol.PhaseWorkerSlices,
@@ -33,9 +33,9 @@ func sampleQueryStateResult() types.QueryStateResult {
 				Success:      true,
 			},
 		},
-		Votes: map[types.ReviewAxis]types.VoteType{
-			types.AxisCorrectness: types.VoteAccept,
-			types.AxisTestQuality: types.VoteRevise,
+		Votes: map[protocol.ReviewAxis]protocol.VoteType{
+			protocol.AxisCorrectness: protocol.VoteAccept,
+			protocol.AxisTestQuality: protocol.VoteRevise,
 		},
 		LastError:            &lastErr,
 		AvailableTransitions: []protocol.PhaseId{protocol.PhaseCodeReview},
@@ -203,7 +203,7 @@ func TestFormatEpochState_InvalidFormat(t *testing.T) {
 // ─── FormatStartResult ───────────────────────────────────────────────────────
 
 func TestFormatStartResult_JSON(t *testing.T) {
-	got, err := formatters.FormatStartResult("epoch-123", "run-abc", types.OutputJSON)
+	got, err := formatters.FormatStartResult("epoch-123", types.OutputJSON)
 	if err != nil {
 		t.Fatalf("FormatStartResult JSON: unexpected error: %v", err)
 	}
@@ -214,24 +214,24 @@ func TestFormatStartResult_JSON(t *testing.T) {
 	if m["workflowId"] != "epoch-123" {
 		t.Errorf("workflowId: want %q, got %v", "epoch-123", m["workflowId"])
 	}
-	if m["runId"] != "run-abc" {
-		t.Errorf("runId: want %q, got %v", "run-abc", m["runId"])
+	if _, hasRunId := m["runId"]; hasRunId {
+		t.Errorf("runId should be absent from start result; got %v", m["runId"])
 	}
 }
 
 func TestFormatStartResult_Text(t *testing.T) {
-	got, err := formatters.FormatStartResult("epoch-123", "run-abc", types.OutputText)
+	got, err := formatters.FormatStartResult("epoch-123", types.OutputText)
 	if err != nil {
 		t.Fatalf("FormatStartResult Text: unexpected error: %v", err)
 	}
-	want := "Started epoch: workflow_id=epoch-123, run_id=run-abc"
+	want := "Started epoch: workflow_id=epoch-123"
 	if got != want {
 		t.Errorf("FormatStartResult Text:\n  want: %q\n  got:  %q", want, got)
 	}
 }
 
 func TestFormatStartResult_InvalidFormat(t *testing.T) {
-	_, err := formatters.FormatStartResult("id", "run", types.OutputFormat("yaml"))
+	_, err := formatters.FormatStartResult("id", types.OutputFormat("yaml"))
 	if err == nil {
 		t.Fatal("expected error for unknown format, got nil")
 	}

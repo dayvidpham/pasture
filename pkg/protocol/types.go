@@ -257,6 +257,12 @@ const (
 	EventSliceCompleted     EventType = "SliceCompleted"
 	EventSessionRegistered  EventType = "SessionRegistered"
 	EventReviewCycleStarted EventType = "ReviewCycleStarted"
+	// EventEpochCancelled records that an operator explicitly cancelled a
+	// running epoch via the CLI. The event payload carries the operator's
+	// reason (key "reason", empty string when no reason was given). Unlike
+	// engine-emitted transition events, this event is a one-shot CLI action
+	// and is written via the non-dedup RecordEvent path (NULL dedup_key).
+	EventEpochCancelled EventType = "EpochCancelled"
 )
 
 // AllEventTypes is the ordered slice of all valid EventType values.
@@ -269,6 +275,7 @@ var AllEventTypes = []EventType{
 	EventSliceCompleted,
 	EventSessionRegistered,
 	EventReviewCycleStarted,
+	EventEpochCancelled,
 }
 
 // IsValid reports whether e is a known EventType value.
@@ -276,7 +283,7 @@ func (e EventType) IsValid() bool {
 	switch e {
 	case EventPhaseTransition, EventPhaseAdvance, EventVoteRecorded,
 		EventConstraintChecked, EventSliceStarted, EventSliceCompleted,
-		EventSessionRegistered, EventReviewCycleStarted:
+		EventSessionRegistered, EventReviewCycleStarted, EventEpochCancelled:
 		return true
 	}
 	return false
@@ -286,6 +293,13 @@ func (e EventType) IsValid() bool {
 
 // AuditEvent is a generic audit trail event emitted by epoch workflows and
 // activities. JSON tags use camelCase to match Python aura-protocol output.
+//
+// DedupKey is the OPTIONAL deterministic deduplication key (see DedupKey).
+// When set, the SQLite trail writes it into the dedup_key column with an
+// ON CONFLICT … DO NOTHING upsert, so a crash-replay of the emitting durable
+// step records the row exactly once. Ordinary (non-engine) callers leave it
+// empty; the column is then NULL and the partial unique index ignores the row,
+// preserving the legacy insert-always behaviour.
 type AuditEvent struct {
 	EpochId   string         `json:"epochId"`
 	Phase     PhaseId        `json:"phase"`
@@ -293,4 +307,5 @@ type AuditEvent struct {
 	EventType EventType      `json:"eventType"`
 	Payload   map[string]any `json:"payload"`
 	Timestamp time.Time      `json:"timestamp"`
+	DedupKey  string         `json:"dedupKey,omitempty"`
 }

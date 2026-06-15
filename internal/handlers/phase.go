@@ -4,91 +4,59 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/dayvidpham/pasture/internal/config"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/formatters"
-	"github.com/dayvidpham/pasture/internal/temporal"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
-// PhaseAdvance sends a PhaseAdvanceSignal to the EpochWorkflow.
+// PhaseAdvance delivers an advance-phase signal to the epoch's control workflow.
 //
-// toPhase must be a valid PhaseId. triggeredBy identifies the sender (e.g. a
-// role name). condition describes the protocol condition that was satisfied.
+// toPhaseStr is the raw phase name or pX shorthand from the CLI flag; this
+// handler parses and validates it so RunE can forward the string directly.
+// triggeredBy identifies the sender (e.g. a role name); condition describes
+// the protocol condition that was satisfied.
 //
-// Exit codes: 0=success, 1=validation error, 2=connection error, 3=workflow error.
+// Exit codes: 0=success, 1=validation error, 3=workflow error.
 func PhaseAdvance(
-	ctx context.Context,
-	conn config.ConnectionConfig,
+	ctrl EpochController,
 	epochId string,
-	toPhase protocol.PhaseId,
+	toPhaseStr protocol.PhaseId,
 	triggeredBy, condition string,
 	format types.OutputFormat,
-	factory TemporalClientFactory,
 ) (int, error) {
-	if factory == nil {
-		factory = DefaultClientFactory
-	}
-
-	if epochId == "" {
-		err := &pasterrors.StructuredError{
-			Category: pasterrors.CategoryValidation,
-			What:     "An epoch ID is required to advance the phase.",
-			Why:      "The --epoch-id flag was not provided.",
-			Where:    "Advancing the workflow phase (internal/handlers/phase.go in handlers.PhaseAdvance).",
-			Impact:   "Without an epoch ID, there's no way to know which workflow to advance.",
-			Fix: "1. Pass the epoch's ID:\n" +
-				"     pasture-msg phase advance --epoch-id <id> --to <phase>\n" +
-				"2. If you don't know the epoch ID, list active epochs:\n" +
-				"     pasture-msg epoch list",
-		}
+	if err := requireEpochID(epochId, "advance the phase",
+		"Advancing the phase (internal/handlers/phase.go in handlers.PhaseAdvance).",
+		"pasture phase advance --epoch-id <id> --to <phase>"); err != nil {
 		return pasterrors.ExitCode(err), err
 	}
-	if !toPhase.IsValid() {
+
+	toPhase, parseErr := protocol.ParsePhaseId(string(toPhaseStr))
+	if parseErr != nil {
 		err := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("%q is not a recognised phase name.", toPhase),
+			What:     fmt.Sprintf("%q is not a recognised phase name.", toPhaseStr),
 			Why: "The target phase must be one of the 12 protocol phase names\n" +
 				"(request, elicit, propose, ..., landing, complete) or the short\n" +
 				"form p1..p12.",
-			Where:  "Advancing the workflow phase (internal/handlers/phase.go in handlers.PhaseAdvance).",
+			Where:  "Advancing the phase (internal/handlers/phase.go in handlers.PhaseAdvance).",
 			Impact: "The phase advance can't be sent because the target phase isn't recognised.",
 			Fix: "1. Use a recognised phase name, for example:\n" +
-				"     pasture-msg phase advance --to code-review --epoch-id <id>\n" +
+				"     pasture phase advance --to code-review --epoch-id <id>\n" +
 				"2. Or use the short form:\n" +
-				"     pasture-msg phase advance --to p10 --epoch-id <id>",
+				"     pasture phase advance --to p10 --epoch-id <id>",
+			Cause: parseErr,
 		}
 		return pasterrors.ExitCode(err), err
 	}
 
-	c, err := factory(ctx, conn)
-	if err != nil {
-		return pasterrors.ExitCode(err), err
-	}
-	defer c.Close()
-
-	payload := types.PhaseAdvanceSignal{
+	sig := protocol.PhaseAdvanceSignal{
 		ToPhase:      toPhase,
 		TriggeredBy:  triggeredBy,
 		ConditionMet: condition,
 	}
-
-	if err := c.SignalWorkflow(ctx, epochId, "", temporal.SignalAdvancePhase, payload); err != nil {
-		return pasterrors.ExitCode(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow}), &pasterrors.StructuredError{
-			Category: pasterrors.CategoryWorkflow,
-			What:     fmt.Sprintf("Couldn't send the phase-advance request to epoch %q.", epochId),
-			Why:      "The workflow server rejected the advance signal.",
-			Where:    "Advancing the workflow phase (internal/handlers/phase.go in handlers.PhaseAdvance).",
-			Impact:   "The phase transition didn't start, so the workflow remains in its current phase.",
-			Fix: fmt.Sprintf("1. Confirm the epoch is currently running:\n"+
-				"     pasture-msg epoch status --epoch-id %q\n"+
-				"2. If the epoch isn't found, list active epochs to find the right ID:\n"+
-				"     pasture-msg epoch list\n"+
-				"3. Retry the phase advance once the epoch is healthy.",
-				epochId),
-			Cause: err,
-		}
+	if err := ctrl.AdvancePhase(context.Background(), epochId, sig); err != nil {
+		return pasterrors.ExitCode(err), err
 	}
 
 	out, fmtErr := formatters.FormatSignalResult(true, format)

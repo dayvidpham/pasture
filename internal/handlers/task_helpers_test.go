@@ -3,13 +3,13 @@ package handlers_test
 import (
 	"bytes"
 	"encoding/json"
-	"path/filepath"
 	"testing"
 
 	"github.com/dayvidpham/provenance"
 
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
@@ -18,7 +18,7 @@ import (
 // in-memory DB would not be shared across calls.
 func dbPath(t *testing.T) string {
 	t.Helper()
-	return filepath.Join(t.TempDir(), "pasture.db")
+	return testutil.GoldenUnifiedDBPath(t)
 }
 
 // taskJSONShape mirrors the formatter's JSON wire shape. Tests decode into
@@ -162,15 +162,13 @@ func createTask(t *testing.T, dbPath, title string) string {
 // and returns the agent's wire-format ID. Tests use this to seed an author
 // before exercising comment-related handlers.
 //
-// Routes through OpenTaskTracker so the test fixture exercises the same
-// open-side path the production CLI uses (PROPOSAL-2 §7.4 / Slice S10): the
-// audit migrator runs on first open against an empty file (no-op for fresh
-// databases), and subsequent handler calls share the same on-disk layout.
+// Routes through the same unified tracker used by production, but skips
+// migrations because dbPath comes from the pre-migrated golden test database.
 // RegisterHumanAgent is a method on the embedded provenance.Tracker so the
 // call site is unchanged from the legacy OpenTracker path.
 func mustRegisterAgent(t *testing.T, dbPath, name, contact string) string {
 	t.Helper()
-	tr, err := tasks.OpenTaskTracker(dbPath)
+	tr, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("open tracker for agent register: %v", err)
 	}

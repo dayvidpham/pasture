@@ -35,6 +35,7 @@ import (
 	_ "modernc.org/sqlite" // pure-Go driver; CGO_ENABLED=0 compatible
 
 	"github.com/dayvidpham/pasture/internal/audit"
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
@@ -67,12 +68,66 @@ func OpenTaskTracker(dbPath string) (protocol.TaskTracker, error) {
 	return openTaskTrackerImpl(dbPath)
 }
 
+type openTaskTrackerOptions struct {
+	skipMigrations bool
+	maxOpenConns   int
+}
+
+// OpenTaskTrackerOption configures OpenTaskTrackerWithOptions.
+type OpenTaskTrackerOption func(*openTaskTrackerOptions)
+
+// WithSkipMigrations opens a pre-migrated database without running the audit
+// migrator. The audit layer still asserts the schema version loudly. This is an
+// opt-in test performance hook; production callers should use OpenTaskTracker.
+func WithSkipMigrations() OpenTaskTrackerOption {
+	return func(o *openTaskTrackerOptions) {
+		o.skipMigrations = true
+	}
+}
+
+// WithMaxOpenConns overrides the pasture-owned audit handle's connection-pool
+// size. It is intended for tests that need one goroutine to hold a connection
+// while another observes the same database. Production callers should leave it
+// unset, preserving the single-connection writer cap.
+func WithMaxOpenConns(n int) OpenTaskTrackerOption {
+	return func(o *openTaskTrackerOptions) {
+		o.maxOpenConns = n
+	}
+}
+
+// OpenTaskTrackerWithOptions opens the unified tracker with explicit opt-in
+// behavior for tests that copy a current golden database.
+func OpenTaskTrackerWithOptions(dbPath string, opts ...OpenTaskTrackerOption) (protocol.TaskTracker, error) {
+	cfg := openTaskTrackerOptions{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	return openTaskTrackerWithOptions(dbPath, cfg)
+}
+
 // openTaskTrackerImpl is the actual constructor. Split out so init() can
 // register it without recursive resolution of the public OpenTaskTracker
 // symbol via the protocol package.
 func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
+	return openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{})
+}
+
+func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (protocol.TaskTracker, error) {
 	if dbPath == "" {
 		dbPath = DefaultDBPath()
+	}
+
+	// Resolve the audit-handle pool size before opening anything so we can
+	// fail fast with an actionable error on a misconfigured PASTURE_DB_POOL_SIZE.
+	// An explicit WithMaxOpenConns option takes priority; otherwise the env
+	// var PASTURE_DB_POOL_SIZE is consulted, falling back to DefaultDBPoolSize (1).
+	poolSize := cfg.maxOpenConns
+	if poolSize <= 0 {
+		var poolErr error
+		poolSize, poolErr = ResolveDBPoolSize()
+		if poolErr != nil {
+			return nil, poolErr
+		}
 	}
 
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
@@ -100,7 +155,13 @@ func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
 	// (and any of its own tables). NewSqliteAuditTrail invokes audit.Migrate
 	// internally; if Migrate returns a CategoryStorage / CategoryValidation
 	// error (newer-schema rejection), it propagates out unchanged via %w.
-	trail, err := audit.NewSqliteAuditTrail(dbPath)
+	var trail *audit.SqliteAuditTrail
+	var err error
+	if cfg.skipMigrations {
+		trail, err = audit.NewSqliteAuditTrailWithOptions(dbPath, audit.WithSkipMigrations())
+	} else {
+		trail, err = audit.NewSqliteAuditTrail(dbPath)
+	}
 	if err != nil {
 		return nil, wrapOpenError(dbPath, "audit subsystem", err)
 	}
@@ -109,9 +170,10 @@ func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
 	// fresh handle (not reuse trail's) to avoid taking a hidden reference
 	// into audit's struct internals — the modernc.org/sqlite driver shares
 	// the underlying file (via WAL) so writes through either handle hit the
-	// same disk state. SetMaxOpenConns(1) on this handle plus busy_timeout
-	// gives us the same single-writer serialisation as the audit handle.
-	auditDB, err := openAuditHandle(dbPath)
+	// same disk state. The shared DSN (WAL + busy_timeout + _txlock=immediate)
+	// gives this handle the same write serialisation as the audit handle.
+	// poolSize was already resolved above (WithMaxOpenConns > env > default 1).
+	auditDB, err := openAuditHandle(dbPath, poolSize)
 	if err != nil {
 		_ = trail.Close()
 		return nil, err
@@ -131,8 +193,8 @@ func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
 	// Open Provenance on the same file. provenance.OpenSQLite manages its
 	// own *sql.DB handle (separate from auditDB). Both handles target the
 	// same on-disk file via the modernc/sqlite driver; WAL mode + a
-	// 5000ms busy_timeout (set by NewSqliteAuditTrail's pragmas) provide
-	// cross-handle serialisation.
+	// 5000ms busy_timeout (applied via the shared DSN on the pasture handles)
+	// provide cross-handle serialisation.
 	prov, err := provenance.OpenSQLite(dbPath)
 	if err != nil {
 		_ = auditDB.Close()
@@ -164,10 +226,12 @@ func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
 }
 
 // openAuditHandle opens a private *sql.DB on the same SQLite file used by
-// audit and applies the same pragmas (WAL + busy_timeout=5000) so writes
-// from this handle serialise correctly against audit and Provenance writes.
-func openAuditHandle(dbPath string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", dbPath)
+// audit, configured via the shared DSN (WAL + busy_timeout=5000 +
+// synchronous=NORMAL + foreign_keys=ON + _txlock=immediate) so writes from this
+// handle serialise correctly against audit and Provenance writes. The WAL
+// multi-writer model + busy_timeout replaces the former single-connection cap.
+func openAuditHandle(dbPath string, maxOpenConns int) (*sql.DB, error) {
+	db, err := sql.Open("sqlite", dbconn.SharedDSN(dbPath))
 	if err != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
@@ -190,41 +254,17 @@ func openAuditHandle(dbPath string) (*sql.DB, error) {
 		}
 	}
 
-	// Single-writer serialisation. Multiple handles into modernc/sqlite share
-	// the file via WAL, so this max-conns=1 prevents *this* handle from
-	// queuing writers against itself. Cross-handle (this vs audit vs
-	// Provenance) serialisation comes from SQLite's file lock + WAL.
-	db.SetMaxOpenConns(1)
-
-	pragmas := []string{
-		`PRAGMA journal_mode=WAL`,
-		`PRAGMA busy_timeout=5000`,
+	// The shared DSN already applied WAL + busy_timeout + synchronous +
+	// foreign_keys + _txlock=immediate to every connection in the pool, so no
+	// runtime PRAGMAs are needed. This pasture-owned write handle keeps the
+	// single-connection cap (like the audit handle) to serialise its writers at
+	// the Go level — the proven model the cross-subsystem race test exercises.
+	// Only the DBOS engine handle is uncapped, because its poller needs a second
+	// concurrent connection.
+	if maxOpenConns <= 0 {
+		maxOpenConns = 1
 	}
-	for _, p := range pragmas {
-		if _, err := db.Exec(p); err != nil {
-			db.Close()
-			return nil, &pasterrors.StructuredError{
-				Category: pasterrors.CategoryStorage,
-				What:     "Couldn't configure the pasture database for safe concurrent writes.",
-				Why: fmt.Sprintf(
-					"Tried to apply the database setting %q on %q, but it failed.\n"+
-						"This setting is what lets the daemon and the CLI write at the same time\n"+
-						"without one blocking the other for too long.",
-					p, dbPath,
-				),
-				Where: "Opening the pasture database (internal/tasks/open_unified.go in tasks.openAuditHandle).",
-				Impact: "Without this setting, writes from different parts of pasture can stall or\n" +
-					"time out under load.",
-				Fix: fmt.Sprintf("1. Confirm the database file is writable:\n"+
-					"     ls -l %q\n"+
-					"2. If the file lives on a network or read-only filesystem, move it onto a\n"+
-					"   local writable disk and point pasture at the new location:\n"+
-					"     pasture task --db <local-path> ...",
-					dbPath),
-				Cause: err,
-			}
-		}
-	}
+	db.SetMaxOpenConns(maxOpenConns)
 	return db, nil
 }
 

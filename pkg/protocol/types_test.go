@@ -390,8 +390,8 @@ func TestEventType_IsValid(t *testing.T) {
 func TestAllEventTypes_Completeness(t *testing.T) {
 	t.Parallel()
 
-	if got := len(protocol.AllEventTypes); got != 8 {
-		t.Errorf("len(AllEventTypes) = %d, want 8", got)
+	if got := len(protocol.AllEventTypes); got != 9 {
+		t.Errorf("len(AllEventTypes) = %d, want 9", got)
 	}
 	for _, e := range protocol.AllEventTypes {
 		if !e.IsValid() {

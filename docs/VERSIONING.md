@@ -17,7 +17,7 @@ consumer; the **external Go** channel is deferred-but-plausible.
 |---|---------|----------|--------|-----------------|
 | ① | **Claude Code plugin** | skills + agent definitions, installed via Claude Code | content + release tooling ready; **no manifest, 0 tags** | **semver tags + plugin manifest — needed now** |
 | ② | **External Go import** | `pkg/protocol` imported by another module | no importer yet; **peasant** (ex-`agent-data-leverage`) is a plausible future consumer (analytics tool / taxonomy) | `v0.x` no-guarantees; pin a commit; stabilization trigger |
-| ③ | **Inter-tool** | the pasture binaries (`pastured`, `pasture-msg`, `pasture`, `pasture-release`) | **real, current** — 54 internal imports | shared contract to prevent drift |
+| ③ | **Inter-tool** | the pasture binaries (`pastured`, `pasture`, `pasture-release`) | **real, current** — 54 internal imports | shared contract to prevent drift |
 
 ---
 
@@ -73,23 +73,24 @@ plugin**. This is the channel that needs versioning *now*.
 
 ## ③ Inter-tool channel (the pasture binaries) — REAL CURRENT consumer
 
-`pastured` (Temporal worker daemon), `pasture-msg` (control CLI), `pasture` (task/audit CLI), and
-`pasture-release` all import `pkg/protocol`. This is the **real, present** consumption — and its
-purpose is **drift-prevention**.
+`pastured` (DBOS engine-host daemon), `pasture` (unified CLI for tasks, epoch lifecycle, signals,
+and queries), and `pasture-release` all import `pkg/protocol`. This is the **real, present**
+consumption — and its purpose is **drift-prevention**.
 
 - **The contract:** the shared single-source-of-truth is **`pkg/protocol`** (types: `PhaseId`,
-  `AuditEvent`, `TaskTracker`, `VoteType`, …) **plus `internal/temporal/constants.go`** (signal /
-  query names: `SignalSubmitVote`, `SignalAdvancePhase`, `QueryCurrentState`, `QueryFullState`, …).
-- **Why it matters:** `pastured` *registers* the workflow's signals/queries; `pasture-msg` *sends*
-  them. If either hardcoded a name or redefined a type, they would **drift** and silently fail to
-  communicate. Both referencing the same constants/types makes drift a compile error, not a runtime
-  surprise.
+  `AuditEvent`, `TaskTracker`, `VoteType`, `SignalTopic`, `QueryName`, …). Signal and query topic
+  constants are declared once in `pkg/protocol`; all binaries reference them directly.
+- **Why it matters:** `pastured` hosts the DBOS engine that registers durable workflows and
+  consumes signals; `pasture` starts, signals, and queries those workflows through the shared
+  database-backed protocol. If either hardcoded a name or redefined a type, they would **drift**
+  and silently fail to communicate. Both referencing the same constants/types makes drift a compile
+  error, not a runtime surprise.
 - **Convention:** in-tree binaries **import `pkg/protocol` directly** (never via `internal/types`
   aliases — see `pasture/CLAUDE.md`) and **never hardcode** a signal/query string — always use the
-  `internal/temporal/constants.go` constant.
-- **Example:** adding a new query, a contributor adds `QuerySliceProgressState = "slice_progress_state"`
-  to `constants.go` once; both `pastured`'s query handler and `pasture-msg`'s query command
-  reference that constant, so they cannot disagree on the wire name.
+  typed constants in `pkg/protocol`.
+- **Example:** adding a new signal, a contributor adds `SignalMyTopic SignalTopic = "my_topic"` to
+  `pkg/protocol` once; both `pastured`'s handler and `pasture`'s CLI command reference that
+  constant, so they cannot disagree on the wire name.
 
 ---
 
@@ -99,7 +100,7 @@ purpose is **drift-prevention**.
 |------|--------|
 | **versioning-strategy** | SemVer, cut by `pasture-release`; a git tag is the release unit (channel ①). Pre-1.0 today (0 tags). |
 | **semver-guarantees** | Pre-1.0: **none** for external consumers (①/②). Internal (③): the binaries live in one Go module and move in lockstep — no inter-binary version skew possible. |
-| **import-path-convention** | External: `github.com/dayvidpham/pasture/pkg/protocol`. Internal: import `pkg/protocol` directly, not `internal/types` aliases; never hardcode signal/query names (use `internal/temporal/constants.go`). |
+| **import-path-convention** | External: `github.com/dayvidpham/pasture/pkg/protocol`. Internal: import `pkg/protocol` directly, not `internal/types` aliases; never hardcode signal/query names (use typed constants in `pkg/protocol`). |
 | **deprecation-policy** | **Pre-1.0 (now): anything goes** — any symbol/skill/command/type may change or be removed in *any* release, with **no deprecation window** required (still note notable removals in CHANGELOG). Post-1.0: **one MINOR-version window** — deprecate in `vX.Y`, remove no earlier than `vX.(Y+1)`; deprecated items get a `DEPRECATED.md` entry + an in-skill banner (see breaking-change-communication). |
 | **module-version-pinning** | External consumers pin a **commit pseudo-version** until `v1.0` tags exist; then pin a tag. |
 | **stability-tiers** | **Stable** (heavily-used, safe to depend on): `TaskTracker`, `PhaseId`, `AuditEvent`. **Experimental** (may move): `SessionEntry` (aligned with peasant; will change as that alignment firms up), newer ACP types. |

@@ -24,10 +24,8 @@ Pasture is **unversioned** (0 git tags). **There is no semver guarantee on this 
 
 ## Internal consumers — this is the anti-drift contract
 
-The pasture binaries (`pastured`, `pasture-msg`, `pasture`, `pasture-release`) all import this
-package as their **single source of truth**, together with the signal/query name constants in
-`internal/temporal/constants.go`. That shared contract is what keeps `pastured` (which registers
-signals/queries) and `pasture-msg` (which sends them) from drifting. **Import these types directly
+The pasture binaries (`pastured`, `pasture`, `pasture-release`) all import this
+package as their **single source of truth**. **Import these types directly
 (not via `internal/types` aliases) and never hardcode a signal/query string.**
 
 ## Full policy

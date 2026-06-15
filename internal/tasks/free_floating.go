@@ -482,5 +482,5 @@ func OpenAuditDBForFreeFloating(dbPath string) (*sql.DB, error) {
 	if dbPath == "" {
 		dbPath = DefaultDBPath()
 	}
-	return openAuditHandle(dbPath)
+	return openAuditHandle(dbPath, 0)
 }
