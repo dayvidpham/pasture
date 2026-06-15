@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	_ "modernc.org/sqlite"
 
+	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/pkg/protocol"
@@ -64,6 +66,7 @@ func TestRecovery_MultiVoteCrashReplay(t *testing.T) {
 		_ = victim.Wait()
 		t.Fatalf("VoteRecorded rows before kill = %d, want %d: %+v", len(before), len(protocol.AllReviewAxes), before)
 	}
+	assertDistinctVoteDedupKeys(t, before)
 
 	if err := victim.Process.Kill(); err != nil {
 		t.Fatalf("kill recovery-vote victim: %v", err)
@@ -86,6 +89,10 @@ func TestRecovery_MultiVoteCrashReplay(t *testing.T) {
 	}
 
 	after := voteRecordedRows(t, dbPath)
+	if len(after) != len(protocol.AllReviewAxes) {
+		t.Fatalf("VoteRecorded rows after replay = %d, want %d: %+v", len(after), len(protocol.AllReviewAxes), after)
+	}
+	assertDistinctVoteDedupKeys(t, after)
 	if !reflect.DeepEqual(after, before) {
 		t.Fatalf("VoteRecorded rows changed across crash replay:\nbefore=%+v\nafter=%+v", before, after)
 	}
@@ -108,12 +115,16 @@ func TestRecoveryVoteHelperProcess(t *testing.T) {
 		t.Fatalf("OpenTaskTracker: %v", err)
 	}
 	defer tracker.Close()
+	trail := &recoveryVoteStallTrail{
+		inner:        tracker,
+		stallSeconds: stallSeconds,
+	}
 
 	e, err := New(context.Background(), Config{
 		DBPath:             dbPath,
 		ApplicationVersion: "recovery-vote-test-v1",
 		ExecutorID:         "pasture-recovery-vote-test",
-		Trail:              tracker,
+		Trail:              trail,
 		Tracker:            tracker,
 	})
 	if err != nil {
@@ -121,7 +132,7 @@ func TestRecoveryVoteHelperProcess(t *testing.T) {
 	}
 	defer e.Shutdown(5 * time.Second)
 
-	workflow := recoveryVoteWorkflow(t, e, stallSeconds)
+	workflow := recoveryVoteWorkflow(t, e)
 	dbos.RegisterWorkflow(e.DBOS(), workflow, dbos.WithWorkflowName(recoveryVoteWorkflowName))
 
 	if err := e.Launch(); err != nil {
@@ -141,53 +152,77 @@ func TestRecoveryVoteHelperProcess(t *testing.T) {
 	fmt.Printf("VOTE COMPLETE %d\n", count)
 }
 
-func recoveryVoteWorkflow(t *testing.T, e *Engine, stallSeconds int) func(dbos.DBOSContext, recoveryVoteInput) (int, error) {
+func recoveryVoteWorkflow(t *testing.T, e *Engine) func(dbos.DBOSContext, recoveryVoteInput) (int, error) {
 	t.Helper()
 	return func(ctx dbos.DBOSContext, in recoveryVoteInput) (int, error) {
-		for i, axis := range protocol.AllReviewAxes {
-			axis := axis
+		for _, axis := range protocol.AllReviewAxes {
 			reviewerID := "recovery-" + string(axis)
 			stepSeqInt, err := dbos.GetStepID(ctx)
 			if err != nil {
 				return 0, err
 			}
 			stepSeq := strconv.Itoa(stepSeqInt)
-			dedupKey := protocol.DedupKey(in.EpochID, string(protocol.PhaseReview), string(protocol.EventVoteRecorded), stepSeq)
-			_, err = dbos.RunAsStep(ctx, func(c context.Context) (struct{}, error) {
-				_, err := e.trail.RecordEventReturningId(c, protocol.AuditEvent{
-					EpochId:   in.EpochID,
-					Phase:     protocol.PhaseReview,
-					Role:      reviewerID,
-					EventType: protocol.EventVoteRecorded,
-					Payload: map[string]any{
-						"axis":       string(axis),
-						"vote":       string(protocol.VoteAccept),
-						"reviewerId": reviewerID,
-					},
-					Timestamp: time.Now().UTC(),
-					DedupKey:  dedupKey,
-				})
-				if err != nil {
-					return struct{}{}, err
-				}
-				if stallSeconds > 0 && i == len(protocol.AllReviewAxes)-1 {
-					if err := signalRecoveryVoteReady(); err != nil {
-						return struct{}{}, err
-					}
-					select {
-					case <-time.After(time.Duration(stallSeconds) * time.Second):
-					case <-c.Done():
-						return struct{}{}, c.Err()
-					}
-				}
-				return struct{}{}, nil
-			})
+			err = e.emitVoteRecorded(ctx, in.EpochID, protocol.PhaseReview, protocol.ReviewVoteSignal{
+				Axis:       axis,
+				Vote:       protocol.VoteAccept,
+				ReviewerId: reviewerID,
+			}, stepSeq)
 			if err != nil {
 				return 0, err
 			}
 		}
 		return len(protocol.AllReviewAxes), nil
 	}
+}
+
+type recoveryVoteStallTrail struct {
+	inner        audit.Trail
+	stallSeconds int
+	mu           sync.Mutex
+	voteWrites   int
+}
+
+func (s *recoveryVoteStallTrail) RecordEvent(ctx context.Context, event protocol.AuditEvent) error {
+	return s.inner.RecordEvent(ctx, event)
+}
+
+func (s *recoveryVoteStallTrail) RecordEventReturningId(ctx context.Context, event protocol.AuditEvent) (int64, error) {
+	id, err := s.inner.RecordEventReturningId(ctx, event)
+	if err != nil {
+		return 0, err
+	}
+	if event.EventType != protocol.EventVoteRecorded {
+		return id, nil
+	}
+	s.mu.Lock()
+	s.voteWrites++
+	shouldStall := s.stallSeconds > 0 && s.voteWrites == len(protocol.AllReviewAxes)
+	stallSeconds := s.stallSeconds
+	s.mu.Unlock()
+	if !shouldStall {
+		return id, nil
+	}
+	if err := signalRecoveryVoteReady(); err != nil {
+		return 0, err
+	}
+	select {
+	case <-time.After(time.Duration(stallSeconds) * time.Second):
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+	return id, nil
+}
+
+func (s *recoveryVoteStallTrail) QueryEvents(ctx context.Context, epochId string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
+	return s.inner.QueryEvents(ctx, epochId, phase, role)
+}
+
+func (s *recoveryVoteStallTrail) RecordSessionEntries(ctx context.Context, entries []protocol.SessionEntry) error {
+	return s.inner.RecordSessionEntries(ctx, entries)
+}
+
+func (s *recoveryVoteStallTrail) QuerySessionEntries(ctx context.Context, sessionId string) ([]protocol.SessionEntry, error) {
+	return s.inner.QuerySessionEntries(ctx, sessionId)
 }
 
 func armRecoveryVoteReadySignal(t *testing.T) chan os.Signal {
@@ -252,6 +287,23 @@ func voteRecordedRows(t *testing.T, dbPath string) []voteRecordedSnapshot {
 		t.Fatalf("iterate VoteRecorded rows: %v", err)
 	}
 	return out
+}
+
+func assertDistinctVoteDedupKeys(t *testing.T, rows []voteRecordedSnapshot) {
+	t.Helper()
+	seen := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		if row.DedupKey == "" {
+			t.Fatalf("VoteRecorded row %d has empty dedup key: %+v", row.ID, row)
+		}
+		if _, ok := seen[row.DedupKey]; ok {
+			t.Fatalf("VoteRecorded rows contain duplicate dedup key %q: %+v", row.DedupKey, rows)
+		}
+		seen[row.DedupKey] = struct{}{}
+	}
+	if len(seen) != len(protocol.AllReviewAxes) {
+		t.Fatalf("VoteRecorded distinct dedup keys = %d, want %d: %+v", len(seen), len(protocol.AllReviewAxes), rows)
+	}
 }
 
 func containsLine(out, line string) bool {
