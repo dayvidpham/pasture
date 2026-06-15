@@ -12,8 +12,9 @@ The testing strategy is:
 - Do not use `t.Setenv` for path isolation. It is not compatible with parallel
   tests and it makes the isolation model ambiguous.
 - Inject per-test paths and IDs directly into the code under test.
-- Use `os.Setenv` in `TestMain` only for process-wide knobs such as `HOME`,
-  `XDG_DATA_HOME`, and pool-size overrides.
+- Use `os.Setenv` in `TestMain` only for process-wide knobs such as `HOME`
+  and `XDG_DATA_HOME`. See the [env-override knobs table](#env-override-knobs)
+  for the full list of what is and is not set by tests.
 
 ## Parallel-safe pattern
 
@@ -33,15 +34,17 @@ exercise git commands or relative paths.
 
 ## Hermetic environment
 
-Process-wide setup belongs in `TestMain`, not in individual tests. The current
-helpers use `os.Setenv` to redirect:
+Process-wide setup belongs in `TestMain`, not in individual tests. The helpers
+use `os.Setenv` (not `t.Setenv`) so individual tests can still call
+`t.Parallel()` — `t.Setenv` marks tests non-parallel.
 
-- `HOME`
-- `XDG_DATA_HOME`
-- pool-size knobs that should stay small in tests
+### Env-override knobs
 
-Production defaults stay unchanged. The point is to make the test process
-hermetic, not to change runtime behavior.
+| Knob | Prod default | Test value | Set where |
+|------|--------------|------------|-----------|
+| `HOME`, `XDG_DATA_HOME`, all `XDG_*` | Real user home / XDG dirs | Throwaway temp dir | `TestMain` → `SetHermeticEnv(prefix)` — process-wide `os.Setenv`; does not disable `t.Parallel` |
+| `GOCACHE`, `GOPATH` | Resolved from host via `go env GOCACHE`/`GOPATH` (not `os.Getenv` — may be unset in the dev shell) | **Preserved** — effective host cache paths | `TestMain` — set explicitly *before* redirecting `HOME` so subprocess `go build` calls (audit crash tests, `cmd/pasture` `TestMain`) stay warm and do not hit a cold cache |
+| `PASTURE_DB_POOL_SIZE` | `1` | Unset / default `1` | **Production tuning only — NEVER set by tests.** Governs only the pasture-owned `auditDB` handle (`internal/tasks/open_unified.go`): affects `AttachContext`, `EventContexts`, categories, and timeline queries. Does **not** affect `RecordEvent` (the audit-trail handle) or the provenance handle — those stay at pool size 1. Tests needing pool > 1 use `tasks.WithMaxOpenConns` directly; a process-wide env set under `t.Parallel` would race. |
 
 ## Golden database and migration carve-out
 

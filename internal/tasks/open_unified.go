@@ -117,6 +117,19 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 		dbPath = DefaultDBPath()
 	}
 
+	// Resolve the audit-handle pool size before opening anything so we can
+	// fail fast with an actionable error on a misconfigured PASTURE_DB_POOL_SIZE.
+	// An explicit WithMaxOpenConns option takes priority; otherwise the env
+	// var PASTURE_DB_POOL_SIZE is consulted, falling back to DefaultDBPoolSize (1).
+	poolSize := cfg.maxOpenConns
+	if poolSize <= 0 {
+		var poolErr error
+		poolSize, poolErr = ResolveDBPoolSize()
+		if poolErr != nil {
+			return nil, poolErr
+		}
+	}
+
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
@@ -159,7 +172,8 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 	// the underlying file (via WAL) so writes through either handle hit the
 	// same disk state. The shared DSN (WAL + busy_timeout + _txlock=immediate)
 	// gives this handle the same write serialisation as the audit handle.
-	auditDB, err := openAuditHandle(dbPath, cfg.maxOpenConns)
+	// poolSize was already resolved above (WithMaxOpenConns > env > default 1).
+	auditDB, err := openAuditHandle(dbPath, poolSize)
 	if err != nil {
 		_ = trail.Close()
 		return nil, err

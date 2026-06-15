@@ -30,11 +30,10 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "pasture cli smoke: could not set hermetic env: %v\n", err)
 		os.Exit(1)
 	}
-	defer envCleanup()
-
 	tmpDir, err := os.MkdirTemp("", "pasture-cli-smoke-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "pasture cli smoke: could not create temp dir: %v\n", err)
+		envCleanup()
 		os.Exit(1)
 	}
 	binaryName := "pasture"
@@ -56,11 +55,14 @@ func TestMain(m *testing.M) {
 				"  output: %s\n",
 			binaryPath, err, buildOut.String(),
 		)
+		_ = os.RemoveAll(tmpDir)
+		envCleanup()
 		os.Exit(1)
 	}
 
 	code := m.Run()
 	_ = os.RemoveAll(tmpDir)
+	envCleanup()
 	os.Exit(code)
 }
 

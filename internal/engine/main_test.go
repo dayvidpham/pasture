@@ -15,6 +15,13 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "engine tests: hermetic env setup failed: %v\n", err)
 		os.Exit(1)
 	}
-	defer cleanup()
-	goleak.VerifyTestMain(m, testutil.GoleakOptions()...)
+	code := m.Run()
+	cleanup()
+	if err := goleak.Find(testutil.GoleakOptions()...); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		if code == 0 {
+			code = 1
+		}
+	}
+	os.Exit(code)
 }

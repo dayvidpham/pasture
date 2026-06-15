@@ -4,8 +4,6 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dayvidpham/bestiary v0.1.0 h1:5ovdxMlRgssn3+oJCZqjbhlhX6aQwbYFf981LbMAhII=
 github.com/dayvidpham/bestiary v0.1.0/go.mod h1:Z2/Ax6PmmBqhHomuLDjvf+JQBo0K7TFyrQN7pOCOpKs=
-github.com/dayvidpham/provenance v0.0.2 h1:/yMGw9YCdBZT0SnyEM9XskL1Qj2pB5P4686algdgSGI=
-github.com/dayvidpham/provenance v0.0.2/go.mod h1:I2VvA5RMcg+/Audz7Kg0Haio8emNe87wVK20RT2xW1g=
 github.com/dayvidpham/provenance v0.0.3-0.20260614233909-f185372f4c66 h1:1xSEoiN480HCIViYrjmRIfil8bIENrmKaqdBwCwIixk=
 github.com/dayvidpham/provenance v0.0.3-0.20260614233909-f185372f4c66/go.mod h1:I2VvA5RMcg+/Audz7Kg0Haio8emNe87wVK20RT2xW1g=
 github.com/dbos-inc/dbos-transact-golang v0.16.0 h1:1TPVfcyZ7gqNtZyXmaJRtkQqlv8mchE4XQoRM7pOqp8=

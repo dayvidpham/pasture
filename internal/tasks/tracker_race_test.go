@@ -150,7 +150,7 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 	)
 
 	dbPath := testutil.GoldenUnifiedDBPath(t)
-	tracker, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithSkipMigrations(), tasks.WithMaxOpenConns(2))
+	tracker, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("OpenTaskTracker(%q) failed: %v", dbPath, err)
 	}
@@ -235,9 +235,13 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 						// if any busy errors slipped through.
 						continue
 					}
-					// Any other error is a hard failure.
-					t.Errorf("goroutine %d iter %d op %v: unexpected error: %v",
-						goroutineId, i, op, err)
+					// Any other error is a hard failure. Print the unwrapped
+					// cause alongside the top-level message so future
+					// busy-vs-fatal triage has the raw driver text to work
+					// with (StructuredError.Error() returns "category: what"
+					// and hides the cause; Unwrap reaches the driver string).
+					t.Errorf("goroutine %d iter %d op %v: unexpected error: %v; underlying cause: %+v",
+						goroutineId, i, op, err, errors.Unwrap(err))
 					continue
 				}
 				atomic.AddInt64(&succeededByOp[op], 1)
@@ -546,10 +550,13 @@ func mustCountRows(t *testing.T, db *sql.DB, table string) int64 {
 	return n
 }
 
-// isBusyOrLockedErr reports whether err contains a SQLite contention
-// signature (SQLITE_BUSY or SQLITE_LOCKED). Substring match is sufficient
-// because modernc.org/sqlite formats both as "database is locked
-// (SQLITE_BUSY)" or "(SQLITE_LOCKED)" in the underlying driver error chain.
+// isBusyOrLockedErr reports whether err (or any error in its Unwrap chain)
+// contains a SQLite contention signature (SQLITE_BUSY or SQLITE_LOCKED).
+//
+// Walking the full chain is required because pasture wraps driver errors
+// inside *pasterrors.StructuredError: StructuredError.Error() returns
+// "category: what" which hides the raw driver message. The SQLite busy/locked
+// text lives in StructuredError.Cause, which is reachable via Unwrap().
 //
 // Centralised so the test's busy-error assertion has one definition; new
 // SQLite contention signatures can be added here without touching the test
@@ -560,12 +567,20 @@ func isBusyOrLockedErr(err error) bool {
 	}
 	// Fast path: errors.Is against any sentinel the driver might export.
 	// modernc.org/sqlite doesn't yet export sentinel busy errors, so we
-	// fall through to substring matching on the message.
+	// fall through to substring matching on the unwrapped chain.
 	if errors.Is(err, sql.ErrConnDone) {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "SQLITE_BUSY") ||
-		strings.Contains(msg, "SQLITE_LOCKED") ||
-		strings.Contains(msg, "database is locked")
+	// Walk every level of the error chain. StructuredError.Unwrap() returns
+	// .Cause, so a wrapped driver "database is locked" is reached here even
+	// though the top-level .Error() string wouldn't show it.
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		msg := e.Error()
+		if strings.Contains(msg, "SQLITE_BUSY") ||
+			strings.Contains(msg, "SQLITE_LOCKED") ||
+			strings.Contains(msg, "database is locked") {
+			return true
+		}
+	}
+	return false
 }
