@@ -54,6 +54,7 @@ func sortedKeys(m map[string]struct{}) []string {
 // test still passes if a future DBOS version shifts its schema — what it pins is
 // the boundary, not the substrate's internal table set.
 func TestProvenanceEngineBoundary(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 
 	// 1. Create the pasture + Provenance tables (audit_events, tasks,
@@ -75,9 +76,11 @@ func TestProvenanceEngineBoundary(t *testing.T) {
 
 	// 2. Bring up the engine (creates epoch_state_projection) and Launch
 	//    (creates the DBOS system tables).
+	executorID, appVersion := testEngineIdentity(t)
 	e, err := engine.New(context.Background(), engine.Config{
 		DBPath:             dbPath,
-		ApplicationVersion: "boundary-v1",
+		ApplicationVersion: appVersion,
+		ExecutorID:         executorID,
 	})
 	if err != nil {
 		t.Fatalf("engine.New: %v", err)

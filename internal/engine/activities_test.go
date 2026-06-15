@@ -21,6 +21,7 @@ import (
 func newEngineWithTracker(t *testing.T) (*engine.Engine, string) {
 	t.Helper()
 	dbPath := testutil.GoldenUnifiedDBPath(t)
+	executorID, appVersion := testEngineIdentity(t)
 	tracker, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("OpenTaskTracker: %v", err)
@@ -29,7 +30,8 @@ func newEngineWithTracker(t *testing.T) (*engine.Engine, string) {
 
 	e, err := engine.New(context.Background(), engine.Config{
 		DBPath:                   dbPath,
-		ApplicationVersion:       "activities-v1",
+		ApplicationVersion:       appVersion,
+		ExecutorID:               executorID,
 		QueueBasePollingInterval: 100 * time.Millisecond,
 		// Route BOTH forensic tiers through the one tracker: audit_events via
 		// the audit methods, activities via the provenance methods.
@@ -59,6 +61,7 @@ func countRows(t *testing.T, db *sql.DB, q string, args ...any) int {
 // records exactly one activity per successful transition, attributed to the
 // stable engine agent, in lock-step with the audit rows.
 func TestEngine_RecordsActivityPerTransition(t *testing.T) {
+	t.Parallel()
 	e, dbPath := newEngineWithTracker(t)
 	const epochId = "epoch-acts"
 
@@ -98,6 +101,7 @@ func TestEngine_RecordsActivityPerTransition(t *testing.T) {
 // by a shared id. Both remain deterministic (the activity id matches the encoder
 // recomputed with the activity kind).
 func TestEngine_ActivityAndAuditDistinctKeys(t *testing.T) {
+	t.Parallel()
 	e, dbPath := newEngineWithTracker(t)
 	const epochId = "epoch-distinct"
 
@@ -149,6 +153,7 @@ func TestEngine_ActivityAndAuditDistinctKeys(t *testing.T) {
 // distinct activity ids (epoch hashed into the key) — no cross-epoch false dedup
 // on the activities tier.
 func TestEngine_ActivitiesCrossEpochDistinct(t *testing.T) {
+	t.Parallel()
 	e, dbPath := newEngineWithTracker(t)
 
 	short := []engine.AdvanceStep{
@@ -176,6 +181,7 @@ func TestEngine_ActivitiesCrossEpochDistinct(t *testing.T) {
 // TestEngine_NoTracker_NoActivities: without a Tracker, the engine records no
 // activities (backward-compatible) while still recording audit rows.
 func TestEngine_NoTracker_NoActivities(t *testing.T) {
+	t.Parallel()
 	e := newEngine(t) // no Tracker configured
 	const epochId = "epoch-no-acts"
 	runEpoch(t, e, epochId, []engine.AdvanceStep{

@@ -52,6 +52,7 @@ import (
 // tables' presence is therefore the cleanest way to prove the route flipped
 // without requiring deeper introspection (e.g., audit_schema_meta version).
 func TestCLI_S10_TaskCreate_LeavesUnifiedAuditTables(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 
 	out := runCLI(t,
@@ -120,6 +121,7 @@ func TestCLI_S10_TaskCreate_LeavesUnifiedAuditTables(t *testing.T) {
 // audit migrator should detect version<MaxKnownSchemaVersion and run the
 // forward chain transparently.
 func TestCLI_S10_AutoMigratesLegacyV1OnFirstUse(t *testing.T) {
+	t.Parallel()
 	dbPath := makeLegacyV1ForS10(t)
 
 	// Pre-condition: the file is a Provenance database with a v1-shaped
@@ -160,6 +162,7 @@ func TestCLI_S10_AutoMigratesLegacyV1OnFirstUse(t *testing.T) {
 // confuse users about where their data lives) and pairs with the binding in
 // internal/tasks.DefaultDBFilename.
 func TestCLI_S10_HelpMentionsUnifiedDefault(t *testing.T) {
+	t.Parallel()
 	out := runCLI(t, "--help")
 	if out.exitCode != 0 {
 		t.Fatalf("--help exit %d; stderr=%q", out.exitCode, out.stderr)

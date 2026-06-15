@@ -15,6 +15,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/engine"
 	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
@@ -95,7 +96,7 @@ func TestResolvePasturedConfigFromFile_DefaultsToSqlite(t *testing.T) {
 }
 
 func TestResolvePasturedConfig_AuditTrailEnvOverride(t *testing.T) {
-	t.Setenv(config.EnvAuditTrail, string(types.BackendMemory))
+	testutil.SetEnv(t, config.EnvAuditTrail, string(types.BackendMemory))
 
 	root := newRootCmd()
 	if err := root.ParseFlags([]string{}); err != nil {
@@ -112,7 +113,7 @@ func TestResolvePasturedConfig_AuditTrailEnvOverride(t *testing.T) {
 }
 
 func TestResolvePasturedConfig_AuditTrailCLIOverridesEnv(t *testing.T) {
-	t.Setenv(config.EnvAuditTrail, string(types.BackendMemory))
+	testutil.SetEnv(t, config.EnvAuditTrail, string(types.BackendMemory))
 
 	root := newRootCmd()
 	if err := root.ParseFlags([]string{"--audit-trail", string(types.BackendSqlite)}); err != nil {
@@ -192,9 +193,9 @@ func TestInitAuditTrail_Sqlite(t *testing.T) {
 
 func TestInitAuditTrail_Sqlite_DefaultPath(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-	t.Setenv("PASTURE_DB_PATH", "")
-	t.Setenv("XDG_DATA_HOME", "")
+	testutil.SetEnv(t, "HOME", tmpDir)
+	testutil.SetEnv(t, "PASTURE_DB_PATH", "")
+	testutil.SetEnv(t, "XDG_DATA_HOME", "")
 
 	cfg := config.PasturedConfig{
 		AuditTrail:  types.BackendSqlite,
@@ -235,9 +236,9 @@ func TestInitAuditTrail_UnknownBackend(t *testing.T) {
 
 func TestResolveDBPath_Default(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-	t.Setenv("PASTURE_DB_PATH", "")
-	t.Setenv("XDG_DATA_HOME", "")
+	testutil.SetEnv(t, "HOME", tmpDir)
+	testutil.SetEnv(t, "PASTURE_DB_PATH", "")
+	testutil.SetEnv(t, "XDG_DATA_HOME", "")
 
 	root := newRootCmd()
 	if err := root.ParseFlags([]string{}); err != nil {
@@ -254,7 +255,7 @@ func TestResolveDBPath_Default(t *testing.T) {
 }
 
 func TestResolveDBPath_Env(t *testing.T) {
-	t.Setenv("PASTURE_DB_PATH", "/env/pasture.db")
+	testutil.SetEnv(t, "PASTURE_DB_PATH", "/env/pasture.db")
 
 	root := newRootCmd()
 	if err := root.ParseFlags([]string{}); err != nil {
@@ -271,7 +272,7 @@ func TestResolveDBPath_Env(t *testing.T) {
 }
 
 func TestResolveDBPath_DBFlagBeatsEnv(t *testing.T) {
-	t.Setenv("PASTURE_DB_PATH", "/env/pasture.db")
+	testutil.SetEnv(t, "PASTURE_DB_PATH", "/env/pasture.db")
 
 	root := newRootCmd()
 	if err := root.ParseFlags([]string{"--db", "/cli/pasture.db"}); err != nil {

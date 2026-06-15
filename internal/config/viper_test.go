@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dayvidpham/pasture/internal/config"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
@@ -32,8 +33,8 @@ func TestResolvePasturedConfig_Defaults(t *testing.T) {
 }
 
 func TestResolvePasturedConfig_EnvOverride(t *testing.T) {
-	t.Setenv(config.EnvAuditTrail, string(types.BackendMemory))
-	t.Setenv(config.EnvAuditDBPath, "/tmp/env-audit.db")
+	testutil.SetEnv(t, config.EnvAuditTrail, string(types.BackendMemory))
+	testutil.SetEnv(t, config.EnvAuditDBPath, "/tmp/env-audit.db")
 
 	cfg := config.ResolvePasturedConfig(newPasturedTestCmd())
 
@@ -46,8 +47,8 @@ func TestResolvePasturedConfig_EnvOverride(t *testing.T) {
 }
 
 func TestResolvePasturedConfig_CLIFlagsOverrideEnvVars(t *testing.T) {
-	t.Setenv(config.EnvAuditTrail, string(types.BackendMemory))
-	t.Setenv(config.EnvAuditDBPath, "/tmp/env-audit.db")
+	testutil.SetEnv(t, config.EnvAuditTrail, string(types.BackendMemory))
+	testutil.SetEnv(t, config.EnvAuditDBPath, "/tmp/env-audit.db")
 
 	cmd := newPasturedTestCmd()
 	if err := cmd.PersistentFlags().Set("audit-trail", string(types.BackendSqlite)); err != nil {
@@ -96,7 +97,6 @@ audit_db_path: /tmp/yaml-audit.db
 func clearAllEnvVars(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{config.EnvAuditTrail, config.EnvAuditDBPath} {
-		t.Setenv(key, "")
-		os.Unsetenv(key) //nolint:errcheck
+		testutil.UnsetEnv(t, key)
 	}
 }

@@ -50,6 +50,7 @@ func seedEpochDB(t *testing.T, epochId string) string {
 }
 
 func TestCLI_QueryState_JSON(t *testing.T) {
+	t.Parallel()
 	const epochId = "demo--query-state"
 	db := seedEpochDB(t, epochId)
 
@@ -73,6 +74,7 @@ func TestCLI_QueryState_JSON(t *testing.T) {
 }
 
 func TestCLI_QueryCurrentAndTransitions(t *testing.T) {
+	t.Parallel()
 	const epochId = "demo--query-current"
 	db := seedEpochDB(t, epochId)
 
@@ -109,6 +111,7 @@ func TestCLI_QueryCurrentAndTransitions(t *testing.T) {
 // TestCLI_QuerySessionsAndSliceProgress checks the two detail verbs are wired
 // and read the projection (empty lists render cleanly with a clean exit).
 func TestCLI_QuerySessionsAndSliceProgress(t *testing.T) {
+	t.Parallel()
 	const epochId = "demo--query-detail"
 	db := seedEpochDB(t, epochId)
 
@@ -123,6 +126,7 @@ func TestCLI_QuerySessionsAndSliceProgress(t *testing.T) {
 // TestCLI_QueryUnknownEpoch covers the fresh-database path: opening a db on
 // which no epoch ran must report a not-found (exit 3), not a raw SQL error.
 func TestCLI_QueryUnknownEpoch(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	out := runCLI(t, "--db", db, "query", "state", "--epoch-id", "demo--never-ran")
 	if out.exitCode != 3 {
@@ -132,6 +136,7 @@ func TestCLI_QueryUnknownEpoch(t *testing.T) {
 
 // TestCLI_QueryMissingEpochId asserts the required-flag guard (exit 1).
 func TestCLI_QueryMissingEpochId(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	out := runCLI(t, "--db", db, "query", "state")
 	if out.exitCode != 1 {

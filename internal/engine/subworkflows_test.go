@@ -78,9 +78,11 @@ import (
 func newQueueEngine(t *testing.T, k int) *engine.Engine {
 	t.Helper()
 	dbPath := testutil.GoldenUnifiedDBPath(t)
+	executorID, appVersion := testEngineIdentity(t)
 	e, err := engine.New(context.Background(), engine.Config{
 		DBPath:                   dbPath,
-		ApplicationVersion:       "test-v1",
+		ApplicationVersion:       appVersion,
+		ExecutorID:               executorID,
 		SliceConcurrency:         k,
 		SkipMigrations:           true,
 		QueueBasePollingInterval: 100 * time.Millisecond,
@@ -100,9 +102,11 @@ func newQueueEngine(t *testing.T, k int) *engine.Engine {
 func newQueueEngineWithHooks(t *testing.T, k int, mgr *hooks.Manager) *engine.Engine {
 	t.Helper()
 	dbPath := testutil.GoldenUnifiedDBPath(t)
+	executorID, appVersion := testEngineIdentity(t)
 	e, err := engine.New(context.Background(), engine.Config{
 		DBPath:                   dbPath,
-		ApplicationVersion:       "test-v1",
+		ApplicationVersion:       appVersion,
+		ExecutorID:               executorID,
 		SliceConcurrency:         k,
 		HooksMgr:                 mgr,
 		SkipMigrations:           true,
@@ -226,6 +230,7 @@ func (h *gatingConcurrencyHandler) Handle(ctx context.Context, p hooks.HookPaylo
 // sub-workflow returns an honest failure (no-signal path), which is pinned by
 // TestSliceSubWorkflow_NoStartSignal_FailsHonestly.
 func TestSliceSubWorkflow_MockMode_CompletesAndReportsProgress(t *testing.T) {
+	t.Parallel()
 	e := newQueueEngine(t, engine.DefaultSliceQueueConcurrency)
 
 	const epochId = "queue--slice-mock-1"
@@ -289,6 +294,7 @@ func TestSliceSubWorkflow_MockMode_CompletesAndReportsProgress(t *testing.T) {
 // This makes the outcome deterministic: subprocess mode → Success=false with a
 // not-yet-implemented error (distinct from the default mock → Success=true).
 func TestSliceSubWorkflow_StartSignalSetsMode(t *testing.T) {
+	t.Parallel()
 	e := newQueueEngine(t, engine.DefaultSliceQueueConcurrency)
 
 	const epochId = "queue--slice-start-sig-v2"
@@ -355,6 +361,7 @@ func TestSliceSubWorkflow_StartSignalSetsMode(t *testing.T) {
 // signal. The post-step Recv window (1s) then finds the queued signal and
 // applies the override.
 func TestSliceSubWorkflow_CompleteSignalOverridesResult(t *testing.T) {
+	t.Parallel()
 	gate := make(chan struct{})
 	rec := newRecordingHandler(gate, hooks.HookSliceStarted)
 	mgr := hooks.NewManager(hooks.WithDispatchTimeout(4 * time.Second))
@@ -429,6 +436,7 @@ func TestSliceSubWorkflow_CompleteSignalOverridesResult(t *testing.T) {
 // path (pinned by TestSliceSubWorkflow_NoStartSignal_FailsHonestly) is not
 // exercised here.
 func TestSliceQueue_BoundedConcurrency(t *testing.T) {
+	t.Parallel()
 	const K = 2
 	const N = 4
 
@@ -518,6 +526,7 @@ func TestSliceQueue_BoundedConcurrency(t *testing.T) {
 // The signals are pre-populated in the DBOS notifications table; each slice
 // consumes its signal when its queue slot opens.
 func TestSliceQueue_BackpressureAllEventuallyComplete(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping 30-slice backpressure test in short mode")
 	}
@@ -607,6 +616,7 @@ func TestSliceQueue_BackpressureAllEventuallyComplete(t *testing.T) {
 // three review-axis votes via dbos.Send unblocks the review sub-workflow and
 // returns a ReviewResult with the correct per-axis vote map.
 func TestReviewSubWorkflow_AllVotesUnblocksResult(t *testing.T) {
+	t.Parallel()
 	e := newQueueEngine(t, engine.DefaultSliceQueueConcurrency)
 
 	const epochId = "queue--review-1"
@@ -656,6 +666,7 @@ func TestReviewSubWorkflow_AllVotesUnblocksResult(t *testing.T) {
 // TestReviewSubWorkflow_ReviseSetsSuccessFalse verifies that a REVISE vote on
 // any axis causes the ReviewResult to have Success=false.
 func TestReviewSubWorkflow_ReviseSetsSuccessFalse(t *testing.T) {
+	t.Parallel()
 	e := newQueueEngine(t, engine.DefaultSliceQueueConcurrency)
 
 	const epochId = "queue--review-revise"
@@ -698,6 +709,7 @@ func TestReviewSubWorkflow_ReviseSetsSuccessFalse(t *testing.T) {
 // supersedes the earlier vote. REVISE then ACCEPT on correctness must produce
 // Success=true (all axes ACCEPT).
 func TestReviewSubWorkflow_LastWriterWins(t *testing.T) {
+	t.Parallel()
 	e := newQueueEngine(t, engine.DefaultSliceQueueConcurrency)
 
 	const epochId = "queue--review-lww"
@@ -747,6 +759,7 @@ func TestReviewSubWorkflow_LastWriterWins(t *testing.T) {
 // 3 axes does NOT unblock the sub-workflow: GetResult must time out because the
 // loop keeps polling.
 func TestReviewSubWorkflow_PartialVoteGateHolds(t *testing.T) {
+	t.Parallel()
 	e := newQueueEngine(t, engine.DefaultSliceQueueConcurrency)
 
 	const epochId = "queue--review-partial"
@@ -803,6 +816,7 @@ func TestReviewSubWorkflow_PartialVoteGateHolds(t *testing.T) {
 // of the round-1 result. This proves the round component prevents DBOS from
 // returning the memoized round-1 (REVISE) result for the iterate-until-ACCEPT loop.
 func TestReviewSubWorkflow_Round2RunsFreshWorkflow(t *testing.T) {
+	t.Parallel()
 	e := newQueueEngine(t, engine.DefaultSliceQueueConcurrency)
 
 	const epochId = "queue--review-round2"
@@ -871,6 +885,7 @@ func TestReviewSubWorkflow_Round2RunsFreshWorkflow(t *testing.T) {
 // SliceStart returns exit 3 (CategoryWorkflow) when the target slice id has
 // never been started as a DBOS workflow.
 func TestHandler_SliceStart_WorkflowError_NeverStartedSlice_Exit3(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -892,6 +907,7 @@ func TestHandler_SliceStart_WorkflowError_NeverStartedSlice_Exit3(t *testing.T) 
 // TestHandler_SliceComplete_WorkflowError_NeverStartedSlice_Exit3 verifies
 // that SliceComplete returns exit 3 for a never-started slice id.
 func TestHandler_SliceComplete_WorkflowError_NeverStartedSlice_Exit3(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
@@ -918,6 +934,7 @@ func TestHandler_SliceComplete_WorkflowError_NeverStartedSlice_Exit3(t *testing.
 // HookSliceFailed. An explicit mock start_slice signal is delivered so the
 // sub-workflow takes the mock-success path.
 func TestSliceSubWorkflow_HookSliceStartedAndCompleted(t *testing.T) {
+	t.Parallel()
 	rec := newRecordingHandler(nil,
 		hooks.HookSliceStarted, hooks.HookSliceCompleted, hooks.HookSliceFailed)
 	mgr := hooks.NewManager()
@@ -976,6 +993,7 @@ func TestSliceSubWorkflow_HookSliceStartedAndCompleted(t *testing.T) {
 // complete_slice override Success=false) fires HookSliceFailed and NOT
 // HookSliceCompleted (after the HookSliceStarted that always fires).
 func TestSliceSubWorkflow_HookSliceFailed(t *testing.T) {
+	t.Parallel()
 	gate := make(chan struct{})
 	rec := newRecordingHandler(gate,
 		hooks.HookSliceStarted, hooks.HookSliceCompleted, hooks.HookSliceFailed)
@@ -1042,6 +1060,7 @@ func TestSliceSubWorkflow_HookSliceFailed(t *testing.T) {
 // An explicit mock start_slice signal is delivered so the sub-workflow takes
 // the mock-success path.
 func TestSliceSubWorkflow_HookNilManagerIsNoop(t *testing.T) {
+	t.Parallel()
 	e := newQueueEngine(t, engine.DefaultSliceQueueConcurrency) // no HooksMgr
 
 	const epochId = "queue--hook-nil"
@@ -1081,6 +1100,7 @@ func TestSliceSubWorkflow_HookNilManagerIsNoop(t *testing.T) {
 //   - subprocess with command → Success=false, Error mentions not-yet-implemented
 //   - unrecognised mode → Success=false, Error mentions the mode and valid modes
 func TestRunSlice_AllModes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		mode        protocol.SliceExecutionMode
@@ -1183,6 +1203,7 @@ func TestRunSlice_AllModes(t *testing.T) {
 // created with that name in the DBOS system). SliceConcurrency() is the stored
 // resolved value (not a re-derivation).
 func TestSliceQueue_DefaultConcurrency(t *testing.T) {
+	t.Parallel()
 	e := newQueueEngine(t, 0) // 0 → DefaultSliceQueueConcurrency
 	if got := e.SliceConcurrency(); got != engine.DefaultSliceQueueConcurrency {
 		t.Errorf("SliceConcurrency() = %d, want %d (default)", got, engine.DefaultSliceQueueConcurrency)
@@ -1247,10 +1268,10 @@ func TestResolveSliceConcurrency_Precedence(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.envVal != "" {
-				t.Setenv(engine.SliceConcurrencyEnv, tc.envVal)
+				testutil.SetEnv(t, engine.SliceConcurrencyEnv, tc.envVal)
 			} else {
 				// Ensure the env var is unset for this test case.
-				t.Setenv(engine.SliceConcurrencyEnv, "")
+				testutil.SetEnv(t, engine.SliceConcurrencyEnv, "")
 			}
 
 			got, err := engine.ResolveSliceConcurrency(tc.flagVal)
@@ -1274,6 +1295,7 @@ func TestResolveSliceConcurrency_Precedence(t *testing.T) {
 // TestEnqueueSlice_EmptyIdRejectsWithValidationError verifies that EnqueueSlice
 // returns a CategoryValidation error when SliceId or EpochId is empty.
 func TestEnqueueSlice_EmptyIdRejectsWithValidationError(t *testing.T) {
+	t.Parallel()
 	e := newQueueEngine(t, engine.DefaultSliceQueueConcurrency)
 
 	// Empty SliceId.
@@ -1292,6 +1314,7 @@ func TestEnqueueSlice_EmptyIdRejectsWithValidationError(t *testing.T) {
 // TestEnqueueReview_EmptyIdRejectsWithValidationError verifies that EnqueueReview
 // returns a CategoryValidation error when EpochId or PhaseId is empty.
 func TestEnqueueReview_EmptyIdRejectsWithValidationError(t *testing.T) {
+	t.Parallel()
 	e := newQueueEngine(t, engine.DefaultSliceQueueConcurrency)
 
 	// Empty EpochId.
@@ -1352,6 +1375,7 @@ func sendMockStartSignal(t *testing.T, e *engine.Engine, sliceId string, timeout
 //
 // This test deliberately does NOT send a start_slice signal.
 func TestSliceSubWorkflow_NoStartSignal_FailsHonestly(t *testing.T) {
+	t.Parallel()
 	recFail := newRecordingHandler(nil,
 		hooks.HookSliceCompleted, hooks.HookSliceFailed)
 	mgr := hooks.NewManager(hooks.WithDispatchTimeout(4 * time.Second))
@@ -1433,6 +1457,7 @@ func TestSliceSubWorkflow_NoStartSignal_FailsHonestly(t *testing.T) {
 // This test pins the workflow-level validation guard in review.go that drops
 // signals where !sig.Axis.IsValid() || !sig.Vote.IsValid().
 func TestReviewSubWorkflow_JunkVoteDropped(t *testing.T) {
+	t.Parallel()
 	e := newQueueEngine(t, engine.DefaultSliceQueueConcurrency)
 
 	const epochId = "queue--review-junk-vote"
@@ -1496,7 +1521,7 @@ func TestReviewSubWorkflow_JunkVoteDropped(t *testing.T) {
 // Invalid PASTURE_SLICE_CONCURRENCY values belong to pastured startup, not
 // client-backed signal submission.
 func TestOpenEpochController_DoesNotResolveSliceConcurrency(t *testing.T) {
-	t.Setenv(engine.SliceConcurrencyEnv, "not-a-number")
+	testutil.SetEnv(t, engine.SliceConcurrencyEnv, "not-a-number")
 
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	ctrl, err := handlers.OpenEpochController(dbPath)

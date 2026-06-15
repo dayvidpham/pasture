@@ -32,9 +32,11 @@ func newControlEngine(t *testing.T) *engine.Engine {
 	t.Helper()
 	dbPath := testutil.GoldenUnifiedDBPath(t)
 	phaseEvents := make(chan protocol.PhaseId, 32)
+	executorID, appVersion := testEngineIdentity(t)
 	e, err := engine.New(context.Background(), engine.Config{
 		DBPath:                   dbPath,
-		ApplicationVersion:       "test-v1",
+		ApplicationVersion:       appVersion,
+		ExecutorID:               executorID,
 		SkipMigrations:           true,
 		QueueBasePollingInterval: 100 * time.Millisecond,
 		OnTransition: func(_ context.Context, _ string, rec *protocol.TransitionRecord, _ string) error {
@@ -144,6 +146,7 @@ func advanceTo(t *testing.T, e *engine.Engine, epochId string, to protocol.Phase
 // via the substrate durably mutates epoch state (the projection + a forensic
 // row), driven by the running control workflow rather than a scripted plan.
 func TestControl_SignalDrivenAdvanceIsDurable(t *testing.T) {
+	t.Parallel()
 	e := newControlEngine(t)
 	const epochId = "ctl--advance"
 	startControl(t, e, epochId)
@@ -169,6 +172,7 @@ func TestControl_SignalDrivenAdvanceIsDurable(t *testing.T) {
 // TestControl_VotesSatisfyConsensusGate proves submit_vote signals recorded
 // ahead of a gated advance let it through; without them the gate would block.
 func TestControl_VotesSatisfyConsensusGate(t *testing.T) {
+	t.Parallel()
 	e := newControlEngine(t)
 	const epochId = "ctl--votes"
 	startControl(t, e, epochId)
@@ -193,6 +197,7 @@ func TestControl_VotesSatisfyConsensusGate(t *testing.T) {
 // TestControl_VoteRecordedAuditRows proves each accepted review vote emits its
 // own durable forensic row with reviewer identity and vote value preserved.
 func TestControl_VoteRecordedAuditRows(t *testing.T) {
+	t.Parallel()
 	e := newControlEngine(t)
 	const epochId = "ctl--vote-audit"
 	startControl(t, e, epochId)
@@ -258,6 +263,7 @@ func TestControl_VoteRecordedAuditRows(t *testing.T) {
 // TestControl_RegisterSessionIsIdempotent proves register_session accumulates
 // distinct sessions and ignores duplicate session ids.
 func TestControl_RegisterSessionIsIdempotent(t *testing.T) {
+	t.Parallel()
 	e := newControlEngine(t)
 	const epochId = "ctl--sessions"
 	startControl(t, e, epochId)
@@ -288,6 +294,7 @@ func TestControl_RegisterSessionIsIdempotent(t *testing.T) {
 // TestControl_SliceProgressAccumulates proves slice_progress events reach the
 // projection.
 func TestControl_SliceProgressAccumulates(t *testing.T) {
+	t.Parallel()
 	e := newControlEngine(t)
 	const epochId = "ctl--progress"
 	startControl(t, e, epochId)
@@ -309,6 +316,7 @@ func TestControl_SliceProgressAccumulates(t *testing.T) {
 // and asserts the workflow completes with one forensic row per transition plus
 // one row per accepted review vote.
 func TestControl_FullEpochDurableRoundTrip(t *testing.T) {
+	t.Parallel()
 	e := newControlEngine(t)
 	const epochId = "ctl--full"
 	h := startControl(t, e, epochId)

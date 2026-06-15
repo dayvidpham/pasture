@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/config"
+	"github.com/dayvidpham/pasture/internal/testutil"
 )
 
 // ---- DefaultConfigPath() ---------------------------------------------------
@@ -78,8 +79,8 @@ func TestDefaultProvenanceDBPath_XDGDataDir(t *testing.T) {
 
 func TestDefaultProvenanceDBPath_HomeUnset(t *testing.T) {
 	// Clear HOME and USERPROFILE (the two env vars os.UserHomeDir consults)
-	t.Setenv("HOME", "")
-	t.Setenv("USERPROFILE", "")
+	testutil.SetEnv(t, "HOME", "")
+	testutil.SetEnv(t, "USERPROFILE", "")
 	got := config.DefaultProvenanceDBPath()
 	want := filepath.Join(".", ".local", "share", "pasture", "provenance.db")
 	if got != want {

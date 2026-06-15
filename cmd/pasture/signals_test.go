@@ -22,6 +22,7 @@ import (
 
 // TestCLI_EpochHelp verifies the epoch subcommand is registered and has help.
 func TestCLI_EpochHelp(t *testing.T) {
+	t.Parallel()
 	out := runCLI(t, "epoch", "--help")
 	if out.exitCode != 0 {
 		t.Fatalf("epoch --help exit %d; stderr=%s", out.exitCode, out.stderr)
@@ -37,6 +38,7 @@ func TestCLI_EpochHelp(t *testing.T) {
 // TestCLI_EpochStart_MissingEpochIdRejectsWithExit1 verifies the required-flag
 // guard on epoch start.
 func TestCLI_EpochStart_MissingEpochIdRejectsWithExit1(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	out := runCLI(t, "--db", db, "epoch", "start")
 	if out.exitCode == 0 {
@@ -53,6 +55,7 @@ func TestCLI_EpochStart_MissingEpochIdRejectsWithExit1(t *testing.T) {
 // report to a one-line Error() string would still produce exit 1 but would
 // fail these checks.
 func TestCLI_EpochStart_MalformedEpochIdRejectsWithExit1(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	out := runCLI(t, "--db", db, "epoch", "start", "--epoch-id", "not-a-valid-task-id")
 	if out.exitCode != 1 {
@@ -74,6 +77,7 @@ func TestCLI_EpochStart_MalformedEpochIdRejectsWithExit1(t *testing.T) {
 // TestCLI_EpochStart_ValidIdSucceeds verifies that a well-formed epoch id
 // reaches the handler without error.
 func TestCLI_EpochStart_ValidIdSucceeds(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	const epochId = "demo--01960000-0000-7000-8000-000000000001"
 	out := runCLI(t, "--db", db, "epoch", "start", "--epoch-id", epochId)
@@ -85,6 +89,7 @@ func TestCLI_EpochStart_ValidIdSucceeds(t *testing.T) {
 // TestCLI_EpochCancel_MissingEpochIdRejectsWithExit1 verifies the required-flag
 // guard on epoch cancel.
 func TestCLI_EpochCancel_MissingEpochIdRejectsWithExit1(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	out := runCLI(t, "--db", db, "epoch", "cancel")
 	if out.exitCode == 0 {
@@ -95,6 +100,7 @@ func TestCLI_EpochCancel_MissingEpochIdRejectsWithExit1(t *testing.T) {
 // TestCLI_EpochTerminate_IsRegistered verifies the terminate subcommand is
 // registered and documents its purpose.
 func TestCLI_EpochTerminate_IsRegistered(t *testing.T) {
+	t.Parallel()
 	out := runCLI(t, "epoch", "terminate", "--help")
 	if out.exitCode != 0 {
 		t.Fatalf("epoch terminate --help exit %d; stderr=%s", out.exitCode, out.stderr)
@@ -109,6 +115,7 @@ func TestCLI_EpochTerminate_IsRegistered(t *testing.T) {
 // error (exit 3). We assert exit 3 AND that the audit event was written —
 // confirming record-before-cancel order.
 func TestCLI_EpochTerminate_WithReason_RecordsAuditEvent(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	const epochId = "demo--01960000-0000-7000-8000-000000000201"
 	const reason = "test termination reason"
@@ -153,6 +160,7 @@ func TestCLI_EpochTerminate_WithReason_RecordsAuditEvent(t *testing.T) {
 // TestCLI_EpochTerminate_EmptyReason_StillRecordsEvent verifies that omitting
 // --reason (empty reason) still writes the EpochCancelled audit event.
 func TestCLI_EpochTerminate_EmptyReason_StillRecordsEvent(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	const epochId = "demo--01960000-0000-7000-8000-000000000202"
 
@@ -193,6 +201,7 @@ func TestCLI_EpochTerminate_EmptyReason_StillRecordsEvent(t *testing.T) {
 // rejected before any audit event is written. The exit code must be 1
 // (validation), and the audit trail must contain no EpochCancelled event.
 func TestCLI_EpochTerminate_MalformedEpochId_RejectsWithExit1_NoAuditRow(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	const malformedId = "not-a-task-id"
 
@@ -225,6 +234,7 @@ func TestCLI_EpochTerminate_MalformedEpochId_RejectsWithExit1_NoAuditRow(t *test
 
 // TestCLI_PhaseHelp verifies the phase subcommand is registered.
 func TestCLI_PhaseHelp(t *testing.T) {
+	t.Parallel()
 	out := runCLI(t, "phase", "--help")
 	if out.exitCode != 0 {
 		t.Fatalf("phase --help exit %d; stderr=%s", out.exitCode, out.stderr)
@@ -237,6 +247,7 @@ func TestCLI_PhaseHelp(t *testing.T) {
 // TestCLI_PhaseAdvance_MissingFlagsRejectWithExit1 verifies the required-flag
 // guards.
 func TestCLI_PhaseAdvance_MissingFlagsRejectWithExit1(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	// missing both
 	out := runCLI(t, "--db", db, "phase", "advance")
@@ -253,6 +264,7 @@ func TestCLI_PhaseAdvance_MissingFlagsRejectWithExit1(t *testing.T) {
 // TestCLI_PhaseAdvance_BadPhaseRejectsWithExit1 verifies the invalid-phase
 // validation guard at the CLI boundary.
 func TestCLI_PhaseAdvance_BadPhaseRejectsWithExit1(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	out := runCLI(t, "--db", db, "phase", "advance",
 		"--epoch-id", "demo--01960000-0000-7000-8000-000000000002",
@@ -266,6 +278,7 @@ func TestCLI_PhaseAdvance_BadPhaseRejectsWithExit1(t *testing.T) {
 
 // TestCLI_SignalHelp verifies the signal subcommand is registered.
 func TestCLI_SignalHelp(t *testing.T) {
+	t.Parallel()
 	out := runCLI(t, "signal", "--help")
 	if out.exitCode != 0 {
 		t.Fatalf("signal --help exit %d; stderr=%s", out.exitCode, out.stderr)
@@ -281,6 +294,7 @@ func TestCLI_SignalHelp(t *testing.T) {
 // TestCLI_SignalVote_MissingRequiredFlagsRejectWithExit1 checks the required
 // flag guards for signal vote.
 func TestCLI_SignalVote_MissingRequiredFlagsRejectWithExit1(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	// Missing --axis and --vote
 	out := runCLI(t, "--db", db, "signal", "vote",
@@ -294,6 +308,7 @@ func TestCLI_SignalVote_MissingRequiredFlagsRejectWithExit1(t *testing.T) {
 // boundary (note: cobra required-flag check fires first, so we pass dummy
 // values for --vote to reach the axis check).
 func TestCLI_SignalVote_BadAxisRejectsWithExit1(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	out := runCLI(t, "--db", db, "signal", "vote",
 		"--epoch-id", "demo--01960000-0000-7000-8000-000000000004",
@@ -306,6 +321,7 @@ func TestCLI_SignalVote_BadAxisRejectsWithExit1(t *testing.T) {
 
 // TestCLI_SignalVote_BadVoteRejectsWithExit1 proves vote value validation.
 func TestCLI_SignalVote_BadVoteRejectsWithExit1(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	out := runCLI(t, "--db", db, "signal", "vote",
 		"--epoch-id", "demo--01960000-0000-7000-8000-000000000005",
@@ -319,6 +335,7 @@ func TestCLI_SignalVote_BadVoteRejectsWithExit1(t *testing.T) {
 // TestCLI_SignalComplete_MissingEpochOrSliceRejectsWithExit1 checks required
 // flags for signal complete.
 func TestCLI_SignalComplete_MissingEpochOrSliceRejectsWithExit1(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	// Missing --slice-id
 	out := runCLI(t, "--db", db, "signal", "complete",
@@ -332,6 +349,7 @@ func TestCLI_SignalComplete_MissingEpochOrSliceRejectsWithExit1(t *testing.T) {
 
 // TestCLI_SessionHelp verifies the session subcommand is registered.
 func TestCLI_SessionHelp(t *testing.T) {
+	t.Parallel()
 	out := runCLI(t, "session", "--help")
 	if out.exitCode != 0 {
 		t.Fatalf("session --help exit %d; stderr=%s", out.exitCode, out.stderr)
@@ -344,6 +362,7 @@ func TestCLI_SessionHelp(t *testing.T) {
 // TestCLI_SessionRegister_MissingRequiredFlagsRejectWithExit1 checks required
 // flag guards for session register.
 func TestCLI_SessionRegister_MissingRequiredFlagsRejectWithExit1(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	// Missing --session-id and --role
 	out := runCLI(t, "--db", db, "session", "register",
@@ -357,6 +376,7 @@ func TestCLI_SessionRegister_MissingRequiredFlagsRejectWithExit1(t *testing.T) {
 
 // TestCLI_SliceHelp verifies the slice subcommand is registered.
 func TestCLI_SliceHelp(t *testing.T) {
+	t.Parallel()
 	out := runCLI(t, "slice", "--help")
 	if out.exitCode != 0 {
 		t.Fatalf("slice --help exit %d; stderr=%s", out.exitCode, out.stderr)
@@ -372,6 +392,7 @@ func TestCLI_SliceHelp(t *testing.T) {
 // TestCLI_SliceStart_MissingRequiredFlagsRejectWithExit1 checks required flag
 // guards for slice start.
 func TestCLI_SliceStart_MissingRequiredFlagsRejectWithExit1(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	// Missing --mode
 	out := runCLI(t, "--db", db, "slice", "start", "--slice-id", "s-1")
@@ -390,6 +411,7 @@ func TestCLI_SliceStart_MissingRequiredFlagsRejectWithExit1(t *testing.T) {
 // exit 3, so we need a db with a running workflow; for mode validation alone,
 // the validation fires before the network call).
 func TestCLI_SliceStart_BadModeRejectsWithExit1(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	out := runCLI(t, "--db", db, "slice", "start",
 		"--slice-id", "demo--01960000-0000-7000-8000-000000000008",
@@ -402,6 +424,7 @@ func TestCLI_SliceStart_BadModeRejectsWithExit1(t *testing.T) {
 // TestCLI_SliceComplete_MissingSliceIdRejectsWithExit1 checks required flag
 // guard for slice complete.
 func TestCLI_SliceComplete_MissingSliceIdRejectsWithExit1(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	out := runCLI(t, "--db", db, "slice", "complete")
 	if out.exitCode == 0 {
@@ -419,6 +442,7 @@ func TestCLI_SliceComplete_MissingSliceIdRejectsWithExit1(t *testing.T) {
 // wiring is intact: a regression that stripped the full report to a one-line
 // Error() string would still produce exit 3 but would fail this check.
 func TestCLI_EpochCancel_WorkflowError_NonexistentEpoch(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	out := runCLI(t, "--db", db, "epoch", "cancel",
 		"--epoch-id", "demo--01960000-0000-7000-8000-000000000099")
@@ -447,6 +471,7 @@ func TestCLI_EpochCancel_WorkflowError_NonexistentEpoch(t *testing.T) {
 // report to a one-line Error() string would still produce exit 3 but would
 // fail these checks.
 func TestCLI_SliceStart_WorkflowError_NeverStartedSlice_Exit3(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	out := runCLI(t, "--db", db, "slice", "start",
 		"--slice-id", "demo--ffffffff-ffff-7fff-8fff-ff0000000099",
@@ -469,6 +494,7 @@ func TestCLI_SliceStart_WorkflowError_NeverStartedSlice_Exit3(t *testing.T) {
 // TestCLI_SliceComplete_WorkflowError_NeverStartedSlice_Exit3 verifies that
 // sending a complete_slice signal to a never-started slice id returns exit 3.
 func TestCLI_SliceComplete_WorkflowError_NeverStartedSlice_Exit3(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	out := runCLI(t, "--db", db, "slice", "complete",
 		"--slice-id", "demo--ffffffff-ffff-7fff-8fff-ff0000000098",
@@ -485,6 +511,7 @@ func TestCLI_SliceComplete_WorkflowError_NeverStartedSlice_Exit3(t *testing.T) {
 // verbs (epoch, phase, signal, session, slice, query) all appear in the top-
 // level help output.
 func TestCLI_TopLevelHelp_RegistersAllNewSubcommands(t *testing.T) {
+	t.Parallel()
 	out := runCLI(t, "--help")
 	if out.exitCode != 0 {
 		t.Fatalf("--help exit %d; stderr=%s", out.exitCode, out.stderr)

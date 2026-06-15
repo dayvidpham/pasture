@@ -13,6 +13,7 @@ import (
 // lock catches any future reordering or rename on either side (which would
 // otherwise silently mis-attribute activities) by failing loudly here.
 func TestProvenancePhaseMapping_Locked(t *testing.T) {
+	t.Parallel()
 	want := map[protocol.PhaseId]provenance.Phase{
 		protocol.PhaseRequest:      provenance.PhaseRequest,
 		protocol.PhaseElicit:       provenance.PhaseElicit,

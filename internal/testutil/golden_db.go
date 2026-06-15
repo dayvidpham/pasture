@@ -29,7 +29,7 @@ func GoldenUnifiedDBPath(t *testing.T) string {
 	t.Helper()
 	src := goldenUnifiedDBSource(t)
 	dst := filepath.Join(t.TempDir(), "pasture.db")
-	if err := CopyFile(dst, src); err != nil {
+	if err := copyFile(dst, src); err != nil {
 		t.Fatalf("copy golden pasture.db: %v", err)
 	}
 	return dst
@@ -52,9 +52,9 @@ func OpenGoldenTaskTracker(t *testing.T) (protocol.TaskTracker, string) {
 	return tracker, dbPath
 }
 
-// CopyFile copies src to dst using ordinary filesystem bytes. The destination
+// copyFile copies src to dst using ordinary filesystem bytes. The destination
 // parent directory must already exist.
-func CopyFile(dst, src string) error {
+func copyFile(dst, src string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("open source %q: %w", src, err)
@@ -78,7 +78,9 @@ func CopyFile(dst, src string) error {
 func goldenUnifiedDBSource(t *testing.T) string {
 	t.Helper()
 	goldenUnifiedDB.once.Do(func() {
-		dir, err := os.MkdirTemp("", "pasture-golden-db-*")
+		dir := filepath.Join(os.TempDir(), fmt.Sprintf("pasture-golden-db-%d", os.Getpid()))
+		_ = os.RemoveAll(dir)
+		err := os.MkdirAll(dir, 0o700)
 		if err != nil {
 			goldenUnifiedDB.err = err
 			return

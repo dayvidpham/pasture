@@ -123,23 +123,20 @@ func ResolveSliceConcurrency(flagVal int) (int, error) {
 // (Note: the function is intentionally unexported; see Engine.SliceQueue for
 // the public accessor.)
 func newSliceQueue(ctx dbos.DBOSContext, concurrency int, basePollingInterval time.Duration) dbos.WorkflowQueue {
-	opts := []dbos.QueueOption{
-		dbos.WithWorkerConcurrency(concurrency),
-	}
-	if basePollingInterval > 0 {
-		opts = append(opts, dbos.WithQueueBasePollingInterval(basePollingInterval))
-	}
+	opts := queueOptions(basePollingInterval, dbos.WithWorkerConcurrency(concurrency))
 	return dbos.NewWorkflowQueue(ctx, SliceQueueName, opts...)
 }
 
 func newControlQueue(ctx dbos.DBOSContext, basePollingInterval time.Duration) dbos.WorkflowQueue {
-	opts := []dbos.QueueOption{
-		dbos.WithWorkerConcurrency(1),
-	}
+	opts := queueOptions(basePollingInterval, dbos.WithWorkerConcurrency(1))
+	return dbos.NewWorkflowQueue(ctx, ControlQueueName, opts...)
+}
+
+func queueOptions(basePollingInterval time.Duration, opts ...dbos.QueueOption) []dbos.QueueOption {
 	if basePollingInterval > 0 {
 		opts = append(opts, dbos.WithQueueBasePollingInterval(basePollingInterval))
 	}
-	return dbos.NewWorkflowQueue(ctx, ControlQueueName, opts...)
+	return opts
 }
 
 // EnqueueSlice dispatches a SliceSubWorkflow via the slice queue, giving it the

@@ -70,6 +70,7 @@ func OpenTaskTracker(dbPath string) (protocol.TaskTracker, error) {
 
 type openTaskTrackerOptions struct {
 	skipMigrations bool
+	maxOpenConns   int
 }
 
 // OpenTaskTrackerOption configures OpenTaskTrackerWithOptions.
@@ -81,6 +82,16 @@ type OpenTaskTrackerOption func(*openTaskTrackerOptions)
 func WithSkipMigrations() OpenTaskTrackerOption {
 	return func(o *openTaskTrackerOptions) {
 		o.skipMigrations = true
+	}
+}
+
+// WithMaxOpenConns overrides the pasture-owned audit handle's connection-pool
+// size. It is intended for tests that need one goroutine to hold a connection
+// while another observes the same database. Production callers should leave it
+// unset, preserving the single-connection writer cap.
+func WithMaxOpenConns(n int) OpenTaskTrackerOption {
+	return func(o *openTaskTrackerOptions) {
+		o.maxOpenConns = n
 	}
 }
 
@@ -148,7 +159,7 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 	// the underlying file (via WAL) so writes through either handle hit the
 	// same disk state. The shared DSN (WAL + busy_timeout + _txlock=immediate)
 	// gives this handle the same write serialisation as the audit handle.
-	auditDB, err := openAuditHandle(dbPath)
+	auditDB, err := openAuditHandle(dbPath, cfg.maxOpenConns)
 	if err != nil {
 		_ = trail.Close()
 		return nil, err
@@ -205,7 +216,7 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 // synchronous=NORMAL + foreign_keys=ON + _txlock=immediate) so writes from this
 // handle serialise correctly against audit and Provenance writes. The WAL
 // multi-writer model + busy_timeout replaces the former single-connection cap.
-func openAuditHandle(dbPath string) (*sql.DB, error) {
+func openAuditHandle(dbPath string, maxOpenConns int) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", dbconn.SharedDSN(dbPath))
 	if err != nil {
 		return nil, &pasterrors.StructuredError{
@@ -236,7 +247,10 @@ func openAuditHandle(dbPath string) (*sql.DB, error) {
 	// the Go level — the proven model the cross-subsystem race test exercises.
 	// Only the DBOS engine handle is uncapped, because its poller needs a second
 	// concurrent connection.
-	db.SetMaxOpenConns(1)
+	if maxOpenConns <= 0 {
+		maxOpenConns = 1
+	}
+	db.SetMaxOpenConns(maxOpenConns)
 	return db, nil
 }
 

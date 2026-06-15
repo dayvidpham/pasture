@@ -9,6 +9,7 @@ import (
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/testutil"
 )
 
 func TestDefaultDBPath_EnvOverride(t *testing.T) {
@@ -16,7 +17,7 @@ func TestDefaultDBPath_EnvOverride(t *testing.T) {
 	// The exact filename is whatever the caller passed — DefaultDBPath does
 	// not enforce DefaultDBFilename when the env var is set, because users
 	// pointing at a custom path know what file they want.
-	t.Setenv(tasks.DBPathEnv, "/custom/path/custom.db")
+	testutil.SetEnv(t, tasks.DBPathEnv, "/custom/path/custom.db")
 	got := tasks.DefaultDBPath()
 	if got != "/custom/path/custom.db" {
 		t.Fatalf("expected env override to win, got %q", got)
@@ -27,8 +28,8 @@ func TestDefaultDBPath_XDG(t *testing.T) {
 	// PROPOSAL-2 §7.1: when XDG_DATA_HOME is set the unified database lives
 	// at $XDG_DATA_HOME/pasture/pasture.db (NOT provenance.db or audit.db,
 	// which were the pre-PROPOSAL-2 defaults for the two subsystems).
-	t.Setenv(tasks.DBPathEnv, "")
-	t.Setenv("XDG_DATA_HOME", "/xdg/data")
+	testutil.SetEnv(t, tasks.DBPathEnv, "")
+	testutil.SetEnv(t, "XDG_DATA_HOME", "/xdg/data")
 	got := tasks.DefaultDBPath()
 	want := filepath.Join("/xdg/data", "pasture", tasks.DefaultDBFilename)
 	if got != want {
@@ -48,9 +49,9 @@ func TestDefaultDBPath_HomeFallback(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skipf("HOME-based fallback test runs only on linux (got %s)", runtime.GOOS)
 	}
-	t.Setenv(tasks.DBPathEnv, "")
-	t.Setenv("XDG_DATA_HOME", "")
-	t.Setenv("HOME", "/home/test")
+	testutil.SetEnv(t, tasks.DBPathEnv, "")
+	testutil.SetEnv(t, "XDG_DATA_HOME", "")
+	testutil.SetEnv(t, "HOME", "/home/test")
 	got := tasks.DefaultDBPath()
 	want := filepath.Join("/home/test", ".local", "share", "pasture", tasks.DefaultDBFilename)
 	if got != want {

@@ -17,6 +17,7 @@ import (
 )
 
 func TestDBOSConcurrencySpike_IsolatedEnginesCanOverlap(t *testing.T) {
+	t.Parallel()
 	const workers = 8
 	type workerCase struct {
 		index int

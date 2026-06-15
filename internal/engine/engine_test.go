@@ -17,9 +17,11 @@ import (
 func newEngine(t *testing.T) *engine.Engine {
 	t.Helper()
 	dbPath := testutil.GoldenUnifiedDBPath(t)
+	executorID, appVersion := testEngineIdentity(t)
 	e, err := engine.New(context.Background(), engine.Config{
 		DBPath:                   dbPath,
-		ApplicationVersion:       "test-v1",
+		ApplicationVersion:       appVersion,
+		ExecutorID:               executorID,
 		SkipMigrations:           true,
 		QueueBasePollingInterval: 100 * time.Millisecond,
 	})
@@ -77,6 +79,7 @@ func runEpoch(t *testing.T, e *engine.Engine, epochId string, plan []engine.Adva
 }
 
 func TestEngine_Full12PhaseEpoch(t *testing.T) {
+	t.Parallel()
 	e := newEngine(t)
 	const epochId = "epoch-full"
 
@@ -125,6 +128,7 @@ func TestEngine_Full12PhaseEpoch(t *testing.T) {
 }
 
 func TestEngine_ConsensusGateBlocksWithoutVotes(t *testing.T) {
+	t.Parallel()
 	e := newEngine(t)
 	const epochId = "epoch-gate"
 
@@ -169,6 +173,7 @@ func TestEngine_ConsensusGateBlocksWithoutVotes(t *testing.T) {
 }
 
 func TestEngine_BlockerGateAtCodeReview(t *testing.T) {
+	t.Parallel()
 	e := newEngine(t)
 	const epochId = "epoch-blocker"
 
@@ -239,6 +244,7 @@ func distinct(keys []string) int {
 // its key differs from the first entry's. It also verifies same-kind multiplicity
 // (every PhaseTransition across distinct steps yields a distinct key).
 func TestEngine_CyclicBounce_DistinctKeys(t *testing.T) {
+	t.Parallel()
 	e := newEngine(t)
 	const epochId = "epoch-bounce"
 
@@ -280,6 +286,7 @@ func TestEngine_CyclicBounce_DistinctKeys(t *testing.T) {
 // distinct rows — the epoch id is hashed into the key, so two epochs at the same
 // (phase, step_seq) get distinct keys (no cross-epoch false dedup).
 func TestEngine_CrossEpochDistinctKeys(t *testing.T) {
+	t.Parallel()
 	e := newEngine(t)
 
 	shortPlan := []engine.AdvanceStep{
@@ -301,6 +308,7 @@ func TestEngine_CrossEpochDistinctKeys(t *testing.T) {
 }
 
 func TestEngine_ReadProjectionUnknownEpoch(t *testing.T) {
+	t.Parallel()
 	e := newEngine(t)
 	proj, err := e.ReadProjection("never-ran")
 	if err != nil {

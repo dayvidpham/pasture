@@ -112,6 +112,7 @@ func recordAuditEvents(t *testing.T, dbPath, epochId string, n int) {
 // TestCLI_StatusHelp verifies the status subcommand is registered and appears
 // in the top-level help output.
 func TestCLI_StatusHelp(t *testing.T) {
+	t.Parallel()
 	out := runCLI(t, "status", "--help")
 	if out.exitCode != 0 {
 		t.Fatalf("status --help exit %d; stderr=%s", out.exitCode, out.stderr)
@@ -127,6 +128,7 @@ func TestCLI_StatusHelp(t *testing.T) {
 // TestCLI_TopLevelHelp_ContainsStatus verifies the status verb appears in the
 // top-level help so users can discover it.
 func TestCLI_TopLevelHelp_ContainsStatus(t *testing.T) {
+	t.Parallel()
 	out := runCLI(t, "--help")
 	if out.exitCode != 0 {
 		t.Fatalf("--help exit %d; stderr=%s", out.exitCode, out.stderr)
@@ -141,6 +143,7 @@ func TestCLI_TopLevelHelp_ContainsStatus(t *testing.T) {
 // an actionable message and does NOT create the file. Status is a pure-read
 // command — it must never create or migrate the database.
 func TestCLI_Status_AbsentDB_NoFileCreated(t *testing.T) {
+	t.Parallel()
 	dbPath := absentDB(t)
 	out := runCLI(t, "--db", dbPath, "status")
 	// Must fail with CategoryConnection exit code (2): absent db = connection error.
@@ -178,6 +181,7 @@ func TestCLI_Status_AbsentDB_NoFileCreated(t *testing.T) {
 // `pasture status --epoch-id <id>` against a path where the database does not
 // exist also fails with an actionable message and does NOT create the file.
 func TestCLI_Status_AbsentDB_EpochId_NoFileCreated(t *testing.T) {
+	t.Parallel()
 	dbPath := absentDB(t)
 	const epochId = "demo--01960000-0000-7000-8000-000000000399"
 	out := runCLI(t, "--db", dbPath, "status", "--epoch-id", epochId)
@@ -206,6 +210,7 @@ func TestCLI_Status_AbsentDB_EpochId_NoFileCreated(t *testing.T) {
 // epochs returns exit 0 and prints the actionable empty-state message. The
 // database is pre-created by running `pasture migrate` so the file exists.
 func TestCLI_Status_ExistingDB_NoEpochs_ShowsActionableMessage(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	// Create and migrate the database via the migrate command so it exists and
 	// has a valid schema, but has no epoch projection rows.
@@ -231,6 +236,7 @@ func TestCLI_Status_ExistingDB_NoEpochs_ShowsActionableMessage(t *testing.T) {
 // json on an existing database with no recorded epochs returns a JSON empty
 // array (not an error). The database is pre-created by running `pasture migrate`.
 func TestCLI_Status_ExistingDB_NoEpochs_JSON_EmptyArray(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	// Pre-create the database with a valid schema.
 	migrateOut := runCLI(t, "--db", db, "migrate")
@@ -258,6 +264,7 @@ func TestCLI_Status_ExistingDB_NoEpochs_JSON_EmptyArray(t *testing.T) {
 // covers the table-absent branch separately from the table-present/row-absent
 // branch in TestCLI_Status_UnknownEpoch_ReturnsExit3.
 func TestCLI_Status_FreshDB_EpochId_ReturnsExit3(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	// Pre-create and migrate the database so it exists with a valid schema but
 	// no epoch projection rows ("fresh" = migrated, not absent).
@@ -286,6 +293,7 @@ func TestCLI_Status_FreshDB_EpochId_ReturnsExit3(t *testing.T) {
 // no projection row when the table already exists (another epoch was seeded),
 // and that stderr contains the actionable structured error.
 func TestCLI_Status_UnknownEpoch_ReturnsExit3(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	// Seed a different epoch so the projection table exists.
 	const seedId = "demo--01960000-0000-7000-8000-000000000301"
@@ -311,6 +319,7 @@ func TestCLI_Status_UnknownEpoch_ReturnsExit3(t *testing.T) {
 // TestCLI_Status_EpochMidFlight_ReportsCurrentPhase_Text verifies that status
 // correctly reports the current phase of an in-flight epoch in text mode.
 func TestCLI_Status_EpochMidFlight_ReportsCurrentPhase_Text(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	const epochId = "demo--01960000-0000-7000-8000-000000000302"
 	seedProjectionDB(t, db, epochId)
@@ -333,6 +342,7 @@ func TestCLI_Status_EpochMidFlight_ReportsCurrentPhase_Text(t *testing.T) {
 // TestCLI_Status_EpochMidFlight_ReportsCurrentPhase_JSON verifies that --format
 // json emits a structurally correct JSON object containing the expected phase.
 func TestCLI_Status_EpochMidFlight_ReportsCurrentPhase_JSON(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	const epochId = "demo--01960000-0000-7000-8000-000000000303"
 	seedProjectionDB(t, db, epochId)
@@ -372,6 +382,7 @@ func TestCLI_Status_EpochMidFlight_ReportsCurrentPhase_JSON(t *testing.T) {
 // mechanics are covered by the build-tagged engine recovery tests in
 // internal/engine/recovery_test.go.
 func TestCLI_Status_ColdDurableRead_ReflectsPersistedState(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	const epochId = "demo--01960000-0000-7000-8000-000000000304"
 
@@ -402,6 +413,7 @@ func TestCLI_Status_ColdDurableRead_ReflectsPersistedState(t *testing.T) {
 // `pasture status --epoch-id <id>` surfaces the cancel reason in both JSON
 // and text output.
 func TestCLI_Status_AfterTerminate_ShowsCancelReason(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	const epochId = "demo--01960000-0000-7000-8000-000000000305"
 	const reason = "operator stopped this epoch for testing"
@@ -470,6 +482,7 @@ func TestCLI_Status_AfterTerminate_ShowsCancelReason(t *testing.T) {
 // that a terminate with no --reason flag renders the empty-reason branch
 // ("CANCELLED (no reason recorded)") in text mode.
 func TestCLI_Status_AfterTerminate_EmptyReason_ShowsCancelledNoReason(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	const epochId = "demo--01960000-0000-7000-8000-000000000310"
 	seedProjectionDB(t, db, epochId)
@@ -497,6 +510,7 @@ func TestCLI_Status_AfterTerminate_EmptyReason_ShowsCancelledNoReason(t *testing
 // window). The full event list must be scanned for the cancel reason before
 // display truncation.
 func TestCLI_Status_CancelReasonSurvivedTruncation(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	const epochId = "demo--01960000-0000-7000-8000-000000000311"
 	const reason = "deliberate cancellation for truncation regression test"
@@ -539,6 +553,7 @@ func TestCLI_Status_CancelReasonSurvivedTruncation(t *testing.T) {
 // and that the event count is greater than zero for seeded epochs (proving
 // the enrichment is real, not always-zero).
 func TestCLI_Status_List_ShowsAllEpochs(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	const epochId1 = "demo--01960000-0000-7000-8000-000000000306"
 	const epochId2 = "demo--01960000-0000-7000-8000-000000000307"
@@ -585,6 +600,7 @@ func TestCLI_Status_List_ShowsAllEpochs(t *testing.T) {
 // TestCLI_Status_List_ShowsAllEpochs_Text verifies the text listing includes
 // the seeded epoch id and phase.
 func TestCLI_Status_List_ShowsAllEpochs_Text(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	const epochId = "demo--01960000-0000-7000-8000-000000000308"
 	seedProjectionDB(t, db, epochId)
@@ -613,6 +629,7 @@ func TestCLI_Status_List_ShowsAllEpochs_Text(t *testing.T) {
 // WAL mode any write lands in the -wal file first, so an unchanged main-file
 // hash confirms that the read-only open did not flush any data into the main db.
 func TestCLI_Status_ReadOnly_NoUnexpectedSidecars(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	// Pre-create and migrate the database so it exists with a valid schema.
 	migrateOut := runCLI(t, "--db", db, "migrate")
@@ -803,6 +820,7 @@ func insertSyntheticProjectionRow(t *testing.T, dbPath, epochId string) {
 // Uses an independent database/sql connection to read the schema version, not
 // the same handle used by the status command, to rule out any caching effect.
 func TestCLI_Status_StaleSchema_OlderDB_ErrorsAndNeverMigrates(t *testing.T) {
+	t.Parallel()
 	dbPath := newDB(t)
 
 	// Step 1: create a fully-migrated database.
@@ -849,6 +867,7 @@ func TestCLI_Status_StaleSchema_OlderDB_ErrorsAndNeverMigrates(t *testing.T) {
 // `pasture status` returns exit 5 with an actionable mismatch error, and does
 // NOT alter the database (MAX(version) unchanged).
 func TestCLI_Status_StaleSchema_NewerDB_ErrorsAndNeverMigrates(t *testing.T) {
+	t.Parallel()
 	dbPath := newDB(t)
 
 	// Step 1: create a fully-migrated database.
@@ -899,6 +918,7 @@ func TestCLI_Status_StaleSchema_NewerDB_ErrorsAndNeverMigrates(t *testing.T) {
 // listing). The schema-version gate must fire on the listing path, not just
 // the populated-detail path.
 func TestCLI_Status_StaleSchema_OlderDB_ListPath_ErrorsNotSilent(t *testing.T) {
+	t.Parallel()
 	dbPath := newDB(t)
 
 	// Create a migrated database (no epochs) and downgrade its version.
@@ -924,6 +944,7 @@ func TestCLI_Status_StaleSchema_OlderDB_ListPath_ErrorsNotSilent(t *testing.T) {
 // (schema mismatch) NOT exit 3 (epoch not found / misspelled ID). This
 // guards against the bug where version skew was misdiagnosed as a bad epoch ID.
 func TestCLI_Status_StaleSchema_OlderDB_UnknownEpoch_ErrorsMismatchNotMisspelled(t *testing.T) {
+	t.Parallel()
 	dbPath := newDB(t)
 
 	// Create a migrated database and downgrade.

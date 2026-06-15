@@ -150,7 +150,7 @@ func TestRaceCrossSubsystem_FileBacked(t *testing.T) {
 	)
 
 	dbPath := testutil.GoldenUnifiedDBPath(t)
-	tracker, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithSkipMigrations())
+	tracker, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithSkipMigrations(), tasks.WithMaxOpenConns(2))
 	if err != nil {
 		t.Fatalf("OpenTaskTracker(%q) failed: %v", dbPath, err)
 	}

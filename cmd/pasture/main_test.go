@@ -25,6 +25,13 @@ import (
 var binaryPath string
 
 func TestMain(m *testing.M) {
+	envCleanup, err := testutil.SetHermeticEnv("pasture-cli")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "pasture cli smoke: could not set hermetic env: %v\n", err)
+		os.Exit(1)
+	}
+	defer envCleanup()
+
 	tmpDir, err := os.MkdirTemp("", "pasture-cli-smoke-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "pasture cli smoke: could not create temp dir: %v\n", err)
@@ -118,6 +125,7 @@ func absentDB(t *testing.T) string {
 }
 
 func TestCLI_TaskCreateAndShow_JSON(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 
 	out := runCLI(t,
@@ -163,6 +171,7 @@ func TestCLI_TaskCreateAndShow_JSON(t *testing.T) {
 }
 
 func TestCLI_PriorityP3Form(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 
 	out := runCLI(t,
@@ -187,6 +196,7 @@ func TestCLI_PriorityP3Form(t *testing.T) {
 }
 
 func TestCLI_PriorityNumericForm(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 
 	out := runCLI(t,
@@ -211,6 +221,7 @@ func TestCLI_PriorityNumericForm(t *testing.T) {
 }
 
 func TestCLI_DepAddAndReady(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 
 	mk := func(title string) string {
@@ -283,6 +294,7 @@ func TestCLI_DepAddAndReady(t *testing.T) {
 }
 
 func TestCLI_LabelAddRemove(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 
 	out := runCLI(t,
@@ -329,6 +341,7 @@ func TestCLI_LabelAddRemove(t *testing.T) {
 }
 
 func TestCLI_InvalidPriorityRejected(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 
 	out := runCLI(t,
@@ -347,6 +360,7 @@ func TestCLI_InvalidPriorityRejected(t *testing.T) {
 }
 
 func TestCLI_CommentAddRequiresAuthor(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 
 	// First create a task so we have a valid ID — the failure should be on
