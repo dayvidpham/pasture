@@ -71,6 +71,18 @@ When measuring memory:
 - capture peak RSS from `/proc/<pid>/VmHWM`
 - watch for arena/cache growth in the daemon and recovery tests
 
+### Measured baseline (2-core config)
+
+Recorded on a 2-core-equivalent runner with `go test -race -p 2 -parallel 2 ./...`:
+
+| Metric | Value |
+|--------|-------|
+| `go test ./...` wall | ~31s (target < 60s) |
+| `-race -p 2 -parallel 2 ./...` wall | ~118s (ceiling ≤ 3 min, aim ~2 min) |
+| Peak RSS (summed test-process tree) | ~580 MB — no OOM |
+
+Re-baseline here if the suite regresses or the runner core count changes.
+
 ## Time and contention profiling
 
 Use the following tools when a suite regresses:
