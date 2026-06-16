@@ -45,7 +45,8 @@ go generate ./internal/codegen/...
 | `internal/codegen/templates/skill.go.tmpl` | Unified SKILL.md template (header + body: role commands, constraints, handoffs, phases, checklists, workflows, figures, preamble, behaviors, sections, recipes) | Changing the layout of generated SKILL.md files |
 | `internal/codegen/templates/skill_sub.go.tmpl` | Sub-skill SKILL.md template (command name, description, figures, preamble, behaviors, sections, recipes) | Changing sub-skill layout |
 | `internal/codegen/templates/agent_definition.go.tmpl` | Agent definition template (role spec, phases, constraints, behaviors, checklists, workflows, figure refs) | Changing agent definition layout |
-| `tools/codegen/main.go` | `go:generate` entry point; `roleSkillDirs` and `commandSkillDirs` maps | Adding a new role or command that needs skill generation |
+| `internal/codegen/harness.go` | Target harness registry, `roleSkillDirs`, `commandSkillDirs`, and target routing helpers | Adding a new generation target, role skill, or command skill |
+| `tools/codegen/main.go` | Thin `go:generate` entry point; parses flags and invokes the selected harness targets | Changing CLI flags or invocation flow |
 | `internal/codegen/testdata/context.yaml` | YAML fixture for `context_test.go` — exact constraint counts and must_contain/must_not_contain per role/phase | Any change to `roleConstraints` or `phaseConstraints` |
 | `internal/codegen/testdata/skills.yaml` | YAML fixture for skill generation tests | Adding/removing roles or commands in skill generation |
 | `internal/codegen/testdata/agents.yaml` | YAML fixture for agent generation tests | Adding/removing roles in agent generation |
@@ -71,6 +72,13 @@ What it does, in order:
 3. Writes `skills/{dir}/SKILL.md` headers for each command in `commandSkillDirs`
 4. Writes `agents/{role}.md` for each role with non-empty `Tools`
 
+The default target is `claude-code`. That target must remain byte-identical to
+the committed `skills/`, `agents/`, and `schema.xml` outputs. To capture a new
+baseline intentionally, start from a clean tree, run `go generate
+./internal/codegen/...`, review the diff in those generated paths, and commit the
+generated output with the source change. If the default target changes bytes
+without an intended generated-output diff, treat it as a regression.
+
 ### Changed X → regenerates Y
 
 | What you changed | Regenerates |
@@ -83,8 +91,8 @@ What it does, in order:
 | `templates/skill.go.tmpl` | SKILL.md role files (stage 2) |
 | `templates/skill_sub.go.tmpl` | SKILL.md sub-skill files (stage 3) |
 | `templates/agent_definition.go.tmpl` | agent definitions (stage 4) |
-| `tools/codegen/main.go` `roleSkillDirs` | which SKILL.md files are regenerated |
-| `tools/codegen/main.go` `commandSkillDirs` | which sub-skill SKILL.md files are regenerated |
+| `internal/codegen/harness.go` `roleSkillDirs` | which SKILL.md files are regenerated |
+| `internal/codegen/harness.go` `commandSkillDirs` | which sub-skill SKILL.md files are regenerated |
 
 After regenerating, run:
 
@@ -143,7 +151,7 @@ This is a subset of the above when the `ConstraintSpec` already exists.
 
 3. Add a `roleConstraints` entry in `context.go` using `mergeConstraints(generalConstraints, map[string]bool{...})`.
 
-4. Add the role to `roleSkillDirs` in `tools/codegen/main.go` (map the `types.RoleId` constant to the directory name under `skills/`).
+4. Add the role to `roleSkillDirs` in `internal/codegen/harness.go` (map the `types.RoleId` constant to the directory name under `skills/`).
 
 5. Create `skills/{dir}/SKILL.md` with at least the BEGIN/END marker pair:
    ```
@@ -193,7 +201,7 @@ This is a subset of the above when the `ConstraintSpec` already exists.
 
 1. Add an entry to `CommandSpecs` in `specs_data.go` (around line 786). Set `ID`, `Name` (e.g. `"pasture:role:action"`), `Description`, `RoleRef`, `Phases`, `File`, and optionally `CreatesLabels`.
 
-2. If the command has associated figures (i.e., a `FigureSpec` entry references this command via `CommandRefs`), add it to `commandSkillDirs` in `tools/codegen/main.go`:
+2. If the command has associated figures (i.e., a `FigureSpec` entry references this command via `CommandRefs`), add it to `commandSkillDirs` in `internal/codegen/harness.go`:
    ```go
    "cmd-your-id": "your-skill-dir",
    ```

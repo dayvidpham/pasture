@@ -1,0 +1,5 @@
+targets:
+  default: claude-code
+  registered:
+    - claude-code
+    - opencode

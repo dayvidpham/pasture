@@ -120,6 +120,11 @@ func buildFuncMap() template.FuncMap {
 
 // ─── Template loading ─────────────────────────────────────────────────────────
 
+const (
+	TemplateSkill    = "templates/skill.go.tmpl"
+	TemplateSubSkill = "templates/skill_sub.go.tmpl"
+)
+
 // mustParseTemplateFS parses a named template from the shared embedded FS
 // (templatesFS, declared in embed.go) with the shared FuncMap and
 // missingkey=error option. The template is named by the base filename of the
@@ -405,7 +410,10 @@ func unifiedDiff(fromFile, toFile, oldContent, newContent string) string {
 // including both the header and body content inside BEGIN/END markers.
 // This is the single-pass replacement for the former renderHeader + renderBody
 // two-pass pipeline.
-func renderSkill(roleId protocol.RoleId, figuresDir string) (string, error) {
+func renderSkill(roleId protocol.RoleId, figuresDir string, tmplName string) (string, error) {
+	if tmplName == "" {
+		tmplName = TemplateSkill
+	}
 	roleSpec, ok := RoleSpecs[roleId]
 	if !ok {
 		return "", fmt.Errorf(
@@ -473,7 +481,7 @@ func renderSkill(roleId protocol.RoleId, figuresDir string) (string, error) {
 	ctx.BodySections = resolvedSections
 	ctx.BodyBehaviors = resolvedBehaviors
 
-	tmpl := mustParseTemplateFS("templates/skill.go.tmpl")
+	tmpl := mustParseTemplateFS(tmplName)
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, ctx); err != nil {
 		return "", fmt.Errorf(
@@ -491,7 +499,10 @@ func renderSkill(roleId protocol.RoleId, figuresDir string) (string, error) {
 // SKILL.md file, including both figures and body content inside BEGIN/END
 // markers. This is the single-pass replacement for the former
 // renderSubSkillHeader + renderBody two-pass pipeline.
-func renderSubSkill(commandId, figuresDir string) (string, error) {
+func renderSubSkill(commandId, figuresDir string, tmplName string) (string, error) {
+	if tmplName == "" {
+		tmplName = TemplateSubSkill
+	}
 	cmdSpec, ok := CommandSpecs[commandId]
 	if !ok {
 		return "", fmt.Errorf(
@@ -554,7 +565,7 @@ func renderSubSkill(commandId, figuresDir string) (string, error) {
 	ctx.BodySections = resolvedSections
 	ctx.BodyBehaviors = resolvedBehaviors
 
-	tmpl := mustParseTemplateFS("templates/skill_sub.go.tmpl")
+	tmpl := mustParseTemplateFS(tmplName)
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, ctx); err != nil {
 		return "", fmt.Errorf(
@@ -615,7 +626,7 @@ func GenerateSkill(roleId protocol.RoleId, skillPath string, figuresDir string, 
 	}
 
 	// Single-pass render: template produces all content inside BEGIN/END.
-	rendered, err := renderSkill(roleId, figuresDir)
+	rendered, err := renderSkill(roleId, figuresDir, TemplateSkill)
 	if err != nil {
 		return "", err
 	}
@@ -714,7 +725,7 @@ func GenerateSubSkill(commandId string, skillPath string, figuresDir string, opt
 	}
 
 	// Single-pass render: template produces frontmatter + H1 + BEGIN/END content.
-	rendered, err := renderSubSkill(commandId, figuresDir)
+	rendered, err := renderSubSkill(commandId, figuresDir, TemplateSubSkill)
 	if err != nil {
 		return "", err
 	}
