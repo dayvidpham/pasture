@@ -183,12 +183,6 @@ func (claudeCodeAgentEmitter) Emit(root string, figuresDir string, opts Generate
 	return out, nil
 }
 
-type noopAgents struct{}
-
-func (noopAgents) Emit(string, string, GenerateOptions) ([]GeneratedFile, error) {
-	return nil, nil
-}
-
 type roleSkillItem struct {
 	role protocol.RoleId
 	dir  string

@@ -76,8 +76,27 @@ func TestEmitHarnessCombinedTargetsDoNotPerturbClaudeCode(t *testing.T) {
 			t.Fatalf("OpenCode target changed claude-code output %q", path)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(root, ".opencode", "skill", "worker", "SKILL.md")); err != nil {
-		t.Fatalf("combined target did not emit .opencode skill tree: %v", err)
+
+	// Dir-coverage: every role and command skill dir the emitter iterates must
+	// have produced a SKILL.md under .opencode/skill/<dir>/. Enumerating the
+	// same sources EmitHarness iterates (roleSkillItems/commandSkillItems)
+	// guarantees the assertion fails if any single dir were dropped from the
+	// OpenCode emission, not just the one previously spot-checked.
+	var expectedSkillDirs []string
+	for _, item := range roleSkillItems() {
+		expectedSkillDirs = append(expectedSkillDirs, item.dir)
+	}
+	for _, item := range commandSkillItems() {
+		expectedSkillDirs = append(expectedSkillDirs, item.dir)
+	}
+	if len(expectedSkillDirs) != len(roleSkillDirs)+len(commandSkillDirs) {
+		t.Fatalf("expected %d OpenCode skill dirs, enumerated %d", len(roleSkillDirs)+len(commandSkillDirs), len(expectedSkillDirs))
+	}
+	for _, dir := range expectedSkillDirs {
+		skillPath := filepath.Join(root, ".opencode", "skill", dir, "SKILL.md")
+		if _, err := os.Stat(skillPath); err != nil {
+			t.Fatalf("combined target did not emit OpenCode skill %q: %v", skillPath, err)
+		}
 	}
 }
 
