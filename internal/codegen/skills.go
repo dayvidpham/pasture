@@ -123,14 +123,27 @@ func buildFuncMap() template.FuncMap {
 const (
 	TemplateSkill    = "templates/skill.go.tmpl"
 	TemplateSubSkill = "templates/skill_sub.go.tmpl"
+
+	// skillBodyPartials is the glob for the shared skill-body partial templates.
+	// These files contain ONLY {{define "skillBody"}} / {{define "skillSubBody"}}
+	// blocks — the single source of truth for the generated SKILL.md body shared
+	// by every harness target (claude-code, opencode). Each harness skill
+	// template (skill.go.tmpl, opencode_skill.go.tmpl, …) carries only its
+	// target-specific frontmatter and then invokes {{template "skillBody" .}} /
+	// {{template "skillSubBody" .}}. Parsing these partials into the same set as
+	// the named template makes the {{define}} blocks resolvable at Execute time.
+	skillBodyPartials = "templates/_skill_*body.go.tmpl"
 )
 
 // mustParseTemplateFS parses a named template from the shared embedded FS
 // (templatesFS, declared in embed.go) with the shared FuncMap and
-// missingkey=error option. The template is named by the base filename of the
-// pattern (e.g. "templates/skill.go.tmpl" → "skill.go.tmpl")
-// so callers can Execute it directly. Panics on parse error — templates are
-// embedded compile-time constants and a parse error is a programming error.
+// missingkey=error option, together with the shared skill-body partials
+// (skillBodyPartials). The template is named by the base filename of the
+// pattern (e.g. "templates/skill.go.tmpl" → "skill.go.tmpl") so callers can
+// Execute it directly; the partials add the named {{define}} bodies
+// ("skillBody", "skillSubBody") that the harness templates reference. Panics on
+// parse error — templates are embedded compile-time constants and a parse error
+// is a programming error.
 func mustParseTemplateFS(pattern string) *template.Template {
 	// ParseFS names templates by their base filename, so we must use the same
 	// name in template.New for Execute() to find the right template.
@@ -141,9 +154,9 @@ func mustParseTemplateFS(pattern string) *template.Template {
 	t, err := template.New(base).
 		Option("missingkey=error").
 		Funcs(buildFuncMap()).
-		ParseFS(templatesFS, pattern)
+		ParseFS(templatesFS, pattern, skillBodyPartials)
 	if err != nil {
-		panic(fmt.Sprintf("codegen: failed to parse embedded template %q: %v", pattern, err))
+		panic(fmt.Sprintf("codegen: failed to parse embedded template %q (with shared partials %q): %v", pattern, skillBodyPartials, err))
 	}
 	return t
 }

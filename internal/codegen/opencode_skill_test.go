@@ -37,23 +37,6 @@ func splitFrontmatter(t *testing.T, path, content string) (frontmatter string, b
 	return rest[:end], rest[end+len("\n---\n"):]
 }
 
-// bodyBetweenMarkers returns the generated body region (the text between the
-// BEGIN and END markers, inclusive of the marker lines). The OpenCode body must
-// match the Claude Code body byte-for-byte; comparing the marker region isolates
-// that comparison from frontmatter differences.
-func bodyBetweenMarkers(t *testing.T, path, content string) string {
-	t.Helper()
-	begin := strings.Index(content, GeneratedBegin)
-	if begin < 0 {
-		t.Fatalf("%s: missing BEGIN marker", path)
-	}
-	end := strings.Index(content, GeneratedEnd)
-	if end < 0 {
-		t.Fatalf("%s: missing END marker", path)
-	}
-	return content[begin : end+len(GeneratedEnd)]
-}
-
 // TestOpenCodeSkillsEmitTwentyNine renders the OpenCode harness into an isolated
 // temp tree and asserts the full emission contract for SLICE-2:
 //   - exactly 29 SKILL.md files under .opencode/skill/<dir>/ (5 roles + 24 commands),
@@ -143,54 +126,16 @@ func TestOpenCodeSkillsEmitTwentyNine(t *testing.T) {
 	}
 }
 
-// TestOpenCodeSkillBodyParity asserts the OpenCode skill body (the text between
-// the BEGIN/END markers) is byte-identical to the Claude Code body for every
-// role and command skill. The two targets diverge ONLY in frontmatter (OpenCode
-// drops the `skills:` list); the body markdown is shared. This is the
-// define-once drift guard: if the Claude Code template body and the OpenCode
-// template body ever diverge, this test fails.
-func TestOpenCodeSkillBodyParity(t *testing.T) {
-	t.Parallel()
-
-	root := testModuleRoot(t)
-	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
-
-	for _, item := range roleSkillItems() {
-		item := item
-		t.Run("role/"+item.dir, func(t *testing.T) {
-			t.Parallel()
-			claude, err := renderSkill(item.role, figuresDir, TemplateSkill)
-			if err != nil {
-				t.Fatalf("renderSkill(claude, %s): %v", item.dir, err)
-			}
-			opencode, err := renderSkill(item.role, figuresDir, OpenCodeTarget.SkillTemplate)
-			if err != nil {
-				t.Fatalf("renderSkill(opencode, %s): %v", item.dir, err)
-			}
-			if got, want := bodyBetweenMarkers(t, item.dir, opencode), bodyBetweenMarkers(t, item.dir, claude); got != want {
-				t.Errorf("role %q: OpenCode body diverges from Claude Code body", item.dir)
-			}
-		})
-	}
-
-	for _, item := range commandSkillItems() {
-		item := item
-		t.Run("command/"+item.dir, func(t *testing.T) {
-			t.Parallel()
-			claude, err := renderSubSkill(item.commandID, figuresDir, TemplateSubSkill)
-			if err != nil {
-				t.Fatalf("renderSubSkill(claude, %s): %v", item.dir, err)
-			}
-			opencode, err := renderSubSkill(item.commandID, figuresDir, OpenCodeTarget.SubSkillTemplate)
-			if err != nil {
-				t.Fatalf("renderSubSkill(opencode, %s): %v", item.dir, err)
-			}
-			if got, want := bodyBetweenMarkers(t, item.dir, opencode), bodyBetweenMarkers(t, item.dir, claude); got != want {
-				t.Errorf("command %q: OpenCode body diverges from Claude Code body", item.dir)
-			}
-		})
-	}
-}
+// Note on body parity: the OpenCode and Claude Code skill bodies cannot diverge
+// because they are no longer two copies. Both harness templates
+// (skill.go.tmpl, opencode_skill.go.tmpl and their sub-skill siblings) carry
+// only target-specific frontmatter and then invoke a single shared body partial
+// ({{template "skillBody" .}} / {{template "skillSubBody" .}}) defined once in
+// templates/_skill_body.go.tmpl and templates/_skill_sub_body.go.tmpl. Body
+// parity is therefore structural (define-once), not asserted dynamically. The
+// only remaining template difference is the frontmatter, which
+// TestOpenCodeSkillsEmitTwentyNine validates (name/description present; the
+// Claude-only `skills:` list and agent-only tools:/model: keys absent).
 
 // TestOpenCodeSkillWritesToDisk asserts the OpenCode skill emission actually
 // materializes the per-skill subdir tree when Write is enabled, exercising the
@@ -223,10 +168,17 @@ func assertWrittenSkill(t *testing.T, path, dir string) {
 		t.Fatalf("OpenCode skill not written to %q: %v", path, err)
 	}
 	fmText, _ := splitFrontmatter(t, path, string(data))
-	if !strings.Contains(fmText, "name: "+dir+"\n") && !strings.HasSuffix(fmText, "name: "+dir) {
-		t.Errorf("%s: frontmatter does not declare name: %s", path, dir)
+
+	dec := yaml.NewDecoder(strings.NewReader(fmText))
+	dec.KnownFields(false)
+	var fm skillFrontmatter
+	if err := dec.Decode(&fm); err != nil {
+		t.Fatalf("%s: decode frontmatter: %v", path, err)
 	}
-	if strings.Contains(fmText, "skills:") {
-		t.Errorf("%s: written skill carries the Claude-only `skills:` key", path)
+	if fm.Name != dir {
+		t.Errorf("%s: name = %q, want %q (the skill dir)", path, fm.Name, dir)
+	}
+	if fm.Skills != "" {
+		t.Errorf("%s: written skill carries the Claude-only `skills:` key, got %q", path, fm.Skills)
 	}
 }
