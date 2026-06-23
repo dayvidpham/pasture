@@ -1,0 +1,38 @@
+id: ride-the-wave
+title: "Ride the Wave — Coordinated Phase 8-10 Execution"
+type: ascii-diagram
+role_ref: supervisor
+section_ref: workflows
+workflow_refs: ['ride-the-wave']
+command_refs: ['cmd-sup-spawn']
+content: |
+  Phase 8: PLAN
+    ├─ Read RATIFIED_PLAN + URD
+    ├─ Spawn ephemeral Explore subagents (Task tool, scoped queries)
+    ├─ Use Explore findings to map codebase
+    ├─ Decompose into vertical slices + integration points
+    └─ Create leaf tasks for every slice
+
+  Phase 9: BUILD
+    ├─ Spawn N Workers for parallel slice implementation
+    ├─ Workers implement their slices in parallel
+    └─ Workers do NOT shut down when finished
+
+  Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget — iterate until 0/0/0 clean, else surface to user)
+    ├─ Cycle 1:
+    │   ├─ Spawn ephemeral reviewers (Task tool, per-slice review)
+    │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
+    │   ├─ Workers fix ALL findings (BLOCKER + IMPORTANT + MINOR) with atomic commits
+    │   └─ Spawn new ephemeral reviewers for re-review
+    ├─ Cycle 2 (if needed): same pattern
+    ├─ Cycle N (as many as needed): same pattern
+    └─ Continue until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR
+
+  DONE → Phase 11 (UAT)
+    ├─ Shut down Workers
+    └─ FOLLOWUP epic (if any) is created at UAT from user-DEFER'd items only
+
+  Cycle Exit Conditions:
+    Fix-free clean round: 0 BLOCKER + 0 IMPORTANT + 0 MINOR   → Proceed to Phase 11 (UAT)
+    ANY finding remains (BLOCKER/IMPORTANT/MINOR)             → Workers fix, spawn new ephemeral reviewers (up to chosen budget; on exhaustion, surface to user)
+    Genuinely stuck (cannot reach a clean round)             → Escalate to architect for re-planning

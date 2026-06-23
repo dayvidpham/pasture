@@ -48,6 +48,7 @@ func TestOpenCodeSkillsEmitTwentyNine(t *testing.T) {
 	root := testModuleRoot(t)
 	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
 	out := t.TempDir()
+	seedVerbatimSourceDirs(t, out) // OpenCode verbatim source (protocol, install-cli)
 
 	files, err := EmitHarness(out, OpenCodeTarget, figuresDir, GenerateOptions{Diff: false, Write: false})
 	if err != nil {
@@ -55,6 +56,10 @@ func TestOpenCodeSkillsEmitTwentyNine(t *testing.T) {
 	}
 
 	skillRoot := filepath.Join(out, ".opencode", "skill")
+	verbatimSet := make(map[string]struct{}, len(openCodeVerbatimDirs))
+	for _, dir := range openCodeVerbatimDirs {
+		verbatimSet[dir] = struct{}{}
+	}
 	skillByDir := make(map[string]GeneratedFile)
 	for _, f := range files {
 		rel, err := filepath.Rel(skillRoot, f.Path)
@@ -64,6 +69,9 @@ func TestOpenCodeSkillsEmitTwentyNine(t *testing.T) {
 		parts := strings.Split(filepath.ToSlash(rel), "/")
 		if len(parts) != 2 || parts[1] != "SKILL.md" {
 			continue // verbatim sibling docs (e.g. protocol/PROCESS.md) — not the SKILL.md entry
+		}
+		if _, isVerbatim := verbatimSet[parts[0]]; isVerbatim {
+			continue // verbatim SKILL.md (protocol, install-cli) — not a generated skill dir
 		}
 		skillByDir[parts[0]] = f
 	}
@@ -146,6 +154,7 @@ func TestOpenCodeSkillWritesToDisk(t *testing.T) {
 	root := testModuleRoot(t)
 	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
 	out := t.TempDir()
+	seedVerbatimSourceDirs(t, out) // OpenCode verbatim source (protocol, install-cli)
 
 	if _, err := EmitHarness(out, OpenCodeTarget, figuresDir, GenerateOptions{Diff: false, Write: true}); err != nil {
 		t.Fatalf("EmitHarness(%s, write): %v", HarnessOpenCode, err)

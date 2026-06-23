@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,6 +57,7 @@ func TestEmitHarnessCombinedTargetsDoNotPerturbClaudeCode(t *testing.T) {
 
 	root := t.TempDir()
 	writeHarnessSeedFiles(t, root)
+	seedVerbatimSourceDirs(t, root) // OpenCode verbatim source (protocol, install-cli)
 	targets, err := ResolveHarness([]string{string(HarnessClaudeCode), string(HarnessOpenCode)})
 	if err != nil {
 		t.Fatalf("ResolveHarness: %v", err)
@@ -132,6 +134,50 @@ func readGeneratedFiles(t *testing.T, files []GeneratedFile) map[string]string {
 		out[file.Path] = string(data)
 	}
 	return out
+}
+
+// seedVerbatimSourceDirs copies the real hand-authored verbatim skill trees
+// (openCodeVerbatimDirs: "protocol" and "install-cli") from the actual module's
+// skills/ directory into dst/skills/<dir>/, making a synthetic temp root usable
+// by EmitHarness(opencode).
+//
+// Background: copyVerbatimSkill reads <root>/skills/<dir> and writes to
+// <root>/<targetSkillRoot>/<dir>. Tests that build a synthetic temp root
+// (dst = t.TempDir()) and call EmitHarness(dst, OpenCodeTarget, ...) must
+// seed the verbatim SOURCE dirs — otherwise copyVerbatimSkill errors on the
+// missing directory. copyVerbatimSkill intentionally stays STRICT (a missing
+// source dir means a real packaging problem in production); seeding here is the
+// correct integration fix for tests with synthetic roots.
+func seedVerbatimSourceDirs(t *testing.T, dst string) {
+	t.Helper()
+	moduleRoot := testModuleRoot(t)
+	for _, dir := range openCodeVerbatimDirs {
+		src := filepath.Join(moduleRoot, "skills", dir)
+		dstDir := filepath.Join(dst, "skills", dir)
+		if err := filepath.WalkDir(src, func(srcPath string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			rel, err := filepath.Rel(src, srcPath)
+			if err != nil {
+				return err
+			}
+			dstPath := filepath.Join(dstDir, rel)
+			if d.IsDir() {
+				return os.MkdirAll(dstPath, 0o755)
+			}
+			data, err := os.ReadFile(srcPath)
+			if err != nil {
+				return err
+			}
+			if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+				return err
+			}
+			return os.WriteFile(dstPath, data, 0o644)
+		}); err != nil {
+			t.Fatalf("seedVerbatimSourceDirs: copy %q into %q: %v", src, dstDir, err)
+		}
+	}
 }
 
 func testModuleRoot(t *testing.T) string {
