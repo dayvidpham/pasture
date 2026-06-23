@@ -1,0 +1,418 @@
+---
+name: impl-review
+description: Code review coordination across all slices (Phase 10)
+---
+
+# Implementation Code Review (Phase 10)
+
+<!-- BEGIN GENERATED FROM pasture schema -->
+**Command:** `pasture:impl:review` — Code review coordination across all slices (Phase 10)
+
+Conduct code review across ALL implementation slices. Each of 3 reviewers reviews every slice.
+
+**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-10-code-review)** <- Phase 10
+
+See `../protocol/CONSTRAINTS.md` for coding standards and severity definitions.
+
+**[frag--sup-review-all-slices]**
+- Given: all slices complete
+- When: starting review
+- Then: spawn 3 reviewers for ALL slices
+- Should not: assign reviewers to single slices
+
+**[frag--sup-review-check-each]**
+- Given: reviewer assigned
+- When: reviewing
+- Then: check each slice against criteria
+- Should not: skip any slice
+
+**[frag--sup-review-severity-groups]**
+- Given: review round
+- When: creating severity groups
+- Then: ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty
+- Should not: lazily create groups only when findings exist
+
+**[frag--sup-blocker-dual-parent]**
+- Given: BLOCKER finding
+- When: wiring dependencies
+- Then: add dual-parent: blocks BOTH the severity group AND the slice
+- Should not: wire BLOCKER to only one parent
+
+**[frag--sup-deferred-followup]**
+- Given: a review finding (BLOCKER, IMPORTANT, or MINOR)
+- When: categorizing
+- Then: track it in its severity group; ALL severity groups must reach 0 before wave close — the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by any review severity
+- Should not: route any review severity (BLOCKER/IMPORTANT/MINOR) to the FOLLOWUP epic; close a wave with any finding outstanding
+
+**[frag--sup-followup-epic-timing]**
+- Given: UAT (Phase 5 or 11) produces one or more user-DEFER'd items
+- When: finishing UAT
+- Then: supervisor creates the FOLLOWUP epic from the user-DEFER'd UAT items only
+- Should not: create a FOLLOWUP epic from any review severity (BLOCKER/IMPORTANT/MINOR)
+
+## Severity Tree (EAGER Creation)
+
+Per [frag--sup-review-severity-groups], create all 3 severity groups immediately:
+
+```bash
+# Step 1: Create all 3 severity groups immediately (EAGER)
+BLOCKER_ID=$(bd create --title "SLICE-1-REVIEW-A-1 BLOCKER" \
+  --labels "pasture:severity:blocker,pasture:p10-impl:s10-review" \
+  --description "---
+references:
+  slice: <slice-1-id>
+  review_round: 1
+---
+BLOCKER findings from Reviewer A (Correctness) on SLICE-1.")
+
+IMPORTANT_ID=$(bd create --title "SLICE-1-REVIEW-A-1 IMPORTANT" \
+  --labels "pasture:severity:important,pasture:p10-impl:s10-review" \
+  --description "---
+references:
+  slice: <slice-1-id>
+  review_round: 1
+---
+IMPORTANT findings from Reviewer A (Correctness) on SLICE-1.")
+
+MINOR_ID=$(bd create --title "SLICE-1-REVIEW-A-1 MINOR" \
+  --labels "pasture:severity:minor,pasture:p10-impl:s10-review" \
+  --description "---
+references:
+  slice: <slice-1-id>
+  review_round: 1
+---
+MINOR findings from Reviewer A (Correctness) on SLICE-1.")
+
+# Step 2: Wire severity groups to the review round task
+bd dep add <review-round-id> --blocked-by $BLOCKER_ID
+bd dep add <review-round-id> --blocked-by $IMPORTANT_ID
+bd dep add <review-round-id> --blocked-by $MINOR_ID
+# NEVER wire severity groups to IMPL_PLAN or slices directly.
+# BLOCKER findings block slices via dual-parent (see below).
+# IMPORTANT/MINOR must ALSO reach 0 before wave close — they are NOT routed to FOLLOWUP.
+# The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items (see Follow-up Epic section).
+
+# Step 3: Close empty groups immediately
+# If a group has no findings, close it right away
+bd close $IMPORTANT_ID   # if no IMPORTANT findings
+bd close $MINOR_ID        # if no MINOR findings
+```
+
+### Naming Convention
+
+```
+SLICE-{N}-REVIEW-{axis}-{round}
+```
+
+Where axis = A (Correctness), B (Test quality), C (Elegance).
+
+Examples:
+- `SLICE-1-REVIEW-A-1` — Reviewer A (Correctness), Round 1, SLICE-1
+- `SLICE-2-REVIEW-C-2` — Reviewer C (Elegance), Round 2, SLICE-2
+
+Severity groups:
+- `SLICE-1-REVIEW-A-1 BLOCKER`
+- `SLICE-1-REVIEW-A-1 IMPORTANT`
+- `SLICE-1-REVIEW-A-1 MINOR`
+
+## Dual-Parent BLOCKER Relationship
+
+BLOCKER findings have **two parents**:
+1. The severity group task (`pasture:severity:blocker`) — for categorization
+2. The slice they block — for dependency tracking
+
+```bash
+# Create a BLOCKER finding
+FINDING_ID=$(bd create --title "BLOCKER: Missing error handling in auth flow" \
+  --labels "pasture:p10-impl:s10-review" \
+  --description "---
+references:
+  slice: <slice-1-id>
+  reviewer: reviewer-A
+  round: 1
+---
+Missing error handling causes silent failure in auth flow.")
+
+# Wire dual-parent: finding blocks BOTH severity group AND slice
+bd dep add $BLOCKER_ID --blocked-by $FINDING_ID
+bd dep add <slice-1-id> --blocked-by $FINDING_ID
+```
+
+Per [frag--sup-deferred-followup], IMPORTANT/MINOR findings attach to their severity group only (they do **not** block the slice via dual-parent), but ALL severity groups (BLOCKER/IMPORTANT/MINOR) must reach 0 before the review wave closes — they are **never** routed to the FOLLOWUP epic. The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items.
+
+```bash
+# IMPORTANT finding — attaches to the IMPORTANT severity group (NOT the slice)
+IMPORTANT_FINDING_ID=$(bd create --title "IMPORTANT: Add request timeout" \
+  --labels "pasture:p10-impl:s10-review" \
+  --description "---
+references:
+  slice: <slice-1-id>
+  reviewer: reviewer-A
+  round: 1
+---
+API calls should have configurable timeouts.")
+
+# Attaches to the IMPORTANT severity group (NOT the slice); the group must still reach 0
+bd dep add $IMPORTANT_ID --blocked-by $IMPORTANT_FINDING_ID
+```
+
+## Review Structure
+
+Each reviewer (A, B, C) reviews EVERY slice:
+
+```
+Reviewer A (Correctness): Reviews SLICE-1, SLICE-2, SLICE-3 →
+  Creates: SLICE-1-REVIEW-A-1, SLICE-2-REVIEW-A-1, SLICE-3-REVIEW-A-1
+  Each review has 3 severity groups (BLOCKER/IMPORTANT/MINOR)
+
+Reviewer B (Test quality): Reviews SLICE-1, SLICE-2, SLICE-3 →
+  Creates: SLICE-1-REVIEW-B-1, SLICE-2-REVIEW-B-1, SLICE-3-REVIEW-B-1
+
+Reviewer C (Elegance): Reviews SLICE-1, SLICE-2, SLICE-3 →
+  Creates: SLICE-1-REVIEW-C-1, SLICE-2-REVIEW-C-1, SLICE-3-REVIEW-C-1
+```
+
+## Spawning Reviewers
+
+Supervisor spawns 3 parallel reviewers as **subagents** (via the Task tool) or via **TeamCreate**. Reviewers are short-lived — keep them in-session.
+
+```
+// Spawn 3 reviewers (one per axis)
+Task({
+  subagent_type: "general-purpose",
+  run_in_background: true,
+  prompt: `You are Reviewer A (Correctness).
+URD: <urd-id> (read with bd show <urd-id> for user requirements context)
+Focus: Does implementation faithfully serve the user? Are technical decisions consistent with rationale?
+Review ALL slices: <slice-1-id>, <slice-2-id>, <slice-3-id>
+For each slice, run: bd show <slice-id>
+Create severity groups (BLOCKER/IMPORTANT/MINOR) for each slice. Title: SLICE-N-REVIEW-A-1
+Call Skill(/pasture:reviewer-review-code) for the review procedure.`
+})
+```
+
+**Handoff:** Before spawning each reviewer, author its handoff in a Beads task body (the task body IS the handoff — no filesystem path).
+
+### Supervisor → Reviewer Handoff Template
+
+```markdown
+# Handoff: Supervisor → Reviewer <N>
+
+## Context
+- Request: <request-task-id>
+- URD: <urd-task-id>
+- IMPL_PLAN: <impl-plan-task-id>
+- Ratified Proposal: <proposal-task-id>
+
+## Slices to Review
+| Slice | Task ID | Description | Worker |
+|-------|---------|-------------|--------|
+| SLICE-1 | <id> | <description> | worker-1 |
+| SLICE-2 | <id> | <description> | worker-2 |
+
+## Review Procedure
+1. For each slice: `bd show <slice-id>`
+2. Create 3 severity groups per slice (EAGER)
+3. Add findings as children of severity groups
+4. BLOCKER findings: dual-parent (severity group + slice)
+5. Close empty severity groups immediately
+6. Vote ACCEPT or REVISE per slice
+```
+
+## Review Criteria
+
+Each reviewer checks each slice for:
+
+1. **Requirements Alignment (check URD)**
+   - Does implementation match ratified plan?
+   - Are all acceptance criteria met?
+   - Read URD (`bd show <urd-id>`) for requirements traceability
+
+2. **User Vision (check URD)**
+   - Does it fulfill the user's original request (as documented in URD)?
+   - Does it match UAT expectations?
+
+3. **MVP Scope**
+   - Is scope appropriate (not over/under engineered)?
+
+4. **Codebase Quality**
+   - Follows project style/constraints?
+   - No TODO placeholders?
+   - Tests import production code?
+
+5. **Validation Checklist**
+   - All items from slice checklist verified?
+
+## Voting: ACCEPT vs REVISE (Binary Only)
+
+| Vote | Requirement |
+|------|-------------|
+| **ACCEPT** | All 5 criteria satisfied; no BLOCKER items |
+| **REVISE** | BLOCKER issues found; must provide actionable feedback |
+
+**Documentation (via Beads comments):**
+```bash
+bd comments add <slice-id> "VOTE: ACCEPT - [reason]"
+# OR
+bd comments add <slice-id> "VOTE: REVISE - [specific issue]. Suggest: [fix]"
+```
+
+## Consensus Check
+
+All reviews across all slices must be ACCEPT:
+
+```bash
+# Check for any REVISE votes
+bd list --labels="pasture:p10-impl:s10-review" --desc-contains "VOTE: REVISE"
+
+# Check for unresolved BLOCKERs
+bd list --labels="pasture:severity:blocker" --status=open
+
+# If any REVISE or open BLOCKERs, return to implementation
+# If all ACCEPT and BLOCKERs resolved, proceed to Phase 11 (UAT)
+```
+
+## Handling REVISE
+
+If any reviewer votes REVISE on any slice:
+
+1. **Document issues** in the review task description
+2. **Return slice to worker** for fixes
+3. **Re-review** after fixes complete (new review round)
+
+```bash
+# Mark slice as needing revision
+bd comments add <slice-id> "REVISION NEEDED: <specific issues>"
+
+# After worker fixes, start new review round
+# New severity groups are created fresh for the new round
+```
+
+## Follow-up Epic (EPIC_FOLLOWUP)
+
+Per [frag--sup-followup-epic-timing], create immediately after review completes.
+
+### Step 1: Create the follow-up epic
+
+```bash
+bd create --type=epic --priority=3 \
+  --title="FOLLOWUP: Non-blocking improvements from code review" \
+  --description="---
+references:
+  request: <request-task-id>
+  urd: <urd-task-id>
+  review_round: <review-round-ids>
+---
+Aggregated IMPORTANT and MINOR findings from code review." \
+  --add-label "pasture:epic-followup"
+
+# Link IMPORTANT/MINOR severity groups
+bd dep add <followup-epic-id> --blocked-by <important-group-id>
+bd dep add <followup-epic-id> --blocked-by <minor-group-id>
+```
+
+### Step 2: Follow-up lifecycle (same protocol, FOLLOWUP_* prefix)
+
+The follow-up epic runs the same protocol phases with FOLLOWUP_* prefixed task types:
+
+```
+FOLLOWUP epic (pasture:epic-followup)
+  ├── relates_to: original URD
+  ├── relates_to: original REVIEW-A/B/C tasks
+  └── blocked-by: FOLLOWUP_URE         (Phase 2: scope which DEFER'd items to address)
+        └── blocked-by: FOLLOWUP_URD   (Phase 2: requirements for follow-up)
+              └── blocked-by: FOLLOWUP_PROPOSAL-1  (Phase 3: proposal for follow-up)
+                    └── blocked-by: FOLLOWUP_IMPL_PLAN  (Phase 8: decompose into slices)
+                          ├── blocked-by: FOLLOWUP_SLICE-1  (Phase 9)
+                          │     ├── blocked-by: deferred-item-leaf-task-...
+                          │     └── blocked-by: deferred-item-leaf-task-...
+                          └── blocked-by: FOLLOWUP_SLICE-2
+```
+
+```bash
+# Create follow-up lifecycle tasks
+FOLLOWUP_URE_ID=$(bd create \
+  --title "FOLLOWUP_URE: Scope follow-up for <feature>" \
+  --labels "pasture:p2-user:s2_1-elicit" \
+  --description "---
+references:
+  followup_epic: <followup-epic-id>
+  original_urd: <original-urd-id>
+---
+Scoping URE: determine which user-DEFER'd UAT items to address.")
+bd dep add <followup-epic-id> --blocked-by $FOLLOWUP_URE_ID
+
+FOLLOWUP_URD_ID=$(bd create \
+  --title "FOLLOWUP_URD: Requirements for <feature> follow-up" \
+  --labels "pasture:p2-user:s2_2-urd,pasture:urd" \
+  --description "---
+references:
+  followup_epic: <followup-epic-id>
+  original_urd: <original-urd-id>
+---
+Follow-up requirements. References original URD.")
+bd dep add $FOLLOWUP_URE_ID --blocked-by $FOLLOWUP_URD_ID
+```
+
+### Step 3: DEFER'd-item leaf adoption (dual-parent)
+
+When the supervisor creates FOLLOWUP_SLICE-N tasks, the user-DEFER'd UAT-item leaf tasks gain a second parent (dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice):
+
+```bash
+# Leaf task gets dual-parent: DEFER'd-items tracking group + follow-up slice
+bd dep add <followup-slice-id> --blocked-by <deferred-item-leaf-id-1>
+bd dep add <followup-slice-id> --blocked-by <deferred-item-leaf-id-2>
+# Leaf task already has: bd dep add <deferred-items-tracking-group-id> --blocked-by <leaf-task-id>
+```
+
+### Followup Handoff (h5)
+
+The h5 handoff (Reviewer → Supervisor, summary-with-ids) closes out the review wave. The FOLLOWUP epic itself is created later, at UAT, from the user-DEFER'd UAT items — **not** from review findings (all review severities reach 0 before the wave closes). Author this handoff in its Beads task body (no filesystem path):
+
+```markdown
+# Handoff: Reviewer → Supervisor (review wave complete)
+
+## Context
+- Request: <request-task-id>
+- URD: <urd-task-id>
+- Ratified Proposal: <proposal-task-id>
+
+## Review Outcome
+- All slices reviewed; ALL severity groups (BLOCKER/IMPORTANT/MINOR) reached 0 on a fix-free clean round.
+
+## Open Items
+- None for this wave. Any user-DEFER'd UAT items feed the FOLLOWUP epic at Phase 11.
+```
+
+### Follow-up Handoff Chain
+
+Inside the follow-up lifecycle, the same handoff types (h1-h4) apply but scoped to the follow-up epic:
+
+| Order | Handoff | Transition |
+|-------|---------|------------|
+| 1 | h5 | Reviewer → Followup: **Starts** the follow-up lifecycle |
+| 2 | *(none)* | Supervisor creates FOLLOWUP_URE (same actor) |
+| 3 | *(none)* | Supervisor creates FOLLOWUP_URD (same actor) |
+| 4 | h6 | Supervisor → Architect: Hands off FOLLOWUP_URE + FOLLOWUP_URD for FOLLOWUP_PROPOSAL |
+| 5 | h1 | Architect → Supervisor: After FOLLOWUP_PROPOSAL ratified |
+| 6 | h2 | Supervisor → Worker: FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks |
+| 7 | h3 | Supervisor → Reviewer: Code review of follow-up slices |
+| 8 | h4 | Worker → Reviewer: Follow-up slice completion |
+
+Follow-up handoff storage: each handoff is authored in its Beads task body (no filesystem path).
+
+See `../protocol/HANDOFF_TEMPLATE.md` for full follow-up handoff examples and field requirements.
+
+## Proceeding to UAT
+
+Only when ALL reviews are ACCEPT and all BLOCKERs are resolved:
+
+```bash
+# Verify consensus — no open BLOCKERs
+bd list --labels="pasture:severity:blocker" --status=open
+# Should return 0 results
+
+# Proceed to Phase 11 (Implementation UAT)
+Skill(/pasture:user-uat)
+```
+<!-- END GENERATED FROM pasture schema -->
