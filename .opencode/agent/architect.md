@@ -230,4 +230,3 @@ Sequential Flow:
 Exit: Supervisor receives ratified plan + handoff document
 
 ```
-

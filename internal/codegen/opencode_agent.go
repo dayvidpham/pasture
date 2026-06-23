@@ -52,7 +52,6 @@ var openCodeMode = map[protocol.RoleId]string{
 var openCodeModel = map[string]string{
 	"opus":   "anthropic/claude-opus-4-8",
 	"sonnet": "anthropic/claude-sonnet-4-6",
-	"haiku":  "anthropic/claude-haiku-4-5",
 }
 
 // openCodeToolPermission maps each Claude-side tool name to the OpenCode
@@ -205,10 +204,10 @@ func renderOpenCodeAgent(roleID protocol.RoleId, figuresDir string) (string, err
 		)
 	}
 
-	content := buf.String()
-	if !strings.HasSuffix(content, "\n") {
-		content += "\n"
-	}
+	// Normalize to exactly one trailing newline (the reused Claude body already
+	// ends in "\n" and the template appends another after {{ .Body }}, which
+	// would double it). This mirrors renderAgent's single-trailing-newline rule.
+	content := strings.TrimRight(buf.String(), "\n") + "\n"
 	return content, nil
 }
 

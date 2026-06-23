@@ -273,4 +273,3 @@ Cycle Exit Conditions:
   Genuinely stuck (cannot reach a clean round)             → Escalate to architect for re-planning
 
 ```
-

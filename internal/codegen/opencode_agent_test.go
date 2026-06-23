@@ -190,8 +190,23 @@ func TestOpenCodeAgentReviewerSubagent(t *testing.T) {
 	if fm.Mode != "subagent" {
 		t.Errorf("reviewer mode = %q, want subagent", fm.Mode)
 	}
+
+	if got := fm.Permission["*"]; got != "deny" {
+		t.Errorf("reviewer permission[*] = %q, want deny (deny-all seed)", got)
+	}
+	// Positive grants: reviewer has Read/Glob/Grep/Bash/Skill (SendMessage has no
+	// OpenCode analog and is omitted). Mirrors the architect/worker assertions.
+	for _, perm := range []string{"read", "glob", "grep", "bash", "skill"} {
+		if got := fm.Permission[perm]; got != "allow" {
+			t.Errorf("reviewer permission[%s] = %q, want allow", perm, got)
+		}
+	}
 	if _, hasEdit := fm.Permission["edit"]; hasEdit {
 		t.Errorf("reviewer is read-only and must not be granted edit, got %v", fm.Permission)
+	}
+	// Reviewer has no Task tool → no task permission.
+	if _, hasTask := fm.Permission["task"]; hasTask {
+		t.Errorf("reviewer has no Task tool and must not be granted task permission, got %v", fm.Permission)
 	}
 }
 

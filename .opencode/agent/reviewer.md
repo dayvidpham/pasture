@@ -123,4 +123,3 @@ You review from an end-user alignment perspective. See the project's protocol/CO
 - When: assigned
 - Then: review ALL slices (not just one)
 - Should not: skip any slice
-

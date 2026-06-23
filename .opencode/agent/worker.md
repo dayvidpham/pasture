@@ -189,4 +189,3 @@ L2 Test File Requirements:
   4. Define expected API contracts — tests specify what the implementation should do
 
 ```
-
