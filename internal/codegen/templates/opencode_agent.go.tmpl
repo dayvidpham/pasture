@@ -1,0 +1,11 @@
+---
+description: {{ .Description }}
+mode: {{ .Mode }}
+model: {{ .Model }}
+permission:
+{{- range .Permissions }}
+  {{ .Key }}: {{ .Value }}
+{{- end }}
+---
+
+{{ .Body }}

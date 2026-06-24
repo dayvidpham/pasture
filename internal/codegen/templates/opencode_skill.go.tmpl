@@ -1,8 +1,5 @@
 ---
 name: {{ .Role.Id }}
 description: {{ .Role.Description }}
-{{- if .SubSkills }}
-skills: {{ join .SubSkills ", " }}
-{{- end }}
 ---
 {{template "skillBody" .}}

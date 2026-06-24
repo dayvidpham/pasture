@@ -24,9 +24,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/dayvidpham/pasture/internal/codegen"
-	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // moduleRoot walks upward from the current working directory until it finds go.mod,
@@ -56,49 +56,9 @@ func moduleRoot() (string, error) {
 	}
 }
 
-// roleSkillDirs maps each role to its skill directory name (relative to skills/).
-// Mirrors Python _ROLE_SKILL_DIRS in gen_skills.py.
-var roleSkillDirs = map[protocol.RoleId]string{
-	protocol.RoleSupervisor: "supervisor",
-	protocol.RoleWorker:     "worker",
-	protocol.RoleReviewer:   "reviewer",
-	protocol.RoleArchitect:  "architect",
-	protocol.RoleEpoch:      "epoch",
-}
-
-// commandSkillDirs maps each command ID to its skill directory name (relative to skills/).
-// Only commands whose FigureSpecs entries have CommandRefs pointing at them need
-// sub-skill header generation. Mirrors Python _COMMAND_SKILL_DIRS in gen_skills.py.
-var commandSkillDirs = map[string]string{
-	"cmd-sup-plan":    "supervisor-plan-tasks",
-	"cmd-sup-spawn":   "supervisor-spawn-worker",
-	"cmd-impl-review": "impl-review",
-	// Newly-ported commands (22 skills from aura-plugins/skills/).
-	"cmd-arch-handoff":  "architect-handoff",
-	"cmd-arch-propose":  "architect-propose-plan",
-	"cmd-arch-ratify":   "architect-ratify",
-	"cmd-arch-review":   "architect-request-review",
-	"cmd-explore":       "explore",
-	"cmd-impl-slice":    "impl-slice",
-	"cmd-research":      "research",
-	"cmd-rev-comment":   "reviewer-comment",
-	"cmd-rev-code":      "reviewer-review-code",
-	"cmd-rev-plan":      "reviewer-review-plan",
-	"cmd-rev-vote":      "reviewer-vote",
-	"cmd-status":        "status",
-	"cmd-sup-commit":    "supervisor-commit",
-	"cmd-sup-track":     "supervisor-track-progress",
-	"cmd-swarm":         "swarm",
-	"cmd-user-elicit":   "user-elicit",
-	"cmd-user-request":  "user-request",
-	"cmd-user-uat":      "user-uat",
-	"cmd-work-blocked":  "worker-blocked",
-	"cmd-work-complete": "worker-complete",
-	"cmd-work-impl":     "worker-implement",
-}
-
 func main() {
 	outputRoot := flag.String("output", "", "output root directory (default: module root, found by walking up from cwd to go.mod)")
+	targetFlag := flag.String("targets", string(codegen.HarnessClaudeCode), "comma-separated generation targets (registered: claude-code, opencode)")
 	flag.Parse()
 
 	var root string
@@ -116,6 +76,11 @@ func main() {
 	opts := codegen.DefaultOptions // Diff: true, Write: true
 
 	var errors []error
+	targets, err := codegen.ResolveHarness(strings.Split(*targetFlag, ","))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+		os.Exit(1)
+	}
 
 	// ── 1. Generate schema.xml ────────────────────────────────────────────────
 	schemaPath := filepath.Join(root, "schema.xml")
@@ -125,49 +90,20 @@ func main() {
 		fmt.Printf("Generated %s\n", schemaPath)
 	}
 
-	// ── 2. Generate SKILL.md headers for each role ────────────────────────────
+	// ── 2. Generate harness-specific skills and agents ────────────────────────
 	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
-	for roleId, dirName := range roleSkillDirs {
-		skillPath := filepath.Join(root, "skills", dirName, "SKILL.md")
-		if _, err := os.Stat(skillPath); os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "Skipping %s (not found)\n", skillPath)
-			continue
-		}
-		if _, err := codegen.GenerateSkill(roleId, skillPath, figuresDir, opts); err != nil {
-			errors = append(errors, fmt.Errorf("skill %s: %w", dirName, err))
+	for _, target := range targets {
+		files, err := codegen.EmitHarness(root, target, figuresDir, opts)
+		if err != nil {
+			errors = append(errors, fmt.Errorf("target %s: %w", target.Name, err))
 		} else {
-			fmt.Printf("Generated %s\n", skillPath)
+			for _, file := range files {
+				fmt.Printf("Generated %s\n", file.Path)
+			}
 		}
 	}
 
-	// ── 3. Generate sub-skill headers (commands with figures) ─────────────────
-	for commandId, dirName := range commandSkillDirs {
-		skillPath := filepath.Join(root, "skills", dirName, "SKILL.md")
-		if _, err := os.Stat(skillPath); os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "Skipping sub-skill %s (not found)\n", skillPath)
-			continue
-		}
-		if _, err := codegen.GenerateSubSkill(commandId, skillPath, figuresDir, opts); err != nil {
-			errors = append(errors, fmt.Errorf("sub-skill %s: %w", dirName, err))
-		} else {
-			fmt.Printf("Generated sub-skill %s\n", skillPath)
-		}
-	}
-
-	// ── 4. Generate agent definitions for roles with tools ────────────────────
-	for roleId, roleSpec := range codegen.RoleSpecs {
-		if len(roleSpec.Tools) == 0 {
-			continue
-		}
-		agentPath := filepath.Join(root, "agents", fmt.Sprintf("%s.md", roleId))
-		if _, err := codegen.GenerateAgent(roleId, agentPath, figuresDir, opts); err != nil {
-			errors = append(errors, fmt.Errorf("agent %s: %w", roleId, err))
-		} else {
-			fmt.Printf("Generated %s\n", agentPath)
-		}
-	}
-
-	// ── 5. Global-ID uniqueness enforcement (SLICE-2, URD R5+R7) ─────────────
+	// ── 3. Global-ID uniqueness enforcement (SLICE-2, URD R5+R7) ─────────────
 	// Must run AFTER all generators so the full registry is assembled, and
 	// BEFORE exit so a violation causes go generate to fail immediately.
 	if err := codegen.ValidateGlobalIds(); err != nil {

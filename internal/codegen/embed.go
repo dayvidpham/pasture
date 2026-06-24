@@ -12,5 +12,11 @@ import "embed"
 // must load templates via this FS rather than from the real filesystem, so
 // that the generated binary works without access to the source tree.
 //
-//go:embed templates
+// The explicit `templates/_*` pattern is required because go:embed omits files
+// whose names begin with "_" or "." by default; the shared skill-body partials
+// (templates/_skill_body.go.tmpl, templates/_skill_sub_body.go.tmpl) carry a
+// leading underscore so they sort apart from the harness skill templates and
+// signal "partial, not a standalone template".
+//
+//go:embed templates templates/_*
 var templatesFS embed.FS
