@@ -25,7 +25,6 @@ func TestOpenCodeManifestEmittedContent(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	seedVerbatimSourceDirs(t, root) // required so verbatim copy doesn't error
 
 	emitter := openCodeManifestEmitter{}
 	files, err := emitter.Emit(root, GenerateOptions{Diff: false, Write: false})
@@ -85,7 +84,6 @@ func TestOpenCodeManifestWritesToDisk(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	seedVerbatimSourceDirs(t, root) // required so verbatim copy doesn't error
 
 	emitter := openCodeManifestEmitter{}
 	if _, err := emitter.Emit(root, GenerateOptions{Diff: false, Write: true}); err != nil {
