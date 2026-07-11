@@ -149,9 +149,9 @@ Error: This destructive git operation is blocked for worker agents.
          git restore <specific-files>
     2. If unexpected files in the worktree are blocking your fix, they are
        almost certainly peer-worker work-in-progress. Do NOT clean them up.
-       Post a coordination comment on your slice task and wait for supervisor
-       direction:
-         bd comments add <your-task-id> "Blocked: peer-worker changes present in <files>; need supervisor coordination."
+       Raise the concern to your team-lead and wait for direction — post a
+       coordination comment on your slice task so the escalation is recorded:
+         bd comments add <your-task-id> "Blocked: peer-worker changes present in <files>; raising to team-lead for coordination."
     3. If you genuinely need to run this command (for example, resolving a
        merge conflict on a branch where you are the only worker), bypass this
        hook for that single command by setting BYPASS_GIT_DISCIPLINE=1 in the
