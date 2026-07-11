@@ -1,21 +1,28 @@
 # CLI smoke-test fixtures for pasture-release.
 # Each case is run as a subprocess (exec.Command) to test the compiled binary.
-# Fields:
+# Fields (stdout and stderr are captured separately, not merged):
 #   id:                    human-readable test name
 #   args:                  CLI arguments passed to the binary
 #   want_exit:             expected exit code (0 = success, non-zero = failure)
-#   want_stdout_contains:  substring that must appear in combined stdout+stderr
-#   want_stderr_contains:  substring that must appear in combined stdout+stderr
+#   want_stdout_contains:  substring that must appear on stdout
+#   want_stderr_contains:  substring that must appear on stderr
+#   want_stdout_excludes:  substring that must NOT appear on stdout
+#   want_stderr_excludes:  substring that must NOT appear on stderr
 tests:
   - id: "help-exits-zero"
     args: ["--help"]
     want_exit: 0
     want_stdout_contains: "pasture-release"
+    # Negative control: help text goes to stdout only, never stderr.
+    want_stderr_excludes: "pasture-release"
 
   - id: "unknown-subcommand-exits-nonzero"
     args: ["does-not-exist"]
     want_exit: 1
     want_stderr_contains: "unknown command"
+    # Negative control: the error is routed to stderr, not stdout. This case
+    # would fail if the harness ever reverted to a merged stdout+stderr buffer.
+    want_stdout_excludes: "unknown command"
 
   - id: "check-help"
     args: ["check", "--help"]

@@ -2,11 +2,23 @@ package release_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/release"
 )
+
+// headSHA returns the current HEAD commit SHA in dir.
+func headSHA(t *testing.T, dir string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD in %s: %v", dir, err)
+	}
+	return strings.TrimSpace(string(out))
+}
 
 // initGitRepo creates a minimal git repo in dir.
 func initGitRepo(t *testing.T) string {
@@ -119,6 +131,9 @@ func TestGitRollback(t *testing.T) {
 	}
 	mustGit(t, dir, "tag", "-a", "v1.0.0", "-m", "test tag")
 
+	// Capture HEAD before rollback to pin the "commit intentionally left" contract.
+	headBefore := headSHA(t, dir)
+
 	if err := release.GitRollback(dir, "v1.0.0"); err != nil {
 		t.Fatalf("GitRollback error: %v", err)
 	}
@@ -131,6 +146,11 @@ func TestGitRollback(t *testing.T) {
 	tag, _ := release.GitLatestVersionTag(dir)
 	if tag != "" {
 		t.Errorf("tag should be deleted after rollback, got %q", tag)
+	}
+	// The already-made commit must survive: rollback undoes the tag and the
+	// working tree, NOT the release commit, so HEAD is unchanged.
+	if headAfter := headSHA(t, dir); headAfter != headBefore {
+		t.Errorf("rollback moved HEAD from %s to %s; the release commit must survive rollback", headBefore, headAfter)
 	}
 }
 

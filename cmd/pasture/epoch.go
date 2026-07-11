@@ -7,11 +7,26 @@ import (
 	"github.com/dayvidpham/pasture/internal/handlers"
 )
 
-// runWithController opens a durable epoch controller on the resolved database,
-// runs fn against it, and maps the result onto the process exit code. It
-// centralizes the open/close/exit handling every lifecycle and signal verb
-// shares so each command body stays a thin argument-marshalling step.
-func runWithController(fn func(handlers.EpochController) (int, error)) error {
+// runWithController validates the invocation, opens a durable epoch controller on
+// the resolved database, runs fn against it, and maps the result onto the process
+// exit code. It centralizes the validate/open/close/exit handling every lifecycle
+// and signal verb shares so each command body stays a thin argument-marshalling
+// step.
+//
+// validate runs FIRST and must be a pure argument check (no controller, no
+// database). When it returns an error, runWithController reports it and exits
+// WITHOUT opening the controller, so a rejected invocation never creates or
+// migrates the database. A nil validate skips the pre-open check. Engine and
+// connection errors from OpenEpochController still surface at command entry.
+func runWithController(validate func() error, fn func(handlers.EpochController) (int, error)) error {
+	if validate != nil {
+		if err := validate(); err != nil {
+			printError(err)
+			exitWithCode(pasterrors.ExitCode(err))
+			return nil
+		}
+	}
+
 	ctrl, err := handlers.OpenEpochController(flagDBPath)
 	if err != nil {
 		printError(err)
@@ -50,9 +65,11 @@ The --epoch-id must be a valid task id ("<project>--<uuid>"); create one with
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		epochId, _ := cmd.Flags().GetString("epoch-id")
-		return runWithController(func(ctrl handlers.EpochController) (int, error) {
-			return handlers.EpochStart(ctrl, epochId, resolveFormat())
-		})
+		return runWithController(
+			func() error { return handlers.ValidateEpochStart(epochId) },
+			func(ctrl handlers.EpochController) (int, error) {
+				return handlers.EpochStart(ctrl, epochId, resolveFormat())
+			})
 	},
 }
 
@@ -62,9 +79,11 @@ var epochCancelCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		epochId, _ := cmd.Flags().GetString("epoch-id")
-		return runWithController(func(ctrl handlers.EpochController) (int, error) {
-			return handlers.EpochCancel(ctrl, epochId, resolveFormat())
-		})
+		return runWithController(
+			func() error { return handlers.ValidateEpochCancel(epochId) },
+			func(ctrl handlers.EpochController) (int, error) {
+				return handlers.EpochCancel(ctrl, epochId, resolveFormat())
+			})
 	},
 }
 
@@ -87,9 +106,11 @@ For a plain cancel without an audit record, use "pasture epoch cancel".`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		epochId, _ := cmd.Flags().GetString("epoch-id")
 		reason, _ := cmd.Flags().GetString("reason")
-		return runWithController(func(ctrl handlers.EpochController) (int, error) {
-			return handlers.EpochTerminate(ctrl, epochId, reason, resolveFormat())
-		})
+		return runWithController(
+			func() error { return handlers.ValidateEpochTerminate(epochId) },
+			func(ctrl handlers.EpochController) (int, error) {
+				return handlers.EpochTerminate(ctrl, epochId, reason, resolveFormat())
+			})
 	},
 }
 

@@ -56,19 +56,27 @@ func requireEpochID(epochId, action, where, example string) error {
 	}
 }
 
+// ValidateEpochStart checks the epoch start verb's arguments without opening a
+// controller or touching the database. The CLI runs it before OpenEpochController
+// so an invalid invocation is rejected without leaving a stray database behind;
+// EpochStart also runs it so a direct handler call stays self-guarding.
+func ValidateEpochStart(epochId string) error {
+	if err := requireEpochID(epochId, "start an epoch",
+		"Starting the epoch (internal/handlers/epoch.go in handlers.ValidateEpochStart).",
+		"pasture epoch start --epoch-id <id>"); err != nil {
+		return err
+	}
+	return validateEpochID(epochId, "handlers.ValidateEpochStart")
+}
+
 // EpochStart starts the durable control workflow for epochId. The epoch is
 // identified by its id (the task already carries its description), and signals
 // are addressed to it by that id.
 //
 // Exit codes: 0=success, 1=validation error, 3=workflow error.
 func EpochStart(ctrl EpochController, epochId string, format types.OutputFormat) (int, error) {
-	if err := requireEpochID(epochId, "start an epoch",
-		"Starting the epoch (internal/handlers/epoch.go in handlers.EpochStart).",
-		"pasture epoch start --epoch-id <id>"); err != nil {
+	if err := ValidateEpochStart(epochId); err != nil {
 		return pasterrors.ExitCode(err), err
-	}
-	if vErr := validateEpochID(epochId, "handlers.EpochStart"); vErr != nil {
-		return pasterrors.ExitCode(vErr), vErr
 	}
 
 	if err := ctrl.StartEpoch(context.Background(), epochId); err != nil {
@@ -83,14 +91,25 @@ func EpochStart(ctrl EpochController, epochId string, format types.OutputFormat)
 	return 0, nil
 }
 
+// ValidateEpochCancel checks the epoch cancel verb's arguments without opening a
+// controller or touching the database, so the CLI can reject a bad invocation
+// before OpenEpochController runs. Like start and terminate it also enforces the
+// epoch-id format, so a malformed id is rejected before any database is created.
+func ValidateEpochCancel(epochId string) error {
+	if err := requireEpochID(epochId, "cancel an epoch",
+		"Cancelling the epoch (internal/handlers/epoch.go in handlers.ValidateEpochCancel).",
+		"pasture epoch cancel --epoch-id <id>"); err != nil {
+		return err
+	}
+	return validateEpochID(epochId, "handlers.ValidateEpochCancel")
+}
+
 // EpochCancel requests cancellation of a running epoch. Both the cancel and
 // terminate verbs route here: the durable substrate has a single stop path.
 //
 // Exit codes: 0=success, 1=validation error, 3=workflow error.
 func EpochCancel(ctrl EpochController, epochId string, format types.OutputFormat) (int, error) {
-	if err := requireEpochID(epochId, "cancel an epoch",
-		"Cancelling the epoch (internal/handlers/epoch.go in handlers.EpochCancel).",
-		"pasture epoch cancel --epoch-id <id>"); err != nil {
+	if err := ValidateEpochCancel(epochId); err != nil {
 		return pasterrors.ExitCode(err), err
 	}
 
@@ -106,6 +125,19 @@ func EpochCancel(ctrl EpochController, epochId string, format types.OutputFormat
 	return 0, nil
 }
 
+// ValidateEpochTerminate checks the epoch terminate verb's arguments without
+// opening a controller or touching the database. Running it before
+// OpenEpochController guarantees a malformed id can never produce a stray
+// database or an unjoinable audit row.
+func ValidateEpochTerminate(epochId string) error {
+	if err := requireEpochID(epochId, "terminate an epoch",
+		"Terminating the epoch (internal/handlers/epoch.go in handlers.ValidateEpochTerminate).",
+		"pasture epoch terminate --epoch-id <id>"); err != nil {
+		return err
+	}
+	return validateEpochID(epochId, "handlers.ValidateEpochTerminate")
+}
+
 // EpochTerminate records an EpochCancelled audit event carrying the operator's
 // reason, then requests cancellation of a running epoch. reason may be empty
 // (the event is still recorded with an empty reason payload).
@@ -117,13 +149,8 @@ func EpochCancel(ctrl EpochController, epochId string, format types.OutputFormat
 //
 // Exit codes: 0=success, 1=validation error, 3=workflow error, 5=storage error.
 func EpochTerminate(ctrl EpochController, epochId, reason string, format types.OutputFormat) (int, error) {
-	if err := requireEpochID(epochId, "terminate an epoch",
-		"Terminating the epoch (internal/handlers/epoch.go in handlers.EpochTerminate).",
-		"pasture epoch terminate --epoch-id <id>"); err != nil {
+	if err := ValidateEpochTerminate(epochId); err != nil {
 		return pasterrors.ExitCode(err), err
-	}
-	if vErr := validateEpochID(epochId, "handlers.EpochTerminate"); vErr != nil {
-		return pasterrors.ExitCode(vErr), vErr
 	}
 
 	if err := ctrl.TerminateEpoch(context.Background(), epochId, reason); err != nil {

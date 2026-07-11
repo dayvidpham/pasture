@@ -36,9 +36,12 @@ For tmux and subprocess modes, --command provides the command to run.
 		modeStr, _ := cmd.Flags().GetString("mode")
 		command, _ := cmd.Flags().GetString("command")
 		timeout, _ := cmd.Flags().GetInt("timeout")
-		return runWithController(func(ctrl handlers.EpochController) (int, error) {
-			return handlers.SliceStart(ctrl, sliceId, protocol.SliceExecutionMode(modeStr), command, timeout, resolveFormat())
-		})
+		mode := protocol.SliceExecutionMode(modeStr)
+		return runWithController(
+			func() error { return handlers.ValidateSliceStart(sliceId, mode) },
+			func(ctrl handlers.EpochController) (int, error) {
+				return handlers.SliceStart(ctrl, sliceId, mode, command, timeout, resolveFormat())
+			})
 	},
 }
 
@@ -65,9 +68,11 @@ Use --error to record a failure with an error description.
 			errMsg = &v
 		}
 
-		return runWithController(func(ctrl handlers.EpochController) (int, error) {
-			return handlers.SliceComplete(ctrl, sliceId, output, errMsg, resolveFormat())
-		})
+		return runWithController(
+			func() error { return handlers.ValidateSliceComplete(sliceId, output, errMsg) },
+			func(ctrl handlers.EpochController) (int, error) {
+				return handlers.SliceComplete(ctrl, sliceId, output, errMsg, resolveFormat())
+			})
 	},
 }
 

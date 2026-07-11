@@ -344,6 +344,79 @@ The `-race` flag is mandatory for all test runs.
 - Import the actual production package — never a test-only re-export.
 - Use dependency injection (interface mocks) for external services (DBOS, SQLite).
 
+### Fixtures (`testdata/` + `testutil.LoadFixtures`)
+
+Table-style test data lives in per-package `testdata/<name>.yaml` files loaded
+through `testutil.LoadFixtures` (`internal/testutil/fixtures.go`) rather than
+inlined as Go literals. This keeps large scenario tables out of the test body and
+lets several tests share one corpus.
+
+- **Typed fixture names.** Fixtures are addressed by the `testutil.FixtureName`
+  typed string, never a raw string literal. Each corpus has a named constant
+  (`testutil.CLISmoke`, `testutil.ConfigLoading`, `testutil.ContentBlock`, …), so
+  a mistyped path fails to compile instead of failing at runtime.
+  `LoadFixtures(t, testutil.ConfigLoading, &fixtures)` reads
+  `testdata/config_loading.yaml` (relative to the package under test) and
+  unmarshals it into `fixtures` — see the real caller `TestResolve_YAMLFixtures`
+  in `internal/config/viper_internal_test.go`.
+- **Fail-fast on infrastructure errors.** `LoadFixtures` uses `require` (not
+  `assert`): a missing or malformed fixture stops the test immediately with an
+  actionable message (which file, which working directory) instead of proceeding
+  with a zero-value target. Its testable core, `readFixture`, returns the error
+  instead of calling `t.FailNow`, so the loader's own error paths are unit-tested
+  in-package (`internal/testutil/fixtures_test.go`).
+- **Strict decoding.** `readFixture` decodes with `KnownFields(true)`, so an
+  unknown or mistyped key in a fixture (e.g. `want_stderr_exclude` instead of
+  `want_stderr_excludes`) fails the test loudly instead of silently zero-valuing
+  the field — which, for a skip-if-empty assertion field, would otherwise quietly
+  disable that check.
+- **Location.** Each package owns its `testdata/` directory; `LoadFixtures`
+  always resolves `testdata/<name>.yaml` against the test's working directory, so
+  fixtures live beside the tests that use them.
+
+### Parallelism via dependency injection (pure core, serial shell)
+
+Prefer `t.Parallel()`. The usual blocker is shared process-global state — chiefly
+the environment, which `t.Setenv` mutates and which therefore *forbids*
+`t.Parallel()`. The pattern that unlocks parallelism is to split the code under
+test into (1) a **pure/injected core** that receives its external inputs as
+parameters, and (2) a **thin shell** that reads the real process I/O and calls the
+core. Test the core in parallel with fixture inputs; cover the shell with a single
+serial test that proves the real wiring.
+
+**Worked example — configuration resolution (`internal/config`).** The OS
+environment boundary is injected as a `lookupEnv func(string) (string, bool)`
+parameter instead of being read inline:
+
+- **The seam.** `internal/config/viper.go` —
+  `bindEnvVar(v *viper.Viper, viperKey, envVar string, lookupEnv func(string) (string, bool))`
+  reads each env var through the injected `lookupEnv` rather than calling
+  `os.Getenv`/`os.LookupEnv` directly. The unexported
+  `resolvePasturedConfigWithFile(cmd, configFile, lookupEnv)` threads it through
+  the whole resolution (defaults → config file → env → CLI flag). Ordering is
+  load-bearing: `bindEnvVar` runs *before* `bindChangedFlag` so a changed flag
+  overwrites the env value, yielding the `CLI > env > YAML > default` precedence.
+- **Pure core, parallel (white-box).** `internal/config/viper_internal_test.go`
+  is `package config`, so it can reach the unexported seam. Every case supplies a
+  fixture map via `envMap(...)` as `lookupEnv` and calls `t.Parallel()`; nothing
+  touches the process environment, so the full precedence matrix runs
+  concurrently with no `os.Setenv` races.
+- **Thin shell, serial (black-box).** `internal/config/viper_test.go` is
+  `package config_test`. The single `TestPublicResolvers_ReadProcessEnv` uses
+  `t.Setenv` to prove BOTH public entry points (`ResolvePasturedConfig` and
+  `ResolvePasturedConfigFromFile`) wire `os.LookupEnv` as their env source.
+  Because `t.Setenv` bans `t.Parallel()`, this test stays serial — but it is the
+  *only* env-reading test for the resolution seam, so it never bottlenecks the
+  suite.
+
+The public entry points (`ResolvePasturedConfig`,
+`ResolvePasturedConfigFromFile`) default `lookupEnv` to `os.LookupEnv`, so
+production callers never see the seam.
+
+Rule of thumb: if a test needs `t.Setenv` (or any global mutation) it must stay
+serial — so push the logic behind an injected parameter, test that in parallel,
+and keep exactly one serial test for the real-I/O wiring.
+
 ### Quality gates (must pass before every commit)
 ```bash
 make fmt    # gofmt — fails if any file needs formatting

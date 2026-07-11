@@ -1,6 +1,7 @@
 // Package main smoke-tests the pasture-release CLI binary via exec.Command
 // subprocesses. Each test case compiles the binary once and then invokes it
-// as a child process, matching against combined stdout+stderr output.
+// as a child process, matching against separately-captured stdout and stderr
+// so a case can assert which stream produced which output.
 //
 // UAT requirement: tests must use exec.Command (subprocess), not the
 // in-process newRootCmd() exported by this package, so that they exercise
@@ -27,13 +28,18 @@ type smokeFixtures struct {
 
 // smokeCaseFixture represents one CLI smoke-test case.
 // Fields that are absent in the YAML are left as empty strings (no match
-// assertion is performed for empty fields).
+// assertion is performed for empty fields). The *_contains fields assert a
+// substring is present on that stream; the *_excludes fields assert one is
+// absent, which locks down stream routing (e.g. an error must NOT leak to
+// stdout).
 type smokeCaseFixture struct {
 	ID                 string   `yaml:"id"`
 	Args               []string `yaml:"args"`
 	WantExit           int      `yaml:"want_exit"`
 	WantStdoutContains string   `yaml:"want_stdout_contains"`
 	WantStderrContains string   `yaml:"want_stderr_contains"`
+	WantStdoutExcludes string   `yaml:"want_stdout_excludes"`
+	WantStderrExcludes string   `yaml:"want_stderr_excludes"`
 }
 
 // ─── Binary build helper ──────────────────────────────────────────────────────
@@ -70,9 +76,9 @@ func buildBinary(t *testing.T) string {
 // ─── Smoke tests ──────────────────────────────────────────────────────────────
 
 // TestCLISmoke compiles the pasture-release binary once and then runs each
-// fixture case as an independent parallel subtest. Combined stdout+stderr is
-// checked for required substrings so that Cobra's output routing (help →
-// stdout, errors → stderr) does not cause false negatives.
+// fixture case as an independent parallel subtest. stdout and stderr are
+// captured separately so a case can assert Cobra's output routing (help →
+// stdout, errors → stderr) rather than papering over it with a merged buffer.
 func TestCLISmoke(t *testing.T) {
 	var fixtures smokeFixtures
 	testutil.LoadFixtures(t, testutil.CLISmoke, &fixtures)
@@ -88,9 +94,9 @@ func TestCLISmoke(t *testing.T) {
 			t.Parallel()
 
 			cmd := exec.Command(binPath, tc.Args...) //nolint:gosec
-			var combined bytes.Buffer
-			cmd.Stdout = &combined
-			cmd.Stderr = &combined
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
 
 			runErr := cmd.Run()
 
@@ -109,23 +115,38 @@ func TestCLISmoke(t *testing.T) {
 				}
 			}
 
-			output := combined.String()
+			outStr := stdout.String()
+			errStr := stderr.String()
+			// streams is included in every failure message so a mismatch shows
+			// exactly which stream carried what.
+			streams := "stdout:\n" + outStr + "\nstderr:\n" + errStr
 
 			assert.Equal(t, tc.WantExit, exitCode,
-				"case %q: exit code mismatch\nargs: %v\noutput:\n%s",
-				tc.ID, tc.Args, output)
+				"case %q: exit code mismatch\nargs: %v\n%s",
+				tc.ID, tc.Args, streams)
 
 			if tc.WantStdoutContains != "" {
-				assert.Contains(t, output, tc.WantStdoutContains,
-					"case %q: expected stdout to contain %q\nfull output:\n%s",
-					tc.ID, tc.WantStdoutContains, output,
+				assert.Contains(t, outStr, tc.WantStdoutContains,
+					"case %q: expected stdout to contain %q\n%s",
+					tc.ID, tc.WantStdoutContains, streams,
 				)
 			}
-
 			if tc.WantStderrContains != "" {
-				assert.Contains(t, output, tc.WantStderrContains,
-					"case %q: expected stderr to contain %q\nfull output:\n%s",
-					tc.ID, tc.WantStderrContains, output,
+				assert.Contains(t, errStr, tc.WantStderrContains,
+					"case %q: expected stderr to contain %q\n%s",
+					tc.ID, tc.WantStderrContains, streams,
+				)
+			}
+			if tc.WantStdoutExcludes != "" {
+				assert.NotContains(t, outStr, tc.WantStdoutExcludes,
+					"case %q: expected stdout to NOT contain %q\n%s",
+					tc.ID, tc.WantStdoutExcludes, streams,
+				)
+			}
+			if tc.WantStderrExcludes != "" {
+				assert.NotContains(t, errStr, tc.WantStderrExcludes,
+					"case %q: expected stderr to NOT contain %q\n%s",
+					tc.ID, tc.WantStderrExcludes, streams,
 				)
 			}
 		})

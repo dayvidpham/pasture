@@ -7,6 +7,7 @@
 package testutil
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +28,11 @@ const (
 
 	// CLISmoke is used by S4–S5 tests (CLI smoke / handler scenarios).
 	CLISmoke FixtureName = "cli_smoke"
+
+	// ValidateBeforeOpen is used by the pasture CLI tests asserting that invalid
+	// epoch/signal/session/slice/phase invocations are rejected by argument
+	// validation before the durable database is opened.
+	ValidateBeforeOpen FixtureName = "validate_before_open"
 
 	// RunAgentSession is used by S5–S6 tests (Temporal workflow scenarios).
 	RunAgentSession FixtureName = "run_agent_session"
@@ -84,10 +90,18 @@ func readFixture(name FixtureName, target any) error {
 			path, string(name), mustGetwd(), err,
 		)
 	}
-	if err := yaml.Unmarshal(data, target); err != nil {
+	// Strict decoding: reject any YAML key that has no matching struct field so a
+	// typo'd fixture key (e.g. want_stderr_exclude instead of want_stderr_excludes)
+	// fails loudly here instead of silently zero-valuing. For skip-if-empty
+	// assertion fields (the *_contains / *_excludes negative-control fields), a
+	// silent zero-value would quietly DISABLE the control rather than fail.
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(target); err != nil {
 		return fmt.Errorf(
-			"LoadFixtures: could not unmarshal fixture file %q into %T — "+
-				"check that the YAML structure matches the target type: %w",
+			"LoadFixtures: could not decode fixture file %q into %T — "+
+				"check that the YAML structure matches the target type and contains "+
+				"no unknown keys: %w",
 			path, target, err,
 		)
 	}
