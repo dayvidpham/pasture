@@ -33,7 +33,10 @@
           # `go test ./...` includes internal/release, whose integration tests
           # shell out to real `git` (init/commit/tag). Provide it in the check
           # sandbox — otherwise those tests fail with "git: not found".
-          nativeCheckInputs = [ pkgs.git ];
+          # git: internal/release integration tests shell out to real git.
+          # jq: the hooks/ git-discipline test execs the hook, which parses the
+          #     PreToolUse event with jq.
+          nativeCheckInputs = [ pkgs.git pkgs.jq ];
 
           doCheck = true;
           checkPhase = ''
