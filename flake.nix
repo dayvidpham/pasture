@@ -20,17 +20,29 @@
         commonAttrs = {
           inherit version;
           src = ./.;
-          # null = use vendor directory; set to a sha256 for module proxy mode
-          vendorHash = null;
+          # Module-proxy mode: Nix fetches go.mod deps into a fixed-output
+          # derivation (no committed vendor/ dir — modernc.org/libc alone would
+          # bloat the repo). Update this hash whenever go.mod/go.sum changes.
+          vendorHash = "sha256-a9XFKM2jX9rlyi9gJQwdmJCwsnqMycie/Z9jbY8w9Co=";
 
           env.CGO_ENABLED = "0";
 
           # modernc.org/sqlite requires no native deps; pure Go build
           nativeBuildInputs = [ ];
 
+          # `go test ./...` includes internal/release, whose integration tests
+          # shell out to real `git` (init/commit/tag). Provide it in the check
+          # sandbox — otherwise those tests fail with "git: not found".
+          nativeCheckInputs = [ pkgs.git ];
+
           doCheck = true;
           checkPhase = ''
             runHook preCheck
+            # buildGoModule adds -trimpath (good for the shipped binary) but it
+            # rewrites runtime.Caller() to module-relative paths, which breaks
+            # tests that locate repo-root testdata (e.g. skills/protocol/figures)
+            # via runtime.Caller. Strip -trimpath for the test run only.
+            export GOFLAGS="''${GOFLAGS//-trimpath/}"
             go test ./...
             runHook postCheck
           '';
