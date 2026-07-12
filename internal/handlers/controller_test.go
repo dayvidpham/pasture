@@ -411,7 +411,7 @@ func TestHandler_EpochCancel_CancelsRunningWorkflow(t *testing.T) {
 // (not a wrong type) for the projection to update.
 func TestHandler_PhaseAdvance_MutatesProjection(t *testing.T) {
 	t.Parallel()
-	const epochId = "ctl--advance-1"
+	const epochId = "demo--01960000-0000-7000-8000-000000000101"
 	rig := openController(t, epochId, nil) // no seed phases; start at request
 
 	// Deliver the advance to elicit via the handler under test.
@@ -441,13 +441,41 @@ func TestHandler_PhaseAdvance_RejectsUnknownPhase(t *testing.T) {
 	}
 	defer ctrl.Close()
 
-	code, hErr := handlers.PhaseAdvance(ctrl, "ctl--advance-2",
+	code, hErr := handlers.PhaseAdvance(ctrl, "demo--01960000-0000-7000-8000-000000000102",
 		protocol.PhaseId("not-a-phase"), "test", "ok", types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a validation error for an unknown phase")
 	}
 	if code != 1 {
 		t.Errorf("PhaseAdvance exit = %d, want 1", code)
+	}
+}
+
+// TestHandler_PhaseAdvance_UnknownPhase_IsErrorNotSilentNoOp guards the exported
+// direct-call path against a silent-success regression. An unrecognised phase
+// parses to the zero-value PhaseId, which the engine control loop treats as a
+// no-op. If PhaseAdvance ever forwarded that zero value instead of surfacing the
+// parse error, the handler would exit 0 "success" while doing nothing and
+// recording nothing — the worst kind of failure. The handler must therefore
+// return a non-nil error AND a non-zero exit code (never 0) for a bad phase,
+// regardless of how the CLI happens to pre-validate. PhaseAdvance is exported and
+// called directly (here and elsewhere), so it must self-guard on its own.
+func TestHandler_PhaseAdvance_UnknownPhase_IsErrorNotSilentNoOp(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	ctrl, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController: %v", err)
+	}
+	defer ctrl.Close()
+
+	code, hErr := handlers.PhaseAdvance(ctrl, "demo--01960000-0000-7000-8000-000000000103",
+		protocol.PhaseId("definitely-not-a-real-phase"), "test", "ok", types.OutputText)
+	if hErr == nil {
+		t.Fatal("bad phase must return a non-nil error, not a silent success")
+	}
+	if code == 0 {
+		t.Errorf("bad phase must not exit 0 (silent no-op); got exit %d with err %v", code, hErr)
 	}
 }
 
@@ -460,7 +488,7 @@ func TestHandler_PhaseAdvance_RejectsUnknownPhase(t *testing.T) {
 // wrong payload would leave the gate unsatisfied and the advance would stall.
 func TestHandler_SignalVote_MutatesProjection(t *testing.T) {
 	t.Parallel()
-	const epochId = "ctl--vote-1"
+	const epochId = "demo--01960000-0000-7000-8000-000000000111"
 	rig := openController(t, epochId, []protocol.PhaseId{
 		protocol.PhaseElicit,
 		protocol.PhasePropose,
@@ -510,7 +538,7 @@ func TestHandler_SignalVote_RejectsInvalidAxis(t *testing.T) {
 	}
 	defer ctrl.Close()
 
-	code, hErr := handlers.SignalVote(ctrl, "ctl--vote-2",
+	code, hErr := handlers.SignalVote(ctrl, "demo--01960000-0000-7000-8000-000000000112",
 		protocol.ReviewAxis("bad_axis"), protocol.VoteAccept, "", types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a validation error for an invalid axis")
@@ -530,7 +558,7 @@ func TestHandler_SignalVote_RejectsInvalidVote(t *testing.T) {
 	}
 	defer ctrl.Close()
 
-	code, hErr := handlers.SignalVote(ctrl, "ctl--vote-3",
+	code, hErr := handlers.SignalVote(ctrl, "demo--01960000-0000-7000-8000-000000000113",
 		protocol.AxisCorrectness, protocol.VoteType("MAYBE"), "", types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a validation error for an invalid vote")
@@ -549,7 +577,7 @@ func TestHandler_SignalVote_RejectsInvalidVote(t *testing.T) {
 // correct register_session topic with a well-formed RegisterSessionSignal.
 func TestHandler_SessionRegister_MutatesProjection(t *testing.T) {
 	t.Parallel()
-	const epochId = "ctl--sess-1"
+	const epochId = "demo--01960000-0000-7000-8000-000000000121"
 	rig := openController(t, epochId, nil)
 
 	code, err := handlers.SessionRegister(rig.ctrl, epochId, "sess-abc", "worker", "claude-code", "claude-sonnet", types.OutputJSON)
@@ -593,7 +621,7 @@ func TestHandler_SessionRegister_RejectsEmptySessionId(t *testing.T) {
 	}
 	defer ctrl.Close()
 
-	code, hErr := handlers.SessionRegister(ctrl, "ctl--sess-2", "", "worker", "", "", types.OutputText)
+	code, hErr := handlers.SessionRegister(ctrl, "demo--01960000-0000-7000-8000-000000000122", "", "worker", "", "", types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a validation error for an empty session id")
 	}
@@ -612,7 +640,7 @@ func TestHandler_SessionRegister_RejectsEmptyRole(t *testing.T) {
 	}
 	defer ctrl.Close()
 
-	code, hErr := handlers.SessionRegister(ctrl, "ctl--sess-3", "sess-xyz", "", "", "", types.OutputText)
+	code, hErr := handlers.SessionRegister(ctrl, "demo--01960000-0000-7000-8000-000000000123", "sess-xyz", "", "", "", types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a validation error for an empty role")
 	}
@@ -630,7 +658,7 @@ func TestHandler_SessionRegister_RejectsEmptyRole(t *testing.T) {
 // the correct slice_progress topic with a well-formed SliceProgressSignal.
 func TestHandler_SignalComplete_MutatesProjection(t *testing.T) {
 	t.Parallel()
-	const epochId = "ctl--complete-1"
+	const epochId = "demo--01960000-0000-7000-8000-000000000131"
 	rig := openController(t, epochId, nil)
 
 	output := "tests passed"
@@ -674,7 +702,7 @@ func TestHandler_SignalComplete_RejectsConflictingOutputAndError(t *testing.T) {
 
 	out := "done"
 	errMsg := "fail"
-	code, hErr := handlers.SignalComplete(ctrl, "ctl--complete-2", "slice-x", &out, &errMsg, types.OutputText)
+	code, hErr := handlers.SignalComplete(ctrl, "demo--01960000-0000-7000-8000-000000000132", "slice-x", &out, &errMsg, types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a validation error for both --output and --error")
 	}

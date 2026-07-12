@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/spf13/cobra"
@@ -32,6 +33,29 @@ func bindChangedFlag(v *viper.Viper, viperKey string, cmd *cobra.Command, flagNa
 	}
 }
 
+// bindEnvVar sets v[viperKey] from environment variable envVar when it is
+// present AND non-empty, reading through the injected lookupEnv (os.LookupEnv in
+// production, a fixture map in tests). A set-but-empty env var (e.g.
+// PASTURE_AUDIT_TRAIL="") is treated as UNSET so it does not mask the default —
+// this matches viper.BindEnv's default (allowEmptyEnv=false) that this seam
+// replaced; without the emptiness guard an exported-but-blank variable would
+// land in the override tier and resolve to "" (for audit_trail, "" maps to the
+// non-durable in-memory backend).
+//
+// Like bindChangedFlag it writes via v.Set — Viper's override tier — so callers
+// MUST invoke bindEnvVar BEFORE bindChangedFlag: a changed flag's later Set then
+// overwrites the env value for that key, giving CLI > env, while both still
+// outrank the config-file and default tiers (CLI > env > YAML > default).
+//
+// Injecting lookupEnv is what keeps env resolution off the process-global
+// environment, so config resolution tests can run in parallel without racing on
+// os.Setenv.
+func bindEnvVar(v *viper.Viper, viperKey, envVar string, lookupEnv func(string) (string, bool)) {
+	if val, ok := lookupEnv(envVar); ok && val != "" {
+		v.Set(viperKey, val)
+	}
+}
+
 // ResolvePasturedConfig resolves the full PasturedConfig, including audit-trail
 // settings, using the default config file path.
 //
@@ -40,7 +64,7 @@ func bindChangedFlag(v *viper.Viper, viperKey string, cmd *cobra.Command, flagNa
 // ResolvePasturedConfigFromFile for explicit paths where an error should be
 // surfaced to the caller.
 func ResolvePasturedConfig(cmd *cobra.Command) PasturedConfig {
-	cfg, _ := resolvePasturedConfigWithFile(cmd, DefaultConfigPath())
+	cfg, _ := resolvePasturedConfigWithFile(cmd, DefaultConfigPath(), os.LookupEnv)
 	return cfg
 }
 
@@ -52,20 +76,23 @@ func ResolvePasturedConfig(cmd *cobra.Command) PasturedConfig {
 // variables, and CLI flags — callers should decide whether to fail-fast or
 // continue with the partial config.
 func ResolvePasturedConfigFromFile(cmd *cobra.Command, configFile string) (PasturedConfig, error) {
-	return resolvePasturedConfigWithFile(cmd, configFile)
+	return resolvePasturedConfigWithFile(cmd, configFile, os.LookupEnv)
 }
 
-// resolvePasturedConfigWithFile resolves PasturedConfig from the given file.
-func resolvePasturedConfigWithFile(cmd *cobra.Command, configFile string) (PasturedConfig, error) {
+// resolvePasturedConfigWithFile resolves PasturedConfig from the given file,
+// reading environment variables through the injected lookupEnv. Production
+// callers pass os.LookupEnv; tests pass a fixture map so resolution can be
+// exercised in parallel without touching the process environment.
+func resolvePasturedConfigWithFile(
+	cmd *cobra.Command,
+	configFile string,
+	lookupEnv func(string) (string, bool),
+) (PasturedConfig, error) {
 	v := viper.New()
 
 	// --- Defaults ---
 	v.SetDefault("audit_trail", string(types.BackendSqlite))
 	v.SetDefault("audit_db_path", "")
-
-	// --- Environment variables ---
-	v.BindEnv("audit_trail", EnvAuditTrail)    //nolint:errcheck
-	v.BindEnv("audit_db_path", EnvAuditDBPath) //nolint:errcheck
 
 	// --- Config file ---
 	var fileErr error
@@ -83,9 +110,20 @@ func resolvePasturedConfigWithFile(cmd *cobra.Command, configFile string) (Pastu
 		}
 	}
 
-	// --- CLI flags ---
-	bindChangedFlag(v, "audit_trail", cmd, "audit-trail")
-	bindChangedFlag(v, "audit_db_path", cmd, "audit-db-path")
+	// --- Environment variables, then CLI flags ---
+	// For each key, bind the env var then the changed flag, in that order:
+	// both write into Viper's override tier, so applying env first and the
+	// changed flag last makes the flag win (CLI > env), while the override tier
+	// still outranks the file and default tiers (CLI > env > YAML > default).
+	// Keeping the two binds adjacent per key — rather than two separate loops —
+	// makes that ordering structural, and a new config key just adds a row.
+	for _, b := range []struct{ viperKey, envVar, flagName string }{
+		{"audit_trail", EnvAuditTrail, "audit-trail"},
+		{"audit_db_path", EnvAuditDBPath, "audit-db-path"},
+	} {
+		bindEnvVar(v, b.viperKey, b.envVar, lookupEnv)
+		bindChangedFlag(v, b.viperKey, cmd, b.flagName)
+	}
 
 	cfg := PasturedConfig{
 		AuditTrail:  types.AuditTrailBackend(v.GetString("audit_trail")),

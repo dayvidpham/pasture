@@ -27,9 +27,11 @@ runtime (e.g. claude-code); the model identifies the version.`,
 		modelHarness, _ := cmd.Flags().GetString("model-harness")
 		model, _ := cmd.Flags().GetString("model")
 
-		return runWithController(func(ctrl handlers.EpochController) (int, error) {
-			return handlers.SessionRegister(ctrl, epochId, sessionId, role, modelHarness, model, resolveFormat())
-		})
+		return runWithController(
+			func() error { return handlers.ValidateSessionRegister(epochId, sessionId, role) },
+			func(ctrl handlers.EpochController) (int, error) {
+				return handlers.SessionRegister(ctrl, epochId, sessionId, role, modelHarness, model, resolveFormat())
+			})
 	},
 }
 

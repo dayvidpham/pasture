@@ -1,17 +1,16 @@
 package config_test
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/spf13/cobra"
 
 	"github.com/dayvidpham/pasture/internal/config"
-	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
+// newPasturedTestCmd builds a command exposing the audit flags.
 func newPasturedTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "test"}
 	cmd.PersistentFlags().String("audit-trail", "", "Audit trail backend")
@@ -19,84 +18,54 @@ func newPasturedTestCmd() *cobra.Command {
 	return cmd
 }
 
-func TestResolvePasturedConfig_Defaults(t *testing.T) {
-	clearAllEnvVars(t)
+// TestPublicResolvers_ReadProcessEnv is the single serial, env-touching test for
+// the config-resolution seam: it proves BOTH public entry points —
+// ResolvePasturedConfig and ResolvePasturedConfigFromFile — wire os.LookupEnv as
+// their environment source, at value level (not just non-nil). It mutates the
+// process environment via t.Setenv, so it stays serial (t.Setenv forbids
+// t.Parallel by design). The full resolution matrix — defaults, env, CLI, YAML,
+// and their precedence — is covered in parallel by the white-box tests in
+// viper_internal_test.go, which inject env as a fixture instead of touching
+// os.Environ.
+func TestPublicResolvers_ReadProcessEnv(t *testing.T) {
+	t.Setenv(config.EnvAuditTrail, string(types.BackendMemory))
+	t.Setenv(config.EnvAuditDBPath, "/tmp/env-audit.db")
 
+	// ResolvePasturedConfig: with no config file, the process env drives values.
 	cfg := config.ResolvePasturedConfig(newPasturedTestCmd())
-
-	if cfg.AuditTrail != types.BackendSqlite {
-		t.Errorf("AuditTrail = %q, want %q", cfg.AuditTrail, types.BackendSqlite)
-	}
-	if cfg.AuditDBPath != "" {
-		t.Errorf("AuditDBPath = %q, want empty", cfg.AuditDBPath)
-	}
-}
-
-func TestResolvePasturedConfig_EnvOverride(t *testing.T) {
-	testutil.SetEnv(t, config.EnvAuditTrail, string(types.BackendMemory))
-	testutil.SetEnv(t, config.EnvAuditDBPath, "/tmp/env-audit.db")
-
-	cfg := config.ResolvePasturedConfig(newPasturedTestCmd())
-
 	if cfg.AuditTrail != types.BackendMemory {
-		t.Errorf("AuditTrail = %q, want %q", cfg.AuditTrail, types.BackendMemory)
+		t.Errorf("ResolvePasturedConfig AuditTrail = %q, want %q", cfg.AuditTrail, types.BackendMemory)
 	}
 	if cfg.AuditDBPath != "/tmp/env-audit.db" {
-		t.Errorf("AuditDBPath = %q, want /tmp/env-audit.db", cfg.AuditDBPath)
-	}
-}
-
-func TestResolvePasturedConfig_CLIFlagsOverrideEnvVars(t *testing.T) {
-	testutil.SetEnv(t, config.EnvAuditTrail, string(types.BackendMemory))
-	testutil.SetEnv(t, config.EnvAuditDBPath, "/tmp/env-audit.db")
-
-	cmd := newPasturedTestCmd()
-	if err := cmd.PersistentFlags().Set("audit-trail", string(types.BackendSqlite)); err != nil {
-		t.Fatalf("setting --audit-trail flag: %v", err)
-	}
-	if err := cmd.PersistentFlags().Set("audit-db-path", "/tmp/cli-audit.db"); err != nil {
-		t.Fatalf("setting --audit-db-path flag: %v", err)
+		t.Errorf("ResolvePasturedConfig AuditDBPath = %q, want /tmp/env-audit.db", cfg.AuditDBPath)
 	}
 
-	cfg := config.ResolvePasturedConfig(cmd)
-
-	if cfg.AuditTrail != types.BackendSqlite {
-		t.Errorf("AuditTrail = %q, want %q", cfg.AuditTrail, types.BackendSqlite)
-	}
-	if cfg.AuditDBPath != "/tmp/cli-audit.db" {
-		t.Errorf("AuditDBPath = %q, want /tmp/cli-audit.db", cfg.AuditDBPath)
-	}
-}
-
-func TestResolvePasturedConfig_YAMLOverridesDefaults(t *testing.T) {
-	clearAllEnvVars(t)
-
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.yaml")
-	yamlContent := `
-audit_trail: memory
-audit_db_path: /tmp/yaml-audit.db
-`
-	if err := os.WriteFile(cfgPath, []byte(yamlContent), 0o644); err != nil {
-		t.Fatalf("writing config file: %v", err)
-	}
-
-	cfg, err := config.ResolvePasturedConfigFromFile(newPasturedTestCmd(), cfgPath)
+	// ResolvePasturedConfigFromFile: an empty config path means the same process
+	// env (not a file) drives the values, so its os.LookupEnv wiring is proven at
+	// value level too. A fresh command avoids any flag-state carryover.
+	cfgFromFile, err := config.ResolvePasturedConfigFromFile(newPasturedTestCmd(), "")
 	if err != nil {
-		t.Fatalf("ResolvePasturedConfigFromFile: %v", err)
+		t.Fatalf("ResolvePasturedConfigFromFile(empty path) unexpected error: %v", err)
 	}
-
-	if cfg.AuditTrail != types.BackendMemory {
-		t.Errorf("AuditTrail = %q, want %q", cfg.AuditTrail, types.BackendMemory)
+	if cfgFromFile.AuditTrail != types.BackendMemory {
+		t.Errorf("ResolvePasturedConfigFromFile AuditTrail = %q, want %q", cfgFromFile.AuditTrail, types.BackendMemory)
 	}
-	if cfg.AuditDBPath != "/tmp/yaml-audit.db" {
-		t.Errorf("AuditDBPath = %q, want /tmp/yaml-audit.db", cfg.AuditDBPath)
+	if cfgFromFile.AuditDBPath != "/tmp/env-audit.db" {
+		t.Errorf("ResolvePasturedConfigFromFile AuditDBPath = %q, want /tmp/env-audit.db", cfgFromFile.AuditDBPath)
 	}
 }
 
-func clearAllEnvVars(t *testing.T) {
-	t.Helper()
-	for _, key := range []string{config.EnvAuditTrail, config.EnvAuditDBPath} {
-		testutil.UnsetEnv(t, key)
+// TestResolvePasturedConfigFromFile_SurfacesFileError covers the public
+// ResolvePasturedConfigFromFile path directly. Unlike ResolvePasturedConfig
+// (which swallows a config-file read error), FromFile surfaces it — that is its
+// distinguishing contract. The assertion is on the error alone, which is
+// independent of the process environment, so this test stays parallel-safe; the
+// resolved-value matrix (malformed / missing / valid YAML) is covered
+// deterministically by TestResolve_YAMLFixtures in viper_internal_test.go.
+func TestResolvePasturedConfigFromFile_SurfacesFileError(t *testing.T) {
+	t.Parallel()
+	missing := filepath.Join(t.TempDir(), "does-not-exist.yaml")
+	if _, err := config.ResolvePasturedConfigFromFile(newPasturedTestCmd(), missing); err == nil {
+		t.Fatal("ResolvePasturedConfigFromFile must surface a file-read error for a missing config file")
 	}
 }

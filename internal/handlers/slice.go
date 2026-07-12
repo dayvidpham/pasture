@@ -10,6 +10,35 @@ import (
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
+// ValidateSliceStart checks the slice start verb's arguments (slice id and
+// execution mode) without opening a controller or touching the database, so the
+// CLI can reject a bad invocation before OpenEpochController runs.
+func ValidateSliceStart(sliceId string, mode protocol.SliceExecutionMode) error {
+	if sliceId == "" {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryValidation,
+			What:     "A slice ID is required to configure a slice.",
+			Why:      "The --slice-id flag was not provided.",
+			Where:    "Configuring a slice (internal/handlers/slice.go in handlers.ValidateSliceStart).",
+			Impact:   "Without a slice ID, there's no slice to configure.",
+			Fix:      "1. Pass the slice's ID:\n     pasture slice start --slice-id <id> --mode mock",
+		}
+	}
+	if !mode.IsValid() {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryValidation,
+			What:     fmt.Sprintf("%q is not a recognised slice execution mode.", mode),
+			Why:      "A slice runs in one of three modes: mock, tmux, or subprocess.",
+			Where:    "Configuring a slice (internal/handlers/slice.go in handlers.ValidateSliceStart).",
+			Impact:   "The slice can't be configured with an unknown mode.",
+			Fix: "1. Pass a recognised mode:\n" +
+				"     pasture slice start --mode mock --slice-id <id>\n" +
+				"     pasture slice start --mode subprocess --command \"<cmd>\" --slice-id <id>",
+		}
+	}
+	return nil
+}
+
 // SliceStart delivers a start-slice configuration signal to a slice sub-workflow
 // (addressed by its slice workflow id).
 //
@@ -22,28 +51,7 @@ func SliceStart(
 	timeoutSeconds int,
 	format types.OutputFormat,
 ) (int, error) {
-	if sliceId == "" {
-		err := &pasterrors.StructuredError{
-			Category: pasterrors.CategoryValidation,
-			What:     "A slice ID is required to configure a slice.",
-			Why:      "The --slice-id flag was not provided.",
-			Where:    "Configuring a slice (internal/handlers/slice.go in handlers.SliceStart).",
-			Impact:   "Without a slice ID, there's no slice to configure.",
-			Fix:      "1. Pass the slice's ID:\n     pasture slice start --slice-id <id> --mode mock",
-		}
-		return pasterrors.ExitCode(err), err
-	}
-	if !mode.IsValid() {
-		err := &pasterrors.StructuredError{
-			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("%q is not a recognised slice execution mode.", mode),
-			Why:      "A slice runs in one of three modes: mock, tmux, or subprocess.",
-			Where:    "Configuring a slice (internal/handlers/slice.go in handlers.SliceStart).",
-			Impact:   "The slice can't be configured with an unknown mode.",
-			Fix: "1. Pass a recognised mode:\n" +
-				"     pasture slice start --mode mock --slice-id <id>\n" +
-				"     pasture slice start --mode subprocess --command \"<cmd>\" --slice-id <id>",
-		}
+	if err := ValidateSliceStart(sliceId, mode); err != nil {
 		return pasterrors.ExitCode(err), err
 	}
 
@@ -60,6 +68,36 @@ func SliceStart(
 	return 0, nil
 }
 
+// ValidateSliceComplete checks the slice complete verb's arguments (slice id and
+// the output/error mutual exclusion) without opening a controller or touching the
+// database, so the CLI can reject a bad invocation before OpenEpochController runs.
+func ValidateSliceComplete(sliceId string, output, errMsg *string) error {
+	if sliceId == "" {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryValidation,
+			What:     "A slice ID is required to complete a slice.",
+			Why:      "The --slice-id flag was not provided.",
+			Where:    "Completing a slice (internal/handlers/slice.go in handlers.ValidateSliceComplete).",
+			Impact:   "Without a slice ID, there's no slice to complete.",
+			Fix:      "1. Pass the slice's ID:\n     pasture slice complete --slice-id <id> --output \"<result>\"",
+		}
+	}
+	if output != nil && errMsg != nil {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryValidation,
+			What:     "Pass either --output or --error, not both.",
+			Why:      "A slice completion override is either a success (--output) or a failure (--error), not both.",
+			Where:    "Completing a slice (internal/handlers/slice.go in handlers.ValidateSliceComplete).",
+			Impact:   "The override can't be recorded because the result is ambiguous.",
+			Fix: "1. Pick one and retry. For success:\n" +
+				"     pasture slice complete --output \"<result>\" --slice-id <id>\n" +
+				"2. For failure:\n" +
+				"     pasture slice complete --error \"<reason>\" --slice-id <id>",
+		}
+	}
+	return nil
+}
+
 // SliceComplete delivers a complete-slice override signal to a slice sub-workflow.
 //
 // output and errMsg are mutually exclusive: set output for a successful override,
@@ -72,29 +110,7 @@ func SliceComplete(
 	output, errMsg *string,
 	format types.OutputFormat,
 ) (int, error) {
-	if sliceId == "" {
-		err := &pasterrors.StructuredError{
-			Category: pasterrors.CategoryValidation,
-			What:     "A slice ID is required to complete a slice.",
-			Why:      "The --slice-id flag was not provided.",
-			Where:    "Completing a slice (internal/handlers/slice.go in handlers.SliceComplete).",
-			Impact:   "Without a slice ID, there's no slice to complete.",
-			Fix:      "1. Pass the slice's ID:\n     pasture slice complete --slice-id <id> --output \"<result>\"",
-		}
-		return pasterrors.ExitCode(err), err
-	}
-	if output != nil && errMsg != nil {
-		err := &pasterrors.StructuredError{
-			Category: pasterrors.CategoryValidation,
-			What:     "Pass either --output or --error, not both.",
-			Why:      "A slice completion override is either a success (--output) or a failure (--error), not both.",
-			Where:    "Completing a slice (internal/handlers/slice.go in handlers.SliceComplete).",
-			Impact:   "The override can't be recorded because the result is ambiguous.",
-			Fix: "1. Pick one and retry. For success:\n" +
-				"     pasture slice complete --output \"<result>\" --slice-id <id>\n" +
-				"2. For failure:\n" +
-				"     pasture slice complete --error \"<reason>\" --slice-id <id>",
-		}
+	if err := ValidateSliceComplete(sliceId, output, errMsg); err != nil {
 		return pasterrors.ExitCode(err), err
 	}
 

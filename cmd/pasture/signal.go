@@ -31,9 +31,11 @@ Axes: correctness, test_quality, elegance. Votes: ACCEPT, REVISE (case-insensiti
 		axis := protocol.ReviewAxis(axisStr)
 		vote := protocol.VoteType(strings.ToUpper(voteStr))
 
-		return runWithController(func(ctrl handlers.EpochController) (int, error) {
-			return handlers.SignalVote(ctrl, epochId, axis, vote, reviewerId, resolveFormat())
-		})
+		return runWithController(
+			func() error { return handlers.ValidateSignalVote(epochId, axis, vote) },
+			func(ctrl handlers.EpochController) (int, error) {
+				return handlers.SignalVote(ctrl, epochId, axis, vote, reviewerId, resolveFormat())
+			})
 	},
 }
 
@@ -59,9 +61,11 @@ mutually exclusive.`,
 			errMsg = &v
 		}
 
-		return runWithController(func(ctrl handlers.EpochController) (int, error) {
-			return handlers.SignalComplete(ctrl, epochId, sliceId, output, errMsg, resolveFormat())
-		})
+		return runWithController(
+			func() error { return handlers.ValidateSignalComplete(epochId, sliceId, output, errMsg) },
+			func(ctrl handlers.EpochController) (int, error) {
+				return handlers.SignalComplete(ctrl, epochId, sliceId, output, errMsg, resolveFormat())
+			})
 	},
 }
 

@@ -221,8 +221,9 @@ func RunRelease(opts ReleaseOptions) error {
 			fmt.Printf("%sWould tag: %s\n", prefix, tagName)
 		} else {
 			if err := GitTag(opts.RepoRoot, tagName, "Release "+bumpedStr); err != nil {
-				// Roll back the in-repo commit + file writes if tagging fails,
-				// so a failed release does not leave a dangling commit.
+				// On tag failure, delete the tag and restore the working tree.
+				// The release commit (step 7) is intentionally left in place,
+				// matching aura-release; see GitRollback.
 				_ = GitRollback(opts.RepoRoot, tagName)
 				return err
 			}

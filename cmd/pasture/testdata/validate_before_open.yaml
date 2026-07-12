@@ -1,0 +1,100 @@
+# Validate-before-open CLI fixtures for the durable epoch/signal/session/slice/
+# phase verbs. Each case is an invalid invocation that must be rejected by
+# argument validation BEFORE the controller opens (and thereby creates) the
+# database. The test runs each as a subprocess against the compiled pasture
+# binary with --db pointed at a not-yet-existent path and asserts:
+#   - exit == want_exit (1 = validation error)
+#   - the structured error report reaches stderr ("Problem:" / "How to fix:")
+#   - no database file (nor a -wal/-shm sidecar) is left behind
+#
+# Coverage spans all five verb families so the shared runWithController helper is
+# exercised through every command file, not just one:
+#
+#   epoch    -> malformed --epoch-id (start, cancel, and the audit-writing terminate)
+#   signal   -> malformed --epoch-id (vote, complete); bad --axis; conflicting --output/--error
+#   slice    -> bad --mode; conflicting --output/--error
+#   session  -> malformed --epoch-id; empty --role (provided-but-empty passes cobra's required check)
+#   phase    -> malformed --epoch-id; unrecognised --to
+#
+# Every epoch-addressed verb (all but slice, which addresses a free-form slice
+# workflow id) format-validates --epoch-id before opening the db, so each has a
+# malformed-epoch-id row pinning that guard.
+#
+# Fields:
+#   id:        human-readable subtest name
+#   args:      CLI arguments passed to the binary. A well-formed epoch id
+#              (demo--01960000-0000-7000-8000-000000000001) is baked in where the
+#              failure is NOT about the epoch id, so cobra's required-flag check
+#              and the epoch-id guard both pass and the intended semantic guard is
+#              what fires.
+#   want_exit: expected process exit code (every validation rejection is 1)
+tests:
+  - id: "epoch_start_malformed_id"
+    args: ["epoch", "start", "--epoch-id", "not-a-valid-task-id"]
+    want_exit: 1
+
+  # cancel enforces the same epoch-id format guard as start and terminate, so a
+  # malformed id is rejected before the controller opens (and creates the db).
+  - id: "epoch_cancel_malformed_id"
+    args: ["epoch", "cancel", "--epoch-id", "not-a-task-id"]
+    want_exit: 1
+
+  # terminate writes an audit event once the controller is open, so rejecting it
+  # before open also guarantees no unjoinable audit row is ever written.
+  - id: "epoch_terminate_malformed_id"
+    args: ["epoch", "terminate", "--epoch-id", "not-a-task-id", "--reason", "should never reach the db"]
+    want_exit: 1
+
+  # Malformed --epoch-id with an otherwise-valid axis+vote: the epoch-id format
+  # guard fires before the controller opens (axis/vote are fine, so only the id
+  # is bad). Pins that signal vote format-validates the epoch id.
+  - id: "signal_vote_malformed_epoch_id"
+    args: ["signal", "vote", "--epoch-id", "not-a-task-id", "--axis", "correctness", "--vote", "ACCEPT"]
+    want_exit: 1
+
+  - id: "signal_vote_bad_axis"
+    args: ["signal", "vote", "--epoch-id", "demo--01960000-0000-7000-8000-000000000001", "--axis", "badaxis", "--vote", "ACCEPT"]
+    want_exit: 1
+
+  # Malformed --epoch-id with an otherwise-valid slice-id + single output: only
+  # the epoch id is bad, so its format guard fires before the controller opens.
+  - id: "signal_complete_malformed_epoch_id"
+    args: ["signal", "complete", "--epoch-id", "not-a-task-id", "--slice-id", "s-1", "--output", "o"]
+    want_exit: 1
+
+  - id: "signal_complete_output_and_error"
+    args: ["signal", "complete", "--epoch-id", "demo--01960000-0000-7000-8000-000000000001", "--slice-id", "s-1", "--output", "o", "--error", "e"]
+    want_exit: 1
+
+  - id: "slice_start_bad_mode"
+    args: ["slice", "start", "--slice-id", "s-1", "--mode", "docker"]
+    want_exit: 1
+
+  - id: "slice_complete_output_and_error"
+    args: ["slice", "complete", "--slice-id", "s-1", "--output", "o", "--error", "e"]
+    want_exit: 1
+
+  # Malformed --epoch-id with an otherwise-valid session-id + role: only the
+  # epoch id is bad, so its format guard fires before the controller opens.
+  - id: "session_register_malformed_epoch_id"
+    args: ["session", "register", "--epoch-id", "not-a-task-id", "--session-id", "s-1", "--role", "worker"]
+    want_exit: 1
+
+  # A provided-but-empty required flag (--role "") passes cobra's required check
+  # (the flag was set) yet fails the non-empty guard, exercising the validate-
+  # before-open path for the session family, whose guards are all non-empty
+  # checks with no other semantic case to trigger after cobra.
+  - id: "session_register_empty_role"
+    args: ["session", "register", "--epoch-id", "demo--01960000-0000-7000-8000-000000000001", "--session-id", "s-1", "--role", ""]
+    want_exit: 1
+
+  # Malformed --epoch-id with an otherwise-valid target phase: only the epoch id
+  # is bad, so its format guard fires before the controller opens (and before the
+  # phase is parsed).
+  - id: "phase_advance_malformed_epoch_id"
+    args: ["phase", "advance", "--epoch-id", "not-a-task-id", "--to", "code-review"]
+    want_exit: 1
+
+  - id: "phase_advance_bad_phase"
+    args: ["phase", "advance", "--epoch-id", "demo--01960000-0000-7000-8000-000000000001", "--to", "not-a-real-phase"]
+    want_exit: 1

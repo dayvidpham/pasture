@@ -1,11 +1,13 @@
-# Fixture for config_yaml_test.go.
+# Fixture for TestResolve_YAMLFixtures in internal/config/viper_internal_test.go.
 #
 # Each entry is a named test case loaded by LoadFixtures(t, testutil.ConfigLoading, &fixtures).
+# The test drives resolvePasturedConfigWithFile with an injected empty env, so the
+# config file alone determines the resolved values.
 # Fields:
 #   name:                human-readable test case label
 #   yaml_content:        inline YAML written to a temp file
 #   use_missing_path:    when true, pass a non-existent file path instead of yaml_content
-#   want_error:          whether ResolvePasturedConfigFromFile should return a non-nil error
+#   want_error:          whether resolution should return a non-nil config-file read error
 #   want_audit_trail:    expected PasturedConfig.AuditTrail
 #   want_audit_db_path:  expected PasturedConfig.AuditDBPath
 

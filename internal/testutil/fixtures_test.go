@@ -76,12 +76,34 @@ func TestReadFixture_MalformedYAML(t *testing.T) {
 		"error message should name the malformed fixture; got: %s", err)
 }
 
-// TestFixtureNameConstants verifies that all four FixtureName constants are
-// distinct non-empty strings — a static guard against copy-paste errors.
+// TestReadFixture_UnknownKeyRejected verifies that strict decoding rejects a YAML
+// key with no matching struct field. Without KnownFields(true) a typo'd fixture
+// key would silently zero-value — and for a skip-if-empty assertion field that
+// would quietly disable the check rather than fail it.
+func TestReadFixture_UnknownKeyRejected(t *testing.T) {
+	unknownPath := filepath.Join("testdata", "unknown_key_fixture.yaml")
+	require.NoError(t,
+		os.WriteFile(unknownPath, []byte("name: x\nvalue: y\ncount: 1\nnot_a_field: oops\n"), 0o644),
+		"setup: could not write unknown-key fixture",
+	)
+	t.Cleanup(func() { _ = os.Remove(unknownPath) })
+
+	var target sampleFixture
+	err := readFixture(FixtureName("unknown_key_fixture"), &target)
+
+	require.Error(t, err,
+		"readFixture must reject a fixture containing a key with no matching struct field")
+	assert.Contains(t, err.Error(), "unknown_key_fixture",
+		"error message should name the offending fixture; got: %s", err)
+}
+
+// TestFixtureNameConstants verifies that the FixtureName constants are distinct
+// non-empty strings — a static guard against copy-paste errors.
 func TestFixtureNameConstants(t *testing.T) {
 	names := []FixtureName{
 		ContentBlock,
 		CLISmoke,
+		ValidateBeforeOpen,
 		RunAgentSession,
 		ConfigLoading,
 		CodegenSchema,

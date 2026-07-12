@@ -10,6 +10,42 @@ import (
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
+// ValidatePhaseAdvance checks the phase advance verb's arguments (epoch id and
+// target phase) without opening a controller or touching the database, so the CLI
+// can reject a bad invocation before OpenEpochController runs. On success it
+// returns the parsed target phase so the handler can build the signal from the
+// already-validated value rather than re-parsing (and never discards the parse
+// error: an unrecognised phase would parse to the zero-value PhaseId, which the
+// engine silently treats as a no-op).
+func ValidatePhaseAdvance(epochId string, toPhaseStr protocol.PhaseId) (protocol.PhaseId, error) {
+	if err := requireEpochID(epochId, "advance the phase",
+		"Advancing the phase (internal/handlers/phase.go in handlers.ValidatePhaseAdvance).",
+		"pasture phase advance --epoch-id <id> --to <phase>"); err != nil {
+		return "", err
+	}
+	if err := validateEpochID(epochId, "handlers.ValidatePhaseAdvance"); err != nil {
+		return "", err
+	}
+	toPhase, parseErr := protocol.ParsePhaseId(string(toPhaseStr))
+	if parseErr != nil {
+		return "", &pasterrors.StructuredError{
+			Category: pasterrors.CategoryValidation,
+			What:     fmt.Sprintf("%q is not a recognised phase name.", toPhaseStr),
+			Why: "The target phase must be one of the 12 protocol phase names\n" +
+				"(request, elicit, propose, ..., landing, complete) or the short\n" +
+				"form p1..p12.",
+			Where:  "Advancing the phase (internal/handlers/phase.go in handlers.ValidatePhaseAdvance).",
+			Impact: "The phase advance can't be sent because the target phase isn't recognised.",
+			Fix: "1. Use a recognised phase name, for example:\n" +
+				"     pasture phase advance --to code-review --epoch-id <id>\n" +
+				"2. Or use the short form:\n" +
+				"     pasture phase advance --to p10 --epoch-id <id>",
+			Cause: parseErr,
+		}
+	}
+	return toPhase, nil
+}
+
 // PhaseAdvance delivers an advance-phase signal to the epoch's control workflow.
 //
 // toPhaseStr is the raw phase name or pX shorthand from the CLI flag; this
@@ -25,28 +61,8 @@ func PhaseAdvance(
 	triggeredBy, condition string,
 	format types.OutputFormat,
 ) (int, error) {
-	if err := requireEpochID(epochId, "advance the phase",
-		"Advancing the phase (internal/handlers/phase.go in handlers.PhaseAdvance).",
-		"pasture phase advance --epoch-id <id> --to <phase>"); err != nil {
-		return pasterrors.ExitCode(err), err
-	}
-
-	toPhase, parseErr := protocol.ParsePhaseId(string(toPhaseStr))
-	if parseErr != nil {
-		err := &pasterrors.StructuredError{
-			Category: pasterrors.CategoryValidation,
-			What:     fmt.Sprintf("%q is not a recognised phase name.", toPhaseStr),
-			Why: "The target phase must be one of the 12 protocol phase names\n" +
-				"(request, elicit, propose, ..., landing, complete) or the short\n" +
-				"form p1..p12.",
-			Where:  "Advancing the phase (internal/handlers/phase.go in handlers.PhaseAdvance).",
-			Impact: "The phase advance can't be sent because the target phase isn't recognised.",
-			Fix: "1. Use a recognised phase name, for example:\n" +
-				"     pasture phase advance --to code-review --epoch-id <id>\n" +
-				"2. Or use the short form:\n" +
-				"     pasture phase advance --to p10 --epoch-id <id>",
-			Cause: parseErr,
-		}
+	toPhase, err := ValidatePhaseAdvance(epochId, toPhaseStr)
+	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
 

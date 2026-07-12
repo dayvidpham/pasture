@@ -28,9 +28,14 @@ the pX shorthand (p1..p12).`,
 		triggeredBy, _ := cmd.Flags().GetString("triggered-by")
 		condition, _ := cmd.Flags().GetString("condition")
 
-		return runWithController(func(ctrl handlers.EpochController) (int, error) {
-			return handlers.PhaseAdvance(ctrl, epochId, protocol.PhaseId(toPhaseStr), triggeredBy, condition, resolveFormat())
-		})
+		return runWithController(
+			func() error {
+				_, err := handlers.ValidatePhaseAdvance(epochId, protocol.PhaseId(toPhaseStr))
+				return err
+			},
+			func(ctrl handlers.EpochController) (int, error) {
+				return handlers.PhaseAdvance(ctrl, epochId, protocol.PhaseId(toPhaseStr), triggeredBy, condition, resolveFormat())
+			})
 	},
 }
 

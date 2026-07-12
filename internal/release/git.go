@@ -110,12 +110,21 @@ func GitCommit(dir string, files []string, message string) error {
 	return nil
 }
 
-// GitRollback restores the named tag and resets modified files to HEAD.
-// Used to undo a partial release on error.
+// GitRollback partially undoes a release on error: it deletes the created tag
+// and restores TRACKED files to HEAD (discarding uncommitted writes to files git
+// already tracks). "git checkout -- ." touches tracked files only, so a file the
+// release newly CREATED but did not commit (e.g. a first-ever CHANGELOG.md
+// written by prependChangelog) is not removed by the rollback — whether it was
+// left untracked or already git-added/staged when a later step failed, it
+// survives. It intentionally does NOT undo an already-made release commit —
+// matching aura-release, whose rollback likewise leaves the commit in place. A
+// caller that needs the commit gone must reset it separately.
 func GitRollback(dir, tag string) error {
 	// Delete the tag if it was created.
 	_, _ = gitRun(dir, "tag", "-d", tag) // ignore error if tag didn't exist
-	// Reset working tree to HEAD (undo file writes).
+	// Restore tracked files to HEAD (undo writes to tracked files; a file the
+	// release newly created is not touched and remains, whether left untracked
+	// or already staged).
 	if _, err := gitRun(dir, "checkout", "--", "."); err != nil {
 		return fmt.Errorf(
 			"workflow error: git rollback failed in %s — %w — "+
