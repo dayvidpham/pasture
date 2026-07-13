@@ -132,12 +132,16 @@ func ValidateSkillStructure(markdown []byte) error {
 func ExtractSection(markdown []byte, headingTitle string) ([]byte, error) {
 	doc := goldmark.New().Parser().Parse(text.NewReader(markdown))
 
-	// Phase 1: find the best match (shallowest level).
-	type match struct {
+	// Single walk: record every heading's level, title, and source-line byte
+	// extent in document order. All selection logic below operates on this
+	// flat list, so the AST is traversed exactly once.
+	type headingInfo struct {
 		level int
-		node  ast.Node
+		title string
+		start int // byte offset of the heading's first source line (0 when Lines() is empty)
+		stop  int // byte offset past the heading's last source line (0 when Lines() is empty)
 	}
-	var bestMatch *match
+	var headings []headingInfo
 
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
@@ -147,20 +151,23 @@ func ExtractSection(markdown []byte, headingTitle string) ([]byte, error) {
 		if !ok {
 			return ast.WalkContinue, nil
 		}
-		title := HeadingTextFromAST(n, markdown)
-		if title != headingTitle {
-			return ast.WalkContinue, nil
+		info := headingInfo{level: h.Level, title: HeadingTextFromAST(n, markdown)}
+		if lines := n.Lines(); lines.Len() > 0 {
+			info.start = lines.At(0).Start
+			info.stop = lines.At(lines.Len() - 1).Stop
 		}
-		if bestMatch == nil || h.Level < bestMatch.level {
-			bestMatch = &match{
-				level: h.Level,
-				node:  n,
-			}
-		}
+		headings = append(headings, info)
 		return ast.WalkContinue, nil
 	})
 
-	if bestMatch == nil {
+	// Best match: the first heading with the title at the shallowest level.
+	best := -1
+	for i, h := range headings {
+		if h.title == headingTitle && (best < 0 || h.level < headings[best].level) {
+			best = i
+		}
+	}
+	if best < 0 {
 		return nil, fmt.Errorf(
 			"codegen.ExtractSection: heading %q not found in markdown — "+
 				"where: searching all heading levels (H1-H6) — "+
@@ -169,53 +176,18 @@ func ExtractSection(markdown []byte, headingTitle string) ([]byte, error) {
 		)
 	}
 
-	// Phase 2: find the byte range of the section content.
-	// Content starts after the heading line and ends at the next heading
-	// at the same or shallower level (or EOF).
-	targetLevel := bestMatch.level
-	inSection := false
-	var contentStart, contentEnd int
-
-	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
-		if !entering {
-			return ast.WalkContinue, nil
+	// Content starts after the matched heading's lines and ends at the next
+	// heading at the same or shallower level. A zero end offset (no closing
+	// heading, or one whose Lines() is empty) means the section runs to EOF.
+	contentStart := headings[best].stop
+	contentEnd := 0
+	for _, h := range headings[best+1:] {
+		if h.level <= headings[best].level {
+			contentEnd = h.start
+			break
 		}
-		h, ok := n.(*ast.Heading)
-		if !ok {
-			return ast.WalkContinue, nil
-		}
-
-		title := HeadingTextFromAST(n, markdown)
-
-		if !inSection {
-			if h.Level == targetLevel && title == headingTitle && n == bestMatch.node {
-				inSection = true
-				// Content starts after this heading's lines.
-				// The heading node's Lines() gives us the source lines.
-				lines := n.Lines()
-				if lines.Len() > 0 {
-					lastLine := lines.At(lines.Len() - 1)
-					contentStart = lastLine.Stop
-				}
-			}
-			return ast.WalkContinue, nil
-		}
-
-		// We are in the section — check if this heading closes it.
-		if h.Level <= targetLevel {
-			// This heading is at the same or higher level — section ends here.
-			lines := n.Lines()
-			if lines.Len() > 0 {
-				contentEnd = lines.At(0).Start
-			}
-			return ast.WalkStop, nil
-		}
-
-		return ast.WalkContinue, nil
-	})
-
-	// If contentEnd was never set, the section extends to EOF.
-	if contentEnd == 0 && inSection {
+	}
+	if contentEnd == 0 {
 		contentEnd = len(markdown)
 	}
 
@@ -224,11 +196,9 @@ func ExtractSection(markdown []byte, headingTitle string) ([]byte, error) {
 		return []byte{}, nil
 	}
 
-	content := markdown[contentStart:contentEnd]
-
 	// Trim leading/trailing whitespace from the extracted content but preserve
 	// internal formatting.
-	return []byte(strings.TrimSpace(string(content))), nil
+	return []byte(strings.TrimSpace(string(markdown[contentStart:contentEnd]))), nil
 }
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
