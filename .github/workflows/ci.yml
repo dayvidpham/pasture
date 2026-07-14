@@ -108,3 +108,33 @@ jobs:
             echo "$files"
             exit 1
           fi
+
+  codegen-drift:
+    name: Codegen Drift
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Regenerate
+        run: make generate
+
+      - name: Verify committed files match codegen output
+        # Catches generated files (schema.xml, skills/**/SKILL.md, agents/*.md,
+        # .opencode/**, opencode.json) that were hand-edited or left stale after
+        # a change to internal/codegen. git status --porcelain also catches newly
+        # generated files that were never committed, which git diff alone would
+        # miss.
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Generated files are stale — run 'make generate' and commit the result."
+            git status --porcelain
+            git diff
+            exit 1
+          fi

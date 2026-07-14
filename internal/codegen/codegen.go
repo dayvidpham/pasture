@@ -1,13 +1,16 @@
 // Package codegen generates protocol documentation from canonical Go type definitions.
 //
-// This package ports the Python codegen tooling (gen_skills.py, gen_schema.py,
-// gen_agents.py, context_injection.py) to Go, using text/template for Markdown
-// generation and encoding/xml for schema.xml.
+// Typed Go specifications in this package are the source of truth. The
+// generators use text/template for Markdown and encoding/xml/manual builders
+// for schema.xml.
 //
 // Generated outputs:
 //   - schema.xml: Protocol schema definition
-//   - skills/{role}/SKILL.md: Role-level skill headers (marker-bounded)
-//   - agents/{role}.md: Agent definition files (fully generated)
+//   - skills/{skill}/SKILL.md: Claude Code skills
+//   - agents/{role}.md: Claude Code agent definitions
+//   - .opencode/skill/{skill}/SKILL.md: OpenCode skills
+//   - .opencode/agent/{role}.md: OpenCode agent definitions
+//   - opencode.json: OpenCode manifest
 //
-//go:generate go run ../../tools/codegen
+//go:generate go run ../../tools/codegen --targets claude-code,opencode
 package codegen
