@@ -6,8 +6,10 @@
 //
 // Generated outputs:
 //   - schema.xml: Protocol schema definition
-//   - skills/{role}/SKILL.md: Role-level skill headers (marker-bounded)
-//   - agents/{role}.md: Agent definition files (fully generated)
+//   - skills/{skill}/SKILL.md: Claude Code skills
+//   - agents/{role}.md: Claude Code agent definitions
+//   - .opencode/skill/{skill}/SKILL.md: OpenCode skills
+//   - .opencode/agent/{role}.md: OpenCode agent definitions
 //
-//go:generate go run ../../tools/codegen
+//go:generate go run ../../tools/codegen --targets claude-code,opencode
 package codegen
