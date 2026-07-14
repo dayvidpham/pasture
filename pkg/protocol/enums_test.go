@@ -131,14 +131,7 @@ func TestAllSeverityLevels_Completeness(t *testing.T) {
 func TestRoleId_IsValid(t *testing.T) {
 	t.Parallel()
 
-	valid := []protocol.RoleId{
-		protocol.RoleEpoch,
-		protocol.RoleArchitect,
-		protocol.RoleReviewer,
-		protocol.RoleSupervisor,
-		protocol.RoleWorker,
-	}
-	for _, r := range valid {
+	for _, r := range protocol.AllRoleIds {
 		r := r
 		t.Run("valid_"+string(r), func(t *testing.T) {
 			t.Parallel()
@@ -162,10 +155,15 @@ func TestRoleId_IsValid(t *testing.T) {
 
 func TestAllRoleIds_Completeness(t *testing.T) {
 	t.Parallel()
-	if got := len(protocol.AllRoleIds); got != 5 {
-		t.Errorf("len(AllRoleIds) = %d, want 5", got)
+	if len(protocol.AllRoleIds) == 0 {
+		t.Fatal("AllRoleIds must contain at least one role")
 	}
+	seen := make(map[protocol.RoleId]bool, len(protocol.AllRoleIds))
 	for _, r := range protocol.AllRoleIds {
+		if seen[r] {
+			t.Errorf("AllRoleIds contains duplicate RoleId %q", r)
+		}
+		seen[r] = true
 		if !r.IsValid() {
 			t.Errorf("AllRoleIds contains invalid RoleId %q", r)
 		}

@@ -201,7 +201,7 @@ func (n *XMLNode) iterInto(tag string, out *[]*XMLNode) {
 
 // ── Element description helper ─────────────────────────────────────────────────
 
-// elemDesc produces an XPath-style description matching Python's _elem_desc().
+// elemDesc produces the stable XPath-style description used in validation errors.
 // Priority: id → name → pattern → ref → bare tag.
 func elemDesc(n *XMLNode) string {
 	tag := n.XMLName.Local

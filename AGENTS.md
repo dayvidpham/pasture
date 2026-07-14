@@ -478,9 +478,9 @@ Pasture's typed Go codegen is the sole authority for generated protocol skills
 and agents. Generation is explicit: run `make generate`; ordinary builds do not
 rewrite repository files. The canonical command emits both supported harnesses:
 
-- Claude Code: 29 generated skills under `skills/` and five generated agents
-  under `agents/`.
-- OpenCode: the corresponding generated skills under `.opencode/skill/`, five
+- Claude Code: all registered skills under `skills/` and every tool-bearing role
+  agent under `agents/`.
+- OpenCode: the corresponding generated skills under `.opencode/skill/`, role
   agents under `.opencode/agent/`, plus `opencode.json`.
 - The hand-authored `protocol` and `install-cli` skills are copied verbatim into
   the OpenCode target and are intentionally outside the generated-skill
@@ -496,12 +496,14 @@ The source inventory is deliberately static and explicit:
   with `init()` registration or reflection.
 - `harness.go` owns the role and command emitter maps and target routing.
 
-`TestGeneratedSkillRegistryParity` requires every generated skill directory to
-have exactly one `CommandSpecs` metadata owner, one harness emitter, and one
-`SkillBodySpecs` entry. The CI `Codegen Drift` job runs the all-target generator
-on a clean checkout and fails if any committed generated file changes. A source
-change that affects output must therefore commit the regenerated files in the
-same change.
+Registry tests require every generated skill directory to have exactly one
+`CommandSpecs` metadata owner, one harness emitter, one `SkillBodySpecs` entry,
+and one schema-order entry; roles likewise stay aligned with procedure steps.
+`TestGeneratedOutputInventory` rejects retired files left behind by in-place
+generation. The CI `Codegen Drift` job runs the all-target generator on a clean
+checkout and rejects modified or newly created output. A source change that
+affects output must therefore commit the regenerated files—and explicitly remove
+retired files—in the same change.
 
 At runtime, harnesses load the generated skill matching the current command or
 role. Durable workflow state determines where execution is; the generated skill

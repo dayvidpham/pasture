@@ -18,8 +18,8 @@ the canonical Go data, run `make generate`, inspect the diff, then run tests.
 The pipeline has four stages:
 
 1. **GenerateSchemaToFile** — marshals spec maps to `schema.xml`.
-2. **EmitHarness(claude-code)** — marker-merges all 29 generated skills under
-   `skills/` and fully rewrites the five role agents under `agents/`.
+2. **EmitHarness(claude-code)** — marker-merges every registered skill under
+   `skills/` and fully rewrites each tool-bearing role agent under `agents/`.
 3. **EmitHarness(opencode)** — fully rewrites the OpenCode skills, agents, and
    manifest, and copies the two verbatim skills.
 4. **ValidateGlobalIds** — rejects unresolved or duplicate protocol identifiers
@@ -46,8 +46,10 @@ make generate
 | `internal/codegen/schema_types.go` | `encoding/xml` annotated structs for 15 marshallable sections; doc-only structs for the 2 CDATA sections | Adding a new schema section's XML shape |
 | `internal/codegen/skills.go` | `GenerateSkill`, `GenerateSubSkill`, `skillContext`, `skillSubContext`, figure-loading helpers | Changing SKILL.md generation logic or template context shape |
 | `internal/codegen/agents.go` | `GenerateAgent`, `agentTemplateData`, `renderAgent` | Changing agent definition generation logic or template context shape |
-| `internal/codegen/templates/skill.go.tmpl` | Unified SKILL.md template (header + body: role commands, constraints, handoffs, phases, checklists, workflows, figures, preamble, behaviors, sections, recipes) | Changing the layout of generated SKILL.md files |
-| `internal/codegen/templates/skill_sub.go.tmpl` | Sub-skill SKILL.md template (command name, description, figures, preamble, behaviors, sections, recipes) | Changing sub-skill layout |
+| `internal/codegen/templates/skill.go.tmpl` | Claude Code role-skill wrapper/frontmatter; invokes `_skill_body.go.tmpl`. | Changing Claude Code role-skill framing |
+| `internal/codegen/templates/skill_sub.go.tmpl` | Claude Code command-skill wrapper/frontmatter; invokes `_skill_sub_body.go.tmpl`. | Changing Claude Code command-skill framing |
+| `internal/codegen/templates/_skill_body.go.tmpl` | Shared role-skill body partial used by both harnesses. | Changing generated role body layout |
+| `internal/codegen/templates/_skill_sub_body.go.tmpl` | Shared command-skill body partial used by both harnesses. | Changing generated command body layout |
 | `internal/codegen/templates/agent_definition.go.tmpl` | Agent definition template (role spec, phases, constraints, behaviors, checklists, workflows, figure refs) | Changing agent definition layout |
 | `internal/codegen/templates/opencode_*.go.tmpl` | OpenCode role-skill, command-skill, and agent templates | Changing OpenCode-specific layout or frontmatter |
 | `internal/codegen/harness.go` | Target harness registry, `roleSkillDirs`, `commandSkillDirs`, and target routing helpers | Adding a new generation target, role skill, or command skill |
@@ -98,7 +100,7 @@ but it is not a substitute for the canonical all-target regeneration gate.
 | `schema.go` section builders | schema.xml only |
 | `templates/skill.go.tmpl` | Claude Code role SKILL.md files |
 | `templates/skill_sub.go.tmpl` | Claude Code command SKILL.md files |
-| `templates/agent_definition.go.tmpl` | Claude Code agent definitions |
+| `templates/agent_definition.go.tmpl` | Shared agent body used by Claude Code and OpenCode agent definitions |
 | `templates/opencode_*.go.tmpl` | corresponding OpenCode skills or agents |
 | `internal/codegen/harness.go` `roleSkillDirs` | which SKILL.md files are regenerated |
 | `internal/codegen/harness.go` `commandSkillDirs` | which sub-skill SKILL.md files are regenerated |
@@ -129,7 +131,7 @@ go test ./internal/codegen/... -count=1
 
 This is a subset of the above when the `ConstraintSpec` already exists.
 
-1. In `context.go`, add the constraint ID to `roleConstraints[types.RoleXxx]` with value `true`.
+1. In `context.go`, add the constraint ID to `roleConstraints[protocol.RoleXxx]` with value `true`.
 
 2. In `testdata/context.yaml`, find the entry for that role:
    - Increment `exact_count` by 1.
@@ -154,52 +156,93 @@ This is a subset of the above when the `ConstraintSpec` already exists.
 
 ### Adding a New Role
 
-1. Add a `RoleId` constant to `pkg/protocol/enums.go` and add it to `AllRoleIds`.
+1. Add a `RoleId` constant to `pkg/protocol/enums.go`, handle it in
+   `RoleId.IsValid`, and add it to `AllRoleIds` in the desired schema order.
 
 2. Add an entry to `RoleSpecs` in `specs_data.go`. Fill `ID`, `Name`, `Description`, `OwnedPhases`, `Introduction`, `OwnershipNarrative`, `Behaviors`, and optionally `Model`, `Thinking`, `Tools`.
 
 3. Add the role's command metadata to `CommandSpecs`. Its `RoleRef` must be the
-   new role and its `File` must be `skills/<dir>/SKILL.md`.
+   new role and its `File` must be `skills/<role-id>/SKILL.md`. Role skill
+   directories and body-registry keys are required to equal the `RoleId`.
 
-4. Add a `roleConstraints` entry in `context.go` using `mergeConstraints(generalConstraints, map[string]bool{...})`.
+4. Add that command ID exactly once to `commandOrder` in `schema.go` at the
+   intended schema position. The schema parity guard rejects missing, orphaned,
+   or duplicate entries.
 
-5. Add the role to `roleSkillDirs` in `internal/codegen/harness.go` (map the `RoleId` constant to its skill directory).
+5. Add a `ProcedureSteps` entry in `specs_data.go`. Use an empty slice when the
+   role has no startup procedure; schema parity requires one key per RoleId.
 
-6. Create `internal/codegen/specs_data_body_<skill>.go` with exactly one
-   package-level `SkillBody` declaration, then add that declaration to the
-   explicit `SkillBodySpecs` map in `specs_data_body.go`.
+6. Add a `roleConstraints` entry in `context.go` using
+   `mergeConstraints(generalConstraints, map[string]bool{...})`.
 
-7. Seed the Claude Code output at `skills/<dir>/SKILL.md` with the marker pair:
+7. Add the role to `roleSkillDirs` in `internal/codegen/harness.go`, mapping the
+   `RoleId` to the identical string directory.
+
+8. Create one body source using underscore-separated filename words and a
+   camelCase variable. For example, skill key `quality-reviewer` uses
+   `specs_data_body_quality_reviewer.go` and `qualityReviewerBody`. Register the
+   declaration under the hyphenated skill key in the explicit `SkillBodySpecs`
+   map in `specs_data_body.go`.
+
+9. Seed the Claude Code output at `skills/<role-id>/SKILL.md` with the marker pair:
    ```
    <!-- BEGIN GENERATED FROM pasture schema -->
    <!-- END GENERATED FROM pasture schema -->
    ```
    The OpenCode output is fully generated and needs no seed file.
 
-8. Update `testdata/context.yaml`: add a `role_constraint_checks` entry with `exact_count`, `must_contain`, and `must_not_contain`.
+10. If `RoleSpec.Tools` is non-empty, add the role's `primary`/`subagent` mapping
+   to `openCodeMode` in `opencode_agent.go`. If it introduces a new model
+   nickname, also update `openCodeModel` and
+   `testdata/opencode_models.json`.
 
-9. Update `testdata/agents.yaml` and `testdata/skills.yaml` as needed for the new role.
+11. Update `testdata/context.yaml`, `testdata/agents.yaml`, and
+    `testdata/skills.yaml` for the new role.
 
-10. Run `make generate` then `go test ./internal/codegen/... -count=1`.
+12. Run `make generate` then `go test ./internal/codegen/... -count=1`.
 
-`TestGeneratedSkillRegistryParity` checks that the command metadata, harness
-emitter, and body registry contain exactly the same generated skill inventory.
+The parity tests derive schema roles from `AllRoleIds` and require command
+metadata, harness emitters, body declarations, procedure steps, schema command
+order, actual emitted XML IDs, production-harness return paths, and checked-in
+output paths to agree. There are no count tables to update.
 
 ---
 
 ### Adding a New Phase
 
-1. Add a `PhaseId` constant to `pkg/protocol/` and add it to `AllPhaseIds`.
+Adding a phase changes the protocol state machine, not only generated prose.
+Update every ordered/runtime surface deliberately:
 
-2. Add an entry to `PhaseSpecs` in `specs_data.go` (around line 17). Set `ID`, `Name`, `Number` (must be unique, 1–12 range extended if needed), `Domain`, `OwnerRoles`, and `Transitions`.
+1. In `pkg/protocol/types.go`, add the `PhaseId` constant, handle it in
+   `PhaseId.IsValid`, add it to `AllPhaseIds`, and insert it into
+   `DefaultPipeline` at the intended p-number. Extend `ParsePhaseId` with the
+   canonical name and any supported aliases; its help/error ranges must reflect
+   the new pipeline length.
 
-3. Add a `phaseConstraints` entry in `context.go` using `mergeConstraints(generalConstraints, map[string]bool{...})` or `copyConstraints(generalConstraints)`.
+2. Update `pkg/protocol/state_machine.go` so the preceding/new phases have the
+   intended transitions. Adjust any phase-specific runtime gates or parsing
+   call sites discovered by `rg 'PhaseLanding|PhaseComplete|12-phase|p12'`.
 
-4. Update `phaseOrder` in `schema.go` (around line 63) to include the new phase in the canonical ordering.
+3. Add the phase's `PhaseSpecs` entry in `specs_data.go`. Set `Id`, `Name`, a
+   unique `Number`, `Domain`, `OwnerRoles`, and `Transitions`.
 
-5. Update `testdata/context.yaml`: add a `phase_constraint_checks` entry for the new phase.
+4. Add its `phaseConstraints` entry in `context.go` using
+   `mergeConstraints(generalConstraints, map[string]bool{...})` or
+   `copyConstraints(generalConstraints)`.
 
-6. Run `make generate` then `go test ./internal/codegen/... -count=1`.
+5. Add it to both schema orderings in `schema.go`: `phaseOrder` (constraint
+   refs) and `buildPhases`'s `orderedPhaseIds` (phase elements). Add any
+   description/task-title/substep data needed by `phaseDescriptions`,
+   `SubstepDataMap`, `LabelSpecs`, and `TitleConventions`.
+
+6. Update the explicit phase expectations in `pkg/protocol/types_test.go`,
+   `pkg/protocol/state_machine_test.go`, and `internal/codegen/specs_test.go`,
+   including pipeline lengths, valid IDs, numbering bounds, parser cases, and
+   transitions. Update `testdata/context.yaml` with a
+   `phase_constraint_checks` entry and adjust schema/context fixtures.
+
+7. Update protocol prose that intentionally describes a fixed 12-phase
+   lifecycle, then run `make generate`, `go test ./...`, and `go vet ./...`.
 
 ---
 
@@ -224,34 +267,41 @@ emitter, and body registry contain exactly the same generated skill inventory.
    `Title`, and optionally `CreatesLabels`. `File` must be
    `skills/<skill-dir>/SKILL.md`.
 
-2. Add exactly one emitter entry to `commandSkillDirs` in
+2. Add the command ID exactly once to `commandOrder` in `schema.go` at the
+   intended schema position.
+
+3. Add exactly one emitter entry to `commandSkillDirs` in
    `internal/codegen/harness.go`:
    ```go
    "cmd-your-id": "your-skill-dir",
    ```
 
-3. Create `internal/codegen/specs_data_body_<skill>.go` with exactly one
-   package-level `SkillBody` declaration. Register that declaration under the
-   same skill-directory key in `SkillBodySpecs` in `specs_data_body.go`.
+4. Create one body source using underscore-separated filename words and a
+   camelCase variable. For example, skill key `worker-retry` uses
+   `specs_data_body_worker_retry.go` and `workerRetryBody`. Register that
+   declaration under `"worker-retry"` in `SkillBodySpecs`.
 
-4. Seed `skills/<skill-dir>/SKILL.md` with the BEGIN/END marker pair. The
+5. Seed `skills/<skill-dir>/SKILL.md` with the BEGIN/END marker pair. The
    OpenCode output is fully generated and needs no seed file.
 
-5. Update `testdata/skills.yaml` to cover the new command.
+6. Update `testdata/skills.yaml` to cover the new command.
 
-6. Run `make generate` then `go test ./internal/codegen/... -count=1`.
+7. Run `make generate` then `go test ./internal/codegen/... -count=1`.
 
-`TestGeneratedSkillRegistryParity` fails with the missing or orphaned skill
-directory if the metadata, emitter, or body-registry leg is forgotten.
+Parity tests name any missing metadata, schema-order, emitter, body-registry, or
+checked-in output leg; generated test cases are derived from those registries.
 
 ---
 
 ### Modifying a Template
 
 1. Edit the `.go.tmpl` file in `internal/codegen/templates/`:
-   - `skill.go.tmpl` — unified role SKILL.md template. Context type: `skillContext` (declared in `skills.go`). Available fields: `Role` (RoleSpec), `Commands` ([]CommandSpec), `Constraints` ([]ConstraintSpec), `Handoffs` ([]HandoffSpec), `OwnedPhases`, `PhasesDetail`, `Steps`, `PhaseSlug`, `SubSkills`, `Introduction`, `OwnershipNarrative`, `Behaviors`, `Checklists`, `CoordinationCommands`, `Workflows`, `FiguresByWorkflow`, `ReviewAxes`, `Preamble`, `BodyBehaviors`, `BodySections`, `BodyRecipes`.
-   - `skill_sub.go.tmpl` — sub-skill template. Context type: `skillSubContext`. Available fields: `CommandName`, `CommandDescription`, `Figures`, `Preamble`, `BodySections`, `BodyRecipes`, `BodyBehaviors`.
+   - `skill.go.tmpl` / `opencode_skill.go.tmpl` — harness-specific role wrappers and frontmatter.
+   - `_skill_body.go.tmpl` — shared role body layout. Context type: `skillContext` (declared in `skills.go`). Available fields include `Role`, `Commands`, `Constraints`, `Handoffs`, `OwnedPhases`, `PhasesDetail`, `Steps`, `PhaseSlug`, `SubSkills`, `Introduction`, `OwnershipNarrative`, `Behaviors`, `Checklists`, `CoordinationCommands`, `Workflows`, `FiguresByWorkflow`, `ReviewAxes`, `Preamble`, `BodyBehaviors`, `BodySections`, and `BodyRecipes`.
+   - `skill_sub.go.tmpl` / `opencode_skill_sub.go.tmpl` — harness-specific command wrappers and frontmatter.
+   - `_skill_sub_body.go.tmpl` — shared command body layout. Context type: `skillSubContext`; available fields include `CommandName`, `CommandDescription`, `Figures`, `Preamble`, `BodySections`, `BodyRecipes`, and `BodyBehaviors`.
    - `agent_definition.go.tmpl` — agent definitions. Context type: `agentTemplateData`. Available fields: `Role` (RoleSpec), `PhasesDetail`, `PhaseSlug`, `Constraints`, `Behaviors`, `Checklists`, `Workflows`, `Figures`.
+   - `opencode_agent.go.tmpl` — OpenCode-specific agent frontmatter around the shared rendered agent body.
 
 2. Run `make generate` to preview the rendered output.
 
@@ -267,7 +317,7 @@ When the same rule must appear in more than one role, phase, or skill body, **de
 
 Add the constraint's **ID** to the relevant set in `internal/codegen/context.go`:
 
-- `roleConstraints[types.RoleXxx]` — to attach it to a role
+- `roleConstraints[protocol.RoleXxx]` — to attach it to a role
 - `phaseConstraints[protocol.PhaseXxx]` — to attach it to a phase
 
 The single `ConstraintSpecs` definition (in `specs_data.go`) then renders into each target's generated `skills/<role>/SKILL.md` **and** `agents/<role>.md`. Do **not** restate the rule as a fresh role/phase behavior.
@@ -282,8 +332,8 @@ This is the subset recipe documented above under [Adding a Constraint to an Exis
 
 **Worked examples (v2-2 re-UAT propagation):**
 
-- **V2-PROP** — the deferral rule lives once in `ConstraintSpecs["C-uat-feedback-disposition"]`. To make the epoch orchestrator carry it, add `"C-uat-feedback-disposition": true` to `roleConstraints[types.RoleEpoch]` and bump the epoch `context.yaml` entry (`exact_count` +1, add to `must_contain`). It now renders into `skills/epoch/SKILL.md` + `agents/epoch.md` — no new epoch-body prose.
-- **V4-PROP** — the validation-case contract lives once in `ConstraintSpecs["C-validation-cases"]`. To make the supervisor carry it, add `"C-validation-cases": true` to `roleConstraints[types.RoleSupervisor]` and bump the supervisor `context.yaml` entry. It now renders into `skills/supervisor/SKILL.md` + `agents/supervisor.md` — no duplicated TDD paragraph.
+- **V2-PROP** — the deferral rule lives once in `ConstraintSpecs["C-uat-feedback-disposition"]`. To make the epoch orchestrator carry it, add `"C-uat-feedback-disposition": true` to `roleConstraints[protocol.RoleEpoch]` and bump the epoch `context.yaml` entry (`exact_count` +1, add to `must_contain`). It now renders into `skills/epoch/SKILL.md` + `agents/epoch.md` — no new epoch-body prose.
+- **V4-PROP** — the validation-case contract lives once in `ConstraintSpecs["C-validation-cases"]`. To make the supervisor carry it, add `"C-validation-cases": true` to `roleConstraints[protocol.RoleSupervisor]` and bump the supervisor `context.yaml` entry. It now renders into `skills/supervisor/SKILL.md` + `agents/supervisor.md` — no duplicated TDD paragraph.
 
 ### To reuse the SAME prose/behaviour across multiple skill BODIES
 
@@ -334,7 +384,7 @@ When you add a constraint to a role or phase, you must increment `exact_count` a
 
 `TestPhaseSpecsCompleteness` verifies every `PhaseId` (except `PhaseComplete`) has an entry in `PhaseSpecs`, with non-empty `Name`, `Domain`, `OwnerRoles`, and `Transitions`.
 
-`TestRoleSpecsCompleteness` verifies every `RoleId` in `types.AllRoleIds` has an entry in `RoleSpecs` with non-empty required fields.
+`TestRoleSpecsCompleteness` verifies every `RoleId` in `protocol.AllRoleIds` has an entry in `RoleSpecs` with non-empty required fields.
 
 `TestPhaseSpecsNumbering` verifies phase numbers 1–12 with no duplicates.
 

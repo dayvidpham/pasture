@@ -10,6 +10,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen"
 	"github.com/dayvidpham/pasture/internal/testutil"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -95,14 +96,13 @@ func TestGenerateSchema_RootElement(t *testing.T) {
 
 // ─── TestGenerateSchema_ContainsAllRoles ──────────────────────────────────────
 
-// TestGenerateSchema_ContainsAllRoles verifies that all 5 role IDs appear in
-// the generated output. This guards against missing role entries.
+// TestGenerateSchema_ContainsAllRoles verifies that every canonical RoleId
+// appears in the generated output. This guards against missing role entries.
 func TestGenerateSchema_ContainsAllRoles(t *testing.T) {
 	output := generateXML(t)
 
-	expectedRoles := []string{"epoch", "architect", "reviewer", "supervisor", "worker"}
-	for _, role := range expectedRoles {
-		assert.Contains(t, output, `id="`+role+`"`,
+	for _, role := range protocol.AllRoleIds {
+		assert.Contains(t, output, `id="`+string(role)+`"`,
 			"output must contain role with id=%q", role)
 	}
 }

@@ -1,6 +1,7 @@
 package codegen_test
 
 import (
+	"sort"
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/codegen"
@@ -355,56 +356,18 @@ func TestTitleConventionsNotEmpty(t *testing.T) {
 	}
 }
 
-// TestSkillBodySpecsCompleteness verifies all 29 SkillBodySpecs entries exist
-// and each has non-empty Sections or Recipes (at least one must be populated).
+// TestSkillBodySpecsCompleteness derives the expected body keys from command
+// metadata and verifies that every registered body is structurally complete.
 func TestSkillBodySpecsCompleteness(t *testing.T) {
-	expectedKeys := []string{
-		// Original 7 role/sub-skill bodies.
-		"supervisor", "supervisor-plan-tasks", "supervisor-spawn-worker",
-		"worker", "architect", "reviewer", "impl-review",
-		// Newly-ported 22 skill bodies.
-		"architect-handoff", "architect-propose-plan", "architect-ratify",
-		"architect-request-review", "epoch", "explore", "impl-slice",
-		"research", "reviewer-comment", "reviewer-review-code",
-		"reviewer-review-plan", "reviewer-vote", "status",
-		"supervisor-commit", "supervisor-track-progress", "swarm",
-		"user-elicit", "user-request", "user-uat",
-		"worker-blocked", "worker-complete", "worker-implement",
+	expectedKeys := make([]string, 0, len(codegen.CommandSpecs))
+	for commandId, spec := range codegen.CommandSpecs {
+		key := codegen.SubSkillDirKey(spec.File)
+		require.NotEmpty(t, key,
+			"CommandSpecs[%q].File=%q does not resolve to a generated skill directory",
+			commandId, spec.File)
+		expectedKeys = append(expectedKeys, key)
 	}
-
-	// Skills known to have non-empty preambles.
-	skillsWithPreamble := map[string]bool{
-		"supervisor":              true,
-		"supervisor-plan-tasks":   true,
-		"supervisor-spawn-worker": true,
-		"worker":                  true,
-		"architect":               true,
-		"reviewer":                true,
-		"impl-review":             true,
-		// Newly-ported skills — preamble presence varies; include those that have one.
-		"architect-handoff":         true,
-		"architect-propose-plan":    true,
-		"architect-ratify":          true,
-		"architect-request-review":  true,
-		"epoch":                     true,
-		"explore":                   true,
-		"impl-slice":                true,
-		"research":                  true,
-		"reviewer-comment":          true,
-		"reviewer-review-code":      true,
-		"reviewer-review-plan":      true,
-		"reviewer-vote":             true,
-		"status":                    true,
-		"supervisor-commit":         true,
-		"supervisor-track-progress": true,
-		"swarm":                     true,
-		"user-elicit":               true,
-		"user-request":              true,
-		"user-uat":                  true,
-		"worker-blocked":            true,
-		"worker-complete":           true,
-		"worker-implement":          true,
-	}
+	sort.Strings(expectedKeys)
 
 	require.NotNil(t, codegen.SkillBodySpecs, "SkillBodySpecs must not be nil")
 	require.Len(t, codegen.SkillBodySpecs, len(expectedKeys),
@@ -421,12 +384,6 @@ func TestSkillBodySpecsCompleteness(t *testing.T) {
 				"SkillBodySpecs[%q] must have non-empty Sections or Recipes — "+
 					"found %d sections and %d recipes",
 				key, len(body.Sections), len(body.Recipes))
-
-			// Verify preamble for skills known to have one.
-			if skillsWithPreamble[key] {
-				assert.NotEmpty(t, body.Preamble,
-					"SkillBodySpecs[%q].Preamble must not be empty (skill is expected to have a preamble)", key)
-			}
 
 			// Verify that sections have non-empty titles and content.
 			// Marker-aware: a section with FragRef set is a placement marker

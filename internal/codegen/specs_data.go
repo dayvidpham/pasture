@@ -1,12 +1,8 @@
 // Canonical data maps for the Pasture protocol codegen system.
 //
-// These are package-level vars that mirror the Python canonical dicts
-// in aura_protocol/types.py. They are the single source of truth for
-// code generation (schema.xml, SKILL.md, agent definitions).
-//
-// Integration with Python: test_schema_types_sync.py verifies the Python
-// dicts match schema.xml; Go tests in specs_test.go verify Go maps are
-// structurally complete (every RoleId, every PhaseId has an entry).
+// These package-level vars are the sole source of truth for schema.xml and the
+// generated Claude Code/OpenCode skills and agents. Go completeness, registry,
+// and generated-output tests keep the typed inventories synchronized.
 package codegen
 
 import (
@@ -16,8 +12,7 @@ import (
 
 // ─── PhaseSpecs ───────────────────────────────────────────────────────────────
 
-// PhaseSpecs maps each PhaseId to its full specification.
-// Mirrors Python PHASE_SPECS dict.
+// PhaseSpecs maps each canonical PhaseId to its full specification.
 var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 	protocol.PhaseRequest: {
 		Id:         protocol.PhaseRequest,
@@ -199,8 +194,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 
 // ─── ConstraintSpecs ─────────────────────────────────────────────────────────
 
-// ConstraintSpecs maps constraint IDs to their full specifications.
-// Mirrors Python CONSTRAINT_SPECS dict.
+// ConstraintSpecs maps constraint IDs to their canonical specifications.
 var ConstraintSpecs = map[string]ConstraintSpec{
 	"C-audit-never-delete": {
 		Id:        "C-audit-never-delete",
@@ -585,8 +579,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 
 // ─── RoleSpecs ────────────────────────────────────────────────────────────────
 
-// RoleSpecs maps each RoleId to its full specification.
-// Mirrors Python ROLE_SPECS dict.
+// RoleSpecs maps each canonical RoleId to its full specification.
 var RoleSpecs = map[protocol.RoleId]RoleSpec{
 	protocol.RoleEpoch: {
 		Id:          protocol.RoleEpoch,
@@ -829,8 +822,7 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 
 // ─── CommandSpecs ─────────────────────────────────────────────────────────────
 
-// CommandSpecs maps command IDs to their full specifications.
-// Mirrors Python COMMAND_SPECS dict.
+// CommandSpecs maps command IDs to their canonical specifications.
 var CommandSpecs = map[string]CommandSpec{
 	"cmd-epoch": {
 		Id:          "cmd-epoch",
@@ -1114,8 +1106,7 @@ var CommandSpecs = map[string]CommandSpec{
 
 // ─── HandoffSpecs ─────────────────────────────────────────────────────────────
 
-// HandoffSpecs maps handoff IDs to their full specifications.
-// Mirrors Python HANDOFF_SPECS dict.
+// HandoffSpecs maps handoff IDs to their canonical specifications.
 var HandoffSpecs = map[string]HandoffSpec{
 	"h1": {
 		Id:           "h1",
@@ -1187,8 +1178,7 @@ var HandoffSpecs = map[string]HandoffSpec{
 
 // ─── FigureSpecs ──────────────────────────────────────────────────────────────
 
-// FigureSpecs maps figure IDs to their full specifications.
-// Mirrors Python FIGURE_SPECS dict. Content is loaded at generation time.
+// FigureSpecs maps figure IDs to canonical specifications. Content is loaded at generation time.
 var FigureSpecs = map[string]FigureSpec{
 	"layer-cake": {
 		Id:           "layer-cake",
@@ -1220,8 +1210,7 @@ var FigureSpecs = map[string]FigureSpec{
 
 // ─── ChecklistSpecs ───────────────────────────────────────────────────────────
 
-// ChecklistSpecs maps "{role}-{gate}" keys to completion checklists.
-// Mirrors Python CHECKLIST_SPECS dict.
+// ChecklistSpecs maps "{role}-{gate}" keys to canonical completion checklists.
 var ChecklistSpecs = map[string]Checklist{
 	"worker-completion": {
 		RoleRef: protocol.RoleWorker,
@@ -1270,8 +1259,7 @@ var ChecklistSpecs = map[string]Checklist{
 
 // ─── CoordinationCommands ─────────────────────────────────────────────────────
 
-// CoordinationCommands maps command IDs to coordination command specs.
-// Mirrors Python COORDINATION_COMMANDS dict.
+// CoordinationCommands maps command IDs to canonical coordination command specs.
 var CoordinationCommands = map[string]CoordinationCommand{
 	"cmd-coord-show": {
 		Id:       "cmd-coord-show",
@@ -1337,8 +1325,7 @@ var CoordinationCommands = map[string]CoordinationCommand{
 
 // ─── WorkflowSpecs ────────────────────────────────────────────────────────────
 
-// WorkflowSpecs maps workflow IDs to their full specifications.
-// Mirrors Python WORKFLOW_SPECS dict.
+// WorkflowSpecs maps workflow IDs to their canonical specifications.
 var WorkflowSpecs = map[string]Workflow{
 	"ride-the-wave": {
 		Id:      "ride-the-wave",
@@ -1771,8 +1758,7 @@ var WorkflowSpecs = map[string]Workflow{
 
 // ─── ReviewAxisSpecs ──────────────────────────────────────────────────────────
 
-// ReviewAxisSpecs maps axis IDs to their full specifications.
-// Mirrors Python REVIEW_AXIS_SPECS dict.
+// ReviewAxisSpecs maps axis IDs to their canonical specifications.
 var ReviewAxisSpecs = map[string]ReviewAxisSpec{
 	"axis-correctness": {
 		Id:     "axis-correctness",
@@ -1813,8 +1799,7 @@ var ReviewAxisSpecs = map[string]ReviewAxisSpec{
 
 // ─── ProcedureSteps ───────────────────────────────────────────────────────────
 
-// ProcedureSteps maps each RoleId to its ordered startup procedure steps.
-// Mirrors Python PROCEDURE_STEPS dict.
+// ProcedureSteps maps each canonical RoleId to its ordered startup procedure steps.
 var ProcedureSteps = map[protocol.RoleId][]ProcedureStep{
 	protocol.RoleEpoch:     {},
 	protocol.RoleArchitect: {},
@@ -1902,8 +1887,7 @@ var ProcedureSteps = map[protocol.RoleId][]ProcedureStep{
 
 // ─── LabelSpecs ───────────────────────────────────────────────────────────────
 
-// LabelSpecs maps label IDs to their full specifications.
-// Mirrors Python LABEL_SPECS dict.
+// LabelSpecs maps label IDs to their canonical specifications.
 var LabelSpecs = map[string]LabelSpec{
 	"L-p1s1_1":      {Id: "L-p1s1_1", Value: "pasture:p1-user:s1_1-classify", Special: false, PhaseRef: "p1", SubstepRef: "s1_1"},
 	"L-p1s1_2":      {Id: "L-p1s1_2", Value: "pasture:p1-user:s1_2-research", Special: false, PhaseRef: "p1", SubstepRef: "s1_2"},
@@ -1930,9 +1914,7 @@ var LabelSpecs = map[string]LabelSpec{
 
 // ─── TitleConventions ─────────────────────────────────────────────────────────
 
-// TitleConventions is the ordered list of task title naming conventions.
-// Mirrors Python TITLE_CONVENTIONS list.
-// Note: In Go we use a slice (not a map) to preserve order, matching Python.
+// TitleConventions is the canonical ordered list of task title naming conventions.
 var TitleConventions = []TitleConvention{
 	{Pattern: "REQUEST: {description}", LabelRef: "L-p1s1_1", CreatedBy: "epoch,architect", PhaseRef: "p1"},
 	{Pattern: "ELICIT: {description}", LabelRef: "L-p2s2_1", CreatedBy: "architect", PhaseRef: "p2"},
@@ -1991,8 +1973,7 @@ var TitleConventions = []TitleConvention{
 
 // ─── SubstepDataMap ───────────────────────────────────────────────────────────
 
-// SubstepDataMap maps phase ID strings to their ordered substep data.
-// Mirrors Python SUBSTEP_DATA dict.
+// SubstepDataMap maps phase ID strings to their canonical ordered substep data.
 var SubstepDataMap = map[string][]SubstepData{
 	"p1": {
 		{

@@ -273,8 +273,8 @@ func TestNamespaceGuard_ProtocolDocs_NoStrayAuraRefs(t *testing.T) {
 // that the OLD `aura schema` marker has been fully retired from the on-disk
 // surface.
 //
-// Marker-bounded files are those that carry a BEGIN marker (the 29 generated
-// role + sub-skill SKILL.md). Hand-authored, marker-less skills (protocol,
+// Marker-bounded files are registered generated role and command SKILL.md
+// files. Hand-authored, marker-less skills (protocol,
 // install-cli) and the fully-generated agents/*.md are exempt from the
 // pair-intact check but are still scanned for the retired old marker.
 func TestNamespaceGuard_PastureMarkerIntact(t *testing.T) {

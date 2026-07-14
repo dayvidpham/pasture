@@ -12,14 +12,15 @@ roles, ~30 constraints, commands, figures, checklists, and the prose bodies of
 each role/command skill. Those same facts have to appear consistently across the
 shipped protocol schema and two runtime harnesses:
 
-- `schema.xml` — the canonical machine-readable protocol schema;
+- `schema.xml` — the generated machine-readable protocol projection;
 - `skills/<dir>/SKILL.md` and `agents/<role>.md` — Claude Code skills and agents;
 - `.opencode/skill/<dir>/SKILL.md`, `.opencode/agent/<role>.md`, and
   `opencode.json` — OpenCode skills, agents, and manifest.
 
-Hand-maintaining the same facts in three formats guarantees drift: a constraint
-reworded in `schema.xml` but stale in two SKILL.md copies, a phase renamed in one
-place and not the others. Codegen makes the facts **single-source** — declared
+Hand-maintaining the same facts across these outputs guarantees drift: a
+constraint reworded in `schema.xml` but stale in two SKILL.md copies, a phase
+renamed in one place and not the others. Codegen makes the facts
+**single-source** — declared
 once as typed Go values — and renders every harness from them. Registry tests
 reject incomplete inventories, and CI rejects committed generated-output drift.
 
@@ -150,6 +151,16 @@ enforces the invariants codegen depends on:
   requires every generated skill directory to have exactly one metadata entry
   in `CommandSpecs`, one emitter in `roleSkillDirs`/`commandSkillDirs`, and one
   body in `SkillBodySpecs`.
+- **Schema registry parity** — `TestSchemaRegistryParity` requires every
+  `CommandSpecs` entry exactly once in `commandOrder` and every `RoleId` in
+  `ProcedureSteps`, then exact-set compares those inputs with the role, command,
+  and procedure IDs actually emitted into XML; role schema order comes directly
+  from `AllRoleIds`.
+- **Output-set parity** — `TestGeneratedOutputInventory` exact-set compares
+  canonical registry paths, the paths returned by each production harness, and
+  the committed Claude Code/OpenCode trees. It also recognizes root
+  `schema.xml`/`opencode.json` by content, so renamed stale copies and other
+  retired files cannot hide from in-place generation.
 - **Constraint-set exactness** — `context.yaml` pins the exact constraint count
   per role/phase, so adding a constraint without updating the fixture fails
   immediately (drift gate).
@@ -157,9 +168,10 @@ enforces the invariants codegen depends on:
   shape.
 
 The CI **Codegen Drift** job adds the clean-tree guard: it runs `make generate`
-for both committed targets and then `git diff --exit-code`. If it fails, run
-`make generate` locally, inspect the generated-path diff, and commit the intended
-output alongside the source change.
+for both committed targets and then checks `git status --porcelain`. That catches
+modified generated files and newly generated files that were never committed.
+If it fails, run `make generate` locally, inspect the generated-path changes,
+and commit the intended output alongside the source change.
 
 This is why every codegen change in CONTRIBUTING.md ends with "update the
 fixture, then `make generate` + `go test`": the inventories, fixtures, and

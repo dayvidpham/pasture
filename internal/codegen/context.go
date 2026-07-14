@@ -1,7 +1,7 @@
 // Package codegen — context injection for role- and phase-specific constraint prompting.
 //
-// This file ports context_injection.py to Go. It provides static constraint
-// mappings (role → constraint IDs, phase → constraint IDs) and builder
+// This file provides the canonical static constraint mappings (role →
+// constraint IDs, phase → constraint IDs) and builder
 // functions that construct RoleContext and PhaseContext values for use by
 // downstream codegen generators (schema.xml, SKILL.md, agent definitions).
 //
@@ -69,7 +69,6 @@ type PhaseContext struct {
 // These constraints govern universal protocol rules regardless of role/phase.
 
 // generalConstraints holds constraint IDs that apply to every role and every phase.
-// Mirrors Python _GENERAL_CONSTRAINTS frozenset.
 var generalConstraints = map[string]bool{
 	// C-audit-never-delete: "any task or label" when modifying → universal
 	"C-audit-never-delete": true,
@@ -85,7 +84,6 @@ var generalConstraints = map[string]bool{
 
 // ─── Static Role → Constraint ID Mapping ─────────────────────────────────────
 // Hand-authored from ConstraintSpecs given/when text.
-// Mirrors Python _ROLE_CONSTRAINTS dict.
 //
 // Authoring rationale per constraint:
 //   C-audit-never-delete      → ALL (see generalConstraints)
@@ -206,7 +204,6 @@ var roleConstraints = map[protocol.RoleId]map[string]bool{
 
 // ─── Static Phase → Constraint ID Mapping ─────────────────────────────────────
 // Hand-authored from ConstraintSpecs given/when text.
-// Mirrors Python _PHASE_CONSTRAINTS dict.
 //
 // Authoring rationale per constraint:
 //   C-audit-never-delete      → ALL phases (see generalConstraints)
