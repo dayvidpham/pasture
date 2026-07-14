@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 
@@ -479,73 +480,48 @@ func repoRoot(t *testing.T) string {
 	return filepath.Join(filepath.Dir(thisFile), "..", "..")
 }
 
-// ─── Generated-skill enumeration (single source of truth for L3 tables) ──────
+// ─── Generated-skill enumeration ─────────────────────────────────────────────
 
 // idempotentRoleSkill describes one role-level SKILL.md driven through
-// GenerateSkill. These 5 roles are exactly the keys of roleSkillDirs in
-// tools/codegen/main.go; the generator writes them on every `go generate`.
+// GenerateSkill.
 type idempotentRoleSkill struct {
 	name   string
 	roleId protocol.RoleId
 }
 
-// allRoleSkills is the full set of generator-driven role SKILL.md files (5).
-// It mirrors roleSkillDirs in tools/codegen/main.go.
-var allRoleSkills = []idempotentRoleSkill{
-	{name: "supervisor", roleId: protocol.RoleSupervisor},
-	{name: "architect", roleId: protocol.RoleArchitect},
-	{name: "worker", roleId: protocol.RoleWorker},
-	{name: "reviewer", roleId: protocol.RoleReviewer},
-	{name: "epoch", roleId: protocol.RoleEpoch},
-}
-
-// allSubSkillCommandIds is the full set of generator-driven sub-skill command
-// IDs (24). It mirrors commandSkillDirs in tools/codegen/main.go exactly; these
-// are the commands GenerateSubSkill renders on every `go generate`. Each gains
-// YAML frontmatter (name = dir key, description = CommandSpec.Description) above
-// its curated H1 (CommandSpec.Title) per D5/SLICE-3.
-//
-// Together with allRoleSkills (5) this enumerates all 29 generator-managed
-// SKILL.md files. The remaining 2 on-disk skills (protocol, install-cli) are
-// hand-authored and carry no BEGIN/END markers, so they are NOT generated and
-// are intentionally excluded from these tables.
-var allSubSkillCommandIds = []string{
-	"cmd-sup-plan",
-	"cmd-sup-spawn",
-	"cmd-impl-review",
-	"cmd-arch-handoff",
-	"cmd-arch-propose",
-	"cmd-arch-ratify",
-	"cmd-arch-review",
-	"cmd-explore",
-	"cmd-impl-slice",
-	"cmd-research",
-	"cmd-rev-comment",
-	"cmd-rev-code",
-	"cmd-rev-plan",
-	"cmd-rev-vote",
-	"cmd-status",
-	"cmd-sup-commit",
-	"cmd-sup-track",
-	"cmd-swarm",
-	"cmd-user-elicit",
-	"cmd-user-request",
-	"cmd-user-uat",
-	"cmd-work-blocked",
-	"cmd-work-complete",
-	"cmd-work-impl",
+// generatedSkillCases derives idempotence/frontmatter coverage directly from
+// CommandSpecs. TestGeneratedSkillRegistryParity separately proves that this
+// metadata set equals the unexported harness emitters and SkillBodySpecs, so the
+// tests do not maintain a fourth generated-skill inventory.
+func generatedSkillCases(t *testing.T) (roles []idempotentRoleSkill, commandIds []string) {
+	t.Helper()
+	for commandId, spec := range codegen.CommandSpecs {
+		dirKey := codegen.SubSkillDirKey(spec.File)
+		require.NotEmpty(t, dirKey,
+			"generated command %q has an unparseable File %q — expected skills/<dir>/SKILL.md",
+			commandId, spec.File)
+		if dirKey == string(spec.RoleRef) {
+			require.True(t, spec.RoleRef.IsValid(),
+				"role-level command %q has invalid RoleRef %q", commandId, spec.RoleRef)
+			roles = append(roles, idempotentRoleSkill{name: dirKey, roleId: spec.RoleRef})
+			continue
+		}
+		commandIds = append(commandIds, commandId)
+	}
+	sort.Slice(roles, func(i, j int) bool { return roles[i].name < roles[j].name })
+	sort.Strings(commandIds)
+	return roles, commandIds
 }
 
 // subSkillCommand resolves a sub-skill command ID to its CommandSpec, the
 // derived skill directory key (e.g. "user-uat"), and the repo-root-relative
-// SKILL.md path. It t.Fatal()s if the command is unknown so a typo in the table
-// surfaces as a clear failure rather than a silent skip.
+// SKILL.md path.
 func subSkillCommand(t *testing.T, commandId string) (spec codegen.CommandSpec, dirKey, relPath string) {
 	t.Helper()
 	spec, ok := codegen.CommandSpecs[commandId]
 	require.True(t, ok,
 		"sub-skill command %q not found in CommandSpecs — "+
-			"the L3 table in skills_test.go is out of sync with specs_data.go", commandId)
+			"the generated test case is out of sync with specs_data.go", commandId)
 	dirKey = codegen.SubSkillDirKey(spec.File)
 	require.NotEmpty(t, dirKey,
 		"sub-skill command %q has an unparseable File %q — expected skills/<dir>/SKILL.md",
@@ -587,8 +563,8 @@ func parseLeadingFrontmatter(t *testing.T, content, label string) subSkillFrontm
 	return fm
 }
 
-// TestSubSkillFrontmatter verifies the D5/SLICE-3 frontmatter contract for ALL
-// 24 generator-driven sub-skills: generating each from its on-disk SKILL.md
+// TestSubSkillFrontmatter verifies the D5/SLICE-3 frontmatter contract for every
+// registered command sub-skill: generating each from its on-disk SKILL.md
 // produces a leading YAML frontmatter block whose `name` equals the skill
 // directory key AND whose `description` equals CommandSpec.Description. This is
 // what makes each sub-skill register as an invocable /pasture:<name> command.
@@ -596,12 +572,9 @@ func TestSubSkillFrontmatter(t *testing.T) {
 	root := repoRoot(t)
 	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
 	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
+	_, commandIds := generatedSkillCases(t)
 
-	require.Len(t, allSubSkillCommandIds, 24,
-		"expected exactly 24 generator-driven sub-skills (mirrors commandSkillDirs); "+
-			"update the L3 table if the sub-skill set changed")
-
-	for _, commandId := range allSubSkillCommandIds {
+	for _, commandId := range commandIds {
 		commandId := commandId
 		t.Run(commandId, func(t *testing.T) {
 			t.Parallel()
@@ -628,30 +601,21 @@ func TestSubSkillFrontmatter(t *testing.T) {
 // ─── TestAllSkillsFrontmatter ────────────────────────────────────────────────
 
 // TestAllSkillsFrontmatter is a durability regression guard: it reads every
-// skills/*/SKILL.md on disk (the full set of 31) and asserts that each file
+// skills/*/SKILL.md on disk and asserts that each file
 // has a parseable YAML frontmatter block with a non-empty `name` and
 // `description`. This catches any skill silently shipping without frontmatter
 // — a skill without frontmatter does not register as an invocable /pasture:*
 // command in Claude Code.
 //
-// Coverage:
-//   - 5 role skills (supervisor, worker, reviewer, architect, epoch) — generated by
-//     skill.go.tmpl (dropPrefix=true).
-//   - 24 command sub-skills (commandSkillDirs in tools/codegen/main.go) — generated
-//     by skill_sub.go.tmpl (dropPrefix=true, D5/SLICE-3).
-//   - 2 hand-authored skills (protocol, install-cli) — no BEGIN/END markers;
-//     frontmatter is stable and maintained by hand.
-//
-// Total: 31 files, matching the full skills/ tree.
+// Exact generated/hand-authored path-set parity is checked independently by
+// TestGeneratedOutputInventory; this test validates frontmatter for every
+// top-level skill that inventory permits.
 func TestAllSkillsFrontmatter(t *testing.T) {
 	root := repoRoot(t)
 
 	glob := filepath.Join(root, "skills", "*", "SKILL.md")
 	skillFiles, err := filepath.Glob(glob)
 	require.NoError(t, err, "cannot glob %q", glob)
-	require.Len(t, skillFiles, 31,
-		"expected exactly 31 on-disk SKILL.md files; got %d — "+
-			"update this count if skills are added or removed", len(skillFiles))
 
 	for _, abs := range skillFiles {
 		abs := abs
@@ -689,10 +653,9 @@ func TestAllSkillsFrontmatter(t *testing.T) {
 // TestGenerateIdempotent verifies that running the code generator on the
 // checked-in SKILL.md files produces identical output (zero diff).
 //
-// It table-drives ALL 29 generator-managed SKILL.md files (5 roles +
-// 24 sub-skills). The remaining 2 on-disk skills (protocol, install-cli) are
-// hand-authored and marker-less, so they are not generated and not asserted
-// here.
+// It derives every generator-managed SKILL.md from CommandSpecs. Hand-authored,
+// marker-less skills are not generated and are asserted by output-inventory and
+// frontmatter tests instead.
 //
 // If this test fails, it means the code generator output has drifted from
 // the on-disk files — run `go generate ./internal/codegen/...` (or the
@@ -708,10 +671,11 @@ func TestGenerateIdempotent(t *testing.T) {
 			"ensure the test is run from the correct working directory", figuresDir)
 
 	opts := codegen.GenerateOptions{Diff: false, Write: false, Init: false}
+	roleSkills, commandIds := generatedSkillCases(t)
 
-	// ─── Role skills (5) ─────────────────────────────────────────────────
+	// ─── Role skills ─────────────────────────────────────────────────────
 
-	for _, tc := range allRoleSkills {
+	for _, tc := range roleSkills {
 		tc := tc
 		t.Run("role/"+tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -734,9 +698,9 @@ func TestGenerateIdempotent(t *testing.T) {
 		})
 	}
 
-	// ─── Sub-skills (24) ─────────────────────────────────────────────────
+	// ─── Sub-skills ──────────────────────────────────────────────────────
 
-	for _, commandId := range allSubSkillCommandIds {
+	for _, commandId := range commandIds {
 		commandId := commandId
 		t.Run("sub-skill/"+commandId, func(t *testing.T) {
 			t.Parallel()

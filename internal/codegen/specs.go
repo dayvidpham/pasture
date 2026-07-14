@@ -18,7 +18,6 @@ import (
 // ─── Example ──────────────────────────────────────────────────────────────────
 
 // Example is a labeled code example for a constraint or procedure step.
-// Mirrors Python CodeExample dataclass.
 type Example struct {
 	Id              string
 	Lang            string // ExampleLang wire value: "bash", "go", "python", etc.
@@ -30,7 +29,7 @@ type Example struct {
 // ─── ConstraintSpec ───────────────────────────────────────────────────────────
 
 // ConstraintSpec is a single protocol constraint in Given/When/Then/Should-Not
-// format. Mirrors Python ConstraintSpec dataclass.
+// format.
 type ConstraintSpec struct {
 	Id        string
 	Given     string
@@ -45,7 +44,7 @@ type ConstraintSpec struct {
 
 // BehaviorSpec is a role-tactical behavior in Given/When/Then/Should-Not
 // format. Distinct from ConstraintSpec: behaviors are role-specific guidance,
-// not formal protocol constraints. Mirrors Python BehaviorSpec dataclass.
+// not formal protocol constraints.
 //
 // A non-zero FragRef marks this entry as a placement MARKER: all other
 // fields are left zero and the entry is resolved to the SharedFragment payload
@@ -102,7 +101,7 @@ type FragmentId string
 // AllFragmentIds lists every declared FragmentId constant. It is maintained
 // in sync with the constant declarations below and validated by
 // ValidateGlobalIds (parity check: AllFragmentIds ↔ SharedFragmentSpecs keys).
-// Mirrors AllRoleIds in internal/types/enums.go.
+// Mirrors AllRoleIds in pkg/protocol/enums.go.
 var AllFragmentIds = []FragmentId{
 	FragRevVoteOptions,
 	FragSupReviewAllSlices,
@@ -235,7 +234,6 @@ type SkillBody struct {
 // ─── RoleSpec ─────────────────────────────────────────────────────────────────
 
 // RoleSpec is the complete specification for an agent role.
-// Mirrors Python RoleSpec dataclass.
 type RoleSpec struct {
 	Id                 protocol.RoleId
 	Name               string
@@ -252,7 +250,6 @@ type RoleSpec struct {
 // ─── CommandSpec ──────────────────────────────────────────────────────────────
 
 // CommandSpec is the complete specification for a protocol command (skill).
-// Mirrors Python CommandSpec dataclass.
 type CommandSpec struct {
 	Id          string // CommandId wire value e.g. "cmd-worker"
 	Name        string // e.g. "pasture:worker"
@@ -263,8 +260,8 @@ type CommandSpec struct {
 	// that the generator can emit YAML frontmatter ABOVE the heading via
 	// skill_sub.go.tmpl while PRESERVING the hand-authored title verbatim.
 	//
-	// Only sub-skill commands (those listed in commandSkillDirs in
-	// tools/codegen/main.go) need Title populated; role-level commands
+	// Only sub-skill commands (those listed in commandSkillDirs in harness.go)
+	// need Title populated; role-level commands
 	// (cmd-supervisor, cmd-worker, etc.) render through skill.go.tmpl which
 	// derives its H1 from RoleSpec.Name, so their Title is left empty.
 	Title         string
@@ -277,7 +274,6 @@ type CommandSpec struct {
 // ─── Transition ───────────────────────────────────────────────────────────────
 
 // Transition is a single valid phase transition.
-// Mirrors Python Transition dataclass.
 type Transition struct {
 	ToPhase   protocol.PhaseId
 	Condition string
@@ -287,7 +283,6 @@ type Transition struct {
 // ─── PhaseSpec ────────────────────────────────────────────────────────────────
 
 // PhaseSpec is the complete specification for a single protocol phase.
-// Mirrors Python PhaseSpec dataclass.
 type PhaseSpec struct {
 	Id          protocol.PhaseId
 	Name        string
@@ -300,7 +295,6 @@ type PhaseSpec struct {
 // ─── HandoffSpec ──────────────────────────────────────────────────────────────
 
 // HandoffSpec specifies an actor-change transition handoff document.
-// Mirrors Python HandoffSpec dataclass.
 type HandoffSpec struct {
 	Id             string
 	SourceRole     protocol.RoleId
@@ -313,7 +307,6 @@ type HandoffSpec struct {
 // ─── FigureSpec ───────────────────────────────────────────────────────────────
 
 // FigureSpec is a figure specification (ASCII diagram or other visual).
-// Mirrors Python Figure dataclass.
 type FigureSpec struct {
 	Id           string // FigureId wire value
 	Title        string
@@ -328,7 +321,6 @@ type FigureSpec struct {
 // ─── ChecklistItem ────────────────────────────────────────────────────────────
 
 // ChecklistItem is a single item in a completion checklist.
-// Mirrors Python ChecklistItem dataclass.
 type ChecklistItem struct {
 	Id       string
 	Text     string
@@ -338,7 +330,7 @@ type ChecklistItem struct {
 // ─── Checklist ────────────────────────────────────────────────────────────────
 
 // Checklist is a completion checklist for a role at a specific quality gate.
-// Keyed in ChecklistSpecs by "{role}-{gate}". Mirrors Python Checklist dataclass.
+// Keyed in ChecklistSpecs by "{role}-{gate}".
 type Checklist struct {
 	Gate    string // GateType wire value: "completion", "slice-closure", etc.
 	RoleRef protocol.RoleId
@@ -348,7 +340,7 @@ type Checklist struct {
 // ─── CoordinationCommand ─────────────────────────────────────────────────────
 
 // CoordinationCommand is a coordination command for inter-agent communication
-// via Beads. Mirrors Python CoordinationCommand dataclass.
+// via Beads.
 type CoordinationCommand struct {
 	Id       string
 	Action   string
@@ -360,7 +352,6 @@ type CoordinationCommand struct {
 // ─── WorkflowAction ───────────────────────────────────────────────────────────
 
 // WorkflowAction is a single action within a workflow stage.
-// Mirrors Python WorkflowAction dataclass.
 type WorkflowAction struct {
 	Id          string
 	Instruction string
@@ -371,7 +362,6 @@ type WorkflowAction struct {
 
 // ExitCondition is an exit condition for a workflow stage.
 // Type must be one of the ExitConditionType wire values.
-// Mirrors Python ExitCondition dataclass.
 type ExitCondition struct {
 	Type      string // ExitConditionType: "success", "continue", "escalate", "proceed"
 	Condition string
@@ -380,7 +370,6 @@ type ExitCondition struct {
 // ─── WorkflowStage ────────────────────────────────────────────────────────────
 
 // WorkflowStage is a single stage in an agent workflow.
-// Mirrors Python WorkflowStage dataclass.
 type WorkflowStage struct {
 	Id                string
 	Name              string
@@ -395,7 +384,7 @@ type WorkflowStage struct {
 // ─── Workflow ─────────────────────────────────────────────────────────────────
 
 // Workflow is a complete workflow specification for an agent role.
-// Keyed in WorkflowSpecs by workflow id. Mirrors Python Workflow dataclass.
+// Keyed in WorkflowSpecs by workflow id.
 type Workflow struct {
 	Id          string
 	Name        string
@@ -407,7 +396,6 @@ type Workflow struct {
 // ─── ReviewAxisSpec ───────────────────────────────────────────────────────────
 
 // ReviewAxisSpec is the complete specification for a code review axis.
-// Mirrors Python ReviewAxisSpec dataclass.
 type ReviewAxisSpec struct {
 	Id           string
 	Letter       string // ReviewAxis wire value: "correctness", "test_quality", "elegance"
@@ -419,7 +407,6 @@ type ReviewAxisSpec struct {
 // ─── ProcedureStep ────────────────────────────────────────────────────────────
 
 // ProcedureStep is a single step in a role's startup or operational procedure.
-// Mirrors Python ProcedureStep dataclass.
 type ProcedureStep struct {
 	Id          string
 	Order       int
@@ -433,7 +420,6 @@ type ProcedureStep struct {
 // ─── LabelSpec ────────────────────────────────────────────────────────────────
 
 // LabelSpec is the complete specification for a protocol label.
-// Mirrors Python LabelSpec dataclass.
 type LabelSpec struct {
 	Id          string
 	Value       string // the actual label string e.g. "pasture:p9-impl:s9-slice"
@@ -447,7 +433,6 @@ type LabelSpec struct {
 // ─── TitleConvention ─────────────────────────────────────────────────────────
 
 // TitleConvention is a task title naming convention for a phase/substep type.
-// Mirrors Python TitleConvention dataclass.
 type TitleConvention struct {
 	Pattern       string
 	LabelRef      string

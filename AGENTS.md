@@ -474,83 +474,40 @@ When debugging "where am I in this workflow?", the layers map cleanly:
 > Pipeline architecture + data-flow diagram: [docs/codegen.md](docs/codegen.md).
 > Step-by-step change recipes: [CONTRIBUTING.md](CONTRIBUTING.md).
 
-The skill bodies in `skills/*/SKILL.md` are *generated at build time* from
-the protocol schema. The generators live in two places:
+Pasture's typed Go codegen is the sole authority for generated protocol skills
+and agents. Generation is explicit: run `make generate`; ordinary builds do not
+rewrite repository files. The canonical command emits both supported harnesses:
 
-- `scripts/aura_protocol/gen_skills.py` (the original Python generator, in
-  the parent `aura-plugins/` repo) — **frozen / deprecated**
-- `pasture/internal/codegen/skills.go` (the Go port) — **canonical / authoritative**
+- Claude Code: all registered skills under `skills/` and every tool-bearing role
+  agent under `agents/`.
+- OpenCode: the corresponding generated skills under `.opencode/skill/`, role
+  agents under `.opencode/agent/`, plus `opencode.json`.
+- The hand-authored `protocol` and `install-cli` skills are copied verbatim into
+  the OpenCode target and are intentionally outside the generated-skill
+  registry.
 
-#### SKILL.md generation authority (audit `aura-plugins-5wbhm` — verdict: `qualified`)
+The source inventory is deliberately static and explicit:
 
-**Verdict:** Go (`pasture/internal/codegen/skills.go`) is the authoritative
-SKILL.md generation pipeline — *qualified* because that authority has been
-verified only across the **8 overlapping skills**; the remaining **29
-Python-only skills** are not yet ported (tracked by
-[`aura-plugins-x5071`](beads://aura-plugins-x5071)).
+- `specs_data.go` owns command, role, phase, constraint, figure, checklist, and
+  workflow metadata.
+- Each generated skill body is declared in exactly one
+  `specs_data_body_<skill>.go` file.
+- `specs_data_body.go` is the slim `SkillBodySpecs` registry; do not replace it
+  with `init()` registration or reflection.
+- `harness.go` owns the role and command emitter maps and target routing.
 
-**Verified-8 (Go authoritative, content-current):**
+Registry tests require every generated skill directory to have exactly one
+`CommandSpecs` metadata owner, one harness emitter, one `SkillBodySpecs` entry,
+and one schema-order entry; roles likewise stay aligned with procedure steps.
+`TestGeneratedOutputInventory` rejects retired files left behind by in-place
+generation. The CI `Codegen Drift` job runs the all-target generator on a clean
+checkout and rejects modified or newly created output. A source change that
+affects output must therefore commit the regenerated files—and explicitly remove
+retired files—in the same change.
 
-Diff lines are from the 2026-05-24 migration-doc inventory (both generators run
-on a clean tree). Three buckets map to the "ahead-of or at-parity" predicate:
-
-| Skill | Diff lines (2026-05-24) | Content currency | Nature |
-|---|---:|---|---|
-| `architect` | 56 | at-parity (structural) | Sort order, heading text, label placement — structural template difference; each side current w.r.t. its own template |
-| `impl-review` | 25 | Go genuinely ahead | Go has full schema-driven body; Python frozen at 2026-02-23 hand-authored version (no template on Python side) |
-| `reviewer` | 30 | at-parity (structural) | Sort order, heading patterns — structural template difference |
-| `supervisor` | 208 | Go genuinely ahead | Go embeds Stage-3 ASCII flow diagram in generated block; Python retains a hand-authored `## Ride the Wave (Rewritten)` tail outside `END GENERATED` (decision pending per migration doc) |
-| `supervisor-plan-tasks` | 27 | at-parity (structural) | Heading order, marker position — structural template difference |
-| `supervisor-spawn-worker` | 33 | at-parity (structural) | Same shape as supervisor-plan-tasks |
-| `worker` | 49 | Go genuinely ahead | Go has expanded verify step (`B-worker-verify-production` bullet), current `worker-slices` phase IDs; Python has hand-authored tail outside `END GENERATED` (Planning Backwards / TDD sections); structural drift in sort order |
-| `protocol` | 0 | exact parity | In sync — 0-diff still counts as verified per audit UAT |
-
-Key evidence: the 2026-05-24 regenerator run (both generators run on a clean
-tree) produced **0 changes** for Go regen (`pasture/skills/` already in sync
-with Go template output), confirming `pasture/skills/` is the canonical
-current output. Python regen modified only `supervisor` (4 lines — wording
-change), leaving all other Python skills behind the Go output.
-
-**Note (7→8 off-by-one):** The user's original reworded claim said "7 skills";
-the Phase-5 UAT resolved this as an off-by-one: `protocol` (0-diff/in-sync)
-is the 8th overlapping skill and counts as verified. Residual
-[`aura-plugins-acroy`](beads://aura-plugins-acroy) tracks the doc/ROADMAP
-phrasing correction.
-
-**22 Python-only SKILL.md-bearing skills (not yet ported — `x5071` scope):**
-
-`architect-handoff`, `architect-propose-plan`, `architect-ratify`,
-`architect-request-review`, `epoch`, `explore`, `impl-slice`, `research`,
-`reviewer-comment`, `reviewer-review-code`, `reviewer-review-plan`,
-`reviewer-vote`, `status`, `supervisor-commit`, `supervisor-track-progress`,
-`swarm`, `user-elicit`, `user-request`, `user-uat`, `worker-blocked`,
-`worker-complete`, `worker-implement`.
-
-These 22 exist only under `aura-plugins/skills/` and continue to use the
-Python pipeline as reference; no immediate action required until ported.
-
-Note: `feedback`, `msg-ack`, `msg-broadcast`, `msg-receive`, `msg-send`,
-`plan`, `test` were deregistered (SKILL.md deleted); they are no longer
-tracked here.
-
-**Count reconciliation (22, previously 29):**
-- `aura-plugins/skills/` has 31 directories with SKILL.md (7 deleted).
-- Overlapping (both homes have SKILL.md): 8 (unchanged).
-- Python-only with SKILL.md: 31 − 8 = **22** (was 37 − 8 = 29 before deletions).
-- CI check for the 8 overlapping skills: tracked by
-  [`aura-plugins-g8egz`](beads://aura-plugins-g8egz) (not yet filed as a
-  working CI rule; filed as a follow-up task).
-
-**Pasture-only skill (1):** `pasture/skills/install-cli/` — the Claude Code
-skill installer. No Python counterpart.
-
-The runtime equivalent — "load the right phase-context into a Claude session
-when the workflow is at phase X" — is **not** a separate Go layer. The
-context is loaded implicitly: the user (or a future SessionStart hook —
-tracked as [`aura-plugins-oo359`](beads://aura-plugins-oo359)) invokes the
-matching `/aura:*` skill for the current phase; Claude Code loads the
-generated SKILL.md into the session context. Temporal answers the *where*
-(via SAs); the skill system supplies the *what to do here*.
+At runtime, harnesses load the generated skill matching the current command or
+role. Durable workflow state determines where execution is; the generated skill
+supplies the instructions for what to do there.
 
 ## Nix
 

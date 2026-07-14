@@ -37,12 +37,12 @@ func splitFrontmatter(t *testing.T, path, content string) (frontmatter string, b
 	return rest[:end], rest[end+len("\n---\n"):]
 }
 
-// TestOpenCodeSkillsEmitTwentyNine renders the OpenCode harness into an isolated
-// temp tree and asserts the full emission contract for SLICE-2:
-//   - exactly 29 SKILL.md files under .opencode/skill/<dir>/ (5 roles + 24 commands),
+// TestOpenCodeSkillsEmitRegisteredInventory renders the OpenCode harness into an
+// isolated temp tree and asserts the full registered-skill emission contract:
+//   - one SKILL.md under .opencode/skill/<dir>/ for every harness emitter,
 //   - each carries valid name (== dir) + non-empty description frontmatter,
 //   - none carries the Claude-only `skills:` list or the agent-only tools:/model: keys.
-func TestOpenCodeSkillsEmitTwentyNine(t *testing.T) {
+func TestOpenCodeSkillsEmitRegisteredInventory(t *testing.T) {
 	t.Parallel()
 
 	root := testModuleRoot(t)
@@ -83,11 +83,6 @@ func TestOpenCodeSkillsEmitTwentyNine(t *testing.T) {
 	}
 	for _, item := range commandSkillItems() {
 		expectedDirs = append(expectedDirs, item.dir)
-	}
-	const wantRoles, wantCommands = 5, 24
-	if len(expectedDirs) != wantRoles+wantCommands {
-		t.Fatalf("expected %d skill dirs (%d roles + %d commands), enumerated %d",
-			wantRoles+wantCommands, wantRoles, wantCommands, len(expectedDirs))
 	}
 	if len(skillByDir) != len(expectedDirs) {
 		t.Fatalf("EmitHarness(%s) emitted %d SKILL.md under .opencode/skill/, want %d",
@@ -142,7 +137,7 @@ func TestOpenCodeSkillsEmitTwentyNine(t *testing.T) {
 // templates/_skill_body.go.tmpl and templates/_skill_sub_body.go.tmpl. Body
 // parity is therefore structural (define-once), not asserted dynamically. The
 // only remaining template difference is the frontmatter, which
-// TestOpenCodeSkillsEmitTwentyNine validates (name/description present; the
+// TestOpenCodeSkillsEmitRegisteredInventory validates (name/description present; the
 // Claude-only `skills:` list and agent-only tools:/model: keys absent).
 
 // TestOpenCodeSkillWritesToDisk asserts the OpenCode skill emission actually

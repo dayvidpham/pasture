@@ -1,20 +1,13 @@
-// Command codegen is the go:generate entry point for the pasture codegen system.
+// Command codegen is the generation entry point for the Pasture protocol.
+// The canonical `make generate` command invokes the go:generate directive in
+// internal/codegen/codegen.go, which selects both registered harness targets:
 //
-// It is invoked by:
+//	go run ../../tools/codegen --targets claude-code,opencode
 //
-//	go generate ./internal/codegen/...
-//
-// which runs:
-//
-//	go run ../../tools/codegen
-//
-// from the internal/codegen/ package directory.
-//
-// This binary wires all three generators:
-//  1. GenerateSchemaToFile — writes schema.xml
-//  2. GenerateSkill — writes skills/{role}/SKILL.md headers (marker-bounded)
-//  3. GenerateSubSkill — writes skills/{dir}/SKILL.md sub-skill headers
-//  4. GenerateAgent — writes agents/{role}.md definitions (fully generated)
+// The tool writes schema.xml once, then emits each selected harness's skills,
+// agents, verbatim skill copies, and manifest. Direct invocations may use
+// --targets for focused generator development, but repository validation uses
+// the canonical all-target command.
 //
 // Exits non-zero if any generator returns an error.
 package main

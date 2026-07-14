@@ -135,21 +135,26 @@ The local `pasture` CLI hosts task verbs (`task create / show / update / close /
 
 ## Code Generation
 
-The skill files (`skills/*/SKILL.md`), agent definitions (`agents/*.md`), and the
-protocol `schema.xml` are **generated**, not hand-maintained. The protocol facts
-(phases, roles, constraints, commands, figures, skill bodies) are declared once as
-typed Go values in `internal/codegen/` and rendered into all three artefacts, so
-they can never drift out of sync.
+The protocol `schema.xml`, registered skills, and tool-bearing role agents are
+**generated**, not hand-maintained. Protocol facts (phases, roles, constraints,
+commands, figures, and skill bodies) are declared once as typed Go values in
+`internal/codegen/` and rendered for both Claude Code and OpenCode. The
+hand-authored `protocol` and `install-cli` skills sit outside that generated
+registry and are copied verbatim into the OpenCode target.
 
 ```bash
-go generate ./internal/codegen/...   # regenerate schema.xml + skills/ + agents/
-go test ./internal/codegen/...       # completeness + sync guards
+make generate                        # regenerate every committed target
+go test ./internal/codegen/...       # completeness, parity, and sync guards
 ```
 
-The data flows `specs_data*.go` (source of truth) → `tools/codegen` (4 stages) →
-`schema.xml` + `skills/<dir>/SKILL.md` + `agents/<role>.md`. SKILL.md files keep
-a hand-authored tail below a `<!-- END GENERATED ... -->` marker that the
-generator preserves.
+The data flows from `specs_data*.go` through `tools/codegen` to `schema.xml`,
+the Claude Code trees (`skills/`, `agents/`), and the OpenCode trees
+(`.opencode/skill/`, `.opencode/agent/`, `opencode.json`). For registered Claude
+Code skills, the generator owns the complete content through the END marker;
+maintained body prose belongs in `specs_data_body_<skill>.go`, not below that
+marker. CI regenerates all targets on a clean checkout and fails on any resulting
+worktree change; an exact output-inventory test also rejects retired files that
+in-place generation cannot remove.
 
 - **Architecture + data-flow diagram:** [docs/codegen.md](docs/codegen.md)
 - **How to add a constraint / role / phase / section / command:** [CONTRIBUTING.md](CONTRIBUTING.md)

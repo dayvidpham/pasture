@@ -9,19 +9,20 @@ recipes, see [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 The Pasture Protocol is a body of structured facts: 12 phases, a handful of
 roles, ~30 constraints, commands, figures, checklists, and the prose bodies of
-each role/command skill. Those same facts have to appear, consistently, in
-**three** different shipped artefacts:
+each role/command skill. Those same facts have to appear consistently across the
+shipped protocol schema and two runtime harnesses:
 
-- `schema.xml` — the canonical machine-readable protocol schema;
-- `skills/<dir>/SKILL.md` — the Claude Code skill files agents load at runtime;
-- `agents/<role>.md` — the Claude Code agent definitions.
+- `schema.xml` — the generated machine-readable protocol projection;
+- `skills/<dir>/SKILL.md` and `agents/<role>.md` — Claude Code skills and agents;
+- `.opencode/skill/<dir>/SKILL.md`, `.opencode/agent/<role>.md`, and
+  `opencode.json` — OpenCode skills, agents, and manifest.
 
-Hand-maintaining the same facts in three formats guarantees drift: a constraint
-reworded in `schema.xml` but stale in two SKILL.md copies, a phase renamed in one
-place and not the others. Codegen makes the facts **single-source** — declared
-once as typed Go values — and renders all three artefacts from them. Drift
-becomes impossible by construction, and a test suite asserts the data is
-complete and the outputs are in sync.
+Hand-maintaining the same facts across these outputs guarantees drift: a
+constraint reworded in `schema.xml` but stale in two SKILL.md copies, a phase
+renamed in one place and not the others. Codegen makes the facts
+**single-source** — declared
+once as typed Go values — and renders every harness from them. Registry tests
+reject incomplete inventories, and CI rejects committed generated-output drift.
 
 A second reason it is **typed Go** rather than a data file (YAML/JSON): the specs
 are validated by the Go compiler and by completeness tests (every `RoleId` has a
@@ -36,71 +37,74 @@ those compile-time and exact-count guarantees — which is the whole point.
    ─────────────────────────                 ─────────                 ─────────────────
 
    internal/codegen/
-     specs_data.go ............ phases, roles, constraints,
-     specs_data_body*.go ...... commands, figures, checklists,
-     specs_data_fragments.go .. skill-body prose, shared fragments
+     specs_data.go ............ phases, roles, constraints, commands,
+                                figures, checklists, workflows
+     specs_data_body.go ....... explicit SkillBodySpecs registry
+     specs_data_body_<skill>.go one generated skill body per file
+     specs_data_fragments.go .. shared prose/behaviour fragments
      context.go ............... role↔constraint, phase↔constraint maps
             │
-            │   go generate ./internal/codegen/...
-            │   (runs `go run ../../tools/codegen`, see codegen.go)
+            │   make generate
+            │   (runs both claude-code and opencode; see codegen.go)
             ▼
    ┌─────────────────────────────────────────────────┐
-   │  tools/codegen/main.go — 4 stages, in order       │
+   │  tools/codegen/main.go                            │
    ├─────────────────────────────────────────────────┤
-   │  1. GenerateSchemaToFile ───────────────────────►  schema.xml          (root; full overwrite)
-   │  2. GenerateSkill        ───────────────────────►  skills/<role>/SKILL.md   (marker-bounded)
-   │       for each role in roleSkillDirs               │
-   │  3. GenerateSubSkill     ───────────────────────►  skills/<dir>/SKILL.md    (marker-bounded)
-   │       for each command in commandSkillDirs         │
-   │  4. GenerateAgent        ───────────────────────►  agents/<role>.md     (full overwrite)
-   │       for each role with non-empty Tools           │
+   │  GenerateSchemaToFile ──────────────────────────► schema.xml
+   │  EmitHarness(claude-code) ──────────────────────► skills/, agents/
+   │  EmitHarness(opencode) ─────────────────────────► .opencode/, opencode.json
    └─────────────────────────────────────────────────┘
             │
             ▼
-   go test ./internal/codegen/...   (YAML-fixture tests assert completeness + sync)
+   go test ./internal/codegen/...   (registry, fixture, and sync guards)
+   CI Codegen Drift                 (clean-tree all-target regeneration)
 ```
 
-The single command, run from anywhere in the module:
+The canonical command, run from the module root:
 
 ```bash
-go generate ./internal/codegen/...
+make generate
 ```
 
-It locates the module root by walking up to `go.mod`, then runs the four stages
-above. Each stage prints what it wrote (and a unified diff for `schema.xml` if it
-changed). Nothing else triggers generation — there is one entry point.
+`make generate` invokes `go generate ./internal/codegen/...`; the directive
+selects both registered targets. The tool locates the module root by walking up
+to `go.mod`, then emits the schema and each harness. Each emitter prints what it
+wrote (and a unified diff for `schema.xml` if it changed). Ordinary builds do not
+trigger generation.
 
-## The four stages
+## Core emitters
 
 | # | Function | Output | Overwrite model |
 |---|----------|--------|-----------------|
 | 1 | `GenerateSchemaToFile` | `schema.xml` (17 sections) | full file |
-| 2 | `GenerateSkill` | `skills/<role>/SKILL.md` | **marker-bounded** (header + body) |
-| 3 | `GenerateSubSkill` | `skills/<dir>/SKILL.md` (commands) | **marker-bounded** |
-| 4 | `GenerateAgent` | `agents/<role>.md` | full file |
+| 2 | role-skill renderer | Claude Code and OpenCode role skills | marker merge for Claude Code; full file for OpenCode |
+| 3 | command-skill renderer | Claude Code and OpenCode command skills | marker merge for Claude Code; full file for OpenCode |
+| 4 | agent emitters | Claude Code and OpenCode role agents | full file |
 
-Stages 2–3 render `templates/skill.go.tmpl` / `templates/skill_sub.go.tmpl`;
-stage 4 renders `templates/agent_definition.go.tmpl`. All three templates pull
-their data from the spec maps via context structs assembled in `skills.go` /
-`agents.go`.
+Role and command emitters select the target-specific templates registered in
+`harness.go`; agent emitters do the same for their harness. Every template pulls
+from context structs assembled in `skills.go` / `agents.go`.
 
-## The marker-region model (SKILL.md only)
+## The marker-region model (Claude Code generated skills only)
 
-Agent and schema files are **fully generated** — the generator owns the whole
-file. SKILL.md files are different: they have a **generated header/body region
-plus a hand-authored tail**. The generator only rewrites the region between:
+Schema, agent, and OpenCode files are **fully generated**. Claude Code generated
+skills are seeded with a BEGIN/END marker pair so the generator can safely take
+ownership of their frontmatter, heading, and body:
 
 ```
 <!-- BEGIN GENERATED FROM pasture schema -->
    ... generated content (replaced on every run) ...
 <!-- END GENERATED FROM pasture schema -->
-   ... hand-authored prose below the END marker is preserved verbatim ...
 ```
 
-`ReplaceMarkerRegion` (see `markers.go`) swaps only the inside of the markers, so
-contributors can keep human-written guidance after the END marker without it
-being clobbered by `go generate`. A new role/command skill must be created with
-at least an empty BEGIN/END marker pair before its first generation.
+The low-level `ReplaceMarkerRegion` helper preserves a trailing region for its
+generic marker-manipulation callers. `GenerateSkill` and `GenerateSubSkill` are
+stricter: every registered skill has a `SkillBodySpecs` entry, so these public
+generators render the complete body inside the markers and remove anything
+after the END marker. Put maintained prose in that skill's
+`specs_data_body_<skill>.go` declaration, not in an on-disk tail. A new Claude
+Code role/command skill must have an empty marker pair before first generation;
+the OpenCode target needs no seed file.
 
 After rendering, `ValidateSkillStructure` parses the result with goldmark and
 fails on malformed heading hierarchy (duplicate H2 titles, orphan H3s), so a
@@ -111,12 +115,14 @@ broken template can't ship a malformed skill.
 | File | Holds |
 |------|-------|
 | `internal/codegen/specs_data.go` | the canonical maps: `PhaseSpecs`, `RoleSpecs`, `ConstraintSpecs`, `CommandSpecs`, `FigureSpecs`, `ChecklistSpecs`, `WorkflowSpecs`, … |
-| `internal/codegen/specs_data_body*.go` | `SkillBodySpecs` — the prose body of each skill (one file per skill body) |
+| `internal/codegen/specs_data_body.go` | the explicit `SkillBodySpecs` registry |
+| `internal/codegen/specs_data_body_<skill>.go` | one generated skill's prose body declaration |
 | `internal/codegen/specs_data_fragments.go` | `SharedFragmentSpecs` — prose/behaviour fragments reused across skill bodies by ID |
 | `internal/codegen/context.go` | `roleConstraints` / `phaseConstraints` — which constraints attach to which roles/phases |
 | `internal/codegen/specs.go` | the Go struct definitions for every spec type + `AllFragmentIds` |
-| `internal/codegen/templates/*.go.tmpl` | the three output templates |
-| `tools/codegen/main.go` | the `go:generate` entry point; `roleSkillDirs` + `commandSkillDirs` decide which skills get generated |
+| `internal/codegen/templates/*.go.tmpl` | target-specific skill and agent output templates |
+| `internal/codegen/harness.go` | harness registry, target routing, and the `roleSkillDirs` + `commandSkillDirs` emitter inventories |
+| `tools/codegen/main.go` | thin CLI entry point that resolves target flags and invokes schema/harness generation |
 
 ## Define-once, reference-by-ID
 
@@ -141,14 +147,35 @@ enforces the invariants codegen depends on:
 
 - **Completeness** — every `RoleId`/`PhaseId` has a spec with non-empty required
   fields; phase numbers are unique (1–12).
+- **Generated-skill registry parity** — `TestGeneratedSkillRegistryParity`
+  requires every generated skill directory to have exactly one metadata entry
+  in `CommandSpecs`, one emitter in `roleSkillDirs`/`commandSkillDirs`, and one
+  body in `SkillBodySpecs`.
+- **Schema registry parity** — `TestSchemaRegistryParity` requires every
+  `CommandSpecs` entry exactly once in `commandOrder` and every `RoleId` in
+  `ProcedureSteps`, then exact-set compares those inputs with the role, command,
+  and procedure IDs actually emitted into XML; role schema order comes directly
+  from `AllRoleIds`.
+- **Output-set parity** — `TestGeneratedOutputInventory` exact-set compares
+  canonical registry paths, the paths returned by each production harness, and
+  the committed Claude Code/OpenCode trees. It also recognizes root
+  `schema.xml`/`opencode.json` by content, so renamed stale copies and other
+  retired files cannot hide from in-place generation.
 - **Constraint-set exactness** — `context.yaml` pins the exact constraint count
   per role/phase, so adding a constraint without updating the fixture fails
   immediately (drift gate).
 - **Output sync** — schema/skill/agent generation fixtures assert the rendered
   shape.
 
+The CI **Codegen Drift** job adds the clean-tree guard: it runs `make generate`
+for both committed targets and then checks `git status --porcelain`. That catches
+modified generated files and newly generated files that were never committed.
+If it fails, run `make generate` locally, inspect the generated-path changes,
+and commit the intended output alongside the source change.
+
 This is why every codegen change in CONTRIBUTING.md ends with "update the
-fixture, then `go generate` + `go test`": the fixtures are the contract.
+fixture, then `make generate` + `go test`": the inventories, fixtures, and
+committed outputs are the contract.
 
 ## See also
 

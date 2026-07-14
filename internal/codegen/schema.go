@@ -1,10 +1,11 @@
 // Package codegen — schema.xml generation.
 //
-// This file ports gen_schema.py to Go. It generates schema.xml from
-// the canonical Go spec data maps (ConstraintSpecs, PhaseSpecs, etc.)
+// This file generates schema.xml from the canonical Go spec data maps
+// (ConstraintSpecs, PhaseSpecs, etc.). It was originally ported from the
+// retired Python generator and preserves that output's stable XML layout
 // using manual XML building (bytes.Buffer + fmt.Fprintf) to achieve
 // CDATA sections for <code> elements and fine-grained indentation
-// control matching the Python output.
+// control.
 //
 // 15 of 17 section builders use encoding/xml struct marshalling (SLICE-B).
 // The remaining 2 (buildConstraints, buildProcedureSteps) use manual
@@ -50,15 +51,8 @@ func marshalSection(buf *bytes.Buffer, depth int, v interface{}) {
 
 // ─── Constraint role/phase ref helpers ────────────────────────────────────────
 
-// rolePriority is the canonical sort order for role-ref attributes on
-// <constraint> elements. Mirrors Python _ROLE_PRIORITY.
-var rolePriority = []protocol.RoleId{
-	protocol.RoleEpoch, protocol.RoleReviewer, protocol.RoleArchitect,
-	protocol.RoleSupervisor, protocol.RoleWorker,
-}
-
 // phaseOrder is the canonical sort order for phase-ref attributes on
-// <constraint> elements. Mirrors Python _PHASE_ORDER.
+// <constraint> elements.
 var phaseOrder = []protocol.PhaseId{
 	protocol.PhaseRequest, protocol.PhaseElicit, protocol.PhasePropose,
 	protocol.PhaseReview, protocol.PhasePlanReview, protocol.PhaseRatify,
@@ -68,7 +62,6 @@ var phaseOrder = []protocol.PhaseId{
 
 // constraintRoleRef returns the comma-separated role-ref string for the
 // given constraint ID, or "" if the constraint is general (all roles).
-// Mirrors Python _build_constraint_role_refs.
 func constraintRoleRef(cid string) string {
 	if generalConstraints[cid] {
 		return "" // general constraint → omit role-ref
@@ -78,13 +71,11 @@ func constraintRoleRef(cid string) string {
 	if !ok || len(roles) == 0 {
 		return ""
 	}
-	// Sort by rolePriority order.
-	priorityIdx := make(map[protocol.RoleId]int, len(rolePriority))
-	for i, r := range rolePriority {
-		priorityIdx[r] = i
-	}
+	// Sort by the schema's historical role-ref order. Reviewer precedes
+	// architect for byte compatibility; every other role follows AllRoleIds,
+	// so adding a role does not require another inventory update.
 	sort.Slice(roles, func(i, j int) bool {
-		pi, pj := priorityIdx[roles[i]], priorityIdx[roles[j]]
+		pi, pj := constraintRolePriority(roles[i]), constraintRolePriority(roles[j])
 		return pi < pj
 	})
 	parts := make([]string, len(roles))
@@ -94,9 +85,26 @@ func constraintRoleRef(cid string) string {
 	return strings.Join(parts, ",")
 }
 
+func constraintRolePriority(role protocol.RoleId) int {
+	for i, candidate := range protocol.AllRoleIds {
+		// schema.xml historically places reviewer before architect while the
+		// protocol's canonical role order does the reverse. Swap only that pair;
+		// every new role otherwise keeps its AllRoleIds position automatically.
+		switch candidate {
+		case protocol.RoleArchitect:
+			candidate = protocol.RoleReviewer
+		case protocol.RoleReviewer:
+			candidate = protocol.RoleArchitect
+		}
+		if candidate == role {
+			return i
+		}
+	}
+	return len(protocol.AllRoleIds)
+}
+
 // constraintPhaseRef returns the comma-separated phase-ref string for the
 // given constraint ID, or "" if the constraint applies to all phases.
-// Mirrors Python _build_constraint_phase_refs.
 func constraintPhaseRef(cid string) string {
 	if generalConstraints[cid] {
 		return "" // general constraint → omit phase-ref
@@ -172,7 +180,6 @@ func indent(depth int) string {
 }
 
 // sectionComment returns a section divider comment string.
-// Mirrors Python _section_comment.
 func sectionComment(title string, depth int) string {
 	bar := strings.Repeat("═", 71)
 	return fmt.Sprintf("%s<!-- %s\n%s     %s\n%s     %s -->",
@@ -345,7 +352,6 @@ func buildReviewAxes(buf *bytes.Buffer, depth int) {
 }
 
 // phaseDescriptions maps phase ID strings to their description text.
-// Mirrors the inline dict in Python _build_phases.
 var phaseDescriptions = map[string]string{
 	"p1":  "Capture, classify, research, and explore user request",
 	"p2":  "User Requirements Elicitation survey and URD creation",
@@ -369,7 +375,6 @@ var p7SkillInvocation = map[string]string{
 }
 
 // buildPhaseTaskTitles derives per-phase task-title hints from TitleConventions.
-// Mirrors Python _build_phase_task_titles.
 func buildPhaseTaskTitles() map[string][]map[string]string {
 	byPhase := make(map[string][]TitleConvention)
 	for _, tc := range TitleConventions {
@@ -614,14 +619,9 @@ var roleUsesAxes = map[string][]string{
 }
 
 func buildRoles(buf *bytes.Buffer, depth int) {
-	roleOrder := []protocol.RoleId{
-		protocol.RoleEpoch, protocol.RoleArchitect, protocol.RoleReviewer,
-		protocol.RoleSupervisor, protocol.RoleWorker,
-	}
-
 	section := RolesSection{}
 
-	for _, roleId := range roleOrder {
+	for _, roleId := range protocol.AllRoleIds {
 		spec, ok := RoleSpecs[roleId]
 		if !ok {
 			continue
@@ -715,10 +715,9 @@ func buildRoles(buf *bytes.Buffer, depth int) {
 }
 
 // commandOrder is the canonical ordering of commands in schema.xml.
-// Mirrors Python command_order list in _build_commands.
 var commandOrder = []string{
 	// Orchestration
-	"cmd-epoch", "cmd-status",
+	"cmd-epoch", "cmd-status", "cmd-swarm",
 	// User interaction
 	"cmd-user-request", "cmd-user-elicit", "cmd-user-uat",
 	// Architect
@@ -906,7 +905,7 @@ func buildHandoffs(buf *bytes.Buffer, depth int) {
 	marshalSection(buf, depth, section)
 }
 
-// constraintOrder is the canonical ordering of constraints matching Python CONSTRAINT_SPECS insertion order.
+// constraintOrder is the canonical ordering of constraints in schema.xml.
 var constraintOrder = []string{
 	"C-audit-never-delete",
 	"C-audit-dep-chain",
@@ -1155,10 +1154,10 @@ func buildDocuments(buf *bytes.Buffer, depth int) {
 		},
 		{
 			id:      "doc-schema",
-			path:    "protocol/schema.xml",
-			purpose: "This file: canonical machine-readable protocol definition (BCNF)",
+			path:    "schema.xml",
+			purpose: "Generated machine-readable protocol projection (BCNF)",
 			covers: []map[string]string{
-				{"type": "all", "depth": "full", "note": "Single source of truth for all entity definitions and relationships"},
+				{"type": "all", "depth": "full", "note": "Complete projection generated from the canonical typed Go specifications"},
 			},
 		},
 	}
@@ -1279,14 +1278,9 @@ func buildProcedureSteps(buf *bytes.Buffer, depth int) {
 	d3 := indent(depth + 3)
 	d4 := indent(depth + 4)
 
-	roleOrder := []protocol.RoleId{
-		protocol.RoleEpoch, protocol.RoleArchitect, protocol.RoleReviewer,
-		protocol.RoleSupervisor, protocol.RoleWorker,
-	}
-
 	w(d + "<procedure-steps>")
 
-	for _, roleId := range roleOrder {
+	for _, roleId := range protocol.AllRoleIds {
 		steps, ok := ProcedureSteps[roleId]
 		if !ok || len(steps) == 0 {
 			continue
@@ -1504,7 +1498,7 @@ func phaseXMLId(id protocol.PhaseId) string {
 // GenerateSchema generates schema.xml from canonical Go spec data and writes
 // the result to w.
 //
-// The output matches the structure of the Python gen_schema.py output:
+// The output preserves the established schema.xml structure:
 //   - XML declaration with UTF-8 encoding
 //   - <pasture-protocol version="2.0"> root element
 //   - All sections with section-divider comments
@@ -1567,9 +1561,9 @@ func generateSchemaContent() string {
 	// Header comment
 	buf.WriteString("  <!--\n")
 	buf.WriteString("  Pasture Protocol Schema v2.0\n\n")
-	buf.WriteString("  Canonical, machine-readable definition of the Pasture multi-agent protocol.\n")
-	buf.WriteString("  All markdown documentation (PROCESS.md, AGENTS.md, SKILLS.md, etc.) is\n")
-	buf.WriteString("  derived from this schema. Changes to the protocol MUST be reflected here first.\n\n")
+	buf.WriteString("  Generated, machine-readable projection of the Pasture multi-agent protocol.\n")
+	buf.WriteString("  Canonical typed Go specifications live under internal/codegen/. Change those\n")
+	buf.WriteString("  sources first, then run make generate; do not edit this file directly.\n\n")
 	buf.WriteString("  Design: Boyce-Codd Normal Form (BCNF)\n")
 	buf.WriteString("  - Each fact stored exactly once\n")
 	buf.WriteString("  - Relationships via idref attributes, no duplication\n")
