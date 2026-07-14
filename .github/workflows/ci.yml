@@ -127,9 +127,10 @@ jobs:
 
       - name: Verify committed files match codegen output
         # Catches generated files (schema.xml, skills/**/SKILL.md, agents/*.md,
-        # .opencode/**) that were hand-edited or left stale after a change to
-        # internal/codegen. git status --porcelain also catches newly generated
-        # files that were never committed, which git diff alone would miss.
+        # .opencode/**, opencode.json) that were hand-edited or left stale after
+        # a change to internal/codegen. git status --porcelain also catches newly
+        # generated files that were never committed, which git diff alone would
+        # miss.
         run: |
           if [ -n "$(git status --porcelain)" ]; then
             echo "::error::Generated files are stale — run 'make generate' and commit the result."
