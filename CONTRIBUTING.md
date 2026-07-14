@@ -8,24 +8,27 @@
 
 ## Architecture Overview
 
-`specs_data.go` is the single source of truth. All three generators — schema.xml,
-SKILL.md headers, and agent definitions — are driven from the canonical data maps
-declared there. Edits flow in one direction: change a map entry, run `go generate`,
-inspect the diff, run tests.
+Typed Go values under `internal/codegen/` are the single source of truth. Protocol
+metadata lives in `specs_data.go`, shared prose lives in
+`specs_data_fragments.go`, and each generated skill body lives in its own
+`specs_data_body_<skill>.go` file. `specs_data_body.go` is the explicit registry
+that ties those body declarations together. Edits flow in one direction: change
+the canonical Go data, run `make generate`, inspect the diff, then run tests.
 
 The pipeline has four stages:
 
-1. **GenerateSchemaToFile** — marshals spec maps → `schema.xml` (17 sections)
-2. **GenerateSkill** — single unified pass → `skills/{role}/SKILL.md` (marker-bounded):
-   - `ReplaceMarkerRegion` renders `templates/skill.go.tmpl` between the BEGIN/END markers (header + body in one pass)
-   - `ValidateSkillStructure` validates heading hierarchy via goldmark (duplicate H2 titles, orphan H3 headings)
-3. **GenerateSubSkill** — single unified pass → `skills/{dir}/SKILL.md` using `templates/skill_sub.go.tmpl`
-4. **GenerateAgent** — renders `templates/agent_definition.go.tmpl` → `agents/{role}.md` (fully overwritten)
+1. **GenerateSchemaToFile** — marshals spec maps to `schema.xml`.
+2. **EmitHarness(claude-code)** — marker-merges all 29 generated skills under
+   `skills/` and fully rewrites the five role agents under `agents/`.
+3. **EmitHarness(opencode)** — fully rewrites the OpenCode skills, agents, and
+   manifest, and copies the two verbatim skills.
+4. **ValidateGlobalIds** — rejects unresolved or duplicate protocol identifiers
+   after the complete registry has been assembled.
 
-The entry point is `tools/codegen/main.go`, invoked by:
+The entry point is `tools/codegen/main.go`, invoked for all committed targets by:
 
 ```
-go generate ./internal/codegen/...
+make generate
 ```
 
 ---
@@ -35,7 +38,8 @@ go generate ./internal/codegen/...
 | File | Purpose | When to touch it |
 |------|---------|-----------------|
 | `internal/codegen/specs_data.go` | All canonical data maps (`PhaseSpecs`, `ConstraintSpecs`, `RoleSpecs`, `CommandSpecs`, `HandoffSpecs`, `FigureSpecs`, `ChecklistSpecs`, `CoordinationCommands`, `WorkflowSpecs`, `ReviewAxisSpecs`, `ProcedureSteps`, `LabelSpecs`, `TitleConventions`, `SubstepDataMap`) | Adding/changing any protocol concept |
-| `internal/codegen/specs_data_body.go` | `SkillBodySpecs` map: body content for all skill SKILL.md files (preamble, sections, recipes, behaviors). Source of truth for body content inside the BEGIN/END markers. | Adding/changing skill body prose |
+| `internal/codegen/specs_data_body.go` | Slim, explicit `SkillBodySpecs` registry: one skill directory key mapped to each body declaration. | Registering or removing a generated skill body |
+| `internal/codegen/specs_data_body_<skill>.go` | One `SkillBody` declaration containing that skill's preamble, sections, recipes, and behaviors. | Adding/changing one skill's body prose |
 | `internal/codegen/specs.go` | Go type definitions for all spec structs (`ConstraintSpec`, `RoleSpec`, `PhaseSpec`, etc.) | Adding a new field to any spec struct |
 | `internal/codegen/context.go` | `generalConstraints`, `roleConstraints`, `phaseConstraints` maps; `GetRoleContext`, `GetPhaseContext` | Adding/removing a constraint-role or constraint-phase association |
 | `internal/codegen/schema.go` | `generateSchemaContent`, `sections` slice, `buildConstraints` and `buildProcedureSteps` (manual CDATA builders), `marshalSection` helper | Adding a new schema section or modifying CDATA sections |
@@ -45,6 +49,7 @@ go generate ./internal/codegen/...
 | `internal/codegen/templates/skill.go.tmpl` | Unified SKILL.md template (header + body: role commands, constraints, handoffs, phases, checklists, workflows, figures, preamble, behaviors, sections, recipes) | Changing the layout of generated SKILL.md files |
 | `internal/codegen/templates/skill_sub.go.tmpl` | Sub-skill SKILL.md template (command name, description, figures, preamble, behaviors, sections, recipes) | Changing sub-skill layout |
 | `internal/codegen/templates/agent_definition.go.tmpl` | Agent definition template (role spec, phases, constraints, behaviors, checklists, workflows, figure refs) | Changing agent definition layout |
+| `internal/codegen/templates/opencode_*.go.tmpl` | OpenCode role-skill, command-skill, and agent templates | Changing OpenCode-specific layout or frontmatter |
 | `internal/codegen/harness.go` | Target harness registry, `roleSkillDirs`, `commandSkillDirs`, and target routing helpers | Adding a new generation target, role skill, or command skill |
 | `tools/codegen/main.go` | Thin `go:generate` entry point; parses flags and invokes the selected harness targets | Changing CLI flags or invocation flow |
 | `internal/codegen/testdata/context.yaml` | YAML fixture for `context_test.go` — exact constraint counts and must_contain/must_not_contain per role/phase | Any change to `roleConstraints` or `phaseConstraints` |
@@ -57,40 +62,44 @@ go generate ./internal/codegen/...
 
 ## Regeneration
 
-The single regeneration command (run from anywhere inside the module):
+The canonical regeneration command (run from the module root):
 
 ```bash
-go generate ./internal/codegen/...
+make generate
 ```
 
-This runs `go run ../../tools/codegen` from the `internal/codegen/` package directory.
-The binary locates the module root by walking upward from cwd to find `go.mod`.
+This runs `go generate ./internal/codegen/...`, whose directive invokes
+`tools/codegen` for both the `claude-code` and `opencode` targets. The binary
+locates the module root by walking upward from cwd to find `go.mod`.
 
 What it does, in order:
 1. Writes `schema.xml` (diff printed to stdout if changed)
-2. Writes `skills/{role}/SKILL.md` headers for each role in `roleSkillDirs`
-3. Writes `skills/{dir}/SKILL.md` headers for each command in `commandSkillDirs`
-4. Writes `agents/{role}.md` for each role with non-empty `Tools`
+2. Writes Claude Code skills under `skills/` and agents under `agents/`
+3. Writes OpenCode skills under `.opencode/skill/`, agents under
+   `.opencode/agent/`, and `opencode.json`
+4. Copies the hand-authored `protocol` and `install-cli` skills verbatim into
+   the OpenCode target
 
-The default target is `claude-code`. That target must remain byte-identical to
-the committed `skills/`, `agents/`, and `schema.xml` outputs. To capture a new
-baseline intentionally, start from a clean tree, run `go generate
-./internal/codegen/...`, review the diff in those generated paths, and commit the
-generated output with the source change. If the default target changes bytes
-without an intended generated-output diff, treat it as a regression.
+All committed generated outputs must remain byte-identical after regeneration.
+To capture a new baseline intentionally, start from a clean tree, run
+`make generate`, review the generated-path diff, and commit that output with the
+source change. An unexpected generated diff is a regression. For focused tool
+development, `go run ./tools/codegen --targets claude-code` selects one target,
+but it is not a substitute for the canonical all-target regeneration gate.
 
 ### Changed X → regenerates Y
 
 | What you changed | Regenerates |
 |-----------------|-------------|
-| Any map in `specs_data.go` | schema.xml, SKILL.md headers, agent definitions (all 4 stages) |
-| `specs_data_body.go` (`SkillBodySpecs`) | SKILL.md body content (stages 2–3) |
-| `context.go` (`roleConstraints` / `phaseConstraints`) | SKILL.md headers, agent definitions (stages 2–4 only) |
-| `schema_types.go` | schema.xml only (stage 1) |
-| `schema.go` section builders | schema.xml only (stage 1) |
-| `templates/skill.go.tmpl` | SKILL.md role files (stage 2) |
-| `templates/skill_sub.go.tmpl` | SKILL.md sub-skill files (stage 3) |
-| `templates/agent_definition.go.tmpl` | agent definitions (stage 4) |
+| Any map in `specs_data.go` | schema.xml and the affected skills/agents in both harnesses |
+| `specs_data_body_<skill>.go` plus its `SkillBodySpecs` registry entry | Claude Code and OpenCode SKILL.md body content |
+| `context.go` (`roleConstraints` / `phaseConstraints`) | affected SKILL.md and agent definitions in both harnesses |
+| `schema_types.go` | schema.xml only |
+| `schema.go` section builders | schema.xml only |
+| `templates/skill.go.tmpl` | Claude Code role SKILL.md files |
+| `templates/skill_sub.go.tmpl` | Claude Code command SKILL.md files |
+| `templates/agent_definition.go.tmpl` | Claude Code agent definitions |
+| `templates/opencode_*.go.tmpl` | corresponding OpenCode skills or agents |
 | `internal/codegen/harness.go` `roleSkillDirs` | which SKILL.md files are regenerated |
 | `internal/codegen/harness.go` `commandSkillDirs` | which sub-skill SKILL.md files are regenerated |
 
@@ -112,7 +121,7 @@ go test ./internal/codegen/... -count=1
 
 3. Update `testdata/context.yaml`: increment `exact_count` for each role or phase that gains the constraint, and add the ID to `must_contain` lists.
 
-4. Run `go generate ./internal/codegen/...` then `go test ./internal/codegen/... -count=1`.
+4. Run `make generate` then `go test ./internal/codegen/... -count=1`.
 
 ---
 
@@ -127,7 +136,7 @@ This is a subset of the above when the `ConstraintSpec` already exists.
    - Add the constraint ID to `must_contain`.
    - Remove it from `must_not_contain` if it was listed there.
 
-3. Run `go generate ./internal/codegen/...` then `go test ./internal/codegen/... -count=1`.
+3. Run `make generate` then `go test ./internal/codegen/... -count=1`.
 
 ---
 
@@ -137,7 +146,7 @@ This is a subset of the above when the `ConstraintSpec` already exists.
 
 2. Create a YAML file at `skills/protocol/figures/{id}.yaml` with a `content` key containing the ASCII diagram text. This is loaded at generation time by `loadFigureContent` in `skills.go`.
 
-3. Run `go generate ./internal/codegen/...`. The figure will appear automatically in SKILL.md files (via `skill.go.tmpl`) and agent definition figure-ref lists (via `agent_definition.go.tmpl`) for the referenced roles.
+3. Run `make generate`. The figure will appear automatically in SKILL.md files (via `skill.go.tmpl`) and agent definition figure-ref lists (via `agent_definition.go.tmpl`) for the referenced roles.
 
 4. Run `go test ./internal/codegen/... -count=1`. Update `testdata/agents.yaml` if fixture checks figure references.
 
@@ -145,25 +154,36 @@ This is a subset of the above when the `ConstraintSpec` already exists.
 
 ### Adding a New Role
 
-1. Add a `RoleId` constant to `internal/types/` (wherever `RoleId` values are declared) and add it to `AllRoleIds`.
+1. Add a `RoleId` constant to `pkg/protocol/enums.go` and add it to `AllRoleIds`.
 
-2. Add an entry to `RoleSpecs` in `specs_data.go` (around line 535). Fill `ID`, `Name`, `Description`, `OwnedPhases`, `Introduction`, `OwnershipNarrative`, `Behaviors`, and optionally `Model`, `Thinking`, `Tools`.
+2. Add an entry to `RoleSpecs` in `specs_data.go`. Fill `ID`, `Name`, `Description`, `OwnedPhases`, `Introduction`, `OwnershipNarrative`, `Behaviors`, and optionally `Model`, `Thinking`, `Tools`.
 
-3. Add a `roleConstraints` entry in `context.go` using `mergeConstraints(generalConstraints, map[string]bool{...})`.
+3. Add the role's command metadata to `CommandSpecs`. Its `RoleRef` must be the
+   new role and its `File` must be `skills/<dir>/SKILL.md`.
 
-4. Add the role to `roleSkillDirs` in `internal/codegen/harness.go` (map the `types.RoleId` constant to the directory name under `skills/`).
+4. Add a `roleConstraints` entry in `context.go` using `mergeConstraints(generalConstraints, map[string]bool{...})`.
 
-5. Create `skills/{dir}/SKILL.md` with at least the BEGIN/END marker pair:
+5. Add the role to `roleSkillDirs` in `internal/codegen/harness.go` (map the `RoleId` constant to its skill directory).
+
+6. Create `internal/codegen/specs_data_body_<skill>.go` with exactly one
+   package-level `SkillBody` declaration, then add that declaration to the
+   explicit `SkillBodySpecs` map in `specs_data_body.go`.
+
+7. Seed the Claude Code output at `skills/<dir>/SKILL.md` with the marker pair:
    ```
    <!-- BEGIN GENERATED FROM pasture schema -->
    <!-- END GENERATED FROM pasture schema -->
    ```
+   The OpenCode output is fully generated and needs no seed file.
 
-6. Update `testdata/context.yaml`: add a `role_constraint_checks` entry with `exact_count`, `must_contain`, and `must_not_contain`.
+8. Update `testdata/context.yaml`: add a `role_constraint_checks` entry with `exact_count`, `must_contain`, and `must_not_contain`.
 
-7. Update `testdata/agents.yaml` and `testdata/skills.yaml` as needed for the new role.
+9. Update `testdata/agents.yaml` and `testdata/skills.yaml` as needed for the new role.
 
-8. Run `go generate ./internal/codegen/...` then `go test ./internal/codegen/... -count=1`.
+10. Run `make generate` then `go test ./internal/codegen/... -count=1`.
+
+`TestGeneratedSkillRegistryParity` checks that the command metadata, harness
+emitter, and body registry contain exactly the same generated skill inventory.
 
 ---
 
@@ -179,7 +199,7 @@ This is a subset of the above when the `ConstraintSpec` already exists.
 
 5. Update `testdata/context.yaml`: add a `phase_constraint_checks` entry for the new phase.
 
-6. Run `go generate ./internal/codegen/...` then `go test ./internal/codegen/... -count=1`.
+6. Run `make generate` then `go test ./internal/codegen/... -count=1`.
 
 ---
 
@@ -193,24 +213,36 @@ This is a subset of the above when the `ConstraintSpec` already exists.
 
 3. Add a `{comment, build{Name}}` entry to the `sections` slice in `generateSchemaContent` (around line 1576 in `schema.go`).
 
-4. Run `go generate ./internal/codegen/...` then `go test ./internal/codegen/... -count=1`. Update `testdata/schema.yaml` to cover the new section.
+4. Run `make generate` then `go test ./internal/codegen/... -count=1`. Update `testdata/schema.yaml` to cover the new section.
 
 ---
 
 ### Adding a New Command / Skill
 
-1. Add an entry to `CommandSpecs` in `specs_data.go` (around line 786). Set `ID`, `Name` (e.g. `"pasture:role:action"`), `Description`, `RoleRef`, `Phases`, `File`, and optionally `CreatesLabels`.
+1. Add an entry to `CommandSpecs` in `specs_data.go`. Set `ID`, `Name` (for
+   example `"pasture:role:action"`), `Description`, `RoleRef`, `Phases`, `File`,
+   `Title`, and optionally `CreatesLabels`. `File` must be
+   `skills/<skill-dir>/SKILL.md`.
 
-2. If the command has associated figures (i.e., a `FigureSpec` entry references this command via `CommandRefs`), add it to `commandSkillDirs` in `internal/codegen/harness.go`:
+2. Add exactly one emitter entry to `commandSkillDirs` in
+   `internal/codegen/harness.go`:
    ```go
    "cmd-your-id": "your-skill-dir",
    ```
 
-3. Create `skills/{dir}/SKILL.md` with the BEGIN/END marker pair.
+3. Create `internal/codegen/specs_data_body_<skill>.go` with exactly one
+   package-level `SkillBody` declaration. Register that declaration under the
+   same skill-directory key in `SkillBodySpecs` in `specs_data_body.go`.
 
-4. Update `testdata/skills.yaml` to cover the new command.
+4. Seed `skills/<skill-dir>/SKILL.md` with the BEGIN/END marker pair. The
+   OpenCode output is fully generated and needs no seed file.
 
-5. Run `go generate ./internal/codegen/...` then `go test ./internal/codegen/... -count=1`.
+5. Update `testdata/skills.yaml` to cover the new command.
+
+6. Run `make generate` then `go test ./internal/codegen/... -count=1`.
+
+`TestGeneratedSkillRegistryParity` fails with the missing or orphaned skill
+directory if the metadata, emitter, or body-registry leg is forgotten.
 
 ---
 
@@ -221,7 +253,7 @@ This is a subset of the above when the `ConstraintSpec` already exists.
    - `skill_sub.go.tmpl` — sub-skill template. Context type: `skillSubContext`. Available fields: `CommandName`, `CommandDescription`, `Figures`, `Preamble`, `BodySections`, `BodyRecipes`, `BodyBehaviors`.
    - `agent_definition.go.tmpl` — agent definitions. Context type: `agentTemplateData`. Available fields: `Role` (RoleSpec), `PhasesDetail`, `PhaseSlug`, `Constraints`, `Behaviors`, `Checklists`, `Workflows`, `Figures`.
 
-2. Run `go generate ./internal/codegen/...` to preview the rendered output.
+2. Run `make generate` to preview the rendered output.
 
 3. Template functions available in all templates: `join(items []string, sep string)`, `lower(s string)`, `last(i, length int) bool`, `not(b bool) bool`.
 

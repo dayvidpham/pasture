@@ -102,7 +102,7 @@ type FragmentId string
 // AllFragmentIds lists every declared FragmentId constant. It is maintained
 // in sync with the constant declarations below and validated by
 // ValidateGlobalIds (parity check: AllFragmentIds ↔ SharedFragmentSpecs keys).
-// Mirrors AllRoleIds in internal/types/enums.go.
+// Mirrors AllRoleIds in pkg/protocol/enums.go.
 var AllFragmentIds = []FragmentId{
 	FragRevVoteOptions,
 	FragSupReviewAllSlices,
@@ -263,8 +263,8 @@ type CommandSpec struct {
 	// that the generator can emit YAML frontmatter ABOVE the heading via
 	// skill_sub.go.tmpl while PRESERVING the hand-authored title verbatim.
 	//
-	// Only sub-skill commands (those listed in commandSkillDirs in
-	// tools/codegen/main.go) need Title populated; role-level commands
+	// Only sub-skill commands (those listed in commandSkillDirs in harness.go)
+	// need Title populated; role-level commands
 	// (cmd-supervisor, cmd-worker, etc.) render through skill.go.tmpl which
 	// derives its H1 from RoleSpec.Name, so their Title is left empty.
 	Title         string
