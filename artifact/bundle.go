@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"sort"
 	"sync"
 	"time"
 )
@@ -28,13 +29,6 @@ type Bundle struct {
 // NewBundle validates source against manifest and snapshots every file byte.
 // The returned value owns no handle or alias into source.
 func NewBundle(source fs.FS, manifest Manifest) (Bundle, error) {
-	if source == nil {
-		return Bundle{}, invalid(
-			"bundle source snapshot", "<pending>", "", "non-nil source filesystem",
-			"the source fs.FS is nil", "no artifact bytes can be validated or captured",
-			"provide an fs.FS containing exactly the manifest's files and directories", fs.ErrInvalid,
-		)
-	}
 	if !manifest.valid {
 		return Bundle{}, invalid(
 			"bundle source snapshot", "<pending>", "", "validated manifest",
@@ -44,155 +38,242 @@ func NewBundle(source fs.FS, manifest Manifest) (Bundle, error) {
 	}
 
 	ownedManifest := manifest.clone()
-	declared := ownedManifest.entryMap()
-	seen := make(map[string]struct{}, len(declared))
-	snapshot := make(map[string][]byte, len(declared))
+	id := deriveBundleID(ownedManifest)
+	bundleName := id.String()
+	if source == nil {
+		return Bundle{}, invalid(
+			"bundle source snapshot", bundleName, "", "non-nil source filesystem",
+			"the source fs.FS is nil", "no artifact bytes can be validated or captured",
+			"provide an fs.FS containing exactly the manifest's files and directories", fs.ErrInvalid,
+		)
+	}
 
-	err := fs.WalkDir(source, ".", func(name string, dirEntry fs.DirEntry, walkErr error) error {
+	declared := ownedManifest.entryMap()
+	observedPaths := make(map[string]struct{}, len(declared))
+	occurrences := make(map[string]int, len(declared))
+	observations := make(map[string]fs.FileInfo, len(declared))
+	snapshot := make(map[string][]byte, len(declared))
+	failures := make([]sourceFailure, 0)
+
+	// Walk failures are recorded by the callback, which deliberately returns nil
+	// so independent sibling failures can be collected and ordered afterward.
+	_ = fs.WalkDir(source, ".", func(name string, dirEntry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return invalid(
-				"bundle source walk", "<pending>", name, "readable source tree",
+			failures = append(failures, newSourceFailure(name, sourceFailureWalk, invalid(
+				"bundle source walk", bundleName, name, "readable source tree",
 				fmt.Sprintf("the source filesystem could not enumerate this location: %v", walkErr),
 				"the complete artifact inventory cannot be verified",
 				"repair the source filesystem so every declared entry and parent directory can be read", walkErr,
-			)
+			)))
+			return nil
+		}
+		if dirEntry == nil {
+			failures = append(failures, newSourceFailure(name, sourceFailureMetadata, invalid(
+				"bundle source inspection", bundleName, name, "source directory entry present",
+				"the source walk returned no DirEntry", "entry type cannot be checked against the manifest",
+				"repair the fs.FS implementation so successful walk callbacks include a DirEntry", fs.ErrInvalid,
+			)))
+			return nil
 		}
 		if name == "." {
 			if !dirEntry.IsDir() {
-				return invalid(
-					"bundle source walk", "<pending>", name, "directory bundle root",
+				failures = append(failures, newSourceFailure(name, sourceFailureRoot, invalid(
+					"bundle source walk", bundleName, name, "directory bundle root",
 					"the fs.FS root is not a directory", "artifact leaves cannot be enumerated safely",
 					"provide an fs.FS whose '.' root is a directory", fs.ErrInvalid,
-				)
+				)))
 			}
 			return nil
 		}
 
 		entryPath, err := NewPath(name)
 		if err != nil {
-			return invalid(
-				"bundle source walk", "<pending>", name, "canonical source path",
+			failures = append(failures, newSourceFailure(name, sourceFailurePath, invalid(
+				"bundle source walk", bundleName, name, "canonical source path",
 				"the source enumerated a path that is not a canonical artifact path",
 				"the source tree could escape or collide at an installation boundary",
 				"make every source path a clean slash-separated relative path", err,
-			)
+			)))
+			return nil
 		}
 		name = entryPath.String()
-		if _, duplicate := seen[name]; duplicate {
-			return invalid(
-				"bundle source walk", "<pending>", name, "unique source path",
-				"the source enumerated the same path more than once",
-				"source ownership is ambiguous and cannot be snapshotted deterministically",
-				"repair the fs.FS implementation so each path is enumerated exactly once", fs.ErrExist,
-			)
-		}
+		occurrences[name]++
+		observedPaths[name] = struct{}{}
 
 		info, err := dirEntry.Info()
 		if err != nil {
-			return invalid(
-				"bundle source inspection", "<pending>", name, "readable source metadata",
+			failures = append(failures, newSourceFailure(name, sourceFailureMetadata, invalid(
+				"bundle source inspection", bundleName, name, "readable source metadata",
 				fmt.Sprintf("the source entry metadata could not be read: %v", err),
 				"entry type cannot be checked against the manifest",
 				"repair the source fs.FS so DirEntry.Info succeeds", err,
-			)
+			)))
+			return nil
 		}
 		if dirEntry.IsDir() != info.IsDir() {
-			return invalid(
-				"bundle source inspection", "<pending>", name, "consistent source metadata",
+			failures = append(failures, newSourceFailure(name, sourceFailureConsistency, invalid(
+				"bundle source inspection", bundleName, name, "consistent source metadata",
 				fmt.Sprintf("DirEntry directory status disagrees with FileInfo mode %s", info.Mode().Type()),
 				"a changing or malicious source could be interpreted differently across reads",
 				"provide a stable fs.FS whose DirEntry and FileInfo report the same type", fs.ErrInvalid,
-			)
+			)))
+			return nil
 		}
+		if _, exists := observations[name]; !exists {
+			observations[name] = info
+		}
+		return nil
+	})
 
+	for name, count := range occurrences {
+		if count > 1 {
+			failures = append(failures, newSourceFailure(name, sourceFailureDuplicate, invalid(
+				"bundle source walk", bundleName, name, "unique source path",
+				fmt.Sprintf("the source enumerated path %q %d times", name, count),
+				"source ownership is ambiguous and cannot be snapshotted deterministically",
+				"repair the fs.FS implementation so each path is enumerated exactly once", fs.ErrExist,
+			)))
+		}
+	}
+
+	names := make([]string, 0, len(observations))
+	for name := range observations {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if occurrences[name] != 1 {
+			continue
+		}
+		info := observations[name]
 		declaredEntry, isDeclared := declared[name]
 		switch {
 		case info.IsDir():
 			if !ownedManifest.hasPathOrDescendant(name) {
-				return invalid(
-					"bundle source ownership check", "<pending>", name, "no extra source directory",
+				failures = append(failures, newSourceFailure(name, sourceFailureOwnership, invalid(
+					"bundle source ownership check", bundleName, name, "no extra source directory",
 					"the source contains a directory that is neither declared nor a parent of a declared entry",
 					"the source and manifest entry sets differ",
 					"remove the extra directory or add a matching directory entry to the manifest", fs.ErrExist,
-				)
+				)))
+				continue
 			}
 			if isDeclared {
 				if !declaredEntry.IsDirectory() {
-					return sourceTypeMismatch(name, declaredEntry, "directory")
+					failures = append(failures, newSourceFailure(name, sourceFailureType, sourceTypeMismatch(bundleName, name, declaredEntry, "directory")))
 				}
-				seen[name] = struct{}{}
 			}
-			return nil
 		case info.Mode().IsRegular():
 			if !isDeclared {
-				return invalid(
-					"bundle source ownership check", "<pending>", name, "no extra source file",
+				failures = append(failures, newSourceFailure(name, sourceFailureOwnership, invalid(
+					"bundle source ownership check", bundleName, name, "no extra source file",
 					"the source contains a regular file absent from the manifest",
 					"undeclared bytes would bypass content identity and ownership checks",
 					"remove the extra file or add a matching regular-file entry and digest to the manifest", fs.ErrExist,
-				)
+				)))
+				continue
 			}
 			if !declaredEntry.IsRegular() {
-				return sourceTypeMismatch(name, declaredEntry, "regular-file")
+				failures = append(failures, newSourceFailure(name, sourceFailureType, sourceTypeMismatch(bundleName, name, declaredEntry, "regular-file")))
+				continue
 			}
-			content, readErr := readAndCloseSource(source, name)
+			content, readErr := readAndCloseSource(source, bundleName, name)
 			if readErr != nil {
-				return readErr
+				failures = append(failures, newSourceFailure(name, sourceFailureIO, readErr))
+				continue
 			}
 			actualDigest := DigestBytes(content)
 			if actualDigest != declaredEntry.digest {
-				return invalid(
-					"bundle content validation", "<pending>", name, "declared content digest matches exact bytes",
+				failures = append(failures, newSourceFailure(name, sourceFailureDigest, invalid(
+					"bundle content validation", bundleName, name, "declared content digest matches exact bytes",
 					fmt.Sprintf("manifest declares %s but source bytes digest to %s", declaredEntry.digest, actualDigest),
 					"the bundle would publish bytes under the wrong content identity",
 					fmt.Sprintf("update the source bytes or declare digest %s", actualDigest), fs.ErrInvalid,
-				)
+				)))
+				continue
 			}
 			snapshot[name] = bytes.Clone(content)
-			seen[name] = struct{}{}
-			return nil
 		default:
-			return invalid(
-				"bundle source inspection", "<pending>", name, "supported source entry type",
+			failures = append(failures, newSourceFailure(name, sourceFailureType, invalid(
+				"bundle source inspection", bundleName, name, "supported source entry type",
 				fmt.Sprintf("source mode %s is neither a directory nor a regular file", info.Mode()),
 				"symlinks, devices, sockets, and other special entries cannot be snapshotted portably",
 				"replace the entry with a declared regular file or directory", fs.ErrInvalid,
-			)
+			)))
 		}
-	})
-	if err != nil {
-		return Bundle{}, err
 	}
 
 	for _, entry := range ownedManifest.entries {
-		if _, ok := seen[entry.path.value]; !ok {
-			return Bundle{}, invalid(
-				"bundle source ownership check", "<pending>", entry.path.value, "every declared entry exists",
+		if _, ok := observedPaths[entry.path.value]; !ok {
+			failures = append(failures, newSourceFailure(entry.path.value, sourceFailureMissing, invalid(
+				"bundle source ownership check", bundleName, entry.path.value, "every declared entry exists",
 				"the manifest entry is missing from the source filesystem",
 				"the bundle would be incomplete relative to its ownership inventory",
 				"add the matching source entry or remove it from the manifest", fs.ErrNotExist,
-			)
+			)))
 		}
 	}
+	if err := firstSourceFailure(failures); err != nil {
+		return Bundle{}, err
+	}
 
-	id := deriveBundleID(ownedManifest)
 	return Bundle{id: id, manifest: ownedManifest, entries: declared, files: snapshot, valid: true}, nil
 }
 
-func sourceTypeMismatch(name string, declared Entry, actual string) error {
+type sourceFailure struct {
+	entry string
+	rank  int
+	err   error
+}
+
+const (
+	sourceFailureWalk = iota
+	sourceFailureRoot
+	sourceFailurePath
+	sourceFailureDuplicate
+	sourceFailureMetadata
+	sourceFailureConsistency
+	sourceFailureOwnership
+	sourceFailureType
+	sourceFailureIO
+	sourceFailureDigest
+	sourceFailureMissing
+)
+
+func newSourceFailure(entry string, rank int, err error) sourceFailure {
+	return sourceFailure{entry: entry, rank: rank, err: err}
+}
+
+func firstSourceFailure(failures []sourceFailure) error {
+	if len(failures) == 0 {
+		return nil
+	}
+	sort.Slice(failures, func(i, j int) bool {
+		if failures[i].entry != failures[j].entry {
+			return failures[i].entry < failures[j].entry
+		}
+		if failures[i].rank != failures[j].rank {
+			return failures[i].rank < failures[j].rank
+		}
+		return failures[i].err.Error() < failures[j].err.Error()
+	})
+	return failures[0].err
+}
+
+func sourceTypeMismatch(bundleName, name string, declared Entry, actual string) error {
 	return invalid(
-		"bundle source type validation", "<pending>", name, "source type matches manifest",
+		"bundle source type validation", bundleName, name, "source type matches manifest",
 		fmt.Sprintf("manifest declares %s but source is %s", declared.kind, actual),
 		"the same path would have conflicting ownership semantics",
 		fmt.Sprintf("change the source entry to %s or declare its actual type", declared.kind), fs.ErrInvalid,
 	)
 }
 
-func readAndCloseSource(source fs.FS, name string) ([]byte, error) {
+func readAndCloseSource(source fs.FS, bundleName, name string) ([]byte, error) {
 	file, err := source.Open(name)
 	if err != nil {
 		return nil, invalid(
-			"bundle source read", "<pending>", name, "open declared regular file",
+			"bundle source read", bundleName, name, "open declared regular file",
 			fmt.Sprintf("the source file could not be opened: %v", err),
 			"its exact bytes cannot be validated or snapshotted",
 			"repair the fs.FS so the declared file opens for reading", err,
@@ -202,7 +283,7 @@ func readAndCloseSource(source fs.FS, name string) ([]byte, error) {
 	closeErr := file.Close()
 	if readErr != nil {
 		return nil, invalid(
-			"bundle source read", "<pending>", name, "read complete declared file",
+			"bundle source read", bundleName, name, "read complete declared file",
 			fmt.Sprintf("the source file could not be read completely: %v", readErr),
 			"its exact bytes cannot be validated or snapshotted",
 			"repair the fs.FS so reading reaches a clean EOF", readErr,
@@ -210,7 +291,7 @@ func readAndCloseSource(source fs.FS, name string) ([]byte, error) {
 	}
 	if closeErr != nil {
 		return nil, invalid(
-			"bundle source close", "<pending>", name, "close source file after snapshot",
+			"bundle source close", bundleName, name, "close source file after snapshot",
 			fmt.Sprintf("the source file reported a close failure: %v", closeErr),
 			"source resource ownership cannot be completed reliably",
 			"repair the fs.File implementation so Close succeeds", closeErr,

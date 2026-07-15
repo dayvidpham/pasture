@@ -205,11 +205,6 @@ type manifestWire struct {
 	Entries []entryWire `json:"entries"`
 }
 
-type manifestDecodeWire struct {
-	Schema  string       `json:"schema"`
-	Entries *[]entryWire `json:"entries"`
-}
-
 type entryWire struct {
 	Path   string  `json:"path"`
 	Type   string  `json:"type"`
@@ -248,18 +243,8 @@ func (m Manifest) MarshalBinary() ([]byte, error) { return m.MarshalJSON() }
 // ParseManifest decodes and validates a manifest. Entry order in the input is
 // canonicalized by NewManifest before the value can be observed.
 func ParseManifest(data []byte) (Manifest, error) {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	var wire manifestDecodeWire
-	if err := decoder.Decode(&wire); err != nil {
-		return Manifest{}, invalid(
-			"manifest decoding", "", "", "valid manifest JSON",
-			fmt.Sprintf("the manifest JSON could not be decoded: %v", err),
-			"the bundle inventory is unavailable",
-			"provide one JSON object using only schema and entries fields", err,
-		)
-	}
-	if err := requireJSONEOF(decoder); err != nil {
+	wire, err := decodeManifestWire(data)
+	if err != nil {
 		return Manifest{}, err
 	}
 	if wire.Schema != manifestSchema {
@@ -270,16 +255,9 @@ func ParseManifest(data []byte) (Manifest, error) {
 			fmt.Sprintf("encode the manifest with schema %q", manifestSchema), fs.ErrInvalid,
 		)
 	}
-	if wire.Entries == nil {
-		return Manifest{}, invalid(
-			"manifest decoding", "", "", "entries array present",
-			"the entries field is missing or null", "the artifact inventory is ambiguous",
-			"provide an entries JSON array, using [] for an empty manifest", fs.ErrInvalid,
-		)
-	}
 
-	entries := make([]Entry, 0, len(*wire.Entries))
-	for index, item := range *wire.Entries {
+	entries := make([]Entry, 0, len(wire.Entries))
+	for index, item := range wire.Entries {
 		entryPath, err := NewPath(item.Path)
 		if err != nil {
 			return Manifest{}, annotateWireEntryError(err, index, item.Path)
@@ -326,6 +304,213 @@ func ParseManifest(data []byte) (Manifest, error) {
 		entries = append(entries, entry)
 	}
 	return NewManifest(entries...)
+}
+
+func decodeManifestWire(data []byte) (manifestWire, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if err := requireJSONDelim(decoder, '{', "manifest object"); err != nil {
+		return manifestWire{}, err
+	}
+
+	var wire manifestWire
+	seen := make(map[string]struct{}, 2)
+	for decoder.More() {
+		key, err := readJSONKey(decoder, "manifest object")
+		if err != nil {
+			return manifestWire{}, err
+		}
+		if _, duplicate := seen[key]; duplicate {
+			return manifestWire{}, invalid(
+				"manifest decoding", "", key, "unique manifest object field",
+				fmt.Sprintf("field %q appears more than once", key),
+				"duplicate object members make the manifest interpretation ambiguous",
+				fmt.Sprintf("keep exactly one lowercase %q field", key), fs.ErrInvalid,
+			)
+		}
+		seen[key] = struct{}{}
+		switch key {
+		case "schema":
+			wire.Schema, err = readJSONString(decoder, "schema", "manifest object")
+		case "entries":
+			wire.Entries, err = decodeEntryArray(decoder)
+		default:
+			return manifestWire{}, invalid(
+				"manifest decoding", "", key, "exact manifest object field name",
+				fmt.Sprintf("field %q is not exactly \"schema\" or \"entries\"", key),
+				"unknown or case-aliased fields could be interpreted differently by another decoder",
+				"use only the exact lowercase fields \"schema\" and \"entries\"", fs.ErrInvalid,
+			)
+		}
+		if err != nil {
+			return manifestWire{}, err
+		}
+	}
+	if err := requireJSONDelim(decoder, '}', "manifest object"); err != nil {
+		return manifestWire{}, err
+	}
+	if _, ok := seen["schema"]; !ok {
+		return manifestWire{}, invalid(
+			"manifest decoding", "", "schema", "schema field present",
+			"the schema field is missing", "the manifest codec version is unknown",
+			"provide the exact lowercase schema field", fs.ErrInvalid,
+		)
+	}
+	if _, ok := seen["entries"]; !ok {
+		return manifestWire{}, invalid(
+			"manifest decoding", "", "entries", "entries array present",
+			"the entries field is missing", "the artifact inventory is ambiguous",
+			"provide the exact lowercase entries field with a JSON array, using [] for an empty manifest", fs.ErrInvalid,
+		)
+	}
+	if err := requireJSONEOF(decoder); err != nil {
+		return manifestWire{}, err
+	}
+	return wire, nil
+}
+
+func decodeEntryArray(decoder *json.Decoder) ([]entryWire, error) {
+	if err := requireJSONDelim(decoder, '[', "entries array"); err != nil {
+		return nil, err
+	}
+	entries := make([]entryWire, 0)
+	for decoder.More() {
+		entry, err := decodeEntryObject(decoder, len(entries))
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	if err := requireJSONDelim(decoder, ']', "entries array"); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func decodeEntryObject(decoder *json.Decoder, index int) (entryWire, error) {
+	location := fmt.Sprintf("entries[%d]", index)
+	if err := requireJSONDelim(decoder, '{', location); err != nil {
+		return entryWire{}, err
+	}
+
+	var wire entryWire
+	seen := make(map[string]struct{}, 4)
+	for decoder.More() {
+		key, err := readJSONKey(decoder, location)
+		if err != nil {
+			return entryWire{}, err
+		}
+		if _, duplicate := seen[key]; duplicate {
+			return entryWire{}, invalid(
+				"manifest decoding", "", location, "unique manifest entry field",
+				fmt.Sprintf("field %q appears more than once in %s", key, location),
+				"duplicate object members make the entry interpretation ambiguous",
+				fmt.Sprintf("keep exactly one lowercase %q field in the entry", key), fs.ErrInvalid,
+			)
+		}
+		seen[key] = struct{}{}
+		switch key {
+		case "path":
+			wire.Path, err = readJSONString(decoder, key, location)
+		case "type":
+			wire.Type, err = readJSONString(decoder, key, location)
+		case "mode":
+			wire.Mode, err = readJSONString(decoder, key, location)
+		case "digest":
+			var digest string
+			digest, err = readJSONString(decoder, key, location)
+			wire.Digest = &digest
+		default:
+			return entryWire{}, invalid(
+				"manifest decoding", "", location, "exact manifest entry field name",
+				fmt.Sprintf("field %q is not an exact supported entry field", key),
+				"unknown or case-aliased fields could be interpreted differently by another decoder",
+				"use only the exact lowercase fields \"path\", \"type\", \"mode\", and optional \"digest\"", fs.ErrInvalid,
+			)
+		}
+		if err != nil {
+			return entryWire{}, err
+		}
+	}
+	if err := requireJSONDelim(decoder, '}', location); err != nil {
+		return entryWire{}, err
+	}
+	for _, required := range []string{"path", "type", "mode"} {
+		if _, ok := seen[required]; !ok {
+			return entryWire{}, invalid(
+				"manifest decoding", "", location, "required manifest entry field present",
+				fmt.Sprintf("field %q is missing from %s", required, location),
+				"the entry path, type, and permissions cannot be reconstructed completely",
+				fmt.Sprintf("add exactly one lowercase %q field to the entry", required), fs.ErrInvalid,
+			)
+		}
+	}
+	return wire, nil
+}
+
+func readJSONKey(decoder *json.Decoder, location string) (string, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return "", invalid(
+			"manifest decoding", "", location, "read JSON object field",
+			fmt.Sprintf("the next object field could not be decoded: %v", err),
+			"the manifest inventory is unavailable",
+			"provide a syntactically valid JSON object", err,
+		)
+	}
+	key, ok := token.(string)
+	if !ok {
+		return "", invalid(
+			"manifest decoding", "", location, "string JSON object field",
+			fmt.Sprintf("object field token has type %T", token),
+			"the manifest inventory is unavailable",
+			"provide a quoted JSON object field name", fs.ErrInvalid,
+		)
+	}
+	return key, nil
+}
+
+func readJSONString(decoder *json.Decoder, field, location string) (string, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return "", invalid(
+			"manifest decoding", "", location, "string manifest field value",
+			fmt.Sprintf("field %q could not be decoded: %v", field, err),
+			"the manifest inventory is unavailable",
+			fmt.Sprintf("provide a JSON string value for field %q", field), err,
+		)
+	}
+	value, ok := token.(string)
+	if !ok {
+		return "", invalid(
+			"manifest decoding", "", location, "string manifest field value",
+			fmt.Sprintf("field %q has JSON type %T instead of string", field, token),
+			"the manifest inventory cannot be decoded canonically",
+			fmt.Sprintf("provide a quoted JSON string for field %q", field), fs.ErrInvalid,
+		)
+	}
+	return value, nil
+}
+
+func requireJSONDelim(decoder *json.Decoder, want json.Delim, location string) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return invalid(
+			"manifest decoding", "", location, "valid manifest JSON structure",
+			fmt.Sprintf("the JSON delimiter %q could not be decoded: %v", want, err),
+			"the manifest inventory is unavailable",
+			"provide one syntactically valid manifest JSON object", err,
+		)
+	}
+	got, ok := token.(json.Delim)
+	if !ok || got != want {
+		return invalid(
+			"manifest decoding", "", location, "valid manifest JSON structure",
+			fmt.Sprintf("found token %v where delimiter %q was required", token, want),
+			"the manifest inventory cannot be decoded canonically",
+			fmt.Sprintf("provide delimiter %q at this location", want), fs.ErrInvalid,
+		)
+	}
+	return nil
 }
 
 func requireJSONEOF(decoder *json.Decoder) error {
