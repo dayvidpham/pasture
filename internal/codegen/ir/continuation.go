@@ -9,36 +9,36 @@ import (
 	"io"
 	"strings"
 
-	"github.com/dayvidpham/pasture/pkg/protocol"
+	"github.com/dayvidpham/pasture/pkg/protocol/portable"
 )
 
 // MutationAuthority is the exact portable initiating authority retained across
 // retry or fresh-agent continuation.
 type MutationAuthority interface{ mutationAuthority() }
 
-type assignmentAuthority struct{ assignment protocol.AssignmentRef }
-type bootstrapAuthority struct{ agent protocol.AgentRef }
+type assignmentAuthority struct{ assignment portable.AssignmentRef }
+type bootstrapAuthority struct{ agent portable.AgentRef }
 
 func (assignmentAuthority) mutationAuthority() {}
 func (bootstrapAuthority) mutationAuthority()  {}
 
-func InitiatingAssignment(assignment protocol.AssignmentRef) (MutationAuthority, error) {
+func InitiatingAssignment(assignment portable.AssignmentRef) (MutationAuthority, error) {
 	if !assignment.IsValid() {
-		return nil, continuationError("initiating assignment is zero or invalid", "a mutation must retain the exact logical assignment that created it", "construct the assignment with protocol.NewAssignmentRef", nil)
+		return nil, continuationError("initiating assignment is zero or invalid", "a mutation must retain the exact logical assignment that created it", "construct the assignment with portable.NewAssignmentRef", nil)
 	}
 	return assignmentAuthority{assignment: assignment}, nil
 }
 
-func BootstrapActor(agent protocol.AgentRef) (MutationAuthority, error) {
+func BootstrapActor(agent portable.AgentRef) (MutationAuthority, error) {
 	if !agent.IsValid() {
-		return nil, continuationError("bootstrap actor is zero or invalid", "a bootstrap mutation must retain one registered portable agent identity", "construct the agent with protocol.NewAgentRef", nil)
+		return nil, continuationError("bootstrap actor is zero or invalid", "a bootstrap mutation must retain one registered portable agent identity", "construct the agent with portable.NewAgentRef", nil)
 	}
 	return bootstrapAuthority{agent: agent}, nil
 }
 
 // AssignmentAuthority returns the initiating assignment when that is the
 // retained authority.
-func AssignmentAuthority(authority MutationAuthority) (protocol.AssignmentRef, bool) {
+func AssignmentAuthority(authority MutationAuthority) (portable.AssignmentRef, bool) {
 	switch value := authority.(type) {
 	case assignmentAuthority:
 		return value.assignment, true
@@ -47,11 +47,11 @@ func AssignmentAuthority(authority MutationAuthority) (protocol.AssignmentRef, b
 			return value.assignment, true
 		}
 	}
-	return protocol.AssignmentRef{}, false
+	return portable.AssignmentRef{}, false
 }
 
 // BootstrapAuthority returns the initiating bootstrap agent when applicable.
-func BootstrapAuthority(authority MutationAuthority) (protocol.AgentRef, bool) {
+func BootstrapAuthority(authority MutationAuthority) (portable.AgentRef, bool) {
 	switch value := authority.(type) {
 	case bootstrapAuthority:
 		return value.agent, true
@@ -60,7 +60,7 @@ func BootstrapAuthority(authority MutationAuthority) (protocol.AgentRef, bool) {
 			return value.agent, true
 		}
 	}
-	return protocol.AgentRef{}, false
+	return portable.AgentRef{}, false
 }
 
 // ResolvedMutationRequest retains protocol meaning, request schema, and exact
@@ -96,7 +96,20 @@ func (r ResolvedMutationRequest) IsValid() bool {
 	return r.operation.IsValid() && r.schema != "" && len(r.canonical) > 0 && json.Valid(r.canonical)
 }
 
+// canonicalJSON decodes exactly one JSON value and re-marshals it in Go's
+// canonical (sorted-key, minimal) form. It rejects duplicate JSON object
+// members at every nesting level first: encoding/json's own decode into `any`
+// silently keeps the last occurrence of a repeated key, which would let a
+// fresh agent reconstructing this mutation's request from canonical bytes
+// disagree with whichever reader first saw the raw wire bytes about which
+// duplicate value was authoritative.
 func canonicalJSON(data []byte) ([]byte, error) {
+	if err := rejectDuplicateJSONMembers(data); err != nil {
+		if isDuplicateJSONMember(err) {
+			return nil, fmt.Errorf("mutation request has a duplicate JSON member: %w", err)
+		}
+		return nil, fmt.Errorf("mutation request is empty, truncated, or malformed JSON: %w", err)
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
 	var value any
@@ -150,7 +163,7 @@ func (d CanonicalCommandDigest) Equal(other CanonicalCommandDigest) bool {
 // MutationContinuation is the complete in-memory parent-owned continuation for
 // one logical stateful invocation. It deliberately has no persistence codec.
 type MutationContinuation struct {
-	ref       protocol.MutationRef
+	ref       portable.MutationRef
 	authority MutationAuthority
 	request   ResolvedMutationRequest
 	command   CanonicalCommandDigest
@@ -158,8 +171,62 @@ type MutationContinuation struct {
 	scope     LexicalScopeSnapshot
 }
 
+// MutationRefFactory mints a portable.MutationRef for one logical stateful
+// invocation identity (seed). This package deliberately does not hardcode a
+// minting strategy: a real orchestrator may choose any deterministic
+// approach (e.g. a content digest of the resolved request and authority),
+// while every consumer of a MutationRef relies on exactly one invariant —
+// retrying the SAME logical invocation, or reconstructing it from a fresh
+// agent with no memory of prior calls, must mint the exact same ref for the
+// exact same seed; two distinct logical invocations must never collide.
+// Injecting the factory (rather than calling portable.NewMutationRef
+// directly) is what makes that invariant testable independent of whatever
+// strategy production code eventually chooses.
+type MutationRefFactory func(seed string) (portable.MutationRef, error)
+
+// DeterministicMutationRefFactory is the default MutationRefFactory: the
+// minted ref's value is exactly seed, so by portable.MutationRef's own
+// value-equality semantics, equal seeds always mint an equal ref (continuity
+// across retries and fresh-agent reconstruction) and distinct seeds mint
+// distinct refs (distinct minting), with no additional strategy needed.
+func DeterministicMutationRefFactory(seed string) (portable.MutationRef, error) {
+	return portable.NewMutationRef(seed)
+}
+
+// NewMutationContinuationFromFactory mints ref via factory(seed) and
+// otherwise constructs exactly as NewMutationContinuation. A caller retrying
+// the same logical invocation, or a fresh agent reconstructing it from
+// persisted state, must supply the same seed to receive the same
+// MutationRef; a different logical invocation must supply a different seed.
+func NewMutationContinuationFromFactory(
+	factory MutationRefFactory,
+	seed string,
+	authority MutationAuthority,
+	request ResolvedMutationRequest,
+	command CanonicalCommandDigest,
+	results []ResultSlotDeclaration,
+	scope LexicalScopeSnapshot,
+) (MutationContinuation, error) {
+	if factory == nil {
+		return MutationContinuation{}, continuationError(
+			"mutation invocation factory is nil",
+			"minting a retry-stable reference requires an injected factory, not an ad hoc caller-chosen value",
+			"supply DeterministicMutationRefFactory or a custom MutationRefFactory", nil,
+		)
+	}
+	ref, err := factory(seed)
+	if err != nil {
+		return MutationContinuation{}, continuationError(
+			"mutation invocation factory failed to mint a reference",
+			"the injected factory must produce a valid portable.MutationRef for every seed it accepts",
+			"correct the factory implementation or supply a valid seed", err,
+		)
+	}
+	return NewMutationContinuation(ref, authority, request, command, results, scope)
+}
+
 func NewMutationContinuation(
-	ref protocol.MutationRef,
+	ref portable.MutationRef,
 	authority MutationAuthority,
 	request ResolvedMutationRequest,
 	command CanonicalCommandDigest,
@@ -167,7 +234,7 @@ func NewMutationContinuation(
 	scope LexicalScopeSnapshot,
 ) (MutationContinuation, error) {
 	if !ref.IsValid() {
-		return MutationContinuation{}, continuationError("mutation reference is zero or invalid", "one logical invocation needs one constructor-validated retry identity", "construct the reference with protocol.NewMutationRef", nil)
+		return MutationContinuation{}, continuationError("mutation reference is zero or invalid", "one logical invocation needs one constructor-validated retry identity", "construct the reference with portable.NewMutationRef", nil)
 	}
 	if !validMutationAuthority(authority) {
 		return MutationContinuation{}, continuationError("mutation authority is omitted or unknown", "authority is closed to an initiating assignment or registered bootstrap agent", "construct authority with InitiatingAssignment or BootstrapActor", nil)
@@ -202,7 +269,7 @@ func validMutationAuthority(authority MutationAuthority) bool {
 	return false
 }
 
-func (c MutationContinuation) Ref() protocol.MutationRef        { return c.ref }
+func (c MutationContinuation) Ref() portable.MutationRef        { return c.ref }
 func (c MutationContinuation) Authority() MutationAuthority     { return c.authority }
 func (c MutationContinuation) Request() ResolvedMutationRequest { return c.request }
 func (c MutationContinuation) Command() CanonicalCommandDigest  { return c.command }
@@ -218,9 +285,9 @@ func (c MutationContinuation) IsValid() bool {
 // AssignmentContext is the complete logical continuity value restored for a
 // resumed or fresh runtime agent.
 type AssignmentContext struct {
-	role        protocol.RoleID
-	assignment  protocol.AssignmentRef
-	task        protocol.TaskRef
+	role        portable.RoleID
+	assignment  portable.AssignmentRef
+	task        portable.TaskRef
 	worktree    WorktreeRef
 	evidence    []EvidenceRef
 	decisions   []DecisionRef
@@ -230,9 +297,9 @@ type AssignmentContext struct {
 }
 
 func NewAssignmentContext(
-	role protocol.RoleID,
-	assignment protocol.AssignmentRef,
-	task protocol.TaskRef,
+	role portable.RoleID,
+	assignment portable.AssignmentRef,
+	task portable.TaskRef,
 	worktree WorktreeRef,
 	evidence []EvidenceRef,
 	decisions []DecisionRef,
@@ -281,9 +348,9 @@ func validateRefSlice(domain string, length int, valid func(int) bool) error {
 	return nil
 }
 
-func (c AssignmentContext) Role() protocol.RoleID              { return c.role }
-func (c AssignmentContext) Assignment() protocol.AssignmentRef { return c.assignment }
-func (c AssignmentContext) Task() protocol.TaskRef             { return c.task }
+func (c AssignmentContext) Role() portable.RoleID              { return c.role }
+func (c AssignmentContext) Assignment() portable.AssignmentRef { return c.assignment }
+func (c AssignmentContext) Task() portable.TaskRef             { return c.task }
 func (c AssignmentContext) Worktree() WorktreeRef              { return c.worktree }
 func (c AssignmentContext) Evidence() []EvidenceRef            { return append([]EvidenceRef(nil), c.evidence...) }
 func (c AssignmentContext) Decisions() []DecisionRef {

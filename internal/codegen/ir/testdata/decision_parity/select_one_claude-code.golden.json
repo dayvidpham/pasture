@@ -1,0 +1,108 @@
+{
+  "native": {
+    "kind": "request_user_decision",
+    "id": "pasture.orchestration.request-user-decision/v1",
+    "scope": "golden",
+    "payload": {
+      "schema": "pasture.request-user-decision/v1",
+      "request_id": "request-select_one_claude-code",
+      "harness": "claude-code",
+      "runtime_contract": "claude-code/2.1.210",
+      "epoch": "epoch-1",
+      "gate_task": "gate-1",
+      "purpose": "impl-uat",
+      "prompt": {
+        "mode": "select_one",
+        "data": {
+          "stimulus": {
+            "question": "Approve the plan?",
+            "definition_shown": "the ratified implementation plan",
+            "command_shown": "pasture uat approve"
+          },
+          "options": [
+            {
+              "id": "approve",
+              "label": "Approve",
+              "description": "accept the plan as written"
+            },
+            {
+              "id": "revise",
+              "label": "Revise",
+              "description": "request changes before proceeding"
+            }
+          ]
+        }
+      }
+    },
+    "results": []
+  },
+  "parent_mediated": {
+    "schema": "pasture.request-user-decision/v1",
+    "request_id": "request-select_one_claude-code",
+    "harness": "claude-code",
+    "runtime_contract": "claude-code/2.1.210",
+    "epoch": "epoch-1",
+    "gate_task": "gate-1",
+    "purpose": "impl-uat",
+    "prompt": {
+      "mode": "select_one",
+      "data": {
+        "stimulus": {
+          "question": "Approve the plan?",
+          "definition_shown": "the ratified implementation plan",
+          "command_shown": "pasture uat approve"
+        },
+        "options": [
+          {
+            "id": "approve",
+            "label": "Approve",
+            "description": "accept the plan as written"
+          },
+          {
+            "id": "revise",
+            "label": "Revise",
+            "description": "request changes before proceeding"
+          }
+        ]
+      }
+    }
+  },
+  "reported": {
+    "schema": "pasture.reported-user-decision/v1",
+    "request_id": "request-select_one_claude-code",
+    "harness": "claude-code",
+    "runtime_contract": "claude-code/2.1.210",
+    "epoch": "epoch-1",
+    "gate_task": "gate-1",
+    "purpose": "impl-uat",
+    "prompt": {
+      "mode": "select_one",
+      "data": {
+        "stimulus": {
+          "question": "Approve the plan?",
+          "definition_shown": "the ratified implementation plan",
+          "command_shown": "pasture uat approve"
+        },
+        "options": [
+          {
+            "id": "approve",
+            "label": "Approve",
+            "description": "accept the plan as written"
+          },
+          {
+            "id": "revise",
+            "label": "Revise",
+            "description": "request changes before proceeding"
+          }
+        ]
+      }
+    },
+    "result": {
+      "mode": "select_one",
+      "data": {
+        "selected": "approve",
+        "verbatim_answer": "approve"
+      }
+    }
+  }
+}

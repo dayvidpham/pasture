@@ -3,10 +3,11 @@ package ir
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"unicode/utf8"
 
-	"github.com/dayvidpham/pasture/pkg/protocol"
+	"github.com/dayvidpham/pasture/pkg/protocol/portable"
 )
 
 type OperationKind string
@@ -21,7 +22,7 @@ const (
 	OperationRequestUserDecision      OperationKind = "request_user_decision"
 )
 
-var AllOperationKinds = []OperationKind{
+var canonicalOperationKinds = [...]OperationKind{
 	OperationInvokeSkill,
 	OperationDelegateAssignment,
 	OperationContinueAssignment,
@@ -29,6 +30,16 @@ var AllOperationKinds = []OperationKind{
 	OperationCollectAssignmentResults,
 	OperationStopAssignment,
 	OperationRequestUserDecision,
+}
+
+// AllOperationKinds returns a fresh defensive copy of the closed
+// orchestration variant set, in canonical order. This is a function, not a
+// package-level slice: an earlier revision exported a mutable
+// `var AllOperationKinds []OperationKind` initialized once at package load,
+// so any caller mutation corrupted every later reader for the lifetime of
+// the process.
+func AllOperationKinds() []OperationKind {
+	return append([]OperationKind(nil), canonicalOperationKinds[:]...)
 }
 
 var coreOperationIDs = map[OperationKind]SemanticOperationID{
@@ -272,15 +283,15 @@ func NewContinueAssignment(context AssignmentContext, scope ScopeID, results ...
 
 type SendAssignmentMessage struct {
 	base       operationBase
-	assignment protocol.AssignmentRef
+	assignment portable.AssignmentRef
 	message    string
 }
 
-func (o SendAssignmentMessage) Assignment() protocol.AssignmentRef { return o.assignment }
+func (o SendAssignmentMessage) Assignment() portable.AssignmentRef { return o.assignment }
 func (o SendAssignmentMessage) Message() string                    { return o.message }
 func (o SendAssignmentMessage) Scope() ScopeID                     { return o.base.scope }
 
-func NewSendAssignmentMessage(assignment protocol.AssignmentRef, message string, scope ScopeID) (SendAssignmentMessage, error) {
+func NewSendAssignmentMessage(assignment portable.AssignmentRef, message string, scope ScopeID) (SendAssignmentMessage, error) {
 	base, err := newOperationBase(scope, nil)
 	if err != nil {
 		return SendAssignmentMessage{}, err
@@ -293,12 +304,12 @@ func NewSendAssignmentMessage(assignment protocol.AssignmentRef, message string,
 
 type CollectAssignmentResults struct {
 	base        operationBase
-	assignments []protocol.AssignmentRef
+	assignments []portable.AssignmentRef
 	scheduling  Scheduling
 }
 
-func (o CollectAssignmentResults) Assignments() []protocol.AssignmentRef {
-	return append([]protocol.AssignmentRef(nil), o.assignments...)
+func (o CollectAssignmentResults) Assignments() []portable.AssignmentRef {
+	return append([]portable.AssignmentRef(nil), o.assignments...)
 }
 func (o CollectAssignmentResults) Scheduling() Scheduling { return o.scheduling }
 func (o CollectAssignmentResults) Scope() ScopeID         { return o.base.scope }
@@ -306,7 +317,7 @@ func (o CollectAssignmentResults) Results() []ResultSlotDeclaration {
 	return append([]ResultSlotDeclaration(nil), o.base.results...)
 }
 
-func NewCollectAssignmentResults(assignments []protocol.AssignmentRef, scheduling Scheduling, scope ScopeID, results ...ResultSlotDeclaration) (CollectAssignmentResults, error) {
+func NewCollectAssignmentResults(assignments []portable.AssignmentRef, scheduling Scheduling, scope ScopeID, results ...ResultSlotDeclaration) (CollectAssignmentResults, error) {
 	base, err := newOperationBase(scope, results)
 	if err != nil {
 		return CollectAssignmentResults{}, err
@@ -323,17 +334,17 @@ func NewCollectAssignmentResults(assignments []protocol.AssignmentRef, schedulin
 
 type StopAssignment struct {
 	base        operationBase
-	assignments []protocol.AssignmentRef
+	assignments []portable.AssignmentRef
 	reason      string
 }
 
-func (o StopAssignment) Assignments() []protocol.AssignmentRef {
-	return append([]protocol.AssignmentRef(nil), o.assignments...)
+func (o StopAssignment) Assignments() []portable.AssignmentRef {
+	return append([]portable.AssignmentRef(nil), o.assignments...)
 }
 func (o StopAssignment) Reason() string { return o.reason }
 func (o StopAssignment) Scope() ScopeID { return o.base.scope }
 
-func NewStopAssignment(assignments []protocol.AssignmentRef, reason string, scope ScopeID) (StopAssignment, error) {
+func NewStopAssignment(assignments []portable.AssignmentRef, reason string, scope ScopeID) (StopAssignment, error) {
 	base, err := newOperationBase(scope, nil)
 	if err != nil {
 		return StopAssignment{}, err
@@ -348,15 +359,15 @@ func NewStopAssignment(assignments []protocol.AssignmentRef, reason string, scop
 	return StopAssignment{base: base, assignments: owned, reason: reason}, nil
 }
 
-func validateAssignmentRefs(assignments []protocol.AssignmentRef) ([]protocol.AssignmentRef, error) {
+func validateAssignmentRefs(assignments []portable.AssignmentRef) ([]portable.AssignmentRef, error) {
 	if len(assignments) == 0 {
 		return nil, operationError("assignment reference collection is empty", "collection operations need at least one logical destination", "supply one or more AssignmentRef values", nil)
 	}
-	owned := append([]protocol.AssignmentRef(nil), assignments...)
+	owned := append([]portable.AssignmentRef(nil), assignments...)
 	seen := make(map[string]struct{}, len(owned))
 	for index, assignment := range owned {
 		if !assignment.IsValid() {
-			return nil, operationError(fmt.Sprintf("assignment reference %d is invalid", index), "raw or zero identities cannot enter orchestration", "construct it with protocol.NewAssignmentRef", nil)
+			return nil, operationError(fmt.Sprintf("assignment reference %d is invalid", index), "raw or zero identities cannot enter orchestration", "construct it with portable.NewAssignmentRef", nil)
 		}
 		if _, duplicate := seen[assignment.String()]; duplicate {
 			return nil, operationError(fmt.Sprintf("assignment %q is duplicated", assignment), "collection semantics operate once per logical assignment", "deduplicate the collection", nil)
@@ -435,6 +446,13 @@ func canonicalSemanticOperation(operation SemanticOperation) ([]byte, error) {
 	if operation == nil {
 		return nil, operationError("semantic operation is nil", "the orchestration sum is closed and nil has no meaning", "construct one supported operation variant", nil)
 	}
+	if isNilOperationPointer(operation) {
+		return nil, operationError(
+			fmt.Sprintf("operation variant %T is a nil pointer", operation),
+			"the orchestration sum is closed and a typed nil pointer has no operation meaning, even though the interface value itself is non-nil",
+			"supply a non-nil operation value (or a non-nil pointer to one)", nil,
+		)
+	}
 	if err := operation.validateOperation(); err != nil {
 		return nil, err
 	}
@@ -466,11 +484,33 @@ func normalizeSemanticOperation(operation SemanticOperation) (SemanticOperation,
 		}
 		return validated, nil
 	default:
+		if isNilOperationPointer(operation) {
+			return nil, operationError(
+				fmt.Sprintf("operation variant %T is a nil pointer", operation),
+				"the orchestration sum is closed and a typed nil pointer has no operation meaning, even though the interface value itself is non-nil",
+				"supply a non-nil operation value (or a non-nil pointer to one)", nil,
+			)
+		}
 		if err := operation.validateOperation(); err != nil {
 			return nil, err
 		}
 		return operation, nil
 	}
+}
+
+// isNilOperationPointer reports whether operation is a non-nil
+// SemanticOperation interface value wrapping a nil pointer. Every one of
+// InvokeSkill, DelegateAssignment, ContinueAssignment,
+// SendAssignmentMessage, CollectAssignmentResults, and StopAssignment
+// implements SemanticOperation with value receivers, so *T also satisfies
+// the interface for each — a caller passing a typed-nil *InvokeSkill (etc.)
+// produces a non-nil interface value whose underlying pointer is nil. Left
+// unchecked, validateOperation()'s value-receiver call auto-dereferences
+// that nil pointer and panics instead of returning the closed-sum
+// diagnostic every other nil shape in this package already returns.
+func isNilOperationPointer(operation SemanticOperation) bool {
+	reflected := reflect.ValueOf(operation)
+	return reflected.Kind() == reflect.Ptr && reflected.IsNil()
 }
 
 // SemanticOperationKind returns the closed protocol variant identity.
@@ -588,7 +628,7 @@ func (o RequestUserDecision) canonicalOperation() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return marshalOperation(o.operationKind(), ScopeID{}, json.RawMessage(request), nil)
+	return marshalOperation(o.operationKind(), o.base.scope, json.RawMessage(request), o.base.results)
 }
 
 func operationError(what, why, fix string, cause error) error {

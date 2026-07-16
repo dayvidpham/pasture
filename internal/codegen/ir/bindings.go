@@ -74,6 +74,17 @@ const (
 	valueSourceResult
 )
 
+func (s valueSource) String() string {
+	switch s {
+	case valueSourceInput:
+		return "a context input (BindRuntimeValue/InputValueRef)"
+	case valueSourceResult:
+		return "a captured result (CaptureRuntimeResult/ResultValueRef)"
+	default:
+		return "an unknown/forged source"
+	}
+}
+
 func InputValueRef[T any](key BindingKey[T], scope ScopeID) (ValueRef[T], error) {
 	if !key.IsValid() || !scope.IsValid() {
 		return ValueRef[T]{}, bindingError("input ValueRef has an invalid key or scope", "typed operands require constructor-validated identity and lexical scope", "construct both operands before creating the reference", nil)
@@ -139,6 +150,7 @@ type bindingEntry struct {
 	typeOf   reflect.Type
 	typeName string
 	encoded  []byte
+	source   valueSource
 }
 
 // RuntimeBindings is an immutable typed lexical binding environment.
@@ -150,11 +162,24 @@ func NewRuntimeBindings() RuntimeBindings {
 
 func (b RuntimeBindings) Len() int { return len(b.entries) }
 
+// BindRuntimeValue binds a context input: a value already known before any
+// mutation runs (e.g. an assignment's task or worktree). It always stores
+// the entry with valueSourceInput, matching InputValueRef.
 func BindRuntimeValue[T any](
 	bindings RuntimeBindings,
 	key BindingKey[T],
 	scope ScopeID,
 	value T,
+) (RuntimeBindings, error) {
+	return bindRuntimeValueWithSource(bindings, key, scope, value, valueSourceInput)
+}
+
+func bindRuntimeValueWithSource[T any](
+	bindings RuntimeBindings,
+	key BindingKey[T],
+	scope ScopeID,
+	value T,
+	source valueSource,
 ) (RuntimeBindings, error) {
 	if !key.IsValid() || !scope.IsValid() {
 		return RuntimeBindings{}, bindingError("binding has an invalid key or scope", "runtime values need a stable typed key and lexical owner", "construct the key and scope first", nil)
@@ -173,11 +198,17 @@ func BindRuntimeValue[T any](
 	out := cloneBindings(bindings)
 	out.entries[key.name] = bindingEntry{
 		key: key.name, scope: scope, typeOf: typeOf[T](), typeName: typeOf[T]().String(),
-		encoded: append([]byte(nil), encoded...),
+		encoded: append([]byte(nil), encoded...), source: source,
 	}
 	return out, nil
 }
 
+// CaptureRuntimeResult binds a result produced by running a mutation. It
+// always stores the entry with valueSourceResult, matching ResultValueRef,
+// so a ResultValueRef can never resolve against an entry that was only ever
+// bound as a context input (see ResolveRuntimeValue's source check) — an
+// uncaptured result must stay missing, not silently alias an input that
+// happens to share the same key spelling.
 func CaptureRuntimeResult[T any](
 	bindings RuntimeBindings,
 	slot ResultSlot[T],
@@ -190,7 +221,7 @@ func CaptureRuntimeResult[T any](
 	if err != nil {
 		return RuntimeBindings{}, bindingError(fmt.Sprintf("result %q failed typed JSON capture", slot.key.name), "runtime output did not satisfy its declared portable domain", "return JSON matching the slot codec", err)
 	}
-	return BindRuntimeValue(bindings, slot.key, slot.scope, value)
+	return bindRuntimeValueWithSource(bindings, slot.key, slot.scope, value, valueSourceResult)
 }
 
 func ResolveRuntimeValue[T any](
@@ -199,7 +230,7 @@ func ResolveRuntimeValue[T any](
 	current ScopeID,
 ) (T, error) {
 	var zero T
-	if ref.key == "" || ref.typeOf != typeOf[T]() || !ref.scope.IsValid() || !current.IsValid() {
+	if ref.key == "" || ref.typeOf != typeOf[T]() || !ref.scope.IsValid() || !current.IsValid() || ref.source == 0 {
 		return zero, bindingError("ValueRef or current scope is zero or forged", "typed dataflow accepts only constructor-produced references", "construct the ValueRef and current ScopeID through their APIs", nil)
 	}
 	entry, found := bindings.entries[ref.key]
@@ -208,6 +239,13 @@ func ResolveRuntimeValue[T any](
 	}
 	if entry.typeOf != typeOf[T]() {
 		return zero, bindingError(fmt.Sprintf("binding %q has type %s, not %s", ref.key, entry.typeName, typeOf[T]()), "portable ID domains and result schemas cannot be interchanged", "consume the binding with a ValueRef of its declared type", nil)
+	}
+	if entry.source != ref.source {
+		return zero, bindingError(
+			fmt.Sprintf("binding %q was captured as %s but referenced as %s", ref.key, entry.source, ref.source),
+			"a ResultValueRef must resolve only a value CaptureRuntimeResult actually captured, and an InputValueRef must resolve only a value BindRuntimeValue bound as a context input; conflating them would let a mutation's declared result resolve before the mutation ever ran, aliasing whatever unrelated input happens to share its key",
+			"resolve a result with the ValueRef returned by ResultValueRef only after CaptureRuntimeResult, and resolve an input with the ValueRef returned by InputValueRef", nil,
+		)
 	}
 	if entry.scope != ref.scope {
 		return zero, bindingError(fmt.Sprintf("binding %q declaration scope changed", ref.key), "a reference cannot retarget a same-named value in another scope", "use the ValueRef produced for the original slot/key", nil)

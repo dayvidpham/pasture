@@ -26,11 +26,16 @@ func TestReportedUserDecisionSelectManyGolden(t *testing.T) {
 		MinSelections: 1,
 		MaxSelections: 2,
 	}
+	scope, err := ir.NewRootScope("golden")
+	require.NoError(t, err)
 	request, err := ir.NewRequestUserDecision(
 		"request-α", ir.HarnessCodex, mustContract(t, ir.HarnessCodex, "0.144.1"),
 		mustTaskRef(t, "epoch-1"), mustTaskRef(t, "gate-1"), "implementation-uat", prompt,
+		scope,
 	)
 	require.NoError(t, err)
+	assert.Equal(t, scope, request.Scope())
+	assert.Empty(t, request.Results())
 
 	selected := []ir.OptionID{"z", "a"}
 	report := ir.ReportedUserDecision{
@@ -54,7 +59,8 @@ func TestReportedUserDecisionSelectManyGolden(t *testing.T) {
 
 	golden, err := os.ReadFile("testdata/reported_select_many.golden.json")
 	require.NoError(t, err)
-	assert.Equal(t, strings.TrimSpace(string(golden)), string(canonical))
+	assert.True(t, canonical.IsValid())
+	assert.Equal(t, strings.TrimSpace(string(golden)), string(canonical.Bytes()))
 	assert.Equal(t, goldenWithoutFinalNewline(golden), canonical.Bytes())
 
 	canonicalCopy := canonical.Bytes()
@@ -108,7 +114,8 @@ func TestReportedUserDecisionClosedModes(t *testing.T) {
 			decoded, canonical, err := request.DecodeReportedResult(bytes.NewReader(encoded), 64<<10)
 			require.NoError(t, err)
 			assert.NotNil(t, decoded.Result)
-			assert.True(t, json.Valid(canonical))
+			assert.True(t, canonical.IsValid())
+			assert.True(t, json.Valid(canonical.Bytes()))
 		})
 	}
 }
@@ -163,9 +170,10 @@ func TestReportedUserDecisionRejectsMalformedOrMismatchedEvidence(t *testing.T) 
 		name, input := name, input
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, tree, err := request.DecodeReportedResult(bytes.NewReader(input), 64<<10)
+			_, canonical, err := request.DecodeReportedResult(bytes.NewReader(input), 64<<10)
 			require.Error(t, err)
-			assert.Nil(t, tree)
+			assert.False(t, canonical.IsValid())
+			assert.Zero(t, canonical)
 			for _, field := range []string{"what:", "why:", "where:", "phase:", "impact:", "fix:"} {
 				assert.Contains(t, err.Error(), field)
 			}
@@ -174,14 +182,18 @@ func TestReportedUserDecisionRejectsMalformedOrMismatchedEvidence(t *testing.T) 
 
 	_, canonical, err := request.DecodeReportedResult(bytes.NewReader(valid), int64(len(valid)-1))
 	require.Error(t, err)
-	assert.Nil(t, canonical)
+	assert.False(t, canonical.IsValid())
+	assert.Zero(t, canonical)
 }
 
 func decisionRequest(t testing.TB, prompt ir.UserDecisionPrompt) ir.RequestUserDecision {
 	t.Helper()
+	scope, err := ir.NewRootScope("decision")
+	require.NoError(t, err)
 	request, err := ir.NewRequestUserDecision(
 		"request-1", ir.HarnessClaudeCode, mustContract(t, ir.HarnessClaudeCode, "2.1.210"),
 		mustTaskRef(t, "epoch-1"), mustTaskRef(t, "gate-1"), "test-purpose", prompt,
+		scope,
 	)
 	require.NoError(t, err)
 	return request
@@ -207,12 +219,13 @@ func FuzzDecodeReportedUserDecision(f *testing.F) {
 	f.Fuzz(func(t *testing.T, input []byte) {
 		decoded, canonical, err := request.DecodeReportedResult(bytes.NewReader(input), 4096)
 		if err != nil {
-			assert.Nil(t, canonical)
+			assert.False(t, canonical.IsValid())
 			return
 		}
 		assert.Equal(t, ir.ReportedUserDecisionSchema, decoded.Schema)
-		assert.True(t, json.Valid(canonical))
-		decodedAgain, canonicalAgain, err := request.DecodeReportedResult(bytes.NewReader(canonical), 4096)
+		assert.True(t, canonical.IsValid())
+		assert.True(t, json.Valid(canonical.Bytes()))
+		decodedAgain, canonicalAgain, err := request.DecodeReportedResult(bytes.NewReader(canonical.Bytes()), 4096)
 		require.NoError(t, err)
 		assert.Equal(t, decoded.RequestID, decodedAgain.RequestID)
 		assert.Equal(t, canonical.Bytes(), canonicalAgain.Bytes())

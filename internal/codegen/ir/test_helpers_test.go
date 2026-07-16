@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
-	"github.com/dayvidpham/pasture/pkg/protocol"
+	"github.com/dayvidpham/pasture/pkg/protocol/portable"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,16 +15,16 @@ func mustLocation(t testing.TB, section string, stop int) ir.Location {
 	return location
 }
 
-func mustTaskRef(t testing.TB, value string) protocol.TaskRef {
+func mustTaskRef(t testing.TB, value string) portable.TaskRef {
 	t.Helper()
-	reference, err := protocol.NewTaskRef(value)
+	reference, err := portable.NewTaskRef(value)
 	require.NoError(t, err)
 	return reference
 }
 
-func mustAssignmentRef(t testing.TB, value string) protocol.AssignmentRef {
+func mustAssignmentRef(t testing.TB, value string) portable.AssignmentRef {
 	t.Helper()
-	reference, err := protocol.NewAssignmentRef(value)
+	reference, err := portable.NewAssignmentRef(value)
 	require.NoError(t, err)
 	return reference
 }

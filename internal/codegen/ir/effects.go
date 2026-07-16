@@ -93,10 +93,10 @@ func (s EffectSet) ContainsAll(required EffectSet) bool {
 
 // CompatibleWith requires exact canonical effect equality. A runtime binding
 // with missing or additional effects does not implement the same descriptor.
+// This is the only compatibility-check spelling: an earlier revision also
+// exported the identical Compatible(required) as an "explicit alias",
+// meaning every caller had to pick between two names for one concept.
 func (s EffectSet) CompatibleWith(required EffectSet) bool { return s.Equal(required) }
-
-// Compatible is an explicit alias for CompatibleWith.
-func (s EffectSet) Compatible(required EffectSet) bool { return s.CompatibleWith(required) }
 
 func (s EffectSet) MarshalJSON() ([]byte, error) {
 	if !s.IsValid() {

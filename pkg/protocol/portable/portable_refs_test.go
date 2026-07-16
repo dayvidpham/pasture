@@ -1,10 +1,10 @@
-package protocol_test
+package portable_test
 
 import (
 	"encoding/json"
 	"testing"
 
-	"github.com/dayvidpham/pasture/pkg/protocol"
+	"github.com/dayvidpham/pasture/pkg/protocol/portable"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -12,15 +12,15 @@ import (
 func TestPortableRefsAreDistinctValidatedDomains(t *testing.T) {
 	t.Parallel()
 
-	assignment, err := protocol.NewAssignmentRef("assignment-17")
+	assignment, err := portable.NewAssignmentRef("assignment-17")
 	require.NoError(t, err)
-	task, err := protocol.NewTaskRef("task-17")
+	task, err := portable.NewTaskRef("task-17")
 	require.NoError(t, err)
-	role, err := protocol.NewRoleID("worker")
+	role, err := portable.NewRoleID("worker")
 	require.NoError(t, err)
-	mutation, err := protocol.NewMutationRef("mutation-17")
+	mutation, err := portable.NewMutationRef("mutation-17")
 	require.NoError(t, err)
-	agent, err := protocol.NewAgentRef("bootstrap-17")
+	agent, err := portable.NewAgentRef("bootstrap-17")
 	require.NoError(t, err)
 
 	assert.Equal(t, "assignment-17", assignment.String())
@@ -35,11 +35,11 @@ func TestPortableRefsAreDistinctValidatedDomains(t *testing.T) {
 	assert.True(t, agent.IsValid())
 
 	for name, construct := range map[string]func(string) error{
-		"assignment": func(value string) error { _, err := protocol.NewAssignmentRef(value); return err },
-		"task":       func(value string) error { _, err := protocol.NewTaskRef(value); return err },
-		"role":       func(value string) error { _, err := protocol.NewRoleID(value); return err },
-		"mutation":   func(value string) error { _, err := protocol.NewMutationRef(value); return err },
-		"agent":      func(value string) error { _, err := protocol.NewAgentRef(value); return err },
+		"assignment": func(value string) error { _, err := portable.NewAssignmentRef(value); return err },
+		"task":       func(value string) error { _, err := portable.NewTaskRef(value); return err },
+		"role":       func(value string) error { _, err := portable.NewRoleID(value); return err },
+		"mutation":   func(value string) error { _, err := portable.NewMutationRef(value); return err },
+		"agent":      func(value string) error { _, err := portable.NewAgentRef(value); return err },
 	} {
 		construct := construct
 		t.Run(name, func(t *testing.T) {
@@ -57,13 +57,13 @@ func TestPortableRefsAreDistinctValidatedDomains(t *testing.T) {
 func TestPortableRefJSONRoundTripRejectsInvalid(t *testing.T) {
 	t.Parallel()
 
-	task, err := protocol.NewTaskRef("epoch-root")
+	task, err := portable.NewTaskRef("epoch-root")
 	require.NoError(t, err)
 	encoded, err := json.Marshal(task)
 	require.NoError(t, err)
 	assert.JSONEq(t, `"epoch-root"`, string(encoded))
 
-	var decoded protocol.TaskRef
+	var decoded portable.TaskRef
 	require.NoError(t, json.Unmarshal(encoded, &decoded))
 	assert.Equal(t, task, decoded)
 

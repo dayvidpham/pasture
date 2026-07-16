@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
-	"github.com/dayvidpham/pasture/pkg/protocol"
+	"github.com/dayvidpham/pasture/pkg/protocol/portable"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,7 +20,7 @@ func TestTypedBindingsCaptureAndLexicalScope(t *testing.T) {
 	require.NoError(t, err)
 	sibling, err := ir.NewChildScope(root, "sibling")
 	require.NoError(t, err)
-	taskKey, err := ir.NewBindingKey[protocol.TaskRef]("pasture.binding.task")
+	taskKey, err := ir.NewBindingKey[portable.TaskRef]("pasture.binding.task")
 	require.NoError(t, err)
 	taskRef, err := ir.InputValueRef(taskKey, child)
 	require.NoError(t, err)
@@ -36,7 +36,7 @@ func TestTypedBindingsCaptureAndLexicalScope(t *testing.T) {
 	_, err = ir.ResolveRuntimeValue(bindings, taskRef, root)
 	assert.Error(t, err, "ancestor scope must not consume a descendant's result")
 
-	assignmentKey, err := ir.NewBindingKey[protocol.AssignmentRef]("pasture.binding.task")
+	assignmentKey, err := ir.NewBindingKey[portable.AssignmentRef]("pasture.binding.task")
 	require.NoError(t, err)
 	wrongDomain, err := ir.InputValueRef(assignmentKey, child)
 	require.NoError(t, err)
@@ -46,14 +46,14 @@ func TestTypedBindingsCaptureAndLexicalScope(t *testing.T) {
 	_, err = ir.BindRuntimeValue(bindings, taskKey, child, mustTaskRef(t, "duplicate"))
 	assert.Error(t, err)
 
-	codec, err := ir.NewJSONCodec[protocol.AssignmentRef]("pasture.binding.assignment-result/v1", func(value protocol.AssignmentRef) error {
+	codec, err := ir.NewJSONCodec[portable.AssignmentRef]("pasture.binding.assignment-result/v1", func(value portable.AssignmentRef) error {
 		if !value.IsValid() {
 			return assert.AnError
 		}
 		return nil
 	})
 	require.NoError(t, err)
-	resultKey, err := ir.NewBindingKey[protocol.AssignmentRef]("pasture.binding.assignment-result")
+	resultKey, err := ir.NewBindingKey[portable.AssignmentRef]("pasture.binding.assignment-result")
 	require.NoError(t, err)
 	slot, err := ir.NewResultSlot(resultKey, child, codec)
 	require.NoError(t, err)
@@ -75,7 +75,7 @@ func TestMutationContinuationRetainsExactRequestAuthorityResultsAndScope(t *test
 
 	scope, err := ir.NewRootScope("parent")
 	require.NoError(t, err)
-	key, err := ir.NewBindingKey[protocol.TaskRef]("pasture.binding.gate-task")
+	key, err := ir.NewBindingKey[portable.TaskRef]("pasture.binding.gate-task")
 	require.NoError(t, err)
 	bindings, err := ir.BindRuntimeValue(ir.NewRuntimeBindings(), key, scope, mustTaskRef(t, "gate-task"))
 	require.NoError(t, err)
@@ -92,9 +92,9 @@ func TestMutationContinuationRetainsExactRequestAuthorityResultsAndScope(t *test
 	require.NoError(t, err)
 	assert.True(t, digest.Equal(parsedDigest))
 
-	resultCodec, err := ir.NewJSONCodec[protocol.TaskRef]("pasture.task.update-result/v1", nil)
+	resultCodec, err := ir.NewJSONCodec[portable.TaskRef]("pasture.task.update-result/v1", nil)
 	require.NoError(t, err)
-	resultKey, err := ir.NewBindingKey[protocol.TaskRef]("pasture.binding.updated-task")
+	resultKey, err := ir.NewBindingKey[portable.TaskRef]("pasture.binding.updated-task")
 	require.NoError(t, err)
 	resultSlot, err := ir.NewResultSlot(resultKey, scope, resultCodec)
 	require.NoError(t, err)
@@ -102,7 +102,7 @@ func TestMutationContinuationRetainsExactRequestAuthorityResultsAndScope(t *test
 	require.NoError(t, err)
 	authority, err := ir.InitiatingAssignment(mustAssignmentRef(t, "assignment-owner"))
 	require.NoError(t, err)
-	mutationRef, err := protocol.NewMutationRef("mutation-logical-1")
+	mutationRef, err := portable.NewMutationRef("mutation-logical-1")
 	require.NoError(t, err)
 	continuation, err := ir.NewMutationContinuation(
 		mutationRef, authority, request, digest, []ir.ResultSlotDeclaration{declaration}, snapshot,
@@ -121,7 +121,7 @@ func TestMutationContinuationRetainsExactRequestAuthorityResultsAndScope(t *test
 	results[0] = ir.ResultSlotDeclaration{}
 	assert.True(t, continuation.Results()[0].IsValid())
 
-	secondRef, err := protocol.NewMutationRef("mutation-logical-2")
+	secondRef, err := portable.NewMutationRef("mutation-logical-2")
 	require.NoError(t, err)
 	second, err := ir.NewMutationContinuation(secondRef, authority, request, digest, nil, snapshot)
 	require.NoError(t, err)
@@ -156,9 +156,9 @@ func TestClosedOrchestrationVariantsAreNeutralAndComplete(t *testing.T) {
 	require.NoError(t, err)
 	message, err := ir.NewSendAssignmentMessage(context.Assignment(), "Status requested", scope)
 	require.NoError(t, err)
-	collect, err := ir.NewCollectAssignmentResults([]protocol.AssignmentRef{context.Assignment()}, ir.DependencyOrdered(), scope)
+	collect, err := ir.NewCollectAssignmentResults([]portable.AssignmentRef{context.Assignment()}, ir.DependencyOrdered(), scope)
 	require.NoError(t, err)
-	stop, err := ir.NewStopAssignment([]protocol.AssignmentRef{context.Assignment()}, "work is superseded", scope)
+	stop, err := ir.NewStopAssignment([]portable.AssignmentRef{context.Assignment()}, "work is superseded", scope)
 	require.NoError(t, err)
 	decision := decisionRequest(t, ir.FreeTextPrompt{Stimulus: ir.PromptStimulus{Question: "What changed?"}})
 
@@ -174,7 +174,7 @@ func TestClosedOrchestrationVariantsAreNeutralAndComplete(t *testing.T) {
 		{stop, ir.OperationStopAssignment},
 		{decision, ir.OperationRequestUserDecision},
 	}
-	assert.Len(t, operations, len(ir.AllOperationKinds))
+	assert.Len(t, operations, len(ir.AllOperationKinds()))
 	for _, test := range operations {
 		kind, err := ir.SemanticOperationKind(test.operation)
 		require.NoError(t, err)
@@ -195,13 +195,13 @@ func TestClosedOrchestrationVariantsAreNeutralAndComplete(t *testing.T) {
 	assert.Equal(t, "work is superseded", stop.Reason())
 	_, err = ir.BoundedParallel(0)
 	assert.Error(t, err)
-	_, err = ir.NewSendAssignmentMessage(protocol.AssignmentRef{}, "message", scope)
+	_, err = ir.NewSendAssignmentMessage(portable.AssignmentRef{}, "message", scope)
 	assert.Error(t, err)
 }
 
 func assignmentContext(t testing.TB, bindings ir.RuntimeBindings, mutations []ir.MutationContinuation) ir.AssignmentContext {
 	t.Helper()
-	role, err := protocol.NewRoleID("worker")
+	role, err := portable.NewRoleID("worker")
 	require.NoError(t, err)
 	worktree, err := ir.NewWorktreeRef("worktree/worker")
 	require.NoError(t, err)

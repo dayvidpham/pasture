@@ -162,44 +162,16 @@ type targetCaseValue struct {
 
 func (targetCaseValue) targetCase() {}
 
-func NewRuntimeContractID(harness HarnessID, name string) (RuntimeContractID, error) {
-	if !harness.IsValid() {
-		return "", documentError(fmt.Sprintf("runtime contract harness %q is unknown", harness), "contracts bind one enabled harness", "use a known HarnessID", nil)
-	}
-	if strings.TrimSpace(name) == "" || strings.TrimSpace(name) != name || strings.ContainsAny(name, "\t\r\n") {
-		return "", documentError("runtime contract name is empty, padded, or multiline", "contract identities require one exact spelling", "supply a non-empty single-line name", nil)
-	}
-	prefix := string(harness) + "/"
-	if strings.HasPrefix(name, prefix) {
-		return RuntimeContractID(name), nil
-	}
-	return RuntimeContractID(prefix + name), nil
-}
-
-func runtimeContractHarness(contract RuntimeContractID) (HarnessID, bool) {
-	value := string(contract)
-	for _, harness := range canonicalHarnessIDs {
-		if strings.HasPrefix(value, string(harness)+"/") && len(value) > len(harness)+1 {
-			return harness, true
-		}
-	}
-	return "", false
-}
-
-// LiteralFor constructs a contract-bound literal. Its harness is derived from
-// the RuntimeContractID constructed by NewRuntimeContractID.
-func LiteralFor(contract RuntimeContractID, content []byte, reason string) (TargetCase, error) {
-	harness, ok := runtimeContractHarness(contract)
-	if !ok {
-		return nil, documentError(fmt.Sprintf("runtime contract %q has no enabled harness prefix", contract), "literal selection must be exhaustive by harness", "construct the contract with NewRuntimeContractID", nil)
-	}
-	return LiteralForHarness(harness, contract, content, reason)
-}
-
-// LiteralForHarness constructs a case while explicitly checking the harness.
+// LiteralForHarness constructs a contract-bound literal case, explicitly
+// checking that harness is the exact enabled harness contract was
+// constructed for. This is the only literal-construction spelling: an
+// earlier revision additionally offered LiteralFor, which derived harness
+// from the contract itself and forwarded here — now that RuntimeContractID
+// is opaque and self-describing (Harness()), that indirection added a second
+// spelling of the same concept without adding safety. Callers that only have
+// a contract in hand can pass contract.Harness() explicitly.
 func LiteralForHarness(harness HarnessID, contract RuntimeContractID, content []byte, reason string) (TargetCase, error) {
-	derived, ok := runtimeContractHarness(contract)
-	if !harness.IsValid() || !ok || derived != harness {
+	if !harness.IsValid() || !contract.IsValid() || contract.Harness() != harness {
 		return nil, documentError("literal harness and runtime contract do not match", "native syntax is valid only for its reviewed contract", "use the harness encoded by NewRuntimeContractID", nil)
 	}
 	owned := append([]byte(nil), content...)
@@ -230,7 +202,7 @@ func TargetLiteral(cases []TargetCase, at Location) (Part, error) {
 			}
 		}
 		if !ok || !value.harness.IsValid() || strings.TrimSpace(value.reason) == "" {
-			return nil, documentError(fmt.Sprintf("target case %d is zero or unknown", index), "target literals are a closed exhaustive sum", "construct cases with LiteralFor or LiteralUnsupported", nil)
+			return nil, documentError(fmt.Sprintf("target case %d is zero or unknown", index), "target literals are a closed exhaustive sum", "construct cases with LiteralForHarness or LiteralUnsupported", nil)
 		}
 		if _, duplicate := byHarness[value.harness]; duplicate {
 			return nil, documentError(fmt.Sprintf("target literal duplicates harness %q", value.harness), "each enabled harness needs exactly one disposition", "remove the duplicate case", nil)
@@ -242,11 +214,11 @@ func TargetLiteral(cases []TargetCase, at Location) (Part, error) {
 	}
 	for _, harness := range canonicalHarnessIDs {
 		if _, exists := byHarness[harness]; !exists {
-			return nil, documentError(fmt.Sprintf("target literal omits enabled harness %q", harness), "raw native syntax must be exhaustive and cannot silently fall back", "add LiteralFor or LiteralUnsupported for the harness", nil)
+			return nil, documentError(fmt.Sprintf("target literal omits enabled harness %q", harness), "raw native syntax must be exhaustive and cannot silently fall back", "add LiteralForHarness or LiteralUnsupported for the harness", nil)
 		}
 	}
 	if len(byHarness) != len(canonicalHarnessIDs) {
-		return nil, documentError("target literal includes an out-of-range harness", "the portable target set is closed", "remove cases outside AllHarnessIDs", nil)
+		return nil, documentError("target literal includes an out-of-range harness", "the portable target set is closed", "remove cases outside EnabledHarnessIDs", nil)
 	}
 	return targetLiteralPart{location: at, cases: byHarness}, nil
 }
@@ -392,8 +364,7 @@ func NewTarget(
 	lowerer OperationLowerer,
 	validators ...NativeValidator,
 ) (Target, error) {
-	derived, ok := runtimeContractHarness(contract)
-	if !harness.IsValid() || !ok || derived != harness {
+	if !harness.IsValid() || !contract.IsValid() || contract.Harness() != harness {
 		return Target{}, compileError("target harness and runtime contract are invalid or mismatched", "target selection must use one reviewed harness-bound contract", Location{}, "target validation", "construct the contract with NewRuntimeContractID for this harness", nil)
 	}
 	if !validRelativePath(outputPath) {
@@ -412,13 +383,17 @@ func (t Target) Harness() HarnessID                 { return t.harness }
 func (t Target) RuntimeContract() RuntimeContractID { return t.contract }
 func (t Target) OutputPath() string                 { return t.outputPath }
 
-// RenderedFile is an immutable relative file.
+// RenderedFile is an immutable relative file. Construction is private to
+// this package (see newRenderedFile) — only Compile produces one, so a
+// caller can never fabricate a RenderedFile/RenderedTree to hand to a
+// NativeValidator or downstream publisher and have it pass for genuine
+// compiled output.
 type RenderedFile struct {
 	path    string
 	content []byte
 }
 
-func NewRenderedFile(relativePath string, content []byte) (RenderedFile, error) {
+func newRenderedFile(relativePath string, content []byte) (RenderedFile, error) {
 	if !validRelativePath(relativePath) || len(content) == 0 {
 		return RenderedFile{}, compileError(fmt.Sprintf("rendered file %q has an unsafe path or empty content", relativePath), "complete trees require immutable non-empty relative files", Location{}, "tree validation", "use a normalized relative path and non-empty content", nil)
 	}
@@ -429,16 +404,18 @@ func (f RenderedFile) Path() string    { return f.path }
 func (f RenderedFile) Content() []byte { return append([]byte(nil), f.content...) }
 
 // RenderedTree is one complete immutable set of validated relative files.
+// Construction is private to this package (see newRenderedTree); Compile is
+// the only producer.
 type RenderedTree struct{ files map[string]RenderedFile }
 
-func NewRenderedTree(files ...RenderedFile) (RenderedTree, error) {
+func newRenderedTree(files ...RenderedFile) (RenderedTree, error) {
 	if len(files) == 0 {
 		return RenderedTree{}, compileError("rendered tree has no files", "successful compilation returns one complete output set", Location{}, "tree validation", "supply at least one validated RenderedFile", nil)
 	}
 	owned := make(map[string]RenderedFile, len(files))
 	for index, file := range files {
 		if !validRelativePath(file.path) || len(file.content) == 0 {
-			return RenderedTree{}, compileError(fmt.Sprintf("rendered file %d is zero or invalid", index), "forged files cannot enter an immutable tree", Location{}, "tree validation", "construct each file with NewRenderedFile", nil)
+			return RenderedTree{}, compileError(fmt.Sprintf("rendered file %d is zero or invalid", index), "forged files cannot enter an immutable tree", Location{}, "tree validation", "let Compile construct every file", nil)
 		}
 		if _, duplicate := owned[file.path]; duplicate {
 			return RenderedTree{}, compileError(fmt.Sprintf("rendered path %q is duplicated", file.path), "one complete tree has exactly one content value per path", Location{}, "tree validation", "deduplicate output paths", nil)
@@ -475,8 +452,7 @@ func Compile(document Document, target Target) (RenderedTree, error) {
 	if len(document.parts) == 0 {
 		return RenderedTree{}, compileError("document is zero or empty", "only NewDocument establishes part invariants", Location{}, "document validation", "construct the document with NewDocument", nil)
 	}
-	derived, ok := runtimeContractHarness(target.contract)
-	if !target.harness.IsValid() || !ok || derived != target.harness || !validRelativePath(target.outputPath) {
+	if !target.harness.IsValid() || !target.contract.IsValid() || target.contract.Harness() != target.harness || !validRelativePath(target.outputPath) {
 		return RenderedTree{}, compileError("target is zero, invalid, or internally mismatched", "only NewTarget establishes a complete runtime selection", Location{}, "target validation", "construct the target with NewTarget", nil)
 	}
 	for index, part := range document.parts {
@@ -519,11 +495,11 @@ func Compile(document Document, target Target) (RenderedTree, error) {
 			return RenderedTree{}, compileError(fmt.Sprintf("unknown document part %T", part), "the document sum is closed", part.partLocation(), "rendering", "construct only supported Part variants", nil)
 		}
 	}
-	file, err := NewRenderedFile(target.outputPath, output.Bytes())
+	file, err := newRenderedFile(target.outputPath, output.Bytes())
 	if err != nil {
 		return RenderedTree{}, err
 	}
-	tree, err := NewRenderedTree(file)
+	tree, err := newRenderedTree(file)
 	if err != nil {
 		return RenderedTree{}, err
 	}

@@ -67,6 +67,20 @@ func (c JSONCodec[T]) Decode(data []byte) (T, error) {
 			"construct the codec with NewJSONCodec", nil,
 		)
 	}
+	if err := rejectDuplicateJSONMembers(data); err != nil {
+		if isDuplicateJSONMember(err) {
+			return zero, diagnostic(
+				"JSON value has a duplicate member", "a duplicate key lets two readers of the same bytes disagree on the effective value",
+				string(c.schema), "codec decoding", "the runtime result cannot be trusted",
+				"encode each field exactly once", err,
+			)
+		}
+		return zero, diagnostic(
+			"JSON value is empty, truncated, or malformed", "decoding requires one complete, syntactically valid JSON value before it can be validated",
+			string(c.schema), "codec decoding", "the runtime result cannot be parsed",
+			"supply the complete, syntactically valid JSON value", err,
+		)
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var value T

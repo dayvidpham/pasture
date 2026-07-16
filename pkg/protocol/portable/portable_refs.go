@@ -1,4 +1,10 @@
-package protocol
+// Package portable defines Pasture's portable cross-boundary identity types.
+// It is deliberately dependency-free of pkg/protocol's TaskTracker facade (and
+// therefore of github.com/dayvidpham/provenance): internal/codegen/ir compiles
+// documents entirely in memory and must not pull in a durable-store client
+// transitively through an unrelated identity type. See
+// dependency_guard_test.go in internal/codegen/ir for the enforced boundary.
+package portable
 
 import (
 	"encoding/json"

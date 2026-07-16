@@ -28,7 +28,7 @@ func TestEffectSetCanonicalCodecEqualityAndCompatibility(t *testing.T) {
 	assert.False(t, set.CompatibleWith(required), "additional effects change descriptor semantics")
 	assert.True(t, set.CompatibleWith(equal))
 	assert.False(t, required.CompatibleWith(set))
-	assert.False(t, set.Compatible(empty))
+	assert.False(t, set.CompatibleWith(empty))
 	assert.True(t, set.ContainsAll(required))
 	assert.True(t, set.ContainsAll(empty))
 	assert.False(t, (ir.EffectSet{}).IsValid())
