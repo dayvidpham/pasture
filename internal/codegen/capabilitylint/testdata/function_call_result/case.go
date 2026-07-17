@@ -23,7 +23,7 @@ func computeID() ir.CapabilityID {
 
 func defineWithFunctionCallResult(inputCodec ir.Codec[input], outputCodec ir.Codec[output], effects ir.EffectSet) ir.Capability[input, output] {
 	return ir.MustDefineCapability[input, output](
-		computeID(),
+		computeID(), // want "result of a function/method call"
 		ir.CapabilityContractVersion("1.0.0"),
 		ir.CapabilitySemantics{Summary: "fixture", Result: "fixture result"},
 		effects,

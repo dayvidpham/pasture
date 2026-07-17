@@ -122,12 +122,19 @@
 // The same runtime backstop (validateCapabilityID, registry conflict
 // detection) still applies to it.
 //
-// Check is intentionally syntactic — go/ast/go/parser/go/token only, no
-// go/types, no module loading, no golang.org/x/tools — so this package adds
-// no new module dependency. Its scope-aware resolution relies on go/parser's
-// legacy (but still functional, and not removed) identifier resolution; see
-// collectTypedConstObjs, collectCapabilityIDParamObjs, and
-// collectImportNames for the precise mechanism and its limits.
+// Check's rule itself is intentionally syntactic — go/ast/go/parser/go/token
+// only, no go/types — and this package is also available as a standalone
+// golang.org/x/tools/go/analysis.Analyzer (see Analyzer below) for use with
+// go/analysis-based drivers (go vet -vettool, unitchecker, analysistest,
+// etc.), which is how its own fixture corpus is now exercised (see
+// analysistest_test.go). Its scope-aware resolution relies on go/parser's
+// legacy (but still functional, and not removed) identifier resolution — the
+// same resolution go/packages performs when it parses files for
+// golang.org/x/tools/go/analysis drivers (see collectTypedConstObjs,
+// collectCapabilityIDParamObjs, and collectImportNames for the precise
+// mechanism and its limits), so Check's logic is unchanged: only the
+// entry point (a *ast.File already parsed and supplied by a driver, via
+// Analyzer's Run, rather than one CheckFile parses itself) is new.
 package capabilitylint
 
 import (
@@ -135,7 +142,38 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+
+	"golang.org/x/tools/go/analysis"
 )
+
+// Analyzer is capabilitylint packaged as a golang.org/x/tools/go/analysis
+// analyzer: it applies exactly the same deny-by-default rule as Check (see
+// the package doc comment) to every file in the analyzed package, reporting
+// one diagnostic per Finding via pass.Reportf. It requires no other
+// analyzer's facts or results and performs no type-checking of its own —
+// consistent with Check's syntactic, go/types-free design — so it can run
+// standalone (analysistest, a single-analyzer unitchecker) or alongside any
+// other analyzer set.
+var Analyzer = &analysis.Analyzer{
+	Name: "capabilitylint",
+	Doc: "reports ir.DefineCapability/ir.MustDefineCapability calls whose identity " +
+		"argument does not resolve to a package-level typed const, a verbatim-forwarded " +
+		"CapabilityID-typed parameter, or a qualified cross-package const reference; see " +
+		"the capabilitylint package doc comment for the full deny-by-default rule.",
+	Run:              run,
+	RunDespiteErrors: false,
+}
+
+// run is Analyzer's Run function: it applies Check to every file in the
+// package under analysis and reports each Finding at its recorded Pos.
+func run(pass *analysis.Pass) (any, error) {
+	for _, file := range pass.Files {
+		for _, finding := range Check(file) {
+			pass.Reportf(finding.Pos, "%s", finding.Message)
+		}
+	}
+	return nil, nil
+}
 
 const (
 	capabilityIDTypeName          = "CapabilityID"

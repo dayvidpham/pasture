@@ -20,7 +20,7 @@ type output struct {
 func defineWithRangeReassignedParameter(id ir.CapabilityID, ids []ir.CapabilityID, inputCodec ir.Codec[input], outputCodec ir.Codec[output], effects ir.EffectSet) (ir.Capability[input, output], error) {
 	for _, id = range ids {
 		return ir.DefineCapability(
-			id,
+			id, // want "does not resolve to a package-level"
 			ir.CapabilityContractVersion("1.0.0"),
 			ir.CapabilitySemantics{Summary: "fixture", Result: "fixture result"},
 			effects,

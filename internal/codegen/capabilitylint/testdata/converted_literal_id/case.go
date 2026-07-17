@@ -18,7 +18,7 @@ type output struct {
 
 func defineWithConversion(inputCodec ir.Codec[input], outputCodec ir.Codec[output], effects ir.EffectSet) (ir.Capability[input, output], error) {
 	return ir.DefineCapability(
-		ir.CapabilityID("acme.diagram.render"),
+		ir.CapabilityID("acme.diagram.render"), // want "inline ir\\.CapabilityID\\(\\.\\.\\.\\) conversion"
 		ir.CapabilityContractVersion("1.0.0"),
 		ir.CapabilitySemantics{Summary: "fixture", Result: "fixture result"},
 		effects,

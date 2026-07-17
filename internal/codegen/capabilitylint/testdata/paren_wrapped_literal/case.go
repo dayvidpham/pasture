@@ -17,7 +17,7 @@ type output struct {
 
 func defineWithParenLiteral(inputCodec ir.Codec[input], outputCodec ir.Codec[output], effects ir.EffectSet) ir.Capability[input, output] {
 	return ir.MustDefineCapability[input, output](
-		("acme.diagram.render"),
+		("acme.diagram.render"), // want "raw string literal capability identity"
 		ir.CapabilityContractVersion("1.0.0"),
 		ir.CapabilitySemantics{Summary: "fixture", Result: "fixture result"},
 		effects,

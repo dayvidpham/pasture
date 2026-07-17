@@ -30,7 +30,7 @@ type holder struct {
 func defineWithShadowedImportSelector(userValue string, inputCodec ir.Codec[input], outputCodec ir.Codec[output], effects ir.EffectSet) (ir.Capability[input, output], error) {
 	fmt := holder{Value: ir.CapabilityID(fmt.Sprintf("acme.diagram.%s", userValue))}
 	return ir.DefineCapability(
-		fmt.Value,
+		fmt.Value, // want "not a reference to one of this file's imported packages"
 		ir.CapabilityContractVersion("1.0.0"),
 		ir.CapabilitySemantics{Summary: "fixture", Result: "fixture result"},
 		effects,

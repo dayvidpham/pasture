@@ -17,7 +17,7 @@ type output struct {
 
 func defineWithConcatenation(inputCodec ir.Codec[input], outputCodec ir.Codec[output], effects ir.EffectSet) ir.Capability[input, output] {
 	return ir.MustDefineCapability[input, output](
-		"acme."+"diagram.render",
+		"acme."+"diagram.render", // want "binary expression \\(e\\.g\\. string concatenation\\)"
 		ir.CapabilityContractVersion("1.0.0"),
 		ir.CapabilitySemantics{Summary: "fixture", Result: "fixture result"},
 		effects,

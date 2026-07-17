@@ -29,7 +29,7 @@ const CapabilityRenderDiagram ir.CapabilityID = "acme.legit.canonical"
 func defineWithShadowedLocal(userSuppliedID string, inputCodec ir.Codec[input], outputCodec ir.Codec[output], effects ir.EffectSet) ir.Capability[input, output] {
 	CapabilityRenderDiagram := ir.CapabilityID(userSuppliedID)
 	return ir.MustDefineCapability[input, output](
-		CapabilityRenderDiagram,
+		CapabilityRenderDiagram, // want "does not resolve to a package-level"
 		ir.CapabilityContractVersion("1.0.0"),
 		ir.CapabilitySemantics{Summary: "fixture", Result: "fixture result"},
 		effects,

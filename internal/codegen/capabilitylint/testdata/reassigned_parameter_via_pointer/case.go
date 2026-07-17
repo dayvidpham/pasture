@@ -21,7 +21,7 @@ func defineWithPointerReassignedParameter(id ir.CapabilityID, inputCodec ir.Code
 	p := &id
 	*p = ir.CapabilityID("acme.diagram.pointer.rebound")
 	return ir.MustDefineCapability(
-		id,
+		id, // want "does not resolve to a package-level"
 		ir.CapabilityContractVersion("1.0.0"),
 		ir.CapabilitySemantics{Summary: "fixture", Result: "fixture result"},
 		effects,

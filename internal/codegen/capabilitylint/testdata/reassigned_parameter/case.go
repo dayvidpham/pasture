@@ -21,7 +21,7 @@ type output struct {
 func defineWithReassignedParameter(id ir.CapabilityID, inputCodec ir.Codec[input], outputCodec ir.Codec[output], effects ir.EffectSet) (ir.Capability[input, output], error) {
 	id = ir.CapabilityID("acme.diagram.rebound")
 	return ir.DefineCapability(
-		id,
+		id, // want "does not resolve to a package-level"
 		ir.CapabilityContractVersion("1.0.0"),
 		ir.CapabilitySemantics{Summary: "fixture", Result: "fixture result"},
 		effects,

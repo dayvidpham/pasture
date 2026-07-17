@@ -19,7 +19,7 @@ type output struct {
 func defineWithLocalTypedVar(inputCodec ir.Codec[input], outputCodec ir.Codec[output], effects ir.EffectSet) (ir.Capability[input, output], error) {
 	var localID ir.CapabilityID = "acme.diagram.render"
 	return ir.DefineCapability(
-		localID,
+		localID, // want "does not resolve to a package-level"
 		ir.CapabilityContractVersion("1.0.0"),
 		ir.CapabilitySemantics{Summary: "fixture", Result: "fixture result"},
 		effects,

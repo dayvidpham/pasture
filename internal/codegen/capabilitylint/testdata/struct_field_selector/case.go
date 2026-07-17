@@ -24,7 +24,7 @@ type capabilityConfig struct {
 func defineWithStructFieldSelector(inputCodec ir.Codec[input], outputCodec ir.Codec[output], effects ir.EffectSet) ir.Capability[input, output] {
 	cfg := capabilityConfig{ID: "acme.diagram.render"}
 	return ir.MustDefineCapability[input, output](
-		cfg.ID,
+		cfg.ID, // want "not a reference to one of this file's imported packages"
 		ir.CapabilityContractVersion("1.0.0"),
 		ir.CapabilitySemantics{Summary: "fixture", Result: "fixture result"},
 		effects,

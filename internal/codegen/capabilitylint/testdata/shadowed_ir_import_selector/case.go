@@ -33,7 +33,7 @@ func defineWithShadowedIRSelector(userValue string, inputCodec capir.Codec[input
 	prefixed := ir.ToUpper(userValue)
 	ir := holder{Value: capir.CapabilityID(prefixed)}
 	return capir.DefineCapability(
-		ir.Value,
+		ir.Value, // want "not a reference to one of this file's imported packages"
 		capir.CapabilityContractVersion("1.0.0"),
 		capir.CapabilitySemantics{Summary: "fixture", Result: "fixture result"},
 		effects,

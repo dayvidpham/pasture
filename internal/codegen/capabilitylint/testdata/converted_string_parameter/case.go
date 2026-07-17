@@ -18,7 +18,7 @@ type output struct {
 
 func WrapRawString(raw string, inputCodec ir.Codec[input], outputCodec ir.Codec[output], effects ir.EffectSet) (ir.Capability[input, output], error) {
 	return ir.DefineCapability(
-		ir.CapabilityID(raw),
+		ir.CapabilityID(raw), // want "inline ir\\.CapabilityID\\(\\.\\.\\.\\) conversion"
 		ir.CapabilityContractVersion("1.0.0"),
 		ir.CapabilitySemantics{Summary: "fixture", Result: "fixture result"},
 		effects,

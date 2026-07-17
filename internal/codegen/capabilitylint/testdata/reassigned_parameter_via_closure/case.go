@@ -21,7 +21,7 @@ func Outer(id ir.CapabilityID, inputCodec ir.Codec[input], outputCodec ir.Codec[
 	return func() (ir.Capability[input, output], error) {
 		id = ir.CapabilityID("acme.diagram.closure.rebound")
 		return ir.MustDefineCapability(
-			id,
+			id, // want "does not resolve to a package-level"
 			ir.CapabilityContractVersion("1.0.0"),
 			ir.CapabilitySemantics{Summary: "fixture", Result: "fixture result"},
 			effects,
