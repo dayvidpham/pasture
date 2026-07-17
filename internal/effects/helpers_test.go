@@ -68,12 +68,16 @@ func mustGuardedInput(t testing.TB, expected effects.ExpectedOldOID) effects.Gua
 // fakePusher is a deterministic RepositoryPusher used to drive every guarded-push
 // scenario without a real repository or any sleeping. Each primitive's result is
 // configured directly, and call counts are recorded so tests can prove ordering
-// and short-circuiting.
+// and short-circuiting. ReadRemote is called twice by the production algorithm —
+// once before the push (returns remoteBefore, zero value = absent) and once
+// after (returns remoteAfter) — so the two states can be configured
+// independently to model the already-at-target-before-the-call scenario.
 type fakePusher struct {
-	localErr    error
-	pushErr     error
-	remoteAfter effects.RemoteState
-	readErr     error
+	localErr     error
+	pushErr      error
+	remoteBefore effects.RemoteState
+	remoteAfter  effects.RemoteState
+	readErr      error
 
 	verifyCalls int
 	pushCalls   int
@@ -92,7 +96,13 @@ func (f *fakePusher) PushExact(effects.RepositoryID, effects.CommitOID, effects.
 
 func (f *fakePusher) ReadRemote(effects.RepositoryID, effects.RemoteRef) (effects.RemoteState, error) {
 	f.readCalls++
-	return f.remoteAfter, f.readErr
+	if f.readErr != nil {
+		return effects.RemoteState{}, f.readErr
+	}
+	if f.readCalls == 1 {
+		return f.remoteBefore, nil
+	}
+	return f.remoteAfter, nil
 }
 
 // memNode is one in-memory filesystem node.

@@ -27,6 +27,7 @@ func TestGuardedPushExactCommitScenarios(t *testing.T) {
 		wantOutcome effects.GuardedPushOutcome
 		wantVerify  int
 		wantPush    int
+		wantRead    int
 		wantErrHint string
 	}{
 		{
@@ -37,15 +38,38 @@ func TestGuardedPushExactCommitScenarios(t *testing.T) {
 			wantOutcome: effects.GuardedPushPushed,
 			wantVerify:  1,
 			wantPush:    1,
+			wantRead:    2,
 		},
 		{
-			name:        "already-at-target is idempotent replay success",
+			// Realistic already-at-target scenario: git's own force-with-lease
+			// reports an already-up-to-date no-op as SUCCESS (nil error), not a
+			// rejection — so the outcome must be classified from the remote's
+			// prior state, not from a push error.
+			name:     "already-at-target is idempotent replay success",
+			expected: expectAbsent(),
+			pusher: &fakePusher{
+				remoteBefore: effects.PresentRemoteState(mustCommit(t, oidA)),
+				remoteAfter:  effects.PresentRemoteState(mustCommit(t, oidA)),
+			},
+			wantProof:   true,
+			wantOutcome: effects.GuardedPushIdempotentReplay,
+			wantVerify:  1,
+			wantPush:    1,
+			wantRead:    2,
+		},
+		{
+			// Fallback path: the pre-push probe found nothing usable (here,
+			// simply unset/absent), but the pusher rejected the push as a
+			// no-op and the post-push re-read still confirms the exact
+			// target — still classified as a replay, not a fresh push.
+			name:        "push rejection with confirmed target is idempotent replay success",
 			expected:    expectAbsent(),
 			pusher:      &fakePusher{pushErr: errors.New("rejected: already up to date"), remoteAfter: effects.PresentRemoteState(mustCommit(t, oidA))},
 			wantProof:   true,
 			wantOutcome: effects.GuardedPushIdempotentReplay,
 			wantVerify:  1,
 			wantPush:    1,
+			wantRead:    2,
 		},
 		{
 			name:        "missing local object never pushes and yields no proof",
@@ -54,6 +78,7 @@ func TestGuardedPushExactCommitScenarios(t *testing.T) {
 			wantProof:   false,
 			wantVerify:  1,
 			wantPush:    0,
+			wantRead:    0,
 			wantErrHint: "local object",
 		},
 		{
@@ -63,6 +88,7 @@ func TestGuardedPushExactCommitScenarios(t *testing.T) {
 			wantProof:   false,
 			wantVerify:  1,
 			wantPush:    1,
+			wantRead:    2,
 			wantErrHint: "did not reach exact commit",
 		},
 		{
@@ -72,6 +98,7 @@ func TestGuardedPushExactCommitScenarios(t *testing.T) {
 			wantProof:   false,
 			wantVerify:  1,
 			wantPush:    1,
+			wantRead:    2,
 			wantErrHint: "did not reach exact commit",
 		},
 		{
@@ -81,6 +108,7 @@ func TestGuardedPushExactCommitScenarios(t *testing.T) {
 			wantProof:   false,
 			wantVerify:  1,
 			wantPush:    1,
+			wantRead:    2,
 			wantErrHint: "could not be re-read",
 		},
 	}
@@ -93,6 +121,7 @@ func TestGuardedPushExactCommitScenarios(t *testing.T) {
 			proof, err := effects.GuardedPushExactCommit(input, testCase.pusher)
 			assert.Equal(t, testCase.wantVerify, testCase.pusher.verifyCalls, "verify call count")
 			assert.Equal(t, testCase.wantPush, testCase.pusher.pushCalls, "push call count")
+			assert.Equal(t, testCase.wantRead, testCase.pusher.readCalls, "read call count")
 			if testCase.wantProof {
 				require.NoError(t, err)
 				require.NoError(t, proof.Validate())
@@ -115,11 +144,25 @@ func TestGuardedPushExactCommitWithExpectedCommit(t *testing.T) {
 	expected, err := effects.ExpectRemoteAt(mustCommit(t, oidB))
 	require.NoError(t, err)
 	input := mustGuardedInput(t, expected)
-	pusher := &fakePusher{remoteAfter: effects.PresentRemoteState(mustCommit(t, oidA))}
+	pusher := &fakePusher{
+		remoteBefore: effects.PresentRemoteState(mustCommit(t, oidB)),
+		remoteAfter:  effects.PresentRemoteState(mustCommit(t, oidA)),
+	}
 	proof, err := effects.GuardedPushExactCommit(input, pusher)
 	require.NoError(t, err)
 	require.NoError(t, proof.Validate())
 	assert.Equal(t, effects.GuardedPushPushed, proof.Outcome())
+}
+
+// TestGuardedPushOutcomeIsValid proves the outcome enum is a closed set: only
+// the two verified outcomes validate, and the zero value and any other string
+// are rejected.
+func TestGuardedPushOutcomeIsValid(t *testing.T) {
+	t.Parallel()
+	assert.True(t, effects.GuardedPushPushed.IsValid())
+	assert.True(t, effects.GuardedPushIdempotentReplay.IsValid())
+	assert.False(t, effects.GuardedPushOutcome("").IsValid(), "zero value is invalid")
+	assert.False(t, effects.GuardedPushOutcome("pending").IsValid(), "unrecognized value is invalid")
 }
 
 // TestGuardedPushRejectsInvalidInputs proves the algorithm rejects a zero input

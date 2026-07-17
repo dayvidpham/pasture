@@ -128,9 +128,12 @@ func (s RemoteState) Commit() (CommitOID, bool) {
 // RepositoryPusher is the injected seam that performs the three primitive git
 // operations a guarded push composes: verifying the exact local object,
 // performing only the CommitOID:RemoteRef update, and re-reading the remote.
-// Production wires this to a git executable; tests wire a fake. The guarded-push
-// algorithm — verify, push, re-read, and only-then construct the proof — lives
-// entirely in GuardedPushExactCommit, never in an implementation of this seam.
+// Production wires this to a git executable; tests wire a fake. ReadRemote is
+// called twice by the algorithm below — once before the push, to probe whether
+// the remote already holds the exact target, and once after, to verify it. The
+// guarded-push algorithm — verify, probe, push, re-read, and only-then construct
+// the proof — lives entirely in GuardedPushExactCommit, never in an
+// implementation of this seam.
 type RepositoryPusher interface {
 	// VerifyLocalObject confirms the local repository holds commit and that it
 	// carries exactly tree. It returns an actionable error otherwise.
@@ -220,10 +223,14 @@ func (v VerifiedGuardedPush) MarshalJSON() ([]byte, error) {
 }
 
 // GuardedPushExactCommit is the one landing push. It verifies the exact local
-// object, performs only the CommitOID:RemoteRef update through pusher, re-reads
-// the remote, and constructs the opaque VerifiedGuardedPush only when the remote
-// holds the exact commit. A remote already at the commit is an idempotent replay
-// success; a stale, racing, or different ref returns no proof. It makes no
+// object, probes the remote before pushing (best-effort — an unreadable probe
+// never blocks the push), performs only the CommitOID:RemoteRef update through
+// pusher, re-reads the remote, and constructs the opaque VerifiedGuardedPush
+// only when that re-read confirms the remote holds the exact commit. This
+// re-read gate is the sole safety invariant and is unconditional: no outcome
+// label ever bypasses it. A remote that already held the exact commit before
+// this call ran is an idempotent replay success, labeled distinctly from a
+// fresh push; a stale, racing, or different ref returns no proof. It makes no
 // SQLite or multi-repository atomicity claim.
 func GuardedPushExactCommit(input GuardedPushInput, pusher RepositoryPusher) (VerifiedGuardedPush, error) {
 	if !input.IsValid() {
@@ -253,6 +260,21 @@ func GuardedPushExactCommit(input GuardedPushInput, pusher RepositoryPusher) (Ve
 			"ensure the exact commit and its tree exist locally before landing", err,
 		)
 	}
+
+	// Best-effort pre-push probe: if the remote already holds the exact target,
+	// a push that lands nothing (for example git's own "everything up to date"
+	// no-op, which force-with-lease reports as success, not an error) must still
+	// be labeled a replay rather than a fresh push. An unreadable or absent
+	// probe result never blocks the push and never by itself produces a proof —
+	// it only informs the outcome label decided after the mandatory post-push
+	// re-read below.
+	alreadyAtTarget := false
+	if priorState, priorErr := pusher.ReadRemote(input.repository, input.remoteRef); priorErr == nil {
+		if priorCommit, present := priorState.Commit(); present && priorCommit.Equal(input.commit) {
+			alreadyAtTarget = true
+		}
+	}
+
 	pushErr := pusher.PushExact(input.repository, input.commit, input.remoteRef, input.expectedOld)
 	state, readErr := pusher.ReadRemote(input.repository, input.remoteRef)
 	if readErr != nil {
@@ -275,9 +297,18 @@ func GuardedPushExactCommit(input GuardedPushInput, pusher RepositoryPusher) (Ve
 		)
 	}
 	outcome := GuardedPushPushed
-	if pushErr != nil {
-		// The remote already held the exact commit: the push was a no-op but the
-		// exact target is verified, so this is an idempotent replay success.
+	switch {
+	case alreadyAtTarget:
+		// The pre-push probe confirmed the remote already held the exact target
+		// before this call ran; the re-read above only reconfirms it. This call
+		// advanced nothing, so it is a verified idempotent replay.
+		outcome = GuardedPushIdempotentReplay
+	case pushErr != nil:
+		// The pre-push probe could not determine prior state (unreadable or
+		// absent), but the pusher rejected the push (for example an
+		// already-up-to-date rejection) and the mandatory re-read above still
+		// confirms the exact target: this call did not itself advance the ref,
+		// so it is an idempotent replay rather than a fresh push.
 		outcome = GuardedPushIdempotentReplay
 	}
 	return newVerifiedGuardedPush(input, outcome), nil
