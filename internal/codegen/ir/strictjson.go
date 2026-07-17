@@ -8,7 +8,7 @@ import (
 	"io"
 )
 
-// strictJSONWithPresence decodes exactly one JSON value from data into
+// StrictJSONWithPresence decodes exactly one JSON value from data into
 // target, and:
 //  1. rejects any duplicate JSON object member anywhere in data (see
 //     rejectDuplicateJSONMembers) — encoding/json's decoder silently applies
@@ -24,7 +24,16 @@ import (
 //
 // requiredFields names the top-level JSON object members target must
 // contain; it is the caller's exhaustive omission matrix for that wire type.
-func strictJSONWithPresence(data []byte, requiredFields []string, target any) error {
+//
+// This is the single shared presence-aware strict-JSON codec every checked-in
+// manifest/wire decoder in this module should use — it is exported
+// specifically so internal/codegen/scan (and future manifest-consuming
+// packages such as #43/#46/#40) can call it instead of each maintaining their
+// own byte-for-byte copy of this algorithm. Only the decoder entry points
+// (this function and IsDuplicateJSONMember) are exported;
+// rejectDuplicateJSONMembers stays this package's internal implementation
+// detail.
+func StrictJSONWithPresence(data []byte, requiredFields []string, target any) error {
 	if err := rejectDuplicateJSONMembers(data); err != nil {
 		return err
 	}
@@ -136,10 +145,13 @@ func walkNoDuplicateMembers(decoder *json.Decoder) error {
 	}
 }
 
-// isDuplicateJSONMember reports whether err (or something it wraps) is a
+// IsDuplicateJSONMember reports whether err (or something it wraps) is a
 // genuine duplicate-member failure from rejectDuplicateJSONMembers, as
-// opposed to empty/truncated/malformed input.
-func isDuplicateJSONMember(err error) bool {
+// opposed to empty/truncated/malformed input. Exported alongside
+// StrictJSONWithPresence so a caller outside this package can distinguish
+// "duplicate member" from every other decode failure without reimplementing
+// rejectDuplicateJSONMembers' internal error type.
+func IsDuplicateJSONMember(err error) bool {
 	var duplicate *duplicateJSONMemberError
 	return errors.As(err, &duplicate)
 }

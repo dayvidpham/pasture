@@ -105,7 +105,7 @@ func (r ResolvedMutationRequest) IsValid() bool {
 // duplicate value was authoritative.
 func canonicalJSON(data []byte) ([]byte, error) {
 	if err := rejectDuplicateJSONMembers(data); err != nil {
-		if isDuplicateJSONMember(err) {
+		if IsDuplicateJSONMember(err) {
 			return nil, fmt.Errorf("mutation request has a duplicate JSON member: %w", err)
 		}
 		return nil, fmt.Errorf("mutation request is empty, truncated, or malformed JSON: %w", err)

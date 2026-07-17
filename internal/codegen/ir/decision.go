@@ -386,7 +386,7 @@ func (q RequestUserDecision) DecodeReportedResult(
 		)
 	}
 	if err := rejectDuplicateJSONMembers(data); err != nil {
-		if isDuplicateJSONMember(err) {
+		if IsDuplicateJSONMember(err) {
 			return ReportedUserDecision{}, CanonicalDecisionBytes{}, decisionError(
 				"reported-result JSON has a duplicate member",
 				"a duplicate key lets different readers of the same bytes disagree on the effective value",
@@ -623,7 +623,7 @@ type reportWire struct {
 }
 
 // Every required-field list below is the exhaustive omission matrix for its
-// wire form: strictJSONWithPresence rejects a decode when any of these JSON
+// wire form: StrictJSONWithPresence rejects a decode when any of these JSON
 // members is missing, even though its Go zero value (empty string, 0, nil
 // slice) could otherwise look like a deliberately supplied value — an
 // omitted "min_selections" and an explicit "min_selections": 0 must not be
@@ -644,7 +644,7 @@ var (
 )
 
 // promptStimulusWire is PromptStimulus's underlying type without its methods,
-// used to decode through strictJSONWithPresence without recursing back into
+// used to decode through StrictJSONWithPresence without recursing back into
 // PromptStimulus.UnmarshalJSON.
 type promptStimulusWire PromptStimulus
 
@@ -654,7 +654,7 @@ type promptStimulusWire PromptStimulus
 // indistinguishable from a caller who explicitly supplied an empty string.
 func (s *PromptStimulus) UnmarshalJSON(data []byte) error {
 	var wire promptStimulusWire
-	if err := strictJSONWithPresence(data, promptStimulusRequiredFields, &wire); err != nil {
+	if err := StrictJSONWithPresence(data, promptStimulusRequiredFields, &wire); err != nil {
 		return decisionError(
 			"prompt stimulus JSON is malformed or omits a required field",
 			"question, definition_shown, and command_shown must all be explicitly present, even when a value is legitimately empty",
@@ -666,7 +666,7 @@ func (s *PromptStimulus) UnmarshalJSON(data []byte) error {
 }
 
 // decisionOptionWire is DecisionOption's underlying type without its
-// methods, used to decode through strictJSONWithPresence without recursing
+// methods, used to decode through StrictJSONWithPresence without recursing
 // back into DecisionOption.UnmarshalJSON.
 type decisionOptionWire DecisionOption
 
@@ -677,7 +677,7 @@ type decisionOptionWire DecisionOption
 // PromptStimulus.UnmarshalJSON closes for the stimulus object.
 func (o *DecisionOption) UnmarshalJSON(data []byte) error {
 	var wire decisionOptionWire
-	if err := strictJSONWithPresence(data, decisionOptionRequiredFields, &wire); err != nil {
+	if err := StrictJSONWithPresence(data, decisionOptionRequiredFields, &wire); err != nil {
 		return decisionError(
 			"decision option JSON is malformed or omits a required field",
 			"id, label, and description must all be explicitly present, even when a value is legitimately empty",
@@ -789,7 +789,7 @@ func marshalResult(result UserDecisionResult) ([]byte, error) {
 
 func decodeReportedWire(data []byte) (ReportedUserDecision, error) {
 	var wire reportWire
-	if err := strictJSONWithPresence(data, reportWireRequiredFields, &wire); err != nil {
+	if err := StrictJSONWithPresence(data, reportWireRequiredFields, &wire); err != nil {
 		return ReportedUserDecision{}, decisionError(
 			"reported-result JSON is malformed, has unknown fields, omits a required field, or has trailing content",
 			"the evidence codec accepts exactly one closed versioned value with every field explicitly present, "+
@@ -814,25 +814,25 @@ func decodeReportedWire(data []byte) (ReportedUserDecision, error) {
 
 func decodePrompt(data []byte) (UserDecisionPrompt, error) {
 	var envelope promptEnvelope
-	if err := strictJSONWithPresence(data, envelopeRequiredFields, &envelope); err != nil {
+	if err := StrictJSONWithPresence(data, envelopeRequiredFields, &envelope); err != nil {
 		return nil, decisionError("prompt envelope is malformed or omits mode/data", "prompt mode and data are a closed sum and both must be explicitly present", "encode one supported prompt variant", err)
 	}
 	switch envelope.Mode {
 	case promptSelectOne:
 		var wire selectOnePromptWire
-		if err := strictJSONWithPresence(envelope.Data, selectOnePromptWireRequiredFields, &wire); err != nil {
+		if err := StrictJSONWithPresence(envelope.Data, selectOnePromptWireRequiredFields, &wire); err != nil {
 			return nil, decisionError("select-one prompt data is malformed or omits a required field", "variant data cannot contain fields from another mode, and every field of this mode must be present", "encode exactly stimulus and options", err)
 		}
 		return cloneAndValidatePrompt(SelectOnePrompt(wire))
 	case promptSelectMany:
 		var wire selectManyPromptWire
-		if err := strictJSONWithPresence(envelope.Data, selectManyPromptWireRequiredFields, &wire); err != nil {
+		if err := StrictJSONWithPresence(envelope.Data, selectManyPromptWireRequiredFields, &wire); err != nil {
 			return nil, decisionError("select-many prompt data is malformed or omits a required field", "variant data must include explicit bounds, and an omitted min_selections/max_selections is not the same as an explicit 0", "encode stimulus, options, min_selections, and max_selections", err)
 		}
 		return cloneAndValidatePrompt(SelectManyPrompt(wire))
 	case promptFreeText:
 		var wire freeTextPromptWire
-		if err := strictJSONWithPresence(envelope.Data, freeTextPromptWireRequiredFields, &wire); err != nil {
+		if err := StrictJSONWithPresence(envelope.Data, freeTextPromptWireRequiredFields, &wire); err != nil {
 			return nil, decisionError("free-text prompt data is malformed or omits a required field", "variant data cannot contain option fields", "encode exactly one stimulus", err)
 		}
 		return cloneAndValidatePrompt(FreeTextPrompt(wire))
@@ -843,25 +843,25 @@ func decodePrompt(data []byte) (UserDecisionPrompt, error) {
 
 func decodeResult(data []byte) (UserDecisionResult, error) {
 	var envelope resultEnvelope
-	if err := strictJSONWithPresence(data, envelopeRequiredFields, &envelope); err != nil {
+	if err := StrictJSONWithPresence(data, envelopeRequiredFields, &envelope); err != nil {
 		return nil, decisionError("result envelope is malformed or omits mode/data", "result mode and data are a closed sum and both must be explicitly present", "encode one supported result variant", err)
 	}
 	switch envelope.Mode {
 	case promptSelectOne:
 		var wire selectOneResultWire
-		if err := strictJSONWithPresence(envelope.Data, selectOneResultWireRequiredFields, &wire); err != nil {
+		if err := StrictJSONWithPresence(envelope.Data, selectOneResultWireRequiredFields, &wire); err != nil {
 			return nil, decisionError("select-one result data is malformed or omits a required field", "variant data cannot contain fields from another mode", "encode selected and verbatim_answer", err)
 		}
 		return SelectOneResult(wire), nil
 	case promptSelectMany:
 		var wire selectManyResultWire
-		if err := strictJSONWithPresence(envelope.Data, selectManyResultWireRequiredFields, &wire); err != nil {
+		if err := StrictJSONWithPresence(envelope.Data, selectManyResultWireRequiredFields, &wire); err != nil {
 			return nil, decisionError("select-many result data is malformed or omits a required field", "variant data cannot contain free-text fields", "encode selected and verbatim_answer", err)
 		}
 		return SelectManyResult(wire), nil
 	case promptFreeText:
 		var wire freeTextResultWire
-		if err := strictJSONWithPresence(envelope.Data, freeTextResultWireRequiredFields, &wire); err != nil {
+		if err := StrictJSONWithPresence(envelope.Data, freeTextResultWireRequiredFields, &wire); err != nil {
 			return nil, decisionError("free-text result data is malformed or omits a required field", "variant data cannot contain option IDs", "encode exactly text", err)
 		}
 		return FreeTextResult(wire), nil

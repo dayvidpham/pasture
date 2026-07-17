@@ -68,7 +68,7 @@ func (c JSONCodec[T]) Decode(data []byte) (T, error) {
 		)
 	}
 	if err := rejectDuplicateJSONMembers(data); err != nil {
-		if isDuplicateJSONMember(err) {
+		if IsDuplicateJSONMember(err) {
 			return zero, diagnostic(
 				"JSON value has a duplicate member", "a duplicate key lets two readers of the same bytes disagree on the effective value",
 				string(c.schema), "codec decoding", "the runtime result cannot be trusted",
