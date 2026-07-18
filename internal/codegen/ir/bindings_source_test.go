@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestResultValueRefMustNotResolveAnUncapturedInput is the BLOCKER fix test:
+// TestResultValueRefMustNotResolveAnUncapturedInput proves the correctness guarantee:
 // a ResultValueRef built from a declared-but-not-yet-captured ResultSlot must
 // never resolve to a value that was only ever bound as a context input under
 // the same key/scope/type — that would let a mutation's declared result

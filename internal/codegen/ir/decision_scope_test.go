@@ -146,8 +146,8 @@ func TestReportedUserDecisionCopiesScopeAndResultsFromRequest(t *testing.T) {
 	assert.Empty(t, literal.Results())
 }
 
-// TestRequestUserDecisionRejectsCrossHarnessRuntimeContract is the mismatch
-// test required by the BLOCKER fix: a RuntimeContractID constructed for one
+// TestRequestUserDecisionRejectsCrossHarnessRuntimeContract is the mismatch-rejection guard:
+// a RuntimeContractID constructed for one
 // harness must not be accepted as the contract for a request declaring a
 // different harness, even though both harness and contract are individually
 // valid.

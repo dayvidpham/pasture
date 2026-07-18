@@ -36,8 +36,8 @@ type forbiddenModule struct {
 //     hypothetical shape.
 //   - "github.com/dayvidpham/pasture/pkg/protocol" is matched EXACTLY, not by
 //     prefix: its child pkg/protocol/portable is precisely the dependency-
-//     free package the round-1 fix moved the portable ref types into (see
-//     portable_refs.go), and internal/codegen/ir legitimately depends on it
+//     free package portable_refs.go defines the portable ref types in, and
+//     internal/codegen/ir legitimately depends on it
 //     today. Prefix-matching this root would make that real, intentional
 //     dependency indistinguishable from the pkg/protocol facade this guard
 //     forbids, breaking the guard against the package's own correct import.
