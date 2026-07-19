@@ -150,6 +150,85 @@ func TestTaskUpdate_AllFields(t *testing.T) {
 	}
 }
 
+// TestTaskUpdate_MetadataAndIllegalStatus_AtomicRollback is the regression for the
+// combined metadata+status atomicity fix: when a single `update` call changes metadata
+// AND requests an FSM-illegal status transition, the whole operation must be rejected and
+// NOTHING may commit — the metadata half must not be left applied. Pre-fix the metadata
+// half committed while the status half was rejected and the call still returned an error.
+func TestTaskUpdate_MetadataAndIllegalStatus_AtomicRollback(t *testing.T) {
+	t.Parallel()
+	path := dbPath(t)
+	const originalTitle = "Original atomic"
+	id := createTask(t, path, originalTitle)
+
+	// Close the task so a subsequent --status in_progress is FSM-illegal (Start requires
+	// the task to be open; a closed task cannot go directly to in_progress).
+	if _, err := handlers.TaskClose(&bytes.Buffer{}, path, id, "done", types.OutputJSON); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	newTitle := "Should not stick"
+	inProgress := provenance.StatusInProgress
+	code, err := handlers.TaskUpdate(&bytes.Buffer{}, handlers.TaskUpdateInput{
+		DBPath: path,
+		IdStr:  id,
+		Title:  &newTitle,
+		Status: &inProgress,
+	}, types.OutputJSON)
+	if err == nil {
+		t.Fatal("expected error updating a closed task to in_progress (FSM-illegal)")
+	}
+	if code != 3 {
+		t.Fatalf("expected exit 3 (workflow), got %d", code)
+	}
+
+	// The metadata half must have rolled back with the rejected status half: the title
+	// must be UNCHANGED and the status must still be closed.
+	var showOut bytes.Buffer
+	if _, err := handlers.TaskShow(&showOut, path, id, types.OutputJSON); err != nil {
+		t.Fatalf("show after failed update: %v", err)
+	}
+	got := decodeTask(t, showOut.String())
+	if got.Title != originalTitle {
+		t.Errorf("title changed despite failed update: got %q, want %q (metadata half leaked)", got.Title, originalTitle)
+	}
+	if got.Status != "closed" {
+		t.Errorf("status changed despite FSM-illegal transition: got %q, want %q", got.Status, "closed")
+	}
+}
+
+// TestTaskUpdate_MetadataAndLegalStatus_BothApplied confirms the atomic path still applies
+// both halves when the status transition is legal: a single `update` that changes metadata
+// and legally moves the status commits both.
+func TestTaskUpdate_MetadataAndLegalStatus_BothApplied(t *testing.T) {
+	t.Parallel()
+	path := dbPath(t)
+	id := createTask(t, path, "before")
+
+	newTitle := "after"
+	inProgress := provenance.StatusInProgress
+	var out bytes.Buffer
+	code, err := handlers.TaskUpdate(&out, handlers.TaskUpdateInput{
+		DBPath: path,
+		IdStr:  id,
+		Title:  &newTitle,
+		Status: &inProgress,
+	}, types.OutputJSON)
+	if err != nil {
+		t.Fatalf("update failed: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	got := decodeTask(t, out.String())
+	if got.Title != newTitle {
+		t.Errorf("title: got %q, want %q", got.Title, newTitle)
+	}
+	if got.Status != "in_progress" {
+		t.Errorf("status: got %q, want %q", got.Status, "in_progress")
+	}
+}
+
 func TestTaskClose_AndDoubleCloseRejected(t *testing.T) {
 	t.Parallel()
 	path := dbPath(t)
