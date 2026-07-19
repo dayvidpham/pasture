@@ -121,6 +121,15 @@ func TestRunBaselineMigration_SuccessAndIdempotentReplay(t *testing.T) {
 	if second.Result.BaselineAnchorsCreated != 0 || second.Result.ShortCircuited != 3 {
 		t.Fatalf("second run result = %+v, want {created:0 shortCircuited:3}", second.Result)
 	}
+	if len(second.OrderedRowIDs) != len(first.OrderedRowIDs) {
+		t.Fatalf("replay OrderedRowIDs len = %d, want %d", len(second.OrderedRowIDs), len(first.OrderedRowIDs))
+	}
+	for i := range second.OrderedRowIDs {
+		if second.OrderedRowIDs[i].String() != first.OrderedRowIDs[i].String() {
+			t.Fatalf("replay OrderedRowIDs[%d] = %s, want %s (order must be deterministic across runs)",
+				i, second.OrderedRowIDs[i].String(), first.OrderedRowIDs[i].String())
+		}
+	}
 }
 
 // TestRunBaselineMigration_UnmappableOwnerStopsClosed proves a whole-batch
