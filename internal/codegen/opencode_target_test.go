@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dayvidpham/pasture/internal/artifact"
+	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
@@ -162,46 +162,72 @@ func TestOpenCodeTargetDescriptor_BundleManifestOracle(t *testing.T) {
 		t.Fatalf("descriptor: %v", err)
 	}
 	// Integration layer folds in an emitted skill file and an agent file.
-	extra := []artifact.Source{
-		{Path: "skills/worker/SKILL.md", Type: artifact.EntryTypeSkill, Mode: 0o644, Content: []byte("worker skill\n")},
-		{Path: "agent/reviewer.md", Type: artifact.EntryTypeAgent, Mode: 0o644, Content: []byte("reviewer\n")},
+	extra := []OpenCodeComponentFile{
+		{Path: "skills/worker/SKILL.md", Content: []byte("worker skill\n")},
+		{Path: "agent/reviewer.md", Content: []byte("reviewer\n")},
 	}
 	bundle, err := desc.Bundle(extra)
 	if err != nil {
 		t.Fatalf("bundle: %v", err)
 	}
-	if bundle.ID() != desc.RuntimeContract().String() {
-		t.Errorf("bundle id = %q, want the RuntimeContractID %q", bundle.ID(), desc.RuntimeContract().String())
+	// The shared artifact.Bundle is content-addressed: its ID is a canonical
+	// bundle content address, not the RuntimeContractID. Attribution to the
+	// producing contract lives on the descriptor (RuntimeContract), not on the
+	// neutral bundle value.
+	if _, err := artifact.ParseBundleID(bundle.ID().String()); err != nil {
+		t.Errorf("bundle id %q is not a canonical artifact bundle id: %v", bundle.ID(), err)
 	}
 
-	entries := bundle.Manifest().Entries
-	if len(entries) != 4 {
-		t.Fatalf("expected 4 bundle entries, got %d", len(entries))
-	}
+	entries := bundle.Manifest().Entries()
+	// Lexicographic order over every entry (files and declared directories).
 	for i := 1; i < len(entries); i++ {
-		if entries[i-1].Path >= entries[i].Path {
-			t.Errorf("bundle manifest not lexicographically sorted at %d: %q >= %q", i, entries[i-1].Path, entries[i].Path)
+		if entries[i-1].Path().String() >= entries[i].Path().String() {
+			t.Errorf("bundle manifest not lexicographically sorted at %d: %q >= %q",
+				i, entries[i-1].Path(), entries[i].Path())
 		}
 	}
+
+	regularPaths := make(map[string]struct{})
 	for _, e := range entries {
-		if !digestRE.MatchString(e.Digest) {
-			t.Errorf("entry %q digest %q not sha256:<64 hex>", e.Path, e.Digest)
+		p := e.Path().String()
+		if e.IsDirectory() {
+			// Declared parent directories carry mode 0755 and no content digest.
+			if e.Mode().Bits() != 0o755 {
+				t.Errorf("directory entry %q mode %o, want 0755", p, e.Mode().Bits())
+			}
+			continue
 		}
-		if e.Mode.Perm() != 0o644 {
-			t.Errorf("entry %q mode %o, want 0644", e.Path, e.Mode.Perm())
+		regularPaths[p] = struct{}{}
+		if !digestRE.MatchString(e.Digest().String()) {
+			t.Errorf("entry %q digest %q not sha256:<64 hex>", p, e.Digest())
+		}
+		if e.Mode().Bits() != 0o644 {
+			t.Errorf("entry %q mode %o, want 0644", p, e.Mode().Bits())
 		}
 		// Isolated retrieval: each component's bytes are independently available,
 		// so a materializer can write each file with siblings absent.
-		if _, ok := bundle.Content(e.Path); !ok {
-			t.Errorf("entry %q has no retrievable content", e.Path)
+		file, openErr := bundle.Open(p)
+		if openErr != nil {
+			t.Errorf("entry %q has no retrievable content: %v", p, openErr)
+			continue
 		}
+		_ = file.Close()
 	}
 
-	// The two target-owned components are always present.
-	paths := strings.Join(bundle.Paths(), "\n")
-	for _, want := range []string{OpenCodeHooksModulePath, OpenCodeTargetManifestPath} {
-		if !strings.Contains(paths, want) {
-			t.Errorf("bundle missing target-owned component %q", want)
+	// Exactly four regular files: the two target-owned components plus the two
+	// folded-in emitted files.
+	wantRegular := []string{
+		OpenCodeHooksModulePath,
+		OpenCodeTargetManifestPath,
+		"skills/worker/SKILL.md",
+		"agent/reviewer.md",
+	}
+	if len(regularPaths) != len(wantRegular) {
+		t.Fatalf("expected %d regular-file entries, got %d (%v)", len(wantRegular), len(regularPaths), regularPaths)
+	}
+	for _, want := range wantRegular {
+		if _, ok := regularPaths[want]; !ok {
+			t.Errorf("bundle missing regular-file component %q", want)
 		}
 	}
 }
@@ -223,8 +249,13 @@ func TestOpenCodeTargetDescriptor_Deterministic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bundle 2: %v", err)
 	}
-	if b1.Manifest().Digest() != b2.Manifest().Digest() {
-		t.Fatal("target bundle is not deterministic across descriptor builds")
+	// The shared bundle is content-addressed, so identical inputs yield an
+	// identical bundle id and an equal manifest.
+	if b1.ID() != b2.ID() {
+		t.Fatalf("target bundle is not deterministic across descriptor builds: %q != %q", b1.ID(), b2.ID())
+	}
+	if !b1.Equal(b2) {
+		t.Fatal("target bundles with identical inputs are not Equal")
 	}
 }
 
