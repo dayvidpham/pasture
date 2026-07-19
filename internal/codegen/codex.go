@@ -133,6 +133,13 @@ func codexNativeFunctions() []string {
 // CodexComponentID is the stable marketplace identity of one Codex plugin
 // package. It is a typed value, not a bare string, so a package identity can
 // never be confused with an arbitrary label.
+//
+// Component identity is spelled per target profile, not uniformly: this target's
+// open per-package map uses this struct-wrapped identity; the Claude Code
+// target's fixed three-slot descriptor pairs a string ComponentID with a closed
+// Component/ComponentKind value type; the OpenCode target's small fixed set uses
+// a bare ComponentID string. Each shape is as strong as its own component model
+// needs — the variance is profile-driven, not an oversight.
 type CodexComponentID struct{ value string }
 
 // String returns the component identity spelling.
