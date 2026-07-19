@@ -35,4 +35,18 @@
 //     (ordinals 0..1023, manifest-v1 ordinal zero seeded as pasture-system/default
 //     / software_agent) over a real Provenance actor-namespace registry, with the
 //     fixed big-endian ordinal-UUID wire encoding.
+//   - facade.go: the thin Apply/LookupCommitted facade over the single Provenance
+//     journal write path (no split audit store), routing every call through the
+//     ref/authority/digest conversions above and surfacing the closed
+//     Absent/Committed/Conflict outcome with the underlying typed provenance error
+//     round-tripped for errors.Is/As.
+//   - migrate.go: the finite serial legacy-baseline migration coordinator over
+//     MigrateLegacyBaseline — deterministic (RecordedAt, LegacyRowID) ordering,
+//     read-only source byte-hash integrity before and after, whole-batch
+//     stop-on-first-failure with typed errors round-tripped, and idempotent
+//     re-run counts surfaced.
+//   - legacyaudit.go: the separately-named, read-only 'pasture legacy-audit event
+//     list' API over NON-TASK legacy rows, preserving raw actor text, contexts, and
+//     source identity verbatim in deterministic order — the surface #43's CLI wires
+//     (no CLI wiring here).
 package provadapter
