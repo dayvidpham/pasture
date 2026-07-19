@@ -6,6 +6,8 @@ github.com/dayvidpham/bestiary v0.1.0 h1:5ovdxMlRgssn3+oJCZqjbhlhX6aQwbYFf981LbM
 github.com/dayvidpham/bestiary v0.1.0/go.mod h1:Z2/Ax6PmmBqhHomuLDjvf+JQBo0K7TFyrQN7pOCOpKs=
 github.com/dayvidpham/provenance v0.0.3-0.20260614233909-f185372f4c66 h1:1xSEoiN480HCIViYrjmRIfil8bIENrmKaqdBwCwIixk=
 github.com/dayvidpham/provenance v0.0.3-0.20260614233909-f185372f4c66/go.mod h1:I2VvA5RMcg+/Audz7Kg0Haio8emNe87wVK20RT2xW1g=
+github.com/dayvidpham/provenance v0.0.3-0.20260719005126-7b3451a6efe7 h1:4E/8XuoaGJwIhGUqdb6Fw9rOLBJNeu72k+ECImRYFgY=
+github.com/dayvidpham/provenance v0.0.3-0.20260719005126-7b3451a6efe7/go.mod h1:LRsh0KbNd0d88t4gbgBsUHod7kR+vDHUZN9Z68JMj50=
 github.com/dbos-inc/dbos-transact-golang v0.16.0 h1:1TPVfcyZ7gqNtZyXmaJRtkQqlv8mchE4XQoRM7pOqp8=
 github.com/dbos-inc/dbos-transact-golang v0.16.0/go.mod h1:Sk09r/6IkZeknjEdZ/6nJVyCXKMr1G3l4Vn13iQg+Yo=
 github.com/dominikbraun/graph v0.23.0 h1:TdZB4pPqCLFxYhdyMFb1TBdFxp8XLcJfTTBQucVPgCo=
@@ -58,6 +60,8 @@ github.com/robfig/cron/v3 v3.0.1 h1:WdRxkvbJztn8LMz/QEvLN5sBU+xKpSqwwUO1Pjr4qDs=
 github.com/robfig/cron/v3 v3.0.1/go.mod h1:eQICP3HwyT7UooqI/z+Ov+PtYAWygg1TEWWzGIFLtro=
 github.com/rogpeppe/go-internal v1.12.0 h1:exVL4IDcn6na9z1rAb56Vxr+CgyK3nn3O+epU5NdKM8=
 github.com/rogpeppe/go-internal v1.12.0/go.mod h1:E+RYuTGaKKdloAfM02xzb0FW3Paa99yedzYV+kq4uf4=
+github.com/rogpeppe/go-internal v1.15.0 h1:D0RCU5rMAp+SpgkiNdrjfJ+LX4J1M32V2NeCY7EJ6hc=
+github.com/rogpeppe/go-internal v1.15.0/go.mod h1:DrUVZyrJU+txYW5/1kwtXQSMFio52ZOxX7yM1VHvnxs=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/sagikazarmark/locafero v0.12.0 h1:/NQhBAkUb4+fH1jivKHWusDYFjMOOKU88eegjfxfHb4=
 github.com/sagikazarmark/locafero v0.12.0/go.mod h1:sZh36u/YSZ918v0Io+U9ogLYQJ9tLLBmM4eneO6WwsI=
