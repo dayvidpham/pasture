@@ -1,4 +1,4 @@
-// Package tasks — journaled task-backend system identity (#43 / S3.3).
+// Package tasks — journaled task-backend system identity (#43).
 //
 // system_identity.go resolves the (committing actor, governing authority) pair
 // the task backend binds every journaled mutation to. Since the provenance main

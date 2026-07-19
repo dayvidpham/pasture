@@ -1,4 +1,4 @@
-// Package tasks — pasture.* material-event definitions and journal effect mapping (#43 / S3.3 stage a).
+// Package tasks — pasture.* material-event definitions and journal effect mapping (#43).
 //
 // material_events.go is the authoritative, closed algebra of Pasture's domain
 // MATERIAL events: the typed, per-family records the task backend folds into the
@@ -70,9 +70,12 @@ const (
 	FamilyLegacyAuditImported
 )
 
-// materialEventFamilies is the canonical, ordered list of every real family. It is
-// the single source the exhaustive-mapping tests iterate, so a new family that is
-// added to the const block but not here is caught by the round-trip test.
+// materialEventFamilies is the canonical, ordered list of every real family. The
+// exhaustive-mapping tests iterate it, so it must list every real family in the const
+// block: a family that is present here but broken is caught by those tests, but a family
+// added to the const block and OMITTED here would be silently untested (it is simply never
+// iterated). TestMaterialEventFamiliesMatchConstBlock guards against that omission by
+// cross-checking this slice against the const block's authoritative EventKind() switch.
 var materialEventFamilies = []MaterialEventFamily{
 	FamilyAssignmentStarted,
 	FamilyAssignmentCompleted,
@@ -546,11 +549,15 @@ func (e TaskClosedEvent) contexts() ([]provenance.EventContext, error) {
 	return buildContexts(taskCtx(e.Task))
 }
 
-// LegacyAuditImportedEvent carries one pre-journal legacy audit row, preserved
-// verbatim, attached to exactly one referenced task. Its canonical payload embeds
-// the source payload bytes UNCHANGED (byte-recoverable) alongside the row's source
-// identity, its original raw actor text, and its original raw context strings, so no
-// legacy detail is lost. AttributedActor is the resolved (mapped-or-fallback) actor
+// LegacyAuditImportedEvent carries one pre-journal legacy audit row, attached to exactly
+// one referenced task. Its canonical payload embeds the source payload as an embedded JSON
+// value (value-preserving canonical JSON — encoding/json compacts the embedded
+// json.RawMessage, so the stored envelope holds the value-equivalent form, not the exact
+// source bytes) alongside the row's source identity, its original raw actor text, and its
+// original raw context strings, so no legacy VALUE is lost. The exact original bytes still
+// bind identity through legacyImportMutationDigest (which hashes row.Payload verbatim),
+// though they are not byte-recoverable from the stored event. AttributedActor is the
+// resolved (mapped-or-fallback) actor
 // the import derived from RawActor; the committing actor of the operation is the
 // pasture-system actor, and this attributed actor is journaled as an actor context.
 type LegacyAuditImportedEvent struct {
@@ -590,8 +597,10 @@ func (e LegacyAuditImportedEvent) validate() error {
 }
 
 func (e LegacyAuditImportedEvent) canonicalPayload() (json.RawMessage, error) {
-	// Preserve the source payload byte-for-byte; an empty source is a JSON null so the
-	// envelope stays valid without inventing content.
+	// Embed the source payload as a JSON value (value-preserving: encoding/json compacts
+	// the embedded RawMessage, so insignificant whitespace is dropped but the JSON value is
+	// unchanged). An empty source is a JSON null so the envelope stays valid without
+	// inventing content.
 	source := e.SourcePayload
 	if len(source) == 0 {
 		source = json.RawMessage("null")

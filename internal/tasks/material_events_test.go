@@ -130,6 +130,47 @@ func TestEveryFamilyHasDistinctLegalFixedKind(t *testing.T) {
 	}
 }
 
+// TestMaterialEventFamiliesMatchConstBlock guards the hand-maintained
+// materialEventFamilies slice against the const block. Every slice-iterating test (mapping
+// exhaustiveness, distinct-kind) only exercises families that appear in the slice, so a
+// family added to the const block but omitted from the slice would be silently untested.
+// The EventKind() switch is the const block's authoritative fixed-kind mapping (every real
+// family resolves to a non-empty kind; the invalid sentinel and any non-family value
+// resolve to ""), so cross-checking the slice against it detects both a missing and an
+// extraneous entry.
+func TestMaterialEventFamiliesMatchConstBlock(t *testing.T) {
+	inSlice := make(map[MaterialEventFamily]int, len(materialEventFamilies))
+	for _, f := range materialEventFamilies {
+		inSlice[f]++
+	}
+	for f, n := range inSlice {
+		if n != 1 {
+			t.Errorf("family %v appears %d times in materialEventFamilies, want exactly 1", f, n)
+		}
+	}
+
+	// Scan the contiguous iota space (families are declared with iota starting at 1, after
+	// the zero sentinel). The bound is generous so appending a new family needs no edit
+	// here; a real family is one whose fixed EventKind() is non-empty.
+	const scanUpTo = 64
+	realCount := 0
+	for i := 1; i <= scanUpTo; i++ {
+		f := MaterialEventFamily(i)
+		if f.EventKind() == "" {
+			continue
+		}
+		realCount++
+		if inSlice[f] == 0 {
+			t.Errorf("family %v (%d) has a fixed kind but is missing from materialEventFamilies — "+
+				"add it so the exhaustive-mapping tests cover it", f, i)
+		}
+	}
+	if len(materialEventFamilies) != realCount {
+		t.Errorf("materialEventFamilies has %d entries but %d families resolve to a real fixed kind; "+
+			"the slice and the const block have diverged", len(materialEventFamilies), realCount)
+	}
+}
+
 // TestMapMaterialEventCanonicalPayloadIsDeterministic proves the payload is a pure
 // function of the value: two independent maps of the same event yield byte-identical
 // payloads (golden-comparable canonical encoding).

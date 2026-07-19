@@ -1,4 +1,4 @@
-// Package tasks — decision-ledger BASE types (#43 / S3.3 stage c).
+// Package tasks — decision-ledger BASE types (#43).
 //
 // decision_ledger.go holds ONLY the generic, declarative, serializable decision-ledger
 // base types #43 owns: the compile-time typed descriptor/draft extension-construction

@@ -21,6 +21,14 @@
 // Concurrency note: the io.Closer-style Close() is idempotent (sync.Once); a
 // double-close returns nil rather than a use-after-free. The 6 new methods are
 // safe for concurrent use because *sql.DB is itself goroutine-safe.
+//
+// Package-name divergence (issue #43 text vs delivered surface): issue #43 refers to
+// this package in the singular as "internal/task". The delivered package is the existing
+// plural facade "internal/tasks" — the very package these files extend — so the two names
+// denote the SAME package; the plural name stands. Recorded here in source (rather than
+// only in the review thread) so a future reader auditing this code against issue #43 sees
+// the mapping, mirroring the RoleID<->AssignmentSlotID naming-divergence NOTE in
+// internal/provadapter/refs.go.
 
 package tasks
 

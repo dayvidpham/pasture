@@ -1,5 +1,5 @@
 // Package tasks — review-round shape, review-subject sum, and slice-close authorization
-// projections (#43 / S3.3 stage d).
+// projections (#43).
 //
 // review_projection.go holds the DETERMINISTIC, pure projection layer for review: the
 // authoritative review-round graph SHAPE (PlanReviewRound), the closed review-subject sum
@@ -14,7 +14,7 @@
 // relationships and parent-blocked-by-child edges, THREE distinct reviewer
 // owner-responsibility assignments, and the round-started event — is built on top of
 // PlanReviewRound. Its end-to-end assignment-attribution test needs the seeded
-// ordinal-zero actor (per the S3.3 continuation charter); the deterministic shape and the
+// ordinal-zero actor; the deterministic shape and the
 // authorization types below do not, and are delivered and tested here.
 
 package tasks

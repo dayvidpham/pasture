@@ -1,5 +1,5 @@
 // Package tasks — composed task-centric timeline and assignment-episode projections
-// (#43 / S3.3 stage d).
+// (#43).
 //
 // timeline_projection.go holds two DETERMINISTIC, pure read projections:
 //
@@ -160,9 +160,9 @@ func (p AssignmentProjection) OwnerOf(task provenance.TaskID) (provenance.ActorI
 
 // ProjectAssignments folds transitions (applied in ascending Ordinal) into the current
 // episodes and derived owner. A Started transition opens/re-activates an episode; an Ended
-// transition deactivates it. Task.Owner is derived last-writer-wins from the active
-// owner-responsibility episodes, so a responsibility transfer (end predecessor, start
-// successor) atomically moves the owner. The input is never mutated.
+// transition deactivates it. Task.Owner is the occupant of the single active
+// owner-responsibility episode for the task, so a responsibility transfer (end
+// predecessor, start successor) atomically moves the owner. The input is never mutated.
 func ProjectAssignments(transitions []AssignmentTransition) AssignmentProjection {
 	ordered := make([]AssignmentTransition, len(transitions))
 	copy(ordered, transitions)
@@ -191,9 +191,15 @@ func ProjectAssignments(transitions []AssignmentTransition) AssignmentProjection
 			}
 		}
 	}
-	// Derive Task.Owner from the active owner-responsibility episodes. When a task has
-	// several such episodes across time, the highest-Ordinal active one wins; we recompute
-	// deterministically by scanning transitions in order.
+	// Derive Task.Owner from the single active owner-responsibility episode per task. The
+	// episode model's atomic-transfer invariant — a transfer ends the predecessor and
+	// starts the successor within one operation — guarantees at most one
+	// owner-responsibility episode is active for a task at any point, so tracking the
+	// last-started-still-active episode and clearing it only when that same episode ends is
+	// exact for every well-formed input. Overlapping owner-responsibility episodes for one
+	// task would violate that invariant and are outside this projection's contract; we do
+	// not attempt to reconcile them (the result of that malformed input is unspecified,
+	// never a silent wrong-owner for well-formed input).
 	activeOwner := make(map[provenance.TaskID]provenance.AssignmentID)
 	for _, tr := range ordered {
 		if tr.Role != RoleOwnerResponsibility {
