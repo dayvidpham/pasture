@@ -146,6 +146,18 @@ type installWire struct {
 
 // Load reads preferences from path. A missing file or an absent install section
 // yields Default(). Unknown harnesses or axes are rejected actionably.
+//
+// Symlink asymmetry (intentional, versus inventory.Load and Save): Load reads
+// THROUGH a symlinked config.yaml on purpose. Under dotfile managers and Nix
+// Home Manager, ~/.config/pasture/config.yaml is routinely a symlink into a
+// version-controlled dotfiles source, and refusing to read it would break the
+// supported managed-config workflow. This is safe for a read: the file is
+// declared user-owned preference input (not confirmed trust evidence like the
+// install-state inventory, which does reject a symlink before read), and every
+// value it yields is re-validated (known harnesses/axes only) before use. The
+// asymmetry is deliberate — Save (below) still refuses to REPLACE a symlink,
+// because clobbering the link would silently detach the user's managed config
+// from its source; a write instead directs the user to edit that source.
 func Load(path string) (Preferences, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -225,7 +237,23 @@ func applyBool(harnesses *map[ir.HarnessID]bool, harness ir.HarnessID, value *bo
 // Save persists preferences to path, preserving every unrelated top-level
 // Pasture config key. If saving fails, the caller must perform no external
 // action.
+//
+// Unlike Load, Save refuses to write through a symlinked config.yaml. fsatomic
+// enforces this as defense-in-depth, but Save pre-checks it here to return a
+// config-specific fix: a managed config symlinked from a dotfiles source must be
+// edited at that source, not clobbered by an atomic replace that would detach
+// the link.
 func Save(path string, prefs Preferences) error {
+	if info, err := os.Lstat(path); err == nil && info.Mode().Type()&os.ModeSymlink != 0 {
+		target, _ := os.Readlink(path)
+		return cell.NewFault(
+			"preferences save", "regular-file or absent config destination",
+			fmt.Sprintf("the config file %q is a symlink to %q", path, target),
+			path, "checking the config type before an atomic preference save",
+			"an atomic replace would detach the symlink and stop your dotfiles or Home Manager source from managing this config",
+			"edit the install: section in the file your dotfiles manager links here (the symlink's source), then re-apply, instead of writing through the link", nil,
+		)
+	}
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return cell.NewFault(

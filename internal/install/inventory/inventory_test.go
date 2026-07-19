@@ -96,6 +96,83 @@ func TestMarshalParseRoundTripWithLeafAndTombstone(t *testing.T) {
 	}
 }
 
+func TestMarshalParseRoundTripPreservesCreatedDirs(t *testing.T) {
+	inv := inventory.New()
+	p, _ := artifact.NewPath("skills/pasture/SKILL.md")
+	mode, _ := artifact.NewMode(0o644)
+	leaf, _ := inventory.NewLeaf(p, artifact.RegularFileType(), mode, artifact.DigestBytes([]byte("x")))
+	d1, _ := artifact.NewPath("skills")
+	d2, _ := artifact.NewPath("skills/pasture")
+	oc, _ := cell.New(ir.HarnessOpenCode, cell.SkillsAxis())
+	rec, err := inventory.NewRecord(inventory.RecordInput{
+		Cell:        oc,
+		Source:      inventory.InstallerSource(),
+		Strategy:    activation.DirectFileKindValue(),
+		Managed:     true,
+		Leaves:      []inventory.Leaf{leaf},
+		CreatedDirs: []artifact.Path{d1, d2},
+		Observation: inventory.Installed(),
+		Trust:       inventory.TrustNotApplicable(),
+		LastAction:  "ensure",
+		LastOutcome: "completed",
+	})
+	if err != nil {
+		t.Fatalf("NewRecord: %v", err)
+	}
+	_ = inv.Upsert(rec)
+
+	data, err := inv.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(data), "created_dirs") {
+		t.Fatalf("marshaled state missing created_dirs key:\n%s", data)
+	}
+	got, err := inventory.Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	round, ok := got.Lookup(oc)
+	if !ok {
+		t.Fatal("record lost in round trip")
+	}
+	dirs := round.CreatedDirs()
+	if len(dirs) != 2 || dirs[0].String() != "skills" || dirs[1].String() != "skills/pasture" {
+		t.Errorf("created dirs not preserved: %v", dirs)
+	}
+}
+
+func TestLoadRejectsGroupOrOtherAccessibleStateFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "installations.yaml")
+	inv := inventory.New()
+	_ = inv.Upsert(nativeRecord(t, ir.HarnessClaudeCode, cell.SkillsAxis(), inventory.Installed()))
+	data, err := inv.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	// Simulate an older Pasture, a manual edit, or an external tool that left the
+	// valid state document group/other-readable.
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := inventory.Load(path); err == nil {
+		t.Fatal("Load of a 0644 state file = nil error, want rejection")
+	}
+	// Load must reject, not repair: the mode is left as the user set it.
+	info, _ := os.Stat(path)
+	if info.Mode().Perm() != 0o644 {
+		t.Errorf("Load repaired the mode to %o; it must reject, not write to an unvalidated file", info.Mode().Perm())
+	}
+	// A 0600 copy of the same document loads cleanly.
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := inventory.Load(path); err != nil {
+		t.Errorf("Load of a 0600 state file failed: %v", err)
+	}
+}
+
 func TestParseRejectsDuplicateCell(t *testing.T) {
 	doc := `schema: pasture.install.state/v1
 cells:

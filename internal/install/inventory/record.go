@@ -56,6 +56,7 @@ type Record struct {
 	version     string
 	selector    string
 	leaves      []Leaf
+	createdDirs []artifact.Path
 	observation Observation
 	trust       Trust
 	lastAction  string
@@ -67,14 +68,20 @@ type Record struct {
 // RecordInput carries the fields for a new record. Validation happens in
 // NewRecord so no partially-built record ever escapes.
 type RecordInput struct {
-	Cell        cell.Cell
-	Source      Source
-	Strategy    activation.StrategyKind
-	Managed     bool
-	ArtifactID  string
-	Version     string
-	Selector    string
-	Leaves      []Leaf
+	Cell       cell.Cell
+	Source     Source
+	Strategy   activation.StrategyKind
+	Managed    bool
+	ArtifactID string
+	Version    string
+	Selector   string
+	Leaves     []Leaf
+	// CreatedDirs are directory paths, relative to the destination root, that
+	// Pasture created while materializing this cell's bundle. They are the
+	// ownership token that authorizes a later Remove to reclaim exactly the
+	// directory tree Pasture made (empty-only, deepest-first) without orphaning
+	// intermediate directories or touching a directory it did not create.
+	CreatedDirs []artifact.Path
 	Observation Observation
 	Trust       Trust
 	LastAction  string
@@ -138,6 +145,7 @@ func NewRecord(in RecordInput) (Record, error) {
 		version:     in.Version,
 		selector:    in.Selector,
 		leaves:      append([]Leaf(nil), in.Leaves...),
+		createdDirs: append([]artifact.Path(nil), in.CreatedDirs...),
 		observation: in.Observation,
 		trust:       in.Trust,
 		lastAction:  in.LastAction,
@@ -156,6 +164,7 @@ func (r Record) ArtifactID() string                { return r.artifactID }
 func (r Record) Version() string                   { return r.version }
 func (r Record) Selector() string                  { return r.selector }
 func (r Record) Leaves() []Leaf                    { return append([]Leaf(nil), r.leaves...) }
+func (r Record) CreatedDirs() []artifact.Path      { return append([]artifact.Path(nil), r.createdDirs...) }
 func (r Record) Observation() Observation          { return r.observation }
 func (r Record) Trust() Trust                      { return r.trust }
 func (r Record) LastAction() string                { return r.lastAction }

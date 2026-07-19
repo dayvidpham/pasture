@@ -145,7 +145,7 @@ func TestRemoveOnlyMatchingAndPreservesSiblings(t *testing.T) {
 	sibling := filepath.Join(root, "plugin", "other.ts")
 	_ = os.WriteFile(sibling, []byte("keep me"), 0o644)
 
-	if err := directfile.Remove(root, out.Leaves, out.CreatedDirs); err != nil {
+	if _, err := directfile.Remove(root, out.Leaves, out.CreatedDirs); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "plugin", "pasture-hooks.ts")); !os.IsNotExist(err) {
@@ -166,7 +166,7 @@ func TestRemoveLeavesDriftedLeafAndReports(t *testing.T) {
 	out, _ := directfile.Ensure(root, bundle, nil)
 	dest := filepath.Join(root, "plugin", "pasture-hooks.ts")
 	_ = os.WriteFile(dest, []byte("drifted\n"), 0o644)
-	if err := directfile.Remove(root, out.Leaves, out.CreatedDirs); err == nil {
+	if _, err := directfile.Remove(root, out.Leaves, out.CreatedDirs); err == nil {
 		t.Fatal("removing a drifted managed leaf = nil error, want rejection")
 	}
 	if _, err := os.Stat(dest); err != nil {
@@ -178,10 +178,104 @@ func TestEnsureRemovesEmptyCreatedDir(t *testing.T) {
 	root := t.TempDir()
 	bundle := hookBundle(t, "export default {}\n")
 	out, _ := directfile.Ensure(root, bundle, nil)
-	if err := directfile.Remove(root, out.Leaves, out.CreatedDirs); err != nil {
+	if _, err := directfile.Remove(root, out.Leaves, out.CreatedDirs); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "plugin")); !os.IsNotExist(err) {
 		t.Errorf("empty created dir should be removed")
+	}
+}
+
+// nestedBundle builds a one-leaf bundle under a multi-level created directory
+// (skills/pasture/SKILL.md), exercising intermediate-directory ownership.
+func nestedBundle(t *testing.T, content string) artifact.Bundle {
+	t.Helper()
+	rel := "skills/pasture/SKILL.md"
+	p, _ := artifact.NewPath(rel)
+	mode, _ := artifact.NewMode(0o644)
+	entry, err := artifact.NewFileEntry(p, mode, artifact.DigestBytes([]byte(content)))
+	if err != nil {
+		t.Fatalf("NewFileEntry: %v", err)
+	}
+	manifest, err := artifact.NewManifest(entry)
+	if err != nil {
+		t.Fatalf("NewManifest: %v", err)
+	}
+	src := fstest.MapFS{rel: &fstest.MapFile{Data: []byte(content), Mode: 0o644}}
+	bundle, err := artifact.NewBundle(src, manifest)
+	if err != nil {
+		t.Fatalf("NewBundle: %v", err)
+	}
+	return bundle
+}
+
+// TestEnsureRecordsAndRemovesEveryCreatedDirLevel pins that Ensure records every
+// intermediate directory it creates (not only the deepest), so Remove reclaims
+// the whole tree and leaves zero orphaned directories under root.
+func TestEnsureRecordsAndRemovesEveryCreatedDirLevel(t *testing.T) {
+	root := t.TempDir()
+	bundle := nestedBundle(t, "# skill\n")
+	out, err := directfile.Ensure(root, bundle, nil)
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	// Both levels must be recorded, shallowest-first, as relative paths.
+	want := []string{"skills", "skills/pasture"}
+	if len(out.CreatedDirs) != len(want) {
+		t.Fatalf("created dirs = %v, want %v", out.CreatedDirs, want)
+	}
+	for i, w := range want {
+		if out.CreatedDirs[i] != w {
+			t.Errorf("created dir[%d] = %q, want %q", i, out.CreatedDirs[i], w)
+		}
+	}
+	res, err := directfile.Remove(root, out.Leaves, out.CreatedDirs)
+	if err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if len(res.PreservedDirs) != 0 {
+		t.Errorf("preserved dirs = %v, want none", res.PreservedDirs)
+	}
+	// Zero orphaned directories: root must be empty.
+	entries, _ := os.ReadDir(root)
+	if len(entries) != 0 {
+		t.Errorf("orphaned entries under root: %v", entries)
+	}
+}
+
+// TestRemovePreservesCreatedDirWithForeignFile pins that a created directory a
+// foreign file moved into survives removal and is reported, never force-removed.
+func TestRemovePreservesCreatedDirWithForeignFile(t *testing.T) {
+	root := t.TempDir()
+	bundle := nestedBundle(t, "# skill\n")
+	out, err := directfile.Ensure(root, bundle, nil)
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	// A foreign file dropped into the deepest created directory.
+	foreign := filepath.Join(root, "skills", "pasture", "notes.txt")
+	if err := os.WriteFile(foreign, []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := directfile.Remove(root, out.Leaves, out.CreatedDirs)
+	if err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	// The foreign file and both non-empty directories must survive.
+	if _, err := os.Stat(foreign); err != nil {
+		t.Errorf("foreign file was removed: %v", err)
+	}
+	if len(res.PreservedDirs) == 0 {
+		t.Fatal("expected preserved-dir report for a non-empty created dir")
+	}
+	// The deepest non-empty dir must be reported.
+	found := false
+	for _, d := range res.PreservedDirs {
+		if d == "skills/pasture" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("preserved dirs = %v, want to include skills/pasture", res.PreservedDirs)
 	}
 }

@@ -13,6 +13,23 @@
 // then write/flush/close/atomic sibling rename. The current process best-effort
 // removes only the exact temp it created after a failure. A later process never
 // scans, cleans, reuses, or infers ownership from crash orphans.
+//
+// Every directory level Pasture creates (not only the deepest) is recorded as a
+// path relative to the destination root, so a later Remove can reclaim the whole
+// tree it made instead of orphaning intermediate directories, and so the record
+// survives a process restart independent of the absolute root.
+//
+// Threat model (accepted residual): each leaf is Lstat-checked and rejected if
+// it is a symlink before Pasture reads or mutates it, but Go exposes no portable
+// open-if-not-symlink primitive, so a local attacker with write access to the
+// same directory could swap a regular file for a symlink in the narrow window
+// between that Lstat and the subsequent open inside identify. The window cannot
+// escalate to a write outside root: writeLeaf renames onto the leaf path (rename
+// never follows a link) and Remove unlinks the directory entry itself, not a
+// link target, so the worst case is a spurious ownership mismatch that refuses
+// to touch the leaf. In the single-user deployment model this package targets,
+// an attacker with that write access already holds the user's own rights to the
+// directory.
 package directfile
 
 import (
@@ -22,7 +39,9 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/install/cell"
@@ -34,7 +53,10 @@ type EnsureOutcome struct {
 	// Leaves are the bundle's regular-file leaves now confirmed present with
 	// their exact bundle identity, suitable for a managed inventory record.
 	Leaves []inventory.Leaf
-	// CreatedDirs are directories Pasture created and may later remove if empty.
+	// CreatedDirs are the directories Pasture created, each a clean path relative
+	// to root, shallowest-first, including every intermediate level (not only the
+	// deepest). Persist these in the inventory record so a later Remove can
+	// reclaim the tree it made without orphaning intermediate directories.
 	CreatedDirs []string
 	// Managed is true when Pasture created or updated at least one leaf.
 	Managed bool
@@ -61,18 +83,14 @@ func Ensure(root string, bundle artifact.Bundle, prior []inventory.Leaf) (Ensure
 		if !e.IsDirectory() {
 			continue
 		}
-		dest, err := safeJoin(root, e.Path().String())
+		made, err := ensureDirTree(root, e.Path().String(), e.Mode().Bits())
 		if err != nil {
 			return EnsureOutcome{}, err
 		}
-		madeDir, err := ensureDir(dest, e.Mode().Bits())
-		if err != nil {
-			return EnsureOutcome{}, err
-		}
-		if madeDir {
+		if len(made) > 0 {
 			created = true
 			allExternalOrPresent = false
-			createdDirs = append(createdDirs, dest)
+			createdDirs = append(createdDirs, made...)
 		}
 	}
 
@@ -84,14 +102,18 @@ func Ensure(root string, bundle artifact.Bundle, prior []inventory.Leaf) (Ensure
 		if err != nil {
 			return EnsureOutcome{}, err
 		}
-		// Ensure the parent directory exists.
-		parent := filepath.Dir(dest)
-		if madeDir, err := ensureDir(parent, 0o755); err != nil {
-			return EnsureOutcome{}, err
-		} else if madeDir {
-			created = true
-			allExternalOrPresent = false
-			createdDirs = append(createdDirs, parent)
+		// Ensure the parent directory (and any missing ancestor) exists,
+		// recording every level created so Remove can reclaim the whole tree.
+		if relParent := path.Dir(e.Path().String()); relParent != "." {
+			made, err := ensureDirTree(root, relParent, 0o755)
+			if err != nil {
+				return EnsureOutcome{}, err
+			}
+			if len(made) > 0 {
+				created = true
+				allExternalOrPresent = false
+				createdDirs = append(createdDirs, made...)
+			}
 		}
 
 		content, err := readBundleFile(bundle, e.Path().String())
@@ -177,21 +199,35 @@ func Ensure(root string, bundle artifact.Bundle, prior []inventory.Leaf) (Ensure
 	}, nil
 }
 
+// RemoveOutcome reports the result of an uninstall that could not fully reclaim
+// its tree.
+type RemoveOutcome struct {
+	// PreservedDirs are recorded created directories, each relative to root, that
+	// Remove intentionally left in place because they still hold entries Pasture
+	// did not record (a foreign file dropped in later, or a surviving sibling).
+	// They are reported, shallowest-first, so the caller can surface an
+	// actionable note rather than deleting a directory it does not exclusively
+	// own. An empty slice means the created tree was fully reclaimed.
+	PreservedDirs []string
+}
+
 // Remove unlinks recorded managed leaves whose live identity still exactly
-// matches, then removes recorded created directories that are empty. Siblings
-// are preserved. A leaf that drifted is left in place and reported.
-func Remove(root string, recorded []inventory.Leaf, createdDirs []string) error {
+// matches, then removes recorded created directories that are empty, deepest
+// first. A directory that still holds unrecorded entries is preserved and
+// reported, never force-removed. Siblings are preserved. A leaf that drifted is
+// left in place and the removal is rejected.
+func Remove(root string, recorded []inventory.Leaf, createdDirs []string) (RemoveOutcome, error) {
 	for _, l := range recorded {
 		dest, err := safeJoin(root, l.Path().String())
 		if err != nil {
-			return err
+			return RemoveOutcome{}, err
 		}
 		info, statErr := os.Lstat(dest)
 		if statErr != nil {
 			if os.IsNotExist(statErr) {
 				continue // already gone
 			}
-			return cell.NewFault(
+			return RemoveOutcome{}, cell.NewFault(
 				"direct-file remove", "inspectable managed leaf",
 				fmt.Sprintf("the managed leaf could not be inspected: %v", statErr),
 				dest, "checking a managed leaf before unlink",
@@ -200,19 +236,19 @@ func Remove(root string, recorded []inventory.Leaf, createdDirs []string) error 
 			)
 		}
 		if info.Mode().Type()&fs.ModeSymlink != 0 || !info.Mode().IsRegular() {
-			return rejectLeaf(dest, "the recorded managed leaf is no longer a regular file",
+			return RemoveOutcome{}, rejectLeaf(dest, "the recorded managed leaf is no longer a regular file",
 				"Pasture will not unlink a path type it did not record")
 		}
 		liveIdentity, err := identify(dest)
 		if err != nil {
-			return err
+			return RemoveOutcome{}, err
 		}
 		if !identityMatchesLeaf(liveIdentity, l) {
-			return rejectLeaf(dest, "the managed leaf drifted from its recorded ownership token",
+			return RemoveOutcome{}, rejectLeaf(dest, "the managed leaf drifted from its recorded ownership token",
 				"removing a drifted leaf could discard local changes")
 		}
 		if err := os.Remove(dest); err != nil {
-			return cell.NewFault(
+			return RemoveOutcome{}, cell.NewFault(
 				"direct-file remove", "managed leaf unlinked",
 				fmt.Sprintf("the managed leaf could not be unlinked: %v", err),
 				dest, "unlinking a managed leaf",
@@ -221,14 +257,73 @@ func Remove(root string, recorded []inventory.Leaf, createdDirs []string) error 
 			)
 		}
 	}
-	// Remove created directories that are now empty, deepest first.
+	// Reclaim recorded created directories that are now empty, deepest first.
+	// A directory recorded shallowest-first always precedes its descendants, so
+	// reverse iteration removes a child before its parent and lets the emptiness
+	// check cascade up the tree. Only recorded, now-empty directories are ever
+	// removed; anything still holding an unrecorded entry is preserved.
+	var preserved []string
 	for i := len(createdDirs) - 1; i >= 0; i-- {
-		dir := createdDirs[i]
-		if entries, err := os.ReadDir(dir); err == nil && len(entries) == 0 {
-			_ = os.Remove(dir)
+		rel := createdDirs[i]
+		dir, err := safeJoin(root, rel)
+		if err != nil {
+			return RemoveOutcome{}, err
+		}
+		entries, readErr := os.ReadDir(dir)
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				continue // already gone
+			}
+			// Unreadable: leave it in place and report rather than fail the
+			// whole uninstall over a directory Pasture cannot inspect.
+			preserved = append(preserved, rel)
+			continue
+		}
+		if len(entries) != 0 {
+			preserved = append(preserved, rel)
+			continue
+		}
+		if err := os.Remove(dir); err != nil {
+			preserved = append(preserved, rel)
 		}
 	}
-	return nil
+	// Report shallowest-first for a stable, human-readable note.
+	for l, r := 0, len(preserved)-1; l < r; l, r = l+1, r-1 {
+		preserved[l], preserved[r] = preserved[r], preserved[l]
+	}
+	return RemoveOutcome{PreservedDirs: preserved}, nil
+}
+
+// ensureDirTree ensures rel (a clean relative directory path under root) and
+// every missing ancestor exists, returning the relative paths of the
+// directories it actually created, ordered shallowest-first. Recording every
+// level it creates — not just the deepest — is what lets Remove later reclaim
+// the whole tree instead of orphaning intermediate directories.
+func ensureDirTree(root, rel string, mode uint32) ([]string, error) {
+	var created []string
+	cur := ""
+	for _, part := range strings.Split(rel, "/") {
+		if part == "" || part == "." {
+			continue
+		}
+		if cur == "" {
+			cur = part
+		} else {
+			cur += "/" + part
+		}
+		dest, err := safeJoin(root, cur)
+		if err != nil {
+			return nil, err
+		}
+		made, err := ensureDir(dest, mode)
+		if err != nil {
+			return nil, err
+		}
+		if made {
+			created = append(created, cur)
+		}
+	}
+	return created, nil
 }
 
 type identity struct {
@@ -236,25 +331,43 @@ type identity struct {
 	mode   artifact.Mode
 }
 
-func identify(path string) (identity, error) {
-	content, err := os.ReadFile(path)
+// identify opens dest once and derives both the content digest and the mode
+// from that single handle. Deriving both from one fd (instead of an independent
+// os.ReadFile plus os.Stat, each of which resolves the path separately) means a
+// concurrent path swap between the two operations cannot make the digest and the
+// mode describe two different inodes. The residual Lstat-then-open race the
+// caller cannot close on Go's portable API is analyzed in the package doc; it
+// cannot escalate past a spurious ownership mismatch.
+func identify(dest string) (identity, error) {
+	file, err := os.Open(dest)
 	if err != nil {
 		return identity{}, cell.NewFault(
 			"direct-file identify", "readable leaf",
-			fmt.Sprintf("the leaf could not be read to compute its identity: %v", err),
-			path, "hashing a leaf for ownership comparison",
+			fmt.Sprintf("the leaf could not be opened to compute its identity: %v", err),
+			dest, "opening a leaf for ownership comparison",
 			"ownership cannot be verified before mutation",
 			"ensure the leaf is readable, then retry", err,
 		)
 	}
-	info, err := os.Stat(path)
+	defer file.Close()
+	info, err := file.Stat()
 	if err != nil {
 		return identity{}, cell.NewFault(
 			"direct-file identify", "stattable leaf",
 			fmt.Sprintf("the leaf mode could not be read: %v", err),
-			path, "reading a leaf mode for ownership comparison",
+			dest, "reading a leaf mode for ownership comparison",
 			"ownership cannot be verified before mutation",
 			"ensure the leaf is accessible, then retry", err,
+		)
+	}
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return identity{}, cell.NewFault(
+			"direct-file identify", "readable leaf",
+			fmt.Sprintf("the leaf could not be read to compute its identity: %v", err),
+			dest, "hashing a leaf for ownership comparison",
+			"ownership cannot be verified before mutation",
+			"ensure the leaf is readable, then retry", err,
 		)
 	}
 	mode, err := artifact.NewMode(uint32(info.Mode().Perm()))

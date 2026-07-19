@@ -7,7 +7,9 @@
 // or is unknown, the control source and native-trust disposition, and the exact
 // retry. Records serialize in the frozen nine-cell order and reject unknown or
 // duplicate cells. The file is written with a mode-0600 symlink-safe atomic
-// replace; a symlink or non-regular state file is rejected before any read.
+// replace; a symlink, non-regular, or group/other-accessible state file is
+// rejected before any read, so the confidentiality invariant Pasture establishes
+// on write is re-checked (not silently repaired) on every read.
 package inventory
 
 import (
@@ -69,7 +71,8 @@ func (inv Inventory) Ordered() []Record {
 func (inv Inventory) Len() int { return len(inv.records) }
 
 // Load reads and decodes the confirmed-state file. A missing file yields an
-// empty inventory; a symlink or non-regular state file is rejected before read.
+// empty inventory; a symlink, non-regular, or group/other-accessible state file
+// is rejected before read.
 func Load(path string) (Inventory, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -91,6 +94,19 @@ func Load(path string) (Inventory, error) {
 			path, "checking the state file type before read",
 			"a symlink or special file could redirect trust to attacker-controlled bytes",
 			"remove the non-regular entry so Pasture manages a regular state file", nil,
+		)
+	}
+	// Enforce (not repair) the mode-0600 confidentiality invariant on read. A
+	// file with any group or other permission is rejected rather than chmod-ed in
+	// place, because repairing would mean writing to a file Pasture has not yet
+	// validated as its own; the user resolves it explicitly.
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		return Inventory{}, cell.NewFault(
+			"inventory load", "owner-only (0600) state file",
+			fmt.Sprintf("the state file mode is %04o, which grants group or other access", perm),
+			path, "checking the state file permissions before read",
+			"a world- or group-readable confirmed-state file leaks what Pasture installed, and a group/other-writable one could be tampered with between Pasture runs",
+			fmt.Sprintf("restore owner-only access with: chmod 0600 %s", path), nil,
 		)
 	}
 	data, err := os.ReadFile(path)

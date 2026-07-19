@@ -3,6 +3,7 @@ package apply
 import (
 	"fmt"
 
+	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/install/activation"
 	"github.com/dayvidpham/pasture/internal/install/cell"
 	"github.com/dayvidpham/pasture/internal/install/directfile"
@@ -57,6 +58,10 @@ func (a DirectFileActivator) Ensure(c cell.Cell, act activation.ComponentActivat
 	if err != nil {
 		return Outcome{Observation: inventory.Unknown()}, err
 	}
+	createdDirs, err := parseCreatedDirs(out.CreatedDirs)
+	if err != nil {
+		return Outcome{Observation: inventory.Unknown()}, err
+	}
 	record, err := inventory.NewRecord(inventory.RecordInput{
 		Cell:        c,
 		Source:      a.recordSource(),
@@ -64,6 +69,7 @@ func (a DirectFileActivator) Ensure(c cell.Cell, act activation.ComponentActivat
 		Managed:     out.Managed, // false for a pure external match
 		ArtifactID:  df.Bundle().ID().String(),
 		Leaves:      out.Leaves,
+		CreatedDirs: createdDirs,
 		Observation: inventory.Installed(),
 		Trust:       inventory.TrustNotApplicable(),
 		LastAction:  "ensure",
@@ -79,15 +85,22 @@ func (a DirectFileActivator) Ensure(c cell.Cell, act activation.ComponentActivat
 	return Outcome{Status: Completed(), Observation: inventory.Installed(), Record: &record, Diagnostic: diagnostic}, nil
 }
 
-// Remove unlinks the recorded managed leaves and records an absent tombstone.
+// Remove unlinks the recorded managed leaves, reclaims the recorded created
+// directories that are now empty, and records an absent tombstone. A created
+// directory that a foreign file moved into is preserved and surfaced as an
+// actionable diagnostic rather than force-removed.
 func (a DirectFileActivator) Remove(c cell.Cell, act activation.ComponentActivation, prior inventory.Record) (Outcome, error) {
 	df, err := a.strategy(act)
 	if err != nil {
 		return Outcome{Observation: inventory.Unknown()}, err
 	}
-	if err := directfile.Remove(df.DestinationRoot(), prior.Leaves(), nil); err != nil {
+	removeOut, err := directfile.Remove(df.DestinationRoot(), prior.Leaves(), createdDirStrings(prior.CreatedDirs()))
+	if err != nil {
 		return Outcome{Observation: inventory.Unknown()}, err
 	}
+	// A tombstone carries no created-dir token: any directory still on disk now
+	// holds a foreign entry Pasture does not own, and a re-install re-records the
+	// tree it re-creates.
 	record, err := inventory.NewRecord(inventory.RecordInput{
 		Cell:        c,
 		Source:      a.recordSource(),
@@ -102,7 +115,38 @@ func (a DirectFileActivator) Remove(c cell.Cell, act activation.ComponentActivat
 	if err != nil {
 		return Outcome{Observation: inventory.Unknown()}, err
 	}
-	return Outcome{Status: Completed(), Observation: inventory.Absent(), Record: &record}, nil
+	diagnostic := ""
+	if len(removeOut.PreservedDirs) > 0 {
+		diagnostic = fmt.Sprintf(
+			"the managed leaves were removed, but these directories Pasture created were kept because a file it does not manage now lives inside them: %v; remove them by hand once you no longer need that content",
+			removeOut.PreservedDirs,
+		)
+	}
+	return Outcome{Status: Completed(), Observation: inventory.Absent(), Record: &record, Diagnostic: diagnostic}, nil
+}
+
+// parseCreatedDirs validates the relative created-directory paths reported by the
+// directfile layer into the typed paths persisted on the record.
+func parseCreatedDirs(dirs []string) ([]artifact.Path, error) {
+	out := make([]artifact.Path, 0, len(dirs))
+	for _, d := range dirs {
+		p, err := artifact.NewPath(d)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// createdDirStrings flattens the typed created-directory paths back to the
+// relative strings the directfile layer removes.
+func createdDirStrings(dirs []artifact.Path) []string {
+	out := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		out = append(out, d.String())
+	}
+	return out
 }
 
 func (a DirectFileActivator) recordSource() inventory.Source {

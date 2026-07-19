@@ -172,6 +172,100 @@ func TestApplySelectionRemovesDeselectedManagedCell(t *testing.T) {
 	}
 }
 
+func TestApplySelectionUninstallLeavesNoOrphanedDirs(t *testing.T) {
+	root := t.TempDir()
+	engine, _ := apply.NewEngine(apply.NewDirectFileActivator(apply.InstallerSource()))
+	contracts := map[ir.HarnessID]activation.ActivationContract{ir.HarnessOpenCode: opencodeContract(t, root)}
+	inv := inventory.New()
+	// Full install materializes nested trees: skills/pasture, agent, plugin.
+	if _, err := engine.ApplySelection(opencodeAllOnSelection(t), apply.InstallerSource(), contracts, &inv); err != nil {
+		t.Fatal(err)
+	}
+	// The intermediate directory Pasture had to create must be recorded, not
+	// just the deepest leaf's parent.
+	oc, _ := cell.New(ir.HarnessOpenCode, cell.SkillsAxis())
+	rec, ok := inv.Lookup(oc)
+	if !ok {
+		t.Fatal("opencode.skills record missing after install")
+	}
+	var recorded []string
+	for _, d := range rec.CreatedDirs() {
+		recorded = append(recorded, d.String())
+	}
+	if len(recorded) != 2 || recorded[0] != "skills" || recorded[1] != "skills/pasture" {
+		t.Fatalf("recorded created dirs = %v, want [skills skills/pasture]", recorded)
+	}
+
+	// Deselect everything and uninstall.
+	off := map[cell.Cell]bool{}
+	for _, c := range cell.CanonicalCells() {
+		off[c] = false
+	}
+	offSel, _ := selection.New(off)
+	res, err := engine.ApplySelection(offSel, apply.InstallerSource(), contracts, &inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK() {
+		t.Fatalf("uninstall not ok: %+v", res.Rows())
+	}
+	// Zero orphaned directories anywhere under root.
+	entries, _ := os.ReadDir(root)
+	if len(entries) != 0 {
+		t.Errorf("orphaned entries under root after full uninstall: %v", entries)
+	}
+}
+
+func TestApplySelectionUninstallPreservesForeignOccupiedDir(t *testing.T) {
+	root := t.TempDir()
+	engine, _ := apply.NewEngine(apply.NewDirectFileActivator(apply.InstallerSource()))
+	contracts := map[ir.HarnessID]activation.ActivationContract{ir.HarnessOpenCode: opencodeContract(t, root)}
+	inv := inventory.New()
+	if _, err := engine.ApplySelection(opencodeAllOnSelection(t), apply.InstallerSource(), contracts, &inv); err != nil {
+		t.Fatal(err)
+	}
+	// A foreign file moves into a directory Pasture created.
+	foreign := filepath.Join(root, "skills", "pasture", "user-notes.md")
+	if err := os.WriteFile(foreign, []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	off := map[cell.Cell]bool{}
+	for _, c := range cell.CanonicalCells() {
+		off[c] = false
+	}
+	offSel, _ := selection.New(off)
+	res, err := engine.ApplySelection(offSel, apply.InstallerSource(), contracts, &inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK() {
+		t.Fatalf("uninstall not ok: %+v", res.Rows())
+	}
+	// The foreign file survives.
+	if _, err := os.Stat(foreign); err != nil {
+		t.Errorf("foreign file removed during uninstall: %v", err)
+	}
+	// The occupied directory survives.
+	if _, err := os.Stat(filepath.Join(root, "skills", "pasture")); err != nil {
+		t.Errorf("foreign-occupied created dir was removed: %v", err)
+	}
+	// The skills row carries an actionable note naming the preserved dir.
+	var skillsRow apply.ActionRow
+	found := false
+	for _, r := range res.Rows() {
+		if r.Cell().String() == "opencode.skills" {
+			skillsRow = r
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("no opencode.skills row in uninstall result")
+	}
+	if !strings.Contains(skillsRow.Diagnostic(), "skills/pasture") {
+		t.Errorf("skills row diagnostic missing preserved-dir note: %q", skillsRow.Diagnostic())
+	}
+}
+
 func TestApplySelectionHomeManagerInspectsDirectFileDeclaratively(t *testing.T) {
 	root := t.TempDir()
 	engine, _ := apply.NewEngine(apply.NewDirectFileActivator(apply.HomeManagerSource()))

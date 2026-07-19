@@ -126,6 +126,65 @@ telemetry:
 	}
 }
 
+func TestLoadFollowsSymlinkedConfig(t *testing.T) {
+	// A symlinked config.yaml (the dotfile-manager / Home Manager layout) is read
+	// THROUGH, on purpose. Pin the intentional asymmetry versus Save.
+	dir := t.TempDir()
+	real := filepath.Join(dir, "source-config.yaml")
+	doc := `install:
+  harnesses:
+    opencode: true
+  extensions:
+    hooks: true
+`
+	if err := os.WriteFile(real, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "config.yaml")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := preferences.Load(link)
+	if err != nil {
+		t.Fatalf("Load through symlink = %v, want success (managed-config workflow)", err)
+	}
+	if !loaded.HarnessEnabled(ir.HarnessOpenCode) || !loaded.ExtensionEnabled(cell.HooksAxis()) {
+		t.Error("symlinked config content not read through the link")
+	}
+}
+
+func TestSaveRefusesSymlinkedConfigAndLeavesTargetUntouched(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "source-config.yaml")
+	original := "telemetry:\n  level: verbose\n"
+	if err := os.WriteFile(real, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "config.yaml")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := preferences.Default().WithHarness(ir.HarnessCodex, true)
+	err := preferences.Save(link, p)
+	if err == nil {
+		t.Fatal("Save through a symlinked config = nil error, want rejection")
+	}
+	// The fix must point the user at the dotfiles source, not at clobbering.
+	if !strings.Contains(err.Error(), "symlink's source") {
+		t.Errorf("Save fault does not direct the user to the symlink source: %v", err)
+	}
+	// The real target must be untouched (no atomic replace ran through the link).
+	got, _ := os.ReadFile(real)
+	if string(got) != original {
+		t.Errorf("symlink target was modified: %q", got)
+	}
+	// The link must still be a link, not replaced by a regular file.
+	info, _ := os.Lstat(link)
+	if info.Mode().Type()&os.ModeSymlink == 0 {
+		t.Error("config symlink was replaced by a regular file")
+	}
+}
+
 func TestLoadRejectsUnknownHarness(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	bad := `install:

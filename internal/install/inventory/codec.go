@@ -27,6 +27,7 @@ type recordWire struct {
 	Version     string     `yaml:"version,omitempty"`
 	Selector    string     `yaml:"selector,omitempty"`
 	Leaves      []leafWire `yaml:"leaves,omitempty"`
+	CreatedDirs []string   `yaml:"created_dirs,omitempty"`
 	Observation string     `yaml:"observation"`
 	Trust       string     `yaml:"trust"`
 	LastAction  string     `yaml:"last_action,omitempty"`
@@ -52,6 +53,10 @@ func (inv Inventory) Marshal() ([]byte, error) {
 				Digest: l.Digest().String(),
 			})
 		}
+		createdDirs := make([]string, 0, len(r.createdDirs))
+		for _, d := range r.createdDirs {
+			createdDirs = append(createdDirs, d.String())
+		}
 		wire.Cells = append(wire.Cells, recordWire{
 			Cell:        r.cell.String(),
 			Source:      r.source.String(),
@@ -61,6 +66,7 @@ func (inv Inventory) Marshal() ([]byte, error) {
 			Version:     r.version,
 			Selector:    r.selector,
 			Leaves:      leaves,
+			CreatedDirs: createdDirs,
 			Observation: r.observation.String(),
 			Trust:       r.trust.String(),
 			LastAction:  r.lastAction,
@@ -86,6 +92,18 @@ func (inv Inventory) Marshal() ([]byte, error) {
 
 // Parse decodes and validates a confirmed-state document. Unknown keys,
 // duplicate cells, and unknown enum values are rejected.
+//
+// Schema version discipline (forward compatibility): pasture.install.state/v1 is
+// a closed schema. KnownFields(true) rejects any key recordWire does not
+// declare, so a document written by a newer, unknown Pasture is refused rather
+// than silently truncated. While the schema is pre-release, a new OPTIONAL field
+// (for example created_dirs, added with an omitempty tag so older documents
+// still round-trip) is added to recordWire in place and the SchemaID stays v1.
+// The first change that alters existing field SEMANTICS instead bumps SchemaID
+// to v2, and Parse must then branch on wire.Schema before decodeRecord and route
+// a v1 document through a migration shim into the v2 model — never widen this
+// equality check to accept multiple versions with one decoder, which would let
+// incompatible record semantics load unvalidated.
 func Parse(data []byte) (Inventory, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
@@ -157,6 +175,14 @@ func decodeRecord(rw recordWire, index int) (Record, error) {
 		}
 		leaves = append(leaves, leaf)
 	}
+	createdDirs := make([]artifact.Path, 0, len(rw.CreatedDirs))
+	for _, d := range rw.CreatedDirs {
+		p, err := artifact.NewPath(d)
+		if err != nil {
+			return Record{}, err
+		}
+		createdDirs = append(createdDirs, p)
+	}
 	return NewRecord(RecordInput{
 		Cell:        c,
 		Source:      source,
@@ -166,6 +192,7 @@ func decodeRecord(rw recordWire, index int) (Record, error) {
 		Version:     rw.Version,
 		Selector:    rw.Selector,
 		Leaves:      leaves,
+		CreatedDirs: createdDirs,
 		Observation: observation,
 		Trust:       trust,
 		LastAction:  rw.LastAction,
