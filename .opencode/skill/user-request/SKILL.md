@@ -62,7 +62,7 @@ description: Capture user feature request verbatim (Phase 1)
 
 1. **Get the user's request verbatim:**
    ```
-   AskUserQuestion: "What feature or change would you like to request?"
+   interactive_user_prompt: "What feature or change would you like to request?"
    ```
 
 2. **Create the request task:**
@@ -102,7 +102,7 @@ bd comments add {{request-task-id}} \
 After classification, confirm research depth with the user:
 
 ```
-AskUserQuestion:
+interactive_user_prompt:
   question: "Based on classification ({{scope}}, {{complexity}}, {{risk}}, {{novelty}}), how deep should research go?"
   header: "Research Depth"
   options:
@@ -127,7 +127,7 @@ bd comments add {{request-task-id}} \
   "Research depth: {{depth}} (user confirmed)"
 ```
 
-Spawn both agents in parallel (via Task tool with `run_in_background: true`). Each agent invokes its dedicated skill.
+Spawn both agents in parallel (via task agent tool with `background: true`). Each agent invokes its dedicated skill.
 
 ### s1_2-research: Domain Research
 

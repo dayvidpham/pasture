@@ -110,7 +110,7 @@ bd dep add ure-id --blocked-by request-id
 **[C-handoff-skill-invocation]**
 - Given: an agent is launched for a new phase (especially p7 to p8 handoff)
 - When: composing the launch prompt
-- Then: prompt MUST start with Skill(/pasture:{role}) invocation directive so the agent loads its role instructions
+- Then: prompt MUST start with skill("{role}") invocation directive so the agent loads its role instructions
 - Should not: launch agents without skill invocation — they skip role-critical procedures like ephemeral exploration and leaf task creation
 
 **[C-proposal-naming]**
@@ -122,7 +122,7 @@ bd dep add ure-id --blocked-by request-id
 **[C-ure-verbatim]**
 - Given: user interview (Request, URE, or UAT), URD update, or mid-implementation design decision
 - When: recording in Beads
-- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via bd comments add whenever user intent is captured
+- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside interactive_user_prompt option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via bd comments add whenever user intent is captured
 - Should not: summarize options as (1)/(2)/(3) without option text, paraphrase user responses, or omit code/snippets shown inside option previews
 
 _Example (correct)_
@@ -498,28 +498,28 @@ The same review/ratify/UAT/handoff cycle (Phases 3-7) applies. After FOLLOWUP_PR
 
 ## Spawning Reviewers
 
-Spawn 3 axis-specific reviewers (A=Correctness, B=Test quality, C=Elegance) as `general-purpose` subagents. Each reviewer must invoke the `/pasture:reviewer` skill (via the Skill tool) to load its role instructions — `/pasture:reviewer` is a **Skill**, not a subagent type.
+Spawn 3 axis-specific reviewers (A=Correctness, B=Test quality, C=Elegance) as `general-purpose` subagents. Each reviewer must invoke the `/pasture:reviewer` skill (via the skill tool) to load its role instructions — `/pasture:reviewer` is a **Skill**, not a subagent type.
 
 ```
-Task(description: "Reviewer A: correctness", prompt: "You are Reviewer A (Correctness). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose")
-Task(description: "Reviewer B: test quality", prompt: "You are Reviewer B (Test quality). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose")
-Task(description: "Reviewer C: elegance", prompt: "You are Reviewer C (Elegance). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose")
+task(description: "Reviewer A: correctness", prompt: "You are Reviewer A (Correctness). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", agent_type: "general-purpose")
+task(description: "Reviewer B: test quality", prompt: "You are Reviewer B (Test quality). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", agent_type: "general-purpose")
+task(description: "Reviewer C: elegance", prompt: "You are Reviewer C (Elegance). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", agent_type: "general-purpose")
 ```
 
 ## Supervisor Handoff
 
-**DO NOT** spawn the supervisor as a Task tool subagent or via `aura-swarm` for the IMPL_PLAN phase. Instead, invoke:
+**DO NOT** spawn the supervisor as a task agent tool subagent or via `aura-swarm` for the IMPL_PLAN phase. Instead, invoke:
 
 ```
-Skill(skill: "pasture:architect-handoff")
+skill("architect-handoff")
 ```
 
 The handoff skill guides you through:
 1. Authoring the handoff in a HANDOFF Beads task body (no filesystem path)
-2. Launching the supervisor (and workers) as **Opus** teammates via TeamCreate, then assigning work via SendMessage
+2. Launching the supervisor (and workers) as **Opus** teammates via task(, then assigning work via task_agent_message
 
 **CRITICAL:** The supervisor assignment MUST:
-1. **Start with `Skill(/pasture:supervisor)`** — this loads the supervisor's role instructions, including leaf task creation
+1. **Start with `skill("supervisor")`** — this loads the supervisor's role instructions, including leaf task creation
 2. Include all Beads task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)
 3. Reference the HANDOFF Beads task ID — the handoff is in that task body
 

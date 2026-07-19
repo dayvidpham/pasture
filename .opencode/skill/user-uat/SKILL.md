@@ -67,7 +67,7 @@ description: User Acceptance Testing with demonstrative examples
 **[uat-invoke-skill]**
 - Given: the Phase 5 or Phase 11 UAT interview
 - When: conducting it
-- Then: MUST invoke `Skill(/pasture:user-uat)` so the verbatim-capture, FIX-NOW/DEFER disposition, and validation-case confirmation procedures are loaded
+- Then: MUST invoke `skill("user-uat")` so the verbatim-capture, FIX-NOW/DEFER disposition, and validation-case confirmation procedures are loaded
 - Should not: conduct the UAT without invoking its skill — skipping it loses the disposition and verbatim-capture procedures
 
 **[frag--validation-cases]**
@@ -106,7 +106,7 @@ The user needs to see the actual thing — definition, behavior, example — and
 2. **Options describe competing tradeoffs, not approval levels.** Each option is a real engineering alternative with its own pros/cons.
 3. **Later questions depend on earlier answers.** Structure the survey as a decision tree — Round 1 settles the highest-leverage boundaries, Round 2 addresses dependent decisions informed by Round 1 answers, etc.
 4. **Show context before asking.** The user MUST see a code snippet, interface definition, or motivating before/after example before being asked to evaluate.
-5. **One component per AskUserQuestion call.** Never batch all components into one survey.
+5. **One component per interactive_user_prompt call.** Never batch all components into one survey.
 
 ## Wrong vs Right Question Patterns
 
@@ -158,7 +158,7 @@ Look for:
 
 Structure questions to progressively validate the proposal against the user's original requirements.
 
-**Round 1: Highest-leverage tradeoffs** (1-2 questions per AskUserQuestion call)
+**Round 1: Highest-leverage tradeoffs** (1-2 questions per interactive_user_prompt call)
 
 Start with the 2-3 architectural decisions where the proposal made the biggest choices. For each, show the user:
 1. What they originally said in URE (their stated requirement/preference)
@@ -220,10 +220,10 @@ Design-space questions to ask per component type:
 
 ## UAT Survey Template
 
-Use one AskUserQuestion call per component — do NOT batch all components into one survey.
+Use one interactive_user_prompt call per component — do NOT batch all components into one survey.
 
 ```
-AskUserQuestion({
+interactive_user_prompt({
   questions: [
     {
       question: `The verbose flag shows the following extra lines for backup events:

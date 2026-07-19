@@ -94,7 +94,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 **[C-handoff-skill-invocation]**
 - Given: an agent is launched for a new phase (especially p7 to p8 handoff)
 - When: composing the launch prompt
-- Then: prompt MUST start with Skill(/pasture:{role}) invocation directive so the agent loads its role instructions
+- Then: prompt MUST start with skill("{role}") invocation directive so the agent loads its role instructions
 - Should not: launch agents without skill invocation — they skip role-critical procedures like ephemeral exploration and leaf task creation
 
 **[C-integration-points]**
@@ -130,7 +130,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 **[C-supervisor-explore-ephemeral]**
 - Given: supervisor needs codebase exploration
 - When: starting Phase 8 (IMPL_PLAN)
-- Then: spawn ephemeral Explore subagents via Task tool for scoped codebase queries; each subagent is short-lived and returns findings; no standing team overhead
+- Then: spawn ephemeral Explore subagents via task agent tool for scoped codebase queries; each subagent is short-lived and returns findings; no standing team overhead
 - Should not: explore the codebase directly as supervisor; maintain a standing explore team
 
 **[C-supervisor-no-impl]**
@@ -168,7 +168,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 **[B-sup-model-nontrivial]**
 - Given: non-trivial changes (multi-file, architectural, logic-heavy)
 - When: spawning a worker
-- Then: prefer model: sonnet for the Task tool to ensure quality
+- Then: prefer model: sonnet for the task agent tool to ensure quality
 - Should not: default to haiku for complex work
 
 **[B-sup-ride-the-wave]**
@@ -202,7 +202,7 @@ Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full c
 
 - Read RATIFIED_PLAN and URD via bd show (`bd show <ratified-plan-id> && bd show <urd-id>`)
 
-- Spawn ephemeral Explore subagents (`subagent_type=Explore`) for scoped codebase queries — NOT standing teams
+- Spawn ephemeral Explore subagents (`agent_type=Explore`) for scoped codebase queries — NOT standing teams
 
 - Use Explore findings to decompose into vertical slices with integration points
 
@@ -213,7 +213,7 @@ Exit conditions:
 
 **Stage 2: Build** _(parallel)_
 
-- Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity.
+- Spawn workers via the task agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity.
 
 - Monitor worker progress via bd list and bd show (`bd list --labels="pasture:p9-impl:s9-slice" --status=in_progress`)
 
@@ -224,7 +224,7 @@ Exit conditions:
 
 **Stage 3: Review + Fix Cycles** _(conditional-loop)_
 
-- Spawn reviewers via Task tool for per-slice code review
+- Spawn reviewers via task agent tool for per-slice code review
 
 - Reviewers create severity groups (BLOCKER/IMPORTANT/MINOR) per slice
 
@@ -243,7 +243,7 @@ Exit conditions:
 ```text
 Phase 8: PLAN
   ├─ Read RATIFIED_PLAN + URD
-  ├─ Spawn ephemeral Explore subagents (Task tool, scoped queries)
+  ├─ Spawn ephemeral Explore subagents (task agent tool, scoped queries)
   ├─ Use Explore findings to map codebase
   ├─ Decompose into vertical slices + integration points
   └─ Create leaf tasks for every slice
@@ -255,7 +255,7 @@ Phase 9: BUILD
 
 Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget — iterate until 0/0/0 clean, else surface to user)
   ├─ Cycle 1:
-  │   ├─ Spawn ephemeral reviewers (Task tool, per-slice review)
+  │   ├─ Spawn ephemeral reviewers (task agent tool, per-slice review)
   │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
   │   ├─ Workers fix ALL findings (BLOCKER + IMPORTANT + MINOR) with atomic commits
   │   └─ Spawn new ephemeral reviewers for re-review

@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"text/template"
@@ -613,29 +614,32 @@ func renderSubSkill(commandId, figuresDir string, tmplName string) (string, erro
 // Returns a *MarkerError if skillPath is missing the BEGIN/END marker pair (and
 // Init is false), or if the markers are malformed.
 func GenerateSkill(roleId protocol.RoleId, skillPath string, figuresDir string, opts GenerateOptions) (string, error) {
+	return generateSkillFromSource(roleId, skillPath, skillPath, figuresDir, opts)
+}
+
+func generateSkillFromSource(roleId protocol.RoleId, sourcePath string, outputPath string, figuresDir string, opts GenerateOptions) (string, error) {
 	// Read existing file.
-	oldContent, err := os.ReadFile(skillPath)
+	sourceContent, err := os.ReadFile(sourcePath)
 	if err != nil {
 		return "", fmt.Errorf(
-			"codegen.GenerateSkill: cannot read skill file %q — "+
+			"codegen.GenerateSkill: cannot read source skill file %q — "+
 				"where: role %q — "+
 				"fix: ensure the file exists before calling GenerateSkill: %w",
-			skillPath, roleId, err,
+			sourcePath, roleId, err,
 		)
 	}
-	content := string(oldContent)
+	content := string(sourceContent)
+	oldOutput := content
+	if outputPath != sourcePath {
+		oldOutput = ""
+		if data, readErr := os.ReadFile(outputPath); readErr == nil {
+			oldOutput = string(data)
+		}
+	}
 
 	// In Init mode, prepend markers if missing.
 	if opts.Init && !HasMarkers(content) {
 		content = PrependMarkers(content)
-		if opts.Write {
-			if err := os.WriteFile(skillPath, []byte(content), 0o644); err != nil {
-				return "", fmt.Errorf(
-					"codegen.GenerateSkill: cannot write marker-prepended file %q: %w",
-					skillPath, err,
-				)
-			}
-		}
 	}
 
 	// Single-pass render: template produces all content inside BEGIN/END.
@@ -649,7 +653,7 @@ func GenerateSkill(roleId protocol.RoleId, skillPath string, figuresDir string, 
 	if err != nil {
 		return "", fmt.Errorf(
 			"codegen.GenerateSkill: marker replacement failed for %q (role %q): %w",
-			skillPath, roleId, err,
+			sourcePath, roleId, err,
 		)
 	}
 
@@ -668,16 +672,22 @@ func GenerateSkill(roleId protocol.RoleId, skillPath string, figuresDir string, 
 	}
 
 	// Print diff if requested and content changed.
-	if opts.Diff && newContent != content {
-		fmt.Print(unifiedDiff(skillPath, skillPath, content, newContent))
+	if opts.Diff && newContent != oldOutput {
+		fmt.Print(unifiedDiff(outputPath, outputPath, oldOutput, newContent))
 	}
 
 	// Write to file if requested.
 	if opts.Write {
-		if err := os.WriteFile(skillPath, []byte(newContent), 0o644); err != nil {
+		if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+			return "", fmt.Errorf(
+				"codegen.GenerateSkill: cannot create output directory for %q: %w",
+				outputPath, err,
+			)
+		}
+		if err := os.WriteFile(outputPath, []byte(newContent), 0o644); err != nil {
 			return "", fmt.Errorf(
 				"codegen.GenerateSkill: cannot write skill file %q: %w",
-				skillPath, err,
+				outputPath, err,
 			)
 		}
 	}
@@ -708,17 +718,28 @@ func GenerateSkill(roleId protocol.RoleId, skillPath string, figuresDir string, 
 // Returns a *MarkerError if skillPath is missing the BEGIN/END marker pair (and
 // Init is false), or if the markers are malformed.
 func GenerateSubSkill(commandId string, skillPath string, figuresDir string, opts GenerateOptions) (string, error) {
+	return generateSubSkillFromSource(commandId, skillPath, skillPath, figuresDir, opts)
+}
+
+func generateSubSkillFromSource(commandId string, sourcePath string, outputPath string, figuresDir string, opts GenerateOptions) (string, error) {
 	// Read existing file.
-	oldContent, err := os.ReadFile(skillPath)
+	sourceContent, err := os.ReadFile(sourcePath)
 	if err != nil {
 		return "", fmt.Errorf(
-			"codegen.GenerateSubSkill: cannot read skill file %q — "+
+			"codegen.GenerateSubSkill: cannot read source skill file %q — "+
 				"where: command %q — "+
 				"fix: ensure the file exists before calling GenerateSubSkill: %w",
-			skillPath, commandId, err,
+			sourcePath, commandId, err,
 		)
 	}
-	content := string(oldContent)
+	content := string(sourceContent)
+	oldOutput := content
+	if outputPath != sourcePath {
+		oldOutput = ""
+		if data, readErr := os.ReadFile(outputPath); readErr == nil {
+			oldOutput = string(data)
+		}
+	}
 
 	// In Init mode, prepend markers if missing. The template now owns the full
 	// header (frontmatter + H1) via dropPrefix=true, so markers are prepended —
@@ -727,14 +748,6 @@ func GenerateSubSkill(commandId string, skillPath string, figuresDir string, opt
 	// the subsequent dropPrefix=true ReplaceMarkerRegion call.
 	if opts.Init && !HasMarkers(content) {
 		content = PrependMarkers(content)
-		if opts.Write {
-			if err := os.WriteFile(skillPath, []byte(content), 0o644); err != nil {
-				return "", fmt.Errorf(
-					"codegen.GenerateSubSkill: cannot write marker-prepended file %q: %w",
-					skillPath, err,
-				)
-			}
-		}
 	}
 
 	// Single-pass render: template produces frontmatter + H1 + BEGIN/END content.
@@ -748,7 +761,7 @@ func GenerateSubSkill(commandId string, skillPath string, figuresDir string, opt
 	if err != nil {
 		return "", fmt.Errorf(
 			"codegen.GenerateSubSkill: marker replacement failed for %q (command %q): %w",
-			skillPath, commandId, err,
+			sourcePath, commandId, err,
 		)
 	}
 
@@ -767,16 +780,22 @@ func GenerateSubSkill(commandId string, skillPath string, figuresDir string, opt
 	}
 
 	// Print diff if requested and content changed.
-	if opts.Diff && newContent != content {
-		fmt.Print(unifiedDiff(skillPath, skillPath, content, newContent))
+	if opts.Diff && newContent != oldOutput {
+		fmt.Print(unifiedDiff(outputPath, outputPath, oldOutput, newContent))
 	}
 
 	// Write to file if requested.
 	if opts.Write {
-		if err := os.WriteFile(skillPath, []byte(newContent), 0o644); err != nil {
+		if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+			return "", fmt.Errorf(
+				"codegen.GenerateSubSkill: cannot create output directory for %q: %w",
+				outputPath, err,
+			)
+		}
+		if err := os.WriteFile(outputPath, []byte(newContent), 0o644); err != nil {
 			return "", fmt.Errorf(
 				"codegen.GenerateSubSkill: cannot write skill file %q: %w",
-				skillPath, err,
+				outputPath, err,
 			)
 		}
 	}

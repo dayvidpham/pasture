@@ -47,9 +47,9 @@ Reviews are named `PROPOSAL-N-REVIEW-{axis}-{round}` where:
 2. Spawn three reviewers with the task ID and URD reference:
 
 ```
-Task(description: "Reviewer A: correctness", prompt: "Review PROPOSAL-1 task <task-id>. URD: <urd-id> (read for requirements context). You are Reviewer A (Correctness). Focus: Does it faithfully serve the user? Are technical decisions consistent with rationale? Create review task titled PROPOSAL-1-REVIEW-A-1...", subagent_type: "general-purpose")
-Task(description: "Reviewer B: test quality", prompt: "Review PROPOSAL-1 task <task-id>. URD: <urd-id> (read for requirements context). You are Reviewer B (Test quality). Focus: Integration over unit? SUT not mocked? Shared fixtures? Assert outcomes? Create review task titled PROPOSAL-1-REVIEW-B-1...", subagent_type: "general-purpose")
-Task(description: "Reviewer C: elegance", prompt: "Review PROPOSAL-1 task <task-id>. URD: <urd-id> (read for requirements context). You are Reviewer C (Elegance). Focus: Right API? Not over/under-engineered? Complexity proportional to problem? Create review task titled PROPOSAL-1-REVIEW-C-1...", subagent_type: "general-purpose")
+task(description: "Reviewer A: correctness", prompt: "Review PROPOSAL-1 task <task-id>. URD: <urd-id> (read for requirements context). You are Reviewer A (Correctness). Focus: Does it faithfully serve the user? Are technical decisions consistent with rationale? Create review task titled PROPOSAL-1-REVIEW-A-1...", agent_type: "general-purpose")
+task(description: "Reviewer B: test quality", prompt: "Review PROPOSAL-1 task <task-id>. URD: <urd-id> (read for requirements context). You are Reviewer B (Test quality). Focus: Integration over unit? SUT not mocked? Shared fixtures? Assert outcomes? Create review task titled PROPOSAL-1-REVIEW-B-1...", agent_type: "general-purpose")
+task(description: "Reviewer C: elegance", prompt: "Review PROPOSAL-1 task <task-id>. URD: <urd-id> (read for requirements context). You are Reviewer C (Elegance). Focus: Right API? Not over/under-engineered? Complexity proportional to problem? Create review task titled PROPOSAL-1-REVIEW-C-1...", agent_type: "general-purpose")
 ```
 
 3. Wait for all 3 reviewers to vote ACCEPT

@@ -97,7 +97,7 @@ bd dep add ure-id --blocked-by request-id
 **[C-handoff-skill-invocation]**
 - Given: an agent is launched for a new phase (especially p7 to p8 handoff)
 - When: composing the launch prompt
-- Then: prompt MUST start with Skill(/pasture:{role}) invocation directive so the agent loads its role instructions
+- Then: prompt MUST start with skill("{role}") invocation directive so the agent loads its role instructions
 - Should not: launch agents without skill invocation — they skip role-critical procedures like ephemeral exploration and leaf task creation
 
 **[C-integration-points]**
@@ -127,7 +127,7 @@ bd dep add ure-id --blocked-by request-id
 **[C-supervisor-explore-ephemeral]**
 - Given: supervisor needs codebase exploration
 - When: starting Phase 8 (IMPL_PLAN)
-- Then: spawn ephemeral Explore subagents via Task tool for scoped codebase queries; each subagent is short-lived and returns findings; no standing team overhead
+- Then: spawn ephemeral Explore subagents via task agent tool for scoped codebase queries; each subagent is short-lived and returns findings; no standing team overhead
 - Should not: explore the codebase directly as supervisor; maintain a standing explore team
 
 **[C-uat-feedback-disposition]**
@@ -385,24 +385,24 @@ bd list --labels="pasture:p9-impl:s9-slice"          # Implementation slices
 
 ## Skills to Invoke
 
-Each phase transition MUST include an explicit `Skill(...)` invocation directive. When launching agents for a phase, the prompt MUST tell the agent to call the corresponding skill as its first action.
+Each phase transition MUST include an explicit `skill("<skill>")` invocation directive. When launching agents for a phase, the prompt MUST tell the agent to call the corresponding skill as its first action.
 
 | Phase | Skill | Invocation Directive |
 |-------|-------|---------------------|
-| 1 (REQUEST: classify, research, explore) | `/pasture:user-request` | `Skill(/pasture:user-request)` |
-| 2 (ELICIT + URD) | `/pasture:user-elicit` | `Skill(/pasture:user-elicit)` |
-| 3-6 (PROPOSAL, REVIEW, UAT, RATIFY) | `/pasture:architect` | `Skill(/pasture:architect)` |
-| 5, 11 (UAT) | `/pasture:user-uat` | `Skill(/pasture:user-uat)` |
-| 7 (HANDOFF) | `/pasture:architect-handoff` | Architect calls `Skill(/pasture:architect-handoff)` after ratification |
-| 8-10 (IMPL_PLAN, SLICES, CODE REVIEW) | `/pasture:supervisor` | Supervisor prompt MUST start with `Skill(/pasture:supervisor)` |
+| 1 (REQUEST: classify, research, explore) | `/pasture:user-request` | `skill("user-request")` |
+| 2 (ELICIT + URD) | `/pasture:user-elicit` | `skill("user-elicit")` |
+| 3-6 (PROPOSAL, REVIEW, UAT, RATIFY) | `/pasture:architect` | `skill("architect")` |
+| 5, 11 (UAT) | `/pasture:user-uat` | `skill("user-uat")` |
+| 7 (HANDOFF) | `/pasture:architect-handoff` | Architect calls `skill("architect-handoff")` after ratification |
+| 8-10 (IMPL_PLAN, SLICES, CODE REVIEW) | `/pasture:supervisor` | Supervisor prompt MUST start with `skill("supervisor")` |
 | 12 (LANDING) | Manual git commit and push | N/A |
 
 **CRITICAL — interviewing phases:** The interviewing phases MUST explicitly invoke their skill. Do **not** improvise interview questions:
-- **Phase 2 (URE):** invoke `Skill(/pasture:user-elicit)` — skipping it produces low-quality elicitation.
-- **Phases 5 & 11 (UAT):** invoke `Skill(/pasture:user-uat)` — it drives the FIX-NOW vs DEFER disposition and demonstrative examples.
+- **Phase 2 (URE):** invoke `skill("user-elicit")` — skipping it produces low-quality elicitation.
+- **Phases 5 & 11 (UAT):** invoke `skill("user-uat")` — it drives the FIX-NOW vs DEFER disposition and demonstrative examples.
 
 **CRITICAL:** When the architect hands off to the supervisor (Phase 7 → 8), the supervisor launch prompt MUST:
-1. Start with `Skill(/pasture:supervisor)` — without this, the supervisor skips role-critical procedures
+1. Start with `skill("supervisor")` — without this, the supervisor skips role-critical procedures
 2. Include all Beads task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)
 3. Include the HANDOFF Beads task ID — the handoff is authored in that task body (no filesystem path)
 

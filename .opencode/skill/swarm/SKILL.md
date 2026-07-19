@@ -16,13 +16,13 @@ Orchestrate Claude agent sessions in two modes:
 - Given: an epic needs implementation
 - When: launching agents
 - Then: use `aura-swarm start --epic <id>` to create an isolated worktree
-- Should not: launch long-running workers as Task tool subagents
+- Should not: launch long-running workers as task agent tool subagents
 
 **[swarm-intree-longrunning]**
 - Given: a long-running agent is needed in-place
 - When: launching
 - Then: use `aura-swarm start --swarm-mode intree --role <role> -n 1 --prompt "..."`
-- Should not: spawn long-running agents as Task tool subagents
+- Should not: spawn long-running agents as task agent tool subagents
 
 **[swarm-task-assignment]**
 - Given: multiple workers are needed in-place
@@ -33,7 +33,7 @@ Orchestrate Claude agent sessions in two modes:
 **[swarm-reviewer-subagents]**
 - Given: reviewers are needed
 - When: spawning
-- Then: use Task tool subagents or TeamCreate instead
+- Then: use task agent tool subagents or task( instead
 - Should not: use `aura-swarm start` for reviewer rounds
 
 **[swarm-status-check]**

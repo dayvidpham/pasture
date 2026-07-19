@@ -1,7 +1,6 @@
 package codegen
 
 import (
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,7 +30,7 @@ func TestEmitHarnessClaudeCodeIsByteIdentical(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveHarness: %v", err)
 	}
-	files, err := EmitHarness(root, targets[0], filepath.Join(root, "skills", "protocol", "figures"), GenerateOptions{
+	files, err := EmitHarness(root, root, targets[0], filepath.Join(root, "skills", "protocol", "figures"), GenerateOptions{
 		Diff:  false,
 		Write: false,
 	})
@@ -55,21 +54,20 @@ func TestEmitHarnessClaudeCodeIsByteIdentical(t *testing.T) {
 func TestEmitHarnessCombinedTargetsDoNotPerturbClaudeCode(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	writeHarnessSeedFiles(t, root)
-	seedVerbatimSourceDirs(t, root) // OpenCode verbatim source (protocol, install-cli)
+	sourceRoot := testModuleRoot(t)
+	outputRoot := t.TempDir()
 	targets, err := ResolveHarness([]string{string(HarnessClaudeCode), string(HarnessOpenCode)})
 	if err != nil {
 		t.Fatalf("ResolveHarness: %v", err)
 	}
 
-	claudeFiles, err := EmitHarness(root, targets[0], "", GenerateOptions{Diff: false, Write: true})
+	claudeFiles, err := EmitHarness(sourceRoot, outputRoot, targets[0], "", GenerateOptions{Diff: false, Write: true})
 	if err != nil {
 		t.Fatalf("EmitHarness(%s): %v", targets[0].Name, err)
 	}
 	before := readGeneratedFiles(t, claudeFiles)
 
-	if _, err := EmitHarness(root, targets[1], "", GenerateOptions{Diff: false, Write: true}); err != nil {
+	if _, err := EmitHarness(sourceRoot, outputRoot, targets[1], "", GenerateOptions{Diff: false, Write: true}); err != nil {
 		t.Fatalf("EmitHarness(%s): %v", targets[1].Name, err)
 	}
 	after := readGeneratedFiles(t, claudeFiles)
@@ -95,31 +93,10 @@ func TestEmitHarnessCombinedTargetsDoNotPerturbClaudeCode(t *testing.T) {
 		t.Fatalf("expected %d OpenCode skill dirs, enumerated %d", len(roleSkillDirs)+len(commandSkillDirs), len(expectedSkillDirs))
 	}
 	for _, dir := range expectedSkillDirs {
-		skillPath := filepath.Join(root, ".opencode", "skill", dir, "SKILL.md")
+		skillPath := filepath.Join(outputRoot, ".opencode", "skill", dir, "SKILL.md")
 		if _, err := os.Stat(skillPath); err != nil {
 			t.Fatalf("combined target did not emit OpenCode skill %q: %v", skillPath, err)
 		}
-	}
-}
-
-func writeHarnessSeedFiles(t *testing.T, root string) {
-	t.Helper()
-	for _, item := range roleSkillItems() {
-		writeSeedSkill(t, filepath.Join(root, "skills", item.dir, "SKILL.md"))
-	}
-	for _, item := range commandSkillItems() {
-		writeSeedSkill(t, filepath.Join(root, "skills", item.dir, "SKILL.md"))
-	}
-}
-
-func writeSeedSkill(t *testing.T, path string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("create seed dir for %q: %v", path, err)
-	}
-	content := GeneratedBegin + "\n" + GeneratedEnd + "\n"
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("write seed skill %q: %v", path, err)
 	}
 }
 
@@ -134,50 +111,6 @@ func readGeneratedFiles(t *testing.T, files []GeneratedFile) map[string]string {
 		out[file.Path] = string(data)
 	}
 	return out
-}
-
-// seedVerbatimSourceDirs copies the real hand-authored verbatim skill trees
-// (openCodeVerbatimDirs: "protocol" and "install-cli") from the actual module's
-// skills/ directory into dst/skills/<dir>/, making a synthetic temp root usable
-// by EmitHarness(opencode).
-//
-// Background: copyVerbatimSkill reads <root>/skills/<dir> and writes to
-// <root>/<targetSkillRoot>/<dir>. Tests that build a synthetic temp root
-// (dst = t.TempDir()) and call EmitHarness(dst, OpenCodeTarget, ...) must
-// seed the verbatim SOURCE dirs — otherwise copyVerbatimSkill errors on the
-// missing directory. copyVerbatimSkill intentionally stays STRICT (a missing
-// source dir means a real packaging problem in production); seeding here is the
-// correct integration fix for tests with synthetic roots.
-func seedVerbatimSourceDirs(t *testing.T, dst string) {
-	t.Helper()
-	moduleRoot := testModuleRoot(t)
-	for _, dir := range openCodeVerbatimDirs {
-		src := filepath.Join(moduleRoot, "skills", dir)
-		dstDir := filepath.Join(dst, "skills", dir)
-		if err := filepath.WalkDir(src, func(srcPath string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			rel, err := filepath.Rel(src, srcPath)
-			if err != nil {
-				return err
-			}
-			dstPath := filepath.Join(dstDir, rel)
-			if d.IsDir() {
-				return os.MkdirAll(dstPath, 0o755)
-			}
-			data, err := os.ReadFile(srcPath)
-			if err != nil {
-				return err
-			}
-			if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
-				return err
-			}
-			return os.WriteFile(dstPath, data, 0o644)
-		}); err != nil {
-			t.Fatalf("seedVerbatimSourceDirs: copy %q into %q: %v", src, dstDir, err)
-		}
-	}
 }
 
 func testModuleRoot(t *testing.T) string {

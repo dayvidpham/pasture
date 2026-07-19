@@ -109,11 +109,10 @@ func TestOpenCodeManifestWritesToDisk(t *testing.T) {
 func TestClaudeCodeTargetEmitsNoManifest(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	writeHarnessSeedFiles(t, root)
-
-	figuresDir := filepath.Join(testModuleRoot(t), "skills", "protocol", "figures")
-	files, err := EmitHarness(root, ClaudeCodeTarget, figuresDir, GenerateOptions{Diff: false, Write: false})
+	sourceRoot := testModuleRoot(t)
+	outputRoot := t.TempDir()
+	figuresDir := filepath.Join(sourceRoot, "skills", "protocol", "figures")
+	files, err := EmitHarness(sourceRoot, outputRoot, ClaudeCodeTarget, figuresDir, GenerateOptions{Diff: false, Write: false})
 	if err != nil {
 		t.Fatalf("EmitHarness(claude-code): %v", err)
 	}

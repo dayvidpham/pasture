@@ -17,7 +17,7 @@ Launch the wave of workers for parallel vertical slice implementation, reviewed 
 ```text
 Phase 8: PLAN
   ├─ Read RATIFIED_PLAN + URD
-  ├─ Spawn ephemeral Explore subagents (Task tool, scoped queries)
+  ├─ Spawn ephemeral Explore subagents (task agent tool, scoped queries)
   ├─ Use Explore findings to map codebase
   ├─ Decompose into vertical slices + integration points
   └─ Create leaf tasks for every slice
@@ -29,7 +29,7 @@ Phase 9: BUILD
 
 Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget — iterate until 0/0/0 clean, else surface to user)
   ├─ Cycle 1:
-  │   ├─ Spawn ephemeral reviewers (Task tool, per-slice review)
+  │   ├─ Spawn ephemeral reviewers (task agent tool, per-slice review)
   │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
   │   ├─ Workers fix ALL findings (BLOCKER + IMPORTANT + MINOR) with atomic commits
   │   └─ Spawn new ephemeral reviewers for re-review
@@ -51,7 +51,7 @@ Cycle Exit Conditions:
 **[sup-spawn-task-tool]**
 - Given: implementation tasks
 - When: spawning
-- Then: use Task tool with `run_in_background: true`
+- Then: use task agent tool with `background: true`
 - Should not: block on worker completion
 
 **[sup-spawn-parallel-wave]**
@@ -112,9 +112,9 @@ The supervisor executes Phases 8-10 as a single coordinated cycle called **Ride 
 
 ```
 1. PLAN  → supervisor-plan-tasks: decompose into slices + integration points
-2. EXPLORE → Ephemeral Explore subagents (Task tool): map codebase, short-lived
+2. EXPLORE → Ephemeral Explore subagents (task agent tool): map codebase, short-lived
 3. BUILD → N Workers: implement slices in parallel
-4. REVIEW → Ephemeral reviewers (Task tool): review per-slice
+4. REVIEW → Ephemeral reviewers (task agent tool): review per-slice
 5. FIX   → Workers fix BLOCKERs + IMPORTANTs with atomic commits
 6. RE-REVIEW → Spawn new ephemeral reviewers for re-review
 7. REPEAT → Steps 5-6 up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface to the user
@@ -123,7 +123,7 @@ The supervisor executes Phases 8-10 as a single coordinated cycle called **Ride 
 ```
 
 **Key rules:**
-- Reviewers are ephemeral (spawned per review cycle via Task tool)
+- Reviewers are ephemeral (spawned per review cycle via task agent tool)
 - Slices are **never closed** until reviewed at least once
 - **Configurable review-effort budget** (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — iterate review→fix→re-review up to the budget until 0 BLOCKER + 0 IMPORTANT + 0 MINOR on a fix-free round; on budget exhaustion without clean, surface outstanding findings to the user at a gate; escalate to architect only if genuinely stuck
 - The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by review severities
@@ -177,30 +177,30 @@ full Ride the Wave cycle.
 ## Task Call
 
 ```
-Task({
+task({
   description: "Worker: implement SLICE-N",
-  prompt: `Call Skill(/pasture:worker) and implement the assigned slice.
+  prompt: `Call skill("worker") and implement the assigned slice.
 
 Beads Task ID: <task-id>
 Read full requirements + handoff: bd show <task-id>
 
 Do NOT shut down after implementation. You will receive review feedback and may need to fix issues.`,
-  subagent_type: "general-purpose",
-  run_in_background: true
+  agent_type: "general-purpose",
+  background: true
 })
 ```
 
-Per [sup-spawn-workers], use `subagent_type: "general-purpose"`, not a custom agent type. The worker skill is invoked inside the agent via `Skill(/pasture:worker)`.
+Per [sup-spawn-workers], use `agent_type: "general-purpose"`, not a custom agent type. The worker skill is invoked inside the agent via `skill("worker")`.
 
-## TeamCreate: SendMessage Assignment
+## task(: task_agent_message Assignment
 
-When workers are spawned via TeamCreate, they receive context through SendMessage instead of a Task prompt. The message MUST be self-contained — teammates have **no prior context**:
+When workers are spawned via task(, they receive context through task_agent_message instead of a task agent prompt. The message MUST be self-contained — teammates have **no prior context**:
 
 ```
-SendMessage({
+task_agent_message({
   type: "message",
   recipient: "worker-1",
-  content: `You are assigned SLICE-1. Start by calling Skill(/pasture:worker).
+  content: `You are assigned SLICE-1. Start by calling skill("worker").
 
 Your Beads task ID: <slice-task-id>
 Run this to get full requirements + handoff: bd show <slice-task-id>
@@ -238,7 +238,7 @@ Per [sup-worker-persistence], workers stay alive for the full review-fix cycle:
 ### Fix Assignment Message Template
 
 ```
-SendMessage({
+task_agent_message({
   type: "message",
   recipient: "worker-1",
   content: `Review cycle <N> found issues in your slice (SLICE-1).

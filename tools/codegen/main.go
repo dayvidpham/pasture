@@ -50,20 +50,25 @@ func moduleRoot() (string, error) {
 }
 
 func main() {
-	outputRoot := flag.String("output", "", "output root directory (default: module root, found by walking up from cwd to go.mod)")
+	sourceFlag := flag.String("source", "", "source checkout root (default: module root, found by walking up from cwd to go.mod)")
+	outputFlag := flag.String("output", "", "output root directory (default: source root)")
 	targetFlag := flag.String("targets", string(codegen.HarnessClaudeCode), "comma-separated generation targets (registered: claude-code, opencode)")
 	flag.Parse()
 
-	var root string
-	if *outputRoot != "" {
-		root = *outputRoot
+	var sourceRoot string
+	if *sourceFlag != "" {
+		sourceRoot = *sourceFlag
 	} else {
 		var err error
-		root, err = moduleRoot()
+		sourceRoot, err = moduleRoot()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 			os.Exit(1)
 		}
+	}
+	outputRoot := sourceRoot
+	if *outputFlag != "" {
+		outputRoot = *outputFlag
 	}
 
 	opts := codegen.DefaultOptions // Diff: true, Write: true
@@ -76,7 +81,7 @@ func main() {
 	}
 
 	// ── 1. Generate schema.xml ────────────────────────────────────────────────
-	schemaPath := filepath.Join(root, "schema.xml")
+	schemaPath := filepath.Join(outputRoot, "schema.xml")
 	if _, err := codegen.GenerateSchemaToFile(schemaPath, opts); err != nil {
 		errors = append(errors, fmt.Errorf("schema: %w", err))
 	} else {
@@ -84,9 +89,9 @@ func main() {
 	}
 
 	// ── 2. Generate harness-specific skills and agents ────────────────────────
-	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
+	figuresDir := filepath.Join(sourceRoot, "skills", "protocol", "figures")
 	for _, target := range targets {
-		files, err := codegen.EmitHarness(root, target, figuresDir, opts)
+		files, err := codegen.EmitHarness(sourceRoot, outputRoot, target, figuresDir, opts)
 		if err != nil {
 			errors = append(errors, fmt.Errorf("target %s: %w", target.Name, err))
 		} else {

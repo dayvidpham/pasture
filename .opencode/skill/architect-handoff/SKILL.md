@@ -19,8 +19,8 @@ description: Create handoff document and transfer to supervisor
 **[arch-handoff-spawn-supervisor]**
 - Given: handoff for the IMPL_PLAN phase
 - When: spawning the supervisor
-- Then: use TeamCreate to spawn the supervisor as an Opus teammate (workers also Opus), then assign work via SendMessage
-- Should not: spawn the supervisor as a Task tool subagent or via aura-swarm for the IMPL_PLAN phase
+- Then: use task( to spawn the supervisor as an Opus teammate (workers also Opus), then assign work via task_agent_message
+- Should not: spawn the supervisor as a task agent tool subagent or via aura-swarm for the IMPL_PLAN phase
 
 **[arch-handoff-supervisor-not-idle]**
 - Given: a freshly spawned supervisor
@@ -46,8 +46,8 @@ Storage: the handoff is authored directly in the **HANDOFF Beads task body** (no
 # Handoff: Architect → Supervisor
 
 ## Supervisor Startup
-1. Call `Skill(/pasture:supervisor)` to load your role instructions
-2. Spawn ephemeral Explore subagents via Task tool when codebase exploration is needed
+1. Call `skill("supervisor")` to load your role instructions
+2. Spawn ephemeral Explore subagents via task agent tool when codebase exploration is needed
 3. Read the RATIFIED PROPOSAL and URD with `bd show` commands below
 4. Every vertical slice MUST have leaf tasks — any number, named after the real work units (the L1 types / L2 tests / L3 impl triple is only illustrative)
 
@@ -91,10 +91,10 @@ Storage: the handoff is authored directly in the **HANDOFF Beads task body** (no
    bd dep add <request-id> --blocked-by <handoff-id>
    ```
 
-2. Launch the supervisor as an **Opus teammate** via TeamCreate (the IMPL_PLAN phase runs as an Agent Team, not aura-swarm):
+2. Launch the supervisor as an **Opus teammate** via task( (the IMPL_PLAN phase runs as an Agent Team, not aura-swarm):
    ```
-   TeamCreate({ team_name: "<epoch>-impl", ... })          # supervisor + workers as Opus teammates
-   # then assign the supervisor its task via SendMessage (see Example Prompt below)
+   task(({ team_name: "<epoch>-impl", ... })          # supervisor + workers as Opus teammates
+   # then assign the supervisor its task via task_agent_message (see Example Prompt below)
    ```
 
 3. Monitor supervisor progress:
@@ -107,10 +107,10 @@ Storage: the handoff is authored directly in the **HANDOFF Beads task body** (no
 
 ## Example Prompt
 
-**CRITICAL:** The SendMessage assignment MUST instruct the supervisor to invoke `/pasture:supervisor` as its first action. Without this, the supervisor agent starts without its role instructions and skips leaf task creation, ephemeral exploration, and other critical procedures.
+**CRITICAL:** The task_agent_message assignment MUST instruct the supervisor to invoke `/pasture:supervisor` as its first action. Without this, the supervisor agent starts without its role instructions and skips leaf task creation, ephemeral exploration, and other critical procedures.
 
 ```
-Start by calling `Skill(/pasture:supervisor)` to load your role instructions.
+Start by calling `skill("supervisor")` to load your role instructions.
 
 Implement the ratified plan for <feature name>.
 
@@ -130,18 +130,18 @@ Implement the ratified plan for <feature name>.
 <Given/When/Then criteria from the ratified plan>
 
 ## Reminders
-1. Call `Skill(/pasture:supervisor)` FIRST — do not proceed without loading your role
-2. Spawn ephemeral Explore subagents via Task tool when codebase exploration is needed
+1. Call `skill("supervisor")` FIRST — do not proceed without loading your role
+2. Spawn ephemeral Explore subagents via task agent tool when codebase exploration is needed
 3. Every vertical slice MUST have leaf tasks — any number, named after the real work units (the L1/L2/L3 triple is only illustrative); a slice without leaf tasks is undecomposed
 4. Read the ratified plan with `bd show <ratified-proposal-id>` and the URD with `bd show <urd-id>`
 ```
 
-Deliver this assignment to the supervisor teammate via SendMessage after TeamCreate:
+Deliver this assignment to the supervisor teammate via task_agent_message after task(:
 
 ```
-SendMessage({
+task_agent_message({
   to: "supervisor",
-  message: `Start by calling Skill(/pasture:supervisor) to load your role instructions.
+  message: `Start by calling skill("supervisor") to load your role instructions.
 
 Implement the ratified plan for User Authentication.
 
@@ -164,23 +164,23 @@ Given a valid JWT token when accessing protected routes then allow access
 Given an expired token when accessing protected routes then return 401
 
 ## Reminders
-1. Call Skill(/pasture:supervisor) FIRST
-2. Spawn ephemeral Explore subagents via Task tool when codebase exploration is needed
+1. Call skill("supervisor") FIRST
+2. Spawn ephemeral Explore subagents via task agent tool when codebase exploration is needed
 3. Every slice MUST have leaf tasks (any number; L1/L2/L3 is only illustrative)
 4. Read ratified plan: bd show project-prop1 and URD: bd show project-xyz`,
   summary: "IMPL_PLAN assignment with Beads context"
 })
 ```
 
-## Spawning via TeamCreate
+## Spawning via task(
 
 - Spawn the supervisor (and the workers it will coordinate) as **Opus** teammates — the IMPL_PLAN phase benefits from the stronger model for decomposition and review.
-- Teammates have **zero prior context**: every SendMessage assignment MUST be self-contained (call `Skill(/pasture:supervisor)`, the Beads task IDs, and `bd show` commands to fetch full requirements).
-- Do not spawn the supervisor via `aura-swarm` for the IMPL_PLAN phase; aura-swarm remains available for worktree-isolated epics, but the default handoff uses TeamCreate.
+- Teammates have **zero prior context**: every task_agent_message assignment MUST be self-contained (call `skill("supervisor")`, the Beads task IDs, and `bd show` commands to fetch full requirements).
+- Do not spawn the supervisor via `aura-swarm` for the IMPL_PLAN phase; aura-swarm remains available for worktree-isolated epics, but the default handoff uses task(.
 
 ## IMPORTANT
 
-- **DO NOT** spawn the supervisor as a Task tool subagent or via `aura-swarm` for the IMPL_PLAN phase — use TeamCreate with an Opus supervisor
+- **DO NOT** spawn the supervisor as a task agent tool subagent or via `aura-swarm` for the IMPL_PLAN phase — use task( with an Opus supervisor
 - **DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks
 - **DO NOT** implement the plan yourself - your role is handoff and monitoring
 - **DO NOT** shut down a supervisor that appears idle right after spawn — it is usually running Explore subagents

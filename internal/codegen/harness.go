@@ -26,8 +26,9 @@ const (
 )
 
 type GeneratedFile struct {
-	Path    string
-	Content string
+	Path           string
+	Content        string
+	RuntimeLiteral bool
 }
 
 type AgentEmitter interface {
@@ -47,6 +48,7 @@ type TargetHarness struct {
 	Agents           AgentEmitter
 	Manifest         ManifestEmitter
 	Verbatim         []string
+	Runtime          RuntimeDialect
 }
 
 var ClaudeCodeTarget = TargetHarness{
@@ -56,6 +58,7 @@ var ClaudeCodeTarget = TargetHarness{
 	SubSkillTemplate: TemplateSubSkill,
 	SkillWrite:       WriteMarkerMerge,
 	Agents:           claudeCodeAgentEmitter{},
+	Runtime:          ClaudeRuntimeDialect,
 }
 
 var OpenCodeTarget = TargetHarness{
@@ -67,6 +70,7 @@ var OpenCodeTarget = TargetHarness{
 	Agents:           openCodeAgentEmitter{},
 	Manifest:         openCodeManifestEmitter{},
 	Verbatim:         openCodeVerbatimDirs,
+	Runtime:          OpenCodeRuntimeDialect,
 }
 
 var harnessRegistry = map[HarnessName]TargetHarness{
@@ -108,12 +112,16 @@ func ResolveHarness(targets []string) ([]TargetHarness, error) {
 	return out, nil
 }
 
-func EmitHarness(root string, h TargetHarness, figuresDir string, opts GenerateOptions) ([]GeneratedFile, error) {
+func EmitHarness(sourceRoot string, outputRoot string, h TargetHarness, figuresDir string, opts GenerateOptions) ([]GeneratedFile, error) {
 	var out []GeneratedFile
+	renderOpts := opts
+	renderOpts.Diff = false
+	renderOpts.Write = false
 
 	for _, item := range roleSkillItems() {
-		path := filepath.Join(root, h.SkillRoot, item.dir, "SKILL.md")
-		generated, err := emitRoleSkill(h, item.role, path, figuresDir, opts)
+		sourcePath := filepath.Join(sourceRoot, h.SkillRoot, item.dir, "SKILL.md")
+		outputPath := filepath.Join(outputRoot, h.SkillRoot, item.dir, "SKILL.md")
+		generated, err := emitRoleSkill(h, item.role, sourcePath, outputPath, figuresDir, renderOpts)
 		if err != nil {
 			return nil, fmt.Errorf("codegen.EmitHarness(%s): role skill %s: %w", h.Name, item.dir, err)
 		}
@@ -123,8 +131,9 @@ func EmitHarness(root string, h TargetHarness, figuresDir string, opts GenerateO
 	}
 
 	for _, item := range commandSkillItems() {
-		path := filepath.Join(root, h.SkillRoot, item.dir, "SKILL.md")
-		generated, err := emitCommandSkill(h, item.commandID, path, figuresDir, opts)
+		sourcePath := filepath.Join(sourceRoot, h.SkillRoot, item.dir, "SKILL.md")
+		outputPath := filepath.Join(outputRoot, h.SkillRoot, item.dir, "SKILL.md")
+		generated, err := emitCommandSkill(h, item.commandID, sourcePath, outputPath, figuresDir, renderOpts)
 		if err != nil {
 			return nil, fmt.Errorf("codegen.EmitHarness(%s): command skill %s: %w", h.Name, item.dir, err)
 		}
@@ -134,7 +143,7 @@ func EmitHarness(root string, h TargetHarness, figuresDir string, opts GenerateO
 	}
 
 	for _, dir := range h.Verbatim {
-		files, err := copyVerbatimSkill(root, h.SkillRoot, dir, opts)
+		files, err := copyVerbatimSkill(sourceRoot, outputRoot, h.SkillRoot, dir, renderOpts)
 		if err != nil {
 			return nil, fmt.Errorf("codegen.EmitHarness(%s): verbatim skill %s: %w", h.Name, dir, err)
 		}
@@ -142,7 +151,7 @@ func EmitHarness(root string, h TargetHarness, figuresDir string, opts GenerateO
 	}
 
 	if h.Agents != nil {
-		files, err := h.Agents.Emit(root, figuresDir, opts)
+		files, err := h.Agents.Emit(outputRoot, figuresDir, renderOpts)
 		if err != nil {
 			return nil, fmt.Errorf("codegen.EmitHarness(%s): agents: %w", h.Name, err)
 		}
@@ -150,14 +159,36 @@ func EmitHarness(root string, h TargetHarness, figuresDir string, opts GenerateO
 	}
 
 	if h.Manifest != nil {
-		files, err := h.Manifest.Emit(root, opts)
+		files, err := h.Manifest.Emit(outputRoot, renderOpts)
 		if err != nil {
 			return nil, fmt.Errorf("codegen.EmitHarness(%s): manifest: %w", h.Name, err)
 		}
 		out = append(out, files...)
 	}
 
-	return out, nil
+	dialect := h.Runtime
+	if dialect == nil {
+		dialect = ClaudeRuntimeDialect
+	}
+	projected := make([]GeneratedFile, 0, len(out))
+	for _, file := range out {
+		content := file.Content
+		if !file.RuntimeLiteral {
+			var err error
+			content, err = dialect.Project(file.Content)
+			if err != nil {
+				return nil, fmt.Errorf("codegen.EmitHarness(%s): project runtime operations in %s: %w", h.Name, file.Path, err)
+			}
+		}
+		generated, err := writeFullGeneratedFile(file.Path, content, opts)
+		if err != nil {
+			return nil, fmt.Errorf("codegen.EmitHarness(%s): materialize projected file %s: %w", h.Name, file.Path, err)
+		}
+		generated.RuntimeLiteral = file.RuntimeLiteral
+		projected = append(projected, generated)
+	}
+
+	return projected, nil
 }
 
 type claudeCodeAgentEmitter struct{}
@@ -228,39 +259,39 @@ var commandSkillDirs = map[string]string{
 	"cmd-work-impl":     "worker-implement",
 }
 
-func emitRoleSkill(h TargetHarness, roleID protocol.RoleId, path string, figuresDir string, opts GenerateOptions) (GeneratedFile, error) {
+func emitRoleSkill(h TargetHarness, roleID protocol.RoleId, sourcePath string, outputPath string, figuresDir string, opts GenerateOptions) (GeneratedFile, error) {
 	if h.SkillWrite == WriteMarkerMerge {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
 			return GeneratedFile{}, nil
 		}
-		content, err := GenerateSkill(roleID, path, figuresDir, opts)
-		return GeneratedFile{Path: path, Content: content}, err
+		content, err := generateSkillFromSource(roleID, sourcePath, outputPath, figuresDir, opts)
+		return GeneratedFile{Path: outputPath, Content: content}, err
 	}
 	content, err := renderSkill(roleID, figuresDir, h.SkillTemplate)
 	if err != nil {
 		return GeneratedFile{}, err
 	}
-	return writeFullGeneratedFile(path, content, opts)
+	return writeFullGeneratedFile(outputPath, content, opts)
 }
 
-func emitCommandSkill(h TargetHarness, commandID string, path string, figuresDir string, opts GenerateOptions) (GeneratedFile, error) {
+func emitCommandSkill(h TargetHarness, commandID string, sourcePath string, outputPath string, figuresDir string, opts GenerateOptions) (GeneratedFile, error) {
 	if h.SkillWrite == WriteMarkerMerge {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
 			return GeneratedFile{}, nil
 		}
-		content, err := GenerateSubSkill(commandID, path, figuresDir, opts)
-		return GeneratedFile{Path: path, Content: content}, err
+		content, err := generateSubSkillFromSource(commandID, sourcePath, outputPath, figuresDir, opts)
+		return GeneratedFile{Path: outputPath, Content: content}, err
 	}
 	content, err := renderSubSkill(commandID, figuresDir, h.SubSkillTemplate)
 	if err != nil {
 		return GeneratedFile{}, err
 	}
-	return writeFullGeneratedFile(path, content, opts)
+	return writeFullGeneratedFile(outputPath, content, opts)
 }
 
-func copyVerbatimSkill(root string, targetSkillRoot string, dirName string, opts GenerateOptions) ([]GeneratedFile, error) {
-	srcRoot := filepath.Join(root, "skills", dirName)
-	dstRoot := filepath.Join(root, targetSkillRoot, dirName)
+func copyVerbatimSkill(sourceRoot string, outputRoot string, targetSkillRoot string, dirName string, opts GenerateOptions) ([]GeneratedFile, error) {
+	srcRoot := filepath.Join(sourceRoot, "skills", dirName)
+	dstRoot := filepath.Join(outputRoot, targetSkillRoot, dirName)
 	var out []GeneratedFile
 	if err := filepath.WalkDir(srcRoot, func(srcPath string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -281,6 +312,7 @@ func copyVerbatimSkill(root string, targetSkillRoot string, dirName string, opts
 		if err != nil {
 			return err
 		}
+		generated.RuntimeLiteral = true
 		out = append(out, generated)
 		return nil
 	}); err != nil {

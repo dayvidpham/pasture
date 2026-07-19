@@ -47,7 +47,7 @@ description: User Requirements Elicitation survey (Phase 2)
 - Should not: use `bd dep add --blocked-by` for URD links (URD is a reference document, not a blocking dependency)
 
 **[user-elicit-code-shown]**
-- Given: any definition, code snippet, interface, or before/after example shown to the user during elicitation (e.g. in an AskUserQuestion preview)
+- Given: any definition, code snippet, interface, or before/after example shown to the user during elicitation (e.g. in an interactive_user_prompt preview)
 - When: recording the Q&A
 - Then: capture the shown definition/code VERBATIM in the elicit task alongside the question and response (parity with UAT's 'Definition shown' / 'Command run' fields)
 - Should not: record only the answer while dropping the code or definition the user was reacting to — the response is meaningless without what was shown
@@ -55,7 +55,7 @@ description: User Requirements Elicitation survey (Phase 2)
 **[user-elicit-invoke-skill]**
 - Given: the Phase 2 URE interview
 - When: conducting it
-- Then: MUST invoke `Skill(/pasture:user-elicit)` so the verbatim-capture and validation-case elicitation procedures are loaded
+- Then: MUST invoke `skill("user-elicit")` so the verbatim-capture and validation-case elicitation procedures are loaded
 - Should not: conduct the URE without invoking its skill — skipping it loses verbatim capture and the validation-case lifecycle
 
 **[user-elicit-raise-deferrals]**
@@ -145,7 +145,7 @@ Use the Phase 1 findings to identify:
 Structure questions as a decision tree that progressively narrows the design
 space. Each question should depend on the answers to previous questions.
 
-**Round 1: Highest-leverage boundaries** (1-2 questions per AskUserQuestion call)
+**Round 1: Highest-leverage boundaries** (1-2 questions per interactive_user_prompt call)
 
 Identify the 2-3 dimensions that most constrain the design. These are the axes
 where different choices lead to fundamentally different architectures.
@@ -172,7 +172,7 @@ One open-ended question to capture anything the decision tree missed.
 ## Example Survey
 
 ```
-AskUserQuestion(questions: [
+interactive_user_prompt(questions: [
   {
     question: "What is your end vision for this feature? How will users interact with it when complete?",
     header: "End Vision",
