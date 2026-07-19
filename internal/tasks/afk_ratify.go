@@ -80,11 +80,14 @@ type RatifyInput struct {
 // cursor to still be AFK and anchored to the exact mode entry the deferral recorded. Any
 // later mode entry (of any target mode) makes the deferral ineligible; a fresh deferral is
 // then required. It returns nil when eligible and an actionable error otherwise.
-func EvaluateRatify(in RatifyInput) error {
+//
+// policy is passed through to EffectiveMode explicitly; EvaluateRatify holds no
+// package-level or process-global PolicySet of its own.
+func EvaluateRatify(policy PolicySet, in RatifyInput) error {
 	if err := validatePlanDeferredByAFK(in.Deferred); err != nil {
 		return err
 	}
-	cursor, err := EffectiveMode(in.CurrentLedger)
+	cursor, err := EffectiveMode(policy, in.CurrentLedger)
 	if err != nil {
 		return err
 	}

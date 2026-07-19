@@ -3,7 +3,8 @@ package tasks
 import "testing"
 
 func TestEffectiveModeDefaultsToNormal(t *testing.T) {
-	cursor, err := EffectiveMode(nil)
+	ps := mustPolicySet(t)
+	cursor, err := EffectiveMode(ps, nil)
 	if err != nil {
 		t.Fatalf("EffectiveMode(nil): %v", err)
 	}
@@ -16,12 +17,13 @@ func TestEffectiveModeDefaultsToNormal(t *testing.T) {
 }
 
 func TestEffectiveModeIgnoresNonModeEntries(t *testing.T) {
+	ps := mustPolicySet(t)
 	// A ledger with only non-mode entries yields the default cursor.
 	entries := []DecisionLedgerEntry{
 		{ID: "dl-1", Decision: DecisionEncoding{Kind: "pasture.other/v1"}},
 		{ID: "dl-2", Decision: DecisionEncoding{Kind: "pasture.other/v1"}},
 	}
-	cursor, err := EffectiveMode(entries)
+	cursor, err := EffectiveMode(ps, entries)
 	if err != nil {
 		t.Fatalf("EffectiveMode: %v", err)
 	}
@@ -38,7 +40,7 @@ func TestEffectiveModeSelectsLatestEntry(t *testing.T) {
 		modeEntry(t, ps, "m2", InteractionAFK, InteractionNormal),
 		modeEntry(t, ps, "m3", InteractionNormal, InteractionAFK),
 	}
-	cursor, err := EffectiveMode(entries)
+	cursor, err := EffectiveMode(ps, entries)
 	if err != nil {
 		t.Fatalf("EffectiveMode: %v", err)
 	}
@@ -75,7 +77,7 @@ func TestEffectiveModeAllFourTransitions(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cursor, err := EffectiveMode(tc.seq)
+			cursor, err := EffectiveMode(ps, tc.seq)
 			if err != nil {
 				t.Fatalf("EffectiveMode: %v", err)
 			}
@@ -97,7 +99,7 @@ func TestEffectiveModeRejectsBrokenChain(t *testing.T) {
 	entries := []DecisionLedgerEntry{
 		modeEntry(t, ps, "m1", InteractionAFK, InteractionNormal),
 	}
-	if _, err := EffectiveMode(entries); err == nil {
+	if _, err := EffectiveMode(ps, entries); err == nil {
 		t.Fatal("expected broken-chain error, got nil")
 	}
 }

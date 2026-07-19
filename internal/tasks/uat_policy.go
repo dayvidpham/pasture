@@ -39,6 +39,11 @@ func validateInteractions(field string, xs []UATInteraction) error {
 				"a verbatim UAT interaction preserves both the prompt and the response",
 				"record the exact prompt text for every interaction")
 		}
+		if x.Response == "" {
+			return uatErr(field, fmt.Sprintf("interaction %d has an empty response", i),
+				"a verbatim UAT interaction preserves both the prompt and the response, so a recorded interaction must carry both halves",
+				"record the exact response text for every interaction, or omit the interaction until a response is available")
+		}
 	}
 	return nil
 }
@@ -85,9 +90,11 @@ func hasFixNowFeedback(xs []UATFeedbackItem) bool {
 // HeldUATQuestionID identifies one held (unanswered) UAT question.
 type HeldUATQuestionID string
 
-// HeldUATQuestion is a question held open during a UAT session. Stable marks a question
-// that survived the interaction and is a genuine carry-forward target; an AFK Plan
-// deferral requires at least one stable held question.
+// HeldUATQuestion is a question held open during a UAT session. Stable gates only whether
+// an AFK Plan deferral is ELIGIBLE to be recorded (at least one held question must be
+// stable); it does not filter which held questions are carried forward — RequiredDecisions
+// (uat_coverage.go) carries every held question from the deferred Plan decision forward
+// regardless of Stable, matching issue #49's literal "every unresolved held question".
 type HeldUATQuestion struct {
 	ID       HeldUATQuestionID `json:"id"`
 	Question string            `json:"question"`
@@ -240,9 +247,17 @@ func validatePlanSnapshot(field string, s PlanUATSnapshot) error {
 		return uatErr(field, "the plan-UAT snapshot id is empty",
 			"a plan-UAT decision references its immutable snapshot id", "supply the plan-UAT snapshot id")
 	}
+	if s.UATTaskID == (provenance.TaskID{}) {
+		return uatErr(field, "the snapshot names no UAT task",
+			"a plan-UAT snapshot pins the exact task the UAT session ran under", "supply the UAT task id")
+	}
 	if s.Proposal == "" {
 		return uatErr(field, "the snapshot names no proposal revision",
 			"a plan-UAT snapshot pins the exact proposal revision under review", "supply the proposal revision")
+	}
+	if s.DecisionEntry == "" {
+		return uatErr(field, "the snapshot names no decision-ledger entry",
+			"a plan-UAT snapshot pins the exact decision-ledger entry the UAT verdict is recorded under", "supply the decision-ledger entry id")
 	}
 	if s.InputLedger == "" || s.OutputLedger == "" {
 		return uatErr(field, "the snapshot names an empty input or output ledger revision",

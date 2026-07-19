@@ -52,7 +52,7 @@ func deferred(modeEntryID string) PlanDeferredByAFK {
 func TestEvaluateRatifyStillCurrentAFK(t *testing.T) {
 	ps := mustPolicySet(t)
 	ledger := []DecisionLedgerEntry{modeEntry(t, ps, "m1", InteractionNormal, InteractionAFK)}
-	if err := EvaluateRatify(RatifyInput{Deferred: deferred("m1"), CurrentLedger: ledger}); err != nil {
+	if err := EvaluateRatify(ps, RatifyInput{Deferred: deferred("m1"), CurrentLedger: ledger}); err != nil {
 		t.Fatalf("ratify against current afk entry rejected: %v", err)
 	}
 }
@@ -64,7 +64,7 @@ func TestEvaluateRatifyAFKThenNormalCannotRatify(t *testing.T) {
 		modeEntry(t, ps, "m1", InteractionNormal, InteractionAFK),
 		modeEntry(t, ps, "m2", InteractionAFK, InteractionNormal),
 	}
-	if err := EvaluateRatify(RatifyInput{Deferred: deferred("m1"), CurrentLedger: ledger}); err == nil {
+	if err := EvaluateRatify(ps, RatifyInput{Deferred: deferred("m1"), CurrentLedger: ledger}); err == nil {
 		t.Fatal("expected ratify to fail after mode returned to normal")
 	}
 }
@@ -78,11 +78,11 @@ func TestEvaluateRatifyLaterAFKCannotReviveOriginal(t *testing.T) {
 		modeEntry(t, ps, "m2", InteractionAFK, InteractionNormal),
 		modeEntry(t, ps, "m3", InteractionNormal, InteractionAFK),
 	}
-	if err := EvaluateRatify(RatifyInput{Deferred: deferred("m1"), CurrentLedger: ledger}); err == nil {
+	if err := EvaluateRatify(ps, RatifyInput{Deferred: deferred("m1"), CurrentLedger: ledger}); err == nil {
 		t.Fatal("expected stale R1 deferral to be ineligible under R3")
 	}
 	// A fresh deferral anchored to R3 is eligible.
-	if err := EvaluateRatify(RatifyInput{Deferred: deferred("m3"), CurrentLedger: ledger}); err != nil {
+	if err := EvaluateRatify(ps, RatifyInput{Deferred: deferred("m3"), CurrentLedger: ledger}); err != nil {
 		t.Fatalf("fresh R3 deferral rejected: %v", err)
 	}
 }

@@ -191,6 +191,14 @@ const coverageDigestVersion = "pasture.coverage-digest/v1"
 // the required refs and the three resolution domains are sorted canonically so input
 // permutation does not change the digest. Duplicate targets within a domain are rejected
 // upstream (validateImplUATPayload), so the encoded resolution list is a set.
+//
+// Scope: the digest folds each resolution's (domain, target, kind) plus the reported
+// verdict — it deliberately excludes the free-text Note (and interaction/feedback bodies).
+// This is intentionally decision-bearing-only: (domain, target, kind) is the exact
+// information VerifyCoverage's mismatch check needs (a later ledger append changes the
+// required-ref set, or a resolution's disposition changes, and either flips the digest);
+// Note is documentation attached to a resolution, not itself a decision, so a Note-only
+// edit does not stale a previously accepted coverage digest.
 func ComputeCoverageDigest(spec CoverageDigestSpec) (CoverageDigest, error) {
 	var buf bytes.Buffer
 	writeDelimited(&buf, []byte(coverageDigestVersion))

@@ -24,12 +24,25 @@
 // `pasture task epoch interaction-mode set` CLI it backs) is designed on top of these
 // pure types but its end-to-end attribution genuinely needs the seeded user actor, so
 // it is deferred pending-seed like the base package's live review-start path — never faked.
+//
+// Delivered-surface divergence #5 (signature). The issue sketches EffectiveMode as
+// func EffectiveMode(entries []DecisionLedgerEntry) (InteractionModeCursor, error) — no
+// PolicySet parameter. Delivered here (and on EvaluateRatify in afk_ratify.go) with an
+// explicit leading PolicySet parameter instead: EffectiveMode decodes mode-change entries
+// through PolicySet.modeChanged, and policy_set.go's own package doc states "There is NO
+// init-time registry and NO process-global set: the PolicySet is constructed explicitly
+// ... and passed by value" — a claim that must hold for every entry point in this package,
+// not only PolicySet's own constructor. A prior revision closed that gap with an unexported
+// package-level sync.Once-memoized PolicySet singleton (deterministic and side-effect-free,
+// but still a process-global contradicting the no-global contract in the same PR); this
+// revision removes it and threads the caller-constructed PolicySet explicitly instead, so
+// the no-process-global claim holds everywhere in the package and every call site is
+// independently testable with its own PolicySet.
 
 package tasks
 
 import (
 	"fmt"
-	"sync"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 )
@@ -89,20 +102,6 @@ func validateInteractionModeChanged(c InteractionModeChanged) error {
 	return nil
 }
 
-// productionPolicySet memoizes the single production PolicySet the pure fold functions
-// use. It is built once from NewProductionPolicySet; construction is deterministic and
-// pure, so memoizing it is safe and avoids rebuilding the catalog per fold.
-var (
-	prodPolicyOnce sync.Once
-	prodPolicy     PolicySet
-	prodPolicyErr  error
-)
-
-func productionPolicySet() (PolicySet, error) {
-	prodPolicyOnce.Do(func() { prodPolicy, prodPolicyErr = NewProductionPolicySet() })
-	return prodPolicy, prodPolicyErr
-}
-
 // EffectiveMode folds an immutable, ledger-ordered slice of decision entries into the
 // current interaction-mode cursor. It selects the latest valid interaction-mode entry;
 // absence of any mode entry returns the default normal/nil cursor. Non-mode entries are
@@ -110,11 +109,12 @@ func productionPolicySet() (PolicySet, error) {
 // source mode must equal the running effective mode — so a corrupted or mis-ordered
 // ledger is reported rather than silently yielding a wrong mode. The input is never
 // mutated.
-func EffectiveMode(entries []DecisionLedgerEntry) (InteractionModeCursor, error) {
-	policy, err := productionPolicySet()
-	if err != nil {
-		return InteractionModeCursor{}, err
-	}
+//
+// policy is the explicit PolicySet the caller constructed (typically via
+// NewProductionPolicySet once and reused); EffectiveMode holds no package-level or
+// process-global PolicySet of its own, matching policy_set.go's "constructed explicitly,
+// passed by value" contract.
+func EffectiveMode(policy PolicySet, entries []DecisionLedgerEntry) (InteractionModeCursor, error) {
 	cursor := InteractionModeCursor{Entry: nil, Mode: InteractionNormal}
 	for i := range entries {
 		entry := entries[i]

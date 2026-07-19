@@ -5,7 +5,15 @@ import (
 	"testing"
 
 	"github.com/dayvidpham/provenance"
+	"github.com/google/uuid"
 )
+
+// validSnapshotUATTaskID is a fixed UAT task id so validSnapshot() is stable across the
+// multiple calls a single test makes (build vs. compare).
+var validSnapshotUATTaskID = provenance.TaskID{
+	Namespace: "aura-plugins",
+	UUID:      uuid.MustParse("018f4b30-1e3a-7c9a-8f3b-000000000001"),
+}
 
 // mustPolicySet builds a fresh production policy set or fails the test.
 func mustPolicySet(t *testing.T) PolicySet {
@@ -39,6 +47,7 @@ func modeEntry(t *testing.T, ps PolicySet, id string, from, to InteractionMode) 
 func validSnapshot() PlanUATSnapshot {
 	return PlanUATSnapshot{
 		ID:            "puat-1",
+		UATTaskID:     validSnapshotUATTaskID,
 		Proposal:      "prop-r1",
 		DecisionEntry: "dl-1",
 		InputLedger:   "L1",
@@ -257,4 +266,70 @@ type errKindMismatch struct{ got, want DecisionKindID }
 
 func (e errKindMismatch) Error() string {
 	return "draft kind " + string(e.got) + ", want " + string(e.want)
+}
+
+// TestCanonicalPayloadGolden pins the exact canonical-JSON wire bytes of one fixed payload
+// per #49 decision kind, decoded straight off the descriptor's real encode path (the actual
+// Go struct fields and json tags) rather than the hand-maintained shape string
+// policySchemaDigest hashes. TestSchemaDigestGolden only reddens when the shape STRING is
+// bumped; this test additionally reddens on a field rename/add/remove or json-tag change
+// that a shape-string bump was forgotten for, because it compares the literal wire bytes.
+func TestCanonicalPayloadGolden(t *testing.T) {
+	ps := mustPolicySet(t)
+	snapshot := validSnapshot()
+	interactions := []UATInteraction{{Prompt: "q?", Response: "a"}}
+	feedback := []UATFeedbackItem{{ID: "fb-1", Body: "b", FixNow: true}}
+
+	modeChanged, err := ps.DraftModeChange(InteractionModeChanged{From: InteractionNormal, To: InteractionAFK})
+	if err != nil {
+		t.Fatalf("DraftModeChange: %v", err)
+	}
+	accepted, err := ps.planAccepted.Draft(PlanAccepted{Snapshot: snapshot, Interactions: interactions, Feedback: nil})
+	if err != nil {
+		t.Fatalf("draft accepted: %v", err)
+	}
+	changes, err := ps.planChanges.Draft(PlanChangesRequested{Snapshot: snapshot, Interactions: interactions, Feedback: feedback})
+	if err != nil {
+		t.Fatalf("draft changes: %v", err)
+	}
+	deferred, err := ps.planDeferred.Draft(PlanDeferredByAFK{
+		Snapshot:      snapshot,
+		Interactions:  interactions,
+		HeldQuestions: []HeldUATQuestion{{ID: "hq-1", Question: "still open?", Stable: true}},
+		ModeEntry:     "mode-1",
+	})
+	if err != nil {
+		t.Fatalf("draft deferred: %v", err)
+	}
+	implUAT, err := ps.implementationUAT.Draft(ImplUATPayload{
+		ReportedVerdict: ImplUATChangesRequested,
+		Interactions:    interactions,
+		Feedback:        feedback,
+		HeldAnswers:     []HeldQuestionResolution{{Target: "hq-1", Kind: ResolutionConfirm}},
+		PlanFeedback:    []DeferredFeedbackResolution{{Target: "pf-1", Kind: ResolutionDefer}},
+		LedgerDecisions: []LedgerDecisionResolution{{Target: "dl-1", Kind: ResolutionReplace, Note: "superseded"}},
+	})
+	if err != nil {
+		t.Fatalf("draft impl-uat: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		got  []byte
+		want string
+	}{
+		{"mode-changed", modeChanged.encoding().Payload, `{"from":"normal","to":"afk"}`},
+		{"plan-accepted", accepted.encoding().Payload, `{"snapshot":{"id":"puat-1","uatTaskId":{"Namespace":"aura-plugins","UUID":"018f4b30-1e3a-7c9a-8f3b-000000000001"},"proposal":"prop-r1","decisionEntry":"dl-1","inputLedger":"L1","outputLedger":"L2"},"interactions":[{"prompt":"q?","response":"a"}],"feedback":null}`},
+		{"plan-changes", changes.encoding().Payload, `{"snapshot":{"id":"puat-1","uatTaskId":{"Namespace":"aura-plugins","UUID":"018f4b30-1e3a-7c9a-8f3b-000000000001"},"proposal":"prop-r1","decisionEntry":"dl-1","inputLedger":"L1","outputLedger":"L2"},"interactions":[{"prompt":"q?","response":"a"}],"feedback":[{"id":"fb-1","body":"b","fixNow":true}]}`},
+		{"plan-deferred", deferred.encoding().Payload, `{"snapshot":{"id":"puat-1","uatTaskId":{"Namespace":"aura-plugins","UUID":"018f4b30-1e3a-7c9a-8f3b-000000000001"},"proposal":"prop-r1","decisionEntry":"dl-1","inputLedger":"L1","outputLedger":"L2"},"interactions":[{"prompt":"q?","response":"a"}],"feedback":null,"heldQuestions":[{"id":"hq-1","question":"still open?","stable":true}],"modeEntry":"mode-1"}`},
+		{"impl-uat", implUAT.encoding().Payload, `{"reportedVerdict":2,"interactions":[{"prompt":"q?","response":"a"}],"feedback":[{"id":"fb-1","body":"b","fixNow":true}],"heldAnswers":[{"target":"hq-1","kind":1,"note":""}],"planFeedback":[{"target":"pf-1","kind":2,"note":""}],"ledgerDecisions":[{"target":"dl-1","kind":3,"note":"superseded"}]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := string(tc.got)
+			if got != tc.want {
+				t.Fatalf("canonical payload =\n%s\nwant\n%s", got, tc.want)
+			}
+		})
+	}
 }
