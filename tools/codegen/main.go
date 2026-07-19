@@ -51,7 +51,7 @@ func moduleRoot() (string, error) {
 
 func main() {
 	outputRoot := flag.String("output", "", "output root directory (default: module root, found by walking up from cwd to go.mod)")
-	targetFlag := flag.String("targets", string(codegen.HarnessClaudeCode), "comma-separated generation targets (registered: claude-code, opencode)")
+	targetFlag := flag.String("targets", string(codegen.HarnessClaudeCode), "comma-separated generation targets (registered: claude-code, opencode, codex)")
 	flag.Parse()
 
 	var root string
