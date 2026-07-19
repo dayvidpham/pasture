@@ -10,6 +10,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/formatters"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/types"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // TaskCreateInput captures the inputs for `pasture task create`.
@@ -117,14 +118,33 @@ func TaskUpdate(w io.Writer, in TaskUpdateInput, format types.OutputFormat) (int
 	}
 	defer tr.Close()
 
-	t, err := tr.Update(id, provenance.UpdateFields{
-		Title:       in.Title,
-		Description: in.Description,
-		Status:      in.Status,
-		Priority:    in.Priority,
-		Phase:       in.Phase,
-		Notes:       in.Notes,
-	})
+	// Metadata and status are separate journaled concerns under the journaled
+	// backend: metadata (title/description/priority/phase/notes) is one
+	// metadata-only Update operation; a status change is a dedicated lifecycle
+	// transition governed by the static FSM (Start/Stop/CloseTask/Reopen). We
+	// apply metadata first, then the status transition, preserving the pre-journal
+	// `update` behaviour of setting both in one command.
+	if in.Title != nil || in.Description != nil || in.Priority != nil ||
+		in.Phase != nil || in.Notes != nil {
+		if _, err := tr.Update(id, provenance.UpdateFields{
+			Title:       in.Title,
+			Description: in.Description,
+			Priority:    in.Priority,
+			Phase:       in.Phase,
+			Notes:       in.Notes,
+		}); err != nil {
+			return wrapTaskOpError("update", err)
+		}
+	}
+
+	if in.Status != nil {
+		if err := applyStatusTransition(tr, id, *in.Status); err != nil {
+			return wrapTaskOpError("update", err)
+		}
+	}
+
+	// Return the canonical final state after both concerns are applied.
+	t, err := tr.Show(id)
 	if err != nil {
 		return wrapTaskOpError("update", err)
 	}
@@ -134,6 +154,42 @@ func TaskUpdate(w io.Writer, in TaskUpdateInput, format types.OutputFormat) (int
 	}
 	fmt.Fprintln(w, out)
 	return 0, nil
+}
+
+// applyStatusTransition maps a requested target status onto the journaled
+// lifecycle verb that reaches it from the task's current status. A request that
+// already matches the current status is a no-op (preserving the pre-journal
+// idempotence of setting the same status), and any transition the static FSM
+// rejects surfaces its typed ErrStatusTransition unchanged.
+func applyStatusTransition(tr protocol.TaskTracker, id provenance.TaskID, target provenance.Status) error {
+	current, err := tr.Show(id)
+	if err != nil {
+		return err
+	}
+	if current.Status == target {
+		return nil
+	}
+	switch target {
+	case provenance.StatusInProgress:
+		_, err = tr.Start(id)
+	case provenance.StatusClosed:
+		_, err = tr.CloseTask(id, "")
+	case provenance.StatusOpen:
+		// open is reachable from in_progress (Stop) or closed (Reopen).
+		if current.Status == provenance.StatusClosed {
+			_, err = tr.Reopen(id)
+		} else {
+			_, err = tr.Stop(id)
+		}
+	default:
+		return fmt.Errorf(
+			"pasture task update: unsupported target status %q — "+
+				"what: no journaled lifecycle transition reaches this status; "+
+				"where: internal/handlers/task_crud.go in applyStatusTransition; "+
+				"impact: the status change was not applied; "+
+				"fix: pass one of open, in_progress, or closed", target)
+	}
+	return err
 }
 
 // TaskClose closes a task with the given reason.

@@ -49,6 +49,29 @@ type trackerImpl struct {
 	closeOnce sync.Once
 	closeErr  error
 
+	// sysOnce/sysSession/sysErr memoize the journaled task-backend system identity
+	// (committing actor + genesis authority). The mutation verbs commit through
+	// this Session (Tracker.As), so the identity is resolved and persisted at most
+	// once per tracker lifetime. See system_identity.go.
+	sysOnce    sync.Once
+	sysSession *provenance.Session
+	sysErr     error
+
+	// writeMu serializes every write across BOTH backing connection families —
+	// the provenance journal connection (task/edge/label/comment/agent/activity
+	// writes) and the pasture audit connection (event/context/category writes).
+	// The journaled backend commits each mutation as a multi-statement Apply
+	// transaction that holds the WAL write lock longer than the pre-journal
+	// direct write did; two separate connections racing that longer lock produced
+	// SQLITE_BUSY_SNAPSHOT that busy_timeout cannot absorb (it is returned
+	// immediately, not retried). Interposing this single writer serializes the two
+	// families so contention never escapes as a busy error — the interposition the
+	// unified-DB race test (tracker_race_test.go) anticipates. Reads stay
+	// unsynchronized (WAL concurrent readers). The bootstrap path (system_identity.go)
+	// writes through t.prov directly, so a guarded verb that triggers bootstrap does
+	// not re-enter this mutex.
+	writeMu sync.Mutex
+
 	// pastureTablesOnce ensures ensurePastureTables runs at most once for the
 	// lifetime of this trackerImpl, even when test helpers construct the struct
 	// without going through openTaskTrackerImpl (which calls ensurePastureTables
@@ -139,20 +162,96 @@ func (t *trackerImpl) ensurePastureTablesOnce() error {
 // `var _ protocol.TaskTracker = (*trackerImpl)(nil)` check at the bottom of
 // this file.
 
+// ─── Journaled mutation verbs (Tracker.As → Session) ─────────────────────────
+//
+// Task/edge/label/comment MUTATIONS moved off the direct-write Tracker onto the
+// journaled Session SDK (provenance.Tracker.As): each verb commits one logical
+// operation through the ordered journal under the pasture-system committing actor
+// and genesis authority (system_identity.go). These façade methods keep the exact
+// pre-journal signatures so every caller is unchanged, and route the write through
+// the memoized system Session, so the observable behaviour (returned task/comment,
+// typed errors) is preserved while the change is now journaled and reproducible.
+//
+// As exposes the underlying binding directly for callers that need to commit under
+// a specific (actor, authority) pair rather than the system identity.
+
+// As returns a Session bound to the given committing actor and governing authority.
+func (t *trackerImpl) As(actor provenance.ActorID, authority provenance.JournalID) *provenance.Session {
+	return t.prov.As(actor, authority)
+}
+
+// Journal exposes the ordered global-journal surface.
+func (t *trackerImpl) Journal() provenance.JournalAPI {
+	return t.prov.Journal()
+}
+
+// lockWrite acquires the single cross-connection write mutex and returns the
+// paired unlock, for `defer t.lockWrite()()` at the top of every write method.
+func (t *trackerImpl) lockWrite() func() {
+	t.writeMu.Lock()
+	return t.writeMu.Unlock
+}
+
 // Task CRUD.
 
 func (t *trackerImpl) Create(namespace, title, description string, taskType provenance.TaskType, priority provenance.Priority, phase provenance.Phase) (provenance.Task, error) {
-	return t.prov.Create(namespace, title, description, taskType, priority, phase)
+	defer t.lockWrite()()
+	s, err := t.systemSession()
+	if err != nil {
+		return provenance.Task{}, err
+	}
+	return s.Create(namespace, title, description, taskType, priority, phase)
 }
 func (t *trackerImpl) Show(id provenance.TaskID) (provenance.Task, error) {
 	return t.prov.Show(id)
 }
 func (t *trackerImpl) Update(id provenance.TaskID, fields provenance.UpdateFields) (provenance.Task, error) {
-	return t.prov.Update(id, fields)
+	defer t.lockWrite()()
+	s, err := t.systemSession()
+	if err != nil {
+		return provenance.Task{}, err
+	}
+	return s.Update(id, fields)
 }
 func (t *trackerImpl) CloseTask(id provenance.TaskID, reason string) (provenance.Task, error) {
-	return t.prov.CloseTask(id, reason)
+	defer t.lockWrite()()
+	s, err := t.systemSession()
+	if err != nil {
+		return provenance.Task{}, err
+	}
+	return s.CloseTask(id, reason)
 }
+
+// Start transitions a task open → in_progress through the journaled lifecycle FSM.
+func (t *trackerImpl) Start(id provenance.TaskID) (provenance.Task, error) {
+	defer t.lockWrite()()
+	s, err := t.systemSession()
+	if err != nil {
+		return provenance.Task{}, err
+	}
+	return s.Start(id)
+}
+
+// Stop transitions a task in_progress → open through the journaled lifecycle FSM.
+func (t *trackerImpl) Stop(id provenance.TaskID) (provenance.Task, error) {
+	defer t.lockWrite()()
+	s, err := t.systemSession()
+	if err != nil {
+		return provenance.Task{}, err
+	}
+	return s.Stop(id)
+}
+
+// Reopen transitions a task closed → open through the journaled lifecycle FSM.
+func (t *trackerImpl) Reopen(id provenance.TaskID) (provenance.Task, error) {
+	defer t.lockWrite()()
+	s, err := t.systemSession()
+	if err != nil {
+		return provenance.Task{}, err
+	}
+	return s.Reopen(id)
+}
+
 func (t *trackerImpl) List(filter provenance.ListFilter) ([]provenance.Task, error) {
 	return t.prov.List(filter)
 }
@@ -160,10 +259,20 @@ func (t *trackerImpl) List(filter provenance.ListFilter) ([]provenance.Task, err
 // Edges.
 
 func (t *trackerImpl) AddEdge(sourceId provenance.TaskID, targetId string, kind provenance.EdgeKind) error {
-	return t.prov.AddEdge(sourceId, targetId, kind)
+	defer t.lockWrite()()
+	s, err := t.systemSession()
+	if err != nil {
+		return err
+	}
+	return s.AddEdge(sourceId, targetId, kind)
 }
 func (t *trackerImpl) RemoveEdge(sourceId provenance.TaskID, targetId string, kind provenance.EdgeKind) error {
-	return t.prov.RemoveEdge(sourceId, targetId, kind)
+	defer t.lockWrite()()
+	s, err := t.systemSession()
+	if err != nil {
+		return err
+	}
+	return s.RemoveEdge(sourceId, targetId, kind)
 }
 func (t *trackerImpl) Edges(id provenance.TaskID, kind *provenance.EdgeKind) ([]provenance.Edge, error) {
 	return t.prov.Edges(id, kind)
@@ -186,17 +295,32 @@ func (t *trackerImpl) Descendants(id provenance.TaskID) ([]provenance.Task, erro
 // Labels.
 
 func (t *trackerImpl) AddLabel(id provenance.TaskID, label string) error {
-	return t.prov.AddLabel(id, label)
+	defer t.lockWrite()()
+	s, err := t.systemSession()
+	if err != nil {
+		return err
+	}
+	return s.AddLabel(id, label)
 }
 func (t *trackerImpl) RemoveLabel(id provenance.TaskID, label string) error {
-	return t.prov.RemoveLabel(id, label)
+	defer t.lockWrite()()
+	s, err := t.systemSession()
+	if err != nil {
+		return err
+	}
+	return s.RemoveLabel(id, label)
 }
 func (t *trackerImpl) Labels(id provenance.TaskID) ([]string, error) { return t.prov.Labels(id) }
 
 // Comments.
 
 func (t *trackerImpl) AddComment(id provenance.TaskID, authorId provenance.AgentID, body string) (provenance.Comment, error) {
-	return t.prov.AddComment(id, authorId, body)
+	defer t.lockWrite()()
+	s, err := t.systemSession()
+	if err != nil {
+		return provenance.Comment{}, err
+	}
+	return s.AddComment(id, authorId, body)
 }
 func (t *trackerImpl) Comments(id provenance.TaskID) ([]provenance.Comment, error) {
 	return t.prov.Comments(id)
@@ -205,12 +329,15 @@ func (t *trackerImpl) Comments(id provenance.TaskID) ([]provenance.Comment, erro
 // Agents.
 
 func (t *trackerImpl) RegisterHumanAgent(namespace, name, contact string) (provenance.HumanAgent, error) {
+	defer t.lockWrite()()
 	return t.prov.RegisterHumanAgent(namespace, name, contact)
 }
 func (t *trackerImpl) RegisterMLAgent(namespace string, role provenance.Role, provider provenance.Provider, modelName provenance.ModelID) (provenance.MLAgent, error) {
+	defer t.lockWrite()()
 	return t.prov.RegisterMLAgent(namespace, role, provider, modelName)
 }
 func (t *trackerImpl) RegisterSoftwareAgent(namespace, name, version, source string) (provenance.SoftwareAgent, error) {
+	defer t.lockWrite()()
 	return t.prov.RegisterSoftwareAgent(namespace, name, version, source)
 }
 func (t *trackerImpl) Agent(id provenance.AgentID) (provenance.Agent, error) {
@@ -229,12 +356,15 @@ func (t *trackerImpl) SoftwareAgent(id provenance.AgentID) (provenance.SoftwareA
 // Activities.
 
 func (t *trackerImpl) StartActivity(agentId provenance.AgentID, phase provenance.Phase, stage provenance.Stage, notes string) (provenance.Activity, error) {
+	defer t.lockWrite()()
 	return t.prov.StartActivity(agentId, phase, stage, notes)
 }
 func (t *trackerImpl) StartActivityWithID(id provenance.ActivityID, agentId provenance.AgentID, phase provenance.Phase, stage provenance.Stage, notes string) (provenance.Activity, error) {
+	defer t.lockWrite()()
 	return t.prov.StartActivityWithID(id, agentId, phase, stage, notes)
 }
 func (t *trackerImpl) EndActivity(id provenance.ActivityID) (provenance.Activity, error) {
+	defer t.lockWrite()()
 	return t.prov.EndActivity(id)
 }
 func (t *trackerImpl) Activities(agentId *provenance.AgentID) ([]provenance.Activity, error) {
@@ -244,6 +374,7 @@ func (t *trackerImpl) Activities(agentId *provenance.AgentID) ([]provenance.Acti
 // ─── Audit Trail surface (4 methods, signature-identical to audit.Trail) ─────
 
 func (t *trackerImpl) RecordEvent(ctx context.Context, event protocol.AuditEvent) error {
+	defer t.lockWrite()()
 	return t.trail.RecordEvent(ctx, event)
 }
 
@@ -265,12 +396,14 @@ func (t *trackerImpl) RecordEvent(ctx context.Context, event protocol.AuditEvent
 // What field — the audit-side messages name the SqliteAuditTrail receiver
 // directly so the origin is clear without re-wrapping.
 func (t *trackerImpl) RecordEventReturningId(ctx context.Context, event protocol.AuditEvent) (int64, error) {
+	defer t.lockWrite()()
 	return t.trail.RecordEventReturningId(ctx, event)
 }
 func (t *trackerImpl) QueryEvents(ctx context.Context, epochId string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
 	return t.trail.QueryEvents(ctx, epochId, phase, role)
 }
 func (t *trackerImpl) RecordSessionEntries(ctx context.Context, entries []protocol.SessionEntry) error {
+	defer t.lockWrite()()
 	return t.trail.RecordSessionEntries(ctx, entries)
 }
 func (t *trackerImpl) QuerySessionEntries(ctx context.Context, sessionId string) ([]protocol.SessionEntry, error) {
@@ -285,6 +418,7 @@ func (t *trackerImpl) QuerySessionEntries(ctx context.Context, sessionId string)
 // Validation: both enums must be valid IsValid() members. Empty / unknown
 // values produce CategoryValidation. Storage failures produce CategoryStorage.
 func (t *trackerImpl) SetAgentCategories(id provenance.AgentID, automaton protocol.AutomatonRole, pastureRole protocol.PastureRole) error {
+	defer t.lockWrite()()
 	if !automaton.IsValid() {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
@@ -388,6 +522,7 @@ func (t *trackerImpl) AgentCategories(id provenance.AgentID) (protocol.Automaton
 // kind MUST be valid; contextId MUST be non-empty (a zero-length context_id
 // is meaningless and would silently break Timeline lookups).
 func (t *trackerImpl) AttachContext(ctx context.Context, eventId int64, kind protocol.ContextKind, contextId string) error {
+	defer t.lockWrite()()
 	if !kind.IsValid() {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,

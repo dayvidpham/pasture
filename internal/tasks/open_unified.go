@@ -382,6 +382,21 @@ func ensurePastureTables(db *sql.DB) error {
 				name      TEXT NOT NULL UNIQUE
 			)`,
 		},
+		{
+			// pasture_system_identity persists the resolved committing actor and
+			// genesis bootstrap-authority JournalID that the journaled task backend
+			// binds every mutation to (Tracker.As → Session). It is a singleton
+			// (CHECK singleton_id = 0). The row is written once, the first time a
+			// mutation opens a Session against a fresh journal; every later open
+			// reads it back so the same (actor, authority) pair governs all system
+			// mutations. See internal/tasks/system_identity.go.
+			name: "pasture_system_identity",
+			ddl: `CREATE TABLE IF NOT EXISTS pasture_system_identity (
+				singleton_id                 INTEGER PRIMARY KEY CHECK (singleton_id = 0),
+				committer_actor_id           TEXT    NOT NULL,
+				genesis_authority_journal_id INTEGER NOT NULL
+			)`,
+		},
 	}
 
 	for _, s := range statements {

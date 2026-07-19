@@ -43,9 +43,54 @@ import (
 // mode with busy_timeout=5000 (PROPOSAL-2 §10.3 / D11 binding). The
 // cross-subsystem race test (BLOCKER B3) in internal/tasks proves this.
 type TaskTracker interface {
-	// ─── Embedded: Provenance task CRUD, edges, labels, comments,
-	// agents (Human/ML/Software), activities. See provenance.Tracker. ───
+	// ─── Embedded: Provenance task reads, edges/labels/comments reads,
+	// agents (Human/ML/Software), activities, plus the journaled mutation
+	// binder As(actor, authority) and the global journal surface Journal().
+	// See provenance.Tracker. ───
 	provenance.Tracker
+
+	// ─── Journaled mutation verbs (Tracker.As → Session) ────────────────
+	//
+	// Task/edge/label/comment mutations moved off the direct-write Tracker
+	// onto the journaled Session SDK. The façade re-declares them here with
+	// the pre-journal signatures and routes each through the pasture-system
+	// committing actor + genesis authority, so callers are unchanged while
+	// every mutation is now committed through the ordered journal.
+
+	// Create mints a new task and journals its birth (status open).
+	Create(namespace, title, description string, taskType provenance.TaskType, priority provenance.Priority, phase provenance.Phase) (provenance.Task, error)
+
+	// Update applies partial metadata (Title/Description/Priority/Phase/Notes)
+	// to a task as one journaled operation. Status is NOT a metadata field:
+	// use the lifecycle verbs Start/Stop/Reopen/CloseTask to change status.
+	Update(id provenance.TaskID, fields provenance.UpdateFields) (provenance.Task, error)
+
+	// CloseTask transitions {open,in_progress} → closed, materialising reason.
+	CloseTask(id provenance.TaskID, reason string) (provenance.Task, error)
+
+	// Start transitions open → in_progress through the journaled lifecycle FSM.
+	Start(id provenance.TaskID) (provenance.Task, error)
+
+	// Stop transitions in_progress → open through the journaled lifecycle FSM.
+	Stop(id provenance.TaskID) (provenance.Task, error)
+
+	// Reopen transitions closed → open through the journaled lifecycle FSM.
+	Reopen(id provenance.TaskID) (provenance.Task, error)
+
+	// AddEdge journals a typed edge from sourceId to targetId.
+	AddEdge(sourceId provenance.TaskID, targetId string, kind provenance.EdgeKind) error
+
+	// RemoveEdge journals the removal of the edge from sourceId to targetId.
+	RemoveEdge(sourceId provenance.TaskID, targetId string, kind provenance.EdgeKind) error
+
+	// AddLabel journals attaching a label to a task.
+	AddLabel(id provenance.TaskID, label string) error
+
+	// RemoveLabel journals detaching a label from a task.
+	RemoveLabel(id provenance.TaskID, label string) error
+
+	// AddComment journals a comment on a task authored by authorId.
+	AddComment(id provenance.TaskID, authorId provenance.AgentID, body string) (provenance.Comment, error)
 
 	// ─── Audit Trail surface (signatures match audit.Trail exactly) ─────
 

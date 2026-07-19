@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/dayvidpham/pasture v0.0.0
-	github.com/dayvidpham/provenance v0.0.2
+	github.com/dayvidpham/provenance v0.0.3-0.20260719005126-7b3451a6efe7
 	github.com/spf13/cobra v1.10.2
 	go.temporal.io/api v1.46.0
 	go.temporal.io/sdk v1.34.0
@@ -48,10 +48,12 @@ require (
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
+	github.com/yuin/goldmark v1.7.17 // indirect
+	go.uber.org/goleak v1.3.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/net v0.48.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.44.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20241219192143-6b3ec007d9bb // indirect
