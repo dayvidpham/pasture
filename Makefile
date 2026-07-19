@@ -19,6 +19,7 @@ all: build
 
 generate:
 	go generate ./internal/codegen/...
+	go generate ./internal/target/claudecode/...
 
 # --------------------------------------------------------------------------
 # Build

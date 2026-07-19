@@ -23,6 +23,13 @@ const (
 // not carry an ActivationContractID or any installation state: a downstream
 // installer consumes this descriptor and binds each component to a closed
 // activation strategy.
+//
+// Component identity is spelled per target profile, not uniformly: this target's
+// fixed three-slot shape pairs a string ComponentID with a closed Component/
+// ComponentKind value type; the OpenCode target's small fixed set uses a bare
+// ComponentID string; the Codex target's open per-package map uses a
+// struct-wrapped CodexComponentID. Each shape is as strong as its own component
+// model needs — the variance is profile-driven, not an oversight.
 type TargetDescriptor struct {
 	harness  ir.HarnessID
 	contract ir.RuntimeContractID
