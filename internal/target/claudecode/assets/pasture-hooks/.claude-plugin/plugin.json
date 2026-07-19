@@ -1,0 +1,17 @@
+{
+  "author": {
+    "name": "David Pham"
+  },
+  "description": "Pasture lifecycle hooks for Claude Code — inject beads workflow context on session start and before compaction, and enforce shared-worktree git discipline for worker agents. Installed default-off; enable explicitly.",
+  "keywords": [
+    "workflow",
+    "protocol",
+    "hooks",
+    "beads",
+    "git-discipline"
+  ],
+  "license": "MIT",
+  "name": "pasture-hooks",
+  "repository": "https://github.com/dayvidpham/pasture",
+  "version": "0.0.4"
+}
