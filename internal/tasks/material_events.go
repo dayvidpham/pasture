@@ -64,6 +64,10 @@ const (
 	FamilyGitRemoteRefVerified
 	// FamilyTaskClosed is the task-closed domain marker ("pasture.task.closed/v1").
 	FamilyTaskClosed
+	// FamilyLegacyAuditImported carries one pre-journal legacy audit row, preserved
+	// verbatim, attached to one referenced task (see legacy_import.go). It is the
+	// material representation the atomic ImportLegacyAuditRow command fans out.
+	FamilyLegacyAuditImported
 )
 
 // materialEventFamilies is the canonical, ordered list of every real family. It is
@@ -77,6 +81,7 @@ var materialEventFamilies = []MaterialEventFamily{
 	FamilySkillRun,
 	FamilyGitRemoteRefVerified,
 	FamilyTaskClosed,
+	FamilyLegacyAuditImported,
 }
 
 // EventKind returns the one fixed journal EventKind for this family. The kind is a
@@ -99,6 +104,8 @@ func (f MaterialEventFamily) EventKind() provenance.EventKind {
 		return "pasture.git.remote-ref-verified.v1"
 	case FamilyTaskClosed:
 		return "pasture.task.closed.v1"
+	case FamilyLegacyAuditImported:
+		return "pasture.legacy.audit-imported.v1"
 	default:
 		return ""
 	}
@@ -537,6 +544,81 @@ func (e TaskClosedEvent) canonicalPayload() (json.RawMessage, error) {
 
 func (e TaskClosedEvent) contexts() ([]provenance.EventContext, error) {
 	return buildContexts(taskCtx(e.Task))
+}
+
+// LegacyAuditImportedEvent carries one pre-journal legacy audit row, preserved
+// verbatim, attached to exactly one referenced task. Its canonical payload embeds
+// the source payload bytes UNCHANGED (byte-recoverable) alongside the row's source
+// identity, its original raw actor text, and its original raw context strings, so no
+// legacy detail is lost. AttributedActor is the resolved (mapped-or-fallback) actor
+// the import derived from RawActor; the committing actor of the operation is the
+// pasture-system actor, and this attributed actor is journaled as an actor context.
+type LegacyAuditImportedEvent struct {
+	Task            provenance.TaskID
+	SourceTable     string
+	LegacyRowID     string
+	RawActor        string
+	AttributedActor provenance.ActorID
+	RawContexts     []string
+	SourcePayload   json.RawMessage
+}
+
+func (LegacyAuditImportedEvent) Family() MaterialEventFamily     { return FamilyLegacyAuditImported }
+func (e LegacyAuditImportedEvent) SourceTask() provenance.TaskID { return e.Task }
+func (LegacyAuditImportedEvent) isMaterialEvent()                {}
+
+func (e LegacyAuditImportedEvent) validate() error {
+	if err := validateTaskPresent("LegacyAuditImportedEvent.Task", e.Task); err != nil {
+		return err
+	}
+	if e.SourceTable == "" {
+		return invalidFieldErr("LegacyAuditImportedEvent.SourceTable", "", "a non-empty source table")
+	}
+	if e.LegacyRowID == "" {
+		return invalidFieldErr("LegacyAuditImportedEvent.LegacyRowID", "", "a non-empty legacy row id")
+	}
+	if err := validateActorPresent("LegacyAuditImportedEvent.AttributedActor", e.AttributedActor); err != nil {
+		return err
+	}
+	// A non-empty source payload must be well-formed JSON so the embedded bytes are a
+	// valid, opaquely-preserved value rather than a corrupt blob.
+	if len(e.SourcePayload) > 0 && !json.Valid(e.SourcePayload) {
+		return invalidFieldErr("LegacyAuditImportedEvent.SourcePayload", string(e.SourcePayload),
+			"well-formed JSON (or empty)")
+	}
+	return nil
+}
+
+func (e LegacyAuditImportedEvent) canonicalPayload() (json.RawMessage, error) {
+	// Preserve the source payload byte-for-byte; an empty source is a JSON null so the
+	// envelope stays valid without inventing content.
+	source := e.SourcePayload
+	if len(source) == 0 {
+		source = json.RawMessage("null")
+	}
+	contexts := e.RawContexts
+	if contexts == nil {
+		contexts = []string{}
+	}
+	return canonicalJSON(struct {
+		SourceTable     string          `json:"source_table"`
+		LegacyRowID     string          `json:"legacy_row_id"`
+		RawActor        string          `json:"raw_actor"`
+		AttributedActor string          `json:"attributed_actor"`
+		RawContexts     []string        `json:"raw_contexts"`
+		SourcePayload   json.RawMessage `json:"source_payload"`
+	}{
+		SourceTable:     e.SourceTable,
+		LegacyRowID:     e.LegacyRowID,
+		RawActor:        e.RawActor,
+		AttributedActor: e.AttributedActor.String(),
+		RawContexts:     contexts,
+		SourcePayload:   source,
+	})
+}
+
+func (e LegacyAuditImportedEvent) contexts() ([]provenance.EventContext, error) {
+	return buildContexts(taskCtx(e.Task), actorCtx(e.AttributedActor))
 }
 
 // MapMaterialEvent validates a material event and maps it to exactly one journal

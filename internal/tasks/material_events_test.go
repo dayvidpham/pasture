@@ -51,6 +51,16 @@ func validEventFor(t *testing.T, f MaterialEventFamily) MaterialEvent {
 		}
 	case FamilyTaskClosed:
 		return TaskClosedEvent{Task: task, Reason: "reviewed and merged"}
+	case FamilyLegacyAuditImported:
+		return LegacyAuditImportedEvent{
+			Task:            task,
+			SourceTable:     "audit_events",
+			LegacyRowID:     "42",
+			RawActor:        "legacy-worker",
+			AttributedActor: mkActor(t),
+			RawContexts:     []string{"EpochContext:test--epoch"},
+			SourcePayload:   json.RawMessage(`{"kind":"legacy"}`),
+		}
 	default:
 		t.Fatalf("validEventFor: unhandled family %v (%d) — add it to the exhaustive test switch", f, int(f))
 		return nil
