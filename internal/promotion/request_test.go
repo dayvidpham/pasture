@@ -1,0 +1,109 @@
+package promotion_test
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/dayvidpham/pasture/internal/effects"
+	"github.com/dayvidpham/pasture/internal/promotion"
+)
+
+func validRefAndRepo(t *testing.T) (effects.RepositoryID, effects.RemoteRef) {
+	t.Helper()
+	repo, err := effects.NewRepositoryID("/repo")
+	if err != nil {
+		t.Fatalf("repo: %v", err)
+	}
+	ref, err := effects.NewRemoteRef(promotion.DefaultStableRef)
+	if err != nil {
+		t.Fatalf("ref: %v", err)
+	}
+	return repo, ref
+}
+
+func TestParseExpectedOldAbsent(t *testing.T) {
+	for _, v := range []string{"absent", "ABSENT", "Absent"} {
+		e, err := promotion.ParseExpectedOld(v)
+		if err != nil {
+			t.Fatalf("ParseExpectedOld(%q): %v", v, err)
+		}
+		if !e.Absent() {
+			t.Fatalf("ParseExpectedOld(%q) is not absent", v)
+		}
+	}
+}
+
+func TestParseExpectedOldCommit(t *testing.T) {
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	e, err := promotion.ParseExpectedOld(sha)
+	if err != nil {
+		t.Fatalf("ParseExpectedOld: %v", err)
+	}
+	c, present := e.Commit()
+	if !present {
+		t.Fatal("expected a present commit expectation")
+	}
+	if c.String() != sha {
+		t.Fatalf("commit = %q, want %q", c, sha)
+	}
+}
+
+func TestParseExpectedOldRejectsGarbage(t *testing.T) {
+	for _, v := range []string{"", "   ", "not-a-sha", "12345"} {
+		if _, err := promotion.ParseExpectedOld(v); err == nil {
+			t.Fatalf("expected ParseExpectedOld(%q) to fail", v)
+		}
+	}
+}
+
+func TestNewPromotionRequestValidation(t *testing.T) {
+	repo, ref := validRefAndRepo(t)
+	exp := effects.ExpectAbsentRemote()
+
+	// Happy path.
+	if _, err := promotion.NewPromotionRequest(repo, "abc123", repo, "def456", "origin", ref, exp); err != nil {
+		t.Fatalf("valid request rejected: %v", err)
+	}
+
+	cases := []struct {
+		name                        string
+		pastureRepo, auraRepo       effects.RepositoryID
+		pastureRev, auraRev, remote string
+		ref                         effects.RemoteRef
+		exp                         effects.ExpectedOldOID
+	}{
+		{"invalid pasture repo", effects.RepositoryID{}, repo, "a", "b", "origin", ref, exp},
+		{"empty pasture rev", repo, repo, "", "b", "origin", ref, exp},
+		{"padded pasture rev", repo, repo, " a ", "b", "origin", ref, exp},
+		{"invalid aura repo", repo, effects.RepositoryID{}, "a", "b", "origin", ref, exp},
+		{"empty aura rev", repo, repo, "a", "", "origin", ref, exp},
+		{"empty remote", repo, repo, "a", "b", "", ref, exp},
+		{"invalid ref", repo, repo, "a", "b", "origin", effects.RemoteRef{}, exp},
+		{"unspecified expected-old", repo, repo, "a", "b", "origin", ref, effects.ExpectedOldOID{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := promotion.NewPromotionRequest(tc.pastureRepo, tc.pastureRev, tc.auraRepo, tc.auraRev, tc.remote, tc.ref, tc.exp)
+			if err == nil {
+				t.Fatalf("expected %s to be rejected", tc.name)
+			}
+		})
+	}
+}
+
+func TestPromotionRequestAccessors(t *testing.T) {
+	repo, ref := validRefAndRepo(t)
+	req, err := promotion.NewPromotionRequest(repo, "prev", repo, "arev", "origin", ref, effects.ExpectAbsentRemote())
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if req.PastureRevision() != "prev" || req.AuraRevision() != "arev" || req.Remote() != "origin" {
+		t.Fatal("accessor mismatch")
+	}
+	if req.StableRef().String() != promotion.DefaultStableRef {
+		t.Fatalf("ref = %q", req.StableRef())
+	}
+	if !strings.HasPrefix(req.StableRef().String(), "refs/heads/") {
+		t.Fatalf("unexpected ref %q", req.StableRef())
+	}
+}

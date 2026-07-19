@@ -67,6 +67,16 @@
           subPackages = [ "cmd/pasture" ];
         });
 
+        # `nix run .#promote-pasture-stable` — the gated, guarded promotion of the
+        # moving pasture-stable release channel. It wraps the pasture-release
+        # subcommand and provides git at runtime (the guarded update shells out to
+        # a resolved git binary).
+        promote-pasture-stable = pkgs.writeShellApplication {
+          name = "promote-pasture-stable";
+          runtimeInputs = [ pasture-release pkgs.git ];
+          text = ''exec pasture-release promote-pasture-stable "$@"'';
+        };
+
         # All three binaries in one derivation for convenience
         pasture-bundle = pkgs.buildGoModule (commonAttrs // {
           pname = "pasture-bundle";
@@ -102,7 +112,15 @@
           inherit pasture-release;
           inherit pasture;
           inherit pasture-bundle;
+          inherit promote-pasture-stable;
           default = pasture-bundle;
+        };
+
+        apps = {
+          promote-pasture-stable = {
+            type = "app";
+            program = "${promote-pasture-stable}/bin/promote-pasture-stable";
+          };
         };
 
         devShells.default = devShell;
