@@ -1,4 +1,4 @@
-// Package tasks — atomic legacy audit-row import command (#43 / S3.3 stage b).
+// Package tasks — atomic legacy audit-row import command (#43).
 //
 // legacy_import.go owns the typed, atomic ImportLegacyAuditRow command #43 is the
 // exclusive owner of (the issue's import-command section): #14 owns only the
@@ -274,8 +274,19 @@ func legacyContextIdentity(raw string) string {
 // re-import replays; the ref is a hash of the source identity so arbitrary legacy row
 // ids (which may contain characters a portable ref forbids) always produce a valid
 // handle.
+//
+// The two source fields are length-delimited before hashing ("<len>:<value>:" per field,
+// the netstring discipline provadapter.lenField uses): a plain SourceTable+separator+
+// LegacyRowID concatenation is ambiguous whenever either field can itself contain the
+// separator byte, which would let two distinct (SourceTable, LegacyRowID) pairs hash to
+// the same OperationID and collide two different source rows onto one identity. Prefixing
+// each field with its byte length makes the hash input injective, so distinct pairs can
+// never alias. (This branch is pre-merge with no deployed journals, so changing the
+// derived OperationID has no replay-identity implications for any existing data.)
 func legacyImportMutationRef(row provadapter.LegacyAuditEvent) (portable.MutationRef, error) {
-	sum := sha256.Sum256([]byte(row.SourceTable + "\x00" + row.LegacyRowID))
+	framed := fmt.Sprintf("%d:%s:%d:%s:",
+		len(row.SourceTable), row.SourceTable, len(row.LegacyRowID), row.LegacyRowID)
+	sum := sha256.Sum256([]byte(framed))
 	value := fmt.Sprintf("pasture.legacy-audit-import.%x", sum)
 	ref, err := portable.NewMutationRef(value)
 	if err != nil {
