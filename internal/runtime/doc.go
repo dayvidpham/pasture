@@ -39,6 +39,6 @@
 // delivers the buildable core: the version-bounded contract, the three lookup
 // families, external capability composition, and the initial pinned point
 // contracts. The composite landing binding and the interaction-mode lowering
-// are deferred until their task-side dependencies land, and are tracked on the
-// slice rather than stubbed with a fabricated task surface here.
+// are deferred until their task-side dependencies land as a follow-up change
+// rather than stubbed with a fabricated task surface here.
 package runtime

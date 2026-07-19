@@ -143,8 +143,28 @@ func parseDotSeries(raw, domain, where string) ([]string, error) {
 				)
 			}
 		}
+		// Semver forbids leading zeroes on NUMERIC prerelease identifiers (the
+		// same rule the release triple already enforces); build metadata is
+		// exempt because it never participates in precedence.
+		if domain == "prerelease" && len(field) > 1 && field[0] == '0' && isAllDigits(field) {
+			return nil, runtimeError(
+				fmt.Sprintf("host version %s identifier %q has a leading zero", domain, field),
+				"numeric prerelease identifiers must not include leading zeroes, matching the release-triple rule",
+				where, "the host cannot be matched against any runtime contract",
+				"drop the leading zero or make the identifier alphanumeric", nil,
+			)
+		}
 	}
 	return fields, nil
+}
+
+func isAllDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return s != ""
 }
 
 func (v HostVersion) IsValid() bool { return v.parsed }
