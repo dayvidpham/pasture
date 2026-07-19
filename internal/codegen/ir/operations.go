@@ -32,12 +32,22 @@ var canonicalOperationKinds = [...]OperationKind{
 	OperationRequestUserDecision,
 }
 
-// AllOperationKinds returns a fresh defensive copy of the closed
+// AllOperationKinds returns a fresh defensive copy of the closed *core*
 // orchestration variant set, in canonical order. This is a function, not a
 // package-level slice: an earlier revision exported a mutable
 // `var AllOperationKinds []OperationKind` initialized once at package load,
 // so any caller mutation corrupted every later reader for the lifetime of
 // the process.
+//
+// This accessor enumerates only the reviewed core vocabulary. The full set of
+// SemanticOperation implementers is larger: OperationInvokeTool (the
+// InvokeToolOperation escape hatch, defined in capability.go) is a distinct
+// OperationKind that shares one fixed SemanticOperationID across every
+// capability it invokes and is deliberately excluded here — see
+// OperationInvokeTool's own documentation for why it is not part of the closed
+// core set. Any code that must reason about every SemanticOperation variant
+// (for example the nil-pointer guard below) must account for both the core
+// kinds and OperationInvokeTool.
 func AllOperationKinds() []OperationKind {
 	return append([]OperationKind(nil), canonicalOperationKinds[:]...)
 }
@@ -499,15 +509,20 @@ func normalizeSemanticOperation(operation SemanticOperation) (SemanticOperation,
 }
 
 // isNilOperationPointer reports whether operation is a non-nil
-// SemanticOperation interface value wrapping a nil pointer. Every one of
-// InvokeSkill, DelegateAssignment, ContinueAssignment,
-// SendAssignmentMessage, CollectAssignmentResults, and StopAssignment
-// implements SemanticOperation with value receivers, so *T also satisfies
-// the interface for each — a caller passing a typed-nil *InvokeSkill (etc.)
-// produces a non-nil interface value whose underlying pointer is nil. Left
-// unchecked, validateOperation()'s value-receiver call auto-dereferences
-// that nil pointer and panics instead of returning the closed-sum
-// diagnostic every other nil shape in this package already returns.
+// SemanticOperation interface value wrapping a nil pointer. Every current
+// SemanticOperation implementer declares its marker and behavior methods with
+// value receivers: the seven core variants — InvokeSkill, DelegateAssignment,
+// ContinueAssignment, SendAssignmentMessage, CollectAssignmentResults,
+// StopAssignment, and RequestUserDecision — plus InvokeToolOperation, the
+// non-core InvokeTool escape hatch defined in capability.go. Because each uses
+// value receivers, *T also satisfies the interface for each — a caller passing
+// a typed-nil *InvokeSkill (or *InvokeToolOperation, etc.) produces a non-nil
+// interface value whose underlying pointer is nil. Left unchecked,
+// validateOperation()'s value-receiver call auto-dereferences that nil pointer
+// and panics instead of returning the closed-sum diagnostic every other nil
+// shape in this package already returns. This guard is variant-agnostic: it
+// reflects on the concrete pointer, so it already covers every present and
+// future value-receiver implementer without re-enumerating them here.
 func isNilOperationPointer(operation SemanticOperation) bool {
 	reflected := reflect.ValueOf(operation)
 	return reflected.Kind() == reflect.Ptr && reflected.IsNil()
