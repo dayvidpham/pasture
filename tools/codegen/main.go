@@ -68,42 +68,26 @@ func main() {
 
 	opts := codegen.DefaultOptions // Diff: true, Write: true
 
-	var errors []error
 	targets, err := codegen.ResolveHarness(strings.Split(*targetFlag, ","))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 		os.Exit(1)
 	}
 
-	// ── 1. Generate schema.xml ────────────────────────────────────────────────
-	schemaPath := filepath.Join(root, "schema.xml")
-	if _, err := codegen.GenerateSchemaToFile(schemaPath, opts); err != nil {
-		errors = append(errors, fmt.Errorf("schema: %w", err))
-	} else {
-		fmt.Printf("Generated %s\n", schemaPath)
+	// codegen.Generate runs the strict source-migration gate first (so an
+	// unclassified harness-syntax candidate aborts generation with no partial
+	// output), then emits schema.xml, every requested harness target, and the
+	// global-ID uniqueness check. Steps after the gate accumulate their errors
+	// so one run reports every problem at once.
+	result, errors := codegen.Generate(root, targets, opts)
+
+	if result.SchemaPath != "" {
+		fmt.Printf("Generated %s\n", result.SchemaPath)
+	}
+	for _, file := range result.Files {
+		fmt.Printf("Generated %s\n", file.Path)
 	}
 
-	// ── 2. Generate harness-specific skills and agents ────────────────────────
-	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
-	for _, target := range targets {
-		files, err := codegen.EmitHarness(root, target, figuresDir, opts)
-		if err != nil {
-			errors = append(errors, fmt.Errorf("target %s: %w", target.Name, err))
-		} else {
-			for _, file := range files {
-				fmt.Printf("Generated %s\n", file.Path)
-			}
-		}
-	}
-
-	// ── 3. Global-ID uniqueness enforcement (SLICE-2, URD R5+R7) ─────────────
-	// Must run AFTER all generators so the full registry is assembled, and
-	// BEFORE exit so a violation causes go generate to fail immediately.
-	if err := codegen.ValidateGlobalIds(); err != nil {
-		errors = append(errors, fmt.Errorf("global-id validation: %w", err))
-	}
-
-	// ── Report errors and exit ────────────────────────────────────────────────
 	if len(errors) > 0 {
 		fmt.Fprintf(os.Stderr, "\n%d error(s) encountered:\n", len(errors))
 		for _, e := range errors {
