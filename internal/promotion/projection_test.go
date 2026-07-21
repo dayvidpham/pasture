@@ -18,7 +18,7 @@ func mustDescriptor(t *testing.T) claudecode.TargetDescriptor {
 }
 
 func TestProjectClaudeCodeProducesOneEntryPerComponent(t *testing.T) {
-	proj, err := promotion.ProjectClaudeCode(mustDescriptor(t), "aura-plugins", "dayvidpham/pasture", promotion.DefaultStableRef)
+	proj, err := promotion.ProjectClaudeCode(mustDescriptor(t), "aura-plugins", promotion.PastureRepository, testPastureCommit)
 	if err != nil {
 		t.Fatalf("project: %v", err)
 	}
@@ -28,11 +28,11 @@ func TestProjectClaudeCodeProducesOneEntryPerComponent(t *testing.T) {
 	names := map[string]promotion.MarketplaceEntry{}
 	for _, e := range proj.Entries {
 		names[e.Name] = e
-		if e.Source.Source != promotion.SourceGitHub {
-			t.Errorf("%s source = %q, want github", e.Name, e.Source.Source)
+		if e.Source.Source != promotion.SourceGitSubdir {
+			t.Errorf("%s source = %q, want git-subdir", e.Name, e.Source.Source)
 		}
-		if e.Source.Repo != "dayvidpham/pasture" {
-			t.Errorf("%s repo = %q", e.Name, e.Source.Repo)
+		if e.Source.SHA != testPastureCommit || e.Source.Path == "" {
+			t.Errorf("%s source is not pinned to a distinct path at %s: %+v", e.Name, testPastureCommit, e.Source)
 		}
 		if e.Version == "" {
 			t.Errorf("%s has empty version", e.Name)
@@ -46,7 +46,7 @@ func TestProjectClaudeCodeProducesOneEntryPerComponent(t *testing.T) {
 }
 
 func TestProjectClaudeCodeSelectorsMatchComponentIDs(t *testing.T) {
-	proj, err := promotion.ProjectClaudeCode(mustDescriptor(t), "aura-plugins", "dayvidpham/pasture", promotion.DefaultStableRef)
+	proj, err := promotion.ProjectClaudeCode(mustDescriptor(t), "aura-plugins", promotion.PastureRepository, testPastureCommit)
 	if err != nil {
 		t.Fatalf("project: %v", err)
 	}
@@ -60,11 +60,11 @@ func TestProjectClaudeCodeSelectorsMatchComponentIDs(t *testing.T) {
 }
 
 func TestProjectClaudeCodeIsDeterministic(t *testing.T) {
-	a, err := promotion.ProjectClaudeCode(mustDescriptor(t), "aura-plugins", "dayvidpham/pasture", promotion.DefaultStableRef)
+	a, err := promotion.ProjectClaudeCode(mustDescriptor(t), "aura-plugins", promotion.PastureRepository, testPastureCommit)
 	if err != nil {
 		t.Fatalf("project a: %v", err)
 	}
-	b, err := promotion.ProjectClaudeCode(mustDescriptor(t), "aura-plugins", "dayvidpham/pasture", promotion.DefaultStableRef)
+	b, err := promotion.ProjectClaudeCode(mustDescriptor(t), "aura-plugins", promotion.PastureRepository, testPastureCommit)
 	if err != nil {
 		t.Fatalf("project b: %v", err)
 	}
@@ -79,9 +79,10 @@ func TestProjectClaudeCodeRejectsEmptyOperands(t *testing.T) {
 		name                    string
 		market, repo, sourceRef string
 	}{
-		{"empty market", "", "dayvidpham/pasture", promotion.DefaultStableRef},
-		{"empty repo", "aura-plugins", "", promotion.DefaultStableRef},
-		{"empty ref", "aura-plugins", "dayvidpham/pasture", ""},
+		{"empty market", "", promotion.PastureRepository, testPastureCommit},
+		{"empty repo", "aura-plugins", "", testPastureCommit},
+		{"empty ref", "aura-plugins", promotion.PastureRepository, ""},
+		{"moving ref", "aura-plugins", promotion.PastureRepository, promotion.DefaultStableRef},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -93,13 +94,13 @@ func TestProjectClaudeCodeRejectsEmptyOperands(t *testing.T) {
 }
 
 func TestProjectClaudeCodeRejectsInvalidDescriptor(t *testing.T) {
-	if _, err := promotion.ProjectClaudeCode(claudecode.TargetDescriptor{}, "aura-plugins", "dayvidpham/pasture", promotion.DefaultStableRef); err == nil {
+	if _, err := promotion.ProjectClaudeCode(claudecode.TargetDescriptor{}, "aura-plugins", promotion.PastureRepository, testPastureCommit); err == nil {
 		t.Fatal("expected error for zero descriptor")
 	}
 }
 
 func TestFindEntry(t *testing.T) {
-	proj, err := promotion.ProjectClaudeCode(mustDescriptor(t), "aura-plugins", "dayvidpham/pasture", promotion.DefaultStableRef)
+	proj, err := promotion.ProjectClaudeCode(mustDescriptor(t), "aura-plugins", promotion.PastureRepository, testPastureCommit)
 	if err != nil {
 		t.Fatalf("project: %v", err)
 	}

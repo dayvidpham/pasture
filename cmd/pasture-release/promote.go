@@ -7,7 +7,6 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/effects"
 	"github.com/dayvidpham/pasture/internal/promotion"
-	"github.com/dayvidpham/pasture/internal/target/claudecode"
 	"github.com/spf13/cobra"
 )
 
@@ -18,16 +17,12 @@ import (
 // gate set before performing exactly one guarded ref update.
 func newPromoteStableCmd() *cobra.Command {
 	var (
-		pastureRevision  string
-		auraRevision     string
-		expectedOldFlag  string
-		remote           string
-		pastureRepo      string
-		auraRepo         string
-		marketplacePath  string
-		sourceRepo       string
-		marketplaceName  string
-		skipCommandGates bool
+		pastureRevision string
+		auraRevision    string
+		expectedOldFlag string
+		remote          string
+		pastureRepo     string
+		auraRepo        string
 	)
 
 	cmd := &cobra.Command{
@@ -56,7 +51,7 @@ Example:
 				pastureRepo = root
 			}
 			if auraRepo == "" {
-				auraRepo = pastureRepo
+				return fmt.Errorf("validation error: --aura-repo is required because Aura and Pasture provenance must be verified as distinct repositories")
 			}
 			absPastureRepo, err := filepath.Abs(pastureRepo)
 			if err != nil {
@@ -93,25 +88,26 @@ Example:
 				return err
 			}
 
-			// Project the aggregate marketplace from the pinned target descriptors
-			// (no hand-maintained second catalog) and resolve the marketplace path
-			// the Aura repository gate validates against.
-			descriptor, err := claudecode.Descriptor()
+			pastureSnapshot, err := promotion.PrepareRepositorySnapshot(pastureRepoID, pastureRevision, remote, promotion.PastureRepository)
 			if err != nil {
 				return err
 			}
-			projection, err := promotion.ProjectClaudeCode(descriptor, marketplaceName, sourceRepo, promotion.DefaultStableRef)
+			defer pastureSnapshot.Close()
+			auraSnapshot, err := promotion.PrepareRepositorySnapshot(auraRepoID, auraRevision, "origin", promotion.AuraRepository)
 			if err != nil {
 				return err
 			}
-			if marketplacePath == "" {
-				marketplacePath = filepath.Join(absAuraRepo, ".claude-plugin", "marketplace.json")
+			defer auraSnapshot.Close()
+
+			projection, err := promotion.ProjectClaudeCodeTree(pastureSnapshot.Repository.String(), "aura-plugins", pastureSnapshot.Commit.String())
+			if err != nil {
+				return err
 			}
 
 			gates, err := buildPromotionGates(
-				pastureRepoID, auraRepoID,
-				projection, marketplacePath,
-				skipCommandGates,
+				pastureSnapshot.Repository,
+				projection,
+				filepath.Join(auraSnapshot.Repository.String(), ".claude-plugin", "marketplace.json"),
 			)
 			if err != nil {
 				return err
@@ -154,29 +150,23 @@ Example:
 	cmd.Flags().StringVar(&expectedOldFlag, "expected-old", "", "Expected current pasture-stable commit, or 'absent' for a first publication (required)")
 	cmd.Flags().StringVar(&remote, "remote", "", "Git remote to publish the channel to (required)")
 	cmd.Flags().StringVar(&pastureRepo, "pasture-repo", "", "Pasture working repository (default: current git root)")
-	cmd.Flags().StringVar(&auraRepo, "aura-repo", "", "Aura working repository (default: --pasture-repo)")
-	cmd.Flags().StringVar(&marketplacePath, "marketplace", "", "Path to the Aura marketplace.json the gate validates (default: <aura-repo>/.claude-plugin/marketplace.json)")
-	cmd.Flags().StringVar(&sourceRepo, "source-repo", "dayvidpham/pasture", "GitHub owner/name the projected plugins are fetched from")
-	cmd.Flags().StringVar(&marketplaceName, "marketplace-name", "aura-plugins", "Aggregate marketplace name")
-	cmd.Flags().BoolVar(&skipCommandGates, "skip-command-gates", false, "Skip the subprocess test/fixture gates (keeps the in-process marketplace gate); use only when the caller runs those gates externally")
+	cmd.Flags().StringVar(&auraRepo, "aura-repo", "", "Aura repository containing the named marketplace revision (required; origin must identify dayvidpham/aura-plugins)")
 
 	_ = cmd.MarkFlagRequired("pasture-revision")
 	_ = cmd.MarkFlagRequired("aura-revision")
 	_ = cmd.MarkFlagRequired("expected-old")
 	_ = cmd.MarkFlagRequired("remote")
+	_ = cmd.MarkFlagRequired("aura-repo")
 
 	return cmd
 }
 
-// buildPromotionGates assembles the ordered production gate set: the in-process
-// Aura marketplace/repository validation, then (unless skipped) the Pasture
-// target package tests and the #39 activation fixtures, run at the caller's
-// checked-out revisions.
+// buildPromotionGates assembles the mandatory production gate set against
+// detached immutable candidate checkouts.
 func buildPromotionGates(
-	pastureRepo, auraRepo effects.RepositoryID,
+	pastureRepo effects.RepositoryID,
 	projection promotion.Projection,
 	marketplacePath string,
-	skipCommandGates bool,
 ) ([]promotion.Gate, error) {
 	marketGate, err := promotion.NewFuncGate("aura-marketplace-validation", func() error {
 		return promotion.ValidateMarketplaceFile(marketplacePath, projection)
@@ -184,26 +174,19 @@ func buildPromotionGates(
 	if err != nil {
 		return nil, err
 	}
-	gates := []promotion.Gate{marketGate}
-
-	if skipCommandGates {
-		return gates, nil
-	}
-
 	pkgTests, err := promotion.NewCommandGate(
 		"pasture-package-tests", pastureRepo, "go",
-		[]string{"test", "./..."}, exec.LookPath, effects.DefaultCommandRunner,
+		[]string{"test", "-race", "./..."}, exec.LookPath, effects.DefaultCommandRunner,
 	)
 	if err != nil {
 		return nil, err
 	}
 	activationFixtures, err := promotion.NewCommandGate(
 		"activation-fixtures", pastureRepo, "go",
-		[]string{"test", "./internal/install/..."}, exec.LookPath, effects.DefaultCommandRunner,
+		[]string{"test", "-race", "./internal/install/..."}, exec.LookPath, effects.DefaultCommandRunner,
 	)
 	if err != nil {
 		return nil, err
 	}
-	_ = auraRepo // reserved for a future Aura repository command gate
-	return append(gates, pkgTests, activationFixtures), nil
+	return []promotion.Gate{marketGate, pkgTests, activationFixtures}, nil
 }

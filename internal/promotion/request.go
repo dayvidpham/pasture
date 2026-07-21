@@ -59,6 +59,15 @@ func NewPromotionRequest(
 			"pass --pasture-revision <sha> naming the reviewed commit to promote", nil,
 		)
 	}
+	if _, err := effects.NewCommitOID(pastureRevision); err != nil {
+		return PromotionRequest{}, fault(
+			"pasture revision is not a full immutable commit id",
+			"promotion gates and publication must address the same exact commit object",
+			"promotion.NewPromotionRequest", "promotion request validation",
+			"a symbolic, abbreviated, or malformed revision could move or identify the wrong candidate",
+			"pass --pasture-revision as the full lowercase commit sha reported by git rev-parse HEAD", err,
+		)
+	}
 	if !auraRepo.IsValid() {
 		return PromotionRequest{}, fault(
 			"aura repository is zero or invalid",
@@ -75,6 +84,15 @@ func NewPromotionRequest(
 			"promotion.NewPromotionRequest", "promotion request validation",
 			"the promotion cannot pin the Aura tree it validated against",
 			"pass --aura-revision <sha> naming the Aura commit to validate", nil,
+		)
+	}
+	if _, err := effects.NewCommitOID(auraRevision); err != nil {
+		return PromotionRequest{}, fault(
+			"aura revision is not a full immutable commit id",
+			"marketplace validation must address one exact Aura commit object",
+			"promotion.NewPromotionRequest", "promotion request validation",
+			"a symbolic, abbreviated, or malformed revision could validate the wrong marketplace",
+			"pass --aura-revision as the full lowercase commit sha reported by git rev-parse HEAD", err,
 		)
 	}
 	if strings.TrimSpace(remote) == "" || strings.TrimSpace(remote) != remote {

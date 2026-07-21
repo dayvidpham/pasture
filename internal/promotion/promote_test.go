@@ -49,8 +49,10 @@ func TestNewPromoterValidation(t *testing.T) {
 	}
 }
 
-func TestPromoteDoesNotResolveOrPushWhenGateFails(t *testing.T) {
-	resolver := &fakeResolver{}
+func TestPromoteResolvesBeforeGateAndDoesNotPushWhenGateFails(t *testing.T) {
+	commit, _ := effects.NewCommitOID(testPastureCommit)
+	tree, _ := effects.NewTreeDigest("abcdef0123456789abcdef0123456789abcdef01")
+	resolver := &fakeResolver{commit: commit, tree: tree}
 	pusher := &fakePusher{}
 	p, err := promotion.NewPromoter(resolver, pusher)
 	if err != nil {
@@ -58,7 +60,7 @@ func TestPromoteDoesNotResolveOrPushWhenGateFails(t *testing.T) {
 	}
 	repo, _ := effects.NewRepositoryID("/repo")
 	ref, _ := effects.NewRemoteRef(promotion.DefaultStableRef)
-	req, err := promotion.NewPromotionRequest(repo, "rev", repo, "arev", "origin", ref, effects.ExpectAbsentRemote())
+	req, err := promotion.NewPromotionRequest(repo, testPastureCommit, repo, testAuraCommit, "origin", ref, effects.ExpectAbsentRemote())
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -67,8 +69,8 @@ func TestPromoteDoesNotResolveOrPushWhenGateFails(t *testing.T) {
 	if _, err := p.Promote(req, []promotion.Gate{failing}); err == nil {
 		t.Fatal("expected gate failure")
 	}
-	if resolver.called {
-		t.Error("resolver was called despite gate failure — resolution must run after gates")
+	if !resolver.called {
+		t.Error("resolver was not called before the expensive gate")
 	}
 	if pusher.pushed {
 		t.Error("pusher was called despite gate failure — no ref may be touched after a gate failure")
@@ -79,7 +81,7 @@ func TestPromoteRejectsZeroPromoterAndRequest(t *testing.T) {
 	var zero promotion.Promoter
 	repo, _ := effects.NewRepositoryID("/repo")
 	ref, _ := effects.NewRemoteRef(promotion.DefaultStableRef)
-	req, _ := promotion.NewPromotionRequest(repo, "rev", repo, "arev", "origin", ref, effects.ExpectAbsentRemote())
+	req, _ := promotion.NewPromotionRequest(repo, testPastureCommit, repo, testAuraCommit, "origin", ref, effects.ExpectAbsentRemote())
 	if _, err := zero.Promote(req, nil); err == nil {
 		t.Error("expected zero promoter to be rejected")
 	}

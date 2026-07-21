@@ -23,10 +23,10 @@ import (
 type FixtureName string
 
 const (
-	// ContentBlock is used by S2–S3 tests (message/content-block scenarios).
+	// ContentBlock covers message/content-block scenarios.
 	ContentBlock FixtureName = "content_block"
 
-	// CLISmoke is used by S4–S5 tests (CLI smoke / handler scenarios).
+	// CLISmoke covers CLI smoke and handler scenarios.
 	CLISmoke FixtureName = "cli_smoke"
 
 	// ValidateBeforeOpen is used by the pasture CLI tests asserting that invalid
@@ -34,26 +34,29 @@ const (
 	// validation before the durable database is opened.
 	ValidateBeforeOpen FixtureName = "validate_before_open"
 
-	// RunAgentSession is used by S5–S6 tests (Temporal workflow scenarios).
+	// RunAgentSession covers workflow execution scenarios.
 	RunAgentSession FixtureName = "run_agent_session"
 
-	// ConfigLoading is used by S3 tests (config loading scenarios).
+	// ConfigLoading covers configuration loading scenarios.
 	ConfigLoading FixtureName = "config_loading"
 
-	// CodegenMarkers is used by S3 codegen tests (marker parsing scenarios).
+	// CodegenMarkers covers marker parsing scenarios.
 	CodegenMarkers FixtureName = "markers"
 
-	// CodegenContext is used by S2 codegen tests (context injection scenarios).
+	// CodegenContext covers context injection scenarios.
 	CodegenContext FixtureName = "context"
 
-	// CodegenAgents is used by S6 codegen tests (agent definition generation scenarios).
+	// CodegenAgents covers agent definition generation scenarios.
 	CodegenAgents FixtureName = "agents"
 
-	// CodegenSkills is used by S4 codegen tests (SKILL.md generation scenarios).
+	// CodegenSkills covers skill generation scenarios.
 	CodegenSkills FixtureName = "skills"
 
-	// CodegenSchema is used by S5 codegen tests (schema.xml generation scenarios).
+	// CodegenSchema covers schema generation scenarios.
 	CodegenSchema FixtureName = "schema"
+
+	// MarketplaceValidation covers canonical marketplace boundary scenarios.
+	MarketplaceValidation FixtureName = "marketplace_validation"
 )
 
 // LoadFixtures reads testdata/<name>.yaml relative to the current working

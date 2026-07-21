@@ -57,14 +57,13 @@ func NewPromoter(resolver RevisionResolver, pusher effects.RepositoryPusher) (Pr
 	return Promoter{resolver: resolver, pusher: pusher, valid: true}, nil
 }
 
-// Promote runs the ordered gate set, then advances the pasture-stable ref to the
-// requested revision with exactly one guarded update.
+// Promote resolves the immutable candidate, runs the ordered gate set, then
+// advances the pasture-stable ref with exactly one guarded update.
 //
 // Ordering guarantees:
-//  1. Gates run first. Any gate failure returns before any ref is touched, so a
-//     failed promotion leaves the remote channel exactly as it was.
-//  2. The requested revision is resolved to an exact commit and tree, which the
-//     guarded push verifies locally before touching the remote.
+//  1. The full requested revision is resolved before expensive gates. Invalid or
+//     unavailable candidates fail without running the suite or touching a ref.
+//  2. Gates run against immutable materializations prepared from that commit.
 //  3. The guarded push re-reads the remote immediately before publication and
 //     performs a single --force-with-lease update. A stale expected-old, a racing
 //     advance, or a different ref yields no proof and never overwrites the remote;
@@ -89,18 +88,27 @@ func (p Promoter) Promote(request PromotionRequest, gates []Gate) (PromotionResu
 		)
 	}
 
-	// (1) Gates first — a failure aborts before the remote is touched.
-	if err := RunGates(gates); err != nil {
-		return PromotionResult{}, err
-	}
-
-	// (2) Resolve the exact commit and tree to publish.
+	// (1) Resolve the exact commit and tree before expensive gates.
 	commit, err := p.resolver.ResolveCommit(request.PastureRepo(), request.PastureRevision())
 	if err != nil {
 		return PromotionResult{}, err
 	}
 	tree, err := p.resolver.ResolveTree(request.PastureRepo(), commit)
 	if err != nil {
+		return PromotionResult{}, err
+	}
+	if commit.String() != request.PastureRevision() {
+		return PromotionResult{}, fault(
+			"resolved pasture commit does not equal the requested commit",
+			"the promotion request must name the exact object used by gates and publication",
+			"promotion.Promoter.Promote", "candidate resolution",
+			"the candidate is not published and the pasture-stable ref is unchanged",
+			"fetch the exact commit and pass its full lowercase object id", nil,
+		)
+	}
+
+	// (2) A failure aborts before the remote is touched.
+	if err := RunGates(gates); err != nil {
 		return PromotionResult{}, err
 	}
 

@@ -8,6 +8,11 @@ import (
 	"github.com/dayvidpham/pasture/internal/promotion"
 )
 
+const (
+	testPastureCommit = "0123456789abcdef0123456789abcdef01234567"
+	testAuraCommit    = "89abcdef0123456789abcdef0123456789abcdef"
+)
+
 func validRefAndRepo(t *testing.T) (effects.RepositoryID, effects.RemoteRef) {
 	t.Helper()
 	repo, err := effects.NewRepositoryID("/repo")
@@ -61,7 +66,7 @@ func TestNewPromotionRequestValidation(t *testing.T) {
 	exp := effects.ExpectAbsentRemote()
 
 	// Happy path.
-	if _, err := promotion.NewPromotionRequest(repo, "abc123", repo, "def456", "origin", ref, exp); err != nil {
+	if _, err := promotion.NewPromotionRequest(repo, testPastureCommit, repo, testAuraCommit, "origin", ref, exp); err != nil {
 		t.Fatalf("valid request rejected: %v", err)
 	}
 
@@ -72,14 +77,16 @@ func TestNewPromotionRequestValidation(t *testing.T) {
 		ref                         effects.RemoteRef
 		exp                         effects.ExpectedOldOID
 	}{
-		{"invalid pasture repo", effects.RepositoryID{}, repo, "a", "b", "origin", ref, exp},
-		{"empty pasture rev", repo, repo, "", "b", "origin", ref, exp},
-		{"padded pasture rev", repo, repo, " a ", "b", "origin", ref, exp},
-		{"invalid aura repo", repo, effects.RepositoryID{}, "a", "b", "origin", ref, exp},
-		{"empty aura rev", repo, repo, "a", "", "origin", ref, exp},
-		{"empty remote", repo, repo, "a", "b", "", ref, exp},
-		{"invalid ref", repo, repo, "a", "b", "origin", effects.RemoteRef{}, exp},
-		{"unspecified expected-old", repo, repo, "a", "b", "origin", ref, effects.ExpectedOldOID{}},
+		{"invalid pasture repo", effects.RepositoryID{}, repo, testPastureCommit, testAuraCommit, "origin", ref, exp},
+		{"empty pasture rev", repo, repo, "", testAuraCommit, "origin", ref, exp},
+		{"padded pasture rev", repo, repo, " " + testPastureCommit + " ", testAuraCommit, "origin", ref, exp},
+		{"symbolic pasture rev", repo, repo, "HEAD", testAuraCommit, "origin", ref, exp},
+		{"invalid aura repo", repo, effects.RepositoryID{}, testPastureCommit, testAuraCommit, "origin", ref, exp},
+		{"empty aura rev", repo, repo, testPastureCommit, "", "origin", ref, exp},
+		{"symbolic aura rev", repo, repo, testPastureCommit, "main", "origin", ref, exp},
+		{"empty remote", repo, repo, testPastureCommit, testAuraCommit, "", ref, exp},
+		{"invalid ref", repo, repo, testPastureCommit, testAuraCommit, "origin", effects.RemoteRef{}, exp},
+		{"unspecified expected-old", repo, repo, testPastureCommit, testAuraCommit, "origin", ref, effects.ExpectedOldOID{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -93,11 +100,11 @@ func TestNewPromotionRequestValidation(t *testing.T) {
 
 func TestPromotionRequestAccessors(t *testing.T) {
 	repo, ref := validRefAndRepo(t)
-	req, err := promotion.NewPromotionRequest(repo, "prev", repo, "arev", "origin", ref, effects.ExpectAbsentRemote())
+	req, err := promotion.NewPromotionRequest(repo, testPastureCommit, repo, testAuraCommit, "origin", ref, effects.ExpectAbsentRemote())
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
-	if req.PastureRevision() != "prev" || req.AuraRevision() != "arev" || req.Remote() != "origin" {
+	if req.PastureRevision() != testPastureCommit || req.AuraRevision() != testAuraCommit || req.Remote() != "origin" {
 		t.Fatal("accessor mismatch")
 	}
 	if req.StableRef().String() != promotion.DefaultStableRef {

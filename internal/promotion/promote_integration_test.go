@@ -15,7 +15,7 @@ import (
 // bare git remote: the real GitRevisionResolver and the real
 // effects.GitRepositoryPusher, driven by the on-disk git binary. They falsify
 // every guarded-update failure mode and prove the old ref is preserved in every
-// failure case, per the aura-plugins#9 acceptance criteria.
+// failure case required by the guarded promotion contract.
 
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
@@ -150,7 +150,7 @@ func TestPromoteAdvancesChannelOnMatchingExpectedOld(t *testing.T) {
 		t.Fatalf("initial promote: %v", err)
 	}
 
-	// A second reviewed commit.
+	// A second candidate commit.
 	writeFile(t, workDir, "CHANGELOG.md", "v2\n")
 	git(t, workDir, "add", "CHANGELOG.md")
 	git(t, workDir, "commit", "-m", "second")
