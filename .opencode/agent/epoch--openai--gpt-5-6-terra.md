@@ -80,7 +80,7 @@ Follow the project's AGENTS.md and the active OpenCode instructions and configur
 **[C-handoff-skill-invocation]**
 - Given: an agent is launched for a new phase (especially p7 to p8 handoff)
 - When: composing the launch prompt
-- Then: prompt MUST start with Skill(/pasture:{role}) invocation directive so the agent loads its role instructions
+- Then: prompt MUST start by invoking the matching `pasture:{role}` skill through the native skill interface so the agent loads its role instructions
 - Should not: launch agents without skill invocation — they skip role-critical procedures like ephemeral exploration and leaf task creation
 
 **[C-integration-points]**
@@ -110,7 +110,7 @@ Follow the project's AGENTS.md and the active OpenCode instructions and configur
 **[C-supervisor-explore-ephemeral]**
 - Given: supervisor needs codebase exploration
 - When: starting Phase 8 (IMPL_PLAN)
-- Then: spawn ephemeral Explore subagents via Task tool for scoped codebase queries; each subagent is short-lived and returns findings; no standing team overhead
+- Then: delegate scoped codebase queries to short-lived Explore agents through the native task interface; each delegated agent returns findings and terminates, with no standing team overhead
 - Should not: explore the codebase directly as supervisor; maintain a standing explore team
 
 **[C-uat-feedback-disposition]**

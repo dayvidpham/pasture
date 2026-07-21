@@ -426,6 +426,10 @@ func TestGeneratedOutputInventory(t *testing.T) {
 	if !ok {
 		t.Fatalf("OpenCode target agent emitter has type %T, want openCodeAgentEmitter", OpenCodeTarget.Agents)
 	}
+	openCodeVariants, err := validateOpenCodeProviderVariants(openCodeAgentTarget.Variants)
+	if err != nil {
+		t.Fatalf("OpenCode target variants are invalid: %v", err)
+	}
 	for _, roleID := range protocol.AllRoleIds {
 		spec := RoleSpecs[roleID]
 		if len(spec.Tools) == 0 {
@@ -441,7 +445,7 @@ func TestGeneratedOutputInventory(t *testing.T) {
 		addExpectedOutput(t, expectedClaudeHarness, claudePath, owner)
 		addExpectedOutput(t, expectedOpenCodeHarness, openCodePath, owner)
 		addExpectedOutput(t, expectedOpenCodeHarness, openCodeDefaultPath, owner+" default variant")
-		for _, variant := range openCodeAgentTarget.Variants {
+		for _, variant := range openCodeVariants {
 			variantPath := filepath.ToSlash(filepath.Join(".opencode", "agent", variant.filename(roleID)))
 			variantOwner := owner + " " + variant.qualifiedModel() + " variant"
 			addExpectedOutput(t, expectedOpenCodeAgents, variantPath, variantOwner)

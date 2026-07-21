@@ -36,6 +36,15 @@ const (
 type agentRenderContext struct {
 	Harness                   agentHarness
 	InstructionSourceGuidance string
+	RoleSkillInvocation       string
+	ExploreDelegation         string
+	TrivialWorkerSelection    string
+	TrivialWorkerAvoid        string
+	NontrivialWorkerSelection string
+	NontrivialWorkerAvoid     string
+	WorkflowExplore           string
+	WorkflowWorker            string
+	WorkflowReviewer          string
 }
 
 var agentRenderContexts = map[agentHarness]agentRenderContext{
@@ -46,6 +55,15 @@ var agentRenderContexts = map[agentHarness]agentRenderContext{
 	agentHarnessOpenCode: {
 		Harness:                   agentHarnessOpenCode,
 		InstructionSourceGuidance: "Follow the project's AGENTS.md and the active OpenCode instructions and configuration.",
+		RoleSkillInvocation:       "prompt MUST start by invoking the matching `pasture:{role}` skill through the native skill interface so the agent loads its role instructions",
+		ExploreDelegation:         "delegate scoped codebase queries to short-lived Explore agents through the native task interface; each delegated agent returns findings and terminates, with no standing team overhead",
+		TrivialWorkerSelection:    "select the lowest-cost, lowest-latency available agent definition that is adequate for the work",
+		TrivialWorkerAvoid:        "select a high-cost agent definition when a lower-cost definition is adequate",
+		NontrivialWorkerSelection: "select an available agent definition with sufficient capability for multi-file, architectural, or logic-heavy work",
+		NontrivialWorkerAvoid:     "select a low-capability agent definition for complex work",
+		WorkflowExplore:           "Delegate scoped codebase queries to short-lived Explore agents through the native task interface - do not maintain a standing exploration team",
+		WorkflowWorker:            "Delegate each slice to a worker through the native task interface. Select an available agent definition whose capability and reasoning effort match the slice complexity.",
+		WorkflowReviewer:          "Delegate each per-slice code review to a short-lived reviewer through the native task interface",
 	},
 }
 
@@ -177,6 +195,7 @@ func renderAgentBody(roleId protocol.RoleId, figuresDir string, harness agentHar
 		Figures:       figures,
 		RenderContext: renderContext,
 	}
+	data = projectAgentTemplateData(data)
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
@@ -188,6 +207,66 @@ func renderAgentBody(roleId protocol.RoleId, figuresDir string, harness agentHar
 	}
 
 	return normalizeTrailingNewline(buf.String()), nil
+}
+
+func projectAgentTemplateData(data agentTemplateData) agentTemplateData {
+	ctx := data.RenderContext
+	data.Constraints = append([]ConstraintContext(nil), data.Constraints...)
+	for index := range data.Constraints {
+		switch data.Constraints[index].Id {
+		case "C-handoff-skill-invocation":
+			if ctx.RoleSkillInvocation != "" {
+				data.Constraints[index].Then = ctx.RoleSkillInvocation
+			}
+		case "C-supervisor-explore-ephemeral":
+			if ctx.ExploreDelegation != "" {
+				data.Constraints[index].Then = ctx.ExploreDelegation
+			}
+		}
+	}
+
+	data.Behaviors = append([]BehaviorSpec(nil), data.Behaviors...)
+	for index := range data.Behaviors {
+		switch data.Behaviors[index].Id {
+		case "B-sup-model-trivial":
+			if ctx.TrivialWorkerSelection != "" {
+				data.Behaviors[index].Then = ctx.TrivialWorkerSelection
+				data.Behaviors[index].ShouldNot = ctx.TrivialWorkerAvoid
+			}
+		case "B-sup-model-nontrivial":
+			if ctx.NontrivialWorkerSelection != "" {
+				data.Behaviors[index].Then = ctx.NontrivialWorkerSelection
+				data.Behaviors[index].ShouldNot = ctx.NontrivialWorkerAvoid
+			}
+		}
+	}
+
+	data.Workflows = append([]Workflow(nil), data.Workflows...)
+	for workflowIndex := range data.Workflows {
+		data.Workflows[workflowIndex].Stages = append([]WorkflowStage(nil), data.Workflows[workflowIndex].Stages...)
+		for stageIndex := range data.Workflows[workflowIndex].Stages {
+			stage := &data.Workflows[workflowIndex].Stages[stageIndex]
+			stage.Actions = append([]WorkflowAction(nil), stage.Actions...)
+			for actionIndex := range stage.Actions {
+				action := &stage.Actions[actionIndex]
+				switch action.Id {
+				case "rtw-plan-explore":
+					if ctx.WorkflowExplore != "" {
+						action.Instruction = ctx.WorkflowExplore
+					}
+				case "rtw-build-spawn":
+					if ctx.WorkflowWorker != "" {
+						action.Instruction = ctx.WorkflowWorker
+					}
+				case "rtw-review-spawn":
+					if ctx.WorkflowReviewer != "" {
+						action.Instruction = ctx.WorkflowReviewer
+					}
+				}
+			}
+		}
+	}
+	return data
 }
 
 func normalizeTrailingNewline(content string) string {

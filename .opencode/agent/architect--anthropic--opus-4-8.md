@@ -75,7 +75,7 @@ Follow the project's AGENTS.md and the active OpenCode instructions and configur
 **[C-handoff-skill-invocation]**
 - Given: an agent is launched for a new phase (especially p7 to p8 handoff)
 - When: composing the launch prompt
-- Then: prompt MUST start with Skill(/pasture:{role}) invocation directive so the agent loads its role instructions
+- Then: prompt MUST start by invoking the matching `pasture:{role}` skill through the native skill interface so the agent loads its role instructions
 - Should not: launch agents without skill invocation — they skip role-critical procedures like ephemeral exploration and leaf task creation
 
 **[C-proposal-naming]**
@@ -87,7 +87,7 @@ Follow the project's AGENTS.md and the active OpenCode instructions and configur
 **[C-ure-verbatim]**
 - Given: user interview (Request, URE, or UAT), URD update, or mid-implementation design decision
 - When: recording in Beads
-- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via bd comments add whenever user intent is captured
+- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside interactive question option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via bd comments add whenever user intent is captured
 - Should not: summarize options as (1)/(2)/(3) without option text, paraphrase user responses, or omit code/snippets shown inside option previews
 
 ## Behaviors

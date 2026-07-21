@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -74,26 +75,37 @@ type openCodeVariantSuite struct {
 	InvalidCases          []openCodeVariantInvalidCase `yaml:"invalid_cases"`
 }
 
-func normalizeAgentBodyForHarnessParity(t *testing.T, body string) string {
-	t.Helper()
-	const heading = "## Instruction Sources\n\n"
-	start := strings.Index(body, heading)
-	if start < 0 {
-		t.Fatalf("agent body has no Instruction Sources section:\n%s", body)
-	}
-	rest := body[start+len(heading):]
-	end := strings.Index(rest, "\n## ")
-	if end < 0 {
-		t.Fatalf("Instruction Sources section has no following semantic section:\n%s", body)
-	}
-	return body[:start] + rest[end+1:]
-}
-
 func loadOpenCodeVariantSuite(t *testing.T) openCodeVariantSuite {
 	t.Helper()
 	var suite openCodeVariantSuite
 	testutil.LoadFixtures(t, testutil.CodegenOpenCodeAgentVariants, &suite)
 	return suite
+}
+
+func expectedOpenCodeAgentInventory(t *testing.T, variants []OpenCodeProviderVariant) map[string]string {
+	t.Helper()
+	validated, err := validateOpenCodeProviderVariants(variants)
+	if err != nil {
+		t.Fatalf("validate production OpenCode variants: %v", err)
+	}
+	expected := make(map[string]string)
+	add := func(name, owner string) {
+		if previous, exists := expected[name]; exists {
+			t.Fatalf("expected OpenCode inventory gives %q multiple owners: %s and %s", name, previous, owner)
+		}
+		expected[name] = owner
+	}
+	for roleID, roleSpec := range RoleSpecs {
+		if len(roleSpec.Tools) == 0 {
+			continue
+		}
+		add(string(roleID)+".md", string(roleID)+" legacy")
+		add(string(roleID)+"--default.md", string(roleID)+" default")
+		for _, variant := range validated {
+			add(variant.filename(roleID), string(roleID)+" "+variant.qualifiedModel())
+		}
+	}
+	return expected
 }
 
 func emitOpenCodeAgentFiles(t *testing.T, variants []OpenCodeProviderVariant) []GeneratedFile {
@@ -278,20 +290,20 @@ func TestOpenCodeTargetEmitsCompleteProviderInventory(t *testing.T) {
 	if !ok {
 		t.Fatalf("OpenCodeTarget.Agents type = %T, want openCodeAgentEmitter", OpenCodeTarget.Agents)
 	}
-	files := emitOpenCodeAgentFiles(t, emitter.Variants)
-	if len(files) != 45 {
-		t.Fatalf("OpenCode target emitted %d agent definitions, want 45 (5 roles x legacy, default, and 7 provider variants)", len(files))
+	variants, err := validateOpenCodeProviderVariants(emitter.Variants)
+	if err != nil {
+		t.Fatalf("validate production OpenCode variants: %v", err)
 	}
-
-	wantModels := map[string]string{
-		"--default.md":               "",
-		"--anthropic--fable-5.md":    "anthropic/claude-fable-5",
-		"--anthropic--haiku-4-5.md":  "anthropic/claude-haiku-4-5",
-		"--anthropic--opus-4-8.md":   "anthropic/claude-opus-4-8",
-		"--anthropic--sonnet-5.md":   "anthropic/claude-sonnet-5",
-		"--openai--gpt-5-6-luna.md":  "openai/gpt-5.6-luna",
-		"--openai--gpt-5-6-sol.md":   "openai/gpt-5.6-sol",
-		"--openai--gpt-5-6-terra.md": "openai/gpt-5.6-terra",
+	files := emitOpenCodeAgentFiles(t, emitter.Variants)
+	toolRoleCount := 0
+	for _, roleSpec := range RoleSpecs {
+		if len(roleSpec.Tools) > 0 {
+			toolRoleCount++
+		}
+	}
+	wantFileCount := toolRoleCount * (2 + len(variants))
+	if len(files) != wantFileCount {
+		t.Fatalf("OpenCode target emitted %d agent definitions, want %d (%d tool-bearing roles x legacy, default, and %d validated provider variants)", len(files), wantFileCount, toolRoleCount, len(variants))
 	}
 	byName := make(map[string]GeneratedFile, len(files))
 	for _, file := range files {
@@ -300,6 +312,14 @@ func TestOpenCodeTargetEmitsCompleteProviderInventory(t *testing.T) {
 			t.Fatalf("OpenCode target emitted duplicate agent filename %q", name)
 		}
 		byName[name] = file
+	}
+	expectedInventory := expectedOpenCodeAgentInventory(t, variants)
+	actualInventory := make(map[string]string, len(byName))
+	for name := range byName {
+		actualInventory[name] = "production emitter"
+	}
+	if missing, unexpected := registrySetDiff(expectedInventory, actualInventory); len(missing) != 0 || len(unexpected) != 0 {
+		t.Fatalf("OpenCode production inventory mismatch: missing=%v unexpected=%v", missing, unexpected)
 	}
 
 	for roleID, roleSpec := range RoleSpecs {
@@ -313,27 +333,94 @@ func TestOpenCodeTargetEmitsCompleteProviderInventory(t *testing.T) {
 			continue
 		}
 		_, sharedBody := decodeOpenCodeAgent(t, legacy)
-		if strings.Contains(sharedBody, "~/.claude") || strings.Contains(sharedBody, "Claude Code") {
-			t.Errorf("role %s legacy OpenCode body contains Claude-only instruction guidance", roleID)
+		assertNoForeignOpenCodeGuidance(t, legacyName, legacy.Content)
+
+		defaultName := string(roleID) + "--default.md"
+		defaultFile, exists := byName[defaultName]
+		if !exists {
+			t.Errorf("role %s is missing selectable definition %s", roleID, defaultName)
+		} else {
+			frontmatter, body := decodeOpenCodeAgent(t, defaultFile)
+			if frontmatter.Model != "" {
+				t.Errorf("%s model = %q, want omitted", defaultName, frontmatter.Model)
+			}
+			if body != sharedBody {
+				t.Errorf("%s body differs from shared semantic body in %s", defaultName, legacyName)
+			}
+			assertNoForeignOpenCodeGuidance(t, defaultName, defaultFile.Content)
 		}
 
-		for suffix, wantModel := range wantModels {
-			name := string(roleID) + suffix
+		for _, variant := range variants {
+			name := variant.filename(roleID)
 			file, exists := byName[name]
 			if !exists {
 				t.Errorf("role %s is missing selectable definition %s", roleID, name)
 				continue
 			}
 			frontmatter, body := decodeOpenCodeAgent(t, file)
-			if frontmatter.Model != wantModel {
-				t.Errorf("%s model = %q, want %q", name, frontmatter.Model, wantModel)
+			if frontmatter.Model != variant.qualifiedModel() {
+				t.Errorf("%s model = %q, want %q", name, frontmatter.Model, variant.qualifiedModel())
 			}
 			if body != sharedBody {
 				t.Errorf("%s body differs from shared semantic body in %s", name, legacyName)
 			}
-			if strings.Contains(body, "~/.claude") || strings.Contains(body, "Claude Code") {
-				t.Errorf("%s contains Claude-only instruction guidance", name)
-			}
+			assertNoForeignOpenCodeGuidance(t, name, file.Content)
+		}
+	}
+}
+
+var openCodeForeignGuidancePatterns = []struct {
+	name    string
+	sample  string
+	pattern *regexp.Regexp
+}{
+	{name: "Claude Code identity", sample: "Claude Code", pattern: regexp.MustCompile(`Claude Code`)},
+	{name: "Claude configuration path", sample: "~/.claude/CLAUDE.md", pattern: regexp.MustCompile(`(?:~?/)?\.claude/|CLAUDE\.md`)},
+	{name: "Claude Task tool", sample: "Task tool", pattern: regexp.MustCompile(`\bTask tool\b|\bTask\s*\(`)},
+	{name: "Claude Skill call syntax", sample: "Skill(/pasture:worker)", pattern: regexp.MustCompile(`\bSkill\s*\(`)},
+	{name: "Claude subagent_type parameter", sample: "subagent_type=Explore", pattern: regexp.MustCompile(`\bsubagent_type\b`)},
+	{name: "Claude model alias", sample: "model: sonnet", pattern: regexp.MustCompile(`(?m)\bmodel:\s*(?:sonnet|haiku)\b`)},
+	{name: "Claude TeamCreate operation", sample: "TeamCreate", pattern: regexp.MustCompile(`\bTeamCreate\b`)},
+}
+
+func foreignNativeGuidancePattern(name string) *regexp.Regexp {
+	if name == "Agent" {
+		// "Agent" is part of each document's role heading; only operational
+		// call/tool forms are foreign guidance.
+		return regexp.MustCompile(`\bAgent(?:\s+tool\b|\s*\()`)
+	}
+	return regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`)
+}
+
+func TestOpenCodeForeignGuidanceOracleCoversKnownSet(t *testing.T) {
+	t.Parallel()
+	for _, foreign := range foreignNativeCallNames {
+		sample := foreign
+		if foreign == "Agent" {
+			sample = "Agent tool"
+		}
+		if !foreignNativeGuidancePattern(foreign).MatchString(sample) {
+			t.Errorf("foreign native operation oracle does not match %q sample %q", foreign, sample)
+		}
+	}
+	for _, forbidden := range openCodeForeignGuidancePatterns {
+		if !forbidden.pattern.MatchString(forbidden.sample) {
+			t.Errorf("%s oracle %q does not match its sample %q", forbidden.name, forbidden.pattern, forbidden.sample)
+		}
+	}
+}
+
+func assertNoForeignOpenCodeGuidance(t *testing.T, name, content string) {
+	t.Helper()
+	for _, foreign := range foreignNativeCallNames {
+		pattern := foreignNativeGuidancePattern(foreign)
+		if pattern.MatchString(content) {
+			t.Errorf("%s contains foreign native operation %q", name, foreign)
+		}
+	}
+	for _, forbidden := range openCodeForeignGuidancePatterns {
+		if forbidden.pattern.MatchString(content) {
+			t.Errorf("%s contains %s matching %q", name, forbidden.name, forbidden.pattern)
 		}
 	}
 }
@@ -343,35 +430,39 @@ func TestOpenCodeTargetInventoryRejectsMissingStaleAndDuplicateEntries(t *testin
 
 	emitter := OpenCodeTarget.Agents.(openCodeAgentEmitter)
 	files := emitOpenCodeAgentFiles(t, emitter.Variants)
-	expected := make(map[string]string, len(files))
+	expected := expectedOpenCodeAgentInventory(t, emitter.Variants)
+	actual := make(map[string]string, len(files))
 	for _, file := range files {
 		name := filepath.Base(file.Path)
-		if _, exists := expected[name]; exists {
+		if _, exists := actual[name]; exists {
 			t.Fatalf("production inventory contains duplicate filename %q", name)
 		}
-		expected[name] = "production emitter"
+		actual[name] = "production emitter"
+	}
+	if missing, unexpected := registrySetDiff(expected, actual); len(missing) != 0 || len(unexpected) != 0 {
+		t.Fatalf("baseline production inventory mismatch: missing=%v unexpected=%v", missing, unexpected)
 	}
 
 	t.Run("missing", func(t *testing.T) {
-		actual := make(map[string]string, len(expected)-1)
+		missingActual := make(map[string]string, len(expected)-1)
 		for name := range expected {
 			if name != "worker--default.md" {
-				actual[name] = "checked-out tree"
+				missingActual[name] = "checked-out tree"
 			}
 		}
-		missing, stale := registrySetDiff(expected, actual)
+		missing, stale := registrySetDiff(expected, missingActual)
 		if !reflect.DeepEqual(missing, []string{"worker--default.md"}) || len(stale) != 0 {
 			t.Fatalf("missing inventory diff = (%v, %v), want ([worker--default.md], [])", missing, stale)
 		}
 	})
 
 	t.Run("stale", func(t *testing.T) {
-		actual := make(map[string]string, len(expected)+1)
+		staleActual := make(map[string]string, len(expected)+1)
 		for name := range expected {
-			actual[name] = "checked-out tree"
+			staleActual[name] = "checked-out tree"
 		}
-		actual["worker--retired.md"] = "checked-out tree"
-		missing, stale := registrySetDiff(expected, actual)
+		staleActual["worker--retired.md"] = "checked-out tree"
+		missing, stale := registrySetDiff(expected, staleActual)
 		if len(missing) != 0 || !reflect.DeepEqual(stale, []string{"worker--retired.md"}) {
 			t.Fatalf("stale inventory diff = (%v, %v), want ([], [worker--retired.md])", missing, stale)
 		}
@@ -390,7 +481,7 @@ func TestOpenCodeTargetInventoryRejectsMissingStaleAndDuplicateEntries(t *testin
 	})
 }
 
-func TestAgentSemanticBodyParityAcrossHarnesses(t *testing.T) {
+func TestAgentSemanticStructureParityAcrossHarnesses(t *testing.T) {
 	t.Parallel()
 
 	figuresDir := filepath.Join(testModuleRoot(t), "skills", "protocol", "figures")
@@ -406,12 +497,20 @@ func TestAgentSemanticBodyParityAcrossHarnesses(t *testing.T) {
 		if err != nil {
 			t.Fatalf("render OpenCode body for %s: %v", roleID, err)
 		}
-		if got, want := normalizeAgentBodyForHarnessParity(t, openCodeBody), normalizeAgentBodyForHarnessParity(t, claudeBody); got != want {
-			t.Errorf("role %s semantic body differs across harnesses", roleID)
+		roleContext := GetRoleContext(roleID)
+		for _, constraint := range roleContext.Constraints {
+			marker := "**[" + constraint.Id + "]**"
+			if !strings.Contains(claudeBody, marker) || !strings.Contains(openCodeBody, marker) {
+				t.Errorf("role %s constraint %s is not present in both harness bodies", roleID, constraint.Id)
+			}
 		}
-		if strings.Contains(openCodeBody, "~/.claude") || strings.Contains(openCodeBody, "Claude Code") {
-			t.Errorf("role %s OpenCode body contains Claude-only instruction guidance", roleID)
+		for _, behavior := range roleSpec.Behaviors {
+			marker := "**[" + behavior.Id + "]**"
+			if !strings.Contains(claudeBody, marker) || !strings.Contains(openCodeBody, marker) {
+				t.Errorf("role %s behavior %s is not present in both harness bodies", roleID, behavior.Id)
+			}
 		}
+		assertNoForeignOpenCodeGuidance(t, string(roleID), openCodeBody)
 	}
 }
 

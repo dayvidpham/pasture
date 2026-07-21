@@ -17,7 +17,7 @@ Launch the wave of workers for parallel vertical slice implementation, reviewed 
 ```text
 Phase 8: PLAN
   ├─ Read RATIFIED_PLAN + URD
-  ├─ Spawn ephemeral Explore subagents (Task tool, scoped queries)
+  ├─ Delegate scoped queries to ephemeral Explore agents
   ├─ Use Explore findings to map codebase
   ├─ Decompose into vertical slices + integration points
   └─ Create leaf tasks for every slice
@@ -29,7 +29,7 @@ Phase 9: BUILD
 
 Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget — iterate until 0/0/0 clean, else surface to user)
   ├─ Cycle 1:
-  │   ├─ Spawn ephemeral reviewers (Task tool, per-slice review)
+  │   ├─ Delegate each per-slice review to ephemeral reviewers
   │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
   │   ├─ Workers fix ALL findings (BLOCKER + IMPORTANT + MINOR) with atomic commits
   │   └─ Spawn new ephemeral reviewers for re-review

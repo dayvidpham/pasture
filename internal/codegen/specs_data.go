@@ -466,7 +466,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		Given: "user interview (Request, URE, or UAT), URD update, or mid-implementation design decision",
 		When:  "recording in Beads",
 		Then: "capture full question text, ALL option descriptions, AND user's verbatim response, " +
-			"INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, " +
+			"INCLUDING any code, snippets, or examples shown inside interactive question option labels, descriptions, " +
 			"or definition blocks (the preview/stimulus the user actually saw); " +
 			"the URD is the living document of ALL user requests, URE, UAT, and mid-implementation " +
 			"design decisions and feedback — update it via bd comments add whenever user intent is captured",

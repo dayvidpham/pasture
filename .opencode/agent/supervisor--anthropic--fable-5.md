@@ -98,7 +98,7 @@ Follow the project's AGENTS.md and the active OpenCode instructions and configur
 **[C-handoff-skill-invocation]**
 - Given: an agent is launched for a new phase (especially p7 to p8 handoff)
 - When: composing the launch prompt
-- Then: prompt MUST start with Skill(/pasture:{role}) invocation directive so the agent loads its role instructions
+- Then: prompt MUST start by invoking the matching `pasture:{role}` skill through the native skill interface so the agent loads its role instructions
 - Should not: launch agents without skill invocation — they skip role-critical procedures like ephemeral exploration and leaf task creation
 
 **[C-integration-points]**
@@ -134,7 +134,7 @@ Follow the project's AGENTS.md and the active OpenCode instructions and configur
 **[C-supervisor-explore-ephemeral]**
 - Given: supervisor needs codebase exploration
 - When: starting Phase 8 (IMPL_PLAN)
-- Then: spawn ephemeral Explore subagents via Task tool for scoped codebase queries; each subagent is short-lived and returns findings; no standing team overhead
+- Then: delegate scoped codebase queries to short-lived Explore agents through the native task interface; each delegated agent returns findings and terminates, with no standing team overhead
 - Should not: explore the codebase directly as supervisor; maintain a standing explore team
 
 **[C-supervisor-no-impl]**
@@ -166,14 +166,14 @@ Follow the project's AGENTS.md and the active OpenCode instructions and configur
 **[B-sup-model-trivial]**
 - Given: trivial changes (single-file edits, config tweaks, typo fixes)
 - When: spawning a worker
-- Then: use model: haiku to minimize cost and latency
-- Should not: use a heavyweight model for trivial work
+- Then: select the lowest-cost, lowest-latency available agent definition that is adequate for the work
+- Should not: select a high-cost agent definition when a lower-cost definition is adequate
 
 **[B-sup-model-nontrivial]**
 - Given: non-trivial changes (multi-file, architectural, logic-heavy)
 - When: spawning a worker
-- Then: prefer model: sonnet for the Task tool to ensure quality
-- Should not: default to haiku for complex work
+- Then: select an available agent definition with sufficient capability for multi-file, architectural, or logic-heavy work
+- Should not: select a low-capability agent definition for complex work
 
 **[B-sup-ride-the-wave]**
 - Given: Phase 8-10 execution
@@ -206,7 +206,7 @@ Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full c
 
 - Read RATIFIED_PLAN and URD via bd show (`bd show <ratified-plan-id> && bd show <urd-id>`)
 
-- Spawn ephemeral Explore subagents (`subagent_type=Explore`) for scoped codebase queries — NOT standing teams
+- Delegate scoped codebase queries to short-lived Explore agents through the native task interface - do not maintain a standing exploration team
 
 - Use Explore findings to decompose into vertical slices with integration points
 
@@ -217,7 +217,7 @@ Exit conditions:
 
 **Stage 2: Build** _(parallel)_
 
-- Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity.
+- Delegate each slice to a worker through the native task interface. Select an available agent definition whose capability and reasoning effort match the slice complexity.
 
 - Monitor worker progress via bd list and bd show (`bd list --labels="pasture:p9-impl:s9-slice" --status=in_progress`)
 
@@ -228,7 +228,7 @@ Exit conditions:
 
 **Stage 3: Review + Fix Cycles** _(conditional-loop)_
 
-- Spawn reviewers via Task tool for per-slice code review
+- Delegate each per-slice code review to a short-lived reviewer through the native task interface
 
 - Reviewers create severity groups (BLOCKER/IMPORTANT/MINOR) per slice
 
@@ -247,7 +247,7 @@ Exit conditions:
 ```text
 Phase 8: PLAN
   ├─ Read RATIFIED_PLAN + URD
-  ├─ Spawn ephemeral Explore subagents (Task tool, scoped queries)
+  ├─ Delegate scoped queries to ephemeral Explore agents
   ├─ Use Explore findings to map codebase
   ├─ Decompose into vertical slices + integration points
   └─ Create leaf tasks for every slice
@@ -259,7 +259,7 @@ Phase 9: BUILD
 
 Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget — iterate until 0/0/0 clean, else surface to user)
   ├─ Cycle 1:
-  │   ├─ Spawn ephemeral reviewers (Task tool, per-slice review)
+  │   ├─ Delegate each per-slice review to ephemeral reviewers
   │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
   │   ├─ Workers fix ALL findings (BLOCKER + IMPORTANT + MINOR) with atomic commits
   │   └─ Spawn new ephemeral reviewers for re-review
