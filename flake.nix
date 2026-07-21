@@ -23,7 +23,7 @@
           # Module-proxy mode: Nix fetches go.mod deps into a fixed-output
           # derivation (no committed vendor/ dir — modernc.org/libc alone would
           # bloat the repo). Update this hash whenever go.mod/go.sum changes.
-          vendorHash = "sha256-a9XFKM2jX9rlyi9gJQwdmJCwsnqMycie/Z9jbY8w9Co=";
+          vendorHash = "sha256-PJ3GVfZ3aHH5/SdpcKfyHR7aloZUOsVCn9OD2sC/lVk=";
 
           env.CGO_ENABLED = "0";
 
