@@ -22,7 +22,52 @@ import (
 
 // ─── Template context ─────────────────────────────────────────────────────────
 
-// agentTemplateData is the data passed to agent_definition.go.tmpl.
+// agentHarness identifies the target whose wrapper and instruction-source
+// guidance surround the canonical role body.
+type agentHarness string
+
+const (
+	agentHarnessClaudeCode agentHarness = "claude-code"
+	agentHarnessOpenCode   agentHarness = "opencode"
+)
+
+// agentRenderContext contains the only harness-specific prose permitted in an
+// agent body. Role semantics remain in RoleSpec and the shared body template.
+type agentRenderContext struct {
+	Harness                   agentHarness
+	InstructionSourceGuidance string
+	RoleSkillInvocation       string
+	ExploreDelegation         string
+	TrivialWorkerSelection    string
+	TrivialWorkerAvoid        string
+	NontrivialWorkerSelection string
+	NontrivialWorkerAvoid     string
+	WorkflowExplore           string
+	WorkflowWorker            string
+	WorkflowReviewer          string
+}
+
+var agentRenderContexts = map[agentHarness]agentRenderContext{
+	agentHarnessClaudeCode: {
+		Harness:                   agentHarnessClaudeCode,
+		InstructionSourceGuidance: "Follow the project's AGENTS.md and the active Claude Code instructions, including ~/.claude/CLAUDE.md when present.",
+	},
+	agentHarnessOpenCode: {
+		Harness:                   agentHarnessOpenCode,
+		InstructionSourceGuidance: "Follow the project's AGENTS.md and the active OpenCode instructions and configuration.",
+		RoleSkillInvocation:       "prompt MUST start by invoking the matching `pasture:{role}` skill through the native skill interface so the agent loads its role instructions",
+		ExploreDelegation:         "delegate scoped codebase queries to short-lived Explore agents through the native task interface; each delegated agent returns findings and terminates, with no standing team overhead",
+		TrivialWorkerSelection:    "select the lowest-cost, lowest-latency available agent definition that is adequate for the work",
+		TrivialWorkerAvoid:        "select a high-cost agent definition when a lower-cost definition is adequate",
+		NontrivialWorkerSelection: "select an available agent definition with sufficient capability for multi-file, architectural, or logic-heavy work",
+		NontrivialWorkerAvoid:     "select a low-capability agent definition for complex work",
+		WorkflowExplore:           "Delegate scoped codebase queries to short-lived Explore agents through the native task interface - do not maintain a standing exploration team",
+		WorkflowWorker:            "Delegate each slice to a worker through the native task interface. Select an available agent definition whose capability and reasoning effort match the slice complexity.",
+		WorkflowReviewer:          "Delegate each per-slice code review to a short-lived reviewer through the native task interface",
+	},
+}
+
+// agentTemplateData is the data passed to agent_body.go.tmpl.
 type agentTemplateData struct {
 	// Role is the full RoleSpec for the role being generated.
 	Role RoleSpec
@@ -51,15 +96,22 @@ type agentTemplateData struct {
 	// content when figuresDir is provided to GenerateAgent. When figuresDir is
 	// empty, Content fields will be empty (ID + Title only).
 	Figures []FigureSpec
+
+	RenderContext agentRenderContext
+}
+
+type claudeAgentTemplateData struct {
+	Role RoleSpec
+	Body string
 }
 
 // ─── Template rendering ───────────────────────────────────────────────────────
 
 // renderAgent renders the agent definition markdown for the given role.
 //
-// It loads agent_definition.go.tmpl from the embedded FS (templatesFS,
-// declared in embed.go), builds the template context from RoleSpecs and
-// GetRoleContext, and executes the template.
+// It renders the canonical body through a typed Claude Code context, then
+// applies Claude Code frontmatter. OpenCode calls the body renderer directly
+// with its own context rather than projecting this completed file.
 // Returns the rendered string (including a trailing newline).
 //
 // figuresDir is the path to the directory containing figure YAML files
@@ -72,6 +124,31 @@ type agentTemplateData struct {
 //   - The template file cannot be read from the embedded FS.
 //   - Template execution fails (e.g., missing key, rendering error).
 func renderAgent(roleId protocol.RoleId, figuresDir string) (string, error) {
+	return renderClaudeAgent(roleId, figuresDir)
+}
+
+func renderClaudeAgent(roleID protocol.RoleId, figuresDir string) (string, error) {
+	body, err := renderAgentBody(roleID, figuresDir, agentHarnessClaudeCode)
+	if err != nil {
+		return "", err
+	}
+	roleSpec := RoleSpecs[roleID]
+	tmpl, err := template.New("claude_agent.go.tmpl").
+		Option("missingkey=error").
+		Funcs(buildFuncMap()).
+		ParseFS(templatesFS, "templates/claude_agent.go.tmpl")
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderClaudeAgent: failed to parse templates/claude_agent.go.tmpl — check that the file exists and has valid Go template syntax: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, claudeAgentTemplateData{Role: roleSpec, Body: body}); err != nil {
+		return "", fmt.Errorf("codegen.renderClaudeAgent: template execution failed for role %q — check claude_agent.go.tmpl for undefined variables or type mismatches: %w", roleID, err)
+	}
+	return normalizeTrailingNewline(buf.String()), nil
+}
+
+func renderAgentBody(roleId protocol.RoleId, figuresDir string, harness agentHarness) (string, error) {
 	roleSpec, ok := RoleSpecs[roleId]
 	if !ok {
 		return "", fmt.Errorf(
@@ -80,15 +157,19 @@ func renderAgent(roleId protocol.RoleId, figuresDir string) (string, error) {
 			roleId,
 		)
 	}
+	renderContext, ok := agentRenderContexts[harness]
+	if !ok {
+		return "", fmt.Errorf("codegen.renderAgentBody: harness %q has no render context — define its typed instruction-source guidance before rendering role %q", harness, roleId)
+	}
 
 	// Parse the embedded template, reusing the shared FuncMap from skills.go.
-	tmpl, err := template.New("agent_definition.go.tmpl").
+	tmpl, err := template.New("agent_body.go.tmpl").
 		Option("missingkey=error").
 		Funcs(buildFuncMap()).
-		ParseFS(templatesFS, "templates/agent_definition.go.tmpl")
+		ParseFS(templatesFS, "templates/agent_body.go.tmpl")
 	if err != nil {
 		return "", fmt.Errorf(
-			"codegen.renderAgent: failed to parse template templates/agent_definition.go.tmpl — "+
+			"codegen.renderAgentBody: failed to parse template templates/agent_body.go.tmpl — "+
 				"check that the file exists in the embedded FS and has valid Go template syntax: %w",
 			err,
 		)
@@ -104,31 +185,92 @@ func renderAgent(roleId protocol.RoleId, figuresDir string) (string, error) {
 	}
 
 	data := agentTemplateData{
-		Role:         roleSpec,
-		PhasesDetail: ownedPhaseDetails(roleSpec),
-		PhaseSlug:    buildPhaseSlug(),
-		Constraints:  roleCtx.Constraints,
-		Behaviors:    roleSpec.Behaviors,
-		Checklists:   roleCtx.Checklists,
-		Workflows:    roleCtx.Workflows,
-		Figures:      figures,
+		Role:          roleSpec,
+		PhasesDetail:  ownedPhaseDetails(roleSpec),
+		PhaseSlug:     buildPhaseSlug(),
+		Constraints:   roleCtx.Constraints,
+		Behaviors:     roleSpec.Behaviors,
+		Checklists:    roleCtx.Checklists,
+		Workflows:     roleCtx.Workflows,
+		Figures:       figures,
+		RenderContext: renderContext,
 	}
+	data = projectAgentTemplateData(data)
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf(
-			"codegen.renderAgent: template execution failed for role %q — "+
-				"check agent_definition.go.tmpl for undefined variables or type mismatches: %w",
+			"codegen.renderAgentBody: template execution failed for role %q — "+
+				"check agent_body.go.tmpl for undefined variables or type mismatches: %w",
 			roleId, err,
 		)
 	}
 
-	content := buf.String()
-	// Ensure content always ends with a single newline (mirrors Python behaviour).
-	if !strings.HasSuffix(content, "\n") {
-		content += "\n"
+	return normalizeTrailingNewline(buf.String()), nil
+}
+
+func projectAgentTemplateData(data agentTemplateData) agentTemplateData {
+	ctx := data.RenderContext
+	data.Constraints = append([]ConstraintContext(nil), data.Constraints...)
+	for index := range data.Constraints {
+		switch data.Constraints[index].Id {
+		case "C-handoff-skill-invocation":
+			if ctx.RoleSkillInvocation != "" {
+				data.Constraints[index].Then = ctx.RoleSkillInvocation
+			}
+		case "C-supervisor-explore-ephemeral":
+			if ctx.ExploreDelegation != "" {
+				data.Constraints[index].Then = ctx.ExploreDelegation
+			}
+		}
 	}
-	return content, nil
+
+	data.Behaviors = append([]BehaviorSpec(nil), data.Behaviors...)
+	for index := range data.Behaviors {
+		switch data.Behaviors[index].Id {
+		case "B-sup-model-trivial":
+			if ctx.TrivialWorkerSelection != "" {
+				data.Behaviors[index].Then = ctx.TrivialWorkerSelection
+				data.Behaviors[index].ShouldNot = ctx.TrivialWorkerAvoid
+			}
+		case "B-sup-model-nontrivial":
+			if ctx.NontrivialWorkerSelection != "" {
+				data.Behaviors[index].Then = ctx.NontrivialWorkerSelection
+				data.Behaviors[index].ShouldNot = ctx.NontrivialWorkerAvoid
+			}
+		}
+	}
+
+	data.Workflows = append([]Workflow(nil), data.Workflows...)
+	for workflowIndex := range data.Workflows {
+		data.Workflows[workflowIndex].Stages = append([]WorkflowStage(nil), data.Workflows[workflowIndex].Stages...)
+		for stageIndex := range data.Workflows[workflowIndex].Stages {
+			stage := &data.Workflows[workflowIndex].Stages[stageIndex]
+			stage.Actions = append([]WorkflowAction(nil), stage.Actions...)
+			for actionIndex := range stage.Actions {
+				action := &stage.Actions[actionIndex]
+				switch action.Id {
+				case "rtw-plan-explore":
+					if ctx.WorkflowExplore != "" {
+						action.Instruction = ctx.WorkflowExplore
+					}
+				case "rtw-build-spawn":
+					if ctx.WorkflowWorker != "" {
+						action.Instruction = ctx.WorkflowWorker
+					}
+				case "rtw-review-spawn":
+					if ctx.WorkflowReviewer != "" {
+						action.Instruction = ctx.WorkflowReviewer
+					}
+				}
+			}
+		}
+	}
+	return data
+}
+
+func normalizeTrailingNewline(content string) string {
+	return strings.TrimRight(content, "\n") + "\n"
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────

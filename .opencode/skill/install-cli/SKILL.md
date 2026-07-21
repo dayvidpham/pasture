@@ -5,11 +5,11 @@ description: Install Pasture binaries (pastured, pasture, pasture-release) from 
 
 # /pasture:install-cli
 
-Claude Code skill for automated Pasture binary installation.
+OpenCode skill for automated Pasture binary installation.
 
 ## Usage
 
-Invoke via Claude Code:
+Invoke via OpenCode:
 ```
 /pasture:install-cli
 ```

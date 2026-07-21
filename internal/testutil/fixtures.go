@@ -49,6 +49,9 @@ const (
 	// CodegenAgents is used by S6 codegen tests (agent definition generation scenarios).
 	CodegenAgents FixtureName = "agents"
 
+	// CodegenOpenCodeAgentVariants drives typed provider-variant emitter cases.
+	CodegenOpenCodeAgentVariants FixtureName = "opencode_agent_variants"
+
 	// CodegenSkills is used by S4 codegen tests (SKILL.md generation scenarios).
 	CodegenSkills FixtureName = "skills"
 

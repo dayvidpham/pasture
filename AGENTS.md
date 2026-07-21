@@ -482,9 +482,10 @@ rewrite repository files. The canonical command emits both supported harnesses:
   agent under `agents/`.
 - OpenCode: the corresponding generated skills under `.opencode/skill/`, role
   agents under `.opencode/agent/`, plus `opencode.json`.
-- The hand-authored `protocol` and `install-cli` skills are copied verbatim into
-  the OpenCode target and are intentionally outside the generated-skill
-  registry.
+- The hand-authored `protocol` skill is copied verbatim into the OpenCode target
+  and remains outside the generated-skill registry. The canonical `install-cli`
+  body is rendered through typed target contexts so harness identity and
+  invocation guidance cannot leak between outputs.
 
 The source inventory is deliberately static and explicit:
 

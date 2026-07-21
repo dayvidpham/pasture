@@ -9,7 +9,7 @@
 //   - skills/{skill}/SKILL.md: Claude Code skills
 //   - agents/{role}.md: Claude Code agent definitions
 //   - .opencode/skill/{skill}/SKILL.md: OpenCode skills
-//   - .opencode/agent/{role}.md: OpenCode agent definitions
+//   - .opencode/agent/{role}[--{variant}].md: OpenCode agent definitions
 //   - opencode.json: OpenCode manifest
 //
 //go:generate go run ../../tools/codegen --targets claude-code,opencode

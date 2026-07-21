@@ -1,0 +1,68 @@
+valid_variants:
+  - provider: acme
+    model: model-2.1
+    slug: balanced
+  - provider: example-ai
+    model: model_fast
+    slug: fast
+
+cross_provider_same_slug:
+  - provider: acme
+    model: model-fast
+    slug: fast
+  - provider: example-ai
+    model: model_fast
+    slug: fast
+
+invalid_cases:
+  - name: duplicate-provider-slug
+    variants:
+      - provider: acme
+        model: model-a
+        slug: shared
+      - provider: acme
+        model: model-b
+        slug: shared
+    want_error: repeats provider and slug key
+  - name: duplicate-filename
+    variants:
+      - provider: acme
+        model: model-a
+        slug: shared
+      - provider: acme
+        model: model-b
+        slug: shared
+    want_error: conflicts on generated filename
+  - name: duplicate-model
+    variants:
+      - provider: acme
+        model: model-a
+        slug: first
+      - provider: acme
+        model: model-a
+        slug: second
+    want_error: repeats qualified model ID
+  - name: invalid-provider
+    variants:
+      - provider: ../acme
+        model: model-a
+        slug: safe
+    want_error: invalid provider ID
+  - name: invalid-model
+    variants:
+      - provider: acme
+        model: ../model-a
+        slug: safe
+    want_error: invalid model ID
+  - name: unsafe-filename
+    variants:
+      - provider: acme
+        model: model-a
+        slug: ../escape
+    want_error: unsafe or reserved filename slug
+  - name: reserved-default
+    variants:
+      - provider: acme
+        model: model-a
+        slug: default
+    want_error: unsafe or reserved filename slug

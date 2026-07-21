@@ -59,6 +59,7 @@ type skillContext struct {
 	PhaseSlug            map[protocol.PhaseId]string
 	SubSkills            []string
 	Introduction         string
+	InstructionSources   string
 	OwnershipNarrative   string
 	Behaviors            []BehaviorSpec
 	Checklists           []Checklist
@@ -72,6 +73,16 @@ type skillContext struct {
 	BodySections  []ProseSection
 	BodyRecipes   []RecipeBlock
 	BodyBehaviors []BehaviorSpec
+}
+
+// roleSkillInstructionSources is the canonical skill-only source guidance.
+// Agent definitions use their typed harness render contexts instead, keeping
+// RoleSpec.Introduction free of harness identity and filesystem paths.
+var roleSkillInstructionSources = map[protocol.RoleId]string{
+	protocol.RoleArchitect:  "See the project's AGENTS.md and active harness instructions for coding standards and constraints.",
+	protocol.RoleReviewer:   "See the project's protocol/CONSTRAINTS.md for coding standards.",
+	protocol.RoleSupervisor: "See the project's AGENTS.md and active harness instructions for coding standards and constraints.",
+	protocol.RoleWorker:     "See the project's AGENTS.md and active harness instructions for coding standards and constraints.",
 }
 
 // skillSubContext is the unified data passed to skill_sub.go.tmpl.
@@ -463,6 +474,7 @@ func renderSkill(roleId protocol.RoleId, figuresDir string, tmplName string) (st
 		PhaseSlug:            phaseSlug,
 		SubSkills:            subSkills,
 		Introduction:         roleSpec.Introduction,
+		InstructionSources:   roleSkillInstructionSources[roleId],
 		OwnershipNarrative:   roleSpec.OwnershipNarrative,
 		Behaviors:            roleSpec.Behaviors,
 		Checklists:           roleCtx.Checklists,

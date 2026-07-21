@@ -409,6 +409,27 @@ func TestGeneratedOutputInventory(t *testing.T) {
 		}
 	}
 
+	for _, skillID := range ClaudeCodeTarget.CanonicalSkills {
+		path := filepath.ToSlash(filepath.Join("skills", string(skillID), "SKILL.md"))
+		owner := "ClaudeCodeTarget.CanonicalSkills[" + string(skillID) + "]"
+		addExpectedOutput(t, expectedClaudeSkills, path, owner)
+		addExpectedOutput(t, expectedClaudeHarness, path, owner)
+	}
+	for _, skillID := range OpenCodeTarget.CanonicalSkills {
+		path := filepath.ToSlash(filepath.Join(".opencode", "skill", string(skillID), "SKILL.md"))
+		owner := "OpenCodeTarget.CanonicalSkills[" + string(skillID) + "]"
+		addExpectedOutput(t, expectedOpenCodeSkills, path, owner)
+		addExpectedOutput(t, expectedOpenCodeHarness, path, owner)
+	}
+
+	openCodeAgentTarget, ok := OpenCodeTarget.Agents.(openCodeAgentEmitter)
+	if !ok {
+		t.Fatalf("OpenCode target agent emitter has type %T, want openCodeAgentEmitter", OpenCodeTarget.Agents)
+	}
+	openCodeVariants, err := validateOpenCodeProviderVariants(openCodeAgentTarget.Variants)
+	if err != nil {
+		t.Fatalf("OpenCode target variants are invalid: %v", err)
+	}
 	for _, roleID := range protocol.AllRoleIds {
 		spec := RoleSpecs[roleID]
 		if len(spec.Tools) == 0 {
@@ -417,10 +438,19 @@ func TestGeneratedOutputInventory(t *testing.T) {
 		owner := "RoleSpecs[" + string(roleID) + "].Tools"
 		claudePath := filepath.ToSlash(filepath.Join("agents", string(roleID)+".md"))
 		openCodePath := filepath.ToSlash(filepath.Join(".opencode", "agent", string(roleID)+".md"))
+		openCodeDefaultPath := filepath.ToSlash(filepath.Join(".opencode", "agent", string(roleID)+"--default.md"))
 		addExpectedOutput(t, expectedClaudeAgents, claudePath, owner)
 		addExpectedOutput(t, expectedOpenCodeAgents, openCodePath, owner)
+		addExpectedOutput(t, expectedOpenCodeAgents, openCodeDefaultPath, owner+" default variant")
 		addExpectedOutput(t, expectedClaudeHarness, claudePath, owner)
 		addExpectedOutput(t, expectedOpenCodeHarness, openCodePath, owner)
+		addExpectedOutput(t, expectedOpenCodeHarness, openCodeDefaultPath, owner+" default variant")
+		for _, variant := range openCodeVariants {
+			variantPath := filepath.ToSlash(filepath.Join(".opencode", "agent", variant.filename(roleID)))
+			variantOwner := owner + " " + variant.qualifiedModel() + " variant"
+			addExpectedOutput(t, expectedOpenCodeAgents, variantPath, variantOwner)
+			addExpectedOutput(t, expectedOpenCodeHarness, variantPath, variantOwner)
+		}
 	}
 
 	addExpectedOutput(t, expectedOpenCodeHarness, "opencode.json", "OpenCodeTarget.Manifest")

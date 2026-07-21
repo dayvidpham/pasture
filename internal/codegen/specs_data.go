@@ -466,7 +466,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		Given: "user interview (Request, URE, or UAT), URD update, or mid-implementation design decision",
 		When:  "recording in Beads",
 		Then: "capture full question text, ALL option descriptions, AND user's verbatim response, " +
-			"INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, " +
+			"INCLUDING any code, snippets, or examples shown inside interactive question option labels, descriptions, " +
 			"or definition blocks (the preview/stimulus the user actually saw); " +
 			"the URD is the living document of ALL user requests, URE, UAT, and mid-implementation " +
 			"design decisions and feedback — update it via bd comments add whenever user intent is captured",
@@ -614,8 +614,7 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 			protocol.PhaseReview, protocol.PhasePlanReview, protocol.PhaseRatify,
 			protocol.PhaseHandoff,
 		},
-		Introduction: "You design specifications and coordinate the planning phases of epochs. " +
-			"See the project's AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.",
+		Introduction: "You design specifications and coordinate the planning phases of epochs.",
 		OwnershipNarrative: "You own Phases 1-7 of the epoch: " +
 			"capture and classify user request (p1), " +
 			"run requirements elicitation URE survey (p2), " +
@@ -671,8 +670,7 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		OwnedPhases: []protocol.PhaseId{
 			protocol.PhaseReview, protocol.PhaseCodeReview,
 		},
-		Introduction: "You review from an end-user alignment perspective. " +
-			"See the project's protocol/CONSTRAINTS.md for coding standards.",
+		Introduction: "You review from an end-user alignment perspective.",
 		OwnershipNarrative: "You participate in two phases: " +
 			"Phase 4 (plan review) — evaluate PROPOSAL-N against one axis using binary ACCEPT/REVISE, " +
 			"NO severity tree; " +
@@ -720,8 +718,7 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 			protocol.PhaseHandoff, protocol.PhaseImplPlan, protocol.PhaseWorkerSlices,
 			protocol.PhaseCodeReview, protocol.PhaseImplUAT, protocol.PhaseLanding,
 		},
-		Introduction: "You coordinate parallel task execution. " +
-			"See the project's AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.",
+		Introduction: "You coordinate parallel task execution.",
 		OwnershipNarrative: "You own Phases 7-12 of the epoch: " +
 			"receive handoff from architect (p7), " +
 			"create vertical slice decomposition IMPL_PLAN (p8), " +
@@ -773,8 +770,7 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "Edit", "Write", "SendMessage"},
 		OwnedPhases: []protocol.PhaseId{protocol.PhaseWorkerSlices},
 		Introduction: "You own a vertical slice (full production code path from CLI/API entry point " +
-			"→ service → types). " +
-			"See the project's AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.",
+			"→ service → types).",
 		OwnershipNarrative: "NOT: A single file or horizontal layer (e.g., 'all types' or 'all tests'). " +
 			"YES: A full vertical slice (complete production code path end-to-end). " +
 			"You own the FEATURE end-to-end, not a layer or file. " +

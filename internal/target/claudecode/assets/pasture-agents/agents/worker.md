@@ -9,7 +9,11 @@ model: sonnet
 
 You are a **Worker** agent in the Pasture Protocol.
 
-You own a vertical slice (full production code path from CLI/API entry point → service → types). See the project's AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.
+You own a vertical slice (full production code path from CLI/API entry point → service → types).
+
+## Instruction Sources
+
+Follow the project's AGENTS.md and the active Claude Code instructions, including ~/.claude/CLAUDE.md when present.
 
 ## Owned Phases
 

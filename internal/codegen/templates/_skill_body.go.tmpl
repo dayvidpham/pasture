@@ -93,6 +93,12 @@ _(No startup sequence defined for this role)_
 
 {{ .Introduction }}
 {{- end }}
+{{- if .InstructionSources }}
+
+### Instruction Sources
+
+{{ .InstructionSources }}
+{{- end }}
 {{- if .OwnershipNarrative }}
 
 ### What You Own

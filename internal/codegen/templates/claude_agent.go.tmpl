@@ -1,0 +1,11 @@
+---
+name: {{ .Role.Id }}
+description: {{ .Role.Description }}
+tools: {{ join .Role.Tools ", " }}
+model: {{ .Role.Model }}
+{{- if .Role.Thinking }}
+thinking: {{ .Role.Thinking }}
+{{- end }}
+---
+
+{{ .Body }}
