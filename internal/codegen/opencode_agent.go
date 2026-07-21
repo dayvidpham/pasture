@@ -1,7 +1,8 @@
 // Package codegen — OpenCode agent definition generation.
 //
-// The OpenCode harness discovers agents from `.opencode/agent/<role>.md`
-// (one file per role that has tools). Each file carries OpenCode-flavoured
+// The OpenCode harness discovers agents from `.opencode/agent/*.md`.
+// Each tool-bearing role keeps its legacy file and receives selectable default
+// and provider-variant files. Every file carries OpenCode-flavoured
 // YAML frontmatter (description / mode / model / permission) followed by the
 // SAME agent body the Claude Code harness emits.
 //
@@ -16,6 +17,7 @@ import (
 	"bytes"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"text/template"
@@ -88,13 +90,52 @@ type openCodeAgentTemplateData struct {
 	Body        string
 }
 
+// OpenCodeProviderID identifies one OpenCode model provider.
+type OpenCodeProviderID string
+
+// OpenCodeModelID identifies a model within an OpenCode provider catalog.
+type OpenCodeModelID string
+
+// OpenCodeVariantSlug is the filename-safe selectable name of a model variant.
+type OpenCodeVariantSlug string
+
+// OpenCodeProviderVariant is the extension record provider catalogs contribute.
+// The emitter derives both model and filename fields so catalogs cannot replace
+// core frontmatter, least-privilege permissions, or the shared agent body.
+type OpenCodeProviderVariant struct {
+	Provider OpenCodeProviderID
+	Model    OpenCodeModelID
+	Slug     OpenCodeVariantSlug
+}
+
+var (
+	openCodeProviderPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+	openCodeModelPattern    = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$`)
+	openCodeSlugPattern     = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+)
+
+func (v OpenCodeProviderVariant) qualifiedModel() string {
+	return string(v.Provider) + "/" + string(v.Model)
+}
+
+func (v OpenCodeProviderVariant) filename(roleID protocol.RoleId) string {
+	return fmt.Sprintf("%s--%s--%s.md", roleID, v.Provider, v.Slug)
+}
+
 // ─── Emitter ───────────────────────────────────────────────────────────────────
 
-type openCodeAgentEmitter struct{}
+type openCodeAgentEmitter struct {
+	Variants []OpenCodeProviderVariant
+}
 
-// Emit renders .opencode/agent/<role>.md for every role that has tools (the
-// same role set the Claude Code agent emitter covers).
-func (openCodeAgentEmitter) Emit(root string, figuresDir string, opts GenerateOptions) ([]GeneratedFile, error) {
+// Emit renders legacy and selectable .opencode/agent definitions for every
+// role that has tools (the same role set the Claude Code emitter covers).
+func (e openCodeAgentEmitter) Emit(root string, figuresDir string, opts GenerateOptions) ([]GeneratedFile, error) {
+	variants, err := validateOpenCodeProviderVariants(e.Variants)
+	if err != nil {
+		return nil, fmt.Errorf("codegen.openCodeAgentEmitter.Emit: provider variant validation failed before generation: %w", err)
+	}
+
 	var out []GeneratedFile
 	for roleID, roleSpec := range RoleSpecs {
 		if len(roleSpec.Tools) == 0 {
@@ -116,11 +157,105 @@ func (openCodeAgentEmitter) Emit(root string, figuresDir string, opts GenerateOp
 			)
 		}
 		out = append(out, generated)
+
+		defaultContent, err := renderOpenCodeAgentWithModel(roleID, figuresDir, "")
+		if err != nil {
+			return nil, fmt.Errorf(
+				"codegen.openCodeAgentEmitter.Emit: render default OpenCode agent for role %q failed: %w",
+				roleID, err,
+			)
+		}
+		defaultPath := filepath.Join(root, ".opencode", "agent", fmt.Sprintf("%s--default.md", roleID))
+		defaultGenerated, err := writeFullGeneratedFile(defaultPath, defaultContent, opts)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"codegen.openCodeAgentEmitter.Emit: write default OpenCode agent for role %q to %q failed: %w",
+				roleID, defaultPath, err,
+			)
+		}
+		out = append(out, defaultGenerated)
+
+		for _, variant := range variants {
+			variantContent, err := renderOpenCodeAgentWithModel(roleID, figuresDir, variant.qualifiedModel())
+			if err != nil {
+				return nil, fmt.Errorf(
+					"codegen.openCodeAgentEmitter.Emit: render OpenCode agent variant %q for role %q failed: %w",
+					variant.Slug, roleID, err,
+				)
+			}
+			variantPath := filepath.Join(root, ".opencode", "agent", variant.filename(roleID))
+			variantGenerated, err := writeFullGeneratedFile(variantPath, variantContent, opts)
+			if err != nil {
+				return nil, fmt.Errorf(
+					"codegen.openCodeAgentEmitter.Emit: write OpenCode agent variant %q for role %q to %q failed: %w",
+					variant.Slug, roleID, variantPath, err,
+				)
+			}
+			out = append(out, variantGenerated)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].Path < out[j].Path
 	})
 	return out, nil
+}
+
+func validateOpenCodeProviderVariants(variants []OpenCodeProviderVariant) ([]OpenCodeProviderVariant, error) {
+	validated := append([]OpenCodeProviderVariant(nil), variants...)
+	slugs := make(map[OpenCodeVariantSlug]struct{}, len(validated))
+	models := make(map[string]struct{}, len(validated))
+	filenames := make(map[string]struct{}, len(validated))
+
+	for index, variant := range validated {
+		provider := string(variant.Provider)
+		model := string(variant.Model)
+		slug := string(variant.Slug)
+		if !openCodeProviderPattern.MatchString(provider) || provider == "default" {
+			return nil, fmt.Errorf(
+				"variant %d has invalid provider ID %q; provider IDs must be lowercase ASCII letters, digits, or single hyphens and cannot be %q — fix the provider catalog entry",
+				index, provider, "default",
+			)
+		}
+		if !openCodeModelPattern.MatchString(model) || strings.Contains(model, "..") {
+			return nil, fmt.Errorf(
+				"variant %d for provider %q has invalid model ID %q; model IDs must be one safe path segment using lowercase ASCII letters, digits, dots, underscores, or hyphens — fix the provider catalog entry",
+				index, provider, model,
+			)
+		}
+		if !openCodeSlugPattern.MatchString(slug) || slug == "default" {
+			return nil, fmt.Errorf(
+				"variant %d for provider %q has unsafe or reserved filename slug %q; slugs must be lowercase ASCII kebab-case and cannot be %q — choose a unique safe slug",
+				index, provider, slug, "default",
+			)
+		}
+		if _, exists := slugs[variant.Slug]; exists {
+			return nil, fmt.Errorf("variant %d repeats slug %q; duplicate slugs would make selection ambiguous — assign every provider variant a unique slug", index, slug)
+		}
+		slugs[variant.Slug] = struct{}{}
+
+		qualifiedModel := variant.qualifiedModel()
+		if _, exists := models[qualifiedModel]; exists {
+			return nil, fmt.Errorf("variant %d repeats qualified model ID %q; conflicting aliases would emit redundant agent definitions — keep one variant per provider model", index, qualifiedModel)
+		}
+		models[qualifiedModel] = struct{}{}
+
+		filename := variant.filename(protocol.RoleWorker)
+		if filepath.Base(filename) != filename || strings.Contains(filename, string(filepath.Separator)) {
+			return nil, fmt.Errorf("variant %d derives unsafe filename %q; generation must remain inside .opencode/agent — use safe provider and slug IDs", index, filename)
+		}
+		if _, exists := filenames[filename]; exists {
+			return nil, fmt.Errorf("variant %d conflicts on generated filename %q; choose a distinct provider and slug", index, filename)
+		}
+		filenames[filename] = struct{}{}
+	}
+
+	sort.Slice(validated, func(i, j int) bool {
+		if validated[i].Provider != validated[j].Provider {
+			return validated[i].Provider < validated[j].Provider
+		}
+		return validated[i].Slug < validated[j].Slug
+	})
+	return validated, nil
 }
 
 // renderOpenCodeAgent builds the full .opencode/agent/<role>.md content: it
@@ -137,15 +272,6 @@ func renderOpenCodeAgent(roleID protocol.RoleId, figuresDir string) (string, err
 		)
 	}
 
-	mode, ok := openCodeMode[roleID]
-	if !ok {
-		return "", fmt.Errorf(
-			"codegen.renderOpenCodeAgent: role %q has no OpenCode mode mapping — "+
-				"add an entry to openCodeMode in internal/codegen/opencode_agent.go",
-			roleID,
-		)
-	}
-
 	model, ok := openCodeModel[roleSpec.Model]
 	if !ok {
 		return "", fmt.Errorf(
@@ -153,6 +279,26 @@ func renderOpenCodeAgent(roleID protocol.RoleId, figuresDir string) (string, err
 				"mapping — add it to openCodeModel in internal/codegen/opencode_agent.go and to "+
 				"the testdata/opencode_models.json snapshot",
 			roleID, roleSpec.Model,
+		)
+	}
+	return renderOpenCodeAgentWithModel(roleID, figuresDir, model)
+}
+
+// renderOpenCodeAgentWithModel renders one selectable definition. An empty
+// model omits the frontmatter key so OpenCode inherits the configured model.
+func renderOpenCodeAgentWithModel(roleID protocol.RoleId, figuresDir string, model string) (string, error) {
+	roleSpec, ok := RoleSpecs[roleID]
+	if !ok {
+		return "", fmt.Errorf(
+			"codegen.renderOpenCodeAgentWithModel: role %q not found in RoleSpecs — verify the role ID is defined in specs_data.go",
+			roleID,
+		)
+	}
+	mode, ok := openCodeMode[roleID]
+	if !ok {
+		return "", fmt.Errorf(
+			"codegen.renderOpenCodeAgentWithModel: role %q has no OpenCode mode mapping — add an entry to openCodeMode in internal/codegen/opencode_agent.go",
+			roleID,
 		)
 	}
 

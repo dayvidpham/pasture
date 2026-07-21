@@ -1,10 +1,13 @@
 package codegen
 
 import (
+	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	"gopkg.in/yaml.v3"
 )
@@ -41,9 +44,51 @@ func emitOpenCodeAgents(t *testing.T) map[protocol.RoleId]GeneratedFile {
 			t.Fatalf("emitted agent file outside %q: %q", agentRoot, f.Path)
 		}
 		name := strings.TrimSuffix(rel, ".md")
+		if strings.Contains(name, "--") {
+			continue
+		}
 		byRole[protocol.RoleId(name)] = f
 	}
 	return byRole
+}
+
+type openCodeVariantFixture struct {
+	Provider OpenCodeProviderID  `yaml:"provider"`
+	Model    OpenCodeModelID     `yaml:"model"`
+	Slug     OpenCodeVariantSlug `yaml:"slug"`
+}
+
+func (f openCodeVariantFixture) variant() OpenCodeProviderVariant {
+	return OpenCodeProviderVariant{Provider: f.Provider, Model: f.Model, Slug: f.Slug}
+}
+
+type openCodeVariantInvalidCase struct {
+	Name      string                   `yaml:"name"`
+	Variants  []openCodeVariantFixture `yaml:"variants"`
+	WantError string                   `yaml:"want_error"`
+}
+
+type openCodeVariantSuite struct {
+	ValidVariants []openCodeVariantFixture     `yaml:"valid_variants"`
+	InvalidCases  []openCodeVariantInvalidCase `yaml:"invalid_cases"`
+}
+
+func loadOpenCodeVariantSuite(t *testing.T) openCodeVariantSuite {
+	t.Helper()
+	var suite openCodeVariantSuite
+	testutil.LoadFixtures(t, testutil.CodegenOpenCodeAgentVariants, &suite)
+	return suite
+}
+
+func emitOpenCodeAgentFiles(t *testing.T, variants []OpenCodeProviderVariant) []GeneratedFile {
+	t.Helper()
+	root := testModuleRoot(t)
+	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
+	files, err := (openCodeAgentEmitter{Variants: variants}).Emit(t.TempDir(), figuresDir, GenerateOptions{})
+	if err != nil {
+		t.Fatalf("openCodeAgentEmitter.Emit: %v", err)
+	}
+	return files
 }
 
 // decodeOpenCodeAgent splits the frontmatter from the body and decodes it. It
@@ -88,6 +133,129 @@ func TestOpenCodeAgentsEmitForToolRoles(t *testing.T) {
 		if _, ok := byRole[roleID]; !ok {
 			t.Errorf("missing OpenCode agent for tool-bearing role %q", roleID)
 		}
+	}
+}
+
+func TestOpenCodeAgentsEmitLegacyAndUnpinnedDefaults(t *testing.T) {
+	t.Parallel()
+
+	files := emitOpenCodeAgentFiles(t, nil)
+	byName := make(map[string]GeneratedFile, len(files))
+	for _, file := range files {
+		byName[filepath.Base(file.Path)] = file
+	}
+
+	toolRoleCount := 0
+	for roleID, spec := range RoleSpecs {
+		if len(spec.Tools) == 0 {
+			continue
+		}
+		toolRoleCount++
+		legacy, legacyOK := byName[string(roleID)+".md"]
+		defaultFile, defaultOK := byName[string(roleID)+"--default.md"]
+		if !legacyOK || !defaultOK {
+			t.Errorf("role %q outputs: legacy=%t default=%t", roleID, legacyOK, defaultOK)
+			continue
+		}
+
+		legacyFrontmatter, legacyBody := decodeOpenCodeAgent(t, legacy)
+		defaultFrontmatter, defaultBody := decodeOpenCodeAgent(t, defaultFile)
+		if defaultFrontmatter.Model != "" {
+			t.Errorf("%s default model = %q, want omitted", roleID, defaultFrontmatter.Model)
+		}
+		if strings.Contains(strings.Split(defaultFile.Content, "---\n")[1], "model:") {
+			t.Errorf("%s default frontmatter contains a model key", roleID)
+		}
+		if defaultFrontmatter.Mode != legacyFrontmatter.Mode || defaultFrontmatter.Description != legacyFrontmatter.Description {
+			t.Errorf("%s default changed mode/description from legacy", roleID)
+		}
+		if !reflect.DeepEqual(defaultFrontmatter.Permission, legacyFrontmatter.Permission) {
+			t.Errorf("%s default permissions differ from legacy: default=%v legacy=%v", roleID, defaultFrontmatter.Permission, legacyFrontmatter.Permission)
+		}
+		if defaultBody != legacyBody {
+			t.Errorf("%s default body differs from reused legacy body", roleID)
+		}
+	}
+	if len(files) != toolRoleCount*2 {
+		t.Errorf("emitted %d files, want %d legacy plus default files", len(files), toolRoleCount*2)
+	}
+}
+
+func TestOpenCodeProviderVariantExtensionIsDeterministic(t *testing.T) {
+	t.Parallel()
+
+	suite := loadOpenCodeVariantSuite(t)
+	variants := make([]OpenCodeProviderVariant, 0, len(suite.ValidVariants))
+	for index := len(suite.ValidVariants) - 1; index >= 0; index-- {
+		variants = append(variants, suite.ValidVariants[index].variant())
+	}
+	files := emitOpenCodeAgentFiles(t, variants)
+
+	var workerNames []string
+	for _, file := range files {
+		name := filepath.Base(file.Path)
+		if strings.HasPrefix(name, "worker--") {
+			workerNames = append(workerNames, name)
+		}
+	}
+	wantNames := []string{
+		"worker--acme--balanced.md",
+		"worker--default.md",
+		"worker--example-ai--fast.md",
+	}
+	if !reflect.DeepEqual(workerNames, wantNames) {
+		t.Fatalf("worker variant order = %v, want %v", workerNames, wantNames)
+	}
+
+	for _, file := range files {
+		if filepath.Base(file.Path) != "worker--acme--balanced.md" {
+			continue
+		}
+		frontmatter, body := decodeOpenCodeAgent(t, file)
+		if frontmatter.Model != "acme/model-2.1" {
+			t.Errorf("extension model = %q, want acme/model-2.1", frontmatter.Model)
+		}
+		legacy, err := renderOpenCodeAgent(protocol.RoleWorker, filepath.Join(testModuleRoot(t), "skills", "protocol", "figures"))
+		if err != nil {
+			t.Fatalf("render legacy worker: %v", err)
+		}
+		_, legacyBody := splitFrontmatter(t, "worker.md", legacy)
+		if body != legacyBody {
+			t.Errorf("provider extension changed the shared worker body")
+		}
+		return
+	}
+	t.Fatal("worker--acme--balanced.md was not emitted")
+}
+
+func TestOpenCodeProviderVariantValidationRejectsFixtureCasesBeforeWrite(t *testing.T) {
+	t.Parallel()
+
+	suite := loadOpenCodeVariantSuite(t)
+	for _, testCase := range suite.InvalidCases {
+		testCase := testCase
+		t.Run(testCase.Name, func(t *testing.T) {
+			t.Parallel()
+			variants := make([]OpenCodeProviderVariant, 0, len(testCase.Variants))
+			for _, fixture := range testCase.Variants {
+				variants = append(variants, fixture.variant())
+			}
+			out := t.TempDir()
+			files, err := (openCodeAgentEmitter{Variants: variants}).Emit(out, "", GenerateOptions{Write: true})
+			if err == nil || !strings.Contains(err.Error(), testCase.WantError) {
+				t.Fatalf("Emit error = %v, want error containing %q", err, testCase.WantError)
+			}
+			if files != nil {
+				t.Errorf("Emit returned files after validation failure: %v", files)
+			}
+			entries, readErr := os.ReadDir(out)
+			if readErr != nil {
+				t.Fatalf("read output directory: %v", readErr)
+			}
+			if len(entries) != 0 {
+				t.Errorf("validation failure wrote output entries: %v", entries)
+			}
+		})
 	}
 }
 

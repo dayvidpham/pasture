@@ -417,10 +417,13 @@ func TestGeneratedOutputInventory(t *testing.T) {
 		owner := "RoleSpecs[" + string(roleID) + "].Tools"
 		claudePath := filepath.ToSlash(filepath.Join("agents", string(roleID)+".md"))
 		openCodePath := filepath.ToSlash(filepath.Join(".opencode", "agent", string(roleID)+".md"))
+		openCodeDefaultPath := filepath.ToSlash(filepath.Join(".opencode", "agent", string(roleID)+"--default.md"))
 		addExpectedOutput(t, expectedClaudeAgents, claudePath, owner)
 		addExpectedOutput(t, expectedOpenCodeAgents, openCodePath, owner)
+		addExpectedOutput(t, expectedOpenCodeAgents, openCodeDefaultPath, owner+" default variant")
 		addExpectedOutput(t, expectedClaudeHarness, claudePath, owner)
 		addExpectedOutput(t, expectedOpenCodeHarness, openCodePath, owner)
+		addExpectedOutput(t, expectedOpenCodeHarness, openCodeDefaultPath, owner+" default variant")
 	}
 
 	addExpectedOutput(t, expectedOpenCodeHarness, "opencode.json", "OpenCodeTarget.Manifest")

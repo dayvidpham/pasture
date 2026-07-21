@@ -106,6 +106,11 @@ func TestFixtureNameConstants(t *testing.T) {
 		ValidateBeforeOpen,
 		RunAgentSession,
 		ConfigLoading,
+		CodegenMarkers,
+		CodegenContext,
+		CodegenAgents,
+		CodegenOpenCodeAgentVariants,
+		CodegenSkills,
 		CodegenSchema,
 	}
 
