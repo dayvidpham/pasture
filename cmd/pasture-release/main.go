@@ -87,6 +87,7 @@ Examples:
 		newBumpCmd("major"),
 		newCheckCmd(),
 		newRegistryCmd(),
+		newPromoteStableCmd(),
 	)
 	return root
 }

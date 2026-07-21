@@ -1,0 +1,33 @@
+- name: valid canonical catalog
+  mutation: valid
+  want_error: false
+- name: duplicate plugin identity
+  mutation: duplicate
+  want_error: true
+- name: wrong catalog identity
+  mutation: wrong_catalog
+  want_error: true
+- name: padded plugin identity
+  mutation: padded_name
+  want_error: true
+- name: wrong component subdirectory
+  mutation: wrong_path
+  want_error: true
+- name: wrong canonical repository URL
+  mutation: wrong_url
+  want_error: true
+- name: duplicate split plugin source path
+  mutation: duplicate_source_path
+  want_error: true
+- name: moving source selector
+  mutation: moving_ref
+  want_error: true
+- name: malformed source union
+  mutation: mixed_union
+  want_error: true
+- name: unsupported source discriminator
+  mutation: unsupported_source
+  want_error: true
+- name: unknown source field
+  mutation: unknown_source_field
+  want_error: true

@@ -21,18 +21,19 @@ type CommandRunner func(dir, executable string, args ...string) (string, error)
 // executable. It carries no guarded-push policy — verify/push/re-read primitives
 // only; the verify-push-reread-then-prove algorithm lives in
 // GuardedPushExactCommit. RepositoryID names the repository working directory,
-// and remoteName is the configured git remote the RemoteRef is pushed to.
+// and remoteURL is the exact repository endpoint the RemoteRef is pushed to.
 type GitRepositoryPusher struct {
-	resolve    ExecutableResolver
-	run        CommandRunner
-	remoteName string
+	resolve   ExecutableResolver
+	run       CommandRunner
+	remoteURL string
 }
 
 // NewGitRepositoryPusher wires a git-backed pusher. resolve locates the git
 // binary (pass exec.LookPath in production); run executes it (pass
-// DefaultCommandRunner in production). remoteName is the git remote the guarded
-// push targets (for example "origin").
-func NewGitRepositoryPusher(resolve ExecutableResolver, run CommandRunner, remoteName string) (GitRepositoryPusher, error) {
+// DefaultCommandRunner in production). remoteURL is the immutable endpoint the
+// guarded push targets. Callers that enforce repository provenance must resolve
+// and verify this URL before constructing the pusher.
+func NewGitRepositoryPusher(resolve ExecutableResolver, run CommandRunner, remoteURL string) (GitRepositoryPusher, error) {
 	if resolve == nil || run == nil {
 		return GitRepositoryPusher{}, effectError(
 			"git repository pusher is missing an executable resolver or command runner",
@@ -42,16 +43,16 @@ func NewGitRepositoryPusher(resolve ExecutableResolver, run CommandRunner, remot
 			"pass a non-nil resolver (exec.LookPath) and runner (DefaultCommandRunner)", nil,
 		)
 	}
-	if strings.TrimSpace(remoteName) == "" {
+	if strings.TrimSpace(remoteURL) == "" || strings.TrimSpace(remoteURL) != remoteURL {
 		return GitRepositoryPusher{}, effectError(
-			"git remote name is empty",
-			"a guarded push targets a configured git remote",
+			"git remote URL is empty or padded",
+			"a guarded push targets one exact repository endpoint",
 			"NewGitRepositoryPusher", "git pusher wiring",
-			"the pusher has no remote to push to",
-			"supply the git remote name, such as \"origin\"", nil,
+			"the pusher has no immutable remote identity",
+			"supply the exact verified fetch/push URL", nil,
 		)
 	}
-	return GitRepositoryPusher{resolve: resolve, run: run, remoteName: remoteName}, nil
+	return GitRepositoryPusher{resolve: resolve, run: run, remoteURL: remoteURL}, nil
 }
 
 // DefaultCommandRunner runs git through os/exec, returning trimmed combined
@@ -126,13 +127,13 @@ func (p GitRepositoryPusher) PushExact(repository RepositoryID, commit CommitOID
 		lease = remoteRef.String() + ":" + oldCommit.String()
 	}
 	refspec := commit.String() + ":" + remoteRef.String()
-	_, err := p.git(repository, "push", "--force-with-lease="+lease, p.remoteName, refspec)
+	_, err := p.git(repository, "push", "--force-with-lease="+lease, p.remoteURL, refspec)
 	return err
 }
 
-// ReadRemote re-reads the current commit of remoteRef on the configured remote.
+// ReadRemote re-reads the current commit of remoteRef at the bound exact URL.
 func (p GitRepositoryPusher) ReadRemote(repository RepositoryID, remoteRef RemoteRef) (RemoteState, error) {
-	out, err := p.git(repository, "ls-remote", p.remoteName, remoteRef.String())
+	out, err := p.git(repository, "ls-remote", p.remoteURL, remoteRef.String())
 	if err != nil {
 		return RemoteState{}, err
 	}
