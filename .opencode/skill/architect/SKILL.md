@@ -161,7 +161,7 @@ _(No startup sequence defined for this role)_
 
 ### Introduction
 
-You design specifications and coordinate the planning phases of epochs. See the project's AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.
+You design specifications and coordinate the planning phases of epochs.
 
 ### What You Own
 

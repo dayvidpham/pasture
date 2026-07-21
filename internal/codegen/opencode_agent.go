@@ -4,17 +4,12 @@
 // Each tool-bearing role keeps its legacy file and receives selectable default
 // and provider-variant files. Every file carries OpenCode-flavoured
 // YAML frontmatter (description / mode / model / permission) followed by the
-// SAME agent body the Claude Code harness emits.
-//
-// Body reuse (define-once): the agent body is NOT re-authored here. We call
-// renderAgent (the single source of the full Claude agent file: Claude YAML
-// frontmatter + body), strip the leading Claude frontmatter block, and wrap
-// the remaining body in the OpenCode frontmatter via opencode_agent.go.tmpl.
-// renderAgent / agents.go / agent_definition.go.tmpl stay untouched.
+// canonical role body rendered with OpenCode-specific instruction guidance.
 package codegen
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -202,9 +197,10 @@ func (e openCodeAgentEmitter) Emit(root string, figuresDir string, opts Generate
 
 func validateOpenCodeProviderVariants(variants []OpenCodeProviderVariant) ([]OpenCodeProviderVariant, error) {
 	validated := append([]OpenCodeProviderVariant(nil), variants...)
-	slugs := make(map[OpenCodeVariantSlug]struct{}, len(validated))
+	variantKeys := make(map[string]struct{}, len(validated))
 	models := make(map[string]struct{}, len(validated))
 	filenames := make(map[string]struct{}, len(validated))
+	var conflicts []error
 
 	for index, variant := range validated {
 		provider := string(variant.Provider)
@@ -228,14 +224,15 @@ func validateOpenCodeProviderVariants(variants []OpenCodeProviderVariant) ([]Ope
 				index, provider, slug, "default",
 			)
 		}
-		if _, exists := slugs[variant.Slug]; exists {
-			return nil, fmt.Errorf("variant %d repeats slug %q; duplicate slugs would make selection ambiguous — assign every provider variant a unique slug", index, slug)
+		variantKey := provider + "/" + slug
+		if _, exists := variantKeys[variantKey]; exists {
+			conflicts = append(conflicts, fmt.Errorf("variant %d repeats provider and slug key %q; this conflicts with an existing selectable variant — keep one variant per provider and slug", index, variantKey))
 		}
-		slugs[variant.Slug] = struct{}{}
+		variantKeys[variantKey] = struct{}{}
 
 		qualifiedModel := variant.qualifiedModel()
 		if _, exists := models[qualifiedModel]; exists {
-			return nil, fmt.Errorf("variant %d repeats qualified model ID %q; conflicting aliases would emit redundant agent definitions — keep one variant per provider model", index, qualifiedModel)
+			conflicts = append(conflicts, fmt.Errorf("variant %d repeats qualified model ID %q; conflicting aliases would emit redundant agent definitions — keep one variant per provider model", index, qualifiedModel))
 		}
 		models[qualifiedModel] = struct{}{}
 
@@ -244,9 +241,12 @@ func validateOpenCodeProviderVariants(variants []OpenCodeProviderVariant) ([]Ope
 			return nil, fmt.Errorf("variant %d derives unsafe filename %q; generation must remain inside .opencode/agent — use safe provider and slug IDs", index, filename)
 		}
 		if _, exists := filenames[filename]; exists {
-			return nil, fmt.Errorf("variant %d conflicts on generated filename %q; choose a distinct provider and slug", index, filename)
+			conflicts = append(conflicts, fmt.Errorf("variant %d conflicts on generated filename %q; choose a distinct provider and slug", index, filename))
 		}
 		filenames[filename] = struct{}{}
+	}
+	if len(conflicts) > 0 {
+		return nil, errors.Join(conflicts...)
 	}
 
 	sort.Slice(validated, func(i, j int) bool {
@@ -258,10 +258,8 @@ func validateOpenCodeProviderVariants(variants []OpenCodeProviderVariant) ([]Ope
 	return validated, nil
 }
 
-// renderOpenCodeAgent builds the full .opencode/agent/<role>.md content: it
-// reuses the Claude agent body verbatim (via renderAgent + frontmatter strip)
-// and wraps it in OpenCode frontmatter resolved from the generator-local
-// mode/model/permission lookup tables.
+// renderOpenCodeAgent builds the full .opencode/agent/<role>.md content from
+// OpenCode frontmatter and the canonical role-body renderer.
 func renderOpenCodeAgent(roleID protocol.RoleId, figuresDir string) (string, error) {
 	roleSpec, ok := RoleSpecs[roleID]
 	if !ok {
@@ -304,20 +302,10 @@ func renderOpenCodeAgentWithModel(roleID protocol.RoleId, figuresDir string, mod
 
 	permissions := buildOpenCodePermissions(roleSpec.Tools)
 
-	// Reuse the Claude agent body verbatim (no re-authoring): render the full
-	// Claude agent file, then strip its leading YAML frontmatter block.
-	claudeAgent, err := renderAgent(roleID, figuresDir)
+	body, err := renderAgentBody(roleID, figuresDir, agentHarnessOpenCode)
 	if err != nil {
 		return "", fmt.Errorf(
-			"codegen.renderOpenCodeAgent: renderAgent for role %q failed: %w",
-			roleID, err,
-		)
-	}
-	body, err := stripFrontmatter(claudeAgent)
-	if err != nil {
-		return "", fmt.Errorf(
-			"codegen.renderOpenCodeAgent: strip Claude frontmatter from rendered agent for role %q "+
-				"failed: %w — renderAgent output must start with a `---`-delimited YAML frontmatter block",
+			"codegen.renderOpenCodeAgent: render canonical body for role %q failed: %w",
 			roleID, err,
 		)
 	}
@@ -350,11 +338,9 @@ func renderOpenCodeAgentWithModel(roleID protocol.RoleId, figuresDir string, mod
 		)
 	}
 
-	// Normalize to exactly one trailing newline (the reused Claude body already
-	// ends in "\n" and the template appends another after {{ .Body }}, which
-	// would double it). This mirrors renderAgent's single-trailing-newline rule.
-	content := strings.TrimRight(buf.String(), "\n") + "\n"
-	return content, nil
+	// Normalize to exactly one trailing newline because the canonical body and
+	// wrapper template each terminate their own content.
+	return normalizeTrailingNewline(buf.String()), nil
 }
 
 // buildOpenCodePermissions produces the least-privilege, deterministically
@@ -381,22 +367,4 @@ func buildOpenCodePermissions(tools []string) []openCodePermissionEntry {
 		entries = append(entries, openCodePermissionEntry{Key: perm, Value: "allow"})
 	}
 	return entries
-}
-
-// stripFrontmatter removes the leading YAML frontmatter block (the content
-// between the first pair of "---" fences, inclusive) from a rendered agent
-// file and returns the remaining body. It returns an error if the input does
-// not begin with a "---\n" fence or has no closing fence.
-func stripFrontmatter(content string) (string, error) {
-	const fence = "---\n"
-	if !strings.HasPrefix(content, fence) {
-		return "", fmt.Errorf("content does not start with a `---` frontmatter fence")
-	}
-	rest := content[len(fence):]
-	end := strings.Index(rest, "\n"+fence)
-	if end < 0 {
-		return "", fmt.Errorf("content has no closing `---` frontmatter fence")
-	}
-	body := rest[end+len("\n"+fence):]
-	return strings.TrimLeft(body, "\n"), nil
 }

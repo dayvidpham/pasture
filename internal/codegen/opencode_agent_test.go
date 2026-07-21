@@ -69,8 +69,24 @@ type openCodeVariantInvalidCase struct {
 }
 
 type openCodeVariantSuite struct {
-	ValidVariants []openCodeVariantFixture     `yaml:"valid_variants"`
-	InvalidCases  []openCodeVariantInvalidCase `yaml:"invalid_cases"`
+	ValidVariants         []openCodeVariantFixture     `yaml:"valid_variants"`
+	CrossProviderSameSlug []openCodeVariantFixture     `yaml:"cross_provider_same_slug"`
+	InvalidCases          []openCodeVariantInvalidCase `yaml:"invalid_cases"`
+}
+
+func normalizeAgentBodyForHarnessParity(t *testing.T, body string) string {
+	t.Helper()
+	const heading = "## Instruction Sources\n\n"
+	start := strings.Index(body, heading)
+	if start < 0 {
+		t.Fatalf("agent body has no Instruction Sources section:\n%s", body)
+	}
+	rest := body[start+len(heading):]
+	end := strings.Index(rest, "\n## ")
+	if end < 0 {
+		t.Fatalf("Instruction Sources section has no following semantic section:\n%s", body)
+	}
+	return body[:start] + rest[end+1:]
 }
 
 func loadOpenCodeVariantSuite(t *testing.T) openCodeVariantSuite {
@@ -228,6 +244,58 @@ func TestOpenCodeProviderVariantExtensionIsDeterministic(t *testing.T) {
 	t.Fatal("worker--acme--balanced.md was not emitted")
 }
 
+func TestOpenCodeProviderVariantsAllowCrossProviderSlugReuse(t *testing.T) {
+	t.Parallel()
+
+	suite := loadOpenCodeVariantSuite(t)
+	variants := make([]OpenCodeProviderVariant, 0, len(suite.CrossProviderSameSlug))
+	for _, fixture := range suite.CrossProviderSameSlug {
+		variants = append(variants, fixture.variant())
+	}
+	files := emitOpenCodeAgentFiles(t, variants)
+
+	want := map[string]bool{
+		"worker--acme--fast.md":       false,
+		"worker--example-ai--fast.md": false,
+	}
+	for _, file := range files {
+		name := filepath.Base(file.Path)
+		if _, ok := want[name]; ok {
+			want[name] = true
+		}
+	}
+	for name, found := range want {
+		if !found {
+			t.Errorf("cross-provider shared slug did not emit %s", name)
+		}
+	}
+}
+
+func TestAgentSemanticBodyParityAcrossHarnesses(t *testing.T) {
+	t.Parallel()
+
+	figuresDir := filepath.Join(testModuleRoot(t), "skills", "protocol", "figures")
+	for roleID, roleSpec := range RoleSpecs {
+		if len(roleSpec.Tools) == 0 {
+			continue
+		}
+		claudeBody, err := renderAgentBody(roleID, figuresDir, agentHarnessClaudeCode)
+		if err != nil {
+			t.Fatalf("render Claude body for %s: %v", roleID, err)
+		}
+		openCodeBody, err := renderAgentBody(roleID, figuresDir, agentHarnessOpenCode)
+		if err != nil {
+			t.Fatalf("render OpenCode body for %s: %v", roleID, err)
+		}
+		if got, want := normalizeAgentBodyForHarnessParity(t, openCodeBody), normalizeAgentBodyForHarnessParity(t, claudeBody); got != want {
+			t.Errorf("role %s semantic body differs across harnesses", roleID)
+		}
+		if strings.Contains(openCodeBody, "~/.claude") || strings.Contains(openCodeBody, "Claude Code") {
+			t.Errorf("role %s OpenCode body contains Claude-only instruction guidance", roleID)
+		}
+	}
+}
+
 func TestOpenCodeProviderVariantValidationRejectsFixtureCasesBeforeWrite(t *testing.T) {
 	t.Parallel()
 
@@ -302,10 +370,10 @@ func TestOpenCodeAgentArchitectMapping(t *testing.T) {
 		t.Errorf("architect permission map has %d entries, want 7 (deny seed + 6 grants): %v", len(fm.Permission), fm.Permission)
 	}
 
-	// Body reuse: the Claude agent body is wrapped verbatim, so the role's
-	// agent H1 heading must appear in the OpenCode body.
+	// The canonical role body supplies the agent H1 heading independently of
+	// either harness wrapper.
 	if !strings.Contains(body, "# Architect Agent") {
-		t.Errorf("architect OpenCode body missing reused Claude agent body heading '# Architect Agent'")
+		t.Errorf("architect OpenCode body missing canonical heading '# Architect Agent'")
 	}
 }
 

@@ -163,7 +163,7 @@ _(No startup sequence defined for this role)_
 
 ### Introduction
 
-You review from an end-user alignment perspective. See the project's protocol/CONSTRAINTS.md for coding standards.
+You review from an end-user alignment perspective.
 
 ### What You Own
 

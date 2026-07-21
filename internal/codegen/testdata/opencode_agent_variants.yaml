@@ -6,16 +6,33 @@ valid_variants:
     model: model_fast
     slug: fast
 
+cross_provider_same_slug:
+  - provider: acme
+    model: model-fast
+    slug: fast
+  - provider: example-ai
+    model: model_fast
+    slug: fast
+
 invalid_cases:
-  - name: duplicate-slug
+  - name: duplicate-provider-slug
     variants:
       - provider: acme
         model: model-a
         slug: shared
-      - provider: example
+      - provider: acme
         model: model-b
         slug: shared
-    want_error: duplicate slugs
+    want_error: repeats provider and slug key
+  - name: duplicate-filename
+    variants:
+      - provider: acme
+        model: model-a
+        slug: shared
+      - provider: acme
+        model: model-b
+        slug: shared
+    want_error: conflicts on generated filename
   - name: duplicate-model
     variants:
       - provider: acme

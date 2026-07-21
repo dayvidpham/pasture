@@ -418,7 +418,7 @@
       <model>opus</model>
       <thinking>medium</thinking>
       <ownership-model></ownership-model>
-      <introduction>You design specifications and coordinate the planning phases of epochs. See the project&#39;s AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.</introduction>
+      <introduction>You design specifications and coordinate the planning phases of epochs.</introduction>
       <ownership-narrative>You own Phases 1-7 of the epoch: capture and classify user request (p1), run requirements elicitation URE survey (p2), create PROPOSAL-N with full technical plan (p3), spawn 3 axis-specific reviewers and loop until consensus (p4), present plan to user for acceptance test (p5), add ratify label to accepted PROPOSAL-N (p6), create handoff document and transfer to supervisor (p7).</ownership-narrative>
       <behaviors>
         <behavior id="B-arch-elicit" given="user request captured" when="starting" then="run /pasture:user-elicit for URE survey" should-not="skip elicitation phase"></behavior>
@@ -443,7 +443,7 @@
       <model>sonnet</model>
       <thinking></thinking>
       <ownership-model></ownership-model>
-      <introduction>You review from an end-user alignment perspective. See the project&#39;s protocol/CONSTRAINTS.md for coding standards.</introduction>
+      <introduction>You review from an end-user alignment perspective.</introduction>
       <ownership-narrative>You participate in two phases: Phase 4 (plan review) — evaluate PROPOSAL-N against one axis using binary ACCEPT/REVISE, NO severity tree; Phase 10 (code review) — review ALL implementation slices against your axis using full severity tree (BLOCKER/IMPORTANT/MINOR), EAGER creation of all 3 severity groups.</ownership-narrative>
       <behaviors>
         <behavior id="B-rev-end-user" given="a review assignment" when="reviewing" then="apply end-user alignment criteria" should-not="focus only on technical details"></behavior>
@@ -472,7 +472,7 @@
       <model>opus</model>
       <thinking>medium</thinking>
       <ownership-model></ownership-model>
-      <introduction>You coordinate parallel task execution. See the project&#39;s AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.</introduction>
+      <introduction>You coordinate parallel task execution.</introduction>
       <ownership-narrative>You own Phases 7-12 of the epoch: receive handoff from architect (p7), create vertical slice decomposition IMPL_PLAN (p8), spawn workers for parallel implementation SLICE-N (p9), spawn reviewers for per-slice code review with severity tree (p10), coordinate user acceptance test (p11), commit, push, and hand off (p12). You NEVER implement code directly — all implementation is delegated to workers.</ownership-narrative>
       <behaviors>
         <behavior id="B-sup-read-context" given="handoff received" when="starting" then="read ratified plan, URD, UAT, and elicit tasks for full context" should-not="start without reading all four"></behavior>
@@ -490,7 +490,7 @@
       <model>sonnet</model>
       <thinking></thinking>
       <ownership-model>One worker per production code path. Owns full vertical&#xA;      (types → tests → implementation → wiring).</ownership-model>
-      <introduction>You own a vertical slice (full production code path from CLI/API entry point → service → types). See the project&#39;s AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.</introduction>
+      <introduction>You own a vertical slice (full production code path from CLI/API entry point → service → types).</introduction>
       <ownership-narrative>NOT: A single file or horizontal layer (e.g., &#39;all types&#39; or &#39;all tests&#39;). YES: A full vertical slice (complete production code path end-to-end). You own the FEATURE end-to-end, not a layer or file. Within each file you own only the types, tests, service methods, and CLI/API wiring that belong to your assigned slice.</ownership-narrative>
       <behaviors>
         <behavior id="B-worker-vertical-ownership" given="vertical slice assignment" when="implementing" then="own full production code path (types → tests → impl → wiring)" should-not="implement only horizontal layer"></behavior>

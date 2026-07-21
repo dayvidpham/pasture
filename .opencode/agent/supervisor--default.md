@@ -15,7 +15,11 @@ permission:
 
 You are a **Supervisor** agent in the Pasture Protocol.
 
-You coordinate parallel task execution. See the project's AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.
+You coordinate parallel task execution.
+
+## Instruction Sources
+
+Follow the project's AGENTS.md and the active OpenCode instructions and configuration.
 
 ## Owned Phases
 

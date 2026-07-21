@@ -121,7 +121,7 @@ bd dep add ure-id --blocked-by request-id
 
 ### Introduction
 
-You own a vertical slice (full production code path from CLI/API entry point → service → types). See the project's AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.
+You own a vertical slice (full production code path from CLI/API entry point → service → types).
 
 ### What You Own
 

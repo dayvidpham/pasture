@@ -22,7 +22,34 @@ import (
 
 // ─── Template context ─────────────────────────────────────────────────────────
 
-// agentTemplateData is the data passed to agent_definition.go.tmpl.
+// agentHarness identifies the target whose wrapper and instruction-source
+// guidance surround the canonical role body.
+type agentHarness string
+
+const (
+	agentHarnessClaudeCode agentHarness = "claude-code"
+	agentHarnessOpenCode   agentHarness = "opencode"
+)
+
+// agentRenderContext contains the only harness-specific prose permitted in an
+// agent body. Role semantics remain in RoleSpec and the shared body template.
+type agentRenderContext struct {
+	Harness                   agentHarness
+	InstructionSourceGuidance string
+}
+
+var agentRenderContexts = map[agentHarness]agentRenderContext{
+	agentHarnessClaudeCode: {
+		Harness:                   agentHarnessClaudeCode,
+		InstructionSourceGuidance: "Follow the project's AGENTS.md and the active Claude Code instructions, including ~/.claude/CLAUDE.md when present.",
+	},
+	agentHarnessOpenCode: {
+		Harness:                   agentHarnessOpenCode,
+		InstructionSourceGuidance: "Follow the project's AGENTS.md and the active OpenCode instructions and configuration.",
+	},
+}
+
+// agentTemplateData is the data passed to agent_body.go.tmpl.
 type agentTemplateData struct {
 	// Role is the full RoleSpec for the role being generated.
 	Role RoleSpec
@@ -51,15 +78,22 @@ type agentTemplateData struct {
 	// content when figuresDir is provided to GenerateAgent. When figuresDir is
 	// empty, Content fields will be empty (ID + Title only).
 	Figures []FigureSpec
+
+	RenderContext agentRenderContext
+}
+
+type claudeAgentTemplateData struct {
+	Role RoleSpec
+	Body string
 }
 
 // ─── Template rendering ───────────────────────────────────────────────────────
 
 // renderAgent renders the agent definition markdown for the given role.
 //
-// It loads agent_definition.go.tmpl from the embedded FS (templatesFS,
-// declared in embed.go), builds the template context from RoleSpecs and
-// GetRoleContext, and executes the template.
+// It renders the canonical body through a typed Claude Code context, then
+// applies Claude Code frontmatter. OpenCode calls the body renderer directly
+// with its own context rather than projecting this completed file.
 // Returns the rendered string (including a trailing newline).
 //
 // figuresDir is the path to the directory containing figure YAML files
@@ -72,6 +106,31 @@ type agentTemplateData struct {
 //   - The template file cannot be read from the embedded FS.
 //   - Template execution fails (e.g., missing key, rendering error).
 func renderAgent(roleId protocol.RoleId, figuresDir string) (string, error) {
+	return renderClaudeAgent(roleId, figuresDir)
+}
+
+func renderClaudeAgent(roleID protocol.RoleId, figuresDir string) (string, error) {
+	body, err := renderAgentBody(roleID, figuresDir, agentHarnessClaudeCode)
+	if err != nil {
+		return "", err
+	}
+	roleSpec := RoleSpecs[roleID]
+	tmpl, err := template.New("claude_agent.go.tmpl").
+		Option("missingkey=error").
+		Funcs(buildFuncMap()).
+		ParseFS(templatesFS, "templates/claude_agent.go.tmpl")
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderClaudeAgent: failed to parse templates/claude_agent.go.tmpl — check that the file exists and has valid Go template syntax: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, claudeAgentTemplateData{Role: roleSpec, Body: body}); err != nil {
+		return "", fmt.Errorf("codegen.renderClaudeAgent: template execution failed for role %q — check claude_agent.go.tmpl for undefined variables or type mismatches: %w", roleID, err)
+	}
+	return normalizeTrailingNewline(buf.String()), nil
+}
+
+func renderAgentBody(roleId protocol.RoleId, figuresDir string, harness agentHarness) (string, error) {
 	roleSpec, ok := RoleSpecs[roleId]
 	if !ok {
 		return "", fmt.Errorf(
@@ -80,15 +139,19 @@ func renderAgent(roleId protocol.RoleId, figuresDir string) (string, error) {
 			roleId,
 		)
 	}
+	renderContext, ok := agentRenderContexts[harness]
+	if !ok {
+		return "", fmt.Errorf("codegen.renderAgentBody: harness %q has no render context — define its typed instruction-source guidance before rendering role %q", harness, roleId)
+	}
 
 	// Parse the embedded template, reusing the shared FuncMap from skills.go.
-	tmpl, err := template.New("agent_definition.go.tmpl").
+	tmpl, err := template.New("agent_body.go.tmpl").
 		Option("missingkey=error").
 		Funcs(buildFuncMap()).
-		ParseFS(templatesFS, "templates/agent_definition.go.tmpl")
+		ParseFS(templatesFS, "templates/agent_body.go.tmpl")
 	if err != nil {
 		return "", fmt.Errorf(
-			"codegen.renderAgent: failed to parse template templates/agent_definition.go.tmpl — "+
+			"codegen.renderAgentBody: failed to parse template templates/agent_body.go.tmpl — "+
 				"check that the file exists in the embedded FS and has valid Go template syntax: %w",
 			err,
 		)
@@ -104,31 +167,31 @@ func renderAgent(roleId protocol.RoleId, figuresDir string) (string, error) {
 	}
 
 	data := agentTemplateData{
-		Role:         roleSpec,
-		PhasesDetail: ownedPhaseDetails(roleSpec),
-		PhaseSlug:    buildPhaseSlug(),
-		Constraints:  roleCtx.Constraints,
-		Behaviors:    roleSpec.Behaviors,
-		Checklists:   roleCtx.Checklists,
-		Workflows:    roleCtx.Workflows,
-		Figures:      figures,
+		Role:          roleSpec,
+		PhasesDetail:  ownedPhaseDetails(roleSpec),
+		PhaseSlug:     buildPhaseSlug(),
+		Constraints:   roleCtx.Constraints,
+		Behaviors:     roleSpec.Behaviors,
+		Checklists:    roleCtx.Checklists,
+		Workflows:     roleCtx.Workflows,
+		Figures:       figures,
+		RenderContext: renderContext,
 	}
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf(
-			"codegen.renderAgent: template execution failed for role %q — "+
-				"check agent_definition.go.tmpl for undefined variables or type mismatches: %w",
+			"codegen.renderAgentBody: template execution failed for role %q — "+
+				"check agent_body.go.tmpl for undefined variables or type mismatches: %w",
 			roleId, err,
 		)
 	}
 
-	content := buf.String()
-	// Ensure content always ends with a single newline (mirrors Python behaviour).
-	if !strings.HasSuffix(content, "\n") {
-		content += "\n"
-	}
-	return content, nil
+	return normalizeTrailingNewline(buf.String()), nil
+}
+
+func normalizeTrailingNewline(content string) string {
+	return strings.TrimRight(content, "\n") + "\n"
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────

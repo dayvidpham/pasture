@@ -217,7 +217,7 @@ bd dep add ure-id --blocked-by request-id
 
 ### Introduction
 
-You coordinate parallel task execution. See the project's AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.
+You coordinate parallel task execution.
 
 ### What You Own
 

@@ -1,13 +1,3 @@
----
-name: {{ .Role.Id }}
-description: {{ .Role.Description }}
-tools: {{ join .Role.Tools ", " }}
-model: {{ .Role.Model }}
-{{- if .Role.Thinking }}
-thinking: {{ .Role.Thinking }}
-{{- end }}
----
-
 # {{ .Role.Name }} Agent
 
 You are a **{{ .Role.Name }}** agent in the Pasture Protocol.
@@ -15,6 +5,10 @@ You are a **{{ .Role.Name }}** agent in the Pasture Protocol.
 
 {{ .Role.Introduction }}
 {{- end }}
+
+## Instruction Sources
+
+{{ .RenderContext.InstructionSourceGuidance }}
 {{- if .PhasesDetail }}
 
 ## Owned Phases
