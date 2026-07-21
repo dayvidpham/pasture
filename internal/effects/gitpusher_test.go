@@ -55,9 +55,9 @@ func stubResolver(path string, resolveErr error) effects.ExecutableResolver {
 	}
 }
 
-func mustPusher(t testing.TB, runner *stubCommandRunner, remoteName string) effects.GitRepositoryPusher {
+func mustPusher(t testing.TB, runner *stubCommandRunner, remoteURL string) effects.GitRepositoryPusher {
 	t.Helper()
-	pusher, err := effects.NewGitRepositoryPusher(stubResolver("/usr/bin/git", nil), runner.run, remoteName)
+	pusher, err := effects.NewGitRepositoryPusher(stubResolver("/usr/bin/git", nil), runner.run, remoteURL)
 	require.NoError(t, err)
 	return pusher
 }
@@ -66,17 +66,17 @@ func mustPusher(t testing.TB, runner *stubCommandRunner, remoteName string) effe
 
 func TestNewGitRepositoryPusherRejectsNilResolver(t *testing.T) {
 	t.Parallel()
-	_, err := effects.NewGitRepositoryPusher(nil, (&stubCommandRunner{}).run, "origin")
+	_, err := effects.NewGitRepositoryPusher(nil, (&stubCommandRunner{}).run, "https://github.com/dayvidpham/pasture.git")
 	require.Error(t, err)
 }
 
 func TestNewGitRepositoryPusherRejectsNilRunner(t *testing.T) {
 	t.Parallel()
-	_, err := effects.NewGitRepositoryPusher(stubResolver("/usr/bin/git", nil), nil, "origin")
+	_, err := effects.NewGitRepositoryPusher(stubResolver("/usr/bin/git", nil), nil, "https://github.com/dayvidpham/pasture.git")
 	require.Error(t, err)
 }
 
-func TestNewGitRepositoryPusherRejectsEmptyRemoteName(t *testing.T) {
+func TestNewGitRepositoryPusherRejectsEmptyRemoteURL(t *testing.T) {
 	t.Parallel()
 	_, err := effects.NewGitRepositoryPusher(stubResolver("/usr/bin/git", nil), (&stubCommandRunner{}).run, "   ")
 	require.Error(t, err)
@@ -90,7 +90,7 @@ func TestGitRepositoryPusherVerifyLocalObjectAcceptsMatchingCommitAndTree(t *tes
 		{output: "commit"},
 		{output: treeA},
 	}}
-	pusher := mustPusher(t, runner, "origin")
+	pusher := mustPusher(t, runner, "https://github.com/dayvidpham/pasture.git")
 
 	err := pusher.VerifyLocalObject(mustRepository(t, "/repo"), mustCommit(t, oidA), mustTree(t, treeA))
 	require.NoError(t, err)
@@ -106,7 +106,7 @@ func TestGitRepositoryPusherVerifyLocalObjectAcceptsMatchingCommitAndTree(t *tes
 func TestGitRepositoryPusherVerifyLocalObjectRejectsNonCommitKind(t *testing.T) {
 	t.Parallel()
 	runner := &stubCommandRunner{responses: []stubResponse{{output: "blob"}}}
-	pusher := mustPusher(t, runner, "origin")
+	pusher := mustPusher(t, runner, "https://github.com/dayvidpham/pasture.git")
 
 	err := pusher.VerifyLocalObject(mustRepository(t, "/repo"), mustCommit(t, oidA), mustTree(t, treeA))
 	require.Error(t, err)
@@ -120,7 +120,7 @@ func TestGitRepositoryPusherVerifyLocalObjectRejectsTreeMismatch(t *testing.T) {
 		{output: "commit"},
 		{output: treeB},
 	}}
-	pusher := mustPusher(t, runner, "origin")
+	pusher := mustPusher(t, runner, "https://github.com/dayvidpham/pasture.git")
 
 	err := pusher.VerifyLocalObject(mustRepository(t, "/repo"), mustCommit(t, oidA), mustTree(t, treeA))
 	require.Error(t, err)
@@ -131,7 +131,7 @@ func TestGitRepositoryPusherVerifyLocalObjectRejectsTreeMismatch(t *testing.T) {
 func TestGitRepositoryPusherVerifyLocalObjectSurfacesCatFileFailure(t *testing.T) {
 	t.Parallel()
 	runner := &stubCommandRunner{responses: []stubResponse{{err: errors.New("fatal: not a valid object")}}}
-	pusher := mustPusher(t, runner, "origin")
+	pusher := mustPusher(t, runner, "https://github.com/dayvidpham/pasture.git")
 
 	err := pusher.VerifyLocalObject(mustRepository(t, "/repo"), mustCommit(t, oidA), mustTree(t, treeA))
 	require.Error(t, err)
@@ -143,7 +143,7 @@ func TestGitRepositoryPusherVerifyLocalObjectSurfacesCatFileFailure(t *testing.T
 func TestGitRepositoryPusherPushExactForceWithLeaseExpectAbsentRemote(t *testing.T) {
 	t.Parallel()
 	runner := &stubCommandRunner{responses: []stubResponse{{output: ""}}}
-	pusher := mustPusher(t, runner, "origin")
+	pusher := mustPusher(t, runner, "https://github.com/dayvidpham/pasture.git")
 	remoteRef := mustRemoteRef(t, "refs/heads/main")
 
 	err := pusher.PushExact(mustRepository(t, "/repo"), mustCommit(t, oidA), remoteRef, effects.ExpectAbsentRemote())
@@ -155,7 +155,7 @@ func TestGitRepositoryPusherPushExactForceWithLeaseExpectAbsentRemote(t *testing
 	assert.Equal(t, []string{
 		"push",
 		"--force-with-lease=refs/heads/main:",
-		"origin",
+		"https://github.com/dayvidpham/pasture.git",
 		oidA + ":refs/heads/main",
 	}, call.args, "an absent expectation must lease with an empty expect-string, requiring the ref not already exist")
 }
@@ -163,7 +163,7 @@ func TestGitRepositoryPusherPushExactForceWithLeaseExpectAbsentRemote(t *testing
 func TestGitRepositoryPusherPushExactForceWithLeaseExpectRemoteAt(t *testing.T) {
 	t.Parallel()
 	runner := &stubCommandRunner{responses: []stubResponse{{output: ""}}}
-	pusher := mustPusher(t, runner, "origin")
+	pusher := mustPusher(t, runner, "https://github.com/dayvidpham/pasture.git")
 	remoteRef := mustRemoteRef(t, "refs/heads/main")
 	old, err := effects.ExpectRemoteAt(mustCommit(t, oidB))
 	require.NoError(t, err)
@@ -176,7 +176,7 @@ func TestGitRepositoryPusherPushExactForceWithLeaseExpectRemoteAt(t *testing.T) 
 	assert.Equal(t, []string{
 		"push",
 		"--force-with-lease=refs/heads/main:" + oidB,
-		"origin",
+		"https://github.com/dayvidpham/pasture.git",
 		oidA + ":refs/heads/main",
 	}, call.args, "a present expectation must lease with the exact expected-old commit id")
 }
@@ -184,7 +184,7 @@ func TestGitRepositoryPusherPushExactForceWithLeaseExpectRemoteAt(t *testing.T) 
 func TestGitRepositoryPusherPushExactSurfacesFailure(t *testing.T) {
 	t.Parallel()
 	runner := &stubCommandRunner{responses: []stubResponse{{err: errors.New("stale info")}}}
-	pusher := mustPusher(t, runner, "origin")
+	pusher := mustPusher(t, runner, "https://github.com/dayvidpham/pasture.git")
 	remoteRef := mustRemoteRef(t, "refs/heads/main")
 
 	err := pusher.PushExact(mustRepository(t, "/repo"), mustCommit(t, oidA), remoteRef, effects.ExpectAbsentRemote())
@@ -196,7 +196,7 @@ func TestGitRepositoryPusherPushExactSurfacesFailure(t *testing.T) {
 func TestGitRepositoryPusherReadRemotePresent(t *testing.T) {
 	t.Parallel()
 	runner := &stubCommandRunner{responses: []stubResponse{{output: oidA + "\trefs/heads/main"}}}
-	pusher := mustPusher(t, runner, "origin")
+	pusher := mustPusher(t, runner, "https://github.com/dayvidpham/pasture.git")
 	remoteRef := mustRemoteRef(t, "refs/heads/main")
 
 	state, err := pusher.ReadRemote(mustRepository(t, "/repo"), remoteRef)
@@ -207,13 +207,13 @@ func TestGitRepositoryPusherReadRemotePresent(t *testing.T) {
 	assert.Equal(t, oidA, commit.String())
 
 	require.Len(t, runner.calls, 1)
-	assert.Equal(t, []string{"ls-remote", "origin", "refs/heads/main"}, runner.calls[0].args)
+	assert.Equal(t, []string{"ls-remote", "https://github.com/dayvidpham/pasture.git", "refs/heads/main"}, runner.calls[0].args)
 }
 
 func TestGitRepositoryPusherReadRemoteEmptyOutputMeansAbsent(t *testing.T) {
 	t.Parallel()
 	runner := &stubCommandRunner{responses: []stubResponse{{output: "   "}}}
-	pusher := mustPusher(t, runner, "origin")
+	pusher := mustPusher(t, runner, "https://github.com/dayvidpham/pasture.git")
 
 	state, err := pusher.ReadRemote(mustRepository(t, "/repo"), mustRemoteRef(t, "refs/heads/main"))
 	require.NoError(t, err)
@@ -225,7 +225,7 @@ func TestGitRepositoryPusherReadRemoteEmptyOutputMeansAbsent(t *testing.T) {
 func TestGitRepositoryPusherReadRemoteLowersUppercaseCommitID(t *testing.T) {
 	t.Parallel()
 	runner := &stubCommandRunner{responses: []stubResponse{{output: strings.ToUpper(oidA) + "\trefs/heads/main"}}}
-	pusher := mustPusher(t, runner, "origin")
+	pusher := mustPusher(t, runner, "https://github.com/dayvidpham/pasture.git")
 
 	state, err := pusher.ReadRemote(mustRepository(t, "/repo"), mustRemoteRef(t, "refs/heads/main"))
 	require.NoError(t, err)
@@ -237,7 +237,7 @@ func TestGitRepositoryPusherReadRemoteLowersUppercaseCommitID(t *testing.T) {
 func TestGitRepositoryPusherReadRemoteMalformedCommitID(t *testing.T) {
 	t.Parallel()
 	runner := &stubCommandRunner{responses: []stubResponse{{output: "not-a-valid-oid\trefs/heads/main"}}}
-	pusher := mustPusher(t, runner, "origin")
+	pusher := mustPusher(t, runner, "https://github.com/dayvidpham/pasture.git")
 
 	_, err := pusher.ReadRemote(mustRepository(t, "/repo"), mustRemoteRef(t, "refs/heads/main"))
 	require.Error(t, err)
@@ -250,7 +250,7 @@ func TestGitRepositoryPusherReadRemoteMultiLineOutputUsesFirstToken(t *testing.T
 	// annotated-tag target); ReadRemote must parse only the first field.
 	multiLine := oidA + "\trefs/heads/main\n" + oidB + "\trefs/heads/main^{}"
 	runner := &stubCommandRunner{responses: []stubResponse{{output: multiLine}}}
-	pusher := mustPusher(t, runner, "origin")
+	pusher := mustPusher(t, runner, "https://github.com/dayvidpham/pasture.git")
 
 	state, err := pusher.ReadRemote(mustRepository(t, "/repo"), mustRemoteRef(t, "refs/heads/main"))
 	require.NoError(t, err)
@@ -262,7 +262,7 @@ func TestGitRepositoryPusherReadRemoteMultiLineOutputUsesFirstToken(t *testing.T
 func TestGitRepositoryPusherReadRemoteSurfacesLsRemoteFailure(t *testing.T) {
 	t.Parallel()
 	runner := &stubCommandRunner{responses: []stubResponse{{err: errors.New("could not resolve host")}}}
-	pusher := mustPusher(t, runner, "origin")
+	pusher := mustPusher(t, runner, "https://github.com/dayvidpham/pasture.git")
 
 	_, err := pusher.ReadRemote(mustRepository(t, "/repo"), mustRemoteRef(t, "refs/heads/main"))
 	require.Error(t, err)
@@ -273,7 +273,7 @@ func TestGitRepositoryPusherReadRemoteSurfacesLsRemoteFailure(t *testing.T) {
 func TestGitRepositoryPusherSurfacesResolverFailure(t *testing.T) {
 	t.Parallel()
 	runner := &stubCommandRunner{}
-	pusher, err := effects.NewGitRepositoryPusher(stubResolver("", errors.New("exec: \"git\": executable file not found in $PATH")), runner.run, "origin")
+	pusher, err := effects.NewGitRepositoryPusher(stubResolver("", errors.New("exec: \"git\": executable file not found in $PATH")), runner.run, "https://github.com/dayvidpham/pasture.git")
 	require.NoError(t, err)
 
 	_, err = pusher.ReadRemote(mustRepository(t, "/repo"), mustRemoteRef(t, "refs/heads/main"))

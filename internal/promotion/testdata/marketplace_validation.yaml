@@ -13,6 +13,12 @@
 - name: wrong component subdirectory
   mutation: wrong_path
   want_error: true
+- name: wrong canonical repository URL
+  mutation: wrong_url
+  want_error: true
+- name: duplicate split plugin source path
+  mutation: duplicate_source_path
+  want_error: true
 - name: moving source selector
   mutation: moving_ref
   want_error: true

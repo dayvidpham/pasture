@@ -1,13 +1,13 @@
 // Package promotion owns Aura's release/distribution surface for the moving
-// pasture-stable channel: it projects the pinned native target descriptors into
-// an aggregate marketplace catalog (no hand-maintained second catalog) and
-// performs the gated, guarded promotion of the pasture-stable ref.
+// pasture-stable channel: it derives one aggregate marketplace catalog from an
+// exact Pasture snapshot and performs the gated, guarded promotion of the
+// pasture-stable ref.
 //
 // The promotion is release metadata, not installer state: it advances the
-// pasture-stable ref only after an explicit, ordered gate set passes at the
-// named revisions, then performs exactly one guarded ref update that re-reads
-// the remote immediately before publication and never overwrites a racing
-// publisher. The guarded-update mechanics are reused verbatim from
+// pasture-stable ref only after the static mandatory gates pass at the exact
+// Pasture and Aura commits and candidate cleanup succeeds. It then performs one
+// guarded ref update against the verified URL and never overwrites a racing
+// publisher. The guarded-update mechanics are reused from
 // internal/effects (GuardedPushExactCommit + GitRepositoryPusher); this package
 // composes them into the promotion workflow and never re-implements the
 // verify/push/re-read/prove algorithm.

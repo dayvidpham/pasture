@@ -1,151 +1,165 @@
 package promotion
 
 import (
+	"errors"
+	"path/filepath"
+
 	"github.com/dayvidpham/pasture/internal/effects"
 )
 
 // PromotionResult is the verified outcome of a completed pasture-stable
-// promotion. It carries the exact ref and commit the channel now resolves to and
-// the guarded-push outcome (a fresh advance or a verified idempotent replay), so
-// a release operator and downstream consumers observe exactly what was published.
+// promotion, including the single candidate-owned marketplace projection that
+// passed validation.
 type PromotionResult struct {
-	Ref     string
-	Commit  string
-	Tree    string
-	Outcome effects.GuardedPushOutcome
-	proof   effects.VerifiedGuardedPush
+	Ref         string
+	Commit      string
+	Tree        string
+	Outcome     effects.GuardedPushOutcome
+	Marketplace Projection
+	proof       effects.VerifiedGuardedPush
 }
 
-// Proof returns the process-local verified guarded-push proof. It is never
-// serialized (its codec deliberately fails); a caller uses it in-process to gate
-// a protected follow-on operation.
+// Proof returns the process-local verified guarded-push proof.
 func (r PromotionResult) Proof() effects.VerifiedGuardedPush { return r.proof }
 
-// Promoter performs the gated, guarded promotion of the pasture-stable ref. It
-// composes an injected RevisionResolver (to resolve the exact commit/tree to
-// publish) and an injected effects.RepositoryPusher (to perform the guarded
-// update). It re-implements no guarded-push logic: the verify/push/re-read/prove
-// algorithm lives entirely in effects.GuardedPushExactCommit.
-type Promoter struct {
-	pusher   effects.RepositoryPusher
-	resolver RevisionResolver
-	valid    bool
+// Coordinator is the sole promotion entry point. Its production dependencies
+// are injectable process effects; release policy, candidate states, and the
+// mandatory gate inventory are not caller-selectable.
+type Coordinator struct {
+	resolve effects.ExecutableResolver
+	run     effects.CommandRunner
+	valid   bool
 }
 
-// NewPromoter wires a promoter with a revision resolver and a repository pusher.
-// Production passes a GitRevisionResolver and an effects.GitRepositoryPusher;
-// tests pass fakes.
-func NewPromoter(resolver RevisionResolver, pusher effects.RepositoryPusher) (Promoter, error) {
-	if resolver == nil {
-		return Promoter{}, fault(
-			"promoter has no revision resolver",
-			"the promoter must resolve the exact commit and tree to publish",
-			"promotion.NewPromoter", "promoter wiring",
-			"the promotion cannot identify the object to land",
-			"pass a RevisionResolver (GitRevisionResolver in production)", nil,
-		)
+// NewCoordinator wires the process effects used for git and gate commands.
+// Tests inject command outcomes through run while exercising the same mandatory
+// gate inventory and state transitions as production.
+func NewCoordinator(resolve effects.ExecutableResolver, run effects.CommandRunner) (Coordinator, error) {
+	if resolve == nil || run == nil {
+		return Coordinator{}, fault("promotion coordinator is missing an executable resolver or command runner", "candidate preparation, mandatory gates, cleanup, and publication share one injected process boundary", "promotion.NewCoordinator", "coordinator wiring", "no promotion can start", "pass exec.LookPath and effects.DefaultCommandRunner in production", nil)
 	}
-	if pusher == nil {
-		return Promoter{}, fault(
-			"promoter has no repository pusher",
-			"the guarded update is performed through an injected repository pusher",
-			"promotion.NewPromoter", "promoter wiring",
-			"the promotion cannot verify or publish the channel update",
-			"pass an effects.RepositoryPusher (effects.GitRepositoryPusher in production)", nil,
-		)
-	}
-	return Promoter{resolver: resolver, pusher: pusher, valid: true}, nil
+	return Coordinator{resolve: resolve, run: run, valid: true}, nil
 }
 
-// Promote resolves the immutable candidate, runs the ordered gate set, then
-// advances the pasture-stable ref with exactly one guarded update.
-//
-// Ordering guarantees:
-//  1. The full requested revision is resolved before expensive gates. Invalid or
-//     unavailable candidates fail without running the suite or touching a ref.
-//  2. Gates run against immutable materializations prepared from that commit.
-//  3. The guarded push re-reads the remote immediately before publication and
-//     performs a single --force-with-lease update. A stale expected-old, a racing
-//     advance, or a different ref yields no proof and never overwrites the remote;
-//     a remote already at the exact target is a verified idempotent replay.
-func (p Promoter) Promote(request PromotionRequest, gates []Gate) (PromotionResult, error) {
-	if !p.valid {
-		return PromotionResult{}, fault(
-			"promoter is zero or invalid",
-			"a promotion requires a validly wired promoter",
-			"promotion.Promoter.Promote", "promotion",
-			"no promotion can be performed",
-			"construct the promoter with NewPromoter", nil,
-		)
-	}
-	if !request.IsValid() {
-		return PromotionResult{}, fault(
-			"promotion request is zero or invalid",
-			"a promotion requires a constructor-validated request",
-			"promotion.Promoter.Promote", "promotion",
-			"no promotion is attempted",
-			"construct the request with NewPromotionRequest", nil,
-		)
-	}
+type preparedCandidate struct {
+	pasture    repositorySnapshot
+	aura       repositorySnapshot
+	projection Projection
+	stableRef  effects.RemoteRef
+	expected   effects.ExpectedOldOID
+}
 
-	// (1) Resolve the exact commit and tree before expensive gates.
-	commit, err := p.resolver.ResolveCommit(request.PastureRepo(), request.PastureRevision())
+type gatedCandidate struct{ candidate preparedCandidate }
+
+type publishableCandidate struct {
+	repository effects.RepositoryID
+	commit     effects.CommitOID
+	tree       effects.TreeDigest
+	pushURL    string
+	stableRef  effects.RemoteRef
+	expected   effects.ExpectedOldOID
+	projection Projection
+}
+
+// Promote executes the unforgeable transition chain: exact request, immutable
+// prepared candidate, mandatory-gated candidate, verified cleanup, then guarded
+// publication. No intermediate state is exported or caller-constructible.
+func (c Coordinator) Promote(request PromotionRequest) (PromotionResult, error) {
+	if !c.valid || !request.IsValid() {
+		return PromotionResult{}, fault("promotion coordinator or request is zero or invalid", "promotion requires constructor-validated runtime dependencies and exact request operands", "promotion.Coordinator.Promote", "promotion startup", "no candidate is prepared and no ref is touched", "construct both values with NewCoordinator and NewPromotionRequest", nil)
+	}
+	prepared, err := c.prepare(request)
 	if err != nil {
 		return PromotionResult{}, err
 	}
-	tree, err := p.resolver.ResolveTree(request.PastureRepo(), commit)
+	gated, err := c.gate(prepared)
+	if err != nil {
+		return PromotionResult{}, errors.Join(err, c.cleanup(prepared))
+	}
+	publishable, err := c.cleanupForPublication(gated)
 	if err != nil {
 		return PromotionResult{}, err
 	}
-	if commit.String() != request.PastureRevision() {
-		return PromotionResult{}, fault(
-			"resolved pasture commit does not equal the requested commit",
-			"the promotion request must name the exact object used by gates and publication",
-			"promotion.Promoter.Promote", "candidate resolution",
-			"the candidate is not published and the pasture-stable ref is unchanged",
-			"fetch the exact commit and pass its full lowercase object id", nil,
-		)
-	}
+	return c.publish(publishable)
+}
 
-	// (2) A failure aborts before the remote is touched.
-	if err := RunGates(gates); err != nil {
-		return PromotionResult{}, err
-	}
-
-	// (3) Build the guarded update input and perform exactly one guarded push.
-	input, err := effects.NewGuardedPushInput(
-		request.PastureRepo(),
-		commit,
-		tree,
-		request.StableRef(),
-		request.ExpectedOld(),
-	)
+func (c Coordinator) prepare(request PromotionRequest) (preparedCandidate, error) {
+	pasture, err := prepareRepositorySnapshot(request.pastureRepo, request.pastureCommit.String(), request.remote, PastureRepository, c.resolve, c.run)
 	if err != nil {
-		return PromotionResult{}, fault(
-			"guarded push input could not be constructed for the promotion",
-			"the resolved operands did not form a valid guarded-push input",
-			"promotion.Promoter.Promote", "guarded update construction",
-			"the promotion cannot publish the channel safely",
-			"check the resolved commit, tree, ref, and expected-old operands", err,
-		)
+		return preparedCandidate{}, err
 	}
-
-	proof, err := effects.GuardedPushExactCommit(input, p.pusher)
+	aura, err := prepareRepositorySnapshot(request.auraRepo, request.auraCommit.String(), "origin", AuraRepository, c.resolve, c.run)
 	if err != nil {
-		return PromotionResult{}, fault(
-			"guarded promotion of "+request.StableRef().String()+" did not land",
-			"the remote was absent, stale, racing, or at a different commit, so the update was not verified",
-			"promotion.Promoter.Promote", "guarded update",
-			"the pasture-stable ref is unchanged and the promotion did not publish a racing publisher's work",
-			"re-read --expected-old from the current remote channel state and re-run the promotion", err,
-		)
+		return preparedCandidate{}, errors.Join(err, pasture.close())
 	}
+	projection, err := ProjectClaudeCodeTree(pasture.repository.String(), "aura-plugins", pasture.commit.String())
+	if err != nil {
+		return preparedCandidate{}, errors.Join(err, aura.close(), pasture.close())
+	}
+	return preparedCandidate{pasture: pasture, aura: aura, projection: projection, stableRef: request.stableRef, expected: request.expectedOld}, nil
+}
 
-	return PromotionResult{
-		Ref:     request.StableRef().String(),
-		Commit:  commit.String(),
-		Tree:    tree.String(),
-		Outcome: proof.Outcome(),
-		proof:   proof,
+func (c Coordinator) gate(candidate preparedCandidate) (gatedCandidate, error) {
+	marketplace := filepath.Join(candidate.aura.repository.String(), ".claude-plugin", "marketplace.json")
+	if err := ValidateMarketplaceFile(marketplace, candidate.projection); err != nil {
+		return gatedCandidate{}, mandatoryGateFailure("aura-marketplace-validation", err)
+	}
+	if err := c.runGoGate(candidate.pasture.repository, "pasture-package-race", "./..."); err != nil {
+		return gatedCandidate{}, mandatoryGateFailure("pasture-package-race", err)
+	}
+	if err := c.runGoGate(candidate.pasture.repository, "activation-race", "./internal/install/..."); err != nil {
+		return gatedCandidate{}, mandatoryGateFailure("activation-race", err)
+	}
+	return gatedCandidate{candidate: candidate}, nil
+}
+
+func mandatoryGateFailure(name string, cause error) error {
+	return fault("mandatory promotion gate "+name+" failed", "every static release gate must pass against the immutable candidate", "promotion.Coordinator.gate", name+" evaluation", "the pasture-stable ref remains unchanged", "fix the failing candidate check and retry", cause)
+}
+
+func (c Coordinator) runGoGate(repository effects.RepositoryID, name, pattern string) error {
+	goBinary, err := c.resolve("go")
+	if err != nil {
+		return fault("mandatory gate "+name+" could not resolve go", "the gate runs the repository test suite with the race detector", "promotion.Coordinator.runGoGate", name+" dispatch", "the candidate is not published", "install Go on PATH and retry", err)
+	}
+	if _, err := c.run(repository.String(), goBinary, "test", "-race", pattern); err != nil {
+		return fault("mandatory gate "+name+" failed", "the immutable Pasture candidate did not pass its required race-enabled suite", "promotion.Coordinator.runGoGate", name+" execution", "the candidate is not published", "fix the failing tests at the requested Pasture commit and retry", err)
+	}
+	return nil
+}
+
+func (c Coordinator) cleanup(candidate preparedCandidate) error {
+	return errors.Join(candidate.aura.close(), candidate.pasture.close())
+}
+
+func (c Coordinator) cleanupForPublication(candidate gatedCandidate) (publishableCandidate, error) {
+	prepared := candidate.candidate
+	if err := c.cleanup(prepared); err != nil {
+		return publishableCandidate{}, fault("immutable promotion candidate cleanup failed", "both detached candidate worktrees must be removed successfully before publication", "promotion.Coordinator.cleanupForPublication", "pre-publication cleanup", "the pasture-stable ref remains unchanged and guarded publication does not begin", "follow the nested cleanup error, prune stale worktrees, and retry", err)
+	}
+	return publishableCandidate{
+		repository: prepared.pasture.owner,
+		commit:     prepared.pasture.commit,
+		tree:       prepared.pasture.tree,
+		pushURL:    prepared.pasture.pushURL,
+		stableRef:  prepared.stableRef,
+		expected:   prepared.expected,
+		projection: prepared.projection,
 	}, nil
+}
+
+func (c Coordinator) publish(candidate publishableCandidate) (PromotionResult, error) {
+	pusher, err := effects.NewGitRepositoryPusher(c.resolve, c.run, candidate.pushURL)
+	if err != nil {
+		return PromotionResult{}, err
+	}
+	input, err := effects.NewGuardedPushInput(candidate.repository, candidate.commit, candidate.tree, candidate.stableRef, candidate.expected)
+	if err != nil {
+		return PromotionResult{}, fault("guarded publication input could not be constructed", "the prepared candidate must carry exact verified publication operands", "promotion.Coordinator.publish", "guarded publication construction", "the ref is unchanged", "inspect candidate preparation and retry", err)
+	}
+	proof, err := effects.GuardedPushExactCommit(input, pusher)
+	if err != nil {
+		return PromotionResult{}, fault("guarded promotion of "+candidate.stableRef.String()+" did not land", "the exact URL was absent, stale, racing, or at a different commit", "promotion.Coordinator.publish", "guarded publication", "the promotion did not overwrite a racing publisher", "re-read --expected-old from the canonical channel and retry", err)
+	}
+	return PromotionResult{Ref: candidate.stableRef.String(), Commit: candidate.commit.String(), Tree: candidate.tree.String(), Outcome: proof.Outcome(), Marketplace: candidate.projection, proof: proof}, nil
 }

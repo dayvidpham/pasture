@@ -2,11 +2,16 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/dayvidpham/pasture/internal/effects"
+	"github.com/dayvidpham/pasture/internal/promotion"
 )
 
 func runGit(t *testing.T, dir string, args ...string) string {
@@ -118,6 +123,65 @@ func TestPromoteStableCLIHasNoPublicGateBypass(t *testing.T) {
 		if strings.Contains(out.String(), forbidden) {
 			t.Fatalf("public help exposes bypass or provenance override %q\n%s", forbidden, out.String())
 		}
+	}
+}
+
+type cliPromotionRunner struct {
+	t         *testing.T
+	bare      string
+	gateCalls [][]string
+}
+
+func (r *cliPromotionRunner) run(dir, executable string, args ...string) (string, error) {
+	r.t.Helper()
+	if filepath.Base(executable) == "go" {
+		r.gateCalls = append(r.gateCalls, slices.Clone(args))
+		return "ok", nil
+	}
+	gitArgs := slices.Clone(args)
+	for i, arg := range gitArgs {
+		if arg == "https://github.com/dayvidpham/pasture.git" && (gitArgs[0] == "push" || gitArgs[0] == "ls-remote") {
+			gitArgs[i] = r.bare
+		}
+	}
+	return effects.DefaultCommandRunner(dir, executable, gitArgs...)
+}
+
+func TestPromoteStableCLIProductionPathRunsMandatoryGates(t *testing.T) {
+	pastureRepo, pastureCommit := candidateRepository(t, "https://github.com/dayvidpham/pasture.git", pastureCandidateFiles(t))
+	projection, err := promotion.ProjectClaudeCodeTree(pastureRepo, "aura-plugins", pastureCommit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plugins := make([]map[string]any, 0, len(projection.Entries))
+	for _, entry := range projection.Entries {
+		plugins = append(plugins, map[string]any{
+			"name": entry.Name, "description": entry.Description, "version": entry.Version,
+			"source": map[string]any{"source": entry.Source.Source, "url": entry.Source.URL, "path": entry.Source.Path, "sha": entry.Source.SHA},
+		})
+	}
+	marketplace, err := json.Marshal(map[string]any{"name": projection.MarketplaceName, "plugins": plugins})
+	if err != nil {
+		t.Fatal(err)
+	}
+	auraRepo, auraCommit := candidateRepository(t, "https://github.com/dayvidpham/aura-plugins.git", map[string]string{".claude-plugin/marketplace.json": string(marketplace)})
+	bare := t.TempDir()
+	runGit(t, bare, "init", "--bare", "--initial-branch=main", ".")
+	runner := &cliPromotionRunner{t: t, bare: bare}
+	cmd := newPromoteStableCmdWithRuntime(exec.LookPath, runner.run)
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--pasture-revision", pastureCommit, "--aura-revision", auraCommit, "--expected-old", "absent", "--remote", "origin", "--pasture-repo", pastureRepo, "--aura-repo", auraRepo})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("production CLI path: %v\n%s", err, out.String())
+	}
+	want := [][]string{{"test", "-race", "./..."}, {"test", "-race", "./internal/install/..."}}
+	if !slices.EqualFunc(runner.gateCalls, want, func(a, b []string) bool { return slices.Equal(a, b) }) {
+		t.Fatalf("CLI command gates = %v, want %v", runner.gateCalls, want)
+	}
+	if !strings.Contains(out.String(), "promoted "+promotion.DefaultStableRef) || runGit(t, bare, "rev-parse", promotion.DefaultStableRef) != pastureCommit {
+		t.Fatalf("CLI did not publish exact candidate:\n%s", out.String())
 	}
 }
 

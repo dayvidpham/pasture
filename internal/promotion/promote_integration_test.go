@@ -1,9 +1,12 @@
 package promotion_test
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,252 +14,244 @@ import (
 	"github.com/dayvidpham/pasture/internal/promotion"
 )
 
-// These tests exercise the full production promotion path against a temporary
-// bare git remote: the real GitRevisionResolver and the real
-// effects.GitRepositoryPusher, driven by the on-disk git binary. They falsify
-// every guarded-update failure mode and prove the old ref is preserved in every
-// failure case required by the guarded promotion contract.
+const canonicalPastureRemote = "https://github.com/dayvidpham/pasture.git"
+
+type promotionRunner struct {
+	t           *testing.T
+	bare        string
+	gateCalls   [][]string
+	failPattern string
+	failCleanup bool
+	mutateRepo  string
+	pushes      int
+	cleanups    int
+	unsafePush  bool
+}
+
+func (r *promotionRunner) run(dir, executable string, args ...string) (string, error) {
+	r.t.Helper()
+	if filepath.Base(executable) == "go" {
+		r.gateCalls = append(r.gateCalls, slices.Clone(args))
+		if r.mutateRepo != "" && len(r.gateCalls) == 1 {
+			git(r.t, r.mutateRepo, "remote", "set-url", "origin", "https://github.com/example/redirected.git")
+		}
+		if slices.Contains(args, r.failPattern) {
+			return "", errors.New("injected mandatory gate failure")
+		}
+		return "ok", nil
+	}
+	gitArgs := slices.Clone(args)
+	for i, arg := range gitArgs {
+		if arg == canonicalPastureRemote && (gitArgs[0] == "push" || gitArgs[0] == "ls-remote") {
+			gitArgs[i] = r.bare
+		}
+	}
+	if len(gitArgs) > 0 && gitArgs[0] == "push" {
+		r.pushes++
+		r.unsafePush = r.cleanups != 2
+	}
+	if r.failCleanup && len(gitArgs) >= 2 && gitArgs[0] == "worktree" && gitArgs[1] == "remove" {
+		_, _ = effects.DefaultCommandRunner(dir, executable, gitArgs...)
+		r.cleanups++
+		r.failCleanup = false
+		return "", errors.New("injected worktree cleanup failure")
+	}
+	output, err := effects.DefaultCommandRunner(dir, executable, gitArgs...)
+	if err == nil && len(gitArgs) >= 2 && gitArgs[0] == "worktree" && gitArgs[1] == "remove" {
+		r.cleanups++
+	}
+	return output, err
+}
 
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(cmd.Environ(),
-		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
-		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
-		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
-	)
+	cmd.Env = append(cmd.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("git %s in %s failed: %v\n%s", strings.Join(args, " "), dir, err, out)
+		t.Fatalf("git %s in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
 	}
 	return strings.TrimSpace(string(out))
 }
 
-// bareRemoteFixture stands up a bare remote and a work repo with one commit on
-// the pasture-stable-eligible branch, and returns their paths plus the head sha.
-func bareRemoteFixture(t *testing.T) (workDir, bareDir, head string) {
+func repository(t *testing.T, remote string, files map[string]string) (string, string) {
 	t.Helper()
-	bareDir = t.TempDir()
-	git(t, bareDir, "init", "--bare", "--initial-branch=main", ".")
-
-	workDir = t.TempDir()
-	git(t, workDir, "init", "--initial-branch=main", ".")
-	git(t, workDir, "config", "commit.gpgsign", "false")
-	git(t, workDir, "remote", "add", "origin", bareDir)
-	// One real commit to publish.
-	writeFile(t, workDir, "README.md", "pasture\n")
-	git(t, workDir, "add", "README.md")
-	git(t, workDir, "commit", "-m", "initial")
-	head = git(t, workDir, "rev-parse", "HEAD")
-	return workDir, bareDir, head
-}
-
-func writeFile(t *testing.T, dir, name, content string) {
-	t.Helper()
-	if err := writeFileAtomic(dir+"/"+name, content); err != nil {
-		t.Fatalf("write %s: %v", name, err)
+	dir := t.TempDir()
+	git(t, dir, "init", "--initial-branch=main", ".")
+	git(t, dir, "config", "commit.gpgsign", "false")
+	git(t, dir, "remote", "add", "origin", remote)
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-m", "candidate")
+	return dir, git(t, dir, "rev-parse", "HEAD")
 }
 
-func writeFileAtomic(path, content string) error {
-	return os.WriteFile(path, []byte(content), 0o644)
-}
-
-// remoteRef reads the bare remote's value for ref, or "" if absent.
-func remoteRef(t *testing.T, bareDir, ref string) string {
+func candidatePair(t *testing.T) (pastureRepo, pastureCommit, auraRepo, auraCommit, bare string) {
 	t.Helper()
-	cmd := exec.Command("git", "show-ref", "--verify", ref)
-	cmd.Dir = bareDir
-	out, err := cmd.CombinedOutput()
+	pastureFiles := map[string]string{"go.mod": "module example.invalid/candidate\n\ngo 1.25\n"}
+	for _, name := range []string{"pasture-agents", "pasture-hooks", "pasture-skills"} {
+		data, err := os.ReadFile(filepath.Join("..", "target", "claudecode", "assets", name, ".claude-plugin", "plugin.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		pastureFiles[filepath.Join("internal", "target", "claudecode", "assets", name, ".claude-plugin", "plugin.json")] = string(data)
+	}
+	pastureRepo, pastureCommit = repository(t, canonicalPastureRemote, pastureFiles)
+	projection, err := promotion.ProjectClaudeCodeTree(pastureRepo, "aura-plugins", pastureCommit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := projectedCatalog(projection)
+	data, err := jsonMarshal(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	auraRepo, auraCommit = repository(t, "https://github.com/dayvidpham/aura-plugins.git", map[string]string{".claude-plugin/marketplace.json": string(data)})
+	bare = t.TempDir()
+	git(t, bare, "init", "--bare", "--initial-branch=main", ".")
+	return
+}
+
+func jsonMarshal(value any) ([]byte, error) {
+	return json.Marshal(value)
+}
+
+func request(t *testing.T, pastureRepo, pastureCommit, auraRepo, auraCommit string, expected effects.ExpectedOldOID) promotion.PromotionRequest {
+	t.Helper()
+	pastureID, _ := effects.NewRepositoryID(pastureRepo)
+	auraID, _ := effects.NewRepositoryID(auraRepo)
+	ref, _ := effects.NewRemoteRef(promotion.DefaultStableRef)
+	request, err := promotion.NewPromotionRequest(pastureID, pastureCommit, auraID, auraCommit, "origin", ref, expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return request
+}
+
+func remoteRef(t *testing.T, bare string) string {
+	t.Helper()
+	cmd := exec.Command("git", "show-ref", "--verify", promotion.DefaultStableRef)
+	cmd.Dir = bare
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
-	fields := strings.Fields(strings.TrimSpace(string(out)))
-	if len(fields) == 0 {
-		return ""
-	}
-	return fields[0]
+	return strings.Fields(string(out))[0]
 }
 
-func productionPromoter(t *testing.T) promotion.Promoter {
-	t.Helper()
-	resolver, err := promotion.NewGitRevisionResolver(exec.LookPath, effects.DefaultCommandRunner)
-	if err != nil {
-		t.Fatalf("resolver: %v", err)
-	}
-	pusher, err := effects.NewGitRepositoryPusher(exec.LookPath, effects.DefaultCommandRunner, "origin")
-	if err != nil {
-		t.Fatalf("pusher: %v", err)
-	}
-	p, err := promotion.NewPromoter(resolver, pusher)
-	if err != nil {
-		t.Fatalf("promoter: %v", err)
-	}
-	return p
-}
-
-func mustRequest(t *testing.T, workDir, head string, expectedOld effects.ExpectedOldOID) promotion.PromotionRequest {
-	t.Helper()
-	repo, err := effects.NewRepositoryID(workDir)
-	if err != nil {
-		t.Fatalf("repo id: %v", err)
-	}
-	ref, err := effects.NewRemoteRef(promotion.DefaultStableRef)
-	if err != nil {
-		t.Fatalf("ref: %v", err)
-	}
-	req, err := promotion.NewPromotionRequest(repo, head, repo, head, "origin", ref, expectedOld)
-	if err != nil {
-		t.Fatalf("request: %v", err)
-	}
-	return req
-}
-
-func passGates(t *testing.T) []promotion.Gate {
-	t.Helper()
-	g, err := promotion.NewFuncGate("test-gate", func() error { return nil })
-	if err != nil {
-		t.Fatalf("gate: %v", err)
-	}
-	return []promotion.Gate{g}
-}
-
-// Fixture 1: initial absent creation.
-func TestPromoteCreatesAbsentChannel(t *testing.T) {
-	workDir, bareDir, head := bareRemoteFixture(t)
-	p := productionPromoter(t)
-	req := mustRequest(t, workDir, head, effects.ExpectAbsentRemote())
-
-	res, err := p.Promote(req, passGates(t))
+func TestCoordinatorRunsExactMandatoryGateSetAndPublishes(t *testing.T) {
+	pastureRepo, pastureCommit, auraRepo, auraCommit, bare := candidatePair(t)
+	runner := &promotionRunner{t: t, bare: bare}
+	coordinator, _ := promotion.NewCoordinator(exec.LookPath, runner.run)
+	result, err := coordinator.Promote(request(t, pastureRepo, pastureCommit, auraRepo, auraCommit, effects.ExpectAbsentRemote()))
 	if err != nil {
 		t.Fatalf("promote: %v", err)
 	}
-	if res.Outcome != effects.GuardedPushPushed {
-		t.Fatalf("outcome = %q, want pushed", res.Outcome)
+	wantGates := [][]string{{"test", "-race", "./..."}, {"test", "-race", "./internal/install/..."}}
+	if !slices.EqualFunc(runner.gateCalls, wantGates, func(a, b []string) bool { return slices.Equal(a, b) }) {
+		t.Fatalf("command gates = %v, want exact mandatory set %v", runner.gateCalls, wantGates)
 	}
-	if got := remoteRef(t, bareDir, promotion.DefaultStableRef); got != head {
-		t.Fatalf("remote ref = %q, want %q", got, head)
-	}
-}
-
-// Fixture 2: matching expected-old promotion (advance the channel).
-func TestPromoteAdvancesChannelOnMatchingExpectedOld(t *testing.T) {
-	workDir, bareDir, first := bareRemoteFixture(t)
-	p := productionPromoter(t)
-
-	// Create the channel at the first commit.
-	if _, err := p.Promote(mustRequest(t, workDir, first, effects.ExpectAbsentRemote()), passGates(t)); err != nil {
-		t.Fatalf("initial promote: %v", err)
-	}
-
-	// A second candidate commit.
-	writeFile(t, workDir, "CHANGELOG.md", "v2\n")
-	git(t, workDir, "add", "CHANGELOG.md")
-	git(t, workDir, "commit", "-m", "second")
-	second := git(t, workDir, "rev-parse", "HEAD")
-
-	firstCommit, err := effects.NewCommitOID(strings.ToLower(first))
-	if err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-	expectAt, err := effects.ExpectRemoteAt(firstCommit)
-	if err != nil {
-		t.Fatalf("expect: %v", err)
-	}
-
-	res, err := p.Promote(mustRequest(t, workDir, second, expectAt), passGates(t))
-	if err != nil {
-		t.Fatalf("advance promote: %v", err)
-	}
-	if res.Outcome != effects.GuardedPushPushed {
-		t.Fatalf("outcome = %q, want pushed", res.Outcome)
-	}
-	if got := remoteRef(t, bareDir, promotion.DefaultStableRef); got != second {
-		t.Fatalf("remote ref = %q, want %q", got, second)
+	if result.Commit != pastureCommit || remoteRef(t, bare) != pastureCommit || runner.pushes != 1 || runner.cleanups != 2 || runner.unsafePush {
+		t.Fatalf("publication result=%+v remote=%q pushes=%d cleanups=%d unsafe=%v", result, remoteRef(t, bare), runner.pushes, runner.cleanups, runner.unsafePush)
 	}
 }
 
-// Fixture 3 + racing-advance preservation: a stale expected-old is rejected and
-// the racing publisher's advance is preserved unchanged.
-func TestPromoteRejectsStaleExpectedOldAndPreservesRacingAdvance(t *testing.T) {
-	workDir, bareDir, first := bareRemoteFixture(t)
-	p := productionPromoter(t)
-
-	// A racing publisher already advanced the channel to `first`.
-	if _, err := p.Promote(mustRequest(t, workDir, first, effects.ExpectAbsentRemote()), passGates(t)); err != nil {
-		t.Fatalf("racing publish: %v", err)
+func TestCoordinatorIgnoresRemoteNameMutationAfterPreparation(t *testing.T) {
+	pastureRepo, pastureCommit, auraRepo, auraCommit, bare := candidatePair(t)
+	runner := &promotionRunner{t: t, bare: bare, mutateRepo: pastureRepo}
+	coordinator, _ := promotion.NewCoordinator(exec.LookPath, runner.run)
+	if _, err := coordinator.Promote(request(t, pastureRepo, pastureCommit, auraRepo, auraCommit, effects.ExpectAbsentRemote())); err != nil {
+		t.Fatalf("exact verified URL publication failed after config mutation: %v", err)
 	}
+	if remoteRef(t, bare) != pastureCommit {
+		t.Fatalf("canonical endpoint was not updated: %q", remoteRef(t, bare))
+	}
+}
 
-	// Our candidate commit.
-	writeFile(t, workDir, "ours.md", "ours\n")
-	git(t, workDir, "add", "ours.md")
-	git(t, workDir, "commit", "-m", "ours")
-	ours := git(t, workDir, "rev-parse", "HEAD")
+func TestCoordinatorGateAndCleanupFailuresPreserveRef(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		failPattern string
+		cleanup     bool
+	}{
+		{"package race", "./...", false},
+		{"activation race", "./internal/install/...", false},
+		{"cleanup", "", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pastureRepo, pastureCommit, auraRepo, auraCommit, bare := candidatePair(t)
+			runner := &promotionRunner{t: t, bare: bare, failPattern: test.failPattern, failCleanup: test.cleanup}
+			coordinator, _ := promotion.NewCoordinator(exec.LookPath, runner.run)
+			_, err := coordinator.Promote(request(t, pastureRepo, pastureCommit, auraRepo, auraCommit, effects.ExpectAbsentRemote()))
+			if err == nil {
+				t.Fatal("expected pre-publication failure")
+			}
+			if test.cleanup && !strings.Contains(err.Error(), "cleanup failed") {
+				t.Fatalf("cleanup failure is not actionable: %v", err)
+			}
+			if got := remoteRef(t, bare); got != "" || runner.pushes != 0 {
+				t.Fatalf("failure changed ref=%q pushes=%d", got, runner.pushes)
+			}
+		})
+	}
+}
 
-	// We believed the channel was still absent (stale expectation).
-	res, err := p.Promote(mustRequest(t, workDir, ours, effects.ExpectAbsentRemote()), passGates(t))
+func TestCoordinatorCleansPastureWhenAuraPreparationFails(t *testing.T) {
+	pastureRepo, pastureCommit, auraRepo, _, bare := candidatePair(t)
+	runner := &promotionRunner{t: t, bare: bare}
+	coordinator, _ := promotion.NewCoordinator(exec.LookPath, runner.run)
+	_, err := coordinator.Promote(request(t, pastureRepo, pastureCommit, auraRepo, testAuraCommit, effects.ExpectAbsentRemote()))
 	if err == nil {
-		t.Fatalf("expected stale expected-old to be rejected, got result %+v", res)
+		t.Fatal("expected unavailable Aura commit to fail preparation")
 	}
-	// The racing publisher's advance is preserved: the ref still holds `first`.
-	if got := remoteRef(t, bareDir, promotion.DefaultStableRef); got != first {
-		t.Fatalf("racing advance not preserved: remote ref = %q, want %q", got, first)
-	}
-}
-
-// Fixture 4: idempotent retry — re-running the same landed promotion is a
-// verified replay, and the remote is unchanged.
-func TestPromoteIdempotentRetry(t *testing.T) {
-	workDir, bareDir, head := bareRemoteFixture(t)
-	p := productionPromoter(t)
-
-	if _, err := p.Promote(mustRequest(t, workDir, head, effects.ExpectAbsentRemote()), passGates(t)); err != nil {
-		t.Fatalf("first promote: %v", err)
-	}
-
-	headCommit, err := effects.NewCommitOID(strings.ToLower(head))
-	if err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-	expectAt, err := effects.ExpectRemoteAt(headCommit)
-	if err != nil {
-		t.Fatalf("expect: %v", err)
-	}
-
-	// Retry landing the same commit; the remote already holds it.
-	res, err := p.Promote(mustRequest(t, workDir, head, expectAt), passGates(t))
-	if err != nil {
-		t.Fatalf("retry promote: %v", err)
-	}
-	if res.Outcome != effects.GuardedPushIdempotentReplay {
-		t.Fatalf("outcome = %q, want idempotent-replay", res.Outcome)
-	}
-	if got := remoteRef(t, bareDir, promotion.DefaultStableRef); got != head {
-		t.Fatalf("remote ref = %q, want %q", got, head)
+	if runner.cleanups != 1 || runner.pushes != 0 || remoteRef(t, bare) != "" {
+		t.Fatalf("partial preparation cleanup: cleanups=%d pushes=%d ref=%q", runner.cleanups, runner.pushes, remoteRef(t, bare))
 	}
 }
 
-// A failing gate aborts before any ref update: the channel is never created.
-func TestPromoteFailingGateLeavesRefUnchanged(t *testing.T) {
-	workDir, bareDir, head := bareRemoteFixture(t)
-	p := productionPromoter(t)
-
-	failing, err := promotion.NewFuncGate("failing-gate", func() error {
-		return errors.New("simulated gate failure")
-	})
-	if err != nil {
-		t.Fatalf("gate: %v", err)
+func TestCoordinatorPreservesRacingRef(t *testing.T) {
+	pastureRepo, pastureCommit, auraRepo, auraCommit, bare := candidatePair(t)
+	runner := &promotionRunner{t: t, bare: bare}
+	coordinator, _ := promotion.NewCoordinator(exec.LookPath, runner.run)
+	if _, err := coordinator.Promote(request(t, pastureRepo, pastureCommit, auraRepo, auraCommit, effects.ExpectAbsentRemote())); err != nil {
+		t.Fatal(err)
 	}
-
-	res, err := p.Promote(mustRequest(t, workDir, head, effects.ExpectAbsentRemote()), []promotion.Gate{failing})
+	first := pastureCommit
+	file := filepath.Join(pastureRepo, "second")
+	if err := os.WriteFile(file, []byte("second"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, pastureRepo, "add", "second")
+	git(t, pastureRepo, "commit", "-m", "second")
+	second := git(t, pastureRepo, "rev-parse", "HEAD")
+	projection, err := promotion.ProjectClaudeCodeTree(pastureRepo, "aura-plugins", second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := json.Marshal(projectedCatalog(projection))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(auraRepo, ".claude-plugin", "marketplace.json"), catalog, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, auraRepo, "add", ".claude-plugin/marketplace.json")
+	git(t, auraRepo, "commit", "-m", "second projection")
+	auraCommit = git(t, auraRepo, "rev-parse", "HEAD")
+	_, err = coordinator.Promote(request(t, pastureRepo, second, auraRepo, auraCommit, effects.ExpectAbsentRemote()))
 	if err == nil {
-		t.Fatalf("expected gate failure, got %+v", res)
+		t.Fatal("expected stale absent lease to fail")
 	}
-	if !strings.Contains(err.Error(), "failing-gate") {
-		t.Fatalf("error does not name the failing gate: %v", err)
-	}
-	if got := remoteRef(t, bareDir, promotion.DefaultStableRef); got != "" {
-		t.Fatalf("ref was created despite gate failure: %q", got)
+	if got := remoteRef(t, bare); got != first {
+		t.Fatalf("racing ref changed to %q, want %q", got, first)
 	}
 }

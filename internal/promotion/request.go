@@ -9,27 +9,24 @@ import (
 // DefaultStableRef is the moving release channel ref this package promotes.
 const DefaultStableRef = "refs/heads/pasture-stable"
 
-// PromotionRequest is a validated request to advance the pasture-stable ref to a
-// named Pasture revision, gated on an Aura revision's repository/marketplace
-// checks. It carries the exact operands the guarded update needs: the pasture
-// working repository, the revision to publish, the Aura repository/revision the
-// marketplace gate validates, the git remote, the destination ref, and the
-// expected prior remote state (an explicit commit or explicit absence).
+// PromotionRequest is the exact, constructor-validated input to Coordinator.
+// It identifies both immutable commits and the local repositories used to
+// materialize them. It contains no gate evidence or projected marketplace data;
+// those are derived exactly once by the coordinator.
 type PromotionRequest struct {
-	pastureRepo     effects.RepositoryID
-	pastureRevision string
-	auraRepo        effects.RepositoryID
-	auraRevision    string
-	remote          string
-	stableRef       effects.RemoteRef
-	expectedOld     effects.ExpectedOldOID
-	valid           bool
+	pastureRepo   effects.RepositoryID
+	pastureCommit effects.CommitOID
+	auraRepo      effects.RepositoryID
+	auraCommit    effects.CommitOID
+	remote        string
+	stableRef     effects.RemoteRef
+	expectedOld   effects.ExpectedOldOID
+	valid         bool
 }
 
 // NewPromotionRequest validates every operand of a pasture-stable promotion. The
-// pasture and aura repositories are working-directory identities; pastureRevision
-// is the ref/sha to publish (resolved to an exact commit at run time);
-// auraRevision names the Aura tree the marketplace/repository gate runs against;
+// pasture and aura repositories are working-directory identities; both revision
+// operands must already be full immutable commit IDs;
 // remote is the configured git remote; stableRef is the destination ref; and
 // expectedOld states the remote's required prior state.
 func NewPromotionRequest(
@@ -59,7 +56,8 @@ func NewPromotionRequest(
 			"pass --pasture-revision <sha> naming the reviewed commit to promote", nil,
 		)
 	}
-	if _, err := effects.NewCommitOID(pastureRevision); err != nil {
+	pastureCommit, err := effects.NewCommitOID(pastureRevision)
+	if err != nil {
 		return PromotionRequest{}, fault(
 			"pasture revision is not a full immutable commit id",
 			"promotion gates and publication must address the same exact commit object",
@@ -86,7 +84,8 @@ func NewPromotionRequest(
 			"pass --aura-revision <sha> naming the Aura commit to validate", nil,
 		)
 	}
-	if _, err := effects.NewCommitOID(auraRevision); err != nil {
+	auraCommit, err := effects.NewCommitOID(auraRevision)
+	if err != nil {
 		return PromotionRequest{}, fault(
 			"aura revision is not a full immutable commit id",
 			"marketplace validation must address one exact Aura commit object",
@@ -123,38 +122,16 @@ func NewPromotionRequest(
 		)
 	}
 	return PromotionRequest{
-		pastureRepo:     pastureRepo,
-		pastureRevision: pastureRevision,
-		auraRepo:        auraRepo,
-		auraRevision:    auraRevision,
-		remote:          remote,
-		stableRef:       stableRef,
-		expectedOld:     expectedOld,
-		valid:           true,
+		pastureRepo:   pastureRepo,
+		pastureCommit: pastureCommit,
+		auraRepo:      auraRepo,
+		auraCommit:    auraCommit,
+		remote:        remote,
+		stableRef:     stableRef,
+		expectedOld:   expectedOld,
+		valid:         true,
 	}, nil
 }
-
-// PastureRepo returns the pasture working repository the revision is read and
-// pushed from.
-func (r PromotionRequest) PastureRepo() effects.RepositoryID { return r.pastureRepo }
-
-// PastureRevision returns the raw revision to publish (resolved at run time).
-func (r PromotionRequest) PastureRevision() string { return r.pastureRevision }
-
-// AuraRepo returns the aura working repository the marketplace gate validates.
-func (r PromotionRequest) AuraRepo() effects.RepositoryID { return r.auraRepo }
-
-// AuraRevision returns the aura revision the gate validates against.
-func (r PromotionRequest) AuraRevision() string { return r.auraRevision }
-
-// Remote returns the configured git remote name.
-func (r PromotionRequest) Remote() string { return r.remote }
-
-// StableRef returns the destination ref the channel advances.
-func (r PromotionRequest) StableRef() effects.RemoteRef { return r.stableRef }
-
-// ExpectedOld returns the required prior remote state.
-func (r PromotionRequest) ExpectedOld() effects.ExpectedOldOID { return r.expectedOld }
 
 // IsValid reports whether the request was validly constructed.
 func (r PromotionRequest) IsValid() bool { return r.valid }

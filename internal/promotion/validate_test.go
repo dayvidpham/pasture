@@ -17,10 +17,7 @@ type marketplaceValidationFixture struct {
 func TestValidateMarketplaceFixtureMatrix(t *testing.T) {
 	var fixtures []marketplaceValidationFixture
 	testutil.LoadFixtures(t, testutil.MarketplaceValidation, &fixtures)
-	projection, err := promotion.ProjectClaudeCode(mustDescriptor(t), "aura-plugins", promotion.PastureRepository, testPastureCommit)
-	if err != nil {
-		t.Fatalf("projection: %v", err)
-	}
+	projection := projectCandidateTree(t)
 
 	for _, fixture := range fixtures {
 		fixture := fixture
@@ -38,6 +35,10 @@ func TestValidateMarketplaceFixtureMatrix(t *testing.T) {
 				plugins[0]["name"] = " " + plugins[0]["name"].(string)
 			case "wrong_path":
 				plugins[0]["source"].(map[string]any)["path"] = "internal/target/claudecode/assets/other"
+			case "wrong_url":
+				plugins[0]["source"].(map[string]any)["url"] = "https://github.com/example/pasture.git"
+			case "duplicate_source_path":
+				plugins[1]["source"].(map[string]any)["path"] = plugins[0]["source"].(map[string]any)["path"]
 			case "moving_ref":
 				source := plugins[0]["source"].(map[string]any)
 				delete(source, "sha")
@@ -60,6 +61,18 @@ func TestValidateMarketplaceFixtureMatrix(t *testing.T) {
 				t.Fatalf("ValidateMarketplace error = %v, want_error=%v", err, fixture.WantError)
 			}
 		})
+	}
+}
+
+func TestValidateMarketplaceRejectsDuplicateProjectionAuthorityPath(t *testing.T) {
+	projection := projectCandidateTree(t)
+	projection.Entries[1].Source.Path = projection.Entries[0].Source.Path
+	data, err := json.Marshal(projectedCatalog(projection))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := promotion.ValidateMarketplace(data, "fixture", projection); err == nil {
+		t.Fatal("expected duplicate candidate-owned source path to fail before catalog comparison")
 	}
 }
 

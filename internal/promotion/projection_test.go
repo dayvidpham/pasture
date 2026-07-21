@@ -1,117 +1,98 @@
 package promotion_test
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/promotion"
-	"github.com/dayvidpham/pasture/internal/target/claudecode"
 )
 
-func mustDescriptor(t *testing.T) claudecode.TargetDescriptor {
+func candidateTree(t *testing.T) string {
 	t.Helper()
-	d, err := claudecode.Descriptor()
-	if err != nil {
-		t.Fatalf("descriptor: %v", err)
+	root := t.TempDir()
+	for _, name := range []string{"pasture-agents", "pasture-hooks", "pasture-skills"} {
+		source := filepath.Join("..", "target", "claudecode", "assets", name, ".claude-plugin", "plugin.json")
+		data, err := os.ReadFile(source)
+		if err != nil {
+			t.Fatalf("read %s: %v", source, err)
+		}
+		destination := filepath.Join(root, "internal", "target", "claudecode", "assets", name, ".claude-plugin", "plugin.json")
+		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(destination, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
-	return d
+	return root
 }
 
-func TestProjectClaudeCodeProducesOneEntryPerComponent(t *testing.T) {
-	proj, err := promotion.ProjectClaudeCode(mustDescriptor(t), "aura-plugins", promotion.PastureRepository, testPastureCommit)
+func projectCandidateTree(t *testing.T) promotion.Projection {
+	t.Helper()
+	projection, err := promotion.ProjectClaudeCodeTree(candidateTree(t), "aura-plugins", testPastureCommit)
 	if err != nil {
 		t.Fatalf("project: %v", err)
 	}
-	if len(proj.Entries) != 3 {
-		t.Fatalf("entries = %d, want 3", len(proj.Entries))
+	return projection
+}
+
+func TestProjectClaudeCodeTreePinsExactDistinctSources(t *testing.T) {
+	projection := projectCandidateTree(t)
+	want := map[string]string{
+		"pasture-agents": "internal/target/claudecode/assets/pasture-agents",
+		"pasture-hooks":  "internal/target/claudecode/assets/pasture-hooks",
+		"pasture-skills": "internal/target/claudecode/assets/pasture-skills",
 	}
-	names := map[string]promotion.MarketplaceEntry{}
-	for _, e := range proj.Entries {
-		names[e.Name] = e
-		if e.Source.Source != promotion.SourceGitSubdir {
-			t.Errorf("%s source = %q, want git-subdir", e.Name, e.Source.Source)
-		}
-		if e.Source.SHA != testPastureCommit || e.Source.Path == "" {
-			t.Errorf("%s source is not pinned to a distinct path at %s: %+v", e.Name, testPastureCommit, e.Source)
-		}
-		if e.Version == "" {
-			t.Errorf("%s has empty version", e.Name)
-		}
+	if len(projection.Entries) != len(want) {
+		t.Fatalf("entries = %d, want %d", len(projection.Entries), len(want))
 	}
-	for _, want := range []string{"pasture-skills", "pasture-agents", "pasture-hooks"} {
-		if _, ok := names[want]; !ok {
-			t.Errorf("missing projected plugin %q", want)
+	paths := map[string]struct{}{}
+	for _, entry := range projection.Entries {
+		if entry.Source.Source != promotion.SourceGitSubdir || entry.Source.URL != "https://github.com/dayvidpham/pasture.git" || entry.Source.SHA != testPastureCommit || entry.Source.Path != want[entry.Name] {
+			t.Errorf("%s source = %+v, want canonical exact tuple", entry.Name, entry.Source)
 		}
+		if _, duplicate := paths[entry.Source.Path]; duplicate {
+			t.Errorf("source path %q is not pairwise distinct", entry.Source.Path)
+		}
+		paths[entry.Source.Path] = struct{}{}
 	}
 }
 
-func TestProjectClaudeCodeSelectorsMatchComponentIDs(t *testing.T) {
-	proj, err := promotion.ProjectClaudeCode(mustDescriptor(t), "aura-plugins", promotion.PastureRepository, testPastureCommit)
+func TestProjectClaudeCodeTreeSelectorsAndDeterminism(t *testing.T) {
+	root := candidateTree(t)
+	a, err := promotion.ProjectClaudeCodeTree(root, "aura-plugins", testPastureCommit)
 	if err != nil {
-		t.Fatalf("project: %v", err)
+		t.Fatal(err)
 	}
-	got := proj.Selectors()
-	// Selectors are the stable activation identities, in canonical (name-sorted)
-	// order: agents, hooks, skills.
-	want := []string{"claude-code/agents", "claude-code/hooks", "claude-code/skills"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("selectors = %v, want %v", got, want)
-	}
-}
-
-func TestProjectClaudeCodeIsDeterministic(t *testing.T) {
-	a, err := promotion.ProjectClaudeCode(mustDescriptor(t), "aura-plugins", promotion.PastureRepository, testPastureCommit)
+	b, err := promotion.ProjectClaudeCodeTree(root, "aura-plugins", testPastureCommit)
 	if err != nil {
-		t.Fatalf("project a: %v", err)
-	}
-	b, err := promotion.ProjectClaudeCode(mustDescriptor(t), "aura-plugins", promotion.PastureRepository, testPastureCommit)
-	if err != nil {
-		t.Fatalf("project b: %v", err)
+		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(a, b) {
-		t.Fatalf("projection is not deterministic:\n a=%+v\n b=%+v", a, b)
+		t.Fatalf("projection differs: a=%+v b=%+v", a, b)
+	}
+	want := []string{"claude-code/agents", "claude-code/hooks", "claude-code/skills"}
+	if !reflect.DeepEqual(a.Selectors(), want) {
+		t.Fatalf("selectors = %v, want %v", a.Selectors(), want)
 	}
 }
 
-func TestProjectClaudeCodeRejectsEmptyOperands(t *testing.T) {
-	d := mustDescriptor(t)
-	cases := []struct {
-		name                    string
-		market, repo, sourceRef string
-	}{
-		{"empty market", "", promotion.PastureRepository, testPastureCommit},
-		{"empty repo", "aura-plugins", "", testPastureCommit},
-		{"empty ref", "aura-plugins", promotion.PastureRepository, ""},
-		{"moving ref", "aura-plugins", promotion.PastureRepository, promotion.DefaultStableRef},
+func TestProjectClaudeCodeTreeRejectsMissingCanonicalPath(t *testing.T) {
+	root := candidateTree(t)
+	if err := os.Remove(filepath.Join(root, "internal", "target", "claudecode", "assets", "pasture-hooks", ".claude-plugin", "plugin.json")); err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if _, err := promotion.ProjectClaudeCode(d, tc.market, tc.repo, tc.sourceRef); err == nil {
-				t.Fatalf("expected error for %s", tc.name)
-			}
-		})
-	}
-}
-
-func TestProjectClaudeCodeRejectsInvalidDescriptor(t *testing.T) {
-	if _, err := promotion.ProjectClaudeCode(claudecode.TargetDescriptor{}, "aura-plugins", promotion.PastureRepository, testPastureCommit); err == nil {
-		t.Fatal("expected error for zero descriptor")
+	if _, err := promotion.ProjectClaudeCodeTree(root, "aura-plugins", testPastureCommit); err == nil {
+		t.Fatal("expected missing canonical manifest to fail")
 	}
 }
 
 func TestFindEntry(t *testing.T) {
-	proj, err := promotion.ProjectClaudeCode(mustDescriptor(t), "aura-plugins", promotion.PastureRepository, testPastureCommit)
-	if err != nil {
-		t.Fatalf("project: %v", err)
-	}
-	e, ok := proj.FindEntry("pasture-skills")
-	if !ok {
-		t.Fatal("pasture-skills not found")
-	}
-	if e.ComponentID != "claude-code/skills" {
-		t.Fatalf("component id = %q", e.ComponentID)
-	}
-	if _, ok := proj.FindEntry("nonexistent"); ok {
-		t.Fatal("unexpectedly found nonexistent entry")
+	projection := projectCandidateTree(t)
+	entry, ok := projection.FindEntry("pasture-skills")
+	if !ok || entry.ComponentID != "claude-code/skills" {
+		t.Fatalf("pasture-skills entry = %+v, present=%v", entry, ok)
 	}
 }

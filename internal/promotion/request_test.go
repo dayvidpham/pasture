@@ -1,7 +1,6 @@
 package promotion_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/effects"
@@ -95,22 +94,5 @@ func TestNewPromotionRequestValidation(t *testing.T) {
 				t.Fatalf("expected %s to be rejected", tc.name)
 			}
 		})
-	}
-}
-
-func TestPromotionRequestAccessors(t *testing.T) {
-	repo, ref := validRefAndRepo(t)
-	req, err := promotion.NewPromotionRequest(repo, testPastureCommit, repo, testAuraCommit, "origin", ref, effects.ExpectAbsentRemote())
-	if err != nil {
-		t.Fatalf("request: %v", err)
-	}
-	if req.PastureRevision() != testPastureCommit || req.AuraRevision() != testAuraCommit || req.Remote() != "origin" {
-		t.Fatal("accessor mismatch")
-	}
-	if req.StableRef().String() != promotion.DefaultStableRef {
-		t.Fatalf("ref = %q", req.StableRef())
-	}
-	if !strings.HasPrefix(req.StableRef().String(), "refs/heads/") {
-		t.Fatalf("unexpected ref %q", req.StableRef())
 	}
 }

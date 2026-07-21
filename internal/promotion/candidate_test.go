@@ -1,4 +1,4 @@
-package promotion_test
+package promotion
 
 import (
 	"os"
@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/effects"
-	"github.com/dayvidpham/pasture/internal/promotion"
 )
 
 func candidateGit(t *testing.T, dir string, args ...string) string {
@@ -39,21 +38,24 @@ func TestPrepareRepositorySnapshotUsesNamedCommitNotLiveFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo, _ := effects.NewRepositoryID(repoPath)
-	snapshot, err := promotion.PrepareRepositorySnapshot(repo, commit, "origin", promotion.PastureRepository)
+	snapshot, err := prepareRepositorySnapshot(repo, commit, "origin", PastureRepository, exec.LookPath, effects.DefaultCommandRunner)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := snapshot.Close(); err != nil {
+		if err := snapshot.close(); err != nil {
 			t.Errorf("close snapshot: %v", err)
 		}
 	})
-	data, err := os.ReadFile(filepath.Join(snapshot.Repository.String(), "evidence.txt"))
+	data, err := os.ReadFile(filepath.Join(snapshot.repository.String(), "evidence.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(data) != "committed\n" {
 		t.Fatalf("snapshot read live content %q", data)
+	}
+	if snapshot.fetchURL != "https://github.com/dayvidpham/pasture.git" || snapshot.pushURL != "https://github.com/dayvidpham/pasture.git" {
+		t.Fatalf("snapshot URLs = fetch %q push %q, want exact canonical URL", snapshot.fetchURL, snapshot.pushURL)
 	}
 }
 
@@ -62,7 +64,7 @@ func TestPrepareRepositorySnapshotRejectsWrongProvenanceBeforeMaterialization(t 
 	candidateGit(t, repoPath, "init", "--initial-branch=main", ".")
 	candidateGit(t, repoPath, "remote", "add", "origin", "https://github.com/example/unrelated.git")
 	repo, _ := effects.NewRepositoryID(repoPath)
-	_, err := promotion.PrepareRepositorySnapshot(repo, testPastureCommit, "origin", promotion.PastureRepository)
+	_, err := prepareRepositorySnapshot(repo, "0123456789abcdef0123456789abcdef01234567", "origin", PastureRepository, exec.LookPath, effects.DefaultCommandRunner)
 	if err == nil || !strings.Contains(err.Error(), "not the canonical") {
 		t.Fatalf("wrong provenance error = %v", err)
 	}

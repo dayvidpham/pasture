@@ -16,6 +16,10 @@ import (
 // aggregate marketplace from the pinned target descriptors, and runs the ordered
 // gate set before performing exactly one guarded ref update.
 func newPromoteStableCmd() *cobra.Command {
+	return newPromoteStableCmdWithRuntime(exec.LookPath, effects.DefaultCommandRunner)
+}
+
+func newPromoteStableCmdWithRuntime(resolve effects.ExecutableResolver, run effects.CommandRunner) *cobra.Command {
 	var (
 		pastureRevision string
 		auraRevision    string
@@ -88,45 +92,12 @@ Example:
 				return err
 			}
 
-			pastureSnapshot, err := promotion.PrepareRepositorySnapshot(pastureRepoID, pastureRevision, remote, promotion.PastureRepository)
-			if err != nil {
-				return err
-			}
-			defer pastureSnapshot.Close()
-			auraSnapshot, err := promotion.PrepareRepositorySnapshot(auraRepoID, auraRevision, "origin", promotion.AuraRepository)
-			if err != nil {
-				return err
-			}
-			defer auraSnapshot.Close()
-
-			projection, err := promotion.ProjectClaudeCodeTree(pastureSnapshot.Repository.String(), "aura-plugins", pastureSnapshot.Commit.String())
+			coordinator, err := promotion.NewCoordinator(resolve, run)
 			if err != nil {
 				return err
 			}
 
-			gates, err := buildPromotionGates(
-				pastureSnapshot.Repository,
-				projection,
-				filepath.Join(auraSnapshot.Repository.String(), ".claude-plugin", "marketplace.json"),
-			)
-			if err != nil {
-				return err
-			}
-
-			resolver, err := promotion.NewGitRevisionResolver(exec.LookPath, effects.DefaultCommandRunner)
-			if err != nil {
-				return err
-			}
-			pusher, err := effects.NewGitRepositoryPusher(exec.LookPath, effects.DefaultCommandRunner, remote)
-			if err != nil {
-				return err
-			}
-			promoter, err := promotion.NewPromoter(resolver, pusher)
-			if err != nil {
-				return err
-			}
-
-			result, err := promoter.Promote(request, gates)
+			result, err := coordinator.Promote(request)
 			if err != nil {
 				return err
 			}
@@ -137,8 +108,8 @@ Example:
 			fmt.Fprintf(out, "  tree:    %s\n", result.Tree)
 			fmt.Fprintf(out, "  outcome: %s\n", result.Outcome)
 			fmt.Fprintf(out, "  marketplace: %s (%d plugins, ref %s)\n",
-				projection.MarketplaceName, len(projection.Entries), projection.SourceRef)
-			for _, e := range projection.Entries {
+				result.Marketplace.MarketplaceName, len(result.Marketplace.Entries), result.Marketplace.SourceRef)
+			for _, e := range result.Marketplace.Entries {
 				fmt.Fprintf(out, "    - %s %s [%s]\n", e.Name, e.Version, e.ComponentID)
 			}
 			return nil
@@ -159,34 +130,4 @@ Example:
 	_ = cmd.MarkFlagRequired("aura-repo")
 
 	return cmd
-}
-
-// buildPromotionGates assembles the mandatory production gate set against
-// detached immutable candidate checkouts.
-func buildPromotionGates(
-	pastureRepo effects.RepositoryID,
-	projection promotion.Projection,
-	marketplacePath string,
-) ([]promotion.Gate, error) {
-	marketGate, err := promotion.NewFuncGate("aura-marketplace-validation", func() error {
-		return promotion.ValidateMarketplaceFile(marketplacePath, projection)
-	})
-	if err != nil {
-		return nil, err
-	}
-	pkgTests, err := promotion.NewCommandGate(
-		"pasture-package-tests", pastureRepo, "go",
-		[]string{"test", "-race", "./..."}, exec.LookPath, effects.DefaultCommandRunner,
-	)
-	if err != nil {
-		return nil, err
-	}
-	activationFixtures, err := promotion.NewCommandGate(
-		"activation-fixtures", pastureRepo, "go",
-		[]string{"test", "-race", "./internal/install/..."}, exec.LookPath, effects.DefaultCommandRunner,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return []promotion.Gate{marketGate, pkgTests, activationFixtures}, nil
 }
