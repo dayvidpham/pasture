@@ -66,10 +66,13 @@ var OpenCodeTarget = TargetHarness{
 	SkillTemplate:    "templates/opencode_skill.go.tmpl",
 	SubSkillTemplate: "templates/opencode_skill_sub.go.tmpl",
 	SkillWrite:       WriteFullFile,
-	Agents:           openCodeAgentEmitter{},
-	Manifest:         openCodeManifestEmitter{},
-	Verbatim:         openCodeVerbatimDirs,
-	CanonicalSkills:  []CanonicalSkillID{CanonicalSkillInstallCLI},
+	Agents: openCodeAgentEmitter{Variants: append(
+		append([]OpenCodeProviderVariant(nil), openCodeAnthropicCatalog...),
+		openCodeOpenAIVariants...,
+	)},
+	Manifest:        openCodeManifestEmitter{},
+	Verbatim:        openCodeVerbatimDirs,
+	CanonicalSkills: []CanonicalSkillID{CanonicalSkillInstallCLI},
 }
 
 var harnessRegistry = map[HarnessName]TargetHarness{

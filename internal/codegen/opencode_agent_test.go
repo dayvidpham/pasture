@@ -271,6 +271,125 @@ func TestOpenCodeProviderVariantsAllowCrossProviderSlugReuse(t *testing.T) {
 	}
 }
 
+func TestOpenCodeTargetEmitsCompleteProviderInventory(t *testing.T) {
+	t.Parallel()
+
+	emitter, ok := OpenCodeTarget.Agents.(openCodeAgentEmitter)
+	if !ok {
+		t.Fatalf("OpenCodeTarget.Agents type = %T, want openCodeAgentEmitter", OpenCodeTarget.Agents)
+	}
+	files := emitOpenCodeAgentFiles(t, emitter.Variants)
+	if len(files) != 45 {
+		t.Fatalf("OpenCode target emitted %d agent definitions, want 45 (5 roles x legacy, default, and 7 provider variants)", len(files))
+	}
+
+	wantModels := map[string]string{
+		"--default.md":               "",
+		"--anthropic--fable-5.md":    "anthropic/claude-fable-5",
+		"--anthropic--haiku-4-5.md":  "anthropic/claude-haiku-4-5",
+		"--anthropic--opus-4-8.md":   "anthropic/claude-opus-4-8",
+		"--anthropic--sonnet-5.md":   "anthropic/claude-sonnet-5",
+		"--openai--gpt-5-6-luna.md":  "openai/gpt-5.6-luna",
+		"--openai--gpt-5-6-sol.md":   "openai/gpt-5.6-sol",
+		"--openai--gpt-5-6-terra.md": "openai/gpt-5.6-terra",
+	}
+	byName := make(map[string]GeneratedFile, len(files))
+	for _, file := range files {
+		name := filepath.Base(file.Path)
+		if _, exists := byName[name]; exists {
+			t.Fatalf("OpenCode target emitted duplicate agent filename %q", name)
+		}
+		byName[name] = file
+	}
+
+	for roleID, roleSpec := range RoleSpecs {
+		if len(roleSpec.Tools) == 0 {
+			continue
+		}
+		legacyName := string(roleID) + ".md"
+		legacy, exists := byName[legacyName]
+		if !exists {
+			t.Errorf("role %s is missing legacy definition %s", roleID, legacyName)
+			continue
+		}
+		_, sharedBody := decodeOpenCodeAgent(t, legacy)
+		if strings.Contains(sharedBody, "~/.claude") || strings.Contains(sharedBody, "Claude Code") {
+			t.Errorf("role %s legacy OpenCode body contains Claude-only instruction guidance", roleID)
+		}
+
+		for suffix, wantModel := range wantModels {
+			name := string(roleID) + suffix
+			file, exists := byName[name]
+			if !exists {
+				t.Errorf("role %s is missing selectable definition %s", roleID, name)
+				continue
+			}
+			frontmatter, body := decodeOpenCodeAgent(t, file)
+			if frontmatter.Model != wantModel {
+				t.Errorf("%s model = %q, want %q", name, frontmatter.Model, wantModel)
+			}
+			if body != sharedBody {
+				t.Errorf("%s body differs from shared semantic body in %s", name, legacyName)
+			}
+			if strings.Contains(body, "~/.claude") || strings.Contains(body, "Claude Code") {
+				t.Errorf("%s contains Claude-only instruction guidance", name)
+			}
+		}
+	}
+}
+
+func TestOpenCodeTargetInventoryRejectsMissingStaleAndDuplicateEntries(t *testing.T) {
+	t.Parallel()
+
+	emitter := OpenCodeTarget.Agents.(openCodeAgentEmitter)
+	files := emitOpenCodeAgentFiles(t, emitter.Variants)
+	expected := make(map[string]string, len(files))
+	for _, file := range files {
+		name := filepath.Base(file.Path)
+		if _, exists := expected[name]; exists {
+			t.Fatalf("production inventory contains duplicate filename %q", name)
+		}
+		expected[name] = "production emitter"
+	}
+
+	t.Run("missing", func(t *testing.T) {
+		actual := make(map[string]string, len(expected)-1)
+		for name := range expected {
+			if name != "worker--default.md" {
+				actual[name] = "checked-out tree"
+			}
+		}
+		missing, stale := registrySetDiff(expected, actual)
+		if !reflect.DeepEqual(missing, []string{"worker--default.md"}) || len(stale) != 0 {
+			t.Fatalf("missing inventory diff = (%v, %v), want ([worker--default.md], [])", missing, stale)
+		}
+	})
+
+	t.Run("stale", func(t *testing.T) {
+		actual := make(map[string]string, len(expected)+1)
+		for name := range expected {
+			actual[name] = "checked-out tree"
+		}
+		actual["worker--retired.md"] = "checked-out tree"
+		missing, stale := registrySetDiff(expected, actual)
+		if len(missing) != 0 || !reflect.DeepEqual(stale, []string{"worker--retired.md"}) {
+			t.Fatalf("stale inventory diff = (%v, %v), want ([], [worker--retired.md])", missing, stale)
+		}
+	})
+
+	t.Run("duplicate", func(t *testing.T) {
+		variants := append([]OpenCodeProviderVariant(nil), emitter.Variants...)
+		variants = append(variants, variants[0])
+		files, err := (openCodeAgentEmitter{Variants: variants}).Emit(t.TempDir(), "", GenerateOptions{})
+		if err == nil || !strings.Contains(err.Error(), "repeats") {
+			t.Fatalf("duplicate catalog Emit error = %v, want actionable duplicate rejection", err)
+		}
+		if files != nil {
+			t.Fatalf("duplicate catalog returned %d generated files, want none", len(files))
+		}
+	})
+}
+
 func TestAgentSemanticBodyParityAcrossHarnesses(t *testing.T) {
 	t.Parallel()
 
