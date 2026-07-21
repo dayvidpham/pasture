@@ -138,15 +138,6 @@ func TestOpenCodeVerbatimResolvesGeneratedSkillLinks(t *testing.T) {
 	}
 }
 
-// TestOpenCodeVerbatimCopiesInstallCLI asserts the hand-authored install-cli
-// skill (SKILL.md only, no generated counterpart) is emitted verbatim.
-func TestOpenCodeVerbatimCopiesInstallCLI(t *testing.T) {
-	t.Parallel()
-
-	root, byRel := emitOpenCodeVerbatim(t)
-	assertVerbatim(t, root, byRel, "install-cli/SKILL.md")
-}
-
 // tokenizeLinks extracts whitespace/paren/bracket-delimited tokens that contain
 // a "../protocol/" path so the link-resolution test can scan markdown bodies
 // without a full markdown parser.

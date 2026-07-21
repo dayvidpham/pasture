@@ -57,7 +57,7 @@ func TestEmitHarnessCombinedTargetsDoNotPerturbClaudeCode(t *testing.T) {
 
 	root := t.TempDir()
 	writeHarnessSeedFiles(t, root)
-	seedVerbatimSourceDirs(t, root) // OpenCode verbatim source (protocol, install-cli)
+	seedVerbatimSourceDirs(t, root) // OpenCode verbatim protocol source
 	targets, err := ResolveHarness([]string{string(HarnessClaudeCode), string(HarnessOpenCode)})
 	if err != nil {
 		t.Fatalf("ResolveHarness: %v", err)
@@ -136,10 +136,9 @@ func readGeneratedFiles(t *testing.T, files []GeneratedFile) map[string]string {
 	return out
 }
 
-// seedVerbatimSourceDirs copies the real hand-authored verbatim skill trees
-// (openCodeVerbatimDirs: "protocol" and "install-cli") from the actual module's
-// skills/ directory into dst/skills/<dir>/, making a synthetic temp root usable
-// by EmitHarness(opencode).
+// seedVerbatimSourceDirs copies the union of real hand-authored verbatim skill
+// trees registered by current targets into dst/skills/<dir>/, making a
+// synthetic temp root usable by any EmitHarness test.
 //
 // Background: copyVerbatimSkill reads <root>/skills/<dir> and writes to
 // <root>/<targetSkillRoot>/<dir>. Tests that build a synthetic temp root
@@ -151,7 +150,13 @@ func readGeneratedFiles(t *testing.T, files []GeneratedFile) map[string]string {
 func seedVerbatimSourceDirs(t *testing.T, dst string) {
 	t.Helper()
 	moduleRoot := testModuleRoot(t)
-	for _, dir := range openCodeVerbatimDirs {
+	dirs := make(map[string]struct{}, len(openCodeVerbatimDirs)+len(codexVerbatimDirs))
+	for _, targetDirs := range [][]string{openCodeVerbatimDirs, codexVerbatimDirs} {
+		for _, dir := range targetDirs {
+			dirs[dir] = struct{}{}
+		}
+	}
+	for dir := range dirs {
 		src := filepath.Join(moduleRoot, "skills", dir)
 		dstDir := filepath.Join(dst, "skills", dir)
 		if err := filepath.WalkDir(src, func(srcPath string, d fs.DirEntry, err error) error {

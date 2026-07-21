@@ -47,6 +47,7 @@ type TargetHarness struct {
 	Agents           AgentEmitter
 	Manifest         ManifestEmitter
 	Verbatim         []string
+	CanonicalSkills  []CanonicalSkillID
 }
 
 var ClaudeCodeTarget = TargetHarness{
@@ -56,6 +57,7 @@ var ClaudeCodeTarget = TargetHarness{
 	SubSkillTemplate: TemplateSubSkill,
 	SkillWrite:       WriteMarkerMerge,
 	Agents:           claudeCodeAgentEmitter{},
+	CanonicalSkills:  []CanonicalSkillID{CanonicalSkillInstallCLI},
 }
 
 var OpenCodeTarget = TargetHarness{
@@ -67,6 +69,7 @@ var OpenCodeTarget = TargetHarness{
 	Agents:           openCodeAgentEmitter{},
 	Manifest:         openCodeManifestEmitter{},
 	Verbatim:         openCodeVerbatimDirs,
+	CanonicalSkills:  []CanonicalSkillID{CanonicalSkillInstallCLI},
 }
 
 var harnessRegistry = map[HarnessName]TargetHarness{
@@ -140,6 +143,14 @@ func EmitHarness(root string, h TargetHarness, figuresDir string, opts GenerateO
 			return nil, fmt.Errorf("codegen.EmitHarness(%s): verbatim skill %s: %w", h.Name, dir, err)
 		}
 		out = append(out, files...)
+	}
+
+	for _, skillID := range h.CanonicalSkills {
+		generated, err := emitCanonicalSkill(root, h, skillID, opts)
+		if err != nil {
+			return nil, fmt.Errorf("codegen.EmitHarness(%s): canonical skill %s: %w", h.Name, skillID, err)
+		}
+		out = append(out, generated)
 	}
 
 	if h.Agents != nil {

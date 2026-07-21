@@ -1,19 +1,3 @@
----
-name: install-cli
-description: Install Pasture binaries (pastured, pasture, pasture-release) from GitHub Releases, go install, or Nix
----
-
-# /pasture:install-cli
-
-OpenCode skill for automated Pasture binary installation.
-
-## Usage
-
-Invoke via OpenCode:
-```
-/pasture:install-cli
-```
-
 ## Behavior
 
 The skill performs the following steps in order:

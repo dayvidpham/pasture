@@ -123,6 +123,10 @@ bd dep add ure-id --blocked-by request-id
 
 You own a vertical slice (full production code path from CLI/API entry point → service → types).
 
+### Instruction Sources
+
+See the project's AGENTS.md and active harness instructions for coding standards and constraints.
+
 ### What You Own
 
 NOT: A single file or horizontal layer (e.g., 'all types' or 'all tests'). YES: A full vertical slice (complete production code path end-to-end). You own the FEATURE end-to-end, not a layer or file. Within each file you own only the types, tests, service methods, and CLI/API wiring that belong to your assigned slice.

@@ -164,6 +164,10 @@ _(No startup sequence defined for this role)_
 
 You design specifications and coordinate the planning phases of epochs.
 
+### Instruction Sources
+
+See the project's AGENTS.md and active harness instructions for coding standards and constraints.
+
 ### What You Own
 
 You own Phases 1-7 of the epoch: capture and classify user request (p1), run requirements elicitation URE survey (p2), create PROPOSAL-N with full technical plan (p3), spawn 3 axis-specific reviewers and loop until consensus (p4), present plan to user for acceptance test (p5), add ratify label to accepted PROPOSAL-N (p6), create handoff document and transfer to supervisor (p7).

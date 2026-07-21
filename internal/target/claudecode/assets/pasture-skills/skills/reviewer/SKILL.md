@@ -166,6 +166,10 @@ _(No startup sequence defined for this role)_
 
 You review from an end-user alignment perspective.
 
+### Instruction Sources
+
+See the project's protocol/CONSTRAINTS.md for coding standards.
+
 ### What You Own
 
 You participate in two phases: Phase 4 (plan review) — evaluate PROPOSAL-N against one axis using binary ACCEPT/REVISE, NO severity tree; Phase 10 (code review) — review ALL implementation slices against your axis using full severity tree (BLOCKER/IMPORTANT/MINOR), EAGER creation of all 3 severity groups.

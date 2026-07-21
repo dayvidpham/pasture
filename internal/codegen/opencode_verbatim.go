@@ -6,7 +6,7 @@ package codegen
 // harness.go): the entire source tree — SKILL.md plus every sibling .md doc and
 // the figures/ subdirectory — is reproduced byte-for-byte.
 //
-// Why these two:
+// Why this directory:
 //   - "protocol" is the shared documentation skill (PROCESS.md, AGENTS.md,
 //     CONSTRAINTS.md, CLAUDE.md, SKILLS.md, README.md, the HANDOFF_*/MR_*/UAT_*
 //     templates, and figures/). The generated per-role OpenCode skills under
@@ -14,12 +14,10 @@ package codegen
 //     (e.g. ../protocol/PROCESS.md, ../protocol/CONSTRAINTS.md), so emitting
 //     .opencode/skill/protocol/ in full is what makes those links resolve. A
 //     SKILL.md-only copy would ship dangling links — hence the recursive copy.
-//   - "install-cli" is the Pasture binary installer skill (hand-authored, no
-//     generated counterpart).
 //
-// Both are wired into OpenCodeTarget.Verbatim (harness.go). The Claude Code
-// target does NOT copy these (they already live under skills/ on that path).
+// install-cli is intentionally absent: it has target-specific identity and
+// invocation guidance and is emitted from its canonical target-aware renderer.
+// The Claude Code target does not copy protocol (it already lives under skills/).
 var openCodeVerbatimDirs = []string{
 	"protocol",
-	"install-cli",
 }

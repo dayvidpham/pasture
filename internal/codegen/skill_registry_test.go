@@ -409,6 +409,19 @@ func TestGeneratedOutputInventory(t *testing.T) {
 		}
 	}
 
+	for _, skillID := range ClaudeCodeTarget.CanonicalSkills {
+		path := filepath.ToSlash(filepath.Join("skills", string(skillID), "SKILL.md"))
+		owner := "ClaudeCodeTarget.CanonicalSkills[" + string(skillID) + "]"
+		addExpectedOutput(t, expectedClaudeSkills, path, owner)
+		addExpectedOutput(t, expectedClaudeHarness, path, owner)
+	}
+	for _, skillID := range OpenCodeTarget.CanonicalSkills {
+		path := filepath.ToSlash(filepath.Join(".opencode", "skill", string(skillID), "SKILL.md"))
+		owner := "OpenCodeTarget.CanonicalSkills[" + string(skillID) + "]"
+		addExpectedOutput(t, expectedOpenCodeSkills, path, owner)
+		addExpectedOutput(t, expectedOpenCodeHarness, path, owner)
+	}
+
 	for _, roleID := range protocol.AllRoleIds {
 		spec := RoleSpecs[roleID]
 		if len(spec.Tools) == 0 {

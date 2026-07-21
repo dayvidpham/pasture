@@ -139,8 +139,9 @@ The protocol `schema.xml`, registered skills, and tool-bearing role agents are
 **generated**, not hand-maintained. Protocol facts (phases, roles, constraints,
 commands, figures, and skill bodies) are declared once as typed Go values in
 `internal/codegen/` and rendered for both Claude Code and OpenCode. The
-hand-authored `protocol` and `install-cli` skills sit outside that generated
-registry and are copied verbatim into the OpenCode target.
+hand-authored `protocol` skill sits outside that generated registry and is
+copied verbatim into the OpenCode target. The canonical `install-cli` body is
+rendered with typed target identity and invocation guidance.
 
 ```bash
 make generate                        # regenerate every committed target
