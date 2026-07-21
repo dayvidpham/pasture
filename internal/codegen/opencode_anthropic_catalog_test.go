@@ -3,12 +3,15 @@ package codegen
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
@@ -40,23 +43,38 @@ func loadOpenCodeAnthropicFixture(t *testing.T) openCodeAnthropicFixture {
 		}
 	}()
 
-	decoder := json.NewDecoder(file)
+	fixture, err := decodeOpenCodeAnthropicFixture(file)
+	if err != nil {
+		t.Fatalf("strictly decode Anthropic catalog fixture %q: %v; refresh it from %s with validated provenance and no unvalidated fields", path, err, "https://models.dev/api.json")
+	}
+	return fixture
+}
+
+func decodeOpenCodeAnthropicFixture(reader io.Reader) (openCodeAnthropicFixture, error) {
+	decoder := json.NewDecoder(reader)
 	decoder.DisallowUnknownFields()
 	var fixture openCodeAnthropicFixture
 	if err := decoder.Decode(&fixture); err != nil {
-		t.Fatalf("strictly decode Anthropic catalog fixture %q: %v; refresh it from %s without adding unvalidated fields", path, err, "https://models.dev/api.json")
+		return openCodeAnthropicFixture{}, fmt.Errorf("decode fixture JSON: %w", err)
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		t.Fatalf("Anthropic catalog fixture %q contains data after its first JSON value: %v; keep exactly one catalog document", path, err)
+		return openCodeAnthropicFixture{}, fmt.Errorf("fixture contains data after its first JSON value: %v; keep exactly one catalog document", err)
 	}
-	return fixture
+	if fixture.Captured == "" {
+		return openCodeAnthropicFixture{}, errors.New("fixture _captured is required; record the models.dev snapshot date as YYYY-MM-DD")
+	}
+	captured, err := time.Parse(time.DateOnly, fixture.Captured)
+	if err != nil || captured.Format(time.DateOnly) != fixture.Captured {
+		return openCodeAnthropicFixture{}, fmt.Errorf("fixture _captured value %q is not a valid canonical ISO-8601 calendar date; use YYYY-MM-DD for the actual snapshot date", fixture.Captured)
+	}
+	return fixture, nil
 }
 
 func TestOpenCodeAnthropicCatalogMatchesStrictFixture(t *testing.T) {
 	t.Parallel()
 
 	fixture := loadOpenCodeAnthropicFixture(t)
-	if fixture.Source != "https://models.dev/api.json" || fixture.Captured == "" {
+	if fixture.Source != "https://models.dev/api.json" {
 		t.Fatalf("Anthropic fixture provenance = source %q, captured %q; record the models.dev source and capture date", fixture.Source, fixture.Captured)
 	}
 	if fixture.Anthropic.ID != openCodeAnthropicProvider || fixture.Anthropic.Name != "Anthropic" {
@@ -110,6 +128,34 @@ func TestOpenCodeAnthropicCatalogMatchesStrictFixture(t *testing.T) {
 	}
 	if _, err := validateOpenCodeProviderVariants(openCodeAnthropicCatalog); err != nil {
 		t.Fatalf("validate committed Anthropic production catalog: %v", err)
+	}
+}
+
+func TestOpenCodeAnthropicFixtureRejectsInvalidCaptureDate(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name     string
+		captured string
+	}{
+		{name: "malformed", captured: "unknown"},
+		{name: "impossible-calendar-date", captured: "2026-02-30"},
+		{name: "non-canonical", captured: "2026-7-1"},
+		{name: "missing", captured: ""},
+	}
+	for _, testCase := range testCases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			document := fmt.Sprintf(`{
+  "_source": "https://models.dev/api.json",
+  "_captured": %q,
+  "anthropic": {"id": "anthropic", "name": "Anthropic", "models": {}}
+}`, testCase.captured)
+			if _, err := decodeOpenCodeAnthropicFixture(strings.NewReader(document)); err == nil || !strings.Contains(err.Error(), "_captured") {
+				t.Fatalf("decode capture date %q error = %v, want actionable _captured validation failure", testCase.captured, err)
+			}
+		})
 	}
 }
 
