@@ -2,13 +2,15 @@ package tasks
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
-	"sync"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,38 +112,77 @@ type coordinatedOutcome struct {
 	err     error
 }
 
+const (
+	systemIdentityHelperModeEnv = "PASTURE_SYSTEM_IDENTITY_HELPER_MODE"
+	systemIdentityHelperDBEnv   = "PASTURE_SYSTEM_IDENTITY_HELPER_DB"
+	systemIdentityHelperReady   = "PASTURE_SYSTEM_IDENTITY_HELPER_READY"
+)
+
 func TestSystemIdentityConcurrentFirstOpenConverges(t *testing.T) {
 	t.Parallel()
-	testDir, err := os.MkdirTemp("", "pasture-system-identity-concurrency-")
-	if err != nil {
-		t.Fatalf("create coordinated tracker directory: %v", err)
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run", "^TestSystemIdentityConcurrentFirstOpenHelperProcess$")
+	cmd.Env = append(os.Environ(),
+		systemIdentityHelperModeEnv+"=converge",
+		systemIdentityHelperDBEnv+"="+dbPath,
+	)
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		t.Fatalf("coordinated first-open child timed out after 15s and was killed/reaped; output:\n%s", output)
 	}
-	cleanupSafe := true
-	t.Cleanup(func() {
-		if cleanupSafe {
-			_ = os.RemoveAll(testDir)
+	if err != nil {
+		t.Fatalf("coordinated first-open child failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "SYSTEM_IDENTITY_CONVERGED") {
+		t.Fatalf("coordinated first-open child returned no success evidence; output:\n%s", output)
+	}
+
+	db := openIdentityAssertionDB(t, dbPath)
+	defer func() { _ = db.Close() }()
+	assertIdentityRowCount(t, db, 1)
+	assertGenesisOperationCount(t, db, 1)
+}
+
+func TestSystemIdentityConcurrentFirstOpenHelperProcess(t *testing.T) {
+	mode := os.Getenv(systemIdentityHelperModeEnv)
+	if mode == "" {
+		return
+	}
+	if mode == "stuck" {
+		readyPath := os.Getenv(systemIdentityHelperReady)
+		if readyPath == "" {
+			t.Fatal("stuck helper requires PASTURE_SYSTEM_IDENTITY_HELPER_READY")
 		}
-	})
-	dbPath := filepath.Join(testDir, "pasture.db")
+		if err := os.WriteFile(readyPath, []byte("ready\n"), 0o600); err != nil {
+			t.Fatalf("write stuck-helper readiness evidence: %v", err)
+		}
+		fmt.Println("SYSTEM_IDENTITY_STUCK_READY")
+		for {
+			time.Sleep(time.Hour)
+		}
+	}
+	if mode != "converge" {
+		t.Fatalf("unknown system-identity helper mode %q", mode)
+	}
+	dbPath := os.Getenv(systemIdentityHelperDBEnv)
+	if dbPath == "" {
+		t.Fatal("converge helper requires PASTURE_SYSTEM_IDENTITY_HELPER_DB")
+	}
+	runCoordinatedFirstOpenChild(t, dbPath)
+}
+
+func runCoordinatedFirstOpenChild(t *testing.T, dbPath string) {
+	t.Helper()
 	ready := make(chan coordinatedCheckpoint, 2)
-	abort := make(chan struct{})
-	var abortOnce sync.Once
-	abortAll := func() { abortOnce.Do(func() { close(abort) }) }
-	t.Cleanup(abortAll)
 	afterGenesis := func(tracker string) func(provenance.JournalID) error {
 		return func(authority provenance.JournalID) error {
 			point := coordinatedCheckpoint{tracker: tracker, authority: authority, proceed: make(chan struct{})}
-			select {
-			case ready <- point:
-			case <-abort:
-				return fmt.Errorf("%s tracker aborted while reporting the post-genesis checkpoint", tracker)
-			}
-			select {
-			case <-point.proceed:
-				return nil
-			case <-abort:
-				return fmt.Errorf("%s tracker aborted while waiting at the post-genesis checkpoint", tracker)
-			}
+			fmt.Printf("SYSTEM_IDENTITY_CHECKPOINT tracker=%s authority=%d\n", tracker, authority)
+			ready <- point
+			<-point.proceed
+			return nil
 		}
 	}
 
@@ -157,8 +198,6 @@ func TestSystemIdentityConcurrentFirstOpenConverges(t *testing.T) {
 	// Fixed-agent activation has its own multi-writer coverage. Pre-activate here
 	// so this proof coordinates only the deterministic genesis replay boundary.
 	if _, err := provadapter.ActivatePastureSystem(first); err != nil {
-		_ = second.Close()
-		_ = first.Close()
 		t.Fatalf("pre-activate pasture-system actor: %v", err)
 	}
 
@@ -171,100 +210,21 @@ func TestSystemIdentityConcurrentFirstOpenConverges(t *testing.T) {
 		}()
 	}
 	startTracker("first", first)
-	cleanupSafe = false
-	launched := 1
-
-	timer := time.NewTimer(10 * time.Second)
-	defer timer.Stop()
-	checkpoints := make(map[string]coordinatedCheckpoint, 2)
-	outcomes := make(map[string]error, 2)
-	released := make(map[string]bool, 2)
-	launchedNames := []string{"first"}
-	failure := ""
-	var liveTrackers []string
-	release := func(tracker string) {
-		if point, ok := checkpoints[tracker]; ok && !released[tracker] {
-			close(point.proceed)
-			released[tracker] = true
-		}
-	}
-coordination:
-	for len(outcomes) != 2 {
-		if failure != "" {
-			liveTrackers = joinCoordinatedOutcomes(results, outcomes, launchedNames, 6*time.Second)
-			if len(liveTrackers) != 0 {
-				failure += fmt.Sprintf("; timed out after abort waiting for tracker operations to stop: %v", liveTrackers)
-			}
-			break coordination
-		}
-		if failure == "" && len(checkpoints) == 2 && !released["first"] {
-			firstAuthority := checkpoints["first"].authority
-			secondAuthority := checkpoints["second"].authority
-			if firstAuthority == 0 || firstAuthority != secondAuthority {
-				failure = fmt.Sprintf("post-genesis authorities differ: first=%d second=%d", firstAuthority, secondAuthority)
-				abortAll()
-			}
-			if failure == "" {
-				release("first")
-			}
-		}
-		if failure == "" && released["first"] && !released["second"] {
-			if firstErr, done := outcomes["first"]; done {
-				if firstErr != nil {
-					failure = fmt.Sprintf("first tracker failed after its post-genesis checkpoint: %v", firstErr)
-					abortAll()
-				} else {
-					release("second")
-				}
-			}
-		}
-		select {
-		case point := <-ready:
-			if _, duplicate := checkpoints[point.tracker]; duplicate {
-				failure = fmt.Sprintf("%s tracker reported the post-genesis checkpoint twice", point.tracker)
-				abortAll()
-				continue
-			}
-			checkpoints[point.tracker] = point
-			if point.tracker == "first" && launched == 1 {
-				// Keep the first tracker paused after its committed genesis while the
-				// independent second tracker performs the exact replay. This exercises
-				// overlapping first opens without racing unrelated SQLite connection locks.
-				startTracker("second", second)
-				launched = 2
-				launchedNames = append(launchedNames, "second")
-			}
-		case result := <-results:
-			outcomes[result.tracker] = result.err
-			if failure == "" && len(checkpoints) < 2 {
-				failure = fmt.Sprintf("%s tracker returned before both post-genesis checkpoints: %v (checkpoints=%v)",
-					result.tracker, result.err, checkpointNames(checkpoints))
-				abortAll()
-			} else if failure == "" && result.err != nil {
-				failure = fmt.Sprintf("%s tracker failed after its post-genesis checkpoint: %v", result.tracker, result.err)
-				abortAll()
-			}
-		case <-timer.C:
-			failure = fmt.Sprintf("timed out coordinating first-open trackers (checkpoints=%v outcomes=%v released=%v)",
-				checkpointNames(checkpoints), outcomeNames(outcomes), released)
-			abortAll()
-		}
-	}
-	if failure != "" {
-		if len(liveTrackers) == 0 {
-			_ = second.Close()
-			_ = first.Close()
-			cleanupSafe = true
-		}
-		t.Fatal(failure)
-	}
-	for tracker, err := range outcomes {
-		if err != nil {
-			t.Fatalf("%s tracker Create failed: %v", tracker, err)
-		}
+	firstPoint := awaitCoordinatedCheckpoint(t, "first", ready, results)
+	// Keep the first tracker paused after committed genesis while the independent
+	// second tracker performs the exact replay.
+	startTracker("second", second)
+	secondPoint := awaitCoordinatedCheckpoint(t, "second", ready, results)
+	if firstPoint.authority == 0 || firstPoint.authority != secondPoint.authority {
+		t.Fatalf("post-genesis authorities differ: first=%d second=%d", firstPoint.authority, secondPoint.authority)
 	}
 
-	authority := checkpoints["first"].authority
+	close(firstPoint.proceed)
+	awaitCoordinatedOutcome(t, "first", results)
+	close(secondPoint.proceed)
+	awaitCoordinatedOutcome(t, "second", results)
+
+	authority := firstPoint.authority
 	assertCommittedGenesisAuthority(t, first.Journal(), authority)
 	db := openIdentityAssertionDB(t, dbPath)
 	assertPersistedIdentity(t, db, authority)
@@ -275,80 +235,75 @@ coordination:
 	if firstCloseErr, secondCloseErr := first.Close(), second.Close(); firstCloseErr != nil || secondCloseErr != nil {
 		t.Fatalf("close coordinated trackers: first=%v second=%v", firstCloseErr, secondCloseErr)
 	}
-	cleanupSafe = true
+	fmt.Printf("SYSTEM_IDENTITY_CONVERGED authority=%d\n", authority)
 }
 
-func joinCoordinatedOutcomes(
+func awaitCoordinatedCheckpoint(
+	t *testing.T,
+	want string,
+	ready <-chan coordinatedCheckpoint,
 	results <-chan coordinatedOutcome,
-	outcomes map[string]error,
-	launched []string,
-	timeout time.Duration,
-) []string {
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	for len(outcomes) < len(launched) {
-		select {
-		case result := <-results:
-			outcomes[result.tracker] = result.err
-		case <-timer.C:
-			missing := make([]string, 0, len(launched)-len(outcomes))
-			for _, tracker := range launched {
-				if _, joined := outcomes[tracker]; !joined {
-					missing = append(missing, tracker)
-				}
-			}
-			return missing
-		}
-	}
-	return nil
-}
-
-func TestJoinCoordinatedOutcomesBoundsStuckOperation(t *testing.T) {
-	t.Parallel()
-	results := make(chan coordinatedOutcome, 1)
-	outcomes := make(map[string]error, 1)
-	release := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		<-release
-		results <- coordinatedOutcome{tracker: "stuck"}
-	}()
-
-	started := time.Now()
-	missing := joinCoordinatedOutcomes(results, outcomes, []string{"stuck"}, 25*time.Millisecond)
-	if !reflect.DeepEqual(missing, []string{"stuck"}) {
-		t.Fatalf("bounded join missing trackers = %v, want [stuck]", missing)
-	}
-	if elapsed := time.Since(started); elapsed > time.Second {
-		t.Fatalf("bounded join took %s for stuck tracker, want under 1s", elapsed)
-	}
-	close(release)
+) coordinatedCheckpoint {
+	t.Helper()
 	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("controlled stuck tracker did not stop after test release")
+	case point := <-ready:
+		if point.tracker != want {
+			t.Fatalf("received %s checkpoint while waiting for %s", point.tracker, want)
+		}
+		return point
+	case result := <-results:
+		t.Fatalf("%s tracker returned before the %s post-genesis checkpoint: %v", result.tracker, want, result.err)
+	}
+	return coordinatedCheckpoint{}
+}
+
+func awaitCoordinatedOutcome(t *testing.T, want string, results <-chan coordinatedOutcome) {
+	t.Helper()
+	result := <-results
+	if result.tracker != want {
+		t.Fatalf("%s tracker returned while waiting for %s", result.tracker, want)
+	}
+	if result.err != nil {
+		t.Fatalf("%s tracker failed after its post-genesis checkpoint: %v", result.tracker, result.err)
 	}
 }
 
-func checkpointNames(checkpoints map[string]coordinatedCheckpoint) []string {
-	names := make([]string, 0, len(checkpoints))
-	for _, name := range []string{"first", "second"} {
-		if _, ok := checkpoints[name]; ok {
-			names = append(names, name)
-		}
+func TestSystemIdentityConcurrentFirstOpenTimeoutKillsAndReaps(t *testing.T) {
+	t.Parallel()
+	testDir := t.TempDir()
+	readyPath := filepath.Join(testDir, "stuck.ready")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run", "^TestSystemIdentityConcurrentFirstOpenHelperProcess$")
+	cmd.Env = append(os.Environ(),
+		systemIdentityHelperModeEnv+"=stuck",
+		systemIdentityHelperReady+"="+readyPath,
+	)
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() != context.DeadlineExceeded {
+		t.Fatalf("controlled stuck child was not stopped by its command deadline: err=%v output=\n%s", err, output)
 	}
-	return names
-}
-
-func outcomeNames(outcomes map[string]error) []string {
-	names := make([]string, 0, len(outcomes))
-	for _, name := range []string{"first", "second"} {
-		if _, ok := outcomes[name]; ok {
-			names = append(names, name)
-		}
+	if err == nil {
+		t.Fatalf("controlled stuck child exited successfully instead of being killed; output:\n%s", output)
 	}
-	return names
+	if !strings.Contains(string(output), "SYSTEM_IDENTITY_STUCK_READY") {
+		t.Fatalf("controlled stuck child reached no readiness point before timeout; output:\n%s", output)
+	}
+	if _, statErr := os.Stat(readyPath); statErr != nil {
+		t.Fatalf("read stuck-child readiness evidence after reap: %v", statErr)
+	}
+	if cmd.ProcessState == nil {
+		t.Fatal("controlled stuck child has no ProcessState after Command.Wait")
+	}
+	if signalErr := cmd.Process.Signal(os.Kill); !errors.Is(signalErr, os.ErrProcessDone) {
+		t.Fatalf("controlled stuck child still accepts signals after Command.Wait: %v", signalErr)
+	}
+	if removeErr := os.RemoveAll(testDir); removeErr != nil {
+		t.Fatalf("remove parent temp directory after child reap: %v", removeErr)
+	}
+	if _, statErr := os.Stat(testDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("parent temp directory still exists after reaped-child cleanup: %v", statErr)
+	}
 }
 
 func TestSystemIdentityPersistedNoncanonicalGenesisFailsClosed(t *testing.T) {
