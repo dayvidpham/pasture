@@ -11,28 +11,17 @@
 // bootstraps it once and persists it in the pasture-side singleton
 // pasture_system_identity so every later open reuses the same pair:
 //
-//  1. Activate the reserved pasture-system actor namespace over the real
-//     Provenance registry (provadapter.ActivatePastureSystem): it registers the
-//     namespace claim and reserves fixed-UUID ordinals [0, 1023]. This is the
-//     claim/range path the design asserts against — NOT a seeded ordinal-zero row.
-//  2. Resolve the committing actor. When the manifest-v1 ordinal-zero fixed actor
-//     (pasture-system/default) is seeded — which lands with the upstream fixed-ID
-//     software-agent registration seam (provenance PR #12) — the backend commits
-//     directly as that fixed identity (ActivationResult.DefaultActorSeeded). Until
-//     then the ordinal-zero UUID is reserved but is NOT yet an agents(id) row, and
-//     the journal's actor_id foreign key rejects an unregistered committer, so the
-//     backend mints a registered pasture-system software agent as the committing
-//     identity instead. The seed flips in by taking the DefaultActorSeeded branch;
-//     no other part of this package changes.
+//  1. Atomically activate the reserved pasture-system actor namespace, ordinal
+//     range [0, 1023], and manifest-v1 ordinal-zero software agent through
+//     provadapter.ActivatePastureSystem.
+//  2. Use that deterministic pasture-system/default ActorID as the committer.
 //  3. Establish the genesis bootstrap authority (one EffectBootstrapAuthority
 //     operation under a nil parent authority) and bind Tracker.As to its JournalID.
 //
-// Concurrency: the singleton is the durable serialization point. On the normal
-// single-writer first open exactly one identity is written. If two processes race
-// a first open they may each mint a committer and a genesis authority, but only
-// one row wins the INSERT OR IGNORE; the loser's extra agent/authority rows become
-// unreferenced (harmless) and every open thereafter — including the losing one —
-// reads back and commits under the single persisted winner.
+// Concurrency: Provenance atomically converges the fixed actor. The singleton is
+// the authority serialization point: racing first opens may each establish a
+// genesis authority, but only one row wins INSERT OR IGNORE and every caller
+// re-reads that persisted winner.
 
 package tasks
 
@@ -68,17 +57,10 @@ func (t *trackerImpl) bootstrapSystemSession() (*provenance.Session, error) {
 		return nil, err
 	}
 
-	// Fast path: a previous open already resolved and persisted the identity.
-	if actor, authority, found, err := readSystemIdentity(t.auditDB); err != nil {
-		return nil, err
-	} else if found {
-		return t.prov.As(actor, authority), nil
-	}
-
-	// Reserve the pasture-system namespace claim + [0, 1023] ordinal range. This
-	// is idempotent: a fresh journal registers the claim, an already-activated one
-	// is inert, and a drifted claim aborts with an actionable error.
-	activation, err := provadapter.ActivatePastureSystem(t.prov.Journal())
+	// Atomically converge the claim, reserved range, software agent, and manifest
+	// entry before consulting the persisted session identity. This also repairs a
+	// claim-only store created before fixed-agent activation was available.
+	activation, err := provadapter.ActivatePastureSystem(t.prov)
 	if err != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
@@ -95,9 +77,19 @@ func (t *trackerImpl) bootstrapSystemSession() (*provenance.Session, error) {
 		}
 	}
 
-	committer, err := t.resolveCommitterActor(activation)
-	if err != nil {
+	committer := activation.DefaultActorID
+
+	// Fast path: preserve an existing genesis authority, but replace an obsolete
+	// random fallback committer with the deterministic ordinal-zero actor.
+	if actor, authority, found, err := readSystemIdentity(t.auditDB); err != nil {
 		return nil, err
+	} else if found {
+		if actor != committer {
+			if err := updateSystemIdentityActor(t.auditDB, committer); err != nil {
+				return nil, err
+			}
+		}
+		return t.prov.As(committer, authority), nil
 	}
 
 	authority, err := establishGenesisAuthority(t.prov.Journal(), committer)
@@ -130,49 +122,15 @@ func (t *trackerImpl) bootstrapSystemSession() (*provenance.Session, error) {
 	return t.prov.As(actor, authority), nil
 }
 
-// resolveCommitterActor returns the ActorID the task backend commits under. It
-// takes the ordinal-zero fixed identity once it is seeded (provenance PR #12), and
-// otherwise mints a registered pasture-system software agent. The choice is made
-// from the claim/range activation result, never from a probe of the seeded row, so
-// the seed flips this over with no other change.
-func (t *trackerImpl) resolveCommitterActor(activation provadapter.ActivationResult) (provenance.ActorID, error) {
-	if activation.DefaultActorSeeded {
-		return activation.DefaultActorID, nil
-	}
-	sa, err := t.prov.RegisterSoftwareAgent(
-		provadapter.PastureSystemNamespace,
-		provadapter.PastureSystemDefaultName,
-		"1",
-		"pasture",
-	)
-	if err != nil {
-		return provenance.ActorID{}, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What:     "Pasture couldn't register its system committing agent.",
-			Why: "The reserved ordinal-zero pasture-system identity is not yet a registered\n" +
-				"agent, so the task backend registers a pasture-system software agent to\n" +
-				"commit journaled task changes under, and that registration failed.",
-			Where:  "Resolving the task-backend committing actor (internal/tasks/system_identity.go in tasks.resolveCommitterActor).",
-			Impact: "No journaled task change can be committed until a committing agent exists.",
-			Fix: "1. Confirm the database is writable and at the latest schema version:\n" +
-				"     pasture migrate\n" +
-				"2. Retry the command once the database is healthy.",
-			Cause: err,
-		}
-	}
-	return sa.ID, nil
-}
-
 // establishGenesisAuthority commits one genesis bootstrap-authority operation (a
 // nil-parent EffectBootstrapAuthority) under the committer and returns the produced
 // authority's JournalID — the system root every task-governing Session binds to.
 func establishGenesisAuthority(j provenance.JournalAPI, committer provenance.ActorID) (provenance.JournalID, error) {
 	res, err := j.Apply(provenance.OperationInput{
-		OperationID:    provenance.OperationID("pasture.system.genesis." + uuid.Must(uuid.NewV7()).String()),
-		ActorID:        committer,
-		CommandDigest:  []byte("pasture-system-genesis-command"),
-		MutationDigest: []byte("pasture-system-genesis-mutation"),
-		RecordedAt:     time.Now().UTC().UnixNano(),
+		OperationID:   provenance.OperationID("pasture.system.genesis." + uuid.Must(uuid.NewV7()).String()),
+		ActorID:       committer,
+		CommandDigest: []byte("pasture-system-genesis-command"),
+		RecordedAt:    time.Now().UTC().UnixNano(),
 		Effects: []provenance.Effect{{
 			Sort:           provenance.EffectBootstrapAuthority,
 			BootstrapLabel: provadapter.PastureSystemNamespace,
@@ -272,6 +230,42 @@ func writeSystemIdentity(db *sql.DB, actor provenance.ActorID, authority provena
 				"     df -h .\n" +
 				"2. Retry the command once the database is healthy.",
 			Cause: err,
+		}
+	}
+	return nil
+}
+
+// updateSystemIdentityActor replaces only the persisted committer while retaining
+// the existing genesis authority. It upgrades stores initialized with the former
+// random fallback actor after fixed ordinal-zero activation became available.
+func updateSystemIdentityActor(db *sql.DB, actor provenance.ActorID) error {
+	result, err := db.Exec(
+		`UPDATE pasture_system_identity SET committer_actor_id = ? WHERE singleton_id = 0`,
+		actor.String(),
+	)
+	if err != nil {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     "Pasture couldn't upgrade its saved system identity to the fixed default actor.",
+			Why:      "The ordinal-zero actor was activated, but updating pasture_system_identity failed.",
+			Where:    "Upgrading the task-backend system identity (internal/tasks/system_identity.go in tasks.updateSystemIdentityActor).",
+			Impact:   "The task backend will not mix the obsolete random committer with the fixed system identity.",
+			Fix: "1. Confirm the database is writable and the disk has free space:\n" +
+				"     df -h .\n" +
+				"2. Retry the command once the database is healthy.",
+			Cause: err,
+		}
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows != 1 {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     "Pasture couldn't confirm its system identity upgrade.",
+			Why:      fmt.Sprintf("Expected to update one pasture_system_identity row, but updated %d.", rows),
+			Where:    "Upgrading the task-backend system identity (internal/tasks/system_identity.go in tasks.updateSystemIdentityActor).",
+			Impact:   "The committing actor is unknown, so no task mutation will proceed.",
+			Fix:      "Confirm the singleton row exists exactly once, then reopen the database and retry.",
+			Cause:    err,
 		}
 	}
 	return nil

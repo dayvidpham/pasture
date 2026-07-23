@@ -30,12 +30,11 @@ func createMarkerTask(t *testing.T, facade *Journal, actor provenance.ActorID, b
 	id := provenance.TaskID{Namespace: "pasture-legacy", UUID: uuid.Must(uuid.NewV7())}
 	authority := boot
 	out, err := facade.Apply(ApplyRequest{
-		Mutation:       mustMutationRef(t, "pasture.task.create."+suffix),
-		Actor:          actor,
-		Authority:      &authority,
-		Command:        mustDigest(t, []byte("create-command-"+suffix)),
-		MutationDigest: []byte("create-mutation-" + suffix),
-		RecordedAt:     time.Now().UTC().UnixNano(),
+		Mutation:   mustMutationRef(t, "pasture.task.create."+suffix),
+		Actor:      actor,
+		Authority:  &authority,
+		Command:    mustDigest(t, []byte("create-command-"+suffix)),
+		RecordedAt: time.Now().UTC().UnixNano(),
 		Effects: []provenance.Effect{{
 			Sort:     provenance.EffectTaskCreate,
 			TaskID:   id,

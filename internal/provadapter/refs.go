@@ -30,7 +30,7 @@ import (
 //   - AgentRef  -> ActorID           via the "namespace--uuid" wire form.
 //
 // NOTE (issue #14 text vs delivered surface): issue #14 names the role target
-// "AssignmentRoleID". The delivered Provenance surface at main@7b3451a exposes
+// "AssignmentRoleID". The delivered Provenance surface at main@ecc7663 exposes
 // the responsibility-slot domain as AssignmentSlotID (the single seeded slot is
 // SlotOwnerResponsibility); there is no exported AssignmentRoleID type. This
 // adapter therefore maps the portable RoleID onto AssignmentSlotID, the delivered

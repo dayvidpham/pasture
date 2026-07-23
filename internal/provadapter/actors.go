@@ -32,6 +32,8 @@ const (
 	PastureSystemReservedOrdinals = 1024
 	// pastureSystemMaxOrdinal is the inclusive top of the reserved range.
 	pastureSystemMaxOrdinal = PastureSystemReservedOrdinals - 1
+	pastureSystemVersion    = "1"
+	pastureSystemSource     = "pasture"
 )
 
 // PastureSystemRange is the inclusive [0, 1023] fixed-UUID range the pasture-system
@@ -95,6 +97,19 @@ func PastureSystemDefaultEntry() provenance.FixedActorEntry {
 	}
 }
 
+// PastureSystemDefaultRegistration is the complete atomic activation request for
+// manifest-v1 ordinal zero. The manifest and software-agent names intentionally
+// match so every public actor lookup returns the same durable identity.
+func PastureSystemDefaultRegistration() provenance.FixedSoftwareAgentRegistration {
+	return provenance.FixedSoftwareAgentRegistration{
+		Claim:     PastureSystemClaim(),
+		Entry:     PastureSystemDefaultEntry(),
+		AgentName: PastureSystemDefaultName,
+		Version:   pastureSystemVersion,
+		Source:    pastureSystemSource,
+	}
+}
+
 // ValidateActorID rejects a structurally invalid ActorID: the zero value (empty
 // namespace) is never a usable identity, while a namespaced all-zero UUID (the
 // pasture-system/default identity) is valid. This is the boundary check the
@@ -112,80 +127,36 @@ func ValidateActorID(id provenance.ActorID) error {
 	return nil
 }
 
-// ActivationResult reports how ActivatePastureSystem resolved. Fresh is true when
-// the namespace claim was newly registered; false when an exact existing claim
-// made activation inert. DefaultActorID is always the pasture-system/default
-// identity on success. DefaultActorSeeded reports whether the manifest-v1
-// ordinal-zero fixed actor row was seeded — see the DELIVERED-SURFACE GAP note on
-// ActivatePastureSystem for why it is currently always false against main@7b3451a.
+// ActivationResult identifies the exact default actor installed by activation.
+// Success means the namespace claim, software-agent rows, and manifest entry all
+// exist atomically; callers do not need a race-prone fresh-versus-retry flag.
 type ActivationResult struct {
-	Fresh              bool
-	DefaultActorSeeded bool
-	DefaultActorID     provenance.ActorID
+	DefaultActorID provenance.ActorID
 }
 
-// ActivatePastureSystem registers the pasture-system namespace claim and reserves
-// fixed-UUID ordinals 0..1023 over a real Provenance actor-namespace registry,
-// idempotently. Fresh absence registers the claim. An exact existing claim is
-// inert (Fresh=false). A stored claim of the same namespace that differs in any
-// field (owner/range/codec drift) aborts with an actionable error and writes
-// nothing further. Ordinals 1..1023 are never materialized.
-//
-// DELIVERED-SURFACE GAP (pasture#14 acceptance vs Provenance main@7b3451a).
-// Issue #14 additionally requires seeding manifest-v1 ordinal zero as a fixed
-// pasture-system/default software_agent. The delivered Provenance schema declares
-// fixed_actor_manifest_entries.actor_id as a FOREIGN KEY to agents(id), but the
-// released public surface exposes no way to create an agent with a caller-supplied
-// fixed ActorID: RegisterSoftwareAgent always mints a fresh UUIDv7, so the
-// all-zero-UUID default actor row cannot be created, and RegisterFixedActorEntry
-// for it fails a FOREIGN KEY constraint. The fixed-actor SEED is therefore
-// deferred (DefaultActorSeeded=false) pending a Provenance surface that can
-// register a fixed-id system agent (or a manifest seam that creates the agent row
-// atomically). PastureSystemDefaultEntry() below is the exact entry to register
-// once that surface exists; the claim + range reservation this function performs
-// is the maximum a #14 adapter can commit against the released API today.
-func ActivatePastureSystem(j provenance.JournalAPI) (ActivationResult, error) {
-	if j == nil {
+// ActivatePastureSystem atomically claims the pasture-system namespace, reserves
+// fixed-UUID ordinals 0..1023, and installs only ordinal zero as the fixed
+// pasture-system/default software agent. Exact retries are inert, claim-only
+// persisted state is repaired, and any claim, actor, or manifest conflict aborts
+// without partial writes. Ordinals 1..1023 remain unmaterialized.
+func ActivatePastureSystem(tr provenance.Tracker) (ActivationResult, error) {
+	if tr == nil {
 		return ActivationResult{}, errors.New(
-			"provadapter: cannot activate pasture-system — what: the Provenance JournalAPI is nil; " +
-				"why: activation registers a namespace claim through the journal registry; " +
+			"provadapter: cannot activate pasture-system — what: the Provenance Tracker is nil; " +
+				"why: activation atomically registers the namespace, software agent, and manifest entry; " +
 				"where: internal/provadapter ActivatePastureSystem; when: at startup; impact: no reservation " +
-				"is made; fix: pass Tracker.Journal() from an open Provenance tracker")
+				"or default actor is created; fix: pass an open Provenance tracker")
 	}
-	want := PastureSystemClaim()
 
-	existing, err := j.NamespaceClaims()
+	agent, err := tr.RegisterFixedSoftwareAgent(PastureSystemDefaultRegistration())
 	if err != nil {
 		return ActivationResult{}, fmt.Errorf(
-			"provadapter: activate pasture-system: read existing namespace claims: %w", err)
+			"provadapter: atomically activate pasture-system default actor: %w", err)
 	}
-	var current *provenance.ActorNamespaceClaim
-	for i := range existing {
-		if existing[i].Namespace == PastureSystemNamespace {
-			current = &existing[i]
-			break
-		}
-	}
-
-	fresh := false
-	if current == nil {
-		if err := j.RegisterNamespaceClaim(want); err != nil {
-			return ActivationResult{}, fmt.Errorf(
-				"provadapter: activate pasture-system: register namespace claim: %w", err)
-		}
-		fresh = true
-	} else if !current.Equal(want) {
+	if agent.ID != PastureSystemDefaultActorID() {
 		return ActivationResult{}, fmt.Errorf(
-			"provadapter: activate pasture-system: a %q namespace claim already exists but differs from the "+
-				"manifest — what: stored claim %+v does not equal the expected %+v; why: the reserved system "+
-				"namespace must have exactly the manifest-v1 owner, [0, %d] range, and %q codec, and a drifted "+
-				"claim signals corruption or a foreign claimant; where: internal/provadapter ActivatePastureSystem; "+
-				"when: activation drift check; impact: nothing further is written; fix: reconcile the stored claim "+
-				"with the manifest or investigate the conflicting claimant",
-			PastureSystemNamespace, *current, want, pastureSystemMaxOrdinal, provenance.OrdinalV1CodecName)
+			"provadapter: activate pasture-system returned actor %q instead of %q — what: the atomic registration returned an unexpected identity; why: the fixed actor response diverged from the manifest request; where: internal/provadapter ActivatePastureSystem; when: after activation commit; impact: Pasture will not bind journal operations to an ambiguous actor; fix: verify the pinned Provenance fixed-agent contract",
+			agent.ID.String(), PastureSystemDefaultActorID().String())
 	}
-
-	// The manifest-v1 ordinal-zero fixed-actor SEED is deferred: see the
-	// DELIVERED-SURFACE GAP note above. Ordinals 1..1023 remain unmaterialized.
-	return ActivationResult{Fresh: fresh, DefaultActorSeeded: false, DefaultActorID: PastureSystemDefaultActorID()}, nil
+	return ActivationResult{DefaultActorID: agent.ID}, nil
 }

@@ -1,6 +1,6 @@
 // Package provadapter is Pasture's thin low-level adapter over the released
 // Provenance global-journal surface (github.com/dayvidpham/provenance at
-// dayvidpham/provenance#4/#5/#6, module pinned to main@7b3451a). It owns exactly
+// dayvidpham/provenance#4/#5/#6, module pinned to main@ecc7663). It owns exactly
 // the boundary conversions and system-actor activation that pasture#14 places
 // between the portable protocol identity domain (pkg/protocol/portable, produced
 // by the in-memory compiler internal/codegen/ir) and Provenance's durable

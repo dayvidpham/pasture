@@ -348,6 +348,10 @@ func (t *trackerImpl) RegisterSoftwareAgent(namespace, name, version, source str
 	defer t.lockWrite()()
 	return t.prov.RegisterSoftwareAgent(namespace, name, version, source)
 }
+func (t *trackerImpl) RegisterFixedSoftwareAgent(reg provenance.FixedSoftwareAgentRegistration) (provenance.SoftwareAgent, error) {
+	defer t.lockWrite()()
+	return t.prov.RegisterFixedSoftwareAgent(reg)
+}
 func (t *trackerImpl) Agent(id provenance.AgentID) (provenance.Agent, error) {
 	return t.prov.Agent(id)
 }

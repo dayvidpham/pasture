@@ -3,11 +3,11 @@ package tasks_test
 // system_identity_test.go covers the journaled task-backend system identity:
 // the mutation verbs commit through a Session bound to the pasture-system
 // committing actor and genesis authority (Tracker.As), the reserved namespace is
-// activated as a claim + [0, 1023] range (the seam the ordinal-zero seed flips in
-// through — asserted here via the claim/range registry, NOT a seeded row), and the
-// whole thing is journaled and reproducible and stable across reopen.
+// activated with the deterministic ordinal-zero software agent, and the whole
+// thing is journaled, reproducible, and stable across reopen.
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 
@@ -36,6 +36,8 @@ type provenanceTracker interface {
 	Stop(id provenance.TaskID) (provenance.Task, error)
 	Reopen(id provenance.TaskID) (provenance.Task, error)
 	Show(id provenance.TaskID) (provenance.Task, error)
+	RegisterSoftwareAgent(namespace, name, version, source string) (provenance.SoftwareAgent, error)
+	SoftwareAgent(id provenance.AgentID) (provenance.SoftwareAgent, error)
 	Journal() provenance.JournalAPI
 	Close() error
 }
@@ -50,13 +52,14 @@ func createSmoke(t *testing.T, tr provenanceTracker, title string) provenance.Ta
 	return task
 }
 
-// TestSystemIdentity_ActivatesClaimAndRange proves the first mutation reserves the
-// pasture-system namespace as the exact manifest claim over the [0, 1023] range.
-// The assertion is the claim/range registry entry, not a seeded ordinal-zero row,
-// so it holds in the reservation-only era and continues to hold once the seed lands.
-func TestSystemIdentity_ActivatesClaimAndRange(t *testing.T) {
+// TestSystemIdentity_ActivatesExactDefaultActor proves the first production task
+// mutation atomically installs the exact claim and ordinal-zero software actor,
+// persists that actor as the committer, and materializes no reserved ordinal above
+// zero.
+func TestSystemIdentity_ActivatesExactDefaultActor(t *testing.T) {
 	t.Parallel()
-	tr := openTempTracker(t, filepath.Join(t.TempDir(), "pasture.db"))
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	tr := openTempTracker(t, dbPath)
 
 	// A mutation triggers identity bootstrap (namespace activation + genesis).
 	createSmoke(t, tr, "activate")
@@ -82,6 +85,47 @@ func TestSystemIdentity_ActivatesClaimAndRange(t *testing.T) {
 	if found.Range != provadapter.PastureSystemRange {
 		t.Errorf("claim range = %+v, want the reserved [0, 1023] range %+v",
 			found.Range, provadapter.PastureSystemRange)
+	}
+
+	agent, err := tr.SoftwareAgent(provadapter.PastureSystemDefaultActorID())
+	if err != nil {
+		t.Fatalf("SoftwareAgent(default): %v", err)
+	}
+	if agent.ID != provadapter.PastureSystemDefaultActorID() || agent.Name != provadapter.PastureSystemDefaultName ||
+		agent.Version != "1" || agent.Source != "pasture" {
+		t.Errorf("default software agent = %+v", agent)
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open persisted store for assertions: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var committer string
+	if err := db.QueryRow(`SELECT committer_actor_id FROM pasture_system_identity WHERE singleton_id = 0`).Scan(&committer); err != nil {
+		t.Fatalf("read persisted committer: %v", err)
+	}
+	if committer != provadapter.PastureSystemDefaultActorID().String() {
+		t.Errorf("persisted committer = %q, want %q", committer, provadapter.PastureSystemDefaultActorID())
+	}
+	var manifestCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM fixed_actor_manifest_entries`).Scan(&manifestCount); err != nil {
+		t.Fatalf("count fixed manifest entries: %v", err)
+	}
+	if manifestCount != 1 {
+		t.Fatalf("fixed manifest entries = %d, want only ordinal zero", manifestCount)
+	}
+	var actorID, namespace, name, metadata string
+	var kind int
+	if err := db.QueryRow(`SELECT actor_id, namespace, kind_id, name, metadata FROM fixed_actor_manifest_entries`).
+		Scan(&actorID, &namespace, &kind, &name, &metadata); err != nil {
+		t.Fatalf("read fixed manifest entry: %v", err)
+	}
+	if actorID != provadapter.PastureSystemDefaultActorID().String() ||
+		namespace != provadapter.PastureSystemNamespace || kind != int(provenance.AgentKindSoftware) ||
+		name != provadapter.PastureSystemDefaultName || metadata != "{}" {
+		t.Errorf("fixed manifest entry = actor=%q namespace=%q kind=%d name=%q metadata=%q",
+			actorID, namespace, kind, name, metadata)
 	}
 }
 
@@ -180,5 +224,59 @@ func TestSystemIdentity_StableAcrossReopen(t *testing.T) {
 	// The journal remains reproducible after the cross-open mutations.
 	if _, err := tr2.Journal().ReplayProjections(); err != nil {
 		t.Errorf("ReplayProjections after reopen: %v", err)
+	}
+}
+
+// TestSystemIdentity_PersistedFallbackUpgradesToDefaultActor proves a store
+// initialized with the former random committer preserves its genesis authority
+// while converging the persisted actor to manifest-v1 ordinal zero on reopen.
+func TestSystemIdentity_PersistedFallbackUpgradesToDefaultActor(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+
+	tr1 := openTempTracker(t, dbPath)
+	createSmoke(t, tr1, "before-identity-upgrade")
+	random, err := tr1.RegisterSoftwareAgent("pasture-system", "old-fallback", "1", "pasture")
+	if err != nil {
+		t.Fatalf("register old fallback fixture: %v", err)
+	}
+	if err := tr1.Close(); err != nil {
+		t.Fatalf("close first tracker: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open persisted store fixture: %v", err)
+	}
+	var authorityBefore int64
+	if err := db.QueryRow(`SELECT genesis_authority_journal_id FROM pasture_system_identity WHERE singleton_id = 0`).Scan(&authorityBefore); err != nil {
+		t.Fatalf("read authority before upgrade: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE pasture_system_identity SET committer_actor_id = ? WHERE singleton_id = 0`, random.ID.String()); err != nil {
+		t.Fatalf("seed old fallback identity: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close persisted store fixture: %v", err)
+	}
+
+	tr2 := openTempTracker(t, dbPath)
+	createSmoke(t, tr2, "after-identity-upgrade")
+
+	db, err = sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("reopen persisted store fixture: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var actorAfter string
+	var authorityAfter int64
+	if err := db.QueryRow(`SELECT committer_actor_id, genesis_authority_journal_id FROM pasture_system_identity WHERE singleton_id = 0`).
+		Scan(&actorAfter, &authorityAfter); err != nil {
+		t.Fatalf("read upgraded identity: %v", err)
+	}
+	if actorAfter != provadapter.PastureSystemDefaultActorID().String() {
+		t.Errorf("upgraded actor = %q, want %q", actorAfter, provadapter.PastureSystemDefaultActorID())
+	}
+	if authorityAfter != authorityBefore {
+		t.Errorf("genesis authority changed from %d to %d during actor upgrade", authorityBefore, authorityAfter)
 	}
 }
