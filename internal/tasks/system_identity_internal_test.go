@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -111,7 +112,17 @@ type coordinatedOutcome struct {
 
 func TestSystemIdentityConcurrentFirstOpenConverges(t *testing.T) {
 	t.Parallel()
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	testDir, err := os.MkdirTemp("", "pasture-system-identity-concurrency-")
+	if err != nil {
+		t.Fatalf("create coordinated tracker directory: %v", err)
+	}
+	cleanupSafe := true
+	t.Cleanup(func() {
+		if cleanupSafe {
+			_ = os.RemoveAll(testDir)
+		}
+	})
+	dbPath := filepath.Join(testDir, "pasture.db")
 	ready := make(chan coordinatedCheckpoint, 2)
 	abort := make(chan struct{})
 	var abortOnce sync.Once
@@ -160,6 +171,7 @@ func TestSystemIdentityConcurrentFirstOpenConverges(t *testing.T) {
 		}()
 	}
 	startTracker("first", first)
+	cleanupSafe = false
 	launched := 1
 
 	timer := time.NewTimer(10 * time.Second)
@@ -167,15 +179,24 @@ func TestSystemIdentityConcurrentFirstOpenConverges(t *testing.T) {
 	checkpoints := make(map[string]coordinatedCheckpoint, 2)
 	outcomes := make(map[string]error, 2)
 	released := make(map[string]bool, 2)
+	launchedNames := []string{"first"}
 	failure := ""
-	deadlineExpired := false
+	var liveTrackers []string
 	release := func(tracker string) {
 		if point, ok := checkpoints[tracker]; ok && !released[tracker] {
 			close(point.proceed)
 			released[tracker] = true
 		}
 	}
-	for (failure == "" && len(outcomes) != 2) || (failure != "" && len(outcomes) != launched) {
+coordination:
+	for len(outcomes) != 2 {
+		if failure != "" {
+			liveTrackers = joinCoordinatedOutcomes(results, outcomes, launchedNames, 6*time.Second)
+			if len(liveTrackers) != 0 {
+				failure += fmt.Sprintf("; timed out after abort waiting for tracker operations to stop: %v", liveTrackers)
+			}
+			break coordination
+		}
 		if failure == "" && len(checkpoints) == 2 && !released["first"] {
 			firstAuthority := checkpoints["first"].authority
 			secondAuthority := checkpoints["second"].authority
@@ -197,11 +218,6 @@ func TestSystemIdentityConcurrentFirstOpenConverges(t *testing.T) {
 				}
 			}
 		}
-		if deadlineExpired {
-			result := <-results
-			outcomes[result.tracker] = result.err
-			continue
-		}
 		select {
 		case point := <-ready:
 			if _, duplicate := checkpoints[point.tracker]; duplicate {
@@ -216,6 +232,7 @@ func TestSystemIdentityConcurrentFirstOpenConverges(t *testing.T) {
 				// overlapping first opens without racing unrelated SQLite connection locks.
 				startTracker("second", second)
 				launched = 2
+				launchedNames = append(launchedNames, "second")
 			}
 		case result := <-results:
 			outcomes[result.tracker] = result.err
@@ -230,13 +247,15 @@ func TestSystemIdentityConcurrentFirstOpenConverges(t *testing.T) {
 		case <-timer.C:
 			failure = fmt.Sprintf("timed out coordinating first-open trackers (checkpoints=%v outcomes=%v released=%v)",
 				checkpointNames(checkpoints), outcomeNames(outcomes), released)
-			deadlineExpired = true
 			abortAll()
 		}
 	}
 	if failure != "" {
-		_ = second.Close()
-		_ = first.Close()
+		if len(liveTrackers) == 0 {
+			_ = second.Close()
+			_ = first.Close()
+			cleanupSafe = true
+		}
 		t.Fatal(failure)
 	}
 	for tracker, err := range outcomes {
@@ -255,6 +274,60 @@ func TestSystemIdentityConcurrentFirstOpenConverges(t *testing.T) {
 	}
 	if firstCloseErr, secondCloseErr := first.Close(), second.Close(); firstCloseErr != nil || secondCloseErr != nil {
 		t.Fatalf("close coordinated trackers: first=%v second=%v", firstCloseErr, secondCloseErr)
+	}
+	cleanupSafe = true
+}
+
+func joinCoordinatedOutcomes(
+	results <-chan coordinatedOutcome,
+	outcomes map[string]error,
+	launched []string,
+	timeout time.Duration,
+) []string {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for len(outcomes) < len(launched) {
+		select {
+		case result := <-results:
+			outcomes[result.tracker] = result.err
+		case <-timer.C:
+			missing := make([]string, 0, len(launched)-len(outcomes))
+			for _, tracker := range launched {
+				if _, joined := outcomes[tracker]; !joined {
+					missing = append(missing, tracker)
+				}
+			}
+			return missing
+		}
+	}
+	return nil
+}
+
+func TestJoinCoordinatedOutcomesBoundsStuckOperation(t *testing.T) {
+	t.Parallel()
+	results := make(chan coordinatedOutcome, 1)
+	outcomes := make(map[string]error, 1)
+	release := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		<-release
+		results <- coordinatedOutcome{tracker: "stuck"}
+	}()
+
+	started := time.Now()
+	missing := joinCoordinatedOutcomes(results, outcomes, []string{"stuck"}, 25*time.Millisecond)
+	if !reflect.DeepEqual(missing, []string{"stuck"}) {
+		t.Fatalf("bounded join missing trackers = %v, want [stuck]", missing)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("bounded join took %s for stuck tracker, want under 1s", elapsed)
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("controlled stuck tracker did not stop after test release")
 	}
 }
 
@@ -329,6 +402,47 @@ func TestSystemIdentityPersistedNoncanonicalGenesisFailsClosed(t *testing.T) {
 	after := systemIdentityStoreSnapshot(t, impl.auditDB)
 	if after != before {
 		t.Fatalf("store mutated while rejecting noncanonical genesis:\n before=%+v\n  after=%+v", before, after)
+	}
+	if err := opened.Close(); err != nil {
+		t.Fatalf("close fixture tracker: %v", err)
+	}
+}
+
+func TestSystemIdentityPersistedMissingGenesisFailsClosed(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	opened, err := openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{})
+	if err != nil {
+		t.Fatalf("open fixture tracker: %v", err)
+	}
+	impl := opened.(*trackerImpl)
+	if _, err := provadapter.ActivatePastureSystem(impl.prov); err != nil {
+		t.Fatalf("activate pasture-system fixture: %v", err)
+	}
+	if err := impl.ensurePastureTablesOnce(); err != nil {
+		t.Fatalf("create pasture identity table: %v", err)
+	}
+	const arbitraryAuthority provenance.JournalID = 4242
+	if err := writeSystemIdentity(impl.auditDB, provadapter.PastureSystemDefaultActorID(), arbitraryAuthority); err != nil {
+		t.Fatalf("write missing-genesis singleton fixture: %v", err)
+	}
+	before := systemIdentityStoreSnapshot(t, impl.auditDB)
+	if before.operations != 0 {
+		t.Fatalf("fixture journal operations = %d, want empty journal", before.operations)
+	}
+
+	err = createSystemIdentityTask(opened, "must-fail-missing-genesis")
+	if err == nil {
+		t.Fatal("Create succeeded with a persisted singleton and no deterministic genesis operation")
+	}
+	var structured *pasterrors.StructuredError
+	if !errors.As(err, &structured) || structured.Category != pasterrors.CategoryStorage ||
+		structured.What == "" || structured.Why == "" || structured.Where == "" || structured.Impact == "" || structured.Fix == "" {
+		t.Fatalf("Create error is not an actionable CategoryStorage StructuredError: %T %v", err, err)
+	}
+	after := systemIdentityStoreSnapshot(t, impl.auditDB)
+	if after != before {
+		t.Fatalf("store mutated while rejecting missing genesis:\n before=%+v\n  after=%+v", before, after)
 	}
 	if err := opened.Close(); err != nil {
 		t.Fatalf("close fixture tracker: %v", err)

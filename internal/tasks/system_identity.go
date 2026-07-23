@@ -154,6 +154,29 @@ func (t *trackerImpl) bootstrapSystemSession() (*provenance.Session, error) {
 }
 
 func validatePersistedGenesisAuthority(j provenance.JournalAPI, committer provenance.ActorID, authority provenance.JournalID) error {
+	committed, err := j.LookupCommitted(pastureSystemGenesisOperationID)
+	if err != nil {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     "Pasture couldn't look up its saved genesis operation.",
+			Why:      "Reading the deterministic genesis operation from the journal failed before canonical replay validation could begin.",
+			Where:    "Validating the task-backend genesis authority (internal/tasks/system_identity.go in tasks.validatePersistedGenesisAuthority).",
+			Impact:   "Bootstrap stopped without changing the saved identity or journal.",
+			Fix:      "Verify journal integrity and database readability, then retry. Do not recreate the operation through normal startup while a singleton already exists.",
+			Cause:    err,
+		}
+	}
+	if committed.Kind != provenance.CommittedExact {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     "Pasture's saved system identity references a missing genesis operation.",
+			Why:      fmt.Sprintf("The singleton cites authority %d, but deterministic operation %q is absent from the journal.", authority, pastureSystemGenesisOperationID),
+			Where:    "Validating the task-backend genesis authority (internal/tasks/system_identity.go in tasks.validatePersistedGenesisAuthority).",
+			Impact:   "Bootstrap stopped before canonical replay, actor activation, or task mutation, so startup cannot silently create journal history behind an existing singleton.",
+			Fix:      "Inspect the singleton and journal. Reconcile the missing deterministic genesis through an explicit reviewed migration, then retry.",
+		}
+	}
+
 	result, err := j.Apply(pastureSystemGenesisInput(committer, time.Now().UTC().UnixNano()))
 	if err != nil {
 		return &pasterrors.StructuredError{
