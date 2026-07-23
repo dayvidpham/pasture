@@ -2,6 +2,8 @@ package tasks
 
 import (
 	"encoding/hex"
+	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/dayvidpham/provenance"
@@ -96,7 +98,7 @@ func TestSchemaDigestGolden(t *testing.T) {
 		{"plan-accepted", ps.planAccepted.Schema(), "e91e64ac26c52cd07be3968065af7b88f6f555ea8144c71ccb6002b518ee09c1"},
 		{"plan-changes", ps.planChanges.Schema(), "8a4183a5abcf6dd988fdb5520f7db7b8246c2a72e31af473d7c73263d4305ca8"},
 		{"plan-deferred", ps.planDeferred.Schema(), "a712b9bd98bb5439f1e2bf66309b5c2fea243beaab75c17eb3bb23e525eb6c34"},
-		{"impl-uat", ps.implementationUAT.Schema(), "51d18de9b61799805a2cf42ae1bef2870216550a212c7714d31e1981d7968a05"},
+		{"impl-uat", ps.implementationUAT.Schema(), "541809202fb1823057f695ea4cb42bd2583b3ed8c0eff9f66a2b148b730a237b"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -140,14 +142,13 @@ func TestModeChangeRoundTrip(t *testing.T) {
 func TestImplUATPayloadRoundTrip(t *testing.T) {
 	ps := mustPolicySet(t)
 	payload := ImplUATPayload{
-		ReportedVerdict: ImplUATChangesRequested,
 		Interactions:    []UATInteraction{{Prompt: "q?", Response: "a"}},
 		Feedback:        []UATFeedbackItem{{ID: "fb-1", Body: "b", FixNow: true}},
 		HeldAnswers:     []HeldQuestionResolution{{Target: "hq-1", Kind: ResolutionConfirm}},
 		PlanFeedback:    []DeferredFeedbackResolution{{Target: "pf-1", Kind: ResolutionDefer}},
 		LedgerDecisions: []LedgerDecisionResolution{{Target: "dl-1", Kind: ResolutionReplace, Note: "superseded"}},
 	}
-	draft, err := ps.DraftImplementationUAT(payload)
+	draft, err := ps.DraftImplementationUAT(ImplUATChangesRequested, payload)
 	if err != nil {
 		t.Fatalf("DraftImplementationUAT: %v", err)
 	}
@@ -159,10 +160,45 @@ func TestImplUATPayloadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeDecision: %v", err)
 	}
-	if got.ReportedVerdict != payload.ReportedVerdict ||
-		len(got.Interactions) != 1 || got.Interactions[0] != payload.Interactions[0] ||
-		len(got.LedgerDecisions) != 1 || got.LedgerDecisions[0] != payload.LedgerDecisions[0] {
+	if got.Outcome != ImplUATChangesRequested ||
+		len(got.Payload.Interactions) != 1 || got.Payload.Interactions[0] != payload.Interactions[0] ||
+		len(got.Payload.LedgerDecisions) != 1 || got.Payload.LedgerDecisions[0] != payload.LedgerDecisions[0] {
 		t.Fatalf("round-trip = %+v, want %+v", got, payload)
+	}
+}
+
+func TestImplementationUATOutcomePersistsAcrossEncodingRoundTrip(t *testing.T) {
+	ps := mustPolicySet(t)
+	payload := ImplUATPayload{Interactions: []UATInteraction{{Prompt: "ship?", Response: "recorded"}}}
+	encodings := map[ImplementationUATVerdict]DecisionEncoding{}
+
+	for _, outcome := range []ImplementationUATVerdict{ImplUATAccepted, ImplUATChangesRequested} {
+		draft, err := ps.DraftImplementationUAT(outcome, payload)
+		if err != nil {
+			t.Fatalf("DraftImplementationUAT(%s): %v", outcome, err)
+		}
+		wire, err := json.Marshal(draft.encoding())
+		if err != nil {
+			t.Fatalf("marshal %s encoding: %v", outcome, err)
+		}
+		var restored DecisionEncoding
+		if err := json.Unmarshal(wire, &restored); err != nil {
+			t.Fatalf("unmarshal %s encoding: %v", outcome, err)
+		}
+		if err := ps.Catalog.ValidateStored(restored); err != nil {
+			t.Fatalf("ValidateStored(%s): %v", outcome, err)
+		}
+		got, err := DecodeDecision(ps.Catalog, ps.implementationUAT, restored)
+		if err != nil {
+			t.Fatalf("DecodeDecision(%s): %v", outcome, err)
+		}
+		if got.Outcome != outcome || !reflect.DeepEqual(got.Payload, payload) {
+			t.Fatalf("decoded record = %+v, want outcome %s payload %+v", got, outcome, payload)
+		}
+		encodings[outcome] = restored
+	}
+	if reflect.DeepEqual(encodings[ImplUATAccepted].Payload, encodings[ImplUATChangesRequested].Payload) {
+		t.Fatal("accepted and changes-requested canonical encodings are identical")
 	}
 }
 
@@ -301,8 +337,7 @@ func TestCanonicalPayloadGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("draft deferred: %v", err)
 	}
-	implUAT, err := ps.implementationUAT.Draft(ImplUATPayload{
-		ReportedVerdict: ImplUATChangesRequested,
+	implUAT, err := ps.DraftImplementationUAT(ImplUATChangesRequested, ImplUATPayload{
 		Interactions:    interactions,
 		Feedback:        feedback,
 		HeldAnswers:     []HeldQuestionResolution{{Target: "hq-1", Kind: ResolutionConfirm}},
@@ -322,7 +357,7 @@ func TestCanonicalPayloadGolden(t *testing.T) {
 		{"plan-accepted", accepted.encoding().Payload, `{"snapshot":{"id":"puat-1","uatTaskId":{"Namespace":"aura-plugins","UUID":"018f4b30-1e3a-7c9a-8f3b-000000000001"},"proposal":"prop-r1","decisionEntry":"dl-1","inputLedger":"L1","outputLedger":"L2"},"interactions":[{"prompt":"q?","response":"a"}],"feedback":null}`},
 		{"plan-changes", changes.encoding().Payload, `{"snapshot":{"id":"puat-1","uatTaskId":{"Namespace":"aura-plugins","UUID":"018f4b30-1e3a-7c9a-8f3b-000000000001"},"proposal":"prop-r1","decisionEntry":"dl-1","inputLedger":"L1","outputLedger":"L2"},"interactions":[{"prompt":"q?","response":"a"}],"feedback":[{"id":"fb-1","body":"b","fixNow":true}]}`},
 		{"plan-deferred", deferred.encoding().Payload, `{"snapshot":{"id":"puat-1","uatTaskId":{"Namespace":"aura-plugins","UUID":"018f4b30-1e3a-7c9a-8f3b-000000000001"},"proposal":"prop-r1","decisionEntry":"dl-1","inputLedger":"L1","outputLedger":"L2"},"interactions":[{"prompt":"q?","response":"a"}],"feedback":null,"heldQuestions":[{"id":"hq-1","question":"still open?","stable":true}],"modeEntry":"mode-1"}`},
-		{"impl-uat", implUAT.encoding().Payload, `{"reportedVerdict":2,"interactions":[{"prompt":"q?","response":"a"}],"feedback":[{"id":"fb-1","body":"b","fixNow":true}],"heldAnswers":[{"target":"hq-1","kind":1,"note":""}],"planFeedback":[{"target":"pf-1","kind":2,"note":""}],"ledgerDecisions":[{"target":"dl-1","kind":3,"note":"superseded"}]}`},
+		{"impl-uat", implUAT.encoding().Payload, `{"outcome":2,"payload":{"interactions":[{"prompt":"q?","response":"a"}],"feedback":[{"id":"fb-1","body":"b","fixNow":true}],"heldAnswers":[{"target":"hq-1","kind":1,"note":""}],"planFeedback":[{"target":"pf-1","kind":2,"note":""}],"ledgerDecisions":[{"target":"dl-1","kind":3,"note":"superseded"}]}}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

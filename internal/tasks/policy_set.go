@@ -47,7 +47,19 @@ type PolicySet struct {
 	planAccepted      DecisionDescriptor[PlanAccepted]
 	planChanges       DecisionDescriptor[PlanChangesRequested]
 	planDeferred      DecisionDescriptor[PlanDeferredByAFK]
-	implementationUAT DecisionDescriptor[ImplUATPayload]
+	implementationUAT DecisionDescriptor[implementationUATRecord]
+}
+
+// implementationUATRecord is the private canonical value stored under the existing
+// implementation-UAT decision kind. Keeping outcome beside payload in one encoding makes
+// the authoritative verdict durable without duplicating it inside ImplUATPayload.
+type implementationUATRecord struct {
+	Outcome ImplementationUATVerdict `json:"outcome"`
+	Payload ImplUATPayload           `json:"payload"`
+}
+
+func validateImplementationUATRecord(record implementationUATRecord) error {
+	return validateImplUATPayload(record.Outcome, record.Payload)
 }
 
 // NewProductionPolicySet constructs the explicit production PolicySet. It builds the five
@@ -75,7 +87,7 @@ func NewProductionPolicySet() (PolicySet, error) {
 		return PolicySet{}, err
 	}
 	implementationUAT, err := newJSONDescriptor(
-		DecisionImplementationUAT, "implementation-uat{verdict,interactions,feedback,heldAnswers,planFeedback,ledgerDecisions}", validateImplUATPayload)
+		DecisionImplementationUAT, "implementation-uat{outcome,payload{interactions,feedback,heldAnswers,planFeedback,ledgerDecisions}}", validateImplementationUATRecord)
 	if err != nil {
 		return PolicySet{}, err
 	}
@@ -113,7 +125,7 @@ func (s PolicySet) PlanChangesRequestedDescriptor() DecisionDescriptor[PlanChang
 func (s PolicySet) PlanDeferredByAFKDescriptor() DecisionDescriptor[PlanDeferredByAFK] {
 	return s.planDeferred
 }
-func (s PolicySet) ImplementationUATDescriptor() DecisionDescriptor[ImplUATPayload] {
+func (s PolicySet) ImplementationUATDescriptor() DecisionDescriptor[implementationUATRecord] {
 	return s.implementationUAT
 }
 
@@ -167,9 +179,10 @@ func (s PolicySet) DraftPlanUAT(d PlanUATDecision) (DecisionDraft, error) {
 	}
 }
 
-// DraftImplementationUAT validates and drafts an Implementation-UAT payload.
-func (s PolicySet) DraftImplementationUAT(p ImplUATPayload) (DecisionDraft, error) {
-	return s.implementationUAT.Draft(p)
+// DraftImplementationUAT validates the authoritative verdict with its structured payload,
+// then drafts the payload through the production descriptor.
+func (s PolicySet) DraftImplementationUAT(verdict ImplementationUATVerdict, p ImplUATPayload) (DecisionDraft, error) {
+	return s.implementationUAT.Draft(implementationUATRecord{Outcome: verdict, Payload: p})
 }
 
 // newJSONDescriptor builds a #49 decision descriptor over a payload type T using the

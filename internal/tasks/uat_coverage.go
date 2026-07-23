@@ -177,6 +177,7 @@ func RequiredDecisions(in CoverageInput) []RequiredRef {
 // under any value change.
 type CoverageDigestSpec struct {
 	RequiredRefs   []RequiredRef
+	Outcome        ImplementationUATVerdict
 	Payload        ImplUATPayload
 	PlanDecision   PlanUATDecisionID
 	IntegrationSet IntegrationCandidateSetID
@@ -192,7 +193,7 @@ const coverageDigestVersion = "pasture.coverage-digest/v1"
 // permutation does not change the digest. Duplicate targets within a domain are rejected
 // upstream (validateImplUATPayload), so the encoded resolution list is a set.
 //
-// Scope: the digest folds each resolution's (domain, target, kind) plus the reported
+// Scope: the digest folds each resolution's (domain, target, kind) plus the authoritative
 // verdict — it deliberately excludes the free-text Note (and interaction/feedback bodies).
 // This is intentionally decision-bearing-only: (domain, target, kind) is the exact
 // information VerifyCoverage's mismatch check needs (a later ledger append changes the
@@ -200,6 +201,9 @@ const coverageDigestVersion = "pasture.coverage-digest/v1"
 // Note is documentation attached to a resolution, not itself a decision, so a Note-only
 // edit does not stale a previously accepted coverage digest.
 func ComputeCoverageDigest(spec CoverageDigestSpec) (CoverageDigest, error) {
+	if err := validateImplUATPayload(spec.Outcome, spec.Payload); err != nil {
+		return CoverageDigest{}, err
+	}
 	var buf bytes.Buffer
 	writeDelimited(&buf, []byte(coverageDigestVersion))
 	writeDelimited(&buf, []byte(spec.PlanDecision))
@@ -243,7 +247,7 @@ func ComputeCoverageDigest(spec CoverageDigestSpec) (CoverageDigest, error) {
 	}
 
 	// Fold the verdict last so an accept/changes-requested flip changes the digest.
-	writeDelimited(&buf, []byte(spec.Payload.ReportedVerdict.String()))
+	writeDelimited(&buf, []byte(spec.Outcome.String()))
 
 	return CoverageDigest(sha256.Sum256(buf.Bytes())), nil
 }

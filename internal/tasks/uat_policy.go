@@ -5,11 +5,10 @@
 //
 //   - Plan UAT: an accept / changes-requested / AFK-deferred verdict over a proposal
 //     revision, recorded as one of three typed decision kinds.
-//   - Implementation UAT: the single ImplUATPayload — the ONLY codec payload for the
-//     implementation-UAT verdict, verbatim interactions, feedback, and carry-forward
-//     resolutions. Actor attribution is never stored here: Decider and Recorder come
-//     exclusively from the referenced DecisionLedgerEntry.Actor, so attribution cannot
-//     disagree after restart.
+//   - Implementation UAT: one authoritative verdict plus the single ImplUATPayload for
+//     verbatim interactions, feedback, and carry-forward resolutions. Actor attribution
+//     is never stored here: Decider and Recorder come exclusively from the referenced
+//     DecisionLedgerEntry.Actor, so attribution cannot disagree after restart.
 //
 // Every payload is a plain, deterministically-serializable value: no maps, stable field
 // order, so its canonical JSON encoding is a pure function of the value and round-trips
@@ -359,12 +358,11 @@ type LedgerDecisionResolution struct {
 	Note   string                `json:"note"`
 }
 
-// ImplUATPayload is the single, canonical Implementation-UAT decision payload: the
-// verdict, verbatim interactions, feedback, and the three carry-forward resolution
-// domains. It stores no actor — attribution is read only from the referenced ledger
-// entry. It is the ONLY representation of these fields, so no second copy can drift.
+// ImplUATPayload is the single structured Implementation-UAT payload: verbatim
+// interactions, feedback, and the three carry-forward resolution domains. The
+// authoritative verdict is supplied separately to validation and drafting, so it cannot
+// disagree with a second payload field. Actor attribution is likewise stored separately.
 type ImplUATPayload struct {
-	ReportedVerdict ImplementationUATVerdict     `json:"reportedVerdict"`
 	Interactions    []UATInteraction             `json:"interactions"`
 	Feedback        []UATFeedbackItem            `json:"feedback"`
 	HeldAnswers     []HeldQuestionResolution     `json:"heldAnswers"`
@@ -396,11 +394,7 @@ func (p ImplUATPayload) forcesChangesRequested() bool {
 	return false
 }
 
-func validateImplUATPayload(p ImplUATPayload) error {
-	if !p.ReportedVerdict.valid() {
-		return uatErr("ImplUATPayload.ReportedVerdict", fmt.Sprintf("the reported verdict %q is not accepted or changes_requested", p.ReportedVerdict),
-			"an implementation-UAT decision is either accepted or changes_requested", "report accepted or changes_requested")
-	}
+func validateImplUATPayloadContents(p ImplUATPayload) error {
 	if err := validateInteractions("ImplUATPayload.Interactions", p.Interactions); err != nil {
 		return err
 	}
@@ -455,8 +449,22 @@ func validateImplUATPayload(p ImplUATPayload) error {
 		}
 		ledgerSeen[r.Target] = true
 	}
-	if p.forcesChangesRequested() && p.ReportedVerdict != ImplUATChangesRequested {
-		return uatErr("ImplUATPayload.ReportedVerdict", "an accepted verdict carries a REPLACE resolution or FIX-NOW feedback",
+	return nil
+}
+
+// validateImplUATPayload validates the authoritative verdict together with its structured
+// payload. Payload-only descriptor decoding uses validateImplUATPayloadContents; mutation
+// drafting must call this function first to enforce cross-field verdict rules.
+func validateImplUATPayload(verdict ImplementationUATVerdict, p ImplUATPayload) error {
+	if !verdict.valid() {
+		return uatErr("ImplementationUATVerdict", fmt.Sprintf("the verdict %q is not accepted or changes_requested", verdict),
+			"an implementation-UAT decision is either accepted or changes_requested", "supply accepted or changes_requested")
+	}
+	if err := validateImplUATPayloadContents(p); err != nil {
+		return err
+	}
+	if p.forcesChangesRequested() && verdict != ImplUATChangesRequested {
+		return uatErr("ImplementationUATVerdict", "an accepted verdict carries a REPLACE resolution or FIX-NOW feedback",
 			"REPLACE resolutions and FIX-NOW feedback force a changes-requested verdict because they record new required work",
 			"report changes_requested when any resolution is replace or any feedback is FIX-NOW")
 	}
@@ -478,6 +486,7 @@ type ImplementationUATDecision struct {
 	InputLedger    DocumentRevisionID
 	OutputLedger   DocumentRevisionID
 	PlanDecision   PlanUATDecisionID
+	Outcome        ImplementationUATVerdict
 	Payload        ImplUATPayload
 	Coverage       CoverageDigest
 }

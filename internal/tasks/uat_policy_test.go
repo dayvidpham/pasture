@@ -9,37 +9,32 @@ import (
 func TestValidateImplUATPayloadForcesChangesRequested(t *testing.T) {
 	// A REPLACE resolution with an accepted verdict is rejected.
 	replaceAccepted := ImplUATPayload{
-		ReportedVerdict: ImplUATAccepted,
 		LedgerDecisions: []LedgerDecisionResolution{{Target: "j-1", Kind: ResolutionReplace}},
 	}
-	if err := validateImplUATPayload(replaceAccepted); err == nil {
+	if err := validateImplUATPayload(ImplUATAccepted, replaceAccepted); err == nil {
 		t.Fatal("expected REPLACE+accepted to be rejected")
 	}
 	// FIX-NOW feedback with an accepted verdict is rejected.
 	fixNowAccepted := ImplUATPayload{
-		ReportedVerdict: ImplUATAccepted,
-		Feedback:        []UATFeedbackItem{{ID: "fb-1", FixNow: true}},
+		Feedback: []UATFeedbackItem{{ID: "fb-1", FixNow: true}},
 	}
-	if err := validateImplUATPayload(fixNowAccepted); err == nil {
+	if err := validateImplUATPayload(ImplUATAccepted, fixNowAccepted); err == nil {
 		t.Fatal("expected FIX-NOW+accepted to be rejected")
 	}
 	// The same payloads with changes_requested are accepted.
-	ok := replaceAccepted
-	ok.ReportedVerdict = ImplUATChangesRequested
-	if err := validateImplUATPayload(ok); err != nil {
+	if err := validateImplUATPayload(ImplUATChangesRequested, replaceAccepted); err != nil {
 		t.Fatalf("REPLACE+changes_requested rejected: %v", err)
 	}
 }
 
 func TestValidateImplUATPayloadRejectsDuplicateResolution(t *testing.T) {
 	dup := ImplUATPayload{
-		ReportedVerdict: ImplUATChangesRequested,
 		HeldAnswers: []HeldQuestionResolution{
 			{Target: "hq-1", Kind: ResolutionConfirm},
 			{Target: "hq-1", Kind: ResolutionDefer},
 		},
 	}
-	if err := validateImplUATPayload(dup); err == nil {
+	if err := validateImplUATPayload(ImplUATChangesRequested, dup); err == nil {
 		t.Fatal("expected duplicate held-answer target to be rejected")
 	}
 }

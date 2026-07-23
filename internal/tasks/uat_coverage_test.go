@@ -81,17 +81,15 @@ func TestCoverageDigestStableUnderPermutation(t *testing.T) {
 		{Kind: RequiredHeldQuestion, ID: "hq-1"},
 	}
 	payloadA := ImplUATPayload{
-		ReportedVerdict: ImplUATAccepted,
 		LedgerDecisions: []LedgerDecisionResolution{{Target: "j-2", Kind: ResolutionConfirm}},
 		HeldAnswers:     []HeldQuestionResolution{{Target: "hq-1", Kind: ResolutionDefer}},
 	}
 	payloadB := ImplUATPayload{
-		ReportedVerdict: ImplUATAccepted,
 		HeldAnswers:     []HeldQuestionResolution{{Target: "hq-1", Kind: ResolutionDefer}},
 		LedgerDecisions: []LedgerDecisionResolution{{Target: "j-2", Kind: ResolutionConfirm}},
 	}
-	specA := CoverageDigestSpec{RequiredRefs: refsA, Payload: payloadA, PlanDecision: "p1", IntegrationSet: "iset", InputLedger: "L1"}
-	specB := CoverageDigestSpec{RequiredRefs: refsB, Payload: payloadB, PlanDecision: "p1", IntegrationSet: "iset", InputLedger: "L1"}
+	specA := CoverageDigestSpec{RequiredRefs: refsA, Outcome: ImplUATAccepted, Payload: payloadA, PlanDecision: "p1", IntegrationSet: "iset", InputLedger: "L1"}
+	specB := CoverageDigestSpec{RequiredRefs: refsB, Outcome: ImplUATAccepted, Payload: payloadB, PlanDecision: "p1", IntegrationSet: "iset", InputLedger: "L1"}
 
 	digA, err := ComputeCoverageDigest(specA)
 	if err != nil {
@@ -115,9 +113,7 @@ func TestCoverageDigestStableUnderPermutation(t *testing.T) {
 			return s
 		},
 		func(s CoverageDigestSpec) CoverageDigestSpec {
-			p := s.Payload
-			p.ReportedVerdict = ImplUATChangesRequested
-			s.Payload = p
+			s.Outcome = ImplUATChangesRequested
 			return s
 		},
 	} {
@@ -134,7 +130,8 @@ func TestCoverageDigestStableUnderPermutation(t *testing.T) {
 func TestVerifyCoverage(t *testing.T) {
 	spec := CoverageDigestSpec{
 		RequiredRefs:   []RequiredRef{{Kind: RequiredLedgerDecision, ID: "j-1"}},
-		Payload:        ImplUATPayload{ReportedVerdict: ImplUATAccepted},
+		Outcome:        ImplUATAccepted,
+		Payload:        ImplUATPayload{},
 		PlanDecision:   "p1",
 		IntegrationSet: "iset",
 		InputLedger:    "L1",

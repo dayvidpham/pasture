@@ -69,6 +69,10 @@ const (
 // FindingSeverities is the canonical ordered triple of severities.
 var FindingSeverities = [3]FindingSeverity{SeverityBlocker, SeverityImportant, SeverityMinor}
 
+func (s FindingSeverity) valid() bool {
+	return s == SeverityBlocker || s == SeverityImportant || s == SeverityMinor
+}
+
 func (s FindingSeverity) String() string {
 	switch s {
 	case SeverityBlocker:
@@ -299,9 +303,6 @@ func (s ImplementationCandidateSubject) Ref() ReviewSubjectRef {
 // ReviewRoundID identifies one review round.
 type ReviewRoundID string
 
-// TaskCandidateID identifies the canonical closure candidate task.
-type TaskCandidateID string
-
 // SliceCloseAuthorization is the typed authorization a slice close requires: the governing
 // supervisor's owner-responsibility assignment, the clean review round, the canonical
 // candidate, and the three canonical review EventIDs (one per axis). It carries no caller
@@ -309,7 +310,7 @@ type TaskCandidateID string
 type SliceCloseAuthorization struct {
 	GoverningSupervisor provenance.AssignmentID
 	ReviewRound         ReviewRoundID
-	Candidate           TaskCandidateID
+	Candidate           ImplementationCandidateID
 	ReviewEvents        [3]provenance.JournalID
 }
 
