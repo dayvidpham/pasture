@@ -196,13 +196,12 @@ func (t *trackerImpl) ImportLegacyAuditRow(row provadapter.LegacyAuditEvent, res
 	// serializes with every other write on the shared connections.
 	unlock := t.lockWrite()
 	outcome, applyErr := journal.Apply(provadapter.ApplyRequest{
-		Mutation:       mutation,
-		Actor:          committer,
-		Authority:      &authority,
-		Command:        command,
-		MutationDigest: legacyImportMutationDigest(row, tasks, attributed),
-		RecordedAt:     row.RecordedAt.UnixNano(),
-		Effects:        effects,
+		Mutation:   mutation,
+		Actor:      committer,
+		Authority:  &authority,
+		Command:    command,
+		RecordedAt: row.RecordedAt.UnixNano(),
+		Effects:    effects,
 	})
 	unlock()
 
@@ -299,9 +298,10 @@ func legacyImportMutationRef(row provadapter.LegacyAuditEvent) (portable.Mutatio
 
 // legacyImportCommandBytes returns the canonical command bytes the CommandDigest is
 // taken over: the fully-resolved import intent (source identity, sorted fan-out, and
-// attributed actor). A changed fan-out or actor changes these bytes, so a distinct
-// operation reusing the same source identity produces a differing four-field replay
-// identity and is rejected as a conflict.
+// attributed actor, and exact source payload bytes). A changed fan-out, actor, or
+// source representation changes these bytes, so a distinct operation reusing the
+// same source identity is rejected as a conflict independently of canonical JSON
+// value normalization in the material event.
 func legacyImportCommandBytes(row provadapter.LegacyAuditEvent, tasks []provenance.TaskID, actor provenance.ActorID) []byte {
 	buf := make([]byte, 0, 128)
 	buf = append(buf, "import-legacy-audit-row\x1f"...)
@@ -314,17 +314,8 @@ func legacyImportCommandBytes(row provadapter.LegacyAuditEvent, tasks []provenan
 		buf = append(buf, 0x1e)
 		buf = append(buf, task.String()...)
 	}
+	buf = append(buf, 0x1d)
+	buf = append(buf, fmt.Sprintf("%d:", len(row.Payload))...)
+	buf = append(buf, row.Payload...)
 	return buf
-}
-
-// legacyImportMutationDigest is the opaque structural mutation digest: a hash over the
-// source identity, sorted fan-out, attributed actor, AND the preserved source payload,
-// so any structural change to what would be written yields a distinct digest.
-func legacyImportMutationDigest(row provadapter.LegacyAuditEvent, tasks []provenance.TaskID, actor provenance.ActorID) []byte {
-	h := sha256.New()
-	h.Write(legacyImportCommandBytes(row, tasks, actor))
-	h.Write([]byte{0x1d})
-	h.Write(row.Payload)
-	sum := h.Sum(nil)
-	return sum
 }

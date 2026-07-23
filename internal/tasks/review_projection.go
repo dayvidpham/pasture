@@ -6,16 +6,8 @@
 // (DocumentRevisionSubject / ImplementationCandidateSubject with a derived
 // ReviewSubjectRef), and the typed SliceCloseAuthorization. These are the read/plan
 // projections review start/finalize/close are lowered onto; they compute WHAT the review
-// graph is without touching the journal, so they are exhaustively testable against the
-// claim/range actor model with no seeded ordinal-zero actor.
-//
-// Seed dependency (PR #12, user gate pending). Actually COMMITTING a review round — one
-// ConditionalMutationBatch minting the round task, three axis tasks, the typed
-// relationships and parent-blocked-by-child edges, THREE distinct reviewer
-// owner-responsibility assignments, and the round-started event — is built on top of
-// PlanReviewRound. Its end-to-end assignment-attribution test needs the seeded
-// ordinal-zero actor; the deterministic shape and the
-// authorization types below do not, and are delivered and tested here.
+// graph is without touching the journal, so they are exhaustively testable independently
+// of the atomically seeded ordinal-zero system actor used by the committing path.
 
 package tasks
 

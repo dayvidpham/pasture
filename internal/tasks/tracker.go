@@ -64,6 +64,9 @@ type trackerImpl struct {
 	sysOnce    sync.Once
 	sysSession *provenance.Session
 	sysErr     error
+	// afterGenesisCommit is an internal dependency-injection boundary used by
+	// white-box crash tests. Production constructors leave it nil.
+	afterGenesisCommit func(provenance.JournalID) error
 
 	// writeMu serializes every write across BOTH backing connection families —
 	// the provenance journal connection (task/edge/label/comment/agent/activity
@@ -347,6 +350,10 @@ func (t *trackerImpl) RegisterMLAgent(namespace string, role provenance.Role, pr
 func (t *trackerImpl) RegisterSoftwareAgent(namespace, name, version, source string) (provenance.SoftwareAgent, error) {
 	defer t.lockWrite()()
 	return t.prov.RegisterSoftwareAgent(namespace, name, version, source)
+}
+func (t *trackerImpl) RegisterFixedSoftwareAgent(reg provenance.FixedSoftwareAgentRegistration) (provenance.SoftwareAgent, error) {
+	defer t.lockWrite()()
+	return t.prov.RegisterFixedSoftwareAgent(reg)
 }
 func (t *trackerImpl) Agent(id provenance.AgentID) (provenance.Agent, error) {
 	return t.prov.Agent(id)

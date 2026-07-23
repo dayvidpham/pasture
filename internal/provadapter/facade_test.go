@@ -48,12 +48,11 @@ func facadeGenesis(t *testing.T) (*Journal, provenance.Tracker, provenance.Actor
 	actor := registerActor(t, tr, "committer")
 
 	out, err := facade.Apply(ApplyRequest{
-		Mutation:       mustMutationRef(t, "pasture.genesis"),
-		Actor:          actor,
-		Authority:      nil, // genesis
-		Command:        mustDigest(t, []byte("genesis-command")),
-		MutationDigest: []byte("genesis-mutation"),
-		RecordedAt:     time.Now().UTC().UnixNano(),
+		Mutation:   mustMutationRef(t, "pasture.genesis"),
+		Actor:      actor,
+		Authority:  nil, // genesis
+		Command:    mustDigest(t, []byte("genesis-command")),
+		RecordedAt: time.Now().UTC().UnixNano(),
 		Effects: []provenance.Effect{{
 			Sort:           provenance.EffectBootstrapAuthority,
 			BootstrapLabel: "pasture-system",
@@ -82,15 +81,14 @@ func facadeGenesis(t *testing.T) (*Journal, provenance.Tracker, provenance.Actor
 
 // createTaskRequest builds a valid task-create ApplyRequest under the bootstrap
 // authority, minting a fresh task id.
-func createTaskRequest(actor provenance.ActorID, boot provenance.JournalID, mutation portable.MutationRef, command ir.CanonicalCommandDigest, mutationDigest []byte) ApplyRequest {
+func createTaskRequest(actor provenance.ActorID, boot provenance.JournalID, mutation portable.MutationRef, command ir.CanonicalCommandDigest) ApplyRequest {
 	authority := boot
 	return ApplyRequest{
-		Mutation:       mutation,
-		Actor:          actor,
-		Authority:      &authority,
-		Command:        command,
-		MutationDigest: mutationDigest,
-		RecordedAt:     time.Now().UTC().UnixNano(),
+		Mutation:   mutation,
+		Actor:      actor,
+		Authority:  &authority,
+		Command:    command,
+		RecordedAt: time.Now().UTC().UnixNano(),
 		Effects: []provenance.Effect{{
 			Sort:        provenance.EffectTaskCreate,
 			TaskID:      provenance.TaskID{Namespace: "pasture-test", UUID: uuid.Must(uuid.NewV7())},
@@ -110,7 +108,7 @@ func TestFacade_ApplyCommitsAndLooksUp(t *testing.T) {
 	facade, _, actor, boot := facadeGenesis(t)
 
 	mut := mustMutationRef(t, "pasture.task.create.001")
-	req := createTaskRequest(actor, boot, mut, mustDigest(t, []byte("create-001-command")), []byte("create-001-mutation"))
+	req := createTaskRequest(actor, boot, mut, mustDigest(t, []byte("create-001-command")))
 
 	out, err := facade.Apply(req)
 	if err != nil {
@@ -152,7 +150,7 @@ func TestFacade_IdempotentReplay(t *testing.T) {
 	facade, _, actor, boot := facadeGenesis(t)
 
 	mut := mustMutationRef(t, "pasture.task.create.replay")
-	req := createTaskRequest(actor, boot, mut, mustDigest(t, []byte("replay-command")), []byte("replay-mutation"))
+	req := createTaskRequest(actor, boot, mut, mustDigest(t, []byte("replay-command")))
 
 	first, err := facade.Apply(req)
 	if err != nil {
@@ -181,15 +179,15 @@ func TestFacade_ConflictRoundTripsTypedError(t *testing.T) {
 	facade, _, actor, boot := facadeGenesis(t)
 
 	mut := mustMutationRef(t, "pasture.task.create.conflict")
-	first := createTaskRequest(actor, boot, mut, mustDigest(t, []byte("conflict-command")), []byte("conflict-mutation-A"))
+	first := createTaskRequest(actor, boot, mut, mustDigest(t, []byte("conflict-command")))
 	if _, err := facade.Apply(first); err != nil {
 		t.Fatalf("first Apply: %v", err)
 	}
 
-	// Same mutation reference (same OperationID) but a DIFFERENT mutation digest:
-	// the four-field replay identity mismatches (§11).
+	// Same mutation reference (same OperationID) but a different canonical effect
+	// operand: the canonical mutation identity mismatches.
 	conflicting := first
-	conflicting.MutationDigest = []byte("conflict-mutation-B")
+	conflicting.Effects[0].Title = "different title"
 
 	out, err := facade.Apply(conflicting)
 	if err == nil {
@@ -214,8 +212,8 @@ func TestFacade_ConflictRoundTripsTypedError(t *testing.T) {
 }
 
 // TestFacade_RejectsInvalidInput proves the facade's boundary validation rejects a
-// nil journal, an empty mutation reference, a zero actor, a zero digest, and an
-// empty mutation digest with actionable errors before any store call.
+// nil journal, an empty mutation reference, a zero actor, and a zero digest with
+// actionable errors before any store call.
 func TestFacade_RejectsInvalidInput(t *testing.T) {
 	if _, err := NewJournal(nil); err == nil {
 		t.Fatalf("expected NewJournal(nil) to be rejected")
@@ -225,12 +223,11 @@ func TestFacade_RejectsInvalidInput(t *testing.T) {
 	authority := boot
 
 	base := ApplyRequest{
-		Mutation:       mustMutationRef(t, "pasture.valid.ref"),
-		Actor:          actor,
-		Authority:      &authority,
-		Command:        mustDigest(t, []byte("valid-command")),
-		MutationDigest: []byte("valid-mutation"),
-		RecordedAt:     time.Now().UTC().UnixNano(),
+		Mutation:   mustMutationRef(t, "pasture.valid.ref"),
+		Actor:      actor,
+		Authority:  &authority,
+		Command:    mustDigest(t, []byte("valid-command")),
+		RecordedAt: time.Now().UTC().UnixNano(),
 	}
 
 	// Empty mutation reference.
@@ -251,13 +248,6 @@ func TestFacade_RejectsInvalidInput(t *testing.T) {
 	if _, err := facade.Apply(zeroDigest); err == nil {
 		t.Fatalf("expected zero command digest to be rejected")
 	}
-	// Empty mutation digest.
-	noMut := base
-	noMut.MutationDigest = nil
-	if _, err := facade.Apply(noMut); err == nil {
-		t.Fatalf("expected empty mutation digest to be rejected")
-	}
-
 	// LookupCommitted with an empty mutation reference is also rejected.
 	if _, err := facade.LookupCommitted(portable.MutationRef{}); err == nil {
 		t.Fatalf("expected empty mutation reference to be rejected by LookupCommitted")

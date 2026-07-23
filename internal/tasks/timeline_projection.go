@@ -14,11 +14,11 @@
 //  2. ProjectAssignments folds an ordered sequence of assignment start/end transitions into
 //     the current owner/supervisor/reviewer episodes and the derived Task.Owner. Owner is
 //     the occupant of the active owner-responsibility episode — responsibility transfer is
-//     the atomic authority for Task.Owner. Actors are plain claim/range ActorIDs, so the
-//     projection needs no seeded ordinal-zero actor.
+//     the atomic authority for Task.Owner. Actors are plain claim/range ActorIDs, so this
+//     pure projection is independent of fixed-actor activation.
 //
 // Both are pure functions over typed inputs, so they are exhaustively testable without a
-// journal or the pending ordinal-zero seed.
+// journal or actor registry.
 
 package tasks
 

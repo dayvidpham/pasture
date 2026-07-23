@@ -69,8 +69,9 @@ func OpenTaskTracker(dbPath string) (protocol.TaskTracker, error) {
 }
 
 type openTaskTrackerOptions struct {
-	skipMigrations bool
-	maxOpenConns   int
+	skipMigrations     bool
+	maxOpenConns       int
+	afterGenesisCommit func(provenance.JournalID) error
 }
 
 // OpenTaskTrackerOption configures OpenTaskTrackerWithOptions.
@@ -222,7 +223,9 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 		}
 	}
 
-	return newTrackerImpl(prov, trail, auditDB), nil
+	tracker := newTrackerImpl(prov, trail, auditDB)
+	tracker.afterGenesisCommit = cfg.afterGenesisCommit
+	return tracker, nil
 }
 
 // openAuditHandle opens a private *sql.DB on the same SQLite file used by

@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/dayvidpham/pasture v0.0.0
-	github.com/dayvidpham/provenance v0.0.3-0.20260719005126-7b3451a6efe7
+	github.com/dayvidpham/provenance v0.0.3-0.20260723032331-ecc766320b81
 	github.com/spf13/cobra v1.10.2
 	go.temporal.io/api v1.46.0
 	go.temporal.io/sdk v1.34.0

@@ -107,10 +107,6 @@ type ApplyRequest struct {
 	// byte-preservingly to the Provenance CommandDigest with no re-canonicalization
 	// and no caller digest flag (digest.go).
 	Command ir.CanonicalCommandDigest
-	// MutationDigest is the opaque structural mutation digest #43 supplies; it is
-	// required by Apply (§3.1) and passes through unchanged to participate in the
-	// four-field replay identity.
-	MutationDigest []byte
 	// RecordedAt is the caller-supplied wall-clock stamp copied onto the operation
 	// anchor for audit/display only (§12); it never establishes causality or order.
 	RecordedAt int64
@@ -166,21 +162,11 @@ func (j *Journal) Apply(req ApplyRequest) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, fmt.Errorf("provadapter: facade Apply for operation %q: convert command digest: %w", op, err)
 	}
-	if len(req.MutationDigest) == 0 {
-		return Outcome{}, fmt.Errorf(
-			"provadapter: facade Apply for operation %q — what: MutationDigest is empty; why: Provenance "+
-				"requires both a command digest and a structural mutation digest to form the four-field replay "+
-				"identity (§3.1); where: internal/provadapter Journal.Apply; when: before the store call; "+
-				"impact: no operation is committed; fix: supply the #43-produced structural mutation digest",
-			op)
-	}
-
 	res, err := j.api.Apply(provenance.OperationInput{
 		OperationID:        op,
 		ActorID:            req.Actor,
 		AuthorityJournalID: req.Authority,
 		CommandDigest:      command,
-		MutationDigest:     req.MutationDigest,
 		RecordedAt:         req.RecordedAt,
 		Effects:            req.Effects,
 	})

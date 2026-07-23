@@ -554,9 +554,9 @@ func (e TaskClosedEvent) contexts() ([]provenance.EventContext, error) {
 // value (value-preserving canonical JSON — encoding/json compacts the embedded
 // json.RawMessage, so the stored envelope holds the value-equivalent form, not the exact
 // source bytes) alongside the row's source identity, its original raw actor text, and its
-// original raw context strings, so no legacy VALUE is lost. The exact original bytes still
-// bind identity through legacyImportMutationDigest (which hashes row.Payload verbatim),
-// though they are not byte-recoverable from the stored event. AttributedActor is the
+// original raw context strings, so no legacy VALUE is lost. The exact original bytes bind
+// the canonical command digest through legacyImportCommandBytes, though they are not
+// byte-recoverable from the stored event. AttributedActor is the
 // resolved (mapped-or-fallback) actor
 // the import derived from RawActor; the committing actor of the operation is the
 // pasture-system actor, and this attributed actor is journaled as an actor context.

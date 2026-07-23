@@ -68,7 +68,7 @@ test-race:
 	CGO_ENABLED=1 go test -race ./...
 
 test-race-ci:
-	CGO_ENABLED=1 go test -race ./internal/engine/ ./internal/handlers/ ./internal/tasks/
+	CGO_ENABLED=1 go test -race ./internal/engine/ ./internal/handlers/ ./internal/provadapter/ ./internal/tasks/
 
 # --------------------------------------------------------------------------
 # Lint / Vet
