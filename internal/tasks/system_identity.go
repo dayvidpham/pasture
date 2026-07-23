@@ -82,7 +82,7 @@ func (t *trackerImpl) bootstrapSystemSession() (*provenance.Session, error) {
 					"Restore the expected fixed actor only through an explicit, reviewed data migration; normal startup will not rewrite it.",
 			}
 		}
-		if err := validatePersistedGenesisAuthority(t.prov.Journal(), authority); err != nil {
+		if err := validatePersistedGenesisAuthority(t.prov.Journal(), expectedActor, authority); err != nil {
 			return nil, err
 		}
 		activation, err := provadapter.ActivatePastureSystem(t.prov)
@@ -153,16 +153,16 @@ func (t *trackerImpl) bootstrapSystemSession() (*provenance.Session, error) {
 	return t.prov.As(actor, authority), nil
 }
 
-func validatePersistedGenesisAuthority(j provenance.JournalAPI, authority provenance.JournalID) error {
-	result, err := j.LookupCommitted(pastureSystemGenesisOperationID)
+func validatePersistedGenesisAuthority(j provenance.JournalAPI, committer provenance.ActorID, authority provenance.JournalID) error {
+	result, err := j.Apply(pastureSystemGenesisInput(committer, time.Now().UTC().UnixNano()))
 	if err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     "Pasture couldn't verify its saved genesis authority.",
-			Why:      "Reading the deterministic genesis operation from the journal failed.",
+			Why:      "Replaying the complete deterministic genesis identity through the journal failed.",
 			Where:    "Validating the task-backend genesis authority (internal/tasks/system_identity.go in tasks.validatePersistedGenesisAuthority).",
-			Impact:   "No task mutation will proceed with an unverified authority.",
-			Fix:      "Verify journal integrity and database readability, then retry.",
+			Impact:   "Bootstrap stopped before actor activation or task mutation rather than trusting an operation with a conflicting actor, authority, command, or effect.",
+			Fix:      "Inspect the typed journal conflict and the saved singleton. Restore the canonical deterministic genesis only through an explicit reviewed migration, then retry.",
 			Cause:    err,
 		}
 	}

@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/dayvidpham/provenance"
 
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/provadapter"
 )
 
@@ -95,71 +98,287 @@ func TestSystemIdentityCrashAfterGenesisCommitConvergesOnReopen(t *testing.T) {
 	assertGenesisOperationCount(t, db, 1)
 }
 
+type coordinatedCheckpoint struct {
+	tracker   string
+	authority provenance.JournalID
+	proceed   chan struct{}
+}
+
+type coordinatedOutcome struct {
+	tracker string
+	err     error
+}
+
 func TestSystemIdentityConcurrentFirstOpenConverges(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
-	type checkpoint struct {
-		authority provenance.JournalID
-		proceed   chan struct{}
-	}
-	ready := make(chan checkpoint, 2)
+	ready := make(chan coordinatedCheckpoint, 2)
 	abort := make(chan struct{})
-	t.Cleanup(func() { close(abort) })
-	afterGenesis := func(authority provenance.JournalID) error {
-		point := checkpoint{authority: authority, proceed: make(chan struct{})}
-		ready <- point
-		select {
-		case <-point.proceed:
-			return nil
-		case <-abort:
-			return errors.New("coordinated genesis test aborted")
+	var abortOnce sync.Once
+	abortAll := func() { abortOnce.Do(func() { close(abort) }) }
+	t.Cleanup(abortAll)
+	afterGenesis := func(tracker string) func(provenance.JournalID) error {
+		return func(authority provenance.JournalID) error {
+			point := coordinatedCheckpoint{tracker: tracker, authority: authority, proceed: make(chan struct{})}
+			select {
+			case ready <- point:
+			case <-abort:
+				return fmt.Errorf("%s tracker aborted while reporting the post-genesis checkpoint", tracker)
+			}
+			select {
+			case <-point.proceed:
+				return nil
+			case <-abort:
+				return fmt.Errorf("%s tracker aborted while waiting at the post-genesis checkpoint", tracker)
+			}
 		}
 	}
 
-	first, err := openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{afterGenesisCommit: afterGenesis})
+	first, err := openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{afterGenesisCommit: afterGenesis("first")})
 	if err != nil {
 		t.Fatalf("open first coordinated tracker: %v", err)
 	}
-	defer func() { _ = first.Close() }()
-	second, err := openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{afterGenesisCommit: afterGenesis})
+	second, err := openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{afterGenesisCommit: afterGenesis("second")})
 	if err != nil {
+		_ = first.Close()
 		t.Fatalf("open second coordinated tracker: %v", err)
 	}
-	defer func() { _ = second.Close() }()
+	// Fixed-agent activation has its own multi-writer coverage. Pre-activate here
+	// so this proof coordinates only the deterministic genesis replay boundary.
+	if _, err := provadapter.ActivatePastureSystem(first); err != nil {
+		_ = second.Close()
+		_ = first.Close()
+		t.Fatalf("pre-activate pasture-system actor: %v", err)
+	}
 
-	start := make(chan struct{})
-	errs := make(chan error, 2)
-	go func() { <-start; errs <- createSystemIdentityTask(first, "concurrent-first") }()
-	go func() { <-start; errs <- createSystemIdentityTask(second, "concurrent-second") }()
-	close(start)
+	results := make(chan coordinatedOutcome, 2)
+	startTracker := func(name string, tracker interface {
+		Create(string, string, string, provenance.TaskType, provenance.Priority, provenance.Phase) (provenance.Task, error)
+	}) {
+		go func() {
+			results <- coordinatedOutcome{tracker: name, err: createSystemIdentityTask(tracker, "concurrent-"+name)}
+		}()
+	}
+	startTracker("first", first)
+	launched := 1
 
-	checkpoints := make([]checkpoint, 0, 2)
-	for len(checkpoints) < 2 {
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+	checkpoints := make(map[string]coordinatedCheckpoint, 2)
+	outcomes := make(map[string]error, 2)
+	released := make(map[string]bool, 2)
+	failure := ""
+	deadlineExpired := false
+	release := func(tracker string) {
+		if point, ok := checkpoints[tracker]; ok && !released[tracker] {
+			close(point.proceed)
+			released[tracker] = true
+		}
+	}
+	for (failure == "" && len(outcomes) != 2) || (failure != "" && len(outcomes) != launched) {
+		if failure == "" && len(checkpoints) == 2 && !released["first"] {
+			firstAuthority := checkpoints["first"].authority
+			secondAuthority := checkpoints["second"].authority
+			if firstAuthority == 0 || firstAuthority != secondAuthority {
+				failure = fmt.Sprintf("post-genesis authorities differ: first=%d second=%d", firstAuthority, secondAuthority)
+				abortAll()
+			}
+			if failure == "" {
+				release("first")
+			}
+		}
+		if failure == "" && released["first"] && !released["second"] {
+			if firstErr, done := outcomes["first"]; done {
+				if firstErr != nil {
+					failure = fmt.Sprintf("first tracker failed after its post-genesis checkpoint: %v", firstErr)
+					abortAll()
+				} else {
+					release("second")
+				}
+			}
+		}
+		if deadlineExpired {
+			result := <-results
+			outcomes[result.tracker] = result.err
+			continue
+		}
 		select {
 		case point := <-ready:
-			checkpoints = append(checkpoints, point)
-		case <-time.After(10 * time.Second):
-			t.Fatal("timed out waiting for both trackers to replay genesis")
+			if _, duplicate := checkpoints[point.tracker]; duplicate {
+				failure = fmt.Sprintf("%s tracker reported the post-genesis checkpoint twice", point.tracker)
+				abortAll()
+				continue
+			}
+			checkpoints[point.tracker] = point
+			if point.tracker == "first" && launched == 1 {
+				// Keep the first tracker paused after its committed genesis while the
+				// independent second tracker performs the exact replay. This exercises
+				// overlapping first opens without racing unrelated SQLite connection locks.
+				startTracker("second", second)
+				launched = 2
+			}
+		case result := <-results:
+			outcomes[result.tracker] = result.err
+			if failure == "" && len(checkpoints) < 2 {
+				failure = fmt.Sprintf("%s tracker returned before both post-genesis checkpoints: %v (checkpoints=%v)",
+					result.tracker, result.err, checkpointNames(checkpoints))
+				abortAll()
+			} else if failure == "" && result.err != nil {
+				failure = fmt.Sprintf("%s tracker failed after its post-genesis checkpoint: %v", result.tracker, result.err)
+				abortAll()
+			}
+		case <-timer.C:
+			failure = fmt.Sprintf("timed out coordinating first-open trackers (checkpoints=%v outcomes=%v released=%v)",
+				checkpointNames(checkpoints), outcomeNames(outcomes), released)
+			deadlineExpired = true
+			abortAll()
 		}
 	}
-	if checkpoints[0].authority == 0 || checkpoints[0].authority != checkpoints[1].authority {
-		t.Fatalf("coordinated authorities = [%d %d], want one non-zero authority",
-			checkpoints[0].authority, checkpoints[1].authority)
+	if failure != "" {
+		_ = second.Close()
+		_ = first.Close()
+		t.Fatal(failure)
 	}
-	// Both trackers reached the post-genesis boundary concurrently. Serialize only
-	// their later singleton/task writes so this test isolates genesis convergence.
-	for _, point := range checkpoints {
-		close(point.proceed)
-		if err := <-errs; err != nil {
-			t.Errorf("concurrent first-open Create: %v", err)
+	for tracker, err := range outcomes {
+		if err != nil {
+			t.Fatalf("%s tracker Create failed: %v", tracker, err)
 		}
 	}
 
-	assertCommittedGenesisAuthority(t, first.Journal(), checkpoints[0].authority)
+	authority := checkpoints["first"].authority
+	assertCommittedGenesisAuthority(t, first.Journal(), authority)
 	db := openIdentityAssertionDB(t, dbPath)
-	defer func() { _ = db.Close() }()
-	assertPersistedIdentity(t, db, checkpoints[0].authority)
+	assertPersistedIdentity(t, db, authority)
 	assertGenesisOperationCount(t, db, 1)
+	if err := db.Close(); err != nil {
+		t.Fatalf("close coordinated assertion database: %v", err)
+	}
+	if firstCloseErr, secondCloseErr := first.Close(), second.Close(); firstCloseErr != nil || secondCloseErr != nil {
+		t.Fatalf("close coordinated trackers: first=%v second=%v", firstCloseErr, secondCloseErr)
+	}
+}
+
+func checkpointNames(checkpoints map[string]coordinatedCheckpoint) []string {
+	names := make([]string, 0, len(checkpoints))
+	for _, name := range []string{"first", "second"} {
+		if _, ok := checkpoints[name]; ok {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func outcomeNames(outcomes map[string]error) []string {
+	names := make([]string, 0, len(outcomes))
+	for _, name := range []string{"first", "second"} {
+		if _, ok := outcomes[name]; ok {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func TestSystemIdentityPersistedNoncanonicalGenesisFailsClosed(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	opened, err := openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{})
+	if err != nil {
+		t.Fatalf("open fixture tracker: %v", err)
+	}
+	impl := opened.(*trackerImpl)
+	if _, err := provadapter.ActivatePastureSystem(impl.prov); err != nil {
+		t.Fatalf("activate pasture-system fixture: %v", err)
+	}
+	noncanonicalActor, err := impl.prov.RegisterSoftwareAgent("genesis-conflict", "noncanonical", "1", "test")
+	if err != nil {
+		t.Fatalf("register noncanonical genesis actor: %v", err)
+	}
+	noncanonical := pastureSystemGenesisInput(noncanonicalActor.ID, time.Now().UTC().UnixNano())
+	noncanonical.CommandDigest = []byte("noncanonical-genesis-command")
+	noncanonical.Effects[0].BootstrapLabel = "noncanonical-genesis"
+	noncanonical.Effects[0].OperationAuthorityID = "noncanonical.genesis.authority"
+	committed, err := impl.prov.Journal().Apply(noncanonical)
+	if err != nil {
+		t.Fatalf("commit noncanonical genesis fixture: %v", err)
+	}
+	authority := resultSlotJournalID(t, committed, pastureSystemGenesisResultSlot)
+	if err := impl.ensurePastureTablesOnce(); err != nil {
+		t.Fatalf("create pasture identity table: %v", err)
+	}
+	if err := writeSystemIdentity(impl.auditDB, provadapter.PastureSystemDefaultActorID(), authority); err != nil {
+		t.Fatalf("write matching singleton fixture: %v", err)
+	}
+	before := systemIdentityStoreSnapshot(t, impl.auditDB)
+
+	err = createSystemIdentityTask(opened, "must-fail-noncanonical-genesis")
+	if err == nil {
+		t.Fatal("Create succeeded with a noncanonical operation under the deterministic genesis ID")
+	}
+	if !errors.Is(err, provenance.ErrOperationConflict) {
+		t.Fatalf("Create error does not preserve provenance.ErrOperationConflict: %v", err)
+	}
+	var conflict *provenance.OperationConflict
+	if !errors.As(err, &conflict) || conflict.Field == "" {
+		t.Fatalf("Create error does not expose an actionable typed OperationConflict: %T %v", err, err)
+	}
+	var structured *pasterrors.StructuredError
+	if !errors.As(err, &structured) || structured.Category != pasterrors.CategoryStorage ||
+		structured.What == "" || structured.Why == "" || structured.Where == "" || structured.Impact == "" || structured.Fix == "" {
+		t.Fatalf("Create error is not an actionable CategoryStorage StructuredError: %T %v", err, err)
+	}
+	after := systemIdentityStoreSnapshot(t, impl.auditDB)
+	if after != before {
+		t.Fatalf("store mutated while rejecting noncanonical genesis:\n before=%+v\n  after=%+v", before, after)
+	}
+	if err := opened.Close(); err != nil {
+		t.Fatalf("close fixture tracker: %v", err)
+	}
+}
+
+func resultSlotJournalID(t *testing.T, result provenance.CommittedResult, slot provenance.ResultSlotID) provenance.JournalID {
+	t.Helper()
+	for _, candidate := range result.ResultSlots {
+		if candidate.Slot == slot {
+			return candidate.ProducedJournalID
+		}
+	}
+	t.Fatalf("committed result has no %q slot", slot)
+	return 0
+}
+
+type systemIdentitySnapshot struct {
+	actor      string
+	authority  int64
+	operations int
+	tasks      int
+	claims     int
+	agents     int
+	manifests  int
+}
+
+func systemIdentityStoreSnapshot(t *testing.T, db *sql.DB) systemIdentitySnapshot {
+	t.Helper()
+	var snapshot systemIdentitySnapshot
+	if err := db.QueryRow(`SELECT committer_actor_id, genesis_authority_journal_id FROM pasture_system_identity WHERE singleton_id = 0`).
+		Scan(&snapshot.actor, &snapshot.authority); err != nil {
+		t.Fatalf("read system identity snapshot: %v", err)
+	}
+	counts := []struct {
+		query string
+		out   *int
+	}{
+		{`SELECT COUNT(*) FROM journal_operations`, &snapshot.operations},
+		{`SELECT COUNT(*) FROM tasks`, &snapshot.tasks},
+		{`SELECT COUNT(*) FROM actor_namespace_claims`, &snapshot.claims},
+		{`SELECT COUNT(*) FROM agents`, &snapshot.agents},
+		{`SELECT COUNT(*) FROM fixed_actor_manifest_entries`, &snapshot.manifests},
+	}
+	for _, count := range counts {
+		if err := db.QueryRow(count.query).Scan(count.out); err != nil {
+			t.Fatalf("query snapshot count %q: %v", count.query, err)
+		}
+	}
+	return snapshot
 }
 
 func openIdentityAssertionDB(t *testing.T, path string) *sql.DB {
