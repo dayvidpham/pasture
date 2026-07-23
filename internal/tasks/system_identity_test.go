@@ -8,11 +8,13 @@ package tasks_test
 
 import (
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 
 	"github.com/dayvidpham/provenance"
 
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/provadapter"
 	"github.com/dayvidpham/pasture/internal/tasks"
 )
@@ -227,18 +229,18 @@ func TestSystemIdentity_StableAcrossReopen(t *testing.T) {
 	}
 }
 
-// TestSystemIdentity_PersistedFallbackUpgradesToDefaultActor proves a store
-// initialized with the former random committer preserves its genesis authority
-// while converging the persisted actor to manifest-v1 ordinal zero on reopen.
-func TestSystemIdentity_PersistedFallbackUpgradesToDefaultActor(t *testing.T) {
+// TestSystemIdentity_PersistedActorMismatchFailsClosed proves normal startup
+// never rewrites a differing singleton actor and performs no actor, journal, or
+// task mutation before returning an actionable storage error.
+func TestSystemIdentity_PersistedActorMismatchFailsClosed(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 
 	tr1 := openTempTracker(t, dbPath)
-	createSmoke(t, tr1, "before-identity-upgrade")
-	random, err := tr1.RegisterSoftwareAgent("pasture-system", "old-fallback", "1", "pasture")
+	createSmoke(t, tr1, "before-identity-mismatch")
+	different, err := tr1.RegisterSoftwareAgent("different-system", "different-committer", "1", "test")
 	if err != nil {
-		t.Fatalf("register old fallback fixture: %v", err)
+		t.Fatalf("register differing actor fixture: %v", err)
 	}
 	if err := tr1.Close(); err != nil {
 		t.Fatalf("close first tracker: %v", err)
@@ -248,35 +250,70 @@ func TestSystemIdentity_PersistedFallbackUpgradesToDefaultActor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open persisted store fixture: %v", err)
 	}
-	var authorityBefore int64
-	if err := db.QueryRow(`SELECT genesis_authority_journal_id FROM pasture_system_identity WHERE singleton_id = 0`).Scan(&authorityBefore); err != nil {
-		t.Fatalf("read authority before upgrade: %v", err)
+	if _, err := db.Exec(`UPDATE pasture_system_identity SET committer_actor_id = ? WHERE singleton_id = 0`, different.ID.String()); err != nil {
+		t.Fatalf("seed differing system identity: %v", err)
 	}
-	if _, err := db.Exec(`UPDATE pasture_system_identity SET committer_actor_id = ? WHERE singleton_id = 0`, random.ID.String()); err != nil {
-		t.Fatalf("seed old fallback identity: %v", err)
-	}
+	before := identityStoreSnapshot(t, db)
 	if err := db.Close(); err != nil {
 		t.Fatalf("close persisted store fixture: %v", err)
 	}
 
 	tr2 := openTempTracker(t, dbPath)
-	createSmoke(t, tr2, "after-identity-upgrade")
+	_, createErr := tr2.Create("pasture-sysid-test", "must-fail", "identity mismatch",
+		provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseRequest)
+	if createErr == nil {
+		t.Fatal("Create succeeded with a differing persisted system actor")
+	}
+	var structured *pasterrors.StructuredError
+	if !errors.As(createErr, &structured) || structured.Category != pasterrors.CategoryStorage {
+		t.Fatalf("Create error = %T %v, want CategoryStorage StructuredError", createErr, createErr)
+	}
 
 	db, err = sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("reopen persisted store fixture: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	var actorAfter string
-	var authorityAfter int64
+	after := identityStoreSnapshot(t, db)
+	if after != before {
+		t.Errorf("store mutated across mismatch failure:\n before=%+v\n  after=%+v", before, after)
+	}
+	if after.actor != different.ID.String() {
+		t.Errorf("persisted actor = %q, want differing actor %q unchanged", after.actor, different.ID)
+	}
+}
+
+type identitySnapshot struct {
+	actor      string
+	authority  int64
+	operations int
+	tasks      int
+	claims     int
+	agents     int
+	manifests  int
+}
+
+func identityStoreSnapshot(t *testing.T, db *sql.DB) identitySnapshot {
+	t.Helper()
+	var snapshot identitySnapshot
 	if err := db.QueryRow(`SELECT committer_actor_id, genesis_authority_journal_id FROM pasture_system_identity WHERE singleton_id = 0`).
-		Scan(&actorAfter, &authorityAfter); err != nil {
-		t.Fatalf("read upgraded identity: %v", err)
+		Scan(&snapshot.actor, &snapshot.authority); err != nil {
+		t.Fatalf("read persisted identity snapshot: %v", err)
 	}
-	if actorAfter != provadapter.PastureSystemDefaultActorID().String() {
-		t.Errorf("upgraded actor = %q, want %q", actorAfter, provadapter.PastureSystemDefaultActorID())
+	counts := []struct {
+		query string
+		out   *int
+	}{
+		{`SELECT COUNT(*) FROM journal_operations`, &snapshot.operations},
+		{`SELECT COUNT(*) FROM tasks`, &snapshot.tasks},
+		{`SELECT COUNT(*) FROM actor_namespace_claims`, &snapshot.claims},
+		{`SELECT COUNT(*) FROM agents`, &snapshot.agents},
+		{`SELECT COUNT(*) FROM fixed_actor_manifest_entries`, &snapshot.manifests},
 	}
-	if authorityAfter != authorityBefore {
-		t.Errorf("genesis authority changed from %d to %d during actor upgrade", authorityBefore, authorityAfter)
+	for _, count := range counts {
+		if err := db.QueryRow(count.query).Scan(count.out); err != nil {
+			t.Fatalf("query snapshot count %q: %v", count.query, err)
+		}
 	}
+	return snapshot
 }

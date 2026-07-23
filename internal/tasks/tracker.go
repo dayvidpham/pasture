@@ -64,6 +64,9 @@ type trackerImpl struct {
 	sysOnce    sync.Once
 	sysSession *provenance.Session
 	sysErr     error
+	// afterGenesisCommit is an internal dependency-injection boundary used by
+	// white-box crash tests. Production constructors leave it nil.
+	afterGenesisCommit func(provenance.JournalID) error
 
 	// writeMu serializes every write across BOTH backing connection families —
 	// the provenance journal connection (task/edge/label/comment/agent/activity
