@@ -1,0 +1,70 @@
+schema: pasture.acceptance-corpus/v1
+id: strict-loader
+maxGenerated: 4
+operators:
+  - id: remove-actor
+    compatible: [production-command]
+    oracle: validation-error
+    maxPerCase: 1
+cases:
+  - id: command-pass
+    class: must-pass
+    target:
+      kind: production-command
+      command:
+        argv: [pasture, epoch, land, --actor, acceptance--00000000-0000-7000-8000-000000000010]
+        stdin: {inline: "{}"}
+    setup:
+      fixture: initialized-store
+      preState: {inline: ""}
+      actors:
+        - {id: acceptance--00000000-0000-7000-8000-000000000010, kind: human}
+      assignments: []
+      tasks: []
+      evidence: []
+    expect:
+      oracle: success
+      exitCode: 0
+      stdoutJSON: {inline: "{}"}
+      stderr: {inline: ""}
+    delta:
+      graph: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      assignments: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      decisions: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      evidence: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      activities: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      events: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      journal: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      projection: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+    provenance: {requirement: explicit-actor, record: reviewed-record, rationale: direct positive command}
+    mutations: [remove-actor]
+  - id: command-fail
+    class: must-fail
+    target:
+      kind: production-command
+      command:
+        argv: [pasture, epoch, land]
+        stdin: {inline: "{}"}
+    setup:
+      fixture: initialized-store
+      preState: {inline: ""}
+      actors: []
+      assignments: []
+      tasks: []
+      evidence: []
+    expect:
+      oracle: validation-error
+      exitCode: 1
+      stdoutJSON: {inline: ""}
+      stderr: {inline: "missing actor"}
+    delta:
+      graph: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      assignments: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      decisions: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      evidence: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      activities: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      events: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      journal: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      projection: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+    provenance: {requirement: explicit-actor, record: reviewed-record, rationale: direct negative command}
+    mutations: []
