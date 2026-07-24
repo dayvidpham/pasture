@@ -356,18 +356,23 @@ func TestSchemaRegistryParity(t *testing.T) {
 
 // TestGeneratedOutputInventory proves both sides of the generation contract:
 // canonical registries select the exact paths each harness emits, and those
-// paths are the exact files committed in the dedicated output trees. Root
-// outputs are recognized by content so a renamed stale copy is still orphaned.
+// paths are the exact files committed in the dedicated output trees. Generation
+// intentionally does not delete stale files, so a renamed stale copy remains an
+// orphan and is reported for manual removal. Root outputs are recognized by
+// content so a renamed stale copy is still orphaned.
 func TestGeneratedOutputInventory(t *testing.T) {
 	root := testModuleRoot(t)
 	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
 
 	expectedClaudeSkills := make(map[string]string, len(CommandSpecs))
 	expectedOpenCodeSkills := make(map[string]string, len(CommandSpecs))
+	expectedCodexSkills := make(map[string]string, len(CommandSpecs))
 	expectedClaudeAgents := make(map[string]string)
 	expectedOpenCodeAgents := make(map[string]string)
+	expectedCodexAgents := make(map[string]string)
 	expectedClaudeHarness := make(map[string]string)
 	expectedOpenCodeHarness := make(map[string]string)
+	expectedCodexHarness := make(map[string]string)
 	expectedRootOutputs := make(map[string]string, 2)
 
 	for _, commandID := range sortedCommandSpecIDs() {
@@ -379,16 +384,19 @@ func TestGeneratedOutputInventory(t *testing.T) {
 		owner := "CommandSpecs[" + commandID + "]"
 		claudePath := filepath.ToSlash(spec.File)
 		openCodePath := filepath.ToSlash(filepath.Join(".opencode", "skill", dir, "SKILL.md"))
+		codexPath := filepath.ToSlash(filepath.Join(".agents", "skills", dir, "SKILL.md"))
 		addExpectedOutput(t, expectedClaudeSkills, claudePath, owner)
 		addExpectedOutput(t, expectedOpenCodeSkills, openCodePath, owner)
+		addExpectedOutput(t, expectedCodexSkills, codexPath, owner)
 		addExpectedOutput(t, expectedClaudeHarness, claudePath, owner)
 		addExpectedOutput(t, expectedOpenCodeHarness, openCodePath, owner)
+		addExpectedOutput(t, expectedCodexHarness, codexPath, owner)
 	}
 
-	for _, dir := range openCodeVerbatimDirs {
+	for _, dir := range portableVerbatimDirs {
 		sourceRoot := filepath.Join(root, "skills", dir)
 		for _, sourcePath := range sortedStringKeys(collectRelativeFiles(t, root, sourceRoot)) {
-			addExpectedOutput(t, expectedClaudeSkills, sourcePath, "openCodeVerbatimDirs["+dir+"] source")
+			addExpectedOutput(t, expectedClaudeSkills, sourcePath, "portableVerbatimDirs["+dir+"] source")
 			relWithinSource, err := filepath.Rel(filepath.Join("skills", dir), filepath.FromSlash(sourcePath))
 			if err != nil {
 				t.Fatalf(
@@ -398,14 +406,17 @@ func TestGeneratedOutputInventory(t *testing.T) {
 						"where: internal/codegen/skill_registry_test.go TestGeneratedOutputInventory; "+
 						"when: the test translates a Claude Code source path into its OpenCode destination; "+
 						"what it means for the caller: output-inventory parity cannot be checked and the test stops; "+
-						"fix: ensure openCodeVerbatimDirs names a directory under skills/ and its collected paths remain repository-relative",
+						"fix: ensure portableVerbatimDirs names a directory under skills/ and its collected paths remain repository-relative",
 					sourcePath, dir, err,
 				)
 			}
 			destination := filepath.ToSlash(filepath.Join(".opencode", "skill", dir, relWithinSource))
-			owner := "openCodeVerbatimDirs[" + dir + "] destination"
+			codexDestination := filepath.ToSlash(filepath.Join(".agents", "skills", dir, relWithinSource))
+			owner := "portableVerbatimDirs[" + dir + "] destination"
 			addExpectedOutput(t, expectedOpenCodeSkills, destination, owner)
 			addExpectedOutput(t, expectedOpenCodeHarness, destination, owner)
+			addExpectedOutput(t, expectedCodexSkills, codexDestination, owner)
+			addExpectedOutput(t, expectedCodexHarness, codexDestination, owner)
 		}
 	}
 
@@ -417,10 +428,13 @@ func TestGeneratedOutputInventory(t *testing.T) {
 		owner := "RoleSpecs[" + string(roleID) + "].Tools"
 		claudePath := filepath.ToSlash(filepath.Join("agents", string(roleID)+".md"))
 		openCodePath := filepath.ToSlash(filepath.Join(".opencode", "agent", string(roleID)+".md"))
+		codexPath := filepath.ToSlash(filepath.Join(".codex", "agents", codexAgentNamespace+string(roleID)+".toml"))
 		addExpectedOutput(t, expectedClaudeAgents, claudePath, owner)
 		addExpectedOutput(t, expectedOpenCodeAgents, openCodePath, owner)
+		addExpectedOutput(t, expectedCodexAgents, codexPath, owner)
 		addExpectedOutput(t, expectedClaudeHarness, claudePath, owner)
 		addExpectedOutput(t, expectedOpenCodeHarness, openCodePath, owner)
+		addExpectedOutput(t, expectedCodexHarness, codexPath, owner)
 	}
 
 	addExpectedOutput(t, expectedOpenCodeHarness, "opencode.json", "OpenCodeTarget.Manifest")
@@ -429,15 +443,20 @@ func TestGeneratedOutputInventory(t *testing.T) {
 
 	claudeFiles, claudePaths := collectHarnessOutputs(t, root, figuresDir, ClaudeCodeTarget)
 	openCodeFiles, openCodePaths := collectHarnessOutputs(t, root, figuresDir, OpenCodeTarget)
+	codexFiles, codexPaths := collectHarnessOutputs(t, root, figuresDir, CodexTarget)
 	assertOutputSetEqual(t, "Claude Code harness output paths", expectedClaudeHarness, claudePaths)
 	assertOutputSetEqual(t, "OpenCode harness output paths", expectedOpenCodeHarness, openCodePaths)
+	assertOutputSetEqual(t, "Codex harness output paths", expectedCodexHarness, codexPaths)
 	assertGeneratedFilesCommitted(t, root, claudeFiles)
 	assertGeneratedFilesCommitted(t, root, openCodeFiles)
+	assertGeneratedFilesCommitted(t, root, codexFiles)
 
 	assertOutputSetEqual(t, "Claude Code skill tree", expectedClaudeSkills, collectRelativeFiles(t, root, filepath.Join(root, "skills")))
 	assertOutputSetEqual(t, "OpenCode skill tree", expectedOpenCodeSkills, collectRelativeFiles(t, root, filepath.Join(root, ".opencode", "skill")))
+	assertOutputSetEqual(t, "Codex skill tree", expectedCodexSkills, collectRelativeFiles(t, root, filepath.Join(root, ".agents", "skills")))
 	assertOutputSetEqual(t, "Claude Code agent tree", expectedClaudeAgents, collectRelativeFiles(t, root, filepath.Join(root, "agents")))
 	assertOutputSetEqual(t, "OpenCode agent tree", expectedOpenCodeAgents, collectRelativeFiles(t, root, filepath.Join(root, ".opencode", "agent")))
+	assertOutputSetEqual(t, "Codex agent tree", expectedCodexAgents, collectRelativeFiles(t, root, filepath.Join(root, ".codex", "agents")))
 	assertOutputSetEqual(t, "generated repository-root files", expectedRootOutputs, collectGeneratedRootFiles(t, root))
 
 	assertCommittedContent(t, filepath.Join(root, "schema.xml"), generateSchemaContent(), "GenerateSchemaToFile")
@@ -604,7 +623,7 @@ func assertOutputSetEqual(t *testing.T, outputName string, expected, actual map[
 			"where: repository output trees selected by internal/codegen/harness.go; "+
 			"when: TestGeneratedOutputInventory compares the checked-out file set after generation; "+
 			"what it means for the caller: codegen tests fail because stale runtime files could remain committed even when regeneration is otherwise clean; "+
-			"fix: run make generate, add missing outputs, and explicitly remove each orphaned generated file after confirming its registry/source entry was intentionally retired",
+			"fix: run make generate, add missing outputs, and manually remove each orphaned generated file only after confirming its registry/source entry was intentionally retired",
 		outputName, missing, orphaned,
 	)
 }
@@ -700,7 +719,7 @@ func collectHarnessOutputs(
 	harness TargetHarness,
 ) ([]GeneratedFile, map[string]string) {
 	t.Helper()
-	files, err := EmitHarness(repoRoot, harness, figuresDir, GenerateOptions{Diff: false, Write: false})
+	files, err := EmitHarness(repoRoot, repoRoot, harness, figuresDir, GenerateOptions{Diff: false, Write: false})
 	if err != nil {
 		t.Fatalf(
 			"harness output inventory could not be rendered — "+

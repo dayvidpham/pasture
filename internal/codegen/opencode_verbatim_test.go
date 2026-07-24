@@ -12,20 +12,21 @@ import (
 // file that lands under .opencode/skill/<dir>/, keyed by its path RELATIVE to
 // .opencode/skill (e.g. "protocol/PROCESS.md", "protocol/figures/layer-cake.yaml").
 // Using the full harness (not copyVerbatimSkill directly) proves OpenCodeTarget
-// is actually WIRED to the verbatim dirs — a stub openCodeVerbatimDirs would
+// is actually WIRED to the verbatim dirs — a stub portableVerbatimDirs would
 // make this map empty and fail every assertion below.
 func emitOpenCodeVerbatim(t *testing.T) (root string, byRel map[string]GeneratedFile) {
 	t.Helper()
 
 	root = testModuleRoot(t)
+	out := t.TempDir()
 	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
 
-	files, err := EmitHarness(root, OpenCodeTarget, figuresDir, GenerateOptions{Diff: false, Write: false})
+	files, err := EmitHarness(root, out, OpenCodeTarget, figuresDir, GenerateOptions{Diff: false, Write: false})
 	if err != nil {
 		t.Fatalf("EmitHarness(opencode): %v", err)
 	}
 
-	skillRoot := filepath.Join(root, ".opencode", "skill")
+	skillRoot := filepath.Join(out, ".opencode", "skill")
 	byRel = make(map[string]GeneratedFile)
 	for _, f := range files {
 		rel, err := filepath.Rel(skillRoot, f.Path)

@@ -10,12 +10,17 @@ recipes, see [CONTRIBUTING.md](../CONTRIBUTING.md).
 The Pasture Protocol is a body of structured facts: 12 phases, a handful of
 roles, ~30 constraints, commands, figures, checklists, and the prose bodies of
 each role/command skill. Those same facts have to appear consistently across the
-shipped protocol schema and two runtime harnesses:
+shipped protocol schema and three runtime harnesses:
 
 - `schema.xml` — the generated machine-readable protocol projection;
 - `skills/<dir>/SKILL.md` and `agents/<role>.md` — Claude Code skills and agents;
 - `.opencode/skill/<dir>/SKILL.md`, `.opencode/agent/<role>.md`, and
   `opencode.json` — OpenCode skills, agents, and manifest.
+- `.agents/skills/<dir>/SKILL.md` and `.codex/agents/pasture-<role>.toml` —
+  directly discovered Codex skills and custom agents. Codex inherits model,
+  reasoning, and sandbox policy because generated agent TOMLs omit those
+  optional fields. This direct Home Manager path emits no Codex plugin
+  manifest, hooks, or private Codex configuration.
 
 Hand-maintaining the same facts across these outputs guarantees drift: a
 constraint reworded in `schema.xml` but stale in two SKILL.md copies, a phase
@@ -23,6 +28,30 @@ renamed in one place and not the others. Codegen makes the facts
 **single-source** — declared
 once as typed Go values — and renders every harness from them. Registry tests
 reject incomplete inventories, and CI rejects committed generated-output drift.
+
+## Codex Contract Provenance
+
+The Codex target follows the current official documentation:
+
+- [Configure custom Codex agents](https://learn.chatgpt.com/docs/agent-configuration/subagents?surface=app)
+- [Build skills](https://learn.chatgpt.com/docs/build-skills)
+- [Build plugins](https://learn.chatgpt.com/docs/build-plugins)
+
+The active contract is:
+
+- Codex skills are directories containing `SKILL.md`, discovered from the
+  repository `.agents/skills` tree and the user `~/.agents/skills` tree.
+- Codex custom agents are standalone TOML files in project `.codex/agents` or
+  user `~/.codex/agents`. Each file must define `name`, `description`, and
+  `developer_instructions`; other supported agent settings remain optional.
+- An official plugin package contains skills and/or an MCP server. Custom-agent
+  TOMLs are not documented as plugin contents, so Home Manager keeps the agent
+  definition projection separate from plugin packaging.
+
+The earlier `.codex/skills` path and the uncertainty about plugin-contained
+custom agents are superseded by these sources. This direct codegen/Home Manager
+path therefore emits `.agents/skills` plus `.codex/agents`, without a duplicate
+skill tree or a plugin manifest.
 
 A second reason it is **typed Go** rather than a data file (YAML/JSON): the specs
 are validated by the Go compiler and by completeness tests (every `RoleId` has a
@@ -45,14 +74,15 @@ those compile-time and exact-count guarantees — which is the whole point.
      context.go ............... role↔constraint, phase↔constraint maps
             │
             │   make generate
-            │   (runs both claude-code and opencode; see codegen.go)
+             │   (runs all registered targets; see codegen.go)
             ▼
    ┌─────────────────────────────────────────────────┐
    │  tools/codegen/main.go                            │
    ├─────────────────────────────────────────────────┤
    │  GenerateSchemaToFile ──────────────────────────► schema.xml
-   │  EmitHarness(claude-code) ──────────────────────► skills/, agents/
-   │  EmitHarness(opencode) ─────────────────────────► .opencode/, opencode.json
+   │  EmitHarness(source, output, claude-code) ─────► skills/, agents/
+   │  EmitHarness(source, output, opencode) ─────────► .opencode/, opencode.json
+   │  EmitHarness(source, output, codex) ────────────► .agents/skills/, .codex/agents/
    └─────────────────────────────────────────────────┘
             │
             ▼
@@ -66,9 +96,20 @@ The canonical command, run from the module root:
 make generate
 ```
 
+For a clean staging tree, pass `--output` while running from inside the Pasture
+module. The tool keeps the module checkout as its canonical source root and
+writes only the selected target artifacts to the staging directory:
+
+```bash
+go run ./tools/codegen --targets opencode,codex --output /tmp/pasture-codegen
+```
+
 `make generate` invokes `go generate ./internal/codegen/...`; the directive
-selects both registered targets. The tool locates the module root by walking up
-to `go.mod`, then emits the schema and each harness. Each emitter prints what it
+selects all registered targets. The tool locates the module root by walking up
+to `go.mod`, then emits the schema and each harness. `EmitHarness` takes the
+canonical source root separately from the output root: the normal command passes
+the module root for both, while clean staging callers can emit OpenCode or Codex
+without copying source skills into the staging tree. Each emitter prints what it
 wrote (and a unified diff for `schema.xml` if it changed). Ordinary builds do not
 trigger generation.
 
@@ -77,9 +118,9 @@ trigger generation.
 | # | Function | Output | Overwrite model |
 |---|----------|--------|-----------------|
 | 1 | `GenerateSchemaToFile` | `schema.xml` (17 sections) | full file |
-| 2 | role-skill renderer | Claude Code and OpenCode role skills | marker merge for Claude Code; full file for OpenCode |
-| 3 | command-skill renderer | Claude Code and OpenCode command skills | marker merge for Claude Code; full file for OpenCode |
-| 4 | agent emitters | Claude Code and OpenCode role agents | full file |
+| 2 | role-skill renderer | Claude Code, OpenCode, and Codex role skills | marker merge for Claude Code; full file for OpenCode/Codex |
+| 3 | command-skill renderer | Claude Code, OpenCode, and Codex command skills | marker merge for Claude Code; full file for OpenCode/Codex |
+| 4 | agent emitters | Claude Code, OpenCode, and Codex role agents | full file |
 
 Role and command emitters select the target-specific templates registered in
 `harness.go`; agent emitters do the same for their harness. Every template pulls
@@ -87,7 +128,7 @@ from context structs assembled in `skills.go` / `agents.go`.
 
 ## The marker-region model (Claude Code generated skills only)
 
-Schema, agent, and OpenCode files are **fully generated**. Claude Code generated
+Schema, agent, OpenCode, and Codex files are **fully generated**. Claude Code generated
 skills are seeded with a BEGIN/END marker pair so the generator can safely take
 ownership of their frontmatter, heading, and body:
 
@@ -158,7 +199,7 @@ enforces the invariants codegen depends on:
   from `AllRoleIds`.
 - **Output-set parity** — `TestGeneratedOutputInventory` exact-set compares
   canonical registry paths, the paths returned by each production harness, and
-  the committed Claude Code/OpenCode trees. It also recognizes root
+  the committed Claude Code/OpenCode/Codex trees. It also recognizes root
   `schema.xml`/`opencode.json` by content, so renamed stale copies and other
   retired files cannot hide from in-place generation.
 - **Constraint-set exactness** — `context.yaml` pins the exact constraint count
@@ -167,8 +208,14 @@ enforces the invariants codegen depends on:
 - **Output sync** — schema/skill/agent generation fixtures assert the rendered
   shape.
 
+The generator is intentionally overwrite-only: it writes current outputs but
+never silently deletes files from a target tree. The exact output-inventory test
+therefore reports orphaned files, with an actionable instruction to inspect and
+manually remove each retired output after confirming the source entry was
+intentionally removed. Do not add broad cleanup to generation.
+
 The CI **Codegen Drift** job adds the clean-tree guard: it runs `make generate`
-for both committed targets and then checks `git status --porcelain`. That catches
+for all committed targets and then checks `git status --porcelain`. That catches
 modified generated files and newly generated files that were never committed.
 If it fails, run `make generate` locally, inspect the generated-path changes,
 and commit the intended output alongside the source change.

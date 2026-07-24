@@ -1,10 +1,9 @@
 package codegen
 
-// openCodeVerbatimDirs names the hand-authored skill directories the OpenCode
-// harness copies VERBATIM (no template rendering) from skills/<dir>/ into
-// .opencode/skill/<dir>/. The copy is RECURSIVE (see copyVerbatimSkill in
-// harness.go): the entire source tree — SKILL.md plus every sibling .md doc and
-// the figures/ subdirectory — is reproduced byte-for-byte.
+// portableVerbatimDirs names the hand-authored skill directories the OpenCode
+// and Codex harnesses copy VERBATIM (no template rendering). The copy is
+// RECURSIVE (see copyVerbatimSkill in harness.go): the entire source tree is
+// reproduced byte-for-byte.
 //
 // Why these two:
 //   - "protocol" is the shared documentation skill (PROCESS.md, AGENTS.md,
@@ -17,9 +16,9 @@ package codegen
 //   - "install-cli" is the Pasture binary installer skill (hand-authored, no
 //     generated counterpart).
 //
-// Both are wired into OpenCodeTarget.Verbatim (harness.go). The Claude Code
-// target does NOT copy these (they already live under skills/ on that path).
-var openCodeVerbatimDirs = []string{
+// Both are wired into OpenCodeTarget.Verbatim and CodexTarget.Verbatim. The
+// Claude Code target does not copy them because they already live under skills/.
+var portableVerbatimDirs = []string{
 	"protocol",
 	"install-cli",
 }

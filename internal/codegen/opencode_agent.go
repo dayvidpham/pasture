@@ -94,7 +94,7 @@ type openCodeAgentEmitter struct{}
 
 // Emit renders .opencode/agent/<role>.md for every role that has tools (the
 // same role set the Claude Code agent emitter covers).
-func (openCodeAgentEmitter) Emit(root string, figuresDir string, opts GenerateOptions) ([]GeneratedFile, error) {
+func (openCodeAgentEmitter) Emit(_ string, outputRoot string, figuresDir string, opts GenerateOptions) ([]GeneratedFile, error) {
 	var out []GeneratedFile
 	for roleID, roleSpec := range RoleSpecs {
 		if len(roleSpec.Tools) == 0 {
@@ -107,7 +107,7 @@ func (openCodeAgentEmitter) Emit(root string, figuresDir string, opts GenerateOp
 				roleID, err,
 			)
 		}
-		path := filepath.Join(root, ".opencode", "agent", fmt.Sprintf("%s.md", roleID))
+		path := filepath.Join(outputRoot, ".opencode", "agent", fmt.Sprintf("%s.md", roleID))
 		generated, err := writeFullGeneratedFile(path, content, opts)
 		if err != nil {
 			return nil, fmt.Errorf(

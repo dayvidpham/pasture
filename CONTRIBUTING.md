@@ -15,15 +15,28 @@ metadata lives in `specs_data.go`, shared prose lives in
 that ties those body declarations together. Edits flow in one direction: change
 the canonical Go data, run `make generate`, inspect the diff, then run tests.
 
-The pipeline has four stages:
+The pipeline has five stages:
 
 1. **GenerateSchemaToFile** — marshals spec maps to `schema.xml`.
-2. **EmitHarness(claude-code)** — marker-merges every registered skill under
+2. **EmitHarness(source, output, claude-code)** — marker-merges every registered skill under
    `skills/` and fully rewrites each tool-bearing role agent under `agents/`.
-3. **EmitHarness(opencode)** — fully rewrites the OpenCode skills, agents, and
-   manifest, and copies the two verbatim skills.
-4. **ValidateGlobalIds** — rejects unresolved or duplicate protocol identifiers
+3. **EmitHarness(source, output, opencode)** — fully rewrites the OpenCode skills,
+   agents, and manifest, and copies the two verbatim skills from the canonical
+   source root.
+4. **EmitHarness(source, output, codex)** — fully rewrites Codex skills under
+   `.agents/skills/` and custom-agent TOMLs under `.codex/agents/`, and copies the two verbatim skills from
+   the canonical source root. It intentionally emits no plugin manifest or
+   private Codex configuration.
+5. **ValidateGlobalIds** — rejects unresolved or duplicate protocol identifiers
    after the complete registry has been assembled.
+
+### Codex Contract Provenance
+
+The active Codex paths and the boundary between standalone custom-agent TOMLs
+and plugin packaging are documented, with official source links, in
+[docs/codegen.md](docs/codegen.md#codex-contract-provenance). The former
+`.codex/skills` path is superseded; changes must keep skills under
+`.agents/skills/` and custom agents under `.codex/agents/`.
 
 The entry point is `tools/codegen/main.go`, invoked for all committed targets by:
 
@@ -48,8 +61,8 @@ make generate
 | `internal/codegen/agents.go` | `GenerateAgent`, `agentTemplateData`, `renderAgent` | Changing agent definition generation logic or template context shape |
 | `internal/codegen/templates/skill.go.tmpl` | Claude Code role-skill wrapper/frontmatter; invokes `_skill_body.go.tmpl`. | Changing Claude Code role-skill framing |
 | `internal/codegen/templates/skill_sub.go.tmpl` | Claude Code command-skill wrapper/frontmatter; invokes `_skill_sub_body.go.tmpl`. | Changing Claude Code command-skill framing |
-| `internal/codegen/templates/_skill_body.go.tmpl` | Shared role-skill body partial used by both harnesses. | Changing generated role body layout |
-| `internal/codegen/templates/_skill_sub_body.go.tmpl` | Shared command-skill body partial used by both harnesses. | Changing generated command body layout |
+| `internal/codegen/templates/_skill_body.go.tmpl` | Shared role-skill body partial used by all harnesses. | Changing generated role body layout |
+| `internal/codegen/templates/_skill_sub_body.go.tmpl` | Shared command-skill body partial used by all harnesses. | Changing generated command body layout |
 | `internal/codegen/templates/agent_definition.go.tmpl` | Agent definition template (role spec, phases, constraints, behaviors, checklists, workflows, figure refs) | Changing agent definition layout |
 | `internal/codegen/templates/opencode_*.go.tmpl` | OpenCode role-skill, command-skill, and agent templates | Changing OpenCode-specific layout or frontmatter |
 | `internal/codegen/harness.go` | Target harness registry, `roleSkillDirs`, `commandSkillDirs`, and target routing helpers | Adding a new generation target, role skill, or command skill |
@@ -71,16 +84,21 @@ make generate
 ```
 
 This runs `go generate ./internal/codegen/...`, whose directive invokes
-`tools/codegen` for both the `claude-code` and `opencode` targets. The binary
-locates the module root by walking upward from cwd to find `go.mod`.
+`tools/codegen` for the `claude-code`, `opencode`, and `codex` targets. The binary
+locates the module root by walking upward from cwd to find `go.mod`. Each
+`EmitHarness` call receives the canonical source root and an explicit output
+root; production generation uses the module root for both, while staging tests
+can emit Codex/OpenCode into a clean directory without copying source inputs.
 
 What it does, in order:
 1. Writes `schema.xml` (diff printed to stdout if changed)
 2. Writes Claude Code skills under `skills/` and agents under `agents/`
 3. Writes OpenCode skills under `.opencode/skill/`, agents under
    `.opencode/agent/`, and `opencode.json`
-4. Copies the hand-authored `protocol` and `install-cli` skills verbatim into
-   the OpenCode target
+4. Writes Codex skills under `.agents/skills/` and custom agents under
+   `.codex/agents/`
+5. Copies the hand-authored `protocol` and `install-cli` skills verbatim into
+   both the OpenCode and Codex targets
 
 All committed generated outputs must remain byte-identical after regeneration.
 To capture a new baseline intentionally, start from a clean tree, run
@@ -93,15 +111,16 @@ but it is not a substitute for the canonical all-target regeneration gate.
 
 | What you changed | Regenerates |
 |-----------------|-------------|
-| Any map in `specs_data.go` | schema.xml and the affected skills/agents in both harnesses |
-| `specs_data_body_<skill>.go` plus its `SkillBodySpecs` registry entry | Claude Code and OpenCode SKILL.md body content |
-| `context.go` (`roleConstraints` / `phaseConstraints`) | affected SKILL.md and agent definitions in both harnesses |
+| Any map in `specs_data.go` | schema.xml and the affected skills/agents in all harnesses |
+| `specs_data_body_<skill>.go` plus its `SkillBodySpecs` registry entry | Claude Code, OpenCode, and Codex SKILL.md body content |
+| `context.go` (`roleConstraints` / `phaseConstraints`) | affected SKILL.md and agent definitions in all harnesses |
 | `schema_types.go` | schema.xml only |
 | `schema.go` section builders | schema.xml only |
 | `templates/skill.go.tmpl` | Claude Code role SKILL.md files |
 | `templates/skill_sub.go.tmpl` | Claude Code command SKILL.md files |
 | `templates/agent_definition.go.tmpl` | Shared agent body used by Claude Code and OpenCode agent definitions |
 | `templates/opencode_*.go.tmpl` | corresponding OpenCode skills or agents |
+| `templates/codex_*.go.tmpl` | corresponding Codex skills or custom agents |
 | `internal/codegen/harness.go` `roleSkillDirs` | which SKILL.md files are regenerated |
 | `internal/codegen/harness.go` `commandSkillDirs` | which sub-skill SKILL.md files are regenerated |
 

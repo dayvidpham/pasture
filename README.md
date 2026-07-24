@@ -138,9 +138,9 @@ The local `pasture` CLI hosts task verbs (`task create / show / update / close /
 The protocol `schema.xml`, registered skills, and tool-bearing role agents are
 **generated**, not hand-maintained. Protocol facts (phases, roles, constraints,
 commands, figures, and skill bodies) are declared once as typed Go values in
-`internal/codegen/` and rendered for both Claude Code and OpenCode. The
+`internal/codegen/` and rendered for Claude Code, OpenCode, and Codex. The
 hand-authored `protocol` and `install-cli` skills sit outside that generated
-registry and are copied verbatim into the OpenCode target.
+registry and are copied verbatim into the OpenCode and Codex targets.
 
 ```bash
 make generate                        # regenerate every committed target
@@ -149,12 +149,14 @@ go test ./internal/codegen/...       # completeness, parity, and sync guards
 
 The data flows from `specs_data*.go` through `tools/codegen` to `schema.xml`,
 the Claude Code trees (`skills/`, `agents/`), and the OpenCode trees
-(`.opencode/skill/`, `.opencode/agent/`, `opencode.json`). For registered Claude
-Code skills, the generator owns the complete content through the END marker;
-maintained body prose belongs in `specs_data_body_<skill>.go`, not below that
-marker. CI regenerates all targets on a clean checkout and fails on any resulting
-worktree change; an exact output-inventory test also rejects retired files that
-in-place generation cannot remove.
+(`.opencode/skill/`, `.opencode/agent/`, `opencode.json`), and the Codex trees
+(`.agents/skills/`, `.codex/agents/`). For registered Claude Code skills, the
+generator owns the complete content through the END marker; maintained body
+prose belongs in `specs_data_body_<skill>.go`, not below that marker. CI
+regenerates all targets on a clean checkout and fails on any resulting worktree
+change; an exact output-inventory test also rejects retired files that in-place
+generation intentionally cannot remove, directing maintainers to remove them
+manually after review.
 
 - **Architecture + data-flow diagram:** [docs/codegen.md](docs/codegen.md)
 - **How to add a constraint / role / phase / section / command:** [CONTRIBUTING.md](CONTRIBUTING.md)

@@ -351,3 +351,33 @@ The exact ids must be pinned from an authoritative source at build time and give
 ---
 
 **Files cited (verified this session unless marked):** `pasture/tools/codegen/main.go:37-185` (incl. `commandSkillDirs` 72-98, stale "22" comment 75), `pasture/internal/codegen/skills.go:129,408,494,591,686`, `pasture/internal/codegen/agents.go:74,163`, `pasture/internal/codegen/specs.go:243-245`, `pasture/internal/codegen/markers.go:15,18`, `pasture/internal/codegen/embed.go`, `pasture/internal/codegen/templates/skill.go.tmpl:1-7`, `pasture/internal/codegen/templates/agent_definition.go.tmpl:1-9`, `pasture/internal/codegen/testdata/skills.yaml`, `~/codebases/opencode/packages/opencode/src/skill/index.ts:21-26,30-50,86-99,226`. Dossier precedents NOT re-verified this session: `~/codebases/vercel-labs--skills/src/agents.ts`, `~/codebases/ponytail/.codex-plugin/plugin.json`, `~/codebases/Yeachan-Heo--oh-my-codex/src/agents/native-config.ts` (Codex evidence — see V-4 blocker).
+
+---
+
+## 10. Official Documentation Correction (2026-07-24)
+
+The investigation above is retained as historical evidence, including its
+third-party sources, open questions, and earlier recommendations. The following
+official documentation is now authoritative wherever it conflicts with those
+historical notes:
+
+- [Configure custom Codex agents](https://learn.chatgpt.com/docs/agent-configuration/subagents?surface=app)
+- [Build skills](https://learn.chatgpt.com/docs/build-skills)
+- [Build plugins](https://learn.chatgpt.com/docs/build-plugins)
+
+The active contract is:
+
+- Codex skills are directories with `SKILL.md`, discovered from repository
+  `.agents/skills` and user `~/.agents/skills` locations.
+- Codex custom agents are standalone TOML files in project `.codex/agents` and
+  user `~/.codex/agents`. The required fields are `name`, `description`, and
+  `developer_instructions`.
+- Official plugin documentation describes a package containing skills and/or an
+  MCP server. It does not document custom-agent TOMLs as plugin contents, so
+  Home Manager remains the separate projection for those agent definitions.
+
+The earlier `.codex/skills` path is superseded by `.agents/skills`. The earlier
+uncertainty about whether custom-agent TOMLs belong inside a plugin is also
+superseded. This correction changes documentation provenance only; it does not
+add a compatibility skill tree, plugin manifest, runtime/lifecycle behavior, or
+installer behavior.

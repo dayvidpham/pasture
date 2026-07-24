@@ -28,7 +28,7 @@ func emitOpenCodeAgents(t *testing.T) map[protocol.RoleId]GeneratedFile {
 	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
 	out := t.TempDir()
 
-	files, err := openCodeAgentEmitter{}.Emit(out, figuresDir, GenerateOptions{Diff: false, Write: false})
+	files, err := openCodeAgentEmitter{}.Emit(root, out, figuresDir, GenerateOptions{Diff: false, Write: false})
 	if err != nil {
 		t.Fatalf("openCodeAgentEmitter.Emit: %v", err)
 	}

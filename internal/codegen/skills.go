@@ -127,7 +127,7 @@ const (
 	// skillBodyPartials is the glob for the shared skill-body partial templates.
 	// These files contain ONLY {{define "skillBody"}} / {{define "skillSubBody"}}
 	// blocks — the single source of truth for the generated SKILL.md body shared
-	// by every harness target (claude-code, opencode). Each harness skill
+	// by every harness target (claude-code, opencode, codex). Each harness skill
 	// template (skill.go.tmpl, opencode_skill.go.tmpl, …) carries only its
 	// target-specific frontmatter and then invokes {{template "skillBody" .}} /
 	// {{template "skillSubBody" .}}. Parsing these partials into the same set as

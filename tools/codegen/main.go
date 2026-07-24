@@ -1,13 +1,14 @@
 // Command codegen is the generation entry point for the Pasture protocol.
 // The canonical `make generate` command invokes the go:generate directive in
-// internal/codegen/codegen.go, which selects both registered harness targets:
+// internal/codegen/codegen.go, which selects all registered harness targets:
 //
-//	go run ../../tools/codegen --targets claude-code,opencode
+//	go run ../../tools/codegen --targets claude-code,opencode,codex
 //
 // The tool writes schema.xml once, then emits each selected harness's skills,
 // agents, verbatim skill copies, and manifest. Direct invocations may use
-// --targets for focused generator development, but repository validation uses
-// the canonical all-target command.
+// --targets for focused generator development or --output to emit into a clean
+// staging root; canonical inputs always come from the module root. Repository
+// validation uses the canonical all-target command.
 //
 // Exits non-zero if any generator returns an error.
 package main
@@ -50,20 +51,25 @@ func moduleRoot() (string, error) {
 }
 
 func main() {
-	outputRoot := flag.String("output", "", "output root directory (default: module root, found by walking up from cwd to go.mod)")
-	targetFlag := flag.String("targets", string(codegen.HarnessClaudeCode), "comma-separated generation targets (registered: claude-code, opencode)")
+	outputFlag := flag.String("output", "", "output root directory (default: module root, found by walking up from cwd to go.mod)")
+	targetFlag := flag.String("targets", string(codegen.HarnessClaudeCode), "comma-separated generation targets (registered: claude-code, opencode, codex)")
 	flag.Parse()
 
-	var root string
-	if *outputRoot != "" {
-		root = *outputRoot
-	} else {
-		var err error
-		root, err = moduleRoot()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
-			os.Exit(1)
-		}
+	sourceRoot, err := moduleRoot()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+		os.Exit(1)
+	}
+	outputRoot := sourceRoot
+	if *outputFlag != "" {
+		outputRoot = *outputFlag
+	}
+	if err := os.MkdirAll(outputRoot, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr,
+			"ERROR: codegen output root %q cannot be created — ensure the staging path is writable: %v\n",
+			outputRoot, err,
+		)
+		os.Exit(1)
 	}
 
 	opts := codegen.DefaultOptions // Diff: true, Write: true
@@ -76,7 +82,7 @@ func main() {
 	}
 
 	// ── 1. Generate schema.xml ────────────────────────────────────────────────
-	schemaPath := filepath.Join(root, "schema.xml")
+	schemaPath := filepath.Join(outputRoot, "schema.xml")
 	if _, err := codegen.GenerateSchemaToFile(schemaPath, opts); err != nil {
 		errors = append(errors, fmt.Errorf("schema: %w", err))
 	} else {
@@ -84,9 +90,9 @@ func main() {
 	}
 
 	// ── 2. Generate harness-specific skills and agents ────────────────────────
-	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
+	figuresDir := filepath.Join(sourceRoot, "skills", "protocol", "figures")
 	for _, target := range targets {
-		files, err := codegen.EmitHarness(root, target, figuresDir, opts)
+		files, err := codegen.EmitHarness(sourceRoot, outputRoot, target, figuresDir, opts)
 		if err != nil {
 			errors = append(errors, fmt.Errorf("target %s: %w", target.Name, err))
 		} else {
