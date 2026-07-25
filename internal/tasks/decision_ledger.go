@@ -372,9 +372,10 @@ type DecisionEncoding struct {
 	Payload CanonicalDecisionPayload `json:"payload"`
 }
 
-// DecisionAttribution is the decider/recorder attribution stored on a ledger entry. The
-// Decider is the epoch root's registered user; the Recorder is the appending assignment's
-// actor. Kinds use provenance.AgentKind (the delivered spelling of the issue's ActorKind).
+// DecisionAttribution is the decider/recorder attribution stored on a projected ledger
+// entry. Explicit human gates use the selected registered human for both fields; other
+// decision producers may distinguish the deciding and recording actors. Kinds use
+// provenance.AgentKind.
 type DecisionAttribution struct {
 	Decider      provenance.ActorID   `json:"decider"`
 	DeciderKind  provenance.AgentKind `json:"deciderKind"`

@@ -68,6 +68,15 @@ const (
 	// verbatim, attached to one referenced task (see legacy_import.go). It is the
 	// material representation the atomic ImportLegacyAuditRow command fans out.
 	FamilyLegacyAuditImported
+	// FamilyHumanDecisionActivity records the activity identity and exact asserted actor
+	// for one human decision operation.
+	FamilyHumanDecisionActivity
+	// FamilyEpochDecisionRecorded records the user-visible lifecycle result and links it
+	// to the decision and activity identities produced by the same operation.
+	FamilyEpochDecisionRecorded
+	// FamilyReviewRoundFinalized is the accepted/revising review-round projection consumed
+	// by ratification. The assignment-authorized review service produces it.
+	FamilyReviewRoundFinalized
 )
 
 // materialEventFamilies is the canonical, ordered list of every real family. The
@@ -85,6 +94,9 @@ var materialEventFamilies = []MaterialEventFamily{
 	FamilyGitRemoteRefVerified,
 	FamilyTaskClosed,
 	FamilyLegacyAuditImported,
+	FamilyHumanDecisionActivity,
+	FamilyEpochDecisionRecorded,
+	FamilyReviewRoundFinalized,
 }
 
 // EventKind returns the one fixed journal EventKind for this family. The kind is a
@@ -109,6 +121,12 @@ func (f MaterialEventFamily) EventKind() provenance.EventKind {
 		return "pasture.task.closed.v1"
 	case FamilyLegacyAuditImported:
 		return "pasture.legacy.audit-imported.v1"
+	case FamilyHumanDecisionActivity:
+		return "pasture.epoch.human-decision-activity.v1"
+	case FamilyEpochDecisionRecorded:
+		return "pasture.epoch.decision-recorded.v1"
+	case FamilyReviewRoundFinalized:
+		return "pasture.review.round-finalized.v1"
 	default:
 		return ""
 	}
@@ -432,6 +450,122 @@ func (e UATRecordedEvent) canonicalPayload() (json.RawMessage, error) {
 
 func (e UATRecordedEvent) contexts() ([]provenance.EventContext, error) {
 	return buildContexts(taskCtx(e.Subject))
+}
+
+// HumanDecisionActivityEvent is the journal-native activity record for one user gate.
+// Provenance currently has no atomic activity effect, so this typed task event preserves
+// the activity identity and attribution inside the same canonical operation as the
+// decision, evidence, and lifecycle event rather than writing the legacy activity table.
+type HumanDecisionActivityEvent struct {
+	Subject  provenance.TaskID
+	Epoch    provenance.TaskID
+	Activity provenance.ActivityID
+	Actor    provenance.ActorID
+	Decision DecisionLedgerEntryID
+	Kind     DecisionKindID
+}
+
+func (HumanDecisionActivityEvent) Family() MaterialEventFamily     { return FamilyHumanDecisionActivity }
+func (e HumanDecisionActivityEvent) SourceTask() provenance.TaskID { return e.Subject }
+func (HumanDecisionActivityEvent) isMaterialEvent()                {}
+func (e HumanDecisionActivityEvent) validate() error {
+	if err := validateTaskPresent("HumanDecisionActivityEvent.Subject", e.Subject); err != nil {
+		return err
+	}
+	if err := validateTaskPresent("HumanDecisionActivityEvent.Epoch", e.Epoch); err != nil {
+		return err
+	}
+	if e.Activity == (provenance.ActivityID{}) || e.Decision == "" || e.Kind == "" {
+		return invalidFieldErr("HumanDecisionActivityEvent", "incomplete", "a non-empty activity, decision, and kind")
+	}
+	return validateActorPresent("HumanDecisionActivityEvent.Actor", e.Actor)
+}
+func (e HumanDecisionActivityEvent) canonicalPayload() (json.RawMessage, error) {
+	return canonicalJSON(struct {
+		Epoch    string `json:"epoch"`
+		Activity string `json:"activity"`
+		Actor    string `json:"actor"`
+		Decision string `json:"decision"`
+		Kind     string `json:"kind"`
+	}{e.Epoch.String(), e.Activity.String(), e.Actor.String(), string(e.Decision), string(e.Kind)})
+}
+func (e HumanDecisionActivityEvent) contexts() ([]provenance.EventContext, error) {
+	return buildContexts(taskCtx(e.Subject), taskCtx(e.Epoch), actorCtx(e.Actor), activityCtx(e.Activity))
+}
+
+// EpochDecisionRecordedEvent is the projection event used for reopen-safe gate reads.
+// Detail is canonical decision-bearing JSON specific to the decision kind.
+type EpochDecisionRecordedEvent struct {
+	Subject  provenance.TaskID
+	Epoch    provenance.TaskID
+	Activity provenance.ActivityID
+	Actor    provenance.ActorID
+	Decision DecisionLedgerEntryID
+	Kind     DecisionKindID
+	Detail   json.RawMessage
+}
+
+func (EpochDecisionRecordedEvent) Family() MaterialEventFamily     { return FamilyEpochDecisionRecorded }
+func (e EpochDecisionRecordedEvent) SourceTask() provenance.TaskID { return e.Subject }
+func (EpochDecisionRecordedEvent) isMaterialEvent()                {}
+func (e EpochDecisionRecordedEvent) validate() error {
+	if err := validateTaskPresent("EpochDecisionRecordedEvent.Subject", e.Subject); err != nil {
+		return err
+	}
+	if err := validateTaskPresent("EpochDecisionRecordedEvent.Epoch", e.Epoch); err != nil {
+		return err
+	}
+	if e.Activity == (provenance.ActivityID{}) || e.Decision == "" || e.Kind == "" || !json.Valid(e.Detail) {
+		return invalidFieldErr("EpochDecisionRecordedEvent", "incomplete", "a non-empty activity, decision, kind, and valid detail JSON")
+	}
+	return validateActorPresent("EpochDecisionRecordedEvent.Actor", e.Actor)
+}
+func (e EpochDecisionRecordedEvent) canonicalPayload() (json.RawMessage, error) {
+	return canonicalJSON(struct {
+		Epoch    string          `json:"epoch"`
+		Activity string          `json:"activity"`
+		Actor    string          `json:"actor"`
+		Decision string          `json:"decision"`
+		Kind     string          `json:"kind"`
+		Detail   json.RawMessage `json:"detail"`
+	}{e.Epoch.String(), e.Activity.String(), e.Actor.String(), string(e.Decision), string(e.Kind), e.Detail})
+}
+func (e EpochDecisionRecordedEvent) contexts() ([]provenance.EventContext, error) {
+	return buildContexts(taskCtx(e.Subject), taskCtx(e.Epoch), actorCtx(e.Actor), activityCtx(e.Activity))
+}
+
+// ReviewRoundFinalizedEvent is the persisted review projection ratification reads.
+type ReviewRoundFinalizedEvent struct {
+	Subject provenance.TaskID
+	Epoch   provenance.TaskID
+	Round   ReviewRoundID
+	Verdict Verdict
+}
+
+func (ReviewRoundFinalizedEvent) Family() MaterialEventFamily     { return FamilyReviewRoundFinalized }
+func (e ReviewRoundFinalizedEvent) SourceTask() provenance.TaskID { return e.Subject }
+func (ReviewRoundFinalizedEvent) isMaterialEvent()                {}
+func (e ReviewRoundFinalizedEvent) validate() error {
+	if err := validateTaskPresent("ReviewRoundFinalizedEvent.Subject", e.Subject); err != nil {
+		return err
+	}
+	if err := validateTaskPresent("ReviewRoundFinalizedEvent.Epoch", e.Epoch); err != nil {
+		return err
+	}
+	if e.Round == "" || !e.Verdict.valid() {
+		return invalidFieldErr("ReviewRoundFinalizedEvent", "incomplete", "a review round and accept or revise verdict")
+	}
+	return nil
+}
+func (e ReviewRoundFinalizedEvent) canonicalPayload() (json.RawMessage, error) {
+	return canonicalJSON(struct {
+		Epoch   string `json:"epoch"`
+		Round   string `json:"round"`
+		Verdict string `json:"verdict"`
+	}{e.Epoch.String(), string(e.Round), e.Verdict.String()})
+}
+func (e ReviewRoundFinalizedEvent) contexts() ([]provenance.EventContext, error) {
+	return buildContexts(taskCtx(e.Subject), taskCtx(e.Epoch))
 }
 
 // SkillRunEvent records a skill-run material event bound to a task and an actor.

@@ -1,10 +1,6 @@
 package tasks
 
-import (
-	"testing"
-
-	"github.com/dayvidpham/pasture/internal/codegen/ir"
-)
+import "testing"
 
 func TestValidateImplUATPayloadForcesChangesRequested(t *testing.T) {
 	// A REPLACE resolution with an accepted verdict is rejected.
@@ -75,32 +71,5 @@ func TestValidatePlanAcceptedRejectsFixNow(t *testing.T) {
 	}
 	if err := validatePlanAccepted(p); err == nil {
 		t.Fatal("expected accepted-with-FIX-NOW to be rejected")
-	}
-}
-
-func TestSetInteractionModeCommandValidate(t *testing.T) {
-	valid := SetInteractionModeCommand{
-		Epoch:          "epoch-1",
-		Desired:        InteractionAFK,
-		ExpectedLedger: "L1",
-		Report:         ir.ReportedUserDecision{},
-	}
-	if err := valid.Validate(); err != nil {
-		t.Fatalf("valid command rejected: %v", err)
-	}
-	cases := []struct {
-		name string
-		cmd  SetInteractionModeCommand
-	}{
-		{"empty-epoch", SetInteractionModeCommand{Desired: InteractionAFK, ExpectedLedger: "L1"}},
-		{"invalid-mode", SetInteractionModeCommand{Epoch: "e", Desired: "bogus", ExpectedLedger: "L1"}},
-		{"empty-ledger", SetInteractionModeCommand{Epoch: "e", Desired: InteractionAFK}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if err := tc.cmd.Validate(); err == nil {
-				t.Fatalf("expected %s to be rejected", tc.name)
-			}
-		})
 	}
 }

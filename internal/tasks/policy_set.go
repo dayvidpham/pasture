@@ -1,8 +1,8 @@
 // Package tasks — the production decision PolicySet (#49).
 //
-// policy_set.go constructs the explicit production PolicySet: the five concrete decision
-// descriptors #49 registers on top of #43's base catalog machinery, plus the typed draft
-// helpers the live-commit handlers (pending-seed) use to lower a policy decision to one
+// policy_set.go constructs the explicit production PolicySet: the concrete decision
+// descriptors registered on top of the base catalog machinery, plus the typed draft
+// helpers live commit handlers use to lower a policy decision to one
 // canonical DecisionDraft. There is NO init-time registry and NO process-global set: the
 // PolicySet is constructed explicitly by NewProductionPolicySet and passed by value.
 //
@@ -35,6 +35,8 @@ const (
 	DecisionPlanUATChangesRequested DecisionKindID = "pasture.plan-uat.changes-requested/v1"
 	DecisionPlanUATDeferredByAFK    DecisionKindID = "pasture.plan-uat.deferred-by-afk/v1"
 	DecisionImplementationUAT       DecisionKindID = "pasture.implementation-uat/v1"
+	DecisionPlanRatified            DecisionKindID = "pasture.plan.ratified/v1"
+	DecisionLanded                  DecisionKindID = "pasture.epoch.landed/v1"
 )
 
 // PolicySet is the explicit production set of #49 decision descriptors plus the immutable
@@ -48,6 +50,37 @@ type PolicySet struct {
 	planChanges       DecisionDescriptor[PlanChangesRequested]
 	planDeferred      DecisionDescriptor[PlanDeferredByAFK]
 	implementationUAT DecisionDescriptor[implementationUATRecord]
+	planRatified      DecisionDescriptor[PlanRatified]
+	landed            DecisionDescriptor[EpochLanded]
+}
+
+// PlanRatified is the immutable decision payload binding ratification to its exact
+// proposal, accepted review round, and accepted Plan UAT decision.
+type PlanRatified struct {
+	Proposal    string                `json:"proposal"`
+	ReviewRound ReviewRoundID         `json:"reviewRound"`
+	PlanUAT     DecisionLedgerEntryID `json:"planUat"`
+}
+
+func validatePlanRatified(v PlanRatified) error {
+	if v.Proposal == "" || v.ReviewRound == "" || v.PlanUAT == "" {
+		return decisionErr("PlanRatified", "ratification is missing its proposal, review round, or Plan UAT evidence", "ratification must bind all three exact inputs", "supply the proposal, accepted review round, and accepted Plan UAT decision")
+	}
+	return nil
+}
+
+// EpochLanded is the immutable decision payload binding landing to the exact candidate
+// and accepted Implementation UAT decision.
+type EpochLanded struct {
+	Candidate         IntegrationCandidateSetID `json:"candidate"`
+	ImplementationUAT DecisionLedgerEntryID     `json:"implementationUat"`
+}
+
+func validateEpochLanded(v EpochLanded) error {
+	if v.Candidate == "" || v.ImplementationUAT == "" {
+		return decisionErr("EpochLanded", "landing is missing its candidate or Implementation UAT evidence", "landing must bind both exact inputs", "supply the candidate and accepted Implementation UAT decision")
+	}
+	return nil
 }
 
 // implementationUATRecord is the private canonical value stored under the existing
@@ -91,12 +124,22 @@ func NewProductionPolicySet() (PolicySet, error) {
 	if err != nil {
 		return PolicySet{}, err
 	}
+	planRatified, err := newJSONDescriptor(DecisionPlanRatified, "plan.ratified{proposal,reviewRound,planUat}", validatePlanRatified)
+	if err != nil {
+		return PolicySet{}, err
+	}
+	landed, err := newJSONDescriptor(DecisionLanded, "epoch.landed{candidate,implementationUat}", validateEpochLanded)
+	if err != nil {
+		return PolicySet{}, err
+	}
 	catalog, err := NewDecisionCatalog(
 		BindDecision(modeChanged),
 		BindDecision(planAccepted),
 		BindDecision(planChanges),
 		BindDecision(planDeferred),
 		BindDecision(implementationUAT),
+		BindDecision(planRatified),
+		BindDecision(landed),
 	)
 	if err != nil {
 		return PolicySet{}, err
@@ -108,6 +151,8 @@ func NewProductionPolicySet() (PolicySet, error) {
 		planChanges:       planChanges,
 		planDeferred:      planDeferred,
 		implementationUAT: implementationUAT,
+		planRatified:      planRatified,
+		landed:            landed,
 	}, nil
 }
 
@@ -183,6 +228,14 @@ func (s PolicySet) DraftPlanUAT(d PlanUATDecision) (DecisionDraft, error) {
 // then drafts the payload through the production descriptor.
 func (s PolicySet) DraftImplementationUAT(verdict ImplementationUATVerdict, p ImplUATPayload) (DecisionDraft, error) {
 	return s.implementationUAT.Draft(implementationUATRecord{Outcome: verdict, Payload: p})
+}
+
+func (s PolicySet) DraftPlanRatified(v PlanRatified) (DecisionDraft, error) {
+	return s.planRatified.Draft(v)
+}
+
+func (s PolicySet) DraftLanded(v EpochLanded) (DecisionDraft, error) {
+	return s.landed.Draft(v)
 }
 
 // newJSONDescriptor builds a #49 decision descriptor over a payload type T using the

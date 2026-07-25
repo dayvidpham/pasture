@@ -57,11 +57,11 @@ func validSnapshot() PlanUATSnapshot {
 	}
 }
 
-func TestNewProductionPolicySetRegistersFiveKinds(t *testing.T) {
+func TestNewProductionPolicySetRegistersHumanDecisionKinds(t *testing.T) {
 	ps := mustPolicySet(t)
 	manifest := ps.Catalog.Manifest()
-	if len(manifest) != 5 {
-		t.Fatalf("catalog manifest has %d entries, want 5", len(manifest))
+	if len(manifest) != 7 {
+		t.Fatalf("catalog manifest has %d entries, want 7", len(manifest))
 	}
 	want := map[DecisionKindID]bool{
 		DecisionInteractionModeChanged:  true,
@@ -69,6 +69,8 @@ func TestNewProductionPolicySetRegistersFiveKinds(t *testing.T) {
 		DecisionPlanUATChangesRequested: true,
 		DecisionPlanUATDeferredByAFK:    true,
 		DecisionImplementationUAT:       true,
+		DecisionPlanRatified:            true,
+		DecisionLanded:                  true,
 	}
 	for _, e := range manifest {
 		if !want[e.Kind] {
@@ -99,6 +101,8 @@ func TestSchemaDigestGolden(t *testing.T) {
 		{"plan-changes", ps.planChanges.Schema(), "8a4183a5abcf6dd988fdb5520f7db7b8246c2a72e31af473d7c73263d4305ca8"},
 		{"plan-deferred", ps.planDeferred.Schema(), "a712b9bd98bb5439f1e2bf66309b5c2fea243beaab75c17eb3bb23e525eb6c34"},
 		{"impl-uat", ps.implementationUAT.Schema(), "541809202fb1823057f695ea4cb42bd2583b3ed8c0eff9f66a2b148b730a237b"},
+		{"plan-ratified", ps.planRatified.Schema(), "88aa092c97f74e7358a3246931b7aa5b0c9ed3a3df0a45c8a191eaac55dbe40e"},
+		{"landed", ps.landed.Schema(), "df1f49fb065d6dbf1395731d69f82b11be6a55f5c956696002afa541dcacef05"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -164,6 +168,27 @@ func TestImplUATPayloadRoundTrip(t *testing.T) {
 		len(got.Payload.Interactions) != 1 || got.Payload.Interactions[0] != payload.Interactions[0] ||
 		len(got.Payload.LedgerDecisions) != 1 || got.Payload.LedgerDecisions[0] != payload.LedgerDecisions[0] {
 		t.Fatalf("round-trip = %+v, want %+v", got, payload)
+	}
+}
+
+func TestRatifyAndLandAreDistinctCatalogDecisions(t *testing.T) {
+	ps := mustPolicySet(t)
+	ratify, err := ps.DraftPlanRatified(PlanRatified{Proposal: "proposal", ReviewRound: "round", PlanUAT: "plan-uat"})
+	if err != nil {
+		t.Fatalf("DraftPlanRatified: %v", err)
+	}
+	land, err := ps.DraftLanded(EpochLanded{Candidate: "candidate", ImplementationUAT: "implementation-uat"})
+	if err != nil {
+		t.Fatalf("DraftLanded: %v", err)
+	}
+	if ratify.encoding().Kind != DecisionPlanRatified || land.encoding().Kind != DecisionLanded || ratify.encoding().Kind == land.encoding().Kind {
+		t.Fatalf("ratify/land kinds are not distinct: %q %q", ratify.encoding().Kind, land.encoding().Kind)
+	}
+	if err := ps.Catalog.ValidateDraft(ratify); err != nil {
+		t.Fatalf("ratify draft not catalog-issued: %v", err)
+	}
+	if err := ps.Catalog.ValidateDraft(land); err != nil {
+		t.Fatalf("land draft not catalog-issued: %v", err)
 	}
 }
 

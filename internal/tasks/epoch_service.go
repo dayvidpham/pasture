@@ -404,21 +404,30 @@ type EpochServiceOptions struct {
 	Synchronization EpochServiceSynchronization
 }
 
-// EpochServiceFactory is the production construction boundary. A concrete factory owns
-// durable tracker, journal, policy, clock, and repository dependencies, then applies these
-// options when constructing the aggregate. This keeps synchronization injectable without
-// introducing a test-only service or exposing it in command values.
+// EpochServiceFactory is the production construction boundary for the composed service.
+// The assignment implementation composes its service with EpochHumanService.
 type EpochServiceFactory interface {
 	NewEpochService(EpochServiceOptions) (EpochService, error)
 }
 
-// EpochService is the single workflow aggregate. Human decisions require an explicit
-// AssertedHumanActor. Review, slice, and integration mutations instead require exact
-// active assignments (except StartReview, which resolves a unique governing assignment).
-type EpochService interface {
+// EpochHumanService is the explicit-human portion of the workflow aggregate.
+type EpochHumanService interface {
 	SetInteractionMode(context.Context, SetInteractionModeInput) (DecisionResult, error)
 	ShowInteractionMode(context.Context, EpochRootID) (InteractionModeCursor, error)
+	RecordPlanUAT(context.Context, PlanUATInput) (DecisionResult, error)
+	RatifyPlan(context.Context, RatifyPlanInput) (DecisionResult, error)
+	RecordImplementationUAT(context.Context, ImplementationUATInput) (DecisionResult, error)
+	Land(context.Context, LandInput) (DecisionResult, error)
+}
 
+// EpochHumanServiceFactory constructs the production human-decision aggregate without
+// requiring placeholder implementations of assignment-controlled operations.
+type EpochHumanServiceFactory interface {
+	NewEpochHumanService(EpochServiceOptions) (EpochHumanService, error)
+}
+
+// EpochAssignmentService is the assignment-authorized portion of the aggregate.
+type EpochAssignmentService interface {
 	StartReview(context.Context, StartReviewInput) (ReviewStartResult, error)
 	SubmitReview(context.Context, SubmitReviewInput) (ReviewSubmitResult, error)
 	FinalizeReview(context.Context, FinalizeReviewInput) (ReviewFinalizeResult, error)
@@ -431,9 +440,11 @@ type EpochService interface {
 	CreateIntegrationCandidate(context.Context, CreateIntegrationCandidateInput) (IntegrationCandidateResult, error)
 	ReworkIntegrationCandidate(context.Context, ReworkIntegrationCandidateInput) (IntegrationCandidateResult, error)
 	PublishRepository(context.Context, PublishRepositoryInput) (PublicationResult, error)
+}
 
-	RecordPlanUAT(context.Context, PlanUATInput) (DecisionResult, error)
-	RatifyPlan(context.Context, RatifyPlanInput) (DecisionResult, error)
-	RecordImplementationUAT(context.Context, ImplementationUATInput) (DecisionResult, error)
-	Land(context.Context, LandInput) (DecisionResult, error)
+// EpochService is the one public workflow contract composed from its two authority
+// families. Production composition does not permit either family to fake the other.
+type EpochService interface {
+	EpochHumanService
+	EpochAssignmentService
 }

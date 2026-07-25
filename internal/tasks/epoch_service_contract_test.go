@@ -278,6 +278,7 @@ func TestProductionConstructionCarriesSynchronizationOutsideCommands(t *testing.
 	assertStructShape(t, typeOf[tasks.EpochServiceSynchronization](), fields(field[tasks.EpochRaceBarrier]("RaceBarrier")))
 	assertStructShape(t, typeOf[tasks.EpochServiceOptions](), fields(field[tasks.EpochServiceSynchronization]("Synchronization")))
 	var _ func(tasks.EpochServiceFactory, tasks.EpochServiceOptions) (tasks.EpochService, error) = tasks.EpochServiceFactory.NewEpochService
+	var _ func(tasks.EpochHumanServiceFactory, tasks.EpochServiceOptions) (tasks.EpochHumanService, error) = tasks.EpochHumanServiceFactory.NewEpochHumanService
 }
 
 func commandInputTypes() []reflect.Type {

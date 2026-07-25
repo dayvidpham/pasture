@@ -19,7 +19,6 @@ package tasks
 import (
 	"fmt"
 
-	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/provenance"
 )
@@ -489,39 +488,6 @@ type ImplementationUATDecision struct {
 	Outcome        ImplementationUATVerdict
 	Payload        ImplUATPayload
 	Coverage       CoverageDigest
-}
-
-// SetInteractionModeCommand is the command-level input of `pasture task epoch
-// interaction-mode set`. It retains the exact originating protocol-reported user decision;
-// the live handler (pending-seed) calls the originating request's DecodeReportedResult on
-// one bounded JSON value before any mutation. It accepts no actor/decider/trust/file
-// alternative: the Recorder derives from the active assignment and the Decider from the
-// epoch root's registered UserActorID.
-type SetInteractionModeCommand struct {
-	Epoch          EpochRootID
-	Desired        InteractionMode
-	ExpectedLedger DocumentRevisionID
-	Report         ir.ReportedUserDecision
-}
-
-// Validate rejects a malformed set-interaction-mode command shape. It does NOT consume the
-// report (the live handler decodes it against its originating request); it checks the
-// command's own required fields.
-func (c SetInteractionModeCommand) Validate() error {
-	if c.Epoch == "" {
-		return uatErr("SetInteractionModeCommand.Epoch", "the epoch root is empty",
-			"a mode change targets a specific protected epoch root", "supply the epoch root id")
-	}
-	if !c.Desired.valid() {
-		return uatErr("SetInteractionModeCommand.Desired", fmt.Sprintf("the desired mode %q is not normal or afk", c.Desired),
-			"a mode change sets the mode to normal or afk", "set Desired to normal or afk")
-	}
-	if c.ExpectedLedger == "" {
-		return uatErr("SetInteractionModeCommand.ExpectedLedger", "the expected ledger revision is empty",
-			"a mode change is a compare-and-swap against the exact expected current ledger revision",
-			"supply the expected current ledger revision")
-	}
-	return nil
 }
 
 func uatErr(where, what, why, fix string) error {

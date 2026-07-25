@@ -16,15 +16,6 @@
 // logical assignment; only decision-bearing / interaction-sensitive commands derive
 // mode.
 //
-// Seed dependency (provenance PR #12, user gate pending). This file delivers the pure
-// POLICY layer — the mode enum, the typed decision, and the deterministic EffectiveMode
-// fold — which is exhaustively testable with no journal and no seeded ordinal-zero
-// actor. Actually COMMITTING a mode change is a decision-ledger append whose Decider is
-// the epoch root's immutable registered UserActorID; that append (and the
-// `pasture task epoch interaction-mode set` CLI it backs) is designed on top of these
-// pure types but its end-to-end attribution genuinely needs the seeded user actor, so
-// it is deferred pending-seed like the base package's live review-start path — never faked.
-//
 // Delivered-surface divergence #5 (signature). The issue sketches EffectiveMode as
 // func EffectiveMode(entries []DecisionLedgerEntry) (InteractionModeCursor, error) — no
 // PolicySet parameter. Delivered here (and on EvaluateRatify in afk_ratify.go) with an
