@@ -61,10 +61,8 @@ func validEventFor(t *testing.T, f MaterialEventFamily) MaterialEvent {
 			RawContexts:     []string{"EpochContext:test--epoch"},
 			SourcePayload:   json.RawMessage(`{"kind":"legacy"}`),
 		}
-	case FamilyHumanDecisionActivity:
-		return HumanDecisionActivityEvent{Subject: task, Epoch: mkTask(t), Activity: mkActivity(t), Actor: mkActor(t), Decision: "decision:1", Kind: DecisionPlanUATAccepted}
 	case FamilyEpochDecisionRecorded:
-		return EpochDecisionRecordedEvent{Subject: task, Epoch: mkTask(t), Activity: mkActivity(t), Actor: mkActor(t), Decision: "decision:1", Kind: DecisionPlanUATAccepted, Detail: json.RawMessage(`{"outcome":"accepted"}`)}
+		return EpochDecisionRecordedEvent{Subject: task, Epoch: mkTask(t), Activity: mkActivity(t), Actor: mkActor(t), Decision: "decision:1", Kind: DecisionPlanUATAccepted}
 	case FamilyReviewRoundFinalized:
 		return ReviewRoundFinalizedEvent{Subject: task, Epoch: mkTask(t), Round: "round-1", Verdict: VerdictAccept}
 	default:
