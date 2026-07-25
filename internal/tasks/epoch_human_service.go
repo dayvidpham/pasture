@@ -20,6 +20,8 @@ const (
 	activityResultSlot       = provenance.ResultSlotID("activity")
 	eventResultSlot          = provenance.ResultSlotID("event")
 	preconditionEvidenceKind = provenance.EvidenceKind("pasture.epoch.precondition.v1")
+	planSubjectEvidenceKind  = provenance.EvidenceKind("pasture.plan.proposal.v1")
+	candidateEvidenceKind    = provenance.EvidenceKind("pasture.integration.candidate.v1")
 )
 
 // epochHumanService is the single journal-backed aggregate for explicit-human
@@ -30,6 +32,7 @@ type epochHumanService struct {
 	policy    PolicySet
 	authority provenance.JournalID
 	barrier   EpochRaceBarrier
+	now       func() time.Time
 }
 
 var _ EpochHumanService = (*epochHumanService)(nil)
@@ -50,7 +53,11 @@ func (t *trackerImpl) NewEpochHumanService(opts EpochServiceOptions) (EpochHuman
 	if err != nil {
 		return nil, fmt.Errorf("construct epoch human service: build decision policy: %w", err)
 	}
-	return &epochHumanService{tracker: t, policy: policy, authority: authority, barrier: opts.Synchronization.RaceBarrier}, nil
+	now := opts.now
+	if now == nil {
+		now = time.Now
+	}
+	return &epochHumanService{tracker: t, policy: policy, authority: authority, barrier: opts.Synchronization.RaceBarrier, now: now}, nil
 }
 
 func (s *epochHumanService) SetInteractionMode(ctx context.Context, in SetInteractionModeInput) (DecisionResult, error) {
@@ -61,7 +68,7 @@ func (s *epochHumanService) SetInteractionMode(ctx context.Context, in SetIntera
 	if !in.Mode.valid() {
 		return DecisionResult{}, humanServiceErr("SetInteractionMode", fmt.Sprintf("mode %q is unknown", in.Mode), "interaction mode must be normal or afk", "supply normal or afk")
 	}
-	if stored, found, err := s.committedDecision(in.Meta.OperationID, epoch, DecisionInteractionModeChanged); err != nil {
+	if stored, found, err := s.committedOperationDecision(in.Meta.OperationID, []DecisionKindID{DecisionInteractionModeChanged}); err != nil {
 		return DecisionResult{}, err
 	} else if found {
 		var changed InteractionModeChanged
@@ -74,8 +81,17 @@ func (s *epochHumanService) SetInteractionMode(ctx context.Context, in SetIntera
 				return DecisionResult{}, err
 			}
 			return s.commit(ctx, in.Meta, in.Epoch, epoch, epoch, in.Actor, MutationSetInteractionMode, draft,
-				[]evidenceRef{{Kind: "pasture.epoch.subject.v1", Value: epoch.String()}}, []provenance.Condition{currentDecisionCondition(epoch, DecisionInteractionModeChanged, 0)}, nil)
+				[]evidenceRef{{Kind: "pasture.epoch.subject.v1", Value: epoch.String()}}, nil, nil)
 		}
+		state, err := s.interactionModeState(epoch)
+		if err != nil {
+			return DecisionResult{}, err
+		}
+		draft, err := s.policy.DraftModeChange(InteractionModeChanged{From: state.cursor.Mode, To: in.Mode})
+		if err != nil {
+			return DecisionResult{}, err
+		}
+		return s.commit(ctx, in.Meta, in.Epoch, epoch, epoch, in.Actor, MutationSetInteractionMode, draft, nil, nil, nil)
 	}
 	state, err := s.interactionModeState(epoch)
 	if err != nil {
@@ -112,68 +128,71 @@ func (s *epochHumanService) RecordPlanUAT(ctx context.Context, in PlanUATInput) 
 	if in.Proposal == (provenance.TaskID{}) {
 		return DecisionResult{}, humanServiceErr("RecordPlanUAT", "the proposal is empty", "Plan UAT must target an existing proposal", "supply the proposal task")
 	}
-	if _, err := s.tracker.prov.Show(in.Proposal); err != nil {
-		return DecisionResult{}, humanServiceErr("RecordPlanUAT", fmt.Sprintf("proposal %q could not be read", in.Proposal), "Plan UAT cannot target a missing proposal", "supply an existing proposal")
-	}
 	payload := PlanUATPayload{}
 	if in.Payload != nil {
 		payload = *in.Payload
 	}
-	if replay, found, err := s.planUATReplayDraft(in, payload, epoch); err != nil {
+	if stored, found, err := s.committedOperationDecision(in.Meta.OperationID, planUATDecisionKinds()); err != nil {
 		return DecisionResult{}, err
 	} else if found {
-		conditions := []provenance.Condition(nil)
-		if in.Outcome == PlanUATDeferredByAFK {
-			conditions = []provenance.Condition{currentDecisionCondition(epoch, DecisionInteractionModeChanged, 0)}
+		draft, matched, err := s.planUATReplayDraft(in, payload, epoch, stored)
+		if err != nil {
+			return DecisionResult{}, err
 		}
-		return s.commit(ctx, in.Meta, in.Epoch, epoch, in.Proposal, in.Actor, MutationRecordPlanUAT, replay,
-			[]evidenceRef{{Kind: "pasture.plan.proposal.v1", Value: in.Proposal.String()}}, conditions, nil)
+		if !matched {
+			draft, _, err = s.planUATDraftWithoutSubjectState(in, payload, epoch)
+			if err != nil {
+				return DecisionResult{}, err
+			}
+		}
+		return s.commit(ctx, in.Meta, in.Epoch, epoch, in.Proposal, in.Actor, MutationRecordPlanUAT, draft, nil, nil, nil)
 	}
-	draft, conditions, err := s.planUATDraft(in, payload, epoch)
+	if _, err := s.tracker.prov.Show(in.Proposal); err != nil {
+		return DecisionResult{}, humanServiceErr("RecordPlanUAT", fmt.Sprintf("proposal %q could not be read", in.Proposal), "Plan UAT cannot target a missing proposal", "supply an existing proposal")
+	}
+	state, err := s.planSubjectState(epoch, in.Proposal)
+	if err != nil {
+		return DecisionResult{}, err
+	}
+	if state.terminal() {
+		return DecisionResult{}, humanServiceErr("RecordPlanUAT", fmt.Sprintf("proposal %q is already in terminal state %q", in.Proposal, state.state), "a terminal proposal cannot receive another Plan UAT decision", "start a new proposal or use the existing terminal decision")
+	}
+	draft, conditions, err := s.planUATDraft(in, payload, epoch, state)
 	if err != nil {
 		return DecisionResult{}, err
 	}
 	return s.commit(ctx, in.Meta, in.Epoch, epoch, in.Proposal, in.Actor, MutationRecordPlanUAT, draft,
-		[]evidenceRef{{Kind: "pasture.plan.proposal.v1", Value: in.Proposal.String()}}, conditions, nil)
+		nil, conditions, nil)
 }
 
-func (s *epochHumanService) planUATDraft(in PlanUATInput, payload PlanUATPayload, epoch provenance.TaskID) (DecisionDraft, []provenance.Condition, error) {
-	if !in.Outcome.valid() {
-		return DecisionDraft{}, nil, humanServiceErr("RecordPlanUAT", fmt.Sprintf("outcome %q is unknown", in.Outcome), "Plan UAT must be accepted, changes_requested, or deferred_by_afk", "supply a known Plan UAT outcome")
-	}
-	if err := validateInteractions("PlanUATPayload.Interactions", payload.Interactions); err != nil {
-		return DecisionDraft{}, nil, err
-	}
-	if err := validateFeedback("PlanUATPayload.Feedback", payload.Feedback); err != nil {
-		return DecisionDraft{}, nil, err
-	}
-	if err := validateHeldQuestions("PlanUATPayload.HeldQuestions", payload.HeldQuestions); err != nil {
-		return DecisionDraft{}, nil, err
-	}
-	if in.Outcome == PlanUATAccepted && hasFixNowFeedback(payload.Feedback) {
-		return DecisionDraft{}, nil, humanServiceErr("RecordPlanUAT", "accepted Plan UAT contains FIX-NOW feedback", "blocking feedback requires changes_requested", "change the outcome or remove resolved blocking feedback")
-	}
+func (s *epochHumanService) planUATDraft(in PlanUATInput, payload PlanUATPayload, epoch provenance.TaskID, subjectState subjectStateSnapshot) (DecisionDraft, []provenance.Condition, error) {
 	snapshot := servicePlanSnapshot(in, epoch)
-	switch in.Outcome {
-	case PlanUATAccepted:
-		draft, err := s.policy.planAccepted.Draft(PlanAccepted{Snapshot: snapshot, Interactions: payload.Interactions, Feedback: payload.Feedback})
-		return draft, nil, err
-	case PlanUATChangesRequested:
-		draft, err := s.policy.planChanges.Draft(PlanChangesRequested{Snapshot: snapshot, Interactions: payload.Interactions, Feedback: payload.Feedback})
-		return draft, nil, err
-	case PlanUATDeferredByAFK:
+	mode := InteractionModeCursor{Mode: InteractionNormal}
+	conditions := []provenance.Condition{subjectState.conditionCurrent()}
+	if in.Outcome == PlanUATDeferredByAFK {
+		modeState, err := s.interactionModeState(epoch)
+		if err != nil {
+			return DecisionDraft{}, nil, err
+		}
+		mode = modeState.cursor
+		conditions = append(conditions, modeState.condition)
+	}
+	draft, err := s.policy.DraftPlanUAT(PlanUATDecision{Snapshot: snapshot, ReportedVerdict: in.Outcome, Interactions: payload.Interactions, Feedback: payload.Feedback, HeldQuestions: payload.HeldQuestions, Mode: mode})
+	return draft, conditions, err
+}
+
+func (s *epochHumanService) planUATDraftWithoutSubjectState(in PlanUATInput, payload PlanUATPayload, epoch provenance.TaskID) (DecisionDraft, []provenance.Condition, error) {
+	snapshot := servicePlanSnapshot(in, epoch)
+	mode := InteractionModeCursor{Mode: InteractionNormal}
+	if in.Outcome == PlanUATDeferredByAFK {
 		state, err := s.interactionModeState(epoch)
 		if err != nil {
 			return DecisionDraft{}, nil, err
 		}
-		if err := EvaluatePlanDeferral(PlanDeferralInput{Mode: state.cursor, HeldQuestions: payload.HeldQuestions, Feedback: payload.Feedback, Snapshot: snapshot}); err != nil {
-			return DecisionDraft{}, nil, err
-		}
-		draft, err := s.policy.planDeferred.Draft(PlanDeferredByAFK{Snapshot: snapshot, Interactions: payload.Interactions, Feedback: payload.Feedback, HeldQuestions: payload.HeldQuestions, ModeEntry: *state.cursor.Entry})
-		return draft, []provenance.Condition{state.condition}, err
-	default:
-		return DecisionDraft{}, nil, humanServiceErr("RecordPlanUAT", fmt.Sprintf("outcome %q is not handled", in.Outcome), "every Plan UAT outcome must lower to a catalog-issued decision", "supply a known Plan UAT outcome")
+		mode = state.cursor
 	}
+	draft, err := s.policy.DraftPlanUAT(PlanUATDecision{Snapshot: snapshot, ReportedVerdict: in.Outcome, Interactions: payload.Interactions, Feedback: payload.Feedback, HeldQuestions: payload.HeldQuestions, Mode: mode})
+	return draft, nil, err
 }
 
 func servicePlanSnapshot(in PlanUATInput, epoch provenance.TaskID) PlanUATSnapshot {
@@ -186,14 +205,11 @@ func (s *epochHumanService) RatifyPlan(ctx context.Context, in RatifyPlanInput) 
 	if err != nil {
 		return DecisionResult{}, err
 	}
-	if _, err := s.tracker.prov.Show(in.Proposal); err != nil {
-		return DecisionResult{}, humanServiceErr("RatifyPlan", fmt.Sprintf("proposal %q could not be read", in.Proposal), "ratification must target an existing proposal", "supply an existing proposal")
-	}
 	draft, err := s.policy.DraftPlanRatified(PlanRatified{Proposal: in.Proposal.String(), ReviewRound: in.ReviewRound, PlanUAT: in.PlanUAT})
 	if err != nil {
 		return DecisionResult{}, err
 	}
-	if stored, found, err := s.committedDecision(in.Meta.OperationID, in.Proposal, DecisionPlanRatified); err != nil {
+	if stored, found, err := s.committedOperationDecision(in.Meta.OperationID, []DecisionKindID{DecisionPlanRatified}); err != nil {
 		return DecisionResult{}, err
 	} else if found && sameDecisionEncoding(stored.record.Decision, draft.encoding()) {
 		replay, err := s.draftFromStored(stored.record.Decision)
@@ -202,18 +218,29 @@ func (s *epochHumanService) RatifyPlan(ctx context.Context, in RatifyPlanInput) 
 		}
 		return s.commit(ctx, in.Meta, in.Epoch, epoch, in.Proposal, in.Actor, MutationRatifyPlan, replay,
 			[]evidenceRef{{Kind: "pasture.review.round.v1", Value: string(in.ReviewRound)}, {Kind: "pasture.plan-uat.decision.v1", Value: string(in.PlanUAT)}},
-			[]provenance.Condition{currentDecisionCondition(in.Proposal, DecisionPlanUATAccepted, 0)}, []provenance.Effect{lifecycleEffect(in.Proposal, provenance.EventKindTaskClosed)})
+			nil, []provenance.Effect{lifecycleEffect(in.Proposal, provenance.EventKindTaskClosed)})
+	} else if found {
+		return s.commit(ctx, in.Meta, in.Epoch, epoch, in.Proposal, in.Actor, MutationRatifyPlan, draft, nil, nil, nil)
+	}
+	if _, err := s.tracker.prov.Show(in.Proposal); err != nil {
+		return DecisionResult{}, humanServiceErr("RatifyPlan", fmt.Sprintf("proposal %q could not be read", in.Proposal), "ratification must target an existing proposal", "supply an existing proposal")
 	}
 	if err := s.requireAcceptedReview(in.Proposal, epoch, in.ReviewRound); err != nil {
 		return DecisionResult{}, err
 	}
-	planUATCondition, err := s.requireAcceptedDecision(in.Proposal, epoch, in.PlanUAT, DecisionPlanUATAccepted, "RatifyPlan")
+	state, err := s.planSubjectState(epoch, in.Proposal)
 	if err != nil {
+		return DecisionResult{}, err
+	}
+	if state.state != subjectStatePlanAccepted || state.decision != in.PlanUAT {
+		return DecisionResult{}, humanServiceErr("RatifyPlan", fmt.Sprintf("Plan UAT decision %q is not the current accepted state for proposal %q", in.PlanUAT, in.Proposal), "ratification must bind the latest accepted Plan UAT state", "record a fresh accepted Plan UAT before ratifying")
+	}
+	if err := s.requireAcceptedDecision(in.Proposal, epoch, in.PlanUAT, DecisionPlanUATAccepted, "RatifyPlan"); err != nil {
 		return DecisionResult{}, err
 	}
 	return s.commit(ctx, in.Meta, in.Epoch, epoch, in.Proposal, in.Actor, MutationRatifyPlan, draft,
 		[]evidenceRef{{Kind: "pasture.review.round.v1", Value: string(in.ReviewRound)}, {Kind: "pasture.plan-uat.decision.v1", Value: string(in.PlanUAT)}},
-		[]provenance.Condition{planUATCondition}, []provenance.Effect{lifecycleEffect(in.Proposal, provenance.EventKindTaskClosed)})
+		[]provenance.Condition{state.conditionExact()}, []provenance.Effect{lifecycleEffect(in.Proposal, provenance.EventKindTaskClosed)})
 }
 
 func (s *epochHumanService) RecordImplementationUAT(ctx context.Context, in ImplementationUATInput) (DecisionResult, error) {
@@ -225,9 +252,6 @@ func (s *epochHumanService) RecordImplementationUAT(ctx context.Context, in Impl
 	if err != nil {
 		return DecisionResult{}, err
 	}
-	if _, err := s.tracker.prov.Show(candidate); err != nil {
-		return DecisionResult{}, humanServiceErr("RecordImplementationUAT", fmt.Sprintf("candidate %q could not be read", in.Candidate), "Implementation UAT cannot target a missing candidate", "supply an existing integration candidate")
-	}
 	payload := ImplUATPayload{}
 	if in.Payload != nil {
 		payload = *in.Payload
@@ -236,7 +260,7 @@ func (s *epochHumanService) RecordImplementationUAT(ctx context.Context, in Impl
 	if err != nil {
 		return DecisionResult{}, err
 	}
-	if stored, found, err := s.committedDecision(in.Meta.OperationID, candidate, DecisionImplementationUAT); err != nil {
+	if stored, found, err := s.committedOperationDecision(in.Meta.OperationID, []DecisionKindID{DecisionImplementationUAT}); err != nil {
 		return DecisionResult{}, err
 	} else if found && sameDecisionEncoding(stored.record.Decision, draft.encoding()) {
 		replay, err := s.draftFromStored(stored.record.Decision)
@@ -244,10 +268,22 @@ func (s *epochHumanService) RecordImplementationUAT(ctx context.Context, in Impl
 			return DecisionResult{}, err
 		}
 		return s.commit(ctx, in.Meta, in.Epoch, epoch, candidate, in.Actor, MutationRecordImplementationUAT, replay,
-			[]evidenceRef{{Kind: "pasture.integration.candidate.v1", Value: string(in.Candidate)}}, nil, nil)
+			nil, nil, nil)
+	} else if found {
+		return s.commit(ctx, in.Meta, in.Epoch, epoch, candidate, in.Actor, MutationRecordImplementationUAT, draft, nil, nil, nil)
+	}
+	if _, err := s.tracker.prov.Show(candidate); err != nil {
+		return DecisionResult{}, humanServiceErr("RecordImplementationUAT", fmt.Sprintf("candidate %q could not be read", in.Candidate), "Implementation UAT cannot target a missing candidate", "supply an existing integration candidate")
+	}
+	state, err := s.candidateSubjectState(epoch, candidate)
+	if err != nil {
+		return DecisionResult{}, err
+	}
+	if state.terminal() {
+		return DecisionResult{}, humanServiceErr("RecordImplementationUAT", fmt.Sprintf("candidate %q is already in terminal state %q", in.Candidate, state.state), "a landed candidate cannot receive another Implementation UAT decision", "start a new candidate or use the existing landed decision")
 	}
 	return s.commit(ctx, in.Meta, in.Epoch, epoch, candidate, in.Actor, MutationRecordImplementationUAT, draft,
-		[]evidenceRef{{Kind: "pasture.integration.candidate.v1", Value: string(in.Candidate)}}, nil, nil)
+		nil, []provenance.Condition{state.conditionCurrent()}, nil)
 }
 
 func (s *epochHumanService) Land(ctx context.Context, in LandInput) (DecisionResult, error) {
@@ -259,14 +295,11 @@ func (s *epochHumanService) Land(ctx context.Context, in LandInput) (DecisionRes
 	if err != nil {
 		return DecisionResult{}, err
 	}
-	if _, err := s.tracker.prov.Show(candidate); err != nil {
-		return DecisionResult{}, humanServiceErr("Land", fmt.Sprintf("candidate %q could not be read", in.Candidate), "landing must target an existing integration candidate", "supply an existing integration candidate")
-	}
 	draft, err := s.policy.DraftLanded(EpochLanded{Candidate: in.Candidate, ImplementationUAT: in.ImplementationUAT})
 	if err != nil {
 		return DecisionResult{}, err
 	}
-	if stored, found, err := s.committedDecision(in.Meta.OperationID, epoch, DecisionLanded); err != nil {
+	if stored, found, err := s.committedOperationDecision(in.Meta.OperationID, []DecisionKindID{DecisionLanded}); err != nil {
 		return DecisionResult{}, err
 	} else if found && sameDecisionEncoding(stored.record.Decision, draft.encoding()) {
 		replay, err := s.draftFromStored(stored.record.Decision)
@@ -274,21 +307,98 @@ func (s *epochHumanService) Land(ctx context.Context, in LandInput) (DecisionRes
 			return DecisionResult{}, err
 		}
 		return s.commit(ctx, in.Meta, in.Epoch, epoch, epoch, in.Actor, MutationLand, replay,
-			[]evidenceRef{{Kind: "pasture.implementation-uat.decision.v1", Value: string(in.ImplementationUAT)}, {Kind: "pasture.integration.candidate.v1", Value: string(in.Candidate)}},
-			[]provenance.Condition{currentDecisionCondition(candidate, DecisionImplementationUAT, 0)}, []provenance.Effect{lifecycleEffect(epoch, provenance.EventKindTaskClosed)})
+			[]evidenceRef{{Kind: "pasture.implementation-uat.decision.v1", Value: string(in.ImplementationUAT), stateSubject: candidate}},
+			nil, []provenance.Effect{lifecycleEffect(epoch, provenance.EventKindTaskClosed)})
+	} else if found {
+		return s.commit(ctx, in.Meta, in.Epoch, epoch, epoch, in.Actor, MutationLand, draft, nil, nil, nil)
 	}
-	implementationUATCondition, err := s.requireAcceptedImplementationUAT(candidate, epoch, in.Candidate, in.ImplementationUAT)
+	if _, err := s.tracker.prov.Show(candidate); err != nil {
+		return DecisionResult{}, humanServiceErr("Land", fmt.Sprintf("candidate %q could not be read", in.Candidate), "landing must target an existing integration candidate", "supply an existing integration candidate")
+	}
+	state, err := s.candidateSubjectState(epoch, candidate)
 	if err != nil {
 		return DecisionResult{}, err
 	}
+	if state.state != subjectStateImplementationAccepted || state.decision != in.ImplementationUAT {
+		return DecisionResult{}, humanServiceErr("Land", fmt.Sprintf("Implementation UAT decision %q is not the current accepted state for candidate %q", in.ImplementationUAT, in.Candidate), "landing must bind the latest accepted Implementation UAT state", "record a fresh accepted Implementation UAT before landing")
+	}
+	if err := s.requireAcceptedImplementationUAT(candidate, epoch, in.Candidate, in.ImplementationUAT); err != nil {
+		return DecisionResult{}, err
+	}
 	return s.commit(ctx, in.Meta, in.Epoch, epoch, epoch, in.Actor, MutationLand, draft,
-		[]evidenceRef{{Kind: "pasture.implementation-uat.decision.v1", Value: string(in.ImplementationUAT)}, {Kind: "pasture.integration.candidate.v1", Value: string(in.Candidate)}},
-		[]provenance.Condition{implementationUATCondition}, []provenance.Effect{lifecycleEffect(epoch, provenance.EventKindTaskClosed)})
+		[]evidenceRef{{Kind: "pasture.implementation-uat.decision.v1", Value: string(in.ImplementationUAT), stateSubject: candidate}},
+		[]provenance.Condition{state.conditionExact()}, []provenance.Effect{lifecycleEffect(epoch, provenance.EventKindTaskClosed)})
 }
 
 type evidenceRef struct {
-	Kind  provenance.EvidenceKind `json:"kind"`
-	Value string                  `json:"value"`
+	Kind         provenance.EvidenceKind `json:"kind"`
+	Value        string                  `json:"value"`
+	State        subjectState            `json:"state,omitempty"`
+	stateSubject provenance.TaskID       `json:"-"`
+}
+
+// subjectState is a private current-subject projection carried by the existing
+// proposal and candidate evidence families. Immutable decisions remain the
+// purpose-specific authority; this value only makes their latest lifecycle state
+// conditionable without adding a store, ledger, or public decision kind.
+type subjectState string
+
+const (
+	subjectStateInvalid                subjectState = ""
+	subjectStatePlanAccepted           subjectState = "plan-accepted"
+	subjectStatePlanChangesRequested   subjectState = "plan-changes-requested"
+	subjectStatePlanDeferred           subjectState = "plan-deferred"
+	subjectStatePlanRatified           subjectState = "plan-ratified"
+	subjectStateImplementationAccepted subjectState = "implementation-accepted"
+	subjectStateImplementationChanges  subjectState = "implementation-changes-requested"
+	subjectStateImplementationLanded   subjectState = "implementation-landed"
+	subjectStateReworked               subjectState = "reworked"
+)
+
+type subjectStateEvidence struct {
+	Epoch        string                 `json:"epoch"`
+	Subject      string                 `json:"subject"`
+	State        subjectState           `json:"state"`
+	Decision     DecisionLedgerEntryID  `json:"decision"`
+	DecisionKind DecisionKindID         `json:"decisionKind"`
+	Operation    provenance.OperationID `json:"operation"`
+}
+
+// newSubjectStateEvidence is the package-private constructor reserved for the
+// future assignment/candidate rework producer. This leaf intentionally does not
+// create a rework command or producer.
+func newSubjectStateEvidence(epoch, subject provenance.TaskID, state subjectState, decision DecisionLedgerEntryID, kind DecisionKindID, operation provenance.OperationID) subjectStateEvidence {
+	return subjectStateEvidence{Epoch: epoch.String(), Subject: subject.String(), State: state, Decision: decision, DecisionKind: kind, Operation: operation}
+}
+
+type subjectStateSnapshot struct {
+	subject      provenance.TaskID
+	state        subjectState
+	decision     DecisionLedgerEntryID
+	decisionKind DecisionKindID
+	operation    provenance.OperationID
+	journalID    provenance.JournalID
+	family       provenance.EvidenceKind
+}
+
+func (s subjectStateSnapshot) conditionCurrent() provenance.Condition {
+	return currentEvidenceCondition(s.subject, s.family, s.journalID)
+}
+
+func (s subjectStateSnapshot) conditionExact() provenance.Condition {
+	return evidenceCondition(s.subject, s.family, s.journalID, provenance.ConditionExactFact)
+}
+
+func (s subjectStateSnapshot) terminal() bool {
+	return s.state == subjectStatePlanRatified || s.state == subjectStateImplementationLanded
+}
+
+func currentEvidenceCondition(subject provenance.TaskID, kind provenance.EvidenceKind, asserted provenance.JournalID) provenance.Condition {
+	return evidenceCondition(subject, kind, asserted, provenance.ConditionCurrentFact)
+}
+
+func evidenceCondition(subject provenance.TaskID, kind provenance.EvidenceKind, asserted provenance.JournalID, conditionKind provenance.ConditionKind) provenance.Condition {
+	return provenance.Condition{Kind: conditionKind, Selector: provenance.FactSelector{Kind: provenance.FactEvidence, Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskExact, TaskID: subject}}, EvidenceKind: kind}, AssertedJournalID: asserted}
 }
 
 // conditionSnapshot is canonical evidence for the preconditions selected by a
@@ -296,8 +406,10 @@ type evidenceRef struct {
 // On an exact retry it restores the original operation input before direct Apply.
 type conditionSnapshot struct {
 	Kind              provenance.ConditionKind `json:"kind"`
+	FactKind          provenance.FactKind      `json:"factKind"`
 	Task              string                   `json:"task"`
-	DecisionKind      provenance.DecisionKind  `json:"decisionKind"`
+	DecisionKind      provenance.DecisionKind  `json:"decisionKind,omitempty"`
+	EvidenceKind      provenance.EvidenceKind  `json:"evidenceKind,omitempty"`
 	AssertedJournalID provenance.JournalID     `json:"assertedJournalId"`
 }
 
@@ -306,7 +418,22 @@ type conditionEvidence struct {
 }
 
 func (s *epochHumanService) commit(ctx context.Context, meta CommandMeta, epochID EpochRootID, epoch, subject provenance.TaskID, actor AssertedHumanActor, mutation EpochMutationKind, draft DecisionDraft, refs []evidenceRef, conditions []provenance.Condition, trailing []provenance.Effect) (DecisionResult, error) {
-	conditions, err := s.restoreCommittedConditions(meta.OperationID, conditions)
+	decisionID := decisionIDForOperation(meta.OperationID)
+	state, family, err := subjectStateForMutation(mutation, draft.encoding())
+	if err != nil {
+		return DecisionResult{}, err
+	}
+	if state != subjectStateInvalid {
+		stateSubject := subject
+		for _, ref := range refs {
+			if ref.stateSubject != (provenance.TaskID{}) {
+				stateSubject = ref.stateSubject
+				break
+			}
+		}
+		refs = append([]evidenceRef{{Kind: family, State: state, stateSubject: stateSubject}}, refs...)
+	}
+	conditions, err = s.restoreCommittedConditions(meta.OperationID, conditions)
 	if err != nil {
 		return DecisionResult{}, err
 	}
@@ -314,7 +441,6 @@ func (s *epochHumanService) commit(ctx context.Context, meta CommandMeta, epochI
 	if err != nil {
 		return DecisionResult{}, err
 	}
-	decisionID := decisionIDForOperation(meta.OperationID)
 	activityID := provenance.ActivityID{Namespace: "pasture", UUID: uuid.NewSHA1(uuid.NameSpaceURL, []byte("activity:"+string(meta.OperationID)))}
 	envelope, err := canonicalJSON(struct {
 		ID       DecisionLedgerEntryID `json:"id"`
@@ -328,12 +454,25 @@ func (s *epochHumanService) commit(ctx context.Context, meta CommandMeta, epochI
 	}
 	effects := []provenance.Effect{{Sort: provenance.EffectDecision, ResultSlot: decisionResultSlot, TaskID: subject, DecisionKind: journalDecisionKind(draft.encoding().Kind), Payload: envelope}}
 	for i, ref := range refs {
-		payload, err := canonicalJSON(struct{ Epoch, Subject, Decision, Reference string }{epoch.String(), subject.String(), string(decisionID), ref.Value})
+		var payload []byte
+		if ref.State != subjectStateInvalid {
+			stateSubject := subject
+			if ref.stateSubject != (provenance.TaskID{}) {
+				stateSubject = ref.stateSubject
+			}
+			payload, err = canonicalJSON(newSubjectStateEvidence(epoch, stateSubject, ref.State, decisionID, draft.encoding().Kind, meta.OperationID))
+		} else {
+			payload, err = canonicalJSON(struct{ Epoch, Subject, Decision, Reference string }{epoch.String(), subject.String(), string(decisionID), ref.Value})
+		}
 		if err != nil {
 			return DecisionResult{}, err
 		}
 		digest := sha256.Sum256(payload)
-		effects = append(effects, provenance.Effect{Sort: provenance.EffectEvidence, ResultSlot: provenance.ResultSlotID(fmt.Sprintf("evidence-%d", i)), TaskID: subject, EvidenceKind: ref.Kind, ContentDigest: digest[:], Payload: payload})
+		evidenceSubject := subject
+		if ref.State != subjectStateInvalid && ref.stateSubject != (provenance.TaskID{}) {
+			evidenceSubject = ref.stateSubject
+		}
+		effects = append(effects, provenance.Effect{Sort: provenance.EffectEvidence, ResultSlot: provenance.ResultSlotID(fmt.Sprintf("evidence-%d", i)), TaskID: evidenceSubject, EvidenceKind: ref.Kind, ContentDigest: digest[:], Payload: payload})
 	}
 	conditionDigest := sha256.Sum256(conditionPayload)
 	effects = append(effects, provenance.Effect{Sort: provenance.EffectEvidence, TaskID: subject, EvidenceKind: preconditionEvidenceKind, ContentDigest: conditionDigest[:], Payload: conditionPayload})
@@ -361,11 +500,41 @@ func (s *epochHumanService) commit(ctx context.Context, meta CommandMeta, epochI
 			return DecisionResult{}, humanServiceErr("commit", "the operation was cancelled at the post-preflight barrier", "the injected synchronization boundary rejected the operation before Apply", "retry after the synchronization condition is resolved")
 		}
 	}
-	result, err := s.tracker.prov.Journal().Apply(provenance.OperationInput{OperationID: meta.OperationID, ActorID: actor.ActorID, AuthorityJournalID: &s.authority, CommandDigest: command, RecordedAt: time.Now().UTC().UnixNano(), Conditions: conditions, Effects: effects})
+	result, err := s.tracker.prov.Journal().Apply(provenance.OperationInput{OperationID: meta.OperationID, ActorID: actor.ActorID, AuthorityJournalID: &s.authority, CommandDigest: command, RecordedAt: s.now().UTC().UnixNano(), Conditions: conditions, Effects: effects})
 	if err != nil {
 		return DecisionResult{}, fmt.Errorf("epoch human decision %q failed during its single atomic Apply; no partial effects committed: %w", draft.encoding().Kind, err)
 	}
 	return decisionResult(meta.OperationID, epochID, subject, actor.ActorID, decisionID, activityID, result)
+}
+
+func subjectStateForMutation(mutation EpochMutationKind, encoding DecisionEncoding) (subjectState, provenance.EvidenceKind, error) {
+	switch mutation {
+	case MutationRecordPlanUAT:
+		switch encoding.Kind {
+		case DecisionPlanUATAccepted:
+			return subjectStatePlanAccepted, planSubjectEvidenceKind, nil
+		case DecisionPlanUATChangesRequested:
+			return subjectStatePlanChangesRequested, planSubjectEvidenceKind, nil
+		case DecisionPlanUATDeferredByAFK:
+			return subjectStatePlanDeferred, planSubjectEvidenceKind, nil
+		}
+	case MutationRatifyPlan:
+		return subjectStatePlanRatified, planSubjectEvidenceKind, nil
+	case MutationRecordImplementationUAT:
+		var record implementationUATRecord
+		if err := json.Unmarshal(encoding.Payload, &record); err != nil {
+			return subjectStateInvalid, "", humanServiceErr("subjectStateForMutation", "the Implementation UAT decision payload is malformed", "the candidate current state cannot be derived from an invalid decision", "repair the decision payload before retrying")
+		}
+		if record.Outcome == ImplUATAccepted {
+			return subjectStateImplementationAccepted, candidateEvidenceKind, nil
+		}
+		if record.Outcome == ImplUATChangesRequested {
+			return subjectStateImplementationChanges, candidateEvidenceKind, nil
+		}
+	case MutationLand:
+		return subjectStateImplementationLanded, candidateEvidenceKind, nil
+	}
+	return subjectStateInvalid, "", nil
 }
 
 func humanDecisionActivityMetadata(mutation EpochMutationKind, kind DecisionKindID) (provenance.Phase, string) {
@@ -460,61 +629,87 @@ type decisionFact struct {
 	record persistedDecision
 }
 
-func (s *epochHumanService) decisionFacts(subject provenance.TaskID, kind DecisionKindID) ([]decisionFact, error) {
+func planUATDecisionKinds() []DecisionKindID {
+	return []DecisionKindID{DecisionPlanUATAccepted, DecisionPlanUATChangesRequested, DecisionPlanUATDeferredByAFK}
+}
+
+func decisionKindID(kind provenance.DecisionKind) (DecisionKindID, bool) {
+	for _, candidate := range []DecisionKindID{DecisionInteractionModeChanged, DecisionPlanUATAccepted, DecisionPlanUATChangesRequested, DecisionPlanUATDeferredByAFK, DecisionImplementationUAT, DecisionPlanRatified, DecisionLanded} {
+		if journalDecisionKind(candidate) == kind {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+func (s *epochHumanService) foldDecisionFacts(subject provenance.TaskID, kind DecisionKindID, visit func(decisionFact) (bool, error)) error {
 	query := provenance.DecisionQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskExact, TaskID: subject}}, Kinds: []provenance.DecisionKind{journalDecisionKind(kind)}, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize}}
-	var out []decisionFact
 	for {
 		page, err := s.tracker.prov.Journal().Facts().QueryDecisions(query)
 		if err != nil {
-			return nil, fmt.Errorf("query bounded decision facts for task %q: %w", subject, err)
+			return fmt.Errorf("query bounded decision facts for task %q: %w", subject, err)
 		}
 		for _, row := range page.Rows {
 			fact, err := s.decodeDecisionFact(row, subject, kind)
 			if err != nil {
-				return nil, err
+				return err
 			}
-			out = append(out, fact)
+			stop, err := visit(fact)
+			if err != nil {
+				return err
+			}
+			if stop {
+				return nil
+			}
 		}
 		if page.Next == nil {
-			return out, nil
+			return nil
 		}
 		query.Page.SnapshotMaxJournalID = page.Next.SnapshotMaxJournalID
 		query.Page.AfterJournalID = page.Next.AfterJournalID
 	}
 }
 
-// committedDecision returns the canonical decision fact already produced by one
-// operation. It is bounded by the Journal Facts API and is used only to rebuild the
-// exact internal Apply input for an idempotent retry; normal state reconstruction never
-// uses operation lookup as an authority source.
-func (s *epochHumanService) committedDecision(op provenance.OperationID, subject provenance.TaskID, kind DecisionKindID) (decisionFact, bool, error) {
-	query := provenance.DecisionQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskExact, TaskID: subject}, OperationIDs: []provenance.OperationID{op}}, Kinds: []provenance.DecisionKind{journalDecisionKind(kind)}, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize}}
-	var matches []decisionFact
+// committedOperationDecision finds the one decision produced by an operation across
+// all relevant subjects. Limit=2 is intentional: a second row is enough to reject a
+// corrupt operation-local singleton without accumulating history in memory.
+func (s *epochHumanService) committedOperationDecision(op provenance.OperationID, kinds []DecisionKindID) (decisionFact, bool, error) {
+	journalKinds := make([]provenance.DecisionKind, len(kinds))
+	for i, kind := range kinds {
+		journalKinds[i] = journalDecisionKind(kind)
+	}
+	query := provenance.DecisionQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}, OperationIDs: []provenance.OperationID{op}}, Kinds: journalKinds, Page: provenance.FactPageRequest{Limit: 2}}
+	var match decisionFact
+	count := 0
 	for {
 		page, err := s.tracker.prov.Journal().Facts().QueryDecisions(query)
 		if err != nil {
 			return decisionFact{}, false, fmt.Errorf("query bounded committed decision for operation %q: %w", op, err)
 		}
 		for _, row := range page.Rows {
-			fact, err := s.decodeDecisionFact(row, subject, kind)
+			if row.TaskID == nil {
+				return decisionFact{}, false, humanServiceErr("committedOperationDecision", fmt.Sprintf("operation %q produced an unscoped decision fact", op), "human decisions must be tied to their epoch subject", "repair the decision fact before retrying")
+			}
+			kind, ok := decisionKindID(row.DecisionKind)
+			if !ok {
+				return decisionFact{}, false, humanServiceErr("committedOperationDecision", fmt.Sprintf("operation %q produced unknown decision kind %q", op, row.DecisionKind), "replay can only reconstruct catalog-issued human decisions", "repair the decision fact before retrying")
+			}
+			fact, err := s.decodeDecisionFact(row, *row.TaskID, kind)
 			if err != nil {
 				return decisionFact{}, false, err
 			}
-			matches = append(matches, fact)
+			count++
+			if count > 1 {
+				return decisionFact{}, false, humanServiceErr("committedOperationDecision", fmt.Sprintf("operation %q has multiple canonical decision facts", op), "one human-decision operation must produce exactly one decision fact", "repair the duplicate decision facts before retrying")
+			}
+			match = fact
 		}
 		if page.Next == nil {
-			break
+			return match, count == 1, nil
 		}
 		query.Page.SnapshotMaxJournalID = page.Next.SnapshotMaxJournalID
 		query.Page.AfterJournalID = page.Next.AfterJournalID
 	}
-	if len(matches) == 0 {
-		return decisionFact{}, false, nil
-	}
-	if len(matches) != 1 {
-		return decisionFact{}, false, humanServiceErr("committedDecision", fmt.Sprintf("operation %q has %d canonical decision facts", op, len(matches)), "one human-decision operation must produce exactly one decision fact", "repair the duplicate decision facts before retrying")
-	}
-	return matches[0], true, nil
 }
 
 func (s *epochHumanService) draftFromStored(encoding DecisionEncoding) (DecisionDraft, error) {
@@ -532,55 +727,29 @@ func sameDecisionEncoding(left, right DecisionEncoding) bool {
 	return left.Kind == right.Kind && left.Codec == right.Codec && left.Schema == right.Schema && bytes.Equal(left.Payload, right.Payload)
 }
 
-func (s *epochHumanService) planUATReplayDraft(in PlanUATInput, payload PlanUATPayload, epoch provenance.TaskID) (DecisionDraft, bool, error) {
-	var kind DecisionKindID
-	switch in.Outcome {
-	case PlanUATAccepted:
-		kind = DecisionPlanUATAccepted
-	case PlanUATChangesRequested:
-		kind = DecisionPlanUATChangesRequested
-	case PlanUATDeferredByAFK:
-		kind = DecisionPlanUATDeferredByAFK
-	default:
-		return DecisionDraft{}, false, nil
-	}
-	stored, found, err := s.committedDecision(in.Meta.OperationID, in.Proposal, kind)
-	if err != nil || !found {
-		return DecisionDraft{}, false, err
-	}
-	snapshot := servicePlanSnapshot(in, epoch)
-	matched := false
-	switch in.Outcome {
-	case PlanUATAccepted:
-		expected, err := s.policy.planAccepted.Draft(PlanAccepted{Snapshot: snapshot, Interactions: payload.Interactions, Feedback: payload.Feedback})
-		matched = err == nil && sameDecisionEncoding(stored.record.Decision, expected.encoding())
-	case PlanUATChangesRequested:
-		expected, err := s.policy.planChanges.Draft(PlanChangesRequested{Snapshot: snapshot, Interactions: payload.Interactions, Feedback: payload.Feedback})
-		matched = err == nil && sameDecisionEncoding(stored.record.Decision, expected.encoding())
-	case PlanUATDeferredByAFK:
+func (s *epochHumanService) planUATReplayDraft(in PlanUATInput, payload PlanUATPayload, epoch provenance.TaskID, stored decisionFact) (DecisionDraft, bool, error) {
+	mode := InteractionModeCursor{Mode: InteractionNormal}
+	if stored.record.Decision.Kind == DecisionPlanUATDeferredByAFK {
 		var existing PlanDeferredByAFK
 		if err := json.Unmarshal(stored.record.Decision.Payload, &existing); err != nil {
 			return DecisionDraft{}, false, humanServiceErr("planUATReplayDraft", "the committed AFK Plan UAT payload is malformed", "an exact retry cannot verify its original user decision", "repair the malformed decision fact before retrying")
 		}
-		expected, err := canonicalJSON(struct {
-			Snapshot      PlanUATSnapshot   `json:"snapshot"`
-			Interactions  []UATInteraction  `json:"interactions"`
-			Feedback      []UATFeedbackItem `json:"feedback"`
-			HeldQuestions []HeldUATQuestion `json:"heldQuestions"`
-		}{snapshot, payload.Interactions, payload.Feedback, payload.HeldQuestions})
-		actual, actualErr := canonicalJSON(struct {
-			Snapshot      PlanUATSnapshot   `json:"snapshot"`
-			Interactions  []UATInteraction  `json:"interactions"`
-			Feedback      []UATFeedbackItem `json:"feedback"`
-			HeldQuestions []HeldUATQuestion `json:"heldQuestions"`
-		}{existing.Snapshot, existing.Interactions, existing.Feedback, existing.HeldQuestions})
-		matched = err == nil && actualErr == nil && bytes.Equal(expected, actual)
+		entry := existing.ModeEntry
+		mode = InteractionModeCursor{Entry: &entry, Mode: InteractionAFK}
 	}
-	if !matched {
-		return DecisionDraft{}, false, nil
+	expected, err := s.policy.DraftPlanUAT(PlanUATDecision{
+		Snapshot: servicePlanSnapshot(in, epoch), ReportedVerdict: in.Outcome,
+		Interactions: payload.Interactions, Feedback: payload.Feedback,
+		HeldQuestions: payload.HeldQuestions, Mode: mode,
+	})
+	if err != nil {
+		return DecisionDraft{}, false, err
+	}
+	if !sameDecisionEncoding(stored.record.Decision, expected.encoding()) {
+		return expected, false, nil
 	}
 	draft, err := s.draftFromStored(stored.record.Decision)
-	return draft, err == nil, err
+	return draft, true, err
 }
 
 func (s *epochHumanService) decodeDecisionFact(row provenance.DecisionRow, subject provenance.TaskID, expectedKind DecisionKindID) (decisionFact, error) {
@@ -598,10 +767,89 @@ func (s *epochHumanService) decodeDecisionFact(row provenance.DecisionRow, subje
 	if _, err := provenance.ParseTaskID(record.Epoch); err != nil {
 		return decisionFact{}, humanServiceErr("decodeDecisionFact", "a canonical decision fact has malformed epoch identity", "the decision cannot be scoped to an existing epoch", "repair the malformed decision fact before retrying")
 	}
+	if _, err := provenance.ParseTaskID(record.Subject); err != nil || record.Subject != subject.String() || row.ProducingOperationID == "" {
+		return decisionFact{}, humanServiceErr("decodeDecisionFact", "a canonical decision fact has malformed subject or operation identity", "the decision envelope must identify the exact producing subject and operation", "repair the inconsistent decision fact before retrying")
+	}
 	if err := s.policy.Catalog.ValidateStored(record.Decision); err != nil {
 		return decisionFact{}, fmt.Errorf("decode canonical decision fact %q: %w", record.ID, err)
 	}
 	return decisionFact{row: row, record: record}, nil
+}
+
+func (s *epochHumanService) planSubjectState(epoch, proposal provenance.TaskID) (subjectStateSnapshot, error) {
+	return s.currentSubjectState(epoch, proposal, planSubjectEvidenceKind)
+}
+
+func (s *epochHumanService) candidateSubjectState(epoch, candidate provenance.TaskID) (subjectStateSnapshot, error) {
+	return s.currentSubjectState(epoch, candidate, candidateEvidenceKind)
+}
+
+func (s *epochHumanService) currentSubjectState(epoch, subject provenance.TaskID, family provenance.EvidenceKind) (subjectStateSnapshot, error) {
+	state := subjectStateSnapshot{subject: subject, family: family}
+	query := provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskExact, TaskID: subject}}, Kinds: []provenance.EvidenceKind{family}, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize}}
+	for {
+		page, err := s.tracker.prov.Journal().Facts().QueryEvidence(query)
+		if err != nil {
+			return subjectStateSnapshot{}, fmt.Errorf("query bounded current subject state for task %q: %w", subject, err)
+		}
+		for _, row := range page.Rows {
+			if row.TaskID == nil || *row.TaskID != subject || row.EvidenceKind != family || row.ProducingOperationID == "" {
+				return subjectStateSnapshot{}, humanServiceErr("currentSubjectState", "a subject-state evidence row has an unexpected task, family, or operation", "current-subject conditions require one exact task-scoped evidence authority", "repair the inconsistent evidence fact before retrying")
+			}
+			var evidence subjectStateEvidence
+			if err := json.Unmarshal(row.Payload, &evidence); err != nil {
+				return subjectStateSnapshot{}, humanServiceErr("currentSubjectState", "a subject-state evidence payload is malformed", "lifecycle eligibility cannot fold an untyped evidence payload", "repair the malformed evidence fact before retrying")
+			}
+			kind, ok := subjectStateDecisionKind(evidence.State)
+			if evidence.State == subjectStateReworked {
+				ok = evidence.DecisionKind != ""
+			}
+			if !ok || !subjectStateBelongsToFamily(evidence.State, family) || evidence.Epoch != epoch.String() || evidence.Subject != subject.String() || evidence.Decision == "" || (kind != "" && evidence.DecisionKind != kind) || evidence.Operation != row.ProducingOperationID || evidence.Decision != decisionIDForOperation(row.ProducingOperationID) {
+				return subjectStateSnapshot{}, humanServiceErr("currentSubjectState", "a subject-state evidence row has inconsistent epoch, reference, decision, or operation identity", "the latest lifecycle state must point to the exact immutable decision that produced it", "repair the inconsistent subject-state evidence before retrying")
+			}
+			state = subjectStateSnapshot{subject: subject, state: evidence.State, decision: evidence.Decision, decisionKind: evidence.DecisionKind, operation: evidence.Operation, journalID: row.JournalID, family: family}
+		}
+		if page.Next == nil {
+			return state, nil
+		}
+		query.Page.SnapshotMaxJournalID = page.Next.SnapshotMaxJournalID
+		query.Page.AfterJournalID = page.Next.AfterJournalID
+	}
+}
+
+func subjectStateDecisionKind(state subjectState) (DecisionKindID, bool) {
+	switch state {
+	case subjectStatePlanAccepted:
+		return DecisionPlanUATAccepted, true
+	case subjectStatePlanChangesRequested:
+		return DecisionPlanUATChangesRequested, true
+	case subjectStatePlanDeferred:
+		return DecisionPlanUATDeferredByAFK, true
+	case subjectStatePlanRatified:
+		return DecisionPlanRatified, true
+	case subjectStateImplementationAccepted, subjectStateImplementationChanges:
+		return DecisionImplementationUAT, true
+	case subjectStateImplementationLanded:
+		return DecisionLanded, true
+	case subjectStateReworked:
+		return "", false
+	default:
+		return "", false
+	}
+}
+
+func subjectStateBelongsToFamily(state subjectState, family provenance.EvidenceKind) bool {
+	if state == subjectStateReworked {
+		return family == planSubjectEvidenceKind || family == candidateEvidenceKind
+	}
+	kind, ok := subjectStateDecisionKind(state)
+	if !ok {
+		return false
+	}
+	if family == planSubjectEvidenceKind {
+		return kind == DecisionPlanUATAccepted || kind == DecisionPlanUATChangesRequested || kind == DecisionPlanUATDeferredByAFK || kind == DecisionPlanRatified
+	}
+	return family == candidateEvidenceKind && (kind == DecisionImplementationUAT || kind == DecisionLanded)
 }
 
 type interactionModeState struct {
@@ -610,28 +858,28 @@ type interactionModeState struct {
 }
 
 func (s *epochHumanService) interactionModeState(epoch provenance.TaskID) (interactionModeState, error) {
-	facts, err := s.decisionFacts(epoch, DecisionInteractionModeChanged)
-	if err != nil {
-		return interactionModeState{}, err
-	}
 	state := interactionModeState{cursor: InteractionModeCursor{Mode: InteractionNormal}, condition: currentDecisionCondition(epoch, DecisionInteractionModeChanged, 0)}
-	for _, fact := range facts {
+	err := s.foldDecisionFacts(epoch, DecisionInteractionModeChanged, func(fact decisionFact) (bool, error) {
 		if fact.record.Epoch != epoch.String() {
-			return interactionModeState{}, humanServiceErr("interactionModeState", "a mode decision is scoped to a different epoch", "an epoch mode fold can only consume decisions for that exact epoch", "repair the inconsistent decision fact before retrying")
+			return false, humanServiceErr("interactionModeState", "a mode decision is scoped to a different epoch", "an epoch mode fold can only consume decisions for that exact epoch", "repair the inconsistent decision fact before retrying")
 		}
 		var changed InteractionModeChanged
 		if err := json.Unmarshal(fact.record.Decision.Payload, &changed); err != nil {
-			return interactionModeState{}, humanServiceErr("interactionModeState", "a mode decision payload is malformed", "the canonical decision fact cannot be folded", "repair the malformed decision fact before retrying")
+			return false, humanServiceErr("interactionModeState", "a mode decision payload is malformed", "the canonical decision fact cannot be folded", "repair the malformed decision fact before retrying")
 		}
 		if err := validateInteractionModeChanged(changed); err != nil {
-			return interactionModeState{}, fmt.Errorf("fold canonical mode decision %q: %w", fact.record.ID, err)
+			return false, fmt.Errorf("fold canonical mode decision %q: %w", fact.record.ID, err)
 		}
 		if changed.From != state.cursor.Mode {
-			return interactionModeState{}, humanServiceErr("interactionModeState", fmt.Sprintf("mode decision %q starts from %q but current mode is %q", fact.record.ID, changed.From, state.cursor.Mode), "the canonical interaction-mode decision chain is inconsistent", "resolve the competing mode decisions before retrying")
+			return false, humanServiceErr("interactionModeState", fmt.Sprintf("mode decision %q starts from %q but current mode is %q", fact.record.ID, changed.From, state.cursor.Mode), "the canonical interaction-mode decision chain is inconsistent", "resolve the competing mode decisions before retrying")
 		}
 		id := fact.record.ID
 		state.cursor = InteractionModeCursor{Entry: &id, Mode: changed.To}
 		state.condition = currentDecisionCondition(epoch, DecisionInteractionModeChanged, fact.row.JournalID)
+		return false, nil
+	})
+	if err != nil {
+		return interactionModeState{}, err
 	}
 	return state, nil
 }
@@ -640,121 +888,159 @@ func currentDecisionCondition(subject provenance.TaskID, kind DecisionKindID, jo
 	return provenance.Condition{Kind: provenance.ConditionCurrentFact, Selector: provenance.FactSelector{Kind: provenance.FactDecision, Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskExact, TaskID: subject}}, DecisionKind: journalDecisionKind(kind)}, AssertedJournalID: journalID}
 }
 
-func (s *epochHumanService) taskEvents(task provenance.TaskID, kind provenance.EventKind) ([]provenance.TaskEventRow, error) {
-	query := provenance.JournalQueryV1{OrderBy: provenance.OrderByJournalID, TaskIDs: []provenance.TaskID{task}, EventKinds: []provenance.EventKind{kind}, Limit: provenance.MaxFactPageSize}
-	var out []provenance.TaskEventRow
+func (s *epochHumanService) requireAcceptedReview(subject, epoch provenance.TaskID, round ReviewRoundID) error {
+	query := provenance.JournalQueryV1{OrderBy: provenance.OrderByJournalID, TaskIDs: []provenance.TaskID{subject}, EventKinds: []provenance.EventKind{FamilyReviewRoundFinalized.EventKind()}, Limit: provenance.MaxFactPageSize}
 	for {
 		page, err := s.tracker.prov.Journal().QueryTaskEvents(query)
 		if err != nil {
-			return nil, fmt.Errorf("query bounded task events for task %q: %w", task, err)
+			return fmt.Errorf("query bounded accepted review events for task %q: %w", subject, err)
 		}
-		out = append(out, page.Events...)
+		for _, row := range page.Events {
+			var value struct {
+				Epoch   string `json:"epoch"`
+				Round   string `json:"round"`
+				Verdict string `json:"verdict"`
+			}
+			if json.Unmarshal(row.Payload, &value) == nil && value.Epoch == epoch.String() && value.Round == string(round) && value.Verdict == VerdictAccept.String() {
+				return nil
+			}
+		}
 		if page.Next == nil {
-			return out, nil
+			break
 		}
 		query.SnapshotMaxJournalID = page.Next.SnapshotMaxJournalID
 		query.AfterJournalID = page.Next.AfterJournalID
 	}
-}
-
-func (s *epochHumanService) requireAcceptedReview(subject, epoch provenance.TaskID, round ReviewRoundID) error {
-	events, err := s.taskEvents(subject, FamilyReviewRoundFinalized.EventKind())
-	if err != nil {
-		return err
-	}
-	for _, row := range events {
-		var value struct {
-			Epoch   string `json:"epoch"`
-			Round   string `json:"round"`
-			Verdict string `json:"verdict"`
-		}
-		if json.Unmarshal(row.Payload, &value) == nil && value.Epoch == epoch.String() && value.Round == string(round) && value.Verdict == VerdictAccept.String() {
-			return nil
-		}
-	}
 	return humanServiceErr("RatifyPlan", fmt.Sprintf("review round %q is not an accepted finalized round for proposal %q", round, subject), "ratification requires exact accepted review evidence", "finalize and accept that review round before ratifying")
 }
 
-func (s *epochHumanService) requireAcceptedDecision(subject, epoch provenance.TaskID, id DecisionLedgerEntryID, kind DecisionKindID, where string) (provenance.Condition, error) {
-	facts, err := s.decisionFacts(subject, kind)
-	if err != nil {
-		return provenance.Condition{}, err
-	}
-	for _, fact := range facts {
+func (s *epochHumanService) requireAcceptedDecision(subject, epoch provenance.TaskID, id DecisionLedgerEntryID, kind DecisionKindID, where string) error {
+	var found bool
+	err := s.foldDecisionFacts(subject, kind, func(fact decisionFact) (bool, error) {
 		if fact.record.Epoch == epoch.String() && fact.record.ID == id {
-			return currentDecisionCondition(subject, kind, fact.row.JournalID), nil
+			found = true
+			return true, nil
 		}
+		return false, nil
+	})
+	if err != nil {
+		return err
 	}
-	return provenance.Condition{}, humanServiceErr(where, fmt.Sprintf("decision %q is not accepted evidence for subject %q", id, subject), "the gate requires the exact persisted accepted decision", "record an accepted decision for this subject and reference its returned id")
+	if found {
+		return nil
+	}
+	return humanServiceErr(where, fmt.Sprintf("decision %q is not accepted evidence for subject %q", id, subject), "the gate requires the exact persisted accepted decision", "record an accepted decision for this subject and reference its returned id")
 }
 
-func (s *epochHumanService) requireAcceptedImplementationUAT(subject, epoch provenance.TaskID, candidate IntegrationCandidateSetID, id DecisionLedgerEntryID) (provenance.Condition, error) {
-	facts, err := s.decisionFacts(subject, DecisionImplementationUAT)
-	if err != nil {
-		return provenance.Condition{}, err
-	}
-	for _, fact := range facts {
+func (s *epochHumanService) requireAcceptedImplementationUAT(subject, epoch provenance.TaskID, candidate IntegrationCandidateSetID, id DecisionLedgerEntryID) error {
+	var found bool
+	err := s.foldDecisionFacts(subject, DecisionImplementationUAT, func(fact decisionFact) (bool, error) {
 		if fact.record.Epoch != epoch.String() || fact.record.ID != id {
-			continue
+			return false, nil
 		}
-		var record struct {
-			Outcome ImplementationUATVerdict `json:"outcome"`
+		var record implementationUATRecord
+		if err := json.Unmarshal(fact.record.Decision.Payload, &record); err == nil && record.Outcome == ImplUATAccepted {
+			found = true
+			return true, nil
 		}
-		if json.Unmarshal(fact.record.Decision.Payload, &record) == nil && record.Outcome == ImplUATAccepted {
-			return currentDecisionCondition(subject, DecisionImplementationUAT, fact.row.JournalID), nil
-		}
+		return false, nil
+	})
+	if err != nil {
+		return err
 	}
-	return provenance.Condition{}, humanServiceErr("Land", fmt.Sprintf("Implementation UAT decision %q is not an accepted decision bound to candidate %q", id, candidate), "landing requires exact accepted UAT evidence for the same candidate", "record accepted Implementation UAT for this candidate and reference its returned id")
+	if found {
+		return nil
+	}
+	return humanServiceErr("Land", fmt.Sprintf("Implementation UAT decision %q is not an accepted decision bound to candidate %q", id, candidate), "landing requires exact accepted UAT evidence for the same candidate", "record accepted Implementation UAT for this candidate and reference its returned id")
 }
 
 func encodeConditionEvidence(conditions []provenance.Condition) (json.RawMessage, error) {
 	snapshots := make([]conditionSnapshot, len(conditions))
 	for i, condition := range conditions {
-		if condition.Selector.Kind != provenance.FactDecision || condition.Selector.Filter.TaskScope.Kind != provenance.FactTaskExact {
-			return nil, humanServiceErr("encodeConditionEvidence", "a command condition has an unsupported fact selector", "human-decision conditions must be exact task-scoped decision facts", "construct the condition through currentDecisionCondition")
+		if condition.Selector.Filter.TaskScope.Kind != provenance.FactTaskExact || condition.Selector.Filter.TaskScope.TaskID == (provenance.TaskID{}) {
+			return nil, humanServiceErr("encodeConditionEvidence", "a command condition has an unsupported task selector", "human-decision conditions must be exact task-scoped facts", "construct the condition through the typed state or decision condition helpers")
 		}
-		snapshots[i] = conditionSnapshot{Kind: condition.Kind, Task: condition.Selector.Filter.TaskScope.TaskID.String(), DecisionKind: condition.Selector.DecisionKind, AssertedJournalID: condition.AssertedJournalID}
+		snapshot := conditionSnapshot{Kind: condition.Kind, FactKind: condition.Selector.Kind, Task: condition.Selector.Filter.TaskScope.TaskID.String(), AssertedJournalID: condition.AssertedJournalID}
+		switch condition.Selector.Kind {
+		case provenance.FactDecision:
+			if condition.Selector.DecisionKind == "" || condition.Selector.EvidenceKind != "" {
+				return nil, humanServiceErr("encodeConditionEvidence", fmt.Sprintf("condition %d does not select exactly one decision arm", i), "replay must preserve the closed selector arm and its decision kind", "construct a decision selector with one non-empty DecisionKind")
+			}
+			snapshot.DecisionKind = condition.Selector.DecisionKind
+		case provenance.FactEvidence:
+			if condition.Selector.EvidenceKind == "" || condition.Selector.DecisionKind != "" {
+				return nil, humanServiceErr("encodeConditionEvidence", fmt.Sprintf("condition %d does not select exactly one evidence arm", i), "replay must preserve the closed selector arm and its evidence kind", "construct an evidence selector with one non-empty EvidenceKind")
+			}
+			snapshot.EvidenceKind = condition.Selector.EvidenceKind
+		default:
+			return nil, humanServiceErr("encodeConditionEvidence", fmt.Sprintf("condition %d has unknown fact kind", i), "human-decision conditions use only decision or evidence facts", "construct a typed FactDecision or FactEvidence selector")
+		}
+		snapshots[i] = snapshot
 	}
 	return canonicalJSON(conditionEvidence{Conditions: snapshots})
 }
 
 func (s *epochHumanService) restoreCommittedConditions(op provenance.OperationID, current []provenance.Condition) ([]provenance.Condition, error) {
-	query := provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}, OperationIDs: []provenance.OperationID{op}}, Kinds: []provenance.EvidenceKind{preconditionEvidenceKind}, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize}}
-	var rows []provenance.EvidenceRow
+	query := provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}, OperationIDs: []provenance.OperationID{op}}, Kinds: []provenance.EvidenceKind{preconditionEvidenceKind}, Page: provenance.FactPageRequest{Limit: 2}}
+	var row provenance.EvidenceRow
+	count := 0
 	for {
 		page, err := s.tracker.prov.Journal().Facts().QueryEvidence(query)
 		if err != nil {
 			return nil, fmt.Errorf("query bounded operation precondition evidence for %q: %w", op, err)
 		}
-		rows = append(rows, page.Rows...)
+		for _, candidate := range page.Rows {
+			count++
+			if count > 1 {
+				return nil, fmt.Errorf("%w: operation %q has multiple precondition evidence facts; expected one", provenance.ErrOperationConflict, op)
+			}
+			row = candidate
+		}
 		if page.Next == nil {
 			break
 		}
 		query.Page.SnapshotMaxJournalID = page.Next.SnapshotMaxJournalID
 		query.Page.AfterJournalID = page.Next.AfterJournalID
 	}
-	if len(rows) == 0 {
+	if count == 0 {
 		return append([]provenance.Condition(nil), current...), nil
 	}
-	if len(rows) != 1 {
-		return nil, fmt.Errorf("%w: operation %q has %d precondition evidence facts; expected one", provenance.ErrOperationConflict, op, len(rows))
-	}
 	var stored conditionEvidence
-	if err := json.Unmarshal(rows[0].Payload, &stored); err != nil {
+	if err := json.Unmarshal(row.Payload, &stored); err != nil {
 		return nil, humanServiceErr("restoreCommittedConditions", "the committed precondition evidence is malformed", "an exact operation retry cannot reconstruct its original transaction-local conditions", "repair the malformed evidence fact before retrying")
 	}
-	if len(stored.Conditions) != len(current) {
-		return nil, fmt.Errorf("%w: operation %q was already committed with a different condition count", provenance.ErrOperationConflict, op)
-	}
-	restored := append([]provenance.Condition(nil), current...)
+	restored := make([]provenance.Condition, len(stored.Conditions))
 	for i, snapshot := range stored.Conditions {
-		condition := &restored[i]
-		if condition.Kind != snapshot.Kind || condition.Selector.Kind != provenance.FactDecision || condition.Selector.Filter.TaskScope.Kind != provenance.FactTaskExact || condition.Selector.Filter.TaskScope.TaskID.String() != snapshot.Task || condition.Selector.DecisionKind != snapshot.DecisionKind {
-			return nil, fmt.Errorf("%w: operation %q was already committed with different prerequisite semantics", provenance.ErrOperationConflict, op)
+		condition, err := conditionFromSnapshot(snapshot)
+		if err != nil {
+			return nil, fmt.Errorf("%w: operation %q has malformed persisted condition %d: %v", provenance.ErrOperationConflict, op, i, err)
 		}
-		condition.AssertedJournalID = snapshot.AssertedJournalID
+		restored[i] = condition
 	}
 	return restored, nil
+}
+
+func conditionFromSnapshot(snapshot conditionSnapshot) (provenance.Condition, error) {
+	task, err := provenance.ParseTaskID(snapshot.Task)
+	if err != nil {
+		return provenance.Condition{}, fmt.Errorf("task %q is malformed: %w", snapshot.Task, err)
+	}
+	selector := provenance.FactSelector{Kind: snapshot.FactKind, Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskExact, TaskID: task}}}
+	switch snapshot.FactKind {
+	case provenance.FactDecision:
+		if snapshot.DecisionKind == "" || snapshot.EvidenceKind != "" {
+			return provenance.Condition{}, fmt.Errorf("decision selector must contain exactly one DecisionKind")
+		}
+		selector.DecisionKind = snapshot.DecisionKind
+	case provenance.FactEvidence:
+		if snapshot.EvidenceKind == "" || snapshot.DecisionKind != "" {
+			return provenance.Condition{}, fmt.Errorf("evidence selector must contain exactly one EvidenceKind")
+		}
+		selector.EvidenceKind = snapshot.EvidenceKind
+	default:
+		return provenance.Condition{}, fmt.Errorf("fact kind %d is not supported", snapshot.FactKind)
+	}
+	return provenance.Condition{Kind: snapshot.Kind, Selector: selector, AssertedJournalID: snapshot.AssertedJournalID}, nil
 }
 
 func humanServiceErr(where, what, why, fix string) error {

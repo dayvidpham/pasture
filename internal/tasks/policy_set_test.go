@@ -276,6 +276,10 @@ func TestDraftPlanUATLowersByVerdict(t *testing.T) {
 	if err := requireKind(ps, acc, DecisionPlanUATAccepted); err != nil {
 		t.Fatal(err)
 	}
+	held := []HeldUATQuestion{{ID: "hq-invalid", Question: "must remain deferred", Stable: true}}
+	if _, err := ps.DraftPlanUAT(PlanUATDecision{Snapshot: validSnapshot(), ReportedVerdict: PlanUATAccepted, HeldQuestions: held}); err == nil {
+		t.Fatal("accepted Plan UAT with held questions was accepted")
+	}
 
 	chg, err := ps.DraftPlanUAT(PlanUATDecision{
 		Snapshot:        validSnapshot(),
@@ -288,11 +292,14 @@ func TestDraftPlanUATLowersByVerdict(t *testing.T) {
 	if err := requireKind(ps, chg, DecisionPlanUATChangesRequested); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := ps.DraftPlanUAT(PlanUATDecision{Snapshot: validSnapshot(), ReportedVerdict: PlanUATChangesRequested, HeldQuestions: held}); err == nil {
+		t.Fatal("changes-requested Plan UAT with held questions was accepted")
+	}
 
 	def, err := ps.DraftPlanUAT(PlanUATDecision{
 		Snapshot:        validSnapshot(),
 		ReportedVerdict: PlanUATDeferredByAFK,
-		HeldQuestions:   []HeldUATQuestion{{ID: "hq-1", Question: "open", Stable: true}},
+		HeldQuestions:   held,
 		Mode:            InteractionModeCursor{Entry: &entry, Mode: InteractionAFK},
 	})
 	if err != nil {

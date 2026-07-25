@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/dayvidpham/provenance"
 )
@@ -402,6 +403,7 @@ type EpochServiceSynchronization struct {
 // receive these options.
 type EpochServiceOptions struct {
 	Synchronization EpochServiceSynchronization
+	now             func() time.Time
 }
 
 // EpochServiceFactory is the production construction boundary for the composed service.

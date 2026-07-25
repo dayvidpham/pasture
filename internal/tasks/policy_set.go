@@ -95,8 +95,8 @@ func validateImplementationUATRecord(record implementationUATRecord) error {
 	return validateImplUATPayload(record.Outcome, record.Payload)
 }
 
-// NewProductionPolicySet constructs the explicit production PolicySet. It builds the five
-// concrete descriptors and freezes them into one immutable catalog; a construction failure
+// NewProductionPolicySet constructs the explicit production PolicySet. It builds the
+// registered concrete descriptors and freezes them into one immutable catalog; a construction failure
 // (an invalid descriptor or a catalog conflict) is returned rather than panicked.
 func NewProductionPolicySet() (PolicySet, error) {
 	modeChanged, err := newJSONDescriptor(
@@ -191,12 +191,22 @@ func (s PolicySet) DraftPlanUAT(d PlanUATDecision) (DecisionDraft, error) {
 	}
 	switch d.ReportedVerdict {
 	case PlanUATAccepted:
+		if len(d.HeldQuestions) != 0 {
+			return DecisionDraft{}, uatErr("PlanUATDecision.HeldQuestions", "accepted Plan UAT carries held questions",
+				"held questions are meaningful only when the Plan UAT is deferred by AFK",
+				"remove held questions or report deferred_by_afk")
+		}
 		return s.planAccepted.Draft(PlanAccepted{
 			Snapshot:     d.Snapshot,
 			Interactions: d.Interactions,
 			Feedback:     d.Feedback,
 		})
 	case PlanUATChangesRequested:
+		if len(d.HeldQuestions) != 0 {
+			return DecisionDraft{}, uatErr("PlanUATDecision.HeldQuestions", "changes-requested Plan UAT carries held questions",
+				"held questions are meaningful only when the Plan UAT is deferred by AFK",
+				"remove held questions or report deferred_by_afk")
+		}
 		return s.planChanges.Draft(PlanChangesRequested{
 			Snapshot:     d.Snapshot,
 			Interactions: d.Interactions,

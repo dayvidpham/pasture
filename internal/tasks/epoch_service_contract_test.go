@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/provenance"
@@ -276,7 +277,7 @@ func TestProductionConstructionCarriesSynchronizationOutsideCommands(t *testing.
 	t.Parallel()
 
 	assertStructShape(t, typeOf[tasks.EpochServiceSynchronization](), fields(field[tasks.EpochRaceBarrier]("RaceBarrier")))
-	assertStructShape(t, typeOf[tasks.EpochServiceOptions](), fields(field[tasks.EpochServiceSynchronization]("Synchronization")))
+	assertStructShape(t, typeOf[tasks.EpochServiceOptions](), fields(field[tasks.EpochServiceSynchronization]("Synchronization"), field[func() time.Time]("now")))
 	var _ func(tasks.EpochServiceFactory, tasks.EpochServiceOptions) (tasks.EpochService, error) = tasks.EpochServiceFactory.NewEpochService
 	var _ func(tasks.EpochHumanServiceFactory, tasks.EpochServiceOptions) (tasks.EpochHumanService, error) = tasks.EpochHumanServiceFactory.NewEpochHumanService
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/dayvidpham/provenance"
 	"github.com/google/uuid"
@@ -94,6 +95,14 @@ func TestEpochHumanServiceProductionFlowAndReopen(t *testing.T) {
 	if replay, err := service.RatifyPlan(ctx, RatifyPlanInput{Meta: CommandMeta{OperationID: "human-ratify-1"}, Epoch: EpochRootID(epoch.String()), Proposal: proposal, ReviewRound: "review-round-1", PlanUAT: planUAT.DecisionID, Actor: AssertedHumanActor{ActorID: human.ID}}); err != nil || !replay.Replayed || replay.DecisionID != ratified.DecisionID {
 		t.Fatalf("ratify direct Apply replay = %+v, %v", replay, err)
 	}
+	if err := tracker.Close(); err != nil {
+		t.Fatalf("close before implementation UAT: %v", err)
+	}
+	tracker = openHumanTestTracker(t, db)
+	service = newHumanTestService(t, tracker)
+	if replay, err := service.RatifyPlan(ctx, RatifyPlanInput{Meta: CommandMeta{OperationID: "human-ratify-1"}, Epoch: EpochRootID(epoch.String()), Proposal: proposal, ReviewRound: "review-round-1", PlanUAT: planUAT.DecisionID, Actor: AssertedHumanActor{ActorID: human.ID}}); err != nil || !replay.Replayed || replay.DecisionID != ratified.DecisionID || replay.ActivityID != ratified.ActivityID || len(replay.EventIDs) != len(ratified.EventIDs) {
+		t.Fatalf("ratify replay after reopen = %+v, %v; want original bindings", replay, err)
+	}
 
 	implUAT, err := service.RecordImplementationUAT(ctx, ImplementationUATInput{Meta: CommandMeta{OperationID: "human-impl-uat-1"}, Epoch: EpochRootID(epoch.String()), Candidate: IntegrationCandidateSetID(candidate.String()), Outcome: ImplUATAccepted, Actor: AssertedHumanActor{ActorID: human.ID}})
 	if err != nil {
@@ -111,6 +120,15 @@ func TestEpochHumanServiceProductionFlowAndReopen(t *testing.T) {
 	}
 	if replay, err := service.Land(ctx, LandInput{Meta: CommandMeta{OperationID: "human-land-1"}, Epoch: EpochRootID(epoch.String()), Candidate: IntegrationCandidateSetID(candidate.String()), ImplementationUAT: implUAT.DecisionID, Actor: AssertedHumanActor{ActorID: human.ID}}); err != nil || !replay.Replayed || replay.DecisionID != landed.DecisionID {
 		t.Fatalf("land direct Apply replay = %+v, %v", replay, err)
+	}
+	if err := tracker.Close(); err != nil {
+		t.Fatalf("close after landing: %v", err)
+	}
+	tracker = openHumanTestTracker(t, db)
+	service = newHumanTestService(t, tracker)
+	defer tracker.Close()
+	if replay, err := service.Land(ctx, LandInput{Meta: CommandMeta{OperationID: "human-land-1"}, Epoch: EpochRootID(epoch.String()), Candidate: IntegrationCandidateSetID(candidate.String()), ImplementationUAT: implUAT.DecisionID, Actor: AssertedHumanActor{ActorID: human.ID}}); err != nil || !replay.Replayed || replay.DecisionID != landed.DecisionID || replay.ActivityID != landed.ActivityID || len(replay.EventIDs) != len(landed.EventIDs) {
+		t.Fatalf("land replay after reopen = %+v, %v; want original bindings", replay, err)
 	}
 	attributions, err := tracker.Journal().TaskAttributions(epoch)
 	if err != nil {
@@ -222,6 +240,193 @@ func TestEpochHumanServiceRejectsStaleModeConditionAfterBarrier(t *testing.T) {
 	}
 }
 
+func TestEpochHumanServiceOldAcceptedPlanUATCannotRatifyAfterLaterNonAccept(t *testing.T) {
+	tracker := openHumanTestTracker(t, filepath.Join(t.TempDir(), "pasture.db"))
+	defer tracker.Close()
+	human, err := tracker.RegisterHumanAgent("test", "State Human", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	epoch := createHumanTestTask(t, tracker, "epoch")
+	proposal := createHumanTestTask(t, tracker, "proposal")
+	service := newHumanTestService(t, tracker)
+	accepted, err := service.RecordPlanUAT(context.Background(), PlanUATInput{Meta: CommandMeta{OperationID: "state-accepted"}, Epoch: EpochRootID(epoch.String()), Proposal: proposal, Outcome: PlanUATAccepted, Actor: AssertedHumanActor{ActorID: human.ID}})
+	if err != nil {
+		t.Fatalf("accepted Plan UAT: %v", err)
+	}
+	seedAcceptedReview(t, tracker, epoch, proposal, "state-round")
+	if _, err := service.RecordPlanUAT(context.Background(), PlanUATInput{Meta: CommandMeta{OperationID: "state-changes"}, Epoch: EpochRootID(epoch.String()), Proposal: proposal, Outcome: PlanUATChangesRequested, Payload: &PlanUATPayload{Feedback: []UATFeedbackItem{{ID: "revise", Body: "revise"}}}, Actor: AssertedHumanActor{ActorID: human.ID}}); err != nil {
+		t.Fatalf("changes-requested Plan UAT: %v", err)
+	}
+	before := subjectFootprint(t, tracker, proposal)
+	if _, err := service.RatifyPlan(context.Background(), RatifyPlanInput{Meta: CommandMeta{OperationID: "state-ratify-old"}, Epoch: EpochRootID(epoch.String()), Proposal: proposal, ReviewRound: "state-round", PlanUAT: accepted.DecisionID, Actor: AssertedHumanActor{ActorID: human.ID}}); err == nil {
+		t.Fatal("old accepted Plan UAT was ratified after changes_requested")
+	}
+	if after := subjectFootprint(t, tracker, proposal); after != before {
+		t.Fatalf("stale ratify wrote partial state: before=%+v after=%+v", before, after)
+	}
+
+	if _, err := service.SetInteractionMode(context.Background(), SetInteractionModeInput{Meta: CommandMeta{OperationID: "state-afk"}, Epoch: EpochRootID(epoch.String()), Mode: InteractionAFK, Actor: AssertedHumanActor{ActorID: human.ID}}); err != nil {
+		t.Fatalf("set AFK: %v", err)
+	}
+	if _, err := service.RecordPlanUAT(context.Background(), PlanUATInput{Meta: CommandMeta{OperationID: "state-deferred"}, Epoch: EpochRootID(epoch.String()), Proposal: proposal, Outcome: PlanUATDeferredByAFK, Payload: &PlanUATPayload{HeldQuestions: []HeldUATQuestion{{ID: "held", Question: "open", Stable: true}}}, Actor: AssertedHumanActor{ActorID: human.ID}}); err != nil {
+		t.Fatalf("deferred Plan UAT: %v", err)
+	}
+	before = subjectFootprint(t, tracker, proposal)
+	if _, err := service.RatifyPlan(context.Background(), RatifyPlanInput{Meta: CommandMeta{OperationID: "state-ratify-old-again"}, Epoch: EpochRootID(epoch.String()), Proposal: proposal, ReviewRound: "state-round", PlanUAT: accepted.DecisionID, Actor: AssertedHumanActor{ActorID: human.ID}}); err == nil {
+		t.Fatal("old accepted Plan UAT was ratified after deferred_by_afk")
+	}
+	if after := subjectFootprint(t, tracker, proposal); after != before {
+		t.Fatalf("stale deferred ratify wrote partial state: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestEpochHumanServiceUATTerminalBarrierRows(t *testing.T) {
+	t.Run("plan-uat-versus-ratify", func(t *testing.T) {
+		tracker := openHumanTestTracker(t, filepath.Join(t.TempDir(), "pasture.db"))
+		defer tracker.Close()
+		human, err := tracker.RegisterHumanAgent("test", "Plan Race Human", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		epoch := createHumanTestTask(t, tracker, "epoch")
+		proposal := createHumanTestTask(t, tracker, "proposal")
+		winner := newHumanTestService(t, tracker)
+		accepted, err := winner.RecordPlanUAT(context.Background(), PlanUATInput{Meta: CommandMeta{OperationID: "race-plan-accepted"}, Epoch: EpochRootID(epoch.String()), Proposal: proposal, Outcome: PlanUATAccepted, Actor: AssertedHumanActor{ActorID: human.ID}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		seedAcceptedReview(t, tracker, epoch, proposal, "race-round")
+		barrier := &callbackEpochBarrier{}
+		barrier.after = func() error {
+			_, err := winner.RatifyPlan(context.Background(), RatifyPlanInput{Meta: CommandMeta{OperationID: "race-ratify-winner"}, Epoch: EpochRootID(epoch.String()), Proposal: proposal, ReviewRound: "race-round", PlanUAT: accepted.DecisionID, Actor: AssertedHumanActor{ActorID: human.ID}})
+			return err
+		}
+		loser, err := tracker.NewEpochHumanService(EpochServiceOptions{Synchronization: EpochServiceSynchronization{RaceBarrier: barrier}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := subjectFootprint(t, tracker, proposal)
+		_, err = loser.RecordPlanUAT(context.Background(), PlanUATInput{Meta: CommandMeta{OperationID: "race-plan-loser"}, Epoch: EpochRootID(epoch.String()), Proposal: proposal, Outcome: PlanUATChangesRequested, Payload: &PlanUATPayload{Feedback: []UATFeedbackItem{{ID: "fix", Body: "fix"}}}, Actor: AssertedHumanActor{ActorID: human.ID}})
+		if !errors.Is(err, provenance.ErrConditionFailed) || barrier.calls != 1 {
+			t.Fatalf("Plan UAT loser = %v, barrier calls=%d; want condition failure after one barrier", err, barrier.calls)
+		}
+		if _, found, err := loser.(*epochHumanService).committedOperationDecision("race-plan-loser", planUATDecisionKinds()); err != nil || found {
+			t.Fatalf("losing Plan UAT operation persisted: found=%t err=%v", found, err)
+		}
+		if after := subjectFootprint(t, tracker, proposal); after.decisions != before.decisions+1 || after.activities != before.activities+1 {
+			t.Fatalf("Plan UAT barrier footprint = before=%+v after=%+v; want one complete winner", before, after)
+		}
+	})
+
+	t.Run("implementation-uat-versus-land", func(t *testing.T) {
+		tracker := openHumanTestTracker(t, filepath.Join(t.TempDir(), "pasture.db"))
+		defer tracker.Close()
+		human, err := tracker.RegisterHumanAgent("test", "Implementation Race Human", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		epoch := createHumanTestTask(t, tracker, "epoch")
+		candidate := createHumanTestTask(t, tracker, "candidate")
+		winner := newHumanTestService(t, tracker)
+		accepted, err := winner.RecordImplementationUAT(context.Background(), ImplementationUATInput{Meta: CommandMeta{OperationID: "race-impl-accepted"}, Epoch: EpochRootID(epoch.String()), Candidate: IntegrationCandidateSetID(candidate.String()), Outcome: ImplUATAccepted, Actor: AssertedHumanActor{ActorID: human.ID}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		barrier := &callbackEpochBarrier{}
+		barrier.after = func() error {
+			_, err := winner.Land(context.Background(), LandInput{Meta: CommandMeta{OperationID: "race-land-winner"}, Epoch: EpochRootID(epoch.String()), Candidate: IntegrationCandidateSetID(candidate.String()), ImplementationUAT: accepted.DecisionID, Actor: AssertedHumanActor{ActorID: human.ID}})
+			return err
+		}
+		loser, err := tracker.NewEpochHumanService(EpochServiceOptions{Synchronization: EpochServiceSynchronization{RaceBarrier: barrier}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := subjectFootprint(t, tracker, candidate)
+		_, err = loser.RecordImplementationUAT(context.Background(), ImplementationUATInput{Meta: CommandMeta{OperationID: "race-impl-loser"}, Epoch: EpochRootID(epoch.String()), Candidate: IntegrationCandidateSetID(candidate.String()), Outcome: ImplUATChangesRequested, Actor: AssertedHumanActor{ActorID: human.ID}})
+		if !errors.Is(err, provenance.ErrConditionFailed) || barrier.calls != 1 {
+			t.Fatalf("Implementation UAT loser = %v, barrier calls=%d; want condition failure after one barrier", err, barrier.calls)
+		}
+		if _, found, err := loser.(*epochHumanService).committedOperationDecision("race-impl-loser", []DecisionKindID{DecisionImplementationUAT}); err != nil || found {
+			t.Fatalf("losing Implementation UAT operation persisted: found=%t err=%v", found, err)
+		}
+		if after := subjectFootprint(t, tracker, candidate); after.decisions != before.decisions || after.evidence != before.evidence+1 || after.activities != before.activities+1 {
+			t.Fatalf("Implementation UAT barrier footprint = before=%+v after=%+v; want one land state and no loser candidate rows", before, after)
+		}
+	})
+}
+
+func TestEpochHumanServiceRejectsWrongRatifyAndLandBindings(t *testing.T) {
+	tracker := openHumanTestTracker(t, filepath.Join(t.TempDir(), "pasture.db"))
+	defer tracker.Close()
+	human, err := tracker.RegisterHumanAgent("test", "Binding Human", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	epoch := createHumanTestTask(t, tracker, "epoch")
+	proposalA := createHumanTestTask(t, tracker, "proposal-a")
+	proposalB := createHumanTestTask(t, tracker, "proposal-b")
+	candidateA := createHumanTestTask(t, tracker, "candidate-a")
+	candidateB := createHumanTestTask(t, tracker, "candidate-b")
+	service := newHumanTestService(t, tracker)
+	if _, err := service.RecordPlanUAT(context.Background(), PlanUATInput{Meta: CommandMeta{OperationID: "binding-plan-a"}, Epoch: EpochRootID(epoch.String()), Proposal: proposalA, Outcome: PlanUATAccepted, Actor: AssertedHumanActor{ActorID: human.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	planB, err := service.RecordPlanUAT(context.Background(), PlanUATInput{Meta: CommandMeta{OperationID: "binding-plan-b"}, Epoch: EpochRootID(epoch.String()), Proposal: proposalB, Outcome: PlanUATAccepted, Actor: AssertedHumanActor{ActorID: human.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedAcceptedReview(t, tracker, epoch, proposalA, "binding-round")
+	beforeProposal := subjectFootprint(t, tracker, proposalA)
+	if _, err := service.RatifyPlan(context.Background(), RatifyPlanInput{Meta: CommandMeta{OperationID: "binding-ratify"}, Epoch: EpochRootID(epoch.String()), Proposal: proposalA, ReviewRound: "binding-round", PlanUAT: planB.DecisionID, Actor: AssertedHumanActor{ActorID: human.ID}}); err == nil {
+		t.Fatal("ratify accepted a Plan UAT from another proposal")
+	}
+	if after := subjectFootprint(t, tracker, proposalA); after != beforeProposal {
+		t.Fatalf("wrong ratify binding wrote partial state: before=%+v after=%+v", beforeProposal, after)
+	}
+
+	implA, err := service.RecordImplementationUAT(context.Background(), ImplementationUATInput{Meta: CommandMeta{OperationID: "binding-impl-a"}, Epoch: EpochRootID(epoch.String()), Candidate: IntegrationCandidateSetID(candidateA.String()), Outcome: ImplUATAccepted, Actor: AssertedHumanActor{ActorID: human.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	implB, err := service.RecordImplementationUAT(context.Background(), ImplementationUATInput{Meta: CommandMeta{OperationID: "binding-impl-b"}, Epoch: EpochRootID(epoch.String()), Candidate: IntegrationCandidateSetID(candidateB.String()), Outcome: ImplUATAccepted, Actor: AssertedHumanActor{ActorID: human.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeCandidate := subjectFootprint(t, tracker, candidateA)
+	if _, err := service.Land(context.Background(), LandInput{Meta: CommandMeta{OperationID: "binding-land"}, Epoch: EpochRootID(epoch.String()), Candidate: IntegrationCandidateSetID(candidateA.String()), ImplementationUAT: implB.DecisionID, Actor: AssertedHumanActor{ActorID: human.ID}}); err == nil {
+		t.Fatal("land accepted an Implementation UAT from another candidate")
+	}
+	if after := subjectFootprint(t, tracker, candidateA); after != beforeCandidate {
+		t.Fatalf("wrong land binding wrote partial state: before=%+v after=%+v", beforeCandidate, after)
+	}
+	if implA.DecisionID == implB.DecisionID {
+		t.Fatal("test setup did not produce distinct candidate decisions")
+	}
+}
+
+func TestEpochHumanServiceUsesInjectedClock(t *testing.T) {
+	tracker := openHumanTestTracker(t, filepath.Join(t.TempDir(), "pasture.db"))
+	defer tracker.Close()
+	human, err := tracker.RegisterHumanAgent("test", "Clock Human", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	epoch := createHumanTestTask(t, tracker, "epoch")
+	fixed := time.Date(2026, time.July, 25, 22, 0, 0, 123456789, time.UTC)
+	service, err := tracker.NewEpochHumanService(EpochServiceOptions{now: func() time.Time { return fixed }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SetInteractionMode(context.Background(), SetInteractionModeInput{Meta: CommandMeta{OperationID: "fixed-clock"}, Epoch: EpochRootID(epoch.String()), Mode: InteractionAFK, Actor: AssertedHumanActor{ActorID: human.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := tracker.Journal().Facts().QueryDecisions(provenance.DecisionQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskExact, TaskID: epoch}}, Kinds: []provenance.DecisionKind{journalDecisionKind(DecisionInteractionModeChanged)}, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize}})
+	if err != nil || len(page.Rows) != 1 || page.Rows[0].RecordedAt.UnixNano() != fixed.UnixNano() {
+		t.Fatalf("RecordedAt = %v, err=%v; want injected UTC instant %v", page.Rows, err, fixed)
+	}
+}
+
 func openHumanTestTracker(t *testing.T, path string) *trackerImpl {
 	t.Helper()
 	opened, err := OpenTaskTracker(path)
@@ -323,6 +528,38 @@ type decisionFootprint struct {
 	evidence   int
 	events     int
 	activities int
+}
+
+type subjectStateFootprint struct {
+	decisions  int
+	evidence   int
+	events     int
+	activities int
+}
+
+func subjectFootprint(t *testing.T, tracker *trackerImpl, subject provenance.TaskID) subjectStateFootprint {
+	t.Helper()
+	decisionKinds := make([]provenance.DecisionKind, 0, 7)
+	for _, kind := range []DecisionKindID{DecisionInteractionModeChanged, DecisionPlanUATAccepted, DecisionPlanUATChangesRequested, DecisionPlanUATDeferredByAFK, DecisionImplementationUAT, DecisionPlanRatified, DecisionLanded} {
+		decisionKinds = append(decisionKinds, journalDecisionKind(kind))
+	}
+	decisions, err := tracker.Journal().Facts().QueryDecisions(provenance.DecisionQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskExact, TaskID: subject}}, Kinds: decisionKinds, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize}})
+	if err != nil {
+		t.Fatalf("read subject decisions: %v", err)
+	}
+	evidence, err := tracker.Journal().Facts().QueryEvidence(provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskExact, TaskID: subject}}, Kinds: []provenance.EvidenceKind{planSubjectEvidenceKind, candidateEvidenceKind, preconditionEvidenceKind}, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize}})
+	if err != nil {
+		t.Fatalf("read subject evidence: %v", err)
+	}
+	events, err := tracker.Journal().QueryTaskEvents(provenance.JournalQueryV1{OrderBy: provenance.OrderByJournalID, TaskIDs: []provenance.TaskID{subject}, Limit: provenance.MaxFactPageSize})
+	if err != nil {
+		t.Fatalf("read subject events: %v", err)
+	}
+	activities, err := tracker.Activities(nil)
+	if err != nil {
+		t.Fatalf("read activities: %v", err)
+	}
+	return subjectStateFootprint{decisions: len(decisions.Rows), evidence: len(evidence.Rows), events: len(events.Events), activities: len(activities)}
 }
 
 func humanDecisionFootprint(t *testing.T, tracker *trackerImpl, epoch provenance.TaskID) decisionFootprint {
