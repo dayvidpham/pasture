@@ -153,7 +153,7 @@ func (t *trackerImpl) bootstrapSystemSession() (*provenance.Session, error) {
 	return t.prov.As(actor, authority), nil
 }
 
-func validatePersistedGenesisAuthority(j provenance.JournalAPI, committer provenance.ActorID, authority provenance.JournalID) error {
+func validatePersistedGenesisAuthority(j provenance.Journal, committer provenance.ActorID, authority provenance.JournalID) error {
 	committed, err := j.LookupCommitted(pastureSystemGenesisOperationID)
 	if err != nil {
 		return &pasterrors.StructuredError{
@@ -235,7 +235,7 @@ func unexpectedActivationActor(got, want provenance.ActorID) error {
 // establishGenesisAuthority commits one genesis bootstrap-authority operation (a
 // nil-parent EffectBootstrapAuthority) under the committer and returns the produced
 // authority's JournalID — the system root every task-governing Session binds to.
-func establishGenesisAuthority(j provenance.JournalAPI, committer provenance.ActorID) (provenance.JournalID, error) {
+func establishGenesisAuthority(j provenance.Journal, committer provenance.ActorID) (provenance.JournalID, error) {
 	res, err := j.Apply(pastureSystemGenesisInput(committer, time.Now().UTC().UnixNano()))
 	if err != nil {
 		return 0, &pasterrors.StructuredError{

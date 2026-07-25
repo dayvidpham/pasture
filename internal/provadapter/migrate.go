@@ -96,10 +96,10 @@ var ErrSourceMutatedDuringMigration = errors.New("provadapter: legacy source mut
 // errors.Is/As; the coordinator still re-checks source integrity so a caller learns
 // if a partial/aborted run somehow perturbed the source. On success the returned
 // outcome carries the whole-batch MigrationResult and SourceUnchanged=true.
-func RunBaselineMigration(j provenance.JournalAPI, req BaselineMigrationRequest, hashSource SourceHasher) (BaselineMigrationOutcome, error) {
+func RunBaselineMigration(j provenance.Journal, req BaselineMigrationRequest, hashSource SourceHasher) (BaselineMigrationOutcome, error) {
 	if j == nil {
 		return BaselineMigrationOutcome{}, errors.New(
-			"provadapter: cannot run baseline migration — what: the Provenance JournalAPI is nil; " +
+			"provadapter: cannot run baseline migration — what: the Provenance Journal is nil; " +
 				"why: the coordinator drives MigrateLegacyBaseline on the underlying journal; " +
 				"where: internal/provadapter RunBaselineMigration; when: before the migration batch; " +
 				"impact: no baseline is migrated; fix: pass Tracker.Journal() from an open Provenance tracker")

@@ -11,7 +11,7 @@ import (
 )
 
 // facade.go is the thin Apply/LookupCommitted facade over the pinned Provenance
-// JournalAPI (pasture#14). It is a SINGLE write path to the global journal — there
+// Journal (pasture#14). It is a SINGLE write path to the global journal — there
 // is deliberately no split audit-store — and it routes every call through the
 // adapter's own identity/authority/digest conversions (refs.go, authority.go,
 // digest.go) so the portable protocol domain and the durable Provenance domain
@@ -115,21 +115,21 @@ type ApplyRequest struct {
 	Effects []provenance.Effect
 }
 
-// Journal is the thin facade over a single Provenance JournalAPI. Construct it
-// with NewJournal over the JournalAPI from an open Provenance tracker; every
+// Journal is the thin facade over a single Provenance Journal. Construct it
+// with NewJournal over the Journal from an open Provenance tracker; every
 // mutation flows through the one underlying journal, so there is no split write
 // path.
 type Journal struct {
-	api provenance.JournalAPI
+	api provenance.Journal
 }
 
-// NewJournal wraps a Provenance JournalAPI (e.g. Tracker.Journal()) in the facade.
+// NewJournal wraps a Provenance Journal (e.g. Tracker.Journal()) in the facade.
 // A nil api is rejected so the failure surfaces at construction rather than as a
 // nil-dereference on the first call.
-func NewJournal(api provenance.JournalAPI) (*Journal, error) {
+func NewJournal(api provenance.Journal) (*Journal, error) {
 	if api == nil {
 		return nil, errors.New(
-			"provadapter: cannot construct facade Journal — what: the Provenance JournalAPI is nil; " +
+			"provadapter: cannot construct facade Journal — what: the Provenance Journal is nil; " +
 				"why: the facade routes every Apply/LookupCommitted to exactly one underlying journal and " +
 				"has no fallback store; where: internal/provadapter NewJournal; when: at facade construction; " +
 				"impact: no operation can be committed or looked up; fix: pass Tracker.Journal() from an open " +

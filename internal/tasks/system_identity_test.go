@@ -40,7 +40,7 @@ type provenanceTracker interface {
 	Show(id provenance.TaskID) (provenance.Task, error)
 	RegisterSoftwareAgent(namespace, name, version, source string) (provenance.SoftwareAgent, error)
 	SoftwareAgent(id provenance.AgentID) (provenance.SoftwareAgent, error)
-	Journal() provenance.JournalAPI
+	Journal() provenance.Journal
 	Close() error
 }
 

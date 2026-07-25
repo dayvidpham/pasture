@@ -192,7 +192,7 @@ func (t *trackerImpl) As(actor provenance.ActorID, authority provenance.JournalI
 }
 
 // Journal exposes the ordered global-journal surface.
-func (t *trackerImpl) Journal() provenance.JournalAPI {
+func (t *trackerImpl) Journal() provenance.Journal {
 	return t.prov.Journal()
 }
 

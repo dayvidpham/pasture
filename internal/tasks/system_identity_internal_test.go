@@ -39,13 +39,13 @@ func TestPastureSystemGenesisInputIsDeterministic(t *testing.T) {
 		!bytes.Equal(first.CommandDigest, second.CommandDigest) || !reflect.DeepEqual(first.Effects, second.Effects) {
 		t.Fatalf("genesis retry identity differs:\n first=%+v\nsecond=%+v", first, second)
 	}
-	firstMutation, err := provenance.PrepareMutationV1(first.Effects)
+	firstMutation, err := provenance.Canonicalize(provenance.OperationInput{Effects: first.Effects})
 	if err != nil {
-		t.Fatalf("PrepareMutationV1(first): %v", err)
+		t.Fatalf("Canonicalize(first): %v", err)
 	}
-	secondMutation, err := provenance.PrepareMutationV1(second.Effects)
+	secondMutation, err := provenance.Canonicalize(provenance.OperationInput{Effects: second.Effects})
 	if err != nil {
-		t.Fatalf("PrepareMutationV1(second): %v", err)
+		t.Fatalf("Canonicalize(second): %v", err)
 	}
 	if !bytes.Equal(firstMutation.CanonicalBytes(), secondMutation.CanonicalBytes()) ||
 		!bytes.Equal(firstMutation.DerivedDigest(), secondMutation.DerivedDigest()) {
@@ -317,11 +317,7 @@ func TestSystemIdentityPersistedNoncanonicalGenesisFailsClosed(t *testing.T) {
 	if _, err := provadapter.ActivatePastureSystem(impl.prov); err != nil {
 		t.Fatalf("activate pasture-system fixture: %v", err)
 	}
-	noncanonicalActor, err := impl.prov.RegisterSoftwareAgent("genesis-conflict", "noncanonical", "1", "test")
-	if err != nil {
-		t.Fatalf("register noncanonical genesis actor: %v", err)
-	}
-	noncanonical := pastureSystemGenesisInput(noncanonicalActor.ID, time.Now().UTC().UnixNano())
+	noncanonical := pastureSystemGenesisInput(provadapter.PastureSystemDefaultActorID(), time.Now().UTC().UnixNano())
 	noncanonical.CommandDigest = []byte("noncanonical-genesis-command")
 	noncanonical.Effects[0].BootstrapLabel = "noncanonical-genesis"
 	noncanonical.Effects[0].OperationAuthorityID = "noncanonical.genesis.authority"
@@ -346,8 +342,8 @@ func TestSystemIdentityPersistedNoncanonicalGenesisFailsClosed(t *testing.T) {
 		t.Fatalf("Create error does not preserve provenance.ErrOperationConflict: %v", err)
 	}
 	var conflict *provenance.OperationConflict
-	if !errors.As(err, &conflict) || conflict.Field == "" {
-		t.Fatalf("Create error does not expose an actionable typed OperationConflict: %T %v", err, err)
+	if !errors.As(err, &conflict) || conflict.Axis != provenance.ConflictCommand || conflict.Index != -1 {
+		t.Fatalf("Create error conflict = %+v, want ConflictCommand index -1: %T %v", conflict, err, err)
 	}
 	var structured *pasterrors.StructuredError
 	if !errors.As(err, &structured) || structured.Category != pasterrors.CategoryStorage ||
@@ -496,7 +492,7 @@ func assertPersistedIdentity(t *testing.T, db *sql.DB, wantAuthority provenance.
 	}
 }
 
-func assertCommittedGenesisAuthority(t *testing.T, journal provenance.JournalAPI, want provenance.JournalID) {
+func assertCommittedGenesisAuthority(t *testing.T, journal provenance.Journal, want provenance.JournalID) {
 	t.Helper()
 	result, err := journal.LookupCommitted(pastureSystemGenesisOperationID)
 	if err != nil {

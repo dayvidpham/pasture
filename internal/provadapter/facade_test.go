@@ -206,8 +206,8 @@ func TestFacade_ConflictRoundTripsTypedError(t *testing.T) {
 	if !errors.As(err, &typed) {
 		t.Fatalf("conflict error does not round-trip *provenance.OperationConflict via errors.As: %v", err)
 	}
-	if typed.Field == "" {
-		t.Fatalf("typed conflict does not name the differing identity field")
+	if typed.Axis != provenance.ConflictEffect || typed.Index != 0 {
+		t.Fatalf("typed conflict = %+v, want ConflictEffect index 0", typed)
 	}
 }
 
