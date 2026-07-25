@@ -135,15 +135,9 @@ func (s *epochHumanService) RecordPlanUAT(ctx context.Context, in PlanUATInput) 
 	if stored, found, err := s.committedOperationDecision(in.Meta.OperationID, planUATDecisionKinds()); err != nil {
 		return DecisionResult{}, err
 	} else if found {
-		draft, matched, err := s.planUATReplayDraft(in, payload, epoch, stored)
+		draft, err := s.planUATReplayDraft(in, payload, epoch, stored)
 		if err != nil {
 			return DecisionResult{}, err
-		}
-		if !matched {
-			draft, _, err = s.planUATDraftWithoutSubjectState(in, payload, epoch)
-			if err != nil {
-				return DecisionResult{}, err
-			}
 		}
 		return s.commit(ctx, in.Meta, in.Epoch, epoch, in.Proposal, in.Actor, MutationRecordPlanUAT, draft, nil, nil, nil)
 	}
@@ -179,20 +173,6 @@ func (s *epochHumanService) planUATDraft(in PlanUATInput, payload PlanUATPayload
 	}
 	draft, err := s.policy.DraftPlanUAT(PlanUATDecision{Snapshot: snapshot, ReportedVerdict: in.Outcome, Interactions: payload.Interactions, Feedback: payload.Feedback, HeldQuestions: payload.HeldQuestions, Mode: mode})
 	return draft, conditions, err
-}
-
-func (s *epochHumanService) planUATDraftWithoutSubjectState(in PlanUATInput, payload PlanUATPayload, epoch provenance.TaskID) (DecisionDraft, []provenance.Condition, error) {
-	snapshot := servicePlanSnapshot(in, epoch)
-	mode := InteractionModeCursor{Mode: InteractionNormal}
-	if in.Outcome == PlanUATDeferredByAFK {
-		state, err := s.interactionModeState(epoch)
-		if err != nil {
-			return DecisionDraft{}, nil, err
-		}
-		mode = state.cursor
-	}
-	draft, err := s.policy.DraftPlanUAT(PlanUATDecision{Snapshot: snapshot, ReportedVerdict: in.Outcome, Interactions: payload.Interactions, Feedback: payload.Feedback, HeldQuestions: payload.HeldQuestions, Mode: mode})
-	return draft, nil, err
 }
 
 func servicePlanSnapshot(in PlanUATInput, epoch provenance.TaskID) PlanUATSnapshot {
@@ -727,15 +707,24 @@ func sameDecisionEncoding(left, right DecisionEncoding) bool {
 	return left.Kind == right.Kind && left.Codec == right.Codec && left.Schema == right.Schema && bytes.Equal(left.Payload, right.Payload)
 }
 
-func (s *epochHumanService) planUATReplayDraft(in PlanUATInput, payload PlanUATPayload, epoch provenance.TaskID, stored decisionFact) (DecisionDraft, bool, error) {
+func (s *epochHumanService) planUATReplayDraft(in PlanUATInput, payload PlanUATPayload, epoch provenance.TaskID, stored decisionFact) (DecisionDraft, error) {
 	mode := InteractionModeCursor{Mode: InteractionNormal}
 	if stored.record.Decision.Kind == DecisionPlanUATDeferredByAFK {
 		var existing PlanDeferredByAFK
 		if err := json.Unmarshal(stored.record.Decision.Payload, &existing); err != nil {
-			return DecisionDraft{}, false, humanServiceErr("planUATReplayDraft", "the committed AFK Plan UAT payload is malformed", "an exact retry cannot verify its original user decision", "repair the malformed decision fact before retrying")
+			return DecisionDraft{}, humanServiceErr("planUATReplayDraft", "the committed AFK Plan UAT payload is malformed", "an exact retry cannot verify its original user decision", "repair the malformed decision fact before retrying")
 		}
 		entry := existing.ModeEntry
 		mode = InteractionModeCursor{Entry: &entry, Mode: InteractionAFK}
+	} else if in.Outcome == PlanUATDeferredByAFK {
+		// A changed retry is still a complete, policy-valid candidate before it
+		// reaches Apply. Use the live cursor here; the stored ModeEntry is only
+		// authoritative for an exact replay of a previously deferred decision.
+		state, err := s.interactionModeState(epoch)
+		if err != nil {
+			return DecisionDraft{}, err
+		}
+		mode = state.cursor
 	}
 	expected, err := s.policy.DraftPlanUAT(PlanUATDecision{
 		Snapshot: servicePlanSnapshot(in, epoch), ReportedVerdict: in.Outcome,
@@ -743,13 +732,13 @@ func (s *epochHumanService) planUATReplayDraft(in PlanUATInput, payload PlanUATP
 		HeldQuestions: payload.HeldQuestions, Mode: mode,
 	})
 	if err != nil {
-		return DecisionDraft{}, false, err
+		return DecisionDraft{}, err
 	}
 	if !sameDecisionEncoding(stored.record.Decision, expected.encoding()) {
-		return expected, false, nil
+		return expected, nil
 	}
 	draft, err := s.draftFromStored(stored.record.Decision)
-	return draft, true, err
+	return draft, err
 }
 
 func (s *epochHumanService) decodeDecisionFact(row provenance.DecisionRow, subject provenance.TaskID, expectedKind DecisionKindID) (decisionFact, error) {
