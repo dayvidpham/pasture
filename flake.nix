@@ -30,25 +30,14 @@
           # modernc.org/sqlite requires no native deps; pure Go build
           nativeBuildInputs = [ ];
 
-          # `go test ./...` includes internal/release, whose integration tests
-          # shell out to real `git` (init/commit/tag). Provide it in the check
-          # sandbox — otherwise those tests fail with "git: not found".
-          # git: internal/release integration tests shell out to real git.
-          # jq: the hooks/ git-discipline test execs the hook, which parses the
-          #     PreToolUse event with jq.
+          # The race check includes internal/release, whose integration tests
+          # shell out to real `git` (init/commit/tag), and hooks/ tests that
+          # parse PreToolUse events with `jq`.
           nativeCheckInputs = [ pkgs.git pkgs.jq ];
 
-          doCheck = true;
-          checkPhase = ''
-            runHook preCheck
-            # buildGoModule adds -trimpath (good for the shipped binary) but it
-            # rewrites runtime.Caller() to module-relative paths, which breaks
-            # tests that locate repo-root testdata (e.g. skills/protocol/figures)
-            # via runtime.Caller. Strip -trimpath for the test run only.
-            export GOFLAGS="''${GOFLAGS//-trimpath/}"
-            go test ./...
-            runHook postCheck
-          '';
+          # Package outputs are build-only; the race check below owns the test
+          # wave so each package is not tested repeatedly by Nix.
+          doCheck = false;
         };
 
         pastured = pkgs.buildGoModule (commonAttrs // {
@@ -75,6 +64,27 @@
             "cmd/pasture-release"
             "cmd/pasture"
           ];
+        });
+
+        race-check = pkgs.buildGoModule (commonAttrs // {
+          pname = "pasture-race";
+          subPackages = [
+            "cmd/pastured"
+            "cmd/pasture-release"
+            "cmd/pasture"
+          ];
+          env.CGO_ENABLED = "1";
+          doCheck = true;
+          checkPhase = ''
+            runHook preCheck
+            # buildGoModule adds -trimpath (good for the shipped binary) but it
+            # rewrites runtime.Caller() to module-relative paths, which breaks
+            # tests that locate repo-root testdata (e.g. skills/protocol/figures)
+            # via runtime.Caller. Strip -trimpath for the test run only.
+            export GOFLAGS="''${GOFLAGS//-trimpath/}"
+            go test -race ./...
+            runHook postCheck
+          '';
         });
 
         devShell = pkgs.mkShell {
@@ -109,9 +119,8 @@
 
         # nix flake check runs builds
         checks = {
-          inherit pastured;
-          inherit pasture-release;
-          inherit pasture;
+          race = race-check;
+          cgo-disabled-build = pasture-bundle;
         };
       }
     );
