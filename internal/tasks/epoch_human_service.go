@@ -243,13 +243,21 @@ func (s *epochHumanService) RecordImplementationUAT(ctx context.Context, in Impl
 	}
 	if stored, found, err := s.committedOperationDecision(in.Meta.OperationID, []DecisionKindID{DecisionImplementationUAT}); err != nil {
 		return DecisionResult{}, err
-	} else if found && sameDecisionEncoding(stored.record.Decision, draft.encoding()) {
+	} else if found && sameDecisionEncoding(stored.record.Decision, draft.encoding()) && stored.row.TaskID != nil && *stored.row.TaskID == candidate {
 		replay, err := s.draftFromStored(stored.record.Decision)
 		if err != nil {
 			return DecisionResult{}, err
 		}
-		return s.commit(ctx, in.Meta, in.Epoch, epoch, candidate, in.Actor, MutationRecordImplementationUAT, replay,
-			nil, nil, nil)
+		binding, err := s.implementationUATReviewBindingForOperation(epoch, candidate, in.Meta.OperationID)
+		if err != nil {
+			return DecisionResult{}, err
+		}
+		bindingEffect, err := newImplementationUATReviewBindingEvidenceEffect(candidate, binding.value, provenance.ResultSlotID("evidence-1"))
+		if err != nil {
+			return DecisionResult{}, err
+		}
+		return s.commitWithAuthority(ctx, in.Meta, in.Epoch, epoch, candidate, in.Actor, MutationRecordImplementationUAT, replay,
+			nil, nil, nil, []provenance.Effect{bindingEffect})
 	} else if found {
 		return s.commit(ctx, in.Meta, in.Epoch, epoch, candidate, in.Actor, MutationRecordImplementationUAT, draft, nil, nil, nil)
 	}
@@ -260,11 +268,28 @@ func (s *epochHumanService) RecordImplementationUAT(ctx context.Context, in Impl
 	if err != nil {
 		return DecisionResult{}, err
 	}
-	if state.terminal() {
-		return DecisionResult{}, humanServiceErr("RecordImplementationUAT", fmt.Sprintf("candidate %q is already in terminal state %q", in.Candidate, state.state), "a landed candidate cannot receive another Implementation UAT decision", "start a new candidate or use the existing landed decision")
+	if err := requireEligibleCandidateLifecycle("RecordImplementationUAT", candidate, state); err != nil {
+		return DecisionResult{}, err
 	}
-	return s.commit(ctx, in.Meta, in.Epoch, epoch, candidate, in.Actor, MutationRecordImplementationUAT, draft,
-		nil, []provenance.Condition{state.conditionCurrent()}, nil)
+	review, err := s.currentImplementationReviewAuthority(epoch, candidate)
+	if err != nil {
+		return DecisionResult{}, err
+	}
+	if review.value.State != reviewFinalizedClean {
+		return DecisionResult{}, humanServiceErr("RecordImplementationUAT", fmt.Sprintf("candidate %q has current review state %d", in.Candidate, review.value.State), "Implementation UAT requires one current finalized clean implementation review", "finalize a clean three-axis review for this candidate before recording Implementation UAT")
+	}
+	bindingEffect, err := newImplementationUATReviewBindingEvidenceEffect(candidate, implementationUATReviewBinding{
+		Epoch:       EpochRootID(epoch.String()),
+		Candidate:   in.Candidate,
+		ReviewRound: review.value.Round,
+		ReviewFact:  review.journalID,
+		Operation:   in.Meta.OperationID,
+	}, provenance.ResultSlotID("evidence-1"))
+	if err != nil {
+		return DecisionResult{}, err
+	}
+	return s.commitWithAuthority(ctx, in.Meta, in.Epoch, epoch, candidate, in.Actor, MutationRecordImplementationUAT, draft,
+		nil, []provenance.Condition{state.conditionCurrent(), reviewAuthorityCurrentCondition(candidate, review.journalID)}, nil, []provenance.Effect{bindingEffect})
 }
 
 func (s *epochHumanService) Land(ctx context.Context, in LandInput) (DecisionResult, error) {
@@ -300,15 +325,37 @@ func (s *epochHumanService) Land(ctx context.Context, in LandInput) (DecisionRes
 	if err != nil {
 		return DecisionResult{}, err
 	}
-	if state.state != subjectStateImplementationAccepted || state.decision != in.ImplementationUAT {
+	if state.state != subjectStateImplementationAccepted || state.decision != in.ImplementationUAT || state.source != subjectStateSourceHumanDecision || state.operation == "" {
 		return DecisionResult{}, humanServiceErr("Land", fmt.Sprintf("Implementation UAT decision %q is not the current accepted state for candidate %q", in.ImplementationUAT, in.Candidate), "landing must bind the latest accepted Implementation UAT state", "record a fresh accepted Implementation UAT before landing")
 	}
 	if err := s.requireAcceptedImplementationUAT(candidate, epoch, in.Candidate, in.ImplementationUAT); err != nil {
 		return DecisionResult{}, err
 	}
+	binding, err := s.implementationUATReviewBindingForOperation(epoch, candidate, state.operation)
+	if err != nil {
+		return DecisionResult{}, err
+	}
+	review, err := s.currentImplementationReviewAuthority(epoch, candidate)
+	if err != nil {
+		return DecisionResult{}, err
+	}
+	if review.value.State != reviewFinalizedClean || binding.value.ReviewFact != review.journalID {
+		return DecisionResult{}, humanServiceErr("Land", fmt.Sprintf("Implementation UAT decision %q is not bound to the current clean review for candidate %q", in.ImplementationUAT, in.Candidate), "landing requires the exact review authority accepted by Implementation UAT to remain current and clean", "record a fresh accepted Implementation UAT after a clean finalized review")
+	}
+	manifest, err := s.exactCandidateManifest(epoch, candidate)
+	if err != nil {
+		return DecisionResult{}, err
+	}
+	publications, err := s.currentCandidatePublicationSet(epoch, candidate)
+	if err != nil {
+		return DecisionResult{}, err
+	}
+	if err := validatePublicationSetAgainstManifest(manifest.value, publications.value); err != nil {
+		return DecisionResult{}, humanServiceErr("Land", fmt.Sprintf("candidate %q has incomplete or mismatched publication authority", in.Candidate), "every immutable candidate manifest member must have one current repository, ref, and commit verification", "publish every manifest member at its exact immutable commit before landing")
+	}
 	return s.commit(ctx, in.Meta, in.Epoch, epoch, epoch, in.Actor, MutationLand, draft,
 		[]evidenceRef{{Kind: "pasture.implementation-uat.decision.v1", Value: string(in.ImplementationUAT), stateSubject: candidate}},
-		[]provenance.Condition{state.conditionExact()}, []provenance.Effect{lifecycleEffect(epoch, provenance.EventKindTaskClosed)})
+		[]provenance.Condition{state.conditionCurrent(), reviewAuthorityCurrentCondition(candidate, review.journalID), candidateManifestExactCondition(candidate, manifest.journalID), candidatePublicationSetCurrentCondition(candidate, publications.journalID)}, []provenance.Effect{lifecycleEffect(epoch, provenance.EventKindTaskClosed)})
 }
 
 type evidenceRef struct {
@@ -335,6 +382,13 @@ type conditionEvidence struct {
 }
 
 func (s *epochHumanService) commit(ctx context.Context, meta CommandMeta, epochID EpochRootID, epoch, subject provenance.TaskID, actor AssertedHumanActor, mutation EpochMutationKind, draft DecisionDraft, refs []evidenceRef, conditions []provenance.Condition, trailing []provenance.Effect) (DecisionResult, error) {
+	return s.commitWithAuthority(ctx, meta, epochID, epoch, subject, actor, mutation, draft, refs, conditions, trailing, nil)
+}
+
+// commitWithAuthority extends the standard human-decision effect set with
+// private typed authority evidence. Callers construct those values through the
+// shared authority constructors; user inputs never nominate fact identities.
+func (s *epochHumanService) commitWithAuthority(ctx context.Context, meta CommandMeta, epochID EpochRootID, epoch, subject provenance.TaskID, actor AssertedHumanActor, mutation EpochMutationKind, draft DecisionDraft, refs []evidenceRef, conditions []provenance.Condition, trailing, authorityEvidence []provenance.Effect) (DecisionResult, error) {
 	decisionID := decisionIDForOperation(meta.OperationID)
 	state, family, err := subjectStateForMutation(mutation, draft.encoding())
 	if err != nil {
@@ -394,6 +448,13 @@ func (s *epochHumanService) commit(ctx context.Context, meta CommandMeta, epochI
 			evidenceSubject = ref.stateSubject
 		}
 		effects = append(effects, provenance.Effect{Sort: provenance.EffectEvidence, ResultSlot: provenance.ResultSlotID(fmt.Sprintf("evidence-%d", i)), TaskID: evidenceSubject, EvidenceKind: ref.Kind, ContentDigest: digest[:], Payload: payload})
+	}
+	for i, effect := range authorityEvidence {
+		wantSlot := provenance.ResultSlotID(fmt.Sprintf("evidence-%d", len(refs)+i))
+		if effect.Sort != provenance.EffectEvidence || effect.TaskID != subject || effect.ResultSlot != wantSlot {
+			return DecisionResult{}, humanServiceErr("commitWithAuthority", fmt.Sprintf("authority evidence %d has an unexpected effect shape", i), "human-decision authority evidence must be a canonical candidate-scoped evidence result", "construct authority evidence with the expected candidate subject and evidence result slot")
+		}
+		effects = append(effects, effect)
 	}
 	conditionDigest := sha256.Sum256(conditionPayload)
 	effects = append(effects, provenance.Effect{Sort: provenance.EffectEvidence, TaskID: subject, EvidenceKind: preconditionEvidenceKind, ContentDigest: conditionDigest[:], Payload: conditionPayload})
@@ -738,6 +799,170 @@ func (s *epochHumanService) currentSubjectState(epoch, subject provenance.TaskID
 		query.Page.SnapshotMaxJournalID = page.Next.SnapshotMaxJournalID
 		query.Page.AfterJournalID = page.Next.AfterJournalID
 	}
+}
+
+type reviewAuthoritySnapshot struct {
+	value     implementationReviewAuthority
+	journalID provenance.JournalID
+}
+
+type candidateManifestSnapshot struct {
+	value     integrationCandidateManifest
+	journalID provenance.JournalID
+}
+
+type candidatePublicationSetSnapshot struct {
+	value     candidatePublicationSet
+	journalID provenance.JournalID
+}
+
+type implementationUATReviewBindingSnapshot struct {
+	value     implementationUATReviewBinding
+	journalID provenance.JournalID
+}
+
+func requireEligibleCandidateLifecycle(where string, candidate provenance.TaskID, state subjectStateSnapshot) error {
+	if state.journalID == 0 || state.state == subjectStateInvalid {
+		return humanServiceErr(where, fmt.Sprintf("candidate %q has no current lifecycle authority", candidate), "Implementation UAT requires an assignment-produced or current human candidate lifecycle fact", "create the integration candidate through the assignment-controlled aggregate before recording Implementation UAT")
+	}
+	if state.state == subjectStateReworked || state.state == subjectStateImplementationLanded {
+		return humanServiceErr(where, fmt.Sprintf("candidate %q is in ineligible lifecycle state %q", candidate, state.state), "reworked and landed candidates cannot receive a new Implementation UAT decision", "use the current replacement candidate or the existing landed decision")
+	}
+	return nil
+}
+
+func (s *epochHumanService) currentImplementationReviewAuthority(epoch, candidate provenance.TaskID) (reviewAuthoritySnapshot, error) {
+	query := provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskExact, TaskID: candidate}}, Kinds: []provenance.EvidenceKind{implementationReviewAuthorityEvidenceKind}, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize}}
+	var current reviewAuthoritySnapshot
+	for {
+		page, err := s.tracker.prov.Journal().Facts().QueryEvidence(query)
+		if err != nil {
+			return reviewAuthoritySnapshot{}, fmt.Errorf("query bounded implementation review authority for candidate %q: %w", candidate, err)
+		}
+		for _, row := range page.Rows {
+			if row.TaskID == nil || *row.TaskID != candidate || row.EvidenceKind != implementationReviewAuthorityEvidenceKind || row.ProducingOperationID == "" {
+				return reviewAuthoritySnapshot{}, humanServiceErr("currentImplementationReviewAuthority", "a review authority row has inconsistent task, kind, or producer identity", "Implementation UAT requires a canonical candidate-scoped review authority fact", "repair the malformed authority fact before retrying")
+			}
+			value, err := decodeImplementationReviewAuthority(row.Payload)
+			if err != nil || value.Epoch != EpochRootID(epoch.String()) || value.Candidate != IntegrationCandidateSetID(candidate.String()) || value.Operation != row.ProducingOperationID {
+				return reviewAuthoritySnapshot{}, humanServiceErr("currentImplementationReviewAuthority", "a review authority payload is inconsistent with its fact metadata", "the current review must be scoped to this epoch and candidate and identify its producing operation", "repair the malformed authority fact before retrying")
+			}
+			if row.JournalID > current.journalID {
+				current = reviewAuthoritySnapshot{value: value, journalID: row.JournalID}
+			}
+		}
+		if page.Next == nil {
+			break
+		}
+		query.Page.SnapshotMaxJournalID = page.Next.SnapshotMaxJournalID
+		query.Page.AfterJournalID = page.Next.AfterJournalID
+	}
+	if current.journalID == 0 {
+		return reviewAuthoritySnapshot{}, humanServiceErr("currentImplementationReviewAuthority", fmt.Sprintf("candidate %q has no implementation review authority", candidate), "Implementation UAT requires one current finalized clean three-axis review", "finalize a clean implementation review for this candidate before recording Implementation UAT")
+	}
+	return current, nil
+}
+
+func (s *epochHumanService) exactCandidateManifest(epoch, candidate provenance.TaskID) (candidateManifestSnapshot, error) {
+	query := provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskExact, TaskID: candidate}}, Kinds: []provenance.EvidenceKind{candidateManifestEvidenceKind}, Page: provenance.FactPageRequest{Limit: 2}}
+	var manifest candidateManifestSnapshot
+	count := 0
+	for {
+		page, err := s.tracker.prov.Journal().Facts().QueryEvidence(query)
+		if err != nil {
+			return candidateManifestSnapshot{}, fmt.Errorf("query bounded candidate manifest for %q: %w", candidate, err)
+		}
+		for _, row := range page.Rows {
+			count++
+			if count > 1 {
+				return candidateManifestSnapshot{}, humanServiceErr("exactCandidateManifest", fmt.Sprintf("candidate %q has multiple immutable manifests", candidate), "landing requires exactly one immutable candidate membership authority", "create a replacement candidate instead of appending another manifest")
+			}
+			if row.TaskID == nil || *row.TaskID != candidate || row.EvidenceKind != candidateManifestEvidenceKind || row.ProducingOperationID == "" {
+				return candidateManifestSnapshot{}, humanServiceErr("exactCandidateManifest", "a candidate manifest row has inconsistent task, kind, or producer identity", "landing requires one canonical candidate-scoped immutable manifest", "repair the malformed manifest fact before retrying")
+			}
+			value, err := decodeCandidateManifest(row.Payload)
+			if err != nil || value.Epoch != EpochRootID(epoch.String()) || value.Candidate != IntegrationCandidateSetID(candidate.String()) || value.Operation != row.ProducingOperationID {
+				return candidateManifestSnapshot{}, humanServiceErr("exactCandidateManifest", "a candidate manifest payload is inconsistent with its fact metadata", "landing requires immutable membership for this exact epoch and candidate", "repair the malformed manifest fact before retrying")
+			}
+			manifest = candidateManifestSnapshot{value: value, journalID: row.JournalID}
+		}
+		if page.Next == nil {
+			break
+		}
+		query.Page.SnapshotMaxJournalID = page.Next.SnapshotMaxJournalID
+		query.Page.AfterJournalID = page.Next.AfterJournalID
+	}
+	if count == 0 {
+		return candidateManifestSnapshot{}, humanServiceErr("exactCandidateManifest", fmt.Sprintf("candidate %q has no immutable manifest", candidate), "landing requires exact repository and commit membership before publication can be validated", "create the integration candidate manifest before landing")
+	}
+	return manifest, nil
+}
+
+func (s *epochHumanService) currentCandidatePublicationSet(epoch, candidate provenance.TaskID) (candidatePublicationSetSnapshot, error) {
+	query := provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskExact, TaskID: candidate}}, Kinds: []provenance.EvidenceKind{candidatePublicationSetEvidenceKind}, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize}}
+	var current candidatePublicationSetSnapshot
+	for {
+		page, err := s.tracker.prov.Journal().Facts().QueryEvidence(query)
+		if err != nil {
+			return candidatePublicationSetSnapshot{}, fmt.Errorf("query bounded candidate publication authority for %q: %w", candidate, err)
+		}
+		for _, row := range page.Rows {
+			if row.TaskID == nil || *row.TaskID != candidate || row.EvidenceKind != candidatePublicationSetEvidenceKind || row.ProducingOperationID == "" {
+				return candidatePublicationSetSnapshot{}, humanServiceErr("currentCandidatePublicationSet", "a publication authority row has inconsistent task, kind, or producer identity", "landing requires one canonical candidate-scoped publication snapshot", "repair the malformed publication authority before retrying")
+			}
+			value, err := decodeCandidatePublicationSet(row.Payload)
+			if err != nil || value.Epoch != EpochRootID(epoch.String()) || value.Candidate != IntegrationCandidateSetID(candidate.String()) || value.Operation != row.ProducingOperationID {
+				return candidatePublicationSetSnapshot{}, humanServiceErr("currentCandidatePublicationSet", "a publication snapshot payload is inconsistent with its fact metadata", "landing requires current publication authority for this exact epoch and candidate", "repair the malformed publication fact before retrying")
+			}
+			if row.JournalID > current.journalID {
+				current = candidatePublicationSetSnapshot{value: value, journalID: row.JournalID}
+			}
+		}
+		if page.Next == nil {
+			break
+		}
+		query.Page.SnapshotMaxJournalID = page.Next.SnapshotMaxJournalID
+		query.Page.AfterJournalID = page.Next.AfterJournalID
+	}
+	if current.journalID == 0 {
+		return candidatePublicationSetSnapshot{}, humanServiceErr("currentCandidatePublicationSet", fmt.Sprintf("candidate %q has no current publication set", candidate), "landing requires a complete current repository publication snapshot", "verify every candidate manifest member before landing")
+	}
+	return current, nil
+}
+
+func (s *epochHumanService) implementationUATReviewBindingForOperation(epoch, candidate provenance.TaskID, operation provenance.OperationID) (implementationUATReviewBindingSnapshot, error) {
+	query := provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskExact, TaskID: candidate}, OperationIDs: []provenance.OperationID{operation}}, Kinds: []provenance.EvidenceKind{implementationUATReviewBindingEvidenceKind}, Page: provenance.FactPageRequest{Limit: 2}}
+	var binding implementationUATReviewBindingSnapshot
+	count := 0
+	for {
+		page, err := s.tracker.prov.Journal().Facts().QueryEvidence(query)
+		if err != nil {
+			return implementationUATReviewBindingSnapshot{}, fmt.Errorf("query bounded Implementation UAT review binding for operation %q: %w", operation, err)
+		}
+		for _, row := range page.Rows {
+			count++
+			if count > 1 {
+				return implementationUATReviewBindingSnapshot{}, humanServiceErr("implementationUATReviewBindingForOperation", fmt.Sprintf("Implementation UAT operation %q has multiple review bindings", operation), "one Implementation UAT must bind exactly one finalized clean review authority", "repair the duplicate binding evidence before retrying")
+			}
+			if row.TaskID == nil || *row.TaskID != candidate || row.EvidenceKind != implementationUATReviewBindingEvidenceKind || row.ProducingOperationID != operation {
+				return implementationUATReviewBindingSnapshot{}, humanServiceErr("implementationUATReviewBindingForOperation", "an Implementation UAT review binding has inconsistent task, kind, or producer identity", "landing and replay require one canonical candidate-scoped review binding", "repair the malformed binding evidence before retrying")
+			}
+			value, err := decodeImplementationUATReviewBinding(row.Payload)
+			if err != nil || value.Epoch != EpochRootID(epoch.String()) || value.Candidate != IntegrationCandidateSetID(candidate.String()) || value.Operation != operation {
+				return implementationUATReviewBindingSnapshot{}, humanServiceErr("implementationUATReviewBindingForOperation", "an Implementation UAT review-binding payload is inconsistent with its fact metadata", "the binding must identify this exact epoch, candidate, and UAT operation", "repair the malformed binding evidence before retrying")
+			}
+			binding = implementationUATReviewBindingSnapshot{value: value, journalID: row.JournalID}
+		}
+		if page.Next == nil {
+			break
+		}
+		query.Page.SnapshotMaxJournalID = page.Next.SnapshotMaxJournalID
+		query.Page.AfterJournalID = page.Next.AfterJournalID
+	}
+	if count == 0 {
+		return implementationUATReviewBindingSnapshot{}, humanServiceErr("implementationUATReviewBindingForOperation", fmt.Sprintf("Implementation UAT operation %q has no review binding", operation), "landing and exact replay require the review authority recorded with the accepted Implementation UAT", "record a fresh accepted Implementation UAT after a clean finalized review")
+	}
+	return binding, nil
 }
 
 func subjectStateDecisionKind(state subjectState) (DecisionKindID, bool) {

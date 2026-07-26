@@ -55,6 +55,12 @@ func TestEpochHumanServiceProductionFlowAndReopen(t *testing.T) {
 	epoch := createHumanTestTask(t, tracker, "epoch")
 	proposal := createHumanTestTask(t, tracker, "proposal")
 	candidate := createHumanTestTask(t, tracker, "candidate")
+	candidateAuthority := humanCandidateAuthority{}
+	candidateAuthority.stateFact = seedCurrentCandidateLifecycle(t, tracker, epoch, candidate, "flow-candidate-state")
+	candidateAuthority.reviewFact = seedCleanImplementationReview(t, tracker, epoch, candidate, "candidate-review-1", "flow-review-finalized")
+	candidateAuthority.members = humanCandidateMembers(t, tracker, "flow")
+	candidateAuthority.manifestFact = seedCandidateManifest(t, tracker, epoch, candidate, candidateAuthority.members, "flow-candidate-manifest")
+	candidateAuthority.publicationFact = seedCandidatePublicationSet(t, tracker, epoch, candidate, candidateAuthority.manifestFact, publicationsForMembers(candidateAuthority.members), 0, "flow-publication-set")
 	service := newHumanTestService(t, tracker)
 
 	mode, err := service.SetInteractionMode(ctx, SetInteractionModeInput{Meta: CommandMeta{OperationID: "human-mode-1"}, Epoch: EpochRootID(epoch.String()), Mode: InteractionAFK, Actor: AssertedHumanActor{ActorID: human.ID}})
@@ -207,9 +213,12 @@ func TestEpochHumanServiceProductionFlowAndReopen(t *testing.T) {
 			name: "implementation-uat", expectation: humanDecisionExpectation{
 				operation: implInput.Meta.OperationID, actor: human.ID, epoch: epoch, subject: candidate, phase: provenance.PhaseImplUAT,
 				kind: DecisionImplementationUAT, note: "explicit Implementation UAT decision", branch: oracleImplementationUATBranch{Outcome: ImplUATAccepted, Payload: *implPayload},
-				conditions: []conditionSnapshot{oracleEvidenceCondition(candidate, candidateEvidenceKind, 0, provenance.ConditionCurrentFact)},
-				evidence:   []oracleEvidenceExpectation{{kind: candidateEvidenceKind, task: candidate, state: &oracleStateEvidence{Epoch: epoch.String(), Subject: candidate.String(), State: string(subjectStateImplementationAccepted), Decision: oracleDecisionID(implInput.Meta.OperationID), DecisionKind: DecisionImplementationUAT, Operation: implInput.Meta.OperationID}}},
-				statuses:   finalStatuses,
+				conditions: []conditionSnapshot{oracleEvidenceCondition(candidate, candidateEvidenceKind, candidateAuthority.stateFact, provenance.ConditionCurrentFact), oracleEvidenceCondition(candidate, implementationReviewAuthorityEvidenceKind, candidateAuthority.reviewFact, provenance.ConditionCurrentFact)},
+				evidence: []oracleEvidenceExpectation{
+					{kind: candidateEvidenceKind, task: candidate, state: &oracleStateEvidence{Epoch: epoch.String(), Subject: candidate.String(), State: string(subjectStateImplementationAccepted), Decision: oracleDecisionID(implInput.Meta.OperationID), DecisionKind: DecisionImplementationUAT, Operation: implInput.Meta.OperationID}},
+					{kind: implementationUATReviewBindingEvidenceKind, task: candidate, value: implementationUATReviewBinding{Epoch: EpochRootID(epoch.String()), Candidate: IntegrationCandidateSetID(candidate.String()), ReviewRound: "candidate-review-1", ReviewFact: candidateAuthority.reviewFact, Operation: implInput.Meta.OperationID}},
+				},
+				statuses: finalStatuses,
 			}, run: func() (DecisionResult, error) { return implUAT, nil },
 			retry: func() (DecisionResult, error) { return service.RecordImplementationUAT(ctx, implInput) },
 		},
@@ -217,7 +226,7 @@ func TestEpochHumanServiceProductionFlowAndReopen(t *testing.T) {
 			name: "land", expectation: humanDecisionExpectation{
 				operation: landInput.Meta.OperationID, actor: human.ID, epoch: epoch, subject: epoch, phase: provenance.PhaseLanding,
 				kind: DecisionLanded, note: "explicit landing decision", branch: oracleLandedBranch{Candidate: landInput.Candidate, ImplementationUAT: implUAT.DecisionID},
-				conditions: []conditionSnapshot{oracleEvidenceCondition(candidate, candidateEvidenceKind, implState.JournalID, provenance.ConditionExactFact)},
+				conditions: []conditionSnapshot{oracleEvidenceCondition(candidate, candidateEvidenceKind, implState.JournalID, provenance.ConditionCurrentFact), oracleEvidenceCondition(candidate, implementationReviewAuthorityEvidenceKind, candidateAuthority.reviewFact, provenance.ConditionCurrentFact), oracleEvidenceCondition(candidate, candidateManifestEvidenceKind, candidateAuthority.manifestFact, provenance.ConditionExactFact), oracleEvidenceCondition(candidate, candidatePublicationSetEvidenceKind, candidateAuthority.publicationFact, provenance.ConditionCurrentFact)},
 				evidence: []oracleEvidenceExpectation{
 					{kind: candidateEvidenceKind, task: candidate, state: &oracleStateEvidence{Epoch: epoch.String(), Subject: candidate.String(), State: string(subjectStateImplementationLanded), Decision: oracleDecisionID(landInput.Meta.OperationID), DecisionKind: DecisionLanded, Operation: landInput.Meta.OperationID}},
 					{kind: "pasture.implementation-uat.decision.v1", task: epoch, reference: &oracleReferenceEvidence{Epoch: epoch.String(), Subject: epoch.String(), Decision: string(oracleDecisionID(landInput.Meta.OperationID)), Reference: string(landInput.ImplementationUAT)}},
@@ -489,6 +498,12 @@ func TestEpochHumanServiceUATTerminalBarrierRows(t *testing.T) {
 		}
 		epoch := createHumanTestTask(t, tracker, "epoch")
 		candidate := createHumanTestTask(t, tracker, "candidate")
+		authority := humanCandidateAuthority{}
+		authority.stateFact = seedCurrentCandidateLifecycle(t, tracker, epoch, candidate, "race-candidate-state")
+		authority.reviewFact = seedCleanImplementationReview(t, tracker, epoch, candidate, "race-review", "race-review-finalized")
+		authority.members = humanCandidateMembers(t, tracker, "race")
+		authority.manifestFact = seedCandidateManifest(t, tracker, epoch, candidate, authority.members, "race-candidate-manifest")
+		authority.publicationFact = seedCandidatePublicationSet(t, tracker, epoch, candidate, authority.manifestFact, publicationsForMembers(authority.members), 0, "race-publication-set")
 		winner := newHumanTestService(t, tracker)
 		accepted, err := winner.RecordImplementationUAT(context.Background(), ImplementationUATInput{Meta: CommandMeta{OperationID: "race-impl-accepted"}, Epoch: EpochRootID(epoch.String()), Candidate: IntegrationCandidateSetID(candidate.String()), Outcome: ImplUATAccepted, Actor: AssertedHumanActor{ActorID: human.ID}})
 		if err != nil {
@@ -517,7 +532,7 @@ func TestEpochHumanServiceUATTerminalBarrierRows(t *testing.T) {
 			operation: "race-land-winner", actor: human.ID, epoch: epoch, subject: epoch, phase: provenance.PhaseLanding,
 			kind: DecisionLanded, note: "explicit landing decision",
 			branch:     oracleLandedBranch{Candidate: IntegrationCandidateSetID(candidate.String()), ImplementationUAT: accepted.DecisionID},
-			conditions: []conditionSnapshot{oracleEvidenceCondition(candidate, candidateEvidenceKind, acceptedState.JournalID, provenance.ConditionExactFact)},
+			conditions: []conditionSnapshot{oracleEvidenceCondition(candidate, candidateEvidenceKind, acceptedState.JournalID, provenance.ConditionCurrentFact), oracleEvidenceCondition(candidate, implementationReviewAuthorityEvidenceKind, authority.reviewFact, provenance.ConditionCurrentFact), oracleEvidenceCondition(candidate, candidateManifestEvidenceKind, authority.manifestFact, provenance.ConditionExactFact), oracleEvidenceCondition(candidate, candidatePublicationSetEvidenceKind, authority.publicationFact, provenance.ConditionCurrentFact)},
 			evidence: []oracleEvidenceExpectation{
 				{kind: candidateEvidenceKind, task: candidate, state: &oracleStateEvidence{Epoch: epoch.String(), Subject: candidate.String(), State: string(subjectStateImplementationLanded), Decision: oracleDecisionID("race-land-winner"), DecisionKind: DecisionLanded, Operation: "race-land-winner"}},
 				{kind: "pasture.implementation-uat.decision.v1", task: epoch, reference: &oracleReferenceEvidence{Epoch: epoch.String(), Subject: epoch.String(), Decision: string(oracleDecisionID("race-land-winner")), Reference: string(accepted.DecisionID)}},
@@ -540,6 +555,13 @@ func TestEpochHumanServiceRejectsWrongRatifyAndLandBindings(t *testing.T) {
 	proposalB := createHumanTestTask(t, tracker, "proposal-b")
 	candidateA := createHumanTestTask(t, tracker, "candidate-a")
 	candidateB := createHumanTestTask(t, tracker, "candidate-b")
+	seedCurrentCandidateLifecycle(t, tracker, epoch, candidateA, "binding-candidate-a-state")
+	seedCleanImplementationReview(t, tracker, epoch, candidateA, "binding-review-a", "binding-review-a-finalized")
+	seedCurrentCandidateLifecycle(t, tracker, epoch, candidateB, "binding-candidate-b-state")
+	seedCleanImplementationReview(t, tracker, epoch, candidateB, "binding-review-b", "binding-review-b-finalized")
+	membersA := humanCandidateMembers(t, tracker, "binding-a")
+	manifestA := seedCandidateManifest(t, tracker, epoch, candidateA, membersA, "binding-candidate-a-manifest")
+	seedCandidatePublicationSet(t, tracker, epoch, candidateA, manifestA, publicationsForMembers(membersA), 0, "binding-candidate-a-publication")
 	service := newHumanTestService(t, tracker)
 	if _, err := service.RecordPlanUAT(context.Background(), PlanUATInput{Meta: CommandMeta{OperationID: "binding-plan-a"}, Epoch: EpochRootID(epoch.String()), Proposal: proposalA, Outcome: PlanUATAccepted, Actor: AssertedHumanActor{ActorID: human.ID}}); err != nil {
 		t.Fatal(err)
@@ -753,6 +775,96 @@ func seedAcceptedReview(t *testing.T, tracker *trackerImpl, epoch, proposal prov
 	}
 }
 
+type humanCandidateAuthority struct {
+	stateFact       provenance.JournalID
+	reviewFact      provenance.JournalID
+	manifestFact    provenance.JournalID
+	publicationFact provenance.JournalID
+	members         []candidateMember
+}
+
+func seedCurrentCandidateLifecycle(t *testing.T, tracker *trackerImpl, epoch, candidate provenance.TaskID, operation provenance.OperationID) provenance.JournalID {
+	t.Helper()
+	state, err := newAssignmentSubjectStateEvidence(epoch, candidate, subjectStateCandidateCurrent, operation)
+	if err != nil {
+		t.Fatalf("construct candidate lifecycle authority: %v", err)
+	}
+	effect, err := newSubjectStateEvidenceEffect(candidate, state, "candidate-state")
+	if err != nil {
+		t.Fatalf("construct candidate lifecycle effect: %v", err)
+	}
+	applyAuthorityTestEffect(t, tracker, operation, nil, effect)
+	return factJournalID(t, tracker, candidate, candidateEvidenceKind, operation)
+}
+
+func seedCleanImplementationReview(t *testing.T, tracker *trackerImpl, epoch, candidate provenance.TaskID, round ReviewRoundID, operation provenance.OperationID) provenance.JournalID {
+	t.Helper()
+	review, err := newFinalizedReviewAuthority(EpochRootID(epoch.String()), IntegrationCandidateSetID(candidate.String()), round, [3]reviewAxisAuthority{
+		{Axis: AxisCorrectness, Event: 101, Verdict: VerdictAccept},
+		{Axis: AxisTestQuality, Event: 102, Verdict: VerdictAccept},
+		{Axis: AxisElegance, Event: 103, Verdict: VerdictAccept},
+	}, operation)
+	if err != nil {
+		t.Fatalf("construct clean implementation review authority: %v", err)
+	}
+	effect, err := newReviewAuthorityEvidenceEffect(candidate, review, "review-authority")
+	if err != nil {
+		t.Fatalf("construct clean implementation review effect: %v", err)
+	}
+	applyAuthorityTestEffect(t, tracker, operation, nil, effect)
+	return factJournalID(t, tracker, candidate, implementationReviewAuthorityEvidenceKind, operation)
+}
+
+func seedCandidateManifest(t *testing.T, tracker *trackerImpl, epoch, candidate provenance.TaskID, members []candidateMember, operation provenance.OperationID) provenance.JournalID {
+	t.Helper()
+	manifest, err := newIntegrationCandidateManifest(EpochRootID(epoch.String()), IntegrationCandidateSetID(candidate.String()), members, operation)
+	if err != nil {
+		t.Fatalf("construct candidate manifest authority: %v", err)
+	}
+	effect, err := newCandidateManifestEvidenceEffect(candidate, manifest, "candidate-manifest")
+	if err != nil {
+		t.Fatalf("construct candidate manifest effect: %v", err)
+	}
+	applyAuthorityTestEffect(t, tracker, operation, nil, effect)
+	return factJournalID(t, tracker, candidate, candidateManifestEvidenceKind, operation)
+}
+
+func seedCandidatePublicationSet(t *testing.T, tracker *trackerImpl, epoch, candidate provenance.TaskID, manifestFact provenance.JournalID, publications []repositoryPublication, previousFact provenance.JournalID, operation provenance.OperationID) provenance.JournalID {
+	t.Helper()
+	publicationSet, err := newCandidatePublicationSet(EpochRootID(epoch.String()), IntegrationCandidateSetID(candidate.String()), publications, operation)
+	if err != nil {
+		t.Fatalf("construct candidate publication authority: %v", err)
+	}
+	effect, err := newCandidatePublicationSetEvidenceEffect(candidate, publicationSet, "publication-set")
+	if err != nil {
+		t.Fatalf("construct candidate publication effect: %v", err)
+	}
+	conditions := []provenance.Condition{candidateManifestExactCondition(candidate, manifestFact)}
+	if previousFact != 0 {
+		conditions = append(conditions, candidatePublicationSetCurrentCondition(candidate, previousFact))
+	}
+	applyAuthorityTestEffect(t, tracker, operation, conditions, effect)
+	return factJournalID(t, tracker, candidate, candidatePublicationSetEvidenceKind, operation)
+}
+
+func humanCandidateMembers(t *testing.T, tracker *trackerImpl, prefix string) []candidateMember {
+	t.Helper()
+	memberA := createHumanTestTask(t, tracker, prefix+"-member-a")
+	memberB := createHumanTestTask(t, tracker, prefix+"-member-b")
+	return []candidateMember{
+		{Repository: "repo-a", Candidate: ImplementationCandidateID(memberA.String()), Commit: authorityTestCommitA},
+		{Repository: "repo-b", Candidate: ImplementationCandidateID(memberB.String()), Commit: authorityTestCommitB},
+	}
+}
+
+func publicationsForMembers(members []candidateMember) []repositoryPublication {
+	publications := make([]repositoryPublication, len(members))
+	for i, member := range members {
+		publications[i] = repositoryPublication{Repository: member.Repository, Candidate: member.Candidate, Ref: "refs/heads/main", Commit: member.Commit, VerificationOperation: provenance.OperationID("verify-" + string(member.Repository))}
+	}
+	return publications
+}
+
 type humanStoreScope struct {
 	tasks      []provenance.TaskID
 	operations []provenance.OperationID
@@ -845,12 +957,13 @@ type normalizedCommittedOperation struct {
 }
 
 type normalizedHumanStoreFootprint struct {
-	Decisions  []normalizedDecisionFact
-	Evidence   []normalizedEvidenceFact
-	Activities []normalizedActivity
-	Events     []normalizedTaskEvent
-	Statuses   map[string]provenance.Status
-	Operations map[string]normalizedCommittedOperation
+	Decisions          []normalizedDecisionFact
+	Evidence           []normalizedEvidenceFact
+	Activities         []normalizedActivity
+	Events             []normalizedTaskEvent
+	Statuses           map[string]provenance.Status
+	Operations         map[string]normalizedCommittedOperation
+	ExpectedOperations map[string]normalizedCommittedOperation
 }
 
 const oracleCanonicalJSONCodec DecisionCodecID = "pasture.canonical-json/v1"
@@ -917,6 +1030,7 @@ type oracleEvidenceExpectation struct {
 	state      *oracleStateEvidence
 	reference  *oracleReferenceEvidence
 	conditions []conditionSnapshot
+	value      any
 }
 
 type humanDecisionExpectation struct {
@@ -1069,7 +1183,17 @@ func rawFactContexts(t *testing.T, tracker *trackerImpl, table, column string, j
 
 func humanDecisionStoreFootprint(t *testing.T, tracker *trackerImpl, scope humanStoreScope) normalizedHumanStoreFootprint {
 	t.Helper()
-	footprint := normalizedHumanStoreFootprint{Statuses: make(map[string]provenance.Status), Operations: make(map[string]normalizedCommittedOperation)}
+	footprint := normalizedHumanStoreFootprint{Statuses: make(map[string]provenance.Status), Operations: make(map[string]normalizedCommittedOperation), ExpectedOperations: make(map[string]normalizedCommittedOperation)}
+	// LookupCommitted is captured by the independently supplied operation ID
+	// before any raw decision, evidence, or event row is inspected. This record
+	// is the oracle's expected producer identity.
+	for _, operation := range scope.operations {
+		result, err := tracker.Journal().LookupCommitted(operation)
+		if err != nil {
+			t.Fatalf("capture committed operation %q before raw rows: %v", operation, err)
+		}
+		footprint.ExpectedOperations[string(operation)] = normalizeCommittedOperation(result)
+	}
 	for _, task := range scope.tasks {
 		footprint.Decisions = append(footprint.Decisions, readRawDecisionFacts(t, tracker, task)...)
 		footprint.Evidence = append(footprint.Evidence, readRawEvidenceFacts(t, tracker, task)...)
@@ -1085,18 +1209,7 @@ func humanDecisionStoreFootprint(t *testing.T, tracker *trackerImpl, scope human
 		if err != nil {
 			t.Fatalf("lookup complete operation footprint %q: %v", operation, err)
 		}
-		normalized := normalizedCommittedOperation{Present: result.Kind != provenance.CommittedAbsent, Kind: result.Kind, AnchorJournalID: result.AnchorJournalID, EmittedEvents: append([]provenance.JournalID(nil), result.EmittedEvents...)}
-		for _, slot := range result.ResultSlots {
-			value := normalizedResultSlot{Slot: slot.Slot, ProducedJournalID: slot.ProducedJournalID, Kind: slot.Kind}
-			if slot.TaskID != nil {
-				value.TaskID, value.HasTaskID = *slot.TaskID, true
-			}
-			if slot.ActivityID != nil {
-				value.ActivityID, value.HasActivityID = *slot.ActivityID, true
-			}
-			normalized.ResultSlots = append(normalized.ResultSlots, value)
-		}
-		footprint.Operations[string(operation)] = normalized
+		footprint.Operations[string(operation)] = normalizeCommittedOperation(result)
 	}
 
 	query := provenance.JournalQueryV1{OrderBy: provenance.OrderByJournalID, TaskIDs: append([]provenance.TaskID(nil), scope.tasks...), Limit: provenance.MaxFactPageSize}
@@ -1140,6 +1253,21 @@ func humanDecisionStoreFootprint(t *testing.T, tracker *trackerImpl, scope human
 	sort.Slice(footprint.Events, func(i, j int) bool { return footprint.Events[i].JournalID < footprint.Events[j].JournalID })
 	sort.Slice(footprint.Activities, func(i, j int) bool { return footprint.Activities[i].ID.String() < footprint.Activities[j].ID.String() })
 	return footprint
+}
+
+func normalizeCommittedOperation(result provenance.CommittedResult) normalizedCommittedOperation {
+	normalized := normalizedCommittedOperation{Present: result.Kind != provenance.CommittedAbsent, Kind: result.Kind, AnchorJournalID: result.AnchorJournalID, EmittedEvents: append([]provenance.JournalID(nil), result.EmittedEvents...)}
+	for _, slot := range result.ResultSlots {
+		value := normalizedResultSlot{Slot: slot.Slot, ProducedJournalID: slot.ProducedJournalID, Kind: slot.Kind}
+		if slot.TaskID != nil {
+			value.TaskID, value.HasTaskID = *slot.TaskID, true
+		}
+		if slot.ActivityID != nil {
+			value.ActivityID, value.HasActivityID = *slot.ActivityID, true
+		}
+		normalized.ResultSlots = append(normalized.ResultSlots, value)
+	}
+	return normalized
 }
 
 func valueTaskID(id *provenance.TaskID) provenance.TaskID {
@@ -1350,12 +1478,14 @@ func oracleEvidencePayload(t *testing.T, want oracleEvidenceExpectation) []byte 
 	t.Helper()
 	var value any
 	switch {
-	case want.state != nil && want.reference == nil && want.conditions == nil:
+	case want.state != nil && want.reference == nil && want.conditions == nil && want.value == nil:
 		value = want.state
-	case want.state == nil && want.reference != nil && want.conditions == nil:
+	case want.state == nil && want.reference != nil && want.conditions == nil && want.value == nil:
 		value = want.reference
-	case want.state == nil && want.reference == nil && want.conditions != nil:
+	case want.state == nil && want.reference == nil && want.conditions != nil && want.value == nil:
 		value = oracleConditionEvidence{Conditions: want.conditions}
+	case want.state == nil && want.reference == nil && want.conditions == nil && want.value != nil:
+		value = want.value
 	default:
 		t.Fatalf("invalid oracle evidence expectation: %+v", want)
 	}
@@ -1435,10 +1565,17 @@ func assertHumanDecisionOracleExact(t *testing.T, _ *trackerImpl, footprint norm
 		t.Fatalf("activity %q appears %d times in complete footprint; want exactly once", result.ActivityID, activityCount)
 	}
 
-	anchor := decision.ProducingOperationID
+	expectedCommitted, ok := footprint.ExpectedOperations[string(want.operation)]
+	if !ok || expectedCommitted.Kind != provenance.CommittedExact || expectedCommitted.AnchorJournalID == 0 {
+		t.Fatalf("independently captured operation %q = %+v; want an exact committed operation with a nonzero anchor", want.operation, expectedCommitted)
+	}
+	anchor := expectedCommitted.AnchorJournalID
 	committed, ok := footprint.Operations[string(want.operation)]
-	if !ok || committed.Kind != provenance.CommittedExact || committed.AnchorJournalID != anchor || !reflect.DeepEqual(committed.EmittedEvents, result.EventIDs) {
-		t.Fatalf("committed operation = %+v; want exact anchor=%d and returned EventIDs=%v", committed, anchor, result.EventIDs)
+	if !ok || !reflect.DeepEqual(committed, expectedCommitted) || !reflect.DeepEqual(committed.EmittedEvents, result.EventIDs) {
+		t.Fatalf("committed operation = %+v; want independently captured complete operation %+v and returned EventIDs=%v", committed, expectedCommitted, result.EventIDs)
+	}
+	if decision.ProducingOperationID != anchor {
+		t.Fatalf("decision producer anchor = %d; want independently captured anchor %d", decision.ProducingOperationID, anchor)
 	}
 	wantEvidence := append([]oracleEvidenceExpectation(nil), want.evidence...)
 	wantEvidence = append(wantEvidence, oracleEvidenceExpectation{kind: preconditionEvidenceKind, task: want.subject, conditions: want.conditions})
@@ -1604,12 +1741,8 @@ func assertBarrierWinnerDelta(t *testing.T, before, after normalizedHumanStoreFo
 	if beforeResult, ok := before.Operations[string(loser)]; ok && beforeResult.Present {
 		t.Fatalf("barrier loser %q was already present before the race: %+v", loser, beforeResult)
 	}
-	withoutWinner := footprintWithoutOperation(after, want.operation)
-	if beforeResult, ok := before.Operations[string(want.operation)]; ok {
-		withoutWinner.Operations[string(want.operation)] = beforeResult
-	}
-	withoutWinner.Statuses = cloneStatuses(before.Statuses)
-	assertHumanDecisionStoreFootprintEqual(t, before, withoutWinner)
+	residual := subtractValidatedWinner(t, before, after, validatedWinnerDeltaFromOracle(t, before, after, want, winner))
+	assertHumanDecisionStoreFootprintEqual(t, before, residual)
 	for task, beforeStatus := range before.Statuses {
 		wantStatus, ok := want.statuses[task]
 		if !ok {
@@ -1621,46 +1754,189 @@ func assertBarrierWinnerDelta(t *testing.T, before, after normalizedHumanStoreFo
 	}
 }
 
-func footprintWithoutOperation(footprint normalizedHumanStoreFootprint, operation provenance.OperationID) normalizedHumanStoreFootprint {
-	without := footprint
-	without.Decisions = nil
-	for _, decision := range footprint.Decisions {
-		if decision.OperationID != operation {
-			without.Decisions = append(without.Decisions, decision)
-		}
-	}
-	without.Evidence = nil
-	for _, evidence := range footprint.Evidence {
-		if evidence.OperationID != operation {
-			without.Evidence = append(without.Evidence, evidence)
-		}
-	}
-	without.Events = nil
-	for _, event := range footprint.Events {
-		if event.OperationID != operation {
-			without.Events = append(without.Events, event)
-		}
-	}
-	activityID := oracleActivityID(operation)
-	without.Activities = nil
-	for _, activity := range footprint.Activities {
-		if activity.ID != activityID {
-			without.Activities = append(without.Activities, activity)
-		}
-	}
-	without.Operations = make(map[string]normalizedCommittedOperation, len(footprint.Operations))
-	for key, result := range footprint.Operations {
-		if key != string(operation) {
-			without.Operations[key] = result
-		}
-	}
-	return without
+type validatedWinnerDelta struct {
+	decision       normalizedDecisionFact
+	evidence       []normalizedEvidenceFact
+	events         []normalizedTaskEvent
+	activity       normalizedActivity
+	operation      provenance.OperationID
+	operationValue normalizedCommittedOperation
+	status         *validatedStatusTransition
 }
 
-func cloneStatuses(statuses map[string]provenance.Status) map[string]provenance.Status {
-	clone := make(map[string]provenance.Status, len(statuses))
-	for task, status := range statuses {
-		clone[task] = status
+type validatedStatusTransition struct {
+	task          string
+	before        provenance.Status
+	beforePresent bool
+	after         provenance.Status
+}
+
+// validatedWinnerDeltaFromOracle is intentionally called only after
+// assertHumanDecisionOracleExact has accepted every winner binding. It records
+// full normalized values, not an operation-wide predicate, for once-only
+// subtraction from a barrier footprint.
+func validatedWinnerDeltaFromOracle(t *testing.T, before, after normalizedHumanStoreFootprint, want humanDecisionExpectation, winner DecisionResult) validatedWinnerDelta {
+	t.Helper()
+	delta := validatedWinnerDelta{decision: findDecisionByOperation(t, after, want.operation), operation: want.operation}
+	for _, evidence := range after.Evidence {
+		if evidence.OperationID == want.operation {
+			delta.evidence = append(delta.evidence, evidence)
+		}
+	}
+	if len(delta.evidence) != len(want.evidence)+1 {
+		t.Fatalf("validated winner %q has %d evidence rows; want exactly %d including preconditions", want.operation, len(delta.evidence), len(want.evidence)+1)
+	}
+	for _, eventID := range winner.EventIDs {
+		count := 0
+		for _, event := range after.Events {
+			if event.JournalID == eventID {
+				delta.events = append(delta.events, event)
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("validated winner %q event %d appears %d times", want.operation, eventID, count)
+		}
+	}
+	for _, activity := range after.Activities {
+		if activity.ID == winner.ActivityID {
+			if delta.activity.ID != (provenance.ActivityID{}) {
+				t.Fatalf("validated winner %q has duplicate activity %s", want.operation, winner.ActivityID)
+			}
+			delta.activity = activity
+		}
+	}
+	if delta.activity.ID == (provenance.ActivityID{}) {
+		t.Fatalf("validated winner %q is missing activity %s", want.operation, winner.ActivityID)
+	}
+	operation, ok := after.Operations[string(want.operation)]
+	if !ok {
+		t.Fatalf("validated winner %q is missing its committed operation", want.operation)
+	}
+	delta.operationValue = operation
+	if want.closeTask != (provenance.TaskID{}) {
+		task := want.closeTask.String()
+		beforeStatus, beforePresent := before.Statuses[task]
+		afterStatus, afterPresent := after.Statuses[task]
+		wantStatus, wanted := want.statuses[task]
+		if !afterPresent || !wanted || afterStatus != wantStatus {
+			t.Fatalf("validated winner %q close status %q = %s (present=%t); want %s", want.operation, task, afterStatus, afterPresent, wantStatus)
+		}
+		delta.status = &validatedStatusTransition{task: task, before: beforeStatus, beforePresent: beforePresent, after: afterStatus}
+	}
+	return delta
+}
+
+func subtractValidatedWinner(t *testing.T, before, after normalizedHumanStoreFootprint, delta validatedWinnerDelta) normalizedHumanStoreFootprint {
+	t.Helper()
+	residual := cloneHumanStoreFootprint(after)
+	residual.Decisions = subtractExactOne(t, residual.Decisions, delta.decision, "decision")
+	for _, evidence := range delta.evidence {
+		residual.Evidence = subtractExactOne(t, residual.Evidence, evidence, "evidence")
+	}
+	for _, event := range delta.events {
+		residual.Events = subtractExactOne(t, residual.Events, event, "task event")
+	}
+	residual.Activities = subtractExactOne(t, residual.Activities, delta.activity, "activity")
+
+	storedOperation, found := residual.Operations[string(delta.operation)]
+	if !found || !reflect.DeepEqual(storedOperation, delta.operationValue) {
+		t.Fatalf("validated winner %q committed operation is missing or changed: %+v", delta.operation, storedOperation)
+	}
+	if beforeOperation, found := before.Operations[string(delta.operation)]; found {
+		residual.Operations[string(delta.operation)] = beforeOperation
+	} else {
+		delete(residual.Operations, string(delta.operation))
+	}
+	if beforeExpected, found := before.ExpectedOperations[string(delta.operation)]; found {
+		residual.ExpectedOperations[string(delta.operation)] = beforeExpected
+	} else {
+		delete(residual.ExpectedOperations, string(delta.operation))
+	}
+	if delta.status != nil {
+		if got, found := residual.Statuses[delta.status.task]; !found || got != delta.status.after {
+			t.Fatalf("validated winner status transition for %q is missing or changed: %s (present=%t), want %s", delta.status.task, got, found, delta.status.after)
+		}
+		if delta.status.beforePresent {
+			residual.Statuses[delta.status.task] = delta.status.before
+		} else {
+			delete(residual.Statuses, delta.status.task)
+		}
+	}
+	return residual
+}
+
+func subtractExactOne[T any](t *testing.T, values []T, expected T, label string) []T {
+	t.Helper()
+	index := -1
+	for i, value := range values {
+		if reflect.DeepEqual(value, expected) {
+			if index >= 0 {
+				t.Fatalf("validated winner %s appears more than once", label)
+			}
+			index = i
+		}
+	}
+	if index < 0 {
+		t.Fatalf("validated winner %s is missing from the after footprint", label)
+	}
+	if len(values) == 1 {
+		return nil
+	}
+	return append(values[:index:index], values[index+1:]...)
+}
+
+func cloneHumanStoreFootprint(footprint normalizedHumanStoreFootprint) normalizedHumanStoreFootprint {
+	clone := footprint
+	clone.Decisions = append([]normalizedDecisionFact(nil), footprint.Decisions...)
+	clone.Evidence = append([]normalizedEvidenceFact(nil), footprint.Evidence...)
+	clone.Events = append([]normalizedTaskEvent(nil), footprint.Events...)
+	clone.Activities = append([]normalizedActivity(nil), footprint.Activities...)
+	clone.Statuses = make(map[string]provenance.Status, len(footprint.Statuses))
+	for key, value := range footprint.Statuses {
+		clone.Statuses[key] = value
+	}
+	clone.Operations = make(map[string]normalizedCommittedOperation, len(footprint.Operations))
+	for key, value := range footprint.Operations {
+		clone.Operations[key] = value
+	}
+	clone.ExpectedOperations = make(map[string]normalizedCommittedOperation, len(footprint.ExpectedOperations))
+	for key, value := range footprint.ExpectedOperations {
+		clone.ExpectedOperations[key] = value
 	}
 	return clone
+}
+
+func TestEpochHumanServiceExactWinnerSubtractionRetainsUnexpectedRows(t *testing.T) {
+	winnerOperation := provenance.OperationID("winner")
+	winnerDecision := normalizedDecisionFact{JournalID: 1, OperationID: winnerOperation, ProducingOperationID: 10, HasProducingOperationID: true}
+	winnerEvidence := normalizedEvidenceFact{JournalID: 2, OperationID: winnerOperation, Kind: "pasture.expected.v1", ProducingOperationID: 10, HasProducingOperationID: true}
+	winnerPrecondition := normalizedEvidenceFact{JournalID: 3, OperationID: winnerOperation, Kind: preconditionEvidenceKind, ProducingOperationID: 10, HasProducingOperationID: true}
+	winnerEvent := normalizedTaskEvent{JournalID: 4, OperationID: winnerOperation, OperationJournalID: 10, HasOperationJournalID: true}
+	winnerActivity := normalizedActivity{ID: oracleActivityID(winnerOperation)}
+	before := normalizedHumanStoreFootprint{
+		Statuses:           map[string]provenance.Status{"winner-task": provenance.StatusOpen},
+		Operations:         map[string]normalizedCommittedOperation{},
+		ExpectedOperations: map[string]normalizedCommittedOperation{},
+	}
+	operation := normalizedCommittedOperation{Present: true, Kind: provenance.CommittedExact, AnchorJournalID: 10}
+	after := cloneHumanStoreFootprint(before)
+	after.Decisions = []normalizedDecisionFact{winnerDecision, {JournalID: 5, OperationID: winnerOperation, Kind: "pasture.unknown.decision.v1", ProducingOperationID: 10, HasProducingOperationID: true}}
+	after.Evidence = []normalizedEvidenceFact{winnerEvidence, winnerPrecondition}
+	after.Events = []normalizedTaskEvent{winnerEvent, {JournalID: 6, OperationID: winnerOperation, OperationJournalID: 99, HasOperationJournalID: true, Contexts: []normalizedEventContext{{Kind: provenance.EventContextKindTask, Identity: "unexpected-context"}}}}
+	after.Activities = []normalizedActivity{winnerActivity}
+	after.Statuses["winner-task"] = provenance.StatusClosed
+	after.Operations[string(winnerOperation)] = operation
+	after.ExpectedOperations[string(winnerOperation)] = operation
+	residual := subtractValidatedWinner(t, before, after, validatedWinnerDelta{
+		decision: winnerDecision, evidence: []normalizedEvidenceFact{winnerEvidence, winnerPrecondition}, events: []normalizedTaskEvent{winnerEvent}, activity: winnerActivity,
+		operation: winnerOperation, operationValue: operation,
+		status: &validatedStatusTransition{task: "winner-task", before: provenance.StatusOpen, beforePresent: true, after: provenance.StatusClosed},
+	})
+	if len(residual.Decisions) != 1 || residual.Decisions[0].Kind != "pasture.unknown.decision.v1" || len(residual.Events) != 1 || residual.Events[0].OperationJournalID != 99 {
+		t.Fatalf("exact subtraction erased unexpected rows: %+v", residual)
+	}
+	if reflect.DeepEqual(before, residual) {
+		t.Fatal("exact subtraction made a footprint with unknown/wrong-anchor rows equal to its before snapshot")
+	}
 }
