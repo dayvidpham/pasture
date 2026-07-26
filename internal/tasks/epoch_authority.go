@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/dayvidpham/provenance"
 
@@ -39,7 +40,8 @@ func (s reviewAuthorityState) valid() bool {
 }
 
 // reviewAxisAuthority binds one canonical review axis to its immutable event and
-// verdict. The array containing these values is always in ReviewAxes order.
+// verdict. The array containing these values is always in the authority's
+// private canonical order.
 type reviewAxisAuthority struct {
 	Axis    ReviewAxis
 	Event   provenance.JournalID
@@ -301,7 +303,7 @@ func validateImplementationReviewAuthority(value implementationReviewAuthority) 
 	if err := validateText(string(value.Round), "review round"); err != nil {
 		return err
 	}
-	if err := provenance.ValidateOperationID(value.Operation); err != nil {
+	if err := validateOperationID(value.Operation); err != nil {
 		return authorityErr("implementationReviewAuthority", "the producing operation identity is malformed", "authority replay requires one stable operation identity", "supply a non-empty operation identity without control characters")
 	}
 	if !value.State.valid() {
@@ -322,12 +324,13 @@ func validateImplementationReviewAuthority(value implementationReviewAuthority) 
 func validateReviewAxes(axes [3]reviewAxisAuthority, state reviewAuthorityState) error {
 	hasRevise := false
 	seenEvents := make(map[provenance.JournalID]struct{}, len(axes))
+	canonicalAxes := canonicalReviewAxes()
 	for i, axis := range axes {
-		if axis.Axis != ReviewAxes[i] {
-			return authorityErr("reviewAxisAuthority", fmt.Sprintf("axis %d is %s", i, axis.Axis), "review authority uses correctness, test-quality, elegance order", "supply the canonical ReviewAxes order")
+		if axis.Axis != canonicalAxes[i] {
+			return authorityErr("reviewAxisAuthority", fmt.Sprintf("axis %d is %s", i, axis.Axis), "review authority uses correctness, test-quality, elegance order", "supply correctness, test-quality, elegance order")
 		}
-		if axis.Event == 0 {
-			return authorityErr("reviewAxisAuthority", fmt.Sprintf("axis %d has no event", i), "a finalized authority must bind every immutable review event", "supply three non-zero distinct review event IDs")
+		if axis.Event <= 0 {
+			return authorityErr("reviewAxisAuthority", fmt.Sprintf("axis %d has invalid event %d", i, axis.Event), "a finalized authority must bind every immutable review event with a positive journal identity", "supply three distinct positive review event IDs")
 		}
 		if _, found := seenEvents[axis.Event]; found {
 			return authorityErr("reviewAxisAuthority", fmt.Sprintf("axis %d repeats event %d", i, axis.Event), "each review axis must bind a distinct event", "supply one distinct event per axis")
@@ -345,6 +348,12 @@ func validateReviewAxes(axes [3]reviewAxisAuthority, state reviewAuthorityState)
 		return authorityErr("reviewAxisAuthority", "a revising finalized authority contains no revise verdict", "revising authority requires actionable revision", "use reviewFinalizedClean or include a revise axis")
 	}
 	return nil
+}
+
+// canonicalReviewAxes returns a fresh value so authority validation cannot be
+// changed by mutation of the exported ReviewAxes API value.
+func canonicalReviewAxes() [3]ReviewAxis {
+	return [3]ReviewAxis{AxisCorrectness, AxisTestQuality, AxisElegance}
 }
 
 func zeroReviewAxes(axes [3]reviewAxisAuthority) bool {
@@ -388,7 +397,7 @@ func newIntegrationCandidateManifest(epoch EpochRootID, candidate IntegrationCan
 	if err := validateTaskWrapper(string(candidate), "candidate set"); err != nil {
 		return integrationCandidateManifest{}, err
 	}
-	if err := provenance.ValidateOperationID(operation); err != nil {
+	if err := validateOperationID(operation); err != nil {
 		return integrationCandidateManifest{}, authorityErr("candidateManifest", "the manifest operation identity is malformed", "immutable membership must identify its producer", "supply a stable operation identity")
 	}
 	normalized, err := normalizeCandidateMembers(members)
@@ -416,7 +425,7 @@ func normalizePublications(publications []repositoryPublication) ([]repositoryPu
 		if err := validateGitOID(publication.Commit); err != nil {
 			return nil, fmt.Errorf("publication %d: %w", i, err)
 		}
-		if err := provenance.ValidateOperationID(publication.VerificationOperation); err != nil {
+		if err := validateOperationID(publication.VerificationOperation); err != nil {
 			return nil, authorityErr("candidatePublicationSet", fmt.Sprintf("publication %d has a malformed verification operation", i), "each verification must be replayable and attributable", "supply a stable operation identity")
 		}
 	}
@@ -441,7 +450,7 @@ func newCandidatePublicationSet(epoch EpochRootID, candidate IntegrationCandidat
 	if err := validateTaskWrapper(string(candidate), "candidate set"); err != nil {
 		return candidatePublicationSet{}, err
 	}
-	if err := provenance.ValidateOperationID(operation); err != nil {
+	if err := validateOperationID(operation); err != nil {
 		return candidatePublicationSet{}, authorityErr("candidatePublicationSet", "the publication-set operation identity is malformed", "a current publication snapshot must identify its producer", "supply a stable operation identity")
 	}
 	normalized, err := normalizePublications(publications)
@@ -480,10 +489,10 @@ func newImplementationUATReviewBinding(epoch EpochRootID, candidate IntegrationC
 	if err := validateText(string(round), "review round"); err != nil {
 		return implementationUATReviewBinding{}, err
 	}
-	if reviewFact == 0 {
-		return implementationUATReviewBinding{}, authorityErr("implementationUATReviewBinding", "the review fact is zero", "Implementation UAT must bind one exact finalized review authority fact", "supply the committed review evidence journal id")
+	if reviewFact <= 0 {
+		return implementationUATReviewBinding{}, authorityErr("implementationUATReviewBinding", fmt.Sprintf("the review fact %d is not positive", reviewFact), "Implementation UAT must bind one exact finalized review authority fact with a positive journal identity", "supply the committed positive review evidence journal id")
 	}
-	if err := provenance.ValidateOperationID(operation); err != nil {
+	if err := validateOperationID(operation); err != nil {
 		return implementationUATReviewBinding{}, authorityErr("implementationUATReviewBinding", "the UAT operation identity is malformed", "review binding must be replayable", "supply a stable operation identity")
 	}
 	return implementationUATReviewBinding{Epoch: epoch, Candidate: candidate, ReviewRound: round, ReviewFact: reviewFact, Operation: operation}, nil
@@ -506,6 +515,20 @@ func newAssignmentSubjectStateEvidence(epoch, subject provenance.TaskID, state s
 }
 
 func validateSubjectStateEvidence(value subjectStateEvidence, epoch, subject provenance.TaskID, family provenance.EvidenceKind, producingOperation provenance.OperationID) error {
+	for _, scalar := range []struct {
+		value string
+		label string
+	}{
+		{value.Epoch, "subject-state epoch"},
+		{value.Subject, "subject-state subject"},
+		{string(value.State), "subject-state value"},
+		{string(value.Decision), "subject-state decision"},
+		{string(value.DecisionKind), "subject-state decision kind"},
+	} {
+		if err := validateAuthorityUTF8(scalar.value, scalar.label); err != nil {
+			return err
+		}
+	}
 	if epoch == (provenance.TaskID{}) || subject == (provenance.TaskID{}) || value.Epoch != epoch.String() || value.Subject != subject.String() {
 		return authorityErr("subjectStateEvidence", "the epoch or subject identity is inconsistent", "candidate state must point to the exact task-scoped subject", "construct the state from the epoch and subject task IDs")
 	}
@@ -515,7 +538,7 @@ func validateSubjectStateEvidence(value subjectStateEvidence, epoch, subject pro
 	if _, err := provenance.TaskContext(subject); err != nil {
 		return authorityErr("subjectStateEvidence", "the subject identity is malformed", "candidate state must be scoped to a valid Provenance task", "supply a valid subject task identity")
 	}
-	if err := provenance.ValidateOperationID(value.Operation); err != nil || value.Operation != producingOperation {
+	if err := validateOperationID(value.Operation); err != nil || value.Operation != producingOperation {
 		return authorityErr("subjectStateEvidence", "the producing operation identity is inconsistent", "state evidence must identify the operation that emitted the fact", "use the operation identity from the enclosing Apply")
 	}
 	if !subjectStateBelongsToFamily(value.State, family) && family != "" {
@@ -538,35 +561,55 @@ func validateSubjectStateEvidence(value subjectStateEvidence, epoch, subject pro
 }
 
 func newReviewAuthorityEvidenceEffect(subject provenance.TaskID, value implementationReviewAuthority, resultSlot provenance.ResultSlotID) (provenance.Effect, error) {
-	if err := validateEvidenceSubject(subject, string(value.Candidate), "review authority"); err != nil {
+	canonical, err := newImplementationReviewAuthority(value)
+	if err != nil {
 		return provenance.Effect{}, err
 	}
-	return newTypedEvidenceEffect(subject, implementationReviewAuthorityEvidenceKind, value, resultSlot, "implementation review authority")
+	if err := validateEvidenceSubject(subject, string(canonical.Candidate), "review authority"); err != nil {
+		return provenance.Effect{}, err
+	}
+	return newTypedEvidenceEffect(subject, implementationReviewAuthorityEvidenceKind, canonical, resultSlot, "implementation review authority")
 }
 
 func newCandidateManifestEvidenceEffect(subject provenance.TaskID, value integrationCandidateManifest, resultSlot provenance.ResultSlotID) (provenance.Effect, error) {
-	if err := validateEvidenceSubject(subject, string(value.Candidate), "candidate manifest"); err != nil {
+	canonical, err := newIntegrationCandidateManifest(value.Epoch, value.Candidate, value.Members, value.Operation)
+	if err != nil {
 		return provenance.Effect{}, err
 	}
-	return newTypedEvidenceEffect(subject, candidateManifestEvidenceKind, value, resultSlot, "candidate manifest")
+	if err := validateEvidenceSubject(subject, string(canonical.Candidate), "candidate manifest"); err != nil {
+		return provenance.Effect{}, err
+	}
+	return newTypedEvidenceEffect(subject, candidateManifestEvidenceKind, canonical, resultSlot, "candidate manifest")
 }
 
 func newCandidatePublicationSetEvidenceEffect(subject provenance.TaskID, value candidatePublicationSet, resultSlot provenance.ResultSlotID) (provenance.Effect, error) {
-	if err := validateEvidenceSubject(subject, string(value.Candidate), "candidate publication set"); err != nil {
+	canonical, err := newCandidatePublicationSet(value.Epoch, value.Candidate, value.Publications, value.Operation)
+	if err != nil {
 		return provenance.Effect{}, err
 	}
-	return newTypedEvidenceEffect(subject, candidatePublicationSetEvidenceKind, value, resultSlot, "candidate publication set")
+	if err := validateEvidenceSubject(subject, string(canonical.Candidate), "candidate publication set"); err != nil {
+		return provenance.Effect{}, err
+	}
+	return newTypedEvidenceEffect(subject, candidatePublicationSetEvidenceKind, canonical, resultSlot, "candidate publication set")
 }
 
 func newImplementationUATReviewBindingEvidenceEffect(subject provenance.TaskID, value implementationUATReviewBinding, resultSlot provenance.ResultSlotID) (provenance.Effect, error) {
-	if err := validateEvidenceSubject(subject, string(value.Candidate), "Implementation UAT review binding"); err != nil {
+	canonical, err := newImplementationUATReviewBinding(value.Epoch, value.Candidate, value.ReviewRound, value.ReviewFact, value.Operation)
+	if err != nil {
 		return provenance.Effect{}, err
 	}
-	return newTypedEvidenceEffect(subject, implementationUATReviewBindingEvidenceKind, value, resultSlot, "Implementation UAT review binding")
+	if err := validateEvidenceSubject(subject, string(canonical.Candidate), "Implementation UAT review binding"); err != nil {
+		return provenance.Effect{}, err
+	}
+	return newTypedEvidenceEffect(subject, implementationUATReviewBindingEvidenceKind, canonical, resultSlot, "Implementation UAT review binding")
 }
 
 func newSubjectStateEvidenceEffect(subject provenance.TaskID, value subjectStateEvidence, resultSlot provenance.ResultSlotID) (provenance.Effect, error) {
-	if err := validateSubjectStateEvidence(value, mustParseTaskID(value.Epoch), subject, familyForSubjectState(value.State), value.Operation); err != nil {
+	epoch, err := parseAuthorityTaskID(value.Epoch, "subject-state epoch")
+	if err != nil {
+		return provenance.Effect{}, err
+	}
+	if err := validateSubjectStateEvidence(value, epoch, subject, familyForSubjectState(value.State), value.Operation); err != nil {
 		return provenance.Effect{}, err
 	}
 	return newTypedEvidenceEffect(subject, familyForSubjectState(value.State), value, resultSlot, "candidate state")
@@ -681,7 +724,7 @@ func validateEvidenceSubject(subject provenance.TaskID, candidate, label string)
 	if subject == (provenance.TaskID{}) {
 		return authorityErr("evidence subject", fmt.Sprintf("the %s subject is zero", label), "authority evidence must be scoped to the candidate task", "supply the candidate set task as the evidence subject")
 	}
-	parsed, err := provenance.ParseTaskID(candidate)
+	parsed, err := parseAuthorityTaskID(candidate, label+" candidate")
 	if err != nil || parsed != subject {
 		return authorityErr("evidence subject", fmt.Sprintf("the %s candidate does not match its task subject", label), "a typed authority fact cannot bind one candidate identity to another task", "use the exact candidate task identity as both values")
 	}
@@ -689,10 +732,8 @@ func validateEvidenceSubject(subject provenance.TaskID, candidate, label string)
 }
 
 func validateTaskWrapper(raw, label string) error {
-	if _, err := provenance.ParseTaskID(raw); err != nil {
-		return authorityErr("typed task identity", fmt.Sprintf("the %s identity %q is malformed", label, raw), "authority facts are scoped to existing Provenance task identities", fmt.Sprintf("supply %s as namespace--uuid", label))
-	}
-	return nil
+	_, err := parseAuthorityTaskID(raw, label)
+	return err
 }
 
 func validateRepositoryID(repository RepositoryID) error {
@@ -704,13 +745,21 @@ func validateGitRef(ref GitRef) error {
 		return err
 	}
 	value := string(ref)
-	if strings.Contains(value, "..") || strings.Contains(value, "@{") || strings.ContainsAny(value, "~^:?*[\\") || strings.HasPrefix(value, "/") || strings.HasSuffix(value, "/") || strings.HasPrefix(value, ".") || strings.HasSuffix(value, ".") || strings.Contains(value, "//") {
+	if value == "@" || !strings.Contains(value, "/") || strings.Contains(value, "..") || strings.Contains(value, "@{") || strings.ContainsAny(value, "~^:?*[\\") || strings.HasPrefix(value, "/") || strings.HasSuffix(value, "/") || strings.HasSuffix(value, ".") || strings.Contains(value, "//") {
 		return authorityErr("git ref", fmt.Sprintf("the ref %q is malformed", ref), "publication evidence must identify a valid non-ambiguous Git ref", "supply a Git ref accepted by git-check-ref-format")
+	}
+	for _, component := range strings.Split(value, "/") {
+		if component == "" || strings.HasPrefix(component, ".") || strings.HasSuffix(strings.ToLower(component), ".lock") {
+			return authorityErr("git ref", fmt.Sprintf("the ref %q is malformed", ref), "publication evidence must identify a valid non-ambiguous Git ref", "supply a Git ref accepted by git-check-ref-format")
+		}
 	}
 	return nil
 }
 
 func validateGitOID(oid provenance.GitOID) error {
+	if err := validateAuthorityUTF8(string(oid), "git object identity"); err != nil {
+		return err
+	}
 	if _, err := provenance.GitContext(oid); err != nil {
 		return authorityErr("git object identity", fmt.Sprintf("the Git object id %q is malformed", oid), "candidate and publication facts require canonical SHA-1 or SHA-256 object identities", "supply a lowercase 40- or 64-hex Git object id")
 	}
@@ -718,6 +767,9 @@ func validateGitOID(oid provenance.GitOID) error {
 }
 
 func validateText(value, label string) error {
+	if err := validateAuthorityUTF8(value, label); err != nil {
+		return err
+	}
 	if value == "" || strings.TrimSpace(value) != value {
 		return authorityErr("typed scalar", fmt.Sprintf("the %s is empty or padded", label), "authority payloads require a canonical non-empty scalar", fmt.Sprintf("supply a trimmed %s", label))
 	}
@@ -727,6 +779,43 @@ func validateText(value, label string) error {
 		}
 	}
 	return nil
+}
+
+// validateAuthorityUTF8 rejects lossy JSON inputs before any parser or rune
+// traversal can observe replacement runes instead of the original bytes.
+func validateAuthorityUTF8(value, label string) error {
+	if !utf8.ValidString(value) {
+		return authorityErr("typed scalar", fmt.Sprintf("the %s contains invalid UTF-8", label), "authority text must be valid UTF-8 before it can be parsed or encoded as canonical JSON", fmt.Sprintf("supply valid UTF-8 text for the %s", label))
+	}
+	return nil
+}
+
+func validateOperationID(operation provenance.OperationID) error {
+	if err := validateAuthorityUTF8(string(operation), "operation identity"); err != nil {
+		return err
+	}
+	return provenance.ValidateOperationID(operation)
+}
+
+// parseAuthorityTaskID preserves the source parser failure while adding the
+// authority boundary's actionable validation context.
+func parseAuthorityTaskID(raw, label string) (provenance.TaskID, error) {
+	if err := validateAuthorityUTF8(raw, label); err != nil {
+		return provenance.TaskID{}, err
+	}
+	id, err := provenance.ParseTaskID(raw)
+	if err != nil {
+		return provenance.TaskID{}, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryValidation,
+			What:     fmt.Sprintf("Pasture rejected an epoch authority contract: the %s identity %q is malformed.", label, raw),
+			Why:      "Authority facts are scoped to existing Provenance task identities.",
+			Where:    "Epoch authority contract (internal/tasks/epoch_authority.go, parseAuthorityTaskID).",
+			Impact:   "The authority fact was not constructed; no journal effect was produced.",
+			Fix:      fmt.Sprintf("Supply %s as namespace--uuid.", label),
+			Cause:    err,
+		}
+	}
+	return id, nil
 }
 
 func equalMembers(left, right []candidateMember) bool {
@@ -749,11 +838,6 @@ func equalPublications(left, right []repositoryPublication) bool {
 		}
 		return true
 	}()
-}
-
-func mustParseTaskID(raw string) provenance.TaskID {
-	id, _ := provenance.ParseTaskID(raw)
-	return id
 }
 
 func authorityErr(where, what, why, fix string) error {

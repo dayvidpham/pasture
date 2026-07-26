@@ -1,10 +1,13 @@
 package tasks
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
 	"github.com/dayvidpham/provenance"
+
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 )
 
 const (
@@ -84,19 +87,241 @@ func TestEpochAuthorityContractsRejectMalformedAndDuplicateValues(t *testing.T) 
 		t.Fatalf("invalidated authority = %+v, err=%v", invalidated, err)
 	}
 
-	humanState, err := newHumanSubjectStateEvidence(mustParseTaskID(string(epoch)), mustParseTaskID(string(candidate)), subjectStateImplementationAccepted, decisionIDForOperation("human-state"), DecisionImplementationUAT, "human-state")
+	humanState, err := newHumanSubjectStateEvidence(authorityTestTaskID(t, string(epoch)), authorityTestTaskID(t, string(candidate)), subjectStateImplementationAccepted, decisionIDForOperation("human-state"), DecisionImplementationUAT, "human-state")
 	if err != nil {
 		t.Fatalf("newHumanSubjectStateEvidence: %v", err)
 	}
 	if humanState.Source != subjectStateSourceHumanDecision || humanState.Decision == "" || humanState.DecisionKind == "" {
 		t.Fatalf("human state source = %+v, want exact decision binding", humanState)
 	}
-	assignmentState, err := newAssignmentSubjectStateEvidence(mustParseTaskID(string(epoch)), mustParseTaskID(string(candidate)), subjectStateReworked, "assignment-rework")
+	assignmentState, err := newAssignmentSubjectStateEvidence(authorityTestTaskID(t, string(epoch)), authorityTestTaskID(t, string(candidate)), subjectStateReworked, "assignment-rework")
 	if err != nil {
 		t.Fatalf("newAssignmentSubjectStateEvidence: %v", err)
 	}
 	if assignmentState.Source != subjectStateSourceAssignmentOperation || assignmentState.Decision != "" || assignmentState.DecisionKind != "" {
 		t.Fatalf("assignment state source = %+v, want operation-only binding", assignmentState)
+	}
+}
+
+func TestEpochAuthorityEffectBoundariesValidateAndCanonicalize(t *testing.T) {
+	t.Parallel()
+	epoch := EpochRootID("tasks--018f0000-0000-7000-8000-000000000001")
+	candidate := IntegrationCandidateSetID("tasks--018f0000-0000-7000-8000-000000000002")
+	subject := authorityTestTaskID(t, string(candidate))
+	memberA := candidateMember{Repository: "repo-a", Candidate: ImplementationCandidateID(candidate), Commit: authorityTestCommitA}
+	memberB := candidateMember{Repository: "repo-b", Candidate: "tasks--018f0000-0000-7000-8000-000000000003", Commit: authorityTestCommitB}
+
+	for _, test := range []struct {
+		name   string
+		effect func() (provenance.Effect, error)
+	}{
+		{
+			name: "review authority",
+			effect: func() (provenance.Effect, error) {
+				return newReviewAuthorityEvidenceEffect(subject, implementationReviewAuthority{
+					Epoch: epoch, Candidate: candidate, Round: "round-1", State: reviewFinalizedClean,
+					Axes: [3]reviewAxisAuthority{
+						{Axis: AxisCorrectness, Event: 1, Verdict: VerdictAccept},
+						{Axis: AxisTestQuality, Event: 0, Verdict: VerdictAccept},
+						{Axis: AxisElegance, Event: 3, Verdict: VerdictAccept},
+					},
+					Operation: "invalid-review-authority",
+				}, "review-authority")
+			},
+		},
+		{
+			name: "candidate manifest",
+			effect: func() (provenance.Effect, error) {
+				return newCandidateManifestEvidenceEffect(subject, integrationCandidateManifest{
+					Epoch: epoch, Candidate: candidate, Members: []candidateMember{{Repository: "", Candidate: memberA.Candidate, Commit: memberA.Commit}}, Operation: "invalid-manifest",
+				}, "candidate-manifest")
+			},
+		},
+		{
+			name: "candidate publication set",
+			effect: func() (provenance.Effect, error) {
+				return newCandidatePublicationSetEvidenceEffect(subject, candidatePublicationSet{
+					Epoch: epoch, Candidate: candidate, Publications: []repositoryPublication{{Repository: memberA.Repository, Candidate: memberA.Candidate, Ref: "@", Commit: memberA.Commit, VerificationOperation: "verify-invalid-ref"}}, Operation: "invalid-publication",
+				}, "candidate-publication")
+			},
+		},
+		{
+			name: "implementation UAT review binding",
+			effect: func() (provenance.Effect, error) {
+				return newImplementationUATReviewBindingEvidenceEffect(subject, implementationUATReviewBinding{
+					Epoch: epoch, Candidate: candidate, ReviewRound: "round-1", ReviewFact: 0, Operation: "invalid-review-binding",
+				}, "uat-review-binding")
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := test.effect(); err == nil {
+				t.Fatal("malformed authority value produced an evidence effect")
+			}
+		})
+	}
+
+	manifestEffect, err := newCandidateManifestEvidenceEffect(subject, integrationCandidateManifest{
+		Epoch: epoch, Candidate: candidate, Members: []candidateMember{memberB, memberA}, Operation: "canonical-manifest",
+	}, "canonical-manifest")
+	if err != nil {
+		t.Fatalf("newCandidateManifestEvidenceEffect: %v", err)
+	}
+	var encodedManifest integrationCandidateManifest
+	if err := json.Unmarshal(manifestEffect.Payload, &encodedManifest); err != nil {
+		t.Fatalf("decode canonical manifest effect payload: %v", err)
+	}
+	if !equalMembers(encodedManifest.Members, []candidateMember{memberA, memberB}) {
+		t.Fatalf("manifest effect payload members = %+v, want canonical order", encodedManifest.Members)
+	}
+
+	publicationEffect, err := newCandidatePublicationSetEvidenceEffect(subject, candidatePublicationSet{
+		Epoch: epoch, Candidate: candidate, Publications: []repositoryPublication{
+			{Repository: memberB.Repository, Candidate: memberB.Candidate, Ref: "refs/heads/main", Commit: memberB.Commit, VerificationOperation: "verify-b"},
+			{Repository: memberA.Repository, Candidate: memberA.Candidate, Ref: "refs/heads/main", Commit: memberA.Commit, VerificationOperation: "verify-a"},
+		}, Operation: "canonical-publication",
+	}, "canonical-publication")
+	if err != nil {
+		t.Fatalf("newCandidatePublicationSetEvidenceEffect: %v", err)
+	}
+	var encodedPublications candidatePublicationSet
+	if err := json.Unmarshal(publicationEffect.Payload, &encodedPublications); err != nil {
+		t.Fatalf("decode canonical publication effect payload: %v", err)
+	}
+	wantPublications := []repositoryPublication{
+		{Repository: memberA.Repository, Candidate: memberA.Candidate, Ref: "refs/heads/main", Commit: memberA.Commit, VerificationOperation: "verify-a"},
+		{Repository: memberB.Repository, Candidate: memberB.Candidate, Ref: "refs/heads/main", Commit: memberB.Commit, VerificationOperation: "verify-b"},
+	}
+	if !equalPublications(encodedPublications.Publications, wantPublications) {
+		t.Fatalf("publication effect payload = %+v, want canonical order", encodedPublications.Publications)
+	}
+}
+
+func TestEpochAuthorityRejectsInvalidUTF8AtAuthorityBoundaries(t *testing.T) {
+	t.Parallel()
+	invalid := string([]byte{'x', 0xff})
+	epoch := EpochRootID("tasks--018f0000-0000-7000-8000-000000000001")
+	candidate := IntegrationCandidateSetID("tasks--018f0000-0000-7000-8000-000000000002")
+	subject := authorityTestTaskID(t, string(candidate))
+	publication := repositoryPublication{Repository: "repo-a", Candidate: ImplementationCandidateID(candidate), Ref: "refs/heads/main", Commit: authorityTestCommitA, VerificationOperation: "verify"}
+
+	for _, test := range []struct {
+		name     string
+		validate func() error
+	}{
+		{"repository", func() error { return validateRepositoryID(RepositoryID(invalid)) }},
+		{"git ref", func() error { return validateGitRef(GitRef(invalid)) }},
+		{"git object identity", func() error { return validateGitOID(provenance.GitOID(invalid)) }},
+		{"task identity", func() error { return validateTaskWrapper(invalid, "task") }},
+		{"epoch", func() error {
+			_, err := newReviewStartedAuthority(EpochRootID(invalid), candidate, "round-1", "invalid-epoch")
+			return err
+		}},
+		{"candidate", func() error {
+			_, err := newReviewStartedAuthority(epoch, IntegrationCandidateSetID(invalid), "round-1", "invalid-candidate")
+			return err
+		}},
+		{"review round", func() error {
+			_, err := newReviewStartedAuthority(epoch, candidate, ReviewRoundID(invalid), "invalid-round")
+			return err
+		}},
+		{"operation", func() error {
+			_, err := newCandidatePublicationSet(epoch, candidate, []repositoryPublication{publication}, provenance.OperationID(invalid))
+			return err
+		}},
+		{"subject-state epoch", func() error {
+			_, err := newSubjectStateEvidenceEffect(subject, subjectStateEvidence{Epoch: invalid, Subject: subject.String(), State: subjectStateReworked, Source: subjectStateSourceAssignmentOperation, Operation: "invalid-subject-epoch"}, "subject-state")
+			return err
+		}},
+		{"subject-state subject", func() error {
+			_, err := newSubjectStateEvidenceEffect(subject, subjectStateEvidence{Epoch: string(epoch), Subject: invalid, State: subjectStateReworked, Source: subjectStateSourceAssignmentOperation, Operation: "invalid-subject"}, "subject-state")
+			return err
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.validate(); err == nil {
+				t.Fatal("invalid UTF-8 was accepted")
+			}
+		})
+	}
+}
+
+func TestEpochAuthorityValidatesExactGitRefs(t *testing.T) {
+	t.Parallel()
+	for _, ref := range []GitRef{"refs/heads/main", "refs/tags/v1.0", "refs/feature/review"} {
+		if err := validateGitRef(ref); err != nil {
+			t.Fatalf("valid Git ref %q rejected: %v", ref, err)
+		}
+	}
+	for _, ref := range []GitRef{
+		"@", "main", "refs/heads/.hidden", "refs/heads/foo/.bar", "refs/heads/main.lock", "refs/heads/MAIN.LOCK",
+		"refs/heads/foo..bar", "refs/heads/foo@{bar", "refs/heads/foo bar", "refs/heads/foo^bar", "refs/heads/foo?bar",
+		"refs//heads/main", "/refs/heads/main", "refs/heads/main/", "refs/heads/main.", "refs/heads/main\x7f",
+	} {
+		if err := validateGitRef(ref); err == nil {
+			t.Fatalf("invalid Git ref %q accepted", ref)
+		}
+	}
+}
+
+func TestEpochAuthorityRequiresPositiveJournalIDs(t *testing.T) {
+	t.Parallel()
+	epoch := EpochRootID("tasks--018f0000-0000-7000-8000-000000000001")
+	candidate := IntegrationCandidateSetID("tasks--018f0000-0000-7000-8000-000000000002")
+	for _, journalID := range []provenance.JournalID{0, -1} {
+		axes := [3]reviewAxisAuthority{
+			{Axis: AxisCorrectness, Event: journalID, Verdict: VerdictAccept},
+			{Axis: AxisTestQuality, Event: 2, Verdict: VerdictAccept},
+			{Axis: AxisElegance, Event: 3, Verdict: VerdictAccept},
+		}
+		if _, err := newFinalizedReviewAuthority(epoch, candidate, "round-1", axes, "invalid-review-event"); err == nil {
+			t.Fatalf("review event %d accepted", journalID)
+		}
+		if _, err := newImplementationUATReviewBinding(epoch, candidate, "round-1", journalID, "invalid-review-fact"); err == nil {
+			t.Fatalf("review fact %d accepted", journalID)
+		}
+	}
+}
+
+func TestEpochAuthorityReviewAxisOrderIgnoresExportedReviewAxes(t *testing.T) {
+	original := ReviewAxes
+	ReviewAxes = [3]ReviewAxis{AxisElegance, AxisTestQuality, AxisCorrectness}
+	t.Cleanup(func() { ReviewAxes = original })
+
+	epoch := EpochRootID("tasks--018f0000-0000-7000-8000-000000000001")
+	candidate := IntegrationCandidateSetID("tasks--018f0000-0000-7000-8000-000000000002")
+	canonical := [3]reviewAxisAuthority{
+		{Axis: AxisCorrectness, Event: 1, Verdict: VerdictAccept},
+		{Axis: AxisTestQuality, Event: 2, Verdict: VerdictAccept},
+		{Axis: AxisElegance, Event: 3, Verdict: VerdictAccept},
+	}
+	if _, err := newFinalizedReviewAuthority(epoch, candidate, "round-1", canonical, "canonical-axis-order"); err != nil {
+		t.Fatalf("canonical authority rejected after ReviewAxes mutation: %v", err)
+	}
+	nonCanonical := canonical
+	nonCanonical[0], nonCanonical[2] = nonCanonical[2], nonCanonical[0]
+	if _, err := newFinalizedReviewAuthority(epoch, candidate, "round-1", nonCanonical, "mutated-axis-order"); err == nil {
+		t.Fatal("mutated exported ReviewAxes changed authority acceptance")
+	}
+}
+
+func TestEpochAuthoritySubjectStateEffectPropagatesEpochParseError(t *testing.T) {
+	t.Parallel()
+	candidate := authorityTestTaskID(t, "tasks--018f0000-0000-7000-8000-000000000002")
+	malformedEpoch := "not-a-task"
+	_, parseErr := provenance.ParseTaskID(malformedEpoch)
+	if parseErr == nil {
+		t.Fatal("test fixture unexpectedly parsed as a task ID")
+	}
+	_, err := newSubjectStateEvidenceEffect(candidate, subjectStateEvidence{
+		Epoch: malformedEpoch, Subject: candidate.String(), State: subjectStateReworked, Source: subjectStateSourceAssignmentOperation, Operation: "malformed-epoch",
+	}, "subject-state")
+	if err == nil {
+		t.Fatal("malformed subject-state epoch produced an effect")
+	}
+	var structured *pasterrors.StructuredError
+	if !errors.As(err, &structured) || structured.Cause == nil || structured.Cause.Error() != parseErr.Error() {
+		t.Fatalf("subject-state epoch error = %v, want the original task parse error as its cause", err)
 	}
 }
 
@@ -289,4 +514,13 @@ func factJournalID(t *testing.T, tracker *trackerImpl, subject provenance.TaskID
 		t.Fatalf("QueryEvidence %q rows = %d, want at most one", operation, len(page.Rows))
 	}
 	return page.Rows[0].JournalID
+}
+
+func authorityTestTaskID(t testing.TB, raw string) provenance.TaskID {
+	t.Helper()
+	id, err := provenance.ParseTaskID(raw)
+	if err != nil {
+		t.Fatalf("ParseTaskID(%q): %v", raw, err)
+	}
+	return id
 }
