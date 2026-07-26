@@ -1,6 +1,8 @@
 package tasks
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -195,6 +197,82 @@ func TestEpochAuthorityEffectBoundariesValidateAndCanonicalize(t *testing.T) {
 	}
 	if !equalPublications(encodedPublications.Publications, wantPublications) {
 		t.Fatalf("publication effect payload = %+v, want canonical order", encodedPublications.Publications)
+	}
+}
+
+func TestEpochAuthorityLandBindingIsCanonicalAndStrict(t *testing.T) {
+	t.Parallel()
+	epoch := EpochRootID("tasks--018f0000-0000-7000-8000-000000000001")
+	candidate := IntegrationCandidateSetID("tasks--018f0000-0000-7000-8000-000000000002")
+	subject := authorityTestTaskID(t, string(epoch))
+	memberA := candidateMember{Repository: "repo-a", Candidate: "tasks--018f0000-0000-7000-8000-000000000003", Commit: authorityTestCommitA}
+	memberB := candidateMember{Repository: "repo-b", Candidate: "tasks--018f0000-0000-7000-8000-000000000004", Commit: authorityTestCommitB}
+	publicationA := repositoryPublication{Repository: memberA.Repository, Candidate: memberA.Candidate, Ref: "refs/heads/main", Commit: memberA.Commit, VerificationOperation: "verify-a"}
+	publicationB := repositoryPublication{Repository: memberB.Repository, Candidate: memberB.Candidate, Ref: "refs/heads/main", Commit: memberB.Commit, VerificationOperation: "verify-b"}
+	value := landAuthorityBinding{
+		Epoch:                              epoch,
+		Candidate:                          candidate,
+		LandOperation:                      "land-binding",
+		ImplementationUAT:                  decisionIDForOperation("implementation-uat"),
+		ImplementationUATOperation:         "implementation-uat",
+		ImplementationUATDecisionFact:      101,
+		ImplementationUATStateFact:         102,
+		ImplementationUATReviewBindingFact: 103,
+		ReviewFact:                         104,
+		ReviewRound:                        "round-1",
+		ReviewAxes: [3]reviewAxisAuthority{
+			{Axis: AxisCorrectness, Event: 11, Verdict: VerdictAccept},
+			{Axis: AxisTestQuality, Event: 12, Verdict: VerdictAccept},
+			{Axis: AxisElegance, Event: 13, Verdict: VerdictAccept},
+		},
+		ManifestFact:       105,
+		Members:            []candidateMember{memberB, memberA},
+		PublicationSetFact: 106,
+		Publications:       []repositoryPublication{publicationB, publicationA},
+	}
+	effect, err := newLandAuthorityBindingEvidenceEffect(subject, value, "evidence-2")
+	if err != nil {
+		t.Fatalf("newLandAuthorityBindingEvidenceEffect: %v", err)
+	}
+	if effect.EvidenceKind != landAuthorityBindingEvidenceKind || effect.ResultSlot != "evidence-2" {
+		t.Fatalf("Land binding effect = %+v; want typed evidence-2", effect)
+	}
+	digest := sha256.Sum256(effect.Payload)
+	if !bytes.Equal(effect.ContentDigest, digest[:]) {
+		t.Fatalf("Land binding digest = %x; want SHA-256(payload) %x", effect.ContentDigest, digest)
+	}
+	decoded, err := decodeLandAuthorityBinding(effect.Payload)
+	if err != nil {
+		t.Fatalf("decodeLandAuthorityBinding: %v", err)
+	}
+	if decoded.ImplementationUATDecisionFact != value.ImplementationUATDecisionFact || decoded.ImplementationUATStateFact != value.ImplementationUATStateFact || decoded.ImplementationUATReviewBindingFact != value.ImplementationUATReviewBindingFact || decoded.ReviewFact != value.ReviewFact || decoded.ManifestFact != value.ManifestFact || decoded.PublicationSetFact != value.PublicationSetFact || !equalMembers(decoded.Members, []candidateMember{memberA, memberB}) || !equalPublications(decoded.Publications, []repositoryPublication{publicationA, publicationB}) {
+		t.Fatalf("decoded Land binding = %+v; want exact positive references and canonical values", decoded)
+	}
+
+	if _, err := newLandAuthorityBinding(landAuthorityBinding{ImplementationUAT: value.ImplementationUAT, ImplementationUATOperation: value.ImplementationUATOperation}); err == nil {
+		t.Fatal("Land binding accepted missing authority identities")
+	}
+	badDecision := value
+	badDecision.ImplementationUAT = "decision:another-operation"
+	if _, err := newLandAuthorityBinding(badDecision); err == nil {
+		t.Fatal("Land binding accepted a UAT decision that does not match its operation")
+	}
+	badAxes := value
+	badAxes.ReviewAxes[0].Verdict = VerdictRevise
+	if _, err := newLandAuthorityBinding(badAxes); err == nil {
+		t.Fatal("Land binding accepted a non-clean review axis")
+	}
+	if _, err := decodeLandAuthorityBinding(append(append([]byte(nil), effect.Payload...), []byte("{}")...)); err == nil {
+		t.Fatal("Land binding decoder accepted trailing JSON")
+	}
+	noncanonical := decoded
+	noncanonical.Members[0], noncanonical.Members[1] = noncanonical.Members[1], noncanonical.Members[0]
+	payload, err := canonicalJSON(noncanonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeLandAuthorityBinding(payload); err == nil {
+		t.Fatal("Land binding decoder accepted noncanonical member order")
 	}
 }
 

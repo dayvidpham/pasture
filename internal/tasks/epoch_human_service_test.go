@@ -178,6 +178,29 @@ func TestEpochHumanServiceProductionFlowAndReopen(t *testing.T) {
 	)
 	planState := findEvidenceByOperationAndKind(t, humanDecisionStoreFootprint(t, tracker, allScope), planInput.Meta.OperationID, planSubjectEvidenceKind)
 	implState := findEvidenceByOperationAndKind(t, humanDecisionStoreFootprint(t, tracker, allScope), implInput.Meta.OperationID, candidateEvidenceKind)
+	implDecision := findDecisionByOperation(t, humanDecisionStoreFootprint(t, tracker, allScope), implInput.Meta.OperationID)
+	implReviewBinding := findEvidenceByOperationAndKind(t, humanDecisionStoreFootprint(t, tracker, allScope), implInput.Meta.OperationID, implementationUATReviewBindingEvidenceKind)
+	landAuthority := landAuthorityBinding{
+		Epoch:                              EpochRootID(epoch.String()),
+		Candidate:                          IntegrationCandidateSetID(candidate.String()),
+		LandOperation:                      landInput.Meta.OperationID,
+		ImplementationUAT:                  implUAT.DecisionID,
+		ImplementationUATOperation:         implInput.Meta.OperationID,
+		ImplementationUATDecisionFact:      implDecision.JournalID,
+		ImplementationUATStateFact:         implState.JournalID,
+		ImplementationUATReviewBindingFact: implReviewBinding.JournalID,
+		ReviewFact:                         candidateAuthority.reviewFact,
+		ReviewRound:                        "candidate-review-1",
+		ReviewAxes: [3]reviewAxisAuthority{
+			{Axis: AxisCorrectness, Event: 101, Verdict: VerdictAccept},
+			{Axis: AxisTestQuality, Event: 102, Verdict: VerdictAccept},
+			{Axis: AxisElegance, Event: 103, Verdict: VerdictAccept},
+		},
+		ManifestFact:       candidateAuthority.manifestFact,
+		Members:            candidateAuthority.members,
+		PublicationSetFact: candidateAuthority.publicationFact,
+		Publications:       publicationsForMembers(candidateAuthority.members),
+	}
 	finalStatuses := map[string]provenance.Status{epoch.String(): provenance.StatusClosed, proposal.String(): provenance.StatusClosed, candidate.String(): provenance.StatusOpen}
 	nonModeCases := []struct {
 		name        string
@@ -230,6 +253,7 @@ func TestEpochHumanServiceProductionFlowAndReopen(t *testing.T) {
 				evidence: []oracleEvidenceExpectation{
 					{kind: candidateEvidenceKind, task: candidate, state: &oracleStateEvidence{Epoch: epoch.String(), Subject: candidate.String(), State: string(subjectStateImplementationLanded), Decision: oracleDecisionID(landInput.Meta.OperationID), DecisionKind: DecisionLanded, Operation: landInput.Meta.OperationID}},
 					{kind: "pasture.implementation-uat.decision.v1", task: epoch, reference: &oracleReferenceEvidence{Epoch: epoch.String(), Subject: epoch.String(), Decision: string(oracleDecisionID(landInput.Meta.OperationID)), Reference: string(landInput.ImplementationUAT)}},
+					{kind: landAuthorityBindingEvidenceKind, task: epoch, value: landAuthority},
 				},
 				closeTask: epoch, statuses: finalStatuses,
 			}, run: func() (DecisionResult, error) { return landed, nil },
@@ -528,6 +552,29 @@ func TestEpochHumanServiceUATTerminalBarrierRows(t *testing.T) {
 		}
 		after := humanDecisionStoreFootprint(t, tracker, scope)
 		acceptedState := findEvidenceByOperationAndKind(t, before, "race-impl-accepted", candidateEvidenceKind)
+		acceptedDecision := findDecisionByOperation(t, before, "race-impl-accepted")
+		acceptedReviewBinding := findEvidenceByOperationAndKind(t, before, "race-impl-accepted", implementationUATReviewBindingEvidenceKind)
+		raceLandAuthority := landAuthorityBinding{
+			Epoch:                              EpochRootID(epoch.String()),
+			Candidate:                          IntegrationCandidateSetID(candidate.String()),
+			LandOperation:                      "race-land-winner",
+			ImplementationUAT:                  accepted.DecisionID,
+			ImplementationUATOperation:         "race-impl-accepted",
+			ImplementationUATDecisionFact:      acceptedDecision.JournalID,
+			ImplementationUATStateFact:         acceptedState.JournalID,
+			ImplementationUATReviewBindingFact: acceptedReviewBinding.JournalID,
+			ReviewFact:                         authority.reviewFact,
+			ReviewRound:                        "race-review",
+			ReviewAxes: [3]reviewAxisAuthority{
+				{Axis: AxisCorrectness, Event: 101, Verdict: VerdictAccept},
+				{Axis: AxisTestQuality, Event: 102, Verdict: VerdictAccept},
+				{Axis: AxisElegance, Event: 103, Verdict: VerdictAccept},
+			},
+			ManifestFact:       authority.manifestFact,
+			Members:            authority.members,
+			PublicationSetFact: authority.publicationFact,
+			Publications:       publicationsForMembers(authority.members),
+		}
 		assertBarrierWinnerDelta(t, before, after, humanDecisionExpectation{
 			operation: "race-land-winner", actor: human.ID, epoch: epoch, subject: epoch, phase: provenance.PhaseLanding,
 			kind: DecisionLanded, note: "explicit landing decision",
@@ -536,6 +583,7 @@ func TestEpochHumanServiceUATTerminalBarrierRows(t *testing.T) {
 			evidence: []oracleEvidenceExpectation{
 				{kind: candidateEvidenceKind, task: candidate, state: &oracleStateEvidence{Epoch: epoch.String(), Subject: candidate.String(), State: string(subjectStateImplementationLanded), Decision: oracleDecisionID("race-land-winner"), DecisionKind: DecisionLanded, Operation: "race-land-winner"}},
 				{kind: "pasture.implementation-uat.decision.v1", task: epoch, reference: &oracleReferenceEvidence{Epoch: epoch.String(), Subject: epoch.String(), Decision: string(oracleDecisionID("race-land-winner")), Reference: string(accepted.DecisionID)}},
+				{kind: landAuthorityBindingEvidenceKind, task: epoch, value: raceLandAuthority},
 			},
 			closeTask: epoch,
 			statuses:  map[string]provenance.Status{epoch.String(): provenance.StatusClosed, candidate.String(): provenance.StatusOpen},
@@ -1615,6 +1663,9 @@ func assertHumanDecisionOracleExact(t *testing.T, _ *trackerImpl, footprint norm
 		}
 		expectedPayload := oracleEvidencePayload(t, expected)
 		digest := sha256.Sum256(expectedPayload)
+		if expected.kind == landAuthorityBindingEvidenceKind && !bytes.Equal(got.Payload, expectedPayload) {
+			t.Fatalf("evidence row %d payload = %q; want exact canonical payload %q", i, got.Payload, expectedPayload)
+		}
 		if !bytes.Equal(got.Digest, digest[:]) {
 			t.Fatalf("evidence row %d digest = %x; want sha256(independent payload)=%x persisted payload=%q", i, got.Digest, digest, got.Payload)
 		}

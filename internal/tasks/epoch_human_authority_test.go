@@ -1,7 +1,9 @@
 package tasks
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"path/filepath"
 	"reflect"
@@ -183,7 +185,9 @@ func TestEpochHumanServiceAuthorityLand(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Land with complete publications: %v", err)
 		}
-		state := findEvidenceByOperationAndKind(t, humanDecisionStoreFootprint(t, tracker, humanStoreScopeFor([]provenance.TaskID{epoch, candidate}, []provenance.OperationID{input.Meta.OperationID})), "uat-land-complete", candidateEvidenceKind)
+		scope := humanStoreScopeFor([]provenance.TaskID{epoch, candidate}, []provenance.OperationID{"uat-land-complete", input.Meta.OperationID})
+		footprint := humanDecisionStoreFootprint(t, tracker, scope)
+		state := findEvidenceByOperationAndKind(t, footprint, "uat-land-complete", candidateEvidenceKind)
 		wantConditions := []conditionSnapshot{
 			oracleEvidenceCondition(candidate, candidateEvidenceKind, state.JournalID, provenance.ConditionCurrentFact),
 			oracleEvidenceCondition(candidate, implementationReviewAuthorityEvidenceKind, authority.reviewFact, provenance.ConditionCurrentFact),
@@ -195,6 +199,37 @@ func TestEpochHumanServiceAuthorityLand(t *testing.T) {
 		}
 		if result.Replayed {
 			t.Fatal("fresh Land result was marked replayed")
+		}
+		wantBinding := landAuthorityBinding{
+			Epoch:                              EpochRootID(epoch.String()),
+			Candidate:                          IntegrationCandidateSetID(candidate.String()),
+			LandOperation:                      input.Meta.OperationID,
+			ImplementationUAT:                  accepted.DecisionID,
+			ImplementationUATOperation:         "uat-land-complete",
+			ImplementationUATDecisionFact:      findDecisionByOperation(t, footprint, "uat-land-complete").JournalID,
+			ImplementationUATStateFact:         state.JournalID,
+			ImplementationUATReviewBindingFact: findEvidenceByOperationAndKind(t, footprint, "uat-land-complete", implementationUATReviewBindingEvidenceKind).JournalID,
+			ReviewFact:                         authority.reviewFact,
+			ReviewRound:                        "round-land-complete",
+			ReviewAxes: [3]reviewAxisAuthority{
+				{Axis: AxisCorrectness, Event: 101, Verdict: VerdictAccept},
+				{Axis: AxisTestQuality, Event: 102, Verdict: VerdictAccept},
+				{Axis: AxisElegance, Event: 103, Verdict: VerdictAccept},
+			},
+			ManifestFact:       authority.manifestFact,
+			Members:            authority.members,
+			PublicationSetFact: authority.publicationFact,
+			Publications:       publications,
+		}
+		binding := assertLandAuthorityBindingEvidence(t, footprint, input.Meta.OperationID, wantBinding)
+		immediate, err := service.Land(context.Background(), input)
+		if err != nil || !immediate.Replayed || !sameDecisionResultBindings(immediate, result) {
+			t.Fatalf("immediate Land replay = %+v, %v; want original binding", immediate, err)
+		}
+		afterImmediate := humanDecisionStoreFootprint(t, tracker, scope)
+		assertHumanDecisionStoreFootprintEqual(t, footprint, afterImmediate)
+		if got := assertLandAuthorityBindingEvidence(t, afterImmediate, input.Meta.OperationID, wantBinding); !reflect.DeepEqual(got, binding) {
+			t.Fatalf("immediate Land binding changed: got %+v; want %+v", got, binding)
 		}
 	})
 
@@ -250,6 +285,41 @@ func TestEpochHumanServiceAuthorityLand(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		originalScope := humanStoreScopeFor([]provenance.TaskID{epoch, candidate}, []provenance.OperationID{"land-replay-uat", input.Meta.OperationID})
+		originalFootprint := humanDecisionStoreFootprint(t, tracker, originalScope)
+		wantBinding := landAuthorityBinding{
+			Epoch:                              EpochRootID(epoch.String()),
+			Candidate:                          IntegrationCandidateSetID(candidate.String()),
+			LandOperation:                      input.Meta.OperationID,
+			ImplementationUAT:                  accepted.DecisionID,
+			ImplementationUATOperation:         "land-replay-uat",
+			ImplementationUATDecisionFact:      findDecisionByOperation(t, originalFootprint, "land-replay-uat").JournalID,
+			ImplementationUATStateFact:         findEvidenceByOperationAndKind(t, originalFootprint, "land-replay-uat", candidateEvidenceKind).JournalID,
+			ImplementationUATReviewBindingFact: findEvidenceByOperationAndKind(t, originalFootprint, "land-replay-uat", implementationUATReviewBindingEvidenceKind).JournalID,
+			ReviewFact:                         authority.reviewFact,
+			ReviewRound:                        "land-replay-round",
+			ReviewAxes: [3]reviewAxisAuthority{
+				{Axis: AxisCorrectness, Event: 101, Verdict: VerdictAccept},
+				{Axis: AxisTestQuality, Event: 102, Verdict: VerdictAccept},
+				{Axis: AxisElegance, Event: 103, Verdict: VerdictAccept},
+			},
+			ManifestFact:       authority.manifestFact,
+			Members:            authority.members,
+			PublicationSetFact: authority.publicationFact,
+			Publications:       publications,
+		}
+		originalBinding := assertLandAuthorityBindingEvidence(t, originalFootprint, input.Meta.OperationID, wantBinding)
+		other, err := tracker.RegisterHumanAgent("authority-retry", "Changed Retry Human", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		changed := input
+		changed.Actor = AssertedHumanActor{ActorID: other.ID}
+		beforeConflict := humanDecisionStoreFootprint(t, tracker, originalScope)
+		if _, err := service.Land(context.Background(), changed); !errors.Is(err, provenance.ErrOperationConflict) {
+			t.Fatalf("changed Land retry = %v; want provenance operation conflict", err)
+		}
+		assertHumanDecisionStoreFootprintEqual(t, beforeConflict, humanDecisionStoreFootprint(t, tracker, originalScope))
 		originalConditions := authorityPreconditionsForOperation(t, tracker, epoch, input.Meta.OperationID)
 		appendStartedReviewAuthority(t, tracker, epoch, candidate, "land-replay-newer-review", "land-replay-newer-review-op")
 		seedCandidatePublicationSet(t, tracker, epoch, candidate, authority.manifestFact, publications, authority.publicationFact, "land-replay-newer-publication")
@@ -259,9 +329,15 @@ func TestEpochHumanServiceAuthorityLand(t *testing.T) {
 		tracker = openHumanTestTracker(t, db)
 		defer tracker.Close()
 		service = newHumanTestService(t, tracker)
+		beforeReplay := humanDecisionStoreFootprint(t, tracker, originalScope)
 		replayed, err := service.Land(context.Background(), input)
 		if err != nil || !replayed.Replayed || !sameDecisionResultBindings(replayed, original) {
 			t.Fatalf("reopened Land replay = %+v, %v; want original binding", replayed, err)
+		}
+		afterReplay := humanDecisionStoreFootprint(t, tracker, originalScope)
+		assertHumanDecisionStoreFootprintEqual(t, beforeReplay, afterReplay)
+		if got := assertLandAuthorityBindingEvidence(t, afterReplay, input.Meta.OperationID, wantBinding); !reflect.DeepEqual(got, originalBinding) {
+			t.Fatalf("reopened Land binding changed: got %+v; want %+v", got, originalBinding)
 		}
 		if got := authorityPreconditionsForOperation(t, tracker, epoch, input.Meta.OperationID); !reflect.DeepEqual(got, originalConditions) {
 			t.Fatalf("replayed Land conditions = %+v; want original %+v", got, originalConditions)
@@ -332,6 +408,52 @@ func authorityPublicationForOperation(t *testing.T, tracker *trackerImpl, candid
 		t.Fatalf("decode publication set: %v", err)
 	}
 	return publication
+}
+
+func assertLandAuthorityBindingEvidence(t *testing.T, footprint normalizedHumanStoreFootprint, operation provenance.OperationID, want landAuthorityBinding) normalizedEvidenceFact {
+	t.Helper()
+	got := findEvidenceByOperationAndKind(t, footprint, operation, landAuthorityBindingEvidenceKind)
+	decoded, err := decodeLandAuthorityBinding(got.Payload)
+	if err != nil {
+		t.Fatalf("decode Land authority binding for %q: %v", operation, err)
+	}
+	canonical, err := newLandAuthorityBinding(want)
+	if err != nil {
+		t.Fatalf("construct expected Land authority binding for %q: %v", operation, err)
+	}
+	if !reflect.DeepEqual(decoded, canonical) {
+		t.Fatalf("Land authority binding for %q = %+v; want %+v", operation, decoded, canonical)
+	}
+	wantPayload, err := canonicalJSON(canonical)
+	if err != nil {
+		t.Fatalf("encode expected Land authority binding for %q: %v", operation, err)
+	}
+	digest := sha256.Sum256(wantPayload)
+	if !bytes.Equal(got.Payload, wantPayload) || !bytes.Equal(got.Digest, digest[:]) {
+		t.Fatalf("Land authority binding bytes/digest for %q = %q/%x; want %q/%x", operation, got.Payload, got.Digest, wantPayload, digest)
+	}
+	expected, ok := footprint.ExpectedOperations[string(operation)]
+	if !ok || expected.Kind != provenance.CommittedExact || expected.AnchorJournalID == 0 || !got.HasProducingOperationID || got.ProducingOperationID != expected.AnchorJournalID {
+		t.Fatalf("Land authority binding producer for %q = %+v; want independently captured nonzero anchor %+v", operation, got, expected)
+	}
+	committed, ok := footprint.Operations[string(operation)]
+	if !ok || !reflect.DeepEqual(committed, expected) {
+		t.Fatalf("Land committed operation for %q = %+v; want independently captured %+v", operation, committed, expected)
+	}
+	count := 0
+	for _, slot := range committed.ResultSlots {
+		if slot.Slot != "evidence-2" {
+			continue
+		}
+		count++
+		if slot.Kind != provenance.JournalKindEvidence || slot.ProducedJournalID != got.JournalID || slot.HasTaskID || slot.HasActivityID {
+			t.Fatalf("Land evidence-2 result slot = %+v; want binding journal %d", slot, got.JournalID)
+		}
+	}
+	if count != 1 {
+		t.Fatalf("Land operation %q has %d evidence-2 result slots; want one", operation, count)
+	}
+	return got
 }
 
 func authorityPreconditionsForOperation(t *testing.T, tracker *trackerImpl, subject provenance.TaskID, operation provenance.OperationID) []conditionSnapshot {

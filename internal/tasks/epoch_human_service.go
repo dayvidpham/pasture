@@ -312,6 +312,19 @@ func (s *epochHumanService) Land(ctx context.Context, in LandInput) (DecisionRes
 		if err != nil {
 			return DecisionResult{}, err
 		}
+		binding, err := s.landAuthorityBindingForOperation(stored)
+		if err != nil {
+			return DecisionResult{}, err
+		}
+		if binding.value.Epoch == EpochRootID(epoch.String()) && binding.value.Candidate == IntegrationCandidateSetID(candidate.String()) && binding.value.ImplementationUAT == in.ImplementationUAT {
+			bindingEffect, err := newLandAuthorityBindingEvidenceEffect(epoch, binding.value, provenance.ResultSlotID("evidence-2"))
+			if err != nil {
+				return DecisionResult{}, err
+			}
+			return s.commitWithAuthority(ctx, in.Meta, in.Epoch, epoch, epoch, in.Actor, MutationLand, replay,
+				[]evidenceRef{{Kind: "pasture.implementation-uat.decision.v1", Value: string(in.ImplementationUAT), stateSubject: candidate}},
+				nil, []provenance.Effect{lifecycleEffect(epoch, provenance.EventKindTaskClosed)}, []provenance.Effect{bindingEffect})
+		}
 		return s.commit(ctx, in.Meta, in.Epoch, epoch, epoch, in.Actor, MutationLand, replay,
 			[]evidenceRef{{Kind: "pasture.implementation-uat.decision.v1", Value: string(in.ImplementationUAT), stateSubject: candidate}},
 			nil, []provenance.Effect{lifecycleEffect(epoch, provenance.EventKindTaskClosed)})
@@ -328,8 +341,12 @@ func (s *epochHumanService) Land(ctx context.Context, in LandInput) (DecisionRes
 	if state.state != subjectStateImplementationAccepted || state.decision != in.ImplementationUAT || state.source != subjectStateSourceHumanDecision || state.operation == "" {
 		return DecisionResult{}, humanServiceErr("Land", fmt.Sprintf("Implementation UAT decision %q is not the current accepted state for candidate %q", in.ImplementationUAT, in.Candidate), "landing must bind the latest accepted Implementation UAT state", "record a fresh accepted Implementation UAT before landing")
 	}
-	if err := s.requireAcceptedImplementationUAT(candidate, epoch, in.Candidate, in.ImplementationUAT); err != nil {
+	implementationUAT, err := s.acceptedImplementationUATFact(candidate, epoch, in.Candidate, in.ImplementationUAT)
+	if err != nil {
 		return DecisionResult{}, err
+	}
+	if implementationUAT.row.ProducingOperationID != state.operation {
+		return DecisionResult{}, humanServiceErr("Land", fmt.Sprintf("Implementation UAT decision %q and current candidate state have different producing operations", in.ImplementationUAT), "landing requires the exact accepted UAT decision and state emitted by one operation", "record a fresh accepted Implementation UAT before landing")
 	}
 	binding, err := s.implementationUATReviewBindingForOperation(epoch, candidate, state.operation)
 	if err != nil {
@@ -339,7 +356,7 @@ func (s *epochHumanService) Land(ctx context.Context, in LandInput) (DecisionRes
 	if err != nil {
 		return DecisionResult{}, err
 	}
-	if review.value.State != reviewFinalizedClean || binding.value.ReviewFact != review.journalID {
+	if review.value.State != reviewFinalizedClean || binding.value.ReviewFact != review.journalID || binding.value.ReviewRound != review.value.Round {
 		return DecisionResult{}, humanServiceErr("Land", fmt.Sprintf("Implementation UAT decision %q is not bound to the current clean review for candidate %q", in.ImplementationUAT, in.Candidate), "landing requires the exact review authority accepted by Implementation UAT to remain current and clean", "record a fresh accepted Implementation UAT after a clean finalized review")
 	}
 	manifest, err := s.exactCandidateManifest(epoch, candidate)
@@ -353,9 +370,33 @@ func (s *epochHumanService) Land(ctx context.Context, in LandInput) (DecisionRes
 	if err := validatePublicationSetAgainstManifest(manifest.value, publications.value); err != nil {
 		return DecisionResult{}, humanServiceErr("Land", fmt.Sprintf("candidate %q has incomplete or mismatched publication authority", in.Candidate), "every immutable candidate manifest member must have one current repository, ref, and commit verification", "publish every manifest member at its exact immutable commit before landing")
 	}
-	return s.commit(ctx, in.Meta, in.Epoch, epoch, epoch, in.Actor, MutationLand, draft,
+	landBinding, err := newLandAuthorityBinding(landAuthorityBinding{
+		Epoch:                              EpochRootID(epoch.String()),
+		Candidate:                          IntegrationCandidateSetID(candidate.String()),
+		LandOperation:                      in.Meta.OperationID,
+		ImplementationUAT:                  in.ImplementationUAT,
+		ImplementationUATOperation:         state.operation,
+		ImplementationUATDecisionFact:      implementationUAT.row.JournalID,
+		ImplementationUATStateFact:         state.journalID,
+		ImplementationUATReviewBindingFact: binding.journalID,
+		ReviewFact:                         review.journalID,
+		ReviewRound:                        review.value.Round,
+		ReviewAxes:                         review.value.Axes,
+		ManifestFact:                       manifest.journalID,
+		Members:                            manifest.value.Members,
+		PublicationSetFact:                 publications.journalID,
+		Publications:                       publications.value.Publications,
+	})
+	if err != nil {
+		return DecisionResult{}, err
+	}
+	landBindingEffect, err := newLandAuthorityBindingEvidenceEffect(epoch, landBinding, provenance.ResultSlotID("evidence-2"))
+	if err != nil {
+		return DecisionResult{}, err
+	}
+	return s.commitWithAuthority(ctx, in.Meta, in.Epoch, epoch, epoch, in.Actor, MutationLand, draft,
 		[]evidenceRef{{Kind: "pasture.implementation-uat.decision.v1", Value: string(in.ImplementationUAT), stateSubject: candidate}},
-		[]provenance.Condition{state.conditionCurrent(), reviewAuthorityCurrentCondition(candidate, review.journalID), candidateManifestExactCondition(candidate, manifest.journalID), candidatePublicationSetCurrentCondition(candidate, publications.journalID)}, []provenance.Effect{lifecycleEffect(epoch, provenance.EventKindTaskClosed)})
+		[]provenance.Condition{state.conditionCurrent(), reviewAuthorityCurrentCondition(candidate, review.journalID), candidateManifestExactCondition(candidate, manifest.journalID), candidatePublicationSetCurrentCondition(candidate, publications.journalID)}, []provenance.Effect{lifecycleEffect(epoch, provenance.EventKindTaskClosed)}, []provenance.Effect{landBindingEffect})
 }
 
 type evidenceRef struct {
@@ -821,6 +862,11 @@ type implementationUATReviewBindingSnapshot struct {
 	journalID provenance.JournalID
 }
 
+type landAuthorityBindingSnapshot struct {
+	value     landAuthorityBinding
+	journalID provenance.JournalID
+}
+
 func requireEligibleCandidateLifecycle(where string, candidate provenance.TaskID, state subjectStateSnapshot) error {
 	if state.journalID == 0 || state.state == subjectStateInvalid {
 		return humanServiceErr(where, fmt.Sprintf("candidate %q has no current lifecycle authority", candidate), "Implementation UAT requires an assignment-produced or current human candidate lifecycle fact", "create the integration candidate through the assignment-controlled aggregate before recording Implementation UAT")
@@ -965,6 +1011,54 @@ func (s *epochHumanService) implementationUATReviewBindingForOperation(epoch, ca
 	return binding, nil
 }
 
+// landAuthorityBindingForOperation restores the immutable Land evidence from
+// the committed operation itself. It deliberately does not consult current
+// review, manifest, publication, or UAT facts, because an exact replay must
+// retain the authority selected by the original Apply.
+func (s *epochHumanService) landAuthorityBindingForOperation(stored decisionFact) (landAuthorityBindingSnapshot, error) {
+	operation := stored.row.ProducingOperationID
+	query := provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}, OperationIDs: []provenance.OperationID{operation}}, Kinds: []provenance.EvidenceKind{landAuthorityBindingEvidenceKind}, Page: provenance.FactPageRequest{Limit: 2}}
+	var binding landAuthorityBindingSnapshot
+	count := 0
+	for {
+		page, err := s.tracker.prov.Journal().Facts().QueryEvidence(query)
+		if err != nil {
+			return landAuthorityBindingSnapshot{}, fmt.Errorf("query bounded Land authority binding for operation %q: %w", operation, err)
+		}
+		for _, row := range page.Rows {
+			count++
+			if count > 1 {
+				return landAuthorityBindingSnapshot{}, humanServiceErr("landAuthorityBindingForOperation", fmt.Sprintf("Land operation %q has multiple authority bindings", operation), "one Land decision must persist exactly one immutable authority binding", "repair the duplicate Land authority evidence before retrying")
+			}
+			if row.TaskID == nil || row.EvidenceKind != landAuthorityBindingEvidenceKind || row.ProducingOperationID != operation {
+				return landAuthorityBindingSnapshot{}, humanServiceErr("landAuthorityBindingForOperation", "a Land authority binding has inconsistent task, kind, or producer identity", "exact Land replay requires one canonical epoch-scoped operation-local authority binding", "repair the malformed Land authority evidence before retrying")
+			}
+			value, err := decodeLandAuthorityBinding(row.Payload)
+			if err != nil {
+				return landAuthorityBindingSnapshot{}, humanServiceErr("landAuthorityBindingForOperation", "the Land authority binding payload is malformed", "exact Land replay requires a strict canonical authority binding", "repair the malformed Land authority evidence before retrying")
+			}
+			epoch, err := parseAuthorityTaskID(string(value.Epoch), "Land authority epoch")
+			if err != nil || *row.TaskID != epoch || value.LandOperation != operation {
+				return landAuthorityBindingSnapshot{}, humanServiceErr("landAuthorityBindingForOperation", "the Land authority binding disagrees with its persisted fact metadata", "the binding must be epoch-scoped and produced by the Land operation it records", "repair the inconsistent Land authority evidence before retrying")
+			}
+			binding = landAuthorityBindingSnapshot{value: value, journalID: row.JournalID}
+		}
+		if page.Next == nil {
+			break
+		}
+		query.Page.SnapshotMaxJournalID = page.Next.SnapshotMaxJournalID
+		query.Page.AfterJournalID = page.Next.AfterJournalID
+	}
+	if count == 0 {
+		return landAuthorityBindingSnapshot{}, humanServiceErr("landAuthorityBindingForOperation", fmt.Sprintf("Land operation %q has no authority binding", operation), "exact Land replay requires the immutable authority record emitted with the original decision", "repair the committed Land operation before retrying")
+	}
+	var landed EpochLanded
+	if err := json.Unmarshal(stored.record.Decision.Payload, &landed); err != nil || binding.value.ImplementationUAT != landed.ImplementationUAT || binding.value.Candidate != landed.Candidate || stored.record.ID != decisionIDForOperation(operation) {
+		return landAuthorityBindingSnapshot{}, humanServiceErr("landAuthorityBindingForOperation", "the Land authority binding disagrees with its stored Land decision", "operation-local authority evidence must bind the exact landed candidate and Implementation UAT decision", "repair the inconsistent Land decision or authority binding before retrying")
+	}
+	return binding, nil
+}
+
 func subjectStateDecisionKind(state subjectState) (DecisionKindID, bool) {
 	switch state {
 	case subjectStatePlanAccepted:
@@ -1083,7 +1177,8 @@ func (s *epochHumanService) requireAcceptedDecision(subject, epoch provenance.Ta
 	return humanServiceErr(where, fmt.Sprintf("decision %q is not accepted evidence for subject %q", id, subject), "the gate requires the exact persisted accepted decision", "record an accepted decision for this subject and reference its returned id")
 }
 
-func (s *epochHumanService) requireAcceptedImplementationUAT(subject, epoch provenance.TaskID, candidate IntegrationCandidateSetID, id DecisionLedgerEntryID) error {
+func (s *epochHumanService) acceptedImplementationUATFact(subject, epoch provenance.TaskID, candidate IntegrationCandidateSetID, id DecisionLedgerEntryID) (decisionFact, error) {
+	var accepted decisionFact
 	var found bool
 	err := s.foldDecisionFacts(subject, DecisionImplementationUAT, func(fact decisionFact) (bool, error) {
 		if fact.record.Epoch != epoch.String() || fact.record.ID != id {
@@ -1091,18 +1186,19 @@ func (s *epochHumanService) requireAcceptedImplementationUAT(subject, epoch prov
 		}
 		var record implementationUATRecord
 		if err := json.Unmarshal(fact.record.Decision.Payload, &record); err == nil && record.Outcome == ImplUATAccepted {
+			accepted = fact
 			found = true
 			return true, nil
 		}
 		return false, nil
 	})
 	if err != nil {
-		return err
+		return decisionFact{}, err
 	}
 	if found {
-		return nil
+		return accepted, nil
 	}
-	return humanServiceErr("Land", fmt.Sprintf("Implementation UAT decision %q is not an accepted decision bound to candidate %q", id, candidate), "landing requires exact accepted UAT evidence for the same candidate", "record accepted Implementation UAT for this candidate and reference its returned id")
+	return decisionFact{}, humanServiceErr("Land", fmt.Sprintf("Implementation UAT decision %q is not an accepted decision bound to candidate %q", id, candidate), "landing requires exact accepted UAT evidence for the same candidate", "record accepted Implementation UAT for this candidate and reference its returned id")
 }
 
 func encodeConditionEvidence(conditions []provenance.Condition) (json.RawMessage, error) {

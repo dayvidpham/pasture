@@ -21,6 +21,7 @@ const (
 	candidateManifestEvidenceKind              provenance.EvidenceKind = "pasture.integration.candidate-manifest.v1"
 	candidatePublicationSetEvidenceKind        provenance.EvidenceKind = "pasture.integration.publication-set.v1"
 	implementationUATReviewBindingEvidenceKind provenance.EvidenceKind = "pasture.implementation-uat.review-binding.v1"
+	landAuthorityBindingEvidenceKind           provenance.EvidenceKind = "pasture.land.authority-binding.v1"
 )
 
 // reviewAuthorityState is the closed lifecycle of the current implementation
@@ -108,6 +109,87 @@ type implementationUATReviewBinding struct {
 	ReviewRound ReviewRoundID
 	ReviewFact  provenance.JournalID
 	Operation   provenance.OperationID
+}
+
+// landAuthorityBinding is the immutable, operation-local authority record
+// emitted by Land. It references the authority facts Land consumed without
+// creating another current review, manifest, publication, or UAT-binding fact.
+type landAuthorityBinding struct {
+	Epoch                              EpochRootID
+	Candidate                          IntegrationCandidateSetID
+	LandOperation                      provenance.OperationID
+	ImplementationUAT                  DecisionLedgerEntryID
+	ImplementationUATOperation         provenance.OperationID
+	ImplementationUATDecisionFact      provenance.JournalID
+	ImplementationUATStateFact         provenance.JournalID
+	ImplementationUATReviewBindingFact provenance.JournalID
+	ReviewFact                         provenance.JournalID
+	ReviewRound                        ReviewRoundID
+	ReviewAxes                         [3]reviewAxisAuthority
+	ManifestFact                       provenance.JournalID
+	Members                            []candidateMember
+	PublicationSetFact                 provenance.JournalID
+	Publications                       []repositoryPublication
+}
+
+// MarshalJSON fixes the private persisted representation to the same canonical
+// key order used by the journal's evidence codec. This keeps the stored payload
+// bytes and its SHA-256 ContentDigest identical while retaining typed values in
+// the service boundary.
+func (value landAuthorityBinding) MarshalJSON() ([]byte, error) {
+	type member struct {
+		Candidate  ImplementationCandidateID
+		Commit     provenance.GitOID
+		Repository RepositoryID
+	}
+	type publication struct {
+		Candidate             ImplementationCandidateID
+		Commit                provenance.GitOID
+		Ref                   GitRef
+		Repository            RepositoryID
+		VerificationOperation provenance.OperationID
+	}
+	members := make([]member, len(value.Members))
+	for i, item := range value.Members {
+		members[i] = member{Candidate: item.Candidate, Commit: item.Commit, Repository: item.Repository}
+	}
+	publications := make([]publication, len(value.Publications))
+	for i, item := range value.Publications {
+		publications[i] = publication{Candidate: item.Candidate, Commit: item.Commit, Ref: item.Ref, Repository: item.Repository, VerificationOperation: item.VerificationOperation}
+	}
+	return json.Marshal(struct {
+		Candidate                          IntegrationCandidateSetID
+		Epoch                              EpochRootID
+		ImplementationUAT                  DecisionLedgerEntryID
+		ImplementationUATDecisionFact      provenance.JournalID
+		ImplementationUATOperation         provenance.OperationID
+		ImplementationUATReviewBindingFact provenance.JournalID
+		ImplementationUATStateFact         provenance.JournalID
+		LandOperation                      provenance.OperationID
+		ManifestFact                       provenance.JournalID
+		Members                            []member
+		PublicationSetFact                 provenance.JournalID
+		Publications                       []publication
+		ReviewAxes                         [3]reviewAxisAuthority
+		ReviewFact                         provenance.JournalID
+		ReviewRound                        ReviewRoundID
+	}{
+		Candidate:                          value.Candidate,
+		Epoch:                              value.Epoch,
+		ImplementationUAT:                  value.ImplementationUAT,
+		ImplementationUATDecisionFact:      value.ImplementationUATDecisionFact,
+		ImplementationUATOperation:         value.ImplementationUATOperation,
+		ImplementationUATReviewBindingFact: value.ImplementationUATReviewBindingFact,
+		ImplementationUATStateFact:         value.ImplementationUATStateFact,
+		LandOperation:                      value.LandOperation,
+		ManifestFact:                       value.ManifestFact,
+		Members:                            members,
+		PublicationSetFact:                 value.PublicationSetFact,
+		Publications:                       publications,
+		ReviewAxes:                         value.ReviewAxes,
+		ReviewFact:                         value.ReviewFact,
+		ReviewRound:                        value.ReviewRound,
+	})
 }
 
 // subjectStateSource is the closed source discriminator for candidate-state
@@ -537,6 +619,66 @@ func newImplementationUATReviewBinding(epoch EpochRootID, candidate IntegrationC
 	return implementationUATReviewBinding{Epoch: epoch, Candidate: candidate, ReviewRound: round, ReviewFact: reviewFact, Operation: operation}, nil
 }
 
+func newLandAuthorityBinding(value landAuthorityBinding) (landAuthorityBinding, error) {
+	canonicalEpoch, err := canonicalAuthorityTaskID(string(value.Epoch), "epoch")
+	if err != nil {
+		return landAuthorityBinding{}, err
+	}
+	canonicalCandidate, err := canonicalAuthorityTaskID(string(value.Candidate), "candidate set")
+	if err != nil {
+		return landAuthorityBinding{}, err
+	}
+	value.Epoch = EpochRootID(canonicalEpoch)
+	value.Candidate = IntegrationCandidateSetID(canonicalCandidate)
+	if err := validateOperationID(value.LandOperation); err != nil {
+		return landAuthorityBinding{}, authorityErr("landAuthorityBinding", "the Land operation identity is malformed", "Land authority evidence must identify the operation that emitted it", "supply a stable Land operation identity")
+	}
+	if err := validateOperationID(value.ImplementationUATOperation); err != nil {
+		return landAuthorityBinding{}, authorityErr("landAuthorityBinding", "the Implementation UAT operation identity is malformed", "Land authority evidence must identify the accepted UAT operation", "supply a stable Implementation UAT operation identity")
+	}
+	if value.ImplementationUAT != decisionIDForOperation(value.ImplementationUATOperation) {
+		return landAuthorityBinding{}, authorityErr("landAuthorityBinding", "the Implementation UAT decision does not match its operation", "Land must bind the exact decision emitted by the accepted UAT operation", "use the decision identity derived from the accepted Implementation UAT operation")
+	}
+	if err := validateText(string(value.ReviewRound), "review round"); err != nil {
+		return landAuthorityBinding{}, err
+	}
+	for _, reference := range []struct {
+		label string
+		id    provenance.JournalID
+	}{
+		{"Implementation UAT decision fact", value.ImplementationUATDecisionFact},
+		{"Implementation UAT state fact", value.ImplementationUATStateFact},
+		{"Implementation UAT review-binding fact", value.ImplementationUATReviewBindingFact},
+		{"review fact", value.ReviewFact},
+		{"manifest fact", value.ManifestFact},
+		{"publication-set fact", value.PublicationSetFact},
+	} {
+		if reference.id <= 0 {
+			return landAuthorityBinding{}, authorityErr("landAuthorityBinding", fmt.Sprintf("the %s %d is not positive", reference.label, reference.id), "Land authority evidence must reference committed immutable facts", "supply the positive journal identity selected by Land")
+		}
+	}
+	if err := validateReviewAxes(value.ReviewAxes, reviewFinalizedClean); err != nil {
+		return landAuthorityBinding{}, err
+	}
+	members, err := normalizeCandidateMembers(value.Members)
+	if err != nil {
+		return landAuthorityBinding{}, err
+	}
+	publications, err := normalizePublications(value.Publications)
+	if err != nil {
+		return landAuthorityBinding{}, err
+	}
+	if err := validatePublicationSetAgainstManifest(
+		integrationCandidateManifest{Epoch: value.Epoch, Candidate: value.Candidate, Members: members},
+		candidatePublicationSet{Epoch: value.Epoch, Candidate: value.Candidate, Publications: publications},
+	); err != nil {
+		return landAuthorityBinding{}, err
+	}
+	value.Members = members
+	value.Publications = publications
+	return value, nil
+}
+
 func newHumanSubjectStateEvidence(epoch, subject provenance.TaskID, state subjectState, decision DecisionLedgerEntryID, kind DecisionKindID, operation provenance.OperationID) (subjectStateEvidence, error) {
 	value := subjectStateEvidence{Epoch: epoch.String(), Subject: subject.String(), State: state, Source: subjectStateSourceHumanDecision, Decision: decision, DecisionKind: kind, Operation: operation}
 	if err := validateSubjectStateEvidence(value, epoch, subject, "", operation); err != nil {
@@ -643,6 +785,18 @@ func newImplementationUATReviewBindingEvidenceEffect(subject provenance.TaskID, 
 	return newTypedEvidenceEffect(subject, implementationUATReviewBindingEvidenceKind, canonical, resultSlot, "Implementation UAT review binding")
 }
 
+func newLandAuthorityBindingEvidenceEffect(subject provenance.TaskID, value landAuthorityBinding, resultSlot provenance.ResultSlotID) (provenance.Effect, error) {
+	canonical, err := newLandAuthorityBinding(value)
+	if err != nil {
+		return provenance.Effect{}, err
+	}
+	epoch, err := parseAuthorityTaskID(string(canonical.Epoch), "Land authority epoch")
+	if err != nil || subject != epoch {
+		return provenance.Effect{}, authorityErr("landAuthorityBinding", "the Land authority evidence subject does not match its epoch", "Land decisions are epoch-scoped while their binding references a candidate", "use the exact Land epoch task as the evidence subject")
+	}
+	return newTypedEvidenceEffect(subject, landAuthorityBindingEvidenceKind, canonical, resultSlot, "Land authority binding")
+}
+
 func newSubjectStateEvidenceEffect(subject provenance.TaskID, value subjectStateEvidence, resultSlot provenance.ResultSlotID) (provenance.Effect, error) {
 	epoch, err := parseAuthorityTaskID(value.Epoch, "subject-state epoch")
 	if err != nil {
@@ -734,6 +888,28 @@ func decodeImplementationUATReviewBinding(payload []byte) (implementationUATRevi
 	}
 	if value.Epoch != canonical.Epoch || value.Candidate != canonical.Candidate {
 		return implementationUATReviewBinding{}, authorityErr("decodeImplementationUATReviewBinding", "the review binding contains a noncanonical task identity", "persisted authority payloads must use TaskID.String identities", "re-encode the epoch and candidate identities canonically")
+	}
+	return canonical, nil
+}
+
+func decodeLandAuthorityBinding(payload []byte) (landAuthorityBinding, error) {
+	var value landAuthorityBinding
+	if err := decodeAuthorityJSON(payload, &value); err != nil {
+		return landAuthorityBinding{}, fmt.Errorf("decode Land authority binding: %w", err)
+	}
+	canonical, err := newLandAuthorityBinding(value)
+	if err != nil {
+		return landAuthorityBinding{}, err
+	}
+	if value.Epoch != canonical.Epoch || value.Candidate != canonical.Candidate || !equalMembers(value.Members, canonical.Members) || !equalPublications(value.Publications, canonical.Publications) {
+		return landAuthorityBinding{}, authorityErr("decodeLandAuthorityBinding", "the Land authority binding contains noncanonical task identities or member ordering", "persisted Land authority evidence must use canonical task IDs and repository/candidate ordering", "re-encode the authority binding through its typed constructor")
+	}
+	canonicalPayload, err := canonicalJSON(canonical)
+	if err != nil {
+		return landAuthorityBinding{}, fmt.Errorf("encode canonical Land authority binding: %w", err)
+	}
+	if !bytes.Equal(payload, canonicalPayload) {
+		return landAuthorityBinding{}, authorityErr("decodeLandAuthorityBinding", "the Land authority binding is not canonically encoded", "operation-local replay requires one exact deterministic authority payload", "re-encode the authority binding through its typed constructor")
 	}
 	return canonical, nil
 }
