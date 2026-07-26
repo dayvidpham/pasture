@@ -68,6 +68,7 @@ func (s *epochHumanService) SetInteractionMode(ctx context.Context, in SetIntera
 	if !in.Mode.valid() {
 		return DecisionResult{}, humanServiceErr("SetInteractionMode", fmt.Sprintf("mode %q is unknown", in.Mode), "interaction mode must be normal or afk", "supply normal or afk")
 	}
+	subjectRef := []evidenceRef{{Kind: "pasture.epoch.subject.v1", Value: epoch.String()}}
 	if stored, found, err := s.committedOperationDecision(in.Meta.OperationID, []DecisionKindID{DecisionInteractionModeChanged}); err != nil {
 		return DecisionResult{}, err
 	} else if found {
@@ -81,7 +82,7 @@ func (s *epochHumanService) SetInteractionMode(ctx context.Context, in SetIntera
 				return DecisionResult{}, err
 			}
 			return s.commit(ctx, in.Meta, in.Epoch, epoch, epoch, in.Actor, MutationSetInteractionMode, draft,
-				[]evidenceRef{{Kind: "pasture.epoch.subject.v1", Value: epoch.String()}}, nil, nil)
+				subjectRef, nil, nil)
 		}
 		state, err := s.interactionModeState(epoch)
 		if err != nil {
@@ -91,7 +92,7 @@ func (s *epochHumanService) SetInteractionMode(ctx context.Context, in SetIntera
 		if err != nil {
 			return DecisionResult{}, err
 		}
-		return s.commit(ctx, in.Meta, in.Epoch, epoch, epoch, in.Actor, MutationSetInteractionMode, draft, nil, nil, nil)
+		return s.commit(ctx, in.Meta, in.Epoch, epoch, epoch, in.Actor, MutationSetInteractionMode, draft, subjectRef, nil, nil)
 	}
 	state, err := s.interactionModeState(epoch)
 	if err != nil {
@@ -102,7 +103,7 @@ func (s *epochHumanService) SetInteractionMode(ctx context.Context, in SetIntera
 		return DecisionResult{}, err
 	}
 	return s.commit(ctx, in.Meta, in.Epoch, epoch, epoch, in.Actor, MutationSetInteractionMode, draft,
-		[]evidenceRef{{Kind: "pasture.epoch.subject.v1", Value: epoch.String()}}, []provenance.Condition{state.condition}, nil)
+		subjectRef, []provenance.Condition{state.condition}, nil)
 }
 
 func (s *epochHumanService) ShowInteractionMode(_ context.Context, epoch EpochRootID) (InteractionModeCursor, error) {
