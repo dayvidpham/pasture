@@ -20,6 +20,14 @@ type CommandMeta struct {
 	OperationID provenance.OperationID
 }
 
+// RepositoryID identifies one repository participating in an integration
+// candidate or publication. It is intentionally distinct from GitOID.
+type RepositoryID string
+
+// GitRef identifies the remote ref verified for one published repository
+// member. Git object identity remains provenance.GitOID.
+type GitRef string
+
 // SetInteractionModeInput records an explicit human choice of epoch interaction mode.
 type SetInteractionModeInput struct {
 	Meta  CommandMeta
@@ -259,7 +267,7 @@ type SetSliceCandidateInput struct {
 	Meta       CommandMeta
 	Epoch      EpochRootID
 	Slice      provenance.TaskID
-	Repository string
+	Repository RepositoryID
 	Commit     provenance.GitOID
 	Assignment provenance.AssignmentID
 }
@@ -278,7 +286,7 @@ type ReworkSliceInput struct {
 // SliceCandidateReplacement is the complete immutable replacement value for one slice.
 // The aggregate allocates its ImplementationCandidateID when committing this value.
 type SliceCandidateReplacement struct {
-	Repository string
+	Repository RepositoryID
 	Commit     provenance.GitOID
 }
 
@@ -308,7 +316,7 @@ type CandidateResult struct {
 
 // RepositoryCandidate is one repository commit included in an integration candidate.
 type RepositoryCandidate struct {
-	Repository string
+	Repository RepositoryID
 	Candidate  ImplementationCandidateID
 	Commit     provenance.GitOID
 }
@@ -343,8 +351,8 @@ type PublishRepositoryInput struct {
 	Meta       CommandMeta
 	Epoch      EpochRootID
 	Candidate  IntegrationCandidateSetID
-	Repository string
-	Ref        string
+	Repository RepositoryID
+	Ref        GitRef
 	Commit     provenance.GitOID
 	Assignment provenance.AssignmentID
 }
@@ -359,7 +367,7 @@ type IntegrationCandidateResult struct {
 type PublicationResult struct {
 	CommandResult
 	Candidate  IntegrationCandidateSetID
-	Repository string
+	Repository RepositoryID
 	Evidence   provenance.JournalID
 }
 

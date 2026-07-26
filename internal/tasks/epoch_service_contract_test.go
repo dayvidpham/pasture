@@ -145,12 +145,12 @@ func TestAssignmentControlledInputShapes(t *testing.T) {
 		{typeOf[tasks.SubmitReviewInput](), fields(field[tasks.CommandMeta]("Meta"), field[tasks.EpochRootID]("Epoch"), field[tasks.ReviewRoundID]("Round"), field[tasks.ReviewAxis]("Axis"), field[provenance.AssignmentID]("Assignment"), field[tasks.ReviewSubmission]("Submission"))},
 		{typeOf[tasks.FinalizeReviewInput](), fields(field[tasks.CommandMeta]("Meta"), field[tasks.EpochRootID]("Epoch"), field[tasks.ReviewRoundID]("Round"), field[provenance.AssignmentID]("Assignment"))},
 		{typeOf[tasks.CreateSliceInput](), fields(field[tasks.CommandMeta]("Meta"), field[tasks.EpochRootID]("Epoch"), field[provenance.TaskID]("Plan"), field[provenance.AssignmentID]("Assignment"))},
-		{typeOf[tasks.SetSliceCandidateInput](), fields(field[tasks.CommandMeta]("Meta"), field[tasks.EpochRootID]("Epoch"), field[provenance.TaskID]("Slice"), field[string]("Repository"), field[provenance.GitOID]("Commit"), field[provenance.AssignmentID]("Assignment"))},
+		{typeOf[tasks.SetSliceCandidateInput](), fields(field[tasks.CommandMeta]("Meta"), field[tasks.EpochRootID]("Epoch"), field[provenance.TaskID]("Slice"), field[tasks.RepositoryID]("Repository"), field[provenance.GitOID]("Commit"), field[provenance.AssignmentID]("Assignment"))},
 		{typeOf[tasks.ReworkSliceInput](), fields(field[tasks.CommandMeta]("Meta"), field[tasks.EpochRootID]("Epoch"), field[provenance.TaskID]("Slice"), field[tasks.ImplementationCandidateID]("Candidate"), field[provenance.AssignmentID]("Assignment"), field[tasks.SliceCandidateReplacement]("Replacement"), field[tasks.ReworkSubmission]("Rework"))},
 		{typeOf[tasks.CloseSliceInput](), fields(field[tasks.CommandMeta]("Meta"), field[tasks.EpochRootID]("Epoch"), field[provenance.TaskID]("Slice"), field[tasks.ImplementationCandidateID]("Candidate"), field[tasks.ReviewRoundID]("ReviewRound"), field[provenance.AssignmentID]("Assignment"))},
 		{typeOf[tasks.CreateIntegrationCandidateInput](), fields(field[tasks.CommandMeta]("Meta"), field[tasks.EpochRootID]("Epoch"), field[provenance.TaskID]("Plan"), field[provenance.AssignmentID]("Assignment"), field[[]tasks.RepositoryCandidate]("Repositories"))},
 		{typeOf[tasks.ReworkIntegrationCandidateInput](), fields(field[tasks.CommandMeta]("Meta"), field[tasks.EpochRootID]("Epoch"), field[tasks.IntegrationCandidateSetID]("Candidate"), field[provenance.AssignmentID]("Assignment"), field[tasks.IntegrationCandidateReplacement]("Replacement"), field[tasks.ReworkSubmission]("Rework"))},
-		{typeOf[tasks.PublishRepositoryInput](), fields(field[tasks.CommandMeta]("Meta"), field[tasks.EpochRootID]("Epoch"), field[tasks.IntegrationCandidateSetID]("Candidate"), field[string]("Repository"), field[string]("Ref"), field[provenance.GitOID]("Commit"), field[provenance.AssignmentID]("Assignment"))},
+		{typeOf[tasks.PublishRepositoryInput](), fields(field[tasks.CommandMeta]("Meta"), field[tasks.EpochRootID]("Epoch"), field[tasks.IntegrationCandidateSetID]("Candidate"), field[tasks.RepositoryID]("Repository"), field[tasks.GitRef]("Ref"), field[provenance.GitOID]("Commit"), field[provenance.AssignmentID]("Assignment"))},
 	}
 	for _, tc := range cases {
 		t.Run(tc.typ.Name(), func(t *testing.T) { assertStructShape(t, tc.typ, tc.want) })
@@ -168,8 +168,8 @@ func TestReviewAndReplacementPayloadShapes(t *testing.T) {
 	var _ tasks.ReviewSubmission = tasks.ImplementationReviewSubmission{}
 	assertStructShape(t, typeOf[tasks.FindingResolution](), fields(field[provenance.TaskID]("Finding"), field[tasks.FindingDisposition]("Outcome"), field[[]provenance.JournalID]("Evidence")))
 	assertStructShape(t, typeOf[tasks.ReworkSubmission](), fields(field[[]tasks.FindingResolution]("Findings")))
-	assertStructShape(t, typeOf[tasks.SliceCandidateReplacement](), fields(field[string]("Repository"), field[provenance.GitOID]("Commit")))
-	assertStructShape(t, typeOf[tasks.RepositoryCandidate](), fields(field[string]("Repository"), field[tasks.ImplementationCandidateID]("Candidate"), field[provenance.GitOID]("Commit")))
+	assertStructShape(t, typeOf[tasks.SliceCandidateReplacement](), fields(field[tasks.RepositoryID]("Repository"), field[provenance.GitOID]("Commit")))
+	assertStructShape(t, typeOf[tasks.RepositoryCandidate](), fields(field[tasks.RepositoryID]("Repository"), field[tasks.ImplementationCandidateID]("Candidate"), field[provenance.GitOID]("Commit")))
 	assertStructShape(t, typeOf[tasks.IntegrationCandidateReplacement](), fields(field[[]tasks.RepositoryCandidate]("Repositories")))
 }
 
@@ -228,7 +228,7 @@ func TestCommandResultShapes(t *testing.T) {
 		{typeOf[tasks.SliceResult](), fields(embedded[tasks.CommandResult](), field[provenance.TaskID]("Slice"))},
 		{typeOf[tasks.CandidateResult](), fields(embedded[tasks.CommandResult](), field[provenance.TaskID]("Slice"), field[tasks.ImplementationCandidateID]("Candidate"))},
 		{typeOf[tasks.IntegrationCandidateResult](), fields(embedded[tasks.CommandResult](), field[tasks.IntegrationCandidateSetID]("Candidate"))},
-		{typeOf[tasks.PublicationResult](), fields(embedded[tasks.CommandResult](), field[tasks.IntegrationCandidateSetID]("Candidate"), field[string]("Repository"), field[provenance.JournalID]("Evidence"))},
+		{typeOf[tasks.PublicationResult](), fields(embedded[tasks.CommandResult](), field[tasks.IntegrationCandidateSetID]("Candidate"), field[tasks.RepositoryID]("Repository"), field[provenance.JournalID]("Evidence"))},
 	}
 	for _, tc := range cases {
 		t.Run(tc.typ.Name(), func(t *testing.T) { assertStructShape(t, tc.typ, tc.want) })

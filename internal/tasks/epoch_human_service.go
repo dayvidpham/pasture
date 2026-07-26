@@ -318,70 +318,6 @@ type evidenceRef struct {
 	stateSubject provenance.TaskID       `json:"-"`
 }
 
-// subjectState is a private current-subject projection carried by the existing
-// proposal and candidate evidence families. Immutable decisions remain the
-// purpose-specific authority; this value only makes their latest lifecycle state
-// conditionable without adding a store, ledger, or public decision kind.
-type subjectState string
-
-const (
-	subjectStateInvalid                subjectState = ""
-	subjectStatePlanAccepted           subjectState = "plan-accepted"
-	subjectStatePlanChangesRequested   subjectState = "plan-changes-requested"
-	subjectStatePlanDeferred           subjectState = "plan-deferred"
-	subjectStatePlanRatified           subjectState = "plan-ratified"
-	subjectStateImplementationAccepted subjectState = "implementation-accepted"
-	subjectStateImplementationChanges  subjectState = "implementation-changes-requested"
-	subjectStateImplementationLanded   subjectState = "implementation-landed"
-	subjectStateReworked               subjectState = "reworked"
-)
-
-type subjectStateEvidence struct {
-	Epoch        string                 `json:"epoch"`
-	Subject      string                 `json:"subject"`
-	State        subjectState           `json:"state"`
-	Decision     DecisionLedgerEntryID  `json:"decision"`
-	DecisionKind DecisionKindID         `json:"decisionKind"`
-	Operation    provenance.OperationID `json:"operation"`
-}
-
-// newSubjectStateEvidence is the package-private constructor reserved for the
-// future assignment/candidate rework producer. This leaf intentionally does not
-// create a rework command or producer.
-func newSubjectStateEvidence(epoch, subject provenance.TaskID, state subjectState, decision DecisionLedgerEntryID, kind DecisionKindID, operation provenance.OperationID) subjectStateEvidence {
-	return subjectStateEvidence{Epoch: epoch.String(), Subject: subject.String(), State: state, Decision: decision, DecisionKind: kind, Operation: operation}
-}
-
-type subjectStateSnapshot struct {
-	subject      provenance.TaskID
-	state        subjectState
-	decision     DecisionLedgerEntryID
-	decisionKind DecisionKindID
-	operation    provenance.OperationID
-	journalID    provenance.JournalID
-	family       provenance.EvidenceKind
-}
-
-func (s subjectStateSnapshot) conditionCurrent() provenance.Condition {
-	return currentEvidenceCondition(s.subject, s.family, s.journalID)
-}
-
-func (s subjectStateSnapshot) conditionExact() provenance.Condition {
-	return evidenceCondition(s.subject, s.family, s.journalID, provenance.ConditionExactFact)
-}
-
-func (s subjectStateSnapshot) terminal() bool {
-	return s.state == subjectStatePlanRatified || s.state == subjectStateImplementationLanded
-}
-
-func currentEvidenceCondition(subject provenance.TaskID, kind provenance.EvidenceKind, asserted provenance.JournalID) provenance.Condition {
-	return evidenceCondition(subject, kind, asserted, provenance.ConditionCurrentFact)
-}
-
-func evidenceCondition(subject provenance.TaskID, kind provenance.EvidenceKind, asserted provenance.JournalID, conditionKind provenance.ConditionKind) provenance.Condition {
-	return provenance.Condition{Kind: conditionKind, Selector: provenance.FactSelector{Kind: provenance.FactEvidence, Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskExact, TaskID: subject}}, EvidenceKind: kind}, AssertedJournalID: asserted}
-}
-
 // conditionSnapshot is canonical evidence for the preconditions selected by a
 // command. It is internal operation data, never a caller-supplied revision token.
 // On an exact retry it restores the original operation input before direct Apply.
@@ -441,7 +377,11 @@ func (s *epochHumanService) commit(ctx context.Context, meta CommandMeta, epochI
 			if ref.stateSubject != (provenance.TaskID{}) {
 				stateSubject = ref.stateSubject
 			}
-			payload, err = canonicalJSON(newSubjectStateEvidence(epoch, stateSubject, ref.State, decisionID, draft.encoding().Kind, meta.OperationID))
+			stateEvidence, stateErr := newHumanSubjectStateEvidence(epoch, stateSubject, ref.State, decisionID, draft.encoding().Kind, meta.OperationID)
+			if stateErr != nil {
+				return DecisionResult{}, stateErr
+			}
+			payload, err = canonicalJSON(stateEvidence)
 		} else {
 			payload, err = canonicalJSON(struct{ Epoch, Subject, Decision, Reference string }{epoch.String(), subject.String(), string(decisionID), ref.Value})
 		}
@@ -786,18 +726,11 @@ func (s *epochHumanService) currentSubjectState(epoch, subject provenance.TaskID
 			if row.TaskID == nil || *row.TaskID != subject || row.EvidenceKind != family || row.ProducingOperationID == "" {
 				return subjectStateSnapshot{}, humanServiceErr("currentSubjectState", "a subject-state evidence row has an unexpected task, family, or operation", "current-subject conditions require one exact task-scoped evidence authority", "repair the inconsistent evidence fact before retrying")
 			}
-			var evidence subjectStateEvidence
-			if err := json.Unmarshal(row.Payload, &evidence); err != nil {
-				return subjectStateSnapshot{}, humanServiceErr("currentSubjectState", "a subject-state evidence payload is malformed", "lifecycle eligibility cannot fold an untyped evidence payload", "repair the malformed evidence fact before retrying")
+			evidence, err := decodeSubjectStateEvidence(row.Payload, epoch, subject, family, row.ProducingOperationID)
+			if err != nil {
+				return subjectStateSnapshot{}, humanServiceErr("currentSubjectState", "a subject-state evidence payload is malformed or uses an impossible source", "lifecycle eligibility requires a validated typed source union", "repair the inconsistent subject-state evidence before retrying")
 			}
-			kind, ok := subjectStateDecisionKind(evidence.State)
-			if evidence.State == subjectStateReworked {
-				ok = evidence.DecisionKind != ""
-			}
-			if !ok || !subjectStateBelongsToFamily(evidence.State, family) || evidence.Epoch != epoch.String() || evidence.Subject != subject.String() || evidence.Decision == "" || (kind != "" && evidence.DecisionKind != kind) || evidence.Operation != row.ProducingOperationID || evidence.Decision != decisionIDForOperation(row.ProducingOperationID) {
-				return subjectStateSnapshot{}, humanServiceErr("currentSubjectState", "a subject-state evidence row has inconsistent epoch, reference, decision, or operation identity", "the latest lifecycle state must point to the exact immutable decision that produced it", "repair the inconsistent subject-state evidence before retrying")
-			}
-			state = subjectStateSnapshot{subject: subject, state: evidence.State, decision: evidence.Decision, decisionKind: evidence.DecisionKind, operation: evidence.Operation, journalID: row.JournalID, family: family}
+			state = subjectStateSnapshot{subject: subject, state: evidence.State, decision: evidence.Decision, decisionKind: evidence.DecisionKind, operation: evidence.Operation, source: evidence.Source, journalID: row.JournalID, family: family}
 		}
 		if page.Next == nil {
 			return state, nil
@@ -821,7 +754,7 @@ func subjectStateDecisionKind(state subjectState) (DecisionKindID, bool) {
 		return DecisionImplementationUAT, true
 	case subjectStateImplementationLanded:
 		return DecisionLanded, true
-	case subjectStateReworked:
+	case subjectStateCandidateCurrent, subjectStateReworked:
 		return "", false
 	default:
 		return "", false
@@ -831,6 +764,9 @@ func subjectStateDecisionKind(state subjectState) (DecisionKindID, bool) {
 func subjectStateBelongsToFamily(state subjectState, family provenance.EvidenceKind) bool {
 	if state == subjectStateReworked {
 		return family == planSubjectEvidenceKind || family == candidateEvidenceKind
+	}
+	if state == subjectStateCandidateCurrent {
+		return family == candidateEvidenceKind
 	}
 	kind, ok := subjectStateDecisionKind(state)
 	if !ok {
