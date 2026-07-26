@@ -158,6 +158,9 @@ type subjectStateEvidence struct {
 }
 
 func (s *subjectStateEvidence) UnmarshalJSON(payload []byte) error {
+	if err := validateAuthorityJSONUTF8(payload, "subject-state payload"); err != nil {
+		return err
+	}
 	type wire struct {
 		Epoch        string                 `json:"epoch"`
 		Subject      string                 `json:"subject"`
@@ -287,6 +290,16 @@ func newInvalidatedReviewAuthority(epoch EpochRootID, candidate IntegrationCandi
 }
 
 func newImplementationReviewAuthority(value implementationReviewAuthority) (implementationReviewAuthority, error) {
+	epoch, err := canonicalAuthorityTaskID(string(value.Epoch), "epoch")
+	if err != nil {
+		return implementationReviewAuthority{}, err
+	}
+	candidate, err := canonicalAuthorityTaskID(string(value.Candidate), "candidate")
+	if err != nil {
+		return implementationReviewAuthority{}, err
+	}
+	value.Epoch = EpochRootID(epoch)
+	value.Candidate = IntegrationCandidateSetID(candidate)
 	if err := validateImplementationReviewAuthority(value); err != nil {
 		return implementationReviewAuthority{}, err
 	}
@@ -365,16 +378,28 @@ func normalizeCandidateMembers(members []candidateMember) ([]candidateMember, er
 		return nil, authorityErr("candidateManifest", "the candidate manifest has no members", "an integration candidate must identify at least one repository commit", "supply one valid member per candidate repository")
 	}
 	copyMembers := append([]candidateMember(nil), members...)
+	seenRepositories := make(map[RepositoryID]int, len(copyMembers))
+	seenCandidates := make(map[ImplementationCandidateID]int, len(copyMembers))
 	for i, member := range copyMembers {
 		if err := validateRepositoryID(member.Repository); err != nil {
 			return nil, fmt.Errorf("candidate manifest member %d: %w", i, err)
 		}
-		if err := validateTaskWrapper(string(member.Candidate), "candidate member"); err != nil {
+		candidate, err := canonicalAuthorityTaskID(string(member.Candidate), "candidate member")
+		if err != nil {
 			return nil, fmt.Errorf("candidate manifest member %d: %w", i, err)
 		}
+		copyMembers[i].Candidate = ImplementationCandidateID(candidate)
 		if err := validateGitOID(member.Commit); err != nil {
 			return nil, fmt.Errorf("candidate manifest member %d: %w", i, err)
 		}
+		if prior, found := seenRepositories[member.Repository]; found {
+			return nil, authorityErr("candidateManifest", fmt.Sprintf("members %d and %d duplicate repository %q", prior, i, member.Repository), "one complete manifest has one candidate commit per repository", "remove the duplicate member")
+		}
+		seenRepositories[member.Repository] = i
+		if prior, found := seenCandidates[copyMembers[i].Candidate]; found {
+			return nil, authorityErr("candidateManifest", fmt.Sprintf("members %d and %d duplicate candidate %q", prior, i, copyMembers[i].Candidate), "one complete manifest binds each implementation candidate once", "remove the duplicate member")
+		}
+		seenCandidates[copyMembers[i].Candidate] = i
 	}
 	sort.Slice(copyMembers, func(i, j int) bool {
 		if copyMembers[i].Repository != copyMembers[j].Repository {
@@ -382,21 +407,20 @@ func normalizeCandidateMembers(members []candidateMember) ([]candidateMember, er
 		}
 		return copyMembers[i].Candidate < copyMembers[j].Candidate
 	})
-	for i := 1; i < len(copyMembers); i++ {
-		if copyMembers[i-1].Repository == copyMembers[i].Repository || copyMembers[i-1].Candidate == copyMembers[i].Candidate {
-			return nil, authorityErr("candidateManifest", fmt.Sprintf("members %d and %d duplicate a repository or candidate", i-1, i), "one complete manifest has one candidate commit per repository", "remove the duplicate member")
-		}
-	}
 	return copyMembers, nil
 }
 
 func newIntegrationCandidateManifest(epoch EpochRootID, candidate IntegrationCandidateSetID, members []candidateMember, operation provenance.OperationID) (integrationCandidateManifest, error) {
-	if err := validateEpoch(epoch); err != nil {
+	canonicalEpoch, err := canonicalAuthorityTaskID(string(epoch), "epoch")
+	if err != nil {
 		return integrationCandidateManifest{}, err
 	}
-	if err := validateTaskWrapper(string(candidate), "candidate set"); err != nil {
+	canonicalCandidate, err := canonicalAuthorityTaskID(string(candidate), "candidate set")
+	if err != nil {
 		return integrationCandidateManifest{}, err
 	}
+	epoch = EpochRootID(canonicalEpoch)
+	candidate = IntegrationCandidateSetID(canonicalCandidate)
 	if err := validateOperationID(operation); err != nil {
 		return integrationCandidateManifest{}, authorityErr("candidateManifest", "the manifest operation identity is malformed", "immutable membership must identify its producer", "supply a stable operation identity")
 	}
@@ -412,13 +436,17 @@ func normalizePublications(publications []repositoryPublication) ([]repositoryPu
 		return nil, authorityErr("candidatePublicationSet", "the publication set has no verified members", "a current publication snapshot must contain the verification being recorded", "supply at least one repository publication")
 	}
 	copyPublications := append([]repositoryPublication(nil), publications...)
+	seenRepositories := make(map[RepositoryID]int, len(copyPublications))
+	seenCandidates := make(map[ImplementationCandidateID]int, len(copyPublications))
 	for i, publication := range copyPublications {
 		if err := validateRepositoryID(publication.Repository); err != nil {
 			return nil, fmt.Errorf("publication %d: %w", i, err)
 		}
-		if err := validateTaskWrapper(string(publication.Candidate), "published candidate"); err != nil {
+		candidate, err := canonicalAuthorityTaskID(string(publication.Candidate), "published candidate")
+		if err != nil {
 			return nil, fmt.Errorf("publication %d: %w", i, err)
 		}
+		copyPublications[i].Candidate = ImplementationCandidateID(candidate)
 		if err := validateGitRef(publication.Ref); err != nil {
 			return nil, fmt.Errorf("publication %d: %w", i, err)
 		}
@@ -428,6 +456,14 @@ func normalizePublications(publications []repositoryPublication) ([]repositoryPu
 		if err := validateOperationID(publication.VerificationOperation); err != nil {
 			return nil, authorityErr("candidatePublicationSet", fmt.Sprintf("publication %d has a malformed verification operation", i), "each verification must be replayable and attributable", "supply a stable operation identity")
 		}
+		if prior, found := seenRepositories[publication.Repository]; found {
+			return nil, authorityErr("candidatePublicationSet", fmt.Sprintf("publications %d and %d duplicate repository %q", prior, i, publication.Repository), "a publication set has one verification per repository", "remove the duplicate publication")
+		}
+		seenRepositories[publication.Repository] = i
+		if prior, found := seenCandidates[copyPublications[i].Candidate]; found {
+			return nil, authorityErr("candidatePublicationSet", fmt.Sprintf("publications %d and %d duplicate candidate %q", prior, i, copyPublications[i].Candidate), "a publication set binds each implementation candidate once", "remove the duplicate publication")
+		}
+		seenCandidates[copyPublications[i].Candidate] = i
 	}
 	sort.Slice(copyPublications, func(i, j int) bool {
 		if copyPublications[i].Repository != copyPublications[j].Repository {
@@ -435,21 +471,20 @@ func normalizePublications(publications []repositoryPublication) ([]repositoryPu
 		}
 		return copyPublications[i].Candidate < copyPublications[j].Candidate
 	})
-	for i := 1; i < len(copyPublications); i++ {
-		if copyPublications[i-1].Repository == copyPublications[i].Repository || copyPublications[i-1].Candidate == copyPublications[i].Candidate {
-			return nil, authorityErr("candidatePublicationSet", fmt.Sprintf("publications %d and %d duplicate a repository or candidate", i-1, i), "a publication set is one complete verification per candidate repository", "remove the duplicate publication")
-		}
-	}
 	return copyPublications, nil
 }
 
 func newCandidatePublicationSet(epoch EpochRootID, candidate IntegrationCandidateSetID, publications []repositoryPublication, operation provenance.OperationID) (candidatePublicationSet, error) {
-	if err := validateEpoch(epoch); err != nil {
+	canonicalEpoch, err := canonicalAuthorityTaskID(string(epoch), "epoch")
+	if err != nil {
 		return candidatePublicationSet{}, err
 	}
-	if err := validateTaskWrapper(string(candidate), "candidate set"); err != nil {
+	canonicalCandidate, err := canonicalAuthorityTaskID(string(candidate), "candidate set")
+	if err != nil {
 		return candidatePublicationSet{}, err
 	}
+	epoch = EpochRootID(canonicalEpoch)
+	candidate = IntegrationCandidateSetID(canonicalCandidate)
 	if err := validateOperationID(operation); err != nil {
 		return candidatePublicationSet{}, authorityErr("candidatePublicationSet", "the publication-set operation identity is malformed", "a current publication snapshot must identify its producer", "supply a stable operation identity")
 	}
@@ -480,12 +515,16 @@ func validatePublicationSetAgainstManifest(manifest integrationCandidateManifest
 }
 
 func newImplementationUATReviewBinding(epoch EpochRootID, candidate IntegrationCandidateSetID, round ReviewRoundID, reviewFact provenance.JournalID, operation provenance.OperationID) (implementationUATReviewBinding, error) {
-	if err := validateEpoch(epoch); err != nil {
+	canonicalEpoch, err := canonicalAuthorityTaskID(string(epoch), "epoch")
+	if err != nil {
 		return implementationUATReviewBinding{}, err
 	}
-	if err := validateTaskWrapper(string(candidate), "candidate set"); err != nil {
+	canonicalCandidate, err := canonicalAuthorityTaskID(string(candidate), "candidate set")
+	if err != nil {
 		return implementationUATReviewBinding{}, err
 	}
+	epoch = EpochRootID(canonicalEpoch)
+	candidate = IntegrationCandidateSetID(canonicalCandidate)
 	if err := validateText(string(round), "review round"); err != nil {
 		return implementationUATReviewBinding{}, err
 	}
@@ -609,6 +648,12 @@ func newSubjectStateEvidenceEffect(subject provenance.TaskID, value subjectState
 	if err != nil {
 		return provenance.Effect{}, err
 	}
+	stateSubject, err := canonicalAuthorityTaskID(value.Subject, "subject-state subject")
+	if err != nil {
+		return provenance.Effect{}, err
+	}
+	value.Epoch = epoch.String()
+	value.Subject = stateSubject
 	if err := validateSubjectStateEvidence(value, epoch, subject, familyForSubjectState(value.State), value.Operation); err != nil {
 		return provenance.Effect{}, err
 	}
@@ -638,10 +683,14 @@ func decodeImplementationReviewAuthority(payload []byte) (implementationReviewAu
 	if err := decodeAuthorityJSON(payload, &value); err != nil {
 		return implementationReviewAuthority{}, fmt.Errorf("decode implementation review authority: %w", err)
 	}
-	if err := validateImplementationReviewAuthority(value); err != nil {
+	canonical, err := newImplementationReviewAuthority(value)
+	if err != nil {
 		return implementationReviewAuthority{}, err
 	}
-	return value, nil
+	if value.Epoch != canonical.Epoch || value.Candidate != canonical.Candidate {
+		return implementationReviewAuthority{}, authorityErr("decodeImplementationReviewAuthority", "the review authority contains a noncanonical task identity", "persisted authority payloads must use TaskID.String identities", "re-encode the epoch and candidate identities canonically")
+	}
+	return canonical, nil
 }
 
 func decodeCandidateManifest(payload []byte) (integrationCandidateManifest, error) {
@@ -653,7 +702,7 @@ func decodeCandidateManifest(payload []byte) (integrationCandidateManifest, erro
 	if err != nil {
 		return integrationCandidateManifest{}, err
 	}
-	if !equalMembers(value.Members, normalized.Members) {
+	if value.Epoch != normalized.Epoch || value.Candidate != normalized.Candidate || !equalMembers(value.Members, normalized.Members) {
 		return integrationCandidateManifest{}, authorityErr("decodeCandidateManifest", "the manifest members are not in canonical order", "immutable evidence must have one deterministic encoding", "re-encode members sorted by repository then candidate")
 	}
 	return normalized, nil
@@ -668,7 +717,7 @@ func decodeCandidatePublicationSet(payload []byte) (candidatePublicationSet, err
 	if err != nil {
 		return candidatePublicationSet{}, err
 	}
-	if !equalPublications(value.Publications, normalized.Publications) {
+	if value.Epoch != normalized.Epoch || value.Candidate != normalized.Candidate || !equalPublications(value.Publications, normalized.Publications) {
 		return candidatePublicationSet{}, authorityErr("decodeCandidatePublicationSet", "the publication set is not in canonical order", "current snapshots need deterministic payloads for exact replay", "re-encode publications sorted by repository then candidate")
 	}
 	return normalized, nil
@@ -679,7 +728,14 @@ func decodeImplementationUATReviewBinding(payload []byte) (implementationUATRevi
 	if err := decodeAuthorityJSON(payload, &value); err != nil {
 		return implementationUATReviewBinding{}, fmt.Errorf("decode Implementation UAT review binding: %w", err)
 	}
-	return newImplementationUATReviewBinding(value.Epoch, value.Candidate, value.ReviewRound, value.ReviewFact, value.Operation)
+	canonical, err := newImplementationUATReviewBinding(value.Epoch, value.Candidate, value.ReviewRound, value.ReviewFact, value.Operation)
+	if err != nil {
+		return implementationUATReviewBinding{}, err
+	}
+	if value.Epoch != canonical.Epoch || value.Candidate != canonical.Candidate {
+		return implementationUATReviewBinding{}, authorityErr("decodeImplementationUATReviewBinding", "the review binding contains a noncanonical task identity", "persisted authority payloads must use TaskID.String identities", "re-encode the epoch and candidate identities canonically")
+	}
+	return canonical, nil
 }
 
 func decodeSubjectStateEvidence(payload []byte, epoch, subject provenance.TaskID, family provenance.EvidenceKind, producingOperation provenance.OperationID) (subjectStateEvidence, error) {
@@ -694,6 +750,9 @@ func decodeSubjectStateEvidence(payload []byte, epoch, subject provenance.TaskID
 }
 
 func decodeAuthorityJSON(payload []byte, target any) error {
+	if err := validateAuthorityJSONUTF8(payload, "authority payload"); err != nil {
+		return err
+	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
@@ -732,8 +791,14 @@ func validateEvidenceSubject(subject provenance.TaskID, candidate, label string)
 }
 
 func validateTaskWrapper(raw, label string) error {
-	_, err := parseAuthorityTaskID(raw, label)
-	return err
+	canonical, err := canonicalAuthorityTaskID(raw, label)
+	if err != nil {
+		return err
+	}
+	if raw != canonical {
+		return authorityErr("task identity", fmt.Sprintf("the %s identity is not canonical", label), "authority payloads must use the one TaskID.String spelling", fmt.Sprintf("supply the canonical TaskID.String value for the %s", label))
+	}
+	return nil
 }
 
 func validateRepositoryID(repository RepositoryID) error {
@@ -741,15 +806,23 @@ func validateRepositoryID(repository RepositoryID) error {
 }
 
 func validateGitRef(ref GitRef) error {
-	if err := validateText(string(ref), "git ref"); err != nil {
+	value := string(ref)
+	if err := validateAuthorityUTF8(value, "git ref"); err != nil {
 		return err
 	}
-	value := string(ref)
-	if value == "@" || !strings.Contains(value, "/") || strings.Contains(value, "..") || strings.Contains(value, "@{") || strings.ContainsAny(value, "~^:?*[\\") || strings.HasPrefix(value, "/") || strings.HasSuffix(value, "/") || strings.HasSuffix(value, ".") || strings.Contains(value, "//") {
+	// This matches the default multi-component git-check-ref-format contract.
+	// It intentionally restricts only Git's ASCII forbidden bytes, so valid
+	// UTF-8 ref components, including a non-breaking space, remain valid.
+	if value == "@" || !strings.Contains(value, "/") || strings.Contains(value, "..") || strings.Contains(value, "@{") || strings.ContainsAny(value, " ~^:?*[\\") || strings.HasPrefix(value, "/") || strings.HasSuffix(value, "/") || strings.HasSuffix(value, ".") || strings.Contains(value, "//") {
 		return authorityErr("git ref", fmt.Sprintf("the ref %q is malformed", ref), "publication evidence must identify a valid non-ambiguous Git ref", "supply a Git ref accepted by git-check-ref-format")
 	}
+	for _, r := range value {
+		if r <= 0x1f || r == 0x7f {
+			return authorityErr("git ref", fmt.Sprintf("the ref %q is malformed", ref), "publication evidence must identify a valid non-ambiguous Git ref", "supply a Git ref accepted by git-check-ref-format")
+		}
+	}
 	for _, component := range strings.Split(value, "/") {
-		if component == "" || strings.HasPrefix(component, ".") || strings.HasSuffix(strings.ToLower(component), ".lock") {
+		if component == "" || strings.HasPrefix(component, ".") || strings.HasSuffix(component, ".lock") {
 			return authorityErr("git ref", fmt.Sprintf("the ref %q is malformed", ref), "publication evidence must identify a valid non-ambiguous Git ref", "supply a Git ref accepted by git-check-ref-format")
 		}
 	}
@@ -790,6 +863,15 @@ func validateAuthorityUTF8(value, label string) error {
 	return nil
 }
 
+// validateAuthorityJSONUTF8 rejects raw payload bytes before encoding/json can
+// replace malformed text with U+FFFD during authority decoding.
+func validateAuthorityJSONUTF8(payload []byte, label string) error {
+	if !utf8.Valid(payload) {
+		return authorityErr("authority JSON", fmt.Sprintf("the %s contains invalid UTF-8", label), "authority JSON must preserve the supplied bytes before strict decoding", fmt.Sprintf("supply valid UTF-8 JSON for the %s", label))
+	}
+	return nil
+}
+
 func validateOperationID(operation provenance.OperationID) error {
 	if err := validateAuthorityUTF8(string(operation), "operation identity"); err != nil {
 		return err
@@ -816,6 +898,16 @@ func parseAuthorityTaskID(raw, label string) (provenance.TaskID, error) {
 		}
 	}
 	return id, nil
+}
+
+// canonicalAuthorityTaskID retains the parsed TaskID so every authority DTO
+// can serialize the single canonical namespace--lowercase-UUID spelling.
+func canonicalAuthorityTaskID(raw, label string) (string, error) {
+	id, err := parseAuthorityTaskID(raw, label)
+	if err != nil {
+		return "", err
+	}
+	return id.String(), nil
 }
 
 func equalMembers(left, right []candidateMember) bool {

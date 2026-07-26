@@ -3,6 +3,7 @@ package tasks
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/dayvidpham/provenance"
@@ -197,6 +198,100 @@ func TestEpochAuthorityEffectBoundariesValidateAndCanonicalize(t *testing.T) {
 	}
 }
 
+func TestEpochAuthorityRejectsNonAdjacentCandidateDuplicates(t *testing.T) {
+	t.Parallel()
+	epoch := EpochRootID("tasks--018f0000-0000-7000-8000-000000000001")
+	candidate := IntegrationCandidateSetID("tasks--018f0000-0000-7000-8000-000000000002")
+	subject := authorityTestTaskID(t, string(candidate))
+	duplicateCandidate := ImplementationCandidateID("tasks--018f0000-0000-7000-8000-000000000003")
+	otherCandidate := ImplementationCandidateID("tasks--018f0000-0000-7000-8000-000000000004")
+	members := []candidateMember{
+		{Repository: "repo-a", Candidate: duplicateCandidate, Commit: authorityTestCommitA},
+		{Repository: "repo-b", Candidate: otherCandidate, Commit: authorityTestCommitB},
+		{Repository: "repo-c", Candidate: duplicateCandidate, Commit: authorityTestCommitA},
+	}
+	if _, err := newIntegrationCandidateManifest(epoch, candidate, members, "non-adjacent-manifest"); err == nil {
+		t.Fatal("manifest accepted a candidate duplicated across non-adjacent repositories")
+	}
+	if _, err := newCandidateManifestEvidenceEffect(subject, integrationCandidateManifest{Epoch: epoch, Candidate: candidate, Members: members, Operation: "non-adjacent-manifest-effect"}, "manifest"); err == nil {
+		t.Fatal("manifest effect accepted a candidate duplicated across non-adjacent repositories")
+	}
+
+	publications := []repositoryPublication{
+		{Repository: "repo-a", Candidate: duplicateCandidate, Ref: "refs/heads/main", Commit: authorityTestCommitA, VerificationOperation: "verify-a"},
+		{Repository: "repo-b", Candidate: otherCandidate, Ref: "refs/heads/main", Commit: authorityTestCommitB, VerificationOperation: "verify-b"},
+		{Repository: "repo-c", Candidate: duplicateCandidate, Ref: "refs/heads/main", Commit: authorityTestCommitA, VerificationOperation: "verify-c"},
+	}
+	if _, err := newCandidatePublicationSet(epoch, candidate, publications, "non-adjacent-publication"); err == nil {
+		t.Fatal("publication set accepted a candidate duplicated across non-adjacent repositories")
+	}
+	if _, err := newCandidatePublicationSetEvidenceEffect(subject, candidatePublicationSet{Epoch: epoch, Candidate: candidate, Publications: publications, Operation: "non-adjacent-publication-effect"}, "publication"); err == nil {
+		t.Fatal("publication effect accepted a candidate duplicated across non-adjacent repositories")
+	}
+}
+
+func TestEpochAuthorityEffectsSerializeCanonicalTaskIDs(t *testing.T) {
+	t.Parallel()
+	const (
+		canonicalEpoch     = "tasks--018f0000-0000-7000-8000-000000000001"
+		canonicalCandidate = "tasks--018f0000-0000-7000-8000-000000000002"
+		canonicalMember    = "tasks--018f0000-0000-7000-8000-000000000003"
+		aliasedEpoch       = "tasks--018F0000-0000-7000-8000-000000000001"
+		aliasedCandidate   = "tasks--018F0000-0000-7000-8000-000000000002"
+		aliasedMember      = "tasks--018F0000-0000-7000-8000-000000000003"
+	)
+	subject := authorityTestTaskID(t, canonicalCandidate)
+	manifestEffect, err := newCandidateManifestEvidenceEffect(subject, integrationCandidateManifest{
+		Epoch: aliasedEpoch, Candidate: aliasedCandidate,
+		Members:   []candidateMember{{Repository: "repo-a", Candidate: aliasedMember, Commit: authorityTestCommitA}},
+		Operation: "canonical-task-ids-manifest",
+	}, "manifest")
+	if err != nil {
+		t.Fatalf("newCandidateManifestEvidenceEffect: %v", err)
+	}
+	var manifest integrationCandidateManifest
+	if err := json.Unmarshal(manifestEffect.Payload, &manifest); err != nil {
+		t.Fatalf("decode manifest payload: %v", err)
+	}
+	if manifest.Epoch != canonicalEpoch || manifest.Candidate != canonicalCandidate || manifest.Members[0].Candidate != canonicalMember {
+		t.Fatalf("manifest payload retained a noncanonical task identity: %+v", manifest)
+	}
+	aliasedManifestPayload := []byte(strings.Replace(string(manifestEffect.Payload), canonicalEpoch, aliasedEpoch, 1))
+	if _, err := decodeCandidateManifest(aliasedManifestPayload); err == nil {
+		t.Fatal("strict manifest decoder accepted a noncanonical task identity")
+	}
+
+	publicationEffect, err := newCandidatePublicationSetEvidenceEffect(subject, candidatePublicationSet{
+		Epoch: aliasedEpoch, Candidate: aliasedCandidate,
+		Publications: []repositoryPublication{{Repository: "repo-a", Candidate: aliasedMember, Ref: "refs/heads/main", Commit: authorityTestCommitA, VerificationOperation: "verify"}},
+		Operation:    "canonical-task-ids-publication",
+	}, "publication")
+	if err != nil {
+		t.Fatalf("newCandidatePublicationSetEvidenceEffect: %v", err)
+	}
+	var publications candidatePublicationSet
+	if err := json.Unmarshal(publicationEffect.Payload, &publications); err != nil {
+		t.Fatalf("decode publication payload: %v", err)
+	}
+	if publications.Epoch != canonicalEpoch || publications.Candidate != canonicalCandidate || publications.Publications[0].Candidate != canonicalMember {
+		t.Fatalf("publication payload retained a noncanonical task identity: %+v", publications)
+	}
+
+	stateEffect, err := newSubjectStateEvidenceEffect(subject, subjectStateEvidence{
+		Epoch: aliasedEpoch, Subject: aliasedCandidate, State: subjectStateReworked, Source: subjectStateSourceAssignmentOperation, Operation: "canonical-task-ids-state",
+	}, "state")
+	if err != nil {
+		t.Fatalf("newSubjectStateEvidenceEffect: %v", err)
+	}
+	var state subjectStateEvidence
+	if err := json.Unmarshal(stateEffect.Payload, &state); err != nil {
+		t.Fatalf("decode state payload: %v", err)
+	}
+	if state.Epoch != canonicalEpoch || state.Subject != canonicalCandidate {
+		t.Fatalf("subject-state payload retained a noncanonical task identity: %+v", state)
+	}
+}
+
 func TestEpochAuthorityRejectsInvalidUTF8AtAuthorityBoundaries(t *testing.T) {
 	t.Parallel()
 	invalid := string([]byte{'x', 0xff})
@@ -246,15 +341,42 @@ func TestEpochAuthorityRejectsInvalidUTF8AtAuthorityBoundaries(t *testing.T) {
 	}
 }
 
+func TestEpochAuthorityDecodersRejectInvalidRawUTF8(t *testing.T) {
+	t.Parallel()
+	payload := []byte{'{', '"', 'v', '"', ':', '"', 0xff, '"', '}'}
+	epoch := authorityTestTaskID(t, "tasks--018f0000-0000-7000-8000-000000000001")
+	subject := authorityTestTaskID(t, "tasks--018f0000-0000-7000-8000-000000000002")
+	for _, test := range []struct {
+		name   string
+		decode func() error
+	}{
+		{"review authority", func() error { _, err := decodeImplementationReviewAuthority(payload); return err }},
+		{"candidate manifest", func() error { _, err := decodeCandidateManifest(payload); return err }},
+		{"publication set", func() error { _, err := decodeCandidatePublicationSet(payload); return err }},
+		{"UAT review binding", func() error { _, err := decodeImplementationUATReviewBinding(payload); return err }},
+		{"subject state", func() error {
+			_, err := decodeSubjectStateEvidence(payload, epoch, subject, candidateEvidenceKind, "invalid-utf8")
+			return err
+		}},
+		{"subject state unmarshal", func() error { return (&subjectStateEvidence{}).UnmarshalJSON(payload) }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.decode(); err == nil || !strings.Contains(err.Error(), "invalid UTF-8") {
+				t.Fatalf("decoder error = %v, want raw invalid UTF-8 rejection", err)
+			}
+		})
+	}
+}
+
 func TestEpochAuthorityValidatesExactGitRefs(t *testing.T) {
 	t.Parallel()
-	for _, ref := range []GitRef{"refs/heads/main", "refs/tags/v1.0", "refs/feature/review"} {
+	for _, ref := range []GitRef{"refs/heads/main", "refs/tags/v1.0", "refs/feature/review", "refs/heads/MAIN.LOCK", "refs/heads/foo\u00a0bar"} {
 		if err := validateGitRef(ref); err != nil {
 			t.Fatalf("valid Git ref %q rejected: %v", ref, err)
 		}
 	}
 	for _, ref := range []GitRef{
-		"@", "main", "refs/heads/.hidden", "refs/heads/foo/.bar", "refs/heads/main.lock", "refs/heads/MAIN.LOCK",
+		"@", "main", "refs/heads/.hidden", "refs/heads/foo/.bar", "refs/heads/main.lock",
 		"refs/heads/foo..bar", "refs/heads/foo@{bar", "refs/heads/foo bar", "refs/heads/foo^bar", "refs/heads/foo?bar",
 		"refs//heads/main", "/refs/heads/main", "refs/heads/main/", "refs/heads/main.", "refs/heads/main\x7f",
 	} {
