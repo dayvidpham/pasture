@@ -222,7 +222,7 @@ func TestEpochHumanServiceProductionFlowAndReopen(t *testing.T) {
 			name: "ratify", expectation: humanDecisionExpectation{
 				operation: ratifyInput.Meta.OperationID, actor: human.ID, epoch: epoch, subject: proposal, phase: provenance.PhaseRatify,
 				kind: DecisionPlanRatified, note: "explicit plan-ratification decision", branch: oraclePlanRatifiedBranch{Proposal: proposal.String(), ReviewRound: ratifyInput.ReviewRound, PlanUAT: planUAT.DecisionID},
-				conditions: []conditionSnapshot{oracleEvidenceCondition(proposal, planSubjectEvidenceKind, planState.JournalID, provenance.ConditionExactFact)},
+				conditions: []conditionSnapshot{oracleEvidenceCondition(proposal, planSubjectEvidenceKind, planState.JournalID, provenance.ConditionCurrentFact)},
 				evidence: []oracleEvidenceExpectation{
 					{kind: planSubjectEvidenceKind, task: proposal, state: &oracleStateEvidence{Epoch: epoch.String(), Subject: proposal.String(), State: string(subjectStatePlanRatified), Decision: oracleDecisionID(ratifyInput.Meta.OperationID), DecisionKind: DecisionPlanRatified, Operation: ratifyInput.Meta.OperationID}},
 					{kind: "pasture.review.round.v1", task: proposal, reference: &oracleReferenceEvidence{Epoch: epoch.String(), Subject: proposal.String(), Decision: string(oracleDecisionID(ratifyInput.Meta.OperationID)), Reference: string(ratifyInput.ReviewRound)}},
@@ -502,7 +502,7 @@ func TestEpochHumanServiceUATTerminalBarrierRows(t *testing.T) {
 			operation: "race-ratify-winner", actor: human.ID, epoch: epoch, subject: proposal, phase: provenance.PhaseRatify,
 			kind: DecisionPlanRatified, note: "explicit plan-ratification decision",
 			branch:     oraclePlanRatifiedBranch{Proposal: proposal.String(), ReviewRound: "race-round", PlanUAT: accepted.DecisionID},
-			conditions: []conditionSnapshot{oracleEvidenceCondition(proposal, planSubjectEvidenceKind, acceptedState.JournalID, provenance.ConditionExactFact)},
+			conditions: []conditionSnapshot{oracleEvidenceCondition(proposal, planSubjectEvidenceKind, acceptedState.JournalID, provenance.ConditionCurrentFact)},
 			evidence: []oracleEvidenceExpectation{
 				{kind: planSubjectEvidenceKind, task: proposal, state: &oracleStateEvidence{Epoch: epoch.String(), Subject: proposal.String(), State: string(subjectStatePlanRatified), Decision: oracleDecisionID("race-ratify-winner"), DecisionKind: DecisionPlanRatified, Operation: "race-ratify-winner"}},
 				{kind: "pasture.review.round.v1", task: proposal, reference: &oracleReferenceEvidence{Epoch: epoch.String(), Subject: proposal.String(), Decision: string(oracleDecisionID("race-ratify-winner")), Reference: "race-round"}},

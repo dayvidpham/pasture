@@ -128,6 +128,94 @@ func TestEpochHumanServiceAuthorityImplementationUAT(t *testing.T) {
 			t.Fatalf("replayed Implementation UAT conditions = %+v; want original candidate/review identities", got)
 		}
 	})
+
+	t.Run("changed existing epoch reaches Apply conflict without writes", func(t *testing.T) {
+		tracker := openHumanTestTracker(t, filepath.Join(t.TempDir(), "pasture.db"))
+		defer tracker.Close()
+		human, err := tracker.RegisterHumanAgent("authority", "Authority Human", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		epochA := createHumanTestTask(t, tracker, "epoch-a")
+		epochB := createHumanTestTask(t, tracker, "epoch-b")
+		candidate := createHumanTestTask(t, tracker, "candidate")
+		seedCurrentCandidateLifecycle(t, tracker, epochA, candidate, "uat-conflict-state")
+		seedCleanImplementationReview(t, tracker, epochA, candidate, "uat-conflict-round", "uat-conflict-review")
+		service := newHumanTestService(t, tracker)
+		input := authorityImplementationUATInput(epochA, candidate, human.ID, "uat-changed-epoch")
+		if _, err := service.RecordImplementationUAT(context.Background(), input); err != nil {
+			t.Fatalf("record original Implementation UAT: %v", err)
+		}
+		scope := humanStoreScopeFor([]provenance.TaskID{epochA, epochB, candidate}, []provenance.OperationID{input.Meta.OperationID})
+		before := humanDecisionStoreFootprint(t, tracker, scope)
+		changed := input
+		changed.Epoch = EpochRootID(epochB.String())
+		if _, err := service.RecordImplementationUAT(context.Background(), changed); !errors.Is(err, provenance.ErrOperationConflict) {
+			t.Fatalf("changed existing epoch Implementation UAT = %v; want provenance operation conflict", err)
+		}
+		after := humanDecisionStoreFootprint(t, tracker, scope)
+		assertHumanDecisionStoreFootprintEqual(t, before, after)
+		assertCommittedOperationKind(t, after, input.Meta.OperationID, provenance.CommittedExact)
+	})
+}
+
+func TestEpochHumanServiceAuthorityRatify(t *testing.T) {
+	tracker := openHumanTestTracker(t, filepath.Join(t.TempDir(), "pasture.db"))
+	defer tracker.Close()
+	human, err := tracker.RegisterHumanAgent("authority", "Authority Human", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	epoch := createHumanTestTask(t, tracker, "epoch")
+	proposal := createHumanTestTask(t, tracker, "proposal")
+	winner := newHumanTestService(t, tracker)
+	accepted, err := winner.RecordPlanUAT(context.Background(), PlanUATInput{Meta: CommandMeta{OperationID: "ratify-current-accepted"}, Epoch: EpochRootID(epoch.String()), Proposal: proposal, Outcome: PlanUATAccepted, Actor: AssertedHumanActor{ActorID: human.ID}})
+	if err != nil {
+		t.Fatalf("record accepted Plan UAT: %v", err)
+	}
+	seedAcceptedReview(t, tracker, epoch, proposal, "ratify-current-review")
+	later := PlanUATInput{Meta: CommandMeta{OperationID: "ratify-current-later"}, Epoch: EpochRootID(epoch.String()), Proposal: proposal, Outcome: PlanUATChangesRequested, Payload: &PlanUATPayload{Feedback: []UATFeedbackItem{{ID: "revise", Body: "revise"}}}, Actor: AssertedHumanActor{ActorID: human.ID}}
+	barrier := &callbackEpochBarrier{}
+	barrier.after = func() error {
+		_, err := winner.RecordPlanUAT(context.Background(), later)
+		return err
+	}
+	loser, err := tracker.NewEpochHumanService(EpochServiceOptions{Synchronization: EpochServiceSynchronization{RaceBarrier: barrier}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loserOperation := provenance.OperationID("ratify-current-loser")
+	scope := humanStoreScopeFor([]provenance.TaskID{epoch, proposal}, []provenance.OperationID{accepted.OperationID, later.Meta.OperationID, loserOperation})
+	before := humanDecisionStoreFootprint(t, tracker, scope)
+	_, err = loser.RatifyPlan(context.Background(), RatifyPlanInput{Meta: CommandMeta{OperationID: loserOperation}, Epoch: EpochRootID(epoch.String()), Proposal: proposal, ReviewRound: "ratify-current-review", PlanUAT: accepted.DecisionID, Actor: AssertedHumanActor{ActorID: human.ID}})
+	if !errors.Is(err, provenance.ErrConditionFailed) || barrier.calls != 1 {
+		t.Fatalf("Ratify after a later Plan UAT = %v, barrier calls=%d; want condition failure after one barrier", err, barrier.calls)
+	}
+	after := humanDecisionStoreFootprint(t, tracker, scope)
+	assertCommittedOperationKind(t, after, later.Meta.OperationID, provenance.CommittedExact)
+	assertCommittedAbsent(t, after, loserOperation)
+	assertNoOperationPartials(t, after, loserOperation)
+	if after.Statuses[proposal.String()] != provenance.StatusOpen || !reflect.DeepEqual(after.Statuses, before.Statuses) {
+		t.Fatalf("Ratify loser changed proposal status: before=%+v after=%+v", before.Statuses, after.Statuses)
+	}
+	if len(after.Decisions) != len(before.Decisions)+1 || len(after.Evidence) != len(before.Evidence)+2 || len(after.Events) != len(before.Events)+1 || len(after.Activities) != len(before.Activities)+1 {
+		t.Fatalf("post-barrier writes = decisions %d->%d evidence %d->%d events %d->%d activities %d->%d; want only the later Plan UAT", len(before.Decisions), len(after.Decisions), len(before.Evidence), len(after.Evidence), len(before.Events), len(after.Events), len(before.Activities), len(after.Activities))
+	}
+	for _, decision := range after.Decisions[len(before.Decisions):] {
+		if decision.OperationID != later.Meta.OperationID {
+			t.Fatalf("unexpected post-barrier decision: %+v", decision)
+		}
+	}
+	for _, evidence := range after.Evidence[len(before.Evidence):] {
+		if evidence.OperationID != later.Meta.OperationID {
+			t.Fatalf("unexpected post-barrier evidence: %+v", evidence)
+		}
+	}
+	for _, event := range after.Events[len(before.Events):] {
+		if event.OperationID != later.Meta.OperationID {
+			t.Fatalf("unexpected post-barrier event: %+v", event)
+		}
+	}
 }
 
 func TestEpochHumanServiceAuthorityLand(t *testing.T) {

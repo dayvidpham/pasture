@@ -221,7 +221,7 @@ func (s *epochHumanService) RatifyPlan(ctx context.Context, in RatifyPlanInput) 
 	}
 	return s.commit(ctx, in.Meta, in.Epoch, epoch, in.Proposal, in.Actor, MutationRatifyPlan, draft,
 		[]evidenceRef{{Kind: "pasture.review.round.v1", Value: string(in.ReviewRound)}, {Kind: "pasture.plan-uat.decision.v1", Value: string(in.PlanUAT)}},
-		[]provenance.Condition{state.conditionExact()}, []provenance.Effect{lifecycleEffect(in.Proposal, provenance.EventKindTaskClosed)})
+		[]provenance.Condition{state.conditionCurrent()}, []provenance.Effect{lifecycleEffect(in.Proposal, provenance.EventKindTaskClosed)})
 }
 
 func (s *epochHumanService) RecordImplementationUAT(ctx context.Context, in ImplementationUATInput) (DecisionResult, error) {
@@ -233,6 +233,9 @@ func (s *epochHumanService) RecordImplementationUAT(ctx context.Context, in Impl
 	if err != nil {
 		return DecisionResult{}, err
 	}
+	if _, err := s.tracker.prov.Show(candidate); err != nil {
+		return DecisionResult{}, humanServiceErr("RecordImplementationUAT", fmt.Sprintf("candidate %q could not be read", in.Candidate), "Implementation UAT cannot target a missing candidate", "supply an existing integration candidate")
+	}
 	payload := ImplUATPayload{}
 	if in.Payload != nil {
 		payload = *in.Payload
@@ -243,26 +246,26 @@ func (s *epochHumanService) RecordImplementationUAT(ctx context.Context, in Impl
 	}
 	if stored, found, err := s.committedOperationDecision(in.Meta.OperationID, []DecisionKindID{DecisionImplementationUAT}); err != nil {
 		return DecisionResult{}, err
-	} else if found && sameDecisionEncoding(stored.record.Decision, draft.encoding()) && stored.row.TaskID != nil && *stored.row.TaskID == candidate {
-		replay, err := s.draftFromStored(stored.record.Decision)
-		if err != nil {
-			return DecisionResult{}, err
-		}
-		binding, err := s.implementationUATReviewBindingForOperation(epoch, candidate, in.Meta.OperationID)
-		if err != nil {
-			return DecisionResult{}, err
-		}
-		bindingEffect, err := newImplementationUATReviewBindingEvidenceEffect(candidate, binding.value, provenance.ResultSlotID("evidence-1"))
-		if err != nil {
-			return DecisionResult{}, err
-		}
-		return s.commitWithAuthority(ctx, in.Meta, in.Epoch, epoch, candidate, in.Actor, MutationRecordImplementationUAT, replay,
-			nil, nil, nil, []provenance.Effect{bindingEffect})
 	} else if found {
+		if sameDecisionEncoding(stored.record.Decision, draft.encoding()) {
+			binding, err := s.implementationUATReviewBindingForOperation(stored)
+			if err != nil {
+				return DecisionResult{}, err
+			}
+			if stored.record.Epoch == epoch.String() && stored.record.Subject == candidate.String() && stored.record.Actor == in.Actor.ActorID.String() && binding.value.Epoch == EpochRootID(epoch.String()) && binding.value.Candidate == IntegrationCandidateSetID(candidate.String()) {
+				replay, err := s.draftFromStored(stored.record.Decision)
+				if err != nil {
+					return DecisionResult{}, err
+				}
+				bindingEffect, err := newImplementationUATReviewBindingEvidenceEffect(candidate, binding.value, provenance.ResultSlotID("evidence-1"))
+				if err != nil {
+					return DecisionResult{}, err
+				}
+				return s.commitWithAuthority(ctx, in.Meta, in.Epoch, epoch, candidate, in.Actor, MutationRecordImplementationUAT, replay,
+					nil, nil, nil, []provenance.Effect{bindingEffect})
+			}
+		}
 		return s.commit(ctx, in.Meta, in.Epoch, epoch, candidate, in.Actor, MutationRecordImplementationUAT, draft, nil, nil, nil)
-	}
-	if _, err := s.tracker.prov.Show(candidate); err != nil {
-		return DecisionResult{}, humanServiceErr("RecordImplementationUAT", fmt.Sprintf("candidate %q could not be read", in.Candidate), "Implementation UAT cannot target a missing candidate", "supply an existing integration candidate")
 	}
 	state, err := s.candidateSubjectState(epoch, candidate)
 	if err != nil {
@@ -348,7 +351,7 @@ func (s *epochHumanService) Land(ctx context.Context, in LandInput) (DecisionRes
 	if implementationUAT.row.ProducingOperationID != state.operation {
 		return DecisionResult{}, humanServiceErr("Land", fmt.Sprintf("Implementation UAT decision %q and current candidate state have different producing operations", in.ImplementationUAT), "landing requires the exact accepted UAT decision and state emitted by one operation", "record a fresh accepted Implementation UAT before landing")
 	}
-	binding, err := s.implementationUATReviewBindingForOperation(epoch, candidate, state.operation)
+	binding, err := s.implementationUATReviewBindingForOperation(implementationUAT)
 	if err != nil {
 		return DecisionResult{}, err
 	}
@@ -976,7 +979,16 @@ func (s *epochHumanService) currentCandidatePublicationSet(epoch, candidate prov
 	return current, nil
 }
 
-func (s *epochHumanService) implementationUATReviewBindingForOperation(epoch, candidate provenance.TaskID, operation provenance.OperationID) (implementationUATReviewBindingSnapshot, error) {
+func (s *epochHumanService) implementationUATReviewBindingForOperation(stored decisionFact) (implementationUATReviewBindingSnapshot, error) {
+	if stored.row.TaskID == nil || stored.row.ProducingOperationID == "" || stored.record.Decision.Kind != DecisionImplementationUAT || stored.record.ID != decisionIDForOperation(stored.row.ProducingOperationID) || stored.record.Subject != stored.row.TaskID.String() {
+		return implementationUATReviewBindingSnapshot{}, humanServiceErr("implementationUATReviewBindingForOperation", "the stored Implementation UAT decision has inconsistent task, operation, or subject metadata", "operation-local review binding reconstruction requires one canonical persisted Implementation UAT decision", "repair the malformed Implementation UAT decision before retrying")
+	}
+	epoch, err := provenance.ParseTaskID(stored.record.Epoch)
+	if err != nil || stored.record.Epoch != epoch.String() {
+		return implementationUATReviewBindingSnapshot{}, humanServiceErr("implementationUATReviewBindingForOperation", "the stored Implementation UAT decision has a malformed or noncanonical epoch", "operation-local review binding reconstruction requires the canonical persisted epoch identity", "repair the malformed Implementation UAT decision before retrying")
+	}
+	candidate := *stored.row.TaskID
+	operation := stored.row.ProducingOperationID
 	query := provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskExact, TaskID: candidate}, OperationIDs: []provenance.OperationID{operation}}, Kinds: []provenance.EvidenceKind{implementationUATReviewBindingEvidenceKind}, Page: provenance.FactPageRequest{Limit: 2}}
 	var binding implementationUATReviewBindingSnapshot
 	count := 0
