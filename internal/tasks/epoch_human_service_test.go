@@ -767,31 +767,33 @@ func humanStoreScopeFor(tasks []provenance.TaskID, operations []provenance.Opera
 }
 
 type normalizedDecisionFact struct {
-	JournalID            provenance.JournalID
-	TaskID               provenance.TaskID
-	Kind                 provenance.DecisionKind
-	RawActorID           string
-	ActorID              provenance.ActorID
-	OperationID          provenance.OperationID
-	RecordedAt           time.Time
-	Payload              []byte
-	ProducingOperationID provenance.JournalID
-	Contexts             []normalizedEventContext
+	JournalID               provenance.JournalID
+	TaskID                  provenance.TaskID
+	Kind                    provenance.DecisionKind
+	RawActorID              string
+	ActorID                 provenance.ActorID
+	OperationID             provenance.OperationID
+	RecordedAt              time.Time
+	Payload                 []byte
+	ProducingOperationID    provenance.JournalID
+	HasProducingOperationID bool
+	Contexts                []normalizedEventContext
 }
 
 type normalizedEvidenceFact struct {
-	JournalID            provenance.JournalID
-	TaskID               provenance.TaskID
-	Kind                 provenance.EvidenceKind
-	RawActorID           string
-	ActorID              provenance.ActorID
-	OperationID          provenance.OperationID
-	Digest               []byte
-	Payload              []byte
-	RecordedAt           time.Time
-	ProducingOperationID provenance.JournalID
-	Conditions           []conditionSnapshot
-	Contexts             []normalizedEventContext
+	JournalID               provenance.JournalID
+	TaskID                  provenance.TaskID
+	Kind                    provenance.EvidenceKind
+	RawActorID              string
+	ActorID                 provenance.ActorID
+	OperationID             provenance.OperationID
+	Digest                  []byte
+	Payload                 []byte
+	RecordedAt              time.Time
+	ProducingOperationID    provenance.JournalID
+	HasProducingOperationID bool
+	Conditions              []conditionSnapshot
+	Contexts                []normalizedEventContext
 }
 
 type normalizedEventContext struct {
@@ -968,6 +970,7 @@ func readRawDecisionFacts(t *testing.T, tracker *trackerImpl, task provenance.Ta
 		}
 		if anchor.Valid {
 			fact.ProducingOperationID = provenance.JournalID(anchor.Int64)
+			fact.HasProducingOperationID = true
 		}
 		facts = append(facts, fact)
 	}
@@ -1020,6 +1023,7 @@ func readRawEvidenceFacts(t *testing.T, tracker *trackerImpl, task provenance.Ta
 		}
 		if anchor.Valid {
 			fact.ProducingOperationID = provenance.JournalID(anchor.Int64)
+			fact.HasProducingOperationID = true
 		}
 		if fact.Kind == preconditionEvidenceKind {
 			var conditions conditionEvidence
@@ -1401,7 +1405,7 @@ func assertHumanDecisionOracleExact(t *testing.T, _ *trackerImpl, footprint norm
 	}
 
 	decision := findDecisionByOperation(t, footprint, want.operation)
-	if decision.TaskID != want.subject || decision.Kind != journalDecisionKind(want.kind) || decision.RawActorID != want.actor.String() || decision.ActorID != want.actor || decision.OperationID != want.operation || decision.ProducingOperationID == 0 || len(decision.Contexts) != 0 {
+	if decision.TaskID != want.subject || decision.Kind != journalDecisionKind(want.kind) || decision.RawActorID != want.actor.String() || decision.ActorID != want.actor || decision.OperationID != want.operation || !decision.HasProducingOperationID || decision.ProducingOperationID == 0 || len(decision.Contexts) != 0 {
 		t.Fatalf("canonical decision row = %+v; want subject=%s kind=%s actor=%s operation=%s, no contexts, and nonzero anchor", decision, want.subject, want.kind, want.actor, want.operation)
 	}
 	var envelope persistedDecision
@@ -1449,7 +1453,7 @@ func assertHumanDecisionOracleExact(t *testing.T, _ *trackerImpl, footprint norm
 	}
 	for i, expected := range wantEvidence {
 		got := evidenceRows[i]
-		if got.Kind != expected.kind || got.TaskID != expected.task || got.RawActorID != want.actor.String() || got.ActorID != want.actor || got.OperationID != want.operation || got.ProducingOperationID != anchor || len(got.Payload) == 0 || len(got.Digest) == 0 || len(got.Contexts) != 0 {
+		if got.Kind != expected.kind || got.TaskID != expected.task || got.RawActorID != want.actor.String() || got.ActorID != want.actor || got.OperationID != want.operation || !got.HasProducingOperationID || got.ProducingOperationID != anchor || len(got.Payload) == 0 || len(got.Digest) == 0 || len(got.Contexts) != 0 {
 			t.Fatalf("evidence row %d = %+v; want exact kind=%s task=%s actor=%s operation=%s anchor=%d and no contexts", i, got, expected.kind, expected.task, want.actor, want.operation, anchor)
 		}
 		switch {
