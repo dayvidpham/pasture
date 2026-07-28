@@ -1,5 +1,5 @@
 dayvidpham/nix-openclaw-vm [main]
- I  -> pwd 
+ I  -> pwd
 /home/minttea/codebases/dayvidpham/nix-openclaw-vm
 
 ===========
@@ -988,4 +988,3 @@ DEPENDS ON
 
 BLOCKS
   ← ○ nix-openclaw-vm-whp: URE: Credential proxy scope and MVP ● P1
-

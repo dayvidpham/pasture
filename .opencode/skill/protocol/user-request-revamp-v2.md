@@ -118,4 +118,3 @@ unified-schema-ldl: EPIC: Ingest Pipeline Follow-Up Work (post-implementation) [
         └── unified-schema-s3l: M17: B6 tracking field has no test assertion on meta.Git.Tracking [P3] (closed)
 
 </followup-epic-example>
-
