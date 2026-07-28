@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -18,7 +19,7 @@ func countToolRoles() int {
 }
 
 // TestCodexAgentEmitsStandaloneProfilePerToolRole proves the Codex agent
-// emitter produces exactly one `.codex/agents/<role>.toml` per tool-bearing
+// emitter produces exactly one `.codex/agents/pasture-<role>.toml` per tool-bearing
 // role, sorted by path.
 func TestCodexAgentEmitsStandaloneProfilePerToolRole(t *testing.T) {
 	t.Parallel()
@@ -38,6 +39,9 @@ func TestCodexAgentEmitsStandaloneProfilePerToolRole(t *testing.T) {
 		}
 		if !strings.Contains(f.Path, ".codex") {
 			t.Fatalf("agent profile %q is not under the .codex agents root", f.Path)
+		}
+		if !strings.HasPrefix(filepath.Base(f.Path), "pasture-") {
+			t.Fatalf("agent profile %q lacks the required pasture- namespace", f.Path)
 		}
 		if prev != "" && f.Path < prev {
 			t.Fatalf("agent profiles are not path-sorted: %q after %q", f.Path, prev)

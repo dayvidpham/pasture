@@ -1,0 +1,23 @@
+{
+  "$schema": "https://pasture.dev/opencode-target.json",
+  "target": "opencode",
+  "runtime_contract": "opencode/opencode@1.17.18",
+  "host_version": "1.17.18",
+  "native_tools": [
+    "question",
+    "skill",
+    "task"
+  ],
+  "components": [
+    {
+      "id": "opencode.pasture-hooks",
+      "path": ".opencode/plugins/pasture-lifecycle.ts",
+      "type": "hook"
+    },
+    {
+      "id": "opencode.target-manifest",
+      "path": ".opencode/pasture-opencode.json",
+      "type": "manifest"
+    }
+  ]
+}

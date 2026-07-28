@@ -1,23 +1,25 @@
-// Package codegen — Codex plugin manifest and default-off hooks package.
+// Package codegen - Codex plugin manifest and lifecycle hook package.
 //
 // codexManifestEmitter emits the Codex plugin manifest at `.codex/codex.toml`
-// and the default-off hooks package marker at `.codex/hooks/README.md`.
+// plus the pinned host hook configuration and per-event adapters under
+// `.codex/hooks/`.
 //
 // The manifest declares the three independently selectable Codex packages
 // (skills, agents, hooks), each by its stable component identity and package
 // root, plus the pinned RuntimeContractID the packages were generated against.
-// The hooks package is marked `enabled = false`: Codex 0.144.1 exposes no hook
-// runtime, so the package ships a single explanatory marker and is inert by
-// default. This keeps the hooks package a real, selectable-in-isolation package
-// (its own root, its own component identity) while emitting no active behavior —
-// matching the "default-off hooks" requirement and the "no Git/Beads hooks"
-// non-scope.
+// The hooks package remains default-off at the Pasture component-selection
+// boundary. When selected, Codex loads the generated per-event command runners;
+// none of these files installs a Git hook or changes core.hooksPath.
 package codegen
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
+
+	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
 // codexManifestSchema tags the Codex plugin manifest so a consumer can reject
@@ -27,30 +29,103 @@ const codexManifestSchema = "pasture.codex.manifest.v1"
 // codexManifestEmitter implements ManifestEmitter for the Codex target.
 type codexManifestEmitter struct{}
 
-// Emit writes the Codex plugin manifest and the default-off hooks marker,
-// returning both files in deterministic path order.
+// Emit writes the Codex package manifest, host hook configuration, shared
+// adapter, and one fixed-event executable per pinned lifecycle event.
 func (codexManifestEmitter) Emit(root string, opts GenerateOptions) ([]GeneratedFile, error) {
-	manifestPath := filepath.Join(root, ".codex", "codex.toml")
-	manifest, err := writeFullGeneratedFile(manifestPath, renderCodexManifest(), opts)
+	metadata, err := lifecycleMetadata(runtime.Codex0_144_1Lifecycle(), "0.144.1", codexNativeFields)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"codegen.codexManifestEmitter.Emit: write %q failed — "+
-				"check that the output root %q exists and is writable: %w",
-			manifestPath, root, err,
-		)
+		return nil, fmt.Errorf("codegen.codexManifestEmitter.Emit: lifecycle metadata: %w", err)
+	}
+	adapter, err := renderPythonLifecycleAdapter(metadata)
+	if err != nil {
+		return nil, fmt.Errorf("codegen.codexManifestEmitter.Emit: lifecycle adapter: %w", err)
 	}
 
-	hooksPath := filepath.Join(root, ".codex", "hooks", "README.md")
-	hooks, err := writeFullGeneratedFile(hooksPath, renderCodexHooksMarker(), opts)
+	config, err := renderCodexHooksConfig(metadata.Events)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"codegen.codexManifestEmitter.Emit: write %q failed — "+
-				"check that the output root %q exists and is writable: %w",
-			hooksPath, root, err,
-		)
+		return nil, fmt.Errorf("codegen.codexManifestEmitter.Emit: hooks config: %w", err)
 	}
+	outputs := []struct {
+		path    string
+		content string
+	}{
+		{path: filepath.Join(root, ".codex", "codex.toml"), content: renderCodexManifest()},
+		{path: filepath.Join(root, ".codex", "hooks.json"), content: config},
+		{path: filepath.Join(root, ".codex", "hooks", "pasture-lifecycle.py"), content: adapter},
+	}
+	for _, event := range metadata.Events {
+		outputs = append(outputs, struct {
+			path    string
+			content string
+		}{
+			path:    filepath.Join(root, ".codex", "hooks", "events", event.Name+".sh"),
+			content: renderCodexEventExecutable(event.Name),
+		})
+	}
+	sort.Slice(outputs, func(i, j int) bool { return outputs[i].path < outputs[j].path })
 
-	return []GeneratedFile{manifest, hooks}, nil
+	files := make([]GeneratedFile, 0, len(outputs))
+	for _, output := range outputs {
+		generated, err := writeFullGeneratedFile(output.path, output.content, opts)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"codegen.codexManifestEmitter.Emit: write %q failed - check that output root %q is writable: %w",
+				output.path, root, err,
+			)
+		}
+		files = append(files, generated)
+	}
+	return files, nil
+}
+
+type codexHookCommand struct {
+	Type          string `json:"type"`
+	Command       string `json:"command"`
+	Timeout       int    `json:"timeout"`
+	StatusMessage string `json:"statusMessage"`
+}
+
+type codexHookGroup struct {
+	Matcher *string            `json:"matcher,omitempty"`
+	Hooks   []codexHookCommand `json:"hooks"`
+}
+
+type codexHooksConfig struct {
+	Hooks map[string][]codexHookGroup `json:"hooks"`
+}
+
+func renderCodexHooksConfig(events []lifecycleEventMetadata) (string, error) {
+	config := codexHooksConfig{Hooks: make(map[string][]codexHookGroup, len(events))}
+	for _, event := range events {
+		var matcher *string
+		switch event.Name {
+		case "SessionStart", "PreToolUse", "PermissionRequest", "PostToolUse", "PreCompact", "PostCompact", "SubagentStart", "SubagentStop":
+			value := ""
+			matcher = &value
+		}
+		config.Hooks[event.Name] = []codexHookGroup{{
+			Matcher: matcher,
+			Hooks: []codexHookCommand{{
+				Type:          "command",
+				Command:       "sh ${PLUGIN_ROOT}/hooks/events/" + event.Name + ".sh",
+				Timeout:       600,
+				StatusMessage: "Consulting Pasture lifecycle state",
+			}},
+		}}
+	}
+	wire, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(wire) + "\n", nil
+}
+
+func renderCodexEventExecutable(event string) string {
+	return "#!/usr/bin/env sh\n" +
+		"# Code generated by Pasture. DO NOT EDIT.\n" +
+		"set -eu\n" +
+		"SCRIPT_DIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\n" +
+		"exec python3 \"${SCRIPT_DIR}/../pasture-lifecycle.py\" --event " + tomlString(event) + "\n"
 }
 
 // renderCodexManifest builds the deterministic `.codex/codex.toml` content. The
@@ -81,26 +156,6 @@ func renderCodexManifest() string {
 	fmt.Fprintf(&b, "id = %s\n", tomlString(codexHooksComponent.String()))
 	fmt.Fprintf(&b, "path = %s\n", tomlString(codexHooksRoot))
 	b.WriteString("enabled = false\n")
-	return b.String()
-}
-
-// renderCodexHooksMarker builds the single explanatory file the default-off
-// hooks package ships. It documents that Codex 0.144.1 exposes no hook runtime,
-// so the package is intentionally inert.
-func renderCodexHooksMarker() string {
-	var b strings.Builder
-	b.WriteString("<!-- Code-generated by Pasture; DO NOT EDIT. -->\n")
-	b.WriteString("# Pasture Codex hooks package (default-off)\n\n")
-	fmt.Fprintf(&b,
-		"Codex %s exposes no harness hook runtime, so this package is intentionally\n"+
-			"inert: it ships no active hooks and is marked `enabled = false` in\n"+
-			"`.codex/codex.toml`.\n\n",
-		codexHostVersionLabel(),
-	)
-	b.WriteString("It exists as a real, independently selectable package so a consumer can\n")
-	b.WriteString("select skills and agents without pulling any hook behavior, and so a future\n")
-	b.WriteString("Codex hook surface has a stable package identity to grow into. This package\n")
-	b.WriteString("never installs Git hooks, Beads hooks, or `core.hooksPath`.\n")
 	return b.String()
 }
 

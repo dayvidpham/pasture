@@ -1,0 +1,132 @@
+{
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ${PLUGIN_ROOT}/hooks/events/PermissionRequest.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ${PLUGIN_ROOT}/hooks/events/PostCompact.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ${PLUGIN_ROOT}/hooks/events/PostToolUse.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ${PLUGIN_ROOT}/hooks/events/PreCompact.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ${PLUGIN_ROOT}/hooks/events/PreToolUse.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ${PLUGIN_ROOT}/hooks/events/SessionStart.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ${PLUGIN_ROOT}/hooks/events/Stop.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ${PLUGIN_ROOT}/hooks/events/SubagentStart.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ${PLUGIN_ROOT}/hooks/events/SubagentStop.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ${PLUGIN_ROOT}/hooks/events/UserPromptSubmit.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ]
+  }
+}

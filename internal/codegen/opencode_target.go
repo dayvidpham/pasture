@@ -66,7 +66,7 @@ func (k ComponentKind) IsValid() bool {
 
 // OpenCodeTargetManifestPath is the canonical bundle-relative path of the
 // serialized target descriptor.
-const OpenCodeTargetManifestPath = "pasture-opencode.json"
+const OpenCodeTargetManifestPath = ".opencode/pasture-opencode.json"
 
 // OpenCodeComponent pairs a stable component identity with the canonical
 // bundle-relative path it materializes to and the descriptor-level kind it

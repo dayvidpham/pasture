@@ -11,6 +11,7 @@ import (
 
 	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
@@ -107,8 +108,46 @@ func TestOpenCodeHooksModule_SelfContainedAndDiscoverable(t *testing.T) {
 		t.Error("hooks module uses require(); it must depend on no npm package")
 	}
 	// Discoverable: a default export is required for OpenCode plugin loading.
-	if !strings.Contains(module, "export default PastureHooks") {
+	if !strings.Contains(module, "export default PastureLifecycle") {
 		t.Error("hooks module lacks a default export; OpenCode plugin auto-discovery needs one")
+	}
+}
+
+func TestOpenCodeHooksModulePreservesNamedAndObservationBoundary(t *testing.T) {
+	t.Parallel()
+
+	module, err := GenerateOpenCodeHooksModule()
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	for _, named := range []string{"command.execute.before", "permission.ask", "tool.execute.before", "tool.execute.after"} {
+		if !strings.Contains(module, `async "`+named+`"(input, output)`) {
+			t.Errorf("generated plugin lacks awaited named handler %q", named)
+		}
+	}
+	if strings.Contains(module, `async "permission.replied"`) {
+		t.Error("permission.replied became a named gate; it must remain catch-all observation")
+	}
+	for _, humanOperation := range []handlers.AdapterOperation{
+		handlers.AdapterOperationSetInteractionMode,
+		handlers.AdapterOperationRecordPlanUAT,
+		handlers.AdapterOperationRatifyPlan,
+		handlers.AdapterOperationRecordImplementationUAT,
+		handlers.AdapterOperationLand,
+	} {
+		if strings.Contains(module, string(humanOperation)) {
+			t.Errorf("OpenCode has no explicit-human-response event but generated plugin carries human operation %q", humanOperation)
+		}
+	}
+
+	fixture, err := os.ReadFile(filepath.Join("testdata", "native", "opencode", "tool_execute_before.json"))
+	if err != nil {
+		t.Fatalf("read native fixture: %v", err)
+	}
+	for _, identity := range []string{"sessionID", "callID"} {
+		if !strings.Contains(string(fixture), `"`+identity+`"`) || !strings.Contains(module, `"name":"`+identity+`"`) {
+			t.Errorf("fixture/module pair does not preserve declared identity %q", identity)
+		}
 	}
 }
 

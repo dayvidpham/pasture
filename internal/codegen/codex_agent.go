@@ -8,7 +8,7 @@
 //
 // This file emits one standalone TOML profile per protocol role that carries
 // tools (the same role set the Claude Code and OpenCode agent emitters cover)
-// at `.codex/agents/<role>.toml`. Each profile is a self-describing Codex agent
+// at `.codex/agents/pasture-<role>.toml`. Each profile is a self-describing Codex agent
 // descriptor: identity, description, model, orchestration role-class, and the
 // contract-derived set of native Codex functions it is permitted to call.
 //
@@ -71,7 +71,7 @@ var codexModel = map[string]string{
 	"sonnet": "gpt-5.6-terra",
 }
 
-// codexAgentEmitter emits `.codex/agents/<role>.toml` for every role that has
+// codexAgentEmitter emits `.codex/agents/pasture-<role>.toml` for every role that has
 // tools. It implements AgentEmitter and is wired into CodexTarget.Agents.
 type codexAgentEmitter struct{}
 
@@ -91,7 +91,7 @@ func (codexAgentEmitter) Emit(root string, figuresDir string, opts GenerateOptio
 				roleID, err,
 			)
 		}
-		path := filepath.Join(root, ".codex", "agents", fmt.Sprintf("%s.toml", roleID))
+		path := filepath.Join(root, ".codex", "agents", fmt.Sprintf("pasture-%s.toml", roleID))
 		generated, err := writeFullGeneratedFile(path, content, opts)
 		if err != nil {
 			return nil, fmt.Errorf(
@@ -105,7 +105,7 @@ func (codexAgentEmitter) Emit(root string, figuresDir string, opts GenerateOptio
 	return out, nil
 }
 
-// renderCodexAgent builds the complete `.codex/agents/<role>.toml` content for
+// renderCodexAgent builds the complete `.codex/agents/pasture-<role>.toml` content for
 // one role. functions is the pre-computed, contract-derived native Codex
 // function list shared across every emitted agent (see codexNativeFunctions).
 func renderCodexAgent(roleID protocol.RoleId, functions []string) (string, error) {

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
 // emitCodexIntoSeededRoot seeds a temp module root with the verbatim source
@@ -120,8 +121,13 @@ func TestCodexTargetDescriptorPartitionsPackages(t *testing.T) {
 		t.Fatal("hooks package is missing")
 	}
 	hookFiles := codexRegularFilePaths(hooks)
-	if len(hookFiles) != 1 || hookFiles[0] != ".codex/hooks/README.md" {
-		t.Fatalf("hooks package files = %v, want only the default-off README", hookFiles)
+	wantHookFiles := 1 + len(codexTargetLifecycleEventsForTest())
+	if len(hookFiles) != wantHookFiles {
+		t.Fatalf("hooks package files = %d, want shared adapter plus %d event executables: %v", len(hookFiles), len(codexTargetLifecycleEventsForTest()), hookFiles)
+	}
+	if hookFiles[0] != ".codex/hooks/events/PermissionRequest.sh" {
+		// Paths are sorted; event executables precede the shared Python adapter.
+		t.Fatalf("first hook package file = %q, want sorted event executable inventory", hookFiles[0])
 	}
 
 	// The target manifest bundle carries exactly the plugin manifest.
@@ -132,8 +138,8 @@ func TestCodexTargetDescriptorPartitionsPackages(t *testing.T) {
 			manifestPaths = append(manifestPaths, e.Path().String())
 		}
 	}
-	if len(manifestPaths) != 1 || manifestPaths[0] != codexTargetManifestPath {
-		t.Fatalf("manifest bundle files = %v, want only %q", manifestPaths, codexTargetManifestPath)
+	if strings.Join(manifestPaths, "\n") != strings.Join([]string{".codex/codex.toml", ".codex/hooks.json"}, "\n") {
+		t.Fatalf("manifest bundle files = %v, want codex.toml plus hooks.json", manifestPaths)
 	}
 }
 
@@ -159,8 +165,12 @@ func TestCodexBundleManifestsAreCanonical(t *testing.T) {
 			}
 			prev = p
 			if e.IsRegular() {
-				if e.Mode().String() != "0644" {
-					t.Fatalf("file %q mode = %q, want 0644", p, e.Mode().String())
+				wantMode := "0644"
+				if strings.HasSuffix(p, ".sh") {
+					wantMode = "0755"
+				}
+				if e.Mode().String() != wantMode {
+					t.Fatalf("file %q mode = %q, want %s", p, e.Mode().String(), wantMode)
 				}
 				d := e.Digest().String()
 				if !strings.HasPrefix(d, "sha256:") || len(strings.TrimPrefix(d, "sha256:")) != 64 {
@@ -171,6 +181,18 @@ func TestCodexBundleManifestsAreCanonical(t *testing.T) {
 			}
 		}
 	}
+}
+
+func codexTargetLifecycleEventsForTest() []string {
+	metadata, err := lifecycleMetadata(runtime.Codex0_144_1Lifecycle(), "0.144.1", codexNativeFields)
+	if err != nil {
+		panic(err)
+	}
+	events := make([]string, len(metadata.Events))
+	for index, event := range metadata.Events {
+		events[index] = event.Name
+	}
+	return events
 }
 
 // TestCodexDescriptorIsContentAddressedDeterministic proves the descriptor is a

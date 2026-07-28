@@ -1,8 +1,11 @@
 package codegen
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
 // TestCodexManifestDeclaresThreePackages proves the Codex plugin manifest
@@ -50,26 +53,50 @@ func TestCodexManifestIsDeterministic(t *testing.T) {
 	if renderCodexManifest() != renderCodexManifest() {
 		t.Fatal("renderCodexManifest is not deterministic")
 	}
-	if renderCodexHooksMarker() != renderCodexHooksMarker() {
-		t.Fatal("renderCodexHooksMarker is not deterministic")
+	metadata, err := lifecycleMetadata(runtime.Codex0_144_1Lifecycle(), "0.144.1", codexNativeFields)
+	if err != nil {
+		t.Fatalf("lifecycleMetadata: %v", err)
+	}
+	first, err := renderCodexHooksConfig(metadata.Events)
+	if err != nil {
+		t.Fatalf("first config render: %v", err)
+	}
+	second, err := renderCodexHooksConfig(metadata.Events)
+	if err != nil {
+		t.Fatalf("second config render: %v", err)
+	}
+	if first != second {
+		t.Fatal("renderCodexHooksConfig is not deterministic")
 	}
 }
 
-// TestCodexHooksMarkerIsDefaultOffAndHookSafe proves the hooks package marker
-// documents the intentional default-off inertness, cites the pinned host
-// version, and states the no-Git/Beads-hooks guarantee.
-func TestCodexHooksMarkerIsDefaultOffAndHookSafe(t *testing.T) {
+// TestCodexHooksConfigCoversPinnedEvents proves the executable hook inventory is
+// exactly the runtime contract's closed event set.
+func TestCodexHooksConfigCoversPinnedEvents(t *testing.T) {
 	t.Parallel()
-
-	got := renderCodexHooksMarker()
-	for _, want := range []string{
-		"default-off",
-		codexHostVersionLabel(),
-		"no harness hook runtime",
-		"never installs Git hooks",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("hooks marker is missing %q\n--- marker ---\n%s", want, got)
+	metadata, err := lifecycleMetadata(runtime.Codex0_144_1Lifecycle(), "0.144.1", codexNativeFields)
+	if err != nil {
+		t.Fatalf("lifecycleMetadata: %v", err)
+	}
+	wire, err := renderCodexHooksConfig(metadata.Events)
+	if err != nil {
+		t.Fatalf("renderCodexHooksConfig: %v", err)
+	}
+	var config codexHooksConfig
+	if err := json.Unmarshal([]byte(wire), &config); err != nil {
+		t.Fatalf("decode hooks config: %v", err)
+	}
+	if len(config.Hooks) != len(runtime.CodexLifecycleEvents()) {
+		t.Fatalf("hook event count = %d, want %d", len(config.Hooks), len(runtime.CodexLifecycleEvents()))
+	}
+	for _, event := range runtime.CodexLifecycleEvents() {
+		groups, ok := config.Hooks[event.NativeName()]
+		if !ok || len(groups) != 1 || len(groups[0].Hooks) != 1 {
+			t.Fatalf("event %s config = %+v, want one command hook", event, groups)
+		}
+		command := groups[0].Hooks[0].Command
+		if !strings.Contains(command, "/hooks/events/"+event.NativeName()+".sh") {
+			t.Fatalf("event %s command %q does not select its fixed-event executable", event, command)
 		}
 	}
 }

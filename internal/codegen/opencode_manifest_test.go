@@ -8,11 +8,12 @@ import (
 )
 
 // openCodeConfig mirrors the structure of the emitted opencode.json for test
-// decoding. The schema and skills fields are the only expected top-level keys.
+// decoding. Schema, plugin, and skills are the only expected top-level keys.
 // The agents field must be ABSENT (agents are auto-discovered by OpenCode from
 // .opencode/agent/ and must NOT be listed in opencode.json).
 type openCodeConfig struct {
-	Schema string `json:"$schema"`
+	Schema string   `json:"$schema"`
+	Plugin []string `json:"plugin"`
 	Skills struct {
 		Paths []string `json:"paths"`
 	} `json:"skills"`
@@ -20,7 +21,7 @@ type openCodeConfig struct {
 
 // TestOpenCodeManifestEmittedContent asserts the opencode.json manifest that
 // the OpenCode target emits has exactly the minimal committed structure:
-// $schema + skills.paths=[".opencode/skill"], no agents key, valid JSON.
+// $schema, lifecycle plugin, skills path, no agents key, and valid JSON.
 func TestOpenCodeManifestEmittedContent(t *testing.T) {
 	t.Parallel()
 
@@ -31,11 +32,20 @@ func TestOpenCodeManifestEmittedContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openCodeManifestEmitter.Emit: %v", err)
 	}
-	if len(files) != 1 {
-		t.Fatalf("openCodeManifestEmitter.Emit returned %d files, want exactly 1 (opencode.json)", len(files))
+	if len(files) != 3 {
+		t.Fatalf("openCodeManifestEmitter.Emit returned %d files, want opencode.json, lifecycle plugin, and target manifest", len(files))
 	}
 
-	f := files[0]
+	var f GeneratedFile
+	for _, candidate := range files {
+		if candidate.Path == filepath.Join(root, "opencode.json") {
+			f = candidate
+			break
+		}
+	}
+	if f.Path == "" {
+		t.Fatal("OpenCode emission omitted opencode.json")
+	}
 
 	// File path: <root>/opencode.json (repo root, not under .opencode/).
 	wantPath := filepath.Join(root, "opencode.json")
@@ -63,6 +73,9 @@ func TestOpenCodeManifestEmittedContent(t *testing.T) {
 	if len(cfg.Skills.Paths) != 1 || cfg.Skills.Paths[0] != ".opencode/skill" {
 		t.Errorf("skills.paths = %v, want [%q]", cfg.Skills.Paths, ".opencode/skill")
 	}
+	if len(cfg.Plugin) != 1 || cfg.Plugin[0] != "./"+filepath.ToSlash(OpenCodeHooksModulePath) {
+		t.Errorf("plugin = %v, want generated lifecycle plugin path", cfg.Plugin)
+	}
 
 	// The agents key must be ABSENT: agents are auto-discovered from
 	// .opencode/agent/ and must not be listed in the manifest.
@@ -70,10 +83,10 @@ func TestOpenCodeManifestEmittedContent(t *testing.T) {
 		t.Errorf("opencode.json must not carry an 'agents' key (agents are auto-discovered), got raw keys: %v", keys(raw))
 	}
 
-	// The only top-level keys expected are $schema and skills.
+	// The only top-level keys expected are $schema, plugin, and skills.
 	for k := range raw {
-		if k != "$schema" && k != "skills" {
-			t.Errorf("unexpected top-level key %q in opencode.json — only $schema and skills are expected", k)
+		if k != "$schema" && k != "plugin" && k != "skills" {
+			t.Errorf("unexpected top-level key %q in opencode.json", k)
 		}
 	}
 }
@@ -101,6 +114,11 @@ func TestOpenCodeManifestWritesToDisk(t *testing.T) {
 	}
 	if cfg.Schema != "https://opencode.ai/config.json" {
 		t.Errorf("on-disk $schema = %q, want https://opencode.ai/config.json", cfg.Schema)
+	}
+	for _, generatedPath := range []string{OpenCodeHooksModulePath, OpenCodeTargetManifestPath} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(generatedPath))); err != nil {
+			t.Errorf("generated OpenCode file %q is missing: %v", generatedPath, err)
+		}
 	}
 }
 

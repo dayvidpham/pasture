@@ -2,9 +2,9 @@
 // descriptor, packaged artifact bundles, and target validation).
 //
 // The Codex target projects Pasture's canonical protocol source into three
-// independently selectable Codex plugin packages under `.codex/`:
+// independently selectable Codex plugin packages:
 //
-//   - skills  (`.codex/skills/<dir>/SKILL.md`): protocol skills rendered as
+//   - skills  (`.agents/skills/<dir>/SKILL.md`): protocol skills rendered as
 //     semantic-instruction markdown. Codex 0.144.1 has no native skill
 //     invocation, so these carry the reviewed protocol steps the agent performs
 //     directly (matching the pinned contract's semantic lowering of
@@ -12,8 +12,8 @@
 //     trees copied verbatim.
 //   - agents  (`.codex/agents/<role>.toml`): one standalone Codex agent profile
 //     per tool-bearing role (see codex_agent.go).
-//   - hooks   (`.codex/hooks/`): a default-off, intentionally inert package —
-//     Codex 0.144.1 exposes no hook runtime (see codex_manifest.go).
+//   - hooks   (`.codex/hooks/`): version-bounded per-event lifecycle adapters
+//     and their shared strict JSON transport (see codex_manifest.go).
 //
 // The target flows through the existing codegen.Generate pipeline (it is a
 // TargetHarness registered in harnessRegistry), so its output is produced
@@ -32,6 +32,7 @@ package codegen
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"path"
 	"path/filepath"
 	"sort"
@@ -50,7 +51,7 @@ const HarnessCodex HarnessName = "codex"
 // codexSkillRoot is the package-relative root for the Codex skills package. The
 // harness emits role and command skills to <root>/<codexSkillRoot>/<dir>/SKILL.md
 // and copies the verbatim support trees into the same package.
-const codexSkillRoot = ".codex/skills"
+const codexSkillRoot = ".agents/skills"
 
 // codexAgentsRoot and codexHooksRoot are the package roots for the standalone
 // agent TOML package and the (default-off) hooks package.
@@ -325,7 +326,7 @@ const codexTargetManifestPath = ".codex/codex.toml"
 // isCodexTargetManifestPath reports whether rel is a recognized target-level
 // manifest file: a file directly under .codex/ that is not under a package root.
 func isCodexTargetManifestPath(rel string) bool {
-	return rel == codexTargetManifestPath
+	return rel == codexTargetManifestPath || rel == ".codex/hooks.json"
 }
 
 // codexComponentForPath returns the component whose root owns rel, matching the
@@ -358,13 +359,17 @@ func codexComponentRoots() []string {
 }
 
 // buildCodexBundle freezes one package's package-relative files into an
-// immutable artifact.Bundle. Every regular file entry carries mode 0644 and its
+// immutable artifact.Bundle. Plain files carry mode 0644 and generated event
+// runners carry mode 0755. Every regular file carries its
 // exact-byte sha256 digest; the parent directory chain of each file is declared
 // (mode 0755) so the bundle manifest is a complete ownership inventory. An
-// empty package (for example the default-off hooks package when it ships no
-// files) yields a valid empty bundle.
+// empty package yields a valid empty bundle.
 func buildCodexBundle(files map[string][]byte) (artifact.Bundle, error) {
-	fileMode, err := artifact.NewMode(0o644)
+	plainFileMode, err := artifact.NewMode(0o644)
+	if err != nil {
+		return artifact.Bundle{}, err
+	}
+	executableMode, err := artifact.NewMode(0o755)
 	if err != nil {
 		return artifact.Bundle{}, err
 	}
@@ -389,7 +394,13 @@ func buildCodexBundle(files map[string][]byte) (artifact.Bundle, error) {
 		if err != nil {
 			return artifact.Bundle{}, fmt.Errorf("codex bundle entry path %q: %w", rel, err)
 		}
-		fileEntry, err := artifact.NewFileEntry(entryPath, fileMode, artifact.DigestBytes(content))
+		mode := plainFileMode
+		mapMode := fs.FileMode(0o644)
+		if strings.HasSuffix(rel, ".sh") {
+			mode = executableMode
+			mapMode = 0o755
+		}
+		fileEntry, err := artifact.NewFileEntry(entryPath, mode, artifact.DigestBytes(content))
 		if err != nil {
 			return artifact.Bundle{}, fmt.Errorf("codex bundle file entry %q: %w", rel, err)
 		}
@@ -397,7 +408,7 @@ func buildCodexBundle(files map[string][]byte) (artifact.Bundle, error) {
 		// fstest.MapFS synthesizes the parent directories of this file, so only
 		// the regular file itself is inserted as source; the directory entries
 		// below are declared in the manifest for a complete ownership inventory.
-		source[rel] = &fstest.MapFile{Data: content, Mode: 0o644}
+		source[rel] = &fstest.MapFile{Data: content, Mode: mapMode}
 
 		// Declare each ancestor directory exactly once.
 		for dir := path.Dir(rel); dir != "." && dir != "/"; dir = path.Dir(dir) {

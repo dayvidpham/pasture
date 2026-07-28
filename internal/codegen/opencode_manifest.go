@@ -17,8 +17,8 @@ import (
 //	  "skills": { "paths": [".opencode/skill"] }
 //	}
 //
-// Only the opencode target emits this file. ClaudeCodeTarget.Manifest is nil,
-// so the claude-code path never reaches this emitter.
+// Only the opencode target emits this file. Other targets use their own
+// manifest emitters and never reach this emitter.
 type openCodeManifestEmitter struct{}
 
 // openCodeManifestConfig is the typed representation of opencode.json. Using a
@@ -26,6 +26,7 @@ type openCodeManifestEmitter struct{}
 // the MarshalIndent output and makes the schema contract explicit.
 type openCodeManifestConfig struct {
 	Schema string                 `json:"$schema"`
+	Plugin []string               `json:"plugin"`
 	Skills openCodeManifestSkills `json:"skills"`
 }
 
@@ -34,11 +35,11 @@ type openCodeManifestSkills struct {
 }
 
 // Emit writes opencode.json to <root>/opencode.json and returns a single
-// GeneratedFile. Only the opencode target calls this; the claude-code target
-// sets Manifest to nil, so this method is never invoked on that path.
+// GeneratedFile. Only the opencode target calls this method.
 func (openCodeManifestEmitter) Emit(root string, opts GenerateOptions) ([]GeneratedFile, error) {
 	cfg := openCodeManifestConfig{
 		Schema: "https://opencode.ai/config.json",
+		Plugin: []string{"./" + filepath.ToSlash(OpenCodeHooksModulePath)},
 		Skills: openCodeManifestSkills{
 			Paths: []string{".opencode/skill"},
 		},
@@ -55,14 +56,32 @@ func (openCodeManifestEmitter) Emit(root string, opts GenerateOptions) ([]Genera
 	// Ensure single trailing newline (consistent with all other emitted files).
 	content := string(data) + "\n"
 
-	path := filepath.Join(root, "opencode.json")
-	generated, err := writeFullGeneratedFile(path, content, opts)
+	descriptor, err := NewOpenCodeTargetDescriptor()
 	if err != nil {
-		return nil, fmt.Errorf(
-			"codegen.openCodeManifestEmitter.Emit: write %q failed — "+
-				"check that the output root directory %q exists and is writable: %w",
-			path, root, err,
-		)
+		return nil, fmt.Errorf("codegen.openCodeManifestEmitter.Emit: build target descriptor: %w", err)
 	}
-	return []GeneratedFile{generated}, nil
+	targetManifest, err := descriptor.Manifest()
+	if err != nil {
+		return nil, fmt.Errorf("codegen.openCodeManifestEmitter.Emit: render target manifest: %w", err)
+	}
+	outputs := []struct {
+		path    string
+		content string
+	}{
+		{path: filepath.Join(root, "opencode.json"), content: content},
+		{path: filepath.Join(root, filepath.FromSlash(OpenCodeHooksModulePath)), content: descriptor.HooksModule()},
+		{path: filepath.Join(root, filepath.FromSlash(OpenCodeTargetManifestPath)), content: targetManifest},
+	}
+	files := make([]GeneratedFile, 0, len(outputs))
+	for _, output := range outputs {
+		generated, err := writeFullGeneratedFile(output.path, output.content, opts)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"codegen.openCodeManifestEmitter.Emit: write %q failed - check that output root %q is writable: %w",
+				output.path, root, err,
+			)
+		}
+		files = append(files, generated)
+	}
+	return files, nil
 }

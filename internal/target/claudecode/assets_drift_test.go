@@ -24,10 +24,8 @@ const regenerateHint = "run `make generate` (or `go generate ./internal/target/c
 // template change updates the canonical skills/agents but leaves the embed
 // stale.
 //
-// It checks the codegen-driven surface only. The plugin scaffolding
-// (.claude-plugin/plugin.json, the pasture-hooks package) and the hand-authored
-// verbatim skill trees (skills/protocol, skills/install-cli) have no generator
-// and are intentionally out of scope; see assets_source.go.
+// It checks the codegen-driven surface only. Plugin scaffolding, hand-authored
+// hook support files, and verbatim skill trees remain out of scope.
 func TestEmbeddedAssetsMatchLivePipeline(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -66,7 +64,7 @@ func TestEmbeddedAssetsMatchLivePipeline(t *testing.T) {
 	//    pipeline no longer emits (a skill removed from specs, or a renamed
 	//    agent, would otherwise linger in the embed forever). Verbatim skill
 	//    trees and plugin scaffolding are excluded by design.
-	for _, packageDir := range []string{skillsPackageDir, agentsPackageDir} {
+	for _, packageDir := range []string{skillsPackageDir, agentsPackageDir, hooksPackageDir} {
 		root := path.Join(assetsDirName, packageDir)
 		walkErr := fs.WalkDir(assetsFS, root, func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
