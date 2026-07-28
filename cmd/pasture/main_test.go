@@ -222,7 +222,7 @@ func TestCLI_PriorityNumericForm(t *testing.T) {
 	}
 }
 
-func TestCLI_DepAddAndReady(t *testing.T) {
+func TestCLI_RelationAdd(t *testing.T) {
 	t.Parallel()
 	db := newDB(t)
 
@@ -248,97 +248,24 @@ func TestCLI_DepAddAndReady(t *testing.T) {
 	parent := mk("parent")
 	child := mk("child")
 
-	depOut := runCLI(t,
+	relationOut := runCLI(t,
 		"--db", db,
 		"--format", "json",
-		"task", "dep", "add", parent, "--blocked-by", child,
+		"task", "relation", "add", parent, "--target", child, "--kind", "blocked_by",
 	)
-	if depOut.exitCode != 0 {
-		t.Fatalf("dep add exit %d stderr=%s", depOut.exitCode, depOut.stderr)
+	if relationOut.exitCode != 0 {
+		t.Fatalf("relation add exit %d stderr=%s", relationOut.exitCode, relationOut.stderr)
 	}
 	var edge struct {
 		SourceId string `json:"sourceId"`
 		TargetId string `json:"targetId"`
 		Kind     string `json:"kind"`
 	}
-	if err := json.Unmarshal([]byte(depOut.stdout), &edge); err != nil {
-		t.Fatalf("decode edge: %v\nbody: %s", err, depOut.stdout)
+	if err := json.Unmarshal([]byte(relationOut.stdout), &edge); err != nil {
+		t.Fatalf("decode edge: %v\nbody: %s", err, relationOut.stdout)
 	}
 	if edge.SourceId != parent || edge.TargetId != child || edge.Kind != "blocked_by" {
 		t.Errorf("edge: %+v", edge)
-	}
-
-	readyOut := runCLI(t, "--db", db, "--format", "json", "task", "ready")
-	if readyOut.exitCode != 0 {
-		t.Fatalf("ready exit %d stderr=%s", readyOut.exitCode, readyOut.stderr)
-	}
-	var ready []struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal([]byte(readyOut.stdout), &ready); err != nil {
-		t.Fatalf("decode ready: %v\nbody: %s", err, readyOut.stdout)
-	}
-	foundChild, foundParent := false, false
-	for _, r := range ready {
-		if r.ID == child {
-			foundChild = true
-		}
-		if r.ID == parent {
-			foundParent = true
-		}
-	}
-	if !foundChild {
-		t.Errorf("child %s should be ready, got %+v", child, ready)
-	}
-	if foundParent {
-		t.Errorf("parent %s should be blocked, got %+v", parent, ready)
-	}
-}
-
-func TestCLI_LabelAddRemove(t *testing.T) {
-	t.Parallel()
-	db := newDB(t)
-
-	out := runCLI(t,
-		"--db", db, "--namespace", "demo", "--format", "json",
-		"task", "create", "labelable",
-	)
-	if out.exitCode != 0 {
-		t.Fatalf("create exit %d stderr=%s", out.exitCode, out.stderr)
-	}
-	var created struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal([]byte(out.stdout), &created); err != nil {
-		t.Fatalf("decode create: %v", err)
-	}
-
-	addOut := runCLI(t, "--db", db, "--format", "json", "task", "label", "add", created.ID, "important")
-	if addOut.exitCode != 0 {
-		t.Fatalf("label add exit %d stderr=%s", addOut.exitCode, addOut.stderr)
-	}
-	var added struct {
-		Labels []string `json:"labels"`
-	}
-	if err := json.Unmarshal([]byte(addOut.stdout), &added); err != nil {
-		t.Fatalf("decode add: %v\nbody: %s", err, addOut.stdout)
-	}
-	if !contains(added.Labels, "important") {
-		t.Errorf("expected 'important' in labels, got %+v", added.Labels)
-	}
-
-	rmOut := runCLI(t, "--db", db, "--format", "json", "task", "label", "remove", created.ID, "important")
-	if rmOut.exitCode != 0 {
-		t.Fatalf("label remove exit %d stderr=%s", rmOut.exitCode, rmOut.stderr)
-	}
-	var removed struct {
-		Labels []string `json:"labels"`
-	}
-	if err := json.Unmarshal([]byte(rmOut.stdout), &removed); err != nil {
-		t.Fatalf("decode remove: %v\nbody: %s", err, rmOut.stdout)
-	}
-	if contains(removed.Labels, "important") {
-		t.Errorf("'important' should be gone, got %+v", removed.Labels)
 	}
 }
 
@@ -382,13 +309,4 @@ func TestCLI_CommentAddRequiresAuthor(t *testing.T) {
 	if commentOut.exitCode == 0 {
 		t.Fatalf("expected non-zero exit when --author is missing")
 	}
-}
-
-func contains(list []string, want string) bool {
-	for _, s := range list {
-		if s == want {
-			return true
-		}
-	}
-	return false
 }
