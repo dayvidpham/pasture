@@ -11,7 +11,7 @@
 // SessionEntry / PhaseId), so a literal embedding would create an import
 // cycle. We resolve by re-declaring the 4 audit method signatures inline here;
 // any audit.Trail implementation satisfies them automatically because the
-// signatures match exactly. The net public surface is identical (28 + 4 + 6 +
+// signatures match exactly. The net public surface is identical (28 + 4 + 7 +
 // Close + OpenTaskTracker) — only the Go-level composition differs.
 //
 // See bd comment on aura-plugins-mbkfi for the full design rationale.
@@ -29,10 +29,11 @@ import (
 // activities) and an audit.Trail (event recording, query, session entries),
 // both opened against the same SQLite file at ~/.local/share/pasture/pasture.db.
 //
-// The interface adds 6 pasture-only methods on top of the 28 + 4 inherited:
+// The interface adds 7 pasture-only methods on top of the 28 + 4 inherited:
 //
 //   - Agent categorisation (R8): SetAgentCategories, AgentCategories
 //   - Context attachment (R9): AttachContext, EventContexts, Timeline
+//   - Task assignment: TransferTaskAssignment
 //   - Lifecycle: Close (closes both wrapped subsystems exactly once)
 //
 // The constructor OpenTaskTracker is the supported way to obtain an instance;
@@ -91,6 +92,12 @@ type TaskTracker interface {
 
 	// AddComment journals a comment on a task authored by authorId.
 	AddComment(id provenance.TaskID, authorId provenance.AgentID, body string) (provenance.Comment, error)
+
+	// TransferTaskAssignment atomically transfers the active assignment in one
+	// supported task slot to its requested successor. The caller supplies only
+	// semantic task and actor values; Pasture resolves the current assignment
+	// internally and returns semantic prior and successor states.
+	TransferTaskAssignment(ctx context.Context, request TransferTaskAssignmentRequest) (TransferTaskAssignmentResult, error)
 
 	// ─── Audit Trail surface (signatures match audit.Trail exactly) ─────
 
