@@ -51,11 +51,12 @@ import (
 // backed by the same SQLite file, and exposes a *sql.DB handle for the 6
 // pasture-only methods that operate on context_edges and pasture_agent_categories.
 type trackerImpl struct {
-	prov      provenance.Tracker
-	trail     audit.Trail
-	auditDB   *sql.DB // shared with trail; used for pasture-only table writes
-	closeOnce sync.Once
-	closeErr  error
+	prov             provenance.Tracker
+	trail            audit.Trail
+	auditDB          *sql.DB // shared with trail; used for pasture-only table writes
+	closeOnce        sync.Once
+	closeErr         error
+	allocationRunner composedAllocationRunner
 
 	// sysOnce/sysSession/sysErr memoize the journaled task-backend system identity
 	// (committing actor + genesis authority). The mutation verbs commit through
@@ -145,6 +146,10 @@ func newTrackerImpl(prov provenance.Tracker, trail audit.Trail, auditDB *sql.DB)
 	}
 
 	return t
+}
+
+func (t *trackerImpl) InitializeGovernedRoot(ctx context.Context, request provenance.RootGenesisRequest) (provenance.OperationClosure, error) {
+	return t.prov.InitializeGovernedRoot(ctx, request)
 }
 
 // ensurePastureTablesOnce is the in-method guard that replaces per-call

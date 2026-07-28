@@ -22,6 +22,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/hooks"
+	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -254,6 +255,24 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		trail:       trail,
 		trailCloser: trailCloser,
 		specs:       specs,
+	}
+
+	if cfg.Tracker != nil && tasks.SupportsEngineGovernedAllocation(cfg.Tracker) {
+		allocator, bindErr := provenance.NewHostBoundGovernedAllocator(ctx, dbosCtx, db, tasks.GovernedAllocationAuditParticipant)
+		if bindErr != nil {
+			_ = db.Close()
+			if trailCloser != nil {
+				_ = trailCloser.Close()
+			}
+			return nil, &pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow, What: "Couldn't bind governed slice allocation to the durable engine.", Why: "The engine-owned DBOS root rejected the governed allocator before launch.", Where: "Constructing the engine (internal/engine/engine.go in engine.New).", Impact: "CreateSlice cannot run atomically on the engine's existing root and database handle.", Fix: "Construct one engine with a unified task tracker and ensure governed allocation is registered before Launch.", Cause: bindErr}
+		}
+		if bindErr := tasks.BindEngineGovernedAllocation(cfg.Tracker, allocator); bindErr != nil {
+			_ = db.Close()
+			if trailCloser != nil {
+				_ = trailCloser.Close()
+			}
+			return nil, &pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow, What: "Couldn't install the engine-owned slice allocator.", Why: "The configured tracker rejected the narrow composed-allocation capability before launch.", Where: "Constructing the engine (internal/engine/engine.go in engine.New).", Impact: "CreateSlice would otherwise have no safe path to the engine-owned transaction.", Fix: "Pass the unified tracker returned by tasks.OpenTaskTracker as engine.Config.Tracker and do not reuse it across engines.", Cause: bindErr}
+		}
 	}
 
 	// When an activity sink is configured, resolve the engine's stable agent id

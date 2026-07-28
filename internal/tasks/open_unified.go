@@ -354,6 +354,16 @@ func ensurePastureTables(db *sql.DB) error {
 		ddl  string
 	}{
 		{
+			name: "pasture_governed_allocation_audit",
+			ddl: `CREATE TABLE IF NOT EXISTS pasture_governed_allocation_audit (
+				operation_id TEXT PRIMARY KEY,
+				closure_anchor INTEGER NOT NULL,
+				child_task_id TEXT NOT NULL,
+				child_assignment_id TEXT NOT NULL,
+				occupant_id TEXT NOT NULL
+			)`,
+		},
+		{
 			name: "context_edges",
 			ddl: `CREATE TABLE IF NOT EXISTS context_edges (
 				event_id     INTEGER NOT NULL REFERENCES audit_events(id) ON DELETE CASCADE,

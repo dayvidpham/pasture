@@ -143,6 +143,91 @@ type PlannedEdge struct {
 	Relation ReviewRelation
 }
 
+// reviewRoundGraph is the persisted, typed identity binding for one materialized
+// review round. Severity order is explicit so submission lowering never infers a
+// group from mutable graph traversal or string handles.
+type reviewRoundGraph [3]reviewAxisGraphBinding
+
+type reviewAxisGraphBinding struct {
+	Axis   ReviewAxis                    `json:"axis"`
+	Task   provenance.TaskID             `json:"task"`
+	Groups [3]reviewSeverityGroupBinding `json:"groups"`
+}
+
+type reviewSeverityGroupBinding struct {
+	Severity FindingSeverity   `json:"severity"`
+	Task     provenance.TaskID `json:"task"`
+}
+
+func newReviewRoundGraph(kind SubjectKind, axisTasks [3]provenance.TaskID, groups [3][3]provenance.TaskID) (reviewRoundGraph, error) {
+	var graph reviewRoundGraph
+	for i, axis := range canonicalReviewAxes() {
+		graph[i] = reviewAxisGraphBinding{Axis: axis, Task: axisTasks[i]}
+		if kind != SubjectImplementation {
+			continue
+		}
+		for j, severity := range canonicalFindingSeverities() {
+			graph[i].Groups[j] = reviewSeverityGroupBinding{Severity: severity, Task: groups[i][j]}
+		}
+	}
+	if err := graph.validate(kind); err != nil {
+		return reviewRoundGraph{}, err
+	}
+	return graph, nil
+}
+
+func (g reviewRoundGraph) validate(kind SubjectKind) error {
+	if !kind.valid() {
+		return reviewErr("reviewRoundGraph.validate", fmt.Sprintf("review kind %q is not plan or implementation", kind),
+			"materialized review identities are closed by subject kind", "use SubjectPlan or SubjectImplementation")
+	}
+	seen := make(map[provenance.TaskID]struct{}, 12)
+	recordTask := func(task provenance.TaskID, label string) error {
+		if task == (provenance.TaskID{}) {
+			return reviewErr("reviewRoundGraph.validate", label+" has a zero task identity",
+				"every materialized review slot must bind one exact task", "persist the generated task identity")
+		}
+		if _, duplicate := seen[task]; duplicate {
+			return reviewErr("reviewRoundGraph.validate", label+" repeats another review task identity",
+				"each axis and severity group occupies one distinct graph slot", "persist distinct generated task identities")
+		}
+		seen[task] = struct{}{}
+		return nil
+	}
+	for i, axis := range canonicalReviewAxes() {
+		binding := g[i]
+		if binding.Axis != axis {
+			return reviewErr("reviewRoundGraph.validate", fmt.Sprintf("axis slot %d is %s", i, binding.Axis),
+				"review axes use canonical correctness, test-quality, elegance order", "persist the canonical axis order")
+		}
+		if err := recordTask(binding.Task, fmt.Sprintf("axis slot %d", i)); err != nil {
+			return err
+		}
+		if kind == SubjectPlan {
+			if binding.Groups != [3]reviewSeverityGroupBinding{} {
+				return reviewErr("reviewRoundGraph.validate", fmt.Sprintf("plan axis %s carries severity groups", axis),
+					"plan reviews have no severity graph", "clear all plan-review severity bindings")
+			}
+			continue
+		}
+		for j, severity := range canonicalFindingSeverities() {
+			group := binding.Groups[j]
+			if group.Severity != severity {
+				return reviewErr("reviewRoundGraph.validate", fmt.Sprintf("axis %s severity slot %d is %s", axis, j, group.Severity),
+					"implementation severity groups use canonical blocker, important, minor order", "persist the canonical severity order")
+			}
+			if err := recordTask(group.Task, fmt.Sprintf("axis %s severity %s", axis, severity)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func canonicalFindingSeverities() [3]FindingSeverity {
+	return [3]FindingSeverity{SeverityBlocker, SeverityImportant, SeverityMinor}
+}
+
 // ReviewRoundPlan is the deterministic shape of one review round: the round task, exactly
 // three axis tasks, the eager severity groups for an implementation review, and every
 // typed subject/contains/blocked-by edge. The reviewed task is blocked by the round; the
@@ -189,7 +274,7 @@ func PlanReviewRound(reviewedTask provenance.TaskID, subject ReviewSubjectRef, k
 		PlannedEdge{From: plan.RoundHandle, To: reviewedTaskHandle, Relation: RelationSubject},
 	)
 
-	for i, axis := range ReviewAxes {
+	for i, axis := range canonicalReviewAxes() {
 		axisHandle := "axis-" + axis.String()
 		plan.AxisHandles[i] = axisHandle
 		plan.Tasks = append(plan.Tasks, PlannedTask{Handle: axisHandle, Kind: ReviewTaskAxis, Axis: axis})
@@ -199,7 +284,7 @@ func PlanReviewRound(reviewedTask provenance.TaskID, subject ReviewSubjectRef, k
 			PlannedEdge{From: plan.RoundHandle, To: axisHandle, Relation: RelationBlockedBy},
 		)
 		if kind == SubjectImplementation {
-			for _, sev := range FindingSeverities {
+			for _, sev := range canonicalFindingSeverities() {
 				groupHandle := axisHandle + ".group-" + sev.String()
 				plan.Tasks = append(plan.Tasks, PlannedTask{
 					Handle: groupHandle, Kind: ReviewTaskGroup, Axis: axis, Severity: sev,
