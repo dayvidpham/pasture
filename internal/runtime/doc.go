@@ -26,6 +26,17 @@
 // set, and capability-version intersection, requires each requested capability
 // exactly once, and rejects missing, duplicate, or conflicting contributions.
 //
+// The package also exposes three closed native lifecycle profiles through
+// ClaudeCode2_1_210Lifecycle, Codex0_144_1Lifecycle, and
+// OpenCode1_17_18Lifecycle. Their harness-specific numeric event enums map every
+// pinned native event to observation, gate consultation, or an explicit human
+// response, together with exact transport, blocking, identity, mutation,
+// ordering, reconciliation, failure, and stop-loop behavior. There is no string
+// lookup or registration API. Lifecycle mappings carry generation metadata only:
+// native payloads cannot supply Pasture review/publication authority or create a
+// decision merely because an event occurred. Antigravity fails actionably because
+// no public contract can be pinned; Pi has no adapter profile.
+//
 // # Scope boundary (delivered-surface divergence)
 //
 // Issue #40 also describes a landing-composition path — the versioned
