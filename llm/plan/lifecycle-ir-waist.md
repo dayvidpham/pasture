@@ -102,7 +102,11 @@ and do not belong in the waist.
 
 Enforced in `NewEvent`, per research §8:
 
-- every `Identity.NativeName()` is declared by the pinned mapping for this event;
+- every `Identity`'s `(Kind(), NativeName())` **pair** matches a declared
+  `NativeIdentityField` on the pinned mapping. Validating the name alone is
+  insufficient: `session_id` could be supplied as `IdentityRequest`, and since
+  the waist compares identity *kinds*, that would produce a semantically wrong
+  correlation inside IR the verifier has already blessed (axis A, round 4);
 - every mapping identity marked `required` is present;
 - unknown identity names rejected;
 - values non-empty and bounded (`identityValueMaxBytes`);
@@ -384,6 +388,9 @@ disposition rather than reusing the general CLI exit-code contract.
   values, AND their `Semantics` are `EquivalentTo`.
 - GIVEN an `Event`, WHEN constructed, THEN semantics and target behaviour are
   derived from the pinned contract, AND SHOULD NOT be caller-supplied.
+- GIVEN an identity whose kind does not match the pinned declaration for that
+  native field name, WHEN `NewEvent` is called, THEN it is rejected, AND SHOULD
+  NOT produce IR carrying a mis-kinded correlation.
 - GIVEN an actor, assignment, JournalID or revision, WHEN placing it in an
   `Event`, THEN no field exists to hold it.
 - GIVEN two occurrences with different native payloads, WHEN both are lowered,
