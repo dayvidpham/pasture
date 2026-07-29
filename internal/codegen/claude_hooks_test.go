@@ -63,6 +63,54 @@ func TestLifecycleAdapterTargetsUnsupportedAndAbsentHarnesses(t *testing.T) {
 	}
 }
 
+func TestLifecycleIdentityFieldsBelongToPinnedPayloadShapes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Claude", func(t *testing.T) {
+		assertIdentityFieldsInPayloadShape(
+			t,
+			runtime.ClaudeCode2_1_210Lifecycle(),
+			runtime.ClaudeLifecycleEvents(),
+			"claudeNativeFields",
+			claudeNativeFields,
+		)
+	})
+	t.Run("Codex", func(t *testing.T) {
+		assertIdentityFieldsInPayloadShape(
+			t,
+			runtime.Codex0_144_1Lifecycle(),
+			runtime.CodexLifecycleEvents(),
+			"codexNativeFields",
+			codexNativeFields,
+		)
+	})
+}
+
+func assertIdentityFieldsInPayloadShape[E comparable](
+	t *testing.T,
+	contract runtime.LifecycleContract[E],
+	events []E,
+	payloadTable string,
+	payloadFields func(string) []string,
+) {
+	t.Helper()
+	for _, event := range events {
+		mapping, err := contract.Mapping(event)
+		if err != nil {
+			t.Fatalf("read lifecycle identity table for event %v: %v", event, err)
+		}
+		declaredPayloadFields := payloadFields(mapping.NativeName())
+		for _, identity := range mapping.Identities() {
+			if !slices.Contains(declaredPayloadFields, identity.NativeName()) {
+				t.Errorf(
+					"event %q identity field %q is declared by the runtime lifecycle identity table but absent from the pinned payload shape; edit %s in internal/codegen/claude_hooks.go",
+					mapping.NativeName(), identity.NativeName(), payloadTable,
+				)
+			}
+		}
+	}
+}
+
 func TestClaudeLifecycleAdapterInvokesStrictHiddenEnvelope(t *testing.T) {
 	t.Parallel()
 
