@@ -2,50 +2,50 @@
 references:
   request: aura-plugins-s43qq
   impl_plan: aura-plugins-sgxp6
-  supersedes: aura-plugins-9ih8s
+  supersedes: aura-plugins-gwva1
   reviews_round1: aura-plugins-dkuiu, aura-plugins-4yydp, aura-plugins-b627b
   reviews_round2: aura-plugins-1q0hn, aura-plugins-hsth1, aura-plugins-4kb2i
+  reviews_round3: aura-plugins-79vaz, aura-plugins-1fv7y, aura-plugins-28mlb
   authority: llm/research/hooks-ir-compilers-architecture-lessons.md
 ---
 
-# PROPOSAL-3: Canonical lifecycle IR waist
+# PROPOSAL-4: Canonical lifecycle IR waist
 
-Supersedes PROPOSAL-2. Round 2 returned REVISE on all three axes, with three
-axes independently reporting the same four defects. That convergence is the
-useful signal: the *architecture* stopped being contested after round 1, and
-round 2 found only places where the declared contract could not actually be
-implemented. This revision closes those.
+Supersedes PROPOSAL-3. Round 3 returned ACCEPT on axis C and REVISE on A and B,
+with **all three axes converging on the same list**. No architectural objection
+remains; every open finding is an undeclared type or an unspecified encoding —
+material I cut from PROPOSAL-2 while trimming speculative surface, and took
+load-bearing declarations with it.
 
-| Defect | Reported by |
+| Round | What was contested |
 |---|---|
-| D8 reverse lookup does not exist and was deliberately excluded | A (blocker), C (important) |
-| D5 payload dedup unimplementable — no payload reaches the IR | A (blocker), C (blocker) |
-| `Lower` forbidden to read `Origin`, yet must pass it to `ActorResolver` | A, B, C (all blocker) |
-| `Outcome` declared frozen while incomplete | B (blocker), C (blocker), A (important) |
+| 1 | The architecture — is the waist real, is it too heavy |
+| 2 | The contract — four things declared but unimplementable |
+| 3 | The declarations — types referenced but never defined |
 
 ## 0. Provenance
 
-Authority: `llm/research/hooks-ir-compilers-architecture-lessons.md`. Axis A
-correctly objected again that two rows still laundered derivation as citation.
+Authority: `llm/research/hooks-ir-compilers-architecture-lessons.md`.
 
 | This plan | Research | Relationship |
 |---|---|---|
-| §2 hourglass waist | §2 | **stated** |
-| §3 Go frontend is not "JSON as API" | §13.1 | **stated** |
+| hourglass waist | §2 | **stated** |
+| Go frontend is not "JSON as API" | §13.1 | **stated** |
 | middle-end owns operation selection | §6 | **stated** |
 | legalization failure is first-class | §8 | **stated** |
 | no IR serialization yet | §9 | **stated** |
 | differential equivalence proves a waist | §11 | **stated** |
 | `Semantics`/`Origin` split | §7 | **derived** |
 | type erasure at `BindEvent` | §7 | **derived** |
-| *one exported* `Lower` symbol | §6 | **derived** — research requires middle-end ownership, not one symbol |
-| constructor-enforced invariants | §8 | **derived** — research requires verification at pass boundaries, not a specific mechanism |
+| *one exported* `Lower` symbol | §6 | **derived** |
+| constructor-enforced invariants | §8 | **derived** |
 | replay key from payload digest | §8 | **derived** |
 
 ## 1. The waist
 
-The equivalence that the M2 test must prove is what fixes the waist's width.
-Claude `PreToolUse` against OpenCode `tool.execute.before`:
+Claude `PreToolUse` against OpenCode `tool.execute.before` — **five** of eight
+axes differ, and differ correctly, because they describe how to speak back to
+one specific host (research §7 drops target detail at L2):
 
 ```
                     Claude PreToolUse      OpenCode tool.execute.before
@@ -61,91 +61,115 @@ Claude `PreToolUse` against OpenCode `tool.execute.before`:
   failure           exit-2-blocks          throw-fail-fast          DIFFERS
 ```
 
-**Five** of the eight axes differ (A and C both corrected PROPOSAL-2's "six";
-`stopLoop` matches here). The five that differ describe how to speak back to one
-specific host — target description, which research §7 says the L2 dialect drops.
+## 2. Declared types
+
+All previously-undangling references are now defined (A-blocker-1, B-blocker).
 
 ```go
-// THE WAIST. Target-agnostic: nothing here names a harness or a wire format.
-type Semantics struct {
-    Semantic   runtime.EventSemantic
-    Blocking   runtime.BlockingMode
-    Identities []SemanticIdentity   // sorted; see §4.3
-}
+// Exact native event spelling. Validated against the pinned catalog.
+type NativeEventName string
 
-// Occurrence identity, stripped of native field naming (axis C).
+// Fixed-width SHA-256 over the exact bytes read at the process boundary,
+// computed BEFORE parsing so it is well-defined even for payloads that fail
+// to parse. The zero value is invalid and rejected.
+type Digest [32]byte
+
+func NewDigest(raw []byte) Digest
+func (d Digest) IsZero() bool
+
+// Native identity input to the constructor: what the frontend extracted,
+// still carrying its native field name for validation against the mapping.
+type Identity struct{ /* unexported: kind, nativeName, value */ }
+
+func NewIdentity(kind runtime.NativeIdentityKind, nativeName, value string) (Identity, error)
+func (i Identity) Kind() runtime.NativeIdentityKind
+func (i Identity) NativeName() string
+func (i Identity) Value() string
+
+// Waist-side identity: native field naming stripped (axis C, round 2).
 type SemanticIdentity struct {
     Kind  runtime.NativeIdentityKind
     Value string
 }
 ```
 
-## 2. Origin, and the death of D8
+`Identity` → `SemanticIdentity` conversion happens **inside** the constructor,
+which drops `nativeName` and sorts by `(Kind, Value)`. Native field names exist
+to validate against the pinned mapping; once validated they are target detail
+and do not belong in the waist.
 
-PROPOSAL-2 said the response backend could recover the five target axes by
-looking them up from `(Contract, NativeEventName)`. Axis A found this is
-impossible and axis C independently found the same: `LifecycleContract.Mapping`
-is generic over `E`, `Origin` erases `E`, and `internal/runtime/lifecycle.go`
-**deliberately has no native-name lookup** — its doc comment says so explicitly.
+### 2.1 Constructor invariants (restored)
 
-D8 is withdrawn. Neither offered fix is taken wholesale: adding a reverse lookup
-would re-open the string-keyed lookup that `runtime` was designed to forbid.
+Enforced in `NewEvent`, per research §8:
 
-DECISION D9 — `Event` retains the immutable `LifecycleEventMapping` it was
-bound to, unexported, exposed only through a backend-facing accessor.
+- every `Identity.NativeName()` is declared by the pinned mapping for this event;
+- every mapping identity marked `required` is present;
+- unknown identity names rejected;
+- values non-empty and bounded (`identityValueMaxBytes`);
+- duplicate `(kind, nativeName)` pairs rejected;
+- `Digest` non-zero;
+- Pasture actors, assignments, `JournalID`s, revisions and evidence have **no
+  field to occupy**.
+
+## 3. The waist and its origin
 
 ```go
-type Origin struct {
-    Contract        ir.RuntimeContractID
-    NativeEventName NativeEventName
-    PayloadDigest   Digest      // §3
-    // unexported: mapping runtime.LifecycleEventMapping
-}
+// Opaque (A/B round 3: an exported slice field is aliasable and in-place
+// sorting would mutate the caller's data). Accessors return copies.
+type Semantics struct{ /* unexported */ }
 
-func (o Origin) Harness() ir.HarnessID   // derived; no stored field (axis C minor)
+func (s Semantics) Semantic() runtime.EventSemantic
+func (s Semantics) Blocking() runtime.BlockingMode
+func (s Semantics) Identities() []SemanticIdentity   // defensive copy, sorted
+func (s Semantics) EquivalentTo(other Semantics) bool
+func (s Semantics) CanonicalKey() string
 
-// Backend-only. Lower must not call this; see §5.
-func (o Origin) TargetBehaviour() runtime.LifecycleEventMapping
+type Origin struct{ /* unexported */ }
+
+func (o Origin) Contract() ir.RuntimeContractID
+func (o Origin) Harness() ir.HarnessID          // derived from Contract
+func (o Origin) NativeEventName() NativeEventName
+func (o Origin) PayloadDigest() Digest
 ```
 
-This preserves D8's actual intent. The anti-drift worry was a *copy that can
-diverge from the table*; a value read from the immutable table at `BindEvent`
-and never mutated cannot diverge from it. And the impossible reverse lookup
-disappears rather than being built.
+### 3.1 The backend capability boundary
 
-## 3. Replay identity — one rule
+D9 retains the immutable `LifecycleEventMapping` from bind time rather than
+re-deriving it — `internal/runtime` deliberately has no native-name lookup, so
+PROPOSAL-2's D8 was impossible. But axis C is right that an exported
+`Origin.TargetBehaviour()` is a side door: the §5 invariant would depend on
+nobody reaching for a method `Lower` already holds.
 
-PROPOSAL-2's two-branch `DedupScope` was unimplementable: `DedupByPayload`
-needs the payload, and no payload reaches the IR. The Claude frontend discards
-`file_path`, so the field distinguishing two `FileChanged` occurrences was gone.
-Axis C also noted the table omitted Codex's `IdentityTurn`.
+```go
+// Backend-only. Lower must never reference this symbol.
+func BackendView(e Event) Backend
 
-Rather than complete the table, delete it. The frontend digests the raw native
-payload it received and carries the digest as origin provenance:
-
-```
-replay key = (Contract, NativeEventName, PayloadDigest)
+type Backend struct{ /* unexported */ }
+func (b Backend) TargetBehaviour() runtime.LifecycleEventMapping
 ```
 
-DECISION D5 (final) — one rule, total by construction. Identity values live
-inside the payload, so identity-based dedup is subsumed; the `IdentityTurn` gap
-and every future one closes automatically. A byte-identical redelivery
-collapses, which is the retry case dedup exists for. Two different file changes
-carry different paths, therefore different digests, therefore different records.
+Go cannot make this compiler-enforced across packages without ceremony that
+costs more than it buys. What it does buy is collapsing the invariant to one
+greppable question — *does `Lower`, or anything it calls, reference
+`BackendView`?* — answerable mechanically rather than by reading for intent.
 
-`Digest` is a bounded, fixed-width value (SHA-256) computed over the exact bytes
-read, before any parsing, so it is well-defined even for payloads that fail to
-parse. Wall-clock time is not in the key.
+### 3.2 CanonicalKey and replay-key encoding
 
-**Named residual:** two genuinely distinct occurrences with byte-identical
-payloads collapse into one record. This is narrow and documented, and replaces
-PROPOSAL-2's silent universal collapse. The acceptance criterion in §10 is
-worded to match this, rather than claiming a guarantee the design cannot make
-(axis A's contradiction finding).
+Axis B: rejecting a separator at identity construction is not viable, because
+values come from host payloads and Pasture cannot dictate their content.
+Length-prefixing is unambiguous regardless of content.
 
-## 4. Declared surface
+```
+field    := decimal-length ":" raw-bytes
+key      := field(contract) field(nativeEventName) field(hex(digest))
+canonical:= field(semantic) field(blocking) field(count) [field(kind) field(value)]...
+```
 
-### 4.1 Frontend (restored — axis B found it dropped)
+Identities are sorted by `(Kind, Value)` before encoding; duplicates of the same
+kind are retained in sorted order. Two different triples cannot produce the same
+string (A round 3).
+
+## 4. Frontend
 
 ```go
 type Frontend interface {
@@ -154,10 +178,10 @@ type Frontend interface {
 }
 ```
 
-Pure: no effects, no store, no clock. Golden-IR tests need no host and no
-database. `MaxNativePayloadBytes` bounds the read at the process boundary.
+Pure: no store, no clock, no effects. Golden-IR tests need no host and no
+database.
 
-### 4.2 Construction
+## 5. Construction
 
 ```go
 func BindEvent[E comparable](c runtime.LifecycleContract[E], event E) (EventBinding, error)
@@ -171,38 +195,11 @@ func (e Event) Semantics() Semantics
 func (e Event) Origin() Origin
 ```
 
-D1 (confirmed by all three axes, twice) — the constructor derives `Semantics`
-and the mapping from the binding. It accepts only what the binding cannot know:
-the payload digest and the extracted identity values.
+D1 (confirmed by all three axes, three times) — the constructor derives
+semantics and target behaviour from the binding, and accepts only what the
+binding cannot know: the digest and the extracted identity values.
 
-### 4.3 Equivalence — honest about what it proves
-
-Axis B found the relation too coarse: Claude `UserPromptSubmit` and `Stop` both
-reduce to (gate-consultation, blocking, [session]) and would compare equivalent
-despite being unrelated events. That is correct, and it means `EquivalentTo`
-alone cannot be the M2 test.
-
-```go
-// Coarse SHAPE relation over the waist. Necessary, NOT sufficient.
-func (s Semantics) EquivalentTo(other Semantics) bool
-
-// Deterministic rendering. Identities sorted by (Kind, Value); duplicates of
-// the same Kind retained in sorted order; fields joined with a reserved
-// separator that cannot occur in an identity value.
-func (s Semantics) CanonicalKey() string
-```
-
-The M2 differential test is therefore specified as three assertions, not one:
-
-1. each frontend produced the **expected native event** (`Origin.NativeEventName`
-   is `PreToolUse` on one side, `tool.execute.before` on the other);
-2. each side carries the **exact expected identity values**;
-3. the two `Semantics` are `EquivalentTo`.
-
-Without (1) and (2) the test would pass even if a frontend produced the wrong
-event, which is precisely the bug class it exists to catch.
-
-### 4.4 Lowering
+## 6. Lowering
 
 ```go
 func Lower(ctx context.Context, deps Deps, event Event) (Outcome, error)
@@ -211,55 +208,60 @@ type Deps struct {
     Recorder ObservationRecorder   // required
     Actors   ActorResolver         // required
     Clock    func() time.Time      // required; no time.Now fallback
-    Logger   *slog.Logger          // required; no slog.Default fallback
 }
 ```
 
-All fields required and validated; nil is an actionable error, never a silent
-default. Axis B is right that fallbacks to `time.Now` or `slog.Default`
-reintroduce the hidden global state the injection exists to remove.
+`Deps.Logger` is **removed** (B, C round 3): a field declared required, with no
+fallback permitted and nothing consuming it, is the speculative surface the
+previous two rounds were spent removing. It returns when something needs it.
 
-`Clock`'s only consumer is the observed-at timestamp on the recorded activity.
-It is deliberately *not* in the replay key (§3), so a fake clock cannot change
-dedup behaviour.
+`Clock`'s only consumer is the observed-at timestamp. It is deliberately not in
+the replay key, so a fake clock cannot change dedup behaviour.
 
 ```go
-// Consumer-owned, narrow. Not protocol.TaskTracker wholesale.
+// One call, one transaction (B round 3). The activity and task event are
+// written together or neither is visible; exposing two calls invited a
+// partial write.
 type ObservationRecorder interface {
     RecordObservation(ctx context.Context, o ObservationRecord) (RecordOutcome, error)
 }
 
 type ObservationRecord struct {
     Actor      provenance.AgentID
-    Actee      Origin           // what was observed
+    Observed   Origin
     Semantics  Semantics
     ObservedAt time.Time
-    ReplayKey  string           // §3
+    ReplayKey  string
 }
 
 type RecordOutcome uint8
 const (
-    RecordCreated RecordOutcome = iota + 1  // new activity + event written
-    RecordReplayed                          // replay key already present; no write
+    RecordCreated RecordOutcome = iota + 1
+    RecordReplayed
 )
 
-// Fails closed. Must verify the resolved ID is non-zero and registered.
 type ActorResolver interface {
     ResolveHookActor(ctx context.Context, o Origin) (provenance.AgentID, error)
 }
 ```
 
-Axis B's finding that `ActivityRecord`/`EventRecord` were undefined is
-addressed by collapsing them: the activity and the task event are written
-together or not at all, so exposing two calls invited a partial write. One call,
-one transaction, one typed outcome that distinguishes a write from a replay.
+The production adapter MUST implement `RecordObservation` in a single
+transaction such that an error leaves neither the activity nor the event
+visible. Actor resolution MUST succeed before any write is attempted, so a
+failed resolve cannot leave a partial record (A round 3).
 
-### 4.5 Outcome — provisional by declaration
+`ActorResolver` MUST verify the resolved ID is non-zero and registered, MUST
+namespace by harness — the existing `pasture/automaton/hook/<name>` convention
+has no harness segment, so OpenCode `session.idle` and a same-spelled Claude
+event would collide (A round 3) — and MUST remain compatible with the existing
+registered Claude names.
+
+### 6.1 Outcome — provisional by declaration
 
 ```go
 type Outcome struct {
     Kind   OutcomeKind
-    Record RecordOutcome   // meaningful when Kind == OutcomeRecorded
+    Record RecordOutcome
 }
 
 type OutcomeKind uint8
@@ -268,36 +270,20 @@ const (
 )
 ```
 
-DECISION D10 — M1–M3 declare **only** `OutcomeRecorded`. Axis B and C both
-found PROPOSAL-2 repeating, one level smaller, the same error that got
-`Responder` withdrawn: freezing `OutcomeAllow`/`OutcomeDeny`/`OutcomeMutate`
-with no payloads and no consumers. `OutcomeMutate` in particular cannot be
-specified while the IR carries no mutation input.
+D10 — M1–M3 declare only `OutcomeRecorded`. A struct rather than a bare enum so
+M5 can add variants and payloads without breaking callers. Declared
+**provisional**: the observation path is frozen, the gate path is not designed.
 
-`Outcome` is a struct rather than a bare enum specifically so M5 can add
-variants and payloads without breaking callers, and it is declared
-**provisional**: the observation path is frozen, the gate path is not yet
-designed. Saying so is more honest than implying a stability the design has not
-earned.
+### 6.2 What keeps the middle-end target-agnostic
 
-## 5. What keeps the middle-end target-agnostic
+`Lower`'s behaviour must not vary by harness:
 
-All three axes found the contradiction: PROPOSAL-2's criterion said `Lower`
-reads only `Semantics`, but actor resolution and the replay key both need
-`Origin`. The criterion was wrong, not the design.
+- MAY read `Semantics` and `Origin`'s coordinates;
+- MUST NOT reference `BackendView` (§3.1);
+- `Deps` contains no lifecycle-table accessor, so harness-varying lookups can
+  only occur behind `ActorResolver`.
 
-The property actually wanted is that **`Lower`'s behaviour does not vary by
-harness**. Restated precisely and checkably:
-
-- `Lower` MAY read `Semantics` and `Origin`'s coordinates.
-- `Lower` MUST NOT call `Origin.TargetBehaviour()`. Those five axes govern how
-  to speak back to a host; a middle-end that branches on them is not
-  target-agnostic.
-- `Deps` deliberately contains no lifecycle-table accessor, so harness-varying
-  lookups can only happen behind `ActorResolver`. `Lower` itself contains no
-  harness branch.
-
-## 6. Level traversal is not uniform
+## 7. Level traversal is not uniform
 
 ```
   observation      L2 ──────────────────────> L4 effects   (terminal pass)
@@ -305,39 +291,42 @@ harness**. Restated precisely and checkably:
   human response   L2 ──> L3 protocol op ───> L4 ──> response
 ```
 
-L3 is the protocol dialect (`StartReview`, `RecordPlanUAT`, `Land`). An
-observation is not a protocol transition: a host reporting that a session
-started is *evidence*, not authority to advance a phase (research §13.3).
-Axis A and C both accepted this as a genuine resolution when named as a
-**terminal observation-effect pass**, which is how §6 now labels it.
-Consequence: M1–M3 never touch `AdapterOperation`.
+An observation is not a protocol transition: a host reporting a session started
+is *evidence*, not authority to advance a phase (research §13.3). M1–M3 never
+touch `AdapterOperation`.
 
-## 7. Blocking events are refused until M5
+D11 — M1–M3 refuse any event whose blocking mode is not `NonBlocking`, with an
+actionable error naming M5. Before M5 there is no response encoding, so a
+blocking event would leave the host awaiting a result it never receives.
+Refusing loudly is the legalization behaviour research §8 requires.
 
-Axis A: since no response encoding exists before M5, a blocking event processed
-at M1–M3 would leave the host awaiting a result it never receives.
+## 8. Production process path (restored)
 
-DECISION D11 — M1–M3 refuse any event whose `Semantics.Blocking` is not
-`NonBlocking`, with an actionable error naming M5. Refusing loudly is the
-legalization behaviour research §8 requires; hanging or silently allowing is
-the failure mode this work exists to remove.
+A and C both flagged its loss as blocking. This is where the properties that
+stop a malformed invocation from creating a database actually live.
 
-## 8. Response encoding — M5, with constraints
+```
+pasture hook lifecycle --harness <id> [--event <native-name>]    # payload on stdin
+```
 
-`Responder` stays withdrawn. Two constraints recorded so M5 is not designed blind:
+1. `--harness` is **required and typed**; no default, no autodetection.
+   Inferring the harness from payload shape is the guess that produces silent
+   misclassification.
+2. Read stdin bounded by `MaxNativePayloadBytes`; exceeding it is an error, not
+   a truncation.
+3. Compute `Digest` over the exact bytes read, before parsing.
+4. Dispatch to the frontend for `--harness` through a typed table; an unknown
+   harness is `UnsupportedHarnessError` naming the supported set.
+5. `Parse`. If `--event` is present and the payload names an event, disagreement
+   is a hard error — it means a hook is misregistered.
+6. **Only now** open the store, construct the recorder adapter and the actor
+   resolver, and call `Lower`.
+7. Emit no storage identities (`ActivityID`, `JournalID`, row ids) on stdout.
 
-**C1** — one canonical process-boundary response form; each harness trampoline
-applies a fixed mechanical mapping to its native dialect. Per-surface knowledge
-is emitted statically by the generator from the pinned table, not selected at
-runtime.
+Steps 1–5 perform no I/O beyond reading stdin, so an invalid invocation cannot
+create a database file.
 
-**C2** — verified by axis B against `AGENTS.md` and
-`internal/errors/errors.go:226-255`: exit code 2 means `CategoryConnection`,
-but exit 2 is exactly how Claude and Codex hooks signal *deny*. M5 needs a
-distinct typed lifecycle response disposition rather than reusing the general
-CLI exit-code contract.
-
-## 9. Milestones
+## 9. Milestones and testing
 
 | # | Milestone | Status |
 |---|---|---|
@@ -346,37 +335,68 @@ CLI exit-code contract.
 | M3 | Codex frontend | committed |
 | M4+ | Context binding, gates, human response, escape hatch, retire drift | directional |
 
-M3 is the Codex **frontend only** — axis C found PROPOSAL-2 claiming strict
-failure semantics at M3 while deferring all response encoding to M5.
+Systematic unit coverage is deferred by user direction. Two tests are not:
 
-Actor coverage (D6, unchanged): the static registry has 9 `HookHandler` agents
-against 30/10/42 pinned events. Do not expand it to 82 — that is a second copy
-of the pinned tables and will drift. Derive lazily from `(harness, native name)`
-at M2. M1 uses the registered `SessionStart` agent and fails closed otherwise.
-`ActorResolver` must verify the resolved ID is non-zero and registered, and must
-remain compatible with the existing `pasture/automaton/hook/<name>` naming.
+**M1 built-binary replay test.** Invoke the built binary as a hook would — real
+native payload on stdin, isolated `PASTURE_DB_PATH`, unrelated working
+directory. One observation writes one activity and one task event; identical
+re-invocation returns `RecordReplayed` with zero deltas; an unknown-field
+payload is rejected with zero writes.
 
-## 10. Acceptance criteria
+**M2 differential equivalence.** Compares **Events straight out of the two
+frontends and never invokes `Lower`** (axis C round 3): the pair is
+`PreToolUse` / `tool.execute.before`, both blocking gate consultations, which
+D11 refuses before M5. Testing at the waist is also the more correct level,
+isolating the property proved from the effect path. Three assertions:
+
+1. each side's `Origin.NativeEventName()` is the expected native event;
+2. each side carries the exact expected identity values;
+3. the two `Semantics` are `EquivalentTo`.
+
+`EquivalentTo` alone is insufficient — it is a coarse shape relation, and
+Claude `UserPromptSubmit` and `Stop` also reduce to the same shape (axis B
+round 2). Assertions 1 and 2 are what catch a frontend emitting the wrong event.
+
+Actor coverage (D6): the static registry has 9 `HookHandler` agents against
+30/10/42 pinned events. Do not expand it to 82 — that is a second copy of the
+pinned tables and will drift. Derive lazily from `(harness, native name)` at M2.
+M1 uses the registered `SessionStart` agent and fails closed otherwise.
+
+## 10. Response encoding — M5, with constraints
+
+`Responder` stays withdrawn. **C1** — one canonical process-boundary response
+form; each harness trampoline applies a fixed mechanical mapping to its native
+dialect, emitted statically by the generator from the pinned table.
+**C2** — verified against `AGENTS.md` and `internal/errors/errors.go:226-255`:
+exit code 2 means `CategoryConnection`, but exit 2 is exactly how Claude and
+Codex hooks signal *deny*. M5 needs a distinct typed lifecycle response
+disposition rather than reusing the general CLI exit-code contract.
+
+## 11. Acceptance criteria
 
 - GIVEN any environment, WHEN an event is processed, THEN the operation is
   selected only by `Lower` from verified IR, AND SHOULD NOT be influenced by any
   env var, argv value, or generated script.
-- GIVEN `Lower`, WHEN it executes, THEN it never calls `Origin.TargetBehaviour()`
-  and contains no harness branch.
+- GIVEN `Lower`, WHEN it executes, THEN it never references `BackendView` and
+  contains no harness branch.
 - GIVEN the same logical occurrence from Claude and OpenCode, WHEN both are
-  lowered, THEN each carries its own expected native event name and exact
-  identity values, AND their `Semantics` are `EquivalentTo`.
+  parsed, THEN each carries its expected native event name and exact identity
+  values, AND their `Semantics` are `EquivalentTo`.
 - GIVEN an `Event`, WHEN constructed, THEN semantics and target behaviour are
   derived from the pinned contract, AND SHOULD NOT be caller-supplied.
 - GIVEN an actor, assignment, JournalID or revision, WHEN placing it in an
   `Event`, THEN no field exists to hold it.
-- GIVEN two occurrences with **different** native payloads, WHEN both are
-  lowered, THEN two records exist, AND SHOULD NOT collapse.
+- GIVEN two occurrences with different native payloads, WHEN both are lowered,
+  THEN two records exist, AND SHOULD NOT collapse.
 - GIVEN the identical payload delivered twice, WHEN both are lowered, THEN one
   record exists and the second returns `RecordReplayed`.
+- GIVEN a recorder error, WHEN it occurs, THEN neither the activity nor the
+  event is visible, AND SHOULD NOT leave a partial record.
 - GIVEN a blocking event before M5, WHEN lowered, THEN it is refused with an
   actionable error naming M5, AND SHOULD NOT be silently allowed.
-- GIVEN an event with no registered actor, WHEN lowered, THEN it fails closed,
-  AND SHOULD NOT invent an actor.
+- GIVEN an event with no registered actor, WHEN lowered, THEN it fails closed
+  before any write, AND SHOULD NOT invent an actor.
+- GIVEN an invalid invocation, WHEN it is rejected, THEN no database file is
+  created.
 - GIVEN a nil `Deps` field, WHEN `Lower` is called, THEN it fails actionably,
-  AND SHOULD NOT fall back to `time.Now` or `slog.Default`.
+  AND SHOULD NOT fall back to `time.Now`.
