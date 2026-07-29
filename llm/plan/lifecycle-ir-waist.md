@@ -2,377 +2,343 @@
 references:
   request: aura-plugins-s43qq
   impl_plan: aura-plugins-sgxp6
-  research: llm/research/hooks-ir-compilers-architecture-lessons.md
-  target_table: internal/runtime/lifecycle.go, internal/runtime/lifecycle_profiles.go
+  supersedes: aura-plugins-42tgj
+  reviews: aura-plugins-dkuiu, aura-plugins-4yydp, aura-plugins-b627b
+  authority: llm/research/hooks-ir-compilers-architecture-lessons.md
 ---
 
-# PROPOSAL-1: Canonical lifecycle IR waist
+# PROPOSAL-2: Canonical lifecycle IR waist
+
+Supersedes PROPOSAL-1. All three review axes voted REVISE and converged, from
+three different directions, on one defect: **PROPOSAL-1 copied the pinned target
+table into the IR and called the result a waist.** It was not narrow, so the
+test that was supposed to prove it existed could not be written.
+
+| Axis | Route to the same defect |
+|---|---|
+| A | `Responder` dispatch keyed on surface alone is axis-incomplete |
+| B | Differential equivalence unwritable; naive comparison would also be *wrong* |
+| C | `Order`/`Reconciliation`/`StopLoop` have no L2 consumer |
 
 ## 0. Provenance of this plan
 
-This plan does not originate from taste. Every structural decision below is
-derived from a documented compiler-architecture principle recorded in
-`llm/research/hooks-ir-compilers-architecture-lessons.md`. That document is the
-authority; this one is its application to Pasture.
+Authority: `llm/research/hooks-ir-compilers-architecture-lessons.md`. That
+document is normative; this one applies it. Axis A correctly objected that
+PROPOSAL-1's traceability table laundered derivation as citation, so the table
+now separates the two.
 
-| This plan | Derives from | Principle |
+| This plan | Research | Relationship |
 |---|---|---|
-| §2 two-sided hourglass | §2 The hourglass | Narrow waist: N frontends + M backends via one IR, not N×M translators |
-| §3 Go frontend is not "JSON as API" | §3, §13.1 | A parser bound to a versioned input language is a component, not an API |
-| §4.1 type erasure at `BindEvent` | §7 Progressive lowering | L1 harness dialect is generic per harness; L2 must be target-agnostic |
-| §4.2 constructor-enforced invariants | §8 Verifier | Verify at pass boundaries; make illegal states unrepresentable |
-| §4.3 single `Lower` entry point | §6 Frontends emit IR, never target operations | Caller-selected operation is worse than syntax-directed codegen |
-| §4.4 per-surface `Responder` | §2 hourglass, backend half | A waist has two sides; emitters are backends |
-| §4.3 `UnsupportedSemanticError` | §8 Legalization | Failure must be first-class and actionable, never a silent no-op |
-| §4.5 reuse `AdapterOperation` as L3 | §12 Retained assets | The operation DTO set is a serviceable backend instruction set |
-| D7 no IR serialization yet | §9 Serialization is a boundary artifact | The in-memory typed structure is the API; JSON is not the semantic model |
-| M7 escape hatch | §10 Escape hatches | Same IR, same verifier, visibly marked, never the default |
-| M2 differential equivalence | §11 Testing discipline | The one test that proves a waist exists |
+| §2 hourglass waist | §2 | **stated** — narrow waist, N+M not N×M |
+| §3 Go frontend is not "JSON as API" | §13.1 | **stated** — resolved by the user |
+| §4.3 single `Lower`, middle-end owns selection | §6 | **stated** — frontends never emit target ops |
+| §4.2 constructor-enforced invariants | §8 | **stated** — verify at pass boundaries |
+| §4.4 `UnsupportedSemanticError` | §8 | **stated** — legalization failure is first-class |
+| §7 no IR serialization yet | §9 | **stated** — in-memory type is the API |
+| M2 differential equivalence | §11 | **stated** — the test that proves a waist |
+| §4.1 `Semantics`/`Origin` split | §7 | **derived** — multi-level lowering implies the L2 dialect drops target detail; the research does not name this split |
+| §4.1 type erasure at `BindEvent` | §7 | **derived** — forced by `LifecycleContract[E]` being generic |
+| §5 dedup scope from declared identities | §8 | **derived** — a verifier-style invariant, not stated |
+| §6 response encoding deferred | §2 | **derived** — the backend half is implied; its design is not given |
 
-**Resolution of the open decisions left in §13 of the research document:**
+## 1. What changed from PROPOSAL-1
 
-- §13.1 — Resolved there by the user; restated in §3 of this plan.
-- §13.2 *Where does epoch/assignment/actor context come from?* — Observations
-  need an **actor** only; they need no epoch or assignment. See §6 and D6.
-  Gates and human decisions need full context, which is why they are sequenced
-  behind M4 (context binding) rather than attempted at M1.
-- §13.3 *What is the honest first semantic for a native observation?* — A
-  recorded Provenance activity plus task event. Explicitly **not** an epoch
-  lifecycle transition. A host telling us a session started is evidence that a
-  session started; it is not authority to advance a protocol phase. See §5.
-- §13.4 *Daemon split now or later?* — Later. See D7.
+1. `Axes` — the flat eight-enum struct — **is deleted**.
+2. `Event` splits into `Semantics` (the waist) and `Origin` (target coordinates).
+3. `Responder` is **withdrawn from M0** and deferred to M5.
+4. Replay identity is derived from declared identity scope, not fixed.
+5. `Deps` is concretely declared.
+6. Observation lowers **L2 → L4 directly**; only gates and human responses pass
+   through the L3 protocol dialect.
 
-DECISION D7 — the CLI hosts the pipeline in-process; the IR is an in-memory Go
-value with no serialized form. Per research §9, the typed in-memory structure
-is the API and serialization is a boundary artifact. No boundary exists yet, so
-introducing a wire format now would be an unforced versioning commitment. If a
-daemon split is later measured to be necessary, the IR gains a serialized form
-*at that boundary only*, and the in-memory type stays authoritative.
+## 2. The waist, correctly narrow
 
-## 1. Problem
-
-Today a native lifecycle occurrence reaches Pasture like this:
+The test that proves a waist exists is: the *same logical occurrence* arriving
+from two different harnesses must lower to *equivalent* IR. Working out what
+"equivalent" means is what determines the waist. Concretely:
 
 ```
-native event -> generated Python translator -> `pasture __adapter invoke`
-                       ^                              ^
-                       |                              |
-        decides WHICH semantic operation      accepts a caller-chosen
-        via PASTURE_ADAPTER_* env vars        AdapterOperation + JSON DTO
+                      Claude PreToolUse      OpenCode tool.execute.before
+  semantic            gate-consultation      gate-consultation        SAME
+  blocking            blocking               blocking                 SAME
+  identity kinds      session, tool-call     session, tool-call       SAME
+  ------------------------------------------------------------------------
+  surface             claude-command-json    opencode-named-output    DIFFERS
+  mutation            input                  output-object            DIFFERS
+  order               concurrent-native      sequential-load          DIFFERS
+  reconciliation      host-native            sequential-mutation      DIFFERS
+  failure             exit-2-blocks          throw-fail-fast          DIFFERS
 ```
 
-Three defects follow from that shape:
-
-1. **Operation selection is delegated outward.** The generated script and its
-   environment decide which Pasture operation runs. Authorization and meaning
-   are therefore decided by the least trustworthy, least testable component.
-2. **Semantics are duplicated per harness.** Each new harness re-implements
-   translation in a different foreign language. Three harnesses means three
-   chances to disagree, and no mechanism can detect the disagreement.
-3. **Raw JSON became the de-facto semantic API.** `__adapter invoke` accepts a
-   JSON DTO that names an operation. That is a public, unversioned semantic
-   surface wearing a `__`-prefixed disguise.
-
-The pinned tables in `internal/runtime` are correct and are NOT the problem.
-They are a declarative *target description* — the equivalent of a machine
-description file. The defect is that nothing consumes them as such.
-
-## 2. Shape: a two-sided hourglass
-
-```
-   L1  native payloads (many, host-owned, versioned by the host)
-       Claude command JSON    Codex strict JSON    OpenCode named/SSE
-              \                     |                    /
-               \                    |                   /
-   FRONTENDS    +-------------------+------------------+
-               (one per harness, written in Go, linked into Pasture)
-                                    |
-                                    v
-   L2  ============ canonical lifecycle Event ============   <- THE WAIST
-       target-agnostic, verified against the pinned contract
-                                    |
-                    +---------------+---------------+
-                    |                               |
-              LOWERING (one pass)            RESPONSE EMIT (one per surface)
-              semantic -> operation          decision -> native encoding
-                    |                               |
-                    v                               ^
-   L3  typed protocol operation                     |
-       (AdapterOperation + DTOs)                    |
-                    |                               |
-                    v                               |
-   L4  EpochService -> Engine -> Provenance --------+
-                    (decision flows back out)
-```
-
-The left half (native -> IR) is a **frontend**. The right half (IR decision ->
-native encoding) is a **backend/emitter**. Both are necessary. My earlier
-decomposition planned only the left half; see §7.
-
-Generated hooks sit strictly *outside* the diagram. They are trampolines: they
-forward bytes and an event name, and contain no semantics.
-
-## 3. Why a per-harness Go frontend is not "raw JSON as API"
-
-A C compiler parses C text. That does not make arbitrary text a compiler API.
-The API is the IR and the driver contract; the parser is an internal component
-bound to a specific, versioned input language.
-
-Identically: `internal/lifecycle/claude` parses Claude's payload because it is
-linked into Pasture, bound to one pinned contract, reviewed, and its only
-output is IR. What is forbidden is a *public entry point that accepts arbitrary
-JSON naming a semantic operation* — i.e. `__adapter invoke`. Confirmed by user.
-
-## 4. Layer contracts
-
-### 4.1 L2 — the Event (package `internal/lifecycle`)
-
-`runtime.LifecycleContract[E]` is generic over a harness-specific event enum.
-A uniform frontend interface therefore cannot expose `E`. The IR must **erase**
-the type parameter. That erasure is the waist, and it is load-bearing.
+Six of PROPOSAL-1's eight axes differ, and differ **correctly**. They describe
+how to speak back to one specific host. They are target description, and per
+research §7 the L2 dialect is precisely where target detail is dropped.
 
 ```go
-// Type-erasing bridge. Generic in, non-generic out. This is the ONLY
-// admission point into the IR: an Event cannot exist without a binding, and a
-// binding cannot exist without a pinned contract and a typed event value.
-func BindEvent[E comparable](
-    contract runtime.LifecycleContract[E],
-    event E,
-) (EventBinding, error)
+// THE WAIST. Target-agnostic. Nothing here names a harness.
+type Semantics struct {
+    Semantic   runtime.EventSemantic   // observation | gate | human-response
+    Blocking   runtime.BlockingMode    // does the host await a result
+    Identities []Identity              // typed kind + value
+}
 
-type EventBinding struct{ /* unexported */ }
-
-func (b EventBinding) Contract() ir.RuntimeContractID
-func (b EventBinding) Harness() ir.HarnessID
-func (b EventBinding) NativeEventName() NativeEventName
-func (b EventBinding) Axes() Axes
-func (b EventBinding) Identities() []runtime.NativeIdentityField
-
-// The Event itself: opaque, constructor-validated, no exported fields.
-type Event struct{ /* unexported */ }
-
-func (b EventBinding) NewEvent(identities []Identity) (Event, error)
-
-func (e Event) Harness() ir.HarnessID
-func (e Event) Contract() ir.RuntimeContractID
-func (e Event) NativeEventName() NativeEventName
-func (e Event) Axes() Axes
-func (e Event) Semantic() runtime.EventSemantic
-func (e Event) Identities() []Identity
-func (e Event) Identity(kind runtime.NativeIdentityKind) (Identity, bool)
-```
-
-`Axes` is a flat struct of the eight existing `internal/runtime` enums. It is
-**derived from the binding, never supplied by the caller**.
-
-DECISION D1 — the constructor takes only identities. A signature of the form
-`NewEvent(binding, nativeName, axes, identities)` requires the caller to
-restate `nativeName` and `axes`, which the binding already fixes, and then
-verifies the restatement. That is a tautological check across a wider API: the
-frontend's only source for those values is the binding itself, so the check can
-only ever catch a frontend that deliberately lied. Narrow the constructor;
-make the illegal state unrepresentable rather than detected.
-
-REJECTED ALTERNATIVE — `Event` as a plain struct with exported fields and a
-separate `Verify()`. Rejected: an unverified `Event` becomes representable, and
-every downstream consumer must then defensively re-verify or trust.
-
-### 4.2 L2 invariants (the verifier)
-
-Enforced in the constructor, not in a separate pass:
-
-- Axes equal the pinned mapping's axes for `(contract, event)`. No drift.
-- Every identity's `nativeName` is declared by the mapping; every `required`
-  declared identity is present; unknown identities are rejected.
-- Identity values are bounded (`identityValueMaxBytes`) and non-empty.
-- Pasture actors, assignments, `JournalID`s, revisions, review evidence, and
-  publication evidence are **unrepresentable** — there is no field for them.
-
-### 4.3 L2 -> L3 — ONE lowering pass
-
-DECISION D2 — a single entry point that dispatches on semantic internally.
-
-```go
-// The whole middle-end. Callers never choose an operation, and never choose a
-// per-semantic entry point either.
-func Lower(ctx context.Context, deps Deps, event Event) (Outcome, error)
-```
-
-REJECTED ALTERNATIVE — per-semantic exported entry points
-(`LowerObservation`, `LowerGate`, `LowerHumanResponse`). Rejected because it
-reintroduces the exact defect being removed: the caller selects the operation.
-Moving that selection from a `PASTURE_ADAPTER_*` env var into a Go call site
-narrows the blast radius but does not change the shape. The `Event` already
-carries `Semantic()`, verified against the pinned contract; dispatch belongs
-inside the pass that owns the semantic -> operation table.
-
-`Deps` carries injected collaborators only — a narrow tracker interface, a
-clock, and a logger. No global state, no env reads.
-
-`Outcome` is a closed sum over what the middle-end decided:
-
-```go
-type OutcomeKind uint8
-const (
-    OutcomeRecorded OutcomeKind = iota + 1 // observation persisted, no response
-    OutcomeAllow                            // gate consulted, proceed
-    OutcomeDeny                             // gate consulted, block
-    OutcomeMutate                           // gate consulted, payload amended
-)
-```
-
-Unimplemented semantics return an actionable `UnsupportedSemanticError` and
-perform no writes. That is legalization: an explicit, named refusal, never a
-silent no-op.
-
-### 4.4 L2 + Outcome -> L1 — the response emitter (the missing half)
-
-An observation is fire-and-forget. A *gate consultation* is not: the host is
-blocked awaiting a result, and the result must be encoded in that surface's
-native dialect. The encodings are genuinely different per `runtime.HookSurface`:
-
-| Surface | Deny encoding | Mutation encoding | Failure encoding |
-|---|---|---|---|
-| `SurfaceClaudeCommandJSON` | exit 2 | stdout JSON | report-and-continue |
-| `SurfaceCodexStrictCommandJSON` | exit 2, strict | stdout JSON, strict | strict-hook-failure |
-| `SurfaceOpenCodeNamedOutput` | throw | mutate output object | throw, fail-fast |
-| `SurfaceOpenCodeCatchAllSSE` | n/a (observe-only) | n/a | observe-only |
-
-```go
-// Encodes an Outcome into one native surface's response dialect.
-// Selected by event.Axes().Surface — never by the caller.
-type Responder interface {
-    Surface() runtime.HookSurface
-    Respond(w io.Writer, event Event, outcome Outcome) (ExitCode, error)
+// Target coordinates. Three fields, not nine.
+type Origin struct {
+    Harness         ir.HarnessID
+    Contract        ir.RuntimeContractID
+    NativeEventName NativeEventName
 }
 ```
 
-DECISION D3 — the responder is selected from the Event's verified surface, so
-a Claude event can never be answered in Codex's dialect. The `Failure`,
-`Mutation`, `Blocking`, and `StopLoop` axes already in the pinned table are the
-responder's input; this is precisely what that table was built for and is
-currently unused.
+DECISION D8 — `Origin` carries **only** the coordinates needed to look the
+event up again. Surface, mutation, order, reconciliation, failure and stop-loop
+are *not stored*: they are recoverable from the pinned table via
+`(Contract, NativeEventName)`. Copying them into the IR would create a second
+copy of the pinned table that can drift from the first. This answers axis C's
+"no L2 consumer" blocker completely — those axes have a consumer, but it is the
+response backend at M5, and it should read the table rather than a stale copy.
 
-M1 ships only the degenerate responder (observation: write nothing, exit 0),
-but the interface is defined at M0 so M5 is an addition, not a redesign.
+`Lower` reads only `Semantics`. The response backend reads `Origin` and looks
+up the rest. `Lower` must never touch `Origin`; that is the invariant that keeps
+the middle-end target-agnostic, and it is mechanically checkable by review.
 
-### 4.5 L3/L4 — reuse, do not rebuild
+## 3. Level traversal is not uniform
 
-`internal/handlers.AdapterOperation` and its DTOs are a serviceable L3
-instruction set, and `EpochService` is L4. Neither is redesigned by this work.
-What changes is *who selects the operation*: the `Lower` pass, from verified
-IR — never a caller, an env var, or a generated script.
+Axis C correctly found PROPOSAL-1 internally inconsistent: it drew a linear
+`L2 → L3 → L4` pipeline, but no observation operation exists in
+`handlers.AdapterOperation`, and the prototype writes straight to the tracker.
 
-### 4.6 Process boundary
-
-```
-pasture hook lifecycle --harness <id> [--event <native-name>]   # payload on stdin
-```
-
-Reads at most `MaxNativePayloadBytes`. Validates flags and parses the payload
-*before* opening any store, so a malformed invocation cannot create a database.
-Emits no storage identities (`ActivityID`, `JournalID`, row ids) to stdout.
-
-`--event` is cross-checked against the payload when the payload names the event
-and both are present; disagreement is a hard error, because it means a hook is
-misregistered.
-
-DECISION D4 — `--harness` is required and typed. There is no default and no
-autodetection: guessing the harness from payload shape is exactly the kind of
-inference that produces silent misclassification.
-
-## 5. Information flow (M1, concrete)
+The resolution is not to invent an observation operation. It is to state that
+**not every semantic traverses every level** — normal in a multi-level compiler,
+where some IR operations lower directly to machine operations while others pass
+through an intermediate dialect.
 
 ```
-Claude fires SessionStart
-  -> hooks.json runs: pasture hook lifecycle --harness claude-code --event SessionStart
-  -> stdin: {"hook_event_name":"SessionStart","session_id":"abc","source":"startup"}
-  -> claude.Frontend.Parse
-       strict-decode, reject unknown fields
-       resolve ClaudeEventSessionStart from the pinned catalog
-       BindEvent(runtime.ClaudeCode2_1_210Lifecycle(), ClaudeEventSessionStart)
-       extract declared identity session_id="abc"
-       binding.NewEvent([session_id]) -> Event{Semantic: Observation}
-  -> Lower(ctx, deps, event)
-       dispatch: Observation
-       derive deterministic identity from (contract, native name, identities)
-       tracker.RecordActivity + RecordEvent
-  -> Outcome{Kind: OutcomeRecorded}
-  -> Responder(SurfaceClaudeCommandJSON).Respond -> exit 0, no stdout
+  observation      L2 ─────────────────────────> L4 effects
+                       (record activity + event)
+
+  gate             L2 ──> L3 protocol op ──────> L4 effects ──> response
+  human response   L2 ──> L3 protocol op ──────> L4 effects ──> response
 ```
 
-Re-running the identical invocation replays: the derived identity is a pure
-function of `(RuntimeContractID, NativeEventName, sorted identities)`, so the
-second write is a no-op rather than a duplicate.
+L3 is the *protocol* dialect — `StartReview`, `RecordPlanUAT`, `Land`. An
+observation is not a protocol transition. A host reporting that a session
+started is evidence, not authority to advance a phase (research §13.3). Forcing
+observations through L3 would manufacture exactly the authority this work
+exists to remove.
 
-DECISION D5 — replay identity deliberately excludes wall-clock time. Two
-genuinely distinct occurrences that share a session and event name collapse
-into one record. That is the correct trade for M1: a hook that fires twice
-because the host retried is far more common than two semantically distinct
-`SessionStart`s in one session, and a duplicate-free ledger is the property
-that matters. Events with finer identities (`tool_use_id`, `request_id`) do
-not have this collapse. Revisit at M4 when turn/session context binding lands.
+Consequence: M0–M3 legitimately do not touch `AdapterOperation` at all.
 
-## 6. Known gap: actor coverage
+## 4. Declared surface (frozen at M0)
 
-`internal/tasks/well_known_registry.go` registers exactly 9 `HookHandler`
-agents, named `pasture/automaton/hook/<name>`, covering the legacy Claude event
-set. The pinned Claude profile has **30** events; Codex has 10; OpenCode has 42.
+### 4.1 Construction
 
-An observation must be attributed to an actor. M1's `SessionStart` is covered
-by the existing registry. Everything beyond it is not.
+```go
+func BindEvent[E comparable](c runtime.LifecycleContract[E], event E) (EventBinding, error)
 
-DECISION D6 — do not expand the well-known registry to 82 entries. Derive the
-hook-handler actor from `(harness, native event name)` and register lazily on
-first use, keeping the 15 static well-known agents as-is. Expanding the static
-registry per harness event makes it a second, redundant copy of the pinned
-lifecycle tables, which will drift. Deferred to M2, where it first bites; M1
-uses the existing registered `SessionStart` agent.
+type EventBinding struct{ /* unexported */ }
+func (b EventBinding) Origin() Origin
+func (b EventBinding) DeclaredIdentities() []runtime.NativeIdentityField
+func (b EventBinding) NewEvent(identities []Identity) (Event, error)   // D1
 
-## 7. Revised milestone ladder
+type Identity struct{ /* unexported */ }
+func NewIdentity(kind runtime.NativeIdentityKind, nativeName, value string) (Identity, error)
 
-The original ladder omitted the emitter half. Revised:
+type Event struct{ /* unexported */ }
+func (e Event) Semantics() Semantics
+func (e Event) Origin() Origin
+```
 
-| # | Milestone | Adds |
+DECISION D1 (unchanged; confirmed by all three axes) — the constructor takes
+only identities. `Origin` and `Semantics` are derived from the binding. A
+constructor that accepts caller-supplied axes and then verifies them is a
+tautological check across a wider API. The prototype currently uses the wider
+four-argument form and **must be narrowed**.
+
+Axis C's scope note is accepted: `EventBinding` exposes only identity
+declarations, origin, and event construction — nothing else.
+
+### 4.2 Invariants (constructor-enforced, research §8)
+
+- Every identity's `nativeName` is declared by the pinned mapping.
+- Every `required` declared identity is present.
+- Unknown identities rejected; values bounded and non-empty.
+- Pasture actors, assignments, `JournalID`s, revisions and evidence have **no
+  field to occupy**.
+
+### 4.3 Equivalence (makes the M2 test writable)
+
+```go
+// Target-agnostic equivalence. Compares Semantics only; Origin is ignored by
+// construction. Identity KINDS are compared, values are not: two harnesses
+// report the same logical occurrence with different id strings.
+func (s Semantics) EquivalentTo(other Semantics) bool
+
+// Stable canonical rendering for golden-IR tests and diffing.
+func (s Semantics) CanonicalKey() string
+```
+
+This is the load-bearing correctness argument of the whole design, and it was
+unwritable in PROPOSAL-1. It is writable now precisely because the waist got
+narrower.
+
+### 4.4 Lowering
+
+```go
+func Lower(ctx context.Context, deps Deps, event Event) (Outcome, error)
+
+type Deps struct {
+    Recorder ObservationRecorder
+    Actors   ActorResolver
+    Clock    func() time.Time
+    Logger   *slog.Logger
+}
+
+// Consumer-owned narrow interface. NOT protocol.TaskTracker wholesale.
+type ObservationRecorder interface {
+    RecordActivity(ctx context.Context, a ActivityRecord) (provenance.ActivityID, error)
+    RecordEvent(ctx context.Context, e EventRecord) error
+}
+
+// Fails closed. An event with no registered actor is an actionable error,
+// never an invented actor.
+type ActorResolver interface {
+    ResolveHookActor(ctx context.Context, o Origin) (provenance.AgentID, error)
+}
+
+type OutcomeKind uint8
+const (
+    OutcomeRecorded OutcomeKind = iota + 1
+    OutcomeAllow
+    OutcomeDeny
+    OutcomeMutate
+)
+```
+
+`Lower` is the **only** exported lowering symbol. Per-semantic helpers are
+unexported. Axis A is right that research §6 mandates middle-end ownership
+rather than one Go symbol specifically — but an exported per-semantic entry
+point lets a caller pick, and that is the defect being removed.
+
+Unimplemented semantics return `UnsupportedSemanticError`, write nothing, and
+name the milestone that will support them.
+
+## 5. Replay identity
+
+DECISION D5 (replaces PROPOSAL-1's D5, which axis A correctly blocked) —
+PROPOSAL-1 generalized from `SessionStart`, where a session-scoped identity does
+distinguish occurrences, to all events. `FileChanged` declares only `session_id`,
+so repeated file changes in one session would have silently collapsed into one
+record. `PermissionDenied`, `Notification`, `MessageDisplay`, `CwdChanged` and
+`InstructionsLoaded` share that shape.
+
+Dedup scope is a pure function of the mapping's declared identities:
+
+| Declared identity kinds | Scope | Key |
 |---|---|---|
-| M0 | Contract freeze | `Event`, `EventBinding`, verifier, `Frontend`, `Lower` signature, `Outcome`, `Responder` |
-| M1 | Claude observation spine | Claude frontend, observation lowering, degenerate responder, CLI |
-| M2 | OpenCode frontend + differential equivalence | second frontend; proves the waist is target-agnostic; lazy actor derivation |
-| M3 | Codex frontend | third frontend; strict-mode failure semantics |
-| M4 | Context binding | session -> epoch/assignment/actor correlation |
-| M5 | Gate consultation | blocking lowering + real per-surface responders |
-| M6 | Explicit human response | request-id correlated human decisions |
-| M7 | Escape hatch | versioned raw-payload entry decoding into the same IR |
-| M8 | Retire drift | delete Python translators, `PASTURE_ADAPTER_*`, `__adapter invoke` |
+| Any of Request, ToolCall, Message | `DedupByIdentity` | contract + native name + identity values |
+| Only Session and/or Agent | `DedupByPayload` | contract + native name + digest of canonical payload |
 
-M2 is deliberately second: OpenCode's surface is structurally different from
-Claude's (named handlers with output-object mutation, plus a catch-all SSE
-stream). Retiring the generalization risk early is worth more than a third
-Claude-shaped harness. The differential test — same logical occurrence from two
-harnesses lowering to equivalent IR — is the only test that actually proves a
-waist exists, and it is unwritable against the current design.
+Under `DedupByPayload` a byte-identical redelivery collapses — the retry case
+that motivated dedup — while two different file changes carry different paths
+and so different keys. The residual false-collapse is two byte-identical
+payloads that are genuinely distinct; that is now a narrow, named case rather
+than a silent universal one.
 
-## 8. Testing posture
+Wall-clock time stays out of the key. Where declared identity cannot
+distinguish occurrences, the design must not silently collapse them: silent
+loss is worse than visible duplication.
 
-Deferred by explicit user direction. M0-M3 carry compile-time contract
-enforcement plus one built-binary spine test per milestone. Systematic
-per-package unit coverage is a follow-up. The differential equivalence test at
-M2 is NOT deferred: it is the load-bearing correctness argument.
+## 6. Response encoding — deferred to M5, with constraints
 
-## 9. Acceptance criteria
+PROPOSAL-1 froze a `Responder` interface at M0. Axis B showed it could not model
+OpenCode's output-object mutation or throw semantics, and axis C called it
+premature. Both are right: I argued early definition avoids an M5 redesign, but
+an interface I cannot yet specify correctly guarantees that redesign.
 
-- GIVEN a caller with any environment, WHEN a lifecycle event is processed,
-  THEN the semantic operation is selected only by `Lower` from verified IR,
-  AND SHOULD NOT be influenced by any env var, argv value, or generated script.
-- GIVEN a generated trampoline, WHEN inspected, THEN it forwards bytes and an
-  event name only, AND SHOULD NOT contain branching on Pasture semantics.
-- GIVEN an `Event`, WHEN constructed, THEN its axes equal the pinned contract's
-  axes, AND SHOULD NOT be constructible with caller-supplied axes.
-- GIVEN a Pasture actor, assignment, JournalID, or revision, WHEN attempting to
-  place it in an `Event`, THEN no field exists to hold it.
+`Responder` is withdrawn. `Outcome` is frozen at M0 because `Lower`'s signature
+requires it. Two constraints are recorded now so M5 is not designed blind:
+
+**C1 — one canonical encoding.** A single process-boundary response form, with
+each harness trampoline applying a fixed mechanical mapping to its native
+dialect. N mechanical trampolines beat N runtime responders and keep trampolines
+trivial. Per-surface knowledge is emitted **statically** by the generator from
+the pinned table, not selected at runtime.
+
+**C2 — exit-code collision, newly found.** `AGENTS.md` maps process exit code 2
+to `CategoryConnection`, but exit 2 is exactly how Claude and Codex hooks signal
+*deny*. The lifecycle command cannot reuse the general CLI exit-code contract
+without conflating a connection failure with a deliberate denial. M5 must
+resolve this explicitly. Recorded now so it is not discovered mid-implementation.
+
+## 7. Serialization
+
+DECISION D7 (unchanged) — the CLI hosts the pipeline in-process; the IR is an
+in-memory Go value with no serialized form (research §9). No boundary exists, so
+a wire format would be an unforced versioning commitment. If a daemon split is
+later measured to be necessary, the IR gains a serialized form at that boundary
+only, and the in-memory type stays authoritative.
+
+## 8. Process boundary
+
+```
+pasture hook lifecycle --harness <id> [--event <native-name>]    # payload on stdin
+```
+
+Bounded read (`MaxNativePayloadBytes`). Parse and validate **before** opening any
+store. Emit no storage identities. `--harness` is required and typed — no
+autodetection, because inferring the harness from payload shape is the kind of
+guess that produces silent misclassification. `--event` is cross-checked against
+the payload when both are present; disagreement is a hard error, since it means
+a hook is misregistered.
+
+## 9. Milestones
+
+Axis C called the nine-milestone ladder inflated. M0 and M1 are merged (they were
+already one slice), and everything past M3 is marked directional rather than
+committed scope.
+
+| # | Milestone | Status |
+|---|---|---|
+| M1 | Contract freeze + Claude observation spine | committed |
+| M2 | OpenCode frontend + **differential equivalence** + lazy actor derivation | committed |
+| M3 | Codex frontend, strict-mode failure semantics | committed |
+| M4+ | Context binding, gates, human response, escape hatch, retire drift | directional |
+
+M2 stays ahead of Codex: OpenCode's surface is structurally different, and
+retiring the generalization risk early is worth more than a third Claude-shaped
+harness.
+
+## 10. Actor coverage
+
+`internal/tasks/well_known_registry.go` registers 9 `HookHandler` agents; the
+pinned Claude profile has 30 events, Codex 10, OpenCode 42.
+
+DECISION D6 (unchanged, now with a fail-closed rule) — do not expand the static
+registry to 82 entries; that would be a second copy of the pinned tables and
+would drift. Derive the hook actor from `(harness, native event name)` and
+register lazily, at M2 where it first bites. M1 uses the already-registered
+`SessionStart` agent and **fails closed** with an actionable error for any event
+lacking a registered actor.
+
+## 11. Acceptance criteria
+
+- GIVEN any environment, WHEN an event is processed, THEN the operation is
+  selected only by `Lower` from verified IR, AND SHOULD NOT be influenced by any
+  env var, argv value, or generated script.
+- GIVEN `Lower`, WHEN it executes, THEN it reads only `Semantics`, AND SHOULD
+  NOT read `Origin`.
+- GIVEN the same logical occurrence from Claude and from OpenCode, WHEN both are
+  lowered, THEN their `Semantics` are equivalent, AND SHOULD NOT be required to
+  share `Origin`.
+- GIVEN an `Event`, WHEN constructed, THEN axes are derived from the pinned
+  contract, AND SHOULD NOT be caller-supplied.
+- GIVEN an actor, assignment, JournalID or revision, WHEN placing it in an
+  `Event`, THEN no field exists to hold it.
+- GIVEN an event whose declared identities cannot distinguish occurrences, WHEN
+  two different occurrences are lowered, THEN two records exist, AND SHOULD NOT
+  collapse into one.
 - GIVEN an unimplemented semantic, WHEN lowered, THEN an actionable named error
-  is returned and nothing is written, AND SHOULD NOT silently succeed.
-- GIVEN the same native occurrence delivered twice, WHEN lowered, THEN exactly
-  one activity and one task event exist.
-- GIVEN a Claude event, WHEN a response is emitted, THEN the encoding is chosen
-  from the event's verified surface, AND SHOULD NOT be chosen by the caller.
+  is returned naming the milestone, and nothing is written.
+- GIVEN an event with no registered actor, WHEN lowered, THEN it fails closed,
+  AND SHOULD NOT invent an actor.
