@@ -6,6 +6,7 @@ require (
 	github.com/dayvidpham/provenance v0.0.4-0.20260730015136-0976165224e9
 	github.com/dbos-inc/dbos-transact-golang v0.20.0
 	github.com/google/uuid v1.6.0
+	github.com/opencontainers/go-digest v1.0.0
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
