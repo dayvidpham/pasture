@@ -65,3 +65,9 @@ func (r OccurrenceRecord) JournalID() provenance.JournalID { return r.Occurrence
 func (r OccurrenceRecord) Bindings() []NativeBinding {
 	return append([]NativeBinding(nil), r.bindings...)
 }
+
+// NewOccurrenceRecord constructs the immutable public view used by replay
+// projections. Bindings are defensively copied at the boundary.
+func NewOccurrenceRecord(id OccurrenceID, kind ContractEventKind, contract ir.RuntimeContractID, envelope OccurrenceEnvelopeRef, receivedAt time.Time, actor provenance.AgentID, bindings []NativeBinding, capture CaptureDisposition, payload EvidencePayloadRef) OccurrenceRecord {
+	return OccurrenceRecord{OccurrenceID: id, Kind: kind, RuntimeContract: contract, Envelope: envelope, ReceivedAt: receivedAt, Actor: actor, bindings: append([]NativeBinding(nil), bindings...), Capture: capture, Payload: payload}
+}
