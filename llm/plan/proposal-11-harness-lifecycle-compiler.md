@@ -174,15 +174,40 @@ stage exists as an addressable pass.
   separate testable step
 - **legalization** and **backend** as thin but real stages
 - bind `FixtureEvidenceAuthentic` to an actual digest and ref
-- **enable five events**; the other 25 stay visibly withheld
+- **enable ten events**; the other 20 stay visibly withheld
 
-| # | Event | Blocking | Failure | Identity | Role in M1 |
+| # | Event | Blocking | Failure | Identity | L2 arm |
 |---|---|---|---|---|---|
 | 1 | `SessionStart` | no | report | — | evidence |
-| 8 | `PreToolUse` | **yes** | **exit 2 = deny** | `toolUseID` | gate-consultation; agent **intent** |
-| 11 | `PostToolUse` | no | report | `toolUseID` | evidence; **result** |
-| 12 | `PostToolUseFailure` | no | report | `toolUseID` | evidence; failed result |
-| 13 | `PostToolBatch` | **yes** | **exit 2 = deny** | **none** | evidence; **uncorrelatable** |
+| 3 | `SessionEnd` | no | report | — | evidence |
+| 8 | `PreToolUse` | **yes** | **exit 2 = deny** | `toolUseID` | gate-consultation — agent **intent** |
+| 11 | `PostToolUse` | no | report | `toolUseID` | evidence — **result**; human answer when the tool is `AskUserQuestion` |
+| 12 | `PostToolUseFailure` | no | report | `toolUseID` | evidence — failed result |
+| 13 | `PostToolBatch` | **yes** | **exit 2 = deny** | **none** | evidence — **uncorrelatable** |
+| 25 | `PreCompact` | **yes** | **exit 2 = deny** | — | gate-consultation |
+| 26 | `PostCompact` | no | report | — | evidence |
+| 29 | `Elicitation` | **yes** | **exit 2 = deny** | `requestID` | gate-consultation |
+| 30 | `ElicitationResult` | **yes** | **exit 2 = deny** | `requestID` | **human-response** |
+
+**All three L2 arms are exercised.** Evidence, gate-consultation and
+human-response each have at least one enabled event, so the lifecycle dialect is
+tested across its full shape rather than two thirds of it. No smaller event set
+achieves this.
+
+**Two correlation domains.** `toolUseID` (`BindingToolCall`) joins tool intent to
+result; `requestID` (`BindingRequest`) joins an elicitation to its answer. Two
+domains exercise the identity machinery in a way one cannot.
+
+**`AskUserQuestion` is a tool, not a hook event** (`internal/runtime/profiles.go:228`).
+It arrives through `PreToolUse`/`PostToolUse` with `tool_name == "AskUserQuestion"`,
+already covered. OpenCode's equivalent is `question(prompt, options)`
+(`profiles.go:267`) — a natural differential-equivalence case at M2.
+
+**`ElicitationResult` is enabled as EVIDENCE ONLY.** It is the event URD R8 names
+as the canonical explicit-human-response write path, and the write-gate mechanism
+is a deferred user decision. M1 must record it and exercise no authority. This
+makes the "no authority at M1" assertion meaningful rather than vacuous: the one
+event that *would* write is present and provably does not.
 
 **Why the tool events matter architecturally.** `toolUseID` is the join key
 between intent (`PreToolUse`) and result (`PostToolUse`). That pair is what makes
@@ -194,7 +219,8 @@ matters most.
 
 #### M1-1 — the exit-code guard is a safety requirement, not a convention
 
-Two of the five enabled events are **blocking with `FailureExitTwoBlocks`**: the
+**Five of the ten** enabled events are **blocking with `FailureExitTwoBlocks`**
+(`PreToolUse`, `PostToolBatch`, `PreCompact`, `Elicitation`, `ElicitationResult`): the
 host waits, and exit 2 means *deny the user's tool call*. `AGENTS.md` maps exit
 code 2 to `CategoryConnection`. Therefore an internal Pasture storage or
 connection fault during `PreToolUse` would exit 2 and be read by the host as a
@@ -224,11 +250,32 @@ the `PreToolUse`/`PostToolUse` pair by `toolUseID`. Per URD V12 it must record t
 occurrence and emit an explicit **unresolved** fact rather than infer an
 association from ordering or timing. Do not correlate it by proximity.
 
-**Exit:** each of the five events traverses frontend → lowering → legalization →
+#### M1-4 — capture logistics are a real schedule risk
+
+Every enabled event needs an authentic captured payload (P0-CAPTURE); a
+descriptor-derived fixture cannot falsify the descriptor it came from. Difficulty
+varies sharply:
+
+| Event | Capture difficulty |
+|---|---|
+| `SessionStart`, `SessionEnd`, `PreToolUse`, `PostToolUse` | trivial |
+| `PostToolUseFailure` | easy — induce a failing tool call |
+| `PreCompact`, `PostCompact` | moderate — force compaction |
+| `PostToolBatch` | moderate — needs a batched tool call |
+| `Elicitation`, `ElicitationResult` | **hard — needs an MCP server that elicits** |
+
+If the elicitation round-trip cannot be captured, those two events stay
+**visibly withheld** per R13 and the human-response arm goes untested at M1. That
+is an acceptable outcome and must not be worked around by synthesising a fixture.
+It should be surfaced, not absorbed.
+
+**Exit:** each enabled event traverses frontend → lowering → legalization →
 backend → effects through the built binary, observed only through public bounded
 readers; the lowering pass is unit-tested with no database; the exit-code guard
-fails the build when mutated; and a `PreToolUse`/`PostToolUse` pair sharing a
-`toolUseID` is retrievable as a correlated pair.
+fails the build when mutated; a `PreToolUse`/`PostToolUse` pair sharing a
+`toolUseID` is retrievable as a correlated pair; an `Elicitation`/
+`ElicitationResult` pair sharing a `requestID` likewise; and `ElicitationResult`
+is proven to exercise no authority.
 
 ### M2 — OpenCode frontend and differential equivalence
 

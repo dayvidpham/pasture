@@ -72,8 +72,12 @@ range. Must not name a protocol operation.
 
 **Consumes:** IP-1.
 
-**Scope: five events** — `SessionStart`, `PreToolUse`, `PostToolUse`,
-`PostToolUseFailure`, `PostToolBatch`.
+**Scope: ten events** — `SessionStart`(1), `SessionEnd`(3), `PreToolUse`(8),
+`PostToolUse`(11), `PostToolUseFailure`(12), `PostToolBatch`(13),
+`PreCompact`(25), `PostCompact`(26), `Elicitation`(29), `ElicitationResult`(30).
+
+Two identity bindings: `toolUseID` (`BindingToolCall`) on 8/11/12, `requestID`
+(`BindingRequest`) on 29/30. `PostToolBatch` binds none.
 
 Leaf tasks:
 - `FE-1` payload → L1 for all five, driven by the generated descriptor
@@ -81,8 +85,8 @@ Leaf tasks:
   panic and never a guess
 - `FE-3` extract from `ingress/claude/capture.go` without changing recording
   behaviour; capture keeps the pre-parse digest
-- `FE-4` `toolUseID` is carried into L1 as an identity binding for events 8, 11
-  and 12; `PostToolBatch` binds none and must say so rather than infer one
+- `FE-4` `toolUseID` carried into L1 for events 8/11/12 and `requestID` for
+  29/30; `PostToolBatch` binds none and must say so rather than infer one
 
 ### SLICE-3 — Lowering pass (the middle-end)
 
@@ -126,6 +130,11 @@ Leaf tasks:
   nothing and answers proceed, which is the silent no-op this architecture exists
   to remove.
 - `LG-5` `MutationInput` is modelled in the IR but no backend rule emits it
+- `LG-6` all three L2 arms are reachable: evidence, gate-consultation, and
+  human-response. `ElicitationResult` is the human-response event and is proven
+  to exercise **no authority** at M1 — this is the assertion that makes "no
+  authority at M1" meaningful rather than vacuous, because it is the one event
+  that would legitimately write under URD R8.
 
 ### SLICE-5 — Authentic-capture evidence binding
 
@@ -166,8 +175,9 @@ Leaf tasks:
 **Owns:** the guard, in `internal/lifecycle/guard/**`, plus the exit paths of
 `cmd/pasture/hook_lifecycle.go` it constrains
 
-**Safety-critical.** Two of the five M1 events — `PreToolUse` and
-`PostToolBatch` — are blocking with `FailureExitTwoBlocks`: the host waits and
+**Safety-critical.** **Five of the ten** M1 events — `PreToolUse`,
+`PostToolBatch`, `PreCompact`, `Elicitation`, `ElicitationResult` — are blocking
+with `FailureExitTwoBlocks`: the host waits and
 reads **exit 2 as deny**. `AGENTS.md` maps exit code 2 to `CategoryConnection`,
 so an internal Pasture storage or connection fault would exit 2 and silently
 deny the user's tool call, converting an unrelated Pasture fault into lost user
@@ -249,11 +259,15 @@ epic has rejected a duplicate framework five times.
 
 ## 5. Definition of done for M1
 
-- [ ] All five enabled events traverse frontend → lowering → legalization →
-      backend → effects through the built binary
+- [ ] All enabled events traverse frontend → lowering → legalization → backend →
+      effects through the built binary
 - [ ] The lowering pass is unit-tested with **no database**
-- [ ] All five are enabled on **verified digests**, not constants
-- [ ] The other 25 events remain visibly withheld with typed reasons
+- [ ] Each enabled event is enabled on a **verified digest**, not a constant
+- [ ] The remaining events stay visibly withheld with typed reasons
+- [ ] All three L2 arms are exercised by at least one enabled event
+- [ ] An `Elicitation`/`ElicitationResult` pair sharing a `requestID` is
+      retrievable as a correlated pair
+- [ ] `ElicitationResult` is recorded as evidence and exercises **no authority**
 - [ ] The exit-code guard fails the build when mutated; no lifecycle exit path
       can return non-zero
 - [ ] A `PreToolUse`/`PostToolUse` pair sharing a `toolUseID` is retrievable as a
@@ -265,11 +279,20 @@ epic has rejected a duplicate framework five times.
 - [ ] A malformed invocation creates no database file
 - [ ] All gates pass; `make generate` is a zero diff
 
-**Authentic capture (P0-CAPTURE):** each newly enabled event needs a real
-captured payload from a host inside the pinned range. The range is now
+**Authentic capture (P0-CAPTURE):** each enabled event needs a real captured
+payload from a host inside the pinned range. The range is now
 `>=2.1.210,<2.2.0-0`, so capture happens on the installed 2.1.220 with **no
 downgrade**. A descriptor-derived fixture cannot back an enabled event — it
 cannot falsify the descriptor it came from.
+
+**Capture difficulty is uneven and is a schedule risk.** `SessionStart`,
+`SessionEnd`, `PreToolUse`, `PostToolUse` are trivial; `PostToolUseFailure` needs
+an induced failure; `PreCompact`/`PostCompact` need forced compaction;
+`PostToolBatch` needs a batched call; **`Elicitation`/`ElicitationResult` need an
+MCP server that actually elicits.** If the elicitation round-trip cannot be
+captured, those two stay **visibly withheld** and the human-response arm goes
+untested at M1. That is an acceptable outcome under R13. **Do not synthesise a
+fixture to close the gap** — surface it.
 
 **Explicitly not in M1:** differential equivalence (needs a second harness, M2),
 the normative write gate (open user decision), versioned interpretation identity,
