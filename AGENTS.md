@@ -431,6 +431,84 @@ The unit/integration suite (`make test`) runs against the DBOS/SQLite runtime
 and is the primary quality gate. The old Temporal smoke harness is preserved
 only inside `legacy/temporal/` with the deprecated Temporal substrate.
 
+## Searching the Codebase
+
+Use the weakest tool that can actually answer the question, and know what each
+one cannot answer.
+
+| Question | Tool |
+|---|---|
+| Structural shape — call sites, struct literals, signatures | `ast-grep` |
+| Which type owns this symbol | `go/types` (extend `internal/lifecycle/guard`) |
+| **Can I delete this?** | **The compiler.** Delete, build, read errors. |
+
+**Never use `sg`.** On NixOS `sg` resolves to shadow-utils' setgid command, not
+ast-grep. Always invoke `ast-grep` by full name.
+
+**A zero result is not an absence proof.** This has produced three false
+negatives to date:
+
+- A regex missed a same-package reference (`BackendView`), because the call had
+  no package qualifier to match on.
+- The pattern `lifecycle\.(EventKind|EventByNativeName|Key)\b` matched none of
+  the six real consumers (`BindEvent`, `Origin`, `Semantics`, `NativeEventName`,
+  `CanonicalKey`, `ReplayKey`) and wrongly reported two files as deletable.
+- `ast-grep -p '$X.ReplayKey()'` returned zero because the real references were
+  a struct field and doc comments, not method calls — the pattern *shape* was
+  wrong.
+
+`ast-grep` is tree-sitter **syntax**-aware, not **type**-aware: `$X.Key()`
+matches every type with a `Key()` method and cannot distinguish receivers. It
+fixes multiline and formatting failures; it does not fix wrong-name or
+type-resolution failures. Only the compiler does, and it is cheaper than both.
+
+## Parallel Worker Isolation
+
+**One worktree per worker slice.** Workers must never share a worktree.
+
+```bash
+# supervisor: branch each slice off the integration branch
+git worktree add -b <beads-id>--<type>--<slug> \
+  ~/codebases/dayvidpham/pasture/<beads-id>--<type>--<slug> <integration-branch>
+
+# supervisor: after the slice lands and gates pass at the merge point
+git worktree remove <path>
+```
+
+Branch name and directory name are identical, matching the existing convention
+(`pasture-44--feat--agent-integration`).
+
+Worktrees are cheap here — about 13 MB each, and `GOCACHE`/`GOMODCACHE` are
+global, so build artifacts are shared rather than duplicated.
+
+**Why:** workers sharing a tree observe each other's half-finished edits. A
+worker can then report a false gate failure, debug someone else's incomplete
+code, or conclude its own change is at fault and "fix" something that was never
+broken. Verification is only trustworthy on a quiescent tree. The
+`codegen-drift` CI job is especially exposed, since it keys off
+`git status --porcelain` and any unrelated dirty file reads as drift.
+
+**The tradeoff this creates — read before assuming isolation is free.**
+Separate worktrees trade *build interference* for *merge divergence*. Isolation
+does not remove cross-slice coupling; it hides it until merge. This has already
+bitten: one slice deleted `internal/lifecycle/{event,key}.go` while another
+slice's code still consumed six symbols from them. In a shared tree that broke
+immediately and visibly. In isolated worktrees it would have surfaced only at
+merge, after both slices had built further work on incompatible assumptions.
+
+Therefore isolation is **mandatory but not sufficient**. Pair it with:
+
+- **Declare Layer Integration Points up front** — any type, interface, or file
+  one slice exports and another imports. Merge sooner, not later; divergence
+  grows with delay.
+- **Rebase onto the integration branch at every increment boundary**, not once
+  at the end.
+- **Run full gates at the merge point**, not only inside the slice worktree.
+  Gates passing in isolation prove nothing about the merged tree.
+
+Commit hygiene is unchanged and still applies: stage only paths your slice owns,
+never `git add -A`, commit with `git agent-commit`, and do not close Beads tasks.
+
 ## Build
 
 ```bash
