@@ -126,7 +126,8 @@ jobs:
         run: make generate
 
       - name: Verify committed files match codegen output
-        # Catches generated files (schema.xml, skills/**/SKILL.md, agents/*.md,
+        # Catches generated files (lifecycle registration/payload descriptors,
+        # schema.xml, skills/**/SKILL.md, agents/*.md,
         # .opencode/**, opencode.json) that were hand-edited or left stale after
         # a change to internal/codegen. git status --porcelain also catches newly
         # generated files that were never committed, which git diff alone would

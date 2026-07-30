@@ -18,6 +18,7 @@ all: build
 # --------------------------------------------------------------------------
 
 generate:
+	go generate ./internal/lifecycle/ingress/internal/hostcontract
 	go generate ./internal/codegen/...
 	go generate ./internal/target/claudecode/...
 

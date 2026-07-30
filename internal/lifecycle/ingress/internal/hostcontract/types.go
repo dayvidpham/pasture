@@ -26,8 +26,9 @@ const (
 )
 
 type Field struct {
-	ID   model.NativeFieldID
-	Name string
+	ID     model.NativeFieldID
+	Symbol string
+	Name   string
 }
 
 type Identity struct {
@@ -38,6 +39,7 @@ type Identity struct {
 
 type Event struct {
 	Kind       model.ContractEventKind
+	Symbol     string
 	Name       string
 	Fields     []model.NativeFieldID
 	Identities []Identity
