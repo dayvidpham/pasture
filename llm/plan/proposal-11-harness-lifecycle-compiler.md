@@ -74,7 +74,7 @@ L1, L2 and `Lower` live in **one package**, `internal/lifecycle/waist`. Splittin
 separately testable. Its signature admits no dependency capable of I/O:
 
 ```go
-func Lower(l1 dialect.L1) (dialect.L2, error)   // no ctx, no interfaces, no receiver deps
+func Lower(l1 waist.L1) (waist.L2, error)   // no ctx, no interfaces, no receiver deps
 ```
 
 A function with no context and no injected dependency cannot perform I/O except
@@ -338,7 +338,7 @@ Definition resolution, lineage, context disclosure, the normative write gate.
 | Restore the IR from `event.go`, not `lower.go` | `lower.go` consumes `Semantics()` and writes; it is L2→L4. The L1→L2 transform is `EventBinding.NewEvent`. |
 | Consume `runtime.EventSemantic` and `LifecycleEventMapping` | They already encode the arms and the L1→L2 axes; authority §7 says retain. Declaring a second enum is the sixth duplicate. |
 | Add the record stage | Without a durable consumer, lowering is a no-caller pass — the condition under which it was deleted. |
-| Name the package `dialect`, not `ir` | `internal/codegen/ir` exists; 116 files bind `ir`; authority warns against conflation. |
+| Name the package `waist`, not `ir` or `dialect` | `internal/codegen/ir` exists (116 importing files) and the authority warns against conflating them (§7:195-197); `dialect` was rev3's name for a split that rev5 collapsed. |
 | Pure `Lower(L1) (L2, error)` with no ctx | Construction-enforcement: a function with no dependency cannot do I/O. Same idiom as `timeouts.Profile`, the one invariant here that held. |
 | Give `guard` a driver and `acceptance` an executor at M1 | Both are shells. "Extend, do not fork" is unactionable until they can run. |
 | Keep `CanonicalKey`, drop `ReplayKey` | `CanonicalKey` is the M2 equivalence primitive; `ReplayKey` is digest-derived dedup that R5 removed. |
@@ -354,7 +354,7 @@ Definition resolution, lineage, context disclosure, the normative write gate.
 - [ ] no symbol named `ReplayKey`, `RecordReplayed`, `Origin.PayloadDigest`
 - [ ] enabling gate requires authentic origin, passing validation, in-range version
 - [ ] no non-zero exit from the lifecycle path
-- [ ] every durable record carries contract ID and codebook version
+- [ ] every durable record carries the pinned contract ID (R7 has no M1 discharge)
 - [ ] privacy posture documented before `PreToolUse` is enabled
 - [ ] `TestEngineStartReviewUsesAttachedProvenanceAdapter` stays green (R14/V11)
 
