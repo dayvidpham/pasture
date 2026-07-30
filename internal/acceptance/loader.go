@@ -125,9 +125,19 @@ type exactDeltaWire struct {
 }
 
 type provenanceSourceWire struct {
-	Requirement *string `yaml:"requirement"`
-	Record      *string `yaml:"record"`
-	Rationale   *string `yaml:"rationale"`
+	Requirement *string                `yaml:"requirement"`
+	Record      *string                `yaml:"record"`
+	Rationale   *string                `yaml:"rationale"`
+	Capture     *captureProvenanceWire `yaml:"capture"`
+}
+
+type captureProvenanceWire struct {
+	Origin         *CaptureOrigin `yaml:"origin"`
+	Harness        *HarnessKind   `yaml:"harness"`
+	HarnessVersion *string        `yaml:"harnessVersion"`
+	CaptureSource  *string        `yaml:"captureSource"`
+	RawFileDigest  *string        `yaml:"rawFileDigest"`
+	CapturedAt     *string        `yaml:"capturedAt"`
 }
 
 type mutationOperatorWire struct {
@@ -153,6 +163,21 @@ func LoadCorpus(path string) (Corpus, error) {
 	corpus, err := DecodeCorpus(data)
 	if err != nil {
 		return Corpus{}, fmt.Errorf("acceptance corpus: could not load %q; the corpus was rejected before execution; fix the named schema error: %w", path, err)
+	}
+	root := filepath.Dir(path)
+	for _, row := range corpus.Cases {
+		if row.Provenance.Capture.Origin == OriginAuthenticCapture {
+			fixture := ""
+			if row.Target.NativeEvent != nil {
+				fixture = row.Target.NativeEvent.InputJSON.Fixture
+			}
+			if fixture == "" {
+				return Corpus{}, fmt.Errorf("acceptance corpus: authentic capture case %q must reference a native-event fixture", row.ID)
+			}
+			if err := row.Provenance.Capture.ValidateFixture(root, fixture); err != nil {
+				return Corpus{}, fmt.Errorf("acceptance corpus: case %q capture provenance: %w", row.ID, err)
+			}
+		}
 	}
 	return corpus, nil
 }
@@ -528,7 +553,15 @@ func (w provenanceSourceWire) convert() (ProvenanceSource, error) {
 	if strings.TrimSpace(*w.Requirement) == "" || strings.TrimSpace(*w.Record) == "" || strings.TrimSpace(*w.Rationale) == "" {
 		return ProvenanceSource{}, errors.New("requirement, record, and rationale must be non-empty")
 	}
-	return ProvenanceSource{Requirement: *w.Requirement, Record: *w.Record, Rationale: *w.Rationale}, nil
+	result := ProvenanceSource{Requirement: *w.Requirement, Record: *w.Record, Rationale: *w.Rationale}
+	if w.Capture != nil {
+		capture := w.Capture
+		if capture.Origin == nil || capture.Harness == nil || capture.HarnessVersion == nil || capture.CaptureSource == nil || capture.RawFileDigest == nil || capture.CapturedAt == nil {
+			return ProvenanceSource{}, errors.New("capture provenance requires origin, harness, harnessVersion, captureSource, rawFileDigest, and capturedAt")
+		}
+		result.Capture = CaptureProvenance{Origin: *capture.Origin, Harness: *capture.Harness, HarnessVersion: *capture.HarnessVersion, CaptureSource: *capture.CaptureSource, RawFileDigest: *capture.RawFileDigest, CapturedAt: *capture.CapturedAt}
+	}
+	return result, nil
 }
 
 // ValidateCorpus validates the final typed corpus. DecodeCorpus and

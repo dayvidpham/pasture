@@ -268,6 +268,7 @@ type ProvenanceSource struct {
 	Requirement string
 	Record      string
 	Rationale   string
+	Capture     CaptureProvenance
 }
 
 type MutationOperator struct {
