@@ -11,6 +11,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/provadapter"
 	"github.com/dayvidpham/pasture/pkg/protocol"
+	"github.com/dayvidpham/provenance"
 )
 
 // ResolveLifecycleIdentity reads the already-persisted ingress actor and
@@ -37,10 +38,26 @@ func (t *trackerImpl) ResolveLifecycleIdentity(context.Context) (receipt.Identit
 	if actor != expected {
 		return receipt.Identity{}, &pasterrors.StructuredError{Category: pasterrors.CategoryStorage, What: "Lifecycle ingress found an unexpected persisted system actor.", Why: fmt.Sprintf("The store names %q but this build requires %q.", actor.String(), expected.String()), Where: "Resolving lifecycle ingress identity (internal/tasks/lifecycle_identity.go in tasks.ResolveLifecycleIdentity).", Impact: "No lifecycle occurrence was committed.", Fix: "Inspect the pasture_system_identity row and repair it only through a reviewed migration."}
 	}
-	if err := validatePersistedGenesisAuthority(t.prov.Journal(), actor, authority); err != nil {
+	if err := validatePersistedGenesisAuthorityReadOnly(t.prov.Journal(), authority); err != nil {
 		return receipt.Identity{}, err
 	}
 	return receipt.Identity{Actor: actor, Authority: authority}, nil
+}
+
+func validatePersistedGenesisAuthorityReadOnly(j provenance.Journal, authority provenance.JournalID) error {
+	committed, err := j.LookupCommitted(pastureSystemGenesisOperationID)
+	if err != nil {
+		return err
+	}
+	if committed.Kind != provenance.CommittedExact {
+		return fmt.Errorf("persisted lifecycle identity cites absent genesis operation %q", pastureSystemGenesisOperationID)
+	}
+	for _, slot := range committed.ResultSlots {
+		if slot.Slot == pastureSystemGenesisResultSlot && slot.ProducedJournalID == authority {
+			return nil
+		}
+	}
+	return fmt.Errorf("persisted lifecycle identity authority %d does not match genesis result", authority)
 }
 
 // NewLifecycleReader returns the public bounded lifecycle reader backed by the

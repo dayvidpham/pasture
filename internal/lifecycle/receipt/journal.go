@@ -62,7 +62,10 @@ type JournalAppender struct {
 	Journal  provenance.Journal
 	Deadline time.Duration
 	Clock    Clock
+	Observer CommitObserver
 }
+
+type CommitObserver interface{ ObserveOccurrenceCommit(time.Duration, error) }
 
 func (a JournalAppender) Append(ctx context.Context, in provenance.OperationInput) (model.OccurrenceID, error) {
 	contextJournal, ok := a.Journal.(provenance.ContextJournal)
@@ -80,6 +83,9 @@ func (a JournalAppender) Append(ctx context.Context, in provenance.OperationInpu
 	bounded, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 	result, err := contextJournal.ApplyContext(bounded, in)
+	if a.Observer != nil {
+		a.Observer.ObserveOccurrenceCommit(a.Clock.Now().Sub(started), err)
+	}
 	if err != nil {
 		if stderrors.Is(err, context.DeadlineExceeded) {
 			return 0, model.IngressDeadlineError{Deadline: deadline, Elapsed: a.Clock.Now().Sub(started)}
