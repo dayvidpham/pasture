@@ -1,504 +1,336 @@
 ---
-title: IMPL_PLAN — M1 Claude vertical
-status: DRAFT rev3 — revised after review round 2
+title: IMPL_PLAN — M1 Claude vertical (MVP)
+status: rev4 — cut to MVP scope
 proposal: llm/plan/proposal-11-harness-lifecycle-compiler.md
 urd: llm/plan/urd-harness-lifecycle.md
 authority: llm/research/hooks-ir-compilers-architecture-lessons.md
 obsoletes: aura-plugins-sgxp6
-baseline: bbc6cfd
-review_effort_budget: revise until 0 BLOCKER / 0 IMPORTANT / 0 MINOR
-worker_isolation: one worktree per slice; orchestrator merges
+baseline: a20bc1a
 ---
 
-# IMPL_PLAN — M1: Claude vertical
+# IMPL_PLAN — M1: Claude vertical (MVP)
 
-**Ten enabled events. Nine slices.**
+**Ten events. One package for the waist. Get it running, then add.**
 
-**M1 is mostly separation and renaming, not construction.** Three of the four
-stages already exist under non-compiler names, and the IR exists in the deleted
-source at `43dbbf1^`.
+## The point of M1
 
-Repository: `worktree/proposal-57-integration/pasture`, branch
-`feat/proposal-57-integration`, baseline `bbc6cfd`.
+**We have never run this pipeline once.** Everything else is secondary to that.
+M1 is reverse-planned from the end goal to find the shortest path to a native
+Claude event reaching Provenance through the compiler stages — and then adds
+onto a running thing rather than assembling a large thing that has never run.
+
+So M1 has two phases with a hard checkpoint between them:
+
+```
+M1a  THE SPINE          one event, end to end, through the built binary
+     ─────────────────  <-- THE PIPELINE RUNS. Everything after is addition.
+M1b  BREADTH + SAFETY   remaining nine events, gate arm, exit-code safety
+```
+
+**M1a is the deliverable that matters.** If M1a lands and M1b slips, we have a
+working pipeline and a known list of additions. If we build all seven slices
+before anything executes, we have three review rounds of speculation and no
+evidence — which is what the last three revisions were.
+
+Rev1–rev3 accumulated a guard framework, five package boundaries, five
+integration-point contracts, and a mechanism ledger, and took three review rounds
+without converging. Almost none of that was load-bearing. Rev4 keeps what the
+MVP needs and deletes the rest.
+
+**What changed and why**
+
+| Deleted | Reason |
+|---|---|
+| `dialect`/`lowering` package split, IP-1/IP-2/IP-3 | Package boundaries are the hardest structure to reverse and we are least certain now. The waist is a **type and signature** property, not a directory layout. Split at M2, when a second frontend shows where the seam actually is. |
+| Import-boundary guards (`DI-9`, `LO-3`) | The concern they inherited (`mgn58`) was a *same-package* worry that no longer applies, was never demonstrated, and the purity property is not import-checkable at all: `internal/runtime`'s closure contains `os`, `os/exec`, `syscall`, and `DI-2` requires consuming it. Purity is enforced by `Lower(L1) (L2, error)` taking no context and no dependency. |
+| Guard framework — driver, `ScopePredicate`, registry, `DR-6` | Framework for guards that no longer exist. |
+| Corpus executor, classifier, must-pass verification | `EE-2` is ten events. That is a table-driven test with `exec.Command`, not a corpus framework. `internal/acceptance` was built for something else. |
+| `SemanticFields()`, equivalence-class table | Only used by the M2 differential gate. Build it at M2 with two harnesses in hand, not speculatively with one. |
+| `model/ids.go` alias cleanup | Unrelated repo hygiene. Note `:22-23` are **live** (`definition.go:30,53,54,71`) — do not delete that range. |
+| V9 generated-artifact guard | M2/M3 concern; Claude already emits the ratified shape. |
+
+**Kept, because each is a real hazard rather than ceremony:** authentic captures,
+the exit-code safety work, and an end-to-end test that reads records back.
 
 ---
 
-## 0. The class rule — read before anything else
-
-Two review rounds found the same shape each time: a defect fixed *locally* and
-reintroduced *elsewhere*. Round 1 — lowering had no consumer; rev2 added the
-record stage; round 2 — `legalize`/`backend` had no consumer. Round 1 — a
-direct-import check missed one indirection; rev2 wrote a transitive check whose
-allowlist was a denylist. Round 1 — guards named no falsifying mutation; rev2
-named four, two of which kill nothing.
-
-URD R11 already states the remedy: **fix as a class, enforced by construction.**
-Rev3 applies it as two standing rules, checked in §6 rather than per item.
-
-**Rule 1 — every stage has a production caller at its own milestone.** A stage
-built and guarded but never called is dead code, and dead lifecycle code is what
-gets deleted as unreferenced two epochs later. If a stage has no M1 caller, that
-is *declared* in §6, not discovered.
-
-**Rule 2 — every gate declares four things.** What it detects; its scope
-predicate; the mutation that must turn it red; and where that mutation is
-*executed*. A gate missing any of the four is not a gate. §6 is the ledger.
-
----
-
-## 1. Target package layout
+## 1. Package layout
 
 ```text
 internal/lifecycle/
-    dialect/             L1 + L2 IR AND their verified constructors.
-    frontend/claude/     native payload -> L1        (extracted from ingress/claude)
-    lowering/            L1 -> L2. Pure. Selects arm/axes; delegates construction.
-    legalize/            L2 -> L3.
-    backend/             L3 -> L4 effects.
-
-    receipt/     (exists) THE RECORD STAGE — raw-body record + interpreted record
-                          + consultation record
-    projection/  (exists) EXTENDED with a binding filter
-    activation/  (exists) enabled/withheld set
-    guard/       (exists) EXTENDED with a driver + scope predicates
-    model/       (exists) durable journal records; may import dialect, never the reverse
-internal/acceptance/     (exists) EXTENDED with executor + classifier
-internal/runtime/        (exists) RETAINED — EventSemantic + LifecycleEventMapping
+    waist/        L1 + L2 types, the verified constructors, and Lower.
+                  ONE package. This is event.go + lower.go's L1->L2 half,
+                  as they originally were.
+    frontend/claude/   native payload -> L1
+    legalize/     L2 -> L3
+    backend/      L3 -> L4 effects
+    receipt/  (exists)  raw record + interpreted record + consultation record
+    projection/ (exists) EXTEND with a reader for the new records
+    activation/ (exists) enabled/withheld set
 ```
 
-**The record stage lives in the pre-existing `receipt` package.** "Record" is the
-stage, `receipt` is the package; they are the same thing. Every other stage
-shares one name with its package — this one does not, and saying so once is
-cheaper than renaming a package the tree already uses.
-
-**Not `internal/lifecycle/ir`** — `internal/codegen/ir` exists with 125 importing
-files; the authority warns against conflation (§7:195-197).
+`legalize` and `backend` stay separate from `waist` only because they **write**
+and the waist does not — it is easier to keep a pure thing pure when the writing
+code is not in the same drawer. Not for boundary enforcement.
 
 ---
 
-## 2. Slices
+## 2. M1a — the spine
 
-Nine slices. Every path below is owned by **exactly one** slice, and every task
-edits **only paths its slice owns** — both halves are checked in §5.
+The shortest path to a running pipeline. **`SessionStart` only** — non-blocking,
+already captured (`session_start_2_1_210.json`, digest verified), already
+enabled, and the observation arm terminates at the interpreted record with no
+legalization needed.
 
-### SLICE-0 — Framework drivers (prerequisite)
+| Slice | Owns | Does |
+|---|---|---|
+| **A1** waist | `internal/lifecycle/waist/**` | L1/L2 types, verified constructors, `Lower(L1) (L2, error)` |
+| **A2** frontend | `frontend/claude/**`, `ingress/claude/capture.go`, `receipt/service.go` | `SessionStart` payload → L1 |
+| **A3** record | `receipt/interpreted.go`, `projection/**`, `model/{reader,occurrence}.go`, new `audit/migrate_v*.go` | interpreted record + a reader that returns it |
+| **A4** wiring | `handlers/hook_lifecycle.go` + its test | wire the stages; end-to-end test through the built binary |
 
-**Owns:** `internal/lifecycle/guard/driver.go`,
-`internal/acceptance/{executor,classifier}.go` (+ their tests)
+**M1a is done when:** a real `SessionStart` from the installed host traverses
+frontend → `Lower` → record through `bin/pasture`, and the interpreted record is
+read back with the expected L2 arm. Four slices, one event, no new safety
+surface — `SessionStart` is non-blocking, so exit-code work is not yet on the
+critical path.
 
-Both frameworks are shells: `guard` has no tree-walker and **zero importers**;
-`acceptance` has no `os/exec`, and `Case.Expect`/`Case.Delta` are declared,
-cloned and shape-validated but **never compared against a real run anywhere**.
+That is the foundation. It is also the first evidence that any of this design is
+right.
 
-**Merges first, with SLICE-1.**
+## 3. M1b — breadth and safety, added onto a running pipeline
 
-- `DR-1` the driver, with a **per-guard scope predicate** — two guards cannot
-  share one scope. `CheckBoundedReaderSource` is scoped to lifecycle
-  production-path *tests* (a tree-wide walk is red on correct production code at
-  `receipt/journal.go:5`); `CheckTimeoutSource` is scoped to production files.
+### B0 — (M1a slices A1–A4 are the prerequisite)
 
-  ```go
-  type ScopePredicate uint8   // closed enum
-  const ( LifecycleTestFiles ScopePredicate = iota+1; LifecycleStageFiles; GeneratedArtifacts )
-  type Check struct { ID CheckID; Scope ScopePredicate; Fn func(path string, src []byte) []string }
-  func CheckTree(root string) ([]Finding, error)   // walks a DERIVED set per predicate
-  ```
-- `DR-2` register the two existing guards with their predicates stated
-  explicitly. `CheckTimeoutSource` currently runs against four hardcoded paths
-  (`guard/timeouts_test.go:19`).
-- `DR-3` **executor split in two**, because `acceptance.Observation`
-  (`report.go:20-25`) carries no exit/stdout/stderr field and cannot hold a raw
-  run:
-  - `RunCase(ctx, Case, binaryPath) (RawResult, error)` — exit code, stdout,
-    stderr, and before/after `StoreSnapshot`
-  - `Classify(Case, RawResult) (Observation, error)` — a **stated oracle table**.
-    Under the exit-0 regime (§SLICE-7) exit code cannot discriminate
-    `OracleSuccess` from `OracleValidation`, so classification derives from
-    stderr class and `Delta`/`AssertExactRowChanges`, never from exit code.
-- `DR-4` source-mutation runner: apply the mutation in a scratch worktree, run a
-  **declared command**, set `Killed` from that command's non-zero exit and
-  `Observed` from its captured output. `SourceMutationOperator.Guard` carries an
-  exact test identifier, not prose. Closes `aura-plugins-0si2b` in substance.
-- `DR-5` **must-pass verification** — compare `RawResult` against `Case.Expect`
-  and `Case.Delta`. Without it a corpus can only say "a mutant died", never "the
-  real command did the right thing".
-- `DR-6` exhaustiveness: AST-walk package `guard` and fail if any exported
-  `Check*` function is absent from the registry. Same fail-closed idiom as
-  `guard/classification.go:22-32`. Prevents a slice adding an unregistered — and
-  therefore zero-importer — guard.
+### SLICE-1 — The waist
 
-**Note for the orchestrator:** `DR-4`'s scratch worktree must not collide with a
-sibling slice's worktree. Confirm isolation before SLICE-0 starts.
+**Owns:** `internal/lifecycle/waist/**`
 
-### SLICE-1 — The dialect (L1, L2, and their constructors)
+**Port from** `git show 43dbbf1^:internal/lifecycle/event.go` (657) and
+`key.go` (86). Consumes `runtime.EventSemantic` and
+`runtime.LifecycleEventMapping` — retained per authority §7:190-193; do **not**
+declare a second arm enum.
 
-**Owns:** `internal/lifecycle/dialect/**`, `internal/lifecycle/guard/dialect_imports.go`,
-**`internal/lifecycle/model/ids.go`**
+- L1 and L2 types, with the verified constructors (`BindEvent`,
+  `EventBinding.NewEvent`). Keep the unexported-field discipline: `Semantics`
+  and `Event` are constructor-owned, which is what makes contract agreement a
+  real check rather than a tautology (`event.go:360-364`). In-package code
+  *could* bypass it; that is a visible five-line diff and is caught in review.
+- `func Lower(L1) (L2, error)` — no `context.Context`, no interface parameters,
+  no receiver carrying dependencies. That signature is the purity enforcement.
+- Drop the dedup surface: `Digest`, `Origin.digest`, `Origin.PayloadDigest`,
+  `Origin.ReplayKey`. `NewEvent` loses its `digest` parameter. The pre-parse
+  digest stays on the recording side (`claude.Capture.Digest`).
+- Keep `Semantics.CanonicalKey` (`key.go:50`) and `EquivalentTo`
+  (`event.go:301`) — M2 needs them.
+- Typed unresolved fact with a closed reason enum.
+- Unit tests construct L1 directly and open no database.
 
-**Port source:** `git show 43dbbf1^:internal/lifecycle/event.go` (657) and
-`:internal/lifecycle/key.go` (86).
-
-**Consumes** `runtime.EventSemantic` and `runtime.LifecycleEventMapping`
-(authority §7:190-193 — retain).
-
-**Exports:** IP-1 (L1), IP-2 (L2 + **the verified constructors** +
-`SemanticFields()` + the class table).
-
-- `DI-1` port L1. Event identity is a generated ordinal with pinned-contract
-  lookup — no per-event Go constant, so `dialect` has no `PreToolUse` symbol.
-- `DI-2` port L2. **Type-alias or re-export `runtime.EventSemantic`; declare no
-  second arm enum.** Axes read from `LifecycleEventMapping`.
-- `DI-3` **the verified constructors stay here.** `Semantics` and `Event` have
-  entirely unexported fields plus a `constructed bool`
-  (`43dbbf1^:event.go:259-264,433-437`), and `NewEvent` is a *method* on
-  `EventBinding` (`:475`). No other package can construct them — that opacity is
-  what makes "agrees with the pinned contract" a real check rather than a
-  tautology (`:360-364`). Export `dialect.BindEvent` and
-  `dialect.EventBinding.NewEvent` via IP-2.
-- `DI-4` **drop the dedup surface here**, not downstream: `Digest`,
-  `Origin.digest`, `Origin.PayloadDigest`, `Origin.ReplayKey` (`key.go:77`). The
-  pre-parse digest stays on the recording side (`claude.Capture.Digest`).
-- `DI-5` keep `Semantics.CanonicalKey` (`key.go:50`) and `EquivalentTo`
-  (`event.go:301`). Add `SemanticFields() SemanticProjection`, the **only**
-  surface differential equivalence compares.
-- `DI-6` **totality guard over L2 fields**: every exported field of the L2 type
-  is classified exactly once as semantic or explicitly non-semantic, fail-closed.
-  `SemanticProjection` is a distinct type structurally incapable of holding a
-  `provenance.JournalID`, a timestamp, or a harness ID. Without this an empty
-  projection passes every M1 gate and is maximally back-fittable at M2 — which is
-  the exact thing the M1 obligation exists to prevent.
-- `DI-7` equivalence-class table over the **full thirty-event generated
-  descriptor set**, not the M1-enabled subset — the enabled set is declared by
-  `EV-5` in SLICE-6, which merges later, so a guard over it has no domain at
-  SLICE-1.
-- `DI-8` typed unresolved fact with a **closed reason enum**
-  (`ReasonNoToolCallBinding`, …) on L1 and L2.
-- `DI-9` boundary guard: `dialect` may not import `provenance`, `model`,
-  `receipt`, `ingress`, or `database/sql`.
-- `DI-10` delete the **twelve** unreferenced aliases at `model/ids.go:13-21,24-26`.
-  **Do not touch `:22-23`** — `DefinitionJournalID` and `DefinitionStateID` are
-  live at `model/definition.go:30,53,54,71`. Deleting the range as stated in rev2
-  would have broken the build.
-
-### SLICE-2 — Claude frontend
+### SLICE-2 — Claude frontend and captures
 
 **Owns:** `internal/lifecycle/frontend/claude/**`,
 `internal/lifecycle/ingress/claude/capture.go`,
-**`internal/lifecycle/receipt/service.go`**
+`internal/lifecycle/receipt/service.go`,
+`internal/lifecycle/ingress/claude/testdata/fixtures/**`
 
-**Scope: ten events** — 1, 3, 8, 11, 12, 13, 25, 26, 29, 30.
+**Ten events:** 1, 3, 8, 11, 12, 13, 25, 26, 29, 30.
 
-`ingress/claude.Parse` (`capture.go:27-49`) is already a frontend. Extract and
-rename; do not rewrite.
+`ingress/claude.Parse` (`capture.go:27-49`) is already a frontend — extract and
+rename, do not rewrite.
 
-- `FE-1` payload → L1 for **all ten**, driven by the generated descriptor
-- `FE-2` malformed or unclassifiable payloads produce a typed disposition **and a
-  durable unresolved fact** — never a panic, never a guess
-- `FE-3` **`receipt.Delivery` becomes a projection of L1 via exactly one
-  function.** Not "state which" — this is the decision, made here, because the
-  alternative silently required editing another slice's package. Observable
-  recording behaviour is unchanged; the pre-parse digest stays.
-- `FE-4` bindings: `BindingSession` on **all ten** (contract-required);
-  `BindingToolCall` on 8/11/12; `BindingRequest` on 29/30. `PostToolBatch` binds
-  session and emits a **tool-call-unresolved** fact — not a blanket unresolved.
-- `FE-5` the pinned descriptor selects **interpretation only, never admission**.
-  An out-of-range host version is recorded verbatim (R12/V6).
-- `FE-6` golden cases per authority §11: captured payload → expected L1 →
-  expected L2, per enabled event plus malformed and unresolved cases.
+- payload → L1 for all ten, driven by the generated descriptor
+- **authentic captures** for all ten. A descriptor-derived fixture cannot
+  falsify the descriptor it came from. Capture on the installed 2.1.220 — the
+  range is `>=2.1.210,<2.2.0-0`, so no downgrade.
+- bindings: `BindingSession` on all ten (contract-required); `BindingToolCall`
+  on 8/11/12; `BindingRequest` on 29/30. `PostToolBatch` binds session and emits
+  a **tool-call-unresolved** fact.
+- malformed payloads produce a typed disposition and a durable unresolved fact
+- the pinned descriptor selects **interpretation only, never admission** — an
+  out-of-range host version is recorded verbatim (R12)
+- golden cases: captured payload → expected L1 → expected L2, per event
 
-### SLICE-3 — Lowering pass (the middle-end)
+### SLICE-3 — Record stage and readers
 
-**Owns:** `internal/lifecycle/lowering/**`,
-`internal/lifecycle/guard/lowering_imports.go`
+**Owns:** `internal/lifecycle/receipt/{interpreted,consultation}.go`,
+`internal/lifecycle/receipt/journal.go`, `internal/lifecycle/projection/**`,
+`internal/lifecycle/model/{reader,occurrence}.go`,
+the new `internal/audit/migrate_v*.go` step
 
-L1 → L2. **Port source is the arm/axis *selection*, not the constructors.**
-`lowering.Lower` reads `LifecycleEventMapping` and delegates construction to
-`dialect.EventBinding.NewEvent` (IP-2). The constructors cannot live here — their
-fields are unexported and `NewEvent` is a method on a `dialect` type.
-
-`43dbbf1^:lower.go` is **not** this slice's source: it consumes
-`event.Semantics()` (`:237`), branches on blocking (`:241`) and writes via
-`RecordObservation` (`:288`). It is legalization + backend — SLICE-4.
-
-**Hard constraint:** `func Lower(dialect.L1) (dialect.L2, error)` — no
-`context.Context`, no interface parameters, no receiver carrying dependencies.
-
-- `LO-1` the pass; arms and axes from `LifecycleEventMapping`; no per-event table
-- `LO-2` unit tests constructing L1 directly, opening no database
-- `LO-3` guard: `lowering`'s transitive import closure **equals** this closed set —
-  `dialect`, `internal/runtime`, `internal/codegen/ir`, `internal/effects`,
-  `internal/errors`, and the I/O-incapable stdlib set `{errors, fmt, strings,
-  strconv, sort, slices, maps, time}`. Rev2 wrote "stdlib minus `database/sql`",
-  which is a denylist admitting `os`, `os/exec`, `net`, `syscall` — the same
-  defect class it was written to fix. The listed non-stdlib packages are the
-  real closure, since `DI-2` aliases `runtime.EventSemantic`.
-- `LO-4` two distinct Claude events sharing an arm produce equal `EquivalentTo`
-  shape and distinct `CanonicalKey`. Use `PreToolUse`/`PreCompact` — not the
-  at-risk elicitation capture.
+- **interpreted record**: L2 arm, bindings, unresolved facts, pinned contract ID
+  and codebook version (R7, minimal form)
+- **consultation record**: for gate-consultation events — the L3 value legalized,
+  the `HostResponse` returned, and a reference to the interpreted record. It
+  carries what the legalization plane knows and the interpreted record does not;
+  it does not restate arm/contract/codebook.
+- both are disambiguated **solely** by autoincrementing row ID. Blob writes use
+  `ON CONFLICT(digest) DO NOTHING` (`journal.go:53`) — correct for
+  content-addressed bodies, **wrong** for these; do not mirror it.
+- **a reader for the new records.** They are not occurrences, so
+  `OccurrenceQuery` and `projection.Reader.Occurrences` cannot return them
+  (`projection/rebuild.go:14,32,85` populates that table from the occurrence
+  evidence kind only). This slice owns the DDL, the replay-apply path, the view
+  types, and the query.
+- binding filter on `OccurrenceQuery`, applied **in SQL before `LIMIT`** — a
+  filter applied in Go after `ORDER BY … LIMIT ?` (`projection/reader.go:55-56`)
+  under-fills pages and corrupts cursors. Thread it through `queryFingerprint`
+  (`:106`).
+- payload-by-digest reader (V2 has no public path today)
+- all new durable writes go through `receipt.JournalAppender`, which already
+  enforces the caller deadline (`journal.go:118-136`) — R10's mechanism exists;
+  do not bypass it.
 
 ### SLICE-4 — Legalization and backend
 
 **Owns:** `internal/lifecycle/legalize/**`, `internal/lifecycle/backend/**`
 
-**Port source:** `43dbbf1^:lower.go` — blocking dispatch, semantic dispatch,
-actor resolution, single-transaction write.
+**Port from** `43dbbf1^:lower.go` — blocking dispatch, semantic dispatch, actor
+resolution, the single-transaction write.
 
-**This stage has a real M1 caller** (Rule 1). The gate-consultation arm produces
-an L3 value which `backend` maps to one L4 effect: the **consultation record**.
-That is 5 of 10 events, and it is what makes URD **V8** implementable —
-*"evidence of consultation is recorded and the host is answered proceed"*. Rev2
-declared the consultation record and assigned it to nobody, which left V8
-unimplementable and `backend` uncalled.
+- gate-consultation arm produces an L3 value; `backend` maps it to the
+  consultation record. That is 5 of 10 events and it is what makes URD **V8**
+  implementable, and what gives these two stages a real M1 caller.
+- observation and human-response arms produce no L3.
+- **key the consultation obligation on the arm** (`SemanticGateConsultation`),
+  not on blocking mode. Gate-consultation ⟹ blocking is already enforced at
+  `runtime/lifecycle.go:382`, so nothing escapes. Keying on blocking mode breaks
+  `ElicitationResult`, which is human-response **and** blocking.
+- **invert the ported refusal.** `lower.go:242` returns `awaitedReplyError`
+  (`:388`) for every blocking event; M1 enables five. Blocking events record
+  consultation and answer proceed. `awaitedReplyError` must not survive.
+- human-response arm returns a typed `NoAuthority`; no backend rule maps it.
+- `MutationInput` modelled in the waist, emitted by no backend rule.
+- neither package performs an authority-bearing write — the consultation record
+  is the only permitted L4 effect.
 
-- `LG-1` legalization L2 → L3. Observation and human-response arms produce **no**
-  L3; the gate arm produces one.
-- `LG-2` backend L3 → L4: the consultation effect, written through `receipt`
-  (SLICE-5 owns the record type; SLICE-4 owns the rule that selects it).
-- `LG-3` **static** no-**authority** proof: neither package performs an
-  authority-bearing write. Restated from rev2's "no write call", which was
-  incompatible with LG-2. Static, so it holds whether or not the elicitation pair
-  is enabled.
-- `LG-4` **INVERT the ported refusal.** `lower.go:242` returns
-  `awaitedReplyError` (`:388`) for every blocking event; M1 enables five.
-  Blocking events **record consultation and answer proceed; they never refuse.**
-  `awaitedReplyError` must not survive the port.
-- `LG-5` the consultation obligation keys on `Blocking != NonBlocking`, **not on
-  the arm** — `PostToolBatch` is blocking, and an arm-keyed rule lets it escape.
-- `LG-6` `MutationInput` modelled in the dialect, emitted by no backend rule
-- `LG-7` human-response arm returns a typed `NoAuthority`; a guard asserts no
-  backend rule maps it
-- `LG-8` the L3 type has no field capable of holding authority
-
-### SLICE-5 — Record stage and readers
-
-**Owns:** `internal/lifecycle/receipt/{interpreted,consultation}.go`,
-`internal/lifecycle/model/reader.go`, `internal/lifecycle/projection/reader.go`
-
-- `RC-1` interpreted record: L2 arm, bindings, unresolved facts, plus the pinned
-  contract ID and codebook version (R7, minimal form)
-- `RC-2` **consultation record** (SLICE-4's L4 effect): L2 arm, the answered
-  `HostResponse`, contract and codebook identity. Keyed on blocking mode per LG-5.
-- `RC-3` **row identity**: the interpreted and consultation records are
-  disambiguated **solely** by autoincrementing row ID. No payload-derived key
-  participates. Blob writes use `ON CONFLICT(digest) DO NOTHING`
-  (`journal.go:53`) — correct for content-addressed bodies and **wrong** for
-  these records; do not mirror it. This is V1's mechanism.
-- `RC-4` extend `OccurrenceQuery` with a typed binding filter; thread it through
-  `projection.Reader` **including `queryFingerprint`** (`projection/reader.go:106`),
-  or cursors silently mismatch
-- `RC-5` negative test: a cursor from a binding-filtered query is rejected by an
-  unfiltered one
-- `RC-6` public bounded payload-by-digest reader — V2 has no public path today
-
-### SLICE-6 — Activation and evidence binding
+### SLICE-5 — Activation
 
 **Owns:** `internal/lifecycle/activation/**`
 
-- `EV-1` evidence carries the whole `acceptance.CaptureProvenance`
-- `EV-2` the enabling gate requires `Origin == OriginAuthenticCapture` **and** a
-  passing `ValidateFixture` **and** an in-range `HarnessVersion`. A digest proves
-  non-tampering, not provenance; `ValidateFixture` returns `nil` early for
-  non-authentic origins (`capture.go:45-47`) and `Origin` is caller-asserted.
-- `EV-3` bind `ProductionProof` to a referenced passing case ID and its recorded
-  outcome — the identical bare-constant defect two lines below `FixtureEvidence`
-  (`activation/types.go:33-38,55-57`)
-- `EV-4` replace the hardcoded `if event.NativeName == "SessionStart"`
-  (`claude_2_1_210.go:11`) with the declared ten-ordinal enabled set; assert
-  twenty withheld with typed reasons
-- `EV-5` the arms-exercised claim is **derived from the activation set**, not
-  asserted, so a withheld event cannot be counted as exercised
+- the enabling gate requires `Origin == OriginAuthenticCapture` **and** a passing
+  `acceptance.CaptureProvenance.ValidateFixture` **and** an in-range
+  `HarnessVersion`. A digest proves non-tampering, not provenance;
+  `ValidateFixture` returns `nil` early for non-authentic origins
+  (`capture.go:45-47`) and `Origin` is caller-asserted.
+- bind `ProductionProof` to a referenced passing case — same bare-constant defect
+  two lines below `FixtureEvidence` (`activation/types.go:33-38,55-57`)
+- replace the hardcoded `if event.NativeName == "SessionStart"`
+  (`claude_2_1_210.go:11`) with the declared ten-ordinal set; twenty withheld
+  with typed reasons
 
-### SLICE-7 — Exit-code safety
+### SLICE-6 — Exit-code safety
 
-**Owns:** `cmd/pasture/hook_lifecycle.go`, `internal/lifecycle/guard/exit_codes.go`
+**Owns:** `cmd/pasture/hook_lifecycle.go`
 
-Sole owner of the lifecycle command. Five of ten events are blocking; the host
-reads exit 2 as deny. The command **exits non-zero today** (`:46`) and **panics**
-(`:58`).
+Five of ten events are blocking and the host reads **exit 2 as deny the user's
+tool call**. The command exits non-zero today (`:46`) and panics (`:58`).
+**Merges before any blocking event is enabled.**
 
-**Merges before any blocking event is enabled** — gates SLICE-6 and SLICE-8.
+- no non-zero exit from the lifecycle path; report on stderr instead
+- top-level `recover()` in `RunE`
+- **the panic at `:58` is inside `func init()`** — it cannot return an error and
+  no `RunE`-level recover reaches it, because `init()` runs before `main`. Move
+  the `MarkFlagRequired` calls into `PreRunE`, which can return an error.
+- integration cases against the **built binary**: injected panic, nil
+  dereference, storage failure (unwritable `--db`), missing required flag — each
+  asserting exit 0 and a stderr report naming the fault class
+- typed `HostResponse` with one legal value (`Proceed`) at M1
 
-- `XC-1` syntactic ban — no non-zero `os.Exit`, no `log.Fatal*`, no `panic(`.
-  **Scope is derived** over `internal/lifecycle/{dialect,frontend,lowering,legalize,backend}`
-  plus the `RunE` body of `hookLifecycleCmd`. It does **not** cover all of
-  `cmd/pasture` (`package main`, shared with every command, where `exitWithCode`
-  is legitimate) and does **not** cover package-init `must` helpers
-  (`timeouts/profile.go:73-77`, `acceptance/mutation.go:387-392`), which are
-  reachable but correct.
-- `XC-2` top-level `recover()` converting any panic to exit 0 + stderr; replace
-  the `panic` at `:58` with a returned error
-- `XC-3` fault classes over the **closed** `errors.Category` enum plus panic;
-  totality guard fails when a category is added without a row
-- `XC-4` integration cases executing the **built binary**: injected panic,
-  injected nil dereference, **and an injected storage failure** (unwritable
-  `--db`), each asserting exit 0 and non-empty stderr. The storage case is the
-  guard for `XC-1`'s falsifying mutation — rev2 named that mutation with nothing
-  able to kill it.
-- `XC-5` typed `HostResponse` with a closed decision enum, exactly one legal
-  value (`Proceed`) at M1, and a guard asserting one arm. Deny later becomes
-  *adding an arm*, not *removing a guard* (R9's retained responder).
-
-### SLICE-8 — Wiring, production proof, and generated-artifact conformance
+### SLICE-7 — Wiring and end-to-end proof
 
 **Owns:** `internal/handlers/hook_lifecycle.go`,
-`internal/acceptance/testdata/corpora/lifecycle_m1.yaml`,
-`internal/lifecycle/guard/generated_artifacts.go`, `docs/privacy.md`
+`internal/handlers/hook_lifecycle_test.go`, `docs/privacy.md`
 
-**Consumes** IP-1..IP-5. **Merges last.**
+**Merges last.**
 
-- `EE-1` wire frontend → lowering → record → legalize → backend in the handler;
-  no stage bypassed
-- `EE-2` **per-event traversal proof.** For each of the ten events: `make build`,
-  exec `bin/pasture` with argv, then through the **public readers** (`RC-4`
-  binding filter, `RC-6` payload-by-digest) assert (a) the raw record, (b) the
-  interpreted record carrying the expected L2 arm from `LifecycleEventMapping`,
-  (c) the §2.1 terminal for that arm. Exit code and stderr remain assertions but
-  **must not be the only ones** — under `XC-1`/`XC-2` exit 0 is a constant, so a
-  handler returning `nil` would satisfy an exit-code-only test identically.
-- `EE-3` deliver byte-identical input twice; assert two distinct occurrence IDs
-  **and** two distinct interpreted-record IDs through the public reader. This is
-  **V1**, which had no owner in rev1 or rev2.
-- `EE-4` a malformed invocation creates no database file
-- `EE-5` **V9 conformance guard**: walk the artifact set emitted by
-  `make generate` and assert no artifact names a protocol operation or parses
-  native JSON, against a declared per-harness table
-  (`claude: enforced, opencode: known-failing, codex: known-failing`) with a
-  totality guard over `acceptance.HarnessKind` (`schema.go:63-68`). Fails when
-  actual disagrees with declared, so M2/M3 cannot forget to flip a row.
-- `EE-6` privacy posture in `docs/privacy.md`. **Gates enabling `PreToolUse`**,
-  which carries `FieldToolInput` — full file contents for `Write`/`Edit`.
-- `EE-7` `TestEngineStartReviewUsesAttachedProvenanceAdapter` stays green (R14/V11)
+- wire frontend → `Lower` → record → legalize → backend; no stage bypassed
+- **end-to-end table test over the ten events.** `make build`, exec
+  `bin/pasture` with argv, then read back through the public readers: the raw
+  record, the interpreted record with the expected arm, and the arm's terminal.
+  **Exit code cannot be the only assertion** — SLICE-6 makes exit 0 a constant,
+  so an exit-only test is satisfied by a handler that returns `nil`.
+  At least one assertion must be one only `Lower` can satisfy — e.g. the
+  `PostToolBatch` tool-call-unresolved fact, which no mapping lookup yields.
+- deliver byte-identical input twice; assert two distinct occurrence IDs and two
+  distinct interpreted-record IDs (**V1**)
+- a malformed invocation creates no database file
+- `docs/privacy.md` — every prompt, tool input and file content passing a
+  registered hook is persisted by default. **Gates enabling `PreToolUse`**,
+  which carries `FieldToolInput`.
 
 ---
 
-## 3. Layer Integration Points
-
-| ID | Contract | Owner | Consumers | Merge timing |
-|---|---|---|---|---|
-| IP-0 | guard driver + executor/classifier | SLICE-0 | all | **first** |
-| IP-1 | L1 types | SLICE-1 | SLICE-2, 3 | before their implementation |
-| IP-2 | L2 + **constructors** + `SemanticFields()` + class table | SLICE-1 | SLICE-2, 3, 4, 5 | same |
-| IP-3 | `Lower` signature | SLICE-3 | SLICE-8 | before wiring |
-| IP-4 | exit-code guard + `HostResponse` | SLICE-7 | SLICE-6, 8 | **before any blocking event is enabled** |
-| IP-5 | interpreted + consultation records, binding-filtered reader | SLICE-5 | SLICE-4, 8 | before wiring |
+## 4. Order
 
 ```text
-  SLICE-0 drivers ──┐
-  SLICE-1 dialect ──┤  (merge together, first)
-                    |
-     +---------+----+----+---------+
-     |         |         |         |
-  SLICE-2  SLICE-3   SLICE-7   (parallel)
-  frontend lowering  exit-code
-     |         |         |
-     +----+----+         |
-          |              |
-      SLICE-5 record ────┤
-          |              |
-      SLICE-4 legalize/backend
-          |              |
-          +------+-------+
-                 |
-            SLICE-6 activation  (gated by IP-4)
-                 |
-            SLICE-8 wiring + proof  (merges last)
+M1a   A1 waist ──> A2 frontend ──> A3 record ──> A4 wiring
+                                                    |
+                                   ===== PIPELINE RUNS =====
+                                                    |
+M1b   SLICE-2 remaining nine events + captures  ────┤
+      SLICE-3 consultation record + readers     ────┤
+      SLICE-4 legalize + backend (gate arm)     ────┤
+      SLICE-6 exit-code safety  ────────────────────┤   before any blocking
+      SLICE-5 activation (needs captures + SLICE-6) ┤   event is enabled
+                                                    |
+                                          SLICE-7 breadth proof
 ```
 
----
-
-## 4. Execution rules
-
-One worktree per slice. **Merge conflicts are the orchestrator's job**;
-ambiguous design choices go to the user. **Generated files are never
-hand-merged** — merge the source, re-run `make generate`, verify a zero-diff regen.
-
-**Guard scope is derived** — by walk under a declared `ScopePredicate`, or by
-exhaustive enumeration over a closed typed set. A hand-maintained path or symbol
-list is not acceptable scope for a new guard.
-
-Gates before every commit: `make fmt`, `make lint`, `make build`,
-`go test -race ./...`, zero-diff `make generate`. `go` is not on PATH by default.
-Stage only owned paths, never `git add -A`, commit with `git agent-commit`.
+Within M1b the four slices are parallel; SLICE-6 gates SLICE-5 because enabling a
+blocking event before exit-code safety lands means an internal fault can deny the
+user's tool call.
 
 ---
 
-## 5. Ownership check
+## 5. Constraints verified in-tree
 
-Both halves, per §0 Rule 2 and the round-2 finding that rev2 checked only the first:
+Facts established by review, recorded so they are not rediscovered:
 
-1. **No path is claimed by two slices.** Verified pairwise across all nine.
-2. **Every task edits only paths its slice owns.** The two rev2 violations are
-   fixed: `model/ids.go` → SLICE-1 (for `DI-10`); `receipt/service.go` → SLICE-2
-   (for `FE-3`). SLICE-8's end-to-end corpus has an explicit path.
-
----
-
-## 6. Mechanism ledger
-
-Rule 2: every gate declares what it detects, its scope, its falsifying mutation,
-and where that mutation executes. A gate missing a row here is not a gate.
-
-| Gate | Detects | Scope | Falsifying mutation | Executed by |
-|---|---|---|---|---|
-| `DI-6` | unclassified L2 field | L2 type, closed set | add a field to L2 without classifying it | `DR-4` |
-| `DI-9` | `dialect` importing storage/provenance | `LifecycleStageFiles` | add `import ".../receipt"` to a `dialect` file | `DR-4` |
-| `LO-3` | `lowering` gaining any I/O capability | transitive closure, set equality | add `import "os"` + an `os.ReadFile` call | `DR-4` |
-| `EV-2` | a synthesised fixture backing an enabled event | activation gate | relabel an authentic fixture's origin to `authored` | `DR-4` |
-| `XC-1` | a non-zero exit path in a lifecycle stage | `LifecycleStageFiles` + `RunE` body | change a `return nil` on the storage-failure path to `return err` | **`XC-4`'s storage-failure case** |
-| `DR-6` | an unregistered guard | package `guard`, AST walk | add an exported `Check*` without registering it | `DR-4` |
-| `EE-2` | a bypassed stage | ten-event corpus | delete the record-stage call from `EE-1`'s wiring | `DR-4` |
-| `EE-5` | a generated artifact regaining operation selection | `GeneratedArtifacts` | reintroduce `renderPythonLifecycleAdapter` into `claudeHooksEmitter.Emit` | `DR-4` |
-
-**Rule 1 check — every stage has an M1 caller:**
-
-| Stage | M1 caller |
-|---|---|
-| frontend | `EE-1` wiring |
-| lowering | `EE-1` wiring |
-| record | `EE-1` wiring; consultation effect from `backend` |
-| legalize | `EE-1` wiring — gate arm, 5 of 10 events |
-| backend | `LG-2` consultation effect — 5 of 10 events |
-
-No stage is built without a caller at M1.
+- **`internal/runtime`'s import closure contains `os`, `os/exec`, `syscall`.**
+  Import-based purity checks on anything consuming it are meaningless.
+- **Interpreted records are not occurrences.** `projection.Reader.Occurrences`
+  reads `lifecycle_occurrences`, populated only from the occurrence evidence
+  kind. A new reader is required.
+- **Gate-consultation ⟹ blocking is already enforced** at
+  `runtime/lifecycle.go:382`.
+- **`SemanticExplicitHumanResponse` requires a request identity**
+  (`runtime/lifecycle.go:390-398`) — so `PostToolUse` cannot carry that arm, and
+  `AskUserQuestion` (a *tool*, `profiles.go:228`) does not give M1 a human-answer
+  path.
+- **R10's deadline is already enforced** at `journal.go:118-136`.
+- **`model/ids.go:22-23` are live** (`definition.go:30,53,54,71`).
+- **`ElicitationResult` is human-response AND blocking** — any rule keyed on
+  blocking mode must account for it.
+- **`acceptance.Observation` cannot hold a process result** (`report.go:20-25`).
+- **Claude already emits the ratified Option-2 shape** (`claude_hooks.go:449`);
+  `PASTURE_ADAPTER_*` reaches generated output only via the Codex emitter.
 
 ---
 
-## 7. Definition of done
+## 6. Done
 
-- [ ] All ten events traverse the pipeline through the built binary, proven
-      per-event through public readers (`EE-2`) — not by exit code alone
-- [ ] Two byte-identical deliveries yield two distinct occurrence IDs and two
-      distinct interpreted-record IDs (`EE-3`, V1)
-- [ ] The lowering pass is unit-tested with **no database**; its transitive
-      closure equals the declared closed set
-- [ ] Each enabled event: authentic origin + passing validation + in-range version
-- [ ] `ProductionProof` bound to a referenced passing case
-- [ ] Twenty events withheld with typed reasons
-- [ ] Gate-consultation events produce a durable consultation record (V8)
-- [ ] Human-response arm returns typed `NoAuthority`; arms-exercised derived from
-      the activation set
-- [ ] `toolUseID` and `requestID` correlated pairs retrievable through a public reader
-- [ ] `PostToolBatch` records session correlation plus a tool-call-unresolved fact
-- [ ] Every durable record carries contract ID and codebook version
-- [ ] No non-zero exit path in a lifecycle stage; injected panic, nil deref and
-      storage failure each exit 0
-- [ ] No second arm enum; no `ReplayKey`/`RecordReplayed`/`Origin.PayloadDigest`
-- [ ] `CanonicalKey`, `EquivalentTo` and `SemanticFields()` exist; the class table
-      is total over all thirty descriptor events
+**M1a:** a real `SessionStart` traverses frontend → `Lower` → record through the
+built binary and is read back with the expected L2 arm. Nothing else.
+
+**M1b:**
+- [ ] Ten events traverse the pipeline through the built binary, verified by
+      reading records back — not by exit code
+- [ ] Two byte-identical deliveries yield two distinct records (V1)
+- [ ] `Lower` is unit-tested with no database
+- [ ] Each enabled event has an authentic capture; twenty withheld with reasons
+- [ ] Gate-consultation events produce a consultation record (V8)
+- [ ] No non-zero exit from the lifecycle path; injected panic, nil deref,
+      storage failure and missing flag each exit 0
+- [ ] No `ReplayKey`, `RecordReplayed`, `Origin.PayloadDigest`
 - [ ] `docs/privacy.md` published before `PreToolUse` is enabled
-- [ ] Every row of §6's ledger has its mutation executed and red
-- [ ] All gates pass; `make generate` is a zero diff
+- [ ] `make fmt`, `make lint`, `make build`, `go test -race ./...`,
+      zero-diff `make generate`
 
-**Capture risk.** `Elicitation`/`ElicitationResult` need an MCP server that
-elicits. If uncapturable they stay **visibly withheld**, and **must not** be
-closed with a synthesised fixture. Degraded form, stated so it is not silently
-ticked: the human-response arm is then exercised at the `Lower` unit level over a
-synthetic `dialect.L1` — an IR value, not a capture — and the arms-exercised DoD
-item is recorded **partially met**, linked to the withheld reason. `LG-3`/`LG-7`
-are static and hold regardless.
+**Capture risk:** `Elicitation`/`ElicitationResult` need an MCP server that
+elicits. If uncapturable they stay **visibly withheld** — eight enabled, twenty-
+two withheld — and the human-response arm is exercised at the `Lower` unit level
+only. **Do not synthesise a fixture.**
 
-**Not in M1:** differential-equivalence execution (M2; its surface is built here),
-the normative write gate, definition resolution, lineage, context disclosure, and
-the raw-ingestion escape hatch (M4). **R10** — the bounded-wait deadline, user
-decision *"Do A."* — is **deferred to M2** and named here so it is not lost a
-third time.
+**Not in M1:** differential equivalence (M2), the write gate, lineage, context
+disclosure, the raw-ingestion escape hatch (M4), and any package split of the
+waist (M2, when a second frontend shows where the seam is).
