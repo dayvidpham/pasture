@@ -1,4 +1,6 @@
 ---
+status: SUPERSEDED — historical provenance only. DO NOT IMPLEMENT FROM THIS DOCUMENT.
+superseded_by: aura-plugins-6ljvd (PROPOSAL-10), llm/plan/proposal-10-hook-lifecycle-architecture.md
 references:
   request: aura-plugins-s43qq
   impl_plan: aura-plugins-sgxp6
@@ -8,6 +10,36 @@ references:
   reviews_round3: aura-plugins-79vaz, aura-plugins-1fv7y, aura-plugins-28mlb
   authority: llm/research/hooks-ir-compilers-architecture-lessons.md
 ---
+
+> # ⚠ SUPERSEDED — PROPOSAL-4
+>
+> **This is PROPOSAL-4. It was superseded six proposals ago and is retained only as
+> provenance. Do not implement, cite, or plan from it.**
+>
+> **Current ratified architecture:**
+> [`llm/plan/proposal-10-hook-lifecycle-architecture.md`](proposal-10-hook-lifecycle-architecture.md)
+> (PROPOSAL-10, `aura-plugins-6ljvd`, ratified 2026-07-30 with two amendments).
+>
+> Standing authority is unchanged and is **not** superseded:
+> [`llm/research/hooks-ir-compilers-architecture-lessons.md`](../research/hooks-ir-compilers-architecture-lessons.md).
+>
+> **What changed between PROPOSAL-4 and PROPOSAL-10** — the stages survive; the vocabulary
+> and the transaction structure do not:
+>
+> | This document (P4) | PROPOSAL-10 | Note |
+> |---|---|---|
+> | `Event` / `Semantics` / `Origin`, the "waist" | `OccurrenceRecord` (§5.2) | Same role. Now journal-resident, envelope-stamped, and reachable only through `LifecycleReader`. |
+> | `BindEvent` / `NewEvent` | `ReceiptService.Receive` → T1 `Journal.Apply` (§5.2) | No separately addressable pure L1→L2 pass. |
+> | `Lower(ctx, deps, event)` — one terminal L2→L4 observation pass | **Split.** T1 receipt (§5.2) for evidence; `Interpreter.Interpret` (§8.2) for semantics; `internal/lifecycle/lowering/{canonicalize,effects}.go` (§18.1 S3) for effect mapping; `EpochControlService.CommitCandidate` (§11.2) for authority. | The word "lowering" now denotes **L3→L4**, not L1→L2. |
+> | `ReplayKey`, `RecordReplayed`, dedup on payload digest (§2, §6) | **FORBIDDEN.** §5.2 bans these symbols by name; §16.4's replay source guard enforces it, proven by `MutateReintroduceReplaySymbol`. | Binding UAT decision (§0.3): *every host delivery is appended as a distinct occurrence.* This is the single largest reversal. |
+> | `Outcome{OutcomeRecorded}` | `EvidenceReceipt{OccurrenceID}` (§5.2) | |
+> | `Frontend.Parse(payload, requested) (Event, error)` | `claude.Parse` → private `CapturedDelivery` (§5.1) | `CapturedDelivery` is private transport, never a public model. |
+> | M1–M4 milestone ladder (§9) | P0-PIN / P0-CAPTURE / M1–M6 + catalogue completeness (§17) | |
+> | Differential equivalence as the M2 gate (§9) | **Not required at any milestone.** PROPOSAL-10 is a Claude-2.1.210-only plan. | Recorded as conflict C3 in the current document §8.1. |
+>
+> The files this document specified — `internal/lifecycle/{event,key,lower,frontend,backend}.go`
+> — have been removed from the tree (`43dbbf1`, and S1/S2 replacements). See
+> `proposal-10-hook-lifecycle-architecture.md` §7 for why `lower.go` stays deleted.
 
 # PROPOSAL-4: Canonical lifecycle IR waist
 
