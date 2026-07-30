@@ -467,16 +467,18 @@ type-resolution failures. Only the compiler does, and it is cheaper than both.
 **One worktree per worker slice.** Workers must never share a worktree.
 
 ```bash
-# supervisor: branch each slice off the integration branch
-git worktree add -b <beads-id>--<type>--<slug> \
-  ~/codebases/dayvidpham/pasture/<beads-id>--<type>--<slug> <integration-branch>
+# orchestrator: branch each slice off the integration branch
+git worktree add -b pasture-<issue#>--<semantic-commit>--<descriptive-name> \
+  <pasture-host>/worktree/pasture-<issue#>--<semantic-commit>--<descriptive-name> \
+  <integration-branch>
 
-# supervisor: after the slice lands and gates pass at the merge point
+# orchestrator: after the slice lands and gates pass at the merge point
 git worktree remove <path>
 ```
 
-Branch name and directory name are identical, matching the existing convention
-(`pasture-44--feat--agent-integration`).
+The repo root is the worktree **host** — never work directly in it. All feature
+work lives in `worktree/<worktree-name>`. Branch name and directory name are
+identical (`pasture-44--feat--agent-integration`).
 
 Worktrees are cheap here — about 13 MB each, and `GOCACHE`/`GOMODCACHE` are
 global, so build artifacts are shared rather than duplicated.
@@ -506,8 +508,23 @@ Therefore isolation is **mandatory but not sufficient**. Pair it with:
 - **Run full gates at the merge point**, not only inside the slice worktree.
   Gates passing in isolation prove nothing about the merged tree.
 
+**Merge conflicts are the orchestrator's job, not the worker's.** When a worker
+wraps a slice, the orchestrator merges the integration branch into the slice
+branch and resolves the conflicts. Ambiguous or confusing design choices are
+surfaced to the user rather than settled unilaterally in a merge.
+
+**Generated files are never hand-merged.** On a conflict in generated output
+(`internal/lifecycle/registration/*.gen.go`, `internal/lifecycle/ingress/claude/
+*.gen.go`, or anything else carrying a `Code generated … DO NOT EDIT` marker):
+merge the *source* — the typed host contract the generator reads — keep the
+target branch's generator configuration, and re-run `make generate`. The
+committed output must be byte-identical to a fresh regeneration, which is
+exactly what the `codegen-drift` CI job asserts via `git status --porcelain`.
+Verify with a zero-diff regen before pushing; a hand-resolved `.gen.go` will
+pass local review and fail that gate.
+
 Commit hygiene is unchanged and still applies: stage only paths your slice owns,
-never `git add -A`, commit with `git agent-commit`, and do not close Beads tasks.
+never `git add -A`, and commit with `git agent-commit`.
 
 ## Build
 
