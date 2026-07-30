@@ -85,13 +85,9 @@ func (t *trackerImpl) bootstrapSystemSession() (*provenance.Session, error) {
 		if err := validatePersistedGenesisAuthority(t.prov.Journal(), expectedActor, authority); err != nil {
 			return nil, err
 		}
-		activation, err := provadapter.ActivatePastureSystem(t.prov)
-		if err != nil {
-			return nil, activationError(err)
-		}
-		if activation.DefaultActorID != expectedActor {
-			return nil, unexpectedActivationActor(activation.DefaultActorID, expectedActor)
-		}
+		// The persisted path is deliberately read-only. Activation acquires a
+		// SQLite write transaction even for an exact repeat; lifecycle ingress
+		// must not spend a second writer acquisition before its receipt append.
 		return t.prov.As(expectedActor, authority), nil
 	}
 
