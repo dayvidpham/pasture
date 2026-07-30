@@ -1,6 +1,6 @@
 ---
 title: PROPOSAL-11 — Harness lifecycle compiler
-status: DRAFT rev2 — revised after a six-reviewer wave returned 6/6 REVISE
+status: DRAFT rev3 — revised after review round 2
 urd: llm/plan/urd-harness-lifecycle.md
 authority: llm/research/hooks-ir-compilers-architecture-lessons.md (standing, never superseded)
 supersedes:
@@ -120,7 +120,7 @@ observable, and it is the M1 terminal for the observation arm.
 | Already exists | Where | Rev2 treats it as |
 |---|---|---|
 | a Claude **frontend** | `ingress/claude.Parse` (`capture.go:27-49`) — parses against the generated descriptor, extracts typed identity bindings | extract and rename; do not rewrite |
-| a **backend** | `receipt.Service.Receive` (`service.go:46-89`) — emits effects | extract and rename |
+| **the record stage** | `receipt.Service.Receive` (`service.go:46-89`) | retain in place; `receipt` *is* the record stage |
 | **the L2 arm enum** | `runtime.EventSemantic` — `SemanticObservation`, `SemanticGateConsultation`, `SemanticExplicitHumanResponse` (`internal/runtime/lifecycle.go:20-22`) | **retain and consume. Declare no second enum.** |
 | **the L1→L2 axis table** | `runtime.LifecycleEventMapping` — semantic, blocking, mutation, order, reconciliation, failure, stop-loop, identities, per event | **retain and consume.** Authority §7:190-193 says so explicitly |
 | the human-response correlation invariant | `runtime/lifecycle.go:390-398` — rejects `SemanticExplicitHumanResponse` without a request identity | retain; it constrains the M1 event table (§4) |
@@ -136,7 +136,7 @@ The **deleted** source is also mostly reusable, and rev1 mis-assigned it:
 | `43dbbf1^` | Lines | What it actually is | Owner |
 |---|---|---|---|
 | `event.go` | 657 | **the L1/L2 IR itself**; `EventBinding.NewEvent` (:475) + `verifyIdentities` (:533) is the real L1→L2 transform | SLICE-1 |
-| `key.go` | 86 | `Semantics.CanonicalKey` (:50) — injective semantic key, **keep**. `Origin.ReplayKey` (:65) — dedup, **drop** | SLICE-1 |
+| `key.go` | 86 | `Semantics.CanonicalKey` (:50) — injective semantic key, **keep**. `Origin.ReplayKey` (:77) — dedup, **drop** | SLICE-1 |
 | `lower.go` | 434 | consumes `event.Semantics()` (:239), branches on blocking (:241), **writes** via `RecordObservation` (:288) — this is **legalization + backend**, not lowering | SLICE-4 |
 
 Rev1 handed `lower.go` to the lowering slice and called it the middle-end. It is
@@ -150,13 +150,15 @@ recreating the fusion that hid the stage.
 | The lifecycle command **exits non-zero today** and **panics** | `cmd/pasture/hook_lifecycle.go:46` `exitWithCode(...)`; `:58` `panic(...)`. An unrecovered panic exits 2 = deny |
 | `FixtureEvidenceAuthentic` is a bare constant; the gate checks the caller passed it | `activation/types.go:28-31,52` |
 | `ProductionProofPassing` is the **same defect**, two lines below, checked by the same gate | `activation/types.go:33-38,55-57` |
-| Activation hardcodes `if event.NativeName == "SessionStart"` | `activation/claude_2_1_210.go:12` |
+| Activation hardcodes `if event.NativeName == "SessionStart"` | `activation/claude_2_1_210.go:11` |
 | `internal/lifecycle/guard` has **no tree-walking driver and zero importers** | no `WalkDir`; no file imports the package |
 | `internal/acceptance` has **no executor** | no `os/exec`; nothing runs `Case.Target.Command` |
 | `OccurrenceQuery` filters contract and event only — no binding filter | `model/reader.go:9-14` |
 | No public payload-by-digest reader; `SQLiteBlobStore` has `Put`/`Exists`/`Reclaimable` | `receipt/journal.go` |
-| Ten unreferenced lifecycle ID aliases for dropped mechanisms | `model/ids.go:13-26` |
-| Codex and OpenCode still generate the rejected `PASTURE_ADAPTER_*` path | `codegen/codex_manifest.go:54,128` |
+| Twelve unreferenced lifecycle ID aliases | `model/ids.go:13-21,24-26` — `:22-23` are LIVE (`definition.go:30,53,54,71`) |
+| `PASTURE_ADAPTER_*` env binding | `codegen/claude_hooks.go:18-20`, via `renderPythonLifecycleAdapter` (`:388-393`) |
+| Python transport (Codex) | `codegen/codex_manifest.go:54,128` |
+| `__adapter invoke` envelope (OpenCode) | `codegen/opencode_hooks.go:162,172` |
 
 **The guard and corpus frameworks are shells.** Rev1 said "extend, do not fork"
 without knowing this. A worker told to extend them finds nothing to run and
@@ -167,7 +169,7 @@ extensions.
 ### 3.2 Naming
 
 The new IR package is **`internal/lifecycle/dialect`**, not `ir`.
-`internal/codegen/ir` already exists, 116 files bind the identifier `ir`, and
+`internal/codegen/ir` already exists, 125 files bind the identifier `ir`, and
 both wiring sites already import it. Authority §7:195-197 explicitly warns
 against conflating the two. `dialect.L1` / `dialect.L2` keeps the vocabulary and
 stays greppable.
@@ -314,6 +316,14 @@ non-recommended per authority §10.
 
 Definition resolution, lineage, context disclosure, the normative write gate.
 
+### Deferrals named explicitly, so none is lost by omission
+
+| Requirement | Milestone | Why not M1 |
+|---|---|---|
+| R4 raw-ingestion escape hatch | M4 | needs the L1 path stable first |
+| **R10 bounded-wait deadline** (*"Do A."*) | **M2** | M1 proves traversal; the contended write path is M2's concern. Named here because rev2 left it in no milestone and no deferral list — the same silent-omission defect that lost R4 in rev1. |
+| R7 full definition resolution | M5 | minimal form (contract + codebook ID) lands at M1 |
+
 ---
 
 ## 6. Tradeoffs
@@ -355,8 +365,10 @@ URD §7's twelve cases, with these scopings recorded rather than left implicit:
 
 - **V5** requires the declared equivalence-class table and `SemanticFields()`; the
   gate runs at M2, the surface is built at M1.
-- **V9** holds for Claude at M1, OpenCode at M2, Codex at M3. A guard asserts the
-  per-harness state and fails when actual disagrees with declared.
+- **V9** holds for Claude at M1, OpenCode at M2, Codex at M3. **Owned by
+  SLICE-8 `EE-5`** — a guard over the `make generate` artifact set against a
+  declared per-harness table, with a totality guard over `acceptance.HarnessKind`.
+  Rev2 asserted this guard without assigning it.
 - **V2** requires a public payload-by-digest reader, which does not exist yet.
 - **V12** requires a typed unresolved fact with a closed reason enum, which does
   not exist yet.
