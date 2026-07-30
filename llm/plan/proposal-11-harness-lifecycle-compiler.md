@@ -165,21 +165,70 @@ Claude first as the proof of concept, then OpenCode, then Codex.
 
 ### M1 — Claude vertical, end to end
 
-Close the pipeline for one harness and one event. Every stage exists as an
-addressable pass.
+Close the pipeline for one harness across the session and tool-use events. Every
+stage exists as an addressable pass.
 
 - restore the **lowering** pass as a pure L1→L2 function (port from `43dbbf1^`,
   dedup surface removed, boundary compiler-enforced via `lifecycle/guard`)
 - extract the **frontend** from ingress capture so Claude payload → L1 is a
   separate testable step
-- **legalization** and **backend** as thin but real stages, sufficient for the
-  enabled event
+- **legalization** and **backend** as thin but real stages
 - bind `FixtureEvidenceAuthentic` to an actual digest and ref
-- `SessionStart` stays enabled; the other 29 stay visibly withheld
+- **enable five events**; the other 25 stay visibly withheld
 
-**Exit:** a native Claude `SessionStart` traverses frontend → lowering →
-legalization → backend → effects, through the built binary, observed only through
-public bounded readers; and the lowering pass is unit-tested with no database.
+| # | Event | Blocking | Failure | Identity | Role in M1 |
+|---|---|---|---|---|---|
+| 1 | `SessionStart` | no | report | — | evidence |
+| 8 | `PreToolUse` | **yes** | **exit 2 = deny** | `toolUseID` | gate-consultation; agent **intent** |
+| 11 | `PostToolUse` | no | report | `toolUseID` | evidence; **result** |
+| 12 | `PostToolUseFailure` | no | report | `toolUseID` | evidence; failed result |
+| 13 | `PostToolBatch` | **yes** | **exit 2 = deny** | **none** | evidence; **uncorrelatable** |
+
+**Why the tool events matter architecturally.** `toolUseID` is the join key
+between intent (`PreToolUse`) and result (`PostToolUse`). That pair is what makes
+tracing generated code back to a human signal constructible at all — with
+`SessionStart` alone the provenance is session-grained and no finer. It also
+makes L2's **gate-consultation** arm non-vacuous; with one non-blocking event,
+two of the three L2 arms are never exercised and the waist is untested where it
+matters most.
+
+#### M1-1 — the exit-code guard is a safety requirement, not a convention
+
+Two of the five enabled events are **blocking with `FailureExitTwoBlocks`**: the
+host waits, and exit 2 means *deny the user's tool call*. `AGENTS.md` maps exit
+code 2 to `CategoryConnection`. Therefore an internal Pasture storage or
+connection fault during `PreToolUse` would exit 2 and be read by the host as a
+denial, silently blocking the user's work — converting an unrelated Pasture fault
+into lost user work.
+
+The always-exit-0 posture (URD R9) must therefore be **structurally enforced**:
+a guard over the lifecycle command's exit paths, naming the mutation that must
+turn it red. A convention is insufficient; this epic's documented failure mode is
+that only guarded invariants hold, and the failure here is invisible to Pasture
+and expensive to the user.
+
+This does not resolve open decision §9.2 — it makes deny *unreachable* until that
+decision is made, which is the correct M1 posture per R9.
+
+#### M1-2 — `MutationInput` is modelled but never emitted
+
+`PreToolUse` carries `MutationInput`: it is the one event permitted to rewrite the
+agent's tool input. **User decision: model the axis faithfully in L1 and L2,
+because it is part of the pinned harness contract, but no backend rule emits it.**
+The IR stays a truthful description of the harness; the capability stays unused.
+
+#### M1-3 — `PostToolBatch` has no identity binding
+
+It carries only `batchResults` and binds no identity, so it cannot be joined to
+the `PreToolUse`/`PostToolUse` pair by `toolUseID`. Per URD V12 it must record the
+occurrence and emit an explicit **unresolved** fact rather than infer an
+association from ordering or timing. Do not correlate it by proximity.
+
+**Exit:** each of the five events traverses frontend → lowering → legalization →
+backend → effects through the built binary, observed only through public bounded
+readers; the lowering pass is unit-tested with no database; the exit-code guard
+fails the build when mutated; and a `PreToolUse`/`PostToolUse` pair sharing a
+`toolUseID` is retrievable as a correlated pair.
 
 ### M2 — OpenCode frontend and differential equivalence
 

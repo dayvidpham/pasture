@@ -72,12 +72,17 @@ range. Must not name a protocol operation.
 
 **Consumes:** IP-1.
 
+**Scope: five events** — `SessionStart`, `PreToolUse`, `PostToolUse`,
+`PostToolUseFailure`, `PostToolBatch`.
+
 Leaf tasks:
-- `FE-1` payload → L1 for `SessionStart`, driven by the generated descriptor
+- `FE-1` payload → L1 for all five, driven by the generated descriptor
 - `FE-2` unlowerable and malformed payloads produce a typed disposition, never a
   panic and never a guess
 - `FE-3` extract from `ingress/claude/capture.go` without changing recording
   behaviour; capture keeps the pre-parse digest
+- `FE-4` `toolUseID` is carried into L1 as an identity binding for events 8, 11
+  and 12; `PostToolBatch` binds none and must say so rather than infer one
 
 ### SLICE-3 — Lowering pass (the middle-end)
 
@@ -116,6 +121,11 @@ Leaf tasks:
 - `LG-1` legalization: L2 → L3, reads committed state, no writes
 - `LG-2` backend: L3 → L4 effect selection
 - `LG-3` tests proving no authority is exercised at M1
+- `LG-4` gate-consultation arm: a blocking event records evidence of consultation
+  and answers *proceed*; it never refuses. Refusing while exiting 0 records
+  nothing and answers proceed, which is the silent no-op this architecture exists
+  to remove.
+- `LG-5` `MutationInput` is modelled in the IR but no backend rule emits it
 
 ### SLICE-5 — Authentic-capture evidence binding
 
@@ -151,6 +161,31 @@ Leaf tasks:
   only through public bounded readers
 - `EE-3` a malformed invocation creates no database file
 
+### SLICE-7 — Exit-code safety guard
+
+**Owns:** the guard, in `internal/lifecycle/guard/**`, plus the exit paths of
+`cmd/pasture/hook_lifecycle.go` it constrains
+
+**Safety-critical.** Two of the five M1 events — `PreToolUse` and
+`PostToolBatch` — are blocking with `FailureExitTwoBlocks`: the host waits and
+reads **exit 2 as deny**. `AGENTS.md` maps exit code 2 to `CategoryConnection`,
+so an internal Pasture storage or connection fault would exit 2 and silently
+deny the user's tool call, converting an unrelated Pasture fault into lost user
+work.
+
+Make always-exit-0 **structurally enforced**, not conventional. A convention is
+insufficient: this epic's failure mode is that only guarded invariants hold, and
+this failure is invisible to Pasture and expensive to the user.
+
+**Independent of IP-1/IP-2** — may run in parallel from the start.
+**Must merge before any blocking event is enabled** (gates SLICE-6).
+
+Leaf tasks:
+- `XC-1` guard over the lifecycle command's exit paths: no path returns non-zero
+- `XC-2` the named mutation that must turn the guard red, and proof it does
+- `XC-3` internal faults (storage unavailable, deadline breach, malformed input)
+  each exit 0 and report on stderr, asserted per fault class
+
 ---
 
 ## 3. Layer Integration Points
@@ -160,6 +195,7 @@ Leaf tasks:
 | IP-1 | L1 harness-dialect IR types | SLICE-1 | SLICE-2, SLICE-3 | **before SLICE-2/3 implementation begins** |
 | IP-2 | L2 lifecycle-dialect IR types | SLICE-1 | SLICE-3, SLICE-4 | same |
 | IP-3 | lowering pass signature | SLICE-3 | SLICE-6 | before SLICE-6 wiring |
+| IP-4 | exit-code guard | SLICE-7 | SLICE-6 | **before any blocking event is enabled** |
 
 **SLICE-1 merges first and alone.** Every other slice consumes its types. This is
 the "merge sooner, not later" rule: with isolated worktrees, divergence on a
@@ -213,14 +249,27 @@ epic has rejected a duplicate framework five times.
 
 ## 5. Definition of done for M1
 
-- [ ] A native Claude `SessionStart` traverses frontend → lowering →
-      legalization → backend → effects through the built binary
+- [ ] All five enabled events traverse frontend → lowering → legalization →
+      backend → effects through the built binary
 - [ ] The lowering pass is unit-tested with **no database**
-- [ ] `SessionStart` is enabled on a **verified digest**, not a constant
-- [ ] The other 29 events remain visibly withheld with typed reasons
+- [ ] All five are enabled on **verified digests**, not constants
+- [ ] The other 25 events remain visibly withheld with typed reasons
+- [ ] The exit-code guard fails the build when mutated; no lifecycle exit path
+      can return non-zero
+- [ ] A `PreToolUse`/`PostToolUse` pair sharing a `toolUseID` is retrievable as a
+      correlated pair through a public reader
+- [ ] `PostToolBatch` records an explicit **unresolved** correlation fact rather
+      than inferring an association
+- [ ] `MutationInput` is present in the IR and emitted by no backend rule
 - [ ] No `ReplayKey`, `RecordReplayed`, or payload-digest-as-identity exists
 - [ ] A malformed invocation creates no database file
 - [ ] All gates pass; `make generate` is a zero diff
+
+**Authentic capture (P0-CAPTURE):** each newly enabled event needs a real
+captured payload from a host inside the pinned range. The range is now
+`>=2.1.210,<2.2.0-0`, so capture happens on the installed 2.1.220 with **no
+downgrade**. A descriptor-derived fixture cannot back an enabled event — it
+cannot falsify the descriptor it came from.
 
 **Explicitly not in M1:** differential equivalence (needs a second harness, M2),
 the normative write gate (open user decision), versioned interpretation identity,
