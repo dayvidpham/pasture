@@ -37,7 +37,7 @@
 //     unique index over its non-NULL values, for engine exactly-once
 //     (migrate_v4_v5.go).
 //
-// This binary tops out at v5. Future migrations extend the dispatch table in
+// This binary tops out at v6. Future migrations extend the dispatch table in
 // migrationSteps() below by appending a new step and bumping
 // MaxKnownSchemaVersion.
 package audit
@@ -81,7 +81,7 @@ const busyRetryMaxDelay = 2 * time.Second
 // version does my binary support?" reads this constant. The §11 Scenario 5
 // newer-schema rejection error reports this value as the "supported
 // version" — bumping it here automatically updates the assertion.
-const MaxKnownSchemaVersion = 5
+const MaxKnownSchemaVersion = 6
 
 // migrationStep applies a single forward migration. Each step receives an
 // open transaction (already holding the write lock via BEGIN IMMEDIATE)
@@ -115,6 +115,7 @@ func migrationSteps() []migrationStep {
 		{fromVersion: 2, toVersion: 3, apply: migrateV2toV3},
 		{fromVersion: 3, toVersion: 4, apply: migrateV3toV4Step},
 		{fromVersion: 4, toVersion: 5, apply: migrateV4toV5Step},
+		{fromVersion: 5, toVersion: 6, apply: migrateV5toV6Step},
 	}
 }
 

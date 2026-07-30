@@ -90,8 +90,8 @@ func TestMigrateV4toV5_NonDestructive(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if version != 5 {
-		t.Errorf("schema version = %d, want 5", version)
+	if version != audit.MaxKnownSchemaVersion {
+		t.Errorf("schema version = %d, want %d", version, audit.MaxKnownSchemaVersion)
 	}
 
 	// Both seeded rows survive, with dedup_key NULL.
