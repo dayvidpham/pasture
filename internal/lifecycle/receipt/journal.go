@@ -74,7 +74,7 @@ func (a JournalAppender) Append(ctx context.Context, in provenance.OperationInpu
 	}
 	deadline := a.Deadline
 	if deadline <= 0 {
-		deadline = DefaultIngressDeadline
+		return 0, structured(pasterrors.CategoryValidation, "The lifecycle journal appender has no ingress deadline.", "Timeouts must come from one validated injected profile; silently defaulting here could invert SQLite retry and caller deadlines.", "Committing a lifecycle occurrence (internal/lifecycle/receipt/journal.go in receipt.JournalAppender.Append).", "No occurrence was recorded; an already committed payload blob may remain as a reclaimable orphan.", "Construct the receipt service with a validated timeout profile.", nil)
 	}
 	if a.Clock == nil {
 		return 0, structured(pasterrors.CategoryValidation, "The lifecycle journal appender has no clock.", "Deadline accounting must use the injected process clock so timeout behavior is deterministic and testable.", "Committing a lifecycle occurrence (internal/lifecycle/receipt/journal.go in receipt.JournalAppender.Append).", "No occurrence was recorded; an already committed payload blob may remain as a reclaimable orphan.", "Construct the journal appender with the receipt service clock.", nil)

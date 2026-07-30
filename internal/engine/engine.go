@@ -23,6 +23,7 @@ import (
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -104,6 +105,7 @@ type Config struct {
 	// slice lifecycle observability (e.g. the local CLI, unit tests) may leave
 	// this nil.
 	HooksMgr *hooks.Manager
+	Timeouts timeouts.Profile
 }
 
 // ActivitySink is the narrow provenance surface the engine needs to record
@@ -144,6 +146,12 @@ type Engine struct {
 // The returned Engine is NOT yet launched; call Launch to run the recovery
 // sweep and accept work. Always call Shutdown to release handles.
 func New(ctx context.Context, cfg Config) (*Engine, error) {
+	if cfg.Timeouts.IsZero() {
+		cfg.Timeouts = timeouts.ProductionProfile()
+	}
+	if err := cfg.Timeouts.Validate(); err != nil {
+		return nil, fmt.Errorf("engine timeout profile: %w", err)
+	}
 	if cfg.DBPath == "" {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
@@ -208,7 +216,7 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		trailCloser = st
 	}
 
-	db, err := dbconn.OpenSharedDB(cfg.DBPath)
+	db, err := dbconn.OpenSharedDBWithProfile(cfg.DBPath, cfg.Timeouts)
 	if err != nil {
 		if trailCloser != nil {
 			_ = trailCloser.Close()

@@ -14,6 +14,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	_ "modernc.org/sqlite" // pure-Go SQLite driver, CGO_ENABLED=0 compatible
 )
@@ -64,6 +65,11 @@ type SqliteAuditTrail struct {
 
 type sqliteAuditTrailOptions struct {
 	skipMigrations bool
+	timeouts       timeouts.Profile
+}
+
+func WithTimeoutProfile(profile timeouts.Profile) SqliteAuditTrailOption {
+	return func(o *sqliteAuditTrailOptions) { o.timeouts = profile }
 }
 
 // SqliteAuditTrailOption configures NewSqliteAuditTrailWithOptions.
@@ -103,6 +109,12 @@ func NewSqliteAuditTrailWithOptions(dbPath string, opts ...SqliteAuditTrailOptio
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+	if cfg.timeouts.IsZero() {
+		cfg.timeouts = timeouts.ProductionProfile()
+	}
+	if err := cfg.timeouts.Validate(); err != nil {
+		return nil, fmt.Errorf("audit.NewSqliteAuditTrail: invalid timeout profile: %w", err)
+	}
 
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, fmt.Errorf(
@@ -128,7 +140,7 @@ func NewSqliteAuditTrailWithOptions(dbPath string, opts ...SqliteAuditTrailOptio
 	// The shared DSN encodes the full concurrency contract as connection-string
 	// params (WAL, busy_timeout=5000, synchronous=NORMAL, foreign_keys=ON,
 	// _txlock=immediate), applied to every connection in the pool.
-	db, err := sql.Open("sqlite", dbconn.SharedDSN(dbPath))
+	db, err := sql.Open("sqlite", dbconn.SharedDSNWithProfile(dbPath, cfg.timeouts))
 	if err != nil {
 		return nil, fmt.Errorf(
 			"audit.NewSqliteAuditTrail: cannot open database at %q: %w — "+

@@ -88,7 +88,7 @@ func TestReceiveWritesBlobBeforeOccurrence(t *testing.T) {
 	calls := []string{}
 	clock := testClock{now: time.Unix(10, 0)}
 	j := contextJournal{calls: &calls, result: provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: receiptSlot, ProducedJournalID: 41}}}}
-	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-order"}}
+	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-order"}}
 	r, err := s.Receive(context.Background(), validDelivery())
 	if err != nil {
 		t.Fatalf("Receive: %v", err)
@@ -105,7 +105,7 @@ func TestReceiveCrashAfterBlobLeavesNoOccurrence(t *testing.T) {
 	t.Parallel()
 	calls := []string{}
 	clock := testClock{now: time.Unix(10, 0)}
-	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: contextJournal{calls: &calls}, Clock: clock}, Identity: failingIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-crash"}}
+	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: contextJournal{calls: &calls}, Clock: clock, Deadline: time.Second}, Identity: failingIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-crash"}}
 	if _, err := s.Receive(context.Background(), validDelivery()); err == nil {
 		t.Fatal("Receive succeeded, want simulated crash")
 	}
@@ -116,7 +116,7 @@ func TestReceiveCrashAfterBlobLeavesNoOccurrence(t *testing.T) {
 
 func TestAppenderRequiresContextJournal(t *testing.T) {
 	t.Parallel()
-	_, err := (JournalAppender{Journal: nonContextJournal{}, Clock: testClock{now: time.Unix(10, 0)}}).Append(context.Background(), provenance.OperationInput{})
+	_, err := (JournalAppender{Journal: nonContextJournal{}, Clock: testClock{now: time.Unix(10, 0)}, Deadline: time.Second}).Append(context.Background(), provenance.OperationInput{})
 	if err == nil {
 		t.Fatal("Append succeeded without ContextJournal")
 	}

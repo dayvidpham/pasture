@@ -6,14 +6,15 @@ import (
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/dbconn"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	_ "modernc.org/sqlite"
 )
 
 // HoldWriter is deterministic load-test instrumentation. Production ingress
 // never calls it; it exists so the honest-failure case does not depend on a
 // scheduler race to keep SQLite's writer lock occupied.
-func HoldWriter(ctx context.Context, dbPath string, held chan<- struct{}, release <-chan struct{}) error {
-	db, err := sql.Open("sqlite", dbconn.SharedDSN(dbPath))
+func HoldWriter(ctx context.Context, dbPath string, profile timeouts.Profile, held chan<- struct{}, release <-chan struct{}) error {
+	db, err := sql.Open("sqlite", dbconn.SharedDSNWithProfile(dbPath, profile))
 	if err != nil {
 		return err
 	}

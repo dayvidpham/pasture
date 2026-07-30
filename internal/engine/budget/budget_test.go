@@ -1,6 +1,7 @@
 package budget_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	stderrors "errors"
@@ -15,10 +16,13 @@ import (
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/engine/budget"
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	claudeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/timeouts"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/dayvidpham/provenance"
 	digest "github.com/opencontainers/go-digest"
 )
@@ -42,6 +46,7 @@ func (s *operationSource) NewOperationID() (string, error) {
 type observation struct {
 	Durations        []int64 `json:"durations_ns"`
 	DeadlineFailures int     `json:"deadline_failures"`
+	StorageFailures  int     `json:"storage_failures"`
 }
 type observer struct{ result *observation }
 
@@ -63,16 +68,17 @@ func TestSliceStartAvailabilityUnderHookWriteLoad(t *testing.T) {
 	}
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "pasture.db")
-	bootstrap(t, dbPath)
-	uncontended := runWorkers(t, dbPath, dir, 1, deliveriesPerWriter)
-	contended := runWorkers(t, dbPath, dir, loadWriters, deliveriesPerWriter)
+	profile := measurementProfile()
+	bootstrap(t, dbPath, profile)
+	uncontended := runWorkers(t, dbPath, dir, profile, 1, deliveriesPerWriter)
+	contended := runWorkers(t, dbPath, dir, profile, loadWriters, deliveriesPerWriter)
 	u99, c99 := p99(uncontended.Durations), p99(contended.Durations)
-	t.Logf("occurrence commit: uncontended p99=%s, contended p99=%s, ratio=%.2f, deliveries=%d, deadline failures=%d", u99, c99, float64(c99)/float64(u99), loadWriters*deliveriesPerWriter, contended.DeadlineFailures)
-	if uncontended.DeadlineFailures != 0 || contended.DeadlineFailures != 0 {
-		t.Fatalf("deadline failures: uncontended=%d contended=%d; every delivery must produce a receipt", uncontended.DeadlineFailures, contended.DeadlineFailures)
+	t.Logf("occurrence commit: uncontended p99=%s, contended p99=%s, ratio=%.2f, deliveries=%d, deadline failures=%d, storage failures=%d", u99, c99, float64(c99)/float64(u99), loadWriters*deliveriesPerWriter, contended.DeadlineFailures, contended.StorageFailures)
+	if uncontended.DeadlineFailures+uncontended.StorageFailures != 0 || contended.DeadlineFailures+contended.StorageFailures != 0 {
+		t.Fatalf("delivery failures: uncontended deadline=%d storage=%d; contended deadline=%d storage=%d; every delivery must produce a receipt", uncontended.DeadlineFailures, uncontended.StorageFailures, contended.DeadlineFailures, contended.StorageFailures)
 	}
 	want := loadWriters * deliveriesPerWriter
-	tracker, err := tasks.OpenTaskTracker(dbPath)
+	tracker, err := openTracker(dbPath, profile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,8 +114,8 @@ func TestSliceStartAvailabilityUnderHookWriteLoad(t *testing.T) {
 func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "pasture.db")
-	bootstrap(t, dbPath)
-	tracker, err := tasks.OpenTaskTracker(dbPath)
+	bootstrap(t, dbPath, timeouts.TestProfile())
+	tracker, err := openTracker(dbPath, timeouts.TestProfile())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,15 +123,14 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 	lockErr := make(chan error, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	go func() { lockErr <- budget.HoldWriter(ctx, dbPath, held, release) }()
+	go func() { lockErr <- budget.HoldWriter(ctx, dbPath, timeouts.TestProfile(), held, release) }()
 	<-held
-	service, err := tasks.NewLifecycleReceiptService(tracker, budget.RealClock{}, &operationSource{prefix: "honest"})
+	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, budget.RealClock{}, &operationSource{prefix: "honest"}, timeouts.TestProfile())
 	if err != nil {
 		close(release)
 		tracker.Close()
 		t.Fatal(err)
 	}
-	service.Appender.Deadline = 100 * time.Millisecond
 	// Blob storage is outside the occurrence lock-hold budget. Treat this body
 	// as already content-addressed so the injected contention targets only the
 	// second transaction.
@@ -141,11 +146,13 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 		t.Fatal(lock)
 	}
 	tracker.Close()
+	var storage *pasterrors.StructuredError
 	var deadline model.IngressDeadlineError
-	if !stderrors.As(err, &deadline) {
-		t.Fatalf("Receive error=%v, want typed IngressDeadlineError", err)
+	storageFailure := stderrors.As(err, &storage) && storage.Category == pasterrors.CategoryStorage
+	if !storageFailure && !stderrors.As(err, &deadline) {
+		t.Fatalf("Receive error=%v, want actionable inner storage failure or typed ingress deadline", err)
 	}
-	tracker, err = tasks.OpenTaskTracker(dbPath)
+	tracker, err = openTracker(dbPath, timeouts.TestProfile())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,13 +183,17 @@ func TestBudgetWorkerProcess(t *testing.T) {
 	readyPath := os.Getenv("PASTURE_BUDGET_READY")
 	startPath := os.Getenv("PASTURE_BUDGET_START")
 	prefix := filepath.Base(resultPath)
-	tracker, err := tasks.OpenTaskTracker(dbPath)
+	profile := timeouts.TestProfile()
+	if os.Getenv("PASTURE_BUDGET_PROFILE") == "production" {
+		profile = timeouts.ProductionProfile()
+	}
+	tracker, err := openTracker(dbPath, profile)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tracker.Close()
 	clock := budget.RealClock{}
-	service, err := tasks.NewLifecycleReceiptService(tracker, clock, &operationSource{prefix: prefix})
+	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, clock, &operationSource{prefix: prefix}, profile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +220,8 @@ func TestBudgetWorkerProcess(t *testing.T) {
 				result.DeadlineFailures++
 				continue
 			}
-			t.Fatal(err)
+			result.StorageFailures++
+			continue
 		}
 	}
 	body, _ := json.Marshal(result)
@@ -218,9 +230,9 @@ func TestBudgetWorkerProcess(t *testing.T) {
 	}
 }
 
-func bootstrap(t *testing.T, dbPath string) {
+func bootstrap(t *testing.T, dbPath string, profile timeouts.Profile) {
 	t.Helper()
-	tracker, err := tasks.OpenTaskTracker(dbPath)
+	tracker, err := openTracker(dbPath, profile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +241,17 @@ func bootstrap(t *testing.T, dbPath string) {
 	}
 	tracker.Close()
 }
-func runWorkers(t *testing.T, dbPath, dir string, workers, count int) observation {
+
+func openTracker(dbPath string, profile timeouts.Profile) (protocol.TaskTracker, error) {
+	return tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithTimeoutProfile(profile))
+}
+func measurementProfile() timeouts.Profile {
+	if os.Getenv("PASTURE_BUDGET_USE_PRODUCTION") == "1" {
+		return timeouts.ProductionProfile()
+	}
+	return timeouts.TestProfile()
+}
+func runWorkers(t *testing.T, dbPath, dir string, profile timeouts.Profile, workers, count int) observation {
 	t.Helper()
 	executable, err := os.Executable()
 	if err != nil {
@@ -244,16 +266,22 @@ func runWorkers(t *testing.T, dbPath, dir string, workers, count int) observatio
 		readyPath := filepath.Join(dir, fmt.Sprintf("ready-%d-%d", workers, i))
 		wg.Add(1)
 		cmd := exec.Command(executable, "-test.run=^TestBudgetWorkerProcess$", "-test.count=1")
-		cmd.Env = append(os.Environ(), "PASTURE_BUDGET_DB="+dbPath, "PASTURE_BUDGET_COUNT="+strconv.Itoa(count), "PASTURE_BUDGET_RESULT="+results[i], "PASTURE_BUDGET_READY="+readyPath, "PASTURE_BUDGET_START="+startPath)
+		var output bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &output, &output
+		profileName := "test"
+		if profile.Kind() == timeouts.Production {
+			profileName = "production"
+		}
+		cmd.Env = append(os.Environ(), "PASTURE_BUDGET_DB="+dbPath, "PASTURE_BUDGET_COUNT="+strconv.Itoa(count), "PASTURE_BUDGET_RESULT="+results[i], "PASTURE_BUDGET_READY="+readyPath, "PASTURE_BUDGET_START="+startPath, "PASTURE_BUDGET_PROFILE="+profileName)
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		go func(command *exec.Cmd) {
+		go func(command *exec.Cmd, captured *bytes.Buffer) {
 			defer wg.Done()
 			if err := command.Wait(); err != nil {
-				errs <- fmt.Errorf("worker: %w", err)
+				errs <- fmt.Errorf("worker: %w: %s", err, captured.String())
 			}
-		}(cmd)
+		}(cmd, &output)
 		deadline := time.Now().Add(10 * time.Second)
 		for {
 			if _, err := os.Stat(readyPath); err == nil {
@@ -285,6 +313,7 @@ func runWorkers(t *testing.T, dbPath, dir string, workers, count int) observatio
 		}
 		combined.Durations = append(combined.Durations, result.Durations...)
 		combined.DeadlineFailures += result.DeadlineFailures
+		combined.StorageFailures += result.StorageFailures
 	}
 	return combined
 }

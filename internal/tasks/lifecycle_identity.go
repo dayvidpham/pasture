@@ -10,6 +10,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/projection"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/provadapter"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/dayvidpham/provenance"
 )
@@ -89,9 +90,16 @@ type lifecycleReceiptStore interface {
 // NewLifecycleReceiptService wires the production receipt path to the unified
 // database and Provenance journal while keeping clocks and operation IDs injected.
 func NewLifecycleReceiptService(tracker protocol.TaskTracker, clock receipt.Clock, operations receipt.OperationIDSource) (receipt.Service, error) {
+	return NewLifecycleReceiptServiceWithProfile(tracker, clock, operations, timeouts.ProductionProfile())
+}
+
+func NewLifecycleReceiptServiceWithProfile(tracker protocol.TaskTracker, clock receipt.Clock, operations receipt.OperationIDSource, profile timeouts.Profile) (receipt.Service, error) {
+	if err := profile.Validate(); err != nil {
+		return receipt.Service{}, &pasterrors.StructuredError{Category: pasterrors.CategoryValidation, What: "The lifecycle receipt timeout profile is invalid.", Why: err.Error(), Where: "Wiring lifecycle ingress (internal/tasks/lifecycle_identity.go in tasks.NewLifecycleReceiptServiceWithProfile).", Impact: "No delivery can be recorded through this service.", Fix: "Use a constructor-validated production or test timeout profile."}
+	}
 	store, ok := tracker.(lifecycleReceiptStore)
 	if !ok || store.auditDBHandle() == nil {
 		return receipt.Service{}, &pasterrors.StructuredError{Category: pasterrors.CategoryValidation, What: "The supplied tracker cannot host lifecycle receipts.", Why: "Receipt storage needs the unified SQLite blob handle, Provenance journal, and read-only persisted identity resolver.", Where: "Wiring lifecycle ingress (internal/tasks/lifecycle_identity.go in tasks.NewLifecycleReceiptService).", Impact: "No delivery can be recorded through this service.", Fix: "Use the tracker returned by tasks.OpenTaskTracker."}
 	}
-	return receipt.Service{Blobs: receipt.SQLiteBlobStore{DB: store.auditDBHandle()}, Appender: receipt.JournalAppender{Journal: store.Journal(), Deadline: receipt.DefaultIngressDeadline, Clock: clock}, Identity: store, Clock: clock, Operations: operations}, nil
+	return receipt.Service{Blobs: receipt.SQLiteBlobStore{DB: store.auditDBHandle()}, Appender: receipt.JournalAppender{Journal: store.Journal(), Deadline: profile.Ingress(), Clock: clock}, Identity: store, Clock: clock, Operations: operations}, nil
 }
