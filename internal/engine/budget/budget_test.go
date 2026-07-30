@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/engine/budget"
-	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	claudeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
@@ -61,6 +61,28 @@ func (o observer) ObserveOccurrenceCommit(duration time.Duration, err error) {
 type existingBlob struct{}
 
 func (existingBlob) Put(context.Context, digest.Digest, []byte) error { return nil }
+
+type lockAfterBlob struct {
+	store   receipt.SQLiteBlobStore
+	dbPath  string
+	profile timeouts.Profile
+	held    chan struct{}
+	release chan struct{}
+	lockErr chan error
+}
+
+func (s lockAfterBlob) Put(ctx context.Context, ref digest.Digest, body []byte) error {
+	if err := s.store.Put(ctx, ref, body); err != nil {
+		return err
+	}
+	go func() { s.lockErr <- budget.HoldWriter(ctx, s.dbPath, s.profile, s.held, s.release) }()
+	select {
+	case <-s.held:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
 
 func TestSliceStartAvailabilityUnderHookWriteLoad(t *testing.T) {
 	if os.Getenv("PASTURE_RUN_LOAD_TESTS") != "1" {
@@ -146,11 +168,9 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 		t.Fatal(lock)
 	}
 	tracker.Close()
-	var storage *pasterrors.StructuredError
 	var deadline model.IngressDeadlineError
-	storageFailure := stderrors.As(err, &storage) && storage.Category == pasterrors.CategoryStorage
-	if !storageFailure && !stderrors.As(err, &deadline) {
-		t.Fatalf("Receive error=%v, want actionable inner storage failure or typed ingress deadline", err)
+	if !stderrors.As(err, &deadline) {
+		t.Fatalf("Receive error=%v, want typed IngressDeadlineError", err)
 	}
 	tracker, err = openTracker(dbPath, timeouts.DeadlineTestProfile())
 	if err != nil {
@@ -170,6 +190,85 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 	}
 	if len(page.Records()) != 0 {
 		t.Fatalf("deadline-failed delivery exposed %d receipts, want zero", len(page.Records()))
+	}
+}
+
+func TestBlobFirstFailureLeavesReclaimableOrphanWithoutReceipt(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "pasture.db")
+	profile := timeouts.DeadlineTestProfile()
+	bootstrap(t, dbPath, profile)
+	tracker, err := openTracker(dbPath, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, budget.RealClock{}, &operationSource{prefix: "orphan"}, profile)
+	if err != nil {
+		tracker.Close()
+		t.Fatal(err)
+	}
+	realStore, ok := service.Blobs.(receipt.SQLiteBlobStore)
+	if !ok {
+		tracker.Close()
+		t.Fatalf("production blob store type=%T", service.Blobs)
+	}
+	held, release, lockErr := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	service.Blobs = lockAfterBlob{store: realStore, dbPath: dbPath, profile: profile, held: held, release: release, lockErr: lockErr}
+	raw, err := os.ReadFile(filepath.Join("..", "..", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_210.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], "2.1.210", model.OccurrenceEnvelopeRef{}).Delivery
+	ref := digest.FromBytes(delivery.Body)
+	_, receiveErr := service.Receive(context.Background(), delivery)
+	close(release)
+	if err := <-lockErr; err != nil {
+		tracker.Close()
+		t.Fatal(err)
+	}
+	if receiveErr == nil {
+		tracker.Close()
+		t.Fatal("occurrence commit succeeded under injected lock")
+	}
+	exists, err := realStore.Exists(context.Background(), ref)
+	if err != nil || !exists {
+		tracker.Close()
+		t.Fatalf("blob exists=%v err=%v, want committed blob", exists, err)
+	}
+	orphans, err := realStore.Reclaimable(context.Background(), receipt.MaxReclaimablePayloads)
+	if err != nil {
+		tracker.Close()
+		t.Fatal(err)
+	}
+	found := false
+	for _, orphan := range orphans {
+		if orphan == ref {
+			found = true
+		}
+	}
+	if !found {
+		tracker.Close()
+		t.Fatalf("blob %s absent from reclaimable set %v", ref, orphans)
+	}
+	tracker.Close()
+	tracker, err = openTracker(dbPath, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tracker.Close()
+	if err := tasks.RebuildLifecycleOccurrences(context.Background(), tracker); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := tasks.NewLifecycleReader(tracker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := reader.Occurrences(context.Background(), model.OccurrenceQuery{Page: model.PageRequest{Size: 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Records()) != 0 {
+		t.Fatalf("public reader exposed %d receipts for orphaned blob", len(page.Records()))
 	}
 }
 

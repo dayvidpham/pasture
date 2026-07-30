@@ -34,6 +34,8 @@ type BlobStore interface {
 
 type SQLiteBlobStore struct{ DB *sql.DB }
 
+const MaxReclaimablePayloads = 256
+
 func (s SQLiteBlobStore) Put(ctx context.Context, ref digest.Digest, body []byte) error {
 	if s.DB == nil {
 		return structured(pasterrors.CategoryValidation, "The lifecycle payload store is unavailable.", "The receipt service was constructed without a SQLite handle.", "Writing the content-addressed payload blob (internal/lifecycle/receipt/journal.go in receipt.SQLiteBlobStore.Put).", "No payload or occurrence was recorded.", "Open the receipt service through the unified Pasture database opener.", nil)
@@ -56,6 +58,47 @@ func (s SQLiteBlobStore) Put(ctx context.Context, ref digest.Digest, body []byte
 	}
 	committed = true
 	return nil
+}
+
+func (s SQLiteBlobStore) Exists(ctx context.Context, ref digest.Digest) (bool, error) {
+	if s.DB == nil {
+		return false, structured(pasterrors.CategoryValidation, "The lifecycle payload store is unavailable.", "Existence checks require the unified SQLite handle.", "Inspecting a lifecycle payload blob (internal/lifecycle/receipt/journal.go in receipt.SQLiteBlobStore.Exists).", "No storage state was inspected.", "Open the blob store through the unified Pasture database opener.", nil)
+	}
+	var exists int
+	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM lifecycle_payload_blobs WHERE digest = ?)`, ref.String()).Scan(&exists); err != nil {
+		return false, structured(pasterrors.CategoryStorage, "The lifecycle payload blob could not be inspected.", "SQLite rejected the bounded digest existence query.", "Inspecting a lifecycle payload blob (internal/lifecycle/receipt/journal.go in receipt.SQLiteBlobStore.Exists).", "The caller cannot determine whether the body is retained.", "Confirm database health and retry.", err)
+	}
+	return exists == 1, nil
+}
+
+// Reclaimable returns committed payload blobs referenced by no occurrence.
+// The bounded query is the future reclamation pass's identification seam; it
+// does not delete anything.
+func (s SQLiteBlobStore) Reclaimable(ctx context.Context, limit int) ([]digest.Digest, error) {
+	if s.DB == nil || limit <= 0 || limit > MaxReclaimablePayloads {
+		return nil, structured(pasterrors.CategoryValidation, "The reclaimable lifecycle payload query is invalid.", fmt.Sprintf("A unified SQLite handle and limit from 1 through %d are required.", MaxReclaimablePayloads), "Listing reclaimable lifecycle payloads (internal/lifecycle/receipt/journal.go in receipt.SQLiteBlobStore.Reclaimable).", "No storage state was inspected or changed.", fmt.Sprintf("Open the production blob store and choose a limit from 1 through %d.", MaxReclaimablePayloads), nil)
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT b.digest FROM lifecycle_payload_blobs b LEFT JOIN lifecycle_occurrences o ON o.payload_digest = b.digest WHERE o.journal_id IS NULL ORDER BY b.digest LIMIT ?`, limit)
+	if err != nil {
+		return nil, structured(pasterrors.CategoryStorage, "Reclaimable lifecycle payloads could not be listed.", "SQLite rejected the bounded orphan-identification query.", "Listing reclaimable lifecycle payloads (internal/lifecycle/receipt/journal.go in receipt.SQLiteBlobStore.Reclaimable).", "No payload was deleted; reclamation cannot proceed until inspection succeeds.", "Confirm database health and retry.", err)
+	}
+	defer rows.Close()
+	refs := make([]digest.Digest, 0, limit)
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		ref, err := digest.Parse(raw)
+		if err != nil {
+			return nil, fmt.Errorf("stored lifecycle payload digest %q is invalid: %w", raw, err)
+		}
+		refs = append(refs, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return refs, nil
 }
 
 type JournalAppender struct {
