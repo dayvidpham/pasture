@@ -23,6 +23,20 @@ const (
 	WithheldProductionProofMissing
 )
 
+type FixtureEvidence uint8
+
+const (
+	FixtureEvidenceMissing FixtureEvidence = iota + 1
+	FixtureEvidenceAuthentic
+)
+
+type ProductionProof uint8
+
+const (
+	ProductionProofMissing ProductionProof = iota + 1
+	ProductionProofPassing
+)
+
 // Entry is one complete activation decision. Withheld entries always carry a
 // reason; enabled entries never do.
 type Entry struct {
@@ -31,14 +45,14 @@ type Entry struct {
 	Reason WithheldReason
 }
 
-func NewEnabled(event model.ContractEventKind, authenticFixture, productionProof bool) (Entry, error) {
+func NewEnabled(event model.ContractEventKind, fixture FixtureEvidence, proof ProductionProof) (Entry, error) {
 	if event == 0 {
 		return Entry{}, fmt.Errorf("activation.NewEnabled: event kind is zero; a generated event ordinal is required before registration; select an event from the generated manifest")
 	}
-	if !authenticFixture {
+	if fixture != FixtureEvidenceAuthentic {
 		return Entry{}, fmt.Errorf("activation.NewEnabled: event %d has no authentic exact-version capture; registering it would claim support from descriptor-derived evidence; capture a raw payload from the pinned host and record its verified digest", event)
 	}
-	if !productionProof {
+	if proof != ProductionProofPassing {
 		return Entry{}, fmt.Errorf("activation.NewEnabled: event %d has no passing production-path proof; registration would expose an unverified event; run the generated-hook to public-reader proof first", event)
 	}
 	return Entry{Event: event, State: Enabled}, nil

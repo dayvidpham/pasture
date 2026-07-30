@@ -417,7 +417,10 @@ type claudeHooksConfig struct {
 
 func (claudeHooksEmitter) Emit(root string, opts GenerateOptions) ([]GeneratedFile, error) {
 	manifest := registration.ClaudeCode2_1_210()
-	states := activation.ClaudeCode2_1_210()
+	states, err := activation.ClaudeCode2_1_210()
+	if err != nil {
+		return nil, fmt.Errorf("codegen.claudeHooksEmitter.Emit: build activation manifest: %w", err)
+	}
 	stateByKind := make(map[model.ContractEventKind]activation.Entry, len(states))
 	for _, state := range states {
 		stateByKind[state.Event] = state

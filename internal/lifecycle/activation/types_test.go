@@ -11,7 +11,8 @@ import (
 
 func TestClaudeActivationIsCompleteDisjointAndProgressive(t *testing.T) {
 	t.Parallel()
-	entries := activation.ClaudeCode2_1_210()
+	entries, err := activation.ClaudeCode2_1_210()
+	require.NoError(t, err)
 	require.Len(t, entries, 30)
 	seen := make(map[uint16]struct{}, len(entries))
 	enabled := 0
@@ -35,8 +36,8 @@ func TestClaudeActivationIsCompleteDisjointAndProgressive(t *testing.T) {
 
 func TestEnabledRequiresIndependentEvidenceAndProductionProof(t *testing.T) {
 	t.Parallel()
-	_, err := activation.NewEnabled(registration.EventSessionStart, false, true)
+	_, err := activation.NewEnabled(registration.EventSessionStart, activation.FixtureEvidenceMissing, activation.ProductionProofPassing)
 	require.ErrorContains(t, err, "authentic exact-version capture")
-	_, err = activation.NewEnabled(registration.EventSessionStart, true, false)
+	_, err = activation.NewEnabled(registration.EventSessionStart, activation.FixtureEvidenceAuthentic, activation.ProductionProofMissing)
 	require.ErrorContains(t, err, "production-path proof")
 }

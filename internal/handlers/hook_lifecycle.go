@@ -32,7 +32,11 @@ type HookLifecycleInput struct {
 type lifecycleStoreOpener func(string) (protocol.TaskTracker, error)
 
 func HookLifecycle(ctx context.Context, in HookLifecycleInput) error {
-	return hookLifecycle(ctx, in, activation.ClaudeCode2_1_210(), tasks.OpenTaskTracker)
+	activations, err := activation.ClaudeCode2_1_210()
+	if err != nil {
+		return err
+	}
+	return hookLifecycle(ctx, in, activations, tasks.OpenTaskTracker)
 }
 
 func hookLifecycle(ctx context.Context, in HookLifecycleInput, activations []activation.Entry, open lifecycleStoreOpener) error {
