@@ -1,6 +1,6 @@
 ---
 title: PROPOSAL-11 — Harness lifecycle compiler
-status: DRAFT — not yet reviewed, not ratified
+status: DRAFT rev2 — revised after a six-reviewer wave returned 6/6 REVISE
 urd: llm/plan/urd-harness-lifecycle.md
 authority: llm/research/hooks-ir-compilers-architecture-lessons.md (standing, never superseded)
 supersedes:
@@ -11,34 +11,31 @@ obsoletes_impl_plan: aura-plugins-sgxp6
 
 # PROPOSAL-11 — Harness lifecycle compiler
 
-Satisfies [`urd-harness-lifecycle.md`](urd-harness-lifecycle.md). Vocabulary is
-compiler vocabulary throughout, per user ruling.
+Satisfies [`urd-harness-lifecycle.md`](urd-harness-lifecycle.md). Compiler
+vocabulary throughout, per user ruling.
+
+**Revision 2** corrects rev1 after review. The architecture was accepted by all
+six reviewers; the decomposition was not. The single root cause: rev1 treated M1
+as *building four new stages* when it is *separating and renaming code that
+already exists*, in the tree and in the deleted source. Every correction below
+follows from that.
 
 ---
 
 ## 1. Why there is an eleventh proposal
 
 Ten proposals were written without a requirements document. From the fifth
-onward each justified itself against the previous round's reviewer findings
-rather than against stated requirements. Three consequences followed, none of
-them decided by anyone:
+onward each justified itself against the previous round's reviewer findings.
+Three consequences followed, none decided by anyone:
 
-1. **The middle-end was lost.** `internal/lifecycle/lower.go` — the Level-1 to
-   Level-2 lowering pass, the one place operation selection was supposed to live
-   — was deleted because a search found no production callers. It had no callers
-   because the slice that would have called it was never built. The compiler
-   cannot distinguish *unfinished* from *obsolete*.
+1. **The middle-end was lost.** `internal/lifecycle/lower.go` was deleted because
+   a search found no production callers. It had none because the slice that would
+   have called it was never built.
 2. **Multi-harness fell out of the plan.** PROPOSAL-4's M2 (OpenCode +
    differential equivalence) and M3 (Codex) were renumbered into unrelated work.
-   Neither appears in any PROPOSAL-10 milestone.
 3. **A private dialect made the drift invisible.** PROPOSAL-4 said *waist / IR /
-   Level 1-4 / frontend / lowering*. PROPOSAL-10 said *occurrence / T1-T3 /
-   ingress capture / interpretation*, and contains the token `IR` twice in 4,289
-   lines. A search in one dialect could not see the other.
-
-PROPOSAL-11 restores the architecture PROPOSAL-4 ratified, keeps the ratified
-decisions that superseded PROPOSAL-4's mechanisms, and adds the milestone that
-proves the architecture works.
+   Level 1-4 / frontend / lowering*; PROPOSAL-10 said *occurrence / T1-T3 /
+   interpretation*, containing the token `IR` twice in 4,289 lines.
 
 ---
 
@@ -48,256 +45,274 @@ proves the architecture works.
   Claude Code          OpenCode            Codex
        |                   |                 |
   [ frontend ]        [ frontend ]      [ frontend ]     native -> Level 1
-       |                   |                 |
        +---------+---------+-----------------+
                  |
            ===========  L1  harness dialect
                  |          SessionStart, PreToolUse, tool.execute.before
            [ lowering ]                                  THE MIDDLE-END
-                 |                                       operation selection
+                 |                                       arm + axis selection
            ===========  L2  lifecycle dialect            THE NARROW WAIST
-                 |          evidence | gate-consultation | human-response
+                 |          observation | gate-consultation | human-response
         [ legalization ]                                 authority verified here
                  |
            ===========  L3  protocol dialect
-                 |          StartReview, RecordPlanUAT, Land
-            [ backend ]                                  effect selection
-                 |
+            [ backend ]
            ===========  L4  effects
-                            journal operations, tasks, assignments
 ```
 
-| Stage | Consumes | Produces | Package | Storage? |
+| Stage | Consumes | Produces | Package | Storage |
 |---|---|---|---|---|
-| frontend | native payload + host version | L1 IR | `internal/lifecycle/frontend/<harness>` | no |
-| lowering | L1 IR | L2 IR | `internal/lifecycle/lowering` | **no** |
-| legalization | L2 IR + committed state | L3 operation, or refusal | `internal/lifecycle/legalize` | reads only |
-| backend | L3 operation | L4 effects | `internal/lifecycle/backend` | writes |
+| frontend | native payload + host version | L1 | `lifecycle/frontend/<harness>` | no |
+| lowering | L1 | L2 | `lifecycle/lowering` | **no** |
+| **record** | L1 + L2 | durable interpreted record | `lifecycle/receipt` | **writes** |
+| legalization | L2 + committed state | L3, or none | `lifecycle/legalize` | reads only |
+| backend | L3 | L4 effects | `lifecycle/backend` | writes |
 
-**The lowering pass must be a pure function.** Research §7 requires each level be
-separately testable; a pass fused into a storage-bearing service cannot be tested
-without a database. This is the single most important structural constraint in
-this proposal, because violating it is what made the middle-end invisible.
+**The lowering pass is a pure function.** Research §7 requires each level be
+separately testable. Its signature admits no dependency capable of I/O:
 
-### 2.1 Evidence is recorded before lowering, not after
+```go
+func Lower(l1 dialect.L1) (dialect.L2, error)   // no ctx, no interfaces, no receiver deps
+```
 
-Recording is not a pipeline stage. It is a side-channel taken at the frontend
-boundary, so that a payload we cannot lower is still preserved:
+A function with no context and no injected dependency cannot perform I/O except
+through a package-level global, which is one AST check.
+
+### 2.1 The record stage — why lowering has a durable consumer
+
+Rev1 recorded only the raw payload at the frontend boundary, and terminated the
+pipeline at L4 effects. Under M1's "legalization exercises no authority", no L3
+is emitted, so no L4 effect is emitted, so **lowering's output was computed and
+discarded** — a pass with no production caller, which is the exact condition
+under which `lower.go` was deleted as unreferenced.
+
+The URD placed the evidence plane at *"frontend + lowering, and the
+Level-1/Level-2 record"* (§2.1). Rev2 restores that:
 
 ```text
-native payload --> [record: blob, then row]  (ordered pair, R6)
+native payload --> [record: blob, then row]          raw body, ordered pair (R6)
                \
-                -> [frontend] -> L1 -> [lowering] -> L2 -> ...
+                -> [frontend] -> L1 -> [lowering] -> L2
+                                          |
+                                          +--> [record: interpreted row]   (R7)
+                                          |
+                                          +--> [legalization] -> L3 -> [backend] -> L4
 ```
 
-A payload that fails to lower still produces a durable record plus an explicit
-*unresolved* fact (URD V12). This is the concrete form of *automate data entry,
-not semantic guessing*.
+The interpreted record carries the L2 arm, the bindings, and the identity of the
+contract and codebook that produced it (R7). It is what makes the pass's output
+observable, and it is the M1 terminal for the observation arm.
+
+**Per-arm terminals at M1** — the pipeline does not terminate uniformly:
+
+| L2 arm | M1 terminal |
+|---|---|
+| observation | the interpreted record |
+| gate-consultation | interpreted record + consultation record + host response `Proceed` |
+| human-response | interpreted record; **no L3**, typed `NoAuthority` result |
 
 ---
 
-## 3. What already exists
+## 3. What already exists — M1 is mostly separation, not construction
 
-Honest starting point. Fourteen commits on `feat/proposal-57-integration`.
+**This section is load-bearing.** Rev1's defects all trace to omitting it.
 
-| Built | Where | URD |
+| Already exists | Where | Rev2 treats it as |
 |---|---|---|
-| Ordered pair: blob write then row commit, crash-window tested | `lifecycle/receipt` | R6 |
-| Content-addressed blob store, reclaimable-orphan query | `receipt/journal.go` | R6 |
-| Append-every-delivery; no replay key, no dedup symbols | tree-wide, guarded | R5 |
-| Replay-derived projection, bounded reader, direct-SQL guard | `lifecycle/projection` | — |
-| Typed ingress deadline, zero writes on breach | `receipt`, `model` | R10 |
-| Ordered timeout profiles enforced by a guard | `internal/timeouts`, `lifecycle/guard` | R11 |
-| Host descriptor generator that **emits**, with a drift gate | `ingress/cmd/hostcontractgen` | R1 |
-| Claude registration: 1 enabled, 29 visibly withheld | `lifecycle/activation` | R13 |
-| Host version recorded, never rejected; range `>=2.1.210,<2.2.0-0` | `internal/runtime` | R12 |
-| **Public CLI boundary already in the ratified shape** | `cmd/pasture/hook_lifecycle.go` | R1 |
-| INV-1 record classification with a `go/ast` totality guard | `lifecycle/guard` | — |
-| Shared acceptance corpus with mutation accounting | `internal/acceptance` | — |
+| a Claude **frontend** | `ingress/claude.Parse` (`capture.go:27-49`) — parses against the generated descriptor, extracts typed identity bindings | extract and rename; do not rewrite |
+| a **backend** | `receipt.Service.Receive` (`service.go:46-89`) — emits effects | extract and rename |
+| **the L2 arm enum** | `runtime.EventSemantic` — `SemanticObservation`, `SemanticGateConsultation`, `SemanticExplicitHumanResponse` (`internal/runtime/lifecycle.go:20-22`) | **retain and consume. Declare no second enum.** |
+| **the L1→L2 axis table** | `runtime.LifecycleEventMapping` — semantic, blocking, mutation, order, reconciliation, failure, stop-loop, identities, per event | **retain and consume.** Authority §7:190-193 says so explicitly |
+| the human-response correlation invariant | `runtime/lifecycle.go:390-398` — rejects `SemanticExplicitHumanResponse` without a request identity | retain; it constrains the M1 event table (§4) |
+| append-every-delivery, no dedup | tree-wide | unchanged |
+| content-addressed blob store, ordered pair | `receipt/journal.go` | unchanged |
+| replay-derived projection, bounded reader | `lifecycle/projection` | **extend** — see §3.2 |
+| ordered timeout profiles + guard | `internal/timeouts`, `lifecycle/guard/timeouts.go` | unchanged |
+| descriptor generator that emits + drift gate | `ingress/cmd/hostcontractgen` | unchanged |
+| public CLI in the ratified Option-2 shape | `cmd/pasture/hook_lifecycle.go` | **argv surface only** — see §3.1 |
 
-The generated Claude registration already invokes ordinary argv against a typed
-public command:
+The **deleted** source is also mostly reusable, and rev1 mis-assigned it:
 
-```
-${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event SessionStart --host-version "..."
-```
+| `43dbbf1^` | Lines | What it actually is | Owner |
+|---|---|---|---|
+| `event.go` | 657 | **the L1/L2 IR itself**; `EventBinding.NewEvent` (:475) + `verifyIdentities` (:533) is the real L1→L2 transform | SLICE-1 |
+| `key.go` | 86 | `Semantics.CanonicalKey` (:50) — injective semantic key, **keep**. `Origin.ReplayKey` (:65) — dedup, **drop** | SLICE-1 |
+| `lower.go` | 434 | consumes `event.Semantics()` (:239), branches on blocking (:241), **writes** via `RecordObservation` (:288) — this is **legalization + backend**, not lowering | SLICE-4 |
 
-That is exactly the Option-2 boundary ratified at `sj1sc` Component 2. No Python,
-no hidden envelope, no `PASTURE_ADAPTER_*` on the Claude path.
+Rev1 handed `lower.go` to the lowering slice and called it the middle-end. It is
+L2→L4. A worker following rev1 would have fused writes back into the pass —
+recreating the fusion that hid the stage.
 
-### 3.1 Known defects carried in
+### 3.1 Defects carried in, verified in-tree
 
 | Defect | Evidence |
 |---|---|
-| No addressable L1→L2 pass — lowering is absent and capture is fused into a storage-bearing service | `lifecycle/receipt` |
-| `FixtureEvidenceAuthentic` carries no digest and no ref; the enabling gate checks that the caller passed a constant | `activation/types.go:28-31,52` |
-| Mutation operators declared but not all executed | `aura-plugins-0si2b` |
-| INV-1 status check is a hardcoded list of one entry | `aura-plugins-k1dvf` |
-| Codex and OpenCode still generate the rejected `PASTURE_ADAPTER_*` Python path | `codegen/codex_manifest.go:54,128` |
+| The lifecycle command **exits non-zero today** and **panics** | `cmd/pasture/hook_lifecycle.go:46` `exitWithCode(...)`; `:58` `panic(...)`. An unrecovered panic exits 2 = deny |
+| `FixtureEvidenceAuthentic` is a bare constant; the gate checks the caller passed it | `activation/types.go:28-31,52` |
+| `ProductionProofPassing` is the **same defect**, two lines below, checked by the same gate | `activation/types.go:33-38,55-57` |
+| Activation hardcodes `if event.NativeName == "SessionStart"` | `activation/claude_2_1_210.go:12` |
+| `internal/lifecycle/guard` has **no tree-walking driver and zero importers** | no `WalkDir`; no file imports the package |
+| `internal/acceptance` has **no executor** | no `os/exec`; nothing runs `Case.Target.Command` |
+| `OccurrenceQuery` filters contract and event only — no binding filter | `model/reader.go:9-14` |
+| No public payload-by-digest reader; `SQLiteBlobStore` has `Put`/`Exists`/`Reclaimable` | `receipt/journal.go` |
+| Ten unreferenced lifecycle ID aliases for dropped mechanisms | `model/ids.go:13-26` |
+| Codex and OpenCode still generate the rejected `PASTURE_ADAPTER_*` path | `codegen/codex_manifest.go:54,128` |
+
+**The guard and corpus frameworks are shells.** Rev1 said "extend, do not fork"
+without knowing this. A worker told to extend them finds nothing to run and
+builds a parallel harness by necessity — a fork arrived at by omission. Giving
+`guard` a driver and `acceptance` an executor are M1 prerequisites, not
+extensions.
+
+### 3.2 Naming
+
+The new IR package is **`internal/lifecycle/dialect`**, not `ir`.
+`internal/codegen/ir` already exists, 116 files bind the identifier `ir`, and
+both wiring sites already import it. Authority §7:195-197 explicitly warns
+against conflating the two. `dialect.L1` / `dialect.L2` keeps the vocabulary and
+stays greppable.
+
+**Boundary rule, guarded:** `dialect` types carry no `provenance.JournalID`, no
+timestamp, and no `provenance` import — they exist *before and independent of*
+any write. `model` types record *what was written*; `model` may import
+`dialect`, never the reverse.
 
 ---
 
-## 4. What is deliberately NOT carried forward
+## 4. M1 event set
 
-PROPOSAL-10 designed nine mechanisms. **None is implemented.** They are dropped
-as *mechanisms*; the requirements they served survive in the URD and must be
-answered again, on evidence.
+Ten enabled, twenty withheld.
 
-| Dropped mechanism | Requirement it served | Status |
-|---|---|---|
-| Capability handshake: `IssuedRequestRecord`, Issue/Bind/Revoke, 15 scope axes | R8 — the write gate | **user-deferred**, decide before legalization |
-| `TransitionCandidateRecord` → `CommittedTransition` | legalization split | re-derive at legalization |
-| Three-way disclosure record split | context disclosure | re-derive at that stage |
-| `BuildIdentity` + status | R7 | re-derive |
-| `DefinitionSnapshot`, definition resolution | R7 | re-derive |
-| `InterpretationRecord` | R7 | re-derive |
-| `CausalLinkRecord`, lineage queries | the core provenance goal | re-derive |
-| `EnrichmentFact` snapshots | lineage | re-derive |
+| # | Event | Blocking | Failure | Bindings | L2 arm |
+|---|---|---|---|---|---|
+| 1 | `SessionStart` | no | report | session | observation |
+| 3 | `SessionEnd` | no | report | session | observation |
+| 8 | `PreToolUse` | **yes** | **exit 2 = deny** | session, **toolUse** | gate-consultation |
+| 11 | `PostToolUse` | no | report | session, **toolUse** | observation |
+| 12 | `PostToolUseFailure` | no | report | session, **toolUse** | observation |
+| 13 | `PostToolBatch` | **yes** | **exit 2 = deny** | session | gate-consultation |
+| 25 | `PreCompact` | **yes** | **exit 2 = deny** | session | gate-consultation |
+| 26 | `PostCompact` | no | report | session | observation |
+| 29 | `Elicitation` | **yes** | **exit 2 = deny** | session, **request** | gate-consultation |
+| 30 | `ElicitationResult` | **yes** | **exit 2 = deny** | session, **request** | **human-response** |
 
-Dropping unbuilt design costs nothing implemented. Carrying it forward
-unexamined would import a dialect and a set of unratified assumptions.
+**Three correlation domains,** not two: `BindingSession` (all thirty events,
+required), `BindingToolCall` (8/11/12), `BindingRequest` (29/30).
+
+**Corrections to rev1, each verified against `registration/claude_2_1_210.gen.go`:**
+
+- `PostToolBatch` binds `BindingSession` **required** and has nine allowed
+  fields, not one. It is `SemanticGateConsultation`, not observation. Rev1 said
+  "binds none, carries only `batchResults`, evidence arm" — all three false.
+  What is genuinely absent is only the **tool-call** correlation, so it records a
+  session-correlated occurrence plus an explicit **tool-call-unresolved** fact.
+  Recording it as wholly unresolved would assert Pasture knows less than it does.
+- **`PostToolUse` cannot carry the human-response arm.** Rev1 assigned it that
+  arm when `tool_name == "AskUserQuestion"`. `runtime/lifecycle.go:390-398`
+  rejects `SemanticExplicitHumanResponse` without a request identity, because
+  *"an unrelated native occurrence could manufacture a user decision"* — the
+  precise hazard R8 exists to prevent. `PostToolUse` binds no request identity.
+  It lowers to observation only. Capturing the human's `AskUserQuestion` answer
+  needs its own correlation design and is **not** in M1.
+- All ten arms are taken from `runtime.LifecycleEventMapping`, not re-declared.
+
+**All three L2 arms are reachable**, which no smaller set achieves.
+
+### 4.1 The exit-code guard is a safety requirement
+
+Five of ten enabled events are blocking with `FailureExitTwoBlocks`: the host
+waits and reads exit 2 as *deny the user's tool call*. `AGENTS.md` maps
+`CategoryConnection` to exit 2. The command **exits non-zero today**
+(`hook_lifecycle.go:46`) and **panics** (`:58`); an unrecovered panic exits 2.
+
+So always-exit-0 must be structurally enforced:
+
+- a **syntactic ban** over the lifecycle command's packages: no non-zero
+  `os.Exit`, no `log.Fatal*`, no `panic(`
+- a top-level `recover()` converting any panic to exit 0 plus a stderr report
+- an integration test injecting a panic and a nil dereference, asserting exit 0
+- fault classes enumerated over the **closed** `errors.Category` enum plus
+  panic, with a totality guard failing when a new category is added
+
+Rev1 claimed this makes deny "unreachable". Corrected: it makes **no deliberate
+deny reachable, and every fault class including panic proven to exit 0.** It
+does not resolve §9.2; it makes deny unreachable until that decision is made.
+
+### 4.2 `MutationInput` modelled, never emitted
+
+`PreToolUse` alone carries `MutationInput`. The axis is modelled faithfully in
+L1 and L2 because it is part of the pinned contract; no backend rule emits it.
+
+### 4.3 Capture logistics
+
+Every enabled event needs an authentic capture. **A digest proves bytes have not
+changed; it does not prove they came from a host.** `acceptance.CaptureProvenance`
+already carries the real check but returns `nil` when `Origin !=
+OriginAuthenticCapture`, and `Origin` is caller-asserted — so labelling a
+synthesised fixture `authored` bypasses everything. The enabling gate must
+require `Origin == OriginAuthenticCapture`, a passing `ValidateFixture`, and a
+`HarnessVersion` inside the pinned range.
+
+Difficulty is uneven: session and tool events are trivial; compaction needs
+forcing; **`Elicitation`/`ElicitationResult` need an MCP server that elicits.**
+If that round-trip cannot be captured they stay visibly withheld and the
+human-response arm goes untested. **Do not synthesise a fixture** — surface it.
+The "no authority at M1" claim survives regardless, because §5's static form of
+it does not depend on the event being enabled.
 
 ---
 
 ## 5. Milestones
 
-Claude first as the proof of concept, then OpenCode, then Codex.
+### M1 — Claude vertical
 
-### M1 — Claude vertical, end to end
+Separate the stages, give the frameworks their missing drivers, enable ten
+events, and make the pipeline observable.
 
-Close the pipeline for one harness across the session and tool-use events. Every
-stage exists as an addressable pass.
-
-- restore the **lowering** pass as a pure L1→L2 function (port from `43dbbf1^`,
-  dedup surface removed, boundary compiler-enforced via `lifecycle/guard`)
-- extract the **frontend** from ingress capture so Claude payload → L1 is a
-  separate testable step
-- **legalization** and **backend** as thin but real stages
-- bind `FixtureEvidenceAuthentic` to an actual digest and ref
-- **enable ten events**; the other 20 stay visibly withheld
-
-| # | Event | Blocking | Failure | Identity | L2 arm |
-|---|---|---|---|---|---|
-| 1 | `SessionStart` | no | report | — | evidence |
-| 3 | `SessionEnd` | no | report | — | evidence |
-| 8 | `PreToolUse` | **yes** | **exit 2 = deny** | `toolUseID` | gate-consultation — agent **intent** |
-| 11 | `PostToolUse` | no | report | `toolUseID` | evidence — **result**; human answer when the tool is `AskUserQuestion` |
-| 12 | `PostToolUseFailure` | no | report | `toolUseID` | evidence — failed result |
-| 13 | `PostToolBatch` | **yes** | **exit 2 = deny** | **none** | evidence — **uncorrelatable** |
-| 25 | `PreCompact` | **yes** | **exit 2 = deny** | — | gate-consultation |
-| 26 | `PostCompact` | no | report | — | evidence |
-| 29 | `Elicitation` | **yes** | **exit 2 = deny** | `requestID` | gate-consultation |
-| 30 | `ElicitationResult` | **yes** | **exit 2 = deny** | `requestID` | **human-response** |
-
-**All three L2 arms are exercised.** Evidence, gate-consultation and
-human-response each have at least one enabled event, so the lifecycle dialect is
-tested across its full shape rather than two thirds of it. No smaller event set
-achieves this.
-
-**Two correlation domains.** `toolUseID` (`BindingToolCall`) joins tool intent to
-result; `requestID` (`BindingRequest`) joins an elicitation to its answer. Two
-domains exercise the identity machinery in a way one cannot.
-
-**`AskUserQuestion` is a tool, not a hook event** (`internal/runtime/profiles.go:228`).
-It arrives through `PreToolUse`/`PostToolUse` with `tool_name == "AskUserQuestion"`,
-already covered. OpenCode's equivalent is `question(prompt, options)`
-(`profiles.go:267`) — a natural differential-equivalence case at M2.
-
-**`ElicitationResult` is enabled as EVIDENCE ONLY.** It is the event URD R8 names
-as the canonical explicit-human-response write path, and the write-gate mechanism
-is a deferred user decision. M1 must record it and exercise no authority. This
-makes the "no authority at M1" assertion meaningful rather than vacuous: the one
-event that *would* write is present and provably does not.
-
-**Why the tool events matter architecturally.** `toolUseID` is the join key
-between intent (`PreToolUse`) and result (`PostToolUse`). That pair is what makes
-tracing generated code back to a human signal constructible at all — with
-`SessionStart` alone the provenance is session-grained and no finer. It also
-makes L2's **gate-consultation** arm non-vacuous; with one non-blocking event,
-two of the three L2 arms are never exercised and the waist is untested where it
-matters most.
-
-#### M1-1 — the exit-code guard is a safety requirement, not a convention
-
-**Five of the ten** enabled events are **blocking with `FailureExitTwoBlocks`**
-(`PreToolUse`, `PostToolBatch`, `PreCompact`, `Elicitation`, `ElicitationResult`): the
-host waits, and exit 2 means *deny the user's tool call*. `AGENTS.md` maps exit
-code 2 to `CategoryConnection`. Therefore an internal Pasture storage or
-connection fault during `PreToolUse` would exit 2 and be read by the host as a
-denial, silently blocking the user's work — converting an unrelated Pasture fault
-into lost user work.
-
-The always-exit-0 posture (URD R9) must therefore be **structurally enforced**:
-a guard over the lifecycle command's exit paths, naming the mutation that must
-turn it red. A convention is insufficient; this epic's documented failure mode is
-that only guarded invariants hold, and the failure here is invisible to Pasture
-and expensive to the user.
-
-This does not resolve open decision §9.2 — it makes deny *unreachable* until that
-decision is made, which is the correct M1 posture per R9.
-
-#### M1-2 — `MutationInput` is modelled but never emitted
-
-`PreToolUse` carries `MutationInput`: it is the one event permitted to rewrite the
-agent's tool input. **User decision: model the axis faithfully in L1 and L2,
-because it is part of the pinned harness contract, but no backend rule emits it.**
-The IR stays a truthful description of the harness; the capability stays unused.
-
-#### M1-3 — `PostToolBatch` has no identity binding
-
-It carries only `batchResults` and binds no identity, so it cannot be joined to
-the `PreToolUse`/`PostToolUse` pair by `toolUseID`. Per URD V12 it must record the
-occurrence and emit an explicit **unresolved** fact rather than infer an
-association from ordering or timing. Do not correlate it by proximity.
-
-#### M1-4 — capture logistics are a real schedule risk
-
-Every enabled event needs an authentic captured payload (P0-CAPTURE); a
-descriptor-derived fixture cannot falsify the descriptor it came from. Difficulty
-varies sharply:
-
-| Event | Capture difficulty |
-|---|---|
-| `SessionStart`, `SessionEnd`, `PreToolUse`, `PostToolUse` | trivial |
-| `PostToolUseFailure` | easy — induce a failing tool call |
-| `PreCompact`, `PostCompact` | moderate — force compaction |
-| `PostToolBatch` | moderate — needs a batched tool call |
-| `Elicitation`, `ElicitationResult` | **hard — needs an MCP server that elicits** |
-
-If the elicitation round-trip cannot be captured, those two events stay
-**visibly withheld** per R13 and the human-response arm goes untested at M1. That
-is an acceptable outcome and must not be worked around by synthesising a fixture.
-It should be surfaced, not absorbed.
-
-**Exit:** each enabled event traverses frontend → lowering → legalization →
-backend → effects through the built binary, observed only through public bounded
-readers; the lowering pass is unit-tested with no database; the exit-code guard
-fails the build when mutated; a `PreToolUse`/`PostToolUse` pair sharing a
-`toolUseID` is retrievable as a correlated pair; an `Elicitation`/
-`ElicitationResult` pair sharing a `requestID` likewise; and `ElicitationResult`
-is proven to exercise no authority.
+**Exit criteria:**
+- every enabled event traverses frontend → lowering → record → (legalization →
+  backend) through the built binary, with the per-arm terminals of §2.1
+- the lowering pass is unit-tested with **no database**, and its import closure
+  equals a declared allowlist
+- each enabled event is enabled on `OriginAuthenticCapture` + passing
+  `ValidateFixture` + in-range version — not a constant
+- `ProductionProof` is bound to a referenced passing case, not a constant
+- the exit-code guard fails the build when mutated; injected panic exits 0
+- correlated pairs retrievable through a public reader: `toolUseID` for 8/11,
+  `requestID` for 29/30
+- every durable record carries the pinned contract ID and codebook version (R7,
+  minimal form)
+- **static** proof of no authority: `legalize` and `backend` contain no write
+  call at M1, and the human-response arm returns a typed `NoAuthority`
 
 ### M2 — OpenCode frontend and differential equivalence
 
-- OpenCode frontend producing L1 for the same semantic events
-- **differential equivalence gate**: semantically equivalent native events from
-  Claude and OpenCode lower to identical L2 IR
+- generated **thin forwarding** TS plugin — *replace*, not retire. Authority
+  §122-148 requires OpenCode to have a minimal in-process plugin that forwards
+  and returns. Rev1 said "retire", which would leave no native path.
+- differential equivalence over a declared equivalence-class table, comparing a
+  `SemanticFields()` projection — harness identity, timestamps and row identity
+  excluded **by construction**, not by the test remembering
 
-**Exit:** the gate passes. This is the milestone that proves a waist exists —
-research §11. No prior plan carried it.
+The projection and the class table are **M1 obligations** (SLICE-1), even though
+the gate runs at M2. If first written at M2, L2 will have been designed without
+them and the projection will be back-fitted to whatever already matches.
 
 ### M3 — Codex frontend
 
-- Codex frontend; retire `PASTURE_ADAPTER_*`, the Python transport, and the
-  generated TS plugin
-- extend differential equivalence to three harnesses
+Replace the Python transport; retire `PASTURE_ADAPTER_*`. Extend equivalence to
+three harnesses.
 
-**Exit:** `N + M` demonstrated. No harness-specific operation selection remains.
+### M4 — raw ingestion escape hatch (R4)
 
-### M4+ — deferred stages
+R4 had **no milestone in rev1** — a stated requirement with no owner, the exact
+failure this proposal exists to end. A typed versioned raw-JSON command that
+decodes into the same L1 through the same verifier, visibly marked as
+non-recommended per authority §10.
 
-Versioned interpretation identity (R7), lineage, context disclosure, and the
-normative write gate (R8) follow M3 and are re-derived then, not inherited.
+### M5+ — deferred
+
+Definition resolution, lineage, context disclosure, the normative write gate.
 
 ---
 
@@ -305,41 +320,57 @@ normative write gate (R8) follow M3 and are re-derived then, not inherited.
 
 | Decision | Rationale |
 |---|---|
-| Restore lowering as a **port**, not a revert | Its type substrate is gone: `Origin`, `Semantics`, `ObservationRecord`, `ActorResolver` no longer exist. The logic is the asset; the 2026-07-29 types are not. |
-| Lowering is pure, with no storage | Research §7 demands separate testability. Fusing it into a service is what hid its absence. |
-| Record before lowering, not after | A payload that cannot be lowered must still be preserved (R6, V12). Ordering also gives crash safety: orphan blob reclaimable, dangling reference is corruption. |
-| Differential equivalence at M2, not M1 | A single-harness MVP cannot demonstrate a waist by construction. Placing the gate at M1 would make it vacuous. |
-| Drop P10's mechanisms rather than translate them | None is implemented, so nothing is lost; translating would import the dialect that caused the drift. |
-| Leave the write gate undecided | User decision. The principle (R8) is fixed; the mechanism is not, and legalization is three milestones away. |
-| Keep actor unauthenticated | Explicit user scope decision. The rejected envelope did not prevent forgery either. |
+| Restore the IR from `event.go`, not `lower.go` | `lower.go` consumes `Semantics()` and writes; it is L2→L4. The L1→L2 transform is `EventBinding.NewEvent`. |
+| Consume `runtime.EventSemantic` and `LifecycleEventMapping` | They already encode the arms and the L1→L2 axes; authority §7 says retain. Declaring a second enum is the sixth duplicate. |
+| Add the record stage | Without a durable consumer, lowering is a no-caller pass — the condition under which it was deleted. |
+| Name the package `dialect`, not `ir` | `internal/codegen/ir` exists; 116 files bind `ir`; authority warns against conflation. |
+| Pure `Lower(L1) (L2, error)` with no ctx | Construction-enforcement: a function with no dependency cannot do I/O. Same idiom as `timeouts.Profile`, the one invariant here that held. |
+| Give `guard` a driver and `acceptance` an executor at M1 | Both are shells. "Extend, do not fork" is unactionable until they can run. |
+| Keep `CanonicalKey`, drop `ReplayKey` | `CanonicalKey` is the M2 equivalence primitive; `ReplayKey` is digest-derived dedup that R5 removed. |
+| Syntactic exit ban plus `recover()` | A return-value guard cannot discharge a panic, and a panic exits 2 = deny. |
+| Differential-equivalence machinery designed at M1, run at M2 | A single-harness gate is vacuous; a back-fitted projection is worse than none. |
 
 ---
 
 ## 7. Validation checklist
 
-- [ ] `make fmt`, `make lint`, `make build`, `go test -race ./...` pass
-- [ ] `make generate` produces a zero diff
-- [ ] The lowering pass is exercised by tests that open no database
-- [ ] No symbol named `ReplayKey`, `RecordReplayed`, or a payload-digest-as-identity exists
-- [ ] Every enabled event's fixture carries a digest that matches bytes on disk
-- [ ] Every withheld event carries a typed reason and appears in a report
-- [ ] A malformed invocation creates no database file
-- [ ] Every timeout profile passes the ordering guard, including test profiles
-- [ ] Production tests read only public bounded readers
-- [ ] Generated host artifacts contain no operation selection and no JSON parsing
-- [ ] Differential equivalence passes at M2
+- [ ] `make fmt`, `make lint`, `make build`, `go test -race ./...`, zero-diff `make generate`
+- [ ] `guard` has a tree-walking driver; every guard registers with it; scope is derived by walk or by exhaustive enumeration over a closed typed set, never a hand-maintained list
+- [ ] `acceptance` can execute a `Case` against the built binary and return an `Observation`
+- [ ] `dialect` import closure excludes `provenance`, `model`, `receipt`, `database/sql`
+- [ ] `lowering` import closure equals a declared allowlist
+- [ ] no second `EventSemantic`-shaped enum exists under `internal/lifecycle`
+- [ ] no symbol named `ReplayKey`, `RecordReplayed`, `Origin.PayloadDigest`
+- [ ] `CanonicalKey` retained; `SemanticFields()` projection exists
+- [ ] enabling gate requires authentic origin, passing validation, in-range version
+- [ ] no non-zero `os.Exit`, no `log.Fatal*`, no `panic(` in lifecycle packages
+- [ ] every durable record carries contract ID and codebook version
+- [ ] privacy posture documented in user-facing docs before `PreToolUse` is enabled
+- [ ] `TestEngineStartReviewUsesAttachedProvenanceAdapter` stays green (R14/V11)
+- [ ] each guard names its falsifying mutation, and that mutation is executed
 
 ## 8. Acceptance criteria
 
-The twelve cases in URD §7 are the acceptance criteria for this proposal and are
-not restated here. V4 (lowering testable without storage) and V5 (differential
-equivalence) are the two that no prior plan could satisfy.
+URD §7's twelve cases, with these scopings recorded rather than left implicit:
+
+- **V5** requires the declared equivalence-class table and `SemanticFields()`; the
+  gate runs at M2, the surface is built at M1.
+- **V9** holds for Claude at M1, OpenCode at M2, Codex at M3. A guard asserts the
+  per-harness state and fails when actual disagrees with declared.
+- **V2** requires a public payload-by-digest reader, which does not exist yet.
+- **V12** requires a typed unresolved fact with a closed reason enum, which does
+  not exist yet.
 
 ---
 
 ## 9. Open decisions
 
-1. **The write gate mechanism** (URD §6.2) — deferred by the user; required
-   before legalization is implemented beyond M1's thin form.
+1. **The write-gate mechanism** — deferred by the user. M1 exercises no
+   authority, proven statically.
 2. **Exit-code contract** — exit 2 means `CategoryConnection` internally and
-   *deny* to the host; must be resolved before any real deny ships (R9).
+   *deny* to the host. Must be resolved before any deliberate deny ships.
+3. **The hook-by-hook write-plane audit** the user requested at `q5ams` 20:45
+   (*"Audit the Claude Hooks for me, where you place them, why, and how they
+   might interact bi-directionally"*) has not been performed. It is deferred to
+   the milestone that implements the write gate, and recorded here so it is not
+   lost again.

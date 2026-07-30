@@ -1,6 +1,6 @@
 ---
 title: User Requirements Document — harness lifecycle compiler
-status: CONFIRMED by user
+status: CONFIRMED by user; rev2 corrects R8 sourcing and MVP traceability
 authority: llm/research/hooks-ir-compilers-architecture-lessons.md (standing, never superseded)
 sources:
   request: aura-plugins-s43qq
@@ -242,10 +242,22 @@ exit code — exit 0 proceed, exit 2 deny on Claude and Codex. It does not mean 
 native event fails.
 
 **Verbatim selection** (`q5ams` C3): *"Answer yes, write only explicit human
-responses"* — later widened by the 20:48 clarification that many hooks will be
-automated write gates at the evidence and provenance stages. The durable rule is:
-**broad automated writes before legalization; separately verified authority at
-legalization.**
+responses"* — **SUPERSEDED at 20:45**, when the user rejected the option's
+premise outright:
+
+> "There are definitely more hooks that should be allowed in the write path.
+> Audit the Claude Hooks for me, where you place them, why, and how they might
+> interact bi-directionally with the Pasture system."
+
+and again at 20:48: *"we will need many hooks that WILL be in the write gate."*
+
+The durable rule is therefore: **broad automated writes before legalization;
+separately verified authority at legalization.** `ElicitationResult` is one
+legitimate normative source, **not the only one** — treating it as the sole
+write path is the superseded reading.
+
+**Outstanding:** the hook-by-hook write-plane audit the user asked for at 20:45
+has not been performed. Deferred to the milestone implementing the write gate.
 
 ### R9 — Exit 0 is a temporary posture, and must be replaceable
 
@@ -296,7 +308,7 @@ This is safe **because** of R6: a payload from an unsupported version is retaine
 in full, so the evidence to detect and re-interpret it is in the ledger rather
 than discarded at ingest.
 
-### R13 — Unproved events are visibly withheld, never silently absent
+### R13 — Unproved events are visibly withheld, never silently absent *(derived)*
 
 An event Pasture cannot prove end-to-end must be registered as withheld with a
 typed reason, not omitted. Omission without a visible report is itself a silent
@@ -315,8 +327,15 @@ and must not regress.
 
 ## 4. MVP sequencing
 
-**Verbatim intent:** implement for Claude first as an MVP, then translate the
-approach to OpenCode and Codex.
+**MVP scope, verbatim** (`sj1sc`, 2026-07-29 06:58):
+
+> "Now let's plan backwards from what we need, and figure out MVPs and milestones
+> that we can iterate towards minimally. **The first MVP should establish the flow
+> from native hook event as input, flowing down to the engine + Provenance.**"
+
+**Harness ordering — Claude first, then OpenCode, then Codex — is INFERRED**
+architect sequencing, confirmed by the user in session but not traceable to a
+quoted statement in the four source tasks. Marked inferred per §intro.
 
 | Stage | Content | Proves |
 |---|---|---|
@@ -387,16 +406,17 @@ Per the standing constraint that every request carries concrete validation cases
 |---|---|---|
 | R1, R2, R4 | `s43qq` | request |
 | R3 | `s43qq` + research §5, §7 | request + standing authority |
-| R5 | `q5ams` C1, C2 | ratified UAT, verbatim |
-| R6 | `q5ams` 03:40 | ratified UAT, verbatim (supersedes 03:33) |
-| R7 | `q5ams` 20:45 | ratified UAT, verbatim |
-| R8 | `q5ams` C3 + 20:48 | ratified UAT, verbatim |
-| R9 | `q5ams` C3 | ratified UAT, verbatim |
-| R10 | `q5ams` 01:31 | ratified UAT, verbatim |
-| R11 | `q5ams` 05:32 | ratified UAT, verbatim |
-| R12 | `q5ams` 04:49, `16aam` | ratified UAT, verbatim |
+| R5 | `q5ams` C1, C2 | recorded UAT decision (task open), verbatim |
+| R6 | `q5ams` 03:40 | recorded UAT decision (task open), verbatim (supersedes 03:33) |
+| R7 | `q5ams` 20:45 | recorded UAT decision (task open), verbatim |
+| R8 | `q5ams` C3 + 20:48 | recorded UAT decision (task open), verbatim |
+| R9 | `q5ams` C3 | recorded UAT decision (task open), verbatim |
+| R10 | `q5ams` 01:31 | recorded UAT decision (task open), verbatim |
+| R11 | `q5ams` 05:32 | recorded UAT decision (task open), verbatim |
+| R12 | `q5ams` 04:49, `16aam` | recorded UAT decision (task open), verbatim |
 | R13 | `q5ams` C2 consequences | derived, marked |
 | R14 | `sj1sc` C1 | accepted implementation UAT, verbatim |
-| R1 adapter boundary | `sj1sc` C2 | ratified UAT, verbatim (Option 2 selected) |
-| MVP sequencing | user statement, this session | verbatim intent |
+| R1 adapter boundary | `sj1sc` C2 | recorded UAT decision (task open), verbatim (Option 2 selected) |
+| MVP scope | `sj1sc` 06:58 | verbatim |
+| Harness ordering | architect sequencing, user-confirmed in session | **inferred** |
 | Differential equivalence | research §2, §11 | standing authority |
