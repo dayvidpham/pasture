@@ -102,7 +102,7 @@ native payload --> [record: blob, then row]          raw body, ordered pair (R6)
 ```
 
 The interpreted record carries the L2 arm, the bindings, and the identity of the
-contract and codebook that produced it (R7). It is what makes the pass's output
+contract that produced it. **R7 has no M1 discharge** (§5). It is what makes the pass's output
 observable, and it is the M1 terminal for the observation arm.
 
 **Per-arm terminals at M1** — the pipeline does not terminate uniformly:
@@ -138,7 +138,7 @@ The **deleted** source is also mostly reusable, and rev1 mis-assigned it:
 | `43dbbf1^` | Lines | What it actually is | Owner |
 |---|---|---|---|
 | `event.go` | 657 | **the L1/L2 IR itself**; `EventBinding.NewEvent` (:475) + `verifyIdentities` (:533) is the real L1→L2 transform | SLICE-1 |
-| `key.go` | 86 | `Semantics.CanonicalKey` (:50) — injective semantic key, **keep**. `Origin.ReplayKey` (:77) — dedup, **drop** | SLICE-1 |
+| `key.go` | 86 | `CanonicalKey` (:50) deferred to **M2**; `ReplayKey` (:77) dropped | M2 |
 | `lower.go` | 434 | consumes `event.Semantics()` (:239), branches on blocking (:241), **writes** via `RecordObservation` (:288) — this is **legalization + backend**, not lowering | SLICE-4 |
 
 Rev1 handed `lower.go` to the lowering slice and called it the middle-end. It is
@@ -231,18 +231,18 @@ waits and reads exit 2 as *deny the user's tool call*. `AGENTS.md` maps
 `CategoryConnection` to exit 2. The command **exits non-zero today**
 (`hook_lifecycle.go:46`) and **panics** (`:58`); an unrecovered panic exits 2.
 
-So always-exit-0 must be structurally enforced:
+So the lifecycle command returns 0 always and reports on stderr, and installs a
+top-level `recover()` in `RunE` so a panic becomes a stderr report rather than
+exit 2. The `MarkFlagRequired` panic at `hook_lifecycle.go:58` is in `init()` and
+therefore unreachable by that recover — it is deleted at source instead.
 
-- a **syntactic ban** over the lifecycle command's packages: no non-zero
-  `os.Exit`, no `log.Fatal*`, no `panic(`
-- a top-level `recover()` converting any panic to exit 0 plus a stderr report
-- an integration test injecting a panic and a nil dereference, asserting exit 0
-- fault classes enumerated over the **closed** `errors.Category` enum plus
-  panic, with a totality guard failing when a new category is added
+*(Struck in rev5: the syntactic exit-token ban and the `errors.Category` totality
+guard. Both were mechanisms invented for a settled decision; three rounds of
+review found defects in them and no slice owns them. The impl plan's SLICE-7
+carries the actual work.)*
 
-Rev1 claimed this makes deny "unreachable". Corrected: it makes **no deliberate
-deny reachable, and every fault class including panic proven to exit 0.** It
-does not resolve §9.2; it makes deny unreachable until that decision is made.
+This does not resolve §9.2 — it makes deny unreachable until that decision is
+made.
 
 ### 4.2 `MutationInput` modelled, never emitted
 
@@ -272,8 +272,7 @@ it does not depend on the event being enabled.
 
 ### M1 — Claude vertical
 
-Separate the stages, give the frameworks their missing drivers, enable ten
-events, and make the pipeline observable.
+Separate the stages, enable ten events, and make the pipeline observable.
 
 **Exit criteria:**
 - every enabled event traverses frontend → lowering → record → (legalization →
@@ -281,8 +280,8 @@ events, and make the pipeline observable.
 - the lowering pass is unit-tested with **no database**
 - each enabled event is enabled on `OriginAuthenticCapture` + passing
   `ValidateFixture` + in-range version — not a constant
-- `ProductionProof` is bound to a referenced passing case, not a constant
-- the exit-code guard fails the build when mutated; injected panic exits 0
+- `ProductionProof` stays a caller-asserted constant at M1, backed by the named SLICE-7 end-to-end case and the CI gate that runs it — `internal/acceptance` cannot execute a `Case`, so there is no runtime referent
+- no non-zero exit from the lifecycle path for any externally reachable fault
 - correlated pairs retrievable through a public reader: `toolUseID` for 8/11,
   `requestID` for 29/30
 - every durable record carries the pinned contract ID. **R7 has no M1
@@ -327,7 +326,7 @@ Definition resolution, lineage, context disclosure, the normative write gate.
 |---|---|---|
 | R4 raw-ingestion escape hatch | M4 | needs the L1 path stable first |
 | **R10 bounded-wait deadline** (*"Do A."*) | **already enforced** (`receipt/journal.go:113-127`) | `Append` refuses a non-`ContextJournal` and a non-positive deadline, and calls `ApplyContext` under `context.WithTimeout`. Rev3's deferral was stale. The observational writer-count SLO remains an M2 concern. |
-| R7 full definition resolution | M5 | minimal form (contract + codebook ID) lands at M1 |
+| R7 versioned interpretation identity | M5 | **no M1 discharge** — the codebook reference has no producer in the tree; the pinned contract ID is what M1 carries |
 
 ---
 
@@ -340,9 +339,9 @@ Definition resolution, lineage, context disclosure, the normative write gate.
 | Add the record stage | Without a durable consumer, lowering is a no-caller pass — the condition under which it was deleted. |
 | Name the package `waist`, not `ir` or `dialect` | `internal/codegen/ir` exists (116 importing files) and the authority warns against conflating them (§7:195-197); `dialect` was rev3's name for a split that rev5 collapsed. |
 | Pure `Lower(L1) (L2, error)` with no ctx | Construction-enforcement: a function with no dependency cannot do I/O. Same idiom as `timeouts.Profile`, the one invariant here that held. |
-| Give `guard` a driver and `acceptance` an executor at M1 | Both are shells. "Extend, do not fork" is unactionable until they can run. |
-| Keep `CanonicalKey`, drop `ReplayKey` | `CanonicalKey` is the M2 equivalence primitive; `ReplayKey` is digest-derived dedup that R5 removed. |
-| Syntactic exit ban plus `recover()` | A return-value guard cannot discharge a panic, and a panic exits 2 = deny. |
+
+| Defer `CanonicalKey` to M2, drop `ReplayKey` | `CanonicalKey` serves only the M2 equivalence gate — the same rationale that defers `SemanticFields()`; `ReplayKey` is digest-derived dedup that R5 removed. |
+
 | Differential-equivalence machinery designed at M1, run at M2 | A single-harness gate is vacuous; a back-fitted projection is worse than none. |
 
 ---
@@ -358,7 +357,7 @@ Definition resolution, lineage, context disclosure, the normative write gate.
 - [ ] privacy posture documented before `PreToolUse` is enabled
 - [ ] `TestEngineStartReviewUsesAttachedProvenanceAdapter` stays green (R14/V11)
 
-*(Struck in rev4: the guard tree-walking driver, the `acceptance` case executor,
+*(Struck in rev5: the guard tree-walking driver, the `acceptance` case executor,
 the `dialect`/`lowering` import-closure allowlists, `SemanticFields()`, and "each
 guard names its falsifying mutation". The impl plan is the governing checklist.)*
 

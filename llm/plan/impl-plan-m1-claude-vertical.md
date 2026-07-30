@@ -101,10 +101,20 @@ authority §7:190-193. Declare no second arm enum.
 - **`ingress/claude.Parse` must retain the native field name.** It currently
   emits `model.NativeBinding{Kind, Value}` and discards it (`capture.go:113`),
   but `verifyIdentities` matches on the **(kind, native name) pair**. This is not
-  a rename — the bridge from `registration.Event` to
-  `runtime.ClaudeLifecycleEvent` needs three mappings that do not exist:
-  ordinal→typed enum, `NativeFieldID`→native name, and
-  `model.NativeBindingKind` (8 values) → `runtime.NativeIdentityKind` (6 values).
+  a rename — but **only one mapping is genuinely missing: ordinal→typed enum.**
+  Declare no other table:
+  - `NativeFieldID`→native name is **already generated** as `fieldNames`
+    (`ingress/claude/payload_2_1_210.gen.go:9`). `capture.go:101` already binds
+    the name to a local and discards it at `:113` — retain it. One struct field,
+    not a table.
+  - the `model.NativeBindingKind` (8) → `runtime.NativeIdentityKind` (6) mapping
+    is **avoidable**: read the kind off the pinned contract through
+    `runtime.NativeIdentityField.Kind()`/`.NativeName()`
+    (`runtime/lifecycle.go:283-295`). Hand-writing it would be lossy —
+    `BindingTask`/`BindingWorktree` (`model/occurrence.go:33-34`) have no
+    `runtime` counterpart — and §5 already records three hand-maintained copies
+    of this description. Do not make it five.
+
   Write that bridge as **one function with one declared table**, plus one
   table-driven parity test over all thirty events asserting ordinal, native name
   and identity agreement between `registration` and
@@ -149,8 +159,23 @@ authority §7:190-193. Declare no second arm enum.
   | a `harnessVersion` outside `>=2.1.210,<2.2.0-0` | version drift |
   | a fixture path escaping the corpus root | `capture.go:67-70` |
 
-  SLICE-5 passes the root explicitly rather than borrowing a loader's, so
-  containment holds because we chose it. Follow `peasant-labs`' negative-control
+  **Declare the case instantiation**, because the reference `Case` is generic
+  (`peasant-labs/schema/develop/testcase/testcase.go:132-139`) and two slices
+  depend on it: `input` is `{fixture: <path relative to the corpus root>}`, and
+  the `CaptureProvenance` is read from the sibling `<Event>.provenance.json` the
+  capture script already emits — **not inlined in YAML**, because
+  `acceptance.CaptureProvenance` carries no yaml tags and `CaptureOrigin`/
+  `HarnessKind` implement `encoding.TextUnmarshaler`, which `yaml.v3` does not
+  honour, so an out-of-set origin would decode silently instead of being
+  rejected. `encoding/json` honours both. `expected` is the activation decision:
+  `enabled` or `withheld{reason}`. `provenance.source` is a **closed** enum, per
+  the reference (`testcase.go:76-108`), not a free string.
+
+  **The corpus type and loader live in `internal/lifecycle/activation/corpus.go`,
+  owned by SLICE-5**; SLICE-2 owns only `testdata/**`. The negative-control
+  corpus lives beside it as `testdata/captures_vacuous.yaml`, with the test
+  asserting rejection owned by SLICE-5. SLICE-5 passes the root explicitly rather
+  than borrowing a loader's, so containment holds because we chose it. Follow `peasant-labs`' negative-control
   precedent (`testcase/testdata/vacuous_corpus.yaml`): one deliberately invalid
   corpus that the validator must reject, so the validator itself is falsified.
   `tools/capture-claude-hook.sh:105-119` already emits the six-field provenance
@@ -195,12 +220,22 @@ evidence kind, the pattern `projection/rebuild.go:41` already uses.
   no read verb, so an occurrence is journaled and then permanently unobservable;
   the existing end-to-end test passes only by performing a rebuild from Go that
   no user can perform. Roughly forty lines wrapping the rebuild plus
-  `tasks.NewLifecycleReader`.
+  `tasks.NewLifecycleReader`. **It must also return the interpreted record** —
+  `model.LifecycleReader` yields `OccurrencePage` only (`model/reader.go:36-38`),
+  and the interpreted record is what this epic exists to produce. A user who can
+  list what arrived but not what it was interpreted as has half a pipeline.
+  **The rebuild is O(all history)**: `projection/rebuild.go:39-57` accumulates
+  every row unbounded, then `DELETE`s and re-inserts (`:69`). Accepted at M1
+  because history is small; the missing incremental maintainer is recorded in §5.
 - projection, migration, binding filter and payload-by-digest reader land here at
   M1b, designed once against all ten events. **Extract the paging/cursor helper
-  so both readers share it** — the filter-applied-after-`LIMIT` defect
-  (`projection/reader.go:55-56`) must not be fixable in one copy and not the
-  other.
+  so both readers share it.** The hazard is prospective, not present: today's
+  contract and event predicates sit in the SQL `WHERE` clause
+  (`projection/reader.go:43-54`) before `ORDER BY … LIMIT ?` (`:55`), and keyset
+  paging (`:98-102`) is correct. But bindings are stored as `bindings_json` and
+  decoded in Go (`:84-87`), so a **binding** filter cannot be expressed in SQL
+  without a schema change and will necessarily post-filter a `LIMIT`-bounded
+  page. That must not be fixable in one reader copy and not the other.
 - **The ratified ordered pair is preserved by construction.** URD R6 fixes a
   delivery as *two* write transactions — blob, then the record commit. The
   occurrence and interpreted evidence are therefore emitted as **two
@@ -276,10 +311,20 @@ ever goes withheld, `make generate` panics instead of reporting. Guard it.
 SLICE-6 no longer exists; the exit-code work is these three bullets, in the slice
 that owns the command.
 
-- wire frontend → `Lower` → record → legalize → backend; no stage bypassed
+- wire frontend → `Lower` → legalize → backend → **record**. The journal
+  `Append` is issued **once, after backend returns**, carrying the occurrence,
+  interpreted and (for gate events) consultation effects together. `Effects` is
+  built in `receipt.Service.Receive` (`service.go:83`), so the consultation
+  effect must be an input to it — a record-then-legalize order would force a
+  second `Append`, i.e. a third transaction, which §SLICE-3 forbids. Proposal
+  §2.1's diagram shows record and legalization as parallel consumers of L2; this
+  is the ordering that realises it. No stage bypassed.
 - **return exit 0 always, report on stderr.** Per the user's ruling: *"For now
   return exit code 0 for all."* Deny semantics are deferred until there is a
-  working pipeline.
+  working pipeline. Remove the `exitWithCode` call at
+  `cmd/pasture/hook_lifecycle.go:46`, and install a **top-level `recover()` in
+  `RunE`** converting a panic to a stderr report and exit 0 — Go exits 2 on an
+  unrecovered panic, which five M1b events read as *deny*.
 - **delete the `MarkFlagRequired` loop** (`cmd/pasture/hook_lifecycle.go:56-60`)
   rather than relocating it. All three flags are already validated by the handler
   with better messages (`:46-48` harness, `:49-51` host-version, `:52-62` event).
@@ -290,17 +335,35 @@ that owns the command.
   `cmd/pasture/hook_lifecycle_production_test.go:20` already builds the binary,
   execs `hook lifecycle --harness claude-code --event SessionStart
   --host-version 2.1.220`, and reads back. `:57` already covers "a malformed
-  invocation creates no database file". Use `main_test.go`'s
-  `binaryPath`/`runCLI` (`:27-67`, `:99-117`), which build once per test binary
-  into a temp dir. **Do not `make build` from a package test** — `bin/pasture` is
-  one shared path and `go test ./...` runs packages concurrently.
-- **fault cases against the built binary: unwritable `--db`, missing flag,
-  malformed payload** — each asserting exit 0 and a stderr report naming the
-  fault class. Panic and nil-dereference are exercised **in-process** through the
-  existing `open` seam (`internal/handlers/hook_lifecycle.go:42`), or via a
-  separate fixture main following `internal/codegen/ir/capability_panic_subprocess_test.go:22-35`.
+  invocation creates no database file". **Keep its existing self-contained
+  `go build -o t.TempDir()/pasture .` (`:21-26`)** — that already avoids the
+  shared-`bin/pasture` race. Do **not** reach for `main_test.go`'s
+  `binaryPath`/`runCLI`: that file is `package main_test` while
+  `hook_lifecycle_production_test.go` is `package main`, so those identifiers do
+  not cross, and moving the file breaks its `lifecycleCLIClock` /
+  `lifecycleCLIOperations` references (`cmd/pasture/hook_lifecycle.go:16,20`).
+  **Do not `make build` from a package test.**
+- **fault cases against the built binary: unwritable `--db`, missing flag, and a
+  payload over `model.MaxNativePayloadBytes`**
+  (`internal/handlers/hook_lifecycle.go:75-77`) — each asserting exit 0 and a
+  stderr report naming the fault class.
+- **A malformed payload is NOT a fault.** `ingress/claude/capture.go:42-47` sets
+  `Disposition = model.CaptureMalformed` and keeps the delivery;
+  `receipt/service.go:97-98` rejects only `Capture == 0`, so the occurrence
+  commits and the handler returns nil — exit 0, empty stderr. Assert exactly
+  that: **exit 0, no stderr, recorded with `Capture == model.CaptureMalformed`.**
+  Making malformed input emit a stderr fault would invert the ratified rule
+  *"automate data entry, not semantic guessing… do not silently drop it"*.
   **No fault-injection flag or env var in `cmd/pasture`** — that would be a
   deliberate crash path in the binary Claude executes on every hook.
+- **Panic behaviour is out of M1 scope and deliberately unasserted.** There is no
+  `recover` on this path today (`cmd/pasture/main.go:28-36`,
+  `hook_lifecycle.go:34-48`, `handlers.hookLifecycle`), so a panic exits 2 —
+  which Claude reads as *deny*. Closing that requires a stated production change
+  (a top-level `recover` reporting on stderr and exiting 0), not an unassigned
+  test. Recorded in §5 as a known gap; **do not** add a panic test that asserts a
+  crash, which is what `internal/codegen/ir/capability_panic_subprocess_test.go:27`
+  does and which contradicts the exit-0 contract.
 - deliver byte-identical input twice; assert two distinct records (**V1**)
 - `docs/privacy.md` — every prompt, tool input and file content passing a
   registered hook is persisted by default. **Gates enabling `PreToolUse`.**
@@ -364,6 +427,9 @@ separate worktrees, not because a package boundary is implied:
 | consultation-record type | SLICE-3 | SLICE-4 |
 | `CaptureProvenance` corpus path + root | SLICE-2 | SLICE-5 |
 | `hookLifecycleCmd` parent command var (`cmd/pasture/hook_lifecycle.go:30`) | SLICE-7 | SLICE-3 |
+| `model.NativeBinding` native-name field | SLICE-3 | SLICE-2 (`Parse` must retain it) |
+| consultation effect into `receipt.Service.Receive` | SLICE-4 | SLICE-2 (`service.go:83` builds `Effects`) |
+| capture corpus case type + loader | SLICE-5 | SLICE-2 (authors `testdata/**`) |
 
 SLICE-3's `hook_lifecycle_list.go` and SLICE-7's `hook_lifecycle.go` are
 file-disjoint but share package `main`: the `list` file calls `AddCommand` on a
@@ -411,9 +477,15 @@ binding across the whole `cmd/pasture` package, not just its own file.
 
 ## 6. Done
 
-**M1a:** a real `SessionStart` traverses frontend → `Lower` → record through the
-built binary, and the recorded correlation value equals the fixture's
-`session_id`. Nothing else.
+**M1a** — three lines, one moved up from M1b rather than added:
+- [ ] A real `SessionStart` reaches the interpreted record through the built
+      binary, and the recorded binding equals the **pair**
+      `{Kind: model.BindingSession, Value: "b3cfe877-feb4-4ba3-9500-414c8bfb51c4"}`
+- [ ] SLICE-1's DB-free unit tests pass: one event per arm, plus the three
+      `verifyIdentities` negatives *(moved up from M1b — SLICE-1 is complete at
+      M1a, so its gate belongs here, and §3 names these as the honest evidence
+      that `Lower` and the constructors are load-bearing)*
+- [ ] Code inspection confirms no stage bypassed (SLICE-7)
 
 **M1b:**
 - [ ] Every **enabled** event traverses the pipeline, asserted on payload-derived
@@ -426,7 +498,10 @@ built binary, and the recorded correlation value equals the fixture's
 - [ ] A payload body is retrievable by digest through a public reader (V2)
 - [ ] A delivery is two write transactions: blob, then one operation carrying the
       occurrence and interpreted effects together (R6)
-- [ ] Gate-consultation events produce a consultation record (V8)
+- [ ] Gate-consultation events produce a consultation record — the durable
+      consumer that keeps `legalize`/`backend` from being no-caller passes. V8
+      itself is discharged by the interpreted record's arm plus the proceed
+      answer; it does not compel a second record type.
 - [ ] No non-zero exit from the lifecycle path
 - [ ] No `ReplayKey`, `RecordReplayed`, `Origin.PayloadDigest`
 - [ ] `docs/privacy.md` published before `PreToolUse` is enabled
