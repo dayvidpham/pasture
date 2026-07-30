@@ -12,6 +12,7 @@ type Kind uint8
 const (
 	Production Kind = iota + 1
 	Test
+	DeadlineTest
 )
 
 // Profile is immutable and constructor-validated. SQLiteBusy is innermost and
@@ -24,7 +25,7 @@ type Profile struct {
 }
 
 func New(kind Kind, sqliteBusy, ingress, startSlice time.Duration) (Profile, error) {
-	if kind != Production && kind != Test {
+	if kind != Production && kind != Test && kind != DeadlineTest {
 		return Profile{}, fmt.Errorf("timeout profile kind %d is unknown", kind)
 	}
 	if sqliteBusy <= 0 || ingress <= 0 || startSlice <= 0 {
@@ -43,14 +44,22 @@ func ProductionProfile() Profile {
 	return must(New(Production, 500*time.Millisecond, time.Second, 2*time.Second))
 }
 
-// TestProfile scales the hierarchy around the required 250 ms ingress window.
-// SQLite gets one tenth of ingress (25 ms), leaving room for the journal fold's
-// multiple bounded lock acquisitions, and start_slice remains twice ingress.
+// TestProfile favors deterministic integration runs: its two-second ingress
+// window exceeds the measured 48-writer serialized queue, while a 500 ms inner
+// retry remains strictly below both callers.
 func TestProfile() Profile {
-	return must(New(Test, 25*time.Millisecond, 250*time.Millisecond, 500*time.Millisecond))
+	return must(New(Test, 500*time.Millisecond, 2*time.Second, 3*time.Second))
 }
 
-func KnownProfiles() []Profile              { return []Profile{ProductionProfile(), TestProfile()} }
+// DeadlineTestProfile is deliberately tight and is used only by tests proving
+// deadline breach and crash-safe zero-receipt behavior.
+func DeadlineTestProfile() Profile {
+	return must(New(DeadlineTest, 25*time.Millisecond, 250*time.Millisecond, 500*time.Millisecond))
+}
+
+func KnownProfiles() []Profile {
+	return []Profile{ProductionProfile(), TestProfile(), DeadlineTestProfile()}
+}
 func (p Profile) Kind() Kind                { return p.kind }
 func (p Profile) SQLiteBusy() time.Duration { return p.sqliteBusy }
 func (p Profile) Ingress() time.Duration    { return p.ingress }

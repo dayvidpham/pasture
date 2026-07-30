@@ -17,10 +17,17 @@ func TestEveryKnownProfilePreservesStrictOrdering(t *testing.T) {
 	}
 }
 
-func TestTestProfileUsesQuarterSecondIngress(t *testing.T) {
+func TestGeneralTestProfileUsesTwoSecondIngress(t *testing.T) {
 	t.Parallel()
-	if got := TestProfile().Ingress(); got != 250*time.Millisecond {
-		t.Fatalf("test ingress=%s, want 250ms", got)
+	if got := TestProfile().Ingress(); got != 2*time.Second {
+		t.Fatalf("test ingress=%s, want 2s", got)
+	}
+}
+
+func TestDeadlineTestProfileRetainsTightFailurePath(t *testing.T) {
+	t.Parallel()
+	if got := DeadlineTestProfile().Ingress(); got != 250*time.Millisecond {
+		t.Fatalf("deadline-test ingress=%s, want 250ms", got)
 	}
 }
 

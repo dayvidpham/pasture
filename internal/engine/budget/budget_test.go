@@ -114,8 +114,8 @@ func TestSliceStartAvailabilityUnderHookWriteLoad(t *testing.T) {
 func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "pasture.db")
-	bootstrap(t, dbPath, timeouts.TestProfile())
-	tracker, err := openTracker(dbPath, timeouts.TestProfile())
+	bootstrap(t, dbPath, timeouts.DeadlineTestProfile())
+	tracker, err := openTracker(dbPath, timeouts.DeadlineTestProfile())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,9 +123,9 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 	lockErr := make(chan error, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	go func() { lockErr <- budget.HoldWriter(ctx, dbPath, timeouts.TestProfile(), held, release) }()
+	go func() { lockErr <- budget.HoldWriter(ctx, dbPath, timeouts.DeadlineTestProfile(), held, release) }()
 	<-held
-	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, budget.RealClock{}, &operationSource{prefix: "honest"}, timeouts.TestProfile())
+	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, budget.RealClock{}, &operationSource{prefix: "honest"}, timeouts.DeadlineTestProfile())
 	if err != nil {
 		close(release)
 		tracker.Close()
@@ -152,7 +152,7 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 	if !storageFailure && !stderrors.As(err, &deadline) {
 		t.Fatalf("Receive error=%v, want actionable inner storage failure or typed ingress deadline", err)
 	}
-	tracker, err = openTracker(dbPath, timeouts.TestProfile())
+	tracker, err = openTracker(dbPath, timeouts.DeadlineTestProfile())
 	if err != nil {
 		t.Fatal(err)
 	}
