@@ -169,6 +169,30 @@ func mustExactContract(harness ir.HarnessID, name, version string, core CoreRunt
 	return contract
 }
 
+func mustRangeContract(harness ir.HarnessID, name, minVersion, maxVersion string, core CoreRuntimeBindings) RuntimeContract {
+	id, err := ir.NewRuntimeContractID(harness, name)
+	if err != nil {
+		panic(err)
+	}
+	min, err := ParseHostVersion(minVersion)
+	if err != nil {
+		panic(err)
+	}
+	max, err := ParseHostVersion(maxVersion)
+	if err != nil {
+		panic(err)
+	}
+	constraint, err := NewVersionConstraint(min, max, false)
+	if err != nil {
+		panic(err)
+	}
+	contract, err := NewRuntimeContract(id, harness, constraint, core)
+	if err != nil {
+		panic(err)
+	}
+	return contract
+}
+
 // ClaudeCode2_1_210 is the pinned runtime contract for Claude Code 2.1.210. Its
 // native bindings name only Agent/SendMessage/TaskStop-era tools; it never
 // names a removed team-lifecycle call (TeamCreate/TeamDelete). Any schema or
@@ -204,7 +228,7 @@ func ClaudeCode2_1_210() RuntimeContract {
 			native: mustNativeCall("AskUserQuestion", []string{"questions"}, "the user's selected option bound to the originating request", "presents to the interactive user"),
 		},
 	}
-	return mustExactContract(ir.HarnessClaudeCode, "claude-code@2.1.210", "2.1.210", buildCoreBindings(table))
+	return mustRangeContract(ir.HarnessClaudeCode, "claude-code@2.1.210", "2.1.210", "2.2.0-0", buildCoreBindings(table))
 }
 
 // OpenCode1_17_18 is the pinned runtime contract for OpenCode 1.17.18. It uses

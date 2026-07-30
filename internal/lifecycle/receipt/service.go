@@ -72,6 +72,7 @@ func (s Service) Receive(ctx context.Context, delivery Delivery) (Receipt, error
 		return Receipt{}, structured(pasterrors.CategoryStorage, "The lifecycle occurrence envelope could not be encoded.", "The validated typed delivery failed JSON encoding, which indicates an internal contract defect.", "Receiving a lifecycle delivery (internal/lifecycle/receipt/service.go in receipt.Service.Receive).", "The payload blob may remain as a reclaimable orphan; no occurrence was committed.", "Report the incompatible delivery shape and retry only after correcting it.", err)
 	}
 	command := sha256.Sum256(append([]byte(receiptCommand+"\x00"), payload...))
+	payloadDigest := sha256.Sum256(payload)
 	authority := identity.Authority
 	id, err := s.Appender.Append(ctx, provenance.OperationInput{
 		OperationID:        provenance.OperationID(operation),
@@ -79,7 +80,7 @@ func (s Service) Receive(ctx context.Context, delivery Delivery) (Receipt, error
 		AuthorityJournalID: &authority,
 		CommandDigest:      command[:],
 		RecordedAt:         receivedAt.UnixNano(),
-		Effects:            []provenance.Effect{{Sort: provenance.EffectEvidence, ResultSlot: receiptSlot, EvidenceKind: receiptKind, ContentDigest: payload}},
+		Effects:            []provenance.Effect{{Sort: provenance.EffectEvidence, ResultSlot: receiptSlot, EvidenceKind: receiptKind, ContentDigest: payloadDigest[:], Payload: payload}},
 	})
 	if err != nil {
 		return Receipt{}, err

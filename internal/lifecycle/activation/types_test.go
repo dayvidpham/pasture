@@ -24,16 +24,12 @@ func TestClaudeActivationIsCompleteDisjointAndProgressive(t *testing.T) {
 			enabled++
 			require.Zero(t, entry.Reason)
 		case activation.Withheld:
-			if entry.Event == registration.EventSessionStart {
-				require.Equal(t, activation.WithheldProductionProofMissing, entry.Reason)
-			} else {
-				require.Equal(t, activation.WithheldMissingFixture, entry.Reason)
-			}
+			require.Equal(t, activation.WithheldMissingFixture, entry.Reason)
 		default:
 			t.Fatalf("unexpected activation state %d", entry.State)
 		}
 	}
-	require.Zero(t, enabled)
+	require.Equal(t, 1, enabled)
 	require.Equal(t, registration.EventSessionStart, entries[0].Event)
 }
 

@@ -2,8 +2,9 @@ contracts:
   - harness: claude-code
     id: claude-code/claude-code@2.1.210
     version: 2.1.210
+    max_version: 2.2.0-0
     lower: 2.1.209
-    higher: 2.1.211
+    higher: 2.2.0
     event_order:
       - SessionStart
       - Setup

@@ -11,7 +11,7 @@ import (
 	"github.com/dayvidpham/provenance"
 )
 
-const occurrenceEvidenceKind = provenance.EvidenceKind("pasture.lifecycle.occurrence/v1")
+const occurrenceEvidenceKind = provenance.EvidenceKind("pasture.lifecycle.occurrence.v1")
 
 type occurrencePayload struct {
 	Contract string                      `json:"contract"`

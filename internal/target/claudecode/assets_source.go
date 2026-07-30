@@ -95,12 +95,12 @@ func RenderGeneratedAssets(repoRoot string) (map[string][]byte, error) {
 			assetsRel = skillsPackageDir + "/" + rel
 		case strings.HasPrefix(rel, "agents/"):
 			assetsRel = agentsPackageDir + "/" + rel
-		case rel == "hooks/hooks.json", rel == "hooks/scripts/pasture-lifecycle.py":
+		case rel == "hooks/hooks.json", rel == "hooks/pasture-activation.json":
 			assetsRel = hooksPackageDir + "/" + rel
 		default:
 			return nil, fmt.Errorf(
 				"%s: generated file %q is not a skill, agent, or managed lifecycle hook file - "+
-					"why: the claude-code target maps skills, agents, hooks/hooks.json, and hooks/scripts/pasture-lifecycle.py into embedded packages - "+
+					"why: the claude-code target maps skills, agents, hooks/hooks.json, and hooks/pasture-activation.json into embedded packages - "+
 					"fix: update RenderGeneratedAssets and the embedded package layout to cover this new output kind",
 				where, rel,
 			)
@@ -222,5 +222,5 @@ func isManagedGeneratedPath(packageDir, assetsRel string) bool {
 		return !strings.Contains(assetsRel, "/.claude-plugin/")
 	}
 	return assetsRel == hooksPackageDir+"/hooks/hooks.json" ||
-		assetsRel == hooksPackageDir+"/hooks/scripts/pasture-lifecycle.py"
+		assetsRel == hooksPackageDir+"/hooks/pasture-activation.json"
 }

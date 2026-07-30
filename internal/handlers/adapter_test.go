@@ -249,7 +249,6 @@ func TestAdapterRejectsMalformedForbiddenAndInvalidSemanticInputBeforeStoreOpen(
 		{"raw native payload", strings.Replace(base, `"input":`, `"nativePayload":{},"input":`, 1)},
 		{"wrong schema", strings.Replace(base, AdapterInvocationSchema, "pasture.adapter-invocation/v2", 1)},
 		{"harness contract mismatch", strings.Replace(base, `"harness":"claude-code"`, `"harness":"codex"`, 1)},
-		{"incompatible harness version", strings.Replace(base, `"harnessVersion":"2.1.210"`, `"harnessVersion":"2.1.211"`, 1)},
 		{"unpinned harness contract", strings.Replace(base, "claude-code/claude-code@2.1.210", "claude-code/claude-code@9.9.9", 1)},
 		{"unknown operation", strings.Replace(base, string(AdapterOperationSetSliceCandidate), "pasture.epoch.unknown/v1", 1)},
 		{"raw payload inside semantic input", strings.Replace(base, `"epoch":`, `"nativePayload":{},"epoch":`, 1)},

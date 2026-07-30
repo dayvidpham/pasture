@@ -7,6 +7,9 @@ import (
 	"sort"
 
 	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
@@ -413,34 +416,45 @@ type claudeHooksConfig struct {
 }
 
 func (claudeHooksEmitter) Emit(root string, opts GenerateOptions) ([]GeneratedFile, error) {
-	contract := runtime.ClaudeCode2_1_210Lifecycle()
-	metadata, err := lifecycleMetadata(contract, "2.1.210", claudeNativeFields)
-	if err != nil {
-		return nil, fmt.Errorf("codegen.claudeHooksEmitter.Emit: lifecycle metadata: %w", err)
-	}
-	script, err := renderPythonLifecycleAdapter(metadata)
-	if err != nil {
-		return nil, fmt.Errorf("codegen.claudeHooksEmitter.Emit: lifecycle script: %w", err)
+	manifest := registration.ClaudeCode2_1_210()
+	states := activation.ClaudeCode2_1_210()
+	stateByKind := make(map[model.ContractEventKind]activation.Entry, len(states))
+	for _, state := range states {
+		stateByKind[state.Event] = state
 	}
 
 	config := claudeHooksConfig{
 		Description: "Pasture lifecycle adapters and shared-worktree git discipline for the pinned Claude Code contract.",
-		Hooks:       make(map[string][]claudeHookGroup, len(metadata.Events)),
+		Hooks:       make(map[string][]claudeHookGroup, len(manifest.Events)),
 	}
-	lifecycle := claudeHookCommand{
-		Type:    "command",
-		Command: "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/pasture-lifecycle.py",
-		Timeout: 600,
+	type supportEntry struct {
+		Event  string `json:"event"`
+		State  string `json:"state"`
+		Reason string `json:"reason,omitempty"`
 	}
-	for _, event := range metadata.Events {
-		config.Hooks[event.Name] = []claudeHookGroup{{Matcher: "", Hooks: []claudeHookCommand{lifecycle}}}
+	support := struct {
+		Harness  string         `json:"harness"`
+		Contract string         `json:"contract"`
+		Events   []supportEntry `json:"events"`
+	}{Harness: string(manifest.Harness), Contract: manifest.Contract.String()}
+	for _, event := range manifest.Events {
+		state := stateByKind[event.Kind]
+		entry := supportEntry{Event: event.NativeName, State: "withheld", Reason: fmt.Sprintf("reason-%d", state.Reason)}
+		if state.State == activation.Enabled {
+			entry.State = "enabled"
+			entry.Reason = ""
+			command := claudeHookCommand{Type: "command", Command: fmt.Sprintf(`${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event %s --host-version "${CLAUDE_CODE_VERSION:-unknown}"`, event.NativeName), Timeout: 10}
+			config.Hooks[event.NativeName] = []claudeHookGroup{{Matcher: "", Hooks: []claudeHookCommand{command}}}
+		}
+		support.Events = append(support.Events, entry)
 	}
 	config.Hooks["SessionStart"][0].Hooks = append([]claudeHookCommand{{
 		Type: "command", Command: "cat ${CLAUDE_PLUGIN_ROOT}/hooks/bd-prime.md 2>&1",
 	}}, config.Hooks["SessionStart"][0].Hooks...)
-	config.Hooks["PreCompact"][0].Hooks = append([]claudeHookCommand{{
-		Type: "command", Command: "cat ${CLAUDE_PLUGIN_ROOT}/hooks/bd-prime.md 2>&1",
-	}}, config.Hooks["PreCompact"][0].Hooks...)
+	if groups := config.Hooks["PreCompact"]; len(groups) > 0 {
+		groups[0].Hooks = append([]claudeHookCommand{{Type: "command", Command: "cat ${CLAUDE_PLUGIN_ROOT}/hooks/bd-prime.md 2>&1"}}, groups[0].Hooks...)
+		config.Hooks["PreCompact"] = groups
+	}
 	config.Hooks["PreToolUse"] = append([]claudeHookGroup{{
 		Matcher: "Bash",
 		Hooks: []claudeHookCommand{{
@@ -453,13 +467,18 @@ func (claudeHooksEmitter) Emit(root string, opts GenerateOptions) ([]GeneratedFi
 		return nil, fmt.Errorf("codegen.claudeHooksEmitter.Emit: marshal hooks config: %w", err)
 	}
 	configJSON = append(configJSON, '\n')
+	supportJSON, err := json.MarshalIndent(support, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("codegen.claudeHooksEmitter.Emit: marshal activation support: %w", err)
+	}
+	supportJSON = append(supportJSON, '\n')
 
 	outputs := []struct {
 		path    string
 		content string
 	}{
 		{path: filepath.Join(root, "hooks", "hooks.json"), content: string(configJSON)},
-		{path: filepath.Join(root, filepath.FromSlash(claudeLifecycleScriptPath)), content: script},
+		{path: filepath.Join(root, "hooks", "pasture-activation.json"), content: string(supportJSON)},
 	}
 	files := make([]GeneratedFile, 0, len(outputs))
 	for _, output := range outputs {

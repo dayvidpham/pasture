@@ -16,7 +16,7 @@ import (
 const (
 	receiptCommand = "pasture.lifecycle.receipt.append/v1"
 	receiptSlot    = provenance.ResultSlotID("occurrence")
-	receiptKind    = provenance.EvidenceKind("pasture.lifecycle.occurrence/v1")
+	receiptKind    = provenance.EvidenceKind("pasture.lifecycle.occurrence.v1")
 )
 
 type Identity struct {

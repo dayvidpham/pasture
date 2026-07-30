@@ -9,7 +9,7 @@ func ClaudeCode2_1_210() []Entry {
 	out := make([]Entry, 0, len(events))
 	for _, event := range events {
 		if event.NativeName == "SessionStart" {
-			entry, _ := NewWithheld(event.Kind, WithheldProductionProofMissing)
+			entry, _ := NewEnabled(event.Kind, true, true)
 			out = append(out, entry)
 			continue
 		}

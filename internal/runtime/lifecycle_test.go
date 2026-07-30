@@ -23,6 +23,7 @@ type lifecycleContractFixture struct {
 	Harness    string                   `yaml:"harness"`
 	ID         string                   `yaml:"id"`
 	Version    string                   `yaml:"version"`
+	MaxVersion string                   `yaml:"max_version"`
 	Lower      string                   `yaml:"lower"`
 	Higher     string                   `yaml:"higher"`
 	EventOrder []string                 `yaml:"event_order"`
@@ -114,7 +115,11 @@ func assertLifecycleContract[E comparable](
 	assert.Equal(t, want.ID, contract.ID().String())
 	assert.Equal(t, want.Harness, string(contract.Harness()))
 	assert.Equal(t, want.Version, contract.Versions().Min().String())
-	assert.Equal(t, want.Version, contract.Versions().Max().String())
+	maxVersion := want.MaxVersion
+	if maxVersion == "" {
+		maxVersion = want.Version
+	}
+	assert.Equal(t, maxVersion, contract.Versions().Max().String())
 	assert.True(t, contract.Supports(mustParse(t, want.Version)))
 	assert.False(t, contract.Supports(mustParse(t, want.Lower)))
 	assert.False(t, contract.Supports(mustParse(t, want.Higher)))

@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/projection"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/provadapter"
 	"github.com/dayvidpham/pasture/pkg/protocol"
@@ -39,6 +41,26 @@ func (t *trackerImpl) ResolveLifecycleIdentity(context.Context) (receipt.Identit
 		return receipt.Identity{}, err
 	}
 	return receipt.Identity{Actor: actor, Authority: authority}, nil
+}
+
+// NewLifecycleReader returns the public bounded lifecycle reader backed by the
+// disposable replay-derived projection.
+func NewLifecycleReader(tracker protocol.TaskTracker) (model.LifecycleReader, error) {
+	store, ok := tracker.(lifecycleReceiptStore)
+	if !ok || store.auditDBHandle() == nil {
+		return nil, &pasterrors.StructuredError{Category: pasterrors.CategoryValidation, What: "The supplied tracker cannot serve lifecycle reads.", Why: "The bounded reader needs the unified projection database handle.", Where: "Wiring lifecycle reads (internal/tasks/lifecycle_identity.go in tasks.NewLifecycleReader).", Impact: "No lifecycle records were read.", Fix: "Use the tracker returned by tasks.OpenTaskTracker."}
+	}
+	return projection.Reader{DB: store.auditDBHandle()}, nil
+}
+
+// RebuildLifecycleOccurrences derives the disposable occurrence projection
+// exclusively from journal truth.
+func RebuildLifecycleOccurrences(ctx context.Context, tracker protocol.TaskTracker) error {
+	store, ok := tracker.(lifecycleReceiptStore)
+	if !ok || store.auditDBHandle() == nil {
+		return &pasterrors.StructuredError{Category: pasterrors.CategoryValidation, What: "The supplied tracker cannot rebuild lifecycle occurrences.", Why: "Projection replay needs the unified journal and database handle.", Where: "Wiring lifecycle replay (internal/tasks/lifecycle_identity.go in tasks.RebuildLifecycleOccurrences).", Impact: "No projection rows were changed.", Fix: "Use the tracker returned by tasks.OpenTaskTracker."}
+	}
+	return projection.RebuildOccurrences(ctx, store.Journal(), store.auditDBHandle())
 }
 
 type lifecycleReceiptStore interface {

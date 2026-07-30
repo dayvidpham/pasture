@@ -92,13 +92,19 @@ func TestOpenCodeContractInventsNoTools(t *testing.T) {
 
 func TestPinnedContractVersionBoundaries(t *testing.T) {
 	t.Parallel()
+	claude := runtime.ClaudeCode2_1_210()
+	assert.False(t, claude.Supports(mustParse(t, "2.1.209")))
+	assert.True(t, claude.Supports(mustParse(t, "2.1.210")))
+	assert.True(t, claude.Supports(mustParse(t, "2.1.220")))
+	assert.True(t, claude.Supports(mustParse(t, "2.1.999")))
+	assert.False(t, claude.Supports(mustParse(t, "2.2.0")))
+
 	cases := []struct {
 		contract runtime.RuntimeContract
 		exact    string
 		lower    string
 		higher   string
 	}{
-		{contract: runtime.ClaudeCode2_1_210(), exact: "2.1.210", lower: "2.1.209", higher: "2.1.211"},
 		{contract: runtime.OpenCode1_17_18(), exact: "1.17.18", lower: "1.17.17", higher: "1.17.19"},
 		{contract: runtime.Codex0_144_1(), exact: "0.144.1", lower: "0.144.0", higher: "0.144.2"},
 	}

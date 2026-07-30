@@ -1,0 +1,155 @@
+{
+  "harness": "claude-code",
+  "contract": "claude-code/2.1.210",
+  "events": [
+    {
+      "event": "SessionStart",
+      "state": "enabled"
+    },
+    {
+      "event": "Setup",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "SessionEnd",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "UserPromptSubmit",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "UserPromptExpansion",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "Stop",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "StopFailure",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "PreToolUse",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "PermissionRequest",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "PermissionDenied",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "PostToolUse",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "PostToolUseFailure",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "PostToolBatch",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "FileChanged",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "CwdChanged",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "ConfigChange",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "InstructionsLoaded",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "WorktreeCreate",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "WorktreeRemove",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "SubagentStart",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "SubagentStop",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "TeammateIdle",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "TaskCreated",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "TaskCompleted",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "PreCompact",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "PostCompact",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "Notification",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "MessageDisplay",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "Elicitation",
+      "state": "withheld",
+      "reason": "reason-1"
+    },
+    {
+      "event": "ElicitationResult",
+      "state": "withheld",
+      "reason": "reason-1"
+    }
+  ]
+}
