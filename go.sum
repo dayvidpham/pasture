@@ -6,6 +6,8 @@ github.com/dayvidpham/bestiary v0.1.0 h1:5ovdxMlRgssn3+oJCZqjbhlhX6aQwbYFf981LbM
 github.com/dayvidpham/bestiary v0.1.0/go.mod h1:Z2/Ax6PmmBqhHomuLDjvf+JQBo0K7TFyrQN7pOCOpKs=
 github.com/dayvidpham/provenance v0.0.4-0.20260728134209-bcce71451b4a h1:XNvhtbYtqFfkCUpWSDi2mAJDV65ZuBFKnjvpsIS0y9o=
 github.com/dayvidpham/provenance v0.0.4-0.20260728134209-bcce71451b4a/go.mod h1:xeEkfmEyS0pD2WeSl0gWg+Nei35RlyyA2wEwlJE7cyc=
+github.com/dayvidpham/provenance v0.0.4-0.20260730015136-0976165224e9 h1:zEy9PWscqZS7wyNTtHrAzGezeFmRuJqItO0CJS6Kmhg=
+github.com/dayvidpham/provenance v0.0.4-0.20260730015136-0976165224e9/go.mod h1:xeEkfmEyS0pD2WeSl0gWg+Nei35RlyyA2wEwlJE7cyc=
 github.com/dbos-inc/dbos-transact-golang v0.20.0 h1:gu6+Fzabg32sS0DG1oP/hBhtXvzT13AnD/jB/yXBuiY=
 github.com/dbos-inc/dbos-transact-golang v0.20.0/go.mod h1:pQk6+7HJ3bL0qauVmkA3l4tszUKCv6r+qWYOKLEgD0I=
 github.com/dominikbraun/graph v0.23.0 h1:TdZB4pPqCLFxYhdyMFb1TBdFxp8XLcJfTTBQucVPgCo=
