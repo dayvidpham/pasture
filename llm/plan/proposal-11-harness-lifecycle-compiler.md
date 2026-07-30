@@ -1,6 +1,6 @@
 ---
 title: PROPOSAL-11 — Harness lifecycle compiler
-status: rev4 — aligned to impl-plan rev5; stale M1 gates struck
+status: rev5 — reconciled with impl-plan rev6. The impl plan is the governing checklist for M1.
 urd: llm/plan/urd-harness-lifecycle.md
 authority: llm/research/hooks-ir-compilers-architecture-lessons.md (standing, never superseded)
 supersedes:
@@ -14,7 +14,7 @@ obsoletes_impl_plan: aura-plugins-sgxp6
 Satisfies [`urd-harness-lifecycle.md`](urd-harness-lifecycle.md). Compiler
 vocabulary throughout, per user ruling.
 
-**Revision 2** corrects rev1 after review. The architecture was accepted by all
+**Revision 5.** Earlier revisions are cited below only where they name a specific superseded claim; the frontmatter tracks the current one. The architecture was accepted by all
 six reviewers; the decomposition was not. The single root cause: rev1 treated M1
 as *building four new stages* when it is *separating and renaming code that
 already exists*, in the tree and in the deleted source. Every correction below
@@ -63,7 +63,9 @@ Three consequences followed, none decided by anyone:
 | Stage | Consumes | Produces | Package | Storage |
 |---|---|---|---|---|
 | frontend | native payload + host version | L1 | `lifecycle/frontend/<harness>` | no |
-| lowering | L1 | L2 | `lifecycle/lowering` | **no** |
+
+L1, L2 and `Lower` live in **one package**, `internal/lifecycle/waist`. Splitting the waist is deferred to M2, when a second frontend shows where the seam belongs.
+| lowering | L1 | L2 | `lifecycle/waist` (with the IR types) | **no** |
 | **record** | L1 + L2 | durable interpreted record | `lifecycle/receipt` | **writes** |
 | legalization | L2 + committed state | L3, or none | `lifecycle/legalize` | reads only |
 | backend | L3 | L4 effects | `lifecycle/backend` | writes |
@@ -160,24 +162,26 @@ recreating the fusion that hid the stage.
 | Python transport (Codex) | `codegen/codex_manifest.go:54,128` |
 | `__adapter invoke` envelope (OpenCode) | `codegen/opencode_hooks.go:162,172` |
 
-**The guard and corpus frameworks are shells.** Rev1 said "extend, do not fork"
-without knowing this. A worker told to extend them finds nothing to run and
-builds a parallel harness by necessity — a fork arrived at by omission. Giving
-`guard` a driver and `acceptance` an executor are M1 prerequisites, not
-extensions.
+**The guard and corpus frameworks are shells** — recorded as a fact about the
+tree, not as M1 work. Rev3 made giving them a driver and an executor M1
+prerequisites; **rev5 struck that**. The guard driver is unnecessary once the
+package boundary and the `Lower` signature carry the enforcement, and
+`internal/acceptance` is a mutation-testing framework whose `Case` schema
+(`loader.go:273`, `:503`) is wrong for capture provenance. See impl-plan SLICE-2
+for the corpus shape actually used.
 
 ### 3.2 Naming
 
-The new IR package is **`internal/lifecycle/dialect`**, not `ir`.
-`internal/codegen/ir` already exists, 125 files bind the identifier `ir`, and
-both wiring sites already import it. Authority §7:195-197 explicitly warns
-against conflating the two. `dialect.L1` / `dialect.L2` keeps the vocabulary and
-stays greppable.
+The IR package is **`internal/lifecycle/waist`** — not `ir`, which collides with
+`internal/codegen/ir` (116 importing Go files) and which the authority warns
+against conflating (§7:195-197); and not `dialect`, which rev3 proposed and
+rev5 superseded by collapsing the split.
 
-**Boundary rule, guarded:** `dialect` types carry no `provenance.JournalID`, no
-timestamp, and no `provenance` import — they exist *before and independent of*
-any write. `model` types record *what was written*; `model` may import
-`dialect`, never the reverse.
+**Boundary rule** (retained from rev3, restated for `waist`): `waist` types carry
+no `provenance.JournalID`, no timestamp, and no `provenance` import — they exist
+before and independent of any write. `model` records what *was* written and may
+import `waist`, never the reverse. This is a design invariant, not a guarded one:
+the compiler enforces the import direction, and the rest is visible in review.
 
 ---
 
@@ -274,16 +278,18 @@ events, and make the pipeline observable.
 **Exit criteria:**
 - every enabled event traverses frontend → lowering → record → (legalization →
   backend) through the built binary, with the per-arm terminals of §2.1
-- the lowering pass is unit-tested with **no database**, and its import closure
-  equals a declared allowlist
+- the lowering pass is unit-tested with **no database**
 - each enabled event is enabled on `OriginAuthenticCapture` + passing
   `ValidateFixture` + in-range version — not a constant
 - `ProductionProof` is bound to a referenced passing case, not a constant
 - the exit-code guard fails the build when mutated; injected panic exits 0
 - correlated pairs retrievable through a public reader: `toolUseID` for 8/11,
   `requestID` for 29/30
-- every durable record carries the pinned contract ID and codebook version (R7,
-  minimal form)
+- every durable record carries the pinned contract ID. **R7 has no M1
+  discharge** — the codebook reference has no producer in the tree and full
+  definition resolution is deferred to M5, so a codebook field at M1 could only be
+  a zero value that satisfies the gate while answering neither half of the
+  requirement.
 - **static** proof of no authority: `legalize` and `backend` contain no write
   call at M1, and the human-response arm returns a typed `NoAuthority`
 
@@ -296,9 +302,8 @@ events, and make the pipeline observable.
   `SemanticFields()` projection — harness identity, timestamps and row identity
   excluded **by construction**, not by the test remembering
 
-The projection and the class table are **M1 obligations** (SLICE-1), even though
-the gate runs at M2. If first written at M2, L2 will have been designed without
-them and the projection will be back-fitted to whatever already matches.
+`SemanticFields()`, the equivalence-class table, `CanonicalKey` and
+`EquivalentTo` are all **M2**, built with two harnesses in hand.
 
 ### M3 — Codex frontend
 
@@ -321,7 +326,7 @@ Definition resolution, lineage, context disclosure, the normative write gate.
 | Requirement | Milestone | Why not M1 |
 |---|---|---|
 | R4 raw-ingestion escape hatch | M4 | needs the L1 path stable first |
-| **R10 bounded-wait deadline** (*"Do A."*) | **M2** | M1 proves traversal; the contended write path is M2's concern. Named here because rev2 left it in no milestone and no deferral list — the same silent-omission defect that lost R4 in rev1. |
+| **R10 bounded-wait deadline** (*"Do A."*) | **already enforced** (`receipt/journal.go:113-127`) | `Append` refuses a non-`ContextJournal` and a non-positive deadline, and calls `ApplyContext` under `context.WithTimeout`. Rev3's deferral was stale. The observational writer-count SLO remains an M2 concern. |
 | R7 full definition resolution | M5 | minimal form (contract + codebook ID) lands at M1 |
 
 ---

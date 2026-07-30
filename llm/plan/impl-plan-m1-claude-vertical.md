@@ -1,11 +1,11 @@
 ---
 title: IMPL_PLAN — M1 Claude vertical (MVP)
-status: rev5 — after review round 4 (A/B REVISE on one blocker each, C ACCEPT)
+status: rev6 — after review round 5 (0 blockers across all axes; 4 IMPORTANT closed)
 proposal: llm/plan/proposal-11-harness-lifecycle-compiler.md
 urd: llm/plan/urd-harness-lifecycle.md
 authority: llm/research/hooks-ir-compilers-architecture-lessons.md
 obsoletes: aura-plugins-sgxp6
-baseline: fb00691
+baseline: 511e2bb
 ---
 
 # IMPL_PLAN — M1: Claude vertical (MVP)
@@ -68,16 +68,25 @@ authority §7:190-193. Declare no second arm enum.
   no receiver carrying dependencies. That signature is the purity enforcement.
 - Drop the dedup surface: `Digest`, `Origin.digest`, `Origin.PayloadDigest`,
   `Origin.ReplayKey`. `NewEvent` loses its `digest` parameter.
-- **Do not port `key.go`.** `CanonicalKey` and `EquivalentTo` have no M1
+- **Do not port `key.go`** (`CanonicalKey` at `:50`, `ReplayKey` at `:77`), and
+  **additionally drop `Semantics.EquivalentTo` (`43dbbf1^:event.go:283-320`)**,
+  which is in the file being ported, not in `key.go`. All three have no M1
   consumer and serve only the M2 differential gate — the same rationale that cut
-  `SemanticFields()`. Restore all three together at M2 from
-  `git show 43dbbf1^:internal/lifecycle/key.go`.
-- **The waist declares no mutation field.** Mutation is target detail reached
-  through `BackendView`; `Origin` already retains `behaviour`, so `Mutation()` is
-  reachable without widening the waist. A waist representation of an axis one
-  harness has is the UNCOL widening the authority names (§40-44).
+  `SemanticFields()`. Restore `key.go` and re-add `EquivalentTo` at M2.
+- **The waist declares no mutation field**, and **drop `Origin.behaviour` from
+  the port** along with the two `[BackendView]` doc references. A waist
+  representation of an axis one harness has is the UNCOL widening the authority
+  names (§40-44). `BackendView` does **not** exist — it lived in
+  `internal/lifecycle/backend.go`, deleted at `e236e5e`, and is not in the port
+  source, so `behaviour` would be written at `43dbbf1^:event.go:512` and read
+  nowhere. SLICE-4 restores both from `git show 0f7380e:internal/lifecycle/backend.go`
+  when it first needs target detail.
 - Typed unresolved fact with a closed reason enum.
-- **Unit tests cover one event of each of the three arms** and open no database.
+- **Unit tests cover one event of each of the three arms**, plus three negative
+  cases for `verifyIdentities` — an undeclared `(kind, native name)` pair, an
+  absent required identity, and a duplicate pair (`43dbbf1^:event.go:460-470`).
+  Those are the plan's stated reason the constructor is "a real check rather than
+  a tautology"; without them it is only checked positively. All open no database.
   Arm selection needs no capture, so this is free and it is what establishes
   `Lower` behaves — not an end-to-end oracle (see §3).
 
@@ -105,16 +114,47 @@ authority §7:190-193. Declare no second arm enum.
   provenance record it has never had — `origin: authentic-capture`,
   `harness: claude-code`, `harnessVersion: 2.1.210`,
   `rawFileDigest: sha256:30d524e5d2cb22d486faad05adbaa1a4b7e0d72cd6301f38fe18ca5e3f167003`,
-  plus `captureSource`/`capturedAt` from `aura-plugins-16aam`. **Without this
-  record the one enabled event goes withheld the moment SLICE-5's gate lands.**
+  plus `captureSource` and `capturedAt`, which **are author-supplied** —
+  `aura-plugins-16aam` records the digest and the downgrade narrative but neither
+  field, and `acceptance/capture.go:48,51-54` requires both. Cite commit
+  `fb00691` as `captureSource` and its committer date as `capturedAt`, and say so
+  rather than implying they were observed. **Without this record the one enabled
+  event goes withheld the moment SLICE-5's gate lands.**
 - The remaining nine are captured on the installed **2.1.220**, which the range
   `>=2.1.210,<2.2.0-0` admits. Use `tools/capture-claude-hook.sh`. Captures are a
   **parallel, non-gating** workstream: events sit Withheld with a typed reason
   and flip to Enabled as fixtures arrive.
 - **The provenance corpus is `internal/lifecycle/ingress/claude/testdata/captures.yaml`**,
-  beside `fixtures/`. `acceptance.LoadCorpus` sets `root = filepath.Dir(path)`
-  and `ValidateFixture` rejects fixtures outside it (`capture.go:67-70`), so this
-  placement makes containment hold by construction.
+  beside `fixtures/`, carrying **both must-pass and must-fail cases**. Non-vacuity
+  is the point: a corpus of only-passing captures proves nothing.
+
+  **Do not load it with `acceptance.LoadCorpus`.** That schema is for
+  production-path corpora — `loader.go:273` requires eight fields per case and
+  `:503` requires all eight `ExactDelta` sections with a `sha256` digest each,
+  which for ten captures is ~80 author-supplied digests asserting state deltas
+  nothing evaluates. That is the bare-constant defect this gate exists to close,
+  in bulk, inside the gate's own input.
+
+  Use the shape proven at `peasant-labs/schema/develop` (`testcase/testcase.go:53-60`):
+  `name, input, expected, classification (must-pass|must-fail), provenance{source, ref},
+  mutation{description}` — where `mutation.description` is **prose** stating what
+  change would make the case matter, not an executable operator.
+
+  The must-fail cases are the valuable ones, and each maps to a real bypass:
+
+  | must-fail case | Closes |
+  |---|---|
+  | a fixture relabelled `origin: authored` | `capture.go:45-47`'s early return |
+  | a fixture whose `rawFileDigest` does not match its bytes | tampering |
+  | a `harnessVersion` outside `>=2.1.210,<2.2.0-0` | version drift |
+  | a fixture path escaping the corpus root | `capture.go:67-70` |
+
+  SLICE-5 passes the root explicitly rather than borrowing a loader's, so
+  containment holds because we chose it. Follow `peasant-labs`' negative-control
+  precedent (`testcase/testdata/vacuous_corpus.yaml`): one deliberately invalid
+  corpus that the validator must reject, so the validator itself is falsified.
+  `tools/capture-claude-hook.sh:105-119` already emits the six-field provenance
+  record the gate reads.
 - bindings: `BindingSession` on all ten; `BindingToolCall` on 8/11/12;
   `BindingRequest` on 29/30. `PostToolBatch` binds session and emits a
   **tool-call-unresolved** fact.
@@ -125,14 +165,24 @@ authority §7:190-193. Declare no second arm enum.
 
 **Owns:** `internal/lifecycle/receipt/{interpreted,consultation}.go`,
 `internal/lifecycle/receipt/journal.go`, `internal/lifecycle/projection/**`,
-`internal/lifecycle/model/{reader,occurrence}.go`, `cmd/pasture/hook_lifecycle_list.go`,
-the new `internal/audit/migrate_v*.go` step
+`internal/lifecycle/model/{reader,occurrence}.go`, `internal/lifecycle/receipt/reader.go`,
+`cmd/pasture/hook_lifecycle_list.go`, the new `internal/audit/migrate_v*.go` step
+
+`receipt/reader.go` is a five-line file whose only content is a comment saying it
+contains no reader — delete it; the comment belongs on `model.LifecycleReader`
+(`model/reader.go:33-35`), where it already is.
 **M1a subset:** the interpreted record only — **no projection, no migration, no
 new reader.** M1a reads it back with `journal.Facts().QueryEvidence` on its
 evidence kind, the pattern `projection/rebuild.go:41` already uses.
 
-- **interpreted record**: L2 arm, bindings, unresolved facts, pinned contract ID
-  and codebook version (R7, minimal form)
+- **interpreted record**: L2 arm, bindings, unresolved facts, and the pinned
+  contract ID. **No codebook version at M1.** `CodebookDefinitionRef`
+  (`model/definition.go:84-88`) and `SemanticEnvelopeRef` (`model/envelope.go:15-22`)
+  have zero constructors and zero references in the tree, and R7's full
+  definition resolution is deferred to M5 — so a codebook field at M1 could only
+  be a zero value nothing produces, satisfying the gate while answering neither
+  half of the user's requirement. R7 has **no M1 discharge**; the contract ID,
+  which `ingress/claude/capture.go:30` already populates, is what M1 carries.
 - **consultation record** (M1b): for gate-consultation events — the L3 value
   legalized, the `HostResponse` returned, and a reference to the interpreted
   record. It carries what the legalization plane knows and the interpreted record
@@ -151,8 +201,18 @@ evidence kind, the pattern `projection/rebuild.go:41` already uses.
   so both readers share it** — the filter-applied-after-`LIMIT` defect
   (`projection/reader.go:55-56`) must not be fixable in one copy and not the
   other.
-- all new durable writes go through `receipt.JournalAppender`, which already
-  enforces the caller deadline (`journal.go:118-136`).
+- **The ratified ordered pair is preserved by construction.** URD R6 fixes a
+  delivery as *two* write transactions — blob, then the record commit. The
+  occurrence and interpreted evidence are therefore emitted as **two
+  `provenance.Effect` values in one `provenance.OperationInput`**, not two
+  `Append` calls: `JournalAppender.Append` (`receipt/journal.go:113`) is one
+  `ApplyContext` per call, so a second call would be a third transaction on the
+  blocking-hook path, where contended ingress p99 already equals the deadline.
+  `receipt/service.go:83` passes a one-element `Effects` slice today;
+  `internal/tasks/governed_create_slice.go:161,230` demonstrates multi-effect
+  operations in this tree. The consultation record (M1b) is a third effect in the
+  same operation. Any change to this requires amending R6 and re-deriving the
+  lock-hold budget.
 
 ### SLICE-4 — Legalization and backend (M1b)
 
@@ -178,7 +238,15 @@ resolution, the single-transaction write.
 
 ### SLICE-5 — Activation (M1b)
 
-**Owns:** `internal/lifecycle/activation/**`
+**Owns:** `internal/lifecycle/activation/**`,
+`internal/target/claudecode/assets/pasture-hooks/hooks/{hooks.json,pasture-activation.json}`,
+`internal/codegen/claude_hooks.go`
+
+Changing activation state regenerates those two artifacts
+(`codegen/claude_hooks.go:479-485`), and M1b's Done gate requires a zero-diff
+`make generate`. **`claude_hooks.go:453` indexes `config.Hooks["SessionStart"][0]`
+with no length guard** while `:456` guards `PreCompact` — so if `SessionStart`
+ever goes withheld, `make generate` panics instead of reporting. Guard it.
 
 - the enabling gate requires `Origin == OriginAuthenticCapture` **and** a passing
   `acceptance.CaptureProvenance.ValidateFixture` **and** an in-range
@@ -248,12 +316,22 @@ wiring that never calls `Lower` and writes `arm = mapping[kind]` satisfies any
 arm assertion. Asking for "an assertion only `Lower` can satisfy" is unsatisfiable
 by construction.
 
-**So assert payload-derived values instead.** At M1a: the recorded correlation
-value equals the fixture's `session_id`
-(`b3cfe877-feb4-4ba3-9500-414c8bfb51c4`), resolved through the contract's
-identity table. That cannot come from a table lookup on `--event`. At M1b: the
-`tool_use_id` from the captured `PreToolUse`/`PostToolUse` payloads surviving
-into the interpreted record.
+**So assert payload-derived values instead.** At M1a: exactly one binding,
+equal to `model.NativeBinding{Kind: model.BindingSession, Value:
+"b3cfe877-feb4-4ba3-9500-414c8bfb51c4"}`. Assert the **(kind, value) pair**, not
+the bare value — `verifyIdentities` exists precisely because a name-only check
+would let a session field supplied under a request kind produce a semantically
+wrong correlation inside IR the verifier already blessed
+(`43dbbf1^:event.go:462-466`). A bare-value assertion is also satisfiable by
+`transcript_path`, which embeds the same UUID. At M1b: the `tool_use_id` from the
+captured `PreToolUse`/`PostToolUse` payloads.
+
+**The same argument defeats the waist constructors, not just `Lower`.**
+`ingress/claude.Parse` already emits this binding today (`capture.go:113`) and
+`receipt.Service.Receive` already persists it (`service.go:70`), so the assertion
+would pass at `511e2bb` with no waist at all. `BindEvent`, `NewEvent` and
+`verifyIdentities` are likewise established only by code inspection and SLICE-1's
+unit tests — which is why those tests carry the negative cases below.
 
 **`Lower`'s presence is established by code inspection** — SLICE-7's "no stage
 bypassed" — **and by its DB-free unit tests** (SLICE-1). That is the honest
@@ -284,7 +362,13 @@ separate worktrees, not because a package boundary is implied:
 | L1, L2, `Lower` | SLICE-1 | SLICE-2, 4 |
 | interpreted-record type | SLICE-3 | SLICE-2 (`receipt/service.go` emits it) |
 | consultation-record type | SLICE-3 | SLICE-4 |
-| `CaptureProvenance` corpus path | SLICE-2 | SLICE-5 |
+| `CaptureProvenance` corpus path + root | SLICE-2 | SLICE-5 |
+| `hookLifecycleCmd` parent command var (`cmd/pasture/hook_lifecycle.go:30`) | SLICE-7 | SLICE-3 |
+
+SLICE-3's `hook_lifecycle_list.go` and SLICE-7's `hook_lifecycle.go` are
+file-disjoint but share package `main`: the `list` file calls `AddCommand` on a
+variable SLICE-7 is rewriting in another worktree. SLICE-7's merge-last rule is
+binding across the whole `cmd/pasture` package, not just its own file.
 
 ---
 
@@ -310,7 +394,18 @@ separate worktrees, not because a package boundary is implied:
   coincidence; `ingress/claude/catalogue_test.go:59-73` is a third re-derivation
   of the axis table. SLICE-2's parity test is the first thing that checks them.
 - **`model/ids.go:22-23` are live** (`definition.go:30,53,54,71`).
-- **`acceptance.Observation` cannot hold a process result** (`report.go:20-25`).
+- **`acceptance.Observation` cannot hold a process result** (`report.go:20-25`),
+  and `acceptance.Case` requires eight fields (`loader.go:273`) including all
+  eight `ExactDelta` sections with digests (`:503`) — a production-path corpus
+  schema, not a provenance one.
+- **The occurrence projection has no incremental maintainer.** Nothing on the
+  write path inserts a projection row, so any read must rebuild from the journal.
+  Recorded as a known gap, not solved at M1.
+- **V6 holds by construction, not by test.** Ingress performs no version
+  admission check at all; the existing test uses `2.1.220`, which the widened
+  range admits, so it exercises no out-of-range case.
+- **`internal/lifecycle/claude/` is untracked**, not in the tree
+  (`git ls-files` returns nothing).
 
 ---
 
@@ -326,7 +421,11 @@ built binary, and the recorded correlation value equals the fixture's
 - [ ] Two byte-identical deliveries yield two distinct records (V1)
 - [ ] `Lower` unit-tested with no database, one event per arm
 - [ ] Each enabled event has an authentic capture **and a provenance record**
-- [ ] `pasture hook lifecycle list` returns records a user can read
+- [ ] `pasture hook lifecycle list` returns occurrence **and interpreted**
+      records a user can read
+- [ ] A payload body is retrievable by digest through a public reader (V2)
+- [ ] A delivery is two write transactions: blob, then one operation carrying the
+      occurrence and interpreted effects together (R6)
 - [ ] Gate-consultation events produce a consultation record (V8)
 - [ ] No non-zero exit from the lifecycle path
 - [ ] No `ReplayKey`, `RecordReplayed`, `Origin.PayloadDigest`
