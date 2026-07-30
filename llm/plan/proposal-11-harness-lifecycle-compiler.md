@@ -1,6 +1,6 @@
 ---
 title: PROPOSAL-11 — Harness lifecycle compiler
-status: DRAFT rev3 — revised after review round 2
+status: rev4 — aligned to impl-plan rev5; stale M1 gates struck
 urd: llm/plan/urd-harness-lifecycle.md
 authority: llm/research/hooks-ir-compilers-architecture-lessons.md (standing, never superseded)
 supersedes:
@@ -345,30 +345,29 @@ Definition resolution, lineage, context disclosure, the normative write gate.
 ## 7. Validation checklist
 
 - [ ] `make fmt`, `make lint`, `make build`, `go test -race ./...`, zero-diff `make generate`
-- [ ] `guard` has a tree-walking driver; every guard registers with it; scope is derived by walk or by exhaustive enumeration over a closed typed set, never a hand-maintained list
-- [ ] `acceptance` can execute a `Case` against the built binary and return an `Observation`
-- [ ] `dialect` import closure excludes `provenance`, `model`, `receipt`, `database/sql`
-- [ ] `lowering` import closure equals a declared allowlist
 - [ ] no second `EventSemantic`-shaped enum exists under `internal/lifecycle`
 - [ ] no symbol named `ReplayKey`, `RecordReplayed`, `Origin.PayloadDigest`
-- [ ] `CanonicalKey` retained; `SemanticFields()` projection exists
 - [ ] enabling gate requires authentic origin, passing validation, in-range version
-- [ ] no non-zero `os.Exit`, no `log.Fatal*`, no `panic(` in lifecycle packages
+- [ ] no non-zero exit from the lifecycle path
 - [ ] every durable record carries contract ID and codebook version
-- [ ] privacy posture documented in user-facing docs before `PreToolUse` is enabled
+- [ ] privacy posture documented before `PreToolUse` is enabled
 - [ ] `TestEngineStartReviewUsesAttachedProvenanceAdapter` stays green (R14/V11)
-- [ ] each guard names its falsifying mutation, and that mutation is executed
+
+*(Struck in rev4: the guard tree-walking driver, the `acceptance` case executor,
+the `dialect`/`lowering` import-closure allowlists, `SemanticFields()`, and "each
+guard names its falsifying mutation". The impl plan is the governing checklist.)*
 
 ## 8. Acceptance criteria
 
 URD §7's twelve cases, with these scopings recorded rather than left implicit:
 
-- **V5** requires the declared equivalence-class table and `SemanticFields()`; the
-  gate runs at M2, the surface is built at M1.
-- **V9** holds for Claude at M1, OpenCode at M2, Codex at M3. **Owned by
-  SLICE-8 `EE-5`** — a guard over the `make generate` artifact set against a
-  declared per-harness table, with a totality guard over `acceptance.HarnessKind`.
-  Rev2 asserted this guard without assigning it.
+- **V5** requires the declared equivalence-class table and `SemanticFields()`;
+  both are built at **M2**, with two harnesses in hand. `key.go`'s `CanonicalKey`
+  and `EquivalentTo` are restored then, alongside them.
+- **V9** holds for Claude at M1 by construction (`claude_hooks.go:449` already
+  emits the ratified shape), for OpenCode at M2 and Codex at M3. No M1 guard;
+  `PASTURE_ADAPTER_*` reaches generated output only via the Codex and OpenCode
+  emitters, both of which M2/M3 replace.
 - **V2** requires a public payload-by-digest reader, which does not exist yet.
 - **V12** requires a typed unresolved fact with a closed reason enum, which does
   not exist yet.
