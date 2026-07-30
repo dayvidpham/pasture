@@ -468,17 +468,21 @@ type-resolution failures. Only the compiler does, and it is cheaper than both.
 
 ```bash
 # orchestrator: branch each slice off the integration branch
-git worktree add -b pasture-<issue#>--<semantic-commit>--<descriptive-name> \
-  <pasture-host>/worktree/pasture-<issue#>--<semantic-commit>--<descriptive-name> \
-  <integration-branch>
+git worktree add -b <worktree-name> <repo-host>/worktree/<worktree-name> <integration-branch>
 
 # orchestrator: after the slice lands and gates pass at the merge point
 git worktree remove <path>
 ```
 
 The repo root is the worktree **host** — never work directly in it. All feature
-work lives in `worktree/<worktree-name>`. Branch name and directory name are
-identical (`pasture-44--feat--agent-integration`).
+work lives in `worktree/<worktree-name>`.
+
+A worktree is named `<primary-repo>-<issue#>--<semantic-commit>--<descriptive-name>`,
+where the primary repo is the one the change centers on — so `pasture-44--feat--agent-integration`
+here, `provenance-12--fix--bounded-apply` in a sibling repo. Branch name and
+directory name are always identical. A change spanning several repos reuses the
+same worktree name in every participating repo, which is what makes a cross-repo
+change greppable after the fact.
 
 Worktrees are cheap here — about 13 MB each, and `GOCACHE`/`GOMODCACHE` are
 global, so build artifacts are shared rather than duplicated.
