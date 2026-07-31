@@ -1,6 +1,6 @@
 ---
 title: IMPL_PLAN — M1 Claude vertical (MVP)
-status: rev9 — after review round 8 (1 BLOCKER + 8 IMPORTANT closed; MINORs deferred to plan UAT)
+status: rev10 — after plan UAT (15 FIX-NOW items; remainder DEFER'd to the follow-up epic)
 proposal: llm/plan/proposal-11-harness-lifecycle-compiler.md
 urd: llm/plan/urd-harness-lifecycle.md
 authority: llm/research/hooks-ir-compilers-architecture-lessons.md
@@ -35,7 +35,7 @@ M1a subset through its M1b remainder.
 
 ```text
 internal/lifecycle/
-    waist/        L1 + L2 types, verified constructors, Lower. ONE package.
+    waist/        L1 + L2 types, verified constructors (BindEvent, NewEvent). ONE package.
     frontend/claude/   native payload -> L1
     legalize/     L2 -> L3        (M1b)
     backend/      L3 -> L4        (M1b)
@@ -64,15 +64,33 @@ authority §7:190-193. Declare no second arm enum.
   `EventBinding.NewEvent`). Unexported fields, constructor-owned — that opacity
   is what makes contract agreement a real check rather than a tautology
   (`event.go:360-364`).
-- `func Lower(L1) (L2, error)` — no `context.Context`, no interface parameters,
-  no receiver carrying dependencies. That signature is the purity enforcement.
-- **`waist` exports no second constructor for L1 or L2**, and both carry the
-  port's `constructed` flag with an `IsValid()` accessor
-  (`43dbbf1^:event.go:369,424` shows the idiom on `EventBinding`). This is what
-  makes "`Lower` is L2's only constructor" a property of the package rather than
-  an assumption — and it is only enforceable at runtime: `waist.L2{}` is a legal
-  composite literal from any package, so downstream guards must reject
-  `!IsValid()` (§SLICE-3). There is no compile-time equivalent.
+- **`EventBinding.NewEvent` IS the L1→L2 transform. Declare no new function for
+  it.** `43dbbf1^:event.go:475` already performs the transform and calls
+  `verifyIdentities` (`:533`), and the ratified proposal names it as such twice
+  (`llm/plan/proposal-11-harness-lifecycle-compiler.md:140`, `:337`). **L1** is the
+  bound native event (`BindEvent` → `EventBinding`, plus the supplied
+  `[]Identity`); **L2** is the verified semantic value `NewEvent` returns.
+  - **Do not introduce a `waist.Lower`.** An earlier revision declared
+    `func Lower(L1) (L2, error)` on the grounds that its signature — no
+    `context.Context`, no interface parameters, no dependency-carrying receiver —
+    enforced purity. That does not survive contact with the tree: it duplicates a
+    transform that already exists, and **the port already contains a different
+    `Lower`** — `43dbbf1^:lower.go:222`,
+    `func Lower(ctx context.Context, deps Deps, event Event) (Outcome, error)` —
+    which is the **L2→L4** stage that SLICE-4 ports. Two functions named `Lower`,
+    owned by two slices, at different layers with opposite signatures, is a name
+    collision no package boundary makes safe to read.
+  - The purity property survives as a **constraint on `NewEvent`, not as a new
+    signature**: it takes no `context.Context`, no interface parameter and no
+    dependency-carrying receiver, and SLICE-1 must not add one.
+- **`waist` exports exactly two constructors — `BindEvent` and
+  `EventBinding.NewEvent`** — and every opaque type carries the port's
+  `constructed` flag with an `IsValid()` accessor (`43dbbf1^:event.go:369,424` on
+  `EventBinding`; likewise `Identity`, `Semantics`, `Origin`, `Event`). That is
+  enforceable only at runtime: `waist.L2{}` is a legal composite literal from any
+  package — Go forbids only *specifying* another package's unexported field, not
+  the empty literal — so downstream guards must reject `!IsValid()` (§SLICE-3).
+  There is no compile-time equivalent.
 - Drop the dedup surface: `Digest`, `Origin.digest`, `Origin.PayloadDigest`,
   `Origin.ReplayKey`. `NewEvent` loses its `digest` parameter.
 - **Do not port `key.go`** (`CanonicalKey` at `:50`, `ReplayKey` at `:77`), and
@@ -89,7 +107,7 @@ authority §7:190-193. Declare no second arm enum.
   nowhere. SLICE-4 restores both from `git show 0f7380e:internal/lifecycle/backend.go`
   when it first needs target detail.
 - Typed unresolved fact with a closed reason enum.
-- **Unit tests cover one event of each of the three arms**, plus **five** negative
+- **Unit tests cover one event of each of the three arms**, plus **six** negative
   cases for `verifyIdentities` (`43dbbf1^:event.go:533-611` — the implementation.
   `:460-470` is `NewEvent`'s doc comment, which collapses the first two branches
   below into a single bullet and must not be used as the test list):
@@ -110,29 +128,49 @@ authority §7:190-193. Declare no second arm enum.
     (`ingress/claude/capture.go:110`). A black-box test asserting `NewIdentity`'s
     rejection does **not** execute `:550` — which is the branch's whole purpose
     (`:468-470`: "a verifier that trusts its input is not a verifier").
+  - an identity that is not constructor-built — `!identity.IsValid()`
+    (`:540-548`). This is the branch that makes the previous case white-box-only,
+    and it is the cheapest of the six to write: pass `Identity{}` to `NewEvent`
+    from any package.
 
   Those are the plan's stated reason the constructor is "a real check rather than
   a tautology"; without them it is only checked positively. All open no database.
   Arm selection needs no capture, so this is free and it is what establishes
-  `Lower` behaves — not an end-to-end oracle (see §3).
+  `NewEvent` and `verifyIdentities` behave — not an end-to-end oracle (see §3).
 
 ### SLICE-2 — Claude frontend and captures
 
 **Owns:** `internal/lifecycle/frontend/claude/**`,
 `internal/lifecycle/ingress/claude/capture.go`,
+`internal/lifecycle/ingress/claude/catalogue_test.go` (the parity test below joins
+the existing axis re-derivation at `:59-73` rather than starting a fourth),
 `internal/lifecycle/ingress/claude/testdata/**`,
-`internal/lifecycle/receipt/service.go`
-**M1a subset:** `SessionStart` only, plus its provenance record.
+`internal/lifecycle/receipt/service.go`,
+`internal/lifecycle/receipt/service_test.go`,
+`internal/engine/budget/budget_test.go` (both only because the `Receive` signature
+change touches their call sites — see the variadic bullet),
+`tools/capture-claude-hook.sh`
+**M1a subset:** `SessionStart` only, plus its provenance record, **plus the capture
+corpus's first five cases** — the `SessionStart` must-pass case and the four
+must-fail cases. All five are derivable from the one existing fixture, so this does
+not wait on the nine outstanding captures, and **SLICE-5 needs them present at M1b
+because its loader and gate have no other input** (§SLICE-5).
 
 - **`receipt.Service.Receive` takes the record effects as inputs, and the
   parameter shape must admit absence.** It builds the `Effects` slice
   (`receipt/service.go:83`), so the interpreted effect (M1a) and the consultation
   effect (M1b) must reach it as parameters rather than being appended by a later
   stage — that is what holds the delivery to one `Append` (§SLICE-3). **Make them
-  variadic (`…provenance.Effect`) or otherwise optional:** SLICE-7's short-circuit
-  branch passes a non-valid capture with the occurrence effect *alone*, and this
-  slice merges **before** SLICE-7, so a required non-optional parameter would
-  force SLICE-7 to edit a file it does not own at the last merge in the chain.
+  variadic — `Receive(ctx, delivery, extra ...provenance.Effect)` — and not an
+  options struct or an added required parameter.** SLICE-7's short-circuit branch
+  passes a non-valid capture with the occurrence effect *alone*, and this slice
+  merges **before** SLICE-7, so a required parameter would force SLICE-7 to edit a
+  file it does not own at the last merge in the chain. Variadic is also the only
+  shape that is source-compatible with `Receive`'s five existing call sites —
+  `internal/engine/budget/budget_test.go:165,223,316` (outside
+  `internal/lifecycle` entirely) and `internal/lifecycle/receipt/service_test.go:92,109`
+  — which is why this slice now owns those two files rather than leaving them to
+  break silently.
   The interpreted-record type and its constructor are SLICE-3's, due at M1a (§4).
 - **`ingress/claude.Parse` must retain the native field name.** It currently
   emits `model.NativeBinding{Kind, Value}` and discards it
@@ -245,7 +283,17 @@ authority §7:190-193. Declare no second arm enum.
 `internal/lifecycle/receipt/journal.go`, `internal/lifecycle/projection/**`,
 `internal/lifecycle/model/{reader,occurrence}.go`, `internal/lifecycle/receipt/reader.go`,
 `cmd/pasture/hook_lifecycle_list.go`, `internal/handlers/hook_lifecycle_list.go`,
-`internal/audit/migrate.go` and the new `internal/audit/migrate_v*.go` step
+`internal/audit/migrate.go` and the new `internal/audit/migrate_v*.go` step,
+`internal/lifecycle/guard/classification.go`
+
+**`guard/classification.go` fails closed on new exported model types.**
+`ValidateModelDirectory` walks `../model` and rejects any exported type that is
+neither in the `journalClasses` map nor mechanically `nonJournalValue`. The M1b
+read verb "must also return the interpreted record", which means a new exported
+type in `internal/lifecycle/model/` — so the guard must be updated in the same
+change or the slice hits an unexplained red gate. (SLICE-3's M1a `NativeBinding`
+*field* addition is safe: that type already embeds `nonJournalValue`. It is a new
+*type* that trips it.)
 
 `receipt/reader.go` is a five-line file whose only content is a comment saying it
 contains no reader — delete it; the comment belongs on `model.LifecycleReader`
@@ -270,9 +318,19 @@ merges before SLICE-2 at M1a** (§4).
   `error` return. `waist.L2{}` is a legal composite literal from any package (Go
   forbids only *specifying* an unexported field, not the empty literal), so this is
   a runtime rejection and **not** a compile error; with it, the only route to a
-  non-empty identity list is through `Lower` (§3, §6). **No codebook version at M1.** `CodebookDefinitionRef`
-  (`model/definition.go:84-88`) and `SemanticEnvelopeRef` (`model/envelope.go:15-22`)
-  have zero constructors and zero references in the tree, and R7's full
+  non-empty identity list is through `NewEvent` (§3, §6).
+- **Export `func (r Record) Effect() provenance.Effect` beside the constructor.**
+  SLICE-7's handler is what holds the L2, calls `NewInterpreted`, and hands the
+  result to `Receive` — but `receiptKind` and `receiptSlot` are unexported and
+  package-local (`receipt/service.go:83`), so **without this method SLICE-7 cannot
+  build the interpreted effect from `internal/handlers` at all.** Keeping the
+  conversion here also keeps the evidence-kind vocabulary inside the slice that
+  owns `journal.go`. SLICE-4's consultation record needs the same method.
+- **No codebook version at M1.** `CodebookDefinitionRef`
+  (`model/definition.go:84-88`) has **one** reference — `model/envelope.go:19`, as
+  a field of `SemanticEnvelopeRef` (`model/envelope.go:15-22`), which itself has
+  zero — and both have zero constructors, so nothing in the tree produces either.
+  R7's full
   definition resolution is deferred to M5 — so a codebook field at M1 could only
   be a zero value nothing produces, satisfying the gate while answering neither
   half of the user's requirement. R7 has **no M1 discharge**; the contract ID,
@@ -387,16 +445,35 @@ instead of reporting. Guard it.
   `internal/lifecycle/ingress/claude/testdata/**` and the case shape is specified
   in §SLICE-2; this slice owns the type that reads them, and passes the root
   explicitly rather than borrowing a loader's, so containment holds because we
-  chose it.
+  chose it. **This slice owns the loader and the negative control; the test that
+  runs the loader over the REAL corpus belongs to SLICE-2**, which supplies its
+  input and merges after this slice — otherwise a test here would point at a file
+  that does not exist yet. SLICE-2's first five cases land at M1a precisely so this
+  loader has real input when it arrives.
+- **Flipping an event to Enabled as its capture arrives is this slice's
+  obligation, not SLICE-2's.** `activation/**` is owned here, and each flip
+  regenerates `hooks.json` and `pasture-activation.json`
+  (`codegen/claude_hooks.go:479-485`), which must keep the zero-diff
+  `make generate` gate green. Because this slice merges **before** SLICE-2's nine
+  events in the M1b chain, each arriving capture triggers a follow-on change here
+  rather than an edit inside SLICE-2.
 - **The negative control is
   `internal/lifecycle/activation/testdata/captures_vacuous.yaml`, and this slice
   owns both the file and its rejection test.** Follow `peasant-labs`' precedent
   (`testcase/testdata/vacuous_corpus.yaml`), but **name the invalidity**: the file
   is *syntactically valid* and contains **only `classification: must-pass` cases**.
-  The validator must reject it **with a typed reason naming the absent must-fail
-  class**, and the test asserts *that reason*, not merely that an error occurred.
-  A corpus of malformed YAML would falsify the parser rather than the validator,
-  and would leave every validation branch free to `return nil`.
+  The validator must reject it **with a typed reason naming what is absent**, and
+  the test asserts *that reason*, not merely that an error occurred. A corpus of
+  malformed YAML would falsify the parser rather than the validator, and would
+  leave every validation branch free to `return nil`.
+
+  **"Absent must-fail class" means both of these, because either alone is too
+  weak:** (a) no case carries `classification: must-fail` at all — the trivially
+  checkable form; and (b) the corpus does not cover all four bypass categories in
+  §SLICE-2's must-fail table (relabelled origin, digest mismatch, version drift,
+  path escape). (a) alone is satisfied by a single token must-fail case; (b) is the
+  gate the must-fail table actually implies. The validator reports which of the
+  four is missing.
 - **The fixture gate runs in this package's tests, never at runtime.**
   `ValidateFixture` does `os.ReadFile` on the fixture
   (`internal/acceptance/capture.go:71`) and `testdata/` is not embedded, so
@@ -410,13 +487,17 @@ instead of reporting. Guard it.
 
 **Owns:** `internal/handlers/hook_lifecycle.go`, `cmd/pasture/hook_lifecycle.go`,
 `cmd/pasture/hook_lifecycle_production_test.go`, `docs/privacy.md`
-**M1a subset:** wiring `frontend → Lower → record` (legalize/backend arrive with
-SLICE-4 at M1b) plus the `SessionStart` case. **Merges last within each phase.**
+**M1a subset:** wiring `frontend → NewEvent → record` (legalize/backend arrive
+with SLICE-4 at M1b), plus the `SessionStart` case **and the malformed-payload
+case below** — exit 0, no stderr, `Capture == model.CaptureMalformed`, no
+interpreted record. That case is the M1a **regression guard**, not M1b breadth:
+without it, wiring the waist at M1a silently starts dropping input that is
+recorded today. **Merges last within each phase.**
 
 SLICE-6 no longer exists; the exit-code work is these three bullets, in the slice
 that owns the command.
 
-- wire frontend → `Lower` → legalize → backend → **record**. The journal
+- wire frontend → `NewEvent` → legalize → backend → **record**. The journal
   `Append` is issued **once, after backend returns**, carrying the occurrence,
   interpreted and (for gate events) consultation effects together. `Effects` is
   built in `receipt.Service.Receive` (`service.go:83`), so the consultation
@@ -491,10 +572,24 @@ that owns the command.
     positional arguments from `RunE`.
 
   Keep `SilenceErrors`/`SilenceUsage` as the *quieting* measure so cobra does not
-  also print — but do not claim either closes the exit code. A typo'd flag, or
-  drift between the generated `hooks.json` command line and the binary, would
-  otherwise land as a **deny**. That is the escape the unknown-flag and
-  extra-argument fault cases above gate.
+  also print — but do not claim either closes the exit code. A typo'd **flag**, or
+  an unexpected positional argument, would otherwise return a **non-zero exit,
+  violating the ratified "return exit code 0 for all"**. (It exits **1**, not 2 —
+  *deny* is exit 2, and on this path only an unrecovered panic produces it. Do not
+  conflate them.) That is the escape the unknown-flag and extra-argument fault
+  cases above gate.
+- **Two residuals this does NOT close, stated so they are not assumed away.**
+  (a) **Command-path drift.** `Command.Find` resolves the command name *before* any
+  flag parsing, so a renamed verb — `hook lifecycl`, or drift between the
+  `hooks.json` command line generated at `codegen/claude_hooks.go:449` and the
+  binary — still exits 1 from `main.go:35`. Closing it would need `cmd/pasture/main.go`,
+  which **no slice owns**; it is recorded in §5 as an open non-zero-exit path
+  rather than silently claimed as fixed. (b) **The read verb.** Binding the
+  flag-error func to `hookLifecycleCmd` also makes SLICE-3's `hook lifecycle list`
+  exit 0 on a flag typo. That verb is human-invoked, not hook-invoked, so the
+  return-0 rule does not apply to it and exit 0 would mislead a wrapping script.
+  **Bind the func to the leaf command that Claude actually invokes**, or have
+  `list` install its own that returns the error.
 - **A malformed payload is NOT a fault.** `ingress/claude/capture.go:42-47` sets
   `Disposition = model.CaptureMalformed` and keeps the delivery;
   `receipt/service.go:97-98` rejects only `Capture == 0`, so the occurrence
@@ -530,12 +625,12 @@ that owns the command.
 
 ## 3. What the end-to-end test can and cannot prove
 
-**It cannot isolate `Lower`.** `Lower`'s output is a pure function of
-`(event kind, bindings)` taken from `runtime.LifecycleEventMapping`, and both are
-available upstream of it — the event comes from `--event`, not the payload. So a
-wiring that never calls `Lower` and writes `arm = mapping[kind]` satisfies any
-arm assertion. Asking for "an assertion only `Lower` can satisfy" is unsatisfiable
-by construction.
+**It cannot isolate the L1→L2 transform.** `NewEvent`'s arm output is a pure
+function of `(event kind, bindings)` taken from `runtime.LifecycleEventMapping`,
+and both are available upstream of it — the event comes from `--event`, not the
+payload. So a wiring that never calls `NewEvent` and writes `arm = mapping[kind]`
+satisfies any arm assertion. Asking for "an assertion only the transform can
+satisfy" is unsatisfiable by construction.
 
 **So assert payload-derived values instead.** At M1a: **the interpreted record's
 identity list** is exactly one entry, `{Kind: runtime.IdentitySession, Value:
@@ -552,7 +647,7 @@ strong — assert the pair anyway, because at M1b `PreToolUse` binds both sessio
 and tool-call and a value-only check no longer distinguishes them. At M1b: the
 `tool_use_id` from the captured `PreToolUse`/`PostToolUse` payloads.
 
-**The same argument defeats the waist constructors, not just `Lower`.**
+**The same argument defeats the waist constructors generally.**
 `ingress/claude.Parse` already emits the *occurrence-side* binding today
 (`ingress/claude/capture.go:113`) and `receipt.Service.Receive` already persists
 it (`service.go:70`), so an assertion written against
@@ -564,18 +659,21 @@ exists at `511e2bb`, so it cannot pass without the waist having run.
 `verifyIdentities` are likewise established only by code inspection and SLICE-1's
 unit tests — which is why those tests carry the negative cases below.
 
-**`Lower`'s presence is established by the constructor guard, by code inspection,
-and by its DB-free unit tests** (SLICE-1). **The guard is a runtime rejection, not
-a compile error** — `waist.L2{}` is a legal composite literal from any package,
-because Go forbids only *specifying* another package's unexported field, not the
-empty literal. So the interpreted-record constructor takes an L2 and **rejects one
-that is not `IsValid()`** (§SLICE-3), which is the idiom the port source already
-applies to every opaque type (`constructed` + `IsValid()` on `EventBinding` at
-`43dbbf1^:event.go:369,424`, and likewise `Identity`, `Semantics`, `Origin`,
-`Event`) — precisely because zero values are constructible. With that guard the
-only route to a non-empty identity list is through `Lower`. Code inspection —
-SLICE-7's "no stage bypassed" — then covers only the stages carrying no such
-obligation. That is the honest claim; an end-to-end oracle cannot make it.
+**The transform's presence is established by the constructor guard, by code
+inspection, and by SLICE-1's DB-free unit tests.** **The guard is a runtime
+rejection, not a compile error** — `waist.L2{}` is a legal composite literal from
+any package, because Go forbids only *specifying* another package's unexported
+field, not the empty literal. So the interpreted-record constructor takes an L2
+and **rejects one that is not `IsValid()`** (§SLICE-3), which is the idiom the
+port source already applies to every opaque type (`constructed` + `IsValid()` on
+`EventBinding` at `43dbbf1^:event.go:369,424`, and likewise `Identity`,
+`Semantics`, `Origin`, `Event`) — precisely because zero values are
+constructible. Since `waist` exports exactly two constructors and only
+`NewEvent` sets `constructed: true` on an `Event` (§SLICE-1), **the only route to
+a non-empty identity list is through `NewEvent` — and therefore through
+`verifyIdentities`, which it calls.** Code inspection — SLICE-7's "no stage
+bypassed" — then covers only the stages carrying no such obligation. That is the
+honest claim; an end-to-end oracle cannot make it.
 
 ---
 
@@ -600,23 +698,34 @@ M1b   ordered, because four M1b contracts run between these lanes:
 **Cross-slice contracts** — declared because the slices are parallel in separate
 worktrees, not because a package boundary is implied. **The milestone column is
 load-bearing: a row must be satisfied inside its own milestone's chain above.**
-That is why SLICE-3 precedes SLICE-2 at M1a — and **the rule applies to M1b too**.
-Four M1b rows run between lanes, and SLICE-2/SLICE-5 would otherwise form a
+That is why SLICE-3 precedes SLICE-2 at M1a — and **the rule applies to M1b too**,
+where **six** rows run between lanes. SLICE-2/SLICE-5 would otherwise form a
 **cycle**: SLICE-5 exports the case type and loader while SLICE-2 exports the
 corpus path and root. Landing SLICE-5's case type before SLICE-2's corpus cases
 breaks it, which is what the M1b order above does. Only SLICE-2's **capture
 gathering** is genuinely non-gating; its M1b *code* work imports from both SLICE-4
 and SLICE-5.
 
+**Two rows are deliberate exceptions to the rule, marked † in the table.** Neither
+is a type import, so neither can fail to compile: (1) `CaptureProvenance` corpus
+path + root runs SLICE-2 → SLICE-5 against the chain — resolved because the path
+is a plan-declared constant and SLICE-2's first five cases land at **M1a**, so the
+input exists before SLICE-5 reads it; (2) `hookLifecycleCmd` runs SLICE-7 →
+SLICE-3 while SLICE-7 merges last — resolved because that variable **already
+exists** (`cmd/pasture/hook_lifecycle.go:30`), making the row a shared-symbol merge
+hazard rather than a produce/consume edge. The rule's precise form is: *no row may
+require a slice to import a **type** that lands later in its own milestone's
+chain.* Both exceptions satisfy that.
+
 | Type | Exported by | Imported by | Milestone |
 |---|---|---|---|
-| L1, L2, `Lower` | SLICE-1 | SLICE-2, 4 | **M1a** |
-| interpreted-record type + constructor (takes L2) | SLICE-3 | SLICE-2 (`receipt/service.go` emits it) | **M1a** |
+| L1, L2, `BindEvent`, `EventBinding.NewEvent` | SLICE-1 | SLICE-2, 3, 7 (SLICE-4 at M1b) | **M1a** |
+| interpreted-record type, `receipt.NewInterpreted`, `Record.Effect()` | SLICE-3 | **SLICE-7** (its handler constructs the record and passes the effect to `Receive`) | **M1a** |
 | `model.NativeBinding` native-name field | SLICE-3 | SLICE-2 (`Parse` must retain it) | **M1a** |
 | consultation-record type | SLICE-3 | SLICE-4 | M1b |
-| `hookLifecycleCmd` parent command var (`cmd/pasture/hook_lifecycle.go:30`) | SLICE-7 | SLICE-3 | M1b |
-| `CaptureProvenance` corpus path + root | SLICE-2 | SLICE-5 | M1b |
-| consultation effect into `receipt.Service.Receive` | SLICE-4 | SLICE-2 (`service.go:83` builds `Effects`) | M1b |
+| † `hookLifecycleCmd` parent command var (`cmd/pasture/hook_lifecycle.go:30`) | SLICE-7 | SLICE-3 | M1b |
+| † `CaptureProvenance` corpus path + root (first five cases land at **M1a**) | SLICE-2 | SLICE-5 | M1b |
+| consultation effect into `receipt.Service.Receive` | SLICE-4 | **SLICE-7** (it passes the effect; `service.go:83` assembles `Effects`) | M1b |
 | capture corpus case type + loader | SLICE-5 | SLICE-2 (authors `ingress/claude/testdata/**`) | M1b |
 | negative-control corpus + its rejection test | SLICE-5 | — (SLICE-5 owns both; listed so SLICE-2 does not author it) | M1b |
 
@@ -662,6 +771,11 @@ whole `cmd/pasture` **and `internal/handlers`** surface, not just its own files.
   range admits, so it exercises no out-of-range case.
 - **`internal/lifecycle/claude/` is untracked**, not in the tree
   (`git ls-files` returns nothing).
+- **Command-path drift remains an open non-zero-exit path.** `Command.Find`
+  resolves the command name before any flag parsing, so `SetFlagErrorFunc` and a
+  permissive `Args` cannot reach it; a renamed verb exits 1 at `main.go:35`.
+  Closing it requires `cmd/pasture/main.go`, which no slice owns. Known gap, not
+  closed at M1 (§SLICE-7).
 - **No `recover` exists on the lifecycle command path today**
   (`cmd/pasture/main.go:28-36`, `cmd/pasture/hook_lifecycle.go:34-48`), so an
   unrecovered panic exits 2 — which blocking events read as *deny*. SLICE-7
@@ -687,26 +801,33 @@ whole `cmd/pasture` **and `internal/handlers`** surface, not just its own files.
 
 ## 6. Done
 
-**M1a** — four lines: one moved up from M1b, one a regression guard, neither added scope:
+**M1a** — five lines: one moved up from M1b, one a regression guard, one the corpus
+that SLICE-5 later reads; none of them added scope:
 - [ ] A real `SessionStart` reaches the interpreted record through the built
       binary, and **the interpreted record's identity list** is exactly one entry,
       `{Kind: runtime.IdentitySession, Value: "b3cfe877-feb4-4ba3-9500-414c8bfb51c4"}`
       — the **waist's** kind vocabulary. Asserting
       `model.NativeBinding{Kind: model.BindingSession, …}` off the occurrence
       instead would pass at baseline `511e2bb` with no waist at all (§3)
-- [ ] SLICE-1's DB-free unit tests pass: one event per arm, plus the **five**
+- [ ] SLICE-1's DB-free unit tests pass: one event per arm, plus the **six**
       `verifyIdentities` negatives *(moved up from M1b — SLICE-1 is complete at
       M1a, so its gate belongs here, and §3 names these as the honest evidence
-      that `Lower` and the constructors are load-bearing)*
+      that `NewEvent` and the constructors are load-bearing)*
 - [ ] The interpreted-record constructor takes an L2 and **rejects one that is not
       `IsValid()`** — a runtime guard, since `waist.L2{}` compiles from any
-      package — so the only route to a non-empty identity list is through `Lower`;
-      code inspection confirms the same for the stages carrying no such obligation
-      (SLICE-7)
+      package — so the only route to a non-empty identity list is through
+      `NewEvent`, and therefore through `verifyIdentities`; code inspection
+      confirms the same for the stages carrying no such obligation (SLICE-7)
 - [ ] A non-valid capture still records its occurrence: malformed input is **not**
       dropped by the newly-wired waist (SLICE-7's short-circuit branch). This is a
       regression guard — it holds at `511e2bb` today and must still hold once the
       waist is wired
+- [ ] The capture corpus exists with its first five cases — the `SessionStart`
+      must-pass case and **one must-fail case per bypass category** (relabelled
+      origin, digest mismatch, version drift, path escape) — each well-formed
+      against the declared case shape (SLICE-2). *Authoring is gated here;
+      **execution** is gated at M1b, because the loader that runs them is SLICE-5's
+      and M1b is where it lands.*
 
 **M1b:**
 - [ ] Every **enabled** event traverses the pipeline, asserted on payload-derived
@@ -727,7 +848,9 @@ whole `cmd/pasture` **and `internal/handlers`** surface, not just its own files.
       flag-error func and permissive `Args`, **not** by `SilenceErrors`, which
       suppresses printing only while `ExecuteC` returns the error regardless
       (`cobra@v1.10.2/command.go:1167`). Gated by the unknown-flag and
-      extra-argument fault cases asserting exit 0 against the built binary
+      extra-argument fault cases asserting exit 0 against the built binary.
+      **Command-path drift is explicitly out of scope** — `Find` resolves before
+      flag parsing, so a renamed verb still exits 1; recorded as an open gap in §5
 - [ ] SLICE-7's `RunE` defers a `recover()` that **writes a stderr report naming
       the recovered value and returns nil** — inspected against that shape, not
       merely for the presence of a `recover()`, which a silently-swallowing
@@ -735,8 +858,13 @@ whole `cmd/pasture` **and `internal/handlers`** surface, not just its own files.
       by choice (SLICE-7, §5)
 - [ ] A non-valid capture records the occurrence with **no interpreted record**,
       exit 0, no stderr — the declared short-circuit branch, gated not assumed
-- [ ] The vacuous corpus is rejected **with a typed reason naming the absent
-      must-fail class**, and the test asserts that reason (SLICE-5)
+- [ ] The vacuous corpus is rejected **with a typed reason naming what is absent**,
+      and the test asserts that reason (SLICE-5)
+- [ ] **Every `must-fail` case in the real capture corpus is rejected by the
+      enabling gate, and every `must-pass` case is admitted** — the test owned by
+      SLICE-2, run against SLICE-5's already-merged loader. Without this the four
+      must-fail cases are authored and never executed, and a corpus that never runs
+      proves nothing
 - [ ] No `ReplayKey`, `RecordReplayed`, `Origin.PayloadDigest`
 - [ ] `docs/privacy.md` published before `PreToolUse` is enabled
 - [ ] `make fmt`, `make lint`, `make build`, `go test -race ./...`,
