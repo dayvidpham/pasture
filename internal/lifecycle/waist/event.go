@@ -240,11 +240,16 @@ func (b EventBinding) NewEvent(identities []Identity) (L2, error) {
 	if err != nil {
 		return Event{}, err
 	}
+	unresolved, err := unresolvedFacts(b.mapping.UnresolvedIdentities(), where)
+	if err != nil {
+		return Event{}, err
+	}
 	return Event{
 		semantics: Semantics{
 			semantic:    b.mapping.Semantic(),
 			blocking:    b.mapping.Blocking(),
 			identities:  semanticIdentities,
+			unresolved:  unresolved,
 			constructed: true,
 		},
 		origin: Origin{
@@ -254,6 +259,28 @@ func (b EventBinding) NewEvent(identities []Identity) (L2, error) {
 		},
 		constructed: true,
 	}, nil
+}
+
+func unresolvedFacts(kinds []runtime.NativeIdentityKind, where string) ([]UnresolvedFact, error) {
+	facts := make([]UnresolvedFact, 0, len(kinds))
+	for _, kind := range kinds {
+		var reason UnresolvedReason
+		switch kind {
+		case runtime.IdentityToolCall:
+			reason = UnresolvedToolCall
+		default:
+			return nil, validationError(
+				fmt.Sprintf("The lifecycle mapping contains unsupported unresolved identity kind %q.", kind),
+				"Every contract-level correlation gap must have an explicit closed waist reason.",
+				where,
+				"The lifecycle event was not built.",
+				"Add a reviewed unresolved reason before declaring this identity kind unresolved.",
+				nil,
+			)
+		}
+		facts = append(facts, UnresolvedFact{Reason: reason})
+	}
+	return facts, nil
 }
 
 type suppliedKey struct {

@@ -308,6 +308,7 @@ type LifecycleEventMapping struct {
 	surface        HookSurface
 	blocking       BlockingMode
 	identities     []NativeIdentityField
+	unresolved     []NativeIdentityKind
 	mutation       MutationMode
 	order          HandlerOrder
 	reconciliation ReconciliationMode
@@ -326,6 +327,9 @@ func (m LifecycleEventMapping) Failure() FailureMode               { return m.fa
 func (m LifecycleEventMapping) StopLoop() StopLoopPolicy           { return m.stopLoop }
 func (m LifecycleEventMapping) Identities() []NativeIdentityField {
 	return append([]NativeIdentityField(nil), m.identities...)
+}
+func (m LifecycleEventMapping) UnresolvedIdentities() []NativeIdentityKind {
+	return append([]NativeIdentityKind(nil), m.unresolved...)
 }
 
 func (m LifecycleEventMapping) validate(where string) error {
@@ -349,6 +353,7 @@ func (m LifecycleEventMapping) validate(where string) error {
 	}
 
 	identityNames := make(map[string]struct{}, len(m.identities))
+	identityKinds := make(map[NativeIdentityKind]struct{}, len(m.identities))
 	hasRequestIdentity := false
 	for _, identity := range m.identities {
 		if !identity.IsValid() {
@@ -368,7 +373,37 @@ func (m LifecycleEventMapping) validate(where string) error {
 			)
 		}
 		identityNames[identity.nativeName] = struct{}{}
+		identityKinds[identity.kind] = struct{}{}
 		hasRequestIdentity = hasRequestIdentity || identity.kind == IdentityRequest
+	}
+
+	unresolvedKinds := make(map[NativeIdentityKind]struct{}, len(m.unresolved))
+	for _, kind := range m.unresolved {
+		if !kind.IsValid() {
+			return runtimeError(
+				fmt.Sprintf("lifecycle event %q has invalid unresolved identity kind %d", m.nativeName, uint8(kind)),
+				"an unresolved identity must use the same closed native identity vocabulary as resolved correlation",
+				where, "the lifecycle mapping could publish an unknown correlation gap",
+				"use a declared NativeIdentityKind", nil,
+			)
+		}
+		if _, duplicate := unresolvedKinds[kind]; duplicate {
+			return runtimeError(
+				fmt.Sprintf("lifecycle event %q repeats unresolved identity kind %q", m.nativeName, kind),
+				"one static correlation gap must be declared exactly once",
+				where, "the lifecycle event would produce duplicate unresolved facts",
+				"remove the duplicate unresolved identity kind", nil,
+			)
+		}
+		if _, resolved := identityKinds[kind]; resolved {
+			return runtimeError(
+				fmt.Sprintf("lifecycle event %q declares identity kind %q as both resolved and unresolved", m.nativeName, kind),
+				"a static lifecycle contract cannot both expose and lack stable correlation for the same identity kind",
+				where, "consumers could not determine whether correlation exists",
+				"keep the kind in either identities or unresolved identities, not both", nil,
+			)
+		}
+		unresolvedKinds[kind] = struct{}{}
 	}
 
 	if m.semantic == SemanticObservation && m.mutation != MutationNone {
@@ -489,6 +524,7 @@ func (c LifecycleContract[E]) Mapping(event E) (LifecycleEventMapping, error) {
 		)
 	}
 	mapping.identities = append([]NativeIdentityField(nil), mapping.identities...)
+	mapping.unresolved = append([]NativeIdentityKind(nil), mapping.unresolved...)
 	return mapping, nil
 }
 
@@ -563,6 +599,7 @@ func newLifecycleContract[E comparable](
 		}
 		seenNativeNames[mapping.nativeName] = struct{}{}
 		mapping.identities = append([]NativeIdentityField(nil), mapping.identities...)
+		mapping.unresolved = append([]NativeIdentityKind(nil), mapping.unresolved...)
 		ownedMappings[event] = mapping
 	}
 	return LifecycleContract[E]{

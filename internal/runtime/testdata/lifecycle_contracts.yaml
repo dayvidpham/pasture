@@ -36,6 +36,9 @@ contracts:
       - MessageDisplay
       - Elicitation
       - ElicitationResult
+    unresolved_by_event:
+      PostToolBatch:
+        - tool-call
     axes:
       semantic:
         observation:
@@ -339,6 +342,7 @@ contracts:
           - request:request_id:required
 
   - harness: codex
+    unresolved_by_event: {}
     id: codex/codex@0.144.1
     version: 0.144.1
     lower: 0.144.0
@@ -492,6 +496,7 @@ contracts:
           - agent:agent_id:required
 
   - harness: opencode
+    unresolved_by_event: {}
     id: opencode/opencode@1.17.18
     version: 1.17.18
     lower: 1.17.17

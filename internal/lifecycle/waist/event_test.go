@@ -122,6 +122,38 @@ func TestInvalidConstructionCannotProduceValidL2(t *testing.T) {
 	}
 }
 
+func TestNewEventDerivesPostToolBatchUnresolvedFact(t *testing.T) {
+	t.Parallel()
+	binding := mustBinding(t, runtime.ClaudeEventPostToolBatch)
+	session := mustIdentity(t, runtime.IdentitySession, "session_id", "session-1")
+
+	event, err := binding.NewEvent([]Identity{session})
+	if err != nil {
+		t.Fatalf("NewEvent() error = %v", err)
+	}
+	identities := event.Semantics().Identities()
+	if len(identities) != 1 || identities[0].Kind != runtime.IdentitySession {
+		t.Fatalf("Identities() = %#v, want exactly one session identity", identities)
+	}
+	facts := event.Semantics().UnresolvedFacts()
+	if len(facts) != 1 || facts[0].Reason != UnresolvedToolCall || !facts[0].IsValid() {
+		t.Fatalf("UnresolvedFacts() = %#v, want exactly tool-call-unresolved", facts)
+	}
+}
+
+func TestNewEventOrdinaryMappingHasNoUnresolvedFacts(t *testing.T) {
+	t.Parallel()
+	binding := mustBinding(t, runtime.ClaudeEventSessionStart)
+	session := mustIdentity(t, runtime.IdentitySession, "session_id", "session-1")
+	event, err := binding.NewEvent([]Identity{session})
+	if err != nil {
+		t.Fatalf("NewEvent() error = %v", err)
+	}
+	if facts := event.Semantics().UnresolvedFacts(); len(facts) != 0 {
+		t.Fatalf("UnresolvedFacts() = %#v, want none", facts)
+	}
+}
+
 type identitySpec struct {
 	kind       runtime.NativeIdentityKind
 	nativeName string

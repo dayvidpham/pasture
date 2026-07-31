@@ -327,7 +327,7 @@ func claudeLifecycleMappings() map[ClaudeLifecycleEvent]LifecycleEventMapping {
 	gate := func(event ClaudeLifecycleEvent, mutation MutationMode, extra ...NativeIdentityField) LifecycleEventMapping {
 		return claudeLifecycleMapping(event, SemanticGateConsultation, Blocking, mutation, StopLoopNotApplicable, extra...)
 	}
-	return map[ClaudeLifecycleEvent]LifecycleEventMapping{
+	mappings := map[ClaudeLifecycleEvent]LifecycleEventMapping{
 		ClaudeEventSessionStart:        observe(ClaudeEventSessionStart),
 		ClaudeEventSetup:               observe(ClaudeEventSetup),
 		ClaudeEventSessionEnd:          observe(ClaudeEventSessionEnd),
@@ -359,6 +359,10 @@ func claudeLifecycleMappings() map[ClaudeLifecycleEvent]LifecycleEventMapping {
 		ClaudeEventElicitation:         gate(ClaudeEventElicitation, MutationNone, claudeRequestIdentity),
 		ClaudeEventElicitationResult:   claudeLifecycleMapping(ClaudeEventElicitationResult, SemanticExplicitHumanResponse, Blocking, MutationNone, StopLoopNotApplicable, claudeRequestIdentity),
 	}
+	postToolBatch := mappings[ClaudeEventPostToolBatch]
+	postToolBatch.unresolved = []NativeIdentityKind{IdentityToolCall}
+	mappings[ClaudeEventPostToolBatch] = postToolBatch
+	return mappings
 }
 
 func codexLifecycleMapping(

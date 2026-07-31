@@ -29,6 +29,7 @@ type lifecycleContractFixture struct {
 	EventOrder []string                 `yaml:"event_order"`
 	Axes       lifecycleAxesFixture     `yaml:"axes"`
 	Identities lifecycleIdentityFixture `yaml:"identities"`
+	Unresolved map[string][]string      `yaml:"unresolved_by_event"`
 }
 
 type lifecycleAxesFixture struct {
@@ -158,6 +159,16 @@ func assertLifecycleContract[E comparable](
 		}
 		identities := mapping.Identities()
 		assert.Equal(t, wantIdentities, identityStrings(identities), "identity contract for %s", name)
+		wantUnresolved := want.Unresolved[name]
+		if wantUnresolved == nil {
+			wantUnresolved = []string{}
+		}
+		actualUnresolved := mapping.UnresolvedIdentities()
+		actualUnresolvedNames := make([]string, len(actualUnresolved))
+		for index, kind := range actualUnresolved {
+			actualUnresolvedNames[index] = kind.String()
+		}
+		assert.Equal(t, wantUnresolved, actualUnresolvedNames, "unresolved identity contract for %s", name)
 		for _, identity := range identities {
 			assert.True(t, identity.IsValid())
 			lowerName := strings.ToLower(identity.NativeName())
@@ -173,6 +184,12 @@ func assertLifecycleContract[E comparable](
 			again, err := contract.Mapping(event)
 			require.NoError(t, err)
 			assert.Equal(t, wantIdentities, identityStrings(again.Identities()))
+		}
+		if len(actualUnresolved) > 0 {
+			actualUnresolved[0] = runtime.IdentitySession
+			again, err := contract.Mapping(event)
+			require.NoError(t, err)
+			assert.Equal(t, wantUnresolved, []string{again.UnresolvedIdentities()[0].String()})
 		}
 	}
 
@@ -233,6 +250,14 @@ func TestClaudeLifecyclePreservesBatchRequestAndStopSemantics(t *testing.T) {
 	assert.Equal(t, runtime.SemanticGateConsultation, batch.Semantic())
 	assert.Equal(t, runtime.Blocking, batch.Blocking())
 	assert.Equal(t, runtime.FailureExitTwoBlocks, batch.Failure())
+	assert.Equal(t, []runtime.NativeIdentityKind{runtime.IdentityToolCall}, batch.UnresolvedIdentities())
+	unresolved := batch.UnresolvedIdentities()
+	unresolved[0] = runtime.IdentitySession
+	assert.Equal(t, []runtime.NativeIdentityKind{runtime.IdentityToolCall}, batch.UnresolvedIdentities(), "unresolved identity metadata must be defensively copied")
+
+	sessionStart, err := contract.Mapping(runtime.ClaudeEventSessionStart)
+	require.NoError(t, err)
+	assert.Empty(t, sessionStart.UnresolvedIdentities())
 
 	permission, err := contract.Mapping(runtime.ClaudeEventPermissionRequest)
 	require.NoError(t, err)
