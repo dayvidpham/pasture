@@ -19,6 +19,37 @@ import (
 
 type Reader struct{ DB *sql.DB }
 
+func (r Reader) Records(ctx context.Context, query model.OccurrenceQuery) (model.LifecyclePage, error) {
+	page, err := r.Occurrences(ctx, query)
+	if err != nil {
+		return model.LifecyclePage{}, err
+	}
+	items := make([]model.LifecycleRecord, 0, len(page.Items))
+	for _, occurrence := range page.Items {
+		record, err := model.NewLifecycleRecord(occurrence, nil)
+		if err != nil {
+			return model.LifecyclePage{}, err
+		}
+		items = append(items, record)
+	}
+	return model.LifecyclePage{Items: items, State: page.State}, nil
+}
+
+func (r Reader) Payload(ctx context.Context, ref digest.Digest) ([]byte, error) {
+	if r.DB == nil || ref.Algorithm() != digest.SHA256 || ref.Validate() != nil {
+		return nil, readerError("The lifecycle payload request is invalid.", "A canonical sha256 digest and unified database are required.", "No payload was read.", "Pass a canonical sha256 digest to a production lifecycle reader.", nil)
+	}
+	var body []byte
+	var count int
+	if err := r.DB.QueryRowContext(ctx, `SELECT body, byte_count FROM lifecycle_payload_blobs WHERE digest = ?`, ref.String()).Scan(&body, &count); err != nil {
+		return nil, readerError("The lifecycle payload could not be read.", "The digest is missing or SQLite rejected the bounded lookup.", "No payload was returned.", "Verify the digest and database integrity.", err)
+	}
+	if len(body) != count || digest.FromBytes(body) != ref {
+		return nil, readerError("The lifecycle payload failed integrity validation.", "Stored byte count or digest does not match the body.", "Corrupt bytes were not returned.", "Restore the content-addressed blob from trusted evidence.", nil)
+	}
+	return append([]byte(nil), body...), nil
+}
+
 func (r Reader) Occurrences(ctx context.Context, query model.OccurrenceQuery) (model.OccurrencePage, error) {
 	if r.DB == nil {
 		return model.OccurrencePage{}, readerError("The lifecycle reader has no database handle.", "It was constructed outside the unified store opener.", "No records were read.", "Construct the reader with the opened projection database.", nil)

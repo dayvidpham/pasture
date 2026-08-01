@@ -27,6 +27,7 @@ const (
 var journalClasses = map[string]JournalClass{
 	"DefinitionSnapshot":    ImmutableSnapshot,
 	"OccurrenceRecord":      ImmutableSnapshot,
+	"InterpretedRecord":     ImmutableSnapshot,
 	"DefinitionStateFact":   ImmutableFact,
 	"DefinitionStateRecord": DerivedProjection,
 }
