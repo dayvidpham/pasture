@@ -56,15 +56,13 @@ func TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence(t *testing.T) {
 	occurrences := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
 	require.Len(t, occurrences, 1)
 	occurrence := occurrences[0]
-	assertOccurrencePayload(t, occurrence.Payload, raw, model.CaptureValid)
+	occurrencePayload := assertOccurrencePayload(t, occurrence.Payload, raw, model.CaptureValid)
 
 	interpreted := queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)
 	require.Len(t, interpreted, 1)
 	assertInterpretedEvidence(t, interpreted[0].Payload)
 	assertSharedOperation(t, occurrence, interpreted[0])
 
-	var occurrencePayload lifecycleOccurrencePayload
-	require.NoError(t, json.Unmarshal(occurrence.Payload, &occurrencePayload))
 	require.Equal(t, registration.EventSessionStart, occurrencePayload.Event)
 	require.Equal(t, "2.1.220", occurrencePayload.Envelope.HostVersion)
 	// The occurrence-side binding is retained independently from the waist
@@ -112,16 +110,12 @@ func TestInvalidLifecycleInvocationCreatesNoDatabase(t *testing.T) {
 }
 
 type lifecycleOccurrencePayload struct {
-	Contract string                    `json:"contract"`
-	Event    model.ContractEventKind   `json:"event"`
-	Envelope lifecycleEnvelopePayload  `json:"envelope"`
-	Bindings []lifecycleBindingPayload `json:"bindings"`
-	Capture  model.CaptureDisposition  `json:"capture"`
-	Body     string                    `json:"body_digest"`
-}
-
-type lifecycleEnvelopePayload struct {
-	HostVersion string `json:"HostVersion"`
+	Contract string                      `json:"contract"`
+	Event    model.ContractEventKind     `json:"event"`
+	Envelope model.OccurrenceEnvelopeRef `json:"envelope"`
+	Bindings []lifecycleBindingPayload   `json:"bindings"`
+	Capture  model.CaptureDisposition    `json:"capture"`
+	Body     string                      `json:"body_digest"`
 }
 
 type lifecycleBindingPayload struct {
@@ -170,16 +164,22 @@ func queryLifecycleEvidence(t *testing.T, journal provenance.Journal, kind prove
 	return page.Rows
 }
 
-func assertOccurrencePayload(t *testing.T, raw []byte, body []byte, capture model.CaptureDisposition) {
+func assertOccurrencePayload(t *testing.T, raw []byte, body []byte, capture model.CaptureDisposition) lifecycleOccurrencePayload {
 	t.Helper()
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
 	var payload lifecycleOccurrencePayload
-	require.NoError(t, json.Unmarshal(raw, &payload))
+	require.NoError(t, decoder.Decode(&payload))
+	var trailing any
+	require.ErrorIs(t, decoder.Decode(&trailing), io.EOF)
 	require.Equal(t, occurrenceLifecycleContract, payload.Contract)
 	require.Equal(t, registration.EventSessionStart, payload.Event)
+	require.Equal(t, occurrenceLifecycleContract, payload.Envelope.Runtime.Contract.String())
 	require.Equal(t, capture, payload.Capture)
 	require.Equal(t, "2.1.220", payload.Envelope.HostVersion)
 	sum := sha256.Sum256(body)
 	require.Equal(t, "sha256:"+hex.EncodeToString(sum[:]), payload.Body)
+	return payload
 }
 
 func assertInterpretedEvidence(t *testing.T, raw []byte) {
