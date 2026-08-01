@@ -3,6 +3,7 @@ package receipt
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	stderrors "errors"
 	"testing"
 	"time"
@@ -137,12 +138,13 @@ func TestReceiveAppendsOccurrenceAndOneExtraInOneOperation(t *testing.T) {
 	}
 	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-one-extra"}}
 	extra := provenance.Effect{
-		Sort:          provenance.EffectEvidence,
-		ResultSlot:    provenance.ResultSlotID("interpreted"),
-		EvidenceKind:  provenance.EvidenceKind("pasture.lifecycle.interpreted.v1"),
-		ContentDigest: []byte{7, 8, 9},
-		Payload:       []byte(`{"semantic":1}`),
+		Sort:         provenance.EffectEvidence,
+		ResultSlot:   provenance.ResultSlotID("interpreted"),
+		EvidenceKind: provenance.EvidenceKind("pasture.lifecycle.interpreted.v1"),
+		Payload:      []byte(`{"semantic":1}`),
 	}
+	digest := sha256.Sum256(extra.Payload)
+	extra.ContentDigest = digest[:]
 
 	receipt, err := s.Receive(context.Background(), validDelivery(), extra)
 	if err != nil {
@@ -167,6 +169,22 @@ func TestReceiveAppendsOccurrenceAndOneExtraInOneOperation(t *testing.T) {
 	}
 }
 
+func TestReceiveRejectsForgedLifecycleExtraBeforeAppend(t *testing.T) {
+	t.Parallel()
+	calls := []string{}
+	inputs := []provenance.OperationInput{}
+	clock := testClock{now: time.Unix(10, 0)}
+	j := contextJournal{calls: &calls, inputs: &inputs, result: provenance.CommittedResult{}}
+	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-forged-extra"}}
+	forged := provenance.Effect{Sort: provenance.EffectEvidence, ResultSlot: interpretedSlot, EvidenceKind: interpretedKind, ContentDigest: []byte{1}, Payload: []byte(`{"semantic":1}`)}
+	if _, err := s.Receive(context.Background(), validDelivery(), forged); err == nil {
+		t.Fatal("Receive accepted a forged interpreted effect; want validation before Append")
+	}
+	if len(inputs) != 0 {
+		t.Fatalf("Append inputs = %d, want zero for forged pair", len(inputs))
+	}
+}
+
 func TestReceiveAppendsOccurrenceAndExtrasInOneOperation(t *testing.T) {
 	t.Parallel()
 	calls := []string{}
@@ -181,19 +199,22 @@ func TestReceiveAppendsOccurrenceAndExtrasInOneOperation(t *testing.T) {
 	}
 	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-extras"}}
 	extraOne := provenance.Effect{
-		Sort:          provenance.EffectEvidence,
-		ResultSlot:    provenance.ResultSlotID("interpreted"),
-		EvidenceKind:  provenance.EvidenceKind("pasture.lifecycle.interpreted.v1"),
-		ContentDigest: []byte{1, 2, 3},
-		Payload:       []byte(`{"semantic":1}`),
+		Sort:         provenance.EffectEvidence,
+		ResultSlot:   provenance.ResultSlotID("interpreted"),
+		EvidenceKind: provenance.EvidenceKind("pasture.lifecycle.interpreted.v1"),
+		Payload:      []byte(`{"semantic":1}`),
 	}
+	firstDigest := sha256.Sum256(extraOne.Payload)
+	extraOne.ContentDigest = firstDigest[:]
+	firstRef := digest.FromBytes(extraOne.Payload)
 	extraTwo := provenance.Effect{
-		Sort:          provenance.EffectEvidence,
-		ResultSlot:    provenance.ResultSlotID("consultation"),
-		EvidenceKind:  provenance.EvidenceKind("pasture.lifecycle.consultation.v1"),
-		ContentDigest: []byte{4, 5, 6},
-		Payload:       []byte(`{"answer":"proceed"}`),
+		Sort:         provenance.EffectEvidence,
+		ResultSlot:   provenance.ResultSlotID("consultation"),
+		EvidenceKind: provenance.EvidenceKind("pasture.lifecycle.consultation.v1"),
+		Payload:      []byte(`{"interpreted":{"result_slot":"interpreted","content_digest":"` + firstRef.String() + `"}}`),
 	}
+	secondDigest := sha256.Sum256(extraTwo.Payload)
+	extraTwo.ContentDigest = secondDigest[:]
 
 	receipt, err := s.Receive(context.Background(), validDelivery(), extraOne, extraTwo)
 	if err != nil {

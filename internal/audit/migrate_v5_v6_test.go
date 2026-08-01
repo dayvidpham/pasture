@@ -26,8 +26,8 @@ func TestMigrateV5toV6CreatesLifecycleSchema(t *testing.T) {
 		}
 	}
 	version, err := readVersion(db)
-	if err != nil || version != 6 {
-		t.Fatalf("version=%d err=%v, want 6", version, err)
+	if err != nil || version != MaxKnownSchemaVersion {
+		t.Fatalf("version=%d err=%v, want %d", version, err, MaxKnownSchemaVersion)
 	}
 }
 
