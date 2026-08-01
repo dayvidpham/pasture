@@ -95,7 +95,8 @@ func TestMalformedClaudeEventToOccurrenceOnly(t *testing.T) {
 
 	occurrences := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
 	require.Len(t, occurrences, 1)
-	assertOccurrencePayload(t, occurrences[0].Payload, raw, model.CaptureMalformed)
+	occurrencePayload := assertOccurrencePayload(t, occurrences[0].Payload, raw, model.CaptureMalformed)
+	require.Empty(t, occurrencePayload.Bindings)
 
 	interpreted := queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)
 	require.Empty(t, interpreted)
@@ -166,6 +167,20 @@ func queryLifecycleEvidence(t *testing.T, journal provenance.Journal, kind prove
 
 func assertOccurrencePayload(t *testing.T, raw []byte, body []byte, capture model.CaptureDisposition) lifecycleOccurrencePayload {
 	t.Helper()
+	members := decodeJSONObject(t, raw)
+	require.ElementsMatch(t, []string{"contract", "event", "envelope", "bindings", "capture", "body_digest"}, mapKeys(members))
+	require.JSONEq(t, `"claude-code/2.1.210"`, string(members["contract"]))
+	require.JSONEq(t, `1`, string(members["event"]))
+	if capture == model.CaptureMalformed {
+		require.JSONEq(t, `2`, string(members["capture"]))
+	} else {
+		require.JSONEq(t, `1`, string(members["capture"]))
+	}
+	assertOccurrenceEnvelope(t, members["envelope"])
+	if capture == model.CaptureMalformed {
+		require.JSONEq(t, `null`, string(members["bindings"]))
+	}
+
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var payload lifecycleOccurrencePayload
@@ -180,6 +195,44 @@ func assertOccurrencePayload(t *testing.T, raw []byte, body []byte, capture mode
 	sum := sha256.Sum256(body)
 	require.Equal(t, "sha256:"+hex.EncodeToString(sum[:]), payload.Body)
 	return payload
+}
+
+func decodeJSONObject(t *testing.T, raw []byte) map[string]json.RawMessage {
+	t.Helper()
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	var members map[string]json.RawMessage
+	require.NoError(t, decoder.Decode(&members))
+	require.NotNil(t, members)
+	var trailing any
+	require.ErrorIs(t, decoder.Decode(&trailing), io.EOF)
+	return members
+}
+
+func assertOccurrenceEnvelope(t *testing.T, raw json.RawMessage) {
+	t.Helper()
+	members := decodeJSONObject(t, raw)
+	require.ElementsMatch(t, []string{"Runtime", "HostVersion", "Schema", "Implementation", "Retention"}, mapKeys(members))
+	require.JSONEq(t, `"2.1.220"`, string(members["HostVersion"]))
+
+	runtime := decodeJSONObject(t, members["Runtime"])
+	require.ElementsMatch(t, []string{"Definition", "Contract"}, mapKeys(runtime))
+	require.JSONEq(t, `"claude-code/2.1.210"`, string(runtime["Contract"]))
+	assertZeroDefinitionRef(t, runtime["Definition"])
+
+	for _, wrapper := range []string{"Schema", "Implementation", "Retention"} {
+		definition := decodeJSONObject(t, members[wrapper])
+		require.ElementsMatch(t, []string{"Definition"}, mapKeys(definition))
+		assertZeroDefinitionRef(t, definition["Definition"])
+	}
+}
+
+func assertZeroDefinitionRef(t *testing.T, raw json.RawMessage) {
+	t.Helper()
+	members := decodeJSONObject(t, raw)
+	require.ElementsMatch(t, []string{"Definition", "Kind", "Content"}, mapKeys(members))
+	require.JSONEq(t, `0`, string(members["Definition"]))
+	require.JSONEq(t, `0`, string(members["Kind"]))
+	require.JSONEq(t, `[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]`, string(members["Content"]))
 }
 
 func assertInterpretedEvidence(t *testing.T, raw []byte) {
