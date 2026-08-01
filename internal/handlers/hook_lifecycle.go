@@ -9,6 +9,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	claudefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/claude"
 	claudeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
@@ -88,7 +89,23 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, activations []act
 	if err != nil {
 		return err
 	}
-	_, err = service.Receive(ctx, capture.Delivery)
+	if capture.Disposition != model.CaptureValid {
+		_, err = service.Receive(ctx, capture.Delivery)
+		return err
+	}
+	l1, identities, err := claudefrontend.Bind(event.Kind, capture.Delivery.Bindings)
+	if err != nil {
+		return err
+	}
+	l2, err := l1.NewEvent(identities)
+	if err != nil {
+		return err
+	}
+	interpreted, err := receipt.NewInterpreted(l2, l2.Origin().Contract())
+	if err != nil {
+		return err
+	}
+	_, err = service.Receive(ctx, capture.Delivery, interpreted.Effect())
 	return err
 }
 
