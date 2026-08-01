@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/dayvidpham/provenance"
+	digest "github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dayvidpham/pasture/internal/handlers"
@@ -85,6 +87,46 @@ func TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence(t *testing.T) {
 	require.Contains(t, stdout.String(), `"interpreted":[`)
 	require.NotContains(t, stdout.String(), string(raw))
 	require.NotContains(t, stdout.String(), dbPath)
+
+	ingestAgain := func(payload []byte) {
+		cmd := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.220")
+		cmd.Stdin = bytes.NewReader(payload)
+		require.NoError(t, cmd.Run())
+	}
+	ingestAgain(raw)
+	ingestAgain([]byte(`{"session_id":`))
+	ingestAgain(raw)
+	pageOne := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "list", "--format", "json", "--page-size", "1", "--binding", "session:session_id="+expectedSessionIdentity)
+	stdout.Reset()
+	stderr.Reset()
+	pageOne.Stdout = &stdout
+	pageOne.Stderr = &stderr
+	require.NoError(t, pageOne.Run(), stderr.String())
+	var firstPage struct {
+		Items []json.RawMessage `json:"items"`
+		Next  string            `json:"nextCursor"`
+	}
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &firstPage))
+	require.Len(t, firstPage.Items, 1)
+	require.NotEmpty(t, firstPage.Next)
+	ingestAgain(raw)
+	continuation := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "list", "--format", "json", "--page-size", "10", "--cursor", firstPage.Next, "--binding", "session:session_id="+expectedSessionIdentity, "--binding", "session:session_id="+expectedSessionIdentity)
+	stdout.Reset()
+	stderr.Reset()
+	continuation.Stdout = &stdout
+	continuation.Stderr = &stderr
+	require.NoError(t, continuation.Run(), stderr.String())
+	var rest struct {
+		Items []json.RawMessage `json:"items"`
+		Next  string            `json:"nextCursor"`
+	}
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &rest))
+	require.Len(t, rest.Items, 2, "continuation must exclude malformed nonmatch and post-snapshot append")
+	require.Empty(t, rest.Next)
+	changed := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "list", "--format", "json", "--cursor", firstPage.Next, "--binding", "session:session_id=changed")
+	err = changed.Run()
+	require.Error(t, err)
+	require.Equal(t, 1, changed.ProcessState.ExitCode())
 }
 
 func TestMalformedClaudeEventToOccurrenceOnly(t *testing.T) {
@@ -114,6 +156,12 @@ func TestMalformedClaudeEventToOccurrenceOnly(t *testing.T) {
 
 	interpreted := queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)
 	require.Empty(t, interpreted)
+	require.NoError(t, tracker.Close())
+	list := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "list", "--format", "json")
+	var output bytes.Buffer
+	list.Stdout = &output
+	require.NoError(t, list.Run())
+	require.Contains(t, output.String(), `"interpreted":[]`)
 }
 
 func TestInvalidLifecycleInvocationCreatesNoDatabase(t *testing.T) {
@@ -134,9 +182,101 @@ func TestLifecycleListRejectsCursorBeforeDatabaseOpen(t *testing.T) {
 	command.Stderr = &stderr
 	err := command.Run()
 	require.Error(t, err)
+	require.Equal(t, 1, command.ProcessState.ExitCode())
 	require.Contains(t, stderr.String(), "invalid cursor before database open")
 	_, statErr := os.Stat(dbPath)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestLifecycleListStandardExitCategories(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "pasture")
+	buildLifecycleBinary(t, binary)
+	connectionPath := filepath.Join(dir, "database-directory")
+	storagePath := filepath.Join(dir, "future.db")
+	cases := []struct {
+		name, path string
+		prepare    func()
+		want       int
+	}{{"connection", connectionPath, func() { require.NoError(t, os.Mkdir(connectionPath, 0o700)) }, 2}, {"storage", storagePath, func() {
+		initializeLifecycleTestDatabase(t, storagePath)
+		db, err := sql.Open("sqlite", storagePath)
+		require.NoError(t, err)
+		_, err = db.Exec(`DELETE FROM audit_schema_meta; INSERT INTO audit_schema_meta(version,applied_at) VALUES(8,1)`)
+		require.NoError(t, err)
+		require.NoError(t, db.Close())
+	}, 5}}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			tc.prepare()
+			command := exec.Command(binary, "--db", tc.path, "hook", "lifecycle", "list")
+			err := command.Run()
+			require.Error(t, err)
+			require.Equal(t, tc.want, command.ProcessState.ExitCode())
+		})
+	}
+}
+
+func TestLifecycleProjectionRebuildOccurrenceAndBindingsAreAtomic(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "pasture")
+	buildLifecycleBinary(t, binary)
+	dbPath := filepath.Join(dir, "pasture.db")
+	initializeLifecycleTestDatabase(t, dbPath)
+	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_210.json"))
+	require.NoError(t, err)
+	ingest := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.220")
+	ingest.Stdin = bytes.NewReader(raw)
+	require.NoError(t, ingest.Run())
+	ingest = exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.220")
+	ingest.Stdin = bytes.NewReader(raw)
+	require.NoError(t, ingest.Run())
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+	_, err = db.Exec(`CREATE TRIGGER reject_lifecycle_binding BEFORE INSERT ON lifecycle_occurrence_bindings BEGIN SELECT RAISE(ABORT,'binding fault'); END`)
+	require.NoError(t, err)
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	err = tasks.RebuildLifecycleOccurrences(context.Background(), tracker)
+	require.Error(t, err)
+	require.NoError(t, tracker.Close())
+	var occurrences, bindings int
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM lifecycle_occurrences`).Scan(&occurrences))
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM lifecycle_occurrence_bindings`).Scan(&bindings))
+	require.Zero(t, occurrences)
+	require.Zero(t, bindings)
+	_, err = db.Exec(`DROP TRIGGER reject_lifecycle_binding`)
+	require.NoError(t, err)
+	tracker, err = tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	require.NoError(t, tasks.RebuildLifecycleOccurrences(context.Background(), tracker))
+	reader, err := tasks.NewLifecycleReader(tracker)
+	require.NoError(t, err)
+	ref := digest.FromBytes(raw)
+	body, err := reader.Payload(context.Background(), ref)
+	require.NoError(t, err)
+	require.Equal(t, raw, body)
+	body[0] ^= 0xff
+	again, err := reader.Payload(context.Background(), ref)
+	require.NoError(t, err)
+	require.Equal(t, raw, again)
+	_, err = reader.Payload(context.Background(), digest.FromString("missing"))
+	require.Error(t, err)
+	_, err = db.Exec(`PRAGMA ignore_check_constraints=ON; UPDATE lifecycle_payload_blobs SET byte_count=byte_count+1 WHERE digest=?`, ref.String())
+	require.NoError(t, err)
+	_, err = reader.Payload(context.Background(), ref)
+	require.Error(t, err)
+	_, err = db.Exec(`UPDATE lifecycle_payload_blobs SET byte_count=?,body=zeroblob(?) WHERE digest=?`, len(raw), len(raw), ref.String())
+	require.NoError(t, err)
+	_, err = reader.Payload(context.Background(), ref)
+	require.Error(t, err)
+	require.NoError(t, tracker.Close())
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM lifecycle_occurrences`).Scan(&occurrences))
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM lifecycle_occurrence_bindings`).Scan(&bindings))
+	require.Equal(t, 2, occurrences)
+	require.Equal(t, 2, bindings)
 }
 
 type lifecycleOccurrencePayload struct {

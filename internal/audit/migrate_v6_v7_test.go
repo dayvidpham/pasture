@@ -145,3 +145,74 @@ func TestMigrateV6ToV7AcceptsEmptyBindings(t *testing.T) {
 		t.Fatalf("bindings=%d", count)
 	}
 }
+
+func TestMigrateV5RunsOrderedChainToV7(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "pasture.db")+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(schemaMetaDDL + `; INSERT INTO audit_schema_meta(version,applied_at) VALUES(5,1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	version, _ := readVersion(db)
+	if version != 7 {
+		t.Fatalf("version=%d", version)
+	}
+	for _, table := range []string{"lifecycle_payload_blobs", "lifecycle_occurrences", "lifecycle_occurrence_bindings"} {
+		var count int
+		_ = db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&count)
+		if count != 1 {
+			t.Fatalf("missing %s", table)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO lifecycle_payload_blobs(digest,body,byte_count) VALUES('sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',X'01',1); INSERT INTO lifecycle_occurrences(journal_id,contract,event_kind,received_at,actor_id,capture_disposition,payload_digest,envelope_json,snapshot_journal_id) VALUES(1,'c',1,1,'a',1,'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','{}',1); INSERT INTO lifecycle_occurrence_bindings VALUES(1,0,1,X'73657373696f6e5f6964',X'43617365')`); err != nil {
+		t.Fatal(err)
+	}
+	var value []byte
+	if err := db.QueryRow(`SELECT binding_value FROM lifecycle_occurrence_bindings WHERE binding_kind=1 AND native_name=X'73657373696f6e5f6964'`).Scan(&value); err != nil || !bytes.Equal(value, []byte("Case")) {
+		t.Fatalf("lookup=%q err=%v", value, err)
+	}
+}
+
+func TestCurrentV7DatabaseIsIdempotentAndCascades(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "pasture.db")+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ddl := schemaMetaDDL + `; INSERT INTO audit_schema_meta(version,applied_at) VALUES(7,1); CREATE TABLE lifecycle_payload_blobs(digest TEXT PRIMARY KEY,body BLOB NOT NULL,byte_count INTEGER NOT NULL) WITHOUT ROWID; CREATE TABLE lifecycle_occurrences(journal_id INTEGER PRIMARY KEY,contract TEXT NOT NULL,event_kind INTEGER NOT NULL,received_at INTEGER NOT NULL,actor_id TEXT NOT NULL,capture_disposition INTEGER NOT NULL,payload_digest TEXT NOT NULL REFERENCES lifecycle_payload_blobs(digest),envelope_json BLOB NOT NULL,snapshot_journal_id INTEGER NOT NULL); CREATE TABLE lifecycle_occurrence_bindings(journal_id INTEGER NOT NULL REFERENCES lifecycle_occurrences(journal_id) ON DELETE CASCADE,binding_index INTEGER NOT NULL,binding_kind INTEGER NOT NULL,native_name BLOB NOT NULL,binding_value BLOB NOT NULL,PRIMARY KEY(journal_id,binding_index)) STRICT, WITHOUT ROWID; CREATE INDEX lifecycle_occurrence_bindings_lookup ON lifecycle_occurrence_bindings(binding_kind,native_name,binding_value,journal_id); INSERT INTO lifecycle_payload_blobs VALUES('sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',X'01',1); INSERT INTO lifecycle_occurrences VALUES(1,'c',1,1,'a',1,'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','{}',1); INSERT INTO lifecycle_occurrence_bindings VALUES(1,0,1,X'73657373696f6e5f6964',X'78');`
+	if _, err := db.Exec(ddl); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	var value []byte
+	if err := db.QueryRow(`SELECT binding_value FROM lifecycle_occurrence_bindings WHERE binding_kind=1 AND native_name=X'73657373696f6e5f6964'`).Scan(&value); err != nil || string(value) != "x" {
+		t.Fatalf("lookup=%q err=%v", value, err)
+	}
+	var violations int
+	rows, err := db.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		violations++
+	}
+	rows.Close()
+	if violations != 0 {
+		t.Fatalf("foreign key violations=%d", violations)
+	}
+	if _, err := db.Exec(`DELETE FROM lifecycle_occurrences WHERE journal_id=1`); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	_ = db.QueryRow(`SELECT count(*) FROM lifecycle_occurrence_bindings`).Scan(&count)
+	if count != 0 {
+		t.Fatalf("cascade left %d", count)
+	}
+}

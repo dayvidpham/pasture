@@ -5,9 +5,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/provenance"
 )
 
@@ -16,6 +18,12 @@ type jsonPort struct {
 	valid bool
 	err   error
 }
+type nilJSONPort struct{}
+
+func (*nilJSONPort) MarshalJSON() ([]byte, error) { return []byte(`{"ok":true}`), nil }
+func (*nilJSONPort) IsValid() bool                { return true }
+func (*nilJSONPort) ConsultationLegalized()       {}
+func (*nilJSONPort) ConsultationResponse()        {}
 
 func (p jsonPort) MarshalJSON() ([]byte, error) { return append([]byte(nil), p.raw...), p.err }
 func (p jsonPort) IsValid() bool                { return p.valid }
@@ -68,6 +76,66 @@ func TestNewConsultationRejectsInvalidPortsAndJSON(t *testing.T) {
 				t.Fatal("accepted invalid consultation")
 			}
 		})
+	}
+}
+
+func TestNewConsultationValidatesBothPortsSymmetrically(t *testing.T) {
+	t.Parallel()
+	gate, _ := NewInterpreted(mustPostToolBatchL2(t, "s"), mustClaudeLifecycleContract(t))
+	valid := jsonPort{raw: []byte(`{"ok":true}`), valid: true}
+	invalid := []struct {
+		name string
+		port jsonPort
+	}{{"invalid", jsonPort{raw: []byte(`{"ok":true}`)}}, {"marshal", jsonPort{valid: true, err: errors.New("boom")}}, {"null", jsonPort{raw: []byte(`null`), valid: true}}, {"scalar", jsonPort{raw: []byte(`1`), valid: true}}, {"array", jsonPort{raw: []byte(`[]`), valid: true}}, {"duplicate", jsonPort{raw: []byte(`{"a":1,"a":2}`), valid: true}}, {"trailing", jsonPort{raw: []byte(`{"a":1}{}`), valid: true}}, {"malformed", jsonPort{raw: []byte(`{"a":`), valid: true}}}
+	for _, side := range []string{"legalized", "response"} {
+		side := side
+		for _, tc := range invalid {
+			tc := tc
+			t.Run(side+"/"+tc.name, func(t *testing.T) {
+				t.Parallel()
+				legalized, response := valid, valid
+				if side == "legalized" {
+					legalized = tc.port
+				} else {
+					response = tc.port
+				}
+				if _, err := NewConsultation(gate, legalized, response); err == nil {
+					t.Fatal("accepted invalid port")
+				}
+			})
+		}
+	}
+	var typedNil *nilJSONPort
+	if _, err := NewConsultation(gate, typedNil, valid); err == nil {
+		t.Fatal("accepted typed-nil legalized port")
+	}
+	if _, err := NewConsultation(gate, valid, typedNil); err == nil {
+		t.Fatal("accepted typed-nil response port")
+	}
+}
+
+func TestNewConsultationPayloadBound(t *testing.T) {
+	t.Parallel()
+	gate, _ := NewInterpreted(mustPostToolBatchL2(t, "s"), mustClaudeLifecycleContract(t))
+	response := jsonPort{raw: []byte(`{}`), valid: true}
+	base := jsonPort{raw: []byte(`{"v":""}`), valid: true}
+	baseRecord, err := NewConsultation(gate, base, response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseLen := len(baseRecord.Effect().Payload)
+	fill := model.MaxNativePayloadBytes - baseLen
+	atBound := jsonPort{raw: []byte(`{"v":"` + strings.Repeat("x", fill) + `"}`), valid: true}
+	record, err := NewConsultation(gate, atBound, response)
+	if err != nil {
+		t.Fatalf("exact bound rejected: %v", err)
+	}
+	if len(record.Effect().Payload) != model.MaxNativePayloadBytes {
+		t.Fatalf("payload=%d want=%d", len(record.Effect().Payload), model.MaxNativePayloadBytes)
+	}
+	over := jsonPort{raw: []byte(`{"v":"` + strings.Repeat("x", fill+1) + `"}`), valid: true}
+	if _, err := NewConsultation(gate, over, response); err == nil {
+		t.Fatal("oversized consultation accepted")
 	}
 }
 

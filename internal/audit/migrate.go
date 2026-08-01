@@ -36,8 +36,10 @@
 //   - v4 → v5: additive dedup_key TEXT column on audit_events + a partial
 //     unique index over its non-NULL values, for engine exactly-once
 //     (migrate_v4_v5.go).
+//   - v5 → v6: lifecycle payload blobs and replay-derived occurrences.
+//   - v6 → v7: normalized byte-exact lifecycle occurrence bindings.
 //
-// This binary tops out at v6. Future migrations extend the dispatch table in
+// This binary tops out at v7. Future migrations extend the dispatch table in
 // migrationSteps() below by appending a new step and bumping
 // MaxKnownSchemaVersion.
 package audit
