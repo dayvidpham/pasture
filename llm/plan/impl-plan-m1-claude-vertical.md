@@ -279,10 +279,13 @@ because its loader and gate have no other input** (§SLICE-5).
 
 ### SLICE-3 — Record stage and read surface
 
-**Owns:** `internal/lifecycle/receipt/{interpreted,consultation}.go`,
+**Owns:** `internal/lifecycle/waist/consultation.go`,
+`internal/lifecycle/receipt/{interpreted,consultation,service}.go`,
 `internal/lifecycle/receipt/journal.go`, `internal/lifecycle/projection/**`,
-`internal/lifecycle/model/{reader,occurrence}.go`, `internal/lifecycle/receipt/reader.go`,
+`internal/lifecycle/model/{reader,occurrence,interpreted}.go`,
+`internal/lifecycle/receipt/reader.go` (deletion),
 `cmd/pasture/hook_lifecycle_list.go`, `internal/handlers/hook_lifecycle_list.go`,
+`internal/tasks/lifecycle_identity.go`, `internal/formatters/hook_lifecycle.go`,
 `internal/audit/migrate.go` and the new `internal/audit/migrate_v*.go` step,
 `internal/lifecycle/guard/classification.go`
 
@@ -722,10 +725,11 @@ chain.* Both exceptions satisfy that.
 | L1, L2, `BindEvent`, `EventBinding.NewEvent` | SLICE-1 | SLICE-2, 3, 7 (SLICE-4 at M1b) | **M1a** |
 | interpreted-record type, `receipt.NewInterpreted`, `Record.Effect()` | SLICE-3 | **SLICE-7** (its handler constructs the record and passes the effect to `Receive`) | **M1a** |
 | `model.NativeBinding` native-name field | SLICE-3 | SLICE-2 (`Parse` must retain it) | **M1a** |
-| consultation-record type | SLICE-3 | SLICE-4 | M1b |
+| consultation ports/record + same-operation effect-pair validation | SLICE-3 | SLICE-4, **SLICE-7** | M1b |
 | † `hookLifecycleCmd` parent command var (`cmd/pasture/hook_lifecycle.go:30`) | SLICE-7 | SLICE-3 | M1b |
 | † `CaptureProvenance` corpus path + root (first five cases land at **M1a**) | SLICE-2 | SLICE-5 | M1b |
 | consultation effect into `receipt.Service.Receive` | SLICE-4 | **SLICE-7** (it passes the effect; `service.go:83` assembles `Effects`) | M1b |
+| `model.LifecycleReader` records/payload API + `tasks.NewLifecycleReader` wiring | SLICE-3 | **SLICE-7** breadth proof | M1b |
 | capture corpus case type + loader | SLICE-5 | SLICE-2 (authors `ingress/claude/testdata/**`) | M1b |
 | negative-control corpus + its rejection test | SLICE-5 | — (SLICE-5 owns both; listed so SLICE-2 does not author it) | M1b |
 
