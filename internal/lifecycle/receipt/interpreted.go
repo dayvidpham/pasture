@@ -67,8 +67,8 @@ func NewInterpreted(l2 waist.L2, contract ir.RuntimeContractID) (Record, error) 
 	semantics := l2.Semantics()
 	return Record{
 		semantic:    semantics.Semantic(),
-		identities:  append([]waist.SemanticIdentity(nil), semantics.Identities()...),
-		unresolved:  append([]waist.UnresolvedFact(nil), semantics.UnresolvedFacts()...),
+		identities:  semantics.Identities(),
+		unresolved:  semantics.UnresolvedFacts(),
 		contract:    contract,
 		constructed: true,
 	}, nil

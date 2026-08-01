@@ -3,9 +3,7 @@ package receipt
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -15,6 +13,12 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/provenance"
+)
+
+const (
+	expectedInterpretedResultSlot   = provenance.ResultSlotID("interpreted")
+	expectedInterpretedEvidenceKind = provenance.EvidenceKind("pasture.lifecycle.interpreted.v1")
+	expectedInterpretedContract     = "claude-code/claude-code@2.1.210"
 )
 
 func TestNewInterpretedSessionStartPreservesTypedValues(t *testing.T) {
@@ -154,7 +158,7 @@ func TestInterpretedEffectIsCanonicalAndOwnsBytes(t *testing.T) {
 	}
 	effect := record.Effect()
 	wantPayload := []byte(`{"semantic":1,"identities":[{"kind":1,"value":"session-é-<>&"}],"unresolved_facts":[],"contract":"claude-code/claude-code@2.1.210"}`)
-	decoded := decodeInterpretedEffectPayload(t, effect.Payload)
+	decoded := mustDecodeInterpretedEffectPayload(t, effect.Payload)
 	if decoded.Semantic != uint8(runtime.SemanticObservation) {
 		t.Fatalf("decoded semantic = %d, want %d", decoded.Semantic, runtime.SemanticObservation)
 	}
@@ -164,18 +168,10 @@ func TestInterpretedEffectIsCanonicalAndOwnsBytes(t *testing.T) {
 	if len(decoded.UnresolvedFacts) != 0 {
 		t.Fatalf("decoded unresolved facts = %#v, want empty", decoded.UnresolvedFacts)
 	}
-	if decoded.Contract != "claude-code/claude-code@2.1.210" {
-		t.Fatalf("decoded contract = %q, want %q", decoded.Contract, "claude-code/claude-code@2.1.210")
+	if decoded.Contract != expectedInterpretedContract {
+		t.Fatalf("decoded contract = %q, want %q", decoded.Contract, expectedInterpretedContract)
 	}
-	if effect.Sort != provenance.EffectEvidence {
-		t.Fatalf("effect sort = %v, want %v", effect.Sort, provenance.EffectEvidence)
-	}
-	if effect.ResultSlot != provenance.ResultSlotID("interpreted") {
-		t.Fatalf("effect result slot = %q, want %q", effect.ResultSlot, provenance.ResultSlotID("interpreted"))
-	}
-	if effect.EvidenceKind != provenance.EvidenceKind("pasture.lifecycle.interpreted.v1") {
-		t.Fatalf("effect evidence kind = %q, want %q", effect.EvidenceKind, provenance.EvidenceKind("pasture.lifecycle.interpreted.v1"))
-	}
+	assertInterpretedEffectEnvelope(t, effect)
 	if !bytes.Equal(effect.Payload, wantPayload) {
 		t.Fatalf("effect payload = %s, want %s", effect.Payload, wantPayload)
 	}
@@ -195,6 +191,27 @@ func TestInterpretedEffectIsCanonicalAndOwnsBytes(t *testing.T) {
 	}
 }
 
+func TestInterpretedEffectPayloadRejectsDuplicateMembers(t *testing.T) {
+	t.Parallel()
+
+	contract := mustClaudeLifecycleContract(t)
+	record, err := NewInterpreted(mustSessionStartL2(t, "session-1"), contract)
+	if err != nil {
+		t.Fatalf("NewInterpreted() error = %v", err)
+	}
+	effect := record.Effect()
+	needle := []byte(`"contract":"` + expectedInterpretedContract + `"`)
+	duplicate := bytes.Replace(effect.Payload, needle, []byte(`"contract":"forged","contract":"`+expectedInterpretedContract+`"`), 1)
+	if bytes.Equal(duplicate, effect.Payload) {
+		t.Fatal("test setup did not insert a duplicate contract member")
+	}
+	if _, err := decodeInterpretedEffectPayload(duplicate); err == nil {
+		t.Fatal("duplicate contract member was accepted")
+	} else if !ir.IsDuplicateJSONMember(err) {
+		t.Fatalf("duplicate contract member error = %v, want duplicate-member classification", err)
+	}
+}
+
 func TestInterpretedPostToolBatchEffectPreservesUnresolvedFact(t *testing.T) {
 	t.Parallel()
 
@@ -204,17 +221,9 @@ func TestInterpretedPostToolBatchEffectPreservesUnresolvedFact(t *testing.T) {
 		t.Fatalf("NewInterpreted() error = %v", err)
 	}
 	effect := record.Effect()
-	if effect.Sort != provenance.EffectEvidence {
-		t.Fatalf("effect sort = %v, want %v", effect.Sort, provenance.EffectEvidence)
-	}
-	if effect.ResultSlot != provenance.ResultSlotID("interpreted") {
-		t.Fatalf("effect result slot = %q, want %q", effect.ResultSlot, provenance.ResultSlotID("interpreted"))
-	}
-	if effect.EvidenceKind != provenance.EvidenceKind("pasture.lifecycle.interpreted.v1") {
-		t.Fatalf("effect evidence kind = %q, want %q", effect.EvidenceKind, provenance.EvidenceKind("pasture.lifecycle.interpreted.v1"))
-	}
+	assertInterpretedEffectEnvelope(t, effect)
 
-	decoded := decodeInterpretedEffectPayload(t, effect.Payload)
+	decoded := mustDecodeInterpretedEffectPayload(t, effect.Payload)
 	if decoded.Semantic != uint8(runtime.SemanticGateConsultation) {
 		t.Fatalf("decoded semantic = %d, want %d", decoded.Semantic, runtime.SemanticGateConsultation)
 	}
@@ -230,8 +239,8 @@ func TestInterpretedPostToolBatchEffectPreservesUnresolvedFact(t *testing.T) {
 	if got := waist.UnresolvedReason(decoded.UnresolvedFacts[0].Reason).String(); got != "tool-call-unresolved" {
 		t.Fatalf("decoded unresolved reason label = %q, want %q", got, "tool-call-unresolved")
 	}
-	if decoded.Contract != "claude-code/claude-code@2.1.210" {
-		t.Fatalf("decoded contract = %q, want %q", decoded.Contract, "claude-code/claude-code@2.1.210")
+	if decoded.Contract != expectedInterpretedContract {
+		t.Fatalf("decoded contract = %q, want %q", decoded.Contract, expectedInterpretedContract)
 	}
 
 	wantDigest := sha256.Sum256(effect.Payload)
@@ -305,46 +314,34 @@ type interpretedUnresolvedFactOracle struct {
 	Reason uint8 `json:"reason"`
 }
 
-func decodeInterpretedEffectPayload(t *testing.T, payload []byte) interpretedEffectPayloadOracle {
-	t.Helper()
-
+func decodeInterpretedEffectPayload(payload []byte) (interpretedEffectPayloadOracle, error) {
 	var decoded interpretedEffectPayloadOracle
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&decoded); err != nil {
+	if err := ir.StrictJSONWithPresence(payload, []string{"semantic", "identities", "unresolved_facts", "contract"}, &decoded); err != nil {
+		return interpretedEffectPayloadOracle{}, err
+	}
+	return decoded, nil
+}
+
+func mustDecodeInterpretedEffectPayload(t *testing.T, payload []byte) interpretedEffectPayloadOracle {
+	t.Helper()
+	decoded, err := decodeInterpretedEffectPayload(payload)
+	if err != nil {
 		t.Fatalf("decode interpreted effect payload: %v", err)
 	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		if err == nil {
-			t.Fatalf("interpreted effect payload contains trailing JSON value")
-		}
-		t.Fatalf("interpreted effect payload contains trailing data: %v", err)
-	}
-
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &fields); err != nil {
-		t.Fatalf("inspect interpreted effect payload keys: %v", err)
-	}
-	wantKeys := map[string]struct{}{
-		"semantic":         {},
-		"identities":       {},
-		"unresolved_facts": {},
-		"contract":         {},
-	}
-	if len(fields) != len(wantKeys) {
-		t.Fatalf("interpreted effect payload keys = %#v, want exactly %#v", fields, wantKeys)
-	}
-	for key := range wantKeys {
-		if _, ok := fields[key]; !ok {
-			t.Fatalf("interpreted effect payload is missing key %q", key)
-		}
-	}
-	for key := range fields {
-		if _, ok := wantKeys[key]; !ok {
-			t.Fatalf("interpreted effect payload contains unknown key %q", key)
-		}
-	}
 	return decoded
+}
+
+func assertInterpretedEffectEnvelope(t *testing.T, effect provenance.Effect) {
+	t.Helper()
+	if effect.Sort != provenance.EffectEvidence {
+		t.Fatalf("effect sort = %v, want %v", effect.Sort, provenance.EffectEvidence)
+	}
+	if effect.ResultSlot != expectedInterpretedResultSlot {
+		t.Fatalf("effect result slot = %q, want %q", effect.ResultSlot, expectedInterpretedResultSlot)
+	}
+	if effect.EvidenceKind != expectedInterpretedEvidenceKind {
+		t.Fatalf("effect evidence kind = %q, want %q", effect.EvidenceKind, expectedInterpretedEvidenceKind)
+	}
 }
 
 func assertActionableValidationError(t *testing.T, err error, wantWhat string, wantWhatFragments ...string) {
