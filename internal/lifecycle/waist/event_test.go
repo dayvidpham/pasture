@@ -2,12 +2,18 @@ package waist
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/runtime"
+)
+
+const (
+	testIdentityValueMaxBytes = 512
+	testIdentityValueTooLong  = 513
 )
 
 func TestNewEventDerivesEverySemanticArm(t *testing.T) {
@@ -75,6 +81,20 @@ func TestNewEventDerivesEverySemanticArm(t *testing.T) {
 			},
 			wantUnresolved: []UnresolvedFact{
 				{Reason: UnresolvedToolCall},
+			},
+		},
+		{
+			name:         "ordinary tool observation",
+			event:        runtime.ClaudeEventPostToolUse,
+			wantSemantic: runtime.SemanticObservation,
+			wantBlocking: runtime.NonBlocking,
+			identities: []identitySpec{
+				{runtime.IdentitySession, "session_id", "session-1"},
+				{runtime.IdentityToolCall, "tool_use_id", "tool-1"},
+			},
+			wantIdentities: []SemanticIdentity{
+				{Kind: runtime.IdentitySession, Value: "session-1"},
+				{Kind: runtime.IdentityToolCall, Value: "tool-1"},
 			},
 		},
 	}
@@ -152,7 +172,7 @@ func TestVerifyIdentitiesRevalidatesOversizedConstructorState(t *testing.T) {
 	identity := Identity{
 		kind:        runtime.IdentitySession,
 		nativeName:  "session_id",
-		value:       strings.Repeat("x", identityValueMaxBytes+1),
+		value:       strings.Repeat("x", testIdentityValueTooLong),
 		constructed: true,
 	}
 	assertInvalidEvent(t, binding, []Identity{identity}, "over the 512-byte limit")
@@ -176,15 +196,16 @@ func TestInvalidConstructionCannotProduceValidL2(t *testing.T) {
 
 func TestNewIdentityAcceptsValidBoundaryValue(t *testing.T) {
 	t.Parallel()
-	identity, err := NewIdentity(runtime.IdentitySession, "session_id", "session-1")
+	value := strings.Repeat("x", testIdentityValueMaxBytes)
+	identity, err := NewIdentity(runtime.IdentitySession, "session_id", value)
 	if err != nil {
 		t.Fatalf("NewIdentity() error = %v", err)
 	}
 	if !identity.IsValid() {
 		t.Fatal("NewIdentity() returned an invalid identity")
 	}
-	if identity.Kind() != runtime.IdentitySession || identity.NativeName() != "session_id" || identity.Value() != "session-1" {
-		t.Fatalf("NewIdentity() = %#v, want session/session_id/session-1", identity)
+	if identity.Kind() != runtime.IdentitySession || identity.NativeName() != "session_id" || identity.Value() != value {
+		t.Fatalf("NewIdentity() = %#v, want session/session_id/%d-byte value", identity, testIdentityValueMaxBytes)
 	}
 }
 
@@ -236,7 +257,7 @@ func TestNewIdentityRejectsInvalidBoundaryValues(t *testing.T) {
 			name:       "oversized value",
 			kind:       runtime.IdentitySession,
 			nativeName: "session_id",
-			value:      strings.Repeat("x", identityValueMaxBytes+1),
+			value:      strings.Repeat("x", testIdentityValueTooLong),
 			wantWhat:   "over the 512-byte limit",
 		},
 		{
@@ -311,57 +332,43 @@ func TestWaistAccessorsDefensivelyCopySlices(t *testing.T) {
 	}
 }
 
-func TestNewEventOrdinaryMappingsHaveNoUnresolvedFacts(t *testing.T) {
+func TestNewEventClaudeCatalogueHasOnlyPostToolBatchUnresolvedFact(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name       string
-		event      runtime.ClaudeLifecycleEvent
-		identities []identitySpec
-	}{
-		{
-			name:  "observation",
-			event: runtime.ClaudeEventSessionStart,
-			identities: []identitySpec{
-				{runtime.IdentitySession, "session_id", "session-1"},
-			},
-		},
-		{
-			name:  "gate consultation",
-			event: runtime.ClaudeEventPreToolUse,
-			identities: []identitySpec{
-				{runtime.IdentitySession, "session_id", "session-1"},
-				{runtime.IdentityToolCall, "tool_use_id", "tool-1"},
-			},
-		},
-		{
-			name:  "explicit human response",
-			event: runtime.ClaudeEventElicitationResult,
-			identities: []identitySpec{
-				{runtime.IdentitySession, "session_id", "session-1"},
-				{runtime.IdentityRequest, "request_id", "request-1"},
-			},
-		},
-		{
-			name:  "ordinary tool observation",
-			event: runtime.ClaudeEventPostToolUse,
-			identities: []identitySpec{
-				{runtime.IdentitySession, "session_id", "session-1"},
-				{runtime.IdentityToolCall, "tool_use_id", "tool-1"},
-			},
-		},
-	}
-
-	for _, test := range tests {
-		test := test
-		t.Run(test.name, func(t *testing.T) {
+	contract := runtime.ClaudeCode2_1_210Lifecycle()
+	for _, eventKind := range runtime.ClaudeLifecycleEvents() {
+		eventKind := eventKind
+		t.Run(eventKind.NativeName(), func(t *testing.T) {
 			t.Parallel()
-			binding := mustBinding(t, test.event)
-			event, err := binding.NewEvent(buildIdentities(t, test.identities))
+			mapping, err := contract.Mapping(eventKind)
 			if err != nil {
-				t.Fatalf("NewEvent() error = %v", err)
+				t.Fatalf("Mapping(%q) error = %v", eventKind.NativeName(), err)
 			}
-			if facts := event.Semantics().UnresolvedFacts(); len(facts) != 0 {
-				t.Fatalf("UnresolvedFacts() = %#v, want none", facts)
+			identities := make([]Identity, 0, len(mapping.Identities()))
+			for index, field := range mapping.Identities() {
+				identity, err := NewIdentity(
+					field.Kind(),
+					field.NativeName(),
+					fmt.Sprintf("catalogue-%d-%s", index, field.Kind()),
+				)
+				if err != nil {
+					t.Fatalf("NewIdentity(%q) error = %v", field.NativeName(), err)
+				}
+				identities = append(identities, identity)
+			}
+			binding, err := BindEvent(contract, eventKind)
+			if err != nil {
+				t.Fatalf("BindEvent(%q) error = %v", eventKind.NativeName(), err)
+			}
+			event, err := binding.NewEvent(identities)
+			if err != nil {
+				t.Fatalf("NewEvent(%q) error = %v", eventKind.NativeName(), err)
+			}
+			want := []UnresolvedFact{}
+			if eventKind == runtime.ClaudeEventPostToolBatch {
+				want = []UnresolvedFact{{Reason: UnresolvedToolCall}}
+			}
+			if got := event.Semantics().UnresolvedFacts(); !slices.Equal(got, want) {
+				t.Fatalf("UnresolvedFacts() = %#v, want %#v", got, want)
 			}
 		})
 	}
