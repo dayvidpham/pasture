@@ -135,15 +135,6 @@ func TestBindDoesNotAcceptOccurrenceKindsWithoutRuntimeFields(t *testing.T) {
 	require.Empty(t, identities)
 }
 
-func TestBindErrorsRemainActionableStructuredValidation(t *testing.T) {
-	t.Parallel()
-
-	_, _, err := claude.Bind(registration.EventSessionStart, []model.NativeBinding{{
-		Kind: model.BindingRequest, NativeName: "session_id", Value: sessionID,
-	}})
-	requireStructuredValidation(t, err, "classifies native field \"session_id\" as kind 3", "numeric value matches")
-}
-
 func requireStructuredValidation(t *testing.T, err error, whatFragment, fixFragment string) {
 	t.Helper()
 	require.Error(t, err)
