@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	digest "github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
@@ -20,6 +21,24 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
+
+const canonicalAuthenticFixtureDigest = "sha256:30d524e5d2cb22d486faad05adbaa1a4b7e0d72cd6301f38fe18ca5e3f167003"
+
+type expectedCaptureCase struct {
+	name           string
+	fixture        string
+	classification string
+	decision       string
+	reason         string
+}
+
+var expectedCaptureCases = []expectedCaptureCase{
+	{name: "authentic-session-start", fixture: "fixtures/session_start_2_1_210.json", classification: "must-pass", decision: "enabled", reason: ""},
+	{name: "authored-origin-control", fixture: "fixtures/session_start_2_1_210_origin_authored.json", classification: "must-fail", decision: "withheld", reason: "non-authentic-origin"},
+	{name: "digest-mismatch-control", fixture: "fixtures/session_start_2_1_210_digest_mismatch.json", classification: "must-fail", decision: "withheld", reason: "digest-mismatch"},
+	{name: "version-out-of-range-control", fixture: "fixtures/session_start_2_1_210_version_out_of_range.json", classification: "must-fail", decision: "withheld", reason: "version-out-of-range"},
+	{name: "path-escape-control", fixture: "../fixtures/session_start_2_1_210.json", classification: "must-fail", decision: "withheld", reason: "path-escape"},
+}
 
 func TestIndependentCatalogueCoversGeneratedManifest(t *testing.T) {
 	t.Parallel()
@@ -65,6 +84,7 @@ func TestClaudeCatalogueMatchesRuntimeMappingForAllOrdinals(t *testing.T) {
 	runtimeEvents := runtime.ClaudeLifecycleEvents()
 	require.Len(t, manifest.Events, 30)
 	require.Len(t, runtimeEvents, 30)
+	require.NotEqual(t, manifest.Contract, runtimeContract.ID(), "occurrence registration and semantic runtime contracts are intentionally distinct")
 
 	for index, registered := range manifest.Events {
 		runtimeEvent := runtimeEvents[index]
@@ -98,6 +118,11 @@ func TestClaudeCatalogueMatchesRuntimeMappingForAllOrdinals(t *testing.T) {
 			require.Equal(t, runtimeIdentity.Kind(), identity.Kind(), "frontend kind ordinal %d index %d", index+1, identityIndex)
 			require.Equal(t, runtimeIdentity.Required(), identity.Required(), "frontend required flag ordinal %d index %d", index+1, identityIndex)
 		}
+		boundEvent, err := bound.NewEvent(identities)
+		require.NoError(t, err, "frontend NewEvent ordinal %d", index+1)
+		require.True(t, boundEvent.IsValid(), "frontend L2 ordinal %d", index+1)
+		require.Equal(t, runtimeContract.ID(), boundEvent.Origin().Contract(), "frontend origin contract ordinal %d", index+1)
+		require.Equal(t, registered.NativeName, string(boundEvent.Origin().NativeEventName()), "frontend origin native event ordinal %d", index+1)
 	}
 }
 
@@ -142,6 +167,15 @@ func TestCaptureCorpusHasFrozenFiveCaseShape(t *testing.T) {
 	var corpus captureCorpus
 	require.NoError(t, decoder.Decode(&corpus))
 	require.Len(t, corpus.Cases, 5)
+	require.Len(t, expectedCaptureCases, 5)
+	for index, want := range expectedCaptureCases {
+		got := corpus.Cases[index]
+		require.Equal(t, want.name, got.Name, "corpus case %d name", index)
+		require.Equal(t, want.fixture, got.Input.Fixture, "corpus case %d fixture", index)
+		require.Equal(t, want.classification, got.Classification, "corpus case %d classification", index)
+		require.Equal(t, want.decision, got.Expected.Decision, "corpus case %d decision", index)
+		require.Equal(t, want.reason, got.Expected.Reason, "corpus case %d reason", index)
+	}
 
 	wantReasons := map[string]struct{}{
 		"non-authentic-origin": {},
@@ -197,10 +231,14 @@ func TestAuthenticProvenanceValidatesUnchangedFixture(t *testing.T) {
 
 	provenanceBytes, err := os.ReadFile("testdata/fixtures/session_start_2_1_210.provenance.json")
 	require.NoError(t, err)
+	raw, err := os.ReadFile("testdata/fixtures/session_start_2_1_210.json")
+	require.NoError(t, err)
+	require.Equal(t, canonicalAuthenticFixtureDigest, digest.FromBytes(raw).String())
 	var provenanceRecord acceptance.CaptureProvenance
 	// Decode through encoding/json without DisallowUnknownFields: redaction and
 	// event are intentional provenance metadata outside CaptureProvenance.
 	require.NoError(t, json.Unmarshal(provenanceBytes, &provenanceRecord))
+	require.Equal(t, canonicalAuthenticFixtureDigest, provenanceRecord.RawFileDigest)
 	require.NoError(t, provenanceRecord.ValidateFixture("testdata", "fixtures/session_start_2_1_210.json"))
 }
 
@@ -239,7 +277,7 @@ func TestCaptureCorpusMetadataControlsHaveSiblingProvenance(t *testing.T) {
 		case "non-authentic-origin":
 			require.Equal(t, acceptance.OriginAuthored, provenanceRecord.Origin)
 		case "digest-mismatch":
-			require.NotEqual(t, "sha256:30d524e5d2cb22d486faad05adbaa1a4b7e0d72cd6301f38fe18ca5e3f167003", provenanceRecord.RawFileDigest)
+			require.NotEqual(t, canonicalAuthenticFixtureDigest, provenanceRecord.RawFileDigest)
 		case "version-out-of-range":
 			require.Equal(t, "2.2.0", provenanceRecord.HarnessVersion)
 		default:

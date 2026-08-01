@@ -60,14 +60,18 @@ func TestBindRejectsInvalidNativeBindings(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		kind     model.ContractEventKind
-		bindings []model.NativeBinding
+		name         string
+		kind         model.ContractEventKind
+		bindings     []model.NativeBinding
+		whatFragment string
+		fixFragment  string
 	}{
 		{
-			name:     "unknown ordinal",
-			kind:     model.ContractEventKind(31),
-			bindings: nil,
+			name:         "unknown ordinal",
+			kind:         model.ContractEventKind(31),
+			bindings:     nil,
+			whatFragment: "ordinal 31",
+			fixFragment:  "generated Claude event ordinals",
 		},
 		{
 			name: "unknown native name",
@@ -75,6 +79,8 @@ func TestBindRejectsInvalidNativeBindings(t *testing.T) {
 			bindings: []model.NativeBinding{{
 				Kind: model.BindingSession, NativeName: "unknown_id", Value: "value",
 			}},
+			whatFragment: "unknown_id",
+			fixFragment:  "exact NativeName",
 		},
 		{
 			name: "duplicate native name",
@@ -83,6 +89,8 @@ func TestBindRejectsInvalidNativeBindings(t *testing.T) {
 				{Kind: model.BindingSession, NativeName: "session_id", Value: "one"},
 				{Kind: model.BindingSession, NativeName: "session_id", Value: "two"},
 			},
+			whatFragment: "repeats native field \"session_id\"",
+			fixFragment:  "one value for each native identity field",
 		},
 		{
 			name: "numeric kind mismatch",
@@ -90,6 +98,8 @@ func TestBindRejectsInvalidNativeBindings(t *testing.T) {
 			bindings: []model.NativeBinding{{
 				Kind: model.BindingRequest, NativeName: "session_id", Value: "value",
 			}},
+			whatFragment: "classifies native field \"session_id\" as kind 3",
+			fixFragment:  "numeric value matches",
 		},
 		{
 			name: "invalid value",
@@ -97,6 +107,8 @@ func TestBindRejectsInvalidNativeBindings(t *testing.T) {
 			bindings: []model.NativeBinding{{
 				Kind: model.BindingSession, NativeName: "session_id", Value: "",
 			}},
+			whatFragment: "native field \"session_id\" has an invalid value",
+			fixFragment:  "non-empty UTF-8",
 		},
 	}
 
@@ -105,7 +117,7 @@ func TestBindRejectsInvalidNativeBindings(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			l1, identities, err := claude.Bind(test.kind, test.bindings)
-			require.Error(t, err)
+			requireStructuredValidation(t, err, test.whatFragment, test.fixFragment)
 			require.False(t, l1.IsValid())
 			require.Empty(t, identities)
 		})
@@ -118,7 +130,7 @@ func TestBindDoesNotAcceptOccurrenceKindsWithoutRuntimeFields(t *testing.T) {
 	l1, identities, err := claude.Bind(registration.EventSessionStart, []model.NativeBinding{{
 		Kind: model.BindingTask, NativeName: "task_id", Value: "task-1",
 	}})
-	require.Error(t, err)
+	requireStructuredValidation(t, err, "task_id", "exact NativeName")
 	require.False(t, l1.IsValid())
 	require.Empty(t, identities)
 }
@@ -129,14 +141,21 @@ func TestBindErrorsRemainActionableStructuredValidation(t *testing.T) {
 	_, _, err := claude.Bind(registration.EventSessionStart, []model.NativeBinding{{
 		Kind: model.BindingRequest, NativeName: "session_id", Value: sessionID,
 	}})
+	requireStructuredValidation(t, err, "classifies native field \"session_id\" as kind 3", "numeric value matches")
+}
+
+func requireStructuredValidation(t *testing.T, err error, whatFragment, fixFragment string) {
+	t.Helper()
 	require.Error(t, err)
 	var structured *pasterrors.StructuredError
 	require.True(t, errors.As(err, &structured))
-	require.Contains(t, structured.What, "session_id")
+	require.Equal(t, pasterrors.CategoryValidation, structured.Category)
+	require.Contains(t, structured.What, whatFragment)
 	require.NotEmpty(t, structured.Why)
 	require.NotEmpty(t, structured.Where)
 	require.NotEmpty(t, structured.Impact)
 	require.NotEmpty(t, structured.Fix)
+	require.Contains(t, structured.Fix, fixFragment)
 }
 
 func TestBindReturnsWaistIdentityValuesWithoutReinterpretingThem(t *testing.T) {

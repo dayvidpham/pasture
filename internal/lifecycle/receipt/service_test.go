@@ -1,6 +1,7 @@
 package receipt
 
 import (
+	"bytes"
 	"context"
 	stderrors "errors"
 	"testing"
@@ -10,6 +11,11 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/provenance"
 	digest "github.com/opencontainers/go-digest"
+)
+
+const (
+	expectedOccurrenceResultSlot   = provenance.ResultSlotID("occurrence")
+	expectedOccurrenceEvidenceKind = provenance.EvidenceKind("pasture.lifecycle.occurrence.v1")
 )
 
 type testClock struct{ now time.Time }
@@ -96,7 +102,7 @@ func TestReceiveWritesBlobBeforeOccurrence(t *testing.T) {
 	calls := []string{}
 	inputs := []provenance.OperationInput{}
 	clock := testClock{now: time.Unix(10, 0)}
-	j := contextJournal{calls: &calls, inputs: &inputs, result: provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: receiptSlot, ProducedJournalID: 41}}}}
+	j := contextJournal{calls: &calls, inputs: &inputs, result: provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: expectedOccurrenceResultSlot, ProducedJournalID: 41}}}}
 	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-order"}}
 	r, err := s.Receive(context.Background(), validDelivery())
 	if err != nil {
@@ -112,6 +118,53 @@ func TestReceiveWritesBlobBeforeOccurrence(t *testing.T) {
 	if len(inputs) != 1 || len(inputs[0].Effects) != 1 {
 		t.Fatalf("zero-extra effects = %#v, want one occurrence effect", inputs)
 	}
+	effect := inputs[0].Effects[0]
+	if effect.Sort != provenance.EffectEvidence || effect.ResultSlot != expectedOccurrenceResultSlot || effect.EvidenceKind != expectedOccurrenceEvidenceKind {
+		t.Fatalf("zero-extra occurrence effect = %#v, want independently pinned occurrence metadata", effect)
+	}
+}
+
+func TestReceiveAppendsOccurrenceAndOneExtraInOneOperation(t *testing.T) {
+	calls := []string{}
+	inputs := []provenance.OperationInput{}
+	applyCount := 0
+	clock := testClock{now: time.Unix(10, 0)}
+	j := contextJournal{
+		calls:      &calls,
+		inputs:     &inputs,
+		applyCount: &applyCount,
+		result:     provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: expectedOccurrenceResultSlot, ProducedJournalID: 43}}},
+	}
+	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-one-extra"}}
+	extra := provenance.Effect{
+		Sort:          provenance.EffectEvidence,
+		ResultSlot:    provenance.ResultSlotID("interpreted"),
+		EvidenceKind:  provenance.EvidenceKind("pasture.lifecycle.interpreted.v1"),
+		ContentDigest: []byte{7, 8, 9},
+		Payload:       []byte(`{"semantic":1}`),
+	}
+
+	receipt, err := s.Receive(context.Background(), validDelivery(), extra)
+	if err != nil {
+		t.Fatalf("Receive: %v", err)
+	}
+	if receipt.JournalID() != 43 {
+		t.Fatalf("receipt journal id = %d, want 43", receipt.JournalID())
+	}
+	if applyCount != 1 || len(inputs) != 1 {
+		t.Fatalf("ApplyContext calls = %d, recorded inputs = %d, want one each", applyCount, len(inputs))
+	}
+	effects := inputs[0].Effects
+	if len(effects) != 2 {
+		t.Fatalf("effects = %d, want occurrence plus one extra", len(effects))
+	}
+	occurrence := effects[0]
+	if occurrence.Sort != provenance.EffectEvidence || occurrence.ResultSlot != expectedOccurrenceResultSlot || occurrence.EvidenceKind != expectedOccurrenceEvidenceKind {
+		t.Fatalf("first effect = %#v, want independently pinned occurrence metadata", occurrence)
+	}
+	if effects[1].Sort != extra.Sort || effects[1].ResultSlot != extra.ResultSlot || effects[1].EvidenceKind != extra.EvidenceKind || !bytes.Equal(effects[1].ContentDigest, extra.ContentDigest) || !bytes.Equal(effects[1].Payload, extra.Payload) {
+		t.Fatalf("second effect = %#v, want byte-identical extra %#v", effects[1], extra)
+	}
 }
 
 func TestReceiveAppendsOccurrenceAndExtrasInOneOperation(t *testing.T) {
@@ -124,7 +177,7 @@ func TestReceiveAppendsOccurrenceAndExtrasInOneOperation(t *testing.T) {
 		calls:      &calls,
 		inputs:     &inputs,
 		applyCount: &applyCount,
-		result:     provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: receiptSlot, ProducedJournalID: 42}}},
+		result:     provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: expectedOccurrenceResultSlot, ProducedJournalID: 42}}},
 	}
 	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-extras"}}
 	extraOne := provenance.Effect{
@@ -156,13 +209,13 @@ func TestReceiveAppendsOccurrenceAndExtrasInOneOperation(t *testing.T) {
 	if len(effects) != 3 {
 		t.Fatalf("effects = %d, want occurrence plus two extras", len(effects))
 	}
-	if effects[0].ResultSlot != receiptSlot || effects[0].EvidenceKind != receiptKind {
+	if effects[0].Sort != provenance.EffectEvidence || effects[0].ResultSlot != expectedOccurrenceResultSlot || effects[0].EvidenceKind != expectedOccurrenceEvidenceKind {
 		t.Fatalf("first effect = %#v, want occurrence effect", effects[0])
 	}
-	if effects[1].ResultSlot != extraOne.ResultSlot || effects[1].EvidenceKind != extraOne.EvidenceKind || string(effects[1].Payload) != string(extraOne.Payload) {
+	if effects[1].Sort != extraOne.Sort || effects[1].ResultSlot != extraOne.ResultSlot || effects[1].EvidenceKind != extraOne.EvidenceKind || !bytes.Equal(effects[1].ContentDigest, extraOne.ContentDigest) || !bytes.Equal(effects[1].Payload, extraOne.Payload) {
 		t.Fatalf("second effect = %#v, want first extra %#v", effects[1], extraOne)
 	}
-	if effects[2].ResultSlot != extraTwo.ResultSlot || effects[2].EvidenceKind != extraTwo.EvidenceKind || string(effects[2].Payload) != string(extraTwo.Payload) {
+	if effects[2].Sort != extraTwo.Sort || effects[2].ResultSlot != extraTwo.ResultSlot || effects[2].EvidenceKind != extraTwo.EvidenceKind || !bytes.Equal(effects[2].ContentDigest, extraTwo.ContentDigest) || !bytes.Equal(effects[2].Payload, extraTwo.Payload) {
 		t.Fatalf("third effect = %#v, want second extra %#v", effects[2], extraTwo)
 	}
 }
