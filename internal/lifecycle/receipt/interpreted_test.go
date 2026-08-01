@@ -3,8 +3,11 @@ package receipt
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
+	"io"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
@@ -83,13 +86,21 @@ func TestNewInterpretedRejectsInvalidInputs(t *testing.T) {
 		t.Fatalf("NewRuntimeContractID() error = %v", err)
 	}
 	tests := []struct {
-		name     string
-		l2       waist.L2
-		contract ir.RuntimeContractID
+		name                  string
+		l2                    waist.L2
+		contract              ir.RuntimeContractID
+		wantWhat              string
+		wantContractFragments []string
 	}{
-		{name: "zero L2", l2: waist.L2{}, contract: contract},
-		{name: "invalid contract", l2: l2, contract: ir.RuntimeContractID{}},
-		{name: "mismatched contract", l2: l2, contract: mismatched},
+		{name: "zero L2", l2: waist.L2{}, contract: contract, wantWhat: "source is invalid"},
+		{name: "invalid contract", l2: l2, contract: ir.RuntimeContractID{}, wantWhat: "invalid runtime contract"},
+		{
+			name:                  "mismatched contract",
+			l2:                    l2,
+			contract:              mismatched,
+			wantWhat:              "does not match",
+			wantContractFragments: []string{"claude-code/2.1.220", "claude-code/claude-code@2.1.210"},
+		},
 	}
 	for _, test := range tests {
 		test := test
@@ -99,7 +110,7 @@ func TestNewInterpretedRejectsInvalidInputs(t *testing.T) {
 			if err == nil {
 				t.Fatal("NewInterpreted() succeeded, want validation error")
 			}
-			assertActionableValidationError(t, err)
+			assertActionableValidationError(t, err, test.wantWhat, test.wantContractFragments...)
 			if !reflect.DeepEqual(record, Record{}) {
 				t.Fatalf("failed construction returned %#v, want zero Record", record)
 			}
@@ -143,19 +154,32 @@ func TestInterpretedEffectIsCanonicalAndOwnsBytes(t *testing.T) {
 	}
 	effect := record.Effect()
 	wantPayload := []byte(`{"semantic":1,"identities":[{"kind":1,"value":"session-é-<>&"}],"unresolved_facts":[],"contract":"claude-code/claude-code@2.1.210"}`)
+	decoded := decodeInterpretedEffectPayload(t, effect.Payload)
+	if decoded.Semantic != uint8(runtime.SemanticObservation) {
+		t.Fatalf("decoded semantic = %d, want %d", decoded.Semantic, runtime.SemanticObservation)
+	}
+	if len(decoded.Identities) != 1 || decoded.Identities[0].Kind != uint8(runtime.IdentitySession) || decoded.Identities[0].Value != "session-é-<>&" {
+		t.Fatalf("decoded identities = %#v, want the exact session identity", decoded.Identities)
+	}
+	if len(decoded.UnresolvedFacts) != 0 {
+		t.Fatalf("decoded unresolved facts = %#v, want empty", decoded.UnresolvedFacts)
+	}
+	if decoded.Contract != "claude-code/claude-code@2.1.210" {
+		t.Fatalf("decoded contract = %q, want %q", decoded.Contract, "claude-code/claude-code@2.1.210")
+	}
 	if effect.Sort != provenance.EffectEvidence {
 		t.Fatalf("effect sort = %v, want %v", effect.Sort, provenance.EffectEvidence)
 	}
-	if effect.ResultSlot != interpretedSlot {
-		t.Fatalf("effect result slot = %q, want %q", effect.ResultSlot, interpretedSlot)
+	if effect.ResultSlot != provenance.ResultSlotID("interpreted") {
+		t.Fatalf("effect result slot = %q, want %q", effect.ResultSlot, provenance.ResultSlotID("interpreted"))
 	}
-	if effect.EvidenceKind != interpretedKind {
-		t.Fatalf("effect evidence kind = %q, want %q", effect.EvidenceKind, interpretedKind)
+	if effect.EvidenceKind != provenance.EvidenceKind("pasture.lifecycle.interpreted.v1") {
+		t.Fatalf("effect evidence kind = %q, want %q", effect.EvidenceKind, provenance.EvidenceKind("pasture.lifecycle.interpreted.v1"))
 	}
 	if !bytes.Equal(effect.Payload, wantPayload) {
 		t.Fatalf("effect payload = %s, want %s", effect.Payload, wantPayload)
 	}
-	wantDigest := sha256.Sum256(wantPayload)
+	wantDigest := sha256.Sum256(effect.Payload)
 	if !bytes.Equal(effect.ContentDigest, wantDigest[:]) {
 		t.Fatalf("effect digest = %x, want %x", effect.ContentDigest, wantDigest)
 	}
@@ -168,6 +192,51 @@ func TestInterpretedEffectIsCanonicalAndOwnsBytes(t *testing.T) {
 	}
 	if !bytes.Equal(again.ContentDigest, wantDigest[:]) {
 		t.Fatalf("record digest changed through returned effect bytes: %x", again.ContentDigest)
+	}
+}
+
+func TestInterpretedPostToolBatchEffectPreservesUnresolvedFact(t *testing.T) {
+	t.Parallel()
+
+	contract := mustClaudeLifecycleContract(t)
+	record, err := NewInterpreted(mustPostToolBatchL2(t, "session-1"), contract)
+	if err != nil {
+		t.Fatalf("NewInterpreted() error = %v", err)
+	}
+	effect := record.Effect()
+	if effect.Sort != provenance.EffectEvidence {
+		t.Fatalf("effect sort = %v, want %v", effect.Sort, provenance.EffectEvidence)
+	}
+	if effect.ResultSlot != provenance.ResultSlotID("interpreted") {
+		t.Fatalf("effect result slot = %q, want %q", effect.ResultSlot, provenance.ResultSlotID("interpreted"))
+	}
+	if effect.EvidenceKind != provenance.EvidenceKind("pasture.lifecycle.interpreted.v1") {
+		t.Fatalf("effect evidence kind = %q, want %q", effect.EvidenceKind, provenance.EvidenceKind("pasture.lifecycle.interpreted.v1"))
+	}
+
+	decoded := decodeInterpretedEffectPayload(t, effect.Payload)
+	if decoded.Semantic != uint8(runtime.SemanticGateConsultation) {
+		t.Fatalf("decoded semantic = %d, want %d", decoded.Semantic, runtime.SemanticGateConsultation)
+	}
+	if len(decoded.Identities) != 1 || decoded.Identities[0].Kind != uint8(runtime.IdentitySession) || decoded.Identities[0].Value != "session-1" {
+		t.Fatalf("decoded identities = %#v, want the exact session identity", decoded.Identities)
+	}
+	if len(decoded.UnresolvedFacts) != 1 {
+		t.Fatalf("decoded unresolved facts = %#v, want exactly one fact", decoded.UnresolvedFacts)
+	}
+	if decoded.UnresolvedFacts[0].Reason != uint8(waist.UnresolvedToolCall) {
+		t.Fatalf("decoded unresolved reason = %d, want %d", decoded.UnresolvedFacts[0].Reason, waist.UnresolvedToolCall)
+	}
+	if got := waist.UnresolvedReason(decoded.UnresolvedFacts[0].Reason).String(); got != "tool-call-unresolved" {
+		t.Fatalf("decoded unresolved reason label = %q, want %q", got, "tool-call-unresolved")
+	}
+	if decoded.Contract != "claude-code/claude-code@2.1.210" {
+		t.Fatalf("decoded contract = %q, want %q", decoded.Contract, "claude-code/claude-code@2.1.210")
+	}
+
+	wantDigest := sha256.Sum256(effect.Payload)
+	if !bytes.Equal(effect.ContentDigest, wantDigest[:]) {
+		t.Fatalf("effect digest = %x, want SHA-256 of returned payload %x", effect.ContentDigest, wantDigest)
 	}
 }
 
@@ -220,7 +289,65 @@ func mustPostToolBatchL2(t *testing.T, value string) waist.L2 {
 	return l2
 }
 
-func assertActionableValidationError(t *testing.T, err error) {
+type interpretedEffectPayloadOracle struct {
+	Semantic        uint8                             `json:"semantic"`
+	Identities      []interpretedIdentityOracle       `json:"identities"`
+	UnresolvedFacts []interpretedUnresolvedFactOracle `json:"unresolved_facts"`
+	Contract        string                            `json:"contract"`
+}
+
+type interpretedIdentityOracle struct {
+	Kind  uint8  `json:"kind"`
+	Value string `json:"value"`
+}
+
+type interpretedUnresolvedFactOracle struct {
+	Reason uint8 `json:"reason"`
+}
+
+func decodeInterpretedEffectPayload(t *testing.T, payload []byte) interpretedEffectPayloadOracle {
+	t.Helper()
+
+	var decoded interpretedEffectPayloadOracle
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		t.Fatalf("decode interpreted effect payload: %v", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			t.Fatalf("interpreted effect payload contains trailing JSON value")
+		}
+		t.Fatalf("interpreted effect payload contains trailing data: %v", err)
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatalf("inspect interpreted effect payload keys: %v", err)
+	}
+	wantKeys := map[string]struct{}{
+		"semantic":         {},
+		"identities":       {},
+		"unresolved_facts": {},
+		"contract":         {},
+	}
+	if len(fields) != len(wantKeys) {
+		t.Fatalf("interpreted effect payload keys = %#v, want exactly %#v", fields, wantKeys)
+	}
+	for key := range wantKeys {
+		if _, ok := fields[key]; !ok {
+			t.Fatalf("interpreted effect payload is missing key %q", key)
+		}
+	}
+	for key := range fields {
+		if _, ok := wantKeys[key]; !ok {
+			t.Fatalf("interpreted effect payload contains unknown key %q", key)
+		}
+	}
+	return decoded
+}
+
+func assertActionableValidationError(t *testing.T, err error, wantWhat string, wantWhatFragments ...string) {
 	t.Helper()
 	var structured *pasterrors.StructuredError
 	if !errors.As(err, &structured) {
@@ -231,5 +358,13 @@ func assertActionableValidationError(t *testing.T, err error) {
 	}
 	if structured.What == "" || structured.Why == "" || structured.Where == "" || structured.Impact == "" || structured.Fix == "" {
 		t.Fatalf("validation error is not actionable: %#v", structured)
+	}
+	if !strings.Contains(structured.What, wantWhat) {
+		t.Fatalf("validation error What = %q, want substring %q", structured.What, wantWhat)
+	}
+	for _, fragment := range wantWhatFragments {
+		if !strings.Contains(structured.What, fragment) {
+			t.Fatalf("validation error What = %q, want contract fragment %q", structured.What, fragment)
+		}
 	}
 }
