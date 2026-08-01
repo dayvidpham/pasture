@@ -156,8 +156,9 @@ func TestVerifyIdentitiesRejectsDeclaredNameWithWrongKind(t *testing.T) {
 func TestVerifyIdentitiesRejectsDuplicatePair(t *testing.T) {
 	t.Parallel()
 	binding := mustBinding(t, runtime.ClaudeEventSessionStart)
-	identity := mustIdentity(t, runtime.IdentitySession, "session_id", "value")
-	assertInvalidEvent(t, binding, []Identity{identity, identity}, "more than once")
+	first := mustIdentity(t, runtime.IdentitySession, "session_id", "value-1")
+	second := mustIdentity(t, runtime.IdentitySession, "session_id", "value-2")
+	assertInvalidEvent(t, binding, []Identity{first, second}, "more than once")
 }
 
 func TestVerifyIdentitiesRejectsAbsentRequiredIdentity(t *testing.T) {
@@ -362,6 +363,15 @@ func TestNewEventClaudeCatalogueHasOnlyPostToolBatchUnresolvedFact(t *testing.T)
 			event, err := binding.NewEvent(identities)
 			if err != nil {
 				t.Fatalf("NewEvent(%q) error = %v", eventKind.NativeName(), err)
+			}
+			if !event.IsValid() {
+				t.Fatalf("NewEvent(%q) returned an invalid event", eventKind.NativeName())
+			}
+			if !event.Semantics().IsValid() {
+				t.Fatalf("NewEvent(%q) returned invalid semantics", eventKind.NativeName())
+			}
+			if !event.Origin().IsValid() {
+				t.Fatalf("NewEvent(%q) returned an invalid origin", eventKind.NativeName())
 			}
 			want := []UnresolvedFact{}
 			if eventKind == runtime.ClaudeEventPostToolBatch {

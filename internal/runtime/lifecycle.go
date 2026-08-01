@@ -354,7 +354,7 @@ func (m LifecycleEventMapping) validate(where string) error {
 
 	identityNames := make(map[string]struct{}, len(m.identities))
 	identityKinds := make(map[NativeIdentityKind]struct{}, len(m.identities))
-	hasRequestIdentity := false
+	hasRequiredRequestIdentity := false
 	for _, identity := range m.identities {
 		if !identity.IsValid() {
 			return runtimeError(
@@ -374,7 +374,8 @@ func (m LifecycleEventMapping) validate(where string) error {
 		}
 		identityNames[identity.nativeName] = struct{}{}
 		identityKinds[identity.kind] = struct{}{}
-		hasRequestIdentity = hasRequestIdentity || identity.kind == IdentityRequest
+		hasRequiredRequestIdentity = hasRequiredRequestIdentity ||
+			(identity.kind == IdentityRequest && identity.Required())
 	}
 
 	unresolvedKinds := make(map[NativeIdentityKind]struct{}, len(m.unresolved))
@@ -423,12 +424,12 @@ func (m LifecycleEventMapping) validate(where string) error {
 		)
 	}
 	if m.semantic == SemanticExplicitHumanResponse {
-		if !hasRequestIdentity {
+		if !hasRequiredRequestIdentity {
 			return runtimeError(
-				fmt.Sprintf("explicit human response event %q has no native request identity", m.nativeName),
+				fmt.Sprintf("explicit human response event %q has no required native request identity", m.nativeName),
 				"a response may invoke a user gate only after byte-exact correlation to an existing Pasture-originated request",
 				where, "an unrelated native occurrence could manufacture a user decision",
-				"include the documented native request identity or classify the event as observation", nil,
+				"include a required native request identity or classify the event as observation", nil,
 			)
 		}
 		if m.mutation != MutationNone {

@@ -77,6 +77,39 @@ func TestLifecycleContractRejectsInvalidUnresolvedIdentityMetadata(t *testing.T)
 	}
 }
 
+func TestLifecycleContractRejectsOptionalRequestForHumanResponse(t *testing.T) {
+	t.Parallel()
+	mapping := claudeLifecycleMappings()[ClaudeEventElicitationResult]
+	mapping.identities = []NativeIdentityField{
+		nativeIdentity(IdentitySession, "session_id", true),
+		nativeIdentity(IdentityRequest, "request_id", false),
+	}
+	_, err := newLifecycleContract(
+		ClaudeCode2_1_210(),
+		[]ClaudeLifecycleEvent{ClaudeEventElicitationResult},
+		map[ClaudeLifecycleEvent]LifecycleEventMapping{
+			ClaudeEventElicitationResult: mapping,
+		},
+	)
+	if err == nil {
+		t.Fatal("newLifecycleContract() error = nil, want validation failure")
+	}
+
+	var diagnostic *ir.Diagnostic
+	if !errors.As(err, &diagnostic) {
+		t.Fatalf("newLifecycleContract() error type = %T, want *ir.Diagnostic", err)
+	}
+	if diagnostic.Phase != "runtime contract validation" {
+		t.Fatalf("error phase = %q, want runtime contract validation", diagnostic.Phase)
+	}
+	if !strings.Contains(diagnostic.What, "no required native request identity") {
+		t.Fatalf("error problem = %q, want required-request cause", diagnostic.What)
+	}
+	if diagnostic.Why == "" || diagnostic.Where == "" || diagnostic.Impact == "" || diagnostic.Fix == "" {
+		t.Fatalf("validation error is not actionable: %#v", diagnostic)
+	}
+}
+
 func validSessionStartMapping(t *testing.T) LifecycleEventMapping {
 	t.Helper()
 	mapping, ok := claudeLifecycleMappings()[ClaudeEventSessionStart]
