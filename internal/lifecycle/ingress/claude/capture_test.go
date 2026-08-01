@@ -29,6 +29,8 @@ func TestAuthenticSessionStartCapturePreservesExactBytes(t *testing.T) {
 	require.NoError(t, json.Unmarshal(wire, &roundTrip))
 	require.True(t, roundTrip.Runtime.Contract.IsValid())
 	require.Len(t, capture.Delivery.Bindings, 1)
+	require.Equal(t, "session_id", capture.Delivery.Bindings[0].NativeName)
+	require.Equal(t, "b3cfe877-feb4-4ba3-9500-414c8bfb51c4", capture.Delivery.Bindings[0].Value)
 	raw[0] = '!'
 	require.Equal(t, byte('{'), capture.Delivery.Body[0], "delivery owns a defensive byte copy")
 }
@@ -55,6 +57,7 @@ func TestCaptureClassifiesBeforeExtraction(t *testing.T) {
 			require.Equal(t, test.want, got.Disposition)
 			require.Equal(t, test.raw, got.Delivery.Body)
 			require.Equal(t, digest.FromBytes(test.raw), got.Digest)
+			require.Empty(t, got.Delivery.Bindings, "invalid captures must retain zero native bindings")
 		})
 	}
 }

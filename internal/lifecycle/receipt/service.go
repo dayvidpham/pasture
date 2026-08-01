@@ -43,7 +43,7 @@ type occurrencePayload struct {
 	Body     string                      `json:"body_digest"`
 }
 
-func (s Service) Receive(ctx context.Context, delivery Delivery) (Receipt, error) {
+func (s Service) Receive(ctx context.Context, delivery Delivery, extra ...provenance.Effect) (Receipt, error) {
 	if err := validateDelivery(delivery); err != nil {
 		return Receipt{}, err
 	}
@@ -74,13 +74,16 @@ func (s Service) Receive(ctx context.Context, delivery Delivery) (Receipt, error
 	command := sha256.Sum256(append([]byte(receiptCommand+"\x00"), payload...))
 	payloadDigest := sha256.Sum256(payload)
 	authority := identity.Authority
+	effects := make([]provenance.Effect, 0, 1+len(extra))
+	effects = append(effects, provenance.Effect{Sort: provenance.EffectEvidence, ResultSlot: receiptSlot, EvidenceKind: receiptKind, ContentDigest: payloadDigest[:], Payload: payload})
+	effects = append(effects, extra...)
 	id, err := s.Appender.Append(ctx, provenance.OperationInput{
 		OperationID:        provenance.OperationID(operation),
 		ActorID:            identity.Actor,
 		AuthorityJournalID: &authority,
 		CommandDigest:      command[:],
 		RecordedAt:         receivedAt.UnixNano(),
-		Effects:            []provenance.Effect{{Sort: provenance.EffectEvidence, ResultSlot: receiptSlot, EvidenceKind: receiptKind, ContentDigest: payloadDigest[:], Payload: payload}},
+		Effects:            effects,
 	})
 	if err != nil {
 		return Receipt{}, err

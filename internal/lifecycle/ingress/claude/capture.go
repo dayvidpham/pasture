@@ -110,7 +110,7 @@ func validateMembers(members map[string]json.RawMessage, event registration.Even
 		if json.Unmarshal(raw, &value) != nil || value == "" || len(value) > 512 {
 			return model.CaptureUnsupportedSchema, nil
 		}
-		bindings = append(bindings, model.NativeBinding{Kind: identity.Binding, Value: value})
+		bindings = append(bindings, model.NativeBinding{Kind: identity.Binding, NativeName: name, Value: value})
 	}
 	return model.CaptureValid, bindings
 }

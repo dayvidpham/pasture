@@ -76,6 +76,36 @@ if [ -z "$event" ]; then
     exit 0
 fi
 
+# Resolve the host version before choosing either output path. The version is
+# part of the sibling stem so captures from different host versions cannot
+# overwrite one another.
+version="${CLAUDE_CODE_VERSION:-}"
+if [ -z "$version" ] && command -v claude >/dev/null 2>&1; then
+    version="$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+fi
+if [ -z "$version" ]; then
+    version="UNKNOWN-SET-CLAUDE_CODE_VERSION"
+fi
+
+case "$event" in
+    *[![:alnum:]_-]*)
+        echo "capture-claude-hook: hook_event_name contains path-unsafe characters; left at $raw" >&2
+        exit 0
+        ;;
+esac
+case "$version" in
+    *[![:alnum:]._-]*)
+        echo "capture-claude-hook: Claude Code version contains path-unsafe characters; left at $raw" >&2
+        exit 0
+        ;;
+esac
+
+snake_event="$(printf '%s' "$event" | sed -E 's/([a-z0-9])([A-Z])/\1_\2/g' | tr '[:upper:]' '[:lower:]')"
+version_stem="${version//./_}"
+stem="${snake_event}_${version_stem}"
+fixture="$out/${stem}.json"
+provenance="$out/${stem}.provenance.json"
+
 # ---------------------------------------------------------------------------
 # Redaction: value-only, declared, mechanical.
 #
@@ -87,7 +117,6 @@ REDACTION_RULE="home-path-v1"
 home_slash="${HOME:-/home/unset}"
 home_dash="$(printf '%s' "$home_slash" | tr '/' '-')"
 
-fixture="$out/${event}.json"
 sed -e "s|${home_slash}|/home/user|g" \
     -e "s|${home_dash}|-home-user|g" \
     <"$raw" >"$fixture"
@@ -96,11 +125,6 @@ rm -f "$raw"
 # Digest is computed over the committed bytes, which is what
 # acceptance.CaptureProvenance.ValidateFixture re-computes and compares.
 sum="$(sha256sum <"$fixture" | cut -d' ' -f1)"
-
-version="${CLAUDE_CODE_VERSION:-}"
-if [ -z "$version" ] && command -v claude >/dev/null 2>&1; then
-    version="$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-fi
 
 jq -n \
     --arg origin "authentic-capture" \
@@ -114,7 +138,7 @@ jq -n \
     '{origin: $origin, harness: $harness, harnessVersion: $version,
       captureSource: $source, rawFileDigest: $digest, capturedAt: $at,
       redaction: $redaction, event: $event}' \
-    >"$out/${event}.provenance.json"
+    >"$provenance"
 
 echo "capture-claude-hook: captured $event -> $fixture" >&2
 exit 0
