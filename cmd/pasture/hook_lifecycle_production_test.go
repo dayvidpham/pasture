@@ -71,6 +71,20 @@ func TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence(t *testing.T) {
 	require.Equal(t, model.BindingSession, occurrencePayload.Bindings[0].Kind)
 	require.Equal(t, "session_id", occurrencePayload.Bindings[0].NativeName)
 	require.Equal(t, expectedSessionIdentity, occurrencePayload.Bindings[0].Value)
+	require.NoError(t, tracker.Close())
+
+	list := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "list", "--format", "json", "--binding", "session:session_id="+expectedSessionIdentity)
+	stdout.Reset()
+	stderr.Reset()
+	list.Stdout = &stdout
+	list.Stderr = &stderr
+	require.NoError(t, list.Run(), stdout.String()+stderr.String())
+	require.Empty(t, stderr.String())
+	require.Contains(t, stdout.String(), `"registrationContract":"`+occurrenceLifecycleContract+`"`)
+	require.Contains(t, stdout.String(), `"contract":"`+interpretedLifecycleContract+`"`)
+	require.Contains(t, stdout.String(), `"interpreted":[`)
+	require.NotContains(t, stdout.String(), string(raw))
+	require.NotContains(t, stdout.String(), dbPath)
 }
 
 func TestMalformedClaudeEventToOccurrenceOnly(t *testing.T) {
@@ -106,6 +120,21 @@ func TestInvalidLifecycleInvocationCreatesNoDatabase(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "missing", "pasture.db")
 	err := handlers.HookLifecycle(context.Background(), handlers.HookLifecycleInput{DBPath: dbPath, Harness: "claude-code", Event: "Unknown", HostVersion: "2.1.220", Input: bytes.NewBufferString("{}"), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{}})
 	require.Error(t, err)
+	_, statErr := os.Stat(dbPath)
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestLifecycleListRejectsCursorBeforeDatabaseOpen(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "pasture")
+	buildLifecycleBinary(t, binary)
+	dbPath := filepath.Join(dir, "missing", "pasture.db")
+	command := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "list", "--cursor", "not-base64!")
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	err := command.Run()
+	require.Error(t, err)
+	require.Contains(t, stderr.String(), "invalid cursor before database open")
 	_, statErr := os.Stat(dbPath)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
 }

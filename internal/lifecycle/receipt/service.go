@@ -81,14 +81,36 @@ func (s Service) Receive(ctx context.Context, delivery Delivery, extra ...proven
 	effects := make([]provenance.Effect, 0, 1+len(extra))
 	effects = append(effects, provenance.Effect{Sort: provenance.EffectEvidence, ResultSlot: receiptSlot, EvidenceKind: receiptKind, ContentDigest: payloadDigest[:], Payload: payload})
 	effects = append(effects, extra...)
-	id, err := s.Appender.Append(ctx, provenance.OperationInput{
+	input := provenance.OperationInput{
 		OperationID:        provenance.OperationID(operation),
 		ActorID:            identity.Actor,
 		AuthorityJournalID: &authority,
 		CommandDigest:      command[:],
 		RecordedAt:         receivedAt.UnixNano(),
 		Effects:            effects,
-	})
+	}
+	canonical, err := provenance.Canonicalize(input)
+	if err != nil {
+		return Receipt{}, structured(pasterrors.CategoryValidation, "Lifecycle evidence could not cross the canonical journal boundary.", "The validated effects did not produce one canonical operation.", "Preparing lifecycle evidence (internal/lifecycle/receipt/service.go in receipt.Service.Receive).", "No occurrence was committed; the blob may be reclaimable.", "Construct effects through receipt records and retry.", err)
+	}
+	input.Effects = canonical.NormalizedEffects()
+	for index := range input.Effects {
+		if input.Effects[index].Sort == provenance.EffectEvidence {
+			if input.Effects[index].EvidenceKind == consultationKind && index > 0 {
+				payload, bindErr := rebindConsultationPayload(input.Effects[index].Payload, input.Effects[index-1].Payload)
+				if bindErr != nil {
+					return Receipt{}, bindErr
+				}
+				input.Effects[index].Payload = payload
+			}
+			sum := sha256.Sum256(input.Effects[index].Payload)
+			input.Effects[index].ContentDigest = append([]byte(nil), sum[:]...)
+		}
+	}
+	if err := validateLifecycleExtras(input.Effects[1:]); err != nil {
+		return Receipt{}, err
+	}
+	id, err := s.Appender.Append(ctx, input)
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -106,6 +128,9 @@ func validateLifecycleExtras(extra []provenance.Effect) error {
 	if interpreted.Sort != provenance.EffectEvidence || interpreted.ResultSlot != interpretedSlot || interpreted.EvidenceKind != interpretedKind || !effectDigestValid(interpreted) {
 		return invalid("The lifecycle delivery contains a forged interpreted effect.", "Its slot, kind, or content digest is not canonical interpreted evidence.", "Use receipt.Record.Effect without modifying it.")
 	}
+	if err := validateInterpretedPayload(interpreted.Payload); err != nil {
+		return invalid("The lifecycle delivery contains malformed interpreted evidence.", err.Error(), "Use receipt.Record.Effect without modifying or reconstructing its payload.")
+	}
 	if len(extra) == 1 {
 		return nil
 	}
@@ -113,13 +138,7 @@ func validateLifecycleExtras(extra []provenance.Effect) error {
 	if consultation.Sort != provenance.EffectEvidence || consultation.ResultSlot != consultationSlot || consultation.EvidenceKind != consultationKind || !effectDigestValid(consultation) {
 		return invalid("The lifecycle delivery contains a forged consultation effect.", "Its slot, kind, or content digest is not canonical consultation evidence.", "Use receipt.ConsultationRecord.Effect without modifying it.")
 	}
-	var payload struct {
-		Interpreted struct {
-			ResultSlot    string `json:"result_slot"`
-			ContentDigest string `json:"content_digest"`
-		} `json:"interpreted"`
-	}
-	if err := json.Unmarshal(consultation.Payload, &payload); err != nil || payload.Interpreted.ResultSlot != string(interpretedSlot) || payload.Interpreted.ContentDigest != digest.FromBytes(interpreted.Payload).String() {
+	if err := validateConsultationPayload(consultation.Payload, interpreted.Payload); err != nil {
 		return invalid("The lifecycle consultation does not reference its immediately preceding interpreted effect.", "The operation-local slot and exact interpreted payload digest must match as one ordered pair.", "Construct both records together and preserve interpreted-then-consultation order.")
 	}
 	return nil
@@ -144,8 +163,8 @@ func validateDelivery(d Delivery) error {
 		return invalid("The lifecycle delivery has more than 16 native bindings.", "Native correlation is bounded to prevent an untrusted host payload from creating unbounded receipt metadata.", "Keep at most the 16 contract-defined bindings and record the delivery as over-limit.")
 	}
 	for _, binding := range d.Bindings {
-		if binding.Kind == 0 || len(binding.Value) == 0 || len(binding.Value) > 512 {
-			return invalid("The lifecycle delivery contains an invalid native binding.", "Binding kinds must be typed and values must contain between 1 and 512 bytes.", "Validate and bound native bindings before receipt storage.")
+		if err := model.ValidateNativeBinding(binding); err != nil {
+			return invalid("The lifecycle delivery contains an invalid native binding.", err.Error(), "Use a declared kind and normalized 1..512-byte UTF-8 native name and value without controls or padding.")
 		}
 	}
 	return nil

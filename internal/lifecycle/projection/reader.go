@@ -198,41 +198,51 @@ func (r Reader) occurrences(ctx context.Context, query model.OccurrenceQuery) (m
 	if err != nil {
 		return model.OccurrencePage{}, 0, readerError("Lifecycle occurrences could not be read.", "SQLite rejected the bounded projection query.", "No partial page is returned.", "Run pasture migrate, rebuild, and retry.", err)
 	}
-	defer rows.Close()
-	items := make([]model.OccurrenceRecord, 0, int(normalized.Page.Size)+1)
+	type pendingOccurrence struct {
+		jid, received                        int64
+		contractText, actorText, payloadText string
+		event                                uint16
+		capture                              uint8
+		envelopeJSON                         []byte
+	}
+	pending := make([]pendingOccurrence, 0, int(normalized.Page.Size)+1)
 	for rows.Next() {
-		var jid, received int64
-		var contractText, actorText, payloadText string
-		var event uint16
-		var capture uint8
-		var envelopeJSON []byte
-		if err := rows.Scan(&jid, &contractText, &event, &received, &actorText, &capture, &payloadText, &envelopeJSON); err != nil {
+		var item pendingOccurrence
+		if err := rows.Scan(&item.jid, &item.contractText, &item.event, &item.received, &item.actorText, &item.capture, &item.payloadText, &item.envelopeJSON); err != nil {
 			return model.OccurrencePage{}, 0, readerError("A projected lifecycle occurrence could not be decoded.", "The row does not match schema v7.", "No partial page is returned.", "Rebuild projections.", err)
 		}
+		pending = append(pending, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return model.OccurrencePage{}, 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return model.OccurrencePage{}, 0, err
+	}
+	items := make([]model.OccurrenceRecord, 0, len(pending))
+	for _, item := range pending {
 		var contract ir.RuntimeContractID
-		if err := json.Unmarshal([]byte(fmt.Sprintf("%q", contractText)), &contract); err != nil {
+		if err := json.Unmarshal([]byte(fmt.Sprintf("%q", item.contractText)), &contract); err != nil {
 			return model.OccurrencePage{}, 0, err
 		}
-		actor, err := provenance.ParseAgentID(actorText)
+		actor, err := provenance.ParseAgentID(item.actorText)
 		if err != nil {
 			return model.OccurrencePage{}, 0, err
 		}
 		var envelope model.OccurrenceEnvelopeRef
-		if err := json.Unmarshal(envelopeJSON, &envelope); err != nil {
+		if err := json.Unmarshal(item.envelopeJSON, &envelope); err != nil {
 			return model.OccurrencePage{}, 0, err
 		}
-		bindings, err := readBindings(ctx, r.DB, provenance.JournalID(jid))
+		bindings, err := readBindings(ctx, r.DB, provenance.JournalID(item.jid))
 		if err != nil {
 			return model.OccurrencePage{}, 0, err
 		}
-		ref, err := digest.Parse(payloadText)
+		ref, err := digest.Parse(item.payloadText)
 		if err != nil {
 			return model.OccurrencePage{}, 0, err
 		}
-		items = append(items, model.NewOccurrenceRecord(model.OccurrenceID(jid), model.ContractEventKind(event), contract, envelope, time.Unix(0, received).UTC(), actor, bindings, model.CaptureDisposition(capture), model.EvidencePayloadRef{Digest: ref, Retention: envelope.Retention}))
-	}
-	if err := rows.Err(); err != nil {
-		return model.OccurrencePage{}, 0, err
+		items = append(items, model.NewOccurrenceRecord(model.OccurrenceID(item.jid), model.ContractEventKind(item.event), contract, envelope, time.Unix(0, item.received).UTC(), actor, bindings, model.CaptureDisposition(item.capture), model.EvidencePayloadRef{Digest: ref, Retention: envelope.Retention}))
 	}
 	page := model.OccurrencePage{Items: items}
 	if len(items) > int(normalized.Page.Size) {
@@ -300,7 +310,7 @@ func normalizeQuery(q model.OccurrenceQuery) (model.OccurrenceQuery, error) {
 		return a.Kind == b.Kind && a.NativeName == b.NativeName && a.Value == b.Value
 	})
 	for _, b := range out.Bindings {
-		if b.Kind < model.BindingSession || b.Kind > model.BindingWorktree || !validBindingText(b.NativeName) || !validBindingText(b.Value) {
+		if model.ValidateNativeBinding(b) != nil {
 			return model.OccurrenceQuery{}, readerError("A lifecycle binding filter is invalid.", "Kind, UTF-8 text, controls, padding, or byte bounds violate the exact BLOB contract.", "No records were read.", "Use a declared kind and 1..512 unpadded printable UTF-8 bytes.", nil)
 		}
 	}
@@ -316,17 +326,6 @@ func QueryFingerprint(q model.OccurrenceQuery) (model.QueryFingerprint, error) {
 	return queryFingerprint(normalized), nil
 }
 
-func validBindingText(v string) bool {
-	if len(v) < 1 || len(v) > 512 || strings.TrimSpace(v) != v || !json.Valid([]byte(fmt.Sprintf("%q", v))) {
-		return false
-	}
-	for _, r := range v {
-		if r == 0 || r < 0x20 || r == 0x7f {
-			return false
-		}
-	}
-	return true
-}
 func dedup[T any](in []T, equal func(T, T) bool) []T {
 	out := in[:0]
 	for _, v := range in {

@@ -92,10 +92,13 @@ func parseLifecycleBinding(raw string) (model.NativeBinding, error) {
 	if !ok || name == "" || value == "" {
 		return model.NativeBinding{}, fmt.Errorf("list lifecycle records: binding %q is incomplete", raw)
 	}
-	kinds := map[string]model.NativeBindingKind{"session": model.BindingSession, "turn": model.BindingTurn, "request": model.BindingRequest, "tool-call": model.BindingToolCall, "agent": model.BindingAgent, "message": model.BindingMessage, "task": model.BindingTask, "worktree": model.BindingWorktree}
-	typed, ok := kinds[kind]
-	if !ok {
-		return model.NativeBinding{}, fmt.Errorf("list lifecycle records: binding kind %q is unknown", kind)
+	typed, err := model.ParseNativeBindingKind(kind)
+	if err != nil {
+		return model.NativeBinding{}, fmt.Errorf("list lifecycle records: %w", err)
 	}
-	return model.NativeBinding{Kind: typed, NativeName: name, Value: value}, nil
+	binding := model.NativeBinding{Kind: typed, NativeName: name, Value: value}
+	if err := model.ValidateNativeBinding(binding); err != nil {
+		return model.NativeBinding{}, fmt.Errorf("list lifecycle records: %w", err)
+	}
+	return binding, nil
 }

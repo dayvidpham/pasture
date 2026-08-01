@@ -62,10 +62,19 @@ func DecodeInterpreted(id model.InterpretationID, occurrence model.OccurrenceID,
 	}
 	canonicalRecord := Record{semantic: wire.Semantic, identities: identities, unresolved: unresolved, contract: wire.Contract, constructed: true}
 	canonical, err := canonicalInterpretedPayload(canonicalRecord)
-	if err != nil || !bytes.Equal(canonical, payload) {
+	normalized := canonical
+	if mutation, normErr := provenance.Canonicalize(provenance.OperationInput{Effects: []provenance.Effect{{Sort: provenance.EffectEvidence, ResultSlot: interpretedSlot, EvidenceKind: interpretedKind, ContentDigest: make([]byte, sha256.Size), Payload: canonical}}}); normErr == nil {
+		normalized = mutation.NormalizedEffects()[0].Payload
+	}
+	if err != nil || (!bytes.Equal(canonical, payload) && !bytes.Equal(normalized, payload)) {
 		return model.InterpretedRecord{}, fmt.Errorf("decode interpreted lifecycle evidence: payload is not canonical compact JSON")
 	}
 	return record, nil
+}
+
+func validateInterpretedPayload(payload []byte) error {
+	_, err := DecodeInterpreted(model.InterpretationID(1), model.OccurrenceID(1), payload)
+	return err
 }
 
 func requireJSONEOF(decoder *json.Decoder) error {

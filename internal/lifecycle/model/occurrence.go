@@ -1,7 +1,10 @@
 package model
 
 import (
+	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/provenance"
@@ -20,6 +23,48 @@ const (
 	CaptureUnsupportedSchema
 	CaptureEventMismatch
 )
+
+func (k NativeBindingKind) IsValid() bool { return k >= BindingSession && k <= BindingWorktree }
+func (k NativeBindingKind) String() string {
+	if !k.IsValid() {
+		return ""
+	}
+	return [...]string{"", "session", "turn", "request", "tool-call", "agent", "message", "task", "worktree"}[k]
+}
+func ParseNativeBindingKind(token string) (NativeBindingKind, error) {
+	for k := BindingSession; k <= BindingWorktree; k++ {
+		if k.String() == token {
+			return k, nil
+		}
+	}
+	return 0, fmt.Errorf("unknown lifecycle binding kind %q", token)
+}
+func ValidateNativeBinding(binding NativeBinding) error {
+	if !binding.Kind.IsValid() {
+		return fmt.Errorf("binding kind %d is not declared", binding.Kind)
+	}
+	if err := ValidateBindingText("native name", binding.NativeName); err != nil {
+		return err
+	}
+	return ValidateBindingText("value", binding.Value)
+}
+func ValidateBindingText(field, value string) error {
+	if !utf8.ValidString(value) {
+		return fmt.Errorf("binding %s is not valid UTF-8", field)
+	}
+	if len(value) < 1 || len(value) > 512 {
+		return fmt.Errorf("binding %s must contain 1 through 512 bytes", field)
+	}
+	if strings.TrimSpace(value) != value {
+		return fmt.Errorf("binding %s has leading or trailing padding", field)
+	}
+	for _, r := range value {
+		if r == 0 || r < 0x20 || r == 0x7f {
+			return fmt.Errorf("binding %s contains a NUL or control character", field)
+		}
+	}
+	return nil
+}
 
 type NativeBindingKind uint8
 

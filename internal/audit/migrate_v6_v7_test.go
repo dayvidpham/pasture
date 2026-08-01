@@ -1,7 +1,10 @@
 package audit
 
 import (
+	"bytes"
 	"database/sql"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -9,7 +12,7 @@ import (
 
 func openV6Lifecycle(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared&_pragma=foreign_keys(1)")
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "pasture.db")+"?_pragma=foreign_keys(1)")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,24 +59,89 @@ func TestMigrateV6ToV7RebuildsAndBackfillsBindings(t *testing.T) {
 	}
 }
 func TestMigrateV6ToV7MalformedBindingsRollBackExactly(t *testing.T) {
+	cases := map[string]string{"duplicate member": `[{"Kind":1,"NativeName":"session_id","NativeName":"forged","Value":"A"}]`, "null": `null`, "unknown": `[{"Kind":1,"NativeName":"session_id","Value":"A","Other":1}]`, "missing name": `[{"Kind":1,"Value":"A"}]`, "invalid kind": `[{"Kind":9,"NativeName":"session_id","Value":"A"}]`, "nul": `[{"Kind":1,"NativeName":"session_id","Value":"A\u0000"}]`, "control": `[{"Kind":1,"NativeName":"session_id","Value":"A\n"}]`, "padding": `[{"Kind":1,"NativeName":" session_id","Value":"A"}]`, "oversized": `[{"Kind":1,"NativeName":"session_id","Value":"` + strings.Repeat("x", 513) + `"}]`}
+	for name, raw := range cases {
+		name, raw := name, raw
+		t.Run(name, func(t *testing.T) {
+			db := openV6Lifecycle(t)
+			defer db.Close()
+			seedV6Occurrence(t, db, raw)
+			if err := Migrate(db); err == nil {
+				t.Fatal("Migrate accepted malformed bindings")
+			}
+			version, _ := readVersion(db)
+			if version != 6 {
+				t.Fatalf("version=%d want 6", version)
+			}
+			var stored []byte
+			if err := db.QueryRow(`SELECT bindings_json FROM lifecycle_occurrences WHERE journal_id=1`).Scan(&stored); err != nil || string(stored) != raw {
+				t.Fatalf("stored=%q err=%v", stored, err)
+			}
+			var v7 int
+			_ = db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='lifecycle_occurrence_bindings'`).Scan(&v7)
+			if v7 != 0 {
+				t.Fatalf("v7 table survived rollback")
+			}
+			var column int
+			_ = db.QueryRow(`SELECT count(*) FROM pragma_table_info('lifecycle_occurrences') WHERE name='bindings_json'`).Scan(&column)
+			if column != 1 {
+				t.Fatal("v6 schema was not restored")
+			}
+		})
+	}
+}
+
+func TestMigrateV6ToV7PreservesExactBlobOrderAndCascade(t *testing.T) {
 	db := openV6Lifecycle(t)
 	defer db.Close()
-	raw := `[{"Kind":1,"NativeName":"session_id","NativeName":"forged","Value":"A"}]`
+	raw := `[{"Kind":1,"NativeName":"session_id","Value":"é"},{"Kind":4,"NativeName":"tool_use_id","Value":"Case"},{"Kind":4,"NativeName":"tool_use_id","Value":"Cas"}]`
 	seedV6Occurrence(t, db, raw)
-	if err := Migrate(db); err == nil {
-		t.Fatal("Migrate accepted duplicate member")
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
 	}
-	version, _ := readVersion(db)
-	if version != 6 {
-		t.Fatalf("version=%d want 6", version)
+	rows, err := db.Query(`SELECT binding_index,native_name,binding_value,typeof(native_name),typeof(binding_value) FROM lifecycle_occurrence_bindings ORDER BY binding_index`)
+	if err != nil {
+		t.Fatal(err)
 	}
-	var stored []byte
-	if err := db.QueryRow(`SELECT bindings_json FROM lifecycle_occurrences WHERE journal_id=1`).Scan(&stored); err != nil || string(stored) != raw {
-		t.Fatalf("stored=%q err=%v", stored, err)
+	defer rows.Close()
+	wantNames := [][]byte{[]byte("session_id"), []byte("tool_use_id"), []byte("tool_use_id")}
+	wantValues := [][]byte{[]byte("é"), []byte("Case"), []byte("Cas")}
+	i := 0
+	for rows.Next() {
+		var index int
+		var name, value []byte
+		var nt, vt string
+		if err := rows.Scan(&index, &name, &value, &nt, &vt); err != nil {
+			t.Fatal(err)
+		}
+		if index != i || !bytes.Equal(name, wantNames[i]) || !bytes.Equal(value, wantValues[i]) || nt != "blob" || vt != "blob" {
+			t.Fatalf("row %d index=%d name=%q value=%q types=%s/%s", i, index, name, value, nt, vt)
+		}
+		i++
 	}
-	var v7 int
-	_ = db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='lifecycle_occurrence_bindings'`).Scan(&v7)
-	if v7 != 0 {
-		t.Fatalf("v7 table survived rollback")
+	if i != 3 {
+		t.Fatalf("rows=%d", i)
+	}
+	if _, err := db.Exec(`DELETE FROM lifecycle_occurrences WHERE journal_id=1`); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	_ = db.QueryRow(`SELECT count(*) FROM lifecycle_occurrence_bindings`).Scan(&count)
+	if count != 0 {
+		t.Fatalf("cascade left %d bindings", count)
+	}
+}
+
+func TestMigrateV6ToV7AcceptsEmptyBindings(t *testing.T) {
+	db := openV6Lifecycle(t)
+	defer db.Close()
+	seedV6Occurrence(t, db, `[]`)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	_ = db.QueryRow(`SELECT count(*) FROM lifecycle_occurrence_bindings`).Scan(&count)
+	if count != 0 {
+		t.Fatalf("bindings=%d", count)
 	}
 }

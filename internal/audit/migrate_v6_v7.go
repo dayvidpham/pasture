@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
-	"unicode/utf8"
+
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 )
 
 type lifecycleV6Binding struct {
@@ -116,7 +116,7 @@ func decodeV6Bindings(raw []byte) ([]lifecycleV6Binding, error) {
 		return nil, fmt.Errorf("bindings exceed 16-item bound")
 	}
 	for i, b := range bindings {
-		if b.Kind < 1 || b.Kind > 8 || !validBindingBytes(b.NativeName) || !validBindingBytes(b.Value) {
+		if model.ValidateNativeBinding(model.NativeBinding{Kind: model.NativeBindingKind(b.Kind), NativeName: b.NativeName, Value: b.Value}) != nil {
 			return nil, fmt.Errorf("invalid binding at index %d", i)
 		}
 	}
@@ -166,15 +166,4 @@ func rejectDuplicateMembers(raw []byte) error {
 		}
 	}
 	return walk()
-}
-func validBindingBytes(v string) bool {
-	if !utf8.ValidString(v) || len(v) < 1 || len(v) > 512 || strings.TrimSpace(v) != v {
-		return false
-	}
-	for _, r := range v {
-		if r == 0 || r < 0x20 || r == 0x7f {
-			return false
-		}
-	}
-	return true
 }

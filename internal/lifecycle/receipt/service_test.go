@@ -1,10 +1,9 @@
 package receipt
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
 	stderrors "errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -137,14 +136,11 @@ func TestReceiveAppendsOccurrenceAndOneExtraInOneOperation(t *testing.T) {
 		result:     provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: expectedOccurrenceResultSlot, ProducedJournalID: 43}}},
 	}
 	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-one-extra"}}
-	extra := provenance.Effect{
-		Sort:         provenance.EffectEvidence,
-		ResultSlot:   provenance.ResultSlotID("interpreted"),
-		EvidenceKind: provenance.EvidenceKind("pasture.lifecycle.interpreted.v1"),
-		Payload:      []byte(`{"semantic":1}`),
+	interpreted, err := NewInterpreted(mustSessionStartL2(t, "session-1"), mustClaudeLifecycleContract(t))
+	if err != nil {
+		t.Fatal(err)
 	}
-	digest := sha256.Sum256(extra.Payload)
-	extra.ContentDigest = digest[:]
+	extra := interpreted.Effect()
 
 	receipt, err := s.Receive(context.Background(), validDelivery(), extra)
 	if err != nil {
@@ -164,8 +160,8 @@ func TestReceiveAppendsOccurrenceAndOneExtraInOneOperation(t *testing.T) {
 	if occurrence.Sort != provenance.EffectEvidence || occurrence.ResultSlot != expectedOccurrenceResultSlot || occurrence.EvidenceKind != expectedOccurrenceEvidenceKind {
 		t.Fatalf("first effect = %#v, want independently pinned occurrence metadata", occurrence)
 	}
-	if effects[1].Sort != extra.Sort || effects[1].ResultSlot != extra.ResultSlot || effects[1].EvidenceKind != extra.EvidenceKind || !bytes.Equal(effects[1].ContentDigest, extra.ContentDigest) || !bytes.Equal(effects[1].Payload, extra.Payload) {
-		t.Fatalf("second effect = %#v, want byte-identical extra %#v", effects[1], extra)
+	if effects[1].Sort != extra.Sort || effects[1].ResultSlot != extra.ResultSlot || effects[1].EvidenceKind != extra.EvidenceKind || !effectDigestValid(effects[1]) || validateInterpretedPayload(effects[1].Payload) != nil {
+		t.Fatalf("second effect is not canonical interpreted evidence: %#v", effects[1])
 	}
 }
 
@@ -185,6 +181,29 @@ func TestReceiveRejectsForgedLifecycleExtraBeforeAppend(t *testing.T) {
 	}
 }
 
+func TestReceiveRejectsUnnormalizedBindingsBeforeWrites(t *testing.T) {
+	t.Parallel()
+	cases := []model.NativeBinding{{Kind: 0, NativeName: "session_id", Value: "x"}, {Kind: model.BindingSession, Value: "x"}, {Kind: model.BindingSession, NativeName: " session_id", Value: "x"}, {Kind: model.BindingSession, NativeName: "session_id", Value: " x"}, {Kind: model.BindingSession, NativeName: "session_id", Value: "x\x00"}, {Kind: model.BindingSession, NativeName: string([]byte{0xff}), Value: "x"}}
+	for _, binding := range cases {
+		binding := binding
+		t.Run(fmt.Sprintf("%d-%q-%q", binding.Kind, binding.NativeName, binding.Value), func(t *testing.T) {
+			t.Parallel()
+			calls := []string{}
+			inputs := []provenance.OperationInput{}
+			clock := testClock{now: time.Unix(10, 0)}
+			service := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: contextJournal{calls: &calls, inputs: &inputs}, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "invalid-binding"}}
+			delivery := validDelivery()
+			delivery.Bindings = []model.NativeBinding{binding}
+			if _, err := service.Receive(context.Background(), delivery); err == nil {
+				t.Fatal("accepted invalid binding")
+			}
+			if len(calls) != 0 || len(inputs) != 0 {
+				t.Fatalf("writes occurred: %v %#v", calls, inputs)
+			}
+		})
+	}
+}
+
 func TestReceiveAppendsOccurrenceAndExtrasInOneOperation(t *testing.T) {
 	t.Parallel()
 	calls := []string{}
@@ -198,23 +217,16 @@ func TestReceiveAppendsOccurrenceAndExtrasInOneOperation(t *testing.T) {
 		result:     provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: expectedOccurrenceResultSlot, ProducedJournalID: 42}}},
 	}
 	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-extras"}}
-	extraOne := provenance.Effect{
-		Sort:         provenance.EffectEvidence,
-		ResultSlot:   provenance.ResultSlotID("interpreted"),
-		EvidenceKind: provenance.EvidenceKind("pasture.lifecycle.interpreted.v1"),
-		Payload:      []byte(`{"semantic":1}`),
+	interpreted, err := NewInterpreted(mustPostToolBatchL2(t, "session-1"), mustClaudeLifecycleContract(t))
+	if err != nil {
+		t.Fatal(err)
 	}
-	firstDigest := sha256.Sum256(extraOne.Payload)
-	extraOne.ContentDigest = firstDigest[:]
-	firstRef := digest.FromBytes(extraOne.Payload)
-	extraTwo := provenance.Effect{
-		Sort:         provenance.EffectEvidence,
-		ResultSlot:   provenance.ResultSlotID("consultation"),
-		EvidenceKind: provenance.EvidenceKind("pasture.lifecycle.consultation.v1"),
-		Payload:      []byte(`{"interpreted":{"result_slot":"interpreted","content_digest":"` + firstRef.String() + `"}}`),
+	extraOne := interpreted.Effect()
+	consultation, err := NewConsultation(interpreted, jsonPort{raw: []byte(`{"rule":"allow"}`), valid: true}, jsonPort{raw: []byte(`{"decision":"proceed"}`), valid: true})
+	if err != nil {
+		t.Fatal(err)
 	}
-	secondDigest := sha256.Sum256(extraTwo.Payload)
-	extraTwo.ContentDigest = secondDigest[:]
+	extraTwo := consultation.Effect()
 
 	receipt, err := s.Receive(context.Background(), validDelivery(), extraOne, extraTwo)
 	if err != nil {
@@ -233,11 +245,11 @@ func TestReceiveAppendsOccurrenceAndExtrasInOneOperation(t *testing.T) {
 	if effects[0].Sort != provenance.EffectEvidence || effects[0].ResultSlot != expectedOccurrenceResultSlot || effects[0].EvidenceKind != expectedOccurrenceEvidenceKind {
 		t.Fatalf("first effect = %#v, want occurrence effect", effects[0])
 	}
-	if effects[1].Sort != extraOne.Sort || effects[1].ResultSlot != extraOne.ResultSlot || effects[1].EvidenceKind != extraOne.EvidenceKind || !bytes.Equal(effects[1].ContentDigest, extraOne.ContentDigest) || !bytes.Equal(effects[1].Payload, extraOne.Payload) {
-		t.Fatalf("second effect = %#v, want first extra %#v", effects[1], extraOne)
+	if effects[1].Sort != extraOne.Sort || effects[1].ResultSlot != extraOne.ResultSlot || effects[1].EvidenceKind != extraOne.EvidenceKind || !effectDigestValid(effects[1]) || validateInterpretedPayload(effects[1].Payload) != nil {
+		t.Fatalf("second effect is not canonical interpreted evidence: %#v", effects[1])
 	}
-	if effects[2].Sort != extraTwo.Sort || effects[2].ResultSlot != extraTwo.ResultSlot || effects[2].EvidenceKind != extraTwo.EvidenceKind || !bytes.Equal(effects[2].ContentDigest, extraTwo.ContentDigest) || !bytes.Equal(effects[2].Payload, extraTwo.Payload) {
-		t.Fatalf("third effect = %#v, want second extra %#v", effects[2], extraTwo)
+	if effects[2].Sort != extraTwo.Sort || effects[2].ResultSlot != extraTwo.ResultSlot || effects[2].EvidenceKind != extraTwo.EvidenceKind || !effectDigestValid(effects[2]) || validateConsultationPayload(effects[2].Payload, effects[1].Payload) != nil {
+		t.Fatalf("third effect is not canonical consultation evidence: %#v", effects[2])
 	}
 }
 

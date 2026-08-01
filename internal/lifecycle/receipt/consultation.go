@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"reflect"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
@@ -104,4 +105,70 @@ func (r ConsultationRecord) Effect() provenance.Effect {
 	}
 	sum := sha256.Sum256(r.payload)
 	return provenance.Effect{Sort: provenance.EffectEvidence, ResultSlot: consultationSlot, EvidenceKind: consultationKind, ContentDigest: append([]byte(nil), sum[:]...), Payload: append(json.RawMessage(nil), r.payload...)}
+}
+
+type consultationWire struct {
+	Legalized   json.RawMessage `json:"legalized"`
+	Response    json.RawMessage `json:"response"`
+	Interpreted struct {
+		ResultSlot    string `json:"result_slot"`
+		ContentDigest string `json:"content_digest"`
+	} `json:"interpreted"`
+}
+
+func validateConsultationPayload(payload, interpretedPayload []byte) error {
+	if err := rejectDuplicateJSONMembers(payload); err != nil {
+		return fmt.Errorf("decode lifecycle consultation: %w", err)
+	}
+	var wire consultationWire
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
+		return fmt.Errorf("decode lifecycle consultation: %w", err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return fmt.Errorf("decode lifecycle consultation: trailing JSON value")
+	}
+	if err := validateJSONObject(wire.Legalized); err != nil {
+		return fmt.Errorf("decode lifecycle consultation legalized value: %w", err)
+	}
+	if err := validateJSONObject(wire.Response); err != nil {
+		return fmt.Errorf("decode lifecycle consultation response: %w", err)
+	}
+	if wire.Interpreted.ResultSlot != string(interpretedSlot) || wire.Interpreted.ContentDigest != digest.FromBytes(interpretedPayload).String() {
+		return fmt.Errorf("decode lifecycle consultation: interpreted slot or exact payload digest does not match the preceding interpreted effect")
+	}
+	canonical := []byte(`{"legalized":`)
+	canonical = append(canonical, wire.Legalized...)
+	canonical = append(canonical, `,"response":`...)
+	canonical = append(canonical, wire.Response...)
+	canonical = append(canonical, `,"interpreted":{"result_slot":"interpreted","content_digest":`...)
+	quoted, _ := json.Marshal(wire.Interpreted.ContentDigest)
+	canonical = append(canonical, quoted...)
+	canonical = append(canonical, '}', '}')
+	if !bytes.Equal(canonical, payload) {
+		return fmt.Errorf("decode lifecycle consultation: payload is not canonical compact field-ordered JSON")
+	}
+	return nil
+}
+
+func rebindConsultationPayload(payload, interpretedPayload []byte) ([]byte, error) {
+	var wire consultationWire
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
+		return nil, err
+	}
+	wire.Interpreted.ResultSlot = string(interpretedSlot)
+	wire.Interpreted.ContentDigest = digest.FromBytes(interpretedPayload).String()
+	out := []byte(`{"legalized":`)
+	out = append(out, wire.Legalized...)
+	out = append(out, `,"response":`...)
+	out = append(out, wire.Response...)
+	out = append(out, `,"interpreted":{"result_slot":"interpreted","content_digest":`...)
+	quoted, _ := json.Marshal(wire.Interpreted.ContentDigest)
+	out = append(out, quoted...)
+	out = append(out, '}', '}')
+	return out, nil
 }
