@@ -68,7 +68,7 @@ func NewLifecycleReader(tracker protocol.TaskTracker) (model.LifecycleReader, er
 	if !ok || store.auditDBHandle() == nil {
 		return nil, &pasterrors.StructuredError{Category: pasterrors.CategoryValidation, What: "The supplied tracker cannot serve lifecycle reads.", Why: "The bounded reader needs the unified projection database handle.", Where: "Wiring lifecycle reads (internal/tasks/lifecycle_identity.go in tasks.NewLifecycleReader).", Impact: "No lifecycle records were read.", Fix: "Use the tracker returned by tasks.OpenTaskTracker."}
 	}
-	return projection.Reader{DB: store.auditDBHandle()}, nil
+	return projection.Reader{DB: store.auditDBHandle(), Facts: store.Journal().Facts()}, nil
 }
 
 // RebuildLifecycleOccurrences derives the disposable occurrence projection

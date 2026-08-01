@@ -1,6 +1,7 @@
 package receipt
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -47,6 +48,9 @@ func (s Service) Receive(ctx context.Context, delivery Delivery, extra ...proven
 	if err := validateDelivery(delivery); err != nil {
 		return Receipt{}, err
 	}
+	if err := validateLifecycleExtras(extra); err != nil {
+		return Receipt{}, err
+	}
 	if s.Blobs == nil || s.Identity == nil || s.Clock == nil || s.Operations == nil {
 		return Receipt{}, structured(pasterrors.CategoryValidation, "The lifecycle receipt service is incompletely wired.", "Blob storage, identity resolution, clock, and operation identity are all required to produce an attributable durable receipt.", "Receiving a lifecycle delivery (internal/lifecycle/receipt/service.go in receipt.Service.Receive).", "Nothing was recorded.", "Construct the service through the unified production opener with every dependency supplied.", nil)
 	}
@@ -89,6 +93,41 @@ func (s Service) Receive(ctx context.Context, delivery Delivery, extra ...proven
 		return Receipt{}, err
 	}
 	return Receipt{OccurrenceID: id}, nil
+}
+
+func validateLifecycleExtras(extra []provenance.Effect) error {
+	if len(extra) > 2 {
+		return invalid("The lifecycle delivery contains too many interpreted effects.", "Only one interpreted record and its immediately following consultation may accompany an occurrence.", "Pass the canonical ordered interpreted/consultation pair once.")
+	}
+	if len(extra) == 0 {
+		return nil
+	}
+	interpreted := extra[0]
+	if interpreted.Sort != provenance.EffectEvidence || interpreted.ResultSlot != interpretedSlot || interpreted.EvidenceKind != interpretedKind || !effectDigestValid(interpreted) {
+		return invalid("The lifecycle delivery contains a forged interpreted effect.", "Its slot, kind, or content digest is not canonical interpreted evidence.", "Use receipt.Record.Effect without modifying it.")
+	}
+	if len(extra) == 1 {
+		return nil
+	}
+	consultation := extra[1]
+	if consultation.Sort != provenance.EffectEvidence || consultation.ResultSlot != consultationSlot || consultation.EvidenceKind != consultationKind || !effectDigestValid(consultation) {
+		return invalid("The lifecycle delivery contains a forged consultation effect.", "Its slot, kind, or content digest is not canonical consultation evidence.", "Use receipt.ConsultationRecord.Effect without modifying it.")
+	}
+	var payload struct {
+		Interpreted struct {
+			ResultSlot    string `json:"result_slot"`
+			ContentDigest string `json:"content_digest"`
+		} `json:"interpreted"`
+	}
+	if err := json.Unmarshal(consultation.Payload, &payload); err != nil || payload.Interpreted.ResultSlot != string(interpretedSlot) || payload.Interpreted.ContentDigest != digest.FromBytes(interpreted.Payload).String() {
+		return invalid("The lifecycle consultation does not reference its immediately preceding interpreted effect.", "The operation-local slot and exact interpreted payload digest must match as one ordered pair.", "Construct both records together and preserve interpreted-then-consultation order.")
+	}
+	return nil
+}
+
+func effectDigestValid(effect provenance.Effect) bool {
+	sum := sha256.Sum256(effect.Payload)
+	return len(effect.ContentDigest) == sha256.Size && bytes.Equal(effect.ContentDigest, sum[:])
 }
 
 func validateDelivery(d Delivery) error {

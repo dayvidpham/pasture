@@ -17,7 +17,12 @@ import (
 	digest "github.com/opencontainers/go-digest"
 )
 
-type Reader struct{ DB *sql.DB }
+const interpretedKind = provenance.EvidenceKind("pasture.lifecycle.interpreted.v1")
+
+type Reader struct {
+	DB    *sql.DB
+	Facts provenance.FactQueryAPI
+}
 
 func (r Reader) Records(ctx context.Context, query model.OccurrenceQuery) (model.LifecyclePage, error) {
 	page, err := r.Occurrences(ctx, query)
@@ -65,9 +70,14 @@ func (r Reader) Occurrences(ctx context.Context, query model.OccurrenceQuery) (m
 		}
 		after, snapshot = query.Page.Cursor.LastJournalID, query.Page.Cursor.SnapshotJournalID
 	} else {
-		if err := r.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(journal_id), 0) FROM lifecycle_occurrences`).Scan(&snapshot); err != nil {
-			return model.OccurrencePage{}, readerError("The lifecycle reader could not establish a stable snapshot.", "SQLite rejected the bounded projection watermark query.", "No records were read.", "Rebuild projections and retry.", err)
+		if r.Facts == nil {
+			return model.OccurrencePage{}, readerError("The lifecycle reader has no Provenance fact query API.", "A global journal watermark cannot be established from projection-local state.", "No records were read.", "Construct the reader through tasks.NewLifecycleReader.", nil)
 		}
+		page, err := r.Facts.QueryEvidence(provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}}, Kinds: []provenance.EvidenceKind{interpretedKind}, Page: provenance.FactPageRequest{Limit: 1}})
+		if err != nil {
+			return model.OccurrencePage{}, readerError("The lifecycle reader could not establish a stable global snapshot.", "Provenance rejected the bounded watermark query.", "No records were read.", "Repair journal reads and retry.", err)
+		}
+		snapshot = page.SnapshotMaxJournalID
 	}
 	statement := `SELECT journal_id, contract, event_kind, received_at, actor_id, capture_disposition, payload_digest, envelope_json, bindings_json FROM lifecycle_occurrences WHERE journal_id > ? AND journal_id <= ?`
 	args := []any{after, snapshot}
@@ -82,6 +92,10 @@ func (r Reader) Occurrences(ctx context.Context, query model.OccurrenceQuery) (m
 		for _, event := range events {
 			args = append(args, event)
 		}
+	}
+	for _, binding := range query.BindingFilter() {
+		statement += ` AND EXISTS (SELECT 1 FROM lifecycle_occurrence_bindings b WHERE b.journal_id=lifecycle_occurrences.journal_id AND b.binding_kind=? AND b.native_name=? AND b.binding_value=?)`
+		args = append(args, binding.Kind, []byte(binding.NativeName), []byte(binding.Value))
 	}
 	statement += ` ORDER BY journal_id LIMIT ?`
 	args = append(args, int(query.Page.Size)+1)

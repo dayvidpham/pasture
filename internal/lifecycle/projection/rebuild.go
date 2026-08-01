@@ -85,6 +85,11 @@ func RebuildOccurrences(ctx context.Context, journal provenance.Journal, db *sql
 		if _, err := tx.ExecContext(ctx, `INSERT INTO lifecycle_occurrences(journal_id, contract, event_kind, received_at, actor_id, capture_disposition, payload_digest, envelope_json, bindings_json, snapshot_journal_id) VALUES(?,?,?,?,?,?,?,?,?,?)`, item.journalID, item.payload.Contract, item.payload.Event, item.recordedAt, item.actor, item.payload.Capture, item.payload.Body, envelope, bindings, snapshot); err != nil {
 			return projectionError("A lifecycle occurrence could not be projected.", fmt.Sprintf("SQLite rejected replay of journal row %d, commonly because its content-addressed payload blob is absent.", item.journalID), "The rebuild transaction will roll back without exposing a partial projection.", "Restore the referenced blob or repair the journal before retrying.", err)
 		}
+		for index, binding := range item.payload.Bindings {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO lifecycle_occurrence_bindings(journal_id,binding_index,binding_kind,native_name,binding_value) VALUES(?,?,?,?,?)`, item.journalID, index, binding.Kind, []byte(binding.NativeName), []byte(binding.Value)); err != nil {
+				return projectionError("A lifecycle occurrence binding could not be projected.", fmt.Sprintf("SQLite rejected binding %d for journal row %d.", index, item.journalID), "The rebuild transaction will roll back without exposing a partial projection.", "Repair malformed binding evidence and retry.", err)
+			}
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return projectionError("The lifecycle occurrence projection could not be committed.", "SQLite rejected the atomic replacement after replay completed.", "The prior projection remains authoritative.", "Confirm storage health and retry.", err)

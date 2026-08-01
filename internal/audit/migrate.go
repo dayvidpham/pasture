@@ -81,7 +81,7 @@ const busyRetryMaxDelay = 2 * time.Second
 // version does my binary support?" reads this constant. The §11 Scenario 5
 // newer-schema rejection error reports this value as the "supported
 // version" — bumping it here automatically updates the assertion.
-const MaxKnownSchemaVersion = 6
+const MaxKnownSchemaVersion = 7
 
 // migrationStep applies a single forward migration. Each step receives an
 // open transaction (already holding the write lock via BEGIN IMMEDIATE)
@@ -116,6 +116,7 @@ func migrationSteps() []migrationStep {
 		{fromVersion: 3, toVersion: 4, apply: migrateV3toV4Step},
 		{fromVersion: 4, toVersion: 5, apply: migrateV4toV5Step},
 		{fromVersion: 5, toVersion: 6, apply: migrateV5toV6Step},
+		{fromVersion: 6, toVersion: 7, apply: migrateV6toV7Step},
 	}
 }
 
