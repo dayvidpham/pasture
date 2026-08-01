@@ -10,6 +10,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/provenance"
@@ -254,6 +255,30 @@ func TestZeroRecordEffectIsSafe(t *testing.T) {
 
 	if got := (Record{}).Effect(); !reflect.DeepEqual(got, provenance.Effect{}) {
 		t.Fatalf("zero record effect = %#v, want zero effect", got)
+	}
+}
+
+func TestDecodeInterpretedStrictCanonicalEvidence(t *testing.T) {
+	t.Parallel()
+	contract := mustClaudeLifecycleContract(t)
+	record, err := NewInterpreted(mustSessionStartL2(t, "session-1"), contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effect := record.Effect()
+	decoded, err := DecodeInterpreted(model.InterpretationID(12), model.OccurrenceID(11), effect.Payload)
+	if err != nil {
+		t.Fatalf("DecodeInterpreted: %v", err)
+	}
+	if decoded.JournalID() != 12 || decoded.OccurrenceID.JournalID() != 11 || decoded.Semantic() != record.Semantic() || decoded.Contract() != record.Contract() {
+		t.Fatalf("decoded=%#v", decoded)
+	}
+	needle := []byte(`"contract":"` + expectedInterpretedContract + `"`)
+	duplicate := bytes.Replace(effect.Payload, needle, []byte(`"contract":"forged","contract":"`+expectedInterpretedContract+`"`), 1)
+	for _, invalid := range [][]byte{append(append([]byte(nil), effect.Payload...), []byte(` {}`)...), duplicate} {
+		if _, err := DecodeInterpreted(12, 11, invalid); err == nil {
+			t.Fatalf("accepted noncanonical payload %s", invalid)
+		}
 	}
 }
 

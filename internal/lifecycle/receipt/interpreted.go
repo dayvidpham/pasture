@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/provenance"
@@ -24,6 +26,107 @@ type Record struct {
 	unresolved  []waist.UnresolvedFact
 	contract    ir.RuntimeContractID
 	constructed bool
+}
+
+// DecodeInterpreted strictly decodes canonical interpreted evidence.
+func DecodeInterpreted(id model.InterpretationID, occurrence model.OccurrenceID, payload []byte) (model.InterpretedRecord, error) {
+	if err := rejectDuplicateJSONMembers(payload); err != nil {
+		return model.InterpretedRecord{}, fmt.Errorf("decode interpreted lifecycle evidence: %w", err)
+	}
+	var wire interpretedPayload
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
+		return model.InterpretedRecord{}, fmt.Errorf("decode interpreted lifecycle evidence: %w", err)
+	}
+	if err := requireJSONEOF(decoder); err != nil {
+		return model.InterpretedRecord{}, err
+	}
+	identities := make([]waist.SemanticIdentity, len(wire.Identities))
+	for i, identity := range wire.Identities {
+		if !identity.Kind.IsValid() || identity.Value == "" || len(identity.Value) > 512 {
+			return model.InterpretedRecord{}, fmt.Errorf("decode interpreted lifecycle evidence: invalid identity at index %d", i)
+		}
+		identities[i] = waist.SemanticIdentity{Kind: identity.Kind, Value: identity.Value}
+	}
+	unresolved := make([]waist.UnresolvedFact, len(wire.UnresolvedFacts))
+	for i, fact := range wire.UnresolvedFacts {
+		if !fact.Reason.IsValid() {
+			return model.InterpretedRecord{}, fmt.Errorf("decode interpreted lifecycle evidence: invalid unresolved fact at index %d", i)
+		}
+		unresolved[i] = waist.UnresolvedFact{Reason: fact.Reason}
+	}
+	record, err := model.NewInterpretedRecord(id, occurrence, wire.Semantic, identities, unresolved, wire.Contract)
+	if err != nil {
+		return model.InterpretedRecord{}, err
+	}
+	canonicalRecord := Record{semantic: wire.Semantic, identities: identities, unresolved: unresolved, contract: wire.Contract, constructed: true}
+	canonical, err := canonicalInterpretedPayload(canonicalRecord)
+	if err != nil || !bytes.Equal(canonical, payload) {
+		return model.InterpretedRecord{}, fmt.Errorf("decode interpreted lifecycle evidence: payload is not canonical compact JSON")
+	}
+	return record, nil
+}
+
+func requireJSONEOF(decoder *json.Decoder) error {
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return fmt.Errorf("decode interpreted lifecycle evidence: trailing JSON value")
+	}
+	return nil
+}
+
+func rejectDuplicateJSONMembers(raw []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	var walk func() error
+	walk = func() error {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		delim, ok := token.(json.Delim)
+		if !ok {
+			return nil
+		}
+		switch delim {
+		case '{':
+			seen := map[string]struct{}{}
+			for decoder.More() {
+				keyToken, err := decoder.Token()
+				if err != nil {
+					return err
+				}
+				key := keyToken.(string)
+				if _, exists := seen[key]; exists {
+					return fmt.Errorf("duplicate JSON member %q", key)
+				}
+				seen[key] = struct{}{}
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+			_, err = decoder.Token()
+			return err
+		case '[':
+			for decoder.More() {
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+			_, err = decoder.Token()
+			return err
+		default:
+			return fmt.Errorf("unexpected JSON delimiter")
+		}
+	}
+	if err := walk(); err != nil {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return fmt.Errorf("trailing JSON value")
+	}
+	return nil
 }
 
 // NewInterpreted constructs an interpreted record from a verified L2 value.

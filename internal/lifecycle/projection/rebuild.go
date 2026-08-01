@@ -78,11 +78,7 @@ func RebuildOccurrences(ctx context.Context, journal provenance.Journal, db *sql
 		if err != nil {
 			return projectionError("A lifecycle envelope could not be encoded for projection.", "The journal payload decoded but its typed envelope could not be serialized.", "The rebuild transaction will roll back.", "Report the incompatible envelope type.", err)
 		}
-		bindings, err := json.Marshal(item.payload.Bindings)
-		if err != nil {
-			return projectionError("Lifecycle bindings could not be encoded for projection.", "The journal payload decoded but its typed bindings could not be serialized.", "The rebuild transaction will roll back.", "Report the incompatible binding type.", err)
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO lifecycle_occurrences(journal_id, contract, event_kind, received_at, actor_id, capture_disposition, payload_digest, envelope_json, bindings_json, snapshot_journal_id) VALUES(?,?,?,?,?,?,?,?,?,?)`, item.journalID, item.payload.Contract, item.payload.Event, item.recordedAt, item.actor, item.payload.Capture, item.payload.Body, envelope, bindings, snapshot); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO lifecycle_occurrences(journal_id, contract, event_kind, received_at, actor_id, capture_disposition, payload_digest, envelope_json, snapshot_journal_id) VALUES(?,?,?,?,?,?,?,?,?)`, item.journalID, item.payload.Contract, item.payload.Event, item.recordedAt, item.actor, item.payload.Capture, item.payload.Body, envelope, snapshot); err != nil {
 			return projectionError("A lifecycle occurrence could not be projected.", fmt.Sprintf("SQLite rejected replay of journal row %d, commonly because its content-addressed payload blob is absent.", item.journalID), "The rebuild transaction will roll back without exposing a partial projection.", "Restore the referenced blob or repair the journal before retrying.", err)
 		}
 		for index, binding := range item.payload.Bindings {

@@ -43,7 +43,7 @@ func TestLifecycleBlobMustExistBeforeOccurrence(t *testing.T) {
 	if err := Migrate(db); err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Exec(`INSERT INTO lifecycle_occurrences(journal_id, contract, event_kind, received_at, actor_id, capture_disposition, payload_digest, envelope_json, bindings_json, snapshot_journal_id) VALUES(1,'c',1,1,'a',1,'sha256:missing','{}','[]',1)`)
+	_, err = db.Exec(`INSERT INTO lifecycle_occurrences(journal_id, contract, event_kind, received_at, actor_id, capture_disposition, payload_digest, envelope_json, snapshot_journal_id) VALUES(1,'c',1,1,'a',1,'sha256:missing','{}',1)`)
 	if err == nil {
 		t.Fatal("occurrence insert without a committed blob succeeded")
 	}
