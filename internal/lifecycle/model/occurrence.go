@@ -36,8 +36,9 @@ const (
 
 type NativeBinding struct {
 	nonJournalValue
-	Kind  NativeBindingKind
-	Value string
+	Kind       NativeBindingKind
+	NativeName string
+	Value      string
 }
 
 // EvidencePayloadRef identifies a body in the content-addressed SQLite blob
