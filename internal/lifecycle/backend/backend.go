@@ -64,7 +64,18 @@ func (HostResponse) ConsultationResponse() {}
 
 // BuildConsultation is the sole production entry point for backend mapping.
 func BuildConsultation(interpreted receipt.Record, legalized legalize.Legalized) (receipt.ConsultationRecord, HostResponse, error) {
-	return receipt.ConsultationRecord{}, HostResponse{}, fmt.Errorf("build lifecycle consultation: implementation is not available during the contract layer; no record or host response was produced; complete backend consultation mapping before calling BuildConsultation (interpreted valid: %t, legalized valid: %t)", interpreted.IsValid(), legalized.IsValid())
+	if !interpreted.IsValid() {
+		return receipt.ConsultationRecord{}, HostResponse{}, fmt.Errorf("build lifecycle consultation: the interpreted record is invalid because it was not constructed by receipt.NewInterpreted; no record or host response was produced; pass the interpreted record for the same verified gate event")
+	}
+	if !legalized.IsValid() {
+		return receipt.ConsultationRecord{}, HostResponse{}, fmt.Errorf("build lifecycle consultation: the legalized value is invalid because it was not returned by legalize.Event for a gate consultation; no record or host response was produced; pass the Legalized terminal from the same gate event")
+	}
+	response := newHostResponse(DecisionProceed)
+	record, err := receipt.NewConsultation(interpreted, legalized, response)
+	if err != nil {
+		return receipt.ConsultationRecord{}, HostResponse{}, fmt.Errorf("build lifecycle consultation: receipt.NewConsultation rejected the interpreted gate, legalized value, or Proceed response; no record or host response was returned; ensure the interpreted record describes the same gate and preserve constructor-built values: %w", err)
+	}
+	return record, response, nil
 }
 
 var _ waist.ConsultationResponse = HostResponse{}

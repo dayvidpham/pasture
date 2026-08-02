@@ -99,7 +99,20 @@ func (r Result) IsValid() bool {
 
 // Event is the sole production entry point for lifecycle legalization.
 func Event(event waist.L2) (Result, error) {
-	return Result{}, fmt.Errorf("legalize lifecycle event: implementation is not available during the contract layer; no terminal was produced; complete the legalization implementation before calling legalize.Event (event valid: %t)", event.IsValid())
+	if !event.IsValid() || !event.Semantics().IsValid() {
+		return Result{}, fmt.Errorf("legalize lifecycle event: the waist L2 value is invalid because it was not constructed by EventBinding.NewEvent; no legalization terminal was produced; build and verify the native event before calling legalize.Event")
+	}
+	semantic := event.Semantics().Semantic()
+	switch semantic {
+	case runtime.SemanticObservation:
+		return Result{semantic: semantic, constructed: true}, nil
+	case runtime.SemanticGateConsultation:
+		return Result{semantic: semantic, legalized: newLegalized(), constructed: true}, nil
+	case runtime.SemanticExplicitHumanResponse:
+		return Result{semantic: semantic, noAuthority: newNoAuthority(), constructed: true}, nil
+	default:
+		return Result{}, fmt.Errorf("legalize lifecycle event: runtime semantic %d is unknown or impossible at the legalization boundary; no terminal was produced; update the reviewed runtime semantic contract and legalization switch together before retrying", uint8(semantic))
+	}
 }
 
 var _ waist.ConsultationLegalized = Legalized{}
