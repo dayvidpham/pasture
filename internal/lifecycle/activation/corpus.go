@@ -474,9 +474,17 @@ func Evaluate(root string, c Case) (Evaluation, error) {
 	if err != nil {
 		return Evaluation{}, fmt.Errorf("activation.Evaluate: read contained fixture %q for case %q: %w", fixture, c.name, err)
 	}
-	praw, err := os.ReadFile(provenance)
+	provenanceFile, err := os.Open(provenance)
 	if err != nil {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: read contained provenance %q for case %q: %w", provenance, c.name, err)
+		return Evaluation{}, fmt.Errorf("activation.Evaluate: open contained provenance %q for case %q: %w", provenance, c.name, err)
+	}
+	praw, readErr := io.ReadAll(io.LimitReader(provenanceFile, MaxProvenanceBytes+1))
+	closeErr := provenanceFile.Close()
+	if readErr != nil {
+		return Evaluation{}, fmt.Errorf("activation.Evaluate: read bounded provenance %q for case %q: %w", provenance, c.name, readErr)
+	}
+	if closeErr != nil {
+		return Evaluation{}, fmt.Errorf("activation.Evaluate: close provenance %q for case %q after bounded read: %w", provenance, c.name, closeErr)
 	}
 	if len(praw) > MaxProvenanceBytes {
 		return Evaluation{}, fmt.Errorf("activation.Evaluate: provenance %q exceeds %d bytes; reduce it", provenance, MaxProvenanceBytes)
@@ -574,14 +582,42 @@ func containedPath(root, candidate string) (string, bool, error) {
 }
 
 func rejectYAMLFeatures(n *yaml.Node) error {
+	return validateYAMLNode(n, "document")
+}
+
+func validateYAMLNode(n *yaml.Node, path string) error {
 	if n.Alias != nil {
-		return fmt.Errorf("aliases are forbidden")
+		return fmt.Errorf("alias at %s line %d column %d is forbidden; spell out the value", path, n.Line, n.Column)
 	}
 	if n.Tag != "" && n.Tag != "!!map" && n.Tag != "!!seq" && n.Tag != "!!str" && n.Tag != "!!null" {
-		return fmt.Errorf("explicit/custom tag %q is forbidden", n.Tag)
+		return fmt.Errorf("custom tag %q at %s line %d column %d is forbidden; use plain YAML values", n.Tag, path, n.Line, n.Column)
 	}
-	for _, c := range n.Content {
-		if err := rejectYAMLFeatures(c); err != nil {
+	if n.Kind == yaml.MappingNode {
+		if len(n.Content)%2 != 0 {
+			return fmt.Errorf("mapping at %s line %d column %d has an unmatched key; provide key/value pairs", path, n.Line, n.Column)
+		}
+		seen := make(map[string]*yaml.Node, len(n.Content)/2)
+		for index := 0; index < len(n.Content); index += 2 {
+			key, value := n.Content[index], n.Content[index+1]
+			if key.Kind != yaml.ScalarNode || key.Tag != "!!str" {
+				return fmt.Errorf("mapping key at %s line %d column %d must be a scalar string", path, key.Line, key.Column)
+			}
+			childPath := path + "." + key.Value
+			if first, duplicate := seen[key.Value]; duplicate {
+				return fmt.Errorf("duplicate YAML key %q at %s line %d column %d; first declared at line %d column %d; remove the duplicate so one value is authoritative", key.Value, path, key.Line, key.Column, first.Line, first.Column)
+			}
+			seen[key.Value] = key
+			if err := validateYAMLNode(key, childPath+".<key>"); err != nil {
+				return err
+			}
+			if err := validateYAMLNode(value, childPath); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for index, c := range n.Content {
+		if err := validateYAMLNode(c, fmt.Sprintf("%s[%d]", path, index)); err != nil {
 			return err
 		}
 	}

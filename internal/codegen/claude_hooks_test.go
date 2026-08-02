@@ -25,17 +25,26 @@ func TestClaudeHooksFailClosedOnActivationMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, mutate := range map[string]func([]activation.Entry) []activation.Entry{
-		"missing":   func(in []activation.Entry) []activation.Entry { return in[1:] },
-		"duplicate": func(in []activation.Entry) []activation.Entry { return append(in, in[0]) },
-		"invalid":   func(in []activation.Entry) []activation.Entry { in[0] = activation.Entry{}; return in },
+	for name, tc := range map[string]struct {
+		mutate func([]activation.Entry) []activation.Entry
+		want   string
+	}{
+		"missing":   {func(in []activation.Entry) []activation.Entry { return in[1:] }, "has no activation entry"},
+		"duplicate": {func(in []activation.Entry) []activation.Entry { return append(in, in[0]) }, "duplicate activation entry"},
+		"extra": {func(in []activation.Entry) []activation.Entry {
+			extra, _ := activation.NewWithheld(999, activation.WithheldOutsideTargetSet)
+			return append(in, extra)
+		}, "remove non-manifest entries"},
+		"invalid-state":  {func(in []activation.Entry) []activation.Entry { in[0].State = 0; return in }, "is invalid"},
+		"invalid-reason": {func(in []activation.Entry) []activation.Entry { in[1].Reason = 0; return in }, "is invalid"},
+		"invalid-proof":  {func(in []activation.Entry) []activation.Entry { in[0].CaptureProof = 0; return in }, "is invalid"},
 	} {
-		mutate := mutate
+		tc := tc
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, err := emitClaudeHooks(t.TempDir(), GenerateOptions{}, manifest, mutate(append([]activation.Entry(nil), states...)))
-			if err == nil {
-				t.Fatal("expected fail-closed activation error")
+			_, err := emitClaudeHooks(t.TempDir(), GenerateOptions{}, manifest, tc.mutate(append([]activation.Entry(nil), states...)))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want actionable substring %q", err, tc.want)
 			}
 		})
 	}
@@ -61,11 +70,76 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 			support = file.Content
 		}
 	}
-	if !strings.Contains(support, `"reason": "missing-fixture"`) || !strings.Contains(support, `"captureProof":`) || strings.Contains(support, "reason-") {
-		t.Fatalf("support report lacks stable named fields: %s", support)
+	var report struct {
+		Events []struct{ Event, State, Reason, CaptureProof, ProductionProof string }
 	}
-	if !strings.Contains(hooks, "git-discipline.sh") || !strings.Contains(hooks, "hook lifecycle") {
-		t.Fatalf("hooks do not preserve independent and lifecycle PreToolUse disciplines: %s", hooks)
+	if err := json.Unmarshal([]byte(support), &report); err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Events) != 30 {
+		t.Fatalf("support entries=%d, want 30", len(report.Events))
+	}
+	enabled, missing, outside := 0, 0, 0
+	for _, entry := range report.Events {
+		switch entry.State {
+		case "enabled":
+			enabled++
+			if entry.Event != "SessionStart" || entry.Reason != "" || entry.CaptureProof == "" || entry.ProductionProof == "" {
+				t.Errorf("invalid enabled entry: %+v", entry)
+			}
+		case "withheld":
+			if entry.CaptureProof != "" || entry.ProductionProof != "" {
+				t.Errorf("withheld entry carries proofs: %+v", entry)
+			}
+			switch entry.Reason {
+			case "missing-fixture":
+				missing++
+			case "outside-target-set":
+				outside++
+			default:
+				t.Errorf("unstable withheld reason: %+v", entry)
+			}
+		default:
+			t.Errorf("unknown state: %+v", entry)
+		}
+	}
+	if enabled != 1 || missing != 9 || outside != 20 {
+		t.Fatalf("partition=%d/%d/%d, want 1/9/20", enabled, missing, outside)
+	}
+	var config claudeHooksConfig
+	if err := json.Unmarshal([]byte(hooks), &config); err != nil {
+		t.Fatal(err)
+	}
+	lifecycle := 0
+	for event, groups := range config.Hooks {
+		for _, group := range groups {
+			for _, hook := range group.Hooks {
+				if strings.Contains(hook.Command, "hook lifecycle") {
+					lifecycle++
+					if event != "SessionStart" {
+						t.Errorf("withheld lifecycle event emitted: %s", event)
+					}
+				}
+			}
+		}
+	}
+	if lifecycle != 1 {
+		t.Fatalf("lifecycle hooks=%d, want one enabled event", lifecycle)
+	}
+	pre := config.Hooks["PreToolUse"]
+	if len(pre) != 1 || pre[0].Matcher != "Bash" || len(pre[0].Hooks) != 1 || !strings.Contains(pre[0].Hooks[0].Command, "git-discipline.sh") {
+		t.Fatalf("independent PreToolUse discipline missing: %+v", pre)
+	}
+	root, err := os.ReadFile(filepath.Join("..", "..", "hooks", "pasture-activation.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	embedded, err := os.ReadFile(filepath.Join("..", "target", "claudecode", "assets", "pasture-hooks", "hooks", "pasture-activation.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(root, embedded) {
+		t.Fatal("root and embedded generated support reports differ byte-for-byte")
 	}
 }
 
@@ -84,8 +158,26 @@ func TestClaudeHooksAbsentSessionStartDoesNotPanic(t *testing.T) {
 			}
 		}
 	}
-	if _, err := emitClaudeHooks(t.TempDir(), GenerateOptions{}, manifest, states); err != nil {
+	files, err := emitClaudeHooks(t.TempDir(), GenerateOptions{}, manifest, states)
+	if err != nil {
 		t.Fatal(err)
+	}
+	var hooks string
+	for _, file := range files {
+		if strings.HasSuffix(file.Path, "hooks.json") {
+			hooks = file.Content
+		}
+	}
+	var config claudeHooksConfig
+	if err := json.Unmarshal([]byte(hooks), &config); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := config.Hooks["SessionStart"]; present {
+		t.Fatalf("withheld SessionStart emitted augmentation: %+v", config.Hooks["SessionStart"])
+	}
+	pre := config.Hooks["PreToolUse"]
+	if len(pre) != 1 || !strings.Contains(pre[0].Hooks[0].Command, "git-discipline.sh") {
+		t.Fatalf("independent PreToolUse missing without SessionStart: %+v", pre)
 	}
 }
 
