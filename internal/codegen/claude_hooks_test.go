@@ -79,32 +79,38 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 	if len(report.Events) != 30 {
 		t.Fatalf("support entries=%d, want 30", len(report.Events))
 	}
-	enabled, missing, outside := 0, 0, 0
-	for _, entry := range report.Events {
-		switch entry.State {
-		case "enabled":
-			enabled++
-			if entry.Event != "SessionStart" || entry.Reason != "" || entry.CaptureProof == "" || entry.ProductionProof == "" {
-				t.Errorf("invalid enabled entry: %+v", entry)
+	expected := []struct{ event, state, reason string }{
+		{"SessionStart", "enabled", ""}, {"Setup", "withheld", "outside-target-set"}, {"SessionEnd", "withheld", "missing-fixture"}, {"UserPromptSubmit", "withheld", "outside-target-set"}, {"UserPromptExpansion", "withheld", "outside-target-set"}, {"Stop", "withheld", "outside-target-set"}, {"StopFailure", "withheld", "outside-target-set"}, {"PreToolUse", "withheld", "missing-fixture"}, {"PermissionRequest", "withheld", "outside-target-set"}, {"PermissionDenied", "withheld", "outside-target-set"}, {"PostToolUse", "withheld", "missing-fixture"}, {"PostToolUseFailure", "withheld", "missing-fixture"}, {"PostToolBatch", "withheld", "missing-fixture"}, {"FileChanged", "withheld", "outside-target-set"}, {"CwdChanged", "withheld", "outside-target-set"}, {"ConfigChange", "withheld", "outside-target-set"}, {"InstructionsLoaded", "withheld", "outside-target-set"}, {"WorktreeCreate", "withheld", "outside-target-set"}, {"WorktreeRemove", "withheld", "outside-target-set"}, {"SubagentStart", "withheld", "outside-target-set"}, {"SubagentStop", "withheld", "outside-target-set"}, {"TeammateIdle", "withheld", "outside-target-set"}, {"TaskCreated", "withheld", "outside-target-set"}, {"TaskCompleted", "withheld", "outside-target-set"}, {"PreCompact", "withheld", "missing-fixture"}, {"PostCompact", "withheld", "missing-fixture"}, {"Notification", "withheld", "outside-target-set"}, {"MessageDisplay", "withheld", "outside-target-set"}, {"Elicitation", "withheld", "missing-fixture"}, {"ElicitationResult", "withheld", "missing-fixture"},
+	}
+	seen := make(map[string]struct{}, len(expected))
+	for index, want := range expected {
+		entry := report.Events[index]
+		if _, duplicate := seen[entry.Event]; duplicate {
+			t.Errorf("duplicate support event %q", entry.Event)
+		}
+		seen[entry.Event] = struct{}{}
+		if entry.Event != want.event || entry.State != want.state || entry.Reason != want.reason {
+			t.Errorf("support[%d]=%+v, want event=%q state=%q reason=%q", index, entry, want.event, want.state, want.reason)
+		}
+		if want.state == "enabled" {
+			if entry.CaptureProof != "internal/lifecycle/ingress/claude/testdata/fixtures/session_start_2_1_210.json (Claude Code 2.1.210 authentic capture)" || entry.ProductionProof != "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence" {
+				t.Errorf("SessionStart exact proofs changed: %+v", entry)
 			}
-		case "withheld":
-			if entry.CaptureProof != "" || entry.ProductionProof != "" {
-				t.Errorf("withheld entry carries proofs: %+v", entry)
-			}
-			switch entry.Reason {
-			case "missing-fixture":
-				missing++
-			case "outside-target-set":
-				outside++
-			default:
-				t.Errorf("unstable withheld reason: %+v", entry)
-			}
-		default:
-			t.Errorf("unknown state: %+v", entry)
+		} else if entry.CaptureProof != "" || entry.ProductionProof != "" {
+			t.Errorf("withheld event carries proofs: %+v", entry)
+		}
+		if strings.HasPrefix(entry.Reason, "reason-") {
+			t.Errorf("numeric reason leaked: %+v", entry)
 		}
 	}
-	if enabled != 1 || missing != 9 || outside != 20 {
-		t.Fatalf("partition=%d/%d/%d, want 1/9/20", enabled, missing, outside)
+	if len(seen) != 30 {
+		t.Fatalf("unique support events=%d, want 30", len(seen))
+	}
+	manifestEntries := manifest.Entries()
+	for i, want := range expected {
+		if manifestEntries[i].NativeName != want.event {
+			t.Errorf("expected report order diverges from generated manifest at %d: %q != %q", i, want.event, manifestEntries[i].NativeName)
+		}
 	}
 	var config claudeHooksConfig
 	if err := json.Unmarshal([]byte(hooks), &config); err != nil {
@@ -125,6 +131,17 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 	}
 	if lifecycle != 1 {
 		t.Fatalf("lifecycle hooks=%d, want one enabled event", lifecycle)
+	}
+	session := config.Hooks["SessionStart"]
+	if len(session) != 1 || session[0].Matcher != "" || len(session[0].Hooks) != 2 {
+		t.Fatalf("SessionStart hook group changed: %+v", session)
+	}
+	if session[0].Hooks[0].Command != "cat ${CLAUDE_PLUGIN_ROOT}/hooks/bd-prime.md 2>&1" {
+		t.Errorf("SessionStart bd-prime command=%q", session[0].Hooks[0].Command)
+	}
+	wantLifecycle := `${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event SessionStart --host-version "${CLAUDE_CODE_VERSION:-unknown}"`
+	if session[0].Hooks[1].Command != wantLifecycle || session[0].Hooks[1].Type != "command" || session[0].Hooks[1].Timeout != 10 {
+		t.Errorf("SessionStart lifecycle command=%+v, want %q", session[0].Hooks[1], wantLifecycle)
 	}
 	pre := config.Hooks["PreToolUse"]
 	if len(pre) != 1 || pre[0].Matcher != "Bash" || len(pre[0].Hooks) != 1 || !strings.Contains(pre[0].Hooks[0].Command, "git-discipline.sh") {

@@ -101,33 +101,45 @@ func TestLoadCorpusCompleteBoundaryMatrix(t *testing.T) {
 		})
 	}
 
-	rejections := map[string]string{
-		"missing-cases": "{}\n", "empty-cases": "cases: []\n",
-		"empty-name":             strings.Replace(valid, "name: pass", "name: \"\"", 1),
-		"empty-fixture":          strings.Replace(valid, "fixtures/pass.json", "\"\"", 1),
-		"empty-ref":              strings.Replace(valid, "ref: ref", "ref: \"\"", 1),
-		"empty-mutation":         strings.Replace(valid, "description: pass", "description: \"\"", 1),
-		"missing-input":          strings.Replace(valid, "  input: {fixture: fixtures/pass.json}\n", "", 1),
-		"missing-expected":       strings.Replace(valid, "  expected: {decision: enabled, reason: \"\"}\n", "", 1),
-		"missing-provenance":     strings.Replace(valid, "  provenance: {source: requirement, ref: ref}\n", "", 1),
-		"missing-mutation":       strings.Replace(valid, "  mutation: {description: pass}\n", "", 1),
-		"invalid-classification": strings.Replace(valid, "must-pass", "other", 1),
-		"invalid-decision":       strings.Replace(valid, "decision: enabled", "decision: other", 1),
-		"invalid-reason":         strings.Replace(valid, "reason: non-authentic-origin", "reason: other", 1),
-		"invalid-source":         strings.Replace(valid, "source: requirement", "source: other", 1),
-		"enabled-with-reason":    strings.Replace(valid, "decision: enabled, reason: \"\"", "decision: enabled, reason: digest-mismatch", 1),
-		"withheld-with-none":     strings.Replace(valid, "decision: withheld, reason: non-authentic-origin", "decision: withheld, reason: \"\"", 1),
-		"must-pass-withheld":     strings.Replace(valid, "decision: enabled", "decision: withheld", 1),
-		"must-fail-enabled":      strings.Replace(valid, "decision: withheld", "decision: enabled", 1),
-		"duplicate-case-name":    strings.Replace(valid, "name: origin", "name: pass", 1),
-		"unknown-key":            strings.Replace(valid, "name: pass", "unknown: true\n  name: pass", 1),
-		"custom-tag":             strings.Replace(valid, "name: pass", "name: !custom pass", 1),
-		"alias":                  "anchor: &x value\n" + strings.Replace(valid, "fixtures/pass.json", "*x", 1),
-		"trailing-document":      valid + "---\n{}\n",
+	rejections := map[string]struct{ body, want string }{
+		"missing-cases": {"{}\n", "require 1.."}, "empty-cases": {"cases: []\n", "require 1.."},
+		"empty-name":                   {strings.Replace(valid, "name: pass", "name: \"\"", 1), "required field name is empty"},
+		"empty-fixture":                {strings.Replace(valid, "fixtures/pass.json", "\"\"", 1), "required field input.fixture is empty"},
+		"empty-ref":                    {strings.Replace(valid, "ref: ref", "ref: \"\"", 1), "required field provenance.ref is empty"},
+		"empty-mutation":               {strings.Replace(valid, "description: pass", "description: \"\"", 1), "required field mutation.description is empty"},
+		"missing-name":                 {strings.Replace(valid, "- name: pass\n", "-\n", 1), "missing required key name"},
+		"missing-input":                {strings.Replace(valid, "  input: {fixture: fixtures/pass.json}\n", "", 1), "missing required key input"},
+		"missing-input-fixture":        {strings.Replace(valid, "input: {fixture: fixtures/pass.json}", "input: {}", 1), "missing required key input.fixture"},
+		"missing-expected":             {strings.Replace(valid, "  expected: {decision: enabled, reason: \"\"}\n", "", 1), "missing required key expected"},
+		"missing-expected-decision":    {strings.Replace(valid, "expected: {decision: enabled, reason: \"\"}", "expected: {reason: \"\"}", 1), "missing required key expected.decision"},
+		"missing-expected-reason":      {strings.Replace(valid, "expected: {decision: enabled, reason: \"\"}", "expected: {decision: enabled}", 1), "missing required key expected.reason"},
+		"missing-classification":       {strings.Replace(valid, "  classification: must-pass\n", "", 1), "missing required key classification"},
+		"missing-provenance":           {strings.Replace(valid, "  provenance: {source: requirement, ref: ref}\n", "", 1), "missing required key provenance"},
+		"missing-provenance-source":    {strings.Replace(valid, "provenance: {source: requirement, ref: ref}", "provenance: {ref: ref}", 1), "missing required key provenance.source"},
+		"missing-provenance-ref":       {strings.Replace(valid, "provenance: {source: requirement, ref: ref}", "provenance: {source: requirement}", 1), "missing required key provenance.ref"},
+		"missing-mutation":             {strings.Replace(valid, "  mutation: {description: pass}\n", "", 1), "missing required key mutation"},
+		"missing-mutation-description": {strings.Replace(valid, "mutation: {description: pass}", "mutation: {}", 1), "missing required key mutation.description"},
+		"invalid-classification":       {strings.Replace(valid, "must-pass", "other", 1), "unknown classification \"other\"; use must-pass or must-fail"},
+		"invalid-decision":             {strings.Replace(valid, "decision: enabled", "decision: other", 1), "unknown decision \"other\"; use enabled or withheld"},
+		"invalid-reason":               {strings.Replace(valid, "reason: non-authentic-origin", "reason: other", 1), "unknown reason \"other\""},
+		"invalid-source":               {strings.Replace(valid, "source: requirement", "source: other", 1), "unknown provenance source \"other\""},
+		"enabled-with-reason":          {strings.Replace(valid, "decision: enabled, reason: \"\"", "decision: enabled, reason: digest-mismatch", 1), "violates classification/decision/reason combination"},
+		"withheld-with-none":           {strings.Replace(valid, "decision: withheld, reason: non-authentic-origin", "decision: withheld, reason: \"\"", 1), "violates classification/decision/reason combination"},
+		"must-pass-withheld":           {strings.Replace(valid, "decision: enabled", "decision: withheld", 1), "violates classification/decision/reason combination"},
+		"must-fail-enabled":            {strings.Replace(valid, "decision: withheld", "decision: enabled", 1), "violates classification/decision/reason combination"},
+		"duplicate-case-name":          {strings.Replace(valid, "name: origin", "name: pass", 1), "duplicate case name \"pass\""},
+		"unknown-key":                  {strings.Replace(valid, "name: pass", "unknown: value\n  name: pass", 1), "field unknown not found"},
+		"custom-tag":                   {strings.Replace(valid, "name: pass", "name: !custom pass", 1), "custom tag \"!custom\""},
+		"alias":                        {"anchor: &x value\n" + strings.Replace(valid, "fixtures/pass.json", "*x", 1), "alias"},
+		"trailing-document":            {valid + "---\n{}\n", "exactly one YAML document"},
 	}
-	for name, body := range rejections {
-		name, body := name, body
-		t.Run(name, func(t *testing.T) { t.Parallel(); _, err := loadCorpusText(t, body); require.Error(t, err) })
+	for name, tc := range rejections {
+		name, tc := name, tc
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, err := loadCorpusText(t, tc.body)
+			require.ErrorContains(t, err, tc.want)
+		})
 	}
 
 	t.Run("corpus-byte-bound", func(t *testing.T) {
@@ -147,11 +159,25 @@ func TestLoadCorpusCompleteBoundaryMatrix(t *testing.T) {
 		_, err := loadCorpusText(t, b.String())
 		require.ErrorContains(t, err, "require 1..")
 	})
-	t.Run("required-string-bound", func(t *testing.T) {
-		t.Parallel()
-		_, err := loadCorpusText(t, strings.Replace(valid, "name: pass", "name: "+strings.Repeat("x", activation.MaxFieldBytes+1), 1))
-		require.ErrorContains(t, err, "oversized")
-	})
+	for name, wantPath := range map[string]string{"name": "name", "fixture": "input.fixture", "ref": "provenance.ref", "mutation": "mutation.description"} {
+		name, wantPath := name, wantPath
+		t.Run("oversized-"+name, func(t *testing.T) {
+			t.Parallel()
+			body := valid
+			switch name {
+			case "name":
+				body = strings.Replace(body, "name: pass", "name: "+strings.Repeat("x", activation.MaxFieldBytes+1), 1)
+			case "fixture":
+				body = strings.Replace(body, "fixtures/pass.json", strings.Repeat("x", activation.MaxFieldBytes+1), 1)
+			case "ref":
+				body = strings.Replace(body, "ref: ref", "ref: "+strings.Repeat("x", activation.MaxFieldBytes+1), 1)
+			case "mutation":
+				body = strings.Replace(body, "description: pass", "description: "+strings.Repeat("x", activation.MaxFieldBytes+1), 1)
+			}
+			_, err := loadCorpusText(t, body)
+			require.ErrorContains(t, err, "required field "+wantPath+" exceeds")
+		})
+	}
 	t.Run("escaping-metadata-accepted", func(t *testing.T) {
 		t.Parallel()
 		corpus, err := loadCorpusText(t, validCorpusYAML("../outside.json"))
@@ -314,6 +340,9 @@ func TestEvaluateContainmentPrecedenceAndEvidenceErrors(t *testing.T) {
 		"oversized-json": {func(root string) {
 			require.NoError(t, os.WriteFile(filepath.Join(root, "fixtures", "session_start_2_1_210.provenance.json"), []byte(strings.Repeat(" ", activation.MaxProvenanceBytes+1)), 0o600))
 		}, "exceeds"},
+		"oversized-fixture": {func(root string) {
+			require.NoError(t, os.WriteFile(filepath.Join(root, "fixtures", "session_start_2_1_210.json"), []byte(strings.Repeat("x", activation.MaxFixtureBytes+1)), 0o600))
+		}, "native payload bound"},
 	} {
 		name, tc := name, tc
 		t.Run(name, func(t *testing.T) {

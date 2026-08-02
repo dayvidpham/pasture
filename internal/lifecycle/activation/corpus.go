@@ -203,6 +203,7 @@ const (
 	MaxCorpusCases     = 1024
 	MaxFieldBytes      = 1 << 20
 	MaxProvenanceBytes = 1 << 20
+	MaxFixtureBytes    = acceptance.MaxCaptureFixtureBytes
 )
 
 // Case is an immutable, scalar-backed corpus row. Fixture, provenance, and
@@ -377,21 +378,21 @@ func LoadCorpus(path string) (Corpus, error) {
 		return Corpus{}, fmt.Errorf("activation.LoadCorpus: corpus %q must contain exactly one YAML document; remove trailing content", path)
 	}
 	type row struct {
-		Name  string `yaml:"name"`
-		Input struct {
-			Fixture string `yaml:"fixture"`
+		Name  *string `yaml:"name"`
+		Input *struct {
+			Fixture *string `yaml:"fixture"`
 		} `yaml:"input"`
-		Expected struct {
-			Decision Decision     `yaml:"decision"`
-			Reason   CorpusReason `yaml:"reason"`
+		Expected *struct {
+			Decision *Decision     `yaml:"decision"`
+			Reason   *CorpusReason `yaml:"reason"`
 		} `yaml:"expected"`
-		Classification Classification `yaml:"classification"`
-		Provenance     struct {
-			Source ProvenanceSource `yaml:"source"`
-			Ref    string           `yaml:"ref"`
+		Classification *Classification `yaml:"classification"`
+		Provenance     *struct {
+			Source *ProvenanceSource `yaml:"source"`
+			Ref    *string           `yaml:"ref"`
 		} `yaml:"provenance"`
-		Mutation struct {
-			Description string `yaml:"description"`
+		Mutation *struct {
+			Description *string `yaml:"description"`
 		} `yaml:"mutation"`
 	}
 	var wire struct {
@@ -409,19 +410,51 @@ func LoadCorpus(path string) (Corpus, error) {
 	cases := make([]Case, 0, len(wire.Cases))
 	missing := MissingCoverageMustPass | MissingCoverageMustFail | MissingCoverageNonAuthenticOrigin | MissingCoverageDigestMismatch | MissingCoverageVersionOutOfRange | MissingCoveragePathEscape
 	for i, r := range wire.Cases {
-		fields := []string{r.Name, r.Input.Fixture, r.Provenance.Ref, r.Mutation.Description}
-		for _, v := range fields {
-			if strings.TrimSpace(v) == "" || len(v) > MaxFieldBytes {
-				return Corpus{}, fmt.Errorf("activation.LoadCorpus: case %d has a missing or oversized required string; provide non-empty fields no larger than %d bytes", i, MaxFieldBytes)
+		missingPath := ""
+		switch {
+		case r.Name == nil:
+			missingPath = "name"
+		case r.Input == nil:
+			missingPath = "input"
+		case r.Input.Fixture == nil:
+			missingPath = "input.fixture"
+		case r.Expected == nil:
+			missingPath = "expected"
+		case r.Expected.Decision == nil:
+			missingPath = "expected.decision"
+		case r.Expected.Reason == nil:
+			missingPath = "expected.reason"
+		case r.Classification == nil:
+			missingPath = "classification"
+		case r.Provenance == nil:
+			missingPath = "provenance"
+		case r.Provenance.Source == nil:
+			missingPath = "provenance.source"
+		case r.Provenance.Ref == nil:
+			missingPath = "provenance.ref"
+		case r.Mutation == nil:
+			missingPath = "mutation"
+		case r.Mutation.Description == nil:
+			missingPath = "mutation.description"
+		}
+		if missingPath != "" {
+			return Corpus{}, fmt.Errorf("activation.LoadCorpus: case %d is missing required key %s; add that key explicitly (enabled expected.reason must be reason: \"\")", i, missingPath)
+		}
+		for _, field := range []struct{ path, value string }{{"name", *r.Name}, {"input.fixture", *r.Input.Fixture}, {"provenance.ref", *r.Provenance.Ref}, {"mutation.description", *r.Mutation.Description}} {
+			if strings.TrimSpace(field.value) == "" {
+				return Corpus{}, fmt.Errorf("activation.LoadCorpus: case %d required field %s is empty; provide a non-empty string", i, field.path)
+			}
+			if len(field.value) > MaxFieldBytes {
+				return Corpus{}, fmt.Errorf("activation.LoadCorpus: case %d required field %s exceeds the %d-byte bound; shorten that field", i, field.path, MaxFieldBytes)
 			}
 		}
-		if _, ok := seen[r.Name]; ok {
-			return Corpus{}, fmt.Errorf("activation.LoadCorpus: duplicate case name %q at case %d; names must be unique", r.Name, i)
+		if _, ok := seen[*r.Name]; ok {
+			return Corpus{}, fmt.Errorf("activation.LoadCorpus: duplicate case name %q at case %d; names must be unique", *r.Name, i)
 		}
-		seen[r.Name] = struct{}{}
-		c := Case{name: r.Name, fixture: r.Input.Fixture, expectedDecision: r.Expected.Decision, expectedReason: r.Expected.Reason, classification: r.Classification, provenanceSource: r.Provenance.Source, provenanceReference: r.Provenance.Ref, mutationDescription: r.Mutation.Description, constructed: true}
+		seen[*r.Name] = struct{}{}
+		c := Case{name: *r.Name, fixture: *r.Input.Fixture, expectedDecision: *r.Expected.Decision, expectedReason: *r.Expected.Reason, classification: *r.Classification, provenanceSource: *r.Provenance.Source, provenanceReference: *r.Provenance.Ref, mutationDescription: *r.Mutation.Description, constructed: true}
 		if !c.IsValid() {
-			return Corpus{}, fmt.Errorf("activation.LoadCorpus: case %q has inconsistent classification, decision, reason, or enum values; must-pass requires enabled/no reason and must-fail requires withheld/a bypass reason", r.Name)
+			return Corpus{}, fmt.Errorf("activation.LoadCorpus: case %q violates classification/decision/reason combination: classification=%q decision=%q reason=%q; must-pass requires enabled with explicit empty reason and must-fail requires withheld with one bypass reason", *r.Name, r.Classification.String(), r.Expected.Decision.String(), r.Expected.Reason.String())
 		}
 		if c.classification == ClassificationMustPass {
 			missing &^= MissingCoverageMustPass
@@ -470,16 +503,27 @@ func Evaluate(root string, c Case) (Evaluation, error) {
 	if escaped {
 		return withheldEvaluation(c.name, CorpusReasonPathEscape), nil
 	}
-	body, err := os.ReadFile(fixture)
+	fixtureFile, err := os.Open(fixture)
 	if err != nil {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: read contained fixture %q for case %q: %w", fixture, c.name, err)
+		return Evaluation{}, fmt.Errorf("activation.Evaluate: open contained fixture %q for case %q: %w", fixture, c.name, err)
+	}
+	body, readErr := io.ReadAll(io.LimitReader(fixtureFile, MaxFixtureBytes+1))
+	closeErr := fixtureFile.Close()
+	if readErr != nil {
+		return Evaluation{}, fmt.Errorf("activation.Evaluate: read bounded fixture %q for case %q: %w", fixture, c.name, readErr)
+	}
+	if closeErr != nil {
+		return Evaluation{}, fmt.Errorf("activation.Evaluate: close fixture %q for case %q after bounded read: %w", fixture, c.name, closeErr)
+	}
+	if len(body) > MaxFixtureBytes {
+		return Evaluation{}, fmt.Errorf("activation.Evaluate: fixture %q for case %q exceeds the %d-byte native payload bound; reduce or reject the capture", fixture, c.name, MaxFixtureBytes)
 	}
 	provenanceFile, err := os.Open(provenance)
 	if err != nil {
 		return Evaluation{}, fmt.Errorf("activation.Evaluate: open contained provenance %q for case %q: %w", provenance, c.name, err)
 	}
 	praw, readErr := io.ReadAll(io.LimitReader(provenanceFile, MaxProvenanceBytes+1))
-	closeErr := provenanceFile.Close()
+	closeErr = provenanceFile.Close()
 	if readErr != nil {
 		return Evaluation{}, fmt.Errorf("activation.Evaluate: read bounded provenance %q for case %q: %w", provenance, c.name, readErr)
 	}
@@ -545,7 +589,7 @@ func Evaluate(root string, c Case) (Evaluation, error) {
 	if !target {
 		return Evaluation{}, fmt.Errorf("activation.Evaluate: provenance event %q is generated but outside the activation target set; capture one of the ten declared targets", p.Event)
 	}
-	if err := p.CaptureProvenance.ValidateFixture(rootAbs, c.fixture); err != nil {
+	if err := p.CaptureProvenance.ValidateFixtureBytes(body); err != nil {
 		return Evaluation{}, fmt.Errorf("activation.Evaluate: final fixture validation failed for case %q: %w", c.name, err)
 	}
 	return Evaluation{caseName: c.name, event: event, decision: DecisionEnabled, reason: CorpusReasonNone, eventPresent: true, constructed: true}, nil
