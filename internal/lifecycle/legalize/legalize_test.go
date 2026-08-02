@@ -12,25 +12,29 @@ import (
 func TestEventSemanticTerminals(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name        string
-		event       runtime.ClaudeLifecycleEvent
-		semantic    runtime.EventSemantic
-		legalized   bool
-		noAuthority bool
+		name             string
+		event            runtime.ClaudeLifecycleEvent
+		expectedBlocking runtime.BlockingMode
+		semantic         runtime.EventSemantic
+		legalized        bool
+		noAuthority      bool
 	}{
-		{name: "SessionStart observation", event: runtime.ClaudeEventSessionStart, semantic: runtime.SemanticObservation},
-		{name: "PreToolUse ordinal 8", event: runtime.ClaudeEventPreToolUse, semantic: runtime.SemanticGateConsultation, legalized: true},
-		{name: "PostToolBatch ordinal 13", event: runtime.ClaudeEventPostToolBatch, semantic: runtime.SemanticGateConsultation, legalized: true},
-		{name: "PreCompact ordinal 25", event: runtime.ClaudeEventPreCompact, semantic: runtime.SemanticGateConsultation, legalized: true},
-		{name: "Elicitation ordinal 29", event: runtime.ClaudeEventElicitation, semantic: runtime.SemanticGateConsultation, legalized: true},
-		{name: "ConfigChange out of M1 conditionally blocking", event: runtime.ClaudeEventConfigChange, semantic: runtime.SemanticGateConsultation, legalized: true},
-		{name: "ElicitationResult blocking human response", event: runtime.ClaudeEventElicitationResult, semantic: runtime.SemanticExplicitHumanResponse, noAuthority: true},
+		{name: "SessionStart observation", event: runtime.ClaudeEventSessionStart, expectedBlocking: runtime.NonBlocking, semantic: runtime.SemanticObservation},
+		{name: "PreToolUse ordinal 8", event: runtime.ClaudeEventPreToolUse, expectedBlocking: runtime.Blocking, semantic: runtime.SemanticGateConsultation, legalized: true},
+		{name: "PostToolBatch ordinal 13", event: runtime.ClaudeEventPostToolBatch, expectedBlocking: runtime.Blocking, semantic: runtime.SemanticGateConsultation, legalized: true},
+		{name: "PreCompact ordinal 25", event: runtime.ClaudeEventPreCompact, expectedBlocking: runtime.Blocking, semantic: runtime.SemanticGateConsultation, legalized: true},
+		{name: "Elicitation ordinal 29", event: runtime.ClaudeEventElicitation, expectedBlocking: runtime.Blocking, semantic: runtime.SemanticGateConsultation, legalized: true},
+		{name: "ConfigChange out of M1 conditionally blocking", event: runtime.ClaudeEventConfigChange, expectedBlocking: runtime.ConditionallyBlocking, semantic: runtime.SemanticGateConsultation, legalized: true},
+		{name: "ElicitationResult blocking human response", event: runtime.ClaudeEventElicitationResult, expectedBlocking: runtime.Blocking, semantic: runtime.SemanticExplicitHumanResponse, noAuthority: true},
 	}
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			l2 := realL2(t, test.event)
+			if got := l2.Semantics().Blocking(); got != test.expectedBlocking {
+				t.Fatalf("L2 blocking mode = %v, want %v", got, test.expectedBlocking)
+			}
 			result, err := legalize.Event(l2)
 			if err != nil {
 				t.Fatalf("Event() error = %v", err)
