@@ -19,7 +19,12 @@ const (
 	receiptKind     = provenance.EvidenceKind("pasture.lifecycle.occurrence.v1")
 	interpretedSlot = provenance.ResultSlotID("interpreted")
 	interpretedKind = provenance.EvidenceKind("pasture.lifecycle.interpreted.v1")
+	sqliteBusyCode  = 5
 )
+
+type sqliteCodeError interface {
+	Code() int
+}
 
 type Identity struct {
 	Actor     provenance.ActorID
@@ -128,12 +133,29 @@ func (a JournalAppender) Append(ctx context.Context, in provenance.OperationInpu
 	bounded, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 	result, err := contextJournal.ApplyContext(bounded, in)
+	var boundedErr error
+	if err != nil {
+		boundedErr = bounded.Err()
+	}
+	elapsed := a.Clock.Now().Sub(started)
 	if a.Observer != nil {
-		a.Observer.ObserveOccurrenceCommit(a.Clock.Now().Sub(started), err)
+		a.Observer.ObserveOccurrenceCommit(elapsed, err)
 	}
 	if err != nil {
-		if stderrors.Is(err, context.DeadlineExceeded) {
-			return 0, model.IngressDeadlineError{Deadline: deadline, Elapsed: a.Clock.Now().Sub(started)}
+		switch {
+		case stderrors.Is(boundedErr, context.DeadlineExceeded):
+			return 0, model.IngressDeadlineError{Deadline: deadline, Elapsed: elapsed}
+		case stderrors.Is(boundedErr, context.Canceled):
+			cause := err
+			if !stderrors.Is(cause, context.Canceled) {
+				cause = stderrors.Join(cause, boundedErr)
+			}
+			return 0, structured(pasterrors.CategoryStorage, "The lifecycle occurrence could not be committed.", "The Provenance journal rejected the occurrence operation after its payload blob was safely stored.", "Committing a lifecycle occurrence (internal/lifecycle/receipt/journal.go in receipt.JournalAppender.Append).", "No receipt is available; the payload blob may remain as a reclaimable orphan.", "Inspect the error details, repair the database or operation input, and retry with the same operation identity only when the input is unchanged.", cause)
+		case boundedErr == nil:
+			var coded sqliteCodeError
+			if stderrors.As(err, &coded) && coded.Code() == sqliteBusyCode {
+				return 0, model.IngressContentionError{Elapsed: elapsed, Cause: err}
+			}
 		}
 		return 0, structured(pasterrors.CategoryStorage, "The lifecycle occurrence could not be committed.", "The Provenance journal rejected the occurrence operation after its payload blob was safely stored.", "Committing a lifecycle occurrence (internal/lifecycle/receipt/journal.go in receipt.JournalAppender.Append).", "No receipt is available; the payload blob may remain as a reclaimable orphan.", "Inspect the error details, repair the database or operation input, and retry with the same operation identity only when the input is unchanged.", err)
 	}

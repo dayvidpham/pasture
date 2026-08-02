@@ -3,6 +3,7 @@ package budget_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/engine/budget"
 	claudeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
@@ -25,6 +27,7 @@ import (
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/dayvidpham/provenance"
 	digest "github.com/opencontainers/go-digest"
+	"modernc.org/sqlite"
 )
 
 const (
@@ -44,9 +47,10 @@ func (s *operationSource) NewOperationID() (string, error) {
 }
 
 type observation struct {
-	Durations        []int64 `json:"durations_ns"`
-	DeadlineFailures int     `json:"deadline_failures"`
-	StorageFailures  int     `json:"storage_failures"`
+	Durations          []int64 `json:"durations_ns"`
+	DeadlineFailures   int     `json:"deadline_failures"`
+	ContentionFailures int     `json:"contention_failures"`
+	StorageFailures    int     `json:"storage_failures"`
 }
 type observer struct{ result *observation }
 
@@ -95,9 +99,9 @@ func TestSliceStartAvailabilityUnderHookWriteLoad(t *testing.T) {
 	uncontended := runWorkers(t, dbPath, dir, profile, 1, deliveriesPerWriter)
 	contended := runWorkers(t, dbPath, dir, profile, loadWriters, deliveriesPerWriter)
 	u99, c99 := p99(uncontended.Durations), p99(contended.Durations)
-	t.Logf("occurrence commit: uncontended p99=%s, contended p99=%s, ratio=%.2f, deliveries=%d, deadline failures=%d, storage failures=%d", u99, c99, float64(c99)/float64(u99), loadWriters*deliveriesPerWriter, contended.DeadlineFailures, contended.StorageFailures)
-	if uncontended.DeadlineFailures+uncontended.StorageFailures != 0 || contended.DeadlineFailures+contended.StorageFailures != 0 {
-		t.Fatalf("delivery failures: uncontended deadline=%d storage=%d; contended deadline=%d storage=%d; every delivery must produce a receipt", uncontended.DeadlineFailures, uncontended.StorageFailures, contended.DeadlineFailures, contended.StorageFailures)
+	t.Logf("occurrence commit: uncontended p99=%s, contended p99=%s, ratio=%.2f, deliveries=%d, contention failures=%d, deadline failures=%d, storage failures=%d", u99, c99, float64(c99)/float64(u99), loadWriters*deliveriesPerWriter, contended.ContentionFailures, contended.DeadlineFailures, contended.StorageFailures)
+	if uncontended.ContentionFailures+uncontended.DeadlineFailures+uncontended.StorageFailures != 0 || contended.ContentionFailures+contended.DeadlineFailures+contended.StorageFailures != 0 {
+		t.Fatalf("delivery failures: uncontended contention=%d deadline=%d storage=%d; contended contention=%d deadline=%d storage=%d; every delivery must produce a receipt", uncontended.ContentionFailures, uncontended.DeadlineFailures, uncontended.StorageFailures, contended.ContentionFailures, contended.DeadlineFailures, contended.StorageFailures)
 	}
 	want := loadWriters * deliveriesPerWriter
 	tracker, err := openTracker(dbPath, profile)
@@ -136,8 +140,10 @@ func TestSliceStartAvailabilityUnderHookWriteLoad(t *testing.T) {
 func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "pasture.db")
-	bootstrap(t, dbPath, timeouts.DeadlineTestProfile())
-	tracker, err := openTracker(dbPath, timeouts.DeadlineTestProfile())
+	profile := timeouts.DeadlineTestProfile()
+	bootstrap(t, dbPath, profile)
+	contentionJournal := openContentionJournal(t, dbPath, profile)
+	tracker, err := openTracker(dbPath, profile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,12 +153,13 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 	defer cancel()
 	go func() { lockErr <- budget.HoldWriter(ctx, dbPath, timeouts.DeadlineTestProfile(), held, release) }()
 	<-held
-	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, budget.RealClock{}, &operationSource{prefix: "honest"}, timeouts.DeadlineTestProfile())
+	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, budget.RealClock{}, &operationSource{prefix: "honest"}, profile)
 	if err != nil {
 		close(release)
 		tracker.Close()
 		t.Fatal(err)
 	}
+	service.Appender.Journal = contentionJournal
 	// Blob storage is outside the occurrence lock-hold budget. Treat this body
 	// as already content-addressed so the injected contention targets only the
 	// second transaction.
@@ -168,9 +175,20 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 		t.Fatal(lock)
 	}
 	tracker.Close()
+	var contention model.IngressContentionError
+	if !stderrors.As(err, &contention) {
+		t.Fatalf("Receive error=%v, want typed IngressContentionError", err)
+	}
 	var deadline model.IngressDeadlineError
-	if !stderrors.As(err, &deadline) {
-		t.Fatalf("Receive error=%v, want typed IngressDeadlineError", err)
+	if stderrors.As(err, &deadline) {
+		t.Fatalf("Receive error=%v, unexpectedly classified as IngressDeadlineError", err)
+	}
+	var sqliteErr *sqlite.Error
+	if !stderrors.As(err, &sqliteErr) {
+		t.Fatalf("Receive error=%v, want underlying *sqlite.Error through Unwrap", err)
+	}
+	if sqliteErr.Code() != 5 {
+		t.Fatalf("underlying SQLite code=%d, want base SQLITE_BUSY code 5", sqliteErr.Code())
 	}
 	tracker, err = openTracker(dbPath, timeouts.DeadlineTestProfile())
 	if err != nil {
@@ -189,7 +207,7 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(page.Records()) != 0 {
-		t.Fatalf("deadline-failed delivery exposed %d receipts, want zero", len(page.Records()))
+		t.Fatalf("contention-failed delivery exposed %d receipts, want zero", len(page.Records()))
 	}
 }
 
@@ -198,6 +216,7 @@ func TestBlobFirstFailureLeavesReclaimableOrphanWithoutReceipt(t *testing.T) {
 	dbPath := filepath.Join(dir, "pasture.db")
 	profile := timeouts.DeadlineTestProfile()
 	bootstrap(t, dbPath, profile)
+	contentionJournal := openContentionJournal(t, dbPath, profile)
 	tracker, err := openTracker(dbPath, profile)
 	if err != nil {
 		t.Fatal(err)
@@ -207,6 +226,7 @@ func TestBlobFirstFailureLeavesReclaimableOrphanWithoutReceipt(t *testing.T) {
 		tracker.Close()
 		t.Fatal(err)
 	}
+	service.Appender.Journal = contentionJournal
 	realStore, ok := service.Blobs.(receipt.SQLiteBlobStore)
 	if !ok {
 		tracker.Close()
@@ -230,6 +250,25 @@ func TestBlobFirstFailureLeavesReclaimableOrphanWithoutReceipt(t *testing.T) {
 		tracker.Close()
 		t.Fatal("occurrence commit succeeded under injected lock")
 	}
+	var contention model.IngressContentionError
+	if !stderrors.As(receiveErr, &contention) {
+		tracker.Close()
+		t.Fatalf("Receive error=%v, want typed IngressContentionError", receiveErr)
+	}
+	var deadline model.IngressDeadlineError
+	if stderrors.As(receiveErr, &deadline) {
+		tracker.Close()
+		t.Fatalf("Receive error=%v, unexpectedly classified as IngressDeadlineError", receiveErr)
+	}
+	var sqliteErr *sqlite.Error
+	if !stderrors.As(receiveErr, &sqliteErr) {
+		tracker.Close()
+		t.Fatalf("Receive error=%v, want underlying *sqlite.Error through Unwrap", receiveErr)
+	}
+	if sqliteErr.Code() != 5 {
+		tracker.Close()
+		t.Fatalf("underlying SQLite code=%d, want base SQLITE_BUSY code 5", sqliteErr.Code())
+	}
 	exists, err := realStore.Exists(context.Background(), ref)
 	if err != nil || !exists {
 		tracker.Close()
@@ -240,15 +279,9 @@ func TestBlobFirstFailureLeavesReclaimableOrphanWithoutReceipt(t *testing.T) {
 		tracker.Close()
 		t.Fatal(err)
 	}
-	found := false
-	for _, orphan := range orphans {
-		if orphan == ref {
-			found = true
-		}
-	}
-	if !found {
+	if len(orphans) != 1 || orphans[0] != ref {
 		tracker.Close()
-		t.Fatalf("blob %s absent from reclaimable set %v", ref, orphans)
+		t.Fatalf("reclaimable set = %v, want exactly [%s]", orphans, ref)
 	}
 	tracker.Close()
 	tracker, err = openTracker(dbPath, profile)
@@ -314,6 +347,11 @@ func TestBudgetWorkerProcess(t *testing.T) {
 	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], "2.1.210", model.OccurrenceEnvelopeRef{}).Delivery
 	for i := 0; i < count; i++ {
 		if _, err := service.Receive(context.Background(), delivery); err != nil {
+			var contention model.IngressContentionError
+			if stderrors.As(err, &contention) {
+				result.ContentionFailures++
+				continue
+			}
 			var deadline model.IngressDeadlineError
 			if stderrors.As(err, &deadline) {
 				result.DeadlineFailures++
@@ -344,6 +382,37 @@ func bootstrap(t *testing.T, dbPath string, profile timeouts.Profile) {
 func openTracker(dbPath string, profile timeouts.Profile) (protocol.TaskTracker, error) {
 	return tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithTimeoutProfile(profile))
 }
+
+func openContentionJournal(t *testing.T, dbPath string, profile timeouts.Profile) provenance.ContextJournal {
+	t.Helper()
+	db, err := sql.Open("sqlite", dbconn.SharedDSNWithProfile(dbPath, profile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	journalTracker, err := provenance.OpenBorrowedSQLite(db)
+	if err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = journalTracker.Close()
+		_ = db.Close()
+	})
+	journal, ok := journalTracker.Journal().(provenance.ContextJournal)
+	if !ok {
+		t.Fatal("borrowed contention journal does not implement ContextJournal")
+	}
+	// Keep the real borrowed journal's connection-local writer wait aligned with
+	// the profile so the file-backed test exercises early SQLite BUSY while its
+	// outer receipt context is still live.
+	if _, err := db.ExecContext(context.Background(), fmt.Sprintf("PRAGMA busy_timeout=%d", profile.SQLiteBusy().Milliseconds())); err != nil {
+		t.Fatal(err)
+	}
+	return journal
+}
+
 func measurementProfile() timeouts.Profile {
 	if os.Getenv("PASTURE_BUDGET_USE_PRODUCTION") == "1" {
 		return timeouts.ProductionProfile()
@@ -411,6 +480,7 @@ func runWorkers(t *testing.T, dbPath, dir string, profile timeouts.Profile, work
 			t.Fatal(err)
 		}
 		combined.Durations = append(combined.Durations, result.Durations...)
+		combined.ContentionFailures += result.ContentionFailures
 		combined.DeadlineFailures += result.DeadlineFailures
 		combined.StorageFailures += result.StorageFailures
 	}

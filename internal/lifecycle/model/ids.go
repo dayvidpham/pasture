@@ -66,3 +66,15 @@ type IngressDeadlineError struct {
 func (e IngressDeadlineError) Error() string {
 	return "the lifecycle occurrence commit could not acquire the shared database writer before its deadline; the payload blob may remain as a reclaimable orphan, no occurrence was recorded, and the operator should reduce concurrent hook ingress or retry the delivery"
 }
+
+type IngressContentionError struct {
+	nonJournalValue
+	Elapsed time.Duration
+	Cause   error
+}
+
+func (e IngressContentionError) Error() string {
+	return "SQLite exhausted its configured writer wait while ingress was still live; no occurrence receipt was committed, a content-addressed blob may remain reclaimable, and the delivery can be retried"
+}
+
+func (e IngressContentionError) Unwrap() error { return e.Cause }

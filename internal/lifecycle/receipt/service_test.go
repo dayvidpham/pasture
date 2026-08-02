@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/provenance"
 	digest "github.com/opencontainers/go-digest"
@@ -93,6 +94,13 @@ func (contextJournal) PreflightSchema() error { return nil }
 func (contextJournal) ReplayProjections() (provenance.ReplayResult, error) {
 	return provenance.ReplayResult{}, nil
 }
+
+type codedError struct {
+	code int
+}
+
+func (e codedError) Error() string { return fmt.Sprintf("coded sqlite error %d", e.code) }
+func (e codedError) Code() int     { return e.code }
 func (contextJournal) MigrateLegacyBaseline(provenance.MigrationInput) (provenance.MigrationResult, error) {
 	return provenance.MigrationResult{}, nil
 }
@@ -271,6 +279,143 @@ func TestAppenderRequiresContextJournal(t *testing.T) {
 	_, err := (JournalAppender{Journal: nonContextJournal{}, Clock: testClock{now: time.Unix(10, 0)}, Deadline: time.Second}).Append(context.Background(), provenance.OperationInput{})
 	if err == nil {
 		t.Fatal("Append succeeded without ContextJournal")
+	}
+}
+
+func TestAppenderClassifiesContextStateBeforeUpstreamError(t *testing.T) {
+	t.Parallel()
+	contentionUpstream := stderrors.Join(context.DeadlineExceeded, codedError{code: 5})
+	cases := []struct {
+		name     string
+		context  func() context.Context
+		upstream error
+		want     string
+	}{
+		{
+			name:     "live base busy wins over upstream deadline",
+			context:  context.Background,
+			upstream: contentionUpstream,
+			want:     "contention",
+		},
+		{
+			name: "canceled parent preserves cancellation",
+			context: func() context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+			upstream: codedError{code: 5},
+			want:     "canceled",
+		},
+		{
+			name: "canceled parent keeps upstream cancellation chain",
+			context: func() context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+			upstream: stderrors.Join(codedError{code: 5}, context.Canceled),
+			want:     "canceled-preserved",
+		},
+		{
+			name: "already expired parent wins over base busy",
+			context: func() context.Context {
+				ctx, cancel := context.WithTimeout(context.Background(), 0)
+				cancel()
+				return ctx
+			},
+			upstream: codedError{code: 5},
+			want:     "deadline",
+		},
+		{
+			name:     "live non busy deadline wrapper remains storage",
+			context:  context.Background,
+			upstream: fmt.Errorf("non-busy storage error: %w", context.DeadlineExceeded),
+			want:     "storage",
+		},
+		{
+			name:     "live extended busy remains storage",
+			context:  context.Background,
+			upstream: codedError{code: 517},
+			want:     "storage",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			calls := []string{}
+			applyCount := 0
+			journal := contextJournal{calls: &calls, applyCount: &applyCount, err: tc.upstream}
+			appender := JournalAppender{Journal: journal, Clock: testClock{now: time.Unix(10, 0)}, Deadline: time.Second}
+			got, err := appender.Append(tc.context(), provenance.OperationInput{})
+			if got != 0 {
+				t.Fatalf("journal id = %d, want zero on failure", got)
+			}
+			if applyCount != 1 {
+				t.Fatalf("ApplyContext calls = %d, want one", applyCount)
+			}
+
+			var contention model.IngressContentionError
+			var deadline model.IngressDeadlineError
+			var storage *pasterrors.StructuredError
+			switch tc.want {
+			case "contention":
+				if !stderrors.As(err, &contention) {
+					t.Fatalf("error = %v, want IngressContentionError", err)
+				}
+				if contention.Cause != tc.upstream {
+					t.Fatalf("contention cause = %v, want full upstream error %v", contention.Cause, tc.upstream)
+				}
+				if !stderrors.Is(err, context.DeadlineExceeded) {
+					t.Fatal("contention error lost upstream DeadlineExceeded")
+				}
+				var coded sqliteCodeError
+				if !stderrors.As(err, &coded) || coded.Code() != 5 {
+					t.Fatalf("contention error lost exact base BUSY code: %v", err)
+				}
+				if stderrors.As(err, &deadline) || stderrors.As(err, &storage) {
+					t.Fatalf("contention error also classified as another type: %v", err)
+				}
+			case "canceled", "canceled-preserved":
+				if !stderrors.As(err, &storage) {
+					t.Fatalf("error = %v, want structured storage error", err)
+				}
+				if tc.want == "canceled" && storage.Cause == tc.upstream {
+					t.Fatal("canceled storage cause did not join bounded cancellation")
+				}
+				if tc.want == "canceled-preserved" && storage.Cause != tc.upstream {
+					t.Fatalf("canceled storage cause = %v, want unchanged upstream error %v", storage.Cause, tc.upstream)
+				}
+				if !stderrors.Is(storage.Cause, tc.upstream) || !stderrors.Is(storage.Cause, context.Canceled) {
+					t.Fatalf("storage cause = %v, want upstream and context.Canceled", storage.Cause)
+				}
+				if !stderrors.Is(err, context.Canceled) {
+					t.Fatal("canceled storage error does not preserve context.Canceled")
+				}
+				if stderrors.As(err, &contention) || stderrors.As(err, &deadline) {
+					t.Fatalf("canceled error received deadline/contention type: %v", err)
+				}
+			case "deadline":
+				if !stderrors.As(err, &deadline) {
+					t.Fatalf("error = %v, want IngressDeadlineError", err)
+				}
+				if stderrors.As(err, &contention) || stderrors.As(err, &storage) {
+					t.Fatalf("deadline error also classified as another type: %v", err)
+				}
+			case "storage":
+				if !stderrors.As(err, &storage) {
+					t.Fatalf("error = %v, want structured storage error", err)
+				}
+				if storage.Cause != tc.upstream {
+					t.Fatalf("storage cause = %v, want upstream error %v", storage.Cause, tc.upstream)
+				}
+				if stderrors.As(err, &contention) || stderrors.As(err, &deadline) {
+					t.Fatalf("storage error received contention/deadline type: %v", err)
+				}
+			}
+		})
 	}
 }
 
