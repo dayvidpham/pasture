@@ -9,13 +9,17 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
 	claudefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/claude"
 	claudeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
+	"github.com/dayvidpham/pasture/internal/lifecycle/legalize"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
+	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/pkg/protocol"
+	"github.com/dayvidpham/provenance"
 )
 
 const hookLifecycleWhere = "Receiving a native lifecycle event (internal/handlers/hook_lifecycle.go in handlers.HookLifecycle)."
@@ -101,11 +105,39 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, activations []act
 	if err != nil {
 		return err
 	}
+	result, err := legalize.Event(l2)
+	if err != nil {
+		return err
+	}
 	interpreted, err := receipt.NewInterpreted(l2, l2.Origin().Contract())
 	if err != nil {
 		return err
 	}
-	_, err = service.Receive(ctx, capture.Delivery, interpreted.Effect())
+	effects := []provenance.Effect{interpreted.Effect()}
+	switch result.Semantic() {
+	case runtime.SemanticObservation:
+	case runtime.SemanticGateConsultation:
+		legalized, ok := result.Legalized()
+		if !ok {
+			return lifecycleError(pasterrors.CategoryWorkflow, "The gate consultation did not produce a valid legalization terminal.", "The legalization result disagrees with its gate semantic.", "Nothing was recorded and no host response was produced.", "Keep legalize.Event and the runtime semantic contract synchronized.", nil)
+		}
+		consultation, response, buildErr := backend.BuildConsultation(interpreted, legalized)
+		if buildErr != nil {
+			return buildErr
+		}
+		if !response.IsValid() || response.Decision() != backend.DecisionProceed {
+			return lifecycleError(pasterrors.CategoryWorkflow, "The lifecycle backend returned an invalid host response.", "Gate consultations must return a constructor-built Proceed response.", "Nothing was recorded and the host received no decision.", "Use the response returned by backend.BuildConsultation without modification.", nil)
+		}
+		effects = append(effects, consultation.Effect())
+	case runtime.SemanticExplicitHumanResponse:
+		noAuthority, ok := result.NoAuthority()
+		if !ok || !noAuthority.IsValid() {
+			return lifecycleError(pasterrors.CategoryWorkflow, "The explicit human response did not produce a NoAuthority terminal.", "Lifecycle ingestion observes human input but cannot exercise human authority.", "Nothing was recorded and no backend consultation ran.", "Preserve the typed NoAuthority result from legalize.Event.", nil)
+		}
+	default:
+		return lifecycleError(pasterrors.CategoryWorkflow, fmt.Sprintf("The lifecycle legalization result has unsupported semantic %d.", result.Semantic()), "Only observation, gate consultation, and explicit human response semantics are supported.", "Nothing was recorded.", "Update the handler only after extending the reviewed legalization contract.", nil)
+	}
+	_, err = service.Receive(ctx, capture.Delivery, effects...)
 	return err
 }
 

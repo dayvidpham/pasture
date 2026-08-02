@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dayvidpham/provenance"
@@ -18,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
@@ -29,11 +31,22 @@ const (
 	interpretedLifecycleContract  = "claude-code/claude-code@2.1.210"
 	occurrenceEvidenceKind        = provenance.EvidenceKind("pasture.lifecycle.occurrence.v1")
 	interpretedEvidenceKind       = provenance.EvidenceKind("pasture.lifecycle.interpreted.v1")
+	consultationEvidenceKind      = provenance.EvidenceKind("pasture.lifecycle.consultation.v1")
 	expectedSessionIdentity       = "b3cfe877-feb4-4ba3-9500-414c8bfb51c4"
 	expectedInterpretedIdentities = `[{"kind":1,"value":"b3cfe877-feb4-4ba3-9500-414c8bfb51c4"}]`
 )
 
 func TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence(t *testing.T) {
+	manifest, err := activation.ClaudeCode2_1_210()
+	require.NoError(t, err)
+	enabled := make([]model.ContractEventKind, 0, 1)
+	for _, entry := range manifest {
+		if entry.State == activation.Enabled {
+			enabled = append(enabled, entry.Event)
+		}
+	}
+	require.Equal(t, []model.ContractEventKind{registration.EventSessionStart}, enabled, "literal production rows must equal the complete static enabled set")
+
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "pasture")
 	buildLifecycleBinary(t, binary)
@@ -96,6 +109,21 @@ func TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence(t *testing.T) {
 	ingestAgain(raw)
 	ingestAgain([]byte(`{"session_id":`))
 	ingestAgain(raw)
+	tracker, err = tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	duplicateOccurrences := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
+	duplicateInterpreted := queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)
+	require.Len(t, duplicateOccurrences, 4)
+	require.Len(t, duplicateInterpreted, 3)
+	operationIDs := make(map[string]struct{}, len(duplicateOccurrences))
+	journalIDs := make(map[provenance.JournalID]struct{}, len(duplicateOccurrences))
+	for _, row := range duplicateOccurrences {
+		operationIDs[string(row.ProducingOperationID)] = struct{}{}
+		journalIDs[row.JournalID] = struct{}{}
+	}
+	require.Len(t, operationIDs, 4, "byte-identical deliveries need distinct operation identities")
+	require.Len(t, journalIDs, 4, "byte-identical deliveries need distinct occurrence records")
+	require.NoError(t, tracker.Close())
 	pageOne := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "list", "--format", "json", "--page-size", "1", "--binding", "session:session_id="+expectedSessionIdentity)
 	stdout.Reset()
 	stderr.Reset()
@@ -156,12 +184,52 @@ func TestMalformedClaudeEventToOccurrenceOnly(t *testing.T) {
 
 	interpreted := queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)
 	require.Empty(t, interpreted)
+	consultations := queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind)
+	require.Empty(t, consultations)
 	require.NoError(t, tracker.Close())
 	list := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "list", "--format", "json")
 	var output bytes.Buffer
 	list.Stdout = &output
 	require.NoError(t, list.Run())
 	require.Contains(t, output.String(), `"interpreted":[]`)
+}
+
+func TestLifecycleLeafFaultsExitZeroAndReport(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "pasture")
+	buildLifecycleBinary(t, binary)
+	fixture, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_210.json"))
+	require.NoError(t, err)
+	base := []string{"--db", filepath.Join(dir, "pasture.db"), "hook", "lifecycle", "--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.220"}
+	databaseDirectory := filepath.Join(dir, "database-directory")
+	require.NoError(t, os.Mkdir(databaseDirectory, 0o700))
+	cases := []struct {
+		name string
+		args []string
+		in   []byte
+		want string
+	}{
+		{name: "unwritable database", args: append([]string{"--db", databaseDirectory}, base[2:]...), in: fixture, want: "open"},
+		{name: "missing flag", args: []string{"--db", filepath.Join(dir, "missing.db"), "hook", "lifecycle", "--harness", "claude-code", "--host-version", "2.1.220"}, in: fixture, want: "not in the generated Claude registration"},
+		{name: "unknown flag", args: append(append([]string(nil), base...), "--unknown-lifecycle-flag"), in: fixture, want: "flag error"},
+		{name: "extra positional", args: append(append([]string(nil), base...), "unexpected"), in: fixture, want: "unexpected positional arguments"},
+		{name: "oversized payload", args: base, in: []byte(strings.Repeat("x", model.MaxNativePayloadBytes+1)), want: "exceeds"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			command := exec.Command(binary, tc.args...)
+			command.Stdin = bytes.NewReader(tc.in)
+			var stderr bytes.Buffer
+			command.Stderr = &stderr
+			require.NoError(t, command.Run(), stderr.String())
+			require.Contains(t, stderr.String(), tc.want)
+		})
+	}
+
+	list := exec.Command(binary, "--db", filepath.Join(dir, "list.db"), "hook", "lifecycle", "list", "--unknown-list-flag")
+	err = list.Run()
+	require.Error(t, err)
+	require.Equal(t, 1, list.ProcessState.ExitCode(), "human list command must retain standard non-zero flag errors")
 }
 
 func TestInvalidLifecycleInvocationCreatesNoDatabase(t *testing.T) {
