@@ -13,8 +13,81 @@ import (
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
+
+func TestClaudeHooksFailClosedOnActivationMismatch(t *testing.T) {
+	t.Parallel()
+	manifest := registration.ClaudeCode2_1_210()
+	states, err := activation.ClaudeCode2_1_210()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func([]activation.Entry) []activation.Entry{
+		"missing":   func(in []activation.Entry) []activation.Entry { return in[1:] },
+		"duplicate": func(in []activation.Entry) []activation.Entry { return append(in, in[0]) },
+		"invalid":   func(in []activation.Entry) []activation.Entry { in[0] = activation.Entry{}; return in },
+	} {
+		mutate := mutate
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, err := emitClaudeHooks(t.TempDir(), GenerateOptions{}, manifest, mutate(append([]activation.Entry(nil), states...)))
+			if err == nil {
+				t.Fatal("expected fail-closed activation error")
+			}
+		})
+	}
+}
+
+func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
+	t.Parallel()
+	manifest := registration.ClaudeCode2_1_210()
+	states, err := activation.ClaudeCode2_1_210()
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := emitClaudeHooks(t.TempDir(), GenerateOptions{}, manifest, states)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hooks, support string
+	for _, file := range files {
+		if strings.HasSuffix(file.Path, "hooks.json") {
+			hooks = file.Content
+		}
+		if strings.HasSuffix(file.Path, "pasture-activation.json") {
+			support = file.Content
+		}
+	}
+	if !strings.Contains(support, `"reason": "missing-fixture"`) || !strings.Contains(support, `"captureProof":`) || strings.Contains(support, "reason-") {
+		t.Fatalf("support report lacks stable named fields: %s", support)
+	}
+	if !strings.Contains(hooks, "git-discipline.sh") || !strings.Contains(hooks, "hook lifecycle") {
+		t.Fatalf("hooks do not preserve independent and lifecycle PreToolUse disciplines: %s", hooks)
+	}
+}
+
+func TestClaudeHooksAbsentSessionStartDoesNotPanic(t *testing.T) {
+	t.Parallel()
+	manifest := registration.ClaudeCode2_1_210()
+	states, err := activation.ClaudeCode2_1_210()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range states {
+		if states[i].Event == registration.EventSessionStart {
+			states[i], err = activation.NewWithheld(states[i].Event, activation.WithheldMissingFixture)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, err := emitClaudeHooks(t.TempDir(), GenerateOptions{}, manifest, states); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestAdapterOperationsBySemanticPartitionsHiddenContract(t *testing.T) {
 	t.Parallel()

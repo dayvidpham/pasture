@@ -421,8 +421,18 @@ func (claudeHooksEmitter) Emit(root string, opts GenerateOptions) ([]GeneratedFi
 	if err != nil {
 		return nil, fmt.Errorf("codegen.claudeHooksEmitter.Emit: build activation manifest: %w", err)
 	}
+	return emitClaudeHooks(root, opts, manifest, states)
+}
+
+func emitClaudeHooks(root string, opts GenerateOptions, manifest registration.Manifest, states []activation.Entry) ([]GeneratedFile, error) {
 	stateByKind := make(map[model.ContractEventKind]activation.Entry, len(states))
 	for _, state := range states {
+		if !state.IsValid() {
+			return nil, fmt.Errorf("codegen.emitClaudeHooks: activation entry for event %d is invalid; construct it with activation.NewEnabled or activation.NewWithheld", state.Event)
+		}
+		if _, duplicate := stateByKind[state.Event]; duplicate {
+			return nil, fmt.Errorf("codegen.emitClaudeHooks: duplicate activation entry for event %d; provide exactly one decision per generated event", state.Event)
+		}
 		stateByKind[state.Event] = state
 	}
 
@@ -431,9 +441,11 @@ func (claudeHooksEmitter) Emit(root string, opts GenerateOptions) ([]GeneratedFi
 		Hooks:       make(map[string][]claudeHookGroup, len(manifest.Events)),
 	}
 	type supportEntry struct {
-		Event  string `json:"event"`
-		State  string `json:"state"`
-		Reason string `json:"reason,omitempty"`
+		Event           string `json:"event"`
+		State           string `json:"state"`
+		Reason          string `json:"reason,omitempty"`
+		CaptureProof    string `json:"captureProof,omitempty"`
+		ProductionProof string `json:"productionProof,omitempty"`
 	}
 	support := struct {
 		Harness  string         `json:"harness"`
@@ -441,19 +453,26 @@ func (claudeHooksEmitter) Emit(root string, opts GenerateOptions) ([]GeneratedFi
 		Events   []supportEntry `json:"events"`
 	}{Harness: string(manifest.Harness), Contract: manifest.Contract.String()}
 	for _, event := range manifest.Events {
-		state := stateByKind[event.Kind]
-		entry := supportEntry{Event: event.NativeName, State: "withheld", Reason: fmt.Sprintf("reason-%d", state.Reason)}
+		state, present := stateByKind[event.Kind]
+		if !present {
+			return nil, fmt.Errorf("codegen.emitClaudeHooks: generated event %q has no activation entry; add one exhaustive typed decision", event.NativeName)
+		}
+		entry := supportEntry{Event: event.NativeName, State: state.State.String(), Reason: state.Reason.String()}
 		if state.State == activation.Enabled {
-			entry.State = "enabled"
-			entry.Reason = ""
+			entry.CaptureProof = state.CaptureProof.Name()
+			entry.ProductionProof = state.ProductionProof.Name()
 			command := claudeHookCommand{Type: "command", Command: fmt.Sprintf(`${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event %s --host-version "${CLAUDE_CODE_VERSION:-unknown}"`, event.NativeName), Timeout: 10}
 			config.Hooks[event.NativeName] = []claudeHookGroup{{Matcher: "", Hooks: []claudeHookCommand{command}}}
 		}
 		support.Events = append(support.Events, entry)
 	}
-	config.Hooks["SessionStart"][0].Hooks = append([]claudeHookCommand{{
-		Type: "command", Command: "cat ${CLAUDE_PLUGIN_ROOT}/hooks/bd-prime.md 2>&1",
-	}}, config.Hooks["SessionStart"][0].Hooks...)
+	if len(stateByKind) != len(manifest.Events) {
+		return nil, fmt.Errorf("codegen.emitClaudeHooks: activation has %d entries for %d generated events; remove non-manifest entries and provide one exact decision per event", len(stateByKind), len(manifest.Events))
+	}
+	if groups := config.Hooks["SessionStart"]; len(groups) > 0 {
+		groups[0].Hooks = append([]claudeHookCommand{{Type: "command", Command: "cat ${CLAUDE_PLUGIN_ROOT}/hooks/bd-prime.md 2>&1"}}, groups[0].Hooks...)
+		config.Hooks["SessionStart"] = groups
+	}
 	if groups := config.Hooks["PreCompact"]; len(groups) > 0 {
 		groups[0].Hooks = append([]claudeHookCommand{{Type: "command", Command: "cat ${CLAUDE_PLUGIN_ROOT}/hooks/bd-prime.md 2>&1"}}, groups[0].Hooks...)
 		config.Hooks["PreCompact"] = groups

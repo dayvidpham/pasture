@@ -4,152 +4,154 @@
   "events": [
     {
       "event": "SessionStart",
-      "state": "enabled"
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/session_start_2_1_210.json (Claude Code 2.1.210 authentic capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence"
     },
     {
       "event": "Setup",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "SessionEnd",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "missing-fixture"
     },
     {
       "event": "UserPromptSubmit",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "UserPromptExpansion",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "Stop",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "StopFailure",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "PreToolUse",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "missing-fixture"
     },
     {
       "event": "PermissionRequest",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "PermissionDenied",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "PostToolUse",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "missing-fixture"
     },
     {
       "event": "PostToolUseFailure",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "missing-fixture"
     },
     {
       "event": "PostToolBatch",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "missing-fixture"
     },
     {
       "event": "FileChanged",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "CwdChanged",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "ConfigChange",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "InstructionsLoaded",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "WorktreeCreate",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "WorktreeRemove",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "SubagentStart",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "SubagentStop",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "TeammateIdle",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "TaskCreated",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "TaskCompleted",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "PreCompact",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "missing-fixture"
     },
     {
       "event": "PostCompact",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "missing-fixture"
     },
     {
       "event": "Notification",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "MessageDisplay",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "outside-target-set"
     },
     {
       "event": "Elicitation",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "missing-fixture"
     },
     {
       "event": "ElicitationResult",
       "state": "withheld",
-      "reason": "reason-1"
+      "reason": "missing-fixture"
     }
   ]
 }
