@@ -117,12 +117,24 @@ func TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence(t *testing.T) {
 	require.Len(t, duplicateInterpreted, 3)
 	operationIDs := make(map[string]struct{}, len(duplicateOccurrences))
 	journalIDs := make(map[provenance.JournalID]struct{}, len(duplicateOccurrences))
+	occurrenceByOperation := make(map[string]provenance.EvidenceRow, len(duplicateOccurrences))
 	for _, row := range duplicateOccurrences {
-		operationIDs[string(row.ProducingOperationID)] = struct{}{}
+		operationID := string(row.ProducingOperationID)
+		operationIDs[operationID] = struct{}{}
 		journalIDs[row.JournalID] = struct{}{}
+		occurrenceByOperation[operationID] = row
 	}
 	require.Len(t, operationIDs, 4, "byte-identical deliveries need distinct operation identities")
 	require.Len(t, journalIDs, 4, "byte-identical deliveries need distinct occurrence records")
+	interpretedOperations := make(map[string]struct{}, len(duplicateInterpreted))
+	for _, interpretedRow := range duplicateInterpreted {
+		operationID := string(interpretedRow.ProducingOperationID)
+		occurrenceRow, found := occurrenceByOperation[operationID]
+		require.True(t, found, "every interpreted row must share a producing operation with its occurrence")
+		require.Equal(t, occurrenceRow.ProducingOperationJournalID, interpretedRow.ProducingOperationJournalID, "occurrence and interpreted evidence must share one operation journal identity")
+		interpretedOperations[operationID] = struct{}{}
+	}
+	require.Len(t, interpretedOperations, 3, "each valid delivery needs one interpreted operation while the malformed occurrence remains occurrence-only")
 	require.NoError(t, tracker.Close())
 	pageOne := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "list", "--format", "json", "--page-size", "1", "--binding", "session:session_id="+expectedSessionIdentity)
 	stdout.Reset()
