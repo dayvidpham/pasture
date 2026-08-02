@@ -3,7 +3,6 @@ package budget_test
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
@@ -16,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/engine/budget"
 	claudeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
@@ -67,12 +65,13 @@ type existingBlob struct{}
 func (existingBlob) Put(context.Context, digest.Digest, []byte) error { return nil }
 
 type lockAfterBlob struct {
-	store   receipt.SQLiteBlobStore
-	dbPath  string
-	profile timeouts.Profile
-	held    chan struct{}
-	release chan struct{}
-	lockErr chan error
+	store    receipt.SQLiteBlobStore
+	dbPath   string
+	profile  timeouts.Profile
+	held     chan struct{}
+	release  chan struct{}
+	lockErr  chan error
+	probeErr chan error
 }
 
 func (s lockAfterBlob) Put(ctx context.Context, ref digest.Digest, body []byte) error {
@@ -82,6 +81,15 @@ func (s lockAfterBlob) Put(ctx context.Context, ref digest.Digest, body []byte) 
 	go func() { s.lockErr <- budget.HoldWriter(ctx, s.dbPath, s.profile, s.held, s.release) }()
 	select {
 	case <-s.held:
+		// The probe uses the constructor-wired blob store to occupy one fresh
+		// profile-configured connection. The receipt appender then has to use
+		// the second connection from the same pool and its real journal.
+		go func() {
+			s.probeErr <- s.store.Put(ctx, digest.FromString("pasture.budget.contention-probe"), []byte("contention probe"))
+		}()
+		if err := waitForStoreConnection(ctx, s.store); err != nil {
+			return err
+		}
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -142,8 +150,7 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 	dbPath := filepath.Join(dir, "pasture.db")
 	profile := timeouts.DeadlineTestProfile()
 	bootstrap(t, dbPath, profile)
-	contentionJournal := openContentionJournal(t, dbPath, profile)
-	tracker, err := openTracker(dbPath, profile)
+	tracker, err := openTrackerWithPool(dbPath, profile, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +166,24 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 		tracker.Close()
 		t.Fatal(err)
 	}
-	service.Appender.Journal = contentionJournal
+	realStore, ok := service.Blobs.(receipt.SQLiteBlobStore)
+	if !ok {
+		close(release)
+		tracker.Close()
+		t.Fatalf("production blob store type=%T", service.Blobs)
+	}
+	// Keep the constructor-wired journal. The probe occupies one connection
+	// from its shared blob/journal pool so ApplyContext uses the profile-configured
+	// second connection instead of the activation connection's longer timeout.
+	probeErr := make(chan error, 1)
+	go func() {
+		probeErr <- realStore.Put(ctx, digest.FromString("pasture.budget.contention-probe"), []byte("contention probe"))
+	}()
+	if err := waitForStoreConnection(ctx, realStore); err != nil {
+		close(release)
+		tracker.Close()
+		t.Fatal(err)
+	}
 	// Blob storage is outside the occurrence lock-hold budget. Treat this body
 	// as already content-addressed so the injected contention targets only the
 	// second transaction.
@@ -170,6 +194,11 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 	}
 	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], "2.1.210", model.OccurrenceEnvelopeRef{}).Delivery
 	_, err = service.Receive(context.Background(), delivery)
+	if probe := <-probeErr; probe == nil {
+		close(release)
+		tracker.Close()
+		t.Fatal("contention probe unexpectedly committed while writer lock was held")
+	}
 	close(release)
 	if lock := <-lockErr; lock != nil {
 		t.Fatal(lock)
@@ -216,8 +245,7 @@ func TestBlobFirstFailureLeavesReclaimableOrphanWithoutReceipt(t *testing.T) {
 	dbPath := filepath.Join(dir, "pasture.db")
 	profile := timeouts.DeadlineTestProfile()
 	bootstrap(t, dbPath, profile)
-	contentionJournal := openContentionJournal(t, dbPath, profile)
-	tracker, err := openTracker(dbPath, profile)
+	tracker, err := openTrackerWithPool(dbPath, profile, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,14 +254,14 @@ func TestBlobFirstFailureLeavesReclaimableOrphanWithoutReceipt(t *testing.T) {
 		tracker.Close()
 		t.Fatal(err)
 	}
-	service.Appender.Journal = contentionJournal
 	realStore, ok := service.Blobs.(receipt.SQLiteBlobStore)
 	if !ok {
 		tracker.Close()
 		t.Fatalf("production blob store type=%T", service.Blobs)
 	}
 	held, release, lockErr := make(chan struct{}), make(chan struct{}), make(chan error, 1)
-	service.Blobs = lockAfterBlob{store: realStore, dbPath: dbPath, profile: profile, held: held, release: release, lockErr: lockErr}
+	probeErr := make(chan error, 1)
+	service.Blobs = lockAfterBlob{store: realStore, dbPath: dbPath, profile: profile, held: held, release: release, lockErr: lockErr, probeErr: probeErr}
 	raw, err := os.ReadFile(filepath.Join("..", "..", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_210.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -241,6 +269,11 @@ func TestBlobFirstFailureLeavesReclaimableOrphanWithoutReceipt(t *testing.T) {
 	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], "2.1.210", model.OccurrenceEnvelopeRef{}).Delivery
 	ref := digest.FromBytes(delivery.Body)
 	_, receiveErr := service.Receive(context.Background(), delivery)
+	if probe := <-probeErr; probe == nil {
+		close(release)
+		tracker.Close()
+		t.Fatal("contention probe unexpectedly committed while writer lock was held")
+	}
 	close(release)
 	if err := <-lockErr; err != nil {
 		tracker.Close()
@@ -380,37 +413,37 @@ func bootstrap(t *testing.T, dbPath string, profile timeouts.Profile) {
 }
 
 func openTracker(dbPath string, profile timeouts.Profile) (protocol.TaskTracker, error) {
-	return tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithTimeoutProfile(profile))
+	return openTrackerWithPool(dbPath, profile, 0)
 }
 
-func openContentionJournal(t *testing.T, dbPath string, profile timeouts.Profile) provenance.ContextJournal {
-	t.Helper()
-	db, err := sql.Open("sqlite", dbconn.SharedDSNWithProfile(dbPath, profile))
-	if err != nil {
-		t.Fatal(err)
+func openTrackerWithPool(dbPath string, profile timeouts.Profile, poolSize int) (protocol.TaskTracker, error) {
+	options := []tasks.OpenTaskTrackerOption{tasks.WithTimeoutProfile(profile)}
+	if poolSize > 0 {
+		options = append(options, tasks.WithMaxOpenConns(poolSize))
 	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-	journalTracker, err := provenance.OpenBorrowedSQLite(db)
-	if err != nil {
-		db.Close()
-		t.Fatal(err)
+	return tasks.OpenTaskTrackerWithOptions(dbPath, options...)
+}
+
+func waitForStoreConnection(ctx context.Context, store receipt.SQLiteBlobStore) error {
+	if store.DB == nil {
+		return fmt.Errorf("contention fixture cannot observe the production SQLite pool: nil database handle")
 	}
-	t.Cleanup(func() {
-		_ = journalTracker.Close()
-		_ = db.Close()
-	})
-	journal, ok := journalTracker.Journal().(provenance.ContextJournal)
-	if !ok {
-		t.Fatal("borrowed contention journal does not implement ContextJournal")
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	for {
+		if store.DB.Stats().InUse > 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("contention fixture could not observe a production SQLite connection before the fixture context ended: %w", ctx.Err())
+		case <-timer.C:
+			return fmt.Errorf("contention fixture could not observe a production SQLite connection within one second")
+		case <-ticker.C:
+		}
 	}
-	// Keep the real borrowed journal's connection-local writer wait aligned with
-	// the profile so the file-backed test exercises early SQLite BUSY while its
-	// outer receipt context is still live.
-	if _, err := db.ExecContext(context.Background(), fmt.Sprintf("PRAGMA busy_timeout=%d", profile.SQLiteBusy().Milliseconds())); err != nil {
-		t.Fatal(err)
-	}
-	return journal
 }
 
 func measurementProfile() timeouts.Profile {

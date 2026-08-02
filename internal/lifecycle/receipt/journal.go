@@ -11,6 +11,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/provenance"
 	digest "github.com/opencontainers/go-digest"
+	"modernc.org/sqlite"
 )
 
 const (
@@ -21,10 +22,6 @@ const (
 	interpretedKind = provenance.EvidenceKind("pasture.lifecycle.interpreted.v1")
 	sqliteBusyCode  = 5
 )
-
-type sqliteCodeError interface {
-	Code() int
-}
 
 type Identity struct {
 	Actor     provenance.ActorID
@@ -152,8 +149,8 @@ func (a JournalAppender) Append(ctx context.Context, in provenance.OperationInpu
 			}
 			return 0, structured(pasterrors.CategoryStorage, "The lifecycle occurrence could not be committed.", "The Provenance journal rejected the occurrence operation after its payload blob was safely stored.", "Committing a lifecycle occurrence (internal/lifecycle/receipt/journal.go in receipt.JournalAppender.Append).", "No receipt is available; the payload blob may remain as a reclaimable orphan.", "Inspect the error details, repair the database or operation input, and retry with the same operation identity only when the input is unchanged.", cause)
 		case boundedErr == nil:
-			var coded sqliteCodeError
-			if stderrors.As(err, &coded) && coded.Code() == sqliteBusyCode {
+			var sqliteErr *sqlite.Error
+			if stderrors.As(err, &sqliteErr) && sqliteErr.Code() == sqliteBusyCode {
 				return 0, model.IngressContentionError{Elapsed: elapsed, Cause: err}
 			}
 		}

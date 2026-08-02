@@ -292,10 +292,10 @@ func TestAppenderClassifiesContextStateBeforeUpstreamError(t *testing.T) {
 		want     string
 	}{
 		{
-			name:     "live base busy wins over upstream deadline",
+			name:     "live code-compatible non-SQLite error remains storage",
 			context:  context.Background,
 			upstream: contentionUpstream,
-			want:     "contention",
+			want:     "storage",
 		},
 		{
 			name: "canceled parent preserves cancellation",
@@ -361,23 +361,6 @@ func TestAppenderClassifiesContextStateBeforeUpstreamError(t *testing.T) {
 			var deadline model.IngressDeadlineError
 			var storage *pasterrors.StructuredError
 			switch tc.want {
-			case "contention":
-				if !stderrors.As(err, &contention) {
-					t.Fatalf("error = %v, want IngressContentionError", err)
-				}
-				if contention.Cause != tc.upstream {
-					t.Fatalf("contention cause = %v, want full upstream error %v", contention.Cause, tc.upstream)
-				}
-				if !stderrors.Is(err, context.DeadlineExceeded) {
-					t.Fatal("contention error lost upstream DeadlineExceeded")
-				}
-				var coded sqliteCodeError
-				if !stderrors.As(err, &coded) || coded.Code() != 5 {
-					t.Fatalf("contention error lost exact base BUSY code: %v", err)
-				}
-				if stderrors.As(err, &deadline) || stderrors.As(err, &storage) {
-					t.Fatalf("contention error also classified as another type: %v", err)
-				}
 			case "canceled", "canceled-preserved":
 				if !stderrors.As(err, &storage) {
 					t.Fatalf("error = %v, want structured storage error", err)
