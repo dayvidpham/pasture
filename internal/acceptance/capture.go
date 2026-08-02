@@ -61,7 +61,19 @@ func (p CaptureProvenance) ValidateFixture(root, fixture string) error {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("authentic capture fixture %q escapes corpus root %q", fixture, root)
 	}
-	file, err := os.Open(path)
+	resolvedRoot, err := filepath.EvalSymlinks(cleanRoot)
+	if err != nil {
+		return fmt.Errorf("resolve authentic capture root symlinks %q: %w", root, err)
+	}
+	resolvedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return fmt.Errorf("resolve authentic capture fixture symlinks %q: %w", fixture, err)
+	}
+	resolvedRel, err := filepath.Rel(resolvedRoot, resolvedPath)
+	if err != nil || resolvedRel == ".." || strings.HasPrefix(resolvedRel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("authentic capture fixture %q resolves outside corpus root %q; keep fixture symlinks within the reviewed root", fixture, root)
+	}
+	file, err := os.Open(resolvedPath)
 	if err != nil {
 		return fmt.Errorf("open authentic capture fixture %q: %w", fixture, err)
 	}

@@ -38,6 +38,19 @@ func TestClaudeHooksFailClosedOnActivationMismatch(t *testing.T) {
 		"invalid-state":  {func(in []activation.Entry) []activation.Entry { in[0].State = 0; return in }, "is invalid"},
 		"invalid-reason": {func(in []activation.Entry) []activation.Entry { in[1].Reason = 0; return in }, "is invalid"},
 		"invalid-proof":  {func(in []activation.Entry) []activation.Entry { in[0].CaptureProof = 0; return in }, "is invalid"},
+		"enabled-with-reason": {func(in []activation.Entry) []activation.Entry {
+			in[0].Reason = activation.WithheldMissingFixture
+			return in
+		}, "is invalid"},
+		"enabled-with-invalid-production-proof": {func(in []activation.Entry) []activation.Entry { in[0].ProductionProof = 99; return in }, "is invalid"},
+		"withheld-with-capture-proof": {func(in []activation.Entry) []activation.Entry {
+			in[1].CaptureProof = activation.CaptureProofSessionStart
+			return in
+		}, "is invalid"},
+		"withheld-with-production-proof": {func(in []activation.Entry) []activation.Entry {
+			in[1].ProductionProof = activation.ProductionProofSessionStart
+			return in
+		}, "is invalid"},
 	} {
 		tc := tc
 		t.Run(name, func(t *testing.T) {
@@ -144,7 +157,10 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 		t.Errorf("SessionStart lifecycle command=%+v, want %q", session[0].Hooks[1], wantLifecycle)
 	}
 	pre := config.Hooks["PreToolUse"]
-	if len(pre) != 1 || pre[0].Matcher != "Bash" || len(pre[0].Hooks) != 1 || !strings.Contains(pre[0].Hooks[0].Command, "git-discipline.sh") {
+	if len(pre) != 1 || pre[0].Matcher != "Bash" || len(pre[0].Hooks) != 1 ||
+		pre[0].Hooks[0].Type != "command" ||
+		pre[0].Hooks[0].Command != "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/git-discipline.sh" ||
+		pre[0].Hooks[0].Timeout != 10 {
 		t.Fatalf("independent PreToolUse discipline missing: %+v", pre)
 	}
 	root, err := os.ReadFile(filepath.Join("..", "..", "hooks", "pasture-activation.json"))

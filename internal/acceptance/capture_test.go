@@ -59,6 +59,20 @@ func TestNonAuthenticCaptureValidationDoesNotRead(t *testing.T) {
 	require.NoError(t, p.ValidateFixtureBytes(nil))
 }
 
+func TestCaptureProvenanceRejectsResolvedSymlinkEscape(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	body := []byte(`{"synthetic":"rejection-control"}`)
+	outside := filepath.Join(t.TempDir(), "outside.json")
+	require.NoError(t, os.WriteFile(outside, body, 0o600))
+	fixture := filepath.Join(root, "capture.json")
+	if err := os.Symlink(outside, fixture); err != nil {
+		t.Skipf("symlink creation unsupported: %v", err)
+	}
+	err := validCaptureProvenance(body).ValidateFixture(root, "capture.json")
+	require.ErrorContains(t, err, "resolves outside corpus root")
+}
+
 func validCaptureProvenance(body []byte) acceptance.CaptureProvenance {
 	return acceptance.CaptureProvenance{Origin: acceptance.OriginAuthenticCapture, Harness: acceptance.HarnessClaudeCode, HarnessVersion: "2.1.210", CaptureSource: "reviewed-test-evidence", RawFileDigest: digest.FromBytes(body).String(), CapturedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339)}
 }
