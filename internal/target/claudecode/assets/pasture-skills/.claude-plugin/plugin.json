@@ -1,0 +1,20 @@
+{
+  "author": {
+    "name": "David Pham"
+  },
+  "description": "Pasture skills for Claude Code — the 12-phase protocol delivered as role skills (supervisor, worker, reviewer, architect, epoch) and phase sub-skills, generated from the pasture Go codegen.",
+  "keywords": [
+    "workflow",
+    "protocol",
+    "agents",
+    "skills",
+    "planning",
+    "review",
+    "implementation",
+    "beads"
+  ],
+  "license": "MIT",
+  "name": "pasture-skills",
+  "repository": "https://github.com/dayvidpham/pasture",
+  "version": "0.0.4"
+}

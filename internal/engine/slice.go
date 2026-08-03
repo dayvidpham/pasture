@@ -62,7 +62,7 @@ func (e *Engine) SliceSubWorkflow(ctx dbos.DBOSContext, in SliceInput) (SliceRes
 	// ── 1. Receive the start_slice configuration signal (non-blocking with
 	//       a brief deadline). If no signal arrives, record an honest failure:
 	//       the slice was enqueued but never started.
-	const startSignalTimeout = 2 * time.Second
+	startSignalTimeout := e.cfg.Timeouts.StartSlice()
 	startSig, err := dbos.Recv[protocol.SliceStartSignal](ctx,
 		protocol.SignalStartSlice.String(), startSignalTimeout)
 	if err != nil && !isRecvTimeout(err) {

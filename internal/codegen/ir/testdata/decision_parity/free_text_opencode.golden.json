@@ -1,0 +1,71 @@
+{
+  "native": {
+    "kind": "request_user_decision",
+    "id": "pasture.orchestration.request-user-decision/v1",
+    "scope": "golden",
+    "payload": {
+      "schema": "pasture.request-user-decision/v1",
+      "request_id": "request-free_text_opencode",
+      "harness": "opencode",
+      "runtime_contract": "opencode/1.17.18",
+      "epoch": "epoch-1",
+      "gate_task": "gate-1",
+      "purpose": "impl-uat",
+      "prompt": {
+        "mode": "free_text",
+        "data": {
+          "stimulus": {
+            "question": "What changed in this release?",
+            "definition_shown": "release summary",
+            "command_shown": "pasture worker report"
+          }
+        }
+      }
+    },
+    "results": []
+  },
+  "parent_mediated": {
+    "schema": "pasture.request-user-decision/v1",
+    "request_id": "request-free_text_opencode",
+    "harness": "opencode",
+    "runtime_contract": "opencode/1.17.18",
+    "epoch": "epoch-1",
+    "gate_task": "gate-1",
+    "purpose": "impl-uat",
+    "prompt": {
+      "mode": "free_text",
+      "data": {
+        "stimulus": {
+          "question": "What changed in this release?",
+          "definition_shown": "release summary",
+          "command_shown": "pasture worker report"
+        }
+      }
+    }
+  },
+  "reported": {
+    "schema": "pasture.reported-user-decision/v1",
+    "request_id": "request-free_text_opencode",
+    "harness": "opencode",
+    "runtime_contract": "opencode/1.17.18",
+    "epoch": "epoch-1",
+    "gate_task": "gate-1",
+    "purpose": "impl-uat",
+    "prompt": {
+      "mode": "free_text",
+      "data": {
+        "stimulus": {
+          "question": "What changed in this release?",
+          "definition_shown": "release summary",
+          "command_shown": "pasture worker report"
+        }
+      }
+    },
+    "result": {
+      "mode": "free_text",
+      "data": {
+        "text": "Renamed two config keys and fixed a validation bug."
+      }
+    }
+  }
+}

@@ -10,7 +10,7 @@
 // User-facing output (Report and the Stringer) follows a plain-language
 // convention: a top "Error:" line summarising the category in one short
 // sentence (Category-derived header), then a vertically aligned block with
-// full English labels (Problem / Reason / Where / Impact / How to fix). Body
+// full English labels (Problem / Reason / Details / Where / Impact / How to fix). Body
 // text must avoid project-internal jargon — translate code-level terms into
 // ordinary English. The "How to fix" section is numbered when there are
 // multiple alternatives, with concrete shell commands on indented lines.
@@ -122,12 +122,12 @@ type StructuredError struct {
 	// helpers below for the canonical shape. Each step starts with a
 	// plain-English sentence followed by an indented shell command.
 	Fix string
-	// Cause optionally wraps the underlying error for log-debugging and for
-	// errors.Is / errors.As traversal. It is NOT surfaced in user-visible
-	// output (Report) — that prose must be plain English with no Go symbol
-	// names, package qualifiers, or SQL column references. Set Cause when a
+	// Cause optionally wraps the underlying error for diagnosis and for
+	// errors.Is / errors.As traversal. It is surfaced in user-visible output,
+	// so it must use operator-safe text with no secrets. Set Cause when a
 	// translated Why field would otherwise lose the underlying error
-	// information that operators need in logs.
+	// information that operators need to diagnose the failure. Report surfaces
+	// it as Details, so callers must not wrap errors containing secrets.
 	Cause error
 }
 
@@ -139,10 +139,14 @@ func (e *StructuredError) Unwrap() error {
 
 // Error implements the error interface.
 //
-// Returns "<category>: <what>" — suitable for log lines or wrapping with
+// Returns "<category>: <what> Cause: <cause>" when Cause is set, or
+// "<category>: <what>" otherwise — suitable for log lines or wrapping with
 // fmt.Errorf("%w"). User-facing output should use Report or the package's
 // Print helpers (which emit the full plain-language block).
 func (e *StructuredError) Error() string {
+	if e.Cause != nil {
+		return fmt.Sprintf("%s: %s Cause: %v", e.Category, e.What, e.Cause)
+	}
 	return fmt.Sprintf("%s: %s", e.Category, e.What)
 }
 
@@ -154,6 +158,7 @@ func (e *StructuredError) Error() string {
 //
 //	  Problem:    <what — specific to this occurrence>
 //	  Reason:     <why>
+//	  Details:    <underlying cause, when present>
 //	  Where:      <what was happening (file:line in code parenthetically)>
 //	  Impact:     <impact>
 //	  How to fix:
@@ -175,6 +180,9 @@ func (e *StructuredError) Report(w io.Writer) {
 
 	writeAligned(w, "Problem:", labelWidth, e.What)
 	writeAligned(w, "Reason:", labelWidth, e.Why)
+	if e.Cause != nil {
+		writeAligned(w, "Details:", labelWidth, e.Cause.Error())
+	}
 	writeAligned(w, "Where:", labelWidth, e.Where)
 	writeAligned(w, "Impact:", labelWidth, e.Impact)
 

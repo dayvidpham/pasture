@@ -1,0 +1,6 @@
+schema: pasture.acceptance-corpus/v1
+id: unknown-field
+maxGenerated: 1
+operators: []
+cases: []
+executableCallback: forbidden

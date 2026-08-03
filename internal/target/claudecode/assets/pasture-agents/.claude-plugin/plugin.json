@@ -1,0 +1,19 @@
+{
+  "author": {
+    "name": "David Pham"
+  },
+  "description": "Pasture agents for Claude Code — the five protocol roles (supervisor, worker, reviewer, architect, epoch) as installable subagents, generated from the pasture Go codegen.",
+  "keywords": [
+    "workflow",
+    "protocol",
+    "agents",
+    "subagents",
+    "planning",
+    "review",
+    "implementation"
+  ],
+  "license": "MIT",
+  "name": "pasture-agents",
+  "repository": "https://github.com/dayvidpham/pasture",
+  "version": "0.0.4"
+}

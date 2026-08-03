@@ -135,6 +135,39 @@ func waitPhase(t *testing.T, e *engine.Engine, epochId string, want protocol.Pha
 	}
 }
 
+// waitControlAuditRows polls the audit trail after a projection observation.
+// Projection and audit commits are independently visible, so waitPhase may
+// return before both forensic rows can be queried.
+func waitControlAuditRows(t *testing.T, e *engine.Engine, epochId string) []protocol.AuditEvent {
+	t.Helper()
+	deadline := time.NewTimer(15 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+
+	var lastRows []protocol.AuditEvent
+	for {
+		rows, err := e.Trail().QueryEvents(context.Background(), epochId, nil, nil)
+		if err != nil {
+			t.Fatalf("QueryEvents(control audit %q): %v", epochId, err)
+		}
+		lastRows = rows
+		if len(rows) == 2 && countEvents(rows, protocol.EventPhaseTransition) == 2 {
+			return rows
+		}
+
+		select {
+		case <-tick.C:
+		case <-deadline.C:
+			st, projectionErr := e.ReadProjection(epochId)
+			if projectionErr != nil {
+				t.Fatalf("audit rows for epoch %q did not converge to exactly 2; last audit rows = %+v; current projection read failed: %v", epochId, lastRows, projectionErr)
+			}
+			t.Fatalf("audit rows for epoch %q did not converge to exactly 2; last audit rows = %+v; current projection = %+v", epochId, lastRows, st)
+		}
+	}
+}
+
 // advanceTo sends the advance and waits for the projection to reflect it.
 func advanceTo(t *testing.T, e *engine.Engine, epochId string, to protocol.PhaseId) *protocol.EpochState {
 	t.Helper()
@@ -160,12 +193,33 @@ func TestControl_SignalDrivenAdvanceIsDurable(t *testing.T) {
 	if len(st.TransitionHistory) != 2 {
 		t.Errorf("TransitionHistory = %d, want 2", len(st.TransitionHistory))
 	}
-	rows, err := e.Trail().QueryEvents(context.Background(), epochId, nil, nil)
-	if err != nil {
-		t.Fatalf("QueryEvents: %v", err)
-	}
+	rows := waitControlAuditRows(t, e, epochId)
 	if len(rows) != 2 {
 		t.Errorf("audit rows = %d, want 2 (one per transition)", len(rows))
+	}
+	wantTransitions := []struct {
+		phase protocol.PhaseId
+		from  protocol.PhaseId
+		to    protocol.PhaseId
+	}{
+		{phase: protocol.PhaseElicit, from: protocol.PhaseRequest, to: protocol.PhaseElicit},
+		{phase: protocol.PhasePropose, from: protocol.PhaseElicit, to: protocol.PhasePropose},
+	}
+	for i, want := range wantTransitions {
+		if rows[i].EventType != protocol.EventPhaseTransition {
+			t.Errorf("audit row %d event type = %q, want %q", i, rows[i].EventType, protocol.EventPhaseTransition)
+		}
+		if rows[i].Phase != want.phase {
+			t.Errorf("audit row %d phase = %q, want %q", i, rows[i].Phase, want.phase)
+		}
+		from, fromOK := rows[i].Payload["from"].(string)
+		if !fromOK || from != string(want.from) {
+			t.Errorf("audit row %d from = %q, want %q", i, from, want.from)
+		}
+		to, toOK := rows[i].Payload["to"].(string)
+		if !toOK || to != string(want.to) {
+			t.Errorf("audit row %d to = %q, want %q", i, to, want.to)
+		}
 	}
 }
 

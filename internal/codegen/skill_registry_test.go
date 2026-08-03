@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -364,10 +365,14 @@ func TestGeneratedOutputInventory(t *testing.T) {
 
 	expectedClaudeSkills := make(map[string]string, len(CommandSpecs))
 	expectedOpenCodeSkills := make(map[string]string, len(CommandSpecs))
+	expectedCodexSkills := make(map[string]string, len(CommandSpecs))
 	expectedClaudeAgents := make(map[string]string)
 	expectedOpenCodeAgents := make(map[string]string)
+	expectedCodexAgents := make(map[string]string)
 	expectedClaudeHarness := make(map[string]string)
 	expectedOpenCodeHarness := make(map[string]string)
+	expectedCodexHarness := make(map[string]string)
+	expectedCodexControl := make(map[string]string)
 	expectedRootOutputs := make(map[string]string, 2)
 
 	for _, commandID := range sortedCommandSpecIDs() {
@@ -379,10 +384,13 @@ func TestGeneratedOutputInventory(t *testing.T) {
 		owner := "CommandSpecs[" + commandID + "]"
 		claudePath := filepath.ToSlash(spec.File)
 		openCodePath := filepath.ToSlash(filepath.Join(".opencode", "skill", dir, "SKILL.md"))
+		codexPath := filepath.ToSlash(filepath.Join(codexSkillRoot, dir, "SKILL.md"))
 		addExpectedOutput(t, expectedClaudeSkills, claudePath, owner)
 		addExpectedOutput(t, expectedOpenCodeSkills, openCodePath, owner)
+		addExpectedOutput(t, expectedCodexSkills, codexPath, owner)
 		addExpectedOutput(t, expectedClaudeHarness, claudePath, owner)
 		addExpectedOutput(t, expectedOpenCodeHarness, openCodePath, owner)
+		addExpectedOutput(t, expectedCodexHarness, codexPath, owner)
 	}
 
 	for _, dir := range openCodeVerbatimDirs {
@@ -403,9 +411,12 @@ func TestGeneratedOutputInventory(t *testing.T) {
 				)
 			}
 			destination := filepath.ToSlash(filepath.Join(".opencode", "skill", dir, relWithinSource))
+			codexDestination := filepath.ToSlash(filepath.Join(codexSkillRoot, dir, relWithinSource))
 			owner := "openCodeVerbatimDirs[" + dir + "] destination"
 			addExpectedOutput(t, expectedOpenCodeSkills, destination, owner)
 			addExpectedOutput(t, expectedOpenCodeHarness, destination, owner)
+			addExpectedOutput(t, expectedCodexSkills, codexDestination, "codexVerbatimDirs["+dir+"] destination")
+			addExpectedOutput(t, expectedCodexHarness, codexDestination, "codexVerbatimDirs["+dir+"] destination")
 		}
 	}
 
@@ -417,27 +428,49 @@ func TestGeneratedOutputInventory(t *testing.T) {
 		owner := "RoleSpecs[" + string(roleID) + "].Tools"
 		claudePath := filepath.ToSlash(filepath.Join("agents", string(roleID)+".md"))
 		openCodePath := filepath.ToSlash(filepath.Join(".opencode", "agent", string(roleID)+".md"))
+		codexPath := filepath.ToSlash(filepath.Join(codexAgentsRoot, "pasture-"+string(roleID)+".toml"))
 		addExpectedOutput(t, expectedClaudeAgents, claudePath, owner)
 		addExpectedOutput(t, expectedOpenCodeAgents, openCodePath, owner)
+		addExpectedOutput(t, expectedCodexAgents, codexPath, owner)
 		addExpectedOutput(t, expectedClaudeHarness, claudePath, owner)
 		addExpectedOutput(t, expectedOpenCodeHarness, openCodePath, owner)
+		addExpectedOutput(t, expectedCodexHarness, codexPath, owner)
+		addExpectedOutput(t, expectedCodexControl, codexPath, owner)
 	}
 
+	addExpectedOutput(t, expectedClaudeHarness, "hooks/hooks.json", "ClaudeCodeTarget.Manifest lifecycle config")
+	addExpectedOutput(t, expectedClaudeHarness, "hooks/pasture-activation.json", "ClaudeCodeTarget.Manifest activation support report")
+	addExpectedOutput(t, expectedOpenCodeHarness, filepath.ToSlash(OpenCodeHooksModulePath), "OpenCodeTarget.Manifest lifecycle plugin")
+	addExpectedOutput(t, expectedOpenCodeHarness, filepath.ToSlash(OpenCodeTargetManifestPath), "OpenCodeTarget.Manifest target descriptor")
 	addExpectedOutput(t, expectedOpenCodeHarness, "opencode.json", "OpenCodeTarget.Manifest")
+	for _, path := range []string{codexTargetManifestPath, ".codex/hooks.json", ".codex/hooks/pasture-lifecycle.py"} {
+		addExpectedOutput(t, expectedCodexHarness, path, "CodexTarget.Manifest")
+		addExpectedOutput(t, expectedCodexControl, path, "CodexTarget.Manifest")
+	}
+	for _, event := range runtime.CodexLifecycleEvents() {
+		path := filepath.ToSlash(filepath.Join(codexHooksRoot, "events", event.NativeName()+".sh"))
+		addExpectedOutput(t, expectedCodexHarness, path, "CodexTarget lifecycle event "+event.NativeName())
+		addExpectedOutput(t, expectedCodexControl, path, "CodexTarget lifecycle event "+event.NativeName())
+	}
 	addExpectedOutput(t, expectedRootOutputs, "schema.xml", "GenerateSchemaToFile")
 	addExpectedOutput(t, expectedRootOutputs, "opencode.json", "OpenCodeTarget.Manifest")
 
 	claudeFiles, claudePaths := collectHarnessOutputs(t, root, figuresDir, ClaudeCodeTarget)
 	openCodeFiles, openCodePaths := collectHarnessOutputs(t, root, figuresDir, OpenCodeTarget)
+	codexFiles, codexPaths := collectHarnessOutputs(t, root, figuresDir, CodexTarget)
 	assertOutputSetEqual(t, "Claude Code harness output paths", expectedClaudeHarness, claudePaths)
 	assertOutputSetEqual(t, "OpenCode harness output paths", expectedOpenCodeHarness, openCodePaths)
+	assertOutputSetEqual(t, "Codex harness output paths", expectedCodexHarness, codexPaths)
 	assertGeneratedFilesCommitted(t, root, claudeFiles)
 	assertGeneratedFilesCommitted(t, root, openCodeFiles)
+	assertGeneratedFilesCommitted(t, root, codexFiles)
 
 	assertOutputSetEqual(t, "Claude Code skill tree", expectedClaudeSkills, collectRelativeFiles(t, root, filepath.Join(root, "skills")))
 	assertOutputSetEqual(t, "OpenCode skill tree", expectedOpenCodeSkills, collectRelativeFiles(t, root, filepath.Join(root, ".opencode", "skill")))
+	assertOutputSetEqual(t, "Codex skill tree", expectedCodexSkills, collectRelativeFiles(t, root, filepath.Join(root, filepath.FromSlash(codexSkillRoot))))
 	assertOutputSetEqual(t, "Claude Code agent tree", expectedClaudeAgents, collectRelativeFiles(t, root, filepath.Join(root, "agents")))
 	assertOutputSetEqual(t, "OpenCode agent tree", expectedOpenCodeAgents, collectRelativeFiles(t, root, filepath.Join(root, ".opencode", "agent")))
+	assertOutputSetEqual(t, "Codex control tree", expectedCodexControl, collectRelativeFiles(t, root, filepath.Join(root, ".codex")))
 	assertOutputSetEqual(t, "generated repository-root files", expectedRootOutputs, collectGeneratedRootFiles(t, root))
 
 	assertCommittedContent(t, filepath.Join(root, "schema.xml"), generateSchemaContent(), "GenerateSchemaToFile")

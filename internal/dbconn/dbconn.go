@@ -8,10 +8,12 @@ package dbconn
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
 
 	_ "modernc.org/sqlite" // pure-Go driver; CGO_ENABLED=0 compatible
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
 // SharedDSN builds the connection string used for every modernc handle on the
@@ -27,9 +29,17 @@ import (
 //   - _txlock=immediate      BEGIN IMMEDIATE so a write txn holds the lock from
 //     its first statement (migration concurrency-safety)
 func SharedDSN(path string) string {
+	return SharedDSNWithProfile(path, timeouts.ProductionProfile())
+}
+
+func SharedDSNWithProfile(path string, profile timeouts.Profile) string {
+	if err := profile.Validate(); err != nil {
+		panic(fmt.Sprintf("dbconn: invalid timeout profile: %v", err))
+	}
+	busyMillis := profile.SQLiteBusy().Milliseconds()
 	return "file:" + path +
 		"?_pragma=journal_mode(WAL)" +
-		"&_pragma=busy_timeout(5000)" +
+		"&_pragma=busy_timeout(" + strconv.FormatInt(busyMillis, 10) + ")" +
 		"&_pragma=synchronous(NORMAL)" +
 		"&_pragma=foreign_keys(ON)" +
 		"&_txlock=immediate"
@@ -46,9 +56,16 @@ func SharedDSN(path string) string {
 // shared path; without it, those rare contention windows surface as raw lock
 // errors instead of a transparent 5 s retry.
 func ReadOnlyDSN(path string) string {
+	return ReadOnlyDSNWithProfile(path, timeouts.ProductionProfile())
+}
+
+func ReadOnlyDSNWithProfile(path string, profile timeouts.Profile) string {
+	if err := profile.Validate(); err != nil {
+		panic(fmt.Sprintf("dbconn: invalid timeout profile: %v", err))
+	}
 	return "file:" + path +
 		"?mode=ro" +
-		"&_pragma=busy_timeout(5000)"
+		"&_pragma=busy_timeout(" + strconv.FormatInt(profile.SQLiteBusy().Milliseconds(), 10) + ")"
 }
 
 // OpenSharedDB opens a modernc *sql.DB on path using SharedDSN. Unlike the
@@ -57,7 +74,11 @@ func ReadOnlyDSN(path string) string {
 // the DBOS notification poller needs a second connection to make progress while
 // a workflow step holds one.
 func OpenSharedDB(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", SharedDSN(path))
+	return OpenSharedDBWithProfile(path, timeouts.ProductionProfile())
+}
+
+func OpenSharedDBWithProfile(path string, profile timeouts.Profile) (*sql.DB, error) {
+	db, err := sql.Open("sqlite", SharedDSNWithProfile(path, profile))
 	if err != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,

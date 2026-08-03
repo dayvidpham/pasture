@@ -37,6 +37,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -69,8 +70,14 @@ func OpenTaskTracker(dbPath string) (protocol.TaskTracker, error) {
 }
 
 type openTaskTrackerOptions struct {
-	skipMigrations bool
-	maxOpenConns   int
+	skipMigrations     bool
+	maxOpenConns       int
+	afterGenesisCommit func(provenance.JournalID) error
+	timeouts           timeouts.Profile
+}
+
+func WithTimeoutProfile(profile timeouts.Profile) OpenTaskTrackerOption {
+	return func(o *openTaskTrackerOptions) { o.timeouts = profile }
 }
 
 // OpenTaskTrackerOption configures OpenTaskTrackerWithOptions.
@@ -113,6 +120,12 @@ func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
 }
 
 func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (protocol.TaskTracker, error) {
+	if cfg.timeouts.IsZero() {
+		cfg.timeouts = timeouts.ProductionProfile()
+	}
+	if err := cfg.timeouts.Validate(); err != nil {
+		return nil, &pasterrors.StructuredError{Category: pasterrors.CategoryValidation, What: "The unified store timeout profile is invalid.", Why: err.Error(), Where: "Opening the pasture database (internal/tasks/open_unified.go in tasks.openTaskTrackerWithOptions).", Impact: "No database handles were opened.", Fix: "Use a constructor-validated production or test profile."}
+	}
 	if dbPath == "" {
 		dbPath = DefaultDBPath()
 	}
@@ -158,9 +171,9 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 	var trail *audit.SqliteAuditTrail
 	var err error
 	if cfg.skipMigrations {
-		trail, err = audit.NewSqliteAuditTrailWithOptions(dbPath, audit.WithSkipMigrations())
+		trail, err = audit.NewSqliteAuditTrailWithOptions(dbPath, audit.WithSkipMigrations(), audit.WithTimeoutProfile(cfg.timeouts))
 	} else {
-		trail, err = audit.NewSqliteAuditTrail(dbPath)
+		trail, err = audit.NewSqliteAuditTrailWithOptions(dbPath, audit.WithTimeoutProfile(cfg.timeouts))
 	}
 	if err != nil {
 		return nil, wrapOpenError(dbPath, "audit subsystem", err)
@@ -173,7 +186,7 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 	// same disk state. The shared DSN (WAL + busy_timeout + _txlock=immediate)
 	// gives this handle the same write serialisation as the audit handle.
 	// poolSize was already resolved above (WithMaxOpenConns > env > default 1).
-	auditDB, err := openAuditHandle(dbPath, poolSize)
+	auditDB, err := openAuditHandle(dbPath, poolSize, cfg.timeouts)
 	if err != nil {
 		_ = trail.Close()
 		return nil, err
@@ -195,7 +208,7 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 	// same on-disk file via the modernc/sqlite driver; WAL mode + a
 	// 5000ms busy_timeout (applied via the shared DSN on the pasture handles)
 	// provide cross-handle serialisation.
-	prov, err := provenance.OpenSQLite(dbPath)
+	prov, err := provenance.OpenBorrowedSQLite(auditDB)
 	if err != nil {
 		_ = auditDB.Close()
 		_ = trail.Close()
@@ -222,7 +235,9 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 		}
 	}
 
-	return newTrackerImpl(prov, trail, auditDB), nil
+	tracker := newTrackerImpl(prov, trail, auditDB)
+	tracker.afterGenesisCommit = cfg.afterGenesisCommit
+	return tracker, nil
 }
 
 // openAuditHandle opens a private *sql.DB on the same SQLite file used by
@@ -230,8 +245,8 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 // synchronous=NORMAL + foreign_keys=ON + _txlock=immediate) so writes from this
 // handle serialise correctly against audit and Provenance writes. The WAL
 // multi-writer model + busy_timeout replaces the former single-connection cap.
-func openAuditHandle(dbPath string, maxOpenConns int) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", dbconn.SharedDSN(dbPath))
+func openAuditHandle(dbPath string, maxOpenConns int, profile timeouts.Profile) (*sql.DB, error) {
+	db, err := sql.Open("sqlite", dbconn.SharedDSNWithProfile(dbPath, profile))
 	if err != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
@@ -351,6 +366,16 @@ func ensurePastureTables(db *sql.DB) error {
 		ddl  string
 	}{
 		{
+			name: "pasture_governed_allocation_audit",
+			ddl: `CREATE TABLE IF NOT EXISTS pasture_governed_allocation_audit (
+				operation_id TEXT PRIMARY KEY,
+				closure_anchor INTEGER NOT NULL,
+				child_task_id TEXT NOT NULL,
+				child_assignment_id TEXT NOT NULL,
+				occupant_id TEXT NOT NULL
+			)`,
+		},
+		{
 			name: "context_edges",
 			ddl: `CREATE TABLE IF NOT EXISTS context_edges (
 				event_id     INTEGER NOT NULL REFERENCES audit_events(id) ON DELETE CASCADE,
@@ -380,6 +405,21 @@ func ensurePastureTables(db *sql.DB) error {
 			ddl: `CREATE TABLE IF NOT EXISTS pasture_well_known_agents (
 				agent_id  TEXT PRIMARY KEY,
 				name      TEXT NOT NULL UNIQUE
+			)`,
+		},
+		{
+			// pasture_system_identity persists the resolved committing actor and
+			// genesis bootstrap-authority JournalID that the journaled task backend
+			// binds every mutation to (Tracker.As → Session). It is a singleton
+			// (CHECK singleton_id = 0). The row is written once, the first time a
+			// mutation opens a Session against a fresh journal; every later open
+			// reads it back so the same (actor, authority) pair governs all system
+			// mutations. See internal/tasks/system_identity.go.
+			name: "pasture_system_identity",
+			ddl: `CREATE TABLE IF NOT EXISTS pasture_system_identity (
+				singleton_id                 INTEGER PRIMARY KEY CHECK (singleton_id = 0),
+				committer_actor_id           TEXT    NOT NULL,
+				genesis_authority_journal_id INTEGER NOT NULL
 			)`,
 		},
 	}

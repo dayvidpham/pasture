@@ -1,0 +1,25 @@
+schema: pasture.acceptance-corpus/v1
+id: invalid-variant
+maxGenerated: 1
+operators:
+  - {id: remove-actor, compatible: [production-command], oracle: validation-error, maxPerCase: 1}
+cases:
+  - id: both-targets
+    class: must-pass
+    target:
+      kind: production-command
+      command: {argv: [pasture], stdin: {inline: ""}}
+      nativeEvent: {harness: opencode, contract: v1, event: event, inputJSON: {inline: "{}"}}
+    setup: {fixture: store, preState: {inline: ""}, actors: [], assignments: [], tasks: [], evidence: []}
+    expect: {oracle: success, exitCode: 0, stdoutJSON: {inline: ""}, stderr: {inline: ""}}
+    delta:
+      graph: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      assignments: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      decisions: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      evidence: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      activities: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      events: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      journal: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      projection: {added: [], changed: [], removed: [], rowCount: 0, byteDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+    provenance: {requirement: variant, record: reviewed, rationale: rejected}
+    mutations: []

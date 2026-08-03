@@ -483,18 +483,15 @@ func TestStructuredError_Unwrap_PreservesAsTraversal(t *testing.T) {
 	}
 }
 
-// TestStructuredError_Report_SuppressesCause verifies that Report() does NOT
-// surface any Cause text in user-visible output. Cause contains internal
-// jargon (Go error messages, SQL column names, package qualifiers) that the
-// plain-English convention explicitly forbids from appearing in user output.
-func TestStructuredError_Report_SuppressesCause(t *testing.T) {
-	causeText := "internal: jargon-here sql=col_name pkg=temporal.activities"
+func TestStructuredError_Report_SurfacesCauseWithoutBuryingAction(t *testing.T) {
+	causeText := "collaborator refused the request because its credentials expired"
 	se := &errors.StructuredError{
-		Category: errors.CategoryValidation,
-		What:     "The request ID wasn't valid.",
-		Why:      "plain reason visible to users",
-		Impact:   "the command can't run",
-		Fix:      "pass a valid ID",
+		Category: errors.CategoryConnection,
+		What:     "The remote operation couldn't be completed.",
+		Why:      "The collaborator rejected the request.",
+		Where:    "Sending the operation (client.go in client.Send)",
+		Impact:   "The requested change wasn't applied.",
+		Fix:      "Refresh the collaborator credentials and retry.",
 		Cause:    stderrors.New(causeText),
 	}
 
@@ -502,17 +499,29 @@ func TestStructuredError_Report_SuppressesCause(t *testing.T) {
 	se.Report(&buf)
 	out := buf.String()
 
-	if !strings.Contains(out, "plain reason visible to users") {
-		t.Errorf("Report() is missing the Why text. Output:\n%s", out)
+	for _, want := range []string{
+		"Problem:    The remote operation couldn't be completed.",
+		"Reason:     The collaborator rejected the request.",
+		"Details:    " + causeText,
+		"Where:      Sending the operation",
+		"Impact:     The requested change wasn't applied.",
+		"How to fix:",
+		"Refresh the collaborator credentials and retry.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("Report() missing %q in readable output:\n%s", want, out)
+		}
 	}
-	// None of the Cause text should leak into user-visible output.
-	if strings.Contains(out, "jargon-here") {
-		t.Errorf("Report() leaked Cause text %q into output:\n%s", "jargon-here", out)
+}
+
+func TestStructuredError_ErrorIncludesCause(t *testing.T) {
+	se := &errors.StructuredError{
+		Category: errors.CategoryWorkflow,
+		What:     "The operation failed.",
+		Cause:    stderrors.New("worker connection closed unexpectedly"),
 	}
-	if strings.Contains(out, "sql=col_name") {
-		t.Errorf("Report() leaked Cause text %q into output:\n%s", "sql=col_name", out)
-	}
-	if strings.Contains(out, "pkg=temporal.activities") {
-		t.Errorf("Report() leaked Cause text %q into output:\n%s", "pkg=temporal.activities", out)
+
+	if got, want := se.Error(), "workflow error: The operation failed. Cause: worker connection closed unexpectedly"; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
 	}
 }

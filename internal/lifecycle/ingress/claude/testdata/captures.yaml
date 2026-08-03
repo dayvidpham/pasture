@@ -1,0 +1,61 @@
+cases:
+  - name: authentic-session-start
+    input:
+      fixture: fixtures/session_start_2_1_210.json
+    expected:
+      decision: enabled
+      reason: ""
+    classification: must-pass
+    provenance:
+      source: requirement
+      ref: llm/plan/impl-plan-m1-claude-vertical.md
+    mutation:
+      description: The reviewed authentic fixture remains unchanged.
+  - name: authored-origin-control
+    input:
+      fixture: fixtures/session_start_2_1_210_origin_authored.json
+    expected:
+      decision: withheld
+      reason: non-authentic-origin
+    classification: must-fail
+    provenance:
+      source: bug
+      ref: internal/acceptance/capture.go
+    mutation:
+      description: The sibling provenance origin is relabelled from authentic capture to authored.
+  - name: digest-mismatch-control
+    input:
+      fixture: fixtures/session_start_2_1_210_digest_mismatch.json
+    expected:
+      decision: withheld
+      reason: digest-mismatch
+    classification: must-fail
+    provenance:
+      source: bug
+      ref: internal/acceptance/capture.go
+    mutation:
+      description: The sibling provenance carries a digest that does not match the unchanged bytes.
+  - name: version-out-of-range-control
+    input:
+      fixture: fixtures/session_start_2_1_210_version_out_of_range.json
+    expected:
+      decision: withheld
+      reason: version-out-of-range
+    classification: must-fail
+    provenance:
+      source: enum
+      ref: internal/runtime/lifecycle.go
+    mutation:
+      description: The sibling provenance advertises a host version outside the pinned admission range.
+  - name: path-escape-control
+    input:
+      fixture: ../fixtures/session_start_2_1_210.json
+    expected:
+      decision: withheld
+      reason: path-escape
+    classification: must-fail
+    provenance:
+      source: boundary
+      ref: internal/acceptance/capture.go
+    mutation:
+      description: The fixture path escapes the declared testdata corpus root without creating a host capture.

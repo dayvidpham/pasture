@@ -1,0 +1,6 @@
+schema: pasture.acceptance-corpus/v1
+schema: pasture.acceptance-corpus/v1
+id: duplicate-field
+maxGenerated: 1
+operators: []
+cases: []

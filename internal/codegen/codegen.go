@@ -11,6 +11,9 @@
 //   - .opencode/skill/{skill}/SKILL.md: OpenCode skills
 //   - .opencode/agent/{role}.md: OpenCode agent definitions
 //   - opencode.json: OpenCode manifest
+//   - .agents/skills/{skill}/SKILL.md: Codex-compatible skills
+//   - .codex/agents/pasture-{role}.toml: Codex agent definitions
+//   - .codex/hooks/: Codex lifecycle adapters
 //
-//go:generate go run ../../tools/codegen --targets claude-code,opencode
+//go:generate go run ../../tools/codegen --targets claude-code,opencode,codex
 package codegen

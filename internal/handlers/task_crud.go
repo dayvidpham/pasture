@@ -105,6 +105,15 @@ type TaskUpdateInput struct {
 }
 
 // TaskUpdate applies partial updates to an existing task and prints the result.
+//
+// Metadata (title/description/priority/phase/notes) and status are separate journaled
+// concerns under the journaled backend: metadata is one provenance.task.updated event and
+// a status change is a dedicated lifecycle transition governed by the static FSM
+// (Start/Stop/CloseTask/Reopen). When a single `update` call requests BOTH, the tracker
+// folds them into ONE atomic journaled operation, so a status target the FSM rejects
+// rolls the metadata write back with it — nothing commits, and the caller never sees a
+// partially-applied update. A metadata-only or status-only call commits one journaled
+// operation as before.
 func TaskUpdate(w io.Writer, in TaskUpdateInput, format types.OutputFormat) (int, error) {
 	id, err := provenance.ParseTaskID(in.IdStr)
 	if err != nil {
@@ -117,17 +126,30 @@ func TaskUpdate(w io.Writer, in TaskUpdateInput, format types.OutputFormat) (int
 	}
 	defer tr.Close()
 
-	t, err := tr.Update(id, provenance.UpdateFields{
+	updater, ok := tr.(tasks.AtomicTaskUpdater)
+	if !ok {
+		se := &pasterrors.StructuredError{
+			Category: pasterrors.CategoryWorkflow,
+			What:     "Pasture's task store can't apply a metadata-and-status update atomically.",
+			Why:      "The open task tracker does not implement the atomic-update capability the update command requires.",
+			Where:    "Running \"task update\" (handlers/task_crud.go in handlers.TaskUpdate).",
+			Impact:   "The update was not applied.",
+			Fix:      "This is a build/wiring problem: ensure the tracker is opened via tasks.OpenTaskTracker. Please file a bug.",
+		}
+		return pasterrors.ExitCode(se), se
+	}
+
+	t, err := updater.UpdateTaskAtomic(id, provenance.UpdateFields{
 		Title:       in.Title,
 		Description: in.Description,
-		Status:      in.Status,
 		Priority:    in.Priority,
 		Phase:       in.Phase,
 		Notes:       in.Notes,
-	})
+	}, in.Status)
 	if err != nil {
 		return wrapTaskOpError("update", err)
 	}
+
 	out, fErr := formatters.FormatTask(t, format)
 	if fErr != nil {
 		return pasterrors.ExitCode(fErr), fErr

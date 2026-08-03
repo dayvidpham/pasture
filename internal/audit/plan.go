@@ -59,6 +59,10 @@ func stepDescription(fromVersion, toVersion int) string {
 		return "add the context-edge, agent-category, and known-agent tables, then backfill agent IDs into audit events and drop the legacy role column"
 	case fromVersion == 3 && toVersion == 4:
 		return "backfill epoch IDs into the context-edge table, then drop the legacy epoch_id column"
+	case fromVersion == 4 && toVersion == 5:
+		return "add deterministic deduplication keys to audit events"
+	case fromVersion == 5 && toVersion == 6:
+		return "add content-addressed lifecycle payload storage and replay-derived occurrence projections"
 	default:
 		// Forward-compatible default: workers who add a new step will see
 		// this generic text and know to add a tailored description here.

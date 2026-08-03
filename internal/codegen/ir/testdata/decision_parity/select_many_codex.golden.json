@@ -1,0 +1,116 @@
+{
+  "native": {
+    "kind": "request_user_decision",
+    "id": "pasture.orchestration.request-user-decision/v1",
+    "scope": "golden",
+    "payload": {
+      "schema": "pasture.request-user-decision/v1",
+      "request_id": "request-select_many_codex",
+      "harness": "codex",
+      "runtime_contract": "codex/0.144.1",
+      "epoch": "epoch-1",
+      "gate_task": "gate-1",
+      "purpose": "impl-uat",
+      "prompt": {
+        "mode": "select_many",
+        "data": {
+          "stimulus": {
+            "question": "Which items need follow-up?",
+            "definition_shown": "deferred UAT items",
+            "command_shown": "pasture uat defer"
+          },
+          "options": [
+            {
+              "id": "docs",
+              "label": "Documentation",
+              "description": "update user-facing docs"
+            },
+            {
+              "id": "tests",
+              "label": "Tests",
+              "description": "add regression coverage"
+            }
+          ],
+          "min_selections": 0,
+          "max_selections": 2
+        }
+      }
+    },
+    "results": []
+  },
+  "parent_mediated": {
+    "schema": "pasture.request-user-decision/v1",
+    "request_id": "request-select_many_codex",
+    "harness": "codex",
+    "runtime_contract": "codex/0.144.1",
+    "epoch": "epoch-1",
+    "gate_task": "gate-1",
+    "purpose": "impl-uat",
+    "prompt": {
+      "mode": "select_many",
+      "data": {
+        "stimulus": {
+          "question": "Which items need follow-up?",
+          "definition_shown": "deferred UAT items",
+          "command_shown": "pasture uat defer"
+        },
+        "options": [
+          {
+            "id": "docs",
+            "label": "Documentation",
+            "description": "update user-facing docs"
+          },
+          {
+            "id": "tests",
+            "label": "Tests",
+            "description": "add regression coverage"
+          }
+        ],
+        "min_selections": 0,
+        "max_selections": 2
+      }
+    }
+  },
+  "reported": {
+    "schema": "pasture.reported-user-decision/v1",
+    "request_id": "request-select_many_codex",
+    "harness": "codex",
+    "runtime_contract": "codex/0.144.1",
+    "epoch": "epoch-1",
+    "gate_task": "gate-1",
+    "purpose": "impl-uat",
+    "prompt": {
+      "mode": "select_many",
+      "data": {
+        "stimulus": {
+          "question": "Which items need follow-up?",
+          "definition_shown": "deferred UAT items",
+          "command_shown": "pasture uat defer"
+        },
+        "options": [
+          {
+            "id": "docs",
+            "label": "Documentation",
+            "description": "update user-facing docs"
+          },
+          {
+            "id": "tests",
+            "label": "Tests",
+            "description": "add regression coverage"
+          }
+        ],
+        "min_selections": 0,
+        "max_selections": 2
+      }
+    },
+    "result": {
+      "mode": "select_many",
+      "data": {
+        "selected": [
+          "docs"
+        ],
+        "verbatim_answer": "just docs"
+      }
+    }
+  }
+}

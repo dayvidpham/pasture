@@ -37,6 +37,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/dayvidpham/provenance"
+
 	"github.com/dayvidpham/pasture/internal/audit"
 )
 
@@ -117,7 +119,7 @@ func TestCLI_S10_TaskCreate_LeavesUnifiedAuditTables(t *testing.T) {
 // The legacy fixture is constructed in-place via Provenance bootstrap +
 // raw v1 audit_events DDL (mirroring cmd/pasture/task_events_test.go's
 // newLegacyV1DB helper, but inlined here so this test stands alone if
-// task_events_test.go is reorganised). On first `pasture task list` the
+// task_events_test.go is reorganised). On first `pasture task create` the
 // audit migrator should detect version<MaxKnownSchemaVersion and run the
 // forward chain transparently.
 func TestCLI_S10_AutoMigratesLegacyV1OnFirstUse(t *testing.T) {
@@ -131,8 +133,7 @@ func TestCLI_S10_AutoMigratesLegacyV1OnFirstUse(t *testing.T) {
 		t.Fatalf("pre-condition: expected v=0 (no audit_schema_meta) on fresh legacy fixture, got v=%d", v)
 	}
 
-	// Run a no-op CLI command (`task list` against an empty namespace). The
-	// success or failure of the listing is irrelevant; what we care about is
+	// Run a generic task command. The created task is incidental; what we care about is
 	// the side effect: OpenTaskTracker → audit.NewSqliteAuditTrail →
 	// audit.Migrate runs to completion, leaving audit_schema_meta at
 	// MaxKnownSchemaVersion.
@@ -140,10 +141,10 @@ func TestCLI_S10_AutoMigratesLegacyV1OnFirstUse(t *testing.T) {
 		"--db", dbPath,
 		"--namespace", "demo",
 		"--format", "json",
-		"task", "list",
+		"task", "create", "migration probe",
 	)
 	if out.exitCode != 0 {
-		t.Fatalf("task list exit %d; stdout=%q stderr=%q", out.exitCode, out.stdout, out.stderr)
+		t.Fatalf("task create exit %d; stdout=%q stderr=%q", out.exitCode, out.stdout, out.stderr)
 	}
 
 	// Post-condition: the migrator ran; on-disk version equals
@@ -189,7 +190,7 @@ func makeLegacyV1ForS10(t *testing.T) string {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "legacy.db")
 
-	tr, err := provenanceOpenSQLite(dbPath)
+	tr, err := provenance.OpenSQLite(dbPath)
 	if err != nil {
 		t.Fatalf("provenance bootstrap: %v", err)
 	}

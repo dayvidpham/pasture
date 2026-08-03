@@ -1,11 +1,10 @@
-// Command pasture is the local task management and epoch control CLI for the
-// Pasture toolkit.
+// Command pasture is the local task-management and deterministic epoch-lifecycle
+// CLI for the Pasture toolkit.
 //
 // It manages tasks, dependencies, labels, comments, and the audit-event record
 // backed by the unified Pasture SQLite database
-// (~/.local/share/pasture/pasture.db). It also starts, signals, and queries
-// durable epoch workflow requests. A running pastured process hosts long-lived
-// workflow execution, queue dispatch, and crash recovery.
+// (~/.local/share/pasture/pasture.db). Typed epoch commands commit directly
+// through the same EpochService used by generated harness adapters.
 //
 // Task commands route through the unified protocol.TaskTracker constructor
 // (tasks.OpenTaskTracker) so the auto-on-open audit migrator runs against
@@ -16,7 +15,7 @@
 //	0  success
 //	1  validation error (bad flags, missing arguments)
 //	2  connection error (cannot open the database file)
-//	3  task or workflow error (task not found, cycle detected; epoch start rejected, signal undeliverable)
+//	3  task or workflow error (task not found, cycle detected, gate rejected)
 //	4  config error
 //	5  storage error (migration / schema failure)
 package main
@@ -27,6 +26,10 @@ import (
 )
 
 func main() {
+	// The adapter constructor remains isolated in adapter.go; registration belongs
+	// to the production command assembly so ordinary package tests can inspect the
+	// constructor without mutating rootCmd.
+	rootCmd.AddCommand(NewAdapterCommand())
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

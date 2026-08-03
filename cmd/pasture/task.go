@@ -8,10 +8,11 @@ import "github.com/spf13/cobra"
 var taskCmd = &cobra.Command{
 	Use:   "task",
 	Short: "Manage Provenance-backed tasks",
-	Long: `Manage tasks in the local Provenance task tracker.
+	Long: `Manage tasks and their generic Provenance-backed relationships.
 
-Subcommands cover the full task lifecycle: creation, retrieval, updates,
-closure, listing, readiness queries, dependency edges, labels, and comments.
+Subcommands cover task creation, retrieval, updates, closure, relationships,
+comments, and timelines. Epoch lifecycle operations are available only below
+"pasture epoch".
 
 All subcommands accept the global flags --db, --format, and --namespace.`,
 }

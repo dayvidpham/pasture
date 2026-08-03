@@ -468,11 +468,11 @@ func TestSliceQueue_BoundedConcurrency(t *testing.T) {
 		handles[i] = h
 	}
 
-	// Deliver explicit mock start_slice signals to all N slices concurrently so
-	// each sub-workflow takes the mock-success path when its queue slot opens.
+	// Deliver each start signal serially before waiting on results. This preserves
+	// the queue-concurrency behavior under test without making signal delivery
+	// compete with the DBOS queue runners for CPU and SQLite access.
 	for _, sliceId := range sliceIds {
-		sliceId := sliceId
-		go sendMockStartSignal(t, e, sliceId, 30*time.Second)
+		sendMockStartSignal(t, e, sliceId, 30*time.Second)
 	}
 
 	// Wait until exactly K sub-workflows are gated at HookSliceStarted.
@@ -557,18 +557,12 @@ func TestSliceQueue_BackpressureAllEventuallyComplete(t *testing.T) {
 		handles[i] = h
 	}
 
-	// Deliver explicit mock start_slice signals to all N slices concurrently.
-	// The spin-poll inside sendMockStartSignal handles the timing window: each
-	// sub-workflow consumes its signal when its queue slot opens (DBOS holds
-	// the signal in the notifications table until the workflow dequeues).
-	var sigWg sync.WaitGroup
+	// Deliver signals serially. Concurrent spin-polling here creates 30 writers
+	// against the same SQLite-backed DBOS store and can starve a sender beyond
+	// the workflow's start-signal deadline under full-tree race-test load. Signal
+	// delivery concurrency is not part of this test's backpressure invariant.
 	for _, sliceId := range sliceIds {
-		sliceId := sliceId
-		sigWg.Add(1)
-		go func() {
-			defer sigWg.Done()
-			sendMockStartSignal(t, e, sliceId, 90*time.Second)
-		}()
+		sendMockStartSignal(t, e, sliceId, 90*time.Second)
 	}
 
 	var wg sync.WaitGroup
@@ -594,7 +588,6 @@ func TestSliceQueue_BackpressureAllEventuallyComplete(t *testing.T) {
 		}(i, h)
 	}
 	wg.Wait()
-	sigWg.Wait()
 
 	if got := failures.Load(); got != 0 {
 		t.Errorf("%d of %d slices failed", got, N)

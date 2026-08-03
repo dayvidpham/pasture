@@ -1,0 +1,13 @@
+{
+  "event": "tool.execute.before",
+  "input": {
+    "tool": "bash",
+    "sessionID": "opencode-session-1",
+    "callID": "call-4"
+  },
+  "output": {
+    "args": {
+      "command": "git status"
+    }
+  }
+}

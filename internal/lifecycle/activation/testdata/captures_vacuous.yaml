@@ -1,0 +1,13 @@
+cases:
+  - name: only-enabled-control
+    input:
+      fixture: fixtures/session_start_2_1_210.json
+    expected:
+      decision: enabled
+      reason: ""
+    classification: must-pass
+    provenance:
+      source: requirement
+      ref: llm/plan/impl-plan-m1-claude-vertical.md
+    mutation:
+      description: This syntactically valid negative control intentionally has no must-fail evidence.

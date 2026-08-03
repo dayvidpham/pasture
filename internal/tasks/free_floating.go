@@ -63,6 +63,7 @@ import (
 	"time"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -482,5 +483,5 @@ func OpenAuditDBForFreeFloating(dbPath string) (*sql.DB, error) {
 	if dbPath == "" {
 		dbPath = DefaultDBPath()
 	}
-	return openAuditHandle(dbPath, 0)
+	return openAuditHandle(dbPath, 0, timeouts.ProductionProfile())
 }

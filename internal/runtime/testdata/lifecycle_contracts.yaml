@@ -1,0 +1,955 @@
+contracts:
+  - harness: claude-code
+    id: claude-code/claude-code@2.1.210
+    version: 2.1.210
+    max_version: 2.2.0-0
+    lower: 2.1.209
+    higher: 2.2.0
+    event_order:
+      - SessionStart
+      - Setup
+      - SessionEnd
+      - UserPromptSubmit
+      - UserPromptExpansion
+      - Stop
+      - StopFailure
+      - PreToolUse
+      - PermissionRequest
+      - PermissionDenied
+      - PostToolUse
+      - PostToolUseFailure
+      - PostToolBatch
+      - FileChanged
+      - CwdChanged
+      - ConfigChange
+      - InstructionsLoaded
+      - WorktreeCreate
+      - WorktreeRemove
+      - SubagentStart
+      - SubagentStop
+      - TeammateIdle
+      - TaskCreated
+      - TaskCompleted
+      - PreCompact
+      - PostCompact
+      - Notification
+      - MessageDisplay
+      - Elicitation
+      - ElicitationResult
+    unresolved_by_event:
+      PostToolBatch:
+        - tool-call
+    axes:
+      semantic:
+        observation:
+          - SessionStart
+          - Setup
+          - SessionEnd
+          - StopFailure
+          - PermissionDenied
+          - PostToolUse
+          - PostToolUseFailure
+          - FileChanged
+          - CwdChanged
+          - InstructionsLoaded
+          - WorktreeRemove
+          - SubagentStart
+          - PostCompact
+          - Notification
+          - MessageDisplay
+        gate-consultation:
+          - UserPromptSubmit
+          - UserPromptExpansion
+          - Stop
+          - PreToolUse
+          - PermissionRequest
+          - PostToolBatch
+          - ConfigChange
+          - WorktreeCreate
+          - SubagentStop
+          - TeammateIdle
+          - TaskCreated
+          - TaskCompleted
+          - PreCompact
+          - Elicitation
+        explicit-human-response:
+          - ElicitationResult
+      surface:
+        claude-command-json:
+          - SessionStart
+          - Setup
+          - SessionEnd
+          - UserPromptSubmit
+          - UserPromptExpansion
+          - Stop
+          - StopFailure
+          - PreToolUse
+          - PermissionRequest
+          - PermissionDenied
+          - PostToolUse
+          - PostToolUseFailure
+          - PostToolBatch
+          - FileChanged
+          - CwdChanged
+          - ConfigChange
+          - InstructionsLoaded
+          - WorktreeCreate
+          - WorktreeRemove
+          - SubagentStart
+          - SubagentStop
+          - TeammateIdle
+          - TaskCreated
+          - TaskCompleted
+          - PreCompact
+          - PostCompact
+          - Notification
+          - MessageDisplay
+          - Elicitation
+          - ElicitationResult
+      blocking:
+        nonblocking:
+          - SessionStart
+          - Setup
+          - SessionEnd
+          - StopFailure
+          - PermissionDenied
+          - PostToolUse
+          - PostToolUseFailure
+          - FileChanged
+          - CwdChanged
+          - InstructionsLoaded
+          - WorktreeRemove
+          - SubagentStart
+          - PostCompact
+          - Notification
+          - MessageDisplay
+        blocking:
+          - UserPromptSubmit
+          - UserPromptExpansion
+          - Stop
+          - PreToolUse
+          - PermissionRequest
+          - PostToolBatch
+          - WorktreeCreate
+          - SubagentStop
+          - TeammateIdle
+          - TaskCreated
+          - TaskCompleted
+          - PreCompact
+          - Elicitation
+          - ElicitationResult
+        conditionally-blocking:
+          - ConfigChange
+      mutation:
+        none:
+          - SessionStart
+          - Setup
+          - SessionEnd
+          - UserPromptSubmit
+          - UserPromptExpansion
+          - Stop
+          - StopFailure
+          - PermissionRequest
+          - PermissionDenied
+          - PostToolUse
+          - PostToolUseFailure
+          - PostToolBatch
+          - FileChanged
+          - CwdChanged
+          - ConfigChange
+          - InstructionsLoaded
+          - WorktreeCreate
+          - WorktreeRemove
+          - SubagentStart
+          - SubagentStop
+          - TeammateIdle
+          - TaskCreated
+          - TaskCompleted
+          - PreCompact
+          - PostCompact
+          - Notification
+          - MessageDisplay
+          - Elicitation
+          - ElicitationResult
+        input:
+          - PreToolUse
+        output: []
+        output-object: []
+      order:
+        concurrent-native:
+          - SessionStart
+          - Setup
+          - SessionEnd
+          - UserPromptSubmit
+          - UserPromptExpansion
+          - Stop
+          - StopFailure
+          - PreToolUse
+          - PermissionRequest
+          - PermissionDenied
+          - PostToolUse
+          - PostToolUseFailure
+          - PostToolBatch
+          - FileChanged
+          - CwdChanged
+          - ConfigChange
+          - InstructionsLoaded
+          - WorktreeCreate
+          - WorktreeRemove
+          - SubagentStart
+          - SubagentStop
+          - TeammateIdle
+          - TaskCreated
+          - TaskCompleted
+          - PreCompact
+          - PostCompact
+          - Notification
+          - MessageDisplay
+          - Elicitation
+          - ElicitationResult
+      reconciliation:
+        none:
+          - SessionStart
+          - Setup
+          - SessionEnd
+          - StopFailure
+          - PermissionDenied
+          - PostToolUse
+          - PostToolUseFailure
+          - FileChanged
+          - CwdChanged
+          - InstructionsLoaded
+          - WorktreeRemove
+          - SubagentStart
+          - PostCompact
+          - Notification
+          - MessageDisplay
+        host-native:
+          - UserPromptSubmit
+          - UserPromptExpansion
+          - Stop
+          - PreToolUse
+          - PermissionRequest
+          - PostToolBatch
+          - ConfigChange
+          - WorktreeCreate
+          - SubagentStop
+          - TeammateIdle
+          - TaskCreated
+          - TaskCompleted
+          - PreCompact
+          - Elicitation
+          - ElicitationResult
+        no-adapter-merge: []
+        sequential-mutation: []
+      failure:
+        report-and-continue:
+          - SessionStart
+          - Setup
+          - SessionEnd
+          - StopFailure
+          - PermissionDenied
+          - PostToolUse
+          - PostToolUseFailure
+          - FileChanged
+          - CwdChanged
+          - InstructionsLoaded
+          - WorktreeRemove
+          - SubagentStart
+          - PostCompact
+          - Notification
+          - MessageDisplay
+        exit-2-blocks:
+          - UserPromptSubmit
+          - UserPromptExpansion
+          - Stop
+          - PreToolUse
+          - PermissionRequest
+          - PostToolBatch
+          - ConfigChange
+          - WorktreeCreate
+          - SubagentStop
+          - TeammateIdle
+          - TaskCreated
+          - TaskCompleted
+          - PreCompact
+          - Elicitation
+          - ElicitationResult
+        strict-hook-failure: []
+        strict-output-exit-2-blocks: []
+        throw-fail-fast: []
+        observe-only: []
+      stop_loop:
+        not-applicable:
+          - SessionStart
+          - Setup
+          - SessionEnd
+          - UserPromptSubmit
+          - UserPromptExpansion
+          - StopFailure
+          - PreToolUse
+          - PermissionRequest
+          - PermissionDenied
+          - PostToolUse
+          - PostToolUseFailure
+          - PostToolBatch
+          - FileChanged
+          - CwdChanged
+          - ConfigChange
+          - InstructionsLoaded
+          - WorktreeCreate
+          - WorktreeRemove
+          - SubagentStart
+          - TeammateIdle
+          - TaskCreated
+          - TaskCompleted
+          - PreCompact
+          - PostCompact
+          - Notification
+          - MessageDisplay
+          - Elicitation
+          - ElicitationResult
+        consult-when-inactive:
+          - Stop
+          - SubagentStop
+    identities:
+      default:
+        - session:session_id:required
+      by_event:
+        PreToolUse:
+          - session:session_id:required
+          - tool-call:tool_use_id:required
+        PermissionRequest:
+          - session:session_id:required
+          - request:request_id:required
+        PostToolUse:
+          - session:session_id:required
+          - tool-call:tool_use_id:required
+        PostToolUseFailure:
+          - session:session_id:required
+          - tool-call:tool_use_id:required
+        SubagentStart:
+          - session:session_id:required
+          - agent:agent_id:required
+        SubagentStop:
+          - session:session_id:required
+          - agent:agent_id:required
+        Elicitation:
+          - session:session_id:required
+          - request:request_id:required
+        ElicitationResult:
+          - session:session_id:required
+          - request:request_id:required
+
+  - harness: codex
+    unresolved_by_event: {}
+    id: codex/codex@0.144.1
+    version: 0.144.1
+    lower: 0.144.0
+    higher: 0.144.2
+    event_order:
+      - SessionStart
+      - UserPromptSubmit
+      - PreToolUse
+      - PermissionRequest
+      - PostToolUse
+      - PreCompact
+      - PostCompact
+      - SubagentStart
+      - SubagentStop
+      - Stop
+    axes:
+      semantic:
+        observation:
+          - SessionStart
+          - SubagentStart
+        gate-consultation:
+          - UserPromptSubmit
+          - PreToolUse
+          - PermissionRequest
+          - PostToolUse
+          - PreCompact
+          - PostCompact
+          - SubagentStop
+          - Stop
+        explicit-human-response: []
+      surface:
+        codex-strict-command-json:
+          - SessionStart
+          - UserPromptSubmit
+          - PreToolUse
+          - PermissionRequest
+          - PostToolUse
+          - PreCompact
+          - PostCompact
+          - SubagentStart
+          - SubagentStop
+          - Stop
+      blocking:
+        nonblocking:
+          - SessionStart
+          - SubagentStart
+        blocking:
+          - UserPromptSubmit
+          - PreToolUse
+          - PermissionRequest
+          - PostToolUse
+          - PreCompact
+          - PostCompact
+          - SubagentStop
+          - Stop
+        conditionally-blocking: []
+      mutation:
+        none:
+          - SessionStart
+          - UserPromptSubmit
+          - PermissionRequest
+          - PreCompact
+          - PostCompact
+          - SubagentStart
+          - SubagentStop
+          - Stop
+        input:
+          - PreToolUse
+        output:
+          - PostToolUse
+        output-object: []
+      order:
+        concurrent-native:
+          - SessionStart
+          - UserPromptSubmit
+          - PreToolUse
+          - PermissionRequest
+          - PostToolUse
+          - PreCompact
+          - PostCompact
+          - SubagentStart
+          - SubagentStop
+          - Stop
+      reconciliation:
+        none: []
+        host-native: []
+        no-adapter-merge:
+          - SessionStart
+          - UserPromptSubmit
+          - PreToolUse
+          - PermissionRequest
+          - PostToolUse
+          - PreCompact
+          - PostCompact
+          - SubagentStart
+          - SubagentStop
+          - Stop
+        sequential-mutation: []
+      failure:
+        report-and-continue: []
+        exit-2-blocks: []
+        strict-hook-failure:
+          - SessionStart
+          - SubagentStart
+        strict-output-exit-2-blocks:
+          - UserPromptSubmit
+          - PreToolUse
+          - PermissionRequest
+          - PostToolUse
+          - PreCompact
+          - PostCompact
+          - SubagentStop
+          - Stop
+        throw-fail-fast: []
+        observe-only: []
+      stop_loop:
+        not-applicable:
+          - SessionStart
+          - UserPromptSubmit
+          - PreToolUse
+          - PermissionRequest
+          - PostToolUse
+          - PreCompact
+          - PostCompact
+          - SubagentStart
+        consult-when-inactive:
+          - SubagentStop
+          - Stop
+    identities:
+      default:
+        - session:session_id:required
+        - turn:turn_id:required
+      by_event:
+        SessionStart:
+          - session:session_id:required
+        PreToolUse:
+          - session:session_id:required
+          - turn:turn_id:required
+          - tool-call:tool_use_id:required
+        PostToolUse:
+          - session:session_id:required
+          - turn:turn_id:required
+          - tool-call:tool_use_id:required
+        SubagentStart:
+          - session:session_id:required
+          - turn:turn_id:required
+          - agent:agent_id:required
+        SubagentStop:
+          - session:session_id:required
+          - turn:turn_id:required
+          - agent:agent_id:required
+
+  - harness: opencode
+    unresolved_by_event: {}
+    id: opencode/opencode@1.17.18
+    version: 1.17.18
+    lower: 1.17.17
+    higher: 1.17.19
+    event_order:
+      - command.executed
+      - command.execute.before
+      - file.edited
+      - file.watcher.updated
+      - installation.updated
+      - installation.update_available
+      - lsp.client.diagnostics
+      - lsp.updated
+      - message.updated
+      - message.removed
+      - message.part.updated
+      - message.part.removed
+      - permission.asked
+      - permission.replied
+      - permission.ask
+      - server.connected
+      - server.instance.disposed
+      - session.created
+      - session.updated
+      - session.deleted
+      - session.compacted
+      - session.diff
+      - session.error
+      - session.idle
+      - session.status
+      - experimental.session.compacting
+      - shell.env
+      - todo.updated
+      - tool.execute.before
+      - tool.execute.after
+      - tool.definition
+      - tui.prompt.append
+      - tui.command.execute
+      - tui.toast.show
+      - pty.created
+      - pty.updated
+      - pty.exited
+      - pty.deleted
+      - vcs.branch.updated
+      - chat.message
+      - chat.params
+      - chat.headers
+    axes:
+      semantic:
+        observation:
+          - command.executed
+          - file.edited
+          - file.watcher.updated
+          - installation.updated
+          - installation.update_available
+          - lsp.client.diagnostics
+          - lsp.updated
+          - message.updated
+          - message.removed
+          - message.part.updated
+          - message.part.removed
+          - permission.asked
+          - permission.replied
+          - server.connected
+          - server.instance.disposed
+          - session.created
+          - session.updated
+          - session.deleted
+          - session.compacted
+          - session.diff
+          - session.error
+          - session.idle
+          - session.status
+          - experimental.session.compacting
+          - todo.updated
+          - tui.prompt.append
+          - tui.command.execute
+          - tui.toast.show
+          - pty.created
+          - pty.updated
+          - pty.exited
+          - pty.deleted
+          - vcs.branch.updated
+        gate-consultation:
+          - command.execute.before
+          - permission.ask
+          - shell.env
+          - tool.execute.before
+          - tool.execute.after
+          - tool.definition
+          - chat.message
+          - chat.params
+          - chat.headers
+        explicit-human-response: []
+      surface:
+        opencode-named-output:
+          - command.execute.before
+          - permission.ask
+          - shell.env
+          - tool.execute.before
+          - tool.execute.after
+          - tool.definition
+          - chat.message
+          - chat.params
+          - chat.headers
+        opencode-catch-all-sse:
+          - command.executed
+          - file.edited
+          - file.watcher.updated
+          - installation.updated
+          - installation.update_available
+          - lsp.client.diagnostics
+          - lsp.updated
+          - message.updated
+          - message.removed
+          - message.part.updated
+          - message.part.removed
+          - permission.asked
+          - permission.replied
+          - server.connected
+          - server.instance.disposed
+          - session.created
+          - session.updated
+          - session.deleted
+          - session.compacted
+          - session.diff
+          - session.error
+          - session.idle
+          - session.status
+          - experimental.session.compacting
+          - todo.updated
+          - tui.prompt.append
+          - tui.command.execute
+          - tui.toast.show
+          - pty.created
+          - pty.updated
+          - pty.exited
+          - pty.deleted
+          - vcs.branch.updated
+      blocking:
+        nonblocking:
+          - command.executed
+          - file.edited
+          - file.watcher.updated
+          - installation.updated
+          - installation.update_available
+          - lsp.client.diagnostics
+          - lsp.updated
+          - message.updated
+          - message.removed
+          - message.part.updated
+          - message.part.removed
+          - permission.asked
+          - permission.replied
+          - server.connected
+          - server.instance.disposed
+          - session.created
+          - session.updated
+          - session.deleted
+          - session.compacted
+          - session.diff
+          - session.error
+          - session.idle
+          - session.status
+          - experimental.session.compacting
+          - todo.updated
+          - tui.prompt.append
+          - tui.command.execute
+          - tui.toast.show
+          - pty.created
+          - pty.updated
+          - pty.exited
+          - pty.deleted
+          - vcs.branch.updated
+        blocking:
+          - command.execute.before
+          - permission.ask
+          - shell.env
+          - tool.execute.before
+          - tool.execute.after
+          - tool.definition
+          - chat.message
+          - chat.params
+          - chat.headers
+        conditionally-blocking: []
+      mutation:
+        none:
+          - command.executed
+          - file.edited
+          - file.watcher.updated
+          - installation.updated
+          - installation.update_available
+          - lsp.client.diagnostics
+          - lsp.updated
+          - message.updated
+          - message.removed
+          - message.part.updated
+          - message.part.removed
+          - permission.asked
+          - permission.replied
+          - server.connected
+          - server.instance.disposed
+          - session.created
+          - session.updated
+          - session.deleted
+          - session.compacted
+          - session.diff
+          - session.error
+          - session.idle
+          - session.status
+          - experimental.session.compacting
+          - todo.updated
+          - tui.prompt.append
+          - tui.command.execute
+          - tui.toast.show
+          - pty.created
+          - pty.updated
+          - pty.exited
+          - pty.deleted
+          - vcs.branch.updated
+        input: []
+        output: []
+        output-object:
+          - command.execute.before
+          - permission.ask
+          - shell.env
+          - tool.execute.before
+          - tool.execute.after
+          - tool.definition
+          - chat.message
+          - chat.params
+          - chat.headers
+      order:
+        sequential-load-order:
+          - command.execute.before
+          - permission.ask
+          - shell.env
+          - tool.execute.before
+          - tool.execute.after
+          - tool.definition
+          - chat.message
+          - chat.params
+          - chat.headers
+        observation-stream:
+          - command.executed
+          - file.edited
+          - file.watcher.updated
+          - installation.updated
+          - installation.update_available
+          - lsp.client.diagnostics
+          - lsp.updated
+          - message.updated
+          - message.removed
+          - message.part.updated
+          - message.part.removed
+          - permission.asked
+          - permission.replied
+          - server.connected
+          - server.instance.disposed
+          - session.created
+          - session.updated
+          - session.deleted
+          - session.compacted
+          - session.diff
+          - session.error
+          - session.idle
+          - session.status
+          - experimental.session.compacting
+          - todo.updated
+          - tui.prompt.append
+          - tui.command.execute
+          - tui.toast.show
+          - pty.created
+          - pty.updated
+          - pty.exited
+          - pty.deleted
+          - vcs.branch.updated
+      reconciliation:
+        none:
+          - command.executed
+          - file.edited
+          - file.watcher.updated
+          - installation.updated
+          - installation.update_available
+          - lsp.client.diagnostics
+          - lsp.updated
+          - message.updated
+          - message.removed
+          - message.part.updated
+          - message.part.removed
+          - permission.asked
+          - permission.replied
+          - server.connected
+          - server.instance.disposed
+          - session.created
+          - session.updated
+          - session.deleted
+          - session.compacted
+          - session.diff
+          - session.error
+          - session.idle
+          - session.status
+          - experimental.session.compacting
+          - todo.updated
+          - tui.prompt.append
+          - tui.command.execute
+          - tui.toast.show
+          - pty.created
+          - pty.updated
+          - pty.exited
+          - pty.deleted
+          - vcs.branch.updated
+        host-native: []
+        no-adapter-merge: []
+        sequential-mutation:
+          - command.execute.before
+          - permission.ask
+          - shell.env
+          - tool.execute.before
+          - tool.execute.after
+          - tool.definition
+          - chat.message
+          - chat.params
+          - chat.headers
+      failure:
+        report-and-continue: []
+        exit-2-blocks: []
+        strict-hook-failure: []
+        strict-output-exit-2-blocks: []
+        throw-fail-fast:
+          - command.execute.before
+          - permission.ask
+          - shell.env
+          - tool.execute.before
+          - tool.execute.after
+          - tool.definition
+          - chat.message
+          - chat.params
+          - chat.headers
+        observe-only:
+          - command.executed
+          - file.edited
+          - file.watcher.updated
+          - installation.updated
+          - installation.update_available
+          - lsp.client.diagnostics
+          - lsp.updated
+          - message.updated
+          - message.removed
+          - message.part.updated
+          - message.part.removed
+          - permission.asked
+          - permission.replied
+          - server.connected
+          - server.instance.disposed
+          - session.created
+          - session.updated
+          - session.deleted
+          - session.compacted
+          - session.diff
+          - session.error
+          - session.idle
+          - session.status
+          - experimental.session.compacting
+          - todo.updated
+          - tui.prompt.append
+          - tui.command.execute
+          - tui.toast.show
+          - pty.created
+          - pty.updated
+          - pty.exited
+          - pty.deleted
+          - vcs.branch.updated
+      stop_loop:
+        not-applicable:
+          - command.executed
+          - command.execute.before
+          - file.edited
+          - file.watcher.updated
+          - installation.updated
+          - installation.update_available
+          - lsp.client.diagnostics
+          - lsp.updated
+          - message.updated
+          - message.removed
+          - message.part.updated
+          - message.part.removed
+          - permission.asked
+          - permission.replied
+          - permission.ask
+          - server.connected
+          - server.instance.disposed
+          - session.created
+          - session.updated
+          - session.deleted
+          - session.compacted
+          - session.diff
+          - session.error
+          - session.idle
+          - session.status
+          - experimental.session.compacting
+          - shell.env
+          - todo.updated
+          - tool.execute.before
+          - tool.execute.after
+          - tool.definition
+          - tui.prompt.append
+          - tui.command.execute
+          - tui.toast.show
+          - pty.created
+          - pty.updated
+          - pty.exited
+          - pty.deleted
+          - vcs.branch.updated
+          - chat.message
+          - chat.params
+          - chat.headers
+    identities:
+      default: []
+      by_event:
+        command.executed:
+          - session:sessionID:required
+        command.execute.before:
+          - session:sessionID:required
+        shell.env:
+          - session:sessionID:optional
+          - tool-call:callID:optional
+        tool.execute.before:
+          - session:sessionID:required
+          - tool-call:callID:required
+        tool.execute.after:
+          - session:sessionID:required
+          - tool-call:callID:required
+        chat.message:
+          - session:sessionID:required
+          - message:messageID:optional
+        chat.params:
+          - session:sessionID:required
+        chat.headers:
+          - session:sessionID:required
+
+unsupported:
+  harness: antigravity
+  error_contains:
+    - unsupported
+    - no recoverable public Antigravity hook catalog
+    - authentic loader fixtures
+    - "what:"
+    - "why:"
+    - "where:"
+    - "phase:"
+    - "impact:"
+    - "fix:"
+
+no_adapters:
+  - pi

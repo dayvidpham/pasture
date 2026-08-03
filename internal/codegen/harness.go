@@ -8,14 +8,16 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 type HarnessName string
 
 const (
-	HarnessClaudeCode HarnessName = "claude-code"
-	HarnessOpenCode   HarnessName = "opencode"
+	HarnessClaudeCode  HarnessName = "claude-code"
+	HarnessOpenCode    HarnessName = "opencode"
+	HarnessAntigravity HarnessName = "antigravity"
 )
 
 type SkillWriteMode string
@@ -56,6 +58,7 @@ var ClaudeCodeTarget = TargetHarness{
 	SubSkillTemplate: TemplateSubSkill,
 	SkillWrite:       WriteMarkerMerge,
 	Agents:           claudeCodeAgentEmitter{},
+	Manifest:         claudeHooksEmitter{},
 }
 
 var OpenCodeTarget = TargetHarness{
@@ -72,6 +75,7 @@ var OpenCodeTarget = TargetHarness{
 var harnessRegistry = map[HarnessName]TargetHarness{
 	HarnessClaudeCode: ClaudeCodeTarget,
 	HarnessOpenCode:   OpenCodeTarget,
+	HarnessCodex:      CodexTarget,
 }
 
 func ResolveHarness(targets []string) ([]TargetHarness, error) {
@@ -83,6 +87,9 @@ func ResolveHarness(targets []string) ([]TargetHarness, error) {
 		name := HarnessName(strings.TrimSpace(target))
 		if name == "" {
 			continue
+		}
+		if name == HarnessAntigravity {
+			return nil, fmt.Errorf("codegen.ResolveHarness(%s): %w", name, runtime.AntigravityLifecycleContract())
 		}
 		harness, ok := harnessRegistry[name]
 		if !ok {
@@ -98,11 +105,12 @@ func ResolveHarness(targets []string) ([]TargetHarness, error) {
 	if len(out) == 0 {
 		return nil, fmt.Errorf(
 			"codegen.ResolveHarness: no targets were selected — registered targets: [%s]; "+
-				"use -targets=%s or -targets=%s,%s",
+				"use -targets=%s or -targets=%s,%s,%s",
 			joinedHarnessNames(),
 			HarnessClaudeCode,
 			HarnessClaudeCode,
 			HarnessOpenCode,
+			HarnessCodex,
 		)
 	}
 	return out, nil
