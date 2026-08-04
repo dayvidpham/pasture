@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -80,6 +81,42 @@ func TestGenerateOpenCodeHooksModule_Deterministic(t *testing.T) {
 	}
 }
 
+func TestOpenCodeTargetManifestPublishesExhaustiveProofGatedActivation(t *testing.T) {
+	t.Parallel()
+	descriptor, err := NewOpenCodeTargetDescriptor()
+	if err != nil {
+		t.Fatalf("NewOpenCodeTargetDescriptor: %v", err)
+	}
+	raw, err := descriptor.Manifest()
+	if err != nil {
+		t.Fatalf("Manifest: %v", err)
+	}
+	var manifest openCodeTargetManifest
+	if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
+		t.Fatalf("decode target manifest: %v", err)
+	}
+	if len(manifest.Activation) != 47 {
+		t.Fatalf("activation entries = %d, want exhaustive 47-event classification", len(manifest.Activation))
+	}
+	enabled := make([]string, 0, 2)
+	for _, entry := range manifest.Activation {
+		if entry.State != "enabled" {
+			if entry.Reason == "" || entry.CaptureProof != "" || entry.ProductionProof != "" {
+				t.Fatalf("withheld activation entry is not fail-closed: %#v", entry)
+			}
+			continue
+		}
+		if entry.CaptureProof == "" || entry.ProductionProof == "" {
+			t.Fatalf("enabled activation entry lacks both proofs: %#v", entry)
+		}
+		enabled = append(enabled, entry.Event)
+	}
+	want := []string{"session.created", "tool.execute.before"}
+	if !reflect.DeepEqual(enabled, want) {
+		t.Fatalf("enabled events = %v, want %v", enabled, want)
+	}
+}
+
 func TestOpenCodeHooksModule_ReferencesOnlyDeclaredTools(t *testing.T) {
 	module, err := GenerateOpenCodeHooksModule()
 	if err != nil {
@@ -124,7 +161,6 @@ func TestOpenCodeHooksModulePreservesNamedAndObservationBoundary(t *testing.T) {
 		t.Fatalf("generate: %v", err)
 	}
 	for _, required := range []string{
-		`"session.created": false`, `"tool.execute.before": false`,
 		`["hook", "lifecycle", "--harness", "opencode", "--event", "session.created", "--host-version", "1.18.10"]`,
 		`["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", "1.18.10"]`,
 		`{ input, output: { args } }`, `response.decision !== "proceed"`, `output.args = args`,
@@ -132,6 +168,9 @@ func TestOpenCodeHooksModulePreservesNamedAndObservationBoundary(t *testing.T) {
 		if !strings.Contains(module, required) {
 			t.Errorf("generated plugin lacks %q", required)
 		}
+	}
+	if strings.Contains(module, `"session.created": false`) || strings.Contains(module, `"tool.execute.before": false`) {
+		t.Error("generated plugin retained a duplicate hand-flipped activation boolean table")
 	}
 	for _, forbidden := range []string{"PASTURE_ADAPTER_EVENT", "PASTURE_ADAPTER_OPERATION", "PASTURE_ADAPTER_INPUT", `"__adapter"`, "invocationIdentity", "sourceValue("} {
 		if strings.Contains(module, forbidden) {

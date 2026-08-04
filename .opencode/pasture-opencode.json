@@ -19,5 +19,244 @@
       "path": ".opencode/pasture-opencode.json",
       "type": "manifest"
     }
+  ],
+  "activation": [
+    {
+      "event": "command.executed",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "file.edited",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "file.watcher.updated",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "installation.updated",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "installation.update_available",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "lsp.client.diagnostics",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "lsp.updated",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "message.updated",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "message.removed",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "message.part.updated",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "message.part.removed",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "permission.updated",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "permission.replied",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "server.connected",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "server.instance.disposed",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "session.created",
+      "state": "enabled",
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/session_created_1_18_10.capture.json (OpenCode 1.18.10 authentic callback-object capture)",
+      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCodeHandlersToDurableReadBack/session.created"
+    },
+    {
+      "event": "session.updated",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "session.deleted",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "session.compacted",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "session.diff",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "session.error",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "session.idle",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "session.status",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "todo.updated",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "tui.prompt.append",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "tui.command.execute",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "tui.toast.show",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "pty.created",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "pty.updated",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "pty.exited",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "pty.deleted",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "vcs.branch.updated",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "chat.message",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "chat.params",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "chat.headers",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "permission.ask",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "command.execute.before",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "tool.execute.before",
+      "state": "enabled",
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/tool_execute_before_1_18_10.capture.json (OpenCode 1.18.10 authentic callback-object capture)",
+      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCodeHandlersToDurableReadBack/tool.execute.before"
+    },
+    {
+      "event": "shell.env",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "tool.execute.after",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "experimental.chat.messages.transform",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "experimental.chat.system.transform",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "experimental.provider.small_model",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "experimental.session.compacting",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "experimental.compaction.autocontinue",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "experimental.text.complete",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "tool.definition",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    }
   ]
 }

@@ -7,6 +7,9 @@ import (
 	"strings"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
@@ -65,6 +68,26 @@ func deriveOpenCodeNativeToolNames() ([]string, error) {
 // statically bound here; the foreign adapter only serializes callback values and
 // mechanically validates the canonical response returned by Pasture.
 func GenerateOpenCodeHooksModule() (string, error) {
+	activationEntries, err := openCodeActivationEntries()
+	if err != nil {
+		return "", fmt.Errorf("codegen.GenerateOpenCodeHooksModule: activation: %w", err)
+	}
+	enabled := make(map[model.ContractEventKind]bool, 2)
+	manifest := registration.OpenCode1_18_10().Entries()
+	for index, entry := range activationEntries {
+		enabled[manifest[index].Kind] = entry.State == activation.Enabled
+	}
+	sessionEvent, err := openCodeEventByKind(registration.EventOpenCodeSessionCreated)
+	if err != nil {
+		return "", err
+	}
+	toolEvent, err := openCodeEventByKind(registration.EventOpenCodeToolExecuteBefore)
+	if err != nil {
+		return "", err
+	}
+	if !enabled[sessionEvent.Kind] || !enabled[toolEvent.Kind] {
+		return "", fmt.Errorf("codegen.GenerateOpenCodeHooksModule: selected OpenCode handlers lack complete activation proof; add matching capture and production proof before generation")
+	}
 	toolNames, err := deriveOpenCodeNativeToolNames()
 	if err != nil {
 		return "", fmt.Errorf("codegen.GenerateOpenCodeHooksModule: derive native tool allow-list: %w", err)
@@ -95,11 +118,6 @@ func GenerateOpenCodeHooksModule() (string, error) {
 export const PASTURE_NATIVE_TOOLS = Object.freeze([%s]);
 export const PASTURE_RUNTIME_CONTRACT = %q;
 const METADATA = %s;
-const ENABLED = Object.freeze({
-  "session.created": false,
-  "tool.execute.before": false,
-});
-
 async function invokeLifecycle(command, event, value) {
   const binary = process.env.%s ?? "pasture";
   const child = Bun.spawn({
@@ -145,12 +163,11 @@ export async function toolExecuteBefore(input, output) {
 
 export const PastureLifecycle = async ({ client }) => ({
   async event(callback) {
-    if (callback.event?.type !== "session.created" || !ENABLED["session.created"]) return;
+    if (callback.event?.type !== "session.created") return;
     await sessionCreated(callback);
     void client;
   },
   async "tool.execute.before"(input, output) {
-    if (!ENABLED["tool.execute.before"]) return;
     await toolExecuteBefore(input, output);
   },
 });
@@ -166,6 +183,32 @@ export default PastureLifecycle;
 		string(metadataJSON),
 		adapterBinaryEnv,
 	), nil
+}
+
+func openCodeEventByKind(kind model.ContractEventKind) (registration.Event, error) {
+	for _, event := range registration.OpenCode1_18_10().Entries() {
+		if event.Kind == kind {
+			return event, nil
+		}
+	}
+	return registration.Event{}, fmt.Errorf("codegen.openCodeEventByKind: generated OpenCode 1.18.10 manifest lacks event kind %d; regenerate the host contract before activation", kind)
+}
+
+func openCodeActivationEntries() ([]activation.Entry, error) {
+	entries, err := activation.OpenCode1_18_10()
+	if err != nil {
+		return nil, err
+	}
+	manifest := registration.OpenCode1_18_10().Entries()
+	if len(entries) != len(manifest) {
+		return nil, fmt.Errorf("activation has %d entries but generated OpenCode manifest has %d; activation must exhaustively classify every generated event", len(entries), len(manifest))
+	}
+	for index, entry := range entries {
+		if !entry.IsValid() || entry.Event != manifest[index].Kind {
+			return nil, fmt.Errorf("activation entry %d does not validly classify generated event %q; preserve generated manifest order and fail closed", index, manifest[index].NativeName)
+		}
+	}
+	return entries, nil
 }
 
 // openCodeHostVersion is the pinned OpenCode host version this target generates

@@ -66,13 +66,23 @@ type CaptureProof uint8
 const (
 	CaptureProofInvalid CaptureProof = iota
 	CaptureProofSessionStart
+	CaptureProofOpenCodeSessionCreated
+	CaptureProofOpenCodeToolExecuteBefore
 )
 
-func (p CaptureProof) IsValid() bool { return p == CaptureProofSessionStart }
+func (p CaptureProof) IsValid() bool {
+	return p >= CaptureProofSessionStart && p <= CaptureProofOpenCodeToolExecuteBefore
+}
 
 func (p CaptureProof) Event() (model.ContractEventKind, bool) {
 	if p == CaptureProofSessionStart {
 		return registration.EventSessionStart, true
+	}
+	if p == CaptureProofOpenCodeSessionCreated {
+		return registration.EventOpenCodeSessionCreated, true
+	}
+	if p == CaptureProofOpenCodeToolExecuteBefore {
+		return registration.EventOpenCodeToolExecuteBefore, true
 	}
 	return 0, false
 }
@@ -81,6 +91,10 @@ func (p CaptureProof) Name() string {
 	switch p {
 	case CaptureProofSessionStart:
 		return "internal/lifecycle/ingress/claude/testdata/fixtures/session_start_2_1_210.json (Claude Code 2.1.210 authentic capture)"
+	case CaptureProofOpenCodeSessionCreated:
+		return "internal/lifecycle/ingress/opencode/testdata/fixtures/session_created_1_18_10.capture.json (OpenCode 1.18.10 authentic callback-object capture)"
+	case CaptureProofOpenCodeToolExecuteBefore:
+		return "internal/lifecycle/ingress/opencode/testdata/fixtures/tool_execute_before_1_18_10.capture.json (OpenCode 1.18.10 authentic callback-object capture)"
 	default:
 		return ""
 	}
@@ -93,13 +107,23 @@ type ProductionProof uint8
 const (
 	ProductionProofInvalid ProductionProof = iota
 	ProductionProofSessionStart
+	ProductionProofOpenCodeSessionCreated
+	ProductionProofOpenCodeToolExecuteBefore
 )
 
-func (p ProductionProof) IsValid() bool { return p == ProductionProofSessionStart }
+func (p ProductionProof) IsValid() bool {
+	return p >= ProductionProofSessionStart && p <= ProductionProofOpenCodeToolExecuteBefore
+}
 
 func (p ProductionProof) Event() (model.ContractEventKind, bool) {
 	if p == ProductionProofSessionStart {
 		return registration.EventSessionStart, true
+	}
+	if p == ProductionProofOpenCodeSessionCreated {
+		return registration.EventOpenCodeSessionCreated, true
+	}
+	if p == ProductionProofOpenCodeToolExecuteBefore {
+		return registration.EventOpenCodeToolExecuteBefore, true
 	}
 	return 0, false
 }
@@ -108,6 +132,10 @@ func (p ProductionProof) Name() string {
 	switch p {
 	case ProductionProofSessionStart:
 		return "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence"
+	case ProductionProofOpenCodeSessionCreated:
+		return "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCodeHandlersToDurableReadBack/session.created"
+	case ProductionProofOpenCodeToolExecuteBefore:
+		return "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCodeHandlersToDurableReadBack/tool.execute.before"
 	default:
 		return ""
 	}

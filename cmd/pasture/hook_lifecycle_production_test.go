@@ -7,7 +7,9 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +20,7 @@ import (
 	digest "github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/internal/codegen"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
@@ -25,6 +28,106 @@ import (
 	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
 )
+
+func TestEnabledOpenCodeHandlersToDurableReadBack(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	require.NoError(t, err, "Bun is required for the generated OpenCode production proof; enter the flake dev shell")
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "pasture")
+	buildLifecycleBinary(t, binary)
+	dbPath := filepath.Join(dir, "pasture.db")
+	initializeLifecycleTestDatabase(t, dbPath)
+
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err)
+	moduleURL := (&url.URL{Scheme: "file", Path: filepath.Join(root, filepath.FromSlash(codegen.OpenCodeHooksModulePath))}).String()
+	fixtureDir := filepath.Join(root, "internal", "lifecycle", "ingress", "opencode", "testdata", "fixtures")
+	runner := filepath.Join(dir, "enabled-handlers.ts")
+	script := fmt.Sprintf(`
+import PastureLifecycle from %q;
+const sessionCapture = await Bun.file(%q).json();
+const toolCapture = await Bun.file(%q).json();
+const plugin = await PastureLifecycle({ client: {} });
+await plugin.event(sessionCapture.value);
+const output = toolCapture.value.output;
+const before = JSON.stringify(output.args);
+await plugin["tool.execute.before"](toolCapture.value.input, output);
+if (JSON.stringify(output.args) !== before) throw new Error("enabled generated handler changed output.args");
+console.log(JSON.stringify({argsUnchanged: true}));
+`, moduleURL,
+		filepath.Join(fixtureDir, "session_created_1_18_10.capture.json"),
+		filepath.Join(fixtureDir, "tool_execute_before_1_18_10.capture.json"))
+	require.NoError(t, os.WriteFile(runner, []byte(script), 0o600))
+	command := exec.Command(bun, runner)
+	command.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath)
+	output, err := command.CombinedOutput()
+	require.NoError(t, err, string(output))
+	require.Equal(t, `{"argsUnchanged":true}`, strings.TrimSpace(string(output)))
+
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	defer tracker.Close()
+	require.NoError(t, tasks.RebuildLifecycleOccurrences(context.Background(), tracker))
+	reader, err := tasks.NewLifecycleReader(tracker)
+	require.NoError(t, err)
+	pageSize, err := model.NewPageSize(2)
+	require.NoError(t, err)
+	page, err := reader.Records(context.Background(), model.OccurrenceQuery{Page: model.PageRequest{Size: pageSize}})
+	require.NoError(t, err)
+	require.Len(t, page.Records(), 2)
+
+	semantics := make(map[model.ContractEventKind]runtime.EventSemantic, 2)
+	identities := make(map[model.ContractEventKind]map[runtime.NativeIdentityKind]string, 2)
+	for _, record := range page.Records() {
+		require.Equal(t, registration.OpenCode1_18_10().Contract, record.Occurrence.RuntimeContract)
+		require.Equal(t, "1.18.10", record.Occurrence.Envelope.HostVersion)
+		require.Len(t, record.Interpreted(), 1)
+		interpreted := record.Interpreted()[0]
+		require.Equal(t, runtime.OpenCode1_18_10().ID(), interpreted.Contract())
+		semantics[record.Occurrence.Kind] = interpreted.Semantic()
+		identities[record.Occurrence.Kind] = make(map[runtime.NativeIdentityKind]string)
+		for _, identity := range interpreted.Identities() {
+			identities[record.Occurrence.Kind][identity.Kind] = identity.Value
+		}
+	}
+	require.Equal(t, runtime.SemanticObservation, semantics[registration.EventOpenCodeSessionCreated])
+	require.Equal(t, runtime.SemanticGateConsultation, semantics[registration.EventOpenCodeToolExecuteBefore])
+	t.Run("session.created", func(t *testing.T) {
+		require.Equal(t, runtime.SemanticObservation, semantics[registration.EventOpenCodeSessionCreated])
+		require.Equal(t, "ses_038a9e08dffewOKvezW94jg2BO", identities[registration.EventOpenCodeSessionCreated][runtime.IdentitySession])
+	})
+	t.Run("tool.execute.before", func(t *testing.T) {
+		require.Equal(t, runtime.SemanticGateConsultation, semantics[registration.EventOpenCodeToolExecuteBefore])
+		require.Equal(t, "ses_038a9e08dffewOKvezW94jg2BO", identities[registration.EventOpenCodeToolExecuteBefore][runtime.IdentitySession])
+		require.Equal(t, "call_t7cziiGDQdypG92fXwcgWBUf", identities[registration.EventOpenCodeToolExecuteBefore][runtime.IdentityToolCall])
+	})
+
+	interpretedRows := queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)
+	consultationRows := queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind)
+	require.Len(t, interpretedRows, 2)
+	require.Len(t, consultationRows, 1)
+	consultation := consultationRows[0]
+	var gateInterpreted provenance.EvidenceRow
+	for _, row := range interpretedRows {
+		if row.ProducingOperationID == consultation.ProducingOperationID {
+			gateInterpreted = row
+		}
+	}
+	require.NotZero(t, gateInterpreted.JournalID)
+	require.Equal(t, gateInterpreted.ProducingOperationJournalID, consultation.ProducingOperationJournalID)
+	require.Less(t, gateInterpreted.JournalID, consultation.JournalID, "one durable gate operation must order interpreted before consultation evidence")
+	require.Contains(t, string(consultation.Payload), `"response":{"decision":"proceed"}`)
+
+	// Claude is deliberately non-live regression evidence here. Compare only the
+	// shared gate semantic, blocking mode, and canonical Proceed decision.
+	openCodeGate, err := runtime.OpenCode1_18_10Lifecycle().Mapping(runtime.OpenCodeEventToolExecuteBefore)
+	require.NoError(t, err)
+	claudeGate, err := runtime.ClaudeCode2_1_210Lifecycle().Mapping(runtime.ClaudeEventPreToolUse)
+	require.NoError(t, err)
+	require.Equal(t, claudeGate.Semantic(), openCodeGate.Semantic())
+	require.Equal(t, claudeGate.Blocking(), openCodeGate.Blocking())
+	require.NotEqual(t, runtime.ClaudeCode2_1_210().ID(), runtime.OpenCode1_18_10().ID())
+}
 
 const (
 	occurrenceLifecycleContract   = "claude-code/2.1.210"
@@ -388,7 +491,7 @@ type interpretedEvidencePayload struct {
 
 func buildLifecycleBinary(t *testing.T, binary string) {
 	t.Helper()
-	build := exec.Command("go", "build", "-o", binary, ".")
+	build := exec.Command("go", "build", "-race", "-o", binary, ".")
 	build.Dir = "."
 	output, err := build.CombinedOutput()
 	require.NoError(t, err, string(output))
