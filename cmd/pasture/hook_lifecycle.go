@@ -3,7 +3,9 @@ package main
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -44,16 +46,31 @@ var hookLifecycleCmd = &cobra.Command{
 		harness, _ := cmd.Flags().GetString("harness")
 		event, _ := cmd.Flags().GetString("event")
 		hostVersion, _ := cmd.Flags().GetString("host-version")
-		err := handlers.HookLifecycle(cmd.Context(), handlers.HookLifecycleInput{
+		response, err := handlers.HookLifecycleResponse(cmd.Context(), handlers.HookLifecycleInput{
 			DBPath: flagDBPath, Harness: ir.HarnessID(harness), Event: event,
 			HostVersion: hostVersion, Input: cmd.InOrStdin(), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 		})
 		if err == nil {
+			if response.IsValid() {
+				if encodeErr := writeLifecycleResponse(cmd.OutOrStdout(), response); encodeErr != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "pasture: lifecycle hook could not encode its committed host response: %v; the event was recorded but the host received no decision; inspect the database and retry the hook input\n", encodeErr)
+					return nil
+				}
+			}
 			return nil
 		}
 		printError(err)
 		return nil
 	},
+}
+
+func writeLifecycleResponse(out io.Writer, response json.Marshaler) error {
+	encoded, err := response.MarshalJSON()
+	if err != nil {
+		return err
+	}
+	_, err = out.Write(encoded)
+	return err
 }
 
 func init() {
