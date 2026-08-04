@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
@@ -222,6 +224,90 @@ console.log(JSON.stringify({ argsUnchanged: true }));
 		if !strings.Contains(string(readbackOutput), required) {
 			t.Errorf("production lifecycle read-back lacks %s: %s", required, readbackOutput)
 		}
+	}
+}
+
+func TestOpenCodeGeneratedLifecycleCallbacks_RejectInvalidGateResponsesAndSwallowObservationFailure(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("bun is required for the generated OpenCode failure-path proof; enter the flake dev shell")
+	}
+	root := testModuleRoot(t)
+	dir := t.TempDir()
+	fakeBinary := filepath.Join(dir, "fake-pasture")
+	fake := `#!/bin/sh
+payload=$(cat)
+case "$payload" in
+  *'"tool":"malformed"'*) printf '%s' 'not-json' ;;
+  *'"tool":"extra"'*) printf '%s' '{"decision":"proceed","extra":true}' ;;
+  *'"tool":"wrong-decision"'*) printf '%s' '{"decision":"block"}' ;;
+  *'"tool":"nonzero"'*|*'"type":"session.created"'*) printf '%s' 'synthetic lifecycle diagnostic' >&2; exit 7 ;;
+  *) printf '%s' '{"decision":"proceed"}' ;;
+esac
+`
+	if err := os.WriteFile(fakeBinary, []byte(fake), 0o700); err != nil {
+		t.Fatalf("write bounded fake PASTURE_BIN: %v", err)
+	}
+
+	moduleURL := (&url.URL{Scheme: "file", Path: filepath.Join(root, filepath.FromSlash(OpenCodeHooksModulePath))}).String()
+	runner := filepath.Join(dir, "failure-proof.ts")
+	script := fmt.Sprintf(`
+import { sessionCreated, toolExecuteBefore } from %q;
+
+const cases = [
+  { mode: "malformed", diagnostic: "response is not JSON" },
+  { mode: "extra", diagnostic: 'response must be exactly {"decision":"proceed"}' },
+  { mode: "wrong-decision", diagnostic: 'response must be exactly {"decision":"proceed"}' },
+  { mode: "nonzero", diagnostic: "exited 7: synthetic lifecycle diagnostic" },
+];
+for (const testCase of cases) {
+  const output = { args: { path: "unchanged", nested: [1, true, null] } };
+  const before = JSON.stringify(output.args);
+  let diagnostic = "";
+  try {
+    await toolExecuteBefore({ tool: testCase.mode }, output);
+  } catch (error) {
+    diagnostic = String(error);
+  }
+  if (!diagnostic.includes(testCase.diagnostic)) {
+    throw new Error(testCase.mode + " did not reject actionably; got: " + diagnostic);
+  }
+  if (JSON.stringify(output.args) !== before) {
+    throw new Error(testCase.mode + " changed output.args bytes on rejection");
+  }
+}
+
+const logged = [];
+const originalError = console.error;
+console.error = (...values) => logged.push(values.join(" "));
+try {
+  await sessionCreated({ event: { type: "session.created" } });
+} finally {
+  console.error = originalError;
+}
+if (logged.length !== 1 || !logged[0].includes("observation failed for session.created") ||
+    !logged[0].includes("exited 7: synthetic lifecycle diagnostic")) {
+  throw new Error("session.created did not swallow and log its observation failure: " + JSON.stringify(logged));
+}
+console.log(JSON.stringify({ rejected: cases.length, observationLogged: true }));
+`, moduleURL)
+	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
+		t.Fatalf("write Bun failure-proof runner: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	proof := exec.CommandContext(ctx, bun, runner)
+	proof.Env = append(os.Environ(), "PASTURE_BIN="+fakeBinary)
+	output, err := proof.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("Bun failure-path proof exceeded its 20s bound: %v\n%s", ctx.Err(), output)
+	}
+	if err != nil {
+		t.Fatalf("execute generated OpenCode failure paths under Bun: %v\n%s", err, output)
+	}
+	if strings.TrimSpace(string(output)) != `{"rejected":4,"observationLogged":true}` {
+		t.Fatalf("Bun failure-path proof output = %q, want all rejection and observation assertions", output)
 	}
 }
 
