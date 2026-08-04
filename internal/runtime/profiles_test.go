@@ -62,7 +62,7 @@ func TestClaudeContractNamesNoRemovedTeamLifecycleCalls(t *testing.T) {
 
 func TestOpenCodeContractInventsNoTools(t *testing.T) {
 	t.Parallel()
-	opencode := runtime.OpenCode1_17_18()
+	opencode := runtime.OpenCode1_18_10()
 
 	// No invented persistent-message / follow-up / wait native tools.
 	forbidden := []string{"task_agent_message", "follow_up", "followup", "wait", "task_close"}
@@ -105,7 +105,7 @@ func TestPinnedContractVersionBoundaries(t *testing.T) {
 		lower    string
 		higher   string
 	}{
-		{contract: runtime.OpenCode1_17_18(), exact: "1.17.18", lower: "1.17.17", higher: "1.17.19"},
+		{contract: runtime.OpenCode1_18_10(), exact: "1.18.10", lower: "1.18.9", higher: "1.18.11"},
 		{contract: runtime.Codex0_144_1(), exact: "0.144.1", lower: "0.144.0", higher: "0.144.2"},
 	}
 	for _, tc := range cases {
@@ -125,6 +125,6 @@ func TestPinnedContractVersionBoundaries(t *testing.T) {
 func TestPinnedContractHarnessBinding(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, ir.HarnessClaudeCode, runtime.ClaudeCode2_1_210().Harness())
-	assert.Equal(t, ir.HarnessOpenCode, runtime.OpenCode1_17_18().Harness())
+	assert.Equal(t, ir.HarnessOpenCode, runtime.OpenCode1_18_10().Harness())
 	assert.Equal(t, ir.HarnessCodex, runtime.Codex0_144_1().Harness())
 }

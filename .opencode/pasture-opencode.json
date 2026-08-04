@@ -1,8 +1,8 @@
 {
   "$schema": "https://pasture.dev/opencode-target.json",
   "target": "opencode",
-  "runtime_contract": "opencode/opencode@1.17.18",
-  "host_version": "1.17.18",
+  "runtime_contract": "opencode/opencode@1.18.10",
+  "host_version": "1.18.10",
   "native_tools": [
     "question",
     "skill",

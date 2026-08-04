@@ -39,7 +39,7 @@ func TestLookupOperationBindingMediatedAndSemantic(t *testing.T) {
 	require.True(t, isMediated)
 	assert.NotEmpty(t, mediated.Mediator())
 
-	opencode := runtime.OpenCode1_17_18()
+	opencode := runtime.OpenCode1_18_10()
 	cont, ok := runtime.CoreOperationDescriptorFor(ir.OperationContinueAssignment)
 	require.True(t, ok)
 	semBinding, err := runtime.LookupOperationBinding(opencode, cont)
@@ -52,7 +52,7 @@ func TestLookupOperationBindingMediatedAndSemantic(t *testing.T) {
 
 func TestLookupOperationBindingUnsupportedFailsActionably(t *testing.T) {
 	t.Parallel()
-	opencode := runtime.OpenCode1_17_18()
+	opencode := runtime.OpenCode1_18_10()
 	stop, ok := runtime.CoreOperationDescriptorFor(ir.OperationStopAssignment)
 	require.True(t, ok)
 
@@ -138,9 +138,9 @@ func TestLookupCapabilityBinding(t *testing.T) {
 
 	core, err := runtime.NewCoreRuntimeBindings(fullCoreOperationBindings(t), nil)
 	require.NoError(t, err)
-	id, err := ir.NewRuntimeContractID(ir.HarnessOpenCode, "opencode@1.17.18")
+	id, err := ir.NewRuntimeContractID(ir.HarnessOpenCode, "opencode@1.18.10")
 	require.NoError(t, err)
-	constraint, err := runtime.NewExactVersion(mustParse(t, "1.17.18"))
+	constraint, err := runtime.NewExactVersion(mustParse(t, "1.18.10"))
 	require.NoError(t, err)
 	contract, err := runtime.NewRuntimeContract(id, ir.HarnessOpenCode, constraint, core, contribution)
 	require.NoError(t, err)

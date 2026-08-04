@@ -34,7 +34,7 @@ func TestGoldmarkDocumentCompilesEntirelyInMemory(t *testing.T) {
 	verbatimSource[1] = '!'
 
 	claudeContract := mustContract(t, ir.HarnessClaudeCode, "2.1.210")
-	openCodeContract := mustContract(t, ir.HarnessOpenCode, "1.17.18")
+	openCodeContract := mustContract(t, ir.HarnessOpenCode, "1.18.10")
 	codexContract := mustContract(t, ir.HarnessCodex, "0.144.1")
 	claudeLiteral, err := ir.LiteralForHarness(ir.HarnessClaudeCode, claudeContract, []byte("\nClaude contract literal.\n"), "pinned schema has no portable equivalent")
 	require.NoError(t, err)
@@ -89,7 +89,7 @@ func TestGoldmarkDocumentCompilesEntirelyInMemory(t *testing.T) {
 	fileAgain, ok := tree.File(file.Path())
 	require.True(t, ok)
 	assert.Equal(t, byte('#'), fileAgain.Content()[0])
-	assert.Equal(t, openCodeContract, mustContract(t, ir.HarnessOpenCode, "1.17.18"))
+	assert.Equal(t, openCodeContract, mustContract(t, ir.HarnessOpenCode, "1.18.10"))
 }
 
 // TestCompileFailureMatrixReturnsZeroTreeAndShortCircuits is the per-stage
@@ -309,7 +309,7 @@ func TestTargetLiteralRequiresExhaustiveUniqueCasesAndExactContract(t *testing.T
 	require.Error(t, err)
 	assert.Zero(t, tree.Len())
 
-	openCodeTarget := mustTargetForHarness(t, ir.HarnessOpenCode, mustContract(t, ir.HarnessOpenCode, "1.17.18"), nil)
+	openCodeTarget := mustTargetForHarness(t, ir.HarnessOpenCode, mustContract(t, ir.HarnessOpenCode, "1.18.10"), nil)
 	tree, err = ir.Compile(document, openCodeTarget)
 	require.Error(t, err)
 	assert.Zero(t, tree.Len())

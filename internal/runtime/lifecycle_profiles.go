@@ -153,7 +153,6 @@ type OpenCodeLifecycleEvent uint8
 
 const (
 	OpenCodeEventCommandExecuted OpenCodeLifecycleEvent = iota + 1
-	OpenCodeEventCommandExecuteBefore
 	OpenCodeEventFileEdited
 	OpenCodeEventFileWatcherUpdated
 	OpenCodeEventInstallationUpdated
@@ -164,9 +163,8 @@ const (
 	OpenCodeEventMessageRemoved
 	OpenCodeEventMessagePartUpdated
 	OpenCodeEventMessagePartRemoved
-	OpenCodeEventPermissionAsked
+	OpenCodeEventPermissionUpdated
 	OpenCodeEventPermissionReplied
-	OpenCodeEventPermissionAsk
 	OpenCodeEventServerConnected
 	OpenCodeEventServerInstanceDisposed
 	OpenCodeEventSessionCreated
@@ -177,12 +175,7 @@ const (
 	OpenCodeEventSessionError
 	OpenCodeEventSessionIdle
 	OpenCodeEventSessionStatus
-	OpenCodeEventExperimentalSessionCompacting
-	OpenCodeEventShellEnv
 	OpenCodeEventTodoUpdated
-	OpenCodeEventToolExecuteBefore
-	OpenCodeEventToolExecuteAfter
-	OpenCodeEventToolDefinition
 	OpenCodeEventTUIPromptAppend
 	OpenCodeEventTUICommandExecute
 	OpenCodeEventTUIToastShow
@@ -194,12 +187,23 @@ const (
 	OpenCodeEventChatMessage
 	OpenCodeEventChatParams
 	OpenCodeEventChatHeaders
+	OpenCodeEventPermissionAsk
+	OpenCodeEventCommandExecuteBefore
+	OpenCodeEventToolExecuteBefore
+	OpenCodeEventShellEnv
+	OpenCodeEventToolExecuteAfter
+	OpenCodeEventExperimentalChatMessagesTransform
+	OpenCodeEventExperimentalChatSystemTransform
+	OpenCodeEventExperimentalProviderSmallModel
+	OpenCodeEventExperimentalSessionCompacting
+	OpenCodeEventExperimentalCompactionAutocontinue
+	OpenCodeEventExperimentalTextComplete
+	OpenCodeEventToolDefinition
 	openCodeLifecycleEventLimit
 )
 
 var openCodeLifecycleEventNames = [...]string{
 	"command.executed",
-	"command.execute.before",
 	"file.edited",
 	"file.watcher.updated",
 	"installation.updated",
@@ -210,9 +214,8 @@ var openCodeLifecycleEventNames = [...]string{
 	"message.removed",
 	"message.part.updated",
 	"message.part.removed",
-	"permission.asked",
+	"permission.updated",
 	"permission.replied",
-	"permission.ask",
 	"server.connected",
 	"server.instance.disposed",
 	"session.created",
@@ -223,12 +226,7 @@ var openCodeLifecycleEventNames = [...]string{
 	"session.error",
 	"session.idle",
 	"session.status",
-	"experimental.session.compacting",
-	"shell.env",
 	"todo.updated",
-	"tool.execute.before",
-	"tool.execute.after",
-	"tool.definition",
 	"tui.prompt.append",
 	"tui.command.execute",
 	"tui.toast.show",
@@ -240,6 +238,18 @@ var openCodeLifecycleEventNames = [...]string{
 	"chat.message",
 	"chat.params",
 	"chat.headers",
+	"permission.ask",
+	"command.execute.before",
+	"tool.execute.before",
+	"shell.env",
+	"tool.execute.after",
+	"experimental.chat.messages.transform",
+	"experimental.chat.system.transform",
+	"experimental.provider.small_model",
+	"experimental.session.compacting",
+	"experimental.compaction.autocontinue",
+	"experimental.text.complete",
+	"tool.definition",
 }
 
 func (e OpenCodeLifecycleEvent) IsValid() bool {
@@ -448,48 +458,53 @@ func openCodeLifecycleMappings() map[OpenCodeLifecycleEvent]LifecycleEventMappin
 	observe := openCodeObservationMapping
 	named := openCodeNamedMapping
 	return map[OpenCodeLifecycleEvent]LifecycleEventMapping{
-		OpenCodeEventCommandExecuted:               observe(OpenCodeEventCommandExecuted, openCodeSessionIdentity),
-		OpenCodeEventCommandExecuteBefore:          named(OpenCodeEventCommandExecuteBefore, openCodeSessionIdentity),
-		OpenCodeEventFileEdited:                    observe(OpenCodeEventFileEdited),
-		OpenCodeEventFileWatcherUpdated:            observe(OpenCodeEventFileWatcherUpdated),
-		OpenCodeEventInstallationUpdated:           observe(OpenCodeEventInstallationUpdated),
-		OpenCodeEventInstallationUpdateAvailable:   observe(OpenCodeEventInstallationUpdateAvailable),
-		OpenCodeEventLSPClientDiagnostics:          observe(OpenCodeEventLSPClientDiagnostics),
-		OpenCodeEventLSPUpdated:                    observe(OpenCodeEventLSPUpdated),
-		OpenCodeEventMessageUpdated:                observe(OpenCodeEventMessageUpdated),
-		OpenCodeEventMessageRemoved:                observe(OpenCodeEventMessageRemoved),
-		OpenCodeEventMessagePartUpdated:            observe(OpenCodeEventMessagePartUpdated),
-		OpenCodeEventMessagePartRemoved:            observe(OpenCodeEventMessagePartRemoved),
-		OpenCodeEventPermissionAsked:               observe(OpenCodeEventPermissionAsked),
-		OpenCodeEventPermissionReplied:             observe(OpenCodeEventPermissionReplied),
-		OpenCodeEventPermissionAsk:                 named(OpenCodeEventPermissionAsk),
-		OpenCodeEventServerConnected:               observe(OpenCodeEventServerConnected),
-		OpenCodeEventServerInstanceDisposed:        observe(OpenCodeEventServerInstanceDisposed),
-		OpenCodeEventSessionCreated:                observe(OpenCodeEventSessionCreated),
-		OpenCodeEventSessionUpdated:                observe(OpenCodeEventSessionUpdated),
-		OpenCodeEventSessionDeleted:                observe(OpenCodeEventSessionDeleted),
-		OpenCodeEventSessionCompacted:              observe(OpenCodeEventSessionCompacted),
-		OpenCodeEventSessionDiff:                   observe(OpenCodeEventSessionDiff),
-		OpenCodeEventSessionError:                  observe(OpenCodeEventSessionError),
-		OpenCodeEventSessionIdle:                   observe(OpenCodeEventSessionIdle),
-		OpenCodeEventSessionStatus:                 observe(OpenCodeEventSessionStatus),
-		OpenCodeEventExperimentalSessionCompacting: observe(OpenCodeEventExperimentalSessionCompacting),
-		OpenCodeEventShellEnv:                      named(OpenCodeEventShellEnv, openCodeOptionalSessionIdentity, openCodeOptionalCallIdentity),
-		OpenCodeEventTodoUpdated:                   observe(OpenCodeEventTodoUpdated),
-		OpenCodeEventToolExecuteBefore:             named(OpenCodeEventToolExecuteBefore, openCodeSessionIdentity, openCodeCallIdentity),
-		OpenCodeEventToolExecuteAfter:              named(OpenCodeEventToolExecuteAfter, openCodeSessionIdentity, openCodeCallIdentity),
-		OpenCodeEventToolDefinition:                named(OpenCodeEventToolDefinition),
-		OpenCodeEventTUIPromptAppend:               observe(OpenCodeEventTUIPromptAppend),
-		OpenCodeEventTUICommandExecute:             observe(OpenCodeEventTUICommandExecute),
-		OpenCodeEventTUIToastShow:                  observe(OpenCodeEventTUIToastShow),
-		OpenCodeEventPTYCreated:                    observe(OpenCodeEventPTYCreated),
-		OpenCodeEventPTYUpdated:                    observe(OpenCodeEventPTYUpdated),
-		OpenCodeEventPTYExited:                     observe(OpenCodeEventPTYExited),
-		OpenCodeEventPTYDeleted:                    observe(OpenCodeEventPTYDeleted),
-		OpenCodeEventVCSBranchUpdated:              observe(OpenCodeEventVCSBranchUpdated),
-		OpenCodeEventChatMessage:                   named(OpenCodeEventChatMessage, openCodeSessionIdentity, openCodeMessageIdentity),
-		OpenCodeEventChatParams:                    named(OpenCodeEventChatParams, openCodeSessionIdentity),
-		OpenCodeEventChatHeaders:                   named(OpenCodeEventChatHeaders, openCodeSessionIdentity),
+		OpenCodeEventCommandExecuted:                    observe(OpenCodeEventCommandExecuted, openCodeSessionIdentity),
+		OpenCodeEventFileEdited:                         observe(OpenCodeEventFileEdited),
+		OpenCodeEventFileWatcherUpdated:                 observe(OpenCodeEventFileWatcherUpdated),
+		OpenCodeEventInstallationUpdated:                observe(OpenCodeEventInstallationUpdated),
+		OpenCodeEventInstallationUpdateAvailable:        observe(OpenCodeEventInstallationUpdateAvailable),
+		OpenCodeEventLSPClientDiagnostics:               observe(OpenCodeEventLSPClientDiagnostics),
+		OpenCodeEventLSPUpdated:                         observe(OpenCodeEventLSPUpdated),
+		OpenCodeEventMessageUpdated:                     observe(OpenCodeEventMessageUpdated),
+		OpenCodeEventMessageRemoved:                     observe(OpenCodeEventMessageRemoved),
+		OpenCodeEventMessagePartUpdated:                 observe(OpenCodeEventMessagePartUpdated),
+		OpenCodeEventMessagePartRemoved:                 observe(OpenCodeEventMessagePartRemoved),
+		OpenCodeEventPermissionUpdated:                  observe(OpenCodeEventPermissionUpdated),
+		OpenCodeEventPermissionReplied:                  observe(OpenCodeEventPermissionReplied),
+		OpenCodeEventServerConnected:                    observe(OpenCodeEventServerConnected),
+		OpenCodeEventServerInstanceDisposed:             observe(OpenCodeEventServerInstanceDisposed),
+		OpenCodeEventSessionCreated:                     observe(OpenCodeEventSessionCreated, openCodeSessionIdentity),
+		OpenCodeEventSessionUpdated:                     observe(OpenCodeEventSessionUpdated),
+		OpenCodeEventSessionDeleted:                     observe(OpenCodeEventSessionDeleted),
+		OpenCodeEventSessionCompacted:                   observe(OpenCodeEventSessionCompacted),
+		OpenCodeEventSessionDiff:                        observe(OpenCodeEventSessionDiff),
+		OpenCodeEventSessionError:                       observe(OpenCodeEventSessionError),
+		OpenCodeEventSessionIdle:                        observe(OpenCodeEventSessionIdle),
+		OpenCodeEventSessionStatus:                      observe(OpenCodeEventSessionStatus),
+		OpenCodeEventTodoUpdated:                        observe(OpenCodeEventTodoUpdated),
+		OpenCodeEventTUIPromptAppend:                    observe(OpenCodeEventTUIPromptAppend),
+		OpenCodeEventTUICommandExecute:                  observe(OpenCodeEventTUICommandExecute),
+		OpenCodeEventTUIToastShow:                       observe(OpenCodeEventTUIToastShow),
+		OpenCodeEventPTYCreated:                         observe(OpenCodeEventPTYCreated),
+		OpenCodeEventPTYUpdated:                         observe(OpenCodeEventPTYUpdated),
+		OpenCodeEventPTYExited:                          observe(OpenCodeEventPTYExited),
+		OpenCodeEventPTYDeleted:                         observe(OpenCodeEventPTYDeleted),
+		OpenCodeEventVCSBranchUpdated:                   observe(OpenCodeEventVCSBranchUpdated),
+		OpenCodeEventChatMessage:                        named(OpenCodeEventChatMessage, openCodeSessionIdentity, openCodeMessageIdentity),
+		OpenCodeEventChatParams:                         named(OpenCodeEventChatParams, openCodeSessionIdentity),
+		OpenCodeEventChatHeaders:                        named(OpenCodeEventChatHeaders, openCodeSessionIdentity),
+		OpenCodeEventPermissionAsk:                      named(OpenCodeEventPermissionAsk),
+		OpenCodeEventCommandExecuteBefore:               named(OpenCodeEventCommandExecuteBefore, openCodeSessionIdentity),
+		OpenCodeEventToolExecuteBefore:                  named(OpenCodeEventToolExecuteBefore, openCodeSessionIdentity, openCodeCallIdentity),
+		OpenCodeEventShellEnv:                           named(OpenCodeEventShellEnv, openCodeOptionalSessionIdentity, openCodeOptionalCallIdentity),
+		OpenCodeEventToolExecuteAfter:                   named(OpenCodeEventToolExecuteAfter, openCodeSessionIdentity, openCodeCallIdentity),
+		OpenCodeEventExperimentalChatMessagesTransform:  named(OpenCodeEventExperimentalChatMessagesTransform),
+		OpenCodeEventExperimentalChatSystemTransform:    named(OpenCodeEventExperimentalChatSystemTransform, openCodeOptionalSessionIdentity),
+		OpenCodeEventExperimentalProviderSmallModel:     named(OpenCodeEventExperimentalProviderSmallModel),
+		OpenCodeEventExperimentalSessionCompacting:      named(OpenCodeEventExperimentalSessionCompacting, openCodeSessionIdentity),
+		OpenCodeEventExperimentalCompactionAutocontinue: named(OpenCodeEventExperimentalCompactionAutocontinue, openCodeSessionIdentity),
+		OpenCodeEventExperimentalTextComplete:           named(OpenCodeEventExperimentalTextComplete, openCodeSessionIdentity, openCodeMessageIdentity),
+		OpenCodeEventToolDefinition:                     named(OpenCodeEventToolDefinition),
 	}
 }
 
@@ -506,10 +521,10 @@ func Codex0_144_1Lifecycle() LifecycleContract[CodexLifecycleEvent] {
 	return mustLifecycleContract(Codex0_144_1(), CodexLifecycleEvents(), codexLifecycleMappings())
 }
 
-// OpenCode1_17_18Lifecycle returns the immutable OpenCode lifecycle table bound
-// to the same exact host version and RuntimeContractID as OpenCode1_17_18.
-func OpenCode1_17_18Lifecycle() LifecycleContract[OpenCodeLifecycleEvent] {
-	return mustLifecycleContract(OpenCode1_17_18(), OpenCodeLifecycleEvents(), openCodeLifecycleMappings())
+// OpenCode1_18_10Lifecycle returns the immutable OpenCode lifecycle table bound
+// to the same exact host version and RuntimeContractID as OpenCode1_18_10.
+func OpenCode1_18_10Lifecycle() LifecycleContract[OpenCodeLifecycleEvent] {
+	return mustLifecycleContract(OpenCode1_18_10(), OpenCodeLifecycleEvents(), openCodeLifecycleMappings())
 }
 
 // Pi intentionally has no lifecycle contract constructor. Its extension and RPC
