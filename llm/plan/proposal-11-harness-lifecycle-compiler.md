@@ -11,6 +11,10 @@ obsoletes_impl_plan: aura-plugins-sgxp6
 
 # PROPOSAL-11 — Harness lifecycle compiler
 
+> **Landed-state note.** The Claude M1 described here is implemented at
+> `0414ad9a7455905c6f865468fe0f2c23222d11b7`. This proposal remains design
+> history; future-tense implementation language below is not current status.
+
 Satisfies [`urd-harness-lifecycle.md`](urd-harness-lifecycle.md). Compiler
 vocabulary throughout, per user ruling.
 
@@ -69,6 +73,11 @@ L1, L2 and `Lower` live in **one package**, `internal/lifecycle/waist`. Splittin
 | **record** | L1 + L2 | durable interpreted record | `lifecycle/receipt` | **writes** |
 | legalization | L2 + committed state | L3, or none | `lifecycle/legalize` | reads only |
 | backend | L3 | L4 effects | `lifecycle/backend` | writes |
+
+The adjacent `lifecycle/ingress` package owns bounded native capture and generated
+host contracts; `lifecycle/model` owns durable lifecycle values and reader
+contracts. They are part of the landed package map even though they are not
+compiler transformation stages in the table.
 
 **The lowering pass is a pure function.** Research §7 requires each level be
 separately testable. Its signature admits no dependency capable of I/O:
