@@ -1,6 +1,8 @@
 package codegen
 
 import (
+	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -155,6 +157,71 @@ func TestOpenCodeHooksModule_ParsesUnderBun(t *testing.T) {
 	out, err := exec.Command(bun, "--check", path).CombinedOutput()
 	if err != nil {
 		t.Fatalf("bun --check rejected the isolated module: %v\n%s", err, out)
+	}
+}
+
+func TestOpenCodeGeneratedLifecycleCallbacks_RunBuiltCLIWithAuthenticFixtures(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("bun is required for the generated OpenCode production proof; enter the flake dev shell")
+	}
+	root := testModuleRoot(t)
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "pasture")
+	build := exec.Command("go", "build", "-race", "-o", binary, "./cmd/pasture")
+	build.Dir = root
+	if output, buildErr := build.CombinedOutput(); buildErr != nil {
+		t.Fatalf("build production pasture CLI with race instrumentation: %v\n%s", buildErr, output)
+	}
+
+	moduleURL := (&url.URL{Scheme: "file", Path: filepath.Join(root, filepath.FromSlash(OpenCodeHooksModulePath))}).String()
+	fixtureDir := filepath.Join(root, "internal", "lifecycle", "ingress", "opencode", "testdata", "fixtures")
+	runner := filepath.Join(dir, "production-proof.ts")
+	script := fmt.Sprintf(`
+import { sessionCreated, toolExecuteBefore } from %q;
+const sessionCapture = await Bun.file(%q).json();
+const toolCapture = await Bun.file(%q).json();
+await sessionCreated(sessionCapture.value);
+const output = toolCapture.value.output;
+const before = JSON.stringify(output.args);
+await toolExecuteBefore(toolCapture.value.input, output);
+if (JSON.stringify(output.args) !== before) throw new Error("generated tool.execute.before callback changed output.args");
+console.log(JSON.stringify({ argsUnchanged: true }));
+`, moduleURL,
+		filepath.Join(fixtureDir, "session_created_1_18_10.capture.json"),
+		filepath.Join(fixtureDir, "tool_execute_before_1_18_10.capture.json"))
+	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
+		t.Fatalf("write Bun production-proof runner: %v", err)
+	}
+	dbPath := filepath.Join(dir, "pasture.db")
+	bootstrap := exec.Command(binary, "--db", dbPath, "--namespace", "file://opencode-production-proof", "task", "create", "initialize lifecycle identity")
+	if bootstrapOutput, bootstrapErr := bootstrap.CombinedOutput(); bootstrapErr != nil {
+		t.Fatalf("initialize real temporary Pasture store through production CLI: %v\n%s", bootstrapErr, bootstrapOutput)
+	}
+	proof := exec.Command(bun, runner)
+	proof.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath)
+	output, err := proof.CombinedOutput()
+	if err != nil {
+		t.Fatalf("execute generated OpenCode callbacks through built CLI: %v\n%s", err, output)
+	}
+	if strings.TrimSpace(string(output)) != `{"argsUnchanged":true}` {
+		t.Fatalf("Bun proof output = %q, want unchanged-args confirmation", output)
+	}
+
+	readback := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "list", "--format", "json")
+	readbackOutput, err := readback.CombinedOutput()
+	if err != nil {
+		t.Fatalf("read back generated callback receipts through production CLI: %v\n%s", err, readbackOutput)
+	}
+	for _, required := range []string{
+		`"registrationContract":"opencode/1.18.10"`,
+		`"contract":"opencode/opencode@1.18.10"`,
+		`"semantic":1`,
+		`"semantic":2`,
+	} {
+		if !strings.Contains(string(readbackOutput), required) {
+			t.Errorf("production lifecycle read-back lacks %s: %s", required, readbackOutput)
+		}
 	}
 }
 

@@ -36,24 +36,32 @@ function acceptProceed(stdout) {
   }
 }
 
+export async function sessionCreated(callback) {
+  try {
+    await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.created", "--host-version", "1.18.10"], "session.created", callback);
+  } catch (error) {
+    // Observation is never a gate and cannot terminate the native event bus.
+    console.error("Pasture lifecycle observation failed for session.created: " + error);
+  }
+}
+
+export async function toolExecuteBefore(input, output) {
+  const args = output.args;
+  const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", "1.18.10"], "tool.execute.before", { input, output: { args } });
+  acceptProceed(stdout);
+  // Proceed is a decision, not a mutation. Preserve the host-owned args value.
+  output.args = args;
+}
+
 export const PastureLifecycle = async ({ client }) => ({
-  async event({ event }) {
-    if (event?.type !== "session.created" || !ENABLED["session.created"]) return;
-    try {
-      await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.created", "--host-version", "1.18.10"], "session.created", event);
-    } catch (error) {
-      // Observation is never a gate and cannot terminate the native event bus.
-      console.error("Pasture lifecycle observation failed for session.created: " + error);
-      void client;
-    }
+  async event(callback) {
+    if (callback.event?.type !== "session.created" || !ENABLED["session.created"]) return;
+    await sessionCreated(callback);
+    void client;
   },
   async "tool.execute.before"(input, output) {
     if (!ENABLED["tool.execute.before"]) return;
-    const args = output.args;
-    const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", "1.18.10"], "tool.execute.before", { input, output: { args } });
-    acceptProceed(stdout);
-    // Proceed is a decision, not a mutation. Preserve the host-owned args value.
-    output.args = args;
+    await toolExecuteBefore(input, output);
   },
 });
 
