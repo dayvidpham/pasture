@@ -23,7 +23,7 @@
           # Module-proxy mode: Nix fetches go.mod deps into a fixed-output
           # derivation (no committed vendor/ dir — modernc.org/libc alone would
           # bloat the repo). Update this hash whenever go.mod/go.sum changes.
-          vendorHash = "sha256-hdKtK3N6WNdTYcekTdYTRiERH9dSF7PoQ/caHgkvksQ=";
+          vendorHash = "sha256-fkTbqOtELuwGftxwDbFVD/pCblFyIuW30h+4iNKrSGA=";
 
           env.CGO_ENABLED = "0";
 
@@ -31,9 +31,10 @@
           nativeBuildInputs = [ ];
 
           # The race check includes internal/release, whose integration tests
-          # shell out to real `git` (init/commit/tag), and hooks/ tests that
-          # parse PreToolUse events with `jq`.
-          nativeCheckInputs = [ pkgs.bun pkgs.git pkgs.jq ];
+          # shell out to real `git` (init/commit/tag), hooks/ tests that parse
+          # PreToolUse events with `jq`, and generated command-adapter tests
+          # that execute Python transport scripts.
+          nativeCheckInputs = [ pkgs.bun pkgs.git pkgs.jq pkgs.python3 ];
 
           # Package outputs are build-only; the race check below owns the test
           # wave so each package is not tested repeatedly by Nix.
