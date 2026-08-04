@@ -234,7 +234,7 @@ func TestPinnedLifecycleContractsMatchStrictFixture(t *testing.T) {
 		assertLifecycleContract(
 			t,
 			lifecycleFixtureFor(t, fixture, "opencode"),
-			runtime.OpenCode1_17_18Lifecycle(),
+			runtime.OpenCode1_18_10Lifecycle(),
 			runtime.OpenCodeLifecycleEvents(),
 			func(event runtime.OpenCodeLifecycleEvent) string { return event.NativeName() },
 		)
@@ -304,7 +304,7 @@ func TestCodexLifecyclePreservesStrictMutationAndConcurrencyWithoutMerge(t *test
 
 func TestOpenCodeLifecycleSeparatesNamedHandlersFromCatchAllAndSSE(t *testing.T) {
 	t.Parallel()
-	contract := runtime.OpenCode1_17_18Lifecycle()
+	contract := runtime.OpenCode1_18_10Lifecycle()
 
 	named, err := contract.Mapping(runtime.OpenCodeEventToolExecuteBefore)
 	require.NoError(t, err)

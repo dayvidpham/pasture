@@ -158,7 +158,7 @@ func TestRequestUserDecisionRejectsCrossHarnessRuntimeContract(t *testing.T) {
 	require.NoError(t, err)
 	prompt := ir.FreeTextPrompt{Stimulus: ir.PromptStimulus{Question: "Explain"}}
 
-	openCodeContract := mustContract(t, ir.HarnessOpenCode, "1.17.18")
+	openCodeContract := mustContract(t, ir.HarnessOpenCode, "1.18.10")
 	_, err = ir.NewRequestUserDecision(
 		"request-cross-harness", ir.HarnessClaudeCode, openCodeContract,
 		mustTaskRef(t, "epoch-1"), mustTaskRef(t, "gate-1"), "test-purpose", prompt,

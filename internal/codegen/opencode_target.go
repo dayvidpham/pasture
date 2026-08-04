@@ -10,6 +10,7 @@ import (
 
 	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
@@ -118,7 +119,7 @@ type OpenCodeTargetDescriptor struct {
 }
 
 // NewOpenCodeTargetDescriptor builds the descriptor from the delivered pinned
-// OpenCode 1.17.18 runtime contract. It derives the native tool allow-list and
+// OpenCode 1.18.10 runtime contract. It derives the native tool allow-list and
 // generates the embedded hook module up front so the descriptor is a complete,
 // immutable value.
 func NewOpenCodeTargetDescriptor() (OpenCodeTargetDescriptor, error) {
@@ -137,7 +138,7 @@ func NewOpenCodeTargetDescriptor() (OpenCodeTargetDescriptor, error) {
 	}
 	sort.Slice(components, func(i, j int) bool { return components[i].ID < components[j].ID })
 	return OpenCodeTargetDescriptor{
-		contract:   runtime.OpenCode1_17_18().ID(),
+		contract:   runtime.OpenCode1_18_10().ID(),
 		toolNames:  toolNames,
 		hooks:      hooks,
 		components: components,
@@ -166,18 +167,31 @@ func (d OpenCodeTargetDescriptor) HooksModule() string { return d.hooks }
 // openCodeTargetManifest is the typed on-disk shape of the serialized descriptor.
 // A named struct gives MarshalIndent a deterministic field order.
 type openCodeTargetManifest struct {
-	Schema          string              `json:"$schema"`
-	Target          string              `json:"target"`
-	RuntimeContract string              `json:"runtime_contract"`
-	HostVersion     string              `json:"host_version"`
-	NativeTools     []string            `json:"native_tools"`
-	Components      []OpenCodeComponent `json:"components"`
+	Schema          string                            `json:"$schema"`
+	Target          string                            `json:"target"`
+	RuntimeContract string                            `json:"runtime_contract"`
+	HostVersion     string                            `json:"host_version"`
+	NativeTools     []string                          `json:"native_tools"`
+	Components      []OpenCodeComponent               `json:"components"`
+	Activation      []openCodeActivationManifestEntry `json:"activation"`
+}
+
+type openCodeActivationManifestEntry struct {
+	Event           string `json:"event"`
+	State           string `json:"state"`
+	Reason          string `json:"reason,omitempty"`
+	CaptureProof    string `json:"capture_proof,omitempty"`
+	ProductionProof string `json:"production_proof,omitempty"`
 }
 
 // Manifest returns the deterministic JSON serialization of this descriptor. It
 // is the manifest component's content and a stable, human-auditable oracle of
 // the target's contract and component index.
 func (d OpenCodeTargetDescriptor) Manifest() (string, error) {
+	activationManifest, err := openCodeActivationManifest()
+	if err != nil {
+		return "", fmt.Errorf("codegen.OpenCodeTargetDescriptor.Manifest: activation metadata: %w", err)
+	}
 	manifest := openCodeTargetManifest{
 		Schema:          "https://pasture.dev/opencode-target.json",
 		Target:          string(ir.HarnessOpenCode),
@@ -185,6 +199,7 @@ func (d OpenCodeTargetDescriptor) Manifest() (string, error) {
 		HostVersion:     openCodeHostVersion,
 		NativeTools:     d.NativeToolNames(),
 		Components:      d.Components(),
+		Activation:      activationManifest,
 	}
 	data, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -192,6 +207,25 @@ func (d OpenCodeTargetDescriptor) Manifest() (string, error) {
 			"codegen.OpenCodeTargetDescriptor.Manifest: marshal target manifest failed — this is a bug in the manifest struct definition: %w", err)
 	}
 	return string(data) + "\n", nil
+}
+
+func openCodeActivationManifest() ([]openCodeActivationManifestEntry, error) {
+	entries, err := openCodeActivationEntries()
+	if err != nil {
+		return nil, err
+	}
+	events := registration.OpenCode1_18_10().Entries()
+	out := make([]openCodeActivationManifestEntry, len(entries))
+	for index, entry := range entries {
+		out[index] = openCodeActivationManifestEntry{
+			Event:           events[index].NativeName,
+			State:           entry.State.String(),
+			Reason:          entry.Reason.String(),
+			CaptureProof:    entry.CaptureProof.Name(),
+			ProductionProof: entry.ProductionProof.Name(),
+		}
+	}
+	return out, nil
 }
 
 // Bundle assembles the shared, content-addressed artifact.Bundle a packaged CLI

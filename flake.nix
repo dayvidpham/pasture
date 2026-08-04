@@ -33,7 +33,7 @@
           # The race check includes internal/release, whose integration tests
           # shell out to real `git` (init/commit/tag), and hooks/ tests that
           # parse PreToolUse events with `jq`.
-          nativeCheckInputs = [ pkgs.git pkgs.jq ];
+          nativeCheckInputs = [ pkgs.bun pkgs.git pkgs.jq ];
 
           # Package outputs are build-only; the race check below owns the test
           # wave so each package is not tested repeatedly by Nix.
@@ -97,6 +97,7 @@
             go-tools
             delve
             golangci-lint
+            bun
             sqlite
           ];
           shellHook = ''

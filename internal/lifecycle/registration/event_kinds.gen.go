@@ -34,6 +34,53 @@ const (
 	EventMessageDisplay
 	EventElicitation
 	EventElicitationResult
+	EventOpenCodeCommandExecuted
+	EventOpenCodeFileEdited
+	EventOpenCodeFileWatcherUpdated
+	EventOpenCodeInstallationUpdated
+	EventOpenCodeInstallationUpdate_available
+	EventOpenCodeLspClientDiagnostics
+	EventOpenCodeLspUpdated
+	EventOpenCodeMessageUpdated
+	EventOpenCodeMessageRemoved
+	EventOpenCodeMessagePartUpdated
+	EventOpenCodeMessagePartRemoved
+	EventOpenCodePermissionUpdated
+	EventOpenCodePermissionReplied
+	EventOpenCodeServerConnected
+	EventOpenCodeServerInstanceDisposed
+	EventOpenCodeSessionCreated
+	EventOpenCodeSessionUpdated
+	EventOpenCodeSessionDeleted
+	EventOpenCodeSessionCompacted
+	EventOpenCodeSessionDiff
+	EventOpenCodeSessionError
+	EventOpenCodeSessionIdle
+	EventOpenCodeSessionStatus
+	EventOpenCodeTodoUpdated
+	EventOpenCodeTuiPromptAppend
+	EventOpenCodeTuiCommandExecute
+	EventOpenCodeTuiToastShow
+	EventOpenCodePtyCreated
+	EventOpenCodePtyUpdated
+	EventOpenCodePtyExited
+	EventOpenCodePtyDeleted
+	EventOpenCodeVcsBranchUpdated
+	EventOpenCodeChatMessage
+	EventOpenCodeChatParams
+	EventOpenCodeChatHeaders
+	EventOpenCodePermissionAsk
+	EventOpenCodeCommandExecuteBefore
+	EventOpenCodeToolExecuteBefore
+	EventOpenCodeShellEnv
+	EventOpenCodeToolExecuteAfter
+	EventOpenCodeExperimentalChatMessagesTransform
+	EventOpenCodeExperimentalChatSystemTransform
+	EventOpenCodeExperimentalProviderSmall_model
+	EventOpenCodeExperimentalSessionCompacting
+	EventOpenCodeExperimentalCompactionAutocontinue
+	EventOpenCodeExperimentalTextComplete
+	EventOpenCodeToolDefinition
 )
 
 const (
@@ -78,4 +125,6 @@ const (
 	FieldFields
 	FieldMCPServerName
 	FieldResponse
+	FieldOpenCodeSessionID
+	FieldOpenCodeCallID
 )

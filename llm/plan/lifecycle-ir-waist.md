@@ -15,6 +15,11 @@ references:
 >
 > **This is PROPOSAL-4. It was superseded six proposals ago and is retained only as
 > provenance. Do not implement, cite, or plan from it.**
+> Claude lifecycle M1 subsequently landed at
+> `0414ad9a7455905c6f865468fe0f2c23222d11b7`; none of this document's replay-key,
+> actor-resolution, `BackendView`, or monolithic `Lower` design describes that
+> runtime. Current exact provider captures are record-specific privacy evidence,
+> not authorization to restore this superseded IR.
 >
 > **Current ratified architecture:**
 > [`llm/plan/proposal-10-hook-lifecycle-architecture.md`](proposal-10-hook-lifecycle-architecture.md)

@@ -1,0 +1,16 @@
+{
+  "provider": "opencode",
+  "observedRuntimeVersion": "1.18.10",
+  "inspectedSourceRevision": "7902e04c3a67f7c69726bc955efb46e29214c797",
+  "capturedAt": "2026-08-03T11:15:58.439Z",
+  "captureMethod": "in-process callback object serialized by the capture plugin",
+  "sourceSelector": "opencode/lifecycle.jsonl record 6 (first read tool.execute.before)",
+  "parentSHA256": "cf1bb44424ef4bf1d3b3f39041474aa4ef986c95dc3aaa5deaab69614e588a47",
+  "recordBytesIncludingLF": 367,
+  "recordSHA256": "c14a265118d84f679e5be424ed58772e16d4f5d0f2327433f18e860560027358",
+  "callbackValueBytes": 287,
+  "callbackValueSHA256": "b43f3ba21c6c42afd7c2f881da14430e0832600fe521eedd625c214ab9a125df",
+  "origin": "authentic-capture",
+  "redaction": "none",
+  "clearanceAuthority": ".agents.local/opencode-codex-authentic-capture-2026-08-03.md"
+}

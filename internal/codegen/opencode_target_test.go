@@ -1,6 +1,10 @@
 package codegen
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,15 +12,15 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
-	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
 // expectedOpenCodeNativeTools is the exact native tool allow-list OpenCode
-// 1.17.18 declares: invoke-skill -> skill, delegate-assignment -> task,
+// 1.18.10 declares: invoke-skill -> skill, delegate-assignment -> task,
 // request-user-decision -> question. Every other core operation is
 // semantic-instruction or unsupported and contributes no native tool.
 var expectedOpenCodeNativeTools = []string{"question", "skill", "task"}
@@ -38,7 +42,7 @@ func TestOpenCodeNativeToolNames_MatchPinnedContract(t *testing.T) {
 
 	// Cross-check every name really is native in the pinned contract, proving the
 	// allow-list is the contract's own declared surface, not a hand-copied list.
-	contract := runtime.OpenCode1_17_18()
+	contract := runtime.OpenCode1_18_10()
 	native := map[string]bool{}
 	for _, kind := range ir.AllOperationKinds() {
 		desc, ok := runtime.CoreOperationDescriptorFor(kind)
@@ -74,6 +78,42 @@ func TestGenerateOpenCodeHooksModule_Deterministic(t *testing.T) {
 	}
 	if a != b {
 		t.Fatal("hooks module generation is not byte-identical across runs")
+	}
+}
+
+func TestOpenCodeTargetManifestPublishesExhaustiveProofGatedActivation(t *testing.T) {
+	t.Parallel()
+	descriptor, err := NewOpenCodeTargetDescriptor()
+	if err != nil {
+		t.Fatalf("NewOpenCodeTargetDescriptor: %v", err)
+	}
+	raw, err := descriptor.Manifest()
+	if err != nil {
+		t.Fatalf("Manifest: %v", err)
+	}
+	var manifest openCodeTargetManifest
+	if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
+		t.Fatalf("decode target manifest: %v", err)
+	}
+	if len(manifest.Activation) != 47 {
+		t.Fatalf("activation entries = %d, want exhaustive 47-event classification", len(manifest.Activation))
+	}
+	enabled := make([]string, 0, 2)
+	for _, entry := range manifest.Activation {
+		if entry.State != "enabled" {
+			if entry.Reason == "" || entry.CaptureProof != "" || entry.ProductionProof != "" {
+				t.Fatalf("withheld activation entry is not fail-closed: %#v", entry)
+			}
+			continue
+		}
+		if entry.CaptureProof == "" || entry.ProductionProof == "" {
+			t.Fatalf("enabled activation entry lacks both proofs: %#v", entry)
+		}
+		enabled = append(enabled, entry.Event)
+	}
+	want := []string{"session.created", "tool.execute.before"}
+	if !reflect.DeepEqual(enabled, want) {
+		t.Fatalf("enabled events = %v, want %v", enabled, want)
 	}
 }
 
@@ -120,45 +160,30 @@ func TestOpenCodeHooksModulePreservesNamedAndObservationBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	for _, named := range []string{"command.execute.before", "permission.ask", "tool.execute.before", "tool.execute.after"} {
-		if !strings.Contains(module, `async "`+named+`"(input, output)`) {
-			t.Errorf("generated plugin lacks awaited named handler %q", named)
-		}
-	}
-	if strings.Contains(module, `async "permission.replied"`) {
-		t.Error("permission.replied became a named gate; it must remain catch-all observation")
-	}
-	for _, humanOperation := range []handlers.AdapterOperation{
-		handlers.AdapterOperationSetInteractionMode,
-		handlers.AdapterOperationRecordPlanUAT,
-		handlers.AdapterOperationRatifyPlan,
-		handlers.AdapterOperationRecordImplementationUAT,
-		handlers.AdapterOperationLand,
+	for _, required := range []string{
+		`["hook", "lifecycle", "--harness", "opencode", "--event", "session.created", "--host-version", "1.18.10"]`,
+		`["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", "1.18.10"]`,
+		`{ input, output: { args } }`, `response.decision !== "proceed"`, `output.args = args`,
 	} {
-		if strings.Contains(module, string(humanOperation)) {
-			t.Errorf("OpenCode has no explicit-human-response event but generated plugin carries human operation %q", humanOperation)
+		if !strings.Contains(module, required) {
+			t.Errorf("generated plugin lacks %q", required)
 		}
 	}
-
-	fixture, err := os.ReadFile(filepath.Join("testdata", "native", "opencode", "tool_execute_before.json"))
-	if err != nil {
-		t.Fatalf("read native fixture: %v", err)
+	if strings.Contains(module, `"session.created": false`) || strings.Contains(module, `"tool.execute.before": false`) {
+		t.Error("generated plugin retained a duplicate hand-flipped activation boolean table")
 	}
-	for _, identity := range []string{"sessionID", "callID"} {
-		if !strings.Contains(string(fixture), `"`+identity+`"`) || !strings.Contains(module, `"name":"`+identity+`"`) {
-			t.Errorf("fixture/module pair does not preserve declared identity %q", identity)
+	for _, forbidden := range []string{"PASTURE_ADAPTER_EVENT", "PASTURE_ADAPTER_OPERATION", "PASTURE_ADAPTER_INPUT", `"__adapter"`, "invocationIdentity", "sourceValue("} {
+		if strings.Contains(module, forbidden) {
+			t.Errorf("generated lifecycle plugin contains forbidden semantic transport %q", forbidden)
 		}
 	}
 }
 
-// TestOpenCodeHooksModule_ParsesUnderJSEngine is an opportunistic isolated-load
-// oracle: when a JavaScript engine is available it confirms the emitted module
-// parses on its own (siblings absent). It skips cleanly when no engine is
-// installed so the Go suite stays dependency-free and deterministic.
-func TestOpenCodeHooksModule_ParsesUnderJSEngine(t *testing.T) {
-	node, err := exec.LookPath("node")
+// TestOpenCodeHooksModule_ParsesUnderBun makes Bun a required gate dependency.
+func TestOpenCodeHooksModule_ParsesUnderBun(t *testing.T) {
+	bun, err := exec.LookPath("bun")
 	if err != nil {
-		t.Skip("no node on PATH; skipping opportunistic JS parse oracle")
+		t.Fatal("bun is required to validate the generated OpenCode lifecycle plugin; enter the flake dev shell or install the flake-locked Bun package")
 	}
 	module, err := GenerateOpenCodeHooksModule()
 	if err != nil {
@@ -170,9 +195,158 @@ func TestOpenCodeHooksModule_ParsesUnderJSEngine(t *testing.T) {
 	if err := os.WriteFile(path, []byte(module), 0o644); err != nil {
 		t.Fatalf("write module: %v", err)
 	}
-	out, err := exec.Command(node, "--check", path).CombinedOutput()
+	out, err := exec.Command(bun, "--check", path).CombinedOutput()
 	if err != nil {
-		t.Fatalf("node --check rejected the isolated module: %v\n%s", err, out)
+		t.Fatalf("bun --check rejected the isolated module: %v\n%s", err, out)
+	}
+}
+
+func TestOpenCodeGeneratedLifecycleCallbacks_RunBuiltCLIWithAuthenticFixtures(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("bun is required for the generated OpenCode production proof; enter the flake dev shell")
+	}
+	root := testModuleRoot(t)
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "pasture")
+	build := exec.Command("go", "build", "-race", "-o", binary, "./cmd/pasture")
+	build.Dir = root
+	if output, buildErr := build.CombinedOutput(); buildErr != nil {
+		t.Fatalf("build production pasture CLI with race instrumentation: %v\n%s", buildErr, output)
+	}
+
+	moduleURL := (&url.URL{Scheme: "file", Path: filepath.Join(root, filepath.FromSlash(OpenCodeHooksModulePath))}).String()
+	fixtureDir := filepath.Join(root, "internal", "lifecycle", "ingress", "opencode", "testdata", "fixtures")
+	runner := filepath.Join(dir, "production-proof.ts")
+	script := fmt.Sprintf(`
+import { sessionCreated, toolExecuteBefore } from %q;
+const sessionCapture = await Bun.file(%q).json();
+const toolCapture = await Bun.file(%q).json();
+await sessionCreated(sessionCapture.value);
+const output = toolCapture.value.output;
+const before = JSON.stringify(output.args);
+await toolExecuteBefore(toolCapture.value.input, output);
+if (JSON.stringify(output.args) !== before) throw new Error("generated tool.execute.before callback changed output.args");
+console.log(JSON.stringify({ argsUnchanged: true }));
+`, moduleURL,
+		filepath.Join(fixtureDir, "session_created_1_18_10.capture.json"),
+		filepath.Join(fixtureDir, "tool_execute_before_1_18_10.capture.json"))
+	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
+		t.Fatalf("write Bun production-proof runner: %v", err)
+	}
+	dbPath := filepath.Join(dir, "pasture.db")
+	bootstrap := exec.Command(binary, "--db", dbPath, "--namespace", "file://opencode-production-proof", "task", "create", "initialize lifecycle identity")
+	if bootstrapOutput, bootstrapErr := bootstrap.CombinedOutput(); bootstrapErr != nil {
+		t.Fatalf("initialize real temporary Pasture store through production CLI: %v\n%s", bootstrapErr, bootstrapOutput)
+	}
+	proof := exec.Command(bun, runner)
+	proof.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath)
+	output, err := proof.CombinedOutput()
+	if err != nil {
+		t.Fatalf("execute generated OpenCode callbacks through built CLI: %v\n%s", err, output)
+	}
+	if strings.TrimSpace(string(output)) != `{"argsUnchanged":true}` {
+		t.Fatalf("Bun proof output = %q, want unchanged-args confirmation", output)
+	}
+
+	readback := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "list", "--format", "json")
+	readbackOutput, err := readback.CombinedOutput()
+	if err != nil {
+		t.Fatalf("read back generated callback receipts through production CLI: %v\n%s", err, readbackOutput)
+	}
+	for _, required := range []string{
+		`"registrationContract":"opencode/1.18.10"`,
+		`"contract":"opencode/opencode@1.18.10"`,
+		`"semantic":1`,
+		`"semantic":2`,
+	} {
+		if !strings.Contains(string(readbackOutput), required) {
+			t.Errorf("production lifecycle read-back lacks %s: %s", required, readbackOutput)
+		}
+	}
+}
+
+func TestOpenCodeGeneratedLifecycleCallbacks_RejectInvalidGateResponsesAndSwallowObservationFailure(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("bun is required for the generated OpenCode failure-path proof; enter the flake dev shell")
+	}
+	root := testModuleRoot(t)
+	dir := t.TempDir()
+	fakeBinary := filepath.Join(dir, "fake-pasture")
+	fake := `#!/bin/sh
+payload=$(cat)
+case "$payload" in
+  *'"tool":"malformed"'*) printf '%s' 'not-json' ;;
+  *'"tool":"extra"'*) printf '%s' '{"decision":"proceed","extra":true}' ;;
+  *'"tool":"wrong-decision"'*) printf '%s' '{"decision":"block"}' ;;
+  *'"tool":"nonzero"'*|*'"type":"session.created"'*) printf '%s' 'synthetic lifecycle diagnostic' >&2; exit 7 ;;
+  *) printf '%s' '{"decision":"proceed"}' ;;
+esac
+`
+	if err := os.WriteFile(fakeBinary, []byte(fake), 0o700); err != nil {
+		t.Fatalf("write bounded fake PASTURE_BIN: %v", err)
+	}
+
+	moduleURL := (&url.URL{Scheme: "file", Path: filepath.Join(root, filepath.FromSlash(OpenCodeHooksModulePath))}).String()
+	runner := filepath.Join(dir, "failure-proof.ts")
+	script := fmt.Sprintf(`
+import { sessionCreated, toolExecuteBefore } from %q;
+
+const cases = [
+  { mode: "malformed", diagnostic: "response is not JSON" },
+  { mode: "extra", diagnostic: 'response must be exactly {"decision":"proceed"}' },
+  { mode: "wrong-decision", diagnostic: 'response must be exactly {"decision":"proceed"}' },
+  { mode: "nonzero", diagnostic: "exited 7: synthetic lifecycle diagnostic" },
+];
+for (const testCase of cases) {
+  const output = { args: { path: "unchanged", nested: [1, true, null] } };
+  const before = JSON.stringify(output.args);
+  let diagnostic = "";
+  try {
+    await toolExecuteBefore({ tool: testCase.mode }, output);
+  } catch (error) {
+    diagnostic = String(error);
+  }
+  if (!diagnostic.includes(testCase.diagnostic)) {
+    throw new Error(testCase.mode + " did not reject actionably; got: " + diagnostic);
+  }
+  if (JSON.stringify(output.args) !== before) {
+    throw new Error(testCase.mode + " changed output.args bytes on rejection");
+  }
+}
+
+const logged = [];
+const originalError = console.error;
+console.error = (...values) => logged.push(values.join(" "));
+try {
+  await sessionCreated({ event: { type: "session.created" } });
+} finally {
+  console.error = originalError;
+}
+if (logged.length !== 1 || !logged[0].includes("observation failed for session.created") ||
+    !logged[0].includes("exited 7: synthetic lifecycle diagnostic")) {
+  throw new Error("session.created did not swallow and log its observation failure: " + JSON.stringify(logged));
+}
+console.log(JSON.stringify({ rejected: cases.length, observationLogged: true }));
+`, moduleURL)
+	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
+		t.Fatalf("write Bun failure-proof runner: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	proof := exec.CommandContext(ctx, bun, runner)
+	proof.Env = append(os.Environ(), "PASTURE_BIN="+fakeBinary)
+	output, err := proof.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("Bun failure-path proof exceeded its 20s bound: %v\n%s", ctx.Err(), output)
+	}
+	if err != nil {
+		t.Fatalf("execute generated OpenCode failure paths under Bun: %v\n%s", err, output)
+	}
+	if strings.TrimSpace(string(output)) != `{"rejected":4,"observationLogged":true}` {
+		t.Fatalf("Bun failure-path proof output = %q, want all rejection and observation assertions", output)
 	}
 }
 
@@ -303,7 +477,7 @@ func TestOpenCodeTargetDescriptor_RuntimeContractIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("descriptor: %v", err)
 	}
-	want := runtime.OpenCode1_17_18().ID()
+	want := runtime.OpenCode1_18_10().ID()
 	if desc.RuntimeContract() != want {
 		t.Errorf("descriptor RuntimeContract = %v, want %v", desc.RuntimeContract(), want)
 	}
