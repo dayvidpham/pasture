@@ -156,6 +156,21 @@ marker. CI regenerates all targets on a clean checkout and fails on any resultin
 worktree change; an exact output-inventory test also rejects retired files that
 in-place generation cannot remove.
 
+## Lifecycle runtime
+
+The landed Claude Code lifecycle path accepts bounded native payloads, preserves
+each delivery as occurrence evidence, verifies provider bindings through the
+typed lifecycle waist, records interpreted evidence and gate consultations, and
+exposes bounded read-back through `pasture hook lifecycle list`. Activation is a
+generated, static decision: fixture provenance is checked by tests and is not
+loaded from `testdata/` by the shipped binary. Malformed captures retain their
+occurrence evidence but do not produce interpreted records.
+
+Exact provider payloads are not interchangeable fixtures. The current OpenCode
+work is limited to two user-reviewed OpenCode 1.18.10 callback records
+(`session.created` and `tool.execute.before`); Codex candidates remain future
+work. See [docs/privacy.md](docs/privacy.md) for the complete clearance boundary.
+
 - **Architecture + data-flow diagram:** [docs/codegen.md](docs/codegen.md)
 - **How to add a constraint / role / phase / section / command:** [CONTRIBUTING.md](CONTRIBUTING.md)
 

@@ -17,6 +17,13 @@ references:
 
 # PROPOSAL-10: the ratified hook lifecycle architecture
 
+> **Historical architecture note.** Claude lifecycle M1 is landed at
+> `0414ad9a7455905c6f865468fe0f2c23222d11b7`. The current package map includes
+> `internal/lifecycle/ingress` for bounded provider capture and generated host
+> contracts, and `internal/lifecycle/model` for durable values and bounded reader
+> contracts. Any pre-landing audit language below describes the planning snapshot,
+> not an outstanding runtime defect.
+
 This document is the repository-resident form of the ratified architecture. Until now
 that architecture existed only as a Beads task body (`aura-plugins-6ljvd`: a description
 plus seven "NORMATIVE CONTINUATION n/7" comments plus two ratification amendments), while
@@ -1030,8 +1037,10 @@ enrichment,interpretation,lowering,lineage,context,response,control}` do not exi
    *nonzero authentic fixture ref* and §16.0.2(a) requires `OriginAuthenticCapture` with a
    **matching `RawFileDigest`**, and neither exists: `activation.FixtureEvidence`
    (`internal/lifecycle/activation/types.go:26-31`) is a bare two-value enum with no digest
-   and no ref, and `internal/lifecycle/ingress/claude/testdata/corpora/
-   claude_2_1_210_catalogue.yaml` carries no capture-provenance rows.
+   and no ref, and the then-current catalogue corpus carried no
+   capture-provenance rows. The landed exact-version convention places provider
+   fixtures under `testdata/fixtures/` with a same-basename `.provenance.json`
+   sidecar; corpus tables remain under `testdata/corpora/`.
 
    So the authenticity that gates activation is currently a hand-set constant. That is the
    precise defect §22 describes — *"a fixture derived from the descriptor it validates cannot
