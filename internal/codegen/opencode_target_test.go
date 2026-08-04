@@ -16,7 +16,7 @@ import (
 )
 
 // expectedOpenCodeNativeTools is the exact native tool allow-list OpenCode
-// 1.17.18 declares: invoke-skill -> skill, delegate-assignment -> task,
+// 1.18.10 declares: invoke-skill -> skill, delegate-assignment -> task,
 // request-user-decision -> question. Every other core operation is
 // semantic-instruction or unsupported and contributes no native tool.
 var expectedOpenCodeNativeTools = []string{"question", "skill", "task"}
@@ -38,7 +38,7 @@ func TestOpenCodeNativeToolNames_MatchPinnedContract(t *testing.T) {
 
 	// Cross-check every name really is native in the pinned contract, proving the
 	// allow-list is the contract's own declared surface, not a hand-copied list.
-	contract := runtime.OpenCode1_17_18()
+	contract := runtime.OpenCode1_18_10()
 	native := map[string]bool{}
 	for _, kind := range ir.AllOperationKinds() {
 		desc, ok := runtime.CoreOperationDescriptorFor(kind)
@@ -303,7 +303,7 @@ func TestOpenCodeTargetDescriptor_RuntimeContractIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("descriptor: %v", err)
 	}
-	want := runtime.OpenCode1_17_18().ID()
+	want := runtime.OpenCode1_18_10().ID()
 	if desc.RuntimeContract() != want {
 		t.Errorf("descriptor RuntimeContract = %v, want %v", desc.RuntimeContract(), want)
 	}

@@ -17,7 +17,7 @@ import (
 const OpenCodeHooksModulePath = ".opencode/plugins/pasture-lifecycle.ts"
 
 // deriveOpenCodeNativeToolNames returns, sorted and de-duplicated, exactly the
-// native tool names the pinned OpenCode 1.17.18 runtime contract declares — and
+// native tool names the pinned OpenCode 1.18.10 runtime contract declares — and
 // nothing else. It resolves every core orchestration operation against the
 // contract via the delivered runtime lookup and collects only the operations the
 // contract classifies as native. Semantic-instruction, parent-mediated, and
@@ -25,7 +25,7 @@ const OpenCodeHooksModulePath = ".opencode/plugins/pasture-lifecycle.ts"
 // never reference an invented OpenCode tool: the allow-list is the contract's
 // own declared surface, computed here rather than hand-copied.
 func deriveOpenCodeNativeToolNames() ([]string, error) {
-	contract := runtime.OpenCode1_17_18()
+	contract := runtime.OpenCode1_18_10()
 	seen := make(map[string]struct{})
 	var names []string
 	for _, kind := range ir.AllOperationKinds() {
@@ -41,7 +41,7 @@ func deriveOpenCodeNativeToolNames() ([]string, error) {
 		}
 		binding, err := runtime.LookupOperationBinding(contract, descriptor)
 		if err != nil {
-			// Unsupported operations (for OpenCode 1.17.18, stopping an
+			// Unsupported operations (for OpenCode 1.18.10, stopping an
 			// assignment) return a lookup error by contract; they are correctly
 			// absent from a native allow-list, so skip rather than fail.
 			continue
@@ -71,8 +71,8 @@ func GenerateOpenCodeHooksModule() (string, error) {
 		return "", fmt.Errorf("codegen.GenerateOpenCodeHooksModule: derive native tool allow-list: %w", err)
 	}
 	metadata, err := lifecycleMetadata(
-		runtime.OpenCode1_17_18Lifecycle(),
-		"1.17.18",
+		runtime.OpenCode1_18_10Lifecycle(),
+		"1.18.10",
 		func(string) []string { return nil },
 	)
 	if err != nil {
@@ -90,13 +90,17 @@ func GenerateOpenCodeHooksModule() (string, error) {
 	allowList := strings.Join(quoted, ", ")
 
 	var namedHandlers strings.Builder
-	for _, event := range metadata.Events {
-		if event.Surface != runtime.SurfaceOpenCodeNamedOutput.String() {
-			continue
-		}
+	// Preserve the existing generated handler surface during exact-profile
+	// replacement. The additional source-catalog entries remain metadata-only
+	// until the lifecycle transport wave selects reviewed handlers explicitly.
+	existingHandlers := []string{
+		"command.execute.before", "permission.ask", "shell.env", "tool.execute.before",
+		"tool.execute.after", "tool.definition", "chat.message", "chat.params", "chat.headers",
+	}
+	for _, name := range existingHandlers {
 		fmt.Fprintf(&namedHandlers,
 			"    async %q(input, output) {\n      await invokeNamed(%q, input, output);\n    },\n",
-			event.Name, event.Name,
+			name, name,
 		)
 	}
 
@@ -230,4 +234,4 @@ export default PastureLifecycle;
 // openCodeHostVersion is the pinned OpenCode host version this target generates
 // for. It is display metadata for the generated header; the authoritative
 // version bound lives in the runtime contract.
-const openCodeHostVersion = "1.17.18"
+const openCodeHostVersion = "1.18.10"

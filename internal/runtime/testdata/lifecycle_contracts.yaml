@@ -497,13 +497,12 @@ contracts:
 
   - harness: opencode
     unresolved_by_event: {}
-    id: opencode/opencode@1.17.18
-    version: 1.17.18
-    lower: 1.17.17
-    higher: 1.17.19
+    id: opencode/opencode@1.18.10
+    version: 1.18.10
+    lower: 1.18.9
+    higher: 1.18.11
     event_order:
       - command.executed
-      - command.execute.before
       - file.edited
       - file.watcher.updated
       - installation.updated
@@ -514,9 +513,8 @@ contracts:
       - message.removed
       - message.part.updated
       - message.part.removed
-      - permission.asked
+      - permission.updated
       - permission.replied
-      - permission.ask
       - server.connected
       - server.instance.disposed
       - session.created
@@ -527,12 +525,7 @@ contracts:
       - session.error
       - session.idle
       - session.status
-      - experimental.session.compacting
-      - shell.env
       - todo.updated
-      - tool.execute.before
-      - tool.execute.after
-      - tool.definition
       - tui.prompt.append
       - tui.command.execute
       - tui.toast.show
@@ -544,6 +537,18 @@ contracts:
       - chat.message
       - chat.params
       - chat.headers
+      - permission.ask
+      - command.execute.before
+      - tool.execute.before
+      - shell.env
+      - tool.execute.after
+      - experimental.chat.messages.transform
+      - experimental.chat.system.transform
+      - experimental.provider.small_model
+      - experimental.session.compacting
+      - experimental.compaction.autocontinue
+      - experimental.text.complete
+      - tool.definition
     axes:
       semantic:
         observation:
@@ -558,7 +563,7 @@ contracts:
           - message.removed
           - message.part.updated
           - message.part.removed
-          - permission.asked
+          - permission.updated
           - permission.replied
           - server.connected
           - server.instance.disposed
@@ -570,7 +575,6 @@ contracts:
           - session.error
           - session.idle
           - session.status
-          - experimental.session.compacting
           - todo.updated
           - tui.prompt.append
           - tui.command.execute
@@ -590,6 +594,12 @@ contracts:
           - chat.message
           - chat.params
           - chat.headers
+          - experimental.chat.messages.transform
+          - experimental.chat.system.transform
+          - experimental.provider.small_model
+          - experimental.session.compacting
+          - experimental.compaction.autocontinue
+          - experimental.text.complete
         explicit-human-response: []
       surface:
         opencode-named-output:
@@ -602,6 +612,12 @@ contracts:
           - chat.message
           - chat.params
           - chat.headers
+          - experimental.chat.messages.transform
+          - experimental.chat.system.transform
+          - experimental.provider.small_model
+          - experimental.session.compacting
+          - experimental.compaction.autocontinue
+          - experimental.text.complete
         opencode-catch-all-sse:
           - command.executed
           - file.edited
@@ -614,7 +630,7 @@ contracts:
           - message.removed
           - message.part.updated
           - message.part.removed
-          - permission.asked
+          - permission.updated
           - permission.replied
           - server.connected
           - server.instance.disposed
@@ -626,7 +642,6 @@ contracts:
           - session.error
           - session.idle
           - session.status
-          - experimental.session.compacting
           - todo.updated
           - tui.prompt.append
           - tui.command.execute
@@ -649,7 +664,7 @@ contracts:
           - message.removed
           - message.part.updated
           - message.part.removed
-          - permission.asked
+          - permission.updated
           - permission.replied
           - server.connected
           - server.instance.disposed
@@ -661,7 +676,6 @@ contracts:
           - session.error
           - session.idle
           - session.status
-          - experimental.session.compacting
           - todo.updated
           - tui.prompt.append
           - tui.command.execute
@@ -681,6 +695,12 @@ contracts:
           - chat.message
           - chat.params
           - chat.headers
+          - experimental.chat.messages.transform
+          - experimental.chat.system.transform
+          - experimental.provider.small_model
+          - experimental.session.compacting
+          - experimental.compaction.autocontinue
+          - experimental.text.complete
         conditionally-blocking: []
       mutation:
         none:
@@ -695,7 +715,7 @@ contracts:
           - message.removed
           - message.part.updated
           - message.part.removed
-          - permission.asked
+          - permission.updated
           - permission.replied
           - server.connected
           - server.instance.disposed
@@ -707,7 +727,6 @@ contracts:
           - session.error
           - session.idle
           - session.status
-          - experimental.session.compacting
           - todo.updated
           - tui.prompt.append
           - tui.command.execute
@@ -729,6 +748,12 @@ contracts:
           - chat.message
           - chat.params
           - chat.headers
+          - experimental.chat.messages.transform
+          - experimental.chat.system.transform
+          - experimental.provider.small_model
+          - experimental.session.compacting
+          - experimental.compaction.autocontinue
+          - experimental.text.complete
       order:
         sequential-load-order:
           - command.execute.before
@@ -740,6 +765,12 @@ contracts:
           - chat.message
           - chat.params
           - chat.headers
+          - experimental.chat.messages.transform
+          - experimental.chat.system.transform
+          - experimental.provider.small_model
+          - experimental.session.compacting
+          - experimental.compaction.autocontinue
+          - experimental.text.complete
         observation-stream:
           - command.executed
           - file.edited
@@ -752,7 +783,7 @@ contracts:
           - message.removed
           - message.part.updated
           - message.part.removed
-          - permission.asked
+          - permission.updated
           - permission.replied
           - server.connected
           - server.instance.disposed
@@ -764,7 +795,6 @@ contracts:
           - session.error
           - session.idle
           - session.status
-          - experimental.session.compacting
           - todo.updated
           - tui.prompt.append
           - tui.command.execute
@@ -787,7 +817,7 @@ contracts:
           - message.removed
           - message.part.updated
           - message.part.removed
-          - permission.asked
+          - permission.updated
           - permission.replied
           - server.connected
           - server.instance.disposed
@@ -799,7 +829,6 @@ contracts:
           - session.error
           - session.idle
           - session.status
-          - experimental.session.compacting
           - todo.updated
           - tui.prompt.append
           - tui.command.execute
@@ -821,6 +850,12 @@ contracts:
           - chat.message
           - chat.params
           - chat.headers
+          - experimental.chat.messages.transform
+          - experimental.chat.system.transform
+          - experimental.provider.small_model
+          - experimental.session.compacting
+          - experimental.compaction.autocontinue
+          - experimental.text.complete
       failure:
         report-and-continue: []
         exit-2-blocks: []
@@ -836,6 +871,12 @@ contracts:
           - chat.message
           - chat.params
           - chat.headers
+          - experimental.chat.messages.transform
+          - experimental.chat.system.transform
+          - experimental.provider.small_model
+          - experimental.session.compacting
+          - experimental.compaction.autocontinue
+          - experimental.text.complete
         observe-only:
           - command.executed
           - file.edited
@@ -848,7 +889,7 @@ contracts:
           - message.removed
           - message.part.updated
           - message.part.removed
-          - permission.asked
+          - permission.updated
           - permission.replied
           - server.connected
           - server.instance.disposed
@@ -860,7 +901,6 @@ contracts:
           - session.error
           - session.idle
           - session.status
-          - experimental.session.compacting
           - todo.updated
           - tui.prompt.append
           - tui.command.execute
@@ -884,7 +924,7 @@ contracts:
           - message.removed
           - message.part.updated
           - message.part.removed
-          - permission.asked
+          - permission.updated
           - permission.replied
           - permission.ask
           - server.connected
@@ -897,7 +937,6 @@ contracts:
           - session.error
           - session.idle
           - session.status
-          - experimental.session.compacting
           - shell.env
           - todo.updated
           - tool.execute.before
@@ -914,10 +953,18 @@ contracts:
           - chat.message
           - chat.params
           - chat.headers
+          - experimental.chat.messages.transform
+          - experimental.chat.system.transform
+          - experimental.provider.small_model
+          - experimental.session.compacting
+          - experimental.compaction.autocontinue
+          - experimental.text.complete
     identities:
       default: []
       by_event:
         command.executed:
+          - session:sessionID:required
+        session.created:
           - session:sessionID:required
         command.execute.before:
           - session:sessionID:required
@@ -937,6 +984,15 @@ contracts:
           - session:sessionID:required
         chat.headers:
           - session:sessionID:required
+        experimental.chat.system.transform:
+          - session:sessionID:optional
+        experimental.session.compacting:
+          - session:sessionID:required
+        experimental.compaction.autocontinue:
+          - session:sessionID:required
+        experimental.text.complete:
+          - session:sessionID:required
+          - message:messageID:optional
 
 unsupported:
   harness: antigravity

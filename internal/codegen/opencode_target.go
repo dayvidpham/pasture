@@ -118,7 +118,7 @@ type OpenCodeTargetDescriptor struct {
 }
 
 // NewOpenCodeTargetDescriptor builds the descriptor from the delivered pinned
-// OpenCode 1.17.18 runtime contract. It derives the native tool allow-list and
+// OpenCode 1.18.10 runtime contract. It derives the native tool allow-list and
 // generates the embedded hook module up front so the descriptor is a complete,
 // immutable value.
 func NewOpenCodeTargetDescriptor() (OpenCodeTargetDescriptor, error) {
@@ -137,7 +137,7 @@ func NewOpenCodeTargetDescriptor() (OpenCodeTargetDescriptor, error) {
 	}
 	sort.Slice(components, func(i, j int) bool { return components[i].ID < components[j].ID })
 	return OpenCodeTargetDescriptor{
-		contract:   runtime.OpenCode1_17_18().ID(),
+		contract:   runtime.OpenCode1_18_10().ID(),
 		toolNames:  toolNames,
 		hooks:      hooks,
 		components: components,

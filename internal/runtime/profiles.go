@@ -231,12 +231,12 @@ func ClaudeCode2_1_210() RuntimeContract {
 	return mustRangeContract(ir.HarnessClaudeCode, "claude-code@2.1.210", "2.1.210", "2.2.0-0", buildCoreBindings(table))
 }
 
-// OpenCode1_17_18 is the pinned runtime contract for OpenCode 1.17.18. It uses
+// OpenCode1_18_10 is the pinned runtime contract for OpenCode 1.18.10. It uses
 // only OpenCode's documented skill/task/question surfaces. It never invents a
 // persistent-message, follow-up, wait, or close tool: operations with no
 // documented native surface are lowered as semantic instructions, and stopping
 // an assignment is explicitly unsupported rather than a fabricated close call.
-func OpenCode1_17_18() RuntimeContract {
+func OpenCode1_18_10() RuntimeContract {
 	table := map[ir.OperationKind]operationLowering{
 		ir.OperationInvokeSkill: {
 			class:  effects.RuntimeClassNative,
@@ -248,26 +248,26 @@ func OpenCode1_17_18() RuntimeContract {
 		},
 		ir.OperationContinueAssignment: {
 			class:    effects.RuntimeClassSemanticInstruction,
-			semantic: mustSemantic("OpenCode 1.17.18 exposes no follow-up tool: reconstruct the assignment as a fresh task with its complete retained role, evidence, decisions, and outstanding work"),
+			semantic: mustSemantic("OpenCode 1.18.10 exposes no follow-up tool: reconstruct the assignment as a fresh task with its complete retained role, evidence, decisions, and outstanding work"),
 		},
 		ir.OperationSendAssignmentMessage: {
 			class:    effects.RuntimeClassSemanticInstruction,
-			semantic: mustSemantic("OpenCode 1.17.18 exposes no persistent-message tool: carry the message content into the next task prompt for the target assignment"),
+			semantic: mustSemantic("OpenCode 1.18.10 exposes no persistent-message tool: carry the message content into the next task prompt for the target assignment"),
 		},
 		ir.OperationCollectAssignmentResults: {
 			class:    effects.RuntimeClassSemanticInstruction,
-			semantic: mustSemantic("OpenCode 1.17.18 exposes no wait tool: collect each task result inline as tasks return"),
+			semantic: mustSemantic("OpenCode 1.18.10 exposes no wait tool: collect each task result inline as tasks return"),
 		},
 		ir.OperationStopAssignment: {
 			class:  effects.RuntimeClassUnsupported,
-			reason: "OpenCode 1.17.18 exposes no close/stop tool; stopping a running task has no modeled native semantics and must not be lowered to a fabricated close call",
+			reason: "OpenCode 1.18.10 exposes no close/stop tool; stopping a running task has no modeled native semantics and must not be lowered to a fabricated close call",
 		},
 		ir.OperationRequestUserDecision: {
 			class:  effects.RuntimeClassNative,
 			native: mustNativeCall("question", []string{"prompt", "options"}, "the user's selected option bound to the originating request", "presents to the interactive user"),
 		},
 	}
-	return mustExactContract(ir.HarnessOpenCode, "opencode@1.17.18", "1.17.18", buildCoreBindings(table))
+	return mustExactContract(ir.HarnessOpenCode, "opencode@1.18.10", "1.18.10", buildCoreBindings(table))
 }
 
 // Codex0_144_1 is the pinned runtime contract for Codex 0.144.1. It lowers only
@@ -311,5 +311,5 @@ func Codex0_144_1() RuntimeContract {
 // PinnedContracts returns the three initial pinned point contracts, one per
 // enabled harness.
 func PinnedContracts() []RuntimeContract {
-	return []RuntimeContract{ClaudeCode2_1_210(), OpenCode1_17_18(), Codex0_144_1()}
+	return []RuntimeContract{ClaudeCode2_1_210(), OpenCode1_18_10(), Codex0_144_1()}
 }

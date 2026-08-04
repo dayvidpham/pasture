@@ -74,7 +74,7 @@ func TestNewTargetDescriptorRejectsNonClaudeContract(t *testing.T) {
 	d, err := claudecode.Descriptor()
 	require.NoError(t, err)
 
-	openCodeContract := runtime.OpenCode1_17_18().ID()
+	openCodeContract := runtime.OpenCode1_18_10().ID()
 	_, err = claudecode.NewTargetDescriptor(openCodeContract, d.Skills(), d.Agents(), d.Hooks())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "claude-code")
