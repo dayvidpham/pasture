@@ -11,7 +11,6 @@ import (
 
 	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
-	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
@@ -120,45 +119,28 @@ func TestOpenCodeHooksModulePreservesNamedAndObservationBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	for _, named := range []string{"command.execute.before", "permission.ask", "tool.execute.before", "tool.execute.after"} {
-		if !strings.Contains(module, `async "`+named+`"(input, output)`) {
-			t.Errorf("generated plugin lacks awaited named handler %q", named)
-		}
-	}
-	if strings.Contains(module, `async "permission.replied"`) {
-		t.Error("permission.replied became a named gate; it must remain catch-all observation")
-	}
-	for _, humanOperation := range []handlers.AdapterOperation{
-		handlers.AdapterOperationSetInteractionMode,
-		handlers.AdapterOperationRecordPlanUAT,
-		handlers.AdapterOperationRatifyPlan,
-		handlers.AdapterOperationRecordImplementationUAT,
-		handlers.AdapterOperationLand,
+	for _, required := range []string{
+		`"session.created": false`, `"tool.execute.before": false`,
+		`["hook", "lifecycle", "--harness", "opencode", "--event", "session.created", "--host-version", "1.18.10"]`,
+		`["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", "1.18.10"]`,
+		`{ input, output: { args } }`, `response.decision !== "proceed"`, `output.args = args`,
 	} {
-		if strings.Contains(module, string(humanOperation)) {
-			t.Errorf("OpenCode has no explicit-human-response event but generated plugin carries human operation %q", humanOperation)
+		if !strings.Contains(module, required) {
+			t.Errorf("generated plugin lacks %q", required)
 		}
 	}
-
-	fixture, err := os.ReadFile(filepath.Join("testdata", "native", "opencode", "tool_execute_before.json"))
-	if err != nil {
-		t.Fatalf("read native fixture: %v", err)
-	}
-	for _, identity := range []string{"sessionID", "callID"} {
-		if !strings.Contains(string(fixture), `"`+identity+`"`) || !strings.Contains(module, `"name":"`+identity+`"`) {
-			t.Errorf("fixture/module pair does not preserve declared identity %q", identity)
+	for _, forbidden := range []string{"PASTURE_ADAPTER_EVENT", "PASTURE_ADAPTER_OPERATION", "PASTURE_ADAPTER_INPUT", `"__adapter"`, "invocationIdentity", "sourceValue("} {
+		if strings.Contains(module, forbidden) {
+			t.Errorf("generated lifecycle plugin contains forbidden semantic transport %q", forbidden)
 		}
 	}
 }
 
-// TestOpenCodeHooksModule_ParsesUnderJSEngine is an opportunistic isolated-load
-// oracle: when a JavaScript engine is available it confirms the emitted module
-// parses on its own (siblings absent). It skips cleanly when no engine is
-// installed so the Go suite stays dependency-free and deterministic.
-func TestOpenCodeHooksModule_ParsesUnderJSEngine(t *testing.T) {
-	node, err := exec.LookPath("node")
+// TestOpenCodeHooksModule_ParsesUnderBun makes Bun a required gate dependency.
+func TestOpenCodeHooksModule_ParsesUnderBun(t *testing.T) {
+	bun, err := exec.LookPath("bun")
 	if err != nil {
-		t.Skip("no node on PATH; skipping opportunistic JS parse oracle")
+		t.Fatal("bun is required to validate the generated OpenCode lifecycle plugin; enter the flake dev shell or install the flake-locked Bun package")
 	}
 	module, err := GenerateOpenCodeHooksModule()
 	if err != nil {
@@ -170,9 +152,9 @@ func TestOpenCodeHooksModule_ParsesUnderJSEngine(t *testing.T) {
 	if err := os.WriteFile(path, []byte(module), 0o644); err != nil {
 		t.Fatalf("write module: %v", err)
 	}
-	out, err := exec.Command(node, "--check", path).CombinedOutput()
+	out, err := exec.Command(bun, "--check", path).CombinedOutput()
 	if err != nil {
-		t.Fatalf("node --check rejected the isolated module: %v\n%s", err, out)
+		t.Fatalf("bun --check rejected the isolated module: %v\n%s", err, out)
 	}
 }
 

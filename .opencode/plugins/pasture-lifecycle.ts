@@ -5,60 +5,16 @@
 export const PASTURE_NATIVE_TOOLS = Object.freeze(["question", "skill", "task"]);
 export const PASTURE_RUNTIME_CONTRACT = "opencode/opencode@1.18.10";
 const METADATA = {"harness":"opencode","version":"1.18.10","contract":"opencode/opencode@1.18.10","events":[{"name":"command.executed","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"file.edited","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"file.watcher.updated","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"installation.updated","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"installation.update_available","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"lsp.client.diagnostics","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"lsp.updated","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"message.updated","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"message.removed","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"message.part.updated","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"message.part.removed","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"permission.updated","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"permission.replied","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"server.connected","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"server.instance.disposed","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"session.created","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.updated","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"session.deleted","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"session.compacted","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"session.diff","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"session.error","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"session.idle","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"session.status","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"todo.updated","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"tui.prompt.append","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"tui.command.execute","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"tui.toast.show","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"pty.created","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"pty.updated","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"pty.exited","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"pty.deleted","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"vcs.branch.updated","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"chat.message","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true},{"name":"messageID","kind":"message","required":false}],"allowedFields":["messageID","sessionID"]},{"name":"chat.params","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"chat.headers","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"permission.ask","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"command.execute.before","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"tool.execute.before","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true},{"name":"callID","kind":"tool-call","required":true}],"allowedFields":["callID","sessionID"]},{"name":"shell.env","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":false},{"name":"callID","kind":"tool-call","required":false}],"allowedFields":["callID","sessionID"]},{"name":"tool.execute.after","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true},{"name":"callID","kind":"tool-call","required":true}],"allowedFields":["callID","sessionID"]},{"name":"experimental.chat.messages.transform","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"experimental.chat.system.transform","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":false}],"allowedFields":["sessionID"]},{"name":"experimental.provider.small_model","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[],"allowedFields":[]},{"name":"experimental.session.compacting","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"experimental.compaction.autocontinue","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"experimental.text.complete","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true},{"name":"messageID","kind":"message","required":false}],"allowedFields":["messageID","sessionID"]},{"name":"tool.definition","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[],"allowedFields":[]}],"operations":{"gate-consultation":["pasture.epoch.interaction-mode.show/v1"],"observation":["pasture.epoch.review.start/v1","pasture.epoch.review.submit-plan/v1","pasture.epoch.review.submit-implementation/v1","pasture.epoch.review.finalize/v1","pasture.epoch.slice.create/v1","pasture.epoch.slice.candidate.set/v1","pasture.epoch.slice.close/v1","pasture.epoch.integration.candidate-set.create/v1","pasture.epoch.integration.repository.publish/v1"]}};
-const EVENTS = new Map(METADATA.events.map((event) => [event.name, event]));
+const ENABLED = Object.freeze({
+  "session.created": false,
+  "tool.execute.before": false,
+});
 
-function sourceValue(source, name) {
-  if (source && Object.prototype.hasOwnProperty.call(source, name)) return source[name];
-  if (source?.properties && Object.prototype.hasOwnProperty.call(source.properties, name)) return source.properties[name];
-  if (source?.payload?.properties && Object.prototype.hasOwnProperty.call(source.payload.properties, name)) return source.payload.properties[name];
-  return undefined;
-}
-
-function invocationIdentity(mapping, source) {
-  const identities = [];
-  for (const identity of mapping.identities) {
-    const value = sourceValue(source, identity.name);
-    if (value === undefined) {
-      if (identity.required) throw new Error("event " + mapping.name + " is missing required native identity " + identity.name);
-      continue;
-    }
-    if (typeof value !== "string" || value.length === 0) throw new Error("native identity " + identity.name + " must be a non-empty string");
-    identities.push([identity.name, value]);
-  }
-  const canonical = JSON.stringify({ event: mapping.name, identities });
-  const encoded = Buffer.from(canonical, "utf8").toString("base64url");
-  const result = METADATA.harness + "." + encoded;
-  if (Buffer.byteLength(result, "utf8") > 4096) throw new Error("correlated native invocation exceeds the hidden adapter identity limit");
-  return result;
-}
-
-async function invokePasture(mapping, source) {
-  const boundEvent = process.env.PASTURE_ADAPTER_EVENT ?? "";
-  const operation = process.env.PASTURE_ADAPTER_OPERATION ?? "";
-  const rawInput = process.env.PASTURE_ADAPTER_INPUT ?? "";
-  if (!boundEvent && !operation && !rawInput) return;
-  if (!boundEvent || !operation || !rawInput) throw new Error("PASTURE_ADAPTER_EVENT, PASTURE_ADAPTER_OPERATION, and PASTURE_ADAPTER_INPUT must either all be set or all be absent");
-  if (boundEvent !== mapping.name) return;
-  const allowed = METADATA.operations[mapping.semantic] ?? [];
-  if (!allowed.includes(operation)) throw new Error("operation " + operation + " is not allowed for " + mapping.semantic + " event " + mapping.name);
-
-  const header = JSON.stringify({
-    schema: "pasture.adapter-invocation/v1",
-    harness: METADATA.harness,
-    harnessVersion: METADATA.version,
-    harnessContract: METADATA.contract,
-    nativeInvocation: invocationIdentity(mapping, source),
-    operation,
-  });
-  // Preserve operation input bytes until handlers.AdapterInvocationEnvelope
-  // performs the sole strict semantic decode in the production binary.
-  const envelope = header.slice(0, -1) + ',"input":' + rawInput + '}\n';
-  if (Buffer.byteLength(envelope, "utf8") > 1048576) throw new Error("generated adapter envelope exceeds 1 MiB; remove native or transcript data from semantic input");
-
+async function invokeLifecycle(command, event, value) {
   const binary = process.env.PASTURE_BIN ?? "pasture";
   const child = Bun.spawn({
-    cmd: [binary, "__adapter", "invoke"],
-    stdin: new Blob([envelope]),
+    cmd: [binary, ...command],
+    stdin: new Blob([JSON.stringify(value)]),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -67,67 +23,38 @@ async function invokePasture(mapping, source) {
     new Response(child.stderr).text(),
     child.exited,
   ]);
-  if (exitCode !== 0) throw new Error("pasture __adapter invoke exited " + exitCode + ": " + (stderr.trim() || "no diagnostic was returned"));
-  let result;
-  try {
-    result = JSON.parse(stdout);
-  } catch (error) {
-    throw new Error("pasture adapter result is not JSON: " + error);
-  }
-  const keys = Object.keys(result).sort();
-  if (JSON.stringify(keys) !== JSON.stringify(["operation", "result", "schema"])) throw new Error("pasture adapter result must contain exactly schema, operation, and result");
-  if (result.schema !== "pasture.adapter-result/v1" || result.operation !== operation) throw new Error("pasture adapter result schema or operation does not match the invocation");
+  if (exitCode !== 0) throw new Error("pasture hook lifecycle for " + event + " exited " + exitCode + ": " + (stderr.trim() || "no diagnostic was returned") + "; verify PASTURE_BIN and the generated OpenCode 1.18.10 configuration");
+  return stdout;
 }
 
-async function invokeNamed(name, input, output) {
-  const mapping = EVENTS.get(name);
-  if (!mapping || mapping.surface !== "opencode-named-output") throw new Error("named OpenCode lifecycle mapping " + name + " is not pinned");
-  // Await without replacing output: mutations made by an earlier plugin remain
-  // visible to later plugins and to the native operation.
-  await invokePasture(mapping, input);
-  void output;
+function acceptProceed(stdout) {
+  let response;
+  try { response = JSON.parse(stdout); }
+  catch (error) { throw new Error("pasture hook lifecycle response is not JSON: " + error); }
+  if (Object.keys(response).length !== 1 || response.decision !== "proceed") {
+    throw new Error('pasture hook lifecycle response must be exactly {"decision":"proceed"}');
+  }
 }
 
 export const PastureLifecycle = async ({ client }) => ({
   async event({ event }) {
-    const name = event?.type;
-    const mapping = EVENTS.get(name);
-    if (!mapping || mapping.surface !== "opencode-catch-all-sse") return;
+    if (event?.type !== "session.created" || !ENABLED["session.created"]) return;
     try {
-      await invokePasture(mapping, event);
+      await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.created", "--host-version", "1.18.10"], "session.created", event);
     } catch (error) {
       // Observation is never a gate and cannot terminate the native event bus.
-      console.error("Pasture lifecycle observation failed for " + name + ": " + error);
+      console.error("Pasture lifecycle observation failed for session.created: " + error);
       void client;
     }
   },
-    async "command.execute.before"(input, output) {
-      await invokeNamed("command.execute.before", input, output);
-    },
-    async "permission.ask"(input, output) {
-      await invokeNamed("permission.ask", input, output);
-    },
-    async "shell.env"(input, output) {
-      await invokeNamed("shell.env", input, output);
-    },
-    async "tool.execute.before"(input, output) {
-      await invokeNamed("tool.execute.before", input, output);
-    },
-    async "tool.execute.after"(input, output) {
-      await invokeNamed("tool.execute.after", input, output);
-    },
-    async "tool.definition"(input, output) {
-      await invokeNamed("tool.definition", input, output);
-    },
-    async "chat.message"(input, output) {
-      await invokeNamed("chat.message", input, output);
-    },
-    async "chat.params"(input, output) {
-      await invokeNamed("chat.params", input, output);
-    },
-    async "chat.headers"(input, output) {
-      await invokeNamed("chat.headers", input, output);
-    },
-  });
+  async "tool.execute.before"(input, output) {
+    if (!ENABLED["tool.execute.before"]) return;
+    const args = output.args;
+    const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", "1.18.10"], "tool.execute.before", { input, output: { args } });
+    acceptProceed(stdout);
+    // Proceed is a decision, not a mutation. Preserve the host-owned args value.
+    output.args = args;
+  },
+});
 
 export default PastureLifecycle;
