@@ -46,11 +46,7 @@ func HookLifecycle(ctx context.Context, in HookLifecycleInput) error {
 // HookLifecycleResponse records the lifecycle receipt before returning an
 // optional response to the native host.
 func HookLifecycleResponse(ctx context.Context, in HookLifecycleInput) (backend.HostResponse, error) {
-	activations, err := activation.ClaudeCode2_1_210()
-	if err != nil {
-		return backend.HostResponse{}, err
-	}
-	return hookLifecycle(ctx, in, activations, tasks.OpenTaskTracker)
+	return hookLifecycle(ctx, in, tasks.OpenTaskTracker)
 }
 
 type lifecycleCapture struct {
@@ -59,13 +55,14 @@ type lifecycleCapture struct {
 }
 
 type lifecycleDispatch struct {
-	name     string
-	manifest registration.Manifest
-	parse    func([]byte, registration.Event, string) lifecycleCapture
-	bind     func(model.ContractEventKind, []model.NativeBinding) (waist.L1, []waist.Identity, error)
+	name        string
+	manifest    registration.Manifest
+	activations []activation.Entry
+	parse       func([]byte, registration.Event, string) lifecycleCapture
+	bind        func(model.ContractEventKind, []model.NativeBinding) (waist.L1, []waist.Identity, error)
 }
 
-func hookLifecycle(ctx context.Context, in HookLifecycleInput, activations []activation.Entry, open lifecycleStoreOpener) (backend.HostResponse, error) {
+func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleStoreOpener) (backend.HostResponse, error) {
 	if ctx == nil || in.Input == nil || in.Clock == nil || in.Operations == nil || open == nil {
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, "The lifecycle ingress boundary is incompletely wired.", "A context, stdin, clock, operation identity source, and store opener are required.", "Nothing was read or recorded.", "Invoke this path through the production lifecycle command.", nil)
 	}
@@ -86,13 +83,13 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, activations []act
 	if event.Kind == 0 {
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("Event %q is not in the generated %s registration.", in.Event, dispatch.name), "Ingress trusts the generated registration coordinate rather than an unparsed payload claim.", "The input was not read and no database was opened.", "Invoke one of the events present in the support report.", nil)
 	}
-	state, found := activationFor(event.Kind, activations)
-	if in.Harness == ir.HarnessClaudeCode && (!found || state.State != activation.Enabled) {
+	state, found := activationFor(event.Kind, dispatch.activations)
+	if !found || state.State != activation.Enabled {
 		reason := activation.WithheldMissingFixture
 		if found {
 			reason = state.Reason
 		}
-		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("Claude event %q is withheld (reason %d).", event.NativeName, reason), "Only events with authentic capture evidence and a passing production proof are registered.", "The input was not read and no database was opened.", "Inspect the generated activation support report and enable the event only after its proof passes.", nil)
+		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("%s event %q is withheld (reason %s).", dispatch.name, event.NativeName, reason.String()), "Only events with authentic capture evidence and a passing production proof are admitted.", "The input was not read and no database was opened.", "Inspect the generated activation support report and enable the event only after its proof passes.", nil)
 	}
 	raw, err := io.ReadAll(io.LimitReader(in.Input, model.MaxNativePayloadBytes+1))
 	if err != nil {
@@ -140,12 +137,20 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, activations []act
 func dispatchLifecycle(harness ir.HarnessID) (lifecycleDispatch, error) {
 	switch harness {
 	case ir.HarnessClaudeCode:
-		return lifecycleDispatch{name: "Claude", manifest: registration.ClaudeCode2_1_210(), parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
+		activations, err := activation.ClaudeCode2_1_210()
+		if err != nil {
+			return lifecycleDispatch{}, fmt.Errorf("dispatch Claude lifecycle activation: %w", err)
+		}
+		return lifecycleDispatch{name: "Claude", manifest: registration.ClaudeCode2_1_210(), activations: activations, parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
 			capture := claudeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
 			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
 		}, bind: claudefrontend.Bind}, nil
 	case ir.HarnessOpenCode:
-		return lifecycleDispatch{name: "OpenCode", manifest: registration.OpenCode1_18_10(), parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
+		activations, err := activation.OpenCode1_18_10()
+		if err != nil {
+			return lifecycleDispatch{}, fmt.Errorf("dispatch OpenCode lifecycle activation: %w", err)
+		}
+		return lifecycleDispatch{name: "OpenCode", manifest: registration.OpenCode1_18_10(), activations: activations, parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
 			capture := opencodeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
 			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
 		}, bind: opencodefrontend.Bind}, nil

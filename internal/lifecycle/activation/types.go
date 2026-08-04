@@ -71,7 +71,12 @@ const (
 )
 
 func (p CaptureProof) IsValid() bool {
-	return p >= CaptureProofSessionStart && p <= CaptureProofOpenCodeToolExecuteBefore
+	switch p {
+	case CaptureProofSessionStart, CaptureProofOpenCodeSessionCreated, CaptureProofOpenCodeToolExecuteBefore:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p CaptureProof) Event() (model.ContractEventKind, bool) {
@@ -112,7 +117,12 @@ const (
 )
 
 func (p ProductionProof) IsValid() bool {
-	return p >= ProductionProofSessionStart && p <= ProductionProofOpenCodeToolExecuteBefore
+	switch p {
+	case ProductionProofSessionStart, ProductionProofOpenCodeSessionCreated, ProductionProofOpenCodeToolExecuteBefore:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p ProductionProof) Event() (model.ContractEventKind, bool) {

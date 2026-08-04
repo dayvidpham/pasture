@@ -355,6 +355,39 @@ func TestInvalidLifecycleInvocationCreatesNoDatabase(t *testing.T) {
 	require.ErrorIs(t, statErr, os.ErrNotExist)
 }
 
+func TestWithheldOpenCodeEventIsNotAdmittedByBuiltCLI(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "pasture")
+	buildLifecycleBinary(t, binary)
+	dbPath := filepath.Join(dir, "pasture.db")
+	initializeLifecycleTestDatabase(t, dbPath)
+
+	command := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "--harness", "opencode", "--event", "session.updated", "--host-version", "1.18.10")
+	command.Stdin = bytes.NewBufferString(`{"event":{"type":"session.updated"}}`)
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	require.NoError(t, command.Run(), stderr.String())
+	require.Empty(t, stdout.String())
+	require.Contains(t, stderr.String(), `OpenCode event "session.updated" is withheld (reason outside-target-set)`)
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	require.Empty(t, queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind), "withheld direct CLI ingress must persist no occurrence evidence")
+	require.NoError(t, tracker.Close())
+
+	list := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "list", "--format", "json")
+	stdout.Reset()
+	stderr.Reset()
+	list.Stdout = &stdout
+	list.Stderr = &stderr
+	require.NoError(t, list.Run(), stderr.String())
+	var page struct {
+		Items []json.RawMessage `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &page))
+	require.Empty(t, page.Items, "withheld direct CLI ingress must persist no public lifecycle record")
+}
+
 func TestLifecycleListRejectsCursorBeforeDatabaseOpen(t *testing.T) {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "pasture")

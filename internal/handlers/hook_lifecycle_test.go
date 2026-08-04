@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -28,6 +29,28 @@ func (s fixedLifecycleOperations) NewOperationID() (string, error) { return s.id
 
 type openCodeRecord struct {
 	Value json.RawMessage `json:"value"`
+}
+
+type readTrackingLifecycleInput struct{ reads int }
+
+func (r *readTrackingLifecycleInput) Read([]byte) (int, error) {
+	r.reads++
+	return 0, fmt.Errorf("test input must not be read before activation admission")
+}
+
+func TestHookLifecycleResponseRejectsWithheldOpenCodeBeforeInputAndStorage(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "unopened", "pasture.db")
+	input := &readTrackingLifecycleInput{}
+	response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
+		DBPath: dbPath, Harness: ir.HarnessOpenCode, Event: "session.updated", HostVersion: "1.18.10",
+		Input: input, Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.withheld"},
+	})
+	require.ErrorContains(t, err, `OpenCode event "session.updated" is withheld (reason outside-target-set)`)
+	require.False(t, response.IsValid())
+	require.Zero(t, input.reads, "withheld event must be rejected before stdin access")
+	_, statErr := os.Stat(dbPath)
+	require.ErrorIs(t, statErr, os.ErrNotExist, "withheld event must be rejected before storage access")
 }
 
 func TestHookLifecycleResponseOpenCodeCommitsBeforeReturning(t *testing.T) {
