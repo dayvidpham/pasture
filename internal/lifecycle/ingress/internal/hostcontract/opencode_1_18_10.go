@@ -1,6 +1,9 @@
 package hostcontract
 
-import "github.com/dayvidpham/pasture/internal/lifecycle/model"
+import (
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
+)
 
 const (
 	openCodeSessionID model.NativeFieldID = 1001 + iota
@@ -12,55 +15,55 @@ var openCodeFields = []Field{
 	{openCodeCallID, "FieldOpenCodeCallID", "callID"},
 }
 
-// OpenCode1_18_10 is derived from the Event union and Hooks interface at
-// OpenCode source revision 7902e04c3a67f7c69726bc955efb46e29214c797.
-// The 32 catch-all entries and 15 named hooks are source metadata. They do not
-// claim that an event was observed at runtime.
+// OpenCode1_18_10 derives registration order and native names from the typed
+// runtime lifecycle contract. Only the two authentically observed callbacks
+// add provider payload fields and identity bindings at this ingress boundary.
 func OpenCode1_18_10() Contract {
-	catchAll := []string{
-		"command.executed", "file.edited", "file.watcher.updated", "installation.updated",
-		"installation.update_available", "lsp.client.diagnostics", "lsp.updated", "message.updated",
-		"message.removed", "message.part.updated", "message.part.removed", "permission.updated",
-		"permission.replied", "server.connected", "server.instance.disposed", "session.created",
-		"session.updated", "session.deleted", "session.compacted", "session.diff", "session.error",
-		"session.idle", "session.status", "todo.updated", "tui.prompt.append", "tui.command.execute",
-		"tui.toast.show", "pty.created", "pty.updated", "pty.exited", "pty.deleted", "vcs.branch.updated",
-	}
-	named := []string{
-		"chat.message", "chat.params", "chat.headers", "permission.ask", "command.execute.before",
-		"tool.execute.before", "shell.env", "tool.execute.after", "experimental.chat.messages.transform",
-		"experimental.chat.system.transform", "experimental.provider.small_model",
-		"experimental.session.compacting", "experimental.compaction.autocontinue",
-		"experimental.text.complete", "tool.definition",
-	}
-	events := make([]Event, 0, len(catchAll)+len(named))
-	for _, name := range catchAll {
-		events = append(events, Event{
-			Symbol: symbol("EventOpenCode", name), Name: name, Blocking: NonBlocking,
-			Mutation: MutationNone, Failure: FailureReportAndContinue, StopLoop: StopLoopNotApplicable,
-		})
-	}
-	for _, name := range named {
-		events = append(events, Event{
-			Symbol: symbol("EventOpenCode", name), Name: name, Blocking: Blocking,
-			Mutation: MutationNone, Failure: FailureExitTwoBlocks, StopLoop: StopLoopNotApplicable,
-		})
-	}
-	for i := range events {
-		events[i].Kind = model.ContractEventKind(31 + i)
-		switch events[i].Name {
-		case "session.created":
-			events[i].Fields = []model.NativeFieldID{openCodeSessionID}
-			events[i].Identities = []Identity{{Field: openCodeSessionID, Binding: model.BindingSession, Required: true}}
-		case "tool.execute.before":
-			events[i].Fields = []model.NativeFieldID{openCodeSessionID, openCodeCallID}
-			events[i].Identities = []Identity{
+	runtimeContract := pastureruntime.OpenCode1_18_10Lifecycle()
+	runtimeEvents := runtimeContract.Events()
+	events := make([]Event, 0, len(runtimeEvents))
+	for index, runtimeEvent := range runtimeEvents {
+		mapping, err := runtimeContract.Mapping(runtimeEvent)
+		if err != nil {
+			panic(err)
+		}
+		event := Event{
+			Kind:     model.ContractEventKind(31 + index),
+			Symbol:   symbol("EventOpenCode", mapping.NativeName()),
+			Name:     mapping.NativeName(),
+			Blocking: openCodeBlocking(mapping.Blocking()),
+			Mutation: MutationNone,
+			Failure:  openCodeFailure(mapping.Failure()),
+			StopLoop: StopLoopNotApplicable,
+		}
+		switch runtimeEvent {
+		case pastureruntime.OpenCodeEventSessionCreated:
+			event.Fields = []model.NativeFieldID{openCodeSessionID}
+			event.Identities = []Identity{{Field: openCodeSessionID, Binding: model.BindingSession, Required: true}}
+		case pastureruntime.OpenCodeEventToolExecuteBefore:
+			event.Fields = []model.NativeFieldID{openCodeSessionID, openCodeCallID}
+			event.Identities = []Identity{
 				{Field: openCodeSessionID, Binding: model.BindingSession, Required: true},
 				{Field: openCodeCallID, Binding: model.BindingToolCall, Required: true},
 			}
 		}
+		events = append(events, event)
 	}
 	return Contract{Version: "1.18.10", Fields: append([]Field(nil), openCodeFields...), Events: events}
+}
+
+func openCodeBlocking(mode pastureruntime.BlockingMode) BlockingMode {
+	if mode == pastureruntime.NonBlocking {
+		return NonBlocking
+	}
+	return Blocking
+}
+
+func openCodeFailure(mode pastureruntime.FailureMode) FailureMode {
+	if mode == pastureruntime.FailureObserveOnly {
+		return FailureReportAndContinue
+	}
+	return FailureExitTwoBlocks
 }
 
 func symbol(prefix, name string) string {
