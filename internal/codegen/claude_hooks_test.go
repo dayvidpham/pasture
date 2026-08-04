@@ -554,7 +554,11 @@ func writeClaudeAdapter(t *testing.T) string {
 func writeFakePasture(t *testing.T, dir string, operation handlers.AdapterOperation) string {
 	t.Helper()
 	path := filepath.Join(dir, "fake pasture")
-	script := `#!/usr/bin/env sh
+	shell, err := exec.LookPath("sh")
+	if err != nil {
+		t.Fatalf("sh is required to execute the fake pasture adapter: %v", err)
+	}
+	script := `#!` + shell + `
 set -eu
 : "${PASTURE_TEST_CAPTURE:?missing capture path}"
 cat > "${PASTURE_TEST_CAPTURE}"
