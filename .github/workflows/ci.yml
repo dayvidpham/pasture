@@ -24,6 +24,14 @@ jobs:
           go-version: ${{ matrix.go-version }}
           cache: true
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.13"
+
+      - name: Verify Bun
+        run: bun --version
+
       - name: Verify dependencies
         run: go mod verify
 
@@ -51,12 +59,11 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        # CGO_ENABLED=0 enforces pure-Go build; -race requires CGo so it is
-        # omitted here. Use a separate job with CGO_ENABLED=1 if race
-        # detection is needed against a CGo-capable runner.
+        # Production-path tests execute generated TypeScript through Bun and
+        # build the real CLI with the race detector.
         env:
-          CGO_ENABLED: "0"
-        run: go test ./...
+          CGO_ENABLED: "1"
+        run: go test -race ./...
 
       - name: Recovery tests
         env:
