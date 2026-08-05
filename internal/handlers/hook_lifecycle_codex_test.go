@@ -1,0 +1,191 @@
+package handlers_test
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/dayvidpham/provenance"
+	"github.com/stretchr/testify/require"
+
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/nativeresponse"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
+	"github.com/dayvidpham/pasture/internal/runtime"
+	"github.com/dayvidpham/pasture/internal/tasks"
+)
+
+// enabledCodexActivation is the injected pre-activation configuration used by
+// the production proof. Codex activation is default-off in the committed tree
+// until a later wave; these hand-built enabled entries exercise the real
+// durable handler path before the committed activation lands. The handler gates
+// on State==Enabled only, so this is the activation configuration the eventual
+// committed manifest will supply — not a separate test-only code path.
+func enabledCodexActivation() []activation.Entry {
+	return []activation.Entry{
+		{Event: registration.EventCodexSessionStart, State: activation.Enabled},
+		{Event: registration.EventCodexPreToolUse, State: activation.Enabled},
+	}
+}
+
+func codexFixture(t *testing.T, name string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "lifecycle", "ingress", "codex", "testdata", "fixtures", name))
+	require.NoError(t, err)
+	return raw
+}
+
+// TestHookLifecycleResponseRejectsWithheldCodexBeforeInputAndStorage proves the
+// committed default-off Codex manifest gates every Codex event before any stdin
+// or storage access, mirroring the accepted M2 enforcement pattern. No
+// activation is injected, so the statically dispatched default-off manifest
+// governs admission.
+//
+// FAILS until the L3 static Codex dispatch lands.
+func TestHookLifecycleResponseRejectsWithheldCodexBeforeInputAndStorage(t *testing.T) {
+	t.Parallel()
+	for _, event := range []string{"SessionStart", "PreToolUse"} {
+		event := event
+		t.Run(event, func(t *testing.T) {
+			t.Parallel()
+			dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
+			input := &readTrackingLifecycleInput{}
+			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
+				DBPath: dbPath, Harness: ir.HarnessCodex, Event: event, HostVersion: "0.146.0",
+				Input: input, Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.withheld.codex"},
+			})
+			require.ErrorContains(t, err, `Codex event "`+event+`" is withheld (reason production-proof-missing)`)
+			require.False(t, response.IsValid(), "withheld Codex event must emit no host response")
+			require.Zero(t, input.reads, "withheld Codex event must be rejected before stdin access")
+			_, statErr := os.Stat(dbPath)
+			require.ErrorIs(t, statErr, os.ErrNotExist, "withheld Codex event must be rejected before storage access")
+		})
+	}
+}
+
+// TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes
+// drives the two authentic Codex fixtures through the real durable handler with
+// an injected enabled activation configuration. It proves, on the production
+// path, that the durable receipt commits before the response is available for
+// native encoding, that the native continuation bytes match the pinned golden
+// shapes, and that the persisted evidence is provider-correct on bounded
+// public read-back.
+//
+// FAILS until the L3 static Codex dispatch, activation override, and native
+// encoder wiring land.
+func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, fixture, event string
+		kind                 model.ContractEventKind
+		semantic             runtime.EventSemantic
+		wantResponse         bool
+		wantNative           []byte
+		wantEvidence         []provenance.EvidenceKind
+		wantIdentities       map[runtime.NativeIdentityKind]string
+	}{
+		{
+			name:         "SessionStart observation",
+			fixture:      "session_start_0_146_0.json",
+			event:        "SessionStart",
+			kind:         registration.EventCodexSessionStart,
+			semantic:     runtime.SemanticObservation,
+			wantResponse: false,
+			wantNative:   []byte(`{}`),
+			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v1"},
+			wantIdentities: map[runtime.NativeIdentityKind]string{
+				runtime.IdentitySession: "019fc756-217c-7233-81f7-b5e979279345",
+			},
+		},
+		{
+			name:         "PreToolUse gate",
+			fixture:      "pre_tool_use_0_146_0.json",
+			event:        "PreToolUse",
+			kind:         registration.EventCodexPreToolUse,
+			semantic:     runtime.SemanticGateConsultation,
+			wantResponse: true,
+			wantNative:   []byte(`{"continue":true}`),
+			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v1", "pasture.lifecycle.consultation.v1"},
+			wantIdentities: map[runtime.NativeIdentityKind]string{
+				runtime.IdentitySession:  "019fc756-217c-7233-81f7-b5e979279345",
+				runtime.IdentityTurn:     "019fc756-21b7-7f63-b8e2-4f4cd1ce0184",
+				runtime.IdentityToolCall: "exec-fe2dea40-82a3-410f-891e-a7f9e6295c6b",
+			},
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			raw := codexFixture(t, tc.fixture)
+			dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+			bootstrap, err := tasks.OpenTaskTracker(dbPath)
+			require.NoError(t, err)
+			_, err = bootstrap.Create("file://codex-handler-test", "bootstrap", "initialize lifecycle system identity", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
+			require.NoError(t, err)
+			require.NoError(t, bootstrap.Close())
+
+			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
+				DBPath: dbPath, Harness: ir.HarnessCodex, Event: tc.event, HostVersion: "0.146.0",
+				Input: bytes.NewReader(raw), Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.codex." + tc.name},
+				Activations: enabledCodexActivation(),
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.wantResponse, response.IsValid())
+
+			// Native continuation bytes are the exact host stdout for this event.
+			native, err := nativeresponse.Encode(ir.HarnessCodex, response)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantNative, native, "native continuation bytes must equal the pinned golden shape")
+
+			// Returning from the handler must imply every expected effect is
+			// already durably readable (commit before response/stdout).
+			tracker, err := tasks.OpenTaskTracker(dbPath)
+			require.NoError(t, err)
+			defer tracker.Close()
+			page, err := tracker.Journal().Facts().QueryEvidence(provenance.EvidenceQuery{
+				Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}},
+				Kinds:  tc.wantEvidence, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize},
+			})
+			require.NoError(t, err)
+			require.Len(t, page.Rows, len(tc.wantEvidence), "durable evidence must be committed before the handler returns")
+			for _, row := range page.Rows {
+				require.Equal(t, provenance.OperationID("test.codex."+tc.name), row.ProducingOperationID)
+			}
+			if tc.wantResponse {
+				interpreted := queryOneEvidence(t, tracker, "pasture.lifecycle.interpreted.v1")
+				consultation := queryOneEvidence(t, tracker, "pasture.lifecycle.consultation.v1")
+				require.Equal(t, interpreted.ProducingOperationJournalID, consultation.ProducingOperationJournalID, "one durable operation must group interpreted and consultation evidence")
+				require.Less(t, interpreted.JournalID, consultation.JournalID, "interpreted evidence must precede consultation evidence in the committed operation")
+			}
+
+			// Bounded provider-correct public read-back.
+			require.NoError(t, tasks.RebuildLifecycleOccurrences(context.Background(), tracker))
+			reader, err := tasks.NewLifecycleReader(tracker)
+			require.NoError(t, err)
+			pageSize, err := model.NewPageSize(4)
+			require.NoError(t, err)
+			records, err := reader.Records(context.Background(), model.OccurrenceQuery{Page: model.PageRequest{Size: pageSize}})
+			require.NoError(t, err)
+			require.Len(t, records.Records(), 1, "the bounded read-back must return exactly the one committed occurrence")
+			record := records.Records()[0]
+			require.Equal(t, registration.Codex0_146_0().Contract, record.Occurrence.RuntimeContract, "read-back must preserve the Codex provider contract")
+			require.Equal(t, "0.146.0", record.Occurrence.Envelope.HostVersion)
+			require.Equal(t, tc.kind, record.Occurrence.Kind)
+			require.Len(t, record.Interpreted(), 1)
+			interpreted := record.Interpreted()[0]
+			require.Equal(t, runtime.Codex0_146_0().ID(), interpreted.Contract(), "interpreted read-back must carry the Codex runtime contract, never OpenCode or Claude")
+			require.Equal(t, tc.semantic, interpreted.Semantic())
+			identities := make(map[runtime.NativeIdentityKind]string, len(interpreted.Identities()))
+			for _, identity := range interpreted.Identities() {
+				identities[identity.Kind] = identity.Value
+			}
+			require.Equal(t, tc.wantIdentities, identities, "read-back identities must be the provider-correct Codex correlation set")
+		})
+	}
+}
