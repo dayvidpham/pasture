@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,4 +63,58 @@ func TestWithheldCodexEventIsNotAdmittedByBuiltCLI(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &page))
 	require.Empty(t, page.Items, "withheld Codex ingress must persist no public lifecycle record")
+}
+
+// erroringWriter fails on every Write, standing in for a closed stdout pipe.
+type erroringWriter struct{ writes int }
+
+func (w *erroringWriter) Write(p []byte) (int, error) {
+	w.writes++
+	return 0, errors.New("closed output")
+}
+
+// TestLifecycleCommandReportsStdoutWriteFailureAfterDurableCommit exercises the
+// harness-neutral native-continuation write-failure branch in the production
+// lifecycle command RunE (cmd/pasture/hook_lifecycle.go): the durable receipt
+// has already committed, so a failed stdout write must be reported with an
+// actionable diagnostic and the hook must still exit 0 rather than signalling
+// failure to the host. It drives the real command in-process with a stdout
+// writer that fails on Write, using an enabled Claude PreToolUse gate (which
+// produces native continuation bytes; Codex is default-off and cannot reach the
+// write path through the built CLI). This restores the output-failure assertion
+// lost when the canonical-only writeLifecycleResponse helper was removed.
+func TestLifecycleCommandReportsStdoutWriteFailureAfterDurableCommit(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+	initializeLifecycleTestDatabase(t, dbPath)
+	raw := readProductionClaudeFixture(t, "pre_tool_use_2_1_222.json", "PreToolUse")
+
+	failing := &erroringWriter{}
+	var stderr bytes.Buffer
+	rootCmd.SetArgs([]string{databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", "PreToolUse", "--host-version", "2.1.222"})
+	rootCmd.SetIn(bytes.NewReader(raw))
+	rootCmd.SetOut(failing)
+	rootCmd.SetErr(&stderr)
+	t.Cleanup(func() {
+		rootCmd.SetArgs(nil)
+		rootCmd.SetIn(nil)
+		rootCmd.SetOut(nil)
+		rootCmd.SetErr(nil)
+	})
+
+	require.NoError(t, rootCmd.Execute(), "the hook must exit 0 after the durable commit even when the stdout write fails")
+	require.NotZero(t, failing.writes, "the failing writer must have been asked to write the native continuation")
+	require.Contains(t, stderr.String(), "could not write its committed host continuation")
+	require.Contains(t, stderr.String(), "the event was recorded but the host received no continuation; inspect the database and retry the hook input")
+
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	defer tracker.Close()
+	occurrences := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
+	interpreted := queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)
+	consultation := queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind)
+	require.Len(t, occurrences, 1, "durable occurrence evidence must be committed before the failed stdout write")
+	require.Len(t, interpreted, 1)
+	require.Len(t, consultation, 1)
+	require.Equal(t, interpreted[0].ProducingOperationJournalID, consultation[0].ProducingOperationJournalID, "one durable operation groups interpreted and consultation evidence")
+	require.Less(t, interpreted[0].JournalID, consultation[0].JournalID, "interpreted evidence precedes consultation evidence in the committed operation")
 }
