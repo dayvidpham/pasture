@@ -16,53 +16,66 @@ import (
 
 // TestWithheldCodexEventIsNotAdmittedByBuiltCLI proves the built production CLI
 // dispatches the codex harness and gates its events off by default. Codex
-// activation stays default-off in the committed tree until a later wave, so the
-// built binary must emit no host continuation and persist no evidence for a
+// activation stays default-off in the committed tree through implementation and
+// independent review (ratified proposal step 6, "activation last"): even the two
+// selected events (SessionStart, PreToolUse) remain withheld through the built
+// CLI, which exposes no activation-injection seam, until the committed default
+// is flipped to activation.Codex0_146_0() after M3 Implementation UAT. The built
+// binary must therefore emit no host continuation and persist no evidence for a
 // Codex event, while still reporting the withheld reason on stderr.
 //
-// The enabled Codex durable path and native continuation bytes are proven on
-// the in-process production path in
-// internal/handlers/hook_lifecycle_codex_test.go (with the injected activation
-// configuration the committed manifest will later supply) and pinned by the
+// The enabled Codex durable path and native continuation bytes are proven on the
+// real production handler path with the committed catalog injected through the
+// sanctioned pre-activation seam in
+// cmd/pasture/hook_lifecycle_production_test.go:TestEnabledCodexHandlersToDurableReadBack
+// and internal/handlers/hook_lifecycle_codex_test.go, and pinned by the
 // nativeresponse golden-byte tests; the built CLI cannot enable Codex without a
-// production backdoor, so this subprocess test verifies the safe default state.
-//
-// FAILS until the L3 static Codex dispatch lands.
+// production backdoor, so this subprocess test verifies the safe default state
+// for both selected events.
 func TestWithheldCodexEventIsNotAdmittedByBuiltCLI(t *testing.T) {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "pasture")
 	buildLifecycleBinary(t, binary)
-	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
-	initializeLifecycleTestDatabase(t, dbPath)
 
-	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "codex", "testdata", "fixtures", "pre_tool_use_0_146_0.json"))
-	require.NoError(t, err)
+	for _, tc := range []struct{ event, fixture string }{
+		{event: "SessionStart", fixture: "session_start_0_146_0.json"},
+		{event: "PreToolUse", fixture: "pre_tool_use_0_146_0.json"},
+	} {
+		tc := tc
+		t.Run(tc.event, func(t *testing.T) {
+			dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+			initializeLifecycleTestDatabase(t, dbPath)
 
-	command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "codex", "--event", "PreToolUse", "--host-version", "0.146.0")
-	command.Stdin = bytes.NewReader(raw)
-	var stdout, stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-	require.NoError(t, command.Run(), stderr.String())
-	require.Empty(t, stdout.String(), "a withheld Codex event must emit no native continuation on stdout")
-	require.Contains(t, stderr.String(), `Codex event "PreToolUse" is withheld (reason production-proof-missing)`)
+			raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "codex", "testdata", "fixtures", tc.fixture))
+			require.NoError(t, err)
 
-	tracker, err := tasks.OpenTaskTracker(dbPath)
-	require.NoError(t, err)
-	require.Empty(t, queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind), "withheld Codex ingress must persist no occurrence evidence")
-	require.NoError(t, tracker.Close())
+			command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "codex", "--event", tc.event, "--host-version", "0.146.0")
+			command.Stdin = bytes.NewReader(raw)
+			var stdout, stderr bytes.Buffer
+			command.Stdout = &stdout
+			command.Stderr = &stderr
+			require.NoError(t, command.Run(), stderr.String())
+			require.Empty(t, stdout.String(), "a withheld Codex event must emit no native continuation on stdout")
+			require.Contains(t, stderr.String(), `Codex event "`+tc.event+`" is withheld (reason production-proof-missing)`)
 
-	list := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "list", "--format", "json")
-	stdout.Reset()
-	stderr.Reset()
-	list.Stdout = &stdout
-	list.Stderr = &stderr
-	require.NoError(t, list.Run(), stderr.String())
-	var page struct {
-		Items []json.RawMessage `json:"items"`
+			tracker, err := tasks.OpenTaskTracker(dbPath)
+			require.NoError(t, err)
+			require.Empty(t, queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind), "withheld Codex ingress must persist no occurrence evidence")
+			require.NoError(t, tracker.Close())
+
+			list := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "list", "--format", "json")
+			stdout.Reset()
+			stderr.Reset()
+			list.Stdout = &stdout
+			list.Stderr = &stderr
+			require.NoError(t, list.Run(), stderr.String())
+			var page struct {
+				Items []json.RawMessage `json:"items"`
+			}
+			require.NoError(t, json.Unmarshal(stdout.Bytes(), &page))
+			require.Empty(t, page.Items, "withheld Codex ingress must persist no public lifecycle record")
+		})
 	}
-	require.NoError(t, json.Unmarshal(stdout.Bytes(), &page))
-	require.Empty(t, page.Items, "withheld Codex ingress must persist no public lifecycle record")
 }
 
 // erroringWriter fails on every Write, standing in for a closed stdout pipe.
