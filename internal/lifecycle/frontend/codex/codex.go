@@ -1,5 +1,13 @@
 // Package codex binds selected Codex 0.146.0 command-hook identities to the
 // target-neutral lifecycle waist, producing verified L2.
+//
+// This frontend binds ONLY the two authenticity-proven events, SessionStart
+// (observation smoke) and PreToolUse (gate); every other source-derived catalog
+// entry is rejected by Bind. Because of that closed positive scope, the
+// deliberate divergence between the self-contained ingress catalog
+// (internal/lifecycle/ingress/internal/hostcontract/codex_0_146_0.go) and the
+// runtime Codex profile on the 8 non-proven events is inert here — that
+// metadata is never ingested.
 package codex
 
 import (
