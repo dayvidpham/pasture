@@ -121,13 +121,13 @@ func TestCodexTargetDescriptorPartitionsPackages(t *testing.T) {
 		t.Fatal("hooks package is missing")
 	}
 	hookFiles := codexRegularFilePaths(hooks)
-	wantHookFiles := 1 + len(codexTargetLifecycleEventsForTest())
+	wantHookFiles := len(codexTargetLifecycleEventsForTest())
 	if len(hookFiles) != wantHookFiles {
-		t.Fatalf("hooks package files = %d, want shared adapter plus %d event executables: %v", len(hookFiles), len(codexTargetLifecycleEventsForTest()), hookFiles)
+		t.Fatalf("hooks package files = %d, want exactly %d exec-only event runners (no Python adapter): %v", len(hookFiles), wantHookFiles, hookFiles)
 	}
 	if hookFiles[0] != ".codex/hooks/events/PermissionRequest.sh" {
-		// Paths are sorted; event executables precede the shared Python adapter.
-		t.Fatalf("first hook package file = %q, want sorted event executable inventory", hookFiles[0])
+		// Paths are sorted and the package holds only event runners now.
+		t.Fatalf("first hook package file = %q, want sorted event runner inventory", hookFiles[0])
 	}
 
 	// The target manifest bundle carries exactly the plugin manifest.
@@ -184,15 +184,12 @@ func TestCodexBundleManifestsAreCanonical(t *testing.T) {
 }
 
 func codexTargetLifecycleEventsForTest() []string {
-	metadata, err := lifecycleMetadata(runtime.Codex0_146_0Lifecycle(), "0.146.0", codexNativeFields)
-	if err != nil {
-		panic(err)
+	events := runtime.CodexLifecycleEvents()
+	names := make([]string, len(events))
+	for index, event := range events {
+		names[index] = event.NativeName()
 	}
-	events := make([]string, len(metadata.Events))
-	for index, event := range metadata.Events {
-		events[index] = event.Name
-	}
-	return events
+	return names
 }
 
 // TestCodexDescriptorIsContentAddressedDeterministic proves the descriptor is a

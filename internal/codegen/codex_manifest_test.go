@@ -53,15 +53,12 @@ func TestCodexManifestIsDeterministic(t *testing.T) {
 	if renderCodexManifest() != renderCodexManifest() {
 		t.Fatal("renderCodexManifest is not deterministic")
 	}
-	metadata, err := lifecycleMetadata(runtime.Codex0_146_0Lifecycle(), "0.146.0", codexNativeFields)
-	if err != nil {
-		t.Fatalf("lifecycleMetadata: %v", err)
-	}
-	first, err := renderCodexHooksConfig(metadata.Events)
+	eventNames := codexLifecycleEventNamesForTest()
+	first, err := renderCodexHooksConfig(eventNames)
 	if err != nil {
 		t.Fatalf("first config render: %v", err)
 	}
-	second, err := renderCodexHooksConfig(metadata.Events)
+	second, err := renderCodexHooksConfig(eventNames)
 	if err != nil {
 		t.Fatalf("second config render: %v", err)
 	}
@@ -70,15 +67,23 @@ func TestCodexManifestIsDeterministic(t *testing.T) {
 	}
 }
 
+// codexLifecycleEventNamesForTest returns the pinned Codex lifecycle event
+// native names in catalog order, the exact input the production transport
+// renderer consumes.
+func codexLifecycleEventNamesForTest() []string {
+	events := runtime.CodexLifecycleEvents()
+	names := make([]string, len(events))
+	for i, event := range events {
+		names[i] = event.NativeName()
+	}
+	return names
+}
+
 // TestCodexHooksConfigCoversPinnedEvents proves the executable hook inventory is
 // exactly the runtime contract's closed event set.
 func TestCodexHooksConfigCoversPinnedEvents(t *testing.T) {
 	t.Parallel()
-	metadata, err := lifecycleMetadata(runtime.Codex0_146_0Lifecycle(), "0.146.0", codexNativeFields)
-	if err != nil {
-		t.Fatalf("lifecycleMetadata: %v", err)
-	}
-	wire, err := renderCodexHooksConfig(metadata.Events)
+	wire, err := renderCodexHooksConfig(codexLifecycleEventNamesForTest())
 	if err != nil {
 		t.Fatalf("renderCodexHooksConfig: %v", err)
 	}
