@@ -1,0 +1,10 @@
+{
+  "origin": "authentic-capture",
+  "harness": "claude-code",
+  "harnessVersion": "2.1.222",
+  "captureSource": "tools/capture-claude-hook.sh",
+  "rawFileDigest": "sha256:b147a832c7f9781b991443813dd0438ef9990af21af35f9113ad63e50435192e",
+  "capturedAt": "2026-08-05T01:40:04Z",
+  "redaction": "home-path-v1",
+  "event": "PreToolUse"
+}

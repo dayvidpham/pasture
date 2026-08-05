@@ -149,40 +149,19 @@ func sortedUniqueStrings(values []string) []string {
 }
 
 func claudeNativeFields(event string) []string {
-	fields := []string{
-		"session_id", "transcript_path", "cwd", "permission_mode",
-		"hook_event_name", "effort", "agent_id", "agent_type",
+	manifest := registration.ClaudeCode2_1_210()
+	fieldNames := registration.ClaudeCode2_1_210NativeFieldNames()
+	for _, candidate := range manifest.Events {
+		if candidate.NativeName != event {
+			continue
+		}
+		fields := make([]string, 0, len(candidate.AllowedFields))
+		for _, field := range candidate.AllowedFields {
+			fields = append(fields, fieldNames[field])
+		}
+		return fields
 	}
-	extras := map[string][]string{
-		"SessionStart":        {"source", "model", "session_title"},
-		"Setup":               {"trigger"},
-		"SessionEnd":          {"reason"},
-		"UserPromptSubmit":    {"prompt"},
-		"UserPromptExpansion": {"prompt", "command_name"},
-		"Stop":                {"stop_hook_active"},
-		"StopFailure":         {"error", "error_type"},
-		"PreToolUse":          {"tool_name", "tool_input", "tool_use_id"},
-		"PermissionRequest":   {"tool_name", "tool_input", "request_id"},
-		"PermissionDenied":    {"tool_name", "tool_input"},
-		"PostToolUse":         {"tool_name", "tool_input", "tool_output", "tool_use_id"},
-		"PostToolUseFailure":  {"tool_name", "tool_input", "error", "tool_use_id"},
-		"PostToolBatch":       {"batch_results"},
-		"FileChanged":         {"file_path"},
-		"ConfigChange":        {"config_source"},
-		"InstructionsLoaded":  {"file_path", "memory_type", "load_reason", "globs", "trigger_file_path", "parent_file_path"},
-		"SubagentStart":       {"agent_id", "agent_type"},
-		"SubagentStop":        {"agent_id", "agent_type", "agent_transcript_path", "stop_hook_active"},
-		"TeammateIdle":        {"teammate_name"},
-		"TaskCreated":         {"task_id"},
-		"TaskCompleted":       {"task_id"},
-		"PreCompact":          {"trigger"},
-		"PostCompact":         {"trigger"},
-		"Notification":        {"message", "notification_type", "title"},
-		"MessageDisplay":      {"message", "content"},
-		"Elicitation":         {"request_id", "fields", "mcp_server_name"},
-		"ElicitationResult":   {"request_id", "response", "mcp_server_name"},
-	}
-	return append(fields, extras[event]...)
+	return nil
 }
 
 func codexNativeFields(event string) []string {

@@ -1,0 +1,10 @@
+{
+  "origin": "authentic-capture",
+  "harness": "claude-code",
+  "harnessVersion": "2.1.222",
+  "captureSource": "tools/capture-claude-hook.sh",
+  "rawFileDigest": "sha256:dfdbd5d6c525d2d057171c7c15c6439c235f7506e11988c6cd7ae80e827ba16e",
+  "capturedAt": "2026-08-05T01:53:29Z",
+  "redaction": "home-path-v1",
+  "event": "SessionEnd"
+}

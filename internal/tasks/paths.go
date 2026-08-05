@@ -15,6 +15,11 @@ import (
 // unified pasture database location (see DefaultDBPath).
 const DBPathEnv = "PASTURE_DB_PATH"
 
+// DatabaseFilename is a typed unified database filename.
+type DatabaseFilename string
+
+func (f DatabaseFilename) String() string { return string(f) }
+
 // DefaultDBFilename is the filename portion of the unified pasture database.
 // PROPOSAL-2 §7.1 binds this to `pasture.db` so both the Provenance subsystem
 // (task CRUD, agents, edges, labels, comments, activities) and the audit
@@ -24,7 +29,7 @@ const DBPathEnv = "PASTURE_DB_PATH"
 // defaulted to `audit.db`; SLICE-10 collapses both to `pasture.db`. See
 // PROPOSAL-2 §7.1 + §11 Scenario 9 for the unification rationale and the
 // hjsdt-CLI byte-identical-output requirement that drives the migration.
-const DefaultDBFilename = "pasture.db"
+const DefaultDBFilename DatabaseFilename = "pasture.db"
 
 // DefaultDBPath returns the conventional path for the unified pasture
 // database, used by both the `pasture` CLI and the `pastured` daemon
@@ -44,15 +49,15 @@ func DefaultDBPath() string {
 		return v
 	}
 	if dataDir := os.Getenv("XDG_DATA_HOME"); dataDir != "" {
-		return filepath.Join(dataDir, "pasture", DefaultDBFilename)
+		return filepath.Join(dataDir, "pasture", DefaultDBFilename.String())
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		// Fall back to relative path. The handler will surface a clearer error
 		// when SQLite fails to open the file.
-		return filepath.Join(".pasture", DefaultDBFilename)
+		return filepath.Join(".pasture", DefaultDBFilename.String())
 	}
-	return filepath.Join(home, ".local", "share", "pasture", DefaultDBFilename)
+	return filepath.Join(home, ".local", "share", "pasture", DefaultDBFilename.String())
 }
 
 // DefaultNamespace returns the namespace URI that pasture uses when the user

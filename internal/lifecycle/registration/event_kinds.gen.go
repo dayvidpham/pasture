@@ -125,6 +125,16 @@ const (
 	FieldFields
 	FieldMCPServerName
 	FieldResponse
+	FieldPromptID
+	FieldToolResponse
+	FieldDurationMS
+	FieldIsInterrupt
+	FieldToolCalls
+	FieldCustomInstructions
+	FieldCompactSummary
+	FieldMode
+	FieldRequestedSchema
+	FieldAction
 	FieldOpenCodeSessionID
 	FieldOpenCodeCallID
 )

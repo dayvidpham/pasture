@@ -13,6 +13,13 @@ import (
 
 const version = "v0.1.0"
 
+type cliFlagName string
+
+func (n cliFlagName) String() string   { return string(n) }
+func (n cliFlagName) Argument() string { return "--" + n.String() }
+
+const databaseFlagName cliFlagName = "db"
+
 // rootCmd is the parent for all pasture subcommands.
 // Global flags are registered here and resolved to per-command values via the
 // flagFormat / flagDB helpers below.
@@ -48,7 +55,7 @@ var (
 
 func init() {
 	pf := rootCmd.PersistentFlags()
-	pf.StringVar(&flagDBPath, "db", "",
+	pf.StringVar(&flagDBPath, databaseFlagName.String(), "",
 		"Path to the unified pasture SQLite database (env: PASTURE_DB_PATH, default: ~/.local/share/pasture/pasture.db)")
 	pf.StringVar(&flagFormat, "format", "text",
 		"Output format: text or json")

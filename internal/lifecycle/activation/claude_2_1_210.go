@@ -13,19 +13,20 @@ type targetEventDeclaration struct {
 	event           model.ContractEventKind
 	captureProof    CaptureProof
 	productionProof ProductionProof
+	withheldReason  WithheldReason
 }
 
 var claudeTargetEventDeclarations = [...]targetEventDeclaration{
 	{event: registration.EventSessionStart, captureProof: CaptureProofSessionStart, productionProof: ProductionProofSessionStart},
-	{event: registration.EventSessionEnd},
-	{event: registration.EventPreToolUse},
-	{event: registration.EventPostToolUse},
-	{event: registration.EventPostToolUseFailure},
-	{event: registration.EventPostToolBatch},
-	{event: registration.EventPreCompact},
-	{event: registration.EventPostCompact},
-	{event: registration.EventElicitation},
-	{event: registration.EventElicitationResult},
+	{event: registration.EventSessionEnd, captureProof: CaptureProofSessionEnd, productionProof: ProductionProofSessionEnd},
+	{event: registration.EventPreToolUse, captureProof: CaptureProofPreToolUse, productionProof: ProductionProofPreToolUse},
+	{event: registration.EventPostToolUse, captureProof: CaptureProofPostToolUse, productionProof: ProductionProofPostToolUse},
+	{event: registration.EventPostToolUseFailure, captureProof: CaptureProofPostToolUseFailure, productionProof: ProductionProofPostToolUseFailure},
+	{event: registration.EventPostToolBatch, captureProof: CaptureProofPostToolBatch, productionProof: ProductionProofPostToolBatch},
+	{event: registration.EventPreCompact, captureProof: CaptureProofPreCompact, productionProof: ProductionProofPreCompact},
+	{event: registration.EventPostCompact, captureProof: CaptureProofPostCompact, productionProof: ProductionProofPostCompact},
+	{event: registration.EventElicitation, withheldReason: WithheldMissingRequestCorrelation},
+	{event: registration.EventElicitationResult, withheldReason: WithheldMissingRequestCorrelation},
 }
 
 // ClaudeCode2_1_210TargetEvents returns the typed target subset in declaration
@@ -64,6 +65,9 @@ func ClaudeCode2_1_210() ([]Entry, error) {
 			continue
 		}
 		if declaration.captureProof != 0 || declaration.productionProof != 0 {
+			if declaration.withheldReason != 0 {
+				return nil, fmt.Errorf("activation.ClaudeCode2_1_210: target event %q has both proofs and withholding reason %q; choose one static activation state", event.NativeName, declaration.withheldReason.String())
+			}
 			entry, err := NewEnabled(event.Kind, declaration.captureProof, declaration.productionProof)
 			if err != nil {
 				return nil, fmt.Errorf("activation.ClaudeCode2_1_210: enable generated event %q: %w", event.NativeName, err)
@@ -71,7 +75,11 @@ func ClaudeCode2_1_210() ([]Entry, error) {
 			out = append(out, entry)
 			continue
 		}
-		entry, err := NewWithheld(event.Kind, WithheldMissingFixture)
+		reason := declaration.withheldReason
+		if reason == 0 {
+			reason = WithheldMissingFixture
+		}
+		entry, err := NewWithheld(event.Kind, reason)
 		if err != nil {
 			return nil, fmt.Errorf("activation.ClaudeCode2_1_210: withhold target event %q: %w", event.NativeName, err)
 		}
