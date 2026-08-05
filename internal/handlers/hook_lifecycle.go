@@ -99,9 +99,9 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	}
 	// The committed per-harness manifest governs admission unless the caller
 	// injects an activation configuration. Production callers leave in.Activations
-	// nil, so Codex stays default-off until its committed activation lands; the
-	// pre-activation production proof injects an enabled manifest to exercise this
-	// exact durable path with no separate code path.
+	// nil so the committed per-harness activation manifest governs admission
+	// (Codex admits the two accepted events via activation.Codex0_146_0());
+	// the override exercises the same durable path with an alternative manifest.
 	activations := dispatch.activations
 	if in.Activations != nil {
 		activations = in.Activations

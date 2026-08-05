@@ -13,12 +13,11 @@ import (
 // catalog membership alone carries no proof, so every other Codex event derives
 // to Withheld (outside-target-set).
 //
-// This catalog is the post-UAT activation the committed default-off handler
-// dispatch adopts only after M3 Implementation UAT acceptance (ratified proposal
-// step 6, "activation last"). It stays consumed-but-unwired through
-// implementation and independent review; the pre-activation production proof
-// injects it through handlers.HookLifecycleInput.Activations to exercise the
-// real durable path without flipping the committed default.
+// This catalog is the committed Codex dispatch activation adopted at M3
+// Implementation UAT (ratified proposal step 6, "activation last"). It is now
+// the wired production default for the Codex harness, mirroring the Claude and
+// OpenCode catalog docs; the pre-activation production proof exercised the same
+// durable path by injecting it through handlers.HookLifecycleInput.Activations.
 var codexTargetEventDeclarations = [...]targetEventDeclaration{
 	{event: registration.EventCodexSessionStart, captureProof: CaptureProofCodexSessionStart, productionProof: ProductionProofCodexSessionStart},
 	{event: registration.EventCodexPreToolUse, captureProof: CaptureProofCodexPreToolUse, productionProof: ProductionProofCodexPreToolUse},

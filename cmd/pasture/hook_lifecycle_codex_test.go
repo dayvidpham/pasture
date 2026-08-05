@@ -62,8 +62,9 @@ func (w *erroringWriter) Write(p []byte) (int, error) {
 // actionable diagnostic and the hook must still exit 0 rather than signalling
 // failure to the host. It drives the real command in-process with a stdout
 // writer that fails on Write, using an enabled Claude PreToolUse gate (which
-// produces native continuation bytes; Codex is default-off and cannot reach the
-// write path through the built CLI). This restores the output-failure assertion
+// produces native continuation bytes; Codex now enables two events and could
+// reach the write path through the built CLI; we use Claude to keep the test
+// harness-neutral and focused on the write-failure branch).
 // lost when the canonical-only writeLifecycleResponse helper was removed.
 func TestLifecycleCommandReportsStdoutWriteFailureAfterDurableCommit(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
