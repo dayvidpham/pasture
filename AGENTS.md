@@ -135,6 +135,16 @@ both to `pasture.db`. `pastured` accepts `--db`, and the shared fallback remains
 `PASTURE_DB_PATH` / `tasks.DefaultDBPath()`. The old `--audit-db-path` alias has
 been retired with the Temporal daemon role.
 
+### Database initialization (`pasture init`)
+
+`pasture init` creates or upgrades the complete unified database without
+starting `pastured`. Under a bounded cross-process initialization lock, it opens
+the production `TaskTracker`, applies the Provenance and audit migrations,
+idempotently registers all built-in agents, and creates the projection and DBOS
+schemas without launching workflow recovery, queues, or schedulers. Repeated
+runs preserve the existing agent IDs and row counts. `pasture status` remains
+read-only and directs users to this command when the database does not exist.
+
 ### Schema migration (`pasture migrate`)
 
 `pasture migrate [--dry-run]` is a top-level CLI command (NOT under
@@ -151,12 +161,13 @@ Auto-on-open is preserved: `OpenTaskTracker` runs the migrator at every open
 (`internal/audit/migrate.go` + the `migrate_v*.go` step files); the explicit
 command exists for ops convenience and for the BDD Scenario 15 surface.
 
-### Well-known automaton agents (15 entries, registered at `pastured` startup)
+### Well-known automaton agents (15 entries)
 
-`pastured` registers 15 well-known software agents at startup
+`pasture init` registers 15 well-known software agents, and `pastured` repeats
+the same idempotent registration at startup to populate its in-memory cache
 (PROPOSAL-2 §7.7.2; implementation in `internal/tasks/well_known_registry.go`,
 `well_known.go`, `well_known_cache.go`). Registration is idempotent: two
-consecutive startups produce identical row counts in `agents`,
+consecutive initializations or startups produce identical row counts in `agents`,
 `agents_software`, `pasture_well_known_agents`, and `pasture_agent_categories`
 (BDD Scenario 14). The breakdown:
 

@@ -92,7 +92,7 @@ and executes epoch control, slice/review queues, hooks, and recovery work.
 
 ```
 cmd/
-  ├── pasture/         # Unified CLI: task management, epoch lifecycle, signals, queries, migrate
+  ├── pasture/         # Unified CLI: task management, epoch lifecycle, signals, queries, init/migrate
   ├── pastured/        # DBOS engine-host daemon entry point
   └── pasture-release/ # Release and versioning tool
 internal/
@@ -124,6 +124,7 @@ The local `pasture` CLI hosts task verbs (`task create / show / update / close /
 | `pasture task timeline TASK-ID` | Show all events attached to a task |
 | `pasture task contexts EVENT-ID` | List context_edges attached to an event |
 | `pasture task agents [list\|show]` | List or inspect registered agents |
+| `pasture init` | Create or upgrade all local schemas and built-in agents without starting `pastured` |
 | `pasture migrate [--dry-run]` | Run pending audit-database schema migrations (top-level — NOT under `pasture task`) |
 
 ## Key Conventions
