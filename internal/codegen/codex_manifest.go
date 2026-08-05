@@ -117,14 +117,47 @@ func codexRunnerRelPath(event string) string {
 	return codexHooksRoot + "/events/" + event + ".sh"
 }
 
+// codexAuthenticMatchers pins the two authentically-proven, activation-bound
+// Codex 0.146.0 events to the EXACT matcher values recorded by the irreplaceable
+// authentic capture configuration. Matcher input-selection semantics carry no
+// in-tree contract backing (the host contract documents identities/semantics and
+// nativeresponse documents only OUTPUT continuation), and Codex usage is
+// exhausted, so these proven values can never be re-verified or regained. If a
+// non-proven value ("") were shipped for these two events and 0.146.0 selects
+// differently at runtime, S5/Wave-3 activation would silently fail to fire with
+// no evidence left to diagnose. These are exactly the two events M3 activates,
+// so they must carry the proven matcher, not the inherited empty convention.
+//
+// Provenance: authentic Codex capture configuration recorded 2026-08-03 —
+// SessionStart used "startup", PreToolUse used "*". Evidence report
+// .agents.local/opencode-codex-authentic-capture-2026-08-03.md (digest
+// e4af95db2b8098e90f212c0a962fa824f777ba4ec778143c2534047f47693a24); user
+// clearance aura-plugins-a6h3d. Also recorded in the plan's Corrected
+// Current-Tree Facts (aura-plugins-28786). Any deviation from these values must
+// be justified against an in-tree contract fact (none currently exists).
+var codexAuthenticMatchers = map[string]string{
+	"SessionStart": "startup",
+	"PreToolUse":   "*",
+}
+
 func renderCodexHooksConfig(eventNames []string) (string, error) {
 	config := codexHooksConfig{Hooks: make(map[string][]codexHookGroup, len(eventNames))}
 	for _, name := range eventNames {
 		var matcher *string
-		switch name {
-		case "SessionStart", "PreToolUse", "PermissionRequest", "PostToolUse", "PreCompact", "PostCompact", "SubagentStart", "SubagentStop":
-			value := ""
+		if proven, ok := codexAuthenticMatchers[name]; ok {
+			// Authentic, activation-bound event: pin its proven matcher exactly.
+			value := proven
 			matcher = &value
+		} else {
+			switch name {
+			case "PermissionRequest", "PostToolUse", "PreCompact", "PostCompact", "SubagentStart", "SubagentStop":
+				// Non-authentic events, never activated in M3: no matcher
+				// evidence exists, so retain the inherited empty-matcher
+				// convention rather than invent a value. Stop and
+				// UserPromptSubmit omit the matcher entirely.
+				value := ""
+				matcher = &value
+			}
 		}
 		config.Hooks[name] = []codexHookGroup{{
 			Matcher: matcher,
