@@ -93,12 +93,9 @@ func TestAuthenticCodexPayloadsProduceProviderCorrectVerifiedL2(t *testing.T) {
 
 			require.Equal(t, ir.HarnessCodex, l2.Origin().Harness())
 			require.Equal(t, waist.NativeEventName(tc.nativeName), l2.Origin().NativeEventName())
-			// IP-1-SWAP (M3-WAVE-1 consolidation): SLICE-1 replaces the runtime
-			// Codex profile with runtime.Codex0_146_0Lifecycle() (codex@0.146.0).
-			// This line and the frontend seam swap together at consolidation; the
-			// selected events are version-stable so only the origin version
-			// coordinate changes.
-			require.Equal(t, runtime.Codex0_144_1Lifecycle().ID(), l2.Origin().Contract())
+			// IP-1 (resolved at M3-WAVE-1 consolidation): origin must carry the
+			// pinned codex@0.146.0 contract owned by M3-SLICE-1.
+			require.Equal(t, runtime.Codex0_146_0Lifecycle().ID(), l2.Origin().Contract())
 		})
 	}
 }

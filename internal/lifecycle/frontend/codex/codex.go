@@ -15,18 +15,12 @@ import (
 // codexLifecycle returns the pinned Codex runtime lifecycle contract used to
 // bind native events into the waist.
 //
-// IP-1-SWAP (M3-WAVE-1 consolidation): M3-SLICE-1 replaces the runtime Codex
-// profile constructor with runtime.Codex0_146_0Lifecycle() (contract
-// codex@0.146.0), removing runtime.Codex0_144_1Lifecycle(). Until that lands at
-// wave consolidation this worktree references the base-tree constructor so the
-// slice builds and its focused -race tests pass standalone. The two selected
-// events (SessionStart observation, PreToolUse gate) are version-stable in
-// semantics and declared identities, so the supervisor swaps this single call
-// at consolidation and only the L2 origin version coordinate changes
-// (codex@0.144.1 -> codex@0.146.0). This is the sole runtime reference in the
-// slice; see the L1 completion note on aura-plugins-tcsxr for the mismatch risk.
+// IP-1 (resolved at M3-WAVE-1 consolidation): the sole runtime seam in this
+// package. M3-SLICE-1 owns the exact profile; this frontend binds against the
+// pinned codex@0.146.0 contract and its two authentically proven events
+// (SessionStart observation, PreToolUse gate).
 func codexLifecycle() runtime.LifecycleContract[runtime.CodexLifecycleEvent] {
-	return runtime.Codex0_144_1Lifecycle() // IP-1-SWAP -> runtime.Codex0_146_0Lifecycle()
+	return runtime.Codex0_146_0Lifecycle()
 }
 
 var eventMappings = map[model.ContractEventKind]runtime.CodexLifecycleEvent{
