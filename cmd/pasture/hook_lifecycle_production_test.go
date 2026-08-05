@@ -1042,15 +1042,17 @@ func assertSharedOperation(t *testing.T, occurrence, interpreted provenance.Evid
 // per-target encoder the CLI RunE invokes (nativeresponse.Encode).
 
 type codexProductionFixture struct {
-	name         string // subtest name; matches activation.ProductionProofCodex*.Name()
-	fixture      string
-	event        string
-	kind         model.ContractEventKind
-	semantic     runtime.EventSemantic
-	wantResponse bool
-	wantNative   []byte
-	wantEvidence []provenance.EvidenceKind
-	identities   map[runtime.NativeIdentityKind]string
+	name            string // subtest name; must equal activation.ProductionProofCodex*.Name()'s test suffix
+	fixture         string
+	event           string
+	kind            model.ContractEventKind
+	semantic        runtime.EventSemantic
+	wantResponse    bool
+	wantNative      []byte
+	wantEvidence    []provenance.EvidenceKind
+	identities      map[runtime.NativeIdentityKind]string
+	captureProof    activation.CaptureProof    // must cite the fixture this proof actually reads
+	productionProof activation.ProductionProof // must cite this exact running test
 }
 
 var codexProductionFixtures = []codexProductionFixture{
@@ -1058,8 +1060,10 @@ var codexProductionFixtures = []codexProductionFixture{
 		name: "SessionStart", fixture: "session_start_0_146_0.json", event: "SessionStart",
 		kind: registration.EventCodexSessionStart, semantic: runtime.SemanticObservation,
 		wantResponse: false, wantNative: []byte(`{}`),
-		wantEvidence: []provenance.EvidenceKind{occurrenceEvidenceKind, interpretedEvidenceKind},
-		identities:   map[runtime.NativeIdentityKind]string{runtime.IdentitySession: "019fc756-217c-7233-81f7-b5e979279345"},
+		wantEvidence:    []provenance.EvidenceKind{occurrenceEvidenceKind, interpretedEvidenceKind},
+		identities:      map[runtime.NativeIdentityKind]string{runtime.IdentitySession: "019fc756-217c-7233-81f7-b5e979279345"},
+		captureProof:    activation.CaptureProofCodexSessionStart,
+		productionProof: activation.ProductionProofCodexSessionStart,
 	},
 	{
 		name: "PreToolUse", fixture: "pre_tool_use_0_146_0.json", event: "PreToolUse",
@@ -1071,6 +1075,8 @@ var codexProductionFixtures = []codexProductionFixture{
 			runtime.IdentityTurn:     "019fc756-21b7-7f63-b8e2-4f4cd1ce0184",
 			runtime.IdentityToolCall: "exec-fe2dea40-82a3-410f-891e-a7f9e6295c6b",
 		},
+		captureProof:    activation.CaptureProofCodexPreToolUse,
+		productionProof: activation.ProductionProofCodexPreToolUse,
 	},
 }
 
@@ -1087,9 +1093,16 @@ func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
 	for _, tc := range codexProductionFixtures {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			// Production-proof linkage (constant -> running test): the activation
+			// catalog's ProductionProof referent must name this exact test, so a
+			// rename of the function or subtest breaks this assertion immediately
+			// instead of leaving the constant silently stale.
+			require.Equal(t, "cmd/pasture/hook_lifecycle_production_test.go:"+t.Name(), tc.productionProof.Name(),
+				"ProductionProof.Name() must cite this exact running production test")
+
 			dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 			initializeLifecycleTestDatabase(t, dbPath)
-			raw := readCodexProductionFixture(t, tc.fixture, tc.event)
+			raw := readCodexProductionFixture(t, tc.fixture, tc.event, tc.captureProof)
 
 			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
 				DBPath: dbPath, Harness: ir.HarnessCodex, Event: tc.event, HostVersion: "0.146.0",
@@ -1141,7 +1154,7 @@ func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
 	// --- Codex PreToolUse gate: live production path, injected committed catalog.
 	codexActivations, err := activation.Codex0_146_0()
 	require.NoError(t, err)
-	codexRaw := readCodexProductionFixture(t, "pre_tool_use_0_146_0.json", "PreToolUse")
+	codexRaw := readCodexProductionFixture(t, "pre_tool_use_0_146_0.json", "PreToolUse", activation.CaptureProofCodexPreToolUse)
 	codexDB := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, codexDB)
 	codexResponse, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
@@ -1296,9 +1309,10 @@ func openCodeToolExecuteBeforeWire(t *testing.T) []byte {
 	return wire
 }
 
-func readCodexProductionFixture(t *testing.T, fixture, expectedEvent string) []byte {
+func readCodexProductionFixture(t *testing.T, fixture, expectedEvent string, captureProof activation.CaptureProof) []byte {
 	t.Helper()
-	root := filepath.Join("..", "..", "internal", "lifecycle", "ingress", "codex", "testdata", "fixtures")
+	relDir := filepath.Join("internal", "lifecycle", "ingress", "codex", "testdata", "fixtures")
+	root := filepath.Join("..", "..", relDir)
 	raw, err := os.ReadFile(filepath.Join(root, fixture))
 	require.NoError(t, err)
 	require.True(t, json.Valid(raw))
@@ -1324,5 +1338,22 @@ func readCodexProductionFixture(t *testing.T, fixture, expectedEvent string) []b
 	require.Equal(t, len(raw), sidecar.RawBytes, "authentic Codex fixture byte count must match its provenance sidecar")
 	sum := sha256.Sum256(raw)
 	require.Equal(t, hex.EncodeToString(sum[:]), sidecar.RawSHA256, "authentic Codex fixture digest must match the cleared digest exactly")
+
+	// Capture-proof linkage (constant -> fixture, path -> bytes -> digest): the
+	// activation catalog's CaptureProof referent must cite the EXACT fixture this
+	// production proof reads, and the bytes at that cited path must reproduce the
+	// cleared digest the proof enforces (sidecar.RawSHA256, the single source of
+	// truth — no duplicated digest literal). A moved fixture or an edited referent
+	// string breaks this immediately instead of leaving the constant stale.
+	citedPath, _, found := strings.Cut(captureProof.Name(), " (")
+	require.True(t, found, "CaptureProof.Name() must be 'relative/path (description)'; got %q", captureProof.Name())
+	require.Equal(t, filepath.ToSlash(filepath.Join(relDir, fixture)), citedPath,
+		"CaptureProof.Name() must cite the exact fixture path this production proof reads")
+	citedBytes, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(citedPath)))
+	require.NoError(t, err, "the fixture path cited by CaptureProof.Name() must resolve to a real file")
+	require.Equal(t, raw, citedBytes, "the fixture cited by CaptureProof.Name() must be exactly the bytes this proof reads")
+	citedSum := sha256.Sum256(citedBytes)
+	require.Equal(t, sidecar.RawSHA256, hex.EncodeToString(citedSum[:]),
+		"the fixture cited by CaptureProof.Name() must digest-match the cleared SHA-256 the proof enforces")
 	return raw
 }
