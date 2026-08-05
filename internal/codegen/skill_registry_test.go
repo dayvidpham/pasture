@@ -443,7 +443,7 @@ func TestGeneratedOutputInventory(t *testing.T) {
 	addExpectedOutput(t, expectedOpenCodeHarness, filepath.ToSlash(OpenCodeHooksModulePath), "OpenCodeTarget.Manifest lifecycle plugin")
 	addExpectedOutput(t, expectedOpenCodeHarness, filepath.ToSlash(OpenCodeTargetManifestPath), "OpenCodeTarget.Manifest target descriptor")
 	addExpectedOutput(t, expectedOpenCodeHarness, "opencode.json", "OpenCodeTarget.Manifest")
-	for _, path := range []string{codexTargetManifestPath, ".codex/hooks.json", ".codex/hooks/pasture-lifecycle.py"} {
+	for _, path := range []string{codexTargetManifestPath, ".codex/hooks.json"} {
 		addExpectedOutput(t, expectedCodexHarness, path, "CodexTarget.Manifest")
 		addExpectedOutput(t, expectedCodexControl, path, "CodexTarget.Manifest")
 	}

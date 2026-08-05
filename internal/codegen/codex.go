@@ -5,7 +5,7 @@
 // independently selectable Codex plugin packages:
 //
 //   - skills  (`.agents/skills/<dir>/SKILL.md`): protocol skills rendered as
-//     semantic-instruction markdown. Codex 0.144.1 has no native skill
+//     semantic-instruction markdown. Codex 0.146.0 has no native skill
 //     invocation, so these carry the reviewed protocol steps the agent performs
 //     directly (matching the pinned contract's semantic lowering of
 //     InvokeSkill), plus the hand-authored `protocol`/`install-cli` support
@@ -86,10 +86,10 @@ var CodexTarget = TargetHarness{
 
 // ─── Pinned runtime contract accessors ──────────────────────────────────────
 
-// CodexRuntimeContract returns the pinned Codex 0.144.1 runtime contract the
+// CodexRuntimeContract returns the pinned Codex 0.146.0 runtime contract the
 // target lowers against. It is the single source of the target's native
 // vocabulary and RuntimeContractID.
-func CodexRuntimeContract() runtime.RuntimeContract { return runtime.Codex0_144_1() }
+func CodexRuntimeContract() runtime.RuntimeContract { return runtime.Codex0_146_0() }
 
 // CodexRuntimeContractID returns the pinned Codex contract identity the target
 // publishes in its descriptor, manifest, and agent profiles.
@@ -97,7 +97,7 @@ func CodexRuntimeContractID() ir.RuntimeContractID { return CodexRuntimeContract
 
 // codexNativeFunctions returns the sorted, de-duplicated native Codex function
 // (call) names the pinned contract classifies across the closed core operation
-// vocabulary. For Codex 0.144.1 this is exactly ["request-input"]. Deriving the
+// vocabulary. For Codex 0.146.0 this is exactly ["request-input"]. Deriving the
 // list from the contract — never a literal — guarantees the target can never
 // emit or accept a fabricated native call: if the pinned contract stops
 // classifying an operation as native, this set changes with it.
@@ -447,7 +447,7 @@ func buildCodexBundle(files map[string][]byte) (artifact.Bundle, error) {
 //  2. Package completeness: exactly the three closed packages must be present.
 //  3. Native-call fidelity: every native Codex function named by any emitted
 //     agent profile must be a call the pinned contract classifies as native.
-//     Codex 0.144.1 classifies only `request-input`, so an emitted profile that
+//     Codex 0.146.0 classifies only `request-input`, so an emitted profile that
 //     named a fabricated `task`/`Skill`/`Agent` function would be rejected here.
 //  4. Package independence: no package's bundle may contain a path owned by a
 //     sibling package root (sibling files would break isolated selection).

@@ -81,6 +81,16 @@ const (
 	EventOpenCodeExperimentalCompactionAutocontinue
 	EventOpenCodeExperimentalTextComplete
 	EventOpenCodeToolDefinition
+	EventCodexSessionStart
+	EventCodexUserPromptSubmit
+	EventCodexPreToolUse
+	EventCodexPermissionRequest
+	EventCodexPostToolUse
+	EventCodexPreCompact
+	EventCodexPostCompact
+	EventCodexSubagentStart
+	EventCodexSubagentStop
+	EventCodexStop
 )
 
 const (
@@ -137,4 +147,7 @@ const (
 	FieldAction
 	FieldOpenCodeSessionID
 	FieldOpenCodeCallID
+	FieldCodexSessionID
+	FieldCodexTurnID
+	FieldCodexToolUseID
 )

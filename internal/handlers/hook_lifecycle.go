@@ -11,8 +11,10 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
 	claudefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/claude"
+	codexfrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/codex"
 	opencodefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/opencode"
 	claudeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
+	codexingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/codex"
 	opencodeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/opencode"
 	"github.com/dayvidpham/pasture/internal/lifecycle/middleend"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
@@ -33,6 +35,18 @@ type HookLifecycleInput struct {
 	Input       io.Reader
 	Clock       receipt.Clock
 	Operations  receipt.OperationIDSource
+	// Activations optionally injects the activation configuration used by the
+	// event gate, overriding the statically dispatched per-harness manifest.
+	//
+	// Production callers (the CLI) leave this nil so the committed per-harness
+	// activation manifest governs admission. After M3 Implementation UAT the
+	// Codex dispatch enables the accepted SessionStart and PreToolUse events via
+	// activation.Codex0_146_0(), exactly as the Claude and OpenCode cases do;
+	// the two selected events are admitted and every other Codex event stays
+	// withheld. This override remains available to exercise the same durable
+	// handler path with an alternative manifest; there is no separate test-only
+	// code path.
+	Activations []activation.Entry
 }
 
 type lifecycleStoreOpener func(string) (protocol.TaskTracker, error)
@@ -83,7 +97,16 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	if event.Kind == 0 {
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("Event %q is not in the generated %s registration.", in.Event, dispatch.name), "Ingress trusts the generated registration coordinate rather than an unparsed payload claim.", "The input was not read and no database was opened.", "Invoke one of the events present in the support report.", nil)
 	}
-	state, found := activationFor(event.Kind, dispatch.activations)
+	// The committed per-harness manifest governs admission unless the caller
+	// injects an activation configuration. Production callers leave in.Activations
+	// nil so the committed per-harness activation manifest governs admission
+	// (Codex admits the two accepted events via activation.Codex0_146_0());
+	// the override exercises the same durable path with an alternative manifest.
+	activations := dispatch.activations
+	if in.Activations != nil {
+		activations = in.Activations
+	}
+	state, found := activationFor(event.Kind, activations)
 	if !found || state.State != activation.Enabled {
 		reason := activation.WithheldMissingFixture
 		if found {
@@ -154,6 +177,15 @@ func dispatchLifecycle(harness ir.HarnessID) (lifecycleDispatch, error) {
 			capture := opencodeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
 			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
 		}, bind: opencodefrontend.Bind}, nil
+	case ir.HarnessCodex:
+		activations, err := activation.Codex0_146_0()
+		if err != nil {
+			return lifecycleDispatch{}, fmt.Errorf("dispatch Codex lifecycle activation: %w", err)
+		}
+		return lifecycleDispatch{name: "Codex", manifest: registration.Codex0_146_0(), activations: activations, parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
+			capture := codexingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
+			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
+		}, bind: codexfrontend.Bind}, nil
 	default:
 		return lifecycleDispatch{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("Harness %q is not supported by lifecycle ingress.", harness), "Lifecycle ingress has no static provider dispatch for this harness.", "The input was not read and no database was opened.", "Use a harness present in the generated lifecycle support report.", nil)
 	}

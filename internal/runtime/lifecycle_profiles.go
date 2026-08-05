@@ -515,10 +515,10 @@ func ClaudeCode2_1_210Lifecycle() LifecycleContract[ClaudeLifecycleEvent] {
 	return mustLifecycleContract(ClaudeCode2_1_210(), ClaudeLifecycleEvents(), claudeLifecycleMappings())
 }
 
-// Codex0_144_1Lifecycle returns the immutable Codex CLI lifecycle table bound
-// to the same exact host version and RuntimeContractID as Codex0_144_1.
-func Codex0_144_1Lifecycle() LifecycleContract[CodexLifecycleEvent] {
-	return mustLifecycleContract(Codex0_144_1(), CodexLifecycleEvents(), codexLifecycleMappings())
+// Codex0_146_0Lifecycle returns the immutable Codex CLI lifecycle table bound
+// to the same exact host version and RuntimeContractID as Codex0_146_0.
+func Codex0_146_0Lifecycle() LifecycleContract[CodexLifecycleEvent] {
+	return mustLifecycleContract(Codex0_146_0(), CodexLifecycleEvents(), codexLifecycleMappings())
 }
 
 // OpenCode1_18_10Lifecycle returns the immutable OpenCode lifecycle table bound

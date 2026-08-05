@@ -223,7 +223,7 @@ func TestPinnedLifecycleContractsMatchStrictFixture(t *testing.T) {
 		assertLifecycleContract(
 			t,
 			lifecycleFixtureFor(t, fixture, "codex"),
-			runtime.Codex0_144_1Lifecycle(),
+			runtime.Codex0_146_0Lifecycle(),
 			runtime.CodexLifecycleEvents(),
 			func(event runtime.CodexLifecycleEvent) string { return event.NativeName() },
 		)
@@ -278,7 +278,7 @@ func TestClaudeLifecyclePreservesBatchRequestAndStopSemantics(t *testing.T) {
 
 func TestCodexLifecyclePreservesStrictMutationAndConcurrencyWithoutMerge(t *testing.T) {
 	t.Parallel()
-	contract := runtime.Codex0_144_1Lifecycle()
+	contract := runtime.Codex0_146_0Lifecycle()
 
 	pre, err := contract.Mapping(runtime.CodexEventPreToolUse)
 	require.NoError(t, err)

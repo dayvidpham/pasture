@@ -35,7 +35,7 @@ func TestGoldmarkDocumentCompilesEntirelyInMemory(t *testing.T) {
 
 	claudeContract := mustContract(t, ir.HarnessClaudeCode, "2.1.210")
 	openCodeContract := mustContract(t, ir.HarnessOpenCode, "1.18.10")
-	codexContract := mustContract(t, ir.HarnessCodex, "0.144.1")
+	codexContract := mustContract(t, ir.HarnessCodex, "0.146.0")
 	claudeLiteral, err := ir.LiteralForHarness(ir.HarnessClaudeCode, claudeContract, []byte("\nClaude contract literal.\n"), "pinned schema has no portable equivalent")
 	require.NoError(t, err)
 	openCodeUnsupported, err := ir.LiteralUnsupported(ir.HarnessOpenCode, "the pinned host has no equivalent")
@@ -345,7 +345,7 @@ func FuzzMarkdownPart(f *testing.F) {
 		}
 		document, err := ir.NewDocument(part)
 		require.NoError(t, err)
-		contract := mustContract(t, ir.HarnessCodex, "0.144.1")
+		contract := mustContract(t, ir.HarnessCodex, "0.146.0")
 		target := mustTargetForHarness(t, ir.HarnessCodex, contract, nil)
 		tree, err := ir.Compile(document, target)
 		require.NoError(t, err)

@@ -270,19 +270,19 @@ func OpenCode1_18_10() RuntimeContract {
 	return mustExactContract(ir.HarnessOpenCode, "opencode@1.18.10", "1.18.10", buildCoreBindings(table))
 }
 
-// Codex0_144_1 is the pinned runtime contract for Codex 0.144.1. It lowers only
+// Codex0_146_0 is the pinned runtime contract for Codex 0.146.0. It lowers only
 // the exact exposed collaboration/request-input functions; operations with no
 // exposed Codex function are parent-mediated or lowered as semantic
 // instructions rather than invented.
-func Codex0_144_1() RuntimeContract {
+func Codex0_146_0() RuntimeContract {
 	table := map[ir.OperationKind]operationLowering{
 		ir.OperationInvokeSkill: {
 			class:    effects.RuntimeClassSemanticInstruction,
-			semantic: mustSemantic("Codex 0.144.1 exposes no skill function: perform the skill's steps directly following its reviewed protocol instructions"),
+			semantic: mustSemantic("Codex 0.146.0 exposes no skill function: perform the skill's steps directly following its reviewed protocol instructions"),
 		},
 		ir.OperationDelegateAssignment: {
 			class:    effects.RuntimeClassParentMediated,
-			mediated: mustMediated("parent orchestrator", "the parent drives Codex delegation over the collaboration surface; Codex 0.144.1 exposes no self-service spawn function"),
+			mediated: mustMediated("parent orchestrator", "the parent drives Codex delegation over the collaboration surface; Codex 0.146.0 exposes no self-service spawn function"),
 		},
 		ir.OperationContinueAssignment: {
 			class:    effects.RuntimeClassParentMediated,
@@ -298,18 +298,18 @@ func Codex0_144_1() RuntimeContract {
 		},
 		ir.OperationStopAssignment: {
 			class:    effects.RuntimeClassParentMediated,
-			mediated: mustMediated("parent orchestrator", "the parent stops the Codex assignment; Codex 0.144.1 exposes no self-service stop function"),
+			mediated: mustMediated("parent orchestrator", "the parent stops the Codex assignment; Codex 0.146.0 exposes no self-service stop function"),
 		},
 		ir.OperationRequestUserDecision: {
 			class:  effects.RuntimeClassNative,
 			native: mustNativeCall("request-input", []string{"prompt", "options"}, "the user's requested input bound to the originating request", "presents to the interactive user"),
 		},
 	}
-	return mustExactContract(ir.HarnessCodex, "codex@0.144.1", "0.144.1", buildCoreBindings(table))
+	return mustExactContract(ir.HarnessCodex, "codex@0.146.0", "0.146.0", buildCoreBindings(table))
 }
 
 // PinnedContracts returns the three initial pinned point contracts, one per
 // enabled harness.
 func PinnedContracts() []RuntimeContract {
-	return []RuntimeContract{ClaudeCode2_1_210(), OpenCode1_18_10(), Codex0_144_1()}
+	return []RuntimeContract{ClaudeCode2_1_210(), OpenCode1_18_10(), Codex0_146_0()}
 }

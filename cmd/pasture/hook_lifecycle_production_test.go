@@ -22,9 +22,11 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/acceptance"
 	"github.com/dayvidpham/pasture/internal/codegen"
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/nativeresponse"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
 	"github.com/dayvidpham/pasture/internal/runtime"
@@ -1025,4 +1027,333 @@ func assertSharedOperation(t *testing.T, occurrence, interpreted provenance.Evid
 	require.Equal(t, occurrence.ProducingOperationID, interpreted.ProducingOperationID)
 	require.NotZero(t, occurrence.ProducingOperationJournalID)
 	require.Equal(t, occurrence.ProducingOperationJournalID, interpreted.ProducingOperationJournalID)
+}
+
+// --- M3-SLICE-5: activation-last integrated Codex production proof ---------
+//
+// The committed Codex handler dispatch was default-off through implementation and
+// review (ratified proposal step 6, "activation last"): the two selected events
+// became enabled in the committed default only after M3 Implementation UAT. The
+// proofs below exercise the enabled path NOW, on the real production handler
+// path, by injecting the committed activation catalog activation.Codex0_146_0()
+// through the sanctioned HookLifecycleInput.Activations pre-activation seam
+// (documented in internal/handlers/hook_lifecycle.go as "not a separate
+// test-only code path"). Native continuation bytes are produced by the exact
+// per-target encoder the CLI RunE invokes (nativeresponse.Encode).
+
+type codexProductionFixture struct {
+	name            string // subtest name; must equal activation.ProductionProofCodex*.Name()'s test suffix
+	fixture         string
+	event           string
+	kind            model.ContractEventKind
+	semantic        runtime.EventSemantic
+	wantResponse    bool
+	wantNative      []byte
+	wantEvidence    []provenance.EvidenceKind
+	identities      map[runtime.NativeIdentityKind]string
+	captureProof    activation.CaptureProof    // must cite the fixture this proof actually reads
+	productionProof activation.ProductionProof // must cite this exact running test
+}
+
+var codexProductionFixtures = []codexProductionFixture{
+	{
+		name: "SessionStart", fixture: "session_start_0_146_0.json", event: "SessionStart",
+		kind: registration.EventCodexSessionStart, semantic: runtime.SemanticObservation,
+		wantResponse: false, wantNative: []byte(`{}`),
+		wantEvidence:    []provenance.EvidenceKind{occurrenceEvidenceKind, interpretedEvidenceKind},
+		identities:      map[runtime.NativeIdentityKind]string{runtime.IdentitySession: "019fc756-217c-7233-81f7-b5e979279345"},
+		captureProof:    activation.CaptureProofCodexSessionStart,
+		productionProof: activation.ProductionProofCodexSessionStart,
+	},
+	{
+		name: "PreToolUse", fixture: "pre_tool_use_0_146_0.json", event: "PreToolUse",
+		kind: registration.EventCodexPreToolUse, semantic: runtime.SemanticGateConsultation,
+		wantResponse: true, wantNative: []byte(`{"continue":true}`),
+		wantEvidence: []provenance.EvidenceKind{occurrenceEvidenceKind, interpretedEvidenceKind, consultationEvidenceKind},
+		identities: map[runtime.NativeIdentityKind]string{
+			runtime.IdentitySession:  "019fc756-217c-7233-81f7-b5e979279345",
+			runtime.IdentityTurn:     "019fc756-21b7-7f63-b8e2-4f4cd1ce0184",
+			runtime.IdentityToolCall: "exec-fe2dea40-82a3-410f-891e-a7f9e6295c6b",
+		},
+		captureProof:    activation.CaptureProofCodexPreToolUse,
+		productionProof: activation.ProductionProofCodexPreToolUse,
+	},
+}
+
+// TestEnabledCodexHandlersToDurableReadBack is the M3-P1 (SessionStart ingress
+// smoke) and M3-P2 (PreToolUse gate) integrated production proof. For each
+// authentic Codex 0.146.0 fixture it drives the real durable handler path with
+// the committed activation catalog injected, proves the durable receipt commits
+// before the native continuation bytes are available, and proves the persisted
+// evidence is provider-correct on bounded public read-back. It mirrors
+// TestEnabledOpenCodeHandlersToDurableReadBack for the Codex provider.
+func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
+	activations, err := activation.Codex0_146_0()
+	require.NoError(t, err)
+	for _, tc := range codexProductionFixtures {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			// Production-proof linkage (constant -> running test): the activation
+			// catalog's ProductionProof referent must name this exact test, so a
+			// rename of the function or subtest breaks this assertion immediately
+			// instead of leaving the constant silently stale.
+			require.Equal(t, "cmd/pasture/hook_lifecycle_production_test.go:"+t.Name(), tc.productionProof.Name(),
+				"ProductionProof.Name() must cite this exact running production test")
+
+			dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+			initializeLifecycleTestDatabase(t, dbPath)
+			raw := readCodexProductionFixture(t, tc.fixture, tc.event, tc.captureProof)
+
+			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
+				DBPath: dbPath, Harness: ir.HarnessCodex, Event: tc.event, HostVersion: "0.146.0",
+				Input: bytes.NewReader(raw), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
+				Activations: activations,
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.wantResponse, response.IsValid())
+
+			// Native continuation bytes are the exact host stdout for this event,
+			// through the same per-target encoder the CLI RunE invokes.
+			native, err := nativeresponse.Encode(ir.HarnessCodex, response)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantNative, native, "native continuation bytes must equal the pinned golden shape")
+
+			// Returning from the handler must imply every expected effect is
+			// already durably readable (commit precedes response/native encoding).
+			tracker, err := tasks.OpenTaskTracker(dbPath)
+			require.NoError(t, err)
+			for _, kind := range tc.wantEvidence {
+				require.Len(t, queryLifecycleEvidence(t, tracker.Journal(), kind), 1, "durable %s evidence must be committed before the handler returns", kind)
+			}
+			if tc.wantResponse {
+				interpreted := queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)[0]
+				consultation := queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind)[0]
+				require.Equal(t, interpreted.ProducingOperationJournalID, consultation.ProducingOperationJournalID, "one durable operation groups interpreted and consultation evidence")
+				require.Less(t, interpreted.JournalID, consultation.JournalID, "interpreted evidence precedes consultation evidence")
+				require.Contains(t, string(consultation.Payload), `"response":{"decision":"proceed"}`)
+			} else {
+				require.Empty(t, queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind), "an observation produces no consultation evidence")
+			}
+			require.NoError(t, tracker.Close())
+
+			// Bounded provider-correct public read-back.
+			identities, semantic := readBackGate(t, dbPath, registration.Codex0_146_0().Contract, runtime.Codex0_146_0().ID(), tc.kind)
+			require.Equal(t, tc.semantic, semantic)
+			require.Equal(t, tc.identities, identities, "read-back identities must be the provider-correct Codex correlation set")
+		})
+	}
+}
+
+// TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts is the M3-P3
+// two-live-provider differential. It drives the authentic Codex PreToolUse gate
+// and the authentic OpenCode tool.execute.before gate through their real
+// production handler paths, then asserts their common Proceed gate semantics
+// agree while provider-specific identity, contract, event-name, and native
+// continuation facts stay distinct. It never asserts whole-payload identity.
+func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
+	// --- Codex PreToolUse gate: live production path, injected committed catalog.
+	codexActivations, err := activation.Codex0_146_0()
+	require.NoError(t, err)
+	codexRaw := readCodexProductionFixture(t, "pre_tool_use_0_146_0.json", "PreToolUse", activation.CaptureProofCodexPreToolUse)
+	codexDB := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+	initializeLifecycleTestDatabase(t, codexDB)
+	codexResponse, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
+		DBPath: codexDB, Harness: ir.HarnessCodex, Event: "PreToolUse", HostVersion: "0.146.0",
+		Input: bytes.NewReader(codexRaw), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
+		Activations: codexActivations,
+	})
+	require.NoError(t, err)
+	codexIdentities, codexSemantic := readBackGate(t, codexDB, registration.Codex0_146_0().Contract, runtime.Codex0_146_0().ID(), registration.EventCodexPreToolUse)
+	codexNative, err := nativeresponse.Encode(ir.HarnessCodex, codexResponse)
+	require.NoError(t, err)
+
+	// --- OpenCode tool.execute.before gate: live production path, default-enabled.
+	openCodeWire := openCodeToolExecuteBeforeWire(t)
+	openCodeDB := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+	initializeLifecycleTestDatabase(t, openCodeDB)
+	openCodeResponse, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
+		DBPath: openCodeDB, Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: "1.18.10",
+		Input: bytes.NewReader(openCodeWire), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
+	})
+	require.NoError(t, err)
+	openCodeIdentities, openCodeSemantic := readBackGate(t, openCodeDB, registration.OpenCode1_18_10().Contract, runtime.OpenCode1_18_10().ID(), registration.EventOpenCodeToolExecuteBefore)
+	openCodeNative, err := nativeresponse.Encode(ir.HarnessOpenCode, openCodeResponse)
+	require.NoError(t, err)
+
+	// EQUAL: the common Proceed gate semantic agrees across both live providers.
+	require.True(t, codexResponse.IsValid(), "the Codex gate must produce a valid Proceed response")
+	require.True(t, openCodeResponse.IsValid(), "the OpenCode gate must produce a valid Proceed response")
+	require.Equal(t, runtime.SemanticGateConsultation, codexSemantic)
+	require.Equal(t, codexSemantic, openCodeSemantic, "both live providers derive the same gate-consultation semantic")
+	codexGate, err := runtime.Codex0_146_0Lifecycle().Mapping(runtime.CodexEventPreToolUse)
+	require.NoError(t, err)
+	openCodeGate, err := runtime.OpenCode1_18_10Lifecycle().Mapping(runtime.OpenCodeEventToolExecuteBefore)
+	require.NoError(t, err)
+	require.Equal(t, codexGate.Semantic(), openCodeGate.Semantic(), "the shared gate semantic is provider-neutral")
+	require.Equal(t, codexGate.Blocking(), openCodeGate.Blocking(), "both gate mappings share the same blocking mode")
+
+	// DISTINCT: provider-specific facts stay separate; no whole-payload identity.
+	require.NotEqual(t, runtime.Codex0_146_0().ID(), runtime.OpenCode1_18_10().ID(), "interpreted runtime contracts remain provider-correct")
+	require.NotEqual(t, registration.Codex0_146_0().Contract, registration.OpenCode1_18_10().Contract, "registration contracts remain provider-correct")
+	require.Equal(t, []byte(`{"continue":true}`), codexNative)
+	require.Equal(t, []byte(`{"decision":"proceed"}`), openCodeNative)
+	require.NotEqual(t, codexNative, openCodeNative, "provider-specific native continuation shapes remain distinct")
+	require.Equal(t, "PreToolUse", codexGate.NativeName())
+	require.Equal(t, "tool.execute.before", openCodeGate.NativeName())
+
+	// Provider-correct correlation: distinct native identity paths and values.
+	require.Equal(t, []string{"session_id", "turn_id", "tool_use_id"}, gateIdentityNativeNames(codexGate))
+	require.Equal(t, []string{"sessionID", "callID"}, gateIdentityNativeNames(openCodeGate))
+	require.Contains(t, codexIdentities, runtime.IdentityTurn, "only the Codex gate carries a turn correlation")
+	require.NotContains(t, openCodeIdentities, runtime.IdentityTurn, "the OpenCode gate carries no turn correlation")
+	require.NotEqual(t, codexIdentities[runtime.IdentitySession], openCodeIdentities[runtime.IdentitySession], "session identity values are provider-specific")
+	require.NotEqual(t, codexIdentities[runtime.IdentityToolCall], openCodeIdentities[runtime.IdentityToolCall], "tool-call identity values are provider-specific")
+}
+
+// TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated is the M3-P4
+// activation-isolation obligation at the committed-artifact layer. Landing the
+// Codex activation catalog must not write Codex provenance into the Claude or
+// OpenCode activation artifacts, and Codex has no separate committed activation
+// artifact (its enforcement is the handler-side catalog consumed post-UAT). The
+// byte-identity of the Claude and OpenCode artifacts across regeneration is
+// additionally guaranteed by the L3 zero-diff `make generate` gate.
+func TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated(t *testing.T) {
+	t.Parallel()
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err)
+
+	claudeActivation, err := os.ReadFile(filepath.Join(root, "hooks", "pasture-activation.json"))
+	require.NoError(t, err)
+	require.Contains(t, string(claudeActivation), `"harness": "claude-code"`, "the shared activation report remains the Claude-only artifact")
+	require.NotContains(t, string(claudeActivation), "ingress/codex", "no Codex capture proof may leak into the Claude activation artifact")
+	require.NotContains(t, string(claudeActivation), "TestEnabledCodexHandlersToDurableReadBack", "no Codex production proof may leak into the Claude activation artifact")
+
+	openCodeManifest, err := os.ReadFile(filepath.Join(root, ".opencode", "pasture-opencode.json"))
+	require.NoError(t, err)
+	require.Contains(t, string(openCodeManifest), `"target": "opencode"`)
+	require.NotContains(t, string(openCodeManifest), "ingress/codex", "no Codex capture proof may leak into the OpenCode manifest")
+	require.NotContains(t, string(openCodeManifest), "codex", "the OpenCode manifest carries no Codex activation entry")
+
+	// Codex enforcement is the handler-side catalog, not a committed JSON artifact.
+	for _, candidate := range []string{
+		filepath.Join(root, ".codex", "pasture-codex-activation.json"),
+		filepath.Join(root, ".codex", "pasture-activation.json"),
+	} {
+		_, statErr := os.Stat(candidate)
+		require.ErrorIs(t, statErr, os.ErrNotExist, "Codex activation must not be emitted as a separate committed artifact at %s", candidate)
+	}
+}
+
+// readBackGate rebuilds and reads back the single committed occurrence for a
+// live gate, asserts its provider-correct registration/runtime contract and
+// event kind, and returns its interpreted correlation identities and semantic.
+func readBackGate(t *testing.T, dbPath string, wantRegistrationContract ir.RuntimeContractID, wantRuntimeContract any, wantKind model.ContractEventKind) (map[runtime.NativeIdentityKind]string, runtime.EventSemantic) {
+	t.Helper()
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	defer tracker.Close()
+	require.NoError(t, tasks.RebuildLifecycleOccurrences(context.Background(), tracker))
+	reader, err := tasks.NewLifecycleReader(tracker)
+	require.NoError(t, err)
+	pageSize, err := model.NewPageSize(4)
+	require.NoError(t, err)
+	records, err := reader.Records(context.Background(), model.OccurrenceQuery{Page: model.PageRequest{Size: pageSize}})
+	require.NoError(t, err)
+	require.Len(t, records.Records(), 1, "each provider's live gate must persist exactly one occurrence")
+	record := records.Records()[0]
+	require.Equal(t, wantRegistrationContract, record.Occurrence.RuntimeContract)
+	require.Equal(t, wantKind, record.Occurrence.Kind)
+	require.Len(t, record.Interpreted(), 1)
+	interpreted := record.Interpreted()[0]
+	require.Equal(t, wantRuntimeContract, interpreted.Contract())
+	out := make(map[runtime.NativeIdentityKind]string, len(interpreted.Identities()))
+	for _, identity := range interpreted.Identities() {
+		out[identity.Kind] = identity.Value
+	}
+	return out, interpreted.Semantic()
+}
+
+func gateIdentityNativeNames(mapping runtime.LifecycleEventMapping) []string {
+	names := make([]string, 0)
+	for _, identity := range mapping.Identities() {
+		names = append(names, identity.NativeName())
+	}
+	return names
+}
+
+// openCodeToolExecuteBeforeWire reconstructs the exact stdin bytes the generated
+// OpenCode plugin sends the CLI for tool.execute.before —
+// JSON.stringify({ input, output: { args } }) — from the authentic capture.
+func openCodeToolExecuteBeforeWire(t *testing.T) []byte {
+	t.Helper()
+	root := filepath.Join("..", "..", "internal", "lifecycle", "ingress", "opencode", "testdata", "fixtures")
+	raw, err := os.ReadFile(filepath.Join(root, "tool_execute_before_1_18_10.capture.json"))
+	require.NoError(t, err)
+	var capture struct {
+		Value struct {
+			Input  json.RawMessage `json:"input"`
+			Output struct {
+				Args json.RawMessage `json:"args"`
+			} `json:"output"`
+		} `json:"value"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &capture))
+	type outputArgs struct {
+		Args json.RawMessage `json:"args"`
+	}
+	wire, err := json.Marshal(struct {
+		Input  json.RawMessage `json:"input"`
+		Output outputArgs      `json:"output"`
+	}{Input: capture.Value.Input, Output: outputArgs{Args: capture.Value.Output.Args}})
+	require.NoError(t, err)
+	return wire
+}
+
+func readCodexProductionFixture(t *testing.T, fixture, expectedEvent string, captureProof activation.CaptureProof) []byte {
+	t.Helper()
+	relDir := filepath.Join("internal", "lifecycle", "ingress", "codex", "testdata", "fixtures")
+	root := filepath.Join("..", "..", relDir)
+	raw, err := os.ReadFile(filepath.Join(root, fixture))
+	require.NoError(t, err)
+	require.True(t, json.Valid(raw))
+	require.Contains(t, string(raw), `"hook_event_name":"`+expectedEvent+`"`, "the authentic Codex fixture must carry its native event name")
+
+	provenanceBytes, err := os.ReadFile(filepath.Join(root, strings.TrimSuffix(fixture, ".json")+".provenance.json"))
+	require.NoError(t, err)
+	var sidecar struct {
+		Provider               string `json:"provider"`
+		ObservedRuntimeVersion string `json:"observedRuntimeVersion"`
+		Origin                 string `json:"origin"`
+		Redaction              string `json:"redaction"`
+		RawBytes               int    `json:"rawBytes"`
+		RawSHA256              string `json:"rawSHA256"`
+		ClearanceAuthority     string `json:"clearanceAuthority"`
+	}
+	require.NoError(t, json.Unmarshal(provenanceBytes, &sidecar))
+	require.Equal(t, "codex", sidecar.Provider)
+	require.Equal(t, "0.146.0", sidecar.ObservedRuntimeVersion)
+	require.Equal(t, "authentic-capture", sidecar.Origin)
+	require.Equal(t, "none", sidecar.Redaction)
+	require.Equal(t, "aura-plugins-a6h3d", sidecar.ClearanceAuthority)
+	require.Equal(t, len(raw), sidecar.RawBytes, "authentic Codex fixture byte count must match its provenance sidecar")
+	sum := sha256.Sum256(raw)
+	require.Equal(t, hex.EncodeToString(sum[:]), sidecar.RawSHA256, "authentic Codex fixture digest must match the cleared digest exactly")
+
+	// Capture-proof linkage (constant -> fixture, path -> bytes -> digest): the
+	// activation catalog's CaptureProof referent must cite the EXACT fixture this
+	// production proof reads, and the bytes at that cited path must reproduce the
+	// cleared digest the proof enforces (sidecar.RawSHA256, the single source of
+	// truth — no duplicated digest literal). A moved fixture or an edited referent
+	// string breaks this immediately instead of leaving the constant stale.
+	citedPath, _, found := strings.Cut(captureProof.Name(), " (")
+	require.True(t, found, "CaptureProof.Name() must be 'relative/path (description)'; got %q", captureProof.Name())
+	require.Equal(t, filepath.ToSlash(filepath.Join(relDir, fixture)), citedPath,
+		"CaptureProof.Name() must cite the exact fixture path this production proof reads")
+	citedBytes, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(citedPath)))
+	require.NoError(t, err, "the fixture path cited by CaptureProof.Name() must resolve to a real file")
+	require.Equal(t, raw, citedBytes, "the fixture cited by CaptureProof.Name() must be exactly the bytes this proof reads")
+	citedSum := sha256.Sum256(citedBytes)
+	require.Equal(t, sidecar.RawSHA256, hex.EncodeToString(citedSum[:]),
+		"the fixture cited by CaptureProof.Name() must digest-match the cleared SHA-256 the proof enforces")
+	return raw
 }

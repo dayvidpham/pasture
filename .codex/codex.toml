@@ -2,7 +2,7 @@
 # Codex plugin manifest: three independently selectable packages.
 schema = "pasture.codex.manifest.v1"
 name = "pasture-codex"
-runtime_contract = "codex/codex@0.144.1"
+runtime_contract = "codex/codex@0.146.0"
 
 [packages.skills]
 id = "pasture-codex-skills"

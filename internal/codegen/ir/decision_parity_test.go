@@ -62,7 +62,7 @@ func decisionParityFixtures() []decisionParityFixture {
 	}{
 		{ir.HarnessClaudeCode, "2.1.210"},
 		{ir.HarnessOpenCode, "1.18.10"},
-		{ir.HarnessCodex, "0.144.1"},
+		{ir.HarnessCodex, "0.146.0"},
 	}
 
 	var fixtures []decisionParityFixture
