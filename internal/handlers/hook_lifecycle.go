@@ -11,8 +11,10 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
 	claudefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/claude"
+	codexfrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/codex"
 	opencodefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/opencode"
 	claudeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
+	codexingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/codex"
 	opencodeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/opencode"
 	"github.com/dayvidpham/pasture/internal/lifecycle/middleend"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
@@ -93,7 +95,16 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	if event.Kind == 0 {
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("Event %q is not in the generated %s registration.", in.Event, dispatch.name), "Ingress trusts the generated registration coordinate rather than an unparsed payload claim.", "The input was not read and no database was opened.", "Invoke one of the events present in the support report.", nil)
 	}
-	state, found := activationFor(event.Kind, dispatch.activations)
+	// The committed per-harness manifest governs admission unless the caller
+	// injects an activation configuration. Production callers leave in.Activations
+	// nil, so Codex stays default-off until its committed activation lands; the
+	// pre-activation production proof injects an enabled manifest to exercise this
+	// exact durable path with no separate code path.
+	activations := dispatch.activations
+	if in.Activations != nil {
+		activations = in.Activations
+	}
+	state, found := activationFor(event.Kind, activations)
 	if !found || state.State != activation.Enabled {
 		reason := activation.WithheldMissingFixture
 		if found {
@@ -164,9 +175,36 @@ func dispatchLifecycle(harness ir.HarnessID) (lifecycleDispatch, error) {
 			capture := opencodeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
 			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
 		}, bind: opencodefrontend.Bind}, nil
+	case ir.HarnessCodex:
+		activations, err := codexDefaultOffActivations()
+		if err != nil {
+			return lifecycleDispatch{}, fmt.Errorf("dispatch Codex lifecycle activation: %w", err)
+		}
+		return lifecycleDispatch{name: "Codex", manifest: registration.Codex0_146_0(), activations: activations, parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
+			capture := codexingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
+			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
+		}, bind: codexfrontend.Bind}, nil
 	default:
 		return lifecycleDispatch{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("Harness %q is not supported by lifecycle ingress.", harness), "Lifecycle ingress has no static provider dispatch for this harness.", "The input was not read and no database was opened.", "Use a harness present in the generated lifecycle support report.", nil)
 	}
+}
+
+// codexDefaultOffActivations builds the committed default-off Codex activation
+// manifest: every generated Codex event is withheld pending its production proof
+// and activation, which land in a later wave. The pre-activation production
+// proof supplies an enabled configuration through HookLifecycleInput.Activations
+// rather than flipping this committed default.
+func codexDefaultOffActivations() ([]activation.Entry, error) {
+	events := registration.Codex0_146_0().Entries()
+	out := make([]activation.Entry, 0, len(events))
+	for _, event := range events {
+		entry, err := activation.NewWithheld(event.Kind, activation.WithheldProductionProofMissing)
+		if err != nil {
+			return nil, fmt.Errorf("withhold generated Codex event %q: %w", event.NativeName, err)
+		}
+		out = append(out, entry)
+	}
+	return out, nil
 }
 
 func activationFor(kind model.ContractEventKind, entries []activation.Entry) (activation.Entry, bool) {

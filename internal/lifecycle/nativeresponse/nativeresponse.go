@@ -84,7 +84,34 @@ var (
 // no decision. Callers MUST only invoke Encode after the durable receipt commit
 // has completed, so that native bytes never precede persisted evidence.
 func Encode(harness ir.HarnessID, response backend.HostResponse) ([]byte, error) {
-	return nil, fmt.Errorf("nativeresponse.Encode is not implemented for harness %q; the M3-SLICE-3 L3 wiring has not landed yet", harness)
+	switch harness {
+	case ir.HarnessCodex:
+		// Codex's command-hook ABI reads a JSON continuation object on stdout for
+		// every configured hook, so the typed pipeline emits native bytes here.
+		if response.IsValid() {
+			return append([]byte(nil), codexProceedContinuation...), nil
+		}
+		return append([]byte(nil), codexObservationContinuation...), nil
+	case ir.HarnessClaudeCode, ir.HarnessOpenCode:
+		// Claude and OpenCode carry the canonical Pasture host response object; a
+		// gate proceed emits it and an observation emits nothing. These bytes are
+		// byte-identical to M2.
+		if !response.IsValid() {
+			return nil, nil
+		}
+		encoded, err := response.MarshalJSON()
+		if err != nil {
+			return nil, fmt.Errorf("nativeresponse.Encode: marshal canonical host response for harness %q: %w", harness, err)
+		}
+		return encoded, nil
+	default:
+		return nil, encodeError(
+			fmt.Sprintf("Harness %q has no native response encoder.", harness),
+			"Native continuation encoding is defined only for the reviewed lifecycle harnesses.",
+			"No native host continuation was produced for this event.",
+			"Emit responses only for a harness present in the generated lifecycle support report.",
+		)
+	}
 }
 
 // encodeError builds an actionable structured error for an unsupported harness.
