@@ -16,7 +16,7 @@ func TestCLI_EpochInventoryAndHiddenAdapter(t *testing.T) {
 	if root.exitCode != 0 {
 		t.Fatalf("root help exit %d: %s", root.exitCode, root.stderr)
 	}
-	if got, want := commandNames(root.stdout), []string{"epoch", "hook", "install", "migrate", "status", "task"}; !sameStrings(got, want) {
+	if got, want := commandNames(root.stdout), []string{"epoch", "hook", "init", "install", "migrate", "status", "task"}; !sameStrings(got, want) {
 		t.Fatalf("root commands = %v, want %v\n%s", got, want, root.stdout)
 	}
 	if strings.Contains(root.stdout, "__adapter") {

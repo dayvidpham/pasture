@@ -270,61 +270,18 @@ func ensureWellKnownAgent(
 		}
 	}
 
-	// 1. Fast-path lookup. Run on the auditDB (no transaction needed for a
-	//    single SELECT — the UNIQUE index on `name` is the consistency anchor).
-	//    If we find a row, the agent is already registered; recover the
-	//    AgentId and return without touching Provenance.
-	var agentIdStr string
-	err := auditDB.QueryRowContext(ctx,
-		`SELECT agent_id FROM pasture_well_known_agents WHERE name = ?`,
-		spec.Name,
-	).Scan(&agentIdStr)
-	switch {
-	case err == nil:
-		// Hit: parse and return.
-		agentId, perr := provenance.ParseAgentID(agentIdStr)
-		if perr != nil {
-			return provenance.AgentID{}, &pasterrors.StructuredError{
-				Category: pasterrors.CategoryStorage,
-				What:     fmt.Sprintf("The saved id for built-in agent %q is corrupted.", spec.Name),
-				Why: fmt.Sprintf(
-					"Pasture read %q out of the database for this agent, but it doesn't\n"+
-						"look like a valid agent id.",
-					agentIdStr,
-				),
-				Where: "Looking up a built-in agent (internal/tasks/well_known.go in tasks.ensureWellKnownAgent).",
-				Impact: "Anything that tries to attribute an action to this agent will fail\n" +
-					"until the row is cleaned up.",
-				Fix: fmt.Sprintf("1. Look at the broken row directly:\n"+
-					"     sqlite3 <db-path> \\\n"+
-					"       \"SELECT * FROM pasture_well_known_agents WHERE name = %q\"\n"+
-					"2. Remove the broken row and restart pastured so a fresh id is created:\n"+
-					"     sqlite3 <db-path> \\\n"+
-					"       \"DELETE FROM pasture_well_known_agents WHERE name = %q\"\n"+
-					"     pkill -f pastured && pastured\n"+
-					"   Removing rows is destructive — back up the database file first.",
-					spec.Name, spec.Name),
-				Cause: perr,
-			}
+	// 1. Fast-path lookup. The UNIQUE index on name is the consistency anchor.
+	// Existing mappings also repair their category row atomically so a prior
+	// interrupted or older initialization converges to the canonical registry.
+	agentID, found, err := lookupWellKnownAgent(ctx, auditDB, spec)
+	if err != nil {
+		return provenance.AgentID{}, err
+	}
+	if found {
+		if err := ensureWellKnownAgentCategory(ctx, auditDB, agentID, spec); err != nil {
+			return provenance.AgentID{}, err
 		}
-		return agentId, nil
-	case stderrors.Is(err, sql.ErrNoRows):
-		// Miss: fall through to register + insert.
-	default:
-		return provenance.AgentID{}, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("Pasture couldn't check whether the built-in agent %q is already registered.", spec.Name),
-			Why:      "Reading from the database to look this agent up failed.",
-			Where:    "Looking up a built-in agent (internal/tasks/well_known.go in tasks.ensureWellKnownAgent).",
-			Impact: "The daemon can't safely finish startup. Restarting will retry but may\n" +
-				"hit the same error every time.",
-			Fix: "1. Confirm the database is reachable and at the latest schema version:\n" +
-				"     pasture migrate --dry-run\n" +
-				"     pasture migrate\n" +
-				"2. Restart the daemon once the database is healthy:\n" +
-				"     pkill -f pastured && pastured",
-			Cause: err,
-		}
+		return agentID, nil
 	}
 
 	// 2. Mint a fresh SoftwareAgent through Provenance. This call writes to
@@ -339,6 +296,13 @@ func ensureWellKnownAgent(
 		WellKnownAgentSource,
 	)
 	if err != nil {
+		// Another initializer may have won after our fast-path miss. Prefer its
+		// committed canonical mapping over surfacing a transient loser error.
+		if existing, found, lookupErr := lookupWellKnownAgent(ctx, auditDB, spec); lookupErr == nil && found {
+			if categoryErr := ensureWellKnownAgentCategory(ctx, auditDB, existing, spec); categoryErr == nil {
+				return existing, nil
+			}
+		}
 		return provenance.AgentID{}, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Pasture couldn't create a fresh agent record for the built-in agent %q.", spec.Name),
@@ -390,10 +354,11 @@ func ensureWellKnownAgent(
 	// blank assignment).
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO pasture_well_known_agents (agent_id, name) VALUES (?, ?)`,
+	result, err := tx.ExecContext(ctx,
+		`INSERT OR IGNORE INTO pasture_well_known_agents (agent_id, name) VALUES (?, ?)`,
 		sa.ID.String(), spec.Name,
-	); err != nil {
+	)
+	if err != nil {
 		return provenance.AgentID{}, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     fmt.Sprintf("Pasture couldn't save the name-to-id mapping for the built-in agent %q.", spec.Name),
@@ -414,11 +379,47 @@ func ensureWellKnownAgent(
 			Cause: err,
 		}
 	}
+	inserted, err := result.RowsAffected()
+	if err != nil {
+		return provenance.AgentID{}, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     fmt.Sprintf("Pasture couldn't confirm registration of the built-in agent %q.", spec.Name),
+			Why:      "The database accepted the mapping statement but did not report whether it inserted a row.",
+			Where:    "Registering a built-in agent (internal/tasks/well_known.go in tasks.ensureWellKnownAgent).",
+			Impact:   "Pasture can't safely decide whether this initializer won or should use a concurrent initializer's mapping.",
+			Fix:      "Retry pasture init. If the error persists, verify the SQLite file is writable and healthy.",
+			Cause:    err,
+		}
+	}
+	if inserted == 0 {
+		_ = tx.Rollback()
+		existing, found, lookupErr := lookupWellKnownAgent(ctx, auditDB, spec)
+		if lookupErr != nil {
+			return provenance.AgentID{}, lookupErr
+		}
+		if !found {
+			return provenance.AgentID{}, &pasterrors.StructuredError{
+				Category: pasterrors.CategoryStorage,
+				What:     fmt.Sprintf("Pasture couldn't establish a canonical id for the built-in agent %q.", spec.Name),
+				Why:      "The mapping insert was ignored because another unique value conflicted, but no mapping for this name could be recovered.",
+				Where:    "Reconciling concurrent built-in agent registration (internal/tasks/well_known.go in tasks.ensureWellKnownAgent).",
+				Impact:   "Initialization cannot complete because this built-in agent has no stable name-to-id mapping.",
+				Fix:      "Back up the database, inspect pasture_well_known_agents for conflicting rows, and retry pasture init after correcting the conflict.",
+			}
+		}
+		if err := ensureWellKnownAgentCategory(ctx, auditDB, existing, spec); err != nil {
+			return provenance.AgentID{}, err
+		}
+		return existing, nil
+	}
 
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO pasture_agent_categories (agent_id, automaton_role, pasture_role)
-		 VALUES (?, ?, 'None')`,
-		sa.ID.String(), string(spec.Role),
+		 VALUES (?, ?, ?)
+		 ON CONFLICT(agent_id) DO UPDATE SET
+		   automaton_role = excluded.automaton_role,
+		   pasture_role = excluded.pasture_role`,
+		sa.ID.String(), string(spec.Role), string(protocol.PastureRoleNone),
 	); err != nil {
 		return provenance.AgentID{}, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
@@ -464,4 +465,62 @@ func ensureWellKnownAgent(
 	}
 
 	return sa.ID, nil
+}
+
+func lookupWellKnownAgent(ctx context.Context, db *sql.DB, spec WellKnownAgentSpec) (provenance.AgentID, bool, error) {
+	var agentIDText string
+	err := db.QueryRowContext(ctx,
+		`SELECT agent_id FROM pasture_well_known_agents WHERE name = ?`,
+		spec.Name,
+	).Scan(&agentIDText)
+	if stderrors.Is(err, sql.ErrNoRows) {
+		return provenance.AgentID{}, false, nil
+	}
+	if err != nil {
+		return provenance.AgentID{}, false, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     fmt.Sprintf("Pasture couldn't check whether the built-in agent %q is already registered.", spec.Name),
+			Why:      "Reading the canonical name-to-id mapping failed.",
+			Where:    "Looking up a built-in agent (internal/tasks/well_known.go in tasks.lookupWellKnownAgent).",
+			Impact:   "Database initialization can't safely continue without knowing whether this agent already exists.",
+			Fix:      "Confirm the database is writable and healthy, then retry pasture init.",
+			Cause:    err,
+		}
+	}
+	agentID, err := provenance.ParseAgentID(agentIDText)
+	if err != nil {
+		return provenance.AgentID{}, false, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     fmt.Sprintf("The saved id for built-in agent %q is corrupted.", spec.Name),
+			Why:      fmt.Sprintf("The database contains %q, which is not a valid agent id.", agentIDText),
+			Where:    "Looking up a built-in agent (internal/tasks/well_known.go in tasks.lookupWellKnownAgent).",
+			Impact:   "Work cannot be attributed to this built-in agent until its mapping is repaired.",
+			Fix:      "Back up the database, inspect the matching pasture_well_known_agents row, and restore it from a known-good backup before retrying pasture init.",
+			Cause:    err,
+		}
+	}
+	return agentID, true, nil
+}
+
+func ensureWellKnownAgentCategory(ctx context.Context, db *sql.DB, agentID provenance.AgentID, spec WellKnownAgentSpec) error {
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO pasture_agent_categories (agent_id, automaton_role, pasture_role)
+		 VALUES (?, ?, ?)
+		 ON CONFLICT(agent_id) DO UPDATE SET
+		   automaton_role = excluded.automaton_role,
+		   pasture_role = excluded.pasture_role`,
+		agentID.String(), string(spec.Role), string(protocol.PastureRoleNone),
+	)
+	if err == nil {
+		return nil
+	}
+	return &pasterrors.StructuredError{
+		Category: pasterrors.CategoryStorage,
+		What:     fmt.Sprintf("Pasture couldn't save the canonical role for built-in agent %q.", spec.Name),
+		Why:      "The name-to-id mapping exists, but inserting or repairing its category row failed.",
+		Where:    "Repairing a built-in agent category (internal/tasks/well_known.go in tasks.ensureWellKnownAgentCategory).",
+		Impact:   "The agent exists but role-based attribution may return incomplete results.",
+		Fix:      "Verify the database is writable, then retry pasture init; the repair is idempotent.",
+		Cause:    err,
+	}
 }

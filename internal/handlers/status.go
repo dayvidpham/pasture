@@ -78,13 +78,13 @@ func EpochStatus(in EpochStatusInput, format types.OutputFormat) (int, error) {
 			What:     fmt.Sprintf("No pasture database found at %q.", dbPath),
 			Why:      "The database file has not been created yet.",
 			Where:    "Opening the database for status (internal/handlers/status.go in handlers.EpochStatus).",
-			Impact:   "No epoch state or audit history can be read — no epochs have run, or the daemon has not started yet.",
-			Fix: fmt.Sprintf("1. Start the daemon to create and initialize the database:\n"+
-				"     pastured\n"+
+			Impact:   "No epoch state or audit history can be read because the local database has not been initialized.",
+			Fix: fmt.Sprintf("1. Initialize the local database:\n"+
+				"     pasture --db %q init\n"+
 				"2. Then run an epoch:\n"+
 				"     pasture epoch start --epoch-id <id>\n"+
 				"3. To use a different database path, pass --db or set PASTURE_DB_PATH.\n"+
-				"   Expected location: %q", dbPath),
+				"   Expected location: %q", dbPath, dbPath),
 		}
 		return pasterrors.ExitCode(e), e
 	}

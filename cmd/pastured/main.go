@@ -21,6 +21,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/engine"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/hooks"
+	"github.com/dayvidpham/pasture/internal/storage"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
@@ -285,19 +286,10 @@ func initAuditTrail(cfg config.PasturedConfig) (audit.Trail, *tasks.WellKnownAge
 			dbPath = tasks.DefaultDBPath()
 		}
 
-		tracker, err := tasks.OpenTaskTracker(dbPath)
+		tracker, cache, err := storage.OpenInitialized(context.Background(), dbPath)
 		if err != nil {
 			return nil, emptyCache, nil, fmt.Errorf(
-				"pastured.initAuditTrail: cannot open unified TaskTracker at %q - verify the path is writable and the on-disk schema is compatible: %w",
-				dbPath, err,
-			)
-		}
-
-		cache := tasks.NewWellKnownAgentCache()
-		if err := tasks.RegisterWellKnownAgents(context.Background(), tracker, cache); err != nil {
-			_ = tracker.Close()
-			return nil, emptyCache, nil, fmt.Errorf(
-				"pastured.initAuditTrail: well-known automaton agent registration failed at %q - daemon startup cannot proceed without the cache populated: %w",
+				"pastured.initAuditTrail: cannot initialize unified TaskTracker at %q - verify the path is writable and the on-disk schema is compatible: %w",
 				dbPath, err,
 			)
 		}

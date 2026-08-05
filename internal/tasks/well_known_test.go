@@ -427,6 +427,55 @@ func TestRegisterWellKnownAgents_TwoRestartsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRegisterWellKnownAgents_ConcurrentInitializersConverge(t *testing.T) {
+	t.Parallel()
+
+	dbPath := testutil.GoldenUnifiedDBPath(t)
+	trackers := make([]protocol.TaskTracker, 2)
+	caches := make([]*tasks.WellKnownAgentCache, 2)
+	for i := range trackers {
+		tracker, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithSkipMigrations())
+		if err != nil {
+			t.Fatalf("open tracker %d: %v", i, err)
+		}
+		trackers[i] = tracker
+		caches[i] = tasks.NewWellKnownAgentCache()
+		defer tracker.Close()
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, len(trackers))
+	for i := range trackers {
+		go func(i int) {
+			<-start
+			errs <- tasks.RegisterWellKnownAgents(context.Background(), trackers[i], caches[i])
+		}(i)
+	}
+	close(start)
+	for range trackers {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent registration: %v", err)
+		}
+	}
+
+	counts := captureRowCounts(t, dbPath)
+	if counts.PastureWellKnownAgents != tasks.WellKnownAgentCount || counts.PastureAgentCategories != tasks.WellKnownAgentCount {
+		t.Fatalf("concurrent registration did not converge to %d canonical mappings: %+v", tasks.WellKnownAgentCount, counts)
+	}
+	canonical := captureWellKnownMap(t, dbPath)
+	for i, cache := range caches {
+		if cache.Len() != tasks.WellKnownAgentCount {
+			t.Errorf("cache %d has %d entries, want %d", i, cache.Len(), tasks.WellKnownAgentCount)
+		}
+		for name, agentID := range canonical {
+			cached, ok := cache.Get(name)
+			if !ok || cached.String() != agentID {
+				t.Errorf("cache %d mapping %q = %q, want %q", i, name, cached.String(), agentID)
+			}
+		}
+	}
+}
+
 // equalStringSlices returns true if a and b contain the same elements in the
 // same order. Used for cache.Names() comparison (which is sorted).
 func equalStringSlices(a, b []string) bool {
