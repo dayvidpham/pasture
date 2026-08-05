@@ -1031,9 +1031,9 @@ func assertSharedOperation(t *testing.T, occurrence, interpreted provenance.Evid
 
 // --- M3-SLICE-5: activation-last integrated Codex production proof ---------
 //
-// The committed Codex handler dispatch is default-off through implementation and
+// The committed Codex handler dispatch was default-off through implementation and
 // review (ratified proposal step 6, "activation last"): the two selected events
-// become enabled in the committed default only after M3 Implementation UAT. The
+// became enabled in the committed default only after M3 Implementation UAT. The
 // proofs below exercise the enabled path NOW, on the real production handler
 // path, by injecting the committed activation catalog activation.Codex0_146_0()
 // through the sanctioned HookLifecycleInput.Activations pre-activation seam

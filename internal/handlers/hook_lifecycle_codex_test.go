@@ -21,11 +21,12 @@ import (
 )
 
 // enabledCodexActivation is the injected pre-activation configuration used by
-// the production proof. Codex activation is default-off in the committed tree
-// until a later wave; these hand-built enabled entries exercise the real
-// durable handler path before the committed activation lands. The handler gates
-// on State==Enabled only, so this is the activation configuration the eventual
-// committed manifest will supply — not a separate test-only code path.
+// the production proof. The committed Codex catalog now enables the two
+// accepted events (SessionStart, PreToolUse) at M3 UAT; this helper exercises
+// the same durable handler path by injecting an enabled manifest for the
+// production proof. The handler gates on State==Enabled only, so this is the
+// activation configuration the committed manifest supplies — not a separate
+// test-only code path.
 func enabledCodexActivation() []activation.Entry {
 	return []activation.Entry{
 		{Event: registration.EventCodexSessionStart, State: activation.Enabled},
