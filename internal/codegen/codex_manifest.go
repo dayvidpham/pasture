@@ -32,7 +32,7 @@ type codexManifestEmitter struct{}
 // Emit writes the Codex package manifest, host hook configuration, shared
 // adapter, and one fixed-event executable per pinned lifecycle event.
 func (codexManifestEmitter) Emit(root string, opts GenerateOptions) ([]GeneratedFile, error) {
-	metadata, err := lifecycleMetadata(runtime.Codex0_144_1Lifecycle(), "0.144.1", codexNativeFields)
+	metadata, err := lifecycleMetadata(runtime.Codex0_146_0Lifecycle(), "0.146.0", codexNativeFields)
 	if err != nil {
 		return nil, fmt.Errorf("codegen.codexManifestEmitter.Emit: lifecycle metadata: %w", err)
 	}

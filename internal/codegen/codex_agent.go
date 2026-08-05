@@ -1,7 +1,7 @@
 // Package codegen — Codex standalone agent TOML generation.
 //
-// The Codex harness (Codex 0.144.1) has no per-file "subagent" or "skill
-// invocation" runtime: its pinned runtime contract (runtime.Codex0_144_1)
+// The Codex harness (Codex 0.146.0) has no per-file "subagent" or "skill
+// invocation" runtime: its pinned runtime contract (runtime.Codex0_146_0)
 // lowers InvokeSkill as a semantic instruction and every delegation/collection/
 // stop operation as parent-mediated, so the only NATIVE Codex function a
 // generated agent may reference is `request-input`.
@@ -33,7 +33,7 @@ import (
 const codexAgentSchema = "pasture.codex.agent.v1"
 
 // codexRoleClass is the orchestration position a role occupies on the Codex
-// harness. Codex 0.144.1 exposes no self-service spawn function, so a
+// harness. Codex 0.146.0 exposes no self-service spawn function, so a
 // "delegated" role is driven by the parent orchestrator (parent-mediated in the
 // pinned contract) rather than invoked natively by a sibling agent.
 type codexRoleClass string
@@ -145,7 +145,7 @@ func renderCodexAgent(roleID protocol.RoleId, functions []string) (string, error
 	fmt.Fprintf(&b, "# Runtime contract: %s\n", CodexRuntimeContractID().String())
 	b.WriteString("#\n")
 	b.WriteString("# `functions` lists the native Codex functions this agent may call. Codex\n")
-	b.WriteString("# 0.144.1 exposes no skill or self-service spawn function, so it is derived\n")
+	b.WriteString("# 0.146.0 exposes no skill or self-service spawn function, so it is derived\n")
 	b.WriteString("# from the pinned runtime contract's native operation bindings.\n")
 	fmt.Fprintf(&b, "schema = %s\n", tomlString(codexAgentSchema))
 	fmt.Fprintf(&b, "name = %s\n", tomlString(string(roleID)))
