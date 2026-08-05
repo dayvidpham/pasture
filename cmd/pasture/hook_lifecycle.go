@@ -3,15 +3,14 @@ package main
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/internal/lifecycle/nativeresponse"
 )
 
 type lifecycleCLIClock struct{}
@@ -51,9 +50,17 @@ var hookLifecycleCmd = &cobra.Command{
 			HostVersion: hostVersion, Input: cmd.InOrStdin(), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 		})
 		if err == nil {
-			if response.IsValid() {
-				if encodeErr := writeLifecycleResponse(cmd.OutOrStdout(), response); encodeErr != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "pasture: lifecycle hook could not encode its committed host response: %v; the event was recorded but the host received no decision; inspect the database and retry the hook input\n", encodeErr)
+			// The durable receipt has already committed; the per-target backend
+			// now emits the exact native continuation bytes this harness reads on
+			// stdout, so nothing is written to stdout before the commit completes.
+			native, encodeErr := nativeresponse.Encode(ir.HarnessID(harness), response)
+			if encodeErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "pasture: lifecycle hook could not encode its committed host continuation: %v; the event was recorded but the host received no continuation; inspect the database and retry the hook input\n", encodeErr)
+				return nil
+			}
+			if len(native) > 0 {
+				if _, writeErr := cmd.OutOrStdout().Write(native); writeErr != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "pasture: lifecycle hook could not write its committed host continuation: %v; the event was recorded but the host received no continuation; inspect the database and retry the hook input\n", writeErr)
 					return nil
 				}
 			}
@@ -62,15 +69,6 @@ var hookLifecycleCmd = &cobra.Command{
 		printError(err)
 		return nil
 	},
-}
-
-func writeLifecycleResponse(out io.Writer, response json.Marshaler) error {
-	encoded, err := response.MarshalJSON()
-	if err != nil {
-		return err
-	}
-	_, err = out.Write(encoded)
-	return err
 }
 
 func init() {
