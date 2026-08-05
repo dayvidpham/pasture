@@ -137,6 +137,11 @@ func renderManifest(c hostcontract.Contract) []byte {
 		fmt.Fprintf(&b, "}, Blocking:%s, Mutation:%s, Failure:%s, StopLoop:%s},\n", blocking(e.Blocking), mutation(e.Mutation), failure(e.Failure), stop(e.StopLoop))
 	}
 	fmt.Fprintf(&b, "\t}\n\tcontract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, %q)\n\tif err != nil { panic(err) }\n\treturn Manifest{Harness:ir.HarnessClaudeCode, Version:%q, Contract:contract, Events:events}\n}\n", c.Version, c.Version)
+	fmt.Fprintln(&b, "\nfunc ClaudeCode2_1_210NativeFieldNames() map[model.NativeFieldID]string {\n\treturn map[model.NativeFieldID]string{")
+	for _, f := range c.Fields {
+		fmt.Fprintf(&b, "\t\t%s: %q,\n", f.Symbol, f.Name)
+	}
+	fmt.Fprintln(&b, "\t}\n}")
 	return b.Bytes()
 }
 

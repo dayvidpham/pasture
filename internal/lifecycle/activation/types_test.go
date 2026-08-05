@@ -20,9 +20,15 @@ func TestClaudeActivationIsCompleteAndExactlyPartitioned(t *testing.T) {
 		targets[event] = struct{}{}
 	}
 	require.Len(t, targets, 10)
+	enabledTargets := map[model.ContractEventKind]struct{}{
+		registration.EventSessionStart: {}, registration.EventSessionEnd: {},
+		registration.EventPreToolUse: {}, registration.EventPostToolUse: {},
+		registration.EventPostToolUseFailure: {}, registration.EventPostToolBatch: {},
+		registration.EventPreCompact: {}, registration.EventPostCompact: {},
+	}
 	seen := make(map[model.ContractEventKind]struct{}, len(entries))
 	enabled := 0
-	missingFixture := 0
+	missingCorrelation := 0
 	outsideTarget := 0
 	for _, entry := range entries {
 		_, duplicate := seen[entry.Event]
@@ -33,7 +39,7 @@ func TestClaudeActivationIsCompleteAndExactlyPartitioned(t *testing.T) {
 		case activation.Enabled:
 			enabled++
 			require.Zero(t, entry.Reason)
-			require.Equal(t, registration.EventSessionStart, entry.Event)
+			require.Contains(t, enabledTargets, entry.Event)
 			captureEvent, captureOK := entry.CaptureProof.Event()
 			productionEvent, productionOK := entry.ProductionProof.Event()
 			require.True(t, captureOK)
@@ -46,8 +52,9 @@ func TestClaudeActivationIsCompleteAndExactlyPartitioned(t *testing.T) {
 			require.Zero(t, entry.CaptureProof)
 			require.Zero(t, entry.ProductionProof)
 			if _, target := targets[entry.Event]; target {
-				missingFixture++
-				require.Equal(t, activation.WithheldMissingFixture, entry.Reason)
+				missingCorrelation++
+				require.Contains(t, []model.ContractEventKind{registration.EventElicitation, registration.EventElicitationResult}, entry.Event)
+				require.Equal(t, activation.WithheldMissingRequestCorrelation, entry.Reason)
 			} else {
 				outsideTarget++
 				require.Equal(t, activation.WithheldOutsideTargetSet, entry.Reason)
@@ -56,8 +63,8 @@ func TestClaudeActivationIsCompleteAndExactlyPartitioned(t *testing.T) {
 			t.Fatalf("unexpected activation state %d", entry.State)
 		}
 	}
-	require.Equal(t, 1, enabled)
-	require.Equal(t, 9, missingFixture)
+	require.Equal(t, 8, enabled)
+	require.Equal(t, 2, missingCorrelation)
 	require.Equal(t, 20, outsideTarget)
 	require.Equal(t, registration.EventSessionStart, entries[0].Event)
 }
@@ -99,4 +106,5 @@ func TestActivationConstructorsRejectReservedZeroAndInvalidCombinations(t *testi
 	require.False(t, (activation.Entry{}).IsValid())
 	require.False(t, (activation.CaptureProof(99)).IsValid())
 	require.False(t, (activation.ProductionProof(99)).IsValid())
+	require.Equal(t, "missing-request-correlation", activation.WithheldMissingRequestCorrelation.String())
 }

@@ -1,4 +1,5 @@
-# Hand-authored from the Claude Code 2.1.210 host contract and live captures.
+# Hand-authored from the Claude Code 2.1.x compatibility contract and live
+# captures through Claude Code 2.1.222.
 # This file is deliberately outside hostcontractgen and must never be generated.
 events:
   - {name: SessionStart, fields: [source, model, session_title], behavior: observation}
@@ -11,9 +12,9 @@ events:
   - {name: PreToolUse, fields: [tool_name, tool_input, tool_use_id], behavior: gate}
   - {name: PermissionRequest, fields: [tool_name, tool_input, request_id], behavior: gate}
   - {name: PermissionDenied, fields: [tool_name, tool_input], behavior: observation}
-  - {name: PostToolUse, fields: [tool_name, tool_input, tool_output, tool_use_id], behavior: observation}
-  - {name: PostToolUseFailure, fields: [tool_name, tool_input, error, tool_use_id], behavior: observation}
-  - {name: PostToolBatch, fields: [batch_results], behavior: gate}
+  - {name: PostToolUse, fields: [tool_name, tool_input, tool_output, tool_response, duration_ms, tool_use_id], behavior: observation}
+  - {name: PostToolUseFailure, fields: [tool_name, tool_input, error, is_interrupt, duration_ms, tool_use_id], behavior: observation}
+  - {name: PostToolBatch, fields: [batch_results, tool_calls], behavior: gate}
   - {name: FileChanged, fields: [file_path], behavior: observation}
   - {name: CwdChanged, fields: [], behavior: observation}
   - {name: ConfigChange, fields: [config_source], behavior: conditional-gate}
@@ -25,9 +26,9 @@ events:
   - {name: TeammateIdle, fields: [teammate_name], behavior: gate}
   - {name: TaskCreated, fields: [task_id], behavior: gate}
   - {name: TaskCompleted, fields: [task_id], behavior: gate}
-  - {name: PreCompact, fields: [trigger], behavior: gate}
-  - {name: PostCompact, fields: [trigger], behavior: observation}
+  - {name: PreCompact, fields: [trigger, custom_instructions], behavior: gate}
+  - {name: PostCompact, fields: [trigger, compact_summary], behavior: observation}
   - {name: Notification, fields: [message, notification_type, title], behavior: observation}
   - {name: MessageDisplay, fields: [message, content], behavior: observation}
-  - {name: Elicitation, fields: [request_id, fields, mcp_server_name], behavior: gate}
-  - {name: ElicitationResult, fields: [request_id, response, mcp_server_name], behavior: human-response}
+  - {name: Elicitation, fields: [request_id, fields, mcp_server_name, message, mode, requested_schema], behavior: gate}
+  - {name: ElicitationResult, fields: [request_id, response, mcp_server_name, mode, action, content], behavior: human-response}

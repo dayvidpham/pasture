@@ -1,14 +1,98 @@
 cases:
   - name: authentic-session-start
     input:
-      fixture: fixtures/session_start_2_1_210.json
+      fixture: fixtures/session_start_2_1_222.json
     expected:
       decision: enabled
       reason: ""
     classification: must-pass
     provenance:
       source: requirement
-      ref: llm/plan/impl-plan-m1-claude-vertical.md
+      ref: https://github.com/dayvidpham/pasture/issues/55
+    mutation:
+      description: The reviewed authentic fixture remains unchanged.
+  - name: authentic-session-end
+    input:
+      fixture: fixtures/session_end_2_1_222.json
+    expected:
+      decision: enabled
+      reason: ""
+    classification: must-pass
+    provenance:
+      source: requirement
+      ref: https://github.com/dayvidpham/pasture/issues/55
+    mutation:
+      description: The reviewed authentic fixture remains unchanged.
+  - name: authentic-pre-tool-use
+    input:
+      fixture: fixtures/pre_tool_use_2_1_222.json
+    expected:
+      decision: enabled
+      reason: ""
+    classification: must-pass
+    provenance:
+      source: requirement
+      ref: https://github.com/dayvidpham/pasture/issues/55
+    mutation:
+      description: The reviewed authentic fixture remains unchanged.
+  - name: authentic-post-tool-use
+    input:
+      fixture: fixtures/post_tool_use_2_1_222.json
+    expected:
+      decision: enabled
+      reason: ""
+    classification: must-pass
+    provenance:
+      source: requirement
+      ref: https://github.com/dayvidpham/pasture/issues/55
+    mutation:
+      description: The reviewed authentic fixture remains unchanged.
+  - name: authentic-post-tool-use-failure
+    input:
+      fixture: fixtures/post_tool_use_failure_2_1_222.json
+    expected:
+      decision: enabled
+      reason: ""
+    classification: must-pass
+    provenance:
+      source: requirement
+      ref: https://github.com/dayvidpham/pasture/issues/55
+    mutation:
+      description: The reviewed authentic fixture remains unchanged.
+  - name: authentic-post-tool-batch
+    input:
+      fixture: fixtures/post_tool_batch_2_1_222.json
+    expected:
+      decision: enabled
+      reason: ""
+    classification: must-pass
+    provenance:
+      source: requirement
+      ref: https://github.com/dayvidpham/pasture/issues/55
+    mutation:
+      description: The reviewed authentic fixture remains unchanged.
+  - name: authentic-pre-compact
+    input:
+      fixture: fixtures/pre_compact_2_1_222.json
+    expected:
+      decision: enabled
+      reason: ""
+    classification: must-pass
+    provenance:
+      source: requirement
+      ref: https://github.com/dayvidpham/pasture/issues/55
+    mutation:
+      description: The reviewed authentic fixture remains unchanged.
+  - name: authentic-post-compact
+    input:
+      fixture: fixtures/post_compact_2_1_222.json
+    expected:
+      decision: enabled
+      reason: ""
+    classification: must-pass
+    provenance:
+      source: requirement
+      ref: https://github.com/dayvidpham/pasture/issues/55
     mutation:
       description: The reviewed authentic fixture remains unchanged.
   - name: authored-origin-control

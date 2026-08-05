@@ -1,6 +1,70 @@
 {
   "description": "Pasture lifecycle adapters and shared-worktree git discipline for the pinned Claude Code contract.",
   "hooks": {
+    "PostCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event PostCompact --host-version \"${CLAUDE_CODE_VERSION:-unknown}\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolBatch": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event PostToolBatch --host-version \"${CLAUDE_CODE_VERSION:-unknown}\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event PostToolUse --host-version \"${CLAUDE_CODE_VERSION:-unknown}\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event PostToolUseFailure --host-version \"${CLAUDE_CODE_VERSION:-unknown}\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cat ${CLAUDE_PLUGIN_ROOT}/hooks/bd-prime.md 2\u003e\u00261"
+          },
+          {
+            "type": "command",
+            "command": "${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event PreCompact --host-version \"${CLAUDE_CODE_VERSION:-unknown}\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
@@ -8,6 +72,28 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/git-discipline.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event PreToolUse --host-version \"${CLAUDE_CODE_VERSION:-unknown}\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event SessionEnd --host-version \"${CLAUDE_CODE_VERSION:-unknown}\"",
             "timeout": 10
           }
         ]

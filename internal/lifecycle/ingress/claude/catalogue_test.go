@@ -35,7 +35,14 @@ type expectedCaptureCase struct {
 }
 
 var expectedCaptureCases = []expectedCaptureCase{
-	{name: "authentic-session-start", fixture: "fixtures/session_start_2_1_210.json", classification: "must-pass", decision: "enabled", reason: ""},
+	{name: "authentic-session-start", fixture: "fixtures/session_start_2_1_222.json", classification: "must-pass", decision: "enabled", reason: ""},
+	{name: "authentic-session-end", fixture: "fixtures/session_end_2_1_222.json", classification: "must-pass", decision: "enabled", reason: ""},
+	{name: "authentic-pre-tool-use", fixture: "fixtures/pre_tool_use_2_1_222.json", classification: "must-pass", decision: "enabled", reason: ""},
+	{name: "authentic-post-tool-use", fixture: "fixtures/post_tool_use_2_1_222.json", classification: "must-pass", decision: "enabled", reason: ""},
+	{name: "authentic-post-tool-use-failure", fixture: "fixtures/post_tool_use_failure_2_1_222.json", classification: "must-pass", decision: "enabled", reason: ""},
+	{name: "authentic-post-tool-batch", fixture: "fixtures/post_tool_batch_2_1_222.json", classification: "must-pass", decision: "enabled", reason: ""},
+	{name: "authentic-pre-compact", fixture: "fixtures/pre_compact_2_1_222.json", classification: "must-pass", decision: "enabled", reason: ""},
+	{name: "authentic-post-compact", fixture: "fixtures/post_compact_2_1_222.json", classification: "must-pass", decision: "enabled", reason: ""},
 	{name: "authored-origin-control", fixture: "fixtures/session_start_2_1_210_origin_authored.json", classification: "must-fail", decision: "withheld", reason: "non-authentic-origin"},
 	{name: "digest-mismatch-control", fixture: "fixtures/session_start_2_1_210_digest_mismatch.json", classification: "must-fail", decision: "withheld", reason: "digest-mismatch"},
 	{name: "version-out-of-range-control", fixture: "fixtures/session_start_2_1_210_version_out_of_range.json", classification: "must-fail", decision: "withheld", reason: "version-out-of-range"},
@@ -53,6 +60,13 @@ func TestRealCaptureCorpusDrivesStaticActivation(t *testing.T) {
 	}
 	wantCases := []expectedCase{
 		{name: "authentic-session-start", classification: activation.ClassificationMustPass, decision: activation.DecisionEnabled, reason: activation.CorpusReasonNone},
+		{name: "authentic-session-end", classification: activation.ClassificationMustPass, decision: activation.DecisionEnabled, reason: activation.CorpusReasonNone},
+		{name: "authentic-pre-tool-use", classification: activation.ClassificationMustPass, decision: activation.DecisionEnabled, reason: activation.CorpusReasonNone},
+		{name: "authentic-post-tool-use", classification: activation.ClassificationMustPass, decision: activation.DecisionEnabled, reason: activation.CorpusReasonNone},
+		{name: "authentic-post-tool-use-failure", classification: activation.ClassificationMustPass, decision: activation.DecisionEnabled, reason: activation.CorpusReasonNone},
+		{name: "authentic-post-tool-batch", classification: activation.ClassificationMustPass, decision: activation.DecisionEnabled, reason: activation.CorpusReasonNone},
+		{name: "authentic-pre-compact", classification: activation.ClassificationMustPass, decision: activation.DecisionEnabled, reason: activation.CorpusReasonNone},
+		{name: "authentic-post-compact", classification: activation.ClassificationMustPass, decision: activation.DecisionEnabled, reason: activation.CorpusReasonNone},
 		{name: "authored-origin-control", classification: activation.ClassificationMustFail, decision: activation.DecisionWithheld, reason: activation.CorpusReasonNonAuthenticOrigin},
 		{name: "digest-mismatch-control", classification: activation.ClassificationMustFail, decision: activation.DecisionWithheld, reason: activation.CorpusReasonDigestMismatch},
 		{name: "version-out-of-range-control", classification: activation.ClassificationMustFail, decision: activation.DecisionWithheld, reason: activation.CorpusReasonVersionOutOfRange},
@@ -62,7 +76,7 @@ func TestRealCaptureCorpusDrivesStaticActivation(t *testing.T) {
 	corpus, err := activation.LoadCorpus(filepath.Join("testdata", "captures.yaml"))
 	require.NoError(t, err)
 	cases := corpus.Cases()
-	require.Len(t, cases, 5)
+	require.Len(t, cases, 12)
 	require.Len(t, cases, len(wantCases))
 
 	entries, err := activation.ClaudeCode2_1_210()
@@ -127,7 +141,7 @@ func TestRealCaptureCorpusDrivesStaticActivation(t *testing.T) {
 		}
 	}
 
-	require.Equal(t, 1, passCount)
+	require.Equal(t, 8, passCount)
 	require.Equal(t, 4, failCount)
 	require.Equal(t, map[activation.CorpusReason]struct{}{
 		activation.CorpusReasonNonAuthenticOrigin: {},
@@ -135,17 +149,22 @@ func TestRealCaptureCorpusDrivesStaticActivation(t *testing.T) {
 		activation.CorpusReasonVersionOutOfRange:  {},
 		activation.CorpusReasonPathEscape:         {},
 	}, seenReasons)
-	require.Equal(t, map[model.ContractEventKind]struct{}{registration.EventSessionStart: {}}, admittedEvents)
+	require.Equal(t, map[model.ContractEventKind]struct{}{
+		registration.EventSessionStart: {}, registration.EventSessionEnd: {},
+		registration.EventPreToolUse: {}, registration.EventPostToolUse: {},
+		registration.EventPostToolUseFailure: {}, registration.EventPostToolBatch: {},
+		registration.EventPreCompact: {}, registration.EventPostCompact: {},
+	}, admittedEvents)
 	require.Equal(t, enabledEvents, admittedEvents, "every enabled event needs independent real-corpus admission")
 
 	for _, event := range activation.ClaudeCode2_1_210TargetEvents() {
 		entry, exists := entryByEvent[event]
 		require.True(t, exists, "target event %d", event)
-		if event == registration.EventSessionStart {
+		if _, enabled := admittedEvents[event]; enabled {
 			continue
 		}
 		require.Equal(t, activation.Withheld, entry.State, "target event %d", event)
-		require.Equal(t, activation.WithheldMissingFixture, entry.Reason, "target event %d", event)
+		require.Equal(t, activation.WithheldMissingRequestCorrelation, entry.Reason, "target event %d", event)
 		require.Zero(t, entry.CaptureProof, "target event %d", event)
 		require.Zero(t, entry.ProductionProof, "target event %d", event)
 	}
@@ -352,7 +371,7 @@ type captureMutation struct {
 	Description string `yaml:"description"`
 }
 
-func TestCaptureCorpusHasFrozenFiveCaseShape(t *testing.T) {
+func TestCaptureCorpusHasFrozenTwelveCaseShape(t *testing.T) {
 	t.Parallel()
 
 	raw, err := os.ReadFile("testdata/captures.yaml")
@@ -361,8 +380,8 @@ func TestCaptureCorpusHasFrozenFiveCaseShape(t *testing.T) {
 	decoder.KnownFields(true)
 	var corpus captureCorpus
 	require.NoError(t, decoder.Decode(&corpus))
-	require.Len(t, corpus.Cases, 5)
-	require.Len(t, expectedCaptureCases, 5)
+	require.Len(t, corpus.Cases, 12)
+	require.Len(t, expectedCaptureCases, 12)
 	for index, want := range expectedCaptureCases {
 		got := corpus.Cases[index]
 		require.Equal(t, want.name, got.Name, "corpus case %d name", index)
@@ -416,7 +435,7 @@ func TestCaptureCorpusHasFrozenFiveCaseShape(t *testing.T) {
 			t.Fatalf("case %q has unknown classification %q", testCase.Name, testCase.Classification)
 		}
 	}
-	require.Equal(t, 1, passCount)
+	require.Equal(t, 8, passCount)
 	require.Equal(t, 4, failCount)
 	require.Equal(t, wantReasons, seenReasons)
 }
@@ -532,7 +551,7 @@ func TestCaptureScriptEmitsMatchingDeterministicSiblings(t *testing.T) {
 }
 
 func isCommonField(name string) bool {
-	for _, common := range []string{"session_id", "transcript_path", "cwd", "permission_mode", "hook_event_name", "effort", "agent_id", "agent_type"} {
+	for _, common := range []string{"session_id", "transcript_path", "cwd", "permission_mode", "hook_event_name", "effort", "agent_id", "agent_type", "prompt_id"} {
 		if name == common {
 			return true
 		}

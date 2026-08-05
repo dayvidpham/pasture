@@ -93,7 +93,17 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 		t.Fatalf("support entries=%d, want 30", len(report.Events))
 	}
 	expected := []struct{ event, state, reason string }{
-		{"SessionStart", "enabled", ""}, {"Setup", "withheld", "outside-target-set"}, {"SessionEnd", "withheld", "missing-fixture"}, {"UserPromptSubmit", "withheld", "outside-target-set"}, {"UserPromptExpansion", "withheld", "outside-target-set"}, {"Stop", "withheld", "outside-target-set"}, {"StopFailure", "withheld", "outside-target-set"}, {"PreToolUse", "withheld", "missing-fixture"}, {"PermissionRequest", "withheld", "outside-target-set"}, {"PermissionDenied", "withheld", "outside-target-set"}, {"PostToolUse", "withheld", "missing-fixture"}, {"PostToolUseFailure", "withheld", "missing-fixture"}, {"PostToolBatch", "withheld", "missing-fixture"}, {"FileChanged", "withheld", "outside-target-set"}, {"CwdChanged", "withheld", "outside-target-set"}, {"ConfigChange", "withheld", "outside-target-set"}, {"InstructionsLoaded", "withheld", "outside-target-set"}, {"WorktreeCreate", "withheld", "outside-target-set"}, {"WorktreeRemove", "withheld", "outside-target-set"}, {"SubagentStart", "withheld", "outside-target-set"}, {"SubagentStop", "withheld", "outside-target-set"}, {"TeammateIdle", "withheld", "outside-target-set"}, {"TaskCreated", "withheld", "outside-target-set"}, {"TaskCompleted", "withheld", "outside-target-set"}, {"PreCompact", "withheld", "missing-fixture"}, {"PostCompact", "withheld", "missing-fixture"}, {"Notification", "withheld", "outside-target-set"}, {"MessageDisplay", "withheld", "outside-target-set"}, {"Elicitation", "withheld", "missing-fixture"}, {"ElicitationResult", "withheld", "missing-fixture"},
+		{"SessionStart", "enabled", ""}, {"Setup", "withheld", "outside-target-set"}, {"SessionEnd", "enabled", ""}, {"UserPromptSubmit", "withheld", "outside-target-set"}, {"UserPromptExpansion", "withheld", "outside-target-set"}, {"Stop", "withheld", "outside-target-set"}, {"StopFailure", "withheld", "outside-target-set"}, {"PreToolUse", "enabled", ""}, {"PermissionRequest", "withheld", "outside-target-set"}, {"PermissionDenied", "withheld", "outside-target-set"}, {"PostToolUse", "enabled", ""}, {"PostToolUseFailure", "enabled", ""}, {"PostToolBatch", "enabled", ""}, {"FileChanged", "withheld", "outside-target-set"}, {"CwdChanged", "withheld", "outside-target-set"}, {"ConfigChange", "withheld", "outside-target-set"}, {"InstructionsLoaded", "withheld", "outside-target-set"}, {"WorktreeCreate", "withheld", "outside-target-set"}, {"WorktreeRemove", "withheld", "outside-target-set"}, {"SubagentStart", "withheld", "outside-target-set"}, {"SubagentStop", "withheld", "outside-target-set"}, {"TeammateIdle", "withheld", "outside-target-set"}, {"TaskCreated", "withheld", "outside-target-set"}, {"TaskCompleted", "withheld", "outside-target-set"}, {"PreCompact", "enabled", ""}, {"PostCompact", "enabled", ""}, {"Notification", "withheld", "outside-target-set"}, {"MessageDisplay", "withheld", "outside-target-set"}, {"Elicitation", "withheld", "missing-request-correlation"}, {"ElicitationResult", "withheld", "missing-request-correlation"},
+	}
+	enabledProofs := map[string]struct{ capture, production string }{
+		"SessionStart":       {"internal/lifecycle/ingress/claude/testdata/fixtures/session_start_2_1_222.json (Claude Code 2.1.222 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/SessionStart"},
+		"SessionEnd":         {"internal/lifecycle/ingress/claude/testdata/fixtures/session_end_2_1_222.json (Claude Code 2.1.222 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/SessionEnd"},
+		"PreToolUse":         {"internal/lifecycle/ingress/claude/testdata/fixtures/pre_tool_use_2_1_222.json (Claude Code 2.1.222 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PreToolUse"},
+		"PostToolUse":        {"internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_use_2_1_222.json (Claude Code 2.1.222 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolUse"},
+		"PostToolUseFailure": {"internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_use_failure_2_1_222.json (Claude Code 2.1.222 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolUseFailure"},
+		"PostToolBatch":      {"internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_batch_2_1_222.json (Claude Code 2.1.222 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolBatch"},
+		"PreCompact":         {"internal/lifecycle/ingress/claude/testdata/fixtures/pre_compact_2_1_222.json (Claude Code 2.1.222 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PreCompact"},
+		"PostCompact":        {"internal/lifecycle/ingress/claude/testdata/fixtures/post_compact_2_1_222.json (Claude Code 2.1.222 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostCompact"},
 	}
 	seen := make(map[string]struct{}, len(expected))
 	for index, want := range expected {
@@ -106,8 +116,9 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 			t.Errorf("support[%d]=%+v, want event=%q state=%q reason=%q", index, entry, want.event, want.state, want.reason)
 		}
 		if want.state == "enabled" {
-			if entry.CaptureProof != "internal/lifecycle/ingress/claude/testdata/fixtures/session_start_2_1_210.json (Claude Code 2.1.210 authentic capture)" || entry.ProductionProof != "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence" {
-				t.Errorf("SessionStart exact proofs changed: %+v", entry)
+			proof, present := enabledProofs[entry.Event]
+			if !present || entry.CaptureProof != proof.capture || entry.ProductionProof != proof.production {
+				t.Errorf("%s exact proofs changed: %+v", entry.Event, entry)
 			}
 		} else if entry.CaptureProof != "" || entry.ProductionProof != "" {
 			t.Errorf("withheld event carries proofs: %+v", entry)
@@ -130,20 +141,31 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 		t.Fatal(err)
 	}
 	lifecycle := 0
+	lifecycleByEvent := make(map[string]int, len(enabledProofs))
 	for event, groups := range config.Hooks {
 		for _, group := range groups {
 			for _, hook := range group.Hooks {
 				if strings.Contains(hook.Command, "hook lifecycle") {
 					lifecycle++
-					if event != "SessionStart" {
+					if _, enabled := enabledProofs[event]; !enabled {
 						t.Errorf("withheld lifecycle event emitted: %s", event)
+					}
+					lifecycleByEvent[event]++
+					want := `${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event ` + event + ` --host-version "${CLAUDE_CODE_VERSION:-unknown}"`
+					if hook.Command != want || hook.Type != "command" || hook.Timeout != 10 {
+						t.Errorf("%s lifecycle command=%+v, want %q", event, hook, want)
 					}
 				}
 			}
 		}
 	}
-	if lifecycle != 1 {
-		t.Fatalf("lifecycle hooks=%d, want one enabled event", lifecycle)
+	if lifecycle != len(enabledProofs) {
+		t.Fatalf("lifecycle hooks=%d, want %d enabled events", lifecycle, len(enabledProofs))
+	}
+	for event := range enabledProofs {
+		if lifecycleByEvent[event] != 1 {
+			t.Errorf("%s lifecycle hook count=%d, want exactly one", event, lifecycleByEvent[event])
+		}
 	}
 	session := config.Hooks["SessionStart"]
 	if len(session) != 1 || session[0].Matcher != "" || len(session[0].Hooks) != 2 {
@@ -156,23 +178,32 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 	if session[0].Hooks[1].Command != wantLifecycle || session[0].Hooks[1].Type != "command" || session[0].Hooks[1].Timeout != 10 {
 		t.Errorf("SessionStart lifecycle command=%+v, want %q", session[0].Hooks[1], wantLifecycle)
 	}
+	compact := config.Hooks["PreCompact"]
+	if len(compact) != 1 || compact[0].Matcher != "" || len(compact[0].Hooks) != 2 ||
+		compact[0].Hooks[0].Command != "cat ${CLAUDE_PLUGIN_ROOT}/hooks/bd-prime.md 2>&1" ||
+		!strings.Contains(compact[0].Hooks[1].Command, "--event PreCompact") {
+		t.Fatalf("PreCompact hook group changed: %+v", compact)
+	}
 	pre := config.Hooks["PreToolUse"]
-	if len(pre) != 1 || pre[0].Matcher != "Bash" || len(pre[0].Hooks) != 1 ||
+	if len(pre) != 2 || pre[0].Matcher != "Bash" || len(pre[0].Hooks) != 1 ||
 		pre[0].Hooks[0].Type != "command" ||
 		pre[0].Hooks[0].Command != "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/git-discipline.sh" ||
-		pre[0].Hooks[0].Timeout != 10 {
+		pre[0].Hooks[0].Timeout != 10 || pre[1].Matcher != "" || len(pre[1].Hooks) != 1 ||
+		!strings.Contains(pre[1].Hooks[0].Command, "--event PreToolUse") {
 		t.Fatalf("independent PreToolUse discipline missing: %+v", pre)
 	}
-	root, err := os.ReadFile(filepath.Join("..", "..", "hooks", "pasture-activation.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	embedded, err := os.ReadFile(filepath.Join("..", "target", "claudecode", "assets", "pasture-hooks", "hooks", "pasture-activation.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(root, embedded) {
-		t.Fatal("root and embedded generated support reports differ byte-for-byte")
+	for _, name := range []string{"hooks.json", "pasture-activation.json"} {
+		root, err := os.ReadFile(filepath.Join("..", "..", "hooks", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		embedded, err := os.ReadFile(filepath.Join("..", "target", "claudecode", "assets", "pasture-hooks", "hooks", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(root, embedded) {
+			t.Fatalf("root and embedded generated %s differ byte-for-byte", name)
+		}
 	}
 }
 
@@ -209,7 +240,8 @@ func TestClaudeHooksAbsentSessionStartDoesNotPanic(t *testing.T) {
 		t.Fatalf("withheld SessionStart emitted augmentation: %+v", config.Hooks["SessionStart"])
 	}
 	pre := config.Hooks["PreToolUse"]
-	if len(pre) != 1 || !strings.Contains(pre[0].Hooks[0].Command, "git-discipline.sh") {
+	if len(pre) != 2 || !strings.Contains(pre[0].Hooks[0].Command, "git-discipline.sh") ||
+		!strings.Contains(pre[1].Hooks[0].Command, "--event PreToolUse") {
 		t.Fatalf("independent PreToolUse missing without SessionStart: %+v", pre)
 	}
 }
@@ -269,7 +301,7 @@ func TestLifecycleIdentityFieldsBelongToPinnedPayloadShapes(t *testing.T) {
 			t,
 			runtime.ClaudeCode2_1_210Lifecycle(),
 			runtime.ClaudeLifecycleEvents(),
-			"claudeNativeFields",
+			"generated Claude registration",
 			claudeNativeFields,
 		)
 	})
@@ -278,10 +310,72 @@ func TestLifecycleIdentityFieldsBelongToPinnedPayloadShapes(t *testing.T) {
 			t,
 			runtime.Codex0_144_1Lifecycle(),
 			runtime.CodexLifecycleEvents(),
-			"codexNativeFields",
+			"Codex payload field table",
 			codexNativeFields,
 		)
 	})
+}
+
+func TestClaudeLifecycleAdapterAllowsAuthentic2_1_222FieldShapes(t *testing.T) {
+	t.Parallel()
+	metadata, err := lifecycleMetadata(runtime.ClaudeCode2_1_210Lifecycle(), "2.1.210", claudeNativeFields)
+	if err != nil {
+		t.Fatalf("build Claude lifecycle adapter metadata: %v", err)
+	}
+	events := make(map[string]lifecycleEventMetadata, len(metadata.Events))
+	for _, event := range metadata.Events {
+		events[event.Name] = event
+	}
+	fixtureRoot := filepath.Join("..", "lifecycle", "ingress", "claude", "testdata", "fixtures")
+	fixtures, err := filepath.Glob(filepath.Join(fixtureRoot, "*_2_1_222.json"))
+	if err != nil {
+		t.Fatalf("list authentic Claude fixtures: %v", err)
+	}
+	if len(fixtures) != 10 {
+		t.Fatalf("authentic Claude fixture count = %d, want 10", len(fixtures))
+	}
+	for _, fixture := range fixtures {
+		raw, err := os.ReadFile(fixture)
+		if err != nil {
+			t.Fatalf("read authentic Claude fixture %q: %v", fixture, err)
+		}
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("decode authentic Claude fixture %q: %v", fixture, err)
+		}
+		var eventName string
+		if err := json.Unmarshal(payload["hook_event_name"], &eventName); err != nil {
+			t.Fatalf("decode hook_event_name in %q: %v", fixture, err)
+		}
+		event, present := events[eventName]
+		if !present {
+			t.Errorf("authentic Claude fixture %q names unknown adapter event %q", fixture, eventName)
+			continue
+		}
+		for field := range payload {
+			if !slices.Contains(event.AllowedFields, field) {
+				t.Errorf("authentic Claude fixture %q field %q is absent from generated adapter metadata for %s", fixture, field, eventName)
+			}
+		}
+	}
+}
+
+func TestClaudeLifecycleAdapterFieldsMatchGeneratedRegistration(t *testing.T) {
+	t.Parallel()
+	fieldNames := registration.ClaudeCode2_1_210NativeFieldNames()
+	for _, event := range registration.ClaudeCode2_1_210().Entries() {
+		expected := make([]string, 0, len(event.AllowedFields))
+		for _, field := range event.AllowedFields {
+			name, present := fieldNames[field]
+			if !present || name == "" {
+				t.Fatalf("generated Claude event %q field %d has no native name", event.NativeName, field)
+			}
+			expected = append(expected, name)
+		}
+		if actual := claudeNativeFields(event.NativeName); !slices.Equal(actual, expected) {
+			t.Errorf("Claude adapter fields for %q = %v, want generated registration fields %v", event.NativeName, actual, expected)
+		}
+	}
 }
 
 func assertIdentityFieldsInPayloadShape[E comparable](
@@ -301,7 +395,7 @@ func assertIdentityFieldsInPayloadShape[E comparable](
 		for _, identity := range mapping.Identities() {
 			if !slices.Contains(declaredPayloadFields, identity.NativeName()) {
 				t.Errorf(
-					"event %q identity field %q is declared by the runtime lifecycle identity table but absent from the pinned payload shape; edit %s in internal/codegen/claude_hooks.go",
+					"event %q identity field %q is declared by the runtime lifecycle identity table but absent from %s",
 					mapping.NativeName(), identity.NativeName(), payloadTable,
 				)
 			}

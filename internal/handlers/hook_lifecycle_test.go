@@ -40,7 +40,7 @@ func (r *readTrackingLifecycleInput) Read([]byte) (int, error) {
 
 func TestHookLifecycleResponseRejectsWithheldOpenCodeBeforeInputAndStorage(t *testing.T) {
 	t.Parallel()
-	dbPath := filepath.Join(t.TempDir(), "unopened", "pasture.db")
+	dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
 	input := &readTrackingLifecycleInput{}
 	response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
 		DBPath: dbPath, Harness: ir.HarnessOpenCode, Event: "session.updated", HostVersion: "1.18.10",
@@ -51,6 +51,27 @@ func TestHookLifecycleResponseRejectsWithheldOpenCodeBeforeInputAndStorage(t *te
 	require.Zero(t, input.reads, "withheld event must be rejected before stdin access")
 	_, statErr := os.Stat(dbPath)
 	require.ErrorIs(t, statErr, os.ErrNotExist, "withheld event must be rejected before storage access")
+}
+
+func TestHookLifecycleResponseRejectsUncorrelatedClaudeElicitationBeforeInputAndStorage(t *testing.T) {
+	t.Parallel()
+	for _, event := range []string{"Elicitation", "ElicitationResult"} {
+		event := event
+		t.Run(event, func(t *testing.T) {
+			t.Parallel()
+			dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
+			input := &readTrackingLifecycleInput{}
+			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
+				DBPath: dbPath, Harness: ir.HarnessClaudeCode, Event: event, HostVersion: "2.1.222",
+				Input: input, Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.withheld.claude"},
+			})
+			require.ErrorContains(t, err, `Claude event "`+event+`" is withheld (reason missing-request-correlation)`)
+			require.False(t, response.IsValid(), "withheld elicitation must emit no host response")
+			require.Zero(t, input.reads, "withheld elicitation must be rejected before stdin access")
+			_, statErr := os.Stat(dbPath)
+			require.ErrorIs(t, statErr, os.ErrNotExist, "withheld elicitation must be rejected before storage access")
+		})
+	}
 }
 
 func TestHookLifecycleResponseOpenCodeCommitsBeforeReturning(t *testing.T) {
@@ -71,7 +92,7 @@ func TestHookLifecycleResponseOpenCodeCommitsBeforeReturning(t *testing.T) {
 			require.NoError(t, err)
 			var record openCodeRecord
 			require.NoError(t, json.Unmarshal(raw, &record))
-			dbPath := filepath.Join(t.TempDir(), "pasture.db")
+			dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 			bootstrap, err := tasks.OpenTaskTracker(dbPath)
 			require.NoError(t, err)
 			_, err = bootstrap.Create("file://handler-test", "bootstrap", "initialize lifecycle system identity", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
