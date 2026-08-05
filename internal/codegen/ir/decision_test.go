@@ -29,7 +29,7 @@ func TestReportedUserDecisionSelectManyGolden(t *testing.T) {
 	scope, err := ir.NewRootScope("golden")
 	require.NoError(t, err)
 	request, err := ir.NewRequestUserDecision(
-		"request-α", ir.HarnessCodex, mustContract(t, ir.HarnessCodex, "0.144.1"),
+		"request-α", ir.HarnessCodex, mustContract(t, ir.HarnessCodex, "0.146.0"),
 		mustTaskRef(t, "epoch-1"), mustTaskRef(t, "gate-1"), "implementation-uat", prompt,
 		scope,
 	)

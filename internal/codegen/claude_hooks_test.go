@@ -308,7 +308,7 @@ func TestLifecycleIdentityFieldsBelongToPinnedPayloadShapes(t *testing.T) {
 	t.Run("Codex", func(t *testing.T) {
 		assertIdentityFieldsInPayloadShape(
 			t,
-			runtime.Codex0_144_1Lifecycle(),
+			runtime.Codex0_146_0Lifecycle(),
 			runtime.CodexLifecycleEvents(),
 			"Codex payload field table",
 			codexNativeFields,
@@ -579,7 +579,7 @@ func TestLifecycleBindingTargetsExactlyOneNativeEvent(t *testing.T) {
 func TestCodexLifecycleAdapterStrictInputAndNoTranscriptRead(t *testing.T) {
 	t.Parallel()
 
-	metadata, err := lifecycleMetadata(runtime.Codex0_144_1Lifecycle(), "0.144.1", codexNativeFields)
+	metadata, err := lifecycleMetadata(runtime.Codex0_146_0Lifecycle(), "0.146.0", codexNativeFields)
 	if err != nil {
 		t.Fatalf("lifecycleMetadata: %v", err)
 	}

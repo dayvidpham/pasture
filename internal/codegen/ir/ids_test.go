@@ -97,11 +97,11 @@ func TestRuntimeContractIDConstructorRejectsInvalidValues(t *testing.T) {
 func TestRuntimeContractIDJSONRoundTripAndForgedValues(t *testing.T) {
 	t.Parallel()
 
-	contract, err := ir.NewRuntimeContractID(ir.HarnessCodex, "0.144.1")
+	contract, err := ir.NewRuntimeContractID(ir.HarnessCodex, "0.146.0")
 	require.NoError(t, err)
 	encoded, err := json.Marshal(contract)
 	require.NoError(t, err)
-	assert.JSONEq(t, `"codex/0.144.1"`, string(encoded))
+	assert.JSONEq(t, `"codex/0.146.0"`, string(encoded))
 
 	var decoded ir.RuntimeContractID
 	require.NoError(t, json.Unmarshal(encoded, &decoded))

@@ -106,7 +106,7 @@ func TestPinnedContractVersionBoundaries(t *testing.T) {
 		higher   string
 	}{
 		{contract: runtime.OpenCode1_18_10(), exact: "1.18.10", lower: "1.18.9", higher: "1.18.11"},
-		{contract: runtime.Codex0_144_1(), exact: "0.144.1", lower: "0.144.0", higher: "0.144.2"},
+		{contract: runtime.Codex0_146_0(), exact: "0.146.0", lower: "0.145.0", higher: "0.146.1"},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -126,5 +126,5 @@ func TestPinnedContractHarnessBinding(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, ir.HarnessClaudeCode, runtime.ClaudeCode2_1_210().Harness())
 	assert.Equal(t, ir.HarnessOpenCode, runtime.OpenCode1_18_10().Harness())
-	assert.Equal(t, ir.HarnessCodex, runtime.Codex0_144_1().Harness())
+	assert.Equal(t, ir.HarnessCodex, runtime.Codex0_146_0().Harness())
 }

@@ -53,7 +53,7 @@ func TestCodexManifestIsDeterministic(t *testing.T) {
 	if renderCodexManifest() != renderCodexManifest() {
 		t.Fatal("renderCodexManifest is not deterministic")
 	}
-	metadata, err := lifecycleMetadata(runtime.Codex0_144_1Lifecycle(), "0.144.1", codexNativeFields)
+	metadata, err := lifecycleMetadata(runtime.Codex0_146_0Lifecycle(), "0.146.0", codexNativeFields)
 	if err != nil {
 		t.Fatalf("lifecycleMetadata: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestCodexManifestIsDeterministic(t *testing.T) {
 // exactly the runtime contract's closed event set.
 func TestCodexHooksConfigCoversPinnedEvents(t *testing.T) {
 	t.Parallel()
-	metadata, err := lifecycleMetadata(runtime.Codex0_144_1Lifecycle(), "0.144.1", codexNativeFields)
+	metadata, err := lifecycleMetadata(runtime.Codex0_146_0Lifecycle(), "0.146.0", codexNativeFields)
 	if err != nil {
 		t.Fatalf("lifecycleMetadata: %v", err)
 	}

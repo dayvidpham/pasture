@@ -343,10 +343,10 @@ contracts:
 
   - harness: codex
     unresolved_by_event: {}
-    id: codex/codex@0.144.1
-    version: 0.144.1
-    lower: 0.144.0
-    higher: 0.144.2
+    id: codex/codex@0.146.0
+    version: 0.146.0
+    lower: 0.145.0
+    higher: 0.146.1
     event_order:
       - SessionStart
       - UserPromptSubmit

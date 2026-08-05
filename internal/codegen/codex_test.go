@@ -184,7 +184,7 @@ func TestCodexBundleManifestsAreCanonical(t *testing.T) {
 }
 
 func codexTargetLifecycleEventsForTest() []string {
-	metadata, err := lifecycleMetadata(runtime.Codex0_144_1Lifecycle(), "0.144.1", codexNativeFields)
+	metadata, err := lifecycleMetadata(runtime.Codex0_146_0Lifecycle(), "0.146.0", codexNativeFields)
 	if err != nil {
 		panic(err)
 	}
