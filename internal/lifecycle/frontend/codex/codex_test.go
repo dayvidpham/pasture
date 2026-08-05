@@ -103,6 +103,20 @@ func TestAuthenticCodexPayloadsProduceProviderCorrectVerifiedL2(t *testing.T) {
 	}
 }
 
+// TestBindRejectsNonSelectedCatalogEvent asserts the frontend positive-scope
+// boundary directly: a source-derived catalog event that is NOT authentically
+// proven (Stop) has no frontend binding and is rejected with an actionable
+// error and no L1/identities. This is the single direct guard for the "only
+// SessionStart and PreToolUse bind" contract; broad rejection matrices remain
+// deferred (R8), so exactly one representative non-selected kind is exercised.
+func TestBindRejectsNonSelectedCatalogEvent(t *testing.T) {
+	t.Parallel()
+	l1, identities, err := codex.Bind(registration.EventCodexStop, nil)
+	require.Error(t, err, "a non-selected catalog kind must be rejected by the frontend")
+	require.Nil(t, identities)
+	require.False(t, l1.IsValid(), "no L1 binding may be produced for a rejected kind")
+}
+
 func eventByKind(t *testing.T, manifest registration.Manifest, kind model.ContractEventKind) registration.Event {
 	t.Helper()
 	for _, event := range manifest.Events {
