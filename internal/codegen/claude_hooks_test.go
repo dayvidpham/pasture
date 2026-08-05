@@ -2,11 +2,9 @@ package codegen
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -305,15 +303,9 @@ func TestLifecycleIdentityFieldsBelongToPinnedPayloadShapes(t *testing.T) {
 			claudeNativeFields,
 		)
 	})
-	t.Run("Codex", func(t *testing.T) {
-		assertIdentityFieldsInPayloadShape(
-			t,
-			runtime.Codex0_146_0Lifecycle(),
-			runtime.CodexLifecycleEvents(),
-			"Codex payload field table",
-			codexNativeFields,
-		)
-	})
+	// The Codex identity/field-shape guard now lives on the Python-free Codex
+	// transport path (codex_transport_test.go); it no longer routes through the
+	// deleted Codex Python adapter metadata (#65).
 }
 
 func TestClaudeLifecycleAdapterAllowsAuthentic2_1_222FieldShapes(t *testing.T) {
@@ -403,275 +395,25 @@ func assertIdentityFieldsInPayloadShape[E comparable](
 	}
 }
 
-func TestClaudeLifecycleAdapterInvokesStrictHiddenEnvelope(t *testing.T) {
+// The generated Codex/Claude Python lifecycle adapter and its python3 test
+// harness were deleted with the #65 Python-removal work: the generated Python
+// renderer had no production caller after the Codex transport went exec-only,
+// so the tests that shelled out to python3 (strict-envelope, generic-event,
+// stop-loop, policy-config, single-event binding) exercised code nothing ships
+// and gave a false coverage signal. The lifecycle transport is now proven
+// Python-free by codex_transport_test.go and the exec-only runner goldens; the
+// OpenCode adapter's authority/storage-field absence is guarded below.
+
+func TestGeneratedOpenCodeAdapterContainsNoAuthorityOrStorageFields(t *testing.T) {
 	t.Parallel()
 
-	metadata, err := lifecycleMetadata(runtime.ClaudeCode2_1_210Lifecycle(), "2.1.210", claudeNativeFields)
-	if err != nil {
-		t.Fatalf("lifecycleMetadata: %v", err)
-	}
-	script, err := renderPythonLifecycleAdapter(metadata)
-	if err != nil {
-		t.Fatalf("renderPythonLifecycleAdapter: %v", err)
-	}
-	dir := t.TempDir()
-	scriptPath := filepath.Join(dir, "pasture lifecycle.py")
-	if err := os.WriteFile(scriptPath, []byte(script), 0o644); err != nil {
-		t.Fatalf("write generated adapter: %v", err)
-	}
-	capture := filepath.Join(dir, "captured envelope.json")
-	binary := writeFakePasture(t, dir, handlers.AdapterOperationSetInteractionMode)
-	native := readNativeFixture(t, "claude", "elicitation_result.json")
-	rawInput := `{"epoch":"epoch--00000000-0000-0000-0000-000000000001","mode":"normal","actor":"human--00000000-0000-0000-0000-000000000002"}`
-
-	stdout, stderr, exitCode := runPythonAdapter(t, scriptPath, nil, native, map[string]string{
-		adapterEventEnv:        "ElicitationResult",
-		adapterOperationEnv:    string(handlers.AdapterOperationSetInteractionMode),
-		adapterInputEnv:        rawInput,
-		adapterBinaryEnv:       binary,
-		"PASTURE_TEST_CAPTURE": capture,
-	})
-	if exitCode != 0 {
-		t.Fatalf("generated adapter exited %d\nstderr: %s", exitCode, stderr)
-	}
-	if stdout != "{}\n" {
-		t.Fatalf("native stdout = %q, want no-op object", stdout)
-	}
-
-	wire, err := os.ReadFile(capture)
-	if err != nil {
-		t.Fatalf("read captured envelope: %v", err)
-	}
-	var envelope handlers.AdapterInvocationEnvelope
-	if err := json.Unmarshal(wire, &envelope); err != nil {
-		t.Fatalf("decode captured envelope: %v\n%s", err, wire)
-	}
-	if envelope.Schema != handlers.AdapterInvocationSchema ||
-		envelope.Harness != runtime.ClaudeCode2_1_210Lifecycle().Harness() ||
-		envelope.HarnessVersion != "2.1.210" ||
-		envelope.HarnessContract != runtime.ClaudeCode2_1_210Lifecycle().ID() ||
-		envelope.Operation != handlers.AdapterOperationSetInteractionMode {
-		t.Fatalf("captured envelope metadata = %+v", envelope)
-	}
-	if string(envelope.Input) != rawInput {
-		t.Fatalf("operation input changed before hidden decoding:\ngot  %s\nwant %s", envelope.Input, rawInput)
-	}
-
-	prefix, encoded, ok := strings.Cut(envelope.NativeInvocation, ".")
-	if !ok || prefix != "claude-code" {
-		t.Fatalf("native invocation %q has wrong harness prefix", envelope.NativeInvocation)
-	}
-	identityJSON, err := base64.RawURLEncoding.DecodeString(encoded)
-	if err != nil {
-		t.Fatalf("decode native invocation: %v", err)
-	}
-	var identity struct {
-		Event      string     `json:"event"`
-		Identities [][]string `json:"identities"`
-	}
-	if err := json.Unmarshal(identityJSON, &identity); err != nil {
-		t.Fatalf("decode identity JSON: %v", err)
-	}
-	if identity.Event != "ElicitationResult" || len(identity.Identities) != 2 ||
-		identity.Identities[0][0] != "session_id" || identity.Identities[0][1] != "session-alpha" ||
-		identity.Identities[1][0] != "request_id" || identity.Identities[1][1] != "request-exact-001" {
-		t.Fatalf("native correlation did not preserve exact declared identities: %+v", identity)
-	}
-}
-
-func TestClaudeGenericEventCannotManufactureHumanDecision(t *testing.T) {
-	t.Parallel()
-
-	scriptPath := writeClaudeAdapter(t)
-	dir := t.TempDir()
-	capture := filepath.Join(dir, "must-not-exist")
-	binary := writeFakePasture(t, dir, handlers.AdapterOperationRecordPlanUAT)
-	stdout, stderr, exitCode := runPythonAdapter(
-		t,
-		scriptPath,
-		nil,
-		readNativeFixture(t, "claude", "permission_request.json"),
-		map[string]string{
-			adapterEventEnv:        "PermissionRequest",
-			adapterOperationEnv:    string(handlers.AdapterOperationRecordPlanUAT),
-			adapterInputEnv:        `{}`,
-			adapterBinaryEnv:       binary,
-			"PASTURE_TEST_CAPTURE": capture,
-		},
-	)
-	if exitCode != 2 || !strings.Contains(stderr, "not allowed") {
-		t.Fatalf("permission event human operation: exit=%d stdout=%q stderr=%q", exitCode, stdout, stderr)
-	}
-	if _, err := os.Stat(capture); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("generic permission event reached hidden adapter; capture stat = %v", err)
-	}
-}
-
-func TestClaudeStopLoopActiveSuppressesAdapter(t *testing.T) {
-	t.Parallel()
-
-	scriptPath := writeClaudeAdapter(t)
-	dir := t.TempDir()
-	capture := filepath.Join(dir, "must-not-exist")
-	binary := writeFakePasture(t, dir, handlers.AdapterOperationShowInteractionMode)
-	stdout, stderr, exitCode := runPythonAdapter(
-		t,
-		scriptPath,
-		nil,
-		readNativeFixture(t, "claude", "stop_active.json"),
-		map[string]string{
-			adapterEventEnv:        "Stop",
-			adapterOperationEnv:    string(handlers.AdapterOperationShowInteractionMode),
-			adapterInputEnv:        `{}`,
-			adapterBinaryEnv:       binary,
-			"PASTURE_TEST_CAPTURE": capture,
-		},
-	)
-	if exitCode != 0 || stdout != "{}\n" || stderr != "" {
-		t.Fatalf("active stop loop: exit=%d stdout=%q stderr=%q", exitCode, stdout, stderr)
-	}
-	if _, err := os.Stat(capture); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("active stop loop reached hidden adapter; capture stat = %v", err)
-	}
-}
-
-func TestClaudePolicyConfigChangeCannotBlock(t *testing.T) {
-	t.Parallel()
-
-	scriptPath := writeClaudeAdapter(t)
-	stdout, stderr, exitCode := runPythonAdapter(
-		t,
-		scriptPath,
-		nil,
-		readNativeFixture(t, "claude", "config_change_policy.json"),
-		map[string]string{
-			adapterEventEnv:     "ConfigChange",
-			adapterOperationEnv: string(handlers.AdapterOperationShowInteractionMode),
-			adapterInputEnv:     `{"epoch":"epoch--00000000-0000-0000-0000-000000000001"}`,
-			adapterBinaryEnv:    filepath.Join(t.TempDir(), "missing-pasture"),
-		},
-	)
-	if exitCode != 0 || stdout != "{}\n" || !strings.Contains(stderr, "could not execute production binary") {
-		t.Fatalf("policy config change failure blocked: exit=%d stdout=%q stderr=%q", exitCode, stdout, stderr)
-	}
-}
-
-func TestLifecycleBindingTargetsExactlyOneNativeEvent(t *testing.T) {
-	t.Parallel()
-
-	stdout, stderr, exitCode := runPythonAdapter(
-		t,
-		writeClaudeAdapter(t),
-		nil,
-		readNativeFixture(t, "claude", "permission_request.json"),
-		map[string]string{
-			adapterEventEnv:     "ConfigChange",
-			adapterOperationEnv: string(handlers.AdapterOperationShowInteractionMode),
-			adapterInputEnv:     `{"epoch":"epoch--00000000-0000-0000-0000-000000000001"}`,
-			adapterBinaryEnv:    filepath.Join(t.TempDir(), "must-not-run"),
-		},
-	)
-	if exitCode != 0 || stdout != "{}\n" || stderr != "" {
-		t.Fatalf("nonmatching concurrent event consumed binding: exit=%d stdout=%q stderr=%q", exitCode, stdout, stderr)
-	}
-}
-
-// Note: the Codex lifecycle transport is Python-free as of M3 (#65). Its
-// exec-only sh runners and Python-absence are proven in codex_transport_test.go;
-// there is no longer a generated Python Codex adapter to exercise here.
-
-func TestGeneratedLifecycleAdaptersContainNoAuthorityOrStorageFields(t *testing.T) {
-	t.Parallel()
-
-	claude, err := lifecycleMetadata(runtime.ClaudeCode2_1_210Lifecycle(), "2.1.210", claudeNativeFields)
-	if err != nil {
-		t.Fatalf("Claude metadata: %v", err)
-	}
-	python, err := renderPythonLifecycleAdapter(claude)
-	if err != nil {
-		t.Fatalf("Python adapter: %v", err)
-	}
 	opencode, err := GenerateOpenCodeHooksModule()
 	if err != nil {
 		t.Fatalf("OpenCode adapter: %v", err)
 	}
-	for name, artifact := range map[string]string{"python": python, "opencode": opencode} {
-		for _, forbidden := range []string{"JournalID", "journalId", "expectedRevision", "EvidenceID", "evidenceIds", "reported-user-result", "transcript_path)", "open(transcript"} {
-			if strings.Contains(artifact, forbidden) {
-				t.Errorf("generated %s adapter contains forbidden authority/storage/transcript token %q", name, forbidden)
-			}
+	for _, forbidden := range []string{"JournalID", "journalId", "expectedRevision", "EvidenceID", "evidenceIds", "reported-user-result", "transcript_path)", "open(transcript"} {
+		if strings.Contains(opencode, forbidden) {
+			t.Errorf("generated OpenCode adapter contains forbidden authority/storage/transcript token %q", forbidden)
 		}
 	}
-}
-
-func writeClaudeAdapter(t *testing.T) string {
-	t.Helper()
-	metadata, err := lifecycleMetadata(runtime.ClaudeCode2_1_210Lifecycle(), "2.1.210", claudeNativeFields)
-	if err != nil {
-		t.Fatalf("lifecycleMetadata: %v", err)
-	}
-	script, err := renderPythonLifecycleAdapter(metadata)
-	if err != nil {
-		t.Fatalf("renderPythonLifecycleAdapter: %v", err)
-	}
-	path := filepath.Join(t.TempDir(), "claude.py")
-	if err := os.WriteFile(path, []byte(script), 0o644); err != nil {
-		t.Fatalf("write generated adapter: %v", err)
-	}
-	return path
-}
-
-func writeFakePasture(t *testing.T, dir string, operation handlers.AdapterOperation) string {
-	t.Helper()
-	path := filepath.Join(dir, "fake pasture")
-	shell, err := exec.LookPath("sh")
-	if err != nil {
-		t.Fatalf("sh is required to execute the fake pasture adapter: %v", err)
-	}
-	script := `#!` + shell + `
-set -eu
-: "${PASTURE_TEST_CAPTURE:?missing capture path}"
-cat > "${PASTURE_TEST_CAPTURE}"
-printf '%s\n' '{"schema":"` + handlers.AdapterResultSchema + `","operation":"` + string(operation) + `","result":{"replayed":false}}'
-`
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake pasture: %v", err)
-	}
-	return path
-}
-
-func readNativeFixture(t *testing.T, harness, name string) []byte {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", "native", harness, name))
-	if err != nil {
-		t.Fatalf("read native fixture: %v", err)
-	}
-	return data
-}
-
-func runPythonAdapter(t *testing.T, script string, args []string, stdin []byte, env map[string]string) (string, string, int) {
-	t.Helper()
-	python, err := exec.LookPath("python3")
-	if err != nil {
-		t.Fatalf("python3 is required to execute generated command adapters: %v", err)
-	}
-	cmd := exec.Command(python, append([]string{script}, args...)...)
-	cmd.Stdin = bytes.NewReader(stdin)
-	cmd.Env = os.Environ()
-	for key, value := range env {
-		cmd.Env = append(cmd.Env, key+"="+value)
-	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err = cmd.Run()
-	exitCode := 0
-	if err != nil {
-		var exitError *exec.ExitError
-		if !errors.As(err, &exitError) {
-			t.Fatalf("execute generated adapter: %v", err)
-		}
-		exitCode = exitError.ExitCode()
-	}
-	return stdout.String(), stderr.String(), exitCode
 }
