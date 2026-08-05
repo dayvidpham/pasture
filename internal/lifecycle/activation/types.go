@@ -78,6 +78,8 @@ const (
 	CaptureProofPostCompact
 	CaptureProofOpenCodeSessionCreated
 	CaptureProofOpenCodeToolExecuteBefore
+	CaptureProofCodexSessionStart
+	CaptureProofCodexPreToolUse
 )
 
 func (p CaptureProof) IsValid() bool {
@@ -85,7 +87,8 @@ func (p CaptureProof) IsValid() bool {
 	case CaptureProofSessionStart, CaptureProofSessionEnd, CaptureProofPreToolUse,
 		CaptureProofPostToolUse, CaptureProofPostToolUseFailure, CaptureProofPostToolBatch,
 		CaptureProofPreCompact, CaptureProofPostCompact,
-		CaptureProofOpenCodeSessionCreated, CaptureProofOpenCodeToolExecuteBefore:
+		CaptureProofOpenCodeSessionCreated, CaptureProofOpenCodeToolExecuteBefore,
+		CaptureProofCodexSessionStart, CaptureProofCodexPreToolUse:
 		return true
 	default:
 		return false
@@ -114,6 +117,10 @@ func (p CaptureProof) Event() (model.ContractEventKind, bool) {
 		return registration.EventOpenCodeSessionCreated, true
 	case CaptureProofOpenCodeToolExecuteBefore:
 		return registration.EventOpenCodeToolExecuteBefore, true
+	case CaptureProofCodexSessionStart:
+		return registration.EventCodexSessionStart, true
+	case CaptureProofCodexPreToolUse:
+		return registration.EventCodexPreToolUse, true
 	default:
 		return 0, false
 	}
@@ -141,6 +148,10 @@ func (p CaptureProof) Name() string {
 		return "internal/lifecycle/ingress/opencode/testdata/fixtures/session_created_1_18_10.capture.json (OpenCode 1.18.10 authentic callback-object capture)"
 	case CaptureProofOpenCodeToolExecuteBefore:
 		return "internal/lifecycle/ingress/opencode/testdata/fixtures/tool_execute_before_1_18_10.capture.json (OpenCode 1.18.10 authentic callback-object capture)"
+	case CaptureProofCodexSessionStart:
+		return "internal/lifecycle/ingress/codex/testdata/fixtures/session_start_0_146_0.json (Codex 0.146.0 authentic command-hook capture)"
+	case CaptureProofCodexPreToolUse:
+		return "internal/lifecycle/ingress/codex/testdata/fixtures/pre_tool_use_0_146_0.json (Codex 0.146.0 authentic command-hook capture)"
 	default:
 		return ""
 	}
@@ -162,6 +173,8 @@ const (
 	ProductionProofPostCompact
 	ProductionProofOpenCodeSessionCreated
 	ProductionProofOpenCodeToolExecuteBefore
+	ProductionProofCodexSessionStart
+	ProductionProofCodexPreToolUse
 )
 
 func (p ProductionProof) IsValid() bool {
@@ -169,7 +182,8 @@ func (p ProductionProof) IsValid() bool {
 	case ProductionProofSessionStart, ProductionProofSessionEnd, ProductionProofPreToolUse,
 		ProductionProofPostToolUse, ProductionProofPostToolUseFailure, ProductionProofPostToolBatch,
 		ProductionProofPreCompact, ProductionProofPostCompact,
-		ProductionProofOpenCodeSessionCreated, ProductionProofOpenCodeToolExecuteBefore:
+		ProductionProofOpenCodeSessionCreated, ProductionProofOpenCodeToolExecuteBefore,
+		ProductionProofCodexSessionStart, ProductionProofCodexPreToolUse:
 		return true
 	default:
 		return false
@@ -198,6 +212,10 @@ func (p ProductionProof) Event() (model.ContractEventKind, bool) {
 		return registration.EventOpenCodeSessionCreated, true
 	case ProductionProofOpenCodeToolExecuteBefore:
 		return registration.EventOpenCodeToolExecuteBefore, true
+	case ProductionProofCodexSessionStart:
+		return registration.EventCodexSessionStart, true
+	case ProductionProofCodexPreToolUse:
+		return registration.EventCodexPreToolUse, true
 	default:
 		return 0, false
 	}
@@ -225,6 +243,10 @@ func (p ProductionProof) Name() string {
 		return "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCodeHandlersToDurableReadBack/session.created"
 	case ProductionProofOpenCodeToolExecuteBefore:
 		return "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCodeHandlersToDurableReadBack/tool.execute.before"
+	case ProductionProofCodexSessionStart:
+		return "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledCodexHandlersToDurableReadBack/SessionStart"
+	case ProductionProofCodexPreToolUse:
+		return "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledCodexHandlersToDurableReadBack/PreToolUse"
 	default:
 		return ""
 	}
