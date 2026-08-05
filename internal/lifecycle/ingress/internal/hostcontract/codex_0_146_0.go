@@ -32,6 +32,19 @@ var codexFields = []Field{
 // catalog leaves unproven events identity-free. SessionStart is a
 // configured-hook ingress smoke observation and is never treated as
 // semantically identical to the OpenCode session.created aggregate.
+//
+// Deliberate decoupling (do NOT unify): the Codex 0.146.0 event catalog is
+// defined here AND, separately, in the runtime Codex profile that SLICE-1 owns
+// and that surfaces per-event semantics into .codex lifecycle METADATA. The two
+// intentionally disagree on the 8 non-proven events (this source simplifies
+// their modes and declares no identities). That divergence is inert: the Codex
+// frontend (internal/lifecycle/frontend/codex) binds ONLY the 2 authenticity-
+// proven events and rejects the other 8, so their metadata is never ingested.
+// The runtime profile is the authority for non-ingress event semantics; these 8
+// source-derived entries carry no authenticity claim and may lag the runtime
+// profile without any effect. Keeping this catalog self-contained (like Claude)
+// is what isolates SLICE-2 ingress from SLICE-1's runtime profile (IP-1); a
+// later wave may re-derive it from the runtime profile once IP-1 is settled.
 func Codex0_146_0() Contract {
 	// observe builds a non-blocking, report-and-continue catalog event with no
 	// declared identities (source-derived metadata only).
