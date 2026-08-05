@@ -33,6 +33,16 @@ type HookLifecycleInput struct {
 	Input       io.Reader
 	Clock       receipt.Clock
 	Operations  receipt.OperationIDSource
+	// Activations optionally injects the activation configuration used by the
+	// event gate, overriding the statically dispatched per-harness manifest.
+	//
+	// Production callers (the CLI) leave this nil so the committed default-off
+	// manifest governs admission — Codex events stay withheld until their
+	// activation lands in a later wave. The pre-activation production proof
+	// injects an enabled manifest here to exercise the real durable path
+	// through this exact handler before the committed activation is enabled;
+	// there is no separate test-only code path.
+	Activations []activation.Entry
 }
 
 type lifecycleStoreOpener func(string) (protocol.TaskTracker, error)
