@@ -576,33 +576,9 @@ func TestLifecycleBindingTargetsExactlyOneNativeEvent(t *testing.T) {
 	}
 }
 
-func TestCodexLifecycleAdapterStrictInputAndNoTranscriptRead(t *testing.T) {
-	t.Parallel()
-
-	metadata, err := lifecycleMetadata(runtime.Codex0_146_0Lifecycle(), "0.146.0", codexNativeFields)
-	if err != nil {
-		t.Fatalf("lifecycleMetadata: %v", err)
-	}
-	script, err := renderPythonLifecycleAdapter(metadata)
-	if err != nil {
-		t.Fatalf("renderPythonLifecycleAdapter: %v", err)
-	}
-	scriptPath := filepath.Join(t.TempDir(), "codex.py")
-	if err := os.WriteFile(scriptPath, []byte(script), 0o644); err != nil {
-		t.Fatalf("write generated adapter: %v", err)
-	}
-	native := readNativeFixture(t, "codex", "pre_tool_use.json")
-	stdout, stderr, exitCode := runPythonAdapter(t, scriptPath, []string{"--event", "PreToolUse"}, native, nil)
-	if exitCode != 0 || stdout != "{}\n" || stderr != "" {
-		t.Fatalf("unreadable transcript sentinel was accessed: exit=%d stdout=%q stderr=%q", exitCode, stdout, stderr)
-	}
-
-	unknown := bytes.Replace(native, []byte("{"), []byte(`{"unknown":true,`), 1)
-	stdout, stderr, exitCode = runPythonAdapter(t, scriptPath, []string{"--event", "PreToolUse"}, unknown, nil)
-	if exitCode != 2 || !strings.Contains(stderr, "unknown fields") {
-		t.Fatalf("unknown Codex field: exit=%d stdout=%q stderr=%q", exitCode, stdout, stderr)
-	}
-}
+// Note: the Codex lifecycle transport is Python-free as of M3 (#65). Its
+// exec-only sh runners and Python-absence are proven in codex_transport_test.go;
+// there is no longer a generated Python Codex adapter to exercise here.
 
 func TestGeneratedLifecycleAdaptersContainNoAuthorityOrStorageFields(t *testing.T) {
 	t.Parallel()

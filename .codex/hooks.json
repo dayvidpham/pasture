@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ${PLUGIN_ROOT}/hooks/events/PermissionRequest.sh",
+            "command": "sh .codex/hooks/events/PermissionRequest.sh",
             "timeout": 600,
             "statusMessage": "Consulting Pasture lifecycle state"
           }
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ${PLUGIN_ROOT}/hooks/events/PostCompact.sh",
+            "command": "sh .codex/hooks/events/PostCompact.sh",
             "timeout": 600,
             "statusMessage": "Consulting Pasture lifecycle state"
           }
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ${PLUGIN_ROOT}/hooks/events/PostToolUse.sh",
+            "command": "sh .codex/hooks/events/PostToolUse.sh",
             "timeout": 600,
             "statusMessage": "Consulting Pasture lifecycle state"
           }
@@ -45,7 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ${PLUGIN_ROOT}/hooks/events/PreCompact.sh",
+            "command": "sh .codex/hooks/events/PreCompact.sh",
             "timeout": 600,
             "statusMessage": "Consulting Pasture lifecycle state"
           }
@@ -58,7 +58,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ${PLUGIN_ROOT}/hooks/events/PreToolUse.sh",
+            "command": "sh .codex/hooks/events/PreToolUse.sh",
             "timeout": 600,
             "statusMessage": "Consulting Pasture lifecycle state"
           }
@@ -71,7 +71,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ${PLUGIN_ROOT}/hooks/events/SessionStart.sh",
+            "command": "sh .codex/hooks/events/SessionStart.sh",
             "timeout": 600,
             "statusMessage": "Consulting Pasture lifecycle state"
           }
@@ -83,7 +83,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ${PLUGIN_ROOT}/hooks/events/Stop.sh",
+            "command": "sh .codex/hooks/events/Stop.sh",
             "timeout": 600,
             "statusMessage": "Consulting Pasture lifecycle state"
           }
@@ -96,7 +96,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ${PLUGIN_ROOT}/hooks/events/SubagentStart.sh",
+            "command": "sh .codex/hooks/events/SubagentStart.sh",
             "timeout": 600,
             "statusMessage": "Consulting Pasture lifecycle state"
           }
@@ -109,7 +109,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ${PLUGIN_ROOT}/hooks/events/SubagentStop.sh",
+            "command": "sh .codex/hooks/events/SubagentStop.sh",
             "timeout": 600,
             "statusMessage": "Consulting Pasture lifecycle state"
           }
@@ -121,7 +121,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ${PLUGIN_ROOT}/hooks/events/UserPromptSubmit.sh",
+            "command": "sh .codex/hooks/events/UserPromptSubmit.sh",
             "timeout": 600,
             "statusMessage": "Consulting Pasture lifecycle state"
           }
