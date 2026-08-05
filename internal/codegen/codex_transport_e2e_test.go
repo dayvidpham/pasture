@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
+	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
 // This file is the IP-3 end-to-end production proof for the generated Codex
@@ -19,15 +22,14 @@ import (
 // Two complementary properties are proven:
 //
 //  1. Against the BUILT production CLI (TestCodexGeneratedRunnerDrivesBuiltCLI):
-//     the runner execs the real `pasture hook lifecycle --harness codex ...`,
-//     which statically dispatches the Codex harness and applies the committed
-//     default-off activation gate BEFORE any stdin or storage access. Codex
-//     activation is deliberately default-off until a later wave (proposal D8,
-//     "activation last"), and the built CLI exposes no activation-injection
-//     seam (S3's deliberate no-production-backdoor design in
-//     internal/handlers/hook_lifecycle.go), so the built-CLI path proves the
-//     safe withheld state end-to-end: no native continuation on stdout, the
-//     actionable withheld diagnostic on stderr, exit 0, and no database opened.
+//     after M3 Implementation UAT the committed Codex dispatch enables the two
+//     accepted events via activation.Codex0_146_0(), so the generated runner +
+//     built CLI + real temporary storage is the strongest end-to-end M3-P1/P2
+//     proof: PreToolUse emits the exact native continuation {"continue":true}
+//     and SessionStart emits {} on stdout, both exit 0 with durable evidence
+//     readable back through the production CLI. A non-selected catalog event
+//     (Stop) still refuses safely through the runner — no native continuation,
+//     the actionable withheld diagnostic on stderr, exit 0, no database opened.
 //
 //  2. Transparent native conduit (TestCodexGeneratedRunnerIsTransparentConduit):
 //     with PASTURE_BIN pointing at a controlled CLI stand-in, the exec-only
@@ -38,16 +40,10 @@ import (
 //     continuation bytes ({"continue":true}) straight back to the host by exec
 //     stdout inheritance.
 //
-// The ENABLED durable path and the pinned native continuation bytes themselves
-// ({"continue":true} for the PreToolUse gate, {} for the SessionStart
-// observation) are proven on the in-process production path with an injected
-// enabled activation in
+// The pinned native continuation bytes are additionally covered on the
+// in-process production path in
 // internal/handlers/hook_lifecycle_codex_test.go:TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes
-// and pinned by the internal/lifecycle/nativeresponse golden-byte tests.
-// Together with property (2) here, the full generated-runner -> CLI -> native
-// continuation chain is covered for the Wave-2 default-off tree; the enabled
-// built-CLI proof belongs to the activation wave (S5) when Codex activation
-// lands.
+// and by the internal/lifecycle/nativeresponse golden-byte tests.
 
 // buildCodexProofCLI builds the real pasture CLI into binary. It builds
 // ./cmd/pasture from the module root so the proof execs the same production
@@ -71,29 +67,47 @@ func codexIngressFixture(t *testing.T, root, name string) []byte {
 }
 
 // TestCodexGeneratedRunnerDrivesBuiltCLI is the built-CLI half of the IP-3
-// proof. It runs the committed generated runner as Codex would, against the
-// real built binary and a real temporary database path, and proves the Codex
-// dispatch reaches the committed default-off gate before touching stdin or
-// storage.
+// proof and, after the M3-UAT activation flip, the strongest end-to-end M3-P1/P2
+// proof. It runs the committed generated runner exactly as Codex 0.146.0 would
+// (`sh <runner>` with the authentic native event JSON on stdin and PASTURE_BIN
+// pointing at the real built binary) against real temporary storage, and proves:
+//
+//   - ENABLED: each accepted event (PreToolUse gate, SessionStart observation)
+//     flows through the real `pasture hook lifecycle --harness codex ...`, emits
+//     its exact native continuation on stdout, exits 0, and leaves durable
+//     provider-correct evidence readable back through the production CLI.
+//   - WITHHELD: a non-selected catalog event (Stop) still refuses safely — no
+//     native continuation, the actionable withheld diagnostic on stderr, exit 0,
+//     and no database opened (admission enforced before any storage access).
 func TestCodexGeneratedRunnerDrivesBuiltCLI(t *testing.T) {
 	root := testModuleRoot(t)
 	buildDir := t.TempDir()
 	binary := filepath.Join(buildDir, "pasture")
 	buildCodexProofCLI(t, root, binary)
 
-	cases := []struct {
-		event   string
-		fixture string
+	registrationContract := registration.Codex0_146_0().Contract.String()
+	interpretedContract := runtime.Codex0_146_0().ID().String()
+
+	enabled := []struct {
+		event, fixture, wantStdout, wantSemantic string
 	}{
-		{event: "PreToolUse", fixture: "pre_tool_use_0_146_0.json"},
-		{event: "SessionStart", fixture: "session_start_0_146_0.json"},
+		{event: "PreToolUse", fixture: "pre_tool_use_0_146_0.json", wantStdout: `{"continue":true}`, wantSemantic: `"semantic":2`},
+		{event: "SessionStart", fixture: "session_start_0_146_0.json", wantStdout: `{}`, wantSemantic: `"semantic":1`},
 	}
-	for _, tc := range cases {
+	for _, tc := range enabled {
 		tc := tc
-		t.Run(tc.event, func(t *testing.T) {
+		t.Run("enabled/"+tc.event, func(t *testing.T) {
 			runner := filepath.Join(root, ".codex", "hooks", "events", tc.event+".sh")
 			raw := codexIngressFixture(t, root, tc.fixture)
 			dbPath := filepath.Join(t.TempDir(), "pasture.db")
+
+			// Initialize the real temporary store through the production CLI so
+			// this proof imports no lower-level package (codegen cannot import
+			// internal/tasks without an import cycle).
+			bootstrap := exec.Command(binary, "--db", dbPath, "--namespace", "file://codex-runner-e2e", "task", "create", "initialize lifecycle identity")
+			if out, err := bootstrap.CombinedOutput(); err != nil {
+				t.Fatalf("initialize real temporary Pasture store through production CLI: %v\n%s", err, out)
+			}
 
 			// Invoke exactly as the hooks.json entry does: `sh <runner>`.
 			cmd := exec.Command("sh", runner)
@@ -102,27 +116,55 @@ func TestCodexGeneratedRunnerDrivesBuiltCLI(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			cmd.Stdout = &stdout
 			cmd.Stderr = &stderr
-
 			if err := cmd.Run(); err != nil {
 				t.Fatalf("generated %s runner exited nonzero through the built CLI: %v\nstderr:\n%s", tc.event, err, stderr.String())
 			}
+			if stdout.String() != tc.wantStdout {
+				t.Errorf("enabled Codex %s native continuation = %q, want %q\nstderr:\n%s", tc.event, stdout.String(), tc.wantStdout, stderr.String())
+			}
 
-			// Default-off: no native continuation is emitted for a withheld event.
-			if stdout.Len() != 0 {
-				t.Errorf("withheld Codex %s emitted stdout %q; a default-off event must produce no native continuation", tc.event, stdout.String())
+			// Durable, provider-correct evidence must be readable back through the
+			// same production CLI end users run.
+			readback := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "list", "--format", "json")
+			out, err := readback.CombinedOutput()
+			if err != nil {
+				t.Fatalf("read back Codex %s receipt through production CLI: %v\n%s", tc.event, err, out)
 			}
-			// The CLI reports the actionable withheld diagnostic on stderr, proving
-			// the runner reached the real Codex static dispatch and gate.
-			wantReason := `Codex event "` + tc.event + `" is withheld (reason production-proof-missing)`
-			if !strings.Contains(stderr.String(), wantReason) {
-				t.Errorf("Codex %s stderr does not carry the withheld diagnostic %q:\n%s", tc.event, wantReason, stderr.String())
-			}
-			// Withheld admission is enforced before storage: no database is opened.
-			if _, statErr := os.Stat(dbPath); !os.IsNotExist(statErr) {
-				t.Errorf("withheld Codex %s opened storage at %q (stat err=%v); admission must be refused before any storage access", tc.event, dbPath, statErr)
+			for _, required := range []string{
+				`"registrationContract":"` + registrationContract + `"`,
+				`"contract":"` + interpretedContract + `"`,
+				tc.wantSemantic,
+			} {
+				if !strings.Contains(string(out), required) {
+					t.Errorf("Codex %s read-back lacks %s:\n%s", tc.event, required, out)
+				}
 			}
 		})
 	}
+
+	t.Run("withheld/Stop", func(t *testing.T) {
+		runner := filepath.Join(root, ".codex", "hooks", "events", "Stop.sh")
+		dbPath := filepath.Join(t.TempDir(), "pasture.db")
+		cmd := exec.Command("sh", runner)
+		cmd.Stdin = bytes.NewReader([]byte(`{"hook_event_name":"Stop"}`))
+		cmd.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("generated Stop runner exited nonzero through the built CLI: %v\nstderr:\n%s", err, stderr.String())
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("withheld Codex Stop emitted stdout %q; a non-selected event must produce no native continuation", stdout.String())
+		}
+		wantReason := `Codex event "Stop" is withheld (reason outside-target-set)`
+		if !strings.Contains(stderr.String(), wantReason) {
+			t.Errorf("Codex Stop stderr does not carry the withheld diagnostic %q:\n%s", wantReason, stderr.String())
+		}
+		if _, statErr := os.Stat(dbPath); !os.IsNotExist(statErr) {
+			t.Errorf("withheld Codex Stop opened storage at %q (stat err=%v); admission must be refused before any storage access", dbPath, statErr)
+		}
+	})
 }
 
 // TestCodexGeneratedRunnerIsTransparentConduit is the native-conduit half of the

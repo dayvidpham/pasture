@@ -41,15 +41,15 @@ func codexFixture(t *testing.T, name string) []byte {
 }
 
 // TestHookLifecycleResponseRejectsWithheldCodexBeforeInputAndStorage proves the
-// committed default-off Codex manifest gates every Codex event before any stdin
-// or storage access, mirroring the accepted M2 enforcement pattern. No
-// activation is injected, so the statically dispatched default-off manifest
-// governs admission.
-//
-// FAILS until the L3 static Codex dispatch lands.
+// committed production Codex activation catalog withholds every non-selected
+// event before any stdin or storage access, mirroring the accepted M2
+// enforcement pattern. After M3 UAT the two accepted events (SessionStart,
+// PreToolUse) are enabled, so this refusal proof uses non-selected catalog
+// events (Stop, PostToolUse) and no activation is injected: the statically
+// dispatched production manifest activation.Codex0_146_0() governs admission.
 func TestHookLifecycleResponseRejectsWithheldCodexBeforeInputAndStorage(t *testing.T) {
 	t.Parallel()
-	for _, event := range []string{"SessionStart", "PreToolUse"} {
+	for _, event := range []string{"Stop", "PostToolUse"} {
 		event := event
 		t.Run(event, func(t *testing.T) {
 			t.Parallel()
@@ -59,7 +59,7 @@ func TestHookLifecycleResponseRejectsWithheldCodexBeforeInputAndStorage(t *testi
 				DBPath: dbPath, Harness: ir.HarnessCodex, Event: event, HostVersion: "0.146.0",
 				Input: input, Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.withheld.codex"},
 			})
-			require.ErrorContains(t, err, `Codex event "`+event+`" is withheld (reason production-proof-missing)`)
+			require.ErrorContains(t, err, `Codex event "`+event+`" is withheld (reason outside-target-set)`)
 			require.False(t, response.IsValid(), "withheld Codex event must emit no host response")
 			require.Zero(t, input.reads, "withheld Codex event must be rejected before stdin access")
 			_, statErr := os.Stat(dbPath)

@@ -38,12 +38,14 @@ type HookLifecycleInput struct {
 	// Activations optionally injects the activation configuration used by the
 	// event gate, overriding the statically dispatched per-harness manifest.
 	//
-	// Production callers (the CLI) leave this nil so the committed default-off
-	// manifest governs admission — Codex events stay withheld until their
-	// activation lands in a later wave. The pre-activation production proof
-	// injects an enabled manifest here to exercise the real durable path
-	// through this exact handler before the committed activation is enabled;
-	// there is no separate test-only code path.
+	// Production callers (the CLI) leave this nil so the committed per-harness
+	// activation manifest governs admission. After M3 Implementation UAT the
+	// Codex dispatch enables the accepted SessionStart and PreToolUse events via
+	// activation.Codex0_146_0(), exactly as the Claude and OpenCode cases do;
+	// the two selected events are admitted and every other Codex event stays
+	// withheld. This override remains available to exercise the same durable
+	// handler path with an alternative manifest; there is no separate test-only
+	// code path.
 	Activations []activation.Entry
 }
 
@@ -176,7 +178,7 @@ func dispatchLifecycle(harness ir.HarnessID) (lifecycleDispatch, error) {
 			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
 		}, bind: opencodefrontend.Bind}, nil
 	case ir.HarnessCodex:
-		activations, err := codexDefaultOffActivations()
+		activations, err := activation.Codex0_146_0()
 		if err != nil {
 			return lifecycleDispatch{}, fmt.Errorf("dispatch Codex lifecycle activation: %w", err)
 		}
@@ -187,24 +189,6 @@ func dispatchLifecycle(harness ir.HarnessID) (lifecycleDispatch, error) {
 	default:
 		return lifecycleDispatch{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("Harness %q is not supported by lifecycle ingress.", harness), "Lifecycle ingress has no static provider dispatch for this harness.", "The input was not read and no database was opened.", "Use a harness present in the generated lifecycle support report.", nil)
 	}
-}
-
-// codexDefaultOffActivations builds the committed default-off Codex activation
-// manifest: every generated Codex event is withheld pending its production proof
-// and activation, which land in a later wave. The pre-activation production
-// proof supplies an enabled configuration through HookLifecycleInput.Activations
-// rather than flipping this committed default.
-func codexDefaultOffActivations() ([]activation.Entry, error) {
-	events := registration.Codex0_146_0().Entries()
-	out := make([]activation.Entry, 0, len(events))
-	for _, event := range events {
-		entry, err := activation.NewWithheld(event.Kind, activation.WithheldProductionProofMissing)
-		if err != nil {
-			return nil, fmt.Errorf("withhold generated Codex event %q: %w", event.NativeName, err)
-		}
-		out = append(out, entry)
-	}
-	return out, nil
 }
 
 func activationFor(kind model.ContractEventKind, entries []activation.Entry) (activation.Entry, bool) {
