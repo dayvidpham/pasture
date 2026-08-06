@@ -47,7 +47,7 @@ func Bind[E comparable](
 	bindings []model.NativeBinding,
 ) (waist.L1, []waist.Identity, error) {
 	where := fmt.Sprintf(
-		"Binding a %s lifecycle event (internal/lifecycle/frontend/frontend.go in frontend.Bind).",
+		"Binding the %s lifecycle event (internal/lifecycle/frontend/frontend.go in frontend.Bind).",
 		host.Label,
 	)
 

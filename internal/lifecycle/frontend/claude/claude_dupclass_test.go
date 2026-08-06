@@ -19,8 +19,8 @@ import (
 // generic engine is wired — the expected TDD state.
 //
 // OLD (4679f0a): "Binding a Claude lifecycle event (internal/lifecycle/frontend/claude/claude.go in claude.Bind)."
-// NEW (this pin): "Binding a Claude lifecycle event (internal/lifecycle/frontend/frontend.go in frontend.Bind)."
-const claudeGenericWhere = "Binding a Claude lifecycle event (internal/lifecycle/frontend/frontend.go in frontend.Bind)."
+// NEW (this pin): "Binding the Claude lifecycle event (internal/lifecycle/frontend/frontend.go in frontend.Bind)."
+const claudeGenericWhere = "Binding the Claude lifecycle event (internal/lifecycle/frontend/frontend.go in frontend.Bind)."
 
 // TestClaudeDuplicateClassControl is the C4 control: Claude already has the dup
 // guard and the separated undeclared/kind errors, so its ADMISSION is unchanged

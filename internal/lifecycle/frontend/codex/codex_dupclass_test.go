@@ -16,7 +16,7 @@ import (
 // engine emits for Codex after L3. Before L3 the per-host frontend still stamps
 // ".../codex/codex.go in codex.Bind", so every Where pin below FAILS until the
 // generic engine is wired — the expected TDD state.
-const codexGenericWhere = "Binding a Codex lifecycle event (internal/lifecycle/frontend/frontend.go in frontend.Bind)."
+const codexGenericWhere = "Binding the Codex lifecycle event (internal/lifecycle/frontend/frontend.go in frontend.Bind)."
 
 // TestCodexDuplicateClassAdmissionParity is the C1-C4 dup-class table for the
 // Codex frontend. Like OpenCode, Codex has NO duplicate case in production

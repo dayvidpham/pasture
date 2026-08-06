@@ -16,7 +16,7 @@ import (
 // engine emits for OpenCode after L3. Before L3 the per-host frontend still
 // stamps ".../opencode/opencode.go in opencode.Bind", so every Where pin below
 // FAILS until the generic engine is wired — the expected TDD state.
-const ocGenericWhere = "Binding a OpenCode lifecycle event (internal/lifecycle/frontend/frontend.go in frontend.Bind)."
+const ocGenericWhere = "Binding the OpenCode lifecycle event (internal/lifecycle/frontend/frontend.go in frontend.Bind)."
 
 // TestOpenCodeDuplicateClassAdmissionParity is the C1-C4 dup-class table for the
 // OpenCode frontend. OpenCode has NO duplicate case in production today: the
