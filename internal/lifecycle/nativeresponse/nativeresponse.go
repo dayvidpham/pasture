@@ -114,6 +114,33 @@ func Encode(harness ir.HarnessID, response backend.HostResponse) ([]byte, error)
 	}
 }
 
+// CodexContinuation returns the exact Codex native continuation bytes a host
+// reads on standard output for one committed lifecycle event: {"continue":true}
+// for a valid gate Proceed response and {} for an observation default. It is
+// total over its input (no harness argument, no error path for a well-formed
+// response), so the registry row references it directly for the Codex harness.
+//
+// Callers MUST only invoke it after the durable receipt commit has completed,
+// so that native bytes never precede persisted evidence.
+//
+// L1 stub — real body lands in L3.
+func CodexContinuation(response backend.HostResponse) ([]byte, error) {
+	return nil, nil
+}
+
+// CanonicalProceed returns the canonical Pasture host response bytes a host
+// reads on standard output (Claude and OpenCode): the marshaled host response
+// object for a valid gate Proceed decision, or nil (no stdout) for an
+// observation that produced no decision. These bytes are byte-identical to M2.
+//
+// Callers MUST only invoke it after the durable receipt commit has completed,
+// so that native bytes never precede persisted evidence.
+//
+// L1 stub — real body lands in L3.
+func CanonicalProceed(response backend.HostResponse) ([]byte, error) {
+	return nil, nil
+}
+
 // encodeError builds an actionable structured error for an unsupported harness.
 func encodeError(what, why, impact, fix string) error {
 	return &pasterrors.StructuredError{
