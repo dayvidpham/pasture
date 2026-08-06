@@ -130,7 +130,9 @@ func TestCodexTargetDescriptorPartitionsPackages(t *testing.T) {
 		t.Fatalf("first hook package file = %q, want sorted event runner inventory", hookFiles[0])
 	}
 
-	// The target manifest bundle carries exactly the plugin manifest.
+	// The target manifest bundle carries exactly the target-level files owned by
+	// no package: the plugin manifest, the host hook config, and the activation
+	// audit report (all directly under .codex/, sorted lexicographically).
 	mf := desc.ManifestBundle()
 	var manifestPaths []string
 	for _, e := range mf.Manifest().Entries() {
@@ -138,8 +140,9 @@ func TestCodexTargetDescriptorPartitionsPackages(t *testing.T) {
 			manifestPaths = append(manifestPaths, e.Path().String())
 		}
 	}
-	if strings.Join(manifestPaths, "\n") != strings.Join([]string{".codex/codex.toml", ".codex/hooks.json"}, "\n") {
-		t.Fatalf("manifest bundle files = %v, want codex.toml plus hooks.json", manifestPaths)
+	wantManifestFiles := []string{".codex/codex.toml", ".codex/hooks.json", ".codex/pasture-codex-activation.json"}
+	if strings.Join(manifestPaths, "\n") != strings.Join(wantManifestFiles, "\n") {
+		t.Fatalf("manifest bundle files = %v, want codex.toml plus hooks.json plus pasture-codex-activation.json", manifestPaths)
 	}
 }
 

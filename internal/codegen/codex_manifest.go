@@ -31,12 +31,21 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
 // codexManifestSchema tags the Codex plugin manifest so a consumer can reject
 // an incompatible manifest shape.
 const codexManifestSchema = "pasture.codex.manifest.v1"
+
+// codexActivationReportRelPath is the committed Codex activation audit report:
+// a target-level file directly under .codex/, owned by no package (like
+// .codex/hooks.json). Kept as a shared const so the emitter and the target
+// partitioner (isCodexTargetManifestPath) agree on the exact path.
+const codexActivationReportRelPath = ".codex/pasture-codex-activation.json"
 
 // codexManifestEmitter implements ManifestEmitter for the Codex target.
 type codexManifestEmitter struct{}
@@ -76,6 +85,18 @@ func (codexManifestEmitter) Emit(root string, opts GenerateOptions) ([]Generated
 			content: renderCodexEventRunner(name),
 		})
 	}
+
+	report, err := renderCodexActivationReport()
+	if err != nil {
+		return nil, fmt.Errorf("codegen.codexManifestEmitter.Emit: activation report: %w", err)
+	}
+	outputs = append(outputs, struct {
+		path    string
+		content string
+	}{
+		path:    filepath.Join(root, filepath.FromSlash(codexActivationReportRelPath)),
+		content: report,
+	})
 	sort.Slice(outputs, func(i, j int) bool { return outputs[i].path < outputs[j].path })
 
 	files := make([]GeneratedFile, 0, len(outputs))
@@ -172,6 +193,63 @@ func renderCodexHooksConfig(eventNames []string) (string, error) {
 	wire, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return "", err
+	}
+	return string(wire) + "\n", nil
+}
+
+// renderCodexActivationReport builds the committed Codex activation audit report
+// written to .codex/pasture-codex-activation.json. It is emitted
+// UNCONDITIONALLY (Claude precedent, emitClaudeHooks): every generated Codex
+// event appears exactly once, carrying either its typed withholding reason or —
+// for the two authentically-proven, activation-bound events (SessionStart,
+// PreToolUse) — the event-bound capture and production proofs. The withheld
+// dispositions are the audit payload, not a side effect of enablement.
+//
+// The report derives solely from the pinned Codex registration manifest
+// (registration.Codex0_146_0()) and activation catalog
+// (activation.Codex0_146_0()) — no filesystem access and no live Codex — reusing
+// the shared activationSupportReport shape so the Claude and Codex audit reports
+// can never diverge. The exhaustiveness checks reject any disagreement between
+// the generated catalog and the activation decisions (invalid/duplicate/missing/
+// non-manifest entry), so a drifted catalog fails generation rather than
+// silently shipping a partial audit.
+func renderCodexActivationReport() (string, error) {
+	manifest := registration.Codex0_146_0()
+	states, err := activation.Codex0_146_0()
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderCodexActivationReport: build activation manifest: %w", err)
+	}
+	stateByKind := make(map[model.ContractEventKind]activation.Entry, len(states))
+	for _, state := range states {
+		if !state.IsValid() {
+			return "", fmt.Errorf("codegen.renderCodexActivationReport: activation entry for event %d is invalid; construct it with activation.NewEnabled or activation.NewWithheld", state.Event)
+		}
+		if _, duplicate := stateByKind[state.Event]; duplicate {
+			return "", fmt.Errorf("codegen.renderCodexActivationReport: duplicate activation entry for event %d; provide exactly one decision per generated event", state.Event)
+		}
+		stateByKind[state.Event] = state
+	}
+
+	report := activationSupportReport{Harness: string(manifest.Harness), Contract: manifest.Contract.String()}
+	for _, event := range manifest.Events {
+		state, present := stateByKind[event.Kind]
+		if !present {
+			return "", fmt.Errorf("codegen.renderCodexActivationReport: generated event %q has no activation entry; add one exhaustive typed decision", event.NativeName)
+		}
+		entry := activationSupportEntry{Event: event.NativeName, State: state.State.String(), Reason: state.Reason.String()}
+		if state.State == activation.Enabled {
+			entry.CaptureProof = state.CaptureProof.Name()
+			entry.ProductionProof = state.ProductionProof.Name()
+		}
+		report.Events = append(report.Events, entry)
+	}
+	if len(stateByKind) != len(manifest.Events) {
+		return "", fmt.Errorf("codegen.renderCodexActivationReport: activation has %d entries for %d generated events; remove non-manifest entries and provide one exact decision per event", len(stateByKind), len(manifest.Events))
+	}
+
+	wire, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderCodexActivationReport: marshal activation report: %w", err)
 	}
 	return string(wire) + "\n", nil
 }
