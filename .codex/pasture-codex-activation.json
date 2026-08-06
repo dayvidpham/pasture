@@ -1,0 +1,58 @@
+{
+  "harness": "codex",
+  "contract": "codex/0.146.0",
+  "events": [
+    {
+      "event": "SessionStart",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/session_start_0_146_0.json (Codex 0.146.0 authentic command-hook capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledCodexHandlersToDurableReadBack/SessionStart"
+    },
+    {
+      "event": "UserPromptSubmit",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "PreToolUse",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/pre_tool_use_0_146_0.json (Codex 0.146.0 authentic command-hook capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledCodexHandlersToDurableReadBack/PreToolUse"
+    },
+    {
+      "event": "PermissionRequest",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "PostToolUse",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "PreCompact",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "PostCompact",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "SubagentStart",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "SubagentStop",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    },
+    {
+      "event": "Stop",
+      "state": "withheld",
+      "reason": "outside-target-set"
+    }
+  ]
+}

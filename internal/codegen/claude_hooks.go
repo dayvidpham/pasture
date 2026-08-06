@@ -207,24 +207,13 @@ func emitClaudeHooks(root string, opts GenerateOptions, manifest registration.Ma
 		Description: "Pasture lifecycle adapters and shared-worktree git discipline for the pinned Claude Code contract.",
 		Hooks:       make(map[string][]claudeHookGroup, len(manifest.Events)),
 	}
-	type supportEntry struct {
-		Event           string `json:"event"`
-		State           string `json:"state"`
-		Reason          string `json:"reason,omitempty"`
-		CaptureProof    string `json:"captureProof,omitempty"`
-		ProductionProof string `json:"productionProof,omitempty"`
-	}
-	support := struct {
-		Harness  string         `json:"harness"`
-		Contract string         `json:"contract"`
-		Events   []supportEntry `json:"events"`
-	}{Harness: string(manifest.Harness), Contract: manifest.Contract.String()}
+	support := activationSupportReport{Harness: string(manifest.Harness), Contract: manifest.Contract.String()}
 	for _, event := range manifest.Events {
 		state, present := stateByKind[event.Kind]
 		if !present {
 			return nil, fmt.Errorf("codegen.emitClaudeHooks: generated event %q has no activation entry; add one exhaustive typed decision", event.NativeName)
 		}
-		entry := supportEntry{Event: event.NativeName, State: state.State.String(), Reason: state.Reason.String()}
+		entry := activationSupportEntry{Event: event.NativeName, State: state.State.String(), Reason: state.Reason.String()}
 		if state.State == activation.Enabled {
 			entry.CaptureProof = state.CaptureProof.Name()
 			entry.ProductionProof = state.ProductionProof.Name()

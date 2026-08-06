@@ -326,7 +326,9 @@ const codexTargetManifestPath = ".codex/codex.toml"
 // isCodexTargetManifestPath reports whether rel is a recognized target-level
 // manifest file: a file directly under .codex/ that is not under a package root.
 func isCodexTargetManifestPath(rel string) bool {
-	return rel == codexTargetManifestPath || rel == ".codex/hooks.json"
+	return rel == codexTargetManifestPath ||
+		rel == ".codex/hooks.json" ||
+		rel == codexActivationReportRelPath
 }
 
 // codexComponentForPath returns the component whose root owns rel, matching the
