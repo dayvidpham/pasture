@@ -241,7 +241,20 @@ func HookLifecycleNative(ctx context.Context, in HookLifecycleInput) ([]byte, er
 	if err != nil {
 		return nil, err
 	}
-	return dispatch.encode(response)
+	// The encode runs only AFTER the lifecycle receipt has been durably
+	// committed by HookLifecycleResponse, so any failure here means the
+	// receipt is persisted but the native continuation was not delivered to
+	// the host. Wrap it so the operator knows the durable state is intact and
+	// only the stdout continuation is missing. This branch is provably
+	// unreachable today (both encoders return nil,nil on an invalid/absent
+	// response: CanonicalProceed and CodexContinuation never fail on a valid
+	// HostResponse); the guard exists as a post-commit audit guarantee so a
+	// future encoder that can fail cannot silently drop the continuation.
+	native, err := dispatch.encode(response)
+	if err != nil {
+		return nil, fmt.Errorf("%s lifecycle receipt committed but native continuation was not delivered (encode failed): %w", dispatch.name, err)
+	}
+	return native, nil
 }
 
 func activationFor(kind model.ContractEventKind, entries []activation.Entry) (activation.Entry, bool) {
