@@ -139,8 +139,10 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			require.NoError(t, err)
 			require.Equal(t, tc.wantResponse, response.IsValid())
 
-			// Native continuation bytes are the exact host stdout for this event.
-			native, err := nativeresponse.Encode(ir.HarnessCodex, response)
+			// Native continuation bytes are the exact host stdout for this event,
+			// through the same per-target encoder the registry row (and therefore
+			// the CLI via HookLifecycleNative) invokes for Codex.
+			native, err := nativeresponse.CodexContinuation(response)
 			require.NoError(t, err)
 			require.Equal(t, tc.wantNative, native, "native continuation bytes must equal the pinned golden shape")
 

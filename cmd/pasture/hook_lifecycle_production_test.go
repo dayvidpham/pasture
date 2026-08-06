@@ -1039,7 +1039,9 @@ func assertSharedOperation(t *testing.T, occurrence, interpreted provenance.Evid
 // through the sanctioned HookLifecycleInput.Activations pre-activation seam
 // (documented in internal/handlers/hook_lifecycle.go as "not a separate
 // test-only code path"). Native continuation bytes are produced by the exact
-// per-target encoder the CLI RunE invokes (nativeresponse.Encode).
+// per-target encoder the CLI RunE invokes through handlers.HookLifecycleNative
+// via the registry encode member (nativeresponse.CodexContinuation for Codex,
+// nativeresponse.CanonicalProceed for the canonical-object harnesses).
 
 type codexProductionFixture struct {
 	name            string // subtest name; must equal activation.ProductionProofCodex*.Name()'s test suffix
@@ -1113,8 +1115,9 @@ func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
 			require.Equal(t, tc.wantResponse, response.IsValid())
 
 			// Native continuation bytes are the exact host stdout for this event,
-			// through the same per-target encoder the CLI RunE invokes.
-			native, err := nativeresponse.Encode(ir.HarnessCodex, response)
+			// through the same per-target encoder the CLI RunE invokes (the Codex
+			// registry encode member, via handlers.HookLifecycleNative).
+			native, err := nativeresponse.CodexContinuation(response)
 			require.NoError(t, err)
 			require.Equal(t, tc.wantNative, native, "native continuation bytes must equal the pinned golden shape")
 
@@ -1164,7 +1167,7 @@ func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
 	})
 	require.NoError(t, err)
 	codexIdentities, codexSemantic := readBackGate(t, codexDB, registration.Codex0_146_0().Contract, runtime.Codex0_146_0().ID(), registration.EventCodexPreToolUse)
-	codexNative, err := nativeresponse.Encode(ir.HarnessCodex, codexResponse)
+	codexNative, err := nativeresponse.CodexContinuation(codexResponse)
 	require.NoError(t, err)
 
 	// --- OpenCode tool.execute.before gate: live production path, default-enabled.
@@ -1177,7 +1180,7 @@ func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
 	})
 	require.NoError(t, err)
 	openCodeIdentities, openCodeSemantic := readBackGate(t, openCodeDB, registration.OpenCode1_18_10().Contract, runtime.OpenCode1_18_10().ID(), registration.EventOpenCodeToolExecuteBefore)
-	openCodeNative, err := nativeresponse.Encode(ir.HarnessOpenCode, openCodeResponse)
+	openCodeNative, err := nativeresponse.CanonicalProceed(openCodeResponse)
 	require.NoError(t, err)
 
 	// EQUAL: the common Proceed gate semantic agrees across both live providers.
