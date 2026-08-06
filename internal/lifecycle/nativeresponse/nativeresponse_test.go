@@ -16,8 +16,10 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 )
 
-// TestEncodeGoldenNativeContinuationBytes pins the exact native bytes Encode
-// emits for every (harness, response-validity) pair. The Codex shapes are
+// TestEncodeGoldenNativeContinuationBytes pins the exact native bytes the
+// per-host encoders (CodexContinuation, CanonicalProceed) emit for every
+// (harness, response-validity) pair — the encoders the frontendRegistry encode
+// members reference. The Codex shapes are
 // derived from the pinned Codex 0.146.0 command-hook output contract:
 //
 //   - {"continue":true} — hooks/src/schema.rs HookUniversalOutputWire.continue
@@ -32,7 +34,7 @@ import (
 // The OpenCode and Claude shapes are the canonical Pasture host response and
 // MUST remain byte-identical to M2 (regression guard).
 //
-// FAILS until the L3 Encode implementation lands.
+// FAILS until the L3 encoder bodies land.
 func TestEncodeGoldenNativeContinuationBytes(t *testing.T) {
 	t.Parallel()
 	proceed := proceedResponse(t)
@@ -55,23 +57,26 @@ func TestEncodeGoldenNativeContinuationBytes(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := nativeresponse.Encode(tc.harness, tc.response)
+			// Exercise the exact per-host encoder the registry row references:
+			// Codex routes through CodexContinuation, and the canonical-object
+			// harnesses (Claude, OpenCode) through CanonicalProceed. The former
+			// nativeresponse.Encode(harness, response) switch is deleted; the
+			// unknown-harness negative it hosted is relocated to the registry
+			// lookup (handlers.dispatchLifecycle + HookLifecycleNative).
+			var (
+				got []byte
+				err error
+			)
+			switch tc.harness {
+			case ir.HarnessCodex:
+				got, err = nativeresponse.CodexContinuation(tc.response)
+			default:
+				got, err = nativeresponse.CanonicalProceed(tc.response)
+			}
 			require.NoError(t, err)
 			require.Equal(t, tc.want, got, "native continuation bytes must equal the pinned golden shape")
 		})
 	}
-}
-
-// TestEncodeRejectsUnsupportedHarness asserts an unsupported harness yields an
-// actionable error and no bytes rather than silently emitting a default shape.
-//
-// FAILS until the L3 Encode implementation lands.
-func TestEncodeRejectsUnsupportedHarness(t *testing.T) {
-	t.Parallel()
-	got, err := nativeresponse.Encode(ir.HarnessID("grok-build"), proceedResponse(t))
-	require.Error(t, err)
-	require.Nil(t, got)
-	require.Contains(t, err.Error(), "grok-build")
 }
 
 // proceedResponse derives a genuine constructor-built Proceed HostResponse by

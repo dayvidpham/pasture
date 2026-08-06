@@ -10,7 +10,6 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
-	"github.com/dayvidpham/pasture/internal/lifecycle/nativeresponse"
 )
 
 type lifecycleCLIClock struct{}
@@ -45,28 +44,25 @@ var hookLifecycleCmd = &cobra.Command{
 		harness, _ := cmd.Flags().GetString("harness")
 		event, _ := cmd.Flags().GetString("event")
 		hostVersion, _ := cmd.Flags().GetString("host-version")
-		response, err := handlers.HookLifecycleResponse(cmd.Context(), handlers.HookLifecycleInput{
+		// HookLifecycleNative is the single dispatch surface: it commits the
+		// durable receipt and, only on the nil-error path, returns the exact
+		// native continuation bytes this harness reads on stdout — so nothing is
+		// written to stdout before the commit completes (commit-before-stdout is
+		// structural in the handler, no longer enforced by ordering here).
+		native, err := handlers.HookLifecycleNative(cmd.Context(), handlers.HookLifecycleInput{
 			DBPath: flagDBPath, Harness: ir.HarnessID(harness), Event: event,
 			HostVersion: hostVersion, Input: cmd.InOrStdin(), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 		})
-		if err == nil {
-			// The durable receipt has already committed; the per-target backend
-			// now emits the exact native continuation bytes this harness reads on
-			// stdout, so nothing is written to stdout before the commit completes.
-			native, encodeErr := nativeresponse.Encode(ir.HarnessID(harness), response)
-			if encodeErr != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "pasture: lifecycle hook could not encode its committed host continuation: %v; the event was recorded but the host received no continuation; inspect the database and retry the hook input\n", encodeErr)
-				return nil
-			}
-			if len(native) > 0 {
-				if _, writeErr := cmd.OutOrStdout().Write(native); writeErr != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "pasture: lifecycle hook could not write its committed host continuation: %v; the event was recorded but the host received no continuation; inspect the database and retry the hook input\n", writeErr)
-					return nil
-				}
-			}
+		if err != nil {
+			printError(err)
 			return nil
 		}
-		printError(err)
+		if len(native) > 0 {
+			if _, writeErr := cmd.OutOrStdout().Write(native); writeErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "pasture: lifecycle hook could not write its committed host continuation: %v; the event was recorded but the host received no continuation; inspect the database and retry the hook input\n", writeErr)
+				return nil
+			}
+		}
 		return nil
 	},
 }

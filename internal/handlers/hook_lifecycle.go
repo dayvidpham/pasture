@@ -18,6 +18,7 @@ import (
 	opencodeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/opencode"
 	"github.com/dayvidpham/pasture/internal/lifecycle/middleend"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/nativeresponse"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
@@ -68,12 +69,63 @@ type lifecycleCapture struct {
 	delivery    receipt.Delivery
 }
 
+// lifecycleDispatch is the per-harness registry row. Its members fold the two
+// former dispatch switches (the activation/parse/bind dispatch here and the
+// native-response encode switch in nativeresponse) into one static map entry.
+//
+//   - activations is a lazy, fallible constructor: the generated proofs are
+//     fallible, so the row stores the constructor func and hookLifecycle
+//     resolves it at dispatch time, preserving the wrapped error text verbatim.
+//   - encode is the per-target native emitter reached only through the registry
+//     row (D4), replacing the deleted nativeresponse.Encode harness switch.
 type lifecycleDispatch struct {
 	name        string
 	manifest    registration.Manifest
-	activations []activation.Entry
+	activations func() ([]activation.Entry, error)
 	parse       func([]byte, registration.Event, string) lifecycleCapture
 	bind        func(model.ContractEventKind, []model.NativeBinding) (waist.L1, []waist.Identity, error)
+	encode      func(backend.HostResponse) ([]byte, error)
+}
+
+// frontendRegistry is the compile-time static dispatch map keyed by the closed
+// set of string-typed ir.HarnessID constants. It has no init() registration, no
+// reflection, and no string reverse lookup: it is a closed literal, the same
+// construction the codegen harnessRegistry has always used. Adding a harness is
+// adding one data row.
+var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
+	ir.HarnessClaudeCode: {
+		name:        "Claude",
+		manifest:    registration.ClaudeCode2_1_210(),
+		activations: activation.ClaudeCode2_1_210,
+		parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
+			capture := claudeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
+			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
+		},
+		bind:   claudefrontend.Bind,
+		encode: nativeresponse.CanonicalProceed,
+	},
+	ir.HarnessOpenCode: {
+		name:        "OpenCode",
+		manifest:    registration.OpenCode1_18_10(),
+		activations: activation.OpenCode1_18_10,
+		parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
+			capture := opencodeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
+			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
+		},
+		bind:   opencodefrontend.Bind,
+		encode: nativeresponse.CanonicalProceed,
+	},
+	ir.HarnessCodex: {
+		name:        "Codex",
+		manifest:    registration.Codex0_146_0(),
+		activations: activation.Codex0_146_0,
+		parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
+			capture := codexingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
+			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
+		},
+		bind:   codexfrontend.Bind,
+		encode: nativeresponse.CodexContinuation,
+	},
 }
 
 func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleStoreOpener) (backend.HostResponse, error) {
@@ -83,6 +135,18 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	dispatch, err := dispatchLifecycle(in.Harness)
 	if err != nil {
 		return backend.HostResponse{}, err
+	}
+	// The activation catalog is a fallible generated proof; resolve it here at
+	// dispatch time (the same point the former switch resolved it), preserving
+	// the wrapped error text verbatim. Production callers leave in.Activations
+	// nil so the committed per-harness manifest governs admission; the override
+	// exercises the same durable path with an alternative manifest.
+	activations, err := dispatch.activations()
+	if err != nil {
+		return backend.HostResponse{}, fmt.Errorf("dispatch %s lifecycle activation: %w", dispatch.name, err)
+	}
+	if in.Activations != nil {
+		activations = in.Activations
 	}
 	if strings.TrimSpace(in.HostVersion) == "" {
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, "The observed host version is missing.", "Every retained occurrence records which host version produced it, without using the value as an admission check.", "The input was not read and no database was opened.", "Pass the observed version through --host-version.", nil)
@@ -96,15 +160,6 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	}
 	if event.Kind == 0 {
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("Event %q is not in the generated %s registration.", in.Event, dispatch.name), "Ingress trusts the generated registration coordinate rather than an unparsed payload claim.", "The input was not read and no database was opened.", "Invoke one of the events present in the support report.", nil)
-	}
-	// The committed per-harness manifest governs admission unless the caller
-	// injects an activation configuration. Production callers leave in.Activations
-	// nil so the committed per-harness activation manifest governs admission
-	// (Codex admits the two accepted events via activation.Codex0_146_0());
-	// the override exercises the same durable path with an alternative manifest.
-	activations := dispatch.activations
-	if in.Activations != nil {
-		activations = in.Activations
 	}
 	state, found := activationFor(event.Kind, activations)
 	if !found || state.State != activation.Enabled {
@@ -157,38 +212,49 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	return derivation.Response(), nil
 }
 
+// dispatchLifecycle resolves the static registry row for a harness. It is a
+// pure map lookup: the only error is the unchanged unsupported-harness rejection
+// (naming the harness), which is now the relocated home of the unknown-harness
+// negative coverage formerly asserted in nativeresponse_test.go.
 func dispatchLifecycle(harness ir.HarnessID) (lifecycleDispatch, error) {
-	switch harness {
-	case ir.HarnessClaudeCode:
-		activations, err := activation.ClaudeCode2_1_210()
-		if err != nil {
-			return lifecycleDispatch{}, fmt.Errorf("dispatch Claude lifecycle activation: %w", err)
-		}
-		return lifecycleDispatch{name: "Claude", manifest: registration.ClaudeCode2_1_210(), activations: activations, parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
-			capture := claudeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
-			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
-		}, bind: claudefrontend.Bind}, nil
-	case ir.HarnessOpenCode:
-		activations, err := activation.OpenCode1_18_10()
-		if err != nil {
-			return lifecycleDispatch{}, fmt.Errorf("dispatch OpenCode lifecycle activation: %w", err)
-		}
-		return lifecycleDispatch{name: "OpenCode", manifest: registration.OpenCode1_18_10(), activations: activations, parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
-			capture := opencodeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
-			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
-		}, bind: opencodefrontend.Bind}, nil
-	case ir.HarnessCodex:
-		activations, err := activation.Codex0_146_0()
-		if err != nil {
-			return lifecycleDispatch{}, fmt.Errorf("dispatch Codex lifecycle activation: %w", err)
-		}
-		return lifecycleDispatch{name: "Codex", manifest: registration.Codex0_146_0(), activations: activations, parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
-			capture := codexingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
-			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
-		}, bind: codexfrontend.Bind}, nil
-	default:
+	dispatch, ok := frontendRegistry[harness]
+	if !ok {
 		return lifecycleDispatch{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("Harness %q is not supported by lifecycle ingress.", harness), "Lifecycle ingress has no static provider dispatch for this harness.", "The input was not read and no database was opened.", "Use a harness present in the generated lifecycle support report.", nil)
 	}
+	return dispatch, nil
+}
+
+// HookLifecycleNative records the lifecycle receipt and, only after the durable
+// commit has completed, returns the exact native continuation bytes the harness
+// reads on standard output — the single dispatch surface the CLI invokes. The
+// commit-before-stdout invariant is structural: the per-target encoder runs
+// solely on the nil error path of HookLifecycleResponse, so native bytes never
+// precede persisted evidence. An unsupported harness resolves no registry row
+// and returns the unchanged unsupported-harness error with nil bytes, so nothing
+// is written to stdout.
+func HookLifecycleNative(ctx context.Context, in HookLifecycleInput) ([]byte, error) {
+	dispatch, err := dispatchLifecycle(in.Harness)
+	if err != nil {
+		return nil, err
+	}
+	response, err := HookLifecycleResponse(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	// The encode runs only AFTER the lifecycle receipt has been durably
+	// committed by HookLifecycleResponse, so any failure here means the
+	// receipt is persisted but the native continuation was not delivered to
+	// the host. Wrap it so the operator knows the durable state is intact and
+	// only the stdout continuation is missing. This branch is provably
+	// unreachable today (both encoders return nil,nil on an invalid/absent
+	// response: CanonicalProceed and CodexContinuation never fail on a valid
+	// HostResponse); the guard exists as a post-commit audit guarantee so a
+	// future encoder that can fail cannot silently drop the continuation.
+	native, err := dispatch.encode(response)
+	if err != nil {
+		return nil, fmt.Errorf("%s lifecycle receipt committed but native continuation was not delivered (encode failed): %w", dispatch.name, err)
+	}
+	return native, nil
 }
 
 func activationFor(kind model.ContractEventKind, entries []activation.Entry) (activation.Entry, bool) {

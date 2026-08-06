@@ -56,12 +56,8 @@ package nativeresponse
 import (
 	"fmt"
 
-	"github.com/dayvidpham/pasture/internal/codegen/ir"
-	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
 )
-
-const nativeResponseWhere = "Encoding the native host continuation for a committed lifecycle event (internal/lifecycle/nativeresponse/nativeresponse.go in nativeresponse.Encode)."
 
 // Native continuation byte shapes. These are the authoritative golden bytes;
 // the golden-byte tests pin them and record the contract derivation above.
@@ -74,54 +70,39 @@ var (
 	codexObservationContinuation = []byte(`{}`)
 )
 
-// Encode returns the exact native continuation bytes a host reads on standard
-// output for one committed lifecycle event, or nil when the harness emits no
-// stdout for the event.
+// CodexContinuation returns the exact Codex native continuation bytes a host
+// reads on standard output for one committed lifecycle event: {"continue":true}
+// for a valid gate Proceed response and {} for an observation default. Codex's
+// command-hook ABI reads a JSON continuation object on stdout for every
+// configured hook, so the typed pipeline emits native bytes here. It is total
+// over its input (no harness argument, no error path for a well-formed
+// response), so the registry row references it directly for the Codex harness.
 //
-// The response argument is the constructor-built backend.HostResponse returned
-// by the durable lifecycle path; a valid response denotes a gate Proceed
-// decision and an invalid (zero) response denotes an observation that produced
-// no decision. Callers MUST only invoke Encode after the durable receipt commit
-// has completed, so that native bytes never precede persisted evidence.
-func Encode(harness ir.HarnessID, response backend.HostResponse) ([]byte, error) {
-	switch harness {
-	case ir.HarnessCodex:
-		// Codex's command-hook ABI reads a JSON continuation object on stdout for
-		// every configured hook, so the typed pipeline emits native bytes here.
-		if response.IsValid() {
-			return append([]byte(nil), codexProceedContinuation...), nil
-		}
-		return append([]byte(nil), codexObservationContinuation...), nil
-	case ir.HarnessClaudeCode, ir.HarnessOpenCode:
-		// Claude and OpenCode carry the canonical Pasture host response object; a
-		// gate proceed emits it and an observation emits nothing. These bytes are
-		// byte-identical to M2.
-		if !response.IsValid() {
-			return nil, nil
-		}
-		encoded, err := response.MarshalJSON()
-		if err != nil {
-			return nil, fmt.Errorf("nativeresponse.Encode: marshal canonical host response for harness %q: %w", harness, err)
-		}
-		return encoded, nil
-	default:
-		return nil, encodeError(
-			fmt.Sprintf("Harness %q has no native response encoder.", harness),
-			"Native continuation encoding is defined only for the reviewed lifecycle harnesses.",
-			"No native host continuation was produced for this event.",
-			"Emit responses only for a harness present in the generated lifecycle support report.",
-		)
+// Callers MUST only invoke it after the durable receipt commit has completed,
+// so that native bytes never precede persisted evidence.
+func CodexContinuation(response backend.HostResponse) ([]byte, error) {
+	if response.IsValid() {
+		return append([]byte(nil), codexProceedContinuation...), nil
 	}
+	return append([]byte(nil), codexObservationContinuation...), nil
 }
 
-// encodeError builds an actionable structured error for an unsupported harness.
-func encodeError(what, why, impact, fix string) error {
-	return &pasterrors.StructuredError{
-		Category: pasterrors.CategoryValidation,
-		What:     what,
-		Why:      why,
-		Where:    nativeResponseWhere,
-		Impact:   impact,
-		Fix:      fix,
+// CanonicalProceed returns the canonical Pasture host response bytes a host
+// reads on standard output (Claude and OpenCode): the marshaled host response
+// object for a valid gate Proceed decision, or nil (no stdout) for an
+// observation that produced no decision. Claude and OpenCode carry the canonical
+// Pasture host response object; a gate proceed emits it and an observation emits
+// nothing. These bytes are byte-identical to M2.
+//
+// Callers MUST only invoke it after the durable receipt commit has completed,
+// so that native bytes never precede persisted evidence.
+func CanonicalProceed(response backend.HostResponse) ([]byte, error) {
+	if !response.IsValid() {
+		return nil, nil
 	}
+	encoded, err := response.MarshalJSON()
+	if err != nil {
+		return nil, fmt.Errorf("nativeresponse.CanonicalProceed: marshal canonical host response: %w", err)
+	}
+	return encoded, nil
 }
