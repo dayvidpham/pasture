@@ -447,6 +447,8 @@ func TestGeneratedOutputInventory(t *testing.T) {
 		addExpectedOutput(t, expectedCodexHarness, path, "CodexTarget.Manifest")
 		addExpectedOutput(t, expectedCodexControl, path, "CodexTarget.Manifest")
 	}
+	addExpectedOutput(t, expectedCodexHarness, ".codex/pasture-codex-activation.json", "CodexTarget.Manifest activation audit report")
+	addExpectedOutput(t, expectedCodexControl, ".codex/pasture-codex-activation.json", "CodexTarget.Manifest activation audit report")
 	for _, event := range runtime.CodexLifecycleEvents() {
 		path := filepath.ToSlash(filepath.Join(codexHooksRoot, "events", event.NativeName()+".sh"))
 		addExpectedOutput(t, expectedCodexHarness, path, "CodexTarget lifecycle event "+event.NativeName())

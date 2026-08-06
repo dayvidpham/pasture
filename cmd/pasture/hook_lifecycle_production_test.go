@@ -1211,10 +1211,12 @@ func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
 }
 
 // TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated is the M3-P4
-// activation-isolation obligation at the committed-artifact layer. Landing the
-// Codex activation catalog must not write Codex provenance into the Claude or
-// OpenCode activation artifacts, and Codex has no separate committed activation
-// artifact (its enforcement is the handler-side catalog consumed post-UAT). The
+// activation-isolation obligation at the committed-artifact layer. Codex now
+// publishes its OWN committed activation audit report at
+// .codex/pasture-codex-activation.json (Stage 1 #24, mirroring the Claude
+// precedent): its presence is asserted here, but landing it must not write
+// Codex provenance into the Claude or OpenCode activation artifacts, and it must
+// not resurrect the legacy .codex/pasture-activation.json filename. The
 // byte-identity of the Claude and OpenCode artifacts across regeneration is
 // additionally guaranteed by the L3 zero-diff `make generate` gate.
 func TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated(t *testing.T) {
@@ -1234,14 +1236,85 @@ func TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated(t *testing.T) {
 	require.NotContains(t, string(openCodeManifest), "ingress/codex", "no Codex capture proof may leak into the OpenCode manifest")
 	require.NotContains(t, string(openCodeManifest), "codex", "the OpenCode manifest carries no Codex activation entry")
 
-	// Codex enforcement is the handler-side catalog, not a committed JSON artifact.
-	for _, candidate := range []string{
-		filepath.Join(root, ".codex", "pasture-codex-activation.json"),
-		filepath.Join(root, ".codex", "pasture-activation.json"),
-	} {
-		_, statErr := os.Stat(candidate)
-		require.ErrorIs(t, statErr, os.ErrNotExist, "Codex activation must not be emitted as a separate committed artifact at %s", candidate)
+	// Codex now emits its own committed activation audit report, unconditionally,
+	// derived from registration.Codex0_146_0() + activation.Codex0_146_0().
+	codexReportPath := filepath.Join(root, ".codex", "pasture-codex-activation.json")
+	codexReport, err := os.ReadFile(codexReportPath)
+	require.NoError(t, err, "the Codex activation audit report must be a committed artifact at %s", codexReportPath)
+
+	// Content equality against a freshly derived report — no golden literals for
+	// content, so catalog drift in registration.Codex0_146_0() or
+	// activation.Codex0_146_0() is caught here rather than silently accepted.
+	wantReport := deriveCodexActivationReport(t)
+	require.Equal(t, string(wantReport), string(codexReport), "the committed Codex activation report must equal the report freshly derived from the pinned Codex registration + activation catalogs")
+
+	// Literal invariants on the committed artifact: exactly 10 exhaustive
+	// entries, and exactly the two authentically-proven events enabled.
+	var parsed struct {
+		Harness string `json:"harness"`
+		Events  []struct {
+			Event string `json:"event"`
+			State string `json:"state"`
+		} `json:"events"`
 	}
+	require.NoError(t, json.Unmarshal(codexReport, &parsed))
+	require.Equal(t, "codex", parsed.Harness, "the Codex audit report is the Codex-only artifact")
+	require.Len(t, parsed.Events, 10, "the Codex activation report is exhaustive over all 10 generated Codex events")
+	enabled := make([]string, 0, 2)
+	for _, entry := range parsed.Events {
+		if entry.State == "enabled" {
+			enabled = append(enabled, entry.Event)
+		}
+	}
+	require.Equal(t, []string{"SessionStart", "PreToolUse"}, enabled, "exactly the two authentically-proven Codex events (SessionStart, PreToolUse) are enabled; the other 8 are withheld")
+
+	// The legacy Codex activation filename must never be emitted: the report
+	// lives only at pasture-codex-activation.json.
+	legacy := filepath.Join(root, ".codex", "pasture-activation.json")
+	_, statErr := os.Stat(legacy)
+	require.ErrorIs(t, statErr, os.ErrNotExist, "the legacy Codex activation filename must not be emitted at %s", legacy)
+}
+
+// deriveCodexActivationReport recomputes the exact bytes the Codex activation
+// audit report must contain, straight from the pinned registration manifest and
+// activation catalog — mirroring codexManifestEmitter.Emit (which mirrors
+// emitClaudeHooks). It carries no golden literals: every event name, state,
+// reason, and proof is read from the live catalogs, so a catalog change forces
+// the committed artifact to change in lockstep or this test fails.
+func deriveCodexActivationReport(t *testing.T) []byte {
+	t.Helper()
+	manifest := registration.Codex0_146_0()
+	states, err := activation.Codex0_146_0()
+	require.NoError(t, err)
+	byKind := make(map[model.ContractEventKind]activation.Entry, len(states))
+	for _, state := range states {
+		byKind[state.Event] = state
+	}
+	type reportEntry struct {
+		Event           string `json:"event"`
+		State           string `json:"state"`
+		Reason          string `json:"reason,omitempty"`
+		CaptureProof    string `json:"captureProof,omitempty"`
+		ProductionProof string `json:"productionProof,omitempty"`
+	}
+	report := struct {
+		Harness  string        `json:"harness"`
+		Contract string        `json:"contract"`
+		Events   []reportEntry `json:"events"`
+	}{Harness: string(manifest.Harness), Contract: manifest.Contract.String()}
+	for _, event := range manifest.Events {
+		state, ok := byKind[event.Kind]
+		require.True(t, ok, "activation catalog must cover generated Codex event %q", event.NativeName)
+		entry := reportEntry{Event: event.NativeName, State: state.State.String(), Reason: state.Reason.String()}
+		if state.State == activation.Enabled {
+			entry.CaptureProof = state.CaptureProof.Name()
+			entry.ProductionProof = state.ProductionProof.Name()
+		}
+		report.Events = append(report.Events, entry)
+	}
+	wire, err := json.MarshalIndent(report, "", "  ")
+	require.NoError(t, err)
+	return append(wire, '\n')
 }
 
 // readBackGate rebuilds and reads back the single committed occurrence for a
