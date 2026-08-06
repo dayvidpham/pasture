@@ -227,13 +227,21 @@ func dispatchLifecycle(harness ir.HarnessID) (lifecycleDispatch, error) {
 // HookLifecycleNative records the lifecycle receipt and, only after the durable
 // commit has completed, returns the exact native continuation bytes the harness
 // reads on standard output — the single dispatch surface the CLI invokes. The
-// commit-before-stdout invariant is structural: encoding runs solely on the nil
-// error path of HookLifecycleResponse. An unsupported harness returns the
-// unchanged unsupported-harness error with nil bytes and nothing for stdout.
-//
-// L1 stub — real body lands in L3.
+// commit-before-stdout invariant is structural: the per-target encoder runs
+// solely on the nil error path of HookLifecycleResponse, so native bytes never
+// precede persisted evidence. An unsupported harness resolves no registry row
+// and returns the unchanged unsupported-harness error with nil bytes, so nothing
+// is written to stdout.
 func HookLifecycleNative(ctx context.Context, in HookLifecycleInput) ([]byte, error) {
-	return nil, fmt.Errorf("handlers.HookLifecycleNative: not implemented until L3")
+	dispatch, err := dispatchLifecycle(in.Harness)
+	if err != nil {
+		return nil, err
+	}
+	response, err := HookLifecycleResponse(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	return dispatch.encode(response)
 }
 
 func activationFor(kind model.ContractEventKind, entries []activation.Entry) (activation.Entry, bool) {
