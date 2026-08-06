@@ -63,5 +63,14 @@ func Generate(root string, targets []TargetHarness, opts GenerateOptions) (Gener
 		errs = append(errs, fmt.Errorf("global-id validation: %w", err))
 	}
 
+	// ── 5. Authoring-side inventory projections (command + native axes) ───────
+	// The command-skill authoring surface and the contract-derived native call
+	// names are projected into internal/inventory as committed generated rows.
+	// (The lifecycle-event axis is emitted by hostcontractgen in its manifest
+	// walk.) Emitted as text; no production package imports the table.
+	if err := emitInventoryRows(root, opts); err != nil {
+		errs = append(errs, fmt.Errorf("inventory: %w", err))
+	}
+
 	return result, errs
 }
