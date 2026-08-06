@@ -308,7 +308,7 @@ func (b EventBinding) verifyIdentities(supplied []Identity, where string) ([]Sem
 		if err := validateIdentityValue(identity.nativeName, identity.value, where); err != nil {
 			return nil, err
 		}
-		field, found := findDeclaredField(declared, identity.nativeName)
+		field, found := b.mapping.DeclaredField(identity.nativeName)
 		if !found {
 			return nil, validationError(
 				fmt.Sprintf("Correlation field %q is not declared for native event %q.", identity.nativeName, b.nativeName),
@@ -371,15 +371,6 @@ func compareSemanticIdentities(left, right SemanticIdentity) int {
 		return order
 	}
 	return cmp.Compare(left.Value, right.Value)
-}
-
-func findDeclaredField(declared []runtime.NativeIdentityField, nativeName string) (runtime.NativeIdentityField, bool) {
-	for _, field := range declared {
-		if field.NativeName() == nativeName {
-			return field, true
-		}
-	}
-	return runtime.NativeIdentityField{}, false
 }
 
 func describeDeclaredFields(declared []runtime.NativeIdentityField) string {
