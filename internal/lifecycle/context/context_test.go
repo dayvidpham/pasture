@@ -30,15 +30,15 @@ func mustContract(t *testing.T, harness ir.HarnessID, name string) ir.RuntimeCon
 	return contract
 }
 
-func book(content byte) model.CodebookCoordinate {
+func manifest(content byte) model.LifecycleMetamodelManifest {
 	var c model.ContentIdentity
 	c[0] = content
-	return model.CodebookCoordinate{ID: "pasture.lifecycle.codebook", Version: 1, Content: c}
+	return model.LifecycleMetamodelManifest{ID: "pasture.lifecycle.codebook", Version: 1, Content: c}
 }
 
 // recordV2 builds a committed LifecycleRecord whose interpretation carries a
 // codebook coordinate (interpreted.v2), using the production model constructors.
-func recordV2(t *testing.T, jid int64, contract ir.RuntimeContractID, coordinate model.CodebookCoordinate, identities ...waist.SemanticIdentity) model.LifecycleRecord {
+func recordV2(t *testing.T, jid int64, contract ir.RuntimeContractID, coordinate model.LifecycleMetamodelManifest, identities ...waist.SemanticIdentity) model.LifecycleRecord {
 	t.Helper()
 	occ := model.NewOccurrenceRecord(
 		model.OccurrenceID(jid),
@@ -51,7 +51,7 @@ func recordV2(t *testing.T, jid int64, contract ir.RuntimeContractID, coordinate
 		model.CaptureValid,
 		model.EvidencePayloadRef{},
 	)
-	interpreted, err := model.NewInterpretedRecordWithCodebook(
+	interpreted, err := model.NewInterpretedRecordWithMetamodel(
 		model.InterpretationID(jid), model.OccurrenceID(jid), runtime.SemanticObservation,
 		identities, nil, contract, coordinate)
 	if err != nil {
@@ -113,7 +113,7 @@ func scopedInput() lifecyclecontext.ContextInput {
 func TestProjectDeterministicAndCanonical(t *testing.T) {
 	t.Parallel()
 	claude := mustContract(t, ir.HarnessClaudeCode, "claude-code/2.1.210")
-	coordinate := book(0x11)
+	coordinate := manifest(0x11)
 	records := []model.LifecycleRecord{
 		recordV2(t, 30, claude, coordinate, id(runtime.IdentitySession, "S1")),
 		recordV2(t, 10, claude, coordinate, id(runtime.IdentitySession, "S1")),
@@ -162,7 +162,7 @@ func TestProjectDeterministicAndCanonical(t *testing.T) {
 
 	// A different selection (different codebook content) changes the digest.
 	other, err := lifecyclecontext.Project(scopedInput(),
-		[]model.LifecycleRecord{recordV2(t, 10, claude, book(0x22), id(runtime.IdentitySession, "S1"))}, nil)
+		[]model.LifecycleRecord{recordV2(t, 10, claude, manifest(0x22), id(runtime.IdentitySession, "S1"))}, nil)
 	if err != nil {
 		t.Fatalf("Project(other): %v", err)
 	}
@@ -175,14 +175,14 @@ func TestProjectDeterministicAndCanonical(t *testing.T) {
 	}
 }
 
-// TestProjectSummarizesChainsCodebooksAndUnresolved: the projection carries the
+// TestProjectSummarizesChainsMetamodelsAndUnresolved: the projection carries the
 // per-host chain edge count from committed links, the deduplicated codebook
 // coordinates present, and discloses a pre-M5 (v1) record with an unresolved
-// (empty) codebook.
-func TestProjectSummarizesChainsCodebooksAndUnresolved(t *testing.T) {
+// (empty) metamodel.
+func TestProjectSummarizesChainsMetamodelsAndUnresolved(t *testing.T) {
 	t.Parallel()
 	claude := mustContract(t, ir.HarnessClaudeCode, "claude-code/2.1.210")
-	coordinate := book(0x33)
+	coordinate := manifest(0x33)
 	records := []model.LifecycleRecord{
 		recordV2(t, 10, claude, coordinate, id(runtime.IdentitySession, "S1")),
 		recordV2(t, 20, claude, coordinate, id(runtime.IdentitySession, "S1")),
@@ -253,7 +253,7 @@ func TestProjectSummarizesChainsCodebooksAndUnresolved(t *testing.T) {
 func TestProjectBoundsAndMarksTruncation(t *testing.T) {
 	t.Parallel()
 	claude := mustContract(t, ir.HarnessClaudeCode, "claude-code/2.1.210")
-	coordinate := book(0x44)
+	coordinate := manifest(0x44)
 	records := make([]model.LifecycleRecord, lifecyclecontext.MaxProjectionRecords+5)
 	for i := range records {
 		records[i] = recordV2(t, int64(i+1), claude, coordinate, id(runtime.IdentitySession, "S1"))

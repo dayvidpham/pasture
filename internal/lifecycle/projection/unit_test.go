@@ -294,7 +294,7 @@ func TestReaderDispatchesV1AndV2ByKind(t *testing.T) {
 	if len(v1) != 1 {
 		t.Fatalf("occurrence 10 has %d interpretations, want 1", len(v1))
 	}
-	if _, ok := v1[0].Codebook(); ok {
+	if _, ok := v1[0].Metamodel(); ok {
 		t.Fatal("interpreted.v1 record must report NO codebook coordinate")
 	}
 	if v1[0].Identities()[0].Value != "session-v1" {
@@ -304,12 +304,12 @@ func TestReaderDispatchesV1AndV2ByKind(t *testing.T) {
 	if len(v2) != 1 {
 		t.Fatalf("occurrence 20 has %d interpretations, want 1", len(v2))
 	}
-	book, ok := v2[0].Codebook()
+	manifest, ok := v2[0].Metamodel()
 	if !ok {
 		t.Fatal("interpreted.v2 record must report its codebook coordinate")
 	}
-	if book.Version != 1 || string(book.ID) != "pasture.lifecycle.codebook" {
-		t.Fatalf("v2 codebook coordinate = %#v, want the versioned active id", book)
+	if manifest.Version != 1 || string(manifest.ID) != "pasture.lifecycle.codebook" {
+		t.Fatalf("v2 codebook coordinate = %#v, want the versioned active id", manifest)
 	}
 
 	// The association query must ask for BOTH interpreted kinds (the same set the

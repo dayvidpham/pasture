@@ -61,7 +61,7 @@ type recordSummary struct {
 	Event      uint16 `json:"event"`
 	Harness    string `json:"harness"`
 	Capture    uint8  `json:"capture"`
-	Codebook   string `json:"codebook"`
+	Metamodel  string `json:"codebook"`
 }
 
 // chainSummary is the disclosure view of one per-host native-identity chain: the
@@ -76,9 +76,9 @@ type chainSummary struct {
 	Edges   int    `json:"edges"`
 }
 
-// codebookSummary is the disclosure view of one codebook coordinate present in
+// metamodelSummary is the disclosure view of one codebook coordinate present in
 // the disclosed interpreted evidence, deduplicated across records.
-type codebookSummary struct {
+type metamodelSummary struct {
 	ID      string `json:"id"`
 	Version uint32 `json:"version"`
 	Content string `json:"content"`
@@ -89,11 +89,11 @@ type codebookSummary struct {
 // durable plan fact records and the gate intent fingerprints, so its field set
 // and ordering are load-bearing: any change alters every disclosure digest.
 type projectionWire struct {
-	Scope     string            `json:"scope"`
-	Records   []recordSummary   `json:"records"`
-	Chains    []chainSummary    `json:"chains"`
-	Codebooks []codebookSummary `json:"codebooks"`
-	Truncated bool              `json:"truncated"`
+	Scope      string             `json:"scope"`
+	Records    []recordSummary    `json:"records"`
+	Chains     []chainSummary     `json:"chains"`
+	Metamodels []metamodelSummary `json:"codebooks"`
+	Truncated  bool               `json:"truncated"`
 }
 
 // ContextProjection is the constructor-owned, bounded disclosure projection. Its
@@ -106,7 +106,7 @@ type ContextProjection struct {
 	scope       model.ContentIdentity
 	records     []recordSummary
 	chains      []chainSummary
-	codebooks   []codebookSummary
+	metamodels  []metamodelSummary
 	truncated   bool
 	constructed bool
 }
@@ -127,11 +127,11 @@ func (p ContextProjection) ScopeFingerprint() model.ContentIdentity { return p.s
 // stable.
 func (p ContextProjection) canonicalWire() ([]byte, error) {
 	wire := projectionWire{
-		Scope:     hex.EncodeToString(p.scope[:]),
-		Records:   p.records,
-		Chains:    p.chains,
-		Codebooks: p.codebooks,
-		Truncated: p.truncated,
+		Scope:      hex.EncodeToString(p.scope[:]),
+		Records:    p.records,
+		Chains:     p.chains,
+		Metamodels: p.metamodels,
+		Truncated:  p.truncated,
 	}
 	if wire.Records == nil {
 		wire.Records = []recordSummary{}
@@ -139,8 +139,8 @@ func (p ContextProjection) canonicalWire() ([]byte, error) {
 	if wire.Chains == nil {
 		wire.Chains = []chainSummary{}
 	}
-	if wire.Codebooks == nil {
-		wire.Codebooks = []codebookSummary{}
+	if wire.Metamodels == nil {
+		wire.Metamodels = []metamodelSummary{}
 	}
 	var buf bytes.Buffer
 	encoder := json.NewEncoder(&buf)
@@ -208,25 +208,25 @@ func Project(input ContextInput, records []model.LifecycleRecord, links []model.
 
 	inScope := make(map[int64]struct{}, len(ordered))
 	summaries := make([]recordSummary, 0, len(ordered))
-	codebookSeen := make(map[codebookSummary]struct{})
-	var codebooks []codebookSummary
+	metamodelSeen := make(map[metamodelSummary]struct{})
+	var metamodels []metamodelSummary
 	for _, record := range ordered {
 		occurrence := record.Occurrence
 		id := int64(occurrence.JournalID())
 		inScope[id] = struct{}{}
 
-		codebookHex := ""
+		metamodelHex := ""
 		for _, interpreted := range record.Interpreted() {
-			if coordinate, ok := interpreted.Codebook(); ok && coordinate.IsValid() {
-				codebookHex = hex.EncodeToString(coordinate.Content[:])
-				summary := codebookSummary{
+			if coordinate, ok := interpreted.Metamodel(); ok && coordinate.IsValid() {
+				metamodelHex = hex.EncodeToString(coordinate.Content[:])
+				summary := metamodelSummary{
 					ID:      string(coordinate.ID),
 					Version: coordinate.Version,
-					Content: codebookHex,
+					Content: metamodelHex,
 				}
-				if _, dup := codebookSeen[summary]; !dup {
-					codebookSeen[summary] = struct{}{}
-					codebooks = append(codebooks, summary)
+				if _, dup := metamodelSeen[summary]; !dup {
+					metamodelSeen[summary] = struct{}{}
+					metamodels = append(metamodels, summary)
 				}
 			}
 		}
@@ -235,7 +235,7 @@ func Project(input ContextInput, records []model.LifecycleRecord, links []model.
 			Event:      uint16(occurrence.Kind),
 			Harness:    string(occurrence.RuntimeContract.Harness()),
 			Capture:    uint8(occurrence.Capture),
-			Codebook:   codebookHex,
+			Metamodel:  metamodelHex,
 		})
 	}
 
@@ -254,13 +254,13 @@ func Project(input ContextInput, records []model.LifecycleRecord, links []model.
 	}
 
 	sort.SliceStable(chains, func(i, j int) bool { return lessChain(chains[i], chains[j]) })
-	sort.SliceStable(codebooks, func(i, j int) bool { return lessCodebook(codebooks[i], codebooks[j]) })
+	sort.SliceStable(metamodels, func(i, j int) bool { return lessMetamodel(metamodels[i], metamodels[j]) })
 
 	return ContextProjection{
 		scope:       scope,
 		records:     summaries,
 		chains:      chains,
-		codebooks:   codebooks,
+		metamodels:  metamodels,
 		truncated:   truncated,
 		constructed: true,
 	}, nil
@@ -318,7 +318,7 @@ func lessChain(a, b chainSummary) bool {
 	return a.Edges < b.Edges
 }
 
-func lessCodebook(a, b codebookSummary) bool {
+func lessMetamodel(a, b metamodelSummary) bool {
 	if a.ID != b.ID {
 		return a.ID < b.ID
 	}

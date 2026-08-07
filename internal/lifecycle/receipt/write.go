@@ -50,28 +50,28 @@ func (w GatedWrite) OperationID() provenance.OperationID { return w.operationID 
 // the definition snapshot (the canonical body evidence) and the activation
 // state fact — and a deterministic operation identity derived from the content
 // identity, so a concurrent duplicate collapses to one activation.
-func NewDefinitionActivation(book model.CodebookCoordinate, body []byte) (GatedWrite, error) {
-	if !book.IsValid() {
+func NewDefinitionActivation(manifest model.LifecycleMetamodelManifest, body []byte) (GatedWrite, error) {
+	if !manifest.IsValid() {
 		return GatedWrite{}, structured(pasterrors.CategoryValidation,
 			"The definition-activation write has an invalid codebook coordinate.",
 			"A journaled definition must be addressed by a nonzero id, version, and content identity.",
 			"Constructing a definition-activation gated write (internal/lifecycle/receipt/write.go in receipt.NewDefinitionActivation).",
 			"No gated write was constructed.",
-			"Pass codebook.Active() as the coordinate.", nil)
+			"Pass metamodel.Active() as the coordinate.", nil)
 	}
 	bodyDigest := sha256.Sum256(body)
-	if model.ContentIdentity(bodyDigest) != book.Content {
+	if model.ContentIdentity(bodyDigest) != manifest.Content {
 		return GatedWrite{}, structured(pasterrors.CategoryValidation,
 			"The definition-activation body does not match the codebook coordinate content identity.",
 			"The coordinate's content identity is the sha256 of the canonical body, so a mismatch means the body and coordinate disagree.",
 			"Constructing a definition-activation gated write (internal/lifecycle/receipt/write.go in receipt.NewDefinitionActivation).",
 			"No gated write was constructed.",
-			"Pass codebook.Body() for the same coordinate returned by codebook.Active().", nil)
+			"Pass metamodel.Body() for the same coordinate returned by metamodel.Active().", nil)
 	}
 
 	snapshotPayload := append([]byte(nil), body...)
 	snapshotDigest := sha256.Sum256(snapshotPayload)
-	statePayload, err := canonicalDefinitionStatePayload(book)
+	statePayload, err := canonicalDefinitionStatePayload(manifest)
 	if err != nil {
 		return GatedWrite{}, err
 	}
@@ -81,8 +81,8 @@ func NewDefinitionActivation(book model.CodebookCoordinate, body []byte) (GatedW
 		{Sort: provenance.EffectEvidence, ResultSlot: definitionSlot, EvidenceKind: definitionKind, ContentDigest: snapshotDigest[:], Payload: append(json.RawMessage(nil), snapshotPayload...)},
 		{Sort: provenance.EffectEvidence, ResultSlot: definitionStateSlot, EvidenceKind: definitionStateKind, ContentDigest: stateDigest[:], Payload: append(json.RawMessage(nil), statePayload...)},
 	}
-	operationID := provenance.OperationID(definitionOperationPrefix + hex.EncodeToString(book.Content[:16]))
-	command := sha256.Sum256(append([]byte(definitionCommand+"\x00"), book.Content[:]...))
+	operationID := provenance.OperationID(definitionOperationPrefix + hex.EncodeToString(manifest.Content[:16]))
+	command := sha256.Sum256(append([]byte(definitionCommand+"\x00"), manifest.Content[:]...))
 	return GatedWrite{
 		class:         gate.WriteDefinitionActivation,
 		command:       definitionCommand,
@@ -101,9 +101,9 @@ type definitionStatePayload struct {
 	Event      string `json:"event"`
 }
 
-func canonicalDefinitionStatePayload(book model.CodebookCoordinate) ([]byte, error) {
+func canonicalDefinitionStatePayload(manifest model.LifecycleMetamodelManifest) ([]byte, error) {
 	return encodeCanonical(definitionStatePayload{
-		Definition: hex.EncodeToString(book.Content[:]),
+		Definition: hex.EncodeToString(manifest.Content[:]),
 		Event:      "activated",
 	})
 }

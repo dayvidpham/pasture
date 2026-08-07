@@ -51,8 +51,8 @@ func TestGoldenV1InterpretedDecodesUnchangedAfterM5(t *testing.T) {
 	if len(identities) != 1 || identities[0].Kind != runtime.IdentitySession || identities[0].Value != "session-golden-pre-m5" {
 		t.Fatalf("decoded identities = %#v, want the single golden session identity", identities)
 	}
-	if book, ok := decoded.Codebook(); ok {
-		t.Fatalf("committed interpreted.v1 record reported a codebook coordinate %#v, want none (pre-M5)", book)
+	if manifest, ok := decoded.Metamodel(); ok {
+		t.Fatalf("committed interpreted.v1 record reported a codebook coordinate %#v, want none (pre-M5)", manifest)
 	}
 
 	// The v2 decoder must reject the v1 payload: v2 requires the codebook member,

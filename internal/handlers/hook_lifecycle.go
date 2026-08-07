@@ -10,7 +10,6 @@ import (
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
-	"github.com/dayvidpham/pasture/internal/lifecycle/codebook"
 	claudefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/claude"
 	codexfrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/codex"
 	opencodefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/opencode"
@@ -18,6 +17,7 @@ import (
 	claudeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
 	codexingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/codex"
 	opencodeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/opencode"
+	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
 	"github.com/dayvidpham/pasture/internal/lifecycle/middleend"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/nativeresponse"
@@ -212,10 +212,10 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	// On the valid-capture path, lazily journal the active codebook BEFORE the
 	// delivery receipt is written. The definition-activation operation commits
 	// before the first delivery that references the coordinate, so a committed
-	// interpreted.v2 record can never cite an unjournaled codebook. It is
+	// interpreted.v2 record can never cite an unjournaled metamodel. It is
 	// idempotent and race-safe (deterministic content-derived operation ID), so
 	// steady state is one bounded lookup and zero writes.
-	if _, err = receipt.EnsureActiveCodebook(ctx, service); err != nil {
+	if _, err = receipt.EnsureActiveMetamodel(ctx, service); err != nil {
 		return backend.HostResponse{}, err
 	}
 	l1, identities, err := dispatch.bind(event.Kind, capture.delivery.Bindings)
@@ -226,7 +226,7 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
-	derivation, err := middleend.Derive(l2, codebook.Active())
+	derivation, err := middleend.Derive(l2, metamodel.Active())
 	if err != nil {
 		return backend.HostResponse{}, err
 	}

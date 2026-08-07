@@ -9,18 +9,18 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/formatters"
-	"github.com/dayvidpham/pasture/internal/lifecycle/codebook"
+	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/provenance"
 )
 
-// TestHookLifecycleFormatterRendersCodebookColumn proves the read surface
+// TestHookLifecycleFormatterRendersMetamodelColumn proves the read surface
 // discloses the codebook coordinate for interpreted.v2 records and renders the
 // pre-M5 unresolved disclosure for interpreted.v1 records — never inventing a
 // coordinate for a legacy record.
-func TestHookLifecycleFormatterRendersCodebookColumn(t *testing.T) {
+func TestHookLifecycleFormatterRendersMetamodelColumn(t *testing.T) {
 	t.Parallel()
 	contract := runtime.ClaudeCode2_1_210Lifecycle().ID()
 	identities := []waist.SemanticIdentity{{Kind: runtime.IdentitySession, Value: "s"}}
@@ -29,7 +29,7 @@ func TestHookLifecycleFormatterRendersCodebookColumn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build v1 interpreted record: %v", err)
 	}
-	v2, err := model.NewInterpretedRecordWithCodebook(model.InterpretationID(20), model.OccurrenceID(2), runtime.SemanticObservation, identities, nil, contract, codebook.Active())
+	v2, err := model.NewInterpretedRecordWithMetamodel(model.InterpretationID(20), model.OccurrenceID(2), runtime.SemanticObservation, identities, nil, contract, metamodel.Active())
 	if err != nil {
 		t.Fatalf("build v2 interpreted record: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestHookLifecycleFormatterRendersCodebookColumn(t *testing.T) {
 	if !strings.Contains(out, "codebook=unresolved (pre-M5)") {
 		t.Fatalf("text output missing pre-M5 disclosure for the v1 record:\n%s", out)
 	}
-	active := codebook.Active()
+	active := metamodel.Active()
 	shortContent := hex.EncodeToString(active.Content[:])[:12]
 	wantV2 := "codebook=pasture.lifecycle.codebook@1#" + shortContent
 	if !strings.Contains(out, wantV2) {

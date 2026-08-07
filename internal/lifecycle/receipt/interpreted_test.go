@@ -11,7 +11,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
-	"github.com/dayvidpham/pasture/internal/lifecycle/codebook"
+	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
 	"github.com/dayvidpham/pasture/internal/runtime"
@@ -31,7 +31,7 @@ func TestNewInterpretedSessionStartPreservesTypedValues(t *testing.T) {
 	wantValue := "session-é-<>&"
 	l2 := mustSessionStartL2(t, wantValue)
 
-	record, err := NewInterpreted(l2, contract, codebook.Active())
+	record, err := NewInterpreted(l2, contract, metamodel.Active())
 	if err != nil {
 		t.Fatalf("NewInterpreted() error = %v", err)
 	}
@@ -64,7 +64,7 @@ func TestNewInterpretedPostToolBatchPreservesUnresolvedFact(t *testing.T) {
 
 	contract := mustClaudeLifecycleContract(t)
 	l2 := mustPostToolBatchL2(t, "session-1")
-	record, err := NewInterpreted(l2, contract, codebook.Active())
+	record, err := NewInterpreted(l2, contract, metamodel.Active())
 	if err != nil {
 		t.Fatalf("NewInterpreted() error = %v", err)
 	}
@@ -113,7 +113,7 @@ func TestNewInterpretedRejectsInvalidInputs(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			record, err := NewInterpreted(test.l2, test.contract, codebook.Active())
+			record, err := NewInterpreted(test.l2, test.contract, metamodel.Active())
 			if err == nil {
 				t.Fatal("NewInterpreted() succeeded, want validation error")
 			}
@@ -132,7 +132,7 @@ func TestInterpretedAccessorsReturnDefensiveCopies(t *testing.T) {
 	t.Parallel()
 
 	contract := mustClaudeLifecycleContract(t)
-	record, err := NewInterpreted(mustPostToolBatchL2(t, "session-1"), contract, codebook.Active())
+	record, err := NewInterpreted(mustPostToolBatchL2(t, "session-1"), contract, metamodel.Active())
 	if err != nil {
 		t.Fatalf("NewInterpreted() error = %v", err)
 	}
@@ -155,12 +155,12 @@ func TestInterpretedEffectIsCanonicalAndOwnsBytes(t *testing.T) {
 	t.Parallel()
 
 	contract := mustClaudeLifecycleContract(t)
-	record, err := NewInterpreted(mustSessionStartL2(t, "session-é-<>&"), contract, codebook.Active())
+	record, err := NewInterpreted(mustSessionStartL2(t, "session-é-<>&"), contract, metamodel.Active())
 	if err != nil {
 		t.Fatalf("NewInterpreted() error = %v", err)
 	}
 	effect := record.Effect()
-	activeContent := codebook.Active().Content
+	activeContent := metamodel.Active().Content
 	wantPayload := []byte(`{"semantic":1,"identities":[{"kind":1,"value":"session-é-<>&"}],"unresolved_facts":[],"contract":"claude-code/claude-code@2.1.210","codebook":{"id":"pasture.lifecycle.codebook","version":1,"content":"` + hex.EncodeToString(activeContent[:]) + `"}}`)
 	decoded := mustDecodeInterpretedEffectPayload(t, effect.Payload)
 	if decoded.Semantic != uint8(runtime.SemanticObservation) {
@@ -199,7 +199,7 @@ func TestInterpretedEffectPayloadRejectsDuplicateMembers(t *testing.T) {
 	t.Parallel()
 
 	contract := mustClaudeLifecycleContract(t)
-	record, err := NewInterpreted(mustSessionStartL2(t, "session-1"), contract, codebook.Active())
+	record, err := NewInterpreted(mustSessionStartL2(t, "session-1"), contract, metamodel.Active())
 	if err != nil {
 		t.Fatalf("NewInterpreted() error = %v", err)
 	}
@@ -220,7 +220,7 @@ func TestInterpretedPostToolBatchEffectPreservesUnresolvedFact(t *testing.T) {
 	t.Parallel()
 
 	contract := mustClaudeLifecycleContract(t)
-	record, err := NewInterpreted(mustPostToolBatchL2(t, "session-1"), contract, codebook.Active())
+	record, err := NewInterpreted(mustPostToolBatchL2(t, "session-1"), contract, metamodel.Active())
 	if err != nil {
 		t.Fatalf("NewInterpreted() error = %v", err)
 	}
@@ -264,7 +264,7 @@ func TestZeroRecordEffectIsSafe(t *testing.T) {
 func TestDecodeInterpretedStrictCanonicalEvidence(t *testing.T) {
 	t.Parallel()
 	contract := mustClaudeLifecycleContract(t)
-	record, err := NewInterpreted(mustSessionStartL2(t, "session-1"), contract, codebook.Active())
+	record, err := NewInterpreted(mustSessionStartL2(t, "session-1"), contract, metamodel.Active())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,9 +276,9 @@ func TestDecodeInterpretedStrictCanonicalEvidence(t *testing.T) {
 	if decoded.JournalID() != 12 || decoded.OccurrenceID.JournalID() != 11 || decoded.Semantic() != record.Semantic() || decoded.Contract() != record.Contract() {
 		t.Fatalf("decoded=%#v", decoded)
 	}
-	book, ok := decoded.Codebook()
-	if !ok || book != codebook.Active() {
-		t.Fatalf("decoded codebook = %#v ok=%v, want the active coordinate %#v", book, ok, codebook.Active())
+	manifest, ok := decoded.Metamodel()
+	if !ok || manifest != metamodel.Active() {
+		t.Fatalf("decoded codebook = %#v ok=%v, want the active coordinate %#v", manifest, ok, metamodel.Active())
 	}
 	// A committed interpreted.v1 record carries no codebook, so the v1 decoder
 	// must NOT accept the v2 payload (its codebook member is an unknown field).
@@ -340,10 +340,10 @@ type interpretedEffectPayloadOracle struct {
 	Identities      []interpretedIdentityOracle       `json:"identities"`
 	UnresolvedFacts []interpretedUnresolvedFactOracle `json:"unresolved_facts"`
 	Contract        string                            `json:"contract"`
-	Codebook        interpretedCodebookOracle         `json:"codebook"`
+	Metamodel       interpretedMetamodelOracle        `json:"codebook"`
 }
 
-type interpretedCodebookOracle struct {
+type interpretedMetamodelOracle struct {
 	ID      string `json:"id"`
 	Version uint32 `json:"version"`
 	Content string `json:"content"`

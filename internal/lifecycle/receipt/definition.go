@@ -5,16 +5,16 @@ import (
 	"fmt"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
-	"github.com/dayvidpham/pasture/internal/lifecycle/codebook"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
+	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/provenance"
 )
 
-// EnsureActiveCodebook lazily and idempotently journals the active codebook
+// EnsureActiveMetamodel lazily and idempotently journals the active codebook
 // definition, returning the reference to the journaled definition. It is called
 // on the valid-capture delivery path BEFORE the delivery receipt is written, so
-// a committed interpreted.v2 record can never cite an unjournaled codebook.
+// a committed interpreted.v2 record can never cite an unjournaled metamodel.
 //
 // Steady state is one bounded, content-addressed existence check and zero
 // writes: the definition-activation operation identity is derived from the
@@ -25,10 +25,10 @@ import (
 // deliveries collapse to exactly one committed activation (the loser's Commit
 // returns the same result short-circuited), so neither double-activates nor
 // references an unjournaled codebook (F11 replay arbiter, verified benign).
-func EnsureActiveCodebook(ctx context.Context, s Service) (model.CodebookDefinitionRef, error) {
+func EnsureActiveMetamodel(ctx context.Context, s Service) (model.LifecycleMetamodelRef, error) {
 	if s.Appender.Journal == nil {
-		return model.CodebookDefinitionRef{}, structured(pasterrors.CategoryValidation,
-			"The lifecycle receipt service cannot ensure the active codebook.",
+		return model.LifecycleMetamodelRef{}, structured(pasterrors.CategoryValidation,
+			"The lifecycle receipt service cannot ensure the active metamodel.",
 			"Journaling the codebook definition requires the provenance journal.",
 			"Ensuring the active codebook definition (internal/lifecycle/receipt/definition.go in receipt.EnsureActiveCodebook).",
 			"No codebook definition was resolved or committed.",
@@ -37,66 +37,66 @@ func EnsureActiveCodebook(ctx context.Context, s Service) (model.CodebookDefinit
 	// Bounded, content-addressed existence check: the operation identity is
 	// derived from the codebook content, so an already-active codebook resolves
 	// with a single indexed lookup and no writes.
-	ref, journaled, err := ResolveActiveCodebook(s.Appender.Journal)
+	ref, journaled, err := ResolveActiveMetamodel(s.Appender.Journal)
 	if err != nil {
-		return model.CodebookDefinitionRef{}, err
+		return model.LifecycleMetamodelRef{}, err
 	}
 	if journaled {
 		return ref, nil
 	}
 
-	book := codebook.Active()
-	write, err := NewDefinitionActivation(book, codebook.Body())
+	manifest := metamodel.Active()
+	write, err := NewDefinitionActivation(manifest, metamodel.Body())
 	if err != nil {
-		return model.CodebookDefinitionRef{}, err
+		return model.LifecycleMetamodelRef{}, err
 	}
 	// Absent: legalize the activation through the write gate and commit. The
 	// commit is race-safe (deterministic operation identity), so a concurrent
 	// first delivery is admitted as benign-already-activated.
-	intent, refusal := gate.NewDefinitionActivationIntent(book.Content)
+	intent, refusal := gate.NewDefinitionActivationIntent(manifest.Content)
 	if refusal != nil {
-		return model.CodebookDefinitionRef{}, refusal
+		return model.LifecycleMetamodelRef{}, refusal
 	}
 	warrant, refusal := gate.Legalize(intent)
 	if refusal != nil {
-		return model.CodebookDefinitionRef{}, refusal
+		return model.LifecycleMetamodelRef{}, refusal
 	}
 	receipt, err := s.Commit(ctx, warrant, write)
 	if err != nil {
-		return model.CodebookDefinitionRef{}, err
+		return model.LifecycleMetamodelRef{}, err
 	}
-	return model.CodebookDefinitionRef{
+	return model.LifecycleMetamodelRef{
 		Definition: model.DefinitionRef{
 			Definition: model.DefinitionJournalID(receipt.Definition),
-			Kind:       model.DefinitionCodebook,
-			Content:    book.Content,
+			Kind:       model.DefinitionMetamodel,
+			Content:    manifest.Content,
 		},
 	}, nil
 }
 
-// ResolveActiveCodebook reports the journaled definition for the active codebook
+// ResolveActiveMetamodel reports the journaled definition for the active codebook
 // WITHOUT writing anything. It is the read-only counterpart to
 // EnsureActiveCodebook, backing the `hook lifecycle codebook` read surface: it
 // resolves the deterministic content-derived operation identity and returns the
 // journaled definition reference when the codebook has already been activated,
 // or journaled=false when it has not.
-func ResolveActiveCodebook(journal provenance.Journal) (model.CodebookDefinitionRef, bool, error) {
+func ResolveActiveMetamodel(journal provenance.Journal) (model.LifecycleMetamodelRef, bool, error) {
 	if journal == nil {
-		return model.CodebookDefinitionRef{}, false, structured(pasterrors.CategoryValidation,
+		return model.LifecycleMetamodelRef{}, false, structured(pasterrors.CategoryValidation,
 			"The active codebook definition cannot be resolved.",
 			"Resolving the journaled codebook definition requires the provenance journal.",
 			"Resolving the active codebook definition (internal/lifecycle/receipt/definition.go in receipt.ResolveActiveCodebook).",
 			"No codebook definition was resolved.",
 			"Provide the unified store's provenance journal.", nil)
 	}
-	book := codebook.Active()
-	write, err := NewDefinitionActivation(book, codebook.Body())
+	manifest := metamodel.Active()
+	write, err := NewDefinitionActivation(manifest, metamodel.Body())
 	if err != nil {
-		return model.CodebookDefinitionRef{}, false, err
+		return model.LifecycleMetamodelRef{}, false, err
 	}
 	committed, err := journal.LookupCommitted(write.OperationID())
 	if err != nil {
-		return model.CodebookDefinitionRef{}, false, structured(pasterrors.CategoryStorage,
+		return model.LifecycleMetamodelRef{}, false, structured(pasterrors.CategoryStorage,
 			"The active codebook definition could not be looked up.",
 			"The provenance journal rejected the bounded operation-identity lookup.",
 			"Resolving the active codebook definition (internal/lifecycle/receipt/definition.go in receipt.ResolveActiveCodebook).",
@@ -104,28 +104,28 @@ func ResolveActiveCodebook(journal provenance.Journal) (model.CodebookDefinition
 			"Confirm journal health and retry.", err)
 	}
 	if committed.Kind != provenance.CommittedExact {
-		return model.CodebookDefinitionRef{}, false, nil
+		return model.LifecycleMetamodelRef{}, false, nil
 	}
-	ref, err := definitionRefFromSlots(book, committed.ResultSlots)
+	ref, err := definitionRefFromSlots(manifest, committed.ResultSlots)
 	if err != nil {
-		return model.CodebookDefinitionRef{}, false, err
+		return model.LifecycleMetamodelRef{}, false, err
 	}
 	return ref, true, nil
 }
 
-func definitionRefFromSlots(book model.CodebookCoordinate, slots []provenance.ResultSlotBinding) (model.CodebookDefinitionRef, error) {
+func definitionRefFromSlots(manifest model.LifecycleMetamodelManifest, slots []provenance.ResultSlotBinding) (model.LifecycleMetamodelRef, error) {
 	for _, slot := range slots {
 		if slot.Slot == definitionSlot && slot.ProducedJournalID > 0 {
-			return model.CodebookDefinitionRef{
+			return model.LifecycleMetamodelRef{
 				Definition: model.DefinitionRef{
 					Definition: model.DefinitionJournalID(slot.ProducedJournalID),
-					Kind:       model.DefinitionCodebook,
-					Content:    book.Content,
+					Kind:       model.DefinitionMetamodel,
+					Content:    manifest.Content,
 				},
 			}, nil
 		}
 	}
-	return model.CodebookDefinitionRef{}, structured(pasterrors.CategoryStorage,
+	return model.LifecycleMetamodelRef{}, structured(pasterrors.CategoryStorage,
 		"The journaled codebook definition is missing its definition result slot.",
 		"An already-committed definition-activation operation did not expose the definition slot.",
 		"Ensuring the active codebook definition (internal/lifecycle/receipt/definition.go in receipt.EnsureActiveCodebook).",

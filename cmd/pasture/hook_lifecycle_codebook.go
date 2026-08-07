@@ -5,12 +5,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var hookLifecycleCodebookInput handlers.HookLifecycleCodebookInput
-var hookLifecycleCodebookFormat string
+var hookLifecycleManifestInput handlers.HookLifecycleMetamodelInput
+var hookLifecycleManifestFormat string
 
-var hookLifecycleCodebookCmd = &cobra.Command{Use: "codebook", Short: "Show the active lifecycle interpretation codebook coordinate and whether it is journaled", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-	hookLifecycleCodebookInput.DBPath = flagDBPath
-	code, err := handlers.HookLifecycleCodebook(cmd.Context(), cmd.OutOrStdout(), hookLifecycleCodebookInput, hookLifecycleCodebookFormat)
+var hookLifecycleManifestCmd = &cobra.Command{Use: "codebook", Short: "Show the active lifecycle interpretation codebook coordinate and whether it is journaled", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	hookLifecycleManifestInput.DBPath = flagDBPath
+	code, err := handlers.HookLifecycleMetamodel(cmd.Context(), cmd.OutOrStdout(), hookLifecycleManifestInput, hookLifecycleManifestFormat)
 	if err != nil {
 		printError(err)
 	}
@@ -21,8 +21,8 @@ var hookLifecycleCodebookCmd = &cobra.Command{Use: "codebook", Short: "Show the 
 }}
 
 func init() {
-	f := hookLifecycleCodebookCmd.Flags()
-	f.BoolVar(&hookLifecycleCodebookInput.Body, "body", false, "Include the canonical codebook body")
-	f.StringVar(&hookLifecycleCodebookFormat, "format", "text", "Output format: text or json")
-	hookLifecycleCmd.AddCommand(hookLifecycleCodebookCmd)
+	f := hookLifecycleManifestCmd.Flags()
+	f.BoolVar(&hookLifecycleManifestInput.Body, "body", false, "Include the canonical codebook body")
+	f.StringVar(&hookLifecycleManifestFormat, "format", "text", "Output format: text or json")
+	hookLifecycleCmd.AddCommand(hookLifecycleManifestCmd)
 }

@@ -16,8 +16,8 @@ type InterpretedRecord struct {
 	identities       []waist.SemanticIdentity
 	unresolved       []waist.UnresolvedFact
 	contract         ir.RuntimeContractID
-	codebook         CodebookCoordinate
-	hasCodebook      bool
+	metamodel        LifecycleMetamodelManifest
+	hasMetamodel     bool
 	constructed      bool
 }
 
@@ -28,30 +28,30 @@ func NewInterpretedRecord(id InterpretationID, occurrence OccurrenceID, semantic
 	return InterpretedRecord{InterpretationID: id, OccurrenceID: occurrence, semantic: semantic, identities: append([]waist.SemanticIdentity(nil), identities...), unresolved: append([]waist.UnresolvedFact(nil), unresolved...), contract: contract, constructed: true}, nil
 }
 
-// NewInterpretedRecordWithCodebook constructs an interpreted.v2 record that
+// NewInterpretedRecordWithMetamodel constructs an interpreted.v2 record that
 // carries the codebook coordinate it was interpreted against (D2). It is the
 // decode counterpart for interpreted.v2 evidence; the coordinate must be valid.
 // Committed interpreted.v1 records decode through NewInterpretedRecord and have
 // no coordinate — Codebook() reports false for them so the read surface can
 // disclose "codebook unresolved (pre-M5)" rather than inventing one.
-func NewInterpretedRecordWithCodebook(id InterpretationID, occurrence OccurrenceID, semantic runtime.EventSemantic, identities []waist.SemanticIdentity, unresolved []waist.UnresolvedFact, contract ir.RuntimeContractID, book CodebookCoordinate) (InterpretedRecord, error) {
-	if !book.IsValid() {
+func NewInterpretedRecordWithMetamodel(id InterpretationID, occurrence OccurrenceID, semantic runtime.EventSemantic, identities []waist.SemanticIdentity, unresolved []waist.UnresolvedFact, contract ir.RuntimeContractID, manifest LifecycleMetamodelManifest) (InterpretedRecord, error) {
+	if !manifest.IsValid() {
 		return InterpretedRecord{}, fmt.Errorf("construct lifecycle interpreted.v2 record: invalid codebook coordinate")
 	}
 	record, err := NewInterpretedRecord(id, occurrence, semantic, identities, unresolved, contract)
 	if err != nil {
 		return InterpretedRecord{}, err
 	}
-	record.codebook = book
-	record.hasCodebook = true
+	record.metamodel = manifest
+	record.hasMetamodel = true
 	return record, nil
 }
 
-// Codebook returns the codebook coordinate this interpretation was produced
+// Metamodel returns the codebook coordinate this interpretation was produced
 // against and whether one is present. It is false for decoded interpreted.v1
 // records, which predate the codebook producer (M5).
-func (r InterpretedRecord) Codebook() (CodebookCoordinate, bool) {
-	return r.codebook, r.hasCodebook
+func (r InterpretedRecord) Metamodel() (LifecycleMetamodelManifest, bool) {
+	return r.metamodel, r.hasMetamodel
 }
 func (r InterpretedRecord) JournalID() provenance.JournalID { return r.InterpretationID.JournalID() }
 func (r InterpretedRecord) Semantic() runtime.EventSemantic { return r.semantic }

@@ -1,4 +1,4 @@
-package codebook
+package metamodel
 
 import (
 	"bytes"
@@ -9,22 +9,22 @@ import (
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
-// codebookDoc is the canonical on-the-wire shape of the codebook body. Field
+// metamodelDoc is the canonical on-the-wire shape of the codebook body. Field
 // order is fixed by struct declaration order, harnesses are sorted by runtime
 // contract id, and events keep their pinned native catalog order, so the
 // encoded bytes are deterministic.
-type codebookDoc struct {
-	ID        string            `json:"id"`
-	Version   uint32            `json:"version"`
-	Harnesses []codebookHarness `json:"harnesses"`
+type metamodelDoc struct {
+	ID        string             `json:"id"`
+	Version   uint32             `json:"version"`
+	Harnesses []metamodelHarness `json:"harnesses"`
 }
 
-type codebookHarness struct {
-	Harness string          `json:"harness"`
-	Events  []codebookEvent `json:"events"`
+type metamodelHarness struct {
+	Harness string           `json:"harness"`
+	Events  []metamodelEvent `json:"events"`
 }
 
-type codebookEvent struct {
+type metamodelEvent struct {
 	NativeName string   `json:"native_name"`
 	Semantic   string   `json:"semantic"`
 	Blocking   string   `json:"blocking"`
@@ -35,15 +35,15 @@ type codebookEvent struct {
 	Unresolved []string `json:"unresolved"`
 }
 
-// BuildCanonicalBody derives the canonical codebook body from the three pinned
+// GenerateLifecycleMetamodel derives the canonical codebook body from the three pinned
 // runtime lifecycle profiles (F17). It is deterministic: the same profiles
 // always produce byte-identical output, which is what makes `make generate`
 // idempotent and the content identity stable. It is used by the go:generate
-// program that writes codebook.gen.go and by the agreement tests that prove the
+// program that writes metamodel.gen.go and by the agreement tests that prove the
 // committed generated body still matches the profiles.
-func BuildCanonicalBody() ([]byte, error) {
-	sections := make([]codebookHarness, 0, 3)
-	for _, build := range []func() (codebookHarness, error){claudeSection, codexSection, openCodeSection} {
+func GenerateLifecycleMetamodel() ([]byte, error) {
+	sections := make([]metamodelHarness, 0, 3)
+	for _, build := range []func() (metamodelHarness, error){claudeSection, codexSection, openCodeSection} {
 		section, err := build()
 		if err != nil {
 			return nil, err
@@ -52,7 +52,7 @@ func BuildCanonicalBody() ([]byte, error) {
 	}
 	sort.Slice(sections, func(i, j int) bool { return sections[i].Harness < sections[j].Harness })
 
-	doc := codebookDoc{ID: string(CodebookID), Version: CodebookVersion, Harnesses: sections}
+	doc := metamodelDoc{ID: string(LifecycleMetamodelID), Version: LifecycleMetamodelVersion, Harnesses: sections}
 	var buf bytes.Buffer
 	encoder := json.NewEncoder(&buf)
 	encoder.SetEscapeHTML(false)
@@ -62,46 +62,46 @@ func BuildCanonicalBody() ([]byte, error) {
 	return append([]byte(nil), bytes.TrimSuffix(buf.Bytes(), []byte{'\n'})...), nil
 }
 
-func claudeSection() (codebookHarness, error) {
+func claudeSection() (metamodelHarness, error) {
 	contract := runtime.ClaudeCode2_1_210Lifecycle()
-	events := make([]codebookEvent, 0, len(contract.Events()))
+	events := make([]metamodelEvent, 0, len(contract.Events()))
 	for _, event := range contract.Events() {
 		mapping, err := contract.Mapping(event)
 		if err != nil {
-			return codebookHarness{}, fmt.Errorf("codebook claude mapping for %v: %w", event, err)
+			return metamodelHarness{}, fmt.Errorf("codebook claude mapping for %v: %w", event, err)
 		}
 		events = append(events, eventFromMapping(mapping))
 	}
-	return codebookHarness{Harness: contract.ID().String(), Events: events}, nil
+	return metamodelHarness{Harness: contract.ID().String(), Events: events}, nil
 }
 
-func codexSection() (codebookHarness, error) {
+func codexSection() (metamodelHarness, error) {
 	contract := runtime.Codex0_146_0Lifecycle()
-	events := make([]codebookEvent, 0, len(contract.Events()))
+	events := make([]metamodelEvent, 0, len(contract.Events()))
 	for _, event := range contract.Events() {
 		mapping, err := contract.Mapping(event)
 		if err != nil {
-			return codebookHarness{}, fmt.Errorf("codebook codex mapping for %v: %w", event, err)
+			return metamodelHarness{}, fmt.Errorf("codebook codex mapping for %v: %w", event, err)
 		}
 		events = append(events, eventFromMapping(mapping))
 	}
-	return codebookHarness{Harness: contract.ID().String(), Events: events}, nil
+	return metamodelHarness{Harness: contract.ID().String(), Events: events}, nil
 }
 
-func openCodeSection() (codebookHarness, error) {
+func openCodeSection() (metamodelHarness, error) {
 	contract := runtime.OpenCode1_18_10Lifecycle()
-	events := make([]codebookEvent, 0, len(contract.Events()))
+	events := make([]metamodelEvent, 0, len(contract.Events()))
 	for _, event := range contract.Events() {
 		mapping, err := contract.Mapping(event)
 		if err != nil {
-			return codebookHarness{}, fmt.Errorf("codebook opencode mapping for %v: %w", event, err)
+			return metamodelHarness{}, fmt.Errorf("codebook opencode mapping for %v: %w", event, err)
 		}
 		events = append(events, eventFromMapping(mapping))
 	}
-	return codebookHarness{Harness: contract.ID().String(), Events: events}, nil
+	return metamodelHarness{Harness: contract.ID().String(), Events: events}, nil
 }
 
-func eventFromMapping(mapping runtime.LifecycleEventMapping) codebookEvent {
+func eventFromMapping(mapping runtime.LifecycleEventMapping) metamodelEvent {
 	identities := make([]string, 0, len(mapping.Identities()))
 	for _, identity := range mapping.Identities() {
 		identities = append(identities, identity.Kind().String())
@@ -110,7 +110,7 @@ func eventFromMapping(mapping runtime.LifecycleEventMapping) codebookEvent {
 	for _, kind := range mapping.UnresolvedIdentities() {
 		unresolved = append(unresolved, kind.String())
 	}
-	return codebookEvent{
+	return metamodelEvent{
 		NativeName: mapping.NativeName(),
 		Semantic:   mapping.Semantic().String(),
 		Blocking:   mapping.Blocking().String(),

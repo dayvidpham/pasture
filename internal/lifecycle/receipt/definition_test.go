@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dayvidpham/pasture/internal/lifecycle/codebook"
+	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/tasks"
@@ -64,10 +64,10 @@ func activationSnapshotCount(t *testing.T, tracker protocol.TaskTracker) int {
 	return len(page.Rows)
 }
 
-// TestEnsureActiveCodebookIdempotent proves the steady-state path: a second
+// TestEnsureActiveMetamodelIdempotent proves the steady-state path: a second
 // EnsureActiveCodebook resolves the SAME journaled definition and commits no new
 // activation operation.
-func TestEnsureActiveCodebookIdempotent(t *testing.T) {
+func TestEnsureActiveMetamodelIdempotent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	dbPath, cleanup := newBootstrappedTracker(t)
@@ -83,14 +83,14 @@ func TestEnsureActiveCodebookIdempotent(t *testing.T) {
 		t.Fatalf("wire production receipt service: %v", err)
 	}
 
-	first, err := receipt.EnsureActiveCodebook(ctx, service)
+	first, err := receipt.EnsureActiveMetamodel(ctx, service)
 	if err != nil {
 		t.Fatalf("first EnsureActiveCodebook: %v", err)
 	}
-	if first.Definition.Definition == 0 || first.Definition.Kind != model.DefinitionCodebook || first.Definition.Content != codebook.Active().Content {
+	if first.Definition.Definition == 0 || first.Definition.Kind != model.DefinitionMetamodel || first.Definition.Content != metamodel.Active().Content {
 		t.Fatalf("first ensured ref = %#v, want a journaled codebook definition with the active content", first)
 	}
-	second, err := receipt.EnsureActiveCodebook(ctx, service)
+	second, err := receipt.EnsureActiveMetamodel(ctx, service)
 	if err != nil {
 		t.Fatalf("second EnsureActiveCodebook: %v", err)
 	}
@@ -102,13 +102,13 @@ func TestEnsureActiveCodebookIdempotent(t *testing.T) {
 	}
 }
 
-// TestEnsureActiveCodebookRaceSafe is the STOP-1 benign-already-activated proof:
+// TestEnsureActiveMetamodelRaceSafe is the STOP-1 benign-already-activated proof:
 // N goroutines racing the FIRST activation (each with a distinct wall-clock
 // RecordedAt) commit EXACTLY ONE definition-activation operation. Every caller
 // resolves the same journaled definition and none errors — the deterministic
 // content-derived operation identity makes the loser short-circuit benignly
 // rather than raising ErrOperationConflict.
-func TestEnsureActiveCodebookRaceSafe(t *testing.T) {
+func TestEnsureActiveMetamodelRaceSafe(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	dbPath, cleanup := newBootstrappedTracker(t)
@@ -125,7 +125,7 @@ func TestEnsureActiveCodebookRaceSafe(t *testing.T) {
 	}
 
 	const goroutines = 8
-	refs := make([]model.CodebookDefinitionRef, goroutines)
+	refs := make([]model.LifecycleMetamodelRef, goroutines)
 	errs := make([]error, goroutines)
 	start := make(chan struct{})
 	var wg sync.WaitGroup
@@ -134,7 +134,7 @@ func TestEnsureActiveCodebookRaceSafe(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			refs[i], errs[i] = receipt.EnsureActiveCodebook(ctx, service)
+			refs[i], errs[i] = receipt.EnsureActiveMetamodel(ctx, service)
 		}(i)
 	}
 	close(start)

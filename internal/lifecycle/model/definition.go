@@ -12,7 +12,7 @@ type DefinitionKind uint8
 const (
 	DefinitionRuntimeContract DefinitionKind = iota + 1
 	DefinitionLifecycleSchema
-	DefinitionCodebook
+	DefinitionMetamodel
 	DefinitionInterpreter
 	DefinitionEpochImplementation
 	DefinitionContextPolicy
@@ -81,7 +81,7 @@ type LifecycleSchemaDefinitionRef struct {
 	nonJournalValue
 	Definition DefinitionRef
 }
-type CodebookDefinitionRef struct {
+type LifecycleMetamodelRef struct {
 	nonJournalValue
 	Definition DefinitionRef
 }

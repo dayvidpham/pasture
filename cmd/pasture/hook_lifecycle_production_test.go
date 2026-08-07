@@ -25,7 +25,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
-	"github.com/dayvidpham/pasture/internal/lifecycle/codebook"
+	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/nativeresponse"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
@@ -805,10 +805,10 @@ type interpretedEvidencePayload struct {
 	Identities      []interpretedIdentityPayload   `json:"identities"`
 	UnresolvedFacts []interpretedUnresolvedPayload `json:"unresolved_facts"`
 	Contract        string                         `json:"contract"`
-	Codebook        interpretedCodebookPayload     `json:"codebook"`
+	Metamodel       interpretedMetamodelPayload    `json:"codebook"`
 }
 
-type interpretedCodebookPayload struct {
+type interpretedMetamodelPayload struct {
 	ID      string `json:"id"`
 	Version uint32 `json:"version"`
 	Content string `json:"content"`
@@ -1019,10 +1019,10 @@ func assertInterpretedEvidence(t *testing.T, raw []byte) {
 	require.Empty(t, payload.UnresolvedFacts)
 	require.Equal(t, interpretedLifecycleContract, payload.Contract)
 	// interpreted.v2 carries the codebook coordinate it was interpreted against.
-	active := codebook.Active()
-	require.Equal(t, string(active.ID), payload.Codebook.ID)
-	require.Equal(t, active.Version, payload.Codebook.Version)
-	require.Equal(t, hex.EncodeToString(active.Content[:]), payload.Codebook.Content)
+	active := metamodel.Active()
+	require.Equal(t, string(active.ID), payload.Metamodel.ID)
+	require.Equal(t, active.Version, payload.Metamodel.Version)
+	require.Equal(t, hex.EncodeToString(active.Content[:]), payload.Metamodel.Content)
 }
 
 func mapKeys(values map[string]json.RawMessage) []string {

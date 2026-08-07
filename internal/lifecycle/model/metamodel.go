@@ -1,6 +1,6 @@
 package model
 
-// CodebookCoordinate is the journal-independent versioned interpretation
+// LifecycleMetamodelManifest is the journal-independent versioned interpretation
 // identity embedded in interpreted evidence payloads (D2). It names WHICH
 // interpretation vocabulary (the codebook document) an interpreted record was
 // produced against, so a reader can resolve the record's meaning to a journaled
@@ -9,7 +9,7 @@ package model
 // It embeds nonJournalValue: a coordinate is a value stamped INTO durable
 // evidence, never itself a journal row, so it is mechanically non-journal and
 // carries no guard classification entry.
-type CodebookCoordinate struct {
+type LifecycleMetamodelManifest struct {
 	nonJournalValue
 	// ID is the stable definition identity of the codebook document
 	// ("pasture.lifecycle.codebook"). It does not change across versions.
@@ -26,6 +26,6 @@ type CodebookCoordinate struct {
 // IsValid reports whether the coordinate names a nonzero definition id,
 // version, and content identity. A zero coordinate can never be stamped onto an
 // interpreted record or presented to the write gate.
-func (c CodebookCoordinate) IsValid() bool {
+func (c LifecycleMetamodelManifest) IsValid() bool {
 	return c.ID != "" && c.Version != 0 && c.Content != (ContentIdentity{})
 }

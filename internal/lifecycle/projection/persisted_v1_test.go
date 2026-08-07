@@ -140,8 +140,8 @@ func TestPersistedV1InterpretedReadsBackThroughProductionReader(t *testing.T) {
 	if len(identities) != 1 || identities[0].Kind != runtime.IdentitySession || identities[0].Value != "session-golden-pre-m5" {
 		t.Fatalf("read-back interpreted identities = %#v, want the single golden session identity", identities)
 	}
-	if book, ok := got.Codebook(); ok {
-		t.Fatalf("persisted interpreted.v1 record reported a codebook coordinate %#v, want none (pre-M5, unresolved)", book)
+	if manifest, ok := got.Metamodel(); ok {
+		t.Fatalf("persisted interpreted.v1 record reported a codebook coordinate %#v, want none (pre-M5, unresolved)", manifest)
 	}
 
 	// The production text read surface discloses the pre-M5 unresolved codebook

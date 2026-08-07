@@ -37,7 +37,7 @@ type Record struct {
 	identities  []waist.SemanticIdentity
 	unresolved  []waist.UnresolvedFact
 	contract    ir.RuntimeContractID
-	codebook    model.CodebookCoordinate
+	metamodel   model.LifecycleMetamodelManifest
 	constructed bool
 }
 
@@ -91,15 +91,15 @@ func DecodeInterpretedV2(id model.InterpretationID, occurrence model.OccurrenceI
 	if err != nil {
 		return model.InterpretedRecord{}, err
 	}
-	book, err := decodeCodebookCoordinate(wire.Codebook)
+	book, err := decodeMetamodelManifest(wire.Metamodel)
 	if err != nil {
 		return model.InterpretedRecord{}, err
 	}
-	record, err := model.NewInterpretedRecordWithCodebook(id, occurrence, wire.Semantic, identities, unresolved, wire.Contract, book)
+	record, err := model.NewInterpretedRecordWithMetamodel(id, occurrence, wire.Semantic, identities, unresolved, wire.Contract, book)
 	if err != nil {
 		return model.InterpretedRecord{}, err
 	}
-	canonical, err := canonicalV2Payload(Record{semantic: wire.Semantic, identities: identities, unresolved: unresolved, contract: wire.Contract, codebook: book, constructed: true})
+	canonical, err := canonicalV2Payload(Record{semantic: wire.Semantic, identities: identities, unresolved: unresolved, contract: wire.Contract, metamodel: book, constructed: true})
 	if err := requireCanonicalMatch(canonical, err, payload, interpretedKindV2); err != nil {
 		return model.InterpretedRecord{}, err
 	}
@@ -124,21 +124,21 @@ func decodeInterpretedArms(wireIdentities []interpretedIdentity, wireUnresolved 
 	return identities, unresolved, nil
 }
 
-func decodeCodebookCoordinate(wire interpretedCodebook) (model.CodebookCoordinate, error) {
+func decodeMetamodelManifest(wire interpretedMetamodel) (model.LifecycleMetamodelManifest, error) {
 	if len(wire.Content) != 2*sha256.Size {
-		return model.CodebookCoordinate{}, fmt.Errorf("decode interpreted.v2 lifecycle evidence: codebook content is not a sha256 hex digest")
+		return model.LifecycleMetamodelManifest{}, fmt.Errorf("decode interpreted.v2 lifecycle evidence: codebook content is not a sha256 hex digest")
 	}
 	raw, err := hex.DecodeString(wire.Content)
 	if err != nil {
-		return model.CodebookCoordinate{}, fmt.Errorf("decode interpreted.v2 lifecycle evidence: codebook content is not hex: %w", err)
+		return model.LifecycleMetamodelManifest{}, fmt.Errorf("decode interpreted.v2 lifecycle evidence: codebook content is not hex: %w", err)
 	}
 	var content model.ContentIdentity
 	copy(content[:], raw)
-	book := model.CodebookCoordinate{ID: model.DefinitionID(wire.ID), Version: wire.Version, Content: content}
-	if !book.IsValid() {
-		return model.CodebookCoordinate{}, fmt.Errorf("decode interpreted.v2 lifecycle evidence: codebook coordinate is invalid")
+	manifest := model.LifecycleMetamodelManifest{ID: model.DefinitionID(wire.ID), Version: wire.Version, Content: content}
+	if !manifest.IsValid() {
+		return model.LifecycleMetamodelManifest{}, fmt.Errorf("decode interpreted.v2 lifecycle evidence: codebook coordinate is invalid")
 	}
-	return book, nil
+	return manifest, nil
 }
 
 // requireCanonicalMatch verifies that a decoded payload equals its canonical
@@ -228,7 +228,7 @@ func rejectDuplicateJSONMembers(raw []byte) error {
 // coordinate is required: the record binds interpretation to a versioned,
 // journaled codebook, and an invalid coordinate is refused before any evidence
 // is constructed.
-func NewInterpreted(l2 waist.L2, contract ir.RuntimeContractID, book model.CodebookCoordinate) (Record, error) {
+func NewInterpreted(l2 waist.L2, contract ir.RuntimeContractID, manifest model.LifecycleMetamodelManifest) (Record, error) {
 	const where = "Constructing an interpreted lifecycle record (internal/lifecycle/receipt/interpreted.go in receipt.NewInterpreted)."
 	if !l2.IsValid() || !l2.Semantics().IsValid() || !l2.Origin().IsValid() {
 		return Record{}, structured(
@@ -264,14 +264,14 @@ func NewInterpreted(l2 waist.L2, contract ir.RuntimeContractID, book model.Codeb
 			nil,
 		)
 	}
-	if !book.IsValid() {
+	if !manifest.IsValid() {
 		return Record{}, structured(
 			pasterrors.CategoryValidation,
 			"The interpreted lifecycle record has an invalid codebook coordinate.",
 			"Since M5 every interpretation cites the versioned, content-addressed codebook it was produced against, so the coordinate cannot be zero.",
 			where,
 			"No interpreted evidence was constructed.",
-			"Pass codebook.Active() as the interpretation coordinate.",
+			"Pass metamodel.Active() as the interpretation coordinate.",
 			nil,
 		)
 	}
@@ -282,7 +282,7 @@ func NewInterpreted(l2 waist.L2, contract ir.RuntimeContractID, book model.Codeb
 		identities:  semantics.Identities(),
 		unresolved:  semantics.UnresolvedFacts(),
 		contract:    contract,
-		codebook:    book,
+		metamodel:   manifest,
 		constructed: true,
 	}, nil
 }
@@ -303,8 +303,8 @@ func (r Record) UnresolvedFacts() []waist.UnresolvedFact {
 // Contract returns the pinned runtime contract that produced the record.
 func (r Record) Contract() ir.RuntimeContractID { return r.contract }
 
-// Codebook returns the codebook coordinate this interpretation cites.
-func (r Record) Codebook() model.CodebookCoordinate { return r.codebook }
+// Metamodel returns the codebook coordinate this interpretation cites.
+func (r Record) Metamodel() model.LifecycleMetamodelManifest { return r.metamodel }
 
 // IsValid reports whether the record was constructed by NewInterpreted.
 func (r Record) IsValid() bool { return r.constructed }
@@ -341,10 +341,10 @@ type interpretedPayloadV2 struct {
 	Identities      []interpretedIdentity   `json:"identities"`
 	UnresolvedFacts []interpretedUnresolved `json:"unresolved_facts"`
 	Contract        ir.RuntimeContractID    `json:"contract"`
-	Codebook        interpretedCodebook     `json:"codebook"`
+	Metamodel       interpretedMetamodel    `json:"codebook"`
 }
 
-type interpretedCodebook struct {
+type interpretedMetamodel struct {
 	ID      string `json:"id"`
 	Version uint32 `json:"version"`
 	Content string `json:"content"`
@@ -388,10 +388,10 @@ func canonicalV2Payload(r Record) ([]byte, error) {
 		Identities:      identities,
 		UnresolvedFacts: unresolved,
 		Contract:        r.contract,
-		Codebook: interpretedCodebook{
-			ID:      string(r.codebook.ID),
-			Version: r.codebook.Version,
-			Content: hex.EncodeToString(r.codebook.Content[:]),
+		Metamodel: interpretedMetamodel{
+			ID:      string(r.metamodel.ID),
+			Version: r.metamodel.Version,
+			Content: hex.EncodeToString(r.metamodel.Content[:]),
 		},
 	})
 }
