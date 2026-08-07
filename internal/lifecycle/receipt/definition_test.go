@@ -65,7 +65,7 @@ func activationSnapshotCount(t *testing.T, tracker protocol.TaskTracker) int {
 }
 
 // TestEnsureActiveMetamodelIdempotent proves the steady-state path: a second
-// EnsureActiveCodebook resolves the SAME journaled definition and commits no new
+// EnsureActiveMetamodel resolves the SAME journaled definition and commits no new
 // activation operation.
 func TestEnsureActiveMetamodelIdempotent(t *testing.T) {
 	t.Parallel()
@@ -85,14 +85,14 @@ func TestEnsureActiveMetamodelIdempotent(t *testing.T) {
 
 	first, err := receipt.EnsureActiveMetamodel(ctx, service)
 	if err != nil {
-		t.Fatalf("first EnsureActiveCodebook: %v", err)
+		t.Fatalf("first EnsureActiveMetamodel: %v", err)
 	}
 	if first.Definition.Definition == 0 || first.Definition.Kind != model.DefinitionMetamodel || first.Definition.Content != metamodel.Active().Content {
-		t.Fatalf("first ensured ref = %#v, want a journaled codebook definition with the active content", first)
+		t.Fatalf("first ensured ref = %#v, want a journaled metamodel definition with the active content", first)
 	}
 	second, err := receipt.EnsureActiveMetamodel(ctx, service)
 	if err != nil {
-		t.Fatalf("second EnsureActiveCodebook: %v", err)
+		t.Fatalf("second EnsureActiveMetamodel: %v", err)
 	}
 	if second != first {
 		t.Fatalf("second ensured ref = %#v, want identical to first %#v (idempotent)", second, first)
@@ -142,7 +142,7 @@ func TestEnsureActiveMetamodelRaceSafe(t *testing.T) {
 
 	for i, err := range errs {
 		if err != nil {
-			t.Fatalf("goroutine %d EnsureActiveCodebook returned an error (want benign-already-activated): %v", i, err)
+			t.Fatalf("goroutine %d EnsureActiveMetamodel returned an error (want benign-already-activated): %v", i, err)
 		}
 		if refs[i] != refs[0] {
 			t.Fatalf("goroutine %d resolved ref %#v, want the single shared definition %#v", i, refs[i], refs[0])

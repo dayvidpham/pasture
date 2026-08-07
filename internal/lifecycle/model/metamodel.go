@@ -2,7 +2,7 @@ package model
 
 // LifecycleMetamodelManifest is the journal-independent versioned interpretation
 // identity embedded in interpreted evidence payloads (D2). It names WHICH
-// interpretation vocabulary (the codebook document) an interpreted record was
+// interpretation vocabulary (the metamodel document) an interpreted record was
 // produced against, so a reader can resolve the record's meaning to a journaled
 // definition rather than to whatever the current binary happens to believe.
 //
@@ -11,13 +11,13 @@ package model
 // carries no guard classification entry.
 type LifecycleMetamodelManifest struct {
 	nonJournalValue
-	// ID is the stable definition identity of the codebook document
+	// ID is the stable definition identity of the metamodel document
 	// ("pasture.lifecycle.metamodel"). It does not change across versions.
 	ID DefinitionID
-	// Version is the codebook document version. It is 1 at M5 and bumps only
+	// Version is the metamodel document version. It is 1 at M5 and bumps only
 	// when the canonical body content changes.
 	Version uint32
-	// Content is the sha256 over the canonical codebook body — the
+	// Content is the sha256 over the canonical metamodel body — the
 	// content-address that makes the coordinate self-verifying and lets
 	// concurrent first deliveries collapse to one deterministic activation.
 	Content ContentIdentity

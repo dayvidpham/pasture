@@ -46,14 +46,14 @@ func (w GatedWrite) Class() gate.WriteClass { return w.class }
 func (w GatedWrite) OperationID() provenance.OperationID { return w.operationID }
 
 // NewDefinitionActivation builds the definition-activation gated write for a
-// codebook coordinate and its canonical body. It produces two ordered effects —
+// metamodel coordinate and its canonical body. It produces two ordered effects —
 // the definition snapshot (the canonical body evidence) and the activation
 // state fact — and a deterministic operation identity derived from the content
 // identity, so a concurrent duplicate collapses to one activation.
 func NewDefinitionActivation(manifest model.LifecycleMetamodelManifest, body []byte) (GatedWrite, error) {
 	if !manifest.IsValid() {
 		return GatedWrite{}, structured(pasterrors.CategoryValidation,
-			"The definition-activation write has an invalid codebook coordinate.",
+			"The definition-activation write has an invalid metamodel coordinate.",
 			"A journaled definition must be addressed by a nonzero id, version, and content identity.",
 			"Constructing a definition-activation gated write (internal/lifecycle/receipt/write.go in receipt.NewDefinitionActivation).",
 			"No gated write was constructed.",
@@ -62,7 +62,7 @@ func NewDefinitionActivation(manifest model.LifecycleMetamodelManifest, body []b
 	bodyDigest := sha256.Sum256(body)
 	if model.ContentIdentity(bodyDigest) != manifest.Content {
 		return GatedWrite{}, structured(pasterrors.CategoryValidation,
-			"The definition-activation body does not match the codebook coordinate content identity.",
+			"The definition-activation body does not match the metamodel coordinate content identity.",
 			"The coordinate's content identity is the sha256 of the canonical body, so a mismatch means the body and coordinate disagree.",
 			"Constructing a definition-activation gated write (internal/lifecycle/receipt/write.go in receipt.NewDefinitionActivation).",
 			"No gated write was constructed.",

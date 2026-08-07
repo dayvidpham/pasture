@@ -48,7 +48,7 @@ const (
 	// occurrence receipt (plus its interpreted and optional consultation
 	// evidence) per host delivery, produced by receipt.Service.Receive.
 	WriteDeliveryReceipt WriteClass = iota + 1
-	// WriteDefinitionActivation is the lazy, idempotent codebook definition
+	// WriteDefinitionActivation is the lazy, idempotent metamodel definition
 	// journal write (definition snapshot + activation state).
 	WriteDefinitionActivation
 	// WriteLineageLinks is the read-side materialization of committed
@@ -138,17 +138,17 @@ func NewDeliveryIntent(contract ir.RuntimeContractID, event model.ContractEventK
 }
 
 // NewDefinitionActivationIntent constructs a definition-activation write intent.
-// It takes the codebook's content identity — the value that identifies WHAT is
-// being journaled — rather than the full model.CodebookCoordinate, because the
+// It takes the metamodel's content identity — the value that identifies WHAT is
+// being journaled — rather than the full model.LifecycleMetamodelManifest, because the
 // gate only needs a well-formed content identity to judge legality and because
-// model.CodebookCoordinate is introduced by a later wave; the coordinate's
+// model.LifecycleMetamodelManifest is introduced by a later wave; the coordinate's
 // version and id travel with the definition write itself, not the gate.
 func NewDefinitionActivationIntent(content model.ContentIdentity) (WriteIntent, *Refusal) {
 	if content == (model.ContentIdentity{}) {
 		return WriteIntent{}, refuseInvalidIntent(WriteDefinitionActivation,
 			"a definition-activation write intent has no content identity",
-			"a journaled codebook definition must be addressed by the sha256 of its canonical body",
-			"supply the active codebook coordinate's content identity")
+			"a journaled metamodel definition must be addressed by the sha256 of its canonical body",
+			"supply the active metamodel coordinate's content identity")
 	}
 	return WriteIntent{class: WriteDefinitionActivation}, nil
 }

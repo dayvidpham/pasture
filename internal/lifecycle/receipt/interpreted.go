@@ -17,7 +17,7 @@ import (
 )
 
 // interpretedKindV2 is the durable evidence kind for interpreted records that
-// carry a codebook coordinate (D2). It is a SEPARATE kind from interpreted.v1:
+// carry a metamodel coordinate (D2). It is a SEPARATE kind from interpreted.v1:
 // v1's strict decode never sees it, so committed v1 records decode unchanged
 // with no in-place migration. Nothing writes v1 after M5.
 const interpretedKindV2 = provenance.EvidenceKind("pasture.lifecycle.interpreted.v2")
@@ -28,7 +28,7 @@ const interpretedKindV2 = provenance.EvidenceKind("pasture.lifecycle.interpreted
 // the occurrence model's native-binding vocabulary.  That preserves the
 // boundary between interpretation and raw occurrence ingestion.
 //
-// Since M5 a record ALWAYS carries the codebook coordinate it was interpreted
+// Since M5 a record ALWAYS carries the metamodel coordinate it was interpreted
 // against, and its durable form is interpreted.v2. Interpreted.v1 is a
 // read-only legacy kind: committed v1 records decode unchanged through
 // DecodeInterpreted, but nothing produces v1 anymore.
@@ -43,7 +43,7 @@ type Record struct {
 
 // DecodeInterpreted strictly decodes canonical interpreted.v1 evidence. It is
 // the read path for committed pre-M5 records; the returned model record has no
-// codebook coordinate (Codebook() reports false).
+// metamodel coordinate (Metamodel() reports false).
 func DecodeInterpreted(id model.InterpretationID, occurrence model.OccurrenceID, payload []byte) (model.InterpretedRecord, error) {
 	if err := rejectDuplicateJSONMembers(payload); err != nil {
 		return model.InterpretedRecord{}, fmt.Errorf("decode interpreted lifecycle evidence: %w", err)
@@ -73,7 +73,7 @@ func DecodeInterpreted(id model.InterpretationID, occurrence model.OccurrenceID,
 }
 
 // DecodeInterpretedV2 strictly decodes canonical interpreted.v2 evidence,
-// returning a model record that carries the cited codebook coordinate.
+// returning a model record that carries the cited metamodel coordinate.
 func DecodeInterpretedV2(id model.InterpretationID, occurrence model.OccurrenceID, payload []byte) (model.InterpretedRecord, error) {
 	if err := rejectDuplicateJSONMembers(payload); err != nil {
 		return model.InterpretedRecord{}, fmt.Errorf("decode interpreted.v2 lifecycle evidence: %w", err)
@@ -126,17 +126,17 @@ func decodeInterpretedArms(wireIdentities []interpretedIdentity, wireUnresolved 
 
 func decodeMetamodelManifest(wire interpretedMetamodel) (model.LifecycleMetamodelManifest, error) {
 	if len(wire.Content) != 2*sha256.Size {
-		return model.LifecycleMetamodelManifest{}, fmt.Errorf("decode interpreted.v2 lifecycle evidence: codebook content is not a sha256 hex digest")
+		return model.LifecycleMetamodelManifest{}, fmt.Errorf("decode interpreted.v2 lifecycle evidence: metamodel content is not a sha256 hex digest")
 	}
 	raw, err := hex.DecodeString(wire.Content)
 	if err != nil {
-		return model.LifecycleMetamodelManifest{}, fmt.Errorf("decode interpreted.v2 lifecycle evidence: codebook content is not hex: %w", err)
+		return model.LifecycleMetamodelManifest{}, fmt.Errorf("decode interpreted.v2 lifecycle evidence: metamodel content is not hex: %w", err)
 	}
 	var content model.ContentIdentity
 	copy(content[:], raw)
 	manifest := model.LifecycleMetamodelManifest{ID: model.DefinitionID(wire.ID), Version: wire.Version, Content: content}
 	if !manifest.IsValid() {
-		return model.LifecycleMetamodelManifest{}, fmt.Errorf("decode interpreted.v2 lifecycle evidence: codebook coordinate is invalid")
+		return model.LifecycleMetamodelManifest{}, fmt.Errorf("decode interpreted.v2 lifecycle evidence: metamodel coordinate is invalid")
 	}
 	return manifest, nil
 }
@@ -224,9 +224,9 @@ func rejectDuplicateJSONMembers(raw []byte) error {
 }
 
 // NewInterpreted constructs an interpreted.v2 record from a verified L2 value
-// and the codebook coordinate it was interpreted against. Since M5 the
+// and the metamodel coordinate it was interpreted against. Since M5 the
 // coordinate is required: the record binds interpretation to a versioned,
-// journaled codebook, and an invalid coordinate is refused before any evidence
+// journaled metamodel, and an invalid coordinate is refused before any evidence
 // is constructed.
 func NewInterpreted(l2 waist.L2, contract ir.RuntimeContractID, manifest model.LifecycleMetamodelManifest) (Record, error) {
 	const where = "Constructing an interpreted lifecycle record (internal/lifecycle/receipt/interpreted.go in receipt.NewInterpreted)."
@@ -267,8 +267,8 @@ func NewInterpreted(l2 waist.L2, contract ir.RuntimeContractID, manifest model.L
 	if !manifest.IsValid() {
 		return Record{}, structured(
 			pasterrors.CategoryValidation,
-			"The interpreted lifecycle record has an invalid codebook coordinate.",
-			"Since M5 every interpretation cites the versioned, content-addressed codebook it was produced against, so the coordinate cannot be zero.",
+			"The interpreted lifecycle record has an invalid metamodel coordinate.",
+			"Since M5 every interpretation cites the versioned, content-addressed metamodel it was produced against, so the coordinate cannot be zero.",
 			where,
 			"No interpreted evidence was constructed.",
 			"Pass metamodel.Active() as the interpretation coordinate.",
@@ -303,7 +303,7 @@ func (r Record) UnresolvedFacts() []waist.UnresolvedFact {
 // Contract returns the pinned runtime contract that produced the record.
 func (r Record) Contract() ir.RuntimeContractID { return r.contract }
 
-// Metamodel returns the codebook coordinate this interpretation cites.
+// Metamodel returns the metamodel coordinate this interpretation cites.
 func (r Record) Metamodel() model.LifecycleMetamodelManifest { return r.metamodel }
 
 // IsValid reports whether the record was constructed by NewInterpreted.

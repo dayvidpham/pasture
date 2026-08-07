@@ -10,7 +10,7 @@ import (
 )
 
 // metamodelUnresolved is the disclosure the read surface renders for a committed
-// interpreted.v1 record — it predates the codebook producer (M5), so its
+// interpreted.v1 record — it predates the metamodel producer (M5), so its
 // interpretation coordinate is not resolvable rather than invented.
 const metamodelUnresolved = "unresolved (pre-M5)"
 
@@ -49,7 +49,7 @@ func HookLifecycle(w io.Writer, page model.LifecyclePage, format string) error {
 			interpretedContract = values[0].Contract().String()
 			metamodelColumn = metamodelColumnText(values[0])
 		}
-		if _, err := fmt.Fprintf(w, "%d\t%d\tregistration=%s\tinterpreted=%s\tcodebook=%s\n", item.Occurrence.JournalID(), item.Occurrence.Kind, item.Occurrence.RuntimeContract, interpretedContract, metamodelColumn); err != nil {
+		if _, err := fmt.Fprintf(w, "%d\t%d\tregistration=%s\tinterpreted=%s\tmetamodel=%s\n", item.Occurrence.JournalID(), item.Occurrence.Kind, item.Occurrence.RuntimeContract, interpretedContract, metamodelColumn); err != nil {
 			return err
 		}
 	}
@@ -87,7 +87,7 @@ type lifecycleJSONMetamodel struct {
 	Content string `json:"content"`
 }
 
-// metamodelColumnText renders an interpreted record's codebook coordinate for the
+// metamodelColumnText renders an interpreted record's metamodel coordinate for the
 // text read surface: the coordinate id, version, and a short content prefix for
 // interpreted.v2, or the pre-M5 unresolved disclosure for interpreted.v1.
 func metamodelColumnText(record model.InterpretedRecord) string {

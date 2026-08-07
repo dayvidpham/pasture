@@ -37,7 +37,7 @@ func manifest(content byte) model.LifecycleMetamodelManifest {
 }
 
 // recordV2 builds a committed LifecycleRecord whose interpretation carries a
-// codebook coordinate (interpreted.v2), using the production model constructors.
+// metamodel coordinate (interpreted.v2), using the production model constructors.
 func recordV2(t *testing.T, jid int64, contract ir.RuntimeContractID, coordinate model.LifecycleMetamodelManifest, identities ...waist.SemanticIdentity) model.LifecycleRecord {
 	t.Helper()
 	occ := model.NewOccurrenceRecord(
@@ -65,7 +65,7 @@ func recordV2(t *testing.T, jid int64, contract ir.RuntimeContractID, coordinate
 }
 
 // recordV1 builds a committed LifecycleRecord whose interpretation predates the
-// codebook (interpreted.v1) — Codebook() is false, so the projection discloses
+// metamodel (interpreted.v1) — Metamodel() is false, so the projection discloses
 // an unresolved coordinate.
 func recordV1(t *testing.T, jid int64, contract ir.RuntimeContractID, identities ...waist.SemanticIdentity) model.LifecycleRecord {
 	t.Helper()
@@ -160,7 +160,7 @@ func TestProjectDeterministicAndCanonical(t *testing.T) {
 		t.Fatal("Digest must equal sha256 of the canonical MarshalJSON bytes")
 	}
 
-	// A different selection (different codebook content) changes the digest.
+	// A different selection (different metamodel content) changes the digest.
 	other, err := lifecyclecontext.Project(scopedInput(),
 		[]model.LifecycleRecord{recordV2(t, 10, claude, manifest(0x22), id(runtime.IdentitySession, "S1"))}, nil)
 	if err != nil {
@@ -176,7 +176,7 @@ func TestProjectDeterministicAndCanonical(t *testing.T) {
 }
 
 // TestProjectSummarizesChainsMetamodelsAndUnresolved: the projection carries the
-// per-host chain edge count from committed links, the deduplicated codebook
+// per-host chain edge count from committed links, the deduplicated metamodel
 // coordinates present, and discloses a pre-M5 (v1) record with an unresolved
 // (empty) metamodel.
 func TestProjectSummarizesChainsMetamodelsAndUnresolved(t *testing.T) {

@@ -29,14 +29,14 @@ func NewInterpretedRecord(id InterpretationID, occurrence OccurrenceID, semantic
 }
 
 // NewInterpretedRecordWithMetamodel constructs an interpreted.v2 record that
-// carries the codebook coordinate it was interpreted against (D2). It is the
+// carries the metamodel coordinate it was interpreted against (D2). It is the
 // decode counterpart for interpreted.v2 evidence; the coordinate must be valid.
 // Committed interpreted.v1 records decode through NewInterpretedRecord and have
-// no coordinate — Codebook() reports false for them so the read surface can
-// disclose "codebook unresolved (pre-M5)" rather than inventing one.
+// no coordinate — Metamodel() reports false for them so the read surface can
+// disclose "metamodel unresolved (pre-M5)" rather than inventing one.
 func NewInterpretedRecordWithMetamodel(id InterpretationID, occurrence OccurrenceID, semantic runtime.EventSemantic, identities []waist.SemanticIdentity, unresolved []waist.UnresolvedFact, contract ir.RuntimeContractID, manifest LifecycleMetamodelManifest) (InterpretedRecord, error) {
 	if !manifest.IsValid() {
-		return InterpretedRecord{}, fmt.Errorf("construct lifecycle interpreted.v2 record: invalid codebook coordinate")
+		return InterpretedRecord{}, fmt.Errorf("construct lifecycle interpreted.v2 record: invalid metamodel coordinate")
 	}
 	record, err := NewInterpretedRecord(id, occurrence, semantic, identities, unresolved, contract)
 	if err != nil {
@@ -47,9 +47,9 @@ func NewInterpretedRecordWithMetamodel(id InterpretationID, occurrence Occurrenc
 	return record, nil
 }
 
-// Metamodel returns the codebook coordinate this interpretation was produced
+// Metamodel returns the metamodel coordinate this interpretation was produced
 // against and whether one is present. It is false for decoded interpreted.v1
-// records, which predate the codebook producer (M5).
+// records, which predate the metamodel producer (M5).
 func (r InterpretedRecord) Metamodel() (LifecycleMetamodelManifest, bool) {
 	return r.metamodel, r.hasMetamodel
 }

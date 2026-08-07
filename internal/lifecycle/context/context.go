@@ -1,6 +1,6 @@
 // Package context builds the Pasture-side context-disclosure projection: a
 // bounded, canonical summary of committed lifecycle records, per-host chain
-// summaries derived from committed links, and the codebook coordinates present
+// summaries derived from committed links, and the metamodel coordinates present
 // in the interpreted evidence.
 //
 // The package is named context but imports NO standard library context: the
@@ -12,7 +12,7 @@
 // Disclosure is the heaviest surface per unit of payoff, so this package is
 // deliberately LEAN (Stage-3 M5 axis-C directive). It exposes exactly one
 // projection shape under a single static policy — disclose committed lifecycle
-// records, links, and codebook coordinates only. There is no alternate policy to
+// records, links, and metamodel coordinates only. There is no alternate policy to
 // select (ContextPolicyDefinitionRef stays a staked seam) and there are no
 // speculative accessors: the disclosure command reads what Project returns, and
 // the durable plan fact fingerprints it.
@@ -44,7 +44,7 @@ const MaxProjectionRecords = model.MaxPageSize
 // the disclosure command before Project is called.
 //
 // The single static M5 policy — disclose committed lifecycle records, links, and
-// codebook coordinates only — is implicit: ContextInput carries no policy
+// metamodel coordinates only — is implicit: ContextInput carries no policy
 // selector because no alternate policy exists to choose.
 type ContextInput struct {
 	Scope model.OccurrenceQuery
@@ -52,9 +52,9 @@ type ContextInput struct {
 
 // recordSummary is the bounded disclosure view of one committed lifecycle
 // record: its occurrence journal identity, typed event kind, host, capture
-// disposition, and — when the interpretation is codebook-resolved (interpreted
-// .v2) — the hex content identity of the codebook it was interpreted against.
-// A pre-M5 (interpreted.v1) record has an empty Codebook, disclosing "codebook
+// disposition, and — when the interpretation is metamodel-resolved (interpreted
+// .v2) — the hex content identity of the metamodel it was interpreted against.
+// A pre-M5 (interpreted.v1) record has an empty Metamodel, disclosing "metamodel
 // unresolved" rather than inventing one.
 type recordSummary struct {
 	Occurrence int64  `json:"occurrence"`
@@ -76,7 +76,7 @@ type chainSummary struct {
 	Edges   int    `json:"edges"`
 }
 
-// metamodelSummary is the disclosure view of one codebook coordinate present in
+// metamodelSummary is the disclosure view of one metamodel coordinate present in
 // the disclosed interpreted evidence, deduplicated across records.
 type metamodelSummary struct {
 	ID      string `json:"id"`
@@ -185,7 +185,7 @@ type chainKey struct {
 // selection and the already-read committed records and links, it returns a
 // bounded ContextProjection: a canonical, deterministically-ordered summary of
 // the records, the per-host identity chains (edge counts derived from committed
-// links whose endpoints fall inside the disclosed record set), and the codebook
+// links whose endpoints fall inside the disclosed record set), and the metamodel
 // coordinates present in the interpreted evidence.
 //
 // It performs no I/O, holds no clock or store, and consults no std context, so

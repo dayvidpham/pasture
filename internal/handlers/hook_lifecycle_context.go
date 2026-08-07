@@ -15,9 +15,9 @@ import (
 
 // disclosurePolicyNote names the single static M5 disclosure policy recorded in
 // every durable plan fact: disclose committed lifecycle records, links, and
-// codebook coordinates only. There is no alternate policy to select
+// metamodel coordinates only. There is no alternate policy to select
 // (ContextPolicyDefinitionRef stays a staked seam), so the note is a constant.
-const disclosurePolicyNote = "pasture.lifecycle.context.m5-static: committed records, links, codebook coordinates"
+const disclosurePolicyNote = "pasture.lifecycle.context.m5-static: committed records, links, metamodel coordinates"
 
 // HookLifecycleContextInput selects the store, the identity binding whose bounded
 // committed state is disclosed, and the injected clock and operation identity

@@ -1018,7 +1018,7 @@ func assertInterpretedEvidence(t *testing.T, raw []byte) {
 	require.Equal(t, expectedSessionIdentity, payload.Identities[0].Value)
 	require.Empty(t, payload.UnresolvedFacts)
 	require.Equal(t, interpretedLifecycleContract, payload.Contract)
-	// interpreted.v2 carries the codebook coordinate it was interpreted against.
+	// interpreted.v2 carries the metamodel coordinate it was interpreted against.
 	active := metamodel.Active()
 	require.Equal(t, string(active.ID), payload.Metamodel.ID)
 	require.Equal(t, active.Version, payload.Metamodel.Version)

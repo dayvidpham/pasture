@@ -1,9 +1,9 @@
-// Package codebook is the generated, content-addressed lifecycle interpretation
+// Package metamodel is the generated, content-addressed lifecycle interpretation
 // vocabulary (D1). One document describes the FULL pinned per-harness event
 // catalogs (Claude 30, OpenCode 47, Codex 10) — for each event: native name,
 // semantic, blocking, mutation, failure, stop-loop, and declared identity kinds.
 //
-// The codebook describes the interpretation FUNCTION, which is defined over the
+// The metamodel describes the interpretation FUNCTION, which is defined over the
 // whole contract; it is descriptive vocabulary, NOT event enablement. Activation
 // (unchanged) governs admission separately. Describing a withheld event here
 // never admits it.
@@ -24,15 +24,15 @@ import (
 )
 
 const (
-	// LifecycleMetamodelID is the stable definition identity of the codebook document. It
+	// LifecycleMetamodelID is the stable definition identity of the metamodel document. It
 	// does not change across versions.
 	LifecycleMetamodelID model.DefinitionID = "pasture.lifecycle.metamodel"
-	// LifecycleMetamodelVersion is the codebook document version. It is 1 at M5 and bumps
+	// LifecycleMetamodelVersion is the metamodel document version. It is 1 at M5 and bumps
 	// only when the canonical body content changes.
 	LifecycleMetamodelVersion uint32 = 1
 )
 
-// Active returns the compile-time active codebook coordinate derived from the
+// Active returns the compile-time active metamodel coordinate derived from the
 // generated canonical body. Its content identity is the sha256 of Body(), so a
 // coordinate can never cite a body the running binary does not carry.
 func Active() model.LifecycleMetamodelManifest {
@@ -43,7 +43,7 @@ func Active() model.LifecycleMetamodelManifest {
 	}
 }
 
-// Body returns a defensive copy of the canonical generated codebook body — the
+// Body returns a defensive copy of the canonical generated metamodel body — the
 // canonical JSON evidence snapshot the definition journal stores.
 func Body() []byte {
 	return append([]byte(nil), lifecycleMetamodel...)

@@ -11,31 +11,31 @@ import (
 	"github.com/dayvidpham/provenance"
 )
 
-// EnsureActiveMetamodel lazily and idempotently journals the active codebook
+// EnsureActiveMetamodel lazily and idempotently journals the active metamodel
 // definition, returning the reference to the journaled definition. It is called
 // on the valid-capture delivery path BEFORE the delivery receipt is written, so
 // a committed interpreted.v2 record can never cite an unjournaled metamodel.
 //
 // Steady state is one bounded, content-addressed existence check and zero
 // writes: the definition-activation operation identity is derived from the
-// codebook content, so LookupCommitted resolves an already-active codebook
+// metamodel content, so LookupCommitted resolves an already-active metamodel
 // without scanning. On the FIRST delivery the definition is absent, so the
 // activation is legalized through the gate and committed. Concurrency is safe by
 // construction: the deterministic operation identity makes two racing first
 // deliveries collapse to exactly one committed activation (the loser's Commit
 // returns the same result short-circuited), so neither double-activates nor
-// references an unjournaled codebook (F11 replay arbiter, verified benign).
+// references an unjournaled metamodel (F11 replay arbiter, verified benign).
 func EnsureActiveMetamodel(ctx context.Context, s Service) (model.LifecycleMetamodelRef, error) {
 	if s.Appender.Journal == nil {
 		return model.LifecycleMetamodelRef{}, structured(pasterrors.CategoryValidation,
 			"The lifecycle receipt service cannot ensure the active metamodel.",
-			"Journaling the codebook definition requires the provenance journal.",
-			"Ensuring the active codebook definition (internal/lifecycle/receipt/definition.go in receipt.EnsureActiveCodebook).",
-			"No codebook definition was resolved or committed.",
+			"Journaling the metamodel definition requires the provenance journal.",
+			"Ensuring the active metamodel definition (internal/lifecycle/receipt/definition.go in receipt.EnsureActiveMetamodel).",
+			"No metamodel definition was resolved or committed.",
 			"Construct the service through tasks.NewLifecycleReceiptService.", nil)
 	}
 	// Bounded, content-addressed existence check: the operation identity is
-	// derived from the codebook content, so an already-active codebook resolves
+	// derived from the metamodel content, so an already-active metamodel resolves
 	// with a single indexed lookup and no writes.
 	ref, journaled, err := ResolveActiveMetamodel(s.Appender.Journal)
 	if err != nil {
@@ -74,19 +74,19 @@ func EnsureActiveMetamodel(ctx context.Context, s Service) (model.LifecycleMetam
 	}, nil
 }
 
-// ResolveActiveMetamodel reports the journaled definition for the active codebook
+// ResolveActiveMetamodel reports the journaled definition for the active metamodel
 // WITHOUT writing anything. It is the read-only counterpart to
-// EnsureActiveCodebook, backing the `hook lifecycle codebook` read surface: it
+// EnsureActiveMetamodel, backing the `hook lifecycle metamodel` read surface: it
 // resolves the deterministic content-derived operation identity and returns the
-// journaled definition reference when the codebook has already been activated,
+// journaled definition reference when the metamodel has already been activated,
 // or journaled=false when it has not.
 func ResolveActiveMetamodel(journal provenance.Journal) (model.LifecycleMetamodelRef, bool, error) {
 	if journal == nil {
 		return model.LifecycleMetamodelRef{}, false, structured(pasterrors.CategoryValidation,
-			"The active codebook definition cannot be resolved.",
-			"Resolving the journaled codebook definition requires the provenance journal.",
-			"Resolving the active codebook definition (internal/lifecycle/receipt/definition.go in receipt.ResolveActiveCodebook).",
-			"No codebook definition was resolved.",
+			"The active metamodel definition cannot be resolved.",
+			"Resolving the journaled metamodel definition requires the provenance journal.",
+			"Resolving the active metamodel definition (internal/lifecycle/receipt/definition.go in receipt.ResolveActiveMetamodel).",
+			"No metamodel definition was resolved.",
 			"Provide the unified store's provenance journal.", nil)
 	}
 	manifest := metamodel.Active()
@@ -97,10 +97,10 @@ func ResolveActiveMetamodel(journal provenance.Journal) (model.LifecycleMetamode
 	committed, err := journal.LookupCommitted(write.OperationID())
 	if err != nil {
 		return model.LifecycleMetamodelRef{}, false, structured(pasterrors.CategoryStorage,
-			"The active codebook definition could not be looked up.",
+			"The active metamodel definition could not be looked up.",
 			"The provenance journal rejected the bounded operation-identity lookup.",
-			"Resolving the active codebook definition (internal/lifecycle/receipt/definition.go in receipt.ResolveActiveCodebook).",
-			"It is unknown whether the codebook is already journaled.",
+			"Resolving the active metamodel definition (internal/lifecycle/receipt/definition.go in receipt.ResolveActiveMetamodel).",
+			"It is unknown whether the metamodel is already journaled.",
 			"Confirm journal health and retry.", err)
 	}
 	if committed.Kind != provenance.CommittedExact {
@@ -126,10 +126,10 @@ func definitionRefFromSlots(manifest model.LifecycleMetamodelManifest, slots []p
 		}
 	}
 	return model.LifecycleMetamodelRef{}, structured(pasterrors.CategoryStorage,
-		"The journaled codebook definition is missing its definition result slot.",
+		"The journaled metamodel definition is missing its definition result slot.",
 		"An already-committed definition-activation operation did not expose the definition slot.",
-		"Ensuring the active codebook definition (internal/lifecycle/receipt/definition.go in receipt.EnsureActiveCodebook).",
-		"The codebook coordinate cannot be resolved to a journaled definition.",
+		"Ensuring the active metamodel definition (internal/lifecycle/receipt/definition.go in receipt.EnsureActiveMetamodel).",
+		"The metamodel coordinate cannot be resolved to a journaled definition.",
 		"Inspect the committed definition-activation operation and repair the journal.",
 		fmt.Errorf("missing result slot %q", definitionSlot))
 }

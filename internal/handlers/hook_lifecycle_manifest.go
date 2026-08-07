@@ -13,20 +13,20 @@ import (
 	"github.com/dayvidpham/provenance"
 )
 
-// HookLifecycleMetamodelInput selects the codebook read surface's store and
+// HookLifecycleMetamodelInput selects the metamodel read surface's store and
 // whether the canonical body is included in the output.
 type HookLifecycleMetamodelInput struct {
 	DBPath string
 	Body   bool
 }
 
-// HookLifecycleMetamodel prints the active codebook coordinate (id, version,
+// HookLifecycleMetamodel prints the active metamodel coordinate (id, version,
 // content digest), whether that coordinate is journaled (the end-to-end
 // definition-resolution proof), and optionally the canonical body. It is
 // strictly read-only: it never activates the metamodel.
 func HookLifecycleMetamodel(ctx context.Context, out io.Writer, in HookLifecycleMetamodelInput, format string) (int, error) {
 	if ctx == nil || out == nil || (format != "text" && format != "json") {
-		return listResult(fmt.Errorf("show lifecycle codebook: context, output, and format text|json are required"))
+		return listResult(fmt.Errorf("show lifecycle metamodel: context, output, and format text|json are required"))
 	}
 	manifest := metamodel.Active()
 	tracker, err := tasks.OpenTaskTracker(in.DBPath)
@@ -60,14 +60,14 @@ func HookLifecycleMetamodel(ctx context.Context, out io.Writer, in HookLifecycle
 		return 0, nil
 	}
 
-	if _, err := fmt.Fprintf(out, "codebook: %s\nversion: %d\ncontent: %s\n", manifest.ID, manifest.Version, hex.EncodeToString(manifest.Content[:])); err != nil {
+	if _, err := fmt.Fprintf(out, "metamodel: %s\nversion: %d\ncontent: %s\n", manifest.ID, manifest.Version, hex.EncodeToString(manifest.Content[:])); err != nil {
 		return listResult(err)
 	}
 	if journaled {
 		if _, err := fmt.Fprintf(out, "journaled: true (definition journal id %d)\n", definitionJournalID); err != nil {
 			return listResult(err)
 		}
-	} else if _, err := fmt.Fprintf(out, "journaled: false (no delivery has activated this codebook yet)\n"); err != nil {
+	} else if _, err := fmt.Fprintf(out, "journaled: false (no delivery has activated this metamodel yet)\n"); err != nil {
 		return listResult(err)
 	}
 	if in.Body {

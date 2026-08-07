@@ -9,7 +9,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
-// metamodelDoc is the canonical on-the-wire shape of the codebook body. Field
+// metamodelDoc is the canonical on-the-wire shape of the metamodel body. Field
 // order is fixed by struct declaration order, harnesses are sorted by runtime
 // contract id, and events keep their pinned native catalog order, so the
 // encoded bytes are deterministic.
@@ -35,7 +35,7 @@ type metamodelEvent struct {
 	Unresolved []string `json:"unresolved"`
 }
 
-// GenerateLifecycleMetamodel derives the canonical codebook body from the three pinned
+// GenerateLifecycleMetamodel derives the canonical metamodel body from the three pinned
 // runtime lifecycle profiles (F17). It is deterministic: the same profiles
 // always produce byte-identical output, which is what makes `make generate`
 // idempotent and the content identity stable. It is used by the go:generate
@@ -57,7 +57,7 @@ func GenerateLifecycleMetamodel() ([]byte, error) {
 	encoder := json.NewEncoder(&buf)
 	encoder.SetEscapeHTML(false)
 	if err := encoder.Encode(doc); err != nil {
-		return nil, fmt.Errorf("encode canonical codebook body: %w", err)
+		return nil, fmt.Errorf("encode canonical metamodel body: %w", err)
 	}
 	return append([]byte(nil), bytes.TrimSuffix(buf.Bytes(), []byte{'\n'})...), nil
 }
@@ -68,7 +68,7 @@ func claudeSection() (metamodelHarness, error) {
 	for _, event := range contract.Events() {
 		mapping, err := contract.Mapping(event)
 		if err != nil {
-			return metamodelHarness{}, fmt.Errorf("codebook claude mapping for %v: %w", event, err)
+			return metamodelHarness{}, fmt.Errorf("metamodel claude mapping for %v: %w", event, err)
 		}
 		events = append(events, eventFromMapping(mapping))
 	}
@@ -81,7 +81,7 @@ func codexSection() (metamodelHarness, error) {
 	for _, event := range contract.Events() {
 		mapping, err := contract.Mapping(event)
 		if err != nil {
-			return metamodelHarness{}, fmt.Errorf("codebook codex mapping for %v: %w", event, err)
+			return metamodelHarness{}, fmt.Errorf("metamodel codex mapping for %v: %w", event, err)
 		}
 		events = append(events, eventFromMapping(mapping))
 	}
@@ -94,7 +94,7 @@ func openCodeSection() (metamodelHarness, error) {
 	for _, event := range contract.Events() {
 		mapping, err := contract.Mapping(event)
 		if err != nil {
-			return metamodelHarness{}, fmt.Errorf("codebook opencode mapping for %v: %w", event, err)
+			return metamodelHarness{}, fmt.Errorf("metamodel opencode mapping for %v: %w", event, err)
 		}
 		events = append(events, eventFromMapping(mapping))
 	}

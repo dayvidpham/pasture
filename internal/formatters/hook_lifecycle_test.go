@@ -17,7 +17,7 @@ import (
 )
 
 // TestHookLifecycleFormatterRendersMetamodelColumn proves the read surface
-// discloses the codebook coordinate for interpreted.v2 records and renders the
+// discloses the metamodel coordinate for interpreted.v2 records and renders the
 // pre-M5 unresolved disclosure for interpreted.v1 records — never inventing a
 // coordinate for a legacy record.
 func TestHookLifecycleFormatterRendersMetamodelColumn(t *testing.T) {
@@ -49,12 +49,12 @@ func TestHookLifecycleFormatterRendersMetamodelColumn(t *testing.T) {
 		t.Fatalf("format text: %v", err)
 	}
 	out := text.String()
-	if !strings.Contains(out, "codebook=unresolved (pre-M5)") {
+	if !strings.Contains(out, "metamodel=unresolved (pre-M5)") {
 		t.Fatalf("text output missing pre-M5 disclosure for the v1 record:\n%s", out)
 	}
 	active := metamodel.Active()
 	shortContent := hex.EncodeToString(active.Content[:])[:12]
-	wantV2 := "codebook=pasture.lifecycle.metamodel@1#" + shortContent
+	wantV2 := "metamodel=pasture.lifecycle.metamodel@1#" + shortContent
 	if !strings.Contains(out, wantV2) {
 		t.Fatalf("text output missing v2 coordinate %q:\n%s", wantV2, out)
 	}

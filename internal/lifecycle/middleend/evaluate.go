@@ -22,7 +22,7 @@ type Derivation struct {
 }
 
 // Derive returns the canonical effects and optional host response for event.
-// The codebook coordinate is stamped onto the interpreted.v2 evidence, binding
+// The metamodel coordinate is stamped onto the interpreted.v2 evidence, binding
 // this interpretation to a versioned, journaled interpretation vocabulary. The
 // coordinate is compile-time data (metamodel.Active()), so Derive stays pure.
 func Derive(event waist.L2, manifest model.LifecycleMetamodelManifest) (Derivation, error) {

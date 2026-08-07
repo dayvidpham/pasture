@@ -63,8 +63,8 @@ type persistedOccurrenceEnvelope struct {
 // and reads it back through the exact production reader
 // (tasks.NewLifecycleReader → projection.Reader). It asserts the v1 record
 // decodes UNCHANGED (its golden identities, semantic, and contract survive), that
-// it carries NO codebook coordinate (Codebook() reports false), and that the
-// production text formatter discloses "codebook=unresolved (pre-M5)" rather than
+// it carries NO metamodel coordinate (Metamodel() reports false), and that the
+// production text formatter discloses "metamodel=unresolved (pre-M5)" rather than
 // inventing a coordinate.
 //
 // Because Records() runs the cursorless read, it traverses BOTH dual-kind sites:
@@ -141,17 +141,17 @@ func TestPersistedV1InterpretedReadsBackThroughProductionReader(t *testing.T) {
 		t.Fatalf("read-back interpreted identities = %#v, want the single golden session identity", identities)
 	}
 	if manifest, ok := got.Metamodel(); ok {
-		t.Fatalf("persisted interpreted.v1 record reported a codebook coordinate %#v, want none (pre-M5, unresolved)", manifest)
+		t.Fatalf("persisted interpreted.v1 record reported a metamodel coordinate %#v, want none (pre-M5, unresolved)", manifest)
 	}
 
-	// The production text read surface discloses the pre-M5 unresolved codebook
+	// The production text read surface discloses the pre-M5 unresolved metamodel
 	// rather than inventing one.
 	var buf bytes.Buffer
 	if err := formatters.HookLifecycle(&buf, page, "text"); err != nil {
 		t.Fatalf("render lifecycle page: %v", err)
 	}
-	if !bytes.Contains(buf.Bytes(), []byte("codebook=unresolved (pre-M5)")) {
-		t.Fatalf("production text read surface did not disclose the pre-M5 unresolved codebook:\n%s", buf.String())
+	if !bytes.Contains(buf.Bytes(), []byte("metamodel=unresolved (pre-M5)")) {
+		t.Fatalf("production text read surface did not disclose the pre-M5 unresolved metamodel:\n%s", buf.String())
 	}
 }
 

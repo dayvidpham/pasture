@@ -22,12 +22,12 @@ import (
 // (snapshot drift, cross-operation association, duplicate-across-kinds,
 // digest-validation) that a healthy real store cannot produce.
 
-// canonicalV1Interpreted is a canonical interpreted.v1 payload (no codebook
+// canonicalV1Interpreted is a canonical interpreted.v1 payload (no metamodel
 // member) — the pre-M5 read shape DecodeInterpreted accepts.
 const canonicalV1Interpreted = `{"semantic":1,"identities":[{"kind":1,"value":"session-v1"}],"unresolved_facts":[],"contract":"claude-code/claude-code@2.1.210"}`
 
 // canonicalV2Interpreted is a canonical interpreted.v2 payload carrying a
-// versioned codebook coordinate — the post-M5 read shape DecodeInterpretedV2
+// versioned metamodel coordinate — the post-M5 read shape DecodeInterpretedV2
 // accepts. Its content is a fixed nonzero sha256 hex so the coordinate is valid.
 const canonicalV2Interpreted = `{"semantic":1,"identities":[{"kind":1,"value":"session-v2"}],"unresolved_facts":[],"contract":"claude-code/claude-code@2.1.210","manifest":{"id":"pasture.lifecycle.metamodel","version":1,"content":"1111111111111111111111111111111111111111111111111111111111111111"}}`
 
@@ -267,7 +267,7 @@ func TestLinkReaderUnwiredRefused(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestReaderDispatchesV1AndV2ByKind proves the dual-kind association site: a v1
-// interpreted row decodes through DecodeInterpreted (no codebook coordinate) and
+// interpreted row decodes through DecodeInterpreted (no metamodel coordinate) and
 // a v2 row through DecodeInterpretedV2 (carrying its coordinate), each associated
 // to its own occurrence. It also asserts the interpreted association query is
 // issued for BOTH interpreted kinds, matching the watermark site which queries
@@ -295,7 +295,7 @@ func TestReaderDispatchesV1AndV2ByKind(t *testing.T) {
 		t.Fatalf("occurrence 10 has %d interpretations, want 1", len(v1))
 	}
 	if _, ok := v1[0].Metamodel(); ok {
-		t.Fatal("interpreted.v1 record must report NO codebook coordinate")
+		t.Fatal("interpreted.v1 record must report NO metamodel coordinate")
 	}
 	if v1[0].Identities()[0].Value != "session-v1" {
 		t.Fatalf("v1 identity = %q, want session-v1", v1[0].Identities()[0].Value)
@@ -306,10 +306,10 @@ func TestReaderDispatchesV1AndV2ByKind(t *testing.T) {
 	}
 	manifest, ok := v2[0].Metamodel()
 	if !ok {
-		t.Fatal("interpreted.v2 record must report its codebook coordinate")
+		t.Fatal("interpreted.v2 record must report its metamodel coordinate")
 	}
 	if manifest.Version != 1 || string(manifest.ID) != "pasture.lifecycle.metamodel" {
-		t.Fatalf("v2 codebook coordinate = %#v, want the versioned active id", manifest)
+		t.Fatalf("v2 metamodel coordinate = %#v, want the versioned active id", manifest)
 	}
 
 	// The association query must ask for BOTH interpreted kinds (the same set the

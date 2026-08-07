@@ -139,7 +139,7 @@ func (r Reader) interpretations(occurrences []model.OccurrenceRecord, snapshot p
 
 // decodeInterpretedByKind strictly decodes an interpreted evidence row using the
 // decoder for its exact kind: interpreted.v1 records (committed pre-M5) decode
-// without a codebook coordinate, interpreted.v2 records decode with one. A row
+// without a metamodel coordinate, interpreted.v2 records decode with one. A row
 // whose kind is outside the admitted set is a corrupt query result.
 func decodeInterpretedByKind(kind provenance.EvidenceKind, id model.InterpretationID, occurrence model.OccurrenceID, payload []byte) (model.InterpretedRecord, error) {
 	switch kind {

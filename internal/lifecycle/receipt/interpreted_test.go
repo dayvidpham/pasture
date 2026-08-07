@@ -278,10 +278,10 @@ func TestDecodeInterpretedStrictCanonicalEvidence(t *testing.T) {
 	}
 	manifest, ok := decoded.Metamodel()
 	if !ok || manifest != metamodel.Active() {
-		t.Fatalf("decoded codebook = %#v ok=%v, want the active coordinate %#v", manifest, ok, metamodel.Active())
+		t.Fatalf("decoded metamodel = %#v ok=%v, want the active coordinate %#v", manifest, ok, metamodel.Active())
 	}
-	// A committed interpreted.v1 record carries no codebook, so the v1 decoder
-	// must NOT accept the v2 payload (its codebook member is an unknown field).
+	// A committed interpreted.v1 record carries no metamodel, so the v1 decoder
+	// must NOT accept the v2 payload (its metamodel member is an unknown field).
 	if _, err := DecodeInterpreted(12, 11, effect.Payload); err == nil {
 		t.Fatal("interpreted.v1 decoder accepted an interpreted.v2 payload")
 	}

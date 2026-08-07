@@ -209,7 +209,7 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 		_, err = service.Receive(ctx, warrant, capture.delivery)
 		return backend.HostResponse{}, err
 	}
-	// On the valid-capture path, lazily journal the active codebook BEFORE the
+	// On the valid-capture path, lazily journal the active metamodel BEFORE the
 	// delivery receipt is written. The definition-activation operation commits
 	// before the first delivery that references the coordinate, so a committed
 	// interpreted.v2 record can never cite an unjournaled metamodel. It is

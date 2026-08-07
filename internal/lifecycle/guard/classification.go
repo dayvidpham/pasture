@@ -31,7 +31,7 @@ const (
 // file-disjoint from this shared map without changing behavior here. The
 // pre-landed entries below are: LinkRecord (SLICE-3 lineage, an immutable
 // per-host predecessor edge) and the three disclosure facts (SLICE-4 context
-// disclosure, immutable plan/attempt/result facts). CodebookCoordinate is NOT
+// disclosure, immutable plan/attempt/result facts). LifecycleMetamodelManifest is NOT
 // listed: it embeds nonJournalValue and is mechanically non-journal.
 var journalClasses = map[string]JournalClass{
 	"DefinitionSnapshot":    ImmutableSnapshot,

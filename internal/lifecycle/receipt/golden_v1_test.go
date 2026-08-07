@@ -11,7 +11,7 @@ import (
 )
 
 // goldenV1InterpretedPayload is a FROZEN committed interpreted.v1 evidence
-// payload from before the codebook producer (M5). Its provenance is pinned by
+// payload from before the metamodel producer (M5). Its provenance is pinned by
 // goldenV1InterpretedSHA256: interpreted.v1 is a read-only legacy kind, so this
 // byte sequence must decode unchanged forever, with no in-place migration.
 const goldenV1InterpretedPayload = `{"semantic":1,"identities":[{"kind":1,"value":"session-golden-pre-m5"}],"unresolved_facts":[],"contract":"claude-code/claude-code@2.1.210"}`
@@ -22,8 +22,8 @@ const goldenV1InterpretedPayload = `{"semantic":1,"identities":[{"kind":1,"value
 const goldenV1InterpretedSHA256 = "2038445fa70b46043ef21e0105f3ee1c0fd2bc4f6ebe749de8ecf24170e46563"
 
 // TestGoldenV1InterpretedDecodesUnchangedAfterM5 proves a pre-M5 committed
-// interpreted.v1 record still decodes correctly after M5 and carries NO codebook
-// coordinate (Codebook() reports false), so the read surface discloses "codebook
+// interpreted.v1 record still decodes correctly after M5 and carries NO metamodel
+// coordinate (Metamodel() reports false), so the read surface discloses "metamodel
 // unresolved (pre-M5)" rather than inventing one. The SHA-256 pin guards against
 // any silent migration of committed v1 evidence.
 func TestGoldenV1InterpretedDecodesUnchangedAfterM5(t *testing.T) {
@@ -52,10 +52,10 @@ func TestGoldenV1InterpretedDecodesUnchangedAfterM5(t *testing.T) {
 		t.Fatalf("decoded identities = %#v, want the single golden session identity", identities)
 	}
 	if manifest, ok := decoded.Metamodel(); ok {
-		t.Fatalf("committed interpreted.v1 record reported a codebook coordinate %#v, want none (pre-M5)", manifest)
+		t.Fatalf("committed interpreted.v1 record reported a metamodel coordinate %#v, want none (pre-M5)", manifest)
 	}
 
-	// The v2 decoder must reject the v1 payload: v2 requires the codebook member,
+	// The v2 decoder must reject the v1 payload: v2 requires the metamodel member,
 	// so the two kinds never cross-decode.
 	if _, err := receipt.DecodeInterpretedV2(model.InterpretationID(7), model.OccurrenceID(5), []byte(goldenV1InterpretedPayload)); err == nil {
 		t.Fatal("interpreted.v2 decoder accepted an interpreted.v1 golden payload")

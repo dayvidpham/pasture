@@ -29,9 +29,9 @@ type metamodelReadView struct {
 }
 
 // TestHookLifecycleMetamodelReadSurface exercises the production `hook lifecycle
-// codebook` read surface end-to-end against a real store: before any delivery
+// metamodel` read surface end-to-end against a real store: before any delivery
 // the active coordinate is reported unjournaled; after a valid delivery (which
-// lazily activates the codebook) it is reported journaled with a definition
+// lazily activates the metamodel) it is reported journaled with a definition
 // journal id; and the emitted body is content-addressed (sha256(body) == the
 // reported content digest == metamodel.Active().Content).
 func TestHookLifecycleMetamodelReadSurface(t *testing.T) {
@@ -42,7 +42,7 @@ func TestHookLifecycleMetamodelReadSurface(t *testing.T) {
 	// Bootstrap the persisted system identity so deliveries can commit.
 	bootstrap, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)
-	_, err = bootstrap.Create("file://codebook-read-test", "bootstrap", "initialize ingress identity", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
+	_, err = bootstrap.Create("file://metamodel-read-test", "bootstrap", "initialize ingress identity", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
 	require.NoError(t, err)
 	require.NoError(t, bootstrap.Close())
 
@@ -59,7 +59,7 @@ func TestHookLifecycleMetamodelReadSurface(t *testing.T) {
 	require.Equal(t, "pasture.lifecycle.metamodel", beforeView.ID)
 	require.Equal(t, uint32(1), beforeView.Version)
 	require.Equal(t, wantContent, beforeView.Content)
-	require.False(t, beforeView.Journaled, "no delivery has activated the codebook yet")
+	require.False(t, beforeView.Journaled, "no delivery has activated the metamodel yet")
 	require.Nil(t, beforeView.DefinitionJournalID)
 
 	// Deliver a valid Claude SessionStart, which lazily activates the metamodel.
@@ -79,11 +79,11 @@ func TestHookLifecycleMetamodelReadSurface(t *testing.T) {
 	var afterView metamodelReadView
 	require.NoError(t, json.Unmarshal(after.Bytes(), &afterView))
 	require.Equal(t, wantContent, afterView.Content)
-	require.True(t, afterView.Journaled, "a valid delivery must have activated the codebook")
+	require.True(t, afterView.Journaled, "a valid delivery must have activated the metamodel")
 	require.NotNil(t, afterView.DefinitionJournalID)
 	require.Greater(t, *afterView.DefinitionJournalID, int64(0))
 
 	require.NotEmpty(t, afterView.Body)
 	bodySum := sha256.Sum256([]byte(afterView.Body))
-	require.Equal(t, wantContent, hex.EncodeToString(bodySum[:]), "codebook body must be content-addressed by the reported content digest")
+	require.Equal(t, wantContent, hex.EncodeToString(bodySum[:]), "metamodel body must be content-addressed by the reported content digest")
 }
