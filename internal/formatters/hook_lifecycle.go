@@ -28,7 +28,7 @@ func HookLifecycle(w io.Writer, page model.LifecyclePage, format string) error {
 				}
 				views = append(views, view)
 			}
-			items = append(items, lifecycleJSONRecord{JournalID: record.Occurrence.JournalID(), Event: record.Occurrence.Kind, RegistrationContract: record.Occurrence.RuntimeContract.String(), Capture: record.Occurrence.Capture, PayloadDigest: record.Occurrence.Payload.Digest.String(), Interpreted: views})
+			items = append(items, lifecycleJSONRecord{JournalID: record.Occurrence.JournalID(), Event: record.Occurrence.Kind, RegistrationContract: record.Occurrence.RuntimeContract.String(), Capture: record.Occurrence.Capture, PayloadDigest: record.Occurrence.Payload.Digest.String(), Origin: record.Occurrence.Envelope.Origin, Interpreted: views})
 		}
 		next := ""
 		if page.State.Next != nil {
@@ -50,7 +50,18 @@ func HookLifecycle(w io.Writer, page model.LifecyclePage, format string) error {
 			interpretedContract = values[0].Contract().String()
 			metamodelColumn = metamodelColumnText(values[0])
 		}
-		if _, err := fmt.Fprintf(w, "%d\t%d\tregistration=%s\tinterpreted=%s\tmetamodel=%s\n", item.Occurrence.JournalID(), item.Occurrence.Kind, item.Occurrence.RuntimeContract, interpretedContract, metamodelColumn); err != nil {
+		// The text read surface discloses the captured origin (M4 raw
+		// ingestion) ONLY when it is non-zero: the native sentinel is the
+		// empty value, so native and pre-origin rows render without the
+		// clause and stay byte-identical to the pre-M4 formatter.
+		originClause := ""
+		if recordedOrigin := item.Occurrence.Envelope.Origin; recordedOrigin != "" {
+			originClause = "\torigin=" + string(recordedOrigin)
+		}
+		if _, err := fmt.Fprintf(w, "%d\t%d\tregistration=%s\tinterpreted=%s\tmetamodel=%s", item.Occurrence.JournalID(), item.Occurrence.Kind, item.Occurrence.RuntimeContract, interpretedContract, metamodelColumn); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(w, originClause+"\n"); err != nil {
 			return err
 		}
 	}
