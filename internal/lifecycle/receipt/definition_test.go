@@ -119,7 +119,21 @@ func TestEnsureActiveMetamodelRaceSafe(t *testing.T) {
 		t.Fatalf("open tracker: %v", err)
 	}
 	defer tracker.Close()
-	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, &incrementingClock{}, &gateTestOperations{}, timeouts.TestProfile())
+	// This proof races `goroutines` first-activations against ONE SQLite pool.
+	// TestProfile()'s 500ms inner busy timeout (and 2s caller ingress) bound how
+	// long a goroutine may wait merely to LEASE a connection; under CI
+	// shared-runner CPU contention a straggler can exceed that window and surface
+	// "caller deadline expired while leasing a SQLite connection" even though the
+	// activation itself is correct — a lease-timing artifact, not a logic bug.
+	// Widen the busy/ingress/start-slice windows for THIS lease-contention proof
+	// only, keeping the required busy < ingress < start_slice ordering. Production
+	// ProductionProfile() is untouched, and the STOP-1 assertions below (exactly
+	// one committed op, one shared ref, no errors) are unchanged.
+	raceProfile, err := timeouts.New(timeouts.Test, 5*time.Second, 10*time.Second, 15*time.Second)
+	if err != nil {
+		t.Fatalf("construct contention-tolerant timeout profile: %v", err)
+	}
+	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, &incrementingClock{}, &gateTestOperations{}, raceProfile)
 	if err != nil {
 		t.Fatalf("wire production receipt service: %v", err)
 	}
