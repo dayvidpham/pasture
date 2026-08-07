@@ -6,9 +6,9 @@ import (
 	"io"
 	"strings"
 
+	"github.com/dayvidpham/pasture/internal/acceptance"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
-	"github.com/dayvidpham/pasture/internal/acceptance"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
 	claudefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/claude"
