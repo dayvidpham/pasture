@@ -1,0 +1,24 @@
+Record a native harness lifecycle event
+
+Usage:
+  pasture hook lifecycle [flags]
+  pasture hook lifecycle [command]
+
+Available Commands:
+  context     Disclose and durably record the bounded lifecycle context for one native identity binding
+  lineage     Materialize and print the committed occurrence lineage for one native identity binding
+  list        List recorded lifecycle events
+  manifest    Show the active lifecycle metamodel manifest and whether it is journaled
+
+Flags:
+      --event string          Native event this generated hook is registered for (required)
+      --harness string        Native harness whose payload is on standard input (required)
+  -h, --help                  help for lifecycle
+      --host-version string   Observed native host version to retain with this occurrence (required)
+
+Global Flags:
+      --db string          Path to the unified pasture SQLite database (env: PASTURE_DB_PATH, default: ~/.local/share/pasture/pasture.db)
+      --format string      Output format: text or json (default "text")
+      --namespace string   Namespace URI for created tasks (default: derived from git remote, then file:// of cwd)
+
+Use "pasture hook lifecycle [command] --help" for more information about a command.

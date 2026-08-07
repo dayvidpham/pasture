@@ -1,0 +1,13 @@
+Show the active lifecycle metamodel manifest and whether it is journaled
+
+Usage:
+  pasture hook lifecycle manifest [flags]
+
+Flags:
+      --body            Include the canonical metamodel body
+      --format string   Output format: text or json (default "text")
+  -h, --help            help for manifest
+
+Global Flags:
+      --db string          Path to the unified pasture SQLite database (env: PASTURE_DB_PATH, default: ~/.local/share/pasture/pasture.db)
+      --namespace string   Namespace URI for created tasks (default: derived from git remote, then file:// of cwd)
