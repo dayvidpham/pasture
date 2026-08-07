@@ -6,7 +6,6 @@ import (
 	"io"
 	"strings"
 
-	"github.com/dayvidpham/pasture/internal/acceptance"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
@@ -96,21 +95,21 @@ type lifecycleDispatch struct {
 // construction the codegen harnessRegistry has always used. Adding a harness is
 // adding one data row.
 //
-// Every parse closure stamps the NATIVE sentinel (authentic-capture) on the
-// origin carrier of the envelope it passes to the per-harness ingress parser and
-// on the resulting delivery, so native commits disclose their origin on both the
-// occurrence envelope and the receipt payload (M4 origin marking) while keeping
-// the encode and every response byte-identical to the pre-origin path. The raw
-// path (M4) stamps OriginRaw at the same two carriers instead.
+// Every parse closure passes an envelope with the origin carrier left at its
+// zero value, so native commits stay byte-identical to the pre-origin path:
+// the zero value is the documented default (the NATIVE sentinel
+// authentic-capture) for pre-origin callers, and omitted from serialized output
+// by the carrier's omitempty tag, satisfying the frozen golden native payload
+// pins. The raw path (M4) is the first producer to populate the origin carrier:
+// it stamps OriginRaw on the envelope it passes to the per-harness ingress
+// parser and on the resulting delivery.
 var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 	ir.HarnessClaudeCode: {
 		name:        "Claude",
 		manifest:    registration.ClaudeCode2_1_210(),
 		activations: activation.ClaudeCode2_1_210,
 		parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
-			envelope := model.OccurrenceEnvelopeRef{Origin: acceptance.OriginAuthenticCapture}
-			capture := claudeingress.Parse(raw, event, version, envelope)
-			capture.Delivery.Origin = acceptance.OriginAuthenticCapture
+			capture := claudeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
 			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
 		},
 		bind:   claudefrontend.Bind,
@@ -121,9 +120,7 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 		manifest:    registration.OpenCode1_18_10(),
 		activations: activation.OpenCode1_18_10,
 		parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
-			envelope := model.OccurrenceEnvelopeRef{Origin: acceptance.OriginAuthenticCapture}
-			capture := opencodeingress.Parse(raw, event, version, envelope)
-			capture.Delivery.Origin = acceptance.OriginAuthenticCapture
+			capture := opencodeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
 			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
 		},
 		bind:   opencodefrontend.Bind,
@@ -134,9 +131,7 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 		manifest:    registration.Codex0_146_0(),
 		activations: activation.Codex0_146_0,
 		parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
-			envelope := model.OccurrenceEnvelopeRef{Origin: acceptance.OriginAuthenticCapture}
-			capture := codexingress.Parse(raw, event, version, envelope)
-			capture.Delivery.Origin = acceptance.OriginAuthenticCapture
+			capture := codexingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
 			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
 		},
 		bind:   codexfrontend.Bind,
