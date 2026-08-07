@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/engine/budget"
+	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
 	claudeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
@@ -193,7 +194,7 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], "2.1.210", model.OccurrenceEnvelopeRef{}).Delivery
-	_, err = service.Receive(context.Background(), delivery)
+	_, err = service.Receive(context.Background(), deliveryWarrant(t, delivery), delivery)
 	if probe := <-probeErr; probe == nil {
 		close(release)
 		tracker.Close()
@@ -268,7 +269,7 @@ func TestBlobFirstFailureLeavesReclaimableOrphanWithoutReceipt(t *testing.T) {
 	}
 	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], "2.1.210", model.OccurrenceEnvelopeRef{}).Delivery
 	ref := digest.FromBytes(delivery.Body)
-	_, receiveErr := service.Receive(context.Background(), delivery)
+	_, receiveErr := service.Receive(context.Background(), deliveryWarrant(t, delivery), delivery)
 	if probe := <-probeErr; probe == nil {
 		close(release)
 		tracker.Close()
@@ -378,8 +379,9 @@ func TestBudgetWorkerProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], "2.1.210", model.OccurrenceEnvelopeRef{}).Delivery
+	warrant := deliveryWarrant(t, delivery)
 	for i := 0; i < count; i++ {
-		if _, err := service.Receive(context.Background(), delivery); err != nil {
+		if _, err := service.Receive(context.Background(), warrant, delivery); err != nil {
 			var contention model.IngressContentionError
 			if stderrors.As(err, &contention) {
 				result.ContentionFailures++
@@ -398,6 +400,22 @@ func TestBudgetWorkerProcess(t *testing.T) {
 	if err := os.WriteFile(resultPath, body, 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// deliveryWarrant builds a valid delivery-receipt warrant for a parsed budget
+// delivery. Receive requires a delivery-receipt warrant; the gate certifies the
+// write class, so this covers every delivery in the budget load tests.
+func deliveryWarrant(t *testing.T, delivery receipt.Delivery) gate.Warrant {
+	t.Helper()
+	intent, refusal := gate.NewDeliveryIntent(delivery.Contract, delivery.Event)
+	if refusal != nil {
+		t.Fatalf("build delivery intent: %v", refusal)
+	}
+	warrant, refusal := gate.Legalize(intent)
+	if refusal != nil {
+		t.Fatalf("legalize delivery intent: %v", refusal)
+	}
+	return warrant
 }
 
 func bootstrap(t *testing.T, dbPath string, profile timeouts.Profile) {

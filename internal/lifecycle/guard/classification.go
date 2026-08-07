@@ -24,12 +24,26 @@ const (
 // types. Non-journal structs opt in mechanically by embedding nonJournalValue;
 // aliases and interfaces are mechanically non-journal. Thus adding an exported
 // struct without either decision fails closed without a central exception list.
+// journalClasses classifies every journal-facing model type. Entries for types
+// not yet declared in the model package are inert (F4): the map is only ever
+// consulted for types the parser actually finds, so pre-landing a classification
+// for a type an adjacent Stage-3 pillar will declare later keeps that pillar
+// file-disjoint from this shared map without changing behavior here. The
+// pre-landed entries below are: LinkRecord (SLICE-3 lineage, an immutable
+// per-host predecessor edge) and the three disclosure facts (SLICE-4 context
+// disclosure, immutable plan/attempt/result facts). LifecycleMetamodelManifest is NOT
+// listed: it embeds nonJournalValue and is mechanically non-journal.
 var journalClasses = map[string]JournalClass{
 	"DefinitionSnapshot":    ImmutableSnapshot,
 	"OccurrenceRecord":      ImmutableSnapshot,
 	"InterpretedRecord":     ImmutableSnapshot,
 	"DefinitionStateFact":   ImmutableFact,
 	"DefinitionStateRecord": DerivedProjection,
+	// Pre-landed cross-pillar entries (inert until the owning slice declares the type):
+	"LinkRecord":            ImmutableSnapshot, // SLICE-3 (lineage)
+	"DisclosurePlanFact":    ImmutableFact,     // SLICE-4 (context disclosure)
+	"DisclosureAttemptFact": ImmutableFact,     // SLICE-4 (context disclosure)
+	"DisclosureResultFact":  ImmutableFact,     // SLICE-4 (context disclosure)
 }
 
 var lifecycleStatusEnums = map[string]struct{}{

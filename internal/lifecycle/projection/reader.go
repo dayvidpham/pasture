@@ -21,6 +21,16 @@ import (
 )
 
 const interpretedKind = provenance.EvidenceKind("pasture.lifecycle.interpreted.v1")
+const interpretedKindV2 = provenance.EvidenceKind("pasture.lifecycle.interpreted.v2")
+
+// interpretedKinds is the closed set of interpreted evidence kinds the reader
+// admits. BOTH kinds MUST be queried at BOTH read sites (the operation
+// association query and the global snapshot watermark query): a store that
+// holds only interpreted.v2 records would otherwise receive a v1-filtered
+// watermark and read back no interpretations. The exactly-one-interpretation
+// invariant is enforced ACROSS kinds — an occurrence may carry at most one
+// interpretation whether it is v1 or v2.
+var interpretedKinds = []provenance.EvidenceKind{interpretedKind, interpretedKindV2}
 
 type Reader struct {
 	DB    *sql.DB
@@ -89,7 +99,7 @@ func (r Reader) interpretations(occurrences []model.OccurrenceRecord, snapshot p
 		if end > len(operations) {
 			end = len(operations)
 		}
-		fq := provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}, OperationIDs: operations[start:end]}, Kinds: []provenance.EvidenceKind{interpretedKind}, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize, SnapshotMaxJournalID: snapshot}}
+		fq := provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}, OperationIDs: operations[start:end]}, Kinds: interpretedKinds, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize, SnapshotMaxJournalID: snapshot}}
 		for {
 			page, err := r.Facts.QueryEvidence(fq)
 			if err != nil {
@@ -103,6 +113,8 @@ func (r Reader) interpretations(occurrences []model.OccurrenceRecord, snapshot p
 				if !ok {
 					return nil, readerError("Interpreted evidence crossed operation boundaries.", "The producing operation is not associated with a selected occurrence.", "No partial page is returned.", "Repair the corrupt journal association.", nil)
 				}
+				// Exactly-one-interpretation holds ACROSS kinds: a duplicate is
+				// rejected whether the prior interpretation was v1 or v2.
 				if len(result[occurrence.JournalID()]) != 0 {
 					return nil, readerError("A lifecycle occurrence has duplicate interpretations.", "Its operation produced more than one interpreted fact.", "No partial page is returned.", "Repair the corrupt operation.", nil)
 				}
@@ -110,7 +122,7 @@ func (r Reader) interpretations(occurrences []model.OccurrenceRecord, snapshot p
 				if !bytes.Equal(sum[:], row.ContentDigest) {
 					return nil, readerError("Interpreted lifecycle evidence failed digest validation.", "Stored digest differs from the exact payload.", "No partial page is returned.", "Restore canonical evidence.", nil)
 				}
-				decoded, err := receipt.DecodeInterpreted(model.InterpretationID(row.JournalID), occurrence, row.Payload)
+				decoded, err := decodeInterpretedByKind(row.EvidenceKind, model.InterpretationID(row.JournalID), occurrence, row.Payload)
 				if err != nil {
 					return nil, readerError("Interpreted lifecycle evidence is malformed or noncanonical.", err.Error(), "No partial page is returned.", "Repair the evidence producer and row.", err)
 				}
@@ -123,6 +135,21 @@ func (r Reader) interpretations(occurrences []model.OccurrenceRecord, snapshot p
 		}
 	}
 	return result, nil
+}
+
+// decodeInterpretedByKind strictly decodes an interpreted evidence row using the
+// decoder for its exact kind: interpreted.v1 records (committed pre-M5) decode
+// without a metamodel coordinate, interpreted.v2 records decode with one. A row
+// whose kind is outside the admitted set is a corrupt query result.
+func decodeInterpretedByKind(kind provenance.EvidenceKind, id model.InterpretationID, occurrence model.OccurrenceID, payload []byte) (model.InterpretedRecord, error) {
+	switch kind {
+	case interpretedKind:
+		return receipt.DecodeInterpreted(id, occurrence, payload)
+	case interpretedKindV2:
+		return receipt.DecodeInterpretedV2(id, occurrence, payload)
+	default:
+		return model.InterpretedRecord{}, fmt.Errorf("interpreted evidence kind %q is not an admitted interpreted kind", kind)
+	}
 }
 
 func snapshotDriftError() error {
@@ -168,7 +195,10 @@ func (r Reader) occurrences(ctx context.Context, query model.OccurrenceQuery) (m
 			return model.OccurrencePage{}, 0, readerError("The lifecycle cursor bounds are invalid.", "Journal positions must be positive and ordered.", "No records were read.", "Use a cursor emitted by this command.", nil)
 		}
 	} else {
-		watermark, err := r.Facts.QueryEvidence(provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}}, Kinds: []provenance.EvidenceKind{interpretedKind}, Page: provenance.FactPageRequest{Limit: 1}})
+		// BOTH interpreted kinds are queried so a store holding only
+		// interpreted.v2 records still establishes a correct global snapshot
+		// watermark rather than a v1-filtered one.
+		watermark, err := r.Facts.QueryEvidence(provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}}, Kinds: interpretedKinds, Page: provenance.FactPageRequest{Limit: 1}})
 		if err != nil {
 			return model.OccurrencePage{}, 0, readerError("The lifecycle reader could not establish a global snapshot.", "Provenance rejected the watermark query.", "No records were read.", "Repair journal reads.", err)
 		}

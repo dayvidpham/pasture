@@ -1,0 +1,135 @@
+package receipt
+
+import (
+	"context"
+	"fmt"
+
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
+	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/provenance"
+)
+
+// EnsureActiveMetamodel lazily and idempotently journals the active metamodel
+// definition, returning the reference to the journaled definition. It is called
+// on the valid-capture delivery path BEFORE the delivery receipt is written, so
+// a committed interpreted.v2 record can never cite an unjournaled metamodel.
+//
+// Steady state is one bounded, content-addressed existence check and zero
+// writes: the definition-activation operation identity is derived from the
+// metamodel content, so LookupCommitted resolves an already-active metamodel
+// without scanning. On the FIRST delivery the definition is absent, so the
+// activation is legalized through the gate and committed. Concurrency is safe by
+// construction: the deterministic operation identity makes two racing first
+// deliveries collapse to exactly one committed activation (the loser's Commit
+// returns the same result short-circuited), so neither double-activates nor
+// references an unjournaled metamodel (F11 replay arbiter, verified benign).
+func EnsureActiveMetamodel(ctx context.Context, s Service) (model.LifecycleMetamodelRef, error) {
+	if s.Appender.Journal == nil {
+		return model.LifecycleMetamodelRef{}, structured(pasterrors.CategoryValidation,
+			"The lifecycle receipt service cannot ensure the active metamodel.",
+			"Journaling the metamodel definition requires the provenance journal.",
+			"Ensuring the active metamodel definition (internal/lifecycle/receipt/definition.go in receipt.EnsureActiveMetamodel).",
+			"No metamodel definition was resolved or committed.",
+			"Construct the service through tasks.NewLifecycleReceiptService.", nil)
+	}
+	// Bounded, content-addressed existence check: the operation identity is
+	// derived from the metamodel content, so an already-active metamodel resolves
+	// with a single indexed lookup and no writes.
+	ref, journaled, err := ResolveActiveMetamodel(s.Appender.Journal)
+	if err != nil {
+		return model.LifecycleMetamodelRef{}, err
+	}
+	if journaled {
+		return ref, nil
+	}
+
+	manifest := metamodel.Active()
+	write, err := NewDefinitionActivation(manifest, metamodel.Body())
+	if err != nil {
+		return model.LifecycleMetamodelRef{}, err
+	}
+	// Absent: legalize the activation through the write gate and commit. The
+	// commit is race-safe (deterministic operation identity), so a concurrent
+	// first delivery is admitted as benign-already-activated.
+	intent, refusal := gate.NewDefinitionActivationIntent(manifest.Content)
+	if refusal != nil {
+		return model.LifecycleMetamodelRef{}, refusal
+	}
+	warrant, refusal := gate.Legalize(intent)
+	if refusal != nil {
+		return model.LifecycleMetamodelRef{}, refusal
+	}
+	receipt, err := s.Commit(ctx, warrant, write)
+	if err != nil {
+		return model.LifecycleMetamodelRef{}, err
+	}
+	return model.LifecycleMetamodelRef{
+		Definition: model.DefinitionRef{
+			Definition: model.DefinitionJournalID(receipt.Definition),
+			Kind:       model.DefinitionMetamodel,
+			Content:    manifest.Content,
+		},
+	}, nil
+}
+
+// ResolveActiveMetamodel reports the journaled definition for the active metamodel
+// WITHOUT writing anything. It is the read-only counterpart to
+// EnsureActiveMetamodel, backing the `hook lifecycle metamodel` read surface: it
+// resolves the deterministic content-derived operation identity and returns the
+// journaled definition reference when the metamodel has already been activated,
+// or journaled=false when it has not.
+func ResolveActiveMetamodel(journal provenance.Journal) (model.LifecycleMetamodelRef, bool, error) {
+	if journal == nil {
+		return model.LifecycleMetamodelRef{}, false, structured(pasterrors.CategoryValidation,
+			"The active metamodel definition cannot be resolved.",
+			"Resolving the journaled metamodel definition requires the provenance journal.",
+			"Resolving the active metamodel definition (internal/lifecycle/receipt/definition.go in receipt.ResolveActiveMetamodel).",
+			"No metamodel definition was resolved.",
+			"Provide the unified store's provenance journal.", nil)
+	}
+	manifest := metamodel.Active()
+	write, err := NewDefinitionActivation(manifest, metamodel.Body())
+	if err != nil {
+		return model.LifecycleMetamodelRef{}, false, err
+	}
+	committed, err := journal.LookupCommitted(write.OperationID())
+	if err != nil {
+		return model.LifecycleMetamodelRef{}, false, structured(pasterrors.CategoryStorage,
+			"The active metamodel definition could not be looked up.",
+			"The provenance journal rejected the bounded operation-identity lookup.",
+			"Resolving the active metamodel definition (internal/lifecycle/receipt/definition.go in receipt.ResolveActiveMetamodel).",
+			"It is unknown whether the metamodel is already journaled.",
+			"Confirm journal health and retry.", err)
+	}
+	if committed.Kind != provenance.CommittedExact {
+		return model.LifecycleMetamodelRef{}, false, nil
+	}
+	ref, err := definitionRefFromSlots(manifest, committed.ResultSlots)
+	if err != nil {
+		return model.LifecycleMetamodelRef{}, false, err
+	}
+	return ref, true, nil
+}
+
+func definitionRefFromSlots(manifest model.LifecycleMetamodelManifest, slots []provenance.ResultSlotBinding) (model.LifecycleMetamodelRef, error) {
+	for _, slot := range slots {
+		if slot.Slot == definitionSlot && slot.ProducedJournalID > 0 {
+			return model.LifecycleMetamodelRef{
+				Definition: model.DefinitionRef{
+					Definition: model.DefinitionJournalID(slot.ProducedJournalID),
+					Kind:       model.DefinitionMetamodel,
+					Content:    manifest.Content,
+				},
+			}, nil
+		}
+	}
+	return model.LifecycleMetamodelRef{}, structured(pasterrors.CategoryStorage,
+		"The journaled metamodel definition is missing its definition result slot.",
+		"An already-committed definition-activation operation did not expose the definition slot.",
+		"Ensuring the active metamodel definition (internal/lifecycle/receipt/definition.go in receipt.EnsureActiveMetamodel).",
+		"The metamodel coordinate cannot be resolved to a journaled definition.",
+		"Inspect the committed definition-activation operation and repair the journal.",
+		fmt.Errorf("missing result slot %q", definitionSlot))
+}

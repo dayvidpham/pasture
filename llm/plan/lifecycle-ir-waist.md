@@ -336,10 +336,23 @@ An observation is not a protocol transition: a host reporting a session started
 is *evidence*, not authority to advance a phase (research §13.3). M1–M3 never
 touch `AdapterOperation`.
 
-D11 — M1–M3 refuse any event whose blocking mode is not `NonBlocking`, with an
-actionable error naming M5. Before M5 there is no response encoding, so a
-blocking event would leave the host awaiting a result it never receives.
-Refusing loudly is the legalization behaviour research §8 requires.
+D11 — the sole refusal mechanism is the **activation gate**: an event outside
+the enabled set is `Withheld` (`internal/lifecycle/activation/types.go:16` state
+`Withheld` + `WithheldReason`) and never registered with its host, so it can
+never be delivered. An **enabled** blocking (gate-consultation) event is *not*
+refused: `legalize.Event` produces a valid `Legalized` terminal for
+`SemanticGateConsultation` (`internal/lifecycle/legalize/legalize.go:109-110`)
+and `middleend.Derive` records consultation evidence and answers the host
+`Proceed` (`internal/lifecycle/middleend/evaluate.go:40-51`).
+
+> **CORRECTION 2026-08-07 (FOLLOWUP_SLICE-M5-5, D11 docs-yield-to-code).** The
+> original claim — "M1–M3 refuse any non-`NonBlocking` event with an actionable
+> error naming M5" — was never implemented and does not exist in the tree. No
+> code path refuses a blocking event by name of M5; admission is governed only
+> by the activation gate (`Withheld` vs `Enabled`), and enabled blocking events
+> are legalized, recorded as consultation evidence, and answered `Proceed` by
+> M2/M3. Docs yield to code (URE-decided). This note corrects the stale claim;
+> no runtime behaviour changed.
 
 ## 8. Production process path (restored)
 
@@ -386,8 +399,10 @@ payload is rejected with zero writes.
 
 **M2 differential equivalence.** Compares **Events straight out of the two
 frontends and never invokes `Lower`** (axis C round 3): the pair is
-`PreToolUse` / `tool.execute.before`, both blocking gate consultations, which
-D11 refuses before M5. Testing at the waist is also the more correct level,
+`PreToolUse` / `tool.execute.before`, both blocking gate consultations, whose
+admission is governed by the activation gate (currently `Withheld` — see the
+D11 correction in §7; there is no by-name "refuse before M5" path). Testing at
+the waist is also the more correct level,
 isolating the property proved from the effect path. Three assertions:
 
 1. each side's `Origin.NativeEventName()` is the expected native event;
@@ -436,8 +451,13 @@ disposition rather than reusing the general CLI exit-code contract.
   record exists and the second returns `RecordReplayed`.
 - GIVEN a recorder error, WHEN it occurs, THEN neither the activity nor the
   event is visible, AND SHOULD NOT leave a partial record.
-- GIVEN a blocking event before M5, WHEN lowered, THEN it is refused with an
-  actionable error naming M5, AND SHOULD NOT be silently allowed.
+- GIVEN a blocking event outside the enabled activation set, WHEN evaluated,
+  THEN it is `Withheld` by the activation gate and never registered with its
+  host, AND SHOULD NOT reach the waist. GIVEN an **enabled** blocking
+  gate-consultation event, WHEN derived, THEN it is legalized, recorded as
+  consultation evidence, and answered `Proceed`, AND SHOULD NOT be refused by a
+  by-name "error naming M5" path (corrected 2026-08-07, FOLLOWUP_SLICE-M5-5;
+  see §7 D11 note — that path was never implemented).
 - GIVEN an event with no registered actor, WHEN lowered, THEN it fails closed
   before any write, AND SHOULD NOT invent an actor.
 - GIVEN an invalid invocation, WHEN it is rejected, THEN no database file is

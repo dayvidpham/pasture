@@ -7,6 +7,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
 	"github.com/dayvidpham/pasture/internal/lifecycle/legalize"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
 	"github.com/dayvidpham/pasture/internal/runtime"
@@ -21,12 +22,15 @@ type Derivation struct {
 }
 
 // Derive returns the canonical effects and optional host response for event.
-func Derive(event waist.L2) (Derivation, error) {
+// The metamodel coordinate is stamped onto the interpreted.v2 evidence, binding
+// this interpretation to a versioned, journaled interpretation vocabulary. The
+// coordinate is compile-time data (metamodel.Active()), so Derive stays pure.
+func Derive(event waist.L2, manifest model.LifecycleMetamodelManifest) (Derivation, error) {
 	result, err := legalize.Event(event)
 	if err != nil {
 		return Derivation{}, err
 	}
-	interpreted, err := receipt.NewInterpreted(event, event.Origin().Contract())
+	interpreted, err := receipt.NewInterpreted(event, event.Origin().Contract(), manifest)
 	if err != nil {
 		return Derivation{}, err
 	}

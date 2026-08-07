@@ -16,7 +16,7 @@ type SemanticEnvelopeRef struct {
 	nonJournalValue
 	Runtime        RuntimeContractDefinitionRef
 	Schema         LifecycleSchemaDefinitionRef
-	Codebook       CodebookDefinitionRef
+	Metamodel      LifecycleMetamodelRef
 	Interpreter    InterpreterDefinitionRef
 	Implementation EpochImplementationRef
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/provenance"
 	digest "github.com/opencontainers/go-digest"
@@ -44,7 +45,17 @@ type occurrencePayload struct {
 	Body     string                      `json:"body_digest"`
 }
 
-func (s Service) Receive(ctx context.Context, delivery Delivery, extra ...provenance.Effect) (Receipt, error) {
+// Receive is the sole durable lifecycle write for a host delivery. It is a
+// commit surface of the normative write gate: it requires a delivery-receipt
+// gate.Warrant and refuses a zero or class-mismatched warrant with a typed
+// *gate.Refusal BEFORE any I/O, so an ungated write neither compiles (the
+// parameter is required) nor reaches the store. The gate is origin-blind: the
+// warrant certifies only the write class, never which host or delivery produced
+// it.
+func (s Service) Receive(ctx context.Context, warrant gate.Warrant, delivery Delivery, extra ...provenance.Effect) (Receipt, error) {
+	if refusal := gate.Authorize(warrant, gate.WriteDeliveryReceipt); refusal != nil {
+		return Receipt{}, refusal
+	}
 	if err := validateDelivery(delivery); err != nil {
 		return Receipt{}, err
 	}
@@ -125,8 +136,8 @@ func validateLifecycleExtras(extra []provenance.Effect) error {
 		return nil
 	}
 	interpreted := extra[0]
-	if interpreted.Sort != provenance.EffectEvidence || interpreted.ResultSlot != interpretedSlot || interpreted.EvidenceKind != interpretedKind || !effectDigestValid(interpreted) {
-		return invalid("The lifecycle delivery contains a forged interpreted effect.", "Its slot, kind, or content digest is not canonical interpreted evidence.", "Use receipt.Record.Effect without modifying it.")
+	if interpreted.Sort != provenance.EffectEvidence || interpreted.ResultSlot != interpretedSlot || interpreted.EvidenceKind != interpretedKindV2 || !effectDigestValid(interpreted) {
+		return invalid("The lifecycle delivery contains a forged interpreted effect.", "Its slot, kind, or content digest is not canonical interpreted.v2 evidence.", "Use receipt.Record.Effect without modifying it.")
 	}
 	if err := validateInterpretedPayload(interpreted.Payload); err != nil {
 		return invalid("The lifecycle delivery contains malformed interpreted evidence.", err.Error(), "Use receipt.Record.Effect without modifying or reconstructing its payload.")

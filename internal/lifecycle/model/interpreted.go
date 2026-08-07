@@ -16,6 +16,8 @@ type InterpretedRecord struct {
 	identities       []waist.SemanticIdentity
 	unresolved       []waist.UnresolvedFact
 	contract         ir.RuntimeContractID
+	metamodel        LifecycleMetamodelManifest
+	hasMetamodel     bool
 	constructed      bool
 }
 
@@ -24,6 +26,32 @@ func NewInterpretedRecord(id InterpretationID, occurrence OccurrenceID, semantic
 		return InterpretedRecord{}, fmt.Errorf("construct lifecycle interpreted record: invalid journal identity, semantic, or runtime contract")
 	}
 	return InterpretedRecord{InterpretationID: id, OccurrenceID: occurrence, semantic: semantic, identities: append([]waist.SemanticIdentity(nil), identities...), unresolved: append([]waist.UnresolvedFact(nil), unresolved...), contract: contract, constructed: true}, nil
+}
+
+// NewInterpretedRecordWithMetamodel constructs an interpreted.v2 record that
+// carries the metamodel coordinate it was interpreted against (D2). It is the
+// decode counterpart for interpreted.v2 evidence; the coordinate must be valid.
+// Committed interpreted.v1 records decode through NewInterpretedRecord and have
+// no coordinate — Metamodel() reports false for them so the read surface can
+// disclose "metamodel unresolved (pre-M5)" rather than inventing one.
+func NewInterpretedRecordWithMetamodel(id InterpretationID, occurrence OccurrenceID, semantic runtime.EventSemantic, identities []waist.SemanticIdentity, unresolved []waist.UnresolvedFact, contract ir.RuntimeContractID, manifest LifecycleMetamodelManifest) (InterpretedRecord, error) {
+	if !manifest.IsValid() {
+		return InterpretedRecord{}, fmt.Errorf("construct lifecycle interpreted.v2 record: invalid metamodel coordinate")
+	}
+	record, err := NewInterpretedRecord(id, occurrence, semantic, identities, unresolved, contract)
+	if err != nil {
+		return InterpretedRecord{}, err
+	}
+	record.metamodel = manifest
+	record.hasMetamodel = true
+	return record, nil
+}
+
+// Metamodel returns the metamodel coordinate this interpretation was produced
+// against and whether one is present. It is false for decoded interpreted.v1
+// records, which predate the metamodel producer (M5).
+func (r InterpretedRecord) Metamodel() (LifecycleMetamodelManifest, bool) {
+	return r.metamodel, r.hasMetamodel
 }
 func (r InterpretedRecord) JournalID() provenance.JournalID { return r.InterpretationID.JournalID() }
 func (r InterpretedRecord) Semantic() runtime.EventSemantic { return r.semantic }

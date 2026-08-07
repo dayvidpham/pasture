@@ -9,6 +9,8 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
+	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/provenance"
 	digest "github.com/opencontainers/go-digest"
@@ -112,7 +114,7 @@ func TestReceiveWritesBlobBeforeOccurrence(t *testing.T) {
 	clock := testClock{now: time.Unix(10, 0)}
 	j := contextJournal{calls: &calls, inputs: &inputs, result: provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: expectedOccurrenceResultSlot, ProducedJournalID: 41}}}}
 	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-order"}}
-	r, err := s.Receive(context.Background(), validDelivery())
+	r, err := s.Receive(context.Background(), mustDeliveryWarrant(), validDelivery())
 	if err != nil {
 		t.Fatalf("Receive: %v", err)
 	}
@@ -144,13 +146,13 @@ func TestReceiveAppendsOccurrenceAndOneExtraInOneOperation(t *testing.T) {
 		result:     provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: expectedOccurrenceResultSlot, ProducedJournalID: 43}}},
 	}
 	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-one-extra"}}
-	interpreted, err := NewInterpreted(mustSessionStartL2(t, "session-1"), mustClaudeLifecycleContract(t))
+	interpreted, err := NewInterpreted(mustSessionStartL2(t, "session-1"), mustClaudeLifecycleContract(t), metamodel.Active())
 	if err != nil {
 		t.Fatal(err)
 	}
 	extra := interpreted.Effect()
 
-	receipt, err := s.Receive(context.Background(), validDelivery(), extra)
+	receipt, err := s.Receive(context.Background(), mustDeliveryWarrant(), validDelivery(), extra)
 	if err != nil {
 		t.Fatalf("Receive: %v", err)
 	}
@@ -181,7 +183,7 @@ func TestReceiveRejectsForgedLifecycleExtraBeforeAppend(t *testing.T) {
 	j := contextJournal{calls: &calls, inputs: &inputs, result: provenance.CommittedResult{}}
 	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-forged-extra"}}
 	forged := provenance.Effect{Sort: provenance.EffectEvidence, ResultSlot: interpretedSlot, EvidenceKind: interpretedKind, ContentDigest: []byte{1}, Payload: []byte(`{"semantic":1}`)}
-	if _, err := s.Receive(context.Background(), validDelivery(), forged); err == nil {
+	if _, err := s.Receive(context.Background(), mustDeliveryWarrant(), validDelivery(), forged); err == nil {
 		t.Fatal("Receive accepted a forged interpreted effect; want validation before Append")
 	}
 	if len(inputs) != 0 {
@@ -202,7 +204,7 @@ func TestReceiveRejectsUnnormalizedBindingsBeforeWrites(t *testing.T) {
 			service := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: contextJournal{calls: &calls, inputs: &inputs}, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "invalid-binding"}}
 			delivery := validDelivery()
 			delivery.Bindings = []model.NativeBinding{binding}
-			if _, err := service.Receive(context.Background(), delivery); err == nil {
+			if _, err := service.Receive(context.Background(), mustDeliveryWarrant(), delivery); err == nil {
 				t.Fatal("accepted invalid binding")
 			}
 			if len(calls) != 0 || len(inputs) != 0 {
@@ -225,7 +227,7 @@ func TestReceiveAppendsOccurrenceAndExtrasInOneOperation(t *testing.T) {
 		result:     provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: expectedOccurrenceResultSlot, ProducedJournalID: 42}}},
 	}
 	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-extras"}}
-	interpreted, err := NewInterpreted(mustPostToolBatchL2(t, "session-1"), mustClaudeLifecycleContract(t))
+	interpreted, err := NewInterpreted(mustPostToolBatchL2(t, "session-1"), mustClaudeLifecycleContract(t), metamodel.Active())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +238,7 @@ func TestReceiveAppendsOccurrenceAndExtrasInOneOperation(t *testing.T) {
 	}
 	extraTwo := consultation.Effect()
 
-	receipt, err := s.Receive(context.Background(), validDelivery(), extraOne, extraTwo)
+	receipt, err := s.Receive(context.Background(), mustDeliveryWarrant(), validDelivery(), extraOne, extraTwo)
 	if err != nil {
 		t.Fatalf("Receive: %v", err)
 	}
@@ -266,7 +268,7 @@ func TestReceiveCrashAfterBlobLeavesNoOccurrence(t *testing.T) {
 	calls := []string{}
 	clock := testClock{now: time.Unix(10, 0)}
 	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: contextJournal{calls: &calls}, Clock: clock, Deadline: time.Second}, Identity: failingIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-crash"}}
-	if _, err := s.Receive(context.Background(), validDelivery()); err == nil {
+	if _, err := s.Receive(context.Background(), mustDeliveryWarrant(), validDelivery()); err == nil {
 		t.Fatal("Receive succeeded, want simulated crash")
 	}
 	if len(calls) != 1 || calls[0] != "blob" {
@@ -410,4 +412,24 @@ func validDelivery() Delivery {
 		panic(err)
 	}
 	return Delivery{Contract: contract, Event: 1, Envelope: model.OccurrenceEnvelopeRef{Runtime: model.RuntimeContractDefinitionRef{Contract: contract}}, Capture: model.CaptureValid, Body: []byte(`{"session_id":"s"}`)}
+}
+
+// mustDeliveryWarrant builds a valid delivery-receipt warrant for the receipt
+// tests, mirroring validDelivery's panic-on-error style. Receive requires a
+// delivery-receipt warrant; the gate certifies only the write class, so one
+// warrant covers every delivery in these tests.
+func mustDeliveryWarrant() gate.Warrant {
+	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "2.1.210")
+	if err != nil {
+		panic(err)
+	}
+	intent, refusal := gate.NewDeliveryIntent(contract, 1)
+	if refusal != nil {
+		panic(refusal)
+	}
+	warrant, refusal := gate.Legalize(intent)
+	if refusal != nil {
+		panic(refusal)
+	}
+	return warrant
 }

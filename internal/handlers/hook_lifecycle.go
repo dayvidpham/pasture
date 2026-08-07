@@ -13,9 +13,11 @@ import (
 	claudefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/claude"
 	codexfrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/codex"
 	opencodefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/opencode"
+	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
 	claudeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
 	codexingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/codex"
 	opencodeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/opencode"
+	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
 	"github.com/dayvidpham/pasture/internal/lifecycle/middleend"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/nativeresponse"
@@ -189,8 +191,31 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
+	// Every durable lifecycle write presents a gate.Warrant. Deliveries are the
+	// delivery-receipt write class; the gate is origin-blind, so one warrant
+	// covers the valid and the invalid-capture receipt uniformly. The warrant is
+	// pure (no I/O) and is built only on the admitted-dispatch path, so it never
+	// affects the pre-store ordering that keeps an invalid invocation from
+	// creating a database file (M1 §8).
+	deliveryIntent, refusal := gate.NewDeliveryIntent(capture.delivery.Contract, capture.delivery.Event)
+	if refusal != nil {
+		return backend.HostResponse{}, refusal
+	}
+	warrant, refusal := gate.Legalize(deliveryIntent)
+	if refusal != nil {
+		return backend.HostResponse{}, refusal
+	}
 	if capture.disposition != model.CaptureValid {
-		_, err = service.Receive(ctx, capture.delivery)
+		_, err = service.Receive(ctx, warrant, capture.delivery)
+		return backend.HostResponse{}, err
+	}
+	// On the valid-capture path, lazily journal the active metamodel BEFORE the
+	// delivery receipt is written. The definition-activation operation commits
+	// before the first delivery that references the coordinate, so a committed
+	// interpreted.v2 record can never cite an unjournaled metamodel. It is
+	// idempotent and race-safe (deterministic content-derived operation ID), so
+	// steady state is one bounded lookup and zero writes.
+	if _, err = receipt.EnsureActiveMetamodel(ctx, service); err != nil {
 		return backend.HostResponse{}, err
 	}
 	l1, identities, err := dispatch.bind(event.Kind, capture.delivery.Bindings)
@@ -201,11 +226,11 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
-	derivation, err := middleend.Derive(l2)
+	derivation, err := middleend.Derive(l2, metamodel.Active())
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
-	_, err = service.Receive(ctx, capture.delivery, derivation.Effects()...)
+	_, err = service.Receive(ctx, warrant, capture.delivery, derivation.Effects()...)
 	if err != nil {
 		return backend.HostResponse{}, err
 	}

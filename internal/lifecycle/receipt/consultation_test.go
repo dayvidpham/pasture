@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/provenance"
 )
@@ -32,7 +33,7 @@ func (jsonPort) ConsultationResponse()          {}
 
 func TestNewConsultationCanonicalAndOwned(t *testing.T) {
 	t.Parallel()
-	interpreted, err := NewInterpreted(mustPostToolBatchL2(t, "session-1"), mustClaudeLifecycleContract(t))
+	interpreted, err := NewInterpreted(mustPostToolBatchL2(t, "session-1"), mustClaudeLifecycleContract(t), metamodel.Active())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,8 +59,8 @@ func TestNewConsultationCanonicalAndOwned(t *testing.T) {
 
 func TestNewConsultationRejectsInvalidPortsAndJSON(t *testing.T) {
 	t.Parallel()
-	gate, _ := NewInterpreted(mustPostToolBatchL2(t, "s"), mustClaudeLifecycleContract(t))
-	observation, _ := NewInterpreted(mustSessionStartL2(t, "s"), mustClaudeLifecycleContract(t))
+	gate, _ := NewInterpreted(mustPostToolBatchL2(t, "s"), mustClaudeLifecycleContract(t), metamodel.Active())
+	observation, _ := NewInterpreted(mustSessionStartL2(t, "s"), mustClaudeLifecycleContract(t), metamodel.Active())
 	valid := jsonPort{raw: []byte(`{"ok":true}`), valid: true}
 	cases := []struct {
 		name                string
@@ -81,7 +82,7 @@ func TestNewConsultationRejectsInvalidPortsAndJSON(t *testing.T) {
 
 func TestNewConsultationValidatesBothPortsSymmetrically(t *testing.T) {
 	t.Parallel()
-	gate, _ := NewInterpreted(mustPostToolBatchL2(t, "s"), mustClaudeLifecycleContract(t))
+	gate, _ := NewInterpreted(mustPostToolBatchL2(t, "s"), mustClaudeLifecycleContract(t), metamodel.Active())
 	valid := jsonPort{raw: []byte(`{"ok":true}`), valid: true}
 	invalid := []struct {
 		name string
@@ -116,7 +117,7 @@ func TestNewConsultationValidatesBothPortsSymmetrically(t *testing.T) {
 
 func TestNewConsultationPayloadBound(t *testing.T) {
 	t.Parallel()
-	gate, _ := NewInterpreted(mustPostToolBatchL2(t, "s"), mustClaudeLifecycleContract(t))
+	gate, _ := NewInterpreted(mustPostToolBatchL2(t, "s"), mustClaudeLifecycleContract(t), metamodel.Active())
 	response := jsonPort{raw: []byte(`{}`), valid: true}
 	base := jsonPort{raw: []byte(`{"v":""}`), valid: true}
 	baseRecord, err := NewConsultation(gate, base, response)
@@ -141,8 +142,8 @@ func TestNewConsultationPayloadBound(t *testing.T) {
 
 func TestReceiveRejectsInvalidPairMatrixBeforeWrites(t *testing.T) {
 	t.Parallel()
-	first, _ := NewInterpreted(mustPostToolBatchL2(t, "one"), mustClaudeLifecycleContract(t))
-	second, _ := NewInterpreted(mustPostToolBatchL2(t, "two"), mustClaudeLifecycleContract(t))
+	first, _ := NewInterpreted(mustPostToolBatchL2(t, "one"), mustClaudeLifecycleContract(t), metamodel.Active())
+	second, _ := NewInterpreted(mustPostToolBatchL2(t, "two"), mustClaudeLifecycleContract(t), metamodel.Active())
 	valid := jsonPort{raw: []byte(`{"ok":true}`), valid: true}
 	consultFirst, _ := NewConsultation(first, valid, valid)
 	consultSecond, _ := NewConsultation(second, valid, valid)
@@ -163,7 +164,7 @@ func TestReceiveRejectsInvalidPairMatrixBeforeWrites(t *testing.T) {
 			inputs := []provenance.OperationInput{}
 			clock := testClock{now: time.Unix(10, 0)}
 			service := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: contextJournal{calls: &calls, inputs: &inputs}, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "invalid-pair"}}
-			if _, err := service.Receive(context.Background(), validDelivery(), tc.effects...); err == nil {
+			if _, err := service.Receive(context.Background(), mustDeliveryWarrant(), validDelivery(), tc.effects...); err == nil {
 				t.Fatal("accepted invalid pair")
 			}
 			if len(calls) != 0 || len(inputs) != 0 {
