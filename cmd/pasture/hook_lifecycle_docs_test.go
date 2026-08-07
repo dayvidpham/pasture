@@ -111,9 +111,9 @@ func TestRawHelpRendersBanner(t *testing.T) {
 func TestNativeHelpGoldenBytesUnchanged(t *testing.T) {
 	goldenDir := filepath.Join("testdata", "help-golden")
 	cases := []struct {
-		name      string
-		cmdPath   []string
-		golden    string
+		name    string
+		cmdPath []string
+		golden  string
 	}{
 		{name: "hook", cmdPath: []string{"hook"}, golden: "hook.txt"},
 		{name: "hook-lifecycle", cmdPath: []string{"hook", "lifecycle"}, golden: "hook-lifecycle.txt"},
