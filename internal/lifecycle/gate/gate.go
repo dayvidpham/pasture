@@ -121,11 +121,19 @@ func (i WriteIntent) Class() WriteClass { return i.class }
 // the host coordinates (a real runtime contract and a nonzero event kind) and
 // then retains only the write class — the gate never sees, and cannot act on,
 // which host or delivery produced the write.
-//
-// L1 STUB: sets the class without validating coordinates. Real per-class
-// validation lands in L3 (aura-plugins-a4bbb); the L2 constructor tests fail
-// against this stub until then.
 func NewDeliveryIntent(contract ir.RuntimeContractID, event model.ContractEventKind) (WriteIntent, *Refusal) {
+	if !contract.IsValid() {
+		return WriteIntent{}, refuseInvalidIntent(WriteDeliveryReceipt,
+			"a delivery-receipt write intent has no runtime contract",
+			"a delivery receipt must name the exact enabled host contract that produced it",
+			"supply the generated runtime contract coordinate from the dispatched delivery")
+	}
+	if event == 0 {
+		return WriteIntent{}, refuseInvalidIntent(WriteDeliveryReceipt,
+			"a delivery-receipt write intent has no event kind",
+			"a receipt with an unknown event kind cannot be interpreted or queried safely",
+			"supply the generated typed event kind from the dispatched delivery")
+	}
 	return WriteIntent{class: WriteDeliveryReceipt}, nil
 }
 
@@ -135,10 +143,13 @@ func NewDeliveryIntent(contract ir.RuntimeContractID, event model.ContractEventK
 // gate only needs a well-formed content identity to judge legality and because
 // model.CodebookCoordinate is introduced by a later wave; the coordinate's
 // version and id travel with the definition write itself, not the gate.
-//
-// L1 STUB: sets the class without validating the content identity (real
-// validation lands in L3).
 func NewDefinitionActivationIntent(content model.ContentIdentity) (WriteIntent, *Refusal) {
+	if content == (model.ContentIdentity{}) {
+		return WriteIntent{}, refuseInvalidIntent(WriteDefinitionActivation,
+			"a definition-activation write intent has no content identity",
+			"a journaled codebook definition must be addressed by the sha256 of its canonical body",
+			"supply the active codebook coordinate's content identity")
+	}
 	return WriteIntent{class: WriteDefinitionActivation}, nil
 }
 
@@ -146,20 +157,32 @@ func NewDefinitionActivationIntent(content model.ContentIdentity) (WriteIntent, 
 // host and the bounded edge count (1..MaxLinksPerOperation); an over-cap
 // derivation is refused so the operator narrows the scope rather than committing
 // an unbounded operation.
-//
-// L1 STUB: sets the class without validating the host or edge count (real
-// validation lands in L3).
 func NewLineageIntent(harness ir.HarnessID, links int) (WriteIntent, *Refusal) {
+	if !harness.IsValid() {
+		return WriteIntent{}, refuseInvalidIntent(WriteLineageLinks,
+			"a lineage-links write intent has no host",
+			"occurrence chains are reconstructed per host, so a lineage write must name one enabled harness",
+			"supply an enabled harness identity for the chain being materialized")
+	}
+	if links < 1 || links > MaxLinksPerOperation {
+		return WriteIntent{}, refuseInvalidIntent(WriteLineageLinks,
+			"a lineage-links write intent is empty or over the per-operation cap",
+			"a lineage operation commits between one and the bounded maximum of predecessor edges so one write cannot grow unbounded",
+			"narrow the scope with --binding so the derivation yields at most the per-operation cap of edges")
+	}
 	return WriteIntent{class: WriteLineageLinks}, nil
 }
 
 // NewDisclosureIntent constructs a disclosure write intent. It validates the
 // projection scope digest that fingerprints the disclosed content; the plan,
 // attempt, and result facts travel with the disclosure write itself.
-//
-// L1 STUB: sets the class without validating the scope digest (real validation
-// lands in L3).
 func NewDisclosureIntent(scope model.ContentIdentity) (WriteIntent, *Refusal) {
+	if scope == (model.ContentIdentity{}) {
+		return WriteIntent{}, refuseInvalidIntent(WriteDisclosure,
+			"a disclosure write intent has no projection scope",
+			"a disclosure records the sha256 fingerprint of the exact projection it releases",
+			"supply the canonical projection content digest as the disclosure scope")
+	}
 	return WriteIntent{class: WriteDisclosure}, nil
 }
 
@@ -184,11 +207,15 @@ func (w Warrant) Class() WriteClass { return w.class }
 // only the zero-value / unenumerated intent with RefusalUnknownClass. There is
 // no env, config, or runtime policy input — a gate with a second policy source
 // would be a different, unratified design.
-//
-// L1 STUB: issues a warrant for any intent without refusing the zero /
-// unenumerated intent. The real static policy (and the RefusalUnknownClass
-// refusal) lands in L3; the L2 Legalize-refusal tests fail against this stub.
 func Legalize(intent WriteIntent) (Warrant, *Refusal) {
+	if !intent.class.IsValid() {
+		return Warrant{}, newRefusal(intent.class, RefusalUnknownClass,
+			"a durable lifecycle write was refused: its write class is not one of the enumerated Pasture-side classes",
+			"Legalize issues warrants only for the closed WriteClass set, so a zero-value or unenumerated intent cannot be legalized",
+			"legalizing a lifecycle write intent (internal/lifecycle/gate in gate.Legalize)",
+			"no warrant was issued and no durable write can proceed",
+			"construct the intent with one of the gate.NewXxxIntent constructors for an enumerated write class before calling Legalize")
+	}
 	return Warrant{class: intent.class, issued: true}, nil
 }
 
@@ -198,9 +225,30 @@ func Legalize(intent WriteIntent) (Warrant, *Refusal) {
 // zero/unissued warrant (an ungated write) and RefusalClassMismatch for a
 // warrant issued for a different class (a misrouted write). Because it runs
 // before any I/O, a refused write never writes a blob or appends an operation.
-//
-// L1 STUB: authorizes every warrant. The real refusal policy lands in L3; the
-// L2 Authorize-refusal and read-back-empty tests fail against this stub.
 func Authorize(warrant Warrant, expected WriteClass) *Refusal {
+	if !expected.IsValid() {
+		return newRefusal(expected, RefusalUnknownClass,
+			"a durable lifecycle write was refused: the commit surface named an unenumerated expected class",
+			"a commit surface must authorize against one enumerated WriteClass",
+			"authorizing a lifecycle write (internal/lifecycle/gate in gate.Authorize)",
+			"nothing was written",
+			"pass one of the enumerated gate.WriteClass constants as the expected class")
+	}
+	if !warrant.IsValid() {
+		return newRefusal(expected, RefusalInvalidIntent,
+			"a durable "+expected.String()+" write was refused: it presented no gate warrant",
+			"every durable lifecycle write must present a Warrant issued by gate.Legalize; a zero-value warrant means the write was never legalized",
+			"authorizing a lifecycle write (internal/lifecycle/gate in gate.Authorize)",
+			"nothing was written",
+			"obtain a warrant with gate.Legalize for the write's class and present it at the commit surface")
+	}
+	if warrant.Class() != expected {
+		return newRefusal(warrant.Class(), RefusalClassMismatch,
+			"a durable "+expected.String()+" write was refused: it presented a "+warrant.Class().String()+" warrant",
+			"a warrant only admits the exact class it was legalized for, so a warrant for another class cannot authorize this write",
+			"authorizing a lifecycle write (internal/lifecycle/gate in gate.Authorize)",
+			"nothing was written",
+			"legalize an intent of the "+expected.String()+" class and present that warrant at this commit surface")
+	}
 	return nil
 }
