@@ -25,6 +25,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	"github.com/dayvidpham/pasture/internal/lifecycle/codebook"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/nativeresponse"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
@@ -137,7 +138,7 @@ const (
 	occurrenceLifecycleContract   = "claude-code/2.1.210"
 	interpretedLifecycleContract  = "claude-code/claude-code@2.1.210"
 	occurrenceEvidenceKind        = provenance.EvidenceKind("pasture.lifecycle.occurrence.v1")
-	interpretedEvidenceKind       = provenance.EvidenceKind("pasture.lifecycle.interpreted.v1")
+	interpretedEvidenceKind       = provenance.EvidenceKind("pasture.lifecycle.interpreted.v2")
 	consultationEvidenceKind      = provenance.EvidenceKind("pasture.lifecycle.consultation.v1")
 	expectedSessionIdentity       = "3696b790-3973-49f2-b156-9d82146bf7ec"
 	expectedInterpretedIdentities = `[{"kind":1,"value":"3696b790-3973-49f2-b156-9d82146bf7ec"}]`
@@ -804,6 +805,13 @@ type interpretedEvidencePayload struct {
 	Identities      []interpretedIdentityPayload   `json:"identities"`
 	UnresolvedFacts []interpretedUnresolvedPayload `json:"unresolved_facts"`
 	Contract        string                         `json:"contract"`
+	Codebook        interpretedCodebookPayload     `json:"codebook"`
+}
+
+type interpretedCodebookPayload struct {
+	ID      string `json:"id"`
+	Version uint32 `json:"version"`
+	Content string `json:"content"`
 }
 
 func buildLifecycleBinary(t *testing.T, binary string) {
@@ -881,7 +889,7 @@ func decodeOccurrencePayload(t *testing.T, raw []byte) lifecycleOccurrencePayloa
 func decodeInterpretedPayload(t *testing.T, raw []byte) interpretedEvidencePayload {
 	t.Helper()
 	members := decodeJSONObject(t, raw)
-	require.ElementsMatch(t, []string{"semantic", "identities", "unresolved_facts", "contract"}, mapKeys(members))
+	require.ElementsMatch(t, []string{"semantic", "identities", "unresolved_facts", "contract", "codebook"}, mapKeys(members))
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var payload interpretedEvidencePayload
@@ -994,7 +1002,7 @@ func assertInterpretedEvidence(t *testing.T, raw []byte) {
 	require.NoError(t, decoder.Decode(&members))
 	var trailing any
 	require.ErrorIs(t, decoder.Decode(&trailing), io.EOF)
-	require.ElementsMatch(t, []string{"semantic", "identities", "unresolved_facts", "contract"}, mapKeys(members))
+	require.ElementsMatch(t, []string{"semantic", "identities", "unresolved_facts", "contract", "codebook"}, mapKeys(members))
 	require.Equal(t, json.RawMessage(`1`), members["semantic"])
 	require.Equal(t, json.RawMessage(expectedInterpretedIdentities), members["identities"])
 	require.Equal(t, json.RawMessage(`"claude-code/claude-code@2.1.210"`), members["contract"])
@@ -1010,6 +1018,11 @@ func assertInterpretedEvidence(t *testing.T, raw []byte) {
 	require.Equal(t, expectedSessionIdentity, payload.Identities[0].Value)
 	require.Empty(t, payload.UnresolvedFacts)
 	require.Equal(t, interpretedLifecycleContract, payload.Contract)
+	// interpreted.v2 carries the codebook coordinate it was interpreted against.
+	active := codebook.Active()
+	require.Equal(t, string(active.ID), payload.Codebook.ID)
+	require.Equal(t, active.Version, payload.Codebook.Version)
+	require.Equal(t, hex.EncodeToString(active.Content[:]), payload.Codebook.Content)
 }
 
 func mapKeys(values map[string]json.RawMessage) []string {

@@ -11,6 +11,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/dayvidpham/provenance"
 )
@@ -77,7 +78,7 @@ func TestEnsureActiveCodebookIdempotent(t *testing.T) {
 		t.Fatalf("open tracker: %v", err)
 	}
 	defer tracker.Close()
-	service, err := tasks.NewLifecycleReceiptService(tracker, gateTestClock{}, &gateTestOperations{})
+	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, gateTestClock{}, &gateTestOperations{}, timeouts.TestProfile())
 	if err != nil {
 		t.Fatalf("wire production receipt service: %v", err)
 	}
@@ -118,7 +119,7 @@ func TestEnsureActiveCodebookRaceSafe(t *testing.T) {
 		t.Fatalf("open tracker: %v", err)
 	}
 	defer tracker.Close()
-	service, err := tasks.NewLifecycleReceiptService(tracker, &incrementingClock{}, &gateTestOperations{})
+	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, &incrementingClock{}, &gateTestOperations{}, timeouts.TestProfile())
 	if err != nil {
 		t.Fatalf("wire production receipt service: %v", err)
 	}
