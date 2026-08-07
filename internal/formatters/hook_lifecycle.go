@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/dayvidpham/pasture/internal/acceptance/origin"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 )
 
@@ -65,12 +66,17 @@ func HookLifecycle(w io.Writer, page model.LifecyclePage, format string) error {
 }
 
 type lifecycleJSONRecord struct {
-	JournalID            any                        `json:"journalId"`
-	Event                model.ContractEventKind    `json:"event"`
-	RegistrationContract string                     `json:"registrationContract"`
-	Capture              model.CaptureDisposition   `json:"capture"`
-	PayloadDigest        string                     `json:"payloadDigest"`
-	Interpreted          []lifecycleJSONInterpreted `json:"interpreted"`
+	JournalID            any                      `json:"journalId"`
+	Event                model.ContractEventKind  `json:"event"`
+	RegistrationContract string                   `json:"registrationContract"`
+	Capture              model.CaptureDisposition `json:"capture"`
+	PayloadDigest        string                   `json:"payloadDigest"`
+	// Origin is the capture provenance origin of the occurrence (M4 raw
+	// ingestion read disclosure). The native sentinel is the zero value: the
+	// member is omitted so pre-origin and native list output stays
+	// byte-identical; only a non-zero origin (e.g. "raw") serializes.
+	Origin      origin.CaptureOrigin       `json:"origin,omitempty"`
+	Interpreted []lifecycleJSONInterpreted `json:"interpreted"`
 }
 type lifecycleJSONInterpreted struct {
 	JournalID  any                     `json:"journalId"`
