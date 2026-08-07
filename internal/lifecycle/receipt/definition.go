@@ -34,28 +34,22 @@ func EnsureActiveCodebook(ctx context.Context, s Service) (model.CodebookDefinit
 			"No codebook definition was resolved or committed.",
 			"Construct the service through tasks.NewLifecycleReceiptService.", nil)
 	}
+	// Bounded, content-addressed existence check: the operation identity is
+	// derived from the codebook content, so an already-active codebook resolves
+	// with a single indexed lookup and no writes.
+	ref, journaled, err := ResolveActiveCodebook(s.Appender.Journal)
+	if err != nil {
+		return model.CodebookDefinitionRef{}, err
+	}
+	if journaled {
+		return ref, nil
+	}
+
 	book := codebook.Active()
 	write, err := NewDefinitionActivation(book, codebook.Body())
 	if err != nil {
 		return model.CodebookDefinitionRef{}, err
 	}
-
-	// Bounded, content-addressed existence check: the operation identity is
-	// derived from the codebook content, so an already-active codebook resolves
-	// with a single indexed lookup and no writes.
-	committed, err := s.Appender.Journal.LookupCommitted(write.OperationID())
-	if err != nil {
-		return model.CodebookDefinitionRef{}, structured(pasterrors.CategoryStorage,
-			"The active codebook definition could not be looked up.",
-			"The provenance journal rejected the bounded operation-identity lookup.",
-			"Ensuring the active codebook definition (internal/lifecycle/receipt/definition.go in receipt.EnsureActiveCodebook).",
-			"It is unknown whether the codebook is already journaled; no delivery should proceed until this succeeds.",
-			"Confirm journal health and retry.", err)
-	}
-	if committed.Kind == provenance.CommittedExact {
-		return definitionRefFromSlots(book, committed.ResultSlots)
-	}
-
 	// Absent: legalize the activation through the write gate and commit. The
 	// commit is race-safe (deterministic operation identity), so a concurrent
 	// first delivery is admitted as benign-already-activated.
@@ -78,6 +72,45 @@ func EnsureActiveCodebook(ctx context.Context, s Service) (model.CodebookDefinit
 			Content:    book.Content,
 		},
 	}, nil
+}
+
+// ResolveActiveCodebook reports the journaled definition for the active codebook
+// WITHOUT writing anything. It is the read-only counterpart to
+// EnsureActiveCodebook, backing the `hook lifecycle codebook` read surface: it
+// resolves the deterministic content-derived operation identity and returns the
+// journaled definition reference when the codebook has already been activated,
+// or journaled=false when it has not.
+func ResolveActiveCodebook(journal provenance.Journal) (model.CodebookDefinitionRef, bool, error) {
+	if journal == nil {
+		return model.CodebookDefinitionRef{}, false, structured(pasterrors.CategoryValidation,
+			"The active codebook definition cannot be resolved.",
+			"Resolving the journaled codebook definition requires the provenance journal.",
+			"Resolving the active codebook definition (internal/lifecycle/receipt/definition.go in receipt.ResolveActiveCodebook).",
+			"No codebook definition was resolved.",
+			"Provide the unified store's provenance journal.", nil)
+	}
+	book := codebook.Active()
+	write, err := NewDefinitionActivation(book, codebook.Body())
+	if err != nil {
+		return model.CodebookDefinitionRef{}, false, err
+	}
+	committed, err := journal.LookupCommitted(write.OperationID())
+	if err != nil {
+		return model.CodebookDefinitionRef{}, false, structured(pasterrors.CategoryStorage,
+			"The active codebook definition could not be looked up.",
+			"The provenance journal rejected the bounded operation-identity lookup.",
+			"Resolving the active codebook definition (internal/lifecycle/receipt/definition.go in receipt.ResolveActiveCodebook).",
+			"It is unknown whether the codebook is already journaled.",
+			"Confirm journal health and retry.", err)
+	}
+	if committed.Kind != provenance.CommittedExact {
+		return model.CodebookDefinitionRef{}, false, nil
+	}
+	ref, err := definitionRefFromSlots(book, committed.ResultSlots)
+	if err != nil {
+		return model.CodebookDefinitionRef{}, false, err
+	}
+	return ref, true, nil
 }
 
 func definitionRefFromSlots(book model.CodebookCoordinate, slots []provenance.ResultSlotBinding) (model.CodebookDefinitionRef, error) {
