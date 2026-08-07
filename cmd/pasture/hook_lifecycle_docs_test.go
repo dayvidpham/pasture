@@ -175,12 +175,15 @@ func TestProtocolDocsNonRecommendedMarking(t *testing.T) {
 		t.Fatalf("read README.md: %v", err)
 	}
 	body := string(data)
+	// Collapse whitespace so prose wrapped across lines still matches the
+	// canonical posture phrases.
+	normalized := strings.Join(strings.Fields(body), " ")
 	for _, phrase := range []string{
 		"raw ingestion",
 		"not the default path",
-		"no second semantic",
+		"second semantic model",
 	} {
-		if !strings.Contains(body, phrase) {
+		if !strings.Contains(normalized, phrase) {
 			t.Errorf("README.md must carry the protocol posture phrase %q", phrase)
 		}
 	}
