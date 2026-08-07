@@ -9,32 +9,27 @@ import (
 	"time"
 
 	digest "github.com/opencontainers/go-digest"
+
+	"github.com/dayvidpham/pasture/internal/acceptance/origin"
 )
 
 // MaxCaptureFixtureBytes bounds one native capture payload during validation.
 const MaxCaptureFixtureBytes = 1 << 20
 
-type CaptureOrigin string
+// CaptureOrigin aliases the single capture-origin enum definition in
+// internal/acceptance/origin. The definition lives in that leaf package so the
+// lifecycle receipt and envelope carriers can import it without closing an
+// import cycle through acceptance -> internal/tasks -> lifecycle; the corpus
+// re-exports the type and values here under their historical names.
+type CaptureOrigin = origin.CaptureOrigin
 
 const (
-	OriginAuthenticCapture CaptureOrigin = "authentic-capture"
-	OriginPinnedContract   CaptureOrigin = "pinned-contract"
-	OriginReviewFinding    CaptureOrigin = "review-finding"
-	OriginAuthored         CaptureOrigin = "authored"
+	OriginAuthenticCapture = origin.OriginAuthenticCapture
+	OriginPinnedContract   = origin.OriginPinnedContract
+	OriginReviewFinding    = origin.OriginReviewFinding
+	OriginAuthored         = origin.OriginAuthored
+	OriginRaw              = origin.OriginRaw
 )
-
-func (o CaptureOrigin) IsValid() bool {
-	return o == OriginAuthenticCapture || o == OriginPinnedContract || o == OriginReviewFinding || o == OriginAuthored
-}
-
-func (o *CaptureOrigin) UnmarshalText(text []byte) error {
-	value := CaptureOrigin(text)
-	if !value.IsValid() {
-		return fmt.Errorf("unknown capture origin %q", text)
-	}
-	*o = value
-	return nil
-}
 
 type CaptureProvenance struct {
 	Origin         CaptureOrigin
