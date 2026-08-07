@@ -209,6 +209,15 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 		_, err = service.Receive(ctx, warrant, capture.delivery)
 		return backend.HostResponse{}, err
 	}
+	// On the valid-capture path, lazily journal the active codebook BEFORE the
+	// delivery receipt is written. The definition-activation operation commits
+	// before the first delivery that references the coordinate, so a committed
+	// interpreted.v2 record can never cite an unjournaled codebook. It is
+	// idempotent and race-safe (deterministic content-derived operation ID), so
+	// steady state is one bounded lookup and zero writes.
+	if _, err = receipt.EnsureActiveCodebook(ctx, service); err != nil {
+		return backend.HostResponse{}, err
+	}
 	l1, identities, err := dispatch.bind(event.Kind, capture.delivery.Bindings)
 	if err != nil {
 		return backend.HostResponse{}, err
