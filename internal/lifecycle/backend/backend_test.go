@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
+	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
 	"github.com/dayvidpham/pasture/internal/lifecycle/legalize"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
@@ -120,7 +121,15 @@ func TestConsultationEffectsAreAcceptedByReceiptServiceInOrder(t *testing.T) {
 		Capture:  model.CaptureValid,
 		Body:     []byte(`{"hook_event_name":"Elicitation"}`),
 	}
-	if _, err := service.Receive(context.Background(), delivery, interpreted.Effect(), consultation.Effect()); err != nil {
+	deliveryIntent, refusal := gate.NewDeliveryIntent(delivery.Contract, delivery.Event)
+	if refusal != nil {
+		t.Fatalf("build delivery intent: %v", refusal)
+	}
+	warrant, refusal := gate.Legalize(deliveryIntent)
+	if refusal != nil {
+		t.Fatalf("legalize delivery intent: %v", refusal)
+	}
+	if _, err := service.Receive(context.Background(), warrant, delivery, interpreted.Effect(), consultation.Effect()); err != nil {
 		t.Fatalf("Receive() rejected production effects: %v", err)
 	}
 	if len(calls) != 2 || calls[0] != "blob" || calls[1] != "append" {

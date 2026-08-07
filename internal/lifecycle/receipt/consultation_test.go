@@ -163,7 +163,7 @@ func TestReceiveRejectsInvalidPairMatrixBeforeWrites(t *testing.T) {
 			inputs := []provenance.OperationInput{}
 			clock := testClock{now: time.Unix(10, 0)}
 			service := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: contextJournal{calls: &calls, inputs: &inputs}, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "invalid-pair"}}
-			if _, err := service.Receive(context.Background(), validDelivery(), tc.effects...); err == nil {
+			if _, err := service.Receive(context.Background(), mustDeliveryWarrant(), validDelivery(), tc.effects...); err == nil {
 				t.Fatal("accepted invalid pair")
 			}
 			if len(calls) != 0 || len(inputs) != 0 {
