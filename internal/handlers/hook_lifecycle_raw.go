@@ -7,9 +7,15 @@ import (
 	"strings"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
+	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
+	"github.com/dayvidpham/pasture/internal/lifecycle/middleend"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
+	"github.com/dayvidpham/pasture/internal/tasks"
 )
 
 const hookLifecycleRawWhere = "Ingesting a raw lifecycle event (internal/handlers/hook_lifecycle_raw.go in handlers.HookLifecycleRaw)."
@@ -123,15 +129,154 @@ func rawAcknowledge(harness ir.HarnessID) []byte {
 }
 
 // HookLifecycleRaw admits a raw lifecycle payload through the SAME gate path
-// as native (NewDeliveryIntent → Legalize → service.Receive), stamps the
+// as native (registry dispatch → activation gate → bounded read → parse →
+// bind → EventBinding.NewEvent → Derive → service.Receive), stamps the
 // occurrence with the raw origin, and only on the nil-error path returns the
-// canonical proceed bytes the command writes to stdout. An unknown harness,
-// unknown wire schema, malformed stdin, or over-limit stdin refuses BEFORE the
-// store opens, preserving the M1 §8 property that an invalid invocation
-// creates no database file.
+// canonical proceed bytes the command writes to stdout (commit-before-stdout,
+// mirroring HookLifecycleNative). It differs from native in exactly two
+// ways:
 //
-// Implemented in SLICE-2-L3. The L1 signature is the frozen contract; the
-// body is replaced by the implementation layer.
-func HookLifecycleRaw(_ context.Context, _ HookLifecycleRawInput) ([]byte, error) {
-	return nil, fmt.Errorf("HookLifecycleRaw is not implemented yet (SLICE-2-L3)")
+//   - the wire schema identity is part of the ingress contract: unknown
+//     values refuse with the pinned-identity diagnostic before ANY read, and
+//     the identity must describe the selected harness's own registration;
+//   - the UAT-Q1 "reject outright" posture: a raw capture that does not
+//     classify as a valid capture refuses with a typed CategoryValidation
+//     error instead of recording a CaptureDisposition evidence row.
+//
+// Every refusal — unknown harness, unknown or mismatched wire schema, missing
+// host version, unknown event, withheld event, over-limit stdin, and
+// malformed stdin — happens BEFORE the store opens, preserving the M1 §8
+// property that an invalid invocation creates no database file (nor -wal/-
+// shm sidecar). The store opens only after the capture classifies valid.
+func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) ([]byte, error) {
+	if ctx == nil || in.Input == nil || in.Clock == nil || in.Operations == nil {
+		return nil, rawLifecycleError(pasterrors.CategoryValidation, "The raw lifecycle ingress boundary is incompletely wired.", "A context, stdin, clock, operation identity source, and store opener are required.", "Nothing was read or recorded.", "Invoke this path through the production raw lifecycle command.", nil)
+	}
+	if !in.SchemaVersion.IsValid() {
+		if parsed, err := ParseRawSchemaVersion(string(in.SchemaVersion)); err != nil {
+			return nil, rawLifecycleError(pasterrors.CategoryValidation, err.Error(), "The wire schema is the versioned decoder identity pinned to this build; only the closed set can be decoded.", "The input was not read and no database was opened.", "Pass one of the wire schema identities listed in the diagnostic.", nil)
+		} else {
+			in.SchemaVersion = parsed
+		}
+	}
+	dispatch, err := dispatchLifecycle(in.Harness)
+	if err != nil {
+		return nil, err
+	}
+	if in.SchemaVersion != rawSchemaVersionFor(in.Harness) {
+		return nil, rawLifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("Wire schema %q does not describe the %s registration pinned to this build (%q).", in.SchemaVersion, dispatch.name, rawSchemaVersionFor(in.Harness)), "The wire identities are pinned one-to-one to each harness registration; a mismatched pairing cannot be decoded.", "The input was not read and no database was opened.", "Pass the wire schema that names the harness's own registration.", nil)
+	}
+	// The activation catalog is a fallible generated proof; resolve it here at
+	// dispatch time (the same point the native flow resolves it), preserving
+	// the wrapped error text verbatim.
+	activations, err := dispatch.activations()
+	if err != nil {
+		return nil, fmt.Errorf("dispatch %s raw lifecycle activation: %w", dispatch.name, err)
+	}
+	if in.Activations != nil {
+		activations = in.Activations
+	}
+	if strings.TrimSpace(in.HostVersion) == "" {
+		return nil, rawLifecycleError(pasterrors.CategoryValidation, "The observed host version is missing.", "Every retained occurrence records which host version produced it, without using the value as an admission check.", "The input was not read and no database was opened.", "Pass the observed version through --host-version.", nil)
+	}
+	var event registration.Event
+	for _, candidate := range dispatch.manifest.Events {
+		if candidate.NativeName == in.Event {
+			event = candidate
+			break
+		}
+	}
+	if event.Kind == 0 {
+		return nil, rawLifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("Event %q is not in the generated %s registration.", in.Event, dispatch.name), "Ingress trusts the generated registration coordinate rather than an unparsed payload claim.", "The input was not read and no database was opened.", "Invoke one of the events present in the support report.", nil)
+	}
+	state, found := activationFor(event.Kind, activations)
+	if !found || state.State != activation.Enabled {
+		reason := activation.WithheldMissingFixture
+		if found {
+			reason = state.Reason
+		}
+		return nil, rawLifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("%s event %q is withheld (reason %s).", dispatch.name, event.NativeName, reason.String()), "Only events with authentic capture evidence and a passing production proof are admitted; raw ingestion admits the same closed set.", "The input was not read and no database was opened.", "Inspect the generated activation support report and enable the event only after its proof passes.", nil)
+	}
+	raw, err := io.ReadAll(io.LimitReader(in.Input, model.MaxNativePayloadBytes+1))
+	if err != nil {
+		return nil, rawLifecycleError(pasterrors.CategoryValidation, "The raw payload could not be read.", "Standard input failed during the bounded read, the raw handler never truncates retained bytes.", "No database was opened.", "Retry with a readable complete payload.", err)
+	}
+	if len(raw) > model.MaxNativePayloadBytes {
+		return nil, rawLifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("The raw payload exceeds the %d-byte bound.", model.MaxNativePayloadBytes), "The raw input gate never truncates retained evidence: the same 1 MiB bound the native ingress enforces.", "No database was opened.", "Reduce the raw payload below the static bound.", nil)
+	}
+	capture := dispatch.rawParse(raw, event, in.HostVersion)
+	if capture.disposition != model.CaptureValid {
+		return nil, rawDispositionRefusal(dispatch.name, capture.disposition, in.SchemaVersion)
+	}
+	tracker, err := tasks.OpenTaskTracker(in.DBPath)
+	if err != nil {
+		return nil, err
+	}
+	defer tracker.Close()
+	service, err := tasks.NewLifecycleReceiptService(tracker, in.Clock, in.Operations)
+	if err != nil {
+		return nil, err
+	}
+	// Every durable lifecycle write presents a gate.Warrant. Raw deliveries
+	// traverse exactly the native delivery-receipt write class: the gate is
+	// origin-blind, so the same pure, no-IO warrant covers them (D4: same
+	// warrant, no origin discrimination).
+	deliveryIntent, refusal := gate.NewDeliveryIntent(capture.delivery.Contract, capture.delivery.Event)
+	if refusal != nil {
+		return nil, refusal
+	}
+	warrant, refusal := gate.Legalize(deliveryIntent)
+	if refusal != nil {
+		return nil, refusal
+	}
+	// On the valid-capture path, lazily journal the active metamodel BEFORE
+	// the delivery receipt is written, exactly as native does, so a committed
+	// record can never cite an uncompiled metamodel.
+	if _, err = receipt.EnsureActiveMetamodel(ctx, service); err != nil {
+		return nil, err
+	}
+	l1, identities, err := dispatch.bind(event.Kind, capture.delivery.Bindings)
+	if err != nil {
+		return nil, err
+	}
+	l2, err := l1.NewEvent(identities)
+	if err != nil {
+		return nil, err
+	}
+	derivation, err := middleend.Derive(l2, metamodel.Active())
+	if err != nil {
+		return nil, err
+	}
+	if _, err = service.Receive(ctx, warrant, capture.delivery, derivation.Effects()...); err != nil {
+		return nil, err
+	}
+	return rawAcknowledge(in.Harness), nil
+}
+
+// rawDispositionRefusal renders the typed refusal for a raw capture that did
+// NOT classify valid (UAT-Q1 "reject outright"). Each disposition names its
+// own diagnosis so the operator can act on the exact failure class.
+func rawDispositionRefusal(name string, disposition model.CaptureDisposition, schema RawSchemaVersion) error {
+	var what string
+	switch disposition {
+	case model.CaptureMalformed:
+		what = fmt.Sprintf("The raw payload is not a JSON object the %s classifier can capture for wire identity %q.", name, schema)
+	case model.CaptureInvalidUTF8:
+		what = fmt.Sprintf("The raw payload is not valid UTF-8 for the %s classifier (wire identity %q).", name, schema)
+	case model.CaptureDuplicateField:
+		what = fmt.Sprintf("The raw payload repeats an object member; the %s classifier rejects duplicate fields (wire identity %q).", name, schema)
+	case model.CaptureUnsupportedSchema:
+		what = fmt.Sprintf("The raw payload references fields the %s registration does not support (wire identity %q).", name, schema)
+	case model.CaptureEventMismatch:
+		what = fmt.Sprintf("The raw payload's own event identity does not match the invoked %s event (wire identity %q).", name, schema)
+	default:
+		what = fmt.Sprintf("The raw payload was not captured as a valid event by the %s classifier (wire identity %q).", name, schema)
+	}
+	return rawLifecycleError(pasterrors.CategoryValidation, what, "Raw ingestion takes the reject-outright posture: a capture that does not classify valid is refused, never recorded as an evidence row.", "The input was not read and no database was opened.", "Submit a raw payload that classifies as a valid capture of the pinned wire schema.", nil)
+}
+
+// rawLifecycleError is the raw-surface error constructor; it carries the raw
+// ingress location in the Where field so diagnostics name the exact file.
+func rawLifecycleError(category pasterrors.Category, what, why, impact, fix string, cause error) error {
+	return &pasterrors.StructuredError{Category: category, What: what, Why: why, Where: hookLifecycleRawWhere, Impact: impact, Fix: fix, Cause: cause}
 }

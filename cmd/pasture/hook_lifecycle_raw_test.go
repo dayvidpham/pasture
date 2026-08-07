@@ -41,6 +41,10 @@ func TestRawLifecycleGateFlowMirrorsNative(t *testing.T) {
 	require.NoError(t, err)
 
 	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+	// The valid path commits a receipt, exactly like the native positive tests
+	// (hook_lifecycle_production_test.go): the unified store must be
+	// bootstrapped once so the ingress identity resolves before the hook runs.
+	initializeLifecycleTestDatabase(t, dbPath)
 	command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
 		"hook", "lifecycle", "raw",
 		"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.222",
