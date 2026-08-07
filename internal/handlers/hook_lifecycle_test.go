@@ -81,8 +81,8 @@ func TestHookLifecycleResponseOpenCodeCommitsBeforeReturning(t *testing.T) {
 		wantResponse         bool
 		wantEvidence         []provenance.EvidenceKind
 	}{
-		{name: "observation", fixture: "session_created_1_18_10.capture.json", event: "session.created", wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v1"}},
-		{name: "gate", fixture: "tool_execute_before_1_18_10.capture.json", event: "tool.execute.before", wantResponse: true, wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v1", "pasture.lifecycle.consultation.v1"}},
+		{name: "observation", fixture: "session_created_1_18_10.capture.json", event: "session.created", wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2"}},
+		{name: "gate", fixture: "tool_execute_before_1_18_10.capture.json", event: "tool.execute.before", wantResponse: true, wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2", "pasture.lifecycle.consultation.v1"}},
 	}
 	for _, test := range tests {
 		test := test
@@ -123,7 +123,7 @@ func TestHookLifecycleResponseOpenCodeCommitsBeforeReturning(t *testing.T) {
 			}
 			if test.wantResponse {
 				occurrence := queryOneEvidence(t, tracker, "pasture.lifecycle.occurrence.v1")
-				interpreted := queryOneEvidence(t, tracker, "pasture.lifecycle.interpreted.v1")
+				interpreted := queryOneEvidence(t, tracker, "pasture.lifecycle.interpreted.v2")
 				consultation := queryOneEvidence(t, tracker, "pasture.lifecycle.consultation.v1")
 				require.Equal(t, occurrence.ProducingOperationJournalID, interpreted.ProducingOperationJournalID)
 				require.Equal(t, interpreted.ProducingOperationJournalID, consultation.ProducingOperationJournalID)

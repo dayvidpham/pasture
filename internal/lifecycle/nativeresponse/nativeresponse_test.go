@@ -8,6 +8,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
+	"github.com/dayvidpham/pasture/internal/lifecycle/codebook"
 	codexfrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/codex"
 	codexingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/codex"
 	"github.com/dayvidpham/pasture/internal/lifecycle/middleend"
@@ -102,7 +103,7 @@ func proceedResponse(t *testing.T) backend.HostResponse {
 	require.NoError(t, err)
 	l2, err := l1.NewEvent(identities)
 	require.NoError(t, err)
-	derivation, err := middleend.Derive(l2)
+	derivation, err := middleend.Derive(l2, codebook.Active())
 	require.NoError(t, err)
 	response := derivation.Response()
 	require.True(t, response.IsValid(), "the PreToolUse gate must derive a valid Proceed response")

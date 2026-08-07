@@ -136,8 +136,8 @@ func validateLifecycleExtras(extra []provenance.Effect) error {
 		return nil
 	}
 	interpreted := extra[0]
-	if interpreted.Sort != provenance.EffectEvidence || interpreted.ResultSlot != interpretedSlot || interpreted.EvidenceKind != interpretedKind || !effectDigestValid(interpreted) {
-		return invalid("The lifecycle delivery contains a forged interpreted effect.", "Its slot, kind, or content digest is not canonical interpreted evidence.", "Use receipt.Record.Effect without modifying it.")
+	if interpreted.Sort != provenance.EffectEvidence || interpreted.ResultSlot != interpretedSlot || interpreted.EvidenceKind != interpretedKindV2 || !effectDigestValid(interpreted) {
+		return invalid("The lifecycle delivery contains a forged interpreted effect.", "Its slot, kind, or content digest is not canonical interpreted.v2 evidence.", "Use receipt.Record.Effect without modifying it.")
 	}
 	if err := validateInterpretedPayload(interpreted.Payload); err != nil {
 		return invalid("The lifecycle delivery contains malformed interpreted evidence.", err.Error(), "Use receipt.Record.Effect without modifying or reconstructing its payload.")

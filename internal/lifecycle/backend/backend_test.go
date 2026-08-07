@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
+	"github.com/dayvidpham/pasture/internal/lifecycle/codebook"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
 	"github.com/dayvidpham/pasture/internal/lifecycle/legalize"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
@@ -167,7 +168,7 @@ func realL2(t *testing.T, event runtime.ClaudeLifecycleEvent) waist.L2 {
 
 func interpretedRecord(t *testing.T, l2 waist.L2) receipt.Record {
 	t.Helper()
-	record, err := receipt.NewInterpreted(l2, l2.Origin().Contract())
+	record, err := receipt.NewInterpreted(l2, l2.Origin().Contract(), codebook.Active())
 	if err != nil {
 		t.Fatal(err)
 	}

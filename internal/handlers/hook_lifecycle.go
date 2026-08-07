@@ -10,6 +10,7 @@ import (
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
+	"github.com/dayvidpham/pasture/internal/lifecycle/codebook"
 	claudefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/claude"
 	codexfrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/codex"
 	opencodefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/opencode"
@@ -216,7 +217,7 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
-	derivation, err := middleend.Derive(l2)
+	derivation, err := middleend.Derive(l2, codebook.Active())
 	if err != nil {
 		return backend.HostResponse{}, err
 	}

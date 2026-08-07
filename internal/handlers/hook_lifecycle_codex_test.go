@@ -98,7 +98,7 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			semantic:     runtime.SemanticObservation,
 			wantResponse: false,
 			wantNative:   []byte(`{}`),
-			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v1"},
+			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2"},
 			wantIdentities: map[runtime.NativeIdentityKind]string{
 				runtime.IdentitySession: "019fc756-217c-7233-81f7-b5e979279345",
 			},
@@ -111,7 +111,7 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			semantic:     runtime.SemanticGateConsultation,
 			wantResponse: true,
 			wantNative:   []byte(`{"continue":true}`),
-			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v1", "pasture.lifecycle.consultation.v1"},
+			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2", "pasture.lifecycle.consultation.v1"},
 			wantIdentities: map[runtime.NativeIdentityKind]string{
 				runtime.IdentitySession:  "019fc756-217c-7233-81f7-b5e979279345",
 				runtime.IdentityTurn:     "019fc756-21b7-7f63-b8e2-4f4cd1ce0184",
@@ -161,7 +161,7 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 				require.Equal(t, provenance.OperationID("test.codex."+tc.name), row.ProducingOperationID)
 			}
 			if tc.wantResponse {
-				interpreted := queryOneEvidence(t, tracker, "pasture.lifecycle.interpreted.v1")
+				interpreted := queryOneEvidence(t, tracker, "pasture.lifecycle.interpreted.v2")
 				consultation := queryOneEvidence(t, tracker, "pasture.lifecycle.consultation.v1")
 				require.Equal(t, interpreted.ProducingOperationJournalID, consultation.ProducingOperationJournalID, "one durable operation must group interpreted and consultation evidence")
 				require.Less(t, interpreted.JournalID, consultation.JournalID, "interpreted evidence must precede consultation evidence in the committed operation")

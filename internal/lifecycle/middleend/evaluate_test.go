@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
+	"github.com/dayvidpham/pasture/internal/lifecycle/codebook"
 	"github.com/dayvidpham/pasture/internal/lifecycle/middleend"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
@@ -20,7 +21,7 @@ func TestDeriveObservationAndExplicitHumanResponse(t *testing.T) {
 		event := event
 		t.Run(event.NativeName(), func(t *testing.T) {
 			t.Parallel()
-			derivation, err := middleend.Derive(realL2(t, event))
+			derivation, err := middleend.Derive(realL2(t, event), codebook.Active())
 			if err != nil {
 				t.Fatalf("Derive() error = %v", err)
 			}
@@ -39,7 +40,7 @@ func TestDeriveObservationAndExplicitHumanResponse(t *testing.T) {
 
 func TestDeriveGateUsesCanonicalOrderAndProceed(t *testing.T) {
 	t.Parallel()
-	derivation, err := middleend.Derive(realL2(t, runtime.ClaudeEventPreToolUse))
+	derivation, err := middleend.Derive(realL2(t, runtime.ClaudeEventPreToolUse), codebook.Active())
 	if err != nil {
 		t.Fatalf("Derive() error = %v", err)
 	}
@@ -55,7 +56,7 @@ func TestDeriveGateUsesCanonicalOrderAndProceed(t *testing.T) {
 
 func TestEffectsReturnsDeepDefensiveCopy(t *testing.T) {
 	t.Parallel()
-	derivation, err := middleend.Derive(realL2(t, runtime.ClaudeEventPreToolUse))
+	derivation, err := middleend.Derive(realL2(t, runtime.ClaudeEventPreToolUse), codebook.Active())
 	if err != nil {
 		t.Fatalf("Derive() error = %v", err)
 	}
@@ -73,11 +74,11 @@ func TestEffectsReturnsDeepDefensiveCopy(t *testing.T) {
 func TestClaudeGateDerivationRegressionIsNonLive(t *testing.T) {
 	t.Parallel()
 	event := realL2(t, runtime.ClaudeEventPreToolUse)
-	derivation, err := middleend.Derive(event)
+	derivation, err := middleend.Derive(event, codebook.Active())
 	if err != nil {
 		t.Fatalf("Derive() error = %v", err)
 	}
-	interpreted, err := receipt.NewInterpreted(event, event.Origin().Contract())
+	interpreted, err := receipt.NewInterpreted(event, event.Origin().Contract(), codebook.Active())
 	if err != nil {
 		t.Fatalf("NewInterpreted() error = %v", err)
 	}
