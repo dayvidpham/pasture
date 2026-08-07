@@ -26,7 +26,7 @@ import (
 const (
 	// LifecycleMetamodelID is the stable definition identity of the codebook document. It
 	// does not change across versions.
-	LifecycleMetamodelID model.DefinitionID = "pasture.lifecycle.codebook"
+	LifecycleMetamodelID model.DefinitionID = "pasture.lifecycle.metamodel"
 	// LifecycleMetamodelVersion is the codebook document version. It is 1 at M5 and bumps
 	// only when the canonical body content changes.
 	LifecycleMetamodelVersion uint32 = 1

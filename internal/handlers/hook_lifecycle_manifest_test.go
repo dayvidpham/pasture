@@ -56,7 +56,7 @@ func TestHookLifecycleMetamodelReadSurface(t *testing.T) {
 	require.Zero(t, code)
 	var beforeView metamodelReadView
 	require.NoError(t, json.Unmarshal(before.Bytes(), &beforeView))
-	require.Equal(t, "pasture.lifecycle.codebook", beforeView.ID)
+	require.Equal(t, "pasture.lifecycle.metamodel", beforeView.ID)
 	require.Equal(t, uint32(1), beforeView.Version)
 	require.Equal(t, wantContent, beforeView.Content)
 	require.False(t, beforeView.Journaled, "no delivery has activated the codebook yet")

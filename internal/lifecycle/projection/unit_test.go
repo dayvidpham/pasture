@@ -29,7 +29,7 @@ const canonicalV1Interpreted = `{"semantic":1,"identities":[{"kind":1,"value":"s
 // canonicalV2Interpreted is a canonical interpreted.v2 payload carrying a
 // versioned codebook coordinate — the post-M5 read shape DecodeInterpretedV2
 // accepts. Its content is a fixed nonzero sha256 hex so the coordinate is valid.
-const canonicalV2Interpreted = `{"semantic":1,"identities":[{"kind":1,"value":"session-v2"}],"unresolved_facts":[],"contract":"claude-code/claude-code@2.1.210","codebook":{"id":"pasture.lifecycle.codebook","version":1,"content":"1111111111111111111111111111111111111111111111111111111111111111"}}`
+const canonicalV2Interpreted = `{"semantic":1,"identities":[{"kind":1,"value":"session-v2"}],"unresolved_facts":[],"contract":"claude-code/claude-code@2.1.210","manifest":{"id":"pasture.lifecycle.metamodel","version":1,"content":"1111111111111111111111111111111111111111111111111111111111111111"}}`
 
 // canonicalLink is a canonical committed link payload DecodeLink accepts (its
 // field order matches the receipt package's linkPayload encoder).
@@ -308,7 +308,7 @@ func TestReaderDispatchesV1AndV2ByKind(t *testing.T) {
 	if !ok {
 		t.Fatal("interpreted.v2 record must report its codebook coordinate")
 	}
-	if manifest.Version != 1 || string(manifest.ID) != "pasture.lifecycle.codebook" {
+	if manifest.Version != 1 || string(manifest.ID) != "pasture.lifecycle.metamodel" {
 		t.Fatalf("v2 codebook coordinate = %#v, want the versioned active id", manifest)
 	}
 

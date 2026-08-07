@@ -12,7 +12,7 @@ package model
 type LifecycleMetamodelManifest struct {
 	nonJournalValue
 	// ID is the stable definition identity of the codebook document
-	// ("pasture.lifecycle.codebook"). It does not change across versions.
+	// ("pasture.lifecycle.metamodel"). It does not change across versions.
 	ID DefinitionID
 	// Version is the codebook document version. It is 1 at M5 and bumps only
 	// when the canonical body content changes.

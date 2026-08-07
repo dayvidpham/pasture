@@ -54,7 +54,7 @@ func TestHookLifecycleFormatterRendersMetamodelColumn(t *testing.T) {
 	}
 	active := metamodel.Active()
 	shortContent := hex.EncodeToString(active.Content[:])[:12]
-	wantV2 := "codebook=pasture.lifecycle.codebook@1#" + shortContent
+	wantV2 := "codebook=pasture.lifecycle.metamodel@1#" + shortContent
 	if !strings.Contains(out, wantV2) {
 		t.Fatalf("text output missing v2 coordinate %q:\n%s", wantV2, out)
 	}

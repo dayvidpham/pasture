@@ -161,7 +161,7 @@ func TestInterpretedEffectIsCanonicalAndOwnsBytes(t *testing.T) {
 	}
 	effect := record.Effect()
 	activeContent := metamodel.Active().Content
-	wantPayload := []byte(`{"semantic":1,"identities":[{"kind":1,"value":"session-é-<>&"}],"unresolved_facts":[],"contract":"claude-code/claude-code@2.1.210","codebook":{"id":"pasture.lifecycle.codebook","version":1,"content":"` + hex.EncodeToString(activeContent[:]) + `"}}`)
+	wantPayload := []byte(`{"semantic":1,"identities":[{"kind":1,"value":"session-é-<>&"}],"unresolved_facts":[],"contract":"claude-code/claude-code@2.1.210","manifest":{"id":"pasture.lifecycle.metamodel","version":1,"content":"` + hex.EncodeToString(activeContent[:]) + `"}}`)
 	decoded := mustDecodeInterpretedEffectPayload(t, effect.Payload)
 	if decoded.Semantic != uint8(runtime.SemanticObservation) {
 		t.Fatalf("decoded semantic = %d, want %d", decoded.Semantic, runtime.SemanticObservation)
@@ -340,7 +340,7 @@ type interpretedEffectPayloadOracle struct {
 	Identities      []interpretedIdentityOracle       `json:"identities"`
 	UnresolvedFacts []interpretedUnresolvedFactOracle `json:"unresolved_facts"`
 	Contract        string                            `json:"contract"`
-	Metamodel       interpretedMetamodelOracle        `json:"codebook"`
+	Metamodel       interpretedMetamodelOracle        `json:"manifest"`
 }
 
 type interpretedMetamodelOracle struct {
@@ -360,7 +360,7 @@ type interpretedUnresolvedFactOracle struct {
 
 func decodeInterpretedEffectPayload(payload []byte) (interpretedEffectPayloadOracle, error) {
 	var decoded interpretedEffectPayloadOracle
-	if err := ir.StrictJSONWithPresence(payload, []string{"semantic", "identities", "unresolved_facts", "contract", "codebook"}, &decoded); err != nil {
+	if err := ir.StrictJSONWithPresence(payload, []string{"semantic", "identities", "unresolved_facts", "contract", "manifest"}, &decoded); err != nil {
 		return interpretedEffectPayloadOracle{}, err
 	}
 	return decoded, nil

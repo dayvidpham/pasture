@@ -33,7 +33,7 @@ func mustContract(t *testing.T, harness ir.HarnessID, name string) ir.RuntimeCon
 func manifest(content byte) model.LifecycleMetamodelManifest {
 	var c model.ContentIdentity
 	c[0] = content
-	return model.LifecycleMetamodelManifest{ID: "pasture.lifecycle.codebook", Version: 1, Content: c}
+	return model.LifecycleMetamodelManifest{ID: "pasture.lifecycle.metamodel", Version: 1, Content: c}
 }
 
 // recordV2 builds a committed LifecycleRecord whose interpretation carries a
@@ -200,7 +200,7 @@ func TestProjectSummarizesChainsMetamodelsAndUnresolved(t *testing.T) {
 	var out struct {
 		Records []struct {
 			Occurrence int64  `json:"occurrence"`
-			Codebook   string `json:"codebook"`
+			Metamodel  string `json:"manifest"`
 		} `json:"records"`
 		Chains []struct {
 			Harness string `json:"harness"`
@@ -208,11 +208,11 @@ func TestProjectSummarizesChainsMetamodelsAndUnresolved(t *testing.T) {
 			Value   string `json:"value"`
 			Edges   int    `json:"edges"`
 		} `json:"chains"`
-		Codebooks []struct {
+		Metamodels []struct {
 			ID      string `json:"id"`
 			Version uint32 `json:"version"`
 			Content string `json:"content"`
-		} `json:"codebooks"`
+		} `json:"manifests"`
 		Truncated bool `json:"truncated"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
@@ -224,8 +224,8 @@ func TestProjectSummarizesChainsMetamodelsAndUnresolved(t *testing.T) {
 	unresolved := 0
 	for _, r := range out.Records {
 		if r.Occurrence == 30 {
-			if r.Codebook != "" {
-				t.Fatalf("a pre-M5 v1 record must disclose an empty (unresolved) codebook, got %q", r.Codebook)
+			if r.Metamodel != "" {
+				t.Fatalf("a pre-M5 v1 record must disclose an empty (unresolved) metamodel, got %q", r.Metamodel)
 			}
 			unresolved++
 		}
@@ -233,8 +233,8 @@ func TestProjectSummarizesChainsMetamodelsAndUnresolved(t *testing.T) {
 	if unresolved != 1 {
 		t.Fatalf("expected exactly one unresolved (v1) record, got %d", unresolved)
 	}
-	if len(out.Codebooks) != 1 {
-		t.Fatalf("expected one deduplicated codebook coordinate, got %d", len(out.Codebooks))
+	if len(out.Metamodels) != 1 {
+		t.Fatalf("expected one deduplicated metamodel coordinate, got %d", len(out.Metamodels))
 	}
 	if len(out.Chains) != 1 {
 		t.Fatalf("expected one per-host session chain, got %d: %+v", len(out.Chains), out.Chains)

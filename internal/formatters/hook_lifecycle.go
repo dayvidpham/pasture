@@ -78,7 +78,7 @@ type lifecycleJSONInterpreted struct {
 	Identities any                     `json:"identities"`
 	Unresolved any                     `json:"unresolved"`
 	Contract   string                  `json:"contract"`
-	Metamodel  *lifecycleJSONMetamodel `json:"codebook,omitempty"`
+	Metamodel  *lifecycleJSONMetamodel `json:"manifest,omitempty"`
 }
 
 type lifecycleJSONMetamodel struct {

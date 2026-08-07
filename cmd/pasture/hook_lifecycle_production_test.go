@@ -805,7 +805,7 @@ type interpretedEvidencePayload struct {
 	Identities      []interpretedIdentityPayload   `json:"identities"`
 	UnresolvedFacts []interpretedUnresolvedPayload `json:"unresolved_facts"`
 	Contract        string                         `json:"contract"`
-	Metamodel       interpretedMetamodelPayload    `json:"codebook"`
+	Metamodel       interpretedMetamodelPayload    `json:"manifest"`
 }
 
 type interpretedMetamodelPayload struct {
@@ -889,7 +889,7 @@ func decodeOccurrencePayload(t *testing.T, raw []byte) lifecycleOccurrencePayloa
 func decodeInterpretedPayload(t *testing.T, raw []byte) interpretedEvidencePayload {
 	t.Helper()
 	members := decodeJSONObject(t, raw)
-	require.ElementsMatch(t, []string{"semantic", "identities", "unresolved_facts", "contract", "codebook"}, mapKeys(members))
+	require.ElementsMatch(t, []string{"semantic", "identities", "unresolved_facts", "contract", "manifest"}, mapKeys(members))
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var payload interpretedEvidencePayload
@@ -1002,7 +1002,7 @@ func assertInterpretedEvidence(t *testing.T, raw []byte) {
 	require.NoError(t, decoder.Decode(&members))
 	var trailing any
 	require.ErrorIs(t, decoder.Decode(&trailing), io.EOF)
-	require.ElementsMatch(t, []string{"semantic", "identities", "unresolved_facts", "contract", "codebook"}, mapKeys(members))
+	require.ElementsMatch(t, []string{"semantic", "identities", "unresolved_facts", "contract", "manifest"}, mapKeys(members))
 	require.Equal(t, json.RawMessage(`1`), members["semantic"])
 	require.Equal(t, json.RawMessage(expectedInterpretedIdentities), members["identities"])
 	require.Equal(t, json.RawMessage(`"claude-code/claude-code@2.1.210"`), members["contract"])

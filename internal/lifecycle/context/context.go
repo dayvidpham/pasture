@@ -61,7 +61,7 @@ type recordSummary struct {
 	Event      uint16 `json:"event"`
 	Harness    string `json:"harness"`
 	Capture    uint8  `json:"capture"`
-	Metamodel  string `json:"codebook"`
+	Metamodel  string `json:"manifest"`
 }
 
 // chainSummary is the disclosure view of one per-host native-identity chain: the
@@ -92,7 +92,7 @@ type projectionWire struct {
 	Scope      string             `json:"scope"`
 	Records    []recordSummary    `json:"records"`
 	Chains     []chainSummary     `json:"chains"`
-	Metamodels []metamodelSummary `json:"codebooks"`
+	Metamodels []metamodelSummary `json:"manifests"`
 	Truncated  bool               `json:"truncated"`
 }
 

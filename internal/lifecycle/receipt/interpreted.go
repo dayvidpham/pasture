@@ -341,7 +341,7 @@ type interpretedPayloadV2 struct {
 	Identities      []interpretedIdentity   `json:"identities"`
 	UnresolvedFacts []interpretedUnresolved `json:"unresolved_facts"`
 	Contract        ir.RuntimeContractID    `json:"contract"`
-	Metamodel       interpretedMetamodel    `json:"codebook"`
+	Metamodel       interpretedMetamodel    `json:"manifest"`
 }
 
 type interpretedMetamodel struct {
