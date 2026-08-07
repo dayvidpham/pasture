@@ -167,89 +167,40 @@ type DisclosureCommitReceipt struct {
 // completes before the disclosure command prints, so the durable trail is intact
 // even if the later stdout write fails.
 func (s Service) CommitDisclosure(ctx context.Context, warrant gate.Warrant, write GatedWrite) (DisclosureCommitReceipt, error) {
-	if refusal := gate.Authorize(warrant, gate.WriteDisclosure); refusal != nil {
-		return DisclosureCommitReceipt{}, refusal
-	}
-	if !write.constructed || write.class != gate.WriteDisclosure {
-		return DisclosureCommitReceipt{}, invalidCommit(
+	result, operationID, err := s.commitGated(ctx, warrant, write, gatedCommitSurface{
+		expected:          gate.WriteDisclosure,
+		requireOperations: true,
+		notConstructed: gatedInvalidText{
 			"The gated lifecycle write is not a constructed disclosure write.",
 			"CommitDisclosure commits only a GatedWrite built by receipt.NewDisclosure.",
-			"Build the write through receipt.NewDisclosure before committing.")
-	}
-	if s.Identity == nil || s.Clock == nil || s.Operations == nil || s.Appender.Journal == nil {
-		return DisclosureCommitReceipt{}, invalidCommit(
+			"Build the write through receipt.NewDisclosure before committing.",
+		},
+		incompleteWiring: gatedInvalidText{
 			"The lifecycle receipt service is incompletely wired for gated writes.",
 			"Identity resolution, a clock, an operation identity source, and the provenance journal are all required to commit a disclosure write.",
-			"Construct the service through tasks.NewLifecycleReceiptService.")
-	}
-	contextJournal, ok := s.Appender.Journal.(provenance.ContextJournal)
-	if !ok {
-		return DisclosureCommitReceipt{}, invalidCommit(
-			"The lifecycle journal cannot enforce the commit deadline.",
-			"The configured provenance journal does not implement ContextJournal.ApplyContext.",
-			"Use the pinned provenance journal implementation.")
-	}
-	deadline := s.Appender.Deadline
-	if deadline <= 0 {
-		return DisclosureCommitReceipt{}, invalidCommit(
-			"The gated lifecycle write has no commit deadline.",
-			"Timeouts must come from one validated injected profile.",
-			"Construct the receipt service with a validated timeout profile.")
-	}
-
-	identity, err := s.Identity.ResolveLifecycleIdentity(ctx)
-	if err != nil {
-		return DisclosureCommitReceipt{}, err
-	}
-	operation, err := s.Operations.NewOperationID()
-	if err != nil {
-		return DisclosureCommitReceipt{}, structured(pasterrors.CategoryStorage,
-			"A fresh disclosure operation identity could not be created.",
-			"Each context disclosure commits one operation with a distinct fresh identity.",
-			"Committing a disclosure gated write (internal/lifecycle/receipt/write_disclosure.go in receipt.Service.CommitDisclosure).",
-			"No disclosure was recorded; nothing was printed.",
-			"Restore the injected operation identity source and retry the disclosure.", err)
-	}
-	authority := identity.Authority
-	input := provenance.OperationInput{
-		OperationID:        provenance.OperationID(operation),
-		ActorID:            identity.Actor,
-		AuthorityJournalID: &authority,
-		CommandDigest:      append([]byte(nil), write.commandDigest...),
-		RecordedAt:         s.Clock.Now().UTC().UnixNano(),
-		Effects:            append([]provenance.Effect(nil), write.effects...),
-	}
-	canonical, err := provenance.Canonicalize(input)
-	if err != nil {
-		return DisclosureCommitReceipt{}, structured(pasterrors.CategoryValidation,
+			"Construct the service through tasks.NewLifecycleReceiptService.",
+		},
+		canonicalBoundary: gatedStructuredText{
 			"The disclosure write could not cross the canonical journal boundary.",
 			"The validated disclosure effects did not produce one canonical operation.",
 			"Committing a disclosure gated write (internal/lifecycle/receipt/write_disclosure.go in receipt.Service.CommitDisclosure).",
 			"No disclosure operation was committed.",
-			"Construct effects through receipt.NewDisclosure and retry.", err)
-	}
-	input.Effects = canonical.NormalizedEffects()
-	for index := range input.Effects {
-		if input.Effects[index].Sort == provenance.EffectEvidence {
-			sum := sha256.Sum256(input.Effects[index].Payload)
-			input.Effects[index].ContentDigest = append([]byte(nil), sum[:]...)
-		}
-	}
-
-	bounded, cancel := context.WithTimeout(ctx, deadline)
-	defer cancel()
-	committed, err := contextJournal.ApplyContext(bounded, input)
-	if err != nil {
-		return DisclosureCommitReceipt{}, structured(pasterrors.CategoryStorage,
+			"Construct effects through receipt.NewDisclosure and retry.",
+		},
+		applyRejected: gatedStructuredText{
 			"The disclosure write could not be committed.",
 			"The provenance journal rejected the disclosure operation.",
 			"Committing a disclosure gated write (internal/lifecycle/receipt/write_disclosure.go in receipt.Service.CommitDisclosure).",
 			"No disclosure was recorded; nothing was printed.",
-			"Inspect the error and retry the disclosure.", err)
+			"Inspect the error and retry the disclosure.",
+		},
+	})
+	if err != nil {
+		return DisclosureCommitReceipt{}, err
 	}
 
-	receipt := DisclosureCommitReceipt{Operation: provenance.OperationID(operation)}
-	for _, slot := range committed.ResultSlots {
+	receipt := DisclosureCommitReceipt{Operation: operationID}
+	for _, slot := range result.ResultSlots {
 		switch slot.Slot {
 		case disclosurePlanSlot:
 			receipt.Plan = slot.ProducedJournalID

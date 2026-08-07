@@ -204,76 +204,35 @@ type LineageCommitReceipt struct {
 // concurrent duplicate is admitted as CommittedExact/ShortCircuited with a nil
 // error rather than a conflict.
 func (s Service) CommitLineage(ctx context.Context, warrant gate.Warrant, write GatedWrite) (LineageCommitReceipt, error) {
-	if refusal := gate.Authorize(warrant, gate.WriteLineageLinks); refusal != nil {
-		return LineageCommitReceipt{}, refusal
-	}
-	if !write.constructed || write.class != gate.WriteLineageLinks {
-		return LineageCommitReceipt{}, invalidCommit(
+	result, operationID, err := s.commitGated(ctx, warrant, write, gatedCommitSurface{
+		expected: gate.WriteLineageLinks,
+		notConstructed: gatedInvalidText{
 			"The gated lifecycle write is not a constructed lineage-links write.",
 			"CommitLineage commits only a GatedWrite built by receipt.NewLineageLinks.",
-			"Build the write through receipt.NewLineageLinks before committing.")
-	}
-	if s.Identity == nil || s.Clock == nil || s.Appender.Journal == nil {
-		return LineageCommitReceipt{}, invalidCommit(
+			"Build the write through receipt.NewLineageLinks before committing.",
+		},
+		incompleteWiring: gatedInvalidText{
 			"The lifecycle receipt service is incompletely wired for gated writes.",
 			"Identity resolution, a clock, and the provenance journal are all required to commit a gated write.",
-			"Construct the service through tasks.NewLifecycleReceiptService.")
-	}
-	contextJournal, ok := s.Appender.Journal.(provenance.ContextJournal)
-	if !ok {
-		return LineageCommitReceipt{}, invalidCommit(
-			"The lifecycle journal cannot enforce the commit deadline.",
-			"The configured provenance journal does not implement ContextJournal.ApplyContext.",
-			"Use the pinned provenance journal implementation.")
-	}
-	deadline := s.Appender.Deadline
-	if deadline <= 0 {
-		return LineageCommitReceipt{}, invalidCommit(
-			"The gated lifecycle write has no commit deadline.",
-			"Timeouts must come from one validated injected profile.",
-			"Construct the receipt service with a validated timeout profile.")
-	}
-
-	identity, err := s.Identity.ResolveLifecycleIdentity(ctx)
-	if err != nil {
-		return LineageCommitReceipt{}, err
-	}
-	authority := identity.Authority
-	input := provenance.OperationInput{
-		OperationID:        write.operationID,
-		ActorID:            identity.Actor,
-		AuthorityJournalID: &authority,
-		CommandDigest:      append([]byte(nil), write.commandDigest...),
-		RecordedAt:         s.Clock.Now().UTC().UnixNano(),
-		Effects:            append([]provenance.Effect(nil), write.effects...),
-	}
-	canonical, err := provenance.Canonicalize(input)
-	if err != nil {
-		return LineageCommitReceipt{}, structured(pasterrors.CategoryValidation,
+			"Construct the service through tasks.NewLifecycleReceiptService.",
+		},
+		canonicalBoundary: gatedStructuredText{
 			"The lineage-links write could not cross the canonical journal boundary.",
 			"The validated link effects did not produce one canonical operation.",
 			"Committing a lineage-links gated write (internal/lifecycle/receipt/write_lineage.go in receipt.Service.CommitLineage).",
 			"No lineage operation was committed.",
-			"Construct effects through receipt.NewLineageLinks and retry.", err)
-	}
-	input.Effects = canonical.NormalizedEffects()
-	for index := range input.Effects {
-		if input.Effects[index].Sort == provenance.EffectEvidence {
-			sum := sha256.Sum256(input.Effects[index].Payload)
-			input.Effects[index].ContentDigest = append([]byte(nil), sum[:]...)
-		}
-	}
-
-	bounded, cancel := context.WithTimeout(ctx, deadline)
-	defer cancel()
-	result, err := contextJournal.ApplyContext(bounded, input)
-	if err != nil {
-		return LineageCommitReceipt{}, structured(pasterrors.CategoryStorage,
+			"Construct effects through receipt.NewLineageLinks and retry.",
+		},
+		applyRejected: gatedStructuredText{
 			"The lineage-links write could not be committed.",
 			"The provenance journal rejected the lineage-links operation.",
 			"Committing a lineage-links gated write (internal/lifecycle/receipt/write_lineage.go in receipt.Service.CommitLineage).",
 			"No occurrence links were recorded.",
-			"Inspect the error; a persisted operation-identity conflict means a different operation reused the deterministic identity and must be repaired before retrying.", err)
+			"Inspect the error; a persisted operation-identity conflict means a different operation reused the deterministic identity and must be repaired before retrying.",
+		},
+	})
+	if err != nil {
+		return LineageCommitReceipt{}, err
 	}
 	committed := 0
 	for _, slot := range result.ResultSlots {
@@ -281,7 +240,7 @@ func (s Service) CommitLineage(ctx context.Context, warrant gate.Warrant, write 
 			committed++
 		}
 	}
-	return LineageCommitReceipt{Operation: write.operationID, ShortCircuited: result.ShortCircuited, Committed: committed}, nil
+	return LineageCommitReceipt{Operation: operationID, ShortCircuited: result.ShortCircuited, Committed: committed}, nil
 }
 
 // DecodeLink strictly decodes canonical committed link evidence into a
