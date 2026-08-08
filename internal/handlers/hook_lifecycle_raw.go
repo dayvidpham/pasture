@@ -9,9 +9,6 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
-	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
-	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
-	"github.com/dayvidpham/pasture/internal/lifecycle/middleend"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
@@ -112,29 +109,21 @@ func rawSchemaVersionFor(harness ir.HarnessID) RawSchemaVersion {
 	return RawSchemaVersion(contract.String())
 }
 
-// rawAcknowledge is the canonical proceed acknowledgement bytes the raw hatch
-// writes to stdout ONLY after the committed receipt returns (commit-before-
-// stdout structural, mirroring HookLifecycleNative). The spellings are
-// byte-identical to the native continuation shapes the same harness reads
-// after a gate proceed (nativersponse): {"decision":"proceed"} for the
-// canonical Claude/OpenCode host response and {"continue":true} for the Codex
-// command-hook continuation.
-func rawAcknowledge(harness ir.HarnessID) []byte {
-	switch harness {
-	case ir.HarnessCodex:
-		return []byte(`{"continue":true}`)
-	default:
-		return []byte(`{"decision":"proceed"}`)
-	}
-}
+// rawAcknowledge is deleted by design: the raw hatch emits the SAME native
+// continuation bytes as the native path, and they come from ONE source of
+// truth — the registry encoder seam (nativeresponse.CanonicalProceed /
+// CodexContinuation) applied to the derivation the shared commit tail already
+// produced. A second hardcoded spelling here would drift (it previously
+// printed a proceed object for EVERY event, while native prints nothing for
+// Claude/OpenCode observations and {} for Codex observations).
 
 // HookLifecycleRaw admits a raw lifecycle payload through the SAME gate path
 // as native (registry dispatch → activation gate → bounded read → parse →
-// bind → EventBinding.NewEvent → Derive → service.Receive), stamps the
-// occurrence with the raw origin, and only on the nil-error path returns the
-// canonical proceed bytes the command writes to stdout (commit-before-stdout,
-// mirroring HookLifecycleNative). It differs from native in exactly two
-// ways:
+// the shared deliveryCommit tail: bind → NewEvent → Derive → Receive),
+// stamps the occurrence with the raw origin, and only on the nil-error path
+// returns the native continuation bytes the harness would have read for the
+// SAME event via the registry encoder seam (commit-before-stdout, mirroring
+// HookLifecycleNative). It differs from native in exactly two ways:
 //
 //   - the wire schema identity is part of the ingress contract: unknown
 //     values refuse with the pinned-identity diagnostic before ANY read, and
@@ -217,40 +206,24 @@ func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) ([]byte, er
 	if err != nil {
 		return nil, err
 	}
-	// Every durable lifecycle write presents a gate.Warrant. Raw deliveries
-	// traverse exactly the native delivery-receipt write class: the gate is
-	// origin-blind, so the same pure, no-IO warrant covers them (D4: same
-	// warrant, no origin discrimination).
-	deliveryIntent, refusal := gate.NewDeliveryIntent(capture.delivery.Contract, capture.delivery.Event)
-	if refusal != nil {
-		return nil, refusal
-	}
-	warrant, refusal := gate.Legalize(deliveryIntent)
-	if refusal != nil {
-		return nil, refusal
-	}
-	// On the valid-capture path, lazily journal the active metamodel BEFORE
-	// the delivery receipt is written, exactly as native does, so a committed
-	// record can never cite an uncompiled metamodel.
-	if _, err = receipt.EnsureActiveMetamodel(ctx, service); err != nil {
-		return nil, err
-	}
-	l1, identities, err := dispatch.bind(event.Kind, capture.delivery.Bindings)
+	// The raw surface converges on the SAME verification-and-commit tail as
+	// native (deliveryCommit): warrant → EnsureActiveMetamodel → bind →
+	// NewEvent → Derive → Receive. There is no second copy of the sequence
+	// here, so gate/metamodel/metadata parity cannot drift.
+	response, err := deliveryCommit(ctx, service, dispatch, event, capture.delivery)
 	if err != nil {
 		return nil, err
 	}
-	l2, err := l1.NewEvent(identities)
+	// The continuation bytes come from the registry encoder seam exactly as
+	// for native: a gate consultation emits the canonical decision, a
+	// Claude/OpenCode observation emits nothing, and a Codex observation emits
+	// {} — per-event byte parity with native, with no raw-specific reply
+	// shape.
+	native, err := dispatch.encode(response)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s lifecycle receipt committed but native continuation was not delivered (encode failed): %w", dispatch.name, err)
 	}
-	derivation, err := middleend.Derive(l2, metamodel.Active())
-	if err != nil {
-		return nil, err
-	}
-	if _, err = service.Receive(ctx, warrant, capture.delivery, derivation.Effects()...); err != nil {
-		return nil, err
-	}
-	return rawAcknowledge(in.Harness), nil
+	return native, nil
 }
 
 // rawDispositionRefusal renders the typed refusal for a raw capture that did

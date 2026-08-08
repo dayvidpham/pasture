@@ -121,10 +121,8 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
 		},
 		rawParse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
-			envelope := model.OccurrenceEnvelopeRef{Origin: origin.OriginRaw}
-			capture := claudeingress.Parse(raw, event, version, envelope)
-			capture.Delivery.Origin = origin.OriginRaw
-			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
+			capture := claudeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
+			return withRawOrigin(lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery})
 		},
 		bind:   claudefrontend.Bind,
 		encode: nativeresponse.CanonicalProceed,
@@ -138,10 +136,8 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
 		},
 		rawParse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
-			envelope := model.OccurrenceEnvelopeRef{Origin: origin.OriginRaw}
-			capture := opencodeingress.Parse(raw, event, version, envelope)
-			capture.Delivery.Origin = origin.OriginRaw
-			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
+			capture := opencodeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
+			return withRawOrigin(lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery})
 		},
 		bind:   opencodefrontend.Bind,
 		encode: nativeresponse.CanonicalProceed,
@@ -155,10 +151,8 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
 		},
 		rawParse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
-			envelope := model.OccurrenceEnvelopeRef{Origin: origin.OriginRaw}
-			capture := codexingress.Parse(raw, event, version, envelope)
-			capture.Delivery.Origin = origin.OriginRaw
-			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
+			capture := codexingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
+			return withRawOrigin(lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery})
 		},
 		bind:   codexfrontend.Bind,
 		encode: nativeresponse.CodexContinuation,
@@ -226,13 +220,46 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
-	// Every durable lifecycle write presents a gate.Warrant. Deliveries are the
-	// delivery-receipt write class; the gate is origin-blind, so one warrant
-	// covers the valid and the invalid-capture receipt uniformly. The warrant is
-	// pure (no I/O) and is built only on the admitted-dispatch path, so it never
-	// affects the pre-store ordering that keeps an invalid invocation from
-	// creating a database file (M1 §8).
-	deliveryIntent, refusal := gate.NewDeliveryIntent(capture.delivery.Contract, capture.delivery.Event)
+	// The native path is the only producer of the invalid-capture receipt row:
+	// it records the disposition evidence for a malformed host payload without
+	// the derived effects. Raw ingestion refuses outright instead (UAT Q1), so
+	// this write class exists only at the native surface. Every durable write
+	// presents the same origin-blind gate.Warrant as the shared commit tail.
+	if capture.disposition != model.CaptureValid {
+		deliveryIntent, refusal := gate.NewDeliveryIntent(capture.delivery.Contract, capture.delivery.Event)
+		if refusal != nil {
+			return backend.HostResponse{}, refusal
+		}
+		warrant, refusal := gate.Legalize(deliveryIntent)
+		if refusal != nil {
+			return backend.HostResponse{}, refusal
+		}
+		_, err = service.Receive(ctx, warrant, capture.delivery)
+		return backend.HostResponse{}, err
+	}
+	// Valid captures converge on the shared delivery commit tail with the raw
+	// surface (URD R4.2), so the verification sequence cannot drift between
+	// the two handlers.
+	response, err := deliveryCommit(ctx, service, dispatch, event, capture.delivery)
+	if err != nil {
+		return backend.HostResponse{}, err
+	}
+	return response, nil
+}
+
+// deliveryCommit is the ONE verification-and-commit sequence shared by the
+// native and raw lifecycle surfaces (URD R4.2 "all flow into the same
+// pipeline"): warrant intent → legalize → EnsureActiveMetamodel → typed
+// bind → NewEvent → Derive → Receive. Both handlers converge here after their
+// own pre-store admission gates, so the gate/metamodel/metadata sequence
+// cannot drift between surfaces and any change to it is written, reviewed,
+// and tested exactly once.
+func deliveryCommit(ctx context.Context, service receipt.Service, dispatch lifecycleDispatch, event registration.Event, delivery receipt.Delivery) (backend.HostResponse, error) {
+	// Every durable lifecycle write presents a gate.Warrant. The warrant is
+	// pure (no I/O) and is built only on the admitted-dispatch path, so it
+	// never affects the pre-store ordering that keeps an invalid invocation
+	// from creating a database file (M1 §8).
+	deliveryIntent, refusal := gate.NewDeliveryIntent(delivery.Contract, delivery.Event)
 	if refusal != nil {
 		return backend.HostResponse{}, refusal
 	}
@@ -240,20 +267,16 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	if refusal != nil {
 		return backend.HostResponse{}, refusal
 	}
-	if capture.disposition != model.CaptureValid {
-		_, err = service.Receive(ctx, warrant, capture.delivery)
-		return backend.HostResponse{}, err
-	}
 	// On the valid-capture path, lazily journal the active metamodel BEFORE the
 	// delivery receipt is written. The definition-activation operation commits
 	// before the first delivery that references the coordinate, so a committed
 	// interpreted.v2 record can never cite an unjournaled metamodel. It is
 	// idempotent and race-safe (deterministic content-derived operation ID), so
 	// steady state is one bounded lookup and zero writes.
-	if _, err = receipt.EnsureActiveMetamodel(ctx, service); err != nil {
+	if _, err := receipt.EnsureActiveMetamodel(ctx, service); err != nil {
 		return backend.HostResponse{}, err
 	}
-	l1, identities, err := dispatch.bind(event.Kind, capture.delivery.Bindings)
+	l1, identities, err := dispatch.bind(event.Kind, delivery.Bindings)
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
@@ -265,11 +288,21 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
-	_, err = service.Receive(ctx, warrant, capture.delivery, derivation.Effects()...)
-	if err != nil {
+	if _, err := service.Receive(ctx, warrant, delivery, derivation.Effects()...); err != nil {
 		return backend.HostResponse{}, err
 	}
 	return derivation.Response(), nil
+}
+
+// withRawOrigin stamps the raw capture origin on BOTH the envelope carrier and
+// the delivery carrier of an already-classified native capture — the whole raw
+// stamping the shared pipeline applies (UAT Q2). The raw parsers are the only
+// producers that populate the origin carrier; the native path stays at the
+// zero value so its golden payloads stay byte-identical (SLICE-1 L3 pin).
+func withRawOrigin(capture lifecycleCapture) lifecycleCapture {
+	capture.delivery.Envelope.Origin = origin.OriginRaw
+	capture.delivery.Origin = origin.OriginRaw
+	return capture
 }
 
 // dispatchLifecycle resolves the static registry row for a harness. It is a

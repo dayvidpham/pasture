@@ -178,6 +178,8 @@ func validateDelivery(d Delivery) error {
 		return invalid("The lifecycle delivery has no runtime contract.", "A receipt must preserve the exact host contract that produced the delivery.", "Supply the generated runtime contract coordinate.")
 	case d.Event == 0:
 		return invalid("The lifecycle delivery has no event kind.", "A receipt with an unknown event cannot be interpreted or queried safely.", "Supply the generated typed event kind.")
+	case d.Origin != "" && !d.Origin.IsValid():
+		return invalid("The lifecycle delivery carries an unknown capture origin.", "The origin carrier is a closed provenance enum; the empty value is the documented native sentinel, and any non-empty value must be a declared carrier.", "Supply only declared capture origins (internal/acceptance/origin) or leave the carrier empty for a native capture.")
 	case d.Capture == 0:
 		return invalid("The lifecycle delivery has no capture disposition.", "Every delivery records whether its bytes were valid, malformed, truncated, or otherwise classified.", "Classify the delivery at the ingress boundary before receipt storage.")
 	case len(d.Body) > model.MaxNativePayloadBytes:
