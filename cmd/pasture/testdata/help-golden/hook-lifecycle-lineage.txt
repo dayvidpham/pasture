@@ -1,0 +1,13 @@
+Materialize and print the committed occurrence lineage for one native identity binding
+
+Usage:
+  pasture hook lifecycle lineage [flags]
+
+Flags:
+      --binding string   Native identity binding to materialize: <kind>:<native-name>=<exact-value> (required)
+      --format string    Output format: text or json (default "text")
+  -h, --help             help for lineage
+
+Global Flags:
+      --db string          Path to the unified pasture SQLite database (env: PASTURE_DB_PATH, default: ~/.local/share/pasture/pasture.db)
+      --namespace string   Namespace URI for created tasks (default: derived from git remote, then file:// of cwd)
