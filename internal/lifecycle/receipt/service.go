@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/dayvidpham/pasture/internal/acceptance/origin"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
@@ -22,6 +23,12 @@ type Delivery struct {
 	Bindings []model.NativeBinding
 	Capture  model.CaptureDisposition
 	Body     []byte
+	// Origin records the capture provenance origin of the delivery (M4 raw
+	// ingestion carrier). It is provenance-only: the gate never observes it and
+	// validation never discriminates on it. The empty value means the native
+	// sentinel (authentic-capture) for pre-origin callers; the payload member is
+	// omitted when unset so existing deliveries stay byte-identical.
+	Origin origin.CaptureOrigin
 }
 
 type Receipt struct{ OccurrenceID model.OccurrenceID }
@@ -43,6 +50,11 @@ type occurrencePayload struct {
 	Bindings []model.NativeBinding       `json:"bindings"`
 	Capture  model.CaptureDisposition    `json:"capture"`
 	Body     string                      `json:"body_digest"`
+	// Origin is the provenance-only origin carrier. Decode of committed
+	// occurrence.v1 records is tolerant: records committed without the member
+	// decode with the empty origin, and the reader defaults that to the native
+	// sentinel (see Delivery.Origin).
+	Origin origin.CaptureOrigin `json:"origin,omitempty"`
 }
 
 // Receive is the sole durable lifecycle write for a host delivery. It is a
@@ -82,7 +94,7 @@ func (s Service) Receive(ctx context.Context, warrant gate.Warrant, delivery Del
 		return Receipt{}, structured(pasterrors.CategoryStorage, "A fresh lifecycle operation identity could not be created.", "Every host delivery must have a distinct operation identity, including byte-identical deliveries.", "Receiving a lifecycle delivery (internal/lifecycle/receipt/service.go in receipt.Service.Receive).", "The payload blob may remain as a reclaimable orphan; no occurrence was committed.", "Restore the injected operation identity source and retry the delivery.", err)
 	}
 	receivedAt := s.Clock.Now().UTC()
-	payload, err := json.Marshal(occurrencePayload{Contract: delivery.Contract, Event: delivery.Event, Envelope: delivery.Envelope, Bindings: append([]model.NativeBinding(nil), delivery.Bindings...), Capture: delivery.Capture, Body: ref.String()})
+	payload, err := json.Marshal(occurrencePayload{Contract: delivery.Contract, Event: delivery.Event, Envelope: delivery.Envelope, Bindings: append([]model.NativeBinding(nil), delivery.Bindings...), Capture: delivery.Capture, Body: ref.String(), Origin: delivery.Origin})
 	if err != nil {
 		return Receipt{}, structured(pasterrors.CategoryStorage, "The lifecycle occurrence envelope could not be encoded.", "The validated typed delivery failed JSON encoding, which indicates an internal contract defect.", "Receiving a lifecycle delivery (internal/lifecycle/receipt/service.go in receipt.Service.Receive).", "The payload blob may remain as a reclaimable orphan; no occurrence was committed.", "Report the incompatible delivery shape and retry only after correcting it.", err)
 	}

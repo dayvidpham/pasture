@@ -94,6 +94,15 @@ type lifecycleDispatch struct {
 // reflection, and no string reverse lookup: it is a closed literal, the same
 // construction the codegen harnessRegistry has always used. Adding a harness is
 // adding one data row.
+//
+// Every parse closure passes an envelope with the origin carrier left at its
+// zero value, so native commits stay byte-identical to the pre-origin path:
+// the zero value is the documented default (the NATIVE sentinel
+// authentic-capture) for pre-origin callers, and omitted from serialized output
+// by the carrier's omitempty tag, satisfying the frozen golden native payload
+// pins. The raw path (M4) is the first producer to populate the origin carrier:
+// it stamps OriginRaw on the envelope it passes to the per-harness ingress
+// parser and on the resulting delivery.
 var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 	ir.HarnessClaudeCode: {
 		name:        "Claude",

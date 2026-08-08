@@ -1,5 +1,7 @@
 package model
 
+import "github.com/dayvidpham/pasture/internal/acceptance/origin"
+
 type OccurrenceEnvelopeRef struct {
 	nonJournalValue
 	Runtime RuntimeContractDefinitionRef
@@ -10,6 +12,12 @@ type OccurrenceEnvelopeRef struct {
 	Schema         LifecycleSchemaDefinitionRef
 	Implementation EpochImplementationRef
 	Retention      RetentionPolicyDefinitionRef
+	// Origin records the capture provenance origin of the occurrence (M4 raw
+	// ingestion carrier). It is provenance-only: the write gate never observes
+	// it. The empty value means the native sentinel (authentic-capture) for
+	// records committed before origin marking; the member is omitted from the
+	// JSON encoding when unset so pre-origin envelopes stay byte-identical.
+	Origin origin.CaptureOrigin `json:"origin,omitempty"`
 }
 
 type SemanticEnvelopeRef struct {
