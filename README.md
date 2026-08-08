@@ -166,6 +166,12 @@ generated, static decision: fixture provenance is checked by tests and is not
 loaded from `testdata/` by the shipped binary. Malformed captures retain their
 occurrence evidence but do not produce interpreted records.
 
+`pasture hook lifecycle raw` is the raw ingestion escape hatch: a versioned
+payload entry for imports and migration; it is not the default path, it is not
+recommended for day-to-day use, and it does not define a second semantic
+model — raw payloads traverse the same lifecycle parse/bind/verifier/gate
+pipeline as native events and commit the same occurrence evidence kind.
+
 Exact provider payloads are not interchangeable fixtures. The current OpenCode
 work is limited to two user-reviewed OpenCode 1.18.10 callback records
 (`session.created` and `tool.execute.before`); Codex candidates remain future

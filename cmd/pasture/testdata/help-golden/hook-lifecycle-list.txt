@@ -1,0 +1,17 @@
+List recorded lifecycle events
+
+Usage:
+  pasture hook lifecycle list [flags]
+
+Flags:
+      --binding stringArray    Exact binding filter (<kind>:<native-name>=<value>)
+      --contract stringArray   Exact runtime contract filter
+      --cursor string          Opaque cursor returned by a prior lifecycle list page
+      --event stringArray      Exact event ordinal filter
+      --format string          Output format: text or json (default "text")
+  -h, --help                   help for list
+      --page-size uint16       Maximum records to return (default 50)
+
+Global Flags:
+      --db string          Path to the unified pasture SQLite database (env: PASTURE_DB_PATH, default: ~/.local/share/pasture/pasture.db)
+      --namespace string   Namespace URI for created tasks (default: derived from git remote, then file:// of cwd)

@@ -1,0 +1,23 @@
+Record Claude Code / git lifecycle hook events into the unified pasture
+audit trail.
+
+Hook events are dispatched through the same in-process pipeline the pastured
+daemon uses (hooks.Manager → recorder → audit trail), so the CLI works with or
+without the daemon running.
+
+Usage:
+  pasture hook [command]
+
+Available Commands:
+  lifecycle   Record a native harness lifecycle event
+  record      Record a hook event (e.g. a git commit) into the audit trail
+
+Flags:
+  -h, --help   help for hook
+
+Global Flags:
+      --db string          Path to the unified pasture SQLite database (env: PASTURE_DB_PATH, default: ~/.local/share/pasture/pasture.db)
+      --format string      Output format: text or json (default "text")
+      --namespace string   Namespace URI for created tasks (default: derived from git remote, then file:// of cwd)
+
+Use "pasture hook [command] --help" for more information about a command.
