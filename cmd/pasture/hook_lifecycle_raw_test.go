@@ -453,3 +453,78 @@ func checkNoDatabaseFiles(t *testing.T, dbPath string) {
 		require.ErrorIs(t, statErr, os.ErrNotExist, "M1 §8: no %s database file may be created", suffix)
 	}
 }
+
+// TestRawDryRunPreviewCommitsNothing is the SLICE-5 (UAT FIX-NOW) contract:
+// `hook lifecycle raw --dry-run` reports what a real ingestion WOULD commit
+// (the pure L1→L2 derivation tail running exactly as the committing path runs
+// it) without opening the store or issuing a receipt. The preview names the
+// raw origin, the wire schema identity, the verified event co-ordinates, and
+// the canonical continuation the host would read — and despite a VALID
+// payload, neither the database nor its -wal/-shm sidecars are created (M1 §8).
+func TestRawDryRunPreviewCommitsWithout(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "pasture")
+	buildLifecycleBinary(t, binary)
+
+	// Never initialize the database: on dry-run the store must not open.
+	dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
+	payload, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_222.json"))
+	require.NoError(t, err)
+
+	command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
+		"hook", "lifecycle", "raw",
+		"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.222",
+		"--schema-version", "claude-code/2.1.210", "--dry-run")
+	command.Stdin = bytes.NewReader(payload)
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	require.NoError(t, command.Run(), "a valid --dry-run must exit 0: %s", stderr.String())
+	require.Empty(t, stderr.String(), "a valid --dry-run must not report a diagnostic")
+
+	var preview struct {
+		DryRun   bool   `json:"dryRun"`
+		Harness  string `json:"harness"`
+		Event    string `json:"event"`
+		Schema   string `json:"schemaVersion"`
+		Origin   string `json:"origin"`
+		Contract string `json:"contract"`
+		Effects  int    `json:"effects"`
+	}
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &preview), "dry-run stdout must be the preview JSON")
+	require.True(t, preview.DryRun, "preview must mark itself as a dry run")
+	require.Equal(t, "Claude", preview.Harness)
+	require.Equal(t, "SessionStart", preview.Event)
+	require.Equal(t, "claude-code/2.1.210", preview.Schema)
+	require.Equal(t, "raw", preview.Origin, "the preview must disclose the raw origin")
+	require.Equal(t, "claude-code/2.1.210", preview.Contract)
+	checkNoDatabaseFiles(t, dbPath)
+}
+
+// TestRawDryRunRefusesIdentically pins the UAT FIX-NOW invariant that the
+// dry-run surface refuses invalid input EXACTLY as the committing surface
+// does: the same typed disagnostic on stderr, empty stdout, exit 0, and no
+// database file. The dry-run must never widen admission or soften refusal.
+func TestRawDryRunRefusesIdentically(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "pasture")
+	buildLifecycleBinary(t, binary)
+
+	// A withheld event is the sharpest boundary: it must refuse identically
+	// to the committing path (the activation posture is not bypassable by
+	// dry-run).
+	dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
+	command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
+		"hook", "lifecycle", "raw",
+		"--harness", "claude-code", "--event", "InstructionsLoaded", "--host-version", "2.1.222",
+		"--schema-version", "claude-code/2.1.210", "--dry-run")
+	command.Stdin = bytes.NewReader([]byte(`{"hook_event_name":"InstructionsLoaded","file_path":"/tmp/AGENTS.md","memory_type":"project","load_reason":"startup"}`))
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	require.NoError(t, command.Run(), "withheld-event dry-run must exit 0: %s", stderr.String())
+	require.Empty(t, stdout.String(), "refused dry-run must print nothing on stdout")
+	require.Contains(t, stderr.String(), "withheld", "refusal must name the activation withholding")
+	checkNoDatabaseFiles(t, dbPath)
+}

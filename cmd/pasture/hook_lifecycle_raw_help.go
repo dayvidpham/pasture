@@ -21,4 +21,10 @@ const hookLifecycleRawBanner = "raw ingestion — for imports and migration; not
 // It is the banner exactly: no additional prose is required for the
 // non-recommended marking, and SLICE-2 may extend it with more usage prose
 // ONLY after the banner (the marking must remain the visible opener).
-const hookLifecycleRawLong = hookLifecycleRawBanner
+const hookLifecycleRawLong = hookLifecycleRawBanner + `
+
+Use --dry-run to preview what a raw ingestion would commit: the payload is
+classified, admitted, and verified exactly as a real ingestion would be (same
+activation posture, same L1→L2 derivation tail), but no database is opened and
+no receipt is written. The preview names the origin, wire schema identity,
+harness/event co-ordinates, effects, and the canonical host continuation.`

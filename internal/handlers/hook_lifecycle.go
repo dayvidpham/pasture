@@ -255,43 +255,59 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 // cannot drift between surfaces and any change to it is written, reviewed,
 // and tested exactly once.
 func deliveryCommit(ctx context.Context, service receipt.Service, dispatch lifecycleDispatch, event registration.Event, delivery receipt.Delivery) (backend.HostResponse, error) {
-	// Every durable lifecycle write presents a gate.Warrant. The warrant is
-	// pure (no I/O) and is built only on the admitted-dispatch path, so it
-	// never affects the pre-store ordering that keeps an invalid invocation
-	// from creating a database file (M1 §8).
-	deliveryIntent, refusal := gate.NewDeliveryIntent(delivery.Contract, delivery.Event)
-	if refusal != nil {
-		return backend.HostResponse{}, refusal
-	}
-	warrant, refusal := gate.Legalize(deliveryIntent)
-	if refusal != nil {
-		return backend.HostResponse{}, refusal
+	// Every durable lifecycle write follows the pure verification sequence
+	// first (deliveryVerify: warrant → bind → NewEvent → Derive, no I/O), then
+	// presents the resulting warrant to the store. The warrant is built only
+	// on the admitted-dispatch path, so it never affects the pre-store
+	// ordering that keeps an invalid invocation from creating a database file
+	// (M1 §8).
+	warrant, derivation, err := deliveryVerify(dispatch, event, delivery)
+	if err != nil {
+		return backend.HostResponse{}, err
 	}
 	// On the valid-capture path, lazily journal the active metamodel BEFORE the
 	// delivery receipt is written. The definition-activation operation commits
 	// before the first delivery that references the coordinate, so a committed
 	// interpreted.v2 record can never cite an unjournaled metamodel. It is
 	// idempotent and race-safe (deterministic content-derived operation ID), so
-	// steady state is one bounded lookup and zero writes.
+	// steady state is one single lookup and zero writes.
 	if _, err := receipt.EnsureActiveMetamodel(ctx, service); err != nil {
-		return backend.HostResponse{}, err
-	}
-	l1, identities, err := dispatch.bind(event.Kind, delivery.Bindings)
-	if err != nil {
-		return backend.HostResponse{}, err
-	}
-	l2, err := l1.NewEvent(identities)
-	if err != nil {
-		return backend.HostResponse{}, err
-	}
-	derivation, err := middleend.Derive(l2, metamodel.Active())
-	if err != nil {
 		return backend.HostResponse{}, err
 	}
 	if _, err := service.Receive(ctx, warrant, delivery, derivation.Effects()...); err != nil {
 		return backend.HostResponse{}, err
 	}
 	return derivation.Response(), nil
+}
+
+// deliveryVerify is the pure (no-I/O) verification and derivation sequence
+// shared by the native/raw commit tail and the raw dry-run preview: gate
+// warrant → typed bind → NewEvent → Derive. It touches no store and performs
+// no durable write, so the same admitted delivery can be previewed (dry-run)
+// or committed (deliveryCommit) without a second copy of the L1→L2
+// verification sequence.
+func deliveryVerify(dispatch lifecycleDispatch, event registration.Event, delivery receipt.Delivery) (gate.Warrant, middleend.Derivation, error) {
+	deliveryIntent, refusal := gate.NewDeliveryIntent(delivery.Contract, delivery.Event)
+	if refusal != nil {
+		return gate.Warrant{}, middleend.Derivation{}, refusal
+	}
+	warrant, refusal := gate.Legalize(deliveryIntent)
+	if refusal != nil {
+		return gate.Warrant{}, middleend.Derivation{}, refusal
+	}
+	l1, identities, err := dispatch.bind(event.Kind, delivery.Bindings)
+	if err != nil {
+		return gate.Warrant{}, middleend.Derivation{}, err
+	}
+	l2, err := l1.NewEvent(identities)
+	if err != nil {
+		return gate.Warrant{}, middleend.Derivation{}, err
+	}
+	derivation, err := middleend.Derive(l2, metamodel.Active())
+	if err != nil {
+		return gate.Warrant{}, middleend.Derivation{}, err
+	}
+	return warrant, derivation, nil
 }
 
 // withRawOrigin stamps the raw capture origin on BOTH the envelope carrier and
