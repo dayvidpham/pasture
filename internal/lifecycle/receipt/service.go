@@ -112,23 +112,9 @@ func (s Service) Receive(ctx context.Context, warrant gate.Warrant, delivery Del
 		RecordedAt:         receivedAt.UnixNano(),
 		Effects:            effects,
 	}
-	canonical, err := provenance.Canonicalize(input)
+	input.Effects, err = CanonicalizeLifecycleEffects(input.Effects)
 	if err != nil {
 		return Receipt{}, structured(pasterrors.CategoryValidation, "Lifecycle evidence could not cross the canonical journal boundary.", "The validated effects did not produce one canonical operation.", "Preparing lifecycle evidence (internal/lifecycle/receipt/service.go in receipt.Service.Receive).", "No occurrence was committed; the blob may be reclaimable.", "Construct effects through receipt records and retry.", err)
-	}
-	input.Effects = canonical.NormalizedEffects()
-	for index := range input.Effects {
-		if input.Effects[index].Sort == provenance.EffectEvidence {
-			if input.Effects[index].EvidenceKind == consultationKind && index > 0 {
-				payload, bindErr := rebindConsultationPayload(input.Effects[index].Payload, input.Effects[index-1].Payload)
-				if bindErr != nil {
-					return Receipt{}, bindErr
-				}
-				input.Effects[index].Payload = payload
-			}
-			sum := sha256.Sum256(input.Effects[index].Payload)
-			input.Effects[index].ContentDigest = append([]byte(nil), sum[:]...)
-		}
 	}
 	if err := validateLifecycleExtras(input.Effects[1:]); err != nil {
 		return Receipt{}, err
@@ -138,6 +124,34 @@ func (s Service) Receive(ctx context.Context, warrant gate.Warrant, delivery Del
 		return Receipt{}, err
 	}
 	return Receipt{OccurrenceID: id}, nil
+}
+
+// CanonicalizeLifecycleEffects returns the exact evidence effects the journal
+// receives on commit. It is pure: provenance canonicalization, consultation
+// rebinding, and digest recomputation perform no I/O. The raw dry-run preview
+// uses this same boundary so its displayed effects match durable evidence
+// byte-for-byte rather than approximating the pre-canonical derivation.
+func CanonicalizeLifecycleEffects(effects []provenance.Effect) ([]provenance.Effect, error) {
+	canonical, err := provenance.Canonicalize(provenance.OperationInput{Effects: effects})
+	if err != nil {
+		return nil, err
+	}
+	normalized := canonical.NormalizedEffects()
+	for index := range normalized {
+		if normalized[index].Sort != provenance.EffectEvidence {
+			continue
+		}
+		if normalized[index].EvidenceKind == consultationKind && index > 0 {
+			payload, bindErr := rebindConsultationPayload(normalized[index].Payload, normalized[index-1].Payload)
+			if bindErr != nil {
+				return nil, bindErr
+			}
+			normalized[index].Payload = payload
+		}
+		sum := sha256.Sum256(normalized[index].Payload)
+		normalized[index].ContentDigest = append([]byte(nil), sum[:]...)
+	}
+	return normalized, nil
 }
 
 func validateLifecycleExtras(extra []provenance.Effect) error {

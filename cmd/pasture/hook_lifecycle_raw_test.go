@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -492,24 +493,48 @@ func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
 			require.Empty(t, previewErr.String(), "valid --dry-run must not report a diagnostic")
 
 			var preview struct {
-				DryRun       bool   `json:"dryRun"`
-				Harness      string `json:"harness"`
-				Event        string `json:"event"`
-				Schema       string `json:"schemaVersion"`
-				Origin       string `json:"origin"`
-				Contract     string `json:"contract"`
-				Effects      int    `json:"effects"`
+				DryRun      bool   `json:"dryRun"`
+				Harness     string `json:"harness"`
+				Event       string `json:"event"`
+				HostVersion string `json:"hostVersion"`
+				Schema      string `json:"schemaVersion"`
+				Origin      string `json:"origin"`
+				Contract    string `json:"contract"`
+				Effects     []struct {
+					Sort          string          `json:"sort"`
+					ResultSlot    string          `json:"resultSlot"`
+					EvidenceKind  string          `json:"evidenceKind"`
+					ContentDigest string          `json:"contentDigest"`
+					Payload       json.RawMessage `json:"payload"`
+				} `json:"effects"`
 				Continuation string `json:"continuation"`
 			}
+			previewMembers := decodeJSONObject(t, previewOut.Bytes())
+			require.ElementsMatch(t,
+				[]string{"dryRun", "harness", "event", "hostVersion", "schemaVersion", "origin", "contract", "effects", "continuation"},
+				mapKeys(previewMembers),
+				"preview JSON key set is a public operator contract",
+			)
 			require.NoError(t, json.Unmarshal(previewOut.Bytes(), &preview), "dry-run stdout must be the preview JSON")
 			require.True(t, preview.DryRun, "preview must mark itself as a dry run")
 			require.Equal(t, "Claude", preview.Harness)
 			require.Equal(t, tc.event, preview.Event)
+			require.Equal(t, "2.1.222", preview.HostVersion)
 			require.Equal(t, "claude-code/2.1.210", preview.Schema)
 			require.Equal(t, "raw", preview.Origin, "preview must disclose the raw origin")
 			require.Equal(t, "claude-code/2.1.210", preview.Contract)
-			require.Equal(t, tc.wantEffects, preview.Effects)
+			require.Len(t, preview.Effects, tc.wantEffects)
 			require.Equal(t, tc.wantContinuation, preview.Continuation)
+			for _, effect := range preview.Effects {
+				effectBytes, err := json.Marshal(effect)
+				require.NoError(t, err)
+				effectMembers := decodeJSONObject(t, effectBytes)
+				require.ElementsMatch(t,
+					[]string{"sort", "resultSlot", "evidenceKind", "contentDigest", "payload"},
+					mapKeys(effectMembers),
+					"preview effect key set is a public operator contract",
+				)
+			}
 			checkNoDatabaseFiles(t, previewDB)
 
 			commitDB := filepath.Join(t.TempDir(), "commit", tasks.DefaultDBFilename.String())
@@ -533,8 +558,22 @@ func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
 			require.Len(t, occurrences, 1, "real ingestion must commit one occurrence")
 			members := decodeJSONObject(t, occurrences[0].Payload)
 			require.JSONEq(t, `"`+preview.Contract+`"`, string(members["contract"]), "preview contract must match the committed occurrence")
-			committedEffects := len(queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)) + len(queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind))
-			require.Equal(t, committedEffects, preview.Effects, "preview effect count must match committed derivation evidence")
+			interpretedRows := queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)
+			consultationRows := queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind)
+			committedEffects := append(interpretedRows, consultationRows...)
+			require.Len(t, preview.Effects, len(committedEffects), "preview effect count must match committed derivation evidence")
+			wantSlots := []string{"interpreted"}
+			if len(consultationRows) > 0 {
+				wantSlots = append(wantSlots, "consultation")
+			}
+			for index, row := range committedEffects {
+				effect := preview.Effects[index]
+				require.Equal(t, "evidence", effect.Sort)
+				require.Equal(t, wantSlots[index], effect.ResultSlot)
+				require.Equal(t, string(row.EvidenceKind), effect.EvidenceKind)
+				require.Equal(t, hex.EncodeToString(row.ContentDigest), effect.ContentDigest)
+				require.JSONEq(t, string(row.Payload), string(effect.Payload), "preview effect payload must match committed evidence")
+			}
 		})
 	}
 }

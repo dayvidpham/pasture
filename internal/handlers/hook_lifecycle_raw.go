@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -69,7 +70,7 @@ func ParseRawSchemaVersion(value string) (RawSchemaVersion, error) {
 	return candidate, nil
 }
 
-// uuid hookLifecycleRawInput mirrors HookLifecycleInput for the raw ingestion
+// HookLifecycleRawInput mirrors HookLifecycleInput for the raw ingestion
 // hatch: the same coordinates (db path, harness, event, host version, stdin)
 // plus the explicitly typed wire-level schema identity. It is a fresh type so
 // the raw surface can never be reduced accidentally by callers of the native
@@ -264,6 +265,27 @@ func rawDryRunPreview(dispatch lifecycleDispatch, event registration.Event, host
 	if err != nil {
 		return nil, fmt.Errorf("%s dry-run continuation could not be rendered (encode failed): %w", dispatch.name, err)
 	}
+	effects, err := receipt.CanonicalizeLifecycleEffects(derivation.Effects())
+	if err != nil {
+		return nil, rawLifecycleError(
+			pasterrors.CategoryValidation,
+			"The dry-run derivation could not cross the canonical journal boundary.",
+			"Preview effects pass through the same canonicalization and consultation rebinding as a real receipt; the derived effect shape was incompatible.",
+			"No database was opened and no receipt was written.",
+			"Report the incompatible derived effect and retry only after correcting the lifecycle implementation.",
+			err,
+		)
+	}
+	effectViews := make([]rawDryRunEffectView, 0, len(effects))
+	for _, effect := range effects {
+		effectViews = append(effectViews, rawDryRunEffectView{
+			Sort:          effect.Sort.String(),
+			ResultSlot:    string(effect.ResultSlot),
+			EvidenceKind:  string(effect.EvidenceKind),
+			ContentDigest: hex.EncodeToString(effect.ContentDigest),
+			Payload:       append(json.RawMessage(nil), effect.Payload...),
+		})
+	}
 	preview := rawDryRunView{
 		DryRun:        true,
 		Harness:       dispatch.name,
@@ -272,7 +294,7 @@ func rawDryRunPreview(dispatch lifecycleDispatch, event registration.Event, host
 		SchemaVersion: schema.String(),
 		Origin:        string(delivery.Origin),
 		Contract:      delivery.Contract.String(),
-		Effects:       len(derivation.Effects()),
+		Effects:       effectViews,
 		Continuation:  string(continuation),
 	}
 	out, err := json.MarshalIndent(preview, "", "  ")
@@ -284,15 +306,26 @@ func rawDryRunPreview(dispatch lifecycleDispatch, event registration.Event, host
 
 // rawDryRunView is the stable JSON shape of the dry-run preview.
 type rawDryRunView struct {
-	DryRun        bool   `json:"dryRun"`
-	Harness       string `json:"harness"`
-	Event         string `json:"event"`
-	HostVersion   string `json:"hostVersion"`
-	SchemaVersion string `json:"schemaVersion"`
-	Origin        string `json:"origin"`
-	Contract      string `json:"contract"`
-	Effects       int    `json:"effects"`
-	Continuation  string `json:"continuation"`
+	DryRun        bool                  `json:"dryRun"`
+	Harness       string                `json:"harness"`
+	Event         string                `json:"event"`
+	HostVersion   string                `json:"hostVersion"`
+	SchemaVersion string                `json:"schemaVersion"`
+	Origin        string                `json:"origin"`
+	Contract      string                `json:"contract"`
+	Effects       []rawDryRunEffectView `json:"effects"`
+	Continuation  string                `json:"continuation"`
+}
+
+// rawDryRunEffectView is the stable evidence representation passed to the
+// durable receipt service on a real commit. Payload stays as JSON rather than
+// base64 so operators can inspect the exact interpreted/consultation material.
+type rawDryRunEffectView struct {
+	Sort          string          `json:"sort"`
+	ResultSlot    string          `json:"resultSlot"`
+	EvidenceKind  string          `json:"evidenceKind"`
+	ContentDigest string          `json:"contentDigest"`
+	Payload       json.RawMessage `json:"payload"`
 }
 
 // rawDispositionRefusal renders the typed refusal for a raw capture that did

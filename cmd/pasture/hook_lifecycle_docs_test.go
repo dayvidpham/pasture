@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -98,6 +99,25 @@ func TestRawHelpRendersBanner(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(rendered), "future events") {
 		t.Errorf("rendered raw help presents raw promotion/recommendation language; fix banner;\n%s", rendered)
+	}
+}
+
+// TestRawHelpRendersBuiltCLI pins the production binary surface rather than
+// only the Cobra constants: the command must be registered, expose --dry-run,
+// lead with the non-default banner, and state that preview performs no write.
+func TestRawHelpRendersBuiltCLI(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "pasture")
+	buildLifecycleBinary(t, binary)
+	command := exec.Command(binary, "hook", "lifecycle", "raw", "--help")
+	rendered, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("pasture hook lifecycle raw --help: %v\n%s", err, rendered)
+	}
+	help := string(rendered)
+	for _, want := range []string{hookLifecycleRawBanner, "--dry-run", "no database opened or written"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("built raw help does not contain %q;\n%s", want, help)
+		}
 	}
 }
 
