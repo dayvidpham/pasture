@@ -178,11 +178,11 @@ func TestRawAndNativeCommitEquivalentRecordsModuloOrigin(t *testing.T) {
 	buildLifecycleBinary(t, binary)
 
 	for _, tc := range []struct {
-		name          string
-		fixture       string
-		event         string
-		wantStdout    string
-		wantReaction  bool // gate consultations emit consultation evidence
+		name         string
+		fixture      string
+		event        string
+		wantStdout   string
+		wantReaction bool // gate consultations emit consultation evidence
 	}{
 		{name: "observation session start", fixture: "session_start_2_1_222.json", event: "SessionStart"},
 		{name: "gate pre-tool-use", fixture: "pre_tool_use_2_1_222.json", event: "PreToolUse", wantStdout: `{"decision":"proceed"}`, wantReaction: true},
