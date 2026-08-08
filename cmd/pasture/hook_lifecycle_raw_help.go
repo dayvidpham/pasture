@@ -18,13 +18,15 @@ const hookLifecycleRawUse = "raw"
 const hookLifecycleRawBanner = "raw ingestion — for imports and migration; not the default path."
 
 // hookLifecycleRawLong is the full Long text the raw subcommand must render.
-// It is the banner exactly: no additional prose is required for the
-// non-recommended marking, and SLICE-2 may extend it with more usage prose
-// ONLY after the banner (the marking must remain the visible opener).
+// It opens with the exact banner, then documents the dry-run preview. Any
+// additional usage prose must stay after the banner so the non-recommended
+// marking remains the visible opener.
 const hookLifecycleRawLong = hookLifecycleRawBanner + `
 
 Use --dry-run to preview what a raw ingestion would commit: the payload is
 classified, admitted, and verified exactly as a real ingestion would be (same
 activation posture, same L1→L2 derivation tail), but no database is opened and
 no receipt is written. The preview names the origin, wire schema identity,
-harness/event co-ordinates, effects, and the canonical host continuation.`
+harness/event co-ordinates, effects, and the canonical host continuation.
+Because dry-run performs no I/O, a later real ingestion can still fail while
+opening or writing the store.`

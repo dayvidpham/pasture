@@ -63,8 +63,8 @@ func TestRawBannerExactWording(t *testing.T) {
 	if hookLifecycleRawBanner != want {
 		t.Errorf("hookLifecycleRawBanner = %q, want %q", hookLifecycleRawBanner, want)
 	}
-	if hookLifecycleRawLong != want {
-		t.Errorf("hookLifecycleRawLong must be the banner exactly, got %q", hookLifecycleRawLong)
+	if !strings.HasPrefix(hookLifecycleRawLong, want) {
+		t.Errorf("hookLifecycleRawLong must open with the exact banner, got %q", hookLifecycleRawLong)
 	}
 	if hookLifecycleRawUse != "raw" {
 		t.Errorf("hookLifecycleRawUse = %q, want %q", hookLifecycleRawUse, "raw")

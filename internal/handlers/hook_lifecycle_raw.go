@@ -86,9 +86,10 @@ type HookLifecycleRawInput struct {
 	// refuses identically to the committing path.
 	DryRun bool
 	Input  io.Reader
-	Clock  receipt.Clock
-	// Operations supplies the op source for the would-be commit identity
-	// only; nothing is persisted on dry-run.
+	// Clock and Operations are commit dependencies. The production CLI wires
+	// them in both modes so one input contract governs commit and preview;
+	// dry-run requires them for that contract parity but does not read them.
+	Clock       receipt.Clock
 	Operations  receipt.OperationIDSource
 	Activations []activation.Entry
 }
@@ -291,7 +292,7 @@ type rawDryRunView struct {
 	Origin        string `json:"origin"`
 	Contract      string `json:"contract"`
 	Effects       int    `json:"effects"`
-	Continuation  string `json:"continuation,omitempty"`
+	Continuation  string `json:"continuation"`
 }
 
 // rawDispositionRefusal renders the typed refusal for a raw capture that did

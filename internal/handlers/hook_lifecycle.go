@@ -249,11 +249,11 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 
 // deliveryCommit is the ONE verification-and-commit sequence shared by the
 // native and raw lifecycle surfaces (URD R4.2 "all flow into the same
-// pipeline"): warrant intent → legalize → EnsureActiveMetamodel → typed
-// bind → NewEvent → Derive → Receive. Both handlers converge here after their
-// own pre-store admission gates, so the gate/metamodel/metadata sequence
-// cannot drift between surfaces and any change to it is written, reviewed,
-// and tested exactly once.
+// pipeline"): deliveryVerify (warrant intent → legalize → typed bind →
+// NewEvent → Derive) → EnsureActiveMetamodel → Receive. Both handlers
+// converge here after their own pre-store admission gates, so the
+// gate/metamodel/metadata sequence cannot drift between surfaces and any
+// change to it is written, reviewed, and tested exactly once.
 func deliveryCommit(ctx context.Context, service receipt.Service, dispatch lifecycleDispatch, event registration.Event, delivery receipt.Delivery) (backend.HostResponse, error) {
 	// Every durable lifecycle write follows the pure verification sequence
 	// first (deliveryVerify: warrant → bind → NewEvent → Derive, no I/O), then

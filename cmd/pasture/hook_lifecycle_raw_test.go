@@ -454,77 +454,139 @@ func checkNoDatabaseFiles(t *testing.T, dbPath string) {
 	}
 }
 
-// TestRawDryRunPreviewCommitsNothing is the SLICE-5 (UAT FIX-NOW) contract:
-// `hook lifecycle raw --dry-run` reports what a real ingestion WOULD commit
-// (the pure L1→L2 derivation tail running exactly as the committing path runs
-// it) without opening the store or issuing a receipt. The preview names the
-// raw origin, the wire schema identity, the verified event co-ordinates, and
-// the canonical continuation the host would read — and despite a VALID
-// payload, neither the database nor its -wal/-shm sidecars are created (M1 §8).
-func TestRawDryRunPreviewCommitsWithout(t *testing.T) {
+// TestRawDryRunPreviewMatchesCommit is the SLICE-5 (UAT FIX-NOW) contract:
+// `hook lifecycle raw --dry-run` reports the same contract, effect count, and
+// canonical host continuation as a real commit of the same payload, without
+// opening the store or issuing a receipt. Both an observation (empty
+// continuation) and a gate event (non-empty continuation) pin the parity.
+func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "pasture")
 	buildLifecycleBinary(t, binary)
 
-	// Never initialize the database: on dry-run the store must not open.
-	dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
-	payload, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_222.json"))
-	require.NoError(t, err)
+	for _, tc := range []struct {
+		name             string
+		fixture          string
+		event            string
+		wantEffects      int
+		wantContinuation string
+	}{
+		{name: "observation", fixture: "session_start_2_1_222.json", event: "SessionStart", wantEffects: 1},
+		{name: "gate", fixture: "pre_tool_use_2_1_222.json", event: "PreToolUse", wantEffects: 2, wantContinuation: `{"decision":"proceed"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", tc.fixture))
+			require.NoError(t, err)
 
-	command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
-		"hook", "lifecycle", "raw",
-		"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.222",
-		"--schema-version", "claude-code/2.1.210", "--dry-run")
-	command.Stdin = bytes.NewReader(payload)
-	var stdout, stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
+			// Never initialize the preview database: dry-run must not open it.
+			previewDB := filepath.Join(t.TempDir(), "preview", tasks.DefaultDBFilename.String())
+			previewCmd := exec.Command(binary, databaseFlagName.Argument(), previewDB,
+				"hook", "lifecycle", "raw",
+				"--harness", "claude-code", "--event", tc.event, "--host-version", "2.1.222",
+				"--schema-version", "claude-code/2.1.210", "--dry-run")
+			previewCmd.Stdin = bytes.NewReader(payload)
+			var previewOut, previewErr bytes.Buffer
+			previewCmd.Stdout = &previewOut
+			previewCmd.Stderr = &previewErr
+			require.NoError(t, previewCmd.Run(), "valid --dry-run must exit 0: %s", previewErr.String())
+			require.Empty(t, previewErr.String(), "valid --dry-run must not report a diagnostic")
 
-	require.NoError(t, command.Run(), "a valid --dry-run must exit 0: %s", stderr.String())
-	require.Empty(t, stderr.String(), "a valid --dry-run must not report a diagnostic")
+			var preview struct {
+				DryRun       bool   `json:"dryRun"`
+				Harness      string `json:"harness"`
+				Event        string `json:"event"`
+				Schema       string `json:"schemaVersion"`
+				Origin       string `json:"origin"`
+				Contract     string `json:"contract"`
+				Effects      int    `json:"effects"`
+				Continuation string `json:"continuation"`
+			}
+			require.NoError(t, json.Unmarshal(previewOut.Bytes(), &preview), "dry-run stdout must be the preview JSON")
+			require.True(t, preview.DryRun, "preview must mark itself as a dry run")
+			require.Equal(t, "Claude", preview.Harness)
+			require.Equal(t, tc.event, preview.Event)
+			require.Equal(t, "claude-code/2.1.210", preview.Schema)
+			require.Equal(t, "raw", preview.Origin, "preview must disclose the raw origin")
+			require.Equal(t, "claude-code/2.1.210", preview.Contract)
+			require.Equal(t, tc.wantEffects, preview.Effects)
+			require.Equal(t, tc.wantContinuation, preview.Continuation)
+			checkNoDatabaseFiles(t, previewDB)
 
-	var preview struct {
-		DryRun   bool   `json:"dryRun"`
-		Harness  string `json:"harness"`
-		Event    string `json:"event"`
-		Schema   string `json:"schemaVersion"`
-		Origin   string `json:"origin"`
-		Contract string `json:"contract"`
-		Effects  int    `json:"effects"`
+			commitDB := filepath.Join(t.TempDir(), "commit", tasks.DefaultDBFilename.String())
+			initializeLifecycleTestDatabase(t, commitDB)
+			commitCmd := exec.Command(binary, databaseFlagName.Argument(), commitDB,
+				"hook", "lifecycle", "raw",
+				"--harness", "claude-code", "--event", tc.event, "--host-version", "2.1.222",
+				"--schema-version", "claude-code/2.1.210")
+			commitCmd.Stdin = bytes.NewReader(payload)
+			var commitOut, commitErr bytes.Buffer
+			commitCmd.Stdout = &commitOut
+			commitCmd.Stderr = &commitErr
+			require.NoError(t, commitCmd.Run(), "real commit must exit 0: %s", commitErr.String())
+			require.Empty(t, commitErr.String(), "real commit must not report a diagnostic")
+			require.Equal(t, commitOut.String(), preview.Continuation, "preview continuation must match the real commit byte-for-byte")
+
+			tracker, err := tasks.OpenTaskTracker(commitDB)
+			require.NoError(t, err)
+			defer tracker.Close()
+			occurrences := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
+			require.Len(t, occurrences, 1, "real ingestion must commit one occurrence")
+			members := decodeJSONObject(t, occurrences[0].Payload)
+			require.JSONEq(t, `"`+preview.Contract+`"`, string(members["contract"]), "preview contract must match the committed occurrence")
+			committedEffects := len(queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)) + len(queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind))
+			require.Equal(t, committedEffects, preview.Effects, "preview effect count must match committed derivation evidence")
+		})
 	}
-	require.NoError(t, json.Unmarshal(stdout.Bytes(), &preview), "dry-run stdout must be the preview JSON")
-	require.True(t, preview.DryRun, "preview must mark itself as a dry run")
-	require.Equal(t, "Claude", preview.Harness)
-	require.Equal(t, "SessionStart", preview.Event)
-	require.Equal(t, "claude-code/2.1.210", preview.Schema)
-	require.Equal(t, "raw", preview.Origin, "the preview must disclose the raw origin")
-	require.Equal(t, "claude-code/2.1.210", preview.Contract)
-	checkNoDatabaseFiles(t, dbPath)
 }
 
 // TestRawDryRunRefusesIdentically pins the UAT FIX-NOW invariant that the
 // dry-run surface refuses invalid input EXACTLY as the committing surface
-// does: the same typed disagnostic on stderr, empty stdout, exit 0, and no
+// does: the same typed diagnostic on stderr, empty stdout, exit 0, and no
 // database file. The dry-run must never widen admission or soften refusal.
 func TestRawDryRunRefusesIdentically(t *testing.T) {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "pasture")
 	buildLifecycleBinary(t, binary)
 
-	// A withheld event is the sharpest boundary: it must refuse identically
-	// to the committing path (the activation posture is not bypassable by
-	// dry-run).
-	dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
-	command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
-		"hook", "lifecycle", "raw",
-		"--harness", "claude-code", "--event", "InstructionsLoaded", "--host-version", "2.1.222",
-		"--schema-version", "claude-code/2.1.210", "--dry-run")
-	command.Stdin = bytes.NewReader([]byte(`{"hook_event_name":"InstructionsLoaded","file_path":"/tmp/AGENTS.md","memory_type":"project","load_reason":"startup"}`))
-	var stdout, stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-	require.NoError(t, command.Run(), "withheld-event dry-run must exit 0: %s", stderr.String())
-	require.Empty(t, stdout.String(), "refused dry-run must print nothing on stdout")
-	require.Contains(t, stderr.String(), "withheld", "refusal must name the activation withholding")
-	checkNoDatabaseFiles(t, dbPath)
+	for _, tc := range []struct {
+		name    string
+		event   string
+		payload []byte
+		want    string
+	}{
+		{
+			name:    "withheld activation",
+			event:   "InstructionsLoaded",
+			payload: []byte(`{"hook_event_name":"InstructionsLoaded","file_path":"/tmp/AGENTS.md","memory_type":"project","load_reason":"startup"}`),
+			want:    "withheld",
+		},
+		{name: "malformed before preview branch", event: "SessionStart", payload: []byte(`not-json{`), want: "not a JSON object"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			invoke := func(dryRun bool) (string, string) {
+				dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
+				args := []string{databaseFlagName.Argument(), dbPath,
+					"hook", "lifecycle", "raw",
+					"--harness", "claude-code", "--event", tc.event, "--host-version", "2.1.222",
+					"--schema-version", "claude-code/2.1.210"}
+				if dryRun {
+					args = append(args, "--dry-run")
+				}
+				command := exec.Command(binary, args...)
+				command.Stdin = bytes.NewReader(tc.payload)
+				var stdout, stderr bytes.Buffer
+				command.Stdout = &stdout
+				command.Stderr = &stderr
+				require.NoError(t, command.Run(), "refused raw invocation must exit 0: %s", stderr.String())
+				require.Empty(t, stdout.String(), "refused raw invocation must print nothing on stdout")
+				checkNoDatabaseFiles(t, dbPath)
+				return stdout.String(), stderr.String()
+			}
+
+			_, commitStderr := invoke(false)
+			_, previewStderr := invoke(true)
+			require.Equal(t, commitStderr, previewStderr, "dry-run and commit must render the same typed refusal")
+			require.Contains(t, previewStderr, tc.want)
+		})
+	}
 }
