@@ -13,6 +13,7 @@ var rawHookHarness string
 var rawHookEvent string
 var rawHookHostVersion string
 var rawHookSchemaVersion string
+var rawHookDryRun bool
 
 // hookLifecycleRawCmd is the raw-ingestion escape hatch (URD R4.1). The extra
 // path segment "raw" IS the visible mark: raw ingestion is for imports and
@@ -40,6 +41,7 @@ var hookLifecycleRawCmd = &cobra.Command{
 			Event:         rawHookEvent,
 			HostVersion:   rawHookHostVersion,
 			SchemaVersion: handlers.RawSchemaVersion(rawHookSchemaVersion),
+			DryRun:        rawHookDryRun,
 			Input:         cmd.InOrStdin(),
 			Clock:         lifecycleCLIClock{},
 			Operations:    lifecycleCLIOperations{},
@@ -64,5 +66,6 @@ func init() {
 	f.StringVar(&rawHookEvent, "event", "", "Native event this generated hook is registered for (required)")
 	f.StringVar(&rawHookHostVersion, "host-version", "", "Observed native host version to retain with this occurrence (required)")
 	f.StringVar(&rawHookSchemaVersion, "schema-version", "", "Wire-level schema identity this payload conforms to; must name a version pinned in this build (required)")
+	f.BoolVar(&rawHookDryRun, "dry-run", false, "Preview what would be committed (same verification, no database opened or written)")
 	hookLifecycleCmd.AddCommand(hookLifecycleRawCmd)
 }

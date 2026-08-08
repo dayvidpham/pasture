@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -68,7 +70,7 @@ func ParseRawSchemaVersion(value string) (RawSchemaVersion, error) {
 	return candidate, nil
 }
 
-// uuid hookLifecycleRawInput mirrors HookLifecycleInput for the raw ingestion
+// HookLifecycleRawInput mirrors HookLifecycleInput for the raw ingestion
 // hatch: the same coordinates (db path, harness, event, host version, stdin)
 // plus the explicitly typed wire-level schema identity. It is a fresh type so
 // the raw surface can never be reduced accidentally by callers of the native
@@ -79,10 +81,18 @@ type HookLifecycleRawInput struct {
 	Event         string
 	HostVersion   string
 	SchemaVersion RawSchemaVersion
-	Input         io.Reader
-	Clock         receipt.Clock
-	Operations    receipt.OperationIDSource
-	Activations   []activation.Entry
+	// DryRun runs the admission, verification, and L1→L2 derivation chain
+	// and reports what would be committed without opening the store or
+	// writing any durable receipt (UAT FIX-NOW SLICE-5). Invalid input
+	// refuses identically to the committing path.
+	DryRun bool
+	Input  io.Reader
+	// Clock and Operations are commit dependencies. The production CLI wires
+	// them in both modes so one input contract governs commit and preview;
+	// dry-run requires them for that contract parity but does not read them.
+	Clock       receipt.Clock
+	Operations  receipt.OperationIDSource
+	Activations []activation.Entry
 }
 
 // rawSchemaVersionFor returns the wire schema identity pinned to the given
@@ -197,6 +207,20 @@ func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) ([]byte, er
 	if capture.disposition != model.CaptureValid {
 		return nil, rawDispositionRefusal(dispatch.name, capture.disposition, in.SchemaVersion)
 	}
+	// Dry-run: report what WOULD be committed without opening the store
+	// (UAT FIX-NOW SLICE-5). The admission and classification chain above has
+	// already run identically to the committing path — the L1→L2 derivation
+	// tail (deliveryVerify: warrant → bind → NewEvent → Derive) is the same
+	// pure sequence deliveryCommit runs, so the preview is exactly the
+	// material a real commit would persist, minus any I/O. No database file
+	// is created, opened, or written (M1 §8), and no receipt is issued.
+	if in.DryRun {
+		preview, previewErr := rawDryRunPreview(dispatch, event, in.HostVersion, in.SchemaVersion, capture.delivery)
+		if previewErr != nil {
+			return nil, previewErr
+		}
+		return preview, nil
+	}
 	tracker, err := tasks.OpenTaskTracker(in.DBPath)
 	if err != nil {
 		return nil, err
@@ -207,9 +231,10 @@ func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) ([]byte, er
 		return nil, err
 	}
 	// The raw surface converges on the SAME verification-and-commit tail as
-	// native (deliveryCommit): warrant → EnsureActiveMetamodel → bind →
-	// NewEvent → Derive → Receive. There is no second copy of the sequence
-	// here, so gate/metamodel/metadata parity cannot drift.
+	// native (deliveryCommit): deliveryVerify (warrant → bind → NewEvent →
+	// Derive, pure) → EnsureActiveMetamodel → Receive. There is no second
+	// copy of the sequence here, so gate/metamodel/metadata parity cannot
+	// drift.
 	response, err := deliveryCommit(ctx, service, dispatch, event, capture.delivery)
 	if err != nil {
 		return nil, err
@@ -224,6 +249,83 @@ func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) ([]byte, er
 		return nil, fmt.Errorf("%s lifecycle receipt committed but native continuation was not delivered (encode failed): %w", dispatch.name, err)
 	}
 	return native, nil
+}
+
+// rawDryRunPreview renders what a real raw ingestion WOULD commit, without
+// opening the store or issuing a receipt (UAT FIX-NOW SLICE-5). It reuses the
+// exact pure L1→L2 derivation tail the committing path runs (deliveryVerify),
+// so the preview is byte-faithful to the commit's binding material and its
+// canonical continuation — minus any durable write.
+func rawDryRunPreview(dispatch lifecycleDispatch, event registration.Event, hostVersion string, schema RawSchemaVersion, delivery receipt.Delivery) ([]byte, error) {
+	_, derivation, err := deliveryVerify(dispatch, event, delivery)
+	if err != nil {
+		return nil, err
+	}
+	continuation, err := dispatch.encode(derivation.Response())
+	if err != nil {
+		return nil, fmt.Errorf("%s dry-run continuation could not be rendered (encode failed): %w", dispatch.name, err)
+	}
+	effects, err := receipt.CanonicalizeLifecycleEffects(derivation.Effects())
+	if err != nil {
+		return nil, rawLifecycleError(
+			pasterrors.CategoryValidation,
+			"The dry-run derivation could not cross the canonical journal boundary.",
+			"Preview effects pass through the same canonicalization and consultation rebinding as a real receipt; the derived effect shape was incompatible.",
+			"No database was opened and no receipt was written.",
+			"Report the incompatible derived effect and retry only after correcting the lifecycle implementation.",
+			err,
+		)
+	}
+	effectViews := make([]rawDryRunEffectView, 0, len(effects))
+	for _, effect := range effects {
+		effectViews = append(effectViews, rawDryRunEffectView{
+			Sort:          effect.Sort.String(),
+			ResultSlot:    string(effect.ResultSlot),
+			EvidenceKind:  string(effect.EvidenceKind),
+			ContentDigest: hex.EncodeToString(effect.ContentDigest),
+			Payload:       append(json.RawMessage(nil), effect.Payload...),
+		})
+	}
+	preview := rawDryRunView{
+		DryRun:        true,
+		Harness:       dispatch.name,
+		Event:         event.NativeName,
+		HostVersion:   hostVersion,
+		SchemaVersion: schema.String(),
+		Origin:        string(delivery.Origin),
+		Contract:      delivery.Contract.String(),
+		Effects:       effectViews,
+		Continuation:  string(continuation),
+	}
+	out, err := json.MarshalIndent(preview, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("raw dry-run preview could not be rendered: %w", err)
+	}
+	return append(out, '\n'), nil
+}
+
+// rawDryRunView is the stable JSON shape of the dry-run preview.
+type rawDryRunView struct {
+	DryRun        bool                  `json:"dryRun"`
+	Harness       string                `json:"harness"`
+	Event         string                `json:"event"`
+	HostVersion   string                `json:"hostVersion"`
+	SchemaVersion string                `json:"schemaVersion"`
+	Origin        string                `json:"origin"`
+	Contract      string                `json:"contract"`
+	Effects       []rawDryRunEffectView `json:"effects"`
+	Continuation  string                `json:"continuation"`
+}
+
+// rawDryRunEffectView is the stable evidence representation passed to the
+// durable receipt service on a real commit. Payload stays as JSON rather than
+// base64 so operators can inspect the exact interpreted/consultation material.
+type rawDryRunEffectView struct {
+	Sort          string          `json:"sort"`
+	ResultSlot    string          `json:"resultSlot"`
+	EvidenceKind  string          `json:"evidenceKind"`
+	ContentDigest string          `json:"contentDigest"`
+	Payload       json.RawMessage `json:"payload"`
 }
 
 // rawDispositionRefusal renders the typed refusal for a raw capture that did
