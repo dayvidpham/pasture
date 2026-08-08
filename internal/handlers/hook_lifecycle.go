@@ -249,19 +249,12 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 
 // deliveryCommit is the ONE verification-and-commit sequence shared by the
 // native and raw lifecycle surfaces (URD R4.2 "all flow into the same
-// pipeline"): deliveryVerify (warrant intent → legalize → typed bind →
-// NewEvent → Derive) → EnsureActiveMetamodel → Receive. Both handlers
-// converge here after their own pre-store admission gates, so the
-// gate/metamodel/metadata sequence cannot drift between surfaces and any
-// change to it is written, reviewed, and tested exactly once.
+// pipeline"): deliveryWarrant (intent → legalize) → EnsureActiveMetamodel →
+// deliveryDerive (typed bind → NewEvent → Derive) → Receive. The ordering is
+// compatibility-sensitive: metamodel activation precedes derivation exactly
+// as it did before dry-run existed.
 func deliveryCommit(ctx context.Context, service receipt.Service, dispatch lifecycleDispatch, event registration.Event, delivery receipt.Delivery) (backend.HostResponse, error) {
-	// Every durable lifecycle write follows the pure verification sequence
-	// first (deliveryVerify: warrant → bind → NewEvent → Derive, no I/O), then
-	// presents the resulting warrant to the store. The warrant is built only
-	// on the admitted-dispatch path, so it never affects the pre-store
-	// ordering that keeps an invalid invocation from creating a database file
-	// (M1 §8).
-	warrant, derivation, err := deliveryVerify(dispatch, event, delivery)
+	warrant, err := deliveryWarrant(delivery)
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
@@ -274,40 +267,60 @@ func deliveryCommit(ctx context.Context, service receipt.Service, dispatch lifec
 	if _, err := receipt.EnsureActiveMetamodel(ctx, service); err != nil {
 		return backend.HostResponse{}, err
 	}
+	derivation, err := deliveryDerive(dispatch, event, delivery)
+	if err != nil {
+		return backend.HostResponse{}, err
+	}
 	if _, err := service.Receive(ctx, warrant, delivery, derivation.Effects()...); err != nil {
 		return backend.HostResponse{}, err
 	}
 	return derivation.Response(), nil
 }
 
-// deliveryVerify is the pure (no-I/O) verification and derivation sequence
-// shared by the native/raw commit tail and the raw dry-run preview: gate
-// warrant → typed bind → NewEvent → Derive. It touches no store and performs
-// no durable write, so the same admitted delivery can be previewed (dry-run)
-// or committed (deliveryCommit) without a second copy of the L1→L2
-// verification sequence.
+// deliveryVerify composes the same pure warrant and derivation helpers as the
+// committing path without the interleaved metamodel/store operations. It is
+// used only for dry-run; deliveryCommit keeps its compatibility-sensitive I/O
+// ordering while sharing both pieces of verification logic.
 func deliveryVerify(dispatch lifecycleDispatch, event registration.Event, delivery receipt.Delivery) (gate.Warrant, middleend.Derivation, error) {
-	deliveryIntent, refusal := gate.NewDeliveryIntent(delivery.Contract, delivery.Event)
-	if refusal != nil {
-		return gate.Warrant{}, middleend.Derivation{}, refusal
-	}
-	warrant, refusal := gate.Legalize(deliveryIntent)
-	if refusal != nil {
-		return gate.Warrant{}, middleend.Derivation{}, refusal
-	}
-	l1, identities, err := dispatch.bind(event.Kind, delivery.Bindings)
+	warrant, err := deliveryWarrant(delivery)
 	if err != nil {
 		return gate.Warrant{}, middleend.Derivation{}, err
 	}
-	l2, err := l1.NewEvent(identities)
-	if err != nil {
-		return gate.Warrant{}, middleend.Derivation{}, err
-	}
-	derivation, err := middleend.Derive(l2, metamodel.Active())
+	derivation, err := deliveryDerive(dispatch, event, delivery)
 	if err != nil {
 		return gate.Warrant{}, middleend.Derivation{}, err
 	}
 	return warrant, derivation, nil
+}
+
+// deliveryWarrant performs the pure origin-blind write-gate verification.
+func deliveryWarrant(delivery receipt.Delivery) (gate.Warrant, error) {
+	deliveryIntent, refusal := gate.NewDeliveryIntent(delivery.Contract, delivery.Event)
+	if refusal != nil {
+		return gate.Warrant{}, refusal
+	}
+	warrant, refusal := gate.Legalize(deliveryIntent)
+	if refusal != nil {
+		return gate.Warrant{}, refusal
+	}
+	return warrant, nil
+}
+
+// deliveryDerive is the single pure L1→L2 verification and derivation path.
+func deliveryDerive(dispatch lifecycleDispatch, event registration.Event, delivery receipt.Delivery) (middleend.Derivation, error) {
+	l1, identities, err := dispatch.bind(event.Kind, delivery.Bindings)
+	if err != nil {
+		return middleend.Derivation{}, err
+	}
+	l2, err := l1.NewEvent(identities)
+	if err != nil {
+		return middleend.Derivation{}, err
+	}
+	derivation, err := middleend.Derive(l2, metamodel.Active())
+	if err != nil {
+		return middleend.Derivation{}, err
+	}
+	return derivation, nil
 }
 
 // withRawOrigin stamps the raw capture origin on BOTH the envelope carrier and
