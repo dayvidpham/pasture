@@ -1,234 +1,317 @@
 package apply
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/install/activation"
 	"github.com/dayvidpham/pasture/internal/install/cell"
-	"github.com/dayvidpham/pasture/internal/install/inventory"
+	"github.com/dayvidpham/pasture/internal/install/registry"
 	"github.com/dayvidpham/pasture/internal/install/selection"
 )
 
-// Source identifies the caller applying an effective selection.
-type Source struct{ name string }
+// Source identifies the controller applying desired state.
+type Source uint8
 
-var (
-	installerSource   = Source{name: "installer"}
-	homeManagerSource = Source{name: "home-manager"}
+const (
+	SourceInvalid Source = iota
+	SourceInstaller
+	SourceHomeManager
 )
 
-// InstallerSource applies native and direct-file cells.
-func InstallerSource() Source { return installerSource }
+func InstallerSource() Source   { return SourceInstaller }
+func HomeManagerSource() Source { return SourceHomeManager }
+func (s Source) String() string {
+	switch s {
+	case SourceInstaller:
+		return "installer"
+	case SourceHomeManager:
+		return "home-manager"
+	default:
+		return "invalid"
+	}
+}
+func (s Source) IsValid() bool { return s == SourceInstaller || s == SourceHomeManager }
 
-// HomeManagerSource applies native cells only; direct-file cells are inspected
-// read-only as managed_declaratively.
-func HomeManagerSource() Source { return homeManagerSource }
-
-func (s Source) String() string { return s.name }
-func (s Source) IsValid() bool {
-	return s.name == installerSource.name || s.name == homeManagerSource.name
+// Scope selects one logical registry table. Project scope carries one canonical
+// root, allowing the same service to be reused by project reconciliation.
+type Scope struct {
+	kind registry.Scope
+	root registry.ProjectRoot
 }
 
-// Outcome is one activator result.
+func GlobalScope() Scope { return Scope{kind: registry.ScopeGlobal} }
+func ProjectScope(root registry.ProjectRoot) (Scope, error) {
+	if !root.IsValid() {
+		return Scope{}, cell.NewFault("apply scope construction", "canonical project root", "the project root is invalid", "internal/install/apply.ProjectScope", "constructing an apply scope", "project records could collide or enter the global table", "construct the root with registry.CanonicalProjectRoot", nil)
+	}
+	return Scope{kind: registry.ScopeProject, root: root}, nil
+}
+func (s Scope) Kind() registry.Scope              { return s.kind }
+func (s Scope) ProjectRoot() registry.ProjectRoot { return s.root }
+func (s Scope) IsValid() bool {
+	return s.kind == registry.ScopeGlobal && !s.root.IsValid() || s.kind == registry.ScopeProject && s.root.IsValid()
+}
+func (s Scope) key(c cell.Cell) (registry.Key, error) {
+	if s.kind == registry.ScopeProject {
+		return registry.ProjectKey(s.root, c)
+	}
+	if s.kind == registry.ScopeGlobal {
+		return registry.GlobalKey(c)
+	}
+	return registry.Key{}, cell.NewFault("apply scope resolution", "global or project scope", "the scope is invalid", "internal/install/apply.Scope.key", "planning a scoped cell", "the confirmed fact has no logical registry table", "use GlobalScope or ProjectScope", nil)
+}
+
+// Outcome is one live-inspected activator result. Record is the strongest
+// confirmed fact and is persisted before execution advances to another cell.
 type Outcome struct {
 	Status      Status
-	Observation inventory.Observation
-	// Record, when non-nil, is written to the confirmed inventory.
-	Record     *inventory.Record
-	Diagnostic string
+	Observation registry.Observation
+	Record      *registry.Record
+	Diagnostic  string
 }
 
-// Activator activates or removes one strategy kind's cells.
+// Activator is the production boundary implemented by each closed activation
+// strategy. Inspect must be read-only. Ensure and Remove must return facts based
+// on a live postcondition check, including when they return an action error.
 type Activator interface {
 	StrategyKind() activation.StrategyKind
-	Ensure(c cell.Cell, act activation.ComponentActivation, prior *inventory.Record) (Outcome, error)
-	Remove(c cell.Cell, act activation.ComponentActivation, prior inventory.Record) (Outcome, error)
+	Inspect(context.Context, Source, registry.Key, activation.ComponentActivation, *registry.Record) (Outcome, error)
+	Ensure(context.Context, Source, registry.Key, activation.ComponentActivation, *registry.Record) (Outcome, error)
+	Remove(context.Context, Source, registry.Key, activation.ComponentActivation, registry.Record) (Outcome, error)
 }
 
-// Engine executes an effective selection over a set of activation contracts.
-type Engine struct {
-	activators map[string]Activator
-}
+// Committer persists a fully updated registry atomically. It is called after
+// every confirmed fact and before the next external action.
+type Committer func(context.Context, registry.Store) error
 
-// NewEngine builds an engine from strategy activators. Registering more than one
-// activator for the same strategy kind is rejected.
+type Engine struct{ activators map[string]Activator }
+
 func NewEngine(activators ...Activator) (*Engine, error) {
 	reg := make(map[string]Activator, len(activators))
 	for _, a := range activators {
+		if a == nil || !a.StrategyKind().IsValid() {
+			return nil, cell.NewFault("engine construction", "valid strategy activator", "an activator is nil or reports an invalid strategy", "internal/install/apply.NewEngine", "assembling the apply engine", "strategy dispatch cannot be exhaustive", "register one non-nil activator for each used strategy", nil)
+		}
 		kind := a.StrategyKind().String()
 		if _, dup := reg[kind]; dup {
-			return nil, cell.NewFault(
-				"engine construction", "one activator per strategy kind",
-				fmt.Sprintf("two activators were registered for %q", kind),
-				"internal/install/apply.NewEngine", "assembling the apply engine",
-				"strategy dispatch would be ambiguous",
-				"register exactly one activator per strategy kind", nil,
-			)
+			return nil, cell.NewFault("engine construction", "one activator per strategy kind", fmt.Sprintf("two activators were registered for %q", kind), "internal/install/apply.NewEngine", "assembling the apply engine", "strategy dispatch would be ambiguous", "register exactly one activator per strategy kind", nil)
 		}
 		reg[kind] = a
 	}
 	return &Engine{activators: reg}, nil
 }
 
-// ApplySelection plans and executes sel under source. contracts binds each
-// harness to its activation contract. inv is the prior confirmed inventory and
-// is updated in place for native and installer direct-file mutations. A pre-plan
-// problem returns a typed *ApplyError; per-row failures are embedded in the
-// returned Result and set OK=false.
-func (e *Engine) ApplySelection(
-	sel selection.Selection,
-	source Source,
-	contracts map[ir.HarnessID]activation.ActivationContract,
-	inv *inventory.Inventory,
-) (Result, error) {
-	if !sel.IsValid() {
-		return Result{}, e.preplanError(source, "selection validation",
-			"the effective selection is invalid",
-			"internal/install/apply.ApplySelection",
-			"no cell can be applied",
-			"provide a validated selection from selection.Parse or preferences.EffectiveSelection", "")
-	}
-	if !source.IsValid() {
-		return Result{}, e.preplanError(source, "source validation",
-			"the apply source is neither installer nor home-manager",
-			"internal/install/apply.ApplySelection",
-			"the engine cannot decide which cells to mutate",
-			"pass InstallerSource or HomeManagerSource", "")
-	}
+type planned struct {
+	key         registry.Key
+	cell        cell.Cell
+	op          Operation
+	act         activation.ComponentActivation
+	prior       *registry.Record
+	declarative bool
+}
 
-	// Build the plan first so a missing contract fails before any mutation.
-	type planned struct {
-		row      cell.Cell
-		op       Operation
-		act      activation.ComponentActivation
-		priorPtr *inventory.Record
+// ApplySelection validates every contract and builds the complete canonical
+// plan before the first mutation, then executes sequentially and stops after the
+// first failed row. Confirmed facts are saved after each attempted action.
+func (e *Engine) ApplySelection(ctx context.Context, sel selection.Selection, scope Scope, source Source, contracts map[ir.HarnessID]activation.ActivationContract, store *registry.Store, commit Committer) (Result, error) {
+	if !sel.IsValid() {
+		return Result{}, e.preplanError(source, "selection validation", "the effective selection is invalid", "internal/install/apply.Engine.ApplySelection", "no cell can be applied", "provide an exhaustive selection from selection.Parse or preferences.EffectiveSelection", RemediationRerunInstaller)
 	}
-	var plan []planned
-	for _, cs := range sel.Ordered() {
-		prior, hasPrior := inv.Lookup(cs.Cell)
+	bindings, err := e.bindAll(source, contracts)
+	if err != nil {
+		return Result{}, err
+	}
+	plan := make([]planned, 0, 9)
+	for _, state := range sel.Ordered() {
+		key, keyErr := scope.key(state.Cell)
+		if keyErr != nil {
+			return Result{}, e.wrapPreplan(source, keyErr)
+		}
+		prior, hasPrior := store.Lookup(key)
+		act := bindings[state.Cell.String()]
+		declarative := source == SourceHomeManager && act.Strategy().Kind() == activation.DirectFileKindValue()
 		var op Operation
 		switch {
-		case cs.Enabled:
+		case declarative:
+			op = Inspect()
+		case state.Enabled:
 			op = Ensure()
 		case hasPrior && removable(prior):
 			op = RemoveOp()
 		default:
-			continue // never-recorded false, or absent tombstone: no row.
+			continue
 		}
-		contract, ok := contracts[cs.Cell.Harness()]
-		if !ok {
-			return Result{}, e.preplanError(source, "activation contract lookup",
-				fmt.Sprintf("no activation contract is wired for harness %s", cs.Cell.Harness()),
-				"internal/install/apply.ApplySelection",
-				fmt.Sprintf("cell %s cannot be activated by this build", cs.Cell),
-				fmt.Sprintf("provide an activation contract for %s, or deselect that harness", cs.Cell.Harness()),
-				"rerun_installer")
-		}
-		desc, err := activation.NewComponentDescriptor(cs.Cell)
-		if err != nil {
-			return Result{}, e.wrapPreplan(source, err)
-		}
-		act, err := activation.LookupComponentActivation(contract, desc)
-		if err != nil {
-			return Result{}, e.wrapPreplan(source, err)
-		}
-		var priorPtr *inventory.Record
+		var ptr *registry.Record
 		if hasPrior {
-			p := prior
-			priorPtr = &p
+			copy := prior
+			ptr = &copy
 		}
-		plan = append(plan, planned{row: cs.Cell, op: op, act: act, priorPtr: priorPtr})
+		plan = append(plan, planned{key: key, cell: state.Cell, op: op, act: act, prior: ptr, declarative: declarative})
 	}
+	return e.executePlan(ctx, source, plan, store, commit), nil
+}
 
-	// Execute in canonical order, stopping at the first failure.
-	result := Result{source: source.String(), ok: true}
+// ApplyCell uses the identical binding, inspection, execution, and persistence
+// path as ApplySelection. It is intentionally only a single-cell remediation;
+// selection-wide native migrations may reject it in their activator.
+func (e *Engine) ApplyCell(ctx context.Context, c cell.Cell, enabled bool, scope Scope, source Source, contracts map[ir.HarnessID]activation.ActivationContract, store *registry.Store, commit Committer) (Result, error) {
+	bindings, err := e.bindAll(source, contracts)
+	if err != nil {
+		return Result{}, err
+	}
+	if !c.IsValid() {
+		return Result{}, e.preplanError(source, "cell validation", "the requested cell is invalid", "internal/install/apply.Engine.ApplyCell", "no cell can be applied", "construct the cell with cell.New", RemediationApplyCell)
+	}
+	key, keyErr := scope.key(c)
+	if keyErr != nil {
+		return Result{}, e.wrapPreplan(source, keyErr)
+	}
+	prior, hasPrior := store.Lookup(key)
+	act := bindings[c.String()]
+	declarative := source == SourceHomeManager && act.Strategy().Kind() == activation.DirectFileKindValue()
+	op := Inspect()
+	switch {
+	case declarative:
+	case enabled:
+		op = Ensure()
+	case hasPrior && removable(prior):
+		op = RemoveOp()
+	default:
+		management := ManagementUnknown
+		if hasPrior && prior.Managed() {
+			management = ManagementPasture
+		} else if hasPrior {
+			management = ManagementExternal
+		}
+		return Result{source: source, scope: scope.kind, ok: true, rows: []ActionRow{{cell: c, operation: Inspect(), status: NoOp(), management: management, diagnostic: "desired state is false and no Pasture-managed installed or unknown fact authorizes removal"}}}, nil
+	}
+	var ptr *registry.Record
+	if hasPrior {
+		copy := prior
+		ptr = &copy
+	}
+	return e.executePlan(ctx, source, []planned{{key: key, cell: c, op: op, act: act, prior: ptr, declarative: declarative}}, store, commit), nil
+}
+
+func (e *Engine) bindAll(source Source, contracts map[ir.HarnessID]activation.ActivationContract) (map[string]activation.ComponentActivation, error) {
+	if !source.IsValid() {
+		return nil, e.preplanError(source, "source validation", "the apply source is neither installer nor home-manager", "internal/install/apply.Engine.bindAll", "ownership rules cannot be selected", "use InstallerSource or HomeManagerSource", RemediationManualRepair)
+	}
+	bindings := make(map[string]activation.ComponentActivation, 9)
+	for _, c := range cell.CanonicalCells() {
+		contract, ok := contracts[c.Harness()]
+		if !ok || !contract.IsValid() || contract.Harness() != c.Harness() {
+			return nil, e.preplanError(source, "activation contract validation", fmt.Sprintf("harness %s has no matching valid activation contract", c.Harness()), "internal/install/apply.Engine.bindAll", "the nine-cell plan is incomplete and no mutation was started", fmt.Sprintf("wire one exhaustive activation contract for %s", c.Harness()), RemediationRerunInstaller)
+		}
+		desc, descriptorErr := activation.NewComponentDescriptor(c)
+		if descriptorErr != nil {
+			return nil, e.wrapPreplan(source, descriptorErr)
+		}
+		act, lookupErr := activation.LookupComponentActivation(contract, desc)
+		if lookupErr != nil {
+			return nil, e.wrapPreplan(source, lookupErr)
+		}
+		if _, ok := e.activators[act.Strategy().Kind().String()]; !ok {
+			return nil, e.preplanError(source, "activator validation", fmt.Sprintf("cell %s uses %s but no production activator is registered", c, act.Strategy().Kind()), "internal/install/apply.Engine.bindAll", "execution would stop only after earlier cells had mutated", "register the strategy activator before applying", RemediationManualRepair)
+		}
+		bindings[c.String()] = act
+	}
+	return bindings, nil
+}
+
+func removable(prior registry.Record) bool {
+	return prior.Managed() && (prior.Observation() == registry.ObservationInstalled || prior.Observation() == registry.ObservationUnknown)
+}
+
+func (e *Engine) executePlan(ctx context.Context, source Source, plan []planned, store *registry.Store, commit Committer) Result {
+	result := Result{source: source, ok: true}
+	if len(plan) > 0 {
+		result.scope = plan[0].key.Scope()
+	}
 	failed := false
 	for _, p := range plan {
 		if failed {
-			result.rows = append(result.rows, ActionRow{
-				cell: p.row, operation: p.op, status: Unattempted(),
-				diagnostic: "an earlier cell failed; this cell was not attempted",
-			})
+			management := ManagementUnknown
+			if p.prior != nil && p.prior.Managed() {
+				management = ManagementPasture
+			} else if p.prior != nil {
+				management = ManagementExternal
+			}
+			result.rows = append(result.rows, ActionRow{cell: p.cell, operation: p.op, status: Unattempted(), management: management, diagnostic: "an earlier canonical cell failed; this cell was not attempted"})
 			continue
 		}
-		row, outcome := e.execute(p.row, p.op, p.act, source, p.priorPtr)
-		result.rows = append(result.rows, row)
+		row, outcome := e.executeOne(ctx, source, p)
 		if outcome.Record != nil {
-			_ = inv.Upsert(*outcome.Record)
+			if outcome.Record.Managed() {
+				row.management = ManagementPasture
+			} else {
+				row.management = ManagementExternal
+			}
+			if upsertErr := store.Upsert(*outcome.Record); upsertErr != nil {
+				row.status, row.diagnostic = Failed(), actionable("confirmed registry fact could not be staged", upsertErr, p.cell, "upsert", "the next cell was not attempted", "repair the record construction and retry")
+			} else if commit != nil {
+				if saveErr := commit(ctx, *store); saveErr != nil {
+					row.status, row.diagnostic = Failed(), actionable("confirmed registry fact could not be saved atomically", saveErr, p.cell, "registry-save", "the live component may have changed but the previous registry remains authoritative; later cells were not attempted", "inspect status, repair the registry path or permissions, and rerun the same apply operation")
+				}
+			}
 		}
+		result.rows = append(result.rows, row)
 		if row.status == Failed() {
-			failed = true
-			result.ok = false
+			failed, result.ok = true, false
 		}
 	}
-	return result, nil
+	return result
 }
 
-func removable(prior inventory.Record) bool {
-	obs := prior.Observation()
-	// managed installed/unknown cells are removed; absent tombstones are not.
-	return prior.Managed() && (obs == inventory.Installed() || obs == inventory.Unknown())
-}
-
-func (e *Engine) execute(
-	c cell.Cell, op Operation, act activation.ComponentActivation, source Source, prior *inventory.Record,
-) (ActionRow, Outcome) {
-	kind := act.Strategy().Kind()
-
-	// Home Manager inspects direct-file cells read-only; it never mutates them.
-	if source == HomeManagerSource() && kind == activation.DirectFileKindValue() {
-		return ActionRow{
-			cell: c, operation: Inspect(), status: ManagedDeclaratively(),
-			diagnostic: "direct-file cells are realized by Home Manager's declarative links; the installer only inspects them",
-		}, Outcome{Status: ManagedDeclaratively()}
+func (e *Engine) executeOne(ctx context.Context, source Source, p planned) (ActionRow, Outcome) {
+	activator := e.activators[p.act.Strategy().Kind().String()]
+	if err := ctx.Err(); err != nil {
+		return ActionRow{cell: p.cell, operation: p.op, status: Failed(), diagnostic: actionable("cell execution was canceled", err, p.cell, "pre-inspection", "this and later cells were not mutated", "retry with a live context")}, Outcome{}
 	}
-
-	activator, ok := e.activators[kind.String()]
-	if !ok {
-		return ActionRow{
-			cell: c, operation: op, status: Failed(),
-			diagnostic: fmt.Sprintf("this build registered no activator for the %s strategy; %s cannot be activated", kind, c),
-		}, Outcome{Status: Failed()}
+	if p.declarative {
+		out, err := activator.Inspect(ctx, source, p.key, p.act, p.prior)
+		if err != nil {
+			return ActionRow{cell: p.cell, operation: Inspect(), status: Failed(), observation: out.Observation, diagnostic: actionable("declarative cell inspection failed", err, p.cell, "live-inspect", "Home Manager ownership was preserved but live state is unknown", "repair the destination and rerun Home Manager")}, out
+		}
+		return ActionRow{cell: p.cell, operation: Inspect(), status: ManagedDeclaratively(), management: ManagementDeclarative, observation: out.Observation, diagnostic: out.Diagnostic}, Outcome{Status: ManagedDeclaratively(), Observation: out.Observation}
 	}
-
-	var outcome Outcome
+	// Every mutating action begins with a real read-only inspection. The action
+	// implementation performs its own postcondition inspection before returning.
+	if _, err := activator.Inspect(ctx, source, p.key, p.act, p.prior); err != nil {
+		return ActionRow{cell: p.cell, operation: p.op, status: Failed(), observation: registry.ObservationUnknown, diagnostic: actionable("pre-action live inspection failed", err, p.cell, "live-inspect", "no action was attempted and later cells were stopped", "repair the reported live-state conflict and retry")}, Outcome{}
+	}
+	var out Outcome
 	var err error
-	switch op {
-	case Ensure():
-		outcome, err = activator.Ensure(c, act, prior)
-	case RemoveOp():
-		if prior == nil {
-			return ActionRow{cell: c, operation: op, status: Failed(),
-				diagnostic: "a remove was planned without a prior record; this is an internal inconsistency"}, Outcome{Status: Failed()}
-		}
-		outcome, err = activator.Remove(c, act, *prior)
-	default:
-		return ActionRow{cell: c, operation: op, status: Failed(),
-			diagnostic: fmt.Sprintf("unsupported operation %s", op)}, Outcome{Status: Failed()}
+	if p.op == Ensure() {
+		out, err = activator.Ensure(ctx, source, p.key, p.act, p.prior)
+	} else {
+		out, err = activator.Remove(ctx, source, p.key, p.act, *p.prior)
 	}
 	if err != nil {
-		return ActionRow{cell: c, operation: op, status: Failed(),
-			observation: outcome.Observation, diagnostic: err.Error()}, Outcome{Status: Failed(), Record: outcome.Record}
+		return ActionRow{cell: p.cell, operation: p.op, status: Failed(), observation: out.Observation, diagnostic: actionable("activation action failed after live inspection", err, p.cell, p.op.String(), "this cell records only confirmed or unknown state and later cells were not attempted", "repair the reported destination or manager state, then rerun the same apply operation")}, out
 	}
-	return ActionRow{
-		cell: c, operation: op, status: outcome.Status,
-		observation: outcome.Observation, diagnostic: outcome.Diagnostic,
-	}, outcome
+	if out.Record == nil || !out.Record.IsValid() || out.Record.Key() != p.key {
+		err := fmt.Errorf("activator returned no valid confirmed record for scoped key %s/%s", p.key.Scope(), p.cell)
+		return ActionRow{cell: p.cell, operation: p.op, status: Failed(), observation: out.Observation, diagnostic: actionable("activation postcondition was not representable", err, p.cell, "post-inspection", "the action may have changed live state but no unproved fact was persisted; later cells were stopped", "inspect the cell and rerun after repairing the activator contract")}, Outcome{Observation: out.Observation}
+	}
+	management := ManagementUnknown
+	if out.Record.Managed() {
+		management = ManagementPasture
+	} else {
+		management = ManagementExternal
+	}
+	return ActionRow{cell: p.cell, operation: p.op, status: out.Status, management: management, observation: out.Observation, diagnostic: out.Diagnostic}, out
 }
 
-func (e *Engine) preplanError(source Source, stage, reason, where, impact, fix, remediation string) *ApplyError {
-	return &ApplyError{
-		source: source.String(), stage: stage, reason: reason,
-		where: where, impact: impact, fix: fix, remediation: remediation,
-	}
+func actionable(what string, cause error, c cell.Cell, operation, impact, fix string) string {
+	return fmt.Sprintf("%s: %v; where: %s; when: %s; impact: %s; fix: %s", what, cause, c, operation, impact, fix)
 }
 
+func (e *Engine) preplanError(source Source, stage, reason, where, impact, fix string, remediation Remediation) *ApplyError {
+	return &ApplyError{source: source, stage: stage, reason: reason, where: where, impact: impact, fix: fix, remediation: remediation}
+}
 func (e *Engine) wrapPreplan(source Source, err error) *ApplyError {
-	return &ApplyError{
-		source: source.String(), stage: "activation binding",
-		reason: err.Error(), where: "internal/install/apply.ApplySelection",
-		impact: "the effective selection could not be bound to activation strategies before mutation",
-		fix:    "ensure the wired activation contracts cover every desired cell",
-	}
+	return e.preplanError(source, "activation binding", err.Error(), "internal/install/apply.Engine.bindAll", "the complete plan could not be validated before mutation", "repair the activation contracts and retry", RemediationManualRepair)
 }
