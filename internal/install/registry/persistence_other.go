@@ -7,6 +7,8 @@ import (
 	"os"
 )
 
+func registryRequiresPOSIXMode() bool { return false }
+
 func readRegistryFile(string) ([]byte, os.FileInfo, error) {
 	return nil, nil, fmt.Errorf("registry persistence is supported only on Linux, Darwin, and Windows")
 }

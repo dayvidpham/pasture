@@ -14,6 +14,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func registryRequiresPOSIXMode() bool { return true }
+
 const maxRegistryBytes = 8 << 20
 
 // openRegistryParent anchors at the filesystem root and opens every parent one
@@ -86,7 +88,7 @@ func writeRegistryFile(path string, data []byte) error {
 		return err
 	}
 	defer unix.Close(parent)
-	if existing, openErr := unix.Openat(parent, base, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0); openErr == nil {
+	if existing, openErr := unix.Openat(parent, base, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0); openErr == nil {
 		var stat unix.Stat_t
 		statErr := unix.Fstat(existing, &stat)
 		_ = unix.Close(existing)

@@ -9,8 +9,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dayvidpham/pasture/internal/config"
-	"github.com/dayvidpham/pasture/internal/install/inventory"
 	"github.com/dayvidpham/pasture/internal/install/preferences"
+	"github.com/dayvidpham/pasture/internal/install/registry"
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
@@ -98,36 +98,44 @@ action, outcome, and actionable diagnostic. It reads the state file only.`,
 		if statePath == "" {
 			statePath = defaultInstallStatePath()
 		}
-		inv, err := inventory.Load(statePath)
+		store, err := registry.Load(statePath)
 		if err != nil {
 			printError(err)
 			exitWithCode(1)
 			return nil
 		}
 		if resolveFormat() == types.OutputJSON {
-			return writeInstallStatusJSON(cmd, statePath, inv)
+			return writeInstallStatusJSON(cmd, statePath, store)
 		}
-		return writeInstallStatusText(cmd, statePath, inv)
+		return writeInstallStatusText(cmd, statePath, store)
 	},
 }
 
-func writeInstallStatusText(cmd *cobra.Command, statePath string, inv inventory.Inventory) error {
+// Status consumes the same Store that mutating installer frontends must load
+// once and pass through inventory.View; no frontend may open a scope-specific
+// state file or derive a second project index.
+func writeInstallStatusText(cmd *cobra.Command, statePath string, store registry.Store) error {
 	w := cmd.OutOrStdout()
 	fmt.Fprintf(w, "Pasture installation state (%s)\n", statePath)
-	if inv.Len() == 0 {
+	if store.Len() == 0 {
 		fmt.Fprintln(w, "  no cells recorded; nothing has been installed by Pasture yet")
 		return nil
 	}
-	for _, r := range inv.Ordered() {
+	for _, row := range store.Status() {
+		r := row.Record
 		managed := "external"
 		if r.Managed() {
 			managed = "pasture-managed"
 		}
-		fmt.Fprintf(w, "  %-20s %-9s %-15s %s/%s (%s)\n",
-			r.Cell().String(), r.Observation().String(), r.Strategy().String(),
+		identity := row.Scope.String()
+		if row.Scope == registry.ScopeProject {
+			identity += ":" + row.ProjectRoot.String()
+		}
+		fmt.Fprintf(w, "  %-20s %-9s %-15s %-12s %s/%s (%s)\n",
+			r.Cell().String(), r.Observation().String(), r.Strategy().String(), identity,
 			r.Source().String(), managed, r.Trust().String())
-		if r.LastAction() != "" {
-			fmt.Fprintf(w, "      last: %s -> %s\n", r.LastAction(), r.LastOutcome())
+		if r.LastOperation() != registry.OperationNone {
+			fmt.Fprintf(w, "      last: %s -> %s\n", r.LastOperation(), r.LastOutcome())
 		}
 		if r.Diagnostic() != "" {
 			fmt.Fprintf(w, "      note: %s\n", r.Diagnostic())
@@ -137,6 +145,8 @@ func writeInstallStatusText(cmd *cobra.Command, statePath string, inv inventory.
 }
 
 type installStatusCellJSON struct {
+	Scope       string `json:"scope"`
+	ProjectRoot string `json:"project_root,omitempty"`
 	Cell        string `json:"cell"`
 	Observation string `json:"observation"`
 	Strategy    string `json:"strategy"`
@@ -148,18 +158,29 @@ type installStatusCellJSON struct {
 	Diagnostic  string `json:"diagnostic,omitempty"`
 }
 
-func writeInstallStatusJSON(cmd *cobra.Command, statePath string, inv inventory.Inventory) error {
-	cells := make([]installStatusCellJSON, 0, inv.Len())
-	for _, r := range inv.Ordered() {
+func writeInstallStatusJSON(cmd *cobra.Command, statePath string, store registry.Store) error {
+	cells := make([]installStatusCellJSON, 0, store.Len())
+	for _, row := range store.Status() {
+		r := row.Record
+		lastAction := ""
+		if r.LastOperation() != registry.OperationNone {
+			lastAction = r.LastOperation().String()
+		}
+		lastOutcome := ""
+		if r.LastOutcome() != registry.OutcomeNone {
+			lastOutcome = r.LastOutcome().String()
+		}
 		cells = append(cells, installStatusCellJSON{
+			Scope:       row.Scope.String(),
+			ProjectRoot: row.ProjectRoot.String(),
 			Cell:        r.Cell().String(),
 			Observation: r.Observation().String(),
 			Strategy:    r.Strategy().String(),
 			Source:      r.Source().String(),
 			Managed:     r.Managed(),
 			Trust:       r.Trust().String(),
-			LastAction:  r.LastAction(),
-			LastOutcome: r.LastOutcome(),
+			LastAction:  lastAction,
+			LastOutcome: lastOutcome,
 			Diagnostic:  r.Diagnostic(),
 		})
 	}

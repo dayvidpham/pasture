@@ -12,30 +12,36 @@ import (
 )
 
 // Version, Selector, and SharedConfigIdentity are validated ownership values.
-// Strings exist only in the wire codec; in-process records cannot contain an
-// empty, whitespace-padded, control-bearing, or invalidly encoded value.
-type Version string
-type Selector string
-type SharedConfigIdentity string
+// Strings exist only in the wire codec. Their zero values explicitly mean
+// absent; every non-zero value is constructor-validated and cannot be forged.
+type Version struct{ text string }
+type Selector struct{ text string }
+type SharedConfigIdentity struct{ text string }
 
 func NewVersion(value string) (Version, error) {
 	if err := validateIdentityText("version", value); err != nil {
-		return "", err
+		return Version{}, err
 	}
-	return Version(value), nil
+	return Version{text: value}, nil
 }
 func NewSelector(value string) (Selector, error) {
 	if err := validateIdentityText("selector", value); err != nil {
-		return "", err
+		return Selector{}, err
 	}
-	return Selector(value), nil
+	return Selector{text: value}, nil
 }
 func NewSharedConfigIdentity(value string) (SharedConfigIdentity, error) {
 	if err := validateIdentityText("shared config identity", value); err != nil {
-		return "", err
+		return SharedConfigIdentity{}, err
 	}
-	return SharedConfigIdentity(value), nil
+	return SharedConfigIdentity{text: value}, nil
 }
+func (v Version) String() string              { return v.text }
+func (v Version) IsSet() bool                 { return v.text != "" }
+func (s Selector) String() string             { return s.text }
+func (s Selector) IsSet() bool                { return s.text != "" }
+func (i SharedConfigIdentity) String() string { return i.text }
+func (i SharedConfigIdentity) IsSet() bool    { return i.text != "" }
 func validateIdentityText(kind, value string) error {
 	if value == "" || strings.TrimSpace(value) != value || strings.ContainsRune(value, '\x00') || strings.IndexFunc(value, unicode.IsControl) >= 0 {
 		return fault(kind+" construction", "non-empty canonical text", fmt.Sprintf("%s %q is empty, padded, or contains a control character", kind, value), "internal/install/registry.validateIdentityText", "validating registry ownership identity", "identity comparison would be ambiguous", "use non-empty UTF-8 text without surrounding whitespace or control characters", nil)
@@ -244,7 +250,7 @@ type SharedConfigOwnership struct {
 }
 
 func NewSharedConfigOwnership(path artifact.Path, identity SharedConfigIdentity, digest artifact.Digest) (SharedConfigOwnership, error) {
-	if path.String() == "" || validateIdentityText("shared config identity", string(identity)) != nil || digest.String() == "" {
+	if path.String() == "" || !identity.IsSet() || digest.String() == "" {
 		return SharedConfigOwnership{}, fault("shared config ownership construction", "complete path, identity, and digest", "shared config ownership is incomplete", "internal/install/registry.NewSharedConfigOwnership", "recording project config ownership", "a later merge could touch an unproved entry", "provide the exact config path, typed entry identity, and digest", nil)
 	}
 	return SharedConfigOwnership{path: path, identity: identity, digest: digest, valid: true}, nil
@@ -316,16 +322,6 @@ func NewRecord(in RecordInput) (Record, error) {
 			return Record{}, fault("record construction", "validated artifact bundle identity", err.Error(), "internal/install/registry.NewRecord", "validating registry ownership", "the installed artifact cannot be compared reliably", "construct the identity with artifact.ParseBundleID", err)
 		}
 	}
-	if in.Version != "" {
-		if err := validateIdentityText("version", string(in.Version)); err != nil {
-			return Record{}, err
-		}
-	}
-	if in.Selector != "" {
-		if err := validateIdentityText("selector", string(in.Selector)); err != nil {
-			return Record{}, err
-		}
-	}
 	leaves := append([]Leaf(nil), in.Leaves...)
 	for _, leaf := range leaves {
 		if !leaf.valid {
@@ -353,7 +349,7 @@ func NewRecord(in RecordInput) (Record, error) {
 	}
 	sort.Slice(config, func(i, j int) bool {
 		if config[i].path == config[j].path {
-			return config[i].identity < config[j].identity
+			return config[i].identity.text < config[j].identity.text
 		}
 		return config[i].path.String() < config[j].path.String()
 	})

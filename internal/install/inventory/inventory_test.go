@@ -27,7 +27,9 @@ func TestViewMutatesCallerOwnedStoreAndPreservesProjects(t *testing.T) {
 	}
 
 	bundleID, _ := artifact.ParseBundleID("artifact.bundle.v1:sha256:" + strings.Repeat("a", 64))
-	global, err := inventory.NewRecord(inventory.RecordInput{Cell: c, Source: inventory.InstallerSource(), Strategy: activation.NativePluginKindValue(), Managed: true, ArtifactID: bundleID, Version: inventory.Version("claude-code@2.1.210"), Selector: inventory.Selector("pasture-skills@user"), Observation: inventory.Installed(), Trust: inventory.TrustNotApplicable(), LastOperation: inventory.OperationEnsure, LastOutcome: inventory.OutcomeCompleted})
+	version, _ := inventory.NewVersion("claude-code@2.1.210")
+	selector, _ := inventory.NewSelector("pasture-skills@user")
+	global, err := inventory.NewRecord(inventory.RecordInput{Cell: c, Source: inventory.InstallerSource(), Strategy: activation.NativePluginKindValue(), Managed: true, ArtifactID: bundleID, Version: version, Selector: selector, Observation: inventory.Installed(), Trust: inventory.TrustNotApplicable(), LastOperation: inventory.OperationEnsure, LastOutcome: inventory.OutcomeCompleted})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,8 +52,7 @@ func TestViewMutatesCallerOwnedStoreAndPreservesProjects(t *testing.T) {
 }
 
 func TestTypedInventoryInputRejectsInvalidOwnership(t *testing.T) {
-	c, _ := cell.New(ir.HarnessClaudeCode, cell.SkillsAxis())
-	_, err := inventory.NewRecord(inventory.RecordInput{Cell: c, Source: inventory.InstallerSource(), Strategy: activation.NativePluginKindValue(), Managed: true, Version: inventory.Version(" padded "), Observation: inventory.Installed(), Trust: inventory.TrustNotApplicable(), LastOperation: inventory.OperationEnsure, LastOutcome: inventory.OutcomeCompleted})
+	_, err := inventory.NewVersion(" padded ")
 	if err == nil || !strings.Contains(err.Error(), "version") {
 		t.Fatalf("invalid version error=%v", err)
 	}

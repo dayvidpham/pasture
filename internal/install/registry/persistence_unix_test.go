@@ -24,13 +24,59 @@ func TestLoadRejectsFIFOAndSpecialFilesWithoutBlocking(t *testing.T) {
 			} else if err := os.Mkdir(path, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			started := time.Now()
-			_, err := registry.Load(path)
+			result := make(chan error, 1)
+			go func() { _, err := registry.Load(path); result <- err }()
+			var err error
+			select {
+			case err = <-result:
+			case <-time.After(500 * time.Millisecond):
+				if kind == "fifo" {
+					if fd, openErr := unix.Open(path, unix.O_WRONLY|unix.O_NONBLOCK, 0); openErr == nil {
+						_ = unix.Close(fd)
+					}
+				}
+				select {
+				case <-result:
+				case <-time.After(time.Second):
+				}
+				t.Fatalf("Load blocked past its 500ms bound")
+			}
 			if err == nil || !strings.Contains(err.Error(), "regular") {
 				t.Fatalf("Load error=%v", err)
 			}
-			if elapsed := time.Since(started); elapsed > time.Second {
-				t.Fatalf("Load blocked for %s", elapsed)
+		})
+	}
+}
+
+func TestSaveRejectsFIFOAndDirectoryWithoutBlocking(t *testing.T) {
+	for _, kind := range []string{"fifo", "directory"} {
+		t.Run(kind, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "installations.yaml")
+			if kind == "fifo" {
+				if err := unix.Mkfifo(path, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.Mkdir(path, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			result := make(chan error, 1)
+			go func() { result <- registry.Save(path, registry.New()) }()
+			select {
+			case err := <-result:
+				if err == nil || !strings.Contains(err.Error(), "regular") {
+					t.Fatalf("Save error=%v", err)
+				}
+			case <-time.After(500 * time.Millisecond):
+				if kind == "fifo" {
+					if fd, err := unix.Open(path, unix.O_WRONLY|unix.O_NONBLOCK, 0); err == nil {
+						_ = unix.Close(fd)
+					}
+				}
+				select {
+				case <-result:
+				case <-time.After(time.Second):
+				}
+				t.Fatal("Save blocked past its 500ms bound")
 			}
 		})
 	}

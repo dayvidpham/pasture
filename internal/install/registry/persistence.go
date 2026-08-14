@@ -6,7 +6,8 @@ import (
 )
 
 // Load reads the authoritative registry. Missing means an empty first-shipped
-// store. Existing files must be regular, non-symlink, and exactly mode 0600.
+// store. Existing files must be regular, non-symlink, and private according to
+// the platform contract (mode 0600 on Unix, protected owner-only DACL on Windows).
 func Load(path string) (Store, error) {
 	data, info, err := readRegistryFile(path)
 	if err != nil {
@@ -18,7 +19,7 @@ func Load(path string) (Store, error) {
 	if !info.Mode().IsRegular() {
 		return Store{}, fault("registry load", "regular non-symlink registry file", fmt.Sprintf("%q has unsafe type %s", path, info.Mode().Type()), path, "checking registry safety before read", "a special file could redirect or fabricate ownership", "replace it with a regular mode-0600 file", nil)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if registryRequiresPOSIXMode() && info.Mode().Perm() != 0o600 {
 		return Store{}, fault("registry load", "mode-0600 registry file", fmt.Sprintf("%q has mode %04o", path, info.Mode().Perm()), path, "checking registry permissions before read", "group or other users could read or alter installation ownership", "run chmod 0600 on the registry after verifying its contents", nil)
 	}
 	return Parse(data)

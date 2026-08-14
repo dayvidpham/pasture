@@ -3,6 +3,7 @@ package registry_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -120,18 +121,21 @@ func TestPersistedCompleteRecordsRoundTripExactly(t *testing.T) {
 	config, _ := registry.NewSharedConfigOwnership(configPath, identity, artifact.DigestBytes([]byte("entry")))
 	version, _ := registry.NewVersion("claude-code@2.1.210")
 	selector, _ := registry.NewSelector("pasture-skills@user")
-	makeRecord := func(key registry.Key, shared []registry.SharedConfigOwnership) registry.Record {
-		record, err := registry.NewRecord(registry.RecordInput{Key: key, Source: registry.SourceInstaller, Strategy: activation.DirectFileKindValue(), Managed: true, ArtifactID: bundleID, Version: version, Selector: selector, Leaves: []registry.Leaf{leaf}, CreatedDirs: []artifact.Path{dir}, SharedConfig: shared, Observation: registry.ObservationInstalled, Trust: registry.TrustPending, LastOperation: registry.OperationEnsure, LastOutcome: registry.OutcomeCompleted, Diagnostic: "confirmed"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return record
-	}
-	store := registry.New()
-	if err := store.Upsert(makeRecord(projectKey, []registry.SharedConfigOwnership{config})); err != nil {
+	globalRecord, err := registry.NewRecord(registry.RecordInput{Key: globalKey, Source: registry.SourceInstaller, Strategy: activation.DirectFileKindValue(), Managed: true, ArtifactID: bundleID, Version: version, Selector: selector, Leaves: []registry.Leaf{leaf}, CreatedDirs: []artifact.Path{dir}, Observation: registry.ObservationInstalled, Trust: registry.TrustPending, LastOperation: registry.OperationEnsure, LastOutcome: registry.OutcomeCompleted, Diagnostic: "global confirmed"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Upsert(makeRecord(globalKey, nil)); err != nil {
+	projectVersion, _ := registry.NewVersion("claude-code@2.1.211")
+	projectSelector, _ := registry.NewSelector("pasture-project@local")
+	projectRecord, err := registry.NewRecord(registry.RecordInput{Key: projectKey, Source: registry.SourceHomeManager, Strategy: activation.NativePluginKindValue(), Managed: false, Version: projectVersion, Selector: projectSelector, SharedConfig: []registry.SharedConfigOwnership{config}, Observation: registry.ObservationAbsent, Trust: registry.TrustTrusted, LastOperation: registry.OperationRemove, LastOutcome: registry.OutcomeFailed, Diagnostic: "project removed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := registry.New()
+	if err := store.Upsert(projectRecord); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Upsert(globalRecord); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "installations.yaml")
@@ -154,13 +158,15 @@ func TestPersistedCompleteRecordsRoundTripExactly(t *testing.T) {
 	if len(status) != 2 || status[0].Scope != registry.ScopeGlobal || status[1].Scope != registry.ScopeProject || status[0].Cell != status[1].Cell {
 		t.Fatalf("scoped status=%v", status)
 	}
-	for _, row := range status {
-		r := row.Record
-		if r.ArtifactID() != bundleID || r.Version() != version || r.Selector() != selector || len(r.Leaves()) != 1 || len(r.CreatedDirs()) != 1 || r.LastOperation() != registry.OperationEnsure || r.LastOutcome() != registry.OutcomeCompleted || r.Diagnostic() != "confirmed" {
-			t.Fatalf("incomplete round-trip record: %+v", r)
-		}
+	g := status[0].Record
+	if g.Key() != globalKey || g.Source() != registry.SourceInstaller || g.Strategy() != activation.DirectFileKindValue() || !g.Managed() || g.ArtifactID() != bundleID || g.Version() != version || g.Selector() != selector || g.Observation() != registry.ObservationInstalled || g.Trust() != registry.TrustPending || g.LastOperation() != registry.OperationEnsure || g.LastOutcome() != registry.OutcomeCompleted || g.Diagnostic() != "global confirmed" || len(g.Leaves()) != 1 || g.Leaves()[0].Path() != leafPath || g.Leaves()[0].Type() != artifact.RegularFileType() || g.Leaves()[0].Mode() != leafMode || g.Leaves()[0].Digest() != leaf.Digest() || len(g.CreatedDirs()) != 1 || g.CreatedDirs()[0] != dir {
+		t.Fatalf("global record mismatch: %+v", g)
 	}
-	if len(status[0].Record.SharedConfig()) != 0 || len(status[1].Record.SharedConfig()) != 1 {
+	p := status[1].Record
+	if p.Key() != projectKey || p.Source() != registry.SourceHomeManager || p.Strategy() != activation.NativePluginKindValue() || p.Managed() || p.ArtifactID().String() != "" || p.Version() != projectVersion || p.Selector() != projectSelector || p.Observation() != registry.ObservationAbsent || p.Trust() != registry.TrustTrusted || p.LastOperation() != registry.OperationRemove || p.LastOutcome() != registry.OutcomeFailed || p.Diagnostic() != "project removed" || len(p.Leaves()) != 0 || len(p.CreatedDirs()) != 0 {
+		t.Fatalf("project record mismatch: %+v", p)
+	}
+	if len(g.SharedConfig()) != 0 || len(p.SharedConfig()) != 1 || p.SharedConfig()[0].Path() != configPath || p.SharedConfig()[0].Identity() != identity || p.SharedConfig()[0].Digest() != config.Digest() {
 		t.Fatalf("shared config scope leakage")
 	}
 	projects := loaded.Projects()
@@ -250,6 +256,23 @@ func TestStrictCodecRequiresTablesAndRecordFields(t *testing.T) {
 			}
 		})
 	}
+	for _, field := range required {
+		field := field
+		t.Run("null "+field, func(t *testing.T) {
+			needle := field + ":"
+			doc := validGlobalDocument
+			start := strings.Index(doc, needle)
+			if start < 0 {
+				t.Fatal("missing fixture field")
+			}
+			end := strings.Index(doc[start:], "\n") + start
+			doc = doc[:start] + field + ": null" + doc[end:]
+			_, err := registry.Parse([]byte(doc))
+			if err == nil || !strings.Contains(err.Error(), "required record fields") {
+				t.Fatalf("null %s error=%v", field, err)
+			}
+		})
+	}
 }
 
 func TestStrictCodecRejectsEachEnumAndDuplicateBoundary(t *testing.T) {
@@ -333,6 +356,11 @@ func TestCanonicalProjectRootAcceptanceAndRejectionMatrix(t *testing.T) {
 	if _, err := registry.Parse([]byte(fileDoc)); err == nil || !strings.Contains(err.Error(), "non-directory") {
 		t.Fatalf("existing file root error=%v", err)
 	}
+	unclean := t.TempDir() + string(filepath.Separator) + "root" + string(filepath.Separator) + ".." + string(filepath.Separator) + "retained"
+	uncleanDoc := strings.Replace(doc, absent, unclean, 1)
+	if _, err := registry.Parse([]byte(uncleanDoc)); err == nil || !strings.Contains(err.Error(), "clean and absolute") {
+		t.Fatalf("unclean absolute root error=%v", err)
+	}
 }
 
 func TestPersistenceIsAtomicMode0600AndSymlinkSafe(t *testing.T) {
@@ -393,6 +421,16 @@ func TestGlobalRecordRejectsProjectOnlySharedConfigOwnership(t *testing.T) {
 }
 
 func TestTypedOwnershipCodecRejectsInvalidValues(t *testing.T) {
+	stringType := reflect.TypeOf("")
+	for name, target := range map[string]reflect.Type{
+		"version":                reflect.TypeOf(registry.Version{}),
+		"selector":               reflect.TypeOf(registry.Selector{}),
+		"shared config identity": reflect.TypeOf(registry.SharedConfigIdentity{}),
+	} {
+		if stringType.ConvertibleTo(target) {
+			t.Fatalf("external strings remain directly convertible to opaque %s", name)
+		}
+	}
 	cases := []struct{ name, addition, want string }{
 		{"bundle", "    artifact_id: not-a-bundle\n", "bundle ID"},
 		{"version", "    version: ' padded '\n", "version"},
@@ -429,5 +467,9 @@ func TestCodecRejectsDuplicateOwnershipCollections(t *testing.T) {
 	config := "schema: pasture.install.registry/v1\nglobal_installations: []\nproject_installations:\n  - canonical_project_root: " + root + "\n    cell: claude-code.hooks\n    source: installer\n    strategy: direct-file\n    managed: true\n    observation: installed\n    trust: not-applicable\n    last_operation: ensure\n    last_outcome: completed\n    shared_config_ownership:\n      - &owned {path: .claude/settings.json, identity: pasture-hooks, digest: sha256:" + strings.Repeat("b", 64) + "}\n      - *owned\n"
 	if _, err := registry.Parse([]byte(config)); err == nil || !strings.Contains(err.Error(), "duplicated") {
 		t.Fatalf("duplicate shared config error=%v", err)
+	}
+	dirs := strings.Replace(validGlobalDocument, "    observation:", "    created_dirs: [skills, skills]\n    observation:", 1)
+	if _, err := registry.Parse([]byte(dirs)); err == nil || !strings.Contains(err.Error(), "directory skills is duplicated") {
+		t.Fatalf("duplicate created_dirs error=%v", err)
 	}
 }

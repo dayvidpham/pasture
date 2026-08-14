@@ -85,7 +85,7 @@ func encodeRecord(r Record) recordWire {
 	managed := r.Managed()
 	observation := r.Observation().String()
 	trust := r.Trust().String()
-	rw := recordWire{Cell: &cellName, Source: &source, Strategy: &strategy, Managed: &managed, ArtifactID: r.ArtifactID().String(), Version: string(r.Version()), Selector: string(r.Selector()), Observation: &observation, Trust: &trust, LastOperation: &operation, LastOutcome: &outcome, Diagnostic: r.Diagnostic()}
+	rw := recordWire{Cell: &cellName, Source: &source, Strategy: &strategy, Managed: &managed, ArtifactID: r.ArtifactID().String(), Version: r.Version().String(), Selector: r.Selector().String(), Observation: &observation, Trust: &trust, LastOperation: &operation, LastOutcome: &outcome, Diagnostic: r.Diagnostic()}
 	for _, l := range r.Leaves() {
 		rw.Leaves = append(rw.Leaves, leafWire{l.Path().String(), l.Type().String(), l.Mode().String(), l.Digest().String()})
 	}
@@ -97,7 +97,7 @@ func encodeRecord(r Record) recordWire {
 func encodeConfig(in []SharedConfigOwnership) []configWire {
 	out := make([]configWire, 0, len(in))
 	for _, o := range in {
-		out = append(out, configWire{o.Path().String(), string(o.Identity()), o.Digest().String()})
+		out = append(out, configWire{o.Path().String(), o.Identity().String(), o.Digest().String()})
 	}
 	return out
 }

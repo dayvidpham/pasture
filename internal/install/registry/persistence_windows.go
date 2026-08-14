@@ -10,9 +10,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 const maxRegistryBytes = 8 << 20
+
+func registryRequiresPOSIXMode() bool { return false }
+
+var registryWindowsRename = func(root *os.Root, oldName, newName string) error {
+	return root.Rename(oldName, newName)
+}
 
 // openRegistryParentWindows anchors traversal at the volume root. os.Root is
 // implemented with Windows directory handles and remains confined under
@@ -45,7 +55,7 @@ func openRegistryParentWindows(path string) (*os.Root, string, error) {
 			root.Close()
 			return nil, "", statErr
 		}
-		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		if isWindowsReparse(info) || !info.IsDir() {
 			root.Close()
 			return nil, "", fmt.Errorf("parent component %q is a reparse link or non-directory", part)
 		}
@@ -76,7 +86,7 @@ func readRegistryFile(path string) ([]byte, os.FileInfo, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if entry.Mode()&os.ModeSymlink != 0 {
+	if isWindowsReparse(entry) {
 		return nil, nil, fmt.Errorf("registry path is a reparse link")
 	}
 	file, err := root.Open(base)
@@ -91,8 +101,11 @@ func readRegistryFile(path string) ([]byte, os.FileInfo, error) {
 	if !os.SameFile(entry, info) {
 		return nil, nil, fmt.Errorf("registry entry changed while opening its file handle")
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
-		return nil, nil, fmt.Errorf("registry descriptor must be a regular mode-0600 file; got %s/%04o", info.Mode().Type(), info.Mode().Perm())
+	if !info.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("registry descriptor must be a regular file; got %s", info.Mode().Type())
+	}
+	if err := validateOwnerOnlyWindows(windows.Handle(file.Fd())); err != nil {
+		return nil, nil, err
 	}
 	data, err := io.ReadAll(io.LimitReader(file, maxRegistryBytes+1))
 	if err != nil {
@@ -111,7 +124,7 @@ func writeRegistryFile(path string, data []byte) error {
 	}
 	defer root.Close()
 	if info, statErr := root.Lstat(base); statErr == nil {
-		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		if isWindowsReparse(info) || !info.Mode().IsRegular() {
 			return fmt.Errorf("registry destination is a reparse link or non-regular file")
 		}
 	} else if !os.IsNotExist(statErr) {
@@ -122,9 +135,36 @@ func writeRegistryFile(path string, data []byte) error {
 		return err
 	}
 	temp := ".pasture-registry-" + hex.EncodeToString(suffix[:])
-	file, err := root.OpenFile(temp, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	parent, err := openNativeWindowsParent(path, root)
 	if err != nil {
 		return err
+	}
+	defer parent.Close()
+	tempName, err := windows.NewNTUnicodeString(temp)
+	if err != nil {
+		return err
+	}
+	_, descriptor, _, err := currentWindowsOwnerACL()
+	if err != nil {
+		return fmt.Errorf("construct owner-only registry security descriptor: %w", err)
+	}
+	attributes := &windows.OBJECT_ATTRIBUTES{
+		Length:             uint32(unsafe.Sizeof(windows.OBJECT_ATTRIBUTES{})),
+		RootDirectory:      windows.Handle(parent.Fd()),
+		ObjectName:         tempName,
+		Attributes:         windows.OBJ_CASE_INSENSITIVE,
+		SecurityDescriptor: descriptor,
+	}
+	var handle windows.Handle
+	var status windows.IO_STATUS_BLOCK
+	err = windows.NtCreateFile(&handle, windows.GENERIC_READ|windows.GENERIC_WRITE|windows.WRITE_DAC|windows.READ_CONTROL, attributes, &status, nil, windows.FILE_ATTRIBUTE_NORMAL, 0, windows.FILE_CREATE, windows.FILE_NON_DIRECTORY_FILE|windows.FILE_OPEN_REPARSE_POINT, 0, 0)
+	if err != nil {
+		return err
+	}
+	file := os.NewFile(uintptr(handle), temp)
+	if file == nil {
+		_ = windows.CloseHandle(handle)
+		return fmt.Errorf("convert secured registry temporary handle to file")
 	}
 	committed := false
 	defer func() {
@@ -132,9 +172,19 @@ func writeRegistryFile(path string, data []byte) error {
 			_ = root.Remove(temp)
 		}
 	}()
-	if err := file.Chmod(0o600); err != nil {
+	if err := applyOwnerOnlyWindows(windows.Handle(file.Fd())); err != nil {
 		file.Close()
 		return err
+	}
+	tempEntry, err := root.Lstat(temp)
+	if err != nil {
+		file.Close()
+		return fmt.Errorf("verify secured registry temporary file in rooted parent: %w", err)
+	}
+	tempInfo, err := file.Stat()
+	if err != nil || isWindowsReparse(tempEntry) || !os.SameFile(tempEntry, tempInfo) {
+		file.Close()
+		return fmt.Errorf("secured registry temporary file changed parent or became a reparse point")
 	}
 	if _, err := file.Write(data); err != nil {
 		file.Close()
@@ -147,14 +197,103 @@ func writeRegistryFile(path string, data []byte) error {
 	if err := file.Close(); err != nil {
 		return err
 	}
-	if err := root.Rename(temp, base); err != nil {
+	if err := registryWindowsRename(root, temp, base); err != nil {
 		return err
 	}
 	committed = true
-	dir, err := root.Open(".")
+	// Windows documents FlushFileBuffers for file handles, not directory
+	// handles. The temp file is flushed before the atomic rooted rename; do not
+	// turn a successful committed replacement into a false failure afterward.
+	return nil
+}
+
+func openNativeWindowsParent(path string, root *os.Root) (*os.File, error) {
+	abs, err := filepath.Abs(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer dir.Close()
-	return dir.Sync()
+	name, err := windows.UTF16PtrFromString(filepath.Dir(abs))
+	if err != nil {
+		return nil, err
+	}
+	handle, err := windows.CreateFile(name, windows.GENERIC_READ|windows.GENERIC_WRITE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		return nil, err
+	}
+	file := os.NewFile(uintptr(handle), filepath.Dir(abs))
+	if file == nil {
+		_ = windows.CloseHandle(handle)
+		return nil, fmt.Errorf("convert rooted registry parent handle to file")
+	}
+	rootInfo, rootErr := root.Lstat(".")
+	fileInfo, fileErr := file.Stat()
+	if rootErr != nil || fileErr != nil || isWindowsReparse(fileInfo) || !os.SameFile(rootInfo, fileInfo) {
+		file.Close()
+		return nil, fmt.Errorf("registry parent changed or became a reparse point while opening its native handle")
+	}
+	return file, nil
+}
+
+func currentWindowsOwnerACL() (*windows.SID, *windows.SECURITY_DESCRIPTOR, *windows.ACL, error) {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	sd, err := windows.SecurityDescriptorFromString("D:P(A;;GA;;;" + user.User.Sid.String() + ")")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	dacl, _, err := sd.DACL()
+	return user.User.Sid, sd, dacl, err
+}
+
+func applyOwnerOnlyWindows(handle windows.Handle) error {
+	_, _, dacl, err := currentWindowsOwnerACL()
+	if err != nil {
+		return fmt.Errorf("construct owner-only registry DACL: %w", err)
+	}
+	if err := windows.SetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil); err != nil {
+		return fmt.Errorf("apply protected owner-only registry DACL: %w", err)
+	}
+	return validateOwnerOnlyWindows(handle)
+}
+
+func validateOwnerOnlyWindows(handle windows.Handle) error {
+	want, _, _, err := currentWindowsOwnerACL()
+	if err != nil {
+		return fmt.Errorf("resolve registry owner SID: %w", err)
+	}
+	sd, err := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return fmt.Errorf("read registry security descriptor: %w", err)
+	}
+	owner, _, err := sd.Owner()
+	if err != nil || owner == nil || !owner.Equals(want) {
+		return fmt.Errorf("registry owner is not the current user")
+	}
+	control, _, err := sd.Control()
+	if err != nil || control&windows.SE_DACL_PROTECTED == 0 {
+		return fmt.Errorf("registry DACL inherits access instead of being protected owner-only access")
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil || dacl == nil || dacl.AceCount != 1 {
+		return fmt.Errorf("registry DACL is not protected owner-only access")
+	}
+	var ace *windows.ACCESS_ALLOWED_ACE
+	if err := windows.GetAce(dacl, 0, &ace); err != nil || ace == nil || ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
+		return fmt.Errorf("registry DACL does not contain one owner allow entry")
+	}
+	aceSID := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+	if !aceSID.Equals(want) {
+		return fmt.Errorf("registry DACL grants access to a non-owner identity")
+	}
+	if ace.Mask != windows.GENERIC_ALL {
+		return fmt.Errorf("registry owner DACL does not grant the expected owner-only full access")
+	}
+	return nil
+}
+
+func isWindowsReparse(info os.FileInfo) bool {
+	data, ok := info.Sys().(*syscall.Win32FileAttributeData)
+	return info.Mode()&os.ModeSymlink != 0 || (ok && data.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0)
 }

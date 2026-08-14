@@ -20,6 +20,9 @@ type Selector = registry.Selector
 type Operation = registry.Operation
 type Outcome = registry.Outcome
 
+func NewVersion(value string) (Version, error)   { return registry.NewVersion(value) }
+func NewSelector(value string) (Selector, error) { return registry.NewSelector(value) }
+
 const (
 	OperationNone    = registry.OperationNone
 	OperationEnsure  = registry.OperationEnsure
@@ -110,9 +113,6 @@ type Inventory struct{ store *registry.Store }
 
 func View(store *registry.Store) Inventory { return Inventory{store: store} }
 
-// New is test/construction convenience for callers beginning with an empty
-// shared store. Production persistence callers load via registry.Load then View.
-func New() Inventory                       { store := registry.New(); return View(&store) }
 func (i *Inventory) Upsert(r Record) error { return i.store.Upsert(r.value) }
 func (i Inventory) Lookup(c cell.Cell) (Record, bool) {
 	k, err := registry.GlobalKey(c)
@@ -133,10 +133,6 @@ func (i Inventory) Ordered() []Record {
 	return out
 }
 func (i Inventory) Len() int { return len(i.Ordered()) }
-func Load(path string) (Inventory, error) {
-	s, err := registry.Load(path)
-	return View(&s), err
-}
 
 // UnifiedStatus exposes both scopes from one registry store to new callers.
 func UnifiedStatus(store registry.Store) []registry.Status { return store.Status() }
