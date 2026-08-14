@@ -3,6 +3,7 @@ package artifact
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -32,19 +33,19 @@ type AggregateComponent struct {
 	asset           string
 	digest          Digest
 	bundle          BundleID
-	runtimeContract string
+	runtimeContract RuntimeContractID
 	pasture, aura   Revision
 }
 
-func (c AggregateComponent) ID() ComponentID           { return c.id }
-func (c AggregateComponent) Harness() Harness          { return c.harness }
-func (c AggregateComponent) Extension() Extension      { return c.extension }
-func (c AggregateComponent) Asset() string             { return c.asset }
-func (c AggregateComponent) Digest() Digest            { return c.digest }
-func (c AggregateComponent) BundleID() BundleID        { return c.bundle }
-func (c AggregateComponent) RuntimeContractID() string { return c.runtimeContract }
-func (c AggregateComponent) PastureRevision() Revision { return c.pasture }
-func (c AggregateComponent) AuraRevision() Revision    { return c.aura }
+func (c AggregateComponent) ID() ComponentID                      { return c.id }
+func (c AggregateComponent) Harness() Harness                     { return c.harness }
+func (c AggregateComponent) Extension() Extension                 { return c.extension }
+func (c AggregateComponent) Asset() string                        { return c.asset }
+func (c AggregateComponent) Digest() Digest                       { return c.digest }
+func (c AggregateComponent) BundleID() BundleID                   { return c.bundle }
+func (c AggregateComponent) RuntimeContractID() RuntimeContractID { return c.runtimeContract }
+func (c AggregateComponent) PastureRevision() Revision            { return c.pasture }
+func (c AggregateComponent) AuraRevision() Revision               { return c.aura }
 
 // AggregateManifest is a completely validated immutable aggregate release.
 type AggregateManifest struct {
@@ -61,7 +62,7 @@ type AggregateComponentSpec struct {
 	Asset             string
 	Digest            Digest
 	BundleID          BundleID
-	RuntimeContractID string
+	RuntimeContractID RuntimeContractID
 	PastureRevision   Revision
 	AuraRevision      Revision
 }
@@ -122,7 +123,7 @@ type componentWire struct {
 func NewAggregateManifest(spec AggregateManifestSpec) (AggregateManifest, error) {
 	wire := aggregateWire{Schema: AggregateManifestSchema, Version: spec.Version.String(), Channel: string(spec.Channel), Compatibility: compatibilityWire{InstallerMin: spec.InstallerMin.String(), InstallerMax: spec.InstallerMax.String()}, Revisions: revisionsWire{Pasture: spec.PastureRevision.String(), Aura: spec.AuraRevision.String()}, Components: make([]componentWire, 0, len(spec.Components))}
 	for _, c := range spec.Components {
-		wire.Components = append(wire.Components, componentWire{ID: string(canonicalComponentID(c.Harness, c.Extension)), Harness: string(c.Harness), Extension: string(c.Extension), Asset: c.Asset, Digest: c.Digest.String(), BundleID: c.BundleID.String(), RuntimeContract: c.RuntimeContractID, PastureRevision: c.PastureRevision.String(), AuraRevision: c.AuraRevision.String()})
+		wire.Components = append(wire.Components, componentWire{ID: string(canonicalComponentID(c.Harness, c.Extension)), Harness: string(c.Harness), Extension: c.Extension.String(), Asset: c.Asset, Digest: c.Digest.String(), BundleID: c.BundleID.String(), RuntimeContract: c.RuntimeContractID.String(), PastureRevision: c.PastureRevision.String(), AuraRevision: c.AuraRevision.String()})
 	}
 	encoded, err := json.Marshal(wire)
 	if err != nil {
@@ -138,7 +139,7 @@ func (m AggregateManifest) MarshalJSON() ([]byte, error) {
 	}
 	wire := aggregateWire{Schema: AggregateManifestSchema, Version: m.version.String(), Channel: string(m.channel), Compatibility: compatibilityWire{InstallerMin: m.minInstaller.String(), InstallerMax: m.maxInstaller.String()}, Revisions: revisionsWire{Pasture: m.pasture.String(), Aura: m.aura.String()}, Components: make([]componentWire, 0, len(m.components))}
 	for _, c := range m.components {
-		wire.Components = append(wire.Components, componentWire{ID: string(c.id), Harness: string(c.harness), Extension: string(c.extension), Asset: c.asset, Digest: c.digest.String(), BundleID: c.bundle.String(), RuntimeContract: c.runtimeContract, PastureRevision: c.pasture.String(), AuraRevision: c.aura.String()})
+		wire.Components = append(wire.Components, componentWire{ID: string(c.id), Harness: string(c.harness), Extension: c.extension.String(), Asset: c.asset, Digest: c.digest.String(), BundleID: c.bundle.String(), RuntimeContract: c.runtimeContract.String(), PastureRevision: c.pasture.String(), AuraRevision: c.aura.String()})
 	}
 	return json.Marshal(wire)
 }
@@ -207,11 +208,16 @@ func ParseAggregateManifest(data []byte) (AggregateManifest, error) {
 		}
 		id := canonicalComponentID(h, x)
 		if item.ID != string(id) || seen[id] {
-			return AggregateManifest{}, aggregateInvalid("manifest decoding", fmt.Sprintf("components[%d].id", i), fmt.Sprintf("identity %q is mismatched or duplicated; expected %q", item.ID, id), "component identity cannot be proven", "publish each canonical harness.extension identity exactly once", fs.ErrInvalid)
+			return AggregateManifest{}, aggregateInvalid("manifest decoding", fmt.Sprintf("components[%d].id", i), fmt.Sprintf("identity %q is mismatched or duplicated; expected target identity %q", item.ID, id), "component identity cannot be proven", "publish each exact target descriptor harness/extension identity once", fs.ErrInvalid)
 		}
 		seen[id] = true
-		if item.Asset == "" || strings.Contains(item.Asset, "/") || !strings.Contains(item.Asset, version.String()) || strings.Contains(item.Asset, "pasture-stable") || assets[item.Asset] {
-			return AggregateManifest{}, aggregateInvalid("manifest decoding", fmt.Sprintf("components[%d].asset", i), fmt.Sprintf("asset name %q is empty, duplicated, moving, nested, or does not contain version %s", item.Asset, version), "the component is not tied to one immutable aggregate version", "use a unique basename containing the exact aggregate version; never use pasture-stable", fs.ErrInvalid)
+		stem := string(h)
+		if h == HarnessClaudeCode {
+			stem = "claude"
+		}
+		expectedAsset := fmt.Sprintf("pasture-%s-%s-%s.tgz", version, stem, x.String())
+		if item.Asset != expectedAsset || strings.Contains(item.Asset, "pasture-stable") || assets[item.Asset] {
+			return AggregateManifest{}, aggregateInvalid("manifest decoding", fmt.Sprintf("components[%d].asset", i), fmt.Sprintf("asset name %q is duplicated, moving, or differs from canonical %q", item.Asset, expectedAsset), "the component is not tied to one immutable aggregate version", "use the exact canonical immutable component basename; never use pasture-stable", fs.ErrInvalid)
 		}
 		assets[item.Asset] = true
 		digest, e := ParseDigest(item.Digest)
@@ -233,14 +239,15 @@ func ParseAggregateManifest(data []byte) (AggregateManifest, error) {
 		if pr != pasture || ar != aura {
 			return AggregateManifest{}, aggregateInvalid("manifest decoding", fmt.Sprintf("components[%d].revisions", i), "component revisions differ from aggregate revisions", "components from different source revisions could be mixed", "rebuild every component from the manifest's exact Pasture and Aura commits", fs.ErrInvalid)
 		}
-		expectedRuntimePrefix := string(h) + "/"
-		if h == HarnessClaudeCode {
-			expectedRuntimePrefix = "claude/"
+		runtimeContract, e := ParseRuntimeContractID(item.RuntimeContract)
+		if e != nil || runtimeContract.Harness() != h {
+			return AggregateManifest{}, aggregateInvalid("manifest decoding", fmt.Sprintf("components[%d].runtime_contract", i), fmt.Sprintf("runtime contract %q is not bound to harness %q", item.RuntimeContract, h), "runtime compatibility could be tied to the wrong target", "use the exact target descriptor RuntimeContractID", e)
 		}
-		if !strings.HasPrefix(item.RuntimeContract, expectedRuntimePrefix) || len(item.RuntimeContract) == len(expectedRuntimePrefix) || strings.TrimSpace(item.RuntimeContract) != item.RuntimeContract || strings.ContainsAny(item.RuntimeContract, " \t\r\n") {
-			return AggregateManifest{}, aggregateInvalid("manifest decoding", fmt.Sprintf("components[%d].runtime_contract", i), fmt.Sprintf("runtime contract %q is not namespaced to harness %q", item.RuntimeContract, h), "runtime compatibility could be tied to the wrong generated component", "publish a nonempty contract identity beginning with the exact harness and '/'", fs.ErrInvalid)
+		productionContract, _ := ProductionRuntimeContract(h)
+		if runtimeContract != productionContract {
+			return AggregateManifest{}, aggregateInvalid("manifest decoding", fmt.Sprintf("components[%d].runtime_contract", i), fmt.Sprintf("runtime contract %q is not registered production profile %q", runtimeContract, productionContract), "unknown or stale target bytes cannot enter an aggregate", "use ProductionRuntimeContract for the component harness", fs.ErrInvalid)
 		}
-		components = append(components, AggregateComponent{id, h, x, item.Asset, digest, bundle, item.RuntimeContract, pr, ar})
+		components = append(components, AggregateComponent{id, h, x, item.Asset, digest, bundle, runtimeContract, pr, ar})
 	}
 	sort.Slice(components, func(i, j int) bool { return components[i].id < components[j].id })
 	return AggregateManifest{version, min, max, channel, pasture, aura, components}, nil
@@ -274,6 +281,7 @@ func rejectDuplicateJSONFields(data []byte) error {
 		switch delim {
 		case '{':
 			seen := map[string]bool{}
+			allowed := allowedAggregateFields(location)
 			for decoder.More() {
 				keyToken, err := decoder.Token()
 				if err != nil {
@@ -282,6 +290,9 @@ func rejectDuplicateJSONFields(data []byte) error {
 				key, ok := keyToken.(string)
 				if !ok {
 					return fs.ErrInvalid
+				}
+				if !allowed[key] {
+					return aggregateInvalid("manifest decoding", location+"."+key, fmt.Sprintf("field %q is unknown or not canonically spelled", key), "case-folded or unknown JSON keys are ambiguous across consumers", "use only the exact lowercase schema keys", fs.ErrInvalid)
 				}
 				if seen[key] {
 					return aggregateInvalid("manifest decoding", location+"."+key, fmt.Sprintf("field %q appears more than once", key), "duplicate JSON fields make the release ambiguous", "publish every object field exactly once", fs.ErrInvalid)
@@ -308,9 +319,32 @@ func rejectDuplicateJSONFields(data []byte) error {
 		}
 	}
 	if err := walk("manifest"); err != nil {
+		var validation *AggregateValidationError
+		if errors.As(err, &validation) {
+			return err
+		}
 		return aggregateInvalid("manifest decoding", "JSON", fmt.Sprintf("canonical field validation failed: %v", err), "the manifest cannot be interpreted canonically", "publish one strict JSON object without duplicate fields", err)
 	}
 	return nil
+}
+
+func allowedAggregateFields(location string) map[string]bool {
+	fields := []string{}
+	switch {
+	case location == "manifest":
+		fields = []string{"schema", "version", "channel", "compatibility", "revisions", "components"}
+	case location == "manifest.compatibility":
+		fields = []string{"installer_min", "installer_max"}
+	case location == "manifest.revisions":
+		fields = []string{"pasture", "aura"}
+	case strings.HasPrefix(location, "manifest.components["):
+		fields = []string{"id", "harness", "extension", "asset", "digest", "bundle_id", "runtime_contract", "pasture_revision", "aura_revision"}
+	}
+	result := make(map[string]bool, len(fields))
+	for _, field := range fields {
+		result[field] = true
+	}
+	return result
 }
 
 func ensureEOF(dec *json.Decoder) error {

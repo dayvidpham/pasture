@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -19,22 +21,68 @@ const pastureRevisionText = "1111111111111111111111111111111111111111"
 const auraRevisionText = "2222222222222222222222222222222222222222"
 
 type fixtureSource struct {
-	releases []Release
-	data     map[string][]byte
+	releases     []Release
+	data         map[string][]byte
+	listErr      error
+	openErr      error
+	readErr      error
+	cancelOnRead context.CancelFunc
+	closeErr     error
 }
 
 func (s *fixtureSource) ListReleases(context.Context) ([]Release, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
 	return append([]Release(nil), s.releases...), nil
 }
 func (s *fixtureSource) OpenURL(_ context.Context, url string) (io.ReadCloser, error) {
+	if s.openErr != nil {
+		return nil, s.openErr
+	}
 	b, ok := s.data[url]
 	if !ok {
 		return nil, os.ErrNotExist
 	}
+	if s.readErr != nil || s.cancelOnRead != nil {
+		return &faultReader{data: bytes.NewReader(b), err: s.readErr, cancel: s.cancelOnRead, closeErr: s.closeErr}, nil
+	}
+	if s.closeErr != nil {
+		return &faultReader{data: bytes.NewReader(b), closeErr: s.closeErr}, nil
+	}
 	return io.NopCloser(bytes.NewReader(b)), nil
 }
 
+type faultReader struct {
+	data     *bytes.Reader
+	err      error
+	cancel   context.CancelFunc
+	fired    bool
+	closeErr error
+}
+
+func (r *faultReader) Read(p []byte) (int, error) {
+	if !r.fired {
+		r.fired = true
+		if r.cancel != nil {
+			r.cancel()
+		}
+		if r.err != nil {
+			return 0, r.err
+		}
+	}
+	return r.data.Read(p)
+}
+func (r *faultReader) Close() error { return r.closeErr }
+
 type recordingMutator struct{ calls int }
+
+type failingMutator struct{ calls int }
+
+func (m *failingMutator) ApplyVerifiedAggregate(context.Context, artifact.VerifiedAggregate) error {
+	m.calls++
+	return errors.New("mutation failed")
+}
 
 func (m *recordingMutator) ApplyVerifiedAggregate(context.Context, artifact.VerifiedAggregate) error {
 	m.calls++
@@ -82,7 +130,7 @@ func TestResolveAndApplyNeverMutatesUntilCompleteVerification(t *testing.T) {
 			data["final/"+artifact.AggregateChecksumAsset] = []byte(strings.Repeat("0", 64) + "  " + artifact.AggregateManifestAsset + "\n")
 		}},
 		{"component checksum mismatch", func(data map[string][]byte) { data["final/pasture-1.2.0-codex-hooks.tgz"] = []byte("corrupt") }},
-		{"identity mismatch", func(data map[string][]byte) { replaceManifest(data, `"id":"codex.hooks"`, `"id":"codex.skills"`) }},
+		{"identity mismatch", func(data map[string][]byte) { replaceManifest(data, `"id":"codex/hooks"`, `"id":"codex/skills"`) }},
 		{"revision mismatch", func(data map[string][]byte) {
 			replaceManifest(data, `"aura_revision":"2222222222222222222222222222222222222222"`, `"aura_revision":"3333333333333333333333333333333333333333"`)
 		}},
@@ -132,6 +180,230 @@ func TestAssetLimitOverflowDoesNotMutate(t *testing.T) {
 	catalog, _ := New(source)
 	if _, err := catalog.ResolveAndApply(context.Background(), selection, mutator); err == nil {
 		t.Fatal("expected overflow rejection")
+	}
+	if mutator.calls != 0 {
+		t.Fatal("mutation occurred")
+	}
+}
+
+func TestCandidateListingAndExactNonNewestResolution(t *testing.T) {
+	t.Parallel()
+	source := loadFixtureSource(t)
+	for key, value := range source.data {
+		if strings.HasPrefix(key, "final/") {
+			source.data["old/"+strings.TrimPrefix(key, "final/")] = append([]byte(nil), value...)
+		}
+	}
+	replaceManifestPrefix(source.data, "old/", "1.2.0", "1.1.0", "final", "final")
+	latest, _ := artifact.ParseVersion("1.2.0")
+	old, _ := artifact.ParseVersion("1.1.0")
+	source.releases = []Release{makeRelease(t, source, latest, false, "final/"), makeRelease(t, source, old, false, "old/")}
+	catalog, _ := New(source)
+	selection := validSelection(t)
+	candidates, err := catalog.ListCompatible(context.Background(), selection.Installer, FinalsOnly)
+	if err != nil || len(candidates) != 2 {
+		t.Fatalf("candidates=%d err=%v", len(candidates), err)
+	}
+	got, err := catalog.ResolveVersion(context.Background(), selection.Installer, FinalsOnly, old, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Manifest().Version() != old {
+		t.Fatalf("got %s", got.Manifest().Version())
+	}
+	missing, _ := artifact.ParseVersion("1.0.0")
+	if _, err = catalog.ResolveVersion(context.Background(), selection.Installer, FinalsOnly, missing, 0); err == nil {
+		t.Fatal("missing exact version fell back")
+	}
+}
+
+func TestChosenCandidateTamperNeverFallsBackOrMutates(t *testing.T) {
+	t.Parallel()
+	source := loadFixtureSource(t)
+	version, _ := artifact.ParseVersion("1.2.0")
+	source.releases = []Release{makeRelease(t, source, version, false, "final/")}
+	catalog, _ := New(source)
+	selection := validSelection(t)
+	candidates, err := catalog.ListCompatible(context.Background(), selection.Installer, FinalsOnly)
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("err=%v candidates=%d", err, len(candidates))
+	}
+	source.data["final/"+artifact.AggregateManifestAsset] = append(source.data["final/"+artifact.AggregateManifestAsset], byte(' '))
+	updateChecksum(source.data, "final/")
+	mutator := &recordingMutator{}
+	if _, err = catalog.ResolveCandidateAndApply(context.Background(), candidates[0], 0, mutator); err == nil {
+		t.Fatal("expected selected identity mismatch")
+	}
+	if mutator.calls != 0 {
+		t.Fatal("mutation occurred")
+	}
+}
+
+func TestTrustedRevisionMismatchesAreIndependent(t *testing.T) {
+	t.Parallel()
+	for _, which := range []string{"pasture", "aura"} {
+		which := which
+		t.Run(which, func(t *testing.T) {
+			t.Parallel()
+			source := loadFixtureSource(t)
+			version, _ := artifact.ParseVersion("1.2.0")
+			source.releases = []Release{makeRelease(t, source, version, false, "final/")}
+			selection := validSelection(t)
+			wrong, _ := artifact.ParseRevision("3333333333333333333333333333333333333333")
+			if which == "pasture" {
+				selection.PastureRevision = wrong
+			} else {
+				selection.AuraRevision = wrong
+			}
+			mutator := &recordingMutator{}
+			catalog, _ := New(source)
+			if _, err := catalog.ResolveAndApply(context.Background(), selection, mutator); err == nil {
+				t.Fatal("expected revision mismatch")
+			}
+			if mutator.calls != 0 {
+				t.Fatal("mutation occurred")
+			}
+		})
+	}
+}
+
+func TestMutationCallCountsAndErrors(t *testing.T) {
+	t.Parallel()
+	source := loadFixtureSource(t)
+	version, _ := artifact.ParseVersion("1.2.0")
+	source.releases = []Release{makeRelease(t, source, version, false, "final/")}
+	catalog, _ := New(source)
+	success := &recordingMutator{}
+	if _, err := catalog.ResolveAndApply(context.Background(), validSelection(t), success); err != nil || success.calls != 1 {
+		t.Fatalf("calls=%d err=%v", success.calls, err)
+	}
+	failure := &failingMutator{}
+	if _, err := catalog.ResolveAndApply(context.Background(), validSelection(t), failure); err == nil || failure.calls != 1 {
+		t.Fatalf("calls=%d err=%v", failure.calls, err)
+	}
+}
+
+func TestCancellationListOpenAndMissingAssetNeverMutate(t *testing.T) {
+	t.Parallel()
+	version, _ := artifact.ParseVersion("1.2.0")
+	for _, tc := range []struct {
+		name    string
+		prepare func(*fixtureSource)
+	}{{"list", func(s *fixtureSource) { s.listErr = errors.New("list") }}, {"open", func(s *fixtureSource) { s.openErr = errors.New("open") }}, {"missing", func(s *fixtureSource) { delete(s.data, "final/"+artifact.AggregateManifestAsset) }}} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			source := loadFixtureSource(t)
+			source.releases = []Release{makeRelease(t, source, version, false, "final/")}
+			tc.prepare(source)
+			mutator := &recordingMutator{}
+			catalog, _ := New(source)
+			if _, err := catalog.ResolveAndApply(context.Background(), validSelection(t), mutator); err == nil {
+				t.Fatal("expected error")
+			}
+			if mutator.calls != 0 {
+				t.Fatal("mutation occurred")
+			}
+		})
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	source := loadFixtureSource(t)
+	source.releases = []Release{makeRelease(t, source, version, false, "final/")}
+	mutator := &recordingMutator{}
+	catalog, _ := New(source)
+	if _, err := catalog.ResolveAndApply(ctx, validSelection(t), mutator); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v", err)
+	}
+	if mutator.calls != 0 {
+		t.Fatal("mutation occurred")
+	}
+}
+
+func TestDeclaredAssetSizeMismatchNeverMutates(t *testing.T) {
+	t.Parallel()
+	for _, delta := range []int64{-1, 1} {
+		delta := delta
+		t.Run(fmt.Sprintf("delta_%d", delta), func(t *testing.T) {
+			t.Parallel()
+			source := loadFixtureSource(t)
+			version, _ := artifact.ParseVersion("1.2.0")
+			release := makeRelease(t, source, version, false, "final/")
+			asset := release.assets[artifact.AggregateManifestAsset]
+			asset.size += delta
+			release.assets[artifact.AggregateManifestAsset] = asset
+			source.releases = []Release{release}
+			mutator := &recordingMutator{}
+			catalog, _ := New(source)
+			if _, err := catalog.ResolveAndApply(context.Background(), validSelection(t), mutator); err == nil {
+				t.Fatal("expected size failure")
+			}
+			if mutator.calls != 0 {
+				t.Fatal("mutation occurred")
+			}
+		})
+	}
+}
+
+func TestReadErrorAndMidReadCancellationNeverMutate(t *testing.T) {
+	t.Parallel()
+	version, _ := artifact.ParseVersion("1.2.0")
+	t.Run("read error", func(t *testing.T) {
+		source := loadFixtureSource(t)
+		source.releases = []Release{makeRelease(t, source, version, false, "final/")}
+		source.readErr = errors.New("read")
+		mutator := &recordingMutator{}
+		catalog, _ := New(source)
+		if _, err := catalog.ResolveAndApply(context.Background(), validSelection(t), mutator); err == nil {
+			t.Fatal("expected read error")
+		}
+		if mutator.calls != 0 {
+			t.Fatal("mutation occurred")
+		}
+	})
+	t.Run("mid read cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		source := loadFixtureSource(t)
+		source.releases = []Release{makeRelease(t, source, version, false, "final/")}
+		source.cancelOnRead = cancel
+		mutator := &recordingMutator{}
+		catalog, _ := New(source)
+		if _, err := catalog.ResolveAndApply(ctx, validSelection(t), mutator); err == nil {
+			t.Fatal("expected cancellation")
+		}
+		if mutator.calls != 0 {
+			t.Fatal("mutation occurred")
+		}
+	})
+	t.Run("close error", func(t *testing.T) {
+		source := loadFixtureSource(t)
+		source.releases = []Release{makeRelease(t, source, version, false, "final/")}
+		source.closeErr = errors.New("close")
+		mutator := &recordingMutator{}
+		catalog, _ := New(source)
+		if _, err := catalog.ResolveAndApply(context.Background(), validSelection(t), mutator); err == nil {
+			t.Fatal("expected close error")
+		}
+		if mutator.calls != 0 {
+			t.Fatal("mutation occurred")
+		}
+	})
+}
+
+func TestOversizedCandidateManifestNeverMutates(t *testing.T) {
+	t.Parallel()
+	source := loadFixtureSource(t)
+	version, _ := artifact.ParseVersion("1.2.0")
+	release := makeRelease(t, source, version, false, "final/")
+	source.data["final/"+artifact.AggregateManifestAsset] = bytes.Repeat([]byte(" "), 4<<20+1)
+	asset := release.assets[artifact.AggregateManifestAsset]
+	asset.size = int64(len(source.data["final/"+artifact.AggregateManifestAsset]))
+	release.assets[artifact.AggregateManifestAsset] = asset
+	source.releases = []Release{release}
+	mutator := &recordingMutator{}
+	catalog, _ := New(source)
+	if _, err := catalog.ResolveAndApply(context.Background(), validSelection(t), mutator); err == nil {
+		t.Fatal("expected oversized manifest rejection")
 	}
 	if mutator.calls != 0 {
 		t.Fatal("mutation occurred")

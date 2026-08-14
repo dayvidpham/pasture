@@ -12,41 +12,30 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 )
 
 // Extension is a strongly-typed extension axis. Its zero value is invalid; use
 // SkillsAxis, AgentsAxis, or HooksAxis. The three axes are global: the
 // installer asks once which axes apply to every enabled harness.
-type Extension struct{ name string }
-
-const (
-	skillsAxisName = "skills"
-	agentsAxisName = "agents"
-	hooksAxisName  = "hooks"
-)
+type Extension = artifact.Extension
 
 // SkillsAxis is the skills extension axis.
-func SkillsAxis() Extension { return Extension{name: skillsAxisName} }
+func SkillsAxis() Extension { return artifact.ExtensionSkills }
 
 // AgentsAxis is the agents extension axis.
-func AgentsAxis() Extension { return Extension{name: agentsAxisName} }
+func AgentsAxis() Extension { return artifact.ExtensionAgents }
 
 // HooksAxis is the security-sensitive hooks extension axis (default disabled).
-func HooksAxis() Extension { return Extension{name: hooksAxisName} }
+func HooksAxis() Extension { return artifact.ExtensionHooks }
 
 // ParseExtension resolves a canonical axis name to its typed value. It rejects
 // unknown axes actionably rather than returning a silent zero value.
 func ParseExtension(value string) (Extension, error) {
-	switch value {
-	case skillsAxisName:
-		return SkillsAxis(), nil
-	case agentsAxisName:
-		return AgentsAxis(), nil
-	case hooksAxisName:
-		return HooksAxis(), nil
-	default:
-		return Extension{}, newFault(
+	parsed, err := artifact.ParseExtension(value)
+	if err != nil {
+		return 0, newFault(
 			"extension parse", "known extension axis",
 			fmt.Sprintf("the axis name %q is not one of skills, agents, or hooks", value),
 			"internal/install/cell.ParseExtension", "resolving an extension axis name",
@@ -54,43 +43,7 @@ func ParseExtension(value string) (Extension, error) {
 			"use exactly one of the axis names: skills, agents, hooks", nil,
 		)
 	}
-}
-
-// String returns the canonical axis name.
-func (e Extension) String() string { return e.name }
-
-// IsValid reports whether e is one of the three canonical axes.
-func (e Extension) IsValid() bool {
-	switch e.name {
-	case skillsAxisName, agentsAxisName, hooksAxisName:
-		return true
-	default:
-		return false
-	}
-}
-
-// MarshalText encodes the canonical axis name.
-func (e Extension) MarshalText() ([]byte, error) {
-	if !e.IsValid() {
-		return nil, newFault(
-			"extension encode", "valid extension axis",
-			"the extension value is the invalid zero value",
-			"internal/install/cell.Extension.MarshalText", "serializing an extension axis",
-			"a document would be written with an empty axis name",
-			"construct the axis with SkillsAxis, AgentsAxis, or HooksAxis before encoding", nil,
-		)
-	}
-	return []byte(e.name), nil
-}
-
-// UnmarshalText decodes a canonical axis name.
-func (e *Extension) UnmarshalText(text []byte) error {
-	parsed, err := ParseExtension(string(text))
-	if err != nil {
-		return err
-	}
-	*e = parsed
-	return nil
+	return parsed, nil
 }
 
 // canonicalExtensions is the frozen intra-harness axis order.

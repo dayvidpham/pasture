@@ -30,12 +30,13 @@ type AggregateAssetSource interface {
 
 // AggregateRequirements are trusted installer-side constraints.
 type AggregateRequirements struct {
-	Version         Version
-	Installer       Version
-	PastureRevision Revision
-	AuraRevision    Revision
-	MaxAssetBytes   int64
-	MaxTotalBytes   int64
+	Version                Version
+	Installer              Version
+	PastureRevision        Revision
+	AuraRevision           Revision
+	MaxAssetBytes          int64
+	MaxTotalBytes          int64
+	ExpectedManifestDigest Digest
 }
 
 // VerifiedAggregate is produced only after all manifest and component bytes verify.
@@ -59,14 +60,14 @@ func VerifyAggregate(ctx context.Context, source AggregateAssetSource, requireme
 	if err != nil {
 		return VerifiedAggregate{}, err
 	}
+	if requirements.ExpectedManifestDigest.String() != "" && DigestBytes(manifestBytes) != requirements.ExpectedManifestDigest {
+		return VerifiedAggregate{}, aggregateInvalid("aggregate verification", "manifest identity", fmt.Sprintf("manifest digest changed from selected %s to %s", requirements.ExpectedManifestDigest, DigestBytes(manifestBytes)), "the selected candidate no longer identifies these bytes", "refresh the candidate list and reselect", fs.ErrInvalid)
+	}
 	checksumBytes, err := readBounded(ctx, source, AggregateChecksumAsset, 4096)
 	if err != nil {
 		return VerifiedAggregate{}, err
 	}
-	if err := verifyManifestChecksum(manifestBytes, checksumBytes); err != nil {
-		return VerifiedAggregate{}, err
-	}
-	manifest, err := ParseAggregateManifest(manifestBytes)
+	manifest, err := VerifyAggregateManifest(manifestBytes, checksumBytes)
 	if err != nil {
 		return VerifiedAggregate{}, err
 	}
@@ -113,6 +114,14 @@ func VerifyAggregate(ctx context.Context, source AggregateAssetSource, requireme
 	return VerifiedAggregate{manifest: manifest, assets: assets}, nil
 }
 
+// VerifyAggregateManifest validates the immutable checksum sidecar and strict manifest without opening components.
+func VerifyAggregateManifest(manifestBytes, checksumBytes []byte) (AggregateManifest, error) {
+	if err := verifyManifestChecksum(manifestBytes, checksumBytes); err != nil {
+		return AggregateManifest{}, err
+	}
+	return ParseAggregateManifest(manifestBytes)
+}
+
 func readBounded(ctx context.Context, source AggregateAssetSource, name string, limit int64) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, aggregateInvalid("asset read", name, fmt.Sprintf("the operation was canceled before reading: %v", err), "verification is incomplete and mutation must not begin", "retry with a live context", err)
@@ -121,10 +130,13 @@ func readBounded(ctx context.Context, source AggregateAssetSource, name string, 
 	if err != nil {
 		return nil, aggregateInvalid("asset open", name, fmt.Sprintf("the release asset could not be opened: %v", err), "verification is incomplete and mutation must not begin", "publish the named asset and ensure it is readable", err)
 	}
-	defer r.Close()
 	b, err := io.ReadAll(io.LimitReader(r, limit+1))
+	closeErr := r.Close()
 	if err != nil {
 		return nil, aggregateInvalid("asset read", name, fmt.Sprintf("the release asset could not be read completely: %v", err), "verification is incomplete and mutation must not begin", "repair the asset transport and retry", err)
+	}
+	if closeErr != nil {
+		return nil, aggregateInvalid("asset close", name, fmt.Sprintf("the release asset could not be closed cleanly: %v", closeErr), "verification resource ownership is incomplete", "repair the asset transport and retry", closeErr)
 	}
 	if int64(len(b)) > limit {
 		return nil, aggregateInvalid("asset read", name, fmt.Sprintf("asset exceeds the %d-byte verification limit", limit), "unbounded release data was rejected before mutation", "publish a bounded component or configure an explicitly reviewed larger limit", fs.ErrInvalid)
