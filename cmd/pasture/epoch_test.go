@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestCLI_EpochInventoryAndHiddenAdapter(t *testing.T) {
+func TestCLI_EpochInventoryAndRetiredAdapter(t *testing.T) {
 	t.Parallel()
 
 	root := runCLI(t, "--help")
@@ -39,12 +39,19 @@ func TestCLI_EpochInventoryAndHiddenAdapter(t *testing.T) {
 		t.Fatalf("task commands = %v, want %v\n%s", got, want, task.stdout)
 	}
 
-	adapter := runCLI(t, "__adapter", "--help")
-	if adapter.exitCode != 0 {
-		t.Fatalf("hidden adapter was not registered by the production binary: exit=%d stderr=%s", adapter.exitCode, adapter.stderr)
+	dir := t.TempDir()
+	db := filepath.Join(dir, "retired-adapter.db")
+	adapter := runCLI(t, "--db", db, "__adapter", "--help")
+	if adapter.exitCode != 1 {
+		t.Fatalf("retired adapter exit=%d, want ordinary unknown-command exit 1; stdout=%s stderr=%s", adapter.exitCode, adapter.stdout, adapter.stderr)
 	}
-	if strings.Contains(adapter.stdout, "invoke") {
-		t.Fatalf("hidden adapter child appeared in adapter help:\n%s", adapter.stdout)
+	if !strings.Contains(adapter.stderr, `unknown command "__adapter" for "pasture"`) {
+		t.Fatalf("retired adapter did not return the ordinary unknown-command error:\n%s", adapter.stderr)
+	}
+	for _, path := range []string{db, db + "-wal", db + "-shm"} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("retired adapter opened or created %q: stat error=%v", path, err)
+		}
 	}
 }
 
