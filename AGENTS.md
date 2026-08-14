@@ -575,14 +575,16 @@ When debugging "where am I in this workflow?", the layers map cleanly:
 
 Pasture's typed Go codegen is the sole authority for generated protocol skills
 and agents. Generation is explicit: run `make generate`; ordinary builds do not
-rewrite repository files. The canonical command emits both supported harnesses:
+rewrite repository files. The canonical command emits all supported targets:
 
 - Claude Code: all registered skills under `skills/` and every tool-bearing role
   agent under `agents/`.
 - OpenCode: the corresponding generated skills under `.opencode/skill/`, role
   agents under `.opencode/agent/`, plus `opencode.json`.
+- Codex: compatible skills under `.agents/skills/`, role agents under
+  `.codex/agents/`, and the generated lifecycle package under `.codex/`.
 - The hand-authored `protocol` and `install-cli` skills are copied verbatim into
-  the OpenCode target and are intentionally outside the generated-skill
+  the applicable non-Claude targets and are intentionally outside the generated-skill
   registry.
 
 The source inventory is deliberately static and explicit:

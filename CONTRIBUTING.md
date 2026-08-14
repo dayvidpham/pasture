@@ -71,7 +71,7 @@ make generate
 ```
 
 This runs `go generate ./internal/codegen/...`, whose directive invokes
-`tools/codegen` for both the `claude-code` and `opencode` targets. The binary
+`tools/codegen` for the `claude-code`, `opencode`, and `codex` targets. The binary
 locates the module root by walking upward from cwd to find `go.mod`.
 
 What it does, in order:
@@ -79,8 +79,10 @@ What it does, in order:
 2. Writes Claude Code skills under `skills/` and agents under `agents/`
 3. Writes OpenCode skills under `.opencode/skill/`, agents under
    `.opencode/agent/`, and `opencode.json`
-4. Copies the hand-authored `protocol` and `install-cli` skills verbatim into
-   the OpenCode target
+4. Writes Codex-compatible skills under `.agents/skills/`, agents under
+   `.codex/agents/`, and lifecycle package files under `.codex/`
+5. Copies the hand-authored `protocol` and `install-cli` skills verbatim into
+   the applicable non-Claude targets
 
 All committed generated outputs must remain byte-identical after regeneration.
 To capture a new baseline intentionally, start from a clean tree, run
@@ -93,14 +95,14 @@ but it is not a substitute for the canonical all-target regeneration gate.
 
 | What you changed | Regenerates |
 |-----------------|-------------|
-| Any map in `specs_data.go` | schema.xml and the affected skills/agents in both harnesses |
-| `specs_data_body_<skill>.go` plus its `SkillBodySpecs` registry entry | Claude Code and OpenCode SKILL.md body content |
-| `context.go` (`roleConstraints` / `phaseConstraints`) | affected SKILL.md and agent definitions in both harnesses |
+| Any map in `specs_data.go` | schema.xml and the affected skills/agents in all harnesses |
+| `specs_data_body_<skill>.go` plus its `SkillBodySpecs` registry entry | Claude Code, OpenCode, and Codex-compatible SKILL.md body content |
+| `context.go` (`roleConstraints` / `phaseConstraints`) | affected SKILL.md and agent definitions in all harnesses |
 | `schema_types.go` | schema.xml only |
 | `schema.go` section builders | schema.xml only |
 | `templates/skill.go.tmpl` | Claude Code role SKILL.md files |
 | `templates/skill_sub.go.tmpl` | Claude Code command SKILL.md files |
-| `templates/agent_definition.go.tmpl` | Shared agent body used by Claude Code and OpenCode agent definitions |
+| `templates/agent_definition.go.tmpl` | Shared agent body used by Claude Code, OpenCode, and Codex agent definitions |
 | `templates/opencode_*.go.tmpl` | corresponding OpenCode skills or agents |
 | `internal/codegen/harness.go` `roleSkillDirs` | which SKILL.md files are regenerated |
 | `internal/codegen/harness.go` `commandSkillDirs` | which sub-skill SKILL.md files are regenerated |

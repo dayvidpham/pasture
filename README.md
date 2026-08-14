@@ -138,9 +138,9 @@ The local `pasture` CLI hosts task verbs (`task create / show / update / close /
 The protocol `schema.xml`, registered skills, and tool-bearing role agents are
 **generated**, not hand-maintained. Protocol facts (phases, roles, constraints,
 commands, figures, and skill bodies) are declared once as typed Go values in
-`internal/codegen/` and rendered for both Claude Code and OpenCode. The
+`internal/codegen/` and rendered for Claude Code, OpenCode, and Codex. The
 hand-authored `protocol` and `install-cli` skills sit outside that generated
-registry and are copied verbatim into the OpenCode target.
+registry and are copied verbatim into the applicable non-Claude targets.
 
 ```bash
 make generate                        # regenerate every committed target
@@ -148,9 +148,10 @@ go test ./internal/codegen/...       # completeness, parity, and sync guards
 ```
 
 The data flows from `specs_data*.go` through `tools/codegen` to `schema.xml`,
-the Claude Code trees (`skills/`, `agents/`), and the OpenCode trees
-(`.opencode/skill/`, `.opencode/agent/`, `opencode.json`). For registered Claude
-Code skills, the generator owns the complete content through the END marker;
+the Claude Code trees (`skills/`, `agents/`), the OpenCode trees
+(`.opencode/skill/`, `.opencode/agent/`, `opencode.json`), and the Codex trees
+(`.agents/skills/`, `.codex/agents/`, `.codex/hooks/`, and Codex manifests).
+For registered Claude Code skills, the generator owns the complete content through the END marker;
 maintained body prose belongs in `specs_data_body_<skill>.go`, not below that
 marker. CI regenerates all targets on a clean checkout and fails on any resulting
 worktree change; an exact output-inventory test also rejects retired files that
@@ -172,10 +173,13 @@ recommended for day-to-day use, and it does not define a second semantic
 model — raw payloads traverse the same lifecycle parse/bind/verifier/gate
 pipeline as native events and commit the same occurrence evidence kind.
 
-Exact provider payloads are not interchangeable fixtures. The current OpenCode
-work is limited to two user-reviewed OpenCode 1.18.10 callback records
-(`session.created` and `tool.execute.before`); Codex candidates remain future
-work. See [docs/privacy.md](docs/privacy.md) for the complete clearance boundary.
+Exact provider payloads are not interchangeable fixtures. Lifecycle activation
+is proof-gated per host contract: Claude has 8 enabled events, OpenCode has two
+user-reviewed OpenCode 1.18.10 callback records (`session.created` and
+`tool.execute.before`), and Codex has two Codex 0.146.0 command-hook records
+(`SessionStart` and `PreToolUse`). The remaining generated events are explicitly
+withheld until authentic capture and production-path proofs exist. See
+[docs/privacy.md](docs/privacy.md) for the complete clearance boundary.
 
 - **Architecture + data-flow diagram:** [docs/codegen.md](docs/codegen.md)
 - **How to add a constraint / role / phase / section / command:** [CONTRIBUTING.md](CONTRIBUTING.md)
