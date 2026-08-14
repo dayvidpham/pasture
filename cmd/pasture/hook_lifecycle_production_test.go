@@ -818,6 +818,9 @@ func buildLifecycleBinary(t *testing.T, binary string) {
 	t.Helper()
 	build := exec.Command("go", "build", "-race", "-o", binary, ".")
 	build.Dir = "."
+	// The repository's standard test target keeps the outer suite CGO-free.
+	// This child build intentionally uses the race detector, which requires CGO.
+	build.Env = append(build.Environ(), "CGO_ENABLED=1")
 	output, err := build.CombinedOutput()
 	require.NoError(t, err, string(output))
 }

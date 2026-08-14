@@ -1,0 +1,4 @@
+schema: pasture.install.registry/v1
+global_installations: []
+project_installations: []
+legacy_installations: []

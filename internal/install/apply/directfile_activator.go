@@ -63,17 +63,17 @@ func (a DirectFileActivator) Ensure(c cell.Cell, act activation.ComponentActivat
 		return Outcome{Observation: inventory.Unknown()}, err
 	}
 	record, err := inventory.NewRecord(inventory.RecordInput{
-		Cell:        c,
-		Source:      a.recordSource(),
-		Strategy:    activation.DirectFileKindValue(),
-		Managed:     out.Managed, // false for a pure external match
-		ArtifactID:  df.Bundle().ID().String(),
-		Leaves:      out.Leaves,
-		CreatedDirs: createdDirs,
-		Observation: inventory.Installed(),
-		Trust:       inventory.TrustNotApplicable(),
-		LastAction:  "ensure",
-		LastOutcome: "completed",
+		Cell:          c,
+		Source:        a.recordSource(),
+		Strategy:      activation.DirectFileKindValue(),
+		Managed:       out.Managed, // false for a pure external match
+		ArtifactID:    df.Bundle().ID(),
+		Leaves:        out.Leaves,
+		CreatedDirs:   createdDirs,
+		Observation:   inventory.Installed(),
+		Trust:         inventory.TrustNotApplicable(),
+		LastOperation: inventory.OperationEnsure,
+		LastOutcome:   inventory.OutcomeCompleted,
 	})
 	if err != nil {
 		return Outcome{Observation: inventory.Unknown()}, err
@@ -102,15 +102,15 @@ func (a DirectFileActivator) Remove(c cell.Cell, act activation.ComponentActivat
 	// holds a foreign entry Pasture does not own, and a re-install re-records the
 	// tree it re-creates.
 	record, err := inventory.NewRecord(inventory.RecordInput{
-		Cell:        c,
-		Source:      a.recordSource(),
-		Strategy:    activation.DirectFileKindValue(),
-		Managed:     true,
-		ArtifactID:  prior.ArtifactID(),
-		Observation: inventory.Absent(),
-		Trust:       inventory.TrustNotApplicable(),
-		LastAction:  "remove",
-		LastOutcome: "completed",
+		Cell:          c,
+		Source:        a.recordSource(),
+		Strategy:      activation.DirectFileKindValue(),
+		Managed:       true,
+		ArtifactID:    prior.ArtifactID(),
+		Observation:   inventory.Absent(),
+		Trust:         inventory.TrustNotApplicable(),
+		LastOperation: inventory.OperationRemove,
+		LastOutcome:   inventory.OutcomeCompleted,
 	})
 	if err != nil {
 		return Outcome{Observation: inventory.Unknown()}, err

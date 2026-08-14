@@ -14,6 +14,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/install/apply"
 	"github.com/dayvidpham/pasture/internal/install/cell"
 	"github.com/dayvidpham/pasture/internal/install/inventory"
+	"github.com/dayvidpham/pasture/internal/install/registry"
 	"github.com/dayvidpham/pasture/internal/install/selection"
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
@@ -94,7 +95,8 @@ func TestApplySelectionInstallerEnsuresDirectFileCells(t *testing.T) {
 	contracts := map[ir.HarnessID]activation.ActivationContract{
 		ir.HarnessOpenCode: opencodeContract(t, root),
 	}
-	inv := inventory.New()
+	store := registry.New()
+	inv := inventory.View(&store)
 	res, applyErr := engine.ApplySelection(opencodeAllOnSelection(t), apply.InstallerSource(), contracts, &inv)
 	if applyErr != nil {
 		t.Fatalf("pre-plan error: %v", applyErr)
@@ -127,7 +129,8 @@ func TestApplySelectionIdempotent(t *testing.T) {
 	root := t.TempDir()
 	engine, _ := apply.NewEngine(apply.NewDirectFileActivator(apply.InstallerSource()))
 	contracts := map[ir.HarnessID]activation.ActivationContract{ir.HarnessOpenCode: opencodeContract(t, root)}
-	inv := inventory.New()
+	store := registry.New()
+	inv := inventory.View(&store)
 	sel := opencodeAllOnSelection(t)
 	if _, err := engine.ApplySelection(sel, apply.InstallerSource(), contracts, &inv); err != nil {
 		t.Fatal(err)
@@ -145,7 +148,8 @@ func TestApplySelectionRemovesDeselectedManagedCell(t *testing.T) {
 	root := t.TempDir()
 	engine, _ := apply.NewEngine(apply.NewDirectFileActivator(apply.InstallerSource()))
 	contracts := map[ir.HarnessID]activation.ActivationContract{ir.HarnessOpenCode: opencodeContract(t, root)}
-	inv := inventory.New()
+	store := registry.New()
+	inv := inventory.View(&store)
 	if _, err := engine.ApplySelection(opencodeAllOnSelection(t), apply.InstallerSource(), contracts, &inv); err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +180,8 @@ func TestApplySelectionUninstallLeavesNoOrphanedDirs(t *testing.T) {
 	root := t.TempDir()
 	engine, _ := apply.NewEngine(apply.NewDirectFileActivator(apply.InstallerSource()))
 	contracts := map[ir.HarnessID]activation.ActivationContract{ir.HarnessOpenCode: opencodeContract(t, root)}
-	inv := inventory.New()
+	store := registry.New()
+	inv := inventory.View(&store)
 	// Full install materializes nested trees: skills/pasture, agent, plugin.
 	if _, err := engine.ApplySelection(opencodeAllOnSelection(t), apply.InstallerSource(), contracts, &inv); err != nil {
 		t.Fatal(err)
@@ -220,7 +225,8 @@ func TestApplySelectionUninstallPreservesForeignOccupiedDir(t *testing.T) {
 	root := t.TempDir()
 	engine, _ := apply.NewEngine(apply.NewDirectFileActivator(apply.InstallerSource()))
 	contracts := map[ir.HarnessID]activation.ActivationContract{ir.HarnessOpenCode: opencodeContract(t, root)}
-	inv := inventory.New()
+	store := registry.New()
+	inv := inventory.View(&store)
 	if _, err := engine.ApplySelection(opencodeAllOnSelection(t), apply.InstallerSource(), contracts, &inv); err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +276,8 @@ func TestApplySelectionHomeManagerInspectsDirectFileDeclaratively(t *testing.T) 
 	root := t.TempDir()
 	engine, _ := apply.NewEngine(apply.NewDirectFileActivator(apply.HomeManagerSource()))
 	contracts := map[ir.HarnessID]activation.ActivationContract{ir.HarnessOpenCode: opencodeContract(t, root)}
-	inv := inventory.New()
+	store := registry.New()
+	inv := inventory.View(&store)
 	res, err := engine.ApplySelection(opencodeAllOnSelection(t), apply.HomeManagerSource(), contracts, &inv)
 	if err != nil {
 		t.Fatal(err)
@@ -299,7 +306,8 @@ func TestApplySelectionMissingContractFailsBeforeMutation(t *testing.T) {
 		states[c] = c.Harness() == ir.HarnessClaudeCode && c.Extension() == cell.SkillsAxis()
 	}
 	sel, _ := selection.New(states)
-	inv := inventory.New()
+	store := registry.New()
+	inv := inventory.View(&store)
 	_, applyErr := engine.ApplySelection(sel, apply.InstallerSource(), contracts, &inv)
 	if applyErr == nil {
 		t.Fatal("missing contract for desired cell = nil error, want pre-plan ApplyError")
@@ -332,7 +340,8 @@ func TestResultMarshalsFrozenSchemaAndOrder(t *testing.T) {
 	root := t.TempDir()
 	engine, _ := apply.NewEngine(apply.NewDirectFileActivator(apply.InstallerSource()))
 	contracts := map[ir.HarnessID]activation.ActivationContract{ir.HarnessOpenCode: opencodeContract(t, root)}
-	inv := inventory.New()
+	store := registry.New()
+	inv := inventory.View(&store)
 	res, _ := engine.ApplySelection(opencodeAllOnSelection(t), apply.InstallerSource(), contracts, &inv)
 	data, err := json.Marshal(res)
 	if err != nil {

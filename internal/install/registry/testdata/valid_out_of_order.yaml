@@ -1,0 +1,41 @@
+schema: pasture.install.registry/v1
+global_installations:
+  - cell: codex.hooks
+    source: installer
+    strategy: native-plugin-pending-trust
+    managed: true
+    observation: installed
+    trust: pending
+    last_operation: ensure
+    last_outcome: completed
+  - cell: claude-code.skills
+    source: installer
+    strategy: native-plugin
+    managed: true
+    observation: installed
+    trust: not-applicable
+    last_operation: ensure
+    last_outcome: completed
+project_installations:
+  - canonical_project_root: /srv/zeta
+    cell: claude-code.skills
+    source: installer
+    strategy: direct-file
+    managed: true
+    observation: installed
+    trust: not-applicable
+    last_operation: ensure
+    last_outcome: completed
+  - canonical_project_root: /srv/alpha
+    cell: claude-code.skills
+    source: installer
+    strategy: direct-file
+    managed: true
+    observation: absent
+    trust: not-applicable
+    last_operation: remove
+    last_outcome: completed
+    shared_config_ownership:
+      - path: .claude/settings.json
+        identity: pasture-hooks
+        digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

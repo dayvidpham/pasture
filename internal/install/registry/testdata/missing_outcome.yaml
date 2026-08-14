@@ -1,0 +1,10 @@
+schema: pasture.install.registry/v1
+global_installations:
+  - cell: claude-code.skills
+    source: installer
+    strategy: native-plugin
+    managed: true
+    observation: installed
+    trust: not-applicable
+    last_operation: ensure
+project_installations: []

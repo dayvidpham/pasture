@@ -4,7 +4,7 @@
 // It manages tasks, dependencies, labels, comments, and the audit-event record
 // backed by the unified Pasture SQLite database
 // (~/.local/share/pasture/pasture.db). Typed epoch commands commit directly
-// through the same EpochService used by generated harness adapters.
+// through EpochService, while harness lifecycle commands use the lifecycle IR.
 //
 // Task commands route through the unified protocol.TaskTracker constructor
 // (tasks.OpenTaskTracker) so the auto-on-open audit migrator runs against
@@ -26,10 +26,6 @@ import (
 )
 
 func main() {
-	// The adapter constructor remains isolated in adapter.go; registration belongs
-	// to the production command assembly so ordinary package tests can inspect the
-	// constructor without mutating rootCmd.
-	rootCmd.AddCommand(NewAdapterCommand())
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
