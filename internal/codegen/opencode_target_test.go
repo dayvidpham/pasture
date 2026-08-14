@@ -211,6 +211,9 @@ func TestOpenCodeGeneratedLifecycleCallbacks_RunBuiltCLIWithAuthenticFixtures(t 
 	binary := filepath.Join(dir, "pasture")
 	build := exec.Command("go", "build", "-race", "-o", binary, "./cmd/pasture")
 	build.Dir = root
+	// The repository's standard test target keeps the outer suite CGO-free.
+	// This child build intentionally uses the race detector, which requires CGO.
+	build.Env = append(build.Environ(), "CGO_ENABLED=1")
 	if output, buildErr := build.CombinedOutput(); buildErr != nil {
 		t.Fatalf("build production pasture CLI with race instrumentation: %v\n%s", buildErr, output)
 	}
