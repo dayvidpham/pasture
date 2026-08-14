@@ -24,8 +24,9 @@ func Load(path string) (Store, error) {
 	return Parse(data)
 }
 
-// Save validates and atomically replaces the registry at mode 0600. The shared
-// fsatomic path rejects a symlink/non-regular destination, creates an exclusive
+// Save validates and atomically replaces the registry at mode 0600. The
+// registry-specific platform implementation anchors every parent boundary,
+// rejects links and non-regular destinations, creates an exclusive
 // same-directory temporary file, fsyncs it, renames, and fsyncs the directory.
 func Save(path string, s Store) error {
 	data, err := s.Marshal()

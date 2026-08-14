@@ -50,7 +50,7 @@ func readRegistryFile(path string) ([]byte, os.FileInfo, error) {
 		return nil, nil, err
 	}
 	defer unix.Close(parent)
-	fd, err := unix.Openat(parent, base, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	fd, err := unix.Openat(parent, base, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -63,6 +63,12 @@ func readRegistryFile(path string) ([]byte, os.FileInfo, error) {
 	info, err := file.Stat()
 	if err != nil {
 		return nil, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("registry descriptor has unsafe type %s, not a regular file", info.Mode().Type())
+	}
+	if info.Mode().Perm() != 0o600 {
+		return nil, nil, fmt.Errorf("registry descriptor has mode %04o, not required mode 0600", info.Mode().Perm())
 	}
 	data, err := io.ReadAll(io.LimitReader(file, maxRegistryBytes+1))
 	if err != nil {
@@ -128,7 +134,7 @@ func writeRegistryFile(path string, data []byte) error {
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close temporary registry: %w", err)
 	}
-	if err := unix.Renameat(parent, temp, parent, base); err != nil {
+	if err := registryUnixRenameat(parent, temp, parent, base); err != nil {
 		return fmt.Errorf("atomically replace registry: %w", err)
 	}
 	committed = true
@@ -137,3 +143,5 @@ func writeRegistryFile(path string, data []byte) error {
 	}
 	return nil
 }
+
+var registryUnixRenameat = unix.Renameat

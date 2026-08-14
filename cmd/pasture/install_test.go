@@ -87,15 +87,15 @@ func TestCLI_InstallStatus_EmptyStateReported(t *testing.T) {
 func TestCLI_InstallStatus_ReportsRecordedCellsJSON(t *testing.T) {
 	t.Parallel()
 	state := filepath.Join(t.TempDir(), "installations.yaml")
-	body := `schema: pasture.install.state/v1
-cells:
+	body := `schema: pasture.install.registry/v1
+global_installations:
   - cell: opencode.hooks
     source: installer
     strategy: direct-file
     managed: true
     observation: installed
     trust: not-applicable
-    last_action: ensure
+    last_operation: ensure
     last_outcome: completed
   - cell: codex.hooks
     source: installer
@@ -103,8 +103,9 @@ cells:
     managed: true
     observation: installed
     trust: pending
-    last_action: ensure
-    last_outcome: installed_pending_trust
+    last_operation: ensure
+    last_outcome: completed
+project_installations: []
 `
 	if err := os.WriteFile(state, []byte(body), 0o600); err != nil {
 		t.Fatal(err)

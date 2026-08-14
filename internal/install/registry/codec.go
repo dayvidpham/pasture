@@ -23,43 +23,46 @@ type configWire struct {
 	Digest   string `yaml:"digest"`
 }
 type recordWire struct {
-	Cell          string     `yaml:"cell"`
-	Source        string     `yaml:"source"`
-	Strategy      string     `yaml:"strategy"`
-	Managed       bool       `yaml:"managed"`
+	Cell          *string    `yaml:"cell"`
+	Source        *string    `yaml:"source"`
+	Strategy      *string    `yaml:"strategy"`
+	Managed       *bool      `yaml:"managed"`
 	ArtifactID    string     `yaml:"artifact_id,omitempty"`
 	Version       string     `yaml:"version,omitempty"`
 	Selector      string     `yaml:"selector,omitempty"`
 	Leaves        []leafWire `yaml:"leaves,omitempty"`
 	CreatedDirs   []string   `yaml:"created_dirs,omitempty"`
-	Observation   string     `yaml:"observation"`
-	Trust         string     `yaml:"trust"`
+	Observation   *string    `yaml:"observation"`
+	Trust         *string    `yaml:"trust"`
 	LastOperation *string    `yaml:"last_operation"`
 	LastOutcome   *string    `yaml:"last_outcome"`
 	Diagnostic    string     `yaml:"diagnostic,omitempty"`
 }
 type projectRecordWire struct {
-	CanonicalProjectRoot string       `yaml:"canonical_project_root"`
+	CanonicalProjectRoot *string      `yaml:"canonical_project_root"`
 	SharedConfig         []configWire `yaml:"shared_config_ownership,omitempty"`
 	recordWire           `yaml:",inline"`
 }
 type documentWire struct {
-	Schema   string              `yaml:"schema"`
-	Global   []recordWire        `yaml:"global_installations"`
-	Projects []projectRecordWire `yaml:"project_installations"`
+	Schema   string               `yaml:"schema"`
+	Global   *[]recordWire        `yaml:"global_installations"`
+	Projects *[]projectRecordWire `yaml:"project_installations"`
 }
 
 // Marshal emits global_installations first, then project_installations ordered
 // by canonical root and cell. Nested ownership sets are canonicalized by the
 // Record constructor.
 func (s Store) Marshal() ([]byte, error) {
-	w := documentWire{Schema: SchemaID, Global: []recordWire{}, Projects: []projectRecordWire{}}
+	global := []recordWire{}
+	projects := []projectRecordWire{}
+	w := documentWire{Schema: SchemaID, Global: &global, Projects: &projects}
 	for _, r := range s.Ordered() {
 		rw := encodeRecord(r)
 		if r.Key().Scope() == ScopeGlobal {
-			w.Global = append(w.Global, rw)
+			*w.Global = append(*w.Global, rw)
 		} else {
-			w.Projects = append(w.Projects, projectRecordWire{CanonicalProjectRoot: r.Key().ProjectRoot().String(), SharedConfig: encodeConfig(r.SharedConfig()), recordWire: rw})
+			root := r.Key().ProjectRoot().String()
+			*w.Projects = append(*w.Projects, projectRecordWire{CanonicalProjectRoot: &root, SharedConfig: encodeConfig(r.SharedConfig()), recordWire: rw})
 		}
 	}
 	var b bytes.Buffer
@@ -76,7 +79,13 @@ func (s Store) Marshal() ([]byte, error) {
 func encodeRecord(r Record) recordWire {
 	operation := r.LastOperation().String()
 	outcome := r.LastOutcome().String()
-	rw := recordWire{Cell: r.Cell().String(), Source: r.Source().String(), Strategy: r.Strategy().String(), Managed: r.Managed(), ArtifactID: r.ArtifactID(), Version: r.Version(), Selector: r.Selector(), Observation: r.Observation().String(), Trust: r.Trust().String(), LastOperation: &operation, LastOutcome: &outcome, Diagnostic: r.Diagnostic()}
+	cellName := r.Cell().String()
+	source := r.Source().String()
+	strategy := r.Strategy().String()
+	managed := r.Managed()
+	observation := r.Observation().String()
+	trust := r.Trust().String()
+	rw := recordWire{Cell: &cellName, Source: &source, Strategy: &strategy, Managed: &managed, ArtifactID: r.ArtifactID().String(), Version: string(r.Version()), Selector: string(r.Selector()), Observation: &observation, Trust: &trust, LastOperation: &operation, LastOutcome: &outcome, Diagnostic: r.Diagnostic()}
 	for _, l := range r.Leaves() {
 		rw.Leaves = append(rw.Leaves, leafWire{l.Path().String(), l.Type().String(), l.Mode().String(), l.Digest().String()})
 	}
@@ -88,7 +97,7 @@ func encodeRecord(r Record) recordWire {
 func encodeConfig(in []SharedConfigOwnership) []configWire {
 	out := make([]configWire, 0, len(in))
 	for _, o := range in {
-		out = append(out, configWire{o.Path().String(), o.Identity(), o.Digest().String()})
+		out = append(out, configWire{o.Path().String(), string(o.Identity()), o.Digest().String()})
 	}
 	return out
 }
@@ -110,8 +119,11 @@ func Parse(data []byte) (Store, error) {
 	if w.Schema != SchemaID {
 		return Store{}, fault("registry decode", "exact v1 schema", fmt.Sprintf("schema %q is not %q", w.Schema, SchemaID), "internal/install/registry.Parse", "validating registry schema", "another schema may have incompatible ownership semantics", fmt.Sprintf("use schema %q; no migration is available", SchemaID), nil)
 	}
+	if w.Global == nil || w.Projects == nil {
+		return Store{}, fault("registry decode", "explicit global_installations and project_installations arrays", "one or both required logical tables are omitted or null", "internal/install/registry.Parse", "validating v1 table presence", "missing ownership rows could be mistaken for an authoritative empty store", "include both tables explicitly, using [] when empty", nil)
+	}
 	s := New()
-	for i, rw := range w.Global {
+	for i, rw := range *w.Global {
 		r, err := decodeRecord(rw, ScopeGlobal, ProjectRoot{}, nil)
 		if err != nil {
 			return Store{}, fault("registry decode", "valid global row", fmt.Sprintf("global_installations[%d] is invalid: %v", i, err), "internal/install/registry.Parse", "decoding the global logical table", "the registry cannot be trusted", "repair the named global row", err)
@@ -121,8 +133,11 @@ func Parse(data []byte) (Store, error) {
 		}
 		_ = s.Upsert(r)
 	}
-	for i, pw := range w.Projects {
-		root, err := parseStoredProjectRoot(pw.CanonicalProjectRoot)
+	for i, pw := range *w.Projects {
+		if pw.CanonicalProjectRoot == nil {
+			return Store{}, fault("registry decode", "explicit canonical_project_root", fmt.Sprintf("project_installations[%d] omits or nulls canonical_project_root", i), "internal/install/registry.Parse", "decoding the project logical table", "the project row has no stable identity", "set canonical_project_root to the retained canonical absolute directory", nil)
+		}
+		root, err := parseStoredProjectRoot(*pw.CanonicalProjectRoot)
 		if err != nil {
 			return Store{}, err
 		}
@@ -141,7 +156,10 @@ func duplicateKey(k Key) error {
 	return fault("registry decode", "unique scoped keys", fmt.Sprintf("key %s/%s/%s appears more than once", k.Scope(), k.ProjectRoot(), k.Cell()), "internal/install/registry.Parse", "building logical tables", "duplicate ownership is ambiguous", "keep exactly one row for the scoped key", nil)
 }
 func decodeRecord(rw recordWire, scope Scope, root ProjectRoot, cw []configWire) (Record, error) {
-	c, err := cell.ParseCell(rw.Cell)
+	if rw.Cell == nil || rw.Source == nil || rw.Strategy == nil || rw.Managed == nil || rw.Observation == nil || rw.Trust == nil || rw.LastOperation == nil || rw.LastOutcome == nil {
+		return Record{}, fault("registry record decode", "all required record fields", "cell, source, strategy, managed, observation, trust, last_operation, or last_outcome is omitted or null", "internal/install/registry.decodeRecord", "validating v1 record presence", "a zero value could silently change ownership facts", "supply every required field explicitly, including managed: false and none values", nil)
+	}
+	c, err := cell.ParseCell(*rw.Cell)
 	if err != nil {
 		return Record{}, err
 	}
@@ -154,24 +172,21 @@ func decodeRecord(rw recordWire, scope Scope, root ProjectRoot, cw []configWire)
 	if err != nil {
 		return Record{}, err
 	}
-	source, err := ParseSource(rw.Source)
+	source, err := ParseSource(*rw.Source)
 	if err != nil {
 		return Record{}, err
 	}
-	strategy, err := activation.ParseStrategyKind(rw.Strategy)
+	strategy, err := activation.ParseStrategyKind(*rw.Strategy)
 	if err != nil {
 		return Record{}, err
 	}
-	obs, err := ParseObservation(rw.Observation)
+	obs, err := ParseObservation(*rw.Observation)
 	if err != nil {
 		return Record{}, err
 	}
-	trust, err := ParseTrust(rw.Trust)
+	trust, err := ParseTrust(*rw.Trust)
 	if err != nil {
 		return Record{}, err
-	}
-	if rw.LastOperation == nil || rw.LastOutcome == nil {
-		return Record{}, fault("registry record decode", "explicit last_operation and last_outcome", "last_operation or last_outcome is absent or null", "internal/install/registry.decodeRecord", "decoding a registry record", "the record cannot explain its last confirmed result", "set last_operation and last_outcome explicitly, using none when there is no prior action", nil)
 	}
 	op, err := ParseOperation(*rw.LastOperation)
 	if err != nil {
@@ -223,11 +238,36 @@ func decodeRecord(rw recordWire, scope Scope, root ProjectRoot, cw []configWire)
 		if e != nil {
 			return Record{}, e
 		}
-		o, e := NewSharedConfigOwnership(p, v.Identity, digest)
+		identity, e := NewSharedConfigIdentity(v.Identity)
+		if e != nil {
+			return Record{}, e
+		}
+		o, e := NewSharedConfigOwnership(p, identity, digest)
 		if e != nil {
 			return Record{}, e
 		}
 		config = append(config, o)
 	}
-	return NewRecord(RecordInput{Key: k, Source: source, Strategy: strategy, Managed: rw.Managed, ArtifactID: rw.ArtifactID, Version: rw.Version, Selector: rw.Selector, Leaves: leaves, CreatedDirs: dirs, SharedConfig: config, Observation: obs, Trust: trust, LastOperation: op, LastOutcome: outcome, Diagnostic: rw.Diagnostic})
+	var bundleID artifact.BundleID
+	if rw.ArtifactID != "" {
+		bundleID, err = artifact.ParseBundleID(rw.ArtifactID)
+		if err != nil {
+			return Record{}, err
+		}
+	}
+	var version Version
+	if rw.Version != "" {
+		version, err = NewVersion(rw.Version)
+		if err != nil {
+			return Record{}, err
+		}
+	}
+	var selector Selector
+	if rw.Selector != "" {
+		selector, err = NewSelector(rw.Selector)
+		if err != nil {
+			return Record{}, err
+		}
+	}
+	return NewRecord(RecordInput{Key: k, Source: source, Strategy: strategy, Managed: *rw.Managed, ArtifactID: bundleID, Version: version, Selector: selector, Leaves: leaves, CreatedDirs: dirs, SharedConfig: config, Observation: obs, Trust: trust, LastOperation: op, LastOutcome: outcome, Diagnostic: rw.Diagnostic})
 }

@@ -52,6 +52,9 @@ type ProjectRoot struct{ path string }
 
 // CanonicalProjectRoot resolves an existing directory through symlinks.
 func CanonicalProjectRoot(path string) (ProjectRoot, error) {
+	if !filepath.IsAbs(path) {
+		return ProjectRoot{}, fault("project root canonicalization", "absolute project path", fmt.Sprintf("project root %q is relative", path), path, "resolving project identity", "the same project could receive working-directory-dependent keys", "provide an absolute project directory path", nil)
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return ProjectRoot{}, fault("project root canonicalization", "absolute project path", fmt.Sprintf("cannot make %q absolute: %v", path, err), path, "resolving project identity", "the registry key would not be stable", "provide an accessible project directory", err)
@@ -78,6 +81,13 @@ func parseStoredProjectRoot(path string) (ProjectRoot, error) {
 		}
 		if resolved != path {
 			return ProjectRoot{}, fault("project root decode", "symlink-resolved canonical root", fmt.Sprintf("stored project root %q resolves to %q", path, resolved), path, "validating an existing project identity", "the alias could create a second key for one project", fmt.Sprintf("replace the root with %q", resolved), nil)
+		}
+		info, statErr := os.Stat(resolved)
+		if statErr != nil {
+			return ProjectRoot{}, fault("project root decode", "inspectable retained project directory", fmt.Sprintf("stored project root %q cannot be inspected: %v", path, statErr), path, "validating an existing project identity", "the stored identity type cannot be established", "repair path permissions and retry", statErr)
+		}
+		if !info.IsDir() {
+			return ProjectRoot{}, fault("project root decode", "existing directory or absent retained root", fmt.Sprintf("stored project root %q is an existing non-directory", path), path, "validating a retained project identity", "a file cannot own project installations", "remove the conflicting entry or replace the root with the canonical project directory", nil)
 		}
 	} else if !os.IsNotExist(err) {
 		return ProjectRoot{}, fault("project root decode", "inspectable canonical root", fmt.Sprintf("stored project root %q cannot be inspected: %v", path, err), path, "validating an existing project identity", "canonical identity cannot be established", "repair path permissions and retry", err)

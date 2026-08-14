@@ -3,11 +3,45 @@ package registry
 import (
 	"fmt"
 	"sort"
+	"strings"
+	"unicode"
 
 	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/install/activation"
 	"github.com/dayvidpham/pasture/internal/install/cell"
 )
+
+// Version, Selector, and SharedConfigIdentity are validated ownership values.
+// Strings exist only in the wire codec; in-process records cannot contain an
+// empty, whitespace-padded, control-bearing, or invalidly encoded value.
+type Version string
+type Selector string
+type SharedConfigIdentity string
+
+func NewVersion(value string) (Version, error) {
+	if err := validateIdentityText("version", value); err != nil {
+		return "", err
+	}
+	return Version(value), nil
+}
+func NewSelector(value string) (Selector, error) {
+	if err := validateIdentityText("selector", value); err != nil {
+		return "", err
+	}
+	return Selector(value), nil
+}
+func NewSharedConfigIdentity(value string) (SharedConfigIdentity, error) {
+	if err := validateIdentityText("shared config identity", value); err != nil {
+		return "", err
+	}
+	return SharedConfigIdentity(value), nil
+}
+func validateIdentityText(kind, value string) error {
+	if value == "" || strings.TrimSpace(value) != value || strings.ContainsRune(value, '\x00') || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return fault(kind+" construction", "non-empty canonical text", fmt.Sprintf("%s %q is empty, padded, or contains a control character", kind, value), "internal/install/registry.validateIdentityText", "validating registry ownership identity", "identity comparison would be ambiguous", "use non-empty UTF-8 text without surrounding whitespace or control characters", nil)
+	}
+	return nil
+}
 
 type Source uint8
 
@@ -204,51 +238,55 @@ func (l Leaf) Digest() artifact.Digest  { return l.digest }
 // in a harness shared configuration file.
 type SharedConfigOwnership struct {
 	path     artifact.Path
-	identity string
+	identity SharedConfigIdentity
 	digest   artifact.Digest
 	valid    bool
 }
 
-func NewSharedConfigOwnership(path artifact.Path, identity string, digest artifact.Digest) (SharedConfigOwnership, error) {
-	if path.String() == "" || identity == "" || digest.String() == "" {
+func NewSharedConfigOwnership(path artifact.Path, identity SharedConfigIdentity, digest artifact.Digest) (SharedConfigOwnership, error) {
+	if path.String() == "" || validateIdentityText("shared config identity", string(identity)) != nil || digest.String() == "" {
 		return SharedConfigOwnership{}, fault("shared config ownership construction", "complete path, identity, and digest", "shared config ownership is incomplete", "internal/install/registry.NewSharedConfigOwnership", "recording project config ownership", "a later merge could touch an unproved entry", "provide the exact config path, typed entry identity, and digest", nil)
 	}
 	return SharedConfigOwnership{path: path, identity: identity, digest: digest, valid: true}, nil
 }
-func (o SharedConfigOwnership) Path() artifact.Path     { return o.path }
-func (o SharedConfigOwnership) Identity() string        { return o.identity }
-func (o SharedConfigOwnership) Digest() artifact.Digest { return o.digest }
+func (o SharedConfigOwnership) Path() artifact.Path            { return o.path }
+func (o SharedConfigOwnership) Identity() SharedConfigIdentity { return o.identity }
+func (o SharedConfigOwnership) Digest() artifact.Digest        { return o.digest }
 
 type Record struct {
-	key                           Key
-	source                        Source
-	strategy                      activation.StrategyKind
-	managed                       bool
-	artifactID, version, selector string
-	leaves                        []Leaf
-	createdDirs                   []artifact.Path
-	sharedConfig                  []SharedConfigOwnership
-	observation                   Observation
-	trust                         Trust
-	operation                     Operation
-	outcome                       Outcome
-	diagnostic                    string
-	valid                         bool
+	key          Key
+	source       Source
+	strategy     activation.StrategyKind
+	managed      bool
+	artifactID   artifact.BundleID
+	version      Version
+	selector     Selector
+	leaves       []Leaf
+	createdDirs  []artifact.Path
+	sharedConfig []SharedConfigOwnership
+	observation  Observation
+	trust        Trust
+	operation    Operation
+	outcome      Outcome
+	diagnostic   string
+	valid        bool
 }
 type RecordInput struct {
-	Key                           Key
-	Source                        Source
-	Strategy                      activation.StrategyKind
-	Managed                       bool
-	ArtifactID, Version, Selector string
-	Leaves                        []Leaf
-	CreatedDirs                   []artifact.Path
-	SharedConfig                  []SharedConfigOwnership
-	Observation                   Observation
-	Trust                         Trust
-	LastOperation                 Operation
-	LastOutcome                   Outcome
-	Diagnostic                    string
+	Key           Key
+	Source        Source
+	Strategy      activation.StrategyKind
+	Managed       bool
+	ArtifactID    artifact.BundleID
+	Version       Version
+	Selector      Selector
+	Leaves        []Leaf
+	CreatedDirs   []artifact.Path
+	SharedConfig  []SharedConfigOwnership
+	Observation   Observation
+	Trust         Trust
+	LastOperation Operation
+	LastOutcome   Outcome
+	Diagnostic    string
 }
 
 func NewRecord(in RecordInput) (Record, error) {
@@ -272,6 +310,21 @@ func NewRecord(in RecordInput) (Record, error) {
 	}
 	if in.Key.Scope() == ScopeGlobal && len(in.SharedConfig) > 0 {
 		return Record{}, fault("record construction", "project-only shared config ownership", "a global record contains shared config ownership", "internal/install/registry.NewRecord", "constructing a global record", "global and project ownership would be conflated", "attach shared config ownership only to a project key", nil)
+	}
+	if in.ArtifactID.String() != "" {
+		if _, err := artifact.ParseBundleID(in.ArtifactID.String()); err != nil {
+			return Record{}, fault("record construction", "validated artifact bundle identity", err.Error(), "internal/install/registry.NewRecord", "validating registry ownership", "the installed artifact cannot be compared reliably", "construct the identity with artifact.ParseBundleID", err)
+		}
+	}
+	if in.Version != "" {
+		if err := validateIdentityText("version", string(in.Version)); err != nil {
+			return Record{}, err
+		}
+	}
+	if in.Selector != "" {
+		if err := validateIdentityText("selector", string(in.Selector)); err != nil {
+			return Record{}, err
+		}
 	}
 	leaves := append([]Leaf(nil), in.Leaves...)
 	for _, leaf := range leaves {
@@ -316,9 +369,9 @@ func (r Record) Cell() cell.Cell                   { return r.key.Cell() }
 func (r Record) Source() Source                    { return r.source }
 func (r Record) Strategy() activation.StrategyKind { return r.strategy }
 func (r Record) Managed() bool                     { return r.managed }
-func (r Record) ArtifactID() string                { return r.artifactID }
-func (r Record) Version() string                   { return r.version }
-func (r Record) Selector() string                  { return r.selector }
+func (r Record) ArtifactID() artifact.BundleID     { return r.artifactID }
+func (r Record) Version() Version                  { return r.version }
+func (r Record) Selector() Selector                { return r.selector }
 func (r Record) Leaves() []Leaf                    { return append([]Leaf(nil), r.leaves...) }
 func (r Record) CreatedDirs() []artifact.Path      { return append([]artifact.Path(nil), r.createdDirs...) }
 func (r Record) SharedConfig() []SharedConfigOwnership {
