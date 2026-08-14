@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
@@ -244,40 +243,6 @@ func TestClaudeHooksAbsentSessionStartDoesNotPanic(t *testing.T) {
 	}
 }
 
-func TestAdapterOperationsBySemanticPartitionsHiddenContract(t *testing.T) {
-	t.Parallel()
-
-	groups := adapterOperationsBySemantic()
-	seen := make(map[handlers.AdapterOperation]string)
-	for semantic, operations := range groups {
-		for _, operation := range operations {
-			if previous, duplicate := seen[operation]; duplicate {
-				t.Fatalf("operation %q appears in both %s and %s", operation, previous, semantic)
-			}
-			seen[operation] = semantic
-		}
-	}
-	want := handlers.SupportedAdapterOperations()
-	if len(seen) != len(want) {
-		t.Fatalf("partition has %d operations, hidden contract has %d", len(seen), len(want))
-	}
-	for _, operation := range want {
-		if _, ok := seen[operation]; !ok {
-			t.Errorf("hidden operation %q is not classified", operation)
-		}
-	}
-
-	human := groups[runtime.SemanticExplicitHumanResponse.String()]
-	for _, operation := range human {
-		if seen[operation] != runtime.SemanticExplicitHumanResponse.String() {
-			t.Errorf("human operation %q escaped the explicit-response group", operation)
-		}
-	}
-	if !slices.Contains(groups[runtime.SemanticGateConsultation.String()], handlers.AdapterOperationShowInteractionMode) {
-		t.Error("gate consultations do not expose the read-only interaction-mode query")
-	}
-}
-
 func TestLifecycleAdapterTargetsUnsupportedAndAbsentHarnesses(t *testing.T) {
 	t.Parallel()
 
@@ -303,16 +268,22 @@ func TestLifecycleIdentityFieldsBelongToPinnedPayloadShapes(t *testing.T) {
 			claudeNativeFields,
 		)
 	})
-	// The Codex identity/field-shape guard now lives on the Python-free Codex
-	// transport path (codex_transport_test.go); it no longer routes through the
-	// deleted Codex Python adapter metadata (#65).
+	// The Codex identity/field-shape guard lives on the exec-only Codex transport
+	// path in codex_transport_test.go.
 }
 
-func TestClaudeLifecycleAdapterAllowsAuthentic2_1_222FieldShapes(t *testing.T) {
+func TestClaudeLifecycleTransportAllowsAuthentic2_1_222FieldShapes(t *testing.T) {
 	t.Parallel()
 	metadata, err := lifecycleMetadata(runtime.ClaudeCode2_1_210Lifecycle(), "2.1.210", claudeNativeFields)
 	if err != nil {
-		t.Fatalf("build Claude lifecycle adapter metadata: %v", err)
+		t.Fatalf("build Claude lifecycle transport metadata: %v", err)
+	}
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatalf("marshal Claude lifecycle transport metadata: %v", err)
+	}
+	if bytes.Contains(encoded, []byte(`"operations"`)) {
+		t.Fatalf("lifecycle transport metadata retained retired adapter operation vocabulary: %s", encoded)
 	}
 	events := make(map[string]lifecycleEventMetadata, len(metadata.Events))
 	for _, event := range metadata.Events {
@@ -341,18 +312,18 @@ func TestClaudeLifecycleAdapterAllowsAuthentic2_1_222FieldShapes(t *testing.T) {
 		}
 		event, present := events[eventName]
 		if !present {
-			t.Errorf("authentic Claude fixture %q names unknown adapter event %q", fixture, eventName)
+			t.Errorf("authentic Claude fixture %q names unknown lifecycle event %q", fixture, eventName)
 			continue
 		}
 		for field := range payload {
 			if !slices.Contains(event.AllowedFields, field) {
-				t.Errorf("authentic Claude fixture %q field %q is absent from generated adapter metadata for %s", fixture, field, eventName)
+				t.Errorf("authentic Claude fixture %q field %q is absent from generated lifecycle transport metadata for %s", fixture, field, eventName)
 			}
 		}
 	}
 }
 
-func TestClaudeLifecycleAdapterFieldsMatchGeneratedRegistration(t *testing.T) {
+func TestClaudeLifecycleTransportFieldsMatchGeneratedRegistration(t *testing.T) {
 	t.Parallel()
 	fieldNames := registration.ClaudeCode2_1_210NativeFieldNames()
 	for _, event := range registration.ClaudeCode2_1_210().Entries() {
@@ -365,7 +336,7 @@ func TestClaudeLifecycleAdapterFieldsMatchGeneratedRegistration(t *testing.T) {
 			expected = append(expected, name)
 		}
 		if actual := claudeNativeFields(event.NativeName); !slices.Equal(actual, expected) {
-			t.Errorf("Claude adapter fields for %q = %v, want generated registration fields %v", event.NativeName, actual, expected)
+			t.Errorf("Claude lifecycle fields for %q = %v, want generated registration fields %v", event.NativeName, actual, expected)
 		}
 	}
 }
@@ -395,25 +366,20 @@ func assertIdentityFieldsInPayloadShape[E comparable](
 	}
 }
 
-// The generated Codex/Claude Python lifecycle adapter and its python3 test
-// harness were deleted with the #65 Python-removal work: the generated Python
-// renderer had no production caller after the Codex transport went exec-only,
-// so the tests that shelled out to python3 (strict-envelope, generic-event,
-// stop-loop, policy-config, single-event binding) exercised code nothing ships
-// and gave a false coverage signal. The lifecycle transport is now proven
-// Python-free by codex_transport_test.go and the exec-only runner goldens; the
-// OpenCode adapter's authority/storage-field absence is guarded below.
+// The lifecycle transport is Python-free by codex_transport_test.go and the
+// exec-only runner goldens; the OpenCode transport's authority/storage-field
+// absence is guarded below.
 
-func TestGeneratedOpenCodeAdapterContainsNoAuthorityOrStorageFields(t *testing.T) {
+func TestGeneratedOpenCodeTransportContainsNoAuthorityOrStorageFields(t *testing.T) {
 	t.Parallel()
 
 	opencode, err := GenerateOpenCodeHooksModule()
 	if err != nil {
-		t.Fatalf("OpenCode adapter: %v", err)
+		t.Fatalf("OpenCode lifecycle transport: %v", err)
 	}
-	for _, forbidden := range []string{"JournalID", "journalId", "expectedRevision", "EvidenceID", "evidenceIds", "reported-user-result", "transcript_path)", "open(transcript"} {
+	for _, forbidden := range []string{"JournalID", "journalId", "expectedRevision", "EvidenceID", "evidenceIds", "reported-user-result", "transcript_path)", "open(transcript", "__adapter", "pasture.adapter-", `"operations"`} {
 		if strings.Contains(opencode, forbidden) {
-			t.Errorf("generated OpenCode adapter contains forbidden authority/storage/transcript token %q", forbidden)
+			t.Errorf("generated OpenCode lifecycle transport contains forbidden authority/storage/transcript token %q", forbidden)
 		}
 	}
 }
