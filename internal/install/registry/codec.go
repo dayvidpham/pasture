@@ -12,15 +12,15 @@ import (
 )
 
 type leafWire struct {
-	Path   string `yaml:"path"`
-	Type   string `yaml:"type"`
-	Mode   string `yaml:"mode"`
-	Digest string `yaml:"digest"`
+	Path   *string `yaml:"path"`
+	Type   *string `yaml:"type"`
+	Mode   *string `yaml:"mode"`
+	Digest *string `yaml:"digest"`
 }
 type configWire struct {
-	Path     string `yaml:"path"`
-	Identity string `yaml:"identity"`
-	Digest   string `yaml:"digest"`
+	Path     *string `yaml:"path"`
+	Identity *string `yaml:"identity"`
+	Digest   *string `yaml:"digest"`
 }
 type recordWire struct {
 	Cell          *string    `yaml:"cell"`
@@ -87,7 +87,8 @@ func encodeRecord(r Record) recordWire {
 	trust := r.Trust().String()
 	rw := recordWire{Cell: &cellName, Source: &source, Strategy: &strategy, Managed: &managed, ArtifactID: r.ArtifactID().String(), Version: r.Version().String(), Selector: r.Selector().String(), Observation: &observation, Trust: &trust, LastOperation: &operation, LastOutcome: &outcome, Diagnostic: r.Diagnostic()}
 	for _, l := range r.Leaves() {
-		rw.Leaves = append(rw.Leaves, leafWire{l.Path().String(), l.Type().String(), l.Mode().String(), l.Digest().String()})
+		path, kind, mode, digest := l.Path().String(), l.Type().String(), l.Mode().String(), l.Digest().String()
+		rw.Leaves = append(rw.Leaves, leafWire{&path, &kind, &mode, &digest})
 	}
 	for _, d := range r.CreatedDirs() {
 		rw.CreatedDirs = append(rw.CreatedDirs, d.String())
@@ -97,7 +98,8 @@ func encodeRecord(r Record) recordWire {
 func encodeConfig(in []SharedConfigOwnership) []configWire {
 	out := make([]configWire, 0, len(in))
 	for _, o := range in {
-		out = append(out, configWire{o.Path().String(), o.Identity().String(), o.Digest().String()})
+		path, identity, digest := o.Path().String(), o.Identity().String(), o.Digest().String()
+		out = append(out, configWire{&path, &identity, &digest})
 	}
 	return out
 }
@@ -197,22 +199,25 @@ func decodeRecord(rw recordWire, scope Scope, root ProjectRoot, cw []configWire)
 		return Record{}, err
 	}
 	leaves := make([]Leaf, 0, len(rw.Leaves))
-	for _, lw := range rw.Leaves {
-		p, e := artifact.NewPath(lw.Path)
-		if e != nil {
-			return Record{}, e
+	for i, lw := range rw.Leaves {
+		if lw.Path == nil || lw.Type == nil || lw.Mode == nil || lw.Digest == nil {
+			return Record{}, fault("registry record decode", "explicit path, type, mode, and digest for every leaf", fmt.Sprintf("leaves[%d] omits or nulls a required nested field", i), "internal/install/registry.decodeRecord", "validating nested leaf ownership", "incomplete file identity cannot prove safe update or removal", "supply every leaf field explicitly", nil)
 		}
-		kind, e := artifact.ParseEntryType(lw.Type)
+		p, e := artifact.NewPath(*lw.Path)
 		if e != nil {
-			return Record{}, e
+			return Record{}, fmt.Errorf("leaves[%d].path is invalid: %w", i, e)
 		}
-		mode, e := artifact.ParseMode(lw.Mode)
+		kind, e := artifact.ParseEntryType(*lw.Type)
 		if e != nil {
-			return Record{}, e
+			return Record{}, fmt.Errorf("leaves[%d].type is invalid: %w", i, e)
 		}
-		digest, e := artifact.ParseDigest(lw.Digest)
+		mode, e := artifact.ParseMode(*lw.Mode)
 		if e != nil {
-			return Record{}, e
+			return Record{}, fmt.Errorf("leaves[%d].mode is invalid: %w", i, e)
+		}
+		digest, e := artifact.ParseDigest(*lw.Digest)
+		if e != nil {
+			return Record{}, fmt.Errorf("leaves[%d].digest is invalid: %w", i, e)
 		}
 		l, e := NewLeaf(p, kind, mode, digest)
 		if e != nil {
@@ -229,18 +234,21 @@ func decodeRecord(rw recordWire, scope Scope, root ProjectRoot, cw []configWire)
 		dirs = append(dirs, p)
 	}
 	config := make([]SharedConfigOwnership, 0, len(cw))
-	for _, v := range cw {
-		p, e := artifact.NewPath(v.Path)
-		if e != nil {
-			return Record{}, e
+	for i, v := range cw {
+		if v.Path == nil || v.Identity == nil || v.Digest == nil {
+			return Record{}, fault("registry record decode", "explicit path, identity, and digest for every shared config ownership entry", fmt.Sprintf("shared_config_ownership[%d] omits or nulls a required nested field", i), "internal/install/registry.decodeRecord", "validating nested shared config ownership", "incomplete shared-entry identity cannot prove a safe merge", "supply every shared config ownership field explicitly", nil)
 		}
-		digest, e := artifact.ParseDigest(v.Digest)
+		p, e := artifact.NewPath(*v.Path)
 		if e != nil {
-			return Record{}, e
+			return Record{}, fmt.Errorf("shared_config_ownership[%d].path is invalid: %w", i, e)
 		}
-		identity, e := NewSharedConfigIdentity(v.Identity)
+		digest, e := artifact.ParseDigest(*v.Digest)
 		if e != nil {
-			return Record{}, e
+			return Record{}, fmt.Errorf("shared_config_ownership[%d].digest is invalid: %w", i, e)
+		}
+		identity, e := NewSharedConfigIdentity(*v.Identity)
+		if e != nil {
+			return Record{}, fmt.Errorf("shared_config_ownership[%d].identity is invalid: %w", i, e)
 		}
 		o, e := NewSharedConfigOwnership(p, identity, digest)
 		if e != nil {

@@ -85,39 +85,46 @@ func TestCLI_InstallStatus_EmptyStateReported(t *testing.T) {
 	}
 }
 
-func TestCLI_InstallStatus_ReportsRecordedCellsJSON(t *testing.T) {
-	t.Parallel()
-	state := filepath.Join(t.TempDir(), "installations.yaml")
-	project := t.TempDir()
-	body := fmt.Sprintf(`schema: pasture.install.registry/v1
+func mixedScopeStatusDocument(project string) string {
+	return fmt.Sprintf(`schema: pasture.install.registry/v1
 global_installations:
   - cell: opencode.hooks
     source: installer
     strategy: direct-file
     managed: true
     observation: installed
-    trust: not-applicable
-    last_operation: ensure
-    last_outcome: completed
-  - cell: codex.hooks
-    source: installer
-    strategy: native-plugin-pending-trust
-    managed: true
-    observation: installed
     trust: pending
     last_operation: ensure
     last_outcome: completed
+    diagnostic: global hooks await native trust
+  - cell: codex.hooks
+    source: home-manager
+    strategy: native-plugin-pending-trust
+    managed: false
+    observation: unknown
+    trust: not-applicable
+    last_operation: inspect
+    last_outcome: failed
+    diagnostic: global codex inspection failed
 project_installations:
   - canonical_project_root: %s
     cell: opencode.hooks
-    source: installer
-    strategy: direct-file
+    source: home-manager
+    strategy: native-plugin
     managed: false
     observation: absent
-    trust: not-applicable
+    trust: trusted
     last_operation: remove
-    last_outcome: completed
+    last_outcome: failed
+    diagnostic: project hook removal needs retry
 `, project)
+}
+
+func TestCLI_InstallStatus_ReportsRecordedCellsJSON(t *testing.T) {
+	t.Parallel()
+	state := filepath.Join(t.TempDir(), "installations.yaml")
+	project := t.TempDir()
+	body := mixedScopeStatusDocument(project)
 	if err := os.WriteFile(state, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +138,13 @@ project_installations:
 			ProjectRoot string `json:"project_root"`
 			Cell        string `json:"cell"`
 			Observation string `json:"observation"`
+			Strategy    string `json:"strategy"`
+			Source      string `json:"source"`
+			Managed     bool   `json:"managed"`
 			Trust       string `json:"trust"`
+			LastAction  string `json:"last_action"`
+			LastOutcome string `json:"last_outcome"`
+			Diagnostic  string `json:"diagnostic"`
 		} `json:"cells"`
 	}
 	if err := json.Unmarshal([]byte(out.stdout), &decoded); err != nil {
@@ -144,19 +157,28 @@ project_installations:
 	if decoded.Cells[0].Cell != "opencode.hooks" || decoded.Cells[1].Cell != "codex.hooks" || decoded.Cells[2].Cell != "opencode.hooks" {
 		t.Errorf("canonical order broken: %+v", decoded.Cells)
 	}
-	if decoded.Cells[1].Trust != "pending" {
-		t.Errorf("codex hooks trust should be pending: %+v", decoded.Cells[1])
+	want := []struct {
+		scope, root, cell, observation, strategy, source string
+		managed                                          bool
+		trust, action, outcome, diagnostic               string
+	}{
+		{"global", "", "opencode.hooks", "installed", "direct-file", "installer", true, "pending", "ensure", "completed", "global hooks await native trust"},
+		{"global", "", "codex.hooks", "unknown", "native-plugin-pending-trust", "home-manager", false, "not-applicable", "inspect", "failed", "global codex inspection failed"},
+		{"project", project, "opencode.hooks", "absent", "native-plugin", "home-manager", false, "trusted", "remove", "failed", "project hook removal needs retry"},
 	}
-	if decoded.Cells[0].Scope != "global" || decoded.Cells[0].ProjectRoot != "" || decoded.Cells[2].Scope != "project" || decoded.Cells[2].ProjectRoot != project {
-		t.Fatalf("scoped rows=%+v", decoded.Cells)
+	for i, expected := range want {
+		got := decoded.Cells[i]
+		if got.Scope != expected.scope || got.ProjectRoot != expected.root || got.Cell != expected.cell || got.Observation != expected.observation || got.Strategy != expected.strategy || got.Source != expected.source || got.Managed != expected.managed || got.Trust != expected.trust || got.LastAction != expected.action || got.LastOutcome != expected.outcome || got.Diagnostic != expected.diagnostic {
+			t.Errorf("cells[%d]=%+v, want %+v", i, got, expected)
+		}
 	}
 }
 
-func TestCLI_InstallStatus_ProjectOnlyTextNamesScopeAndRoot(t *testing.T) {
+func TestCLI_InstallStatus_MixedScopeTextKeepsFactsWithSameCellRows(t *testing.T) {
 	t.Parallel()
 	state := filepath.Join(t.TempDir(), "installations.yaml")
 	project := t.TempDir()
-	body := fmt.Sprintf("schema: pasture.install.registry/v1\nglobal_installations: []\nproject_installations:\n  - canonical_project_root: %s\n    cell: codex.agents\n    source: installer\n    strategy: direct-file\n    managed: true\n    observation: installed\n    trust: not-applicable\n    last_operation: ensure\n    last_outcome: completed\n", project)
+	body := mixedScopeStatusDocument(project)
 	if err := os.WriteFile(state, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -164,8 +186,23 @@ func TestCLI_InstallStatus_ProjectOnlyTextNamesScopeAndRoot(t *testing.T) {
 	if out.exitCode != 0 {
 		t.Fatalf("status exit %d; stderr=%s", out.exitCode, out.stderr)
 	}
-	if !strings.Contains(out.stdout, "project:"+project) || !strings.Contains(out.stdout, "codex.agents") || strings.Contains(out.stdout, "nothing has been installed") {
-		t.Fatalf("project-only text omitted scope/root: %s", out.stdout)
+	globalStart := strings.Index(out.stdout, "opencode.hooks")
+	projectStart := strings.LastIndex(out.stdout, "opencode.hooks")
+	if globalStart < 0 || projectStart <= globalStart {
+		t.Fatalf("mixed same-cell rows missing: %s", out.stdout)
+	}
+	globalEnd := strings.Index(out.stdout[globalStart:], "codex.hooks") + globalStart
+	globalBlock := out.stdout[globalStart:globalEnd]
+	projectBlock := out.stdout[projectStart:]
+	for _, want := range []string{"installed", "direct-file", "global", "installer/pasture-managed", "pending", "last: ensure -> completed", "note: global hooks await native trust"} {
+		if !strings.Contains(globalBlock, want) {
+			t.Errorf("global same-cell block omitted %q:\n%s", want, globalBlock)
+		}
+	}
+	for _, want := range []string{"absent", "native-plugin", "project:" + project, "home-manager/external", "trusted", "last: remove -> failed", "note: project hook removal needs retry"} {
+		if !strings.Contains(projectBlock, want) {
+			t.Errorf("project same-cell block omitted %q:\n%s", want, projectBlock)
+		}
 	}
 }
 

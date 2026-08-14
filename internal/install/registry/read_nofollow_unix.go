@@ -16,8 +16,6 @@ import (
 
 func registryRequiresPOSIXMode() bool { return true }
 
-const maxRegistryBytes = 8 << 20
-
 // openRegistryParent anchors at the filesystem root and opens every parent one
 // component at a time with O_NOFOLLOW. Directory replacement after a component
 // is opened cannot redirect later descriptor-relative operations.

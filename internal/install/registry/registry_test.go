@@ -306,6 +306,87 @@ func TestStrictCodecRejectsEachEnumAndDuplicateBoundary(t *testing.T) {
 	}
 }
 
+func TestRecordAndCodecRejectContradictoryOperationOutcomePairs(t *testing.T) {
+	c, _ := cell.New(ir.HarnessClaudeCode, cell.SkillsAxis())
+	key, _ := registry.GlobalKey(c)
+	for _, tc := range []struct {
+		name      string
+		operation registry.Operation
+		outcome   registry.Outcome
+	}{
+		{"none with failed", registry.OperationNone, registry.OutcomeFailed},
+		{"ensure with none", registry.OperationEnsure, registry.OutcomeNone},
+	} {
+		t.Run(tc.name+" constructor", func(t *testing.T) {
+			_, err := registry.NewRecord(registry.RecordInput{Key: key, Source: registry.SourceInstaller, Strategy: activation.DirectFileKindValue(), Observation: registry.ObservationUnknown, Trust: registry.TrustNotApplicable, LastOperation: tc.operation, LastOutcome: tc.outcome})
+			if err == nil || !strings.Contains(err.Error(), "contradict") {
+				t.Fatalf("NewRecord error=%v", err)
+			}
+		})
+		t.Run(tc.name+" codec", func(t *testing.T) {
+			doc := strings.Replace(validGlobalDocument, "last_operation: none", "last_operation: "+tc.operation.String(), 1)
+			doc = strings.Replace(doc, "last_outcome: none", "last_outcome: "+tc.outcome.String(), 1)
+			if _, err := registry.Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), "contradict") {
+				t.Fatalf("Parse error=%v", err)
+			}
+		})
+	}
+	for _, operation := range []registry.Operation{registry.OperationEnsure, registry.OperationRemove, registry.OperationInspect} {
+		for _, outcome := range []registry.Outcome{registry.OutcomeCompleted, registry.OutcomeFailed} {
+			if _, err := registry.NewRecord(registry.RecordInput{Key: key, Source: registry.SourceInstaller, Strategy: activation.DirectFileKindValue(), Observation: registry.ObservationUnknown, Trust: registry.TrustNotApplicable, LastOperation: operation, LastOutcome: outcome}); err != nil {
+				t.Fatalf("valid pair %s/%s rejected: %v", operation, outcome, err)
+			}
+		}
+	}
+}
+
+func TestStrictCodecRejectsIncompleteNestedOwnershipFields(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("a", 64)
+	leafDocument := strings.Replace(validGlobalDocument, "    observation:", "    leaves:\n      -\n        path: skills/pasture/SKILL.md\n        type: regular-file\n        mode: '0644'\n        digest: "+digest+"\n    observation:", 1)
+	project := filepath.Join(t.TempDir(), "retained")
+	configDocument := "schema: pasture.install.registry/v1\nglobal_installations: []\nproject_installations:\n  - canonical_project_root: " + project + "\n    cell: claude-code.hooks\n    source: installer\n    strategy: direct-file\n    managed: true\n    observation: installed\n    trust: pending\n    last_operation: ensure\n    last_outcome: completed\n    shared_config_ownership:\n      -\n        path: .claude/settings.json\n        identity: pasture-hooks\n        digest: " + digest + "\n"
+	type nestedCase struct{ field, malformed string }
+	sets := []struct {
+		name, document, marker string
+		fields                 []nestedCase
+	}{
+		{"leaf", leafDocument, "        ", []nestedCase{{"path", "../bad"}, {"type", "unknown"}, {"mode", "invalid"}, {"digest", "sha256:short"}}},
+		{"shared config", configDocument, "        ", []nestedCase{{"path", "../bad"}, {"identity", "' padded '"}, {"digest", "sha256:short"}}},
+	}
+	for _, set := range sets {
+		set := set
+		for _, field := range set.fields {
+			field := field
+			linePrefix := set.marker + field.field + ":"
+			start := strings.Index(set.document, linePrefix)
+			if start < 0 {
+				t.Fatalf("fixture lacks %s %s", set.name, field.field)
+			}
+			end := start + strings.Index(set.document[start:], "\n") + 1
+			for _, mutation := range []struct{ name, replacement string }{
+				{"omitted", ""},
+				{"null", linePrefix + " null\n"},
+				{"malformed", linePrefix + " " + field.malformed + "\n"},
+			} {
+				mutation := mutation
+				t.Run(set.name+" "+field.field+" "+mutation.name, func(t *testing.T) {
+					doc := set.document[:start] + mutation.replacement + set.document[end:]
+					_, err := registry.Parse([]byte(doc))
+					if err == nil || !strings.Contains(err.Error(), field.field) {
+						t.Fatalf("error=%v, want nested field %q", err, field.field)
+					}
+				})
+			}
+		}
+		t.Run(set.name+" unknown field", func(t *testing.T) {
+			doc := strings.Replace(set.document, set.marker+set.fields[0].field+":", set.marker+"surprise: true\n"+set.marker+set.fields[0].field+":", 1)
+			if _, err := registry.Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), "surprise") {
+				t.Fatalf("unknown nested field error=%v", err)
+			}
+		})
+	}
+}
+
 func TestParseRejectsExistingSymlinkProjectRoot(t *testing.T) {
 	real := t.TempDir()
 	alias := filepath.Join(t.TempDir(), "alias")

@@ -16,8 +16,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const maxRegistryBytes = 8 << 20
-
 func registryRequiresPOSIXMode() bool { return false }
 
 var registryWindowsRename = func(root *os.Root, oldName, newName string) error {
@@ -157,7 +155,7 @@ func writeRegistryFile(path string, data []byte) error {
 	}
 	var handle windows.Handle
 	var status windows.IO_STATUS_BLOCK
-	err = windows.NtCreateFile(&handle, windows.GENERIC_READ|windows.GENERIC_WRITE|windows.WRITE_DAC|windows.READ_CONTROL, attributes, &status, nil, windows.FILE_ATTRIBUTE_NORMAL, 0, windows.FILE_CREATE, windows.FILE_NON_DIRECTORY_FILE|windows.FILE_OPEN_REPARSE_POINT, 0, 0)
+	err = windows.NtCreateFile(&handle, windows.GENERIC_READ|windows.GENERIC_WRITE|windows.WRITE_DAC|windows.WRITE_OWNER|windows.READ_CONTROL, attributes, &status, nil, windows.FILE_ATTRIBUTE_NORMAL, 0, windows.FILE_CREATE, windows.FILE_NON_DIRECTORY_FILE|windows.FILE_OPEN_REPARSE_POINT, 0, 0)
 	if err != nil {
 		return err
 	}
@@ -172,7 +170,7 @@ func writeRegistryFile(path string, data []byte) error {
 			_ = root.Remove(temp)
 		}
 	}()
-	if err := applyOwnerOnlyWindows(windows.Handle(file.Fd())); err != nil {
+	if err := validateOwnerOnlyWindows(windows.Handle(file.Fd())); err != nil {
 		file.Close()
 		return err
 	}
@@ -239,23 +237,15 @@ func currentWindowsOwnerACL() (*windows.SID, *windows.SECURITY_DESCRIPTOR, *wind
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	sd, err := windows.SecurityDescriptorFromString("D:P(A;;GA;;;" + user.User.Sid.String() + ")")
+	// NtCreateFile receives both the explicit owner and the protected DACL, so
+	// token-default ownership cannot differ from the identity validation expects.
+	sid := user.User.Sid.String()
+	sd, err := windows.SecurityDescriptorFromString("O:" + sid + "D:P(A;;GA;;;" + sid + ")")
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	dacl, _, err := sd.DACL()
 	return user.User.Sid, sd, dacl, err
-}
-
-func applyOwnerOnlyWindows(handle windows.Handle) error {
-	_, _, dacl, err := currentWindowsOwnerACL()
-	if err != nil {
-		return fmt.Errorf("construct owner-only registry DACL: %w", err)
-	}
-	if err := windows.SetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil); err != nil {
-		return fmt.Errorf("apply protected owner-only registry DACL: %w", err)
-	}
-	return validateOwnerOnlyWindows(handle)
 }
 
 func validateOwnerOnlyWindows(handle windows.Handle) error {

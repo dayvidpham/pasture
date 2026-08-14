@@ -8,11 +8,34 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/install/activation"
 	"github.com/dayvidpham/pasture/internal/install/cell"
+	"golang.org/x/sys/windows"
 )
+
+func TestWindowsCreationDescriptorSetsCurrentUserAsOwner(t *testing.T) {
+	want, descriptor, dacl, err := currentWindowsOwnerACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, _, err := descriptor.Owner()
+	if err != nil || owner == nil || !owner.Equals(want) {
+		t.Fatalf("creation descriptor owner=%v want current user %v err=%v", owner, want, err)
+	}
+	if dacl == nil || dacl.AceCount != 1 {
+		t.Fatalf("creation descriptor DACL=%v", dacl)
+	}
+	var ace *windows.ACCESS_ALLOWED_ACE
+	if err := windows.GetAce(dacl, 0, &ace); err != nil || ace == nil {
+		t.Fatalf("read creation descriptor ACE: %v", err)
+	}
+	if sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart)); !sid.Equals(want) {
+		t.Fatalf("creation descriptor ACE SID=%v want owner %v", sid, want)
+	}
+}
 
 func TestWindowsFailedReplacePreservesCommittedRegistryAndCleansTemp(t *testing.T) {
 	dir := t.TempDir()

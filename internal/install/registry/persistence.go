@@ -5,6 +5,8 @@ import (
 	"os"
 )
 
+const maxRegistryBytes = 8 << 20
+
 // Load reads the authoritative registry. Missing means an empty first-shipped
 // store. Existing files must be regular, non-symlink, and private according to
 // the platform contract (mode 0600 on Unix, protected owner-only DACL on Windows).
@@ -33,6 +35,9 @@ func Save(path string, s Store) error {
 	data, err := s.Marshal()
 	if err != nil {
 		return err
+	}
+	if len(data) > maxRegistryBytes {
+		return fault("registry save", fmt.Sprintf("registry no larger than %d bytes", maxRegistryBytes), fmt.Sprintf("encoded registry is %d bytes and exceeds the persisted-registry limit", len(data)), "internal/install/registry.Save", "validating encoded registry size before replacement", "saving it would replace readable ownership state with a registry that Load must reject", "reduce retained records or diagnostics below the size limit, then retry", nil)
 	}
 	if err := writeRegistryFile(path, data); err != nil {
 		return fault("registry save", "atomic mode-0600 write through non-symlink boundaries", fmt.Sprintf("cannot save %q: %v", path, err), path, "persisting registry state", "the prior committed registry remains authoritative unless directory fsync alone failed", "replace symlink boundaries, restore directory write access, and retry", err)

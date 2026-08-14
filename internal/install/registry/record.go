@@ -314,6 +314,9 @@ func NewRecord(in RecordInput) (Record, error) {
 	if in.LastOperation < OperationNone || in.LastOperation > OperationInspect || in.LastOutcome < OutcomeNone || in.LastOutcome > OutcomeFailed {
 		return Record{}, fault("record construction", "known operation and outcome", "last operation or outcome is invalid", "internal/install/registry.NewRecord", "constructing a registry record", "the last result cannot be explained", "use typed operation and outcome constants", nil)
 	}
+	if (in.LastOperation == OperationNone) != (in.LastOutcome == OutcomeNone) {
+		return Record{}, fault("record construction", "none/none or a concrete operation with a concrete outcome", fmt.Sprintf("last operation %q and outcome %q contradict each other", in.LastOperation, in.LastOutcome), "internal/install/registry.NewRecord", "validating the last operation/outcome pair", "status formats could report different or incomplete retry facts", "use OperationNone with OutcomeNone, or pair ensure/remove/inspect with completed/failed", nil)
+	}
 	if in.Key.Scope() == ScopeGlobal && len(in.SharedConfig) > 0 {
 		return Record{}, fault("record construction", "project-only shared config ownership", "a global record contains shared config ownership", "internal/install/registry.NewRecord", "constructing a global record", "global and project ownership would be conflated", "attach shared config ownership only to a project key", nil)
 	}
