@@ -279,9 +279,11 @@ func (g *GitHubSource) get(ctx context.Context, endpoint *url.URL, purpose reque
 		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 		response, err := g.client.Do(req)
 		if ctxErr := ctx.Err(); ctxErr != nil {
+			closeHTTPResponse(response)
 			return nil, invalid("GitHub request", current.String(), fmt.Sprintf("context ended during GET: %v", ctxErr), "release data is incomplete", "retry with a live context", ctxErr)
 		}
 		if err != nil {
+			closeHTTPResponse(response)
 			return nil, invalid("GitHub request", current.String(), fmt.Sprintf("GET failed: %v", err), "release data cannot be loaded", "repair connectivity and retry", err)
 		}
 		if response == nil || response.Body == nil {
@@ -313,6 +315,12 @@ func (g *GitHubSource) get(ctx context.Context, endpoint *url.URL, purpose reque
 		return response, nil
 	}
 	return nil, invalid("GitHub redirect", endpoint.String(), "redirect limit exceeded", "release data could not be obtained safely", "reduce redirects to at most five", fs.ErrInvalid)
+}
+
+func closeHTTPResponse(response *http.Response) {
+	if response != nil && response.Body != nil {
+		_ = response.Body.Close()
+	}
 }
 
 func validResponseURL(u *url.URL, p requestPurpose, base *url.URL, expected *assetIdentity) bool {

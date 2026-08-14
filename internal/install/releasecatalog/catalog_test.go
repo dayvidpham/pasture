@@ -17,14 +17,16 @@ import (
 )
 
 type fixtureSource struct {
-	releases  []release
-	data      map[string][]byte
-	listErr   error
-	openErr   error
-	readErr   error
-	closeErr  error
-	cancelURL string
-	cancel    context.CancelFunc
+	releases     []release
+	data         map[string][]byte
+	listErr      error
+	openErr      error
+	readErr      error
+	closeErr     error
+	cancelURL    string
+	cancelOnOpen string
+	cancel       context.CancelFunc
+	closeCalls   *int
 }
 
 func (s *fixtureSource) listReleases(context.Context) ([]release, error) {
@@ -43,7 +45,11 @@ func (s *fixtureSource) openAsset(_ context.Context, item asset) (io.ReadCloser,
 	if !ok {
 		return nil, os.ErrNotExist
 	}
-	return &faultReader{data: bytes.NewReader(content), err: s.readErr, closeErr: s.closeErr, cancel: s.cancel, cancelOnRead: name == s.cancelURL}, nil
+	reader := &faultReader{data: bytes.NewReader(content), err: s.readErr, closeErr: s.closeErr, cancel: s.cancel, cancelOnRead: name == s.cancelURL, closeCalls: s.closeCalls}
+	if name == s.cancelOnOpen && s.cancel != nil {
+		s.cancel()
+	}
+	return reader, nil
 }
 
 type faultReader struct {
@@ -53,6 +59,7 @@ type faultReader struct {
 	cancel       context.CancelFunc
 	cancelOnRead bool
 	fired        bool
+	closeCalls   *int
 }
 
 func (r *faultReader) Read(p []byte) (int, error) {
@@ -67,7 +74,12 @@ func (r *faultReader) Read(p []byte) (int, error) {
 	}
 	return r.data.Read(p)
 }
-func (r *faultReader) Close() error { return r.closeErr }
+func (r *faultReader) Close() error {
+	if r.closeCalls != nil {
+		(*r.closeCalls)++
+	}
+	return r.closeErr
+}
 
 func TestListCompatiblePolicyAndExactNonNewestResolution(t *testing.T) {
 	t.Parallel()
@@ -190,6 +202,23 @@ func TestDiscoveryPreservesOperationalErrorsAndCancellation(t *testing.T) {
 	catalog, _ := newCatalog(source, DiscoveryLimits{}, artifact.VerifyAggregate)
 	if candidates, err := catalog.ListCompatible(ctx, installerVersion(t), FinalsOnly); candidates != nil || !errors.Is(err, context.Canceled) {
 		t.Fatalf("candidates=%v err=%v", candidates, err)
+	}
+}
+
+func TestCancellationAfterAssetOpenClosesReaderExactlyOnce(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	source := loadFixtureSource(t)
+	source.releases = []release{makeRelease(t, source, mustVersion(t, "1.2.0"), false, "final/")}
+	closeCalls := 0
+	source.cancel = cancel
+	source.cancelOnOpen = "final/" + artifact.AggregateManifestAsset
+	source.closeCalls = &closeCalls
+	source.closeErr = os.ErrClosed
+	catalog, _ := newCatalog(source, DiscoveryLimits{}, artifact.VerifyAggregate)
+	candidates, err := catalog.ListCompatible(ctx, installerVersion(t), FinalsOnly)
+	if candidates != nil || !errors.Is(err, context.Canceled) || closeCalls != 1 {
+		t.Fatalf("candidates=%v err=%v close calls=%d", candidates, err, closeCalls)
 	}
 }
 

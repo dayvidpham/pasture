@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -24,10 +25,16 @@ func (f doerFunc) Do(r *http.Request) (*http.Response, error) { return f(r) }
 
 type boundaryBody struct {
 	io.Reader
-	closeErr error
+	closeErr   error
+	closeCalls *int
 }
 
-func (b *boundaryBody) Close() error { return b.closeErr }
+func (b *boundaryBody) Close() error {
+	if b.closeCalls != nil {
+		(*b.closeCalls)++
+	}
+	return b.closeErr
+}
 func response(req *http.Request, status int, body, link string, final string) *http.Response {
 	finalReq := req
 	if final != "" {
@@ -154,6 +161,32 @@ func TestGitHubPaginationCancellationBetweenPages(t *testing.T) {
 	_, err := source.listReleases(ctx)
 	if !errors.Is(err, context.Canceled) || calls != 1 {
 		t.Fatalf("err=%v calls=%d", err, calls)
+	}
+}
+
+func TestGitHubCancellationClosesAcquiredResponseExactlyOnce(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	closeCalls := 0
+	doer := doerFunc(func(req *http.Request) (*http.Response, error) {
+		cancel()
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Request:    req,
+			Body:       &boundaryBody{Reader: strings.NewReader(`[]`), closeErr: os.ErrClosed, closeCalls: &closeCalls},
+		}, nil
+	})
+	source, err := NewGitHubSource(doer, releasesEndpoint, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := New(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := catalog.ListCompatible(ctx, installerVersion(t), FinalsOnly)
+	if candidates != nil || !errors.Is(err, context.Canceled) || closeCalls != 1 {
+		t.Fatalf("candidates=%v err=%v close calls=%d", candidates, err, closeCalls)
 	}
 }
 
@@ -517,22 +550,25 @@ func TestProductionFailureBoundaryMatrixReturnsNoVerifiedOutput(t *testing.T) {
 func TestExactProductionFailureBranches(t *testing.T) {
 	t.Parallel()
 	component := "pasture-1.2.0-codex-hooks.tgz"
+	manifestURL := "https://github.com/dayvidpham/pasture/releases/download/v1.2.0/" + artifact.AggregateManifestAsset
+	componentURL := "https://github.com/dayvidpham/pasture/releases/download/v1.2.0/" + component
 	tests := []struct {
 		name, target, fault, errorType, stage, location string
 		delta                                           int64
+		listing                                         bool
 	}{
-		{"manifest transport", artifact.AggregateManifestAsset, "transport", "catalog", "GitHub request", artifact.AggregateManifestAsset, 0},
-		{"manifest status", artifact.AggregateManifestAsset, "status", "catalog", "GitHub response", artifact.AggregateManifestAsset, 0},
-		{"manifest nil body", artifact.AggregateManifestAsset, "nil-body", "catalog", "GitHub response", artifact.AggregateManifestAsset, 0},
-		{"manifest read", artifact.AggregateManifestAsset, "read", "catalog", "candidate manifest read", artifact.AggregateManifestAsset, 0},
-		{"manifest close", artifact.AggregateManifestAsset, "close", "catalog", "candidate manifest close", artifact.AggregateManifestAsset, 0},
-		{"component transport", component, "transport", "catalog", "GitHub request", component, 0},
-		{"component status", component, "status", "catalog", "GitHub response", component, 0},
-		{"component nil body", component, "nil-body", "catalog", "GitHub response", component, 0},
-		{"component read", component, "read", "aggregate", "asset read", component, 0},
-		{"component close", component, "close", "aggregate", "asset close", component, 0},
-		{"declared undersize", component, "", "aggregate", "asset read", component, -1},
-		{"declared oversize", component, "", "aggregate", "asset read", component, 1},
+		{"manifest transport", artifact.AggregateManifestAsset, "transport", "catalog", "GitHub request", manifestURL, 0, true},
+		{"manifest status", artifact.AggregateManifestAsset, "status", "catalog", "GitHub response", manifestURL, 0, true},
+		{"manifest nil body", artifact.AggregateManifestAsset, "nil-body", "catalog", "GitHub response", manifestURL, 0, true},
+		{"manifest read", artifact.AggregateManifestAsset, "read", "catalog", "candidate manifest read", artifact.AggregateManifestAsset, 0, true},
+		{"manifest close", artifact.AggregateManifestAsset, "close", "catalog", "candidate manifest close", artifact.AggregateManifestAsset, 0, true},
+		{"component transport", component, "transport", "catalog", "GitHub request", componentURL, 0, false},
+		{"component status", component, "status", "catalog", "GitHub response", componentURL, 0, false},
+		{"component nil body", component, "nil-body", "catalog", "GitHub response", componentURL, 0, false},
+		{"component read", component, "read", "aggregate", "asset read", component, 0, false},
+		{"component close", component, "close", "aggregate", "asset close", component, 0, false},
+		{"declared undersize", component, "", "aggregate", "asset read", component, -1, false},
+		{"declared oversize", component, "", "aggregate", "asset read", component, 1, false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -563,20 +599,22 @@ func TestExactProductionFailureBranches(t *testing.T) {
 			catalog, _ := New(source)
 			var verified artifact.VerifiedAggregate
 			candidates, err := catalog.ListCompatible(context.Background(), installerVersion(t), FinalsOnly)
-			if err == nil {
+			if test.listing {
+				if candidates != nil {
+					t.Fatalf("listing fault returned candidates: %v", candidates)
+				}
+			} else {
+				if err != nil || len(candidates) != 1 {
+					t.Fatalf("resolution fault selected candidates=%v err=%v", candidates, err)
+				}
 				verified, err = catalog.ResolveCandidate(context.Background(), candidates[0], 0)
 			}
-			if verified.Manifest().Version().String() != "" {
-				t.Fatalf("verified output returned: %v", verified)
-			}
-			for _, id := range artifact.ComponentIDs() {
-				if _, ok := verified.Asset(id); ok {
-					t.Fatalf("verified asset %s returned", id)
-				}
+			if !test.listing {
+				assertZeroVerifiedAggregate(t, verified)
 			}
 			if test.errorType == "catalog" {
 				var typed *Error
-				if !errors.As(err, &typed) || typed.Stage != test.stage || !strings.Contains(typed.Location, test.location) {
+				if !errors.As(err, &typed) || typed.Stage != test.stage || typed.Location != test.location {
 					t.Fatalf("typed=%v err=%v", typed, err)
 				}
 			} else {
@@ -609,6 +647,21 @@ func TestExactProductionFailureBranches(t *testing.T) {
 			t.Fatalf("verified=%v err=%v", verified, err)
 		}
 	})
+}
+
+func assertZeroVerifiedAggregate(t *testing.T, verified artifact.VerifiedAggregate) {
+	t.Helper()
+	if !reflect.DeepEqual(verified, artifact.VerifiedAggregate{}) {
+		t.Fatalf("verified aggregate is not the exact zero value: %v", verified)
+	}
+	if verified.Manifest().Version().String() != "" {
+		t.Fatalf("verified output returned: %v", verified)
+	}
+	for _, id := range artifact.ComponentIDs() {
+		if _, ok := verified.Asset(id); ok {
+			t.Fatalf("verified asset %s returned", id)
+		}
+	}
 }
 
 type errorReader struct{ err error }

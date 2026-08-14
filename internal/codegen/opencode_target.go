@@ -19,13 +19,10 @@ import (
 // downstream installation (issue #39) can attribute a materialized file to the
 // component that produced it without inspecting the file's bytes.
 //
-// The three S5.1 targets spell component identity differently, and each shape
-// traces to that target's profile rather than to an oversight: OpenCode's small,
-// fixed component set uses this bare string identity; the Claude Code target's
-// fixed three-slot descriptor uses a Component/ComponentKind pair; the Codex
-// target's open per-package map uses a struct-wrapped CodexComponentID (see
-// internal/codegen/codex.go). Keeping the variance means each target's identity
-// is as strong as its own component model needs, no stronger.
+// artifact.ComponentID and artifact.Extension are the canonical install
+// coordinate across harnesses. This target-local identity describes generated
+// OpenCode file roles within that coordinate; it is not a second install
+// identity authority.
 type ComponentID string
 
 const (

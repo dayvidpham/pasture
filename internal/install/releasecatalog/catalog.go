@@ -219,9 +219,15 @@ func (c *Catalog) ResolveCandidate(ctx context.Context, candidate Candidate, max
 func readCatalogAsset(ctx context.Context, source releaseAssetSource, name string, limit int64) ([]byte, error) {
 	reader, err := source.OpenAsset(ctx, name)
 	if ctxErr := ctx.Err(); ctxErr != nil {
+		if reader != nil {
+			_ = reader.Close()
+		}
 		return nil, invalid("candidate manifest open", name, fmt.Sprintf("operation canceled while opening candidate metadata: %v", ctxErr), "candidate discovery is incomplete", "retry with a live context", ctxErr)
 	}
 	if err != nil {
+		if reader != nil {
+			_ = reader.Close()
+		}
 		return nil, err
 	}
 	content, readErr := io.ReadAll(io.LimitReader(reader, limit+1))
