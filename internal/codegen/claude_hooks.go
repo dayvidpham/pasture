@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
@@ -16,9 +15,7 @@ import (
 // adapterBinaryEnv is the environment variable a generated lifecycle transport
 // reads to override the Pasture executable it invokes (default: PATH lookup of
 // `pasture`). It is consumed by the Codex exec-only runner and the OpenCode
-// hooks module. The caller-selected PASTURE_ADAPTER_* operation env vars were
-// removed with the generated Python lifecycle adapter (#65): no generated
-// lifecycle artifact selects an operation anymore.
+// hooks module.
 const adapterBinaryEnv = "PASTURE_BIN"
 
 type lifecycleIdentityMetadata struct {
@@ -41,60 +38,27 @@ type lifecycleEventMetadata struct {
 	AllowedFields  []string                    `json:"allowedFields"`
 }
 
-type lifecycleAdapterMetadata struct {
-	Harness    string                                 `json:"harness"`
-	Version    string                                 `json:"version"`
-	Contract   string                                 `json:"contract"`
-	Events     []lifecycleEventMetadata               `json:"events"`
-	Operations map[string][]handlers.AdapterOperation `json:"operations"`
-}
-
-// adapterOperationsBySemantic is a complete, disjoint partition of the hidden
-// adapter's operation vocabulary. Native observations may record only
-// assignment-controlled producer facts, gate consultations may perform only the
-// read-only interaction-mode query, and only an explicit human-response event
-// may submit one of the five human-gated decisions.
-func adapterOperationsBySemantic() map[string][]handlers.AdapterOperation {
-	return map[string][]handlers.AdapterOperation{
-		runtime.SemanticObservation.String(): {
-			handlers.AdapterOperationStartReview,
-			handlers.AdapterOperationSubmitPlanReview,
-			handlers.AdapterOperationSubmitImplementationReview,
-			handlers.AdapterOperationFinalizeReview,
-			handlers.AdapterOperationCreateSlice,
-			handlers.AdapterOperationSetSliceCandidate,
-			handlers.AdapterOperationCloseSlice,
-			handlers.AdapterOperationCreateIntegrationCandidate,
-			handlers.AdapterOperationPublishRepository,
-		},
-		runtime.SemanticGateConsultation.String(): {
-			handlers.AdapterOperationShowInteractionMode,
-		},
-		runtime.SemanticExplicitHumanResponse.String(): {
-			handlers.AdapterOperationSetInteractionMode,
-			handlers.AdapterOperationRecordPlanUAT,
-			handlers.AdapterOperationRatifyPlan,
-			handlers.AdapterOperationRecordImplementationUAT,
-			handlers.AdapterOperationLand,
-		},
-	}
+type lifecycleTransportMetadata struct {
+	Harness  string                   `json:"harness"`
+	Version  string                   `json:"version"`
+	Contract string                   `json:"contract"`
+	Events   []lifecycleEventMetadata `json:"events"`
 }
 
 func lifecycleMetadata[E comparable](
 	contract runtime.LifecycleContract[E],
 	version string,
 	allowedFields func(string) []string,
-) (lifecycleAdapterMetadata, error) {
-	metadata := lifecycleAdapterMetadata{
+) (lifecycleTransportMetadata, error) {
+	metadata := lifecycleTransportMetadata{
 		Harness:  string(contract.Harness()),
 		Version:  version,
 		Contract: contract.ID().String(),
 	}
-	seenSemantics := make(map[string]struct{})
 	for _, event := range contract.Events() {
 		mapping, err := contract.Mapping(event)
 		if err != nil {
-			return lifecycleAdapterMetadata{}, fmt.Errorf("map lifecycle event for %s: %w", contract.ID(), err)
+			return lifecycleTransportMetadata{}, fmt.Errorf("map lifecycle event for %s: %w", contract.ID(), err)
 		}
 		identities := make([]lifecycleIdentityMetadata, 0, len(mapping.Identities()))
 		fields := append([]string(nil), allowedFields(mapping.NativeName())...)
@@ -120,13 +84,6 @@ func lifecycleMetadata[E comparable](
 			Identities:     identities,
 			AllowedFields:  fields,
 		})
-		seenSemantics[mapping.Semantic().String()] = struct{}{}
-	}
-	metadata.Operations = make(map[string][]handlers.AdapterOperation, len(seenSemantics))
-	for semantic, operations := range adapterOperationsBySemantic() {
-		if _, present := seenSemantics[semantic]; present {
-			metadata.Operations[semantic] = operations
-		}
 	}
 	return metadata, nil
 }
