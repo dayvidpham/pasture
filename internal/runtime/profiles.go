@@ -2,7 +2,9 @@ package runtime
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/effects"
 )
@@ -149,10 +151,14 @@ func (l operationLowering) toOperationBinding(descriptor CoreOperationDescriptor
 	}
 }
 
-func mustExactContract(harness ir.HarnessID, name, version string, core CoreRuntimeBindings) RuntimeContract {
-	id, err := ir.NewRuntimeContractID(harness, name)
+func mustExactContract(harness ir.HarnessID, core CoreRuntimeBindings) RuntimeContract {
+	id, err := artifact.ProductionRuntimeContract(harness)
 	if err != nil {
 		panic(err)
+	}
+	_, version, ok := strings.Cut(id.String(), "@")
+	if !ok {
+		panic("production runtime contract has no version")
 	}
 	host, err := ParseHostVersion(version)
 	if err != nil {
@@ -169,10 +175,14 @@ func mustExactContract(harness ir.HarnessID, name, version string, core CoreRunt
 	return contract
 }
 
-func mustRangeContract(harness ir.HarnessID, name, minVersion, maxVersion string, core CoreRuntimeBindings) RuntimeContract {
-	id, err := ir.NewRuntimeContractID(harness, name)
+func mustRangeContract(harness ir.HarnessID, maxVersion string, core CoreRuntimeBindings) RuntimeContract {
+	id, err := artifact.ProductionRuntimeContract(harness)
 	if err != nil {
 		panic(err)
+	}
+	_, minVersion, ok := strings.Cut(id.String(), "@")
+	if !ok {
+		panic("production runtime contract has no version")
 	}
 	min, err := ParseHostVersion(minVersion)
 	if err != nil {
@@ -228,7 +238,7 @@ func ClaudeCode2_1_210() RuntimeContract {
 			native: mustNativeCall("AskUserQuestion", []string{"questions"}, "the user's selected option bound to the originating request", "presents to the interactive user"),
 		},
 	}
-	return mustRangeContract(ir.HarnessClaudeCode, "claude-code@2.1.210", "2.1.210", "2.2.0-0", buildCoreBindings(table))
+	return mustRangeContract(ir.HarnessClaudeCode, "2.2.0-0", buildCoreBindings(table))
 }
 
 // OpenCode1_18_10 is the pinned runtime contract for OpenCode 1.18.10. It uses
@@ -267,7 +277,7 @@ func OpenCode1_18_10() RuntimeContract {
 			native: mustNativeCall("question", []string{"prompt", "options"}, "the user's selected option bound to the originating request", "presents to the interactive user"),
 		},
 	}
-	return mustExactContract(ir.HarnessOpenCode, "opencode@1.18.10", "1.18.10", buildCoreBindings(table))
+	return mustExactContract(ir.HarnessOpenCode, buildCoreBindings(table))
 }
 
 // Codex0_146_0 is the pinned runtime contract for Codex 0.146.0. It lowers only
@@ -305,7 +315,7 @@ func Codex0_146_0() RuntimeContract {
 			native: mustNativeCall("request-input", []string{"prompt", "options"}, "the user's requested input bound to the originating request", "presents to the interactive user"),
 		},
 	}
-	return mustExactContract(ir.HarnessCodex, "codex@0.146.0", "0.146.0", buildCoreBindings(table))
+	return mustExactContract(ir.HarnessCodex, buildCoreBindings(table))
 }
 
 // PinnedContracts returns the three initial pinned point contracts, one per

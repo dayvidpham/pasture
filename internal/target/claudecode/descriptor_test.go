@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/target/claudecode"
@@ -31,13 +32,13 @@ func TestDescriptorPublishesThreeComponentsInCanonicalOrder(t *testing.T) {
 
 	components := d.Components()
 	require.Len(t, components, 3)
-	assert.Equal(t, claudecode.SkillsKind(), components[0].Kind())
-	assert.Equal(t, claudecode.AgentsKind(), components[1].Kind())
-	assert.Equal(t, claudecode.HooksKind(), components[2].Kind())
+	assert.Equal(t, artifact.ExtensionSkills, components[0].Extension())
+	assert.Equal(t, artifact.ExtensionAgents, components[1].Extension())
+	assert.Equal(t, artifact.ExtensionHooks, components[2].Extension())
 
-	assert.Equal(t, claudecode.SkillsComponentID, d.Skills().ID().String())
-	assert.Equal(t, claudecode.AgentsComponentID, d.Agents().ID().String())
-	assert.Equal(t, claudecode.HooksComponentID, d.Hooks().ID().String())
+	assert.Equal(t, "claude-code/skills", d.Skills().ID().String())
+	assert.Equal(t, "claude-code/agents", d.Agents().ID().String())
+	assert.Equal(t, "claude-code/hooks", d.Hooks().ID().String())
 
 	for _, c := range components {
 		assert.True(t, c.IsValid())
@@ -58,16 +59,16 @@ func TestDescriptorHooksAreDefaultOff(t *testing.T) {
 	assert.False(t, d.Agents().DefaultEnabled())
 }
 
-func TestDescriptorComponentLookupByKind(t *testing.T) {
+func TestDescriptorComponentLookupByExtension(t *testing.T) {
 	d, err := claudecode.Descriptor()
 	require.NoError(t, err)
 
-	skills, err := d.Component(claudecode.SkillsKind())
+	skills, err := d.Component(artifact.ExtensionSkills)
 	require.NoError(t, err)
 	assert.Equal(t, d.Skills().ID(), skills.ID())
 
-	_, err = d.Component(claudecode.ComponentKind{})
-	require.Error(t, err, "a zero component kind must be rejected actionably")
+	_, err = d.Component(artifact.Extension(0))
+	require.Error(t, err, "a zero extension must be rejected actionably")
 }
 
 func TestNewTargetDescriptorRejectsNonClaudeContract(t *testing.T) {
@@ -80,13 +81,13 @@ func TestNewTargetDescriptorRejectsNonClaudeContract(t *testing.T) {
 	assert.Contains(t, err.Error(), "claude-code")
 }
 
-func TestNewTargetDescriptorRejectsWrongKindInSlot(t *testing.T) {
+func TestNewTargetDescriptorRejectsWrongExtensionInSlot(t *testing.T) {
 	d, err := claudecode.Descriptor()
 	require.NoError(t, err)
 
 	contract := runtime.ClaudeCode2_1_210().ID()
 	// Agents component placed in the skills slot must be rejected: each slot
-	// holds exactly its own kind.
+	// holds exactly its own extension.
 	_, err = claudecode.NewTargetDescriptor(contract, d.Agents(), d.Agents(), d.Hooks())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "skills")

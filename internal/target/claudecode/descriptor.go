@@ -8,28 +8,12 @@ import (
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
-// Stable published component identities. These are the exact strings a
-// downstream installer binds to an activation strategy; they never change
-// spelling without a coordinated activation-side update.
-const (
-	SkillsComponentID = "claude-code/skills"
-	AgentsComponentID = "claude-code/agents"
-	HooksComponentID  = "claude-code/hooks"
-)
-
 // TargetDescriptor is the Claude Code target's published, opaque descriptor. It
 // exposes exactly three components (skills, agents, hooks), the RuntimeContractID
 // the target was compiled under, and its harness identity. It deliberately does
 // not carry an ActivationContractID or any installation state: a downstream
 // installer consumes this descriptor and binds each component to a closed
 // activation strategy.
-//
-// Component identity is spelled per target profile, not uniformly: this target's
-// fixed three-slot shape pairs a string ComponentID with a closed Component/
-// ComponentKind value type; the OpenCode target's small fixed set uses a bare
-// ComponentID string; the Codex target's open per-package map uses a
-// struct-wrapped CodexComponentID. Each shape is as strong as its own component
-// model needs — the variance is profile-driven, not an oversight.
 type TargetDescriptor struct {
 	harness  ir.HarnessID
 	contract ir.RuntimeContractID
@@ -41,10 +25,10 @@ type TargetDescriptor struct {
 
 // NewTargetDescriptor validates and constructs a Claude Code target descriptor.
 // It requires exactly one skills, one agents, and one hooks component, each with
-// the matching kind, and a valid RuntimeContractID bound to the Claude Code
-// harness. There is no mutable component map: the three slots are the only shape
-// a descriptor can take, so an invalid missing/duplicate/wrong-kind combination
-// cannot be constructed.
+// the matching canonical extension, and a valid RuntimeContractID bound to the
+// Claude Code harness. There is no mutable component map: the three slots are
+// the only shape a descriptor can take, so an invalid missing, duplicate, or
+// wrong-extension combination cannot be constructed.
 func NewTargetDescriptor(contract ir.RuntimeContractID, skills, agents, hooks Component) (TargetDescriptor, error) {
 	if !contract.IsValid() {
 		return TargetDescriptor{}, fmt.Errorf(
@@ -61,13 +45,13 @@ func NewTargetDescriptor(contract ir.RuntimeContractID, skills, agents, hooks Co
 			contract, contract.Harness(), ir.HarnessClaudeCode,
 		)
 	}
-	if err := requireComponent("skills", skills, SkillsKind()); err != nil {
+	if err := requireComponent("skills", skills, artifact.ExtensionSkills); err != nil {
 		return TargetDescriptor{}, err
 	}
-	if err := requireComponent("agents", agents, AgentsKind()); err != nil {
+	if err := requireComponent("agents", agents, artifact.ExtensionAgents); err != nil {
 		return TargetDescriptor{}, err
 	}
-	if err := requireComponent("hooks", hooks, HooksKind()); err != nil {
+	if err := requireComponent("hooks", hooks, artifact.ExtensionHooks); err != nil {
 		return TargetDescriptor{}, err
 	}
 	return TargetDescriptor{
@@ -80,7 +64,7 @@ func NewTargetDescriptor(contract ir.RuntimeContractID, skills, agents, hooks Co
 	}, nil
 }
 
-func requireComponent(slot string, component Component, want ComponentKind) error {
+func requireComponent(slot string, component Component, want artifact.Extension) error {
 	if !component.IsValid() {
 		return fmt.Errorf(
 			"claudecode.NewTargetDescriptor: the %s component is zero or invalid — "+
@@ -89,12 +73,16 @@ func requireComponent(slot string, component Component, want ComponentKind) erro
 			slot, slot,
 		)
 	}
-	if component.Kind() != want {
+	wantID, err := artifact.NewComponentID(artifact.HarnessClaudeCode, want)
+	if err != nil {
+		return err
+	}
+	if component.ID() != wantID || component.Extension() != want {
 		return fmt.Errorf(
-			"claudecode.NewTargetDescriptor: the %s slot received a %q component, not %q — "+
-				"each descriptor slot holds exactly its own kind so activation cannot install the wrong tree; "+
+			"claudecode.NewTargetDescriptor: the %s slot received component %q, not canonical %q — "+
+				"each descriptor slot holds exactly its own extension so activation cannot install the wrong tree; "+
 				"pass the %s component in the %s slot",
-			slot, component.Kind(), want, slot, slot,
+			slot, component.ID(), wantID, slot, slot,
 		)
 	}
 	return nil
@@ -123,17 +111,17 @@ func Descriptor() (TargetDescriptor, error) {
 		return TargetDescriptor{}, fmt.Errorf("claudecode.Descriptor: build hooks bundle: %w", err)
 	}
 
-	skills, err := newNamedComponent(SkillsKind(), SkillsComponentID, skillsBundle, false)
+	skills, err := newNamedComponent(artifact.ExtensionSkills, skillsBundle, false)
 	if err != nil {
 		return TargetDescriptor{}, err
 	}
-	agents, err := newNamedComponent(AgentsKind(), AgentsComponentID, agentsBundle, false)
+	agents, err := newNamedComponent(artifact.ExtensionAgents, agentsBundle, false)
 	if err != nil {
 		return TargetDescriptor{}, err
 	}
 	// Hooks are published default-off: they run commands on session lifecycle
 	// events and enforce git discipline, so the user must opt in explicitly.
-	hooks, err := newNamedComponent(HooksKind(), HooksComponentID, hooksBundle, false)
+	hooks, err := newNamedComponent(artifact.ExtensionHooks, hooksBundle, false)
 	if err != nil {
 		return TargetDescriptor{}, err
 	}
@@ -141,14 +129,14 @@ func Descriptor() (TargetDescriptor, error) {
 	return NewTargetDescriptor(contract.ID(), skills, agents, hooks)
 }
 
-func newNamedComponent(kind ComponentKind, rawID string, bundle artifact.Bundle, defaultEnabled bool) (Component, error) {
-	id, err := NewComponentID(rawID)
+func newNamedComponent(extension artifact.Extension, bundle artifact.Bundle, defaultEnabled bool) (Component, error) {
+	id, err := artifact.NewComponentID(artifact.HarnessClaudeCode, extension)
 	if err != nil {
-		return Component{}, fmt.Errorf("claudecode.Descriptor: %s component identity: %w", kind, err)
+		return Component{}, fmt.Errorf("claudecode.Descriptor: %s component identity: %w", extension, err)
 	}
-	component, err := NewComponent(kind, id, bundle, defaultEnabled)
+	component, err := NewComponent(id, bundle, defaultEnabled)
 	if err != nil {
-		return Component{}, fmt.Errorf("claudecode.Descriptor: build %s component: %w", kind, err)
+		return Component{}, fmt.Errorf("claudecode.Descriptor: build %s component: %w", extension, err)
 	}
 	return component, nil
 }
@@ -175,22 +163,22 @@ func (d TargetDescriptor) Components() []Component {
 	return []Component{d.skills, d.agents, d.hooks}
 }
 
-// Component returns the published component for kind, or an actionable error for
-// a zero or unknown kind.
-func (d TargetDescriptor) Component(kind ComponentKind) (Component, error) {
-	switch kind {
-	case SkillsKind():
+// Component returns the published component for an extension, or an actionable
+// error for a zero or unknown extension.
+func (d TargetDescriptor) Component(extension artifact.Extension) (Component, error) {
+	switch extension {
+	case artifact.ExtensionSkills:
 		return d.skills, nil
-	case AgentsKind():
+	case artifact.ExtensionAgents:
 		return d.agents, nil
-	case HooksKind():
+	case artifact.ExtensionHooks:
 		return d.hooks, nil
 	default:
 		return Component{}, fmt.Errorf(
-			"claudecode.TargetDescriptor.Component: component kind %q is zero or unknown — "+
+			"claudecode.TargetDescriptor.Component: extension %q is zero or unknown — "+
 				"the descriptor publishes only skills, agents, and hooks; "+
-				"request one of those kinds",
-			kind,
+				"request one of those extensions",
+			extension,
 		)
 	}
 }

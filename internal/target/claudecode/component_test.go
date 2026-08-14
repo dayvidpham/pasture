@@ -10,51 +10,31 @@ import (
 	"github.com/dayvidpham/pasture/internal/target/claudecode"
 )
 
-func TestComponentKindParseAndValidity(t *testing.T) {
-	for _, name := range []string{"skills", "agents", "hooks"} {
-		kind, err := claudecode.ParseComponentKind(name)
-		require.NoError(t, err)
-		assert.True(t, kind.IsValid())
-		assert.Equal(t, name, kind.String())
-	}
-
-	_, err := claudecode.ParseComponentKind("plugins")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "skills")
-
-	var zero claudecode.ComponentKind
-	assert.False(t, zero.IsValid())
-}
-
-func TestComponentIDRejectsEmptyOrPadded(t *testing.T) {
-	_, err := claudecode.NewComponentID("")
-	require.Error(t, err)
-
-	_, err = claudecode.NewComponentID(" claude-code/skills ")
-	require.Error(t, err)
-
-	id, err := claudecode.NewComponentID("claude-code/skills")
-	require.NoError(t, err)
-	assert.True(t, id.IsValid())
-	assert.Equal(t, "claude-code/skills", id.String())
-}
-
-func TestNewComponentRejectsEmptyBundle(t *testing.T) {
-	id, err := claudecode.NewComponentID("claude-code/skills")
-	require.NoError(t, err)
-
-	// The zero Bundle has an empty manifest and must be rejected: a published
-	// component must carry real payload bytes.
-	_, err = claudecode.NewComponent(claudecode.SkillsKind(), id, artifact.Bundle{}, false)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "empty")
-}
-
-func TestNewComponentRejectsInvalidKind(t *testing.T) {
-	id, err := claudecode.NewComponentID("claude-code/skills")
-	require.NoError(t, err)
-
+func TestNewComponentUsesCanonicalIdentity(t *testing.T) {
+	t.Parallel()
 	bundle := buildTestBundle(t, map[string]string{"file.txt": "x"})
-	_, err = claudecode.NewComponent(claudecode.ComponentKind{}, id, bundle, false)
-	require.Error(t, err)
+	id, err := artifact.NewComponentID(artifact.HarnessClaudeCode, artifact.ExtensionSkills)
+	require.NoError(t, err)
+	component, err := claudecode.NewComponent(id, bundle, false)
+	require.NoError(t, err)
+	assert.Equal(t, id, component.ID())
+	assert.Equal(t, artifact.ExtensionSkills, component.Extension())
+}
+
+func TestNewComponentRejectsZeroCrossHarnessAndEmptyBundle(t *testing.T) {
+	t.Parallel()
+	bundle := buildTestBundle(t, map[string]string{"file.txt": "x"})
+	if component, err := claudecode.NewComponent(artifact.ComponentID{}, bundle, false); err == nil || component.IsValid() {
+		t.Fatal("zero ID accepted")
+	}
+	for _, harness := range []artifact.Harness{artifact.HarnessOpenCode, artifact.HarnessCodex} {
+		id, _ := artifact.NewComponentID(harness, artifact.ExtensionSkills)
+		if component, err := claudecode.NewComponent(id, bundle, false); err == nil || component.IsValid() {
+			t.Fatalf("cross-harness ID %s accepted", id)
+		}
+	}
+	id, _ := artifact.NewComponentID(artifact.HarnessClaudeCode, artifact.ExtensionSkills)
+	if component, err := claudecode.NewComponent(id, artifact.Bundle{}, false); err == nil || component.IsValid() {
+		t.Fatal("empty bundle accepted")
+	}
 }

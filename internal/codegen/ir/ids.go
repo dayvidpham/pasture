@@ -1,21 +1,22 @@
 package ir
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/dayvidpham/pasture/artifact"
 )
 
 // HarnessID identifies a native host family. Harness names are metadata; the
 // selected version-bounded RuntimeContractID determines actual compatibility.
-type HarnessID string
+type HarnessID = artifact.Harness
 
 const (
-	HarnessClaudeCode HarnessID = "claude-code"
-	HarnessOpenCode   HarnessID = "opencode"
-	HarnessCodex      HarnessID = "codex"
+	HarnessClaudeCode = artifact.HarnessClaudeCode
+	HarnessOpenCode   = artifact.HarnessOpenCode
+	HarnessCodex      = artifact.HarnessCodex
 )
 
 var canonicalHarnessIDs = [...]HarnessID{HarnessClaudeCode, HarnessOpenCode, HarnessCodex}
@@ -29,15 +30,6 @@ func EnabledHarnessIDs() []HarnessID {
 	return append([]HarnessID(nil), canonicalHarnessIDs[:]...)
 }
 
-func (h HarnessID) IsValid() bool {
-	switch h {
-	case HarnessClaudeCode, HarnessOpenCode, HarnessCodex:
-		return true
-	default:
-		return false
-	}
-}
-
 // RuntimeContractID identifies one reviewed, version-bounded runtime profile
 // bound to exactly one enabled harness. It is opaque and constructor-owned:
 // the only way to produce a non-zero value is NewRuntimeContractID (or a
@@ -45,133 +37,14 @@ func (h HarnessID) IsValid() bool {
 // value in hand always names a real, enabled harness — decision and target
 // code can compare Harness() directly instead of re-deriving it from string
 // prefixes.
-type RuntimeContractID struct {
-	harness HarnessID
-	value   string
-}
+type RuntimeContractID = artifact.RuntimeContractID
 
 // NewRuntimeContractID validates name and constructs a RuntimeContractID
 // bound to harness. name may already carry the "<harness>/" prefix (so
 // values round-tripped from String() can be re-supplied); a bare suffix is
 // prefixed automatically.
 func NewRuntimeContractID(harness HarnessID, name string) (RuntimeContractID, error) {
-	if !harness.IsValid() {
-		return RuntimeContractID{}, documentError(
-			fmt.Sprintf("runtime contract harness %q is unknown", harness),
-			"contracts bind one enabled harness", "use a known HarnessID", nil,
-		)
-	}
-	if !utf8.ValidString(name) {
-		return RuntimeContractID{}, documentError(
-			fmt.Sprintf("runtime contract name for harness %q is not valid UTF-8", harness),
-			"contract identities must survive exact JSON and target rendering",
-			"supply a valid UTF-8 name", nil,
-		)
-	}
-	if strings.TrimSpace(name) == "" || strings.TrimSpace(name) != name {
-		return RuntimeContractID{}, documentError(
-			fmt.Sprintf("runtime contract name for harness %q is empty or padded", harness),
-			"contract identities require one exact spelling",
-			"supply a non-empty name without surrounding whitespace", nil,
-		)
-	}
-	for _, r := range name {
-		if unicode.IsControl(r) || unicode.IsSpace(r) {
-			return RuntimeContractID{}, documentError(
-				fmt.Sprintf("runtime contract name for harness %q contains whitespace or control character U+%04X", harness, r),
-				"whitespace and control characters are unsafe in portable identities and make two spellings compare unequal in confusing ways",
-				"remove whitespace and control characters", nil,
-			)
-		}
-	}
-	prefix := string(harness) + "/"
-	canonical := name
-	if !strings.HasPrefix(canonical, prefix) {
-		canonical = prefix + canonical
-	}
-	return parseRuntimeContractID(canonical)
-}
-
-// parseRuntimeContractID is the single parser and validator shared by
-// NewRuntimeContractID and RuntimeContractID's JSON decoder: constructing and
-// parsing a contract go through exactly one set of invariants, so a value
-// NewRuntimeContractID accepts can never be a value its own decoder rejects.
-func parseRuntimeContractID(value string) (RuntimeContractID, error) {
-	if !utf8.ValidString(value) {
-		return RuntimeContractID{}, documentError(
-			"runtime contract is not valid UTF-8",
-			"contract identities must survive exact JSON and target rendering",
-			"supply a valid UTF-8 contract", nil,
-		)
-	}
-	if strings.TrimSpace(value) == "" || strings.TrimSpace(value) != value {
-		return RuntimeContractID{}, documentError(
-			"runtime contract is empty or padded",
-			"contract identities require one exact spelling",
-			"supply a non-empty contract without surrounding whitespace", nil,
-		)
-	}
-	for _, r := range value {
-		if unicode.IsControl(r) || unicode.IsSpace(r) {
-			return RuntimeContractID{}, documentError(
-				fmt.Sprintf("runtime contract %q contains whitespace or control character U+%04X", value, r),
-				"whitespace and control characters are unsafe in portable identities and make two spellings compare unequal in confusing ways",
-				"remove whitespace and control characters", nil,
-			)
-		}
-	}
-	for _, harness := range canonicalHarnessIDs {
-		prefix := string(harness) + "/"
-		if !strings.HasPrefix(value, prefix) {
-			continue
-		}
-		suffix := strings.TrimPrefix(value, prefix)
-		if suffix == "" {
-			return RuntimeContractID{}, documentError(
-				fmt.Sprintf("runtime contract %q has an empty suffix after harness %q", value, harness),
-				"a contract must name one specific version-bound profile, not just its harness",
-				"supply a non-empty suffix after the harness prefix", nil,
-			)
-		}
-		return RuntimeContractID{harness: harness, value: value}, nil
-	}
-	return RuntimeContractID{}, documentError(
-		fmt.Sprintf("runtime contract %q has no enabled harness prefix", value),
-		"literal and target selection must be exhaustive by harness",
-		"construct the contract with NewRuntimeContractID for an enabled harness", nil,
-	)
-}
-
-// Harness returns the exact enabled harness this contract is bound to. It is
-// always derived at construction, never re-parsed from an unrelated caller
-// value, so it cannot disagree with the contract's own String().
-func (c RuntimeContractID) Harness() HarnessID { return c.harness }
-
-func (c RuntimeContractID) String() string { return c.value }
-
-func (c RuntimeContractID) IsValid() bool {
-	_, err := parseRuntimeContractID(c.value)
-	return err == nil && c.harness.IsValid() && strings.HasPrefix(c.value, string(c.harness)+"/")
-}
-
-func (c RuntimeContractID) MarshalJSON() ([]byte, error) {
-	if !c.IsValid() {
-		return nil, documentError("runtime contract is zero or invalid", "only a constructor-produced contract has stable wire identity", "construct it with NewRuntimeContractID", nil)
-	}
-	return json.Marshal(c.value)
-}
-
-func (c *RuntimeContractID) UnmarshalJSON(data []byte) error {
-	var value string
-	if err := json.Unmarshal(data, &value); err != nil {
-		return documentError("runtime contract JSON is not a string", "a contract uses one exact JSON string", "encode the contract as one JSON string", err)
-	}
-	parsed, err := parseRuntimeContractID(value)
-	if err != nil {
-		return err
-	}
-	*c = parsed
-	return nil
+	return artifact.NewRuntimeContractID(harness, name)
 }
 
 // DecisionPurpose identifies why a user interaction is required.

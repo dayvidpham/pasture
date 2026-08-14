@@ -135,12 +135,10 @@ func codexNativeFunctions() []string {
 // package. It is a typed value, not a bare string, so a package identity can
 // never be confused with an arbitrary label.
 //
-// Component identity is spelled per target profile, not uniformly: this target's
-// open per-package map uses this struct-wrapped identity; the Claude Code
-// target's fixed three-slot descriptor pairs a string ComponentID with a closed
-// Component/ComponentKind value type; the OpenCode target's small fixed set uses
-// a bare ComponentID string. Each shape is as strong as its own component model
-// needs — the variance is profile-driven, not an oversight.
+// artifact.ComponentID and artifact.Extension are the canonical install
+// coordinate across harnesses. This struct-wrapped value is target-local Codex
+// package metadata within that coordinate; it is not a second install identity
+// authority.
 type CodexComponentID struct{ value string }
 
 // String returns the component identity spelling.
@@ -192,6 +190,7 @@ func (p CodexPackage) Bundle() artifact.Bundle { return p.bundle }
 // install-state contract.
 type CodexTargetDescriptor struct {
 	contract ir.RuntimeContractID
+	install  []artifact.ComponentID
 	packages []CodexPackage
 	manifest artifact.Bundle
 }
@@ -202,6 +201,12 @@ func (d CodexTargetDescriptor) Harness() ir.HarnessID { return ir.HarnessCodex }
 // RuntimeContractID returns the pinned Codex runtime contract identity the
 // packages were generated against.
 func (d CodexTargetDescriptor) RuntimeContractID() ir.RuntimeContractID { return d.contract }
+
+// InstallationComponents returns the shared installer coordinates. Codex
+// package IDs remain marketplace metadata and are not installation identities.
+func (d CodexTargetDescriptor) InstallationComponents() []artifact.ComponentID {
+	return append([]artifact.ComponentID(nil), d.install...)
+}
 
 // ManifestBundle returns the immutable target-level manifest bundle (the
 // `.codex/codex.toml` plugin manifest that declares the three packages). It is
@@ -314,9 +319,21 @@ func NewCodexTargetDescriptor(root string, files []GeneratedFile) (CodexTargetDe
 
 	return CodexTargetDescriptor{
 		contract: CodexRuntimeContractID(),
+		install:  installationCoordinates(artifact.HarnessCodex),
 		packages: packages,
 		manifest: manifestBundle,
 	}, nil
+}
+
+func installationCoordinates(harness artifact.Harness) []artifact.ComponentID {
+	all := artifact.ComponentIDs()
+	result := make([]artifact.ComponentID, 0, 3)
+	for _, id := range all {
+		if id.Harness() == harness {
+			result = append(result, id)
+		}
+	}
+	return result
 }
 
 // codexTargetManifestPath is the single target-level manifest file the Codex
