@@ -46,7 +46,14 @@ const (
 type GitHubSource struct {
 	client      HTTPDoer
 	releasesURL *url.URL
+	repository  repositoryIdentity
 	limits      GitHubLimits
+}
+
+type repositoryIdentity struct{ owner, name string }
+type assetIdentity struct {
+	repository repositoryIdentity
+	tag, name  string
 }
 
 func NewGitHubSource(client HTTPDoer, releasesURL string, maxCatalogBytes int64) (*GitHubSource, error) {
@@ -75,6 +82,8 @@ func NewGitHubSourceWithLimits(client HTTPDoer, releasesURL string, limits GitHu
 		return nil, invalid("GitHub source construction", "limits", "page, candidate, and byte limits must all be positive", "catalog discovery cannot be bounded", "provide positive GitHubLimits or zero-valued defaults", fs.ErrInvalid)
 	}
 	base := *u
+	parts := strings.Split(base.Path, "/")
+	repository := repositoryIdentity{owner: parts[2], name: parts[3]}
 	query := base.Query()
 	query.Set("per_page", strconv.Itoa(githubPageSize))
 	base.RawQuery = query.Encode()
@@ -83,7 +92,7 @@ func NewGitHubSourceWithLimits(client HTTPDoer, releasesURL string, limits GitHu
 		clone.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 		client = &clone
 	}
-	return &GitHubSource{client: client, releasesURL: &base, limits: limits}, nil
+	return &GitHubSource{client: client, releasesURL: &base, repository: repository, limits: limits}, nil
 }
 
 type githubRelease struct {
@@ -99,10 +108,11 @@ type githubAsset struct {
 	State string `json:"state"`
 }
 
-func (g *GitHubSource) ListReleases(ctx context.Context) ([]Release, error) {
+func (g *GitHubSource) listReleases(ctx context.Context) ([]release, error) {
 	next := cloneURL(g.releasesURL)
 	visited := map[string]bool{}
-	releases := make([]Release, 0)
+	releases := make([]release, 0)
+	defects := make([]string, 0, 8)
 	var totalBytes int64
 	totalCandidates := 0
 	for page := 1; next != nil; page++ {
@@ -117,7 +127,7 @@ func (g *GitHubSource) ListReleases(ctx context.Context) ([]Release, error) {
 			return nil, invalid("GitHub pagination", canonical, "the next link forms a cycle", "catalog completeness cannot be established", "repair the GitHub Link chain", fs.ErrInvalid)
 		}
 		visited[canonical] = true
-		response, err := g.get(ctx, next, purposeCatalog)
+		response, err := g.get(ctx, next, purposeCatalog, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -147,9 +157,12 @@ func (g *GitHubSource) ListReleases(ctx context.Context) ([]Release, error) {
 		}
 		totalCandidates += len(wire)
 		for index, item := range wire {
-			release, ok, decodeErr := decodeRelease(item, fmt.Sprintf("%s#release[%d]", canonical, index))
+			release, ok, decodeErr := g.decodeRelease(item, fmt.Sprintf("%s#release[%d]", canonical, index))
 			if decodeErr != nil {
-				return nil, decodeErr
+				if len(defects) < cap(defects) {
+					defects = append(defects, decodeErr.Error())
+				}
+				continue
 			}
 			if ok {
 				releases = append(releases, release)
@@ -162,6 +175,9 @@ func (g *GitHubSource) ListReleases(ctx context.Context) ([]Release, error) {
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, invalid("GitHub release listing", g.releasesURL.String(), fmt.Sprintf("context ended after catalog discovery: %v", err), "no complete release list is returned", "retry with a live context", err)
+	}
+	if len(releases) == 0 && len(defects) > 0 {
+		return nil, invalid("GitHub release decoding", "catalog", strings.Join(defects, " | "), "no trusted release metadata is available", "repair malformed release assets", errCandidateMetadata)
 	}
 	return releases, nil
 }
@@ -179,23 +195,27 @@ func decodeReleasePage(body []byte, location string) ([]githubRelease, error) {
 	return wire, nil
 }
 
-func decodeRelease(item githubRelease, location string) (Release, bool, error) {
+func (g *GitHubSource) decodeRelease(item githubRelease, location string) (release, bool, error) {
 	if item.Draft || !strings.HasPrefix(item.TagName, "v") || strings.Contains(item.TagName, "pasture-stable") {
-		return Release{}, false, nil
+		return release{}, false, nil
 	}
 	version, err := artifact.ParseVersion(strings.TrimPrefix(item.TagName, "v"))
 	if err != nil {
-		return Release{}, false, nil
+		return release{}, false, nil
 	}
-	assets := make(map[string]Asset, len(item.Assets))
+	if item.TagName != "v"+version.String() {
+		return release{}, false, invalid("GitHub release decoding", location, "release tag is not exact canonical v<version>", "asset identity cannot be bound to one version", "publish the exact canonical semantic-version tag", fs.ErrInvalid)
+	}
+	assets := make(map[string]asset, len(item.Assets))
 	for _, raw := range item.Assets {
 		parsed, e := url.Parse(raw.URL)
-		if raw.Name == "" || strings.Contains(raw.Name, "/") || strings.Contains(raw.Name, "pasture-stable") || raw.Size < 0 || raw.State != "uploaded" || e != nil || !validAssetURL(parsed) || assets[raw.Name].name != "" {
-			return Release{}, false, invalid("GitHub release decoding", location, fmt.Sprintf("asset %q has malformed name, URL, size, state, or duplicate identity", raw.Name), "the release cannot become a trusted candidate", "publish unique uploaded assets with canonical names, nonnegative sizes, and approved release-download URLs", fs.ErrInvalid)
+		identity := assetIdentity{repository: g.repository, tag: item.TagName, name: raw.Name}
+		if raw.Name == "" || strings.Contains(raw.Name, "/") || strings.Contains(raw.Name, "pasture-stable") || raw.Size < 0 || raw.State != "uploaded" || e != nil || !validInitialAssetURL(parsed, identity) || assets[raw.Name].name != "" {
+			return release{}, false, invalid("GitHub release decoding", location, fmt.Sprintf("asset %q has malformed or nonmatching repository/tag/name URL identity", raw.Name), "the release cannot become a trusted candidate", "publish unique uploaded assets at the exact configured repository v<version> download path", fs.ErrInvalid)
 		}
-		assets[raw.Name] = Asset{name: raw.Name, downloadURL: raw.URL, size: raw.Size}
+		assets[raw.Name] = asset{name: raw.Name, downloadURL: raw.URL, size: raw.Size, identity: identity}
 	}
-	return Release{version: version, prerelease: item.Prerelease, assets: assets}, true, nil
+	return release{version: version, prerelease: item.Prerelease, assets: assets}, true, nil
 }
 
 func parseNextLink(header string, base *url.URL) (*url.URL, error) {
@@ -233,20 +253,20 @@ func parseNextLink(header string, base *url.URL) (*url.URL, error) {
 	return next, nil
 }
 
-func (g *GitHubSource) OpenURL(ctx context.Context, assetURL string) (io.ReadCloser, error) {
-	u, err := url.Parse(assetURL)
-	if err != nil || !validAssetURL(u) {
-		return nil, invalid("GitHub asset request", assetURL, "asset URL is outside approved HTTPS GitHub asset hosts", "component bytes are untrusted", "use an approved immutable GitHub asset URL", fs.ErrPermission)
+func (g *GitHubSource) openAsset(ctx context.Context, item asset) (io.ReadCloser, error) {
+	u, err := url.Parse(item.downloadURL)
+	if err != nil || !validInitialAssetURL(u, item.identity) {
+		return nil, invalid("GitHub asset request", item.name, "initial asset URL does not match configured repository, exact tag, and basename", "component bytes are untrusted", "use the exact browser download URL from the selected release", fs.ErrPermission)
 	}
-	response, err := g.get(ctx, u, purposeAsset)
+	response, err := g.get(ctx, u, purposeAsset, &item.identity)
 	if err != nil {
 		return nil, err
 	}
 	return response.Body, nil
 }
 
-func (g *GitHubSource) get(ctx context.Context, endpoint *url.URL, purpose requestPurpose) (*http.Response, error) {
-	if !validPurposeURL(endpoint, purpose, g.releasesURL) {
+func (g *GitHubSource) get(ctx context.Context, endpoint *url.URL, purpose requestPurpose, expected *assetIdentity) (*http.Response, error) {
+	if purpose == purposeCatalog && !validCatalogURL(endpoint, g.releasesURL) || purpose == purposeAsset && (expected == nil || !validInitialAssetURL(endpoint, *expected)) {
 		return nil, invalid("GitHub request", endpoint.String(), "URL does not match its typed request purpose", "release data is untrusted", "use the catalog API or approved asset host for the matching operation", fs.ErrPermission)
 	}
 	current := cloneURL(endpoint)
@@ -258,6 +278,9 @@ func (g *GitHubSource) get(ctx context.Context, endpoint *url.URL, purpose reque
 		req.Header.Set("Accept", map[requestPurpose]string{purposeCatalog: "application/vnd.github+json", purposeAsset: "application/octet-stream"}[purpose])
 		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 		response, err := g.client.Do(req)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, invalid("GitHub request", current.String(), fmt.Sprintf("context ended during GET: %v", ctxErr), "release data is incomplete", "retry with a live context", ctxErr)
+		}
 		if err != nil {
 			return nil, invalid("GitHub request", current.String(), fmt.Sprintf("GET failed: %v", err), "release data cannot be loaded", "repair connectivity and retry", err)
 		}
@@ -269,7 +292,7 @@ func (g *GitHubSource) get(ctx context.Context, endpoint *url.URL, purpose reque
 			return nil, invalid("GitHub response", current.String(), "transport omitted the final request URL", "redirect trust cannot be validated", "return the exact final request URL from HTTPDoer", fs.ErrPermission)
 		}
 		final := response.Request.URL
-		if !validPurposeURL(final, purpose, g.releasesURL) {
+		if !validResponseURL(final, purpose, g.releasesURL, expected) {
 			response.Body.Close()
 			return nil, invalid("GitHub redirect", final.String(), "final redirect destination violates the typed request trust boundary", "release data is untrusted", "keep catalog redirects on api.github.com and assets on approved GitHub asset hosts", fs.ErrPermission)
 		}
@@ -277,7 +300,7 @@ func (g *GitHubSource) get(ctx context.Context, endpoint *url.URL, purpose reque
 			location := response.Header.Get("Location")
 			response.Body.Close()
 			next, err := current.Parse(location)
-			if err != nil || !validPurposeURL(next, purpose, g.releasesURL) {
+			if err != nil || !validResponseURL(next, purpose, g.releasesURL, expected) {
 				return nil, invalid("GitHub redirect", location, "redirect target violates the typed request trust boundary", "release data is untrusted", "keep every redirect within the approved purpose host/path", fs.ErrPermission)
 			}
 			current = next
@@ -292,11 +315,11 @@ func (g *GitHubSource) get(ctx context.Context, endpoint *url.URL, purpose reque
 	return nil, invalid("GitHub redirect", endpoint.String(), "redirect limit exceeded", "release data could not be obtained safely", "reduce redirects to at most five", fs.ErrInvalid)
 }
 
-func validPurposeURL(u *url.URL, p requestPurpose, base *url.URL) bool {
+func validResponseURL(u *url.URL, p requestPurpose, base *url.URL, expected *assetIdentity) bool {
 	if p == purposeCatalog {
 		return validCatalogURL(u, base)
 	}
-	return validAssetURL(u)
+	return expected != nil && (validInitialAssetURL(u, *expected) || validCDNAssetURL(u))
 }
 func validCatalogURL(u, base *url.URL) bool {
 	if u == nil || u.Scheme != "https" || u.Host != "api.github.com" || u.User != nil || u.Fragment != "" {
@@ -325,19 +348,21 @@ func validCatalogURL(u, base *url.URL) bool {
 	}
 	return true
 }
-func validAssetURL(u *url.URL) bool {
-	if u == nil || u.Scheme != "https" || u.User != nil || u.Fragment != "" || u.Path == "" {
+func validInitialAssetURL(u *url.URL, expected assetIdentity) bool {
+	if u == nil || u.Scheme != "https" || u.Host != "github.com" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" {
 		return false
 	}
-	switch u.Host {
-	case "github.com":
-		parts := strings.Split(u.EscapedPath(), "/")
-		return len(parts) == 7 && parts[1] != "" && parts[2] != "" && parts[3] == "releases" && parts[4] == "download" && parts[5] != "" && parts[6] != ""
-	case "release-assets.githubusercontent.com", "objects.githubusercontent.com":
-		return true
-	default:
+	parts := strings.Split(u.Path, "/")
+	return len(parts) == 7 && parts[1] == expected.repository.owner && parts[2] == expected.repository.name && parts[3] == "releases" && parts[4] == "download" && parts[5] == expected.tag && parts[6] == expected.name && expected.tag != "latest" && !strings.Contains(expected.tag, "stable")
+}
+func validCDNAssetURL(u *url.URL) bool {
+	if u == nil || u.Scheme != "https" || u.User != nil || u.Fragment != "" || u.RawPath != "" {
 		return false
 	}
+	if u.Host != "release-assets.githubusercontent.com" && u.Host != "objects.githubusercontent.com" {
+		return false
+	}
+	return strings.HasPrefix(u.Path, "/github-production-release-asset/") && len(strings.Split(strings.TrimPrefix(u.Path, "/"), "/")) >= 3
 }
 func cloneURL(u *url.URL) *url.URL {
 	if u == nil {

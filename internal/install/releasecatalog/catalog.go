@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"net/url"
 	"sort"
 	"strings"
 
@@ -28,55 +27,24 @@ const (
 	IncludePrereleases
 )
 
-// Asset is one validated immutable GitHub Release asset boundary.
-type Asset struct {
+type asset struct {
 	name, downloadURL string
 	size              int64
+	identity          assetIdentity
 }
 
-func (a Asset) Name() string        { return a.name }
-func (a Asset) DownloadURL() string { return a.downloadURL }
-func (a Asset) Size() int64         { return a.size }
-
-// NewAsset validates an immutable alternate-source DTO through the production asset trust rules.
-func NewAsset(name, downloadURL string, size int64) (Asset, error) {
-	u, err := url.Parse(downloadURL)
-	if err != nil || name == "" || strings.Contains(name, "/") || strings.Contains(name, "pasture-stable") || size < 0 || !validAssetURL(u) {
-		return Asset{}, invalid("asset construction", name, "asset metadata is malformed or outside approved GitHub hosts", "alternate source cannot supply trusted bytes", "use a unique non-alias name, nonnegative size, and approved HTTPS GitHub URL", fs.ErrInvalid)
-	}
-	return Asset{name: name, downloadURL: downloadURL, size: size}, nil
-}
-
-// Release is one validated, non-draft GitHub Release.
-type Release struct {
+type release struct {
 	version    artifact.Version
 	prerelease bool
-	assets     map[string]Asset
+	assets     map[string]asset
 }
 
-func (r Release) Version() artifact.Version { return r.version }
-func (r Release) Prerelease() bool          { return r.prerelease }
-
-// NewRelease validates a constructible immutable alternate-source release DTO.
-func NewRelease(version artifact.Version, prerelease bool, assets []Asset) (Release, error) {
-	if version.String() == "" || version.IsPrerelease() != prerelease {
-		return Release{}, invalid("release construction", "version", "version and prerelease flag disagree or are zero", "release channel is ambiguous", "construct Version with ParseVersion and match its prerelease state", fs.ErrInvalid)
-	}
-	owned := map[string]Asset{}
-	for _, asset := range assets {
-		if asset.name == "" || owned[asset.name].name != "" {
-			return Release{}, invalid("release construction", "assets", "asset is invalid or duplicated", "release inventory is ambiguous", "construct unique assets with NewAsset", fs.ErrInvalid)
-		}
-		owned[asset.name] = asset
-	}
-	return Release{version: version, prerelease: prerelease, assets: owned}, nil
+type catalogSource interface {
+	listReleases(context.Context) ([]release, error)
+	openAsset(context.Context, asset) (io.ReadCloser, error)
 }
 
-// Source injects the GitHub catalog and asset network boundary.
-type Source interface {
-	ListReleases(context.Context) ([]Release, error)
-	OpenURL(context.Context, string) (io.ReadCloser, error)
-}
+type aggregateVerifier func(context.Context, artifact.AggregateAssetSource, artifact.AggregateRequirements) (artifact.VerifiedAggregate, error)
 
 // Catalog owns compatible candidate discovery and exact immutable verification.
 type DiscoveryLimits struct {
@@ -84,14 +52,15 @@ type DiscoveryLimits struct {
 	MaxBytes      int64
 }
 type Catalog struct {
-	source    Source
+	source    catalogSource
 	discovery DiscoveryLimits
+	verify    aggregateVerifier
 }
 
 // Candidate is one compatible checksum-verified manifest choice bound to its catalog.
 type Candidate struct {
 	catalog        *Catalog
-	release        Release
+	release        release
 	manifest       artifact.AggregateManifest
 	manifestDigest artifact.Digest
 	installer      artifact.Version
@@ -105,12 +74,16 @@ func (c Candidate) PastureRevision() artifact.Revision { return c.manifest.Pastu
 func (c Candidate) AuraRevision() artifact.Revision    { return c.manifest.AuraRevision() }
 func (c Candidate) ManifestDigest() artifact.Digest    { return c.manifestDigest }
 
-func New(source Source) (*Catalog, error) {
+func New(source *GitHubSource) (*Catalog, error) {
 	return NewWithDiscoveryLimits(source, DiscoveryLimits{})
 }
 
 // NewWithDiscoveryLimits configures bounded manifest discovery for listing and exact selection.
-func NewWithDiscoveryLimits(source Source, limits DiscoveryLimits) (*Catalog, error) {
+func NewWithDiscoveryLimits(source *GitHubSource, limits DiscoveryLimits) (*Catalog, error) {
+	return newCatalog(source, limits, artifact.VerifyAggregate)
+}
+
+func newCatalog(source catalogSource, limits DiscoveryLimits, verifier aggregateVerifier) (*Catalog, error) {
 	if source == nil {
 		return nil, invalid("catalog construction", "source", "the GitHub release source is nil", "no release can be selected or verified", "inject a configured GitHub source", fs.ErrInvalid)
 	}
@@ -123,7 +96,10 @@ func NewWithDiscoveryLimits(source Source, limits DiscoveryLimits) (*Catalog, er
 	if limits.MaxCandidates < 1 || limits.MaxBytes < 1 {
 		return nil, invalid("catalog construction", "discovery limits", "candidate and byte limits must be positive", "candidate discovery cannot be bounded", "use zero defaults or positive reviewed limits", fs.ErrInvalid)
 	}
-	return &Catalog{source: source, discovery: limits}, nil
+	if verifier == nil {
+		return nil, invalid("catalog construction", "verifier", "aggregate verifier is nil", "exact resolution cannot establish immutable output", "use the production constructor", fs.ErrInvalid)
+	}
+	return &Catalog{source: source, discovery: limits, verify: verifier}, nil
 }
 
 // ListCompatible returns typed checksum-verified choices in descending SemVer order.
@@ -131,7 +107,7 @@ func (c *Catalog) ListCompatible(ctx context.Context, installer artifact.Version
 	if policy != FinalsOnly && policy != IncludePrereleases {
 		return nil, invalid("candidate listing", "policy", "unsupported prerelease policy", "candidate channel cannot be filtered", "use FinalsOnly or IncludePrereleases", fs.ErrInvalid)
 	}
-	releases, err := c.source.ListReleases(ctx)
+	releases, err := c.source.listReleases(ctx)
 	if err != nil {
 		return nil, invalid("release listing", "GitHub Releases", fmt.Sprintf("catalog could not be loaded: %v", err), "no candidates are available", "repair GitHub access and retry", err)
 	}
@@ -152,7 +128,13 @@ func (c *Catalog) ListCompatible(ctx context.Context, installer artifact.Version
 			return nil, invalid("candidate listing", "candidate limit", fmt.Sprintf("manifest discovery limit %d exhausted", c.discovery.MaxCandidates), "candidate listing is explicitly incomplete", "construct the Catalog with a larger reviewed DiscoveryLimits value", fs.ErrInvalid)
 		}
 		manifestCost, ok := release.manifestAssetBytes()
-		if !ok || manifestCost > c.discovery.MaxBytes-discoveryBytes {
+		if !ok {
+			if len(defects) < cap(defects) {
+				defects = append(defects, fmt.Sprintf("%s is missing manifest or checksum metadata", release.version))
+			}
+			continue
+		}
+		if manifestCost > c.discovery.MaxBytes-discoveryBytes {
 			return nil, invalid("candidate listing", "byte limit", fmt.Sprintf("manifest discovery byte limit %d exhausted", c.discovery.MaxBytes), "candidate listing is explicitly incomplete", "construct the Catalog with a larger reviewed DiscoveryLimits value", fs.ErrInvalid)
 		}
 		discoveryBytes += manifestCost
@@ -203,7 +185,7 @@ func (c *Catalog) ListCompatible(ctx context.Context, installer artifact.Version
 	return result, nil
 }
 
-func (r Release) manifestAssetBytes() (int64, bool) {
+func (r release) manifestAssetBytes() (int64, bool) {
 	manifest, ok := r.assets[artifact.AggregateManifestAsset]
 	if !ok {
 		return 0, false
@@ -224,7 +206,7 @@ func (c *Catalog) ResolveCandidate(ctx context.Context, candidate Candidate, max
 		return artifact.VerifiedAggregate{}, invalid("candidate resolution", "candidate", "candidate is zero or belongs to another catalog", "exact selection cannot be trusted", "select a value returned by this Catalog.ListCompatible", fs.ErrInvalid)
 	}
 	source := releaseAssetSource{source: c.source, assets: candidate.release.assets}
-	verified, err := artifact.VerifyAggregate(ctx, source, artifact.AggregateRequirements{Version: candidate.Version(), Installer: candidate.installer, PastureRevision: candidate.PastureRevision(), AuraRevision: candidate.AuraRevision(), MaxAssetBytes: maxAssetBytes, ExpectedManifestDigest: candidate.manifestDigest})
+	verified, err := c.verify(ctx, source, artifact.AggregateRequirements{Version: candidate.Version(), Installer: candidate.installer, PastureRevision: candidate.PastureRevision(), AuraRevision: candidate.AuraRevision(), MaxAssetBytes: maxAssetBytes, ExpectedManifestDigest: candidate.manifestDigest})
 	if err != nil {
 		return artifact.VerifiedAggregate{}, err
 	}
@@ -236,6 +218,9 @@ func (c *Catalog) ResolveCandidate(ctx context.Context, candidate Candidate, max
 
 func readCatalogAsset(ctx context.Context, source releaseAssetSource, name string, limit int64) ([]byte, error) {
 	reader, err := source.OpenAsset(ctx, name)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, invalid("candidate manifest open", name, fmt.Sprintf("operation canceled while opening candidate metadata: %v", ctxErr), "candidate discovery is incomplete", "retry with a live context", ctxErr)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -257,8 +242,8 @@ func readCatalogAsset(ctx context.Context, source releaseAssetSource, name strin
 }
 
 type releaseAssetSource struct {
-	source Source
-	assets map[string]Asset
+	source catalogSource
+	assets map[string]asset
 }
 
 func (s releaseAssetSource) OpenAsset(ctx context.Context, name string) (io.ReadCloser, error) {
@@ -266,7 +251,7 @@ func (s releaseAssetSource) OpenAsset(ctx context.Context, name string) (io.Read
 	if !ok {
 		return nil, invalid("candidate metadata validation", name, fmt.Sprintf("release asset %q is missing", name), "the candidate is incomplete", "publish the required immutable asset", errCandidateMetadata)
 	}
-	reader, err := s.source.OpenURL(ctx, asset.downloadURL)
+	reader, err := s.source.openAsset(ctx, asset)
 	if err != nil {
 		return nil, err
 	}

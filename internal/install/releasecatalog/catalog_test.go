@@ -17,7 +17,7 @@ import (
 )
 
 type fixtureSource struct {
-	releases  []Release
+	releases  []release
 	data      map[string][]byte
 	listErr   error
 	openErr   error
@@ -27,17 +27,18 @@ type fixtureSource struct {
 	cancel    context.CancelFunc
 }
 
-func (s *fixtureSource) ListReleases(context.Context) ([]Release, error) {
+func (s *fixtureSource) listReleases(context.Context) ([]release, error) {
 	if s.listErr != nil {
 		return nil, s.listErr
 	}
-	return append([]Release(nil), s.releases...), nil
+	return append([]release(nil), s.releases...), nil
 }
 
-func (s *fixtureSource) OpenURL(_ context.Context, name string) (io.ReadCloser, error) {
+func (s *fixtureSource) openAsset(_ context.Context, item asset) (io.ReadCloser, error) {
 	if s.openErr != nil {
 		return nil, s.openErr
 	}
+	name := item.downloadURL
 	content, ok := s.data[name]
 	if !ok {
 		return nil, os.ErrNotExist
@@ -80,8 +81,8 @@ func TestListCompatiblePolicyAndExactNonNewestResolution(t *testing.T) {
 	latest := mustVersion(t, "1.2.0")
 	old := mustVersion(t, "1.1.0")
 	rc := mustVersion(t, "1.3.0-rc.1")
-	source.releases = []Release{makeRelease(t, source, latest, false, "final/"), makeRelease(t, source, old, false, "old/"), makeRelease(t, source, rc, true, "rc/")}
-	catalog, _ := New(source)
+	source.releases = []release{makeRelease(t, source, latest, false, "final/"), makeRelease(t, source, old, false, "old/"), makeRelease(t, source, rc, true, "rc/")}
+	catalog, _ := newCatalog(source, DiscoveryLimits{}, artifact.VerifyAggregate)
 
 	finals, err := catalog.ListCompatible(context.Background(), installerVersion(t), FinalsOnly)
 	if err != nil || len(finals) != 2 || finals[0].Version() != latest || finals[1].Version() != old {
@@ -100,6 +101,26 @@ func TestListCompatiblePolicyAndExactNonNewestResolution(t *testing.T) {
 		if candidate.Version() == missing {
 			t.Fatal("an absent exact version fell back")
 		}
+	}
+}
+
+func TestMalformedNewestDoesNotHideValidOlderCandidate(t *testing.T) {
+	t.Parallel()
+	source := loadFixtureSource(t)
+	for key, value := range source.data {
+		if strings.HasPrefix(key, "final/") {
+			source.data["old/"+strings.TrimPrefix(key, "final/")] = append([]byte(nil), value...)
+		}
+	}
+	replaceManifestPrefix(source.data, "old/", "1.2.0", "1.1.0", "final", "final")
+	newest := makeRelease(t, source, mustVersion(t, "1.2.0"), false, "final/")
+	delete(newest.assets, artifact.AggregateManifestAsset)
+	older := makeRelease(t, source, mustVersion(t, "1.1.0"), false, "old/")
+	source.releases = []release{newest, older}
+	catalog, _ := newCatalog(source, DiscoveryLimits{}, artifact.VerifyAggregate)
+	candidates, err := catalog.ListCompatible(context.Background(), installerVersion(t), FinalsOnly)
+	if err != nil || len(candidates) != 1 || candidates[0].Version() != older.version {
+		t.Fatalf("candidates=%v err=%v", candidates, err)
 	}
 }
 
@@ -123,8 +144,8 @@ func TestExactCandidateTamperAndVerificationFaultsReturnNoVerifiedOutput(t *test
 			t.Parallel()
 			source := loadFixtureSource(t)
 			version := mustVersion(t, "1.2.0")
-			source.releases = []Release{makeRelease(t, source, version, false, "final/")}
-			catalog, _ := New(source)
+			source.releases = []release{makeRelease(t, source, version, false, "final/")}
+			catalog, _ := newCatalog(source, DiscoveryLimits{}, artifact.VerifyAggregate)
 			candidates, err := catalog.ListCompatible(context.Background(), installerVersion(t), FinalsOnly)
 			if err != nil || len(candidates) != 1 {
 				t.Fatalf("candidates=%d err=%v", len(candidates), err)
@@ -152,9 +173,9 @@ func TestDiscoveryPreservesOperationalErrorsAndCancellation(t *testing.T) {
 	for _, test := range causes {
 		t.Run(test.name, func(t *testing.T) {
 			source := loadFixtureSource(t)
-			source.releases = []Release{makeRelease(t, source, mustVersion(t, "1.2.0"), false, "final/")}
+			source.releases = []release{makeRelease(t, source, mustVersion(t, "1.2.0"), false, "final/")}
 			test.set(source)
-			catalog, _ := New(source)
+			catalog, _ := newCatalog(source, DiscoveryLimits{}, artifact.VerifyAggregate)
 			candidates, err := catalog.ListCompatible(context.Background(), installerVersion(t), FinalsOnly)
 			if candidates != nil || !errors.Is(err, test.cause) {
 				t.Fatalf("candidates=%v err=%v", candidates, err)
@@ -164,32 +185,41 @@ func TestDiscoveryPreservesOperationalErrorsAndCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	source := loadFixtureSource(t)
-	source.releases = []Release{makeRelease(t, source, mustVersion(t, "1.2.0"), false, "final/")}
+	source.releases = []release{makeRelease(t, source, mustVersion(t, "1.2.0"), false, "final/")}
 	source.cancel, source.cancelURL = cancel, "final/"+artifact.AggregateManifestAsset
-	catalog, _ := New(source)
+	catalog, _ := newCatalog(source, DiscoveryLimits{}, artifact.VerifyAggregate)
 	if candidates, err := catalog.ListCompatible(ctx, installerVersion(t), FinalsOnly); candidates != nil || !errors.Is(err, context.Canceled) {
 		t.Fatalf("candidates=%v err=%v", candidates, err)
 	}
 }
 
-func TestFinalComponentAndPostDiscoveryCancellationReturnNoVerifiedOutput(t *testing.T) {
+func TestFinalComponentAndPostVerificationCancellationReturnNoVerifiedOutput(t *testing.T) {
 	t.Parallel()
-	for _, stage := range []string{"final component", "before exact resolution"} {
+	for _, stage := range []string{"final component", "post verification"} {
 		t.Run(stage, func(t *testing.T) {
 			source := loadFixtureSource(t)
-			source.releases = []Release{makeRelease(t, source, mustVersion(t, "1.2.0"), false, "final/")}
-			catalog, _ := New(source)
+			source.releases = []release{makeRelease(t, source, mustVersion(t, "1.2.0"), false, "final/")}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			verifier := aggregateVerifier(artifact.VerifyAggregate)
+			if stage == "post verification" {
+				verifier = func(ctx context.Context, source artifact.AggregateAssetSource, requirements artifact.AggregateRequirements) (artifact.VerifiedAggregate, error) {
+					verified, err := artifact.VerifyAggregate(ctx, source, requirements)
+					if err == nil {
+						cancel()
+					}
+					return verified, err
+				}
+			}
+			catalog, _ := newCatalog(source, DiscoveryLimits{}, verifier)
 			candidates, err := catalog.ListCompatible(context.Background(), installerVersion(t), FinalsOnly)
 			if err != nil || len(candidates) != 1 {
 				t.Fatalf("candidates=%d err=%v", len(candidates), err)
 			}
-			ctx, cancel := context.WithCancel(context.Background())
 			if stage == "final component" {
 				components := candidates[0].manifest.Components()
 				source.cancelURL = "final/" + components[len(components)-1].Asset()
 				source.cancel = cancel
-			} else {
-				cancel()
 			}
 			verified, err := catalog.ResolveCandidate(ctx, candidates[0], 0)
 			if !errors.Is(err, context.Canceled) || verified.Manifest().Version().String() != "" {
@@ -202,9 +232,9 @@ func TestFinalComponentAndPostDiscoveryCancellationReturnNoVerifiedOutput(t *tes
 func TestCandidateOwnershipAndLimits(t *testing.T) {
 	t.Parallel()
 	source := loadFixtureSource(t)
-	source.releases = []Release{makeRelease(t, source, mustVersion(t, "1.2.0"), false, "final/")}
-	first, _ := New(source)
-	second, _ := New(source)
+	source.releases = []release{makeRelease(t, source, mustVersion(t, "1.2.0"), false, "final/")}
+	first, _ := newCatalog(source, DiscoveryLimits{}, artifact.VerifyAggregate)
+	second, _ := newCatalog(source, DiscoveryLimits{}, artifact.VerifyAggregate)
 	candidates, _ := first.ListCompatible(context.Background(), installerVersion(t), FinalsOnly)
 	if _, err := second.ResolveCandidate(context.Background(), candidates[0], 0); err == nil {
 		t.Fatal("foreign candidate accepted")
@@ -238,7 +268,7 @@ func loadFixtureSource(t *testing.T) *fixtureSource {
 	return &fixtureSource{data: data}
 }
 
-func makeRelease(t *testing.T, source *fixtureSource, version artifact.Version, prerelease bool, prefix string) Release {
+func makeRelease(t *testing.T, source *fixtureSource, version artifact.Version, prerelease bool, prefix string) release {
 	t.Helper()
 	manifest, err := artifact.ParseAggregateManifest(source.data[prefix+artifact.AggregateManifestAsset])
 	if err != nil {
@@ -248,12 +278,12 @@ func makeRelease(t *testing.T, source *fixtureSource, version artifact.Version, 
 	for _, component := range manifest.Components() {
 		names = append(names, component.Asset())
 	}
-	assets := map[string]Asset{}
+	assets := map[string]asset{}
 	for _, name := range names {
 		location := prefix + name
-		assets[name] = Asset{name: name, downloadURL: location, size: int64(len(source.data[location]))}
+		assets[name] = asset{name: name, downloadURL: location, size: int64(len(source.data[location]))}
 	}
-	return Release{version: version, prerelease: prerelease, assets: assets}
+	return release{version: version, prerelease: prerelease, assets: assets}
 }
 
 func installerVersion(t *testing.T) artifact.Version { return mustVersion(t, "1.5.0") }

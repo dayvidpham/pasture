@@ -99,10 +99,23 @@ func TestMalformedChecksumSidecars(t *testing.T) {
 		t.Fatal(err)
 	}
 	valid := artifact.AggregateManifestChecksum(manifest)
-	cases := [][]byte{nil, bytes.TrimSuffix(valid, []byte("\n")), append(valid, []byte("extra\n")...), []byte(strings.Repeat("0", 64) + " pasture-aggregate-manifest.json\n"), []byte(strings.Repeat("0", 64) + "  other.json\n")}
-	for i, sidecar := range cases {
-		if _, err := artifact.VerifyAggregateManifest(manifest, sidecar); err == nil {
-			t.Fatalf("case %d accepted", i)
+	cases := []struct {
+		name         string
+		sidecar      []byte
+		stage, field string
+	}{
+		{"empty", nil, "manifest checksum verification", artifact.AggregateChecksumAsset},
+		{"missing newline", bytes.TrimSuffix(valid, []byte("\n")), "manifest checksum verification", artifact.AggregateChecksumAsset},
+		{"extra line", append(valid, []byte("extra\n")...), "manifest checksum verification", artifact.AggregateChecksumAsset},
+		{"noncanonical spacing", []byte(strings.Repeat("0", 64) + " pasture-aggregate-manifest.json\n"), "manifest checksum verification", artifact.AggregateChecksumAsset},
+		{"wrong filename", []byte(strings.Repeat("0", 64) + "  other.json\n"), "manifest checksum verification", artifact.AggregateChecksumAsset},
+		{"nonhex", []byte(strings.Repeat("g", 64) + "  pasture-aggregate-manifest.json\n"), "manifest checksum verification", artifact.AggregateChecksumAsset},
+	}
+	for _, test := range cases {
+		_, err := artifact.VerifyAggregateManifest(manifest, test.sidecar)
+		var validation *artifact.AggregateValidationError
+		if !errors.As(err, &validation) || validation.Stage != test.stage || validation.Field != test.field {
+			t.Fatalf("%s: validation=%v err=%v", test.name, validation, err)
 		}
 	}
 }

@@ -27,7 +27,7 @@ func TestComponentBundlesLoadInIsolation(t *testing.T) {
 	components := d.Components()
 	for _, component := range components {
 		component := component
-		t.Run(component.Kind().String(), func(t *testing.T) {
+		t.Run(component.Extension().String(), func(t *testing.T) {
 			bundle := component.Bundle()
 			manifest := bundle.Manifest()
 			require.Positive(t, manifest.Len())
@@ -105,7 +105,7 @@ func TestDescriptorGenerationIsDeterministic(t *testing.T) {
 		b := secondComponents[i]
 		assert.Equal(t, a.ID(), b.ID())
 		assert.True(t, a.Bundle().Equal(b.Bundle()),
-			"component %s must derive an identical BundleID across generations", a.Kind())
+			"component %s must derive an identical BundleID across generations", a.Extension())
 		assert.Equal(t, a.Bundle().ID().String(), b.Bundle().ID().String())
 
 		firstManifest, err := a.Bundle().Manifest().MarshalJSON()
@@ -113,7 +113,7 @@ func TestDescriptorGenerationIsDeterministic(t *testing.T) {
 		secondManifest, err := b.Bundle().Manifest().MarshalJSON()
 		require.NoError(t, err)
 		assert.Equal(t, firstManifest, secondManifest,
-			"component %s manifest must serialize byte-identically", a.Kind())
+			"component %s manifest must serialize byte-identically", a.Extension())
 	}
 }
 

@@ -86,7 +86,7 @@ func (a ComponentActivation) IsValid() bool { return a.valid }
 // inject an extra, missing, or duplicate axis.
 type ExhaustiveComponentActivations struct {
 	harness ir.HarnessID
-	byAxis  map[string]ComponentActivation
+	byAxis  map[cell.Extension]ComponentActivation
 	valid   bool
 }
 
@@ -103,7 +103,7 @@ func NewExhaustiveComponentActivations(skills, agents, hooks ComponentActivation
 		{cell.HooksAxis(), hooks},
 	}
 	harness := skills.cell.Harness()
-	byAxis := make(map[string]ComponentActivation, 3)
+	byAxis := make(map[cell.Extension]ComponentActivation, 3)
 	for _, p := range provided {
 		if !p.act.IsValid() {
 			return ExhaustiveComponentActivations{}, cell.NewFault(
@@ -114,7 +114,7 @@ func NewExhaustiveComponentActivations(skills, agents, hooks ComponentActivation
 				fmt.Sprintf("provide a valid activation for the %s axis", p.want), nil,
 			)
 		}
-		if p.act.cell.Extension().String() != p.want.String() {
+		if p.act.cell.Extension() != p.want {
 			return ExhaustiveComponentActivations{}, cell.NewFault(
 				"exhaustive activations construction", "each activation on its own axis",
 				fmt.Sprintf("the %s slot holds a %s activation", p.want, p.act.cell.Extension()),
@@ -132,7 +132,7 @@ func NewExhaustiveComponentActivations(skills, agents, hooks ComponentActivation
 				"provide all three activations for the same harness", nil,
 			)
 		}
-		byAxis[p.want.String()] = p.act
+		byAxis[p.want] = p.act
 	}
 	return ExhaustiveComponentActivations{harness: harness, byAxis: byAxis, valid: true}, nil
 }
@@ -295,7 +295,7 @@ func LookupComponentActivation(contract ActivationContract, component ComponentD
 			fmt.Sprintf("look up %s in the %s activation contract", component.cell, component.cell.Harness()), nil,
 		)
 	}
-	act, ok := contract.components.byAxis[component.cell.Extension().String()]
+	act, ok := contract.components.byAxis[component.cell.Extension()]
 	if !ok || !act.valid {
 		return ComponentActivation{}, cell.NewFault(
 			"component lookup", "bound component activation",
