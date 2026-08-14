@@ -59,7 +59,7 @@ func NewGitHubSourceWithLimits(client HTTPDoer, releasesURL string, limits GitHu
 		return nil, invalid("GitHub source construction", "HTTP client", "the HTTP client is nil", "GitHub releases cannot be loaded", "inject an HTTP client with explicit timeouts", fs.ErrInvalid)
 	}
 	u, err := url.Parse(releasesURL)
-	if err != nil || !validCatalogURL(u, nil) {
+	if err != nil || !validCatalogURL(u, nil) || u.RawQuery != "" {
 		return nil, invalid("GitHub source construction", "releases URL", fmt.Sprintf("%q is not an HTTPS api.github.com repository Releases URL", releasesURL), "the release endpoint cannot be trusted", "use https://api.github.com/repos/<owner>/<repository>/releases", fs.ErrInvalid)
 	}
 	if limits.MaxPages == 0 {
@@ -124,6 +124,9 @@ func (g *GitHubSource) ListReleases(ctx context.Context) ([]Release, error) {
 		remaining := g.limits.MaxBytes - totalBytes
 		body, readErr := io.ReadAll(io.LimitReader(response.Body, remaining+1))
 		closeErr := response.Body.Close()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, invalid("GitHub release listing", canonical, fmt.Sprintf("context ended while reading page %d: %v", page, ctxErr), "catalog discovery is incomplete", "retry with a live context", ctxErr)
+		}
 		if readErr != nil || closeErr != nil {
 			cause := readErr
 			if cause == nil {
@@ -143,8 +146,11 @@ func (g *GitHubSource) ListReleases(ctx context.Context) ([]Release, error) {
 			return nil, limitError("candidate", g.limits.MaxCandidates)
 		}
 		totalCandidates += len(wire)
-		for _, item := range wire {
-			release, ok := decodeRelease(item)
+		for index, item := range wire {
+			release, ok, decodeErr := decodeRelease(item, fmt.Sprintf("%s#release[%d]", canonical, index))
+			if decodeErr != nil {
+				return nil, decodeErr
+			}
 			if ok {
 				releases = append(releases, release)
 			}
@@ -153,6 +159,9 @@ func (g *GitHubSource) ListReleases(ctx context.Context) ([]Release, error) {
 		if err != nil {
 			return nil, err
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, invalid("GitHub release listing", g.releasesURL.String(), fmt.Sprintf("context ended after catalog discovery: %v", err), "no complete release list is returned", "retry with a live context", err)
 	}
 	return releases, nil
 }
@@ -170,23 +179,23 @@ func decodeReleasePage(body []byte, location string) ([]githubRelease, error) {
 	return wire, nil
 }
 
-func decodeRelease(item githubRelease) (Release, bool) {
+func decodeRelease(item githubRelease, location string) (Release, bool, error) {
 	if item.Draft || !strings.HasPrefix(item.TagName, "v") || strings.Contains(item.TagName, "pasture-stable") {
-		return Release{}, false
+		return Release{}, false, nil
 	}
 	version, err := artifact.ParseVersion(strings.TrimPrefix(item.TagName, "v"))
 	if err != nil {
-		return Release{}, false
+		return Release{}, false, nil
 	}
 	assets := make(map[string]Asset, len(item.Assets))
 	for _, raw := range item.Assets {
 		parsed, e := url.Parse(raw.URL)
 		if raw.Name == "" || strings.Contains(raw.Name, "/") || strings.Contains(raw.Name, "pasture-stable") || raw.Size < 0 || raw.State != "uploaded" || e != nil || !validAssetURL(parsed) || assets[raw.Name].name != "" {
-			return Release{}, false
+			return Release{}, false, invalid("GitHub release decoding", location, fmt.Sprintf("asset %q has malformed name, URL, size, state, or duplicate identity", raw.Name), "the release cannot become a trusted candidate", "publish unique uploaded assets with canonical names, nonnegative sizes, and approved release-download URLs", fs.ErrInvalid)
 		}
 		assets[raw.Name] = Asset{name: raw.Name, downloadURL: raw.URL, size: raw.Size}
 	}
-	return Release{version: version, prerelease: item.Prerelease, assets: assets}, true
+	return Release{version: version, prerelease: item.Prerelease, assets: assets}, true, nil
 }
 
 func parseNextLink(header string, base *url.URL) (*url.URL, error) {
@@ -317,7 +326,18 @@ func validCatalogURL(u, base *url.URL) bool {
 	return true
 }
 func validAssetURL(u *url.URL) bool {
-	return u != nil && u.Scheme == "https" && u.User == nil && u.Fragment == "" && (u.Host == "github.com" || u.Host == "objects.githubusercontent.com" || strings.HasSuffix(u.Host, ".githubusercontent.com"))
+	if u == nil || u.Scheme != "https" || u.User != nil || u.Fragment != "" || u.Path == "" {
+		return false
+	}
+	switch u.Host {
+	case "github.com":
+		parts := strings.Split(u.EscapedPath(), "/")
+		return len(parts) == 7 && parts[1] != "" && parts[2] != "" && parts[3] == "releases" && parts[4] == "download" && parts[5] != "" && parts[6] != ""
+	case "release-assets.githubusercontent.com", "objects.githubusercontent.com":
+		return true
+	default:
+		return false
+	}
 }
 func cloneURL(u *url.URL) *url.URL {
 	if u == nil {

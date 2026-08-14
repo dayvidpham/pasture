@@ -113,6 +113,7 @@ type OpenCodeComponentFile struct {
 // package re-walking or re-templating the source checkout.
 type OpenCodeTargetDescriptor struct {
 	contract   ir.RuntimeContractID
+	install    []artifact.ComponentID
 	toolNames  []string
 	hooks      string
 	components []OpenCodeComponent
@@ -139,6 +140,7 @@ func NewOpenCodeTargetDescriptor() (OpenCodeTargetDescriptor, error) {
 	sort.Slice(components, func(i, j int) bool { return components[i].ID < components[j].ID })
 	return OpenCodeTargetDescriptor{
 		contract:   runtime.OpenCode1_18_10().ID(),
+		install:    installationCoordinates(artifact.HarnessOpenCode),
 		toolNames:  toolNames,
 		hooks:      hooks,
 		components: components,
@@ -147,6 +149,12 @@ func NewOpenCodeTargetDescriptor() (OpenCodeTargetDescriptor, error) {
 
 // RuntimeContract returns the pinned OpenCode runtime contract identity.
 func (d OpenCodeTargetDescriptor) RuntimeContract() ir.RuntimeContractID { return d.contract }
+
+// InstallationComponents returns the shared installer coordinates. Target-file
+// component IDs remain projection metadata and are not installation identities.
+func (d OpenCodeTargetDescriptor) InstallationComponents() []artifact.ComponentID {
+	return append([]artifact.ComponentID(nil), d.install...)
+}
 
 // NativeToolNames returns a copy of the sorted native tool allow-list derived
 // from the pinned contract. No generated OpenCode artifact may reference a tool

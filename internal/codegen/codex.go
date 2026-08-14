@@ -192,6 +192,7 @@ func (p CodexPackage) Bundle() artifact.Bundle { return p.bundle }
 // install-state contract.
 type CodexTargetDescriptor struct {
 	contract ir.RuntimeContractID
+	install  []artifact.ComponentID
 	packages []CodexPackage
 	manifest artifact.Bundle
 }
@@ -202,6 +203,12 @@ func (d CodexTargetDescriptor) Harness() ir.HarnessID { return ir.HarnessCodex }
 // RuntimeContractID returns the pinned Codex runtime contract identity the
 // packages were generated against.
 func (d CodexTargetDescriptor) RuntimeContractID() ir.RuntimeContractID { return d.contract }
+
+// InstallationComponents returns the shared installer coordinates. Codex
+// package IDs remain marketplace metadata and are not installation identities.
+func (d CodexTargetDescriptor) InstallationComponents() []artifact.ComponentID {
+	return append([]artifact.ComponentID(nil), d.install...)
+}
 
 // ManifestBundle returns the immutable target-level manifest bundle (the
 // `.codex/codex.toml` plugin manifest that declares the three packages). It is
@@ -314,9 +321,21 @@ func NewCodexTargetDescriptor(root string, files []GeneratedFile) (CodexTargetDe
 
 	return CodexTargetDescriptor{
 		contract: CodexRuntimeContractID(),
+		install:  installationCoordinates(artifact.HarnessCodex),
 		packages: packages,
 		manifest: manifestBundle,
 	}, nil
+}
+
+func installationCoordinates(harness artifact.Harness) []artifact.ComponentID {
+	all := artifact.ComponentIDs()
+	result := make([]artifact.ComponentID, 0, 3)
+	for _, id := range all {
+		if id.Harness() == harness {
+			result = append(result, id)
+		}
+	}
+	return result
 }
 
 // codexTargetManifestPath is the single target-level manifest file the Codex

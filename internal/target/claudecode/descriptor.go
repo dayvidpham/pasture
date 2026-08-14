@@ -8,15 +8,6 @@ import (
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
-// Stable published component identities. These are the exact strings a
-// downstream installer binds to an activation strategy; they never change
-// spelling without a coordinated activation-side update.
-const (
-	SkillsComponentID = "claude-code/skills"
-	AgentsComponentID = "claude-code/agents"
-	HooksComponentID  = "claude-code/hooks"
-)
-
 // TargetDescriptor is the Claude Code target's published, opaque descriptor. It
 // exposes exactly three components (skills, agents, hooks), the RuntimeContractID
 // the target was compiled under, and its harness identity. It deliberately does
@@ -123,17 +114,17 @@ func Descriptor() (TargetDescriptor, error) {
 		return TargetDescriptor{}, fmt.Errorf("claudecode.Descriptor: build hooks bundle: %w", err)
 	}
 
-	skills, err := newNamedComponent(SkillsKind(), SkillsComponentID, skillsBundle, false)
+	skills, err := newNamedComponent(SkillsKind(), artifact.ExtensionSkills, skillsBundle, false)
 	if err != nil {
 		return TargetDescriptor{}, err
 	}
-	agents, err := newNamedComponent(AgentsKind(), AgentsComponentID, agentsBundle, false)
+	agents, err := newNamedComponent(AgentsKind(), artifact.ExtensionAgents, agentsBundle, false)
 	if err != nil {
 		return TargetDescriptor{}, err
 	}
 	// Hooks are published default-off: they run commands on session lifecycle
 	// events and enforce git discipline, so the user must opt in explicitly.
-	hooks, err := newNamedComponent(HooksKind(), HooksComponentID, hooksBundle, false)
+	hooks, err := newNamedComponent(HooksKind(), artifact.ExtensionHooks, hooksBundle, false)
 	if err != nil {
 		return TargetDescriptor{}, err
 	}
@@ -141,8 +132,8 @@ func Descriptor() (TargetDescriptor, error) {
 	return NewTargetDescriptor(contract.ID(), skills, agents, hooks)
 }
 
-func newNamedComponent(kind ComponentKind, rawID string, bundle artifact.Bundle, defaultEnabled bool) (Component, error) {
-	id, err := NewComponentID(rawID)
+func newNamedComponent(kind ComponentKind, extension artifact.Extension, bundle artifact.Bundle, defaultEnabled bool) (Component, error) {
+	id, err := artifact.NewComponentID(artifact.HarnessClaudeCode, extension)
 	if err != nil {
 		return Component{}, fmt.Errorf("claudecode.Descriptor: %s component identity: %w", kind, err)
 	}

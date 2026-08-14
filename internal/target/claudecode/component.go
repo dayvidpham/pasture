@@ -9,7 +9,6 @@ package claudecode
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/dayvidpham/pasture/artifact"
 )
@@ -65,29 +64,18 @@ func (k ComponentKind) IsValid() bool {
 	}
 }
 
-// ComponentID is the opaque, validated stable identity of one published
-// component (for example "claude-code/skills"). Downstream activation binds by
-// this identity, so it must be a single exact non-empty spelling.
-type ComponentID struct{ value string }
+type ComponentID = artifact.ComponentID
 
 // NewComponentID validates and constructs a component identity.
 func NewComponentID(value string) (ComponentID, error) {
-	if strings.TrimSpace(value) == "" || strings.TrimSpace(value) != value {
-		return ComponentID{}, fmt.Errorf(
-			"claudecode.NewComponentID: component identity %q is empty or has surrounding whitespace — "+
-				"activation binds components by exact identity, so two spellings must not compare unequal; "+
-				"supply a non-empty identity without surrounding whitespace",
-			value,
-		)
+	id, err := artifact.ParseComponentID(value)
+	if err != nil {
+		return ComponentID{}, fmt.Errorf("claudecode.NewComponentID: %q is not a canonical component coordinate — use claude-code/skills, claude-code/agents, or claude-code/hooks: %w", value, err)
 	}
-	return ComponentID{value: value}, nil
-}
-
-func (id ComponentID) String() string { return id.value }
-
-// IsValid reports whether the identity was produced by NewComponentID.
-func (id ComponentID) IsValid() bool {
-	return id.value != "" && strings.TrimSpace(id.value) == id.value
+	if id.Harness() != artifact.HarnessClaudeCode {
+		return ComponentID{}, fmt.Errorf("claudecode.NewComponentID: %q belongs to %s, not Claude Code — use claude-code/skills, claude-code/agents, or claude-code/hooks", value, id.Harness())
+	}
+	return id, nil
 }
 
 // Component is one published Claude Code extension: its kind, stable identity,

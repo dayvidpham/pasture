@@ -48,7 +48,7 @@ func TestValidateAgentFidelityRejectsRemovedTeamLifecycleGrant(t *testing.T) {
 		".claude-plugin/plugin.json": `{"name":"pasture-agents","version":"0.0.4"}`,
 		"agents/rogue.md":            "---\nname: rogue\ntools: Read, Bash, TeamCreate, SendMessage\n---\n\nRogue agent.\n",
 	})
-	agentsID, err := claudecode.NewComponentID(claudecode.AgentsComponentID)
+	agentsID, err := claudecode.NewComponentID("claude-code/agents")
 	require.NoError(t, err)
 	agentsComponent, err := claudecode.NewComponent(claudecode.AgentsKind(), agentsID, forgedAgents, false)
 	require.NoError(t, err)

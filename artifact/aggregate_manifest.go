@@ -123,7 +123,7 @@ type componentWire struct {
 func NewAggregateManifest(spec AggregateManifestSpec) (AggregateManifest, error) {
 	wire := aggregateWire{Schema: AggregateManifestSchema, Version: spec.Version.String(), Channel: string(spec.Channel), Compatibility: compatibilityWire{InstallerMin: spec.InstallerMin.String(), InstallerMax: spec.InstallerMax.String()}, Revisions: revisionsWire{Pasture: spec.PastureRevision.String(), Aura: spec.AuraRevision.String()}, Components: make([]componentWire, 0, len(spec.Components))}
 	for _, c := range spec.Components {
-		wire.Components = append(wire.Components, componentWire{ID: string(canonicalComponentID(c.Harness, c.Extension)), Harness: string(c.Harness), Extension: c.Extension.String(), Asset: c.Asset, Digest: c.Digest.String(), BundleID: c.BundleID.String(), RuntimeContract: c.RuntimeContractID.String(), PastureRevision: c.PastureRevision.String(), AuraRevision: c.AuraRevision.String()})
+		wire.Components = append(wire.Components, componentWire{ID: canonicalComponentID(c.Harness, c.Extension).String(), Harness: string(c.Harness), Extension: c.Extension.String(), Asset: c.Asset, Digest: c.Digest.String(), BundleID: c.BundleID.String(), RuntimeContract: c.RuntimeContractID.String(), PastureRevision: c.PastureRevision.String(), AuraRevision: c.AuraRevision.String()})
 	}
 	encoded, err := json.Marshal(wire)
 	if err != nil {
@@ -139,7 +139,7 @@ func (m AggregateManifest) MarshalJSON() ([]byte, error) {
 	}
 	wire := aggregateWire{Schema: AggregateManifestSchema, Version: m.version.String(), Channel: string(m.channel), Compatibility: compatibilityWire{InstallerMin: m.minInstaller.String(), InstallerMax: m.maxInstaller.String()}, Revisions: revisionsWire{Pasture: m.pasture.String(), Aura: m.aura.String()}, Components: make([]componentWire, 0, len(m.components))}
 	for _, c := range m.components {
-		wire.Components = append(wire.Components, componentWire{ID: string(c.id), Harness: string(c.harness), Extension: c.extension.String(), Asset: c.asset, Digest: c.digest.String(), BundleID: c.bundle.String(), RuntimeContract: c.runtimeContract.String(), PastureRevision: c.pasture.String(), AuraRevision: c.aura.String()})
+		wire.Components = append(wire.Components, componentWire{ID: c.id.String(), Harness: string(c.harness), Extension: c.extension.String(), Asset: c.asset, Digest: c.digest.String(), BundleID: c.bundle.String(), RuntimeContract: c.runtimeContract.String(), PastureRevision: c.pasture.String(), AuraRevision: c.aura.String()})
 	}
 	return json.Marshal(wire)
 }
@@ -207,7 +207,7 @@ func ParseAggregateManifest(data []byte) (AggregateManifest, error) {
 			return AggregateManifest{}, e
 		}
 		id := canonicalComponentID(h, x)
-		if item.ID != string(id) || seen[id] {
+		if item.ID != id.String() || seen[id] {
 			return AggregateManifest{}, aggregateInvalid("manifest decoding", fmt.Sprintf("components[%d].id", i), fmt.Sprintf("identity %q is mismatched or duplicated; expected target identity %q", item.ID, id), "component identity cannot be proven", "publish each exact target descriptor harness/extension identity once", fs.ErrInvalid)
 		}
 		seen[id] = true
@@ -249,7 +249,7 @@ func ParseAggregateManifest(data []byte) (AggregateManifest, error) {
 		}
 		components = append(components, AggregateComponent{id, h, x, item.Asset, digest, bundle, runtimeContract, pr, ar})
 	}
-	sort.Slice(components, func(i, j int) bool { return components[i].id < components[j].id })
+	sort.Slice(components, func(i, j int) bool { return components[i].id.String() < components[j].id.String() })
 	return AggregateManifest{version, min, max, channel, pasture, aura, components}, nil
 }
 

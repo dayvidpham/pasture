@@ -251,6 +251,92 @@ func TestProductionGitHubSourceRequiresHTTPSGitHub(t *testing.T) {
 	}
 }
 
+func TestProductionConstructorRejectsCallerPaginationState(t *testing.T) {
+	t.Parallel()
+	for _, query := range []string{"?page=2", "?page=1&page=2", "?per_page=1", "?state=all"} {
+		if _, err := NewGitHubSource(http.DefaultClient, releasesEndpoint+query, 4096); err == nil {
+			t.Fatalf("caller query %q accepted", query)
+		}
+	}
+}
+
+func TestAssetTrustUsesExplicitReleaseHostsAndDownloadPaths(t *testing.T) {
+	t.Parallel()
+	doer := doerFunc(func(req *http.Request) (*http.Response, error) { return response(req, 200, "asset", "", ""), nil })
+	source, _ := NewGitHubSource(doer, releasesEndpoint, 4096)
+	approved := []string{
+		"https://github.com/dayvidpham/pasture/releases/download/v1.2.0/pasture.tgz",
+		"https://release-assets.githubusercontent.com/github-production-release-asset/123/file",
+		"https://objects.githubusercontent.com/github-production-release-asset/file",
+	}
+	for _, location := range approved {
+		reader, err := source.OpenURL(context.Background(), location)
+		if err != nil {
+			t.Fatalf("approved %s: %v", location, err)
+		}
+		reader.Close()
+	}
+	rejected := []string{
+		"https://raw.githubusercontent.com/dayvidpham/pasture/main/file",
+		"https://gist.githubusercontent.com/user/id/raw/file",
+		"https://avatars.githubusercontent.com/u/1",
+		"https://evil.githubusercontent.com/file",
+		"https://github.com/dayvidpham/pasture/raw/main/file",
+		"https://github.com/dayvidpham/pasture/releases/tag/v1.2.0",
+	}
+	for _, location := range rejected {
+		if _, err := source.OpenURL(context.Background(), location); err == nil {
+			t.Fatalf("hostile asset location accepted: %s", location)
+		}
+	}
+}
+
+func TestManualRedirectLocationTrustBoundary(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, initial, location string
+		wantErr                 bool
+	}{
+		{"approved asset redirect", "https://github.com/dayvidpham/pasture/releases/download/v1.2.0/file", "https://release-assets.githubusercontent.com/github-production-release-asset/file", false},
+		{"hostile sibling service", "https://github.com/dayvidpham/pasture/releases/download/v1.2.0/file", "https://raw.githubusercontent.com/dayvidpham/pasture/main/file", true},
+		{"wrong github path", "https://github.com/dayvidpham/pasture/releases/download/v1.2.0/file", "https://github.com/dayvidpham/pasture/raw/main/file", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			calls := 0
+			doer := doerFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				if calls == 1 {
+					resp := response(req, http.StatusFound, "", "", "")
+					resp.Header.Set("Location", test.location)
+					return resp, nil
+				}
+				return response(req, http.StatusOK, "asset", "", ""), nil
+			})
+			source, _ := NewGitHubSource(doer, releasesEndpoint, 4096)
+			reader, err := source.OpenURL(context.Background(), test.initial)
+			if reader != nil {
+				reader.Close()
+			}
+			if (err != nil) != test.wantErr {
+				t.Fatalf("calls=%d err=%v", calls, err)
+			}
+		})
+	}
+}
+
+func TestManualCatalogRedirectRejectsHostileLocation(t *testing.T) {
+	t.Parallel()
+	doer := doerFunc(func(req *http.Request) (*http.Response, error) {
+		resp := response(req, http.StatusFound, "", "", "")
+		resp.Header.Set("Location", "https://evil.example/repos/dayvidpham/pasture/releases")
+		return resp, nil
+	})
+	source, _ := NewGitHubSource(doer, releasesEndpoint, 4096)
+	if _, err := source.ListReleases(context.Background()); err == nil {
+		t.Fatal("hostile catalog 3xx accepted")
+	}
+}
+
 func TestGitHubMalformedTrailingAndOversizedPages(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -287,20 +373,155 @@ func TestGitHubCandidateLimitExhaustionIsExplicit(t *testing.T) {
 
 func TestGitHubMalformedReleaseCasesAreIndependent(t *testing.T) {
 	t.Parallel()
-	cases := []string{`[{"tag_name":"pasture-stable","draft":false,"prerelease":false,"assets":[]}]`, `[{"tag_name":"v1.0.0","draft":false,"prerelease":false,"assets":[{"name":"pasture-stable-1.0.0.tgz","browser_download_url":"https://objects.githubusercontent.com/a","size":1,"state":"uploaded"}]}]`, `[{"tag_name":"v1.0.0","draft":false,"prerelease":false,"assets":[{"name":"a","browser_download_url":"https://objects.githubusercontent.com/a","size":1,"state":"uploaded"},{"name":"a","browser_download_url":"https://objects.githubusercontent.com/b","size":1,"state":"uploaded"}]}]`}
-	for i, body := range cases {
-		body := body
-		t.Run(strconv.Itoa(i), func(t *testing.T) {
+	cases := []struct {
+		name, body string
+		skipped    bool
+	}{
+		{"moving tag", `[{"tag_name":"pasture-stable","draft":false,"prerelease":false,"assets":[]}]`, true},
+		{"moving asset", `[{"tag_name":"v1.0.0","draft":false,"prerelease":false,"assets":[{"name":"pasture-stable-1.0.0.tgz","browser_download_url":"https://objects.githubusercontent.com/a","size":1,"state":"uploaded"}]}]`, false},
+		{"empty name", `[{"tag_name":"v1.0.0","draft":false,"prerelease":false,"assets":[{"name":"","browser_download_url":"https://objects.githubusercontent.com/a","size":1,"state":"uploaded"}]}]`, false},
+		{"path name", `[{"tag_name":"v1.0.0","draft":false,"prerelease":false,"assets":[{"name":"a/b","browser_download_url":"https://objects.githubusercontent.com/a","size":1,"state":"uploaded"}]}]`, false},
+		{"negative size", `[{"tag_name":"v1.0.0","draft":false,"prerelease":false,"assets":[{"name":"a","browser_download_url":"https://objects.githubusercontent.com/a","size":-1,"state":"uploaded"}]}]`, false},
+		{"wrong state", `[{"tag_name":"v1.0.0","draft":false,"prerelease":false,"assets":[{"name":"a","browser_download_url":"https://objects.githubusercontent.com/a","size":1,"state":"new"}]}]`, false},
+		{"wrong URL", `[{"tag_name":"v1.0.0","draft":false,"prerelease":false,"assets":[{"name":"a","browser_download_url":"https://raw.githubusercontent.com/o/r/main/a","size":1,"state":"uploaded"}]}]`, false},
+		{"duplicate", `[{"tag_name":"v1.0.0","draft":false,"prerelease":false,"assets":[{"name":"a","browser_download_url":"https://objects.githubusercontent.com/a","size":1,"state":"uploaded"},{"name":"a","browser_download_url":"https://objects.githubusercontent.com/b","size":1,"state":"uploaded"}]}]`, false},
+	}
+	for _, test := range cases {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			doer := doerFunc(func(r *http.Request) (*http.Response, error) { return response(r, 200, body, "", ""), nil })
+			doer := doerFunc(func(r *http.Request) (*http.Response, error) { return response(r, 200, test.body, "", ""), nil })
 			source, _ := NewGitHubSource(doer, releasesEndpoint, 4096)
 			releases, err := source.ListReleases(context.Background())
-			if err != nil {
+			if test.skipped && err != nil {
 				t.Fatal(err)
+			}
+			if !test.skipped && err == nil {
+				t.Fatal("expected typed malformed-asset error")
+			}
+			if !test.skipped {
+				var typed *Error
+				if !errors.As(err, &typed) || typed.Stage != "GitHub release decoding" || typed.Location == "" {
+					t.Fatalf("typed=%v err=%v", typed, err)
+				}
 			}
 			if len(releases) != 0 {
 				t.Fatal("malformed release accepted")
 			}
 		})
 	}
+}
+
+func TestProductionFailureBoundaryMatrixReturnsNoVerifiedOutput(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		mutate     func(map[string][]byte)
+		faultAsset string
+		fault      string
+	}{
+		{"manifest unknown field", func(files map[string][]byte) {
+			files[artifact.AggregateManifestAsset] = []byte(strings.Replace(string(files[artifact.AggregateManifestAsset]), "{", `{"unknown":true,`, 1))
+			files[artifact.AggregateChecksumAsset] = artifact.AggregateManifestChecksum(files[artifact.AggregateManifestAsset])
+		}, "", ""},
+		{"manifest duplicate field", func(files map[string][]byte) {
+			files[artifact.AggregateManifestAsset] = []byte(strings.Replace(string(files[artifact.AggregateManifestAsset]), "{", `{"schema":"pasture.aggregate-release/v1",`, 1))
+			files[artifact.AggregateChecksumAsset] = artifact.AggregateManifestChecksum(files[artifact.AggregateManifestAsset])
+		}, "", ""},
+		{"manifest trailing data", func(files map[string][]byte) {
+			files[artifact.AggregateManifestAsset] = append(files[artifact.AggregateManifestAsset], []byte(" {}")...)
+			files[artifact.AggregateChecksumAsset] = artifact.AggregateManifestChecksum(files[artifact.AggregateManifestAsset])
+		}, "", ""},
+		{"manifest case fold", func(files map[string][]byte) {
+			files[artifact.AggregateManifestAsset] = []byte(strings.Replace(string(files[artifact.AggregateManifestAsset]), `"schema"`, `"Schema"`, 1))
+			files[artifact.AggregateChecksumAsset] = artifact.AggregateManifestChecksum(files[artifact.AggregateManifestAsset])
+		}, "", ""},
+		{"sidecar empty", func(files map[string][]byte) { files[artifact.AggregateChecksumAsset] = nil }, "", ""},
+		{"sidecar wrong filename", func(files map[string][]byte) {
+			files[artifact.AggregateChecksumAsset] = []byte(strings.Replace(string(files[artifact.AggregateChecksumAsset]), artifact.AggregateManifestAsset, "other.json", 1))
+		}, "", ""},
+		{"sidecar uppercase", func(files map[string][]byte) {
+			files[artifact.AggregateChecksumAsset] = []byte(strings.ToUpper(string(files[artifact.AggregateChecksumAsset])))
+		}, "", ""},
+		{"manifest transport", nil, artifact.AggregateManifestAsset, "transport"},
+		{"manifest status", nil, artifact.AggregateManifestAsset, "status"},
+		{"manifest nil body", nil, artifact.AggregateManifestAsset, "nil-body"},
+		{"component transport", nil, "pasture-1.2.0-codex-hooks.tgz", "transport"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			files := loadGitHubFixtureFiles(t)
+			if test.mutate != nil {
+				test.mutate(files)
+			}
+			page := githubReleasePage(t, files)
+			doer := doerFunc(func(req *http.Request) (*http.Response, error) {
+				if req.URL.Host == "api.github.com" {
+					return response(req, 200, page, "", ""), nil
+				}
+				name := strings.TrimPrefix(req.URL.Path, "/")
+				if name == test.faultAsset {
+					switch test.fault {
+					case "transport":
+						return nil, io.ErrUnexpectedEOF
+					case "status":
+						return response(req, 503, "", "", ""), nil
+					case "nil-body":
+						return &http.Response{StatusCode: 200, Request: req}, nil
+					}
+				}
+				return response(req, 200, string(files[name]), "", ""), nil
+			})
+			source, _ := NewGitHubSource(doer, releasesEndpoint, 1<<20)
+			catalog, _ := New(source)
+			var verified artifact.VerifiedAggregate
+			candidates, err := catalog.ListCompatible(context.Background(), installerVersion(t), FinalsOnly)
+			if err == nil && len(candidates) == 1 {
+				verified, err = catalog.ResolveCandidate(context.Background(), candidates[0], 0)
+			}
+			var typed *Error
+			if err == nil || !errors.As(err, &typed) || typed.Stage == "" || typed.Location == "" || verified.Manifest().Version().String() != "" {
+				t.Fatalf("verified=%v typed=%v err=%v", verified, typed, err)
+			}
+		})
+	}
+}
+
+func loadGitHubFixtureFiles(t *testing.T) map[string][]byte {
+	t.Helper()
+	entries, err := os.ReadDir("testdata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string][]byte{}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			files[entry.Name()], err = os.ReadFile(filepath.Join("testdata", entry.Name()))
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	return files
+}
+
+func githubReleasePage(t *testing.T, files map[string][]byte) string {
+	t.Helper()
+	manifest, err := artifact.ParseAggregateManifest(loadGitHubFixtureFiles(t)[artifact.AggregateManifestAsset])
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := []string{artifact.AggregateManifestAsset, artifact.AggregateChecksumAsset}
+	for _, component := range manifest.Components() {
+		names = append(names, component.Asset())
+	}
+	assets := make([]githubAsset, 0, len(names))
+	for _, name := range names {
+		assets = append(assets, githubAsset{Name: name, URL: "https://objects.githubusercontent.com/" + name, Size: int64(len(files[name])), State: "uploaded"})
+	}
+	encoded, err := json.Marshal([]githubRelease{{TagName: "v1.2.0", Assets: assets}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(encoded)
 }

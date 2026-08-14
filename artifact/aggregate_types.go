@@ -99,14 +99,27 @@ func (id *RuntimeContractID) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// ProductionRuntimeContract returns the registered target profile accepted in aggregate releases.
+const (
+	claudeCodeProductionProfile = "claude-code@2.1.210"
+	openCodeProductionProfile   = "opencode@1.18.10"
+	codexProductionProfile      = "codex@0.146.0"
+)
+
+// ProductionRuntimeContract returns the sole registered target profile accepted
+// by runtime lowering, target descriptors, and aggregate releases.
 func ProductionRuntimeContract(harness Harness) (RuntimeContractID, error) {
-	names := map[Harness]string{HarnessClaudeCode: "claude-code@2.1.210", HarnessOpenCode: "opencode@1.18.10", HarnessCodex: "codex@0.146.0"}
-	name, ok := names[harness]
-	if !ok {
+	var profile string
+	switch harness {
+	case HarnessClaudeCode:
+		profile = claudeCodeProductionProfile
+	case HarnessOpenCode:
+		profile = openCodeProductionProfile
+	case HarnessCodex:
+		profile = codexProductionProfile
+	default:
 		return RuntimeContractID{}, aggregateInvalid("runtime contract lookup", "harness", fmt.Sprintf("unsupported harness %q", harness), "no production target profile is registered", "use a supported Harness", fs.ErrInvalid)
 	}
-	return NewRuntimeContractID(harness, name)
+	return NewRuntimeContractID(harness, profile)
 }
 
 // Extension identifies one immutable generated component class.
@@ -149,8 +162,29 @@ func (e *Extension) UnmarshalText(text []byte) error {
 	return nil
 }
 
-// ComponentID is the canonical target descriptor identity harness/extension.
-type ComponentID string
+// ComponentID is the opaque canonical target descriptor identity harness/extension.
+type ComponentID struct {
+	harness   Harness
+	extension Extension
+}
+
+// NewComponentID constructs one member of the closed three-by-three matrix.
+func NewComponentID(harness Harness, extension Extension) (ComponentID, error) {
+	if !harness.IsValid() || !extension.IsValid() {
+		return ComponentID{}, aggregateInvalid("component identity construction", "component", fmt.Sprintf("unsupported coordinate %q/%q", harness, extension), "the component cannot be addressed safely", "use a supported Harness and Extension", fs.ErrInvalid)
+	}
+	return ComponentID{harness: harness, extension: extension}, nil
+}
+
+func (id ComponentID) Harness() Harness     { return id.harness }
+func (id ComponentID) Extension() Extension { return id.extension }
+func (id ComponentID) IsValid() bool        { return id.harness.IsValid() && id.extension.IsValid() }
+func (id ComponentID) String() string {
+	if !id.IsValid() {
+		return ""
+	}
+	return string(id.harness) + "/" + id.extension.String()
+}
 
 // Revision is an immutable lowercase Git commit identity.
 type Revision string
@@ -289,15 +323,15 @@ func ParseRevision(value string) (Revision, error) { return parseRevision(value,
 func ParseComponentID(value string) (ComponentID, error) {
 	harnessText, extensionText, ok := strings.Cut(value, "/")
 	if !ok {
-		return "", aggregateInvalid("component identity decoding", "component", fmt.Sprintf("%q is not harness/extension", value), "the component cannot be addressed safely", "use the exact target descriptor identity", fs.ErrInvalid)
+		return ComponentID{}, aggregateInvalid("component identity decoding", "component", fmt.Sprintf("%q is not harness/extension", value), "the component cannot be addressed safely", "use the exact target descriptor identity", fs.ErrInvalid)
 	}
 	harness, err := parseHarness(harnessText)
 	if err != nil {
-		return "", err
+		return ComponentID{}, err
 	}
 	extension, err := parseExtension(extensionText)
 	if err != nil {
-		return "", err
+		return ComponentID{}, err
 	}
 	return canonicalComponentID(harness, extension), nil
 }
@@ -323,5 +357,16 @@ func parseExtension(value string) (Extension, error) {
 }
 
 func canonicalComponentID(h Harness, e Extension) ComponentID {
-	return ComponentID(string(h) + "/" + e.String())
+	return ComponentID{harness: h, extension: e}
+}
+
+// ComponentIDs returns every canonical coordinate in harness-major order.
+func ComponentIDs() []ComponentID {
+	result := make([]ComponentID, 0, 9)
+	for _, harness := range []Harness{HarnessClaudeCode, HarnessOpenCode, HarnessCodex} {
+		for _, extension := range []Extension{ExtensionSkills, ExtensionAgents, ExtensionHooks} {
+			result = append(result, canonicalComponentID(harness, extension))
+		}
+	}
+	return result
 }

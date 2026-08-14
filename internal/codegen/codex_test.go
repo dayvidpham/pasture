@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
@@ -103,6 +104,10 @@ func TestCodexTargetDescriptorPartitionsPackages(t *testing.T) {
 	}
 	if len(desc.Packages()) != 3 {
 		t.Fatalf("descriptor has %d packages, want 3", len(desc.Packages()))
+	}
+	wantInstall := installationCoordinates(artifact.HarnessCodex)
+	if got := desc.InstallationComponents(); len(got) != 3 || got[0] != wantInstall[0] || got[1] != wantInstall[1] || got[2] != wantInstall[2] {
+		t.Fatalf("installation coordinates = %v, want %v", got, wantInstall)
 	}
 
 	skills, ok := desc.Package(codexSkillsComponent)

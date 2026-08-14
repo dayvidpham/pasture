@@ -35,9 +35,9 @@ func TestDescriptorPublishesThreeComponentsInCanonicalOrder(t *testing.T) {
 	assert.Equal(t, claudecode.AgentsKind(), components[1].Kind())
 	assert.Equal(t, claudecode.HooksKind(), components[2].Kind())
 
-	assert.Equal(t, claudecode.SkillsComponentID, d.Skills().ID().String())
-	assert.Equal(t, claudecode.AgentsComponentID, d.Agents().ID().String())
-	assert.Equal(t, claudecode.HooksComponentID, d.Hooks().ID().String())
+	assert.Equal(t, "claude-code/skills", d.Skills().ID().String())
+	assert.Equal(t, "claude-code/agents", d.Agents().ID().String())
+	assert.Equal(t, "claude-code/hooks", d.Hooks().ID().String())
 
 	for _, c := range components {
 		assert.True(t, c.IsValid())

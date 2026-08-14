@@ -103,13 +103,16 @@ func VerifyAggregate(ctx context.Context, source AggregateAssetSource, requireme
 		}
 		actual := DigestBytes(content)
 		if actual != component.digest {
-			return VerifiedAggregate{}, aggregateInvalid("component verification", string(component.id), fmt.Sprintf("asset %q digest is %s but manifest requires %s", component.asset, actual, component.digest), "a corrupt or substituted component would be installed", "replace the release asset with the exact bytes named by the signed-off manifest", fs.ErrInvalid)
+			return VerifiedAggregate{}, aggregateInvalid("component verification", component.id.String(), fmt.Sprintf("asset %q digest is %s but manifest requires %s", component.asset, actual, component.digest), "a corrupt or substituted component would be installed", "replace the release asset with the exact bytes named by the signed-off manifest", fs.ErrInvalid)
 		}
 		if int64(len(content)) > totalLimit-total {
-			return VerifiedAggregate{}, aggregateInvalid("component verification", string(component.id), "aggregate assets exceed the configured total-byte limit", "the complete release was rejected before mutation", "publish a bounded aggregate or configure an explicitly reviewed larger total limit", fs.ErrInvalid)
+			return VerifiedAggregate{}, aggregateInvalid("component verification", component.id.String(), "aggregate assets exceed the configured total-byte limit", "the complete release was rejected before mutation", "publish a bounded aggregate or configure an explicitly reviewed larger total limit", fs.ErrInvalid)
 		}
 		total += int64(len(content))
 		assets[component.id] = content
+	}
+	if err := ctx.Err(); err != nil {
+		return VerifiedAggregate{}, aggregateInvalid("aggregate verification", "verified output", fmt.Sprintf("operation canceled after the final component verification: %v", err), "no verified aggregate is returned to an installer service", "retry with a live context", err)
 	}
 	return VerifiedAggregate{manifest: manifest, assets: assets}, nil
 }
@@ -132,6 +135,9 @@ func readBounded(ctx context.Context, source AggregateAssetSource, name string, 
 	}
 	b, err := io.ReadAll(io.LimitReader(r, limit+1))
 	closeErr := r.Close()
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, aggregateInvalid("asset read", name, fmt.Sprintf("the operation was canceled while reading: %v", ctxErr), "verification is incomplete and no verified aggregate is returned", "retry with a live context", ctxErr)
+	}
 	if err != nil {
 		return nil, aggregateInvalid("asset read", name, fmt.Sprintf("the release asset could not be read completely: %v", err), "verification is incomplete and mutation must not begin", "repair the asset transport and retry", err)
 	}

@@ -9,6 +9,9 @@ import (
 	"testing"
 
 	"github.com/dayvidpham/pasture/artifact"
+	"github.com/dayvidpham/pasture/internal/codegen"
+	"github.com/dayvidpham/pasture/internal/install/cell"
+	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/target/claudecode"
 )
 
@@ -47,6 +50,56 @@ func TestClaudeProductionDescriptorUsesPublicRuntimeIdentity(t *testing.T) {
 	}
 	if descriptor.RuntimeContractID() != parsed || parsed.Harness() != artifact.HarnessClaudeCode {
 		t.Fatalf("descriptor=%s parsed=%s", descriptor.RuntimeContractID(), parsed)
+	}
+}
+
+func TestProductionProfilesAndInstallerCellsUseArtifactIdentityAuthority(t *testing.T) {
+	t.Parallel()
+	claude, err := claudecode.Descriptor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	opencode, err := codegen.NewOpenCodeTargetDescriptor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := map[artifact.Harness]artifact.RuntimeContractID{
+		artifact.HarnessClaudeCode: claude.RuntimeContractID(),
+		artifact.HarnessOpenCode:   opencode.RuntimeContract(),
+		artifact.HarnessCodex:      codegen.CodexRuntimeContractID(),
+	}
+	contracts := map[artifact.Harness]artifact.RuntimeContractID{}
+	for _, contract := range runtime.PinnedContracts() {
+		contracts[contract.Harness()] = contract.ID()
+	}
+	for harness, descriptorID := range profiles {
+		registered, err := artifact.ProductionRuntimeContract(harness)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if descriptorID != registered || contracts[harness] != registered {
+			t.Fatalf("%s descriptor=%s runtime=%s registry=%s", harness, descriptorID, contracts[harness], registered)
+		}
+	}
+	want := artifact.ComponentIDs()
+	cells := cell.CanonicalCells()
+	if len(cells) != len(want) {
+		t.Fatalf("cells=%d identities=%d", len(cells), len(want))
+	}
+	for i := range want {
+		if cells[i].ID() != want[i] || cells[i].Harness() != want[i].Harness() || cells[i].Extension() != want[i].Extension() {
+			t.Fatalf("coordinate %d cell=%s identity=%s", i, cells[i], want[i])
+		}
+	}
+	for i, component := range claude.Components() {
+		if component.ID() != want[i] {
+			t.Fatalf("Claude component %d=%s want=%s", i, component.ID(), want[i])
+		}
+	}
+	for i, id := range opencode.InstallationComponents() {
+		if id != want[i+3] {
+			t.Fatalf("OpenCode component %d=%s want=%s", i, id, want[i+3])
+		}
 	}
 }
 
