@@ -27,9 +27,11 @@ type fixtureSource struct {
 	cancelOnOpen string
 	cancel       context.CancelFunc
 	closeCalls   *int
+	listCalls    int
 }
 
 func (s *fixtureSource) listReleases(context.Context) ([]release, error) {
+	s.listCalls++
 	if s.listErr != nil {
 		return nil, s.listErr
 	}
@@ -113,6 +115,29 @@ func TestListCompatiblePolicyAndExactNonNewestResolution(t *testing.T) {
 		if candidate.Version() == missing {
 			t.Fatal("an absent exact version fell back")
 		}
+	}
+}
+
+func TestListCompatibleRejectsUnconstructedInstallerBeforeSourceIO(t *testing.T) {
+	t.Parallel()
+	source := loadFixtureSource(t)
+	catalog, err := newCatalog(source, DiscoveryLimits{}, artifact.VerifyAggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := catalog.ListCompatible(context.Background(), artifact.Version{}, FinalsOnly)
+	var typed *Error
+	if candidates != nil || !errors.As(err, &typed) || typed.Stage != "candidate listing" || typed.Location != "installer version" || source.listCalls != 0 {
+		t.Fatalf("candidates=%v typed=%v err=%v list calls=%d", candidates, typed, err, source.listCalls)
+	}
+
+	zero, err := artifact.ParseVersion("0.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, err = catalog.ListCompatible(context.Background(), zero, FinalsOnly)
+	if err != nil || candidates == nil || source.listCalls != 1 {
+		t.Fatalf("parsed zero candidates=%v err=%v list calls=%d", candidates, err, source.listCalls)
 	}
 }
 

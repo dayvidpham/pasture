@@ -104,6 +104,9 @@ func newCatalog(source catalogSource, limits DiscoveryLimits, verifier aggregate
 
 // ListCompatible returns typed checksum-verified choices in descending SemVer order.
 func (c *Catalog) ListCompatible(ctx context.Context, installer artifact.Version, policy PrereleasePolicy) ([]Candidate, error) {
+	if installer.String() == "" {
+		return nil, invalid("candidate listing", "installer version", "the installer version is zero or was not constructed", "release compatibility cannot be established", "parse the running installer version with artifact.ParseVersion before listing candidates", fs.ErrInvalid)
+	}
 	if policy != FinalsOnly && policy != IncludePrereleases {
 		return nil, invalid("candidate listing", "policy", "unsupported prerelease policy", "candidate channel cannot be filtered", "use FinalsOnly or IncludePrereleases", fs.ErrInvalid)
 	}

@@ -25,10 +25,10 @@ type TargetDescriptor struct {
 
 // NewTargetDescriptor validates and constructs a Claude Code target descriptor.
 // It requires exactly one skills, one agents, and one hooks component, each with
-// the matching kind, and a valid RuntimeContractID bound to the Claude Code
-// harness. There is no mutable component map: the three slots are the only shape
-// a descriptor can take, so an invalid missing/duplicate/wrong-kind combination
-// cannot be constructed.
+// the matching canonical extension, and a valid RuntimeContractID bound to the
+// Claude Code harness. There is no mutable component map: the three slots are
+// the only shape a descriptor can take, so an invalid missing, duplicate, or
+// wrong-extension combination cannot be constructed.
 func NewTargetDescriptor(contract ir.RuntimeContractID, skills, agents, hooks Component) (TargetDescriptor, error) {
 	if !contract.IsValid() {
 		return TargetDescriptor{}, fmt.Errorf(
@@ -80,7 +80,7 @@ func requireComponent(slot string, component Component, want artifact.Extension)
 	if component.ID() != wantID || component.Extension() != want {
 		return fmt.Errorf(
 			"claudecode.NewTargetDescriptor: the %s slot received component %q, not canonical %q — "+
-				"each descriptor slot holds exactly its own kind so activation cannot install the wrong tree; "+
+				"each descriptor slot holds exactly its own extension so activation cannot install the wrong tree; "+
 				"pass the %s component in the %s slot",
 			slot, component.ID(), wantID, slot, slot,
 		)
@@ -163,8 +163,8 @@ func (d TargetDescriptor) Components() []Component {
 	return []Component{d.skills, d.agents, d.hooks}
 }
 
-// Component returns the published component for kind, or an actionable error for
-// a zero or unknown kind.
+// Component returns the published component for an extension, or an actionable
+// error for a zero or unknown extension.
 func (d TargetDescriptor) Component(extension artifact.Extension) (Component, error) {
 	switch extension {
 	case artifact.ExtensionSkills:
@@ -177,7 +177,7 @@ func (d TargetDescriptor) Component(extension artifact.Extension) (Component, er
 		return Component{}, fmt.Errorf(
 			"claudecode.TargetDescriptor.Component: extension %q is zero or unknown — "+
 				"the descriptor publishes only skills, agents, and hooks; "+
-				"request one of those kinds",
+				"request one of those extensions",
 			extension,
 		)
 	}

@@ -23,6 +23,10 @@ type doerFunc func(*http.Request) (*http.Response, error)
 
 func (f doerFunc) Do(r *http.Request) (*http.Response, error) { return f(r) }
 
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
 type boundaryBody struct {
 	io.Reader
 	closeErr   error
@@ -59,7 +63,7 @@ func TestGitHubPaginationFindsPageTwo(t *testing.T) {
 		next := releasesEndpoint + "?page=2&per_page=100"
 		return response(req, 200, `[{"tag_name":"v2.0.0-rc.1","draft":false,"prerelease":true,"assets":[]}]`, "<"+next+">; rel=\"next\"", ""), nil
 	})
-	source, err := NewGitHubSource(doer, releasesEndpoint, 4096)
+	source, err := newGitHubSource(doer, releasesEndpoint, 4096)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +113,7 @@ func TestProductionPaginationSelectsOnlyCompatiblePageTwoRelease(t *testing.T) {
 		next := releasesEndpoint + "?page=2&per_page=100"
 		return response(req, 200, `[{"tag_name":"v2.0.0","draft":true,"prerelease":false,"assets":[]}]`, "<"+next+">; rel=\"next\"", ""), nil
 	})
-	source, err := NewGitHubSource(doer, releasesEndpoint, 1<<20)
+	source, err := newGitHubSource(doer, releasesEndpoint, 1<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +141,7 @@ func TestGitHubPaginationRejectsUntrustedAndCycles(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			doer := doerFunc(func(req *http.Request) (*http.Response, error) { return response(req, 200, `[]`, tc.link, ""), nil })
-			source, err := NewGitHubSourceWithLimits(doer, releasesEndpoint, tc.limits)
+			source, err := newGitHubSourceWithLimits(doer, releasesEndpoint, tc.limits)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -157,7 +161,7 @@ func TestGitHubPaginationCancellationBetweenPages(t *testing.T) {
 		cancel()
 		return response(req, 200, `[]`, `<https://api.github.com/repos/dayvidpham/pasture/releases?page=2&per_page=100>; rel="next"`, ""), nil
 	})
-	source, _ := NewGitHubSource(doer, releasesEndpoint, 4096)
+	source, _ := newGitHubSource(doer, releasesEndpoint, 4096)
 	_, err := source.listReleases(ctx)
 	if !errors.Is(err, context.Canceled) || calls != 1 {
 		t.Fatalf("err=%v calls=%d", err, calls)
@@ -176,7 +180,7 @@ func TestGitHubCancellationClosesAcquiredResponseExactlyOnce(t *testing.T) {
 			Body:       &boundaryBody{Reader: strings.NewReader(`[]`), closeErr: os.ErrClosed, closeCalls: &closeCalls},
 		}, nil
 	})
-	source, err := NewGitHubSource(doer, releasesEndpoint, 4096)
+	source, err := newGitHubSource(doer, releasesEndpoint, 4096)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +205,7 @@ func TestGitHubRequestPurposeRejectsHostileRedirects(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			doer := doerFunc(func(req *http.Request) (*http.Response, error) { return response(req, 200, `[]`, "", tc.final), nil })
-			source, _ := NewGitHubSource(doer, releasesEndpoint, 4096)
+			source, _ := newGitHubSource(doer, releasesEndpoint, 4096)
 			var err error
 			if tc.asset {
 				_, err = source.openAsset(context.Background(), exactTestAsset("https://github.com/dayvidpham/pasture/releases/download/v1.2.0/file"))
@@ -224,7 +228,7 @@ func TestGitHubRequestPurposeRejectsMissingFinalURL(t *testing.T) {
 			doer := doerFunc(func(*http.Request) (*http.Response, error) {
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("[]"))}, nil
 			})
-			source, _ := NewGitHubSource(doer, releasesEndpoint, 4096)
+			source, _ := newGitHubSource(doer, releasesEndpoint, 4096)
 			var err error
 			if asset {
 				_, err = source.openAsset(context.Background(), exactTestAsset("https://github.com/dayvidpham/pasture/releases/download/v1.2.0/file"))
@@ -246,7 +250,7 @@ func TestProductionConstructorAndOpenURLUseInjectedDoer(t *testing.T) {
 		}
 		return response(req, 200, "asset", "", ""), nil
 	})
-	source, err := NewGitHubSource(doer, releasesEndpoint, 4096)
+	source, err := newGitHubSource(doer, releasesEndpoint, 4096)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,12 +272,12 @@ func TestGitHubTransportAndStatusErrors(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name string
-		doer HTTPDoer
+		doer httpDoer
 	}{{"transport", doerFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("offline") })}, {"nil", doerFunc(func(*http.Request) (*http.Response, error) { return nil, nil })}, {"nil body", doerFunc(func(r *http.Request) (*http.Response, error) { return &http.Response{StatusCode: 200, Request: r}, nil })}, {"status", doerFunc(func(r *http.Request) (*http.Response, error) { return response(r, 503, "", "", ""), nil })}} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			source, _ := NewGitHubSource(tc.doer, releasesEndpoint, 4096)
+			source, _ := newGitHubSource(tc.doer, releasesEndpoint, 4096)
 			if _, err := source.listReleases(context.Background()); err == nil {
 				t.Fatal("expected error")
 			}
@@ -303,7 +307,7 @@ func TestProductionConstructorRejectsCallerPaginationState(t *testing.T) {
 func TestAssetTrustUsesExplicitReleaseHostsAndDownloadPaths(t *testing.T) {
 	t.Parallel()
 	doer := doerFunc(func(req *http.Request) (*http.Response, error) { return response(req, 200, "asset", "", ""), nil })
-	source, _ := NewGitHubSource(doer, releasesEndpoint, 4096)
+	source, _ := newGitHubSource(doer, releasesEndpoint, 4096)
 	approved := []string{"https://github.com/dayvidpham/pasture/releases/download/v1.2.0/pasture.tgz"}
 	for _, location := range approved {
 		reader, err := source.openAsset(context.Background(), exactTestAsset(location))
@@ -361,7 +365,7 @@ func TestManualRedirectLocationTrustBoundary(t *testing.T) {
 				}
 				return response(req, http.StatusOK, "asset", "", ""), nil
 			})
-			source, _ := NewGitHubSource(doer, releasesEndpoint, 4096)
+			source, _ := newGitHubSource(doer, releasesEndpoint, 4096)
 			reader, err := source.openAsset(context.Background(), exactTestAsset(test.initial))
 			if reader != nil {
 				reader.Close()
@@ -373,6 +377,49 @@ func TestManualRedirectLocationTrustBoundary(t *testing.T) {
 	}
 }
 
+func TestProductionClientCannotHideForbiddenIntermediateRedirect(t *testing.T) {
+	t.Parallel()
+	exact := "https://github.com/dayvidpham/pasture/releases/download/v1.2.0/file"
+	forbidden := "https://github.com/other/pasture/releases/download/v1.2.0/file"
+	approvedCDN := "https://release-assets.githubusercontent.com/github-production-release-asset/123/file"
+	requests := make([]string, 0, 3)
+	transport := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		requests = append(requests, req.URL.String())
+		result := response(req, http.StatusFound, "", "", "")
+		switch req.URL.String() {
+		case exact:
+			result.Header.Set("Location", forbidden)
+		case forbidden:
+			result.Header.Set("Location", approvedCDN)
+		default:
+			result.StatusCode = http.StatusOK
+		}
+		return result, nil
+	})
+	client := &http.Client{
+		Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return nil
+		},
+	}
+	source, err := NewGitHubSource(client, releasesEndpoint, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := source.openAsset(context.Background(), exactTestAsset(exact))
+	if reader != nil {
+		reader.Close()
+		t.Fatal("forbidden intermediate redirect returned a body")
+	}
+	var typed *Error
+	if !errors.As(err, &typed) || typed.Stage != "GitHub redirect" || typed.Location != forbidden {
+		t.Fatalf("typed=%v err=%v", typed, err)
+	}
+	if len(requests) != 1 || requests[0] != exact {
+		t.Fatalf("redirect policy allowed hidden hops: %v", requests)
+	}
+}
+
 func TestManualCatalogRedirectRejectsHostileLocation(t *testing.T) {
 	t.Parallel()
 	doer := doerFunc(func(req *http.Request) (*http.Response, error) {
@@ -380,7 +427,7 @@ func TestManualCatalogRedirectRejectsHostileLocation(t *testing.T) {
 		resp.Header.Set("Location", "https://evil.example/repos/dayvidpham/pasture/releases")
 		return resp, nil
 	})
-	source, _ := NewGitHubSource(doer, releasesEndpoint, 4096)
+	source, _ := newGitHubSource(doer, releasesEndpoint, 4096)
 	if _, err := source.listReleases(context.Background()); err == nil {
 		t.Fatal("hostile catalog 3xx accepted")
 	}
@@ -396,7 +443,7 @@ func TestGitHubMalformedTrailingAndOversizedPages(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			doer := doerFunc(func(r *http.Request) (*http.Response, error) { return response(r, 200, tc.body, "", ""), nil })
-			source, err := NewGitHubSource(doer, releasesEndpoint, tc.limit)
+			source, err := newGitHubSource(doer, releasesEndpoint, tc.limit)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -411,7 +458,7 @@ func TestGitHubCandidateLimitExhaustionIsExplicit(t *testing.T) {
 	t.Parallel()
 	body := `[{"tag_name":"v1.0.0","draft":false,"prerelease":false,"assets":[]},{"tag_name":"v0.9.0","draft":false,"prerelease":false,"assets":[]}]`
 	doer := doerFunc(func(r *http.Request) (*http.Response, error) { return response(r, 200, body, "", ""), nil })
-	source, err := NewGitHubSourceWithLimits(doer, releasesEndpoint, GitHubLimits{MaxCandidates: 1})
+	source, err := newGitHubSourceWithLimits(doer, releasesEndpoint, GitHubLimits{MaxCandidates: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +487,7 @@ func TestGitHubMalformedReleaseCasesAreIndependent(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			doer := doerFunc(func(r *http.Request) (*http.Response, error) { return response(r, 200, test.body, "", ""), nil })
-			source, _ := NewGitHubSource(doer, releasesEndpoint, 4096)
+			source, _ := newGitHubSource(doer, releasesEndpoint, 4096)
 			releases, err := source.listReleases(context.Background())
 			if test.skipped && err != nil {
 				t.Fatal(err)
@@ -465,7 +512,7 @@ func TestMalformedHistoricalReleaseDoesNotHideValidRelease(t *testing.T) {
 	t.Parallel()
 	body := `[{"tag_name":"v0.9.0","draft":false,"prerelease":false,"assets":[{"name":"bad","browser_download_url":"https://raw.githubusercontent.com/o/r/main/bad","size":1,"state":"uploaded"}]},{"tag_name":"v1.2.0","draft":false,"prerelease":false,"assets":[]}]`
 	doer := doerFunc(func(req *http.Request) (*http.Response, error) { return response(req, 200, body, "", ""), nil })
-	source, _ := NewGitHubSource(doer, releasesEndpoint, 4096)
+	source, _ := newGitHubSource(doer, releasesEndpoint, 4096)
 	releases, err := source.listReleases(context.Background())
 	if err != nil || len(releases) != 1 || releases[0].version.String() != "1.2.0" {
 		t.Fatalf("releases=%v err=%v", releases, err)
@@ -532,7 +579,7 @@ func TestProductionFailureBoundaryMatrixReturnsNoVerifiedOutput(t *testing.T) {
 				}
 				return response(req, 200, string(files[name]), "", ""), nil
 			})
-			source, _ := NewGitHubSource(doer, releasesEndpoint, 1<<20)
+			source, _ := newGitHubSource(doer, releasesEndpoint, 1<<20)
 			catalog, _ := New(source)
 			var verified artifact.VerifiedAggregate
 			candidates, err := catalog.ListCompatible(context.Background(), installerVersion(t), FinalsOnly)
@@ -595,7 +642,7 @@ func TestExactProductionFailureBranches(t *testing.T) {
 				}
 				return response(req, 200, string(files[name]), "", ""), nil
 			})
-			source, _ := NewGitHubSource(doer, releasesEndpoint, 1<<20)
+			source, _ := newGitHubSource(doer, releasesEndpoint, 1<<20)
 			catalog, _ := New(source)
 			var verified artifact.VerifiedAggregate
 			candidates, err := catalog.ListCompatible(context.Background(), installerVersion(t), FinalsOnly)
@@ -636,7 +683,7 @@ func TestExactProductionFailureBranches(t *testing.T) {
 			name := req.URL.Path[strings.LastIndex(req.URL.Path, "/")+1:]
 			return response(req, 200, string(files[name]), "", ""), nil
 		})
-		source, _ := NewGitHubSource(doer, releasesEndpoint, 1<<20)
+		source, _ := newGitHubSource(doer, releasesEndpoint, 1<<20)
 		catalog, _ := New(source)
 		candidates, err := catalog.ListCompatible(context.Background(), installerVersion(t), FinalsOnly)
 		if err != nil || len(candidates) != 1 {

@@ -56,6 +56,9 @@ func VerifyAggregate(ctx context.Context, source AggregateAssetSource, requireme
 	if source == nil {
 		return VerifiedAggregate{}, aggregateInvalid("aggregate verification", "asset source", "the asset source is nil", "release bytes cannot be read", "inject a GitHub release or filesystem asset source", fs.ErrInvalid)
 	}
+	if requirements.Installer.String() == "" {
+		return VerifiedAggregate{}, aggregateInvalid("aggregate verification", "installer version", "the installer version is zero or was not constructed", "release compatibility cannot be established", "parse the running installer version with ParseVersion before verification", fs.ErrInvalid)
+	}
 	manifestBytes, err := readBounded(ctx, source, AggregateManifestAsset, 4<<20)
 	if err != nil {
 		return VerifiedAggregate{}, err
@@ -131,7 +134,13 @@ func readBounded(ctx context.Context, source AggregateAssetSource, name string, 
 	}
 	r, err := source.OpenAsset(ctx, name)
 	if err != nil {
+		if r != nil {
+			_ = r.Close()
+		}
 		return nil, aggregateInvalid("asset open", name, fmt.Sprintf("the release asset could not be opened: %v", err), "verification is incomplete and mutation must not begin", "publish the named asset and ensure it is readable", err)
+	}
+	if r == nil {
+		return nil, aggregateInvalid("asset open", name, "the asset source returned no reader and no error", "verification cannot read the release asset and mutation must not begin", "repair AggregateAssetSource.OpenAsset to return a non-nil reader on success", fs.ErrInvalid)
 	}
 	b, err := io.ReadAll(io.LimitReader(r, limit+1))
 	closeErr := r.Close()

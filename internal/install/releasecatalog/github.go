@@ -23,8 +23,7 @@ const (
 	githubPageSize                    = 100
 )
 
-// HTTPDoer injects the GitHub HTTP transport while production URL validation remains active.
-type HTTPDoer interface {
+type httpDoer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
@@ -44,7 +43,7 @@ const (
 
 // GitHubSource is the production GitHub Releases API and asset boundary.
 type GitHubSource struct {
-	client      HTTPDoer
+	client      httpDoer
 	releasesURL *url.URL
 	repository  repositoryIdentity
 	limits      GitHubLimits
@@ -56,12 +55,25 @@ type assetIdentity struct {
 	tag, name  string
 }
 
-func NewGitHubSource(client HTTPDoer, releasesURL string, maxCatalogBytes int64) (*GitHubSource, error) {
+func NewGitHubSource(client *http.Client, releasesURL string, maxCatalogBytes int64) (*GitHubSource, error) {
 	return NewGitHubSourceWithLimits(client, releasesURL, GitHubLimits{MaxBytes: maxCatalogBytes})
 }
 
 // NewGitHubSourceWithLimits configures bounded discovery through the production trust boundary.
-func NewGitHubSourceWithLimits(client HTTPDoer, releasesURL string, limits GitHubLimits) (*GitHubSource, error) {
+func NewGitHubSourceWithLimits(client *http.Client, releasesURL string, limits GitHubLimits) (*GitHubSource, error) {
+	if client == nil {
+		return nil, invalid("GitHub source construction", "HTTP client", "the HTTP client is nil", "GitHub releases cannot be loaded", "inject an HTTP client with explicit timeouts", fs.ErrInvalid)
+	}
+	clone := *client
+	clone.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return newGitHubSourceWithLimits(&clone, releasesURL, limits)
+}
+
+func newGitHubSource(client httpDoer, releasesURL string, maxCatalogBytes int64) (*GitHubSource, error) {
+	return newGitHubSourceWithLimits(client, releasesURL, GitHubLimits{MaxBytes: maxCatalogBytes})
+}
+
+func newGitHubSourceWithLimits(client httpDoer, releasesURL string, limits GitHubLimits) (*GitHubSource, error) {
 	if client == nil {
 		return nil, invalid("GitHub source construction", "HTTP client", "the HTTP client is nil", "GitHub releases cannot be loaded", "inject an HTTP client with explicit timeouts", fs.ErrInvalid)
 	}
@@ -87,11 +99,6 @@ func NewGitHubSourceWithLimits(client HTTPDoer, releasesURL string, limits GitHu
 	query := base.Query()
 	query.Set("per_page", strconv.Itoa(githubPageSize))
 	base.RawQuery = query.Encode()
-	if httpClient, ok := client.(*http.Client); ok {
-		clone := *httpClient
-		clone.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-		client = &clone
-	}
 	return &GitHubSource{client: client, releasesURL: &base, repository: repository, limits: limits}, nil
 }
 
@@ -291,7 +298,7 @@ func (g *GitHubSource) get(ctx context.Context, endpoint *url.URL, purpose reque
 		}
 		if response.Request == nil || response.Request.URL == nil {
 			response.Body.Close()
-			return nil, invalid("GitHub response", current.String(), "transport omitted the final request URL", "redirect trust cannot be validated", "return the exact final request URL from HTTPDoer", fs.ErrPermission)
+			return nil, invalid("GitHub response", current.String(), "transport omitted the final request URL", "redirect trust cannot be validated", "return the exact final request URL from the HTTP transport", fs.ErrPermission)
 		}
 		final := response.Request.URL
 		if !validResponseURL(final, purpose, g.releasesURL, expected) {

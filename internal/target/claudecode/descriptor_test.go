@@ -81,13 +81,13 @@ func TestNewTargetDescriptorRejectsNonClaudeContract(t *testing.T) {
 	assert.Contains(t, err.Error(), "claude-code")
 }
 
-func TestNewTargetDescriptorRejectsWrongKindInSlot(t *testing.T) {
+func TestNewTargetDescriptorRejectsWrongExtensionInSlot(t *testing.T) {
 	d, err := claudecode.Descriptor()
 	require.NoError(t, err)
 
 	contract := runtime.ClaudeCode2_1_210().ID()
 	// Agents component placed in the skills slot must be rejected: each slot
-	// holds exactly its own kind.
+	// holds exactly its own extension.
 	_, err = claudecode.NewTargetDescriptor(contract, d.Agents(), d.Agents(), d.Hooks())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "skills")

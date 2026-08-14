@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"io/fs"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -24,6 +27,20 @@ const (
 )
 
 type memoryAssets map[string][]byte
+
+type aggregateSourceFunc func(context.Context, string) (io.ReadCloser, error)
+
+func (f aggregateSourceFunc) OpenAsset(ctx context.Context, name string) (io.ReadCloser, error) {
+	return f(ctx, name)
+}
+
+type aggregateCloseTracker struct{ closes int }
+
+func (*aggregateCloseTracker) Read([]byte) (int, error) { return 0, io.EOF }
+func (r *aggregateCloseTracker) Close() error {
+	r.closes++
+	return nil
+}
 
 func TestCanonicalExtensionsAreImmutableConstants(t *testing.T) {
 	t.Parallel()
@@ -173,6 +190,73 @@ func TestAggregateProducerRoundTripAndVerifiedCopies(t *testing.T) {
 		if bytes.Equal(first, second) {
 			t.Fatalf("asset %s was not defensively copied", component.ID())
 		}
+	}
+}
+
+func TestVerifyAggregateValidatesAssetAcquisition(t *testing.T) {
+	t.Parallel()
+	installer, err := artifact.ParseVersion("1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	openErr := errors.New("asset open failed")
+	for _, test := range []struct {
+		name       string
+		open       aggregateSourceFunc
+		wantCause  error
+		wantCloses int
+		tracker    *aggregateCloseTracker
+	}{
+		{
+			name:       "reader with error",
+			tracker:    &aggregateCloseTracker{},
+			wantCause:  openErr,
+			wantCloses: 1,
+		},
+		{
+			name:      "nil reader without error",
+			open:      func(context.Context, string) (io.ReadCloser, error) { return nil, nil },
+			wantCause: fs.ErrInvalid,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			open := test.open
+			if test.tracker != nil {
+				open = func(context.Context, string) (io.ReadCloser, error) { return test.tracker, openErr }
+			}
+			verified, err := artifact.VerifyAggregate(context.Background(), open, artifact.AggregateRequirements{Installer: installer})
+			var typed *artifact.AggregateValidationError
+			if !reflect.DeepEqual(verified, artifact.VerifiedAggregate{}) || !errors.Is(err, test.wantCause) || !errors.As(err, &typed) || typed.Stage != "asset open" || typed.Field != artifact.AggregateManifestAsset {
+				t.Fatalf("verified=%v typed=%v err=%v", verified, typed, err)
+			}
+			if test.tracker != nil && test.tracker.closes != test.wantCloses {
+				t.Fatalf("close calls=%d want=%d", test.tracker.closes, test.wantCloses)
+			}
+		})
+	}
+}
+
+func TestVerifyAggregateRejectsUnconstructedInstallerBeforeAssetIO(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	openErr := errors.New("asset open failed")
+	source := aggregateSourceFunc(func(context.Context, string) (io.ReadCloser, error) {
+		calls++
+		return nil, openErr
+	})
+	verified, err := artifact.VerifyAggregate(context.Background(), source, artifact.AggregateRequirements{})
+	var typed *artifact.AggregateValidationError
+	if !reflect.DeepEqual(verified, artifact.VerifiedAggregate{}) || !errors.As(err, &typed) || typed.Stage != "aggregate verification" || typed.Field != "installer version" || calls != 0 {
+		t.Fatalf("verified=%v typed=%v err=%v calls=%d", verified, typed, err, calls)
+	}
+
+	zero, err := artifact.ParseVersion("0.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = artifact.VerifyAggregate(context.Background(), source, artifact.AggregateRequirements{Installer: zero})
+	if !errors.Is(err, openErr) || calls != 1 {
+		t.Fatalf("parsed zero err=%v calls=%d", err, calls)
 	}
 }
 
