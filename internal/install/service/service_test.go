@@ -1147,6 +1147,155 @@ func TestServiceHomeManagerApplyCellRejectsDirectFile(t *testing.T) {
 	}
 }
 
+func TestServiceDirectFilePassThroughAndPendingTrustLifecycleThroughBothEntryPoints(t *testing.T) {
+	t.Parallel()
+	target, _ := cell.New(artifact.HarnessCodex, cell.HooksAxis())
+	for _, viaSelection := range []bool{false, true} {
+		viaSelection := viaSelection
+		t.Run(fmtBool(viaSelection), func(t *testing.T) {
+			t.Parallel()
+			base := t.TempDir()
+			root := filepath.Join(base, "targets")
+			state := filepath.Join(base, "state", "installations.yaml")
+			contractSet := contracts(t, root)
+			var calls []apply.Operation
+			policies := make([]apply.DirectFilePolicy, 0, 9)
+			for _, c := range cell.CanonicalCells() {
+				var policy apply.DirectFilePolicy
+				var err error
+				if c == target {
+					policy, err = apply.PendingNativeTrustDirectFile(c, func(request apply.DirectFileRequest) error {
+						calls = append(calls, request.Operation())
+						return nil
+					}, "review Codex native hook trust before enabling hooks")
+				} else {
+					policy, err = apply.PassThroughDirectFile(c)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				policies = append(policies, policy)
+			}
+			activator, err := apply.NewDirectFileActivator(policies...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			svc := newServiceConfig(t, root, state, service.Config{Contracts: contractSet, Activators: []apply.Activator{activator}})
+			request := service.CellRequest{Cell: target, Enabled: true, Scope: apply.GlobalScope(), Source: apply.InstallerSource()}
+			var result apply.Result
+			if viaSelection {
+				result, err = svc.ApplySelection(context.Background(), service.SelectionRequest{Selection: all(t, func(c cell.Cell) bool { return c == target }), Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+			} else {
+				result, err = svc.ApplyCell(context.Background(), request)
+			}
+			if err != nil || !result.OK() || len(result.Rows()) != 1 {
+				t.Fatalf("pending ensure result=%+v err=%v", result.Rows(), err)
+			}
+			row := result.Rows()[0]
+			if row.Status() != apply.InstalledPendingTrust() || row.Observation() != registry.ObservationInstalled || row.Operation() != apply.Ensure() || !strings.Contains(row.Diagnostic(), "review Codex") {
+				t.Fatalf("pending ensure row=%+v", row)
+			}
+			store, err := registry.Load(state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			key, _ := registry.GlobalKey(target)
+			record, ok := store.Lookup(key)
+			if !ok || record.Trust() != registry.TrustPending || record.LastOperation() != registry.OperationEnsure || record.LastOutcome() != registry.OutcomeCompleted {
+				t.Fatalf("pending authority=%+v present=%v", record, ok)
+			}
+			if len(calls) < 2 || calls[0] != apply.Inspect() || calls[len(calls)-1] != apply.Ensure() {
+				t.Fatalf("policy calls=%v, expected preliminary inspect then ensure", calls)
+			}
+
+			removeRequest := request
+			removeRequest.Enabled = false
+			remove, err := func() (apply.Result, error) {
+				if viaSelection {
+					return svc.ApplySelection(context.Background(), service.SelectionRequest{Selection: all(t, func(cell.Cell) bool { return false }), Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+				}
+				return svc.ApplyCell(context.Background(), removeRequest)
+			}()
+			if err != nil || !remove.OK() || len(remove.Rows()) != 1 || remove.Rows()[0].Status() != apply.Completed() || remove.Rows()[0].Observation() != registry.ObservationAbsent || remove.Rows()[0].Operation() != apply.RemoveOp() {
+				t.Fatalf("pending remove result=%+v err=%v", remove.Rows(), err)
+			}
+			removed, err := registry.Load(state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			removedRecord, ok := removed.Lookup(key)
+			if !ok || removedRecord.Trust() != registry.TrustNotApplicable || removedRecord.LastOperation() != registry.OperationRemove {
+				t.Fatalf("removed authority=%+v present=%v", removedRecord, ok)
+			}
+		})
+	}
+}
+
+func TestServicePendingTrustFailedRemoveComposesDiagnosticsThroughProductionPaths(t *testing.T) {
+	t.Parallel()
+	for _, viaSelection := range []bool{false, true} {
+		viaSelection := viaSelection
+		t.Run(fmtBool(viaSelection), func(t *testing.T) {
+			t.Parallel()
+			base := t.TempDir()
+			root := filepath.Join(base, "targets")
+			state := filepath.Join(base, "state", "installations.yaml")
+			target, _ := cell.New(artifact.HarnessCodex, cell.HooksAxis())
+			contractSet := contracts(t, root)
+			policies := make([]apply.DirectFilePolicy, 0, 9)
+			for _, c := range cell.CanonicalCells() {
+				var policy apply.DirectFilePolicy
+				var err error
+				if c == target {
+					policy, err = apply.PendingNativeTrustDirectFile(c, func(request apply.DirectFileRequest) error {
+						if request.Operation() == apply.RemoveOp() {
+							return errors.New("remove policy rejected before mutation")
+						}
+						return nil
+					}, "review Codex native hook trust after repairing removal")
+				} else {
+					policy, err = apply.PassThroughDirectFile(c)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				policies = append(policies, policy)
+			}
+			activator, err := apply.NewDirectFileActivator(policies...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			svc := newServiceConfig(t, root, state, service.Config{Contracts: contractSet, Activators: []apply.Activator{activator}})
+			install, err := svc.ApplyCell(context.Background(), service.CellRequest{Cell: target, Enabled: true, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+			if err != nil || !install.OK() {
+				t.Fatalf("install=%+v err=%v", install.Rows(), err)
+			}
+			var result apply.Result
+			if viaSelection {
+				result, err = svc.ApplySelection(context.Background(), service.SelectionRequest{Selection: all(t, func(c cell.Cell) bool { return false }), Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+			} else {
+				result, err = svc.ApplyCell(context.Background(), service.CellRequest{Cell: target, Enabled: false, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+			}
+			if err != nil || result.OK() || len(result.Rows()) != 1 {
+				t.Fatalf("failed remove result=%+v err=%v", result.Rows(), err)
+			}
+			row := result.Rows()[0]
+			if row.Status() != apply.Failed() || !strings.Contains(row.Diagnostic(), "remove policy rejected") {
+				t.Fatalf("failed remove diagnostics=%q row=%+v", row.Diagnostic(), row)
+			}
+			store, err := registry.Load(state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			key, _ := registry.GlobalKey(target)
+			record, ok := store.Lookup(key)
+			if !ok || record.Trust() != registry.TrustPending || record.LastOutcome() != registry.OutcomeCompleted || record.LastOperation() != registry.OperationEnsure || record.Observation() != registry.ObservationInstalled {
+				t.Fatalf("failed removal record=%+v present=%v", record, ok)
+			}
+		})
+	}
+}
+
 type probeGroup struct {
 	selectionCalls atomic.Int32
 	cellCalls      atomic.Int32
