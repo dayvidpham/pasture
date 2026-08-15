@@ -155,7 +155,7 @@ func TestNearMatchWrongScopeAndDuplicateFailBeforeMutation(t *testing.T) {
 	cases := map[string][]pluginRow{
 		"wrong scope":  {func() pluginRow { row := exactLegacy(); row.Scope = "project"; return row }()},
 		"near version": {func() pluginRow { row := exactLegacy(); version := "0.0.5"; row.Version = &version; return row }()},
-		"duplicate":    {exactLegacy(), exactLegacy()},
+		"duplicate":    {exactSplit("pasture-skills"), exactSplit("pasture-skills")},
 		"unknown": {func() pluginRow {
 			row := exactLegacy()
 			row.ID, row.Name = "pasture-other@aura-plugins", "pasture-other"
@@ -173,6 +173,17 @@ func TestNearMatchWrongScopeAndDuplicateFailBeforeMutation(t *testing.T) {
 			assert.Empty(t, host.mutations)
 		})
 	}
+}
+
+func TestDuplicateNativeRowDiagnosticNamesRowSelectorAndCell(t *testing.T) {
+	t.Parallel()
+	cc, err := cell.New(ir.HarnessClaudeCode, artifact.ExtensionSkills)
+	require.NoError(t, err)
+
+	assert.Equal(t,
+		`duplicate native row "native-skills@aura-plugins" affects selector "pasture-skills@aura-plugins" and cell "claude-code.skills"`,
+		duplicateNativeRowDiagnostic(pluginRow{ID: "native-skills@aura-plugins"}, cc),
+	)
 }
 
 func TestServiceMalformedStartingStatesFailBeforeMutation(t *testing.T) {

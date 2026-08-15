@@ -630,7 +630,7 @@ func (c *Controller) probe(ctx context.Context) (nativeSnapshot, error) {
 			continue
 		}
 		if _, duplicate := snapshot.plugins[cc]; duplicate {
-			return nativeSnapshot{}, fault("Claude native-state reconciliation", "one exact native row per Claude selector", fmt.Sprintf("duplicate native row %q affects selector %s and cell %s", row.ID, row.ID, cc), "Controller.probe", "reconciling native rows before mutation", "reconciliation stopped before any native mutation and the registry remains unchanged", "remove the duplicate row or repair the native listing, then retry the full selection", nil)
+			return nativeSnapshot{}, fault("Claude native-state reconciliation", "one exact native row per Claude selector", duplicateNativeRowDiagnostic(row, cc), "Controller.probe", "reconciling native rows before mutation", "reconciliation stopped before any native mutation and the registry remains unchanged", "remove the duplicate row or repair the native listing, then retry the full selection", nil)
 		}
 		snapshot.plugins[cc] = row
 	}
@@ -692,6 +692,10 @@ func classifyRow(row pluginRow) (cell.Cell, bool, bool) {
 		}
 	}
 	return cell.Cell{}, false, false
+}
+
+func duplicateNativeRowDiagnostic(row pluginRow, cc cell.Cell) string {
+	return fmt.Sprintf("duplicate native row %q affects selector %q and cell %q", row.ID, selector(packageFor(cc.Extension())), cc.String())
 }
 
 func (c *Controller) ensureMarketplace(ctx context.Context, present bool) error {
