@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 
 	"github.com/dayvidpham/pasture/internal/install/cell"
-	"github.com/dayvidpham/pasture/internal/install/inventory"
 	"github.com/dayvidpham/pasture/internal/install/registry"
 )
 
@@ -99,16 +98,19 @@ type ActionRow struct {
 	operation   Operation
 	status      Status
 	management  Management
-	observation inventory.Observation
+	observation registry.Observation
 	diagnostic  string
 }
 
-func (r ActionRow) Cell() cell.Cell                    { return r.cell }
-func (r ActionRow) Operation() Operation               { return r.operation }
-func (r ActionRow) Status() Status                     { return r.status }
-func (r ActionRow) Management() Management             { return r.management }
-func (r ActionRow) Observation() inventory.Observation { return r.observation }
-func (r ActionRow) Diagnostic() string                 { return r.diagnostic }
+func NewActionRow(c cell.Cell, operation Operation, status Status, management Management, observation registry.Observation, diagnostic string) ActionRow {
+	return ActionRow{cell: c, operation: operation, status: status, management: management, observation: observation, diagnostic: diagnostic}
+}
+func (r ActionRow) Cell() cell.Cell                   { return r.cell }
+func (r ActionRow) Operation() Operation              { return r.operation }
+func (r ActionRow) Status() Status                    { return r.status }
+func (r ActionRow) Management() Management            { return r.management }
+func (r ActionRow) Observation() registry.Observation { return r.observation }
+func (r ActionRow) Diagnostic() string                { return r.diagnostic }
 
 // Result is the transient apply-result document.
 type Result struct {
@@ -127,6 +129,10 @@ func (r Result) Rows() []ActionRow { return append([]ActionRow(nil), r.rows...) 
 
 // OK reports whether every executed row succeeded (no failure occurred).
 func (r Result) OK() bool { return r.ok }
+
+func NewResult(source Source, scope registry.Scope, ok bool, rows []ActionRow) Result {
+	return Result{source: source, scope: scope, ok: ok, rows: append([]ActionRow(nil), rows...)}
+}
 
 type rowWire struct {
 	Index       int    `json:"index"`
@@ -186,6 +192,10 @@ type ApplyError struct {
 	impact      string
 	fix         string
 	remediation Remediation
+}
+
+func NewApplyError(source Source, stage, reason, where, impact, fix string, remediation Remediation) *ApplyError {
+	return &ApplyError{source: source, stage: stage, reason: reason, where: where, impact: impact, fix: fix, remediation: remediation}
 }
 
 // Remediation is the closed caller action family carried by apply errors.

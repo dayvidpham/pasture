@@ -48,8 +48,12 @@ func (r FileRegistry) Save(ctx context.Context, store registry.Store) error {
 		return cell.NewFault("registry save", "live caller context", err.Error(), r.path, "before saving a confirmed installation fact", "the previous registry remains authoritative", "retry with a live context after inspecting the cell", err)
 	}
 	parent := filepath.Dir(r.path)
-	if err := os.MkdirAll(parent, 0o700); err != nil {
-		return cell.NewFault("registry save", "private state directory", err.Error(), parent, "creating the registry parent before atomic save", "the confirmed fact cannot be persisted and later cells will not run", "create a private writable directory and retry", err)
+	info, err := os.Lstat(parent)
+	if err != nil {
+		return cell.NewFault("registry save", "pre-created private state directory", err.Error(), parent, "validating the registry parent before atomic save", "no path was created and the confirmed fact cannot be persisted", "create this directory as a real private directory without symlinked components, then retry", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return cell.NewFault("registry save", "real non-symlink private state directory", fmt.Sprintf("registry parent has unsafe mode %s", info.Mode()), parent, "validating the registry parent before atomic save", "the accepted no-follow writer was not entered and no external path was changed", "replace the parent with a real private directory and retry", nil)
 	}
 	return registry.Save(r.path, store)
 }
@@ -60,19 +64,20 @@ type Config struct {
 	Registry   Registry
 	Contracts  map[ir.HarnessID]activation.ActivationContract
 	Activators []apply.Activator
+	Groups     []GroupReconciler
 }
 
 type Service struct {
 	registry  Registry
 	contracts map[ir.HarnessID]activation.ActivationContract
-	engine    *apply.Engine
+	engine    *engine
 }
 
 func New(config Config) (*Service, error) {
 	if config.Registry == nil {
 		return nil, cell.NewFault("installer service construction", "registry persistence", "the registry dependency is nil", "internal/install/service.New", "wiring the installer application service", "confirmed facts could not be loaded or saved", "provide FileRegistry or an atomic Registry implementation", nil)
 	}
-	engine, err := apply.NewEngine(config.Activators...)
+	engine, err := newEngine(config.Activators, config.Groups)
 	if err != nil {
 		return nil, err
 	}
@@ -98,23 +103,23 @@ type CellRequest struct {
 // ApplySelection and ApplyCell deliberately share load, canonical binding,
 // execution, and per-fact atomic persistence.
 func (s *Service) ApplySelection(ctx context.Context, request SelectionRequest) (apply.Result, error) {
-	store, err := s.load(ctx)
+	store, err := s.load(ctx, request.Source)
 	if err != nil {
 		return apply.Result{}, err
 	}
-	return s.engine.ApplySelection(ctx, request.Selection, request.Scope, request.Source, s.contracts, &store, s.registry.Save)
+	return s.engine.applySelection(ctx, request.Selection, request.Scope, request.Source, s.contracts, &store, s.registry.Save)
 }
 func (s *Service) ApplyCell(ctx context.Context, request CellRequest) (apply.Result, error) {
-	store, err := s.load(ctx)
+	store, err := s.load(ctx, request.Source)
 	if err != nil {
 		return apply.Result{}, err
 	}
-	return s.engine.ApplyCell(ctx, request.Cell, request.Enabled, request.Scope, request.Source, s.contracts, &store, s.registry.Save)
+	return s.engine.applyCell(ctx, request.Cell, request.Enabled, request.Scope, request.Source, s.contracts, &store, s.registry.Save)
 }
-func (s *Service) load(ctx context.Context) (registry.Store, error) {
+func (s *Service) load(ctx context.Context, source apply.Source) (registry.Store, error) {
 	store, err := s.registry.Load(ctx)
 	if err != nil {
-		return registry.Store{}, cell.NewFault("installer service load", "readable authoritative installation registry", err.Error(), "internal/install/service.Service.load", "before planning an apply operation", "no activation was attempted because ownership facts could not be trusted", "repair the registry path, type, permissions, or contents, then retry", err)
+		return registry.Store{}, apply.NewApplyError(source, "registry-load", err.Error(), "internal/install/service.Service.load", "no activation was attempted because authoritative ownership facts could not be trusted", "repair the registry path, type, permissions, or contents, then retry", apply.RemediationManualRepair)
 	}
 	return store, nil
 }

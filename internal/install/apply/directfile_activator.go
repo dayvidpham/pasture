@@ -44,6 +44,9 @@ func (a DirectFileActivator) Inspect(ctx context.Context, source Source, key reg
 	if err != nil {
 		return Outcome{Observation: registry.ObservationUnknown}, err
 	}
+	if err := validateDestinationRoot(df.DestinationRoot()); err != nil {
+		return Outcome{Observation: registry.ObservationUnknown}, err
+	}
 	type liveLeaf struct {
 		leaf           registry.Leaf
 		current, prior bool
@@ -130,6 +133,9 @@ func (a DirectFileActivator) Ensure(ctx context.Context, source Source, key regi
 	if err != nil {
 		return Outcome{Observation: registry.ObservationUnknown}, err
 	}
+	if err := validateDestinationRoot(df.DestinationRoot()); err != nil {
+		return Outcome{Observation: registry.ObservationUnknown}, err
+	}
 	var priorLeaves []registry.Leaf
 	if prior != nil && prior.Managed() {
 		priorLeaves = prior.Leaves()
@@ -166,6 +172,9 @@ func (a DirectFileActivator) Remove(ctx context.Context, source Source, key regi
 	if err != nil {
 		return Outcome{Observation: registry.ObservationUnknown}, err
 	}
+	if err := validateDestinationRoot(df.DestinationRoot()); err != nil {
+		return Outcome{Observation: registry.ObservationUnknown}, err
+	}
 	dirs := make([]string, 0, len(prior.CreatedDirs()))
 	for _, d := range prior.CreatedDirs() {
 		dirs = append(dirs, d.String())
@@ -177,6 +186,10 @@ func (a DirectFileActivator) Remove(ctx context.Context, source Source, key regi
 	out, inspectErr := a.Inspect(ctx, source, key, act, &prior)
 	if inspectErr != nil {
 		return out, cell.NewFault("direct-file remove", "live-confirmed absent postcondition", inspectErr.Error(), df.DestinationRoot(), "inspecting after remove", "the unlink may have partially succeeded but no unproved fact will be persisted", "inspect the destination and rerun removal", inspectErr)
+	}
+	if out.Observation != registry.ObservationAbsent {
+		postErr := cell.NewFault("direct-file remove", "live-confirmed absent postcondition", fmt.Sprintf("live observation is %s after removal", out.Observation), df.DestinationRoot(), "inspecting after remove", "the component remains installed or its state is unknown, so uninstall is failed and retryable", "preserve the remaining files, inspect their ownership, and rerun removal", nil)
+		return a.inspectAfterFailure(ctx, source, key, act, &prior, registry.OperationRemove, postErr)
 	}
 	diagnostic := ""
 	if len(removeOut.PreservedDirs) > 0 {
@@ -253,6 +266,30 @@ func checkParents(root, rel string) error {
 		}
 		if info.Mode().Type()&fs.ModeSymlink != 0 || !info.IsDir() {
 			return cell.NewFault("direct-file inspection", "non-symlink directory boundary", fmt.Sprintf("unsafe parent type %s", info.Mode().Type()), cur, "walking destination parents", "inspection could escape or address the wrong tree", "replace the boundary with a real directory", nil)
+		}
+	}
+	return nil
+}
+
+func validateDestinationRoot(root string) error {
+	clean := filepath.Clean(root)
+	if !filepath.IsAbs(clean) {
+		return cell.NewFault("direct-file path validation", "absolute destination root", fmt.Sprintf("root %q is relative", root), root, "anchoring the destination before inspection or mutation", "working-directory changes could select another tree", "configure an absolute destination root", nil)
+	}
+	volume := filepath.VolumeName(clean)
+	remainder := strings.TrimPrefix(clean, volume)
+	cur := volume + string(filepath.Separator)
+	for _, part := range strings.Split(strings.TrimPrefix(remainder, string(filepath.Separator)), string(filepath.Separator)) {
+		if part == "" {
+			continue
+		}
+		cur = filepath.Join(cur, part)
+		info, err := os.Lstat(cur)
+		if err != nil {
+			return cell.NewFault("direct-file path validation", "existing non-symlink destination ancestry", err.Error(), cur, "anchoring the destination before inspection or mutation", "Pasture cannot prove the destination stays inside the configured tree", "create each destination ancestor as a real directory, then retry", err)
+		}
+		if info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() {
+			return cell.NewFault("direct-file path validation", "real directory destination ancestry", fmt.Sprintf("path has unsafe mode %s", info.Mode()), cur, "anchoring the destination before inspection or mutation", "following this boundary could inspect, write, or remove another tree", "replace the boundary with a real directory and retry", nil)
 		}
 	}
 	return nil
