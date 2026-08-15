@@ -150,22 +150,23 @@ func (r *eventRegistry) Save(ctx context.Context, store registry.Store) error {
 }
 
 type recordingGroup struct {
-	mu             sync.Mutex
-	events         *[]string
-	planErr        error
-	plan           func(service.GroupSelection) (service.GroupPlan, error)
-	handledOnError bool
-	executeErr     error
-	inspectErr     error
-	closeErr       error
-	cancel         context.CancelFunc
-	inspectLive    bool
-	malform        func(service.GroupSelection, service.GroupPlan, service.GroupStep, []service.GroupAction) []service.GroupAction
-	closeCount     int
-	planCount      int
-	stage          service.GroupTerminalStage
-	priorAt        map[string][][]string
-	executed       []executedGroupStep
+	mu               sync.Mutex
+	events           *[]string
+	planErr          error
+	plan             func(service.GroupSelection) (service.GroupPlan, error)
+	handledOnError   bool
+	executeErr       error
+	inspectErr       error
+	inspectErrByCell map[cell.Cell]error
+	closeErr         error
+	cancel           context.CancelFunc
+	inspectLive      bool
+	malform          func(service.GroupSelection, service.GroupPlan, service.GroupStep, []service.GroupAction) []service.GroupAction
+	closeCount       int
+	planCount        int
+	stage            service.GroupTerminalStage
+	priorAt          map[string][][]string
+	executed         []executedGroupStep
 }
 
 type executedGroupStep struct {
@@ -529,6 +530,9 @@ func (g *recordingGroup) InspectAction(ctx context.Context, request service.Grou
 	*g.events = append(*g.events, "inspect:"+step.ControlCell().String())
 	g.inspectLive = ctx.Err() == nil
 	g.mu.Unlock()
+	if err := g.inspectErrByCell[step.ControlCell()]; err != nil {
+		return service.GroupFacts{}, err
+	}
 	if g.inspectErr != nil {
 		return service.GroupFacts{}, g.inspectErr
 	}
@@ -562,6 +566,179 @@ func (g *recordingGroup) InspectAction(ctx context.Context, request service.Grou
 		return service.GroupFacts{}, nil
 	}
 	return service.NewGroupFacts(actions...)
+}
+
+func groupStoreRecords(t *testing.T, repo *eventRegistry) map[cell.Cell]registry.Record {
+	t.Helper()
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	result := make(map[cell.Cell]registry.Record)
+	for _, record := range repo.store.Ordered() {
+		result[record.Cell()] = record
+	}
+	return result
+}
+
+func assertGroupRow(t *testing.T, row apply.ActionRow, wantStatus apply.Status, wantOperation apply.Operation, wantManagement apply.Management, wantObservation registry.Observation, wantRecord bool) {
+	t.Helper()
+	if row.Status() != wantStatus || row.Operation() != wantOperation || row.Management() != wantManagement || row.Observation() != wantObservation {
+		t.Fatalf("row %s = status=%s operation=%s management=%s observation=%s, want %s/%s/%s/%s", row.Cell(), row.Status(), row.Operation(), row.Management(), row.Observation(), wantStatus, wantOperation, wantManagement, wantObservation)
+	}
+	if wantRecord && row.Diagnostic() == "" {
+		t.Fatalf("row %s has no diagnostic despite confirmed record", row.Cell())
+	}
+}
+
+func TestServiceGroupFailureRowsAndAuthorityAreComplete(t *testing.T) {
+	t.Parallel()
+	events := []string{}
+	group := &recordingGroup{events: &events, inspectErrByCell: map[cell.Cell]error{mustCell(t, artifact.HarnessClaudeCode, cell.AgentsAxis()): errors.New("second probe failed")}}
+	repo := &eventRegistry{store: registry.New(), events: &events}
+	request := groupRequest(t)
+	request.Selection = all(t, func(c cell.Cell) bool { return c == mustCell(t, artifact.HarnessClaudeCode, cell.SkillsAxis()) })
+	group.plan = func(selection service.GroupSelection) (service.GroupPlan, error) {
+		return selectionGroupPlan(t, selection, 0, cell.Cell{}), nil
+	}
+	result, err := groupService(t, group, repo).ApplySelection(context.Background(), request)
+	if err != nil || result.OK() || group.closeCount != 1 {
+		t.Fatalf("result=%+v err=%v events=%v closes=%d", result.Rows(), err, events, group.closeCount)
+	}
+	rows := result.Rows()
+	if len(rows) != 3 {
+		t.Fatalf("rows=%d, want three canonical group rows", len(rows))
+	}
+	assertGroupRow(t, rows[0], apply.Completed(), apply.Ensure(), apply.ManagementPasture, registry.ObservationAbsent, true)
+	assertGroupRow(t, rows[1], apply.Failed(), apply.RemoveOp(), apply.ManagementPasture, registry.ObservationAbsent, true)
+	assertGroupRow(t, rows[2], apply.Completed(), apply.RemoveOp(), apply.ManagementPasture, registry.ObservationAbsent, true)
+	if rows[0].Diagnostic() != "live fact" || rows[2].Diagnostic() != "live fact" {
+		t.Fatalf("successful live diagnostics changed: skills=%q hooks=%q", rows[0].Diagnostic(), rows[2].Diagnostic())
+	}
+	if !strings.Contains(rows[1].Diagnostic(), "second probe failed") || strings.Contains(fmt.Sprint(events), "execute:claude-code.hooks") {
+		t.Fatalf("failure row/events lost probe or attempted later action: row=%+v events=%v", rows[1], events)
+	}
+	records := groupStoreRecords(t, repo)
+	if len(records) != 3 {
+		t.Fatalf("persisted records=%d, want complete live authority after first successful action", len(records))
+	}
+	for _, c := range []cell.Cell{mustCell(t, artifact.HarnessClaudeCode, cell.SkillsAxis()), mustCell(t, artifact.HarnessClaudeCode, cell.AgentsAxis()), mustCell(t, artifact.HarnessClaudeCode, cell.HooksAxis())} {
+		if record, ok := records[c]; !ok || record.Observation() != registry.ObservationAbsent {
+			t.Fatalf("persisted record for %s=%+v, want confirmed absent observation", c, record)
+		}
+	}
+}
+
+func TestServiceGroupMutationThenErrorUsesSuccessfulLiveProbe(t *testing.T) {
+	t.Parallel()
+	events := []string{}
+	group := &recordingGroup{events: &events, executeErr: errors.New("mutation returned an error after changing native state")}
+	repo := &eventRegistry{store: registry.New(), events: &events}
+	result, err := groupService(t, group, repo).ApplySelection(context.Background(), groupRequest(t))
+	if err != nil || result.OK() || len(result.Rows()) != 3 {
+		t.Fatalf("result=%+v err=%v", result.Rows(), err)
+	}
+	row := result.Rows()[0]
+	assertGroupRow(t, row, apply.Failed(), apply.Inspect(), apply.ManagementPasture, registry.ObservationAbsent, true)
+	if !strings.Contains(row.Diagnostic(), "mutation returned an error") {
+		t.Fatalf("row lost action diagnostic: %s", row.Diagnostic())
+	}
+	records := groupStoreRecords(t, repo)
+	control := mustCell(t, artifact.HarnessClaudeCode, cell.SkillsAxis())
+	record, ok := records[control]
+	if !ok || record.LastOperation() != registry.OperationInspect || record.LastOutcome() != registry.OutcomeFailed || record.Observation() != registry.ObservationAbsent {
+		t.Fatalf("persisted control fact=%+v, want failed live-probe authority", record)
+	}
+}
+
+func TestServiceGroupRetryReturnsRowsFromCommittedRegistryOnly(t *testing.T) {
+	t.Parallel()
+	events := []string{}
+	group := &recordingGroup{events: &events}
+	repo := &eventRegistry{store: registry.New(), events: &events, saveErr: errors.New("first save failed")}
+	svc := groupService(t, group, repo)
+	first, err := svc.ApplySelection(context.Background(), groupRequest(t))
+	if err != nil || first.OK() || len(groupStoreRecords(t, repo)) != 0 {
+		t.Fatalf("first failed apply=%+v err=%v store=%v", first.Rows(), err, groupStoreRecords(t, repo))
+	}
+	if got := group.priorAt["plan"]; len(got) != 1 {
+		t.Fatalf("plan prior count=%d, want one failed attempt", len(got))
+	}
+	repo.saveErr = nil
+	second, err := svc.ApplySelection(context.Background(), groupRequest(t))
+	if err != nil || !second.OK() || len(second.Rows()) != 3 {
+		t.Fatalf("retry=%+v err=%v", second.Rows(), err)
+	}
+	for _, row := range second.Rows() {
+		if row.Status() != apply.Completed() || row.Management() != apply.ManagementPasture || row.Observation() != registry.ObservationAbsent {
+			t.Fatalf("retry returned non-authoritative row=%+v", row)
+		}
+	}
+	records := groupStoreRecords(t, repo)
+	if len(records) != 3 {
+		t.Fatalf("retry persisted %d records, want complete three-cell authority", len(records))
+	}
+	if got := group.priorAt["plan"][1]; len(got) != 3 || got[0] != "claude-code.skills:<absent>" || got[1] != "claude-code.agents:<absent>" || got[2] != "claude-code.hooks:<absent>" {
+		t.Fatalf("retry reused uncommitted authority: %v", got)
+	}
+	if strings.Contains(fmt.Sprint(events), "execute:claude-code.hooks") && len(group.executed) < 4 {
+		t.Fatalf("remaining work was attempted before retry committed prior facts: %v", events)
+	}
+}
+
+func TestServiceGroupSaveFailurePreservesCompletePriorAuthority(t *testing.T) {
+	t.Parallel()
+	events := []string{}
+	prior := registry.New()
+	repo := &eventRegistry{store: prior, events: &events, saveErr: errors.New("save failed")}
+	group := &recordingGroup{events: &events}
+	request := groupRequest(t)
+	result, err := groupService(t, group, repo).ApplySelection(context.Background(), request)
+	if err != nil || result.OK() || group.closeCount != 1 {
+		t.Fatalf("result=%+v err=%v events=%v closes=%d", result.Rows(), err, events, group.closeCount)
+	}
+	rows := result.Rows()
+	if len(rows) != 3 {
+		t.Fatalf("rows=%d, want three canonical rows", len(rows))
+	}
+	assertGroupRow(t, rows[0], apply.Failed(), apply.Inspect(), apply.ManagementPasture, registry.ObservationAbsent, true)
+	for i, row := range rows[1:] {
+		assertGroupRow(t, row, apply.Completed(), row.Operation(), apply.ManagementPasture, registry.ObservationAbsent, true)
+		if row.Diagnostic() != "live fact" {
+			t.Fatalf("saved-failure sibling %d diagnostic=%q, want live fact", i+1, row.Diagnostic())
+		}
+	}
+	for i, row := range rows[1:] {
+		if row.Status() == apply.Unattempted() && row.Management() == apply.ManagementUnknown && row.Observation() == registry.ObservationUnknown {
+			if _, ok := groupStoreRecords(t, repo)[row.Cell()]; ok {
+				t.Fatalf("unresolved sibling %d=%s manufactured persisted authority", i+1, row.Cell())
+			}
+		}
+	}
+	if got := groupStoreRecords(t, repo); len(got) != 0 {
+		t.Fatalf("save failure changed prior authority: %+v", got)
+	}
+	if strings.Contains(fmt.Sprint(events), "execute:claude-code.agents") {
+		t.Fatalf("later action ran after save failure: %v", events)
+	}
+}
+
+func TestServiceGroupInitialUnresolvedPlaceholdersAreRecordFree(t *testing.T) {
+	t.Parallel()
+	events := []string{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	group := &recordingGroup{events: &events}
+	result, err := groupService(t, group, nil).ApplySelection(ctx, groupRequest(t))
+	if err != nil || result.OK() || len(result.Rows()) != 3 {
+		t.Fatalf("result=%+v err=%v", result.Rows(), err)
+	}
+	for i, row := range result.Rows()[1:] {
+		if row.Status() != apply.Unattempted() || row.Management() != apply.ManagementUnknown || row.Observation() != registry.ObservationUnknown || row.Diagnostic() == "" {
+			t.Fatalf("unresolved placeholder %d=%+v, want Unattempted/ManagementUnknown/ObservationUnknown with diagnostic", i+1, row)
+		}
+	}
+	if strings.Contains(fmt.Sprint(events), "save") || strings.Contains(fmt.Sprint(events), "execute:") {
+		t.Fatalf("canceled group manufactured authority or ran an action: %v", events)
+	}
 }
 func (g *recordingGroup) ClosePlan(_ context.Context, request service.GroupSelection, _ service.GroupPlan, stage service.GroupTerminalStage) error {
 	g.mu.Lock()
