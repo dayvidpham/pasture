@@ -25,7 +25,7 @@ func NewDirectFileActivator(policies ...DirectFilePolicy) (*DirectFileActivator,
 	}
 	indexed := make(map[cell.Cell]DirectFilePolicy, len(policies))
 	for _, policy := range policies {
-		if !policy.Cell().IsValid() || policy.validate == nil || policy.decorate == nil {
+		if !policy.Cell().IsValid() || policy.validate == nil || policy.mode.kind < directFileDecorationPassThrough || policy.mode.kind > directFileDecorationPendingNativeTrust {
 			return nil, cell.NewFault("direct-file activator construction", "complete validated policies", fmt.Sprintf("policy for %s is invalid", policy.Cell()), "internal/install/apply.NewDirectFileActivator", "indexing policy dispatch", "a request could bypass validation or decoration constraints", "construct every policy with NewDirectFilePolicy", nil)
 		}
 		if _, exists := indexed[policy.Cell()]; exists {
@@ -43,6 +43,9 @@ func (*DirectFileActivator) StrategyKind() activation.StrategyKind {
 // ValidateBindings proves at service construction that policy dispatch is an
 // exact bijection with the statically bound DirectFile cells.
 func (a *DirectFileActivator) ValidateBindings(bindings []activation.ComponentActivation) error {
+	if a == nil {
+		return cell.NewFault("direct-file policy binding", "non-nil DirectFile activator", "the activator receiver is nil", "internal/install/apply.DirectFileActivator.ValidateBindings", "validating service construction", "policy coverage cannot be checked", "construct the activator with NewDirectFileActivator", nil)
+	}
 	required := make(map[cell.Cell]struct{}, len(bindings))
 	for _, binding := range bindings {
 		if !binding.IsValid() || binding.Strategy().Kind() != activation.DirectFileKindValue() {
@@ -64,6 +67,9 @@ func (a *DirectFileActivator) ValidateBindings(bindings []activation.ComponentAc
 }
 
 func (a *DirectFileActivator) strategy(act activation.ComponentActivation) (activation.DirectFile, error) {
+	if a == nil {
+		return activation.DirectFile{}, cell.NewFault("direct-file activation", "non-nil DirectFile activator", "the activator receiver is nil", "internal/install/apply.DirectFileActivator.strategy", "dispatching direct-file activation", "no filesystem operation can run safely", "construct the activator with NewDirectFileActivator", nil)
+	}
 	df, ok := act.Strategy().(activation.DirectFile)
 	if !ok || !df.IsValid() {
 		return activation.DirectFile{}, cell.NewFault("direct-file activation", "valid direct-file strategy", fmt.Sprintf("cell %s is not bound to a valid direct-file strategy", act.Cell()), "internal/install/apply.DirectFileActivator.strategy", "dispatching a direct-file activation", "the wrong controller would inspect or mutate the cell", "bind this cell to a validated direct-file strategy", nil)
@@ -75,6 +81,9 @@ func (a *DirectFileActivator) strategy(act activation.ComponentActivation) (acti
 // wholly absent, and ambiguous/partial state without creating directories.
 func (a *DirectFileActivator) policyRequest(operation Operation, source Source, key registry.Key, act activation.ComponentActivation, prior *registry.Record) (DirectFilePolicy, DirectFileRequest, error) {
 	request := newDirectFileRequest(operation, source, key, act, prior)
+	if a == nil {
+		return DirectFilePolicy{}, request, cell.NewFault("direct-file request validation", "non-nil DirectFile activator", "the activator receiver is nil", "internal/install/apply.DirectFileActivator.policyRequest", "before direct-file filesystem access", "no filesystem path was inspected or mutated", "construct the activator with NewDirectFileActivator", nil)
+	}
 	if !operation.IsValid() || !source.IsValid() || !key.Cell().IsValid() || !act.IsValid() || key.Cell() != act.Cell() || act.Strategy().Kind() != activation.DirectFileKindValue() {
 		return DirectFilePolicy{}, request, cell.NewFault("direct-file request validation", "matching valid operation, source, key, activation, and DirectFile strategy", fmt.Sprintf("request for key cell %s and activation cell %s is inconsistent", key.Cell(), act.Cell()), "internal/install/apply.DirectFileActivator.policyRequest", "before direct-file filesystem access", "no filesystem path was inspected or mutated", "construct the request from the matching activation binding and scoped key", nil)
 	}
@@ -94,9 +103,9 @@ func (a *DirectFileActivator) Inspect(ctx context.Context, source Source, key re
 		return Outcome{Observation: registry.ObservationUnknown}, err
 	}
 	out, genericErr := a.inspect(ctx, source, key, act, prior)
-	decorated, decorateErr := policy.apply(request, out)
+	decorated, decorateErr := policy.apply(request, out, genericErr)
 	if decorateErr != nil {
-		return out, decorateErr
+		return out, joinDirectFileErrors(genericErr, decorateErr)
 	}
 	return decorated, genericErr
 }
@@ -182,9 +191,9 @@ func (a *DirectFileActivator) Ensure(ctx context.Context, source Source, key reg
 		return Outcome{Observation: registry.ObservationUnknown}, err
 	}
 	out, genericErr := a.ensure(ctx, source, key, act, prior)
-	decorated, decorateErr := policy.apply(request, out)
+	decorated, decorateErr := policy.apply(request, out, genericErr)
 	if decorateErr != nil {
-		return out, decorateErr
+		return out, joinDirectFileErrors(genericErr, decorateErr)
 	}
 	return decorated, genericErr
 }
@@ -270,9 +279,9 @@ func (a *DirectFileActivator) Remove(ctx context.Context, source Source, key reg
 		return Outcome{Observation: registry.ObservationUnknown}, err
 	}
 	out, genericErr := a.remove(ctx, source, key, act, prior)
-	decorated, decorateErr := policy.apply(request, out)
+	decorated, decorateErr := policy.apply(request, out, genericErr)
 	if decorateErr != nil {
-		return out, decorateErr
+		return out, joinDirectFileErrors(genericErr, decorateErr)
 	}
 	return decorated, genericErr
 }
