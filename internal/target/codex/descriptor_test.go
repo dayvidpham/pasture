@@ -21,9 +21,9 @@ func testBundle(t *testing.T, name string) artifact.Bundle {
 }
 
 func TestDescriptorIsExhaustiveAndHooksDefaultOff(t *testing.T) {
-	s, _ := codex.NewComponent(artifact.ExtensionSkills, testBundle(t, "SKILL.md"), true)
-	a, _ := codex.NewComponent(artifact.ExtensionAgents, testBundle(t, "worker.toml"), true)
-	h, _ := codex.NewComponent(artifact.ExtensionHooks, testBundle(t, "hooks.json"), false)
+	s, _ := codex.NewComponent(artifact.ExtensionSkills, testBundle(t, ".agents/skills/example/SKILL.md"), true)
+	a, _ := codex.NewComponent(artifact.ExtensionAgents, testBundle(t, ".codex/agents/worker.toml"), true)
+	h, _ := codex.NewComponent(artifact.ExtensionHooks, testBundle(t, ".codex/hooks/events/SessionStart.sh"), false)
 	d, err := codex.NewTargetDescriptor(s, a, h)
 	if err != nil {
 		t.Fatal(err)
@@ -31,7 +31,30 @@ func TestDescriptorIsExhaustiveAndHooksDefaultOff(t *testing.T) {
 	if !d.IsValid() || len(d.Components()) != 3 || d.Hooks().DefaultEnabled() {
 		t.Fatalf("invalid descriptor")
 	}
-	if _, err := codex.NewComponent(artifact.ExtensionHooks, testBundle(t, "bad.json"), true); err == nil {
+	if _, err := codex.NewComponent(artifact.ExtensionHooks, testBundle(t, ".codex/hooks/events/bad.sh"), true); err == nil {
 		t.Fatal("enabled hooks accepted")
+	}
+}
+
+func TestComponentConstructionRejectsInvalidLayouts(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		extension artifact.Extension
+		bundle    artifact.Bundle
+	}{
+		{name: "wrong skills prefix", extension: artifact.ExtensionSkills, bundle: testBundle(t, ".codex/skills/example/SKILL.md")},
+		{name: "agent sibling prefix", extension: artifact.ExtensionAgents, bundle: testBundle(t, ".agents/skills/example/SKILL.md")},
+		{name: "unapproved hook public file", extension: artifact.ExtensionHooks, bundle: testBundle(t, ".codex/private-trust.json")},
+		{name: "empty hook bundle", extension: artifact.ExtensionHooks, bundle: artifact.Bundle{}},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := codex.NewComponent(test.extension, test.bundle, false); err == nil {
+				t.Fatalf("NewComponent(%s) accepted invalid immutable layout", test.extension)
+			}
+		})
 	}
 }

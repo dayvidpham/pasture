@@ -1,6 +1,8 @@
 {
   "contract": "codex/global@0.146.0",
   "runtime_contract": "codex/codex@0.146.0",
+  "host_min": "0.144.1",
+  "host_max": "0.146.0",
   "components": [
     {"extension": "skills", "package": "pasture-codex-skills", "prefix": ".agents/skills/", "default_enabled": true},
     {"extension": "agents", "package": "pasture-codex-agents", "prefix": ".codex/agents/", "default_enabled": true},

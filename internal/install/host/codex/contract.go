@@ -16,18 +16,46 @@ import (
 
 const ActivationContractID = "codex/global@0.146.0"
 
+var installerVersions = mustInstallerVersions()
+
+func mustInstallerVersions() runtime.VersionConstraint {
+	// The global installer accepts the reviewed Codex activation interval from
+	// the documented 0.144.1 host contract through the repository's pinned 0.146.0
+	// target. This range does not widen the generated RuntimeContractID: emitted
+	// artifacts remain exactly codex/codex@0.146.0.
+	min, err := runtime.ParseHostVersion("0.144.1")
+	if err != nil {
+		panic(err)
+	}
+	max, err := runtime.ParseHostVersion("0.146.0")
+	if err != nil {
+		panic(err)
+	}
+	versions, err := runtime.NewVersionConstraint(min, max, false)
+	if err != nil {
+		panic(err)
+	}
+	return versions
+}
+
 // NewActivationContract binds all three independent Codex packages beneath one
 // absolute home root. Their immutable bundle paths retain the public native
 // `.agents/skills`, `.codex/agents`, and `.codex/hooks` layouts.
 func NewActivationContract(target targetcodex.TargetDescriptor, home string) (activation.ActivationContract, error) {
-	if !target.IsValid() || target.Harness() != ir.HarnessCodex || target.RuntimeContractID() != runtime.Codex0_146_0().ID() {
-		return activation.ActivationContract{}, fmt.Errorf("Codex activation contract construction failed: target descriptor is invalid or was not compiled for %s; rebuild it with target/codex.Descriptor", runtime.Codex0_146_0().ID())
+	if !target.IsValid() || target.Harness() != ir.HarnessCodex {
+		return activation.ActivationContract{}, fmt.Errorf("Codex activation contract rejected an invalid target descriptor before host validation: the descriptor is zero, malformed, or belongs to another harness; rebuild it with target/codex.Descriptor and retry")
+	}
+	if target.RuntimeContractID() != runtime.Codex0_146_0().ID() {
+		return activation.ActivationContract{}, fmt.Errorf("Codex activation contract rejected target runtime %q before host validation: generated artifacts must remain exactly compiled for %s; regenerate target/codex and review the runtime contract change instead of widening installer compatibility", target.RuntimeContractID(), runtime.Codex0_146_0().ID())
 	}
 	if home == "" || !filepath.IsAbs(home) || filepath.Clean(home) != home {
 		return activation.ActivationContract{}, fmt.Errorf("Codex activation contract construction failed: home root %q is empty, relative, or unclean; pass one canonical absolute user home directory", home)
 	}
 	activations := make([]activation.ComponentActivation, 0, 3)
 	for _, component := range target.Components() {
+		if err := targetcodex.ValidateComponentLayout(component); err != nil {
+			return activation.ActivationContract{}, fmt.Errorf("validate immutable Codex %s layout before activation: %w", component.Extension(), err)
+		}
 		strategy, err := activation.NewDirectFile(component.Bundle(), home)
 		if err != nil {
 			return activation.ActivationContract{}, fmt.Errorf("bind Codex %s direct-file strategy at %q: %w", component.Extension(), home, err)
@@ -54,5 +82,5 @@ func NewActivationContract(target targetcodex.TargetDescriptor, home string) (ac
 	if err != nil {
 		return activation.ActivationContract{}, err
 	}
-	return activation.NewActivationContract(id, ir.HarnessCodex, runtime.Codex0_146_0().Versions(), probe, exhaustive)
+	return activation.NewActivationContract(id, ir.HarnessCodex, installerVersions, probe, exhaustive)
 }
