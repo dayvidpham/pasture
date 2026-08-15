@@ -55,7 +55,12 @@ func isNilInterface(value any) bool {
 		return true
 	}
 	v := reflect.ValueOf(value)
-	return v.Kind() == reflect.Ptr && v.IsNil()
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
+	}
 }
 
 func (e *engine) applySelection(ctx context.Context, sel selection.Selection, scope apply.Scope, source apply.Source, contracts map[ir.HarnessID]activation.ActivationContract, store *registry.Store, commit func(context.Context, registry.Store) error) (apply.Result, error) {
@@ -388,7 +393,7 @@ func (e *engine) executeGroup(ctx context.Context, base GroupSelection, plan Gro
 			break
 		}
 		actions := facts.Actions()
-		if err := validateGroupFacts(base, plan, step, executeErr, actions); err != nil {
+		if err := validateGroupFacts(refreshed, plan, step, executeErr, actions); err != nil {
 			cancelCleanup()
 			terminal = GroupTerminalFactInvalid
 			markGroupControlFailed(groups, plan, control, actionable("group facts were malformed", errors.Join(executeErr, err), control, "fact validation", "no malformed fact was persisted and later actions were not attempted", "return one coherent fact for every canonical group cell"))
@@ -440,14 +445,19 @@ func validateGroupFacts(base GroupSelection, plan GroupPlan, step GroupStep, exe
 		if row.Management() == apply.ManagementPasture && !hasRecord {
 			return fmt.Errorf("group fact %d claims Pasture management without a confirmed record", i)
 		}
+		binding, ok := base.Activation[result.Cell()]
+		if !ok || !binding.IsValid() {
+			return fmt.Errorf("group fact %d has no valid activation binding for %s", i, result.Cell())
+		}
+		pendingStrategy := binding.Strategy().Kind() == activation.NativePluginPendingTrustKindValue()
+		_, hadPrior := base.Prior[result.Cell()]
 		if !hasRecord {
-			if row.Status() == apply.InstalledPendingTrust() {
-				return fmt.Errorf("group fact %d reports pending trust without a confirmed record", i)
+			if row.Status() == apply.InstalledPendingTrust() || pendingStrategy && row.Observation() == registry.ObservationInstalled || hadPrior {
+				return fmt.Errorf("group fact %d omits authority for %s despite pending-trust or committed prior state", i, result.Cell())
 			}
 			continue
 		}
-		binding, ok := base.Activation[result.Cell()]
-		if !ok || !binding.IsValid() || record.Key() != result.Key() || record.Cell() != result.Cell() || record.Source() != sourceRegistry(base.Source) || record.Strategy() != binding.Strategy().Kind() || record.Observation() != row.Observation() || record.Managed() != (row.Management() == apply.ManagementPasture) {
+		if record.Key() != result.Key() || record.Cell() != result.Cell() || record.Source() != sourceRegistry(base.Source) || record.Strategy() != binding.Strategy().Kind() || record.Observation() != row.Observation() || record.Managed() != (row.Management() == apply.ManagementPasture) {
 			return fmt.Errorf("group fact %d record contradicts its selection, activation, key, source, management, or observation", i)
 		}
 		wantOperation := registry.OperationInspect
@@ -461,16 +471,16 @@ func validateGroupFacts(base GroupSelection, plan GroupPlan, step GroupStep, exe
 		if record.LastOperation() != wantOperation || record.LastOutcome() != wantOutcome {
 			return fmt.Errorf("group fact %d record operation/outcome contradicts action %s and its execution result", i, step.Operation())
 		}
-		pendingStrategy := binding.Strategy().Kind() == activation.NativePluginPendingTrustKindValue()
 		pendingStatus := row.Status() == apply.InstalledPendingTrust()
 		installedPending := pendingStrategy && row.Observation() == registry.ObservationInstalled
+		failedPending := pendingStrategy && wantFailed && row.Status() == apply.Failed() && row.Observation() == registry.ObservationInstalled
 		if record.Trust() == registry.TrustTrusted || pendingStatus != (installedPending && !wantFailed) {
 			return fmt.Errorf("group fact %d status and trust contradict the activation strategy or live observation", i)
 		}
-		if installedPending && record.Trust() != registry.TrustPending {
+		if (installedPending || failedPending) && record.Trust() != registry.TrustPending {
 			return fmt.Errorf("group fact %d installed pending-trust strategy lacks TrustPending", i)
 		}
-		if !installedPending && record.Trust() != registry.TrustNotApplicable {
+		if !installedPending && !failedPending && record.Trust() != registry.TrustNotApplicable {
 			return fmt.Errorf("group fact %d trust is invalid for its settled status", i)
 		}
 	}

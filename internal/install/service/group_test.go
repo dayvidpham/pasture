@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -163,12 +164,63 @@ type recordingGroup struct {
 	closeCount     int
 	planCount      int
 	stage          service.GroupTerminalStage
+	priorAt        map[string][][]string
+}
+
+type nilMapGroup map[string]struct{}
+
+func (nilMapGroup) Harness() ir.HarnessID { return artifact.HarnessClaudeCode }
+func (nilMapGroup) PlanSelection(context.Context, service.GroupSelection) (service.GroupPlan, error) {
+	return service.GroupPlan{}, nil
+}
+func (nilMapGroup) ExecuteAction(context.Context, service.GroupSelection, service.GroupPlan, service.GroupStep) error {
+	return nil
+}
+func (nilMapGroup) InspectAction(context.Context, service.GroupSelection, service.GroupPlan, service.GroupStep, error) (service.GroupFacts, error) {
+	return service.GroupFacts{}, nil
+}
+func (nilMapGroup) ClosePlan(context.Context, service.GroupSelection, service.GroupPlan, service.GroupTerminalStage) error {
+	return nil
+}
+func (nilMapGroup) PreflightCell(context.Context, service.GroupCell) error { return nil }
+
+func priorSignature(request service.GroupSelection) []string {
+	result := make([]string, 0, len(cell.CanonicalExtensions()))
+	for _, extension := range cell.CanonicalExtensions() {
+		c, _ := cell.New(artifact.HarnessClaudeCode, extension)
+		record, ok := request.Prior[c]
+		if !ok {
+			result = append(result, c.String()+":<absent>")
+			continue
+		}
+		result = append(result, fmt.Sprintf("%s:%s:%s:%s:%s:%s", c, record.Observation(), record.Trust(), record.LastOperation(), record.LastOutcome(), record.Diagnostic()))
+	}
+	return result
+}
+
+func groupRegistryOperation(operation apply.Operation) registry.Operation {
+	switch operation {
+	case apply.Ensure():
+		return registry.OperationEnsure
+	case apply.RemoveOp():
+		return registry.OperationRemove
+	default:
+		return registry.OperationInspect
+	}
+}
+
+func (g *recordingGroup) capturePrior(stage string, request service.GroupSelection) {
+	if g.priorAt == nil {
+		g.priorAt = make(map[string][][]string)
+	}
+	g.priorAt[stage] = append(g.priorAt[stage], priorSignature(request))
 }
 
 func (*recordingGroup) Harness() ir.HarnessID { return artifact.HarnessClaudeCode }
 func (g *recordingGroup) PlanSelection(_ context.Context, request service.GroupSelection) (service.GroupPlan, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.capturePrior("plan", request)
 	*g.events = append(*g.events, "plan")
 	g.planCount++
 	if g.plan != nil {
@@ -266,9 +318,26 @@ func TestServiceGroupPlanSelectionConsistencyForEveryCombination(t *testing.T) {
 			group.plan = func(selection service.GroupSelection) (service.GroupPlan, error) {
 				return selectionGroupPlan(t, selection, 0, cell.Cell{}), nil
 			}
-			_, err := groupService(t, group, nil).ApplySelection(context.Background(), request)
-			if err != nil {
-				t.Fatalf("valid selection plan rejected: %v", err)
+			result, err := groupService(t, group, nil).ApplySelection(context.Background(), request)
+			if err != nil || !result.OK() || len(result.Rows()) != 3 || group.closeCount != 1 {
+				t.Fatalf("valid selection plan rejected: result=%+v err=%v events=%v closes=%d", result.Rows(), err, events, group.closeCount)
+			}
+			for i, extension := range cell.CanonicalExtensions() {
+				want, _ := cell.New(artifact.HarnessClaudeCode, extension)
+				row := result.Rows()[i]
+				if row.Cell() != want || row.Status() != apply.Completed() {
+					t.Fatalf("row %d=%+v, want canonical completed row for %s", i, row, want)
+				}
+				wantOp := apply.RemoveOp()
+				if request.Selection.Enabled(want) {
+					wantOp = apply.Ensure()
+				}
+				if row.Operation() != wantOp {
+					t.Fatalf("row %d operation=%s, want %s", i, row.Operation(), wantOp)
+				}
+			}
+			if saves := strings.Count(fmt.Sprint(events), "save"); saves != 7 {
+				t.Fatalf("events=%v, want seven per-action saves", events)
 			}
 		})
 	}
@@ -312,6 +381,11 @@ func TestGroupRejectsTypedNilAndZeroFacts(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "typed nil") {
 		t.Fatalf("typed nil error=%v", err)
 	}
+	var typedNilMap nilMapGroup
+	_, err = service.New(service.Config{Registry: &eventRegistry{store: registry.New(), events: &[]string{}}, Contracts: contractSet, Activators: []apply.Activator{directFileActivator(t, contractSet)}, Group: typedNilMap})
+	if err == nil || !strings.Contains(err.Error(), "typed nil") {
+		t.Fatalf("named non-pointer typed nil error=%v", err)
+	}
 	if _, err := service.NewGroupAction(apply.ActionRow{}, nil); err == nil {
 		t.Fatal("zero GroupAction accepted")
 	}
@@ -336,8 +410,9 @@ func TestServiceRejectsTypedNilRegistryAndNilReceivers(t *testing.T) {
 		t.Fatalf("nil ApplyCell error=%v", err)
 	}
 }
-func (g *recordingGroup) ExecuteAction(_ context.Context, _ service.GroupSelection, _ service.GroupPlan, step service.GroupStep) error {
+func (g *recordingGroup) ExecuteAction(_ context.Context, request service.GroupSelection, _ service.GroupPlan, step service.GroupStep) error {
 	g.mu.Lock()
+	g.capturePrior("execute", request)
 	*g.events = append(*g.events, "execute:"+step.ControlCell().String())
 	g.mu.Unlock()
 	if g.cancel != nil {
@@ -347,6 +422,7 @@ func (g *recordingGroup) ExecuteAction(_ context.Context, _ service.GroupSelecti
 }
 func (g *recordingGroup) InspectAction(ctx context.Context, request service.GroupSelection, plan service.GroupPlan, step service.GroupStep, executeErr error) (service.GroupFacts, error) {
 	g.mu.Lock()
+	g.capturePrior("inspect", request)
 	*g.events = append(*g.events, "inspect:"+step.ControlCell().String())
 	g.inspectLive = ctx.Err() == nil
 	g.mu.Unlock()
@@ -362,7 +438,11 @@ func (g *recordingGroup) InspectAction(ctx context.Context, request service.Grou
 			status = apply.Failed()
 			outcome = registry.OutcomeFailed
 		}
-		record, err := registry.NewRecord(registry.RecordInput{Key: result.Key(), Source: registry.SourceInstaller, Strategy: request.Activation[result.Cell()].Strategy().Kind(), Managed: true, Observation: registry.ObservationAbsent, Trust: registry.TrustNotApplicable, LastOperation: registry.OperationInspect, LastOutcome: outcome, Diagnostic: "live fact"})
+		lastOperation := registry.OperationInspect
+		if control {
+			lastOperation = groupRegistryOperation(step.Operation())
+		}
+		record, err := registry.NewRecord(registry.RecordInput{Key: result.Key(), Source: registry.SourceInstaller, Strategy: request.Activation[result.Cell()].Strategy().Kind(), Managed: true, Observation: registry.ObservationAbsent, Trust: registry.TrustNotApplicable, LastOperation: lastOperation, LastOutcome: outcome, Diagnostic: "live fact"})
 		if err != nil {
 			return service.GroupFacts{}, err
 		}
@@ -380,9 +460,10 @@ func (g *recordingGroup) InspectAction(ctx context.Context, request service.Grou
 	}
 	return service.NewGroupFacts(actions...)
 }
-func (g *recordingGroup) ClosePlan(_ context.Context, _ service.GroupSelection, _ service.GroupPlan, stage service.GroupTerminalStage) error {
+func (g *recordingGroup) ClosePlan(_ context.Context, request service.GroupSelection, _ service.GroupPlan, stage service.GroupTerminalStage) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.capturePrior("close", request)
 	*g.events = append(*g.events, "close")
 	g.closeCount++
 	g.stage = stage
@@ -471,6 +552,50 @@ func TestServiceGroupLifecycleOrderingFailuresCancellationCloseAndRetry(t *testi
 		result, err := groupService(t, group, nil).ApplySelection(context.Background(), groupRequest(t))
 		if err != nil || result.OK() || !strings.Contains(result.Rows()[1].Diagnostic(), "close sentinel") || group.closeCount != 1 {
 			t.Fatalf("result=%+v err=%v closes=%d", result.Rows(), err, group.closeCount)
+		}
+	})
+}
+
+func TestGroupLifecyclePriorOnlyAdvancesAfterCommittedSave(t *testing.T) {
+	t.Parallel()
+	t.Run("successful save is the next plan authority", func(t *testing.T) {
+		events := []string{}
+		group := &recordingGroup{events: &events}
+		repo := &eventRegistry{store: registry.New(), events: &events}
+		svc := groupService(t, group, repo)
+		if result, err := svc.ApplySelection(context.Background(), groupRequest(t)); err != nil || !result.OK() {
+			t.Fatalf("first apply result=%+v err=%v", result.Rows(), err)
+		}
+		firstClose := group.priorAt["close"][0]
+		if len(group.priorAt["execute"]) == 0 || reflect.DeepEqual(group.priorAt["execute"][0], firstClose) {
+			t.Fatalf("first action unexpectedly loaded committed authority: execute=%v close=%v", group.priorAt["execute"][0], firstClose)
+		}
+		if result, err := svc.ApplySelection(context.Background(), groupRequest(t)); err != nil || !result.OK() {
+			t.Fatalf("retry result=%+v err=%v", result.Rows(), err)
+		}
+		if got := group.priorAt["plan"][1]; !reflect.DeepEqual(got, firstClose) {
+			t.Fatalf("retry plan prior=%v, want exactly prior committed at close=%v", got, firstClose)
+		}
+	})
+	t.Run("failed save is not reloadable until repair", func(t *testing.T) {
+		events := []string{}
+		group := &recordingGroup{events: &events}
+		repo := &eventRegistry{store: registry.New(), events: &events, saveErr: errors.New("save sentinel")}
+		svc := groupService(t, group, repo)
+		result, err := svc.ApplySelection(context.Background(), groupRequest(t))
+		if err != nil || result.OK() {
+			t.Fatalf("failed save result=%+v err=%v", result.Rows(), err)
+		}
+		failedClose := group.priorAt["close"][0]
+		repo.saveErr = nil
+		if result, err = svc.ApplySelection(context.Background(), groupRequest(t)); err != nil || !result.OK() {
+			t.Fatalf("repaired retry result=%+v err=%v", result.Rows(), err)
+		}
+		if got := group.priorAt["plan"][1]; !reflect.DeepEqual(got, failedClose) {
+			t.Fatalf("retry reloaded uncommitted facts: prior=%v failed-close=%v", got, failedClose)
+		}
+		if reflect.DeepEqual(group.priorAt["close"][1], failedClose) {
+			t.Fatalf("successful repair did not advance committed authority: close=%v", group.priorAt["close"][1])
 		}
 	})
 }
