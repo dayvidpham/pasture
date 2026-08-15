@@ -167,6 +167,13 @@ type recordingGroup struct {
 	stage            service.GroupTerminalStage
 	priorAt          map[string][][]string
 	executed         []executedGroupStep
+	liveFacts        map[cell.Cell]liveGroupFact
+}
+
+type liveGroupFact struct {
+	management  apply.Management
+	observation registry.Observation
+	diagnostic  string
 }
 
 type executedGroupStep struct {
@@ -549,11 +556,15 @@ func (g *recordingGroup) InspectAction(ctx context.Context, request service.Grou
 		if control {
 			lastOperation = groupRegistryOperation(step.Operation())
 		}
-		record, err := registry.NewRecord(registry.RecordInput{Key: result.Key(), Source: registry.SourceInstaller, Strategy: request.Activation[result.Cell()].Strategy().Kind(), Managed: true, Observation: registry.ObservationAbsent, Trust: registry.TrustNotApplicable, LastOperation: lastOperation, LastOutcome: outcome, Diagnostic: "live fact"})
+		fact := liveGroupFact{management: apply.ManagementPasture, observation: registry.ObservationAbsent, diagnostic: "live fact"}
+		if configured, ok := g.liveFacts[result.Cell()]; ok {
+			fact = configured
+		}
+		record, err := registry.NewRecord(registry.RecordInput{Key: result.Key(), Source: registry.SourceInstaller, Strategy: request.Activation[result.Cell()].Strategy().Kind(), Managed: fact.management == apply.ManagementPasture, Observation: fact.observation, Trust: registry.TrustNotApplicable, LastOperation: lastOperation, LastOutcome: outcome, Diagnostic: fact.diagnostic})
 		if err != nil {
 			return service.GroupFacts{}, err
 		}
-		action, err := service.NewGroupAction(apply.NewActionRow(result.Cell(), result.Operation(), status, apply.ManagementPasture, registry.ObservationAbsent, "live fact"), &record)
+		action, err := service.NewGroupAction(apply.NewActionRow(result.Cell(), result.Operation(), status, fact.management, fact.observation, fact.diagnostic), &record)
 		if err != nil {
 			return service.GroupFacts{}, err
 		}
@@ -587,6 +598,17 @@ func assertGroupRow(t *testing.T, row apply.ActionRow, wantStatus apply.Status, 
 	if wantRecord && row.Diagnostic() == "" {
 		t.Fatalf("row %s has no diagnostic despite confirmed record", row.Cell())
 	}
+}
+
+func assertExactGroupRow(t *testing.T, row apply.ActionRow, wantCell cell.Cell, wantStatus apply.Status, wantOperation apply.Operation, wantManagement apply.Management, wantObservation registry.Observation, wantDiagnostic string) {
+	t.Helper()
+	if row.Cell() != wantCell || row.Status() != wantStatus || row.Operation() != wantOperation || row.Management() != wantManagement || row.Observation() != wantObservation || row.Diagnostic() != wantDiagnostic {
+		t.Fatalf("row=%+v, want cell=%s status=%s operation=%s management=%s observation=%s diagnostic=%q", row, wantCell, wantStatus, wantOperation, wantManagement, wantObservation, wantDiagnostic)
+	}
+}
+
+func exactRecordSignature(record registry.Record) string {
+	return fmt.Sprintf("%v|%s|%s|%t|%s|%s|%s|%s", record.Key(), record.Source(), record.Strategy(), record.Managed(), record.Observation(), record.LastOperation(), record.LastOutcome(), record.Diagnostic())
 }
 
 func TestServiceGroupFailureRowsAndAuthorityAreComplete(t *testing.T) {
@@ -630,22 +652,33 @@ func TestServiceGroupFailureRowsAndAuthorityAreComplete(t *testing.T) {
 func TestServiceGroupMutationThenErrorUsesSuccessfulLiveProbe(t *testing.T) {
 	t.Parallel()
 	events := []string{}
-	group := &recordingGroup{events: &events, executeErr: errors.New("mutation returned an error after changing native state")}
+	group := &recordingGroup{events: &events, executeErr: errors.New("mutation returned an error after changing native state"), liveFacts: map[cell.Cell]liveGroupFact{}}
+	for _, extension := range cell.CanonicalExtensions() {
+		c := mustCell(t, artifact.HarnessClaudeCode, extension)
+		group.liveFacts[c] = liveGroupFact{management: apply.ManagementPasture, observation: registry.ObservationInstalled, diagnostic: "strong live " + extension.String()}
+	}
 	repo := &eventRegistry{store: registry.New(), events: &events}
 	result, err := groupService(t, group, repo).ApplySelection(context.Background(), groupRequest(t))
 	if err != nil || result.OK() || len(result.Rows()) != 3 {
 		t.Fatalf("result=%+v err=%v", result.Rows(), err)
 	}
-	row := result.Rows()[0]
-	assertGroupRow(t, row, apply.Failed(), apply.Inspect(), apply.ManagementPasture, registry.ObservationAbsent, true)
-	if !strings.Contains(row.Diagnostic(), "mutation returned an error") {
-		t.Fatalf("row lost action diagnostic: %s", row.Diagnostic())
-	}
-	records := groupStoreRecords(t, repo)
-	control := mustCell(t, artifact.HarnessClaudeCode, cell.SkillsAxis())
-	record, ok := records[control]
-	if !ok || record.LastOperation() != registry.OperationInspect || record.LastOutcome() != registry.OutcomeFailed || record.Observation() != registry.ObservationAbsent {
-		t.Fatalf("persisted control fact=%+v, want failed live-probe authority", record)
+	for i, extension := range cell.CanonicalExtensions() {
+		c := mustCell(t, artifact.HarnessClaudeCode, extension)
+		status, outcome := apply.Completed(), registry.OutcomeCompleted
+		diagnostic := "strong live " + extension.String()
+		if i == 0 {
+			status, outcome = apply.Failed(), registry.OutcomeFailed
+			diagnostic += "; group action failed: mutation returned an error after changing native state; where: " + c.String() + "; when: inspect; impact: the complete inspected live facts were retained and later actions were not attempted; fix: repair the native action and retry the full selection"
+		}
+		assertExactGroupRow(t, result.Rows()[i], c, status, apply.Inspect(), apply.ManagementPasture, registry.ObservationInstalled, diagnostic)
+		key, _ := registry.GlobalKey(c)
+		record, ok := groupStoreRecords(t, repo)[c]
+		if !ok {
+			t.Fatalf("persisted record for %s missing", c)
+		}
+		if got := exactRecordSignature(record); got != fmt.Sprintf("%v|installer|direct-file|true|installed|inspect|%s|strong live %s", key, outcome, extension.String()) {
+			t.Fatalf("record %s=%q, want exact live authority", c, got)
+		}
 	}
 }
 
@@ -688,36 +721,58 @@ func TestServiceGroupSaveFailurePreservesCompletePriorAuthority(t *testing.T) {
 	t.Parallel()
 	events := []string{}
 	prior := registry.New()
+	group := &recordingGroup{events: &events, liveFacts: map[cell.Cell]liveGroupFact{}}
+	for _, extension := range cell.CanonicalExtensions() {
+		c := mustCell(t, artifact.HarnessClaudeCode, extension)
+		key, _ := registry.GlobalKey(c)
+		record, err := registry.NewRecord(registry.RecordInput{Key: key, Source: registry.SourceInstaller, Strategy: activation.DirectFileKindValue(), Managed: true, Observation: registry.ObservationInstalled, Trust: registry.TrustNotApplicable, LastOperation: registry.OperationEnsure, LastOutcome: registry.OutcomeCompleted, Diagnostic: "prior authority " + extension.String()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := prior.Upsert(record); err != nil {
+			t.Fatal(err)
+		}
+		group.liveFacts[c] = liveGroupFact{management: apply.ManagementPasture, observation: registry.ObservationAbsent, diagnostic: "staged live " + extension.String()}
+	}
 	repo := &eventRegistry{store: prior, events: &events, saveErr: errors.New("save failed")}
-	group := &recordingGroup{events: &events}
+	before, err := prior.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
 	request := groupRequest(t)
 	result, err := groupService(t, group, repo).ApplySelection(context.Background(), request)
 	if err != nil || result.OK() || group.closeCount != 1 {
 		t.Fatalf("result=%+v err=%v events=%v closes=%d", result.Rows(), err, events, group.closeCount)
 	}
-	rows := result.Rows()
-	if len(rows) != 3 {
-		t.Fatalf("rows=%d, want three canonical rows", len(rows))
+	if got := fmt.Sprint(events); got != "[plan execute:claude-code.skills inspect:claude-code.skills save close]" {
+		t.Fatalf("events=%s, want first action only and exactly one close", got)
 	}
-	assertGroupRow(t, rows[0], apply.Failed(), apply.Inspect(), apply.ManagementPasture, registry.ObservationAbsent, true)
-	for i, row := range rows[1:] {
-		assertGroupRow(t, row, apply.Completed(), row.Operation(), apply.ManagementPasture, registry.ObservationAbsent, true)
-		if row.Diagnostic() != "live fact" {
-			t.Fatalf("saved-failure sibling %d diagnostic=%q, want live fact", i+1, row.Diagnostic())
+	for i, extension := range cell.CanonicalExtensions() {
+		c := mustCell(t, artifact.HarnessClaudeCode, extension)
+		status, observation := apply.Completed(), registry.ObservationAbsent
+		diagnostic := "staged live " + extension.String()
+		if i == 0 {
+			status = apply.Failed()
+			diagnostic += "; group facts could not be saved atomically: save failed; where: claude-code.skills; when: registry-save; impact: the previous registry remains authoritative; confirmed live facts are reported and later actions were not attempted; fix: repair registry persistence and retry the full selection"
+		}
+		assertExactGroupRow(t, result.Rows()[i], c, status, apply.Inspect(), apply.ManagementPasture, observation, diagnostic)
+		stored, ok := groupStoreRecords(t, repo)[c]
+		if !ok {
+			t.Fatalf("prior record for %s disappeared", c)
+		}
+		if got := exactRecordSignature(stored); got != fmt.Sprintf("%v|installer|direct-file|true|installed|ensure|completed|prior authority %s", stored.Key(), extension.String()) {
+			t.Fatalf("record %s changed to %q", c, got)
 		}
 	}
-	for i, row := range rows[1:] {
-		if row.Status() == apply.Unattempted() && row.Management() == apply.ManagementUnknown && row.Observation() == registry.ObservationUnknown {
-			if _, ok := groupStoreRecords(t, repo)[row.Cell()]; ok {
-				t.Fatalf("unresolved sibling %d=%s manufactured persisted authority", i+1, row.Cell())
-			}
-		}
+	after, err := repo.store.Marshal()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := groupStoreRecords(t, repo); len(got) != 0 {
-		t.Fatalf("save failure changed prior authority: %+v", got)
+	if string(after) != string(before) {
+		t.Fatalf("save failure changed serialized authority:\nbefore=%s\nafter=%s", before, after)
 	}
-	if strings.Contains(fmt.Sprint(events), "execute:claude-code.agents") {
-		t.Fatalf("later action ran after save failure: %v", events)
+	if group.stage != service.GroupTerminalSaveFailed {
+		t.Fatalf("terminal stage=%v, want save failure", group.stage)
 	}
 }
 
