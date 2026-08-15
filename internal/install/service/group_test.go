@@ -165,6 +165,13 @@ type recordingGroup struct {
 	planCount      int
 	stage          service.GroupTerminalStage
 	priorAt        map[string][][]string
+	executed       []executedGroupStep
+}
+
+type executedGroupStep struct {
+	kind      service.GroupActionKind
+	operation apply.Operation
+	control   cell.Cell
 }
 
 type nilMapGroup map[string]struct{}
@@ -336,11 +343,106 @@ func TestServiceGroupPlanSelectionConsistencyForEveryCombination(t *testing.T) {
 					t.Fatalf("row %d operation=%s, want %s", i, row.Operation(), wantOp)
 				}
 			}
-			if saves := strings.Count(fmt.Sprint(events), "save"); saves != 7 {
-				t.Fatalf("events=%v, want seven per-action saves", events)
+			wantSteps := make([]executedGroupStep, 0, 7)
+			for _, c := range []cell.Cell{
+				mustCell(t, artifact.HarnessClaudeCode, cell.SkillsAxis()),
+				mustCell(t, artifact.HarnessClaudeCode, cell.AgentsAxis()),
+				mustCell(t, artifact.HarnessClaudeCode, cell.HooksAxis()),
+			} {
+				wantSteps = append(wantSteps, executedGroupStep{kind: service.InspectGroupAction(), operation: apply.Inspect(), control: c})
+			}
+			for _, c := range []cell.Cell{
+				mustCell(t, artifact.HarnessClaudeCode, cell.SkillsAxis()),
+				mustCell(t, artifact.HarnessClaudeCode, cell.AgentsAxis()),
+				mustCell(t, artifact.HarnessClaudeCode, cell.HooksAxis()),
+			} {
+				if request.Selection.Enabled(c) {
+					wantSteps = append(wantSteps, executedGroupStep{kind: service.EnsureCellGroupAction(), operation: apply.Ensure(), control: c})
+				}
+			}
+			wantSteps = append(wantSteps, executedGroupStep{kind: service.RemoveSharedGroupAction(), operation: apply.RemoveOp(), control: mustCell(t, artifact.HarnessClaudeCode, cell.SkillsAxis())})
+			for _, c := range []cell.Cell{
+				mustCell(t, artifact.HarnessClaudeCode, cell.SkillsAxis()),
+				mustCell(t, artifact.HarnessClaudeCode, cell.AgentsAxis()),
+				mustCell(t, artifact.HarnessClaudeCode, cell.HooksAxis()),
+			} {
+				if !request.Selection.Enabled(c) {
+					wantSteps = append(wantSteps, executedGroupStep{kind: service.RemoveCellGroupAction(), operation: apply.RemoveOp(), control: c})
+				}
+			}
+			if !reflect.DeepEqual(group.executed, wantSteps) {
+				t.Fatalf("executed group steps=%v, want exact sequence=%v", group.executed, wantSteps)
+			}
+			if saves := strings.Count(fmt.Sprint(events), "save"); saves != len(wantSteps) {
+				t.Fatalf("events=%v, want %d per-action saves", events, len(wantSteps))
 			}
 		})
 	}
+}
+
+func mustCell(t *testing.T, harness ir.HarnessID, extension cell.Extension) cell.Cell {
+	t.Helper()
+	c, err := cell.New(harness, extension)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func TestServiceRejectsNewExternalInstalledGroupFactWithoutRecord(t *testing.T) {
+	t.Parallel()
+	request := groupRequest(t)
+	request.Selection = all(t, func(c cell.Cell) bool {
+		return c == mustCell(t, artifact.HarnessClaudeCode, cell.SkillsAxis())
+	})
+	events := []string{}
+	group := &recordingGroup{events: &events}
+	group.plan = func(selection service.GroupSelection) (service.GroupPlan, error) {
+		results := make([]service.GroupResultCell, 0, 3)
+		for _, extension := range cell.CanonicalExtensions() {
+			c := mustCell(t, artifact.HarnessClaudeCode, extension)
+			operation := apply.Inspect()
+			if selection.Selection.Enabled(c) {
+				operation = apply.Ensure()
+			}
+			key, err := selection.Scope.Key(c)
+			if err != nil {
+				return service.GroupPlan{}, err
+			}
+			result, err := service.NewGroupResultCell(c, key, operation)
+			if err != nil {
+				return service.GroupPlan{}, err
+			}
+			results = append(results, result)
+		}
+		step, err := service.NewGroupStep(service.EnsureCellGroupAction(), results[0].Cell())
+		if err != nil {
+			return service.GroupPlan{}, err
+		}
+		return service.NewGroupPlan(results, []service.GroupStep{step})
+	}
+	group.malform = func(_ service.GroupSelection, _ service.GroupPlan, step service.GroupStep, actions []service.GroupAction) []service.GroupAction {
+		if step.Operation() != apply.Ensure() {
+			return actions
+		}
+		row := actions[0].Row()
+		row = apply.NewActionRow(row.Cell(), row.Operation(), apply.Completed(), apply.ManagementExternal, registry.ObservationInstalled, "external installed fact")
+		return replaceGroupAction(t, 0, row, nil, actions)
+	}
+	result, err := groupService(t, group, nil).ApplySelection(context.Background(), request)
+	if err != nil || result.OK() || group.stage != service.GroupTerminalFactInvalid || group.closeCount != 1 || strings.Contains(strings.Join(events, ","), "save") {
+		t.Fatalf("result=%+v err=%v events=%v stage=%v closes=%d", result.Rows(), err, events, group.stage, group.closeCount)
+	}
+}
+
+func replaceGroupAction(t *testing.T, index int, row apply.ActionRow, record *registry.Record, actions []service.GroupAction) []service.GroupAction {
+	t.Helper()
+	action, err := service.NewGroupAction(row, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions[index] = action
+	return actions
 }
 
 func TestServiceGroupPlanRejectsSelectionContradictions(t *testing.T) {
@@ -414,6 +516,7 @@ func (g *recordingGroup) ExecuteAction(_ context.Context, request service.GroupS
 	g.mu.Lock()
 	g.capturePrior("execute", request)
 	*g.events = append(*g.events, "execute:"+step.ControlCell().String())
+	g.executed = append(g.executed, executedGroupStep{kind: step.Kind(), operation: step.Operation(), control: step.ControlCell()})
 	g.mu.Unlock()
 	if g.cancel != nil {
 		g.cancel()

@@ -452,7 +452,7 @@ func validateGroupFacts(base GroupSelection, plan GroupPlan, step GroupStep, exe
 		pendingStrategy := binding.Strategy().Kind() == activation.NativePluginPendingTrustKindValue()
 		_, hadPrior := base.Prior[result.Cell()]
 		if !hasRecord {
-			if row.Status() == apply.InstalledPendingTrust() || pendingStrategy && row.Observation() == registry.ObservationInstalled || hadPrior {
+			if row.Observation() == registry.ObservationInstalled || row.Status() == apply.InstalledPendingTrust() || pendingStrategy && row.Observation() == registry.ObservationInstalled || hadPrior {
 				return fmt.Errorf("group fact %d omits authority for %s despite pending-trust or committed prior state", i, result.Cell())
 			}
 			continue
