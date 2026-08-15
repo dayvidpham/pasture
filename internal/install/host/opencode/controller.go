@@ -9,7 +9,6 @@ import (
 
 	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/install/activation"
-	"github.com/dayvidpham/pasture/internal/install/apply"
 	"github.com/dayvidpham/pasture/internal/install/cell"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	target "github.com/dayvidpham/pasture/internal/target/opencode"
@@ -112,7 +111,6 @@ func New(configRoot string) (Controller, error) {
 func (c Controller) ConfigRoot() string                      { return c.root }
 func (c Controller) Descriptor() target.TargetDescriptor     { return c.descriptor }
 func (c Controller) Contract() activation.ActivationContract { return c.contract }
-func (c Controller) Activator() apply.DirectFileActivator    { return apply.NewDirectFileActivator() }
 
 // Destination returns the exact global discovery root for one extension.
 func (c Controller) Destination(extension artifact.Extension) (string, error) {

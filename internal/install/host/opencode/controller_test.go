@@ -1,11 +1,14 @@
 package opencode_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 	"testing/fstest"
 
@@ -62,11 +65,13 @@ func TestEachCellInstallsStatusesAndRemovesIndependently(t *testing.T) {
 			t.Parallel()
 			base := t.TempDir()
 			controller, svc := productionService(t, base)
+			statePath := filepath.Join(base, "state", "installations.yaml")
 			coordinate, err := cell.New(artifact.HarnessOpenCode, extension)
 			require.NoError(t, err)
 			result, err := svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: true, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
 			require.NoError(t, err)
 			require.True(t, result.OK())
+			require.Equal(t, apply.Completed(), result.Rows()[0].Status())
 			root := destination(t, controller, extension)
 			component, err := controller.Descriptor().Component(extension)
 			require.NoError(t, err)
@@ -78,14 +83,21 @@ func TestEachCellInstallsStatusesAndRemovesIndependently(t *testing.T) {
 				}
 			}
 
+			stableTree := snapshotPath(t, controller.ConfigRoot())
+			stableRegistry := snapshotPath(t, statePath)
 			result, err = svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: true, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
 			require.NoError(t, err)
 			require.True(t, result.OK())
+			require.Equal(t, apply.Completed(), result.Rows()[0].Status())
+			require.Equal(t, stableTree, snapshotPath(t, controller.ConfigRoot()))
+			require.Equal(t, stableRegistry, snapshotPath(t, statePath))
 			unrelated := filepath.Join(root, "user-owned.txt")
 			require.NoError(t, os.WriteFile(unrelated, []byte("preserve\n"), 0o600))
 			result, err = svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: false, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
 			require.NoError(t, err)
 			require.True(t, result.OK())
+			require.Equal(t, apply.Completed(), result.Rows()[0].Status())
+			require.Equal(t, registry.ObservationAbsent, result.Rows()[0].Observation())
 			for _, entry := range component.Bundle().Manifest().Entries() {
 				_, statErr := os.Lstat(filepath.Join(root, filepath.FromSlash(entry.Path().String())))
 				require.ErrorIs(t, statErr, os.ErrNotExist)
@@ -93,6 +105,14 @@ func TestEachCellInstallsStatusesAndRemovesIndependently(t *testing.T) {
 			preserved, err := os.ReadFile(unrelated)
 			require.NoError(t, err)
 			require.Equal(t, "preserve\n", string(preserved))
+			removedTree := snapshotPath(t, controller.ConfigRoot())
+			removedRegistry := snapshotPath(t, statePath)
+			result, err = svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: false, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+			require.NoError(t, err)
+			require.True(t, result.OK())
+			require.Equal(t, apply.NoOp(), result.Rows()[0].Status())
+			require.Equal(t, removedTree, snapshotPath(t, controller.ConfigRoot()))
+			require.Equal(t, removedRegistry, snapshotPath(t, statePath))
 		})
 	}
 }
@@ -120,6 +140,18 @@ func TestSelectionStopsAfterAgentConflictAndKeepsVerifiedSkills(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(agentRoot, "worker.md"))
 	require.NoError(t, err)
 	require.Equal(t, "external\n", string(content))
+
+	require.NoError(t, os.Remove(filepath.Join(agentRoot, "worker.md")))
+	result, applyErr = svc.ApplySelection(context.Background(), service.SelectionRequest{Selection: selection, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+	require.NoError(t, applyErr)
+	require.True(t, result.OK())
+	require.Len(t, result.Rows(), 3)
+	for index, extension := range cell.CanonicalExtensions() {
+		require.Equal(t, apply.Completed(), result.Rows()[index].Status())
+		component, componentErr := controller.Descriptor().Component(extension)
+		require.NoError(t, componentErr)
+		assertBundleMaterialized(t, destination(t, controller, extension), component.Bundle())
+	}
 }
 
 func TestEachCellUpdatesFromAnExactPriorManagedBundle(t *testing.T) {
@@ -158,33 +190,73 @@ func TestEachCellUpdatesFromAnExactPriorManagedBundle(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, result.OK())
 			assertBundleMaterialized(t, root, component.Bundle())
+			stableTree := snapshotPath(t, controller.ConfigRoot())
+			stableRegistry := snapshotPath(t, statePath)
+			result, err = svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: true, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+			require.NoError(t, err)
+			require.Equal(t, apply.Completed(), result.Rows()[0].Status())
+			require.Equal(t, stableTree, snapshotPath(t, controller.ConfigRoot()))
+			require.Equal(t, stableRegistry, snapshotPath(t, statePath))
 		})
 	}
 }
 
-func TestExternalExactMatchRemainsUnrecordedAndUnremoved(t *testing.T) {
-	t.Parallel()
-	base := t.TempDir()
-	controller, svc := productionService(t, base)
-	coordinate, _ := cell.New(artifact.HarnessOpenCode, cell.SkillsAxis())
-	_, err := svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: true, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
-	require.NoError(t, err)
-	require.NoError(t, os.Remove(filepath.Join(base, "state", "installations.yaml")))
+func TestEachExactExternalCellRemainsUnmanagedAndUnremoved(t *testing.T) {
+	for _, extension := range cell.CanonicalExtensions() {
+		extension := extension
+		t.Run(extension.String(), func(t *testing.T) {
+			t.Parallel()
+			base := t.TempDir()
+			controller, svc := productionService(t, base)
+			component, err := controller.Descriptor().Component(extension)
+			require.NoError(t, err)
+			root := destination(t, controller, extension)
+			materializeBundle(t, root, component.Bundle())
+			before := snapshotPath(t, controller.ConfigRoot())
+			coordinate, err := cell.New(artifact.HarnessOpenCode, extension)
+			require.NoError(t, err)
+			result, err := svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: true, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+			require.NoError(t, err)
+			require.Equal(t, apply.Completed(), result.Rows()[0].Status())
+			require.Equal(t, apply.ManagementExternal, result.Rows()[0].Management())
+			require.Equal(t, before, snapshotPath(t, controller.ConfigRoot()))
 
-	_, svc = productionServiceAt(t, base, controller)
-	result, err := svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: true, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
-	require.NoError(t, err)
-	require.Equal(t, apply.ManagementExternal, result.Rows()[0].Management())
-	result, err = svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: false, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
-	require.NoError(t, err)
-	require.Equal(t, apply.NoOp(), result.Rows()[0].Status())
-	assertBundleMaterialized(t, destination(t, controller, artifact.ExtensionSkills), controller.Descriptor().Skills().Bundle())
+			statePath := filepath.Join(base, "state", "installations.yaml")
+			store, err := registry.Load(statePath)
+			require.NoError(t, err)
+			key, err := registry.GlobalKey(coordinate)
+			require.NoError(t, err)
+			record, ok := store.Lookup(key)
+			require.True(t, ok)
+			require.False(t, record.Managed())
+			require.Equal(t, registry.ObservationInstalled, record.Observation())
+			registryBeforeDisable := snapshotPath(t, statePath)
+			result, err = svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: false, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+			require.NoError(t, err)
+			require.Equal(t, apply.NoOp(), result.Rows()[0].Status())
+			require.Equal(t, before, snapshotPath(t, controller.ConfigRoot()))
+			require.Equal(t, registryBeforeDisable, snapshotPath(t, statePath))
+			for _, sibling := range cell.CanonicalExtensions() {
+				if sibling == extension {
+					continue
+				}
+				_, statErr := os.Lstat(destination(t, controller, sibling))
+				require.ErrorIs(t, statErr, os.ErrNotExist)
+			}
+		})
+	}
 }
 
-func TestHomeManagerRowsAreDeclarativeReadOnlyFacts(t *testing.T) {
+func TestHomeManagerMaterializedCellsAreByteIdenticalReadOnlyFacts(t *testing.T) {
 	t.Parallel()
 	base := t.TempDir()
 	controller, svc := productionService(t, base)
+	for _, extension := range cell.CanonicalExtensions() {
+		component, err := controller.Descriptor().Component(extension)
+		require.NoError(t, err)
+		materializeBundle(t, destination(t, controller, extension), component.Bundle())
+	}
+	before := snapshotPath(t, controller.ConfigRoot())
 	desired, err := selectionWithOpenCodeEnabled()
 	require.NoError(t, err)
 	result, err := svc.ApplySelection(context.Background(), service.SelectionRequest{Selection: desired, Scope: apply.GlobalScope(), Source: apply.HomeManagerSource()})
@@ -195,50 +267,191 @@ func TestHomeManagerRowsAreDeclarativeReadOnlyFacts(t *testing.T) {
 		require.Equal(t, apply.ManagedDeclaratively(), row.Status())
 		require.Equal(t, apply.ManagementDeclarative, row.Management())
 		if row.Cell().Harness() == artifact.HarnessOpenCode {
-			_, statErr := os.Lstat(destination(t, controller, row.Cell().Extension()))
-			require.ErrorIs(t, statErr, os.ErrNotExist)
+			require.Equal(t, registry.ObservationInstalled, row.Observation())
 		}
 	}
+	require.Equal(t, before, snapshotPath(t, controller.ConfigRoot()))
 	_, err = os.Lstat(filepath.Join(base, "state", "installations.yaml"))
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
-func TestManagedDriftIsRejectedWithoutOverwriteOrRemoval(t *testing.T) {
+func TestHomeManagerMismatchedCellsDiagnoseWithoutMutation(t *testing.T) {
+	for _, extension := range cell.CanonicalExtensions() {
+		extension := extension
+		t.Run(extension.String(), func(t *testing.T) {
+			t.Parallel()
+			base := t.TempDir()
+			controller, svc := productionService(t, base)
+			for _, candidate := range cell.CanonicalExtensions() {
+				component, err := controller.Descriptor().Component(candidate)
+				require.NoError(t, err)
+				materializeBundle(t, destination(t, controller, candidate), component.Bundle())
+			}
+			component, err := controller.Descriptor().Component(extension)
+			require.NoError(t, err)
+			leaf := component.Bundle().Manifest().Entries()[0]
+			leafPath := filepath.Join(destination(t, controller, extension), filepath.FromSlash(leaf.Path().String()))
+			require.NoError(t, os.WriteFile(leafPath, []byte("declarative-user-drift\n"), os.FileMode(leaf.Mode().Bits())))
+			before := snapshotPath(t, base)
+			desired, err := selectionWithOpenCodeEnabled()
+			require.NoError(t, err)
+			result, err := svc.ApplySelection(context.Background(), service.SelectionRequest{Selection: desired, Scope: apply.GlobalScope(), Source: apply.HomeManagerSource()})
+			require.NoError(t, err)
+			require.False(t, result.OK())
+			row := rowFor(t, result, extension)
+			require.Equal(t, apply.Failed(), row.Status())
+			require.Equal(t, apply.ManagementDeclarative, row.Management())
+			require.Contains(t, row.Diagnostic(), "declarative cell inspection failed")
+			require.Contains(t, row.Diagnostic(), "live files match neither the desired bundle nor the recorded ownership token")
+			require.Contains(t, row.Diagnostic(), "impact: no native action was attempted")
+			require.Contains(t, row.Diagnostic(), "fix: repair the destination and rerun Home Manager")
+			require.Equal(t, before, snapshotPath(t, base))
+			_, statErr := os.Lstat(filepath.Join(base, "state", "installations.yaml"))
+			require.ErrorIs(t, statErr, os.ErrNotExist)
+		})
+	}
+}
+
+func TestEachManagedCellRejectsContentAndModeDriftExactly(t *testing.T) {
+	for _, extension := range cell.CanonicalExtensions() {
+		for _, drift := range []string{"content", "mode"} {
+			extension, drift := extension, drift
+			t.Run(extension.String()+"/"+drift, func(t *testing.T) {
+				t.Parallel()
+				base := t.TempDir()
+				controller, svc := productionService(t, base)
+				coordinate, err := cell.New(artifact.HarnessOpenCode, extension)
+				require.NoError(t, err)
+				_, err = svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: true, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+				require.NoError(t, err)
+				component, err := controller.Descriptor().Component(extension)
+				require.NoError(t, err)
+				leaf := component.Bundle().Manifest().Entries()[0]
+				leafPath := filepath.Join(destination(t, controller, extension), filepath.FromSlash(leaf.Path().String()))
+				if drift == "content" {
+					require.NoError(t, os.WriteFile(leafPath, []byte("managed-user-drift\n"), os.FileMode(leaf.Mode().Bits())))
+				} else {
+					require.NoError(t, os.Chmod(leafPath, 0o600))
+				}
+				before := snapshotPath(t, base)
+				for _, enabled := range []bool{true, false} {
+					result, applyErr := svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: enabled, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+					require.NoError(t, applyErr)
+					require.False(t, result.OK())
+					require.Equal(t, apply.Failed(), result.Rows()[0].Status())
+					require.Equal(t, before, snapshotPath(t, base))
+				}
+			})
+		}
+	}
+}
+
+func TestEachCellRejectsSymlinkAndWrongTypeBoundariesWithoutMutation(t *testing.T) {
+	for _, extension := range cell.CanonicalExtensions() {
+		for _, boundary := range []string{"root-symlink", "intermediate-symlink", "leaf-symlink", "root-wrong-type", "intermediate-wrong-type", "leaf-wrong-type"} {
+			extension, boundary := extension, boundary
+			t.Run(extension.String()+"/"+boundary, func(t *testing.T) {
+				t.Parallel()
+				base := t.TempDir()
+				configRoot := filepath.Join(base, "config", "opencode")
+				controller, err := host.New(configRoot)
+				require.NoError(t, err)
+				component, err := controller.Descriptor().Component(extension)
+				require.NoError(t, err)
+				root := destination(t, controller, extension)
+				leaf := component.Bundle().Manifest().Entries()[0]
+				leafPath := filepath.Join(root, filepath.FromSlash(leaf.Path().String()))
+				outside := filepath.Join(base, "outside")
+				require.NoError(t, os.MkdirAll(outside, 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(outside, "sentinel"), []byte("outside\n"), 0o600))
+				switch boundary {
+				case "root-symlink":
+					require.NoError(t, os.MkdirAll(filepath.Dir(root), 0o755))
+					require.NoError(t, os.Symlink(outside, root))
+				case "intermediate-symlink":
+					require.NoError(t, os.MkdirAll(filepath.Dir(configRoot), 0o755))
+					require.NoError(t, os.Symlink(outside, configRoot))
+				case "leaf-symlink":
+					require.NoError(t, os.MkdirAll(filepath.Dir(leafPath), 0o755))
+					require.NoError(t, os.Symlink(filepath.Join(outside, "sentinel"), leafPath))
+				case "root-wrong-type":
+					require.NoError(t, os.MkdirAll(filepath.Dir(root), 0o755))
+					require.NoError(t, os.WriteFile(root, []byte("wrong root\n"), 0o600))
+				case "intermediate-wrong-type":
+					require.NoError(t, os.MkdirAll(filepath.Dir(configRoot), 0o755))
+					require.NoError(t, os.WriteFile(configRoot, []byte("wrong parent\n"), 0o600))
+				case "leaf-wrong-type":
+					require.NoError(t, os.MkdirAll(leafPath, 0o700))
+				}
+				_, svc := productionServiceAt(t, base, controller)
+				before := snapshotPath(t, base)
+				coordinate, err := cell.New(artifact.HarnessOpenCode, extension)
+				require.NoError(t, err)
+				result, err := svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: true, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+				require.NoError(t, err)
+				require.False(t, result.OK())
+				require.Equal(t, apply.Failed(), result.Rows()[0].Status())
+				require.Equal(t, before, snapshotPath(t, base))
+			})
+		}
+	}
+}
+
+func TestEachCellConflictRepairAndRerunConverges(t *testing.T) {
+	for _, extension := range cell.CanonicalExtensions() {
+		extension := extension
+		t.Run(extension.String(), func(t *testing.T) {
+			t.Parallel()
+			base := t.TempDir()
+			controller, svc := productionService(t, base)
+			component, err := controller.Descriptor().Component(extension)
+			require.NoError(t, err)
+			leaf := component.Bundle().Manifest().Entries()[0]
+			leafPath := filepath.Join(destination(t, controller, extension), filepath.FromSlash(leaf.Path().String()))
+			require.NoError(t, os.MkdirAll(filepath.Dir(leafPath), 0o755))
+			require.NoError(t, os.WriteFile(leafPath, []byte("external conflict\n"), 0o600))
+			before := snapshotPath(t, base)
+			coordinate, err := cell.New(artifact.HarnessOpenCode, extension)
+			require.NoError(t, err)
+			result, err := svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: true, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+			require.NoError(t, err)
+			require.False(t, result.OK())
+			require.Equal(t, before, snapshotPath(t, base))
+			require.NoError(t, os.Remove(leafPath))
+			result, err = svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: true, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+			require.NoError(t, err)
+			require.True(t, result.OK())
+			require.Equal(t, apply.Completed(), result.Rows()[0].Status())
+			assertBundleMaterialized(t, destination(t, controller, extension), component.Bundle())
+		})
+	}
+}
+
+func TestHookLifecyclePreservesEveryConfigSentinelByteAndMode(t *testing.T) {
 	t.Parallel()
 	base := t.TempDir()
 	controller, svc := productionService(t, base)
-	coordinate, _ := cell.New(artifact.HarnessOpenCode, cell.HooksAxis())
-	_, err := svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: true, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+	require.NoError(t, os.MkdirAll(controller.ConfigRoot(), 0o755))
+	for index, name := range []host.ConfigFile{host.LegacyConfigJSON, host.OpenCodeJSON, host.OpenCodeJSONC} {
+		path := filepath.Join(controller.ConfigRoot(), string(name))
+		require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf("sentinel-%d\n", index)), os.FileMode(0o600+index)))
+	}
+	sentinels := snapshotConfigFiles(t, controller.ConfigRoot())
+	coordinate, err := cell.New(artifact.HarnessOpenCode, cell.HooksAxis())
 	require.NoError(t, err)
-	hook := filepath.Join(destination(t, controller, artifact.ExtensionHooks), host.HookFile)
-	require.NoError(t, os.WriteFile(hook, []byte("user-modified\n"), 0o644))
-	result, err := svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: false, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
-	require.NoError(t, err)
-	require.False(t, result.OK())
-	content, err := os.ReadFile(hook)
-	require.NoError(t, err)
-	require.Equal(t, "user-modified\n", string(content))
+	for _, enabled := range []bool{true, true, false, false} {
+		result, applyErr := svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: enabled, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+		require.NoError(t, applyErr)
+		require.True(t, result.OK())
+		require.Equal(t, sentinels, snapshotConfigFiles(t, controller.ConfigRoot()))
+	}
 }
 
-func TestSymlinkAndTraversalRootsRejectWithoutTouchingTargets(t *testing.T) {
+func TestTraversalRootIsRejected(t *testing.T) {
 	t.Parallel()
 	base := t.TempDir()
 	_, err := host.New(base + string(os.PathSeparator) + "opencode" + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "escape")
 	require.Error(t, err)
-
-	controller, svc := productionService(t, base)
-	target := filepath.Join(base, "outside")
-	require.NoError(t, os.MkdirAll(target, 0o755))
-	skillsRoot := destination(t, controller, artifact.ExtensionSkills)
-	require.NoError(t, os.MkdirAll(filepath.Dir(skillsRoot), 0o755))
-	require.NoError(t, os.Symlink(target, skillsRoot))
-	coordinate, _ := cell.New(artifact.HarnessOpenCode, cell.SkillsAxis())
-	result, err := svc.ApplyCell(context.Background(), service.CellRequest{Cell: coordinate, Enabled: true, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
-	require.NoError(t, err)
-	require.False(t, result.OK())
-	entries, err := os.ReadDir(target)
-	require.NoError(t, err)
-	require.Empty(t, entries)
 }
 
 func productionService(t *testing.T, base string) (host.Controller, *service.Service) {
@@ -256,7 +469,10 @@ func productionServiceAt(t *testing.T, base string, controller host.Controller) 
 	require.NoError(t, err)
 	contracts := fakeSiblingContracts(t, base)
 	contracts[ir.HarnessOpenCode] = controller.Contract()
-	svc, err := service.New(service.Config{Registry: registry, Contracts: contracts, Activators: []apply.Activator{controller.Activator()}})
+	// Frontends own activator composition. One shared DirectFile activator serves
+	// every harness contract rather than each host controller constructing one.
+	directFile := apply.NewDirectFileActivator()
+	svc, err := service.New(service.Config{Registry: registry, Contracts: contracts, Activators: []apply.Activator{directFile}})
 	require.NoError(t, err)
 	return controller, svc
 }
@@ -355,7 +571,84 @@ func assertBundleMaterialized(t *testing.T, root string, bundle artifact.Bundle)
 		require.NoError(t, err)
 		require.NoError(t, file.Close())
 		require.Equal(t, want, got)
+		info, err := os.Stat(filepath.Join(root, filepath.FromSlash(entry.Path().String())))
+		require.NoError(t, err)
+		require.Equal(t, os.FileMode(entry.Mode().Bits()), info.Mode().Perm())
 	}
+}
+
+type pathSnapshot struct {
+	Path    string
+	Mode    os.FileMode
+	Content string
+}
+
+func snapshotPath(t *testing.T, root string) []pathSnapshot {
+	t.Helper()
+	if _, err := os.Lstat(root); errorsIsNotExist(err) {
+		return []pathSnapshot{{Path: ".", Mode: 0, Content: "<absent>"}}
+	} else {
+		require.NoError(t, err)
+	}
+	var snapshots []pathSnapshot
+	require.NoError(t, filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		content := ""
+		if info.Mode().IsRegular() {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			content = string(raw)
+		} else if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			content = target
+		}
+		snapshots = append(snapshots, pathSnapshot{Path: filepath.ToSlash(rel), Mode: info.Mode(), Content: content})
+		return nil
+	}))
+	sort.Slice(snapshots, func(i, j int) bool { return snapshots[i].Path < snapshots[j].Path })
+	return snapshots
+}
+
+func errorsIsNotExist(err error) bool { return err != nil && os.IsNotExist(err) }
+
+func rowFor(t *testing.T, result apply.Result, extension artifact.Extension) apply.ActionRow {
+	t.Helper()
+	for _, row := range result.Rows() {
+		if row.Cell().Harness() == artifact.HarnessOpenCode && row.Cell().Extension() == extension {
+			return row
+		}
+	}
+	require.FailNow(t, "OpenCode result row missing", extension.String())
+	return apply.ActionRow{}
+}
+
+func snapshotConfigFiles(t *testing.T, root string) []pathSnapshot {
+	t.Helper()
+	var out []pathSnapshot
+	for _, name := range []host.ConfigFile{host.LegacyConfigJSON, host.OpenCodeJSON, host.OpenCodeJSONC} {
+		path := filepath.Join(root, string(name))
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+		raw, err := os.ReadFile(path)
+		require.NoError(t, err)
+		out = append(out, pathSnapshot{Path: string(name), Mode: info.Mode(), Content: string(bytes.Clone(raw))})
+	}
+	return out
 }
 
 func destination(t *testing.T, controller host.Controller, extension artifact.Extension) string {
