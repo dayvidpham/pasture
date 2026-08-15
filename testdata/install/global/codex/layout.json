@@ -1,0 +1,12 @@
+{
+  "contract": "codex/global@0.146.0",
+  "runtime_contract": "codex/codex@0.146.0",
+  "host_min": "0.146.0",
+  "host_max": "0.146.0",
+  "components": [
+    {"extension": "skills", "package": "pasture-codex-skills", "prefix": ".agents/skills/", "default_enabled": true},
+    {"extension": "agents", "package": "pasture-codex-agents", "prefix": ".codex/agents/", "default_enabled": true},
+    {"extension": "hooks", "package": "pasture-codex-hooks", "prefix": ".codex/hooks/", "default_enabled": false,
+     "public_files": [".codex/hooks.json", ".codex/pasture-codex-activation.json"]}
+  ]
+}
