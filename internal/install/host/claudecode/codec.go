@@ -43,24 +43,28 @@ type pluginRow struct {
 	Enabled                                   bool
 }
 
-type pluginRowWire struct {
-	ID              string  `json:"id"`
+type installedPluginWire struct {
+	ID          string  `json:"id"`
+	Version     *string `json:"version,omitempty"`
+	Scope       string  `json:"scope"`
+	Enabled     *bool   `json:"enabled"`
+	InstallPath string  `json:"installPath"`
+	InstalledAt string  `json:"installedAt"`
+	LastUpdated string  `json:"lastUpdated"`
+}
+
+type availablePluginWire struct {
 	PluginID        string  `json:"pluginId"`
 	Name            string  `json:"name"`
 	Description     *string `json:"description,omitempty"`
 	MarketplaceName string  `json:"marketplaceName"`
 	Version         *string `json:"version,omitempty"`
-	Scope           string  `json:"scope,omitempty"`
-	Enabled         *bool   `json:"enabled,omitempty"`
-	InstallPath     string  `json:"installPath,omitempty"`
-	InstalledAt     string  `json:"installedAt,omitempty"`
-	LastUpdated     string  `json:"lastUpdated,omitempty"`
-	Source          string  `json:"source,omitempty"`
+	Source          string  `json:"source"`
 }
 
 type pluginListWire struct {
-	Installed []pluginRowWire `json:"installed"`
-	Available []pluginRowWire `json:"available"`
+	Installed []installedPluginWire `json:"installed"`
+	Available []availablePluginWire `json:"available"`
 }
 
 func decodeMarketplaces(data []byte) ([]marketplace, error) {
@@ -117,14 +121,8 @@ func decodePlugins(data []byte) ([]pluginRow, error) {
 	result := make([]pluginRow, 0, len(wire.Installed))
 	for i, row := range wire.Installed {
 		id := row.ID
-		if id == "" {
-			id = row.PluginID
-		}
-		if id == "" || row.Scope == "" || row.Enabled == nil || row.InstallPath == "" {
-			return nil, fmt.Errorf("installed plugin row %d lacks required id/scope/enabled/installPath", i)
-		}
-		if row.ID != "" && row.PluginID != "" && row.ID != row.PluginID {
-			return nil, fmt.Errorf("installed plugin row %d has conflicting id %q and pluginId %q", i, row.ID, row.PluginID)
+		if id == "" || row.Scope == "" || row.Enabled == nil || row.InstallPath == "" || row.InstalledAt == "" || row.LastUpdated == "" {
+			return nil, fmt.Errorf("installed plugin row %d lacks required id/scope/enabled/installPath/installedAt/lastUpdated", i)
 		}
 		if _, duplicate := seen[id]; duplicate {
 			return nil, fmt.Errorf("installed plugin %q appears more than once", id)
@@ -134,23 +132,22 @@ func decodePlugins(data []byte) ([]pluginRow, error) {
 			return nil, fmt.Errorf("installed plugin row %d has selector %q outside plugin@marketplace form", i, id)
 		}
 		name, marketplaceName := id[:at], id[at+1:]
-		if row.Name != "" && row.Name != name {
-			return nil, fmt.Errorf("installed plugin row %d name %q contradicts selector %q", i, row.Name, id)
-		}
-		if row.MarketplaceName != "" && row.MarketplaceName != marketplaceName {
-			return nil, fmt.Errorf("installed plugin row %d marketplace %q contradicts selector %q", i, row.MarketplaceName, id)
-		}
 		seen[id] = struct{}{}
 		result = append(result, pluginRow{ID: id, Name: name, Marketplace: marketplaceName, Version: row.Version, Scope: row.Scope, Enabled: *row.Enabled, InstallPath: row.InstallPath})
 	}
 	for i, row := range wire.Available {
 		id := row.PluginID
-		if id == "" {
-			id = row.ID
-		}
 		if id == "" || row.Name == "" || row.MarketplaceName == "" || row.Source == "" {
 			return nil, fmt.Errorf("available plugin row %d lacks pluginId/name/marketplaceName/source", i)
 		}
+		at := strings.LastIndex(id, "@")
+		if at <= 0 || at == len(id)-1 || id[:at] != row.Name || id[at+1:] != row.MarketplaceName {
+			return nil, fmt.Errorf("available plugin row %d has selector %q inconsistent with name %q and marketplace %q", i, id, row.Name, row.MarketplaceName)
+		}
+		if _, duplicate := seen["available:"+id]; duplicate {
+			return nil, fmt.Errorf("available plugin %q appears more than once", id)
+		}
+		seen["available:"+id] = struct{}{}
 	}
 	return result, nil
 }

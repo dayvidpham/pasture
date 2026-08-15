@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/dayvidpham/pasture/artifact"
@@ -26,32 +25,18 @@ type nativeSnapshot struct {
 	legacy      *pluginRow
 }
 
-type groupSession struct {
-	request             service.GroupSelection
-	steps               []service.GroupStep
-	initial             nativeSnapshot
-	actions             map[cell.Cell]service.GroupAction
-	managed             map[cell.Cell]bool
-	optionalUnavailable error
-	ran                 bool
-	terminal            bool
-}
-
 type probeUnavailableError struct{ cause error }
 
 func (e *probeUnavailableError) Error() string { return e.cause.Error() }
 func (e *probeUnavailableError) Unwrap() error { return e.cause }
 
-// Controller is both the ordinary native-plugin activator and Claude's one
-// selection-wide reconciler. The latter is required only for the exact legacy
-// monolith transition; both paths use the same probes, codecs, and actions.
+// Controller is stateless. Every plan and action is derived from immutable
+// bindings, the supplied registry facts, and a fresh complete native probe.
 type Controller struct {
 	runner    Runner
 	manifests ManifestReader
 	artifacts map[cell.Cell]artifact.BundleID
-
-	mu      sync.Mutex
-	pending *groupSession
+	versions  map[cell.Cell]registry.Version
 }
 
 func NewController(runner Runner, manifests ManifestReader) (*Controller, error) {
@@ -63,17 +48,27 @@ func NewController(runner Runner, manifests ManifestReader) (*Controller, error)
 	}
 	descriptor, err := target.Descriptor()
 	if err != nil {
-		return nil, fault("Claude controller construction", "immutable embedded target descriptor", err.Error(), "NewController", "wiring artifact identity records", "native actions cannot be tied to exact shipped bytes", "regenerate and rebuild the embedded Claude target", err)
+		return nil, fault("Claude controller construction", "immutable embedded target descriptor", err.Error(), "NewController", "wiring immutable component bindings", "native actions cannot be tied to shipped bytes", "regenerate and rebuild the embedded Claude target", err)
 	}
 	artifacts := make(map[cell.Cell]artifact.BundleID, 3)
+	versions := make(map[cell.Cell]registry.Version, 3)
 	for _, component := range descriptor.Components() {
 		cc, cellErr := cell.New(ir.HarnessClaudeCode, component.Extension())
 		if cellErr != nil {
 			return nil, cellErr
 		}
+		_, versionText, manifestErr := componentManifest(component)
+		if manifestErr != nil {
+			return nil, manifestErr
+		}
+		version, versionErr := registry.NewVersion(versionText)
+		if versionErr != nil {
+			return nil, versionErr
+		}
 		artifacts[cc] = component.Bundle().ID()
+		versions[cc] = version
 	}
-	return &Controller{runner: runner, manifests: manifests, artifacts: artifacts}, nil
+	return &Controller{runner: runner, manifests: manifests, artifacts: artifacts, versions: versions}, nil
 }
 
 func (c *Controller) Harness() ir.HarnessID { return ir.HarnessClaudeCode }
@@ -83,100 +78,267 @@ func (c *Controller) StrategyKind() activation.StrategyKind {
 
 func (c *Controller) PlanSelection(ctx context.Context, request service.GroupSelection) (service.GroupPlan, error) {
 	if request.Scope.Kind() != registry.ScopeGlobal {
-		return service.GroupPlan{Handled: false}, nil
+		return service.GroupPlan{}, nil
 	}
-	if request.Source != apply.InstallerSource() && request.Source != apply.HomeManagerSource() {
+	if !request.Source.IsValid() {
 		return service.GroupPlan{}, fault("Claude group planning", "valid controller source", "the source is invalid", "Controller.PlanSelection", "planning exhaustive sibling intent", "ownership cannot be selected", "use installer or home-manager source", nil)
 	}
-	if err := validateActivations(request.Activation); err != nil {
+	if err := c.validateRequest(request); err != nil {
 		return service.GroupPlan{}, err
+	}
+	snapshot, probeErr := c.probe(ctx)
+	if probeErr != nil {
+		if !optionalSelection(request) {
+			return service.GroupPlan{}, probeErr
+		}
+		return c.newPlan(request, nativeSnapshot{}, true)
+	}
+	if err := c.validatePrior(request, snapshot); err != nil {
+		if !optionalSelection(request) {
+			return service.GroupPlan{}, err
+		}
+		return c.newPlan(request, snapshot, true)
+	}
+	return c.newPlan(request, snapshot, false)
+}
+
+func (c *Controller) newPlan(request service.GroupSelection, snapshot nativeSnapshot, preserveOnly bool) (service.GroupPlan, error) {
+	results := make([]service.GroupResultCell, 0, 3)
+	actions := make([]service.GroupStep, 0, 7)
+	if preserveOnly {
+		skills, _ := cell.New(ir.HarnessClaudeCode, cell.SkillsAxis())
+		step, err := service.NewGroupStep(service.InspectGroupAction(), skills)
+		if err != nil {
+			return service.GroupPlan{}, err
+		}
+		actions = append(actions, step)
+	} else {
+		for _, extension := range cell.CanonicalExtensions() {
+			cc, _ := cell.New(ir.HarnessClaudeCode, extension)
+			if !request.Selection.Enabled(cc) {
+				continue
+			}
+			prior, hasPrior := request.Prior[cc]
+			_, installed := snapshot.plugins[cc]
+			external := installed && (!hasPrior || !prior.Managed() || prior.Observation() == registry.ObservationAbsent)
+			if !external {
+				step, err := service.NewGroupStep(service.EnsureCellGroupAction(), cc)
+				if err != nil {
+					return service.GroupPlan{}, err
+				}
+				actions = append(actions, step)
+			}
+		}
+		if snapshot.legacy != nil {
+			skills, _ := cell.New(ir.HarnessClaudeCode, cell.SkillsAxis())
+			step, err := service.NewGroupStep(service.RemoveSharedGroupAction(), skills)
+			if err != nil {
+				return service.GroupPlan{}, err
+			}
+			actions = append(actions, step)
+		}
+		for _, extension := range cell.CanonicalExtensions() {
+			cc, _ := cell.New(ir.HarnessClaudeCode, extension)
+			if request.Selection.Enabled(cc) {
+				continue
+			}
+			prior, hasPrior := request.Prior[cc]
+			_, installed := snapshot.plugins[cc]
+			// A legacy monolith authorizes removal of the monolith itself, not
+			// arbitrary split plugins that may have been installed externally.
+			// Only an exact, non-absent managed record can authorize removing a
+			// split plugin.  This keeps migration ownership-safe when native state
+			// contains both the old monolith and an external split install.
+			authorized := hasPrior && prior.Managed() && prior.Observation() != registry.ObservationAbsent
+			if installed && authorized {
+				step, err := service.NewGroupStep(service.RemoveCellGroupAction(), cc)
+				if err != nil {
+					return service.GroupPlan{}, err
+				}
+				actions = append(actions, step)
+			}
+		}
+		if len(actions) == 0 {
+			skills, _ := cell.New(ir.HarnessClaudeCode, cell.SkillsAxis())
+			step, err := service.NewGroupStep(service.InspectGroupAction(), skills)
+			if err != nil {
+				return service.GroupPlan{}, err
+			}
+			actions = append(actions, step)
+		}
+	}
+	resultOps := map[cell.Cell]apply.Operation{}
+	for _, step := range actions {
+		if step.Kind() == service.EnsureCellGroupAction() || step.Kind() == service.RemoveCellGroupAction() {
+			resultOps[step.ControlCell()] = step.Operation()
+		}
+	}
+	for _, extension := range cell.CanonicalExtensions() {
+		cc, _ := cell.New(ir.HarnessClaudeCode, extension)
+		key, err := request.Scope.Key(cc)
+		if err != nil {
+			return service.GroupPlan{}, err
+		}
+		op := resultOps[cc]
+		if !op.IsValid() {
+			op = apply.Inspect()
+		}
+		result, err := service.NewGroupResultCell(cc, key, op)
+		if err != nil {
+			return service.GroupPlan{}, err
+		}
+		results = append(results, result)
+	}
+	return service.NewGroupPlan(results, actions)
+}
+
+func (c *Controller) ExecuteAction(ctx context.Context, request service.GroupSelection, plan service.GroupPlan, step service.GroupStep) error {
+	if err := c.validateActionRequest(request, plan, step); err != nil {
+		return err
+	}
+	if step.Kind() == service.InspectGroupAction() {
+		return nil
 	}
 	snapshot, err := c.probe(ctx)
 	if err != nil {
-		var unavailable *probeUnavailableError
-		if !optionalSelection(request) || !errors.As(err, &unavailable) {
-			return service.GroupPlan{}, err
+		return err
+	}
+	if err := c.validatePrior(request, snapshot); err != nil {
+		return err
+	}
+	cc := step.ControlCell()
+	switch step.Kind() {
+	case service.EnsureCellGroupAction():
+		prior, hasPrior := request.Prior[cc]
+		_, installed := snapshot.plugins[cc]
+		if installed && (!hasPrior || !prior.Managed() || prior.Observation() == registry.ObservationAbsent) {
+			return nil
 		}
-		steps, stepErr := groupSteps(request, nativeSnapshot{})
-		if stepErr != nil {
-			return service.GroupPlan{}, stepErr
+		if err := c.ensureMarketplace(ctx, snapshot.marketplace); err != nil {
+			return err
 		}
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		if c.pending != nil && !c.pending.terminal {
-			return service.GroupPlan{}, fault("Claude group planning", "one active reconciliation", "another group plan has not finished inspection", "Controller.PlanSelection", "creating an optional preservation plan", "two plans could exchange live facts", "finish the current apply request before starting another", nil)
+		verb := "install"
+		if installed {
+			verb = "update"
 		}
-		c.pending = &groupSession{request: request, steps: steps, actions: map[cell.Cell]service.GroupAction{}, managed: map[cell.Cell]bool{}, optionalUnavailable: unavailable}
-		return service.GroupPlan{Handled: true, Steps: append([]service.GroupStep(nil), steps...)}, nil
+		_, err = c.run(ctx, command("claude", "plugin", verb, selector(packageFor(cc.Extension())), "--scope", "user"))
+		return err
+	case service.RemoveSharedGroupAction():
+		if snapshot.legacy == nil {
+			return nil
+		}
+		_, err = c.run(ctx, command("claude", "plugin", "uninstall", selector(LegacyPackage), "--scope", "user"))
+		return err
+	case service.RemoveCellGroupAction():
+		if _, installed := snapshot.plugins[cc]; !installed {
+			return nil
+		}
+		prior, hasPrior := request.Prior[cc]
+		// Shared legacy removal does not confer ownership of an independently
+		// installed split plugin.  Require the exact managed prior record for
+		// every split uninstall, including during monolith migration.
+		authorized := hasPrior && prior.Managed() && prior.Observation() != registry.ObservationAbsent
+		if !authorized {
+			return fault("Claude split removal", "current managed authority or exact legacy migration authority", fmt.Sprintf("cell %s is installed without removable authority", cc), "Controller.ExecuteAction", "authorizing native uninstall", "the external plugin was preserved", "remove it manually or restore an exact managed record", nil)
+		}
+		_, err = c.run(ctx, command("claude", "plugin", "uninstall", selector(packageFor(cc.Extension())), "--scope", "user"))
+		return err
+	default:
+		return fault("Claude group action", "known typed action", "the action discriminator is invalid", "Controller.ExecuteAction", "executing a bounded native action", "no command was run", "rebuild the plan with typed group actions", nil)
 	}
-	if err := validatePrior(request.Prior, snapshot); err != nil {
-		return service.GroupPlan{}, err
-	}
-	steps, err := groupSteps(request, snapshot)
-	if err != nil {
-		return service.GroupPlan{}, err
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.pending != nil && !c.pending.terminal {
-		return service.GroupPlan{}, fault("Claude group planning", "one active reconciliation", "another group plan has not finished inspection", "Controller.PlanSelection", "creating a selection-wide plan", "two plans could exchange live facts", "finish the current apply request before starting another; concurrent installers are unsupported", nil)
-	}
-	c.pending = &groupSession{request: request, steps: steps, initial: snapshot, actions: map[cell.Cell]service.GroupAction{}, managed: map[cell.Cell]bool{}}
-	return service.GroupPlan{Handled: true, Steps: append([]service.GroupStep(nil), steps...)}, nil
 }
 
-func groupSteps(request service.GroupSelection, snapshot nativeSnapshot) ([]service.GroupStep, error) {
-	steps := make([]service.GroupStep, 0, 3)
-	for _, extension := range cell.CanonicalExtensions() {
-		cc, _ := cell.New(ir.HarnessClaudeCode, extension)
-		key, keyErr := request.Scope.Key(cc)
-		if keyErr != nil {
-			return nil, keyErr
-		}
-		op := apply.Inspect()
-		if request.Selection.Enabled(cc) {
-			op = apply.Ensure()
-		} else if prior, ok := request.Prior[cc]; ok && prior.Managed() || snapshot.legacy != nil {
-			op = apply.RemoveOp()
-		}
-		steps = append(steps, service.NewGroupStep(cc, key, op))
+func (c *Controller) InspectAction(ctx context.Context, request service.GroupSelection, plan service.GroupPlan, step service.GroupStep, executeErr error) (service.GroupFacts, error) {
+	if err := c.validateActionRequest(request, plan, step); err != nil {
+		return service.GroupFacts{}, err
 	}
-	return steps, nil
+	snapshot, probeErr := c.probe(ctx)
+	if probeErr != nil {
+		if step.Kind() == service.InspectGroupAction() && optionalSelection(request) {
+			return optionalPreservationFacts(plan, probeErr)
+		}
+		return service.GroupFacts{}, fault("Claude post-action inspection", "complete live three-cell state", probeErr.Error(), "Controller.InspectAction", "probing after a typed group action", "no stale registry facts can be emitted", "repair the Claude binary or response and retry the full selection", errors.Join(executeErr, probeErr))
+	}
+	if err := c.validatePriorForInspection(request, snapshot, step); err != nil {
+		return service.GroupFacts{}, err
+	}
+	results := plan.ResultCells()
+	facts := make([]service.GroupAction, 0, 3)
+	for _, result := range results {
+		cc := result.Cell()
+		key := result.Key()
+		plugin, installed := snapshot.plugins[cc]
+		prior, hasPrior := request.Prior[cc]
+		managed := hasPrior && prior.Managed() && prior.Observation() != registry.ObservationAbsent
+		if step.Kind() == service.EnsureCellGroupAction() && step.ControlCell() == cc && installed {
+			managed = true
+		}
+		observation := registry.ObservationAbsent
+		management := apply.ManagementExternal
+		diagnostic := "exact split plugin is absent"
+		if installed {
+			observation = registry.ObservationInstalled
+			management = apply.ManagementExternal
+			diagnostic = fmt.Sprintf("exact plugin %s is installed and remains externally owned", plugin.ID)
+			if managed {
+				management = apply.ManagementPasture
+				diagnostic = fmt.Sprintf("exact managed plugin %s is installed", plugin.ID)
+			}
+		} else if managed || hasPrior {
+			management = apply.ManagementPasture
+			if hasPrior && !prior.Managed() {
+				management = apply.ManagementExternal
+			}
+		}
+		isControl := cc == step.ControlCell()
+		status := apply.Completed()
+		outcome := registry.OutcomeCompleted
+		lastOperation := registry.OperationInspect
+		if isControl {
+			lastOperation = registryOperation(step.Operation())
+			if executeErr != nil {
+				status = apply.Failed()
+				outcome = registry.OutcomeFailed
+				diagnostic = fmt.Sprintf("typed Claude action failed; strongest live state was retained: %v", executeErr)
+			}
+		}
+		var record *registry.Record
+		if installed || hasPrior || managed {
+			record = c.observedRecord(key, request.Activation[cc], request.Source, management == apply.ManagementPasture, lastOperation, outcome, observation, diagnostic)
+			if record == nil {
+				return service.GroupFacts{}, fault("Claude fact construction", "valid immutable registry record", fmt.Sprintf("record construction failed for %s", cc), "Controller.InspectAction", "building complete live group facts", "the service cannot persist the post-action state", "repair immutable binding or registry identity construction", nil)
+			}
+		}
+		action, err := service.NewGroupAction(apply.NewActionRow(cc, result.Operation(), status, management, observation, diagnostic), record)
+		if err != nil {
+			return service.GroupFacts{}, err
+		}
+		facts = append(facts, action)
+	}
+	return service.NewGroupFacts(facts...)
 }
 
-func (c *Controller) Execute(ctx context.Context, step service.GroupStep) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	s := c.pending
-	if s == nil || !containsStep(s.steps, step) {
-		return fault("Claude group execution", "step from the active canonical plan", fmt.Sprintf("step %s is stale or foreign", step.Cell()), "Controller.Execute", "executing selection-wide reconciliation", "no action was started", "rerun apply-selection to create a fresh plan", nil)
+func optionalPreservationFacts(plan service.GroupPlan, cause error) (service.GroupFacts, error) {
+	actions := make([]service.GroupAction, 0, 3)
+	for _, result := range plan.ResultCells() {
+		diagnostic := fmt.Sprintf("optional all-false Claude probe was unavailable or ambiguous; no state was claimed or mutated: %v", cause)
+		action, err := service.NewGroupAction(apply.NewActionRow(result.Cell(), result.Operation(), apply.Completed(), apply.ManagementExternal, registry.ObservationUnknown, diagnostic), nil)
+		if err != nil {
+			return service.GroupFacts{}, err
+		}
+		actions = append(actions, action)
 	}
-	if s.ran {
-		return nil
+	return service.NewGroupFacts(actions...)
+}
+
+func (c *Controller) ClosePlan(ctx context.Context, request service.GroupSelection, plan service.GroupPlan, stage service.GroupTerminalStage) error {
+	if err := ctx.Err(); err != nil {
+		return fault("Claude plan closure", "live bounded cleanup context", err.Error(), "Controller.ClosePlan", "closing a terminal stateless plan", "closure was not acknowledged", "retry the full selection with a live context", err)
 	}
-	s.ran = true
-	c.reconcile(ctx, s)
+	if !stage.IsValid() || !plan.Handled() || request.Scope.Kind() != registry.ScopeGlobal {
+		return fault("Claude plan closure", "valid terminal stage and handled global plan", "the closure request is malformed", "Controller.ClosePlan", "closing a terminal stateless plan", "the terminal path cannot be confirmed", "pass the original handled plan and typed terminal stage", nil)
+	}
 	return nil
-}
-
-func (c *Controller) Inspect(_ context.Context, step service.GroupStep) (service.GroupAction, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	s := c.pending
-	if s == nil || !s.ran {
-		return service.GroupAction{}, fault("Claude group inspection", "executed active plan", "no executed group plan is active", "Controller.Inspect", "returning a confirmed group fact", "the service must not persist a guessed record", "rerun the full selection", nil)
-	}
-	action, ok := s.actions[step.Cell()]
-	if !ok {
-		return service.GroupAction{}, fault("Claude group inspection", "one exact action per canonical cell", fmt.Sprintf("no action was recorded for %s", step.Cell()), "Controller.Inspect", "returning a confirmed group fact", "the service must stop without persisting a guessed record", "repair the controller and rerun the full selection", nil)
-	}
-	if action.Row.Status() == apply.Failed() {
-		s.terminal = true
-	}
-	if step.Cell() == s.steps[len(s.steps)-1].Cell() {
-		c.pending = nil
-	}
-	return action, nil
 }
 
 func (c *Controller) PreflightCell(ctx context.Context, request service.GroupCell) error {
@@ -191,13 +353,14 @@ func (c *Controller) PreflightCell(ctx context.Context, request service.GroupCel
 		return err
 	}
 	if snapshot.legacy != nil {
-		return fault("Claude cell preflight", "split-only native state", "the exact v0.0.4 monolith or an incomplete transition requires all three sibling choices", "Controller.PreflightCell", "validating a context-free cell request", "no mutation was attempted because sibling intent is unavailable", "rerun `pasture install` or apply-selection with an exhaustive desired document", nil)
+		return fault("Claude cell preflight", "split-only native state", "the exact v0.0.4 monolith requires all three sibling choices", "Controller.PreflightCell", "validating a context-free cell request", "no mutation was attempted because sibling intent is unavailable", "rerun `pasture install` or apply-selection with an exhaustive desired document", nil)
 	}
-	return validatePrior(request.Prior, snapshot)
+	selection := service.GroupSelection{Scope: request.Scope, Source: request.Source, Prior: request.Prior, Activation: request.Activation}
+	return c.validatePrior(selection, snapshot)
 }
 
 func (c *Controller) inspectCell(ctx context.Context, source apply.Source, key registry.Key, act activation.ComponentActivation, prior *registry.Record) (apply.Outcome, error) {
-	if err := validateOrdinary(key, act, prior); err != nil {
+	if err := c.validateOrdinary(source, key, act, prior); err != nil {
 		return apply.Outcome{}, err
 	}
 	snapshot, err := c.probe(ctx)
@@ -205,18 +368,25 @@ func (c *Controller) inspectCell(ctx context.Context, source apply.Source, key r
 		return apply.Outcome{Observation: registry.ObservationUnknown}, err
 	}
 	if snapshot.legacy != nil {
-		return apply.Outcome{Observation: registry.ObservationUnknown}, fault("Claude cell inspection", "split-only state for apply-cell", "the exact legacy monolith requires exhaustive sibling intent", "Controller.Inspect", "inspecting an ordinary cell", "no mutation was attempted", "rerun the full installer or apply-selection", nil)
+		return apply.Outcome{Observation: registry.ObservationUnknown}, fault("Claude cell inspection", "split-only state for apply-cell", "the exact legacy monolith requires exhaustive sibling intent", "Controller.inspectCell", "inspecting an ordinary cell", "no mutation was attempted", "rerun the full installer or apply-selection", nil)
+	}
+	if prior != nil {
+		request := service.GroupSelection{Scope: apply.GlobalScope(), Source: source, Prior: map[cell.Cell]registry.Record{key.Cell(): *prior}, Activation: map[cell.Cell]activation.ComponentActivation{key.Cell(): act}}
+		if err := c.validatePriorRecord(request, key.Cell(), *prior); err != nil {
+			return apply.Outcome{}, err
+		}
 	}
 	row, present := snapshot.plugins[key.Cell()]
 	if !present {
 		return apply.Outcome{Status: apply.Completed(), Observation: registry.ObservationAbsent, Diagnostic: "the exact split plugin is absent"}, nil
 	}
-	managed := prior != nil && prior.Managed()
-	return apply.Outcome{Status: apply.Completed(), Observation: registry.ObservationInstalled, Diagnostic: fmt.Sprintf("exact user-scoped plugin %s is installed", row.ID), Record: c.observedRecord(key, act, source, managed, registry.OperationInspect, registry.OutcomeCompleted, registry.ObservationInstalled, "exact native postcondition observed")}, nil
+	managed := prior != nil && prior.Managed() && prior.Observation() != registry.ObservationAbsent
+	record := c.observedRecord(key, act, source, managed, registry.OperationInspect, registry.OutcomeCompleted, registry.ObservationInstalled, "exact native state observed")
+	return apply.Outcome{Status: apply.Completed(), Observation: registry.ObservationInstalled, Diagnostic: fmt.Sprintf("exact user-scoped plugin %s is installed", row.ID), Record: record}, nil
 }
 
 func (c *Controller) ensureCell(ctx context.Context, source apply.Source, key registry.Key, act activation.ComponentActivation, prior *registry.Record) (apply.Outcome, error) {
-	if err := validateOrdinary(key, act, prior); err != nil {
+	if err := c.validateOrdinary(source, key, act, prior); err != nil {
 		return apply.Outcome{}, err
 	}
 	before, err := c.probe(ctx)
@@ -224,21 +394,27 @@ func (c *Controller) ensureCell(ctx context.Context, source apply.Source, key re
 		return apply.Outcome{Observation: registry.ObservationUnknown}, err
 	}
 	if before.legacy != nil {
-		return apply.Outcome{Observation: registry.ObservationUnknown}, fault("Claude cell ensure", "split-only state", "legacy migration requires exhaustive sibling intent", "Controller.Ensure", "ensuring one cell", "no mutation was attempted", "rerun the full installer or apply-selection", nil)
+		return apply.Outcome{Observation: registry.ObservationUnknown}, fault("Claude cell ensure", "split-only state", "legacy migration requires exhaustive sibling intent", "Controller.ensureCell", "ensuring one cell", "no mutation was attempted", "rerun the full installer or apply-selection", nil)
 	}
-	if _, external := before.plugins[key.Cell()]; external && (prior == nil || !prior.Managed()) {
-		return apply.Outcome{Status: apply.Completed(), Observation: registry.ObservationInstalled, Diagnostic: "exact matching plugin remains externally owned"}, nil
+	if prior != nil {
+		request := service.GroupSelection{Scope: apply.GlobalScope(), Source: source, Prior: map[cell.Cell]registry.Record{key.Cell(): *prior}, Activation: map[cell.Cell]activation.ComponentActivation{key.Cell(): act}}
+		if err := c.validatePriorRecord(request, key.Cell(), *prior); err != nil {
+			return apply.Outcome{}, err
+		}
+	}
+	if _, installed := before.plugins[key.Cell()]; installed && (prior == nil || !prior.Managed() || prior.Observation() == registry.ObservationAbsent) {
+		record := c.observedRecord(key, act, source, false, registry.OperationEnsure, registry.OutcomeCompleted, registry.ObservationInstalled, "exact matching plugin remains externally owned")
+		return apply.Outcome{Status: apply.Completed(), Observation: registry.ObservationInstalled, Record: record, Diagnostic: "exact matching plugin remains externally owned"}, nil
 	}
 	if err := c.ensureMarketplace(ctx, before.marketplace); err != nil {
-		return apply.Outcome{Observation: registry.ObservationUnknown}, err
+		return c.ordinaryFailureProbe(ctx, source, key, act, prior, registry.OperationEnsure, err)
 	}
-	pkg := nativePackage(act)
-	action := command("claude", "plugin", "install", selector(pkg), "--scope", "user")
+	verb := "install"
 	if _, installed := before.plugins[key.Cell()]; installed {
-		action = command("claude", "plugin", "update", selector(pkg), "--scope", "user")
+		verb = "update"
 	}
-	if _, err := c.run(ctx, action); err != nil {
-		return apply.Outcome{Observation: registry.ObservationUnknown}, err
+	if _, err := c.run(ctx, command("claude", "plugin", verb, selector(nativePackage(act)), "--scope", "user")); err != nil {
+		return c.ordinaryFailureProbe(ctx, source, key, act, prior, registry.OperationEnsure, err)
 	}
 	after, err := c.probe(ctx)
 	if err != nil {
@@ -252,22 +428,26 @@ func (c *Controller) ensureCell(ctx context.Context, source apply.Source, key re
 }
 
 func (c *Controller) removeCell(ctx context.Context, source apply.Source, key registry.Key, act activation.ComponentActivation, prior registry.Record) (apply.Outcome, error) {
-	if err := validateOrdinary(key, act, &prior); err != nil {
+	if err := c.validateOrdinary(source, key, act, &prior); err != nil {
 		return apply.Outcome{}, err
 	}
-	if !prior.Managed() {
-		return apply.Outcome{Observation: registry.ObservationUnknown}, fault("Claude plugin removal", "Pasture-managed prior fact", "the prior record is externally owned", "Controller.Remove", "authorizing native uninstall", "the external plugin was preserved", "remove it manually or rerun with a Pasture-managed record", nil)
+	if !prior.Managed() || prior.Observation() == registry.ObservationAbsent {
+		return apply.Outcome{Observation: registry.ObservationUnknown}, fault("Claude plugin removal", "Pasture-managed non-absent prior fact", "the prior record is external or an absent tombstone", "Controller.removeCell", "authorizing native uninstall", "an external reinstall was preserved", "remove it manually or restore exact managed installed evidence", nil)
 	}
 	before, err := c.probe(ctx)
 	if err != nil {
 		return apply.Outcome{Observation: registry.ObservationUnknown}, err
 	}
+	request := service.GroupSelection{Scope: apply.GlobalScope(), Source: source, Prior: map[cell.Cell]registry.Record{key.Cell(): prior}, Activation: map[cell.Cell]activation.ComponentActivation{key.Cell(): act}}
+	if err := c.validatePriorRecord(request, key.Cell(), prior); err != nil {
+		return apply.Outcome{}, err
+	}
 	if before.legacy != nil {
-		return apply.Outcome{Observation: registry.ObservationUnknown}, fault("Claude plugin removal", "split-only state", "legacy migration requires exhaustive sibling intent", "Controller.Remove", "removing one cell", "no mutation was attempted", "rerun the full installer or apply-selection", nil)
+		return apply.Outcome{Observation: registry.ObservationUnknown}, fault("Claude plugin removal", "split-only state", "legacy migration requires exhaustive sibling intent", "Controller.removeCell", "removing one cell", "no mutation was attempted", "rerun the full installer or apply-selection", nil)
 	}
 	if _, installed := before.plugins[key.Cell()]; installed {
 		if _, err := c.run(ctx, command("claude", "plugin", "uninstall", selector(nativePackage(act)), "--scope", "user")); err != nil {
-			return apply.Outcome{Observation: registry.ObservationUnknown}, err
+			return c.ordinaryFailureProbe(ctx, source, key, act, &prior, registry.OperationRemove, err)
 		}
 	}
 	after, err := c.probe(ctx)
@@ -281,150 +461,116 @@ func (c *Controller) removeCell(ctx context.Context, source apply.Source, key re
 	return apply.Outcome{Status: apply.Completed(), Observation: registry.ObservationAbsent, Record: record, Diagnostic: "exact native remove postcondition confirmed"}, nil
 }
 
-func (c *Controller) reconcile(ctx context.Context, s *groupSession) {
-	if s.optionalUnavailable != nil {
-		for _, step := range s.steps {
-			diagnostic := fmt.Sprintf("optional all-false Claude probe was unavailable; no state was claimed or mutated: %v", s.optionalUnavailable)
-			s.actions[step.Cell()] = service.GroupAction{Row: apply.NewActionRow(step.Cell(), step.Operation(), apply.Completed(), apply.ManagementUnknown, registry.ObservationUnknown, diagnostic)}
-		}
-		return
+func (c *Controller) ordinaryFailureProbe(ctx context.Context, source apply.Source, key registry.Key, act activation.ComponentActivation, prior *registry.Record, operation registry.Operation, actionErr error) (apply.Outcome, error) {
+	after, probeErr := c.probe(context.WithoutCancel(ctx))
+	if probeErr != nil {
+		return apply.Outcome{Observation: registry.ObservationUnknown}, errors.Join(actionErr, probeErr)
 	}
-	failedCell := cell.Cell{}
-	failedReason := ""
-	current := s.initial
-	marketReady := false
-	// Desired split packages are always established before the monolith changes.
-	for _, step := range s.steps {
-		cc := step.Cell()
-		if !s.request.Selection.Enabled(cc) {
-			continue
-		}
-		prior, hadPrior := s.request.Prior[cc]
-		_, installed := current.plugins[cc]
-		if installed && (!hadPrior || !prior.Managed()) {
-			continue // exact external match is satisfying but never adopted
-		}
-		if !marketReady {
-			if err := c.ensureMarketplace(ctx, current.marketplace); err != nil {
-				failedCell, failedReason = cc, err.Error()
-				break
-			}
-			marketReady = true
-		}
-		current.marketplace = true
-		pkg := packageFor(cc.Extension())
-		action := command("claude", "plugin", "install", selector(pkg), "--scope", "user")
-		if installed {
-			action = command("claude", "plugin", "update", selector(pkg), "--scope", "user")
-		}
-		if _, err := c.run(ctx, action); err != nil {
-			failedCell, failedReason = cc, err.Error()
-			break
-		}
-		next, err := c.probe(ctx)
-		if err != nil {
-			failedCell, failedReason = cc, err.Error()
-			break
-		}
-		current = next
-		if _, ok := current.plugins[cc]; !ok {
-			failedCell, failedReason = cc, "native ensure returned success but the exact split plugin is absent"
-			break
-		}
-		s.managed[cc] = true
+	observation := registry.ObservationAbsent
+	if _, installed := after.plugins[key.Cell()]; installed {
+		observation = registry.ObservationInstalled
 	}
-	if failedReason == "" && current.legacy != nil {
-		if _, err := c.run(ctx, command("claude", "plugin", "uninstall", selector(LegacyPackage), "--scope", "user")); err != nil {
-			failedCell, _ = cell.New(ir.HarnessClaudeCode, cell.SkillsAxis())
-			failedReason = err.Error()
-		} else if next, err := c.probe(ctx); err != nil {
-			failedCell, _ = cell.New(ir.HarnessClaudeCode, cell.SkillsAxis())
-			failedReason = err.Error()
-		} else {
-			current = next
-			if current.legacy != nil {
-				failedCell, _ = cell.New(ir.HarnessClaudeCode, cell.SkillsAxis())
-				failedReason = "legacy uninstall returned success but the exact monolith remains"
-			}
-		}
-	}
-	// Unselected split packages are removed only when prior inventory or the
-	// exact monolith transition establishes Pasture authority.
-	if failedReason == "" {
-		for _, step := range s.steps {
-			cc := step.Cell()
-			if s.request.Selection.Enabled(cc) {
-				continue
-			}
-			_, installed := current.plugins[cc]
-			prior, hadPrior := s.request.Prior[cc]
-			authorized := hadPrior && prior.Managed() || s.initial.legacy != nil
-			if !installed || !authorized {
-				continue
-			}
-			if _, err := c.run(ctx, command("claude", "plugin", "uninstall", selector(packageFor(cc.Extension())), "--scope", "user")); err != nil {
-				failedCell, failedReason = cc, err.Error()
-				break
-			}
-			next, err := c.probe(ctx)
-			if err != nil {
-				failedCell, failedReason = cc, err.Error()
-				break
-			}
-			current = next
-			if _, remains := current.plugins[cc]; remains {
-				failedCell, failedReason = cc, "native uninstall returned success but the split plugin remains"
-				break
-			}
-		}
-	}
-	c.buildGroupActions(s, current, failedCell, failedReason)
+	managed := prior != nil && prior.Managed() && prior.Observation() != registry.ObservationAbsent
+	record := c.observedRecord(key, act, source, managed, operation, registry.OutcomeFailed, observation, actionErr.Error())
+	return apply.Outcome{Observation: observation, Record: record, Diagnostic: actionErr.Error()}, actionErr
 }
 
-func (c *Controller) buildGroupActions(s *groupSession, live nativeSnapshot, failedCell cell.Cell, failedReason string) {
-	failureSeen := false
-	for _, step := range s.steps {
-		cc := step.Cell()
-		desired := s.request.Selection.Enabled(cc)
-		rowStatus := apply.Completed()
-		observation := registry.ObservationAbsent
-		management := apply.ManagementUnknown
-		diagnostic := "desired false; exact split plugin is absent"
-		var record *registry.Record
-		plugin, installed := live.plugins[cc]
-		prior, hadPrior := s.request.Prior[cc]
-		managed := hadPrior && prior.Managed() || s.initial.legacy != nil || s.managed[cc]
-		if installed {
-			observation = registry.ObservationInstalled
-			management = apply.ManagementExternal
-			diagnostic = "exact matching split plugin remains externally owned"
-			if managed {
-				management = apply.ManagementPasture
-				record = c.observedRecord(step.Key(), s.request.Activation[cc], s.request.Source, true, operationRecord(step.Operation()), registry.OutcomeCompleted, observation, "exact group postcondition confirmed")
-				diagnostic = fmt.Sprintf("exact managed plugin %s is installed", plugin.ID)
-			}
-		} else if managed {
-			management = apply.ManagementPasture
-			record = c.observedRecord(step.Key(), s.request.Activation[cc], s.request.Source, true, operationRecord(step.Operation()), registry.OutcomeCompleted, observation, "exact group absence confirmed")
-		}
-		if failedReason != "" {
-			satisfied := desired == installed
-			switch {
-			case cc == failedCell:
-				rowStatus = apply.Failed()
-				diagnostic = failedReason
-				failureSeen = true
-				if record != nil {
-					record = c.observedRecord(step.Key(), s.request.Activation[cc], s.request.Source, managed, operationRecord(step.Operation()), registry.OutcomeFailed, observation, failedReason)
-				}
-			case failureSeen || !satisfied:
-				rowStatus = apply.Unattempted()
-				diagnostic = "an earlier Claude group action failed; this unsatisfied cell was not attempted"
-				record = nil
-			}
-		}
-		s.actions[cc] = service.GroupAction{Row: apply.NewActionRow(cc, step.Operation(), rowStatus, management, observation, diagnostic), Record: record}
+func (c *Controller) validateRequest(request service.GroupSelection) error {
+	if !request.Selection.IsValid() || request.Scope.Kind() != registry.ScopeGlobal {
+		return fault("Claude group request validation", "valid exhaustive global selection", "the selection or scope is invalid", "Controller.validateRequest", "planning a group reconciliation", "no probe or mutation can safely start", "use a parsed exhaustive selection and global scope", nil)
 	}
+	return validateActivations(request.Activation)
+}
+
+func (c *Controller) validateActionRequest(request service.GroupSelection, plan service.GroupPlan, step service.GroupStep) error {
+	if err := c.validateRequest(request); err != nil {
+		return err
+	}
+	found := false
+	for _, planned := range plan.Actions() {
+		if planned == step {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fault("Claude group action validation", "action from the supplied immutable plan", "the action is stale or foreign", "Controller.validateActionRequest", "executing or inspecting a group action", "no native command may run", "rerun apply-selection to construct a fresh plan", nil)
+	}
+	return nil
+}
+
+func (c *Controller) validatePrior(request service.GroupSelection, live nativeSnapshot) error {
+	if err := validatePriorCells(request.Prior); err != nil {
+		return err
+	}
+	for cc, record := range request.Prior {
+		if err := c.validatePriorRecord(request, cc, record); err != nil {
+			return err
+		}
+		_, installed := live.plugins[cc]
+		if record.Managed() && record.Observation() == registry.ObservationInstalled && !installed {
+			return fault("Claude managed-state validation", "live identity agrees with managed inventory", fmt.Sprintf("managed record for %s says installed but exact live plugin is absent", cc), "Controller.validatePrior", "preflighting ownership before mutation", "no native mutation was attempted", "inspect and manually repair the missing managed component or registry ambiguity", nil)
+		}
+	}
+	return nil
+}
+
+func (c *Controller) validatePriorForInspection(request service.GroupSelection, live nativeSnapshot, step service.GroupStep) error {
+	if err := validatePriorCells(request.Prior); err != nil {
+		return err
+	}
+	for cc, record := range request.Prior {
+		if err := c.validatePriorRecord(request, cc, record); err != nil {
+			return err
+		}
+		_, installed := live.plugins[cc]
+		if record.Managed() && record.Observation() == registry.ObservationInstalled && !installed && !(step.ControlCell() == cc && (step.Kind() == service.RemoveCellGroupAction() || step.Kind() == service.EnsureCellGroupAction())) {
+			return fault("Claude inspected-state validation", "live identity compatible with prior or current action", fmt.Sprintf("managed record for %s became absent outside its typed action", cc), "Controller.validatePriorForInspection", "building complete live facts", "facts may reflect an external concurrent change", "repair native state and retry with one installer", nil)
+		}
+	}
+	return nil
+}
+
+func validatePriorCells(prior map[cell.Cell]registry.Record) error {
+	for cc := range prior {
+		if cc.Harness() != ir.HarnessClaudeCode || !cc.IsValid() {
+			return fault("Claude prior-record validation", "only valid Claude global cells", fmt.Sprintf("prior inventory contains foreign or invalid cell %s", cc), "Controller.validatePriorCells", "validating native ownership before mutation", "no native mutation was attempted", "reload the scoped Claude registry and remove the contradictory entry", nil)
+		}
+	}
+	return nil
+}
+
+func (c *Controller) validatePriorRecord(request service.GroupSelection, cc cell.Cell, record registry.Record) error {
+	key, keyErr := request.Scope.Key(cc)
+	if keyErr != nil {
+		return keyErr
+	}
+	act, ok := request.Activation[cc]
+	wantSource := registry.SourceInstaller
+	if request.Source == apply.HomeManagerSource() {
+		wantSource = registry.SourceHomeManager
+	}
+	wantSelector, _ := registry.NewSelector(selector(packageFor(cc.Extension())))
+	if !ok || !record.IsValid() || record.Key() != key || record.Cell() != cc || record.Source() != wantSource || record.Strategy() != activation.NativePluginKindValue() || record.ArtifactID() != c.artifacts[cc] || record.Version() != c.versions[cc] || record.Selector() != wantSelector || record.Trust() != registry.TrustNotApplicable || !act.IsValid() {
+		return fault("Claude prior-record validation", "exact source, key, strategy, bundle, current version, selector, and trust", fmt.Sprintf("prior record for %s does not match immutable activation authority", cc), "Controller.validatePriorRecord", "authorizing native reconciliation", "no mutation was attempted", "repair or remove the contradictory registry record, then rerun status and apply-selection", nil)
+	}
+	return nil
+}
+
+func (c *Controller) validateOrdinary(source apply.Source, key registry.Key, act activation.ComponentActivation, prior *registry.Record) error {
+	if !source.IsValid() || !key.IsValid() || key.Scope() != registry.ScopeGlobal || key.Cell().Harness() != ir.HarnessClaudeCode {
+		return fmt.Errorf("Claude activator requires a valid source and global Claude key")
+	}
+	if !act.IsValid() || act.Cell() != key.Cell() || act.Strategy().Kind() != activation.NativePluginKindValue() || nativePackage(act) != packageFor(key.Cell().Extension()) {
+		return fmt.Errorf("Claude activation contradicts scoped cell %s", key.Cell())
+	}
+	if prior != nil {
+		request := service.GroupSelection{Scope: apply.GlobalScope(), Source: source, Prior: map[cell.Cell]registry.Record{key.Cell(): *prior}, Activation: map[cell.Cell]activation.ComponentActivation{key.Cell(): act}}
+		if err := c.validatePriorRecord(request, key.Cell(), *prior); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Controller) probe(ctx context.Context) (nativeSnapshot, error) {
@@ -432,11 +578,10 @@ func (c *Controller) probe(ctx context.Context) (nativeSnapshot, error) {
 	if err != nil {
 		return nativeSnapshot{}, &probeUnavailableError{cause: err}
 	}
-	versionText := strings.TrimSpace(string(versionResult.Stdout))
-	versionText = strings.TrimSuffix(versionText, " (Claude Code)")
+	versionText := strings.TrimSuffix(strings.TrimSpace(string(versionResult.Stdout)), " (Claude Code)")
 	host, err := runtime.ParseHostVersion(versionText)
 	if err != nil || !runtime.ClaudeCode2_1_210().Supports(host) {
-		return nativeSnapshot{}, &probeUnavailableError{cause: fault("Claude host probe", ">=2.1.210 and <2.2.0", fmt.Sprintf("reported host version %q is outside the reviewed range", strings.TrimSpace(string(versionResult.Stdout))), "Controller.probe", "checking compatibility before native mutation", "no marketplace or plugin action was attempted", "install a reviewed Claude Code 2.1.x version or update Pasture's reviewed activation contract", err)}
+		return nativeSnapshot{}, &probeUnavailableError{cause: fault("Claude host probe", ">=2.1.210 and <2.2.0", fmt.Sprintf("reported host version %q is outside the reviewed range", strings.TrimSpace(string(versionResult.Stdout))), "Controller.probe", "checking compatibility before native mutation", "no marketplace or plugin action was attempted", "install a reviewed Claude Code 2.1.x version or update the reviewed activation contract", err)}
 	}
 	marketResult, err := c.run(ctx, command("claude", "plugin", "marketplace", "list", "--json"))
 	if err != nil {
@@ -444,11 +589,7 @@ func (c *Controller) probe(ctx context.Context) (nativeSnapshot, error) {
 	}
 	markets, err := decodeMarketplaces(marketResult.Stdout)
 	if err != nil {
-		var unavailable *codecUnavailableError
-		if errors.As(err, &unavailable) {
-			return nativeSnapshot{}, &probeUnavailableError{cause: err}
-		}
-		return nativeSnapshot{}, err
+		return nativeSnapshot{}, &probeUnavailableError{cause: err}
 	}
 	hasMarket := false
 	for _, market := range markets {
@@ -466,11 +607,7 @@ func (c *Controller) probe(ctx context.Context) (nativeSnapshot, error) {
 	}
 	rows, err := decodePlugins(pluginResult.Stdout)
 	if err != nil {
-		var unavailable *codecUnavailableError
-		if errors.As(err, &unavailable) {
-			return nativeSnapshot{}, &probeUnavailableError{cause: err}
-		}
-		return nativeSnapshot{}, err
+		return nativeSnapshot{}, &probeUnavailableError{cause: err}
 	}
 	snapshot := nativeSnapshot{marketplace: hasMarket, plugins: map[cell.Cell]pluginRow{}}
 	for _, row := range rows {
@@ -481,7 +618,7 @@ func (c *Controller) probe(ctx context.Context) (nativeSnapshot, error) {
 			}
 			continue
 		}
-		if err := c.verifyRow(row, legacy); err != nil {
+		if err := c.verifyRow(row, cc, legacy); err != nil {
 			return nativeSnapshot{}, err
 		}
 		if legacy {
@@ -513,17 +650,19 @@ func optionalSelection(request service.GroupSelection) bool {
 	return true
 }
 
-func (c *Controller) verifyRow(row pluginRow, legacy bool) error {
-	wantPackage, wantVersion := row.Name, LegacyVersion
-	if legacy {
-		wantPackage = LegacyPackage
+func (c *Controller) verifyRow(row pluginRow, cc cell.Cell, legacy bool) error {
+	wantPackage := LegacyPackage
+	wantVersion := LegacyVersion
+	if !legacy {
+		wantPackage = packageFor(cc.Extension())
+		wantVersion = c.versions[cc].String()
 	}
 	if row.Scope != "user" || !row.Enabled || row.Marketplace != MarketplaceName || row.ID != selector(wantPackage) || row.Name != wantPackage {
 		return fault("Claude plugin-row validation", "exact enabled user-scoped selector", fmt.Sprintf("row %q has wrong name, marketplace, scope, enabled state, or selector", row.ID), "Controller.verifyRow", "classifying native ownership", "no mutation was attempted", "repair the conflicting plugin row manually and rerun", nil)
 	}
 	if row.Version != nil {
 		if *row.Version != wantVersion {
-			return fault("Claude plugin release validation", wantVersion, fmt.Sprintf("row %q reports version %q", row.ID, *row.Version), "Controller.verifyRow", "proving selected release identity", "no mutation was attempted", "install the exact reviewed plugin release or update Pasture's immutable target", nil)
+			return fault("Claude plugin release validation", wantVersion, fmt.Sprintf("row %q reports version %q", row.ID, *row.Version), "Controller.verifyRow", "proving selected release identity", "no mutation was attempted", "install the exact reviewed plugin release or update the immutable target", nil)
 		}
 		return nil
 	}
@@ -568,7 +707,16 @@ func (c *Controller) run(ctx context.Context, schema activation.CommandSchema) (
 	const managerTimeout = 2 * time.Minute
 	runCtx, cancel := context.WithTimeout(ctx, managerTimeout)
 	defer cancel()
-	return c.runner.Run(runCtx, schema)
+	result, err := c.runner.Run(runCtx, schema)
+	if err != nil {
+		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			return result, fault("Claude native command timeout", "completion within two minutes", err.Error(), schema.String(), "waiting for a bounded manager command", "the requested state is unconfirmed and later actions stop", "repair the manager hang and retry the full selection", errors.Join(err, runCtx.Err()))
+		}
+		if errors.Is(runCtx.Err(), context.Canceled) {
+			return result, fault("Claude native command cancellation", "live caller context", err.Error(), schema.String(), "running a manager command", "the requested state is unconfirmed and later actions stop", "retry with a live context", errors.Join(err, runCtx.Err()))
+		}
+	}
+	return result, err
 }
 
 func validateActivations(acts map[cell.Cell]activation.ComponentActivation) error {
@@ -585,42 +733,13 @@ func validateActivations(acts map[cell.Cell]activation.ComponentActivation) erro
 	return nil
 }
 
-func validatePrior(prior map[cell.Cell]registry.Record, live nativeSnapshot) error {
-	for cc, record := range prior {
-		if cc.Harness() != ir.HarnessClaudeCode || !record.IsValid() || record.Cell() != cc || record.Strategy() != activation.NativePluginKindValue() {
-			return fmt.Errorf("Claude prior record for %s has a wrong key, cell, or strategy", cc)
-		}
-		if record.Managed() {
-			_, installed := live.plugins[cc]
-			if record.Observation() == registry.ObservationInstalled && !installed {
-				return fault("Claude managed-state validation", "live identity agrees with managed inventory", fmt.Sprintf("managed record for %s says installed but exact live plugin is absent", cc), "validatePrior", "preflighting ownership before mutation", "no native mutation was attempted", "inspect and manually repair the missing managed component or registry ambiguity", nil)
-			}
-		}
-	}
-	return nil
-}
-
-func validateOrdinary(key registry.Key, act activation.ComponentActivation, prior *registry.Record) error {
-	if !key.IsValid() || key.Scope() != registry.ScopeGlobal || key.Cell().Harness() != ir.HarnessClaudeCode {
-		return fmt.Errorf("Claude activator requires a valid global Claude key")
-	}
-	if !act.IsValid() || act.Cell() != key.Cell() || act.Strategy().Kind() != activation.NativePluginKindValue() || nativePackage(act) != packageFor(key.Cell().Extension()) {
-		return fmt.Errorf("Claude activation contradicts scoped cell %s", key.Cell())
-	}
-	if prior != nil && (!prior.IsValid() || prior.Key() != key || prior.Strategy() != activation.NativePluginKindValue()) {
-		return fmt.Errorf("Claude prior record contradicts scoped cell %s", key.Cell())
-	}
-	return nil
-}
-
 func (c *Controller) observedRecord(key registry.Key, act activation.ComponentActivation, source apply.Source, managed bool, operation registry.Operation, outcome registry.Outcome, observation registry.Observation, diagnostic string) *registry.Record {
-	version, _ := registry.NewVersion(LegacyVersion)
 	selectorValue, _ := registry.NewSelector(selector(nativePackage(act)))
 	registrySource := registry.SourceInstaller
 	if source == apply.HomeManagerSource() {
 		registrySource = registry.SourceHomeManager
 	}
-	record, err := registry.NewRecord(registry.RecordInput{Key: key, Source: registrySource, Strategy: activation.NativePluginKindValue(), Managed: managed, ArtifactID: c.artifacts[key.Cell()], Version: version, Selector: selectorValue, Observation: observation, Trust: registry.TrustNotApplicable, LastOperation: operation, LastOutcome: outcome, Diagnostic: diagnostic})
+	record, err := registry.NewRecord(registry.RecordInput{Key: key, Source: registrySource, Strategy: activation.NativePluginKindValue(), Managed: managed, ArtifactID: c.artifacts[key.Cell()], Version: c.versions[key.Cell()], Selector: selectorValue, Observation: observation, Trust: registry.TrustNotApplicable, LastOperation: operation, LastOutcome: outcome, Diagnostic: diagnostic})
 	if err != nil {
 		return nil
 	}
@@ -635,30 +754,19 @@ func nativePackage(act activation.ComponentActivation) string {
 	return plugin.Package()
 }
 
-func containsStep(steps []service.GroupStep, step service.GroupStep) bool {
-	for _, candidate := range steps {
-		if candidate.Cell() == step.Cell() && candidate.Key() == step.Key() && candidate.Operation() == step.Operation() {
-			return true
-		}
-	}
-	return false
-}
-
-func operationRecord(operation apply.Operation) registry.Operation {
-	if operation == apply.Ensure() {
+func registryOperation(operation apply.Operation) registry.Operation {
+	switch operation {
+	case apply.Ensure():
 		return registry.OperationEnsure
-	}
-	if operation == apply.RemoveOp() {
+	case apply.RemoveOp():
 		return registry.OperationRemove
+	default:
+		return registry.OperationInspect
 	}
-	return registry.OperationInspect
 }
 
 var _ service.GroupReconciler = (*Controller)(nil)
 
-// Activator exposes the ordinary apply-cell path without creating a second
-// implementation authority. It delegates to the same controller used by the
-// selection-wide reconciler.
 type Activator struct{ controller *Controller }
 
 func (c *Controller) Activator() *Activator { return &Activator{controller: c} }
