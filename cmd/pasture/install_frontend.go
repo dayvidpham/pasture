@@ -22,44 +22,77 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	desiredPath      string
-	installSource    string
-	installJSON      bool
-	installHarness   string
-	installExtension string
-	installEnabled   bool
-)
+// installComposition is the deliberately small boundary between CLI wiring
+// and the real installer graph. It keeps paths and external seams injectable
+// without introducing a general-purpose dependency container.
+type installComposition struct {
+	Home, StatePath       string
+	Registry              service.Registry
+	ClaudeRunner          claudecode.Runner
+	ClaudeManifests       claudecode.ManifestReader
+	NewClaudeController   func(claudecode.Runner, claudecode.ManifestReader) (*claudecode.Controller, error)
+	NewOpenCodeController func(string) (opencode.Controller, error)
+	ClaudeDescriptor      func() (targetclaude.TargetDescriptor, error)
+	CodexDescriptor       func() (targetcodex.TargetDescriptor, error)
+	NewCodexContract      func(targetcodex.TargetDescriptor, string) (activation.ActivationContract, error)
+	NewCodexPolicies      func(targetcodex.TargetDescriptor, string) ([3]apply.DirectFilePolicy, error)
+}
 
 func productionInstallService() (*service.Service, error) {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return nil, fmt.Errorf("installer composition: user home is unavailable; the global destinations cannot be resolved: %w", err)
+		return nil, fmt.Errorf("installer composition/home: user home is unavailable; global destinations cannot be resolved: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(defaultInstallStatePath()), 0o700); err != nil {
-		return nil, fmt.Errorf("installer composition: create private state directory: %w", err)
+	statePath := defaultInstallStatePath()
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o700); err != nil {
+		return nil, fmt.Errorf("installer composition/state-directory: create private state directory: %w", err)
 	}
-	state, err := service.NewFileRegistry(defaultInstallStatePath())
+	state, err := service.NewFileRegistry(statePath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("installer composition/registry: create state registry at %q: %w", statePath, err)
+	}
+	return composeInstallService(installComposition{
+		Home: home, StatePath: statePath, Registry: state,
+		ClaudeRunner: claudecode.OSRunner{}, ClaudeManifests: claudecode.OSManifestReader{},
+		NewClaudeController: claudecode.NewController, NewOpenCodeController: opencode.New,
+		ClaudeDescriptor: targetclaude.Descriptor, CodexDescriptor: targetcodex.Descriptor,
+		NewCodexContract: codex.NewActivationContract, NewCodexPolicies: codex.NewDirectFilePolicies,
+	})
+}
+
+func composeInstallService(config installComposition) (*service.Service, error) {
+	if config.Home == "" || !filepath.IsAbs(config.Home) || filepath.Clean(config.Home) != config.Home {
+		return nil, fmt.Errorf("installer composition/paths: home %q is not a canonical absolute path", config.Home)
+	}
+	if config.StatePath == "" || !filepath.IsAbs(config.StatePath) || filepath.Clean(config.StatePath) != config.StatePath {
+		return nil, fmt.Errorf("installer composition/paths: state path %q is not a canonical absolute path", config.StatePath)
+	}
+	state := config.Registry
+	if state == nil {
+		return nil, fmt.Errorf("installer composition/registry: registry dependency is nil")
+	}
+	for name, dependency := range map[string]any{"Claude runner": config.ClaudeRunner, "Claude manifest reader": config.ClaudeManifests, "Claude controller factory": config.NewClaudeController, "OpenCode controller factory": config.NewOpenCodeController, "Claude descriptor factory": config.ClaudeDescriptor, "Codex descriptor factory": config.CodexDescriptor, "Codex contract factory": config.NewCodexContract, "Codex policy factory": config.NewCodexPolicies} {
+		if dependency == nil {
+			return nil, fmt.Errorf("installer composition/dependencies: %s is nil", name)
+		}
 	}
 
-	claudeTarget, err := targetclaude.Descriptor()
+	claudeTarget, err := config.ClaudeDescriptor()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("installer composition/Claude target: describe embedded target: %w", err)
 	}
 	claudeContract, err := claudecode.Contract(claudeTarget)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("installer composition/Claude contract: bind activation contract: %w", err)
 	}
-	claudeController, err := claudecode.NewController(claudecode.OSRunner{}, claudecode.OSManifestReader{})
+	claudeController, err := config.NewClaudeController(config.ClaudeRunner, config.ClaudeManifests)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("installer composition/Claude controller: construct controller: %w", err)
 	}
 
-	opencodeController, err := opencode.New(filepath.Join(home, ".config", "opencode"))
+	opencodeController, err := config.NewOpenCodeController(filepath.Join(config.Home, ".config", "opencode"))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("installer composition/OpenCode controller: construct controller: %w", err)
 	}
 	opencodeTarget := opencodeController.Descriptor()
 	opencodeContract := opencodeController.Contract()
@@ -67,34 +100,34 @@ func productionInstallService() (*service.Service, error) {
 	for _, component := range opencodeTarget.Components() {
 		c, cellErr := cell.New(ir.HarnessOpenCode, component.Extension())
 		if cellErr != nil {
-			return nil, cellErr
+			return nil, fmt.Errorf("installer composition/OpenCode policy: create %s cell: %w", component.Extension(), cellErr)
 		}
 		policy, policyErr := apply.PassThroughDirectFile(c)
 		if policyErr != nil {
-			return nil, policyErr
+			return nil, fmt.Errorf("installer composition/OpenCode policy: bind %s policy: %w", component.Extension(), policyErr)
 		}
 		opencodePolicies = append(opencodePolicies, policy)
 	}
 
-	codexTarget, err := targetcodex.Descriptor()
+	codexTarget, err := config.CodexDescriptor()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("installer composition/Codex target: describe embedded target: %w", err)
 	}
-	codexContract, err := codex.NewActivationContract(codexTarget, home)
+	codexContract, err := config.NewCodexContract(codexTarget, config.Home)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("installer composition/Codex contract: bind activation contract: %w", err)
 	}
-	codexPolicies, err := codex.NewDirectFilePolicies(codexTarget, home)
+	codexPolicies, err := config.NewCodexPolicies(codexTarget, config.Home)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("installer composition/Codex policy: bind direct-file policies: %w", err)
 	}
 
 	policies := append(opencodePolicies, codexPolicies[:]...)
 	direct, err := apply.NewDirectFileActivator(policies...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("installer composition/activator: construct direct-file activator: %w", err)
 	}
-	return service.New(service.Config{
+	svc, err := service.New(service.Config{
 		Registry: state,
 		Contracts: map[ir.HarnessID]activation.ActivationContract{
 			ir.HarnessClaudeCode: claudeContract,
@@ -104,6 +137,10 @@ func productionInstallService() (*service.Service, error) {
 		Activators: []apply.Activator{claudeController.Activator(), direct},
 		Group:      claudeController,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("installer composition/service: construct application service: %w", err)
+	}
+	return svc, nil
 }
 
 func sourceValue(value string) (apply.Source, error) {
@@ -116,7 +153,15 @@ func sourceValue(value string) (apply.Source, error) {
 	return apply.Source(0), fmt.Errorf("install source %q is unsupported; use installer or home-manager", value)
 }
 
-func runApplySelection(cmd *cobra.Command, _ []string) error {
+type installServiceFactory func() (*service.Service, error)
+
+func runApplySelection(cmd *cobra.Command, args []string) error {
+	return runApplySelectionWith(cmd, args, productionInstallService)
+}
+func runApplySelectionWith(cmd *cobra.Command, _ []string, makeService installServiceFactory) error {
+	desiredPath, _ := cmd.Flags().GetString("desired")
+	installSource, _ := cmd.Flags().GetString("source")
+	installJSON, _ := cmd.Flags().GetBool("json")
 	if desiredPath == "" {
 		return fmt.Errorf("install apply-selection: --desired is required; provide an exhaustive effective-selection file")
 	}
@@ -132,9 +177,9 @@ func runApplySelection(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	svc, err := productionInstallService()
+	svc, err := makeService()
 	if err != nil {
-		return err
+		return fmt.Errorf("install apply-selection: compose installer service: %w", err)
 	}
 	result, err := svc.ApplySelection(cmd.Context(), service.SelectionRequest{Selection: sel, Scope: apply.GlobalScope(), Source: source})
 	if err != nil {
@@ -149,7 +194,15 @@ func runApplySelection(cmd *cobra.Command, _ []string) error {
 	return writeApplyText(cmd.OutOrStdout(), result)
 }
 
-func runApplyCell(cmd *cobra.Command, _ []string) error {
+func runApplyCell(cmd *cobra.Command, args []string) error {
+	return runApplyCellWith(cmd, args, productionInstallService)
+}
+func runApplyCellWith(cmd *cobra.Command, _ []string, makeService installServiceFactory) error {
+	installHarness, _ := cmd.Flags().GetString("harness")
+	installExtension, _ := cmd.Flags().GetString("extension")
+	installSource, _ := cmd.Flags().GetString("source")
+	installEnabled, _ := cmd.Flags().GetBool("enabled")
+	installJSON, _ := cmd.Flags().GetBool("json")
 	harness := ir.HarnessID(installHarness)
 	if !harness.IsValid() {
 		return fmt.Errorf("install apply-cell: invalid --harness %q; use claude-code, opencode, or codex", installHarness)
@@ -166,9 +219,9 @@ func runApplyCell(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	svc, err := productionInstallService()
+	svc, err := makeService()
 	if err != nil {
-		return err
+		return fmt.Errorf("install apply-cell: compose installer service: %w", err)
 	}
 	result, err := svc.ApplyCell(cmd.Context(), service.CellRequest{Cell: c, Enabled: installEnabled, Scope: apply.GlobalScope(), Source: source})
 	if err != nil {
@@ -189,24 +242,39 @@ func writeJSON(w io.Writer, value any) error {
 	return enc.Encode(value)
 }
 func writeApplyText(w io.Writer, result apply.Result) error {
-	fmt.Fprintf(w, "apply %s (%s): %s\n", result.Source(), result.Scope(), map[bool]string{true: "ok", false: "failed"}[result.OK()])
+	if _, err := fmt.Fprintf(w, "apply %s (%s): %s\n", result.Source(), result.Scope(), map[bool]string{true: "ok", false: "failed"}[result.OK()]); err != nil {
+		return fmt.Errorf("installer output: write apply header: %w", err)
+	}
 	for _, row := range result.Rows() {
-		fmt.Fprintf(w, "  %-20s %-8s %-22s %s\n", row.Cell(), row.Operation(), row.Status(), row.Diagnostic())
+		if _, err := fmt.Fprintf(w, "  %-20s %-8s %-22s %s\n", row.Cell(), row.Operation(), row.Status(), row.Diagnostic()); err != nil {
+			return fmt.Errorf("installer output: write apply row %s: %w", row.Cell(), err)
+		}
 	}
 	return nil
 }
 
-var installApplySelectionCmd = &cobra.Command{Use: "apply-selection", Short: "Apply an exhaustive desired installer selection", Args: cobra.NoArgs, RunE: runApplySelection}
-var installApplyCellCmd = &cobra.Command{Use: "apply-cell", Short: "Apply one explicitly selected installer cell", Args: cobra.NoArgs, RunE: runApplyCell}
+func newInstallApplySelectionCommand(makeService installServiceFactory) *cobra.Command {
+	cmd := &cobra.Command{Use: "apply-selection", Short: "Apply an exhaustive desired installer selection", Args: cobra.NoArgs}
+	cmd.RunE = func(cmd *cobra.Command, args []string) error { return runApplySelectionWith(cmd, args, makeService) }
+	cmd.Flags().String("desired", "", "Path to an exhaustive effective-selection document")
+	cmd.Flags().String("source", "installer", "Controller source: installer or home-manager")
+	cmd.Flags().Bool("json", false, "Write the deterministic apply-result document")
+	return cmd
+}
+func newInstallApplyCellCommand(makeService installServiceFactory) *cobra.Command {
+	cmd := &cobra.Command{Use: "apply-cell", Short: "Apply one explicitly selected installer cell", Args: cobra.NoArgs}
+	cmd.RunE = func(cmd *cobra.Command, args []string) error { return runApplyCellWith(cmd, args, makeService) }
+	cmd.Flags().String("harness", "", "Harness: claude-code, opencode, or codex")
+	cmd.Flags().String("extension", "", "Extension: skills, agents, or hooks")
+	cmd.Flags().Bool("enabled", false, "Desired state for the cell")
+	cmd.Flags().String("source", "installer", "Controller source: installer or home-manager")
+	cmd.Flags().Bool("json", false, "Write the deterministic apply-result document")
+	return cmd
+}
+
+var installApplySelectionCmd = newInstallApplySelectionCommand(productionInstallService)
+var installApplyCellCmd = newInstallApplyCellCommand(productionInstallService)
 
 func init() {
-	installApplySelectionCmd.Flags().StringVar(&desiredPath, "desired", "", "Path to an exhaustive effective-selection document")
-	installApplySelectionCmd.Flags().StringVar(&installSource, "source", "installer", "Controller source: installer or home-manager")
-	installApplySelectionCmd.Flags().BoolVar(&installJSON, "json", false, "Write the deterministic apply-result document")
-	installApplyCellCmd.Flags().StringVar(&installHarness, "harness", "", "Harness: claude-code, opencode, or codex")
-	installApplyCellCmd.Flags().StringVar(&installExtension, "extension", "", "Extension: skills, agents, or hooks")
-	installApplyCellCmd.Flags().BoolVar(&installEnabled, "enabled", false, "Desired state for the cell")
-	installApplyCellCmd.Flags().StringVar(&installSource, "source", "installer", "Controller source: installer or home-manager")
-	installApplyCellCmd.Flags().BoolVar(&installJSON, "json", false, "Write the deterministic apply-result document")
 	installCmd.AddCommand(installApplySelectionCmd, installApplyCellCmd)
 }

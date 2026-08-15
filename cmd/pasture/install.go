@@ -32,7 +32,8 @@ var installCmd = &cobra.Command{
     installation inventory: what Pasture actually installed, whether an uninstall
     completed, what remains, and the exact retry.
 
-All commands here read those files; they never contact a running daemon.`,
+Plan and status are read-only. apply-selection and apply-cell mutate native
+installations and update confirmed state; they never contact a running daemon.`,
 }
 
 // installPlanCmd normalizes saved preferences into the transient effective

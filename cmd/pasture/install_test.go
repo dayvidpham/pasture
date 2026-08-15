@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -246,5 +247,89 @@ func TestCLI_InstallStatus_RejectsSymlinkStateFile(t *testing.T) {
 	out := runCLI(t, "install", "status", "--state", link)
 	if out.exitCode != 1 {
 		t.Fatalf("expected exit 1 for symlinked state; got %d; stderr=%s", out.exitCode, out.stderr)
+	}
+}
+
+func runCLIWithHome(t *testing.T, home string, args ...string) runOutcome {
+	t.Helper()
+	cmd := exec.Command(binaryPath, args...)
+	cmd.Env = append(os.Environ(), "HOME="+home, "XDG_STATE_HOME="+filepath.Join(home, ".state"))
+	var stdout, stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	code := 0
+	if err != nil {
+		if exit, ok := err.(*exec.ExitError); ok {
+			code = exit.ExitCode()
+		} else {
+			t.Fatalf("run installer CLI: %v", err)
+		}
+	}
+	return runOutcome{stdout: stdout.String(), stderr: stderr.String(), exitCode: code}
+}
+
+func TestCLI_InstallHelpAndStrictDesiredValidation(t *testing.T) {
+	help := runCLI(t, "install", "--help")
+	if help.exitCode != 0 || !strings.Contains(help.stdout, "apply-selection") || !strings.Contains(help.stdout, "mutate native") {
+		t.Fatalf("install help does not describe command registration/mutation: %+v", help)
+	}
+	desired := filepath.Join(t.TempDir(), "desired.yaml")
+	if err := os.WriteFile(desired, []byte("schema: wrong/v1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := runCLIWithHome(t, t.TempDir(), "install", "apply-selection", "--desired", desired, "--json")
+	if out.exitCode == 0 || !strings.Contains(out.stdout+out.stderr, "effective-selection") {
+		t.Fatalf("invalid desired document was accepted: %+v", out)
+	}
+}
+
+func TestCLI_InstallScriptableApplyLeavesPreferencesUnchanged(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, ".config", "pasture")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(configDir, "config.yaml")
+	body := []byte("install:\n  harnesses:\n    opencode: true\n  extensions:\n    hooks: true\n")
+	if err := os.WriteFile(config, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := runCLIWithHome(t, home, "install", "apply-cell", "--harness", "opencode", "--extension", "hooks", "--enabled=false", "--json")
+	if out.exitCode != 0 {
+		t.Fatalf("apply-cell exit %d: %s%s", out.exitCode, out.stdout, out.stderr)
+	}
+	after, err := os.Stat(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(body) || !after.ModTime().Equal(before.ModTime()) {
+		t.Fatalf("scriptable apply changed preferences")
+	}
+}
+
+func TestCLI_InstallApplySelectionUsesProductionCommandPath(t *testing.T) {
+	home := t.TempDir()
+	plan := runCLI(t, "install", "plan", "--config", filepath.Join(home, "missing-config.yaml"))
+	if plan.exitCode != 0 {
+		t.Fatalf("build representative selection: %s%s", plan.stdout, plan.stderr)
+	}
+	desired := filepath.Join(home, "desired.yaml")
+	if err := os.WriteFile(desired, []byte(plan.stdout), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := runCLIWithHome(t, home, "install", "apply-selection", "--desired", desired, "--json")
+	if out.exitCode != 0 {
+		t.Fatalf("apply-selection exit %d: %s%s", out.exitCode, out.stdout, out.stderr)
+	}
+	if !strings.Contains(out.stdout, `"scope": "global"`) || !strings.Contains(out.stdout, `"ok": true`) {
+		t.Fatalf("unexpected deterministic apply-selection result: %s", out.stdout)
 	}
 }
