@@ -1,0 +1,8 @@
+[
+  {
+    "name": "aura-plugins",
+    "source": "github",
+    "repo": "dayvidpham/aura-plugins",
+    "installLocation": "/isolated-home/.claude/plugins/marketplaces/aura-plugins"
+  }
+]

@@ -1,0 +1,5 @@
+{
+  "name": "fixture-plugin",
+  "description": "Isolated Claude manager codec fixture",
+  "version": "0.0.4"
+}

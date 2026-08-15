@@ -1,0 +1,13 @@
+{
+  "installed": [],
+  "available": [
+    {
+      "pluginId": "pasture-skills@aura-plugins",
+      "name": "pasture-skills",
+      "description": "Pasture skills",
+      "marketplaceName": "aura-plugins",
+      "version": "0.0.4",
+      "source": "./pasture-skills"
+    }
+  ]
+}

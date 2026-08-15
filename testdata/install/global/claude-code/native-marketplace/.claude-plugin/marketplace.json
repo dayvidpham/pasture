@@ -1,0 +1,14 @@
+{
+  "name": "pasture-installer-fixture",
+  "owner": {
+    "name": "Pasture tests"
+  },
+  "plugins": [
+    {
+      "name": "fixture-plugin",
+      "description": "Isolated Claude manager codec fixture",
+      "version": "0.0.4",
+      "source": "./fixture-plugin"
+    }
+  ]
+}

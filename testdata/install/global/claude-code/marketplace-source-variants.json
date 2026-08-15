@@ -1,0 +1,26 @@
+[
+  {
+    "name": "github-marketplace",
+    "source": "github",
+    "repo": "owner/repository",
+    "installLocation": "/isolated/github"
+  },
+  {
+    "name": "git-marketplace",
+    "source": "git",
+    "url": "https://example.invalid/repository.git",
+    "installLocation": "/isolated/git"
+  },
+  {
+    "name": "url-marketplace",
+    "source": "url",
+    "url": "https://example.invalid/marketplace.json",
+    "installLocation": "/isolated/url"
+  },
+  {
+    "name": "directory-marketplace",
+    "source": "directory",
+    "path": "/isolated/source",
+    "installLocation": "/isolated/source"
+  }
+]
