@@ -315,6 +315,61 @@ func TestCLI_InstallScriptableApplyLeavesPreferencesUnchanged(t *testing.T) {
 	}
 }
 
+func TestCLI_InstallApplySelectionLeavesSeededPreferencesUnchanged(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, ".config", "pasture")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(configDir, "config.yaml")
+	body := []byte("install:\n  harnesses:\n    opencode: true\n  extensions:\n    skills: true\n")
+	if err := os.WriteFile(config, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The desired document is transient; the seeded preference file is not an
+	// input to apply-selection and must remain byte-for-byte untouched.
+	desired := filepath.Join(home, "desired.yaml")
+	selection := `schema: pasture.install.effective-selection/v1
+cells:
+  claude-code: {skills: false, agents: false, hooks: false}
+  opencode: {skills: true, agents: false, hooks: false}
+  codex: {skills: false, agents: false, hooks: false}
+`
+	if err := os.WriteFile(desired, []byte(selection), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := runCLIWithHome(t, home, "install", "apply-selection", "--desired", desired, "--json")
+	if out.exitCode != 0 {
+		t.Fatalf("apply-selection exit %d: %s%s", out.exitCode, out.stdout, out.stderr)
+	}
+	after, err := os.Stat(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(body) || !after.ModTime().Equal(before.ModTime()) {
+		t.Fatalf("apply-selection changed seeded preferences")
+	}
+}
+
+func TestCLI_InstallApplyCellTextOutputIsExact(t *testing.T) {
+	out := runCLIWithHome(t, t.TempDir(), "install", "apply-cell", "--harness", "opencode", "--extension", "skills", "--enabled=false")
+	if out.exitCode != 0 {
+		t.Fatalf("apply-cell exit %d: %s%s", out.exitCode, out.stdout, out.stderr)
+	}
+	want := "apply installer (global): ok\n  opencode.skills      inspect  no_op                  desired state is false and no Pasture-managed installed or unknown fact authorizes removal\n"
+	if out.stdout != want {
+		t.Fatalf("text output mismatch:\n got: %q\nwant: %q", out.stdout, want)
+	}
+}
+
 func TestCLI_InstallApplySelectionUsesProductionCommandPath(t *testing.T) {
 	home := t.TempDir()
 	plan := runCLI(t, "install", "plan", "--config", filepath.Join(home, "missing-config.yaml"))
