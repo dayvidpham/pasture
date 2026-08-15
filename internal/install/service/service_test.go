@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
@@ -436,6 +439,18 @@ func TestServiceManagedRemovalIsScopedIdempotentAndPreservesForeignContent(t *te
 			if got, err := os.ReadFile(foreign); err != nil || string(got) != "preserve" {
 				t.Fatalf("foreign content changed: %q %v", got, err)
 			}
+			reloaded, err := registry.Load(state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			key, err := tc.scope.Key(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tombstone, ok := reloaded.Lookup(key)
+			if !ok || reloaded.Len() != 1 || tombstone.Key() != key || tombstone.Source() != registry.SourceInstaller || tombstone.Strategy() != activation.DirectFileKindValue() || !tombstone.Managed() || tombstone.ArtifactID().String() == "" || len(tombstone.Leaves()) != 0 || len(tombstone.CreatedDirs()) != 0 || len(tombstone.SharedConfig()) != 0 || tombstone.Observation() != registry.ObservationAbsent || tombstone.Trust() != registry.TrustNotApplicable || tombstone.LastOperation() != registry.OperationRemove || tombstone.LastOutcome() != registry.OutcomeCompleted || tombstone.Diagnostic() == "" {
+				t.Fatalf("incomplete scoped tombstone: %+v", tombstone)
+			}
 			again, err := svc.ApplyCell(context.Background(), request)
 			if err != nil || !again.OK() || again.Rows()[0].Status() != apply.NoOp() {
 				t.Fatalf("idempotent remove: %v %+v", err, again.Rows())
@@ -480,8 +495,31 @@ func TestServiceManagedUnknownRemovalDoesNotClaimAbsentWhileExternalBundleRemain
 		t.Fatal(err)
 	}
 	got, _ := reloaded.Lookup(key)
-	if got.Observation() != registry.ObservationInstalled || got.LastOutcome() != registry.OutcomeFailed {
+	if got.Observation() != registry.ObservationInstalled || got.LastOutcome() != registry.OutcomeFailed || got.Managed() || len(got.Leaves()) != 1 {
 		t.Fatalf("persisted observation=%s outcome=%s", got.Observation(), got.LastOutcome())
+	}
+	retry, err := svc.ApplyCell(context.Background(), service.CellRequest{Cell: c, Enabled: false, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+	if err != nil || !retry.OK() || retry.Rows()[0].Status() != apply.NoOp() {
+		t.Fatalf("external retry=%+v err=%v", retry.Rows(), err)
+	}
+	if content, err := os.ReadFile(filepath.Join(leafDir, "component.txt")); err != nil || string(content) != "opencode.skills\n" {
+		t.Fatalf("external leaf changed on retry: %q err=%v", content, err)
+	}
+}
+
+func TestApplyErrorTypedAccessorsMatchFrozenJSON(t *testing.T) {
+	t.Parallel()
+	err := apply.NewApplyError(apply.HomeManagerSource(), "contract", "missing activation", "service.bind", "nothing changed", "wire all cells", apply.RemediationRerunHomeManager)
+	if err.Source() != apply.HomeManagerSource() || err.Stage() != "contract" || err.Reason() != "missing activation" || err.Location() != "service.bind" || err.Impact() != "nothing changed" || err.Fix() != "wire all cells" || err.Remediation() != apply.RemediationRerunHomeManager {
+		t.Fatalf("typed accessors lost data: %#v", err)
+	}
+	encoded, marshalErr := err.MarshalJSON()
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	want := "{\n  \"schema\": \"pasture.install.apply-error/v1\",\n  \"source\": \"home-manager\",\n  \"stage\": \"contract\",\n  \"reason\": \"missing activation\",\n  \"where\": \"service.bind\",\n  \"impact\": \"nothing changed\",\n  \"fix\": \"wire all cells\",\n  \"remediation\": \"rerun_home_manager\"\n}"
+	if string(encoded) != want {
+		t.Fatalf("error JSON mismatch\n got: %s\nwant: %s", encoded, want)
 	}
 }
 
@@ -520,7 +558,7 @@ func TestServiceRejectsSymlinkedDestinationRootForEnsureAndRemove(t *testing.T) 
 			before, _ := os.ReadDir(target)
 			svc := newService(t, root, state)
 			result, err := svc.ApplyCell(context.Background(), service.CellRequest{Cell: c, Enabled: enabled, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
-			if err != nil || result.OK() || !strings.Contains(result.Rows()[0].Diagnostic(), "unsafe mode") {
+			if err != nil || result.OK() || !strings.Contains(result.Rows()[0].Diagnostic(), "no-follow") {
 				t.Fatalf("result=%+v err=%v", result.Rows(), err)
 			}
 			after, _ := os.ReadDir(target)
@@ -528,6 +566,136 @@ func TestServiceRejectsSymlinkedDestinationRootForEnsureAndRemove(t *testing.T) 
 				t.Fatalf("symlink target changed: before=%v after=%v", before, after)
 			}
 		})
+	}
+}
+
+func TestServiceDirectFileFirstInstallCreatesMissingRootAndReclaimsOwnedDescendants(t *testing.T) {
+	t.Parallel()
+	for _, scope := range []struct {
+		name  string
+		value func(*testing.T) apply.Scope
+	}{
+		{name: "global", value: func(*testing.T) apply.Scope { return apply.GlobalScope() }},
+		{name: "project", value: func(t *testing.T) apply.Scope { return projectScope(t) }},
+	} {
+		scope := scope
+		t.Run(scope.name, func(t *testing.T) {
+			t.Parallel()
+			base := t.TempDir()
+			root := filepath.Join(base, "missing", "targets")
+			state := filepath.Join(base, "state", "installations.yaml")
+			svc := newService(t, root, state)
+			c, _ := cell.New(artifact.HarnessOpenCode, cell.AgentsAxis())
+			request := service.CellRequest{Cell: c, Enabled: true, Scope: scope.value(t), Source: apply.InstallerSource()}
+			installed, err := svc.ApplyCell(context.Background(), request)
+			if err != nil || !installed.OK() || installed.Rows()[0].Status() != apply.Completed() {
+				t.Fatalf("install=%+v err=%v", installed.Rows(), err)
+			}
+			leaf := filepath.Join(root, "opencode", "agents", "component.txt")
+			if content, err := os.ReadFile(leaf); err != nil || string(content) != "opencode.agents\n" {
+				t.Fatalf("leaf=%q err=%v", content, err)
+			}
+			request.Enabled = false
+			removed, err := svc.ApplyCell(context.Background(), request)
+			if err != nil || !removed.OK() || removed.Rows()[0].Observation() != registry.ObservationAbsent {
+				t.Fatalf("remove=%+v err=%v", removed.Rows(), err)
+			}
+			entries, err := os.ReadDir(root)
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("owned descendants remain: %v err=%v", entries, err)
+			}
+		})
+	}
+}
+
+func TestServiceDirectFileRejectsRootIntermediateAndLeafSymlinksWithoutMutation(t *testing.T) {
+	t.Parallel()
+	for _, boundary := range []string{"root", "intermediate", "leaf"} {
+		boundary := boundary
+		for _, enabled := range []bool{true, false} {
+			enabled := enabled
+			for _, scopeName := range []string{"global", "project"} {
+				scopeName := scopeName
+				t.Run(boundary+"/"+fmtBool(enabled)+"/"+scopeName, func(t *testing.T) {
+					t.Parallel()
+					base := t.TempDir()
+					outside := filepath.Join(base, "outside")
+					if err := os.Mkdir(outside, 0o750); err != nil {
+						t.Fatal(err)
+					}
+					outsideLeaf := filepath.Join(outside, "occupied")
+					if err := os.WriteFile(outsideLeaf, []byte("external"), 0o640); err != nil {
+						t.Fatal(err)
+					}
+					root := filepath.Join(base, "targets")
+					switch boundary {
+					case "root":
+						if err := os.Symlink(outside, root); err != nil {
+							t.Fatal(err)
+						}
+					case "intermediate":
+						if err := os.Mkdir(root, 0o755); err != nil {
+							t.Fatal(err)
+						}
+						if err := os.Symlink(outside, filepath.Join(root, "opencode")); err != nil {
+							t.Fatal(err)
+						}
+					case "leaf":
+						if err := os.MkdirAll(filepath.Join(root, "opencode", "agents"), 0o755); err != nil {
+							t.Fatal(err)
+						}
+						if err := os.Symlink(outsideLeaf, filepath.Join(root, "opencode", "agents", "component.txt")); err != nil {
+							t.Fatal(err)
+						}
+					}
+					state := filepath.Join(base, "state", "installations.yaml")
+					if err := os.MkdirAll(filepath.Dir(state), 0o700); err != nil {
+						t.Fatal(err)
+					}
+					var scope apply.Scope
+					if scopeName == "project" {
+						project := filepath.Join(base, "project")
+						if err := os.Mkdir(project, 0o755); err != nil {
+							t.Fatal(err)
+						}
+						projectRoot, err := registry.CanonicalProjectRoot(project)
+						if err != nil {
+							t.Fatal(err)
+						}
+						scope, err = apply.ProjectScope(projectRoot)
+						if err != nil {
+							t.Fatal(err)
+						}
+					} else {
+						scope = apply.GlobalScope()
+					}
+					c, _ := cell.New(artifact.HarnessOpenCode, cell.AgentsAxis())
+					if !enabled {
+						key, _ := scope.Key(c)
+						record, err := registry.NewRecord(registry.RecordInput{Key: key, Source: registry.SourceInstaller, Strategy: activation.DirectFileKindValue(), Managed: true, Observation: registry.ObservationUnknown, Trust: registry.TrustNotApplicable, LastOperation: registry.OperationRemove, LastOutcome: registry.OutcomeFailed})
+						if err != nil {
+							t.Fatal(err)
+						}
+						store := registry.New()
+						if err := store.Upsert(record); err != nil {
+							t.Fatal(err)
+						}
+						if err := registry.Save(state, store); err != nil {
+							t.Fatal(err)
+						}
+					}
+					before := snapshotTree(t, base)
+					svc := newService(t, root, state)
+					result, err := svc.ApplyCell(context.Background(), service.CellRequest{Cell: c, Enabled: enabled, Scope: scope, Source: apply.InstallerSource()})
+					if err != nil || result.OK() || len(result.Rows()) != 1 || result.Rows()[0].Status() != apply.Failed() || result.Rows()[0].Cell() != c {
+						t.Fatalf("result=%+v err=%v", result.Rows(), err)
+					}
+					if after := snapshotTree(t, base); after != before {
+						t.Fatalf("symlink rejection mutated state\nbefore=%s\nafter=%s", before, after)
+					}
+				})
+			}
+		}
 	}
 }
 
@@ -587,15 +755,59 @@ type probeGroup struct {
 	rejectCell     bool
 }
 
-func (g *probeGroup) Harness() ir.HarnessID { return artifact.HarnessClaudeCode }
-func (g *probeGroup) ReconcileSelection(_ context.Context, request service.GroupSelection) (service.GroupResult, error) {
-	g.selectionCalls.Add(1)
-	actions := make([]service.GroupAction, 0, 3)
+type sequentialGroup struct {
+	mu       sync.Mutex
+	executed []cell.Cell
+	wrongKey bool
+}
+
+func (*sequentialGroup) Harness() ir.HarnessID { return artifact.HarnessClaudeCode }
+func (g *sequentialGroup) PlanSelection(_ context.Context, request service.GroupSelection) (service.GroupPlan, error) {
+	steps := make([]service.GroupStep, 0, 3)
 	for _, extension := range cell.CanonicalExtensions() {
 		c, _ := cell.New(artifact.HarnessClaudeCode, extension)
-		actions = append(actions, service.GroupAction{Row: apply.NewActionRow(c, apply.Inspect(), apply.Completed(), apply.ManagementExternal, registry.ObservationAbsent, "legacy group probe found no managed state")})
+		key, _ := request.Scope.Key(c)
+		if g.wrongKey {
+			key, _ = registry.GlobalKey(c)
+		}
+		steps = append(steps, service.NewGroupStep(c, key, apply.Inspect()))
 	}
-	return service.GroupResult{Handled: true, Actions: actions}, nil
+	return service.GroupPlan{Handled: true, Steps: steps}, nil
+}
+func (g *sequentialGroup) Execute(_ context.Context, step service.GroupStep) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.executed = append(g.executed, step.Cell())
+	return nil
+}
+func (*sequentialGroup) Inspect(_ context.Context, step service.GroupStep) (service.GroupAction, error) {
+	record, err := registry.NewRecord(registry.RecordInput{Key: step.Key(), Source: registry.SourceInstaller, Strategy: activation.NativePluginKindValue(), Managed: true, Observation: registry.ObservationAbsent, Trust: registry.TrustNotApplicable, LastOperation: registry.OperationInspect, LastOutcome: registry.OutcomeCompleted})
+	if err != nil {
+		return service.GroupAction{}, err
+	}
+	return service.GroupAction{Row: apply.NewActionRow(step.Cell(), step.Operation(), apply.Completed(), apply.ManagementPasture, registry.ObservationAbsent, "confirmed after group action"), Record: &record}, nil
+}
+func (*sequentialGroup) PreflightCell(context.Context, service.GroupCell) error { return nil }
+func (g *sequentialGroup) calls() []cell.Cell {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]cell.Cell(nil), g.executed...)
+}
+
+func (g *probeGroup) Harness() ir.HarnessID { return artifact.HarnessClaudeCode }
+func (g *probeGroup) PlanSelection(_ context.Context, request service.GroupSelection) (service.GroupPlan, error) {
+	g.selectionCalls.Add(1)
+	steps := make([]service.GroupStep, 0, 3)
+	for _, extension := range cell.CanonicalExtensions() {
+		c, _ := cell.New(artifact.HarnessClaudeCode, extension)
+		key, _ := request.Scope.Key(c)
+		steps = append(steps, service.NewGroupStep(c, key, apply.Inspect()))
+	}
+	return service.GroupPlan{Handled: true, Steps: steps}, nil
+}
+func (g *probeGroup) Execute(context.Context, service.GroupStep) error { return nil }
+func (g *probeGroup) Inspect(_ context.Context, step service.GroupStep) (service.GroupAction, error) {
+	return service.GroupAction{Row: apply.NewActionRow(step.Cell(), step.Operation(), apply.Completed(), apply.ManagementExternal, registry.ObservationAbsent, "legacy group probe found no managed state")}, nil
 }
 func (g *probeGroup) PreflightCell(_ context.Context, request service.GroupCell) error {
 	g.cellCalls.Add(1)
@@ -613,7 +825,7 @@ func TestServiceCanonicalGroupSeamProbesAllFalseAndRejectsApplyCell(t *testing.T
 		t.Fatal(err)
 	}
 	group := &probeGroup{rejectCell: true}
-	svc := newServiceConfig(t, root, filepath.Join(base, "state", "installations.yaml"), service.Config{Groups: []service.GroupReconciler{group}})
+	svc := newServiceConfig(t, root, filepath.Join(base, "state", "installations.yaml"), service.Config{Group: group})
 	result, err := svc.ApplySelection(context.Background(), service.SelectionRequest{Selection: all(t, func(cell.Cell) bool { return false }), Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
 	if err != nil || !result.OK() || result.Scope() != registry.ScopeGlobal || len(result.Rows()) != 3 || group.selectionCalls.Load() != 1 {
 		t.Fatalf("result=%+v rows=%v calls=%d err=%v", result, result.Rows(), group.selectionCalls.Load(), err)
@@ -627,6 +839,43 @@ func TestServiceCanonicalGroupSeamProbesAllFalseAndRejectsApplyCell(t *testing.T
 	encoded, _ := json.Marshal(applyErr)
 	if !strings.Contains(string(encoded), `"remediation":"apply_selection"`) {
 		t.Fatalf("error json=%s", encoded)
+	}
+}
+
+func TestServiceGroupExecutesInspectsAndPersistsOneActionBeforeAdvancing(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	root := filepath.Join(base, "targets")
+	state := filepath.Join(base, "state", "installations.yaml")
+	if err := os.MkdirAll(filepath.Dir(state), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	file, _ := service.NewFileRegistry(state)
+	fault := &faultRegistry{base: file, saveErr: errors.New("injected group save failure")}
+	group := &sequentialGroup{}
+	svc := newServiceConfig(t, root, state, service.Config{Registry: fault, Group: group})
+	result, err := svc.ApplySelection(context.Background(), service.SelectionRequest{Selection: all(t, func(cell.Cell) bool { return false }), Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+	if err != nil || result.OK() || len(result.Rows()) != 3 {
+		t.Fatalf("result=%+v err=%v", result.Rows(), err)
+	}
+	if calls := group.calls(); len(calls) != 1 || calls[0] != result.Rows()[0].Cell() {
+		t.Fatalf("executed group actions=%v; later action ran ahead of failed persistence", calls)
+	}
+	if result.Rows()[0].Status() != apply.Failed() || result.Rows()[1].Status() != apply.Unattempted() || result.Rows()[2].Status() != apply.Unattempted() {
+		t.Fatalf("statuses=%s/%s/%s", result.Rows()[0].Status(), result.Rows()[1].Status(), result.Rows()[2].Status())
+	}
+}
+
+func TestServiceRejectsGroupPlanWithWrongProjectKeyBeforeExecution(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	root := filepath.Join(base, "targets")
+	group := &sequentialGroup{wrongKey: true}
+	svc := newServiceConfig(t, root, filepath.Join(base, "state", "installations.yaml"), service.Config{Group: group})
+	_, err := svc.ApplySelection(context.Background(), service.SelectionRequest{Selection: all(t, func(cell.Cell) bool { return false }), Scope: projectScope(t), Source: apply.InstallerSource()})
+	var applyErr *apply.ApplyError
+	if !errors.As(err, &applyErr) || len(group.calls()) != 0 || applyErr.Stage() != "pre-plan validation" {
+		t.Fatalf("error=%v calls=%v", err, group.calls())
 	}
 }
 
@@ -795,6 +1044,98 @@ func TestServiceRegistryLoadFailureIsTypedAndPerformsNoMutation(t *testing.T) {
 	}
 }
 
+func TestServiceRealFileRegistryRejectsCorruptAndUnreadableAuthority(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		seed func(*testing.T, string)
+	}{
+		{name: "corrupt", seed: func(t *testing.T, state string) {
+			t.Helper()
+			if err := os.WriteFile(state, []byte("schema: ["), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "wrong-type", seed: func(t *testing.T, state string) {
+			t.Helper()
+			if err := os.Mkdir(state, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			base := t.TempDir()
+			root := filepath.Join(base, "targets")
+			state := filepath.Join(base, "state", "installations.yaml")
+			if err := os.MkdirAll(filepath.Dir(state), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			tc.seed(t, state)
+			before := snapshotTree(t, base)
+			svc := newService(t, root, state)
+			_, err := svc.ApplySelection(context.Background(), service.SelectionRequest{Selection: all(t, func(cell.Cell) bool { return true }), Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+			var applyErr *apply.ApplyError
+			if !errors.As(err, &applyErr) || applyErr.Stage() != "registry-load" || applyErr.Remediation() != apply.RemediationManualRepair {
+				t.Fatalf("error=%v", err)
+			}
+			if after := snapshotTree(t, base); after != before {
+				t.Fatalf("load rejection mutated tree\nbefore=%s\nafter=%s", before, after)
+			}
+		})
+	}
+}
+
+func TestServiceRejectsIncompleteContractAndInvalidRequestsWithoutMutation(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	root := filepath.Join(base, "targets")
+	state := filepath.Join(base, "state", "installations.yaml")
+	if err := os.MkdirAll(filepath.Dir(state), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	file, _ := service.NewFileRegistry(state)
+	valid := contracts(t, root)
+	delete(valid, artifact.HarnessCodex)
+	incompleteService := newServiceConfig(t, root, state, service.Config{Registry: file, Contracts: valid})
+	validService := newServiceConfig(t, root, state, service.Config{Registry: file})
+	invalidScope := apply.Scope{}
+	requests := []struct {
+		stage  string
+		invoke func() error
+	}{
+		{stage: "activation contract validation", invoke: func() error {
+			_, err := incompleteService.ApplySelection(context.Background(), service.SelectionRequest{Selection: all(t, func(cell.Cell) bool { return true }), Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+			return err
+		}},
+		{stage: "cell validation", invoke: func() error {
+			_, err := validService.ApplyCell(context.Background(), service.CellRequest{Cell: cell.Cell{}, Enabled: true, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
+			return err
+		}},
+		{stage: "pre-plan validation", invoke: func() error {
+			c, _ := cell.New(artifact.HarnessOpenCode, cell.SkillsAxis())
+			_, err := validService.ApplyCell(context.Background(), service.CellRequest{Cell: c, Enabled: true, Scope: invalidScope, Source: apply.InstallerSource()})
+			return err
+		}},
+		{stage: "source validation", invoke: func() error {
+			c, _ := cell.New(artifact.HarnessOpenCode, cell.SkillsAxis())
+			_, err := validService.ApplyCell(context.Background(), service.CellRequest{Cell: c, Enabled: true, Scope: apply.GlobalScope(), Source: apply.SourceInvalid})
+			return err
+		}},
+	}
+	before := snapshotTree(t, base)
+	for i, request := range requests {
+		var applyErr *apply.ApplyError
+		if err := request.invoke(); !errors.As(err, &applyErr) || applyErr.Stage() != request.stage {
+			t.Fatalf("request %d error=%v", i, err)
+		}
+		if after := snapshotTree(t, base); after != before {
+			t.Fatalf("request %d mutated tree\nbefore=%s\nafter=%s", i, before, after)
+		}
+	}
+}
+
 func TestServiceRegistrySaveFailureRetainsPriorBytesAndStopsLaterCells(t *testing.T) {
 	t.Parallel()
 	base := t.TempDir()
@@ -844,6 +1185,112 @@ func TestServiceRegistrySaveFailureRetainsPriorBytesAndStopsLaterCells(t *testin
 	if _, err := os.Stat(second); !os.IsNotExist(err) {
 		t.Fatalf("later live action occurred: %v", err)
 	}
+	encoded, err := result.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{
+  "schema": "pasture.install.apply-result/v1",
+  "source": "installer",
+  "scope": "global",
+  "ok": false,
+  "cells": [
+    {
+      "index": 0,
+      "cell": "claude-code.skills",
+      "harness": "claude-code",
+      "extension": "skills",
+      "operation": "ensure",
+      "status": "failed",
+      "management": "pasture_managed",
+      "observation": "installed",
+      "diagnostic": "confirmed registry fact could not be saved atomically: injected atomic replacement failure; where: claude-code.skills; when: registry-save; impact: the live component may have changed but the previous registry remains authoritative; later cells were not attempted; fix: inspect status, repair the registry path or permissions, and rerun the same apply operation"
+    },
+    {
+      "index": 1,
+      "cell": "claude-code.agents",
+      "harness": "claude-code",
+      "extension": "agents",
+      "operation": "ensure",
+      "status": "unattempted",
+      "management": "unknown",
+      "diagnostic": "an earlier canonical cell failed; this cell was not attempted"
+    },
+    {
+      "index": 2,
+      "cell": "claude-code.hooks",
+      "harness": "claude-code",
+      "extension": "hooks",
+      "operation": "ensure",
+      "status": "unattempted",
+      "management": "unknown",
+      "diagnostic": "an earlier canonical cell failed; this cell was not attempted"
+    },
+    {
+      "index": 3,
+      "cell": "opencode.skills",
+      "harness": "opencode",
+      "extension": "skills",
+      "operation": "ensure",
+      "status": "unattempted",
+      "management": "unknown",
+      "diagnostic": "an earlier canonical cell failed; this cell was not attempted"
+    },
+    {
+      "index": 4,
+      "cell": "opencode.agents",
+      "harness": "opencode",
+      "extension": "agents",
+      "operation": "ensure",
+      "status": "unattempted",
+      "management": "unknown",
+      "diagnostic": "an earlier canonical cell failed; this cell was not attempted"
+    },
+    {
+      "index": 5,
+      "cell": "opencode.hooks",
+      "harness": "opencode",
+      "extension": "hooks",
+      "operation": "ensure",
+      "status": "unattempted",
+      "management": "unknown",
+      "diagnostic": "an earlier canonical cell failed; this cell was not attempted"
+    },
+    {
+      "index": 6,
+      "cell": "codex.skills",
+      "harness": "codex",
+      "extension": "skills",
+      "operation": "ensure",
+      "status": "unattempted",
+      "management": "unknown",
+      "diagnostic": "an earlier canonical cell failed; this cell was not attempted"
+    },
+    {
+      "index": 7,
+      "cell": "codex.agents",
+      "harness": "codex",
+      "extension": "agents",
+      "operation": "ensure",
+      "status": "unattempted",
+      "management": "unknown",
+      "diagnostic": "an earlier canonical cell failed; this cell was not attempted"
+    },
+    {
+      "index": 8,
+      "cell": "codex.hooks",
+      "harness": "codex",
+      "extension": "hooks",
+      "operation": "ensure",
+      "status": "unattempted",
+      "management": "unknown",
+      "diagnostic": "an earlier canonical cell failed; this cell was not attempted"
+    }
+  ]
+}`
+	if string(encoded) != want {
+		t.Fatalf("failed result JSON mismatch\n got: %s\nwant: %s", encoded, want)
+	}
 }
 
 func projectScope(t *testing.T) apply.Scope {
@@ -868,4 +1315,43 @@ func fmtBool(value bool) string {
 		return "ensure"
 	}
 	return "remove"
+}
+
+func snapshotTree(t *testing.T, root string) string {
+	t.Helper()
+	var rows []string
+	err := filepath.WalkDir(root, func(name string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(root, name)
+		if err != nil {
+			return err
+		}
+		info, err := os.Lstat(name)
+		if err != nil {
+			return err
+		}
+		row := fmt.Sprintf("%s|%s|%04o", filepath.ToSlash(rel), info.Mode().Type(), info.Mode().Perm())
+		if info.Mode().IsRegular() {
+			content, err := os.ReadFile(name)
+			if err != nil {
+				return err
+			}
+			row += "|" + string(content)
+		} else if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(name)
+			if err != nil {
+				return err
+			}
+			row += "|->" + target
+		}
+		rows = append(rows, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(rows)
+	return strings.Join(rows, "\n")
 }

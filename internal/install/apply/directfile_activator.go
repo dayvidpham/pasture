@@ -2,17 +2,13 @@ package apply
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"io/fs"
-	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/install/activation"
 	"github.com/dayvidpham/pasture/internal/install/cell"
-	"github.com/dayvidpham/pasture/internal/install/directfile"
 	"github.com/dayvidpham/pasture/internal/install/registry"
 )
 
@@ -44,9 +40,15 @@ func (a DirectFileActivator) Inspect(ctx context.Context, source Source, key reg
 	if err != nil {
 		return Outcome{Observation: registry.ObservationUnknown}, err
 	}
-	if err := validateDestinationRoot(df.DestinationRoot()); err != nil {
+	tree, err := openSecureDirectTree(df.DestinationRoot(), false)
+	if errors.Is(err, errSecureRootAbsent) {
+		rec, recErr := a.record(source, key, df, prior, nil, registry.ObservationAbsent, false, registry.OperationInspect, registry.OutcomeCompleted, "")
+		return Outcome{Status: Completed(), Observation: registry.ObservationAbsent, Record: &rec}, recErr
+	}
+	if err != nil {
 		return Outcome{Observation: registry.ObservationUnknown}, err
 	}
+	defer tree.close()
 	type liveLeaf struct {
 		leaf           registry.Leaf
 		current, prior bool
@@ -63,38 +65,15 @@ func (a DirectFileActivator) Inspect(ctx context.Context, source Source, key reg
 		if !entry.IsRegular() {
 			continue
 		}
-		if err := checkParents(df.DestinationRoot(), entry.Path().String()); err != nil {
-			return Outcome{Observation: registry.ObservationUnknown}, err
+		identity, exists, identityErr := tree.identity(entry.Path().String())
+		if identityErr != nil {
+			return Outcome{Observation: registry.ObservationUnknown}, identityErr
 		}
-		dest := filepath.Join(df.DestinationRoot(), filepath.FromSlash(entry.Path().String()))
-		info, statErr := os.Lstat(dest)
-		if statErr != nil {
-			if os.IsNotExist(statErr) {
-				absent++
-				continue
-			}
-			return Outcome{Observation: registry.ObservationUnknown}, cell.NewFault("direct-file inspection", "inspectable destination", statErr.Error(), dest, "reading live leaf metadata", "the service cannot establish ownership before an action", "repair path permissions and retry", statErr)
+		if !exists {
+			absent++
+			continue
 		}
-		if info.Mode().Type()&fs.ModeSymlink != 0 || !info.Mode().IsRegular() {
-			return Outcome{Observation: registry.ObservationUnknown}, cell.NewFault("direct-file inspection", "regular non-symlink leaf", fmt.Sprintf("destination has unsafe type %s", info.Mode().Type()), dest, "classifying live direct-file state", "Pasture will preserve the entry because ownership is unproved", "move the conflicting entry aside and retry", nil)
-		}
-		file, openErr := os.Open(dest)
-		if openErr != nil {
-			return Outcome{Observation: registry.ObservationUnknown}, openErr
-		}
-		bytes, readErr := io.ReadAll(file)
-		closeErr := file.Close()
-		if readErr != nil || closeErr != nil {
-			if readErr == nil {
-				readErr = closeErr
-			}
-			return Outcome{Observation: registry.ObservationUnknown}, readErr
-		}
-		mode, modeErr := artifact.NewMode(uint32(info.Mode().Perm()))
-		if modeErr != nil {
-			return Outcome{Observation: registry.ObservationUnknown}, modeErr
-		}
-		leaf, leafErr := registry.NewLeaf(entry.Path(), artifact.RegularFileType(), mode, artifact.DigestBytes(bytes))
+		leaf, leafErr := registry.NewLeaf(entry.Path(), artifact.RegularFileType(), identity.mode, identity.digest)
 		if leafErr != nil {
 			return Outcome{Observation: registry.ObservationUnknown}, leafErr
 		}
@@ -133,32 +112,68 @@ func (a DirectFileActivator) Ensure(ctx context.Context, source Source, key regi
 	if err != nil {
 		return Outcome{Observation: registry.ObservationUnknown}, err
 	}
-	if err := validateDestinationRoot(df.DestinationRoot()); err != nil {
+	tree, err := openSecureDirectTree(df.DestinationRoot(), true)
+	if err != nil {
 		return Outcome{Observation: registry.ObservationUnknown}, err
 	}
-	var priorLeaves []registry.Leaf
+	defer tree.close()
+	priorByPath := map[string]registry.Leaf{}
 	if prior != nil && prior.Managed() {
-		priorLeaves = prior.Leaves()
+		for _, leaf := range prior.Leaves() {
+			priorByPath[leaf.Path().String()] = leaf
+		}
 	}
-	ensureOut, ensureErr := directfile.Ensure(df.DestinationRoot(), df.Bundle(), priorLeaves)
-	if ensureErr != nil {
-		return a.inspectAfterFailure(ctx, source, key, act, prior, registry.OperationEnsure, ensureErr)
+	managed := false
+	createdDirs := []artifact.Path(nil)
+	for _, entry := range df.Bundle().Manifest().Entries() {
+		if !entry.IsRegular() {
+			continue
+		}
+		identity, exists, identityErr := tree.identity(entry.Path().String())
+		if identityErr != nil {
+			return a.inspectAfterFailure(ctx, source, key, act, prior, registry.OperationEnsure, identityErr)
+		}
+		priorLeaf, hasPrior := priorByPath[entry.Path().String()]
+		if exists {
+			matchesDesired := identity.digest == entry.Digest() && identity.mode.Bits() == entry.Mode().Bits()
+			if hasPrior && !secureIdentityMatchesLeaf(identity, priorLeaf) {
+				return a.inspectAfterFailure(ctx, source, key, act, prior, registry.OperationEnsure, directPathFault(entry.Path().String(), "the managed leaf drifted from its ownership token", "restore the recorded leaf or move it aside and retry"))
+			}
+			if matchesDesired {
+				continue
+			}
+			if !hasPrior {
+				return a.inspectAfterFailure(ctx, source, key, act, prior, registry.OperationEnsure, directPathFault(entry.Path().String(), "a different external leaf occupies the destination", "move the external leaf aside and retry"))
+			}
+		}
+		content, readErr := readBundleLeaf(df.Bundle(), entry.Path().String())
+		if readErr != nil {
+			return a.inspectAfterFailure(ctx, source, key, act, prior, registry.OperationEnsure, readErr)
+		}
+		made, writeErr := tree.write(entry.Path().String(), content, entry.Mode().Bits())
+		if writeErr != nil {
+			return a.inspectAfterFailure(ctx, source, key, act, prior, registry.OperationEnsure, writeErr)
+		}
+		managed = true
+		for _, rel := range made {
+			p, parseErr := artifact.NewPath(rel)
+			if parseErr != nil {
+				return Outcome{Observation: registry.ObservationUnknown}, parseErr
+			}
+			createdDirs = appendUniquePath(createdDirs, p)
+		}
 	}
 	out, inspectErr := a.Inspect(ctx, source, key, act, prior)
 	if inspectErr != nil {
 		return out, cell.NewFault("direct-file ensure", "live-confirmed postcondition", inspectErr.Error(), df.DestinationRoot(), "inspecting after ensure", "the write may have succeeded but no unproved fact will be persisted", "inspect the destination and rerun", inspectErr)
 	}
-	managed := ensureOut.Managed || prior != nil && prior.Managed()
-	if ensureOut.Managed {
+	managed = managed || prior != nil && prior.Managed()
+	if managed {
 		out.Diagnostic = ""
 	}
 	created := append([]artifact.Path(nil), out.Record.CreatedDirs()...)
-	for _, dir := range ensureOut.CreatedDirs {
-		p, parseErr := artifact.NewPath(dir)
-		if parseErr != nil {
-			return Outcome{Observation: out.Observation}, parseErr
-		}
-		created = append(created, p)
+	for _, dir := range createdDirs {
+		created = appendUniquePath(created, dir)
 	}
 	rec, recErr := registry.NewRecord(registry.RecordInput{Key: key, Source: registrySource(source), Strategy: activation.DirectFileKindValue(), Managed: managed, ArtifactID: df.Bundle().ID(), Leaves: out.Record.Leaves(), CreatedDirs: created, Observation: out.Observation, Trust: registry.TrustNotApplicable, LastOperation: registry.OperationEnsure, LastOutcome: registry.OutcomeCompleted, Diagnostic: out.Diagnostic})
 	if recErr != nil {
@@ -172,16 +187,40 @@ func (a DirectFileActivator) Remove(ctx context.Context, source Source, key regi
 	if err != nil {
 		return Outcome{Observation: registry.ObservationUnknown}, err
 	}
-	if err := validateDestinationRoot(df.DestinationRoot()); err != nil {
+	tree, err := openSecureDirectTree(df.DestinationRoot(), false)
+	if errors.Is(err, errSecureRootAbsent) {
+		rec, recErr := a.record(source, key, df, &prior, nil, registry.ObservationAbsent, true, registry.OperationRemove, registry.OutcomeCompleted, "")
+		return Outcome{Status: Completed(), Observation: registry.ObservationAbsent, Record: &rec}, recErr
+	}
+	if err != nil {
 		return Outcome{Observation: registry.ObservationUnknown}, err
 	}
-	dirs := make([]string, 0, len(prior.CreatedDirs()))
-	for _, d := range prior.CreatedDirs() {
-		dirs = append(dirs, d.String())
+	defer tree.close()
+	for _, leaf := range prior.Leaves() {
+		identity, exists, identityErr := tree.identity(leaf.Path().String())
+		if identityErr != nil {
+			return a.inspectAfterFailure(ctx, source, key, act, &prior, registry.OperationRemove, identityErr)
+		}
+		if !exists {
+			continue
+		}
+		if !secureIdentityMatchesLeaf(identity, leaf) {
+			return a.inspectAfterFailure(ctx, source, key, act, &prior, registry.OperationRemove, directPathFault(leaf.Path().String(), "the managed leaf drifted from its ownership token", "restore the recorded leaf or move it aside and retry"))
+		}
+		if unlinkErr := tree.unlink(leaf.Path().String()); unlinkErr != nil {
+			return a.inspectAfterFailure(ctx, source, key, act, &prior, registry.OperationRemove, unlinkErr)
+		}
 	}
-	removeOut, err := directfile.Remove(df.DestinationRoot(), prior.Leaves(), dirs)
-	if err != nil {
-		return a.inspectAfterFailure(ctx, source, key, act, &prior, registry.OperationRemove, err)
+	preserved := []string(nil)
+	dirs := prior.CreatedDirs()
+	for i := len(dirs) - 1; i >= 0; i-- {
+		removed, removeErr := tree.removeDir(dirs[i].String())
+		if removeErr != nil {
+			return a.inspectAfterFailure(ctx, source, key, act, &prior, registry.OperationRemove, removeErr)
+		}
+		if !removed {
+			preserved = append(preserved, dirs[i].String())
+		}
 	}
 	out, inspectErr := a.Inspect(ctx, source, key, act, &prior)
 	if inspectErr != nil {
@@ -192,8 +231,8 @@ func (a DirectFileActivator) Remove(ctx context.Context, source Source, key regi
 		return a.inspectAfterFailure(ctx, source, key, act, &prior, registry.OperationRemove, postErr)
 	}
 	diagnostic := ""
-	if len(removeOut.PreservedDirs) > 0 {
-		diagnostic = fmt.Sprintf("managed leaves are absent; created directories %v were preserved because they contain external entries", removeOut.PreservedDirs)
+	if len(preserved) > 0 {
+		diagnostic = fmt.Sprintf("managed leaves are absent; created directories %v were preserved because they contain external entries", preserved)
 	}
 	rec, recErr := a.record(source, key, df, &prior, nil, registry.ObservationAbsent, true, registry.OperationRemove, registry.OutcomeCompleted, diagnostic)
 	if recErr != nil {
@@ -214,7 +253,10 @@ func (a DirectFileActivator) inspectAfterFailure(ctx context.Context, source Sou
 	managed := prior != nil && prior.Managed()
 	if out.Record != nil {
 		leaves = out.Record.Leaves()
-		managed = managed || out.Record.Managed()
+		// A successful live inspection is stronger than historical authority.
+		// Preserve its exact ownership; only carry prior management when live
+		// inspection could not establish a record at all.
+		managed = out.Record.Managed()
 	}
 	rec, recErr := a.record(source, key, df, prior, leaves, out.Observation, managed, op, registry.OutcomeFailed, diagnostic)
 	if recErr == nil {
@@ -248,49 +290,24 @@ func sameLeaf(a, b registry.Leaf) bool {
 	return a.Path() == b.Path() && a.Type() == b.Type() && a.Mode().Bits() == b.Mode().Bits() && a.Digest() == b.Digest()
 }
 
-func checkParents(root, rel string) error {
-	cleanRoot := filepath.Clean(root)
-	if !filepath.IsAbs(cleanRoot) {
-		return cell.NewFault("direct-file inspection", "absolute destination root", fmt.Sprintf("root %q is relative", root), root, "resolving a live destination", "working-directory changes could inspect the wrong path", "configure an absolute destination root", nil)
-	}
-	cur := cleanRoot
-	parts := strings.Split(filepath.FromSlash(rel), string(filepath.Separator))
-	for _, part := range parts[:len(parts)-1] {
-		cur = filepath.Join(cur, part)
-		info, err := os.Lstat(cur)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return err
-		}
-		if info.Mode().Type()&fs.ModeSymlink != 0 || !info.IsDir() {
-			return cell.NewFault("direct-file inspection", "non-symlink directory boundary", fmt.Sprintf("unsafe parent type %s", info.Mode().Type()), cur, "walking destination parents", "inspection could escape or address the wrong tree", "replace the boundary with a real directory", nil)
-		}
-	}
-	return nil
+func secureIdentityMatchesLeaf(identity secureIdentity, leaf registry.Leaf) bool {
+	return leaf.Type() == artifact.RegularFileType() && identity.digest == leaf.Digest() && identity.mode.Bits() == leaf.Mode().Bits()
 }
 
-func validateDestinationRoot(root string) error {
-	clean := filepath.Clean(root)
-	if !filepath.IsAbs(clean) {
-		return cell.NewFault("direct-file path validation", "absolute destination root", fmt.Sprintf("root %q is relative", root), root, "anchoring the destination before inspection or mutation", "working-directory changes could select another tree", "configure an absolute destination root", nil)
+func readBundleLeaf(bundle artifact.Bundle, name string) ([]byte, error) {
+	file, err := bundle.Open(name)
+	if err != nil {
+		return nil, err
 	}
-	volume := filepath.VolumeName(clean)
-	remainder := strings.TrimPrefix(clean, volume)
-	cur := volume + string(filepath.Separator)
-	for _, part := range strings.Split(strings.TrimPrefix(remainder, string(filepath.Separator)), string(filepath.Separator)) {
-		if part == "" {
-			continue
-		}
-		cur = filepath.Join(cur, part)
-		info, err := os.Lstat(cur)
-		if err != nil {
-			return cell.NewFault("direct-file path validation", "existing non-symlink destination ancestry", err.Error(), cur, "anchoring the destination before inspection or mutation", "Pasture cannot prove the destination stays inside the configured tree", "create each destination ancestor as a real directory, then retry", err)
-		}
-		if info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() {
-			return cell.NewFault("direct-file path validation", "real directory destination ancestry", fmt.Sprintf("path has unsafe mode %s", info.Mode()), cur, "anchoring the destination before inspection or mutation", "following this boundary could inspect, write, or remove another tree", "replace the boundary with a real directory and retry", nil)
+	defer file.Close()
+	return io.ReadAll(file)
+}
+
+func appendUniquePath(paths []artifact.Path, candidate artifact.Path) []artifact.Path {
+	for _, existing := range paths {
+		if existing == candidate {
+			return paths
 		}
 	}
-	return nil
+	return append(paths, candidate)
 }

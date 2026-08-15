@@ -42,32 +42,52 @@ type GroupCell struct {
 	Activation map[cell.Cell]activation.ComponentActivation
 }
 
-// GroupAction is one canonical group row and its strongest confirmed fact.
+// GroupStep is one immutable action in a read-only, canonical group plan. The
+// key is part of the plan so project requests cannot be executed or persisted
+// under a different project root.
+type GroupStep struct {
+	cell cell.Cell
+	key  registry.Key
+	op   apply.Operation
+}
+
+func NewGroupStep(c cell.Cell, key registry.Key, op apply.Operation) GroupStep {
+	return GroupStep{cell: c, key: key, op: op}
+}
+func (s GroupStep) Cell() cell.Cell            { return s.cell }
+func (s GroupStep) Key() registry.Key          { return s.key }
+func (s GroupStep) Operation() apply.Operation { return s.op }
+
+// GroupPlan is produced without mutation and must contain exactly one step for
+// every extension of the reconciler's harness in canonical order.
+type GroupPlan struct {
+	Handled bool
+	Steps   []GroupStep
+}
+
+// GroupAction is one inspected group row and its strongest confirmed fact.
 type GroupAction struct {
 	Row    apply.ActionRow
 	Record *registry.Record
 }
 
-// GroupResult reports whether the group consumed its ordinary cell execution.
-type GroupResult struct {
-	Handled bool
-	Actions []GroupAction
-}
-
-// GroupReconciler is a typed, statically registered selection-wide seam for a
-// harness migration such as the Claude split-package transition.
+// GroupReconciler is the one typed selection-wide native protocol. PlanSelection
+// is read-only. The engine then executes and inspects exactly one validated step
+// at a time and persists the inspected fact before advancing.
 type GroupReconciler interface {
 	Harness() ir.HarnessID
-	ReconcileSelection(context.Context, GroupSelection) (GroupResult, error)
+	PlanSelection(context.Context, GroupSelection) (GroupPlan, error)
+	Execute(context.Context, GroupStep) error
+	Inspect(context.Context, GroupStep) (GroupAction, error)
 	PreflightCell(context.Context, GroupCell) error
 }
 
 type engine struct {
 	activators map[activation.StrategyKind]apply.Activator
-	groups     map[ir.HarnessID]GroupReconciler
+	group      GroupReconciler
 }
 
-func newEngine(activators []apply.Activator, groups []GroupReconciler) (*engine, error) {
+func newEngine(activators []apply.Activator, group GroupReconciler) (*engine, error) {
 	reg := make(map[activation.StrategyKind]apply.Activator, len(activators))
 	for _, a := range activators {
 		if a == nil || !a.StrategyKind().IsValid() {
@@ -79,17 +99,10 @@ func newEngine(activators []apply.Activator, groups []GroupReconciler) (*engine,
 		}
 		reg[kind] = a
 	}
-	groupRegistry := make(map[ir.HarnessID]GroupReconciler, len(groups))
-	for _, group := range groups {
-		if group == nil || !group.Harness().IsValid() {
-			return nil, cell.NewFault("service construction", "valid group reconciler", "a group reconciler is nil or reports an invalid harness", "internal/install/service.newEngine", "assembling selection-wide reconciliation", "group dispatch cannot be exhaustive", "register a non-nil reconciler with a known harness", nil)
-		}
-		if _, duplicate := groupRegistry[group.Harness()]; duplicate {
-			return nil, cell.NewFault("service construction", "one group reconciler per harness", fmt.Sprintf("two reconcilers were registered for %s", group.Harness()), "internal/install/service.newEngine", "assembling selection-wide reconciliation", "migration dispatch would be ambiguous", "register exactly one group reconciler per harness", nil)
-		}
-		groupRegistry[group.Harness()] = group
+	if group != nil && !group.Harness().IsValid() {
+		return nil, cell.NewFault("service construction", "valid group reconciler", "the group reconciler reports an invalid harness", "internal/install/service.newEngine", "assembling selection-wide reconciliation", "group dispatch cannot be deterministic", "register one reconciler with a known harness", nil)
 	}
-	return &engine{activators: reg, groups: groupRegistry}, nil
+	return &engine{activators: reg, group: group}, nil
 }
 
 func (e *engine) applySelection(ctx context.Context, sel selection.Selection, scope apply.Scope, source apply.Source, contracts map[ir.HarnessID]activation.ActivationContract, store *registry.Store, commit func(context.Context, registry.Store) error) (apply.Result, error) {
@@ -113,43 +126,33 @@ func (e *engine) applySelection(ctx context.Context, sel selection.Selection, sc
 	}
 
 	groupRows := map[cell.Cell]GroupAction{}
-	handledHarnesses := map[ir.HarnessID]bool{}
-	for harness, reconciler := range e.groups {
+	var handledHarness ir.HarnessID
+	if e.group != nil {
+		harness := e.group.Harness()
+		reconciler := e.group
 		prior := scopedPrior(scope, harness, *store)
 		acts := harnessActivations(harness, bindings)
-		group, groupErr := reconciler.ReconcileSelection(ctx, GroupSelection{Selection: sel, Scope: scope, Source: source, Prior: prior, Activation: acts})
+		group, groupErr := reconciler.PlanSelection(ctx, GroupSelection{Selection: sel, Scope: scope, Source: source, Prior: prior, Activation: acts})
 		if groupErr != nil {
 			return apply.Result{}, normalizePreplan(source, groupErr, apply.RemediationApplySelection)
 		}
-		if !group.Handled {
-			continue
-		}
-		handledHarnesses[harness] = true
-		for _, action := range group.Actions {
-			if action.Row.Cell().Harness() != harness || !action.Row.Cell().IsValid() {
-				return apply.Result{}, preplan(source, "group result validation", "the group reconciler returned a row outside its harness", "internal/install/service.engine.applySelection", "no group fact was persisted and ordinary execution was stopped", "repair the reconciler to return only canonical rows for its harness", apply.RemediationManualRepair)
+		if group.Handled {
+			if err := validateGroupPlan(scope, harness, group); err != nil {
+				return apply.Result{}, normalizePreplan(source, err, apply.RemediationManualRepair)
 			}
-			if _, duplicate := groupRows[action.Row.Cell()]; duplicate {
-				return apply.Result{}, preplan(source, "group result validation", fmt.Sprintf("the group reconciler returned duplicate row %s", action.Row.Cell()), "internal/install/service.engine.applySelection", "no group fact was persisted and ordinary execution was stopped", "return exactly one row for each harness extension", apply.RemediationManualRepair)
-			}
-			if action.Record != nil && (action.Record.Cell() != action.Row.Cell() || action.Record.Key().Scope() != scope.Kind()) {
-				return apply.Result{}, preplan(source, "group result validation", fmt.Sprintf("the record for row %s has another cell or scope", action.Row.Cell()), "internal/install/service.engine.applySelection", "no group fact was persisted and ordinary execution was stopped", "return records for the exact requested scoped row", apply.RemediationManualRepair)
-			}
-			groupRows[action.Row.Cell()] = action
-		}
-		if len(group.Actions) != len(cell.CanonicalExtensions()) {
-			return apply.Result{}, preplan(source, "group result validation", fmt.Sprintf("the reconciler for %s returned %d rows instead of three", harness, len(group.Actions)), "internal/install/service.engine.applySelection", "no group fact was persisted and ordinary execution was stopped", "return one canonical row for skills, agents, and hooks", apply.RemediationManualRepair)
+			handledHarness = harness
+			groupRows = e.executeGroup(ctx, source, group, store, commit)
 		}
 	}
 
 	filtered := plan[:0]
 	for _, p := range plan {
-		if !handledHarnesses[p.cell.Harness()] {
+		if p.cell.Harness() != handledHarness {
 			filtered = append(filtered, p)
 		}
 	}
 	plan = filtered
-	if persistGroupActions(ctx, groupRows, store, commit) {
+	if groupFailed(groupRows) {
 		return assembleResult(source, scope.Kind(), plan, preRows, groupRows, true), nil
 	}
 	ordinary := e.executePlan(ctx, source, scope.Kind(), plan, preRows, store, commit)
@@ -168,8 +171,8 @@ func (e *engine) applyCell(ctx context.Context, c cell.Cell, enabled bool, scope
 	if source == apply.HomeManagerSource() && act.Strategy().Kind() == activation.DirectFileKindValue() {
 		return apply.Result{}, preplan(source, "declarative ownership validation", fmt.Sprintf("Home Manager owns DirectFile cell %s declaratively", c), "internal/install/service.engine.applyCell", "Pasture did not inspect, write, or remove the declarative destination", "rerun Home Manager activation so Nix realizes the link and invokes apply-selection for native cells", apply.RemediationRerunHomeManager)
 	}
-	if group, ok := e.groups[c.Harness()]; ok {
-		if err := group.PreflightCell(ctx, GroupCell{Cell: c, Enabled: enabled, Scope: scope, Source: source, Prior: scopedPrior(scope, c.Harness(), *store), Activation: harnessActivations(c.Harness(), bindings)}); err != nil {
+	if e.group != nil && e.group.Harness() == c.Harness() {
+		if err := e.group.PreflightCell(ctx, GroupCell{Cell: c, Enabled: enabled, Scope: scope, Source: source, Prior: scopedPrior(scope, c.Harness(), *store), Activation: harnessActivations(c.Harness(), bindings)}); err != nil {
 			return apply.Result{}, normalizePreplan(source, err, apply.RemediationApplySelection)
 		}
 	}
@@ -345,17 +348,43 @@ func (e *engine) executeOne(ctx context.Context, source apply.Source, p planned)
 	return apply.NewActionRow(p.cell, p.op, out.Status, recordManagement(*out.Record), out.Observation, out.Diagnostic), out
 }
 
-func persistGroupActions(ctx context.Context, groups map[cell.Cell]GroupAction, store *registry.Store, commit func(context.Context, registry.Store) error) bool {
+func validateGroupPlan(scope apply.Scope, harness ir.HarnessID, plan GroupPlan) error {
+	if len(plan.Steps) != len(cell.CanonicalExtensions()) {
+		return fmt.Errorf("group plan for %s contains %d rows instead of three", harness, len(plan.Steps))
+	}
+	for i, extension := range cell.CanonicalExtensions() {
+		wantCell, _ := cell.New(harness, extension)
+		wantKey, err := scope.Key(wantCell)
+		if err != nil {
+			return err
+		}
+		step := plan.Steps[i]
+		if step.Cell() != wantCell || step.Key() != wantKey || !step.Operation().IsValid() {
+			return fmt.Errorf("group plan row %d must be canonical cell %s with exact scoped key and valid operation", i, wantCell)
+		}
+	}
+	return nil
+}
+
+func (e *engine) executeGroup(ctx context.Context, source apply.Source, plan GroupPlan, store *registry.Store, commit func(context.Context, registry.Store) error) map[cell.Cell]GroupAction {
+	groups := make(map[cell.Cell]GroupAction, len(plan.Steps))
 	failed := false
-	for _, c := range cell.CanonicalCells() {
-		action, ok := groups[c]
-		if !ok {
+	for _, step := range plan.Steps {
+		c := step.Cell()
+		if failed {
+			groups[c] = GroupAction{Row: apply.NewActionRow(c, step.Operation(), apply.Unattempted(), apply.ManagementUnknown, registry.ObservationUnknown, "an earlier group action failed; this action was not attempted")}
 			continue
 		}
+		executeErr := e.group.Execute(ctx, step)
+		action, inspectErr := e.group.Inspect(ctx, step)
+		if validationErr := validateGroupAction(step, action); validationErr != nil {
+			inspectErr = validationErr
+		}
 		row := action.Row
-		if failed && row.Status() != apply.ManagedDeclaratively() {
-			groups[c] = GroupAction{Row: apply.NewActionRow(c, row.Operation(), apply.Unattempted(), row.Management(), row.Observation(), "an earlier group action failed; this action was not attempted")}
-			continue
+		if inspectErr != nil {
+			row = apply.NewActionRow(c, step.Operation(), apply.Failed(), row.Management(), registry.ObservationUnknown, actionable("group live inspection failed", inspectErr, c, "post-action inspection", "the strongest group fact could not be confirmed and later actions were not attempted", "repair the native probe and retry the full selection"))
+		} else if executeErr != nil {
+			row = apply.NewActionRow(c, step.Operation(), apply.Failed(), row.Management(), row.Observation(), actionable("group action failed", executeErr, c, step.Operation().String(), "the inspected live fact is retained and later actions were not attempted", "repair the native action and retry the full selection"))
 		}
 		if action.Record != nil {
 			if err := store.Upsert(*action.Record); err != nil {
@@ -369,7 +398,27 @@ func persistGroupActions(ctx context.Context, groups map[cell.Cell]GroupAction, 
 			failed = true
 		}
 	}
-	return failed
+	return groups
+}
+
+func validateGroupAction(step GroupStep, action GroupAction) error {
+	row := action.Row
+	if row.Cell() != step.Cell() || row.Operation() != step.Operation() || !row.Status().IsValid() || !row.Management().IsValid() || !row.Observation().IsValid() {
+		return fmt.Errorf("group inspection returned invalid typed fields for %s", step.Cell())
+	}
+	if action.Record != nil && (!action.Record.IsValid() || action.Record.Key() != step.Key() || action.Record.Cell() != step.Cell()) {
+		return fmt.Errorf("group inspection returned a record for a different scoped key than %s", step.Cell())
+	}
+	return nil
+}
+
+func groupFailed(groups map[cell.Cell]GroupAction) bool {
+	for _, c := range cell.CanonicalCells() {
+		if action, ok := groups[c]; ok && action.Row.Status() == apply.Failed() {
+			return true
+		}
+	}
+	return false
 }
 
 func mergeGroupResult(source apply.Source, scope registry.Scope, ordinary apply.Result, groups map[cell.Cell]GroupAction) apply.Result {
@@ -404,8 +453,10 @@ func assembleResult(source apply.Source, scope registry.Scope, plan []planned, p
 			rows[p.cell] = apply.NewActionRow(p.cell, p.op, apply.Unattempted(), management(p.prior), registry.ObservationInvalid, "declarative validation failed before native execution")
 		}
 	}
-	for c, action := range groups {
-		rows[c] = action.Row
+	for _, c := range cell.CanonicalCells() {
+		if action, ok := groups[c]; ok {
+			rows[c] = action.Row
+		}
 	}
 	ordered := make([]apply.ActionRow, 0, len(rows))
 	for _, c := range cell.CanonicalCells() {
@@ -435,9 +486,10 @@ func scopedPrior(scope apply.Scope, harness ir.HarnessID, store registry.Store) 
 
 func harnessActivations(harness ir.HarnessID, bindings map[cell.Cell]activation.ComponentActivation) map[cell.Cell]activation.ComponentActivation {
 	out := map[cell.Cell]activation.ComponentActivation{}
-	for c, act := range bindings {
-		if c.Harness() == harness {
-			out[c] = act
+	for _, extension := range cell.CanonicalExtensions() {
+		c, err := cell.New(harness, extension)
+		if err == nil {
+			out[c] = bindings[c]
 		}
 	}
 	return out

@@ -1,9 +1,6 @@
-// Package apply is the source-agnostic activation engine. It builds an in-memory
-// plan from a normalized effective selection plus the confirmed inventory,
-// executes cells in the frozen canonical order, stops at the first failure
-// (marking later executable rows unattempted), records the strongest confirmed
-// observation, and returns a transient apply-result document. It never reads or
-// writes preference YAML and never persists its result document.
+// Package apply owns the typed request, result, error, and activator contracts
+// plus concrete activation-strategy adapters. Package service alone owns
+// orchestration, canonical execution order, and registry persistence.
 package apply
 
 import (
@@ -68,6 +65,7 @@ func RemoveOp() Operation { return opRemove }
 func Inspect() Operation  { return opInspect }
 
 func (o Operation) String() string { return o.name }
+func (o Operation) IsValid() bool  { return o == opEnsure || o == opRemove || o == opInspect }
 
 // Management identifies whose authority, if any, the row represents.
 type Management uint8
@@ -90,6 +88,9 @@ func (m Management) String() string {
 	default:
 		return "unknown"
 	}
+}
+func (m Management) IsValid() bool {
+	return m >= ManagementUnknown && m <= ManagementDeclarative
 }
 
 // ActionRow is one ordered cell outcome.
@@ -197,6 +198,27 @@ type ApplyError struct {
 func NewApplyError(source Source, stage, reason, where, impact, fix string, remediation Remediation) *ApplyError {
 	return &ApplyError{source: source, stage: stage, reason: reason, where: where, impact: impact, fix: fix, remediation: remediation}
 }
+
+// Source returns the controller associated with the failed request.
+func (e *ApplyError) Source() Source { return e.source }
+
+// Stage returns the operation stage that rejected the request.
+func (e *ApplyError) Stage() string { return e.stage }
+
+// Reason returns the concrete reason the stage failed.
+func (e *ApplyError) Reason() string { return e.reason }
+
+// Location returns the production location that detected the failure.
+func (e *ApplyError) Location() string { return e.where }
+
+// Impact returns what the failure means for the caller and live state.
+func (e *ApplyError) Impact() string { return e.impact }
+
+// Fix returns the actionable repair instruction.
+func (e *ApplyError) Fix() string { return e.fix }
+
+// Remediation returns the closed caller action associated with the repair.
+func (e *ApplyError) Remediation() Remediation { return e.remediation }
 
 // Remediation is the closed caller action family carried by apply errors.
 type Remediation uint8

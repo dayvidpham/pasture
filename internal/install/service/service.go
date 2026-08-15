@@ -64,7 +64,9 @@ type Config struct {
 	Registry   Registry
 	Contracts  map[ir.HarnessID]activation.ActivationContract
 	Activators []apply.Activator
-	Groups     []GroupReconciler
+	// Group is the one statically selected selection-wide native transition.
+	// It never receives registry persistence and cannot create another authority.
+	Group GroupReconciler
 }
 
 type Service struct {
@@ -77,7 +79,7 @@ func New(config Config) (*Service, error) {
 	if config.Registry == nil {
 		return nil, cell.NewFault("installer service construction", "registry persistence", "the registry dependency is nil", "internal/install/service.New", "wiring the installer application service", "confirmed facts could not be loaded or saved", "provide FileRegistry or an atomic Registry implementation", nil)
 	}
-	engine, err := newEngine(config.Activators, config.Groups)
+	engine, err := newEngine(config.Activators, config.Group)
 	if err != nil {
 		return nil, err
 	}
