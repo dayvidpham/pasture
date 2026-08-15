@@ -168,6 +168,7 @@ type recordingGroup struct {
 	priorAt          map[string][][]string
 	executed         []executedGroupStep
 	liveFacts        map[cell.Cell]liveGroupFact
+	inspectedFacts   map[cell.Cell]service.GroupAction
 }
 
 type liveGroupFact struct {
@@ -576,6 +577,12 @@ func (g *recordingGroup) InspectAction(ctx context.Context, request service.Grou
 	if len(actions) != 3 {
 		return service.GroupFacts{}, nil
 	}
+	if g.inspectedFacts == nil {
+		g.inspectedFacts = make(map[cell.Cell]service.GroupAction, len(actions))
+	}
+	for _, action := range actions {
+		g.inspectedFacts[action.Row().Cell()] = action
+	}
 	return service.NewGroupFacts(actions...)
 }
 
@@ -773,6 +780,15 @@ func TestServiceGroupSaveFailurePreservesCompletePriorAuthority(t *testing.T) {
 	}
 	if group.stage != service.GroupTerminalSaveFailed {
 		t.Fatalf("terminal stage=%v, want save failure", group.stage)
+	}
+	control := mustCell(t, artifact.HarnessClaudeCode, cell.SkillsAxis())
+	inspected, ok := group.inspectedFacts[control]
+	if !ok {
+		t.Fatal("save-failure test did not retain the confirmed inspected control fact")
+	}
+	record, ok := inspected.Record()
+	if !ok || record.Observation() != registry.ObservationAbsent || record.LastOperation() != registry.OperationInspect || record.LastOutcome() != registry.OutcomeCompleted || record.Diagnostic() != "staged live skills" {
+		t.Fatalf("inspected control record=%+v present=%t, want complete live inspected semantics", record, ok)
 	}
 }
 

@@ -374,7 +374,7 @@ func (e *engine) executeGroup(ctx context.Context, base GroupSelection, plan Gro
 	var live []GroupAction
 	defer func() {
 		if closeErr := closeGroupPlan(ctx, e.group, refreshedGroupSelection(base, *store), plan, terminal); closeErr != nil {
-			markGroupControlFailed(groups, plan, lastControl, actionable("group plan finalization failed", closeErr, lastControl, "close-plan", "the apply result is failed because reconciliation could not be finalized", "repair the reconciler finalization path and retry the full selection"))
+			markGroupControlFailed(groups, plan, lastControl, GroupAction{}, actionable("group plan finalization failed", closeErr, lastControl, "close-plan", "the apply result is failed because reconciliation could not be finalized", "repair the reconciler finalization path and retry the full selection"))
 		}
 	}()
 
@@ -383,7 +383,7 @@ func (e *engine) executeGroup(ctx context.Context, base GroupSelection, plan Gro
 		lastControl = control
 		if err := ctx.Err(); err != nil {
 			terminal = GroupTerminalCanceled
-			markGroupControlFailed(groups, plan, control, actionable("group execution was canceled", err, control, "before native action", "this and later native actions were not attempted", "retry the full selection with a live context"))
+			markGroupControlFailed(groups, plan, control, GroupAction{}, actionable("group execution was canceled", err, control, "before native action", "this and later native actions were not attempted", "retry the full selection with a live context"))
 			break
 		}
 		refreshed := refreshedGroupSelection(base, *store)
@@ -393,14 +393,14 @@ func (e *engine) executeGroup(ctx context.Context, base GroupSelection, plan Gro
 		if inspectErr != nil {
 			cancelCleanup()
 			terminal = GroupTerminalInspectFailed
-			markGroupControlFailed(groups, plan, control, actionable("group live inspection failed", errors.Join(executeErr, inspectErr), control, "post-action inspection", "no stale fact was persisted and later actions were not attempted", "repair the native action and probe, then retry the full selection"))
+			markGroupControlFailed(groups, plan, control, GroupAction{}, actionable("group live inspection failed", errors.Join(executeErr, inspectErr), control, "post-action inspection", "no stale fact was persisted and later actions were not attempted", "repair the native action and probe, then retry the full selection"))
 			break
 		}
 		actions := facts.Actions()
 		if err := validateGroupFacts(refreshed, plan, step, executeErr, actions); err != nil {
 			cancelCleanup()
 			terminal = GroupTerminalFactInvalid
-			markGroupControlFailed(groups, plan, control, actionable("group facts were malformed", errors.Join(executeErr, err), control, "fact validation", "no malformed fact was persisted and later actions were not attempted", "return one coherent fact for every canonical group cell"))
+			markGroupControlFailed(groups, plan, control, GroupAction{}, actionable("group facts were malformed", errors.Join(executeErr, err), control, "fact validation", "no malformed fact was persisted and later actions were not attempted", "return one coherent fact for every canonical group cell"))
 			break
 		}
 		live = actions
@@ -416,7 +416,7 @@ func (e *engine) executeGroup(ctx context.Context, base GroupSelection, plan Gro
 		if saveErr := commit(cleanupCtx, clone); saveErr != nil {
 			cancelCleanup()
 			terminal = GroupTerminalSaveFailed
-			markGroupControlFailed(groups, plan, control, actionable("group facts could not be saved atomically", errors.Join(executeErr, saveErr), control, "registry-save", "the previous registry remains authoritative; confirmed live facts are reported and later actions were not attempted", "repair registry persistence and retry the full selection"))
+			markGroupControlFailed(groups, plan, control, findGroupAction(live, control), actionable("group facts could not be saved atomically", errors.Join(executeErr, saveErr), control, "registry-save", "the previous registry remains authoritative; confirmed live facts are reported and later actions were not attempted", "repair registry persistence and retry the full selection"))
 			reconcileFailedGroup(groups, plan, live, control)
 			break
 		}
@@ -424,7 +424,7 @@ func (e *engine) executeGroup(ctx context.Context, base GroupSelection, plan Gro
 		*store = clone
 		if executeErr != nil {
 			terminal = GroupTerminalExecuteFailed
-			markGroupControlFailed(groups, plan, control, actionable("group action failed", executeErr, control, step.Operation().String(), "the complete inspected live facts were retained and later actions were not attempted", "repair the native action and retry the full selection"))
+			markGroupControlFailed(groups, plan, control, findGroupAction(live, control), actionable("group action failed", executeErr, control, step.Operation().String(), "the complete inspected live facts were retained and later actions were not attempted", "repair the native action and retry the full selection"))
 			reconcileFailedGroup(groups, plan, live, control)
 			break
 		}
@@ -530,7 +530,16 @@ func registryOperation(operation apply.Operation) registry.Operation {
 	}
 }
 
-func markGroupControlFailed(groups map[cell.Cell]GroupAction, plan GroupPlan, control cell.Cell, diagnostic string) {
+func findGroupAction(actions []GroupAction, control cell.Cell) GroupAction {
+	for _, action := range actions {
+		if action.Row().Cell() == control {
+			return action
+		}
+	}
+	return GroupAction{}
+}
+
+func markGroupControlFailed(groups map[cell.Cell]GroupAction, plan GroupPlan, control cell.Cell, confirmed GroupAction, diagnostic string) {
 	result := plan.ResultCells()[0]
 	for _, candidate := range plan.ResultCells() {
 		if candidate.Cell() == control {
@@ -538,7 +547,10 @@ func markGroupControlFailed(groups map[cell.Cell]GroupAction, plan GroupPlan, co
 			break
 		}
 	}
-	prior := groups[control]
+	prior := confirmed
+	if !prior.Row().Cell().IsValid() {
+		prior = groups[control]
+	}
 	priorRow := prior.Row()
 	if priorRow.Diagnostic() != "" && priorRow.Diagnostic() != diagnostic {
 		diagnostic = priorRow.Diagnostic() + "; " + diagnostic
