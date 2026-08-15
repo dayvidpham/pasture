@@ -162,6 +162,10 @@ var codexAuthenticMatchers = map[string]string{
 }
 
 func renderCodexHooksConfig(eventNames []string) (string, error) {
+	return renderCodexHooksConfigWithRunner(eventNames, codexRunnerRelPath)
+}
+
+func renderCodexHooksConfigWithRunner(eventNames []string, runner func(string) string) (string, error) {
 	config := codexHooksConfig{Hooks: make(map[string][]codexHookGroup, len(eventNames))}
 	for _, name := range eventNames {
 		var matcher *string
@@ -184,7 +188,7 @@ func renderCodexHooksConfig(eventNames []string) (string, error) {
 			Matcher: matcher,
 			Hooks: []codexHookCommand{{
 				Type:          "command",
-				Command:       "sh " + codexRunnerRelPath(name),
+				Command:       "sh " + runner(name),
 				Timeout:       600,
 				StatusMessage: "Consulting Pasture lifecycle state",
 			}},
@@ -195,6 +199,27 @@ func renderCodexHooksConfig(eventNames []string) (string, error) {
 		return "", err
 	}
 	return string(wire) + "\n", nil
+}
+
+// EmitCodexGlobalHooksConfig returns the immutable user-wide hooks
+// configuration. It is deliberately separate from the project emitter: the
+// project contract remains relative to its repository, while this configuration
+// reaches the globally installed runners from every working directory. The
+// pinned Codex contract executes plain command strings through a shell, where
+// the unquoted leading tilde is expanded to the invoking user's home directory.
+func EmitCodexGlobalHooksConfig() (GeneratedFile, error) {
+	events := runtime.CodexLifecycleEvents()
+	names := make([]string, len(events))
+	for index, event := range events {
+		names[index] = event.NativeName()
+	}
+	content, err := renderCodexHooksConfigWithRunner(names, func(event string) string {
+		return "~/.codex/hooks/events/" + event + ".sh"
+	})
+	if err != nil {
+		return GeneratedFile{}, fmt.Errorf("emit immutable global Codex hooks configuration: %w", err)
+	}
+	return GeneratedFile{Path: ".codex/hooks.json", Content: content}, nil
 }
 
 // renderCodexActivationReport builds the committed Codex activation audit report
