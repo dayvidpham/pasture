@@ -363,11 +363,15 @@ const groupCleanupTimeout = 5 * time.Second
 func (e *engine) executeGroup(ctx context.Context, base GroupSelection, plan GroupPlan, store *registry.Store, commit func(context.Context, registry.Store) error) (groups map[cell.Cell]GroupAction) {
 	groups = make(map[cell.Cell]GroupAction, 3)
 	for _, result := range plan.ResultCells() {
-		action := GroupAction{row: apply.NewActionRow(result.Cell(), result.Operation(), apply.Unattempted(), management(recordPointer(*store, result.Key())), registry.ObservationUnknown, "the group cell has not yet been resolved"), record: recordPointer(*store, result.Key())}
+		// This is only a result placeholder, not a live fact.  In particular, do
+		// not lend an old record (or a newly invented one) to work that has not
+		// been attempted yet.
+		action := GroupAction{row: apply.NewActionRow(result.Cell(), result.Operation(), apply.Unattempted(), apply.ManagementUnknown, registry.ObservationUnknown, "the group cell has not yet been resolved")}
 		groups[result.Cell()] = action
 	}
 	terminal := GroupTerminalSucceeded
 	lastControl := plan.ResultCells()[0].Cell()
+	var live []GroupAction
 	defer func() {
 		if closeErr := closeGroupPlan(ctx, e.group, refreshedGroupSelection(base, *store), plan, terminal); closeErr != nil {
 			markGroupControlFailed(groups, plan, lastControl, actionable("group plan finalization failed", closeErr, lastControl, "close-plan", "the apply result is failed because reconciliation could not be finalized", "repair the reconciler finalization path and retry the full selection"))
@@ -399,6 +403,7 @@ func (e *engine) executeGroup(ctx context.Context, base GroupSelection, plan Gro
 			markGroupControlFailed(groups, plan, control, actionable("group facts were malformed", errors.Join(executeErr, err), control, "fact validation", "no malformed fact was persisted and later actions were not attempted", "return one coherent fact for every canonical group cell"))
 			break
 		}
+		live = actions
 		for _, fact := range actions {
 			groups[fact.Row().Cell()] = fact
 		}
@@ -412,6 +417,7 @@ func (e *engine) executeGroup(ctx context.Context, base GroupSelection, plan Gro
 			cancelCleanup()
 			terminal = GroupTerminalSaveFailed
 			markGroupControlFailed(groups, plan, control, actionable("group facts could not be saved atomically", errors.Join(executeErr, saveErr), control, "registry-save", "the previous registry remains authoritative; confirmed live facts are reported and later actions were not attempted", "repair registry persistence and retry the full selection"))
+			reconcileFailedGroup(groups, plan, live, control)
 			break
 		}
 		cancelCleanup()
@@ -419,10 +425,36 @@ func (e *engine) executeGroup(ctx context.Context, base GroupSelection, plan Gro
 		if executeErr != nil {
 			terminal = GroupTerminalExecuteFailed
 			markGroupControlFailed(groups, plan, control, actionable("group action failed", executeErr, control, step.Operation().String(), "the complete inspected live facts were retained and later actions were not attempted", "repair the native action and retry the full selection"))
+			reconcileFailedGroup(groups, plan, live, control)
 			break
 		}
 	}
 	return groups
+}
+
+// reconcileFailedGroup keeps facts proven by the final live probe, while making
+// the boundary of attempted work explicit.  An unattempted row is deliberately
+// record-free: a prior registry record remains authoritative in the store, but
+// must not be presented as authority for this newly stopped result.
+func reconcileFailedGroup(groups map[cell.Cell]GroupAction, plan GroupPlan, live []GroupAction, control cell.Cell) {
+	for _, fact := range live {
+		row := fact.Row()
+		if row.Cell() == control || (row.Status() != apply.Completed() && row.Status() != apply.InstalledPendingTrust()) {
+			continue
+		}
+		groups[row.Cell()] = fact
+	}
+	for _, result := range plan.ResultCells() {
+		if result.Cell() == control {
+			continue
+		}
+		action := groups[result.Cell()]
+		status := action.Row().Status()
+		if status == apply.Completed() || status == apply.InstalledPendingTrust() {
+			continue
+		}
+		groups[result.Cell()] = GroupAction{row: apply.NewActionRow(result.Cell(), result.Operation(), apply.Unattempted(), apply.ManagementUnknown, registry.ObservationUnknown, "a later group action was not attempted after the terminal action failed")}
+	}
 }
 
 func validateGroupFacts(base GroupSelection, plan GroupPlan, step GroupStep, executeErr error, actions []GroupAction) error {
