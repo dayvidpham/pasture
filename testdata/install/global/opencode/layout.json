@@ -1,0 +1,10 @@
+{
+  "activation_contract": "opencode/activation@1.18.10",
+  "version_probe": ["opencode", "--version"],
+  "skills_root": "skills",
+  "agents_root": "agent",
+  "hooks_root": "plugin",
+  "hook_file": "pasture-hooks.ts",
+  "config_read_order": ["config.json", "opencode.json", "opencode.jsonc"],
+  "native_writer_order": ["opencode.json", "opencode.jsonc"]
+}
