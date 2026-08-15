@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -170,6 +171,35 @@ func TestNearMatchWrongScopeAndDuplicateFailBeforeMutation(t *testing.T) {
 			_, err := controller.PlanSelection(context.Background(), groupRequest(t, 7, nil))
 			require.Error(t, err)
 			assert.Empty(t, host.mutations)
+		})
+	}
+}
+
+func TestServiceMalformedStartingStatesFailBeforeMutation(t *testing.T) {
+	t.Parallel()
+	cases := map[string][]pluginRow{
+		"disabled legacy":  {func() pluginRow { row := exactLegacy(); row.Enabled = false; return row }()},
+		"wrong scope":      {func() pluginRow { row := exactLegacy(); row.Scope = "project"; return row }()},
+		"near version":     {func() pluginRow { row := exactLegacy(); version := "0.0.5"; row.Version = &version; return row }()},
+		"duplicate legacy": {exactLegacy(), exactLegacy()},
+		"duplicate split":  {exactSplit("pasture-skills"), exactSplit("pasture-skills")},
+		"unknown identity": {func() pluginRow {
+			row := exactLegacy()
+			row.ID, row.Name = "pasture-other@aura-plugins", "pasture-other"
+			return row
+		}()},
+	}
+	for name, rows := range cases {
+		name, rows := name, rows
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			host := newHost(true, rows...)
+			sut, store := serviceFixture(t, host)
+			request := service.SelectionRequest{Selection: groupRequest(t, 1, nil).Selection, Scope: apply.GlobalScope(), Source: apply.InstallerSource()}
+			_, err := sut.ApplySelection(context.Background(), request)
+			require.Error(t, err)
+			assert.Empty(t, host.mutations)
+			assert.Equal(t, 0, store.store.Len())
 		})
 	}
 }
@@ -523,6 +553,69 @@ func TestServiceProductionPathPersistsExactScopedClaudeFact(t *testing.T) {
 	assert.Equal(t, registry.ObservationInstalled, record.Observation())
 }
 
+func TestServiceApplySelectionCoversEveryLegacySelectionMask(t *testing.T) {
+	t.Parallel()
+	for mask := 0; mask < 8; mask++ {
+		mask := mask
+		t.Run(fmt.Sprintf("mask-%03b", mask), func(t *testing.T) {
+			t.Parallel()
+			host := newHost(true, exactLegacy())
+			sut, store := serviceFixture(t, host)
+			request := service.SelectionRequest{Selection: groupRequest(t, mask, nil).Selection, Scope: apply.GlobalScope(), Source: apply.InstallerSource()}
+
+			result, err := sut.ApplySelection(context.Background(), request)
+			require.NoError(t, err)
+			require.Len(t, result.Rows(), 3)
+			assert.True(t, result.OK(), "%#v", result.Rows())
+			for i, extension := range cell.CanonicalExtensions() {
+				cc, _ := cell.New(ir.HarnessClaudeCode, extension)
+				row := result.Rows()[i]
+				assert.Equal(t, cc, row.Cell())
+				assert.Equal(t, apply.Completed(), row.Status())
+				want := mask&(1<<i) != 0
+				if want {
+					assert.Equal(t, apply.Ensure(), row.Operation())
+					assert.Equal(t, apply.ManagementPasture, row.Management())
+					assert.Equal(t, registry.ObservationInstalled, row.Observation())
+					key, keyErr := registry.GlobalKey(cc)
+					require.NoError(t, keyErr)
+					record, exists := store.store.Lookup(key)
+					require.True(t, exists)
+					assert.True(t, record.Managed())
+					assert.Equal(t, registry.ObservationInstalled, record.Observation())
+				} else {
+					assert.Equal(t, apply.Inspect(), row.Operation())
+					assert.Equal(t, registry.ObservationAbsent, row.Observation())
+					key, keyErr := registry.GlobalKey(cc)
+					require.NoError(t, keyErr)
+					_, exists := store.store.Lookup(key)
+					assert.False(t, exists)
+				}
+			}
+			wantMutations := make([]string, 0, 1+2*bitsSet(mask))
+			if mask != 0 {
+				for i, extension := range cell.CanonicalExtensions() {
+					if mask&(1<<i) != 0 {
+						wantMutations = append(wantMutations, "marketplace update", "install "+selector(packageFor(extension)))
+					}
+				}
+			}
+			wantMutations = append(wantMutations, "uninstall "+selector(LegacyPackage))
+			assert.Equal(t, wantMutations, host.mutations)
+			assert.NotContains(t, host.plugins, selector(LegacyPackage))
+		})
+	}
+}
+
+func bitsSet(mask int) int {
+	count := 0
+	for mask != 0 {
+		count += mask & 1
+		mask >>= 1
+	}
+	return count
+}
+
 func TestServiceFailureResumeKeepsFactsAndConverges(t *testing.T) {
 	t.Parallel()
 	host := newHost(true, exactLegacy())
@@ -730,6 +823,43 @@ func TestManagedAbsentTombstoneThenExternalReinstallNeverAuthorizesMutation(t *t
 	}
 }
 
+func TestServiceManagedAbsentTombstoneThenExternalReinstallPreservesEveryCell(t *testing.T) {
+	t.Parallel()
+	for _, extension := range cell.CanonicalExtensions() {
+		extension := extension
+		t.Run(extension.String(), func(t *testing.T) {
+			t.Parallel()
+			host := newHost(true, exactSplit(packageFor(extension)))
+			controller := mustController(t, host)
+			cc, _ := cell.New(ir.HarnessClaudeCode, extension)
+			prior := exactRecord(t, controller, cc, true, registry.ObservationAbsent, registry.SourceInstaller)
+			store := &memoryRegistry{store: registry.New()}
+			require.NoError(t, store.store.Upsert(prior))
+			sut := serviceWith(t, controller, store)
+			request := service.SelectionRequest{Selection: groupRequest(t, 0, map[cell.Cell]registry.Record{cc: prior}).Selection, Scope: apply.GlobalScope(), Source: apply.InstallerSource()}
+
+			result, err := sut.ApplySelection(context.Background(), request)
+			require.NoError(t, err)
+			require.Len(t, result.Rows(), 3)
+			for i, row := range result.Rows() {
+				assert.Equal(t, apply.Completed(), row.Status())
+				assert.Equal(t, apply.Inspect(), row.Operation())
+				if i == indexOfExtension(extension) {
+					assert.Equal(t, apply.ManagementExternal, row.Management())
+					assert.Equal(t, registry.ObservationInstalled, row.Observation())
+					record, ok := store.store.Lookup(prior.Key())
+					require.True(t, ok)
+					assert.False(t, record.Managed())
+					assert.Equal(t, registry.ObservationInstalled, record.Observation())
+				} else {
+					assert.Equal(t, registry.ObservationAbsent, row.Observation())
+				}
+			}
+			assert.Empty(t, host.mutations)
+		})
+	}
+}
+
 func TestStrictPriorAuthorityRejectsEveryIdentityMismatchBeforeMutation(t *testing.T) {
 	t.Parallel()
 	cc, _ := cell.New(ir.HarnessClaudeCode, cell.SkillsAxis())
@@ -879,6 +1009,25 @@ func TestOSRunnerIsolatedSuccessCancellationAndOutputBound(t *testing.T) {
 	_, err = runner.Run(context.Background(), command("sh", "-c", "dd if=/dev/zero bs=1048576 count=9 2>/dev/null"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "limit")
+}
+
+func TestOSRunnerPreservesArgvAndReportsStderrAndTimeout(t *testing.T) {
+	t.Parallel()
+	runner := OSRunner{}
+	result, err := runner.Run(context.Background(), command("printf", "%s|%s", "first argument", "second argument"))
+	require.NoError(t, err)
+	assert.Equal(t, "first argument|second argument", string(result.Stdout))
+
+	result, err = runner.Run(context.Background(), command("sh", "-c", "printf diagnostic >&2; exit 7"))
+	require.Error(t, err)
+	assert.Equal(t, "diagnostic", string(result.Stderr))
+	assert.Contains(t, err.Error(), "diagnostic")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err = runner.Run(ctx, command("sleep", "10"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
 func indexOfExtension(extension artifact.Extension) int {

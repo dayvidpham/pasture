@@ -623,14 +623,14 @@ func (c *Controller) probe(ctx context.Context) (nativeSnapshot, error) {
 		}
 		if legacy {
 			if snapshot.legacy != nil {
-				return nativeSnapshot{}, fmt.Errorf("exact legacy monolith appears more than once")
+				return nativeSnapshot{}, fault("Claude native-state reconciliation", "one exact user-scoped v0.0.4 monolith row", fmt.Sprintf("duplicate native legacy row %q affects the Claude skills migration cell", row.ID), "Controller.probe", "reconciling native rows before mutation", "reconciliation stopped before any native mutation and the registry remains unchanged", "remove the duplicate row or repair the native listing, then retry the full selection", nil)
 			}
 			copy := row
 			snapshot.legacy = &copy
 			continue
 		}
 		if _, duplicate := snapshot.plugins[cc]; duplicate {
-			return nativeSnapshot{}, fmt.Errorf("exact split plugin %s appears more than once", cc)
+			return nativeSnapshot{}, fault("Claude native-state reconciliation", "one exact native row per Claude selector", fmt.Sprintf("duplicate native row %q affects selector %s and cell %s", row.ID, row.ID, cc), "Controller.probe", "reconciling native rows before mutation", "reconciliation stopped before any native mutation and the registry remains unchanged", "remove the duplicate row or repair the native listing, then retry the full selection", nil)
 		}
 		snapshot.plugins[cc] = row
 	}
