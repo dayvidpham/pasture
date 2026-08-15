@@ -14,10 +14,10 @@ import (
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
-// installCmd groups the installer preference and confirmed-state commands. The
-// interactive TUI and the mutating apply-selection/apply-cell surfaces are
-// delivered incrementally; the commands here are the read-only, source-of-truth
-// views that both the TUI and Home Manager build on.
+// installCmd groups the scriptable installer and confirmed-state commands.
+// Interactive preferences and the Bubble Tea frontend are intentionally
+// deferred; these commands are the source-of-truth surfaces for automation and
+// Home Manager.
 var installCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Inspect and normalize Pasture installer preferences and confirmed state",
@@ -104,7 +104,8 @@ action, outcome, and actionable diagnostic. It reads the state file only.`,
 			exitWithCode(1)
 			return nil
 		}
-		if resolveFormat() == types.OutputJSON {
+		jsonOutput, _ := cmd.Flags().GetBool("json")
+		if jsonOutput || resolveFormat() == types.OutputJSON {
 			return writeInstallStatusJSON(cmd, statePath, store)
 		}
 		return writeInstallStatusText(cmd, statePath, store)
@@ -211,6 +212,7 @@ func defaultInstallStatePath() string {
 func init() {
 	installPlanCmd.Flags().String("config", "", "Path to the pasture config file (default: ~/.config/pasture/config.yaml)")
 	installStatusCmd.Flags().String("state", "", "Path to the confirmed installation state file (default: $XDG_STATE_HOME/pasture/installations.yaml)")
+	installStatusCmd.Flags().Bool("json", false, "Write deterministic JSON status")
 	installCmd.AddCommand(installPlanCmd, installStatusCmd)
 	rootCmd.AddCommand(installCmd)
 }
