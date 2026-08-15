@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"reflect"
+	"time"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/install/activation"
@@ -21,67 +24,6 @@ type planned struct {
 	declarative bool
 }
 
-// GroupSelection supplies one reconciler with exhaustive sibling intent and
-// all scoped prior facts. It is the sole selection-wide mutation seam.
-type GroupSelection struct {
-	Selection  selection.Selection
-	Scope      apply.Scope
-	Source     apply.Source
-	Prior      map[cell.Cell]registry.Record
-	Activation map[cell.Cell]activation.ComponentActivation
-}
-
-// GroupCell supplies the same reconciler with a context-free cell request. A
-// reconciler rejects when live group state requires exhaustive sibling intent.
-type GroupCell struct {
-	Cell       cell.Cell
-	Enabled    bool
-	Scope      apply.Scope
-	Source     apply.Source
-	Prior      map[cell.Cell]registry.Record
-	Activation map[cell.Cell]activation.ComponentActivation
-}
-
-// GroupStep is one immutable action in a read-only, canonical group plan. The
-// key is part of the plan so project requests cannot be executed or persisted
-// under a different project root.
-type GroupStep struct {
-	cell cell.Cell
-	key  registry.Key
-	op   apply.Operation
-}
-
-func NewGroupStep(c cell.Cell, key registry.Key, op apply.Operation) GroupStep {
-	return GroupStep{cell: c, key: key, op: op}
-}
-func (s GroupStep) Cell() cell.Cell            { return s.cell }
-func (s GroupStep) Key() registry.Key          { return s.key }
-func (s GroupStep) Operation() apply.Operation { return s.op }
-
-// GroupPlan is produced without mutation and must contain exactly one step for
-// every extension of the reconciler's harness in canonical order.
-type GroupPlan struct {
-	Handled bool
-	Steps   []GroupStep
-}
-
-// GroupAction is one inspected group row and its strongest confirmed fact.
-type GroupAction struct {
-	Row    apply.ActionRow
-	Record *registry.Record
-}
-
-// GroupReconciler is the one typed selection-wide native protocol. PlanSelection
-// is read-only. The engine then executes and inspects exactly one validated step
-// at a time and persists the inspected fact before advancing.
-type GroupReconciler interface {
-	Harness() ir.HarnessID
-	PlanSelection(context.Context, GroupSelection) (GroupPlan, error)
-	Execute(context.Context, GroupStep) error
-	Inspect(context.Context, GroupStep) (GroupAction, error)
-	PreflightCell(context.Context, GroupCell) error
-}
-
 type engine struct {
 	activators map[activation.StrategyKind]apply.Activator
 	group      GroupReconciler
@@ -90,7 +32,7 @@ type engine struct {
 func newEngine(activators []apply.Activator, group GroupReconciler) (*engine, error) {
 	reg := make(map[activation.StrategyKind]apply.Activator, len(activators))
 	for _, a := range activators {
-		if a == nil || !a.StrategyKind().IsValid() {
+		if isNilInterface(a) || !a.StrategyKind().IsValid() {
 			return nil, cell.NewFault("service construction", "valid strategy activator", "an activator is nil or reports an invalid strategy", "internal/install/service.newEngine", "assembling the application service", "strategy dispatch cannot be exhaustive", "register one non-nil activator for each used strategy", nil)
 		}
 		kind := a.StrategyKind()
@@ -99,10 +41,26 @@ func newEngine(activators []apply.Activator, group GroupReconciler) (*engine, er
 		}
 		reg[kind] = a
 	}
+	if group != nil && isNilInterface(group) {
+		return nil, cell.NewFault("service construction", "ordinary nil or a live group reconciler", "the group reconciler interface contains a typed nil", "internal/install/service.newEngine", "assembling selection-wide reconciliation", "calling Harness would panic", "pass an ordinary nil interface to disable groups or a non-nil reconciler", nil)
+	}
 	if group != nil && !group.Harness().IsValid() {
 		return nil, cell.NewFault("service construction", "valid group reconciler", "the group reconciler reports an invalid harness", "internal/install/service.newEngine", "assembling selection-wide reconciliation", "group dispatch cannot be deterministic", "register one reconciler with a known harness", nil)
 	}
 	return &engine{activators: reg, group: group}, nil
+}
+
+func isNilInterface(value any) bool {
+	if value == nil {
+		return true
+	}
+	v := reflect.ValueOf(value)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
+	}
 }
 
 func (e *engine) applySelection(ctx context.Context, sel selection.Selection, scope apply.Scope, source apply.Source, contracts map[ir.HarnessID]activation.ActivationContract, store *registry.Store, commit func(context.Context, registry.Store) error) (apply.Result, error) {
@@ -132,16 +90,21 @@ func (e *engine) applySelection(ctx context.Context, sel selection.Selection, sc
 		reconciler := e.group
 		prior := scopedPrior(scope, harness, *store)
 		acts := harnessActivations(harness, bindings)
-		group, groupErr := reconciler.PlanSelection(ctx, GroupSelection{Selection: sel, Scope: scope, Source: source, Prior: prior, Activation: acts})
+		groupSelection := GroupSelection{Selection: sel, Scope: scope, Source: source, Prior: prior, Activation: acts}
+		group, groupErr := reconciler.PlanSelection(ctx, groupSelection)
 		if groupErr != nil {
+			if group.Handled() {
+				groupErr = errors.Join(groupErr, closeGroupPlan(ctx, reconciler, groupSelection, group, GroupTerminalPlanInvalid))
+			}
 			return apply.Result{}, normalizePreplan(source, groupErr, apply.RemediationApplySelection)
 		}
-		if group.Handled {
-			if err := validateGroupPlan(scope, harness, group); err != nil {
+		if group.Handled() {
+			if err := validateGroupPlan(groupSelection, harness, group); err != nil {
+				err = errors.Join(err, closeGroupPlan(ctx, reconciler, groupSelection, group, GroupTerminalPlanInvalid))
 				return apply.Result{}, normalizePreplan(source, err, apply.RemediationManualRepair)
 			}
 			handledHarness = harness
-			groupRows = e.executeGroup(ctx, source, group, store, commit)
+			groupRows = e.executeGroup(ctx, groupSelection, group, store, commit)
 		}
 	}
 
@@ -348,73 +311,256 @@ func (e *engine) executeOne(ctx context.Context, source apply.Source, p planned)
 	return apply.NewActionRow(p.cell, p.op, out.Status, recordManagement(*out.Record), out.Observation, out.Diagnostic), out
 }
 
-func validateGroupPlan(scope apply.Scope, harness ir.HarnessID, plan GroupPlan) error {
-	if len(plan.Steps) != len(cell.CanonicalExtensions()) {
-		return fmt.Errorf("group plan for %s contains %d rows instead of three", harness, len(plan.Steps))
+func validateGroupPlan(request GroupSelection, harness ir.HarnessID, plan GroupPlan) error {
+	if err := validateGroupShape(plan); err != nil {
+		return err
 	}
+	results := plan.ResultCells()
 	for i, extension := range cell.CanonicalExtensions() {
 		wantCell, _ := cell.New(harness, extension)
-		wantKey, err := scope.Key(wantCell)
+		wantKey, err := request.Scope.Key(wantCell)
 		if err != nil {
 			return err
 		}
-		step := plan.Steps[i]
-		if step.Cell() != wantCell || step.Key() != wantKey || !step.Operation().IsValid() {
+		result := results[i]
+		if result.Cell() != wantCell || result.Key() != wantKey || !result.Operation().IsValid() {
 			return fmt.Errorf("group plan row %d must be canonical cell %s with exact scoped key and valid operation", i, wantCell)
+		}
+	}
+	cellAction := make(map[cell.Cell]apply.Operation, 3)
+	for i, step := range plan.Actions() {
+		if step.ControlCell().Harness() != harness {
+			return fmt.Errorf("group plan action %d control cell %s belongs to a foreign harness", i, step.ControlCell())
+		}
+		if step.Kind() == RemoveSharedGroupAction() && step.ControlCell().Extension() != cell.SkillsAxis() {
+			return fmt.Errorf("group plan action %d shared-removal control must be canonical skills", i)
+		}
+		enabled := request.Selection.Enabled(step.ControlCell())
+		if step.Kind() == EnsureCellGroupAction() && !enabled {
+			return fmt.Errorf("group plan action %d attempts to ensure disabled cell %s", i, step.ControlCell())
+		}
+		if step.Kind() == RemoveCellGroupAction() && enabled {
+			return fmt.Errorf("group plan action %d attempts to remove enabled cell %s", i, step.ControlCell())
+		}
+		if step.Kind() == EnsureCellGroupAction() || step.Kind() == RemoveCellGroupAction() {
+			cellAction[step.ControlCell()] = step.Operation()
+		}
+	}
+	for i, result := range results {
+		wantOperation, hasMutation := cellAction[result.Cell()]
+		if hasMutation && result.Operation() != wantOperation {
+			return fmt.Errorf("group plan result %d operation %s contradicts planned cell action %s", i, result.Operation(), wantOperation)
+		}
+		if !hasMutation && result.Operation() != apply.Inspect() {
+			return fmt.Errorf("group plan result %d operation %s has no matching cell action", i, result.Operation())
 		}
 	}
 	return nil
 }
 
-func (e *engine) executeGroup(ctx context.Context, source apply.Source, plan GroupPlan, store *registry.Store, commit func(context.Context, registry.Store) error) map[cell.Cell]GroupAction {
-	groups := make(map[cell.Cell]GroupAction, len(plan.Steps))
-	failed := false
-	for _, step := range plan.Steps {
-		c := step.Cell()
-		if failed {
-			groups[c] = GroupAction{Row: apply.NewActionRow(c, step.Operation(), apply.Unattempted(), apply.ManagementUnknown, registry.ObservationUnknown, "an earlier group action failed; this action was not attempted")}
-			continue
+const groupCleanupTimeout = 5 * time.Second
+
+func (e *engine) executeGroup(ctx context.Context, base GroupSelection, plan GroupPlan, store *registry.Store, commit func(context.Context, registry.Store) error) (groups map[cell.Cell]GroupAction) {
+	groups = make(map[cell.Cell]GroupAction, 3)
+	for _, result := range plan.ResultCells() {
+		action := GroupAction{row: apply.NewActionRow(result.Cell(), result.Operation(), apply.Unattempted(), management(recordPointer(*store, result.Key())), registry.ObservationUnknown, "the group cell has not yet been resolved"), record: recordPointer(*store, result.Key())}
+		groups[result.Cell()] = action
+	}
+	terminal := GroupTerminalSucceeded
+	lastControl := plan.ResultCells()[0].Cell()
+	defer func() {
+		if closeErr := closeGroupPlan(ctx, e.group, refreshedGroupSelection(base, *store), plan, terminal); closeErr != nil {
+			markGroupControlFailed(groups, plan, lastControl, actionable("group plan finalization failed", closeErr, lastControl, "close-plan", "the apply result is failed because reconciliation could not be finalized", "repair the reconciler finalization path and retry the full selection"))
 		}
-		executeErr := e.group.Execute(ctx, step)
-		action, inspectErr := e.group.Inspect(ctx, step)
-		if validationErr := validateGroupAction(step, action); validationErr != nil {
-			inspectErr = validationErr
+	}()
+
+	for _, step := range plan.Actions() {
+		control := step.ControlCell()
+		lastControl = control
+		if err := ctx.Err(); err != nil {
+			terminal = GroupTerminalCanceled
+			markGroupControlFailed(groups, plan, control, actionable("group execution was canceled", err, control, "before native action", "this and later native actions were not attempted", "retry the full selection with a live context"))
+			break
 		}
-		row := action.Row
+		refreshed := refreshedGroupSelection(base, *store)
+		executeErr := e.group.ExecuteAction(ctx, refreshed, plan, step)
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), groupCleanupTimeout)
+		facts, inspectErr := e.group.InspectAction(cleanupCtx, refreshed, plan, step, executeErr)
 		if inspectErr != nil {
-			row = apply.NewActionRow(c, step.Operation(), apply.Failed(), row.Management(), registry.ObservationUnknown, actionable("group live inspection failed", inspectErr, c, "post-action inspection", "the strongest group fact could not be confirmed and later actions were not attempted", "repair the native probe and retry the full selection"))
-		} else if executeErr != nil {
-			row = apply.NewActionRow(c, step.Operation(), apply.Failed(), row.Management(), row.Observation(), actionable("group action failed", executeErr, c, step.Operation().String(), "the inspected live fact is retained and later actions were not attempted", "repair the native action and retry the full selection"))
+			cancelCleanup()
+			terminal = GroupTerminalInspectFailed
+			markGroupControlFailed(groups, plan, control, actionable("group live inspection failed", errors.Join(executeErr, inspectErr), control, "post-action inspection", "no stale fact was persisted and later actions were not attempted", "repair the native action and probe, then retry the full selection"))
+			break
 		}
-		if action.Record != nil {
-			if err := store.Upsert(*action.Record); err != nil {
-				row = apply.NewActionRow(c, row.Operation(), apply.Failed(), row.Management(), row.Observation(), actionable("group fact could not be staged", err, c, "upsert", "later facts and cells were not attempted", "repair the group record and retry the full selection"))
-			} else if err := commit(ctx, *store); err != nil {
-				row = apply.NewActionRow(c, row.Operation(), apply.Failed(), row.Management(), row.Observation(), actionable("group fact could not be saved atomically", err, c, "registry-save", "the previous registry remains authoritative and later cells were not attempted", "repair registry persistence and retry the full selection"))
+		actions := facts.Actions()
+		if err := validateGroupFacts(refreshed, plan, step, executeErr, actions); err != nil {
+			cancelCleanup()
+			terminal = GroupTerminalFactInvalid
+			markGroupControlFailed(groups, plan, control, actionable("group facts were malformed", errors.Join(executeErr, err), control, "fact validation", "no malformed fact was persisted and later actions were not attempted", "return one coherent fact for every canonical group cell"))
+			break
+		}
+		for _, fact := range actions {
+			groups[fact.Row().Cell()] = fact
+		}
+		clone := cloneStore(*store)
+		for _, fact := range actions {
+			if record, ok := fact.Record(); ok {
+				_ = clone.Upsert(record) // validation above makes failure unreachable
 			}
 		}
-		groups[c] = GroupAction{Row: row, Record: action.Record}
-		if row.Status() == apply.Failed() {
-			failed = true
+		if saveErr := commit(cleanupCtx, clone); saveErr != nil {
+			cancelCleanup()
+			terminal = GroupTerminalSaveFailed
+			markGroupControlFailed(groups, plan, control, actionable("group facts could not be saved atomically", errors.Join(executeErr, saveErr), control, "registry-save", "the previous registry remains authoritative; confirmed live facts are reported and later actions were not attempted", "repair registry persistence and retry the full selection"))
+			break
+		}
+		cancelCleanup()
+		*store = clone
+		if executeErr != nil {
+			terminal = GroupTerminalExecuteFailed
+			markGroupControlFailed(groups, plan, control, actionable("group action failed", executeErr, control, step.Operation().String(), "the complete inspected live facts were retained and later actions were not attempted", "repair the native action and retry the full selection"))
+			break
 		}
 	}
 	return groups
 }
 
-func validateGroupAction(step GroupStep, action GroupAction) error {
-	row := action.Row
-	if row.Cell() != step.Cell() || row.Operation() != step.Operation() || !row.Status().IsValid() || !row.Management().IsValid() || !row.Observation().IsValid() {
-		return fmt.Errorf("group inspection returned invalid typed fields for %s", step.Cell())
+func validateGroupFacts(base GroupSelection, plan GroupPlan, step GroupStep, executeErr error, actions []GroupAction) error {
+	if len(actions) != 3 {
+		return fmt.Errorf("group inspection returned %d facts instead of three", len(actions))
 	}
-	if action.Record != nil && (!action.Record.IsValid() || action.Record.Key() != step.Key() || action.Record.Cell() != step.Cell()) {
-		return fmt.Errorf("group inspection returned a record for a different scoped key than %s", step.Cell())
+	results := plan.ResultCells()
+	for i, result := range results {
+		action := actions[i]
+		row := action.Row()
+		if err := validateGroupActionInvariant(row, action.record); err != nil {
+			return fmt.Errorf("group fact %d is not constructor-valid: %w", i, err)
+		}
+		isControl := row.Cell() == step.ControlCell()
+		wantFailed := isControl && executeErr != nil
+		if row.Cell() != result.Cell() || row.Operation() != result.Operation() || !row.Status().IsValid() || row.Status() == apply.Unattempted() || row.Status() == apply.NoOp() || row.Status() == apply.ManagedDeclaratively() || (row.Status() == apply.Failed()) != wantFailed || row.Management() == apply.ManagementUnknown || row.Management() == apply.ManagementDeclarative || !row.Observation().IsValid() {
+			return fmt.Errorf("group fact %d does not provide a settled canonical row for %s", i, result.Cell())
+		}
+		record, hasRecord := action.Record()
+		if row.Management() == apply.ManagementPasture && !hasRecord {
+			return fmt.Errorf("group fact %d claims Pasture management without a confirmed record", i)
+		}
+		binding, ok := base.Activation[result.Cell()]
+		if !ok || !binding.IsValid() {
+			return fmt.Errorf("group fact %d has no valid activation binding for %s", i, result.Cell())
+		}
+		pendingStrategy := binding.Strategy().Kind() == activation.NativePluginPendingTrustKindValue()
+		_, hadPrior := base.Prior[result.Cell()]
+		if !hasRecord {
+			if row.Observation() == registry.ObservationInstalled || row.Status() == apply.InstalledPendingTrust() || pendingStrategy && row.Observation() == registry.ObservationInstalled || hadPrior {
+				return fmt.Errorf("group fact %d omits authority for %s despite pending-trust or committed prior state", i, result.Cell())
+			}
+			continue
+		}
+		if record.Key() != result.Key() || record.Cell() != result.Cell() || record.Source() != sourceRegistry(base.Source) || record.Strategy() != binding.Strategy().Kind() || record.Observation() != row.Observation() || record.Managed() != (row.Management() == apply.ManagementPasture) {
+			return fmt.Errorf("group fact %d record contradicts its selection, activation, key, source, management, or observation", i)
+		}
+		wantOperation := registry.OperationInspect
+		wantOutcome := registry.OutcomeCompleted
+		if isControl {
+			wantOperation = registryOperation(step.Operation())
+			if executeErr != nil {
+				wantOutcome = registry.OutcomeFailed
+			}
+		}
+		if record.LastOperation() != wantOperation || record.LastOutcome() != wantOutcome {
+			return fmt.Errorf("group fact %d record operation/outcome contradicts action %s and its execution result", i, step.Operation())
+		}
+		pendingStatus := row.Status() == apply.InstalledPendingTrust()
+		installedPending := pendingStrategy && row.Observation() == registry.ObservationInstalled
+		failedPending := pendingStrategy && wantFailed && row.Status() == apply.Failed() && row.Observation() == registry.ObservationInstalled
+		if record.Trust() == registry.TrustTrusted || pendingStatus != (installedPending && !wantFailed) {
+			return fmt.Errorf("group fact %d status and trust contradict the activation strategy or live observation", i)
+		}
+		if (installedPending || failedPending) && record.Trust() != registry.TrustPending {
+			return fmt.Errorf("group fact %d installed pending-trust strategy lacks TrustPending", i)
+		}
+		if !installedPending && !failedPending && record.Trust() != registry.TrustNotApplicable {
+			return fmt.Errorf("group fact %d trust is invalid for its settled status", i)
+		}
+	}
+	return nil
+}
+
+func registryOperation(operation apply.Operation) registry.Operation {
+	switch operation {
+	case apply.Ensure():
+		return registry.OperationEnsure
+	case apply.RemoveOp():
+		return registry.OperationRemove
+	default:
+		return registry.OperationInspect
+	}
+}
+
+func markGroupControlFailed(groups map[cell.Cell]GroupAction, plan GroupPlan, control cell.Cell, diagnostic string) {
+	result := plan.ResultCells()[0]
+	for _, candidate := range plan.ResultCells() {
+		if candidate.Cell() == control {
+			result = candidate
+			break
+		}
+	}
+	prior := groups[control]
+	priorRow := prior.Row()
+	if priorRow.Diagnostic() != "" && priorRow.Diagnostic() != diagnostic {
+		diagnostic = priorRow.Diagnostic() + "; " + diagnostic
+	}
+	var record *registry.Record
+	if value, ok := prior.Record(); ok {
+		record = &value
+	}
+	action, _ := NewGroupAction(apply.NewActionRow(control, result.Operation(), apply.Failed(), priorRow.Management(), priorRow.Observation(), diagnostic), record)
+	groups[control] = action
+}
+
+func refreshedGroupSelection(base GroupSelection, store registry.Store) GroupSelection {
+	base.Prior = scopedPrior(base.Scope, base.Harness(), store)
+	return base
+}
+
+func (s GroupSelection) Harness() ir.HarnessID {
+	for _, c := range cell.CanonicalCells() {
+		if _, ok := s.Activation[c]; ok {
+			return c.Harness()
+		}
+	}
+	return ""
+}
+
+func cloneStore(store registry.Store) registry.Store {
+	clone := registry.New()
+	for _, record := range store.Ordered() {
+		_ = clone.Upsert(record)
+	}
+	return clone
+}
+
+func recordPointer(store registry.Store, key registry.Key) *registry.Record {
+	record, ok := store.Lookup(key)
+	if !ok {
+		return nil
+	}
+	return &record
+}
+
+func closeGroupPlan(ctx context.Context, reconciler GroupReconciler, selection GroupSelection, plan GroupPlan, stage GroupTerminalStage) error {
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), groupCleanupTimeout)
+	defer cancel()
+	if err := reconciler.ClosePlan(cleanup, selection, plan, stage); err != nil {
+		return fmt.Errorf("group plan close failed: %w; where: internal/install/service.closeGroupPlan; when: terminal stage %d; impact: reconciliation finalization is unconfirmed; fix: repair ClosePlan and retry the full selection", err, stage)
 	}
 	return nil
 }
 
 func groupFailed(groups map[cell.Cell]GroupAction) bool {
 	for _, c := range cell.CanonicalCells() {
-		if action, ok := groups[c]; ok && action.Row.Status() == apply.Failed() {
+		if action, ok := groups[c]; ok && action.Row().Status() == apply.Failed() {
 			return true
 		}
 	}
@@ -432,7 +578,7 @@ func mergeGroupResult(source apply.Source, scope registry.Scope, ordinary apply.
 		if !ok {
 			continue
 		}
-		row := action.Row
+		row := action.Row()
 		rows[c] = row
 	}
 	ordered := make([]apply.ActionRow, 0, len(rows))
@@ -455,7 +601,7 @@ func assembleResult(source apply.Source, scope registry.Scope, plan []planned, p
 	}
 	for _, c := range cell.CanonicalCells() {
 		if action, ok := groups[c]; ok {
-			rows[c] = action.Row
+			rows[c] = action.Row()
 		}
 	}
 	ordered := make([]apply.ActionRow, 0, len(rows))

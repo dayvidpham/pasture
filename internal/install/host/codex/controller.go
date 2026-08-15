@@ -2,76 +2,63 @@ package codex
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/dayvidpham/pasture/artifact"
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/install/activation"
 	"github.com/dayvidpham/pasture/internal/install/apply"
+	"github.com/dayvidpham/pasture/internal/install/cell"
 	"github.com/dayvidpham/pasture/internal/install/registry"
+	targetcodex "github.com/dayvidpham/pasture/internal/target/codex"
 )
 
 const pendingTrustDiagnostic = "Codex hook artifacts are installed but execution is not claimed: review and approve them through Codex's native hooks interface; Pasture does not read or modify private trust state"
 
-// Controller exposes Codex-specific validation and factual trust policy only.
-// It intentionally does not implement apply.Activator or claim the strategy-wide
-// DirectFile slot. Frontend composition registers one generic
-// apply.DirectFileActivator centrally and applies this policy around Codex cells.
-type Controller struct{}
-
-func NewController() Controller { return Controller{} }
-
-// Validate checks the Codex scope contract before the generic activator runs.
-func (Controller) Validate(key registry.Key, act activation.ComponentActivation) error {
-	return validateRequest(key, act)
-}
-
-// Decorate adds Codex's observable pending-trust fact after generic filesystem
-// execution. It never reads or writes private host trust state.
-func (c Controller) Decorate(key registry.Key, out apply.Outcome, actionErr error) (apply.Outcome, error) {
-	return c.decorate(key, out, actionErr)
-}
-
-func validateRequest(key registry.Key, act activation.ComponentActivation) error {
-	if key.Cell() != act.Cell() {
-		return fmt.Errorf("direct-file request rejected before mutation: registry key cell %s does not match activation cell %s; rebuild the scoped request from the same typed cell", key.Cell(), act.Cell())
+// NewDirectFilePolicies constructs exactly one policy for each global Codex
+// cell. The returned array is intended for the one central DirectFile activator;
+// this package never owns a filesystem activator.
+func NewDirectFilePolicies(target targetcodex.TargetDescriptor, home string) ([3]apply.DirectFilePolicy, error) {
+	var policies [3]apply.DirectFilePolicy
+	if !target.IsValid() || target.Harness() != ir.HarnessCodex {
+		return policies, fmt.Errorf("Codex direct-file policy construction rejected an invalid target before filesystem access; rebuild the embedded Codex descriptor and retry")
 	}
-	if act.Cell().Harness() != artifact.HarnessCodex {
-		return fmt.Errorf("Codex controller rejected non-Codex cell %s before mutation; dispatch this cell through its owning harness controller", act.Cell())
+	if home == "" || !filepath.IsAbs(home) || filepath.Clean(home) != home {
+		return policies, fmt.Errorf("Codex direct-file policy construction requires one canonical absolute global home, got %q; resolve and clean the user home before composing the installer", home)
 	}
-	if act.Cell().Harness() == artifact.HarnessCodex && key.Scope() != registry.ScopeGlobal {
-		return fmt.Errorf("Codex global controller rejected project-scoped key for %s before mutation: project installation has a separate controller; use registry.GlobalKey for this global activation", act.Cell())
+	components := target.Components()
+	if len(components) != len(policies) {
+		return policies, fmt.Errorf("Codex direct-file policy construction found %d target components, expected exactly three; regenerate the complete descriptor", len(components))
 	}
-	direct, ok := act.Strategy().(activation.DirectFile)
-	if !ok || !direct.IsValid() {
-		return fmt.Errorf("Codex policy rejected %s before mutation: activation does not contain a valid immutable direct-file strategy; bind the target with codex.NewActivationContract", act.Cell())
-	}
-	return nil
-}
-
-func (c Controller) decorate(key registry.Key, out apply.Outcome, actionErr error) (apply.Outcome, error) {
-	if key.Cell().Harness() != artifact.HarnessCodex || key.Cell().Extension() != artifact.ExtensionHooks || out.Record == nil {
-		return out, actionErr
-	}
-	record := *out.Record
-	trust := registry.TrustNotApplicable
-	diagnostic := record.Diagnostic()
-	if record.Observation() == registry.ObservationInstalled {
-		trust = registry.TrustPending
-		out.Status = apply.InstalledPendingTrust()
-		if diagnostic == "" {
-			diagnostic = pendingTrustDiagnostic
-		} else {
-			diagnostic += "; " + pendingTrustDiagnostic
+	for index, component := range components {
+		if err := targetcodex.ValidateComponentLayout(component); err != nil {
+			return policies, fmt.Errorf("validate immutable Codex %s policy layout: %w", component.Extension(), err)
 		}
-		out.Diagnostic = diagnostic
+		coordinate, err := cell.New(artifact.HarnessCodex, component.Extension())
+		if err != nil {
+			return policies, err
+		}
+		validate := exactGlobalValidator(coordinate, component.Bundle().ID(), home)
+		if component.Extension() == artifact.ExtensionHooks {
+			policies[index], err = apply.PendingNativeTrustDirectFile(coordinate, validate, pendingTrustDiagnostic)
+		} else {
+			policies[index], err = apply.NewDirectFilePolicy(coordinate, validate, apply.PassThroughDecoration())
+		}
+		if err != nil {
+			return [3]apply.DirectFilePolicy{}, fmt.Errorf("construct Codex %s direct-file policy: %w", component.Extension(), err)
+		}
 	}
-	updated, err := registry.NewRecord(registry.RecordInput{
-		Key: key, Source: record.Source(), Strategy: record.Strategy(), Managed: record.Managed(), ArtifactID: record.ArtifactID(),
-		Version: record.Version(), Selector: record.Selector(), Leaves: record.Leaves(), CreatedDirs: record.CreatedDirs(), SharedConfig: record.SharedConfig(),
-		Observation: record.Observation(), Trust: trust, LastOperation: record.LastOperation(), LastOutcome: record.LastOutcome(), Diagnostic: diagnostic,
-	})
-	if err != nil {
-		return apply.Outcome{Status: apply.Failed(), Observation: out.Observation}, fmt.Errorf("Codex hook trust fact could not be constructed after filesystem inspection: %w; hook activation is not claimed and the caller must inspect status before retrying", err)
+	return policies, nil
+}
+
+func exactGlobalValidator(expected cell.Cell, bundle artifact.BundleID, destination string) apply.DirectFileValidator {
+	return func(request apply.DirectFileRequest) error {
+		if request.Cell() != expected || request.Key().Cell() != expected || request.Key().Scope() != registry.ScopeGlobal {
+			return fmt.Errorf("Codex global policy rejected key %s for activation cell %s before mutation; use the exact global key for %s", request.Key().Cell(), request.Cell(), expected)
+		}
+		if request.StrategyKind() != activation.DirectFileKindValue() || request.ArtifactID() != bundle || request.DestinationRoot() != destination {
+			return fmt.Errorf("Codex global policy rejected %s before mutation because its strategy, immutable bundle, or destination differs from the reviewed contract; rebuild the activation and policy from the same descriptor and home", expected)
+		}
+		return nil
 	}
-	out.Record = &updated
-	return out, actionErr
 }

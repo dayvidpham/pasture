@@ -19,11 +19,9 @@ const ActivationContractID = "codex/global@0.146.0"
 var installerVersions = mustInstallerVersions()
 
 func mustInstallerVersions() runtime.VersionConstraint {
-	// The global installer accepts the reviewed Codex activation interval from
-	// the documented 0.144.1 host contract through the repository's pinned 0.146.0
-	// target. This range does not widen the generated RuntimeContractID: emitted
-	// artifacts remain exactly codex/codex@0.146.0.
-	min, err := runtime.ParseHostVersion("0.144.1")
+	// Generated runner evidence is hard-coded for 0.146.0, so activation remains
+	// an exact point contract until detected host-version propagation is proved.
+	min, err := runtime.ParseHostVersion("0.146.0")
 	if err != nil {
 		panic(err)
 	}

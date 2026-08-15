@@ -33,11 +33,46 @@ type snapshotFile struct {
 // bundle. Default enablement is descriptive; hooks are always default-off.
 type Component struct {
 	id             artifact.ComponentID
-	packageID      codegen.CodexComponentID
+	packageID      PackageID
 	bundle         artifact.Bundle
 	layout         ComponentLayout
 	defaultEnabled bool
 	valid          bool
+}
+
+// PackageID is the closed Codex package identity paired with its installer
+// extension. The zero value and cross-extension package names are invalid.
+type PackageID struct {
+	extension artifact.Extension
+	value     codegen.CodexComponentID
+}
+
+func canonicalPackageName(extension artifact.Extension) (string, bool) {
+	switch extension {
+	case artifact.ExtensionSkills:
+		return "pasture-codex-skills", true
+	case artifact.ExtensionAgents:
+		return "pasture-codex-agents", true
+	case artifact.ExtensionHooks:
+		return "pasture-codex-hooks", true
+	default:
+		return "", false
+	}
+}
+
+func NewPackageID(extension artifact.Extension, value codegen.CodexComponentID) (PackageID, error) {
+	want, ok := canonicalPackageName(extension)
+	if !ok || value.String() == "" || value.String() != want {
+		return PackageID{}, fmt.Errorf("Codex package identity %q does not match extension %q; use the canonical generated package identity for skills, agents, or hooks", value.String(), extension)
+	}
+	return PackageID{extension: extension, value: value}, nil
+}
+
+func (p PackageID) String() string                { return p.value.String() }
+func (p PackageID) Extension() artifact.Extension { return p.extension }
+func (p PackageID) IsValid() bool {
+	want, ok := canonicalPackageName(p.extension)
+	return ok && p.value.String() != "" && p.value.String() == want
 }
 
 // ComponentLayout is the closed installation layout for one typed Codex
@@ -68,7 +103,7 @@ var componentLayouts = map[artifact.Extension]ComponentLayout{
 
 // NewComponent constructs one canonical Codex component. Hooks cannot be
 // default-enabled; that policy is statically enforced rather than left to a UI.
-func NewComponent(extension artifact.Extension, bundle artifact.Bundle, defaultEnabled bool) (Component, error) {
+func NewComponent(extension artifact.Extension, packageID PackageID, bundle artifact.Bundle, defaultEnabled bool) (Component, error) {
 	id, err := artifact.NewComponentID(artifact.HarnessCodex, extension)
 	if err != nil {
 		return Component{}, fmt.Errorf("construct canonical Codex %s identity: %w", extension, err)
@@ -76,11 +111,14 @@ func NewComponent(extension artifact.Extension, bundle artifact.Bundle, defaultE
 	if !id.IsValid() || id.Harness() != artifact.HarnessCodex {
 		return Component{}, fmt.Errorf("codex target component construction failed: identity %q is not a canonical Codex component; use artifact.NewComponentID with artifact.HarnessCodex and one supported extension", id)
 	}
+	if !packageID.IsValid() || packageID.Extension() != extension {
+		return Component{}, fmt.Errorf("Codex %s component requires its nonzero extension-matching package identity; construct the package identity from the canonical generated Codex package", extension)
+	}
 	layout, ok := componentLayouts[extension]
 	if !ok {
 		return Component{}, fmt.Errorf("codex target component %q has no approved immutable layout; use skills, agents, or hooks and regenerate the target", id)
 	}
-	component := Component{id: id, bundle: bundle, layout: layout, defaultEnabled: defaultEnabled, valid: true}
+	component := Component{id: id, packageID: packageID, bundle: bundle, layout: layout, defaultEnabled: defaultEnabled, valid: true}
 	if err := ValidateComponentLayout(component); err != nil {
 		return Component{}, err
 	}
@@ -90,13 +128,13 @@ func NewComponent(extension artifact.Extension, bundle artifact.Bundle, defaultE
 	return component, nil
 }
 
-func (c Component) ID() artifact.ComponentID            { return c.id }
-func (c Component) PackageID() codegen.CodexComponentID { return c.packageID }
-func (c Component) Extension() artifact.Extension       { return c.id.Extension() }
-func (c Component) Bundle() artifact.Bundle             { return c.bundle }
-func (c Component) Layout() ComponentLayout             { return c.layout }
-func (c Component) DefaultEnabled() bool                { return c.defaultEnabled }
-func (c Component) IsValid() bool                       { return c.valid }
+func (c Component) ID() artifact.ComponentID      { return c.id }
+func (c Component) PackageID() PackageID          { return c.packageID }
+func (c Component) Extension() artifact.Extension { return c.id.Extension() }
+func (c Component) Bundle() artifact.Bundle       { return c.bundle }
+func (c Component) Layout() ComponentLayout       { return c.layout }
+func (c Component) DefaultEnabled() bool          { return c.defaultEnabled }
+func (c Component) IsValid() bool                 { return c.valid }
 
 // TargetDescriptor exposes exactly skills, agents, and hooks in canonical
 // order. It contains no destination, mutable install state, or trust approval.
@@ -114,7 +152,7 @@ func NewTargetDescriptor(skills, agents, hooks Component) (TargetDescriptor, err
 	want := []artifact.Extension{artifact.ExtensionSkills, artifact.ExtensionAgents, artifact.ExtensionHooks}
 	provided := []Component{skills, agents, hooks}
 	for index, component := range provided {
-		if !component.IsValid() || component.Extension() != want[index] {
+		if !component.IsValid() || component.Extension() != want[index] || !component.PackageID().IsValid() || component.PackageID().Extension() != want[index] {
 			return TargetDescriptor{}, fmt.Errorf("Codex target descriptor slot %s contains an invalid or mismatched component; pass exactly skills, agents, and hooks in canonical order", want[index])
 		}
 	}
@@ -179,11 +217,14 @@ func Descriptor() (TargetDescriptor, error) {
 				return TargetDescriptor{}, err
 			}
 		}
-		component, err := NewComponent(extension, bundle, extension != artifact.ExtensionHooks)
+		packageID, err := NewPackageID(extension, pkg.ID())
 		if err != nil {
 			return TargetDescriptor{}, err
 		}
-		component.packageID = pkg.ID()
+		component, err := NewComponent(extension, packageID, bundle, extension != artifact.ExtensionHooks)
+		if err != nil {
+			return TargetDescriptor{}, err
+		}
 		if _, duplicate := byExtension[extension]; duplicate {
 			return TargetDescriptor{}, fmt.Errorf("embedded Codex target contains duplicate %s package; regenerate a target with exactly one package per extension", extension)
 		}

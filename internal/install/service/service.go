@@ -76,7 +76,7 @@ type Service struct {
 }
 
 func New(config Config) (*Service, error) {
-	if config.Registry == nil {
+	if config.Registry == nil || isNilInterface(config.Registry) {
 		return nil, cell.NewFault("installer service construction", "registry persistence", "the registry dependency is nil", "internal/install/service.New", "wiring the installer application service", "confirmed facts could not be loaded or saved", "provide FileRegistry or an atomic Registry implementation", nil)
 	}
 	engine, err := newEngine(config.Activators, config.Group)
@@ -87,7 +87,43 @@ func New(config Config) (*Service, error) {
 	for key, contract := range config.Contracts {
 		contracts[key] = contract
 	}
+	if err := validateDirectFilePolicies(contracts, engine); err != nil {
+		return nil, err
+	}
 	return &Service{registry: config.Registry, contracts: contracts, engine: engine}, nil
+}
+
+func validateDirectFilePolicies(contracts map[ir.HarnessID]activation.ActivationContract, engine *engine) error {
+	bindings := make([]activation.ComponentActivation, 0, len(cell.CanonicalCells()))
+	for _, c := range cell.CanonicalCells() {
+		contract, ok := contracts[c.Harness()]
+		if !ok || !contract.IsValid() || contract.Harness() != c.Harness() {
+			continue
+		}
+		descriptor, err := activation.NewComponentDescriptor(c)
+		if err != nil {
+			return err
+		}
+		binding, err := activation.LookupComponentActivation(contract, descriptor)
+		if err != nil {
+			return err
+		}
+		if binding.Strategy().Kind() == activation.DirectFileKindValue() {
+			bindings = append(bindings, binding)
+		}
+	}
+	activator, exists := engine.activators[activation.DirectFileKindValue()]
+	if len(bindings) == 0 {
+		if exists {
+			return cell.NewFault("installer service construction", "no DirectFile activator without DirectFile bindings", "a DirectFile activator was registered but no cell uses that strategy", "internal/install/service.validateDirectFilePolicies", "validating strategy dispatch", "foreign policy configuration would be silently retained", "remove the unused DirectFile activator", nil)
+		}
+		return nil
+	}
+	direct, ok := activator.(*apply.DirectFileActivator)
+	if !exists || !ok {
+		return cell.NewFault("installer service construction", "the central DirectFile activator", "DirectFile bindings are not served by *apply.DirectFileActivator", "internal/install/service.validateDirectFilePolicies", "validating strategy dispatch", "cell policies could be bypassed by another activator", "register exactly one activator returned by apply.NewDirectFileActivator", nil)
+	}
+	return direct.ValidateBindings(bindings)
 }
 
 type SelectionRequest struct {
@@ -105,6 +141,9 @@ type CellRequest struct {
 // ApplySelection and ApplyCell deliberately share load, canonical binding,
 // execution, and per-fact atomic persistence.
 func (s *Service) ApplySelection(ctx context.Context, request SelectionRequest) (apply.Result, error) {
+	if s == nil {
+		return apply.Result{}, preplan(request.Source, "service receiver validation", "the installer service receiver is nil", "internal/install/service.Service.ApplySelection", "no registry was loaded and no action was attempted", "construct the service with service.New before applying a selection", apply.RemediationManualRepair)
+	}
 	store, err := s.load(ctx, request.Source)
 	if err != nil {
 		return apply.Result{}, err
@@ -112,6 +151,9 @@ func (s *Service) ApplySelection(ctx context.Context, request SelectionRequest) 
 	return s.engine.applySelection(ctx, request.Selection, request.Scope, request.Source, s.contracts, &store, s.registry.Save)
 }
 func (s *Service) ApplyCell(ctx context.Context, request CellRequest) (apply.Result, error) {
+	if s == nil {
+		return apply.Result{}, preplan(request.Source, "service receiver validation", "the installer service receiver is nil", "internal/install/service.Service.ApplyCell", "no registry was loaded and no action was attempted", "construct the service with service.New before applying a cell", apply.RemediationManualRepair)
+	}
 	store, err := s.load(ctx, request.Source)
 	if err != nil {
 		return apply.Result{}, err
