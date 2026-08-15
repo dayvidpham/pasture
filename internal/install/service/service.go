@@ -87,7 +87,43 @@ func New(config Config) (*Service, error) {
 	for key, contract := range config.Contracts {
 		contracts[key] = contract
 	}
+	if err := validateDirectFilePolicies(contracts, engine); err != nil {
+		return nil, err
+	}
 	return &Service{registry: config.Registry, contracts: contracts, engine: engine}, nil
+}
+
+func validateDirectFilePolicies(contracts map[ir.HarnessID]activation.ActivationContract, engine *engine) error {
+	bindings := make([]activation.ComponentActivation, 0, len(cell.CanonicalCells()))
+	for _, c := range cell.CanonicalCells() {
+		contract, ok := contracts[c.Harness()]
+		if !ok || !contract.IsValid() || contract.Harness() != c.Harness() {
+			continue
+		}
+		descriptor, err := activation.NewComponentDescriptor(c)
+		if err != nil {
+			return err
+		}
+		binding, err := activation.LookupComponentActivation(contract, descriptor)
+		if err != nil {
+			return err
+		}
+		if binding.Strategy().Kind() == activation.DirectFileKindValue() {
+			bindings = append(bindings, binding)
+		}
+	}
+	activator, exists := engine.activators[activation.DirectFileKindValue()]
+	if len(bindings) == 0 {
+		if exists {
+			return cell.NewFault("installer service construction", "no DirectFile activator without DirectFile bindings", "a DirectFile activator was registered but no cell uses that strategy", "internal/install/service.validateDirectFilePolicies", "validating strategy dispatch", "foreign policy configuration would be silently retained", "remove the unused DirectFile activator", nil)
+		}
+		return nil
+	}
+	direct, ok := activator.(*apply.DirectFileActivator)
+	if !exists || !ok {
+		return cell.NewFault("installer service construction", "the central DirectFile activator", "DirectFile bindings are not served by *apply.DirectFileActivator", "internal/install/service.validateDirectFilePolicies", "validating strategy dispatch", "cell policies could be bypassed by another activator", "register exactly one activator returned by apply.NewDirectFileActivator", nil)
+	}
+	return direct.ValidateBindings(bindings)
 }
 
 type SelectionRequest struct {

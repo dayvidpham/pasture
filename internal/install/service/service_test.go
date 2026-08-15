@@ -101,13 +101,39 @@ func newServiceConfig(t *testing.T, root, state string, config service.Config) *
 		config.Contracts = contracts(t, root)
 	}
 	if config.Activators == nil {
-		config.Activators = []apply.Activator{apply.NewDirectFileActivator()}
+		config.Activators = []apply.Activator{directFileActivator(t, config.Contracts)}
 	}
 	svc, err := service.New(config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return svc
+}
+
+func directFileActivator(t *testing.T, contracts map[ir.HarnessID]activation.ActivationContract) *apply.DirectFileActivator {
+	t.Helper()
+	policies := make([]apply.DirectFilePolicy, 0, 9)
+	for _, c := range cell.CanonicalCells() {
+		contract, ok := contracts[c.Harness()]
+		if !ok {
+			continue
+		}
+		descriptor, _ := activation.NewComponentDescriptor(c)
+		binding, err := activation.LookupComponentActivation(contract, descriptor)
+		if err != nil || binding.Strategy().Kind() != activation.DirectFileKindValue() {
+			continue
+		}
+		policy, err := apply.PassThroughDirectFile(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		policies = append(policies, policy)
+	}
+	activator, err := apply.NewDirectFileActivator(policies...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return activator
 }
 
 func all(t *testing.T, enabled func(cell.Cell) bool) selection.Selection {
@@ -126,6 +152,43 @@ func all(t *testing.T, enabled func(cell.Cell) bool) selection.Selection {
 func newService(t *testing.T, root, state string) *service.Service {
 	t.Helper()
 	return newServiceConfig(t, root, state, service.Config{})
+}
+
+func TestServiceConstructionRequiresExactDirectFilePoliciesAndOneActivator(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	root := filepath.Join(base, "targets")
+	state := filepath.Join(base, "state", "installations.yaml")
+	repo, _ := service.NewFileRegistry(state)
+	contractSet := contracts(t, root)
+	policies := make([]apply.DirectFilePolicy, 0, 9)
+	for _, c := range cell.CanonicalCells() {
+		policy, _ := apply.PassThroughDirectFile(c)
+		policies = append(policies, policy)
+	}
+	missing, _ := apply.NewDirectFileActivator(policies[:8]...)
+	if _, err := service.New(service.Config{Registry: repo, Contracts: contractSet, Activators: []apply.Activator{missing}}); err == nil {
+		t.Fatal("service accepted missing DirectFile policy")
+	}
+	complete, _ := apply.NewDirectFileActivator(policies...)
+	if _, err := service.New(service.Config{Registry: repo, Contracts: contractSet, Activators: []apply.Activator{complete, complete}}); err == nil {
+		t.Fatal("service accepted duplicate strategy activators")
+	}
+	nativeCell, _ := cell.New(artifact.HarnessCodex, cell.HooksAxis())
+	mixed := contractsWith(t, root, func(c cell.Cell) activation.ActivationStrategy {
+		if c == nativeCell {
+			return nativeStrategy(t, c)
+		}
+		rel := filepath.ToSlash(filepath.Join(string(c.Harness()), c.Extension().String(), "component.txt"))
+		direct, err := activation.NewDirectFile(bundle(t, rel, c.String()+"\n"), root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return direct
+	})
+	if _, err := service.New(service.Config{Registry: repo, Contracts: mixed, Activators: []apply.Activator{complete, &nativeSpy{}}}); err == nil {
+		t.Fatal("service accepted a policy for a non-DirectFile cell")
+	}
 }
 
 func TestServiceApplySelectionPersistsCanonicalFacts(t *testing.T) {
@@ -1016,10 +1079,13 @@ type sequentialGroup struct {
 	mu       sync.Mutex
 	executed []cell.Cell
 	wrongKey bool
+	closed   int
+	stage    service.GroupTerminalStage
 }
 
 func (*sequentialGroup) Harness() ir.HarnessID { return artifact.HarnessClaudeCode }
 func (g *sequentialGroup) PlanSelection(_ context.Context, request service.GroupSelection) (service.GroupPlan, error) {
+	results := make([]service.GroupResultCell, 0, 3)
 	steps := make([]service.GroupStep, 0, 3)
 	for _, extension := range cell.CanonicalExtensions() {
 		c, _ := cell.New(artifact.HarnessClaudeCode, extension)
@@ -1027,22 +1093,43 @@ func (g *sequentialGroup) PlanSelection(_ context.Context, request service.Group
 		if g.wrongKey {
 			key, _ = registry.GlobalKey(c)
 		}
-		steps = append(steps, service.NewGroupStep(c, key, apply.Inspect()))
+		result, err := service.NewGroupResultCell(c, key, apply.Inspect())
+		if err != nil {
+			return service.GroupPlan{}, err
+		}
+		step, err := service.NewGroupStep(service.InspectGroupAction(), c)
+		if err != nil {
+			return service.GroupPlan{}, err
+		}
+		results = append(results, result)
+		steps = append(steps, step)
 	}
-	return service.GroupPlan{Handled: true, Steps: steps}, nil
+	return service.NewGroupPlan(results, steps)
 }
-func (g *sequentialGroup) Execute(_ context.Context, step service.GroupStep) error {
+func (g *sequentialGroup) ExecuteAction(_ context.Context, _ service.GroupSelection, _ service.GroupPlan, step service.GroupStep) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.executed = append(g.executed, step.Cell())
+	g.executed = append(g.executed, step.ControlCell())
 	return nil
 }
-func (*sequentialGroup) Inspect(_ context.Context, step service.GroupStep) (service.GroupAction, error) {
-	record, err := registry.NewRecord(registry.RecordInput{Key: step.Key(), Source: registry.SourceInstaller, Strategy: activation.NativePluginKindValue(), Managed: true, Observation: registry.ObservationAbsent, Trust: registry.TrustNotApplicable, LastOperation: registry.OperationInspect, LastOutcome: registry.OutcomeCompleted})
-	if err != nil {
-		return service.GroupAction{}, err
+func (*sequentialGroup) InspectAction(_ context.Context, _ service.GroupSelection, plan service.GroupPlan, _ service.GroupStep, _ error) (service.GroupFacts, error) {
+	actions := make([]service.GroupAction, 0, 3)
+	for _, result := range plan.ResultCells() {
+		record, err := registry.NewRecord(registry.RecordInput{Key: result.Key(), Source: registry.SourceInstaller, Strategy: activation.NativePluginKindValue(), Managed: true, Observation: registry.ObservationAbsent, Trust: registry.TrustNotApplicable, LastOperation: registry.OperationInspect, LastOutcome: registry.OutcomeCompleted})
+		if err != nil {
+			return service.GroupFacts{}, err
+		}
+		actions = append(actions, service.GroupAction{Row: apply.NewActionRow(result.Cell(), result.Operation(), apply.Completed(), apply.ManagementPasture, registry.ObservationAbsent, "confirmed after group action"), Record: &record})
 	}
-	return service.GroupAction{Row: apply.NewActionRow(step.Cell(), step.Operation(), apply.Completed(), apply.ManagementPasture, registry.ObservationAbsent, "confirmed after group action"), Record: &record}, nil
+	return service.NewGroupFacts(actions...)
+}
+
+func (g *sequentialGroup) ClosePlan(_ context.Context, _ service.GroupSelection, _ service.GroupPlan, stage service.GroupTerminalStage) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.closed++
+	g.stage = stage
+	return nil
 }
 func (*sequentialGroup) PreflightCell(context.Context, service.GroupCell) error { return nil }
 func (g *sequentialGroup) calls() []cell.Cell {
@@ -1050,21 +1137,45 @@ func (g *sequentialGroup) calls() []cell.Cell {
 	defer g.mu.Unlock()
 	return append([]cell.Cell(nil), g.executed...)
 }
+func (g *sequentialGroup) closure() (int, service.GroupTerminalStage) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.closed, g.stage
+}
 
 func (g *probeGroup) Harness() ir.HarnessID { return artifact.HarnessClaudeCode }
 func (g *probeGroup) PlanSelection(_ context.Context, request service.GroupSelection) (service.GroupPlan, error) {
 	g.selectionCalls.Add(1)
+	results := make([]service.GroupResultCell, 0, 3)
 	steps := make([]service.GroupStep, 0, 3)
 	for _, extension := range cell.CanonicalExtensions() {
 		c, _ := cell.New(artifact.HarnessClaudeCode, extension)
 		key, _ := request.Scope.Key(c)
-		steps = append(steps, service.NewGroupStep(c, key, apply.Inspect()))
+		result, err := service.NewGroupResultCell(c, key, apply.Inspect())
+		if err != nil {
+			return service.GroupPlan{}, err
+		}
+		step, err := service.NewGroupStep(service.InspectGroupAction(), c)
+		if err != nil {
+			return service.GroupPlan{}, err
+		}
+		results = append(results, result)
+		steps = append(steps, step)
 	}
-	return service.GroupPlan{Handled: true, Steps: steps}, nil
+	return service.NewGroupPlan(results, steps)
 }
-func (g *probeGroup) Execute(context.Context, service.GroupStep) error { return nil }
-func (g *probeGroup) Inspect(_ context.Context, step service.GroupStep) (service.GroupAction, error) {
-	return service.GroupAction{Row: apply.NewActionRow(step.Cell(), step.Operation(), apply.Completed(), apply.ManagementExternal, registry.ObservationAbsent, "legacy group probe found no managed state")}, nil
+func (g *probeGroup) ExecuteAction(context.Context, service.GroupSelection, service.GroupPlan, service.GroupStep) error {
+	return nil
+}
+func (g *probeGroup) InspectAction(_ context.Context, _ service.GroupSelection, plan service.GroupPlan, _ service.GroupStep, _ error) (service.GroupFacts, error) {
+	actions := make([]service.GroupAction, 0, 3)
+	for _, result := range plan.ResultCells() {
+		actions = append(actions, service.GroupAction{Row: apply.NewActionRow(result.Cell(), result.Operation(), apply.Completed(), apply.ManagementExternal, registry.ObservationAbsent, "legacy group probe found no managed state")})
+	}
+	return service.NewGroupFacts(actions...)
+}
+func (*probeGroup) ClosePlan(context.Context, service.GroupSelection, service.GroupPlan, service.GroupTerminalStage) error {
+	return nil
 }
 func (g *probeGroup) PreflightCell(_ context.Context, request service.GroupCell) error {
 	g.cellCalls.Add(1)
@@ -1118,8 +1229,11 @@ func TestServiceGroupExecutesInspectsAndPersistsOneActionBeforeAdvancing(t *test
 	if calls := group.calls(); len(calls) != 1 || calls[0] != result.Rows()[0].Cell() {
 		t.Fatalf("executed group actions=%v; later action ran ahead of failed persistence", calls)
 	}
-	if result.Rows()[0].Status() != apply.Failed() || result.Rows()[1].Status() != apply.Unattempted() || result.Rows()[2].Status() != apply.Unattempted() {
+	if result.Rows()[0].Status() != apply.Failed() || result.Rows()[1].Status() != apply.Completed() || result.Rows()[2].Status() != apply.Completed() {
 		t.Fatalf("statuses=%s/%s/%s", result.Rows()[0].Status(), result.Rows()[1].Status(), result.Rows()[2].Status())
+	}
+	if count, stage := group.closure(); count != 1 || stage != service.GroupTerminalSaveFailed {
+		t.Fatalf("close count=%d stage=%v", count, stage)
 	}
 }
 
@@ -1133,6 +1247,9 @@ func TestServiceRejectsGroupPlanWithWrongProjectKeyBeforeExecution(t *testing.T)
 	var applyErr *apply.ApplyError
 	if !errors.As(err, &applyErr) || len(group.calls()) != 0 || applyErr.Stage() != "pre-plan validation" {
 		t.Fatalf("error=%v calls=%v", err, group.calls())
+	}
+	if count, stage := group.closure(); count != 1 || stage != service.GroupTerminalPlanInvalid {
+		t.Fatalf("close count=%d stage=%v", count, stage)
 	}
 }
 
@@ -1244,7 +1361,7 @@ func TestServiceHomeManagerPreinspectsAllDeclarativeCellsBeforeNativeMutation(t 
 		}
 		return direct
 	})
-	svc := newServiceConfig(t, root, filepath.Join(base, "state", "installations.yaml"), service.Config{Contracts: contractSet, Activators: []apply.Activator{spy, apply.NewDirectFileActivator()}})
+	svc := newServiceConfig(t, root, filepath.Join(base, "state", "installations.yaml"), service.Config{Contracts: contractSet, Activators: []apply.Activator{spy, directFileActivator(t, contractSet)}})
 	before := snapshotTree(t, base)
 	result, err := svc.ApplySelection(context.Background(), service.SelectionRequest{Selection: all(t, func(cell.Cell) bool { return true }), Scope: apply.GlobalScope(), Source: apply.HomeManagerSource()})
 	if err != nil || result.OK() || spy.calls.Load() != 0 {
