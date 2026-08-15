@@ -118,16 +118,17 @@ func (p DirectFilePolicy) apply(request DirectFileRequest, generic Outcome, acti
 	if actionErr != nil {
 		decorated.Status = Failed()
 	}
-	if p.mode.kind == directFileDecorationPendingNativeTrust && decorated.Observation == registry.ObservationInstalled && request.operation != RemoveOp() {
+	if p.mode.kind == directFileDecorationPendingNativeTrust && decorated.Observation == registry.ObservationInstalled && (request.operation != RemoveOp() || actionErr != nil) {
 		if decorated.Record == nil {
 			return generic, directFileDecorationFault("pending trust without an installed record")
 		}
-		record, err := rewriteDirectFilePresentation(*decorated.Record, registry.TrustPending, p.mode.diagnostic)
+		recordDiagnostic := appendDiagnostic(decorated.Record.Diagnostic(), p.mode.diagnostic)
+		record, err := rewriteDirectFilePresentation(*decorated.Record, registry.TrustPending, recordDiagnostic)
 		if err != nil {
 			return generic, err
 		}
 		decorated.Record = &record
-		decorated.Diagnostic = p.mode.diagnostic
+		decorated.Diagnostic = appendDiagnostic(decorated.Diagnostic, p.mode.diagnostic)
 		if actionErr == nil {
 			decorated.Status = InstalledPendingTrust()
 		}
@@ -136,6 +137,16 @@ func (p DirectFilePolicy) apply(request DirectFileRequest, generic Outcome, acti
 		return generic, err
 	}
 	return decorated, nil
+}
+
+func appendDiagnostic(existing, guidance string) string {
+	if existing == "" {
+		return guidance
+	}
+	if guidance == "" || existing == guidance {
+		return existing
+	}
+	return existing + "; " + guidance
 }
 
 func validateDirectFileDecoration(request DirectFileRequest, before, after Outcome, actionErr error) error {

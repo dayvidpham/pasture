@@ -52,16 +52,34 @@ type GroupActionKind uint8
 const (
 	groupActionInvalid GroupActionKind = iota
 	groupActionInspect
+	groupActionEnsureCell
 	groupActionRemoveShared
 	groupActionRemoveCell
-	groupActionEnsureCell
 )
 
 func InspectGroupAction() GroupActionKind      { return groupActionInspect }
 func EnsureCellGroupAction() GroupActionKind   { return groupActionEnsureCell }
 func RemoveSharedGroupAction() GroupActionKind { return groupActionRemoveShared }
 func RemoveCellGroupAction() GroupActionKind   { return groupActionRemoveCell }
-func (k GroupActionKind) IsValid() bool        { return k >= groupActionInspect && k <= groupActionEnsureCell }
+func (k GroupActionKind) IsValid() bool {
+	_, ok := k.phaseRank()
+	return ok
+}
+
+func (k GroupActionKind) phaseRank() (uint8, bool) {
+	switch k {
+	case groupActionInspect:
+		return 1, true
+	case groupActionEnsureCell:
+		return 2, true
+	case groupActionRemoveShared:
+		return 3, true
+	case groupActionRemoveCell:
+		return 4, true
+	default:
+		return 0, false
+	}
+}
 func (k GroupActionKind) operation() apply.Operation {
 	if k == groupActionInspect {
 		return apply.Inspect()
@@ -128,9 +146,10 @@ func validateGroupShape(plan GroupPlan) error {
 		}
 	}
 	seen := map[GroupStep]struct{}{}
-	lastPhase := GroupActionKind(0)
+	var lastPhase uint8
 	for i, action := range plan.actions {
-		if !action.kind.IsValid() || !action.control.IsValid() {
+		phase, validKind := action.kind.phaseRank()
+		if !validKind || !action.control.IsValid() {
 			return fmt.Errorf("group plan construction failed: action %d is invalid; where: internal/install/service.NewGroupPlan; when: validating action %d; impact: execution cannot be ordered safely; fix: construct actions with NewGroupStep", i, i)
 		}
 		if action.control.Harness() != harness {
@@ -143,10 +162,10 @@ func validateGroupShape(plan GroupPlan) error {
 			return fmt.Errorf("group plan construction failed: action %d duplicates kind/control; where: internal/install/service.NewGroupPlan; when: validating bounded actions; impact: the same mutation could run twice; fix: remove the duplicate action", i)
 		}
 		seen[action] = struct{}{}
-		if action.kind < lastPhase {
-			return fmt.Errorf("group plan construction failed: action %d violates inspect, shared-remove, cell-remove, ensure phase order; where: internal/install/service.NewGroupPlan; when: validating execution order; impact: later-phase mutation could precede required inspection or removal; fix: reorder typed actions by phase", i)
+		if phase < lastPhase {
+			return fmt.Errorf("group plan construction failed: action %d violates inspect, ensure-selected, shared-remove, remove-unselected phase order; where: internal/install/service.NewGroupPlan; when: validating execution order; impact: a legacy removal or disabled-cell removal could precede required installation; fix: order typed actions as inspect, ensure selected cells, remove shared state, then remove unselected cells", i)
 		}
-		lastPhase = action.kind
+		lastPhase = phase
 	}
 	return nil
 }
@@ -157,18 +176,33 @@ type GroupAction struct {
 }
 
 func NewGroupAction(row apply.ActionRow, record *registry.Record) (GroupAction, error) {
-	if !row.Cell().IsValid() || !row.Operation().IsValid() || !row.Status().IsValid() || !row.Management().IsValid() || !row.Observation().IsValid() {
-		return GroupAction{}, fmt.Errorf("group action construction failed: row for cell %s has an invalid operation, status, management, or observation; where: internal/install/service.NewGroupAction; when: constructing inspected group facts; impact: the fact cannot be validated or persisted; fix: construct a complete row with typed values", row.Cell())
+	if err := validateGroupActionInvariant(row, record); err != nil {
+		return GroupAction{}, err
 	}
 	var copied *registry.Record
 	if record != nil {
-		if !record.IsValid() || record.Cell() != row.Cell() {
-			return GroupAction{}, fmt.Errorf("group action construction failed: record does not validly describe row cell %s; where: internal/install/service.NewGroupAction; when: binding an inspected record; impact: a foreign fact could be staged; fix: construct the record for the row's exact scoped cell", row.Cell())
-		}
 		value := *record
 		copied = &value
 	}
 	return GroupAction{row: row, record: copied}, nil
+}
+
+func validateGroupActionInvariant(row apply.ActionRow, record *registry.Record) error {
+	if !row.Cell().IsValid() || !row.Operation().IsValid() || !row.Status().IsValid() || !row.Management().IsValid() || !row.Observation().IsValid() {
+		return fmt.Errorf("group action construction failed: row for cell %s has an invalid operation, status, management, or observation; where: internal/install/service.NewGroupAction; when: constructing inspected group facts; impact: the fact cannot be validated or persisted; fix: construct a complete row with typed values", row.Cell())
+	}
+	if row.Status() == apply.Unattempted() || row.Status() == apply.NoOp() || row.Status() == apply.ManagedDeclaratively() {
+		return fmt.Errorf("group action construction failed: row for cell %s is not a settled native fact; where: internal/install/service.NewGroupAction; when: constructing post-action group facts; impact: an unobserved or declarative state could be persisted as native truth; fix: return Completed, Failed, or InstalledPendingTrust after live inspection", row.Cell())
+	}
+	if row.Status() == apply.InstalledPendingTrust() && (record == nil || row.Observation() != registry.ObservationInstalled || record.Trust() != registry.TrustPending) {
+		return fmt.Errorf("group action construction failed: pending-trust row for cell %s lacks a matching installed pending record; where: internal/install/service.NewGroupAction; when: constructing post-action group facts; impact: trust state would contradict persisted authority; fix: attach an Installed record with TrustPending", row.Cell())
+	}
+	if record != nil {
+		if !record.IsValid() || record.Cell() != row.Cell() {
+			return fmt.Errorf("group action construction failed: record does not validly describe row cell %s; where: internal/install/service.NewGroupAction; when: binding an inspected record; impact: a foreign fact could be staged; fix: construct the record for the row's exact scoped cell", row.Cell())
+		}
+	}
+	return nil
 }
 
 func (a GroupAction) Row() apply.ActionRow { return a.row }
@@ -188,7 +222,15 @@ func NewGroupFacts(actions ...GroupAction) (GroupFacts, error) {
 	}
 	var facts GroupFacts
 	copy(facts.actions[:], actions)
+	for i, action := range actions {
+		if err := validateGroupActionInvariant(action.row, action.record); err != nil {
+			return GroupFacts{}, fmt.Errorf("group facts construction failed: fact %d is not constructor-valid: %w", i, err)
+		}
+	}
 	harness := actions[0].row.Cell().Harness()
+	if !harness.IsValid() {
+		return GroupFacts{}, fmt.Errorf("group facts construction failed: fact harness is invalid; where: internal/install/service.NewGroupFacts; when: constructing complete post-action facts; impact: facts have no canonical owner; fix: use three valid sibling cells from one harness")
+	}
 	for i, extension := range cell.CanonicalExtensions() {
 		want, _ := cell.New(harness, extension)
 		if actions[i].row.Cell() != want {

@@ -216,8 +216,11 @@ func TestServiceDirectFilePolicyRejectsEnsureRemoveAndSelectionBeforeMutation(t 
 					var err error
 					if c == target {
 						policy, err = apply.NewDirectFilePolicy(c, func(request apply.DirectFileRequest) error {
-							if request.Operation() != apply.Inspect() {
-								t.Fatalf("preflight operation=%s", request.Operation())
+							if request.Operation() == apply.Inspect() {
+								return nil
+							}
+							if request.Operation() != operation {
+								t.Fatalf("actual operation=%s, want %s", request.Operation(), operation)
 							}
 							return errors.New("policy sentinel")
 						}, apply.PassThroughDecoration())

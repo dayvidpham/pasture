@@ -38,10 +38,10 @@ func groupParts(t *testing.T) ([]service.GroupResultCell, []service.GroupStep) {
 		{service.InspectGroupAction(), cells[0]},
 		{service.InspectGroupAction(), cells[1]},
 		{service.InspectGroupAction(), cells[2]},
+		{service.EnsureCellGroupAction(), cells[0]},
 		{service.RemoveSharedGroupAction(), cells[0]},
 		{service.RemoveCellGroupAction(), cells[1]},
 		{service.RemoveCellGroupAction(), cells[2]},
-		{service.EnsureCellGroupAction(), cells[0]},
 	}
 	actions := make([]service.GroupStep, 0, len(specs))
 	for _, spec := range specs {
@@ -74,7 +74,7 @@ func TestGroupPlanRejectsBoundsOrderDuplicatesAndForeignCells(t *testing.T) {
 	if _, err := service.NewGroupPlan(results, eight); err == nil {
 		t.Fatal("eight actions accepted")
 	}
-	if _, err := service.NewGroupPlan(results, []service.GroupStep{actions[6], actions[0]}); err == nil {
+	if _, err := service.NewGroupPlan(results, []service.GroupStep{actions[4], actions[3]}); err == nil {
 		t.Fatal("out-of-order actions accepted")
 	}
 	if _, err := service.NewGroupPlan(results, []service.GroupStep{actions[0], actions[0]}); err == nil {
@@ -110,7 +110,7 @@ func TestGroupConstructorsRejectResultCountsAndEveryDescendingPhaseBoundary(t *t
 			t.Fatalf("result count %d error=%v", count, err)
 		}
 	}
-	boundaries := [][2]int{{6, 5}, {6, 3}, {6, 0}, {5, 3}, {5, 0}, {3, 0}}
+	boundaries := [][2]int{{6, 4}, {6, 3}, {6, 0}, {5, 4}, {5, 3}, {5, 0}, {4, 3}, {4, 0}, {3, 0}}
 	for _, pair := range boundaries {
 		if _, err := service.NewGroupPlan(results, []service.GroupStep{actions[pair[0]], actions[pair[1]]}); err == nil {
 			t.Fatalf("descending phase boundary %v accepted", pair)
@@ -122,10 +122,11 @@ func TestGroupConstructorsRejectResultCountsAndEveryDescendingPhaseBoundary(t *t
 }
 
 type eventRegistry struct {
-	mu      sync.Mutex
-	store   registry.Store
-	events  *[]string
-	saveErr error
+	mu             sync.Mutex
+	store          registry.Store
+	events         *[]string
+	saveErr        error
+	rejectCanceled bool
 }
 
 func (r *eventRegistry) Load(context.Context) (registry.Store, error) {
@@ -133,10 +134,13 @@ func (r *eventRegistry) Load(context.Context) (registry.Store, error) {
 	defer r.mu.Unlock()
 	return r.store, nil
 }
-func (r *eventRegistry) Save(_ context.Context, store registry.Store) error {
+func (r *eventRegistry) Save(ctx context.Context, store registry.Store) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	*r.events = append(*r.events, "save")
+	if r.rejectCanceled && ctx.Err() != nil {
+		return fmt.Errorf("registry rejected canceled context: %w", ctx.Err())
+	}
 	if r.saveErr != nil {
 		return r.saveErr
 	}
@@ -148,6 +152,7 @@ type recordingGroup struct {
 	mu             sync.Mutex
 	events         *[]string
 	planErr        error
+	plan           func(service.GroupSelection) (service.GroupPlan, error)
 	handledOnError bool
 	executeErr     error
 	inspectErr     error
@@ -166,6 +171,9 @@ func (g *recordingGroup) PlanSelection(_ context.Context, request service.GroupS
 	defer g.mu.Unlock()
 	*g.events = append(*g.events, "plan")
 	g.planCount++
+	if g.plan != nil {
+		return g.plan(request)
+	}
 	if g.planErr != nil && !g.handledOnError {
 		return service.GroupPlan{}, g.planErr
 	}
@@ -189,6 +197,144 @@ func (g *recordingGroup) PlanSelection(_ context.Context, request service.GroupS
 		return service.GroupPlan{}, err
 	}
 	return plan, g.planErr
+}
+
+func selectionGroupPlan(t *testing.T, request service.GroupSelection, invalidKind service.GroupActionKind, invalidCell cell.Cell) service.GroupPlan {
+	t.Helper()
+	results := make([]service.GroupResultCell, 0, 3)
+	actions := make([]service.GroupStep, 0, 7)
+	claudeCells := make([]cell.Cell, 0, 3)
+	for _, extension := range cell.CanonicalExtensions() {
+		c, _ := cell.New(artifact.HarnessClaudeCode, extension)
+		claudeCells = append(claudeCells, c)
+		key, _ := request.Scope.Key(c)
+		operation := apply.RemoveOp()
+		if request.Selection.Enabled(c) {
+			operation = apply.Ensure()
+		}
+		result, err := service.NewGroupResultCell(c, key, operation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		results = append(results, result)
+		inspect, _ := service.NewGroupStep(service.InspectGroupAction(), c)
+		actions = append(actions, inspect)
+	}
+	for _, c := range claudeCells {
+		if request.Selection.Enabled(c) {
+			step, _ := service.NewGroupStep(service.EnsureCellGroupAction(), c)
+			actions = append(actions, step)
+		}
+	}
+	shared, _ := service.NewGroupStep(service.RemoveSharedGroupAction(), claudeCells[0])
+	actions = append(actions, shared)
+	for _, c := range claudeCells {
+		if !request.Selection.Enabled(c) {
+			step, _ := service.NewGroupStep(service.RemoveCellGroupAction(), c)
+			actions = append(actions, step)
+		}
+	}
+	if invalidKind.IsValid() {
+		step, _ := service.NewGroupStep(invalidKind, invalidCell)
+		replace := 3
+		if invalidKind == service.RemoveCellGroupAction() {
+			replace = len(actions) - 1
+		}
+		actions[replace] = step
+	}
+	plan, err := service.NewGroupPlan(results, actions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plan
+}
+
+func TestServiceGroupPlanSelectionConsistencyForEveryCombination(t *testing.T) {
+	t.Parallel()
+	for mask := 0; mask < 8; mask++ {
+		mask := mask
+		t.Run(fmt.Sprintf("selection-%03b", mask), func(t *testing.T) {
+			request := groupRequest(t)
+			request.Selection = all(t, func(c cell.Cell) bool {
+				if c.Harness() != artifact.HarnessClaudeCode {
+					return false
+				}
+				return mask&(1<<(c.Extension()-1)) != 0
+			})
+			events := []string{}
+			group := &recordingGroup{events: &events}
+			group.plan = func(selection service.GroupSelection) (service.GroupPlan, error) {
+				return selectionGroupPlan(t, selection, 0, cell.Cell{}), nil
+			}
+			_, err := groupService(t, group, nil).ApplySelection(context.Background(), request)
+			if err != nil {
+				t.Fatalf("valid selection plan rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestServiceGroupPlanRejectsSelectionContradictions(t *testing.T) {
+	t.Parallel()
+	selected, _ := cell.New(artifact.HarnessClaudeCode, cell.SkillsAxis())
+	disabled, _ := cell.New(artifact.HarnessClaudeCode, cell.AgentsAxis())
+	for _, tc := range []struct {
+		name string
+		kind service.GroupActionKind
+		cell cell.Cell
+	}{
+		{name: "ensure disabled", kind: service.EnsureCellGroupAction(), cell: disabled},
+		{name: "remove selected", kind: service.RemoveCellGroupAction(), cell: selected},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := groupRequest(t)
+			request.Selection = all(t, func(c cell.Cell) bool { return c == selected })
+			events := []string{}
+			group := &recordingGroup{events: &events}
+			group.plan = func(selection service.GroupSelection) (service.GroupPlan, error) {
+				return selectionGroupPlan(t, selection, tc.kind, tc.cell), nil
+			}
+			_, err := groupService(t, group, nil).ApplySelection(context.Background(), request)
+			var applyErr *apply.ApplyError
+			if !errors.As(err, &applyErr) || applyErr.Stage() != "pre-plan validation" || group.closeCount != 1 || strings.Contains(fmt.Sprint(events), "execute") {
+				t.Fatalf("err=%v events=%v closes=%d", err, events, group.closeCount)
+			}
+		})
+	}
+}
+
+func TestGroupRejectsTypedNilAndZeroFacts(t *testing.T) {
+	t.Parallel()
+	var typedNil *recordingGroup
+	root := t.TempDir()
+	contractSet := contracts(t, root)
+	_, err := service.New(service.Config{Registry: &eventRegistry{store: registry.New(), events: &[]string{}}, Contracts: contractSet, Activators: []apply.Activator{directFileActivator(t, contractSet)}, Group: typedNil})
+	if err == nil || !strings.Contains(err.Error(), "typed nil") {
+		t.Fatalf("typed nil error=%v", err)
+	}
+	if _, err := service.NewGroupAction(apply.ActionRow{}, nil); err == nil {
+		t.Fatal("zero GroupAction accepted")
+	}
+	if _, err := service.NewGroupFacts(service.GroupAction{}, service.GroupAction{}, service.GroupAction{}); err == nil {
+		t.Fatal("forged zero GroupActions accepted")
+	}
+}
+
+func TestServiceRejectsTypedNilRegistryAndNilReceivers(t *testing.T) {
+	t.Parallel()
+	var typedRegistry *eventRegistry
+	if _, err := service.New(service.Config{Registry: typedRegistry}); err == nil || !strings.Contains(err.Error(), "registry dependency is nil") {
+		t.Fatalf("typed nil registry error=%v", err)
+	}
+	var svc *service.Service
+	selectionRequest := groupRequest(t)
+	if _, err := svc.ApplySelection(context.Background(), selectionRequest); err == nil || !strings.Contains(err.Error(), "service receiver is nil") {
+		t.Fatalf("nil ApplySelection error=%v", err)
+	}
+	c, _ := cell.New(artifact.HarnessClaudeCode, cell.SkillsAxis())
+	if _, err := svc.ApplyCell(context.Background(), service.CellRequest{Cell: c, Scope: apply.GlobalScope(), Source: apply.InstallerSource()}); err == nil || !strings.Contains(err.Error(), "service receiver is nil") {
+		t.Fatalf("nil ApplyCell error=%v", err)
+	}
 }
 func (g *recordingGroup) ExecuteAction(_ context.Context, _ service.GroupSelection, _ service.GroupPlan, step service.GroupStep) error {
 	g.mu.Lock()
@@ -228,6 +374,9 @@ func (g *recordingGroup) InspectAction(ctx context.Context, request service.Grou
 	}
 	if g.malform != nil {
 		actions = g.malform(request, plan, step, actions)
+	}
+	if len(actions) != 3 {
+		return service.GroupFacts{}, nil
 	}
 	return service.NewGroupFacts(actions...)
 }
@@ -301,9 +450,10 @@ func TestServiceGroupLifecycleOrderingFailuresCancellationCloseAndRetry(t *testi
 		events := []string{}
 		ctx, cancel := context.WithCancel(context.Background())
 		group := &recordingGroup{events: &events, executeErr: context.Canceled, cancel: cancel}
-		result, err := groupService(t, group, nil).ApplySelection(ctx, groupRequest(t))
-		if err != nil || result.OK() || !group.inspectLive || group.closeCount != 1 {
-			t.Fatalf("result=%+v err=%v inspectLive=%t closes=%d", result.Rows(), err, group.inspectLive, group.closeCount)
+		repo := &eventRegistry{store: registry.New(), events: &events, rejectCanceled: true}
+		result, err := groupService(t, group, repo).ApplySelection(ctx, groupRequest(t))
+		if err != nil || result.OK() || !group.inspectLive || group.closeCount != 1 || !strings.Contains(fmt.Sprint(events), "save") || strings.Contains(result.Rows()[0].Diagnostic(), "registry rejected canceled") {
+			t.Fatalf("result=%+v err=%v inspectLive=%t closes=%d events=%v", result.Rows(), err, group.inspectLive, group.closeCount, events)
 		}
 	})
 	t.Run("save composes execute error", func(t *testing.T) {
