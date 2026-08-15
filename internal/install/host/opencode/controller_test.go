@@ -76,6 +76,9 @@ func TestEachCellInstallsStatusesAndRemovesIndependently(t *testing.T) {
 			component, err := controller.Descriptor().Component(extension)
 			require.NoError(t, err)
 			assertBundleMaterialized(t, root, component.Bundle())
+			if extension == artifact.ExtensionHooks {
+				assertCanonicalHookLayout(t, controller, true)
+			}
 			for _, sibling := range cell.CanonicalExtensions() {
 				if sibling != extension {
 					_, statErr := os.Lstat(destination(t, controller, sibling))
@@ -101,6 +104,9 @@ func TestEachCellInstallsStatusesAndRemovesIndependently(t *testing.T) {
 			for _, entry := range component.Bundle().Manifest().Entries() {
 				_, statErr := os.Lstat(filepath.Join(root, filepath.FromSlash(entry.Path().String())))
 				require.ErrorIs(t, statErr, os.ErrNotExist)
+			}
+			if extension == artifact.ExtensionHooks {
+				assertCanonicalHookLayout(t, controller, false)
 			}
 			preserved, err := os.ReadFile(unrelated)
 			require.NoError(t, err)
@@ -444,7 +450,23 @@ func TestHookLifecyclePreservesEveryConfigSentinelByteAndMode(t *testing.T) {
 		require.NoError(t, applyErr)
 		require.True(t, result.OK())
 		require.Equal(t, sentinels, snapshotConfigFiles(t, controller.ConfigRoot()))
+		assertCanonicalHookLayout(t, controller, enabled)
 	}
+}
+
+func assertCanonicalHookLayout(t *testing.T, controller host.Controller, installed bool) {
+	t.Helper()
+	require.Equal(t, filepath.Join(controller.ConfigRoot(), "plugins"), destination(t, controller, artifact.ExtensionHooks))
+	hookPath := filepath.Join(controller.ConfigRoot(), "plugins", host.HookFile)
+	info, err := os.Lstat(hookPath)
+	if installed {
+		require.NoError(t, err)
+		require.True(t, info.Mode().IsRegular())
+	} else {
+		require.ErrorIs(t, err, os.ErrNotExist)
+	}
+	_, err = os.Lstat(filepath.Join(controller.ConfigRoot(), "plugin"))
+	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestTraversalRootIsRejected(t *testing.T) {

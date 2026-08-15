@@ -17,7 +17,7 @@ import (
 const (
 	SkillsDirectory = "skills"
 	AgentsDirectory = "agent"
-	HooksDirectory  = "plugin"
+	HooksDirectory  = "plugins"
 	HookFile        = "pasture-hooks.ts"
 )
 
