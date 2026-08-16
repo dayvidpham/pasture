@@ -254,7 +254,7 @@ func writeApplyText(w io.Writer, result apply.Result) error {
 }
 
 func newInstallApplySelectionCommand(makeService installServiceFactory) *cobra.Command {
-	cmd := &cobra.Command{Use: "apply-selection", Short: "Apply an exhaustive desired installer selection", Args: cobra.NoArgs}
+	cmd := &cobra.Command{Use: "apply-selection", Short: "Apply an exhaustive desired installer selection (scripting/Home Manager surface)", Hidden: true, Args: cobra.NoArgs}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error { return runApplySelectionWith(cmd, args, makeService) }
 	cmd.Flags().String("desired", "", "Path to an exhaustive effective-selection document")
 	cmd.Flags().String("source", "installer", "Controller source: installer or home-manager")
@@ -262,7 +262,7 @@ func newInstallApplySelectionCommand(makeService installServiceFactory) *cobra.C
 	return cmd
 }
 func newInstallApplyCellCommand(makeService installServiceFactory) *cobra.Command {
-	cmd := &cobra.Command{Use: "apply-cell", Short: "Apply one explicitly selected installer cell", Args: cobra.NoArgs}
+	cmd := &cobra.Command{Use: "apply-cell", Short: "Apply one explicitly selected installer cell (scripting/Home Manager surface)", Hidden: true, Args: cobra.NoArgs}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error { return runApplyCellWith(cmd, args, makeService) }
 	cmd.Flags().String("harness", "", "Harness: claude-code, opencode, or codex")
 	cmd.Flags().String("extension", "", "Extension: skills, agents, or hooks")

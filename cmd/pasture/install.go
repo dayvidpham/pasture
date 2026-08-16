@@ -14,27 +14,20 @@ import (
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
-// installCmd groups the scriptable installer and confirmed-state commands.
-// Interactive preferences and the Bubble Tea frontend are intentionally
-// deferred; these commands are the source-of-truth surfaces for automation and
-// Home Manager.
-var installCmd = &cobra.Command{
-	Use:   "install",
-	Short: "Inspect and normalize Pasture installer preferences and confirmed state",
-	Long: `install works with two separate files:
+// installCmd is the human-facing installer verb AND the parent for the
+// read-only inspection commands (status, plan) and the scriptable surfaces
+// (apply-selection, apply-cell) that Home Manager and automation consume.
+//
+// Invoked with "<harness> <extension>..." it installs exactly the named cells
+// (see install_verbs.go). Invoked bare, or with a lone harness and no
+// extensions, it prints help rather than acting on an unstated intent. The
+// interactive Bubble Tea frontend is deferred; bare "pasture install" prints
+// this help for now.
+var installCmd = newInstallVerbCommand(productionInstallService)
 
-  * ~/.config/pasture/config.yaml (install: section) — user preferences: which
-    harnesses are enabled and one global set of extension axes (skills, agents,
-    hooks). Skills and agents default on but stay inert until a harness is
-    enabled; hooks default off.
-
-  * ${XDG_STATE_HOME:-~/.local/state}/pasture/installations.yaml — the confirmed
-    installation inventory: what Pasture actually installed, whether an uninstall
-    completed, what remains, and the exact retry.
-
-Plan and status are read-only. apply-selection and apply-cell mutate native
-installations and update confirmed state; they never contact a running daemon.`,
-}
+// uninstallCmd is the top-level sibling verb: "pasture uninstall <harness>
+// <extension>..." removes exactly the named cells, leaving siblings untouched.
+var uninstallCmd = newUninstallVerbCommand(productionInstallService)
 
 // installPlanCmd normalizes saved preferences into the transient effective
 // selection that the apply engine consumes.
@@ -216,4 +209,5 @@ func init() {
 	installStatusCmd.Flags().Bool("json", false, "Write deterministic JSON status")
 	installCmd.AddCommand(installPlanCmd, installStatusCmd)
 	rootCmd.AddCommand(installCmd)
+	rootCmd.AddCommand(uninstallCmd)
 }

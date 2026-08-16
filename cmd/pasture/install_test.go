@@ -269,9 +269,13 @@ func runCLIWithHome(t *testing.T, home string, args ...string) runOutcome {
 }
 
 func TestCLI_InstallHelpAndStrictDesiredValidation(t *testing.T) {
+	// The human-facing help now documents the additive "<harness> <extension>..."
+	// grammar. The scriptable apply-selection surface is hidden but still
+	// registered for Home Manager; its strict desired-document validation must
+	// still reject a malformed schema.
 	help := runCLI(t, "install", "--help")
-	if help.exitCode != 0 || !strings.Contains(help.stdout, "apply-selection") || !strings.Contains(help.stdout, "mutate native") {
-		t.Fatalf("install help does not describe command registration/mutation: %+v", help)
+	if help.exitCode != 0 || !strings.Contains(help.stdout, "install claude skills agents") || !strings.Contains(help.stdout, "extensions") {
+		t.Fatalf("install help does not describe the per-harness install grammar: %+v", help)
 	}
 	desired := filepath.Join(t.TempDir(), "desired.yaml")
 	if err := os.WriteFile(desired, []byte("schema: wrong/v1\n"), 0o600); err != nil {
