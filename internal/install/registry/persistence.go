@@ -1,19 +1,23 @@
 package registry
 
 import (
+	"errors"
 	"fmt"
-	"os"
+	"io/fs"
 )
 
 const maxRegistryBytes = 8 << 20
 
 // Load reads the authoritative registry. Missing means an empty first-shipped
-// store. Existing files must be regular, non-symlink, and private according to
-// the platform contract (mode 0600 on Unix, protected owner-only DACL on Windows).
+// store — whether the registry file itself or any parent directory in its path
+// is absent, so a fresh install that has never written state reports an empty
+// inventory rather than a load failure. Existing files must be regular,
+// non-symlink, and private according to the platform contract (mode 0600 on
+// Unix, protected owner-only DACL on Windows).
 func Load(path string) (Store, error) {
 	data, info, err := readRegistryFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return New(), nil
 		}
 		return Store{}, fault("registry load", "symlink-safe readable registry", fmt.Sprintf("cannot open %q without following links: %v", path, err), path, "opening registry state through a no-follow descriptor", "installation ownership cannot be loaded safely", "replace any symlink with a regular mode-0600 registry file and retry", err)

@@ -554,3 +554,30 @@ func TestCodecRejectsDuplicateOwnershipCollections(t *testing.T) {
 		t.Fatalf("duplicate created_dirs error=%v", err)
 	}
 }
+
+// TestLoadTreatsMissingPathAsEmptyStore pins that a fresh install — where the
+// registry file, or any parent directory in its path, has never been created —
+// loads as an empty first-shipped store rather than failing. This is the
+// read-only `install status` path: it must report an empty inventory before the
+// first mutating apply creates the state directory.
+func TestLoadTreatsMissingPathAsEmptyStore(t *testing.T) {
+	base := t.TempDir()
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{name: "missing file in existing dir", path: filepath.Join(base, "installations.yaml")},
+		{name: "missing parent directory", path: filepath.Join(base, "state", "pasture", "installations.yaml")},
+		{name: "missing several ancestors", path: filepath.Join(base, "a", "b", "c", "pasture", "installations.yaml")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, err := registry.Load(tc.path)
+			if err != nil {
+				t.Fatalf("Load(%q) returned error for absent state: %v", tc.path, err)
+			}
+			if store.Len() != 0 {
+				t.Fatalf("Load(%q) returned %d records; want an empty store", tc.path, store.Len())
+			}
+		})
+	}
+}
