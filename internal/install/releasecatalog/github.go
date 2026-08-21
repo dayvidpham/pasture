@@ -69,10 +69,6 @@ func NewGitHubSourceWithLimits(client *http.Client, releasesURL string, limits G
 	return newGitHubSourceWithLimits(&clone, releasesURL, limits)
 }
 
-func newGitHubSource(client httpDoer, releasesURL string, maxCatalogBytes int64) (*GitHubSource, error) {
-	return newGitHubSourceWithLimits(client, releasesURL, GitHubLimits{MaxBytes: maxCatalogBytes})
-}
-
 func newGitHubSourceWithLimits(client httpDoer, releasesURL string, limits GitHubLimits) (*GitHubSource, error) {
 	if client == nil {
 		return nil, invalid("GitHub source construction", "HTTP client", "the HTTP client is nil", "GitHub releases cannot be loaded", "inject an HTTP client with explicit timeouts", fs.ErrInvalid)

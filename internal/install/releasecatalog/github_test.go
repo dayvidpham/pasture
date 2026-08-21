@@ -19,6 +19,14 @@ import (
 
 const releasesEndpoint = "https://api.github.com/repos/dayvidpham/pasture/releases"
 
+// newGitHubSource is a test-only convenience constructor over
+// newGitHubSourceWithLimits, mirroring the production NewGitHubSource /
+// NewGitHubSourceWithLimits split but accepting the unexported httpDoer
+// interface so tests can inject stub doers instead of *http.Client.
+func newGitHubSource(client httpDoer, releasesURL string, maxCatalogBytes int64) (*GitHubSource, error) {
+	return newGitHubSourceWithLimits(client, releasesURL, GitHubLimits{MaxBytes: maxCatalogBytes})
+}
+
 type doerFunc func(*http.Request) (*http.Response, error)
 
 func (f doerFunc) Do(r *http.Request) (*http.Response, error) { return f(r) }
