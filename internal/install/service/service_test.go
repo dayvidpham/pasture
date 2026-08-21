@@ -1654,13 +1654,16 @@ func TestServiceRegistryLoadFailureIsTypedAndPerformsNoMutation(t *testing.T) {
 	if !errors.As(err, &applyErr) || fault.loadCall.Load() != 1 || fault.saveCall.Load() != 0 {
 		t.Fatalf("error=%v loads=%d saves=%d", err, fault.loadCall.Load(), fault.saveCall.Load())
 	}
-	encoded, _ := applyErr.MarshalJSON()
-	wantFields := []string{`"schema": "pasture.install.apply-error/v1"`, `"source": "installer"`, `"stage": "registry-load"`, `"where": "internal/install/service.Service.load"`, `"impact":`, `"fix":`, `"remediation": "manual_repair"`}
-	for _, field := range wantFields {
-		if !strings.Contains(string(encoded), field) {
-			t.Fatalf("error JSON missing %s: %s", field, encoded)
-		}
-	}
+	assertFrozenApplyError(t, err, `{
+  "schema": "pasture.install.apply-error/v1",
+  "source": "installer",
+  "stage": "registry-load",
+  "reason": "injected unreadable registry",
+  "where": "internal/install/service.Service.load",
+  "impact": "no activation was attempted because authoritative ownership facts could not be trusted",
+  "fix": "repair the registry path, type, permissions, or contents, then retry",
+  "remediation": "manual_repair"
+}`)
 	if entries, _ := os.ReadDir(root); len(entries) != 0 {
 		t.Fatalf("load failure mutated root: %v", entries)
 	}
@@ -1669,20 +1672,43 @@ func TestServiceRegistryLoadFailureIsTypedAndPerformsNoMutation(t *testing.T) {
 func TestServiceRealFileRegistryRejectsCorruptAndUnreadableAuthority(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name string
-		seed func(*testing.T, string)
+		name     string
+		seed     func(*testing.T, string)
+		wantJSON func(state string) string
 	}{
 		{name: "corrupt", seed: func(t *testing.T, state string) {
 			t.Helper()
 			if err := os.WriteFile(state, []byte("schema: ["), 0o600); err != nil {
 				t.Fatal(err)
 			}
+		}, wantJSON: func(string) string {
+			return `{
+  "schema": "pasture.install.apply-error/v1",
+  "source": "installer",
+  "stage": "registry-load",
+  "reason": "install: registry decode failed: rule \"well-formed closed v1 document\" did not hold because decoding failed: yaml: line 1: did not find expected node content (where: internal/install/registry.Parse; when: decoding external registry input); impact: persisted installation ownership cannot be trusted; fix: repair or remove the registry file, then retry",
+  "where": "internal/install/service.Service.load",
+  "impact": "no activation was attempted because authoritative ownership facts could not be trusted",
+  "fix": "repair the registry path, type, permissions, or contents, then retry",
+  "remediation": "manual_repair"
+}`
 		}},
 		{name: "wrong-type", seed: func(t *testing.T, state string) {
 			t.Helper()
 			if err := os.Mkdir(state, 0o700); err != nil {
 				t.Fatal(err)
 			}
+		}, wantJSON: func(state string) string {
+			return fmt.Sprintf(`{
+  "schema": "pasture.install.apply-error/v1",
+  "source": "installer",
+  "stage": "registry-load",
+  "reason": "install: registry load failed: rule \"symlink-safe readable registry\" did not hold because cannot open \"%s\" without following links: registry descriptor has unsafe type d---------, not a regular file (where: %s; when: opening registry state through a no-follow descriptor); impact: installation ownership cannot be loaded safely; fix: replace any symlink with a regular mode-0600 registry file and retry",
+  "where": "internal/install/service.Service.load",
+  "impact": "no activation was attempted because authoritative ownership facts could not be trusted",
+  "fix": "repair the registry path, type, permissions, or contents, then retry",
+  "remediation": "manual_repair"
+}`, state, state)
 		}},
 	} {
 		tc := tc
@@ -1698,8 +1724,8 @@ func TestServiceRealFileRegistryRejectsCorruptAndUnreadableAuthority(t *testing.
 			before := snapshotTree(t, base)
 			svc := newService(t, root, state)
 			_, err := svc.ApplySelection(context.Background(), service.SelectionRequest{Selection: all(t, func(cell.Cell) bool { return true }), Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
-			var applyErr *apply.ApplyError
-			if !errors.As(err, &applyErr) || applyErr.Stage() != "registry-load" || applyErr.Remediation() != apply.RemediationManualRepair {
+			applyErr := assertFrozenApplyError(t, err, tc.wantJSON(state))
+			if applyErr.Stage() != "registry-load" || applyErr.Remediation() != apply.RemediationManualRepair {
 				t.Fatalf("error=%v", err)
 			}
 			if after := snapshotTree(t, base); after != before {
@@ -1724,23 +1750,60 @@ func TestServiceRejectsIncompleteContractAndInvalidRequestsWithoutMutation(t *te
 	validService := newServiceConfig(t, root, state, service.Config{Registry: file})
 	invalidScope := apply.Scope{}
 	requests := []struct {
-		stage  string
-		invoke func() error
+		stage    string
+		wantJSON string
+		invoke   func() error
 	}{
-		{stage: "activation contract validation", invoke: func() error {
+		{stage: "activation contract validation", wantJSON: `{
+  "schema": "pasture.install.apply-error/v1",
+  "source": "installer",
+  "stage": "activation contract validation",
+  "reason": "harness codex has no matching valid activation contract",
+  "where": "internal/install/service.engine.bindAll",
+  "impact": "the nine-cell plan is incomplete and no mutation was started",
+  "fix": "wire one exhaustive activation contract for codex",
+  "remediation": "rerun_installer"
+}`, invoke: func() error {
 			_, err := incompleteService.ApplySelection(context.Background(), service.SelectionRequest{Selection: all(t, func(cell.Cell) bool { return true }), Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
 			return err
 		}},
-		{stage: "cell validation", invoke: func() error {
+		{stage: "cell validation", wantJSON: `{
+  "schema": "pasture.install.apply-error/v1",
+  "source": "installer",
+  "stage": "cell validation",
+  "reason": "the requested cell is invalid",
+  "where": "internal/install/service.engine.applyCell",
+  "impact": "no cell can be applied",
+  "fix": "construct the cell with cell.New",
+  "remediation": "apply_cell"
+}`, invoke: func() error {
 			_, err := validService.ApplyCell(context.Background(), service.CellRequest{Cell: cell.Cell{}, Enabled: true, Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
 			return err
 		}},
-		{stage: "pre-plan validation", invoke: func() error {
+		{stage: "pre-plan validation", wantJSON: `{
+  "schema": "pasture.install.apply-error/v1",
+  "source": "installer",
+  "stage": "pre-plan validation",
+  "reason": "install: apply scope resolution failed: rule \"global or project scope\" did not hold because the scope is invalid (where: internal/install/apply.Scope.key; when: planning a scoped cell); impact: the confirmed fact has no logical registry table; fix: use GlobalScope or ProjectScope",
+  "where": "internal/install/service",
+  "impact": "the complete request was rejected before mutation",
+  "fix": "repair the reported contract or state and retry",
+  "remediation": "manual_repair"
+}`, invoke: func() error {
 			c, _ := cell.New(artifact.HarnessOpenCode, cell.SkillsAxis())
 			_, err := validService.ApplyCell(context.Background(), service.CellRequest{Cell: c, Enabled: true, Scope: invalidScope, Source: apply.InstallerSource()})
 			return err
 		}},
-		{stage: "source validation", invoke: func() error {
+		{stage: "source validation", wantJSON: `{
+  "schema": "pasture.install.apply-error/v1",
+  "source": "invalid",
+  "stage": "source validation",
+  "reason": "the apply source is neither installer nor home-manager",
+  "where": "internal/install/service.engine.bindAll",
+  "impact": "ownership rules cannot be selected",
+  "fix": "use InstallerSource or HomeManagerSource",
+  "remediation": "manual_repair"
+}`, invoke: func() error {
 			c, _ := cell.New(artifact.HarnessOpenCode, cell.SkillsAxis())
 			_, err := validService.ApplyCell(context.Background(), service.CellRequest{Cell: c, Enabled: true, Scope: apply.GlobalScope(), Source: apply.SourceInvalid})
 			return err
@@ -1748,9 +1811,9 @@ func TestServiceRejectsIncompleteContractAndInvalidRequestsWithoutMutation(t *te
 	}
 	before := snapshotTree(t, base)
 	for i, request := range requests {
-		var applyErr *apply.ApplyError
-		if err := request.invoke(); !errors.As(err, &applyErr) || applyErr.Stage() != request.stage {
-			t.Fatalf("request %d error=%v", i, err)
+		applyErr := assertFrozenApplyError(t, request.invoke(), request.wantJSON)
+		if applyErr.Stage() != request.stage {
+			t.Fatalf("request %d stage=%q want %q", i, applyErr.Stage(), request.stage)
 		}
 		if after := snapshotTree(t, base); after != before {
 			t.Fatalf("request %d mutated tree\nbefore=%s\nafter=%s", i, before, after)
@@ -1789,8 +1852,9 @@ func TestServiceRegistrySaveFailureRetainsPriorBytesAndStopsLaterCells(t *testin
 			t.Fatalf("later row %d status=%s", i+1, row.Status())
 		}
 	}
-	if !strings.Contains(result.Rows()[0].Diagnostic(), "what") && !strings.Contains(result.Rows()[0].Diagnostic(), "could not be saved atomically") {
-		t.Fatalf("non-actionable diagnostic: %s", result.Rows()[0].Diagnostic())
+	wantDiagnostic := "confirmed registry fact could not be saved atomically: injected atomic replacement failure; where: claude-code.skills; when: registry-save; impact: the live component may have changed but the previous registry remains authoritative; later cells were not attempted; fix: inspect status, repair the registry path or permissions, and rerun the same apply operation"
+	if got := result.Rows()[0].Diagnostic(); got != wantDiagnostic {
+		t.Fatalf("failed-row diagnostic mismatch\n got: %s\nwant: %s", got, wantDiagnostic)
 	}
 	after, err := os.ReadFile(state)
 	if err != nil {
@@ -1803,9 +1867,11 @@ func TestServiceRegistrySaveFailureRetainsPriorBytesAndStopsLaterCells(t *testin
 	if _, err := os.Stat(first); err != nil {
 		t.Fatalf("first live action did not occur: %v", err)
 	}
-	second := filepath.Join(root, "claude-code", "agents", "component.txt")
-	if _, err := os.Stat(second); !os.IsNotExist(err) {
-		t.Fatalf("later live action occurred: %v", err)
+	for i, row := range result.Rows()[1:] {
+		later := filepath.Join(root, string(row.Cell().Harness()), row.Cell().Extension().String(), "component.txt")
+		if _, err := os.Lstat(later); !os.IsNotExist(err) {
+			t.Fatalf("later live path %d (%s) exists at %s: %v", i+1, row.Cell(), later, err)
+		}
 	}
 	encoded, err := result.MarshalJSON()
 	if err != nil {
@@ -2000,4 +2066,20 @@ func recordSignature(record registry.Record) string {
 		shared = append(shared, fmt.Sprintf("%s:%s:%s", item.Path(), item.Identity(), item.Digest()))
 	}
 	return fmt.Sprintf("scope=%s cell=%s source=%s strategy=%s managed=%t artifact=%s version=%s selector=%s leaves=%v dirs=%v shared=%v observation=%s trust=%s operation=%s outcome=%s diagnostic=%q", record.Key().Scope(), record.Cell(), record.Source(), record.Strategy(), record.Managed(), record.ArtifactID(), record.Version(), record.Selector(), leaves, dirs, shared, record.Observation(), record.Trust(), record.LastOperation(), record.LastOutcome(), record.Diagnostic())
+}
+
+func assertFrozenApplyError(t *testing.T, err error, want string) *apply.ApplyError {
+	t.Helper()
+	var applyErr *apply.ApplyError
+	if !errors.As(err, &applyErr) {
+		t.Fatalf("expected *apply.ApplyError, got %v", err)
+	}
+	encoded, marshalErr := applyErr.MarshalJSON()
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	if string(encoded) != want {
+		t.Fatalf("apply-error JSON mismatch\n got: %s\nwant: %s", encoded, want)
+	}
+	return applyErr
 }
