@@ -1,0 +1,14 @@
+{
+  "installed": [
+    {
+      "id": "pasture@aura-plugins",
+      "version": "0.0.4",
+      "scope": "user",
+      "enabled": true,
+      "installPath": "/isolated-home/.claude/plugins/cache/aura-plugins/pasture/0.0.4",
+      "installedAt": "2026-08-14T00:00:00Z",
+      "lastUpdated": "2026-08-14T00:00:00Z"
+    }
+  ],
+  "available": []
+}

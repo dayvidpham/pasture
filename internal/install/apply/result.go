@@ -1,9 +1,6 @@
-// Package apply is the source-agnostic activation engine. It builds an in-memory
-// plan from a normalized effective selection plus the confirmed inventory,
-// executes cells in the frozen canonical order, stops at the first failure
-// (marking later executable rows unattempted), records the strongest confirmed
-// observation, and returns a transient apply-result document. It never reads or
-// writes preference YAML and never persists its result document.
+// Package apply owns the typed request, result, error, and activator contracts
+// plus concrete activation-strategy adapters. Package service alone owns
+// orchestration, canonical execution order, and registry persistence.
 package apply
 
 import (
@@ -11,7 +8,7 @@ import (
 	"encoding/json"
 
 	"github.com/dayvidpham/pasture/internal/install/cell"
-	"github.com/dayvidpham/pasture/internal/install/inventory"
+	"github.com/dayvidpham/pasture/internal/install/registry"
 )
 
 // ResultSchemaID and ErrorSchemaID are the frozen transient document schemas.
@@ -68,31 +65,65 @@ func RemoveOp() Operation { return opRemove }
 func Inspect() Operation  { return opInspect }
 
 func (o Operation) String() string { return o.name }
+func (o Operation) IsValid() bool  { return o == opEnsure || o == opRemove || o == opInspect }
+
+// Management identifies whose authority, if any, the row represents.
+type Management uint8
+
+const (
+	ManagementUnknown Management = iota
+	ManagementPasture
+	ManagementExternal
+	ManagementDeclarative
+)
+
+func (m Management) String() string {
+	switch m {
+	case ManagementPasture:
+		return "pasture_managed"
+	case ManagementExternal:
+		return "external"
+	case ManagementDeclarative:
+		return "managed_declaratively"
+	default:
+		return "unknown"
+	}
+}
+func (m Management) IsValid() bool {
+	return m >= ManagementUnknown && m <= ManagementDeclarative
+}
 
 // ActionRow is one ordered cell outcome.
 type ActionRow struct {
 	cell        cell.Cell
 	operation   Operation
 	status      Status
-	observation inventory.Observation
+	management  Management
+	observation registry.Observation
 	diagnostic  string
 }
 
-func (r ActionRow) Cell() cell.Cell                    { return r.cell }
-func (r ActionRow) Operation() Operation               { return r.operation }
-func (r ActionRow) Status() Status                     { return r.status }
-func (r ActionRow) Observation() inventory.Observation { return r.observation }
-func (r ActionRow) Diagnostic() string                 { return r.diagnostic }
+func NewActionRow(c cell.Cell, operation Operation, status Status, management Management, observation registry.Observation, diagnostic string) ActionRow {
+	return ActionRow{cell: c, operation: operation, status: status, management: management, observation: observation, diagnostic: diagnostic}
+}
+func (r ActionRow) Cell() cell.Cell                   { return r.cell }
+func (r ActionRow) Operation() Operation              { return r.operation }
+func (r ActionRow) Status() Status                    { return r.status }
+func (r ActionRow) Management() Management            { return r.management }
+func (r ActionRow) Observation() registry.Observation { return r.observation }
+func (r ActionRow) Diagnostic() string                { return r.diagnostic }
 
 // Result is the transient apply-result document.
 type Result struct {
-	source string
+	source Source
+	scope  registry.Scope
 	rows   []ActionRow
 	ok     bool
 }
 
 // Source returns the control source (installer or home-manager).
-func (r Result) Source() string { return r.source }
+func (r Result) Source() Source        { return r.source }
+func (r Result) Scope() registry.Scope { return r.scope }
 
 // Rows returns the ordered action rows.
 func (r Result) Rows() []ActionRow { return append([]ActionRow(nil), r.rows...) }
@@ -100,10 +131,18 @@ func (r Result) Rows() []ActionRow { return append([]ActionRow(nil), r.rows...) 
 // OK reports whether every executed row succeeded (no failure occurred).
 func (r Result) OK() bool { return r.ok }
 
+func NewResult(source Source, scope registry.Scope, ok bool, rows []ActionRow) Result {
+	return Result{source: source, scope: scope, ok: ok, rows: append([]ActionRow(nil), rows...)}
+}
+
 type rowWire struct {
+	Index       int    `json:"index"`
 	Cell        string `json:"cell"`
+	Harness     string `json:"harness"`
+	Extension   string `json:"extension"`
 	Operation   string `json:"operation"`
 	Status      string `json:"status"`
+	Management  string `json:"management"`
 	Observation string `json:"observation,omitempty"`
 	Diagnostic  string `json:"diagnostic,omitempty"`
 }
@@ -111,22 +150,27 @@ type rowWire struct {
 type resultWire struct {
 	Schema string    `json:"schema"`
 	Source string    `json:"source"`
+	Scope  string    `json:"scope"`
 	OK     bool      `json:"ok"`
 	Cells  []rowWire `json:"cells"`
 }
 
 // MarshalJSON renders the frozen apply-result/v1 document with ordered rows.
 func (r Result) MarshalJSON() ([]byte, error) {
-	wire := resultWire{Schema: ResultSchemaID, Source: r.source, OK: r.ok}
+	wire := resultWire{Schema: ResultSchemaID, Source: r.source.String(), Scope: r.scope.String(), OK: r.ok}
 	for _, row := range r.rows {
 		obs := ""
 		if row.observation.IsValid() {
 			obs = row.observation.String()
 		}
 		wire.Cells = append(wire.Cells, rowWire{
+			Index:       row.cell.Index(),
 			Cell:        row.cell.String(),
+			Harness:     string(row.cell.Harness()),
+			Extension:   row.cell.Extension().String(),
 			Operation:   row.operation.String(),
 			Status:      row.status.String(),
+			Management:  row.management.String(),
 			Observation: obs,
 			Diagnostic:  row.diagnostic,
 		})
@@ -142,13 +186,70 @@ func (r Result) MarshalJSON() ([]byte, error) {
 
 // ApplyError is the transient pre-plan apply-error/v1 document.
 type ApplyError struct {
-	source      string
+	source      Source
 	stage       string
 	reason      string
 	where       string
 	impact      string
 	fix         string
-	remediation string
+	remediation Remediation
+}
+
+func NewApplyError(source Source, stage, reason, where, impact, fix string, remediation Remediation) *ApplyError {
+	return &ApplyError{source: source, stage: stage, reason: reason, where: where, impact: impact, fix: fix, remediation: remediation}
+}
+
+// Source returns the controller associated with the failed request.
+func (e *ApplyError) Source() Source { return e.source }
+
+// Stage returns the operation stage that rejected the request.
+func (e *ApplyError) Stage() string { return e.stage }
+
+// Reason returns the concrete reason the stage failed.
+func (e *ApplyError) Reason() string { return e.reason }
+
+// Location returns the production location that detected the failure.
+func (e *ApplyError) Location() string { return e.where }
+
+// Impact returns what the failure means for the caller and live state.
+func (e *ApplyError) Impact() string { return e.impact }
+
+// Fix returns the actionable repair instruction.
+func (e *ApplyError) Fix() string { return e.fix }
+
+// Remediation returns the closed caller action associated with the repair.
+func (e *ApplyError) Remediation() Remediation { return e.remediation }
+
+// Remediation is the closed caller action family carried by apply errors.
+type Remediation uint8
+
+const (
+	RemediationInvalid Remediation = iota
+	RemediationApplyCell
+	RemediationApplySelection
+	RemediationRerunInstaller
+	RemediationRerunHomeManager
+	RemediationManualNativeTrust
+	RemediationManualRepair
+)
+
+func (r Remediation) String() string {
+	switch r {
+	case RemediationApplyCell:
+		return "apply_cell"
+	case RemediationApplySelection:
+		return "apply_selection"
+	case RemediationRerunInstaller:
+		return "rerun_installer"
+	case RemediationRerunHomeManager:
+		return "rerun_home_manager"
+	case RemediationManualNativeTrust:
+		return "manual_native_trust"
+	case RemediationManualRepair:
+		return "manual_repair"
+	default:
+		return ""
+	}
 }
 
 // Error implements the error interface.
@@ -171,13 +272,13 @@ type applyErrorWire struct {
 func (e *ApplyError) MarshalJSON() ([]byte, error) {
 	wire := applyErrorWire{
 		Schema:      ErrorSchemaID,
-		Source:      e.source,
+		Source:      e.source.String(),
 		Stage:       e.stage,
 		Reason:      e.reason,
 		Where:       e.where,
 		Impact:      e.impact,
 		Fix:         e.fix,
-		Remediation: e.remediation,
+		Remediation: e.remediation.String(),
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

@@ -1,0 +1,14 @@
+schema: pasture.install.registry/v1
+global_installations: []
+project_installations:
+  - &row
+    canonical_project_root: /srv/alpha
+    cell: claude-code.skills
+    source: installer
+    strategy: direct-file
+    managed: true
+    observation: installed
+    trust: not-applicable
+    last_operation: ensure
+    last_outcome: completed
+  - *row

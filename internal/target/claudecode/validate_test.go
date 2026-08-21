@@ -3,6 +3,8 @@ package claudecode_test
 import (
 	"testing"
 
+	"github.com/dayvidpham/pasture/artifact"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -48,9 +50,9 @@ func TestValidateAgentFidelityRejectsRemovedTeamLifecycleGrant(t *testing.T) {
 		".claude-plugin/plugin.json": `{"name":"pasture-agents","version":"0.0.4"}`,
 		"agents/rogue.md":            "---\nname: rogue\ntools: Read, Bash, TeamCreate, SendMessage\n---\n\nRogue agent.\n",
 	})
-	agentsID, err := claudecode.NewComponentID(claudecode.AgentsComponentID)
+	agentsID, err := artifact.NewComponentID(artifact.HarnessClaudeCode, artifact.ExtensionAgents)
 	require.NoError(t, err)
-	agentsComponent, err := claudecode.NewComponent(claudecode.AgentsKind(), agentsID, forgedAgents, false)
+	agentsComponent, err := claudecode.NewComponent(agentsID, forgedAgents, false)
 	require.NoError(t, err)
 
 	contract := runtime.ClaudeCode2_1_210().ID()

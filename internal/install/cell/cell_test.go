@@ -46,7 +46,8 @@ func TestNewRejectsUnknownHarnessAndZeroExtension(t *testing.T) {
 	if _, err := cell.New(ir.HarnessID("gemini"), cell.SkillsAxis()); err == nil {
 		t.Error("New with unknown harness = nil error, want rejection")
 	}
-	if _, err := cell.New(ir.HarnessClaudeCode, cell.Extension{}); err == nil {
+	var invalidExtension cell.Extension
+	if _, err := cell.New(ir.HarnessClaudeCode, invalidExtension); err == nil {
 		t.Error("New with zero extension = nil error, want rejection")
 	}
 }

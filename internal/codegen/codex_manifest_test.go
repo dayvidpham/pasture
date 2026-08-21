@@ -48,6 +48,32 @@ func TestCodexManifestDeclaresThreePackages(t *testing.T) {
 	}
 }
 
+func TestCodexGlobalHooksEmitterIsSeparateFromProjectConfiguration(t *testing.T) {
+	t.Parallel()
+	events := runtime.CodexLifecycleEvents()
+	names := make([]string, len(events))
+	for index, event := range events {
+		names[index] = event.NativeName()
+	}
+	project, err := renderCodexHooksConfig(names)
+	if err != nil {
+		t.Fatal(err)
+	}
+	global, err := EmitCodexGlobalHooksConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if global.Path != ".codex/hooks.json" {
+		t.Fatalf("global hooks path = %q", global.Path)
+	}
+	if !strings.Contains(project, "sh .codex/hooks/events/") || strings.Contains(project, "sh ~/.codex/hooks/events/") {
+		t.Fatal("project hook configuration semantics changed while adding the global emitter")
+	}
+	if strings.Contains(global.Content, "sh .codex/hooks/events/") || !strings.Contains(global.Content, "sh ~/.codex/hooks/events/") {
+		t.Fatal("global hook configuration does not exclusively address user-wide runners")
+	}
+}
+
 // TestCodexManifestIsDeterministic proves the manifest renderer is pure.
 func TestCodexManifestIsDeterministic(t *testing.T) {
 	t.Parallel()
