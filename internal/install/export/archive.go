@@ -203,7 +203,7 @@ func ReadArchive(source io.Reader) ([]Member, error) {
 			"component archive read", "a valid gzip stream",
 			fmt.Sprintf("the gzip header could not be read: %v", err),
 			"the archive cannot be verified and must not be published",
-			"rebuild the archive with the component export verb", err)
+			"rebuild the archive with `pasture bundle export`", err)
 	}
 	defer decompressor.Close()
 	archive := tar.NewReader(decompressor)
@@ -218,7 +218,7 @@ func ReadArchive(source io.Reader) ([]Member, error) {
 				"component archive read", "a complete tar stream",
 				fmt.Sprintf("the next member header could not be read: %v", err),
 				"the archive cannot be verified and must not be published",
-				"rebuild the archive with the component export verb", err)
+				"rebuild the archive with `pasture bundle export`", err)
 		}
 		member, err := memberFromHeader(header, archive)
 		if err != nil {
@@ -231,7 +231,7 @@ func ReadArchive(source io.Reader) ([]Member, error) {
 			"component archive read", "the gzip stream ends cleanly",
 			fmt.Sprintf("the gzip trailer is invalid: %v", err),
 			"the archive cannot be verified and must not be published",
-			"rebuild the archive with the component export verb", err)
+			"rebuild the archive with `pasture bundle export`", err)
 	}
 	return members, nil
 }
@@ -251,7 +251,7 @@ func memberFromHeader(header *tar.Header, body io.Reader) (Member, error) {
 				"component archive read", "each member's bytes are readable",
 				fmt.Sprintf("the body of %q could not be read: %v", name, err),
 				"the archive cannot be verified and must not be published",
-				"rebuild the archive with the component export verb", err)
+				"rebuild the archive with `pasture bundle export`", err)
 		}
 		member.Digest = artifact.DigestBytes(content)
 		member.Size = int64(len(content))
@@ -260,7 +260,7 @@ func memberFromHeader(header *tar.Header, body io.Reader) (Member, error) {
 			"component archive read", "only directory and regular-file members",
 			fmt.Sprintf("member %q has unsupported tar type %q", name, string(header.Typeflag)),
 			"symlinks, devices, and other special members cannot be installed portably",
-			"rebuild the archive with the component export verb", fs.ErrInvalid)
+			"rebuild the archive with `pasture bundle export`", fs.ErrInvalid)
 	}
 	entryPath, err := artifact.NewPath(name)
 	if err != nil {
@@ -268,7 +268,7 @@ func memberFromHeader(header *tar.Header, body io.Reader) (Member, error) {
 			"component archive read", "every member path is a canonical relative bundle path",
 			fmt.Sprintf("member path %q is not canonical: %v", name, err),
 			"an archived member could escape its installation root",
-			"rebuild the archive with the component export verb", err)
+			"rebuild the archive with `pasture bundle export`", err)
 	}
 	member.Path = entryPath.String()
 	return member, nil

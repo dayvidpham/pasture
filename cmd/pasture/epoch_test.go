@@ -16,8 +16,16 @@ func TestCLI_EpochInventoryAndRetiredAdapter(t *testing.T) {
 	if root.exitCode != 0 {
 		t.Fatalf("root help exit %d: %s", root.exitCode, root.stderr)
 	}
-	if got, want := commandNames(root.stdout), []string{"epoch", "hook", "install", "migrate", "status", "task", "uninstall"}; !sameStrings(got, want) {
+	if got, want := commandNames(root.stdout), []string{"bundle", "epoch", "hook", "install", "migrate", "status", "task", "uninstall"}; !sameStrings(got, want) {
 		t.Fatalf("root commands = %v, want %v\n%s", got, want, root.stdout)
+	}
+
+	bundle := runCLI(t, "bundle", "--help")
+	if bundle.exitCode != 0 {
+		t.Fatalf("bundle help exit %d: %s", bundle.exitCode, bundle.stderr)
+	}
+	if got, want := commandNames(bundle.stdout), []string{"export"}; !sameStrings(got, want) {
+		t.Fatalf("bundle commands = %v, want %v\n%s", got, want, bundle.stdout)
 	}
 	if strings.Contains(root.stdout, "__adapter") {
 		t.Fatalf("hidden adapter appeared in ordinary root help:\n%s", root.stdout)

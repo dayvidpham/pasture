@@ -3,7 +3,7 @@
 This document is the canonical specification of the archives written by
 
 ```
-pasture install export-components --version <X.Y.Z> --out <DIR>
+pasture bundle export --version <X.Y.Z> --out <DIR>
 ```
 
 One archive is written per harness/extension cell of the closed three-by-three

@@ -11,22 +11,22 @@ import (
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
-// runInstallExportComponents builds the nine immutable component archives and
+// runBundleExport builds the nine immutable component archives and
 // the component-set document a release producer consumes. The bundle source is
 // injected so tests exercise this exact production path with small synthetic
 // bundles instead of the embedded target assets.
-func runInstallExportComponents(cmd *cobra.Command, source export.BundleSource) error {
+func runBundleExport(cmd *cobra.Command, source export.BundleSource) error {
 	versionValue, _ := cmd.Flags().GetString("version")
 	outValue, _ := cmd.Flags().GetString("out")
 	if versionValue == "" {
-		return fmt.Errorf("install export-components: --version is required; pass the release version the assets are named for, for example 1.4.0")
+		return fmt.Errorf("bundle export: --version is required; pass the release version the assets are named for, for example 1.4.0")
 	}
 	if outValue == "" {
-		return fmt.Errorf("install export-components: --out is required; pass a new directory path to claim for the exported assets")
+		return fmt.Errorf("bundle export: --out is required; pass a new directory path to claim for the exported assets")
 	}
 	version, err := artifact.ParseVersion(versionValue)
 	if err != nil {
-		return fmt.Errorf("install export-components: --version %q is not a release version: %w", versionValue, err)
+		return fmt.Errorf("bundle export: --version %q is not a release version: %w", versionValue, err)
 	}
 	result, err := export.Export(cmd.Context(), export.Request{Version: version, OutDir: outValue}, source)
 	if err != nil {
@@ -93,14 +93,14 @@ func writeExportText(w io.Writer, result export.Result) error {
 	return nil
 }
 
-func newInstallExportComponentsCommand(source export.BundleSource) *cobra.Command {
+func newBundleExportCommand(source export.BundleSource) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "export-components",
+		Use:   "export",
 		Short: "Export the nine release component archives and their component set",
-		Long: `export-components writes one immutable component archive per harness/extension
-cell, plus the component-set document a release producer consumes.
+		Long: `export writes one immutable component archive per harness/extension cell, plus
+the component-set document a release producer consumes.
 
-  pasture install export-components --version 1.4.0 --out ./build/1.4.0
+  pasture bundle export --version 1.4.0 --out ./build/1.4.0
 
 Every archive is built from the same embedded target descriptors the installer
 activates: its members, their paths, and their permission modes come from that
@@ -114,7 +114,7 @@ partial set can never be published. The archive format is specified in
 docs/component-archive-format.md.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInstallExportComponents(cmd, source)
+			return runBundleExport(cmd, source)
 		},
 	}
 	cmd.Flags().String("version", "", "Release version the assets are named for, without a leading v (for example 1.4.0)")
@@ -123,8 +123,8 @@ docs/component-archive-format.md.`,
 	return cmd
 }
 
-var installExportComponentsCmd = newInstallExportComponentsCommand(export.EmbeddedBundles)
+var bundleExportCmd = newBundleExportCommand(export.EmbeddedBundles)
 
 func init() {
-	installCmd.AddCommand(installExportComponentsCmd)
+	bundleCmd.AddCommand(bundleExportCmd)
 }

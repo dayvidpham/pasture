@@ -15,9 +15,9 @@ import (
 	"github.com/dayvidpham/pasture/internal/install/export"
 )
 
-// exportTestSource builds one tiny real bundle per canonical cell so the verb
+// bundleExportTestSource builds one tiny real bundle per canonical cell so the verb
 // test runs the production command path without the embedded asset trees.
-func exportTestSource(t *testing.T) export.BundleSource {
+func bundleExportTestSource(t *testing.T) export.BundleSource {
 	t.Helper()
 	cells := make([]export.CellBundle, 0, 9)
 	for _, id := range artifact.ComponentIDs() {
@@ -47,9 +47,9 @@ func exportTestSource(t *testing.T) export.BundleSource {
 	return func() ([]export.CellBundle, error) { return cells, nil }
 }
 
-func runExportVerb(t *testing.T, source export.BundleSource, args ...string) (string, error) {
+func runBundleExportVerb(t *testing.T, source export.BundleSource, args ...string) (string, error) {
 	t.Helper()
-	cmd := newInstallExportComponentsCommand(source)
+	cmd := newBundleExportCommand(source)
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
@@ -58,9 +58,9 @@ func runExportVerb(t *testing.T, source export.BundleSource, args ...string) (st
 	return out.String(), err
 }
 
-func TestInstallExportComponents_WritesAssetsAndComponentSet(t *testing.T) {
+func TestBundleExport_WritesAssetsAndComponentSet(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "release")
-	output, err := runExportVerb(t, exportTestSource(t), "--version", "1.4.0", "--out", outDir)
+	output, err := runBundleExportVerb(t, bundleExportTestSource(t), "--version", "1.4.0", "--out", outDir)
 	if err != nil {
 		t.Fatalf("export verb: %v (output: %s)", err, output)
 	}
@@ -81,9 +81,9 @@ func TestInstallExportComponents_WritesAssetsAndComponentSet(t *testing.T) {
 	}
 }
 
-func TestInstallExportComponents_JSONReportMatchesWrittenBytes(t *testing.T) {
+func TestBundleExport_JSONReportMatchesWrittenBytes(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "release")
-	output, err := runExportVerb(t, exportTestSource(t), "--version", "1.4.0", "--out", outDir, "--json")
+	output, err := runBundleExportVerb(t, bundleExportTestSource(t), "--version", "1.4.0", "--out", outDir, "--json")
 	if err != nil {
 		t.Fatalf("export verb: %v (output: %s)", err, output)
 	}
@@ -111,22 +111,22 @@ func TestInstallExportComponents_JSONReportMatchesWrittenBytes(t *testing.T) {
 	}
 }
 
-func TestInstallExportComponents_RejectsMissingAndInvalidFlags(t *testing.T) {
-	source := exportTestSource(t)
+func TestBundleExport_RejectsMissingAndInvalidFlags(t *testing.T) {
+	source := bundleExportTestSource(t)
 	outDir := filepath.Join(t.TempDir(), "release")
 	cases := []struct {
 		name string
 		args []string
 		want string
 	}{
-		{name: "no version", args: []string{"--out", outDir}, want: "--version is required"},
-		{name: "no output", args: []string{"--version", "1.4.0"}, want: "--out is required"},
+		{name: "no version", args: []string{"--out", outDir}, want: "bundle export: --version is required"},
+		{name: "no output", args: []string{"--version", "1.4.0"}, want: "bundle export: --out is required"},
 		{name: "leading v", args: []string{"--version", "v1.4.0", "--out", outDir}, want: "is not a release version"},
 		{name: "positional argument", args: []string{"--version", "1.4.0", "--out", outDir, "extra"}, want: "unknown command"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			_, err := runExportVerb(t, source, testCase.args...)
+			_, err := runBundleExportVerb(t, source, testCase.args...)
 			if err == nil {
 				t.Fatalf("verb accepted %v", testCase.args)
 			}
@@ -140,22 +140,36 @@ func TestInstallExportComponents_RejectsMissingAndInvalidFlags(t *testing.T) {
 	}
 }
 
-// The verb must be reachable as a subcommand of the human-facing install verb
-// without shadowing its positional harness/extension grammar.
-func TestInstallExportComponents_IsWiredUnderInstall(t *testing.T) {
+// The verb lives under the top-level bundle command, and nowhere else: the
+// installer family must not carry a release-production surface.
+func TestBundleExport_IsWiredUnderBundle(t *testing.T) {
 	var found *cobra.Command
-	for _, sub := range installCmd.Commands() {
-		if sub.Name() == "export-components" {
+	for _, sub := range bundleCmd.Commands() {
+		if sub.Name() == "export" {
 			found = sub
 		}
 	}
 	if found == nil {
-		t.Fatal("export-components is not registered under the install verb")
+		t.Fatal("export is not registered under the bundle command")
 	}
 	for _, flagName := range []string{"version", "out", "json"} {
 		if found.Flags().Lookup(flagName) == nil {
-			t.Fatalf("export-components has no --%s flag", flagName)
+			t.Fatalf("bundle export has no --%s flag", flagName)
 		}
+	}
+	for _, sub := range installCmd.Commands() {
+		if strings.HasPrefix(sub.Name(), "export") {
+			t.Fatalf("the install family still carries a release-production verb %q", sub.Name())
+		}
+	}
+	var registered *cobra.Command
+	for _, sub := range rootCmd.Commands() {
+		if sub.Name() == "bundle" {
+			registered = sub
+		}
+	}
+	if registered == nil {
+		t.Fatal("bundle is not registered as a top-level command")
 	}
 }
 
