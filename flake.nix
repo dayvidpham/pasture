@@ -88,6 +88,25 @@
           '';
         });
 
+        # The installer integration suite drives the built production
+        # `pasture` binary through its real CLI surface from unrelated
+        # temporary roots, against an isolated Claude Code host stand-in built
+        # from testdata. It needs cgo for -race and no network access.
+        installer-check = pkgs.buildGoModule (commonAttrs // {
+          pname = "pasture-installer-integration";
+          subPackages = [ "cmd/pasture" ];
+          env.CGO_ENABLED = "1";
+          doCheck = true;
+          checkPhase = ''
+            runHook preCheck
+            # See race-check: -trimpath breaks tests that locate repo-root
+            # testdata through runtime.Caller and the module root.
+            export GOFLAGS="''${GOFLAGS//-trimpath/}"
+            go test -race -count=1 ./internal/install/...
+            runHook postCheck
+          '';
+        });
+
         devShell = pkgs.mkShell {
           name = "pasture-dev";
           packages = with pkgs; [
@@ -123,6 +142,7 @@
         checks = {
           race = race-check;
           cgo-disabled-build = pasture-bundle;
+          installer = installer-check;
         };
       }
     );
