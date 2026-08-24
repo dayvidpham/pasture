@@ -76,6 +76,17 @@ list against a bundle manifest, member for member. The export verb runs this
 check against every archive it writes before reporting success, so a written
 archive is proven to match the target descriptor it claims to carry.
 
+The tests in `internal/install/export` additionally decode real exported
+archives with the Go standard library's `archive/tar` and `compress/gzip`,
+rather than with this package's own reader, so the format is checked by an
+independent decoder.
+
+The **authoritative cross-check against the consumer is the release pipeline**:
+it runs the real aggregate release producer over real export output before any
+release is published. The producer's document shape is mirrored inside this
+package's tests only as a representative fixture — it is a convenience check,
+not the contract, and it can drift from the producer without failing here.
+
 ## Output directory
 
 `--out DIR` is claimed, never merged: the directory must not already exist, it
@@ -92,7 +103,7 @@ exactly nine records in the canonical component order, each with:
 | Field | Value |
 |---|---|
 | `id` | the canonical `<harness>/<extension>` component identity |
-| `artifact` | the archive path, relative to `components.json` (its basename) |
+| `artifact` | the archive path, relative to `components.json` (always its basename, so `artifact` and `asset` are identical in exported documents) |
 | `asset` | the canonical release asset basename |
 | `bundle_id` | the exact `artifact.BundleID` of the cell's target bundle |
 

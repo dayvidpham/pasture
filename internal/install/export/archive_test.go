@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -162,5 +163,164 @@ func TestReadArchive_RejectsNonArchiveBytes(t *testing.T) {
 	t.Parallel()
 	if _, err := export.ReadArchive(strings.NewReader("not an archive")); err == nil {
 		t.Fatal("read accepted bytes that are not a gzip stream")
+	}
+}
+
+// repackage rewrites an archive through the standard library, applying an
+// optional per-member header mutation. It builds the tamper cases without
+// going through the export writer, so verification is tested against bytes the
+// export path would never produce.
+func repackage(t *testing.T, content []byte, mutate func(*tar.Header)) []byte {
+	t.Helper()
+	decompressor, err := gzip.NewReader(bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("gzip reader: %v", err)
+	}
+	defer decompressor.Close()
+	reader := tar.NewReader(decompressor)
+	var buffer bytes.Buffer
+	compressor := gzip.NewWriter(&buffer)
+	writer := tar.NewWriter(compressor)
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read member: %v", err)
+		}
+		body, err := io.ReadAll(reader)
+		if err != nil {
+			t.Fatalf("read member body: %v", err)
+		}
+		rewritten := *header
+		if mutate != nil {
+			mutate(&rewritten)
+		}
+		if err := writer.WriteHeader(&rewritten); err != nil {
+			t.Fatalf("write member header: %v", err)
+		}
+		if _, err := writer.Write(body); err != nil {
+			t.Fatalf("write member body: %v", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+	if err := compressor.Close(); err != nil {
+		t.Fatalf("close gzip: %v", err)
+	}
+	return buffer.Bytes()
+}
+
+// A member whose permission bits diverge from the manifest is a different
+// artifact: an executable hook that arrives as 0644 silently fails to run.
+func TestVerifyArchive_RejectsMutatedMode(t *testing.T) {
+	t.Parallel()
+	id := artifact.ComponentIDs()[0]
+	bundle := newBundle(t,
+		leaf{path: "run.sh", mode: 0o755, body: "#!/bin/sh\necho hello\n"},
+		leaf{path: "notes.md", mode: 0o644, body: "notes\n"},
+	)
+	content := writeArchive(t, bundle)
+	if err := export.VerifyArchive(id, "in-memory", content, bundle); err != nil {
+		t.Fatalf("verify unmodified archive: %v", err)
+	}
+	tampered := repackage(t, content, func(header *tar.Header) {
+		if header.Name == "run.sh" {
+			header.Mode = 0o644
+		}
+	})
+	err := export.VerifyArchive(id, "in-memory", tampered, bundle)
+	if err == nil {
+		t.Fatal("verification accepted an archive whose member mode differs from the manifest")
+	}
+	if !strings.Contains(err.Error(), "0644") || !strings.Contains(err.Error(), "0755") {
+		t.Fatalf("verification failure does not name both modes: %v", err)
+	}
+}
+
+// Reordered members are also a mismatch: the format pins lexicographic order so
+// two builds of one bundle compare byte for byte.
+func TestVerifyArchive_RejectsReorderedMembers(t *testing.T) {
+	t.Parallel()
+	id := artifact.ComponentIDs()[0]
+	bundle := newBundle(t,
+		leaf{path: "alpha.md", mode: 0o644, body: "alpha\n"},
+		leaf{path: "beta.md", mode: 0o644, body: "beta\n"},
+	)
+	content := writeArchive(t, bundle)
+	reordered := reverseMembers(t, content)
+	if err := export.VerifyArchive(id, "in-memory", reordered, bundle); err == nil {
+		t.Fatal("verification accepted an archive whose members are out of canonical order")
+	}
+}
+
+func reverseMembers(t *testing.T, content []byte) []byte {
+	t.Helper()
+	decompressor, err := gzip.NewReader(bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("gzip reader: %v", err)
+	}
+	defer decompressor.Close()
+	reader := tar.NewReader(decompressor)
+	type member struct {
+		header tar.Header
+		body   []byte
+	}
+	members := make([]member, 0, 4)
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read member: %v", err)
+		}
+		body, err := io.ReadAll(reader)
+		if err != nil {
+			t.Fatalf("read member body: %v", err)
+		}
+		members = append(members, member{header: *header, body: body})
+	}
+	var buffer bytes.Buffer
+	compressor := gzip.NewWriter(&buffer)
+	writer := tar.NewWriter(compressor)
+	for index := len(members) - 1; index >= 0; index-- {
+		if err := writer.WriteHeader(&members[index].header); err != nil {
+			t.Fatalf("write member header: %v", err)
+		}
+		if _, err := writer.Write(members[index].body); err != nil {
+			t.Fatalf("write member body: %v", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+	if err := compressor.Close(); err != nil {
+		t.Fatalf("close gzip: %v", err)
+	}
+	return buffer.Bytes()
+}
+
+// goldenSyntheticArchiveDigest pins the exact bytes the format produces for the
+// fixture bundle below. A change here means the archive bytes changed: either
+// this package changed the format (which must be a deliberate, documented
+// change), or the Go toolchain's DEFLATE implementation changed, which
+// legitimately updates this constant — see the determinism section of
+// docs/component-archive-format.md.
+const goldenSyntheticArchiveDigest = "sha256:8c62445d35421a81c5bf32e0499485e5811f8986c01f5016dfaa1b42d240e82c"
+
+func TestWriteArchive_MatchesTheGoldenDigest(t *testing.T) {
+	t.Parallel()
+	bundle := newBundle(t,
+		leaf{path: "alpha/nested.json", mode: 0o644, body: "{\"cell\":\"golden\"}\n"},
+		leaf{path: "alpha/run.sh", mode: 0o755, body: "#!/bin/sh\necho golden\n"},
+		leaf{path: "zebra.md", mode: 0o644, body: "zebra for golden\n"},
+	)
+	digest := artifact.DigestBytes(writeArchive(t, bundle))
+	if digest.String() != goldenSyntheticArchiveDigest {
+		t.Fatalf("archive digests to %s, want the pinned %s; if this follows a deliberate format change or a Go toolchain flate change, update the constant and say so in the commit",
+			digest, goldenSyntheticArchiveDigest)
 	}
 }

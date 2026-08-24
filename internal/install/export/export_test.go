@@ -134,8 +134,17 @@ func TestExport_RefusesAnExistingOutputDirectory(t *testing.T) {
 	if err == nil {
 		t.Fatal("export claimed a directory that already exists")
 	}
-	if !strings.Contains(err.Error(), "already") && !strings.Contains(err.Error(), "exists") {
-		t.Fatalf("failure does not explain the claimed directory: %v", err)
+	// Pin the exact operator-facing refusal: it must name the directory it
+	// refused to claim and tell the operator what to do instead.
+	for _, fragment := range []string{
+		"a new, unclaimed output directory",
+		outDir,
+		"any existing export is preserved and will not be overwritten",
+		"choose a new directory path whose parent already exists",
+	} {
+		if !strings.Contains(err.Error(), fragment) {
+			t.Fatalf("refusal message is missing %q: %v", fragment, err)
+		}
 	}
 	if _, statErr := os.Stat(existing); statErr != nil {
 		t.Fatalf("export disturbed the existing directory: %v", statErr)
@@ -297,5 +306,41 @@ func TestExport_ComponentSetMatchesTheProducerContract(t *testing.T) {
 		if statErr != nil || !info.Mode().IsRegular() {
 			t.Fatalf("record %d artifact %q does not resolve to a regular file: %v", index, record.Artifact, statErr)
 		}
+	}
+}
+
+// countingContext reports cancellation only after a fixed number of checks, so
+// the guard that runs after the last archive — and before the component set is
+// written — can be exercised deterministically, without timing.
+type countingContext struct {
+	context.Context
+	checks    int
+	cancelAt  int
+	cancelled error
+}
+
+func (c *countingContext) Err() error {
+	c.checks++
+	if c.checks > c.cancelAt {
+		return c.cancelled
+	}
+	return nil
+}
+
+func TestExport_RemovesTheDirectoryWhenCancelledAfterTheLastArchive(t *testing.T) {
+	t.Parallel()
+	outDir := filepath.Join(t.TempDir(), "release")
+	// One check precedes each of the nine archives; the tenth is the guard that
+	// protects the component-set write.
+	ctx := &countingContext{Context: context.Background(), cancelAt: len(artifact.ComponentIDs()), cancelled: context.Canceled}
+	_, err := export.Export(ctx, export.Request{Version: mustVersion(t, "1.4.0"), OutDir: outDir}, syntheticSource(t))
+	if err == nil {
+		t.Fatal("export reported success after the context was cancelled")
+	}
+	if !strings.Contains(err.Error(), "component set") {
+		t.Fatalf("failure does not name the step that was abandoned: %v", err)
+	}
+	if _, statErr := os.Stat(outDir); !os.IsNotExist(statErr) {
+		t.Fatalf("cancelled export left the output directory behind: %v", statErr)
 	}
 }

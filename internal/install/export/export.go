@@ -54,18 +54,18 @@ type Result struct {
 // behind, so a partial set can never be published.
 func Export(ctx context.Context, request Request, source BundleSource) (result Result, err error) {
 	if ctx == nil {
-		return Result{}, exportFault(
+		return Result{}, archiveFault(
 			"component export", "a non-nil context", "the caller passed a nil context",
 			"cancellation could not be observed", "pass the command context", fs.ErrInvalid)
 	}
 	if request.Version.String() == "" {
-		return Result{}, exportFault(
+		return Result{}, archiveFault(
 			"component export", "a parsed release version", "the request version was not constructed",
 			"the assets could not be tied to one immutable release",
 			"parse the version with artifact.ParseVersion", fs.ErrInvalid)
 	}
 	if source == nil {
-		return Result{}, exportFault(
+		return Result{}, archiveFault(
 			"component export", "a bundle source", "the bundle source is nil",
 			"no target bundles could be read", "pass EmbeddedBundles or a test source", fs.ErrInvalid)
 	}
@@ -75,13 +75,13 @@ func Export(ctx context.Context, request Request, source BundleSource) (result R
 	}
 	outDir, err := filepath.Abs(request.OutDir)
 	if err != nil {
-		return Result{}, exportFault(
+		return Result{}, archiveFault(
 			"component export", "an absolute output directory",
 			fmt.Sprintf("output directory %q could not be resolved: %v", request.OutDir, err),
 			"the destination could not be claimed", "pass a valid new directory path", err)
 	}
 	if err := os.Mkdir(outDir, 0o755); err != nil {
-		return Result{}, exportFault(
+		return Result{}, archiveFault(
 			"component export", "a new, unclaimed output directory",
 			fmt.Sprintf("output directory %q could not be created: %v", outDir, err),
 			"any existing export is preserved and will not be overwritten",
@@ -93,7 +93,7 @@ func Export(ctx context.Context, request Request, source BundleSource) (result R
 			return
 		}
 		if cleanupErr := os.RemoveAll(outDir); cleanupErr != nil {
-			err = exportFault(
+			err = archiveFault(
 				"component export cleanup", "the incomplete output directory is removed",
 				fmt.Sprintf("directory %q could not be removed: %v", outDir, cleanupErr),
 				"partial export bytes remain and must not be published",
@@ -104,7 +104,7 @@ func Export(ctx context.Context, request Request, source BundleSource) (result R
 	cells := make([]CellResult, 0, len(bundles))
 	for _, id := range artifact.ComponentIDs() {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return Result{}, exportFault(
+			return Result{}, archiveFault(
 				"component export", "the export runs to completion",
 				fmt.Sprintf("the context was cancelled before component %s was written: %v", id, ctxErr),
 				"the incomplete export directory is removed and nothing is published",
@@ -112,7 +112,7 @@ func Export(ctx context.Context, request Request, source BundleSource) (result R
 		}
 		bundle, ok := bundles[id]
 		if !ok {
-			return Result{}, exportFault(
+			return Result{}, archiveFault(
 				"component export", "the bundle source yields every canonical component",
 				fmt.Sprintf("the bundle source omitted component %s", id),
 				"the export would cover less than the complete installation matrix",
@@ -125,13 +125,20 @@ func Export(ctx context.Context, request Request, source BundleSource) (result R
 		cells = append(cells, cellResult)
 	}
 
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return Result{}, archiveFault(
+			"component export", "the export runs to completion",
+			fmt.Sprintf("the context was cancelled after the last archive but before the component set was written: %v", ctxErr),
+			"the incomplete export directory is removed and nothing is published",
+			"rerun the export without cancelling it", ctxErr)
+	}
 	document, err := MarshalComponentSet(cells)
 	if err != nil {
 		return Result{}, err
 	}
 	componentSetPath := filepath.Join(outDir, ComponentSetFilename)
 	if err := os.WriteFile(componentSetPath, document, 0o644); err != nil {
-		return Result{}, exportFault(
+		return Result{}, archiveFault(
 			"component export", "the component set is written",
 			fmt.Sprintf("component set %q could not be written: %v", componentSetPath, err),
 			"the incomplete export directory is removed and nothing is published",
@@ -155,7 +162,7 @@ func writeCell(version artifact.Version, outDir string, id artifact.ComponentID,
 	archivePath := filepath.Join(outDir, asset)
 	file, err := os.OpenFile(archivePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
-		return CellResult{}, exportFault(
+		return CellResult{}, archiveFault(
 			"component archive write", "each asset basename is claimed exactly once",
 			fmt.Sprintf("archive %q could not be created for component %s: %v", archivePath, id, err),
 			"the incomplete export directory is removed and nothing is published",
@@ -167,7 +174,7 @@ func writeCell(version artifact.Version, outDir string, id artifact.ComponentID,
 		return CellResult{}, writeErr
 	}
 	if closeErr != nil {
-		return CellResult{}, exportFault(
+		return CellResult{}, archiveFault(
 			"component archive write", "each archive is flushed and closed",
 			fmt.Sprintf("archive %q could not be closed for component %s: %v", archivePath, id, closeErr),
 			"the incomplete export directory is removed and nothing is published",
@@ -175,7 +182,7 @@ func writeCell(version artifact.Version, outDir string, id artifact.ComponentID,
 	}
 	content, err := os.ReadFile(archivePath)
 	if err != nil {
-		return CellResult{}, exportFault(
+		return CellResult{}, archiveFault(
 			"component archive verification", "each written archive is readable",
 			fmt.Sprintf("archive %q could not be re-read for component %s: %v", archivePath, id, err),
 			"the archive could not be proven to match its target bundle",
@@ -203,14 +210,14 @@ func indexBundles(source BundleSource) (map[artifact.ComponentID]artifact.Bundle
 	index := make(map[artifact.ComponentID]artifact.Bundle, len(cells))
 	for _, item := range cells {
 		if !item.ID.IsValid() {
-			return nil, exportFault(
+			return nil, archiveFault(
 				"component export", "every source cell names a canonical component",
 				"the bundle source yielded a zero or unsupported component coordinate",
 				"the export could not be addressed to an installation cell",
 				"yield one cell per artifact.ComponentIDs entry", fs.ErrInvalid)
 		}
 		if _, duplicate := index[item.ID]; duplicate {
-			return nil, exportFault(
+			return nil, archiveFault(
 				"component export", "every component appears at most once",
 				fmt.Sprintf("the bundle source yielded component %s more than once", item.ID),
 				"the exported bytes for that cell would be ambiguous",
@@ -219,8 +226,4 @@ func indexBundles(source BundleSource) (map[artifact.ComponentID]artifact.Bundle
 		index[item.ID] = item.Bundle
 	}
 	return index, nil
-}
-
-func exportFault(operation, rule, reason, impact, fix string, cause error) error {
-	return archiveFault(operation, rule, reason, impact, fix, cause)
 }
