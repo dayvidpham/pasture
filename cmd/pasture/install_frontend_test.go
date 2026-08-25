@@ -147,3 +147,79 @@ func TestApplyCell_InjectedFailureReturnsActionableNonzeroStatus(t *testing.T) {
 		t.Fatalf("Cobra failure output lost actionable diagnostic: %q", output.String())
 	}
 }
+
+// TestWriteApplyText_RowsCarryTheirLiveObservation pins the text rendering of
+// apply rows through the production writer.
+//
+// The first row is the case this pin exists for: when a group's control cell
+// fails, its siblings keep the facts of their live probe, so the row is a
+// probe result rather than an applied action. Printing operation and status
+// alone made such a row read as "ensure completed" for a cell that was neither
+// attempted nor installed; the observation column makes the row truthful.
+func TestWriteApplyText_RowsCarryTheirLiveObservation(t *testing.T) {
+	hooks, err := cell.New(ir.HarnessClaudeCode, cell.HooksAxis())
+	if err != nil {
+		t.Fatal(err)
+	}
+	skills, err := cell.New(ir.HarnessClaudeCode, cell.SkillsAxis())
+	if err != nil {
+		t.Fatal(err)
+	}
+	codexSkills, err := cell.New(ir.HarnessCodex, cell.SkillsAxis())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := apply.NewResult(apply.InstallerSource(), registry.ScopeGlobal, false, []apply.ActionRow{
+		apply.NewActionRow(hooks, apply.Ensure(), apply.Completed(), apply.ManagementPasture, registry.ObservationAbsent, "exact split plugin is absent"),
+		apply.NewActionRow(skills, apply.Ensure(), apply.Completed(), apply.ManagementPasture, registry.ObservationInstalled, "exact split plugin is installed"),
+		apply.NewActionRow(codexSkills, apply.Ensure(), apply.Unattempted(), apply.ManagementUnknown, registry.ObservationInvalid, "an earlier canonical cell failed; this cell was not attempted"),
+	})
+
+	var buf bytes.Buffer
+	if err := writeApplyText(&buf, result); err != nil {
+		t.Fatalf("writeApplyText: %v", err)
+	}
+	want := "apply installer (global): failed\n" +
+		"  claude-code.hooks    ensure   completed               observation: absent    exact split plugin is absent\n" +
+		"  claude-code.skills   ensure   completed               observation: installed exact split plugin is installed\n" +
+		"  codex.skills         ensure   unattempted                                    an earlier canonical cell failed; this cell was not attempted\n"
+	if buf.String() != want {
+		t.Fatalf("apply text mismatch:\n got: %q\nwant: %q", buf.String(), want)
+	}
+}
+
+// TestApplyTextRow_UnobservedRowLeavesNoTrailingWhitespace proves the blank
+// observation column never becomes trailing noise on a row without a
+// diagnostic.
+func TestApplyTextRow_UnobservedRowLeavesNoTrailingWhitespace(t *testing.T) {
+	skills, err := cell.New(ir.HarnessOpenCode, cell.SkillsAxis())
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := applyTextRow(apply.NewActionRow(skills, apply.Inspect(), apply.NoOp(), apply.ManagementUnknown, registry.ObservationInvalid, ""))
+	if line != "  opencode.skills      inspect  no_op" {
+		t.Fatalf("unobserved row rendered %q", line)
+	}
+}
+
+// TestApplyTextRow_WidestStatusKeepsColumnsAligned pins applyStatusWidth
+// against apply.InstalledPendingTrust ("installed_pending_trust", 23
+// characters — the longest name in the canonical status list). If
+// applyStatusWidth were narrower than this, the row's status field would run
+// straight into the observation column instead of leaving the pinned
+// single-space separator.
+func TestApplyTextRow_WidestStatusKeepsColumnsAligned(t *testing.T) {
+	skills, err := cell.New(ir.HarnessClaudeCode, cell.SkillsAxis())
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := applyTextRow(apply.NewActionRow(skills, apply.Ensure(), apply.InstalledPendingTrust(), apply.ManagementPasture, registry.ObservationInstalled, "awaiting a trusted activation"))
+	want := "  claude-code.skills   ensure   installed_pending_trust observation: installed awaiting a trusted activation"
+	if line != want {
+		t.Fatalf("widest-status row broke column alignment:\n got: %q\nwant: %q", line, want)
+	}
+	statusEnd := len("  claude-code.skills   ensure   installed_pending_trust")
+	if line[statusEnd] != ' ' || line[statusEnd+1] == ' ' {
+		t.Fatalf("widest status did not leave exactly one separator before the observation column: %q", line)
+	}
+}

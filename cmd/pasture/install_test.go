@@ -368,7 +368,9 @@ func TestCLI_InstallApplyCellTextOutputIsExact(t *testing.T) {
 	if out.exitCode != 0 {
 		t.Fatalf("apply-cell exit %d: %s%s", out.exitCode, out.stdout, out.stderr)
 	}
-	want := "apply installer (global): ok\n  opencode.skills      inspect  no_op                  desired state is false and no Pasture-managed installed or unknown fact authorizes removal\n"
+	// The blank observation column is the honest rendering here: with no
+	// Pasture-managed fact to act on, the cell was never probed.
+	want := "apply installer (global): ok\n  opencode.skills      inspect  no_op                                          desired state is false and no Pasture-managed installed or unknown fact authorizes removal\n"
 	if out.stdout != want {
 		t.Fatalf("text output mismatch:\n got: %q\nwant: %q", out.stdout, want)
 	}
