@@ -33,7 +33,7 @@
           env.CGO_ENABLED = "0";
 
           # Stamp the release identity into every main package that declares a
-          # `version` var (currently cmd/pasture). The linker silently ignores
+          # `version` var (cmd/pasture and cmd/pastured). The linker silently ignores
           # -X for a main package without that symbol, so this is safe for the
           # other binaries. Unstamped builds (plain `go build`) keep their
           # honest "devel" default.
