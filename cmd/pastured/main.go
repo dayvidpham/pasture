@@ -26,7 +26,29 @@ import (
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
-const version = "v0.1.0"
+// version is the release identity reported by `pastured --version` (and by the
+// startup log line). It is a package-level var (not a const) precisely so the
+// linker can stamp it at build time:
+//
+//	go build -ldflags "-X main.version=v0.0.4" ./cmd/pastured
+//
+// The two output shapes are:
+//
+//	stamped (release / nix build): pastured v0.0.4
+//	unstamped (plain `go build`):  pastured devel
+//
+// The unstamped default is the bare word "devel" rather than a synthetic
+// "v0.0.0-*" pseudo-tag so that no consumer scraping the output for a release
+// tag can mistake a development build for a released version: "devel" matches
+// no vX.Y.Z pattern at all.
+//
+// Source-of-truth chain for a stamped build:
+//
+//	.claude-plugin/plugin.json .version
+//	  -> tag v<version>            (.github/workflows/release.yml, detect job)
+//	  -> -X main.version=v<version> (release.yml build job; flake.nix ldflags)
+//	  -> this variable             -> `pastured v<version>`
+var version = "devel"
 
 const engineShutdownTimeout = 10 * time.Second
 
