@@ -10,6 +10,7 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -232,17 +233,28 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		return nil, err
 	}
 
-	dbosCtx, err := dbos.NewDBOSContext(ctx, dbos.Config{
+	// Bounded retry: two processes opening the same fresh database can race
+	// DBOS's non-atomic schema bootstrap, and the loser's error is repaired by
+	// re-running it. See internal/engine/dbosinit.go for the full analysis.
+	dbosCtx, err := newDurableContext(ctx, dbos.NewDBOSContext, dbos.Config{
 		AppName:            appName,
 		SqliteSystemDB:     db,
 		ExecutorID:         executorID,
 		ApplicationVersion: cfg.ApplicationVersion,
 		Logger:             logger,
-	})
+	}, defaultDBOSRetryPolicy())
 	if err != nil {
 		_ = db.Close()
 		if trailCloser != nil {
 			_ = trailCloser.Close()
+		}
+		// newDurableContext already produces an actionable, more specific
+		// error for the failures it recognises (a schema-bootstrap race that
+		// never converged, or a cancelled wait); don't bury it under the
+		// generic one.
+		var structured *pasterrors.StructuredError
+		if errors.As(err, &structured) {
+			return nil, err
 		}
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
