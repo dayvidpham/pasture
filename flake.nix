@@ -14,7 +14,12 @@
           config.allowUnfree = false;
         };
 
-        version = "0.1.0";
+        # Single source of truth for the release identity: the same file the
+        # release workflow reads to decide the tag (.github/workflows/release.yml
+        # detect job tags v<version> from .claude-plugin/plugin.json). Reading it
+        # here means a Nix build can never claim a version the release flow would
+        # not tag, and a tagged release provably reports its own tag.
+        version = (builtins.fromJSON (builtins.readFile ./.claude-plugin/plugin.json)).version;
 
         # Pure Go build — no CGo required (modernc.org/sqlite is pure Go)
         commonAttrs = {
@@ -26,6 +31,13 @@
           vendorHash = "sha256-SlRxNKHoEAcOmrgbXInAtNAdtJCC1UYu640KO+PgQW8=";
 
           env.CGO_ENABLED = "0";
+
+          # Stamp the release identity into every main package that declares a
+          # `version` var (currently cmd/pasture). The linker silently ignores
+          # -X for a main package without that symbol, so this is safe for the
+          # other binaries. Unstamped builds (plain `go build`) keep their
+          # honest "devel" default.
+          ldflags = [ "-X main.version=v${version}" ];
 
           # modernc.org/sqlite requires no native deps; pure Go build
           nativeBuildInputs = [ ];
