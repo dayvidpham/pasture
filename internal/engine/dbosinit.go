@@ -32,10 +32,15 @@ import (
 // failed attempt, so the retry is not a partial-write hazard — it is a fresh
 // read of the file the winner has finished with.
 
-// dbosRaceRetryCeiling caps the total wall-clock time spent re-attempting DBOS
-// initialisation after a lost schema-bootstrap race. It bounds the case where
-// the "already exists" verdict is NOT a race (e.g. a foreign table of the same
-// name in the file) and therefore never converges.
+// dbosRaceRetryCeiling bounds re-attempting DBOS initialisation after a lost
+// schema-bootstrap race. It exists for the case where the "already exists"
+// verdict is NOT a race (e.g. a foreign table of the same name in the file) and
+// therefore never converges.
+//
+// Precisely: it bounds when the LAST attempt may START, not how long the whole
+// operation takes. Real elapsed time can exceed it by one attempt plus one
+// backoff, because an attempt already under way is never abandoned mid-flight.
+// Callers that need a hard wall-clock bound must cancel the context instead.
 const dbosRaceRetryCeiling = 30 * time.Second
 
 // dbosRaceRetryInitialDelay is the first pause between attempts; the delay
@@ -166,8 +171,10 @@ func dbosBootstrapRaceCeilingError(appName string, attempts int, ceiling time.Du
 			"Durable-execution start-up kept failing with a schema-already-exists conflict for more\n"+
 				"than %s (%d attempt(s)). That conflict normally means another pasture process was\n"+
 				"creating the same schema at the same moment, and a re-attempt then succeeds. It did\n"+
-				"not converge here, so either a process is stuck mid-setup or the database file\n"+
-				"already contains tables with durable-execution names that pasture did not create.",
+				"not converge here, so one of three things is true: a process is stuck mid-setup; the\n"+
+				"database file already contains tables with durable-execution names that pasture did not\n"+
+				"create; or the recorded schema version went backwards, so every start-up re-applies setup\n"+
+				"steps that are already in place. Step 2 below tells the three apart.",
 			ceiling, attempts,
 		),
 		Where: "Constructing the engine (internal/engine/dbosinit.go in engine.newDurableContext).",

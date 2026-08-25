@@ -27,6 +27,7 @@
 package audit_test
 
 import (
+	"database/sql"
 	stderrors "errors"
 	"fmt"
 	"io"
@@ -582,7 +583,7 @@ func (w *readyOutput) String() string {
 // Each entry is a bounded, actionable, no-data-written outcome:
 //   - the audit-database upgrade lost the write-lock race and hit its ceiling;
 //   - the durable-execution schema setup lost its own create race and hit its
-//     bounded retry ceiling (its ceiling error, or the generic wrapper);
+//     bounded retry ceiling;
 //   - the governed slice allocator was refused because the durable root it
 //     binds to never came up for this process.
 //
@@ -590,11 +591,20 @@ func (w *readyOutput) String() string {
 // invariant block below (7 legacy-role rows not 14, 1024 audit events, integrity
 // check ok, schema at the current version). Those assertions run unconditionally
 // against the file both processes touched, whatever either one printed.
+//
+// The GENERIC durable-execution failure ("Couldn't initialize the durable-
+// execution context.") is deliberately NOT accepted: now that the bounded
+// schema-race loss has its own specific message, any other durable-execution
+// start-up failure is a regression and must stay loud.
+//
+// readinessTimeout must stay above the worst case of every accepted outcome;
+// see the arithmetic at its use site below.
+const readinessTimeout = 90 * time.Second
+
 var acceptedLoserOutcomes = []string{
 	"audit trail initialisation failed",
 	"Couldn't open the audit subsystem",
 	"Couldn't set up the durable-execution schema in the pasture database.",
-	"Couldn't initialize the durable-execution context.",
 	"Couldn't bind governed slice allocation to the durable engine.",
 }
 
@@ -682,7 +692,16 @@ func TestScenario12_ConcurrentMigratorRace(t *testing.T) {
 			t.Fatalf("%s failed to start: %v\n%s", name, r.err, r.output)
 		}
 		out := cmd.Stdout.(*readyOutput)
-		timer := time.NewTimer(30 * time.Second)
+		// The timer must clear the SLOWEST accepted outcome, not the fastest.
+		// A loser of the durable-execution schema race re-attempts start-up
+		// under a 30s ceiling, and that ceiling bounds only when the LAST
+		// attempt may start — so the wall clock is (time to reach durable
+		// start-up) + (up to 30s of re-attempts) + (one more attempt) +
+		// shutdown. A 30s readiness timer would therefore hard-fail before
+		// that outcome could ever be observed, making it unreachable. 90s
+		// leaves room for all three terms on a loaded CI runner while still
+		// failing fast on a genuinely hung process.
+		timer := time.NewTimer(readinessTimeout)
 		defer timer.Stop()
 		select {
 		case <-out.ready:
@@ -693,12 +712,24 @@ func TestScenario12_ConcurrentMigratorRace(t *testing.T) {
 			}
 			t.Fatalf("%s exited before readiness: %v\n%s", name, r.err, r.output)
 		case <-timer.C:
-			t.Fatalf("%s did not emit daemon runtime readiness within 30s; output:\n%s", name, out.String())
+			t.Fatalf("%s did not emit daemon runtime readiness within %s; output:\n%s", name, readinessTimeout, out.String())
 		}
 		return nil
 	}
 	early1 := waitReady("pastured-1", ch1, cmd1)
 	early2 := waitReady("pastured-2", ch2, cmd2)
+
+	// Exactly-one-winner. waitReady returns nil for a process that reached
+	// readiness and non-nil for one that exited with an accepted loser
+	// outcome, so both being non-nil means NEITHER process got the database
+	// open. Without this check the invariants below could pass vacuously on a
+	// file that no daemon ever migrated (they would then be asserting only
+	// what this test's own reopen did).
+	if early1 != nil && early2 != nil {
+		t.Fatalf("neither pastured process reached readiness — the race produced no winner, "+
+			"so nothing below tests the concurrent-migration path\npastured-1:\n%s\npastured-2:\n%s",
+			early1.output, early2.output)
+	}
 
 	// Signal both processes to stop.  If a process already exited (e.g. it
 	// hit the Scenario 12 busy-retry ceiling and returned exit 5/1), Signal
@@ -725,24 +756,22 @@ func TestScenario12_ConcurrentMigratorRace(t *testing.T) {
 	t.Logf("pastured-1 exit: %v\noutput:\n%s", r1.err, r1.output)
 	t.Logf("pastured-2 exit: %v\noutput:\n%s", r2.err, r2.output)
 
-	// ── Pre-check: was the DB migrated by the pastured processes? ───────────
-	// Open the DB directly to peek at the schema version before
-	// NewSqliteAuditTrail runs any recovery migration.  If neither process
-	// reached the DB (e.g. both hit a timing-dependent SQLITE_BUSY on the
-	// initial PRAGMA), the pre-check will find no audit_schema_meta and we log
-	// a warning but continue — the race property we care about is that the DB
-	// ends up consistent, not which specific process wrote it.
-	preCheckDB := openDB(t, raceDB)
-	var preVersion int
-	preErr := preCheckDB.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&preVersion)
-	_ = preCheckDB.Close()
-	if preErr != nil {
-		t.Logf("WARNING: pre-check MAX(version) failed (%v) — neither pastured process may have completed migration; concurrent-race outcome not observed this run", preErr)
-	} else {
-		t.Logf("pre-check MAX(version) = %d (migration ran before NewSqliteAuditTrail call)", preVersion)
+	// ── Invariants as the DAEMONS left them ────────────────────────────────
+	// These run BEFORE this test opens the database through
+	// NewSqliteAuditTrail. That ordering is load-bearing: the reopen below
+	// runs the migrator itself, so a schema-version assertion made only after
+	// it would be satisfiable by this test's own migration rather than by the
+	// winning daemon. Asserting here pins the state the concurrent processes
+	// actually produced. Any failure is fatal — a database no daemon migrated
+	// means the race was not exercised, which the exactly-one-winner check
+	// above has already ruled out.
+	daemonState := openDB(t, raceDB)
+	assertRaceInvariants(t, daemonState, "as the pastured processes left it")
+	// Release this reader before the reopen below, so the recovery migrator
+	// isn't contending with this test's own handle.
+	if err := daemonState.Close(); err != nil {
+		t.Fatalf("close the daemon-state handle before reopening: %v", err)
 	}
-
-	// ── DB invariants ────────────────────────────────────────────────────
 
 	// Reopen via NewSqliteAuditTrail to exercise the no-op migration path.
 	trail, err := audit.NewSqliteAuditTrail(raceDB)
@@ -751,7 +780,21 @@ func TestScenario12_ConcurrentMigratorRace(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = trail.Close() })
 
-	db := openDB(t, raceDB)
+	// The reopen must be a no-op: the same invariants must still hold. If a
+	// value changed between the two blocks, the recovery migration did work
+	// that the daemons should already have done.
+	assertRaceInvariants(t, openDB(t, raceDB), "after this test reopened the database")
+}
+
+// assertRaceInvariants asserts the four post-race invariants against db. when
+// describes the observation point so a failure says which of the two checks
+// (daemon-produced state vs. after this test's own reopen) broke.
+//
+// These four assertions — not the process exit messages — are the real oracle
+// for the concurrent-open race: they run against the file both processes
+// touched, whatever either one printed.
+func assertRaceInvariants(t *testing.T, db *sql.DB, when string) {
+	t.Helper()
 
 	// 1. Legacy-role agent count must be exactly 7.
 	//    14 would indicate both processes ran the find-or-create loop
@@ -760,40 +803,40 @@ func TestScenario12_ConcurrentMigratorRace(t *testing.T) {
 	if err := db.QueryRow(
 		`SELECT COUNT(*) FROM agents_software WHERE name LIKE 'pasture/legacy-role/%'`,
 	).Scan(&legacyAgents); err != nil {
-		t.Fatalf("count legacy-role agents after race: %v", err)
+		t.Fatalf("count legacy-role agents (%s): %v", when, err)
 	}
 	if legacyAgents != 7 {
-		t.Errorf("agents_software 'pasture/legacy-role/%%' count = %d, want 7"+
+		t.Errorf("agents_software 'pasture/legacy-role/%%' count (%s) = %d, want 7"+
 			" (both processes migrated: concurrent-migrator race not serialised correctly)",
-			legacyAgents)
+			when, legacyAgents)
 	}
 
 	// 2. audit_events row count must be exactly 1024.
 	var n int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM audit_events`).Scan(&n); err != nil {
-		t.Fatalf("count audit_events after race: %v", err)
+		t.Fatalf("count audit_events (%s): %v", when, err)
 	}
 	if n != 1024 {
-		t.Errorf("audit_events count after race = %d, want 1024 (no data loss)", n)
+		t.Errorf("audit_events count (%s) = %d, want 1024 (no data loss)", when, n)
 	}
 
 	// 3. PRAGMA integrity_check must be "ok".
 	var ic string
 	if err := db.QueryRow(`PRAGMA integrity_check`).Scan(&ic); err != nil {
-		t.Fatalf("PRAGMA integrity_check after race: %v", err)
+		t.Fatalf("PRAGMA integrity_check (%s): %v", when, err)
 	}
 	if ic != "ok" {
-		t.Errorf("PRAGMA integrity_check after race = %q, want %q", ic, "ok")
+		t.Errorf("PRAGMA integrity_check (%s) = %q, want %q", when, ic, "ok")
 	}
 
 	// 4. Schema version must be MaxKnownSchemaVersion.
 	var version int
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
-		t.Fatalf("MAX(version) after race: %v", err)
+		t.Fatalf("MAX(version) (%s): %v", when, err)
 	}
 	if version != audit.MaxKnownSchemaVersion {
-		t.Errorf("MAX(version) after race = %d, want %d (MaxKnownSchemaVersion)",
-			version, audit.MaxKnownSchemaVersion)
+		t.Errorf("MAX(version) (%s) = %d, want %d (MaxKnownSchemaVersion)",
+			when, version, audit.MaxKnownSchemaVersion)
 	}
 }
 

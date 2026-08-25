@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -174,4 +176,44 @@ func reportContains(e *pasterrors.StructuredError, want string) bool {
 	var buf bytes.Buffer
 	e.Report(&buf)
 	return strings.Contains(buf.String(), want)
+}
+
+// pinnedDBOSVersion is the durable-execution library version whose schema
+// bootstrap the retry predicate was read against and whose error strings
+// isDBOSBootstrapRace matches.
+const pinnedDBOSVersion = "github.com/dbos-inc/dbos-transact-golang v0.20.0"
+
+// TestDBOSVersionPinMatchesRacePredicate fails when the durable-execution
+// library is upgraded, because the retry predicate in dbosinit.go recognises a
+// lost schema-bootstrap race by MESSAGE TEXT — the library flattens the driver
+// error with %v before it reaches us, so there is no typed error to match on.
+//
+// That coupling cannot be checked by any behavioural test: if a new version
+// rewords "failed to create migrations table: ... already exists", the
+// predicate silently stops matching, the retry never fires, a losing process
+// dies at start-up again, and every existing test still passes because they all
+// assert against the old strings.
+//
+// WHEN THIS TEST FAILS, DO NOT JUST BUMP THE CONSTANT. Re-read the new
+// version's dbos/internal/sysdb/sqlite_migrations.go (the migrations-table
+// bootstrap and applySqliteMigration) and sqlite_pool.go (the wrapper prefix
+// and the retry that wraps them), then update BOTH this constant AND
+// dbosMigrationFailurePrefix / dbosBootstrapRaceMarkers / ciLostRaceError to
+// the messages that version actually produces. If the new version made the
+// bootstrap atomic or retry-safe itself, delete the predicate instead.
+func TestDBOSVersionPinMatchesRacePredicate(t *testing.T) {
+	t.Parallel()
+	gomod, err := os.ReadFile(filepath.Join("..", "..", "go.mod"))
+	if err != nil {
+		t.Fatalf("read go.mod to verify the durable-execution version pin: %v", err)
+	}
+	if !strings.Contains(string(gomod), pinnedDBOSVersion) {
+		t.Fatalf("go.mod no longer pins %q — the lost-schema-bootstrap-race retry in "+
+			"internal/engine/dbosinit.go matches that version's error text and must be "+
+			"re-verified against the new one before this pin is updated", pinnedDBOSVersion)
+	}
+	// The predicate must still recognise the failure this pin was chosen for.
+	if !isDBOSBootstrapRace(errors.New(ciLostRaceError)) {
+		t.Fatal("isDBOSBootstrapRace no longer matches the observed lost-race failure of the pinned version")
+	}
 }
