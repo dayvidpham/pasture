@@ -437,7 +437,7 @@ func (s *epochAssignmentService) allocateReviewBatch(ctx context.Context, in Sta
 	if allocator == nil {
 		return CommandResult{}, assignmentErr("allocateReviewBatch", "the tracker has no engine-owned composed-batch allocator", "StartReview must allocate every generated review task in the engine-owned transaction", "construct and launch the engine with this tracker before starting a review")
 	}
-	composed := provenance.GovernedAllocationComposedBatchRequest{Version: provenance.GovernedAllocationCompositionV1, Allocation: provenance.GovernedAllocationRequest{OperationID: in.Meta.OperationID, ActorID: resolution.occupant, Command: "pasture.epoch.start-review.v1", ParentAssignmentID: resolution.id, Children: children}, Conditions: conditions, SupplementalEffects: effects}
+	composed := provenance.GovernedAllocationComposedRequest{Version: provenance.GovernedAllocationCompositionV1, Allocation: provenance.GovernedAllocationRequest{OperationID: in.Meta.OperationID, ActorID: resolution.occupant, Command: "pasture.epoch.start-review.v1", ParentAssignmentID: resolution.id, Children: children}, Conditions: conditions, SupplementalEffects: effects}
 	subject := ids[reviewedTaskHandle]
 	if subject != resolution.task {
 		composed.ReferenceScope = provenance.GovernedAllocationReferenceScope{Kind: provenance.GovernedAllocationReferenceDescendants, Subjects: []provenance.TaskID{subject}}

@@ -19,7 +19,7 @@ const (
 
 type composedAllocationRunner interface {
 	RunAllocateComposed(context.Context, string, provenance.JournalID, provenance.GovernedAllocationComposedRequest) (provenance.GovernedAllocationComposedResult, error)
-	RunAllocateComposedBatch(context.Context, string, provenance.JournalID, provenance.GovernedAllocationComposedBatchRequest) (provenance.GovernedAllocationComposedBatchResult, error)
+	RunAllocateComposedBatch(context.Context, string, provenance.JournalID, provenance.GovernedAllocationComposedRequest) (provenance.GovernedAllocationComposedResult, error)
 }
 
 // SupportsEngineGovernedAllocation reports whether tracker can receive the
