@@ -254,13 +254,16 @@ func writeApplyText(w io.Writer, result apply.Result) error {
 	return nil
 }
 
-// Text-row column widths. The observation width fits the longest rendered
-// observation field ("observation: installed"), so the diagnostic column stays
-// aligned whether or not a row carries a live observation.
+// Text-row column widths. The status width fits the longest apply.Status name
+// ("installed_pending_trust", see internal/install/apply/result.go), and the
+// observation width fits the longest rendered observation field
+// ("observation: installed"), so the diagnostic column stays aligned whether
+// or not a row carries a live observation, and regardless of which status a
+// row reports.
 const (
 	applyCellWidth        = 20
 	applyOperationWidth   = 8
-	applyStatusWidth      = 22
+	applyStatusWidth      = 23
 	applyObservationWidth = 22
 )
 
@@ -275,10 +278,15 @@ const (
 // would carry meaning only to a reader who already knows the rule, and any new
 // status/observation pairing would silently fall outside it. Printing the
 // probed fact always makes every row self-describing and keeps the operation,
-// status, and live-state facts in fixed columns. A row whose cell was never
-// probed carries no observation and leaves the column blank; that is the
-// honest rendering, since inventing a value there would assert a probe that
-// never happened.
+// status, and live-state facts in fixed columns. The column is blank exactly
+// when row.Observation() is registry.ObservationInvalid — not, as "never
+// probed" would suggest, for every unattempted row: several never-probed rows
+// carry registry.ObservationUnknown instead (see internal/install/service/
+// engine.go and cmd/pasture/install_verbs.go), and those print
+// "observation: unknown" here rather than a blank column. Reconciling that
+// Unknown-vs-Invalid engine convention is tracked as a follow-up
+// (https://github.com/dayvidpham/pasture/issues/39); this renderer prints
+// whatever observation the engine attached, faithfully.
 func applyTextRow(row apply.ActionRow) string {
 	observation := ""
 	if row.Observation().IsValid() {

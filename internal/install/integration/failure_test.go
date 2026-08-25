@@ -165,7 +165,7 @@ func TestNativeStopTextOutputNamesTheLiveObservationOfUntouchedSiblings(t *testi
 	if hooks == "" {
 		t.Fatalf("no claude-code.hooks row in the text output:\n%s%s", stopped.stdout, stopped.stderr)
 	}
-	want := "  claude-code.hooks    ensure   completed              observation: absent    exact split plugin is absent"
+	want := "  claude-code.hooks    ensure   completed               observation: absent    exact split plugin is absent"
 	if hooks != want {
 		t.Fatalf("text row for the untouched sibling is\n got: %q\nwant: %q", hooks, want)
 	}

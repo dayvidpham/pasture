@@ -180,9 +180,9 @@ func TestWriteApplyText_RowsCarryTheirLiveObservation(t *testing.T) {
 		t.Fatalf("writeApplyText: %v", err)
 	}
 	want := "apply installer (global): failed\n" +
-		"  claude-code.hooks    ensure   completed              observation: absent    exact split plugin is absent\n" +
-		"  claude-code.skills   ensure   completed              observation: installed exact split plugin is installed\n" +
-		"  codex.skills         ensure   unattempted                                   an earlier canonical cell failed; this cell was not attempted\n"
+		"  claude-code.hooks    ensure   completed               observation: absent    exact split plugin is absent\n" +
+		"  claude-code.skills   ensure   completed               observation: installed exact split plugin is installed\n" +
+		"  codex.skills         ensure   unattempted                                    an earlier canonical cell failed; this cell was not attempted\n"
 	if buf.String() != want {
 		t.Fatalf("apply text mismatch:\n got: %q\nwant: %q", buf.String(), want)
 	}
@@ -199,5 +199,27 @@ func TestApplyTextRow_UnobservedRowLeavesNoTrailingWhitespace(t *testing.T) {
 	line := applyTextRow(apply.NewActionRow(skills, apply.Inspect(), apply.NoOp(), apply.ManagementUnknown, registry.ObservationInvalid, ""))
 	if line != "  opencode.skills      inspect  no_op" {
 		t.Fatalf("unobserved row rendered %q", line)
+	}
+}
+
+// TestApplyTextRow_WidestStatusKeepsColumnsAligned pins applyStatusWidth
+// against apply.InstalledPendingTrust ("installed_pending_trust", 23
+// characters — the longest name in the canonical status list). If
+// applyStatusWidth were narrower than this, the row's status field would run
+// straight into the observation column instead of leaving the pinned
+// single-space separator.
+func TestApplyTextRow_WidestStatusKeepsColumnsAligned(t *testing.T) {
+	skills, err := cell.New(ir.HarnessClaudeCode, cell.SkillsAxis())
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := applyTextRow(apply.NewActionRow(skills, apply.Ensure(), apply.InstalledPendingTrust(), apply.ManagementPasture, registry.ObservationInstalled, "awaiting a trusted activation"))
+	want := "  claude-code.skills   ensure   installed_pending_trust observation: installed awaiting a trusted activation"
+	if line != want {
+		t.Fatalf("widest-status row broke column alignment:\n got: %q\nwant: %q", line, want)
+	}
+	statusEnd := len("  claude-code.skills   ensure   installed_pending_trust")
+	if line[statusEnd] != ' ' || line[statusEnd+1] == ' ' {
+		t.Fatalf("widest status did not leave exactly one separator before the observation column: %q", line)
 	}
 }
