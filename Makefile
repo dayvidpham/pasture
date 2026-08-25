@@ -1,6 +1,6 @@
 .PHONY: build test test-recovery test-race test-race-ci lint fmt clean release-local release-all generate
 
-VERSION ?= dev
+VERSION ?= devel
 
 # Binaries produced by make build
 #

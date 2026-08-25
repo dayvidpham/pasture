@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,12 +20,67 @@ import (
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
-func TestVersionConstant(t *testing.T) {
-	if version == "" {
-		t.Fatal("version constant must not be empty")
+// buildPasturedBinary builds the production pastured command (this package)
+// into binary, optionally passing extra linker flags. A subprocess build is
+// used deliberately: stamping is a link-time property, so it can only be proven
+// by linking a binary and asking it for its version — inspecting the `version`
+// variable from inside the test binary proves nothing about -ldflags, and could
+// not observe the unstamped default if the test binary were itself stamped.
+func buildPasturedBinary(t *testing.T, binary string, ldflags string) {
+	t.Helper()
+	args := []string{"build"}
+	if ldflags != "" {
+		args = append(args, "-ldflags", ldflags)
 	}
-	if !strings.HasPrefix(version, "v") {
-		t.Errorf("version %q should start with 'v'", version)
+	args = append(args, "-o", binary, ".")
+	build := exec.Command("go", args...)
+	build.Dir = "."
+	build.Env = append(build.Environ(), "CGO_ENABLED=0")
+	output, err := build.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build pastured: %v\n%s", err, output)
+	}
+}
+
+// runPasturedVersion runs `<binary> --version` and returns its stdout verbatim.
+func runPasturedVersion(t *testing.T, binary string) string {
+	t.Helper()
+	command := exec.Command(binary, "--version")
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	if err := command.Run(); err != nil {
+		t.Fatalf("run pastured --version: %v\n%s", err, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("--version must report on stdout only, got stderr %q", stderr.String())
+	}
+	return stdout.String()
+}
+
+// TestUnstampedBuildReportsDevelMarker proves an ordinary `go build` (CI, dev
+// checkouts) reports an honest development marker rather than a fabricated
+// release tag. "devel" carries no "v" and no dotted triple, so a consumer
+// scraping the line for a release tag finds nothing and cannot freeze a fiction
+// into a compatibility floor.
+func TestUnstampedBuildReportsDevelMarker(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "pastured")
+	buildPasturedBinary(t, binary, "")
+
+	if got, want := runPasturedVersion(t, binary), "pastured devel\n"; got != want {
+		t.Errorf("unstamped --version = %q, want %q", got, want)
+	}
+}
+
+// TestStampedBuildReportsTheStampedVersion proves the release path: the value
+// the release workflow, the Makefile and the Nix build pass as -X main.version
+// is exactly what the daemon reports.
+func TestStampedBuildReportsTheStampedVersion(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "pastured")
+	buildPasturedBinary(t, binary, "-X main.version=v1.2.3")
+
+	if got, want := runPasturedVersion(t, binary), "pastured v1.2.3\n"; got != want {
+		t.Errorf("stamped --version = %q, want %q", got, want)
 	}
 }
 
