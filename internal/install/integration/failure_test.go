@@ -134,6 +134,49 @@ func TestFirstFailureStopsAndRetryConverges_NativeManager(t *testing.T) {
 	}
 }
 
+// TestNativeStopTextOutputNamesTheLiveObservationOfUntouchedSiblings pins the
+// human-readable rendering of the rows a native stop leaves behind.
+//
+// When the Claude group's control action fails, the group's other cells keep
+// the facts of their live probe rather than being overwritten, so their rows
+// are probe results: `claude-code.hooks` reports the ensure it was asked for
+// and a completed probe whose observed live state is absent. Rendering only
+// operation and status made that row read as a successful install of a cell
+// that was never attempted, so the text row carries the observed live state.
+func TestNativeStopTextOutputNamesTheLiveObservationOfUntouchedSiblings(t *testing.T) {
+	t.Parallel()
+	env := newEnv(t, hostSeed{failCommands: map[string]string{
+		"plugin install pasture-agents@aura-plugins": "the isolated host refused this install",
+	}})
+
+	selection := allCells(false)
+	selection["claude-code.skills"] = true
+	selection["claude-code.agents"] = true
+	selection["claude-code.hooks"] = true
+
+	stopped := env.run("install", "apply-selection", "--desired", env.writeDesired(selection))
+	lines := strings.Split(strings.TrimRight(stopped.stdout, "\n"), "\n")
+	var hooks string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "  claude-code.hooks ") {
+			hooks = line
+		}
+	}
+	if hooks == "" {
+		t.Fatalf("no claude-code.hooks row in the text output:\n%s%s", stopped.stdout, stopped.stderr)
+	}
+	want := "  claude-code.hooks    ensure   completed              observation: absent    exact split plugin is absent"
+	if hooks != want {
+		t.Fatalf("text row for the untouched sibling is\n got: %q\nwant: %q", hooks, want)
+	}
+	// The host proves the reading: nothing was installed for this cell.
+	for _, command := range env.mutatingHostCommands() {
+		if strings.Contains(command, "pasture-hooks") {
+			t.Fatalf("a native action ran for the sibling cell: %q", command)
+		}
+	}
+}
+
 // TestScriptableSurfaces_ReportFailedCellsButStillExitZero locks in a defect
 // found while validating the stop-at-first-failure contract.
 //

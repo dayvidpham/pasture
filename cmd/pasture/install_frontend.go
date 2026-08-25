@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/install/activation"
@@ -246,11 +247,50 @@ func writeApplyText(w io.Writer, result apply.Result) error {
 		return fmt.Errorf("installer output: write apply header: %w", err)
 	}
 	for _, row := range result.Rows() {
-		if _, err := fmt.Fprintf(w, "  %-20s %-8s %-22s %s\n", row.Cell(), row.Operation(), row.Status(), row.Diagnostic()); err != nil {
+		if _, err := fmt.Fprintln(w, applyTextRow(row)); err != nil {
 			return fmt.Errorf("installer output: write apply row %s: %w", row.Cell(), err)
 		}
 	}
 	return nil
+}
+
+// Text-row column widths. The observation width fits the longest rendered
+// observation field ("observation: installed"), so the diagnostic column stays
+// aligned whether or not a row carries a live observation.
+const (
+	applyCellWidth        = 20
+	applyOperationWidth   = 8
+	applyStatusWidth      = 22
+	applyObservationWidth = 22
+)
+
+// applyTextRow renders one apply row for the text output.
+//
+// The observation column is printed unconditionally for every row that carries
+// a live observation, rather than only for the combinations that can mislead
+// (for example a `completed` status on a cell whose live state was probed as
+// `absent`, which happens when a group's control cell fails and its siblings
+// keep their probe facts). A rule that hides the column except when the tool
+// judges the row confusing is itself unreadable: the absence of the column
+// would carry meaning only to a reader who already knows the rule, and any new
+// status/observation pairing would silently fall outside it. Printing the
+// probed fact always makes every row self-describing and keeps the operation,
+// status, and live-state facts in fixed columns. A row whose cell was never
+// probed carries no observation and leaves the column blank; that is the
+// honest rendering, since inventing a value there would assert a probe that
+// never happened.
+func applyTextRow(row apply.ActionRow) string {
+	observation := ""
+	if row.Observation().IsValid() {
+		observation = "observation: " + row.Observation().String()
+	}
+	line := fmt.Sprintf("  %-*s %-*s %-*s %-*s %s",
+		applyCellWidth, row.Cell(),
+		applyOperationWidth, row.Operation(),
+		applyStatusWidth, row.Status(),
+		applyObservationWidth, observation,
+		row.Diagnostic())
+	return strings.TrimRight(line, " ")
 }
 
 func newInstallApplySelectionCommand(makeService installServiceFactory) *cobra.Command {
