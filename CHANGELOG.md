@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.0.6] - 2026-08-26
+
+### Changed
+- Provenance dependency updated to v0.0.5 (#110): caller deadlines are now a
+  real bound on contended SQLite writes (busy acquisition is retried until the
+  deadline actually expires, with the busy detail preserved in the error
+  chain), reference-data seeding runs through prepared statements, and fresh
+  databases create the operation journal in its completed shape without an
+  immediate rebuild.
+- The governed-allocation composed request and result types carry their final
+  names (`GovernedAllocationComposedRequest` / `...ComposedResult`); the
+  transitional `ComposedBatch` names are gone (#109).
+
+### Fixed
+- Writer contention during lifecycle occurrence commits is classified from the
+  error chain rather than from a timer race: a commit that stays contended
+  until its ingress deadline reports the typed contention error (with the
+  SQLite cause attached), and only a deadline that expires without contention
+  reports the deadline error (#110).
+
 ## [0.0.5] - 2026-08-25
 
 ### Added
