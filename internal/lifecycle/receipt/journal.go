@@ -141,6 +141,15 @@ func (a JournalAppender) Append(ctx context.Context, in provenance.OperationInpu
 	if err != nil {
 		switch {
 		case stderrors.Is(boundedErr, context.DeadlineExceeded):
+			// Provenance v0.0.5 makes the caller deadline the authoritative
+			// bound on contended writes: a writer that stayed contended until
+			// the deadline returns the typed context error joined with the
+			// SQLite busy error. Contention is therefore diagnosed from the
+			// error chain, not from which timer happened to fire first.
+			var busyErr *sqlite.Error
+			if stderrors.As(err, &busyErr) && busyErr.Code() == sqliteBusyCode {
+				return 0, model.IngressContentionError{Elapsed: elapsed, Cause: err}
+			}
 			return 0, model.IngressDeadlineError{Deadline: deadline, Elapsed: elapsed}
 		case stderrors.Is(boundedErr, context.Canceled):
 			cause := err

@@ -4,10 +4,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dayvidpham/bestiary v0.1.0 h1:5ovdxMlRgssn3+oJCZqjbhlhX6aQwbYFf981LbMAhII=
 github.com/dayvidpham/bestiary v0.1.0/go.mod h1:Z2/Ax6PmmBqhHomuLDjvf+JQBo0K7TFyrQN7pOCOpKs=
-github.com/dayvidpham/provenance v0.0.4-0.20260825014922-cc540b2ffc50 h1:fY8yyk+0Td5wUlsxr0K0D7yJUVBjTCHZi/AUYvxiDZo=
-github.com/dayvidpham/provenance v0.0.4-0.20260825014922-cc540b2ffc50/go.mod h1:xeEkfmEyS0pD2WeSl0gWg+Nei35RlyyA2wEwlJE7cyc=
-github.com/dayvidpham/provenance v0.0.4 h1:q3XcXQM21D8njaEVLoNB6CgN6OD4glcP35VYQZoXRoU=
-github.com/dayvidpham/provenance v0.0.4/go.mod h1:xeEkfmEyS0pD2WeSl0gWg+Nei35RlyyA2wEwlJE7cyc=
+github.com/dayvidpham/provenance v0.0.5 h1:2fQ+3HSGWZKIG7xKA7CSwJ6chWfL958g6T+zPs+IH5k=
+github.com/dayvidpham/provenance v0.0.5/go.mod h1:xeEkfmEyS0pD2WeSl0gWg+Nei35RlyyA2wEwlJE7cyc=
 github.com/dbos-inc/dbos-transact-golang v0.20.0 h1:gu6+Fzabg32sS0DG1oP/hBhtXvzT13AnD/jB/yXBuiY=
 github.com/dbos-inc/dbos-transact-golang v0.20.0/go.mod h1:pQk6+7HJ3bL0qauVmkA3l4tszUKCv6r+qWYOKLEgD0I=
 github.com/dominikbraun/graph v0.23.0 h1:TdZB4pPqCLFxYhdyMFb1TBdFxp8XLcJfTTBQucVPgCo=
