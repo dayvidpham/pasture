@@ -561,7 +561,9 @@ func TestEngineShutdown_NamesTheWorkStillRunningWhenTheBudgetExpires(t *testing.
 		t.Fatal("the transition hook never reached its durable step, so no work was in flight to hold the shutdown")
 	}
 
-	const budget = time.Second
+	// The budget is large enough that the machine's own overhead cannot reach
+	// the ceiling below. See the arithmetic at that assertion.
+	const budget = 3 * time.Second
 	start := time.Now()
 	err := e.Shutdown(budget)
 	elapsed := time.Since(start)
@@ -605,20 +607,27 @@ func TestEngineShutdown_NamesTheWorkStillRunningWhenTheBudgetExpires(t *testing.
 		t.Errorf("exit code = %d, want %d", got, want)
 	}
 
+	t.Logf("shutdown with work still running took %v for a %v per-part budget", elapsed, budget)
+
 	if elapsed < budget {
 		t.Errorf("Shutdown returned after %v, sooner than the %v budget it was given", elapsed, budget)
 	}
-	// One budget is spent here, not one per part. The ceiling is ONE budget
-	// plus slack for a loaded machine, so a runtime that spends the budget a
-	// second time on any part that follows the in-flight-work wait fails this
-	// test. Measured cost of this shape is about 1.0 budget; a second full
-	// spend costs about 2.0, which is well beyond the ceiling. A ceiling of
-	// two budgets would let that second spend through unnoticed. The worst
+	// One budget is spent here, not one per part. The window is sized by the
+	// budget, not by a slack ratio, so the whole suite's overhead cannot
+	// reach it:
+	//
+	//	one spend    3s + overhead (measured up to about 0.9s under the full
+	//	             race suite)                          = about 3.9s  PASS
+	//	ceiling      2 x 3s - 1s                          = 5s
+	//	two spends   6s + overhead                        = about 6.9s  FAIL
+	//
+	// The 1s subtracted from two budgets keeps the ceiling clear of a second
+	// spend; the 2s left above one spend absorbs a loaded machine. The worst
 	// case (SequentialShutdownWaits budgets) is what an operator must plan
 	// for, not what this shape costs.
-	const loadSlack = 750 * time.Millisecond
-	if ceiling := budget + loadSlack; elapsed >= ceiling {
-		t.Errorf("Shutdown took %v, at or beyond %v: the budget is being spent on more than the in-flight-work wait", elapsed, ceiling)
+	if ceiling := 2*budget - time.Second; elapsed >= ceiling {
+		t.Errorf("Shutdown took %v, at or beyond the ceiling %v (2 x the %v budget, less 1s): one budget plus load is about %v, so this is a second spend of the budget on a later part, not machine load",
+			elapsed, ceiling, budget, budget+900*time.Millisecond)
 	}
 }
 
