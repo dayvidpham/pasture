@@ -18,6 +18,10 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	code := m.Run()
+	// Delete the shared fixture databases this binary built. It runs after
+	// m.Run because a fixture is shared by every test in the binary, and before
+	// the leak check because it starts no goroutine of its own.
+	testutil.RemoveFixtureDirs()
 	cleanup()
 	if err := checkLeaks(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

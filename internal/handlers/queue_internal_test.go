@@ -12,6 +12,10 @@ package handlers
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -147,7 +151,7 @@ func TestReleaseClient_ReportsAnIncompleteShutdown(t *testing.T) {
 	<-entered
 
 	start := time.Now()
-	err = releaseClient(dbosCtx, releaseSiteQueueCommand)
+	err = releaseClient(dbosCtx, clientSiteQueueCommand)
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("releaseClient returned nil while a workflow was still running; an incomplete shutdown must be reported")
@@ -186,7 +190,7 @@ func TestReleaseClient_ReportsAnIncompleteShutdown(t *testing.T) {
 
 	// The epoch controller keeps its own wording, which is the point of the
 	// distinction.
-	controllerErr := incompleteShutdownError(releaseSiteEpochController, errors.New("stop timed out"))
+	controllerErr := incompleteShutdownError(clientSiteEpochController, errors.New("stop timed out"))
 	var controllerSE *pasterrors.StructuredError
 	if !errors.As(controllerErr, &controllerSE) {
 		t.Fatalf("controller error is %T, want a structured error", controllerErr)
@@ -196,7 +200,75 @@ func TestReleaseClient_ReportsAnIncompleteShutdown(t *testing.T) {
 	}
 
 	// A nil client is not a failure: there is nothing to release.
-	if err := releaseClient(nil, releaseSiteQueueCommand); err != nil {
+	if err := releaseClient(nil, clientSiteQueueCommand); err != nil {
 		t.Errorf("releaseClient(nil) = %v, want nil", err)
+	}
+}
+
+// TestOnlyOpenClientConstructsADurableClient pins the single door every command
+// in this package uses to reach the durable runtime.
+//
+// Two contracts hang off that door, and both are invisible at a call site that
+// bypasses it. A client that refuses to START is classified there, so a build
+// that never linked the SQLite driver is explained instead of reported as a bare
+// runtime message; and the function that RELEASES the client is handed out
+// there, so the release cannot be forgotten or written differently twice. A
+// second dbos.NewClient anywhere in this package would silently lose both, and
+// the loss would only show on the day one of those failures happened.
+//
+// This is a structural check because the failures it protects cannot be produced
+// at run time here: the driver IS linked into the test binary, by design.
+func TestOnlyOpenClientConstructsADurableClient(t *testing.T) {
+	t.Parallel()
+
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read the package directory: %v", err)
+	}
+
+	type site struct {
+		file string
+		fn   string
+	}
+	var sites []site
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		fset := token.NewFileSet()
+		file, parseErr := parser.ParseFile(fset, name, nil, 0)
+		if parseErr != nil {
+			t.Fatalf("parse %s: %v", name, parseErr)
+		}
+		enclosing := ""
+		ast.Inspect(file, func(n ast.Node) bool {
+			if fn, ok := n.(*ast.FuncDecl); ok {
+				enclosing = fn.Name.Name
+			}
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "NewClient" {
+				return true
+			}
+			pkg, ok := sel.X.(*ast.Ident)
+			if !ok || pkg.Name != "dbos" {
+				return true
+			}
+			sites = append(sites, site{file: name, fn: enclosing})
+			return true
+		})
+	}
+
+	if len(sites) != 1 {
+		t.Fatalf("dbos.NewClient is called %d times in this package, want exactly 1 (openClient); found %v", len(sites), sites)
+	}
+	if sites[0].fn != "openClient" {
+		t.Errorf("dbos.NewClient is called in %s (%s), want openClient: a client built anywhere else "+
+			"loses the start-up classification and the release contract", sites[0].fn, sites[0].file)
 	}
 }

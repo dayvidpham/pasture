@@ -88,6 +88,9 @@ func goldenUnifiedDBSource(t *testing.T) string {
 			goldenUnifiedDB.err = err
 			return
 		}
+		// Registered as soon as it exists, so it is deleted at the end of the
+		// run even if the build below fails half way and leaves a partial file.
+		RegisterFixtureDir(dir)
 		dbPath := filepath.Join(dir, "pasture.db")
 		tracker, err := tasks.OpenTaskTracker(dbPath)
 		if err != nil {

@@ -76,9 +76,40 @@ type dbosController struct {
 	closeErr  error
 }
 
-// controllerConstructionSite names this file for the Where line of the durable
-// start-up errors OpenEpochController surfaces.
-const controllerConstructionSite = "Opening the epoch controller (internal/handlers/controller.go in OpenEpochController)."
+// clientSite names the operation that opened a durable client.
+//
+// ONE typed value per caller, and every caller-specific report is derived from
+// it: the Where line when the client refuses to START, and the whole report when
+// it refuses to STOP. A second per-caller parameter would let the two disagree —
+// a caller could describe itself as the controller in one and as the queue
+// command in the other — so there is deliberately only this.
+//
+// The reports must differ because the same runtime failure means different
+// things to the two callers. After an epoch lifecycle command, work in flight
+// may never have been recorded and the epoch state has to be re-read. After a
+// work-queue command, the answer was already read back from the database before
+// the stop began, so it stands, and an operator who never gave an epoch id
+// cannot act on a fix that asks for one.
+type clientSite int
+
+const (
+	// clientSiteEpochController is the epoch controller: OpenEpochController
+	// opening the client, and dbosController.Close releasing it.
+	clientSiteEpochController clientSite = iota
+	// clientSiteQueueCommand is a work-queue command opening a client to read or
+	// change a queue setting, and releasing it afterwards.
+	clientSiteQueueCommand
+)
+
+// startupWhere is the Where line for a client that refused to start at this
+// site. It answers the operator's first question — which command was this? — so
+// it names the operation, not only the file.
+func (s clientSite) startupWhere() string {
+	if s == clientSiteQueueCommand {
+		return "Opening a durable client for a work-queue command (internal/handlers/queue.go in handlers.withQueueClient)."
+	}
+	return "Opening the epoch controller (internal/handlers/controller.go in OpenEpochController)."
+}
 
 // OpenEpochController opens a DBOS-backed controller on the unified database.
 // Empty dbPath resolves to tasks.DefaultDBPath(). The returned controller does
@@ -94,7 +125,7 @@ func OpenEpochController(dbPath string) (EpochController, error) {
 	if err != nil {
 		return nil, err
 	}
-	client, db, _, err := openClient(dbPath, releaseSiteEpochController)
+	client, db, _, err := openClient(dbPath, clientSiteEpochController)
 	if err != nil {
 		_ = trail.Close()
 		return nil, err
@@ -117,7 +148,7 @@ func OpenEpochController(dbPath string) (EpochController, error) {
 // caller named by site. The client owns the handle it was given and closes it,
 // so releasing the client is the whole release; closing the handle separately
 // would close the same database twice.
-func openClient(dbPath string, site releaseSite) (dbos.Client, *sql.DB, func() error, error) {
+func openClient(dbPath string, site clientSite) (dbos.Client, *sql.DB, func() error, error) {
 	if dbPath == "" {
 		dbPath = tasks.DefaultDBPath()
 	}
@@ -172,7 +203,7 @@ func openClient(dbPath string, site releaseSite) (dbos.Client, *sql.DB, func() e
 		// It sits HERE, not at a caller, so that every command which opens a
 		// client is told the same thing about the same failure. The trail is
 		// closed by the caller that opened it.
-		return nil, nil, nil, engine.DescribeDurableStartupFailure(controllerConstructionSite, err)
+		return nil, nil, nil, engine.DescribeDurableStartupFailure(site.startupWhere(), err)
 	}
 	return client, db, func() error { return releaseClient(client, site) }, nil
 }
@@ -184,7 +215,7 @@ func openClient(dbPath string, site releaseSite) (dbos.Client, *sql.DB, func() e
 //
 // site decides how the failure is described, because the caller is the only one
 // who knows what the operator was doing.
-func releaseClient(client dbos.Client, site releaseSite) error {
+func releaseClient(client dbos.Client, site clientSite) error {
 	if client == nil {
 		return nil
 	}
@@ -350,25 +381,6 @@ func (c *dbosController) CompleteSlice(ctx context.Context, sliceId string, sig 
 // genuinely stuck rather than merely busy.
 const controllerShutdownTimeout = 5 * time.Second
 
-// releaseSite names the operation whose durable client failed to stop.
-//
-// The report an operator reads has to describe what THEY were doing. The same
-// runtime failure means different things to the two callers: after an epoch
-// lifecycle command, work that was in flight may not have been recorded and the
-// epoch state must be re-read; after a work-queue command, the answer was
-// already read back from the database before the stop began, so it stands. A
-// single wording would be wrong for one of them, and a fix that asks for an
-// epoch id is useless to an operator who never gave one.
-type releaseSite int
-
-const (
-	// releaseSiteEpochController is the epoch controller's own Close.
-	releaseSiteEpochController releaseSite = iota
-	// releaseSiteQueueCommand is a work-queue command releasing the client it
-	// opened to read or change a queue setting.
-	releaseSiteQueueCommand
-)
-
 // incompleteShutdownError is the contract for a durable client that did not
 // finish shutting down inside controllerShutdownTimeout.
 //
@@ -381,11 +393,11 @@ const (
 // timeout, so an unguarded retry would spend the whole budget again on a client
 // whose database handle is already gone. The controller's Close refuses that
 // retry itself rather than only warning against it.
-func incompleteShutdownError(site releaseSite, cause error) error {
+func incompleteShutdownError(site clientSite, cause error) error {
 	why := fmt.Sprintf("At least one part of the durable runtime was still running when its %s shutdown budget expired, "+
 		"so the shutdown was cut short.", controllerShutdownTimeout)
 
-	if site == releaseSiteQueueCommand {
+	if site == clientSiteQueueCommand {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     "The work-queue command finished, but the durable client it used did not stop cleanly.",
@@ -452,7 +464,7 @@ func (c *dbosController) shutdown() error {
 		// dbos/internal/sysdb/dbq.go, on the timeout path too. Engine.Shutdown
 		// in internal/engine/engine.go states the same ownership for the
 		// engine's handle; the two must stay in agreement.
-		if err := releaseClient(c.client, releaseSiteEpochController); err != nil {
+		if err := releaseClient(c.client, clientSiteEpochController); err != nil {
 			errs = append(errs, err)
 		}
 	}

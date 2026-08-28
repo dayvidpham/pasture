@@ -70,6 +70,9 @@ func registeredQueuesSource(t *testing.T) string {
 			registeredQueuesDB.err = fmt.Errorf("create the fixture directory: %w", err)
 			return
 		}
+		// Registered as soon as it exists, so it is deleted at the end of the
+		// run even if the build below fails half way and leaves a partial file.
+		testutil.RegisterFixtureDir(dir)
 		dbPath := filepath.Join(dir, "pasture.db")
 
 		// Registering the queues is a side effect of building the engine, which
@@ -84,7 +87,15 @@ func registeredQueuesSource(t *testing.T) string {
 			registeredQueuesDB.err = fmt.Errorf("build the engine that registers the queues: %w", err)
 			return
 		}
-		e.Shutdown(registeredQueuesShutdownTimeout)
+		// The stop has to be CLEAN before the file is touched. An incomplete
+		// stop means some part of the runtime is still writing, and the
+		// checkpoint below would then truncate the log under it and leave a
+		// SHORT database — which would be copied into every test that asks for
+		// this fixture, and would fail them far away from this cause.
+		if err := e.Shutdown(registeredQueuesShutdownTimeout); err != nil {
+			registeredQueuesDB.err = fmt.Errorf("stop the engine that registered the queues: %w", err)
+			return
+		}
 
 		// Fold the write-ahead log back in, so the single file is a complete
 		// database and the copies below are not missing the queue rows.

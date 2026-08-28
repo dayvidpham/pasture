@@ -61,6 +61,9 @@ func TestMain(m *testing.M) {
 	}
 
 	code := m.Run()
+	// Delete the shared fixture databases this binary built, alongside the
+	// directory holding the binary it compiled. Both outlive any single test.
+	testutil.RemoveFixtureDirs()
 	_ = os.RemoveAll(tmpDir)
 	envCleanup()
 	os.Exit(code)

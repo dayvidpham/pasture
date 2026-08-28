@@ -46,7 +46,12 @@ func restartDaemonAt(t *testing.T, dbPath string) {
 	if err != nil {
 		t.Fatalf("engine.New (restart): %v", err)
 	}
-	e.Shutdown(10 * time.Second)
+	// The restart is only meaningful if the engine stopped cleanly: an engine
+	// that was still writing would leave the queue rows in doubt, and the
+	// assertion that follows would be measuring the mess rather than the rule.
+	if err := e.Shutdown(10 * time.Second); err != nil {
+		t.Fatalf("engine.Shutdown (restart): %v", err)
+	}
 }
 
 // storedConcurrency reads one queue's stored limit through a plain database
