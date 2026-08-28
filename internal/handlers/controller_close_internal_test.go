@@ -102,6 +102,12 @@ func TestDbosControllerClose_ReportsIncompleteShutdown(t *testing.T) {
 			elapsed, controllerShutdownTimeout)
 	}
 
+	// Close joins the client and trail outcomes, so the exit code has to survive
+	// that wrapper: callers read it off the joined error, not off the cause.
+	if got := pasterrors.ExitCode(closeErr); got != 3 {
+		t.Errorf("ExitCode(Close error) = %d, want 3: the workflow category must survive the join", got)
+	}
+
 	var structured *pasterrors.StructuredError
 	if !errors.As(closeErr, &structured) {
 		t.Fatalf("Close error = %v (%T), want a structured, actionable error", closeErr, closeErr)
