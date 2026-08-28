@@ -266,6 +266,10 @@ func (c *dbosController) Close() error {
 	if c.client != nil {
 		// The client owns and closes the SQLiteSystemDB handle supplied at
 		// construction; closing c.db separately would double-close the same DB.
+		// The shutdown reaches that handle through sqlPoolAdapter.Close in
+		// dbos/internal/sysdb/dbq.go, on the timeout path too. Engine.Shutdown
+		// in internal/engine/engine.go states the same ownership for the
+		// engine's handle; the two must stay in agreement.
 		if err := dbos.Shutdown(c.client, 5*time.Second); err != nil {
 			errs = append(errs, err)
 		}

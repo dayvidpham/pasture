@@ -397,3 +397,56 @@ func TestEngineNew_AbortsCleanlyWhenConstructionFailsAfterTheDurableContext(t *t
 		t.Fatalf("engine.Launch on the replacement engine: %v", err)
 	}
 }
+
+// TestEngineNew_AbortsWhenTheTrackerAlreadyDrivesAnEngine covers the abort call
+// site on the allocator-binding failure: a tracker accepts exactly one
+// engine-owned allocator, so a second engine on a tracker that already drives a
+// live one must be refused and torn down.
+//
+// It also pins the limit of the unwind added for the failure paths below the
+// binding: this abort installed nothing, so it must leave the FIRST engine's
+// binding in place. A third construction therefore fails the same way.
+func TestEngineNew_AbortsWhenTheTrackerAlreadyDrivesAnEngine(t *testing.T) {
+	t.Parallel()
+	tracker, dbPath := testutil.OpenGoldenTaskTracker(t)
+	executorID, appVersion := testEngineIdentity(t)
+	cfg := engine.Config{
+		DBPath:                   dbPath,
+		ApplicationVersion:       appVersion,
+		ExecutorID:               executorID,
+		SkipMigrations:           true,
+		QueueBasePollingInterval: 100 * time.Millisecond,
+		Trail:                    tracker,
+		Tracker:                  tracker,
+	}
+
+	first, err := engine.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("engine.New for the first engine: %v", err)
+	}
+	t.Cleanup(func() { first.Shutdown(5 * time.Second) })
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		second, err := engine.New(context.Background(), cfg)
+		if err == nil {
+			second.Shutdown(5 * time.Second)
+			t.Fatalf("engine.New attempt %d on a tracker that already drives an engine succeeded; wanted a refusal", attempt)
+		}
+		if second != nil {
+			t.Fatalf("engine.New attempt %d returned a non-nil engine together with error %v", attempt, err)
+		}
+		if !strings.Contains(err.Error(), "slice allocator") {
+			t.Fatalf("engine.New attempt %d error = %v, want the allocator-binding refusal", attempt, err)
+		}
+	}
+
+	// The refused constructions did not disturb the engine that owns the
+	// tracker: it still runs an epoch to completion.
+	if err := first.Launch(); err != nil {
+		t.Fatalf("engine.Launch on the surviving engine: %v", err)
+	}
+	final := runEpoch(t, first, "epoch-abort-bind", fullEpochPlan())
+	if final.CurrentPhase != protocol.PhaseComplete {
+		t.Errorf("surviving engine final phase = %q, want %q", final.CurrentPhase, protocol.PhaseComplete)
+	}
+}
