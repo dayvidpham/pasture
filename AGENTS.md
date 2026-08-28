@@ -125,8 +125,10 @@ Both subsystems open the same file: the Provenance tables (`tasks`, `edges`,
 `labels`, `comments`, `agents`, `agents_software`, `agents_human`, `agents_ml`,
 `activities`) and the audit tables (`audit_events`, `context_edges`, `sessions`,
 `pasture_well_known_agents`, `pasture_agent_categories`, `audit_schema_meta`)
-co-exist in one file. PROPOSAL-2 §7.1 / D11 binds writers to SQLite WAL mode
-with `busy_timeout=5000`; the cross-subsystem race test in
+co-exist in one file. PROPOSAL-2 §7.1 / D11 binds writers to SQLite WAL mode.
+The `busy_timeout` that goes with it is taken from the shared timeout profile
+(`internal/timeouts`) and is **500 ms** in the production profile; it is never a
+literal in a DSN. The cross-subsystem race test in
 `internal/tasks/tracker_race_test.go` (BLOCKER B3) exercises this path.
 
 Pre-PROPOSAL-2 deployments used two separate files (`provenance.db` for the
@@ -134,6 +136,34 @@ Pre-PROPOSAL-2 deployments used two separate files (`provenance.db` for the
 both to `pasture.db`. `pastured` accepts `--db`, and the shared fallback remains
 `PASTURE_DB_PATH` / `tasks.DefaultDBPath()`. The old `--audit-db-path` alias has
 been retired with the Temporal daemon role.
+
+### Timeout tiers (`internal/timeouts`)
+
+Every deadline that guards a database write comes from one immutable
+`timeouts.Profile`. The tiers are strictly increasing, and the constructor
+refuses a profile that inverts them, so an inner retry can never outlive the
+caller waiting on it:
+
+| Tier | Field | Production | Bounds |
+|---|---|---|---|
+| 1 (innermost) | `SQLiteBusy` | **500 ms** | one SQLite lock wait inside the driver, set as the DSN `busy_timeout` |
+| 2 | `Ingress` | **1 s** | one lifecycle receipt append, including its lock retries |
+| 3 (outermost) | `StartSlice` | **2 s** | how long a slice sub-workflow waits for its `start_slice` signal |
+
+The other two profiles keep the same ordering with different budgets:
+`TestProfile` (500 ms / 2 s / 3 s) gives integration runs room for a serialized
+writer queue, and `DeadlineTestProfile` (25 ms / 250 ms / 500 ms) is tight on
+purpose so tests can prove deadline-breach behaviour quickly.
+
+Rules:
+
+- Production code takes these values from the injected profile. It must not
+  write a duration or a `busy_timeout(...)` DSN literal of its own.
+  `guard.CheckTimeoutSource` parses a listed set of production files and fails
+  the test suite for any of them that does; add a file to that list when it
+  starts to carry a timeout.
+- A change to a tier is a change to observable behaviour under load. State the
+  measurement that justifies it, and keep the ordering strict.
 
 ### Schema migration (`pasture migrate`)
 
@@ -189,13 +219,21 @@ Existing `pasture task` verbs (`create`, `show`, `update`, `close`, `list`,
 
 ## Dependencies (Approved)
 
-| Package | Purpose |
-|---------|---------|
-| `github.com/spf13/cobra` | CLI framework |
-| `github.com/spf13/viper` | Configuration loading (TOML/YAML/env) |
-| `github.com/dbos-inc/dbos-transact-golang` | Durable-execution substrate (DBOS Transact, SQLite backend) |
-| `modernc.org/sqlite` | Pure-Go SQLite (audit trail, local state, DBOS system DB) |
-| `golang.org/x/term` | Cross-platform terminal/isatty detection (sync-versions non-TTY guard) |
+| Package | Pinned | Purpose |
+|---------|--------|---------|
+| `github.com/spf13/cobra` | (see `go.mod`) | CLI framework |
+| `github.com/spf13/viper` | (see `go.mod`) | Configuration loading (TOML/YAML/env) |
+| `github.com/dbos-inc/dbos-transact-golang` | v1.2.0 | Durable-execution substrate (DBOS Transact, SQLite backend) |
+| `github.com/dayvidpham/provenance` | v0.0.7 | Task, edge and receipt store; built on the same DBOS version |
+| `modernc.org/sqlite` | v1.54.0 | Pure-Go SQLite (audit trail, local state, DBOS system DB) |
+| `modernc.org/libc` | v1.75.6 | Indirect, but pinned on purpose: v1.74.3 is retracted upstream, and module resolution selects it unless this floor is held |
+| `golang.org/x/term` | (see `go.mod`) | Cross-platform terminal/isatty detection (sync-versions non-TTY guard) |
+
+`go.mod` is the source of truth for every version. The three versions written
+above are repeated here because a change to any of them changes behaviour the
+operator sees, so a bump must be a deliberate act: the durable runtime version
+decides which databases can be opened, and the two modernc versions decide
+whether a pure-Go build is possible at all.
 
 No other external dependencies may be added without supervisor approval.
 
@@ -229,7 +267,7 @@ os.Exit(1) // magic number with no name
 |------|-------------------|---------|
 | 0 | (none) | Success |
 | 1 | `CategoryValidation` | Validation error (bad input, missing flags) |
-| 2 | `CategoryConnection` | Connection error (Temporal unreachable, ACP unreachable, file open failure) |
+| 2 | `CategoryConnection` | Connection error (durable runtime unreachable, ACP unreachable, file open failure) |
 | 3 | `CategoryWorkflow` | Workflow error (execution failure, signal rejected) |
 | 4 | `CategoryConfig` | Configuration error (bad YAML, invalid env var) |
 | 5 | `CategoryStorage` | Storage error (SQLite open, schema migration failure, schema-version mismatch) |
@@ -558,6 +596,30 @@ GOOS=windows GOARCH=amd64  CGO_ENABLED=0 go build ./cmd/pastured
 - The root module must not require `go.temporal.io/*`. The old Temporal
   substrate is preserved only as the isolated deprecated nested module under
   `legacy/temporal/`.
+
+### Work queues
+
+- Queues are rows in the shared database, not per-process state. `RegisterQueue`
+  writes the row with the `QueueConflictAlwaysUpdate` policy, so a starting
+  process configures the queue every peer then reads. Every worker re-reads the
+  row as it polls, about once a second.
+- Two queues exist: `pasture-slice-queue` for slice and review sub-workflows,
+  and `pasture-control-queue` for epoch control workflows. Slices and reviews
+  share one concurrency budget K, because the bound protects one thing: the
+  number of writers on the single `pasture.db` file.
+- The control queue runs one workflow at a time in each process by design.
+  `pasture queue concurrency set control ...` is refused with that reason.
+- K can change while the daemon runs: `pasture queue concurrency set slice <n>`
+  writes the stored setting, reads it back, and the daemon adopts it at its next
+  poll. Work already running is not interrupted. The change lasts until a daemon
+  starts again, because a start writes the limit the daemon was configured with.
+  For a limit that survives a restart, set `--slice-concurrency` or
+  `PASTURE_SLICE_CONCURRENCY`.
+- Recovery keeps a workflow on the queue it ran on. A recovered slice returns to
+  the slice queue and stays under K. Work that ran on no queue — an epoch control
+  workflow — is put on the runtime's own reserved queue, which pasture does not
+  configure: it carries no concurrency limit and polls at the runtime's fixed
+  cadence.
 
 When debugging "where am I in this workflow?", the layers map cleanly:
 
