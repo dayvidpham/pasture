@@ -152,21 +152,34 @@ func ResolveSliceConcurrency(flagVal int) (int, error) {
 // internal/engine/subworkflows_test.go):
 //
 //   - AlwaysUpdate and the runtime default (update only when this application
-//     version is the latest registered one) behave IDENTICALLY for peers of the
-//     same application version, which is the only case pasture supports: a
-//     running engine limited to 2 concurrent slices adopts a starting peer's
-//     limit of 4 and immediately runs 4. The two differ only across versions,
-//     and a mixed-version deployment is out of scope because an upgrade
-//     replaces the database rather than sharing it.
+//     version is the latest registered one) behave IDENTICALLY here, because
+//     every pasture process pins the same application version: see
+//     DefaultApplicationVersion in internal/engine/version.go, which is a fixed
+//     value precisely so that a rebuilt binary still recovers the epochs an
+//     earlier build left in flight from the SAME database. Peers therefore
+//     always share a version, and under either policy a running engine limited
+//     to 2 concurrent slices adopts a starting peer's limit of 4 and
+//     immediately runs 4.
 //   - NeverUpdate keeps the first registration and ignores every later one. It
 //     was rejected: it makes the queue's settings depend on which process
 //     started first, which is not something an operator can predict or correct,
 //     and it silently discards a deliberate change.
 //
-// The cost of AlwaysUpdate is real and is accepted: a peer that starts with a
-// different limit changes the limit for work that is already running. That is
-// the same power the operator path (Engine.SetSliceConcurrency) offers on
+// Two costs are real and are accepted.
+//
+// First, a peer that starts with a different limit changes the limit for work
+// that is already running. That is the same power the operator path
+// (Engine.SetSliceConcurrency, and the command line behind it) offers on
 // purpose, and it is preferred over a queue that ignores its own settings.
+//
+// Second, the two policies part company in exactly one window: a deliberate
+// bump of the pinned application version, when processes of the old and the new
+// version run against one database at once. There, the default would let only
+// the newest version reconfigure the queue, while AlwaysUpdate lets an old
+// process reconfigure a new one's running queue. That window is short, it is
+// entered on purpose, and during it the operator can set the limit they want
+// with the command line; a queue that silently ignores the process actually
+// serving it is the worse trade.
 //
 // Roadmap for the queue behaviour: https://github.com/dayvidpham/pasture/issues/104
 const queueConflictPolicy = dbos.QueueConflictAlwaysUpdate

@@ -707,14 +707,23 @@ func (e *Engine) SliceQueue() dbos.Queue { return e.sliceQueue }
 // ControlQueue returns the DBOS queue used for epoch control workflows.
 func (e *Engine) ControlQueue() dbos.Queue { return e.controlQueue }
 
-// SliceConcurrency returns the per-executor concurrency limit K currently in
-// force for the slice queue. New stores the resolved start-up value (after
-// applying the DefaultSliceQueueConcurrency fallback) rather than re-deriving
-// it from the config, so the fallback logic exists in one place only.
-// SetSliceConcurrency replaces the value after it has updated the stored queue
-// configuration, so this getter always reports the last value this process
-// wrote, not necessarily the value a peer process wrote afterwards. Read the
-// stored configuration back with SliceQueueWorkerConcurrency for that.
+// SliceConcurrency returns the per-executor concurrency limit K for the slice
+// queue as this process last saw it. New stores the resolved start-up value
+// (after applying the DefaultSliceQueueConcurrency fallback) rather than
+// re-deriving it from the config, so the fallback logic exists in one place
+// only.
+//
+// SetSliceConcurrency then replaces the value with the one it READ BACK from
+// storage, not the one it was asked for. That is deliberate: when another
+// process wins the same row, the read-back value is the limit the queue really
+// runs work at, and reporting the losing request instead would be a lie.
+//
+// The value can still be out of date. This process reads the stored row when it
+// starts and when it changes the limit, while any process may change that row at
+// any moment. For the limit in force right now, read the row: dbos.RetrieveQueue
+// on Engine.DBOS(), or from a terminal
+//
+//	pasture queue concurrency get slice
 func (e *Engine) SliceConcurrency() int {
 	return int(e.sliceConcurrency.Load())
 }
