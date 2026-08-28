@@ -12,10 +12,22 @@ import (
 	"github.com/dayvidpham/pasture/internal/testutil"
 )
 
-// recvProbeTimeout is the receive deadline the probe workflow waits out. Nothing
-// ever sends on the probe topic, so the deadline always expires; it is short
-// because the wait is the whole point and no other test work depends on it.
-const recvProbeTimeout = 50 * time.Millisecond
+// recvProbeTimeouts are the receive deadlines the probe workflow waits out.
+// Nothing ever sends on the probe topic, so every deadline expires. Zero is the
+// shape the three drain loops use (no wait; the timeout is stamped inside the
+// transaction) and 50ms is the shape of the blocking advance receive; both must
+// classify the same way.
+var recvProbeTimeouts = map[string]time.Duration{
+	"zero deadline (drain loops)":       0,
+	"positive deadline (blocking recv)": 50 * time.Millisecond,
+}
+
+// recvProbeInput is the probe workflow's input: the topic to wait on and the
+// deadline to wait out.
+type recvProbeInput struct {
+	Topic   string
+	Timeout time.Duration
+}
 
 // recvProbeResult reports how the workflow itself classified the receive error,
 // so the assertion covers the production predicate running inside a real
@@ -27,10 +39,10 @@ type recvProbeResult struct {
 
 // recvTimeoutProbeWorkflow waits out a receive deadline on a topic no one sends
 // to, then classifies the runtime's own error with isRecvTimeout.
-func recvTimeoutProbeWorkflow(ctx dbos.Context, topic string) (recvProbeResult, error) {
-	_, err := dbos.Recv[string](ctx, topic, recvProbeTimeout)
+func recvTimeoutProbeWorkflow(ctx dbos.Context, in recvProbeInput) (recvProbeResult, error) {
+	_, err := dbos.Recv[string](ctx, in.Topic, in.Timeout)
 	if err == nil {
-		return recvProbeResult{}, fmt.Errorf("receive on topic %q returned no error; the probe needs the deadline to expire", topic)
+		return recvProbeResult{}, fmt.Errorf("receive on topic %q returned no error; the probe needs the deadline to expire", in.Topic)
 	}
 	return recvProbeResult{ClassifiedAsTimeout: isRecvTimeout(err), ErrText: err.Error()}, nil
 }
@@ -71,11 +83,23 @@ func newRecvProbeEngine(t *testing.T) *Engine {
 func TestIsRecvTimeout_MatchesRuntimeRecvTimeout(t *testing.T) {
 	e := newRecvProbeEngine(t)
 
-	const workflowID = "recv-timeout-probe"
-	handle, err := dbos.RunWorkflow(e.dbosCtx, recvTimeoutProbeWorkflow, "probe-topic",
+	for name, timeout := range recvProbeTimeouts {
+		t.Run(name, func(t *testing.T) {
+			assertRuntimeRecvTimeoutClassifies(t, e, timeout)
+		})
+	}
+}
+
+// assertRuntimeRecvTimeoutClassifies runs the probe with one receive deadline
+// and asserts the three classification facts for it.
+func assertRuntimeRecvTimeoutClassifies(t *testing.T, e *Engine, timeout time.Duration) {
+	t.Helper()
+	workflowID := fmt.Sprintf("recv-timeout-probe-%d", timeout)
+	handle, err := dbos.RunWorkflow(e.dbosCtx, recvTimeoutProbeWorkflow,
+		recvProbeInput{Topic: "probe-topic", Timeout: timeout},
 		dbos.WithWorkflowID(workflowID))
 	if err != nil {
-		t.Fatalf("RunWorkflow(recv probe): %v", err)
+		t.Fatalf("RunWorkflow(recv probe, timeout %v): %v", timeout, err)
 	}
 	result, err := handle.GetResult(dbos.WithHandleTimeout(30 * time.Second))
 	if err != nil {

@@ -222,7 +222,16 @@ func (e *Engine) projectState(ctx dbos.Context, state *protocol.EpochState) erro
 // sentinel for it; errors.Is compares that code, so the match holds for a
 // timeout raised on a fresh execution and for the same timeout read back from
 // the database when the receive is replayed — the runtime encodes the typed
-// error and rebuilds it on decode.
+// error and rebuilds it on decode. That replay guarantee holds for databases
+// written by a runtime that encodes typed errors (dbos-transact-golang v0.20.0
+// and later); older runtimes persisted the message text only, and databases
+// they wrote are outside the supported set — the system-schema preflight refuses
+// them before any workflow is replayed.
+//
+// The sentinel is the runtime's general timeout code, not a receive-specific
+// one: GetEvent and handle GetResult timeouts carry the same code. Pass only the
+// error returned by dbos.Recv to this predicate; a GetResult timeout fed here
+// would be read as an idle poll.
 //
 // Do not add a message-text fallback here. Text is a second, silent classifier:
 // a re-worded runtime message switches it off with no compile or test failure,
