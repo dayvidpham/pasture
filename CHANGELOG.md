@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.0.7] - 2026-08-28
+
+### Changed
+- Provenance dependency updated to v0.0.6 (#112): a deadline-expired contended
+  write always carries its SQLite busy evidence in the error chain (the busy
+  error observed by any earlier acquisition attempt is joined into the deadline
+  return, with a post-expiry zero-budget probe covering an interrupted first
+  attempt). The receipt appender's contention-versus-deadline classification is
+  therefore deterministic under load.
+
 ## [0.0.6] - 2026-08-26
 
 ### Changed
