@@ -3,6 +3,9 @@ package engine
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -11,7 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dayvidpham/provenance"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
+	_ "modernc.org/sqlite"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/testutil"
@@ -399,4 +404,277 @@ func TestDescribeDurableStartupFailure(t *testing.T) {
 			t.Errorf("error = %v, want the original failure returned unchanged", got)
 		}
 	})
+}
+
+// SCHEMA-GATE TESTS
+//
+// The gate itself lives in the provenance library, which owns the durable
+// schema contract and proves the refusal against a recorded 176 KB database
+// that the superseded runtime really wrote, plus the matching hazard: the same
+// file handed straight to the runtime is migrated in place. Those two proofs
+// are not repeated here, and the recorded database is not copied into this
+// repository, because the library exports no way to obtain it.
+//
+// What the tests below prove is pasture's own wiring, which the library cannot:
+// the gate runs before the durable context is built, its refusal reaches the
+// caller as an actionable storage error that names the file, a refused database
+// keeps the durable layout it arrived with, and a database this build created
+// is never refused.
+//
+// The refused database is built here from the only two facts the gate reads:
+// the durable runtime records its layout version in a single-row table named
+// dbos_migrations, and the superseded runtime stopped at version 41. Evidence
+// for both, in the library version pinned in go.mod:
+// dbos/internal/sysdb/sqlite_migrations.go (RunSqliteMigrations creates
+// `dbos_migrations (version INTEGER NOT NULL PRIMARY KEY)` and reads a single
+// row from it) and BuildSqliteMigrations in the same file, whose SQLite list
+// runs 1..41 and then continues at 42, so 41 is the last version the superseded
+// runtime can leave behind.
+
+// supersededDurableSchemaVersion is the layout version the superseded runtime
+// stopped at, and therefore the version the refused database below records.
+const supersededDurableSchemaVersion = 41
+
+// firstSupportedDurableSchemaVersion is the floor the gate enforces: the first
+// layout version this build's durable runtime introduces. The refusal names it,
+// so a floor that ever moves in the library fails these tests instead of
+// passing silently.
+const firstSupportedDurableSchemaVersion = 42
+
+// durableMigrationTable is the single-row table the durable runtime keeps its
+// layout version in.
+const durableMigrationTable = "dbos_migrations"
+
+// writeSupersededDurableDatabase writes a private database whose durable layout
+// is the one the superseded runtime left behind, and returns its path with the
+// digest of its bytes. The digest lets a caller prove that a refusal wrote
+// nothing.
+func writeSupersededDurableDatabase(t *testing.T) (string, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "pasture.db")
+	db := openTestSQLite(t, path)
+	if _, err := db.ExecContext(t.Context(),
+		"CREATE TABLE "+durableMigrationTable+" (version INTEGER NOT NULL PRIMARY KEY)"); err != nil {
+		t.Fatalf("create the %s table in %s: %v", durableMigrationTable, path, err)
+	}
+	if _, err := db.ExecContext(t.Context(),
+		"INSERT INTO "+durableMigrationTable+" (version) VALUES (?)", supersededDurableSchemaVersion); err != nil {
+		t.Fatalf("record layout version %d in %s: %v", supersededDurableSchemaVersion, path, err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close %s after writing the superseded layout: %v", path, err)
+	}
+	return path, fileSHA256(t, path)
+}
+
+// openTestSQLite opens a private handle on the same driver production uses. The
+// handle is closed on cleanup.
+func openTestSQLite(t *testing.T, path string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatalf("open the test database %s: %v", path, err)
+	}
+	db.SetMaxOpenConns(1)
+	if err := db.PingContext(t.Context()); err != nil {
+		t.Fatalf("ping the test database %s: %v", path, err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+func fileSHA256(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// readDurableSchemaVersion reports the layout version a database records, or 0
+// when it records none.
+func readDurableSchemaVersion(t *testing.T, path string) int64 {
+	t.Helper()
+	db := openTestSQLite(t, path)
+	var version int64
+	err := db.QueryRowContext(t.Context(),
+		"SELECT version FROM "+durableMigrationTable+" LIMIT 1").Scan(&version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0
+	}
+	if err != nil {
+		t.Fatalf("read the recorded layout version from %s: %v", path, err)
+	}
+	return version
+}
+
+// durableRuntimeTables reports which tables the durable runtime owns are
+// present in the database. The gate must leave every one of them absent.
+func durableRuntimeTables(t *testing.T, path string) []string {
+	t.Helper()
+	db := openTestSQLite(t, path)
+	present := []string{}
+	// These four tables are created by the very first layout steps the runtime
+	// applies, so any one of them proves the runtime ran against the file.
+	for _, name := range []string{"workflow_status", "operation_outputs", "notifications", "workflow_queue"} {
+		var found int
+		err := db.QueryRowContext(t.Context(),
+			"SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", name).Scan(&found)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			t.Fatalf("probe %s for the table %s: %v", path, name, err)
+		}
+		present = append(present, name)
+	}
+	return present
+}
+
+// renderReport returns the user-visible error block, for a failure message that
+// shows exactly what an operator would read.
+func renderReport(e *pasterrors.StructuredError) string {
+	var buf bytes.Buffer
+	e.Report(&buf)
+	return buf.String()
+}
+
+// requireStructuredStorageError fails unless err is a pasture storage error,
+// which is the exit code an operator scripts against.
+func requireStructuredStorageError(t *testing.T, err error) *pasterrors.StructuredError {
+	t.Helper()
+	var structured *pasterrors.StructuredError
+	if !errors.As(err, &structured) {
+		t.Fatalf("error type = %T, want *errors.StructuredError: %v", err, err)
+	}
+	if structured.Category != pasterrors.CategoryStorage {
+		t.Errorf("error category = %v, want %v", structured.Category, pasterrors.CategoryStorage)
+	}
+	return structured
+}
+
+// The gate refuses a database an older build wrote, reads only, and says what
+// the operator must do about it.
+func TestRequireSupportedDurableSchema_RefusesADatabaseAnOlderBuildWrote(t *testing.T) {
+	t.Parallel()
+	path, before := writeSupersededDurableDatabase(t)
+	db := openTestSQLite(t, path)
+
+	err := RequireSupportedDurableSchema(t.Context(), engineConstructionSite, db, path)
+	if err == nil {
+		t.Fatal("the gate accepted a database whose durable layout an older build wrote")
+	}
+	structured := requireStructuredStorageError(t, err)
+	if !errors.Is(err, provenance.ErrSupersededDBOSSystemSchema) {
+		t.Errorf("the refusal no longer matches the library's own sentinel: %v", err)
+	}
+	for _, want := range []string{
+		path,                           // the file the operator must act on
+		path + "-wal",                  // and its two companions
+		path + "-shm",                  // ...
+		"rm ",                          // the exact command
+		"--db <path>",                  // the alternative to deleting it
+		"pgrep -fa 'pasture|pastured'", // stop the processes first
+	} {
+		if !reportContains(structured, want) {
+			t.Errorf("the refusal does not mention %q: %s", want, renderReport(structured))
+		}
+	}
+	// The wrapped library text carries the recorded version and the floor, so a
+	// floor that moves fails here instead of passing silently.
+	for _, want := range []string{
+		fmt.Sprintf("version %d", supersededDurableSchemaVersion),
+		fmt.Sprintf("floor %d", firstSupportedDurableSchemaVersion),
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not report %q: %v", want, err)
+		}
+	}
+
+	if after := fileSHA256(t, path); after != before {
+		t.Errorf("the refused database changed on disk: digest %s, want %s; the gate must only read", after, before)
+	}
+}
+
+// A database with no durable layout is fresh, and the runtime creates the
+// layout on its first launch. The gate must not stand in the way of that.
+func TestRequireSupportedDurableSchema_AcceptsAFreshDatabase(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "fresh.db")
+	db := openTestSQLite(t, path)
+	if err := RequireSupportedDurableSchema(t.Context(), engineConstructionSite, db, path); err != nil {
+		t.Fatalf("the gate refused a fresh database: %v", err)
+	}
+}
+
+// The production path: engine construction refuses such a database, and the
+// durable runtime never touches it.
+func TestEngineNew_RefusesADatabaseAnOlderBuildWrote(t *testing.T) {
+	t.Parallel()
+	path, _ := writeSupersededDurableDatabase(t)
+
+	built, err := New(t.Context(), Config{
+		DBPath:             path,
+		ApplicationVersion: "test-app-refuses-superseded",
+		ExecutorID:         "test-executor-refuses-superseded",
+	})
+	if err == nil {
+		built.Shutdown(5 * time.Second)
+		t.Fatal("engine.New opened a database whose durable layout an older build wrote")
+	}
+	if built != nil {
+		t.Fatalf("engine.New returned an engine together with error %v", err)
+	}
+	structured := requireStructuredStorageError(t, err)
+	if !reportContains(structured, path) {
+		t.Errorf("the refusal does not name the database %s: %s", path, renderReport(structured))
+	}
+	if !reportContains(structured, engineConstructionSite) {
+		t.Errorf("the refusal does not name the engine as the refusing caller: %s", renderReport(structured))
+	}
+
+	// Nothing was migrated: the recorded layout version is untouched and no
+	// table the durable runtime owns was created.
+	if version := readDurableSchemaVersion(t, path); version != supersededDurableSchemaVersion {
+		t.Errorf("recorded layout version = %d after the refusal, want %d: the refusal migrated the database",
+			version, supersededDurableSchemaVersion)
+	}
+	if tables := durableRuntimeTables(t, path); len(tables) != 0 {
+		t.Errorf("the refused database gained durable-runtime tables %v: the runtime ran against it", tables)
+	}
+}
+
+// The other side of the gate: a database this build created carries a supported
+// layout, and reopening it must not be refused.
+func TestEngineNew_AcceptsADatabaseThisBuildCreated(t *testing.T) {
+	t.Parallel()
+	dbPath := testutil.GoldenUnifiedDBPath(t)
+	cfg := Config{
+		DBPath:                   dbPath,
+		ApplicationVersion:       "test-app-accepts-supported",
+		ExecutorID:               "test-executor-accepts-supported",
+		SkipMigrations:           true,
+		QueueBasePollingInterval: 100 * time.Millisecond,
+	}
+
+	first, err := New(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("engine.New on a fresh database: %v", err)
+	}
+	first.Shutdown(30 * time.Second)
+
+	version := readDurableSchemaVersion(t, dbPath)
+	if version < firstSupportedDurableSchemaVersion {
+		t.Fatalf("this build left the database at layout version %d, below its own floor %d: "+
+			"the fixture below no longer represents a database this build created",
+			version, firstSupportedDurableSchemaVersion)
+	}
+
+	second, err := New(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("engine.New refused a database this build itself created at layout version %d: %v", version, err)
+	}
+	second.Shutdown(30 * time.Second)
 }

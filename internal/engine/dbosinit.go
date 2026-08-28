@@ -2,10 +2,13 @@ package engine
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/dayvidpham/provenance"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
@@ -358,6 +361,108 @@ func missingDBOSSQLiteDriverError(where string, cause error) error {
 			fmt.Sprintf("   for lifecycle commands):\n     _ %q\n", dbosSQLiteDriverPackage) +
 			"3. Rebuild, then run the tests in those two packages: they check that the import is\n" +
 			"   present in each file that needs it.",
+		Cause: cause,
+	}
+}
+
+// SCHEMA GATE
+//
+// The durable runtime migrates a system database in place while it builds a
+// context or a client. A database that the superseded runtime wrote is
+// therefore upgraded silently, and after that moment no refusal is possible any
+// more. This build supports no such in-place upgrade, so the gate below must
+// run on the exact handle that becomes the runtime's system database, BEFORE
+// that construction.
+//
+// The check itself belongs to the provenance library, which owns the durable
+// schema contract and pins the floor against a recorded database written by the
+// superseded runtime. Pasture calls that public gate and translates its refusal
+// into the error shape pasture's own commands report. It never re-implements
+// the check, so the floor cannot drift between the two repositories.
+//
+// The refusal is permanent: deleting the file is the only repair, and no
+// re-attempt can change the recorded version. It must therefore never enter the
+// bounded schema-bootstrap retry above, and it does not: the gate runs and
+// returns before newDurableContext is ever called.
+
+// RequireSupportedDurableSchema refuses a pasture database whose durable
+// schema a superseded runtime wrote, and reports every other preflight failure
+// in the same actionable shape.
+//
+// Call it on the exact *sql.DB that is about to become the durable runtime's
+// system handle, before dbos.NewContext or dbos.NewClient. dbPath names the
+// file for the operator. where is the caller's own location, because the engine
+// and the epoch controller open the same file and an operator needs to know
+// which of them refused to start.
+//
+// The gate only reads. On refusal nothing was opened, created, or migrated, and
+// the file is byte-for-byte as it was.
+func RequireSupportedDurableSchema(ctx context.Context, where string, db *sql.DB, dbPath string) error {
+	if err := provenance.RequireSupportedDBOSSystemSchema(ctx, db, dbPath); err != nil {
+		if errors.Is(err, provenance.ErrSupersededDBOSSystemSchema) {
+			return supersededDurableSchemaError(where, dbPath, err)
+		}
+		return unreadableDurableSchemaError(where, dbPath, err)
+	}
+	return nil
+}
+
+// supersededDurableSchemaError explains a database that an older pasture build
+// wrote and that this build will not open.
+//
+// The category is storage: what failed for the caller is the database, and the
+// repair is an operator action on that file. The wrapped library error is kept
+// as the cause, so errors.Is against the library sentinel still succeeds for a
+// caller that wants to tell this refusal from any other storage failure.
+func supersededDurableSchemaError(where, dbPath string, cause error) error {
+	return &pasterrors.StructuredError{
+		Category: pasterrors.CategoryStorage,
+		What: fmt.Sprintf(
+			"This pasture build can't open the database %s: an older pasture build wrote it.", dbPath),
+		Why: "The durable-execution state in that file has a layout that an older pasture build\n" +
+			"created. This build reads a newer layout and supports no upgrade of the old one: the\n" +
+			"change was a clean cut, so there is no path that carries the old records forward.",
+		Where: where,
+		Impact: "Nothing was opened, started, or changed, and the file is exactly as it was. No epoch\n" +
+			"can run or be inspected from this build until the database is replaced.",
+		Fix: fmt.Sprintf(
+			"The old file can't be converted, so it has to be replaced. Its epochs and their history\n"+
+				"are lost with it — read them with the older build first if you still need them.\n"+
+				"1. Stop every pasture and pastured process that uses this file:\n"+
+				"     pgrep -fa 'pasture|pastured'\n"+
+				"2. Confirm no other process is opening it right now. A first-ever start-up is still\n"+
+				"   writing the new layout while it runs, and reads as an old file until it finishes.\n"+
+				"3. Delete the file and its two companions:\n"+
+				"     rm %s %s-wal %s-shm\n"+
+				"4. Run the command again. This build creates a fresh database on its next start.\n"+
+				"   To keep the old file instead, point pasture at another path with --db <path>.",
+			dbPath, dbPath, dbPath),
+		Cause: cause,
+	}
+}
+
+// unreadableDurableSchemaError explains a preflight that could not decide
+// whether the database is usable, which is every failure of the gate other than
+// the refusal above: an unreadable file, a damaged one, or a table of the same
+// name that pasture did not write.
+func unreadableDurableSchemaError(where, dbPath string, cause error) error {
+	return &pasterrors.StructuredError{
+		Category: pasterrors.CategoryStorage,
+		What: fmt.Sprintf(
+			"Couldn't check the durable-execution layout of the database %s.", dbPath),
+		Why: "Before it opens a database, pasture reads the recorded layout version to be sure this\n" +
+			"build can use it. That read failed, so the layout is unknown. The file is normally\n" +
+			"unreadable, damaged, or not the database pasture owns.",
+		Where: where,
+		Impact: "Nothing was opened, started, or changed. The engine did not start, so no epoch can run\n" +
+			"from this process.",
+		Fix: fmt.Sprintf(
+			"1. Confirm the path exists and this user may read and write it:\n"+
+				"     ls -l %s\n"+
+				"2. Confirm the file is a healthy SQLite database:\n"+
+				"     sqlite3 %s 'PRAGMA integrity_check;'\n"+
+				"3. If the file belongs to another program, point pasture at its own database with\n"+
+				"   --db <path>.", dbPath, dbPath),
 		Cause: cause,
 	}
 }

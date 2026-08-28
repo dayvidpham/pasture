@@ -252,6 +252,21 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		return nil, err
 	}
 
+	// Schema gate. This build opens no database whose durable layout an older
+	// build wrote, and the refusal is only possible before the durable context
+	// below is constructed: constructing it migrates such a file in place. The
+	// gate runs on this exact handle, and it runs before pasture writes its own
+	// tables, so a refused database keeps the layout it arrived with. The
+	// refusal is permanent, so it stays outside the bounded retry that follows.
+	// See internal/engine/dbosinit.go.
+	if err := RequireSupportedDurableSchema(ctx, engineConstructionSite, db, cfg.DBPath); err != nil {
+		_ = db.Close()
+		if trailCloser != nil {
+			_ = trailCloser.Close()
+		}
+		return nil, err
+	}
+
 	if err := ensureProjectionTable(db); err != nil {
 		_ = db.Close()
 		if trailCloser != nil {
@@ -260,15 +275,6 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		return nil, err
 	}
 
-	// SCHEMA GATE — NOT WIRED YET. The refusal of a system database written by
-	// the superseded durable runtime belongs HERE: call
-	// provenance.RequireSupportedDBOSSystemSchema(ctx, db, cfg.DBPath) on this
-	// exact handle, BEFORE the context below is constructed. Constructing the
-	// context migrates such a database in place, so the gate is worthless after
-	// this point. provenance.ErrSupersededDBOSSystemSchema is permanent: the
-	// bounded retry below must not re-attempt it. Tracked in
-	// https://github.com/dayvidpham/pasture/issues/104.
-	//
 	// Bounded retry: two processes opening the same fresh database can race
 	// DBOS's non-atomic schema bootstrap, and the loser's error is repaired by
 	// re-running it. See internal/engine/dbosinit.go for the full analysis.
