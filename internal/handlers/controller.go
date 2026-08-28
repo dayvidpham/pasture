@@ -76,6 +76,10 @@ type dbosController struct {
 	closeErr  error
 }
 
+// controllerConstructionSite names this file for the Where line of the durable
+// start-up errors OpenEpochController surfaces.
+const controllerConstructionSite = "Opening the epoch controller (internal/handlers/controller.go in OpenEpochController)."
+
 // OpenEpochController opens a DBOS-backed controller on the unified database.
 // Empty dbPath resolves to tasks.DefaultDBPath(). The returned controller does
 // not construct or launch an engine: lifecycle verbs enqueue durable DBOS
@@ -135,7 +139,11 @@ func OpenEpochController(dbPath string) (EpochController, error) {
 	if err != nil {
 		_ = db.Close()
 		_ = trail.Close()
-		return nil, err
+		// The client refuses to start for causes the runtime reports as bare
+		// text. engine.DescribeDurableStartupFailure replaces the ones pasture
+		// can name with actionable guidance, and returns every other one
+		// unchanged.
+		return nil, engine.DescribeDurableStartupFailure(controllerConstructionSite, err)
 	}
 	return &dbosController{client: client, db: db, trail: trail, trailCloser: trail}, nil
 }

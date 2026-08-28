@@ -25,11 +25,33 @@ import (
 // (dbos/internal/sysdb/dialect.go SqliteDialect.IsRetryable), and even that is
 // defeated for migration failures because dbos/internal/sysdb/sqlite_migrations.go
 // formats every error with %v and so severs the driver error from the chain.
-// Re-read against the pinned version: the probe, the create, the per-migration
-// transaction, and every message this predicate matches are unchanged, and the
-// unguarded migration bodies above still collide.
 // A lost race therefore surfaces immediately as a plain SQLITE_ERROR (code 1)
 // "already exists" string and kills process start-up.
+//
+// EVIDENCE, read from the library version pinned in go.mod (see
+// dbosBootstrapRaceMarkers for the per-message locations):
+//   - probe-then-create, outside any transaction:
+//     dbos/internal/sysdb/sqlite_migrations.go:227-240 (RunSqliteMigrations).
+//   - one transaction per migration, with %v formatting on every failure:
+//     dbos/internal/sysdb/sqlite_migrations.go:261-296 (applySqliteMigration).
+//   - the retry that cannot see the driver error:
+//     dbos/internal/sysdb/dialect.go:399-412 (SqliteDialect.IsRetryable, which
+//     reads the driver's error code) and dbos/internal/sysdb/system_database.go:6664-6675
+//     (Retry, whose condition chain is the two dialects' IsRetryable).
+//   - the migration bodies: dbos/internal/sysdb/migrations/sqlite holds 47
+//     files; 14 of them use IF NOT EXISTS and the other 33 collide.
+//
+// KNOWN LIMIT, same version: dbos/internal/sysdb/system_database.go:873-884
+// (startupError) REPLACES the message above when the start-up context has
+// already exceeded dbos.Config.SystemDBStartupTimeout. A race lost that late
+// therefore reads as "system database startup timed out after ... while
+// initializing the SQLite system database" and this predicate does not match
+// it. That is deliberate: a start-up that ran out of its own budget is not
+// repaired by an immediate re-attempt, and the timeout text is actionable on
+// its own. Pasture leaves dbos.Config.SystemDBStartupTimeout unset, so the
+// library default of 2 minutes applies (dbos/dbos.go:63 and :131-132) — far
+// more than a bootstrap needs. Re-check this if that budget ever becomes short
+// enough that a normal bootstrap can hit it.
 //
 // Re-running the whole bootstrap is the correct repair, and it converges: the
 // second run re-probes sqlite_master, re-reads the committed version row, and
@@ -83,8 +105,11 @@ func defaultDBOSRetryPolicy() dbosRetryPolicy {
 // succeeds, the error becomes something else, the caller's context is
 // cancelled, or the policy ceiling is spent.
 //
-// Any error that is not the race signature is returned on the first attempt,
-// unchanged, so a genuine configuration or corruption failure still fails fast.
+// Any error that is not the race signature ends the loop on the first attempt,
+// so a genuine configuration or corruption failure still fails fast. Such an
+// error goes through DescribeDurableStartupFailure, which replaces the causes
+// pasture can name with actionable text and passes every other one through
+// unchanged.
 func newDurableContext(
 	ctx context.Context,
 	newCtx dbosContextFactory,
@@ -101,7 +126,7 @@ func newDurableContext(
 			return dbosCtx, nil
 		}
 		if !isDBOSBootstrapRace(err) {
-			return nil, err
+			return nil, DescribeDurableStartupFailure(engineConstructionSite, err)
 		}
 		if time.Now().After(deadline) {
 			return nil, dbosBootstrapRaceCeilingError(cfg.AppName, attempts, policy.ceiling, err)
@@ -123,9 +148,12 @@ func newDurableContext(
 }
 
 // dbosMigrationFailurePrefix is the wrapper DBOS puts on every system-database
-// schema-bootstrap failure (dbos/internal/sysdb/sqlite_pool.go). Requiring it
-// keeps the retry predicate scoped to schema bootstrap: an "already exists"
-// from anywhere else in start-up is still fatal on the first attempt.
+// schema-bootstrap failure. Requiring it keeps the retry predicate scoped to
+// schema bootstrap: an "already exists" from anywhere else in start-up is still
+// fatal on the first attempt.
+//
+// Evidence in the pinned library version: dbos/internal/sysdb/sqlite_pool.go:172
+// (newSqliteSystemDatabase wraps the migration run).
 const dbosMigrationFailurePrefix = "failed to run sqlite migrations"
 
 // dbosBootstrapRaceMarkers are the ways a lost schema-bootstrap race shows up,
@@ -135,6 +163,24 @@ const dbosMigrationFailurePrefix = "failed to run sqlite migrations"
 // row is inserted twice; or the loser is simply still queued behind the
 // winner's write lock. Every one of them is repaired by re-running the
 // bootstrap against the winner's committed schema.
+//
+// Evidence in the pinned library version, message by message:
+//   - "already exists" reaches us from two producers:
+//     dbos/internal/sysdb/sqlite_migrations.go:238 ("failed to create migrations
+//     table: %v", the lost probe-then-create window) and
+//     dbos/internal/sysdb/sqlite_migrations.go:281 ("failed to execute migration
+//     %d: %v", a migration body re-creating a table or index). SQLite supplies
+//     the "already exists" text itself.
+//   - "duplicate column name" reaches us from the same line :281, for a
+//     migration body that re-adds a column.
+//   - "UNIQUE constraint failed: dbos_migrations" reaches us from
+//     dbos/internal/sysdb/sqlite_migrations.go:288 ("failed to insert migration
+//     version %d: %v"). That insert runs only on a first-ever bootstrap
+//     (lastApplied == 0); a database that already carries a version row is
+//     UPDATEd instead at :293, and a lost race there shows up as a lock message
+//     rather than a constraint one.
+//   - "database is locked" and "database table is locked" are SQLite's own
+//     busy/locked text, and can wrap any statement above.
 var dbosBootstrapRaceMarkers = []string{
 	"already exists",
 	"duplicate column name",
@@ -218,5 +264,100 @@ func dbosBootstrapRaceCancelledError(attempts int, cancelCause, lastErr error) e
 			"2. Start pasture again once the other process has finished:\n" +
 			"     pgrep -fa 'pasture|pastured'",
 		Cause: cancelCause,
+	}
+}
+
+// engineConstructionSite names the place newDurableContext runs, for the Where
+// line of the errors it produces.
+const engineConstructionSite = "Constructing the engine (internal/engine/engine.go in engine.New)."
+
+// dbosMissingSQLiteDriverMarker is how the durable runtime refuses a binary
+// that never linked its SQLite driver. The runtime keeps the driver in a
+// registry that only the driver package's init populates, so a binary that
+// drops the blank import compiles, links, and then fails at the first attempt
+// to open a system database.
+//
+// Evidence in the pinned library version:
+// dbos/internal/sysdb/sqlite_driver.go:47-53 (registeredSQLiteDriver) writes
+// this message; dbos/internal/sysdb/sqlite_pool.go:72 and :141 are the two
+// callers, and :141 runs even when the caller supplies its own handle, which is
+// pasture's case. dbos/dbos.go:636-638 then re-wraps it as an initialisation
+// error, so the text below arrives inside a *dbos.Error.
+//
+// Matching text rather than an error value is forced by the library: the
+// message is built with fmt.Errorf and then flattened into the *dbos.Error
+// message, and the library exports no sentinel for it. The match is coupled to
+// the version pinned in go.mod and is re-checked by
+// TestDBOSVersionPinMatchesRacePredicate.
+const dbosMissingSQLiteDriverMarker = "SQLite support is not linked into this binary"
+
+// dbosSQLiteDriverPackage is the package whose blank import registers the
+// SQLite driver. It is named in the fix text below, and pinned in every binary
+// that opens a system database by the blank-import guards in
+// internal/engine/dbosinit_test.go and internal/handlers/controller_test.go.
+const dbosSQLiteDriverPackage = "github.com/dbos-inc/dbos-transact-golang/dbos/driver/sqlite"
+
+// isMissingDBOSSQLiteDriver reports whether err is the durable runtime's
+// refusal of a binary that did not link the SQLite driver.
+//
+// This failure is permanent for the life of the process: no other process can
+// repair it, and re-attempting it only repeats the same registry lookup. It
+// must therefore never enter the lost-race retry above, and
+// isDBOSBootstrapRace does not match it — the two predicates require different
+// text and this one carries no migration wrapper.
+func isMissingDBOSSQLiteDriver(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), dbosMissingSQLiteDriverMarker)
+}
+
+// DescribeDurableStartupFailure returns an actionable replacement for a
+// durable-runtime start-up failure whose cause pasture can name, and returns
+// err unchanged when it cannot name one. It returns nil for a nil error.
+//
+// where is the caller's own location, used for the Where line: the engine and
+// the epoch controller both build a durable runtime over the same shared
+// handle, and an operator needs to know which of them refused to start.
+//
+// Callers keep their own wrapping for the errors this function passes through.
+func DescribeDurableStartupFailure(where string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if isMissingDBOSSQLiteDriver(err) {
+		return missingDBOSSQLiteDriverError(where, err)
+	}
+	return err
+}
+
+// missingDBOSSQLiteDriverError explains a binary that did not link the durable
+// runtime's SQLite driver.
+//
+// The category is storage because that is what failed for the caller: pasture
+// could not open its database. The repair, however, is a source change in this
+// repository, not an operator action on the machine — the Fix line says so
+// plainly, because an operator who reads "storage" alone would go looking at
+// the file.
+func missingDBOSSQLiteDriverError(where string, cause error) error {
+	return &pasterrors.StructuredError{
+		Category: pasterrors.CategoryStorage,
+		What:     "This pasture build can't open a pasture database: its SQLite support is missing.",
+		Why: "The durable-execution runtime finds its SQLite driver through a registry that only the\n" +
+			"driver package fills in, and this binary never linked that package. Nothing in the code\n" +
+			"names the package, so the compiler and the linker can't notice it is gone: the build\n" +
+			"succeeds and the failure appears here, at the first attempt to open the database.",
+		Where:  where,
+		Impact: "No epoch can start or be inspected from this binary. No data was read or written.",
+		Fix: "This is a defect in the build, not in the database or the machine — an operator can't\n" +
+			"work around it.\n" +
+			"1. Report it, with the version of pasture you are running:\n" +
+			"     https://github.com/dayvidpham/pasture/issues\n" +
+			"2. To repair it in a source checkout, add this blank import to the file that opens the\n" +
+			"   database (internal/engine/engine.go for the engine, internal/handlers/controller.go\n" +
+			fmt.Sprintf("   for lifecycle commands):\n     _ %q\n", dbosSQLiteDriverPackage) +
+			"3. Rebuild, then run the tests in those two packages: they check that the import is\n" +
+			"   present in each file that needs it.",
+		Cause: cause,
 	}
 }

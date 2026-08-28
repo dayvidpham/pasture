@@ -160,6 +160,7 @@ func TestIsDBOSBootstrapRace(t *testing.T) {
 		{"already-exists outside schema bootstrap is fatal", errors.New("engine.New: failed to open the forensic audit trail: table audit_events already exists"), false},
 		{"unrelated bootstrap failure is fatal", errors.New(prefix + "disk I/O error (10)"), false},
 		{"configuration failure is fatal", errors.New("Error initializing DBOS Transact: ApplicationVersion cannot be empty"), false},
+		{"unlinked sqlite driver is not a race", errors.New(unlinkedSQLiteDriverError), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -202,6 +203,10 @@ const pinnedDBOSVersion = "github.com/dbos-inc/dbos-transact-golang v1.2.0"
 // dbosMigrationFailurePrefix / dbosBootstrapRaceMarkers / ciLostRaceError to
 // the messages that version actually produces. If the new version made the
 // bootstrap atomic or retry-safe itself, delete the predicate instead.
+//
+// The same applies to the second text-matched message: re-read
+// dbos/internal/sysdb/sqlite_driver.go (registeredSQLiteDriver) and update
+// dbosMissingSQLiteDriverMarker and unlinkedSQLiteDriverError together.
 func TestDBOSVersionPinMatchesRacePredicate(t *testing.T) {
 	t.Parallel()
 	gomod, err := os.ReadFile(filepath.Join("..", "..", "go.mod"))
@@ -213,16 +218,14 @@ func TestDBOSVersionPinMatchesRacePredicate(t *testing.T) {
 			"internal/engine/dbosinit.go matches that version's error text and must be "+
 			"re-verified against the new one before this pin is updated", pinnedDBOSVersion)
 	}
-	// The predicate must still recognise the failure this pin was chosen for.
+	// The predicates must still recognise the failures this pin was chosen for.
 	if !isDBOSBootstrapRace(errors.New(ciLostRaceError)) {
 		t.Fatal("isDBOSBootstrapRace no longer matches the observed lost-race failure of the pinned version")
 	}
+	if !isMissingDBOSSQLiteDriver(errors.New(unlinkedSQLiteDriverError)) {
+		t.Fatal("isMissingDBOSSQLiteDriver no longer matches the unlinked-driver refusal of the pinned version")
+	}
 }
-
-// dbosSQLiteDriverImport is the driver package the durable runtime looks up in
-// its backend registry when it is handed a SQLite handle. It is linked only by
-// a blank import, so nothing in this package references it by name.
-const dbosSQLiteDriverImport = "github.com/dbos-inc/dbos-transact-golang/dbos/driver/sqlite"
 
 // TestEngineLinksDBOSSQLiteDriver pins the blank import that links the durable
 // runtime's SQLite driver into every binary that builds a context in this
@@ -232,5 +235,168 @@ const dbosSQLiteDriverImport = "github.com/dbos-inc/dbos-transact-golang/dbos/dr
 // package's business and may be dropped without notice.
 func TestEngineLinksDBOSSQLiteDriver(t *testing.T) {
 	t.Parallel()
-	testutil.RequireBlankImport(t, "engine.go", dbosSQLiteDriverImport)
+	testutil.RequireBlankImport(t, "engine.go", dbosSQLiteDriverPackage)
+}
+
+// unlinkedSQLiteDriverMessage is the verbatim refusal the durable runtime
+// produces when the binary never linked its SQLite driver. It was recorded from
+// a real run of the pinned library version: a throwaway program that opened a
+// database handle and called dbos.NewContext and dbos.NewClient WITHOUT the
+// blank import produced exactly this message from both, inside a *dbos.Error
+// whose code is Initialization.
+//
+// Keeping the real text here means a library upgrade that rewords the refusal
+// fails TestDBOSVersionPinMatchesRacePredicate rather than silently turning the
+// diagnosis off.
+const unlinkedSQLiteDriverMessage = "Error initializing DBOS Transact: SQLite support is not linked into this binary: " +
+	`add import _ "github.com/dbos-inc/dbos-transact-golang/dbos/driver/sqlite" to register the SQLite driver`
+
+// unlinkedSQLiteDriverError is the full text of that failure as an operator
+// sees it, i.e. the *dbos.Error rendering of unlinkedSQLiteDriverMessage.
+const unlinkedSQLiteDriverError = "DBOS Error Initialization: " + unlinkedSQLiteDriverMessage
+
+// newUnlinkedSQLiteDriverFailure builds the failure in the shape the runtime
+// really returns: a *dbos.Error carrying the initialization code. The shape is
+// asserted below, so a library change to either the code or the rendering is
+// caught here too.
+func newUnlinkedSQLiteDriverFailure() error {
+	return &dbos.Error{Code: dbos.ErrorCodeInitialization, Message: unlinkedSQLiteDriverMessage}
+}
+
+// TestUnlinkedSQLiteDriverFailureShape pins the recorded failure to the shape
+// the pinned library version produces, so the tests below run against the real
+// error rather than a hand-written string that has drifted from it.
+func TestUnlinkedSQLiteDriverFailureShape(t *testing.T) {
+	t.Parallel()
+	err := newUnlinkedSQLiteDriverFailure()
+	if got := err.Error(); got != unlinkedSQLiteDriverError {
+		t.Fatalf("rendered failure = %q, want %q", got, unlinkedSQLiteDriverError)
+	}
+	var dbosErr *dbos.Error
+	if !errors.As(err, &dbosErr) {
+		t.Fatalf("failure type = %T, want *dbos.Error", err)
+	}
+	if dbosErr.Code != dbos.ErrorCodeInitialization {
+		t.Errorf("code = %v, want %v", dbosErr.Code, dbos.ErrorCodeInitialization)
+	}
+}
+
+// TestNewDurableContext_UnlinkedSQLiteDriverIsNotRetried pins that a binary
+// which did not link the SQLite driver fails at once.
+//
+// The refusal is permanent for the life of the process: no peer can repair it
+// and every re-attempt repeats the same registry lookup. Retrying it would turn
+// an instant, explainable failure into a long silent wait that ends in the
+// wrong diagnosis (a schema-bootstrap race).
+func TestNewDurableContext_UnlinkedSQLiteDriverIsNotRetried(t *testing.T) {
+	t.Parallel()
+	unlinked := newUnlinkedSQLiteDriverFailure()
+	// The second scripted result is a success: if the loop retried, the test
+	// would pass with two attempts and no error, which the assertions reject.
+	f := &fakeFactory{errs: []error{unlinked, nil}}
+
+	_, err := newDurableContext(context.Background(), f.new, dbos.Config{AppName: "pasture"}, fastPolicy())
+	if err == nil {
+		t.Fatal("newDurableContext with an unlinked SQLite driver: got success, want a failure on the first attempt")
+	}
+	if f.attempts != 1 {
+		t.Errorf("attempts = %d, want 1 (an unlinked driver is permanent and must not be retried)", f.attempts)
+	}
+	if isDBOSBootstrapRace(unlinked) {
+		t.Error("the lost-race predicate matches the unlinked-driver refusal; the two failures must stay distinct")
+	}
+	if !errors.Is(err, unlinked) {
+		t.Errorf("error = %v, want the runtime's own refusal kept as the cause", err)
+	}
+}
+
+// TestNewDurableContext_UnlinkedSQLiteDriverIsActionable pins what the operator
+// reads. The runtime's own text names the import, but nothing else: it does not
+// say who failed, what it means for the caller, or that the repair is a source
+// change rather than an operator action.
+func TestNewDurableContext_UnlinkedSQLiteDriverIsActionable(t *testing.T) {
+	t.Parallel()
+	f := &fakeFactory{errs: []error{newUnlinkedSQLiteDriverFailure()}}
+
+	_, err := newDurableContext(context.Background(), f.new, dbos.Config{AppName: "pasture"}, fastPolicy())
+	var structured *pasterrors.StructuredError
+	if !errors.As(err, &structured) {
+		t.Fatalf("error type = %T, want *errors.StructuredError with actionable guidance", err)
+	}
+	if structured.Category != pasterrors.CategoryStorage {
+		t.Errorf("category = %q, want %q", structured.Category, pasterrors.CategoryStorage)
+	}
+	if got := pasterrors.ExitCode(err); got != 5 {
+		t.Errorf("exit code = %d, want 5 (storage)", got)
+	}
+	if structured.Where != engineConstructionSite {
+		t.Errorf("where = %q, want %q", structured.Where, engineConstructionSite)
+	}
+	// One check per part an operator needs: what, why, where, impact, and a fix
+	// that names the exact import to add.
+	for _, want := range []string{
+		"Problem:",
+		"Reason:",
+		"Impact:",
+		"How to fix:",
+		"SQLite support is missing",
+		"internal/engine/engine.go",
+		"blank import",
+		dbosSQLiteDriverPackage,
+		"https://github.com/dayvidpham/pasture/issues",
+	} {
+		if !reportContains(structured, want) {
+			t.Errorf("unlinked-driver report is missing %q", want)
+		}
+	}
+}
+
+// TestDescribeDurableStartupFailure covers the shared classifier both durable
+// entry points use: the engine (through newDurableContext) and the epoch
+// controller (internal/handlers/controller.go).
+func TestDescribeDurableStartupFailure(t *testing.T) {
+	t.Parallel()
+	const where = "a caller's location."
+
+	t.Run("nil stays nil", func(t *testing.T) {
+		t.Parallel()
+		if err := DescribeDurableStartupFailure(where, nil); err != nil {
+			t.Errorf("error = %v, want nil", err)
+		}
+	})
+
+	t.Run("unlinked driver is described", func(t *testing.T) {
+		t.Parallel()
+		cause := newUnlinkedSQLiteDriverFailure()
+		err := DescribeDurableStartupFailure(where, cause)
+		var structured *pasterrors.StructuredError
+		if !errors.As(err, &structured) {
+			t.Fatalf("error type = %T, want *errors.StructuredError", err)
+		}
+		if structured.Where != where {
+			t.Errorf("where = %q, want the caller's own location %q", structured.Where, where)
+		}
+		if !errors.Is(err, cause) {
+			t.Error("the runtime's own refusal must stay reachable as the cause")
+		}
+	})
+
+	t.Run("a wrapped unlinked driver is still described", func(t *testing.T) {
+		t.Parallel()
+		cause := fmt.Errorf("opening the controller: %w", newUnlinkedSQLiteDriverFailure())
+		var structured *pasterrors.StructuredError
+		if !errors.As(DescribeDurableStartupFailure(where, cause), &structured) {
+			t.Error("a wrapped refusal must be recognised too")
+		}
+	})
+
+	t.Run("an unnamed cause is passed through unchanged", func(t *testing.T) {
+		t.Parallel()
+		// The classifier must not dress up failures it cannot diagnose: the
+		// caller's own wrapping is more accurate than a guess.
+		cause := errors.New("Error initializing DBOS Transact: ApplicationVersion cannot be empty")
+		if got := DescribeDurableStartupFailure(where, cause); got != cause {
+			t.Errorf("error = %v, want the original failure returned unchanged", got)
+		}
+	})
 }
