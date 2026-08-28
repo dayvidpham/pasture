@@ -50,9 +50,36 @@ package engine_test
 // 11. No-signal failure: a slice enqueued with no start_slice signal within the
 //     2s window returns Success=false with an actionable error message, fires
 //     SliceFailed (not SliceCompleted), and the parent receives Completed=false.
+//
+// 12. Junk-vote guard: an invalid-axis or invalid-vote signal sent mid-review
+//     does not flip or poison the consensus verdict.
+//
+// 13. Controller boundary: the client-backed controller does not construct an
+//     engine and does not own slice-queue configuration.
+//
+// 14. Registration conflict policy: a second process that registers the same
+//     queue with a different concurrency limit re-configures the queue the FIRST
+//     process is already running work on. Measured live: the running engine is
+//     saturated at 2, the peer registers 4, the running engine then runs 4.
+//
+// 15. Operator-driven concurrency change: SetSliceConcurrency raises the limit
+//     on a running engine, the stored settings are read back, and the running
+//     engine goes on to run at the new limit. Its refusal of a non-positive
+//     limit and its reporting of a storage failure are covered too.
+//
+// 16. Recovery and queues: a recovered slice goes back onto the pasture slice
+//     queue and completes there, while a recovered epoch workflow — which never
+//     ran on a queue — goes onto the runtime's reserved internal queue. The
+//     proof is a read-back of the stored queue name for each.
+//
+// 17. The operator path end to end: a concurrency change written by the
+//     command-line code path, from a separate client on the same database,
+//     reaches an engine that is already running.
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -64,6 +91,7 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	"github.com/dayvidpham/pasture/internal/engine"
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/testutil"
@@ -74,53 +102,77 @@ import (
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
-// newQueueEngine opens an engine with the given concurrency limit K.
-// k <= 0 uses the default (DefaultSliceQueueConcurrency).
-func newQueueEngine(t *testing.T, k int) *engine.Engine {
+// queueEngineOpts describes one engine for the queue tests. The zero value is
+// not usable: dbPath, executorID and appVersion are always required.
+//
+// Two engines that share dbPath share the queue rows, which is what the
+// registration-conflict test needs; two engines that also share executorID and
+// appVersion share crash-recovery ownership, which is what the recovery test
+// needs.
+type queueEngineOpts struct {
+	dbPath     string
+	k          int // <= 0 uses DefaultSliceQueueConcurrency
+	executorID string
+	appVersion string
+	mgr        *hooks.Manager // nil ⇒ no hook dispatch
+	// manualShutdown leaves shutdown to the test instead of registering it with
+	// t.Cleanup. Use it when the test must stop one engine before starting
+	// another on the same database file.
+	manualShutdown bool
+	// skipLaunch constructs the engine (which registers the queues) without
+	// launching it, so it never polls a queue or recovers a workflow. Use it
+	// for a peer whose only role is to register.
+	skipLaunch bool
+}
+
+// newQueueEngineFrom builds an engine, launches it unless skipLaunch is set,
+// and registers its shutdown with the test unless manualShutdown is set.
+func newQueueEngineFrom(t *testing.T, o queueEngineOpts) *engine.Engine {
 	t.Helper()
-	dbPath := testutil.GoldenUnifiedDBPath(t)
-	executorID, appVersion := testEngineIdentity(t)
 	e, err := engine.New(context.Background(), engine.Config{
-		DBPath:                   dbPath,
-		ApplicationVersion:       appVersion,
-		ExecutorID:               executorID,
-		SliceConcurrency:         k,
+		DBPath:                   o.dbPath,
+		ApplicationVersion:       o.appVersion,
+		ExecutorID:               o.executorID,
+		SliceConcurrency:         o.k,
+		HooksMgr:                 o.mgr,
 		SkipMigrations:           true,
 		QueueBasePollingInterval: 100 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("engine.New: %v", err)
 	}
+	if !o.manualShutdown {
+		t.Cleanup(func() { e.Shutdown(10 * time.Second) })
+	}
+	if o.skipLaunch {
+		return e
+	}
 	if err := e.Launch(); err != nil {
 		t.Fatalf("engine.Launch: %v", err)
 	}
-	t.Cleanup(func() { e.Shutdown(10 * time.Second) })
 	return e
+}
+
+// newQueueEngine opens an engine with the given concurrency limit K on a fresh
+// copy of the golden database. k <= 0 uses the default
+// (DefaultSliceQueueConcurrency).
+func newQueueEngine(t *testing.T, k int) *engine.Engine {
+	t.Helper()
+	return newQueueEngineWithHooks(t, k, nil)
 }
 
 // newQueueEngineWithHooks is like newQueueEngine but wires the given hooks
 // manager so dispatchHook delivers events to it.
 func newQueueEngineWithHooks(t *testing.T, k int, mgr *hooks.Manager) *engine.Engine {
 	t.Helper()
-	dbPath := testutil.GoldenUnifiedDBPath(t)
 	executorID, appVersion := testEngineIdentity(t)
-	e, err := engine.New(context.Background(), engine.Config{
-		DBPath:                   dbPath,
-		ApplicationVersion:       appVersion,
-		ExecutorID:               executorID,
-		SliceConcurrency:         k,
-		HooksMgr:                 mgr,
-		SkipMigrations:           true,
-		QueueBasePollingInterval: 100 * time.Millisecond,
+	return newQueueEngineFrom(t, queueEngineOpts{
+		dbPath:     testutil.GoldenUnifiedDBPath(t),
+		k:          k,
+		executorID: executorID,
+		appVersion: appVersion,
+		mgr:        mgr,
 	})
-	if err != nil {
-		t.Fatalf("engine.New: %v", err)
-	}
-	if err := e.Launch(); err != nil {
-		t.Fatalf("engine.Launch: %v", err)
-	}
-	t.Cleanup(func() { e.Shutdown(10 * time.Second) })
-	return e
 }
 
 // waitSliceResult calls GetResult with a timeout and fails the test on error.
@@ -1593,4 +1645,508 @@ func TestOpenEpochController_DoesNotResolveSliceConcurrency(t *testing.T) {
 		t.Fatalf("OpenEpochController must ignore %s because it no longer owns engine queues; got: %v", engine.SliceConcurrencyEnv, err)
 	}
 	defer ctrl.Close()
+}
+
+// ── Test 14: Queue configuration is shared state ──────────────────────────────
+
+// dbosInternalQueueName is the reserved queue that the durable runtime
+// re-enqueues a recovered workflow onto when that workflow was not running on a
+// queue of its own. The runtime keeps the name in an internal package
+// (dbos/internal/models/queue.go) and does not export it, so it is repeated
+// here; the recovery path that uses it is dbos/recovery.go.
+const dbosInternalQueueName = "_dbos_internal_queue"
+
+// storedSliceQueueConcurrency reads the slice queue's per-executor limit back
+// out of the database rather than off an in-process handle. That row is what
+// every queue worker reads its limit from, so it is the only reading that
+// proves what the running system will do.
+func storedSliceQueueConcurrency(t *testing.T, e *engine.Engine) *int {
+	t.Helper()
+	q, err := dbos.RetrieveQueue(e.DBOS(), engine.SliceQueueName)
+	if err != nil {
+		t.Fatalf("RetrieveQueue(%q): %v", engine.SliceQueueName, err)
+	}
+	return q.GetWorkerConcurrency()
+}
+
+// startGatedSlices starts the parent epoch workflow, enqueues n mock slices and
+// delivers each start signal. Every slice blocks in its SliceStarted hook until
+// the caller's gate is released, so the number of slices that reach the hook is
+// the number the queue is willing to run at once.
+func startGatedSlices(t *testing.T, e *engine.Engine, epochId string, n int) []dbos.WorkflowHandle[engine.SliceResult] {
+	t.Helper()
+	if _, err := dbos.RunWorkflow(e.DBOS(), e.EpochControlWorkflow,
+		engine.ControlInput{EpochId: epochId}, dbos.WithWorkflowID(epochId)); err != nil {
+		t.Fatalf("RunWorkflow(control): %v", err)
+	}
+	handles := make([]dbos.WorkflowHandle[engine.SliceResult], n)
+	sliceIds := make([]string, n)
+	for i := 0; i < n; i++ {
+		sliceId := fmt.Sprintf("%s--gated-%02x", epochId, i)
+		sliceIds[i] = sliceId
+		h, err := e.EnqueueSlice(engine.SliceInput{
+			EpochId:          epochId,
+			SliceId:          sliceId,
+			ParentWorkflowId: epochId,
+		})
+		if err != nil {
+			t.Fatalf("EnqueueSlice[%d]: %v", i, err)
+		}
+		handles[i] = h
+	}
+	for _, sliceId := range sliceIds {
+		sendMockStartSignal(t, e, sliceId, 30*time.Second)
+	}
+	return handles
+}
+
+// TestSliceQueue_PeerRegistrationReconfiguresTheRunningQueue pins the
+// registration conflict policy the engine chooses, which is only observable
+// when two processes register the same queue.
+//
+// A queue's settings are a row in the shared database, and a worker reloads
+// that row on every poll iteration (dbos/queue.go, queueRunner.runQueue). The
+// engine registers with the policy that always overwrites the row, so a second
+// process that starts against the same database re-configures the queue that
+// the first process is already running work on — without restarting it.
+//
+// The test makes that live effect visible: the running engine is saturated at
+// its start-up limit of 2, a second engine registers the same queue with a
+// limit of 4, and the FIRST engine then runs 4 slices at once. It also reads
+// the stored limit back, because that row is what every worker obeys.
+//
+// The second engine is deliberately not launched. A launched peer would also
+// poll the shared queue, and then it would be ambiguous which process ran a
+// slice. Registration alone is the behaviour under test.
+func TestSliceQueue_PeerRegistrationReconfiguresTheRunningQueue(t *testing.T) {
+	t.Parallel()
+	const startK = 2
+	const peerK = 4
+	const N = peerK
+
+	gater := &gatingConcurrencyHandler{release: make(chan struct{})}
+	mgr := hooks.NewManager(hooks.WithDispatchTimeout(60 * time.Second))
+	mgr.Register(gater)
+
+	dbPath := testutil.GoldenUnifiedDBPath(t)
+	executorID, appVersion := testEngineIdentity(t)
+	host := newQueueEngineFrom(t, queueEngineOpts{
+		dbPath: dbPath, k: startK, executorID: executorID, appVersion: appVersion, mgr: mgr,
+	})
+	releaseGate := sync.OnceFunc(func() { close(gater.release) })
+	defer releaseGate()
+
+	const epochId = "queue--peer-registration"
+	handles := startGatedSlices(t, host, epochId, N)
+
+	// The start-up limit holds: exactly startK slices reach the gate.
+	waitUntil(t, 30*time.Second, func() bool { return gater.hwm.Load() >= int64(startK) })
+	if hwm := gater.hwm.Load(); hwm != int64(startK) {
+		t.Fatalf("high-water mark before the peer registered = %d, want %d", hwm, startK)
+	}
+	requireWorkerConcurrency(t, "stored SliceQueue before the peer registered",
+		storedSliceQueueConcurrency(t, host), startK)
+
+	// A second process registers the same queue with a different limit.
+	newQueueEngineFrom(t, queueEngineOpts{
+		dbPath:     dbPath,
+		k:          peerK,
+		executorID: executorID + "-peer",
+		appVersion: appVersion,
+		skipLaunch: true,
+	})
+
+	requireWorkerConcurrency(t, "stored SliceQueue after the peer registered",
+		storedSliceQueueConcurrency(t, host), peerK)
+
+	// The already-running engine adopts the peer's limit: it now runs peerK
+	// slices at once, which its own start-up limit forbade.
+	waitUntil(t, 30*time.Second, func() bool { return gater.hwm.Load() >= int64(peerK) })
+	if hwm := gater.hwm.Load(); hwm > int64(peerK) {
+		t.Errorf("high-water mark = %d, want at most %d", hwm, peerK)
+	}
+
+	releaseGate()
+	for i, h := range handles {
+		if res := waitSliceResult(t, h, 60*time.Second); !res.Success {
+			errVal := "<nil>"
+			if res.Error != nil {
+				errVal = *res.Error
+			}
+			t.Errorf("slice[%d] Success=false; error=%s", i, errVal)
+		}
+	}
+}
+
+// ── Test 15: Operator-driven concurrency change ───────────────────────────────
+
+// TestSliceQueue_SetSliceConcurrencyReconfiguresTheRunningQueue verifies the
+// operator path for changing how much slice and review work runs at once,
+// without restarting the engine.
+//
+// The engine starts limited to 2 concurrent slices and is saturated at that
+// limit. SetSliceConcurrency(4) then changes the stored limit; the assertion
+// that matters is not the return value but that the ALREADY RUNNING engine goes
+// on to run 4 slices at once.
+func TestSliceQueue_SetSliceConcurrencyReconfiguresTheRunningQueue(t *testing.T) {
+	t.Parallel()
+	const startK = 2
+	const raisedK = 4
+	const N = raisedK
+
+	gater := &gatingConcurrencyHandler{release: make(chan struct{})}
+	mgr := hooks.NewManager(hooks.WithDispatchTimeout(60 * time.Second))
+	mgr.Register(gater)
+
+	e := newQueueEngineWithHooks(t, startK, mgr)
+	releaseGate := sync.OnceFunc(func() { close(gater.release) })
+	defer releaseGate()
+
+	const epochId = "queue--set-concurrency"
+	handles := startGatedSlices(t, e, epochId, N)
+
+	waitUntil(t, 30*time.Second, func() bool { return gater.hwm.Load() >= int64(startK) })
+	if hwm := gater.hwm.Load(); hwm != int64(startK) {
+		t.Fatalf("high-water mark before the change = %d, want %d", hwm, startK)
+	}
+
+	inForce, err := e.SetSliceConcurrency(raisedK)
+	if err != nil {
+		t.Fatalf("SetSliceConcurrency(%d): %v", raisedK, err)
+	}
+	if inForce != raisedK {
+		t.Errorf("SetSliceConcurrency returned %d, want %d (the value read back from storage)", inForce, raisedK)
+	}
+	if got := e.SliceConcurrency(); got != raisedK {
+		t.Errorf("SliceConcurrency() = %d, want %d after the change", got, raisedK)
+	}
+	requireWorkerConcurrency(t, "stored SliceQueue after the change",
+		storedSliceQueueConcurrency(t, e), raisedK)
+
+	// The running engine honours the new limit on its next poll.
+	waitUntil(t, 30*time.Second, func() bool { return gater.hwm.Load() >= int64(raisedK) })
+	if hwm := gater.hwm.Load(); hwm > int64(raisedK) {
+		t.Errorf("high-water mark = %d, want at most %d", hwm, raisedK)
+	}
+
+	releaseGate()
+	for i, h := range handles {
+		if res := waitSliceResult(t, h, 60*time.Second); !res.Success {
+			errVal := "<nil>"
+			if res.Error != nil {
+				errVal = *res.Error
+			}
+			t.Errorf("slice[%d] Success=false; error=%s", i, errVal)
+		}
+	}
+}
+
+// TestSliceQueue_SetSliceConcurrencyRejectsAnUnusableLimit verifies that a
+// limit of zero or less is refused with an actionable validation error, and
+// that the stored limit is left alone.
+func TestSliceQueue_SetSliceConcurrencyRejectsAnUnusableLimit(t *testing.T) {
+	t.Parallel()
+	e := newQueueEngine(t, 2)
+
+	for _, k := range []int{0, -1} {
+		got, err := e.SetSliceConcurrency(k)
+		if err == nil {
+			t.Fatalf("SetSliceConcurrency(%d) returned no error; want a validation error", k)
+		}
+		if got != 0 {
+			t.Errorf("SetSliceConcurrency(%d) = %d, want 0 alongside the error", k, got)
+		}
+		var se *pasterrors.StructuredError
+		if !errors.As(err, &se) {
+			t.Fatalf("SetSliceConcurrency(%d) error is %T, want a structured error", k, err)
+		}
+		if se.Category != pasterrors.CategoryValidation {
+			t.Errorf("error category = %v, want %v", se.Category, pasterrors.CategoryValidation)
+		}
+		if se.Fix == "" {
+			t.Error("error carries no fix; an operator error must say how to correct it")
+		}
+	}
+
+	requireWorkerConcurrency(t, "stored SliceQueue after the rejected changes",
+		storedSliceQueueConcurrency(t, e), 2)
+	if got := e.SliceConcurrency(); got != 2 {
+		t.Errorf("SliceConcurrency() = %d, want 2 (unchanged)", got)
+	}
+}
+
+// TestSliceQueue_SetSliceConcurrencyReportsAStorageFailure verifies the error
+// path of the queue runtime beyond registration: when the queue's settings row
+// is gone, the change fails with a storage error that names the cause, rather
+// than with the runtime's own bare message.
+//
+// Deleting the row is how the failure is produced, and it is also a real one:
+// the settings are shared, so another process can remove them at any time.
+func TestSliceQueue_SetSliceConcurrencyReportsAStorageFailure(t *testing.T) {
+	t.Parallel()
+	e := newQueueEngine(t, 2)
+
+	if err := dbos.DeleteQueue(e.DBOS(), engine.SliceQueueName); err != nil {
+		t.Fatalf("DeleteQueue(%q): %v", engine.SliceQueueName, err)
+	}
+
+	got, err := e.SetSliceConcurrency(4)
+	if err == nil {
+		t.Fatalf("SetSliceConcurrency(4) = %d with no error; want a storage error", got)
+	}
+	var se *pasterrors.StructuredError
+	if !errors.As(err, &se) {
+		t.Fatalf("SetSliceConcurrency error is %T, want a structured error", err)
+	}
+	if se.Category != pasterrors.CategoryStorage {
+		t.Errorf("error category = %v, want %v", se.Category, pasterrors.CategoryStorage)
+	}
+	if se.Cause == nil {
+		t.Error("error drops the underlying cause; the operator loses the reason it failed")
+	}
+	if se.Fix == "" {
+		t.Error("error carries no fix; a storage failure must say what to check")
+	}
+}
+
+// ── Test 16: Recovery keeps a workflow on the queue it belongs to ─────────────
+
+// markWorkflowPending puts a workflow row back into the state a killed process
+// leaves behind: still marked as running, with no result recorded. It is the
+// same state the durable runtime's own recovery tests reproduce, and it is the
+// only state that crash recovery acts on.
+func markWorkflowPending(t *testing.T, db *sql.DB, workflowID string) {
+	t.Helper()
+	res, err := db.Exec(
+		`UPDATE workflow_status
+		    SET status = ?, output = NULL, error = NULL, started_at_epoch_ms = NULL, updated_at = ?
+		  WHERE workflow_uuid = ?`,
+		string(dbos.WorkflowStatusPending), time.Now().UnixMilli(), workflowID)
+	if err != nil {
+		t.Fatalf("mark %q pending: %v", workflowID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		t.Fatalf("mark %q pending, row count: %v", workflowID, err)
+	}
+	if n != 1 {
+		t.Fatalf("mark %q pending updated %d rows, want 1", workflowID, n)
+	}
+}
+
+// workflowStatusOf reads one workflow's stored status, including the queue it
+// belongs to.
+func workflowStatusOf(t *testing.T, e *engine.Engine, workflowID string) dbos.WorkflowStatus {
+	t.Helper()
+	rows, err := dbos.ListWorkflows(e.DBOS(), dbos.WithFilterWorkflowIDs(workflowID))
+	if err != nil {
+		t.Fatalf("ListWorkflows(%q): %v", workflowID, err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("ListWorkflows(%q) returned %d rows, want 1", workflowID, len(rows))
+	}
+	return rows[0]
+}
+
+// TestSliceQueue_RecoveryKeepsEachWorkflowOnItsOwnQueue pins the queue side of
+// crash recovery, which the durable runtime changed: a recovered workflow is
+// always put back on a queue, never restarted in place.
+//
+// Which queue it lands on decides which limits and which polling cadence apply
+// to it, so both cases are pinned here:
+//
+//   - a slice, which ran on the pasture slice queue, goes back onto that same
+//     queue, so it is still governed by the concurrency limit and the polling
+//     cadence pasture configured;
+//   - an epoch workflow, which never ran on a queue, goes onto the runtime's
+//     reserved internal queue instead. That queue is not pasture's to configure:
+//     it carries no concurrency limit and polls at the runtime's own one-second
+//     cadence, not at the interval pasture sets for its own queues.
+//
+// The proof is a read-back of the stored queue name for each workflow, plus the
+// recovered slice actually completing.
+func TestSliceQueue_RecoveryKeepsEachWorkflowOnItsOwnQueue(t *testing.T) {
+	t.Parallel()
+	dbPath := testutil.GoldenUnifiedDBPath(t)
+	executorID, appVersion := testEngineIdentity(t)
+
+	// The engine that "crashes". Its identity is reused by the second engine,
+	// because recovery only acts on the work its own executor left behind.
+	first := newQueueEngineFrom(t, queueEngineOpts{
+		dbPath: dbPath, k: engine.DefaultSliceQueueConcurrency,
+		executorID: executorID, appVersion: appVersion, manualShutdown: true,
+	})
+	firstStopped := false
+	defer func() {
+		if !firstStopped {
+			first.Shutdown(10 * time.Second)
+		}
+	}()
+
+	const epochId = "queue--recovery-readback"
+	if _, err := dbos.RunWorkflow(first.DBOS(), first.EpochControlWorkflow,
+		engine.ControlInput{EpochId: epochId}, dbos.WithWorkflowID(epochId)); err != nil {
+		t.Fatalf("RunWorkflow(control): %v", err)
+	}
+
+	sliceId := epochId + "--slice"
+	h, err := first.EnqueueSlice(engine.SliceInput{
+		EpochId:          epochId,
+		SliceId:          sliceId,
+		ParentWorkflowId: epochId,
+	})
+	if err != nil {
+		t.Fatalf("EnqueueSlice: %v", err)
+	}
+	sendMockStartSignal(t, first, sliceId, 30*time.Second)
+	if res := waitSliceResult(t, h, 60*time.Second); !res.Success {
+		errVal := "<nil>"
+		if res.Error != nil {
+			errVal = *res.Error
+		}
+		t.Fatalf("slice Success=false before the crash; error=%s", errVal)
+	}
+	if got := workflowStatusOf(t, first, sliceId).QueueName; got != engine.SliceQueueName {
+		t.Fatalf("slice ran on queue %q, want %q", got, engine.SliceQueueName)
+	}
+	// The epoch workflow is still waiting for signals, so it is genuinely
+	// in flight, and it never ran on a queue.
+	if got := workflowStatusOf(t, first, epochId).QueueName; got != "" {
+		t.Fatalf("epoch workflow ran on queue %q, want no queue", got)
+	}
+
+	// The crash: the slice is left marked as running with no result, exactly as
+	// a killed process would leave it. The epoch workflow is already in that
+	// state on its own.
+	markWorkflowPending(t, first.DB(), sliceId)
+	first.Shutdown(10 * time.Second)
+	firstStopped = true
+
+	// The replacement process. Recovery runs inside Launch, before it serves
+	// any queue.
+	second := newQueueEngineFrom(t, queueEngineOpts{
+		dbPath: dbPath, k: engine.DefaultSliceQueueConcurrency,
+		executorID: executorID, appVersion: appVersion,
+	})
+
+	if got := workflowStatusOf(t, second, sliceId).QueueName; got != engine.SliceQueueName {
+		t.Errorf("recovered slice is on queue %q, want %q (its own queue, with pasture's limits)", got, engine.SliceQueueName)
+	}
+	if got := workflowStatusOf(t, second, epochId).QueueName; got != dbosInternalQueueName {
+		t.Errorf("recovered epoch workflow is on queue %q, want %q (the reserved queue for work that had none)", got, dbosInternalQueueName)
+	}
+
+	// The recovered slice is dequeued from the pasture slice queue and finishes.
+	recovered, err := dbos.RetrieveWorkflow[engine.SliceResult](second.DBOS(), sliceId)
+	if err != nil {
+		t.Fatalf("RetrieveWorkflow(%q): %v", sliceId, err)
+	}
+	res, err := recovered.GetResult(dbos.WithHandleTimeout(60 * time.Second))
+	if err != nil {
+		t.Fatalf("GetResult(recovered slice): %v", err)
+	}
+	if !res.Success {
+		errVal := "<nil>"
+		if res.Error != nil {
+			errVal = *res.Error
+		}
+		t.Errorf("recovered slice Success=false; error=%s", errVal)
+	}
+	final := workflowStatusOf(t, second, sliceId)
+	if final.Status != dbos.WorkflowStatusSuccess {
+		t.Errorf("recovered slice status = %v, want %v", final.Status, dbos.WorkflowStatusSuccess)
+	}
+	if final.QueueName != engine.SliceQueueName {
+		t.Errorf("recovered slice completed on queue %q, want %q", final.QueueName, engine.SliceQueueName)
+	}
+}
+
+// TestSliceQueue_SetSliceConcurrencyNeedsABuiltEngine verifies that an engine
+// value that was never built by engine.New reports the problem instead of
+// panicking on its missing queue.
+func TestSliceQueue_SetSliceConcurrencyNeedsABuiltEngine(t *testing.T) {
+	t.Parallel()
+	var unbuilt engine.Engine
+
+	got, err := unbuilt.SetSliceConcurrency(4)
+	if err == nil {
+		t.Fatalf("SetSliceConcurrency(4) = %d with no error; want an error naming the missing queue", got)
+	}
+	var se *pasterrors.StructuredError
+	if !errors.As(err, &se) {
+		t.Fatalf("error is %T, want a structured error", err)
+	}
+	if se.Category != pasterrors.CategoryValidation {
+		t.Errorf("error category = %v, want %v", se.Category, pasterrors.CategoryValidation)
+	}
+}
+
+// ── Test 17: A change made from outside the process ───────────────────────────
+
+// TestSliceQueue_OperatorCommandReconfiguresTheRunningQueue is the end-to-end
+// proof of the operator path: a change written by a SEPARATE code path, the one
+// the command line uses, reaches a running engine.
+//
+// The command does not contact the daemon. It writes the queue's settings row,
+// which the daemon's workers reload as they poll. So the assertion that matters
+// is not that the row changed — the handler's own tests cover that — but that
+// the engine which was already saturated at 2 goes on to run 4 at once.
+func TestSliceQueue_OperatorCommandReconfiguresTheRunningQueue(t *testing.T) {
+	t.Parallel()
+	const startK = 2
+	const raisedK = 4
+	const N = raisedK
+
+	gater := &gatingConcurrencyHandler{release: make(chan struct{})}
+	mgr := hooks.NewManager(hooks.WithDispatchTimeout(60 * time.Second))
+	mgr.Register(gater)
+
+	dbPath := testutil.GoldenUnifiedDBPath(t)
+	executorID, appVersion := testEngineIdentity(t)
+	e := newQueueEngineFrom(t, queueEngineOpts{
+		dbPath: dbPath, k: startK, executorID: executorID, appVersion: appVersion, mgr: mgr,
+	})
+	releaseGate := sync.OnceFunc(func() { close(gater.release) })
+	defer releaseGate()
+
+	const epochId = "queue--operator-command"
+	handles := startGatedSlices(t, e, epochId, N)
+
+	waitUntil(t, 30*time.Second, func() bool { return gater.hwm.Load() >= int64(startK) })
+	if hwm := gater.hwm.Load(); hwm != int64(startK) {
+		t.Fatalf("high-water mark before the change = %d, want %d", hwm, startK)
+	}
+
+	// The operator's path: a separate client on the same database file.
+	code, err := handlers.SetQueueConcurrency(handlers.QueueConcurrencyInput{
+		DBPath: dbPath,
+		Queue:  string(handlers.QueueSelectorSlice),
+		Limit:  raisedK,
+	}, types.OutputText)
+	if err != nil {
+		t.Fatalf("SetQueueConcurrency: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("SetQueueConcurrency exit code = %d, want 0", code)
+	}
+
+	requireWorkerConcurrency(t, "stored SliceQueue after the operator command",
+		storedSliceQueueConcurrency(t, e), raisedK)
+
+	// The running engine adopts it on its next poll.
+	waitUntil(t, 30*time.Second, func() bool { return gater.hwm.Load() >= int64(raisedK) })
+	if hwm := gater.hwm.Load(); hwm > int64(raisedK) {
+		t.Errorf("high-water mark = %d, want at most %d", hwm, raisedK)
+	}
+
+	releaseGate()
+	for i, h := range handles {
+		if res := waitSliceResult(t, h, 60*time.Second); !res.Success {
+			errVal := "<nil>"
+			if res.Error != nil {
+				errVal = *res.Error
+			}
+			t.Errorf("slice[%d] Success=false; error=%s", i, errVal)
+		}
+	}
 }

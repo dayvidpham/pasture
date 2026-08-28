@@ -76,9 +76,87 @@ type dbosController struct {
 	closeErr  error
 }
 
-// controllerConstructionSite names this file for the Where line of the durable
-// start-up errors OpenEpochController surfaces.
-const controllerConstructionSite = "Opening the epoch controller (internal/handlers/controller.go in OpenEpochController)."
+// clientSite names the operation that opened a durable client.
+//
+// ONE typed value per caller, and every caller-specific report is derived from
+// it: the Where line when the client refuses to START, and the whole report when
+// it refuses to STOP. A second per-caller parameter would let the two disagree —
+// a caller could describe itself as the controller in one and as the queue
+// command in the other — so there is deliberately only this.
+//
+// The reports must differ because the same runtime failure means different
+// things to the two callers. After an epoch lifecycle command, work in flight
+// may never have been recorded and the epoch state has to be re-read. After a
+// work-queue command, the answer was already read back from the database before
+// the stop began, so it stands, and an operator who never gave an epoch id
+// cannot act on a fix that asks for one.
+type clientSite int
+
+const (
+	// clientSiteUnset is the zero value, and it names NO caller. It exists so
+	// that forgetting to pass a site is a loud failure rather than a silent
+	// promotion to whichever caller happened to be written first: every
+	// consumer below rejects it, and a third site added later is rejected the
+	// same way until it is handled deliberately.
+	clientSiteUnset clientSite = iota
+	// clientSiteEpochController is the epoch controller: OpenEpochController
+	// opening the client, and dbosController.Close releasing it.
+	clientSiteEpochController
+	// clientSiteQueueCommand is a work-queue command opening a client to read or
+	// change a queue setting, and releasing it afterwards.
+	clientSiteQueueCommand
+)
+
+// String names the site for a message about a site that is not handled.
+func (s clientSite) String() string {
+	switch s {
+	case clientSiteEpochController:
+		return "epoch controller"
+	case clientSiteQueueCommand:
+		return "work-queue command"
+	case clientSiteUnset:
+		return "unset"
+	default:
+		return fmt.Sprintf("unknown site %d", int(s))
+	}
+}
+
+// startupWhere is the Where line for a client that refused to start at this
+// site. It answers the operator's first question — which command was this? — so
+// it names the operation, not only the file.
+//
+// An unhandled site is an error, never a default: a Where line that names the
+// wrong command sends the operator to the wrong place, and it would look exactly
+// as authoritative as a right one.
+func (s clientSite) startupWhere() (string, error) {
+	switch s {
+	case clientSiteEpochController:
+		return "Opening the epoch controller (internal/handlers/controller.go in OpenEpochController).", nil
+	case clientSiteQueueCommand:
+		return "Opening a durable client for a work-queue command (internal/handlers/queue.go in handlers.withQueueClient).", nil
+	default:
+		return "", unhandledClientSiteError(s, "describing where a durable client refused to start")
+	}
+}
+
+// unhandledClientSiteError reports a caller that this code cannot describe.
+//
+// It is a defect in pasture, not something the operator did, and the message
+// says so: they cannot fix it, and the failure they were actually chasing is
+// carried alongside it so it is not lost.
+func unhandledClientSiteError(site clientSite, doing string) error {
+	return &pasterrors.StructuredError{
+		Category: pasterrors.CategoryValidation,
+		What:     fmt.Sprintf("pasture couldn't describe which command was using the database (%s).", site),
+		Why: "Every command that opens the database names itself, so its failures can be explained in its own " +
+			"terms. This one did not, which means a command was added without naming itself.",
+		Where:  fmt.Sprintf("Reporting a durable-client failure (internal/handlers/controller.go, %s).", doing),
+		Impact: "The failure below is real and is reported unchanged; only pasture's explanation of which command hit it is missing.",
+		Fix: "This is a defect in pasture, not in the database or the machine — an operator can't work around it.\n" +
+			"Report it, with the command you ran and the version of pasture:\n" +
+			"     pasture --version",
+	}
+}
 
 // OpenEpochController opens a DBOS-backed controller on the unified database.
 // Empty dbPath resolves to tasks.DefaultDBPath(). The returned controller does
@@ -94,10 +172,36 @@ func OpenEpochController(dbPath string) (EpochController, error) {
 	if err != nil {
 		return nil, err
 	}
-	db, err := dbconn.OpenSharedDB(dbPath)
+	client, db, _, err := openClient(dbPath, clientSiteEpochController)
 	if err != nil {
 		_ = trail.Close()
 		return nil, err
+	}
+	return &dbosController{client: client, db: db, trail: trail, trailCloser: trail}, nil
+}
+
+// openClient opens a database-backed durable client on the unified database and
+// returns it, the handle it was built on, and the function that releases it.
+// Empty dbPath resolves to tasks.DefaultDBPath().
+//
+// Every command that talks to the durable runtime WITHOUT hosting an engine
+// comes through here — the epoch controller and the work-queue commands — so
+// the process identity below is stated in one place and cannot drift between
+// them. A drift would be silent and expensive: see the ownership note on
+// AppName.
+//
+// The release function shuts the client down within controllerShutdownTimeout
+// and reports an incomplete shutdown rather than dropping it, described for the
+// caller named by site. The client owns the handle it was given and closes it,
+// so releasing the client is the whole release; closing the handle separately
+// would close the same database twice.
+func openClient(dbPath string, site clientSite) (dbos.Client, *sql.DB, func() error, error) {
+	if dbPath == "" {
+		dbPath = tasks.DefaultDBPath()
+	}
+	db, err := dbconn.OpenSharedDB(dbPath)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	// SCHEMA GATE — NOT WIRED YET. The refusal of a system database written by
 	// the superseded durable runtime belongs HERE: call
@@ -138,14 +242,41 @@ func OpenEpochController(dbPath string) (EpochController, error) {
 	})
 	if err != nil {
 		_ = db.Close()
-		_ = trail.Close()
 		// The client refuses to start for causes the runtime reports as bare
 		// text. engine.DescribeDurableStartupFailure replaces the ones pasture
 		// can name with actionable guidance, and returns every other one
 		// unchanged.
-		return nil, engine.DescribeDurableStartupFailure(controllerConstructionSite, err)
+		//
+		// It sits HERE, not at a caller, so that every command which opens a
+		// client is told the same thing about the same failure. The trail is
+		// closed by the caller that opened it.
+		where, siteErr := site.startupWhere()
+		if siteErr != nil {
+			// The caller could not be named. The runtime's own failure is still
+			// the thing that stopped the command, so it is joined rather than
+			// replaced.
+			return nil, nil, nil, errors.Join(siteErr, err)
+		}
+		return nil, nil, nil, engine.DescribeDurableStartupFailure(where, err)
 	}
-	return &dbosController{client: client, db: db, trail: trail, trailCloser: trail}, nil
+	return client, db, func() error { return releaseClient(client, site) }, nil
+}
+
+// releaseClient shuts a durable client down within controllerShutdownTimeout and
+// reports an incomplete shutdown rather than dropping it. It is the one
+// definition of what releasing a client means, used by the epoch controller's
+// Close and by the release function openClient hands to the work-queue commands.
+//
+// site decides how the failure is described, because the caller is the only one
+// who knows what the operator was doing.
+func releaseClient(client dbos.Client, site clientSite) error {
+	if client == nil {
+		return nil
+	}
+	if err := dbos.Shutdown(client, controllerShutdownTimeout); err != nil {
+		return incompleteShutdownError(site, err)
+	}
+	return nil
 }
 
 func (c *dbosController) StartEpoch(ctx context.Context, epochId string) error {
@@ -307,37 +438,65 @@ const controllerShutdownTimeout = 5 * time.Second
 // incompleteShutdownError is the contract for a durable client that did not
 // finish shutting down inside controllerShutdownTimeout.
 //
-// Close reports it instead of dropping it because an incomplete shutdown is not
+// It is reported instead of dropped because an incomplete shutdown is not
 // cosmetic: the runtime closes the shared database handle unconditionally when
 // its budget expires, so any component still running loses the handle mid-flight
-// and the records it would have written are never made durable. A caller that
-// ignores this error can therefore read a partial epoch state moments later and
-// see no sign of why.
+// and the records it would have written are never made durable.
 //
-// Callers must treat it as "the process stopped, but not cleanly": stop using
-// the controller, surface the message, and re-read state through the daemon
-// rather than trusting what was in flight. Retrying Close cannot help — the
-// runtime reopens its own shutdown guard after a timeout, so an unguarded retry
-// would spend the whole budget again on a client whose database handle is
-// already gone. Close refuses that retry itself rather than only warning
-// against it.
-func incompleteShutdownError(cause error) error {
-	return &pasterrors.StructuredError{
-		Category: pasterrors.CategoryWorkflow,
-		What:     "The epoch controller stopped, but its durable client did not shut down cleanly.",
-		Why: fmt.Sprintf("At least one part of the durable runtime was still running when its %s shutdown budget expired, "+
-			"so the shutdown was cut short.", controllerShutdownTimeout),
-		Where: "Closing the epoch controller (internal/handlers/controller.go in dbosController.Close).",
-		Impact: "The database handle is closed and the controller is unusable, but the work that was still running was " +
-			"interrupted before it could record its result. Epoch state read straight after this may be stale or " +
-			"incomplete. Nothing is lost permanently: the daemon recovers interrupted work on its next start.",
-		Fix: "1. Do not treat this as a clean stop, and do not reuse the controller.\n" +
-			"2. Check the daemon is running and healthy; a wedged or unreachable database is the usual cause:\n" +
-			"     ls -l ~/.local/share/pasture/pasture.db\n" +
-			"3. Re-read the epoch state through the daemon before acting on it:\n" +
-			"     pasture status --epoch-id <epoch-id>\n" +
-			"4. If this repeats, stop other writers to the database file and retry the command.",
-		Cause: cause,
+// Retrying cannot help — the runtime reopens its own shutdown guard after a
+// timeout, so an unguarded retry would spend the whole budget again on a client
+// whose database handle is already gone. The controller's Close refuses that
+// retry itself rather than only warning against it.
+func incompleteShutdownError(site clientSite, cause error) error {
+	why := fmt.Sprintf("At least one part of the durable runtime was still running when its %s shutdown budget expired, "+
+		"so the shutdown was cut short.", controllerShutdownTimeout)
+
+	switch site {
+	case clientSiteQueueCommand:
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryWorkflow,
+			What:     "The work-queue command finished, but the durable client it used did not stop cleanly.",
+			Why:      why,
+			Where:    "Releasing the client after a work-queue command (internal/handlers/queue.go in handlers.withQueueClient).",
+			Impact: "The setting shown above was read back from the database before the stop began, so it is what the " +
+				"database holds. Nothing this command did was left half-finished. What the failure does say is that " +
+				"the database is under strain or held by something that will not let go, which will affect the next " +
+				"command too.",
+			Fix: "1. Confirm the setting by asking again:\n" +
+				"     pasture queue concurrency get <queue>\n" +
+				"2. Find what else is holding the database:\n" +
+				"     pgrep -fa 'pasture|pastured'\n" +
+				"3. Confirm the database file is present and not held exclusively:\n" +
+				"     ls -l ~/.local/share/pasture/pasture.db\n" +
+				"4. If this repeats, stop the other writers and run the command again.",
+			Cause: cause,
+		}
+
+	case clientSiteEpochController:
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryWorkflow,
+			What:     "The epoch controller stopped, but its durable client did not shut down cleanly.",
+			Why:      why,
+			Where:    "Closing the epoch controller (internal/handlers/controller.go in dbosController.Close).",
+			Impact: "The database handle is closed and the controller is unusable, but the work that was still running was " +
+				"interrupted before it could record its result. Epoch state read straight after this may be stale or " +
+				"incomplete. Nothing is lost permanently: the daemon recovers interrupted work on its next start.",
+			Fix: "1. Do not treat this as a clean stop, and do not reuse the controller.\n" +
+				"2. Check the daemon is running and healthy; a wedged or unreachable database is the usual cause:\n" +
+				"     ls -l ~/.local/share/pasture/pasture.db\n" +
+				"3. Re-read the epoch state through the daemon before acting on it:\n" +
+				"     pasture status --epoch-id <epoch-id>\n" +
+				"4. If this repeats, stop other writers to the database file and retry the command.",
+			Cause: cause,
+		}
+
+	default:
+		// Never fall through to a caller's text. Each of these reports tells the
+		// operator what to do next, and the two say opposite things: one says the
+		// value you were shown stands, the other says re-read the state because
+		// work may have been lost. Guessing between them is worse than saying
+		// nothing.
+		return errors.Join(unhandledClientSiteError(site, "reporting a durable client that did not stop"), cause)
 	}
 }
 
@@ -369,8 +528,8 @@ func (c *dbosController) shutdown() error {
 		// dbos/internal/sysdb/dbq.go, on the timeout path too. Engine.Shutdown
 		// in internal/engine/engine.go states the same ownership for the
 		// engine's handle; the two must stay in agreement.
-		if err := dbos.Shutdown(c.client, controllerShutdownTimeout); err != nil {
-			errs = append(errs, incompleteShutdownError(err))
+		if err := releaseClient(c.client, clientSiteEpochController); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	if c.trailCloser != nil {

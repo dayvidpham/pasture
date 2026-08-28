@@ -15,6 +15,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/dayvidpham/provenance"
@@ -147,18 +148,22 @@ type ActivitySink interface {
 //
 // Lifecycle: New → Launch → (run workflows) → Shutdown.
 type Engine struct {
-	cfg              Config
-	logger           *slog.Logger
-	db               *sql.DB
-	dbosCtx          dbos.Context
-	trail            audit.Trail
-	trailCloser      io.Closer
-	specs            map[protocol.PhaseId]protocol.PhaseSpec
-	activityAgentID  provenance.AgentID
-	launched         bool
-	controlQueue     dbos.Queue
-	sliceQueue       dbos.Queue
-	sliceConcurrency int // resolved value stored once in New; returned by SliceConcurrency()
+	cfg             Config
+	logger          *slog.Logger
+	db              *sql.DB
+	dbosCtx         dbos.Context
+	trail           audit.Trail
+	trailCloser     io.Closer
+	specs           map[protocol.PhaseId]protocol.PhaseSpec
+	activityAgentID provenance.AgentID
+	launched        bool
+	controlQueue    dbos.Queue
+	sliceQueue      dbos.Queue
+	// sliceConcurrency is the per-executor concurrency limit currently in force
+	// for the slice queue. New stores the resolved start-up value;
+	// SetSliceConcurrency replaces it after the queue row is updated. It is
+	// atomic because an operator can change it while workflows read it.
+	sliceConcurrency atomic.Int64
 }
 
 // New constructs an Engine: opens the shared handle with the WAL/busy-timeout
@@ -424,7 +429,7 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		return abort(queueRegistrationError(SliceQueueName, err))
 	}
 	e.sliceQueue = sliceQueue
-	e.sliceConcurrency = k
+	e.sliceConcurrency.Store(int64(k))
 
 	return e, nil
 }
@@ -702,13 +707,25 @@ func (e *Engine) SliceQueue() dbos.Queue { return e.sliceQueue }
 // ControlQueue returns the DBOS queue used for epoch control workflows.
 func (e *Engine) ControlQueue() dbos.Queue { return e.controlQueue }
 
-// SliceConcurrency returns the effective per-executor concurrency limit K that
-// was used to configure the slice queue. This is the resolved value (after
-// applying the DefaultSliceQueueConcurrency fallback) stored once in New —
-// not re-derived from the config to avoid having two copies of the fallback
-// logic that could drift.
+// SliceConcurrency returns the per-executor concurrency limit K for the slice
+// queue as this process last saw it. New stores the resolved start-up value
+// (after applying the DefaultSliceQueueConcurrency fallback) rather than
+// re-deriving it from the config, so the fallback logic exists in one place
+// only.
+//
+// SetSliceConcurrency then replaces the value with the one it READ BACK from
+// storage, not the one it was asked for. That is deliberate: when another
+// process wins the same row, the read-back value is the limit the queue really
+// runs work at, and reporting the losing request instead would be a lie.
+//
+// The value can still be out of date. This process reads the stored row when it
+// starts and when it changes the limit, while any process may change that row at
+// any moment. For the limit in force right now, read the row: dbos.RetrieveQueue
+// on Engine.DBOS(), or from a terminal
+//
+//	pasture queue concurrency get slice
 func (e *Engine) SliceConcurrency() int {
-	return e.sliceConcurrency
+	return int(e.sliceConcurrency.Load())
 }
 
 // queueRegistrationError wraps a failed queue registration. A queue

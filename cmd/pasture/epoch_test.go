@@ -16,7 +16,7 @@ func TestCLI_EpochInventoryAndRetiredAdapter(t *testing.T) {
 	if root.exitCode != 0 {
 		t.Fatalf("root help exit %d: %s", root.exitCode, root.stderr)
 	}
-	if got, want := commandNames(root.stdout), []string{"bundle", "epoch", "hook", "install", "migrate", "status", "task", "uninstall"}; !sameStrings(got, want) {
+	if got, want := commandNames(root.stdout), []string{"bundle", "epoch", "hook", "install", "migrate", "queue", "status", "task", "uninstall"}; !sameStrings(got, want) {
 		t.Fatalf("root commands = %v, want %v\n%s", got, want, root.stdout)
 	}
 
