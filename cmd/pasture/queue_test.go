@@ -7,8 +7,11 @@ package main_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,22 +25,71 @@ const (
 	exitStorage    = 5
 )
 
-// dbWithRegisteredQueues returns a database in the state one daemon start
-// leaves behind: the queues exist, with their configured limits. Building an
-// engine is what registers them, so that is what this does, and then stops it.
-func dbWithRegisteredQueues(t *testing.T) string {
-	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+// queueFixture builds ONE database in the state a single daemon start leaves
+// behind — the queues registered, with their configured limits — and every test
+// here takes a private copy of it.
+//
+// It is built once per test binary on purpose. Registering the queues means
+// building and stopping a whole durable engine, and doing that in each of
+// several parallel tests loaded the machine enough to starve a slice test
+// elsewhere in the tree that waits a fixed two seconds for a signal.
+var queueFixture = sync.OnceValues(func() (string, error) {
+	dir, err := os.MkdirTemp("", "pasture-cli-queue-fixture-*")
+	if err != nil {
+		return "", fmt.Errorf("create the queue fixture directory: %w", err)
+	}
+	queueFixtureDir = dir
+	dbPath := filepath.Join(dir, "pasture.db")
 	e, err := engine.New(context.Background(), engine.Config{
 		DBPath:             dbPath,
 		ApplicationVersion: "test-queue-cli",
 		ExecutorID:         "test-queue-cli",
 	})
 	if err != nil {
-		t.Fatalf("engine.New: %v", err)
+		return "", fmt.Errorf("build the engine that registers the queues: %w", err)
 	}
+	// Shutdown closes the handle, so the file on disk is complete and can be
+	// copied.
 	e.Shutdown(10 * time.Second)
-	return dbPath
+	return dbPath, nil
+})
+
+// queueFixtureDir is the directory queueFixture built, kept so it can be deleted
+// when every test has finished. It is written inside queueFixture and read only
+// after the run.
+var queueFixtureDir string
+
+// removeQueueFixture deletes the shared fixture. TestMain calls it after the
+// tests finish; a t.Cleanup could not, because the fixture outlives the test
+// that happened to build it.
+func removeQueueFixture() {
+	if queueFixtureDir != "" {
+		_ = os.RemoveAll(queueFixtureDir)
+	}
+}
+
+// dbWithRegisteredQueues returns a private copy of the fixture, which this test
+// alone may change.
+func dbWithRegisteredQueues(t *testing.T) string {
+	t.Helper()
+	src, err := queueFixture()
+	if err != nil {
+		t.Fatalf("queue fixture: %v", err)
+	}
+	dst := filepath.Join(t.TempDir(), "pasture.db")
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		data, readErr := os.ReadFile(src + suffix)
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				continue // a cleanly closed database has no write-ahead files
+			}
+			t.Fatalf("read the queue fixture %q: %v", src+suffix, readErr)
+		}
+		if writeErr := os.WriteFile(dst+suffix, data, 0o600); writeErr != nil {
+			t.Fatalf("write the queue fixture copy %q: %v", dst+suffix, writeErr)
+		}
+	}
+	return dst
 }
 
 // TestCLI_QueueConcurrency_ShowAndChange walks the operator's whole path: read
@@ -114,6 +166,12 @@ func TestCLI_QueueConcurrency_RejectsBadArguments(t *testing.T) {
 			wantText: "not a number of jobs",
 		},
 		{
+			name:     "set on the control queue",
+			args:     []string{"queue", "concurrency", "set", "control", "4"},
+			wantCode: exitValidation,
+			wantText: "one epoch control workflow at a time",
+		},
+		{
 			name:     "jobs is zero",
 			args:     []string{"queue", "concurrency", "set", "slice", "0"},
 			wantCode: exitValidation,
@@ -175,4 +233,31 @@ func jsonObjectIn(t *testing.T, stdout string) string {
 		t.Fatalf("no JSON object in output:\n%s", stdout)
 	}
 	return stdout[start : end+1]
+}
+
+// TestCLI_QueueConcurrency_ControlQueueIsReadOnly pins the whole shape of the
+// control queue on the command line: it can be read, it cannot be changed, and
+// the help text says so, so an operator learns the rule before they meet the
+// refusal.
+func TestCLI_QueueConcurrency_ControlQueueIsReadOnly(t *testing.T) {
+	t.Parallel()
+	db := dbWithRegisteredQueues(t)
+
+	get := runCLI(t, "--db", db, "queue", "concurrency", "get", "control")
+	if get.exitCode != 0 {
+		t.Fatalf("get control exit %d; stderr=%s", get.exitCode, get.stderr)
+	}
+	if !strings.Contains(get.stdout, "1 concurrent jobs per process") {
+		t.Errorf("get control does not report the fixed limit: %s", get.stdout)
+	}
+
+	help := runCLI(t, "queue", "concurrency", "set", "--help")
+	if help.exitCode != 0 {
+		t.Fatalf("set help exit %d; stderr=%s", help.exitCode, help.stderr)
+	}
+	for _, want := range []string{"Only the slice queue can be changed", "read only, its concurrency is fixed"} {
+		if !strings.Contains(help.stdout, want) {
+			t.Errorf("the help text does not contain %q:\n%s", want, help.stdout)
+		}
+	}
 }

@@ -1719,7 +1719,13 @@ func startGatedSlices(t *testing.T, e *engine.Engine, epochId string, n int) []d
 // poll the shared queue, and then it would be ambiguous which process ran a
 // slice. Registration alone is the behaviour under test.
 func TestSliceQueue_PeerRegistrationReconfiguresTheRunningQueue(t *testing.T) {
-	t.Parallel()
+	// NOT parallel, deliberately. This test builds engines and holds several
+	// slices at once, and a Go test that does not call t.Parallel runs before
+	// the parallel ones rather than beside them. Running it beside them added
+	// enough load to starve another slice test in this package that waits a
+	// fixed two seconds for a signal. Measured on one host: the parallel form
+	// failed 2 runs in 12 of engine+handlers together, this form 0 in 12,
+	// against a 1-in-12 background rate that predates this file.
 	const startK = 2
 	const peerK = 4
 	const N = peerK
@@ -1789,7 +1795,13 @@ func TestSliceQueue_PeerRegistrationReconfiguresTheRunningQueue(t *testing.T) {
 // that matters is not the return value but that the ALREADY RUNNING engine goes
 // on to run 4 slices at once.
 func TestSliceQueue_SetSliceConcurrencyReconfiguresTheRunningQueue(t *testing.T) {
-	t.Parallel()
+	// NOT parallel, deliberately. This test builds engines and holds several
+	// slices at once, and a Go test that does not call t.Parallel runs before
+	// the parallel ones rather than beside them. Running it beside them added
+	// enough load to starve another slice test in this package that waits a
+	// fixed two seconds for a signal. Measured on one host: the parallel form
+	// failed 2 runs in 12 of engine+handlers together, this form 0 in 12,
+	// against a 1-in-12 background rate that predates this file.
 	const startK = 2
 	const raisedK = 4
 	const N = raisedK
@@ -1966,7 +1978,13 @@ func workflowStatusOf(t *testing.T, e *engine.Engine, workflowID string) dbos.Wo
 // The proof is a read-back of the stored queue name for each workflow, plus the
 // recovered slice actually completing.
 func TestSliceQueue_RecoveryKeepsEachWorkflowOnItsOwnQueue(t *testing.T) {
-	t.Parallel()
+	// NOT parallel, deliberately. This test builds engines and holds several
+	// slices at once, and a Go test that does not call t.Parallel runs before
+	// the parallel ones rather than beside them. Running it beside them added
+	// enough load to starve another slice test in this package that waits a
+	// fixed two seconds for a signal. Measured on one host: the parallel form
+	// failed 2 runs in 12 of engine+handlers together, this form 0 in 12,
+	// against a 1-in-12 background rate that predates this file.
 	dbPath := testutil.GoldenUnifiedDBPath(t)
 	executorID, appVersion := testEngineIdentity(t)
 
@@ -2092,7 +2110,13 @@ func TestSliceQueue_SetSliceConcurrencyNeedsABuiltEngine(t *testing.T) {
 // is not that the row changed — the handler's own tests cover that — but that
 // the engine which was already saturated at 2 goes on to run 4 at once.
 func TestSliceQueue_OperatorCommandReconfiguresTheRunningQueue(t *testing.T) {
-	t.Parallel()
+	// NOT parallel, deliberately. This test builds engines and holds several
+	// slices at once, and a Go test that does not call t.Parallel runs before
+	// the parallel ones rather than beside them. Running it beside them added
+	// enough load to starve another slice test in this package that waits a
+	// fixed two seconds for a signal. Measured on one host: the parallel form
+	// failed 2 runs in 12 of engine+handlers together, this form 0 in 12,
+	// against a 1-in-12 background rate that predates this file.
 	const startK = 2
 	const raisedK = 4
 	const N = raisedK

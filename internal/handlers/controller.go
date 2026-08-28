@@ -94,10 +94,35 @@ func OpenEpochController(dbPath string) (EpochController, error) {
 	if err != nil {
 		return nil, err
 	}
-	db, err := dbconn.OpenSharedDB(dbPath)
+	client, db, _, err := openClient(dbPath)
 	if err != nil {
 		_ = trail.Close()
 		return nil, err
+	}
+	return &dbosController{client: client, db: db, trail: trail, trailCloser: trail}, nil
+}
+
+// openClient opens a database-backed durable client on the unified database and
+// returns it, the handle it was built on, and the function that releases it.
+// Empty dbPath resolves to tasks.DefaultDBPath().
+//
+// Every command that talks to the durable runtime WITHOUT hosting an engine
+// comes through here — the epoch controller and the work-queue commands — so
+// the process identity below is stated in one place and cannot drift between
+// them. A drift would be silent and expensive: see the ownership note on
+// AppName.
+//
+// The release function shuts the client down within controllerShutdownTimeout
+// and reports an incomplete shutdown rather than dropping it. The client owns
+// the handle it was given and closes it, so releasing the client is the whole
+// release; closing the handle separately would close the same database twice.
+func openClient(dbPath string) (dbos.Client, *sql.DB, func() error, error) {
+	if dbPath == "" {
+		dbPath = tasks.DefaultDBPath()
+	}
+	db, err := dbconn.OpenSharedDB(dbPath)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	// SCHEMA GATE — NOT WIRED YET. The refusal of a system database written by
 	// the superseded durable runtime belongs HERE: call
@@ -138,14 +163,31 @@ func OpenEpochController(dbPath string) (EpochController, error) {
 	})
 	if err != nil {
 		_ = db.Close()
-		_ = trail.Close()
 		// The client refuses to start for causes the runtime reports as bare
 		// text. engine.DescribeDurableStartupFailure replaces the ones pasture
 		// can name with actionable guidance, and returns every other one
 		// unchanged.
-		return nil, engine.DescribeDurableStartupFailure(controllerConstructionSite, err)
+		//
+		// It sits HERE, not at a caller, so that every command which opens a
+		// client is told the same thing about the same failure. The trail is
+		// closed by the caller that opened it.
+		return nil, nil, nil, engine.DescribeDurableStartupFailure(controllerConstructionSite, err)
 	}
-	return &dbosController{client: client, db: db, trail: trail, trailCloser: trail}, nil
+	return client, db, func() error { return releaseClient(client) }, nil
+}
+
+// releaseClient shuts a durable client down within controllerShutdownTimeout and
+// reports an incomplete shutdown rather than dropping it. It is the one
+// definition of what releasing a client means, used by the epoch controller's
+// Close and by the release function openClient hands to the work-queue commands.
+func releaseClient(client dbos.Client) error {
+	if client == nil {
+		return nil
+	}
+	if err := dbos.Shutdown(client, controllerShutdownTimeout); err != nil {
+		return incompleteShutdownError(err)
+	}
+	return nil
 }
 
 func (c *dbosController) StartEpoch(ctx context.Context, epochId string) error {
@@ -369,8 +411,8 @@ func (c *dbosController) shutdown() error {
 		// dbos/internal/sysdb/dbq.go, on the timeout path too. Engine.Shutdown
 		// in internal/engine/engine.go states the same ownership for the
 		// engine's handle; the two must stay in agreement.
-		if err := dbos.Shutdown(c.client, controllerShutdownTimeout); err != nil {
-			errs = append(errs, incompleteShutdownError(err))
+		if err := releaseClient(c.client); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	if c.trailCloser != nil {

@@ -76,10 +76,15 @@ what the database holds, not merely what was asked for.
 A running daemon adopts the new limit as it polls, about a second later. Jobs
 already running are not interrupted.
 
+Only the slice queue can be changed. The control queue runs one epoch control
+workflow at a time in each process by design, and this command refuses to change
+it.
+
 The change lasts until the daemon starts again. At start-up a daemon writes the
-limit it is configured with, which replaces a limit set here. For a limit that
-survives a restart, set it where the daemon reads it: the --slice-concurrency
-option or the PASTURE_SLICE_CONCURRENCY environment variable.
+limit it is configured with, which replaces a limit set here. For a slice limit
+that survives a restart, set it where the daemon reads it: the
+--slice-concurrency option or the PASTURE_SLICE_CONCURRENCY environment
+variable. Those two govern the slice queue only.
 
 ` + queueArgumentHelp(),
 	Args: cobra.ExactArgs(2),
@@ -115,12 +120,17 @@ option or the PASTURE_SLICE_CONCURRENCY environment variable.
 }
 
 // queueArgumentHelp lists the queue names the commands accept, so the help text
-// and the error message for a wrong name always agree.
+// and the error message for a wrong name always agree. It is built from the
+// same table the commands act on, so it cannot fall out of step with them.
 func queueArgumentHelp() string {
 	out := "Queues:\n"
 	for _, s := range handlers.QueueSelectors() {
 		stored, _ := s.StoredName()
-		out += fmt.Sprintf("  %s (stored as %s)\n", s, stored)
+		note := "read only, its concurrency is fixed"
+		if s.Adjustable() {
+			note = "its concurrency can be changed"
+		}
+		out += fmt.Sprintf("  %s (stored as %s; %s)\n", s, stored, note)
 	}
 	return out + "\nEither form is accepted."
 }

@@ -48,30 +48,70 @@ const (
 	QueueSelectorControl QueueSelector = "control"
 )
 
-// queueSelectorNames maps each selector to the queue name stored in the
-// database. The stored names come from the engine, so there is one definition
-// of each name in the codebase.
-var queueSelectorNames = map[QueueSelector]string{
-	QueueSelectorSlice:   engine.SliceQueueName,
-	QueueSelectorControl: engine.ControlQueueName,
+// queueFacts is what the commands need to know about one queue: the name it is
+// stored under, and whether its concurrency is an operator's to change.
+type queueFacts struct {
+	storedName string
+	// adjustable is false for a queue whose concurrency is fixed by design. The
+	// commands refuse to change such a queue rather than accepting the change
+	// and having it ignored.
+	adjustable bool
+}
+
+// queueSelectorFacts is the one table of what pasture's queues are. The stored
+// names come from the engine, so each name has a single definition in the
+// codebase.
+//
+// The control queue is NOT adjustable. It runs one epoch control workflow at a
+// time per process by design, and nothing in pasture offers a different value:
+// its registration fixes the limit at one (see newControlQueue in
+// internal/engine/queue.go), and no option or environment variable overrides
+// that. Accepting a change for it would write a number that the next daemon
+// start silently replaces with one, so the commands refuse it instead.
+var queueSelectorFacts = map[QueueSelector]queueFacts{
+	QueueSelectorSlice:   {storedName: engine.SliceQueueName, adjustable: true},
+	QueueSelectorControl: {storedName: engine.ControlQueueName, adjustable: false},
 }
 
 // StoredName returns the queue name this selector addresses in the database,
 // and whether the selector is one pasture knows.
 func (s QueueSelector) StoredName() (string, bool) {
-	name, ok := queueSelectorNames[s]
-	return name, ok
+	facts, ok := queueSelectorFacts[s]
+	return facts.storedName, ok
+}
+
+// Adjustable reports whether an operator may change this queue's concurrency.
+func (s QueueSelector) Adjustable() bool {
+	return queueSelectorFacts[s].adjustable
 }
 
 // QueueSelectors returns every selector an operator may name, in a stable
 // order, for help text and error messages.
 func QueueSelectors() []QueueSelector {
-	out := make([]QueueSelector, 0, len(queueSelectorNames))
-	for s := range queueSelectorNames {
+	out := make([]QueueSelector, 0, len(queueSelectorFacts))
+	for s := range queueSelectorFacts {
 		out = append(out, s)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
+}
+
+// fixedConcurrencyError refuses a change to a queue whose concurrency is fixed
+// by design. It is a refusal, not a failure: nothing is wrong with the
+// database, and there is nothing for the operator to repair.
+func fixedConcurrencyError(selector QueueSelector, storedName string) error {
+	return &pasterrors.StructuredError{
+		Category: pasterrors.CategoryValidation,
+		What:     fmt.Sprintf("The %s queue does not have a concurrency setting to change.", selector),
+		Why: fmt.Sprintf("%s runs one epoch control workflow at a time in each process, by design. "+
+			"That number is fixed where the queue is created, and no option or environment variable changes it.", storedName),
+		Where:  "Changing a queue's concurrency (internal/handlers/queue.go in handlers.SetQueueConcurrency).",
+		Impact: "Nothing was changed. A number written here would be replaced by one the next time the daemon starts.",
+		Fix: fmt.Sprintf("1. Read the setting instead:\n"+
+			"     pasture queue concurrency get %s\n"+
+			"2. To change how much work runs at once, change the queue that carries it:\n"+
+			"     pasture queue concurrency set %s <jobs>", selector, QueueSelectorSlice),
+	}
 }
 
 // ResolveQueueSelector maps one command-line argument to a known queue. Both
@@ -97,12 +137,16 @@ func ResolveQueueSelector(arg string) (QueueSelector, string, error) {
 }
 
 // queueChoiceList renders the accepted queue names for an error message or help
-// text, one per line, short name first.
+// text, one per line, short name first, and says which of them can be changed.
 func queueChoiceList() string {
 	var b strings.Builder
 	for _, s := range QueueSelectors() {
 		stored, _ := s.StoredName()
-		fmt.Fprintf(&b, "  %s (stored as %s)\n", s, stored)
+		note := "read only, its concurrency is fixed"
+		if s.Adjustable() {
+			note = "its concurrency can be changed"
+		}
+		fmt.Fprintf(&b, "  %s (stored as %s; %s)\n", s, stored, note)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -127,17 +171,13 @@ func QueueConcurrency(in QueueConcurrencyInput, format types.OutputFormat) (int,
 		return pasterrors.ExitCode(err), err
 	}
 
-	client, closeClient, err := openQueueClient(in.DBPath)
-	if err != nil {
-		return pasterrors.ExitCode(err), err
-	}
-	defer closeClient()
-
-	queue, err := retrieveQueue(client, storedName)
-	if err != nil {
-		return pasterrors.ExitCode(err), err
-	}
-	return printQueueConcurrency(storedName, queue.GetWorkerConcurrency(), format)
+	return withQueueClient(in.DBPath, func(client dbos.Client) (int, error) {
+		queue, err := retrieveQueue(client, storedName)
+		if err != nil {
+			return pasterrors.ExitCode(err), err
+		}
+		return printQueueConcurrency(storedName, queue.GetWorkerConcurrency(), format)
+	})
 }
 
 // SetQueueConcurrency changes the limit on concurrent jobs for one queue, then
@@ -148,9 +188,13 @@ func QueueConcurrency(in QueueConcurrencyInput, format types.OutputFormat) (int,
 // process can change it in between. The operator is told what the database
 // holds, never merely what they asked for.
 func SetQueueConcurrency(in QueueConcurrencyInput, format types.OutputFormat) (int, error) {
-	_, storedName, err := ResolveQueueSelector(in.Queue)
+	selector, storedName, err := ResolveQueueSelector(in.Queue)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
+	}
+	if !selector.Adjustable() {
+		e := fixedConcurrencyError(selector, storedName)
+		return pasterrors.ExitCode(e), e
 	}
 	if in.Limit <= 0 {
 		e := &pasterrors.StructuredError{
@@ -164,22 +208,24 @@ func SetQueueConcurrency(in QueueConcurrencyInput, format types.OutputFormat) (i
 		return pasterrors.ExitCode(e), e
 	}
 
-	client, closeClient, err := openQueueClient(in.DBPath)
-	if err != nil {
-		return pasterrors.ExitCode(err), err
-	}
-	defer closeClient()
+	return withQueueClient(in.DBPath, func(client dbos.Client) (int, error) {
+		return setStoredConcurrency(client, storedName, in.Limit, format)
+	})
+}
 
+// setStoredConcurrency writes one queue's limit and reports the limit that is in
+// force afterwards.
+func setStoredConcurrency(client dbos.Client, storedName string, wanted int, format types.OutputFormat) (int, error) {
 	queue, err := retrieveQueue(client, storedName)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
 
-	limit := in.Limit
+	limit := wanted
 	if err := queue.SetWorkerConcurrency(client, &limit); err != nil {
 		e := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("Couldn't set %s to %d concurrent jobs per process.", storedName, in.Limit),
+			What:     fmt.Sprintf("Couldn't set %s to %d concurrent jobs per process.", storedName, wanted),
 			Why: "The setting is stored in the pasture database and the database refused the change — " +
 				"usually because the file is unwritable, or another process is holding it.",
 			Where:  "Changing a queue's concurrency (internal/handlers/queue.go in handlers.SetQueueConcurrency).",
@@ -199,11 +245,11 @@ func SetQueueConcurrency(in QueueConcurrencyInput, format types.OutputFormat) (i
 		return pasterrors.ExitCode(err), err
 	}
 	inForce := persisted.GetWorkerConcurrency()
-	if inForce == nil || *inForce != in.Limit {
+	if inForce == nil || *inForce != wanted {
 		e := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What: fmt.Sprintf("Asked for %d concurrent jobs on %s, but the stored setting now says %s.",
-				in.Limit, storedName, describeConcurrency(inForce)),
+				wanted, storedName, describeConcurrency(inForce)),
 			Why: "Queue settings are shared by every pasture process, and another process changed the same " +
 				"setting between this change and the read that confirmed it.",
 			Where:  "Reading a queue's concurrency back (internal/handlers/queue.go in handlers.SetQueueConcurrency).",
@@ -238,28 +284,27 @@ func printQueueConcurrency(storedName string, limit *int, format types.OutputFor
 	return 0, nil
 }
 
-// openQueueClient opens a database-backed client on the shared pasture
-// database, reusing the controller the lifecycle verbs already open so there is
-// one place in the codebase that builds a client. The returned function
-// releases it.
-func openQueueClient(dbPath string) (dbos.Client, func(), error) {
-	controller, err := OpenEpochController(dbPath)
+// withQueueClient runs one queue operation against a database-backed client and
+// releases the client afterwards.
+//
+// The client comes from openClient, the same constructor the epoch controller
+// uses, so the queue commands and the daemon share one process identity and
+// therefore act on the same rows.
+//
+// A release that does not finish is reported when the operation itself
+// succeeded, because it means the runtime lost its database handle mid-flight
+// and the operator should not trust what they just read. When the operation
+// already failed, its own error is the one worth reporting.
+func withQueueClient(dbPath string, fn func(dbos.Client) (int, error)) (int, error) {
+	client, _, release, err := openClient(dbPath)
 	if err != nil {
-		return nil, nil, err
+		return pasterrors.ExitCode(err), err
 	}
-	backed, ok := controller.(*dbosController)
-	if !ok || backed.client == nil {
-		_ = controller.Close()
-		return nil, nil, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryConnection,
-			What:     "Couldn't get a database client to read the work-queue settings.",
-			Why:      "The opened controller is not the database-backed one, so it carries no client.",
-			Where:    "Opening a queue client (internal/handlers/queue.go in handlers.openQueueClient).",
-			Impact:   "No queue setting can be read or changed.",
-			Fix:      "Retry against the unified pasture database, passing --db or setting PASTURE_DB_PATH if it is not in the default location.",
-		}
+	code, opErr := fn(client)
+	if releaseErr := release(); releaseErr != nil && opErr == nil {
+		return pasterrors.ExitCode(releaseErr), releaseErr
 	}
-	return backed.client, func() { _ = controller.Close() }, nil
+	return code, opErr
 }
 
 // retrieveQueue reads one queue's stored settings and turns the two failures an

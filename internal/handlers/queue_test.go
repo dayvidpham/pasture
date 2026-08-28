@@ -10,8 +10,11 @@ package handlers_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,20 +34,98 @@ const (
 	exitStorage    = 5
 )
 
-// registerQueuesAt builds an engine on dbPath so the queues are registered in
-// that database, exactly as starting the daemon once would, and stops it again.
-// The queue settings survive the engine, because they are rows in the database.
-func registerQueuesAt(t *testing.T, dbPath string) {
-	t.Helper()
+// queueFixture builds ONE database with the queues registered — the state a
+// single daemon start leaves behind — and every test here takes a private copy
+// of it.
+//
+// It is built once per test binary on purpose. Registering the queues means
+// building and stopping a whole durable engine, which is by far the most
+// expensive thing these tests do, and doing it in each of several parallel
+// tests loaded the machine enough to starve a slice test elsewhere in the tree
+// that waits a fixed two seconds for a signal. One build, then a file copy per
+// test, removes that load and still gives each test a database of its own to
+// write to.
+var queueFixture = sync.OnceValues(func() (string, error) {
+	dir, err := os.MkdirTemp("", "pasture-queue-fixture-*")
+	if err != nil {
+		return "", fmt.Errorf("create the queue fixture directory: %w", err)
+	}
+	queueFixtureDir = dir
+	dbPath := filepath.Join(dir, "pasture.db")
 	e, err := engine.New(context.Background(), engine.Config{
 		DBPath:             dbPath,
 		ApplicationVersion: "test-queue-handler",
 		ExecutorID:         "test-queue-handler",
 	})
 	if err != nil {
-		t.Fatalf("engine.New: %v", err)
+		return "", fmt.Errorf("build the engine that registers the queues: %w", err)
+	}
+	// Shutdown closes the handle, so the file on disk is complete and can be
+	// copied.
+	e.Shutdown(10 * time.Second)
+	return dbPath, nil
+})
+
+// queueFixtureDir is the directory queueFixture built, kept so the tests can
+// delete it when they are done. It is written inside queueFixture and read only
+// after every test has finished.
+var queueFixtureDir string
+
+// removeQueueFixture deletes the shared fixture. TestMain calls it after the
+// tests finish; a t.Cleanup could not, because the fixture outlives the test
+// that happened to build it.
+func removeQueueFixture() {
+	if queueFixtureDir != "" {
+		_ = os.RemoveAll(queueFixtureDir)
+	}
+}
+
+// restartDaemonAt does what a daemon start does to the queue rows: it builds an
+// engine on this database, which registers the queues with the engine's own
+// configured limits, and stops it again. Only the test that is ABOUT that
+// behaviour calls it; the others copy the fixture instead.
+func restartDaemonAt(t *testing.T, dbPath string) {
+	t.Helper()
+	e, err := engine.New(context.Background(), engine.Config{
+		DBPath:             dbPath,
+		ApplicationVersion: "test-queue-handler",
+		ExecutorID:         "test-queue-handler-restart",
+	})
+	if err != nil {
+		t.Fatalf("engine.New (restart): %v", err)
 	}
 	e.Shutdown(10 * time.Second)
+}
+
+// registeredQueueDB returns a private copy of the fixture: a database with the
+// queues already registered, which this test alone may change.
+func registeredQueueDB(t *testing.T) string {
+	t.Helper()
+	src, err := queueFixture()
+	if err != nil {
+		t.Fatalf("queue fixture: %v", err)
+	}
+	dst := filepath.Join(t.TempDir(), "pasture.db")
+	copyQueueFixture(t, dst, src)
+	return dst
+}
+
+// copyQueueFixture copies the fixture database, and any write-ahead files beside
+// it, so the copy is a complete database and not a truncated one.
+func copyQueueFixture(t *testing.T, dst, src string) {
+	t.Helper()
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		data, err := os.ReadFile(src + suffix)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue // a cleanly closed database has no write-ahead files
+			}
+			t.Fatalf("read the queue fixture %q: %v", src+suffix, err)
+		}
+		if err := os.WriteFile(dst+suffix, data, 0o600); err != nil {
+			t.Fatalf("write the queue fixture copy %q: %v", dst+suffix, err)
+		}
+	}
 }
 
 // storedConcurrency reads one queue's stored limit through a plain database
@@ -146,8 +227,7 @@ func TestResolveQueueSelector_RejectsAnUnknownQueue(t *testing.T) {
 // database a daemon has run against.
 func TestQueueConcurrency_ReadsTheStoredSetting(t *testing.T) {
 	t.Parallel()
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
-	registerQueuesAt(t, dbPath)
+	dbPath := registeredQueueDB(t)
 
 	for _, queue := range []string{"slice", "control"} {
 		code, err := handlers.QueueConcurrency(handlers.QueueConcurrencyInput{
@@ -168,8 +248,7 @@ func TestQueueConcurrency_ReadsTheStoredSetting(t *testing.T) {
 // sees the change.
 func TestSetQueueConcurrency_WritesAndReadsBack(t *testing.T) {
 	t.Parallel()
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
-	registerQueuesAt(t, dbPath)
+	dbPath := registeredQueueDB(t)
 	requireStoredConcurrency(t, dbPath, engine.SliceQueueName, engine.DefaultSliceQueueConcurrency)
 
 	const raised = 3
@@ -195,8 +274,7 @@ func TestSetQueueConcurrency_WritesAndReadsBack(t *testing.T) {
 // would stop the queue is refused before anything is written.
 func TestSetQueueConcurrency_RejectsAnUnusableNumber(t *testing.T) {
 	t.Parallel()
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
-	registerQueuesAt(t, dbPath)
+	dbPath := registeredQueueDB(t)
 
 	for _, limit := range []int{0, -4} {
 		code, err := handlers.SetQueueConcurrency(handlers.QueueConcurrencyInput{
@@ -255,9 +333,8 @@ func TestQueueConcurrency_ReportsAQueueThatWasNeverRegistered(t *testing.T) {
 // silently undoes their change. The command's help text says so.
 func TestSetQueueConcurrency_IsReplacedWhenTheDaemonStartsAgain(t *testing.T) {
 	t.Parallel()
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	dbPath := registeredQueueDB(t) // the daemon has started once
 
-	registerQueuesAt(t, dbPath) // the daemon starts once
 	if _, err := handlers.SetQueueConcurrency(handlers.QueueConcurrencyInput{
 		DBPath: dbPath,
 		Queue:  "slice",
@@ -267,6 +344,56 @@ func TestSetQueueConcurrency_IsReplacedWhenTheDaemonStartsAgain(t *testing.T) {
 	}
 	requireStoredConcurrency(t, dbPath, engine.SliceQueueName, 3)
 
-	registerQueuesAt(t, dbPath) // and starts again, with its own configured limit
+	restartDaemonAt(t, dbPath) // the daemon starts again, with its own configured limit
 	requireStoredConcurrency(t, dbPath, engine.SliceQueueName, engine.DefaultSliceQueueConcurrency)
+}
+
+// TestSetQueueConcurrency_RefusesTheControlQueue pins the refusal of a change
+// that pasture could not honour.
+//
+// The control queue runs one epoch control workflow at a time in each process
+// by design: its limit is fixed where the queue is created and no option
+// changes it. Accepting a number for it would write a value that the next
+// daemon start replaces with one, so the operator would see their change
+// disappear with no explanation. The command refuses instead, and says why.
+// Reading the queue stays allowed.
+func TestSetQueueConcurrency_RefusesTheControlQueue(t *testing.T) {
+	t.Parallel()
+	dbPath := registeredQueueDB(t)
+
+	for _, name := range []string{"control", engine.ControlQueueName} {
+		code, err := handlers.SetQueueConcurrency(handlers.QueueConcurrencyInput{
+			DBPath: dbPath,
+			Queue:  name,
+			Limit:  4,
+		}, types.OutputText)
+		if err == nil {
+			t.Fatalf("SetQueueConcurrency(%q) returned no error; want a refusal", name)
+		}
+		if code != exitValidation {
+			t.Errorf("exit code = %d, want %d", code, exitValidation)
+		}
+		var se *pasterrors.StructuredError
+		if !errors.As(err, &se) {
+			t.Fatalf("error is %T, want a structured error", err)
+		}
+		if se.Category != pasterrors.CategoryValidation {
+			t.Errorf("category = %v, want %v", se.Category, pasterrors.CategoryValidation)
+		}
+		if !strings.Contains(se.Why, "one epoch control workflow at a time") {
+			t.Errorf("the reason does not say the limit is one by design:\n%s", se.Why)
+		}
+		if !strings.Contains(se.Fix, string(handlers.QueueSelectorSlice)) {
+			t.Errorf("the fix does not point at the queue that can be changed:\n%s", se.Fix)
+		}
+	}
+
+	// The refusal changed nothing, and reading is still allowed.
+	requireStoredConcurrency(t, dbPath, engine.ControlQueueName, 1)
+	if _, err := handlers.QueueConcurrency(handlers.QueueConcurrencyInput{
+		DBPath: dbPath,
+		Queue:  "control",
+	}, types.OutputText); err != nil {
+		t.Errorf("reading the control queue must stay allowed; got: %v", err)
+	}
 }
