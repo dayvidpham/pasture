@@ -10,9 +10,9 @@
 //   1. `cmd/pastured/main.go` constructs an empty cache via NewWellKnownAgentCache.
 //   2. `RegisterWellKnownAgents(tracker, cache)` populates it during startup,
 //      using `ensureWellKnownAgent` per row in the canonical registry.
-//   3. The populated cache is read through Get / MustGet by callers that need
-//      the `agent_id` to attach to an emitted audit event. The daemon itself
-//      only reports the cache size at startup.
+//   3. The daemon holds the populated cache and reports its size at startup.
+//      It has no other production reader today: Get and MustGet are called
+//      only from tests.
 //
 // Concurrency: Lookups (Get / Names) happen on the workflow hot path from
 // many concurrent goroutines. Writes happen ONLY during startup
@@ -35,9 +35,8 @@ import (
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 )
 
-// WellKnownAgentCache holds the well-known-name → AgentId mapping used when an
-// emitted audit event needs an agent id. Construct via NewWellKnownAgentCache;
-// populate via RegisterWellKnownAgents; inject into the caller. Cache lookups
+// WellKnownAgentCache holds the well-known-name → AgentId mapping. Construct via
+// NewWellKnownAgentCache and populate via RegisterWellKnownAgents. Cache lookups
 // (Get / MustGet / Names) are safe for concurrent use after population.
 //
 // A nil *WellKnownAgentCache is NOT a valid cache: all methods other than

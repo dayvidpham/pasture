@@ -139,10 +139,10 @@ been retired with the Temporal daemon role.
 
 ### Timeout tiers (`internal/timeouts`)
 
-Every deadline that guards a database write comes from one immutable
-`timeouts.Profile`. The tiers are strictly increasing, and the constructor
-refuses a profile that inverts them, so an inner retry can never outlive the
-caller waiting on it:
+Every SQLite busy timeout, and the two caller deadlines directly above it, come
+from one immutable `timeouts.Profile`. The tiers are strictly increasing, and the
+constructor refuses a profile that inverts them, so an inner retry can never
+outlive the caller waiting on it:
 
 | Tier | Field | Production | Bounds |
 |---|---|---|---|
@@ -155,13 +155,27 @@ The other two profiles keep the same ordering with different budgets:
 writer queue, and `DeadlineTestProfile` (25 ms / 250 ms / 500 ms) is tight on
 purpose so tests can prove deadline-breach behaviour quickly.
 
+Two longer retry ceilings sit **above** the profile and are not part of it.
+Both bound a retry loop, not a single wait, and both are 30 s:
+`busyRetryCeiling` (`internal/audit/migrate.go`) bounds retrying a schema
+migration that lost the file lock to another process, and `dbosRaceRetryCeiling`
+(`internal/engine/dbosinit.go`) bounds re-attempting durable start-up after a
+lost schema-bootstrap race.
+
 Rules:
 
 - Production code takes these values from the injected profile. It must not
   write a duration or a `busy_timeout(...)` DSN literal of its own.
-  `guard.CheckTimeoutSource` parses a listed set of production files and fails
-  the test suite for any of them that does; add a file to that list when it
-  starts to carry a timeout.
+- `guard.CheckTimeoutSource` is a narrow check, not a general one. It parses
+  four listed files (`internal/dbconn/dbconn.go`, `internal/engine/slice.go`,
+  `internal/lifecycle/receipt/clock.go`, `internal/lifecycle/receipt/journal.go`)
+  and reports exactly two things: use of the retired `DefaultIngressDeadline`
+  identifier, and a string literal carrying the retired five-second
+  `busy_timeout` pragma (the exact text it matches is in
+  `internal/lifecycle/guard/timeouts.go`). It does not see any other hard-coded
+  duration, and it does not look at any other file. Add
+  a file to the list in `internal/lifecycle/guard/timeouts_test.go` when that
+  file starts to carry a timeout.
 - A change to a tier is a change to observable behaviour under load. State the
   measurement that justifies it, and keep the ordering strict.
 
@@ -615,11 +629,15 @@ GOOS=windows GOARCH=amd64  CGO_ENABLED=0 go build ./cmd/pastured
   starts again, because a start writes the limit the daemon was configured with.
   For a limit that survives a restart, set `--slice-concurrency` or
   `PASTURE_SLICE_CONCURRENCY`.
-- Recovery keeps a workflow on the queue it ran on. A recovered slice returns to
-  the slice queue and stays under K. Work that ran on no queue — an epoch control
-  workflow — is put on the runtime's own reserved queue, which pasture does not
-  configure: it carries no concurrency limit and polls at the runtime's fixed
-  cadence.
+- Recovery returns a workflow to the queue it ran on. A recovered slice comes
+  back to the slice queue and stays under K; a recovered epoch control workflow
+  comes back to the control queue and stays under its limit of one, because
+  production starts it by enqueueing it there
+  (`dbosController.StartEpoch` in `internal/handlers/controller.go`). Work that
+  ran on **no** queue is put on the runtime's own reserved queue instead, which
+  pasture does not configure: no concurrency limit, fixed polling cadence.
+  Nothing in production reaches that case — only a caller that starts a workflow
+  directly with `RunWorkflow`, which today is test code.
 
 When debugging "where am I in this workflow?", the layers map cleanly:
 

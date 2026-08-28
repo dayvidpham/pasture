@@ -2,6 +2,7 @@ package timeouts
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,19 +20,39 @@ func docsRoot(t *testing.T) string {
 	return root
 }
 
-// guardedDocs are the hand-written documents that state timeout facts. The
-// research notes under llm/ are dated snapshots of an older library and are
-// excluded on purpose: they carry their own snapshot note.
-var guardedDocs = []string{
-	"AGENTS.md",
-	"CHANGELOG.md",
-	"CONTRIBUTING.md",
-	"README.md",
-	"ROADMAP.md",
-	"TESTING.md",
-	"docs/dbos-architecture.md",
-	"docs/codegen.md",
-	"docs/VERSIONING.md",
+// tier pairs a Profile field name with the value that field returns, so a
+// document is checked against the pair and not against a number that could
+// belong to any tier. Add an entry here when a tier is added to Profile.
+type tier struct {
+	field string
+	value string
+}
+
+func productionTiers() []tier {
+	profile := ProductionProfile()
+	return []tier{
+		{field: "SQLiteBusy", value: profile.SQLiteBusy().String()},
+		{field: "Ingress", value: profile.Ingress().String()},
+		{field: "StartSlice", value: profile.StartSlice().String()},
+	}
+}
+
+// compact removes every space so a document may write "500 ms" where a Go
+// duration prints "500ms", and may pad a table column. The field name, the
+// number and the unit still have to match, and they still have to sit next to
+// each other.
+func compact(text string) string { return strings.ReplaceAll(text, " ", "") }
+
+// skippedDocDirs are excluded from the markdown scan. llm/ holds dated research
+// snapshots that keep their old vocabulary on purpose, and legacy/ preserves
+// the retired substrate.
+var skippedDocDirs = map[string]bool{
+	".git":     true,
+	"legacy":   true,
+	"llm":      true,
+	"vendor":   true,
+	"result":   true,
+	"testdata": true,
 }
 
 // retiredBusyTimeoutLiterals are the forms of the five-second SQLite retry that
@@ -43,16 +64,59 @@ var retiredBusyTimeoutLiterals = []string{
 	"busy_timeout = 5000",
 }
 
-// TestDocsDoNotRepeatTheRetiredSQLiteRetry fails when a shipped document states
-// the retired five-second SQLite lock retry. The live value belongs to
-// ProductionProfile and is asserted separately below.
+// markdownDocs walks the repository and returns every markdown file outside the
+// skipped directories. A glob rather than a list, so a document added later is
+// covered without anyone remembering to register it.
+func markdownDocs(t *testing.T, root string) []string {
+	t.Helper()
+	var found []string
+	seen := map[string]bool{}
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if path != root && skippedDocDirs[entry.Name()] {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.EqualFold(filepath.Ext(entry.Name()), ".md") {
+			// CLAUDE.md and GEMINI.md are symlinks to AGENTS.md. Report the
+			// underlying document once.
+			target, resolveErr := filepath.EvalSymlinks(path)
+			if resolveErr != nil {
+				target = path
+			}
+			if !seen[target] {
+				seen[target] = true
+				found = append(found, target)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+	if len(found) == 0 {
+		t.Fatal("no markdown files found; the walk is broken, not the documents")
+	}
+	return found
+}
+
+// TestDocsDoNotRepeatTheRetiredSQLiteRetry fails when any markdown document in
+// the repository states the retired five-second SQLite lock retry.
 func TestDocsDoNotRepeatTheRetiredSQLiteRetry(t *testing.T) {
 	t.Parallel()
 	root := docsRoot(t)
-	for _, relative := range guardedDocs {
-		body, err := os.ReadFile(filepath.Join(root, relative))
+	for _, path := range markdownDocs(t, root) {
+		body, err := os.ReadFile(path)
 		if err != nil {
-			t.Fatalf("read %s: %v", relative, err)
+			t.Fatalf("read %s: %v", path, err)
+		}
+		relative, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			relative = path
 		}
 		for _, literal := range retiredBusyTimeoutLiterals {
 			if strings.Contains(string(body), literal) {
@@ -63,35 +127,29 @@ func TestDocsDoNotRepeatTheRetiredSQLiteRetry(t *testing.T) {
 	}
 }
 
-// TestAgentsDocStatesTheLiveProductionTiers pins the tier table in AGENTS.md to
-// the values ProductionProfile actually returns, so a profile change that is
-// not written up fails here instead of misleading a reader.
+// TestAgentsDocStatesTheLiveProductionTiers pins the AGENTS.md tier table to the
+// values ProductionProfile returns. Each tier is matched as a table row — the
+// field name immediately followed by its own value — so changing one tier's
+// number cannot be satisfied by the same number appearing elsewhere.
 func TestAgentsDocStatesTheLiveProductionTiers(t *testing.T) {
 	t.Parallel()
-	profile := ProductionProfile()
 	body, err := os.ReadFile(filepath.Join(docsRoot(t), "AGENTS.md"))
 	if err != nil {
 		t.Fatalf("read AGENTS.md: %v", err)
 	}
-	// Spaces are removed so the prose may write "500 ms" where the Go
-	// duration prints "500ms". The number and the unit still have to match.
-	compact := strings.ReplaceAll(string(body), " ", "")
-	for _, want := range []string{
-		fmt.Sprintf("**%s**", profile.SQLiteBusy()),
-		fmt.Sprintf("**%s**", profile.Ingress()),
-		fmt.Sprintf("**%s**", profile.StartSlice()),
-	} {
-		if !strings.Contains(compact, want) {
-			t.Errorf("AGENTS.md does not state %s; update the timeout tier table to match internal/timeouts.", want)
+	table := compact(string(body))
+	for _, tr := range productionTiers() {
+		want := compact(fmt.Sprintf("`%s` | **%s**", tr.field, tr.value))
+		if !strings.Contains(table, want) {
+			t.Errorf("the AGENTS.md timeout table has no row giving %s as %s; update it to match internal/timeouts.", tr.field, tr.value)
 		}
 	}
 }
 
-// TestPackageDocStatesTheLiveProductionTiers pins the same three values in this
+// TestPackageDocStatesTheLiveProductionTiers pins the same rows in this
 // package's own doc comment, which is what a reader of the code sees first.
 func TestPackageDocStatesTheLiveProductionTiers(t *testing.T) {
 	t.Parallel()
-	profile := ProductionProfile()
 	body, err := os.ReadFile("profile.go")
 	if err != nil {
 		t.Fatalf("read profile.go: %v", err)
@@ -100,9 +158,11 @@ func TestPackageDocStatesTheLiveProductionTiers(t *testing.T) {
 	if !found {
 		t.Fatal("profile.go has no package clause")
 	}
-	for _, want := range []string{profile.SQLiteBusy().String(), profile.Ingress().String(), profile.StartSlice().String()} {
-		if !strings.Contains(doc, want) {
-			t.Errorf("the package doc does not state %s; update the tier table in profile.go to match ProductionProfile.", want)
+	table := compact(doc)
+	for _, tr := range productionTiers() {
+		want := compact(fmt.Sprintf("%s  %s", tr.field, tr.value))
+		if !strings.Contains(table, want) {
+			t.Errorf("the package doc tier table has no row giving %s as %s; update profile.go to match ProductionProfile.", tr.field, tr.value)
 		}
 	}
 }

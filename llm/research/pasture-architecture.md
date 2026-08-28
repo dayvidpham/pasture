@@ -6,6 +6,12 @@ source: github.com/dayvidpham/pasture (this repo)
 
 # Understanding Pasture
 
+> **Snapshot note (2026-08-28).** This document was written at the date in the
+> front matter and is not maintained with the code. It describes the
+> Temporal-to-DBOS migration in the past tense, which is still correct, but any
+> version, name or number in it must be checked against the current sources
+> before it is relied on.
+
 ## Executive summary
 
 Pasture (`github.com/dayvidpham/pasture`) is a Go durable orchestrator for multi-agent LLM software-engineering workflows. It runs a software feature — an **epoch** — through a fixed, auditable **12-phase protocol** (`request → elicit → propose → review → plan-review → ratify → handoff → impl-plan → worker-slices → code-review → impl-uat → landing → complete`) while coordinating ephemeral Claude Code agents (architect, supervisor, worker, reviewer, and a master epoch orchestrator).

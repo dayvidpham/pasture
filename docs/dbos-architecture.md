@@ -162,10 +162,13 @@ daemon was configured with (`--slice-concurrency` / `PASTURE_SLICE_CONCURRENCY`)
 control queue runs one epoch control workflow per process by design and refuses a
 change.
 
-Recovery keeps a workflow on the queue it ran on: a recovered slice returns to the slice
-queue and stays under K, while work that ran on no queue — an epoch control workflow — is
-put on the runtime's own reserved queue, which pasture does not configure (no concurrency
-limit, fixed polling cadence).
+Recovery returns a workflow to the queue it ran on: a recovered slice comes back to the
+slice queue and stays under K, and a recovered epoch control workflow comes back to the
+control queue and stays under its limit of one, because production starts it by enqueueing
+it there (`dbosController.StartEpoch`). Work that ran on **no** queue is put on the
+runtime's own reserved queue, which pasture does not configure (no concurrency limit, fixed
+polling cadence); nothing in production reaches that case, only a caller that starts a
+workflow directly with `RunWorkflow`.
 
 Queries are *not* workflow round-trips: the engine persists a serialization of
 `EpochState` on every transition, and queries (and `pasture status`) read that
