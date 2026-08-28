@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
@@ -218,17 +217,19 @@ func (e *Engine) projectState(ctx dbos.Context, state *protocol.EpochState) erro
 // within the deadline) rather than a real failure. A timeout is the expected
 // signal for "no message right now" and must not end the workflow.
 //
-// On a fresh execution the substrate returns a typed timeout error; on replay
-// it returns the recorded error as a plain value, so the typed check is paired
-// with a message check to classify both identically (required for the workflow
-// to make the same decisions on replay as on first run).
+// The classification is by error identity only. The durable runtime stamps every
+// receive timeout with one error code and publishes dbos.ErrTimeout as the
+// sentinel for it; errors.Is compares that code, so the match holds for a
+// timeout raised on a fresh execution and for the same timeout read back from
+// the database when the receive is replayed — the runtime encodes the typed
+// error and rebuilds it on decode.
+//
+// Do not add a message-text fallback here. Text is a second, silent classifier:
+// a re-worded runtime message switches it off with no compile or test failure,
+// and a loose marker makes it fire on unrelated failures. Both directions are
+// harmful — the first ends a workflow that should have parked, the second
+// swallows a real delivery failure. TestIsRecvTimeout_MatchesRuntimeRecvTimeout
+// in control_internal_test.go pins the code against the runtime's own value.
 func isRecvTimeout(err error) bool {
-	if err == nil {
-		return false
-	}
-	var dbosErr *dbos.Error
-	if errors.As(err, &dbosErr) && dbosErr.Code == dbos.ErrorCodeTimeout {
-		return true
-	}
-	return strings.Contains(err.Error(), "no message received within")
+	return errors.Is(err, dbos.ErrTimeout)
 }

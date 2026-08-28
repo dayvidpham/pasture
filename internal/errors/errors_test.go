@@ -427,6 +427,39 @@ func TestExitCode_WrappedStructuredError(t *testing.T) {
 	}
 }
 
+// TestExitCode_JoinedStructuredErrorKeepsCategory pins the exit code of a
+// StructuredError that is JOINED with a second, unrelated failure rather than
+// wrapped by it. The durable engine reports an abandoned construction that way:
+// it joins the real cause with a note about a shutdown that did not finish, and
+// the cause comes FIRST. A join is not a wrap chain — errors.As has to walk
+// every branch — so this asserts the mapping for both positions and for every
+// category, not just the one category a single case would cover.
+func TestExitCode_JoinedStructuredErrorKeepsCategory(t *testing.T) {
+	cases := []struct {
+		category errors.Category
+		want     int
+	}{
+		{errors.CategoryValidation, 1},
+		{errors.CategoryConnection, 2},
+		{errors.CategoryWorkflow, 3},
+		{errors.CategoryConfig, 4},
+		{errors.CategoryStorage, 5},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.category), func(t *testing.T) {
+			structured := &errors.StructuredError{Category: tc.category, What: "construction was abandoned"}
+			other := stderrors.New("the durable context did not stop within its budget")
+
+			if got := errors.ExitCode(stderrors.Join(structured, other)); got != tc.want {
+				t.Errorf("ExitCode(join(structured, other)) = %d, want %d", got, tc.want)
+			}
+			if got := errors.ExitCode(stderrors.Join(other, structured)); got != tc.want {
+				t.Errorf("ExitCode(join(other, structured)) = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 // ---- StructuredError.Cause / Unwrap() ----------------------------------------
 
 // TestStructuredError_Unwrap_PreservesIsTraversal verifies that errors.Is can
