@@ -18,8 +18,9 @@ func GoleakVerifier() func() error {
 		// database/sql starts one connection-opener goroutine per *sql.DB and
 		// stops it only when that handle is closed. Test fixtures that open a
 		// handle and let process exit release it therefore leave this goroutine
-		// running: a full run of internal/handlers ends with 95 of them, and
-		// internal/engine with 6. Those unclosed fixture handles are a real
+		// running: a full run of internal/handlers ends with roughly 95 of
+		// them and internal/engine with a handful, both counts varying with
+		// which tests interleave. Those unclosed fixture handles are a real
 		// (pre-existing) test-hygiene debt, not a defect in the code under
 		// test, and they are tracked with the rest of the durable-runtime work
 		// in https://github.com/dayvidpham/pasture/issues/104. Ignoring them by
