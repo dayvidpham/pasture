@@ -19,8 +19,7 @@ func emitCodexIntoTempOutputRoot(t *testing.T) (string, []GeneratedFile) {
 	t.Helper()
 	moduleRoot := testModuleRoot(t)
 	root := t.TempDir()
-	figuresDir := filepath.Join(moduleRoot, "skills", "protocol", "figures")
-	files, err := EmitHarness(HarnessRoots{Source: moduleRoot, Output: root}, CodexTarget, figuresDir, GenerateOptions{Diff: false, Write: false})
+	files, err := EmitHarness(HarnessRoots{Source: moduleRoot, Output: root}, CodexTarget, GenerateOptions{Diff: false, Write: false})
 	if err != nil {
 		t.Fatalf("EmitHarness(codex): %v", err)
 	}
@@ -60,14 +59,13 @@ func TestEmitHarnessCodexIsDeterministic(t *testing.T) {
 
 	moduleRoot := testModuleRoot(t)
 	roots := HarnessRoots{Source: moduleRoot, Output: t.TempDir()}
-	figuresDir := filepath.Join(moduleRoot, "skills", "protocol", "figures")
 	opts := GenerateOptions{Diff: false, Write: false}
 
-	first, err := EmitHarness(roots, CodexTarget, figuresDir, opts)
+	first, err := EmitHarness(roots, CodexTarget, opts)
 	if err != nil {
 		t.Fatalf("first EmitHarness(codex): %v", err)
 	}
-	second, err := EmitHarness(roots, CodexTarget, figuresDir, opts)
+	second, err := EmitHarness(roots, CodexTarget, opts)
 	if err != nil {
 		t.Fatalf("second EmitHarness(codex): %v", err)
 	}

@@ -128,10 +128,8 @@ func TestClaudeCodeTargetEmitsNoManifest(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	writeHarnessSeedFiles(t, root)
 
-	figuresDir := filepath.Join(testModuleRoot(t), "skills", "protocol", "figures")
-	files, err := EmitHarness(HarnessRoots{Source: testModuleRoot(t), Output: root}, ClaudeCodeTarget, figuresDir, GenerateOptions{Diff: false, Write: false})
+	files, err := EmitHarness(HarnessRoots{Source: testModuleRoot(t), Output: root}, ClaudeCodeTarget, GenerateOptions{Diff: false, Write: false})
 	if err != nil {
 		t.Fatalf("EmitHarness(claude-code): %v", err)
 	}

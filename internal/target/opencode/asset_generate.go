@@ -21,7 +21,6 @@ func main() {
 		panic(err)
 	}
 	files, err := codegen.EmitHarness(codegen.RepoRoots(root), codegen.OpenCodeTarget,
-		filepath.Join(root, "skills", "protocol", "figures"),
 		codegen.GenerateOptions{Diff: false, Write: false})
 	if err != nil {
 		panic(fmt.Errorf("render OpenCode harness assets: %w", err))

@@ -119,9 +119,15 @@ func ResolveHarness(targets []string) ([]TargetHarness, error) {
 // HarnessRoots names the two independent directory roots one harness emission
 // uses:
 //
-//   - Source is the tree that holds the hand-authored inputs which are copied
-//     verbatim (skills/<dir>). Nothing is ever written below Source.
+//   - Source is the tree that holds every hand-authored input: the skill
+//     directories copied verbatim (skills/<dir>), the marker-merge base
+//     SKILL.md files a marker-merge target reads (skills/<dir>/SKILL.md), and
+//     the figure YAML files (skills/protocol/figures). Nothing is ever written
+//     below Source.
 //   - Output is the tree that receives every emitted file.
+//
+// Because every input path is derived from Source, the two roots stay paired
+// and no caller can mix one harness's inputs with another's outputs.
 //
 // A normal repository generation sets both to the module root; use RepoRoots
 // for that case. Callers that render into a scratch directory (a temporary
@@ -132,11 +138,59 @@ type HarnessRoots struct {
 	Output string
 }
 
+// figuresDir is the directory of figure YAML files. It is an input, so it is
+// always derived from Source; keeping the derivation here stops a caller from
+// pairing one root with another tree's figures.
+func (r HarnessRoots) figuresDir() string {
+	return filepath.Join(r.Source, "skills", "protocol", "figures")
+}
+
+// skillDir is the hand-authored skill directory below Source. It holds both the
+// verbatim skill trees and the marker-merge base files.
+func (r HarnessRoots) skillDir() string {
+	return filepath.Join(r.Source, "skills")
+}
+
+// skillPaths pairs the file a skill emission reads (Src, a hand-authored
+// marker-merge base below HarnessRoots.Source) with the file it writes (Dst,
+// below HarnessRoots.Output). A full-file target ignores Src.
+type skillPaths struct {
+	Src string
+	Dst string
+}
+
+// inPlaceSkillPaths reads and writes one path, which is what an in-place
+// repository generation does.
+func inPlaceSkillPaths(path string) skillPaths {
+	return skillPaths{Src: path, Dst: path}
+}
+
+// writeSkillFile writes one generated skill file and creates its parent
+// directory first, because a split-root run writes into an empty output tree.
+func writeSkillFile(path string, content string) error {
+	if dir := filepath.Dir(path); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create parent directory for %q: %w", path, err)
+		}
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
 // RepoRoots returns the roots of an in-place generation, where one module root
 // is both the source of the hand-authored trees and the destination of the
 // generated files.
 func RepoRoots(root string) HarnessRoots {
 	return HarnessRoots{Source: root, Output: root}
+}
+
+// skillPathsFor names the two files of one skill directory: the hand-authored
+// marker-merge base below Source, and the emitted file below Output. A
+// full-file target has no base file and uses only Dst.
+func (r HarnessRoots) skillPathsFor(h TargetHarness, dir string) skillPaths {
+	return skillPaths{
+		Src: filepath.Join(r.skillDir(), dir, "SKILL.md"),
+		Dst: filepath.Join(r.Output, h.SkillRoot, dir, "SKILL.md"),
+	}
 }
 
 // validate rejects an incomplete HarnessRoots before any file is read or
@@ -165,19 +219,63 @@ func (r HarnessRoots) validate(name HarnessName) error {
 	)
 }
 
+// validateSource proves the Source tree really holds the hand-authored inputs.
+// Every target reads at least the marker-merge base files or the verbatim skill
+// trees from <Source>/skills, so a wrong or missing Source must fail closed
+// here instead of silently emitting a partial harness.
+func (r HarnessRoots) validateSource(name HarnessName) error {
+	for _, candidate := range []struct {
+		path string
+		what string
+	}{
+		{path: r.Source, what: "source root"},
+		{path: r.skillDir(), what: "hand-authored skill directory"},
+	} {
+		info, err := os.Stat(candidate.path)
+		if err != nil {
+			return fmt.Errorf(
+				"codegen.EmitHarness(%s): cannot read the %s %q — "+
+					"why: the harness reads its hand-authored inputs (marker-merge base SKILL.md files, verbatim skill trees, and figures) below HarnessRoots.Source; "+
+					"where: internal/codegen/harness.go EmitHarness; "+
+					"when: the roots were checked before the first read or write; "+
+					"what it means for the caller: no file was read or written and generation stopped; "+
+					"fix: set HarnessRoots.Source to a module root that contains a skills/ directory, for example codegen.RepoRoots(moduleRoot): %w",
+				name, candidate.what, candidate.path, err,
+			)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf(
+				"codegen.EmitHarness(%s): the %s %q is a file, not a directory — "+
+					"why: the harness reads its hand-authored inputs below HarnessRoots.Source; "+
+					"where: internal/codegen/harness.go EmitHarness; "+
+					"when: the roots were checked before the first read or write; "+
+					"what it means for the caller: no file was read or written and generation stopped; "+
+					"fix: set HarnessRoots.Source to a module root directory that contains a skills/ directory",
+				name, candidate.what, candidate.path,
+			)
+		}
+	}
+	return nil
+}
+
 // EmitHarness renders one harness target: role skills, command skills,
-// verbatim skill copies, agents, and the manifest. roots.Source supplies the
-// verbatim inputs; roots.Output receives all output.
-func EmitHarness(roots HarnessRoots, h TargetHarness, figuresDir string, opts GenerateOptions) ([]GeneratedFile, error) {
+// verbatim skill copies, agents, and the manifest. roots.Source supplies every
+// hand-authored input (verbatim trees, marker-merge base files, and figures);
+// roots.Output receives all output.
+func EmitHarness(roots HarnessRoots, h TargetHarness, opts GenerateOptions) ([]GeneratedFile, error) {
 	if err := roots.validate(h.Name); err != nil {
 		return nil, err
 	}
+	if err := roots.validateSource(h.Name); err != nil {
+		return nil, err
+	}
 	root := roots.Output
+	figuresDir := roots.figuresDir()
 	var out []GeneratedFile
 
 	for _, item := range roleSkillItems() {
-		path := filepath.Join(root, h.SkillRoot, item.dir, "SKILL.md")
-		generated, err := emitRoleSkill(h, item.role, path, figuresDir, opts)
+		paths := roots.skillPathsFor(h, item.dir)
+		generated, err := emitRoleSkill(h, item.role, paths, figuresDir, opts)
 		if err != nil {
 			return nil, fmt.Errorf("codegen.EmitHarness(%s): role skill %s: %w", h.Name, item.dir, err)
 		}
@@ -187,8 +285,8 @@ func EmitHarness(roots HarnessRoots, h TargetHarness, figuresDir string, opts Ge
 	}
 
 	for _, item := range commandSkillItems() {
-		path := filepath.Join(root, h.SkillRoot, item.dir, "SKILL.md")
-		generated, err := emitCommandSkill(h, item.commandID, path, figuresDir, opts)
+		paths := roots.skillPathsFor(h, item.dir)
+		generated, err := emitCommandSkill(h, item.commandID, paths, figuresDir, opts)
 		if err != nil {
 			return nil, fmt.Errorf("codegen.EmitHarness(%s): command skill %s: %w", h.Name, item.dir, err)
 		}
@@ -292,34 +390,39 @@ var commandSkillDirs = map[string]string{
 	"cmd-work-impl":     "worker-implement",
 }
 
-func emitRoleSkill(h TargetHarness, roleID protocol.RoleId, path string, figuresDir string, opts GenerateOptions) (GeneratedFile, error) {
+// emitRoleSkill renders one role skill. A marker-merge target merges into the
+// hand-authored base file at paths.Src (an input below HarnessRoots.Source) and
+// writes the result to paths.Dst; a full-file target renders paths.Dst alone.
+func emitRoleSkill(h TargetHarness, roleID protocol.RoleId, paths skillPaths, figuresDir string, opts GenerateOptions) (GeneratedFile, error) {
 	if h.SkillWrite == WriteMarkerMerge {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		if _, err := os.Stat(paths.Src); os.IsNotExist(err) {
 			return GeneratedFile{}, nil
 		}
-		content, err := GenerateSkill(roleID, path, figuresDir, opts)
-		return GeneratedFile{Path: path, Content: content}, err
+		content, err := generateSkillInto(roleID, paths, figuresDir, opts)
+		return GeneratedFile{Path: paths.Dst, Content: content}, err
 	}
 	content, err := renderSkill(roleID, figuresDir, h.SkillTemplate)
 	if err != nil {
 		return GeneratedFile{}, err
 	}
-	return writeFullGeneratedFile(path, content, opts)
+	return writeFullGeneratedFile(paths.Dst, content, opts)
 }
 
-func emitCommandSkill(h TargetHarness, commandID string, path string, figuresDir string, opts GenerateOptions) (GeneratedFile, error) {
+// emitCommandSkill renders one command skill, with the same source/output split
+// as emitRoleSkill.
+func emitCommandSkill(h TargetHarness, commandID string, paths skillPaths, figuresDir string, opts GenerateOptions) (GeneratedFile, error) {
 	if h.SkillWrite == WriteMarkerMerge {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		if _, err := os.Stat(paths.Src); os.IsNotExist(err) {
 			return GeneratedFile{}, nil
 		}
-		content, err := GenerateSubSkill(commandID, path, figuresDir, opts)
-		return GeneratedFile{Path: path, Content: content}, err
+		content, err := generateSubSkillInto(commandID, paths, figuresDir, opts)
+		return GeneratedFile{Path: paths.Dst, Content: content}, err
 	}
 	content, err := renderSubSkill(commandID, figuresDir, h.SubSkillTemplate)
 	if err != nil {
 		return GeneratedFile{}, err
 	}
-	return writeFullGeneratedFile(path, content, opts)
+	return writeFullGeneratedFile(paths.Dst, content, opts)
 }
 
 // copyVerbatimSkill copies one hand-authored skill directory from
@@ -330,7 +433,7 @@ func emitCommandSkill(h TargetHarness, commandID string, path string, figuresDir
 // The walk stays STRICT: a missing source directory is a real packaging fault
 // and is reported, not skipped.
 func copyVerbatimSkill(roots HarnessRoots, targetSkillRoot string, dirName string, opts GenerateOptions) ([]GeneratedFile, error) {
-	srcRoot := filepath.Join(roots.Source, "skills", dirName)
+	srcRoot := filepath.Join(roots.skillDir(), dirName)
 	dstRoot := filepath.Join(roots.Output, targetSkillRoot, dirName)
 	var out []GeneratedFile
 	if err := filepath.WalkDir(srcRoot, func(srcPath string, d fs.DirEntry, err error) error {

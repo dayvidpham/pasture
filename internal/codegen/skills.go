@@ -613,6 +613,15 @@ func renderSubSkill(commandId, figuresDir string, tmplName string) (string, erro
 // Returns a *MarkerError if skillPath is missing the BEGIN/END marker pair (and
 // Init is false), or if the markers are malformed.
 func GenerateSkill(roleId protocol.RoleId, skillPath string, figuresDir string, opts GenerateOptions) (string, error) {
+	return generateSkillInto(roleId, inPlaceSkillPaths(skillPath), figuresDir, opts)
+}
+
+// generateSkillInto is the split-root form of GenerateSkill: the marker-merge
+// base is read from paths.Src and the merged result is written to paths.Dst.
+// GenerateSkill passes the same path for both, which keeps in-place generation
+// unchanged.
+func generateSkillInto(roleId protocol.RoleId, paths skillPaths, figuresDir string, opts GenerateOptions) (string, error) {
+	skillPath := paths.Src
 	// Read existing file.
 	oldContent, err := os.ReadFile(skillPath)
 	if err != nil {
@@ -629,10 +638,10 @@ func GenerateSkill(roleId protocol.RoleId, skillPath string, figuresDir string, 
 	if opts.Init && !HasMarkers(content) {
 		content = PrependMarkers(content)
 		if opts.Write {
-			if err := os.WriteFile(skillPath, []byte(content), 0o644); err != nil {
+			if err := writeSkillFile(paths.Dst, content); err != nil {
 				return "", fmt.Errorf(
 					"codegen.GenerateSkill: cannot write marker-prepended file %q: %w",
-					skillPath, err,
+					paths.Dst, err,
 				)
 			}
 		}
@@ -669,15 +678,15 @@ func GenerateSkill(roleId protocol.RoleId, skillPath string, figuresDir string, 
 
 	// Print diff if requested and content changed.
 	if opts.Diff && newContent != content {
-		fmt.Print(unifiedDiff(skillPath, skillPath, content, newContent))
+		fmt.Print(unifiedDiff(paths.Src, paths.Dst, content, newContent))
 	}
 
 	// Write to file if requested.
 	if opts.Write {
-		if err := os.WriteFile(skillPath, []byte(newContent), 0o644); err != nil {
+		if err := writeSkillFile(paths.Dst, newContent); err != nil {
 			return "", fmt.Errorf(
 				"codegen.GenerateSkill: cannot write skill file %q: %w",
-				skillPath, err,
+				paths.Dst, err,
 			)
 		}
 	}
@@ -708,6 +717,14 @@ func GenerateSkill(roleId protocol.RoleId, skillPath string, figuresDir string, 
 // Returns a *MarkerError if skillPath is missing the BEGIN/END marker pair (and
 // Init is false), or if the markers are malformed.
 func GenerateSubSkill(commandId string, skillPath string, figuresDir string, opts GenerateOptions) (string, error) {
+	return generateSubSkillInto(commandId, inPlaceSkillPaths(skillPath), figuresDir, opts)
+}
+
+// generateSubSkillInto is the split-root form of GenerateSubSkill: the
+// marker-merge base is read from paths.Src and the merged result is written to
+// paths.Dst.
+func generateSubSkillInto(commandId string, paths skillPaths, figuresDir string, opts GenerateOptions) (string, error) {
+	skillPath := paths.Src
 	// Read existing file.
 	oldContent, err := os.ReadFile(skillPath)
 	if err != nil {
@@ -728,10 +745,10 @@ func GenerateSubSkill(commandId string, skillPath string, figuresDir string, opt
 	if opts.Init && !HasMarkers(content) {
 		content = PrependMarkers(content)
 		if opts.Write {
-			if err := os.WriteFile(skillPath, []byte(content), 0o644); err != nil {
+			if err := writeSkillFile(paths.Dst, content); err != nil {
 				return "", fmt.Errorf(
 					"codegen.GenerateSubSkill: cannot write marker-prepended file %q: %w",
-					skillPath, err,
+					paths.Dst, err,
 				)
 			}
 		}
@@ -768,15 +785,15 @@ func GenerateSubSkill(commandId string, skillPath string, figuresDir string, opt
 
 	// Print diff if requested and content changed.
 	if opts.Diff && newContent != content {
-		fmt.Print(unifiedDiff(skillPath, skillPath, content, newContent))
+		fmt.Print(unifiedDiff(paths.Src, paths.Dst, content, newContent))
 	}
 
 	// Write to file if requested.
 	if opts.Write {
-		if err := os.WriteFile(skillPath, []byte(newContent), 0o644); err != nil {
+		if err := writeSkillFile(paths.Dst, newContent); err != nil {
 			return "", fmt.Errorf(
 				"codegen.GenerateSubSkill: cannot write skill file %q: %w",
-				skillPath, err,
+				paths.Dst, err,
 			)
 		}
 	}

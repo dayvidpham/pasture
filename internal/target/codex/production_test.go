@@ -87,7 +87,7 @@ func TestEmbeddedSnapshotMatchesCanonicalEmitter(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := filepath.Clean(filepath.Join(working, "..", "..", ".."))
-	files, err := codegen.EmitHarness(codegen.RepoRoots(root), codegen.CodexTarget, filepath.Join(root, "skills", "protocol", "figures"), codegen.GenerateOptions{Write: false})
+	files, err := codegen.EmitHarness(codegen.RepoRoots(root), codegen.CodexTarget, codegen.GenerateOptions{Write: false})
 	if err != nil {
 		t.Fatalf("EmitHarness(codex) failed: %v", err)
 	}

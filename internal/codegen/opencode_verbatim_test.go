@@ -18,9 +18,8 @@ func emitOpenCodeVerbatim(t *testing.T) (root string, byRel map[string]Generated
 	t.Helper()
 
 	root = testModuleRoot(t)
-	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
 
-	files, err := EmitHarness(RepoRoots(root), OpenCodeTarget, figuresDir, GenerateOptions{Diff: false, Write: false})
+	files, err := EmitHarness(RepoRoots(root), OpenCodeTarget, GenerateOptions{Diff: false, Write: false})
 	if err != nil {
 		t.Fatalf("EmitHarness(opencode): %v", err)
 	}

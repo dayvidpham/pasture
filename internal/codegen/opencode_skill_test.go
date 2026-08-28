@@ -46,10 +46,9 @@ func TestOpenCodeSkillsEmitRegisteredInventory(t *testing.T) {
 	t.Parallel()
 
 	root := testModuleRoot(t)
-	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
 	out := t.TempDir()
 
-	files, err := EmitHarness(HarnessRoots{Source: root, Output: out}, OpenCodeTarget, figuresDir, GenerateOptions{Diff: false, Write: false})
+	files, err := EmitHarness(HarnessRoots{Source: root, Output: out}, OpenCodeTarget, GenerateOptions{Diff: false, Write: false})
 	if err != nil {
 		t.Fatalf("EmitHarness(%s): %v", HarnessOpenCode, err)
 	}
@@ -146,10 +145,9 @@ func TestOpenCodeSkillWritesToDisk(t *testing.T) {
 	t.Parallel()
 
 	root := testModuleRoot(t)
-	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
 	out := t.TempDir()
 
-	if _, err := EmitHarness(HarnessRoots{Source: root, Output: out}, OpenCodeTarget, figuresDir, GenerateOptions{Diff: false, Write: true}); err != nil {
+	if _, err := EmitHarness(HarnessRoots{Source: root, Output: out}, OpenCodeTarget, GenerateOptions{Diff: false, Write: true}); err != nil {
 		t.Fatalf("EmitHarness(%s, write): %v", HarnessOpenCode, err)
 	}
 
