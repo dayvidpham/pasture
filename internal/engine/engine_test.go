@@ -620,8 +620,9 @@ func TestEngineShutdown_NamesTheWorkStillRunningWhenTheBudgetExpires(t *testing.
 	//	two spends   2 x budget + overhead = 6s or more
 	//
 	// Measured overhead of this shape, over full race runs of the whole
-	// suite: 33, 231, 326, 327, 347, 396, 630, 854 and 866ms. The worst of
-	// those, 866ms, sits inside the 2s of slack the ceiling leaves, and a
+	// suite, this machine and the reviewer's: 33, 231, 326, 327, 347, 396,
+	// 630, 854, 866ms and 1.021s. The worst of those, 1.021s, sits inside the
+	// 2s of slack the ceiling leaves — about twice the worst reading — and a
 	// second spend clears the ceiling by a second or more.
 	//
 	// LIMIT: wall time cannot tell a slow machine from a slow runtime. The
@@ -629,7 +630,7 @@ func TestEngineShutdown_NamesTheWorkStillRunningWhenTheBudgetExpires(t *testing.
 	// is large enough to make them wide.
 	if ceiling := budget + budget*2/3; elapsed >= ceiling {
 		t.Errorf("Shutdown took %v, at or beyond the ceiling %v (the %v budget plus two thirds of it): one budget plus the worst measured load is about %v, and a second spend of the budget on a later part is about %v, so this reading is a second spend rather than load",
-			elapsed, ceiling, budget, budget+866*time.Millisecond, 2*budget)
+			elapsed, ceiling, budget, budget+1021*time.Millisecond, 2*budget)
 	}
 }
 

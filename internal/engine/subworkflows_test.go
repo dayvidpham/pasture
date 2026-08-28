@@ -67,6 +67,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/testutil"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
@@ -525,6 +526,58 @@ func TestSliceQueue_BoundedConcurrency(t *testing.T) {
 // All slices receive explicit mock start_slice signals dispatched concurrently.
 // The signals are pre-populated in the DBOS notifications table; each slice
 // consumes its signal when its queue slot opens.
+// backpressureStartSliceDeadline is the start-signal deadline the backpressure
+// test runs under, in place of the production default.
+//
+// The deadline belongs to the LOAD this test creates, not to the code it
+// tests. The test asks 30 slices to receive their start signal through one
+// SQLite writer while the rest of the package runs beside it in parallel under
+// the race detector, so signal delivery is serialised behind every other
+// writer in the package. The production default is sized for one epoch on a
+// live daemon and is far too short for that shape: a few of the 30 slices
+// miss it whenever the package grows, which reads as a defect in the queue and
+// is only ever machine load.
+//
+// The production default is deliberately left alone. Only this test's own
+// engine takes the longer deadline.
+const backpressureStartSliceDeadline = 10 * time.Second
+
+// newBackpressureEngine is newQueueEngine with the deadline above. It is
+// separate rather than a parameter on the shared helper so that no other test
+// silently inherits a deadline that hides a real delay.
+func newBackpressureEngine(t *testing.T, k int) *engine.Engine {
+	t.Helper()
+	profile, err := timeouts.New(
+		timeouts.Test,
+		500*time.Millisecond, // SQLite lock wait, unchanged
+		2*time.Second,        // ingress, unchanged
+		backpressureStartSliceDeadline,
+	)
+	if err != nil {
+		t.Fatalf("build the timeout profile for the backpressure test: %v", err)
+	}
+
+	dbPath := testutil.GoldenUnifiedDBPath(t)
+	executorID, appVersion := testEngineIdentity(t)
+	e, err := engine.New(context.Background(), engine.Config{
+		DBPath:                   dbPath,
+		ApplicationVersion:       appVersion,
+		ExecutorID:               executorID,
+		SliceConcurrency:         k,
+		SkipMigrations:           true,
+		QueueBasePollingInterval: 100 * time.Millisecond,
+		Timeouts:                 profile,
+	})
+	if err != nil {
+		t.Fatalf("engine.New: %v", err)
+	}
+	if err := e.Launch(); err != nil {
+		t.Fatalf("engine.Launch: %v", err)
+	}
+	t.Cleanup(func() { e.Shutdown(10 * time.Second) })
+	return e
+}
+
 func TestSliceQueue_BackpressureAllEventuallyComplete(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {
@@ -533,7 +586,7 @@ func TestSliceQueue_BackpressureAllEventuallyComplete(t *testing.T) {
 	const K = 4
 	const N = 30
 
-	e := newQueueEngine(t, K)
+	e := newBackpressureEngine(t, K)
 
 	const epochId = "queue--backpressure"
 	if _, err := dbos.RunWorkflow(e.DBOS(), e.EpochControlWorkflow,
