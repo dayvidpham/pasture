@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"go/ast"
 	"go/parser"
@@ -31,6 +32,8 @@ import (
 	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
+
+	_ "modernc.org/sqlite"
 )
 
 // buildPasturedBinary builds the production pastured command (this package)
@@ -621,16 +624,15 @@ func TestPasturedStopsCleanlyOnSignal(t *testing.T) {
 
 // TestPasturedAnswersASignalWhileItIsStillStarting pins the startup window: a
 // stop signal that arrives after the daemon reports that it is starting, but
-// before its engine is ready, must end the process in an orderly way with a
-// message that names the cause.
+// before its engine is ready, must end the process in an orderly way.
 //
 // The daemon listens for the signals before it logs that line, so the line is
 // the earliest point a test can pin. Startup is short here (an empty database
-// on a local disk), so the signal may also land just after the engine is
-// ready; both endings are orderly and both are accepted. The failure this
-// test exists to catch is the third one: a signal that is only buffered while
-// startup blocks, which leaves the operator with a process that answers to
-// nothing but a kill.
+// on a local disk), so the signal may land either inside the window or just
+// after the engine is ready. Both are stops the operator asked for, so both
+// end with exit 0 and a clean-stop line. The failure this test exists to
+// catch is the third ending: a process killed by the default action, which
+// leaves the operator with a daemon that answers to nothing but a kill.
 func TestPasturedAnswersASignalWhileItIsStillStarting(t *testing.T) {
 	command, lines := startPastured(t, t.TempDir())
 	awaitLogLine(t, lines, "pastured starting", 60*time.Second)
@@ -654,26 +656,15 @@ func TestPasturedAnswersASignalWhileItIsStillStarting(t *testing.T) {
 		t.Fatal("pastured did not exit after a stop signal sent while it was starting")
 	}
 
-	var exitErr *exec.ExitError
-	switch {
-	case waitErr == nil:
-		// The signal arrived once the engine was ready: the orderly stop path.
-		if !strings.Contains(output.String(), "pastured stopped cleanly") {
-			t.Errorf("pastured exited 0 without reporting a clean stop:\n%s", output.String())
-		}
-	case errors.As(waitErr, &exitErr):
-		// The signal arrived during startup: an orderly refusal to continue.
-		if exitErr.ExitCode() < 0 {
+	if waitErr != nil {
+		var exitErr *exec.ExitError
+		if errors.As(waitErr, &exitErr) && exitErr.ExitCode() < 0 {
 			t.Fatalf("pastured was killed by a signal instead of ending itself:\n%s", output.String())
 		}
-		if got, want := exitErr.ExitCode(), 3; got != want {
-			t.Errorf("exit code = %d, want %d:\n%s", got, want, output.String())
-		}
-		if !strings.Contains(output.String(), "after a stop signal arrived") {
-			t.Errorf("startup was stopped by a signal but the message does not say so:\n%s", output.String())
-		}
-	default:
-		t.Fatalf("pastured exited with %v:\n%s", waitErr, output.String())
+		t.Fatalf("pastured exited with %v, want exit 0 for a stop the operator asked for:\n%s", waitErr, output.String())
+	}
+	if !strings.Contains(output.String(), "stopped cleanly") {
+		t.Errorf("pastured exited 0 without reporting a clean stop:\n%s", output.String())
 	}
 }
 
@@ -711,58 +702,17 @@ func TestLaunchFailureKeepsItsOwnExitCode(t *testing.T) {
 	}
 }
 
-// TestStartupTakesTheSignalContext pins that the daemon's startup work runs
-// under a context a stop signal cancels, and that a cancelled startup is
-// reported as such.
+// TestRunKeepsTheSignalOffTheEngineContext guards two wirings a compiler
+// cannot check and a test cannot easily observe from outside.
 //
-// It calls the production startup path with an already-cancelled context,
-// which is exactly what signal.NotifyContext hands it when a signal arrives:
-// the startup work must end instead of running to completion, and the report
-// must name the signal while keeping the underlying failure.
-func TestStartupTakesTheSignalContext(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	cfg := config.PasturedConfig{
-		AuditTrail:  types.BackendSqlite,
-		AuditDBPath: filepath.Join(t.TempDir(), "pasture.db"),
-	}
-
-	startupCtx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	rt, err := buildDaemonRuntime(startupCtx, cfg, 2, logger)
-	if err == nil {
-		rt.Close(logger)
-		t.Fatal("startup finished under a cancelled context; the startup work does not take the context")
-	}
-
-	reported := startupError(startupCtx, err)
-	if got, want := pasterrors.ExitCode(reported), 3; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
-	if !errors.Is(reported, err) {
-		t.Error("the underlying startup failure is no longer reachable in the error chain")
-	}
-	for _, want := range []string{"after a stop signal arrived", err.Error()} {
-		if !strings.Contains(reported.Error(), want) {
-			t.Errorf("report does not carry %q:\n%s", want, reported.Error())
-		}
-	}
-
-	// With no signal behind it, the same failure is reported as it is.
-	if got := startupError(context.Background(), err); got != err {
-		t.Errorf("a startup failure with no signal behind it was rewritten: %v", got)
-	}
-}
-
-// TestRunPassesTheSignalContextToStartup guards the wiring the two tests above
-// cannot observe: that run builds its startup context from
-// signal.NotifyContext and hands THAT context to the startup work. A startup
-// context of context.Background() compiles, passes every other test, and
-// silently restores the failure this slice fixed — a stop signal that is only
-// buffered while startup blocks, leaving a process that answers to nothing but
-// a kill. The daemon cannot be made to block on demand from outside, so the
-// wiring is read from the source instead.
-func TestRunPassesTheSignalContextToStartup(t *testing.T) {
+//  1. run builds a stop-signal context and ENDS ITS WAIT on it, so a signal
+//     that arrives while startup blocks is answered.
+//  2. the engine is built under engineLifetimeContext, NOT under the signal
+//     context. Handing the signal context straight to the startup work
+//     compiles, passes every other test that does not exercise recovery, and
+//     silently turns a stop signal into a cancellation of the epoch in
+//     flight — work the recovery sweep then skips for good.
+func TestRunKeepsTheSignalOffTheEngineContext(t *testing.T) {
 	t.Parallel()
 
 	fileSet := token.NewFileSet()
@@ -783,12 +733,13 @@ func TestRunPassesTheSignalContextToStartup(t *testing.T) {
 
 	signalContextName := ""
 	startupContextArg := ""
+	waitsOnTheSignal := false
 	ast.Inspect(runBody, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
 		if !ok {
 			return true
 		}
-		switch callee := selectorName(call.Fun); callee {
+		switch selectorName(call.Fun) {
 		case "signal.NotifyContext":
 			if assign, ok := parentAssign(runBody, call); ok && len(assign.Lhs) > 0 {
 				if ident, ok := assign.Lhs[0].(*ast.Ident); ok {
@@ -797,23 +748,47 @@ func TestRunPassesTheSignalContextToStartup(t *testing.T) {
 			}
 		case "buildDaemonRuntime":
 			if len(call.Args) > 0 {
-				if ident, ok := call.Args[0].(*ast.Ident); ok {
-					startupContextArg = ident.Name
-				} else {
-					startupContextArg = "<not a plain name>"
-				}
+				startupContextArg = describeContextArgument(call.Args[0])
 			}
+		}
+		return true
+	})
+	ast.Inspect(runBody, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if ok && signalContextName != "" && selectorName(call.Fun) == signalContextName+".Done" {
+			waitsOnTheSignal = true
 		}
 		return true
 	})
 
 	if signalContextName == "" {
-		t.Fatal("run no longer builds a context from signal.NotifyContext, so a stop signal cannot reach the startup work")
+		t.Fatal("run no longer builds a context from signal.NotifyContext, so a stop signal cannot end a blocked startup")
 	}
-	if startupContextArg != signalContextName {
-		t.Fatalf("run passes %q to buildDaemonRuntime, want the signal context %q; a signal would only be buffered while startup blocks",
-			startupContextArg, signalContextName)
+	if !waitsOnTheSignal {
+		t.Fatalf("run never waits on %s.Done(), so a signal would only be buffered while startup blocks", signalContextName)
 	}
+	if want := "engineLifetimeContext(" + signalContextName + ")"; startupContextArg != want {
+		t.Fatalf("run passes %q to buildDaemonRuntime, want %q; the engine must not live under the signal context, or a stop cancels the epoch in flight instead of leaving it to be finished",
+			startupContextArg, want)
+	}
+}
+
+// describeContextArgument renders the context argument of a call as source-like
+// text, so the guard can report exactly what it found.
+func describeContextArgument(arg ast.Expr) string {
+	switch value := arg.(type) {
+	case *ast.Ident:
+		return value.Name
+	case *ast.CallExpr:
+		inner := "..."
+		if len(value.Args) == 1 {
+			if ident, ok := value.Args[0].(*ast.Ident); ok {
+				inner = ident.Name
+			}
+		}
+		return selectorName(value.Fun) + "(" + inner + ")"
+	}
+	return "<an expression this guard cannot name>"
 }
 
 // selectorName renders a call target as "package.Function" or "Function".
@@ -847,4 +822,179 @@ func parentAssign(body *ast.BlockStmt, call *ast.CallExpr) (*ast.AssignStmt, boo
 		return true
 	})
 	return found, found != nil
+}
+
+// readWorkflowStatus reads one workflow's recorded status straight from the
+// database, without a running engine. The status is what decides whether the
+// next start finishes the work or skips it for good, so the test reads the
+// stored row rather than any in-memory view of it.
+func readWorkflowStatus(t *testing.T, dbPath, workflowID string) string {
+	t.Helper()
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open the database to read the workflow row: %v", err)
+	}
+	defer db.Close()
+
+	var status string
+	if err := db.QueryRow("SELECT status FROM workflow_status WHERE workflow_uuid = ?", workflowID).Scan(&status); err != nil {
+		t.Fatalf("read the status of workflow %q: %v", workflowID, err)
+	}
+	return status
+}
+
+// TestAStopSignalLeavesTheWorkForTheNextStartToFinish is the contract that
+// makes every "nothing is lost" statement in this daemon true.
+//
+// A stop signal must end the daemon, not the epoch. The durable runtime marks
+// work as cancelled when its context is cancelled for any reason OTHER than
+// the runtime's own stop, and the recovery sweep skips cancelled work for
+// good — so a signal wired into the engine's parent context would quietly
+// destroy an epoch that was in flight. This test delivers the signal exactly
+// as run does, then proves both halves: the work is not written as cancelled,
+// and a new engine on the same database finishes it.
+func TestAStopSignalLeavesTheWorkForTheNextStartToFinish(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	dbPath := testutil.GoldenUnifiedDBPath(t)
+	const epochID = "epoch-stop-then-recover"
+
+	plan := []engine.AdvanceStep{
+		{ToPhase: protocol.PhaseElicit, TriggeredBy: "epoch", ConditionMet: "classified"},
+		{ToPhase: protocol.PhasePropose, TriggeredBy: "architect", ConditionMet: "elicited"},
+	}
+
+	// The first engine holds its first transition inside the durable step, so
+	// there is real work in flight when the signal arrives.
+	entered := make(chan struct{})
+	released := make(chan struct{})
+	var holdOnce, releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(released) }) }
+	defer release()
+
+	firstCfg := newEngineConfig(dbPath, 2, audit.NewInMemoryAuditTrail(), nil, hooks.NewManager(), logger)
+	firstCfg.OnTransition = func(context.Context, string, *protocol.TransitionRecord, string) error {
+		holdOnce.Do(func() {
+			close(entered)
+			select {
+			case <-released:
+			case <-time.After(60 * time.Second):
+			}
+		})
+		return nil
+	}
+
+	// The signal, delivered the way run delivers it: it cancels the startup
+	// context, and the engine lives under engineLifetimeContext of that.
+	startupCtx, signalArrives := context.WithCancel(context.Background())
+	defer signalArrives()
+
+	first, err := engine.New(engineLifetimeContext(startupCtx), firstCfg)
+	if err != nil {
+		t.Fatalf("engine.New for the first daemon: %v", err)
+	}
+	if err := first.Launch(); err != nil {
+		first.Shutdown(perComponentShutdownTimeout)
+		t.Fatalf("engine.Launch for the first daemon: %v", err)
+	}
+
+	if _, err := dbos.RunWorkflow(first.DBOS(), first.EpochWorkflow,
+		engine.EpochInput{EpochId: epochID, Advances: plan},
+		dbos.WithWorkflowID(epochID)); err != nil {
+		t.Fatalf("RunWorkflow: %v", err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(60 * time.Second):
+		t.Fatal("no work reached its durable step, so nothing was in flight when the signal arrived")
+	}
+
+	signalArrives()
+	// A short budget: the point is a stop that ends while work is still
+	// running, which is the case that used to destroy the work.
+	if stopErr := first.Shutdown(2 * time.Second); stopErr == nil {
+		t.Error("the first engine stopped cleanly although work was still running; the test no longer covers the case it was written for")
+	}
+	release()
+
+	if status := readWorkflowStatus(t, dbPath, epochID); status == string(dbos.WorkflowStatusCancelled) {
+		t.Fatalf("the epoch was written as %q after a stop signal; the next start skips cancelled work, so the epoch is lost", status)
+	}
+
+	// A new daemon on the same database must finish what the first one left.
+	finished := make(chan struct{})
+	var finishOnce sync.Once
+	secondCfg := newEngineConfig(dbPath, 2, audit.NewInMemoryAuditTrail(), nil, hooks.NewManager(), logger)
+	secondCfg.OnTransition = func(_ context.Context, _ string, rec *protocol.TransitionRecord, _ string) error {
+		if rec.ToPhase == protocol.PhasePropose {
+			finishOnce.Do(func() { close(finished) })
+		}
+		return nil
+	}
+
+	second, err := engine.New(context.Background(), secondCfg)
+	if err != nil {
+		t.Fatalf("engine.New for the second daemon: %v", err)
+	}
+	t.Cleanup(func() { second.Shutdown(perComponentShutdownTimeout) })
+	if err := second.Launch(); err != nil {
+		t.Fatalf("engine.Launch for the second daemon: %v", err)
+	}
+
+	select {
+	case <-finished:
+	case <-time.After(120 * time.Second):
+		t.Fatalf("the second daemon did not finish the epoch the first one left; its recorded status is %q",
+			readWorkflowStatus(t, dbPath, epochID))
+	}
+}
+
+// TestEngineLifetimeContextDropsTheSignal states the rule the test above
+// proves the consequence of: the context handed to the engine must not be
+// cancelled by the stop signal.
+func TestEngineLifetimeContextDropsTheSignal(t *testing.T) {
+	t.Parallel()
+
+	startupCtx, signalArrives := context.WithCancel(context.Background())
+	engineCtx := engineLifetimeContext(startupCtx)
+	signalArrives()
+
+	if startupCtx.Err() == nil {
+		t.Fatal("the startup context was not cancelled; this test cannot prove anything")
+	}
+	if err := engineCtx.Err(); err != nil {
+		t.Errorf("the engine's context was cancelled by the stop signal (%v); a stop would cancel the epoch in flight instead of leaving it to be finished", err)
+	}
+}
+
+// TestAbandonedStartupEndsWithoutFault pins the two ordinary endings of a
+// startup the operator stopped: whatever the startup step reports afterwards,
+// a stop the operator asked for is not a fault, and the half-built daemon is
+// closed rather than left open.
+func TestAbandonedStartupEndsWithoutFault(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	t.Run("the abandoned step ended with a failure", func(t *testing.T) {
+		built := make(chan startupOutcome, 1)
+		built <- startupOutcome{err: errors.New("the database could not be opened")}
+		if err := abandonStartup(logger, built); err != nil {
+			t.Errorf("abandonStartup = %v, want nil: the operator asked for the stop", err)
+		}
+	})
+
+	t.Run("the abandoned step produced a daemon that must be closed", func(t *testing.T) {
+		cfg := newEngineConfig(testutil.GoldenUnifiedDBPath(t), 2, audit.NewInMemoryAuditTrail(), nil, hooks.NewManager(), logger)
+		eng, err := engine.New(context.Background(), cfg)
+		if err != nil {
+			t.Fatalf("engine.New: %v", err)
+		}
+		built := make(chan startupOutcome, 1)
+		built <- startupOutcome{runtime: &daemonRuntime{Engine: eng}}
+
+		if err := abandonStartup(logger, built); err != nil {
+			t.Errorf("abandonStartup = %v, want nil for a daemon that was never launched", err)
+		}
+		if err := eng.DB().Ping(); err == nil {
+			t.Error("the abandoned daemon was left with an open database handle")
+		}
+	})
 }

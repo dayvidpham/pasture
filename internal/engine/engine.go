@@ -624,7 +624,7 @@ func shutdownIncompleteError(detail *ShutdownIncompleteError) *pasterrors.Struct
 		Why: "Parts of the engine were still busy when their stop budget of " +
 			detail.PerComponentTimeout.String() + " ran out.",
 		Where:  "Stopping the durable engine (internal/engine/engine.go in engine.Engine.Shutdown).",
-		Impact: "Work that was still running was cut off, and the engine had already closed the shared database file, so a late write from that work fails. Nothing is lost: unfinished work stays pending and is picked up on the next start.",
+		Impact: "Work that was still running was cut off, and the engine had already closed the shared database file, so a late write from that work fails. The work itself is not lost: it stays pending rather than cancelled, so the next start of the daemon finishes it.",
 		Fix: "1. Read the log lines just before this one: they name the epoch and the work that was still running.\n" +
 			"2. Start the daemon again. It resumes the work that was left pending:\n" +
 			"     pastured\n" +
@@ -745,7 +745,7 @@ func (e *Engine) logShutdownFailure(err error) {
 	logger.Error(
 		"the durable engine did not stop within its shutdown budget; "+
 			"some work may still have been running, and the durable runtime has already closed the shared database handle it owns, "+
-			"so a late write through that handle will fail; start the daemon again to resume the work that was left pending",
+			"so a late write through that handle will fail; the work stays pending rather than cancelled, so start the daemon again to finish it",
 		"error", err,
 	)
 }

@@ -612,22 +612,24 @@ func TestEngineShutdown_NamesTheWorkStillRunningWhenTheBudgetExpires(t *testing.
 	if elapsed < budget {
 		t.Errorf("Shutdown returned after %v, sooner than the %v budget it was given", elapsed, budget)
 	}
-	// One budget is spent here, not one per part. The window is sized by the
-	// budget, not by a slack ratio, so the whole suite's overhead cannot
-	// reach it:
+	// One budget is spent here, not one per part. Both margins are set by the
+	// budget itself, so neither is a guess about the machine:
 	//
-	//	one spend    3s + overhead (measured up to about 0.9s under the full
-	//	             race suite)                          = about 3.9s  PASS
-	//	ceiling      2 x 3s - 1s                          = 5s
-	//	two spends   6s + overhead                        = about 6.9s  FAIL
+	//	one spend    budget + the machine's own overhead
+	//	ceiling      budget + two thirds of the budget = 5s at a 3s budget
+	//	two spends   2 x budget + overhead = 6s or more
 	//
-	// The 1s subtracted from two budgets keeps the ceiling clear of a second
-	// spend; the 2s left above one spend absorbs a loaded machine. The worst
-	// case (SequentialShutdownWaits budgets) is what an operator must plan
-	// for, not what this shape costs.
-	if ceiling := 2*budget - time.Second; elapsed >= ceiling {
-		t.Errorf("Shutdown took %v, at or beyond the ceiling %v (2 x the %v budget, less 1s): one budget plus load is about %v, so this is a second spend of the budget on a later part, not machine load",
-			elapsed, ceiling, budget, budget+900*time.Millisecond)
+	// Measured overhead of this shape, over full race runs of the whole
+	// suite: 33, 231, 326, 327, 347, 396, 630, 854 and 866ms. The worst of
+	// those, 866ms, sits inside the 2s of slack the ceiling leaves, and a
+	// second spend clears the ceiling by a second or more.
+	//
+	// LIMIT: wall time cannot tell a slow machine from a slow runtime. The
+	// size of the two margins is the only defence, which is why the budget
+	// is large enough to make them wide.
+	if ceiling := budget + budget*2/3; elapsed >= ceiling {
+		t.Errorf("Shutdown took %v, at or beyond the ceiling %v (the %v budget plus two thirds of it): one budget plus the worst measured load is about %v, and a second spend of the budget on a later part is about %v, so this reading is a second spend rather than load",
+			elapsed, ceiling, budget, budget+866*time.Millisecond, 2*budget)
 	}
 }
 

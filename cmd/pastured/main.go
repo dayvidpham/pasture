@@ -146,19 +146,15 @@ func run(cmd *cobra.Command, configFile string) error {
 		return scErr
 	}
 
-	// Listen for the stop signals BEFORE anything is started, and carry them
-	// as a context so a signal REACHES the startup work instead of only
-	// waiting behind it. Startup can block for a long time: another daemon
-	// may hold the database, a migration or a recovery sweep may be long. A
-	// plain channel would leave the operator with a process that answers only
-	// to a kill. The context is cancelled on the first signal, which unblocks
-	// the database and runtime work that takes it, and the same signal also
-	// waits in the channel below so a daemon that finishes starting stops at
-	// once.
+	// Listen for the stop signals BEFORE anything is started, so a signal
+	// that arrives during startup is answered instead of killing the process
+	// by the default action. Two listeners are registered from one signal:
 	//
-	// The context is NOT released once startup ends: the durable runtime
-	// derives its own context from it, and releasing it here would cancel the
-	// running engine. It lives as long as the daemon does.
+	//	startupCtx  cancelled on the first signal. It bounds the WAIT for
+	//	            startup, and nothing else. See engineLifetimeContext for
+	//	            why the engine must not live under it.
+	//	stopCh      carries the same signal to the running daemon below. A
+	//	            signal that arrives during startup waits in the channel.
 	startupCtx, releaseStartupSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer releaseStartupSignals()
 
@@ -175,13 +171,37 @@ func run(cmd *cobra.Command, configFile string) error {
 		"sliceConcurrency", sliceConcurrency,
 	)
 
-	runtime, err := buildDaemonRuntime(startupCtx, cfg, sliceConcurrency, logger)
-	if err != nil {
-		return startupError(startupCtx, err)
+	// Build the daemon beside the wait, not inside it. The build runs under a
+	// context the signal never cancels (engineLifetimeContext), so a stop can
+	// never reach in-flight work through it; the signal instead ends the WAIT
+	// for the build, and the build that lands afterwards is closed.
+	built := make(chan startupOutcome, 1)
+	go func() {
+		runtime, err := buildDaemonRuntime(engineLifetimeContext(startupCtx), cfg, sliceConcurrency, logger)
+		built <- startupOutcome{runtime: runtime, err: err}
+	}()
+
+	var runtime *daemonRuntime
+	select {
+	case outcome := <-built:
+		if outcome.err != nil {
+			return outcome.err
+		}
+		runtime = outcome.runtime
+	case <-startupCtx.Done():
+		logger.Info("stop signal received while starting; waiting for the startup step to finish so it can be closed",
+			"budget", startupAbandonTimeout)
+		return abandonStartup(logger, built)
+	}
+
+	// A signal that arrived while the engine was being built: stop it rather
+	// than launch a daemon the operator has already asked to end.
+	if startupCtx.Err() != nil {
+		return stopBeforeLaunch(logger, runtime)
 	}
 
 	if launchErr := runtime.Engine.Launch(); launchErr != nil {
-		return startupError(startupCtx, launchFailure(launchErr, runtime.Close(logger)))
+		return launchFailure(launchErr, runtime.Close(logger))
 	}
 
 	logger.Info("DBOS engine launched, waiting for shutdown",
@@ -225,35 +245,81 @@ func launchFailure(launchErr, stopErr error) error {
 	return fmt.Errorf("%w (the engine also did not stop cleanly afterwards: %v)", launchErr, stopErr)
 }
 
-// startupError reports a startup that ended while a stop signal was being
-// answered. Any startup failure with no signal behind it is returned
-// unchanged.
+// startupAbandonTimeout bounds how long the daemon waits for an abandoned
+// startup step to finish once a stop signal has ended the wait for it. The
+// step itself is not interruptible (see engineLifetimeContext), so this is
+// the difference between a process that ends and a process that hangs.
 //
-// The wording claims only what is known. The durable runtime reports a
-// cancelled database operation as plain text and does not keep the
-// cancellation in the error chain, so this cannot prove that the signal is
-// what ended the startup; a database that was already unusable can fail at
-// the same moment. Both facts are therefore reported: the signal arrived, and
-// the startup work ended with the failure attached as the cause. Without this
-// the operator would read only the consequence and would have no way to tell
-// a deliberate stop from a broken database.
-func startupError(startupCtx context.Context, cause error) error {
-	if cause == nil || startupCtx.Err() == nil {
-		return cause
+// It is generous on purpose: the step is usually a database open or a schema
+// migration, and closing it properly is worth more than exiting a few seconds
+// sooner. A service manager's own stop deadline is the outer bound.
+const startupAbandonTimeout = 30 * time.Second
+
+// startupOutcome is what the startup goroutine reports back: a built daemon or
+// the reason it could not be built.
+type startupOutcome struct {
+	runtime *daemonRuntime
+	err     error
+}
+
+// engineLifetimeContext returns the context the durable engine lives under.
+//
+// It deliberately DROPS cancellation from the startup context. The durable
+// runtime derives its own base context from what it is given, and it cancels
+// that base itself when it stops, with a private cause that means "we are
+// stopping". Every running workflow watches for that cause: a cancellation
+// with any OTHER cause is read as "this work was cancelled", and the work's
+// row is written as cancelled — which the recovery sweep then skips for good.
+//
+// So a stop signal that reached the engine through its parent context would
+// not stop the epoch in flight; it would destroy it. Startup interruption is
+// therefore bounded by ending the WAIT for startup (see run), never by
+// cancelling the engine's own context.
+func engineLifetimeContext(startupCtx context.Context) context.Context {
+	return context.WithoutCancel(startupCtx)
+}
+
+// abandonStartup ends a startup the operator stopped. It waits for the
+// startup step to finish so the half-built daemon can be closed, and reports
+// nothing wrong: a stop the operator asked for is a normal ending.
+//
+// It reports a failure only when the abandoned step does not finish inside
+// startupAbandonTimeout — that IS a stop that did not finish in its budget,
+// and the operator must know the process ended with work still running.
+func abandonStartup(logger *slog.Logger, built <-chan startupOutcome) error {
+	select {
+	case outcome := <-built:
+		if outcome.err != nil {
+			logger.Info("the startup step ended with a failure while the daemon was stopping; the stop was what the operator asked for",
+				"err", outcome.err)
+			return nil
+		}
+		return stopBeforeLaunch(logger, outcome.runtime)
+	case <-time.After(startupAbandonTimeout):
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryWorkflow,
+			What:     "The daemon stopped before the step it was starting had finished.",
+			Why: "A stop signal arrived while the daemon was starting, and the startup step did not finish within " +
+				startupAbandonTimeout.String() + ", so it could not be closed in an orderly way.",
+			Where:  "Starting the daemon (cmd/pastured/main.go in run).",
+			Impact: "The daemon is not running. The step that was still working held the database when the process ended, so the database may need a check before the next start.",
+			Fix: "1. Confirm no other daemon holds the database:\n" +
+				"     pgrep -fa pastured\n" +
+				"2. Start the daemon again and let it finish starting before you stop it:\n" +
+				"     pastured",
+		}
 	}
-	return &pasterrors.StructuredError{
-		Category: pasterrors.CategoryWorkflow,
-		What:     "The daemon stopped while it was still starting, after a stop signal arrived.",
-		Why:      "A stop signal reached the daemon before the engine was ready, and the startup work then ended with the failure shown below.",
-		Where:    "Starting the daemon (cmd/pastured/main.go in run).",
-		Impact:   "The daemon is not running. Nothing was left half-written: the work that ended had not begun to accept epochs.",
-		Fix: "1. If you meant to stop it, nothing else is needed. Start it again when you want it running:\n" +
-			"     pastured\n" +
-			"2. If you did not mean to stop it, read the cause above: it names the startup step that ended.\n" +
-			"3. If startup is slow enough that you keep stopping it, check that no other daemon holds the database:\n" +
-			"     pgrep -fa pastured",
-		Cause: cause,
+}
+
+// stopBeforeLaunch closes a daemon that was built but never launched, because
+// the operator stopped it first. The engine has nothing in flight at that
+// point, so a clean close is the normal ending and reports nothing wrong.
+func stopBeforeLaunch(logger *slog.Logger, runtime *daemonRuntime) error {
+	if closeErr := runtime.Close(logger); closeErr != nil {
+		return closeErr
 	}
+	logger.Info("pastured stopped cleanly before it finished starting")
+	return nil
 }
 
 type daemonRuntime struct {

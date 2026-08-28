@@ -6,14 +6,16 @@
 - `pastured` now chooses its exit code from the kind of failure instead of
   reporting 1 for everything: 1 for bad input or an unclassified failure, 2
   when the database cannot be opened, 3 when a stop does not finish inside its
-  budget or a stop signal ends startup, 4 for a configuration problem, and 5
-  for a storage or schema failure. Scripts and service units that treated any
-  non-zero exit as the same fault need no change; those that test for exactly
-  1 must be updated.
+  budget, 4 for a configuration problem, and 5 for a storage or schema
+  failure. A stop that the operator asked for still exits 0, at any point in
+  the daemon's life. Scripts and service units that treated any non-zero exit
+  as the same fault need no change; those that test for exactly 1 must be
+  updated.
 - `pastured` reports a stop that did not finish in time. The message names the
   parts of the durable engine that were still running, and the process exits 3
   instead of 0, so a service manager sees that the stop was not orderly. Work
-  that was cut off stays pending and is picked up on the next start.
+  that was cut off is left pending rather than cancelled, so the next start
+  finishes it.
 
 ### Fixed
 - `pastured` answers a stop signal that arrives while it is still starting.
