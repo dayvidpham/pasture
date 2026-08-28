@@ -51,18 +51,30 @@ const codexActivationReportRelPath = ".codex/pasture-codex-activation.json"
 type codexManifestEmitter struct{}
 
 // Emit writes the Codex package manifest, host hook configuration, and one
-// exec-only sh runner per pinned lifecycle event. It generates no Python adapter
-// and no caller-selected PASTURE_ADAPTER_* env: the transport is mechanical and
-// carries no activation or operation-selection logic.
+// exec-only sh runner per ACTIVATED lifecycle event. It generates no Python
+// adapter and no caller-selected PASTURE_ADAPTER_* env: the transport is
+// mechanical and carries no activation or operation-selection logic.
 //
-// The event set is taken directly from the pinned runtime lifecycle catalog
+// The event vocabulary is taken from the pinned runtime lifecycle catalog
 // (runtime.CodexLifecycleEvents), never from the hidden-adapter operation
 // metadata, so the transport can never smuggle a semantic operation vocabulary.
+// The catalog is then narrowed to the events the activation manifest enables
+// (codexEnabledEventNames), exactly as the Claude emitter narrows its own
+// manifest — the transport carries only activated events. A withheld event is
+// therefore never wired: it has no hooks.json entry and no runner, so the host
+// never invokes it, and it can never reach the lifecycle handler as a
+// validation failure.
+//
+// Wiring a withheld event costs the user directly. The host would spawn a
+// process for every occurrence, the handler would refuse the event as withheld,
+// and the host would receive a refusal diagnostic instead of a decision. The
+// wiring would also contradict the committed activation audit report, which
+// records that same event as withheld. The transport and the audit report must
+// state one activation decision, not two.
 func (codexManifestEmitter) Emit(root string, opts GenerateOptions) ([]GeneratedFile, error) {
-	events := runtime.CodexLifecycleEvents()
-	eventNames := make([]string, len(events))
-	for i, event := range events {
-		eventNames[i] = event.NativeName()
+	eventNames, err := codexEnabledEventNames()
+	if err != nil {
+		return nil, fmt.Errorf("codegen.codexManifestEmitter.Emit: %w", err)
 	}
 
 	config, err := renderCodexHooksConfig(eventNames)
@@ -208,10 +220,9 @@ func renderCodexHooksConfigWithRunner(eventNames []string, runner func(string) s
 // pinned Codex contract executes plain command strings through a shell, where
 // the unquoted leading tilde is expanded to the invoking user's home directory.
 func EmitCodexGlobalHooksConfig() (GeneratedFile, error) {
-	events := runtime.CodexLifecycleEvents()
-	names := make([]string, len(events))
-	for index, event := range events {
-		names[index] = event.NativeName()
+	names, err := codexEnabledEventNames()
+	if err != nil {
+		return GeneratedFile{}, fmt.Errorf("emit immutable global Codex hooks configuration: %w", err)
 	}
 	content, err := renderCodexHooksConfigWithRunner(names, func(event string) string {
 		return "~/.codex/hooks/events/" + event + ".sh"
@@ -220,6 +231,99 @@ func EmitCodexGlobalHooksConfig() (GeneratedFile, error) {
 		return GeneratedFile{}, fmt.Errorf("emit immutable global Codex hooks configuration: %w", err)
 	}
 	return GeneratedFile{Path: ".codex/hooks.json", Content: content}, nil
+}
+
+// codexActivationByKind derives the exhaustive Codex activation decisions from
+// the pinned activation catalog and indexes them by contract event kind. It
+// fails closed on an invalid or duplicated decision, so a drifted catalog stops
+// generation instead of shipping a partial transport or a partial audit report.
+func codexActivationByKind() (map[model.ContractEventKind]activation.Entry, error) {
+	states, err := activation.Codex0_146_0()
+	if err != nil {
+		return nil, fmt.Errorf("build activation manifest: %w", err)
+	}
+	return codexActivationByKindFrom(states)
+}
+
+// codexActivationByKindFrom is the injectable body of codexActivationByKind. It
+// takes the activation decisions as an argument instead of reading the pinned
+// catalog, so a test can drive every fail-closed branch with a mutated decision
+// set. Production callers pass activation.Codex0_146_0().
+func codexActivationByKindFrom(states []activation.Entry) (map[model.ContractEventKind]activation.Entry, error) {
+	stateByKind := make(map[model.ContractEventKind]activation.Entry, len(states))
+	for _, state := range states {
+		if !state.IsValid() {
+			return nil, fmt.Errorf("activation entry for event %d is invalid; construct it with activation.NewEnabled or activation.NewWithheld", state.Event)
+		}
+		if _, duplicate := stateByKind[state.Event]; duplicate {
+			return nil, fmt.Errorf("duplicate activation entry for event %d; provide exactly one decision per generated event", state.Event)
+		}
+		stateByKind[state.Event] = state
+	}
+	return stateByKind, nil
+}
+
+// codexEnabledEventNames returns the native names of exactly the Codex events
+// the activation manifest enables, in pinned runtime catalog order. It is the
+// single event set every Codex transport artifact wires: the project hooks
+// configuration, the per-event runners, and the immutable global hooks
+// configuration all derive from it, so those three can never disagree.
+//
+// The order and the vocabulary come from the runtime catalog; only membership
+// comes from activation. An enabled event that the runtime catalog does not
+// carry is a contract drift, not a transport decision, so it fails generation
+// rather than silently disappearing from the wiring.
+func codexEnabledEventNames() ([]string, error) {
+	states, err := activation.Codex0_146_0()
+	if err != nil {
+		return nil, fmt.Errorf("codegen.codexEnabledEventNames: build activation manifest: %w", err)
+	}
+	return codexEnabledEventNamesFrom(registration.Codex0_146_0(), states, runtime.CodexLifecycleEvents())
+}
+
+// codexEnabledEventNamesFrom is the injectable body of codexEnabledEventNames.
+// It takes the generated registration manifest, the activation decisions, and
+// the runtime lifecycle catalog as arguments instead of reading the three pinned
+// sources, so a test can drive every fail-closed branch — invalid decision,
+// duplicate decision, missing decision, and an enabled event the catalog does
+// not carry. Production callers pass the pinned sources unchanged.
+func codexEnabledEventNamesFrom(manifest registration.Manifest, states []activation.Entry, catalog []runtime.CodexLifecycleEvent) ([]string, error) {
+	stateByKind, err := codexActivationByKindFrom(states)
+	if err != nil {
+		return nil, fmt.Errorf("codegen.codexEnabledEventNames: %w", err)
+	}
+	enabled := make(map[string]struct{}, len(stateByKind))
+	for _, event := range manifest.Events {
+		state, present := stateByKind[event.Kind]
+		if !present {
+			return nil, fmt.Errorf(
+				"codegen.codexEnabledEventNames: generated event %q has no activation entry; add one exhaustive typed decision in internal/lifecycle/activation/codex_0_146_0.go before generating the transport",
+				event.NativeName)
+		}
+		if state.State == activation.Enabled {
+			enabled[event.NativeName] = struct{}{}
+		}
+	}
+
+	names := make([]string, 0, len(enabled))
+	for _, event := range catalog {
+		name := event.NativeName()
+		if _, ok := enabled[name]; ok {
+			names = append(names, name)
+			delete(enabled, name)
+		}
+	}
+	if len(enabled) != 0 {
+		missing := make([]string, 0, len(enabled))
+		for name := range enabled {
+			missing = append(missing, name)
+		}
+		sort.Strings(missing)
+		return nil, fmt.Errorf(
+			"codegen.codexEnabledEventNames: activation enables %v, which the pinned runtime lifecycle catalog does not carry; the activation catalog drifted from runtime.CodexLifecycleEvents — align both against the same pinned Codex contract before generating",
+			missing)
+	}
+	return names, nil
 }
 
 // renderCodexActivationReport builds the committed Codex activation audit report
@@ -240,19 +344,9 @@ func EmitCodexGlobalHooksConfig() (GeneratedFile, error) {
 // silently shipping a partial audit.
 func renderCodexActivationReport() (string, error) {
 	manifest := registration.Codex0_146_0()
-	states, err := activation.Codex0_146_0()
+	stateByKind, err := codexActivationByKind()
 	if err != nil {
-		return "", fmt.Errorf("codegen.renderCodexActivationReport: build activation manifest: %w", err)
-	}
-	stateByKind := make(map[model.ContractEventKind]activation.Entry, len(states))
-	for _, state := range states {
-		if !state.IsValid() {
-			return "", fmt.Errorf("codegen.renderCodexActivationReport: activation entry for event %d is invalid; construct it with activation.NewEnabled or activation.NewWithheld", state.Event)
-		}
-		if _, duplicate := stateByKind[state.Event]; duplicate {
-			return "", fmt.Errorf("codegen.renderCodexActivationReport: duplicate activation entry for event %d; provide exactly one decision per generated event", state.Event)
-		}
-		stateByKind[state.Event] = state
+		return "", fmt.Errorf("codegen.renderCodexActivationReport: %w", err)
 	}
 
 	report := activationSupportReport{Harness: string(manifest.Harness), Contract: manifest.Contract.String()}

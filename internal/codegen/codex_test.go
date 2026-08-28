@@ -9,7 +9,6 @@ import (
 
 	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
-	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
 // emitCodexIntoTempOutputRoot emits the full Codex target into a temporary
@@ -128,9 +127,14 @@ func TestCodexTargetDescriptorPartitionsPackages(t *testing.T) {
 	if len(hookFiles) != wantHookFiles {
 		t.Fatalf("hooks package files = %d, want exactly %d exec-only event runners (no Python adapter): %v", len(hookFiles), wantHookFiles, hookFiles)
 	}
-	if hookFiles[0] != ".codex/hooks/events/PermissionRequest.sh" {
-		// Paths are sorted and the package holds only event runners now.
-		t.Fatalf("first hook package file = %q, want sorted event runner inventory", hookFiles[0])
+	wantRunners := make([]string, 0, len(codexTargetLifecycleEventsForTest()))
+	for _, event := range codexTargetLifecycleEventsForTest() {
+		wantRunners = append(wantRunners, ".codex/hooks/events/"+event+".sh")
+	}
+	sort.Strings(wantRunners)
+	// Paths are sorted and the package holds only activated event runners now.
+	if strings.Join(hookFiles, "\n") != strings.Join(wantRunners, "\n") {
+		t.Fatalf("hook package runner inventory = %v, want the activated set %v", hookFiles, wantRunners)
 	}
 
 	// The target manifest bundle carries exactly the target-level files owned by
@@ -189,13 +193,10 @@ func TestCodexBundleManifestsAreCanonical(t *testing.T) {
 	}
 }
 
+// codexTargetLifecycleEventsForTest returns the events the Codex transport
+// wires: exactly the set the pinned activation catalog enables.
 func codexTargetLifecycleEventsForTest() []string {
-	events := runtime.CodexLifecycleEvents()
-	names := make([]string, len(events))
-	for index, event := range events {
-		names[index] = event.NativeName()
-	}
-	return names
+	return codexLifecycleEventNamesForTest()
 }
 
 // TestCodexDescriptorIsContentAddressedDeterministic proves the descriptor is a

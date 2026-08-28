@@ -142,27 +142,24 @@ func TestCodexGeneratedRunnerDrivesBuiltCLI(t *testing.T) {
 		})
 	}
 
-	t.Run("withheld/Stop", func(t *testing.T) {
-		runner := filepath.Join(root, ".codex", "hooks", "events", "Stop.sh")
-		dbPath := filepath.Join(t.TempDir(), "pasture.db")
-		cmd := exec.Command("sh", runner)
-		cmd.Stdin = bytes.NewReader([]byte(`{"hook_event_name":"Stop"}`))
-		cmd.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath)
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-		if err := cmd.Run(); err != nil {
-			t.Fatalf("generated Stop runner exited nonzero through the built CLI: %v\nstderr:\n%s", err, stderr.String())
+	t.Run("withheld/no-transport", func(t *testing.T) {
+		// A withheld event is never wired: it owns no runner and no hooks.json
+		// entry, so Codex has no way to deliver it and it can never reach the
+		// handler as a refusal. This is the transport-level half of the
+		// guarantee; the handler-level refusal is covered in
+		// internal/handlers/hook_lifecycle_codex_test.go.
+		wire, err := os.ReadFile(filepath.Join(root, ".codex", "hooks.json"))
+		if err != nil {
+			t.Fatalf("read committed .codex/hooks.json: %v; run make generate", err)
 		}
-		if stdout.Len() != 0 {
-			t.Errorf("withheld Codex Stop emitted stdout %q; a non-selected event must produce no native continuation", stdout.String())
-		}
-		wantReason := `Codex event "Stop" is withheld (reason outside-target-set)`
-		if !strings.Contains(stderr.String(), wantReason) {
-			t.Errorf("Codex Stop stderr does not carry the withheld diagnostic %q:\n%s", wantReason, stderr.String())
-		}
-		if _, statErr := os.Stat(dbPath); !os.IsNotExist(statErr) {
-			t.Errorf("withheld Codex Stop opened storage at %q (stat err=%v); admission must be refused before any storage access", dbPath, statErr)
+		for _, event := range []string{"Stop", "UserPromptSubmit", "PermissionRequest", "PostToolUse", "PreCompact", "PostCompact", "SubagentStart", "SubagentStop"} {
+			runner := filepath.Join(root, ".codex", "hooks", "events", event+".sh")
+			if _, statErr := os.Stat(runner); !os.IsNotExist(statErr) {
+				t.Errorf("withheld Codex event %s still has a committed runner at %q (stat err=%v); the transport must carry only activated events", event, runner, statErr)
+			}
+			if strings.Contains(string(wire), `"`+event+`"`) {
+				t.Errorf("withheld Codex event %s is still wired in .codex/hooks.json; the transport must carry only activated events", event)
+			}
 		}
 	})
 }
