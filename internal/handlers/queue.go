@@ -299,14 +299,21 @@ func printQueueConcurrency(storedName string, limit *int, format types.OutputFor
 // succeeded, because it means the runtime lost its database handle mid-flight
 // and the operator should not trust what they just read. When the operation
 // already failed, its own error is the one worth reporting.
-func withQueueClient(dbPath string, fn func(dbos.Client) (int, error)) (int, error) {
-	client, _, release, err := openClient(dbPath)
-	if err != nil {
-		return pasterrors.ExitCode(err), err
+//
+// The release runs from a deferred call, so it happens on EVERY way out of the
+// operation — including a panic inside it, and including any early return a
+// later change adds. Releasing on the ordinary path only would leave a durable
+// client, and the database handle it owns, held by a process that is on its way
+// out.
+func withQueueClient(dbPath string, fn func(dbos.Client) (int, error)) (code int, err error) {
+	client, _, release, openErr := openClient(dbPath)
+	if openErr != nil {
+		return pasterrors.ExitCode(openErr), openErr
 	}
-	code, opErr := fn(client)
-	releaseErr := release()
-	return queueCommandResult(code, opErr, releaseErr)
+	defer func() {
+		code, err = queueCommandResult(code, err, release())
+	}()
+	return fn(client)
 }
 
 // queueCommandResult decides what a queue command reports when the operation and

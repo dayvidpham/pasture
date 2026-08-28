@@ -5,17 +5,12 @@ package main_test
 // printed line, and the exit code an operator's script will branch on.
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/dayvidpham/pasture/internal/engine"
+	"github.com/dayvidpham/pasture/internal/engine/enginetest"
 )
 
 // Exit codes an operator sees, from the mapping in internal/errors/errors.go
@@ -25,78 +20,11 @@ const (
 	exitStorage    = 5
 )
 
-// queueFixture builds ONE database in the state a single daemon start leaves
-// behind — the queues registered, with their configured limits — and every test
-// here takes a private copy of it.
-//
-// It is built once per test binary on purpose. Registering the queues means
-// building and stopping a whole durable engine, and doing that in each of
-// several parallel tests loaded the machine enough to starve a slice test
-// elsewhere in the tree that waits a fixed two seconds for a signal.
-var queueFixture = sync.OnceValues(func() (string, error) {
-	dir, err := os.MkdirTemp("", "pasture-cli-queue-fixture-*")
-	if err != nil {
-		return "", fmt.Errorf("create the queue fixture directory: %w", err)
-	}
-	queueFixtureDir = dir
-	dbPath := filepath.Join(dir, "pasture.db")
-	e, err := engine.New(context.Background(), engine.Config{
-		DBPath:             dbPath,
-		ApplicationVersion: "test-queue-cli",
-		ExecutorID:         "test-queue-cli",
-	})
-	if err != nil {
-		return "", fmt.Errorf("build the engine that registers the queues: %w", err)
-	}
-	// Shutdown closes the handle, so the file on disk is complete and can be
-	// copied.
-	e.Shutdown(10 * time.Second)
-	return dbPath, nil
-})
-
-// queueFixtureDir is the directory queueFixture built, kept so it can be deleted
-// when every test has finished. It is written inside queueFixture and read only
-// after the run.
-var queueFixtureDir string
-
-// removeQueueFixture deletes the shared fixture. TestMain calls it after the
-// tests finish; a t.Cleanup could not, because the fixture outlives the test
-// that happened to build it.
-func removeQueueFixture() {
-	if queueFixtureDir != "" {
-		_ = os.RemoveAll(queueFixtureDir)
-	}
-}
-
-// dbWithRegisteredQueues returns a private copy of the fixture, which this test
-// alone may change.
-func dbWithRegisteredQueues(t *testing.T) string {
-	t.Helper()
-	src, err := queueFixture()
-	if err != nil {
-		t.Fatalf("queue fixture: %v", err)
-	}
-	dst := filepath.Join(t.TempDir(), "pasture.db")
-	for _, suffix := range []string{"", "-wal", "-shm"} {
-		data, readErr := os.ReadFile(src + suffix)
-		if readErr != nil {
-			if os.IsNotExist(readErr) {
-				continue // a cleanly closed database has no write-ahead files
-			}
-			t.Fatalf("read the queue fixture %q: %v", src+suffix, readErr)
-		}
-		if writeErr := os.WriteFile(dst+suffix, data, 0o600); writeErr != nil {
-			t.Fatalf("write the queue fixture copy %q: %v", dst+suffix, writeErr)
-		}
-	}
-	return dst
-}
-
 // TestCLI_QueueConcurrency_ShowAndChange walks the operator's whole path: read
 // the limit, change it, and read it back in a separate process.
 func TestCLI_QueueConcurrency_ShowAndChange(t *testing.T) {
 	t.Parallel()
-	db := dbWithRegisteredQueues(t)
+	db := enginetest.RegisteredQueuesDBPath(t)
 
 	out := runCLI(t, "--db", db, "queue", "concurrency", "get", "slice")
 	if out.exitCode != 0 {
@@ -145,7 +73,7 @@ func TestCLI_QueueConcurrency_ShowAndChange(t *testing.T) {
 // message for each way an operator can get the command wrong.
 func TestCLI_QueueConcurrency_RejectsBadArguments(t *testing.T) {
 	t.Parallel()
-	db := dbWithRegisteredQueues(t)
+	db := enginetest.RegisteredQueuesDBPath(t)
 
 	tests := []struct {
 		name     string
@@ -241,7 +169,7 @@ func jsonObjectIn(t *testing.T, stdout string) string {
 // refusal.
 func TestCLI_QueueConcurrency_ControlQueueIsReadOnly(t *testing.T) {
 	t.Parallel()
-	db := dbWithRegisteredQueues(t)
+	db := enginetest.RegisteredQueuesDBPath(t)
 
 	get := runCLI(t, "--db", db, "queue", "concurrency", "get", "control")
 	if get.exitCode != 0 {

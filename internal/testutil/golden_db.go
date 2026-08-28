@@ -29,7 +29,7 @@ func GoldenUnifiedDBPath(t *testing.T) string {
 	t.Helper()
 	src := goldenUnifiedDBSource(t)
 	dst := filepath.Join(t.TempDir(), "pasture.db")
-	if err := copyFile(dst, src); err != nil {
+	if err := CopyFile(dst, src); err != nil {
 		t.Fatalf("copy golden pasture.db: %v", err)
 	}
 	return dst
@@ -52,9 +52,12 @@ func OpenGoldenTaskTracker(t *testing.T) (protocol.TaskTracker, string) {
 	return tracker, dbPath
 }
 
-// copyFile copies src to dst using ordinary filesystem bytes. The destination
-// parent directory must already exist.
-func copyFile(dst, src string) error {
+// CopyFile copies src to dst using ordinary filesystem bytes. The destination
+// parent directory must already exist and dst must not exist.
+//
+// It is exported so that other fixture builders copy a prepared database the
+// same way this one does, instead of each writing its own copy loop.
+func CopyFile(dst, src string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("open source %q: %w", src, err)
@@ -107,15 +110,32 @@ func goldenUnifiedDBSource(t *testing.T) string {
 	return goldenUnifiedDB.path
 }
 
-func checkpointAndAssertGolden(dbPath string) error {
+// CheckpointWAL folds a database's write-ahead log back into the main file and
+// truncates it, so the file alone is a complete database and can be copied.
+//
+// A fixture builder must call this before copying: without it the copy can be
+// missing everything the source wrote since its last checkpoint.
+func CheckpointWAL(dbPath string) error {
 	db, err := sql.Open("sqlite", dbconn.SharedDSN(dbPath))
 	if err != nil {
-		return fmt.Errorf("open golden db for checkpoint: %w", err)
+		return fmt.Errorf("open %q for checkpoint: %w", dbPath, err)
 	}
 	defer db.Close()
 	if _, err := db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
-		return fmt.Errorf("checkpoint golden db: %w", err)
+		return fmt.Errorf("checkpoint %q: %w", dbPath, err)
 	}
+	return nil
+}
+
+func checkpointAndAssertGolden(dbPath string) error {
+	if err := CheckpointWAL(dbPath); err != nil {
+		return err
+	}
+	db, err := sql.Open("sqlite", dbconn.SharedDSN(dbPath))
+	if err != nil {
+		return fmt.Errorf("open golden db to check it: %w", err)
+	}
+	defer db.Close()
 	version, err := audit.ReadSchemaVersion(db)
 	if err != nil {
 		return fmt.Errorf("read golden audit schema version: %w", err)

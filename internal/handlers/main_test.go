@@ -18,10 +18,6 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	code := m.Run()
-	// The work-queue tests share one built database that outlives the test
-	// which happened to build it, so it is deleted here rather than by a
-	// t.Cleanup. See queueFixture in queue_test.go.
-	removeQueueFixture()
 	cleanup()
 	if err := checkLeaks(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
