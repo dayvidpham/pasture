@@ -276,3 +276,125 @@ func TestCodexHostVersionLabelTracksContract(t *testing.T) {
 		t.Fatalf("host version label %q is not a clean version", label)
 	}
 }
+
+// TestCodexEnabledEventNamesFailsClosed drives every fail-closed branch of the
+// Codex transport event-set derivation through its injection seam.
+//
+// The four inputs a drifted catalog can present — an invalid decision, a
+// duplicated decision, a generated event with no decision, and a decision that
+// enables an event the runtime lifecycle catalog does not carry — must all stop
+// generation. If any of them returned a partial set instead, generation would
+// silently ship a transport that disagrees with the activation audit report,
+// which is the exact defect the transport parity check exists to prevent.
+//
+// Production callers pass the pinned sources; only this test injects mutated
+// ones, so the branches are reachable without a build tag or a test-only export.
+func TestCodexEnabledEventNamesFailsClosed(t *testing.T) {
+	t.Parallel()
+	manifest := registration.Codex0_146_0()
+	states, err := activation.Codex0_146_0()
+	if err != nil {
+		t.Fatalf("activation.Codex0_146_0: %v", err)
+	}
+	catalog := runtime.CodexLifecycleEvents()
+	enabledName := "SessionStart"
+
+	for name, tc := range map[string]struct {
+		mutateStates  func([]activation.Entry) []activation.Entry
+		mutateCatalog func([]runtime.CodexLifecycleEvent) []runtime.CodexLifecycleEvent
+		want          string
+		// alsoByKind marks the cases the index builder itself must reject, so
+		// the injection seam is proven at both helper boundaries.
+		alsoByKind bool
+	}{
+		"invalid-state": {
+			mutateStates: func(in []activation.Entry) []activation.Entry { in[0].State = 0; return in },
+			want:         "is invalid",
+			alsoByKind:   true,
+		},
+		"invalid-reason": {
+			mutateStates: func(in []activation.Entry) []activation.Entry { in[1].Reason = 0; return in },
+			want:         "is invalid",
+			alsoByKind:   true,
+		},
+		"duplicate": {
+			mutateStates: func(in []activation.Entry) []activation.Entry { return append(in, in[0]) },
+			want:         "duplicate activation entry",
+			alsoByKind:   true,
+		},
+		"missing": {
+			mutateStates: func(in []activation.Entry) []activation.Entry { return in[1:] },
+			want:         "has no activation entry",
+		},
+		"enabled-event-outside-runtime-catalog": {
+			mutateCatalog: func(in []runtime.CodexLifecycleEvent) []runtime.CodexLifecycleEvent {
+				out := make([]runtime.CodexLifecycleEvent, 0, len(in))
+				for _, event := range in {
+					if event.NativeName() == enabledName {
+						continue
+					}
+					out = append(out, event)
+				}
+				return out
+			},
+			want: "the pinned runtime lifecycle catalog does not carry",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			mutatedStates := append([]activation.Entry(nil), states...)
+			if tc.mutateStates != nil {
+				mutatedStates = tc.mutateStates(mutatedStates)
+			}
+			mutatedCatalog := append([]runtime.CodexLifecycleEvent(nil), catalog...)
+			if tc.mutateCatalog != nil {
+				mutatedCatalog = tc.mutateCatalog(mutatedCatalog)
+			}
+
+			names, err := codexEnabledEventNamesFrom(manifest, mutatedStates, mutatedCatalog)
+			if err == nil {
+				t.Fatalf("codexEnabledEventNamesFrom returned %v and no error; the drifted input must stop generation", names)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want an actionable message containing %q", err, tc.want)
+			}
+			if names != nil {
+				t.Fatalf("codexEnabledEventNamesFrom returned %v with an error; a failed derivation must yield no event set", names)
+			}
+
+			if !tc.alsoByKind {
+				return
+			}
+			byKind, err := codexActivationByKindFrom(mutatedStates)
+			if err == nil {
+				t.Fatalf("codexActivationByKindFrom accepted %d drifted decisions; it must reject them", len(byKind))
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("codexActivationByKindFrom error = %v, want an actionable message containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestCodexEnabledEventNamesInjectionMatchesProduction proves the injection
+// seam is the same code path production uses: called with the pinned sources it
+// returns exactly what the production helper returns. Without this, the
+// fail-closed matrix above could pass against a divergent test-only path.
+func TestCodexEnabledEventNamesInjectionMatchesProduction(t *testing.T) {
+	t.Parallel()
+	states, err := activation.Codex0_146_0()
+	if err != nil {
+		t.Fatalf("activation.Codex0_146_0: %v", err)
+	}
+	injected, err := codexEnabledEventNamesFrom(registration.Codex0_146_0(), states, runtime.CodexLifecycleEvents())
+	if err != nil {
+		t.Fatalf("codexEnabledEventNamesFrom with the pinned sources: %v", err)
+	}
+	production, err := codexEnabledEventNames()
+	if err != nil {
+		t.Fatalf("codexEnabledEventNames: %v", err)
+	}
+	if strings.Join(injected, ",") != strings.Join(production, ",") {
+		t.Fatalf("injected seam produced %v, production produced %v; the seam must be one code path, not two", injected, production)
+	}
+}

@@ -242,6 +242,14 @@ func codexActivationByKind() (map[model.ContractEventKind]activation.Entry, erro
 	if err != nil {
 		return nil, fmt.Errorf("build activation manifest: %w", err)
 	}
+	return codexActivationByKindFrom(states)
+}
+
+// codexActivationByKindFrom is the injectable body of codexActivationByKind. It
+// takes the activation decisions as an argument instead of reading the pinned
+// catalog, so a test can drive every fail-closed branch with a mutated decision
+// set. Production callers pass activation.Codex0_146_0().
+func codexActivationByKindFrom(states []activation.Entry) (map[model.ContractEventKind]activation.Entry, error) {
 	stateByKind := make(map[model.ContractEventKind]activation.Entry, len(states))
 	for _, state := range states {
 		if !state.IsValid() {
@@ -266,12 +274,26 @@ func codexActivationByKind() (map[model.ContractEventKind]activation.Entry, erro
 // carry is a contract drift, not a transport decision, so it fails generation
 // rather than silently disappearing from the wiring.
 func codexEnabledEventNames() ([]string, error) {
-	stateByKind, err := codexActivationByKind()
+	states, err := activation.Codex0_146_0()
+	if err != nil {
+		return nil, fmt.Errorf("codegen.codexEnabledEventNames: build activation manifest: %w", err)
+	}
+	return codexEnabledEventNamesFrom(registration.Codex0_146_0(), states, runtime.CodexLifecycleEvents())
+}
+
+// codexEnabledEventNamesFrom is the injectable body of codexEnabledEventNames.
+// It takes the generated registration manifest, the activation decisions, and
+// the runtime lifecycle catalog as arguments instead of reading the three pinned
+// sources, so a test can drive every fail-closed branch — invalid decision,
+// duplicate decision, missing decision, and an enabled event the catalog does
+// not carry. Production callers pass the pinned sources unchanged.
+func codexEnabledEventNamesFrom(manifest registration.Manifest, states []activation.Entry, catalog []runtime.CodexLifecycleEvent) ([]string, error) {
+	stateByKind, err := codexActivationByKindFrom(states)
 	if err != nil {
 		return nil, fmt.Errorf("codegen.codexEnabledEventNames: %w", err)
 	}
 	enabled := make(map[string]struct{}, len(stateByKind))
-	for _, event := range registration.Codex0_146_0().Events {
+	for _, event := range manifest.Events {
 		state, present := stateByKind[event.Kind]
 		if !present {
 			return nil, fmt.Errorf(
@@ -284,7 +306,7 @@ func codexEnabledEventNames() ([]string, error) {
 	}
 
 	names := make([]string, 0, len(enabled))
-	for _, event := range runtime.CodexLifecycleEvents() {
+	for _, event := range catalog {
 		name := event.NativeName()
 		if _, ok := enabled[name]; ok {
 			names = append(names, name)

@@ -2,10 +2,12 @@ package codegen_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -167,24 +169,263 @@ func codexEventRunnerNames(t *testing.T, dir string) map[string]struct{} {
 	return runners
 }
 
-// lifecycleEventFlag captures the native event name each generated OpenCode
-// handler passes to `pasture hook lifecycle`.
+// lifecycleEventFlag captures the native event name a generated OpenCode
+// handler passes to `pasture hook lifecycle`. It is applied ONLY to
+// comment-stripped source, so prose can never contribute an event name.
 var lifecycleEventFlag = regexp.MustCompile(`"--event",\s*"([^"]+)"`)
 
 // lifecycleCommand recognizes a command string that invokes the Pasture
 // lifecycle handler, in either the Claude or the Codex spelling.
 var lifecycleCommand = regexp.MustCompile(`hook lifecycle`)
 
+// openCodePluginExport is the exported plugin factory the OpenCode host loads.
+// Only the handlers inside its returned object are registered with the host.
+const openCodePluginExport = "export const PastureLifecycle"
+
+// openCodeCatchAllHandler is the single OpenCode handler that receives the whole
+// server-sent observation stream. It is not one native event: it dispatches on
+// the event type, so its registered event set comes from its dispatch guards.
+const openCodeCatchAllHandler = "event"
+
+// openCodeDispatchGuard captures the native event name each catch-all dispatch
+// guard selects, e.g. `if (callback.event?.type !== "session.created") return;`.
+var openCodeDispatchGuard = regexp.MustCompile(`callback\.event\?\.type\s*!==\s*"([^"]+)"`)
+
+// openCodeHandlerKey captures the leading property key of one object-literal
+// member: an optional `async`, then a quoted or bare key, then its parameter
+// list. A named-output handler's key IS the native event name; the catch-all
+// handler's key is openCodeCatchAllHandler.
+var openCodeHandlerKey = regexp.MustCompile(`^\s*(?:async\s+)?(?:"([^"]+)"|'([^']+)'|([A-Za-z_$][A-Za-z0-9_$]*))\s*\(`)
+
+// openCodeWiredLifecycleEvents returns the events the generated OpenCode plugin
+// actually REGISTERS with the host.
+//
+// The set is derived from the structure of the exported plugin object, not from
+// free text. Only a handler inside that object can ever be invoked by the host,
+// so a handler function that is emitted but not registered is dead code, and an
+// event named only in a comment is not wired at all. A free-text scan cannot
+// tell either case apart from real wiring, so it would pass a plugin that
+// silently observes nothing.
+//
+// The check has two parts. First it parses the registered set. Then it requires
+// the registered set to equal the set of events the file emits to
+// `pasture hook lifecycle`, so an emitted-but-unregistered handler and a
+// registered-but-silent handler both fail here with a precise message.
 func openCodeWiredLifecycleEvents(t *testing.T, path string) map[string]struct{} {
 	t.Helper()
-	source, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path)
 	require.NoErrorf(t, err,
 		"read generated OpenCode plugin %q: %v — run `make generate` to restore the committed transport artifact", path, err)
-	wired := make(map[string]struct{})
-	for _, match := range lifecycleEventFlag.FindAllStringSubmatch(string(source), -1) {
-		wired[match[1]] = struct{}{}
+	source := stripScriptComments(string(raw))
+
+	registered := openCodeRegisteredEvents(t, path, source)
+	emitted := make(map[string]struct{})
+	for _, match := range lifecycleEventFlag.FindAllStringSubmatch(source, -1) {
+		emitted[match[1]] = struct{}{}
 	}
-	return wired
+	requireEqualEventSets(t,
+		fmt.Sprintf("%s: handlers registered in %s", path, openCodePluginExport),
+		"registered", registered,
+		fmt.Sprintf("%s: events emitted to `pasture hook lifecycle`", path),
+		"emitted", emitted,
+		"An emitted handler that no registered handler reaches is dead code: the host never calls it, so the event never reaches the lifecycle handler. A registered handler that emits nothing observes nothing. Fix the OpenCode plugin emitter and run `make generate`.")
+	return registered
+}
+
+// openCodeRegisteredEvents parses the object literal the exported plugin factory
+// returns and reports one native event name per registered handler. The
+// catch-all handler contributes the event names of its dispatch guards; every
+// other handler key IS a native event name.
+func openCodeRegisteredEvents(t *testing.T, path, source string) map[string]struct{} {
+	t.Helper()
+	body := openCodePluginObjectBody(t, path, source)
+	registered := make(map[string]struct{})
+	add := func(event, origin string) {
+		_, duplicate := registered[event]
+		require.Falsef(t, duplicate,
+			"%s registers event %q twice (%s); two handlers for one event double every lifecycle invocation — emit exactly one handler per event and run `make generate`",
+			path, event, origin)
+		registered[event] = struct{}{}
+	}
+	for _, member := range splitTopLevelMembers(body) {
+		match := openCodeHandlerKey.FindStringSubmatch(member)
+		require.NotNilf(t, match,
+			"%s: cannot read a handler key from the member %q of the %s object; the parity check derives the wired set from that object's structure, so an unrecognized member shape must fail rather than be skipped — update this parser together with the OpenCode plugin emitter",
+			path, strings.TrimSpace(member), openCodePluginExport)
+		key := match[1] + match[2] + match[3]
+		if key != openCodeCatchAllHandler {
+			add(key, "as a named-output handler")
+			continue
+		}
+		guards := openCodeDispatchGuard.FindAllStringSubmatch(member, -1)
+		require.NotEmptyf(t, guards,
+			"%s: the %q handler of %s dispatches on no event type; a catch-all handler with no guard either observes nothing or forwards every native event — fix the OpenCode plugin emitter and run `make generate`",
+			path, openCodeCatchAllHandler, openCodePluginExport)
+		for _, guard := range guards {
+			add(guard[1], "in the catch-all dispatch")
+		}
+	}
+	require.NotEmptyf(t, registered,
+		"%s registers no lifecycle handler in %s; the plugin would load and observe nothing — run `make generate`",
+		path, openCodePluginExport)
+	return registered
+}
+
+// openCodePluginObjectBody returns the text between the braces of the object
+// literal the exported plugin factory returns. It fails with an actionable
+// message when the export or the literal is absent, so a renamed or restructured
+// export can never be read as "no handler is registered".
+func openCodePluginObjectBody(t *testing.T, path, source string) string {
+	t.Helper()
+	start := strings.Index(source, openCodePluginExport)
+	require.GreaterOrEqualf(t, start, 0,
+		"%s does not export %s; the OpenCode host loads that export, so a plugin without it registers no handler at all — run `make generate`",
+		path, openCodePluginExport)
+	arrow := strings.Index(source[start:], "=> ({")
+	require.GreaterOrEqualf(t, arrow, 0,
+		"%s: %s is not an arrow factory returning an object literal; this parity check reads the registered handler set from that literal — update this parser together with the OpenCode plugin emitter",
+		path, openCodePluginExport)
+	open := start + arrow + len("=> (")
+	end := matchBrace(source, open)
+	require.GreaterOrEqualf(t, end, 0,
+		"%s: the object literal returned by %s has no matching closing brace; the committed artifact is malformed — run `make generate`",
+		path, openCodePluginExport)
+	return source[open+1 : end]
+}
+
+// matchBrace returns the index of the brace that closes the one at open, or -1
+// when the source ends first. It skips braces inside string literals.
+func matchBrace(source string, open int) int {
+	depth := 0
+	var quote byte
+	for i := open; i < len(source); i++ {
+		c := source[i]
+		if quote != 0 {
+			switch c {
+			case '\\':
+				i++
+			case quote:
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '"', '\'', '`':
+			quote = c
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// splitTopLevelMembers splits an object-literal body into its members, cutting
+// only on commas that sit at the literal's own nesting depth and outside every
+// string. Blank members (a trailing comma) are dropped.
+func splitTopLevelMembers(body string) []string {
+	var members []string
+	depth, start := 0, 0
+	var quote byte
+	for i := 0; i < len(body); i++ {
+		c := body[i]
+		if quote != 0 {
+			switch c {
+			case '\\':
+				i++
+			case quote:
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '"', '\'', '`':
+			quote = c
+		case '{', '(', '[':
+			depth++
+		case '}', ')', ']':
+			depth--
+		case ',':
+			if depth == 0 {
+				members = append(members, body[start:i])
+				start = i + 1
+			}
+		}
+	}
+	members = append(members, body[start:])
+	kept := members[:0]
+	for _, member := range members {
+		if strings.TrimSpace(member) != "" {
+			kept = append(kept, member)
+		}
+	}
+	return kept
+}
+
+// stripScriptComments blanks every line and block comment while preserving the
+// source length, so prose can never satisfy a structural or textual match. The
+// generated OpenCode plugin contains no regular-expression literal, so a `/` is
+// always either division or a comment opener.
+func stripScriptComments(source string) string {
+	out := []byte(source)
+	var quote byte
+	for i := 0; i < len(out); i++ {
+		c := out[i]
+		if quote != 0 {
+			switch c {
+			case '\\':
+				i++
+			case quote:
+				quote = 0
+			}
+			continue
+		}
+		switch {
+		case c == '"' || c == '\'' || c == '`':
+			quote = c
+		case c == '/' && i+1 < len(out) && out[i+1] == '/':
+			for ; i < len(out) && out[i] != '\n'; i++ {
+				out[i] = ' '
+			}
+		case c == '/' && i+1 < len(out) && out[i+1] == '*':
+			for ; i < len(out); i++ {
+				if out[i] == '*' && i+1 < len(out) && out[i+1] == '/' {
+					out[i], out[i+1] = ' ', ' '
+					i++
+					break
+				}
+				if out[i] != '\n' {
+					out[i] = ' '
+				}
+			}
+		}
+	}
+	return string(out)
+}
+
+// requireEqualEventSets compares two derived event sets and names both sides in
+// the failure, so the reader learns which artifact to change.
+func requireEqualEventSets(t *testing.T, leftLabel, leftRole string, left map[string]struct{}, rightLabel, rightRole string, right map[string]struct{}, fix string) {
+	t.Helper()
+	var onlyLeft, onlyRight []string
+	for event := range left {
+		if _, ok := right[event]; !ok {
+			onlyLeft = append(onlyLeft, event)
+		}
+	}
+	for event := range right {
+		if _, ok := left[event]; !ok {
+			onlyRight = append(onlyRight, event)
+		}
+	}
+	sort.Strings(onlyLeft)
+	sort.Strings(onlyRight)
+	require.Emptyf(t, onlyLeft, "%s: %v is %s but not %s (%s). %s", leftLabel, onlyLeft, leftRole, rightRole, rightLabel, fix)
+	require.Emptyf(t, onlyRight, "%s: %v is %s but not %s (%s). %s", rightLabel, onlyRight, rightRole, leftRole, leftLabel, fix)
 }
 
 func readGeneratedJSON(t *testing.T, path string, target any) {
