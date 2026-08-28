@@ -349,6 +349,21 @@ func blockEngineAgentRegistration(t *testing.T, dbPath string) (dropTrigger func
 	}
 }
 
+// Coverage of the construction-abort path, and why it stops where it does.
+//
+// engine.New calls one shared abort closure from five failure sites. The two
+// tests below reach two of them: the engine-agent resolution failure, and the
+// refusal to bind a second engine to one tracker. The other three — the
+// allocator construction and the two queue registrations — run the SAME closure
+// body, and they are deliberately left uncovered: Config cannot reach them.
+// A slice concurrency of zero or less is clamped to the default before the
+// queue is registered, a negative polling interval is dropped rather than
+// passed down, and both queue names are constants, so the durable runtime's own
+// configuration rejections are unreachable from the public constructor. A
+// test-only seam in production code would be the only way in, and that trade is
+// refused: it would add a second code path to buy coverage of a body these two
+// tests already execute.
+
 // TestEngineNew_AbortsCleanlyWhenConstructionFailsAfterTheDurableContext pins
 // the abort path in engine.New: a failure raised after the durable context and
 // the allocator binding exist must stop that context and hand the tracker's
