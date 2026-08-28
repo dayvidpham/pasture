@@ -272,3 +272,76 @@ func TestOnlyOpenClientConstructsADurableClient(t *testing.T) {
 			"loses the start-up classification and the release contract", sites[0].fn, sites[0].file)
 	}
 }
+
+// TestUnhandledClientSiteIsRefused pins what happens to a caller this code
+// cannot describe: the zero value, and any site added later without being
+// handled.
+//
+// The danger is specific. The two reports tell the operator OPPOSITE things —
+// one says the value you were shown stands, the other says re-read the state
+// because work may have been lost — and the two Where lines send them to
+// different files. A silent default would hand a new caller one of those at
+// random, and it would look exactly as authoritative as a correct one. So an
+// unhandled site produces neither, and says plainly that pasture cannot name the
+// command.
+func TestUnhandledClientSiteIsRefused(t *testing.T) {
+	t.Parallel()
+
+	// The zero value, and a value beyond the ones defined: a third site added
+	// later starts out looking like this.
+	unhandled := []clientSite{clientSiteUnset, clientSiteQueueCommand + 1}
+
+	for _, site := range unhandled {
+		t.Run(site.String(), func(t *testing.T) {
+			t.Parallel()
+			cause := errors.New("the runtime stopped answering")
+
+			// The stop report.
+			err := incompleteShutdownError(site, cause)
+			if err == nil {
+				t.Fatal("incompleteShutdownError returned nil for a site it cannot describe")
+			}
+			for _, borrowed := range []string{
+				"The epoch controller stopped",
+				"The work-queue command finished",
+				"pasture status --epoch-id",
+				"pasture queue concurrency get",
+			} {
+				if strings.Contains(err.Error(), borrowed) {
+					t.Errorf("the report borrows another caller's wording (%q):\n%v", borrowed, err)
+				}
+			}
+			if !errors.Is(err, cause) {
+				t.Error("the underlying failure was dropped; it is the thing that actually stopped the command")
+			}
+			var se *pasterrors.StructuredError
+			if !errors.As(err, &se) {
+				t.Fatalf("error is %T, want a structured error", err)
+			}
+			if !strings.Contains(se.What, "couldn't describe which command") {
+				t.Errorf("the report does not say pasture cannot name the command:\n%s", se.What)
+			}
+
+			// The start-up location.
+			where, siteErr := site.startupWhere()
+			if siteErr == nil {
+				t.Fatalf("startupWhere returned %q for a site it cannot describe; want an error", where)
+			}
+			if where != "" {
+				t.Errorf("startupWhere returned a location as well as an error: %q", where)
+			}
+		})
+	}
+
+	// The two known sites still work, so the guard above cannot be satisfied by
+	// refusing everything.
+	for _, site := range []clientSite{clientSiteEpochController, clientSiteQueueCommand} {
+		where, err := site.startupWhere()
+		if err != nil {
+			t.Errorf("startupWhere(%s): %v", site, err)
+		}
+		if where == "" {
+			t.Errorf("startupWhere(%s) returned no location", site)
+		}
+	}
+}
