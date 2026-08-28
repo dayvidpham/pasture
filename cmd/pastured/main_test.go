@@ -5,6 +5,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"log/slog"
 	"os"
@@ -528,20 +531,11 @@ func TestPasturedExitCodeComesFromTheErrorCategory(t *testing.T) {
 	}
 }
 
-// TestPasturedStopsCleanlyOnSignal pins the orderly path of the daemon's stop
-// contract from the outside: a real daemon that receives SIGTERM stops its
-// engine, reports a clean stop, and exits 0.
-//
-// COVERAGE LIMIT, recorded rather than papered over: this test and
-// TestDaemonRuntimeClose_ReportsAWorkerThatOutlivedTheStopBudget together
-// cover both outcomes of the daemon's stop, but not the one line that joins
-// them — run's decision to return the stop error instead of logging a clean
-// stop. Forcing a real daemon to hold work past its budget needs a way to
-// stall work from outside the process, and adding one would be a second code
-// path bought only for the test. The two outcomes either side of that line
-// are pinned, and the line itself is one `if err != nil { return err }`.
-func TestPasturedStopsCleanlyOnSignal(t *testing.T) {
-	tmp := t.TempDir()
+// startPastured starts the daemon and returns the running command together
+// with a channel of its log lines. The caller reads the channel to wait on a
+// condition; the channel closes when the daemon's output ends.
+func startPastured(t *testing.T, tmp string) (*exec.Cmd, <-chan string) {
+	t.Helper()
 	binary := filepath.Join(tmp, "pastured")
 	buildPasturedBinary(t, binary, "")
 
@@ -558,41 +552,61 @@ func TestPasturedStopsCleanlyOnSignal(t *testing.T) {
 	if err := command.Start(); err != nil {
 		t.Fatalf("start pastured: %v", err)
 	}
+	t.Cleanup(func() { _ = command.Process.Kill() })
 
-	// Read until the daemon says it is up, then stop it. Reading is the
-	// condition to wait on; the ceiling below is the test's own guard.
-	logLines := make(chan string, 64)
+	lines := make(chan string, 64)
 	go func() {
-		defer close(logLines)
+		defer close(lines)
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
-			logLines <- scanner.Text()
+			lines <- scanner.Text()
 		}
 	}()
+	return command, lines
+}
 
-	launched := false
-	deadline := time.After(60 * time.Second)
-	for !launched {
+// awaitLogLine reads log lines until one carries want, and fails the test if
+// the daemon's output ends or the ceiling passes first.
+func awaitLogLine(t *testing.T, lines <-chan string, want string, ceiling time.Duration) {
+	t.Helper()
+	deadline := time.After(ceiling)
+	for {
 		select {
-		case line, ok := <-logLines:
+		case line, ok := <-lines:
 			if !ok {
-				t.Fatal("pastured exited before it reported that it was waiting for a stop signal")
+				t.Fatalf("pastured stopped producing output before it reported %q", want)
 			}
-			if strings.Contains(line, "waiting for shutdown") {
-				launched = true
+			if strings.Contains(line, want) {
+				return
 			}
 		case <-deadline:
-			_ = command.Process.Kill()
-			t.Fatal("pastured did not report a launched engine within its ceiling")
+			t.Fatalf("pastured did not report %q within %v", want, ceiling)
 		}
 	}
+}
+
+// TestPasturedStopsCleanlyOnSignal pins the orderly path of the daemon's stop
+// contract from the outside: a real daemon that receives SIGTERM stops its
+// engine, reports a clean stop, and exits 0.
+//
+// COVERAGE LIMIT, recorded rather than papered over: this test and
+// TestDaemonRuntimeClose_ReportsAWorkerThatOutlivedTheStopBudget together
+// cover both outcomes of the daemon's stop, but not the one line that joins
+// them — run's decision to return the stop error instead of logging a clean
+// stop. Forcing a real daemon to hold work past its budget needs a way to
+// stall work from outside the process, and adding one would be a second code
+// path bought only for the test. The two outcomes either side of that line
+// are pinned, and the line itself is one `if err != nil { return err }`.
+func TestPasturedStopsCleanlyOnSignal(t *testing.T) {
+	command, lines := startPastured(t, t.TempDir())
+	awaitLogLine(t, lines, "waiting for shutdown", 60*time.Second)
 
 	if err := command.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("signal pastured: %v", err)
 	}
 
 	sawCleanStop := false
-	for line := range logLines {
+	for line := range lines {
 		if strings.Contains(line, "pastured stopped cleanly") {
 			sawCleanStop = true
 		}
@@ -603,4 +617,234 @@ func TestPasturedStopsCleanlyOnSignal(t *testing.T) {
 	if !sawCleanStop {
 		t.Error("pastured exited 0 but never reported a clean stop")
 	}
+}
+
+// TestPasturedAnswersASignalWhileItIsStillStarting pins the startup window: a
+// stop signal that arrives after the daemon reports that it is starting, but
+// before its engine is ready, must end the process in an orderly way with a
+// message that names the cause.
+//
+// The daemon listens for the signals before it logs that line, so the line is
+// the earliest point a test can pin. Startup is short here (an empty database
+// on a local disk), so the signal may also land just after the engine is
+// ready; both endings are orderly and both are accepted. The failure this
+// test exists to catch is the third one: a signal that is only buffered while
+// startup blocks, which leaves the operator with a process that answers to
+// nothing but a kill.
+func TestPasturedAnswersASignalWhileItIsStillStarting(t *testing.T) {
+	command, lines := startPastured(t, t.TempDir())
+	awaitLogLine(t, lines, "pastured starting", 60*time.Second)
+
+	if err := command.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("signal pastured: %v", err)
+	}
+
+	var output strings.Builder
+	for line := range lines {
+		output.WriteString(line)
+		output.WriteString("\n")
+	}
+
+	exited := make(chan error, 1)
+	go func() { exited <- command.Wait() }()
+	var waitErr error
+	select {
+	case waitErr = <-exited:
+	case <-time.After(60 * time.Second):
+		t.Fatal("pastured did not exit after a stop signal sent while it was starting")
+	}
+
+	var exitErr *exec.ExitError
+	switch {
+	case waitErr == nil:
+		// The signal arrived once the engine was ready: the orderly stop path.
+		if !strings.Contains(output.String(), "pastured stopped cleanly") {
+			t.Errorf("pastured exited 0 without reporting a clean stop:\n%s", output.String())
+		}
+	case errors.As(waitErr, &exitErr):
+		// The signal arrived during startup: an orderly refusal to continue.
+		if exitErr.ExitCode() < 0 {
+			t.Fatalf("pastured was killed by a signal instead of ending itself:\n%s", output.String())
+		}
+		if got, want := exitErr.ExitCode(), 3; got != want {
+			t.Errorf("exit code = %d, want %d:\n%s", got, want, output.String())
+		}
+		if !strings.Contains(output.String(), "after a stop signal arrived") {
+			t.Errorf("startup was stopped by a signal but the message does not say so:\n%s", output.String())
+		}
+	default:
+		t.Fatalf("pastured exited with %v:\n%s", waitErr, output.String())
+	}
+}
+
+// TestLaunchFailureKeepsItsOwnExitCode pins which fault decides the exit code
+// when a launch fails AND the half-started engine then does not stop cleanly.
+// The launch failure is what the operator must act on, so an uncategorised
+// launch failure must not borrow the stop failure's code.
+func TestLaunchFailureKeepsItsOwnExitCode(t *testing.T) {
+	t.Parallel()
+
+	plainLaunch := errors.New("the engine could not replay unfinished work")
+	stopFailure := &pasterrors.StructuredError{
+		Category: pasterrors.CategoryWorkflow,
+		What:     "The durable engine didn't finish stopping in the time it was given.",
+	}
+
+	joined := launchFailure(plainLaunch, stopFailure)
+	if got, want := pasterrors.ExitCode(joined), 1; got != want {
+		t.Errorf("exit code = %d, want %d (the launch failure's own code, not the stop failure's)", got, want)
+	}
+	if !errors.Is(joined, plainLaunch) {
+		t.Error("the launch failure is no longer reachable in the error chain")
+	}
+	for _, want := range []string{plainLaunch.Error(), stopFailure.What} {
+		if !strings.Contains(joined.Error(), want) {
+			t.Errorf("joined message does not carry %q:\n%s", want, joined.Error())
+		}
+	}
+
+	if got := launchFailure(nil, stopFailure); got != error(stopFailure) {
+		t.Errorf("with no launch failure the stop failure must be returned as it is, got %v", got)
+	}
+	if got := launchFailure(plainLaunch, nil); got != plainLaunch {
+		t.Errorf("with a clean stop the launch failure must be returned as it is, got %v", got)
+	}
+}
+
+// TestStartupTakesTheSignalContext pins that the daemon's startup work runs
+// under a context a stop signal cancels, and that a cancelled startup is
+// reported as such.
+//
+// It calls the production startup path with an already-cancelled context,
+// which is exactly what signal.NotifyContext hands it when a signal arrives:
+// the startup work must end instead of running to completion, and the report
+// must name the signal while keeping the underlying failure.
+func TestStartupTakesTheSignalContext(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := config.PasturedConfig{
+		AuditTrail:  types.BackendSqlite,
+		AuditDBPath: filepath.Join(t.TempDir(), "pasture.db"),
+	}
+
+	startupCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	rt, err := buildDaemonRuntime(startupCtx, cfg, 2, logger)
+	if err == nil {
+		rt.Close(logger)
+		t.Fatal("startup finished under a cancelled context; the startup work does not take the context")
+	}
+
+	reported := startupError(startupCtx, err)
+	if got, want := pasterrors.ExitCode(reported), 3; got != want {
+		t.Errorf("exit code = %d, want %d", got, want)
+	}
+	if !errors.Is(reported, err) {
+		t.Error("the underlying startup failure is no longer reachable in the error chain")
+	}
+	for _, want := range []string{"after a stop signal arrived", err.Error()} {
+		if !strings.Contains(reported.Error(), want) {
+			t.Errorf("report does not carry %q:\n%s", want, reported.Error())
+		}
+	}
+
+	// With no signal behind it, the same failure is reported as it is.
+	if got := startupError(context.Background(), err); got != err {
+		t.Errorf("a startup failure with no signal behind it was rewritten: %v", got)
+	}
+}
+
+// TestRunPassesTheSignalContextToStartup guards the wiring the two tests above
+// cannot observe: that run builds its startup context from
+// signal.NotifyContext and hands THAT context to the startup work. A startup
+// context of context.Background() compiles, passes every other test, and
+// silently restores the failure this slice fixed — a stop signal that is only
+// buffered while startup blocks, leaving a process that answers to nothing but
+// a kill. The daemon cannot be made to block on demand from outside, so the
+// wiring is read from the source instead.
+func TestRunPassesTheSignalContextToStartup(t *testing.T) {
+	t.Parallel()
+
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "main.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse main.go: %v", err)
+	}
+
+	var runBody *ast.BlockStmt
+	for _, decl := range parsed.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "run" && fn.Recv == nil {
+			runBody = fn.Body
+		}
+	}
+	if runBody == nil {
+		t.Fatal("main.go no longer declares run; this guard needs updating with it")
+	}
+
+	signalContextName := ""
+	startupContextArg := ""
+	ast.Inspect(runBody, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		switch callee := selectorName(call.Fun); callee {
+		case "signal.NotifyContext":
+			if assign, ok := parentAssign(runBody, call); ok && len(assign.Lhs) > 0 {
+				if ident, ok := assign.Lhs[0].(*ast.Ident); ok {
+					signalContextName = ident.Name
+				}
+			}
+		case "buildDaemonRuntime":
+			if len(call.Args) > 0 {
+				if ident, ok := call.Args[0].(*ast.Ident); ok {
+					startupContextArg = ident.Name
+				} else {
+					startupContextArg = "<not a plain name>"
+				}
+			}
+		}
+		return true
+	})
+
+	if signalContextName == "" {
+		t.Fatal("run no longer builds a context from signal.NotifyContext, so a stop signal cannot reach the startup work")
+	}
+	if startupContextArg != signalContextName {
+		t.Fatalf("run passes %q to buildDaemonRuntime, want the signal context %q; a signal would only be buffered while startup blocks",
+			startupContextArg, signalContextName)
+	}
+}
+
+// selectorName renders a call target as "package.Function" or "Function".
+func selectorName(fun ast.Expr) string {
+	switch target := fun.(type) {
+	case *ast.Ident:
+		return target.Name
+	case *ast.SelectorExpr:
+		if pkg, ok := target.X.(*ast.Ident); ok {
+			return pkg.Name + "." + target.Sel.Name
+		}
+		return target.Sel.Name
+	}
+	return ""
+}
+
+// parentAssign finds the assignment whose right-hand side is call.
+func parentAssign(body *ast.BlockStmt, call *ast.CallExpr) (*ast.AssignStmt, bool) {
+	var found *ast.AssignStmt
+	ast.Inspect(body, func(node ast.Node) bool {
+		assign, ok := node.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		for _, rhs := range assign.Rhs {
+			if rhs == ast.Expr(call) {
+				found = assign
+				return false
+			}
+		}
+		return true
+	})
+	return found, found != nil
 }

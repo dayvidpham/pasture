@@ -17,7 +17,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -147,6 +146,28 @@ func run(cmd *cobra.Command, configFile string) error {
 		return scErr
 	}
 
+	// Listen for the stop signals BEFORE anything is started, and carry them
+	// as a context so a signal REACHES the startup work instead of only
+	// waiting behind it. Startup can block for a long time: another daemon
+	// may hold the database, a migration or a recovery sweep may be long. A
+	// plain channel would leave the operator with a process that answers only
+	// to a kill. The context is cancelled on the first signal, which unblocks
+	// the database and runtime work that takes it, and the same signal also
+	// waits in the channel below so a daemon that finishes starting stops at
+	// once.
+	//
+	// The context is NOT released once startup ends: the durable runtime
+	// derives its own context from it, and releasing it here would cancel the
+	// running engine. It lives as long as the daemon does.
+	startupCtx, releaseStartupSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer releaseStartupSignals()
+
+	stopCh := make(chan os.Signal, 1)
+	signal.Notify(stopCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(stopCh)
+
+	// The starting line is logged only after both listeners are in place, so
+	// its appearance means a stop signal is now answered rather than fatal.
 	logger.Info("pastured starting",
 		"version", version,
 		"dbPath", cfg.AuditDBPath,
@@ -154,25 +175,13 @@ func run(cmd *cobra.Command, configFile string) error {
 		"sliceConcurrency", sliceConcurrency,
 	)
 
-	// Listen for the stop signals BEFORE anything is started. A signal that
-	// arrives while the engine is still opening its database or replaying
-	// unfinished work would otherwise hit the default action and kill the
-	// process outright, losing the orderly stop below. Registered early, it
-	// waits in the channel and is consumed as soon as the daemon is up.
-	stopCh := make(chan os.Signal, 1)
-	signal.Notify(stopCh, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(stopCh)
-
-	runtime, err := buildDaemonRuntime(context.Background(), cfg, sliceConcurrency, logger)
+	runtime, err := buildDaemonRuntime(startupCtx, cfg, sliceConcurrency, logger)
 	if err != nil {
-		return err
+		return startupError(startupCtx, err)
 	}
 
-	if err := runtime.Engine.Launch(); err != nil {
-		// The launch failure is what the operator must act on; an incomplete
-		// stop of the half-started engine is joined onto it rather than
-		// hiding either one.
-		return errors.Join(err, runtime.Close(logger))
+	if launchErr := runtime.Engine.Launch(); launchErr != nil {
+		return startupError(startupCtx, launchFailure(launchErr, runtime.Close(logger)))
 	}
 
 	logger.Info("DBOS engine launched, waiting for shutdown",
@@ -196,6 +205,55 @@ func run(cmd *cobra.Command, configFile string) error {
 	}
 	logger.Info("pastured stopped cleanly")
 	return nil
+}
+
+// launchFailure reports a failed launch, together with an engine that then
+// did not stop cleanly.
+//
+// The launch failure is the primary fault, so it alone stays in the error
+// chain and decides the exit code: a launch failure with no category must
+// keep its own code rather than borrow the stop error's. The stop failure is
+// kept as text, and the engine has already logged it in full with the parts
+// that were still running.
+func launchFailure(launchErr, stopErr error) error {
+	if launchErr == nil {
+		return stopErr
+	}
+	if stopErr == nil {
+		return launchErr
+	}
+	return fmt.Errorf("%w (the engine also did not stop cleanly afterwards: %v)", launchErr, stopErr)
+}
+
+// startupError reports a startup that ended while a stop signal was being
+// answered. Any startup failure with no signal behind it is returned
+// unchanged.
+//
+// The wording claims only what is known. The durable runtime reports a
+// cancelled database operation as plain text and does not keep the
+// cancellation in the error chain, so this cannot prove that the signal is
+// what ended the startup; a database that was already unusable can fail at
+// the same moment. Both facts are therefore reported: the signal arrived, and
+// the startup work ended with the failure attached as the cause. Without this
+// the operator would read only the consequence and would have no way to tell
+// a deliberate stop from a broken database.
+func startupError(startupCtx context.Context, cause error) error {
+	if cause == nil || startupCtx.Err() == nil {
+		return cause
+	}
+	return &pasterrors.StructuredError{
+		Category: pasterrors.CategoryWorkflow,
+		What:     "The daemon stopped while it was still starting, after a stop signal arrived.",
+		Why:      "A stop signal reached the daemon before the engine was ready, and the startup work then ended with the failure shown below.",
+		Where:    "Starting the daemon (cmd/pastured/main.go in run).",
+		Impact:   "The daemon is not running. Nothing was left half-written: the work that ended had not begun to accept epochs.",
+		Fix: "1. If you meant to stop it, nothing else is needed. Start it again when you want it running:\n" +
+			"     pastured\n" +
+			"2. If you did not mean to stop it, read the cause above: it names the startup step that ended.\n" +
+			"3. If startup is slow enough that you keep stopping it, check that no other daemon holds the database:\n" +
+			"     pgrep -fa pastured",
+		Cause: cause,
+	}
 }
 
 type daemonRuntime struct {

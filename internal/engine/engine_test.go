@@ -608,8 +608,17 @@ func TestEngineShutdown_NamesTheWorkStillRunningWhenTheBudgetExpires(t *testing.
 	if elapsed < budget {
 		t.Errorf("Shutdown returned after %v, sooner than the %v budget it was given", elapsed, budget)
 	}
-	if ceiling := engine.WorstCaseShutdownDuration(budget); elapsed >= ceiling {
-		t.Errorf("Shutdown took %v, at or beyond the worst case %v: the budget is now being spent on more than the in-flight-work wait", elapsed, ceiling)
+	// One budget is spent here, not one per part. The ceiling is ONE budget
+	// plus slack for a loaded machine, so a runtime that spends the budget a
+	// second time on any part that follows the in-flight-work wait fails this
+	// test. Measured cost of this shape is about 1.0 budget; a second full
+	// spend costs about 2.0, which is well beyond the ceiling. A ceiling of
+	// two budgets would let that second spend through unnoticed. The worst
+	// case (SequentialShutdownWaits budgets) is what an operator must plan
+	// for, not what this shape costs.
+	const loadSlack = 750 * time.Millisecond
+	if ceiling := budget + loadSlack; elapsed >= ceiling {
+		t.Errorf("Shutdown took %v, at or beyond %v: the budget is being spent on more than the in-flight-work wait", elapsed, ceiling)
 	}
 }
 

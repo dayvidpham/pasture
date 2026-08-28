@@ -576,6 +576,10 @@ func (e *ShutdownIncompleteError) Unwrap() error { return e.Cause }
 // parsePendingShutdownComponents recovers the component names from the
 // runtime's message. It returns nil when the message does not carry the
 // expected marker; see shutdownPendingMarker.
+//
+// The names are separated on the comma alone, and each one is trimmed. The
+// runtime writes ", " today, but a build that writes "," would otherwise turn
+// the whole list into one invented component name.
 func parsePendingShutdownComponents(err error) []ShutdownComponent {
 	if err == nil {
 		return nil
@@ -590,7 +594,7 @@ func parsePendingShutdownComponents(err error) []ShutdownComponent {
 		return nil
 	}
 	var pending []ShutdownComponent
-	for _, name := range strings.Split(list, ", ") {
+	for _, name := range strings.Split(list, ",") {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
