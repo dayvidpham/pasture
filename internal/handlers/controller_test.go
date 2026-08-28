@@ -14,12 +14,14 @@ package handlers_test
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/engine"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/testutil"
@@ -1016,4 +1018,161 @@ const dbosSQLiteDriverImport = "github.com/dbos-inc/dbos-transact-golang/dbos/dr
 func TestControllerLinksDBOSSQLiteDriver(t *testing.T) {
 	t.Parallel()
 	testutil.RequireBlankImport(t, "controller.go", dbosSQLiteDriverImport)
+}
+
+// ─── Process identity (application_name) ─────────────────────────────────────
+
+// readWorkflowApplicationName reads the durable runtime's owner column for one
+// workflow row straight from the shared SQLite file. Reading the raw column —
+// rather than any runtime accessor — is the point: the column IS the process
+// identity that queue claiming and crash recovery filter on, and a nameless
+// client writes NULL there.
+func readWorkflowApplicationName(t *testing.T, dbPath, workflowId string) (string, bool) {
+	t.Helper()
+	db, err := dbconn.OpenSharedDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenSharedDB(%s): %v", dbPath, err)
+	}
+	defer db.Close()
+	var appName sql.NullString
+	err = db.QueryRow(`SELECT application_name FROM workflow_status WHERE workflow_uuid = ?`, workflowId).Scan(&appName)
+	if err != nil {
+		t.Fatalf("reading application_name for workflow %q: %v", workflowId, err)
+	}
+	return appName.String, appName.Valid
+}
+
+// TestController_EnqueueStampsPinnedApplicationName pins the process identity of
+// the controller's durable client. The controller runs alone here — no engine is
+// launched — so the row it enqueues can only have been stamped by the client.
+//
+// A client that leaves its application name unset is "nameless": the runtime
+// labels its connection "dbos-client" and writes NULL into application_name,
+// which makes the row unowned. Pinning the name that every pasture process pins
+// is what puts the controller and the daemon in ONE queue and ONE recovery
+// scope. The stored name and the runtime's log identity come from the same
+// single configuration field, so this assertion covers both.
+func TestController_EnqueueStampsPinnedApplicationName(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	ctrl, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := ctrl.Close(); err != nil {
+			t.Errorf("ctrl.Close: %v", err)
+		}
+	})
+
+	const epochId = "demo--01960000-0000-7000-8000-000000000010"
+	if err := ctrl.StartEpoch(context.Background(), epochId); err != nil {
+		t.Fatalf("StartEpoch: %v", err)
+	}
+
+	appName, ok := readWorkflowApplicationName(t, dbPath, epochId)
+	if !ok {
+		t.Fatalf("workflow %q has a NULL application_name: the controller's client is still nameless, "+
+			"so the row is unowned and shares no queue or recovery scope with the daemon", epochId)
+	}
+	if appName != engine.DefaultAppName {
+		t.Fatalf("workflow %q application_name = %q, want %q", epochId, appName, engine.DefaultAppName)
+	}
+}
+
+// TestController_SharesOneApplicationScopeWithTheDaemon proves the consequence
+// of the shared application name: a daemon pinned to the same name claims and
+// runs the row the controller enqueued, and the row stays owned by that one
+// name. Controller and daemon therefore sit in ONE queue and ONE recovery
+// scope. The daemon starts only after the first ownership assertion, so nothing
+// else can have written the column by then.
+//
+// This is a consequence check, not a second pin of the name: the runtime also
+// lets a daemon claim an unowned (NULL) row, so the end-to-end half passes
+// either way. The assertion that fails on a nameless client is the
+// application_name check in
+// TestController_EnqueueStampsPinnedApplicationName.
+func TestController_SharesOneApplicationScopeWithTheDaemon(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	ctrl, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := ctrl.Close(); err != nil {
+			t.Errorf("ctrl.Close: %v", err)
+		}
+	})
+
+	const epochId = "demo--01960000-0000-7000-8000-000000000011"
+	if err := ctrl.StartEpoch(context.Background(), epochId); err != nil {
+		t.Fatalf("StartEpoch: %v", err)
+	}
+	if appName, ok := readWorkflowApplicationName(t, dbPath, epochId); !ok || appName != engine.DefaultAppName {
+		t.Fatalf("before the daemon starts, workflow %q application_name = (%q, present=%v), want (%q, true)",
+			epochId, appName, ok, engine.DefaultAppName)
+	}
+
+	host, err := engine.New(context.Background(), engine.Config{
+		DBPath:             dbPath,
+		AppName:            engine.DefaultAppName,
+		ApplicationVersion: engine.DefaultApplicationVersion,
+	})
+	if err != nil {
+		t.Fatalf("host engine.New: %v", err)
+	}
+	if err := host.Launch(); err != nil {
+		t.Fatalf("host engine.Launch: %v", err)
+	}
+	t.Cleanup(func() { host.Shutdown(5 * time.Second) })
+
+	if err := ctrl.AdvancePhase(context.Background(), epochId, protocol.PhaseAdvanceSignal{
+		ToPhase: protocol.PhaseElicit, TriggeredBy: "worker", ConditionMet: "elicited",
+	}); err != nil {
+		t.Fatalf("AdvancePhase: %v", err)
+	}
+
+	// The host can only observe the signal once it has dequeued and started the
+	// enqueued control workflow, so reaching this phase proves the claim.
+	rig := controllerRig{engine: host, ctrl: ctrl, dbPath: dbPath}
+	rig.waitProjection(t, epochId, protocol.PhaseElicit)
+
+	if appName, ok := readWorkflowApplicationName(t, dbPath, epochId); !ok || appName != engine.DefaultAppName {
+		t.Fatalf("after the daemon ran it, workflow %q application_name = (%q, present=%v), want (%q, true)",
+			epochId, appName, ok, engine.DefaultAppName)
+	}
+}
+
+// ─── Close ───────────────────────────────────────────────────────────────────
+
+// TestController_Close_CleanShutdownIsSilentAndRepeatable pins the clean half of
+// the close contract: a controller with no work left running closes without an
+// error, and a second Close is a no-op rather than a double-close failure.
+// Callers rely on both — Close is reached from deferred cleanup as well as from
+// the normal path.
+func TestController_Close_CleanShutdownIsSilentAndRepeatable(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	ctrl, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController: %v", err)
+	}
+
+	const epochId = "demo--01960000-0000-7000-8000-000000000012"
+	if err := ctrl.StartEpoch(context.Background(), epochId); err != nil {
+		t.Fatalf("StartEpoch: %v", err)
+	}
+	if err := ctrl.Close(); err != nil {
+		t.Fatalf("first Close on a quiescent controller = %v, want nil", err)
+	}
+	if err := ctrl.Close(); err != nil {
+		t.Fatalf("second Close = %v, want nil (Close must be repeatable)", err)
+	}
+
+	// The close must not have undone the enqueued work.
+	if appName, ok := readWorkflowApplicationName(t, dbPath, epochId); !ok || appName != engine.DefaultAppName {
+		t.Fatalf("after Close, workflow %q application_name = (%q, present=%v), want (%q, true)",
+			epochId, appName, ok, engine.DefaultAppName)
+	}
 }
