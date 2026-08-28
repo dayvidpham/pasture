@@ -94,7 +94,7 @@ func OpenEpochController(dbPath string) (EpochController, error) {
 	if err != nil {
 		return nil, err
 	}
-	client, db, _, err := openClient(dbPath)
+	client, db, _, err := openClient(dbPath, releaseSiteEpochController)
 	if err != nil {
 		_ = trail.Close()
 		return nil, err
@@ -113,10 +113,11 @@ func OpenEpochController(dbPath string) (EpochController, error) {
 // AppName.
 //
 // The release function shuts the client down within controllerShutdownTimeout
-// and reports an incomplete shutdown rather than dropping it. The client owns
-// the handle it was given and closes it, so releasing the client is the whole
-// release; closing the handle separately would close the same database twice.
-func openClient(dbPath string) (dbos.Client, *sql.DB, func() error, error) {
+// and reports an incomplete shutdown rather than dropping it, described for the
+// caller named by site. The client owns the handle it was given and closes it,
+// so releasing the client is the whole release; closing the handle separately
+// would close the same database twice.
+func openClient(dbPath string, site releaseSite) (dbos.Client, *sql.DB, func() error, error) {
 	if dbPath == "" {
 		dbPath = tasks.DefaultDBPath()
 	}
@@ -173,19 +174,22 @@ func openClient(dbPath string) (dbos.Client, *sql.DB, func() error, error) {
 		// closed by the caller that opened it.
 		return nil, nil, nil, engine.DescribeDurableStartupFailure(controllerConstructionSite, err)
 	}
-	return client, db, func() error { return releaseClient(client) }, nil
+	return client, db, func() error { return releaseClient(client, site) }, nil
 }
 
 // releaseClient shuts a durable client down within controllerShutdownTimeout and
 // reports an incomplete shutdown rather than dropping it. It is the one
 // definition of what releasing a client means, used by the epoch controller's
 // Close and by the release function openClient hands to the work-queue commands.
-func releaseClient(client dbos.Client) error {
+//
+// site decides how the failure is described, because the caller is the only one
+// who knows what the operator was doing.
+func releaseClient(client dbos.Client, site releaseSite) error {
 	if client == nil {
 		return nil
 	}
 	if err := dbos.Shutdown(client, controllerShutdownTimeout); err != nil {
-		return incompleteShutdownError(err)
+		return incompleteShutdownError(site, err)
 	}
 	return nil
 }
@@ -346,30 +350,67 @@ func (c *dbosController) CompleteSlice(ctx context.Context, sliceId string, sig 
 // genuinely stuck rather than merely busy.
 const controllerShutdownTimeout = 5 * time.Second
 
+// releaseSite names the operation whose durable client failed to stop.
+//
+// The report an operator reads has to describe what THEY were doing. The same
+// runtime failure means different things to the two callers: after an epoch
+// lifecycle command, work that was in flight may not have been recorded and the
+// epoch state must be re-read; after a work-queue command, the answer was
+// already read back from the database before the stop began, so it stands. A
+// single wording would be wrong for one of them, and a fix that asks for an
+// epoch id is useless to an operator who never gave one.
+type releaseSite int
+
+const (
+	// releaseSiteEpochController is the epoch controller's own Close.
+	releaseSiteEpochController releaseSite = iota
+	// releaseSiteQueueCommand is a work-queue command releasing the client it
+	// opened to read or change a queue setting.
+	releaseSiteQueueCommand
+)
+
 // incompleteShutdownError is the contract for a durable client that did not
 // finish shutting down inside controllerShutdownTimeout.
 //
-// Close reports it instead of dropping it because an incomplete shutdown is not
+// It is reported instead of dropped because an incomplete shutdown is not
 // cosmetic: the runtime closes the shared database handle unconditionally when
 // its budget expires, so any component still running loses the handle mid-flight
-// and the records it would have written are never made durable. A caller that
-// ignores this error can therefore read a partial epoch state moments later and
-// see no sign of why.
+// and the records it would have written are never made durable.
 //
-// Callers must treat it as "the process stopped, but not cleanly": stop using
-// the controller, surface the message, and re-read state through the daemon
-// rather than trusting what was in flight. Retrying Close cannot help — the
-// runtime reopens its own shutdown guard after a timeout, so an unguarded retry
-// would spend the whole budget again on a client whose database handle is
-// already gone. Close refuses that retry itself rather than only warning
-// against it.
-func incompleteShutdownError(cause error) error {
+// Retrying cannot help — the runtime reopens its own shutdown guard after a
+// timeout, so an unguarded retry would spend the whole budget again on a client
+// whose database handle is already gone. The controller's Close refuses that
+// retry itself rather than only warning against it.
+func incompleteShutdownError(site releaseSite, cause error) error {
+	why := fmt.Sprintf("At least one part of the durable runtime was still running when its %s shutdown budget expired, "+
+		"so the shutdown was cut short.", controllerShutdownTimeout)
+
+	if site == releaseSiteQueueCommand {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryWorkflow,
+			What:     "The work-queue command finished, but the durable client it used did not stop cleanly.",
+			Why:      why,
+			Where:    "Releasing the client after a work-queue command (internal/handlers/queue.go in handlers.withQueueClient).",
+			Impact: "The setting shown above was read back from the database before the stop began, so it is what the " +
+				"database holds. Nothing this command did was left half-finished. What the failure does say is that " +
+				"the database is under strain or held by something that will not let go, which will affect the next " +
+				"command too.",
+			Fix: "1. Confirm the setting by asking again:\n" +
+				"     pasture queue concurrency get <queue>\n" +
+				"2. Find what else is holding the database:\n" +
+				"     pgrep -fa 'pasture|pastured'\n" +
+				"3. Confirm the database file is present and not held exclusively:\n" +
+				"     ls -l ~/.local/share/pasture/pasture.db\n" +
+				"4. If this repeats, stop the other writers and run the command again.",
+			Cause: cause,
+		}
+	}
+
 	return &pasterrors.StructuredError{
 		Category: pasterrors.CategoryWorkflow,
 		What:     "The epoch controller stopped, but its durable client did not shut down cleanly.",
-		Why: fmt.Sprintf("At least one part of the durable runtime was still running when its %s shutdown budget expired, "+
-			"so the shutdown was cut short.", controllerShutdownTimeout),
-		Where: "Closing the epoch controller (internal/handlers/controller.go in dbosController.Close).",
+		Why:      why,
+		Where:    "Closing the epoch controller (internal/handlers/controller.go in dbosController.Close).",
 		Impact: "The database handle is closed and the controller is unusable, but the work that was still running was " +
 			"interrupted before it could record its result. Epoch state read straight after this may be stale or " +
 			"incomplete. Nothing is lost permanently: the daemon recovers interrupted work on its next start.",
@@ -411,7 +452,7 @@ func (c *dbosController) shutdown() error {
 		// dbos/internal/sysdb/dbq.go, on the timeout path too. Engine.Shutdown
 		// in internal/engine/engine.go states the same ownership for the
 		// engine's handle; the two must stay in agreement.
-		if err := releaseClient(c.client); err != nil {
+		if err := releaseClient(c.client, releaseSiteEpochController); err != nil {
 			errs = append(errs, err)
 		}
 	}

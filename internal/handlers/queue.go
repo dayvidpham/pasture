@@ -306,7 +306,7 @@ func printQueueConcurrency(storedName string, limit *int, format types.OutputFor
 // client, and the database handle it owns, held by a process that is on its way
 // out.
 func withQueueClient(dbPath string, fn func(dbos.Client) (int, error)) (code int, err error) {
-	client, _, release, openErr := openClient(dbPath)
+	client, _, release, openErr := openClient(dbPath, releaseSiteQueueCommand)
 	if openErr != nil {
 		return pasterrors.ExitCode(openErr), openErr
 	}

@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -146,7 +147,7 @@ func TestReleaseClient_ReportsAnIncompleteShutdown(t *testing.T) {
 	<-entered
 
 	start := time.Now()
-	err = releaseClient(dbosCtx)
+	err = releaseClient(dbosCtx, releaseSiteQueueCommand)
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("releaseClient returned nil while a workflow was still running; an incomplete shutdown must be reported")
@@ -162,12 +163,40 @@ func TestReleaseClient_ReportsAnIncompleteShutdown(t *testing.T) {
 	if got := pasterrors.ExitCode(err); got != 3 {
 		t.Errorf("ExitCode = %d, want 3", got)
 	}
-	if se.Fix == "" {
-		t.Error("the error carries no fix; a caller cannot act on it")
+	// The report must describe what the OPERATOR did, not what some other
+	// caller of the same runtime does. A queue command has read its answer back
+	// from the database before the stop begins, and its operator has no epoch id
+	// to give, so the epoch controller's wording would be wrong twice over.
+	for _, want := range []string{"work-queue command", "read back from the database before the stop began"} {
+		if !strings.Contains(se.What+" "+se.Impact, want) {
+			t.Errorf("the report does not contain %q, so it does not describe what this caller did:\nwhat:   %s\nimpact: %s", want, se.What, se.Impact)
+		}
+	}
+	if !strings.Contains(se.Where, "queue.go") {
+		t.Errorf("the location does not name the queue command's own release:\n%s", se.Where)
+	}
+	if !strings.Contains(se.Fix, "pasture queue concurrency get") {
+		t.Errorf("the fix does not point at a queue command:\n%s", se.Fix)
+	}
+	for _, unwanted := range []string{"epoch-id", "epoch controller", "the controller"} {
+		if strings.Contains(se.What+se.Where+se.Impact+se.Fix, unwanted) {
+			t.Errorf("the report mentions %q, which this operator never used:\n%s", unwanted, se.Fix)
+		}
+	}
+
+	// The epoch controller keeps its own wording, which is the point of the
+	// distinction.
+	controllerErr := incompleteShutdownError(releaseSiteEpochController, errors.New("stop timed out"))
+	var controllerSE *pasterrors.StructuredError
+	if !errors.As(controllerErr, &controllerSE) {
+		t.Fatalf("controller error is %T, want a structured error", controllerErr)
+	}
+	if !strings.Contains(controllerSE.Fix, "pasture status --epoch-id") {
+		t.Errorf("the epoch controller's fix no longer points at the epoch it is about:\n%s", controllerSE.Fix)
 	}
 
 	// A nil client is not a failure: there is nothing to release.
-	if err := releaseClient(nil); err != nil {
+	if err := releaseClient(nil, releaseSiteQueueCommand); err != nil {
 		t.Errorf("releaseClient(nil) = %v, want nil", err)
 	}
 }
