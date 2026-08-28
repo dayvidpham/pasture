@@ -210,14 +210,21 @@ const unnamedClientSiteWhere = "Opening a durable client (internal/handlers/cont
 // An unnamed caller does NOT switch the gate off. Refusing such a database does
 // not depend on knowing which command asked for it, and running it anyway is
 // the safe half of the failure: the gate runs with the function as its location
-// and the naming defect is joined to the refusal, so neither is lost. This
-// mirrors how a start-up failure treats an unnamed caller below.
+// and the naming defect is joined to the refusal, so neither is lost. The
+// refusal leads: see the note at the join.
 func gateDurableSchema(db *sql.DB, dbPath string, site clientSite) error {
 	where, siteErr := site.startupWhere()
 	if siteErr != nil {
 		if err := engine.RequireSupportedDurableSchema(
 			context.Background(), unnamedClientSiteWhere, db, dbPath); err != nil {
-			return errors.Join(siteErr, err)
+			// The REFUSAL leads and the naming defect follows. Both are true,
+			// but only one of them is the operator's to act on, and the joined
+			// error is read from the top: leading with pasture's own naming
+			// defect would bury the file they must replace. The order also
+			// decides the exit code, because it is read from the first
+			// structured error in the chain, so this way a refused database
+			// still exits as a storage failure rather than as a validation one.
+			return errors.Join(err, siteErr)
 		}
 		return nil
 	}

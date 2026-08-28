@@ -22,11 +22,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dayvidpham/provenance"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/engine"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/testutil"
 )
 
 // TestQueueCommandResult covers which of two possible failures a queue command
@@ -343,5 +345,60 @@ func TestUnhandledClientSiteIsRefused(t *testing.T) {
 		if where == "" {
 			t.Errorf("startupWhere(%s) returned no location", site)
 		}
+	}
+}
+
+// An unnamed caller must NOT switch the schema gate off.
+//
+// The two are independent failures: pasture not knowing which command asked is
+// a defect in pasture, while a database an older build wrote is a fact about
+// the file, and neither excuses the other. The dangerous reading is that a
+// caller pasture cannot describe is simply let through — the client would then
+// migrate that database in place, which is exactly what the gate exists to
+// prevent, and the operator would never see a word about it.
+//
+// This is white-box because the seam is unexported and no shipped command can
+// reach it: every site in the code names itself. It stays reachable for the
+// site that a later change forgets to name.
+func TestGateDurableSchema_UnnamedCallerStillRefusesAnOlderBuildsDatabase(t *testing.T) {
+	t.Parallel()
+	path, before := testutil.WriteSupersededDurableDatabase(t)
+	db, err := dbconn.OpenSharedDB(path)
+	if err != nil {
+		t.Fatalf("open %s with the production opener: %v", path, err)
+	}
+
+	gateErr := gateDurableSchema(db, path, clientSiteUnset)
+
+	if closeErr := db.Close(); closeErr != nil {
+		t.Fatalf("close the handle on %s: %v", path, closeErr)
+	}
+	if gateErr == nil {
+		t.Fatal("the gate accepted a database an older build wrote because the caller could not be named")
+	}
+
+	// BOTH failures survive the join.
+	if !errors.Is(gateErr, provenance.ErrSupersededDBOSSystemSchema) {
+		t.Errorf("the refusal is missing from the joined error: %v", gateErr)
+	}
+	if !strings.Contains(gateErr.Error(), "couldn't describe which command") {
+		t.Errorf("the naming defect is missing from the joined error: %v", gateErr)
+	}
+
+	// The REFUSAL leads, so the first thing an operator reads is the thing they
+	// can act on, and the exit code is the storage one rather than the
+	// validation code the naming defect carries.
+	lead, _, _ := strings.Cut(gateErr.Error(), "\n")
+	if !strings.Contains(lead, "can't open the database") {
+		t.Errorf("the joined error does not lead with the refusal; first line was %q", lead)
+	}
+	if code := pasterrors.ExitCode(gateErr); code != 5 {
+		t.Errorf("exit code = %d, want 5 (storage): the naming defect must not change what the operator's script sees", code)
+	}
+
+	// A refusal reads only, whichever way the caller was named.
+	if after := testutil.DatabaseDigest(t, path); after != before {
+		t.Errorf("the refused database changed on disk: digest %s, want %s. Tables now present: %v",
+			after, before, testutil.AllTables(t, path))
 	}
 }
