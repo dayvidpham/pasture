@@ -1,23 +1,33 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
+	"time"
+
+	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/config"
 	"github.com/dayvidpham/pasture/internal/engine"
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/internal/types"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // buildPasturedBinary builds the production pastured command (this package)
@@ -410,5 +420,187 @@ func TestRootCmdHelp(t *testing.T) {
 		if strings.Contains(help, retired) {
 			t.Errorf("help output still mentions retired flag %q:\n%s", retired, help)
 		}
+	}
+}
+
+// TestDaemonRuntimeClose_ReportsAWorkerThatOutlivedTheStopBudget pins the
+// daemon's stop contract: when work is still running as the daemon stops, the
+// runtime's stop error reaches the daemon's own Close, names the part that was
+// still busy, and maps to the workflow exit code the package comment
+// documents. Without this the daemon would exit 0 on a stop that cut work off.
+func TestDaemonRuntimeClose_ReportsAWorkerThatOutlivedTheStopBudget(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	entered := make(chan struct{})
+	released := make(chan struct{})
+	var holdOnce sync.Once
+	defer close(released)
+
+	engCfg := newEngineConfig(testutil.GoldenUnifiedDBPath(t), 2, audit.NewInMemoryAuditTrail(), nil, hooks.NewManager(), logger)
+	engCfg.OnTransition = func(context.Context, string, *protocol.TransitionRecord, string) error {
+		holdOnce.Do(func() {
+			close(entered)
+			select {
+			case <-released:
+			case <-time.After(30 * time.Second):
+				// A ceiling only: the held step unwinds even if the test
+				// fails before it releases.
+			}
+		})
+		return nil
+	}
+
+	eng, err := engine.New(context.Background(), engCfg)
+	if err != nil {
+		t.Fatalf("engine.New: %v", err)
+	}
+	rt := &daemonRuntime{Engine: eng}
+	if err := eng.Launch(); err != nil {
+		rt.Close(logger)
+		t.Fatalf("engine.Launch: %v", err)
+	}
+
+	if _, err := dbos.RunWorkflow(eng.DBOS(), eng.EpochWorkflow,
+		engine.EpochInput{
+			EpochId: "epoch-stop-budget",
+			Advances: []engine.AdvanceStep{
+				{ToPhase: protocol.PhaseElicit, TriggeredBy: "epoch", ConditionMet: "classified"},
+			},
+		},
+		dbos.WithWorkflowID("epoch-stop-budget")); err != nil {
+		t.Fatalf("RunWorkflow: %v", err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(30 * time.Second):
+		t.Fatal("no work reached its durable step, so nothing was in flight when the daemon stopped")
+	}
+
+	closeErr := rt.Close(logger)
+	if closeErr == nil {
+		t.Fatal("daemonRuntime.Close with work still running = nil, want the incomplete-stop error")
+	}
+
+	var incomplete *engine.ShutdownIncompleteError
+	if !errors.As(closeErr, &incomplete) {
+		t.Fatalf("Close error %v does not carry the parts that were still running", closeErr)
+	}
+	if !slices.Contains(incomplete.Pending, engine.ShutdownComponentWorkflows) {
+		t.Errorf("Pending = %v, want it to name %q", incomplete.Pending, engine.ShutdownComponentWorkflows)
+	}
+	if got, want := pasterrors.ExitCode(closeErr), 3; got != want {
+		t.Errorf("exit code for an incomplete stop = %d, want %d", got, want)
+	}
+}
+
+// TestPasturedExitCodeComesFromTheErrorCategory proves the real binary chooses
+// its exit code from the error's category rather than reporting 1 for
+// everything: an unusable database path is a connection failure and must exit
+// 2. The incomplete-stop code (3) rides the same single mapping, which
+// TestDaemonRuntimeClose_ReportsAWorkerThatOutlivedTheStopBudget pins.
+func TestPasturedExitCodeComesFromTheErrorCategory(t *testing.T) {
+	tmp := t.TempDir()
+	binary := filepath.Join(tmp, "pastured")
+	buildPasturedBinary(t, binary, "")
+
+	configPath := filepath.Join(tmp, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("audit_trail: sqlite\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	// A plain file where the daemon needs a directory: creating the database's
+	// parent folder then fails, which is the connection failure under test.
+	blocker := filepath.Join(tmp, "not-a-directory")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatalf("write the blocking file: %v", err)
+	}
+	unusable := filepath.Join(blocker, "child", "pasture.db")
+
+	command := exec.Command(binary, "--config", configPath, "--db", unusable)
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	err := command.Run()
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("pastured with an unusable database path exited with %v, want a non-zero exit", err)
+	}
+	if got, want := exitErr.ExitCode(), 2; got != want {
+		t.Errorf("exit code = %d, want %d (connection):\n%s", got, want, stderr.String())
+	}
+}
+
+// TestPasturedStopsCleanlyOnSignal pins the orderly path of the daemon's stop
+// contract from the outside: a real daemon that receives SIGTERM stops its
+// engine, reports a clean stop, and exits 0.
+//
+// COVERAGE LIMIT, recorded rather than papered over: this test and
+// TestDaemonRuntimeClose_ReportsAWorkerThatOutlivedTheStopBudget together
+// cover both outcomes of the daemon's stop, but not the one line that joins
+// them — run's decision to return the stop error instead of logging a clean
+// stop. Forcing a real daemon to hold work past its budget needs a way to
+// stall work from outside the process, and adding one would be a second code
+// path bought only for the test. The two outcomes either side of that line
+// are pinned, and the line itself is one `if err != nil { return err }`.
+func TestPasturedStopsCleanlyOnSignal(t *testing.T) {
+	tmp := t.TempDir()
+	binary := filepath.Join(tmp, "pastured")
+	buildPasturedBinary(t, binary, "")
+
+	configPath := filepath.Join(tmp, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("audit_trail: sqlite\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	command := exec.Command(binary, "--config", configPath, "--db", filepath.Join(tmp, "pasture.db"))
+	stderr, err := command.StderrPipe()
+	if err != nil {
+		t.Fatalf("stderr pipe: %v", err)
+	}
+	if err := command.Start(); err != nil {
+		t.Fatalf("start pastured: %v", err)
+	}
+
+	// Read until the daemon says it is up, then stop it. Reading is the
+	// condition to wait on; the ceiling below is the test's own guard.
+	logLines := make(chan string, 64)
+	go func() {
+		defer close(logLines)
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			logLines <- scanner.Text()
+		}
+	}()
+
+	launched := false
+	deadline := time.After(60 * time.Second)
+	for !launched {
+		select {
+		case line, ok := <-logLines:
+			if !ok {
+				t.Fatal("pastured exited before it reported that it was waiting for a stop signal")
+			}
+			if strings.Contains(line, "waiting for shutdown") {
+				launched = true
+			}
+		case <-deadline:
+			_ = command.Process.Kill()
+			t.Fatal("pastured did not report a launched engine within its ceiling")
+		}
+	}
+
+	if err := command.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("signal pastured: %v", err)
+	}
+
+	sawCleanStop := false
+	for line := range logLines {
+		if strings.Contains(line, "pastured stopped cleanly") {
+			sawCleanStop = true
+		}
+	}
+	if err := command.Wait(); err != nil {
+		t.Fatalf("pastured exited with %v, want a clean exit 0 after SIGTERM", err)
+	}
+	if !sawCleanStop {
+		t.Error("pastured exited 0 but never reported a clean stop")
 	}
 }

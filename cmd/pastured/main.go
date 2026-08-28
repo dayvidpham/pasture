@@ -3,10 +3,21 @@
 // pastured opens the unified pasture.db file, wires the engine's audit,
 // provenance, and hook dependencies, launches DBOS recovery, then blocks until
 // SIGINT or SIGTERM. It does not require an external workflow server.
+//
+// Exit codes (from internal/errors):
+//
+//	0  success: the daemon started and later stopped in an orderly way
+//	1  validation error (bad flags or arguments), or an error with no category
+//	2  connection error (the database file cannot be opened)
+//	3  workflow error, including a stop that did not finish inside its budget
+//	   while work was still running
+//	4  config error
+//	5  storage error (migration or schema failure)
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -50,12 +61,25 @@ import (
 //	  -> this variable             -> `pastured v<version>`
 var version = "devel"
 
-const engineShutdownTimeout = 10 * time.Second
+// perComponentShutdownTimeout is the budget the daemon gives EACH part of the
+// durable runtime when it stops. It is not a total: the runtime stops its
+// parts one after another and gives every one of them the full value, so the
+// worst case is engine.WorstCaseShutdownDuration of this value (70s at 10s).
+// A stop held up by work that is still running costs one budget in practice,
+// because only the in-flight-work wait expires.
+//
+// Keep the worst case inside the stop deadline of whatever supervises the
+// daemon (a service manager kills the process when its own deadline passes,
+// which loses the orderly close this budget exists to buy).
+const perComponentShutdownTimeout = 10 * time.Second
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
-		// Cobra prints the error itself; we only need to set the exit code.
-		os.Exit(1)
+		// Cobra prints the error itself; we only choose the exit code. The
+		// code comes from the error's own category, so an operator's script
+		// can tell a bad configuration from an unreachable database and from
+		// a stop that did not finish. See the table in the package comment.
+		os.Exit(pasterrors.ExitCode(err))
 	}
 }
 
@@ -130,14 +154,25 @@ func run(cmd *cobra.Command, configFile string) error {
 		"sliceConcurrency", sliceConcurrency,
 	)
 
+	// Listen for the stop signals BEFORE anything is started. A signal that
+	// arrives while the engine is still opening its database or replaying
+	// unfinished work would otherwise hit the default action and kill the
+	// process outright, losing the orderly stop below. Registered early, it
+	// waits in the channel and is consumed as soon as the daemon is up.
+	stopCh := make(chan os.Signal, 1)
+	signal.Notify(stopCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(stopCh)
+
 	runtime, err := buildDaemonRuntime(context.Background(), cfg, sliceConcurrency, logger)
 	if err != nil {
 		return err
 	}
 
 	if err := runtime.Engine.Launch(); err != nil {
-		runtime.Close(logger)
-		return err
+		// The launch failure is what the operator must act on; an incomplete
+		// stop of the half-started engine is joined onto it rather than
+		// hiding either one.
+		return errors.Join(err, runtime.Close(logger))
 	}
 
 	logger.Info("DBOS engine launched, waiting for shutdown",
@@ -146,13 +181,19 @@ func run(cmd *cobra.Command, configFile string) error {
 		"hookRecorders", runtime.RegisteredRecorders,
 	)
 
-	stopCh := make(chan os.Signal, 1)
-	signal.Notify(stopCh, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(stopCh)
-
 	sig := <-stopCh
-	logger.Info("shutdown signal received, stopping DBOS engine", "signal", sig)
-	runtime.Close(logger)
+	logger.Info("stop signal received, stopping the durable engine",
+		"signal", sig,
+		"perComponentBudget", perComponentShutdownTimeout,
+		"worstCase", engine.WorstCaseShutdownDuration(perComponentShutdownTimeout),
+	)
+	// An incomplete stop is reported to the operator, not swallowed: the
+	// engine already logged which parts were still running, and returning the
+	// error here gives the process a non-zero exit code (3, workflow) so a
+	// service manager or script can see that the stop was not orderly.
+	if err := runtime.Close(logger); err != nil {
+		return err
+	}
 	logger.Info("pastured stopped cleanly")
 	return nil
 }
@@ -166,12 +207,22 @@ type daemonRuntime struct {
 	closeDeps           []func() error
 }
 
-func (r *daemonRuntime) Close(logger *slog.Logger) {
+// Close stops the engine and releases the daemon's remaining handles. It
+// returns the engine's stop error (nil when the engine stopped inside its
+// budget) so the caller can report an incomplete stop and pick an exit code;
+// see engine.ShutdownIncompleteError for the parts it names.
+//
+// The dependency handles are closed whatever the engine reported, and a
+// failure to close one of them is logged rather than returned: by that point
+// the durable runtime has already closed the shared database file it owns, so
+// a second close failing tells the operator nothing they can act on.
+func (r *daemonRuntime) Close(logger *slog.Logger) error {
 	if r == nil {
-		return
+		return nil
 	}
+	var shutdownErr error
 	if r.Engine != nil {
-		r.Engine.Shutdown(engineShutdownTimeout)
+		shutdownErr = r.Engine.Shutdown(perComponentShutdownTimeout)
 	}
 	for _, closeFn := range r.closeDeps {
 		if closeFn == nil {
@@ -181,6 +232,7 @@ func (r *daemonRuntime) Close(logger *slog.Logger) {
 			logger.Error("Couldn't cleanly close a daemon resource; the database may need an integrity check before next startup", "err", err)
 		}
 	}
+	return shutdownErr
 }
 
 func buildDaemonRuntime(ctx context.Context, cfg config.PasturedConfig, sliceConcurrency int, logger *slog.Logger) (*daemonRuntime, error) {

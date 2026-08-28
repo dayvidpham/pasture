@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/dayvidpham/provenance"
@@ -49,14 +50,11 @@ const DefaultAppName = "pasture"
 // been launched at that point, so there is no in-flight work to drain and the
 // wait exists only to let the runtime's own goroutines exit.
 //
-// It is a PER-COMPONENT budget, not a total. The runtime spends it again on
-// every component it stops, one after another: the schedule reconciler, the
-// queue runner, the workflow scheduler, in-flight workflows, and the system
-// database's two notification loops and its connection pool. That is seven
-// sequential waits in a pasture process (it configures neither the admin
-// server nor the conductor, which would add two more), so the worst case is
-// about seven times this value. An un-launched context has none of those
-// components running, so every wait returns at once in practice.
+// It is a PER-COMPONENT budget, not a total, exactly like the argument to
+// Engine.Shutdown: the runtime spends it again on every part it stops. See
+// SequentialShutdownWaits and WorstCaseShutdownDuration for the bound. An
+// un-launched context has none of those parts running, so every wait returns
+// at once in practice.
 const constructionAbortShutdownTimeout = 2 * time.Second
 
 // Config configures an Engine.
@@ -333,7 +331,7 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 				"engine.New: the durable context created for this engine did not stop while construction was being abandoned; "+
 					"its goroutines may keep running until the process exits; "+
 					"restart the process if epochs behave inconsistently: %w",
-				shutdownErr,
+				newShutdownIncomplete(constructionAbortShutdownTimeout, shutdownErr),
 			))
 		}
 		return nil, cause
@@ -449,30 +447,222 @@ func (e *Engine) Launch() error {
 	return nil
 }
 
-// Shutdown stops the DBOS context (waiting up to timeout for in-flight steps),
-// then releases the handles the runtime does not own. Safe to call once.
+// ShutdownComponent names one part of the durable runtime that a shutdown
+// waits for. The runtime stops its parts one after another and reports the
+// ones that were still running when their wait expired, so an operator can
+// tell "work was still in flight" apart from "a background loop would not
+// stop".
+//
+// The values are the names the runtime itself reports. They are typed so a
+// caller matches on a constant instead of re-spelling a string. A runtime
+// build that adds a part reports a name this list does not carry: such a name
+// is passed through unchanged rather than dropped, and Meaning reports it as
+// unrecognised.
+type ShutdownComponent string
+
+// The parts a shutdown waits for, in the order the runtime waits for them.
+// Two of them can never appear for this engine, and say so in Meaning: the
+// engine configures neither an administrative listener nor a remote-control
+// connection.
+const (
+	ShutdownComponentScheduleReconciler   ShutdownComponent = "schedule reconciler"
+	ShutdownComponentQueueRunner          ShutdownComponent = "queue runner"
+	ShutdownComponentWorkflowScheduler    ShutdownComponent = "workflow scheduler"
+	ShutdownComponentAdminServer          ShutdownComponent = "admin server"
+	ShutdownComponentWorkflows            ShutdownComponent = "workflows"
+	ShutdownComponentConductor            ShutdownComponent = "conductor"
+	ShutdownComponentNotificationListener ShutdownComponent = "system database notification listener"
+	ShutdownComponentNotifier             ShutdownComponent = "system database notifier"
+	ShutdownComponentConnectionPool       ShutdownComponent = "system database connection pool"
+)
+
+// shutdownComponentMeaning translates each part into one plain sentence an
+// operator can act on. It is deliberately a lookup rather than a method body
+// full of cases so the set stays visibly aligned with the constants above.
+var shutdownComponentMeaning = map[ShutdownComponent]string{
+	ShutdownComponentScheduleReconciler:   "the loop that keeps scheduled work in step with the database",
+	ShutdownComponentQueueRunner:          "the loop that hands queued slice and review work to workers",
+	ShutdownComponentWorkflowScheduler:    "the timer that starts work on a schedule",
+	ShutdownComponentAdminServer:          "an administrative listener, which this engine never starts",
+	ShutdownComponentWorkflows:            "epoch, slice or review work that was still running",
+	ShutdownComponentConductor:            "a remote-control connection, which this engine never starts",
+	ShutdownComponentNotificationListener: "the loop that delivers signals between running work",
+	ShutdownComponentNotifier:             "the loop that flushes the last signals before the database closes",
+	ShutdownComponentConnectionPool:       "the shared database connections",
+}
+
+// Meaning returns one plain sentence describing the part, for an operator who
+// does not read this code. An unrecognised name (a newer runtime build) is
+// reported as such instead of being hidden.
+func (c ShutdownComponent) Meaning() string {
+	if m, ok := shutdownComponentMeaning[c]; ok {
+		return m
+	}
+	return "a part of the durable runtime this build does not recognise"
+}
+
+// SequentialShutdownWaits is how many waits one shutdown of THIS engine can
+// spend the per-component budget on, one after another: the schedule
+// reconciler, the queue runner, the work scheduler, in-flight work, and the
+// database's notification listener, notifier and connection pool. The engine
+// configures neither an administrative listener nor a remote-control
+// connection, which would add two more.
+//
+// Measured on the pinned runtime: a shutdown held up by work that is still
+// running spends the budget ONCE (only the in-flight-work wait expires; every
+// other wait returns at once). Seven is therefore the worst case an operator
+// must budget for, not the normal cost.
+const SequentialShutdownWaits = 7
+
+// WorstCaseShutdownDuration reports how long a Shutdown can take in the worst
+// case for a given per-component budget. Callers that must fit inside an
+// external stop deadline (a service manager, a container runtime) size the
+// budget with this rather than with the raw value.
+func WorstCaseShutdownDuration(perComponentTimeout time.Duration) time.Duration {
+	return perComponentTimeout * SequentialShutdownWaits
+}
+
+// shutdownPendingMarker is the only place the runtime names the parts that
+// were still running: it returns a plain message of the shape
+//
+//	shutdown timed out after 1s waiting for: workflows, queue runner
+//
+// and carries no structured field to read them from. The names are therefore
+// recovered from the text after this marker. A runtime that changes the shape
+// costs the caller the component list, not the error: Pending is left empty,
+// the cause is still reported verbatim, and the timeout-path test in
+// internal/engine/engine_test.go fails so the change is noticed.
+const shutdownPendingMarker = " waiting for: "
+
+// ShutdownIncompleteError reports a durable shutdown that ran out of time.
+//
+// It is the typed detail behind the error Engine.Shutdown returns; reach it
+// with errors.As when the caller must act on WHICH parts were still running
+// (an operator report, a metric) rather than only on the fact of the failure.
+type ShutdownIncompleteError struct {
+	// PerComponentTimeout is the budget each wait was given — not the total
+	// the shutdown was allowed to take. See Engine.Shutdown.
+	PerComponentTimeout time.Duration
+	// Pending lists the parts still running when their wait expired, in the
+	// order the runtime waited for them. Empty when the runtime reported a
+	// failure in a shape this build could not read; Cause is then the only
+	// account of it.
+	Pending []ShutdownComponent
+	// Cause is the runtime's own error, kept verbatim for diagnosis.
+	Cause error
+}
+
+// Error reports which parts were still running and what each of them is.
+func (e *ShutdownIncompleteError) Error() string {
+	if len(e.Pending) == 0 {
+		return fmt.Sprintf(
+			"the durable runtime did not stop within %v per part, and did not name which parts were still running: %v",
+			e.PerComponentTimeout, e.Cause,
+		)
+	}
+	parts := make([]string, 0, len(e.Pending))
+	for _, c := range e.Pending {
+		parts = append(parts, fmt.Sprintf("%s (%s)", c, c.Meaning()))
+	}
+	return fmt.Sprintf(
+		"the durable runtime did not stop within %v per part; still running: %s",
+		e.PerComponentTimeout, strings.Join(parts, ", "),
+	)
+}
+
+// Unwrap exposes the runtime's own error so errors.Is and errors.As reach it.
+func (e *ShutdownIncompleteError) Unwrap() error { return e.Cause }
+
+// parsePendingShutdownComponents recovers the component names from the
+// runtime's message. It returns nil when the message does not carry the
+// expected marker; see shutdownPendingMarker.
+func parsePendingShutdownComponents(err error) []ShutdownComponent {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	idx := strings.LastIndex(msg, shutdownPendingMarker)
+	if idx < 0 {
+		return nil
+	}
+	list := strings.TrimSpace(msg[idx+len(shutdownPendingMarker):])
+	if list == "" {
+		return nil
+	}
+	var pending []ShutdownComponent
+	for _, name := range strings.Split(list, ", ") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		pending = append(pending, ShutdownComponent(name))
+	}
+	return pending
+}
+
+// newShutdownIncomplete builds the typed detail from the runtime's error.
+func newShutdownIncomplete(perComponentTimeout time.Duration, cause error) *ShutdownIncompleteError {
+	return &ShutdownIncompleteError{
+		PerComponentTimeout: perComponentTimeout,
+		Pending:             parsePendingShutdownComponents(cause),
+		Cause:               cause,
+	}
+}
+
+// shutdownIncompleteError wraps the typed detail in the actionable surface the
+// command line reports and maps to an exit code. Both layers stay reachable:
+// errors.As finds the StructuredError for the exit code and the operator
+// block, and the *ShutdownIncompleteError underneath it for the part list.
+func shutdownIncompleteError(detail *ShutdownIncompleteError) *pasterrors.StructuredError {
+	return &pasterrors.StructuredError{
+		Category: pasterrors.CategoryWorkflow,
+		What:     "The durable engine didn't finish stopping in the time it was given.",
+		Why: "Parts of the engine were still busy when their stop budget of " +
+			detail.PerComponentTimeout.String() + " ran out.",
+		Where:  "Stopping the durable engine (internal/engine/engine.go in engine.Engine.Shutdown).",
+		Impact: "Work that was still running was cut off, and the engine had already closed the shared database file, so a late write from that work fails. Nothing is lost: unfinished work stays pending and is picked up on the next start.",
+		Fix: "1. Read the log lines just before this one: they name the epoch and the work that was still running.\n" +
+			"2. Start the daemon again. It resumes the work that was left pending:\n" +
+			"     pastured\n" +
+			"3. Confirm the epoch is moving again:\n" +
+			"     pasture status --epoch-id <epoch-id>",
+		Cause: detail,
+	}
+}
+
+// Shutdown stops the durable runtime, then releases the handles the runtime
+// does not own. Call it once.
+//
+// perComponentTimeout is the budget for EACH wait inside the runtime, NOT a
+// total for the whole shutdown. The runtime stops its parts one after another
+// and gives every one of them the full value, so the worst case is
+// SequentialShutdownWaits times this argument; use WorstCaseShutdownDuration
+// to size it against an external stop deadline. Measured on the pinned
+// runtime, a shutdown held up by work that is still running spends the budget
+// once, because every other wait returns at once.
+//
+// It returns nil when the runtime stopped inside its budget. Otherwise it
+// returns an actionable error carrying a *ShutdownIncompleteError with the
+// parts that were still running; the handles are released either way. The
+// error is ALSO logged, because many callers (tests, probes, deferred cleanup)
+// discard the return value and the failure must never go unreported.
 //
 // The durable runtime owns the shared SQLite handle it was constructed with:
 // its shutdown closes that handle unconditionally, on the timeout path too
 // (dbos/internal/sysdb/dbq.go, sqlPoolAdapter.Close). The engine therefore
 // cannot hold the handle open for a worker that outlives the timeout, and the
 // close below is a harmless second close of an already-closed handle.
-// internal/handlers/controller.go records the same ownership for the client.
-//
-// timeout is a per-component budget inside the runtime, not a total for the
-// whole shutdown; see constructionAbortShutdownTimeout for the breakdown.
+// internal/handlers/controller.go records the same ownership for the client;
+// the two must stay in agreement.
 //
 // The trail is closed either way: it is a separate handle that the runtime
 // never writes through.
-//
-// Reporting an incomplete shutdown to the caller, and the tests that pin it,
-// are a separate change tracked in
-// https://github.com/dayvidpham/pasture/issues/104; this method keeps its
-// current void signature.
-func (e *Engine) Shutdown(timeout time.Duration) {
+func (e *Engine) Shutdown(perComponentTimeout time.Duration) error {
+	var incomplete error
 	if e.dbosCtx != nil {
-		if err := dbos.Shutdown(e.dbosCtx, timeout); err != nil {
-			e.logShutdownFailure(err)
+		if err := dbos.Shutdown(e.dbosCtx, perComponentTimeout); err != nil {
+			incomplete = shutdownIncompleteError(newShutdownIncomplete(perComponentTimeout, err))
+			e.logShutdownFailure(incomplete)
 		}
 	}
 	if e.db != nil {
@@ -481,6 +671,7 @@ func (e *Engine) Shutdown(timeout time.Duration) {
 	if e.trailCloser != nil {
 		_ = e.trailCloser.Close()
 	}
+	return incomplete
 }
 
 // DBOS returns the underlying DBOS context so callers (and later slices) can
@@ -538,18 +729,19 @@ func queueRegistrationError(queueName string, cause error) error {
 	}
 }
 
-// logShutdownFailure reports an incomplete durable shutdown. The caller cannot
-// act on it through Shutdown's current void signature, so it is logged rather
-// than dropped silently.
+// logShutdownFailure reports an incomplete durable shutdown on the engine's
+// own logger. Shutdown returns the same error to its caller; it is logged as
+// well because callers that stop an engine from deferred cleanup discard the
+// return value, and an incomplete shutdown must never be silent.
 func (e *Engine) logShutdownFailure(err error) {
 	logger := e.logger
 	if logger == nil {
 		logger = slog.Default()
 	}
 	logger.Error(
-		"the durable engine did not stop within its shutdown timeout; "+
-			"some workers may still be running, and the durable runtime has already begun closing the shared database handle it owns, "+
-			"so a late write through that handle will fail; restart the process if epoch state looks inconsistent",
+		"the durable engine did not stop within its shutdown budget; "+
+			"some work may still have been running, and the durable runtime has already closed the shared database handle it owns, "+
+			"so a late write through that handle will fail; start the daemon again to resume the work that was left pending",
 		"error", err,
 	)
 }

@@ -3,13 +3,17 @@ package engine_test
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	"github.com/dayvidpham/pasture/internal/engine"
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 
@@ -463,5 +467,162 @@ func TestEngineNew_AbortsWhenTheTrackerAlreadyDrivesAnEngine(t *testing.T) {
 	final := runEpoch(t, first, "epoch-abort-bind", fullEpochPlan())
 	if final.CurrentPhase != protocol.PhaseComplete {
 		t.Errorf("surviving engine final phase = %q, want %q", final.CurrentPhase, protocol.PhaseComplete)
+	}
+}
+
+// blockingTransitionEngine builds and launches an engine whose transition hook
+// stops the FIRST transition inside its durable step and holds it there. It
+// returns the engine, a channel closed once the hook is inside the step, and a
+// release function the test must call to let the held work finish.
+//
+// This is the production seam Config.OnTransition, not a test-only hook: the
+// same field carries idempotent activity recording in the daemon. Holding it
+// is the only way to put real work in flight across a shutdown.
+func blockingTransitionEngine(t *testing.T) (e *engine.Engine, entered <-chan struct{}, release func()) {
+	t.Helper()
+	enteredCh := make(chan struct{})
+	releaseCh := make(chan struct{})
+	var holdOnce sync.Once
+	var releaseOnce sync.Once
+
+	dbPath := testutil.GoldenUnifiedDBPath(t)
+	executorID, appVersion := testEngineIdentity(t)
+	built, err := engine.New(context.Background(), engine.Config{
+		DBPath:                   dbPath,
+		ApplicationVersion:       appVersion,
+		ExecutorID:               executorID,
+		SkipMigrations:           true,
+		QueueBasePollingInterval: 100 * time.Millisecond,
+		OnTransition: func(context.Context, string, *protocol.TransitionRecord, string) error {
+			holdOnce.Do(func() {
+				close(enteredCh)
+				select {
+				case <-releaseCh:
+				case <-time.After(30 * time.Second):
+					// A ceiling, never a wait for its own sake: if the test
+					// fails before releasing, the held step still unwinds
+					// instead of pinning a goroutine for the whole run.
+				}
+			})
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("engine.New: %v", err)
+	}
+	if err := built.Launch(); err != nil {
+		t.Fatalf("engine.Launch: %v", err)
+	}
+	release = func() { releaseOnce.Do(func() { close(releaseCh) }) }
+	t.Cleanup(release)
+	return built, enteredCh, release
+}
+
+// TestEngineShutdown_ReturnsNilWhenTheRuntimeStopsInsideItsBudget pins the
+// clean path: an engine with nothing left to do reports success, so a caller
+// that acts on the returned error only acts on a real failure.
+func TestEngineShutdown_ReturnsNilWhenTheRuntimeStopsInsideItsBudget(t *testing.T) {
+	t.Parallel()
+	e := newEngine(t)
+
+	final := runEpoch(t, e, "epoch-clean-shutdown", fullEpochPlan())
+	if final.CurrentPhase != protocol.PhaseComplete {
+		t.Fatalf("final phase = %q, want %q", final.CurrentPhase, protocol.PhaseComplete)
+	}
+
+	if err := e.Shutdown(10 * time.Second); err != nil {
+		t.Fatalf("Shutdown after a completed epoch = %v, want nil", err)
+	}
+}
+
+// TestEngineShutdown_NamesTheWorkStillRunningWhenTheBudgetExpires pins the
+// timeout path end to end: work that is still running when the budget expires
+// must produce an error that says WHICH part of the runtime was still busy,
+// carries the machine-readable detail, and maps to the workflow exit code.
+//
+// It also pins the budget's meaning. The argument is a per-component budget,
+// so a caller could reasonably fear paying it once per part. Measured on the
+// pinned runtime, only the in-flight-work wait expires here, so the whole
+// shutdown costs about one budget; the ceiling below fails if a later runtime
+// starts spending it again on the parts that follow.
+func TestEngineShutdown_NamesTheWorkStillRunningWhenTheBudgetExpires(t *testing.T) {
+	t.Parallel()
+	e, entered, release := blockingTransitionEngine(t)
+
+	if _, err := dbos.RunWorkflow(e.DBOS(), e.EpochWorkflow,
+		engine.EpochInput{EpochId: "epoch-stuck-shutdown", Advances: fullEpochPlan()},
+		dbos.WithWorkflowID("epoch-stuck-shutdown")); err != nil {
+		t.Fatalf("RunWorkflow: %v", err)
+	}
+
+	select {
+	case <-entered:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the transition hook never reached its durable step, so no work was in flight to hold the shutdown")
+	}
+
+	const budget = time.Second
+	start := time.Now()
+	err := e.Shutdown(budget)
+	elapsed := time.Since(start)
+	release()
+
+	if err == nil {
+		t.Fatal("Shutdown with work still running = nil, want an incomplete-shutdown error")
+	}
+
+	var incomplete *engine.ShutdownIncompleteError
+	if !errors.As(err, &incomplete) {
+		t.Fatalf("Shutdown error %v does not carry *engine.ShutdownIncompleteError", err)
+	}
+	if incomplete.PerComponentTimeout != budget {
+		t.Errorf("PerComponentTimeout = %v, want the budget %v", incomplete.PerComponentTimeout, budget)
+	}
+	if !slices.Contains(incomplete.Pending, engine.ShutdownComponentWorkflows) {
+		t.Errorf("Pending = %v, want it to name %q", incomplete.Pending, engine.ShutdownComponentWorkflows)
+	}
+
+	// The message an operator reads must name the part AND say what it is.
+	msg := err.Error()
+	for _, want := range []string{
+		string(engine.ShutdownComponentWorkflows),
+		engine.ShutdownComponentWorkflows.Meaning(),
+		budget.String(),
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("Shutdown error message does not mention %q:\n%s", want, msg)
+		}
+	}
+
+	var structured *pasterrors.StructuredError
+	if !errors.As(err, &structured) {
+		t.Fatalf("Shutdown error %v is not actionable (no structured error in the chain)", err)
+	}
+	if structured.Category != pasterrors.CategoryWorkflow {
+		t.Errorf("category = %q, want %q", structured.Category, pasterrors.CategoryWorkflow)
+	}
+	if got, want := pasterrors.ExitCode(err), 3; got != want {
+		t.Errorf("exit code = %d, want %d", got, want)
+	}
+
+	if elapsed < budget {
+		t.Errorf("Shutdown returned after %v, sooner than the %v budget it was given", elapsed, budget)
+	}
+	if ceiling := engine.WorstCaseShutdownDuration(budget); elapsed >= ceiling {
+		t.Errorf("Shutdown took %v, at or beyond the worst case %v: the budget is now being spent on more than the in-flight-work wait", elapsed, ceiling)
+	}
+}
+
+// TestShutdownComponent_ReportsAnUnrecognisedPart pins the open end of the
+// component list: a runtime build that adds a part must still be reported by
+// name, and described as one this build does not know, rather than dropped.
+func TestShutdownComponent_ReportsAnUnrecognisedPart(t *testing.T) {
+	t.Parallel()
+	const invented = engine.ShutdownComponent("telemetry exporter")
+	if got := invented.Meaning(); !strings.Contains(got, "does not recognise") {
+		t.Errorf("Meaning() for an unknown part = %q, want it to say the part is unrecognised", got)
+	}
+	if got := engine.ShutdownComponentWorkflows.Meaning(); strings.Contains(got, "does not recognise") {
+		t.Errorf("Meaning() for a known part = %q, want its plain description", got)
 	}
 }
