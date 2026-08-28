@@ -447,8 +447,10 @@ func supersededDurableSchemaError(where, dbPath string, cause error) error {
 			"older one: the change was a clean cut, so there is no path that carries old records\n" +
 			"forward.",
 		Where: where,
-		Impact: "Nothing was opened, started, or changed, and the file is exactly as it was. No epoch\n" +
-			"can run or be inspected from this build until the database is replaced.",
+		Impact: "Nothing was opened or started, and no pasture data was written: no epoch, no history,\n" +
+			"and no layout step. Opening the file does normalise its journal mode, so its header can\n" +
+			"differ; the records inside it do not. No epoch can run or be inspected from this build\n" +
+			"until the database is replaced.",
 		Fix: fmt.Sprintf(
 			"The file can't be converted, so it has to be replaced. Step 2 tells you what you lose.\n"+
 				"1. Stop every pasture and pastured process that uses this file:\n"+
@@ -484,8 +486,8 @@ func unreadableDurableSchemaError(where, dbPath string, cause error) error {
 			"build can use it. That read failed, so the layout is unknown. The file is normally\n" +
 			"unreadable, damaged, or not the database pasture owns.",
 		Where: where,
-		Impact: "Nothing was opened, started, or changed. The engine did not start, so no epoch can run\n" +
-			"from this process.",
+		Impact: "Nothing was opened or started, and no pasture data was written. The engine did not\n" +
+			"start, so no epoch can run from this process.",
 		Fix: fmt.Sprintf(
 			"1. Confirm the path exists and this user may read and write it:\n"+
 				"     ls -l %s\n"+

@@ -230,8 +230,8 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 	// — this build refuses its durable layout, and the older build refuses the
 	// trail schema this one just wrote (see internal/audit/migrate.go, which
 	// rejects a database recorded at a newer version than the build knows). The
-	// refusal below promises that nothing was changed and that the older build
-	// can still read the history, so that promise must be true.
+	// refusal below promises that no pasture data was written and that the older
+	// build can still read the history, so that promise must be true.
 	db, err := dbconn.OpenSharedDBWithProfile(cfg.DBPath, cfg.Timeouts)
 	if err != nil {
 		return nil, err
@@ -241,9 +241,11 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 	// build wrote, and the refusal is only possible before the durable context
 	// below is constructed: constructing it migrates such a file in place. The
 	// gate runs on this exact handle, and it runs before anything in this
-	// process writes to the file, so a refused database is byte-for-byte as it
-	// arrived. The refusal is permanent, so it stays outside the bounded retry
-	// that follows. See internal/engine/dbosinit.go.
+	// process writes data to the file, so a refused database carries exactly the
+	// records it arrived with. The one byte-level exception is the journal mode:
+	// the shared handle's connection string normalises it on the gate's first
+	// query, before a refusal is possible. The refusal is permanent, so it stays
+	// outside the bounded retry that follows. See internal/engine/dbosinit.go.
 	if err := RequireSupportedDurableSchema(ctx, engineConstructionSite, db, cfg.DBPath); err != nil {
 		_ = db.Close()
 		return nil, err

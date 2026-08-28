@@ -459,6 +459,15 @@ func writeSupersededDurableDatabase(t *testing.T) (string, string) {
 	// production open, and that conversion alone rewrites the file header —
 	// which would look, to the digest assertions below, like a writer the gate
 	// failed to hold back.
+	//
+	// That header rewrite is the ONE change the digest cannot cover by
+	// construction: the shared handle's connection string sets the journal mode,
+	// and that pragma runs on the gate's own first query, before any refusal is
+	// possible. A database arriving on a rollback journal is therefore
+	// normalised to WAL even when it is refused. It carries no pasture data, and
+	// the refusal says so in those words rather than claiming the file is
+	// untouched. Writing the fixture through the production opener keeps that
+	// single unavoidable change out of the way of every other assertion.
 	db, err := dbconn.OpenSharedDB(path)
 	if err != nil {
 		t.Fatalf("open %s with the production opener: %v", path, err)
@@ -476,7 +485,7 @@ func writeSupersededDurableDatabase(t *testing.T) (string, string) {
 	if err := db.Close(); err != nil {
 		t.Fatalf("close %s after writing the superseded layout: %v", path, err)
 	}
-	return path, fileSHA256(t, path)
+	return path, databaseDigest(t, path)
 }
 
 // openTestSQLite opens a private handle on the same driver production uses. The
@@ -495,14 +504,35 @@ func openTestSQLite(t *testing.T, path string) *sql.DB {
 	return db
 }
 
-func fileSHA256(t *testing.T, path string) string {
+// databaseDigest hashes a SQLite database as a whole: the main file AND its two
+// sidecars, each length-prefixed so no rearrangement of bytes between them can
+// collide.
+//
+// Hashing the main file alone is not enough, and that gap is not theoretical. A
+// writer working under WAL journal mode leaves its pages in the -wal sidecar
+// until a checkpoint runs, so a migration of hundreds of kilobytes can be
+// complete and durable while the main file is untouched. Any later reader —
+// including an older pasture build — replays that sidecar on open and sees the
+// change. A main-file digest therefore reports "nothing was written" for a
+// database that was, in fact, already rewritten.
+//
+// A missing sidecar counts as empty, which is the normal state after the last
+// handle on the file closes.
+func databaseDigest(t *testing.T, path string) string {
 	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
+	h := sha256.New()
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		part := path + suffix
+		data, err := os.ReadFile(part)
+		if errors.Is(err, os.ErrNotExist) {
+			data = nil
+		} else if err != nil {
+			t.Fatalf("read %s: %v", part, err)
+		}
+		fmt.Fprintf(h, "%s:%d:", suffix, len(data))
+		h.Write(data)
 	}
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:])
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // readDurableSchemaVersion reports the layout version a database records, or 0
@@ -605,7 +635,13 @@ func TestRequireSupportedDurableSchema_RefusesADatabaseAnOlderBuildWrote(t *test
 		}
 	}
 
-	if after := fileSHA256(t, path); after != before {
+	// Close the handle first, exactly as the production refusal path does: an
+	// open WAL connection keeps a -shm sidecar alive, and the digest counts the
+	// sidecars.
+	if err := db.Close(); err != nil {
+		t.Fatalf("close the handle on %s after the refusal: %v", path, err)
+	}
+	if after := databaseDigest(t, path); after != before {
 		t.Errorf("the refused database changed on disk: digest %s, want %s; the gate must only read", after, before)
 	}
 }
@@ -632,6 +668,12 @@ func TestEngineNew_RefusesADatabaseAnOlderBuildWrote(t *testing.T) {
 		ApplicationVersion: "test-app-refuses-superseded",
 		ExecutorID:         "test-executor-refuses-superseded",
 	})
+	// Measure the database FIRST, before any assertion below opens a handle of
+	// its own: an open connection under WAL journal mode keeps a -shm sidecar
+	// alive, and the digest counts the sidecars. Production leaves none behind,
+	// because the refusal closes the only handle it opened.
+	afterRefusal := databaseDigest(t, path)
+
 	if err == nil {
 		built.Shutdown(5 * time.Second)
 		t.Fatal("engine.New opened a database whose durable layout an older build wrote")
@@ -657,17 +699,20 @@ func TestEngineNew_RefusesADatabaseAnOlderBuildWrote(t *testing.T) {
 		t.Errorf("the refused database gained durable-runtime tables %v: the runtime ran against it", tables)
 	}
 
-	// The whole file, not only the durable layout. The refusal promises that
-	// nothing was changed and that an older build can still read the history,
-	// so NOTHING in this process may write to the file before the gate passes —
-	// not the durable runtime, not the projection table, and not the forensic
-	// trail, whose own migration would raise a schema version that the older
-	// build then refuses in turn. A digest is the only assertion that covers
-	// every writer at once, including one added later.
-	if after := fileSHA256(t, path); after != before {
+	// The whole database, not only the durable layout, and sidecars included.
+	// The refusal promises that no pasture data was written and that an older
+	// build can still read the history, so NOTHING in this process may write to
+	// the database before the gate passes — not the durable runtime, not the
+	// projection table, and not the forensic trail, whose own migration would
+	// raise a schema version that the older build then refuses in turn. Under
+	// WAL journal mode a writer's pages sit in the -wal sidecar until a
+	// checkpoint, so a main-file digest would call such a write invisible;
+	// databaseDigest hashes the sidecars too, which is what makes this one
+	// assertion cover every writer at once, including one added later.
+	if afterRefusal != before {
 		t.Errorf("the refused database changed on disk: digest %s, want %s; "+
 			"something in engine.New wrote to the file before the schema gate refused it. "+
-			"Tables now present: %v", after, before, allTables(t, path))
+			"Tables now present: %v", afterRefusal, before, allTables(t, path))
 	}
 }
 
