@@ -71,6 +71,10 @@ package engine_test
 //     queue and completes there, while a recovered epoch workflow — which never
 //     ran on a queue — goes onto the runtime's reserved internal queue. The
 //     proof is a read-back of the stored queue name for each.
+//
+// 17. The operator path end to end: a concurrency change written by the
+//     command-line code path, from a separate client on the same database,
+//     reaches an engine that is already running.
 
 import (
 	"context"
@@ -2074,5 +2078,75 @@ func TestSliceQueue_SetSliceConcurrencyNeedsABuiltEngine(t *testing.T) {
 	}
 	if se.Category != pasterrors.CategoryValidation {
 		t.Errorf("error category = %v, want %v", se.Category, pasterrors.CategoryValidation)
+	}
+}
+
+// ── Test 17: A change made from outside the process ───────────────────────────
+
+// TestSliceQueue_OperatorCommandReconfiguresTheRunningQueue is the end-to-end
+// proof of the operator path: a change written by a SEPARATE code path, the one
+// the command line uses, reaches a running engine.
+//
+// The command does not contact the daemon. It writes the queue's settings row,
+// which the daemon's workers reload as they poll. So the assertion that matters
+// is not that the row changed — the handler's own tests cover that — but that
+// the engine which was already saturated at 2 goes on to run 4 at once.
+func TestSliceQueue_OperatorCommandReconfiguresTheRunningQueue(t *testing.T) {
+	t.Parallel()
+	const startK = 2
+	const raisedK = 4
+	const N = raisedK
+
+	gater := &gatingConcurrencyHandler{release: make(chan struct{})}
+	mgr := hooks.NewManager(hooks.WithDispatchTimeout(60 * time.Second))
+	mgr.Register(gater)
+
+	dbPath := testutil.GoldenUnifiedDBPath(t)
+	executorID, appVersion := testEngineIdentity(t)
+	e := newQueueEngineFrom(t, queueEngineOpts{
+		dbPath: dbPath, k: startK, executorID: executorID, appVersion: appVersion, mgr: mgr,
+	})
+	releaseGate := sync.OnceFunc(func() { close(gater.release) })
+	defer releaseGate()
+
+	const epochId = "queue--operator-command"
+	handles := startGatedSlices(t, e, epochId, N)
+
+	waitUntil(t, 30*time.Second, func() bool { return gater.hwm.Load() >= int64(startK) })
+	if hwm := gater.hwm.Load(); hwm != int64(startK) {
+		t.Fatalf("high-water mark before the change = %d, want %d", hwm, startK)
+	}
+
+	// The operator's path: a separate client on the same database file.
+	code, err := handlers.SetQueueConcurrency(handlers.QueueConcurrencyInput{
+		DBPath: dbPath,
+		Queue:  string(handlers.QueueSelectorSlice),
+		Limit:  raisedK,
+	}, types.OutputText)
+	if err != nil {
+		t.Fatalf("SetQueueConcurrency: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("SetQueueConcurrency exit code = %d, want 0", code)
+	}
+
+	requireWorkerConcurrency(t, "stored SliceQueue after the operator command",
+		storedSliceQueueConcurrency(t, e), raisedK)
+
+	// The running engine adopts it on its next poll.
+	waitUntil(t, 30*time.Second, func() bool { return gater.hwm.Load() >= int64(raisedK) })
+	if hwm := gater.hwm.Load(); hwm > int64(raisedK) {
+		t.Errorf("high-water mark = %d, want at most %d", hwm, raisedK)
+	}
+
+	releaseGate()
+	for i, h := range handles {
+		if res := waitSliceResult(t, h, 60*time.Second); !res.Success {
+			errVal := "<nil>"
+			if res.Error != nil {
+				errVal = *res.Error
+			}
+			t.Errorf("slice[%d] Success=false; error=%s", i, errVal)
+		}
 	}
 }
