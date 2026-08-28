@@ -30,7 +30,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	files, err := codegen.EmitHarness(root, codegen.CodexTarget, filepath.Join(root, "skills", "protocol", "figures"), codegen.GenerateOptions{Write: false})
+	files, err := codegen.EmitHarness(codegen.RepoRoots(root), codegen.CodexTarget, codegen.GenerateOptions{Write: false})
 	if err != nil {
 		return fmt.Errorf("generate Codex target snapshot from canonical emitter: %w", err)
 	}

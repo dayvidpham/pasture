@@ -12,15 +12,14 @@ import (
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
-// emitCodexIntoSeededRoot seeds a temp module root with the verbatim source
-// trees the Codex skills package copies, then emits the full Codex target into
-// it (Write=false, so no disk mutation) and returns the root and files.
-func emitCodexIntoSeededRoot(t *testing.T) (string, []GeneratedFile) {
+// emitCodexIntoTempOutputRoot emits the full Codex target into a temporary
+// output root while the verbatim inputs stay in the real module tree
+// (Write=false, so no disk mutation), and returns the output root and files.
+func emitCodexIntoTempOutputRoot(t *testing.T) (string, []GeneratedFile) {
 	t.Helper()
+	moduleRoot := testModuleRoot(t)
 	root := t.TempDir()
-	seedVerbatimSourceDirs(t, root)
-	figuresDir := filepath.Join(testModuleRoot(t), "skills", "protocol", "figures")
-	files, err := EmitHarness(root, CodexTarget, figuresDir, GenerateOptions{Diff: false, Write: false})
+	files, err := EmitHarness(HarnessRoots{Source: moduleRoot, Output: root}, CodexTarget, GenerateOptions{Diff: false, Write: false})
 	if err != nil {
 		t.Fatalf("EmitHarness(codex): %v", err)
 	}
@@ -58,16 +57,15 @@ func TestCodexTargetIsResolvable(t *testing.T) {
 func TestEmitHarnessCodexIsDeterministic(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	seedVerbatimSourceDirs(t, root)
-	figuresDir := filepath.Join(testModuleRoot(t), "skills", "protocol", "figures")
+	moduleRoot := testModuleRoot(t)
+	roots := HarnessRoots{Source: moduleRoot, Output: t.TempDir()}
 	opts := GenerateOptions{Diff: false, Write: false}
 
-	first, err := EmitHarness(root, CodexTarget, figuresDir, opts)
+	first, err := EmitHarness(roots, CodexTarget, opts)
 	if err != nil {
 		t.Fatalf("first EmitHarness(codex): %v", err)
 	}
-	second, err := EmitHarness(root, CodexTarget, figuresDir, opts)
+	second, err := EmitHarness(roots, CodexTarget, opts)
 	if err != nil {
 		t.Fatalf("second EmitHarness(codex): %v", err)
 	}
@@ -90,7 +88,7 @@ func TestEmitHarnessCodexIsDeterministic(t *testing.T) {
 func TestCodexTargetDescriptorPartitionsPackages(t *testing.T) {
 	t.Parallel()
 
-	root, files := emitCodexIntoSeededRoot(t)
+	root, files := emitCodexIntoTempOutputRoot(t)
 	desc, err := NewCodexTargetDescriptor(root, files)
 	if err != nil {
 		t.Fatalf("NewCodexTargetDescriptor: %v", err)
@@ -157,7 +155,7 @@ func TestCodexTargetDescriptorPartitionsPackages(t *testing.T) {
 func TestCodexBundleManifestsAreCanonical(t *testing.T) {
 	t.Parallel()
 
-	root, files := emitCodexIntoSeededRoot(t)
+	root, files := emitCodexIntoTempOutputRoot(t)
 	desc, err := NewCodexTargetDescriptor(root, files)
 	if err != nil {
 		t.Fatalf("NewCodexTargetDescriptor: %v", err)
@@ -206,12 +204,12 @@ func codexTargetLifecycleEventsForTest() []string {
 func TestCodexDescriptorIsContentAddressedDeterministic(t *testing.T) {
 	t.Parallel()
 
-	rootA, filesA := emitCodexIntoSeededRoot(t)
+	rootA, filesA := emitCodexIntoTempOutputRoot(t)
 	descA, err := NewCodexTargetDescriptor(rootA, filesA)
 	if err != nil {
 		t.Fatalf("descriptor A: %v", err)
 	}
-	rootB, filesB := emitCodexIntoSeededRoot(t)
+	rootB, filesB := emitCodexIntoTempOutputRoot(t)
 	descB, err := NewCodexTargetDescriptor(rootB, filesB)
 	if err != nil {
 		t.Fatalf("descriptor B: %v", err)
@@ -233,7 +231,7 @@ func TestCodexDescriptorIsContentAddressedDeterministic(t *testing.T) {
 func TestValidateCodexTargetAcceptsGeneratedTarget(t *testing.T) {
 	t.Parallel()
 
-	root, files := emitCodexIntoSeededRoot(t)
+	root, files := emitCodexIntoTempOutputRoot(t)
 	desc, err := NewCodexTargetDescriptor(root, files)
 	if err != nil {
 		t.Fatalf("NewCodexTargetDescriptor: %v", err)
@@ -249,7 +247,7 @@ func TestValidateCodexTargetAcceptsGeneratedTarget(t *testing.T) {
 func TestValidateCodexTargetRejectsFabricatedNativeCall(t *testing.T) {
 	t.Parallel()
 
-	root, files := emitCodexIntoSeededRoot(t)
+	root, files := emitCodexIntoTempOutputRoot(t)
 	// Corrupt one agent profile's functions line to name a fabricated call.
 	for i, f := range files {
 		if strings.HasSuffix(f.Path, ".toml") && strings.Contains(f.Content, "functions =") {
@@ -283,7 +281,7 @@ func TestValidateCodexTargetRejectsFabricatedNativeCall(t *testing.T) {
 func TestValidateCodexTargetRejectsContractDrift(t *testing.T) {
 	t.Parallel()
 
-	root, files := emitCodexIntoSeededRoot(t)
+	root, files := emitCodexIntoTempOutputRoot(t)
 	desc, err := NewCodexTargetDescriptor(root, files)
 	if err != nil {
 		t.Fatalf("NewCodexTargetDescriptor: %v", err)
@@ -343,12 +341,12 @@ func TestNewCodexTargetDescriptorRejectsFileOutsideRoot(t *testing.T) {
 func TestCodexPackagesLoadInIsolation(t *testing.T) {
 	t.Parallel()
 
-	rootA, filesA := emitCodexIntoSeededRoot(t)
+	rootA, filesA := emitCodexIntoTempOutputRoot(t)
 	descA, err := NewCodexTargetDescriptor(rootA, filesA)
 	if err != nil {
 		t.Fatalf("descriptor A: %v", err)
 	}
-	rootB, filesB := emitCodexIntoSeededRoot(t)
+	rootB, filesB := emitCodexIntoTempOutputRoot(t)
 	descB, err := NewCodexTargetDescriptor(rootB, filesB)
 	if err != nil {
 		t.Fatalf("descriptor B: %v", err)

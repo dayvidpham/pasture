@@ -47,9 +47,8 @@ func Generate(root string, targets []TargetHarness, opts GenerateOptions) (Gener
 	}
 
 	// ── 3. Harness-specific skills, agents, verbatim copies, and manifests ───
-	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
 	for _, target := range targets {
-		files, err := EmitHarness(root, target, figuresDir, opts)
+		files, err := EmitHarness(RepoRoots(root), target, opts)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("target %s: %w", target.Name, err))
 			continue
