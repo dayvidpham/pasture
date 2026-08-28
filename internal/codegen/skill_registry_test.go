@@ -361,7 +361,6 @@ func TestSchemaRegistryParity(t *testing.T) {
 // outputs are recognized by content so a renamed stale copy is still orphaned.
 func TestGeneratedOutputInventory(t *testing.T) {
 	root := testModuleRoot(t)
-	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
 
 	expectedClaudeSkills := make(map[string]string, len(CommandSpecs))
 	expectedOpenCodeSkills := make(map[string]string, len(CommandSpecs))
@@ -457,9 +456,9 @@ func TestGeneratedOutputInventory(t *testing.T) {
 	addExpectedOutput(t, expectedRootOutputs, "schema.xml", "GenerateSchemaToFile")
 	addExpectedOutput(t, expectedRootOutputs, "opencode.json", "OpenCodeTarget.Manifest")
 
-	claudeFiles, claudePaths := collectHarnessOutputs(t, root, figuresDir, ClaudeCodeTarget)
-	openCodeFiles, openCodePaths := collectHarnessOutputs(t, root, figuresDir, OpenCodeTarget)
-	codexFiles, codexPaths := collectHarnessOutputs(t, root, figuresDir, CodexTarget)
+	claudeFiles, claudePaths := collectHarnessOutputs(t, root, ClaudeCodeTarget)
+	openCodeFiles, openCodePaths := collectHarnessOutputs(t, root, OpenCodeTarget)
+	codexFiles, codexPaths := collectHarnessOutputs(t, root, CodexTarget)
 	assertOutputSetEqual(t, "Claude Code harness output paths", expectedClaudeHarness, claudePaths)
 	assertOutputSetEqual(t, "OpenCode harness output paths", expectedOpenCodeHarness, openCodePaths)
 	assertOutputSetEqual(t, "Codex harness output paths", expectedCodexHarness, codexPaths)
@@ -731,7 +730,6 @@ func addExpectedOutput(t *testing.T, inventory map[string]string, path, owner st
 func collectHarnessOutputs(
 	t *testing.T,
 	repoRoot string,
-	figuresDir string,
 	harness TargetHarness,
 ) ([]GeneratedFile, map[string]string) {
 	t.Helper()

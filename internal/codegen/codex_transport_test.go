@@ -302,11 +302,10 @@ func TestCodexTransportRegenerationIsByteStable(t *testing.T) {
 // output. It renders each harness (Write=false) and compares to disk.
 func TestClaudeAndOpenCodeOutputsRemainByteIdentical(t *testing.T) {
 	root := testModuleRoot(t)
-	figuresDir := filepath.Join(root, "skills", "protocol", "figures")
 
-	claudeFiles, _ := collectHarnessOutputs(t, root, figuresDir, ClaudeCodeTarget)
+	claudeFiles, _ := collectHarnessOutputs(t, root, ClaudeCodeTarget)
 	assertGeneratedFilesCommitted(t, root, claudeFiles)
 
-	openCodeFiles, _ := collectHarnessOutputs(t, root, figuresDir, OpenCodeTarget)
+	openCodeFiles, _ := collectHarnessOutputs(t, root, OpenCodeTarget)
 	assertGeneratedFilesCommitted(t, root, openCodeFiles)
 }

@@ -140,6 +140,8 @@ func testModuleRoot(t *testing.T) string {
 // sourceGuardDirs are the subdirectories of the module root that a harness
 // emission reads as input, plus every subdirectory a harness writes output to.
 // A split-root run must leave all of them byte-identical and untouched.
+// The guard hashes and stats these real trees, so it also fails if a developer
+// edits a tracked file or runs the generator while these tests run.
 var sourceGuardDirs = []string{"skills", "agents", "hooks", ".opencode", ".agents", ".codex"}
 
 // TestEmitHarnessCopiesVerbatimFromSourceRootIntoSeparateOutputRoot proves the
