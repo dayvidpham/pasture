@@ -169,7 +169,7 @@ func TestCLI_QueueConcurrency_RejectsBadArguments(t *testing.T) {
 			name:     "set on the control queue",
 			args:     []string{"queue", "concurrency", "set", "control", "4"},
 			wantCode: exitValidation,
-			wantText: "one epoch control workflow at a time",
+			wantText: "one epoch at a time in each process",
 		},
 		{
 			name:     "jobs is zero",

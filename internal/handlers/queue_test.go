@@ -380,8 +380,13 @@ func TestSetQueueConcurrency_RefusesTheControlQueue(t *testing.T) {
 		if se.Category != pasterrors.CategoryValidation {
 			t.Errorf("category = %v, want %v", se.Category, pasterrors.CategoryValidation)
 		}
-		if !strings.Contains(se.Why, "one epoch control workflow at a time") {
-			t.Errorf("the reason does not say the limit is one by design:\n%s", se.Why)
+		// The refusal must say WHY, not only no. The reason an operator needs is
+		// that the driver of an epoch runs for as long as the epoch does, so one
+		// job at a time means one epoch at a time.
+		for _, want := range []string{"driver of one epoch", "as long as the epoch does", "one epoch at a time"} {
+			if !strings.Contains(se.Why, want) {
+				t.Errorf("the reason does not contain %q, so it does not explain the limit:\n%s", want, se.Why)
+			}
 		}
 		if !strings.Contains(se.Fix, string(handlers.QueueSelectorSlice)) {
 			t.Errorf("the fix does not point at the queue that can be changed:\n%s", se.Fix)

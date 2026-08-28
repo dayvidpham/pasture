@@ -172,6 +172,13 @@ func ResolveSliceConcurrency(flagVal int) (int, error) {
 // (Engine.SetSliceConcurrency, and the command line behind it) offers on
 // purpose, and it is preferred over a queue that ignores its own settings.
 //
+// The same rule decides how long an operator's change lasts: until the next
+// daemon start, which writes its own configured limit into this row. So the
+// command line adjusts a daemon that is already running, and the daemon's own
+// option or environment variable sets what it starts with. Both are documented
+// where the operator meets them, in the help text of
+// "pasture queue concurrency set".
+//
 // Second, the two policies part company in exactly one window: a deliberate
 // bump of the pinned application version, when processes of the old and the new
 // version run against one database at once. There, the default would let only
@@ -200,6 +207,31 @@ func newSliceQueue(ctx dbos.Context, concurrency int, basePollingInterval time.D
 	return dbos.RegisterQueue(ctx, SliceQueueName, opts...)
 }
 
+// newControlQueue registers the pasture-control-queue, which carries the
+// long-lived driver of one epoch.
+//
+// WHY THE LIMIT IS ONE, and why it is not an operator setting.
+//
+// EpochControlWorkflow does not run and finish; it loops on incoming signals
+// until the epoch reaches its terminal phase (see EpochControlWorkflow in
+// internal/engine/control.go). It therefore occupies its worker slot for the
+// whole life of the epoch, not for the length of one step.
+//
+// A worker limit of one on that queue means one such driver is dequeued per
+// process at a time, so a process drives ONE epoch at a time and a second
+// enqueued epoch waits in the queue until the first completes. That waiting is
+// the point: the epochs are serialised deliberately, at the only place where
+// they can be.
+//
+// Raising the limit would not make anything faster. It would start a second
+// epoch's driver beside the first, and the two would then compete for the same
+// slice-queue slots and the same single database writer. So the value is fixed
+// here and no option or environment variable overrides it; the command line
+// refuses to change it rather than writing a number that the next start would
+// replace (see handlers.SetQueueConcurrency in internal/handlers/queue.go).
+//
+// The knob that DOES control how much work runs at once is the slice queue's
+// limit, K — see DefaultSliceQueueConcurrency.
 func newControlQueue(ctx dbos.Context, basePollingInterval time.Duration) (dbos.Queue, error) {
 	opts := queueOptions(basePollingInterval, dbos.WithWorkerConcurrency(1))
 	return dbos.RegisterQueue(ctx, ControlQueueName, opts...)

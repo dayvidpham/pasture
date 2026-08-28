@@ -62,12 +62,13 @@ type queueFacts struct {
 // names come from the engine, so each name has a single definition in the
 // codebase.
 //
-// The control queue is NOT adjustable. It runs one epoch control workflow at a
-// time per process by design, and nothing in pasture offers a different value:
-// its registration fixes the limit at one (see newControlQueue in
-// internal/engine/queue.go), and no option or environment variable overrides
-// that. Accepting a change for it would write a number that the next daemon
-// start silently replaces with one, so the commands refuse it instead.
+// The control queue is NOT adjustable. It carries the driver of one epoch, and
+// that driver runs for as long as the epoch does, so one job at a time means one
+// epoch at a time in each process — which is the intent. The full reasoning is
+// where the number is set: newControlQueue in internal/engine/queue.go. Nothing
+// in pasture offers a different value, so accepting a change here would write a
+// number that the next daemon start replaces with one, and the operator would
+// watch their change disappear. The commands refuse it instead.
 var queueSelectorFacts = map[QueueSelector]queueFacts{
 	QueueSelectorSlice:   {storedName: engine.SliceQueueName, adjustable: true},
 	QueueSelectorControl: {storedName: engine.ControlQueueName, adjustable: false},
@@ -103,8 +104,11 @@ func fixedConcurrencyError(selector QueueSelector, storedName string) error {
 	return &pasterrors.StructuredError{
 		Category: pasterrors.CategoryValidation,
 		What:     fmt.Sprintf("The %s queue does not have a concurrency setting to change.", selector),
-		Why: fmt.Sprintf("%s runs one epoch control workflow at a time in each process, by design. "+
-			"That number is fixed where the queue is created, and no option or environment variable changes it.", storedName),
+		Why: fmt.Sprintf("%s carries the driver of one epoch, and that driver runs for as long as the epoch does "+
+			"rather than for the length of one step. One job at a time therefore means one epoch at a time in each "+
+			"process, which is deliberate: a second epoch waits in the queue instead of competing with the first for "+
+			"the same workers and the same database. The number is fixed where the queue is created, and no option or "+
+			"environment variable changes it.", storedName),
 		Where:  "Changing a queue's concurrency (internal/handlers/queue.go in handlers.SetQueueConcurrency).",
 		Impact: "Nothing was changed. A number written here would be replaced by one the next time the daemon starts.",
 		Fix: fmt.Sprintf("1. Read the setting instead:\n"+
@@ -301,10 +305,27 @@ func withQueueClient(dbPath string, fn func(dbos.Client) (int, error)) (int, err
 		return pasterrors.ExitCode(err), err
 	}
 	code, opErr := fn(client)
-	if releaseErr := release(); releaseErr != nil && opErr == nil {
+	releaseErr := release()
+	return queueCommandResult(code, opErr, releaseErr)
+}
+
+// queueCommandResult decides what a queue command reports when the operation and
+// the release of the client can each fail.
+//
+// The operation's own failure wins: it is what the operator asked about, and it
+// is the more useful of the two. A release that did not finish is reported when
+// the operation succeeded, and then it MUST be reported: it means the durable
+// runtime closed its database handle while part of it was still running, so what
+// the command just printed may not be the last word on that row. Reporting it
+// costs the operator one confusing line; swallowing it costs them a wrong belief.
+func queueCommandResult(code int, opErr, releaseErr error) (int, error) {
+	if opErr != nil {
+		return code, opErr
+	}
+	if releaseErr != nil {
 		return pasterrors.ExitCode(releaseErr), releaseErr
 	}
-	return code, opErr
+	return code, nil
 }
 
 // retrieveQueue reads one queue's stored settings and turns the two failures an
