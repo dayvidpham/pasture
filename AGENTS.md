@@ -10,7 +10,7 @@ project. All contributors (human and AI) must follow these standards.
   - `pastured` (DBOS engine-host daemon)
   - `pasture` (local task + audit CLI; routes through `protocol.TaskTracker`)
   - `pasture-release` (versioning)
-- **Language:** Go 1.25+
+- **Language:** Go 1.26+
 - **CGo:** disabled (`CGO_ENABLED=0`) — all dependencies must be pure Go
 
 ## Directory Structure

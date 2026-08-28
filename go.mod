@@ -1,6 +1,6 @@
 module github.com/dayvidpham/pasture
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/dayvidpham/provenance v0.0.7
