@@ -255,15 +255,26 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 	// SQLite trail migrates the file to the current schema (creating
 	// audit_events + the dedup_key column the engine writes), so the shared
 	// handle above sees a ready database from here on.
+	//
+	// The trail is opened with cfg.Timeouts, the SAME profile the shared handle
+	// above uses. The trail and the shared handle write to ONE file, so they
+	// must wait the same time for the file lock. Before this, the trail always
+	// used the production profile and ignored Config.Timeouts. A caller that
+	// asked for a longer SQLite lock wait got it on the durable-runtime handle
+	// but not on the audit writes, so the audit writes failed first with
+	// SQLITE_BUSY while the engine still had budget left. See
+	// https://github.com/dayvidpham/pasture/issues/104.
 	trail := cfg.Trail
 	var trailCloser io.Closer
 	if trail == nil {
 		var st *audit.SqliteAuditTrail
 		var err error
 		if cfg.SkipMigrations {
-			st, err = audit.NewSqliteAuditTrailWithOptions(cfg.DBPath, audit.WithSkipMigrations())
+			st, err = audit.NewSqliteAuditTrailWithOptions(cfg.DBPath,
+				audit.WithSkipMigrations(), audit.WithTimeoutProfile(cfg.Timeouts))
 		} else {
-			st, err = audit.NewSqliteAuditTrail(cfg.DBPath)
+			st, err = audit.NewSqliteAuditTrailWithOptions(cfg.DBPath,
+				audit.WithTimeoutProfile(cfg.Timeouts))
 		}
 		if err != nil {
 			_ = db.Close()
@@ -708,6 +719,15 @@ func (e *Engine) DB() *sql.DB { return e.db }
 
 // Trail returns the forensic trail the engine records transitions into.
 func (e *Engine) Trail() audit.Trail { return e.trail }
+
+// Timeouts returns the timeout profile in force for this engine. It is the
+// profile Config.Timeouts asked for, or the production profile when the caller
+// left that field zero. Every wait the engine owns is taken from it: the SQLite
+// lock wait on both the shared handle and the audit trail, and the start_slice
+// deadline in a slice sub-workflow. A caller that must wait for the engine
+// reads its own ceiling from here instead of writing a second, separate number
+// that can disagree with the engine.
+func (e *Engine) Timeouts() timeouts.Profile { return e.cfg.Timeouts }
 
 // ReadProjection returns the projected EpochState for epochId, or (nil, nil) if
 // the epoch has not advanced yet. This is the read side of the projection that

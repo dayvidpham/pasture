@@ -205,9 +205,9 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 
 	// Open Provenance on the same file. provenance.OpenSQLite manages its
 	// own *sql.DB handle (separate from auditDB). Both handles target the
-	// same on-disk file via the modernc/sqlite driver; WAL mode + a
-	// 5000ms busy_timeout (applied via the shared DSN on the pasture handles)
-	// provide cross-handle serialisation.
+	// same on-disk file via the modernc/sqlite driver; WAL mode + the
+	// profile's busy_timeout (applied via the shared DSN on the pasture
+	// handles) provide cross-handle serialisation.
 	prov, err := provenance.OpenBorrowedSQLite(auditDB)
 	if err != nil {
 		_ = auditDB.Close()
@@ -241,7 +241,7 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 }
 
 // openAuditHandle opens a private *sql.DB on the same SQLite file used by
-// audit, configured via the shared DSN (WAL + busy_timeout=5000 +
+// audit, configured via the shared DSN (WAL + the profile's busy_timeout +
 // synchronous=NORMAL + foreign_keys=ON + _txlock=immediate) so writes from this
 // handle serialise correctly against audit and Provenance writes. The WAL
 // multi-writer model + busy_timeout replaces the former single-connection cap.

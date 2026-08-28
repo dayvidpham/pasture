@@ -129,7 +129,7 @@ func TestEnsureActiveMetamodelRaceSafe(t *testing.T) {
 	// only, keeping the required busy < ingress < start_slice ordering. Production
 	// ProductionProfile() is untouched, and the STOP-1 assertions below (exactly
 	// one committed op, one shared ref, no errors) are unchanged.
-	raceProfile, err := timeouts.New(timeouts.Test, 5*time.Second, 10*time.Second, 15*time.Second)
+	raceProfile, err := timeouts.New(timeouts.Test, 5*time.Second, 10*time.Second, 15*time.Second, 60*time.Second)
 	if err != nil {
 		t.Fatalf("construct contention-tolerant timeout profile: %v", err)
 	}
