@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -168,16 +170,79 @@ func OpenEpochController(dbPath string) (EpochController, error) {
 		dbPath = tasks.DefaultDBPath()
 	}
 
-	trail, err := audit.NewSqliteAuditTrail(dbPath)
+	// The client comes FIRST, and nothing may write to the file before it.
+	//
+	// This ordering is load-bearing, not a preference. Opening the forensic
+	// trail migrates the file: it creates the trail's own tables and raises the
+	// recorded trail schema version. Doing that to a database the schema gate
+	// inside openClient then refuses would leave the operator with a file that
+	// NEITHER build can read — this build refuses its durable layout, and an
+	// older build refuses the trail schema this one just wrote (see
+	// internal/audit/migrate.go, which rejects a database recorded at a newer
+	// version than the build knows). The refusal promises that no pasture data
+	// was written and that the older build can still read the history, so that
+	// promise must be true.
+	client, db, release, err := openClient(dbPath, clientSiteEpochController)
 	if err != nil {
 		return nil, err
 	}
-	client, db, _, err := openClient(dbPath, clientSiteEpochController)
+	trail, err := audit.NewSqliteAuditTrail(dbPath)
 	if err != nil {
-		_ = trail.Close()
+		// The client owns the handle and closes it, so releasing the client is
+		// the whole cleanup.
+		if releaseErr := release(); releaseErr != nil {
+			return nil, errors.Join(err, releaseErr)
+		}
 		return nil, err
 	}
 	return &dbosController{client: client, db: db, trail: trail, trailCloser: trail}, nil
+}
+
+// unnamedClientSiteWhere is the Where line for a durable client whose caller
+// could not be named. It names the function instead of the command, which is
+// all that is left to say, and it is only ever used beside the naming defect
+// itself.
+const unnamedClientSiteWhere = "Opening a durable client (internal/handlers/controller.go in openClient)."
+
+// gateDurableSchema refuses a database whose durable layout an older build
+// wrote, described for the caller named by site.
+//
+// An unnamed caller does NOT switch the gate off. Refusing such a database does
+// not depend on knowing which command asked for it, and running it anyway is
+// the safe half of the failure: the gate runs with the function as its location
+// and the naming defect is joined to the refusal, so neither is lost. This
+// mirrors how a start-up failure treats an unnamed caller below.
+func gateDurableSchema(db *sql.DB, dbPath string, site clientSite) error {
+	where, siteErr := site.startupWhere()
+	if siteErr != nil {
+		if err := engine.RequireSupportedDurableSchema(
+			context.Background(), unnamedClientSiteWhere, db, dbPath); err != nil {
+			return errors.Join(siteErr, err)
+		}
+		return nil
+	}
+	return engine.RequireSupportedDurableSchema(context.Background(), where, db, dbPath)
+}
+
+// durableClientLogger is the logger every durable client opened here is given.
+//
+// STANDARD ERROR, at warning level, and both halves are deliberate.
+//
+// The writer: a command's standard output is its ANSWER, and with --format json
+// it is one machine-readable document. The durable runtime logs through the
+// logger it is configured with, and when it is given none it builds its own on
+// standard OUTPUT at info level (see dbos/dbos.go in the pinned version), so its
+// start-up notes land inside that document and a pipe into a JSON reader fails.
+// Standard error keeps the runtime's account of itself apart from the command's
+// answer, which is what those two streams are for.
+//
+// The level: a runtime warning or error is something the operator should see,
+// so it is not silenced. Its routine start-up notes are not news to someone
+// running a single command, so they are not shown. A daemon, which is a
+// long-running process where those notes ARE the record of what happened, keeps
+// its own logger and is unaffected by this one.
+func durableClientLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 }
 
 // openClient opens a database-backed durable client on the unified database and
@@ -203,15 +268,22 @@ func openClient(dbPath string, site clientSite) (dbos.Client, *sql.DB, func() er
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	// SCHEMA GATE — NOT WIRED YET. The refusal of a system database written by
-	// the superseded durable runtime belongs HERE: call
-	// provenance.RequireSupportedDBOSSystemSchema(ctx, db, dbPath) on this
-	// exact handle, BEFORE the client below is constructed. The client builds a
-	// durable context of its own and migrates such a database in place, so the
-	// gate is worthless after this point. Tracked in
-	// https://github.com/dayvidpham/pasture/issues/104.
+	// Schema gate. A database whose durable layout an older build wrote is
+	// refused HERE, on this exact handle, before the client below exists: the
+	// client builds a durable context of its own and migrates such a file in
+	// place, so no refusal is possible afterwards. Nothing in this function
+	// writes to the file before this point, so a refused database keeps the
+	// records it arrived with. The gate is the same one the engine runs; see
+	// internal/engine/dbosinit.go.
+	if err := gateDurableSchema(db, dbPath, site); err != nil {
+		_ = db.Close()
+		return nil, nil, nil, err
+	}
 	client, err := dbos.NewClient(context.Background(), dbos.ClientConfig{
 		SQLiteSystemDB: db,
+		// Logger keeps the runtime's own log off this command's answer; see
+		// durableClientLogger.
+		Logger: durableClientLogger(),
 		// AppName is the durable runtime's process identity, and it is
 		// load-bearing in three separate places:
 		//

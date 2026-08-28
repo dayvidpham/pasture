@@ -13,9 +13,12 @@ package handlers_test
 // real dbosController via handlers.OpenEpochController.
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +26,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/engine"
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/internal/types"
@@ -1175,4 +1179,108 @@ func TestController_Close_CleanShutdownIsSilentAndRepeatable(t *testing.T) {
 		t.Fatalf("after Close, workflow %q application_name = (%q, present=%v), want (%q, true)",
 			epochId, appName, ok, engine.DefaultAppName)
 	}
+}
+
+// SCHEMA-GATE TESTS FOR THE CLIENT SIDE
+//
+// The epoch controller and the work-queue commands build a durable CLIENT, not
+// an engine, and that client migrates a database in place while it is
+// constructed exactly as an engine's context does. The gate therefore has to run
+// here too, and these tests prove it does — the same three databases the engine
+// side judges, built by the same helpers in internal/testutil.
+//
+// What the library behind the gate proves, and what is not repeated here, is
+// recorded beside the engine-side tests in internal/engine/dbosinit_test.go.
+
+// The production path for a client: opening the controller refuses a database
+// an older build wrote, and nothing is created or migrated.
+func TestOpenEpochController_RefusesADatabaseAnOlderBuildWrote(t *testing.T) {
+	t.Parallel()
+	path, before := testutil.WriteSupersededDurableDatabase(t)
+
+	ctrl, err := handlers.OpenEpochController(path)
+
+	// Measure the database FIRST, before any assertion below opens a handle of
+	// its own: an open connection under WAL journal mode keeps a -shm sidecar
+	// alive, and the digest counts the sidecars.
+	afterRefusal := testutil.DatabaseDigest(t, path)
+
+	if err == nil {
+		_ = ctrl.Close()
+		t.Fatal("OpenEpochController opened a database whose durable layout an older build wrote")
+	}
+	if ctrl != nil {
+		t.Fatalf("OpenEpochController returned a controller together with error %v", err)
+	}
+	report := requireStorageReport(t, err)
+	if !strings.Contains(report, path) {
+		t.Errorf("the refusal does not name the database %s:\n%s", path, report)
+	}
+	// The Where line must name the CONTROLLER, not the engine: the two open the
+	// same file, and an operator needs to know which one refused.
+	if !strings.Contains(report, "OpenEpochController") {
+		t.Errorf("the refusal does not name the epoch controller as the refusing caller:\n%s", report)
+	}
+
+	if version := testutil.ReadDurableSchemaVersion(t, path); version != testutil.SupersededDurableSchemaVersion {
+		t.Errorf("recorded layout version = %d after the refusal, want %d: the refusal migrated the database",
+			version, testutil.SupersededDurableSchemaVersion)
+	}
+	if tables := testutil.DurableRuntimeTables(t, path); len(tables) != 0 {
+		t.Errorf("the refused database gained durable-runtime tables %v: the runtime ran against it", tables)
+	}
+	if afterRefusal != before {
+		t.Errorf("the refused database changed on disk: digest %s, want %s; "+
+			"something in OpenEpochController wrote to the file before the schema gate refused it, "+
+			"or this digest was taken while a handle was still open; check the sidecars and the "+
+			"table list below. Tables now present: %v",
+			afterRefusal, before, testutil.AllTables(t, path))
+	}
+}
+
+// The other side of the client gate: a fresh database, and a database this
+// build itself created, both open without a false refusal.
+func TestOpenEpochController_AcceptsAFreshAndAnAlreadyCreatedDatabase(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+
+	first, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController on a fresh database: %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("close the controller opened on a fresh database: %v", err)
+	}
+
+	version := testutil.ReadDurableSchemaVersion(t, dbPath)
+	if version < testutil.FirstSupportedDurableSchemaVersion {
+		t.Fatalf("this build left the database at layout version %d, below its own floor %d: "+
+			"the reopen below no longer represents a database this build created",
+			version, testutil.FirstSupportedDurableSchemaVersion)
+	}
+
+	second, err := handlers.OpenEpochController(dbPath)
+	if err != nil {
+		t.Fatalf("OpenEpochController refused a database this build itself created at layout version %d: %v",
+			version, err)
+	}
+	if err := second.Close(); err != nil {
+		t.Fatalf("close the controller opened on the already-created database: %v", err)
+	}
+}
+
+// requireStorageReport fails unless err is a pasture storage error, which is the
+// exit code an operator scripts against, and returns the block they read.
+func requireStorageReport(t *testing.T, err error) string {
+	t.Helper()
+	var structured *pasterrors.StructuredError
+	if !errors.As(err, &structured) {
+		t.Fatalf("error type = %T, want *errors.StructuredError: %v", err, err)
+	}
+	if structured.Category != pasterrors.CategoryStorage {
+		t.Errorf("error category = %v, want %v", structured.Category, pasterrors.CategoryStorage)
+	}
+	var buf bytes.Buffer
+	structured.Report(&buf)
+	return buf.String()
 }
