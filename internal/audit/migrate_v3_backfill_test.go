@@ -626,8 +626,8 @@ func isAcceptedLoserOutcome(output string) bool {
 // The --idle-after-migrate=2s flag (landed in S7, aura-plugins-9ye50)
 // widens the window during which a second process can race the first.
 //
-// After both processes exit (both will exit non-zero because there is no
-// Temporal server in the test environment), the db is opened via
+// After both processes exit (both will exit non-zero because the test
+// environment runs no daemon), the db is opened via
 // audit.NewSqliteAuditTrail and the following invariants are asserted:
 //
 //   - agents_software legacy-role count == 7 (NOT 14 — exactly one process

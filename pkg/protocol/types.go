@@ -3,7 +3,7 @@
 //
 // These types are consumed by all other packages (formatters, handlers,
 // workflows, audit, ACP adapter). They are designed to be serialization-safe
-// for Temporal's JSONPlainPayloadConverter and standard encoding/json.
+// for the durable runtime's serializer and standard encoding/json.
 //
 // JSON tags use camelCase to match Python aura-protocol output format.
 package protocol

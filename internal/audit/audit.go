@@ -7,9 +7,9 @@
 //   - InMemoryAuditTrail — for testing and local development (non-durable).
 //   - SqliteAuditTrail  — for production use (durable, CGO-free via modernc.org/sqlite).
 //
-// Temporal activity wrappers (RecordAuditEvent, QueryAuditEvents) delegate to
-// a module-level Trail singleton that must be initialized via InitTrail before
-// the worker starts.
+// A module-level Trail singleton is also kept (see activities.go). It is
+// injected via InitTrail before the durable runtime starts, for callers that
+// cannot be handed a Trail directly.
 package audit
 
 import (
@@ -21,12 +21,13 @@ import (
 // Trail is the pluggable audit persistence interface.
 //
 // All implementations must be safe for concurrent use (multiple goroutines may
-// call RecordEvent and QueryEvents simultaneously inside a Temporal worker).
+// call RecordEvent and QueryEvents simultaneously inside the daemon).
 type Trail interface {
 	// RecordEvent persists a single audit event.
 	//
 	// Returns an error if the underlying store is unavailable or the write
-	// fails. The caller (Temporal activity) is responsible for retry policy.
+	// fails. The caller (a durable workflow step) is responsible for retry
+	// policy.
 	//
 	// Callers that need the inserted row id (so they can attach context_edges
 	// rows in the same logical step) MUST use RecordEventReturningId instead.
@@ -71,7 +72,8 @@ type Trail interface {
 	// for efficient batch INSERT in the SQLite backend.
 	//
 	// Returns an error if the underlying store is unavailable or the write
-	// fails. The caller (Temporal activity) is responsible for retry policy.
+	// fails. The caller (a durable workflow step) is responsible for retry
+	// policy.
 	RecordSessionEntries(ctx context.Context, entries []protocol.SessionEntry) error
 
 	// QuerySessionEntries returns all session entries for the given sessionId

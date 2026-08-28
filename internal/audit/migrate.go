@@ -59,7 +59,7 @@ import (
 //
 // Per PROPOSAL-2 §7.10.3, when a second pasture process opens the same db
 // while the first is mid-migration, the second's BEGIN IMMEDIATE may queue
-// behind the first within the SQLite-level busy_timeout=5000 ms (set in
+// behind the first within the SQLite-level busy_timeout (set in
 // sqlite.go). If the first migration takes longer than that — possible for
 // the v3 backfill against the 1024-row fixture under load — the retry loop
 // here keeps trying with exponential backoff until either (a) the lock is
@@ -240,7 +240,7 @@ func Migrate(db *sql.DB) error {
 //
 // Per PROPOSAL-2 §7.10.3, when two pastured processes start against the
 // same v1 db simultaneously, the loser's BEGIN IMMEDIATE may exceed the
-// SQLite-level busy_timeout=5000ms (set in sqlite.go) if the winner's
+// SQLite-level busy_timeout (set in sqlite.go) if the winner's
 // migration is slow. Rather than fail-fast at 5s, we retry the BeginTx
 // call with exponential backoff up to 30s total, then return the
 // actionable Scenario 12 error.

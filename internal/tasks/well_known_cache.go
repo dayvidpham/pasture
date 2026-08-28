@@ -10,13 +10,13 @@
 //   1. `cmd/pastured/main.go` constructs an empty cache via NewWellKnownAgentCache.
 //   2. `RegisterWellKnownAgents(tracker, cache)` populates it during startup,
 //      using `ensureWellKnownAgent` per row in the canonical registry.
-//   3. The populated cache is injected into `temporal.Activities.WellKnownAgents`
-//      via constructor wiring; S8's activities consult it to look up the
-//      `agent_id` to attach to each emitted audit event.
+//   3. The populated cache is read through Get / MustGet by callers that need
+//      the `agent_id` to attach to an emitted audit event. The daemon itself
+//      only reports the cache size at startup.
 //
 // Concurrency: Lookups (Get / Names) happen on the workflow hot path from
-// many concurrent activity goroutines. Writes happen ONLY during startup
-// before the Temporal worker is started — there is a clear happens-before
+// many concurrent goroutines. Writes happen ONLY during startup
+// before the durable runtime is started — there is a clear happens-before
 // ordering enforced by the daemon's main loop. We use a sync.RWMutex so
 // concurrent readers do not contend, and writes (during startup) take the
 // exclusive lock; this is over-cautious for the current single-writer model
@@ -35,9 +35,9 @@ import (
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 )
 
-// WellKnownAgentCache holds the well-known-name → AgentId mapping for use by
-// `temporal.Activities` (S8). Construct via NewWellKnownAgentCache; populate
-// via RegisterWellKnownAgents; inject into Activities. Cache lookups
+// WellKnownAgentCache holds the well-known-name → AgentId mapping used when an
+// emitted audit event needs an agent id. Construct via NewWellKnownAgentCache;
+// populate via RegisterWellKnownAgents; inject into the caller. Cache lookups
 // (Get / MustGet / Names) are safe for concurrent use after population.
 //
 // A nil *WellKnownAgentCache is NOT a valid cache: all methods other than
@@ -86,8 +86,8 @@ func (c *WellKnownAgentCache) Get(name string) (provenance.AgentID, bool) {
 // then indicates a wiring bug (the cache was not populated, or the registry
 // was edited without re-registering).
 //
-// Returns the actionable error rather than panicking so the activity can
-// surface it through Temporal's error channel without crashing the worker.
+// Returns the actionable error rather than panicking so the caller can
+// surface it as a failed step without crashing the daemon.
 func (c *WellKnownAgentCache) MustGet(name string) (provenance.AgentID, error) {
 	id, ok := c.Get(name)
 	if !ok {

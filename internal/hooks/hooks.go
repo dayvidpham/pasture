@@ -55,7 +55,7 @@ const (
 	HookSliceFailed HookEvent = "slice_failed"
 	// HookConstraintViolation fires when a phase-advance constraint check fails.
 	HookConstraintViolation HookEvent = "constraint_violation"
-	// HookConnectionLost fires when the connection to the Temporal server is lost.
+	// HookConnectionLost fires when the connection to the durable runtime is lost.
 	HookConnectionLost HookEvent = "connection_lost"
 
 	// Session events (2)

@@ -360,7 +360,7 @@ func ensureWellKnownAgent(
 	// 3. Insert mapping rows in ONE transaction on the audit handle. Either
 	//    both INSERTs land or neither does. We do not use BEGIN IMMEDIATE
 	//    explicitly here because the audit handle has SetMaxOpenConns(1) and
-	//    busy_timeout=5000 — the implicit DEFERRED lock upgrades to RESERVED
+	//    the busy-timeout retry — the implicit DEFERRED lock upgrades to RESERVED
 	//    on first write under the same serialisation guarantees.
 	tx, err := auditDB.BeginTx(ctx, nil)
 	if err != nil {

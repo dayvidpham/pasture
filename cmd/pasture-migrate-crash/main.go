@@ -49,6 +49,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	_ "modernc.org/sqlite" // pure-Go driver; CGO_ENABLED=0 compatible
 )
 
@@ -169,11 +170,15 @@ func runCrashMigration(dbPath string) (int, error) {
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 
-	// Apply the same pragmas NewSqliteAuditTrail applies so the file is
-	// in WAL mode with a 5s busy_timeout. This is what makes the
-	// concurrent-migrator race in Scenario 12 work; for Scenario 11 it
-	// is harmless but kept for behavioural parity with production.
-	for _, p := range []string{`PRAGMA journal_mode=WAL`, `PRAGMA busy_timeout=5000`} {
+	// Apply the same pragmas NewSqliteAuditTrail applies so the file is in
+	// WAL mode with the same busy_timeout production uses. The value is read
+	// from the production timeout profile, never written as a literal here:
+	// a literal is how this helper silently stopped matching production when
+	// the retry window moved from 5 s to the profile value. This is what
+	// makes the concurrent-migrator race in Scenario 12 work; for Scenario 11
+	// it is harmless but kept for behavioural parity with production.
+	busyPragma := fmt.Sprintf(`PRAGMA busy_timeout=%d`, timeouts.ProductionProfile().SQLiteBusy().Milliseconds())
+	for _, p := range []string{`PRAGMA journal_mode=WAL`, busyPragma} {
 		if _, err := db.Exec(p); err != nil {
 			return 0, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
