@@ -18,6 +18,7 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	_ "modernc.org/sqlite"
 
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/testutil"
 )
@@ -452,13 +453,24 @@ const durableMigrationTable = "dbos_migrations"
 func writeSupersededDurableDatabase(t *testing.T) (string, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "pasture.db")
-	db := openTestSQLite(t, path)
+	// The production opener, so the file arrives in the exact shape a real
+	// pasture database has: WAL journal mode and the same pragmas. A fixture
+	// written on plainer settings would be converted to WAL by the first
+	// production open, and that conversion alone rewrites the file header —
+	// which would look, to the digest assertions below, like a writer the gate
+	// failed to hold back.
+	db, err := dbconn.OpenSharedDB(path)
+	if err != nil {
+		t.Fatalf("open %s with the production opener: %v", path, err)
+	}
 	if _, err := db.ExecContext(t.Context(),
 		"CREATE TABLE "+durableMigrationTable+" (version INTEGER NOT NULL PRIMARY KEY)"); err != nil {
+		_ = db.Close()
 		t.Fatalf("create the %s table in %s: %v", durableMigrationTable, path, err)
 	}
 	if _, err := db.ExecContext(t.Context(),
 		"INSERT INTO "+durableMigrationTable+" (version) VALUES (?)", supersededDurableSchemaVersion); err != nil {
+		_ = db.Close()
 		t.Fatalf("record layout version %d in %s: %v", supersededDurableSchemaVersion, path, err)
 	}
 	if err := db.Close(); err != nil {
@@ -613,7 +625,7 @@ func TestRequireSupportedDurableSchema_AcceptsAFreshDatabase(t *testing.T) {
 // durable runtime never touches it.
 func TestEngineNew_RefusesADatabaseAnOlderBuildWrote(t *testing.T) {
 	t.Parallel()
-	path, _ := writeSupersededDurableDatabase(t)
+	path, before := writeSupersededDurableDatabase(t)
 
 	built, err := New(t.Context(), Config{
 		DBPath:             path,
@@ -643,6 +655,19 @@ func TestEngineNew_RefusesADatabaseAnOlderBuildWrote(t *testing.T) {
 	}
 	if tables := durableRuntimeTables(t, path); len(tables) != 0 {
 		t.Errorf("the refused database gained durable-runtime tables %v: the runtime ran against it", tables)
+	}
+
+	// The whole file, not only the durable layout. The refusal promises that
+	// nothing was changed and that an older build can still read the history,
+	// so NOTHING in this process may write to the file before the gate passes —
+	// not the durable runtime, not the projection table, and not the forensic
+	// trail, whose own migration would raise a schema version that the older
+	// build then refuses in turn. A digest is the only assertion that covers
+	// every writer at once, including one added later.
+	if after := fileSHA256(t, path); after != before {
+		t.Errorf("the refused database changed on disk: digest %s, want %s; "+
+			"something in engine.New wrote to the file before the schema gate refused it. "+
+			"Tables now present: %v", after, before, allTables(t, path))
 	}
 }
 
@@ -677,4 +702,64 @@ func TestEngineNew_AcceptsADatabaseThisBuildCreated(t *testing.T) {
 		t.Fatalf("engine.New refused a database this build itself created at layout version %d: %v", version, err)
 	}
 	second.Shutdown(30 * time.Second)
+}
+
+// allTables lists every table in a database, for a failure message that names
+// what a writer created.
+func allTables(t *testing.T, path string) []string {
+	t.Helper()
+	db := openTestSQLite(t, path)
+	rows, err := db.QueryContext(t.Context(),
+		"SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+	if err != nil {
+		t.Fatalf("list the tables of %s: %v", path, err)
+	}
+	defer func() { _ = rows.Close() }()
+	names := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan a table name of %s: %v", path, err)
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate the tables of %s: %v", path, err)
+	}
+	return names
+}
+
+// A layout the gate cannot read at all is the third outcome, beside a refusal
+// and a pass. It happens when the file is damaged, unreadable, or simply not
+// the database pasture owns: another program's table of the same name is enough.
+// The operator must get an actionable error for it too, not a bare library
+// message and not silence.
+func TestRequireSupportedDurableSchema_ReportsALayoutItCannotRead(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "foreign.db")
+	db := openTestSQLite(t, path)
+	// A table of the durable runtime's name that another program owns: it has
+	// no version column, so the layout version can be neither read nor judged.
+	if _, err := db.ExecContext(t.Context(),
+		"CREATE TABLE "+durableMigrationTable+" (applied_at TEXT NOT NULL)"); err != nil {
+		t.Fatalf("create a foreign %s table in %s: %v", durableMigrationTable, path, err)
+	}
+
+	err := RequireSupportedDurableSchema(t.Context(), engineConstructionSite, db, path)
+	if err == nil {
+		t.Fatal("the gate accepted a database whose durable layout it could not read")
+	}
+	structured := requireStructuredStorageError(t, err)
+	if errors.Is(err, provenance.ErrSupersededDBOSSystemSchema) {
+		t.Errorf("an unreadable layout was reported as an older build's database: %v", err)
+	}
+	for _, want := range []string{
+		path,              // the file the operator must act on
+		"integrity_check", // how to tell a damaged file from a foreign one
+		"--db <path>",     // what to do when the file belongs to another program
+	} {
+		if !reportContains(structured, want) {
+			t.Errorf("the report does not mention %q: %s", want, renderReport(structured))
+		}
+	}
 }

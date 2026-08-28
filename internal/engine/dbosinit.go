@@ -385,6 +385,18 @@ func missingDBOSSQLiteDriverError(where string, cause error) error {
 // bounded schema-bootstrap retry above, and it does not: the gate runs and
 // returns before newDurableContext is ever called.
 
+// KNOWN LIMIT — THE GATE IS A FLOOR, NOT A RANGE. It refuses a layout version
+// BELOW the supported floor and accepts every version at or above it, so a
+// database written by a FUTURE build (a newer durable runtime, a higher layout
+// version) is accepted here and then handed to this build's runtime. That is
+// the library's contract, not a pasture choice: the check it exposes compares
+// against a floor only. The consequence is bounded but real — a downgraded
+// binary opens a database it does not understand, instead of refusing it with
+// the message above. An upper bound has to come from the library, which owns
+// the layout contract and the version it was built against; it is recorded on
+// the follow-up for that repository. Re-read this note when that gate gains a
+// ceiling, and stop passing the accepted case straight through.
+
 // RequireSupportedDurableSchema refuses a pasture database whose durable
 // schema a superseded runtime wrote, and reports every other preflight failure
 // in the same actionable shape.
@@ -407,8 +419,17 @@ func RequireSupportedDurableSchema(ctx context.Context, where string, db *sql.DB
 	return nil
 }
 
-// supersededDurableSchemaError explains a database that an older pasture build
-// wrote and that this build will not open.
+// supersededDurableSchemaError explains a database whose durable layout this
+// build will not open.
+//
+// TWO CONDITIONS PRODUCE IT, and the text names both, because the repair is the
+// same but what the operator loses is not:
+//  1. An older pasture build wrote the file. Its epochs and their history are
+//     in there and are lost with the file.
+//  2. A first start of THIS build was interrupted. The runtime applies its
+//     layout steps one transaction at a time, so a start that was killed
+//     part-way leaves a below-floor version behind. Nothing of value is in such
+//     a file: it never finished being created.
 //
 // The category is storage: what failed for the caller is the database, and the
 // repair is an operator action on that file. The wrapped library error is kept
@@ -418,20 +439,29 @@ func supersededDurableSchemaError(where, dbPath string, cause error) error {
 	return &pasterrors.StructuredError{
 		Category: pasterrors.CategoryStorage,
 		What: fmt.Sprintf(
-			"This pasture build can't open the database %s: an older pasture build wrote it.", dbPath),
-		Why: "The durable-execution state in that file has a layout that an older pasture build\n" +
-			"created. This build reads a newer layout and supports no upgrade of the old one: the\n" +
-			"change was a clean cut, so there is no path that carries the old records forward.",
+			"This pasture build can't open the database %s: an older build, or an interrupted first\n"+
+				"start, left it in a layout this build doesn't read.", dbPath),
+		Why: "The durable-execution state in that file records an older layout than this build uses.\n" +
+			"Either an older pasture build wrote the file, or a first start of this build was stopped\n" +
+			"part-way and never finished writing the new layout. This build supports no upgrade of the\n" +
+			"older one: the change was a clean cut, so there is no path that carries old records\n" +
+			"forward.",
 		Where: where,
 		Impact: "Nothing was opened, started, or changed, and the file is exactly as it was. No epoch\n" +
 			"can run or be inspected from this build until the database is replaced.",
 		Fix: fmt.Sprintf(
-			"The old file can't be converted, so it has to be replaced. Its epochs and their history\n"+
-				"are lost with it — read them with the older build first if you still need them.\n"+
+			"The file can't be converted, so it has to be replaced. Step 2 tells you what you lose.\n"+
 				"1. Stop every pasture and pastured process that uses this file:\n"+
 				"     pgrep -fa 'pasture|pastured'\n"+
-				"2. Confirm no other process is opening it right now. A first-ever start-up is still\n"+
-				"   writing the new layout while it runs, and reads as an old file until it finishes.\n"+
+				"2. Decide which case this is.\n"+
+				"   - An older build wrote it: its epochs and their history go with the file. Read them\n"+
+				"     with that older build first if you still need them, then come back here.\n"+
+				"   - A first start of this build was interrupted (a crash, a power loss, or a stopped\n"+
+				"     container the first time this database was created): there is nothing to keep,\n"+
+				"     because the file never finished being created.\n"+
+				"   - A first start is still running right now, in another process: it writes the new\n"+
+				"     layout one step at a time and reads as an old file until it is done. Let it\n"+
+				"     finish and run the command again; delete nothing.\n"+
 				"3. Delete the file and its two companions:\n"+
 				"     rm %s %s-wal %s-shm\n"+
 				"4. Run the command again. This build creates a fresh database on its next start.\n"+
