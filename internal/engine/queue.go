@@ -40,9 +40,12 @@
 //     production reaches this case; it is reached by a caller that starts a
 //     workflow directly with RunWorkflow, which today is test code only.
 //
-// Both cases are pinned by
 // TestSliceQueue_RecoveryKeepsEachWorkflowOnItsOwnQueue in
-// internal/engine/subworkflows_test.go.
+// internal/engine/subworkflows_test.go pins two of these shapes: a slice, which
+// returns to the slice queue, and a workflow that ran on no queue, which goes to
+// the reserved queue. It starts its control workflow with RunWorkflow, so it
+// does NOT cover the production shape, where the control workflow is enqueued
+// and returns to the control queue.
 package engine
 
 import (

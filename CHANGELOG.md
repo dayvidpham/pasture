@@ -41,8 +41,8 @@
 
 ### Fixed
 - A build that never linked the SQLite driver now fails with a message that
-  names the exact import to add, and exits 5 (#120). It previously surfaced the
-  runtime's own message, which did not say what was missing or how to fix it.
+  names the exact import to add, and exits 5 (#120). It previously arrived under
+  a generic message that pointed at the database instead of at the build.
 - `pastured` answers a stop signal that arrives while it is still starting.
   The signal was previously held until startup finished, so a daemon blocked
   on a slow database could be ended only by a kill.

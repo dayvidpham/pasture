@@ -64,8 +64,17 @@ var retiredBusyTimeoutLiterals = []string{
 	"busy_timeout = 5000",
 }
 
+// skippedDocFile reports whether one document is excluded by name. The protocol
+// research examples are verbatim records of a different project's requirements
+// work, kept as written, for the same reason llm/ is skipped: correcting a
+// number in them would falsify the record. Generated skill bodies are NOT
+// excluded — a wrong number there is a real defect, repaired in the generator.
+func skippedDocFile(name string) bool {
+	return strings.HasPrefix(name, "RESEARCH_EXAMPLE-") && strings.EqualFold(filepath.Ext(name), ".md")
+}
+
 // markdownDocs walks the repository and returns every markdown file outside the
-// skipped directories. A glob rather than a list, so a document added later is
+// skipped directories and the skipped file names. A glob rather than a list, so a document added later is
 // covered without anyone remembering to register it.
 func markdownDocs(t *testing.T, root string) []string {
 	t.Helper()
@@ -79,6 +88,9 @@ func markdownDocs(t *testing.T, root string) []string {
 			if path != root && skippedDocDirs[entry.Name()] {
 				return fs.SkipDir
 			}
+			return nil
+		}
+		if skippedDocFile(entry.Name()) {
 			return nil
 		}
 		if strings.EqualFold(filepath.Ext(entry.Name()), ".md") {
