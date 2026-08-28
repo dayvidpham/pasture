@@ -6,6 +6,14 @@ source: github.com/dbos-inc/dbos-transact-golang (~/codebases/dbos-transact-gola
 
 # Understanding DBOS Transact (Go)
 
+> **Snapshot note (2026-08-28).** This document reads the library at v0.20, and
+> it keeps that vocabulary on purpose: `DBOSContext`, `NewDBOSContext`,
+> `NewWorkflowQueue`, `SqliteSystemDB`, `DBOSError`. Pasture now pins v1.2.0,
+> where the same concepts are named `Context`, `NewContext`, `RegisterQueue`,
+> `SQLiteSystemDB` and `Error`, and where a queue is a shared row in the system
+> database instead of per-process state. Read this file for the architecture,
+> and `go.mod` plus the library sources for the current names.
+
 ## Executive Summary
 
 DBOS Transact is a lightweight, Postgres-backed **library** (not a server) that adds durable, crash-recoverable workflow execution to ordinary Go programs. You import a package, annotate plain Go functions as workflows and steps, and DBOS checkpoints their execution state directly into a system database (Postgres, plus CockroachDB and SQLite). When a process crashes mid-operation, workflows automatically resume from the last completed step on restart.

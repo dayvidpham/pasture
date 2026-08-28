@@ -115,20 +115,27 @@ func ResolveSliceConcurrency(flagVal int) (int, error) {
 }
 
 // queueConflictPolicy is the registration conflict policy both pasture queues
-// use. A queue configuration is now a row in the system database, shared by
+// use. A queue configuration is a row in the system database now, shared by
 // every process that registers the same name, so a policy must be chosen.
 //
-// AlwaysUpdate keeps the behaviour pasture had when a queue configuration was
-// private to the process that created it: the process now starting governs the
-// queue it is about to poll. The runtime default (update only when this
-// application version is the latest registered one) would instead let an
-// already-recorded version silently keep an older concurrency limit in force,
-// which is not the behaviour any current caller expects.
+// What changed: the configuration used to be private to the process that
+// created it, so each process always polled its own settings. It is shared
+// state today, and the queue runner reloads the row on every poll iteration, so
+// a second pasture process that registers the same queue reconfigures the
+// running one live.
 //
-// This is the minimum needed to keep today's behaviour. Choosing between
-// AlwaysUpdate and a version-aware policy — together with concurrency
-// hot-reload and the recovery re-enqueue semantics — is a separate design
-// decision tracked in https://github.com/dayvidpham/pasture/issues/104.
+// AlwaysUpdate says the process now starting governs the queue it is about to
+// poll. For the only case pasture supports — peers of the same application
+// version — it agrees with the runtime default (update only when this
+// application version is the latest registered one). It differs only across
+// versions, and a mixed-version deployment is out of scope: an upgrade replaces
+// the database rather than sharing it. AlwaysUpdate does, however, maximise the
+// live-reconfiguration effect described above.
+//
+// Whether a running queue should be reconfigurable by a starting peer at all —
+// together with concurrency hot-reload and the recovery re-enqueue semantics —
+// is a design decision for the queue work tracked in
+// https://github.com/dayvidpham/pasture/issues/104.
 const queueConflictPolicy = dbos.QueueConflictAlwaysUpdate
 
 // newSliceQueue registers the pasture-slice-queue with the given DBOS context

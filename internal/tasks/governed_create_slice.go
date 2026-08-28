@@ -47,6 +47,27 @@ func BindEngineGovernedAllocation(tracker interface{}, runner composedAllocation
 	return nil
 }
 
+// UnbindEngineGovernedAllocation removes a capability installed by
+// BindEngineGovernedAllocation, so the tracker can accept another engine. Its
+// caller is the durable engine's own construction-failure path: a half-built
+// engine that kept the slot would leave the tracker pointing at a stopped
+// durable context, and would make every later engine on that tracker fail to
+// bind.
+//
+// It removes the slot only when runner is the exact value that occupies it, so
+// a stale unbind cannot detach a live engine. Removing an already-empty or
+// differently-owned slot is a no-op; there is no error to act on.
+func UnbindEngineGovernedAllocation(tracker interface{}, runner composedAllocationRunner) {
+	t, ok := tracker.(*trackerImpl)
+	if !ok || t == nil || runner == nil {
+		return
+	}
+	if t.allocationRunner != runner {
+		return
+	}
+	t.allocationRunner = nil
+}
+
 // GovernedAllocationAuditParticipant persists Pasture's projection inside the governed
 // allocation transaction. Engine.New is its sole production composition site.
 func GovernedAllocationAuditParticipant(ctx context.Context, tx provenance.GovernedAllocationTransaction, request provenance.GovernedAllocationRequest, closure provenance.OperationClosure) error {

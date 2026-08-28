@@ -1208,6 +1208,23 @@ func TestSliceQueue_DefaultConcurrency(t *testing.T) {
 	if e.ControlQueue().GetName() != engine.ControlQueueName {
 		t.Errorf("ControlQueue().GetName() = %q, want %q", e.ControlQueue().GetName(), engine.ControlQueueName)
 	}
+	// The limit the engine resolved must be the limit the queue row carries:
+	// the runner reads its concurrency from that row, not from the engine.
+	requireWorkerConcurrency(t, "SliceQueue", e.SliceQueue().GetWorkerConcurrency(), engine.DefaultSliceQueueConcurrency)
+	requireWorkerConcurrency(t, "ControlQueue", e.ControlQueue().GetWorkerConcurrency(), 1)
+}
+
+// requireWorkerConcurrency asserts the per-worker concurrency persisted in the
+// queue's own row, which is what the queue runner dequeues against.
+func requireWorkerConcurrency(t *testing.T, queue string, got *int, want int) {
+	t.Helper()
+	if got == nil {
+		t.Errorf("%s().GetWorkerConcurrency() = nil (unlimited), want %d", queue, want)
+		return
+	}
+	if *got != want {
+		t.Errorf("%s().GetWorkerConcurrency() = %d, want %d", queue, *got, want)
+	}
 }
 
 // TestResolveSliceConcurrency_Precedence table-tests the flag > env > default

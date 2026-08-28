@@ -44,10 +44,19 @@ const DefaultExecutorID = "pasture"
 // DefaultAppName is the pinned DBOS application name.
 const DefaultAppName = "pasture"
 
-// constructionAbortShutdownTimeout bounds the wait when a durable context is
+// constructionAbortShutdownTimeout bounds each wait when a durable context is
 // stopped because engine construction failed after creating it. Nothing has
 // been launched at that point, so there is no in-flight work to drain and the
 // wait exists only to let the runtime's own goroutines exit.
+//
+// It is a PER-COMPONENT budget, not a total. The runtime spends it again on
+// every component it stops, one after another: the schedule reconciler, the
+// queue runner, the workflow scheduler, in-flight workflows, and the system
+// database's two notification loops and its connection pool. That is seven
+// sequential waits in a pasture process (it configures neither the admin
+// server nor the conductor, which would add two more), so the worst case is
+// about seven times this value. An un-launched context has none of those
+// components running, so every wait returns at once in practice.
 const constructionAbortShutdownTimeout = 2 * time.Second
 
 // Config configures an Engine.
@@ -292,15 +301,40 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		}
 	}
 
-	// Every failure below owns a live durable context. Abandoning it would
-	// leak its queue runner and notification goroutines for the life of the
-	// process, and would leave them writing through the handle the same
-	// failure path closes. Stop it first, then release the handles.
+	// Every failure below owns a live durable context. Abandoning it would leak
+	// its queue runner and notification goroutines for the life of the process,
+	// and would leave them writing through the shared handle. Stop it first,
+	// then release what the runtime does not own.
+	//
+	// Order matters. The allocator binding installed below points a caller's
+	// tracker at this context; it must be removed before the context stops, or
+	// the tracker keeps a runner on a dead context and refuses to accept a
+	// replacement engine.
+	//
+	// The runtime owns the shared handle it was given and closes it during
+	// shutdown, so db.Close here is a second close of an already-closed handle
+	// — harmless, and still correct if that ownership ever changes.
+	//
+	// A shutdown that does not finish inside its budget is joined into the
+	// returned error rather than dropped: it means goroutines from this
+	// abandoned context may still be running.
+	var unbindAllocator func()
 	abort := func(cause error) (*Engine, error) {
-		_ = dbos.Shutdown(dbosCtx, constructionAbortShutdownTimeout)
+		if unbindAllocator != nil {
+			unbindAllocator()
+		}
+		shutdownErr := dbos.Shutdown(dbosCtx, constructionAbortShutdownTimeout)
 		_ = db.Close()
 		if trailCloser != nil {
 			_ = trailCloser.Close()
+		}
+		if shutdownErr != nil {
+			return nil, errors.Join(cause, fmt.Errorf(
+				"engine.New: the durable context created for this engine did not stop while construction was being abandoned; "+
+					"its goroutines may keep running until the process exits; "+
+					"restart the process if epochs behave inconsistently: %w",
+				shutdownErr,
+			))
 		}
 		return nil, cause
 	}
@@ -323,6 +357,10 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		if bindErr := tasks.BindEngineGovernedAllocation(cfg.Tracker, allocator); bindErr != nil {
 			return abort(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow, What: "Couldn't install the engine-owned slice allocator.", Why: "The configured tracker rejected the narrow composed-allocation capability before launch.", Where: "Constructing the engine (internal/engine/engine.go in engine.New).", Impact: "CreateSlice would otherwise have no safe path to the engine-owned transaction.", Fix: "Pass the unified tracker returned by tasks.OpenTaskTracker as engine.Config.Tracker and do not reuse it across engines.", Cause: bindErr})
 		}
+		// The tracker accepts exactly one engine-owned runner. Give every later
+		// failure path a way to hand that slot back, so the caller can retry
+		// construction with the same tracker.
+		unbindAllocator = func() { tasks.UnbindEngineGovernedAllocation(cfg.Tracker, allocator) }
 	}
 
 	// When an activity sink is configured, resolve the engine's stable agent id
@@ -412,27 +450,32 @@ func (e *Engine) Launch() error {
 }
 
 // Shutdown stops the DBOS context (waiting up to timeout for in-flight steps),
-// then closes the shared handle and the owned trail. Safe to call once.
+// then releases the handles the runtime does not own. Safe to call once.
 //
-// When the durable runtime reports that the timeout expired with workers still
-// running, those workers may still write to the shared SQLite handle. Closing
-// it under them would turn a slow shutdown into a use-after-close, so the
-// handle is deliberately left open in that case and the process exit releases
-// it instead. The trail is closed either way: it is a separate handle that the
-// runtime never writes through.
+// The durable runtime owns the shared SQLite handle it was constructed with:
+// its shutdown closes that handle unconditionally, on the timeout path too
+// (dbos/internal/sysdb/dbq.go, sqlPoolAdapter.Close). The engine therefore
+// cannot hold the handle open for a worker that outlives the timeout, and the
+// close below is a harmless second close of an already-closed handle.
+// internal/handlers/controller.go records the same ownership for the client.
 //
-// Reporting that outcome to the caller, and the tests that pin it, are a
-// separate change tracked in https://github.com/dayvidpham/pasture/issues/104;
-// this method keeps its current void signature.
+// timeout is a per-component budget inside the runtime, not a total for the
+// whole shutdown; see constructionAbortShutdownTimeout for the breakdown.
+//
+// The trail is closed either way: it is a separate handle that the runtime
+// never writes through.
+//
+// Reporting an incomplete shutdown to the caller, and the tests that pin it,
+// are a separate change tracked in
+// https://github.com/dayvidpham/pasture/issues/104; this method keeps its
+// current void signature.
 func (e *Engine) Shutdown(timeout time.Duration) {
-	shutdownIncomplete := false
 	if e.dbosCtx != nil {
 		if err := dbos.Shutdown(e.dbosCtx, timeout); err != nil {
-			shutdownIncomplete = true
 			e.logShutdownFailure(err)
 		}
 	}
-	if e.db != nil && !shutdownIncomplete {
+	if e.db != nil {
 		_ = e.db.Close()
 	}
 	if e.trailCloser != nil {
@@ -505,7 +548,8 @@ func (e *Engine) logShutdownFailure(err error) {
 	}
 	logger.Error(
 		"the durable engine did not stop within its shutdown timeout; "+
-			"workers may still be writing, so the shared database handle was left open for the process to release",
+			"some workers may still be running, and the durable runtime has already begun closing the shared database handle it owns, "+
+			"so a late write through that handle will fail; restart the process if epoch state looks inconsistent",
 		"error", err,
 	)
 }
