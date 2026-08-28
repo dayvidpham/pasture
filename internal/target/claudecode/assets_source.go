@@ -61,7 +61,7 @@ func RenderGeneratedAssets(repoRoot string) (map[string][]byte, error) {
 	const where = "claudecode.RenderGeneratedAssets"
 	figuresDir := filepath.Join(repoRoot, "skills", "protocol", "figures")
 	files, err := codegen.EmitHarness(
-		repoRoot,
+		codegen.RepoRoots(repoRoot),
 		codegen.ClaudeCodeTarget,
 		figuresDir,
 		codegen.GenerateOptions{Diff: false, Write: false},

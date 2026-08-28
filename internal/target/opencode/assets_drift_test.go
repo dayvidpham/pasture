@@ -20,7 +20,7 @@ func TestEmbeddedAssetsMatchOpenCodeHarness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files, err := codegen.EmitHarness(root, codegen.OpenCodeTarget, filepath.Join(root, "skills", "protocol", "figures"), codegen.GenerateOptions{Diff: false, Write: false})
+	files, err := codegen.EmitHarness(codegen.RepoRoots(root), codegen.OpenCodeTarget, filepath.Join(root, "skills", "protocol", "figures"), codegen.GenerateOptions{Diff: false, Write: false})
 	if err != nil {
 		t.Fatalf("render OpenCode harness: %v", err)
 	}

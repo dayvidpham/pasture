@@ -116,7 +116,63 @@ func ResolveHarness(targets []string) ([]TargetHarness, error) {
 	return out, nil
 }
 
-func EmitHarness(root string, h TargetHarness, figuresDir string, opts GenerateOptions) ([]GeneratedFile, error) {
+// HarnessRoots names the two independent directory roots one harness emission
+// uses:
+//
+//   - Source is the tree that holds the hand-authored inputs which are copied
+//     verbatim (skills/<dir>). Nothing is ever written below Source.
+//   - Output is the tree that receives every emitted file.
+//
+// A normal repository generation sets both to the module root; use RepoRoots
+// for that case. Callers that render into a scratch directory (a temporary
+// staging tree, or a test) keep Source on the real module and point Output
+// somewhere else, so no input tree must be duplicated first.
+type HarnessRoots struct {
+	Source string
+	Output string
+}
+
+// RepoRoots returns the roots of an in-place generation, where one module root
+// is both the source of the hand-authored trees and the destination of the
+// generated files.
+func RepoRoots(root string) HarnessRoots {
+	return HarnessRoots{Source: root, Output: root}
+}
+
+// validate rejects an incomplete HarnessRoots before any file is read or
+// written, so a caller that forgot a root gets a named fix instead of a
+// confusing lstat failure on a relative path.
+func (r HarnessRoots) validate(name HarnessName) error {
+	var missing string
+	switch {
+	case r.Source == "" && r.Output == "":
+		missing = "Source and Output are"
+	case r.Source == "":
+		missing = "Source is"
+	case r.Output == "":
+		missing = "Output is"
+	default:
+		return nil
+	}
+	return fmt.Errorf(
+		"codegen.EmitHarness(%s): HarnessRoots.%s empty — "+
+			"why: the harness reads the hand-authored verbatim trees below Source and writes every emitted file below Output, so both roots must be set; "+
+			"where: internal/codegen/harness.go EmitHarness; "+
+			"when: the roots were validated before the first read or write; "+
+			"what it means for the caller: no file was read or written and generation stopped; "+
+			"fix: pass codegen.RepoRoots(moduleRoot) for an in-place run, or set both Source and Output for a split run",
+		name, missing,
+	)
+}
+
+// EmitHarness renders one harness target: role skills, command skills,
+// verbatim skill copies, agents, and the manifest. roots.Source supplies the
+// verbatim inputs; roots.Output receives all output.
+func EmitHarness(roots HarnessRoots, h TargetHarness, figuresDir string, opts GenerateOptions) ([]GeneratedFile, error) {
+	if err := roots.validate(h.Name); err != nil {
+		return nil, err
+	}
+	root := roots.Output
 	var out []GeneratedFile
 
 	for _, item := range roleSkillItems() {
@@ -142,7 +198,7 @@ func EmitHarness(root string, h TargetHarness, figuresDir string, opts GenerateO
 	}
 
 	for _, dir := range h.Verbatim {
-		files, err := copyVerbatimSkill(root, h.SkillRoot, dir, opts)
+		files, err := copyVerbatimSkill(roots, h.SkillRoot, dir, opts)
 		if err != nil {
 			return nil, fmt.Errorf("codegen.EmitHarness(%s): verbatim skill %s: %w", h.Name, dir, err)
 		}
@@ -266,9 +322,16 @@ func emitCommandSkill(h TargetHarness, commandID string, path string, figuresDir
 	return writeFullGeneratedFile(path, content, opts)
 }
 
-func copyVerbatimSkill(root string, targetSkillRoot string, dirName string, opts GenerateOptions) ([]GeneratedFile, error) {
-	srcRoot := filepath.Join(root, "skills", dirName)
-	dstRoot := filepath.Join(root, targetSkillRoot, dirName)
+// copyVerbatimSkill copies one hand-authored skill directory from
+// <roots.Source>/skills/<dirName> to <roots.Output>/<targetSkillRoot>/<dirName>,
+// recursively and byte for byte. The two roots are independent: the source tree
+// is never written, and the output tree needs no copy of the source.
+//
+// The walk stays STRICT: a missing source directory is a real packaging fault
+// and is reported, not skipped.
+func copyVerbatimSkill(roots HarnessRoots, targetSkillRoot string, dirName string, opts GenerateOptions) ([]GeneratedFile, error) {
+	srcRoot := filepath.Join(roots.Source, "skills", dirName)
+	dstRoot := filepath.Join(roots.Output, targetSkillRoot, dirName)
 	var out []GeneratedFile
 	if err := filepath.WalkDir(srcRoot, func(srcPath string, d fs.DirEntry, err error) error {
 		if err != nil {

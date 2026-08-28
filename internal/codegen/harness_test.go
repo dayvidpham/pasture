@@ -1,7 +1,6 @@
 package codegen
 
 import (
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,7 +30,7 @@ func TestEmitHarnessClaudeCodeIsByteIdentical(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveHarness: %v", err)
 	}
-	files, err := EmitHarness(root, targets[0], filepath.Join(root, "skills", "protocol", "figures"), GenerateOptions{
+	files, err := EmitHarness(RepoRoots(root), targets[0], filepath.Join(root, "skills", "protocol", "figures"), GenerateOptions{
 		Diff:  false,
 		Write: false,
 	})
@@ -57,19 +56,21 @@ func TestEmitHarnessCombinedTargetsDoNotPerturbClaudeCode(t *testing.T) {
 
 	root := t.TempDir()
 	writeHarnessSeedFiles(t, root)
-	seedVerbatimSourceDirs(t, root) // OpenCode verbatim source (protocol, install-cli)
+	// The verbatim inputs stay in the real module tree; only the output goes
+	// to the temporary root, so no input tree is copied.
+	roots := HarnessRoots{Source: testModuleRoot(t), Output: root}
 	targets, err := ResolveHarness([]string{string(HarnessClaudeCode), string(HarnessOpenCode)})
 	if err != nil {
 		t.Fatalf("ResolveHarness: %v", err)
 	}
 
-	claudeFiles, err := EmitHarness(root, targets[0], "", GenerateOptions{Diff: false, Write: true})
+	claudeFiles, err := EmitHarness(roots, targets[0], "", GenerateOptions{Diff: false, Write: true})
 	if err != nil {
 		t.Fatalf("EmitHarness(%s): %v", targets[0].Name, err)
 	}
 	before := readGeneratedFiles(t, claudeFiles)
 
-	if _, err := EmitHarness(root, targets[1], "", GenerateOptions{Diff: false, Write: true}); err != nil {
+	if _, err := EmitHarness(roots, targets[1], "", GenerateOptions{Diff: false, Write: true}); err != nil {
 		t.Fatalf("EmitHarness(%s): %v", targets[1].Name, err)
 	}
 	after := readGeneratedFiles(t, claudeFiles)
@@ -136,50 +137,6 @@ func readGeneratedFiles(t *testing.T, files []GeneratedFile) map[string]string {
 	return out
 }
 
-// seedVerbatimSourceDirs copies the real hand-authored verbatim skill trees
-// (openCodeVerbatimDirs: "protocol" and "install-cli") from the actual module's
-// skills/ directory into dst/skills/<dir>/, making a synthetic temp root usable
-// by EmitHarness(opencode).
-//
-// Background: copyVerbatimSkill reads <root>/skills/<dir> and writes to
-// <root>/<targetSkillRoot>/<dir>. Tests that build a synthetic temp root
-// (dst = t.TempDir()) and call EmitHarness(dst, OpenCodeTarget, ...) must
-// seed the verbatim SOURCE dirs — otherwise copyVerbatimSkill errors on the
-// missing directory. copyVerbatimSkill intentionally stays STRICT (a missing
-// source dir means a real packaging problem in production); seeding here is the
-// correct integration fix for tests with synthetic roots.
-func seedVerbatimSourceDirs(t *testing.T, dst string) {
-	t.Helper()
-	moduleRoot := testModuleRoot(t)
-	for _, dir := range openCodeVerbatimDirs {
-		src := filepath.Join(moduleRoot, "skills", dir)
-		dstDir := filepath.Join(dst, "skills", dir)
-		if err := filepath.WalkDir(src, func(srcPath string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			rel, err := filepath.Rel(src, srcPath)
-			if err != nil {
-				return err
-			}
-			dstPath := filepath.Join(dstDir, rel)
-			if d.IsDir() {
-				return os.MkdirAll(dstPath, 0o755)
-			}
-			data, err := os.ReadFile(srcPath)
-			if err != nil {
-				return err
-			}
-			if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
-				return err
-			}
-			return os.WriteFile(dstPath, data, 0o644)
-		}); err != nil {
-			t.Fatalf("seedVerbatimSourceDirs: copy %q into %q: %v", src, dstDir, err)
-		}
-	}
-}
-
 func testModuleRoot(t *testing.T) string {
 	t.Helper()
 	wd, err := os.Getwd()
@@ -196,5 +153,106 @@ func testModuleRoot(t *testing.T) string {
 			t.Fatalf("could not find go.mod walking up from %q", wd)
 		}
 		dir = parent
+	}
+}
+
+// TestEmitHarnessCopiesVerbatimFromSourceRootIntoSeparateOutputRoot proves the
+// verbatim SOURCE root and the OUTPUT root are independent: the harness reads
+// the hand-authored trees from the real module and writes every file into a
+// temporary directory, with no copy of the source seeded there first. It also
+// proves the source tree is never written.
+func TestEmitHarnessCopiesVerbatimFromSourceRootIntoSeparateOutputRoot(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name         string
+		target       TargetHarness
+		verbatimDirs []string
+	}{
+		{name: string(HarnessOpenCode), target: OpenCodeTarget, verbatimDirs: openCodeVerbatimDirs},
+		{name: string(HarnessCodex), target: CodexTarget, verbatimDirs: codexVerbatimDirs},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			sourceRoot := testModuleRoot(t)
+			outputRoot := t.TempDir()
+			figuresDir := filepath.Join(sourceRoot, "skills", "protocol", "figures")
+
+			files, err := EmitHarness(
+				HarnessRoots{Source: sourceRoot, Output: outputRoot},
+				testCase.target,
+				figuresDir,
+				GenerateOptions{Diff: false, Write: true},
+			)
+			if err != nil {
+				t.Fatalf("EmitHarness(%s) with a separate output root: %v", testCase.target.Name, err)
+			}
+			if len(files) == 0 {
+				t.Fatalf("EmitHarness(%s) returned no files", testCase.target.Name)
+			}
+
+			if len(testCase.verbatimDirs) == 0 {
+				t.Fatalf("target %s has no verbatim dirs to exercise", testCase.target.Name)
+			}
+			for _, dir := range testCase.verbatimDirs {
+				srcPath := filepath.Join(sourceRoot, "skills", dir, "SKILL.md")
+				want, err := os.ReadFile(srcPath)
+				if err != nil {
+					t.Fatalf("read verbatim source %q: %v", srcPath, err)
+				}
+				dstPath := filepath.Join(outputRoot, testCase.target.SkillRoot, dir, "SKILL.md")
+				got, err := os.ReadFile(dstPath)
+				if err != nil {
+					t.Fatalf("verbatim skill %q was not written to the output root: %v", dstPath, err)
+				}
+				if string(got) != string(want) {
+					t.Fatalf("verbatim skill %q is not byte-identical to source %q", dstPath, srcPath)
+				}
+			}
+
+			// Nothing may be emitted into the source tree.
+			for _, file := range files {
+				rel, err := filepath.Rel(outputRoot, file.Path)
+				if err != nil || strings.HasPrefix(rel, "..") {
+					t.Fatalf("EmitHarness(%s) emitted %q outside the output root %q", testCase.target.Name, file.Path, outputRoot)
+				}
+			}
+		})
+	}
+}
+
+// TestEmitHarnessRejectsIncompleteRoots proves an unset root stops generation
+// before any read or write, with a message that names the missing field.
+func TestEmitHarnessRejectsIncompleteRoots(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		roots HarnessRoots
+		want  string
+	}{
+		{name: "both empty", roots: HarnessRoots{}, want: "Source and Output are empty"},
+		{name: "source empty", roots: HarnessRoots{Output: "out"}, want: "Source is empty"},
+		{name: "output empty", roots: HarnessRoots{Source: "src"}, want: "Output is empty"},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			files, err := EmitHarness(testCase.roots, OpenCodeTarget, "", GenerateOptions{Diff: false, Write: true})
+			if err == nil {
+				t.Fatalf("EmitHarness with roots %+v returned nil error, want a rejected-roots error", testCase.roots)
+			}
+			if files != nil {
+				t.Fatalf("EmitHarness with roots %+v returned %d files, want none", testCase.roots, len(files))
+			}
+			if !strings.Contains(err.Error(), testCase.want) {
+				t.Fatalf("EmitHarness error %q does not contain %q", err.Error(), testCase.want)
+			}
+		})
 	}
 }

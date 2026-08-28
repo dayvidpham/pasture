@@ -231,7 +231,7 @@ func (d CodexTargetDescriptor) Package(id CodexComponentID) (CodexPackage, bool)
 }
 
 // NewCodexTargetDescriptor partitions a completed set of Codex GeneratedFiles
-// (as produced by EmitHarness(root, CodexTarget, ...)) into the three plugin
+// (as produced by EmitHarness with CodexTarget) into the three plugin
 // packages and freezes each into an immutable artifact.Bundle keyed by a
 // canonical manifest.
 //
@@ -265,7 +265,7 @@ func NewCodexTargetDescriptor(root string, files []GeneratedFile) (CodexTargetDe
 					"codegen.NewCodexTargetDescriptor: generated file %q is not under the module root %q — "+
 						"where: partitioning Codex output into packages — "+
 						"why: every Codex file must be a package-relative path under the emit root — "+
-						"fix: emit the Codex target with EmitHarness(root, CodexTarget, ...) using the same root passed here",
+						"fix: emit the Codex target with EmitHarness(HarnessRoots{Source: ..., Output: root}, CodexTarget, ...) using the same output root passed here",
 					file.Path, root,
 				)
 			}

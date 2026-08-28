@@ -20,7 +20,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	files, err := codegen.EmitHarness(root, codegen.OpenCodeTarget,
+	files, err := codegen.EmitHarness(codegen.RepoRoots(root), codegen.OpenCodeTarget,
 		filepath.Join(root, "skills", "protocol", "figures"),
 		codegen.GenerateOptions{Diff: false, Write: false})
 	if err != nil {

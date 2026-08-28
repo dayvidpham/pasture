@@ -735,7 +735,7 @@ func collectHarnessOutputs(
 	harness TargetHarness,
 ) ([]GeneratedFile, map[string]string) {
 	t.Helper()
-	files, err := EmitHarness(repoRoot, harness, figuresDir, GenerateOptions{Diff: false, Write: false})
+	files, err := EmitHarness(RepoRoots(repoRoot), harness, figuresDir, GenerateOptions{Diff: false, Write: false})
 	if err != nil {
 		t.Fatalf(
 			"harness output inventory could not be rendered — "+
