@@ -180,7 +180,7 @@ var lifecycleCommand = regexp.MustCompile(`hook lifecycle`)
 
 // openCodePluginExport is the exported plugin factory the OpenCode host loads.
 // Only the handlers inside its returned object are registered with the host.
-const openCodePluginExport = "export const PastureLifecycle"
+const openCodePluginExport = "export const PastureLifecycle ="
 
 // openCodeCatchAllHandler is the single OpenCode handler that receives the whole
 // server-sent observation stream. It is not one native event: it dispatches on
