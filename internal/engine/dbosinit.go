@@ -2,10 +2,13 @@ package engine
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/dayvidpham/provenance"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
@@ -358,6 +361,140 @@ func missingDBOSSQLiteDriverError(where string, cause error) error {
 			fmt.Sprintf("   for lifecycle commands):\n     _ %q\n", dbosSQLiteDriverPackage) +
 			"3. Rebuild, then run the tests in those two packages: they check that the import is\n" +
 			"   present in each file that needs it.",
+		Cause: cause,
+	}
+}
+
+// SCHEMA GATE
+//
+// The durable runtime migrates a system database in place while it builds a
+// context or a client. A database that the superseded runtime wrote is
+// therefore upgraded silently, and after that moment no refusal is possible any
+// more. This build supports no such in-place upgrade, so the gate below must
+// run on the exact handle that becomes the runtime's system database, BEFORE
+// that construction.
+//
+// The check itself belongs to the provenance library, which owns the durable
+// schema contract and pins the floor against a recorded database written by the
+// superseded runtime. Pasture calls that public gate and translates its refusal
+// into the error shape pasture's own commands report. It never re-implements
+// the check, so the floor cannot drift between the two repositories.
+//
+// The refusal is permanent: deleting the file is the only repair, and no
+// re-attempt can change the recorded version. It must therefore never enter the
+// bounded schema-bootstrap retry above, and it does not: the gate runs and
+// returns before newDurableContext is ever called.
+
+// KNOWN LIMIT — THE GATE IS A FLOOR, NOT A RANGE. It refuses a layout version
+// BELOW the supported floor and accepts every version at or above it, so a
+// database written by a FUTURE build (a newer durable runtime, a higher layout
+// version) is accepted here and then handed to this build's runtime. That is
+// the library's contract, not a pasture choice: the check it exposes compares
+// against a floor only. The consequence is bounded but real — a downgraded
+// binary opens a database it does not understand, instead of refusing it with
+// the message above. An upper bound has to come from the library, which owns
+// the layout contract and the version it was built against; it is recorded on
+// the follow-up for that repository. Re-read this note when that gate gains a
+// ceiling, and stop passing the accepted case straight through.
+
+// RequireSupportedDurableSchema refuses a pasture database whose durable
+// schema a superseded runtime wrote, and reports every other preflight failure
+// in the same actionable shape.
+//
+// Call it on the exact *sql.DB that is about to become the durable runtime's
+// system handle, before dbos.NewContext or dbos.NewClient. dbPath names the
+// file for the operator. where is the caller's own location, because the engine
+// and the epoch controller open the same file and an operator needs to know
+// which of them refused to start.
+//
+// The gate only reads. On refusal nothing was opened, created, or migrated, and
+// the file is byte-for-byte as it was.
+func RequireSupportedDurableSchema(ctx context.Context, where string, db *sql.DB, dbPath string) error {
+	if err := provenance.RequireSupportedDBOSSystemSchema(ctx, db, dbPath); err != nil {
+		if errors.Is(err, provenance.ErrSupersededDBOSSystemSchema) {
+			return supersededDurableSchemaError(where, dbPath, err)
+		}
+		return unreadableDurableSchemaError(where, dbPath, err)
+	}
+	return nil
+}
+
+// supersededDurableSchemaError explains a database whose durable layout this
+// build will not open.
+//
+// TWO CONDITIONS PRODUCE IT, and the text names both, because the repair is the
+// same but what the operator loses is not:
+//  1. An older pasture build wrote the file. Its epochs and their history are
+//     in there and are lost with the file.
+//  2. A first start of THIS build was interrupted. The runtime applies its
+//     layout steps one transaction at a time, so a start that was killed
+//     part-way leaves a below-floor version behind. Nothing of value is in such
+//     a file: it never finished being created.
+//
+// The category is storage: what failed for the caller is the database, and the
+// repair is an operator action on that file. The wrapped library error is kept
+// as the cause, so errors.Is against the library sentinel still succeeds for a
+// caller that wants to tell this refusal from any other storage failure.
+func supersededDurableSchemaError(where, dbPath string, cause error) error {
+	return &pasterrors.StructuredError{
+		Category: pasterrors.CategoryStorage,
+		What: fmt.Sprintf(
+			"This pasture build can't open the database %s: an older build, or an interrupted first\n"+
+				"start, left it in a layout this build doesn't read.", dbPath),
+		Why: "The durable-execution state in that file records an older layout than this build uses.\n" +
+			"Either an older pasture build wrote the file, or a first start of this build was stopped\n" +
+			"part-way and never finished writing the new layout. This build supports no upgrade of the\n" +
+			"older one: the change was a clean cut, so there is no path that carries old records\n" +
+			"forward.",
+		Where: where,
+		Impact: "Nothing was opened or started, and no pasture data was written: no epoch, no history,\n" +
+			"and no layout step. Opening the file does normalise its journal mode, so its header can\n" +
+			"differ; the records inside it do not. No epoch can run or be inspected from this build\n" +
+			"until the database is replaced.",
+		Fix: fmt.Sprintf(
+			"The file can't be converted, so it has to be replaced. Step 2 tells you what you lose.\n"+
+				"1. Stop every pasture and pastured process that uses this file:\n"+
+				"     pgrep -fa 'pasture|pastured'\n"+
+				"2. Decide which case this is.\n"+
+				"   - An older build wrote it: its epochs and their history go with the file. Read them\n"+
+				"     with that older build first if you still need them, then come back here.\n"+
+				"   - A first start of this build was interrupted (a crash, a power loss, or a stopped\n"+
+				"     container the first time this database was created): there is nothing to keep,\n"+
+				"     because the file never finished being created.\n"+
+				"   - A first start is still running right now, in another process: it writes the new\n"+
+				"     layout one step at a time and reads as an old file until it is done. Let it\n"+
+				"     finish and run the command again; delete nothing.\n"+
+				"3. Delete the file and its two companions:\n"+
+				"     rm %s %s-wal %s-shm\n"+
+				"4. Run the command again. This build creates a fresh database on its next start.\n"+
+				"   To keep the old file instead, point pasture at another path with --db <path>.",
+			dbPath, dbPath, dbPath),
+		Cause: cause,
+	}
+}
+
+// unreadableDurableSchemaError explains a preflight that could not decide
+// whether the database is usable, which is every failure of the gate other than
+// the refusal above: an unreadable file, a damaged one, or a table of the same
+// name that pasture did not write.
+func unreadableDurableSchemaError(where, dbPath string, cause error) error {
+	return &pasterrors.StructuredError{
+		Category: pasterrors.CategoryStorage,
+		What: fmt.Sprintf(
+			"Couldn't check the durable-execution layout of the database %s.", dbPath),
+		Why: "Before it opens a database, pasture reads the recorded layout version to be sure this\n" +
+			"build can use it. That read failed, so the layout is unknown. The file is normally\n" +
+			"unreadable, damaged, or not the database pasture owns.",
+		Where: where,
+		Impact: "Nothing was opened or started, and no pasture data was written. The engine did not\n" +
+			"start, so no epoch can run from this process.",
+		Fix: fmt.Sprintf(
+			"1. Confirm the path exists and this user may read and write it:\n"+
+				"     ls -l %s\n"+
+				"2. Confirm the file is a healthy SQLite database:\n"+
+				"     sqlite3 %s 'PRAGMA integrity_check;'\n"+
+				"3. If the file belongs to another program, point pasture at its own database with\n"+
+				"   --db <path>.", dbPath, dbPath),
 		Cause: cause,
 	}
 }

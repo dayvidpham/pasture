@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -11,8 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dayvidpham/provenance"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
+	_ "modernc.org/sqlite"
 
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/testutil"
 )
@@ -399,4 +403,260 @@ func TestDescribeDurableStartupFailure(t *testing.T) {
 			t.Errorf("error = %v, want the original failure returned unchanged", got)
 		}
 	})
+}
+
+// SCHEMA-GATE TESTS
+//
+// The gate itself lives in the provenance library, which owns the durable
+// schema contract and proves the refusal against a recorded 176 KB database
+// that the superseded runtime really wrote, plus the matching hazard: the same
+// file handed straight to the runtime is migrated in place. Those two proofs
+// are not repeated here, and the recorded database is not copied into this
+// repository, because the library exports no way to obtain it.
+//
+// What the tests below prove is pasture's own wiring, which the library cannot:
+// the gate runs before the durable context is built, its refusal reaches the
+// caller as an actionable storage error that names the file, a refused database
+// keeps the durable layout it arrived with, and a database this build created
+// is never refused.
+//
+// The refused database is built here from the only two facts the gate reads:
+// the durable runtime records its layout version in a single-row table named
+// dbos_migrations, and the superseded runtime stopped at version 41. Evidence
+// for both, in the library version pinned in go.mod:
+// dbos/internal/sysdb/sqlite_migrations.go (RunSqliteMigrations creates
+// `dbos_migrations (version INTEGER NOT NULL PRIMARY KEY)` and reads a single
+// row from it) and BuildSqliteMigrations in the same file, whose SQLite list
+// runs 1..41 and then continues at 42, so 41 is the last version the superseded
+// runtime can leave behind.
+
+// The three databases these tests judge — one an older build wrote, one fresh,
+// one this build created — and the digest that proves a refusal wrote nothing
+// are built by internal/testutil (durableschema.go). They live there because the
+// epoch controller needs exactly the same three, and a second copy of these
+// facts would drift from the first.
+
+// openTestSQLite opens a WRITABLE handle through the production opener, because
+// the gate takes the exact handle a caller is about to hand the durable runtime.
+// The handle is closed on cleanup; a test that measures a digest closes it
+// itself first, since an open connection keeps a sidecar alive.
+func openTestSQLite(t *testing.T, path string) *sql.DB {
+	t.Helper()
+	db, err := dbconn.OpenSharedDB(path)
+	if err != nil {
+		t.Fatalf("open the test database %s: %v", path, err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+// renderReport returns the user-visible error block, for a failure message that
+// shows exactly what an operator would read.
+func renderReport(e *pasterrors.StructuredError) string {
+	var buf bytes.Buffer
+	e.Report(&buf)
+	return buf.String()
+}
+
+// requireStructuredStorageError fails unless err is a pasture storage error,
+// which is the exit code an operator scripts against.
+func requireStructuredStorageError(t *testing.T, err error) *pasterrors.StructuredError {
+	t.Helper()
+	var structured *pasterrors.StructuredError
+	if !errors.As(err, &structured) {
+		t.Fatalf("error type = %T, want *errors.StructuredError: %v", err, err)
+	}
+	if structured.Category != pasterrors.CategoryStorage {
+		t.Errorf("error category = %v, want %v", structured.Category, pasterrors.CategoryStorage)
+	}
+	return structured
+}
+
+// The gate refuses a database an older build wrote, reads only, and says what
+// the operator must do about it.
+func TestRequireSupportedDurableSchema_RefusesADatabaseAnOlderBuildWrote(t *testing.T) {
+	t.Parallel()
+	path, before := testutil.WriteSupersededDurableDatabase(t)
+	db := openTestSQLite(t, path)
+
+	err := RequireSupportedDurableSchema(t.Context(), engineConstructionSite, db, path)
+	if err == nil {
+		t.Fatal("the gate accepted a database whose durable layout an older build wrote")
+	}
+	structured := requireStructuredStorageError(t, err)
+	if !errors.Is(err, provenance.ErrSupersededDBOSSystemSchema) {
+		t.Errorf("the refusal no longer matches the library's own sentinel: %v", err)
+	}
+	for _, want := range []string{
+		path,                           // the file the operator must act on
+		path + "-wal",                  // and its two companions
+		path + "-shm",                  // ...
+		"rm ",                          // the exact command
+		"--db <path>",                  // the alternative to deleting it
+		"pgrep -fa 'pasture|pastured'", // stop the processes first
+	} {
+		if !reportContains(structured, want) {
+			t.Errorf("the refusal does not mention %q: %s", want, renderReport(structured))
+		}
+	}
+	// The wrapped library text carries the recorded version and the floor, so a
+	// floor that moves fails here instead of passing silently.
+	for _, want := range []string{
+		fmt.Sprintf("version %d", testutil.SupersededDurableSchemaVersion),
+		fmt.Sprintf("floor %d", testutil.FirstSupportedDurableSchemaVersion),
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not report %q: %v", want, err)
+		}
+	}
+
+	// Close the handle first, exactly as the production refusal path does: an
+	// open WAL connection keeps a -shm sidecar alive, and the digest counts the
+	// sidecars.
+	if err := db.Close(); err != nil {
+		t.Fatalf("close the handle on %s after the refusal: %v", path, err)
+	}
+	if after := testutil.DatabaseDigest(t, path); after != before {
+		t.Errorf("the refused database changed on disk: digest %s, want %s; the gate must only read", after, before)
+	}
+}
+
+// A database with no durable layout is fresh, and the runtime creates the
+// layout on its first launch. The gate must not stand in the way of that.
+func TestRequireSupportedDurableSchema_AcceptsAFreshDatabase(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "fresh.db")
+	db := openTestSQLite(t, path)
+	if err := RequireSupportedDurableSchema(t.Context(), engineConstructionSite, db, path); err != nil {
+		t.Fatalf("the gate refused a fresh database: %v", err)
+	}
+}
+
+// The production path: engine construction refuses such a database, and the
+// durable runtime never touches it.
+func TestEngineNew_RefusesADatabaseAnOlderBuildWrote(t *testing.T) {
+	t.Parallel()
+	path, before := testutil.WriteSupersededDurableDatabase(t)
+
+	built, err := New(t.Context(), Config{
+		DBPath:             path,
+		ApplicationVersion: "test-app-refuses-superseded",
+		ExecutorID:         "test-executor-refuses-superseded",
+	})
+	// Measure the database FIRST, before any assertion below opens a handle of
+	// its own: an open connection under WAL journal mode keeps a -shm sidecar
+	// alive, and the digest counts the sidecars. Production leaves none behind,
+	// because the refusal closes the only handle it opened.
+	afterRefusal := testutil.DatabaseDigest(t, path)
+
+	if err == nil {
+		built.Shutdown(5 * time.Second)
+		t.Fatal("engine.New opened a database whose durable layout an older build wrote")
+	}
+	if built != nil {
+		t.Fatalf("engine.New returned an engine together with error %v", err)
+	}
+	structured := requireStructuredStorageError(t, err)
+	if !reportContains(structured, path) {
+		t.Errorf("the refusal does not name the database %s: %s", path, renderReport(structured))
+	}
+	if !reportContains(structured, engineConstructionSite) {
+		t.Errorf("the refusal does not name the engine as the refusing caller: %s", renderReport(structured))
+	}
+
+	// Nothing was migrated: the recorded layout version is untouched and no
+	// table the durable runtime owns was created.
+	if version := testutil.ReadDurableSchemaVersion(t, path); version != testutil.SupersededDurableSchemaVersion {
+		t.Errorf("recorded layout version = %d after the refusal, want %d: the refusal migrated the database",
+			version, testutil.SupersededDurableSchemaVersion)
+	}
+	if tables := testutil.DurableRuntimeTables(t, path); len(tables) != 0 {
+		t.Errorf("the refused database gained durable-runtime tables %v: the runtime ran against it", tables)
+	}
+
+	// The whole database, not only the durable layout, and sidecars included.
+	// The refusal promises that no pasture data was written and that an older
+	// build can still read the history, so NOTHING in this process may write to
+	// the database before the gate passes — not the durable runtime, not the
+	// projection table, and not the forensic trail, whose own migration would
+	// raise a schema version that the older build then refuses in turn. Under
+	// WAL journal mode a writer's pages sit in the -wal sidecar until a
+	// checkpoint, so a main-file digest would call such a write invisible;
+	// databaseDigest hashes the sidecars too, which is what makes this one
+	// assertion cover every writer at once, including one added later.
+	if afterRefusal != before {
+		t.Errorf("the refused database changed on disk: digest %s, want %s; "+
+			"something in engine.New wrote to the file before the schema gate refused it, "+
+			"or this digest was taken while a handle was still open; check the sidecars and "+
+			"the table list below. "+
+			"Tables now present: %v", afterRefusal, before, testutil.AllTables(t, path))
+	}
+}
+
+// The other side of the gate: a database this build created carries a supported
+// layout, and reopening it must not be refused.
+func TestEngineNew_AcceptsADatabaseThisBuildCreated(t *testing.T) {
+	t.Parallel()
+	dbPath := testutil.GoldenUnifiedDBPath(t)
+	cfg := Config{
+		DBPath:                   dbPath,
+		ApplicationVersion:       "test-app-accepts-supported",
+		ExecutorID:               "test-executor-accepts-supported",
+		SkipMigrations:           true,
+		QueueBasePollingInterval: 100 * time.Millisecond,
+	}
+
+	first, err := New(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("engine.New on a fresh database: %v", err)
+	}
+	first.Shutdown(30 * time.Second)
+
+	version := testutil.ReadDurableSchemaVersion(t, dbPath)
+	if version < testutil.FirstSupportedDurableSchemaVersion {
+		t.Fatalf("this build left the database at layout version %d, below its own floor %d: "+
+			"the fixture below no longer represents a database this build created",
+			version, testutil.FirstSupportedDurableSchemaVersion)
+	}
+
+	second, err := New(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("engine.New refused a database this build itself created at layout version %d: %v", version, err)
+	}
+	second.Shutdown(30 * time.Second)
+}
+
+// A layout the gate cannot read at all is the third outcome, beside a refusal
+// and a pass. It happens when the file is damaged, unreadable, or simply not
+// the database pasture owns: another program's table of the same name is enough.
+// The operator must get an actionable error for it too, not a bare library
+// message and not silence.
+func TestRequireSupportedDurableSchema_ReportsALayoutItCannotRead(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "foreign.db")
+	db := openTestSQLite(t, path)
+	// A table of the durable runtime's name that another program owns: it has
+	// no version column, so the layout version can be neither read nor judged.
+	if _, err := db.ExecContext(t.Context(),
+		"CREATE TABLE "+testutil.DurableMigrationTable+" (applied_at TEXT NOT NULL)"); err != nil {
+		t.Fatalf("create a foreign %s table in %s: %v", testutil.DurableMigrationTable, path, err)
+	}
+
+	err := RequireSupportedDurableSchema(t.Context(), engineConstructionSite, db, path)
+	if err == nil {
+		t.Fatal("the gate accepted a database whose durable layout it could not read")
+	}
+	structured := requireStructuredStorageError(t, err)
+	if errors.Is(err, provenance.ErrSupersededDBOSSystemSchema) {
+		t.Errorf("an unreadable layout was reported as an older build's database: %v", err)
+	}
+	for _, want := range []string{
+		path,              // the file the operator must act on
+		"integrity_check", // how to tell a damaged file from a foreign one
+		"--db <path>",     // what to do when the file belongs to another program
+	} {
+		if !reportContains(structured, want) {
+			t.Errorf("the report does not mention %q: %s", want, renderReport(structured))
+		}
+	}
 }

@@ -52,8 +52,16 @@ func TestCLI_QueueConcurrency_ShowAndChange(t *testing.T) {
 		Queue             string `json:"queue"`
 		WorkerConcurrency *int   `json:"worker_concurrency"`
 	}
-	if err := json.Unmarshal([]byte(jsonObjectIn(t, after.stdout)), &decoded); err != nil {
-		t.Fatalf("get --format json did not produce a JSON object (%v): %s", err, after.stdout)
+	// The WHOLE of standard output is decoded, not a JSON object picked out of
+	// it. That is the contract an operator's `| jq` depends on: with
+	// --format json the command's stdout is one document and nothing else. A
+	// lenient parse here would hide exactly the defect this asserts against —
+	// the durable runtime printing its start-up notes into the answer.
+	if err := json.Unmarshal([]byte(after.stdout), &decoded); err != nil {
+		t.Fatalf("stdout of get --format json is not one JSON document (%v). "+
+			"Anything printed beside the answer breaks a pipe into a JSON reader; "+
+			"the durable client must log to standard error. stdout was:\n%s",
+			err, after.stdout)
 	}
 	if decoded.Queue != engine.SliceQueueName {
 		t.Errorf("queue = %q, want %q", decoded.Queue, engine.SliceQueueName)
@@ -142,25 +150,6 @@ func TestCLI_QueueConcurrency_ReportsADatabaseWithNoQueues(t *testing.T) {
 			t.Errorf("output does not contain %q, so it does not explain that no daemon has run:\n%s", want, combined)
 		}
 	}
-}
-
-// jsonObjectIn extracts the JSON object from a command's standard output.
-//
-// It is needed because the durable runtime writes its start-up log lines to
-// STANDARD OUTPUT when it is given no logger of its own, so they land in the
-// middle of a command's machine-readable output and a pipe into a JSON reader
-// fails. That is a defect in how the shared client is built, not in this
-// command, and it affects every command that opens one. It is reported at
-// https://github.com/dayvidpham/pasture/issues/104. When the client is given a
-// logger, this helper keeps working unchanged.
-func jsonObjectIn(t *testing.T, stdout string) string {
-	t.Helper()
-	start := strings.Index(stdout, "{")
-	end := strings.LastIndex(stdout, "}")
-	if start < 0 || end < start {
-		t.Fatalf("no JSON object in output:\n%s", stdout)
-	}
-	return stdout[start : end+1]
 }
 
 // TestCLI_QueueConcurrency_ControlQueueIsReadOnly pins the whole shape of the

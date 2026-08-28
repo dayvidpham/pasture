@@ -220,9 +220,41 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		appName = DefaultAppName
 	}
 
-	// Forensic trail first: opening the SQLite trail migrates the file to the
-	// current schema (creating audit_events + the dedup_key column the engine
-	// writes), so the shared handle below sees a ready database.
+	// The shared handle opens first, and NOTHING may write to the file before
+	// the schema gate below has passed.
+	//
+	// This ordering is load-bearing, not a preference. Opening the forensic
+	// trail migrates the file: it creates the trail's own tables and raises the
+	// recorded trail schema version. Doing that to a database this build then
+	// refuses would leave the operator with a file that NEITHER build can read
+	// — this build refuses its durable layout, and the older build refuses the
+	// trail schema this one just wrote (see internal/audit/migrate.go, which
+	// rejects a database recorded at a newer version than the build knows). The
+	// refusal below promises that no pasture data was written and that the older
+	// build can still read the history, so that promise must be true.
+	db, err := dbconn.OpenSharedDBWithProfile(cfg.DBPath, cfg.Timeouts)
+	if err != nil {
+		return nil, err
+	}
+
+	// Schema gate. This build opens no database whose durable layout an older
+	// build wrote, and the refusal is only possible before the durable context
+	// below is constructed: constructing it migrates such a file in place. The
+	// gate runs on this exact handle, and it runs before anything in this
+	// process writes data to the file, so a refused database carries exactly the
+	// records it arrived with. The one byte-level exception is the journal mode:
+	// the shared handle's connection string normalises it on the gate's first
+	// query, before a refusal is possible. The refusal is permanent, so it stays
+	// outside the bounded retry that follows. See internal/engine/dbosinit.go.
+	if err := RequireSupportedDurableSchema(ctx, engineConstructionSite, db, cfg.DBPath); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
+	// The trail comes second, and only after the gate has passed: opening the
+	// SQLite trail migrates the file to the current schema (creating
+	// audit_events + the dedup_key column the engine writes), so the shared
+	// handle above sees a ready database from here on.
 	trail := cfg.Trail
 	var trailCloser io.Closer
 	if trail == nil {
@@ -234,6 +266,7 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 			st, err = audit.NewSqliteAuditTrail(cfg.DBPath)
 		}
 		if err != nil {
+			_ = db.Close()
 			return nil, fmt.Errorf(
 				"engine.New: failed to open the forensic audit trail on %q: %w — "+
 					"the engine records one audit row per transition and needs the trail open",
@@ -244,14 +277,6 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		trailCloser = st
 	}
 
-	db, err := dbconn.OpenSharedDBWithProfile(cfg.DBPath, cfg.Timeouts)
-	if err != nil {
-		if trailCloser != nil {
-			_ = trailCloser.Close()
-		}
-		return nil, err
-	}
-
 	if err := ensureProjectionTable(db); err != nil {
 		_ = db.Close()
 		if trailCloser != nil {
@@ -260,15 +285,6 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		return nil, err
 	}
 
-	// SCHEMA GATE — NOT WIRED YET. The refusal of a system database written by
-	// the superseded durable runtime belongs HERE: call
-	// provenance.RequireSupportedDBOSSystemSchema(ctx, db, cfg.DBPath) on this
-	// exact handle, BEFORE the context below is constructed. Constructing the
-	// context migrates such a database in place, so the gate is worthless after
-	// this point. provenance.ErrSupersededDBOSSystemSchema is permanent: the
-	// bounded retry below must not re-attempt it. Tracked in
-	// https://github.com/dayvidpham/pasture/issues/104.
-	//
 	// Bounded retry: two processes opening the same fresh database can race
 	// DBOS's non-atomic schema bootstrap, and the loser's error is repaired by
 	// re-running it. See internal/engine/dbosinit.go for the full analysis.
