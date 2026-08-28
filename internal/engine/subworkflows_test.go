@@ -518,14 +518,6 @@ func TestSliceQueue_BoundedConcurrency(t *testing.T) {
 	}
 }
 
-// TestSliceQueue_BackpressureAllEventuallyComplete verifies that 30 mock slices
-// all eventually complete exactly once when dispatched via the slice queue, even
-// when K < 30. Excess slices are held in the DBOS queues table and dequeued as
-// earlier ones finish. This is the single-process drain invariant.
-//
-// All slices receive explicit mock start_slice signals dispatched concurrently.
-// The signals are pre-populated in the DBOS notifications table; each slice
-// consumes its signal when its queue slot opens.
 // backpressureStartSliceDeadline is the start-signal deadline the backpressure
 // test runs under, in place of the production default.
 //
@@ -550,7 +542,7 @@ func newBackpressureEngine(t *testing.T, k int) *engine.Engine {
 	profile, err := timeouts.New(
 		timeouts.Test,
 		500*time.Millisecond, // SQLite lock wait, unchanged
-		2*time.Second,        // ingress, unchanged
+		time.Second,          // ingress, the production window; only the start-signal deadline moves
 		backpressureStartSliceDeadline,
 	)
 	if err != nil {
@@ -578,6 +570,14 @@ func newBackpressureEngine(t *testing.T, k int) *engine.Engine {
 	return e
 }
 
+// TestSliceQueue_BackpressureAllEventuallyComplete verifies that 30 mock slices
+// all eventually complete exactly once when dispatched via the slice queue, even
+// when K < 30. Excess slices are held in the DBOS queues table and dequeued as
+// earlier ones finish. This is the single-process drain invariant.
+//
+// All slices receive explicit mock start_slice signals dispatched concurrently.
+// The signals are pre-populated in the DBOS notifications table; each slice
+// consumes its signal when its queue slot opens.
 func TestSliceQueue_BackpressureAllEventuallyComplete(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {
