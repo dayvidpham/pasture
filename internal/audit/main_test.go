@@ -6,10 +6,12 @@ import (
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/testutil"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
+	// Sample the goroutine baseline before any test runs; see
+	// internal/testutil/goleak.go for why the order matters.
+	checkLeaks := testutil.GoleakVerifier()
 	cleanup, err := testutil.SetHermeticEnv("pasture-audit")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "audit tests: hermetic env setup failed: %v\n", err)
@@ -17,7 +19,7 @@ func TestMain(m *testing.M) {
 	}
 	code := m.Run()
 	cleanup()
-	if err := goleak.Find(testutil.GoleakOptions()...); err != nil {
+	if err := checkLeaks(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		if code == 0 {
 			code = 1

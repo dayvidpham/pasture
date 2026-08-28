@@ -58,7 +58,7 @@ type SliceResult struct {
 //
 // The start_slice and complete_slice signals are addressed to the sub-workflow
 // by its sliceId (which is its DBOS workflow id).
-func (e *Engine) SliceSubWorkflow(ctx dbos.DBOSContext, in SliceInput) (SliceResult, error) {
+func (e *Engine) SliceSubWorkflow(ctx dbos.Context, in SliceInput) (SliceResult, error) {
 	// ── 1. Receive the start_slice configuration signal (non-blocking with
 	//       a brief deadline). If no signal arrives, record an honest failure:
 	//       the slice was enqueued but never started.
@@ -270,7 +270,7 @@ func runSlice(_ context.Context, sliceId, _ string, mode protocol.SliceExecution
 //
 // pastured wires Config.HooksMgr when it hosts the engine. Callers that omit it
 // (e.g. CLI paths and tests that don't need observability) see no dispatches.
-func (e *Engine) dispatchHook(ctx dbos.DBOSContext, event hooks.HookEvent, epochId string, data map[string]any) {
+func (e *Engine) dispatchHook(ctx dbos.Context, event hooks.HookEvent, epochId string, data map[string]any) {
 	if e.cfg.HooksMgr == nil {
 		return
 	}

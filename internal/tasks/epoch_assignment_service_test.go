@@ -307,3 +307,45 @@ func endAssignmentEpisode(t *testing.T, tracker *trackerImpl, task provenance.Ta
 		t.Fatalf("end assignment %q: %v", assignment, err)
 	}
 }
+
+// inertAllocationRunner is a composedAllocationRunner that is never run. The
+// unbind rules are about which value occupies the tracker's single engine slot,
+// so identity is all these cases need.
+type inertAllocationRunner struct{ name string }
+
+func (r *inertAllocationRunner) RunAllocateComposed(context.Context, string, provenance.JournalID, provenance.GovernedAllocationComposedRequest) (provenance.GovernedAllocationComposedResult, error) {
+	return provenance.GovernedAllocationComposedResult{}, nil
+}
+
+func (r *inertAllocationRunner) RunAllocateComposedBatch(context.Context, string, provenance.JournalID, provenance.GovernedAllocationComposedRequest) (provenance.GovernedAllocationComposedResult, error) {
+	return provenance.GovernedAllocationComposedResult{}, nil
+}
+
+// TestUnbindEngineGovernedAllocationReleasesOnlyTheExactOccupant pins the rule
+// that makes the unwind safe: a stale unbind, naming a runner that no longer
+// occupies the slot, must leave the live engine's runner in place. Only the
+// occupant itself can release the slot.
+func TestUnbindEngineGovernedAllocationReleasesOnlyTheExactOccupant(t *testing.T) {
+	t.Parallel()
+	tracker := &trackerImpl{}
+	live := &inertAllocationRunner{name: "live"}
+	if err := BindEngineGovernedAllocation(tracker, live); err != nil {
+		t.Fatalf("bind the live runner: %v", err)
+	}
+
+	UnbindEngineGovernedAllocation(tracker, &inertAllocationRunner{name: "stale"})
+	if tracker.allocationRunner != composedAllocationRunner(live) {
+		t.Fatalf("a stale unbind detached the live runner; slot = %#v, want the live runner", tracker.allocationRunner)
+	}
+	if err := BindEngineGovernedAllocation(tracker, &inertAllocationRunner{name: "usurper"}); err == nil {
+		t.Fatal("the tracker accepted a second runner while the live one still occupied the slot")
+	}
+
+	UnbindEngineGovernedAllocation(tracker, live)
+	if tracker.allocationRunner != nil {
+		t.Fatalf("the occupant's own unbind left the slot filled: %#v", tracker.allocationRunner)
+	}
+	if err := BindEngineGovernedAllocation(tracker, &inertAllocationRunner{name: "next"}); err != nil {
+		t.Fatalf("bind after the occupant released the slot: %v", err)
+	}
+}

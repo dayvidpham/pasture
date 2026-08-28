@@ -1192,8 +1192,9 @@ func TestRunSlice_AllModes(t *testing.T) {
 
 // TestSliceQueue_DefaultConcurrency verifies that the default concurrency is
 // applied when Config.SliceConcurrency is 0, and that the queue name is correct.
-// The SliceQueue().Name check is the real wiring assertion (the queue was
-// created with that name in the DBOS system). SliceConcurrency() is the stored
+// The SliceQueue().GetName() check is the real wiring assertion (the queue was
+// registered under that name in the DBOS system, and the accessor returns the
+// persisted configuration read back from it). SliceConcurrency() is the stored
 // resolved value (not a re-derivation).
 func TestSliceQueue_DefaultConcurrency(t *testing.T) {
 	t.Parallel()
@@ -1201,11 +1202,28 @@ func TestSliceQueue_DefaultConcurrency(t *testing.T) {
 	if got := e.SliceConcurrency(); got != engine.DefaultSliceQueueConcurrency {
 		t.Errorf("SliceConcurrency() = %d, want %d (default)", got, engine.DefaultSliceQueueConcurrency)
 	}
-	if e.SliceQueue().Name != engine.SliceQueueName {
-		t.Errorf("SliceQueue().Name = %q, want %q", e.SliceQueue().Name, engine.SliceQueueName)
+	if e.SliceQueue().GetName() != engine.SliceQueueName {
+		t.Errorf("SliceQueue().GetName() = %q, want %q", e.SliceQueue().GetName(), engine.SliceQueueName)
 	}
-	if e.ControlQueue().Name != engine.ControlQueueName {
-		t.Errorf("ControlQueue().Name = %q, want %q", e.ControlQueue().Name, engine.ControlQueueName)
+	if e.ControlQueue().GetName() != engine.ControlQueueName {
+		t.Errorf("ControlQueue().GetName() = %q, want %q", e.ControlQueue().GetName(), engine.ControlQueueName)
+	}
+	// The limit the engine resolved must be the limit the queue row carries:
+	// the runner reads its concurrency from that row, not from the engine.
+	requireWorkerConcurrency(t, "SliceQueue", e.SliceQueue().GetWorkerConcurrency(), engine.DefaultSliceQueueConcurrency)
+	requireWorkerConcurrency(t, "ControlQueue", e.ControlQueue().GetWorkerConcurrency(), 1)
+}
+
+// requireWorkerConcurrency asserts the per-worker concurrency persisted in the
+// queue's own row, which is what the queue runner dequeues against.
+func requireWorkerConcurrency(t *testing.T, queue string, got *int, want int) {
+	t.Helper()
+	if got == nil {
+		t.Errorf("%s().GetWorkerConcurrency() = nil (unlimited), want %d", queue, want)
+		return
+	}
+	if *got != want {
+		t.Errorf("%s().GetWorkerConcurrency() = %d, want %d", queue, *got, want)
 	}
 }
 

@@ -2,6 +2,8 @@ package engine_test
 
 import (
 	"context"
+	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +12,8 @@ import (
 	"github.com/dayvidpham/pasture/internal/engine"
 	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/pkg/protocol"
+
+	_ "modernc.org/sqlite"
 )
 
 // newEngine spins up an engine against a fresh file-backed pasture.db and
@@ -316,5 +320,148 @@ func TestEngine_ReadProjectionUnknownEpoch(t *testing.T) {
 	}
 	if proj != nil {
 		t.Errorf("ReadProjection = %+v, want nil for an epoch that never ran", proj)
+	}
+}
+
+// blockEngineAgentRegistration installs a trigger that makes every insert into
+// agents_software fail, which is what engine.New's agent resolution does when
+// the engine's own software agent is absent. It is the least invasive way to
+// fail construction AFTER the durable context and the allocator binding exist,
+// and dropTrigger removes it again so the same tracker can be reused.
+func blockEngineAgentRegistration(t *testing.T, dbPath string) (dropTrigger func()) {
+	t.Helper()
+	// Same busy timeout the engine's own handle uses, so installing and
+	// dropping the trigger waits for a writer instead of failing on a lock.
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatalf("open %q to install the failure trigger: %v", dbPath, err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	const create = `CREATE TRIGGER pasture_test_block_software_agent BEFORE INSERT ON agents_software
+	                BEGIN SELECT RAISE(ABORT, 'agents_software writes are blocked by this test'); END`
+	if _, err := db.Exec(create); err != nil {
+		t.Fatalf("install the failure trigger on %q: %v", dbPath, err)
+	}
+	return func() {
+		if _, err := db.Exec(`DROP TRIGGER pasture_test_block_software_agent`); err != nil {
+			t.Fatalf("drop the failure trigger on %q: %v", dbPath, err)
+		}
+	}
+}
+
+// Coverage of the construction-abort path, and why it stops where it does.
+//
+// engine.New calls one shared abort closure from five failure sites. The two
+// tests below reach two of them: the engine-agent resolution failure, and the
+// refusal to bind a second engine to one tracker. The other three — the
+// allocator construction and the two queue registrations — run the SAME closure
+// body, and they are deliberately left uncovered: Config cannot reach them.
+// A slice concurrency of zero or less is clamped to the default before the
+// queue is registered, a negative polling interval is dropped rather than
+// passed down, and both queue names are constants, so the durable runtime's own
+// configuration rejections are unreachable from the public constructor. A
+// test-only seam in production code would be the only way in, and that trade is
+// refused: it would add a second code path to buy coverage of a body these two
+// tests already execute.
+
+// TestEngineNew_AbortsCleanlyWhenConstructionFailsAfterTheDurableContext pins
+// the abort path in engine.New: a failure raised after the durable context and
+// the allocator binding exist must stop that context and hand the tracker's
+// engine-owned allocator slot back, so the caller can construct another engine
+// on the same tracker.
+//
+// Without the unbind, the second engine.New below fails to bind, because the
+// tracker still points at the allocator of the engine that was never built.
+func TestEngineNew_AbortsCleanlyWhenConstructionFailsAfterTheDurableContext(t *testing.T) {
+	t.Parallel()
+	tracker, dbPath := testutil.OpenGoldenTaskTracker(t)
+	executorID, appVersion := testEngineIdentity(t)
+	cfg := engine.Config{
+		DBPath:                   dbPath,
+		ApplicationVersion:       appVersion,
+		ExecutorID:               executorID,
+		SkipMigrations:           true,
+		QueueBasePollingInterval: 100 * time.Millisecond,
+		Trail:                    tracker,
+		Tracker:                  tracker,
+	}
+
+	dropTrigger := blockEngineAgentRegistration(t, dbPath)
+
+	e, err := engine.New(context.Background(), cfg)
+	if err == nil {
+		e.Shutdown(5 * time.Second)
+		t.Fatal("engine.New succeeded while the engine agent could not be registered; wanted a construction failure")
+	}
+	if e != nil {
+		t.Fatalf("engine.New returned a non-nil engine together with error %v", err)
+	}
+	if !strings.Contains(err.Error(), "forensic software agent") {
+		t.Fatalf("engine.New error = %v, want the engine-agent registration failure", err)
+	}
+
+	// The abort path ran to the end: the allocator slot is free, so the same
+	// tracker accepts a second engine.
+	dropTrigger()
+	second, err := engine.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("engine.New after an aborted construction on the same tracker: %v", err)
+	}
+	t.Cleanup(func() { second.Shutdown(5 * time.Second) })
+	if err := second.Launch(); err != nil {
+		t.Fatalf("engine.Launch on the replacement engine: %v", err)
+	}
+}
+
+// TestEngineNew_AbortsWhenTheTrackerAlreadyDrivesAnEngine covers the abort call
+// site on the allocator-binding failure: a tracker accepts exactly one
+// engine-owned allocator, so a second engine on a tracker that already drives a
+// live one must be refused and torn down.
+//
+// It also pins the limit of the unwind added for the failure paths below the
+// binding: this abort installed nothing, so it must leave the FIRST engine's
+// binding in place. A third construction therefore fails the same way.
+func TestEngineNew_AbortsWhenTheTrackerAlreadyDrivesAnEngine(t *testing.T) {
+	t.Parallel()
+	tracker, dbPath := testutil.OpenGoldenTaskTracker(t)
+	executorID, appVersion := testEngineIdentity(t)
+	cfg := engine.Config{
+		DBPath:                   dbPath,
+		ApplicationVersion:       appVersion,
+		ExecutorID:               executorID,
+		SkipMigrations:           true,
+		QueueBasePollingInterval: 100 * time.Millisecond,
+		Trail:                    tracker,
+		Tracker:                  tracker,
+	}
+
+	first, err := engine.New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("engine.New for the first engine: %v", err)
+	}
+	t.Cleanup(func() { first.Shutdown(5 * time.Second) })
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		second, err := engine.New(context.Background(), cfg)
+		if err == nil {
+			second.Shutdown(5 * time.Second)
+			t.Fatalf("engine.New attempt %d on a tracker that already drives an engine succeeded; wanted a refusal", attempt)
+		}
+		if second != nil {
+			t.Fatalf("engine.New attempt %d returned a non-nil engine together with error %v", attempt, err)
+		}
+		if !strings.Contains(err.Error(), "slice allocator") {
+			t.Fatalf("engine.New attempt %d error = %v, want the allocator-binding refusal", attempt, err)
+		}
+	}
+
+	// The refused constructions did not disturb the engine that owns the
+	// tracker: it still runs an epoch to completion.
+	if err := first.Launch(); err != nil {
+		t.Fatalf("engine.Launch on the surviving engine: %v", err)
+	}
+	final := runEpoch(t, first, "epoch-abort-bind", fullEpochPlan())
+	if final.CurrentPhase != protocol.PhaseComplete {
+		t.Errorf("surviving engine final phase = %q, want %q", final.CurrentPhase, protocol.PhaseComplete)
 	}
 }

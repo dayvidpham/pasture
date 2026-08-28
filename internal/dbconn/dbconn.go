@@ -19,7 +19,7 @@ import (
 // SharedDSN builds the connection string used for every modernc handle on the
 // unified pasture.db file. It encodes the concurrency contract as DSN params
 // rather than runtime PRAGMAs so a caller-supplied handle (the one passed to
-// DBOS as SqliteSystemDB, which skips DBOS's own PRAGMA setup) is configured
+// DBOS as SQLiteSystemDB, which skips DBOS's own PRAGMA setup) is configured
 // identically to the audit and provenance handles:
 //
 //   - journal_mode(WAL)      multi-reader / single-writer without reader stalls

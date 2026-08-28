@@ -1,18 +1,20 @@
-// Package engine — queue.go defines the DBOS WorkflowQueue for concurrency-limited
+// Package engine — queue.go defines the DBOS queue for concurrency-limited
 // slice and review sub-workflow dispatch.
 //
 // Sub-workflows that drive individual implementation slices and review cycles are
-// dispatched through a shared DBOS WorkflowQueue with a configurable per-executor
+// dispatched through a shared DBOS queue with a configurable per-executor
 // concurrency limit K. Bounded concurrency is the primary control point for the
 // single-writer WAL bottleneck: 30+ unbounded sub-workflows would thrash the
 // shared SQLite connection, so K is tuned to the write throughput of the
 // pasture.db file.
 //
 // Queue lifecycle:
-//   - newSliceQueue must be called BEFORE dbos.Launch (NewWorkflowQueue panics
-//     after Launch). Engine.New calls it as part of construction.
+//   - newSliceQueue registers a database-backed queue row and may be called
+//     before or after dbos.Launch. Engine.New calls it during construction, so
+//     the queue exists before the first enqueue.
 //   - Sub-workflows are enqueued via Engine.EnqueueSlice / Engine.EnqueueReview,
-//     each of which calls dbos.RunWorkflow with dbos.WithQueue(SliceQueueName).
+//     each of which calls dbos.RunWorkflow with dbos.WithQueue on the registered
+//     slice queue.
 //   - DBOS dequeues and starts sub-workflows up to K at a time; excess are
 //     held in the queues table until a running sub-workflow completes and frees
 //     a slot. Multi-process crash recovery and automatic retry across restarts
@@ -112,27 +114,53 @@ func ResolveSliceConcurrency(flagVal int) (int, error) {
 	return DefaultSliceQueueConcurrency, nil
 }
 
-// newSliceQueue registers the pasture-slice-queue with the given DBOS context
-// and returns the WorkflowQueue. concurrency must be > 0; Engine.New enforces
-// this by clamping any <= 0 value to DefaultSliceQueueConcurrency before
-// calling here, so an invalid concurrency is a programming error, not a
-// user-facing case.
+// queueConflictPolicy is the registration conflict policy both pasture queues
+// use. A queue configuration is a row in the system database now, shared by
+// every process that registers the same name, so a policy must be chosen.
 //
-// This must be called before dbos.Launch. Engine.New calls it as part of
-// construction, so callers that use Engine.New do not need to call it directly.
-// (Note: the function is intentionally unexported; see Engine.SliceQueue for
-// the public accessor.)
-func newSliceQueue(ctx dbos.DBOSContext, concurrency int, basePollingInterval time.Duration) dbos.WorkflowQueue {
+// What changed: the configuration used to be private to the process that
+// created it, so each process always polled its own settings. It is shared
+// state today, and the queue runner reloads the row on every poll iteration, so
+// a second pasture process that registers the same queue reconfigures the
+// running one live.
+//
+// AlwaysUpdate says the process now starting governs the queue it is about to
+// poll. For the only case pasture supports — peers of the same application
+// version — it agrees with the runtime default (update only when this
+// application version is the latest registered one). It differs only across
+// versions, and a mixed-version deployment is out of scope: an upgrade replaces
+// the database rather than sharing it. AlwaysUpdate does, however, maximise the
+// live-reconfiguration effect described above.
+//
+// Whether a running queue should be reconfigurable by a starting peer at all —
+// together with concurrency hot-reload and the recovery re-enqueue semantics —
+// is a design decision for the queue work tracked in
+// https://github.com/dayvidpham/pasture/issues/104.
+const queueConflictPolicy = dbos.QueueConflictAlwaysUpdate
+
+// newSliceQueue registers the pasture-slice-queue with the given DBOS context
+// and returns the queue. concurrency must be > 0; Engine.New enforces this by
+// clamping any <= 0 value to DefaultSliceQueueConcurrency before calling here,
+// so an invalid concurrency is a programming error, not a user-facing case.
+//
+// Registration writes the queue configuration to the system database and can
+// fail (a storage error, or an invalid configuration); the error is returned to
+// the caller rather than swallowed. Engine.New calls this during construction,
+// so callers that use Engine.New do not need to call it directly. (Note: the
+// function is intentionally unexported; see Engine.SliceQueue for the public
+// accessor.)
+func newSliceQueue(ctx dbos.Context, concurrency int, basePollingInterval time.Duration) (dbos.Queue, error) {
 	opts := queueOptions(basePollingInterval, dbos.WithWorkerConcurrency(concurrency))
-	return dbos.NewWorkflowQueue(ctx, SliceQueueName, opts...)
+	return dbos.RegisterQueue(ctx, SliceQueueName, opts...)
 }
 
-func newControlQueue(ctx dbos.DBOSContext, basePollingInterval time.Duration) dbos.WorkflowQueue {
+func newControlQueue(ctx dbos.Context, basePollingInterval time.Duration) (dbos.Queue, error) {
 	opts := queueOptions(basePollingInterval, dbos.WithWorkerConcurrency(1))
-	return dbos.NewWorkflowQueue(ctx, ControlQueueName, opts...)
+	return dbos.RegisterQueue(ctx, ControlQueueName, opts...)
 }
 
 func queueOptions(basePollingInterval time.Duration, opts ...dbos.QueueOption) []dbos.QueueOption {
+	opts = append(opts, dbos.WithQueueOnConflict(queueConflictPolicy))
 	if basePollingInterval > 0 {
 		opts = append(opts, dbos.WithQueueBasePollingInterval(basePollingInterval))
 	}
@@ -167,7 +195,7 @@ func (e *Engine) EnqueueSlice(in SliceInput) (dbos.WorkflowHandle[SliceResult], 
 	}
 	h, err := dbos.RunWorkflow(e.dbosCtx, e.SliceSubWorkflow, in,
 		dbos.WithWorkflowID(in.SliceId),
-		dbos.WithQueue(SliceQueueName),
+		dbos.WithQueue(e.sliceQueue),
 	)
 	if err != nil {
 		return nil, &pasterrors.StructuredError{
@@ -223,7 +251,7 @@ func (e *Engine) EnqueueReview(in ReviewInput) (dbos.WorkflowHandle[ReviewResult
 	wfID := protocol.ReviewWorkflowID(in.EpochId, in.PhaseId, round)
 	h, err := dbos.RunWorkflow(e.dbosCtx, e.ReviewSubWorkflow, in,
 		dbos.WithWorkflowID(wfID),
-		dbos.WithQueue(SliceQueueName),
+		dbos.WithQueue(e.sliceQueue),
 	)
 	if err != nil {
 		return nil, &pasterrors.StructuredError{

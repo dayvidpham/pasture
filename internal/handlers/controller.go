@@ -3,10 +3,19 @@ package handlers
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
+	// The durable runtime resolves its SQLite backend through a driver
+	// registry. Every binary that hands it a SQLite handle must link the
+	// driver itself: without this import the client construction below fails
+	// at run time, and the runtime loses the error-code extractor that tells a
+	// busy or locked database apart from a permanent failure. Do not rely on
+	// another package's import to pull it in. The guard test in
+	// internal/handlers/controller_test.go fails if this import is removed.
+	_ "github.com/dbos-inc/dbos-transact-golang/dbos/driver/sqlite"
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/dbconn"
@@ -80,8 +89,15 @@ func OpenEpochController(dbPath string) (EpochController, error) {
 		_ = trail.Close()
 		return nil, err
 	}
+	// SCHEMA GATE — NOT WIRED YET. The refusal of a system database written by
+	// the superseded durable runtime belongs HERE: call
+	// provenance.RequireSupportedDBOSSystemSchema(ctx, db, dbPath) on this
+	// exact handle, BEFORE the client below is constructed. The client builds a
+	// durable context of its own and migrates such a database in place, so the
+	// gate is worthless after this point. Tracked in
+	// https://github.com/dayvidpham/pasture/issues/104.
 	client, err := dbos.NewClient(context.Background(), dbos.ClientConfig{
-		SqliteSystemDB: db,
+		SQLiteSystemDB: db,
 	})
 	if err != nil {
 		_ = db.Close()
@@ -92,7 +108,7 @@ func OpenEpochController(dbPath string) (EpochController, error) {
 }
 
 func (c *dbosController) StartEpoch(ctx context.Context, epochId string) error {
-	_, err := dbos.Enqueue[engine.ControlInput, protocol.EpochState](c.client,
+	_, err := dbos.Enqueue[protocol.EpochState, engine.ControlInput](c.client,
 		engine.ControlQueueName,
 		engine.EpochControlWorkflowName,
 		engine.ControlInput{EpochId: epochId},
@@ -117,7 +133,7 @@ func (c *dbosController) StartEpoch(ctx context.Context, epochId string) error {
 }
 
 func (c *dbosController) CancelEpoch(ctx context.Context, epochId string) error {
-	if err := c.client.CancelWorkflow(epochId); err != nil {
+	if err := dbos.CancelWorkflow(c.client, epochId); err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Couldn't stop the epoch %q.", epochId),
@@ -167,7 +183,7 @@ func (c *dbosController) TerminateEpoch(ctx context.Context, epochId, reason str
 			Cause: err,
 		}
 	}
-	if err := c.client.CancelWorkflow(epochId); err != nil {
+	if err := dbos.CancelWorkflow(c.client, epochId); err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryWorkflow,
 			What:     fmt.Sprintf("Couldn't stop the epoch %q (the cancellation event was recorded).", epochId),
@@ -203,48 +219,65 @@ func (c *dbosController) sendSignal(epochId string, topic protocol.SignalTopic, 
 
 func (c *dbosController) AdvancePhase(ctx context.Context, epochId string, sig protocol.PhaseAdvanceSignal) error {
 	return c.sendSignal(epochId, protocol.SignalAdvancePhase, func() error {
-		return c.client.Send(epochId, sig, protocol.SignalAdvancePhase.String())
+		return dbos.Send(c.client, epochId, sig, protocol.SignalAdvancePhase.String())
 	})
 }
 
 func (c *dbosController) SubmitVote(ctx context.Context, epochId string, sig protocol.ReviewVoteSignal) error {
 	return c.sendSignal(epochId, protocol.SignalSubmitVote, func() error {
-		return c.client.Send(epochId, sig, protocol.SignalSubmitVote.String())
+		return dbos.Send(c.client, epochId, sig, protocol.SignalSubmitVote.String())
 	})
 }
 
 func (c *dbosController) ReportSliceProgress(ctx context.Context, epochId string, sig protocol.SliceProgressSignal) error {
 	return c.sendSignal(epochId, protocol.SignalSliceProgress, func() error {
-		return c.client.Send(epochId, sig, protocol.SignalSliceProgress.String())
+		return dbos.Send(c.client, epochId, sig, protocol.SignalSliceProgress.String())
 	})
 }
 
 func (c *dbosController) RegisterSession(ctx context.Context, epochId string, sig protocol.RegisterSessionSignal) error {
 	return c.sendSignal(epochId, protocol.SignalRegisterSession, func() error {
-		return c.client.Send(epochId, sig, protocol.SignalRegisterSession.String())
+		return dbos.Send(c.client, epochId, sig, protocol.SignalRegisterSession.String())
 	})
 }
 
 func (c *dbosController) StartSlice(ctx context.Context, sliceId string, sig protocol.SliceStartSignal) error {
 	return c.sendSignal(sliceId, protocol.SignalStartSlice, func() error {
-		return c.client.Send(sliceId, sig, protocol.SignalStartSlice.String())
+		return dbos.Send(c.client, sliceId, sig, protocol.SignalStartSlice.String())
 	})
 }
 
 func (c *dbosController) CompleteSlice(ctx context.Context, sliceId string, sig protocol.SliceCompleteSignal) error {
 	return c.sendSignal(sliceId, protocol.SignalCompleteSlice, func() error {
-		return c.client.Send(sliceId, sig, protocol.SignalCompleteSlice.String())
+		return dbos.Send(c.client, sliceId, sig, protocol.SignalCompleteSlice.String())
 	})
 }
 
 func (c *dbosController) Close() error {
+	// The durable client's shutdown now reports a timeout that left work
+	// running, so the outcome is returned to the caller instead of dropped. The
+	// trail is closed either way: it is a separate handle, and leaving it open
+	// would leak it on every failed shutdown.
+	//
+	// The full close contract — what a caller must do with a live-worker
+	// shutdown, and the tests that pin it — is a separate change tracked in
+	// https://github.com/dayvidpham/pasture/issues/104.
+	var errs []error
 	if c.client != nil {
-		// The DBOS client owns and closes the SqliteSystemDB handle supplied at
+		// The client owns and closes the SQLiteSystemDB handle supplied at
 		// construction; closing c.db separately would double-close the same DB.
-		c.client.Shutdown(5 * time.Second)
+		// The shutdown reaches that handle through sqlPoolAdapter.Close in
+		// dbos/internal/sysdb/dbq.go, on the timeout path too. Engine.Shutdown
+		// in internal/engine/engine.go states the same ownership for the
+		// engine's handle; the two must stay in agreement.
+		if err := dbos.Shutdown(c.client, 5*time.Second); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	if c.trailCloser != nil {
-		return c.trailCloser.Close()
+		if err := c.trailCloser.Close(); err != nil {
+			errs = append(errs, err)
+		}
 	}
-	return nil
+	return errors.Join(errs...)
 }

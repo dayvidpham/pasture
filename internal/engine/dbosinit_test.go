@@ -14,6 +14,7 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/testutil"
 )
 
 // ciLostRaceError is the verbatim failure a losing process produced in CI when
@@ -32,14 +33,14 @@ type fakeFactory struct {
 	attempts int
 }
 
-func (f *fakeFactory) new(context.Context, dbos.Config) (dbos.DBOSContext, error) {
+func (f *fakeFactory) new(context.Context, dbos.Config) (dbos.Context, error) {
 	f.attempts++
 	if f.attempts <= len(f.errs) {
 		if err := f.errs[f.attempts-1]; err != nil {
 			return nil, err
 		}
 	}
-	// A nil DBOSContext with a nil error is enough: newDurableContext only
+	// A nil durable context with a nil error is enough: newDurableContext only
 	// passes the value through, it never dereferences it.
 	return nil, nil
 }
@@ -181,7 +182,7 @@ func reportContains(e *pasterrors.StructuredError, want string) bool {
 // pinnedDBOSVersion is the durable-execution library version whose schema
 // bootstrap the retry predicate was read against and whose error strings
 // isDBOSBootstrapRace matches.
-const pinnedDBOSVersion = "github.com/dbos-inc/dbos-transact-golang v0.20.0"
+const pinnedDBOSVersion = "github.com/dbos-inc/dbos-transact-golang v1.2.0"
 
 // TestDBOSVersionPinMatchesRacePredicate fails when the durable-execution
 // library is upgraded, because the retry predicate in dbosinit.go recognises a
@@ -216,4 +217,20 @@ func TestDBOSVersionPinMatchesRacePredicate(t *testing.T) {
 	if !isDBOSBootstrapRace(errors.New(ciLostRaceError)) {
 		t.Fatal("isDBOSBootstrapRace no longer matches the observed lost-race failure of the pinned version")
 	}
+}
+
+// dbosSQLiteDriverImport is the driver package the durable runtime looks up in
+// its backend registry when it is handed a SQLite handle. It is linked only by
+// a blank import, so nothing in this package references it by name.
+const dbosSQLiteDriverImport = "github.com/dbos-inc/dbos-transact-golang/dbos/driver/sqlite"
+
+// TestEngineLinksDBOSSQLiteDriver pins the blank import that links the durable
+// runtime's SQLite driver into every binary that builds a context in this
+// package. Without it, context construction fails at run time and the runtime
+// cannot tell a busy or locked database apart from a permanent failure. The
+// import cannot be relied on transitively: another package's link is that
+// package's business and may be dropped without notice.
+func TestEngineLinksDBOSSQLiteDriver(t *testing.T) {
+	t.Parallel()
+	testutil.RequireBlankImport(t, "engine.go", dbosSQLiteDriverImport)
 }

@@ -49,7 +49,7 @@ type ControlInput struct {
 // projection, the exactly-once forensic emit, and the activity hook are
 // identical to the scripted driver. The loop ends when the FSM reaches the
 // terminal phase.
-func (e *Engine) EpochControlWorkflow(ctx dbos.DBOSContext, in ControlInput) (protocol.EpochState, error) {
+func (e *Engine) EpochControlWorkflow(ctx dbos.Context, in ControlInput) (protocol.EpochState, error) {
 	sm := protocol.NewEpochStateMachine(in.EpochId, e.specs)
 
 	for sm.State().CurrentPhase != protocol.PhaseComplete {
@@ -125,7 +125,7 @@ func (e *Engine) EpochControlWorkflow(ctx dbos.DBOSContext, in ControlInput) (pr
 // reports whether any signal mutated the state (so the caller can persist a
 // fresh projection). Votes are drained before the caller blocks for an advance,
 // guaranteeing the consensus gate sees every vote sent ahead of the advance.
-func (e *Engine) drainSideChannels(ctx dbos.DBOSContext, epochId string, sm *protocol.EpochStateMachine) (bool, error) {
+func (e *Engine) drainSideChannels(ctx dbos.Context, epochId string, sm *protocol.EpochStateMachine) (bool, error) {
 	changed := false
 
 	for {
@@ -206,7 +206,7 @@ func addSession(state *protocol.EpochState, sess protocol.RegisterSessionSignal)
 // projectState persists the current EpochState to the projection in one durable
 // step. Used after side-channel updates so the query and status surfaces observe
 // votes, sessions, and slice progress without waiting for the next transition.
-func (e *Engine) projectState(ctx dbos.DBOSContext, state *protocol.EpochState) error {
+func (e *Engine) projectState(ctx dbos.Context, state *protocol.EpochState) error {
 	snapshot := *state
 	_, err := dbos.RunAsStep(ctx, func(c context.Context) (struct{}, error) {
 		return struct{}{}, WriteProjection(c, e.db, &snapshot, time.Now().UTC().UnixNano())
@@ -226,8 +226,8 @@ func isRecvTimeout(err error) bool {
 	if err == nil {
 		return false
 	}
-	var dbosErr *dbos.DBOSError
-	if errors.As(err, &dbosErr) && dbosErr.Code == dbos.TimeoutError {
+	var dbosErr *dbos.Error
+	if errors.As(err, &dbosErr) && dbosErr.Code == dbos.ErrorCodeTimeout {
 		return true
 	}
 	return strings.Contains(err.Error(), "no message received within")

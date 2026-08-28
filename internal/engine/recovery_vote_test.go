@@ -152,9 +152,9 @@ func TestRecoveryVoteHelperProcess(t *testing.T) {
 	fmt.Printf("VOTE COMPLETE %d\n", count)
 }
 
-func recoveryVoteWorkflow(t *testing.T, e *Engine) func(dbos.DBOSContext, recoveryVoteInput) (int, error) {
+func recoveryVoteWorkflow(t *testing.T, e *Engine) func(dbos.Context, recoveryVoteInput) (int, error) {
 	t.Helper()
-	return func(ctx dbos.DBOSContext, in recoveryVoteInput) (int, error) {
+	return func(ctx dbos.Context, in recoveryVoteInput) (int, error) {
 		for _, axis := range protocol.AllReviewAxes {
 			reviewerID := "recovery-" + string(axis)
 			stepSeqInt, err := dbos.GetStepID(ctx)
