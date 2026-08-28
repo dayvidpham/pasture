@@ -23,6 +23,9 @@ import (
 // (dbos/internal/sysdb/dialect.go SqliteDialect.IsRetryable), and even that is
 // defeated for migration failures because dbos/internal/sysdb/sqlite_migrations.go
 // formats every error with %v and so severs the driver error from the chain.
+// Re-read against the pinned version: the probe, the create, the per-migration
+// transaction, and every message this predicate matches are unchanged, and the
+// migration bodies are still written without IF NOT EXISTS.
 // A lost race therefore surfaces immediately as a plain SQLITE_ERROR (code 1)
 // "already exists" string and kills process start-up.
 //
@@ -53,9 +56,9 @@ const dbosRaceRetryInitialDelay = 25 * time.Millisecond
 const dbosRaceRetryMaxDelay = 1 * time.Second
 
 // dbosContextFactory constructs a durable-execution context. Production passes
-// dbos.NewDBOSContext; tests inject a stub to drive the retry loop
+// dbos.NewContext; tests inject a stub to drive the retry loop
 // deterministically, without a second process and without any sleep.
-type dbosContextFactory func(context.Context, dbos.Config) (dbos.DBOSContext, error)
+type dbosContextFactory func(context.Context, dbos.Config) (dbos.Context, error)
 
 // dbosRetryPolicy is the bounded-retry budget for newDurableContext. The zero
 // value is not usable; defaultDBOSRetryPolicy returns the production budget.
@@ -85,7 +88,7 @@ func newDurableContext(
 	newCtx dbosContextFactory,
 	cfg dbos.Config,
 	policy dbosRetryPolicy,
-) (dbos.DBOSContext, error) {
+) (dbos.Context, error) {
 	deadline := time.Now().Add(policy.ceiling)
 	delay := policy.initialDelay
 	attempts := 0
@@ -147,6 +150,10 @@ var dbosBootstrapRaceMarkers = []string{
 // re-check dbos/internal/sysdb/sqlite_migrations.go and sqlite_pool.go. A
 // signature that stops matching costs an actionable start-up failure under
 // concurrency, not silent corruption.
+//
+// The version this predicate is read against is pinned by
+// TestDBOSVersionPinMatchesRacePredicate in internal/engine/dbosinit_test.go,
+// which fails on any bump so the messages get re-read before the pin moves.
 func isDBOSBootstrapRace(err error) bool {
 	if err == nil {
 		return false

@@ -49,7 +49,7 @@ type EpochInput struct {
 //
 // A failed advance (gate violation) is recorded as a failed transition and the
 // plan continues; the durable step is skipped for that entry.
-func (e *Engine) EpochWorkflow(ctx dbos.DBOSContext, in EpochInput) (protocol.EpochState, error) {
+func (e *Engine) EpochWorkflow(ctx dbos.Context, in EpochInput) (protocol.EpochState, error) {
 	sm := protocol.NewEpochStateMachine(in.EpochId, e.specs)
 
 	for _, adv := range in.Advances {
@@ -112,7 +112,7 @@ func (e *Engine) EpochWorkflow(ctx dbos.DBOSContext, in EpochInput) (protocol.Ep
 // the dedup key collapses the retry onto one row). The hook is process-local,
 // so a recovering process supplies its own non-stalling hook and completes.
 func (e *Engine) commitTransition(
-	ctx dbos.DBOSContext,
+	ctx dbos.Context,
 	epochId, role string,
 	rec *protocol.TransitionRecord,
 	state *protocol.EpochState,
@@ -162,7 +162,7 @@ func (e *Engine) emitTransition(ctx context.Context, epochId, role string, rec *
 // vote is emitted in its own DBOS step by the caller so replay uses a stable
 // step sequence and produces one idempotent row per vote signal.
 func (e *Engine) emitVoteRecorded(
-	ctx dbos.DBOSContext,
+	ctx dbos.Context,
 	epochId string,
 	phase protocol.PhaseId,
 	vote protocol.ReviewVoteSignal,

@@ -22,6 +22,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/engine"
 	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
@@ -999,4 +1000,20 @@ func TestHandler_SliceComplete_WorkflowError_NeverStartedSlice(t *testing.T) {
 	if code != 3 {
 		t.Fatalf("SliceComplete exit = %d, want 3 (workflow error); err = %v", code, hErr)
 	}
+}
+
+// dbosSQLiteDriverImport is the driver package the durable runtime looks up in
+// its backend registry when it is handed a SQLite handle. It is linked only by
+// a blank import, so nothing in this package references it by name.
+const dbosSQLiteDriverImport = "github.com/dbos-inc/dbos-transact-golang/dbos/driver/sqlite"
+
+// TestControllerLinksDBOSSQLiteDriver pins the blank import that links the
+// durable runtime's SQLite driver into every binary that opens a durable client
+// in this package. Without it, client construction fails at run time and the
+// runtime cannot tell a busy or locked database apart from a permanent failure.
+// The import cannot be relied on transitively: another package's link is that
+// package's business and may be dropped without notice.
+func TestControllerLinksDBOSSQLiteDriver(t *testing.T) {
+	t.Parallel()
+	testutil.RequireBlankImport(t, "controller.go", dbosSQLiteDriverImport)
 }

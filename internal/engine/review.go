@@ -72,7 +72,7 @@ const reviewVotePollInterval = 1 * time.Hour
 //
 // Idempotency: if the same axis votes twice, the later vote overwrites the
 // earlier one (last-writer-wins per ReviewAxis key).
-func (e *Engine) ReviewSubWorkflow(ctx dbos.DBOSContext, in ReviewInput) (ReviewResult, error) {
+func (e *Engine) ReviewSubWorkflow(ctx dbos.Context, in ReviewInput) (ReviewResult, error) {
 	votes := make(map[protocol.ReviewAxis]protocol.VoteType)
 
 	// Poll for submit_vote signals until all axes have voted or the workflow

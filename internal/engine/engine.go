@@ -18,6 +18,14 @@ import (
 
 	"github.com/dayvidpham/provenance"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
+	// The durable runtime resolves its SQLite backend through a driver
+	// registry. Every binary that hands it a SQLite handle must link the
+	// driver itself: without this import the construction below fails at run
+	// time, and the runtime loses the error-code extractor that tells a busy
+	// or locked database apart from a permanent failure. Do not rely on
+	// another package's import to pull it in. The guard test in
+	// internal/engine/dbosinit_test.go fails if this import is removed.
+	_ "github.com/dbos-inc/dbos-transact-golang/dbos/driver/sqlite"
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/dbconn"
@@ -35,6 +43,12 @@ const DefaultExecutorID = "pasture"
 
 // DefaultAppName is the pinned DBOS application name.
 const DefaultAppName = "pasture"
+
+// constructionAbortShutdownTimeout bounds the wait when a durable context is
+// stopped because engine construction failed after creating it. Nothing has
+// been launched at that point, so there is no in-flight work to drain and the
+// wait exists only to let the runtime's own goroutines exit.
+const constructionAbortShutdownTimeout = 2 * time.Second
 
 // Config configures an Engine.
 type Config struct {
@@ -127,21 +141,22 @@ type ActivitySink interface {
 // Lifecycle: New → Launch → (run workflows) → Shutdown.
 type Engine struct {
 	cfg              Config
+	logger           *slog.Logger
 	db               *sql.DB
-	dbosCtx          dbos.DBOSContext
+	dbosCtx          dbos.Context
 	trail            audit.Trail
 	trailCloser      io.Closer
 	specs            map[protocol.PhaseId]protocol.PhaseSpec
 	activityAgentID  provenance.AgentID
 	launched         bool
-	controlQueue     dbos.WorkflowQueue
-	sliceQueue       dbos.WorkflowQueue
+	controlQueue     dbos.Queue
+	sliceQueue       dbos.Queue
 	sliceConcurrency int // resolved value stored once in New; returned by SliceConcurrency()
 }
 
 // New constructs an Engine: opens the shared handle with the WAL/busy-timeout
 // DSN, ensures the projection table, opens (or adopts) the forensic trail,
-// creates the DBOS context with the shared handle as SqliteSystemDB and the
+// creates the DBOS context with the shared handle as SQLiteSystemDB and the
 // pinned ExecutorID + ApplicationVersion, and registers EpochWorkflow.
 //
 // The returned Engine is NOT yet launched; call Launch to run the recovery
@@ -233,12 +248,21 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		return nil, err
 	}
 
+	// SCHEMA GATE — NOT WIRED YET. The refusal of a system database written by
+	// the superseded durable runtime belongs HERE: call
+	// provenance.RequireSupportedDBOSSystemSchema(ctx, db, cfg.DBPath) on this
+	// exact handle, BEFORE the context below is constructed. Constructing the
+	// context migrates such a database in place, so the gate is worthless after
+	// this point. provenance.ErrSupersededDBOSSystemSchema is permanent: the
+	// bounded retry below must not re-attempt it. Tracked in
+	// https://github.com/dayvidpham/pasture/issues/104.
+	//
 	// Bounded retry: two processes opening the same fresh database can race
 	// DBOS's non-atomic schema bootstrap, and the loser's error is repaired by
 	// re-running it. See internal/engine/dbosinit.go for the full analysis.
-	dbosCtx, err := newDurableContext(ctx, dbos.NewDBOSContext, dbos.Config{
+	dbosCtx, err := newDurableContext(ctx, dbos.NewContext, dbos.Config{
 		AppName:            appName,
-		SqliteSystemDB:     db,
+		SQLiteSystemDB:     db,
 		ExecutorID:         executorID,
 		ApplicationVersion: cfg.ApplicationVersion,
 		Logger:             logger,
@@ -268,8 +292,22 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		}
 	}
 
+	// Every failure below owns a live durable context. Abandoning it would
+	// leak its queue runner and notification goroutines for the life of the
+	// process, and would leave them writing through the handle the same
+	// failure path closes. Stop it first, then release the handles.
+	abort := func(cause error) (*Engine, error) {
+		_ = dbos.Shutdown(dbosCtx, constructionAbortShutdownTimeout)
+		_ = db.Close()
+		if trailCloser != nil {
+			_ = trailCloser.Close()
+		}
+		return nil, cause
+	}
+
 	e := &Engine{
 		cfg:         cfg,
+		logger:      logger,
 		db:          db,
 		dbosCtx:     dbosCtx,
 		trail:       trail,
@@ -280,18 +318,10 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 	if cfg.Tracker != nil && tasks.SupportsEngineGovernedAllocation(cfg.Tracker) {
 		allocator, bindErr := provenance.NewHostBoundGovernedAllocator(ctx, dbosCtx, db, tasks.GovernedAllocationAuditParticipant)
 		if bindErr != nil {
-			_ = db.Close()
-			if trailCloser != nil {
-				_ = trailCloser.Close()
-			}
-			return nil, &pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow, What: "Couldn't bind governed slice allocation to the durable engine.", Why: "The engine-owned DBOS root rejected the governed allocator before launch.", Where: "Constructing the engine (internal/engine/engine.go in engine.New).", Impact: "CreateSlice cannot run atomically on the engine's existing root and database handle.", Fix: "Construct one engine with a unified task tracker and ensure governed allocation is registered before Launch.", Cause: bindErr}
+			return abort(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow, What: "Couldn't bind governed slice allocation to the durable engine.", Why: "The engine-owned DBOS root rejected the governed allocator before launch.", Where: "Constructing the engine (internal/engine/engine.go in engine.New).", Impact: "CreateSlice cannot run atomically on the engine's existing root and database handle.", Fix: "Construct one engine with a unified task tracker and ensure governed allocation is registered before Launch.", Cause: bindErr})
 		}
 		if bindErr := tasks.BindEngineGovernedAllocation(cfg.Tracker, allocator); bindErr != nil {
-			_ = db.Close()
-			if trailCloser != nil {
-				_ = trailCloser.Close()
-			}
-			return nil, &pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow, What: "Couldn't install the engine-owned slice allocator.", Why: "The configured tracker rejected the narrow composed-allocation capability before launch.", Where: "Constructing the engine (internal/engine/engine.go in engine.New).", Impact: "CreateSlice would otherwise have no safe path to the engine-owned transaction.", Fix: "Pass the unified tracker returned by tasks.OpenTaskTracker as engine.Config.Tracker and do not reuse it across engines.", Cause: bindErr}
+			return abort(&pasterrors.StructuredError{Category: pasterrors.CategoryWorkflow, What: "Couldn't install the engine-owned slice allocator.", Why: "The configured tracker rejected the narrow composed-allocation capability before launch.", Where: "Constructing the engine (internal/engine/engine.go in engine.New).", Impact: "CreateSlice would otherwise have no safe path to the engine-owned transaction.", Fix: "Pass the unified tracker returned by tasks.OpenTaskTracker as engine.Config.Tracker and do not reuse it across engines.", Cause: bindErr})
 		}
 	}
 
@@ -303,11 +333,7 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 	if cfg.Tracker != nil {
 		agentID, err := resolveEngineAgentID(db, cfg.Tracker)
 		if err != nil {
-			_ = db.Close()
-			if trailCloser != nil {
-				_ = trailCloser.Close()
-			}
-			return nil, err
+			return abort(err)
 		}
 		e.activityAgentID = agentID
 
@@ -336,12 +362,19 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 	dbos.RegisterWorkflow(dbosCtx, e.SliceSubWorkflow)
 	dbos.RegisterWorkflow(dbosCtx, e.ReviewSubWorkflow)
 
-	// Create queues BEFORE Launch (NewWorkflowQueue panics after Launch). The
-	// control queue is where CLI clients submit epoch-control workflows for the
-	// hosted pastured process to execute.
-	e.controlQueue = newControlQueue(dbosCtx, cfg.QueueBasePollingInterval)
+	// Register the queues during construction, so both exist before the first
+	// enqueue. Registration writes a row to the system database and can fail;
+	// a failed registration leaves the engine with no queue to dispatch on, so
+	// it aborts construction rather than being ignored.
+	//
+	// The control queue is where CLI clients submit epoch-control workflows for
+	// the hosted pastured process to execute.
+	controlQueue, err := newControlQueue(dbosCtx, cfg.QueueBasePollingInterval)
+	if err != nil {
+		return abort(queueRegistrationError(ControlQueueName, err))
+	}
+	e.controlQueue = controlQueue
 
-	// Create the slice queue BEFORE Launch (NewWorkflowQueue panics after Launch).
 	// Resolve the concurrency limit K once here; store it on the Engine so
 	// SliceConcurrency() can return the actual configured value without
 	// re-deriving it from the config (two copies of the <=0 fallback logic
@@ -350,7 +383,11 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 	if k <= 0 {
 		k = DefaultSliceQueueConcurrency
 	}
-	e.sliceQueue = newSliceQueue(dbosCtx, k, cfg.QueueBasePollingInterval)
+	sliceQueue, err := newSliceQueue(dbosCtx, k, cfg.QueueBasePollingInterval)
+	if err != nil {
+		return abort(queueRegistrationError(SliceQueueName, err))
+	}
+	e.sliceQueue = sliceQueue
 	e.sliceConcurrency = k
 
 	return e, nil
@@ -376,11 +413,26 @@ func (e *Engine) Launch() error {
 
 // Shutdown stops the DBOS context (waiting up to timeout for in-flight steps),
 // then closes the shared handle and the owned trail. Safe to call once.
+//
+// When the durable runtime reports that the timeout expired with workers still
+// running, those workers may still write to the shared SQLite handle. Closing
+// it under them would turn a slow shutdown into a use-after-close, so the
+// handle is deliberately left open in that case and the process exit releases
+// it instead. The trail is closed either way: it is a separate handle that the
+// runtime never writes through.
+//
+// Reporting that outcome to the caller, and the tests that pin it, are a
+// separate change tracked in https://github.com/dayvidpham/pasture/issues/104;
+// this method keeps its current void signature.
 func (e *Engine) Shutdown(timeout time.Duration) {
+	shutdownIncomplete := false
 	if e.dbosCtx != nil {
-		dbos.Shutdown(e.dbosCtx, timeout)
+		if err := dbos.Shutdown(e.dbosCtx, timeout); err != nil {
+			shutdownIncomplete = true
+			e.logShutdownFailure(err)
+		}
 	}
-	if e.db != nil {
+	if e.db != nil && !shutdownIncomplete {
 		_ = e.db.Close()
 	}
 	if e.trailCloser != nil {
@@ -390,7 +442,7 @@ func (e *Engine) Shutdown(timeout time.Duration) {
 
 // DBOS returns the underlying DBOS context so callers (and later slices) can
 // RunWorkflow / Send / ListWorkflows against the engine's registered workflow.
-func (e *Engine) DBOS() dbos.DBOSContext { return e.dbosCtx }
+func (e *Engine) DBOS() dbos.Context { return e.dbosCtx }
 
 // DB returns the shared modernc handle (projection + DBOS tables live here).
 func (e *Engine) DB() *sql.DB { return e.db }
@@ -405,12 +457,12 @@ func (e *Engine) ReadProjection(epochId string) (*protocol.EpochState, error) {
 	return ReadProjection(e.db, epochId)
 }
 
-// SliceQueue returns the DBOS WorkflowQueue used for slice and review
+// SliceQueue returns the DBOS queue used for slice and review
 // sub-workflow dispatch. Tests may inspect the queue name to verify wiring.
-func (e *Engine) SliceQueue() dbos.WorkflowQueue { return e.sliceQueue }
+func (e *Engine) SliceQueue() dbos.Queue { return e.sliceQueue }
 
-// ControlQueue returns the DBOS WorkflowQueue used for epoch control workflows.
-func (e *Engine) ControlQueue() dbos.WorkflowQueue { return e.controlQueue }
+// ControlQueue returns the DBOS queue used for epoch control workflows.
+func (e *Engine) ControlQueue() dbos.Queue { return e.controlQueue }
 
 // SliceConcurrency returns the effective per-executor concurrency limit K that
 // was used to configure the slice queue. This is the resolved value (after
@@ -419,4 +471,41 @@ func (e *Engine) ControlQueue() dbos.WorkflowQueue { return e.controlQueue }
 // logic that could drift.
 func (e *Engine) SliceConcurrency() int {
 	return e.sliceConcurrency
+}
+
+// queueRegistrationError wraps a failed queue registration. A queue
+// configuration is a row in the system database, so registration can fail for
+// the same reasons any write can, and the engine cannot dispatch without it.
+func queueRegistrationError(queueName string, cause error) error {
+	return &pasterrors.StructuredError{
+		Category: pasterrors.CategoryStorage,
+		What:     fmt.Sprintf("Couldn't register the %q work queue in the pasture database.", queueName),
+		Why: "The durable engine stores each queue's configuration as a row in the database and " +
+			"rejected the write — usually because the database is unwritable, is held by another " +
+			"process, or the configured concurrency limit is invalid.",
+		Where:  "Constructing the engine (internal/engine/engine.go in engine.New).",
+		Impact: "The engine did not start, so no epoch, slice, or review work can be dispatched from it.",
+		Fix: "1. Confirm the database file is present and writable:\n" +
+			"     ls -l ~/.local/share/pasture/pasture.db\n" +
+			"2. Confirm no other pasture process is holding it:\n" +
+			"     pgrep -fa 'pasture|pastured'\n" +
+			"3. Confirm the slice concurrency limit is a positive integer\n" +
+			"   (--slice-concurrency or $PASTURE_SLICE_CONCURRENCY), then start again.",
+		Cause: cause,
+	}
+}
+
+// logShutdownFailure reports an incomplete durable shutdown. The caller cannot
+// act on it through Shutdown's current void signature, so it is logged rather
+// than dropped silently.
+func (e *Engine) logShutdownFailure(err error) {
+	logger := e.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Error(
+		"the durable engine did not stop within its shutdown timeout; "+
+			"workers may still be writing, so the shared database handle was left open for the process to release",
+		"error", err,
+	)
 }
