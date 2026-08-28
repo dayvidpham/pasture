@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -448,10 +447,12 @@ func TestGeneratedOutputInventory(t *testing.T) {
 	}
 	addExpectedOutput(t, expectedCodexHarness, ".codex/pasture-codex-activation.json", "CodexTarget.Manifest activation audit report")
 	addExpectedOutput(t, expectedCodexControl, ".codex/pasture-codex-activation.json", "CodexTarget.Manifest activation audit report")
-	for _, event := range runtime.CodexLifecycleEvents() {
-		path := filepath.ToSlash(filepath.Join(codexHooksRoot, "events", event.NativeName()+".sh"))
-		addExpectedOutput(t, expectedCodexHarness, path, "CodexTarget lifecycle event "+event.NativeName())
-		addExpectedOutput(t, expectedCodexControl, path, "CodexTarget lifecycle event "+event.NativeName())
+	// One runner per ACTIVATED event only: the transport wires nothing the
+	// activation manifest withholds, so a withheld event owns no output path.
+	for _, event := range codexLifecycleEventNamesForTest() {
+		path := filepath.ToSlash(filepath.Join(codexHooksRoot, "events", event+".sh"))
+		addExpectedOutput(t, expectedCodexHarness, path, "CodexTarget lifecycle event "+event)
+		addExpectedOutput(t, expectedCodexControl, path, "CodexTarget lifecycle event "+event)
 	}
 	addExpectedOutput(t, expectedRootOutputs, "schema.xml", "GenerateSchemaToFile")
 	addExpectedOutput(t, expectedRootOutputs, "opencode.json", "OpenCodeTarget.Manifest")

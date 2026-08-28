@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
@@ -50,12 +52,7 @@ func TestCodexManifestDeclaresThreePackages(t *testing.T) {
 
 func TestCodexGlobalHooksEmitterIsSeparateFromProjectConfiguration(t *testing.T) {
 	t.Parallel()
-	events := runtime.CodexLifecycleEvents()
-	names := make([]string, len(events))
-	for index, event := range events {
-		names[index] = event.NativeName()
-	}
-	project, err := renderCodexHooksConfig(names)
+	project, err := renderCodexHooksConfig(codexLifecycleEventNamesForTest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,23 +92,44 @@ func TestCodexManifestIsDeterministic(t *testing.T) {
 	}
 }
 
-// codexLifecycleEventNamesForTest returns the pinned Codex lifecycle event
-// native names in catalog order, the exact input the production transport
-// renderer consumes.
+// codexLifecycleEventNamesForTest returns the native names of exactly the Codex
+// events the pinned activation catalog enables, in runtime catalog order — the
+// exact input the production transport renderer consumes. It derives the set
+// from the proved target declaration (activation.Codex0_146_0TargetEvents) and
+// the generated registration manifest, independently of the production filter,
+// so a filter that widened back to the whole catalog would fail these tests.
 func codexLifecycleEventNamesForTest() []string {
-	events := runtime.CodexLifecycleEvents()
-	names := make([]string, len(events))
-	for i, event := range events {
-		names[i] = event.NativeName()
+	enabled := make(map[string]struct{})
+	for _, kind := range activation.Codex0_146_0TargetEvents() {
+		for _, event := range registration.Codex0_146_0().Events {
+			if event.Kind == kind {
+				enabled[event.NativeName] = struct{}{}
+			}
+		}
+	}
+	names := make([]string, 0, len(enabled))
+	for _, event := range runtime.CodexLifecycleEvents() {
+		if _, ok := enabled[event.NativeName()]; ok {
+			names = append(names, event.NativeName())
+		}
 	}
 	return names
 }
 
-// TestCodexHooksConfigCoversPinnedEvents proves the executable hook inventory is
-// exactly the runtime contract's closed event set.
-func TestCodexHooksConfigCoversPinnedEvents(t *testing.T) {
+// TestCodexHooksConfigCoversActivatedEvents proves the executable hook inventory
+// is exactly the activated subset of the runtime contract's closed event set:
+// one command hook per enabled event, and no entry at all for a withheld one.
+func TestCodexHooksConfigCoversActivatedEvents(t *testing.T) {
 	t.Parallel()
-	wire, err := renderCodexHooksConfig(codexLifecycleEventNamesForTest())
+	activated := codexLifecycleEventNamesForTest()
+	produced, err := codexEnabledEventNames()
+	if err != nil {
+		t.Fatalf("codexEnabledEventNames: %v", err)
+	}
+	if strings.Join(produced, ",") != strings.Join(activated, ",") {
+		t.Fatalf("production wired event set = %v, want the activated set %v", produced, activated)
+	}
+	wire, err := renderCodexHooksConfig(produced)
 	if err != nil {
 		t.Fatalf("renderCodexHooksConfig: %v", err)
 	}
@@ -119,17 +137,27 @@ func TestCodexHooksConfigCoversPinnedEvents(t *testing.T) {
 	if err := json.Unmarshal([]byte(wire), &config); err != nil {
 		t.Fatalf("decode hooks config: %v", err)
 	}
-	if len(config.Hooks) != len(runtime.CodexLifecycleEvents()) {
-		t.Fatalf("hook event count = %d, want %d", len(config.Hooks), len(runtime.CodexLifecycleEvents()))
+	if len(config.Hooks) != len(activated) {
+		t.Fatalf("hook event count = %d, want %d", len(config.Hooks), len(activated))
 	}
-	for _, event := range runtime.CodexLifecycleEvents() {
-		groups, ok := config.Hooks[event.NativeName()]
+	for _, event := range activated {
+		groups, ok := config.Hooks[event]
 		if !ok || len(groups) != 1 || len(groups[0].Hooks) != 1 {
 			t.Fatalf("event %s config = %+v, want one command hook", event, groups)
 		}
 		command := groups[0].Hooks[0].Command
-		if !strings.Contains(command, "/hooks/events/"+event.NativeName()+".sh") {
+		if !strings.Contains(command, "/hooks/events/"+event+".sh") {
 			t.Fatalf("event %s command %q does not select its fixed-event executable", event, command)
+		}
+	}
+	for _, event := range runtime.CodexLifecycleEvents() {
+		if _, wired := config.Hooks[event.NativeName()]; wired {
+			continue
+		}
+		for _, name := range activated {
+			if name == event.NativeName() {
+				t.Fatalf("activated event %s has no hooks configuration entry", name)
+			}
 		}
 	}
 }
@@ -173,17 +201,38 @@ func TestCodexHooksMatchersMatchAuthenticCapture(t *testing.T) {
 	requireMatcher("SessionStart", "startup")
 	requireMatcher("PreToolUse", "*")
 
-	// Non-authentic events retain the inherited empty-matcher convention; they
-	// carry no matcher evidence and are never activated in M3.
+	// No non-activated event is wired at all: the transport carries only the
+	// activated set, so a withheld event owns no hooks configuration entry.
+	for _, event := range []string{"PermissionRequest", "PostToolUse", "PreCompact", "PostCompact", "SubagentStart", "SubagentStop", "Stop", "UserPromptSubmit"} {
+		if groups, wired := config.Hooks[event]; wired {
+			t.Errorf("withheld event %s is wired as %+v; the transport must carry only activated events", event, groups)
+		}
+	}
+
+	// The renderer keeps its matcher convention for the events a later
+	// activation may admit: an empty matcher where no capture evidence exists,
+	// and an omitted matcher for the two events that never carried one. This
+	// checks the renderer alone; the wired set above stays the activated set.
+	full := make([]string, 0)
+	for _, event := range runtime.CodexLifecycleEvents() {
+		full = append(full, event.NativeName())
+	}
+	futureWire, err := renderCodexHooksConfig(full)
+	if err != nil {
+		t.Fatalf("renderCodexHooksConfig over the full catalog: %v", err)
+	}
+	var futureConfig codexHooksConfig
+	if err := json.Unmarshal([]byte(futureWire), &futureConfig); err != nil {
+		t.Fatalf("decode full-catalog hooks config: %v", err)
+	}
 	for _, event := range []string{"PermissionRequest", "PostToolUse", "PreCompact", "PostCompact", "SubagentStart", "SubagentStop"} {
-		groups := config.Hooks[event]
+		groups := futureConfig.Hooks[event]
 		if len(groups) != 1 || groups[0].Matcher == nil || *groups[0].Matcher != "" {
 			t.Errorf("non-authentic event %s matcher = %+v, want the inherited empty-matcher convention", event, groups)
 		}
 	}
-	// Stop and UserPromptSubmit omit the matcher entirely.
 	for _, event := range []string{"Stop", "UserPromptSubmit"} {
-		groups := config.Hooks[event]
+		groups := futureConfig.Hooks[event]
 		if len(groups) != 1 || groups[0].Matcher != nil {
 			t.Errorf("event %s matcher = %+v, want the matcher omitted", event, groups)
 		}
