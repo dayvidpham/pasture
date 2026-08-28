@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
@@ -68,6 +69,11 @@ type dbosController struct {
 	db          *sql.DB
 	trail       audit.Trail
 	trailCloser interface{ Close() error }
+
+	// closeOnce and closeErr make Close one-shot: the real shutdown runs on the
+	// first call and every later call replays its result. See Close.
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // OpenEpochController opens a DBOS-backed controller on the unified database.
@@ -102,10 +108,10 @@ func OpenEpochController(dbPath string) (EpochController, error) {
 		// load-bearing in three separate places:
 		//
 		//  1. Ownership. The runtime stamps this name into the application_name
-		//     column of every row it writes (workflow_status, queues,
-		//     operation_outputs, application_versions). Left empty, a client is
-		//     "nameless": it writes NULL there and reads every application's
-		//     rows. Named, it writes "pasture" and its reads are scoped to
+		//     column of every row it writes, including workflow_status, queues,
+		//     workflow_schedules, operation_outputs and application_versions.
+		//     Left empty, a client is "nameless": it writes NULL there and reads
+		//     every application's rows. Named, it writes "pasture" and its reads are scoped to
 		//     rows owned by "pasture" plus still-unclaimed (NULL) ones.
 		//  2. Queue claiming and recovery. Queue dequeue and the recovery sweep
 		//     both filter on application_name. A controller and a daemon that
@@ -302,10 +308,11 @@ const controllerShutdownTimeout = 5 * time.Second
 //
 // Callers must treat it as "the process stopped, but not cleanly": stop using
 // the controller, surface the message, and re-read state through the daemon
-// rather than trusting what was in flight. Do NOT retry Close hoping for a
-// clean answer — the runtime reopens its shutdown guard after a timeout, so a
-// second Close spends the same budget again on a client whose database handle
-// is already gone.
+// rather than trusting what was in flight. Retrying Close cannot help — the
+// runtime reopens its own shutdown guard after a timeout, so an unguarded retry
+// would spend the whole budget again on a client whose database handle is
+// already gone. Close refuses that retry itself rather than only warning
+// against it.
 func incompleteShutdownError(cause error) error {
 	return &pasterrors.StructuredError{
 		Category: pasterrors.CategoryWorkflow,
@@ -328,17 +335,24 @@ func incompleteShutdownError(cause error) error {
 
 // Close shuts the durable client down and then releases the trail handle.
 //
-// Close is safe to call more than once. After a clean shutdown the runtime does
-// no further work and reports nil, and the trail closes exactly once — so a
-// deferred Close after an explicit one is free. After an INCOMPLETE shutdown the
-// runtime reopens its guard, so a second Close repeats the wait; see
-// incompleteShutdownError for why a caller should stop instead.
+// Close is one-shot and safe to call from several places at once: the shutdown
+// runs on the first call, and every later call replays that first result
+// immediately. A deferred Close after an explicit one therefore costs nothing,
+// and a Close that reported an incomplete shutdown never spends the budget a
+// second time on a client whose database handle the runtime has already closed.
+// The runtime's own guard would permit that retry; this one does not.
 //
 // An incomplete shutdown is REPORTED, not swallowed — see
 // incompleteShutdownError for what the caller must do with it. The trail is
 // closed on that path too: it is a separate handle, and leaving it open would
 // leak it on every failed shutdown.
 func (c *dbosController) Close() error {
+	c.closeOnce.Do(func() { c.closeErr = c.shutdown() })
+	return c.closeErr
+}
+
+// shutdown performs the one real close. Only Close calls it, exactly once.
+func (c *dbosController) shutdown() error {
 	var errs []error
 	if c.client != nil {
 		// The client owns and closes the SQLiteSystemDB handle supplied at

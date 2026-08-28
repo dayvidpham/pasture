@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -35,9 +36,16 @@ func TestDbosControllerClose_ReportsIncompleteShutdown(t *testing.T) {
 
 	// parked is closed by the test to release the workflow; entered tells the
 	// test the workflow is really running and counted by the runtime.
+	//
+	// Each close goes through a sync.Once because the runtime may re-execute a
+	// durable workflow: a second instance running the same body would close an
+	// already-closed channel and panic the whole test binary, turning a subtle
+	// scheduling event into an unrelated-looking crash.
 	parked := make(chan struct{})
 	entered := make(chan struct{})
 	finished := make(chan struct{})
+	var enteredOnce, parkedOnce, finishedOnce sync.Once
+	releaseParked := func() { parkedOnce.Do(func() { close(parked) }) }
 
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	db, err := dbconn.OpenSharedDB(dbPath)
@@ -59,9 +67,9 @@ func TestDbosControllerClose_ReportsIncompleteShutdown(t *testing.T) {
 	// what shutdown uses to unwind in-flight work, so a workflow that honoured
 	// it would let the shutdown finish and there would be no timeout to observe.
 	parkedWorkflow := func(_ dbos.Context, _ string) (string, error) {
-		close(entered)
+		enteredOnce.Do(func() { close(entered) })
 		<-parked
-		close(finished)
+		finishedOnce.Do(func() { close(finished) })
 		return "released", nil
 	}
 	dbos.RegisterWorkflow(dbosCtx, parkedWorkflow)
@@ -73,11 +81,7 @@ func TestDbosControllerClose_ReportsIncompleteShutdown(t *testing.T) {
 	// Release the parked workflow whatever happens, and wait for it to leave the
 	// runtime, so a failing assertion cannot leave a goroutine behind.
 	t.Cleanup(func() {
-		select {
-		case <-parked:
-		default:
-			close(parked)
-		}
+		releaseParked()
 		<-finished
 	})
 
@@ -106,6 +110,21 @@ func TestDbosControllerClose_ReportsIncompleteShutdown(t *testing.T) {
 	// that wrapper: callers read it off the joined error, not off the cause.
 	if got := pasterrors.ExitCode(closeErr); got != 3 {
 		t.Errorf("ExitCode(Close error) = %d, want 3: the workflow category must survive the join", got)
+	}
+
+	// A retry must be refused, not re-attempted: the runtime reopens its own
+	// shutdown guard after a timeout, so an unguarded second Close would wait
+	// the whole budget again on a client whose handle is already gone.
+	retryStart := time.Now()
+	retryErr := c.Close()
+	retryElapsed := time.Since(retryStart)
+	if retryErr != closeErr {
+		t.Errorf("second Close returned a different error (%v) than the first (%v); it must replay the recorded result",
+			retryErr, closeErr)
+	}
+	if retryElapsed >= controllerShutdownTimeout {
+		t.Errorf("second Close took %s, at least the full %s budget: the failed close is being re-attempted",
+			retryElapsed, controllerShutdownTimeout)
 	}
 
 	var structured *pasterrors.StructuredError
