@@ -2,6 +2,7 @@ package main
 
 import (
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
@@ -103,4 +104,65 @@ func diffLifecycleRowSets(want, got []string) (missing, extra []string) {
 	sort.Strings(missing)
 	sort.Strings(extra)
 	return missing, extra
+}
+
+// TestGeneratedManifestsCarryRuntimeFailureModesVerbatim renders the two
+// provider registration manifests with the SAME renderer main() uses and
+// asserts two things at once.
+//
+// First, the rendered text names arms of internal/runtime.FailureMode. The
+// registration package no longer declares a failure vocabulary of its own, so
+// an arm that is not in the runtime enum cannot be emitted.
+//
+// Second, the OpenCode rows keep the behavior the runtime profile declares: 15
+// named callbacks stay throw-fail-fast and 32 catch-all/SSE observations stay
+// observe-only. The removed openCodeFailure helper used to fold those six arms
+// into two, which relabelled every named callback as an exit-2 block. A host
+// that reads that label would block a session on a plugin that only throws.
+func TestGeneratedManifestsCarryRuntimeFailureModesVerbatim(t *testing.T) {
+	openCode := string(renderProviderManifest(
+		hostcontract.OpenCode1_18_10(), "OpenCode1_18_10", "ir.HarnessOpenCode"))
+	codex := string(renderProviderManifest(
+		hostcontract.Codex0_146_0(), "Codex0_146_0", "ir.HarnessCodex"))
+
+	for _, rendered := range []string{openCode, codex} {
+		if !strings.Contains(rendered, `pastureruntime "github.com/dayvidpham/pasture/internal/runtime"`) {
+			t.Fatalf("rendered manifest does not import internal/runtime, so it cannot name a runtime failure arm:\n%s", rendered)
+		}
+		for _, retired := range []string{"Failure:FailureReportAndContinue", "Failure:FailureExitTwoBlocks"} {
+			if strings.Contains(rendered, retired) {
+				t.Errorf(
+					"rendered manifest still writes the retired registration-local arm %q; every row must name an arm of internal/runtime.FailureMode",
+					retired)
+			}
+		}
+	}
+
+	counts := map[string]int{}
+	for _, line := range strings.Split(openCode, "\n") {
+		index := strings.Index(line, "Failure:")
+		if index < 0 {
+			continue
+		}
+		rest := line[index+len("Failure:"):]
+		end := strings.IndexAny(rest, ",}")
+		if end < 0 {
+			t.Fatalf("cannot read the failure arm out of rendered row %q", line)
+		}
+		counts[rest[:end]]++
+	}
+	want := map[string]int{
+		"pastureruntime.FailureThrowFailFast": 15,
+		"pastureruntime.FailureObserveOnly":   32,
+	}
+	if len(counts) != len(want) {
+		t.Fatalf("OpenCode rows use failure arms %v, want exactly %v", counts, want)
+	}
+	for arm, wantCount := range want {
+		if counts[arm] != wantCount {
+			t.Errorf(
+				"OpenCode rows carry %d %s rows, want %d; a lossy collapse of the runtime failure vocabulary would change this count",
+				counts[arm], arm, wantCount)
+		}
+	}
 }

@@ -2,7 +2,10 @@
 
 package hostcontract
 
-import "github.com/dayvidpham/pasture/internal/lifecycle/model"
+import (
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
+)
 
 const (
 	fSessionID model.NativeFieldID = iota + 1
@@ -74,7 +77,7 @@ var claudeFields = []Field{
 
 var commonFields = []model.NativeFieldID{fSessionID, fTranscriptPath, fCWD, fPermissionMode, fHookEventName, fEffort, fAgentID, fAgentType, fPromptID}
 
-func nativeEvent(kind model.ContractEventKind, symbol, name string, fields []model.NativeFieldID, identities []Identity, blocking BlockingMode, mutation MutationMode, failure FailureMode, stop StopLoopPolicy) Event {
+func nativeEvent(kind model.ContractEventKind, symbol, name string, fields []model.NativeFieldID, identities []Identity, blocking BlockingMode, mutation MutationMode, failure pastureruntime.FailureMode, stop StopLoopPolicy) Event {
 	all := append([]model.NativeFieldID(nil), commonFields...)
 	all = append(all, fields...)
 	ids := append([]Identity{{Field: fSessionID, Binding: model.BindingSession, Required: true}}, identities...)
@@ -86,22 +89,22 @@ func nativeEvent(kind model.ContractEventKind, symbol, name string, fields []mod
 // through 2.1.222; required identity fields remain the authority boundary.
 func ClaudeCode2_1_210() Contract {
 	o := func(k model.ContractEventKind, s, n string, f ...model.NativeFieldID) Event {
-		return nativeEvent(k, s, n, f, nil, NonBlocking, MutationNone, FailureReportAndContinue, StopLoopNotApplicable)
+		return nativeEvent(k, s, n, f, nil, NonBlocking, MutationNone, pastureruntime.FailureReportAndContinue, StopLoopNotApplicable)
 	}
 	g := func(k model.ContractEventKind, s, n string, f ...model.NativeFieldID) Event {
-		return nativeEvent(k, s, n, f, nil, Blocking, MutationNone, FailureExitTwoBlocks, StopLoopNotApplicable)
+		return nativeEvent(k, s, n, f, nil, Blocking, MutationNone, pastureruntime.FailureExitTwoBlocks, StopLoopNotApplicable)
 	}
 	tool := []Identity{{Field: fToolUseID, Binding: model.BindingToolCall, Required: true}}
 	request := []Identity{{Field: fRequestID, Binding: model.BindingRequest, Required: true}}
 	agent := []Identity{{Field: fAgentID, Binding: model.BindingAgent, Required: true}}
 	events := []Event{
 		o(1, "EventSessionStart", "SessionStart", fSource, fModel, fSessionTitle), o(2, "EventSetup", "Setup", fTrigger), o(3, "EventSessionEnd", "SessionEnd", fReason), g(4, "EventUserPromptSubmit", "UserPromptSubmit", fPrompt), g(5, "EventUserPromptExpansion", "UserPromptExpansion", fPrompt, fCommandName),
-		nativeEvent(6, "EventStop", "Stop", []model.NativeFieldID{fStopHookActive}, nil, Blocking, MutationNone, FailureExitTwoBlocks, StopLoopConsultWhenInactive), o(7, "EventStopFailure", "StopFailure", fError, fErrorType),
-		nativeEvent(8, "EventPreToolUse", "PreToolUse", []model.NativeFieldID{fToolName, fToolInput, fToolUseID}, tool, Blocking, MutationInput, FailureExitTwoBlocks, StopLoopNotApplicable), nativeEvent(9, "EventPermissionRequest", "PermissionRequest", []model.NativeFieldID{fToolName, fToolInput, fRequestID}, request, Blocking, MutationNone, FailureExitTwoBlocks, StopLoopNotApplicable),
-		o(10, "EventPermissionDenied", "PermissionDenied", fToolName, fToolInput), nativeEvent(11, "EventPostToolUse", "PostToolUse", []model.NativeFieldID{fToolName, fToolInput, fToolOutput, fToolResponse, fDurationMS, fToolUseID}, tool, NonBlocking, MutationNone, FailureReportAndContinue, StopLoopNotApplicable), nativeEvent(12, "EventPostToolUseFailure", "PostToolUseFailure", []model.NativeFieldID{fToolName, fToolInput, fError, fIsInterrupt, fDurationMS, fToolUseID}, tool, NonBlocking, MutationNone, FailureReportAndContinue, StopLoopNotApplicable),
-		g(13, "EventPostToolBatch", "PostToolBatch", fBatchResults, fToolCalls), o(14, "EventFileChanged", "FileChanged", fFilePath), o(15, "EventCwdChanged", "CwdChanged"), nativeEvent(16, "EventConfigChange", "ConfigChange", []model.NativeFieldID{fConfigSource}, nil, ConditionallyBlocking, MutationNone, FailureExitTwoBlocks, StopLoopNotApplicable), o(17, "EventInstructionsLoaded", "InstructionsLoaded", fFilePath, fMemoryType, fLoadReason, fGlobs, fTriggerFilePath, fParentFilePath), g(18, "EventWorktreeCreate", "WorktreeCreate"), o(19, "EventWorktreeRemove", "WorktreeRemove"),
-		nativeEvent(20, "EventSubagentStart", "SubagentStart", nil, agent, NonBlocking, MutationNone, FailureReportAndContinue, StopLoopNotApplicable), nativeEvent(21, "EventSubagentStop", "SubagentStop", []model.NativeFieldID{fAgentTranscriptPath, fStopHookActive}, agent, Blocking, MutationNone, FailureExitTwoBlocks, StopLoopConsultWhenInactive), g(22, "EventTeammateIdle", "TeammateIdle", fTeammateName), g(23, "EventTaskCreated", "TaskCreated", fTaskID), g(24, "EventTaskCompleted", "TaskCompleted", fTaskID), g(25, "EventPreCompact", "PreCompact", fTrigger, fCustomInstructions), o(26, "EventPostCompact", "PostCompact", fTrigger, fCompactSummary), o(27, "EventNotification", "Notification", fMessage, fNotificationType, fTitle), o(28, "EventMessageDisplay", "MessageDisplay", fMessage, fContent),
-		nativeEvent(29, "EventElicitation", "Elicitation", []model.NativeFieldID{fRequestID, fFields, fMCPServerName, fMessage, fMode, fRequestedSchema}, request, Blocking, MutationNone, FailureExitTwoBlocks, StopLoopNotApplicable), nativeEvent(30, "EventElicitationResult", "ElicitationResult", []model.NativeFieldID{fRequestID, fResponse, fMCPServerName, fMode, fAction, fContent}, request, Blocking, MutationNone, FailureExitTwoBlocks, StopLoopNotApplicable),
+		nativeEvent(6, "EventStop", "Stop", []model.NativeFieldID{fStopHookActive}, nil, Blocking, MutationNone, pastureruntime.FailureExitTwoBlocks, StopLoopConsultWhenInactive), o(7, "EventStopFailure", "StopFailure", fError, fErrorType),
+		nativeEvent(8, "EventPreToolUse", "PreToolUse", []model.NativeFieldID{fToolName, fToolInput, fToolUseID}, tool, Blocking, MutationInput, pastureruntime.FailureExitTwoBlocks, StopLoopNotApplicable), nativeEvent(9, "EventPermissionRequest", "PermissionRequest", []model.NativeFieldID{fToolName, fToolInput, fRequestID}, request, Blocking, MutationNone, pastureruntime.FailureExitTwoBlocks, StopLoopNotApplicable),
+		o(10, "EventPermissionDenied", "PermissionDenied", fToolName, fToolInput), nativeEvent(11, "EventPostToolUse", "PostToolUse", []model.NativeFieldID{fToolName, fToolInput, fToolOutput, fToolResponse, fDurationMS, fToolUseID}, tool, NonBlocking, MutationNone, pastureruntime.FailureReportAndContinue, StopLoopNotApplicable), nativeEvent(12, "EventPostToolUseFailure", "PostToolUseFailure", []model.NativeFieldID{fToolName, fToolInput, fError, fIsInterrupt, fDurationMS, fToolUseID}, tool, NonBlocking, MutationNone, pastureruntime.FailureReportAndContinue, StopLoopNotApplicable),
+		g(13, "EventPostToolBatch", "PostToolBatch", fBatchResults, fToolCalls), o(14, "EventFileChanged", "FileChanged", fFilePath), o(15, "EventCwdChanged", "CwdChanged"), nativeEvent(16, "EventConfigChange", "ConfigChange", []model.NativeFieldID{fConfigSource}, nil, ConditionallyBlocking, MutationNone, pastureruntime.FailureExitTwoBlocks, StopLoopNotApplicable), o(17, "EventInstructionsLoaded", "InstructionsLoaded", fFilePath, fMemoryType, fLoadReason, fGlobs, fTriggerFilePath, fParentFilePath), g(18, "EventWorktreeCreate", "WorktreeCreate"), o(19, "EventWorktreeRemove", "WorktreeRemove"),
+		nativeEvent(20, "EventSubagentStart", "SubagentStart", nil, agent, NonBlocking, MutationNone, pastureruntime.FailureReportAndContinue, StopLoopNotApplicable), nativeEvent(21, "EventSubagentStop", "SubagentStop", []model.NativeFieldID{fAgentTranscriptPath, fStopHookActive}, agent, Blocking, MutationNone, pastureruntime.FailureExitTwoBlocks, StopLoopConsultWhenInactive), g(22, "EventTeammateIdle", "TeammateIdle", fTeammateName), g(23, "EventTaskCreated", "TaskCreated", fTaskID), g(24, "EventTaskCompleted", "TaskCompleted", fTaskID), g(25, "EventPreCompact", "PreCompact", fTrigger, fCustomInstructions), o(26, "EventPostCompact", "PostCompact", fTrigger, fCompactSummary), o(27, "EventNotification", "Notification", fMessage, fNotificationType, fTitle), o(28, "EventMessageDisplay", "MessageDisplay", fMessage, fContent),
+		nativeEvent(29, "EventElicitation", "Elicitation", []model.NativeFieldID{fRequestID, fFields, fMCPServerName, fMessage, fMode, fRequestedSchema}, request, Blocking, MutationNone, pastureruntime.FailureExitTwoBlocks, StopLoopNotApplicable), nativeEvent(30, "EventElicitationResult", "ElicitationResult", []model.NativeFieldID{fRequestID, fResponse, fMCPServerName, fMode, fAction, fContent}, request, Blocking, MutationNone, pastureruntime.FailureExitTwoBlocks, StopLoopNotApplicable),
 	}
 	return Contract{Version: "2.1.210", Fields: append([]Field(nil), claudeFields...), Events: events}
 }

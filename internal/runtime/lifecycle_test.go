@@ -364,3 +364,41 @@ func hasNativeIdentity(mapping runtime.LifecycleEventMapping, kind runtime.Nativ
 	}
 	return false
 }
+
+// TestFailureModeIsTheOnlyFailureVocabulary pins the single failure-mode enum
+// of the tree. Before this, three FailureMode types existed (this one, one in
+// internal/lifecycle/registration and one in the ingress host contract), and
+// the two small ones folded six native behaviors into two. A fold is silent: a
+// generated adapter cannot tell an OpenCode plugin throw from a Claude exit-2
+// block once both are labelled the same. The zero value must stay invalid so an
+// unset field can never read as a real native behavior.
+func TestFailureModeIsTheOnlyFailureVocabulary(t *testing.T) {
+	t.Parallel()
+
+	var unset runtime.FailureMode
+	assert.False(t, unset.IsValid(), "the zero FailureMode must never be a valid native behavior")
+	assert.Equal(t, "", unset.String(), "the zero FailureMode must not name a native behavior")
+	assert.False(t, runtime.FailureMode(uint8(runtime.FailureObserveOnly)+1).IsValid(),
+		"a value above the last declared arm must never be valid")
+
+	arms := []runtime.FailureMode{
+		runtime.FailureReportAndContinue,
+		runtime.FailureExitTwoBlocks,
+		runtime.FailureStrictHook,
+		runtime.FailureStrictExitTwoBlocks,
+		runtime.FailureThrowFailFast,
+		runtime.FailureObserveOnly,
+	}
+	seen := make(map[string]runtime.FailureMode, len(arms))
+	for _, arm := range arms {
+		assert.True(t, arm.IsValid(), "declared arm %d must be valid", uint8(arm))
+		name := arm.String()
+		require.NotEmpty(t, name, "declared arm %d must have a name", uint8(arm))
+		previous, duplicate := seen[name]
+		require.False(t, duplicate,
+			"arms %d and %d share the name %q, so a generated manifest could not tell them apart",
+			uint8(previous), uint8(arm), name)
+		seen[name] = arm
+	}
+	assert.Len(t, seen, 6, "the failure vocabulary has exactly six arms")
+}

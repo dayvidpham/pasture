@@ -4,20 +4,21 @@ package registration
 import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 )
 
 func Codex0_146_0() Manifest {
 	events := []Event{
-		{Kind: EventCodexSessionStart, NativeName: "SessionStart", AllowedFields: []model.NativeFieldID{FieldCodexSessionID}, Identities: []Identity{{Field: FieldCodexSessionID, Binding: model.BindingSession, Required: true}}, Blocking: NonBlocking, Mutation: MutationNone, Failure: FailureReportAndContinue, StopLoop: StopLoopNotApplicable},
-		{Kind: EventCodexUserPromptSubmit, NativeName: "UserPromptSubmit", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: Blocking, Mutation: MutationNone, Failure: FailureExitTwoBlocks, StopLoop: StopLoopNotApplicable},
-		{Kind: EventCodexPreToolUse, NativeName: "PreToolUse", AllowedFields: []model.NativeFieldID{FieldCodexSessionID, FieldCodexTurnID, FieldCodexToolUseID}, Identities: []Identity{{Field: FieldCodexSessionID, Binding: model.BindingSession, Required: true}, {Field: FieldCodexTurnID, Binding: model.BindingTurn, Required: true}, {Field: FieldCodexToolUseID, Binding: model.BindingToolCall, Required: true}}, Blocking: Blocking, Mutation: MutationInput, Failure: FailureExitTwoBlocks, StopLoop: StopLoopNotApplicable},
-		{Kind: EventCodexPermissionRequest, NativeName: "PermissionRequest", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: Blocking, Mutation: MutationNone, Failure: FailureExitTwoBlocks, StopLoop: StopLoopNotApplicable},
-		{Kind: EventCodexPostToolUse, NativeName: "PostToolUse", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: Blocking, Mutation: MutationNone, Failure: FailureExitTwoBlocks, StopLoop: StopLoopNotApplicable},
-		{Kind: EventCodexPreCompact, NativeName: "PreCompact", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: Blocking, Mutation: MutationNone, Failure: FailureExitTwoBlocks, StopLoop: StopLoopNotApplicable},
-		{Kind: EventCodexPostCompact, NativeName: "PostCompact", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: NonBlocking, Mutation: MutationNone, Failure: FailureReportAndContinue, StopLoop: StopLoopNotApplicable},
-		{Kind: EventCodexSubagentStart, NativeName: "SubagentStart", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: NonBlocking, Mutation: MutationNone, Failure: FailureReportAndContinue, StopLoop: StopLoopNotApplicable},
-		{Kind: EventCodexSubagentStop, NativeName: "SubagentStop", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: Blocking, Mutation: MutationNone, Failure: FailureExitTwoBlocks, StopLoop: StopLoopConsultWhenInactive},
-		{Kind: EventCodexStop, NativeName: "Stop", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: Blocking, Mutation: MutationNone, Failure: FailureExitTwoBlocks, StopLoop: StopLoopConsultWhenInactive},
+		{Kind: EventCodexSessionStart, NativeName: "SessionStart", AllowedFields: []model.NativeFieldID{FieldCodexSessionID}, Identities: []Identity{{Field: FieldCodexSessionID, Binding: model.BindingSession, Required: true}}, Blocking: NonBlocking, Mutation: MutationNone, Failure: pastureruntime.FailureReportAndContinue, StopLoop: StopLoopNotApplicable},
+		{Kind: EventCodexUserPromptSubmit, NativeName: "UserPromptSubmit", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: Blocking, Mutation: MutationNone, Failure: pastureruntime.FailureExitTwoBlocks, StopLoop: StopLoopNotApplicable},
+		{Kind: EventCodexPreToolUse, NativeName: "PreToolUse", AllowedFields: []model.NativeFieldID{FieldCodexSessionID, FieldCodexTurnID, FieldCodexToolUseID}, Identities: []Identity{{Field: FieldCodexSessionID, Binding: model.BindingSession, Required: true}, {Field: FieldCodexTurnID, Binding: model.BindingTurn, Required: true}, {Field: FieldCodexToolUseID, Binding: model.BindingToolCall, Required: true}}, Blocking: Blocking, Mutation: MutationInput, Failure: pastureruntime.FailureExitTwoBlocks, StopLoop: StopLoopNotApplicable},
+		{Kind: EventCodexPermissionRequest, NativeName: "PermissionRequest", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: Blocking, Mutation: MutationNone, Failure: pastureruntime.FailureExitTwoBlocks, StopLoop: StopLoopNotApplicable},
+		{Kind: EventCodexPostToolUse, NativeName: "PostToolUse", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: Blocking, Mutation: MutationNone, Failure: pastureruntime.FailureExitTwoBlocks, StopLoop: StopLoopNotApplicable},
+		{Kind: EventCodexPreCompact, NativeName: "PreCompact", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: Blocking, Mutation: MutationNone, Failure: pastureruntime.FailureExitTwoBlocks, StopLoop: StopLoopNotApplicable},
+		{Kind: EventCodexPostCompact, NativeName: "PostCompact", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: NonBlocking, Mutation: MutationNone, Failure: pastureruntime.FailureReportAndContinue, StopLoop: StopLoopNotApplicable},
+		{Kind: EventCodexSubagentStart, NativeName: "SubagentStart", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: NonBlocking, Mutation: MutationNone, Failure: pastureruntime.FailureReportAndContinue, StopLoop: StopLoopNotApplicable},
+		{Kind: EventCodexSubagentStop, NativeName: "SubagentStop", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: Blocking, Mutation: MutationNone, Failure: pastureruntime.FailureExitTwoBlocks, StopLoop: StopLoopConsultWhenInactive},
+		{Kind: EventCodexStop, NativeName: "Stop", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: Blocking, Mutation: MutationNone, Failure: pastureruntime.FailureExitTwoBlocks, StopLoop: StopLoopConsultWhenInactive},
 	}
 	contract, err := ir.NewRuntimeContractID(ir.HarnessCodex, "0.146.0")
 	if err != nil {

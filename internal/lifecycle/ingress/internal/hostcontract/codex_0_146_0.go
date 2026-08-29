@@ -1,6 +1,9 @@
 package hostcontract
 
-import "github.com/dayvidpham/pasture/internal/lifecycle/model"
+import (
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
+)
 
 // Codex native identity field IDs. Only the correlation fields consumed by the
 // two authentically observed Codex 0.146.0 events are declared here; all other
@@ -22,9 +25,6 @@ var codexFields = []Field{
 //
 // It mirrors the self-contained Claude host-contract shape (a closed native
 // catalog defined in source) rather than the runtime-derived OpenCode shape.
-// This keeps the compile-time generator independent of the parallel M3-SLICE-1
-// runtime profile replacement (IP-1): the registration surface consumed by
-// ingress/frontend is generated from this source alone.
 //
 // Only SessionStart and PreToolUse carry native identities and are eligible for
 // authentic-evidence proof; the remaining closed-catalog entries are
@@ -33,18 +33,18 @@ var codexFields = []Field{
 // configured-hook ingress smoke observation and is never treated as
 // semantically identical to the OpenCode session.created aggregate.
 //
-// Deliberate decoupling (do NOT unify): the Codex 0.146.0 event catalog is
-// defined here AND, separately, in the runtime Codex profile that SLICE-1 owns
-// and that surfaces per-event semantics into .codex lifecycle METADATA. The two
-// intentionally disagree on the 8 non-proven events (this source simplifies
-// their modes and declares no identities). That divergence is inert: the Codex
-// frontend (internal/lifecycle/frontend/codex) binds ONLY the 2 authenticity-
-// proven events and rejects the other 8, so their metadata is never ingested.
-// The runtime profile is the authority for non-ingress event semantics; these 8
-// source-derived entries carry no authenticity claim and may lag the runtime
-// profile without any effect. Keeping this catalog self-contained (like Claude)
-// is what isolates SLICE-2 ingress from SLICE-1's runtime profile (IP-1); a
-// later wave may re-derive it from the runtime profile once IP-1 is settled.
+// Known divergence, and why it is inert. This catalog and the runtime Codex
+// profile (internal/runtime/lifecycle_profiles.go) both describe the Codex
+// event set, and they disagree on the 8 events that have no authentic capture:
+// this source simplifies their failure and blocking modes and declares no
+// identities. The Codex frontend (internal/lifecycle/frontend/codex) binds ONLY
+// the 2 authenticity-proven events and rejects the other 8, so the diverging
+// metadata never reaches ingest. The runtime profile is the authority for
+// non-ingress event semantics.
+//
+// Re-derive this catalog from the runtime profile once every Codex event has an
+// authentic capture and a production proof. Until then, keep the two
+// definitions separate and keep this note truthful.
 func Codex0_146_0() Contract {
 	// observe builds a non-blocking, report-and-continue catalog event with no
 	// declared identities (source-derived metadata only).
@@ -52,7 +52,7 @@ func Codex0_146_0() Contract {
 		return Event{
 			Kind: kind, Symbol: symbol, Name: name,
 			Blocking: NonBlocking, Mutation: MutationNone,
-			Failure: FailureReportAndContinue, StopLoop: StopLoopNotApplicable,
+			Failure: pastureruntime.FailureReportAndContinue, StopLoop: StopLoopNotApplicable,
 		}
 	}
 	// gate builds a blocking, exit-two-blocks catalog event with no declared
@@ -61,7 +61,7 @@ func Codex0_146_0() Contract {
 		return Event{
 			Kind: kind, Symbol: symbol, Name: name,
 			Blocking: Blocking, Mutation: mutation,
-			Failure: FailureExitTwoBlocks, StopLoop: stop,
+			Failure: pastureruntime.FailureExitTwoBlocks, StopLoop: stop,
 		}
 	}
 
