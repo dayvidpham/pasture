@@ -16,6 +16,17 @@
   `lifecycle-faults.jsonl` beside the database, which is written outside the
   database on purpose, because the commonest fault is that the database could
   not be opened.
+- A hook that cannot evaluate an event no longer stops a tool call on OpenCode
+  or Codex. Those two hosts read the hook's STANDARD OUTPUT to decide whether
+  you may carry on, so an empty answer is not a "carry on" there: the OpenCode
+  plugin treated it as a broken answer and aborted the tool call it was
+  watching. When pasture cannot evaluate an event it now answers with that
+  host's own "carry on" bytes and puts the reason on standard error, so your
+  action proceeds. On Claude Code the "carry on" answer is still no output at
+  all, so nothing changes there. If you read hook output while debugging an
+  integration, note that these bytes say only "do not stop on our account":
+  they are not a decision, and the invocation that wrote them is recorded as a
+  fault.
 - One whole hook invocation is now bounded at 5 seconds. Measured against a
   database held under a write lock, a hook took about 31 seconds to return,
   which is more than three times the 10-second budget Claude Code gives a hook,

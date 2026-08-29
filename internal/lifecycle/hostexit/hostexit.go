@@ -39,6 +39,16 @@
 // refused rather than defaulted, because defaulting it to "no bytes" is exactly
 // the defect above.
 //
+// THE RULE THIS REPLACES, so that nobody restores it as a fix. The earlier rule
+// was "a fault writes NO native continuation, on every harness". It was written
+// when a proceed was thought to be an exit code everywhere. It is the defect:
+// on OpenCode an empty body at exit 0 makes the generated plugin throw and
+// stops the user's tool call, and on Codex the command-hook ABI reads a JSON
+// continuation object. The rule now is: A FAIL-OPEN FAULT EMITS THAT HARNESS'S
+// CONTINUE BYTES AND A DIAGNOSTIC; NEVER NOTHING. On Claude Code those continue
+// bytes ARE the empty body, so only the two byte-shaped hosts changed. A later
+// change that makes a fault write nothing again reopens the defect.
+//
 // Emitting continue bytes does NOT make a fault a decision. The event was not
 // evaluated; the bytes only say "do not stop on our account". The durable fault
 // record keeps the fault classification, and ForDecision remains the only door
@@ -81,13 +91,14 @@ const (
 	// Process exit code 1.
 	//
 	// No fault path produces this status today. ForFault answers either
-	// ExitContinue or ExitBlock, because acceptance criterion A2 fixes exit 0
-	// for the fail-open case and a non-zero exit is read as a fault by the
-	// OpenCode plugin. The arm exists for the classify-failure guard in the
-	// command, and for the open question recorded in the slice report: whether
-	// a fail-open fault should use exit 1 on a host documented to show its
-	// stderr to the user. That question needs a host citation, so it is not
-	// answered here.
+	// ExitContinue or ExitBlock: failing open is defined as exit 0 plus the
+	// host's continue bytes, and the OpenCode plugin reads ANY non-zero exit as
+	// a broken pasture installation, so a fault that used exit 1 would reach
+	// the user as "verify PASTURE_BIN". The arm exists for the
+	// classify-failure guard in the command, and for one open question: whether
+	// a fail-open fault should use exit 1 on a host that is documented to show
+	// the standard error of a failing hook to the user. Answering that needs a
+	// citation from the host documentation, so it is not answered here.
 	ExitNonBlockingError
 	// ExitBlock tells the host to refuse the operation. Process exit code 2.
 	ExitBlock
@@ -192,6 +203,17 @@ const (
 	// matters: the work runs in a goroutine and the receipt commits before the
 	// native bytes are produced, so an expiry can land on either side of the
 	// commit.
+	//
+	// A HAZARD THIS ARM CARRIES INTO THE FUTURE, stated here because this is
+	// where a reader meets the arm. Today the only thing that commit may hold
+	// is an occurrence, so an unknown record state is harmless. Once an
+	// EVALUATED DECISION can be part of the same commit, the same interleaving
+	// can land AFTER a Deny is durably recorded, and the fail-open continuation
+	// would then tell the host to PROCEED PAST A REFUSAL that the record says
+	// was made. That direction is the dangerous one, so the change that adds
+	// decisions must choose deliberately between making the decision and the
+	// continuation one atomic step and recording the abandoned gate under its
+	// own evaluation-fault reason; it must not inherit this arm unexamined.
 	FaultStageRecordUnknown
 )
 

@@ -498,3 +498,60 @@ func evidenceName(evidence pastureruntime.FailureEvidence) string {
 	}
 	return "none"
 }
+
+// TestTheDocumentedFaultRuleCannotBeSilentlyReverted pins two sentences of this
+// package's own documentation, because both are load-bearing and neither can be
+// asserted through a value.
+//
+// The first is the rule a fail-open fault follows. An earlier rule said a fault
+// writes NO native continuation on every harness. That rule IS the defect this
+// package was changed to remove: on OpenCode an empty body at exit 0 makes the
+// generated plugin throw and stops the user's tool call. A later reader who
+// finds the fault bytes surprising, and who does not find the replaced rule
+// written down, would "restore" it and reopen the defect. So the replaced rule
+// and its replacement are both stated in the package doc, and this test fails
+// if either disappears.
+//
+// The second is the forward hazard on the record-unknown arm: once an evaluated
+// decision can share the commit the deadline lands in, a fail-open continuation
+// can contradict a recorded refusal. Nothing in the code can carry that warning
+// today, because no decision exists yet to contradict.
+func TestTheDocumentedFaultRuleCannotBeSilentlyReverted(t *testing.T) {
+	t.Parallel()
+
+	file, err := parser.ParseFile(token.NewFileSet(), "hostexit.go", nil, parser.ParseComments)
+	require.NoError(t, err, "the package source must be readable beside its test")
+
+	// The comparison is on whitespace-normalized text, because a doc comment is
+	// line-wrapped and a sentence that must survive is a sentence, not a line.
+	documentation := oneLine(file.Doc.Text())
+	for phrase, why := range map[string]string{
+		"a fault writes NO native continuation": "the replaced rule must stay named, " +
+			"or a later reader restores it as a fix and stops the user's tool call again",
+		"A FAIL-OPEN FAULT EMITS THAT HARNESS'S CONTINUE BYTES AND A DIAGNOSTIC; NEVER NOTHING": "" +
+			"the rule that replaced it must be stated where a reader of this package meets it",
+		"On Claude Code those continue bytes ARE the empty body": "a reader must be told that only " +
+			"the two byte-shaped hosts changed, or the change reads as a change to every host",
+	} {
+		assert.Contains(t, documentation, phrase, why)
+	}
+
+	source, err := parser.ParseFile(token.NewFileSet(), "hostexit.go", nil, parser.ParseComments)
+	require.NoError(t, err)
+	var stageDocumentation strings.Builder
+	for _, group := range source.Comments {
+		stageDocumentation.WriteString(oneLine(group.Text()) + " ")
+	}
+	for phrase, why := range map[string]string{
+		"PROCEED PAST A REFUSAL": "the record-unknown arm must warn that the hazard direction is " +
+			"failing open past a decision that was recorded",
+		"one atomic step": "the reader must be given the two answers to choose between, " +
+			"because inheriting the arm unexamined is what the warning exists to prevent",
+	} {
+		assert.Contains(t, stageDocumentation.String(), phrase, why)
+	}
+}
+
+// oneLine collapses every run of whitespace to one space, so a pinned sentence
+// is compared as a sentence and not as a set of wrapped lines.
+func oneLine(text string) string { return strings.Join(strings.Fields(text), " ") }
