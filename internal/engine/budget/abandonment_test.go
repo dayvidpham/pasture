@@ -158,7 +158,10 @@ func TestAbandonedInvocationNeverLeavesAnOccurrenceWithoutItsBlob(t *testing.T) 
 		t.Fatal(err)
 	}
 	if !exists {
-		t.Fatal("state 3 requires the payload blob to be committed before the journal append")
+		// Reported, not fatal: the invariant check below is the load-bearing
+		// assertion of this test and must still run when the write order
+		// changes, so a reader sees BOTH consequences of one edit.
+		t.Error("state 3 requires the payload blob to be committed before the journal append")
 	}
 	assertNoOccurrenceNamesAnAbsentBlob(t, tracker, blobs)
 
@@ -169,7 +172,7 @@ func TestAbandonedInvocationNeverLeavesAnOccurrenceWithoutItsBlob(t *testing.T) 
 		t.Fatal(err)
 	}
 	if len(orphans) != 1 || orphans[0] != ref {
-		t.Fatalf("reclaimable set = %v, want exactly one orphan [%s] per abandoned invocation", orphans, ref)
+		t.Errorf("reclaimable set = %v, want exactly one orphan [%s] per abandoned invocation", orphans, ref)
 	}
 	t.Logf("ORPHAN MEASUREMENT: one abandoned invocation leaves %d orphan blob of %d bytes "+
 		"(this host payload); the per-orphan bound is the ingress payload cap of %d bytes",
@@ -200,8 +203,16 @@ func TestAbandonedInvocationNeverLeavesAnOccurrenceWithoutItsBlob(t *testing.T) 
 func assertNoOccurrenceNamesAnAbsentBlob(t *testing.T, tracker protocol.TaskTracker, blobs receipt.SQLiteBlobStore) {
 	t.Helper()
 
+	// The projection rebuild is the FIRST place the invariant is enforced, and
+	// it is enforced by the schema rather than by this test: the occurrence
+	// table carries a foreign key to the payload blob table, so an occurrence
+	// that named an absent blob could not be projected at all. A rebuild that
+	// fails on a foreign-key violation IS this invariant refusing the corrupting
+	// state; it is not a broken test fixture.
 	if err := tasks.RebuildLifecycleOccurrences(context.Background(), tracker); err != nil {
-		t.Fatalf("rebuild the lifecycle occurrence projection: %v", err)
+		t.Fatalf("the lifecycle occurrence projection could not be rebuilt: %v. "+
+			"A foreign-key violation here means an occurrence names a payload blob that is not stored, "+
+			"which is the corrupting state the blob-before-journal write order exists to prevent", err)
 	}
 	rows, err := blobs.DB.QueryContext(context.Background(),
 		`SELECT o.journal_id, o.payload_digest FROM lifecycle_occurrences o

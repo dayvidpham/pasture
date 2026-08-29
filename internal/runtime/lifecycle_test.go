@@ -2,9 +2,14 @@ package runtime_test
 
 import (
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/dayvidpham/pasture/internal/codegen/scan"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -408,4 +413,54 @@ func TestFailureModeIsTheOnlyFailureVocabulary(t *testing.T) {
 		seen[name] = arm
 	}
 	assert.Len(t, seen, 6, "the failure vocabulary has exactly six arms")
+}
+
+// TestNoSecondFailureVocabularyIsDeclaredAnywhere is the OTHER half of the
+// single-vocabulary claim, and it is the half a value cannot show.
+//
+// TestFailureModeIsTheOnlyFailureVocabulary proves the arms of THIS enum are
+// distinct and that its zero value is refused. It cannot prove that no SECOND
+// enum exists, because a second type in another package changes nothing this
+// package can observe. That is exactly how the tree acquired three of them: two
+// small enums folded six native behaviours into two, and a generated adapter
+// could no longer tell an OpenCode plugin throw from a Claude exit-2 block.
+//
+// So the absence is asserted over the SOURCE. A new declaration turns this RED
+// on the day it is written.
+func TestNoSecondFailureVocabularyIsDeclaredAnywhere(t *testing.T) {
+	t.Parallel()
+
+	root, err := scan.ModuleRoot()
+	require.NoError(t, err)
+
+	owner := filepath.Join(root, "internal", "runtime")
+	self := filepath.Join(owner, "lifecycle_test.go")
+	declaration := regexp.MustCompile(`(?m)^\s*type\s+\w*FailureMode\s`)
+
+	require.NoError(t, filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if entry.Name() == ".git" || entry.Name() == "legacy" || path == owner {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || path == self {
+			return nil
+		}
+		body, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if declaration.MatchString(string(body)) {
+			relative, _ := filepath.Rel(root, path)
+			t.Errorf("%s declares a second failure-mode vocabulary; "+
+				"one vocabulary is what lets a generated manifest tell an OpenCode plugin throw "+
+				"from a Claude exit-2 block, and a second one folds them back together silently",
+				relative)
+		}
+		return nil
+	}))
 }

@@ -6,6 +6,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -668,4 +671,50 @@ func TestAnInvocationAbandonedAfterItsCommitTellsTheHostTheTruth(t *testing.T) {
 		"the receipt committed before the deadline fired, so exactly one occurrence must be readable")
 	t.Log("this run produced the COMMITTED-RECEIPT-WITH-NO-CONTINUATION outcome, " +
 		"which is the one the barrier makes deterministic")
+}
+
+// TestTheRecoverIsInstalledBeforeAnythingElseRuns pins the POSITION of the main
+// recover, which no injected input can exercise.
+//
+// The recover must be the FIRST thing lifecycleOutcome does, so that a panic in
+// the coordinate read or in the environment parse is a fault and not a process
+// crash. Nothing between the top of the function and the deadline setup has a
+// seam a test can make panic, so moving the recover back down would not turn any
+// value-driven test red. Reading the function is what catches that, and this is
+// the one assertion in this file that is structural for that reason.
+func TestTheRecoverIsInstalledBeforeAnythingElseRuns(t *testing.T) {
+	t.Parallel()
+
+	file, err := parser.ParseFile(token.NewFileSet(), "hook_lifecycle.go", nil, 0)
+	require.NoError(t, err)
+
+	var body []ast.Stmt
+	for _, node := range file.Decls {
+		function, isFunction := node.(*ast.FuncDecl)
+		if isFunction && function.Name.Name == "lifecycleOutcome" {
+			body = function.Body.List
+			break
+		}
+	}
+	require.NotEmpty(t, body, "lifecycleOutcome must exist to be the single exit authority")
+
+	deferAt := -1
+	for index, statement := range body {
+		if _, isDefer := statement.(*ast.DeferStmt); isDefer {
+			deferAt = index
+			break
+		}
+	}
+	require.NotEqual(t, -1, deferAt, "lifecycleOutcome must install a recover")
+
+	// Only the declaration of the values the recover reads may precede it.
+	for index := 0; index < deferAt; index++ {
+		declaration, isDeclaration := body[index].(*ast.DeclStmt)
+		require.True(t, isDeclaration,
+			"statement %d runs BEFORE the recover is installed, so a panic in it would crash the process "+
+				"and reach Claude Code as exit 2, which that host reads as a block", index)
+		generic, isGeneric := declaration.Decl.(*ast.GenDecl)
+		require.True(t, isGeneric && generic.Tok == token.VAR,
+			"only the declaration of the values the recover reads may precede it")
+	}
 }
