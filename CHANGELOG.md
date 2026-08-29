@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+### Fixed
+- A lifecycle hook that could not evaluate an event no longer looks like
+  permission granted (#54). The `pasture hook lifecycle` command printed its
+  error and exited 0 with empty standard output, which every host reads as
+  "proceed", so a validation refusal, a withheld event, a storage error and a
+  recovered panic were all indistinguishable from a granted tool call. The exit
+  code now follows the event's own declared failure mode: an evaluation fault of
+  a documented blocking gate exits 2 and refuses the operation when you opt in
+  with `PASTURE_HOOK_FAIL_CLOSED=1`, and every other case exits 0 with the
+  reason on standard error. The default is to let the host continue, so a broken
+  hook does not stop you working. Each fault is also appended to
+  `lifecycle-faults.jsonl` beside the database, which is written outside the
+  database on purpose, because the commonest fault is that the database could
+  not be opened.
+- One whole hook invocation is now bounded at 5 seconds. Measured against a
+  database held under a write lock, a hook took about 31 seconds to return,
+  which is more than three times the 10-second budget Claude Code gives a hook,
+  so the session was frozen while it waited. The hook now stops first and
+  reports the expiry as a fault.
+
+### Changed
+- A blocking exit code must cite the host documentation or a committed capture
+  that shows the host blocks on it. A row with no citation runs as
+  report-and-continue instead, and code generation refuses a row that claims a
+  blocking exit code without one. Four Claude Code events keep their blocking
+  exit code: UserPromptSubmit, Stop, PreToolUse and SubagentStop. Eleven other
+  Claude Code events and all eight Codex gates now report instead of blocking
+  until their citation exists. No OpenCode event changes.
+- The three internal failure-mode vocabularies are now one. Two of them folded
+  six native behaviours into two, so a generated OpenCode manifest labelled a
+  plugin throw as a Claude exit-2 block. OpenCode rows now carry their real
+  behaviour. No Claude Code or Codex value changes.
+
 ## [0.0.8] - 2026-08-29
 
 ### Added
