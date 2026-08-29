@@ -32,6 +32,7 @@ import (
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
@@ -360,7 +361,7 @@ func (r *daemonRuntime) Close(logger *slog.Logger) error {
 }
 
 func buildDaemonRuntime(ctx context.Context, cfg config.PasturedConfig, sliceConcurrency int, logger *slog.Logger) (*daemonRuntime, error) {
-	trail, wellKnownCache, trailCloser, err := initAuditTrail(cfg)
+	trail, wellKnownCache, trailCloser, err := initAuditTrail(cfg, daemonTimeouts())
 	if err != nil {
 		return nil, fmt.Errorf(
 			"pastured: audit trail initialisation failed (backend=%q, path=%q) - check PASTURE_AUDIT_TRAIL and PASTURE_DB_PATH: %w",
@@ -387,7 +388,7 @@ func buildDaemonRuntime(ctx context.Context, cfg config.PasturedConfig, sliceCon
 		tracker = t
 	}
 
-	engCfg := newEngineConfig(cfg.AuditDBPath, sliceConcurrency, trail, tracker, hooksMgr, logger)
+	engCfg := newEngineConfig(cfg.AuditDBPath, sliceConcurrency, trail, tracker, hooksMgr, logger, daemonTimeouts())
 	eng, err := engine.New(ctx, engCfg)
 	if err != nil {
 		closeAll(logger, closeDeps)
@@ -422,7 +423,20 @@ func closeAll(logger *slog.Logger, closeDeps []func() error) {
 	}
 }
 
-func newEngineConfig(dbPath string, sliceConcurrency int, trail audit.Trail, tracker protocol.TaskTracker, hooksMgr *hooks.Manager, logger *slog.Logger) engine.Config {
+// daemonTimeouts is the ONE timeout profile the daemon runs on. Every component
+// that waits — the audit trail, the task tracker's own handle, and the durable
+// engine — is opened with this value, so an operator reading one of them reads
+// the value all of them use.
+//
+// It must stay a single call site. The daemon injects its trail into the engine,
+// and an engine that is given a trail cannot configure it: whoever opened the
+// trail already chose its SQLite lock budget. When the daemon opened the trail
+// from one default and the engine from another, the two could disagree while
+// writing to the SAME file, and the shorter of the two decided which write
+// failed first. See https://github.com/dayvidpham/pasture/issues/104.
+func daemonTimeouts() timeouts.Profile { return timeouts.ProductionProfile() }
+
+func newEngineConfig(dbPath string, sliceConcurrency int, trail audit.Trail, tracker protocol.TaskTracker, hooksMgr *hooks.Manager, logger *slog.Logger, profile timeouts.Profile) engine.Config {
 	return engine.Config{
 		DBPath:             dbPath,
 		ExecutorID:         engine.DefaultExecutorID,
@@ -433,6 +447,7 @@ func newEngineConfig(dbPath string, sliceConcurrency int, trail audit.Trail, tra
 		SliceConcurrency:   sliceConcurrency,
 		HooksMgr:           hooksMgr,
 		Logger:             logger,
+		Timeouts:           profile,
 	}
 }
 
@@ -470,7 +485,12 @@ func initHooksManager(cfg config.PasturedConfig, trail audit.Trail) (*hooks.Mana
 
 // initAuditTrail creates the audit trail and, for sqlite, registers the
 // well-known automaton agents in the unified task tracker.
-func initAuditTrail(cfg config.PasturedConfig) (audit.Trail, *tasks.WellKnownAgentCache, func() error, error) {
+//
+// profile is the daemon's timeout profile. The trail opened here is the trail
+// the daemon injects into the engine, and an engine that is given a trail does
+// not open one, so this call is the ONLY place that can decide how long the
+// daemon's forensic writes wait for the SQLite file lock.
+func initAuditTrail(cfg config.PasturedConfig, profile timeouts.Profile) (audit.Trail, *tasks.WellKnownAgentCache, func() error, error) {
 	emptyCache := tasks.NewWellKnownAgentCache()
 
 	switch cfg.AuditTrail {
@@ -483,7 +503,7 @@ func initAuditTrail(cfg config.PasturedConfig) (audit.Trail, *tasks.WellKnownAge
 			dbPath = tasks.DefaultDBPath()
 		}
 
-		tracker, err := tasks.OpenTaskTracker(dbPath)
+		tracker, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithTimeoutProfile(profile))
 		if err != nil {
 			return nil, emptyCache, nil, fmt.Errorf(
 				"pastured.initAuditTrail: cannot open unified TaskTracker at %q - verify the path is writable and the on-disk schema is compatible: %w",

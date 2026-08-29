@@ -22,22 +22,32 @@ import (
 )
 
 // spikeWorkers is how many engines this test runs at the same time. Each engine
-// has its own database file, and each file has two writers on it: the audit
-// trail and the durable runtime.
+// opens its OWN database file: testutil.GoldenUnifiedDBPath copies the golden
+// database into a fresh temporary directory on every call. The engines
+// therefore never queue for the same file lock.
 const spikeWorkers = 8
 
-// spikeTimeoutProfile multiplies every wait in the production profile by the
-// number of engines the test starts.
+// spikeTimeoutProfile widens the three inner waits of the production profile by
+// the number of engines the test starts.
 //
-// The test creates the overlap, so the test owns the budget. Sixteen writers
-// share one machine here, against two in production, so a writer can wait about
-// spikeWorkers times longer for its turn. With the production budget a writer
-// gave up after 500 ms and reported "database is locked", which is a property of
-// the load this test creates and not a defect in the code under test. See
-// https://github.com/dayvidpham/pasture/issues/104.
+// WHAT THE MULTIPLIER IS FOR, stated exactly, because the obvious reading is
+// wrong: it is NOT lock contention. Each engine has its own file, so no two
+// engines wait for one lock. What the multiplier answers is processor
+// oversubscription. Each engine keeps two writers on its own file, the audit
+// trail and the durable runtime, so the test asks about 2*spikeWorkers writer
+// goroutines to share the machine's cores, against two writers in production.
+// A writer that already HOLDS its file lock is descheduled far more often under
+// that load, so it holds the lock for longer, and the peer on the same file
+// must absorb a wait that grows with the oversubscription. The budget is scaled
+// by the same factor as the load, which is the only factor the test controls.
+//
+// The outermost wait is deliberately NOT scaled. It is the ceiling a caller
+// uses to notice that a workflow is stuck, and multiplying it would turn a
+// four-minute hang into a passing test. It keeps the production value.
 //
 // timeouts.ProductionProfile is not changed. The profile reaches the audit trail
 // and the durable-runtime handle through the public seam engine.Config.Timeouts.
+// See https://github.com/dayvidpham/pasture/issues/104.
 func spikeTimeoutProfile(t *testing.T) timeouts.Profile {
 	t.Helper()
 	base := timeouts.ProductionProfile()
@@ -46,7 +56,7 @@ func spikeTimeoutProfile(t *testing.T) timeouts.Profile {
 		spikeWorkers*base.SQLiteBusy(),
 		spikeWorkers*base.Ingress(),
 		spikeWorkers*base.StartSlice(),
-		spikeWorkers*base.WorkflowResult(),
+		base.WorkflowResult(),
 	)
 	if err != nil {
 		t.Fatalf("build the timeout profile for the overlap spike: %v", err)
@@ -204,15 +214,15 @@ func waitSpikeProjection(e *engine.Engine, epochID string, want protocol.PhaseId
 	}
 }
 
-// holdWriteLock takes the SQLite write lock on dbPath and holds it for hold.
-// It returns a function that waits until the lock is free again.
+// holdWriteLock takes the SQLite write lock on dbPath and holds it until the
+// caller releases it. _txlock=immediate in the shared connection string makes
+// Begin take the write lock at once, so the lock is already held when this
+// function returns.
 //
-// The hold is a deliberate stimulus, not a wait for a condition: the test needs
-// a writer that is busy for a known time so it can compare that time against
-// the lock budget the engine was configured with. _txlock=immediate in the
-// shared connection string makes Begin take the write lock at once, so the lock
-// is already held when this function returns.
-func holdWriteLock(t *testing.T, dbPath string, profile timeouts.Profile, hold time.Duration) (release func()) {
+// The caller decides when to let go, so no assertion depends on wall-clock
+// timing. release frees the lock; waitUntilFree returns once the lock is gone
+// and the blocking handle is closed. Calling release more than once is safe.
+func holdWriteLock(t *testing.T, dbPath string, profile timeouts.Profile) (release func(), waitUntilFree func()) {
 	t.Helper()
 	blocker, err := dbconn.OpenSharedDBWithProfile(dbPath, profile)
 	if err != nil {
@@ -223,14 +233,15 @@ func holdWriteLock(t *testing.T, dbPath string, profile timeouts.Profile, hold t
 		blocker.Close()
 		t.Fatalf("take the SQLite write lock on %q: %v", dbPath, err)
 	}
+	let := make(chan struct{})
 	freed := make(chan struct{})
 	go func() {
 		defer close(freed)
-		time.Sleep(hold)
+		<-let
 		_ = tx.Rollback()
 		_ = blocker.Close()
 	}()
-	return func() { <-freed }
+	return sync.OnceFunc(func() { close(let) }), func() { <-freed }
 }
 
 // spikeAuditEvent is one ordinary forensic write, the same shape the engine
@@ -257,15 +268,40 @@ func spikeAuditEvent(role string) protocol.AuditEvent {
 // wiring the trail always used the production profile and ignored
 // Config.Timeouts, so a caller could not widen the budget for the load it
 // created. See https://github.com/dayvidpham/pasture/issues/104.
+//
+// Neither half depends on winning a race. The tight half holds the lock until
+// the write has already given up, so the write cannot slip through. The
+// generous half releases the lock after a small fraction of its budget, so the
+// write cannot be starved.
+//
+// The tight half would otherwise pass with ANY budget, because a write blocked
+// for its whole life always fails, so it also reads HOW LONG the write waited.
+// A trail that had fallen back to a much longer budget holds on past the
+// ceiling below. That is what makes the tight half sensitive to the value under
+// test and not merely to the lock.
 func TestEngineAuditTrail_UsesTheConfiguredSQLiteLockBudget(t *testing.T) {
 	t.Parallel()
 
-	// One hold time, two profiles on either side of it with a wide margin:
-	// the generous budget is about 5x the hold, the tight budget about 1/24 of
-	// it. Neither verdict can flip on ordinary scheduling noise.
-	const lockHold = 600 * time.Millisecond
-	generous := spikeTimeoutProfile(t) // 4s SQLite lock wait
+	// The generous budget is four seconds and the tight budget is 25 ms. The
+	// generous half releases the lock after generousLockHold, which is a
+	// twentieth of that budget.
+	const generousLockHold = 200 * time.Millisecond
+	generous := spikeTimeoutProfile(t)
 	tight := timeouts.DeadlineTestProfile()
+	// tightWaitCeiling sits between the two budgets: sixty times the tight
+	// budget of 25 ms, and under half the generous budget of 4 s.
+	//
+	// It is far above the tight budget on purpose. One forensic write issues
+	// several statements in turn, each of which may wait its own budget, and the
+	// whole package runs beside this test under the race detector; a tight
+	// budget of 25 ms was measured taking 410 ms of wall clock that way. The
+	// ceiling must clear that noise, so it cannot separate the tight budget from
+	// the production one — it separates it from the four-second budget the other
+	// half of this test uses. The production-fallback case is covered where it
+	// actually happens, by TestInitAuditTrail_GivesTheDaemonTrailTheConfiguredLockBudget
+	// in cmd/pastured, and by the outright failure of the generous half if the
+	// engine stops passing its profile to the trail.
+	const tightWaitCeiling = 1500 * time.Millisecond
 
 	cases := []struct {
 		name       string
@@ -306,23 +342,43 @@ func TestEngineAuditTrail_UsesTheConfiguredSQLiteLockBudget(t *testing.T) {
 				t.Fatalf("engine SQLite lock budget = %s, want the configured %s", got, tc.profile.SQLiteBusy())
 			}
 
-			waitForFreeLock := holdWriteLock(t, dbPath, generous, lockHold)
+			release, waitUntilFree := holdWriteLock(t, dbPath, generous)
+			defer waitUntilFree()
+			defer release()
+			if !tc.wantLocked {
+				// Let go while the write is still inside its budget.
+				timer := time.AfterFunc(generousLockHold, release)
+				defer timer.Stop()
+			}
+
+			start := time.Now()
 			err = e.Trail().RecordEvent(t.Context(), spikeAuditEvent("supervisor"))
-			waitForFreeLock()
+			waited := time.Since(start)
+			// The tight half holds the lock for the whole write, so releasing
+			// here cannot have helped the write that already returned.
+			release()
 
 			locked := err != nil && strings.Contains(err.Error(), "database is locked")
 			switch {
 			case tc.wantLocked && !locked:
-				t.Fatalf("recording an audit event with a %s lock budget behind a %s lock hold returned %v; want a database-is-locked failure, which is what proves the configured budget is the one in force",
-					tc.profile.SQLiteBusy(), lockHold, err)
+				t.Fatalf("recording an audit event with a %s lock budget succeeded (err=%v) while another writer held the lock for the whole call; want a database-is-locked failure, which is what proves the configured budget is the one in force",
+					tc.profile.SQLiteBusy(), err)
 			case !tc.wantLocked && err != nil:
-				t.Fatalf("recording an audit event with a %s lock budget behind a %s lock hold failed: %v; the budget is above the hold, so the write had to wait and then succeed",
-					tc.profile.SQLiteBusy(), lockHold, err)
+				t.Fatalf("recording an audit event with a %s lock budget failed while the lock was held for only %s: %v; the budget is far above the hold, so the write had to wait and then succeed",
+					tc.profile.SQLiteBusy(), generousLockHold, err)
 			}
 			if tc.wantLocked {
+				if waited > tightWaitCeiling {
+					t.Errorf("the write waited %s before reporting the lock, above the ceiling of %s; it was configured with a budget of %s, so a wait this long means that budget is not the one in force",
+						waited, tightWaitCeiling, tc.profile.SQLiteBusy())
+				}
 				var structured *pasterrors.StructuredError
 				if !errors.As(err, &structured) {
 					t.Fatalf("lock failure is %T, want a structured error a reader can act on", err)
+				}
+				if structured.Category != pasterrors.CategoryStorage {
+					t.Errorf("lock failure category = %v, want %v; the caller routes on the category, so a wrong one sends the reader to the wrong fix",
+						structured.Category, pasterrors.CategoryStorage)
 				}
 			}
 		})

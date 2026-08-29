@@ -15,6 +15,8 @@ import (
 	"strings"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
 type SemanticKind string
@@ -95,7 +97,10 @@ func SnapshotFile(ctx context.Context, path string, limits SnapshotLimits) (Stor
 	query := u.Query()
 	query.Set("mode", "ro")
 	query.Set("_pragma", "query_only(1)")
-	query.Add("_pragma", "busy_timeout(5000)")
+	// The lock budget comes from the shared timeout profile, not from a number
+	// written here, so a read that is blocked by a checkpoint waits exactly as
+	// long as every other pasture reader does.
+	query.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", timeouts.ProductionProfile().SQLiteBusy().Milliseconds()))
 	u.RawQuery = query.Encode()
 	db, err := sql.Open("sqlite", u.String())
 	if err != nil {

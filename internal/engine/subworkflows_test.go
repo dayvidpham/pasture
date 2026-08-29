@@ -76,21 +76,27 @@ package engine_test
 //     command-line code path, from a separate client on the same database,
 //     reaches an engine that is already running.
 //
-// 18. Recovery cost for work that never ran on a queue: a recovered epoch
-//     workflow is picked up from the runtime's reserved queue inside a
-//     documented ceiling, and that queue has no stored settings row, so its
-//     cadence and its absence of a limit are the runtime's and not pasture's.
+// 18. Epoch recovery in the shape a shipped start produces: the epoch control
+//     workflow is ENQUEUED on pasture's control queue, so recovery returns it
+//     to that queue, under pasture's cadence and the control queue's limit.
+//     Read back from the stored queue name, with the pick-up wait held to a
+//     documented ceiling.
 //
-// 19. Recovery limit for work that did run on a queue: recovered slices obey
+// 19. The off-queue variant, which no shipped command produces: work that ran
+//     on NO queue falls back to the runtime's reserved queue, which has no
+//     stored settings row and so is not pasture's to configure.
+//
+// 20. Recovery limit for work that did run on a queue: recovered slices obey
 //     the worker limit the RESTARTED engine registers, not the limit the
 //     crashed engine ran at. Read back from the engine, from the stored queue
-//     row, and from how many slices run together.
+//     row, and from how many slices the queue itself reports running.
 
 import (
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -1927,13 +1933,43 @@ func TestSliceQueue_SetSliceConcurrencyReportsAStorageFailure(t *testing.T) {
 // leaves behind: still marked as running, with no result recorded. It is the
 // same state the durable runtime's own recovery tests reproduce, and it is the
 // only state that crash recovery acts on.
+// markWorkflowPending records the state a stopped process leaves behind: the
+// workflow is marked as still running with no result and no dequeue time.
+//
+// It REFUSES to touch a workflow that already finished. The WHERE clause matches
+// only a row that is still marked as running, so a slice that completed while
+// the engine shut down cannot be quietly resurrected and then "recovered", which
+// would make a test pass without exercising recovery at all.
+//
+// One difference from a real crash is worth naming: a killed process leaves a
+// queued workflow's dequeue time in place, and this clears it. That is harmless
+// for the tests here because recovery clears the dequeue time itself
+// (dbos/internal/sysdb/system_database.go, ReenqueueForRecovery).
 func markWorkflowPending(t *testing.T, db *sql.DB, workflowID string) {
 	t.Helper()
-	res, err := db.Exec(
-		`UPDATE workflow_status
+	writePendingRow(t, db, workflowID, true)
+}
+
+// rewindWorkflowToPending forces a workflow back to the interrupted state even
+// if it already FINISHED. It is the loud form: a caller that uses it is saying
+// that it deliberately un-finishes completed work so recovery has something to
+// act on. Prefer markWorkflowPending, which refuses to do that by accident.
+func rewindWorkflowToPending(t *testing.T, db *sql.DB, workflowID string) {
+	t.Helper()
+	writePendingRow(t, db, workflowID, false)
+}
+
+func writePendingRow(t *testing.T, db *sql.DB, workflowID string, onlyIfUnfinished bool) {
+	t.Helper()
+	query := `UPDATE workflow_status
 		    SET status = ?, output = NULL, error = NULL, started_at_epoch_ms = NULL, updated_at = ?
-		  WHERE workflow_uuid = ?`,
-		string(dbos.WorkflowStatusPending), time.Now().UnixMilli(), workflowID)
+		  WHERE workflow_uuid = ?`
+	args := []any{string(dbos.WorkflowStatusPending), time.Now().UnixMilli(), workflowID}
+	if onlyIfUnfinished {
+		query += ` AND status = ?`
+		args = append(args, string(dbos.WorkflowStatusPending))
+	}
+	res, err := db.Exec(query, args...)
 	if err != nil {
 		t.Fatalf("mark %q pending: %v", workflowID, err)
 	}
@@ -1942,6 +1978,10 @@ func markWorkflowPending(t *testing.T, db *sql.DB, workflowID string) {
 		t.Fatalf("mark %q pending, row count: %v", workflowID, err)
 	}
 	if n != 1 {
+		if onlyIfUnfinished {
+			t.Fatalf("mark %q pending updated %d rows, want 1; the row is no longer marked as running, so it finished instead of being interrupted and recovery would have nothing to do",
+				workflowID, n)
+		}
 		t.Fatalf("mark %q pending updated %d rows, want 1", workflowID, n)
 	}
 }
@@ -2030,7 +2070,10 @@ func TestSliceQueue_RecoveryKeepsEachWorkflowOnItsOwnQueue(t *testing.T) {
 	// The crash: the slice is left marked as running with no result, exactly as
 	// a killed process would leave it. The epoch workflow is already in that
 	// state on its own.
-	markWorkflowPending(t, first.DB(), sliceId)
+	// This slice COMPLETED above, on purpose, so that the queue it completed on
+	// is read back before the crash. Un-finishing it is therefore deliberate,
+	// and it uses the loud form that says so.
+	rewindWorkflowToPending(t, first.DB(), sliceId)
 	first.Shutdown(10 * time.Second)
 	firstStopped = true
 
@@ -2163,7 +2206,7 @@ func TestSliceQueue_OperatorCommandReconfiguresTheRunningQueue(t *testing.T) {
 	}
 }
 
-// ── Recovery behaviour: which cadence and which limit govern recovered work ───
+// ── Recovery behaviour: which queue, which cadence, and which limit ───────────
 
 // reservedQueuePollingInterval is the cadence the reserved internal queue polls
 // at. It is the runtime's own default (dbos/internal/models/queue.go,
@@ -2173,59 +2216,130 @@ func TestSliceQueue_OperatorCommandReconfiguresTheRunningQueue(t *testing.T) {
 // reaches pasture's two queues only.
 const reservedQueuePollingInterval = time.Second
 
-// reservedQueueRecoveryCeiling is the upper bound this test allows for an epoch
-// workflow to be picked up again after recovery.
-//
-// Recovery enqueues the work while Launch runs, and the work then waits for the
-// reserved queue's next poll. One cadence plus one dequeue round is the worst
-// expected cost, so the ceiling is five cadences. The margin is deliberately
-// wide: the number under test is a CEILING, and a tight one would report machine
-// load as a defect.
-//
-// Measured on a quiet machine the wait is about 130 ms, well under one cadence,
-// because the queue runner polls once as soon as it starts and recovery has
-// already enqueued the work by then. The cadence is the bound for work that
-// misses that first poll, which is the case an operator meets on a busy restart.
-// This is stated rather than asserted: a test cannot force the runner to miss
-// its own first poll without reaching into the runtime.
-const reservedQueueRecoveryCeiling = 5 * reservedQueuePollingInterval
+// reservedQueueFactsVerifiedAt is the durable-runtime version whose source the
+// two facts above were read from: the reserved queue's NAME and its POLLING
+// CADENCE. Both live in a package the runtime keeps internal, so no import can
+// hold this file to them and a version bump could silently make the ceiling
+// meaningless.
+const reservedQueueFactsVerifiedAt = "github.com/dbos-inc/dbos-transact-golang v1.2.0"
 
-// recoveredEpochStartLatency restarts the engine at dbPath and returns how long
-// the recovered epoch workflow took to be picked up again, measured from the
-// moment the replacement engine begins to start.
+// TestReservedQueueFactsMatchThePinnedRuntime fails on a runtime bump so the two
+// reserved-queue facts are re-read instead of assumed.
 //
-// "Picked up again" is read back from stored state, not inferred: the crash
-// cleared the workflow's start time, so a non-zero start time can only have been
-// written by a dequeue after recovery. The wait is a condition wait with a
-// bounded ceiling; nothing sleeps for a fixed period.
-func recoveredEpochStartLatency(t *testing.T, dbPath, executorID, appVersion, epochId string) (time.Duration, *engine.Engine) {
-	t.Helper()
-	started := time.Now()
-	second := newQueueEngineFrom(t, queueEngineOpts{
-		dbPath: dbPath, k: engine.DefaultSliceQueueConcurrency,
-		executorID: executorID, appVersion: appVersion,
-	})
-	waitUntil(t, reservedQueueRecoveryCeiling, func() bool {
-		return !workflowStatusOf(t, second, epochId).StartedAt.IsZero()
-	})
-	return time.Since(started), second
+// WHEN THIS FAILS, DO NOT JUST BUMP THE CONSTANT. Re-read the new version's
+// dbos/internal/models/queue.go for InternalQueueName and
+// DefaultBasePollingInterval, and dbos/queue.go for whether the reserved queue
+// is still kept in process rather than in the queues table. Then update
+// dbosInternalQueueName, reservedQueuePollingInterval and this constant
+// together. internal/engine/dbosinit_test.go pins the same runtime version for
+// a different reason and must be re-verified in the same change.
+func TestReservedQueueFactsMatchThePinnedRuntime(t *testing.T) {
+	t.Parallel()
+	gomod, err := os.ReadFile(filepath.Join("..", "..", "go.mod"))
+	if err != nil {
+		t.Fatalf("read go.mod to verify the durable-runtime version pin: %v", err)
+	}
+	if !strings.Contains(string(gomod), reservedQueueFactsVerifiedAt) {
+		t.Fatalf("go.mod no longer pins %q. The reserved queue's name (%q) and its polling cadence (%s) were read from that version's source, and the recovery pick-up ceiling is derived from the cadence, so both must be re-read before the pin moves",
+			reservedQueueFactsVerifiedAt, dbosInternalQueueName, reservedQueuePollingInterval)
+	}
 }
 
-// TestRecovery_EpochWorkflowResumesWithinTheReservedQueueCadence proves the cost
-// of the recovery model for work that never ran on a queue.
+// recoveryPickupCeiling is the upper bound these tests allow for a recovered
+// workflow to be picked up again.
 //
-// An epoch workflow is not enqueued while it runs, so recovery puts it on the
-// runtime's reserved internal queue. That queue is not pasture's to tune: it
-// polls at the runtime's own one-second cadence even though pasture asks its own
-// queues to poll ten times faster. An operator who restarts the daemon with
-// interrupted epochs therefore waits about a second per restart, not a hundred
-// milliseconds, before those epochs move again.
+// Recovery re-enqueues the work while Launch runs and clears its start time
+// (dbos/internal/sysdb/system_database.go, ReenqueueForRecovery), so the work
+// then waits for the next poll of whichever queue it returned to. One cadence
+// plus one dequeue round is the expected cost. The slowest queue in play is the
+// reserved one at one second, so the ceiling is five times that.
 //
-// The test measures that wait and holds it to a documented ceiling. It also
-// reads back the queue the workflow landed on, so a change that moved epoch
-// workflows onto a pasture queue would fail here rather than silently change the
-// cost.
-func TestRecovery_EpochWorkflowResumesWithinTheReservedQueueCadence(t *testing.T) {
+// A queue worker does NOT slow down because it found nothing to do. Its interval
+// grows only after a database-contention error and scales back on every clean
+// poll (dbos/queue.go, queueRunner.runQueue), and a restart builds a fresh
+// runner that starts at the base interval and has never backed off. That is why
+// one cadence bounds the wait here, and why a test on a long-lived process could
+// not assume the same.
+//
+// The margin is deliberately wide. The number is a CEILING, and a tight one
+// would report machine load as a defect.
+const recoveryPickupCeiling = 5 * reservedQueuePollingInterval
+
+// waitForRecoveryPickup waits until workflowID has been dequeued again and
+// returns how long that took, measured from the moment the caller says the
+// replacement engine finished starting.
+//
+// The read-back is stored state, not an inference: recovery clears the start
+// time, so a non-zero start time afterwards can only have been written by a
+// dequeue after recovery.
+func waitForRecoveryPickup(t *testing.T, e *engine.Engine, workflowID string, launched time.Time) time.Duration {
+	t.Helper()
+	waitUntil(t, recoveryPickupCeiling, func() bool {
+		return !workflowStatusOf(t, e, workflowID).StartedAt.IsZero()
+	})
+	return time.Since(launched)
+}
+
+// assertPickupWithinCeiling reports a pick-up that took longer than the ceiling.
+func assertPickupWithinCeiling(t *testing.T, workflowID, queueName string, waited time.Duration) {
+	t.Helper()
+	if waited > recoveryPickupCeiling {
+		t.Errorf("the recovered workflow %q on queue %q was picked up after %s, above the ceiling of %s; recovery re-enqueues during Launch, so a wait this long means it did not simply wait for that queue's next poll",
+			workflowID, queueName, waited, recoveryPickupCeiling)
+	}
+}
+
+// assertStoppedMidFlight reads back the state a stopped process leaves behind:
+// the workflow is still marked as running and has no result. Recovery acts only
+// on rows in that state, so a test that skips this check could "recover" a
+// workflow that had in fact finished.
+//
+// It opens its OWN database handle because the engine that owned the workflow
+// has already been shut down and closed its handle. It returns the stored
+// dequeue time, which is zero for work that never ran on a queue.
+func assertStoppedMidFlight(t *testing.T, dbPath, workflowID string) time.Time {
+	t.Helper()
+	db, err := dbconn.OpenSharedDB(dbPath)
+	if err != nil {
+		t.Fatalf("open the database to read the stopped state of %q: %v", workflowID, err)
+	}
+	defer db.Close()
+
+	var status string
+	var output sql.NullString
+	var startedAtMillis sql.NullInt64
+	if err := db.QueryRow(
+		`SELECT status, output, started_at_epoch_ms FROM workflow_status WHERE workflow_uuid = ?`,
+		workflowID,
+	).Scan(&status, &output, &startedAtMillis); err != nil {
+		t.Fatalf("read the stopped state of %q: %v", workflowID, err)
+	}
+	if status != string(dbos.WorkflowStatusPending) {
+		t.Fatalf("after the engine stopped, workflow %q has status %q, want %q; recovery only re-enqueues rows in that state, so nothing below would be exercised",
+			workflowID, status, dbos.WorkflowStatusPending)
+	}
+	if output.Valid {
+		t.Fatalf("after the engine stopped, workflow %q already has a result; it was supposed to be interrupted", workflowID)
+	}
+	if !startedAtMillis.Valid {
+		return time.Time{}
+	}
+	return time.UnixMilli(startedAtMillis.Int64)
+}
+
+// TestRecovery_EpochControlWorkflowReturnsToItsOwnQueue is the PRODUCTION shape
+// of epoch recovery.
+//
+// A shipped epoch start does not run the control workflow in process: it
+// ENQUEUES it on pasture's control queue (internal/handlers/controller.go, in
+// dbosController.StartEpoch). This test starts it the same way. Because the
+// workflow ran on a queue, recovery returns it to THAT queue, so it stays under
+// pasture's own cadence and under the control queue's limit of one at a time. It
+// never touches the runtime's reserved queue.
+//
+// The test reads the queue back and measures how long the recovered workflow
+// waited to be picked up.
+func TestRecovery_EpochControlWorkflowReturnsToItsOwnQueue(t *testing.T) {
 	t.Parallel()
 	dbPath := testutil.GoldenUnifiedDBPath(t)
 	executorID, appVersion := testEngineIdentity(t)
@@ -2241,50 +2355,146 @@ func TestRecovery_EpochWorkflowResumesWithinTheReservedQueueCadence(t *testing.T
 		}
 	}()
 
-	const epochId = "queue--recovery-cadence"
+	const epochId = "queue--recovery-control-queue"
+	// The same call the shipped start command makes, by name and by queue. The
+	// application version is this test engine's, because recovery only acts on
+	// work that matches the running engine's version.
+	if _, err := dbos.Enqueue[protocol.EpochState, engine.ControlInput](first.DBOS(),
+		engine.ControlQueueName,
+		engine.EpochControlWorkflowName,
+		engine.ControlInput{EpochId: epochId},
+		dbos.WithEnqueueWorkflowID(epochId),
+		dbos.WithEnqueueApplicationVersion(appVersion),
+	); err != nil {
+		t.Fatalf("Enqueue(epoch control workflow): %v", err)
+	}
+	waitUntil(t, 30*time.Second, func() bool {
+		return !workflowStatusOf(t, first, epochId).StartedAt.IsZero()
+	})
+	if got := workflowStatusOf(t, first, epochId).QueueName; got != engine.ControlQueueName {
+		t.Fatalf("the epoch control workflow ran on queue %q, want %q", got, engine.ControlQueueName)
+	}
+
+	// The crash. Stopping the engine leaves the workflow marked as running with
+	// no result, which is the state recovery acts on. Unlike an off-queue start,
+	// a queued workflow keeps its dequeue time here; recovery clears it.
+	first.Shutdown(10 * time.Second)
+	firstStopped = true
+	stoppedAt := assertStoppedMidFlight(t, dbPath, epochId)
+	if stoppedAt.IsZero() {
+		t.Fatalf("the stopped epoch control workflow lost its dequeue time; a queued workflow keeps it, and recovery is what clears it")
+	}
+
+	launched := time.Now()
+	second := newQueueEngineFrom(t, queueEngineOpts{
+		dbPath: dbPath, k: engine.DefaultSliceQueueConcurrency,
+		executorID: executorID, appVersion: appVersion,
+	})
+	constructed := time.Now()
+	t.Logf("building and launching the replacement engine took %s", constructed.Sub(launched))
+
+	waited := waitForRecoveryPickup(t, second, epochId, constructed)
+
+	if got := workflowStatusOf(t, second, epochId).QueueName; got != engine.ControlQueueName {
+		t.Fatalf("the recovered epoch control workflow is on queue %q, want %q; work that ran on a queue must return to it",
+			got, engine.ControlQueueName)
+	}
+	assertPickupWithinCeiling(t, epochId, engine.ControlQueueName, waited)
+	t.Logf("recovered epoch control workflow picked up after %s, ceiling %s", waited, recoveryPickupCeiling)
+}
+
+// TestRecovery_OffQueueEpochWorkflowLandsOnTheReservedQueue covers an
+// IN-PROCESS, OFF-QUEUE start: a caller inside the daemon that runs the epoch
+// workflow directly instead of enqueuing it.
+//
+// NO SHIPPED COMMAND PRODUCES THIS STATE. The epoch start command enqueues on
+// pasture's control queue, which the test above covers. This case is kept
+// because it pins a runtime rule that decides the cost of the other case:
+// recovery returns work to the queue it ran on, and only work that ran on NO
+// queue falls back to the runtime's reserved queue. The reserved queue is not
+// pasture's to configure, which the read-back below shows directly.
+func TestRecovery_OffQueueEpochWorkflowLandsOnTheReservedQueue(t *testing.T) {
+	t.Parallel()
+	dbPath := testutil.GoldenUnifiedDBPath(t)
+	executorID, appVersion := testEngineIdentity(t)
+
+	first := newQueueEngineFrom(t, queueEngineOpts{
+		dbPath: dbPath, k: engine.DefaultSliceQueueConcurrency,
+		executorID: executorID, appVersion: appVersion, manualShutdown: true,
+	})
+	firstStopped := false
+	defer func() {
+		if !firstStopped {
+			first.Shutdown(10 * time.Second)
+		}
+	}()
+
+	const epochId = "queue--recovery-off-queue"
 	if _, err := dbos.RunWorkflow(first.DBOS(), first.EpochControlWorkflow,
 		engine.ControlInput{EpochId: epochId}, dbos.WithWorkflowID(epochId)); err != nil {
 		t.Fatalf("RunWorkflow(control): %v", err)
 	}
 	if got := workflowStatusOf(t, first, epochId).QueueName; got != "" {
-		t.Fatalf("epoch workflow ran on queue %q, want no queue; the whole measurement below depends on it having none", got)
+		t.Fatalf("the off-queue epoch workflow ran on queue %q, want no queue; the whole test depends on it having none", got)
 	}
-	// The start time is the DEQUEUE time, so a workflow that never ran on a
-	// queue has none. That is what makes the measurement below sound: a
-	// non-zero start time after recovery can only have been written by a
-	// dequeue from the reserved queue.
+	// The start time is the DEQUEUE time, so work that never ran on a queue has
+	// none. That is what makes the measurement below sound: a non-zero start
+	// time after recovery can only come from a dequeue off the reserved queue.
 	if got := workflowStatusOf(t, first, epochId).StartedAt; !got.IsZero() {
-		t.Fatalf("epoch workflow already has a start time of %s before the crash; it never ran on a queue, so it should have none", got)
+		t.Fatalf("the off-queue epoch workflow already has a start time of %s; it never ran on a queue, so it should have none", got)
 	}
 
-	// The crash. The workflow is marked as running with no result and no start
-	// time, which is what a killed process leaves behind. Shutdown happens to
-	// leave the row in that state on its own, so the mark is written anyway: the
-	// test states the crash state it needs instead of depending on a shutdown
-	// detail it does not control.
-	markWorkflowPending(t, first.DB(), epochId)
+	// The crash. Stopping the engine is enough: it leaves the workflow marked as
+	// running with no result, which is read back rather than written here.
 	first.Shutdown(10 * time.Second)
 	firstStopped = true
+	if stoppedAt := assertStoppedMidFlight(t, dbPath, epochId); !stoppedAt.IsZero() {
+		t.Fatalf("the stopped off-queue workflow has a dequeue time of %s; it never ran on a queue, so it should have none", stoppedAt)
+	}
 
-	latency, second := recoveredEpochStartLatency(t, dbPath, executorID, appVersion, epochId)
+	launched := time.Now()
+	second := newQueueEngineFrom(t, queueEngineOpts{
+		dbPath: dbPath, k: engine.DefaultSliceQueueConcurrency,
+		executorID: executorID, appVersion: appVersion,
+	})
+	constructed := time.Now()
+	t.Logf("building and launching the replacement engine took %s", constructed.Sub(launched))
+
+	waited := waitForRecoveryPickup(t, second, epochId, constructed)
 
 	if got := workflowStatusOf(t, second, epochId).QueueName; got != dbosInternalQueueName {
-		t.Fatalf("recovered epoch workflow is on queue %q, want %q; the cadence claim only holds on the reserved queue",
-			got, dbosInternalQueueName)
+		t.Fatalf("the recovered off-queue workflow is on queue %q, want %q", got, dbosInternalQueueName)
 	}
 	// Read back WHY pasture cannot change that cadence or add a limit to it: the
-	// reserved queue has no settings row, so there is nothing for pasture to
-	// write. Its cadence and its absence of a limit come from the runtime.
+	// reserved queue has no settings row at all, so there is nothing to write.
 	if q, err := dbos.RetrieveQueue(second.DBOS(), dbosInternalQueueName); err == nil {
 		t.Errorf("the reserved queue %q has a stored settings row (worker concurrency %v); pasture is expected to have no way to configure it",
 			dbosInternalQueueName, q.GetWorkerConcurrency())
+	} else if !errors.Is(err, dbos.ErrQueueNotFound) {
+		t.Errorf("looking up the reserved queue %q failed with %v; want the runtime's queue-not-found result, which is what shows it has no settings row. Any other error means the lookup itself broke and proves nothing",
+			dbosInternalQueueName, err)
 	}
-	if latency > reservedQueueRecoveryCeiling {
-		t.Errorf("the recovered epoch workflow was picked up after %s, above the ceiling of %s; the reserved queue polls every %s, so a wait this long means recovery did not simply wait for the next poll",
-			latency, reservedQueueRecoveryCeiling, reservedQueuePollingInterval)
+	assertPickupWithinCeiling(t, epochId, dbosInternalQueueName, waited)
+	t.Logf("recovered off-queue workflow picked up after %s, ceiling %s, reserved queue cadence %s",
+		waited, recoveryPickupCeiling, reservedQueuePollingInterval)
+}
+
+// runningSliceCount reads back how many of ids the queue is running right now:
+// dequeued (a start time is set) and not yet finished (still marked as running).
+// This is the queue's own state, so it does not depend on any hook firing.
+func runningSliceCount(t *testing.T, e *engine.Engine, ids []string) int {
+	t.Helper()
+	rows, err := dbos.ListWorkflows(e.DBOS(), dbos.WithFilterWorkflowIDs(ids...))
+	if err != nil {
+		t.Fatalf("ListWorkflows for the recovered slices: %v", err)
 	}
-	t.Logf("recovered epoch workflow picked up after %s; ceiling %s, reserved queue cadence %s",
-		latency, reservedQueueRecoveryCeiling, reservedQueuePollingInterval)
+	running := 0
+	for _, row := range rows {
+		if row.Status == dbos.WorkflowStatusPending && !row.StartedAt.IsZero() {
+			running++
+		}
+	}
+	return running
 }
 
 // TestRecovery_RecoveredSlicesObeyTheLimitTheRestartedEngineSets proves which
@@ -2296,11 +2506,13 @@ func TestRecovery_EpochWorkflowResumesWithinTheReservedQueueCadence(t *testing.T
 // the queue settings are a shared row and pasture registers with the policy that
 // always overwrites it (internal/engine/queue.go). So an operator changes the
 // limit for recovered work by restarting at the new limit, and the change takes
-// effect on the work that was already interrupted.
+// effect on work that was already interrupted.
 //
-// The test crashes an engine that was running four slices at once, restarts at
-// two, and reads back both the stored limit and the number of recovered slices
-// that run together.
+// The bound is measured from the QUEUE's own read-back, not from hook counts. A
+// slice dispatches its start hook inside a durable step, so a recovered slice
+// whose hook step already recorded a result does not fire it again; counting
+// hooks would therefore measure step memoization rather than concurrency. The
+// gate is kept only to hold running slices still long enough to be observed.
 func TestRecovery_RecoveredSlicesObeyTheLimitTheRestartedEngineSets(t *testing.T) {
 	t.Parallel()
 	const crashedLimit = 4
@@ -2333,10 +2545,10 @@ func TestRecovery_RecoveredSlicesObeyTheLimitTheRestartedEngineSets(t *testing.T
 	}
 	startGatedSlices(t, first, epochId, slices)
 	waitUntil(t, 30*time.Second, func() bool {
-		return firstGate.hwm.Load() >= int64(crashedLimit)
+		return runningSliceCount(t, first, sliceIds) >= crashedLimit
 	})
-	if got := firstGate.hwm.Load(); got != int64(crashedLimit) {
-		t.Fatalf("before the crash %d slices ran at once, want %d; the contrast with the limit after recovery is the point of this test",
+	if got := runningSliceCount(t, first, sliceIds); got != crashedLimit {
+		t.Fatalf("before the crash the queue was running %d slices at once, want %d; the contrast with the limit after recovery is the point of this test",
 			got, crashedLimit)
 	}
 	startedIds := make([]string, 0, slices)
@@ -2345,15 +2557,15 @@ func TestRecovery_RecoveredSlicesObeyTheLimitTheRestartedEngineSets(t *testing.T
 			startedIds = append(startedIds, sliceId)
 		}
 	}
-	if len(startedIds) < crashedLimit {
-		t.Fatalf("only %d slices had started at the crash, want at least %d", len(startedIds), crashedLimit)
-	}
 
-	// The crash. The engine stops first, then every slice it had dequeued is
-	// marked as still running with no result, which is what a killed process
-	// leaves behind. The order matters: marking first would race with a slice
-	// that finishes while the engine shuts down and writes its own result over
-	// the mark.
+	// The crash. The engine stops FIRST, then every slice it had dequeued is
+	// marked as still running with no result. The order matters: marking first
+	// would race with a slice that finishes while the engine shuts down and
+	// writes its own result over the mark.
+	//
+	// A real killed process keeps the dequeue time on a queued workflow, which
+	// this mark clears. That difference does not matter to what is asserted
+	// below, because recovery clears the dequeue time itself.
 	first.Shutdown(10 * time.Second)
 	firstStopped = true
 	crashDB, err := dbconn.OpenSharedDB(dbPath)
@@ -2390,13 +2602,19 @@ func TestRecovery_RecoveredSlicesObeyTheLimitTheRestartedEngineSets(t *testing.T
 		t.Fatalf("stored slice-queue limit after the restart = %d, want %d", *stored, recoveredLimit)
 	}
 
-	// The recovered slices run again, and no more than the new limit run at once.
+	// The queue runs the slices again, and never more than the new limit at
+	// once. The high-water mark is sampled from stored state while the gate
+	// holds the running slices.
+	highWater := 0
 	waitUntil(t, 60*time.Second, func() bool {
-		return secondGate.hwm.Load() >= int64(recoveredLimit)
+		if running := runningSliceCount(t, second, sliceIds); running > highWater {
+			highWater = running
+		}
+		return highWater >= recoveredLimit
 	})
-	if got := secondGate.hwm.Load(); got > int64(recoveredLimit) {
-		t.Errorf("%d recovered slices ran at once, want at most %d (the limit the restarted engine registered)",
-			got, recoveredLimit)
+	if highWater > recoveredLimit {
+		t.Errorf("the queue ran %d slices at once after the restart, want at most %d (the limit the restarted engine registered)",
+			highWater, recoveredLimit)
 	}
 	for _, sliceId := range startedIds {
 		if got := workflowStatusOf(t, second, sliceId).QueueName; got != engine.SliceQueueName {
@@ -2406,6 +2624,7 @@ func TestRecovery_RecoveredSlicesObeyTheLimitTheRestartedEngineSets(t *testing.T
 	}
 
 	close(secondGate.release)
+	close(firstGate.release)
 	// The handles the crashed engine returned died with it, so the results are
 	// read back through the restarted engine.
 	for _, sliceId := range sliceIds {

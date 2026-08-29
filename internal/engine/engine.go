@@ -722,11 +722,18 @@ func (e *Engine) Trail() audit.Trail { return e.trail }
 
 // Timeouts returns the timeout profile in force for this engine. It is the
 // profile Config.Timeouts asked for, or the production profile when the caller
-// left that field zero. Every wait the engine owns is taken from it: the SQLite
-// lock wait on both the shared handle and the audit trail, and the start_slice
-// deadline in a slice sub-workflow. A caller that must wait for the engine
-// reads its own ceiling from here instead of writing a second, separate number
-// that can disagree with the engine.
+// left that field zero. A caller that must wait for the engine reads its own
+// ceiling from here instead of writing a second, separate number that can
+// disagree with the engine.
+//
+// It governs every wait the engine OWNS: the SQLite lock wait on the shared
+// handle, the start_slice deadline in a slice sub-workflow, and the SQLite lock
+// wait on the audit trail WHEN THE ENGINE OPENED THAT TRAIL ITSELF.
+//
+// It does NOT reach a trail supplied through Config.Trail. Opening a trail also
+// fixes its lock budget, so a caller that injects a trail has already chosen
+// that budget and must open the trail with the same profile it passes here.
+// cmd/pastured does exactly that, from one call site.
 func (e *Engine) Timeouts() timeouts.Profile { return e.cfg.Timeouts }
 
 // ReadProjection returns the projected EpochState for epochId, or (nil, nil) if

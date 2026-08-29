@@ -211,6 +211,11 @@ const pinnedDBOSVersion = "github.com/dbos-inc/dbos-transact-golang v1.2.0"
 // The same applies to the second text-matched message: re-read
 // dbos/internal/sysdb/sqlite_driver.go (registeredSQLiteDriver) and update
 // dbosMissingSQLiteDriverMarker and unlinkedSQLiteDriverError together.
+//
+// A bump also has to re-verify the reserved queue's name and polling cadence,
+// which the recovery pick-up ceiling is derived from. Those are pinned
+// separately by TestReservedQueueFactsMatchThePinnedRuntime in
+// internal/engine/subworkflows_test.go.
 func TestDBOSVersionPinMatchesRacePredicate(t *testing.T) {
 	t.Parallel()
 	gomod, err := os.ReadFile(filepath.Join("..", "..", "go.mod"))
