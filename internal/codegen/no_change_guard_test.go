@@ -2,6 +2,7 @@ package codegen_test
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,10 +116,87 @@ func TestACPAdapterRegistryIsUnchanged(t *testing.T) {
 		"the ACP transcript adapter registry must not gain or lose a format")
 }
 
-// TestRepositoryInstallsNoGitHook is the hard safety rule. A Git hook changes
-// the developer's own repository and can run on every commit; pasture must
-// never install one, and no generated output may become one.
-func TestRepositoryInstallsNoGitHook(t *testing.T) {
+// TestPastureSourceInstallsNoGitHook is the hard safety rule, asserted about
+// THE CODE UNDER REVIEW. A Git hook changes the developer's own repository and
+// can run on every commit; pasture must never install one, redirect one, or let
+// generated output become one.
+//
+// This is a property of pasture's SOURCE, so the source is what it reads. The
+// companion test below reads the repository the suite happens to run in, which
+// is a different question with a different answer, and the two must not be
+// confused: a hook installed by somebody else is not a pasture defect.
+func TestPastureSourceInstallsNoGitHook(t *testing.T) {
+	t.Parallel()
+
+	root, err := scan.ModuleRoot()
+	require.NoError(t, err)
+
+	// The forbidden acts, each named by what it would do to a user's repository.
+	forbidden := map[string]string{
+		"core.hooksPath":     "redirect every Git hook of the repository",
+		".git/hooks":         "write into the Git hooks directory of the repository",
+		"pre-commit install": "hand hook installation to another tool",
+	}
+	self := filepath.Join("internal", "codegen", "no_change_guard_test.go")
+
+	walkErr := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if entry.Name() == ".git" || entry.Name() == "legacy" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, ".ts") && !strings.HasSuffix(path, ".sh") {
+			return nil
+		}
+		relative, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		// This file names the forbidden strings in order to forbid them.
+		if relative == self {
+			return nil
+		}
+		body, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		// Only EXECUTABLE lines are evidence. A comment that names one of these
+		// strings in order to deny doing it is the opposite of the defect, and
+		// treating it as a hit would teach everyone to stop writing the denial.
+		for number, line := range strings.Split(string(body), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "*") ||
+				strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			for needle, act := range forbidden {
+				if strings.Contains(line, needle) {
+					t.Errorf("%s line %d contains %q outside a comment, which would %s; "+
+						"pasture must never install, enable or modify a Git hook",
+						relative, number+1, needle, act)
+				}
+			}
+		}
+		return nil
+	})
+	require.NoError(t, walkErr)
+}
+
+// TestThisRepositoryHasNoInstalledGitHook reports the STATE of the checkout the
+// suite runs in. It is deliberately separate from the source test above,
+// because it can fail for a reason pasture does not control: a developer, or
+// another tool, may install a hook in this repository. When that happens the
+// message must say so and must NOT blame pasture, or a worker spends a
+// diagnosis cycle on somebody else's change.
+//
+// core.hooksPath stays a hard failure whatever installed it: nothing in a normal
+// workflow sets it, and a redirected hooks directory silently changes what runs
+// on every commit.
+func TestThisRepositoryHasNoInstalledGitHook(t *testing.T) {
 	t.Parallel()
 
 	root, err := scan.ModuleRoot()
@@ -127,7 +205,7 @@ func TestRepositoryInstallsNoGitHook(t *testing.T) {
 	hooksPath, err := gitConfig(root, "core.hooksPath")
 	require.NoError(t, err)
 	assert.Empty(t, hooksPath,
-		"core.hooksPath is set to %q; pasture must never redirect Git hooks", hooksPath)
+		"core.hooksPath is set to %q in this checkout; nothing in a normal workflow sets it, so find out what did before continuing", hooksPath)
 
 	commonDir := gitCommonDir(t, root)
 	entries, err := os.ReadDir(filepath.Join(commonDir, "hooks"))
@@ -144,7 +222,9 @@ func TestRepositoryInstallsNoGitHook(t *testing.T) {
 		installed = append(installed, entry.Name())
 	}
 	assert.Empty(t, installed,
-		"the Git hooks directory %s holds installed hooks %v; pasture must never install one", commonDir, installed)
+		"this repository has installed Git hooks %v in %s. pasture never installs one, and the companion source test proves that, "+
+			"so find out which tool or person installed these and remove them before trusting a commit from this checkout",
+		installed, commonDir)
 }
 
 // gitConfig reads one Git configuration value. An unset key exits non-zero,

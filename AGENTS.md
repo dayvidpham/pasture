@@ -168,6 +168,21 @@ longer, and the OpenCode plugin awaits the child process with no timeout of its
 own. The hook enforces this deadline around its own work rather than only handing
 a context down, because the retry ceilings below are longer than any host budget.
 
+The tier bounds the WORK, not the whole process. After the deadline fires, three
+things still run outside it: mapping the fault, appending one line to the
+lifecycle fault record, and writing the two output streams. That is a fixed
+number of local syscalls with no retry and no lock, so on a healthy filesystem
+the guarantee holds in practice. If the fault record ever grows a retry or a
+lock, it moves inside the bound.
+
+The context does NOT reach the code that waits. `OpenTaskTracker` takes no
+context and `audit.Migrate` has none either, so the retry loop below opens with
+its own background context and runs to its own ceiling. The loops themselves do
+honour a context; they are simply never given one. The goroutine and select at
+the hook boundary is therefore the ONLY thing that bounds a lifecycle hook
+invocation today. Threading a context through the opener is tracked separately,
+and until it lands nothing may claim the deadline bounds the retry loop.
+
 Two longer retry ceilings sit **above** the profile and are not part of it.
 Both bound a retry loop, not a single wait, and both are 30 s:
 `busyRetryCeiling` (`internal/audit/migrate.go`) bounds retrying a schema
@@ -189,6 +204,31 @@ Rules:
   list when that file starts to carry a timeout.
 - A change to a tier is a change to observable behaviour under load. State the
   measurement that justifies it, and keep the ordering strict.
+
+### The lifecycle fault record
+
+A lifecycle hook that cannot evaluate its event appends one JSON line to
+`lifecycle-faults.jsonl`, in the same directory as the database the invocation
+would have used (`~/.local/share/pasture/` by default). It sits beside the
+database and not inside it because the commonest fault is that the database
+could not be opened, and evidence that needs the failing store is lost exactly
+when it is wanted.
+
+THE FILE HAS NO RETENTION. One line of roughly 500 bytes is appended per
+faulting invocation; nothing rotates, trims or removes a line, and no command
+reads or clears it. A hook runs on every wired event, so a database that stays
+broken accumulates one line per event, silently, because a fail-open fault exits
+0 and most hosts do not show the standard error of an exit-0 hook. Delete the
+file to clear it. Retention and reclaim are deferred, and this file is one of
+the surfaces that work inherits.
+
+A second unreclaimed surface comes from the same failure class. A lifecycle
+invocation abandoned at its deadline can leave a committed payload blob with no
+occurrence — one orphan per abandoned invocation, holding that invocation's raw
+host payload, bounded by the 1 MiB ingress payload cap. The write order is
+deliberate: an orphan blob is reclaimable, while a journal row naming an absent
+blob is corruption. `receipt.SQLiteBlobStore.Reclaimable` identifies them and
+nothing deletes them yet.
 
 ### Schema migration (`pasture migrate`)
 
