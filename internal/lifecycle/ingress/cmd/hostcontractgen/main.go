@@ -212,6 +212,7 @@ func blocking(v hostcontract.BlockingMode) string {
 func mutation(v hostcontract.MutationMode) string {
 	return []string{"", "MutationNone", "MutationInput"}[int(v)]
 }
+
 // failureIdent renders one runtime.FailureMode arm as the qualified Go
 // identifier the generated manifests refer to. There is exactly ONE FailureMode
 // vocabulary in the tree (internal/runtime), so the generated registration data
