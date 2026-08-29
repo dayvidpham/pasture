@@ -24,10 +24,10 @@
 // Production code must read these values from an injected Profile and must not
 // write a duration or a busy_timeout DSN literal of its own.
 //
-// guard.CheckTimeoutSource enforces a narrow part of that rule: over four listed
-// files it reports use of the retired DefaultIngressDeadline identifier and a
-// string literal carrying the retired five-second busy_timeout pragma, and
-// nothing else.
+// guard.CheckTimeoutSource enforces a narrow part of that rule: over the files
+// listed in internal/lifecycle/guard/timeouts_test.go (seven today) it reports
+// use of the retired DefaultIngressDeadline identifier and a string literal
+// carrying the retired five-second busy_timeout pragma, and nothing else.
 //
 // Two longer retry ceilings live outside this profile on purpose, because they
 // bound a retry loop rather than a single wait: busyRetryCeiling in

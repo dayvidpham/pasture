@@ -25,6 +25,14 @@
   queue is resumed on the runtime's own reserved queue, which carries no limit.
 - Building pasture from source now needs Go 1.26 or newer (#122). The published
   binaries are unaffected.
+- A pasture database written by an older build is refused, not upgraded (#123).
+  The move to the new durable runtime is a clean cut: the daemon and the
+  commands check the recorded durable layout before they write anything, and
+  stop with a storage error (exit 5) that names the file, the recorded and the
+  supported version, and the steps to recover — stop every pasture process, then
+  delete the file with its -wal and -shm sidecars, or point --db at another path.
+  The refused file is left byte for byte as it was, sidecars included, so
+  nothing is lost while you decide.
 - `pastured` now chooses its exit code from the kind of failure instead of
   reporting 1 for everything: 1 for bad input or an unclassified failure, 2
   when the database cannot be opened, 3 when a stop does not finish inside its
@@ -40,6 +48,9 @@
   finishes it.
 
 ### Fixed
+- Command output in JSON is one clean document again (#123). The durable runtime
+  wrote its start-up lines to standard output, which broke any reader that
+  parsed the whole of it. Those lines now go to standard error.
 - A build that never linked the SQLite driver now fails with a message that
   names the exact import to add, and exits 5 (#120). It previously arrived under
   a generic message that pointed at the database instead of at the build.

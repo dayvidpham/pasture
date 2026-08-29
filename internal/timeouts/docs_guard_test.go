@@ -34,6 +34,7 @@ func productionTiers() []tier {
 		{field: "SQLiteBusy", value: profile.SQLiteBusy().String()},
 		{field: "Ingress", value: profile.Ingress().String()},
 		{field: "StartSlice", value: profile.StartSlice().String()},
+		{field: "WorkflowResult", value: profile.WorkflowResult().String()},
 	}
 }
 
@@ -68,7 +69,10 @@ var retiredBusyTimeoutLiterals = []string{
 // research examples are verbatim records of a different project's requirements
 // work, kept as written, for the same reason llm/ is skipped: correcting a
 // number in them would falsify the record. Generated skill bodies are NOT
-// excluded — a wrong number there is a real defect, repaired in the generator.
+// excluded, except the generated copies of these same research records — the
+// match is by file name, so it covers them wherever they are emitted. A wrong
+// number in any other generated body is a real defect, repaired in the
+// generator.
 func skippedDocFile(name string) bool {
 	return strings.HasPrefix(name, "RESEARCH_EXAMPLE-") && strings.EqualFold(filepath.Ext(name), ".md")
 }

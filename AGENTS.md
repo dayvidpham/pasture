@@ -139,21 +139,24 @@ been retired with the Temporal daemon role.
 
 ### Timeout tiers (`internal/timeouts`)
 
-Every SQLite busy timeout, and the two caller deadlines directly above it, come
-from one immutable `timeouts.Profile`. The tiers are strictly increasing, and the
-constructor refuses a profile that inverts them, so an inner retry can never
-outlive the caller waiting on it:
+Every SQLite busy timeout, and the three caller deadlines above it, come from one
+immutable `timeouts.Profile`. A SQLite lock wait must end before either caller
+window can expire, and both of those must end before the caller stops waiting for
+the whole workflow. `Ingress` and `StartSlice` are siblings: neither is inside the
+other, and the constructor does not order them against each other. It refuses any
+profile that inverts the rest:
 
 | Tier | Field | Production | Bounds |
 |---|---|---|---|
-| 1 (innermost) | `SQLiteBusy` | **500 ms** | one SQLite lock wait inside the driver, set as the DSN `busy_timeout` |
-| 2 | `Ingress` | **1 s** | one lifecycle receipt append, including its lock retries |
-| 3 (outermost) | `StartSlice` | **2 s** | how long a slice sub-workflow waits for its `start_slice` signal |
+| innermost | `SQLiteBusy` | **500 ms** | one SQLite lock wait inside the driver, set as the DSN `busy_timeout` |
+| caller window | `Ingress` | **1 s** | one lifecycle receipt append, including its lock retries |
+| caller window | `StartSlice` | **2 s** | how long a slice sub-workflow waits for its `start_slice` signal |
+| outermost | `WorkflowResult` | **30 s** | how long a caller waits for a whole workflow to report a result |
 
 The other two profiles keep the same ordering with different budgets:
-`TestProfile` (500 ms / 2 s / 3 s) gives integration runs room for a serialized
-writer queue, and `DeadlineTestProfile` (25 ms / 250 ms / 500 ms) is tight on
-purpose so tests can prove deadline-breach behaviour quickly.
+`TestProfile` (500 ms / 2 s / 3 s / 30 s) gives integration runs room for a
+serialized writer queue, and `DeadlineTestProfile` (25 ms / 250 ms / 500 ms / 2 s)
+is tight on purpose so tests can prove deadline-breach behaviour quickly.
 
 Two longer retry ceilings sit **above** the profile and are not part of it.
 Both bound a retry loop, not a single wait, and both are 30 s:
@@ -166,16 +169,14 @@ Rules:
 
 - Production code takes these values from the injected profile. It must not
   write a duration or a `busy_timeout(...)` DSN literal of its own.
-- `guard.CheckTimeoutSource` is a narrow check, not a general one. It parses
-  four listed files (`internal/dbconn/dbconn.go`, `internal/engine/slice.go`,
-  `internal/lifecycle/receipt/clock.go`, `internal/lifecycle/receipt/journal.go`)
-  and reports exactly two things: use of the retired `DefaultIngressDeadline`
+- `guard.CheckTimeoutSource` is a narrow check, not a general one. It parses the
+  files listed in `internal/lifecycle/guard/timeouts_test.go` (seven today) and
+  reports exactly two things: use of the retired `DefaultIngressDeadline`
   identifier, and a string literal carrying the retired five-second
   `busy_timeout` pragma (the exact text it matches is in
   `internal/lifecycle/guard/timeouts.go`). It does not see any other hard-coded
-  duration, and it does not look at any other file. Add
-  a file to the list in `internal/lifecycle/guard/timeouts_test.go` when that
-  file starts to carry a timeout.
+  duration, and it does not look at any file outside that list. Add a file to the
+  list when that file starts to carry a timeout.
 - A change to a tier is a change to observable behaviour under load. State the
   measurement that justifies it, and keep the ordering strict.
 

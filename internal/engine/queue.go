@@ -40,12 +40,15 @@
 //     production reaches this case; it is reached by a caller that starts a
 //     workflow directly with RunWorkflow, which today is test code only.
 //
-// TestSliceQueue_RecoveryKeepsEachWorkflowOnItsOwnQueue in
-// internal/engine/subworkflows_test.go pins two of these shapes: a slice, which
-// returns to the slice queue, and a workflow that ran on no queue, which goes to
-// the reserved queue. It starts its control workflow with RunWorkflow, so it
-// does NOT cover the production shape, where the control workflow is enqueued
-// and returns to the control queue.
+// All three shapes are pinned in internal/engine/subworkflows_test.go:
+//
+//   - TestSliceQueue_RecoveryKeepsEachWorkflowOnItsOwnQueue: a slice returns to
+//     the slice queue.
+//   - TestRecovery_EpochControlWorkflowReturnsToItsOwnQueue: the production
+//     shape — the control workflow is enqueued as StartEpoch enqueues it, and
+//     recovery returns it to the control queue.
+//   - TestRecovery_OffQueueEpochWorkflowLandsOnTheReservedQueue: a workflow
+//     started off any queue lands on the runtime's reserved queue.
 package engine
 
 import (
