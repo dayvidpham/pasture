@@ -20,6 +20,9 @@ type GenerateResult struct {
 //     first and, on failure, returns immediately with no schema or harness
 //     output written — an unclassified harness-syntax candidate must abort
 //     generation with no partial or inconsistent output.
+//  1b. The strict lifecycle-row gate (RequireEvidencedLifecycleRows), which
+//     refuses a pinned lifecycle row that claims a blocking exit code without
+//     citing the host evidence for it. It also aborts before any write.
 //  2. schema.xml generation.
 //  3. Every requested harness target's skills, agents, verbatim copies, and
 //     manifest.
@@ -32,6 +35,11 @@ type GenerateResult struct {
 func Generate(root string, targets []TargetHarness, opts GenerateOptions) (GenerateResult, []error) {
 	// ── 1. Strict source-migration gate (fail-closed, before any write) ──────
 	if err := RequireClassifiedSource(root); err != nil {
+		return GenerateResult{}, []error{err}
+	}
+
+	// ── 1b. Strict lifecycle-row gate (fail-closed, before any write) ────────
+	if err := RequireEvidencedLifecycleRows(); err != nil {
 		return GenerateResult{}, []error{err}
 	}
 

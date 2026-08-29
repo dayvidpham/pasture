@@ -4,7 +4,32 @@ import (
 	"fmt"
 
 	"github.com/dayvidpham/pasture/internal/codegen/scan"
+	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 )
+
+// RequireEvidencedLifecycleRows is the second strict rejection gate: it
+// validates the pinned lifecycle profiles before generation writes anything.
+//
+// Its load-bearing rule is the failure-evidence rule. A row may declare a
+// blocking exit code only while it cites where the host's blocking behavior was
+// read, because the generated adapter turns that declaration into a real
+// refusal of a user's prompt or tool call. A row with no citation must run as
+// report-and-continue instead.
+//
+// The gate runs before any write, so an unevidenced blocking row aborts
+// generation with no partial or inconsistent output, and the returned error
+// carries the full six-part diagnostic naming the row.
+func RequireEvidencedLifecycleRows() error {
+	if err := pastureruntime.ValidatePinnedLifecycleProfiles(); err != nil {
+		return fmt.Errorf(
+			"the pinned lifecycle profiles failed contract validation, so generation was "+
+				"aborted with no partial output; fix the row named below in "+
+				"internal/runtime/lifecycle_profiles.go: %w",
+			err,
+		)
+	}
+	return nil
+}
 
 // RequireClassifiedSource is the permanent strict rejection gate: it runs the
 // canonical read-only scanner over the checked-in skills/ and agents/ source

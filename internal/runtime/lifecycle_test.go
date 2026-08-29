@@ -249,7 +249,11 @@ func TestClaudeLifecyclePreservesBatchRequestAndStopSemantics(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, runtime.SemanticGateConsultation, batch.Semantic())
 	assert.Equal(t, runtime.Blocking, batch.Blocking())
-	assert.Equal(t, runtime.FailureExitTwoBlocks, batch.Failure())
+	// PostToolBatch still consults the gate, but the host reference does not
+	// state that it blocks on exit 2, so the row cites no evidence and runs as
+	// report-and-continue.
+	assert.Equal(t, runtime.FailureReportAndContinue, batch.Failure())
+	assert.False(t, batch.Evidence().IsPresent())
 	assert.Equal(t, []runtime.NativeIdentityKind{runtime.IdentityToolCall}, batch.UnresolvedIdentities())
 	unresolved := batch.UnresolvedIdentities()
 	unresolved[0] = runtime.IdentitySession
@@ -286,7 +290,10 @@ func TestCodexLifecyclePreservesStrictMutationAndConcurrencyWithoutMerge(t *test
 	assert.Equal(t, runtime.MutationInput, pre.Mutation())
 	assert.Equal(t, runtime.OrderConcurrentNative, pre.Order())
 	assert.Equal(t, runtime.ReconcileNoAdapterMerge, pre.Reconciliation())
-	assert.Equal(t, runtime.FailureStrictExitTwoBlocks, pre.Failure())
+	// No Codex row cites host evidence yet, so the strict blocking exit is not
+	// claimed and the row runs as report-and-continue.
+	assert.Equal(t, runtime.FailureReportAndContinue, pre.Failure())
+	assert.False(t, pre.Evidence().IsPresent())
 
 	post, err := contract.Mapping(runtime.CodexEventPostToolUse)
 	require.NoError(t, err)

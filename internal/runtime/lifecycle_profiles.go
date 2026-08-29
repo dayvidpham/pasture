@@ -300,21 +300,24 @@ func identities(base []NativeIdentityField, extra ...NativeIdentityField) []Nati
 	return result
 }
 
+// claudeHooksReference is the Claude Code hook reference. It documents that a
+// hook process which exits with code 2 blocks the operation and shows its
+// stderr to the model. It is the citation for every Claude row that keeps a
+// blocking exit code.
+const claudeHooksReference = "https://docs.claude.com/en/docs/claude-code/hooks"
+
 func claudeLifecycleMapping(
 	event ClaudeLifecycleEvent,
 	semantic EventSemantic,
 	blocking BlockingMode,
 	mutation MutationMode,
 	stopLoop StopLoopPolicy,
+	evidence FailureEvidence,
 	extraIdentities ...NativeIdentityField,
 ) LifecycleEventMapping {
 	reconciliation := ReconcileNone
 	if semantic != SemanticObservation {
 		reconciliation = ReconcileHostNative
-	}
-	failure := FailureReportAndContinue
-	if blocking != NonBlocking {
-		failure = FailureExitTwoBlocks
 	}
 	return LifecycleEventMapping{
 		nativeName:     event.NativeName(),
@@ -325,27 +328,39 @@ func claudeLifecycleMapping(
 		mutation:       mutation,
 		order:          OrderConcurrentNative,
 		reconciliation: reconciliation,
-		failure:        failure,
+		failure:        evidenceBoundFailure(blocking, evidence, FailureExitTwoBlocks, FailureReportAndContinue),
+		evidence:       evidence,
 		stopLoop:       stopLoop,
 	}
 }
 
 func claudeLifecycleMappings() map[ClaudeLifecycleEvent]LifecycleEventMapping {
+	// documented is the evidence every Claude row cites while the host
+	// reference states that its hook blocks on exit 2.
+	documented := FailureEvidence{Source: claudeHooksReference}
+	// unevidenced marks a gate whose blocking behavior is NOT stated by the
+	// host reference yet. The row still consults the gate, but it runs as
+	// report-and-continue, so a failure cannot refuse the user's operation.
+	var unevidenced FailureEvidence
+
 	observe := func(event ClaudeLifecycleEvent, extra ...NativeIdentityField) LifecycleEventMapping {
-		return claudeLifecycleMapping(event, SemanticObservation, NonBlocking, MutationNone, StopLoopNotApplicable, extra...)
+		return claudeLifecycleMapping(event, SemanticObservation, NonBlocking, MutationNone, StopLoopNotApplicable, unevidenced, extra...)
 	}
 	gate := func(event ClaudeLifecycleEvent, mutation MutationMode, extra ...NativeIdentityField) LifecycleEventMapping {
-		return claudeLifecycleMapping(event, SemanticGateConsultation, Blocking, mutation, StopLoopNotApplicable, extra...)
+		return claudeLifecycleMapping(event, SemanticGateConsultation, Blocking, mutation, StopLoopNotApplicable, unevidenced, extra...)
+	}
+	evidencedGate := func(event ClaudeLifecycleEvent, mutation MutationMode, extra ...NativeIdentityField) LifecycleEventMapping {
+		return claudeLifecycleMapping(event, SemanticGateConsultation, Blocking, mutation, StopLoopNotApplicable, documented, extra...)
 	}
 	mappings := map[ClaudeLifecycleEvent]LifecycleEventMapping{
 		ClaudeEventSessionStart:        observe(ClaudeEventSessionStart),
 		ClaudeEventSetup:               observe(ClaudeEventSetup),
 		ClaudeEventSessionEnd:          observe(ClaudeEventSessionEnd),
-		ClaudeEventUserPromptSubmit:    gate(ClaudeEventUserPromptSubmit, MutationNone),
+		ClaudeEventUserPromptSubmit:    evidencedGate(ClaudeEventUserPromptSubmit, MutationNone),
 		ClaudeEventUserPromptExpansion: gate(ClaudeEventUserPromptExpansion, MutationNone),
-		ClaudeEventStop:                claudeLifecycleMapping(ClaudeEventStop, SemanticGateConsultation, Blocking, MutationNone, StopLoopConsultWhenInactive),
+		ClaudeEventStop:                claudeLifecycleMapping(ClaudeEventStop, SemanticGateConsultation, Blocking, MutationNone, StopLoopConsultWhenInactive, documented),
 		ClaudeEventStopFailure:         observe(ClaudeEventStopFailure),
-		ClaudeEventPreToolUse:          gate(ClaudeEventPreToolUse, MutationInput, claudeToolCallIdentity),
+		ClaudeEventPreToolUse:          evidencedGate(ClaudeEventPreToolUse, MutationInput, claudeToolCallIdentity),
 		ClaudeEventPermissionRequest:   gate(ClaudeEventPermissionRequest, MutationNone, claudeRequestIdentity),
 		ClaudeEventPermissionDenied:    observe(ClaudeEventPermissionDenied),
 		ClaudeEventPostToolUse:         observe(ClaudeEventPostToolUse, claudeToolCallIdentity),
@@ -353,12 +368,12 @@ func claudeLifecycleMappings() map[ClaudeLifecycleEvent]LifecycleEventMapping {
 		ClaudeEventPostToolBatch:       gate(ClaudeEventPostToolBatch, MutationNone),
 		ClaudeEventFileChanged:         observe(ClaudeEventFileChanged),
 		ClaudeEventCwdChanged:          observe(ClaudeEventCwdChanged),
-		ClaudeEventConfigChange:        claudeLifecycleMapping(ClaudeEventConfigChange, SemanticGateConsultation, ConditionallyBlocking, MutationNone, StopLoopNotApplicable),
+		ClaudeEventConfigChange:        claudeLifecycleMapping(ClaudeEventConfigChange, SemanticGateConsultation, ConditionallyBlocking, MutationNone, StopLoopNotApplicable, unevidenced),
 		ClaudeEventInstructionsLoaded:  observe(ClaudeEventInstructionsLoaded),
 		ClaudeEventWorktreeCreate:      gate(ClaudeEventWorktreeCreate, MutationNone),
 		ClaudeEventWorktreeRemove:      observe(ClaudeEventWorktreeRemove),
 		ClaudeEventSubagentStart:       observe(ClaudeEventSubagentStart, claudeAgentIdentity),
-		ClaudeEventSubagentStop:        claudeLifecycleMapping(ClaudeEventSubagentStop, SemanticGateConsultation, Blocking, MutationNone, StopLoopConsultWhenInactive, claudeAgentIdentity),
+		ClaudeEventSubagentStop:        claudeLifecycleMapping(ClaudeEventSubagentStop, SemanticGateConsultation, Blocking, MutationNone, StopLoopConsultWhenInactive, documented, claudeAgentIdentity),
 		ClaudeEventTeammateIdle:        gate(ClaudeEventTeammateIdle, MutationNone),
 		ClaudeEventTaskCreated:         gate(ClaudeEventTaskCreated, MutationNone),
 		ClaudeEventTaskCompleted:       gate(ClaudeEventTaskCompleted, MutationNone),
@@ -367,7 +382,7 @@ func claudeLifecycleMappings() map[ClaudeLifecycleEvent]LifecycleEventMapping {
 		ClaudeEventNotification:        observe(ClaudeEventNotification),
 		ClaudeEventMessageDisplay:      observe(ClaudeEventMessageDisplay),
 		ClaudeEventElicitation:         gate(ClaudeEventElicitation, MutationNone, claudeRequestIdentity),
-		ClaudeEventElicitationResult:   claudeLifecycleMapping(ClaudeEventElicitationResult, SemanticExplicitHumanResponse, Blocking, MutationNone, StopLoopNotApplicable, claudeRequestIdentity),
+		ClaudeEventElicitationResult:   claudeLifecycleMapping(ClaudeEventElicitationResult, SemanticExplicitHumanResponse, Blocking, MutationNone, StopLoopNotApplicable, unevidenced, claudeRequestIdentity),
 	}
 	postToolBatch := mappings[ClaudeEventPostToolBatch]
 	postToolBatch.unresolved = []NativeIdentityKind{IdentityToolCall}
@@ -382,15 +397,12 @@ func codexLifecycleMapping(
 	mutation MutationMode,
 	stopLoop StopLoopPolicy,
 	turnScoped bool,
+	evidence FailureEvidence,
 	extraIdentities ...NativeIdentityField,
 ) LifecycleEventMapping {
 	baseIdentities := []NativeIdentityField{codexSessionIdentity}
 	if turnScoped {
 		baseIdentities = append(baseIdentities, codexTurnIdentity)
-	}
-	failure := FailureStrictHook
-	if blocking != NonBlocking {
-		failure = FailureStrictExitTwoBlocks
 	}
 	return LifecycleEventMapping{
 		nativeName:     event.NativeName(),
@@ -401,26 +413,32 @@ func codexLifecycleMapping(
 		mutation:       mutation,
 		order:          OrderConcurrentNative,
 		reconciliation: ReconcileNoAdapterMerge,
-		failure:        failure,
+		failure:        evidenceBoundFailure(blocking, evidence, FailureStrictExitTwoBlocks, FailureStrictHook),
+		evidence:       evidence,
 		stopLoop:       stopLoop,
 	}
 }
 
 func codexLifecycleMappings() map[CodexLifecycleEvent]LifecycleEventMapping {
+	// No Codex row cites evidence yet: the Codex hook reference for this pin is
+	// not committed here. Every Codex gate therefore runs as report-and-continue
+	// until the Codex coverage work supplies the citation.
+	var unevidenced FailureEvidence
+
 	gate := func(event CodexLifecycleEvent, mutation MutationMode, extra ...NativeIdentityField) LifecycleEventMapping {
-		return codexLifecycleMapping(event, SemanticGateConsultation, Blocking, mutation, StopLoopNotApplicable, true, extra...)
+		return codexLifecycleMapping(event, SemanticGateConsultation, Blocking, mutation, StopLoopNotApplicable, true, unevidenced, extra...)
 	}
 	return map[CodexLifecycleEvent]LifecycleEventMapping{
-		CodexEventSessionStart:      codexLifecycleMapping(CodexEventSessionStart, SemanticObservation, NonBlocking, MutationNone, StopLoopNotApplicable, false),
+		CodexEventSessionStart:      codexLifecycleMapping(CodexEventSessionStart, SemanticObservation, NonBlocking, MutationNone, StopLoopNotApplicable, false, unevidenced),
 		CodexEventUserPromptSubmit:  gate(CodexEventUserPromptSubmit, MutationNone),
 		CodexEventPreToolUse:        gate(CodexEventPreToolUse, MutationInput, codexToolCallIdentity),
 		CodexEventPermissionRequest: gate(CodexEventPermissionRequest, MutationNone),
 		CodexEventPostToolUse:       gate(CodexEventPostToolUse, MutationOutput, codexToolCallIdentity),
 		CodexEventPreCompact:        gate(CodexEventPreCompact, MutationNone),
 		CodexEventPostCompact:       gate(CodexEventPostCompact, MutationNone),
-		CodexEventSubagentStart:     codexLifecycleMapping(CodexEventSubagentStart, SemanticObservation, NonBlocking, MutationNone, StopLoopNotApplicable, true, codexAgentIdentity),
-		CodexEventSubagentStop:      codexLifecycleMapping(CodexEventSubagentStop, SemanticGateConsultation, Blocking, MutationNone, StopLoopConsultWhenInactive, true, codexAgentIdentity),
-		CodexEventStop:              codexLifecycleMapping(CodexEventStop, SemanticGateConsultation, Blocking, MutationNone, StopLoopConsultWhenInactive, true),
+		CodexEventSubagentStart:     codexLifecycleMapping(CodexEventSubagentStart, SemanticObservation, NonBlocking, MutationNone, StopLoopNotApplicable, true, unevidenced, codexAgentIdentity),
+		CodexEventSubagentStop:      codexLifecycleMapping(CodexEventSubagentStop, SemanticGateConsultation, Blocking, MutationNone, StopLoopConsultWhenInactive, true, unevidenced, codexAgentIdentity),
+		CodexEventStop:              codexLifecycleMapping(CodexEventStop, SemanticGateConsultation, Blocking, MutationNone, StopLoopConsultWhenInactive, true, unevidenced),
 	}
 }
 
@@ -529,3 +547,29 @@ func OpenCode1_18_10Lifecycle() LifecycleContract[OpenCodeLifecycleEvent] {
 
 // Pi intentionally has no lifecycle contract constructor. Its extension and RPC
 // research informed the semantic split, but no Pi adapter is shipped.
+
+// ValidatePinnedLifecycleProfiles rebuilds every pinned lifecycle profile and
+// returns the first row that fails contract validation, WITHOUT panicking.
+//
+// The three profile constructors panic on an invalid row, which is right for a
+// program that is already running: an invalid contract must never reach code
+// generation. A generator, though, has to report the offending row before it
+// writes anything, so it calls this instead and prints the six-part diagnostic.
+func ValidatePinnedLifecycleProfiles() error {
+	if _, err := newLifecycleContract(
+		ClaudeCode2_1_210(), ClaudeLifecycleEvents(), claudeLifecycleMappings(),
+	); err != nil {
+		return err
+	}
+	if _, err := newLifecycleContract(
+		Codex0_146_0(), CodexLifecycleEvents(), codexLifecycleMappings(),
+	); err != nil {
+		return err
+	}
+	if _, err := newLifecycleContract(
+		OpenCode1_18_10(), OpenCodeLifecycleEvents(), openCodeLifecycleMappings(),
+	); err != nil {
+		return err
+	}
+	return nil
+}

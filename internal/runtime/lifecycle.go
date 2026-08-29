@@ -198,6 +198,60 @@ func (m FailureMode) IsValid() bool {
 	return m >= FailureReportAndContinue && m <= FailureObserveOnly
 }
 
+// BlocksByExitCode reports whether the mode makes the host REFUSE the native
+// operation because the pasture hook process exited with the blocking exit
+// code. Only the two exit-code arms do that: Claude Code reads exit 2 as
+// "block", and the Codex strict-output contract reads it the same way.
+//
+// The other four arms never turn a pasture process exit into a host refusal.
+// report-and-continue and observe-only are non-blocking by definition.
+// strict-hook-failure records a failed strict hook without blocking the
+// operation. throw-fail-fast IS a blocking behavior, but the OpenCode plugin
+// blocks by throwing inside the plugin chain, not by reading an exit code, so
+// its blocking bytes are the plugin's own and are not decided here.
+//
+// This predicate is the gate of the failure-evidence rule: only a mode that
+// blocks by exit code may claim a blocking exit, and only with evidence.
+func (m FailureMode) BlocksByExitCode() bool {
+	return m == FailureExitTwoBlocks || m == FailureStrictExitTwoBlocks
+}
+
+// FailureEvidence records WHERE the blocking behavior of a native failure mode
+// was read from the host. A blocking exit code is a claim about somebody else's
+// program, so it must cite its source.
+//
+// Source is a host documentation URL or a path committed in this repository. An
+// empty Source means "no evidence", and a row with no evidence never carries a
+// blocking exit code: it runs as report-and-continue until its harness supplies
+// the citation.
+type FailureEvidence struct {
+	Source string
+}
+
+// IsPresent reports whether the evidence cites a source. Whitespace alone is
+// not a citation, so it reads as no evidence and keeps the row non-blocking.
+func (e FailureEvidence) IsPresent() bool { return strings.TrimSpace(e.Source) != "" }
+
+// evidenceBoundFailure applies the failure-evidence rule to one row. A
+// non-blocking row keeps its harness's non-blocking arm. A blocking row keeps
+// its harness's blocking arm only while it cites evidence; without evidence it
+// runs as report-and-continue, so an undocumented guess can never refuse a
+// user's tool call or prompt.
+func evidenceBoundFailure(
+	blocking BlockingMode,
+	evidence FailureEvidence,
+	blockingArm FailureMode,
+	nonBlockingArm FailureMode,
+) FailureMode {
+	if blocking == NonBlocking {
+		return nonBlockingArm
+	}
+	if !evidence.IsPresent() {
+		return FailureReportAndContinue
+	}
+	return blockingArm
+}
+
 func (m FailureMode) String() string {
 	switch m {
 	case FailureReportAndContinue:
@@ -313,6 +367,7 @@ type LifecycleEventMapping struct {
 	order          HandlerOrder
 	reconciliation ReconciliationMode
 	failure        FailureMode
+	evidence       FailureEvidence
 	stopLoop       StopLoopPolicy
 }
 
@@ -324,6 +379,7 @@ func (m LifecycleEventMapping) Mutation() MutationMode             { return m.mu
 func (m LifecycleEventMapping) Order() HandlerOrder                { return m.order }
 func (m LifecycleEventMapping) Reconciliation() ReconciliationMode { return m.reconciliation }
 func (m LifecycleEventMapping) Failure() FailureMode               { return m.failure }
+func (m LifecycleEventMapping) Evidence() FailureEvidence          { return m.evidence }
 func (m LifecycleEventMapping) StopLoop() StopLoopPolicy           { return m.stopLoop }
 func (m LifecycleEventMapping) Identities() []NativeIdentityField {
 	return append([]NativeIdentityField(nil), m.identities...)
@@ -349,6 +405,23 @@ func (m LifecycleEventMapping) validate(where string) error {
 			"every generation decision must be represented by a closed typed value",
 			where, "codegen could silently choose an unmodeled native behavior",
 			"classify every lifecycle behavior with the declared runtime enum constants", nil,
+		)
+	}
+
+	if m.evidence.IsPresent() && m.evidence.Source != strings.TrimSpace(m.evidence.Source) {
+		return runtimeError(
+			fmt.Sprintf("lifecycle event %q cites failure evidence %q with leading or trailing space", m.nativeName, m.evidence.Source),
+			"an evidence citation is a host documentation URL or a repository path, and both are exact strings",
+			where, "a reader checking the blocking claim could not resolve the citation",
+			fmt.Sprintf("trim the FailureEvidence of the %q row to the exact URL or committed path", m.nativeName), nil,
+		)
+	}
+	if m.failure.BlocksByExitCode() && !m.evidence.IsPresent() {
+		return runtimeError(
+			fmt.Sprintf("lifecycle event %q declares the blocking failure mode %q with no failure evidence", m.nativeName, m.failure),
+			"a blocking exit code refuses the user's operation, so the claim that the host blocks must cite where it was read",
+			where, "the generated adapter would refuse a prompt or a tool call on an undocumented guess",
+			fmt.Sprintf("cite the host documentation URL or the committed capture path in the FailureEvidence of the %q row, or leave the row as report-and-continue until the citation exists", m.nativeName), nil,
 		)
 	}
 
