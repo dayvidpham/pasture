@@ -361,7 +361,12 @@ func (r *daemonRuntime) Close(logger *slog.Logger) error {
 }
 
 func buildDaemonRuntime(ctx context.Context, cfg config.PasturedConfig, sliceConcurrency int, logger *slog.Logger) (*daemonRuntime, error) {
-	trail, wellKnownCache, trailCloser, err := initAuditTrail(cfg, daemonTimeouts())
+	// Resolved ONCE, here, and handed to everything that waits. Two calls could
+	// not disagree today, but the whole point of the single profile is that a
+	// later change cannot make them disagree either.
+	profile := daemonTimeouts()
+
+	trail, wellKnownCache, trailCloser, err := initAuditTrail(cfg, profile)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"pastured: audit trail initialisation failed (backend=%q, path=%q) - check PASTURE_AUDIT_TRAIL and PASTURE_DB_PATH: %w",
@@ -388,7 +393,7 @@ func buildDaemonRuntime(ctx context.Context, cfg config.PasturedConfig, sliceCon
 		tracker = t
 	}
 
-	engCfg := newEngineConfig(cfg.AuditDBPath, sliceConcurrency, trail, tracker, hooksMgr, logger, daemonTimeouts())
+	engCfg := newEngineConfig(cfg.AuditDBPath, sliceConcurrency, trail, tracker, hooksMgr, logger, profile)
 	eng, err := engine.New(ctx, engCfg)
 	if err != nil {
 		closeAll(logger, closeDeps)
@@ -423,7 +428,9 @@ func closeAll(logger *slog.Logger, closeDeps []func() error) {
 	}
 }
 
-// daemonTimeouts is the ONE timeout profile the daemon runs on. Every component
+// daemonTimeouts is the ONE timeout profile the daemon runs on. It has a single
+// production caller: buildDaemonRuntime resolves it once and passes that value
+// to everything that waits. Every component
 // that waits — the audit trail, the task tracker's own handle, and the durable
 // engine — is opened with this value, so an operator reading one of them reads
 // the value all of them use.

@@ -1954,6 +1954,11 @@ func markWorkflowPending(t *testing.T, db *sql.DB, workflowID string) {
 // if it already FINISHED. It is the loud form: a caller that uses it is saying
 // that it deliberately un-finishes completed work so recovery has something to
 // act on. Prefer markWorkflowPending, which refuses to do that by accident.
+//
+// It clears the workflow's own result, NOT the results its durable steps
+// recorded. A rewound workflow therefore runs again from those memoized steps
+// rather than doing the work a second time, so a test must not read its
+// re-completion as proof that the work itself ran again.
 func rewindWorkflowToPending(t *testing.T, db *sql.DB, workflowID string) {
 	t.Helper()
 	writePendingRow(t, db, workflowID, false)

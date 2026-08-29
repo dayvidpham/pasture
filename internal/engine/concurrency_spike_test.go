@@ -276,9 +276,9 @@ func spikeAuditEvent(role string) protocol.AuditEvent {
 //
 // The tight half would otherwise pass with ANY budget, because a write blocked
 // for its whole life always fails, so it also reads HOW LONG the write waited.
-// A trail that had fallen back to a much longer budget holds on past the
-// ceiling below. That is what makes the tight half sensitive to the value under
-// test and not merely to the lock.
+// A trail that had fallen back to a longer budget holds on past the ceiling
+// below. That is what makes the tight half sensitive to the value under test
+// and not merely to the lock.
 func TestEngineAuditTrail_UsesTheConfiguredSQLiteLockBudget(t *testing.T) {
 	t.Parallel()
 
@@ -288,20 +288,21 @@ func TestEngineAuditTrail_UsesTheConfiguredSQLiteLockBudget(t *testing.T) {
 	const generousLockHold = 200 * time.Millisecond
 	generous := spikeTimeoutProfile(t)
 	tight := timeouts.DeadlineTestProfile()
-	// tightWaitCeiling sits between the two budgets: sixty times the tight
-	// budget of 25 ms, and under half the generous budget of 4 s.
+	// tightWaitCeiling is the longest the write may take to report the lock.
 	//
-	// It is far above the tight budget on purpose. One forensic write issues
-	// several statements in turn, each of which may wait its own budget, and the
-	// whole package runs beside this test under the race detector; a tight
-	// budget of 25 ms was measured taking 410 ms of wall clock that way. The
-	// ceiling must clear that noise, so it cannot separate the tight budget from
-	// the production one — it separates it from the four-second budget the other
-	// half of this test uses. The production-fallback case is covered where it
-	// actually happens, by TestInitAuditTrail_GivesTheDaemonTrailTheConfiguredLockBudget
-	// in cmd/pastured, and by the outright failure of the generous half if the
-	// engine stops passing its profile to the trail.
-	const tightWaitCeiling = 1500 * time.Millisecond
+	// It sits between the two budgets in this test AND below the production
+	// budget of 500 ms, so it separates the configured 25 ms from the generous
+	// 4 s and from a silent fall back to production. cmd/pastured's
+	// TestInitAuditTrail_GivesTheDaemonTrailTheConfiguredLockBudget bounds the
+	// same kind of write by the same rule, at half the production budget.
+	//
+	// The warm-up above is what makes so tight a ceiling honest. Measured at
+	// engine -race -count=3, three times, on a busy 32-core machine: nine
+	// samples between 25.5 ms and 33.7 ms, one budget plus scheduling. Without
+	// the warm-up the same runs gave 82 ms to 322 ms, because the first write
+	// for a role issues several statements and each waits its own budget. The
+	// ceiling therefore has about twelve times the observed maximum in hand.
+	const tightWaitCeiling = 400 * time.Millisecond
 
 	cases := []struct {
 		name       string
@@ -340,6 +341,16 @@ func TestEngineAuditTrail_UsesTheConfiguredSQLiteLockBudget(t *testing.T) {
 
 			if got := e.Timeouts().SQLiteBusy(); got != tc.profile.SQLiteBusy() {
 				t.Fatalf("engine SQLite lock budget = %s, want the configured %s", got, tc.profile.SQLiteBusy())
+			}
+
+			// Warm the write path before the lock is taken. The FIRST forensic
+			// write for a role also finds or creates that role's agent rows, so
+			// it issues several statements in turn and each one can wait its own
+			// budget. Warming leaves the measured write below as a single
+			// blocked insert, so the wait it reports is one budget rather than a
+			// sum of them.
+			if err := e.Trail().RecordEvent(t.Context(), spikeAuditEvent("supervisor")); err != nil {
+				t.Fatalf("warm the forensic write path before taking the lock: %v", err)
 			}
 
 			release, waitUntilFree := holdWriteLock(t, dbPath, generous)
