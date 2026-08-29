@@ -183,3 +183,29 @@ func TestPackageDocStatesTheLiveProductionTiers(t *testing.T) {
 		}
 	}
 }
+
+// TestAgentsDocStatesTheLiveTestProfileBudgets pins the two non-production
+// budget lists in AGENTS.md to the live values. The production table already
+// had a guard; these two sentences did not, and they drifted the moment a fifth
+// tier arrived. A stale budget list teaches a reader the wrong ordering.
+func TestAgentsDocStatesTheLiveTestProfileBudgets(t *testing.T) {
+	t.Parallel()
+	body, err := os.ReadFile(filepath.Join(docsRoot(t), "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	text := compact(string(body))
+
+	for name, profile := range map[string]Profile{
+		"TestProfile":         TestProfile(),
+		"DeadlineTestProfile": DeadlineTestProfile(),
+	} {
+		want := compact(fmt.Sprintf("`%s` (%s / %s / %s / %s / %s)",
+			name,
+			profile.SQLiteBusy(), profile.Ingress(), profile.StartSlice(),
+			profile.HookInvocation(), profile.WorkflowResult()))
+		if !strings.Contains(text, want) {
+			t.Errorf("AGENTS.md does not state the live %s budgets %s; update it to match internal/timeouts.", name, want)
+		}
+	}
+}

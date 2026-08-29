@@ -139,12 +139,13 @@ been retired with the Temporal daemon role.
 
 ### Timeout tiers (`internal/timeouts`)
 
-Every SQLite busy timeout, and the three caller deadlines above it, come from one
+Every SQLite busy timeout, and the four deadlines above it, come from one
 immutable `timeouts.Profile`. A SQLite lock wait must end before either caller
-window can expire, and both of those must end before the caller stops waiting for
-the whole workflow. `Ingress` and `StartSlice` are siblings: neither is inside the
-other, and the constructor does not order them against each other. It refuses any
-profile that inverts the rest:
+window can expire; both of those must end before one hook invocation runs out of
+time; and that must end before the caller stops waiting for the whole workflow.
+`Ingress` and `StartSlice` are siblings: neither is inside the other, and the
+constructor does not order them against each other. It refuses any profile that
+inverts the rest:
 
 | Tier | Field | Production | Bounds |
 |---|---|---|---|
@@ -155,9 +156,17 @@ profile that inverts the rest:
 | outermost | `WorkflowResult` | **30 s** | how long a caller waits for a whole workflow to report a result |
 
 The other two profiles keep the same ordering with different budgets:
-`TestProfile` (500 ms / 2 s / 3 s / 30 s) gives integration runs room for a
-serialized writer queue, and `DeadlineTestProfile` (25 ms / 250 ms / 500 ms / 2 s)
+`TestProfile` (500 ms / 2 s / 3 s / 6 s / 30 s) gives integration runs room for a
+serialized writer queue, and
+`DeadlineTestProfile` (25 ms / 250 ms / 500 ms / 1 s / 2 s)
 is tight on purpose so tests can prove deadline-breach behaviour quickly.
+
+`HookInvocation` is the budget the HOST pays for. A host freezes while it waits
+for a lifecycle hook, so the tier sits below the smallest host budget with
+headroom for process start: Claude Code allows a hook 10 s, Codex allows far
+longer, and the OpenCode plugin awaits the child process with no timeout of its
+own. The hook enforces this deadline around its own work rather than only handing
+a context down, because the retry ceilings below are longer than any host budget.
 
 Two longer retry ceilings sit **above** the profile and are not part of it.
 Both bound a retry loop, not a single wait, and both are 30 s:
