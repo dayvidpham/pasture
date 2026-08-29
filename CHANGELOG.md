@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-08-29
+
 ### Added
 - `pasture queue concurrency get <queue>` and `pasture queue concurrency set
   <queue> <jobs>` show and change how many jobs a queue runs at once in one
