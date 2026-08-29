@@ -22,7 +22,16 @@ async function invokeLifecycle(command, event, value) {
   return stdout;
 }
 
-function acceptProceed(stdout) {
+function acceptProceed(stdout, event) {
+  // An EMPTY body at exit 0 means pasture could not evaluate the event and let
+  // this host continue. It is not a decision and it is not a fault of this
+  // callback, so the callback continues and reports on the console. This belt
+  // exists so that an OLD pasture binary, which emitted nothing on a fail-open
+  // fault, still cannot abort the user's action.
+  if (stdout.trim() === "") {
+    console.error("Pasture did not evaluate " + event + " and returned no decision; the host continues unevaluated. Read the pasture diagnostic on standard error and the lifecycle fault record beside the pasture database.");
+    return;
+  }
   let response;
   try { response = JSON.parse(stdout); }
   catch (error) { throw new Error("pasture hook lifecycle response is not JSON: " + error); }
@@ -43,7 +52,7 @@ export async function sessionCreated(callback) {
 export async function toolExecuteBefore(input, output) {
   const args = output.args;
   const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", "1.18.10"], "tool.execute.before", { input, output: { args } });
-  acceptProceed(stdout);
+  acceptProceed(stdout, "tool.execute.before");
   // Proceed is a decision, not a mutation. Preserve the host-owned args value.
   output.args = args;
 }

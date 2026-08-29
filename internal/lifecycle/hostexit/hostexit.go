@@ -7,8 +7,8 @@
 // exited 0 with empty stdout, which every host reads as "proceed". A refusal
 // that reads as a proceed is worse than no hook at all.
 //
-// The package is pure: it reads no environment, no clock and no store, so the
-// whole decision table is testable as a table.
+// The package is pure: it reads no environment, no clock, no store and no
+// harness table, so the whole decision table is testable as a table.
 //
 // Two paths lead here and they must never be confused.
 //
@@ -21,6 +21,45 @@
 //   - ForDecision carries an evaluated policy decision, including a Deny. A
 //     Deny is an ANSWER, not a fault, so it never passes through ForFault and
 //     is never weakened by the fault policy or by missing evidence.
+//
+// # Failing open means emitting the host's CONTINUE BYTES
+//
+// "Exit 0 with nothing on stdout" is an exit-code-shaped idea, and it is a
+// proceed only on a host that reads the exit code. It is NOT a proceed on
+// OpenCode: the pasture-generated plugin parses stdout and an empty body makes
+// it throw inside the callback chain, which stops the user's tool call. The
+// same reasoning applies to Codex, whose command-hook ABI reads a JSON
+// continuation object.
+//
+// A fail-open fault therefore emits the CONTINUE BYTES of the host and the
+// event class, supplied by the caller as a Continuation. This package does not
+// know which bytes those are: the harness table belongs to the encoder
+// boundary (internal/lifecycle/nativeresponse), so hostexit stays pure and the
+// table stays testable without a harness. A Continuation that was never set is
+// refused rather than defaulted, because defaulting it to "no bytes" is exactly
+// the defect above.
+//
+// Emitting continue bytes does NOT make a fault a decision. The event was not
+// evaluated; the bytes only say "do not stop on our account". The durable fault
+// record keeps the fault classification, and ForDecision remains the only door
+// an evaluated answer passes through.
+//
+// # What PASTURE_HOOK_FAIL_CLOSED can reach
+//
+// Fail-closed refuses the operation through the process EXIT CODE, so it
+// reaches the hosts that refuse by exit code: Claude Code, and the Codex strict
+// command-hook contract. It does NOT reach the OpenCode named callbacks:
+// fail-closed has no channel on OpenCode named callbacks until the typed
+// refusal object exists, so such an invocation continues. A non-zero exit is
+// not a substitute, because the generated plugin reads one as a broken pasture
+// installation and would present a policy refusal to the user as "verify
+// PASTURE_BIN".
+//
+// The limit is stated in four places so a reader meets it wherever they look:
+// here, in the description of PASTURE_HOOK_FAIL_CLOSED, in the fault
+// diagnostic itself, and in TestFailClosedHasNoChannelOnTheThrowingHost, which
+// turns RED the day the typed refusal object exists so that somebody has to
+// decide deliberately whether an unevaluated event may use it.
 package hostexit
 
 import (
@@ -40,6 +79,15 @@ const (
 	ExitContinue
 	// ExitNonBlockingError reports a hook problem that must not stop the host.
 	// Process exit code 1.
+	//
+	// No fault path produces this status today. ForFault answers either
+	// ExitContinue or ExitBlock, because acceptance criterion A2 fixes exit 0
+	// for the fail-open case and a non-zero exit is read as a fault by the
+	// OpenCode plugin. The arm exists for the classify-failure guard in the
+	// command, and for the open question recorded in the slice report: whether
+	// a fail-open fault should use exit 1 on a host documented to show its
+	// stderr to the user. That question needs a host citation, so it is not
+	// answered here.
 	ExitNonBlockingError
 	// ExitBlock tells the host to refuse the operation. Process exit code 2.
 	ExitBlock
@@ -79,12 +127,98 @@ func (s ExitStatus) String() string {
 	}
 }
 
+// Continuation is the exact bytes a host reads on standard output as "you may
+// continue", for ONE harness and ONE event class.
+//
+// It is a value with a SET flag rather than a plain byte slice because one
+// legitimate continuation is the EMPTY body (Claude Code reads empty stdout as
+// proceed), and "empty because the host wants nothing" must not be confused
+// with "empty because the caller forgot". ForFault refuses an unset
+// Continuation, so a forgotten one is a loud programming error at the call site
+// instead of a silent regression to the defect this package exists to remove.
+//
+// Construct one with EmptyContinuation or ContinuationOf. The zero value is
+// unset and is refused.
+type Continuation struct {
+	set   bool
+	bytes []byte
+}
+
+// EmptyContinuation is the continuation of a host that reads an EMPTY standard
+// output as "proceed" — Claude Code, whose hook contract asks for no bytes when
+// the hook has nothing to say.
+func EmptyContinuation() Continuation {
+	return Continuation{set: true}
+}
+
+// ContinuationOf is the continuation of a host that reads a native object as
+// "proceed". Empty bytes are accepted and mean the same as EmptyContinuation.
+func ContinuationOf(bytes []byte) Continuation {
+	return Continuation{set: true, bytes: append([]byte(nil), bytes...)}
+}
+
+// IsSet reports whether the caller supplied a continuation at all.
+func (c Continuation) IsSet() bool { return c.set }
+
+// Bytes returns a copy of the continuation bytes, which may be empty.
+func (c Continuation) Bytes() []byte {
+	if len(c.bytes) == 0 {
+		return nil
+	}
+	return append([]byte(nil), c.bytes...)
+}
+
+// FaultStage says what pasture KNOWS about the durable state of the event when
+// the fault stopped it. The zero value is unset and is refused, so a caller
+// cannot inherit a claim it never made.
+//
+// It exists because one sentence used to be told to every reader: "this
+// lifecycle event is not evaluated". That is true of a fault raised before any
+// write, and it is NOT true of a hook abandoned at its deadline, whose durable
+// receipt may already be committed. Telling a maintainer that nothing was
+// recorded, and leaving an occurrence in the journal, is the class of untruth
+// this whole epic exists to remove.
+type FaultStage uint8
+
+const (
+	// FaultStageUnset is the zero value. It is not a stage.
+	FaultStageUnset FaultStage = iota
+	// FaultStageNotRecorded means pasture knows no occurrence was committed:
+	// the fault stopped the invocation before the durable write, or the durable
+	// write itself returned an error, which commits no occurrence.
+	FaultStageNotRecorded
+	// FaultStageRecordUnknown means pasture stopped without learning whether
+	// the occurrence was committed. The abandoned deadline is the case that
+	// matters: the work runs in a goroutine and the receipt commits before the
+	// native bytes are produced, so an expiry can land on either side of the
+	// commit.
+	FaultStageRecordUnknown
+)
+
+// IsValid reports whether the stage is one of the two declared stages.
+func (s FaultStage) IsValid() bool {
+	return s == FaultStageNotRecorded || s == FaultStageRecordUnknown
+}
+
+// String names the stage for a diagnostic and for the durable fault record. The
+// unset value has no name.
+func (s FaultStage) String() string {
+	switch s {
+	case FaultStageNotRecorded:
+		return "not-recorded"
+	case FaultStageRecordUnknown:
+		return "record-unknown"
+	default:
+		return ""
+	}
+}
+
 // Outcome is everything the hook process gives its host: the exit status, the
 // bytes written to stdout, and the diagnostic written to stderr.
 //
-// Stdout carries a native continuation only when the host contract asks for
-// one. A fault never writes a continuation, because pasture has nothing
-// truthful to say about an event it could not evaluate.
+// On a fail-open fault Stdout carries the host's CONTINUE BYTES, so the host
+// proceeds instead of choking on a body it cannot parse. On a block it carries
+// nothing: a host that is being refused is not also told to continue.
 type Outcome struct {
 	Exit   ExitStatus
 	Stdout []byte
@@ -104,7 +238,8 @@ const (
 	FaultFailOpen
 	// FaultFailClosed blocks the host when pasture cannot evaluate an event
 	// whose row cites host evidence for a blocking exit code. It is opt-in,
-	// for a user who would rather stop than proceed unevaluated.
+	// for a user who would rather stop than proceed unevaluated. It reaches
+	// only the hosts that refuse by exit code; see the package doc.
 	FaultFailClosed
 )
 
@@ -125,42 +260,65 @@ func (p FaultPolicy) String() string {
 	}
 }
 
+// Fault is everything the exit authority needs to map ONE internal fault. It is
+// a struct rather than a parameter list because every member is required and
+// three of them are closed enums whose zero value is refused: naming them at
+// the call site is what stops a caller passing the wrong one by position.
+type Fault struct {
+	// Mode is the declared native failure behaviour of the event.
+	Mode pastureruntime.FailureMode
+	// Evidence is the citation for the blocking exit code of that mode.
+	Evidence pastureruntime.FailureEvidence
+	// Policy is the user's fault policy.
+	Policy FaultPolicy
+	// Stage is what pasture knows about the durable state of the event.
+	Stage FaultStage
+	// Continuation is the host's proceed bytes for this event class, used when
+	// the fault fails open.
+	Continuation Continuation
+	// Cause is the error that stopped the evaluation. It is preserved verbatim.
+	Cause error
+}
+
 // ForFault maps an internal fault to the Outcome the host receives.
 //
 // The table is small and total:
 //
-//   - fail-open, any mode: continue, with the diagnostic on stderr.
-//   - fail-closed, a mode that blocks by exit code, WITH evidence: block.
-//   - fail-closed, anything else: continue, with the diagnostic on stderr.
+//   - fail-open, any mode: continue, with the host's CONTINUE BYTES on stdout
+//     and the diagnostic on stderr.
+//   - fail-closed, a mode that blocks by exit code, WITH evidence: block, with
+//     nothing on stdout.
+//   - fail-closed, anything else: continue, exactly as fail-open.
 //
-// The second result is false when there is nothing to map: a nil error, an
-// unset or invalid failure mode, or an unset or invalid policy. A false result
-// is a programming error at the call site, never a host outcome, so the caller
-// must treat it as one and must not fall through to a silent exit 0.
+// The second result is false when there is nothing to map: a nil cause, an
+// unset or invalid failure mode, an unset or invalid policy, an unset or
+// invalid stage, or a Continuation the caller never set. A false result is a
+// programming error at the call site, never a host outcome, so the caller must
+// treat it as one and must not fall through to a silent exit 0.
 //
 // ForFault never encodes a policy Deny. A Deny is an evaluated answer and goes
 // through ForDecision, where neither the fault policy nor missing evidence can
 // weaken it.
-func ForFault(
-	mode pastureruntime.FailureMode,
-	evidence pastureruntime.FailureEvidence,
-	policy FaultPolicy,
-	err error,
-) (Outcome, bool) {
-	if err == nil || !mode.IsValid() || !policy.IsValid() {
+func ForFault(fault Fault) (Outcome, bool) {
+	if fault.Cause == nil || !fault.Mode.IsValid() || !fault.Policy.IsValid() ||
+		!fault.Stage.IsValid() || !fault.Continuation.IsSet() {
 		return Outcome{}, false
 	}
 
-	blocks := policy == FaultFailClosed && mode.BlocksByExitCode() && evidence.IsPresent()
-	exit := ExitContinue
+	blocks := fault.Policy == FaultFailClosed &&
+		fault.Mode.BlocksByExitCode() && fault.Evidence.IsPresent()
 	if blocks {
-		exit = ExitBlock
+		return Outcome{
+			Exit:   ExitBlock,
+			Stdout: nil,
+			Stderr: faultDiagnostic(fault, ExitBlock).Error(),
+		}, true
 	}
 
 	return Outcome{
-		Exit:   exit,
-		Stdout: nil,
-		Stderr: faultDiagnostic(mode, evidence, policy, exit, err).Error(),
+		Exit:   ExitContinue,
+		Stdout: fault.Continuation.Bytes(),
+		Stderr: faultDiagnostic(fault, ExitContinue).Error(),
 	}, true
 }
 
@@ -169,21 +327,28 @@ func ForFault(
 // the hook it happened in, what it means for the host, and how to change the
 // outcome. The cause is preserved verbatim, and the caller puts the hook event
 // and the failing step into it.
-func faultDiagnostic(
-	mode pastureruntime.FailureMode,
-	evidence pastureruntime.FailureEvidence,
-	policy FaultPolicy,
-	exit ExitStatus,
-	cause error,
-) *ir.Diagnostic {
-	impact := "the host continues, and this lifecycle event is not evaluated"
-	if exit == ExitBlock {
-		impact = "the host refuses the operation, because this event is configured to fail closed and the host documents that it blocks on this exit code"
-	}
+//
+// The Impact follows the FaultStage rather than being one fixed sentence,
+// because the hook cannot claim the event was not recorded when it stopped
+// without finding out.
+func faultDiagnostic(fault Fault, exit ExitStatus) *ir.Diagnostic {
+	impact := "the host continues with its own default answer, and this lifecycle event was not evaluated and no occurrence was recorded for it"
+	fix := "read the cause below and fix the reported condition; to make an evaluation fault of an evidenced blocking event stop the host instead of letting it continue, set PASTURE_HOOK_FAIL_CLOSED=1 on a host that refuses by exit code"
 
-	fix := "read the cause below and fix the reported condition; to make an evaluation fault of an evidenced blocking event stop the host instead of letting it continue, set PASTURE_HOOK_FAIL_CLOSED=1"
-	if exit == ExitBlock {
+	switch {
+	case exit == ExitBlock:
+		impact = "the host refuses the operation, because this event is configured to fail closed and the host documents that it blocks on this exit code"
 		fix = "read the cause below and fix the reported condition; to let the host continue through an evaluation fault, unset PASTURE_HOOK_FAIL_CLOSED"
+	case fault.Policy == FaultFailClosed && fault.Mode == pastureruntime.FailureThrowFailFast:
+		impact = "the host continues with its own default answer, and this lifecycle event was not evaluated and no occurrence was recorded for it; " +
+			"fail-closed has no channel on OpenCode named callbacks until the typed refusal object exists; this invocation continued"
+		fix = "read the cause below and fix the reported condition; PASTURE_HOOK_FAIL_CLOSED refuses through the process exit code, which this host does not read as a refusal, " +
+			"so it cannot stop this event today; unset it if you expected it to"
+	case fault.Stage == FaultStageRecordUnknown:
+		impact = "the host continues with its own default answer; pasture stopped before it learned whether this event was recorded, so an occurrence for it MAY OR MAY NOT exist — " +
+			"look for it in the lifecycle occurrence journal, and read the fault record file beside the database for this invocation"
+		fix = "read the cause below and fix the reported condition; a long-running writer holding the pasture store is the usual reason, so find that writer or retry once it releases the store; " +
+			"to make an evaluation fault of an evidenced blocking event stop the host instead of letting it continue, set PASTURE_HOOK_FAIL_CLOSED=1 on a host that refuses by exit code"
 	}
 
 	return &ir.Diagnostic{
@@ -192,11 +357,12 @@ func faultDiagnostic(
 			"because silence reads as a proceed",
 		Where: "internal/lifecycle/hostexit.ForFault",
 		Phase: "hook lifecycle fault handling, after the event was identified and before any decision was written; " +
-			"declared failure mode " + mode.String() + ", fault policy " + policy.String() +
-			", host evidence " + evidenceState(evidence) + ", exit " + exit.String(),
+			"declared failure mode " + fault.Mode.String() + ", fault policy " + fault.Policy.String() +
+			", host evidence " + evidenceState(fault.Evidence) +
+			", durable state " + fault.Stage.String() + ", exit " + exit.String(),
 		Impact: impact,
 		Fix:    fix,
-		Cause:  cause,
+		Cause:  fault.Cause,
 	}
 }
 
@@ -212,8 +378,11 @@ func evidenceState(evidence pastureruntime.FailureEvidence) string {
 // maps to, and the text the user reads.
 //
 // A decision is never re-judged here: the fault policy and the failure evidence
-// do not appear, so an evaluated Deny cannot be turned into a proceed by a
-// missing citation or by the fail-open default.
+// do not appear in the signature, so an evaluated Deny cannot be turned into a
+// proceed by a missing citation or by the fail-open default. That is a
+// STRUCTURAL guarantee of the signature, not a behaviour a table can exercise;
+// TestForDecisionCarriesTheDecisionVerbatim proves the pass-through and
+// TestForDecisionSignatureCannotSeeThePolicyOrTheEvidence pins the structure.
 func ForDecision(native []byte, exit ExitStatus, stderr string) Outcome {
 	return Outcome{Exit: exit, Stdout: native, Stderr: stderr}
 }

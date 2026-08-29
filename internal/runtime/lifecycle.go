@@ -206,9 +206,23 @@ func (m FailureMode) IsValid() bool {
 // The other four arms never turn a pasture process exit into a host refusal.
 // report-and-continue and observe-only are non-blocking by definition.
 // strict-hook-failure records a failed strict hook without blocking the
-// operation. throw-fail-fast IS a blocking behavior, but the OpenCode plugin
-// blocks by throwing inside the plugin chain, not by reading an exit code, so
-// its blocking bytes are the plugin's own and are not decided here.
+// operation.
+//
+// throw-fail-fast IS a blocking behavior, and it is excluded for a reason worth
+// stating exactly, because a later slice will act on it. The OpenCode plugin
+// DOES read the process exit code — it throws on any non-zero exit — but that
+// throw is how it reports a FAULT, not how a policy refuses: on that host a
+// refusal is a typed object returned at exit 0. So the exit code is not the
+// refusal channel there, and the citation rule, which exists to make a claim
+// about somebody else's program cite its source, has nothing to add: the
+// blocking behaviour of that surface is carried by pasture's OWN generated
+// plugin, which is a committed artefact of this repository rather than a host
+// documentation URL.
+//
+// A capability derivation must therefore NOT reuse this predicate as its test
+// for "does this row have a blocking channel". A pasture-owned channel is
+// evidenceable in its own way, and keying a capability on this predicate would
+// make every OpenCode named callback capability-free forever.
 //
 // This predicate is the gate of the failure-evidence rule: only a mode that
 // blocks by exit code may claim a blocking exit, and only with evidence.

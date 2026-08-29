@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -39,6 +40,13 @@ type HookLifecycleInput struct {
 	Input       io.Reader
 	Clock       receipt.Clock
 	Operations  receipt.OperationIDSource
+	// Barrier is called ONCE, after the durable receipt has been committed and
+	// BEFORE the native continuation bytes are produced for the host. It names
+	// the commit-to-emit boundary, which is where the commit-before-stdout
+	// invariant lives. Production supplies PassThroughCommitBarrier, which does
+	// nothing; a nil barrier means the same, so every other caller is
+	// unaffected. See CommitBarrier.
+	Barrier CommitBarrier
 	// Activations optionally injects the activation configuration used by the
 	// event gate, overriding the statically dispatched per-harness manifest.
 	//
@@ -346,6 +354,50 @@ func dispatchLifecycle(harness ir.HarnessID) (lifecycleDispatch, error) {
 	return dispatch, nil
 }
 
+// CommitBarrier is the named boundary between "the lifecycle receipt is
+// durably committed" and "the host is told". It is an interface rather than an
+// implicit sequence point because that boundary carries the strongest guarantee
+// of this command: nothing reaches the host's standard output until the
+// evidence for it is persisted.
+//
+// Naming it buys three things a bare sequence point cannot. An operator reading
+// the code sees where the guarantee is enforced instead of inferring it from
+// statement order. A later change that needs to act at that point — flushing a
+// capture sink, publishing a notification, waiting for a replica — has one
+// place to attach rather than a new call inserted at a new place. And the
+// guarantee becomes observable, so a test can hold the invocation exactly there
+// and read the durable state on both sides, instead of racing a clock.
+//
+// AfterCommit is called at most ONCE per invocation, only on the path where the
+// commit succeeded. An error it returns is a POST-COMMIT error: the occurrence
+// exists and the host did not receive its continuation, which is the same class
+// as a failed encode.
+type CommitBarrier interface {
+	AfterCommit(ctx context.Context, boundary CommitBoundary) error
+}
+
+// CommitBoundary names the invocation that crossed the boundary. It carries the
+// host coordinates and nothing authority-bearing: a barrier observes that a
+// commit happened, and never which decision it carried.
+type CommitBoundary struct {
+	Harness ir.HarnessID
+	Event   string
+}
+
+// PassThroughCommitBarrier is the production barrier: it does nothing and
+// cannot fail, so the boundary is named without costing an invocation anything.
+type PassThroughCommitBarrier struct{}
+
+// AfterCommit does nothing and returns nil.
+func (PassThroughCommitBarrier) AfterCommit(context.Context, CommitBoundary) error { return nil }
+
+// ErrLifecycleCommittedWithoutContinuation marks a fault that happened AFTER
+// the durable receipt was committed and before the host received its
+// continuation. It exists so the caller can tell the host the truth: for these
+// faults the occurrence EXISTS, and a diagnostic claiming the event was never
+// recorded would send a maintainer to look in the wrong place.
+var ErrLifecycleCommittedWithoutContinuation = errors.New("the lifecycle receipt was committed but the host received no continuation")
+
 // HookLifecycleNative records the lifecycle receipt and, only after the durable
 // commit has completed, returns the exact native continuation bytes the harness
 // reads on standard output — the single dispatch surface the CLI invokes. The
@@ -363,6 +415,15 @@ func HookLifecycleNative(ctx context.Context, in HookLifecycleInput) ([]byte, er
 	if err != nil {
 		return nil, err
 	}
+	// The named commit-to-emit boundary. Everything above it is durable;
+	// nothing below it has reached the host yet.
+	barrier := in.Barrier
+	if barrier == nil {
+		barrier = PassThroughCommitBarrier{}
+	}
+	if err := barrier.AfterCommit(ctx, CommitBoundary{Harness: in.Harness, Event: in.Event}); err != nil {
+		return nil, fmt.Errorf("%s: %w: %w", dispatch.name, ErrLifecycleCommittedWithoutContinuation, err)
+	}
 	// The encode runs only AFTER the lifecycle receipt has been durably
 	// committed by HookLifecycleResponse, so any failure here means the
 	// receipt is persisted but the native continuation was not delivered to
@@ -374,7 +435,7 @@ func HookLifecycleNative(ctx context.Context, in HookLifecycleInput) ([]byte, er
 	// future encoder that can fail cannot silently drop the continuation.
 	native, err := dispatch.encode(response)
 	if err != nil {
-		return nil, fmt.Errorf("%s lifecycle receipt committed but native continuation was not delivered (encode failed): %w", dispatch.name, err)
+		return nil, fmt.Errorf("%s lifecycle receipt committed but native continuation was not delivered (encode failed): %w: %w", dispatch.name, ErrLifecycleCommittedWithoutContinuation, err)
 	}
 	return native, nil
 }

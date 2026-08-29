@@ -15,6 +15,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/nativeresponse"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
+	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 )
 
 // TestEncodeGoldenNativeContinuationBytes pins the exact native bytes the
@@ -108,4 +109,137 @@ func proceedResponse(t *testing.T) backend.HostResponse {
 	response := derivation.Response()
 	require.True(t, response.IsValid(), "the PreToolUse gate must derive a valid Proceed response")
 	return response
+}
+
+// TestFaultContinuationIsTheHostProceedForEveryHarness pins the bytes a
+// fail-open FAULT emits.
+//
+// The defect this locks out: a fault used to emit an EMPTY standard output on
+// every harness. That is a proceed only where the host reads the process exit
+// code. On OpenCode the pasture-generated plugin parses standard output, and an
+// empty body makes it throw INSIDE the callback chain, which stops the user's
+// tool call — the exact opposite of the fail-open default.
+//
+// The bytes asserted here are the SAME bytes an evaluated proceed emits, and
+// that is intended: the host reads one channel, so it cannot be asked to tell
+// them apart. The distinction is carried on standard error and in the durable
+// fault record, which classifies the invocation as a fault.
+func TestFaultContinuationIsTheHostProceedForEveryHarness(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		harness  ir.HarnessID
+		semantic pastureruntime.EventSemantic
+		want     []byte
+	}{
+		{
+			name:     "claude gate takes no bytes, because the host reads the exit code",
+			harness:  ir.HarnessClaudeCode,
+			semantic: pastureruntime.SemanticGateConsultation,
+			want:     nil,
+		},
+		{
+			name:     "claude observation takes no bytes either",
+			harness:  ir.HarnessClaudeCode,
+			semantic: pastureruntime.SemanticObservation,
+			want:     nil,
+		},
+		{
+			name:     "codex gate takes the universal continue object, which a blocking gate requires",
+			harness:  ir.HarnessCodex,
+			semantic: pastureruntime.SemanticGateConsultation,
+			want:     []byte(`{"continue":true}`),
+		},
+		{
+			name:     "codex observation takes the default object",
+			harness:  ir.HarnessCodex,
+			semantic: pastureruntime.SemanticObservation,
+			want:     []byte(`{}`),
+		},
+		{
+			name:     "an undeclared codex event takes the universally accepted object",
+			harness:  ir.HarnessCodex,
+			semantic: 0,
+			want:     []byte(`{"continue":true}`),
+		},
+		{
+			name:     "opencode gate takes the canonical proceed object the generated plugin validates",
+			harness:  ir.HarnessOpenCode,
+			semantic: pastureruntime.SemanticGateConsultation,
+			want:     []byte(`{"decision":"proceed"}`),
+		},
+		{
+			name:     "an opencode observation takes the same object, which its callbacks ignore",
+			harness:  ir.HarnessOpenCode,
+			semantic: pastureruntime.SemanticObservation,
+			want:     []byte(`{"decision":"proceed"}`),
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			continuation, err := nativeresponse.FaultContinuation(test.harness, test.semantic)
+			require.NoError(t, err)
+			require.True(t, continuation.IsSet(),
+				"a supported harness always has a continuation, even when it is empty")
+			require.Equal(t, test.want, continuation.Bytes())
+		})
+	}
+}
+
+// TestFaultContinuationRefusesAnUnsupportedHarness pins the refusal. A caller
+// that cannot name the host has no bytes to write, so it must be told that
+// rather than handed a guessed shape the host would reject.
+func TestFaultContinuationRefusesAnUnsupportedHarness(t *testing.T) {
+	t.Parallel()
+
+	continuation, err := nativeresponse.FaultContinuation(ir.HarnessID("gemini"), pastureruntime.SemanticGateConsultation)
+	require.Error(t, err)
+	require.False(t, continuation.IsSet(),
+		"a refused mapping must not hand back a usable continuation")
+	for _, part := range []string{"gemini", "no fail-open continuation", "empty continuation", "generated lifecycle support report"} {
+		require.Contains(t, err.Error(), part,
+			"the refusal must say what went wrong, what it means and how to fix it")
+	}
+}
+
+// TestTheFaultContinuationMatchesTheEvaluatedProceed proves the claim the
+// package doc makes rather than restating it: for each harness, the bytes a
+// FAULT emits are the bytes a successful evaluation of the same event class
+// emits. If the two ever diverge, a host is being handed a shape one of the two
+// paths never produces.
+func TestTheFaultContinuationMatchesTheEvaluatedProceed(t *testing.T) {
+	t.Parallel()
+
+	gateProceed := proceedResponse(t)
+
+	codexGate, err := nativeresponse.CodexContinuation(gateProceed)
+	require.NoError(t, err)
+	codexGateFault, err := nativeresponse.FaultContinuation(ir.HarnessCodex, pastureruntime.SemanticGateConsultation)
+	require.NoError(t, err)
+	require.Equal(t, codexGate, codexGateFault.Bytes(),
+		"the Codex gate fault continuation must be the Codex gate proceed")
+
+	codexObservation, err := nativeresponse.CodexContinuation(backend.HostResponse{})
+	require.NoError(t, err)
+	codexObservationFault, err := nativeresponse.FaultContinuation(ir.HarnessCodex, pastureruntime.SemanticObservation)
+	require.NoError(t, err)
+	require.Equal(t, codexObservation, codexObservationFault.Bytes(),
+		"the Codex observation fault continuation must be the Codex observation default")
+
+	canonical, err := nativeresponse.CanonicalProceed(gateProceed)
+	require.NoError(t, err)
+	openCodeFault, err := nativeresponse.FaultContinuation(ir.HarnessOpenCode, pastureruntime.SemanticGateConsultation)
+	require.NoError(t, err)
+	require.Equal(t, canonical, openCodeFault.Bytes(),
+		"the OpenCode fault continuation must be the canonical proceed the generated plugin validates")
+
+	claudeFault, err := nativeresponse.FaultContinuation(ir.HarnessClaudeCode, pastureruntime.SemanticObservation)
+	require.NoError(t, err)
+	claudeObservation, err := nativeresponse.CanonicalProceed(backend.HostResponse{})
+	require.NoError(t, err)
+	require.Equal(t, claudeObservation, claudeFault.Bytes(),
+		"Claude reads an empty body as a proceed, and that is what a fault emits there")
 }

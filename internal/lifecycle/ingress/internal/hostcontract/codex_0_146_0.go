@@ -35,12 +35,16 @@ var codexFields = []Field{
 //
 // Known divergence, and why it is inert. This catalog and the runtime Codex
 // profile (internal/runtime/lifecycle_profiles.go) both describe the Codex
-// event set, and they disagree on the 8 events that have no authentic capture:
-// this source simplifies their failure and blocking modes and declares no
-// identities. The Codex frontend (internal/lifecycle/frontend/codex) binds ONLY
-// the 2 authenticity-proven events and rejects the other 8, so the diverging
-// metadata never reaches ingest. The runtime profile is the authority for
-// non-ingress event semantics.
+// event set, and they disagree on the 8 events that have no authentic capture,
+// which are also every Codex gate. This source declares no identities for them,
+// and it declares a BLOCKING failure mode for all 7 of its gate rows while the
+// runtime profile now declares none: a blocking exit code needs a citation, and
+// the Codex rows carry none yet. So this source OVER-CLAIMS blocking relative
+// to the runtime profile; it does not merely simplify it. The Codex frontend
+// (internal/lifecycle/frontend/codex) binds ONLY the 2 authenticity-proven
+// events and rejects the other 8, so the diverging metadata never reaches
+// ingest. The runtime profile is the authority for non-ingress event semantics,
+// and it is the one to believe when the two disagree.
 //
 // Re-derive this catalog from the runtime profile once every Codex event has an
 // authentic capture and a production proof. Until then, keep the two

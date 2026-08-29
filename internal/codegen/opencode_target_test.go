@@ -488,3 +488,177 @@ func TestOpenCodeTargetDescriptor_RuntimeContractIdentity(t *testing.T) {
 		t.Errorf("descriptor harness = %v, want opencode", desc.RuntimeContract().Harness())
 	}
 }
+
+// TestOpenCodeGeneratedPluginContinuesOnAnEmptyBody is the GENERATOR BELT.
+//
+// The defect: a pasture fault used to exit 0 with an EMPTY standard output, and
+// the generated plugin ran JSON.parse("") on a NAMED callback, which throws. A
+// throw inside tool.execute.before is the OpenCode blocking channel, so a
+// pasture internal fault stopped the user's tool call — the exact opposite of
+// the fail-open default.
+//
+// The Go fix emits the host's proceed bytes, so a CURRENT binary no longer
+// produces an empty body. This belt covers the OTHER half: an OLD binary, or
+// any future path that returns nothing, must not abort a tool call either. The
+// plugin therefore reads "exit 0 with an empty body" as "not evaluated,
+// continue", and keeps its throw for a NON-EMPTY body it cannot accept.
+func TestOpenCodeGeneratedPluginContinuesOnAnEmptyBody(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("bun is required for the generated OpenCode fail-open belt proof; enter the flake dev shell")
+	}
+	root := testModuleRoot(t)
+	dir := t.TempDir()
+	fakeBinary := filepath.Join(dir, "fake-pasture")
+	// An OLD pasture: exit 0, a diagnostic on stderr, and NOTHING on stdout.
+	fake := `#!/bin/sh
+cat >/dev/null
+printf '%s' 'pasture could not evaluate this lifecycle hook event' >&2
+exit 0
+`
+	if err := os.WriteFile(fakeBinary, []byte(fake), 0o700); err != nil {
+		t.Fatalf("write bounded fake PASTURE_BIN: %v", err)
+	}
+
+	moduleURL := (&url.URL{Scheme: "file", Path: filepath.Join(root, filepath.FromSlash(OpenCodeHooksModulePath))}).String()
+	runner := filepath.Join(dir, "fail-open-belt.ts")
+	script := fmt.Sprintf(`
+import { toolExecuteBefore } from %q;
+
+const output = { args: { path: "unchanged", nested: [1, true, null] } };
+const before = JSON.stringify(output.args);
+const logged = [];
+const originalError = console.error;
+console.error = (...values) => logged.push(values.join(" "));
+try {
+  await toolExecuteBefore({ tool: "empty-body" }, output);
+} finally {
+  console.error = originalError;
+}
+if (JSON.stringify(output.args) !== before) {
+  throw new Error("an unevaluated event changed output.args");
+}
+if (logged.length !== 1 || !logged[0].includes("did not evaluate tool.execute.before")) {
+  throw new Error("the callback did not report the unevaluated event: " + JSON.stringify(logged));
+}
+console.log(JSON.stringify({ continued: true, argsUnchanged: true }));
+`, moduleURL)
+	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
+		t.Fatalf("write Bun fail-open belt runner: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	proof := exec.CommandContext(ctx, bun, runner)
+	proof.Env = append(os.Environ(), "PASTURE_BIN="+fakeBinary)
+	output, err := proof.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("Bun fail-open belt proof exceeded its 20s bound: %v\n%s", ctx.Err(), output)
+	}
+	if err != nil {
+		t.Fatalf("an empty body aborted the generated named callback: %v\n%s", err, output)
+	}
+	if strings.TrimSpace(string(output)) != `{"continued":true,"argsUnchanged":true}` {
+		t.Fatalf("Bun fail-open belt output = %q, want the continue confirmation", output)
+	}
+}
+
+// TestOpenCodeGeneratedGateSurvivesARealPastureFault is the BLOCKER proof, end
+// to end: the REAL built binary, a REAL fault, and the REAL generated plugin
+// under Bun.
+//
+// The fault is the commonest one a user meets: the pasture store cannot be
+// opened. Under the fail-open default the user's tool call must proceed with
+// its arguments untouched, and under the fail-closed opt-in it must ALSO
+// proceed on this harness, because that opt-in refuses through the process exit
+// code and OpenCode's named callbacks do not refuse that way. Both are asserted
+// here so neither can regress silently.
+func TestOpenCodeGeneratedGateSurvivesARealPastureFault(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("bun is required for the generated OpenCode fail-open proof; enter the flake dev shell")
+	}
+	root := testModuleRoot(t)
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "pasture")
+	build := exec.Command("go", "build", "-race", "-o", binary, "./cmd/pasture")
+	build.Dir = root
+	build.Env = append(build.Environ(), "CGO_ENABLED=1")
+	if output, buildErr := build.CombinedOutput(); buildErr != nil {
+		t.Fatalf("build production pasture CLI with race instrumentation: %v\n%s", buildErr, output)
+	}
+
+	// A DIRECTORY where the database file belongs. Every attempt to open the
+	// pasture store fails with a real storage error; nothing is simulated.
+	unopenable := filepath.Join(dir, "not-a-database")
+	if err := os.Mkdir(unopenable, 0o755); err != nil {
+		t.Fatalf("create the unopenable store path: %v", err)
+	}
+
+	moduleURL := (&url.URL{Scheme: "file", Path: filepath.Join(root, filepath.FromSlash(OpenCodeHooksModulePath))}).String()
+	fixtureDir := filepath.Join(root, "internal", "lifecycle", "ingress", "opencode", "testdata", "fixtures")
+	runner := filepath.Join(dir, "fail-open-proof.ts")
+	script := fmt.Sprintf(`
+import { toolExecuteBefore } from %q;
+const toolCapture = await Bun.file(%q).json();
+
+const output = toolCapture.value.output;
+const before = JSON.stringify(output.args);
+await toolExecuteBefore(toolCapture.value.input, output);
+if (JSON.stringify(output.args) !== before) {
+  throw new Error("a pasture fault changed output.args");
+}
+console.log(JSON.stringify({ toolCallProceeded: true }));
+`, moduleURL, filepath.Join(fixtureDir, "tool_execute_before_1_18_10.capture.json"))
+	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
+		t.Fatalf("write Bun fail-open proof runner: %v", err)
+	}
+
+	for _, policy := range []struct {
+		name string
+		env  []string
+	}{
+		{name: "the fail-open default", env: nil},
+		{name: "the fail-closed opt-in, which has no channel on this harness", env: []string{"PASTURE_HOOK_FAIL_CLOSED=1"}},
+	} {
+		policy := policy
+		t.Run(policy.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			proof := exec.CommandContext(ctx, bun, runner)
+			proof.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+unopenable)
+			proof.Env = append(proof.Env, policy.env...)
+			output, err := proof.CombinedOutput()
+			if ctx.Err() != nil {
+				t.Fatalf("the Bun fail-open proof exceeded its bound: %v\n%s", ctx.Err(), output)
+			}
+			if err != nil {
+				t.Fatalf("a pasture fault STOPPED the user's tool call under %s: %v\n%s", policy.name, err, output)
+			}
+			if !strings.Contains(string(output), `{"toolCallProceeded":true}`) {
+				t.Fatalf("Bun fail-open proof output = %q, want the proceed confirmation", output)
+			}
+		})
+	}
+
+	// The fault is reported and recorded as a FAULT, not as a decision. The
+	// record sits beside the database path the invocation used.
+	records, err := os.ReadFile(filepath.Join(dir, "lifecycle-faults.jsonl"))
+	if err != nil {
+		t.Fatalf("read the durable lifecycle fault record: %v", err)
+	}
+	for _, required := range []string{
+		`"outcomeClass":"fault"`,
+		`"harness":"opencode"`,
+		`"event":"tool.execute.before"`,
+		`"hostExit":"continue"`,
+		`"hostContinuation":"{\"decision\":\"proceed\"}"`,
+	} {
+		if !strings.Contains(string(records), required) {
+			t.Errorf("the fault record lacks %s, so a reader cannot tell an unevaluated proceed from a decision: %s", required, records)
+		}
+	}
+	if strings.Contains(string(records), `"outcomeClass":"decision"`) {
+		t.Error("a fault must never be recorded as a decision")
+	}
+}

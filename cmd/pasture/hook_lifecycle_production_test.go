@@ -649,7 +649,12 @@ func TestWithheldOpenCodeEventIsNotAdmittedByBuiltCLI(t *testing.T) {
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 	require.NoError(t, command.Run(), stderr.String())
-	require.Empty(t, stdout.String())
+	// A withheld event is a FAULT, and the fail-open default must not stop the
+	// host. On OpenCode a proceed is a byte shape the generated plugin
+	// validates, so the hook emits it; an empty body would make a named
+	// callback throw and abort the user's action.
+	require.Equal(t, `{"decision":"proceed"}`, stdout.String(),
+		"a withheld OpenCode event must let the host continue with the OpenCode proceed object")
 	require.Contains(t, stderr.String(), `OpenCode event "session.updated" is withheld (reason outside-target-set)`)
 	tracker, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,7 +16,9 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
+	"github.com/dayvidpham/pasture/internal/lifecycle/nativeresponse"
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
+	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
@@ -38,6 +41,12 @@ func (lifecycleCLIOperations) NewOperationID() (string, error) {
 // fault is that the database could not be opened or written, and a record that
 // needs the failing store would be lost exactly when it is needed.
 const lifecycleFaultRecordFile = "lifecycle-faults.jsonl"
+
+// lifecycleFaultOutcomeClass is the value of the outcomeClass member of every
+// fault record line. The file records FAULTS only: an invocation that emitted
+// the host's continue bytes still failed to evaluate the event, and the class
+// is what keeps that distinction readable after the fact.
+const lifecycleFaultOutcomeClass = "fault"
 
 // lifecycleCoordinates are the three host-supplied coordinates of one hook
 // invocation. They are read before anything else, because the declared failure
@@ -66,7 +75,7 @@ var hookLifecycleCmd = &cobra.Command{
 	Short: "Record a native harness lifecycle event",
 	Args:  cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		emitLifecycleOutcome(cmd, lifecycleOutcome(cmd, args))
+		emitLifecycleOutcome(cmd, lifecycleOutcome(cmd, args, handlers.PassThroughCommitBarrier{}))
 		return nil
 	},
 }
@@ -75,56 +84,93 @@ var hookLifecycleCmd = &cobra.Command{
 // host receives. Every path out of the command, including a recovered panic,
 // goes through here, so there is no path that can leave silently.
 //
+// The barrier is the commit-to-emit boundary the handler calls after the
+// durable receipt is committed and before the host is answered. Production
+// passes the pass-through barrier; it is a parameter so the boundary can be
+// held open and observed without a second code path.
+//
 // The internal/errors category table is deliberately NOT consulted. That table
 // maps a pasture error class to an operator exit code for a person at a
 // terminal. This command answers to a HOST, whose exit codes mean "proceed",
 // "report" and "block", and whose meaning comes from the event's declared
 // failure mode, not from the class of the error.
-func lifecycleOutcome(cmd *cobra.Command, args []string) (outcome hostexit.Outcome) {
-	coords := lifecycleCoordinatesFrom(cmd)
-	failure := lifecycleFailurePolicy(coords)
+func lifecycleOutcome(cmd *cobra.Command, args []string, barrier handlers.CommitBarrier) (outcome hostexit.Outcome) {
+	// The recover is installed FIRST, before the coordinates and the
+	// environment are read, so a panic in either is a fault and not a process
+	// crash. Until those reads finish the fault is described by the safe
+	// defaults below: no harness, the observe-only policy and fail-open, which
+	// is the weakest claim the command can make.
+	var (
+		coords       lifecycleCoordinates
+		failure      = pastureruntime.LifecycleFailurePolicy{Mode: pastureruntime.FailureObserveOnly}
+		policy       = hostexit.FaultFailOpen
+		continuation = hostexit.EmptyContinuation()
+	)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			outcome = lifecycleFault(cmd, coords, failure, policy, continuation,
+				hostexit.FaultStageNotRecorded, lifecyclePanicCause(coords, recovered))
+		}
+	}()
+
+	coords = lifecycleCoordinatesFrom(cmd)
+	failure = lifecycleFailurePolicy(coords)
+	continuation = lifecycleContinuation(coords, failure)
 
 	// The fault policy is read before the work starts, so a fault that happens
 	// during the work is judged by the policy the user chose. A malformed
 	// environment is itself a fault, and it is reported under the safe default.
-	policy := hostexit.FaultFailOpen
 	env, envErr := hookEnvironment()
 	if envErr == nil {
 		policy = env.FaultPolicy
 	}
 
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			outcome = lifecycleFault(cmd, coords, failure, policy, lifecyclePanicCause(coords, recovered))
-		}
-	}()
-
 	if envErr != nil {
-		return lifecycleFault(cmd, coords, failure, policy, envErr)
+		return lifecycleFault(cmd, coords, failure, policy, continuation,
+			hostexit.FaultStageNotRecorded, envErr)
 	}
 
 	if len(args) != 0 {
-		return lifecycleFault(cmd, coords, failure, policy, fmt.Errorf(
-			"the hook received the unexpected positional arguments %q while handling event %q of harness %q; "+
-				"hook coordinates are passed through flags only",
-			args, coords.Event, coords.Harness))
+		return lifecycleFault(cmd, coords, failure, policy, continuation,
+			hostexit.FaultStageNotRecorded, fmt.Errorf(
+				"the hook received the unexpected positional arguments %q while handling event %q of harness %q; "+
+					"hook coordinates are passed through flags only",
+				args, coords.Event, coords.Harness))
 	}
 
-	// The whole invocation runs under the hook-invocation deadline. The HOST
-	// pays for a hook that does not return: its session freezes while it waits.
-	// pasture stops first, well inside the smallest host budget, and reports the
-	// expiry as a fault, which fails open by default.
+	// The WORK runs under the hook-invocation deadline. The HOST pays for a
+	// hook that does not return: its session freezes while it waits. pasture
+	// stops first, well inside the smallest host budget, and reports the expiry
+	// as a fault, which fails open by default.
 	//
 	// The deadline is enforced HERE, around the work, and not only by handing a
 	// context down. Layers below retry a locked SQLite database on their own
-	// ceilings, which are longer than any host budget, and they do not all read
-	// the context. Measured on a database held under a write lock, the hook
-	// returned after about 31 seconds, three times the Claude budget. Selecting
-	// on the deadline bounds the invocation whatever the layers below do.
+	// ceilings, which are longer than any host budget, and the deadline context
+	// does not reach all of them: the store opener takes no context, so the
+	// migrator below it runs to its own ceiling whatever this deadline says.
+	// Measured on a database held under a write lock, the hook returned after
+	// about 31 seconds, three times the Claude budget. Selecting on the deadline
+	// bounds the invocation whatever the layers below do, and it is the ONLY
+	// thing that bounds it today.
 	//
-	// On expiry the work is abandoned. That is safe: the process reports the
-	// fault and exits immediately, and an abandoned store transaction is rolled
-	// back by SQLite when the process ends, so no half-written state survives.
+	// The reporting path AFTER the select is outside the bound: mapping the
+	// fault, appending one line to the fault record, and writing the streams.
+	// That is a fixed number of local syscalls with no retry and no lock. If the
+	// fault record ever grows a retry or a lock, it moves inside the bound.
+	//
+	// On expiry the work is ABANDONED. That is safe only because the process
+	// reports the fault and exits immediately: the abandoned goroutine still
+	// holds a store handle, so a future caller that runs this function
+	// in-process and keeps running would leak it. An abandoned SQLite
+	// transaction is rolled back when the process ends. What the abandonment
+	// CANNOT know is whether the receipt committed first, so the fault is
+	// reported with an unknown durable state rather than a false claim.
+	//
+	// The deadline is read from the production profile, not from an injected
+	// one. That is deliberate: the tier exists to sit under a real host budget,
+	// and a hook that could be told to use a shorter one would no longer be
+	// proving the thing the host pays for. It costs the deadline tests one real
+	// wait each; the environment seam carries no fourth variable for it.
 	ctx, cancel := context.WithTimeout(cmd.Context(), timeouts.ProductionProfile().HookInvocation())
 	defer cancel()
 
@@ -143,6 +189,7 @@ func lifecycleOutcome(cmd *cobra.Command, args []string) (outcome hostexit.Outco
 			DBPath: flagDBPath, Harness: coords.Harness, Event: coords.Event,
 			HostVersion: coords.HostVersion, Input: cmd.InOrStdin(),
 			Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
+			Barrier: barrier,
 		})
 		completed <- lifecycleWork{native: native, err: err}
 	}()
@@ -151,21 +198,50 @@ func lifecycleOutcome(cmd *cobra.Command, args []string) (outcome hostexit.Outco
 	select {
 	case work = <-completed:
 	case <-ctx.Done():
-		return lifecycleFault(cmd, coords, failure, policy, fmt.Errorf(
-			"the hook did not finish event %q of harness %q at host version %q within its %s deadline; "+
-				"the work was abandoned so the host is not left waiting: %w",
-			coords.Event, coords.Harness, coords.HostVersion,
-			timeouts.ProductionProfile().HookInvocation(), ctx.Err()))
+		return lifecycleFault(cmd, coords, failure, policy, continuation,
+			hostexit.FaultStageRecordUnknown, fmt.Errorf(
+				"the hook stopped waiting at its %s hook-invocation deadline and abandoned the work for event %q of harness %q "+
+					"at host version %q, so the host is not left waiting; the usual reason is another writer holding the pasture "+
+					"store, so find that writer or retry once it releases the store: %w",
+				timeouts.ProductionProfile().HookInvocation(),
+				coords.Event, coords.Harness, coords.HostVersion, ctx.Err()))
 	}
 
 	if work.err != nil {
-		return lifecycleFault(cmd, coords, failure, policy, fmt.Errorf(
+		// A fault raised AFTER the durable commit leaves an occurrence behind.
+		// Saying "not recorded" there would send a maintainer to look in the
+		// wrong place, so the stage follows the error and not the position.
+		stage := hostexit.FaultStageNotRecorded
+		if errors.Is(work.err, handlers.ErrLifecycleCommittedWithoutContinuation) {
+			stage = hostexit.FaultStageRecordUnknown
+		}
+		return lifecycleFault(cmd, coords, failure, policy, continuation, stage, fmt.Errorf(
 			"the hook could not evaluate event %q of harness %q at host version %q: %w",
 			coords.Event, coords.Harness, coords.HostVersion, work.err))
 	}
 	native := work.native
 
 	return hostexit.ForDecision(native, hostexit.ExitContinue, "")
+}
+
+// lifecycleContinuation resolves the bytes THIS host reads as "you may
+// continue" for THIS event class. A fail-open fault emits them, because on two
+// of the three harnesses a proceed is a byte shape and not an exit code: an
+// empty stdout makes the generated OpenCode plugin throw inside the callback
+// chain, which stops the user's tool call — the opposite of failing open.
+//
+// A harness this build has no response contract for has no bytes to write, so
+// the empty continuation is used rather than a guessed shape. Such an
+// invocation is refused by the handler anyway.
+func lifecycleContinuation(
+	coords lifecycleCoordinates,
+	failure pastureruntime.LifecycleFailurePolicy,
+) hostexit.Continuation {
+	continuation, err := nativeresponse.FaultContinuation(coords.Harness, failure.Semantic)
+	if err != nil {
+		return hostexit.EmptyContinuation()
+	}
+	return continuation
 }
 
 // lifecycleWork is what one hook evaluation produced: the native continuation
@@ -202,9 +278,18 @@ func lifecycleFault(
 	coords lifecycleCoordinates,
 	failure pastureruntime.LifecycleFailurePolicy,
 	policy hostexit.FaultPolicy,
+	continuation hostexit.Continuation,
+	stage hostexit.FaultStage,
 	cause error,
 ) hostexit.Outcome {
-	outcome, mapped := hostexit.ForFault(failure.Mode, failure.Evidence, policy, cause)
+	outcome, mapped := hostexit.ForFault(hostexit.Fault{
+		Mode:         failure.Mode,
+		Evidence:     failure.Evidence,
+		Policy:       policy,
+		Stage:        stage,
+		Continuation: continuation,
+		Cause:        cause,
+	})
 	if !mapped {
 		// Unreachable with a real cause, a declared mode and a parsed policy.
 		// It is handled anyway, because the one thing this command may never do
@@ -221,7 +306,7 @@ func lifecycleFault(
 		}
 	}
 
-	recordLifecycleFault(cmd, coords, failure, policy, outcome, cause)
+	recordLifecycleFault(cmd, coords, failure, policy, stage, outcome, cause)
 	return outcome
 }
 
@@ -233,6 +318,7 @@ func recordLifecycleFault(
 	coords lifecycleCoordinates,
 	failure pastureruntime.LifecycleFailurePolicy,
 	policy hostexit.FaultPolicy,
+	stage hostexit.FaultStage,
 	outcome hostexit.Outcome,
 	cause error,
 ) {
@@ -242,15 +328,26 @@ func recordLifecycleFault(
 	}
 
 	line, err := json.Marshal(map[string]any{
-		"recordedAt":     time.Now().UTC().Format(time.RFC3339Nano),
+		"recordedAt": time.Now().UTC().Format(time.RFC3339Nano),
+		// outcomeClass is always "fault". It is written on every line so the
+		// file cannot be mistaken for a record of decisions: emitting the
+		// host's continue bytes under fail-open is NOT an evaluated proceed,
+		// and this member is what says so where a later reader meets it.
+		"outcomeClass":   lifecycleFaultOutcomeClass,
 		"harness":        string(coords.Harness),
 		"event":          coords.Event,
 		"hostVersion":    coords.HostVersion,
 		"failureMode":    failure.Mode.String(),
 		"failureCitedBy": failure.Evidence.Source,
 		"faultPolicy":    policy.String(),
+		"faultStage":     stage.String(),
 		"hostExit":       outcome.Exit.String(),
-		"cause":          cause.Error(),
+		// hostContinuation is the exact byte body the host was given so that
+		// it could carry on. It is recorded because on OpenCode and Codex the
+		// proceed is a byte shape, and a reader must be able to see that these
+		// bytes were emitted WITHOUT an evaluation.
+		"hostContinuation": string(outcome.Stdout),
+		"cause":            cause.Error(),
 	})
 	if err != nil {
 		return
@@ -274,17 +371,30 @@ func recordLifecycleFault(
 	}
 }
 
-// lifecycleFaultRecordPath puts the record beside the database the invocation
-// used, so a maintainer finds it where the rest of the pasture state lives.
+// lifecycleFaultRecordPath puts the record beside the database THIS invocation
+// would have used, so a maintainer finds it where the rest of the pasture state
+// lives. It resolves the store path exactly as the store itself does — the
+// --db flag first, then the same environment and layout rules — because a
+// record written somewhere else is evidence nobody finds. A generated host hook
+// passes no --db flag, so this is the path a real hook takes.
+//
+// THE FILE GROWS WITHOUT A BOUND. One line is appended per faulting invocation,
+// about 500 bytes, and nothing rotates, trims or removes a line. A hook runs on
+// every wired event, so a database that stays broken accumulates one line per
+// event, silently, because a fail-open fault exits 0 and most hosts do not show
+// the standard error of an exit-0 hook. Retention and reclaim are deliberately
+// out of scope here; the file is named in AGENTS.md with the command to clear
+// it so that somebody who never sees the diagnostic can still find it.
 func lifecycleFaultRecordPath() string {
-	if flagDBPath != "" {
-		return filepath.Join(filepath.Dir(flagDBPath), lifecycleFaultRecordFile)
+	path := flagDBPath
+	if path == "" {
+		path = tasks.DefaultDBPath()
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
+	directory := filepath.Dir(path)
+	if directory == "" || directory == "." {
 		return ""
 	}
-	return filepath.Join(home, ".local", "share", "pasture", lifecycleFaultRecordFile)
+	return filepath.Join(directory, lifecycleFaultRecordFile)
 }
 
 // emitLifecycleOutcome is the ONLY writer of this command's host-facing bytes
@@ -341,10 +451,11 @@ func init() {
 		if env, envErr := hookEnvironment(); envErr == nil {
 			policy = env.FaultPolicy
 		}
-		emitLifecycleOutcome(cmd, lifecycleFault(cmd, coords, failure, policy, fmt.Errorf(
-			"the hook could not parse its flags while handling event %q of harness %q; flag error: %w; "+
-				"inspect the generated hook command and retry",
-			coords.Event, coords.Harness, err)))
+		emitLifecycleOutcome(cmd, lifecycleFault(cmd, coords, failure, policy,
+			lifecycleContinuation(coords, failure), hostexit.FaultStageNotRecorded, fmt.Errorf(
+				"the hook could not parse its flags while handling event %q of harness %q; flag error: %w; "+
+					"inspect the generated hook command and retry",
+				coords.Event, coords.Harness, err)))
 		return nil
 	})
 	hookCmd.AddCommand(hookLifecycleCmd)

@@ -38,7 +38,13 @@ func TestUnselectedCodexEventIsNotAdmittedByBuiltCLI(t *testing.T) {
 			command.Stdout = &stdout
 			command.Stderr = &stderr
 			require.NoError(t, command.Run(), stderr.String())
-			require.Empty(t, stdout.String(), "a withheld Codex event must emit no native continuation on stdout")
+			// A withheld event is a FAULT: pasture deliberately did not
+			// evaluate it. Under the fail-open default the host must still
+			// proceed, and on Codex a proceed is a byte shape, so the hook
+			// emits the harness continue bytes. Emitting nothing would be a
+			// proceed only on a host that reads the exit code.
+			require.Equal(t, `{"continue":true}`, stdout.String(),
+				"a withheld Codex event must let the host continue with the Codex continue object")
 			require.Contains(t, stderr.String(), `Codex event "`+event+`" is withheld (reason outside-target-set)`)
 
 			_, statErr := os.Stat(dbPath)

@@ -422,9 +422,18 @@ func codexLifecycleMapping(
 }
 
 func codexLifecycleMappings() map[CodexLifecycleEvent]LifecycleEventMapping {
-	// No Codex row cites evidence yet: the Codex hook reference for this pin is
-	// not committed here. Every Codex gate therefore runs as report-and-continue
-	// until the Codex coverage work supplies the citation.
+	// No Codex row cites evidence in THIS revision, because the citation work is
+	// limited here to the four documented Claude rows. Every Codex gate
+	// therefore runs as report-and-continue until the Codex coverage work fills
+	// the citation in.
+	//
+	// The evidence itself is NOT missing. The pinned Codex 0.146.0 command-hook
+	// output contract IS committed in this repository, with its inspected source
+	// revision, in internal/lifecycle/nativeresponse/nativeresponse.go: it
+	// records that a blocking hook is rejected unless continue == true. That
+	// file is the citation the Codex coverage work is expected to use. Do not
+	// read this comment as a reason to run a live capture campaign for a fact
+	// the repository already holds.
 	var unevidenced FailureEvidence
 
 	gate := func(event CodexLifecycleEvent, mutation MutationMode, extra ...NativeIdentityField) LifecycleEventMapping {
@@ -577,11 +586,18 @@ func ValidatePinnedLifecycleProfiles() error {
 }
 
 // LifecycleFailurePolicy is the declared failure behaviour of one native event:
-// the mode the host contract says applies, and the citation for a blocking exit
-// code.
+// the mode the host contract says applies, the citation for a blocking exit
+// code, and the event class the host reads the answer as.
 type LifecycleFailurePolicy struct {
 	Mode     FailureMode
 	Evidence FailureEvidence
+	// Semantic is the declared class of the event. It is carried here because
+	// the bytes a host reads as "proceed" depend on the class as well as on the
+	// harness: a Codex gate is refused unless the continuation says continue,
+	// while a Codex observation contributes no directives. The zero value means
+	// the event is not declared by this build, and the caller must not guess a
+	// class from it.
+	Semantic EventSemantic
 }
 
 // LookupLifecycleFailure returns the declared failure behaviour of one native
@@ -618,7 +634,11 @@ func lookupLifecycleFailure[E comparable](
 			continue
 		}
 		if mapping.NativeName() == nativeName {
-			return LifecycleFailurePolicy{Mode: mapping.Failure(), Evidence: mapping.Evidence()}, true
+			return LifecycleFailurePolicy{
+				Mode:     mapping.Failure(),
+				Evidence: mapping.Evidence(),
+				Semantic: mapping.Semantic(),
+			}, true
 		}
 	}
 	return LifecycleFailurePolicy{}, false

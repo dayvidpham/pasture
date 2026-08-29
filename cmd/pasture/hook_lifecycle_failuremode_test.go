@@ -13,7 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/dayvidpham/pasture/internal/dbconn"
+	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
@@ -313,13 +316,15 @@ func TestLifecycleHookPanicBecomesAFault(t *testing.T) {
 
 	panicCause := lifecyclePanicCause(coords, "the store handle was nil")
 
-	blocked := lifecycleFault(hookLifecycleCmd, coords, failure, hostexit.FaultFailClosed, panicCause)
+	blocked := lifecycleFault(hookLifecycleCmd, coords, failure, hostexit.FaultFailClosed,
+		lifecycleContinuation(coords, failure), hostexit.FaultStageNotRecorded, panicCause)
 	assert.Equal(t, hostexit.ExitBlock, blocked.Exit,
 		"a panic left the gate unevaluated, so fail-closed must refuse the operation")
 	assert.Empty(t, blocked.Stdout, "a panic never produces a native continuation")
 	assert.Contains(t, blocked.Stderr, "panicked")
 
-	open := lifecycleFault(hookLifecycleCmd, coords, failure, hostexit.FaultFailOpen, panicCause)
+	open := lifecycleFault(hookLifecycleCmd, coords, failure, hostexit.FaultFailOpen,
+		lifecycleContinuation(coords, failure), hostexit.FaultStageNotRecorded, panicCause)
 	assert.Equal(t, hostexit.ExitContinue, open.Exit,
 		"the default must not stop a user working because pasture panicked")
 	assert.Contains(t, open.Stderr, "panicked")
@@ -349,6 +354,7 @@ func TestLifecycleFaultRecordIsBestEffort(t *testing.T) {
 	t.Cleanup(func() { flagDBPath = previous })
 
 	outcome := lifecycleFault(hookLifecycleCmd, coords, failure, hostexit.FaultFailClosed,
+		lifecycleContinuation(coords, failure), hostexit.FaultStageNotRecorded,
 		errors.New("the task store refused the write"))
 
 	assert.Equal(t, hostexit.ExitBlock, outcome.Exit,
@@ -432,11 +438,234 @@ func TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked(t *testin
 	assert.Equal(t, 0, run.ExitCode,
 		"a report-and-continue event must let the host continue whatever the store is doing")
 	assert.Empty(t, run.Stdout,
-		"a hook that could not reach the store says nothing about the event")
-	assert.Contains(t, run.Stderr, "pasture could not evaluate this lifecycle hook event",
-		"a hook stopped by a locked store must report, never stay silent")
+		"Claude Code reads an empty body as a proceed, so a fail-open fault writes nothing here")
+
+	// THE PATH, NOT THE CLOCK. The elapsed bounds above are the host-budget
+	// claim and nothing more: they hold identically if the deadline select is
+	// deleted and the store instead fails FAST. The assertions below are what
+	// make this a proof of the MECHANISM.
+	//
+	// They matter more, not less, now that the retry ceilings below stay as
+	// they are. The store opener takes no context, so the deadline never
+	// reaches the loop that waits; the goroutine select is the ONLY thing that
+	// bounds this invocation today. A test that could not tell the deadline
+	// path from a fast store failure would go green on a build where that bound
+	// was removed.
+	assert.Contains(t, run.Stderr, "stopped waiting at its 5s hook-invocation deadline",
+		"the diagnostic must name the DEADLINE path, not merely report a fault")
+	assert.Contains(t, run.Stderr, "abandoned the work",
+		"the operator must be told the work was abandoned, because that is why the record state is unknown")
+	assert.NotContains(t, run.Stderr, "the hook could not evaluate event",
+		"that is the wording of the store-error path; if it appears, the store failed fast and this test proved nothing about the deadline")
 
 	records := readFaultRecords(t, run.FaultDir)
 	require.Len(t, records, 1, "the fault must be recorded durably")
 	assert.Equal(t, "continue", records[0]["hostExit"])
+	assert.Equal(t, "fault", records[0]["outcomeClass"])
+	assert.Equal(t, "record-unknown", records[0]["faultStage"],
+		"an abandoned invocation cannot know whether the occurrence committed, and the record must say so")
+	assert.Contains(t, records[0]["cause"], "hook-invocation deadline",
+		"the durable record must agree with the host-facing diagnostic about which path ran")
+}
+
+// panickingReader is a TEST INPUT, not a production branch. cobra already owns
+// the seam: the command reads its host payload through cmd.InOrStdin(), which
+// cmd.SetIn replaces. Nothing test-only is compiled into the binary.
+type panickingReader struct{ message string }
+
+func (r panickingReader) Read([]byte) (int, error) { panic(r.message) }
+
+// lifecycleTestCommand prepares the PRODUCTION command for one in-process
+// invocation and restores every global it touches, so the command a later test
+// receives is the one it expects.
+func lifecycleTestCommand(t *testing.T, harness, event, version, dbPath string) *cobra.Command {
+	t.Helper()
+
+	previousDB := flagDBPath
+	flagDBPath = dbPath
+	t.Cleanup(func() { flagDBPath = previousDB })
+
+	cmd := hookLifecycleCmd
+	for name, value := range map[string]string{"harness": harness, "event": event, "host-version": version} {
+		require.NoError(t, cmd.Flags().Set(name, value))
+	}
+	previousIn, previousOut, previousErr := cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr()
+	cmd.SetContext(context.Background())
+	t.Cleanup(func() {
+		cmd.SetIn(previousIn)
+		cmd.SetOut(previousOut)
+		cmd.SetErr(previousErr)
+		cmd.SetContext(context.Background())
+		for _, name := range []string{"harness", "event", "host-version"} {
+			_ = cmd.Flags().Set(name, "")
+		}
+	})
+	return cmd
+}
+
+// TestAPanicInTheWorkGoroutineIsAFaultAndNeverABlock exercises the recover
+// INSIDE the work goroutine, which is the one the outer deferred recover cannot
+// reach because it is a different stack.
+//
+// What it guards against, in the user's terms: if that recover is removed, the
+// Go runtime terminates the process with status 2 and prints a stack trace on
+// standard error. Claude Code reads exit 2 as a BLOCK and shows standard error
+// as the reason, so a pasture crash would arrive at the user as a policy refusal
+// whose stated reason is a Go stack trace. That is the fault-versus-decision
+// confusion this whole command exists to remove.
+//
+// The panic is raised by a reader injected through cobra's existing SetIn seam,
+// so no production branch exists whose only user is a test.
+func TestAPanicInTheWorkGoroutineIsAFaultAndNeverABlock(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
+	initializeLifecycleTestDatabase(t, dbPath)
+
+	cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.10", dbPath)
+	cmd.SetIn(panickingReader{message: "the host payload reader failed"})
+
+	outcome := lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{})
+
+	assert.Equal(t, hostexit.ExitContinue, outcome.Exit,
+		"a pasture panic must not stop the user working")
+	code, known := outcome.Exit.Code()
+	require.True(t, known)
+	assert.Equal(t, 0, code)
+	assert.NotEqual(t, 2, code,
+		"exit 2 is a BLOCK on Claude Code, so a panic must never produce it under the fail-open default")
+	assert.Equal(t, `{"decision":"proceed"}`, string(outcome.Stdout),
+		"a fail-open panic emits this host's continue bytes, or the generated plugin aborts the tool call")
+	assert.Contains(t, outcome.Stderr, "panicked")
+	assert.Contains(t, outcome.Stderr, "the host payload reader failed",
+		"the recovered value names what failed and must survive into the diagnostic")
+
+	records := readFaultRecords(t, dir)
+	require.Len(t, records, 1, "a recovered panic is recorded durably")
+	assert.Equal(t, "fault", records[0]["outcomeClass"],
+		"a panic is a fault, never a decision, whatever bytes the host was given")
+	assert.Equal(t, "continue", records[0]["hostExit"])
+}
+
+// TestAPanicBeforeTheWorkStartsIsAFaultAndNeverACrash exercises the OTHER
+// recover: the deferred one on the main stack.
+//
+// It is installed FIRST, before the coordinates and the environment are read, so
+// a panic in either is a fault. This test reaches it through cobra's SetContext
+// seam, which is the same class of test input as SetIn: the command consumes
+// cmd.Context() to bound its work, and a nil context makes the standard library
+// refuse to derive from it. No production branch exists for this either.
+//
+// Under the safe defaults that apply before the coordinates are read the fault
+// is observe-only and fail-open, which is the weakest claim the command can
+// make, so the host continues.
+func TestAPanicBeforeTheWorkStartsIsAFaultAndNeverACrash(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
+	initializeLifecycleTestDatabase(t, dbPath)
+
+	cmd := lifecycleTestCommand(t, "claude-code", "SessionStart", "2.1.222", dbPath)
+	cmd.SetIn(bytes.NewReader(claudeFixture(t, "session_start_2_1_222.json")))
+	//nolint:staticcheck // A nil context is the injected fault; cobra owns this seam.
+	cmd.SetContext(nil)
+
+	outcome := lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{})
+
+	assert.Equal(t, hostexit.ExitContinue, outcome.Exit,
+		"the main-path recover must turn a panic into a fault that lets the host continue")
+	assert.Contains(t, outcome.Stderr, "panicked")
+	assert.Empty(t, outcome.Stdout, "Claude Code reads an empty body as a proceed")
+
+	records := readFaultRecords(t, dir)
+	require.Len(t, records, 1)
+	assert.Equal(t, "fault", records[0]["outcomeClass"])
+	assert.Contains(t, records[0]["cause"], "panicked")
+}
+
+// blockingBarrier holds one invocation exactly at the commit-to-emit boundary:
+// after the durable receipt is committed, and before the host is told anything.
+// It signals when it is reached and waits until the test releases it, so the
+// interleaving is DETERMINISTIC and the assertions read on STATE, not on a
+// clock.
+type blockingBarrier struct {
+	reached chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingBarrier) AfterCommit(context.Context, handlers.CommitBoundary) error {
+	close(b.reached)
+	<-b.release
+	return nil
+}
+
+// TestAnInvocationAbandonedAfterItsCommitTellsTheHostTheTruth is the honesty
+// proof for the abandonment path.
+//
+// The hook bounds its own work and abandons it at the deadline. The receipt
+// commits BEFORE the native bytes are produced, so an expiry can land AFTER the
+// commit. The hook then cannot claim the event was not evaluated, and it used to
+// claim exactly that.
+//
+// The barrier makes that interleaving deterministic: the invocation is held at
+// the named commit-to-emit boundary until the deadline fires. The state is then
+// read back through the PRODUCTION read path.
+//
+// This is the FOURTH of the four states an abandoned invocation can land in — a
+// committed occurrence with no continuation to the host. The other three, and
+// the invariant that no occurrence ever names an absent blob, are proven at the
+// commit sequence itself in internal/engine/budget/abandonment_test.go.
+func TestAnInvocationAbandonedAfterItsCommitTellsTheHostTheTruth(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
+	initializeLifecycleTestDatabase(t, dbPath)
+
+	cmd := lifecycleTestCommand(t, "claude-code", "SessionStart", "2.1.222", dbPath)
+	cmd.SetIn(bytes.NewReader(claudeFixture(t, "session_start_2_1_222.json")))
+
+	barrier := &blockingBarrier{reached: make(chan struct{}), release: make(chan struct{})}
+	outcomes := make(chan hostexit.Outcome, 1)
+	go func() { outcomes <- lifecycleOutcome(cmd, nil, barrier) }()
+
+	// The condition, not a sleep: the receipt is committed and the host has not
+	// been told anything.
+	select {
+	case <-barrier.reached:
+	case outcome := <-outcomes:
+		t.Fatalf("the invocation finished without reaching the commit boundary: %+v", outcome)
+	}
+
+	outcome := <-outcomes
+	close(barrier.release)
+
+	assert.Equal(t, hostexit.ExitContinue, outcome.Exit,
+		"an abandoned invocation fails open, so the host is never stopped by it")
+	assert.Empty(t, outcome.Stdout,
+		"the host received NO continuation, because the work never reached the encode")
+	assert.Contains(t, outcome.Stderr, "stopped waiting at its 5s hook-invocation deadline",
+		"the diagnostic must name the deadline path, not any fault")
+	assert.Contains(t, outcome.Stderr, "MAY OR MAY NOT exist",
+		"the receipt IS committed here, so claiming the event was not recorded would be false")
+	assert.NotContains(t, outcome.Stderr, "no occurrence was recorded for it")
+
+	records := readFaultRecords(t, dir)
+	require.Len(t, records, 1)
+	assert.Equal(t, "record-unknown", records[0]["faultStage"],
+		"the durable record must agree with the host-facing text about what is known")
+	assert.Equal(t, "fault", records[0]["outcomeClass"])
+
+	// THE STATE, read back through the production read path rather than by
+	// inspecting files: the occurrence IS there, so this run produced the
+	// committed-receipt-with-no-stdout outcome and not the no-receipt one.
+	var listed bytes.Buffer
+	code, err := handlers.HookLifecycleList(context.Background(), &listed,
+		handlers.HookLifecycleListInput{DBPath: dbPath, PageSize: 50}, "json")
+	require.NoError(t, err)
+	require.Equal(t, 0, code)
+	var page struct {
+		Items []json.RawMessage `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(listed.Bytes(), &page))
+	require.Len(t, page.Items, 1,
+		"the receipt committed before the deadline fired, so exactly one occurrence must be readable")
+	t.Log("this run produced the COMMITTED-RECEIPT-WITH-NO-CONTINUATION outcome, " +
+		"which is the one the barrier makes deterministic")
 }

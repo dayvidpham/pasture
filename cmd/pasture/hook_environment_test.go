@@ -62,6 +62,11 @@ func TestHookEnvironmentTreatsSetButEmptyAsUnset(t *testing.T) {
 			wantErrHas: `PASTURE_HOOK_FAIL_CLOSED is set to " 1"`,
 		},
 		{
+			name:       "a padded capture directory is refused, exactly as a padded actor identifier is",
+			values:     map[string]string{hookCaptureDirEnv: "/var/tmp/pasture-captures "},
+			wantErrHas: "blank or has leading or trailing space, so it is not an exact directory path",
+		},
+		{
 			name:   "capture directory set",
 			values: map[string]string{hookCaptureDirEnv: "/var/tmp/pasture-captures"},
 			want:   HookEnvironment{FaultPolicy: hostexit.FaultFailOpen, CaptureDir: "/var/tmp/pasture-captures"},
@@ -69,7 +74,7 @@ func TestHookEnvironmentTreatsSetButEmptyAsUnset(t *testing.T) {
 		{
 			name:       "capture directory is only space",
 			values:     map[string]string{hookCaptureDirEnv: "  "},
-			wantErrHas: "is only space and is not a directory path",
+			wantErrHas: "blank or has leading or trailing space, so it is not an exact directory path",
 		},
 		{
 			name:   "actor claim set",
