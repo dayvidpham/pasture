@@ -45,9 +45,10 @@ import (
 type Category string
 
 const (
-	// CategoryConnection indicates the daemon could not reach Temporal.
+	// CategoryConnection indicates the daemon could not reach the durable
+	// runtime, an ACP agent, or another process it must talk to.
 	CategoryConnection Category = "connection error"
-	// CategoryWorkflow indicates a Temporal workflow or activity failure.
+	// CategoryWorkflow indicates a durable workflow or step failure.
 	CategoryWorkflow Category = "workflow error"
 	// CategoryValidation indicates bad user input or missing required fields.
 	CategoryValidation Category = "validation error"

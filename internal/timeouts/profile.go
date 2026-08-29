@@ -1,6 +1,38 @@
 // Package timeouts owns the ordered timeout hierarchy shared by SQLite,
 // lifecycle ingress, slice workflows, and callers that wait for a whole
 // workflow to finish.
+//
+// A Profile holds one tier per waiting layer. A SQLite lock wait must end
+// before either caller window can expire, and both of those must end before the
+// caller stops waiting for the whole workflow. Ingress and StartSlice are
+// siblings: neither is inside the other:
+//
+//	Tier           Field           Production   Bounds
+//	innermost      SQLiteBusy      500ms        one SQLite lock wait, set as the
+//	                                            DSN busy_timeout
+//	caller window  Ingress         1s           one lifecycle receipt append,
+//	                                            including its lock retries
+//	caller window  StartSlice      2s           how long a slice sub-workflow
+//	                                            waits for its start_slice signal
+//	outermost      WorkflowResult  30s          how long a caller waits for a
+//	                                            whole workflow to report a result
+//
+// TestProfile (500ms / 2s / 3s / 30s) and DeadlineTestProfile (25ms / 250ms /
+// 500ms / 2s) keep the same ordering with different budgets. New rejects any
+// profile that inverts it.
+//
+// Production code must read these values from an injected Profile and must not
+// write a duration or a busy_timeout DSN literal of its own.
+//
+// guard.CheckTimeoutSource enforces a narrow part of that rule: over the files
+// listed in internal/lifecycle/guard/timeouts_test.go (seven today) it reports
+// use of the retired DefaultIngressDeadline identifier and a string literal
+// carrying the retired five-second busy_timeout pragma, and nothing else.
+//
+// Two longer retry ceilings live outside this profile on purpose, because they
+// bound a retry loop rather than a single wait: busyRetryCeiling in
+// internal/audit/migrate.go and dbosRaceRetryCeiling in
+// internal/engine/dbosinit.go, both 30s.
 package timeouts
 
 import (

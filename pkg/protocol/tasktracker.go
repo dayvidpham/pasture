@@ -41,7 +41,7 @@ import (
 // returned tracker.
 //
 // All methods are safe for concurrent use; the SQLite file is opened in WAL
-// mode with busy_timeout=5000 (PROPOSAL-2 §10.3 / D11 binding). The
+// mode with a busy_timeout taken from the shared timeout profile. The
 // cross-subsystem race test (BLOCKER B3) in internal/tasks proves this.
 type TaskTracker interface {
 	// ─── Embedded: Provenance task reads, edges/labels/comments reads,
@@ -103,7 +103,7 @@ type TaskTracker interface {
 
 	// RecordEvent persists a single audit event. Returns an error if the
 	// underlying store is unavailable or the write fails. The caller
-	// (typically a Temporal activity) is responsible for retry policy.
+	// (typically a durable workflow step) is responsible for retry policy.
 	//
 	// PROPOSAL-2 §7.11: workflows call this then immediately call
 	// AttachContext with ContextEpoch. Free-floating events use other

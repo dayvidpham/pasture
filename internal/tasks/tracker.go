@@ -15,7 +15,7 @@
 //
 // The wrapper uses a pasture-side *sql.DB (the same handle backing the audit
 // subsystem) for the 6 new methods. Single-writer serialisation (sqlite.go's
-// SetMaxOpenConns(1) + busy_timeout=5000 + WAL mode) gives us cross-subsystem
+// SetMaxOpenConns(1) + the busy-timeout retry + WAL mode) gives us cross-subsystem
 // safety on one file. The race test in tracker_race_test.go proves D11/C5.
 //
 // Concurrency note: the io.Closer-style Close() is idempotent (sync.Once); a

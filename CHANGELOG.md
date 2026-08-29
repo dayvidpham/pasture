@@ -2,7 +2,37 @@
 
 ## [Unreleased]
 
+### Added
+- `pasture queue concurrency get <queue>` and `pasture queue concurrency set
+  <queue> <jobs>` show and change how many jobs a queue runs at once in one
+  process (#121). The setting lives in the pasture database, so a running
+  daemon adopts a new slice limit about a second later without a restart, and
+  work already running is not interrupted. What is printed is the setting read
+  back from the database, not what was asked for. The change lasts until a
+  daemon starts again: a start writes the limit the daemon was configured with,
+  so a limit that must survive a restart belongs in `--slice-concurrency` or
+  `PASTURE_SLICE_CONCURRENCY`. The control queue is read only; it runs one
+  epoch control workflow per process by design, and `set` on it is refused with
+  that reason.
+
 ### Changed
+- The durable runtime is updated to dbos-transact-golang v1.2.0, with
+  provenance v0.0.7 built on the same version (#116). Queue settings are now
+  rows in the pasture database that every process reads, instead of state held
+  inside one process, which is what makes the run-time concurrency command
+  above possible. Recovery after a crash keeps a workflow on the queue it ran
+  on, so a recovered slice stays under the slice limit; work that ran on no
+  queue is resumed on the runtime's own reserved queue, which carries no limit.
+- Building pasture from source now needs Go 1.26 or newer (#122). The published
+  binaries are unaffected.
+- A pasture database written by an older build is refused, not upgraded (#123).
+  The move to the new durable runtime is a clean cut: the daemon and the
+  commands check the recorded durable layout before they write anything, and
+  stop with a storage error (exit 5) that names the file, the recorded and the
+  supported version, and the steps to recover — stop every pasture process, then
+  delete the file with its -wal and -shm sidecars, or point --db at another path.
+  The refused file is left byte for byte as it was, sidecars included, so
+  nothing is lost while you decide.
 - `pastured` now chooses its exit code from the kind of failure instead of
   reporting 1 for everything: 1 for bad input or an unclassified failure, 2
   when the database cannot be opened, 3 when a stop does not finish inside its
@@ -18,6 +48,12 @@
   finishes it.
 
 ### Fixed
+- Command output in JSON is one clean document again (#123). The durable runtime
+  wrote its start-up lines to standard output, which broke any reader that
+  parsed the whole of it. Those lines now go to standard error.
+- A build that never linked the SQLite driver now fails with a message that
+  names the exact import to add, and exits 5 (#120). It previously arrived under
+  a generic message that pointed at the database instead of at the build.
 - `pastured` answers a stop signal that arrives while it is still starting.
   The signal was previously held until startup finished, so a daemon blocked
   on a slow database could be ended only by a kill.

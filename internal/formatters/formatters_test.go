@@ -312,10 +312,10 @@ func TestFormatSignalResult_InvalidFormat(t *testing.T) {
 func TestFormatError_StructuredError_JSON(t *testing.T) {
 	se := &errors.StructuredError{
 		Category: errors.CategoryConnection,
-		What:     "cannot reach Temporal",
+		What:     "cannot reach the durable runtime",
 		Why:      "network unreachable",
 		Impact:   "epoch workflows cannot start",
-		Fix:      "start the Temporal server and retry",
+		Fix:      "start pastured and retry",
 	}
 	got := formatters.FormatError(se, types.OutputJSON)
 	var m map[string]any
@@ -325,11 +325,11 @@ func TestFormatError_StructuredError_JSON(t *testing.T) {
 	if m["category"] != "connection error" {
 		t.Errorf("category: want %q, got %v", "connection error", m["category"])
 	}
-	if m["what"] != "cannot reach Temporal" {
-		t.Errorf("what: want %q, got %v", "cannot reach Temporal", m["what"])
+	if m["what"] != "cannot reach the durable runtime" {
+		t.Errorf("what: want %q, got %v", "cannot reach the durable runtime", m["what"])
 	}
-	if m["fix"] != "start the Temporal server and retry" {
-		t.Errorf("fix: want %q, got %v", "start the Temporal server and retry", m["fix"])
+	if m["fix"] != "start pastured and retry" {
+		t.Errorf("fix: want %q, got %v", "start pastured and retry", m["fix"])
 	}
 }
 
@@ -337,9 +337,9 @@ func TestFormatError_StructuredError_Text(t *testing.T) {
 	se := &errors.StructuredError{
 		Category: errors.CategoryWorkflow,
 		What:     "The workflow ran past its timeout.",
-		Why:      "An activity didn't finish within the configured deadline.",
-		Impact:   "The slice can't complete until the activity is rerun.",
-		Fix: "1. Raise the activity timeout in your pastured config:\n" +
+		Why:      "A step didn't finish within the configured deadline.",
+		Impact:   "The slice can't complete until the step is rerun.",
+		Fix: "1. Raise the step timeout in your pastured config:\n" +
 			"     $EDITOR ~/.config/pasture/pastured.toml",
 	}
 	got := formatters.FormatError(se, types.OutputText)
@@ -353,8 +353,8 @@ func TestFormatError_StructuredError_Text(t *testing.T) {
 		"Reason:",
 		"Impact:",
 		"How to fix:",
-		"An activity didn't finish within the configured deadline.",
-		"The slice can't complete until the activity is rerun.",
+		"A step didn't finish within the configured deadline.",
+		"The slice can't complete until the step is rerun.",
 		"$EDITOR ~/.config/pasture/pastured.toml",
 	}
 	for _, s := range checks {

@@ -147,11 +147,28 @@ with deterministic keys, never with a cross-connection transaction (§7).
 | queries: `current_state`, `available_transitions`, `full_state`, `slice_progress_state`, `active_sessions` | **SQL read** of the persisted `EpochState` projection + recompute transitions via the FSM |
 
 **Slice/review dispatch:** worker-slice and review sub-workflows are dispatched via DBOS
-**`Queue`/`Enqueue` with a configurable concurrency limit K** (not unbounded direct
-spawning). This gives bounded concurrency + durable backpressure when fanning out to
-many parallel agents — essential because the single `pasture.db` file is a single-writer
-WAL bottleneck, so 30+ unbounded concurrent sub-workflows would thrash one connection.
+**queues with a configurable concurrency limit K** (not unbounded direct spawning). This
+gives bounded concurrency + durable backpressure when fanning out to many parallel
+agents — essential because the single `pasture.db` file is a single-writer WAL
+bottleneck, so 30+ unbounded concurrent sub-workflows would thrash one connection.
 K is surfaced as configuration and tuned to SQLite throughput.
+
+A queue is a row in the shared database, not per-process state. `RegisterQueue` writes
+that row with the `QueueConflictAlwaysUpdate` policy, and every worker re-reads it as it
+polls, so a limit written by one process governs all of them within about a second.
+`pasture queue concurrency get|set <queue> [n]` is the operator surface for K. A limit
+set that way lasts until a daemon starts again, because a start writes the limit the
+daemon was configured with (`--slice-concurrency` / `PASTURE_SLICE_CONCURRENCY`). The
+control queue runs one epoch control workflow per process by design and refuses a
+change.
+
+Recovery returns a workflow to the queue it ran on: a recovered slice comes back to the
+slice queue and stays under K, and a recovered epoch control workflow comes back to the
+control queue and stays under its limit of one, because production starts it by enqueueing
+it there (`dbosController.StartEpoch`). Work that ran on **no** queue is put on the
+runtime's own reserved queue, which pasture does not configure (no concurrency limit, fixed
+polling cadence); nothing in production reaches that case, only a caller that starts a
+workflow directly with `RunWorkflow`.
 
 Queries are *not* workflow round-trips: the engine persists a serialization of
 `EpochState` on every transition, and queries (and `pasture status`) read that
@@ -204,8 +221,10 @@ local HTTP surface, is available but not enabled by default.)
   `ExecutorID` + `ApplicationVersion` (so a rebuilt binary still recovers).
 - **Manual recovery:** `ResumeWorkflow(id)` for cross-version cases.
 - **Concurrency:** WAL multi-writer; pasture opens the shared handle with DSN-param
-  `journal_mode=WAL`, `busy_timeout=5000`, `synchronous=NORMAL`, `_txlock=immediate`,
-  `foreign_keys=ON` (DBOS skips PRAGMA setup on a caller-supplied handle).
+  `journal_mode=WAL`, `busy_timeout=<profile>`, `synchronous=NORMAL`, `_txlock=immediate`,
+  `foreign_keys=ON` (DBOS skips PRAGMA setup on a caller-supplied handle). The busy
+  timeout is the innermost tier of `internal/timeouts` — 500 ms in production — and is
+  never a literal in the DSN.
 
 ## 7. Exactly-once model (per tier)
 

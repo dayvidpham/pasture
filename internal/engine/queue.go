@@ -26,19 +26,29 @@
 // Recovery never restarts a workflow in place — it puts the workflow back on a
 // queue (dbos/recovery.go). Which queue decides which limits apply to it:
 //
-//   - Work that ran on the slice queue goes back onto the slice queue, so the
-//     concurrency limit K and the configured polling cadence still govern it.
-//   - Work that never ran on a queue — an epoch workflow — goes onto the
-//     runtime's own reserved queue instead. That queue is not pasture's to
-//     configure: it carries no concurrency limit, and it polls at the runtime's
-//     fixed one-second cadence rather than the interval pasture sets for its own
-//     queues. So a process that restarts holding many interrupted epochs resumes
-//     them without a concurrency bound. The slice work each epoch then dispatches
-//     is still bounded by K, which is where the database-writer pressure is.
+//   - A workflow returns to the queue it ran on. Slice and review work goes
+//     back onto the slice queue, so the concurrency limit K and the configured
+//     polling cadence still govern it. An epoch control workflow goes back onto
+//     the control queue, so its limit of one per process still governs it:
+//     production only ever starts one by enqueueing it there (see
+//     dbosController.StartEpoch in internal/handlers/controller.go), so it
+//     always has a queue of its own to return to.
+//   - Work that ran on NO queue goes onto the runtime's own reserved queue
+//     instead. That queue is not pasture's to configure: it carries no
+//     concurrency limit, and it polls at the runtime's fixed one-second cadence
+//     rather than the interval pasture sets for its own queues. Nothing in
+//     production reaches this case; it is reached by a caller that starts a
+//     workflow directly with RunWorkflow, which today is test code only.
 //
-// Both cases are pinned by
-// TestSliceQueue_RecoveryKeepsEachWorkflowOnItsOwnQueue in
-// internal/engine/subworkflows_test.go.
+// All three shapes are pinned in internal/engine/subworkflows_test.go:
+//
+//   - TestSliceQueue_RecoveryKeepsEachWorkflowOnItsOwnQueue: a slice returns to
+//     the slice queue.
+//   - TestRecovery_EpochControlWorkflowReturnsToItsOwnQueue: the production
+//     shape — the control workflow is enqueued as StartEpoch enqueues it, and
+//     recovery returns it to the control queue.
+//   - TestRecovery_OffQueueEpochWorkflowLandsOnTheReservedQueue: a workflow
+//     started off any queue lands on the runtime's reserved queue.
 package engine
 
 import (

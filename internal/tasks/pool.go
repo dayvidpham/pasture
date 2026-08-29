@@ -9,7 +9,7 @@
 //
 // The default pool size of 1 serialises writes at the Go level, which is the
 // proven-safe configuration: zero escaped SQLITE_BUSY errors in the
-// cross-subsystem race test. SQLite WAL + busy_timeout=5000 prevent data
+// cross-subsystem race test. SQLite WAL + the busy-timeout retry prevent data
 // corruption at any pool size; the default of 1 is a contention-serialisation
 // choice, not a correctness requirement. A pool > 1 raises write concurrency
 // but may surface SQLITE_BUSY under heavy contention on the pasture-owned
@@ -37,7 +37,7 @@ const DBPoolSizeEnv = "PASTURE_DB_POOL_SIZE"
 //
 // A pool of 1 serialises writes at the Go level and is the proven-safe default:
 // zero escaped SQLITE_BUSY errors under the cross-subsystem race test. SQLite
-// WAL + busy_timeout=5000 prevent data corruption at any pool size; this cap is
+// WAL + the busy-timeout retry prevent data corruption at any pool size; this cap is
 // a contention-serialisation choice only.
 //
 // For production tuning, override with PASTURE_DB_POOL_SIZE after validating
@@ -57,7 +57,7 @@ const DefaultDBPoolSize = 1
 // Tradeoff: the default of 1 is the proven-safe pool size (zero escaped
 // SQLITE_BUSY in the cross-subsystem race test). A pool > 1 raises write
 // concurrency on the pasture-owned handle but may surface SQLITE_BUSY under
-// heavy contention. SQLite WAL + busy_timeout=5000 prevent data corruption at
+// heavy contention. SQLite WAL + the busy-timeout retry prevent data corruption at
 // any pool size; this setting is purely about contention serialisation.
 //
 // This governs ONLY the pasture-owned audit handle (AttachContext, EventContexts,
@@ -82,7 +82,7 @@ func ResolveDBPoolSize() (int, error) {
 						"Note: the default of 1 serialises writes at the Go level (zero escaped SQLITE_BUSY);\n"+
 						"increasing the pool raises write concurrency but may surface SQLITE_BUSY\n"+
 						"under heavy contention on the pasture-owned audit handle (not corruption —\n"+
-						"SQLite WAL + busy_timeout=5000 prevent data corruption at any pool size).",
+						"SQLite WAL and the busy-timeout retry prevent data corruption at any pool size).",
 					DBPoolSizeEnv, DefaultDBPoolSize, DBPoolSizeEnv, DBPoolSizeEnv,
 				),
 			}

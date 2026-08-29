@@ -34,7 +34,7 @@ const (
 	// validation before the durable database is opened.
 	ValidateBeforeOpen FixtureName = "validate_before_open"
 
-	// RunAgentSession is used by S5–S6 tests (Temporal workflow scenarios).
+	// RunAgentSession is used by the agent-session workflow tests.
 	RunAgentSession FixtureName = "run_agent_session"
 
 	// ConfigLoading is used by S3 tests (config loading scenarios).

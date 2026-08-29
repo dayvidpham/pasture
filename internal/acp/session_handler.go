@@ -17,7 +17,7 @@ import (
 // each update immediately on HandleUpdate (per-update flush mode).
 //
 // All methods are safe for concurrent invocation (multiple sessions may run in
-// parallel within a single Temporal activity).
+// parallel within a single durable step).
 //
 // Lifecycle per session:
 //  1. First HandleUpdate call → fire HookSessionStarted, index update, persist to trail.

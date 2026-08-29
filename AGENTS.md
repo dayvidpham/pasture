@@ -125,8 +125,10 @@ Both subsystems open the same file: the Provenance tables (`tasks`, `edges`,
 `labels`, `comments`, `agents`, `agents_software`, `agents_human`, `agents_ml`,
 `activities`) and the audit tables (`audit_events`, `context_edges`, `sessions`,
 `pasture_well_known_agents`, `pasture_agent_categories`, `audit_schema_meta`)
-co-exist in one file. PROPOSAL-2 §7.1 / D11 binds writers to SQLite WAL mode
-with `busy_timeout=5000`; the cross-subsystem race test in
+co-exist in one file. PROPOSAL-2 §7.1 / D11 binds writers to SQLite WAL mode.
+The `busy_timeout` that goes with it is taken from the shared timeout profile
+(`internal/timeouts`) and is **500 ms** in the production profile; it is never a
+literal in a DSN. The cross-subsystem race test in
 `internal/tasks/tracker_race_test.go` (BLOCKER B3) exercises this path.
 
 Pre-PROPOSAL-2 deployments used two separate files (`provenance.db` for the
@@ -134,6 +136,49 @@ Pre-PROPOSAL-2 deployments used two separate files (`provenance.db` for the
 both to `pasture.db`. `pastured` accepts `--db`, and the shared fallback remains
 `PASTURE_DB_PATH` / `tasks.DefaultDBPath()`. The old `--audit-db-path` alias has
 been retired with the Temporal daemon role.
+
+### Timeout tiers (`internal/timeouts`)
+
+Every SQLite busy timeout, and the three caller deadlines above it, come from one
+immutable `timeouts.Profile`. A SQLite lock wait must end before either caller
+window can expire, and both of those must end before the caller stops waiting for
+the whole workflow. `Ingress` and `StartSlice` are siblings: neither is inside the
+other, and the constructor does not order them against each other. It refuses any
+profile that inverts the rest:
+
+| Tier | Field | Production | Bounds |
+|---|---|---|---|
+| innermost | `SQLiteBusy` | **500 ms** | one SQLite lock wait inside the driver, set as the DSN `busy_timeout` |
+| caller window | `Ingress` | **1 s** | one lifecycle receipt append, including its lock retries |
+| caller window | `StartSlice` | **2 s** | how long a slice sub-workflow waits for its `start_slice` signal |
+| outermost | `WorkflowResult` | **30 s** | how long a caller waits for a whole workflow to report a result |
+
+The other two profiles keep the same ordering with different budgets:
+`TestProfile` (500 ms / 2 s / 3 s / 30 s) gives integration runs room for a
+serialized writer queue, and `DeadlineTestProfile` (25 ms / 250 ms / 500 ms / 2 s)
+is tight on purpose so tests can prove deadline-breach behaviour quickly.
+
+Two longer retry ceilings sit **above** the profile and are not part of it.
+Both bound a retry loop, not a single wait, and both are 30 s:
+`busyRetryCeiling` (`internal/audit/migrate.go`) bounds retrying a schema
+migration that lost the file lock to another process, and `dbosRaceRetryCeiling`
+(`internal/engine/dbosinit.go`) bounds re-attempting durable start-up after a
+lost schema-bootstrap race.
+
+Rules:
+
+- Production code takes these values from the injected profile. It must not
+  write a duration or a `busy_timeout(...)` DSN literal of its own.
+- `guard.CheckTimeoutSource` is a narrow check, not a general one. It parses the
+  files listed in `internal/lifecycle/guard/timeouts_test.go` (seven today) and
+  reports exactly two things: use of the retired `DefaultIngressDeadline`
+  identifier, and a string literal carrying the retired five-second
+  `busy_timeout` pragma (the exact text it matches is in
+  `internal/lifecycle/guard/timeouts.go`). It does not see any other hard-coded
+  duration, and it does not look at any file outside that list. Add a file to the
+  list when that file starts to carry a timeout.
+- A change to a tier is a change to observable behaviour under load. State the
+  measurement that justifies it, and keep the ordering strict.
 
 ### Schema migration (`pasture migrate`)
 
@@ -189,13 +234,21 @@ Existing `pasture task` verbs (`create`, `show`, `update`, `close`, `list`,
 
 ## Dependencies (Approved)
 
-| Package | Purpose |
-|---------|---------|
-| `github.com/spf13/cobra` | CLI framework |
-| `github.com/spf13/viper` | Configuration loading (TOML/YAML/env) |
-| `github.com/dbos-inc/dbos-transact-golang` | Durable-execution substrate (DBOS Transact, SQLite backend) |
-| `modernc.org/sqlite` | Pure-Go SQLite (audit trail, local state, DBOS system DB) |
-| `golang.org/x/term` | Cross-platform terminal/isatty detection (sync-versions non-TTY guard) |
+| Package | Pinned | Purpose |
+|---------|--------|---------|
+| `github.com/spf13/cobra` | (see `go.mod`) | CLI framework |
+| `github.com/spf13/viper` | (see `go.mod`) | Configuration loading (TOML/YAML/env) |
+| `github.com/dbos-inc/dbos-transact-golang` | v1.2.0 | Durable-execution substrate (DBOS Transact, SQLite backend) |
+| `github.com/dayvidpham/provenance` | v0.0.7 | Task, edge and receipt store; built on the same DBOS version |
+| `modernc.org/sqlite` | v1.54.0 | Pure-Go SQLite (audit trail, local state, DBOS system DB) |
+| `modernc.org/libc` | v1.75.6 | Indirect, but pinned on purpose: v1.74.3 is retracted upstream, and module resolution selects it unless this floor is held |
+| `golang.org/x/term` | (see `go.mod`) | Cross-platform terminal/isatty detection (sync-versions non-TTY guard) |
+
+`go.mod` is the source of truth for every version. The three versions written
+above are repeated here because a change to any of them changes behaviour the
+operator sees, so a bump must be a deliberate act: the durable runtime version
+decides which databases can be opened, and the two modernc versions decide
+whether a pure-Go build is possible at all.
 
 No other external dependencies may be added without supervisor approval.
 
@@ -229,7 +282,7 @@ os.Exit(1) // magic number with no name
 |------|-------------------|---------|
 | 0 | (none) | Success |
 | 1 | `CategoryValidation` | Validation error (bad input, missing flags) |
-| 2 | `CategoryConnection` | Connection error (Temporal unreachable, ACP unreachable, file open failure) |
+| 2 | `CategoryConnection` | Connection error (durable runtime unreachable, ACP unreachable, file open failure) |
 | 3 | `CategoryWorkflow` | Workflow error (execution failure, signal rejected) |
 | 4 | `CategoryConfig` | Configuration error (bad YAML, invalid env var) |
 | 5 | `CategoryStorage` | Storage error (SQLite open, schema migration failure, schema-version mismatch) |
@@ -558,6 +611,34 @@ GOOS=windows GOARCH=amd64  CGO_ENABLED=0 go build ./cmd/pastured
 - The root module must not require `go.temporal.io/*`. The old Temporal
   substrate is preserved only as the isolated deprecated nested module under
   `legacy/temporal/`.
+
+### Work queues
+
+- Queues are rows in the shared database, not per-process state. `RegisterQueue`
+  writes the row with the `QueueConflictAlwaysUpdate` policy, so a starting
+  process configures the queue every peer then reads. Every worker re-reads the
+  row as it polls, about once a second.
+- Two queues exist: `pasture-slice-queue` for slice and review sub-workflows,
+  and `pasture-control-queue` for epoch control workflows. Slices and reviews
+  share one concurrency budget K, because the bound protects one thing: the
+  number of writers on the single `pasture.db` file.
+- The control queue runs one workflow at a time in each process by design.
+  `pasture queue concurrency set control ...` is refused with that reason.
+- K can change while the daemon runs: `pasture queue concurrency set slice <n>`
+  writes the stored setting, reads it back, and the daemon adopts it at its next
+  poll. Work already running is not interrupted. The change lasts until a daemon
+  starts again, because a start writes the limit the daemon was configured with.
+  For a limit that survives a restart, set `--slice-concurrency` or
+  `PASTURE_SLICE_CONCURRENCY`.
+- Recovery returns a workflow to the queue it ran on. A recovered slice comes
+  back to the slice queue and stays under K; a recovered epoch control workflow
+  comes back to the control queue and stays under its limit of one, because
+  production starts it by enqueueing it there
+  (`dbosController.StartEpoch` in `internal/handlers/controller.go`). Work that
+  ran on **no** queue is put on the runtime's own reserved queue instead, which
+  pasture does not configure: no concurrency limit, fixed polling cadence.
+  Nothing in production reaches that case — only a caller that starts a workflow
+  directly with `RunWorkflow`, which today is test code.
 
 When debugging "where am I in this workflow?", the layers map cleanly:
 

@@ -3,5 +3,5 @@
 //
 // These tests have been removed as part of the Activity struct DI refactor
 // (Revision 3). Hook dispatch is now tested via Activities.DispatchHook in
-// the temporal package tests, which receive the Manager via DI.
+// the engine package tests, which receive the Manager via DI.
 package hooks_test

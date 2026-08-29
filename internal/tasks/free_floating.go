@@ -457,7 +457,7 @@ func contextIDExample(kind protocol.ContextKind) string {
 
 // OpenAuditDBForFreeFloating opens an auxiliary *sql.DB handle on the same
 // pasture.db file that protocol.TaskTracker writes to, with the same WAL +
-// busy_timeout=5000 pragmas openTaskTrackerImpl applies. It exists so callers
+// busy_timeout pragmas openTaskTrackerImpl applies. It exists so callers
 // outside internal/tasks (e.g. cmd/pastured wiring code, test code) can obtain
 // a direct SQL handle for ad-hoc queries or pasture-specific table writes
 // without depending on internal trackerImpl details.
