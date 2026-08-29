@@ -34,6 +34,7 @@ func productionTiers() []tier {
 		{field: "SQLiteBusy", value: profile.SQLiteBusy().String()},
 		{field: "Ingress", value: profile.Ingress().String()},
 		{field: "StartSlice", value: profile.StartSlice().String()},
+		{field: "HookInvocation", value: profile.HookInvocation().String()},
 		{field: "WorkflowResult", value: profile.WorkflowResult().String()},
 	}
 }

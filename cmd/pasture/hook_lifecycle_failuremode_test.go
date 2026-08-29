@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -9,10 +11,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -350,4 +355,88 @@ func TestLifecycleFaultRecordIsBestEffort(t *testing.T) {
 		"an unwritable fault record must not change the host outcome")
 	assert.Contains(t, outcome.Stderr, "pasture could not evaluate this lifecycle hook event",
 		"the fault is still reported on stderr when the record cannot be written")
+}
+
+// TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked is the
+// host-budget proof. A host freezes while it waits for a hook, so pasture must
+// stop first, whatever the store is doing.
+//
+// A second connection holds the SQLite WRITE lock for the whole run. The test
+// waits on a CONDITION (the writer signals once the lock is really held) with a
+// bounded timeout, and it releases the lock only after the hook process has
+// returned. There is no sleep and no fixed-deadline poll anywhere.
+func TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "lifecycle-cli")
+	buildLifecycleBinary(t, binary)
+
+	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
+	initializeLifecycleTestDatabase(t, dbPath)
+	sessionStart := claudeFixture(t, "session_start_2_1_222.json")
+
+	locked := make(chan struct{})
+	release := make(chan struct{})
+	lockFailed := make(chan error, 1)
+
+	go func() {
+		db, err := sql.Open("sqlite", dbconn.SharedDSN(dbPath))
+		if err != nil {
+			lockFailed <- err
+			return
+		}
+		defer db.Close()
+
+		// BEGIN IMMEDIATE takes the write lock at once, so when this returns
+		// the lock is really held and the condition below is true, not merely
+		// likely.
+		transaction, err := db.BeginTx(context.Background(), nil)
+		if err != nil {
+			lockFailed <- err
+			return
+		}
+		if _, err := transaction.Exec(
+			`CREATE TABLE IF NOT EXISTS lifecycle_hook_deadline_probe (id INTEGER PRIMARY KEY)`); err != nil {
+			lockFailed <- err
+			return
+		}
+
+		close(locked)
+		<-release
+		_ = transaction.Rollback()
+	}()
+
+	select {
+	case <-locked:
+	case err := <-lockFailed:
+		t.Fatalf("could not hold the SQLite write lock: %v", err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("the SQLite write lock was never taken, so the deadline could not be exercised")
+	}
+
+	budget := timeouts.ProductionProfile().HookInvocation()
+	started := time.Now()
+	run := runLifecycleHook(t, binary, dbPath, "SessionStart", sessionStart)
+	elapsed := time.Since(started)
+	close(release)
+
+	// The tier plus one process start. The hook's own work is bounded by the
+	// tier; building and starting a race-instrumented binary is not.
+	const processStartAllowance = 4 * time.Second
+	assert.Less(t, elapsed, budget+processStartAllowance,
+		"the hook must return inside its %s deadline while the store is locked, so the host is never frozen", budget)
+
+	// The smallest host budget is 10s. Exceeding it is what freezes a session.
+	assert.Less(t, elapsed, 10*time.Second,
+		"the hook must always return inside the smallest host budget")
+
+	assert.Equal(t, 0, run.ExitCode,
+		"a report-and-continue event must let the host continue whatever the store is doing")
+	assert.Empty(t, run.Stdout,
+		"a hook that could not reach the store says nothing about the event")
+	assert.Contains(t, run.Stderr, "pasture could not evaluate this lifecycle hook event",
+		"a hook stopped by a locked store must report, never stay silent")
+
+	records := readFaultRecords(t, run.FaultDir)
+	require.Len(t, records, 1, "the fault must be recorded durably")
+	assert.Equal(t, "continue", records[0]["hostExit"])
 }

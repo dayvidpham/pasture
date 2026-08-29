@@ -56,7 +56,8 @@ func spikeTimeoutProfile(t *testing.T) timeouts.Profile {
 		spikeWorkers*base.SQLiteBusy(),
 		spikeWorkers*base.Ingress(),
 		spikeWorkers*base.StartSlice(),
-		base.WorkflowResult(),
+		spikeWorkers*base.HookInvocation(),
+		spikeWorkers*base.WorkflowResult(),
 	)
 	if err != nil {
 		t.Fatalf("build the timeout profile for the overlap spike: %v", err)

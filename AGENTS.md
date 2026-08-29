@@ -151,6 +151,7 @@ profile that inverts the rest:
 | innermost | `SQLiteBusy` | **500 ms** | one SQLite lock wait inside the driver, set as the DSN `busy_timeout` |
 | caller window | `Ingress` | **1 s** | one lifecycle receipt append, including its lock retries |
 | caller window | `StartSlice` | **2 s** | how long a slice sub-workflow waits for its `start_slice` signal |
+| host window | `HookInvocation` | **5 s** | how long one whole lifecycle hook invocation may take before it reports a fault to its host |
 | outermost | `WorkflowResult` | **30 s** | how long a caller waits for a whole workflow to report a result |
 
 The other two profiles keep the same ordering with different budgets:

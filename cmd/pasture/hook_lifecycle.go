@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
 type lifecycleCLIClock struct{}
@@ -108,22 +110,69 @@ func lifecycleOutcome(cmd *cobra.Command, args []string) (outcome hostexit.Outco
 			args, coords.Event, coords.Harness))
 	}
 
+	// The whole invocation runs under the hook-invocation deadline. The HOST
+	// pays for a hook that does not return: its session freezes while it waits.
+	// pasture stops first, well inside the smallest host budget, and reports the
+	// expiry as a fault, which fails open by default.
+	//
+	// The deadline is enforced HERE, around the work, and not only by handing a
+	// context down. Layers below retry a locked SQLite database on their own
+	// ceilings, which are longer than any host budget, and they do not all read
+	// the context. Measured on a database held under a write lock, the hook
+	// returned after about 31 seconds, three times the Claude budget. Selecting
+	// on the deadline bounds the invocation whatever the layers below do.
+	//
+	// On expiry the work is abandoned. That is safe: the process reports the
+	// fault and exits immediately, and an abandoned store transaction is rolled
+	// back by SQLite when the process ends, so no half-written state survives.
+	ctx, cancel := context.WithTimeout(cmd.Context(), timeouts.ProductionProfile().HookInvocation())
+	defer cancel()
+
 	// HookLifecycleNative is the single dispatch surface: it commits the
 	// durable receipt and, only on the nil-error path, returns the exact
 	// native continuation bytes this harness reads on stdout — so nothing is
 	// written to stdout before the commit completes.
-	native, err := handlers.HookLifecycleNative(cmd.Context(), handlers.HookLifecycleInput{
-		DBPath: flagDBPath, Harness: coords.Harness, Event: coords.Event,
-		HostVersion: coords.HostVersion, Input: cmd.InOrStdin(),
-		Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
-	})
-	if err != nil {
+	completed := make(chan lifecycleWork, 1)
+	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				completed <- lifecycleWork{err: lifecyclePanicCause(coords, recovered)}
+			}
+		}()
+		native, err := handlers.HookLifecycleNative(ctx, handlers.HookLifecycleInput{
+			DBPath: flagDBPath, Harness: coords.Harness, Event: coords.Event,
+			HostVersion: coords.HostVersion, Input: cmd.InOrStdin(),
+			Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
+		})
+		completed <- lifecycleWork{native: native, err: err}
+	}()
+
+	var work lifecycleWork
+	select {
+	case work = <-completed:
+	case <-ctx.Done():
 		return lifecycleFault(cmd, coords, failure, policy, fmt.Errorf(
-			"the hook could not evaluate event %q of harness %q at host version %q: %w",
-			coords.Event, coords.Harness, coords.HostVersion, err))
+			"the hook did not finish event %q of harness %q at host version %q within its %s deadline; "+
+				"the work was abandoned so the host is not left waiting: %w",
+			coords.Event, coords.Harness, coords.HostVersion,
+			timeouts.ProductionProfile().HookInvocation(), ctx.Err()))
 	}
 
+	if work.err != nil {
+		return lifecycleFault(cmd, coords, failure, policy, fmt.Errorf(
+			"the hook could not evaluate event %q of harness %q at host version %q: %w",
+			coords.Event, coords.Harness, coords.HostVersion, work.err))
+	}
+	native := work.native
+
 	return hostexit.ForDecision(native, hostexit.ExitContinue, "")
+}
+
+// lifecycleWork is what one hook evaluation produced: the native continuation
+// bytes, or the error that stopped it.
+type lifecycleWork struct {
+	native []byte
+	err    error
 }
 
 // lifecyclePanicCause describes a recovered panic as the fault it is. A panic
