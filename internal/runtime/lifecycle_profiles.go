@@ -1,5 +1,7 @@
 package runtime
 
+import "github.com/dayvidpham/pasture/internal/codegen/ir"
+
 // ClaudeLifecycleEvent is the closed native event catalog for the pinned Claude
 // Code lifecycle profile. Its numeric representation prevents arbitrary native
 // event strings from entering the semantic mapping API.
@@ -572,4 +574,52 @@ func ValidatePinnedLifecycleProfiles() error {
 		return err
 	}
 	return nil
+}
+
+// LifecycleFailurePolicy is the declared failure behaviour of one native event:
+// the mode the host contract says applies, and the citation for a blocking exit
+// code.
+type LifecycleFailurePolicy struct {
+	Mode     FailureMode
+	Evidence FailureEvidence
+}
+
+// LookupLifecycleFailure returns the declared failure behaviour of one native
+// event, by the harness and the exact native NAME.
+//
+// The typed lifecycle contracts have no string lookup on purpose, so a caller
+// cannot invent an event. This function is the ONE narrow exception, and it
+// exists because a real host really does hand the hook a harness and an event
+// NAME on the command line. It answers only this one question, it cannot reach
+// identities, payload fields or ordering, and it returns false for a name no
+// pinned profile declares, so the caller must decide what an unknown event
+// means rather than receive a guess.
+func LookupLifecycleFailure(harness ir.HarnessID, nativeName string) (LifecycleFailurePolicy, bool) {
+	switch harness {
+	case ir.HarnessClaudeCode:
+		return lookupLifecycleFailure(ClaudeCode2_1_210Lifecycle(), ClaudeLifecycleEvents(), nativeName)
+	case ir.HarnessCodex:
+		return lookupLifecycleFailure(Codex0_146_0Lifecycle(), CodexLifecycleEvents(), nativeName)
+	case ir.HarnessOpenCode:
+		return lookupLifecycleFailure(OpenCode1_18_10Lifecycle(), OpenCodeLifecycleEvents(), nativeName)
+	default:
+		return LifecycleFailurePolicy{}, false
+	}
+}
+
+func lookupLifecycleFailure[E comparable](
+	contract LifecycleContract[E],
+	events []E,
+	nativeName string,
+) (LifecycleFailurePolicy, bool) {
+	for _, event := range events {
+		mapping, err := contract.Mapping(event)
+		if err != nil {
+			continue
+		}
+		if mapping.NativeName() == nativeName {
+			return LifecycleFailurePolicy{Mode: mapping.Failure(), Evidence: mapping.Evidence()}, true
+		}
+	}
+	return LifecycleFailurePolicy{}, false
 }
