@@ -170,9 +170,15 @@ func TestFaultContinuationIsTheHostProceedForEveryHarness(t *testing.T) {
 			want:     []byte(`{"decision":"proceed"}`),
 		},
 		{
-			name:     "an opencode observation takes the same object, which its callbacks ignore",
+			name:     "an opencode observation takes no bytes, exactly as its success path does",
 			harness:  ir.HarnessOpenCode,
 			semantic: pastureruntime.SemanticObservation,
+			want:     nil,
+		},
+		{
+			name:     "an undeclared opencode event takes the object a named callback accepts",
+			harness:  ir.HarnessOpenCode,
+			semantic: 0,
 			want:     []byte(`{"decision":"proceed"}`),
 		},
 	}
@@ -235,6 +241,13 @@ func TestTheFaultContinuationMatchesTheEvaluatedProceed(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, canonical, openCodeFault.Bytes(),
 		"the OpenCode fault continuation must be the canonical proceed the generated plugin validates")
+
+	openCodeObservationFault, err := nativeresponse.FaultContinuation(ir.HarnessOpenCode, pastureruntime.SemanticObservation)
+	require.NoError(t, err)
+	openCodeObservation, err := nativeresponse.CanonicalProceed(backend.HostResponse{})
+	require.NoError(t, err)
+	require.Equal(t, openCodeObservation, openCodeObservationFault.Bytes(),
+		"an OpenCode observation says nothing when it succeeds, so a fault must not say more")
 
 	claudeFault, err := nativeresponse.FaultContinuation(ir.HarnessClaudeCode, pastureruntime.SemanticObservation)
 	require.NoError(t, err)

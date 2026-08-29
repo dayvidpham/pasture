@@ -124,9 +124,11 @@ func CanonicalProceed(response backend.HostResponse) ([]byte, error) {
 //     fault continuation is the default object {}.
 //   - OpenCode's named callbacks are validated by the pasture-generated plugin,
 //     which accepts exactly the canonical response object, so the fault
-//     continuation is {"decision":"proceed"}. Its observation callbacks ignore
-//     standard output, so the same bytes are harmless there and are used for
-//     every OpenCode event.
+//     continuation of a gate or an explicit human response is
+//     {"decision":"proceed"}. An OpenCode OBSERVATION takes NO bytes, the same
+//     as its successful path: its callbacks never read standard output, and a
+//     decision word for an event class that has no decision would say more
+//     after a failure than after a success.
 //
 // These are the SAME bytes an evaluated proceed emits. That is the point: the
 // host cannot be asked to distinguish them, because the only channel it reads
@@ -168,6 +170,19 @@ func FaultContinuation(harness ir.HarnessID, semantic pastureruntime.EventSemant
 		// the only shape a blocking gate accepts.
 		return hostexit.ContinuationOf(codexProceedContinuation), nil
 	case ir.HarnessOpenCode:
+		if semantic == pastureruntime.SemanticObservation {
+			// An observation has no decision to report, and the OpenCode
+			// observation callbacks never read standard output. Saying nothing
+			// is what a SUCCESSFUL observation does, so a failed one says the
+			// same. It is also safe on both sides of the plugin version skew
+			// the belt exists for: an older plugin ignores observation output
+			// entirely, and a newer one reads an empty body at exit 0 as "not
+			// evaluated, continue".
+			return hostexit.EmptyContinuation(), nil
+		}
+		// Gates, explicit human responses and undeclared events take the
+		// canonical object, because a named callback of the generated plugin
+		// accepts exactly those bytes.
 		return hostexit.ContinuationOf(canonicalProceedContinuation), nil
 	default:
 		return hostexit.Continuation{}, fmt.Errorf(
