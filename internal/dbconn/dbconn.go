@@ -23,7 +23,10 @@ import (
 // identically to the audit and provenance handles:
 //
 //   - journal_mode(WAL)      multi-reader / single-writer without reader stalls
-//   - busy_timeout(5000)     auto-retry a locked write for up to 5s
+//   - busy_timeout(N)        auto-retry a locked write for the caller's SQLite
+//     lock budget. N is profile.SQLiteBusy() in milliseconds, 500 ms in the
+//     production profile. A caller that creates more overlap than production
+//     passes a wider profile instead of changing this default.
 //   - synchronous(NORMAL)    durable under WAL without an fsync per commit
 //   - foreign_keys(ON)       enforce FK constraints (provenance relies on them)
 //   - _txlock=immediate      BEGIN IMMEDIATE so a write txn holds the lock from
@@ -49,12 +52,12 @@ func SharedDSNWithProfile(path string, profile timeouts.Profile) string {
 // it and without modifying any data. mode=ro prevents any write and prevents
 // file creation (SQLite returns SQLITE_CANTOPEN if the file does not exist).
 //
-// busy_timeout mirrors the writer DSN's 5 s auto-retry. WAL readers normally
+// busy_timeout mirrors the writer DSN's auto-retry. WAL readers normally
 // don't block on writers, but they can receive SQLITE_BUSY during wal-index
 // recovery or a checkpoint restart. The primary use case — reading status
 // while the daemon is actively writing — demands the same retry window as the
 // shared path; without it, those rare contention windows surface as raw lock
-// errors instead of a transparent 5 s retry.
+// errors instead of a transparent retry.
 func ReadOnlyDSN(path string) string {
 	return ReadOnlyDSNWithProfile(path, timeouts.ProductionProfile())
 }

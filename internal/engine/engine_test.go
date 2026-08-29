@@ -79,9 +79,14 @@ func runEpoch(t *testing.T, e *engine.Engine, epochId string, plan []engine.Adva
 	if err != nil {
 		t.Fatalf("RunWorkflow: %v", err)
 	}
-	final, err := h.GetResult(dbos.WithHandleTimeout(30 * time.Second))
+	// The ceiling comes from the engine's own timeout profile, not from a
+	// number written here. A literal in the test can drift below the windows
+	// the engine is allowed to use, and then the test reports a timeout for
+	// work that was still inside its budget. The production profile keeps the
+	// same 30-second wait this helper used before.
+	final, err := h.GetResult(dbos.WithHandleTimeout(e.Timeouts().WorkflowResult()))
 	if err != nil {
-		t.Fatalf("GetResult: %v", err)
+		t.Fatalf("GetResult after %s: %v", e.Timeouts().WorkflowResult(), err)
 	}
 	return final
 }

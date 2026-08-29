@@ -25,11 +25,13 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/config"
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/engine"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/hooks"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/testutil"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 
@@ -203,7 +205,7 @@ func TestResolvePasturedConfig_AuditTrailCLIOverridesEnv(t *testing.T) {
 
 func TestInitAuditTrail_Memory(t *testing.T) {
 	cfg := config.PasturedConfig{AuditTrail: types.BackendMemory}
-	trail, cache, closer, err := initAuditTrail(cfg)
+	trail, cache, closer, err := initAuditTrail(cfg, daemonTimeouts())
 	if err != nil {
 		t.Fatalf("initAuditTrail(memory): unexpected error: %v", err)
 	}
@@ -220,7 +222,7 @@ func TestInitAuditTrail_Memory(t *testing.T) {
 
 func TestInitAuditTrail_EmptyFallsBackToMemory(t *testing.T) {
 	cfg := config.PasturedConfig{AuditTrail: ""}
-	trail, cache, closer, err := initAuditTrail(cfg)
+	trail, cache, closer, err := initAuditTrail(cfg, daemonTimeouts())
 	if err != nil {
 		t.Fatalf("initAuditTrail(empty): unexpected error: %v", err)
 	}
@@ -242,7 +244,7 @@ func TestInitAuditTrail_Sqlite(t *testing.T) {
 		AuditDBPath: dbPath,
 	}
 
-	trail, cache, closer, err := initAuditTrail(cfg)
+	trail, cache, closer, err := initAuditTrail(cfg, daemonTimeouts())
 	if err != nil {
 		t.Fatalf("initAuditTrail(sqlite): %v", err)
 	}
@@ -273,7 +275,7 @@ func TestInitAuditTrail_Sqlite_DefaultPath(t *testing.T) {
 		AuditTrail:  types.BackendSqlite,
 		AuditDBPath: "",
 	}
-	trail, cache, closer, err := initAuditTrail(cfg)
+	trail, cache, closer, err := initAuditTrail(cfg, daemonTimeouts())
 	if err != nil {
 		t.Fatalf("initAuditTrail(sqlite, default path): %v", err)
 	}
@@ -294,7 +296,7 @@ func TestInitAuditTrail_Sqlite_DefaultPath(t *testing.T) {
 
 func TestInitAuditTrail_UnknownBackend(t *testing.T) {
 	cfg := config.PasturedConfig{AuditTrail: types.AuditTrailBackend("postgres")}
-	_, _, _, err := initAuditTrail(cfg)
+	_, _, _, err := initAuditTrail(cfg, daemonTimeouts())
 	if err == nil {
 		t.Fatal("expected error for unknown backend, got nil")
 	}
@@ -365,7 +367,7 @@ func TestNewEngineConfigWiresRecoveryConstantsAndHooks(t *testing.T) {
 	hooksMgr := hooks.NewManager()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	cfg := newEngineConfig("/tmp/pasture.db", 3, trail, nil, hooksMgr, logger)
+	cfg := newEngineConfig("/tmp/pasture.db", 3, trail, nil, hooksMgr, logger, daemonTimeouts())
 
 	if cfg.ExecutorID != engine.DefaultExecutorID {
 		t.Errorf("ExecutorID = %q, want engine.DefaultExecutorID %q", cfg.ExecutorID, engine.DefaultExecutorID)
@@ -441,7 +443,7 @@ func TestDaemonRuntimeClose_ReportsAWorkerThatOutlivedTheStopBudget(t *testing.T
 	var holdOnce sync.Once
 	defer close(released)
 
-	engCfg := newEngineConfig(testutil.GoldenUnifiedDBPath(t), 2, audit.NewInMemoryAuditTrail(), nil, hooks.NewManager(), logger)
+	engCfg := newEngineConfig(testutil.GoldenUnifiedDBPath(t), 2, audit.NewInMemoryAuditTrail(), nil, hooks.NewManager(), logger, daemonTimeouts())
 	engCfg.OnTransition = func(context.Context, string, *protocol.TransitionRecord, string) error {
 		holdOnce.Do(func() {
 			close(entered)
@@ -871,7 +873,7 @@ func TestAStopSignalLeavesTheWorkForTheNextStartToFinish(t *testing.T) {
 	release := func() { releaseOnce.Do(func() { close(released) }) }
 	defer release()
 
-	firstCfg := newEngineConfig(dbPath, 2, audit.NewInMemoryAuditTrail(), nil, hooks.NewManager(), logger)
+	firstCfg := newEngineConfig(dbPath, 2, audit.NewInMemoryAuditTrail(), nil, hooks.NewManager(), logger, daemonTimeouts())
 	firstCfg.OnTransition = func(context.Context, string, *protocol.TransitionRecord, string) error {
 		holdOnce.Do(func() {
 			close(entered)
@@ -923,7 +925,7 @@ func TestAStopSignalLeavesTheWorkForTheNextStartToFinish(t *testing.T) {
 	// A new daemon on the same database must finish what the first one left.
 	finished := make(chan struct{})
 	var finishOnce sync.Once
-	secondCfg := newEngineConfig(dbPath, 2, audit.NewInMemoryAuditTrail(), nil, hooks.NewManager(), logger)
+	secondCfg := newEngineConfig(dbPath, 2, audit.NewInMemoryAuditTrail(), nil, hooks.NewManager(), logger, daemonTimeouts())
 	secondCfg.OnTransition = func(_ context.Context, _ string, rec *protocol.TransitionRecord, _ string) error {
 		if rec.ToPhase == protocol.PhasePropose {
 			finishOnce.Do(func() { close(finished) })
@@ -982,7 +984,7 @@ func TestAbandonedStartupEndsWithoutFault(t *testing.T) {
 	})
 
 	t.Run("the abandoned step produced a daemon that must be closed", func(t *testing.T) {
-		cfg := newEngineConfig(testutil.GoldenUnifiedDBPath(t), 2, audit.NewInMemoryAuditTrail(), nil, hooks.NewManager(), logger)
+		cfg := newEngineConfig(testutil.GoldenUnifiedDBPath(t), 2, audit.NewInMemoryAuditTrail(), nil, hooks.NewManager(), logger, daemonTimeouts())
 		eng, err := engine.New(context.Background(), cfg)
 		if err != nil {
 			t.Fatalf("engine.New: %v", err)
@@ -997,4 +999,87 @@ func TestAbandonedStartupEndsWithoutFault(t *testing.T) {
 			t.Error("the abandoned daemon was left with an open database handle")
 		}
 	})
+}
+
+// TestInitAuditTrail_GivesTheDaemonTrailTheConfiguredLockBudget proves that the
+// daemon's timeout profile reaches the forensic trail it opens.
+//
+// This matters because of how the daemon wires the engine: it opens the trail
+// itself and passes it in as engine.Config.Trail. An engine that is GIVEN a
+// trail does not open one, so the engine's own timeout profile never reaches
+// that trail. Whoever opens the trail is therefore the only party that can
+// choose how long the daemon's forensic writes wait for the SQLite file lock,
+// and that party is this function. See
+// https://github.com/dayvidpham/pasture/issues/104.
+//
+// The proof is behaviour, and it does not depend on winning a race. Another
+// writer holds the file lock for the WHOLE call, so the write is certain to
+// fail; what the test reads is HOW LONG it waited before giving up. A trail
+// opened with the tight profile gives up after tens of milliseconds. A trail
+// that silently fell back to the production profile would wait half a second,
+// which is far outside the ceiling below.
+//
+// What this test does NOT do: it does not re-prove that the budget controls the
+// wait. That is proven once, in both directions, in
+// internal/engine/concurrency_spike_test.go.
+func TestInitAuditTrail_GivesTheDaemonTrailTheConfiguredLockBudget(t *testing.T) {
+	t.Parallel()
+
+	tight := timeouts.DeadlineTestProfile()
+	production := timeouts.ProductionProfile()
+	// Half the production budget: far above the tight budget the daemon was
+	// given, and far below the budget it would use if the profile were dropped.
+	ceiling := production.SQLiteBusy() / 2
+
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	cfg := config.PasturedConfig{AuditTrail: types.BackendSqlite, AuditDBPath: dbPath}
+	trail, _, closer, err := initAuditTrail(cfg, tight)
+	if err != nil {
+		t.Fatalf("initAuditTrail(sqlite, tight profile): %v", err)
+	}
+	if closer != nil {
+		t.Cleanup(func() {
+			if cerr := closer(); cerr != nil {
+				t.Errorf("close the daemon trail: %v", cerr)
+			}
+		})
+	}
+
+	// A second writer holds the file lock for the whole call below, so the
+	// forensic write cannot succeed and the only variable is the wait.
+	blocker, err := dbconn.OpenSharedDBWithProfile(dbPath, production)
+	if err != nil {
+		t.Fatalf("open the blocking writer on %q: %v", dbPath, err)
+	}
+	tx, err := blocker.Begin()
+	if err != nil {
+		blocker.Close()
+		t.Fatalf("take the SQLite write lock on %q: %v", dbPath, err)
+	}
+
+	start := time.Now()
+	writeErr := trail.RecordEvent(t.Context(), protocol.AuditEvent{
+		EpochId:   "daemon-lock-budget",
+		Phase:     protocol.PhaseElicit,
+		Role:      "supervisor",
+		EventType: protocol.EventPhaseTransition,
+		Payload:   map[string]any{"from": "request", "to": "elicit"},
+		Timestamp: time.Now().UTC(),
+	})
+	waited := time.Since(start)
+
+	if rerr := tx.Rollback(); rerr != nil {
+		t.Errorf("release the SQLite write lock: %v", rerr)
+	}
+	if cerr := blocker.Close(); cerr != nil {
+		t.Errorf("close the blocking writer: %v", cerr)
+	}
+
+	if writeErr == nil || !strings.Contains(writeErr.Error(), "database is locked") {
+		t.Fatalf("the forensic write returned %v while another writer held the lock for the whole call; want a database-is-locked failure", writeErr)
+	}
+	if waited > ceiling {
+		t.Errorf("the daemon trail waited %s for the file lock, above the ceiling of %s; it was opened with a budget of %s, so a wait this long means the daemon's profile did not reach the trail and it fell back to the production budget of %s",
+			waited, ceiling, tight.SQLiteBusy(), production.SQLiteBusy())
+	}
 }

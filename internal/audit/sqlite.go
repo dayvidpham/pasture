@@ -138,8 +138,9 @@ func NewSqliteAuditTrailWithOptions(dbPath string, opts ...SqliteAuditTrailOptio
 	// statement one. The cost is negligible — IMMEDIATE acquires the same
 	// lock DEFERRED would have lazily, just earlier.
 	// The shared DSN encodes the full concurrency contract as connection-string
-	// params (WAL, busy_timeout=5000, synchronous=NORMAL, foreign_keys=ON,
-	// _txlock=immediate), applied to every connection in the pool.
+	// params (WAL, the profile's busy_timeout, synchronous=NORMAL,
+	// foreign_keys=ON, _txlock=immediate), applied to every connection in the
+	// pool.
 	db, err := sql.Open("sqlite", dbconn.SharedDSNWithProfile(dbPath, cfg.timeouts))
 	if err != nil {
 		return nil, fmt.Errorf(
