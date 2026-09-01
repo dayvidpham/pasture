@@ -54,8 +54,26 @@ type HookLifecycleOrphansInput struct {
 // deadline and leave one more orphan behind. The counter would become a cause
 // of the thing it counts.
 func HookLifecycleOrphans(ctx context.Context, out io.Writer, in HookLifecycleOrphansInput, format string) (int, error) {
-	if ctx == nil || out == nil || (format != "text" && format != "json") {
-		return listResult(fmt.Errorf("count orphan lifecycle payloads: context, output, and format text|json are required"))
+	// The two refusals are separated because they have DIFFERENT READERS. A
+	// missing context or writer cannot be produced from a terminal; it is a
+	// wiring fault inside pasture, and naming it as one stops an operator
+	// hunting for a flag that does not exist. A refused format IS an operator
+	// mistake, so that refusal names the value it was given, the values it
+	// accepts, and what each one prints. The order of the checks is unchanged.
+	if ctx == nil || out == nil {
+		return listResult(fmt.Errorf(
+			"count orphan lifecycle payloads: pasture called the orphan report without a context or " +
+				"without an output writer, so nothing could be counted or printed. This is a wiring " +
+				"fault inside pasture (internal/handlers.HookLifecycleOrphans), not something a " +
+				"command line can cause; report it with the command you ran"))
+	}
+	if format != "text" && format != "json" {
+		return listResult(fmt.Errorf(
+			"count orphan lifecycle payloads: --format %q is not a format this command can print, "+
+				"so no store was opened and nothing was counted. The accepted values are text and "+
+				"json. Re-run with --format text to read the count with the sentence that says what "+
+				"it means, or --format json to read the same two fields as one object",
+			format))
 	}
 	tracker, err := tasks.OpenTaskTracker(in.DBPath)
 	if err != nil {
