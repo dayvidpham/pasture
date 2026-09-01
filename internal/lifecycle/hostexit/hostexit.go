@@ -332,26 +332,6 @@ type Fault struct {
 	Cause error
 }
 
-// ForFault maps an internal fault to the Outcome the host receives.
-//
-// The table is small and total:
-//
-//   - fail-open, any mode: continue, with the host's CONTINUE BYTES on stdout
-//     and the diagnostic on stderr.
-//   - fail-closed, a mode that blocks by exit code, WITH evidence: block, with
-//     nothing on stdout.
-//   - fail-closed, anything else: continue, exactly as fail-open.
-//
-// The second result is false when there is nothing to map: a nil cause, an
-// unset or invalid effective failure mode, an unset or invalid DECLARED failure
-// mode, an unset or invalid policy, an unset or invalid stage, or a
-// Continuation the caller never set. A false result is a
-// programming error at the call site, never a host outcome, so the caller must
-// treat it as one and must not fall through to a silent exit 0.
-//
-// ForFault never encodes a policy Deny. A Deny is an evaluated answer and goes
-// through ForDecision, where neither the fault policy nor missing evidence can
-// weaken it.
 // UnusableInputs names EVERY member of the fault that ForFault cannot use, in
 // the order the members are declared. An empty result means ForFault can map
 // the fault.
@@ -384,6 +364,26 @@ func (f Fault) UnusableInputs() []string {
 	return unusable
 }
 
+// ForFault maps an internal fault to the Outcome the host receives.
+//
+// The table is small and total:
+//
+//   - fail-open, any mode: continue, with the host's CONTINUE BYTES on stdout
+//     and the diagnostic on stderr.
+//   - fail-closed, a mode that blocks by exit code, WITH evidence: block, with
+//     nothing on stdout.
+//   - fail-closed, anything else: continue, exactly as fail-open.
+//
+// The second result is false when there is nothing to map: a nil cause, an
+// unset or invalid effective failure mode, an unset or invalid DECLARED failure
+// mode, an unset or invalid policy, an unset or invalid stage, or a
+// Continuation the caller never set. A false result is a
+// programming error at the call site, never a host outcome, so the caller must
+// treat it as one and must not fall through to a silent exit 0.
+//
+// ForFault never encodes a policy Deny. A Deny is an evaluated answer and goes
+// through ForDecision, where neither the fault policy nor missing evidence can
+// weaken it.
 func ForFault(fault Fault) (Outcome, bool) {
 	if len(fault.UnusableInputs()) > 0 {
 		return Outcome{}, false

@@ -703,3 +703,110 @@ func TestTheDocumentedFaultRuleCannotBeSilentlyReverted(t *testing.T) {
 // oneLine collapses every run of whitespace to one space, so a pinned sentence
 // is compared as a sentence and not as a set of wrapped lines.
 func oneLine(text string) string { return strings.Join(strings.Fields(text), " ") }
+
+// declaredDoc returns the doc comment Go ATTACHES to one declaration of
+// hostexit.go, whitespace-normalized. The name is either a plain function name
+// ("ForFault") or a method written as receiver and method ("Fault.UnusableInputs").
+//
+// It reads the doc through the same rule the go tool uses — the comment group
+// the parser binds to the declaration node — so what it returns is what
+// "go doc <name>" prints. A guard built on file.Comments cannot do this: that
+// slice holds every comment group in lexical order and says nothing about
+// which declaration each group belongs to.
+func declaredDoc(t *testing.T, name string) string {
+	t.Helper()
+
+	file, err := parser.ParseFile(token.NewFileSet(), "hostexit.go", nil, parser.ParseComments)
+	require.NoError(t, err, "the package source must be readable beside its test")
+
+	for _, declaration := range file.Decls {
+		function, isFunction := declaration.(*ast.FuncDecl)
+		if !isFunction {
+			continue
+		}
+		if declaredName(function) != name {
+			continue
+		}
+		if function.Doc == nil {
+			return ""
+		}
+		return oneLine(function.Doc.Text())
+	}
+
+	require.FailNowf(t, "declaration not found",
+		"hostexit.go declares no %s, so this guard is pinned to a name that no longer exists; "+
+			"rename the pin or restore the declaration", name)
+	return ""
+}
+
+// declaredName renders a function declaration as the name go doc is asked for:
+// "Fault.UnusableInputs" for a method, "ForFault" for a plain function.
+func declaredName(function *ast.FuncDecl) string {
+	if function.Recv == nil || len(function.Recv.List) == 0 {
+		return function.Name.Name
+	}
+	receiver := function.Recv.List[0].Type
+	if pointer, isPointer := receiver.(*ast.StarExpr); isPointer {
+		receiver = pointer.X
+	}
+	identifier, isIdentifier := receiver.(*ast.Ident)
+	if !isIdentifier {
+		return function.Name.Name
+	}
+	return identifier.Name + "." + function.Name.Name
+}
+
+// TestTheFaultTableIsDocumentedOnTheExitAuthorityItself asserts that the
+// normative fault table is ATTACHED TO ForFault, and not to a neighbouring
+// helper.
+//
+// It exists because of a defect no other guard in this tree could see. A method
+// was inserted between the ForFault doc comment and "func ForFault" with no
+// blank line, so the parser read ONE comment group and bound the whole exit
+// contract to the method: "go doc ForFault" printed the signature and nothing
+// else, while "go doc Fault.UnusableInputs" printed the fail-open / fail-closed
+// table and the warning against a silent exit 0. The sole exit authority of
+// this tree had no documentation, and the warning that guards the silent-exit-0
+// defect was filed under a helper that lists field names. gofmt does not flag
+// that, go vet does not flag it, and the package-doc guard beside this one
+// cannot: it reads comments AS TEXT — the package doc, then every comment group
+// in the file concatenated — so neither of its checks knows WHICH declaration a
+// comment belongs to. This guard reads them AS ATTACHED DOCUMENTATION instead,
+// which is the only way the difference is visible.
+//
+// MUTATION: move Fault.UnusableInputs back between the ForFault doc block and
+// "func ForFault", or delete the blank line between the two blocks. The
+// Contains assertions turn RED because ForFault's attached doc becomes empty,
+// and the NotContains assertions turn RED because the helper inherits the exit
+// contract.
+func TestTheFaultTableIsDocumentedOnTheExitAuthorityItself(t *testing.T) {
+	t.Parallel()
+
+	authority := declaredDoc(t, "ForFault")
+	for phrase, why := range map[string]string{
+		"must not fall through to a silent exit 0": "the warning against the founding defect of " +
+			"this package must be attached to the function that decides the exit, because that is " +
+			"where a caller of it reads",
+		"fail-closed, a mode that blocks by exit code, WITH evidence: block": "the fault table is " +
+			"the only normative statement of when this tree blocks a host, and it must document " +
+			"the function that applies it",
+		"A Deny is an evaluated answer": "the rule that keeps a policy Deny out of the fault path " +
+			"must be attached to the fault path it is a rule about",
+	} {
+		assert.Contains(t, authority, phrase, why)
+	}
+
+	helper := declaredDoc(t, "Fault.UnusableInputs")
+	assert.Contains(t, helper, "names EVERY member of the fault that ForFault cannot use",
+		"the helper must keep its own documentation, so that moving the exit contract off it does "+
+			"not leave it undocumented in turn")
+	for phrase, why := range map[string]string{
+		"must not fall through to a silent exit 0": "the helper reports which inputs were wrong; " +
+			"it decides no exit, so a reader who meets this warning here is sent to the wrong symbol",
+		"fail-closed, a mode that blocks by exit code, WITH evidence: block": "the helper applies " +
+			"no part of the fault table, and documenting the table on it is exactly the defect " +
+			"this guard exists to catch",
+	} {
+		assert.NotContains(t, helper, phrase, why)
+	}
+}
