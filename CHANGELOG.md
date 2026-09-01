@@ -23,10 +23,12 @@
   watching. When pasture cannot evaluate an event it now answers with that
   host's own "carry on" bytes and puts the reason on standard error, so your
   action proceeds. On Claude Code the "carry on" answer is still no output at
-  all, so nothing changes there. If you read hook output while debugging an
-  integration, note that these bytes say only "do not stop on our account":
-  they are not a decision, and the invocation that wrote them is recorded as a
-  fault.
+  all, so nothing changes there. On OpenCode this applies to the events a plugin
+  callback waits on; the OpenCode event stream is only watched, nothing there
+  reads standard output, and a failure on it writes nothing, which is what a
+  success on it writes. If you read hook output while debugging an integration,
+  note that these bytes say only "do not stop on our account": they are not a
+  decision, and the invocation that wrote them is recorded as a fault.
 - One whole hook invocation is now bounded at 5 seconds. Measured against a
   database held under a write lock, a hook took about 31 seconds to return,
   which is more than three times the 10-second budget Claude Code gives a hook,
