@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -281,74 +282,102 @@ func TestAWiringFaultIsNamedAsOneAndNotAsAnOperatorMistake(t *testing.T) {
 // most. The read command is the only home where the measurement cannot perturb
 // the measurement.
 //
-// THE SCOPE IS A GLOB, NOT A LIST OF FILENAMES, and that is the whole point of
-// this version. A named deny list only guards the sources that existed when it
-// was written, so a hook-path source ADDED LATER escapes it in SILENCE, and a
-// guard that goes quiet as the code grows is worse than none: it reads as
-// covered. A named list is also a truth claim about each file it names, and
-// this one was wrong — it called `context` and `lineage` "the hook path" when
-// both are READ commands, printing committed lineage and disclosing bounded
-// context.
+// THE SCOPE IS THE WHOLE REPOSITORY, NOT A LIST OF FILENAMES AND NOT TWO
+// PACKAGES. A named deny list only guards the sources that existed when it was
+// written, so a hook-path source ADDED LATER escapes it in SILENCE, and a guard
+// that goes quiet as the code grows is worse than none: it reads as covered. A
+// named list is also a truth claim about each file it names, and this one was
+// wrong - it called `context` and `lineage` "the hook path" when both are READ
+// commands, printing committed lineage and disclosing bounded context.
+//
+// A GLOB OVER TWO PACKAGES HAD THE SAME HOLE IN A SMALLER SHAPE. The count is
+// a method on a store, so any package that holds the store can call it: the
+// symbol added to internal/lifecycle/nativeresponse, or to
+// internal/tasks/lifecycle_identity.go, left the two-package version GREEN.
+// Reasoning about WHICH package could one day host a hook-path caller is the
+// same losing game as naming files, so the walk covers every Go source in the
+// repository and takes exactly two exemptions.
 //
 // So the claim is inverted into one that stays true as sources are added: the
-// count is reached from EXACTLY ONE production source, the orphans handler, and
-// from nowhere else in the command package or the handler package. Every new
-// source in either package is covered the day it is written, whether it is on
-// the hook path or beside it, and nothing has to be remembered.
+// count is DEFINED in one place and CALLED from exactly one production source,
+// the orphans handler, and from nowhere else in the repository. Every new
+// source anywhere is covered the day it is written, whether it is on the hook
+// path or beside it, and nothing has to be remembered.
 //
-// MUTATION: call blobs.ReclaimableCount from any other production source in
-// cmd/pasture or internal/handlers - the lifecycle dispatch handler is the
-// example that matters - and this test turns RED naming that file.
+// MUTATION: call blobs.ReclaimableCount from any other production source - the
+// lifecycle dispatch handler, internal/lifecycle/nativeresponse and
+// internal/tasks/lifecycle_identity.go are the three the two-package version
+// missed - and this test turns RED naming that file. Each was added and
+// removed in turn, and each turned it RED.
 func TestTheOrphanCountLivesOnlyOnTheOrphansReadSurface(t *testing.T) {
 	t.Parallel()
 
-	// The single home of the count, named by PATH and not by base name, so the
-	// exemption cannot spread to a same-named file in the other package.
-	readSurface := filepath.Join("..", "..", "internal", "handlers", "hook_lifecycle_orphans.go")
-	exempted := 0
+	repository := filepath.Join("..", "..")
+
+	// The two exemptions, named by PATH and not by base name, so an exemption
+	// cannot spread to a same-named file in another package. One DEFINES the
+	// count; the other is its single production CALLER.
+	exemptions := map[string]bool{
+		filepath.Join(repository, "internal", "lifecycle", "receipt", "journal.go"):    false,
+		filepath.Join(repository, "internal", "handlers", "hook_lifecycle_orphans.go"): false,
+	}
 	// Offending file NAMES are collected, and the assertion reads the names.
 	// Asserting on each file BODY would print a whole source file into the
 	// failure, which buries the one fact the reader needs.
 	counting := []string{}
 	walked := 0
 
-	for _, directory := range []string{".", filepath.Join("..", "..", "internal", "handlers")} {
-		sources, err := filepath.Glob(filepath.Join(directory, "*.go"))
-		require.NoError(t, err)
-		require.NotEmpty(t, sources, "%s must contain production sources, or this guard reads nothing", directory)
-
-		for _, name := range sources {
-			if strings.HasSuffix(name, "_test.go") {
-				continue
-			}
-			if filepath.Clean(name) == readSurface {
-				exempted++
-				continue
-			}
-			body, err := os.ReadFile(name)
-			require.NoError(t, err, "every production source of these two packages must be readable")
-			walked++
-			if strings.Contains(string(body), "ReclaimableCount") {
-				counting = append(counting, name)
-			}
+	require.NoError(t, filepath.WalkDir(repository, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-	}
+		if entry.IsDir() {
+			// A checkout carries directories that are not this module's
+			// sources. Walking them costs time and can only produce a name
+			// nobody can act on.
+			switch entry.Name() {
+			case ".git", "testdata", "legacy", "node_modules":
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		clean := filepath.Clean(path)
+		if _, exempt := exemptions[clean]; exempt {
+			exemptions[clean] = true
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		walked++
+		if strings.Contains(string(body), "ReclaimableCount") {
+			counting = append(counting, clean)
+		}
+		return nil
+	}), "every production source of the repository must be readable, or the guard is reading less than it claims")
 
 	assert.Empty(t, counting,
 		"these sources must not count orphans. The count belongs to the orphans read surface alone: "+
 			"anywhere on the hook path it would spend the invocation deadline reading the very store "+
 			"that contends, and a slow enough count leaves one more orphan behind")
-	// MUTATION: point either glob at a directory with no production source, or
-	// narrow the walk back to a handful of named files, and this turns RED. It
-	// guards the guard: an empty or tiny scope passes every other assertion
-	// here while reading almost nothing, which is the exact way the deny-list
-	// version went quiet.
-	assert.Greater(t, walked, 10,
-		"the glob must actually reach the production sources of both packages; a scope that walked "+
-			"almost nothing would pass while guarding nothing")
+	// MUTATION: point the walk at a directory with no production source, or
+	// narrow it back to a handful of named files or two packages, and this
+	// turns RED. It guards the guard: a small scope passes every other
+	// assertion here while reading almost nothing, which is the exact way the
+	// deny-list version went quiet, and the two-package version after it.
+	assert.Greater(t, walked, 300,
+		"the walk must actually reach the production sources of the whole repository; a scope that "+
+			"covered only a package or two would pass while leaving every other package free to "+
+			"call the count")
 
-	assert.Equal(t, 1, exempted,
-		"the one exempted source must actually have been walked; if the read surface is renamed or "+
-			"moved the exemption silently stops matching, and the guard would then look stricter "+
-			"than it is while the real home of the count goes unnamed")
+	for path, reached := range exemptions {
+		assert.True(t, reached,
+			"the exempted source %s was never walked; if it is renamed or moved the exemption "+
+				"silently stops matching, and the guard would then look stricter than it is while "+
+				"a real home of the count goes unnamed", path)
+	}
 }
