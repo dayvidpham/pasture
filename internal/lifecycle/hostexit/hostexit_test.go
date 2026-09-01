@@ -207,24 +207,30 @@ func TestForFaultRefusesWhenThereIsNothingToMap(t *testing.T) {
 	blocks := pastureruntime.FailureExitTwoBlocks
 
 	tests := []struct {
-		name  string
+		name string
+		// named is the sentence UnusableInputs must produce for this case. It
+		// is written per case because the whole point of the list is that the
+		// caller can say WHICH input was wrong: six conditions produce one
+		// refusal, and a message that names the wrong one sends the reader to a
+		// field that was fine.
+		named string
 		fault hostexit.Fault
 	}{
-		{name: "nil cause", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailClosed, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation}},
-		{name: "unset mode", fault: hostexit.Fault{DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailClosed, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
-		{name: "mode above the last arm", fault: hostexit.Fault{Mode: pastureruntime.FailureObserveOnly + 1, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
+		{name: "nil cause", named: "the cause is nil, so there is no fault to report", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailClosed, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation}},
+		{name: "unset mode", named: "the effective failure mode is unset or not a known mode", fault: hostexit.Fault{DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailClosed, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
+		{name: "mode above the last arm", named: "the effective failure mode is unset or not a known mode", fault: hostexit.Fault{Mode: pastureruntime.FailureObserveOnly + 1, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
 		// The DECLARED mode is refused on the same terms as the effective one.
 		// It is required because a defaulted declaration is exactly how the
 		// fault text came to call a demoted row's mode "declared": a zero value
 		// there would silently pick the wrong sentence for a blocking gate, and
 		// nothing downstream could tell.
-		{name: "unset declared mode", fault: hostexit.Fault{Mode: blocks, Evidence: evidence, Policy: hostexit.FaultFailClosed, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
-		{name: "declared mode above the last arm", fault: hostexit.Fault{Mode: blocks, DeclaredMode: pastureruntime.FailureObserveOnly + 1, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
-		{name: "unset policy", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
-		{name: "policy above the last arm", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailClosed + 1, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
-		{name: "unset stage", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Continuation: continuation, Cause: fault}},
-		{name: "stage above the last arm", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageRecordUnknown + 1, Continuation: continuation, Cause: fault}},
-		{name: "continuation never set", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageNotRecorded, Cause: fault}},
+		{name: "unset declared mode", named: "the declared failure mode is unset or not a known mode", fault: hostexit.Fault{Mode: blocks, Evidence: evidence, Policy: hostexit.FaultFailClosed, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
+		{name: "declared mode above the last arm", named: "the declared failure mode is unset or not a known mode", fault: hostexit.Fault{Mode: blocks, DeclaredMode: pastureruntime.FailureObserveOnly + 1, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
+		{name: "unset policy", named: "the fault policy is unset or not a known policy", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
+		{name: "policy above the last arm", named: "the fault policy is unset or not a known policy", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailClosed + 1, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
+		{name: "unset stage", named: "the fault stage is unset or not a known stage", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Continuation: continuation, Cause: fault}},
+		{name: "stage above the last arm", named: "the fault stage is unset or not a known stage", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageRecordUnknown + 1, Continuation: continuation, Cause: fault}},
+		{name: "continuation never set", named: "the host continuation was never set, so there are no proceed bytes to emit", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageNotRecorded, Cause: fault}},
 	}
 	for _, test := range tests {
 		test := test
@@ -234,8 +240,39 @@ func TestForFaultRefusesWhenThereIsNothingToMap(t *testing.T) {
 			assert.False(t, ok, "there is nothing to map, so the result must be refused")
 			assert.Equal(t, hostexit.ExitStatusUnset, outcome.Exit,
 				"a refused mapping must not hand back a usable exit status")
+
+			// The refusal and its explanation come from ONE function, so a
+			// caller can print the reason and cannot describe a condition
+			// other than the one that happened.
+			unusable := test.fault.UnusableInputs()
+			assert.Equal(t, []string{test.named}, unusable,
+				"the refusal must name the one input that was not usable, and no other")
 		})
 	}
+}
+
+// TestAUsableFaultNamesNoUnusableInput is the other half of the refusal
+// contract: a fault ForFault CAN map must name nothing, or the caller would
+// print a reason for a fault that was fine.
+//
+// MUTATION: make any arm of UnusableInputs report on a valid value — for
+// example append when the stage IS valid. This test turns RED.
+func TestAUsableFaultNamesNoUnusableInput(t *testing.T) {
+	t.Parallel()
+
+	usable := hostexit.Fault{
+		Mode:         pastureruntime.FailureExitTwoBlocks,
+		DeclaredMode: pastureruntime.FailureExitTwoBlocks,
+		Evidence:     pastureruntime.FailureEvidence{Source: citedSource},
+		Policy:       hostexit.FaultFailClosed,
+		Stage:        hostexit.FaultStageNotRecorded,
+		Continuation: hostexit.ContinuationOf(openCodeProceed),
+		Cause:        errors.New("boom"),
+	}
+	_, ok := hostexit.ForFault(usable)
+	require.True(t, ok, "this fault carries every input, so it must map")
+	assert.Empty(t, usable.UnusableInputs(),
+		"a fault that maps has no unusable input to name")
 }
 
 // TestContinuationZeroValueIsUnusable pins the reason Continuation is a value

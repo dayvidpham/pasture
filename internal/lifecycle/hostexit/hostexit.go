@@ -352,9 +352,40 @@ type Fault struct {
 // ForFault never encodes a policy Deny. A Deny is an evaluated answer and goes
 // through ForDecision, where neither the fault policy nor missing evidence can
 // weaken it.
+// UnusableInputs names EVERY member of the fault that ForFault cannot use, in
+// the order the members are declared. An empty result means ForFault can map
+// the fault.
+//
+// It exists so that a caller which meets the false result can SAY WHICH INPUT
+// WAS WRONG. Six separate conditions produce that result, and a message that
+// names one of them — or names the whole struct — sends the reader to the wrong
+// field. ForFault itself asks this function, so the refusal and the explanation
+// can never describe different conditions.
+func (f Fault) UnusableInputs() []string {
+	var unusable []string
+	if !f.Mode.IsValid() {
+		unusable = append(unusable, "the effective failure mode is unset or not a known mode")
+	}
+	if !f.DeclaredMode.IsValid() {
+		unusable = append(unusable, "the declared failure mode is unset or not a known mode")
+	}
+	if !f.Policy.IsValid() {
+		unusable = append(unusable, "the fault policy is unset or not a known policy")
+	}
+	if !f.Stage.IsValid() {
+		unusable = append(unusable, "the fault stage is unset or not a known stage")
+	}
+	if !f.Continuation.IsSet() {
+		unusable = append(unusable, "the host continuation was never set, so there are no proceed bytes to emit")
+	}
+	if f.Cause == nil {
+		unusable = append(unusable, "the cause is nil, so there is no fault to report")
+	}
+	return unusable
+}
+
 func ForFault(fault Fault) (Outcome, bool) {
-	if fault.Cause == nil || !fault.Mode.IsValid() || !fault.DeclaredMode.IsValid() ||
-		!fault.Policy.IsValid() || !fault.Stage.IsValid() || !fault.Continuation.IsSet() {
+	if len(fault.UnusableInputs()) > 0 {
 		return Outcome{}, false
 	}
 

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -335,7 +336,7 @@ func lifecycleFault(
 	stage hostexit.FaultStage,
 	cause error,
 ) hostexit.Outcome {
-	outcome, mapped := hostexit.ForFault(hostexit.Fault{
+	rawFault := hostexit.Fault{
 		Mode:         failure.Mode,
 		DeclaredMode: failure.DeclaredMode,
 		Evidence:     failure.Evidence,
@@ -343,25 +344,45 @@ func lifecycleFault(
 		Stage:        stage,
 		Continuation: continuation,
 		Cause:        cause,
-	})
+	}
+	unusableFaultInputs := rawFault.UnusableInputs()
+	outcome, mapped := hostexit.ForFault(rawFault)
 	if !mapped {
 		// Unreachable with a real cause, a declared mode and a parsed policy.
 		// It is handled anyway, because the one thing this command may never do
 		// is exit 0 in silence: the host would read that as a proceed.
+		//
+		// The message NAMES THE INPUTS THAT WERE NOT USABLE rather than
+		// guessing at one. Six inputs can produce this refusal, and the list
+		// comes from the same function the refusal itself uses, so the sentence
+		// cannot describe a different condition from the one that happened.
 		outcome = hostexit.Outcome{
-			Exit: hostexit.ExitNonBlockingError,
-			Stderr: fmt.Sprintf(
-				"pasture hook lifecycle could not classify a fault on event %q of harness %q, "+
-					"because the declared failure mode or the fault policy was not usable; "+
-					"this happened in lifecycleFault (cmd/pasture/hook_lifecycle.go) after the event "+
-					"coordinates were read; the host is not blocked and this event was not evaluated; "+
-					"report this with the cause below, which is: %v",
-				coords.Event, coords.Harness, cause),
+			Exit:   hostexit.ExitNonBlockingError,
+			Stderr: unclassifiableFaultDiagnostic(coords, unusableFaultInputs, cause),
 		}
 	}
 
 	recordLifecycleFault(cmd, coords, failure, policy, stage, outcome, cause)
 	return outcome
+}
+
+// unclassifiableFaultDiagnostic composes the message for a fault the exit
+// authority could not map.
+//
+// It NAMES THE INPUTS THAT WERE NOT USABLE. The list is produced by
+// hostexit.Fault.UnusableInputs, the same function the refusal itself uses, so
+// the sentence cannot describe a condition other than the one that happened.
+// The message used to say "the declared failure mode or the fault policy was
+// not usable", which names one field of six and reads as an accusation against
+// the declared mode in particular.
+func unclassifiableFaultDiagnostic(coords lifecycleCoordinates, unusable []string, cause error) string {
+	return fmt.Sprintf(
+		"pasture hook lifecycle could not classify a fault on event %q of harness %q, "+
+			"because these inputs of the fault were not usable: %s; "+
+			"this happened in lifecycleFault (cmd/pasture/hook_lifecycle.go) after the event "+
+			"coordinates were read; the host is not blocked and this event was not evaluated; "+
+			"report this with the cause below, which is: %v",
+		coords.Event, coords.Harness, strings.Join(unusable, "; "), cause)
 }
 
 // recordLifecycleFault appends one JSON line describing the fault. Every error
@@ -387,15 +408,24 @@ func recordLifecycleFault(
 		// file cannot be mistaken for a record of decisions: emitting the
 		// host's continue bytes under fail-open is NOT an evaluated proceed,
 		// and this member is what says so where a later reader meets it.
-		"outcomeClass":   lifecycleFaultOutcomeClass,
-		"harness":        string(coords.Harness),
-		"event":          coords.Event,
-		"hostVersion":    coords.HostVersion,
-		"failureMode":    failure.Mode.String(),
-		"failureCitedBy": failure.Evidence.Source,
-		"faultPolicy":    policy.String(),
-		"faultStage":     stage.String(),
-		"hostExit":       outcome.Exit.String(),
+		"outcomeClass": lifecycleFaultOutcomeClass,
+		"harness":      string(coords.Harness),
+		"event":        coords.Event,
+		"hostVersion":  coords.HostVersion,
+		// failureMode is the EFFECTIVE mode, the one that decided the host
+		// exit. declaredFailureMode is what the host contract DECLARES for the
+		// row, before the failure-evidence rule demotes an uncited blocking
+		// gate. BOTH are written because the record outlives the process: with
+		// the effective mode alone, a demoted gate and a row that was always
+		// report-and-continue are byte-identical here, although they need
+		// opposite maintainer action — the first becomes able to block once
+		// somebody supplies the host citation, the second never blocks.
+		"failureMode":         failure.Mode.String(),
+		"declaredFailureMode": failure.DeclaredMode.String(),
+		"failureCitedBy":      failure.Evidence.Source,
+		"faultPolicy":         policy.String(),
+		"faultStage":          stage.String(),
+		"hostExit":            outcome.Exit.String(),
 		// hostContinuation is the exact byte body the host was given so that
 		// it could carry on. It is recorded because on OpenCode and Codex the
 		// proceed is a byte shape, and a reader must be able to see that these
