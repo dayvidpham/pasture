@@ -141,11 +141,25 @@ func TestNativeHelpGoldenBytesUnchanged(t *testing.T) {
 		{name: "hook-lifecycle-list", cmdPath: []string{"hook", "lifecycle", "list"}, golden: "hook-lifecycle-list.txt"},
 		{name: "hook-lifecycle-lineage", cmdPath: []string{"hook", "lifecycle", "lineage"}, golden: "hook-lifecycle-lineage.txt"},
 		{name: "hook-lifecycle-context", cmdPath: []string{"hook", "lifecycle", "context"}, golden: "hook-lifecycle-context.txt"},
+		{name: "hook-lifecycle-orphans", cmdPath: []string{"hook", "lifecycle", "orphans"}, golden: "hook-lifecycle-orphans.txt"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := []byte(renderHelp(t, tc.cmdPath...))
 			goldenPath := filepath.Join(goldenDir, tc.golden)
+			// UPDATE_GOLDEN=1 recaptures the baseline. It is the escape this
+			// test has always named in its failure message, implemented here so
+			// the message is true: a landing wave that adds a subcommand needs
+			// it, and a reader told to run a command that does nothing would
+			// hand-edit the bytes instead, which is how a golden stops meaning
+			// anything. It writes only when asked, so an ordinary run can never
+			// bless a diff by accident.
+			if os.Getenv("UPDATE_GOLDEN") == "1" {
+				if err := os.WriteFile(goldenPath, got, 0o644); err != nil {
+					t.Fatalf("recapture golden %s: %v", goldenPath, err)
+				}
+				return
+			}
 			want, err := os.ReadFile(goldenPath)
 			if err != nil {
 				t.Fatalf("read golden %s: %v (run UPDATE_GOLDEN=1 go test ./cmd/pasture to (re)capture)", goldenPath, err)

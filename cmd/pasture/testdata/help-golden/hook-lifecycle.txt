@@ -9,6 +9,7 @@ Available Commands:
   lineage     Materialize and print the committed occurrence lineage for one native identity binding
   list        List recorded lifecycle events
   manifest    Show the active lifecycle metamodel manifest and whether it is journaled
+  orphans     Count the payload blobs that no recorded occurrence names
   raw         Ingest a raw lifecycle event (imports and migration; not the default path)
 
 Flags:

@@ -1,0 +1,28 @@
+Count the payload blobs that no recorded occurrence names.
+
+An orphan is a payload blob that no recorded occurrence names. One is left
+behind by a hook invocation that was abandoned between its two durable writes,
+and at most one arises per abandoned invocation. It is expected and reclaimable,
+not damage: the blob is written before the journal row deliberately, because a
+spare blob can be reclaimed later while a journal row naming an absent blob
+could not be repaired at all.
+
+A large number does not mean the store is corrupt. It means invocations were
+abandoned repeatedly, so the thing to investigate is the store contention that
+caused the abandonment.
+
+The command deletes nothing and changes no journal truth. It rebuilds the
+disposable occurrence projection from the journal before counting, because a
+count taken against a projection that was never rebuilt would report every blob
+as an orphan.
+
+Usage:
+  pasture hook lifecycle orphans [flags]
+
+Flags:
+      --format string   Output format: text or json (default "text")
+  -h, --help            help for orphans
+
+Global Flags:
+      --db string          Path to the unified pasture SQLite database (env: PASTURE_DB_PATH, default: ~/.local/share/pasture/pasture.db)
+      --namespace string   Namespace URI for created tasks (default: derived from git remote, then file:// of cwd)
