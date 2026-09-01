@@ -650,11 +650,25 @@ func TestWithheldOpenCodeEventIsNotAdmittedByBuiltCLI(t *testing.T) {
 	command.Stderr = &stderr
 	require.NoError(t, command.Run(), stderr.String())
 	// A withheld event is a FAULT, and the fail-open default must not stop the
-	// host. On OpenCode a proceed is a byte shape the generated plugin
-	// validates, so the hook emits it; an empty body would make a named
-	// callback throw and abort the user's action.
-	require.Equal(t, `{"decision":"proceed"}`, stdout.String(),
-		"a withheld OpenCode event must let the host continue with the OpenCode proceed object")
+	// host. On OpenCode HOW a host is let through depends on the SURFACE of the
+	// event, not on the harness alone:
+	//
+	//   - A GATE reaches the plugin's NAMED-OUTPUT callback, which validates
+	//     exactly the canonical response object, so a gate fault emits those
+	//     bytes. That arm is pinned elsewhere in this command's tests.
+	//   - "session.updated" is an OBSERVATION on the catch-all event stream.
+	//     Nothing on that surface reads standard output at all, so there is no
+	//     reader to satisfy and no callback to abort. Writing a decision word
+	//     there would tell the host MORE after a failure than after a success,
+	//     because a SUCCESSFUL observation writes nothing.
+	//
+	// So the fault writes nothing, which is exactly what the success path
+	// writes. This is safe on both sides of the plugin version skew: an older
+	// plugin ignores observation output, and a newer one treats an empty body
+	// at exit 0 as "not evaluated, continue" and says so on standard error.
+	require.Empty(t, stdout.String(),
+		"a withheld OpenCode observation must say no more after a failure than after a success, "+
+			"and its surface has no reader of standard output to satisfy")
 	require.Contains(t, stderr.String(), `OpenCode event "session.updated" is withheld (reason outside-target-set)`)
 	tracker, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)
