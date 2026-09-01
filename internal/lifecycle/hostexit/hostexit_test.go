@@ -607,8 +607,11 @@ func evidenceName(evidence pastureruntime.FailureEvidence) string {
 //
 // The first is the rule a fail-open fault follows. An earlier rule said a fault
 // writes NO native continuation on every harness. That rule IS the defect this
-// package was changed to remove: on OpenCode an empty body at exit 0 makes the
-// generated plugin throw and stops the user's tool call. A later reader who
+// package was changed to remove: on OpenCode an empty body at exit 0 MADE the
+// generated plugin throw and stop the user's tool call. The plugin this build
+// generates no longer throws; the rule stands anyway, because PASTURE CANNOT
+// KNOW WHICH PLUGIN IS INSTALLED and an ALREADY-INSTALLED OLDER ONE STILL
+// THROWS. A later reader who
 // finds the fault bytes surprising, and who does not find the replaced rule
 // written down, would "restore" it and reopen the defect. So the replaced rule
 // and its replacement are both stated in the package doc, and this test fails
