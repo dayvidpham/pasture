@@ -67,7 +67,10 @@ func lifecycleFailurePolicy(coords lifecycleCoordinates) pastureruntime.Lifecycl
 	if policy, found := pastureruntime.LookupLifecycleFailure(coords.Harness, coords.Event); found {
 		return policy
 	}
-	return pastureruntime.LifecycleFailurePolicy{Mode: pastureruntime.FailureObserveOnly}
+	return pastureruntime.LifecycleFailurePolicy{
+		Mode:         pastureruntime.FailureObserveOnly,
+		DeclaredMode: pastureruntime.FailureObserveOnly,
+	}
 }
 
 var hookLifecycleCmd = &cobra.Command{
@@ -135,8 +138,11 @@ func lifecycleOutcome(
 	// defaults below: no harness, the observe-only policy and fail-open, which
 	// is the weakest claim the command can make.
 	var (
-		coords       lifecycleCoordinates
-		failure      = pastureruntime.LifecycleFailurePolicy{Mode: pastureruntime.FailureObserveOnly}
+		coords  lifecycleCoordinates
+		failure = pastureruntime.LifecycleFailurePolicy{
+			Mode:         pastureruntime.FailureObserveOnly,
+			DeclaredMode: pastureruntime.FailureObserveOnly,
+		}
 		policy       = hostexit.FaultFailOpen
 		continuation = hostexit.EmptyContinuation()
 	)
@@ -331,6 +337,7 @@ func lifecycleFault(
 ) hostexit.Outcome {
 	outcome, mapped := hostexit.ForFault(hostexit.Fault{
 		Mode:         failure.Mode,
+		DeclaredMode: failure.DeclaredMode,
 		Evidence:     failure.Evidence,
 		Policy:       policy,
 		Stage:        stage,

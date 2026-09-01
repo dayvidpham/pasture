@@ -266,6 +266,35 @@ func evidenceBoundFailure(
 	return blockingArm
 }
 
+// declaredFailureArm is the mode the host contract DECLARES for one row, BEFORE
+// the evidence rule of evidenceBoundFailure demotes it. The two functions take
+// the same arms and differ in exactly one way: this one does not consult the
+// evidence.
+//
+// It exists because the demotion DESTROYS a fact that a reader still needs. A
+// blocking row with no citation runs as report-and-continue, and after that
+// nothing downstream can tell it apart from a row that is declared
+// report-and-continue. Those two rows need OPPOSITE advice: the first one can
+// be made blocking by supplying the citation, the second one can never block at
+// all. Telling the first operator that the event "does not refuse through a
+// process exit code" is false about the declaration AND withholds the only
+// action available.
+//
+// So the row keeps BOTH modes: the effective one, which every behaviour obeys,
+// and the declared one, which only explanations read. Nothing may decide an
+// exit status from the declared mode; the evidence rule stays the sole gate of
+// a blocking exit.
+func declaredFailureArm(
+	blocking BlockingMode,
+	blockingArm FailureMode,
+	nonBlockingArm FailureMode,
+) FailureMode {
+	if blocking == NonBlocking {
+		return nonBlockingArm
+	}
+	return blockingArm
+}
+
 func (m FailureMode) String() string {
 	switch m {
 	case FailureReportAndContinue:
@@ -380,9 +409,15 @@ type LifecycleEventMapping struct {
 	mutation       MutationMode
 	order          HandlerOrder
 	reconciliation ReconciliationMode
-	failure        FailureMode
-	evidence       FailureEvidence
-	stopLoop       StopLoopPolicy
+	// failure is the EFFECTIVE mode, after the evidence rule.
+	failure FailureMode
+	// declaredFailure is the mode the host contract declares for the row,
+	// BEFORE the evidence rule. It equals failure on every row the rule does
+	// not demote. Read it only to explain a row to a person; never to choose an
+	// exit status.
+	declaredFailure FailureMode
+	evidence        FailureEvidence
+	stopLoop        StopLoopPolicy
 }
 
 func (m LifecycleEventMapping) NativeName() string                 { return m.nativeName }
@@ -393,8 +428,15 @@ func (m LifecycleEventMapping) Mutation() MutationMode             { return m.mu
 func (m LifecycleEventMapping) Order() HandlerOrder                { return m.order }
 func (m LifecycleEventMapping) Reconciliation() ReconciliationMode { return m.reconciliation }
 func (m LifecycleEventMapping) Failure() FailureMode               { return m.failure }
-func (m LifecycleEventMapping) Evidence() FailureEvidence          { return m.evidence }
-func (m LifecycleEventMapping) StopLoop() StopLoopPolicy           { return m.stopLoop }
+
+// DeclaredFailure is the mode the host contract declares for this row, before
+// the failure-evidence rule demotes an uncited blocking row. It is for
+// explaining the row to a person. Failure remains the mode every behaviour
+// obeys.
+func (m LifecycleEventMapping) DeclaredFailure() FailureMode { return m.declaredFailure }
+
+func (m LifecycleEventMapping) Evidence() FailureEvidence { return m.evidence }
+func (m LifecycleEventMapping) StopLoop() StopLoopPolicy  { return m.stopLoop }
 func (m LifecycleEventMapping) Identities() []NativeIdentityField {
 	return append([]NativeIdentityField(nil), m.identities...)
 }
@@ -413,7 +455,7 @@ func (m LifecycleEventMapping) validate(where string) error {
 	}
 	if !m.semantic.IsValid() || !m.surface.IsValid() || !m.blocking.IsValid() ||
 		!m.mutation.IsValid() || !m.order.IsValid() || !m.reconciliation.IsValid() ||
-		!m.failure.IsValid() || !m.stopLoop.IsValid() {
+		!m.failure.IsValid() || !m.declaredFailure.IsValid() || !m.stopLoop.IsValid() {
 		return runtimeError(
 			fmt.Sprintf("lifecycle event %q has an invalid semantic or native behavior enum", m.nativeName),
 			"every generation decision must be represented by a closed typed value",

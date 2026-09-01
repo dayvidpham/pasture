@@ -19,6 +19,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
@@ -50,10 +51,26 @@ type lifecycleRun struct {
 func runLifecycleHook(t *testing.T, binary, dbPath, event string, payload []byte, env ...string) lifecycleRun {
 	t.Helper()
 
+	return runLifecycleHookOn(t, binary, dbPath, "claude-code", event, "2.1.222", payload, env...)
+}
+
+// runLifecycleHookOn is runLifecycleHook with the harness and the host version
+// open. It exists because the fail-closed REASON has to be read on two
+// harnesses: the demotion that made the reason wrong applies to the Claude rows
+// and the Codex rows alike, so a proof on one harness alone would not show that
+// the fix reaches both.
+func runLifecycleHookOn(
+	t *testing.T,
+	binary, dbPath, harness, event, hostVersion string,
+	payload []byte,
+	env ...string,
+) lifecycleRun {
+	t.Helper()
+
 	command := exec.Command(binary,
 		databaseFlagName.Argument(), dbPath,
 		"hook", "lifecycle",
-		"--harness", "claude-code", "--event", event, "--host-version", "2.1.222")
+		"--harness", harness, "--event", event, "--host-version", hostVersion)
 	command.Stdin = bytes.NewReader(payload)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -823,4 +840,223 @@ func sourceOf(node ast.Expr) string {
 		return ""
 	}
 	return rendered.String()
+}
+
+// codexFixture reads one committed Codex host payload.
+func codexFixture(t *testing.T, name string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(
+		"..", "..", "internal", "lifecycle", "ingress", "codex", "testdata", "fixtures", name))
+	require.NoError(t, err)
+	return raw
+}
+
+// TestTheFailClosedReasonFollowsTheDeclaredModeThroughTheBuiltBinary is the
+// delivery proof of the fail-closed reason.
+//
+// WHY IT IS A BUILT-BINARY TEST AND NOT A UNIT TABLE. The first version of the
+// per-row reason keyed on the EFFECTIVE failure mode, which is the mode left
+// after the failure-evidence rule has demoted an uncited blocking row to
+// report-and-continue. A unit table proved that arm correct, because a unit
+// table can build a fault the production path CANNOT build: an uncited row
+// still carrying its blocking mode. On the real binary the evidence arm was
+// DEAD, and every declared-blocking gate with no citation read the sentence
+// written for a row that can never block. So the assertion has to start where
+// the operator does: at the process, with the real profile behind it.
+//
+// The rows below are the whole shape of the decision, and each is here for a
+// reason a reader can check:
+//
+//   - claude-code PreCompact and codex PreToolUse are DECLARED BLOCKING gates
+//     with NO citation. They are the rows the demotion hides. They must read
+//     the EVIDENCE reason, which is the one that carries an action: supply the
+//     citation and the row becomes able to block.
+//   - claude-code PostToolUse is declared NON-BLOCKING. It must read the mode
+//     reason, which is true of it and has no action, because no citation can
+//     ever make an observation refuse a tool call.
+//   - claude-code PreToolUse is declared blocking AND cited. It must still
+//     BLOCK, with exit code 2. It is here so that a fix aimed at the wording
+//     cannot quietly move the exit table.
+//
+// MUTATION, and it is the mutation that proves the arm is alive on the
+// production path: put panic("MUTATION") inside the evidence arm of
+// failClosedAdvice in internal/lifecycle/hostexit. This test turns RED on
+// claude-code PreCompact and on codex PreToolUse. Before the declared mode was
+// carried, the same panic left the whole built-binary suite GREEN.
+//
+// SECOND MUTATION: change fault.DeclaredMode.BlocksByExitCode() back to
+// fault.Mode.BlocksByExitCode(). The two declared-blocking rows then read the
+// mode reason and this test turns RED on both.
+//
+// THIRD MUTATION: make declaredFailureArm consult the evidence, the way
+// evidenceBoundFailure does. The declared mode collapses onto the effective one
+// and this test turns RED on the same two rows.
+func TestTheFailClosedReasonFollowsTheDeclaredModeThroughTheBuiltBinary(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "lifecycle-cli")
+	buildLifecycleBinary(t, binary)
+
+	const (
+		evidenceReason = "the event declares the blocking exit code but carries no host evidence for it"
+		evidenceAction = "add the host documentation or a committed capture showing the host refuses on that exit code"
+		modeReason     = "does not refuse through a process exit code"
+	)
+
+	tests := []struct {
+		name        string
+		harness     string
+		event       string
+		hostVersion string
+		payload     []byte
+		// wantDeclared is read from the shipped profile inside the subtest, so
+		// the case cannot drift away from the row it claims to cover.
+		wantDeclared pastureruntime.FailureMode
+		wantEvidence bool
+		wantExitCode int
+		wantReason   string
+		wantAbsent   string
+	}{
+		{
+			name:         "a declared blocking Claude gate with no citation reads the evidence reason",
+			harness:      "claude-code",
+			event:        "PreCompact",
+			hostVersion:  "2.1.222",
+			payload:      claudeFixture(t, "pre_compact_2_1_222.json"),
+			wantDeclared: pastureruntime.FailureExitTwoBlocks,
+			wantExitCode: 0,
+			wantReason:   evidenceReason,
+			wantAbsent:   modeReason,
+		},
+		{
+			name:         "a declared blocking Codex gate with no citation reads the evidence reason",
+			harness:      "codex",
+			event:        "PreToolUse",
+			hostVersion:  "0.146.0",
+			payload:      codexFixture(t, "pre_tool_use_0_146_0.json"),
+			wantDeclared: pastureruntime.FailureStrictExitTwoBlocks,
+			wantExitCode: 0,
+			wantReason:   evidenceReason,
+			wantAbsent:   modeReason,
+		},
+		{
+			name:         "a declared non-blocking Claude observation reads the mode reason",
+			harness:      "claude-code",
+			event:        "PostToolUse",
+			hostVersion:  "2.1.222",
+			payload:      claudeFixture(t, "post_tool_use_2_1_222.json"),
+			wantDeclared: pastureruntime.FailureReportAndContinue,
+			wantExitCode: 0,
+			wantReason:   modeReason,
+			wantAbsent:   evidenceReason,
+		},
+		{
+			name:         "a declared blocking Claude gate WITH a citation still refuses the operation",
+			harness:      "claude-code",
+			event:        "PreToolUse",
+			hostVersion:  "2.1.222",
+			payload:      claudeFixture(t, "pre_tool_use_2_1_222.json"),
+			wantDeclared: pastureruntime.FailureExitTwoBlocks,
+			wantEvidence: true,
+			wantExitCode: 2,
+			wantReason:   "the host refuses the operation",
+			wantAbsent:   "had no channel on this event",
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			row, found := pastureruntime.LookupLifecycleFailure(ir.HarnessID(test.harness), test.event)
+			require.True(t, found, "the row under test must be declared by this build")
+			require.Equal(t, test.wantDeclared, row.DeclaredMode,
+				"this case exists for a row with that DECLARED mode; if the profile changed, the case must be re-chosen, not re-labelled")
+			require.Equal(t, test.wantEvidence, row.Evidence.IsPresent(),
+				"the citation state is half of what chooses the reason, so the case pins it")
+
+			dir := t.TempDir()
+			run := runLifecycleHookOn(t, binary, unopenableDatabase(t, dir),
+				test.harness, test.event, test.hostVersion, test.payload, hookFailClosedEnv+"=1")
+
+			assert.Equal(t, test.wantExitCode, run.ExitCode,
+				"the wording of the reason must never move the exit table")
+			assert.Contains(t, run.Stderr, test.wantReason,
+				"the operator must read the reason that is TRUE of this row's DECLARATION")
+			assert.NotContains(t, run.Stderr, test.wantAbsent,
+				"the reason of the other kind of row is false here, and a false reason sends the operator to the wrong place")
+			if test.wantReason == evidenceReason {
+				assert.Contains(t, run.Stderr, evidenceAction,
+					"the evidence reason exists to hand the operator an ACTION; without it the row is only told bad news")
+			}
+		})
+	}
+}
+
+// TestTheDiagnosticSeparatesTheDeclaredModeFromTheEffectiveOne pins the phase
+// line of the fault diagnostic.
+//
+// The line used to print ONE mode and call it "declared failure mode", while
+// the value was the mode left after the evidence rule. For a demoted row that
+// single word was false. Both modes are now named, so a reader can see the
+// demotion itself rather than only its result.
+//
+// MUTATION: remove the "effective failure mode" clause from faultDiagnostic, or
+// print fault.Mode again after the word "declared". This test turns RED.
+func TestTheDiagnosticSeparatesTheDeclaredModeFromTheEffectiveOne(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "lifecycle-cli")
+	buildLifecycleBinary(t, binary)
+
+	dir := t.TempDir()
+	run := runLifecycleHookOn(t, binary, unopenableDatabase(t, dir),
+		"claude-code", "PreCompact", "2.1.222",
+		claudeFixture(t, "pre_compact_2_1_222.json"), hookFailClosedEnv+"=1")
+
+	assert.Contains(t, run.Stderr, "declared failure mode exit-2-blocks",
+		"the DECLARED mode of an uncited blocking gate is the blocking one, and the diagnostic must say so")
+	assert.Contains(t, run.Stderr, "effective failure mode report-and-continue",
+		"the mode the row actually runs as must be named too, or the demotion is invisible")
+}
+
+// TestEveryDeclaredRowDiffersFromItsEffectiveModeOnlyByTheEvidenceRule walks
+// every row of every shipped profile through the PUBLIC lookup.
+//
+// It is the guard on the new declared mode. A declared mode is only useful
+// while it is the mode the row would run as if it were cited; a row that set it
+// to anything else would put an arbitrary sentence in front of an operator, and
+// no other test would notice, because the effective mode still decides every
+// behaviour.
+//
+// MUTATION: give any row a declared mode that is not its harness arm — for
+// example set declaredFailure to FailureObserveOnly on the Claude rows — and
+// this test turns RED naming the row.
+func TestEveryDeclaredRowDiffersFromItsEffectiveModeOnlyByTheEvidenceRule(t *testing.T) {
+	t.Parallel()
+
+	rows := map[ir.HarnessID][]string{
+		ir.HarnessClaudeCode: {"SessionStart", "PreToolUse", "PreCompact", "Notification", "PostToolUse", "ElicitationResult"},
+		ir.HarnessCodex:      {"SessionStart", "PreToolUse", "Stop"},
+		ir.HarnessOpenCode:   {"session.created", "tool.execute.before"},
+	}
+	checked := 0
+	for harness, events := range rows {
+		for _, event := range events {
+			row, found := pastureruntime.LookupLifecycleFailure(harness, event)
+			require.True(t, found, "%s %s must be declared by this build", harness, event)
+			checked++
+
+			require.True(t, row.DeclaredMode.IsValid(),
+				"%s %s carries no declared mode, so its fault diagnostic could not name one", harness, event)
+			if row.DeclaredMode == row.Mode {
+				continue
+			}
+			assert.True(t, row.DeclaredMode.BlocksByExitCode(),
+				"%s %s runs as something other than it declares, and the ONLY rule allowed to do that is the failure-evidence rule, which acts on an exit-code arm", harness, event)
+			assert.False(t, row.Evidence.IsPresent(),
+				"%s %s was demoted although it cites evidence, which no rule permits", harness, event)
+			assert.Equal(t, pastureruntime.FailureReportAndContinue, row.Mode,
+				"%s %s was demoted to something other than report-and-continue", harness, event)
+		}
+	}
+	require.Greater(t, checked, 8,
+		"the walk must actually reach the rows; a lookup that found nothing would pass every assertion above while checking nothing")
 }

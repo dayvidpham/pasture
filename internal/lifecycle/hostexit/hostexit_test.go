@@ -81,7 +81,11 @@ func TestForFaultCoversEveryModePolicyAndEvidenceCell(t *testing.T) {
 			t.Parallel()
 
 			outcome, ok := hostexit.ForFault(hostexit.Fault{
-				Mode:         c.mode,
+				Mode: c.mode,
+				// The cell exercises the EXIT table, which reads the
+				// effective mode alone. A row whose declaration differs is
+				// covered where the difference matters, in the fault text.
+				DeclaredMode: c.mode,
 				Evidence:     c.evidence,
 				Policy:       c.policy,
 				Stage:        hostexit.FaultStageNotRecorded,
@@ -140,6 +144,7 @@ func TestFailOpenEmitsTheContinuationItWasGiven(t *testing.T) {
 			t.Parallel()
 			outcome, ok := hostexit.ForFault(hostexit.Fault{
 				Mode:         pastureruntime.FailureThrowFailFast,
+				DeclaredMode: pastureruntime.FailureThrowFailFast,
 				Policy:       hostexit.FaultFailOpen,
 				Stage:        hostexit.FaultStageNotRecorded,
 				Continuation: test.continuation,
@@ -170,6 +175,7 @@ func TestFailClosedHasNoChannelOnTheThrowingHost(t *testing.T) {
 
 	outcome, ok := hostexit.ForFault(hostexit.Fault{
 		Mode:         pastureruntime.FailureThrowFailFast,
+		DeclaredMode: pastureruntime.FailureThrowFailFast,
 		Evidence:     pastureruntime.FailureEvidence{Source: citedSource},
 		Policy:       hostexit.FaultFailClosed,
 		Stage:        hostexit.FaultStageNotRecorded,
@@ -198,19 +204,27 @@ func TestForFaultRefusesWhenThereIsNothingToMap(t *testing.T) {
 	fault := errors.New("boom")
 	evidence := pastureruntime.FailureEvidence{Source: citedSource}
 	continuation := hostexit.ContinuationOf(openCodeProceed)
+	blocks := pastureruntime.FailureExitTwoBlocks
 
 	tests := []struct {
 		name  string
 		fault hostexit.Fault
 	}{
-		{name: "nil cause", fault: hostexit.Fault{Mode: pastureruntime.FailureExitTwoBlocks, Evidence: evidence, Policy: hostexit.FaultFailClosed, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation}},
-		{name: "unset mode", fault: hostexit.Fault{Evidence: evidence, Policy: hostexit.FaultFailClosed, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
-		{name: "mode above the last arm", fault: hostexit.Fault{Mode: pastureruntime.FailureObserveOnly + 1, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
-		{name: "unset policy", fault: hostexit.Fault{Mode: pastureruntime.FailureExitTwoBlocks, Evidence: evidence, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
-		{name: "policy above the last arm", fault: hostexit.Fault{Mode: pastureruntime.FailureExitTwoBlocks, Evidence: evidence, Policy: hostexit.FaultFailClosed + 1, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
-		{name: "unset stage", fault: hostexit.Fault{Mode: pastureruntime.FailureExitTwoBlocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Continuation: continuation, Cause: fault}},
-		{name: "stage above the last arm", fault: hostexit.Fault{Mode: pastureruntime.FailureExitTwoBlocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageRecordUnknown + 1, Continuation: continuation, Cause: fault}},
-		{name: "continuation never set", fault: hostexit.Fault{Mode: pastureruntime.FailureExitTwoBlocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageNotRecorded, Cause: fault}},
+		{name: "nil cause", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailClosed, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation}},
+		{name: "unset mode", fault: hostexit.Fault{DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailClosed, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
+		{name: "mode above the last arm", fault: hostexit.Fault{Mode: pastureruntime.FailureObserveOnly + 1, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
+		// The DECLARED mode is refused on the same terms as the effective one.
+		// It is required because a defaulted declaration is exactly how the
+		// fault text came to call a demoted row's mode "declared": a zero value
+		// there would silently pick the wrong sentence for a blocking gate, and
+		// nothing downstream could tell.
+		{name: "unset declared mode", fault: hostexit.Fault{Mode: blocks, Evidence: evidence, Policy: hostexit.FaultFailClosed, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
+		{name: "declared mode above the last arm", fault: hostexit.Fault{Mode: blocks, DeclaredMode: pastureruntime.FailureObserveOnly + 1, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
+		{name: "unset policy", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
+		{name: "policy above the last arm", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailClosed + 1, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
+		{name: "unset stage", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Continuation: continuation, Cause: fault}},
+		{name: "stage above the last arm", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageRecordUnknown + 1, Continuation: continuation, Cause: fault}},
+		{name: "continuation never set", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageNotRecorded, Cause: fault}},
 	}
 	for _, test := range tests {
 		test := test
@@ -283,6 +297,7 @@ func TestFaultDiagnosticIsActionable(t *testing.T) {
 		t.Parallel()
 		outcome, ok := hostexit.ForFault(hostexit.Fault{
 			Mode:         pastureruntime.FailureExitTwoBlocks,
+			DeclaredMode: pastureruntime.FailureExitTwoBlocks,
 			Evidence:     pastureruntime.FailureEvidence{Source: citedSource},
 			Policy:       hostexit.FaultFailOpen,
 			Stage:        hostexit.FaultStageNotRecorded,
@@ -301,6 +316,7 @@ func TestFaultDiagnosticIsActionable(t *testing.T) {
 		t.Parallel()
 		outcome, ok := hostexit.ForFault(hostexit.Fault{
 			Mode:         pastureruntime.FailureExitTwoBlocks,
+			DeclaredMode: pastureruntime.FailureExitTwoBlocks,
 			Evidence:     pastureruntime.FailureEvidence{Source: citedSource},
 			Policy:       hostexit.FaultFailClosed,
 			Stage:        hostexit.FaultStageNotRecorded,
@@ -322,11 +338,19 @@ func TestFaultDiagnosticIsActionable(t *testing.T) {
 	// for a typo in their own shell instead of learning the real reason.
 	//
 	// There are TWO such rows and they continue for DIFFERENT reasons, so both
-	// are pinned. Measured through the built binary, the rows an operator meets
-	// today are the second kind: claude-code PreCompact, Notification and
-	// PostToolUse, and codex PreToolUse, all declared report-and-continue. A
-	// clause that covered only the unevidenced blocking row would have left the
-	// measured cases exactly as they were.
+	// are pinned. Measured through the built binary, BOTH KINDS are met today,
+	// and an earlier note here said otherwise: it called all four measured rows
+	// "declared report-and-continue". Two of them are not. claude-code
+	// PreCompact and codex PreToolUse are DECLARED BLOCKING gates that carry no
+	// citation, so the failure-evidence rule demotes them; claude-code
+	// Notification and PostToolUse are declared non-blocking. The first kind
+	// belongs to the unevidenced row, the second to the mode row.
+	//
+	// WHICH KIND A ROW IS CANNOT BE READ FROM THE EFFECTIVE MODE, because the
+	// demotion makes the two look identical. That is why the arm keys on the
+	// DECLARED mode, and why the delivery of this decision is proven on the
+	// built binary rather than here: see
+	// TestTheFailClosedReasonFollowsTheDeclaredModeThroughTheBuiltBinary.
 	//
 	// MUTATION: delete the `exit != ExitBlock` arm of failClosedAdvice in
 	// hostexit.faultDiagnostic, so the default clause is used again, and both
@@ -336,6 +360,7 @@ func TestFaultDiagnosticIsActionable(t *testing.T) {
 		t.Parallel()
 		outcome, ok := hostexit.ForFault(hostexit.Fault{
 			Mode:         pastureruntime.FailureReportAndContinue,
+			DeclaredMode: pastureruntime.FailureReportAndContinue,
 			Evidence:     pastureruntime.FailureEvidence{},
 			Policy:       hostexit.FaultFailClosed,
 			Stage:        hostexit.FaultStageNotRecorded,
@@ -358,7 +383,14 @@ func TestFaultDiagnosticIsActionable(t *testing.T) {
 	t.Run("fail closed but the row cites no host evidence", func(t *testing.T) {
 		t.Parallel()
 		outcome, ok := hostexit.ForFault(hostexit.Fault{
-			Mode:         pastureruntime.FailureExitTwoBlocks,
+			// THE SHAPE PRODUCTION REALLY BUILDS. The failure-evidence rule has
+			// already demoted this row, so the effective mode is
+			// report-and-continue while the DECLARATION still blocks by exit
+			// code. An earlier version of this subtest set the effective mode to
+			// the blocking arm, which no uncited row can carry, and the arm it
+			// proved was therefore dead on the production path.
+			Mode:         pastureruntime.FailureReportAndContinue,
+			DeclaredMode: pastureruntime.FailureExitTwoBlocks,
 			Evidence:     pastureruntime.FailureEvidence{},
 			Policy:       hostexit.FaultFailClosed,
 			Stage:        hostexit.FaultStageNotRecorded,
@@ -397,6 +429,7 @@ func TestTheImpactFollowsWhatPastureKnows(t *testing.T) {
 
 	notRecorded, ok := hostexit.ForFault(hostexit.Fault{
 		Mode:         pastureruntime.FailureReportAndContinue,
+		DeclaredMode: pastureruntime.FailureReportAndContinue,
 		Policy:       hostexit.FaultFailOpen,
 		Stage:        hostexit.FaultStageNotRecorded,
 		Continuation: hostexit.EmptyContinuation(),
@@ -409,6 +442,7 @@ func TestTheImpactFollowsWhatPastureKnows(t *testing.T) {
 
 	unknown, ok := hostexit.ForFault(hostexit.Fault{
 		Mode:         pastureruntime.FailureReportAndContinue,
+		DeclaredMode: pastureruntime.FailureReportAndContinue,
 		Policy:       hostexit.FaultFailOpen,
 		Stage:        hostexit.FaultStageRecordUnknown,
 		Continuation: hostexit.EmptyContinuation(),

@@ -322,17 +322,18 @@ func claudeLifecycleMapping(
 		reconciliation = ReconcileHostNative
 	}
 	return LifecycleEventMapping{
-		nativeName:     event.NativeName(),
-		semantic:       semantic,
-		surface:        SurfaceClaudeCommandJSON,
-		blocking:       blocking,
-		identities:     identities([]NativeIdentityField{claudeSessionIdentity}, extraIdentities...),
-		mutation:       mutation,
-		order:          OrderConcurrentNative,
-		reconciliation: reconciliation,
-		failure:        evidenceBoundFailure(blocking, evidence, FailureExitTwoBlocks, FailureReportAndContinue),
-		evidence:       evidence,
-		stopLoop:       stopLoop,
+		nativeName:      event.NativeName(),
+		semantic:        semantic,
+		surface:         SurfaceClaudeCommandJSON,
+		blocking:        blocking,
+		identities:      identities([]NativeIdentityField{claudeSessionIdentity}, extraIdentities...),
+		mutation:        mutation,
+		order:           OrderConcurrentNative,
+		reconciliation:  reconciliation,
+		failure:         evidenceBoundFailure(blocking, evidence, FailureExitTwoBlocks, FailureReportAndContinue),
+		declaredFailure: declaredFailureArm(blocking, FailureExitTwoBlocks, FailureReportAndContinue),
+		evidence:        evidence,
+		stopLoop:        stopLoop,
 	}
 }
 
@@ -407,17 +408,18 @@ func codexLifecycleMapping(
 		baseIdentities = append(baseIdentities, codexTurnIdentity)
 	}
 	return LifecycleEventMapping{
-		nativeName:     event.NativeName(),
-		semantic:       semantic,
-		surface:        SurfaceCodexStrictCommandJSON,
-		blocking:       blocking,
-		identities:     identities(baseIdentities, extraIdentities...),
-		mutation:       mutation,
-		order:          OrderConcurrentNative,
-		reconciliation: ReconcileNoAdapterMerge,
-		failure:        evidenceBoundFailure(blocking, evidence, FailureStrictExitTwoBlocks, FailureStrictHook),
-		evidence:       evidence,
-		stopLoop:       stopLoop,
+		nativeName:      event.NativeName(),
+		semantic:        semantic,
+		surface:         SurfaceCodexStrictCommandJSON,
+		blocking:        blocking,
+		identities:      identities(baseIdentities, extraIdentities...),
+		mutation:        mutation,
+		order:           OrderConcurrentNative,
+		reconciliation:  ReconcileNoAdapterMerge,
+		failure:         evidenceBoundFailure(blocking, evidence, FailureStrictExitTwoBlocks, FailureStrictHook),
+		declaredFailure: declaredFailureArm(blocking, FailureStrictExitTwoBlocks, FailureStrictHook),
+		evidence:        evidence,
+		stopLoop:        stopLoop,
 	}
 }
 
@@ -455,31 +457,33 @@ func codexLifecycleMappings() map[CodexLifecycleEvent]LifecycleEventMapping {
 
 func openCodeNamedMapping(event OpenCodeLifecycleEvent, eventIdentities ...NativeIdentityField) LifecycleEventMapping {
 	return LifecycleEventMapping{
-		nativeName:     event.NativeName(),
-		semantic:       SemanticGateConsultation,
-		surface:        SurfaceOpenCodeNamedOutput,
-		blocking:       Blocking,
-		identities:     append([]NativeIdentityField(nil), eventIdentities...),
-		mutation:       MutationOutputObject,
-		order:          OrderSequentialLoad,
-		reconciliation: ReconcileSequentialMutation,
-		failure:        FailureThrowFailFast,
-		stopLoop:       StopLoopNotApplicable,
+		nativeName:      event.NativeName(),
+		semantic:        SemanticGateConsultation,
+		surface:         SurfaceOpenCodeNamedOutput,
+		blocking:        Blocking,
+		identities:      append([]NativeIdentityField(nil), eventIdentities...),
+		mutation:        MutationOutputObject,
+		order:           OrderSequentialLoad,
+		reconciliation:  ReconcileSequentialMutation,
+		failure:         FailureThrowFailFast,
+		declaredFailure: FailureThrowFailFast,
+		stopLoop:        StopLoopNotApplicable,
 	}
 }
 
 func openCodeObservationMapping(event OpenCodeLifecycleEvent, eventIdentities ...NativeIdentityField) LifecycleEventMapping {
 	return LifecycleEventMapping{
-		nativeName:     event.NativeName(),
-		semantic:       SemanticObservation,
-		surface:        SurfaceOpenCodeCatchAllSSE,
-		blocking:       NonBlocking,
-		identities:     append([]NativeIdentityField(nil), eventIdentities...),
-		mutation:       MutationNone,
-		order:          OrderObservationStream,
-		reconciliation: ReconcileNone,
-		failure:        FailureObserveOnly,
-		stopLoop:       StopLoopNotApplicable,
+		nativeName:      event.NativeName(),
+		semantic:        SemanticObservation,
+		surface:         SurfaceOpenCodeCatchAllSSE,
+		blocking:        NonBlocking,
+		identities:      append([]NativeIdentityField(nil), eventIdentities...),
+		mutation:        MutationNone,
+		order:           OrderObservationStream,
+		reconciliation:  ReconcileNone,
+		failure:         FailureObserveOnly,
+		declaredFailure: FailureObserveOnly,
+		stopLoop:        StopLoopNotApplicable,
 	}
 }
 
@@ -589,8 +593,21 @@ func ValidatePinnedLifecycleProfiles() error {
 // the mode the host contract says applies, the citation for a blocking exit
 // code, and the event class the host reads the answer as.
 type LifecycleFailurePolicy struct {
-	Mode     FailureMode
-	Evidence FailureEvidence
+	// Mode is the EFFECTIVE failure mode of the row, after the failure-evidence
+	// rule. Every behaviour obeys this one.
+	Mode FailureMode
+	// DeclaredMode is the mode the host contract DECLARES for the row, before
+	// the evidence rule demotes an uncited blocking row to report-and-continue.
+	// It equals Mode on every row the rule does not demote.
+	//
+	// It is carried so that an EXPLANATION can tell an operator the truth about
+	// the declaration. A blocking row with no citation and a row that is
+	// declared report-and-continue are indistinguishable once the demotion has
+	// happened, and they need opposite advice: the first becomes blockable when
+	// somebody supplies the citation, the second can never block. Read this
+	// field only to explain the row; never to choose an exit status.
+	DeclaredMode FailureMode
+	Evidence     FailureEvidence
 	// Semantic is the declared class of the event. It is carried here because
 	// the bytes a host reads as "proceed" depend on the class as well as on the
 	// harness: a Codex gate is refused unless the continuation says continue,
@@ -635,9 +652,10 @@ func lookupLifecycleFailure[E comparable](
 		}
 		if mapping.NativeName() == nativeName {
 			return LifecycleFailurePolicy{
-				Mode:     mapping.Failure(),
-				Evidence: mapping.Evidence(),
-				Semantic: mapping.Semantic(),
+				Mode:         mapping.Failure(),
+				DeclaredMode: mapping.DeclaredFailure(),
+				Evidence:     mapping.Evidence(),
+				Semantic:     mapping.Semantic(),
 			}, true
 		}
 	}

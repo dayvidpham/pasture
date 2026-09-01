@@ -302,8 +302,23 @@ func (p FaultPolicy) String() string {
 // three of them are closed enums whose zero value is refused: naming them at
 // the call site is what stops a caller passing the wrong one by position.
 type Fault struct {
-	// Mode is the declared native failure behaviour of the event.
+	// Mode is the EFFECTIVE native failure behaviour of the event, after the
+	// failure-evidence rule of the runtime profile. It is the mode this package
+	// obeys, and it is the ONLY mode that may reach an exit status.
 	Mode pastureruntime.FailureMode
+	// DeclaredMode is the mode the host contract DECLARES for the row, before
+	// that rule demotes an uncited blocking row to report-and-continue. It
+	// equals Mode on every row the rule does not demote.
+	//
+	// It is required, not optional, and ForFault refuses a Fault without it.
+	// The reason is the defect it was added to remove: while only the effective
+	// mode was carried, the diagnostic called the DEMOTED value "the declared
+	// failure mode", so a blocking gate with no citation was told that it can
+	// never refuse through an exit code. That is false about the declaration,
+	// and it hides the one action the operator has — supply the citation. A
+	// defaulted DeclaredMode would restore exactly that untruth in silence, so a
+	// caller that forgets it gets a loud refusal instead.
+	DeclaredMode pastureruntime.FailureMode
 	// Evidence is the citation for the blocking exit code of that mode.
 	Evidence pastureruntime.FailureEvidence
 	// Policy is the user's fault policy.
@@ -328,8 +343,9 @@ type Fault struct {
 //   - fail-closed, anything else: continue, exactly as fail-open.
 //
 // The second result is false when there is nothing to map: a nil cause, an
-// unset or invalid failure mode, an unset or invalid policy, an unset or
-// invalid stage, or a Continuation the caller never set. A false result is a
+// unset or invalid effective failure mode, an unset or invalid DECLARED failure
+// mode, an unset or invalid policy, an unset or invalid stage, or a
+// Continuation the caller never set. A false result is a
 // programming error at the call site, never a host outcome, so the caller must
 // treat it as one and must not fall through to a silent exit 0.
 //
@@ -337,8 +353,8 @@ type Fault struct {
 // through ForDecision, where neither the fault policy nor missing evidence can
 // weaken it.
 func ForFault(fault Fault) (Outcome, bool) {
-	if fault.Cause == nil || !fault.Mode.IsValid() || !fault.Policy.IsValid() ||
-		!fault.Stage.IsValid() || !fault.Continuation.IsSet() {
+	if fault.Cause == nil || !fault.Mode.IsValid() || !fault.DeclaredMode.IsValid() ||
+		!fault.Policy.IsValid() || !fault.Stage.IsValid() || !fault.Continuation.IsSet() {
 		return Outcome{}, false
 	}
 
@@ -387,15 +403,25 @@ func faultDiagnostic(fault Fault, exit ExitStatus) *ir.Diagnostic {
 	// That is the same shape the OpenCode clause below already uses, which is
 	// where this wording comes from: say what has no channel and why, never
 	// what the operator already did.
+	//
+	// WHICH SENTENCE IS TRUE IS DECIDED BY THE DECLARED MODE, NOT THE EFFECTIVE
+	// ONE, and getting that wrong made the first version of this arm useless.
+	// The failure-evidence rule demotes an uncited blocking row to
+	// report-and-continue BEFORE this package sees it, so keying on the
+	// effective mode put every such row into the second sentence and left the
+	// first one UNREACHABLE on the production path. claude-code PreCompact and
+	// codex PreToolUse are declared blocking gates with no citation: they were
+	// told their declared mode is report-and-continue, which is false, and the
+	// one action they have — supply the citation — was never printed.
 	failClosedAdvice := "to make an evaluation fault of an evidenced blocking event stop the host instead of letting it continue, set PASTURE_HOOK_FAIL_CLOSED=1 on a host that refuses by exit code"
 	if fault.Policy == FaultFailClosed && exit != ExitBlock {
 		// The opt-in is set and the event continued anyway. WHICH reason it was
 		// is a property of the ROW, so the row's own fields choose the sentence
 		// rather than one apologetic clause covering both.
-		if fault.Mode.BlocksByExitCode() {
+		if fault.DeclaredMode.BlocksByExitCode() {
 			failClosedAdvice = "PASTURE_HOOK_FAIL_CLOSED is already set and it had no channel on this event: the event declares the blocking exit code but carries no host evidence for it, and pasture will not refuse a user's operation on an unevidenced claim, so the event continued; to make this event able to block, add the host documentation or a committed capture showing the host refuses on that exit code"
 		} else {
-			failClosedAdvice = "PASTURE_HOOK_FAIL_CLOSED is already set and it had no channel on this event: its declared failure mode " + fault.Mode.String() + " does not refuse through a process exit code, so there is no exit code the opt-in could turn into a refusal and the event continued; the opt-in reaches only the events whose declared mode blocks by exit code and that cite host evidence for it"
+			failClosedAdvice = "PASTURE_HOOK_FAIL_CLOSED is already set and it had no channel on this event: its declared failure mode " + fault.DeclaredMode.String() + " does not refuse through a process exit code, so there is no exit code the opt-in could turn into a refusal and the event continued; the opt-in reaches only the events whose declared mode blocks by exit code and that cite host evidence for it"
 		}
 	}
 	fix := "read the cause below and fix the reported condition; " + failClosedAdvice
@@ -422,7 +448,9 @@ func faultDiagnostic(fault Fault, exit ExitStatus) *ir.Diagnostic {
 			"because silence reads as a proceed",
 		Where: "internal/lifecycle/hostexit.ForFault",
 		Phase: "hook lifecycle fault handling, after the event was identified and before any decision was written; " +
-			"declared failure mode " + fault.Mode.String() + ", fault policy " + fault.Policy.String() +
+			"declared failure mode " + fault.DeclaredMode.String() +
+			", effective failure mode " + fault.Mode.String() +
+			", fault policy " + fault.Policy.String() +
 			", host evidence " + evidenceState(fault.Evidence) +
 			", durable state " + fault.Stage.String() + ", exit " + exit.String(),
 		Impact: impact,

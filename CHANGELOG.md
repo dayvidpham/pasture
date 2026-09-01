@@ -15,6 +15,17 @@
   where hooks were slow or a writer held the database.
 
 ### Fixed
+- When you set `PASTURE_HOOK_FAIL_CLOSED=1` and an event continues anyway,
+  `pasture hook lifecycle` now tells you the reason that is true of THAT event.
+  A gate that declares the blocking exit code but has no host citation for it
+  was told that its failure mode cannot refuse through an exit code. That was
+  false about the gate, and it withheld the only action available. Such an event
+  now reads that it carries no host evidence, and that supplying the host
+  documentation or a committed capture would make it able to block. An event
+  that really is non-blocking reads the same sentence as before. The diagnostic
+  also names the declared mode and the effective mode separately, so you can see
+  when a gate runs as report-and-continue only because its citation is missing.
+  No exit code changed.
 - A lifecycle hook that could not evaluate an event no longer looks like
   permission granted (#54). The `pasture hook lifecycle` command printed its
   error and exited 0 with empty standard output, which every host reads as
