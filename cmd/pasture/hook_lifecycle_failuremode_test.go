@@ -130,13 +130,19 @@ func readFaultRecords(t *testing.T, dir string) []map[string]any {
 	return records
 }
 
-// TestLifecycleHookExitFollowsTheDeclaredFailureMode is the whole exit contract.
+// TestLifecycleHookExitFollowsTheEffectiveFailureMode is the whole exit contract.
 //
 // Every case runs the same real storage fault through the built binary and
-// changes only two things: the event's declared failure mode and the user's
+// changes only two things: the event's EFFECTIVE failure mode and the user's
 // fault policy. The exit code follows those two and NOTHING else, which is what
 // makes the internal error-category table irrelevant here.
-func TestLifecycleHookExitFollowsTheDeclaredFailureMode(t *testing.T) {
+//
+// THE EFFECTIVE MODE IS THE ONE THAT REACHES AN EXIT STATUS. The declared mode
+// is for EXPLANATION only: the failure-evidence rule demotes an uncited
+// blocking row before any exit decision is taken, so a row can declare the
+// blocking exit code and still exit 0. Keying this table on the declared mode
+// would read as a rule this build does not have.
+func TestLifecycleHookExitFollowsTheEffectiveFailureMode(t *testing.T) {
 	root := t.TempDir()
 	binary := filepath.Join(root, "lifecycle-cli")
 	buildLifecycleBinary(t, binary)
@@ -211,8 +217,8 @@ func TestLifecycleHookExitFollowsTheDeclaredFailureMode(t *testing.T) {
 		// The SAME storage fault reaches both events. The internal category
 		// table classes it as a connection error, which maps to operator exit
 		// code 2. If that table decided this command, BOTH events would exit 2.
-		// The declared failure mode decides instead, so one blocks and one does
-		// not.
+		// The EFFECTIVE failure mode of the event decides instead, so one blocks
+		// and one does not.
 		blockingDir := t.TempDir()
 		blockingRun := runLifecycleHook(t, binary, unopenableDatabase(t, blockingDir), "PreToolUse", preToolUse,
 			hookFailClosedEnv+"=1")
@@ -226,7 +232,7 @@ func TestLifecycleHookExitFollowsTheDeclaredFailureMode(t *testing.T) {
 			"both runs must meet the same underlying storage fault")
 		assert.Equal(t, 2, blockingRun.ExitCode)
 		assert.Equal(t, 0, reportingRun.ExitCode,
-			"one fault class, two exit codes: the event's declared mode decides, not the error category")
+			"one fault class, two exit codes: the event's EFFECTIVE mode decides, not the error category")
 	})
 
 	t.Run("an event this build does not declare cannot block", func(t *testing.T) {
@@ -1017,8 +1023,125 @@ func TestTheDiagnosticSeparatesTheDeclaredModeFromTheEffectiveOne(t *testing.T) 
 		"the mode the row actually runs as must be named too, or the demotion is invisible")
 }
 
+// TestTheFaultRecordTellsADemotedGateFromADeclaredObservation pins the two
+// modes in the DURABLE record.
+//
+// The record outlives the process, and the stderr text does not. A demoted gate
+// (claude-code PreCompact declares the blocking exit code and carries no host
+// citation) and a declared observation (claude-code PostToolUse) run as the
+// SAME effective mode, so with the effective mode alone the two are
+// byte-identical in every failure field of the record. They need opposite
+// maintainer action, so the record must separate them.
+//
+// MUTATION: remove the "declaredFailureMode" member from recordLifecycleFault,
+// or write failure.Mode into it. This test turns RED.
+func TestTheFaultRecordTellsADemotedGateFromADeclaredObservation(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "lifecycle-cli")
+	buildLifecycleBinary(t, binary)
+
+	demotedDir := t.TempDir()
+	demoted := runLifecycleHookOn(t, binary, unopenableDatabase(t, demotedDir),
+		"claude-code", "PreCompact", "2.1.222",
+		claudeFixture(t, "pre_compact_2_1_222.json"))
+	observationDir := t.TempDir()
+	observation := runLifecycleHookOn(t, binary, unopenableDatabase(t, observationDir),
+		"claude-code", "PostToolUse", "2.1.222",
+		claudeFixture(t, "post_tool_use_2_1_222.json"))
+
+	demotedRecords := readFaultRecords(t, demoted.FaultDir)
+	require.Len(t, demotedRecords, 1)
+	observationRecords := readFaultRecords(t, observation.FaultDir)
+	require.Len(t, observationRecords, 1)
+
+	require.Equal(t, demotedRecords[0]["failureMode"], observationRecords[0]["failureMode"],
+		"the two rows run as the same EFFECTIVE mode; that is exactly why the record cannot tell them apart with that field alone")
+	assert.Equal(t, "exit-2-blocks", demotedRecords[0]["declaredFailureMode"],
+		"a demoted gate declares the blocking exit code, and the record must keep that so a maintainer can see the citation is the missing thing")
+	assert.Equal(t, "report-and-continue", observationRecords[0]["declaredFailureMode"],
+		"a declared observation never blocks, and the record must say so rather than look like a demoted gate")
+}
+
+// TestAFaultThatCannotBeClassifiedNamesEveryInputThatWasNotUsable pins the
+// refusal message of the unmappable fault.
+//
+// Six inputs can produce that refusal. The message used to blame "the declared
+// failure mode or the fault policy", which names one of the six and sends the
+// reader to the wrong field, and "declared" is now a specific field name.
+//
+// MUTATION: return a fixed sentence from unclassifiableFaultDiagnostic instead
+// of the list, or drop the DeclaredMode arm from hostexit.Fault.UnusableInputs.
+// This test turns RED.
+func TestAFaultThatCannotBeClassifiedNamesEveryInputThatWasNotUsable(t *testing.T) {
+	t.Parallel()
+
+	// Everything is usable EXCEPT the declared mode, which is left unset.
+	fault := hostexit.Fault{
+		Mode:         pastureruntime.FailureExitTwoBlocks,
+		Evidence:     pastureruntime.FailureEvidence{},
+		Policy:       hostexit.FaultFailOpen,
+		Stage:        hostexit.FaultStageNotRecorded,
+		Continuation: hostexit.EmptyContinuation(),
+		Cause:        errors.New("the store could not be opened"),
+	}
+	_, mapped := hostexit.ForFault(fault)
+	require.False(t, mapped,
+		"a fault with no declared mode has nothing to map, which is the case this message explains")
+
+	text := unclassifiableFaultDiagnostic(
+		lifecycleCoordinates{Harness: ir.HarnessClaudeCode, Event: "PreToolUse", HostVersion: "2.1.222"},
+		fault.UnusableInputs(), fault.Cause)
+
+	assert.Contains(t, text, "the declared failure mode is unset or not a known mode",
+		"the message must name the input that was actually not usable")
+	assert.NotContains(t, text, "the fault policy is unset",
+		"the message must not name an input that was usable, which is what one field name standing for six conditions did")
+	assert.NotContains(t, text, "the declared failure mode or the fault policy was not usable",
+		"the retired sentence named one field of six and read as an accusation against the declared mode")
+	assert.Contains(t, text, "the store could not be opened",
+		"the cause stays verbatim, because it is the only thing that says what really broke")
+}
+
+// lifecycleProfileRow names one declared row of one shipped lifecycle profile:
+// the harness, and the exact native event name a host puts on the command line.
+type lifecycleProfileRow struct {
+	harness ir.HarnessID
+	event   string
+}
+
+// everyShippedLifecycleRow DERIVES the full population of declared rows from
+// the exported native event catalogs of the three pinned profiles. It is
+// derived and never hand-listed, so a row added by a later profile is walked
+// WITHOUT a test edit.
+//
+// A hand list was the defect this replaces. The walk below named 11 rows of the
+// 87 the build ships, so a wrong declared mode on any of the other 76 stayed
+// green across the whole repository while the built binary printed a false
+// sentence to the operator.
+func everyShippedLifecycleRow() []lifecycleProfileRow {
+	claude := pastureruntime.ClaudeLifecycleEvents()
+	codex := pastureruntime.CodexLifecycleEvents()
+	openCode := pastureruntime.OpenCodeLifecycleEvents()
+
+	rows := make([]lifecycleProfileRow, 0, len(claude)+len(codex)+len(openCode))
+	for _, event := range claude {
+		rows = append(rows, lifecycleProfileRow{harness: ir.HarnessClaudeCode, event: event.NativeName()})
+	}
+	for _, event := range codex {
+		rows = append(rows, lifecycleProfileRow{harness: ir.HarnessCodex, event: event.NativeName()})
+	}
+	for _, event := range openCode {
+		rows = append(rows, lifecycleProfileRow{harness: ir.HarnessOpenCode, event: event.NativeName()})
+	}
+	return rows
+}
+
 // TestEveryDeclaredRowDiffersFromItsEffectiveModeOnlyByTheEvidenceRule walks
-// every row of every shipped profile through the PUBLIC lookup.
+// EVERY row of EVERY shipped profile through the PUBLIC lookup. The population
+// comes from everyShippedLifecycleRow, which reads the exported event catalogs,
+// so the coverage this comment claims is the coverage the walk has. There is NO
+// exemption: every derived row must be declared, and every declared row is
+// checked.
 //
 // It is the guard on the new declared mode. A declared mode is only useful
 // while it is the mode the row would run as if it were cited; a row that set it
@@ -1027,36 +1150,35 @@ func TestTheDiagnosticSeparatesTheDeclaredModeFromTheEffectiveOne(t *testing.T) 
 // behaviour.
 //
 // MUTATION: give any row a declared mode that is not its harness arm — for
-// example set declaredFailure to FailureObserveOnly on the Claude rows — and
-// this test turns RED naming the row.
+// example set declaredFailure to FailureObserveOnly on the claude-code
+// Elicitation row, which no earlier version of this walk reached — and this
+// test turns RED naming the row.
 func TestEveryDeclaredRowDiffersFromItsEffectiveModeOnlyByTheEvidenceRule(t *testing.T) {
 	t.Parallel()
 
-	rows := map[ir.HarnessID][]string{
-		ir.HarnessClaudeCode: {"SessionStart", "PreToolUse", "PreCompact", "Notification", "PostToolUse", "ElicitationResult"},
-		ir.HarnessCodex:      {"SessionStart", "PreToolUse", "Stop"},
-		ir.HarnessOpenCode:   {"session.created", "tool.execute.before"},
-	}
+	rows := everyShippedLifecycleRow()
 	checked := 0
-	for harness, events := range rows {
-		for _, event := range events {
-			row, found := pastureruntime.LookupLifecycleFailure(harness, event)
-			require.True(t, found, "%s %s must be declared by this build", harness, event)
-			checked++
+	for _, profileRow := range rows {
+		harness, event := profileRow.harness, profileRow.event
+		row, found := pastureruntime.LookupLifecycleFailure(harness, event)
+		require.True(t, found,
+			"%s %s is in the shipped native catalog, so the public lookup must declare it; this walk grants NO exemption", harness, event)
+		checked++
 
-			require.True(t, row.DeclaredMode.IsValid(),
-				"%s %s carries no declared mode, so its fault diagnostic could not name one", harness, event)
-			if row.DeclaredMode == row.Mode {
-				continue
-			}
-			assert.True(t, row.DeclaredMode.BlocksByExitCode(),
-				"%s %s runs as something other than it declares, and the ONLY rule allowed to do that is the failure-evidence rule, which acts on an exit-code arm", harness, event)
-			assert.False(t, row.Evidence.IsPresent(),
-				"%s %s was demoted although it cites evidence, which no rule permits", harness, event)
-			assert.Equal(t, pastureruntime.FailureReportAndContinue, row.Mode,
-				"%s %s was demoted to something other than report-and-continue", harness, event)
+		require.True(t, row.DeclaredMode.IsValid(),
+			"%s %s carries no declared mode, so its fault diagnostic could not name one", harness, event)
+		if row.DeclaredMode == row.Mode {
+			continue
 		}
+		assert.True(t, row.DeclaredMode.BlocksByExitCode(),
+			"%s %s runs as something other than it declares, and the ONLY rule allowed to do that is the failure-evidence rule, which acts on an exit-code arm", harness, event)
+		assert.False(t, row.Evidence.IsPresent(),
+			"%s %s was demoted although it cites evidence, which no rule permits", harness, event)
+		assert.Equal(t, pastureruntime.FailureReportAndContinue, row.Mode,
+			"%s %s was demoted to something other than report-and-continue", harness, event)
 	}
-	require.Greater(t, checked, 8,
-		"the walk must actually reach the rows; a lookup that found nothing would pass every assertion above while checking nothing")
+	require.Equal(t, len(rows), checked,
+		"every derived row must have been reached; a row skipped here is a row no assertion above saw")
+	require.GreaterOrEqual(t, checked, 87,
+		"the three pinned profiles declare 87 rows between them (30 Claude, 10 Codex, 47 OpenCode); a catalog that returned fewer would pass every assertion above while walking a fraction of the population, which is the defect this size assertion replaces")
 }
