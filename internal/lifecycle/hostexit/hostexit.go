@@ -356,6 +356,23 @@ type Fault struct {
 // names one of them — or names the whole struct — sends the reader to the wrong
 // field. ForFault itself asks this function, so the refusal and the explanation
 // can never describe different conditions.
+//
+// WHY THE RESULT IS A SENTENCE AND NOT A TYPED VALUE. A typed input with an
+// Explain method was considered and is not taken. Everything this result
+// reports is a PROGRAMMING ERROR at the call site rather than a host
+// condition, and the action is the same for all six: report it with the cause.
+// There is one caller, it prints, and no caller wants to branch on which
+// member was wrong. A typed value would add a second thing to keep in step
+// with the six conditions and buy no behaviour today.
+//
+// The trigger to revisit is a CONSUMER, not a preference. The durable fault
+// record now carries these sentences, which makes them a de facto schema for
+// anything that later reads that file. A reader that must group faults by
+// cause needs a stable key, and cannot get one from English that may be
+// reworded. When such a reader exists, give this result a typed member and
+// keep the sentence beside it; the sentence itself must not move away from the
+// condition, because that adjacency is what stops the refusal and the
+// explanation from describing different things.
 func (f Fault) UnusableInputs() []string {
 	var unusable []string
 	if !f.Mode.IsValid() {
