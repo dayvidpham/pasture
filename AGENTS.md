@@ -230,6 +230,37 @@ deliberate: an orphan blob is reclaimable, while a journal row naming an absent
 blob is corruption. `receipt.SQLiteBlobStore.Reclaimable` identifies them and
 nothing deletes them yet.
 
+They can now be COUNTED. `pasture hook lifecycle orphans` reports how many
+payload blobs no occurrence names, in text or JSON, and it deletes nothing.
+`receipt.SQLiteBlobStore.ReclaimableCount` answers it from the same predicate
+`Reclaimable` enumerates, so the operator surface and the abandonment invariant
+can never describe different sets. The count rebuilds the disposable occurrence
+projection from the journal first, exactly as `pasture hook lifecycle list`
+does: taken against a projection that was never rebuilt, every blob would look
+unnamed.
+
+The number ships with its meaning, and the meaning is the point. Read alone, a
+large count invites an operator to hunt for corruption — for the very state the
+write order makes impossible. So the report says all three of these, and a test
+pins each phrase:
+
+1. **What an orphan is** — a payload blob that no recorded occurrence names,
+   left by a hook invocation abandoned between its two durable writes, at most
+   one per abandoned invocation.
+2. **That it is expected and reclaimable, not damage** — the blob is written
+   before the journal row deliberately, because a spare blob can be reclaimed
+   later while a journal row naming an absent blob could not be repaired at all.
+3. **What a large number means** — not corruption, but repeated abandonment, so
+   the thing to investigate is the store contention that caused it.
+
+The count lives on the read surface and NEVER on the hook path. That placement
+is load-bearing, not tidiness: on the hook path the count would run inside the
+`HookInvocation` deadline, and it reads the store, which is the resource that
+contends. It would therefore be slowest under exactly the condition that
+produces orphans, and a slow enough count would push the invocation into its
+deadline and leave one more orphan behind — making the counter a cause of the
+thing it counts. A test asserts that no hook-path source calls it.
+
 ### Schema migration (`pasture migrate`)
 
 `pasture migrate [--dry-run]` is a top-level CLI command (NOT under

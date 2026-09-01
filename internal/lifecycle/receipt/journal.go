@@ -105,6 +105,32 @@ func (s SQLiteBlobStore) Reclaimable(ctx context.Context, limit int) ([]digest.D
 	return refs, nil
 }
 
+// ReclaimableCount returns HOW MANY committed payload blobs no occurrence
+// names. It is the same set Reclaimable enumerates, counted rather than
+// listed, so the two can never disagree: both read one predicate, a blob with
+// no occurrence naming its digest.
+//
+// It is COUNTED IN SQLITE and not bounded by MaxReclaimablePayloads. The bound
+// on Reclaimable exists because a future reclamation pass must delete in
+// bounded batches; a count deletes nothing, and a count that stopped at 256
+// would under-report exactly when the number matters, which is the one thing
+// an operator-facing number may never do.
+//
+// It reads the occurrence projection, so the caller must have rebuilt that
+// projection from the journal first. Against a projection that was never
+// rebuilt EVERY blob looks unnamed, and the answer would be the largest and
+// most alarming wrong number this store can produce.
+func (s SQLiteBlobStore) ReclaimableCount(ctx context.Context) (int64, error) {
+	if s.DB == nil {
+		return 0, structured(pasterrors.CategoryValidation, "The orphan payload count is unavailable.", "Counting unnamed payload blobs requires the unified SQLite handle.", "Counting orphan lifecycle payloads (internal/lifecycle/receipt/journal.go in receipt.SQLiteBlobStore.ReclaimableCount).", "No storage state was inspected or changed.", "Open the blob store through the unified Pasture database opener.", nil)
+	}
+	var count int64
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM lifecycle_payload_blobs b LEFT JOIN lifecycle_occurrences o ON o.payload_digest = b.digest WHERE o.journal_id IS NULL`).Scan(&count); err != nil {
+		return 0, structured(pasterrors.CategoryStorage, "Orphan lifecycle payloads could not be counted.", "SQLite rejected the orphan-count query.", "Counting orphan lifecycle payloads (internal/lifecycle/receipt/journal.go in receipt.SQLiteBlobStore.ReclaimableCount).", "The operator cannot learn how many payload blobs are unreferenced; nothing was deleted.", "Run `pasture migrate`, confirm the database is readable, and retry.", err)
+	}
+	return count, nil
+}
+
 type JournalAppender struct {
 	Journal  provenance.Journal
 	Deadline time.Duration
