@@ -269,8 +269,13 @@ func lifecycleOutcome(
 // lifecycleContinuation resolves the bytes THIS host reads as "you may
 // continue" for THIS event class. A fail-open fault emits them, because on two
 // of the three harnesses a proceed is a byte shape and not an exit code: an
-// empty stdout makes the generated OpenCode plugin throw inside the callback
-// chain, which stops the user's tool call — the opposite of failing open.
+// empty stdout is not an answer the OpenCode plugin can read.
+//
+// The plugin this build generates reports "did not evaluate" and continues. The
+// bytes are still emitted, for a reason that does not expire: PASTURE CANNOT
+// KNOW WHICH PLUGIN IS INSTALLED, and an ALREADY-INSTALLED OLDER ONE STILL
+// THROWS inside the callback chain and stops the user's tool call — the
+// opposite of failing open.
 //
 // A harness this build has no response contract for has no bytes to write, so
 // the empty continuation is used rather than a guessed shape. Such an

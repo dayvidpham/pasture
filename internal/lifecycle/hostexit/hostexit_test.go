@@ -44,9 +44,12 @@ func allFailureModes() []pastureruntime.FailureMode {
 //
 // The continue bytes are the fix for a defect this table used to assert as
 // correct: it required an EMPTY stdout for every fault, which is a proceed only
-// on a host that reads the exit code. On OpenCode an empty body makes the
+// on a host that reads the exit code. On OpenCode an empty body MADE the
 // generated plugin throw inside the callback chain, so "fail open" stopped the
-// user's tool call.
+// user's tool call. The plugin this build generates now reports and continues
+// instead, and the cells below do not change for it, because PASTURE CANNOT
+// KNOW WHICH PLUGIN IS INSTALLED and an ALREADY-INSTALLED OLDER ONE STILL
+// THROWS.
 func TestForFaultCoversEveryModePolicyAndEvidenceCell(t *testing.T) {
 	t.Parallel()
 
@@ -311,6 +314,71 @@ func TestFaultDiagnosticIsActionable(t *testing.T) {
 			"the reader must be told the operation was stopped")
 		assert.Contains(t, outcome.Stderr, "unset PASTURE_HOOK_FAIL_CLOSED",
 			"the reader must be told how to let the host continue instead")
+	})
+
+	// An operator who HAS taken the opt-in and whose event continued anyway must
+	// not be told to take it. Why it continued is a property of the ROW, not of
+	// the environment, so advice about the environment sends the reader to hunt
+	// for a typo in their own shell instead of learning the real reason.
+	//
+	// There are TWO such rows and they continue for DIFFERENT reasons, so both
+	// are pinned. Measured through the built binary, the rows an operator meets
+	// today are the second kind: claude-code PreCompact, Notification and
+	// PostToolUse, and codex PreToolUse, all declared report-and-continue. A
+	// clause that covered only the unevidenced blocking row would have left the
+	// measured cases exactly as they were.
+	//
+	// MUTATION: delete the `exit != ExitBlock` arm of failClosedAdvice in
+	// hostexit.faultDiagnostic, so the default clause is used again, and both
+	// subtests turn RED on "already set" and on the forbidden
+	// "set PASTURE_HOOK_FAIL_CLOSED=1".
+	t.Run("fail closed but the declared mode does not refuse by exit code", func(t *testing.T) {
+		t.Parallel()
+		outcome, ok := hostexit.ForFault(hostexit.Fault{
+			Mode:         pastureruntime.FailureReportAndContinue,
+			Evidence:     pastureruntime.FailureEvidence{},
+			Policy:       hostexit.FaultFailClosed,
+			Stage:        hostexit.FaultStageNotRecorded,
+			Continuation: hostexit.EmptyContinuation(),
+			Cause:        cause,
+		})
+		require.True(t, ok)
+		require.Equal(t, hostexit.ExitContinue, outcome.Exit,
+			"a mode that does not refuse by exit code has no exit code the opt-in could use")
+		assertActionable(t, outcome.Stderr, cause)
+		assert.Contains(t, outcome.Stderr, "PASTURE_HOOK_FAIL_CLOSED is already set",
+			"the reader has taken the opt-in, so the text must start from that fact")
+		assert.Contains(t, outcome.Stderr, "does not refuse through a process exit code",
+			"the reader must be told the REAL reason: this event's declared mode has no exit code "+
+				"for the opt-in to turn into a refusal")
+		assert.NotContains(t, outcome.Stderr, "set PASTURE_HOOK_FAIL_CLOSED=1",
+			"telling an operator to do what they have already done reads as 'you did nothing'")
+	})
+
+	t.Run("fail closed but the row cites no host evidence", func(t *testing.T) {
+		t.Parallel()
+		outcome, ok := hostexit.ForFault(hostexit.Fault{
+			Mode:         pastureruntime.FailureExitTwoBlocks,
+			Evidence:     pastureruntime.FailureEvidence{},
+			Policy:       hostexit.FaultFailClosed,
+			Stage:        hostexit.FaultStageNotRecorded,
+			Continuation: hostexit.EmptyContinuation(),
+			Cause:        cause,
+		})
+		require.True(t, ok)
+		require.Equal(t, hostexit.ExitContinue, outcome.Exit,
+			"an unevidenced row may not refuse a user's operation, whatever the policy says")
+		assertActionable(t, outcome.Stderr, cause)
+		assert.Contains(t, outcome.Stderr, "PASTURE_HOOK_FAIL_CLOSED is already set",
+			"the reader has taken the opt-in, so the text must start from that fact")
+		assert.Contains(t, outcome.Stderr, "carries no host evidence",
+			"the reader must be told the REAL reason the event continued, which is a property of "+
+				"this row and not of their environment")
+		assert.Contains(t, outcome.Stderr, "add the host documentation or a committed capture",
+			"the reader must be given the action that would actually change this outcome")
+		assert.NotContains(t, outcome.Stderr, "set PASTURE_HOOK_FAIL_CLOSED=1",
+			"telling an operator to do what they have already done reads as 'you did nothing', and "+
+				"sends them hunting for a typo in their own environment")
 	})
 }
 

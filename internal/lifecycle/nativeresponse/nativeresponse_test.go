@@ -117,8 +117,11 @@ func proceedResponse(t *testing.T) backend.HostResponse {
 // The defect this locks out: a fault used to emit an EMPTY standard output on
 // every harness. That is a proceed only where the host reads the process exit
 // code. On OpenCode the pasture-generated plugin parses standard output, and an
-// empty body makes it throw INSIDE the callback chain, which stops the user's
-// tool call — the exact opposite of the fail-open default.
+// empty body MADE it throw INSIDE the callback chain, which stops the user's
+// tool call — the exact opposite of the fail-open default. The plugin this
+// build generates reports and continues instead; these bytes are still owed,
+// because PASTURE CANNOT KNOW WHICH PLUGIN IS INSTALLED and an
+// ALREADY-INSTALLED OLDER ONE STILL THROWS.
 //
 // The bytes asserted here are the SAME bytes an evaluated proceed emits, and
 // that is intended: the host reads one channel, so it cannot be asked to tell
