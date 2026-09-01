@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+- `pasture hook lifecycle orphans` counts the payload blobs that no recorded
+  occurrence names. A hook writes the payload blob before it appends the journal
+  row, so an invocation abandoned between those two writes leaves one blob
+  behind, and at most one per abandoned invocation. The count reports how many
+  of those are present. It deletes nothing and changes no journal truth. The
+  number ships with the sentence that says what it means, in both `--format
+  text` and `--format json`, because the number alone reads as damage: it is
+  expected and reclaimable, and a large reading points at store contention that
+  made invocations get abandoned, not at a corrupt store. Use it after a run
+  where hooks were slow or a writer held the database.
+
 ### Fixed
 - A lifecycle hook that could not evaluate an event no longer looks like
   permission granted (#54). The `pasture hook lifecycle` command printed its
