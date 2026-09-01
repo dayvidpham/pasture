@@ -1149,10 +1149,32 @@ func everyShippedLifecycleRow() []lifecycleProfileRow {
 // no other test would notice, because the effective mode still decides every
 // behaviour.
 //
-// MUTATION: give any row a declared mode that is not its harness arm — for
-// example set declaredFailure to FailureObserveOnly on the claude-code
-// Elicitation row, which no earlier version of this walk reached — and this
-// test turns RED naming the row.
+// WHAT TURNS EACH ASSERTION RED, one by one. Every line below was measured on
+// this tree, because an assertion whose mutation does not reach it proves
+// something other than what it claims.
+//
+//   - the per-row assertions inside the loop: give any row a declared mode that
+//     is not its harness arm — for example set declaredFailure to
+//     FailureObserveOnly on the claude-code Elicitation row, which no earlier
+//     version of this walk reached. RED, naming the row.
+//   - require.True(found): make one shipped row unreachable through the public
+//     lookup. RED, naming the row. MEASURED on claude-code WorktreeCreate.
+//   - the size floor: remove ONE row CONSISTENTLY — the enum member, its native
+//     name and its mapping entry — so that the catalog stays self-consistent and
+//     the contract still builds. RED with "86 is not greater than or equal to
+//     87". This is the ONLY measured mutation that reaches the floor. Cutting
+//     ClaudeLifecycleEvents to a single row does NOT: newLifecycleContract
+//     already refuses a profile whose event count and mapping count differ, so
+//     mustLifecycleContract PANICS and the walk never runs. That run proves the
+//     pre-existing refusal, and it would stay RED with the floor line deleted.
+//   - the reached-equality: NO PRODUCTION CHANGE CAN TURN IT RED. checked++ is
+//     unconditional, and the only abort above it is a require that ends the test
+//     first, so checked always equals len(rows) by the time the equality is
+//     read. It guards A FUTURE EDIT TO THIS WALK — an exemption, a filter or a
+//     "continue" placed before the counter — and its message says so. It is kept
+//     rather than deleted because it is the only line that would notice such an
+//     edit, and it is documented rather than left to read as a population check
+//     the floor already makes.
 func TestEveryDeclaredRowDiffersFromItsEffectiveModeOnlyByTheEvidenceRule(t *testing.T) {
 	t.Parallel()
 
@@ -1178,7 +1200,10 @@ func TestEveryDeclaredRowDiffersFromItsEffectiveModeOnlyByTheEvidenceRule(t *tes
 			"%s %s was demoted to something other than report-and-continue", harness, event)
 	}
 	require.Equal(t, len(rows), checked,
-		"every derived row must have been reached; a row skipped here is a row no assertion above saw")
+		"the walk itself was edited: it no longer counts one row per derived row. No production "+
+			"change can reach this line — the counter is unconditional and the lookup check above "+
+			"ends the test first — so it guards a later exemption, filter or early continue added "+
+			"inside this loop, which would silently shrink the population every assertion above sees")
 	require.GreaterOrEqual(t, checked, 87,
 		"the three pinned profiles declare 87 rows between them (30 Claude, 10 Codex, 47 OpenCode); a catalog that returned fewer would pass every assertion above while walking a fraction of the population, which is the defect this size assertion replaces")
 }
