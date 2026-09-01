@@ -362,7 +362,7 @@ func lifecycleFault(
 		}
 	}
 
-	recordLifecycleFault(cmd, coords, failure, policy, stage, outcome, cause)
+	recordLifecycleFault(cmd, coords, failure, policy, stage, outcome, unusableFaultInputs, cause)
 	return outcome
 }
 
@@ -375,14 +375,60 @@ func lifecycleFault(
 // The message used to say "the declared failure mode or the fault policy was
 // not usable", which names one field of six and reads as an accusation against
 // the declared mode in particular.
+//
+// It also says what THIS exit means on a throwing host. This arm is the one
+// fault path that leaves with exit 1, and the pasture-generated OpenCode plugin
+// reads any non-zero exit as a broken installation and throws, which stops the
+// user's tool call. A message that said only "the host is not blocked" was
+// true of pasture's intent and false of what the user would see there.
 func unclassifiableFaultDiagnostic(coords lifecycleCoordinates, unusable []string, cause error) string {
 	return fmt.Sprintf(
 		"pasture hook lifecycle could not classify a fault on event %q of harness %q, "+
-			"because these inputs of the fault were not usable: %s; "+
-			"this happened in lifecycleFault (cmd/pasture/hook_lifecycle.go) after the event "+
-			"coordinates were read; the host is not blocked and this event was not evaluated; "+
+			"because %s. "+
+			"This happened in lifecycleFault (cmd/pasture/hook_lifecycle.go) after the event "+
+			"coordinates were read; pasture did not ask the host to block, and this event was "+
+			"not evaluated; the hook still leaves with exit 1, and a host that reads any "+
+			"non-zero exit as a broken pasture installation — the generated OpenCode plugin "+
+			"does — stops the tool call on it; "+
 			"report this with the cause below, which is: %v",
-		coords.Event, coords.Harness, strings.Join(unusable, "; "), cause)
+		coords.Event, coords.Harness, unusableInputSentence(unusable), cause)
+}
+
+// unusableInputSentence renders the unusable-input list WITH A VISIBLE END.
+//
+// The clauses after the list are separated by "; ", so a list joined with "; "
+// runs straight into them and the following clause reads as one more item.
+// Each item carries its ordinal and the sentence closes with a full stop, so
+// the reader can see how many items there are and where the last one ends. The
+// lead-in agrees with the count, because "these inputs" in front of a one-item
+// list is wrong on the commonest case, which is a single unusable member.
+func unusableInputSentence(unusable []string) string {
+	if len(unusable) == 0 {
+		return "the exit authority refused the fault although it named no unusable input, " +
+			"which is a defect in the refusal itself rather than in the fault"
+	}
+
+	numbered := make([]string, 0, len(unusable))
+	for index, input := range unusable {
+		numbered = append(numbered, fmt.Sprintf("(%d) %s", index+1, input))
+	}
+	if len(numbered) == 1 {
+		return "one input of the fault was not usable: " + numbered[0]
+	}
+	return fmt.Sprintf("%d inputs of the fault were not usable: %s",
+		len(numbered), strings.Join(numbered, "; "))
+}
+
+// recordedFailureMode renders a failure mode for the durable record. An
+// invalid or unset mode has an empty String(), and an empty string in the
+// record cannot be told apart from a member the writer forgot. This says which
+// of the two happened, so the record stays readable on the one arm that can
+// hold an unusable mode.
+func recordedFailureMode(mode pastureruntime.FailureMode) string {
+	if !mode.IsValid() {
+		return "unset-or-unknown"
+	}
+	return mode.String()
 }
 
 // recordLifecycleFault appends one JSON line describing the fault. Every error
@@ -395,6 +441,7 @@ func recordLifecycleFault(
 	policy hostexit.FaultPolicy,
 	stage hostexit.FaultStage,
 	outcome hostexit.Outcome,
+	unusable []string,
 	cause error,
 ) {
 	path := lifecycleFaultRecordPath()
@@ -420,8 +467,14 @@ func recordLifecycleFault(
 		// report-and-continue are byte-identical here, although they need
 		// opposite maintainer action — the first becomes able to block once
 		// somebody supplies the host citation, the second never blocks.
-		"failureMode":         failure.Mode.String(),
-		"declaredFailureMode": failure.DeclaredMode.String(),
+		"failureMode":         recordedFailureMode(failure.Mode),
+		"declaredFailureMode": recordedFailureMode(failure.DeclaredMode),
+		// unusableFaultInputs is empty on every fault the exit authority could
+		// map, and carries the refusal reasons on the one arm it could not.
+		// Without it the record of that arm wrote an empty mode and no reason,
+		// so the artefact that outlives the process could not say what stderr
+		// had just said.
+		"unusableFaultInputs": unusable,
 		"failureCitedBy":      failure.Evidence.Source,
 		"faultPolicy":         policy.String(),
 		"faultStage":          stage.String(),

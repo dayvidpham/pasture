@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/printer"
@@ -1100,6 +1101,54 @@ func TestAFaultThatCannotBeClassifiedNamesEveryInputThatWasNotUsable(t *testing.
 		"the retired sentence named one field of six and read as an accusation against the declared mode")
 	assert.Contains(t, text, "the store could not be opened",
 		"the cause stays verbatim, because it is the only thing that says what really broke")
+
+	assert.Contains(t, text, "one input of the fault was not usable: (1) ",
+		"the lead-in must agree with the count, because \"these inputs\" in front of a one-item "+
+			"list is wrong on the commonest case")
+	assert.Contains(t, text, "stops the tool call",
+		"this arm leaves with exit 1, and the generated OpenCode plugin throws on any non-zero "+
+			"exit, so a message that claimed only \"the host is not blocked\" was false there")
+}
+
+// TestTheUnusableInputListHasAVisibleEnd pins the SHAPE of the multi-input
+// list, which no test reached while only the one-item case was covered.
+//
+// The clauses that follow the list are separated by "; ". While the list was
+// joined with the same "; ", the clause after it read as one more item: a
+// six-input refusal ended "...; this happened in lifecycleFault", and
+// "this happened in lifecycleFault" is not an unusable input. Each item now
+// carries its ordinal and the list closes with a full stop.
+//
+// MUTATION: join the items with "; " and drop the ordinals, or drop the full
+// stop that closes the list. This test turns RED.
+func TestTheUnusableInputListHasAVisibleEnd(t *testing.T) {
+	t.Parallel()
+
+	// The zero-value fault makes EVERY one of the six inputs unusable, which is
+	// the widest list this message can ever carry.
+	fault := hostexit.Fault{}
+	unusable := fault.UnusableInputs()
+	require.Len(t, unusable, 6,
+		"the zero-value fault must name all six inputs, or this test no longer covers the widest list")
+
+	text := unclassifiableFaultDiagnostic(
+		lifecycleCoordinates{Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: "1.18.19"},
+		unusable, errors.New("the store could not be opened"))
+
+	assert.Contains(t, text, "6 inputs of the fault were not usable:",
+		"the lead-in must state how many items follow, so the reader can count the list and see it ended")
+	for ordinal := 1; ordinal <= 6; ordinal++ {
+		assert.Contains(t, text, fmt.Sprintf("(%d) ", ordinal),
+			"every item must carry its ordinal, because an unnumbered list joined inside a "+
+				"semicolon-separated sentence has no visible end")
+	}
+	assert.NotContains(t, text, "(7) ",
+		"the list must not gain an item; the clause after it is not an unusable input")
+
+	end := "the cause is nil, so there is no fault to report. This happened in lifecycleFault"
+	assert.Contains(t, text, end,
+		"the last item must be closed by a full stop before the next clause, so that clause "+
+			"cannot be read as a seventh item")
 }
 
 // lifecycleProfileRow names one declared row of one shipped lifecycle profile:
@@ -1206,4 +1255,57 @@ func TestEveryDeclaredRowDiffersFromItsEffectiveModeOnlyByTheEvidenceRule(t *tes
 			"inside this loop, which would silently shrink the population every assertion above sees")
 	require.GreaterOrEqual(t, checked, 87,
 		"the three pinned profiles declare 87 rows between them (30 Claude, 10 Codex, 47 OpenCode); a catalog that returned fewer would pass every assertion above while walking a fraction of the population, which is the defect this size assertion replaces")
+}
+
+// TestTheUnmappableFaultRecordSaysWhatStderrSays drives the ONE arm the exit
+// authority cannot classify through the real production path, and reads the
+// durable record it leaves.
+//
+// The record outlives the process, and it used to be the weaker of the two
+// artefacts on this arm: String() of an invalid failure mode is the empty
+// string, so the record wrote "" for the mode and gave no reason at all, while
+// stderr named every unusable input. A maintainer who found the file could not
+// tell an unusable mode from a member the writer forgot.
+//
+// MUTATION: return mode.String() unconditionally from recordedFailureMode, or
+// drop the unusableFaultInputs member from the record map. This test turns RED.
+func TestTheUnmappableFaultRecordSaysWhatStderrSays(t *testing.T) {
+	coords := lifecycleCoordinates{Harness: ir.HarnessClaudeCode, Event: "PreToolUse", HostVersion: "2.1.222"}
+
+	dir := t.TempDir()
+	previous := flagDBPath
+	flagDBPath = filepath.Join(dir, "pasture.db")
+	t.Cleanup(func() { flagDBPath = previous })
+
+	// The declared mode is left unset, which is one of the six conditions that
+	// make a fault unmappable. Everything else is what a real invocation holds.
+	failure := pastureruntime.LifecycleFailurePolicy{Mode: pastureruntime.FailureExitTwoBlocks}
+	cause := errors.New("the store could not be opened")
+
+	outcome := lifecycleFault(hookLifecycleCmd, coords, failure, hostexit.FaultFailOpen,
+		lifecycleContinuation(coords, failure), hostexit.FaultStageNotRecorded, cause)
+	require.Equal(t, hostexit.ExitNonBlockingError, outcome.Exit,
+		"an unclassifiable fault must leave through the refusal arm, which is the arm this record describes")
+
+	records := readFaultRecords(t, filepath.Dir(flagDBPath))
+	require.Len(t, records, 1, "the refusal arm must still leave exactly one durable line")
+	record := records[0]
+
+	assert.Equal(t, "unset-or-unknown", record["declaredFailureMode"],
+		"an empty string here cannot be told apart from a member the writer forgot, so the "+
+			"record must say WHICH of the two happened")
+	assert.Equal(t, "exit-2-blocks", record["failureMode"],
+		"the effective mode was usable and must still be recorded verbatim, so this member does "+
+			"not become a placeholder for every mode")
+
+	reasons, hasReasons := record["unusableFaultInputs"].([]any)
+	require.True(t, hasReasons,
+		"the record must carry the refusal reasons, because it is the artefact that outlives the "+
+			"process and stderr is not kept anywhere")
+	require.Len(t, reasons, 1, "exactly one input was unusable on this fault")
+	assert.Equal(t, "the declared failure mode is unset or not a known mode", reasons[0],
+		"the record must name the SAME input stderr named, because both come from the function "+
+			"the refusal itself asks")
+	assert.Contains(t, outcome.Stderr, reasons[0],
+		"the two artefacts must not be able to describe different conditions")
 }

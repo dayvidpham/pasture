@@ -105,15 +105,30 @@ const (
 	// ExitNonBlockingError reports a hook problem that must not stop the host.
 	// Process exit code 1.
 	//
-	// No fault path produces this status today. ForFault answers either
-	// ExitContinue or ExitBlock: failing open is defined as exit 0 plus the
-	// host's continue bytes, and the OpenCode plugin reads ANY non-zero exit as
-	// a broken pasture installation, so a fault that used exit 1 would reach
-	// the user as "verify PASTURE_BIN". The arm exists for the
-	// classify-failure guard in the command, and for one open question: whether
-	// a fail-open fault should use exit 1 on a host that is documented to show
-	// the standard error of a failing hook to the user. Answering that needs a
-	// citation from the host documentation, so it is not answered here.
+	// EXACTLY ONE fault path produces this status: the arm in the command that
+	// meets a false result from ForFault and refuses to exit 0 in silence.
+	// ForFault itself never answers it — failing open is defined as exit 0 plus
+	// the host's continue bytes, and blocking is exit 2 — so this status is
+	// reached only when a fault could not be classified at all.
+	//
+	// THAT ARM IS UNREACHABLE TODAY, and it is unreachable by construction
+	// rather than by luck: ForFault refuses only on inputs the command always
+	// supplies, so an unknown event, an unknown host version, an unknown
+	// harness and a malformed payload all fail open at exit 0 instead. It
+	// becomes reachable the moment a caller builds a Fault from a value it did
+	// not set — a new fault stage, a new policy, or a continuation taken from
+	// a host table that has no entry for the event.
+	//
+	// IT IS NOT A HARMLESS STATUS WHEN IT IS REACHED. The pasture-generated
+	// OpenCode plugin reads ANY non-zero exit as a broken pasture installation
+	// and throws, which stops the user's tool call, so on that host this exit
+	// is not the non-blocking report its name promises. The diagnostic on that
+	// arm says so rather than claiming the host is not blocked.
+	//
+	// One question stays open: whether a fail-open fault should use exit 1 on a
+	// host that is documented to show the standard error of a failing hook to
+	// the user. Answering that needs a citation from the host documentation, so
+	// it is not answered here.
 	ExitNonBlockingError
 	// ExitBlock tells the host to refuse the operation. Process exit code 2.
 	ExitBlock
