@@ -75,7 +75,8 @@ var hookLifecycleCmd = &cobra.Command{
 	Short: "Record a native harness lifecycle event",
 	Args:  cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		emitLifecycleOutcome(cmd, lifecycleOutcome(cmd, args, handlers.PassThroughCommitBarrier{}))
+		emitLifecycleOutcome(cmd, lifecycleOutcome(cmd, args,
+			handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile()))
 		return nil
 	},
 }
@@ -89,12 +90,45 @@ var hookLifecycleCmd = &cobra.Command{
 // passes the pass-through barrier; it is a parameter so the boundary can be
 // held open and observed without a second code path.
 //
+// The budget carries the hook-invocation deadline. Production passes the
+// production profile, and the zero profile reads as the production one, so a
+// caller that supplies nothing still gets the tier the host budget requires.
+//
+// IT IS AN IN-PROCESS PARAMETER AND NOTHING MORE. There is NO environment
+// variable and NO flag for it, and that absence is a refusal rather than a
+// gap, because HANDING THIS DIAL TO A USER HANDS THE USER THE DEFECT BACK.
+// Both directions of change harm the person who turns it:
+//
+//   - A user who SHORTENS the tier stops proving the budget the host actually
+//     enforces. The hook would keep satisfying its own proof while it says
+//     nothing at all about the window the host gives it.
+//   - A user who LENGTHENS the tier can FREEZE THEIR OWN SESSION. That is the
+//     exact failure this tier exists to prevent, and it is measured: with the
+//     store held under a write lock the work below took about 31 seconds,
+//     three times the smallest host budget of 10 seconds.
+//
+// A test may supply a shorter tier because a test is not a user: it observes
+// the deadline PATH in this process, and the value it supplies never reaches
+// a host. That distinction is what makes the seam safe, and it is pinned by
+// an assertion that the command path passes the production tier.
+//
+// A supplied profile is NOT re-validated here, and it does not need to be:
+// timeouts.New is the only constructor, its fields are unexported, and it
+// refuses an out-of-order hook-invocation tier. So the only profile a caller
+// can build without New is the zero one, which is normalized to production
+// below. There is no third state to check for.
+//
 // The internal/errors category table is deliberately NOT consulted. That table
 // maps a pasture error class to an operator exit code for a person at a
 // terminal. This command answers to a HOST, whose exit codes mean "proceed",
 // "report" and "block", and whose meaning comes from the event's declared
 // failure mode, not from the class of the error.
-func lifecycleOutcome(cmd *cobra.Command, args []string, barrier handlers.CommitBarrier) (outcome hostexit.Outcome) {
+func lifecycleOutcome(
+	cmd *cobra.Command,
+	args []string,
+	barrier handlers.CommitBarrier,
+	budget timeouts.Profile,
+) (outcome hostexit.Outcome) {
 	// The recover is installed FIRST, before the coordinates and the
 	// environment are read, so a panic in either is a fault and not a process
 	// crash. Until those reads finish the fault is described by the safe
@@ -166,12 +200,20 @@ func lifecycleOutcome(cmd *cobra.Command, args []string, barrier handlers.Commit
 	// CANNOT know is whether the receipt committed first, so the fault is
 	// reported with an unknown durable state rather than a false claim.
 	//
-	// The deadline is read from the production profile, not from an injected
-	// one. That is deliberate: the tier exists to sit under a real host budget,
-	// and a hook that could be told to use a shorter one would no longer be
-	// proving the thing the host pays for. It costs the deadline tests one real
-	// wait each; the environment seam carries no fourth variable for it.
-	ctx, cancel := context.WithTimeout(cmd.Context(), timeouts.ProductionProfile().HookInvocation())
+	// The deadline arrives as a parameter, so an in-process proof can observe
+	// this PATH in about a second instead of five. The reason there is no
+	// environment variable and no flag for it is recorded where the parameter
+	// is declared, above; it is a refusal, not a gap.
+	//
+	// The zero profile reads as the production one, so a caller that supplies
+	// nothing still runs under the tier the host budget requires. It is
+	// normalized HERE, below the recover, because nothing may run before the
+	// recover is installed.
+	if budget.IsZero() {
+		budget = timeouts.ProductionProfile()
+	}
+	deadline := budget.HookInvocation()
+	ctx, cancel := context.WithTimeout(cmd.Context(), deadline)
 	defer cancel()
 
 	// HookLifecycleNative is the single dispatch surface: it commits the
@@ -203,7 +245,7 @@ func lifecycleOutcome(cmd *cobra.Command, args []string, barrier handlers.Commit
 				"the hook stopped waiting at its %s hook-invocation deadline and abandoned the work for event %q of harness %q "+
 					"at host version %q, so the host is not left waiting; the usual reason is another writer holding the pasture "+
 					"store, so find that writer or retry once it releases the store: %w",
-				timeouts.ProductionProfile().HookInvocation(),
+				deadline,
 				coords.Event, coords.Harness, coords.HostVersion, ctx.Err()))
 	}
 

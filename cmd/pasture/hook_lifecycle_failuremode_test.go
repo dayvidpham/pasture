@@ -8,6 +8,7 @@ import (
 	"errors"
 	"go/ast"
 	"go/parser"
+	"go/printer"
 	"go/token"
 	"os"
 	"os/exec"
@@ -374,6 +375,33 @@ func TestLifecycleFaultRecordIsBestEffort(t *testing.T) {
 // waits on a CONDITION (the writer signals once the lock is really held) with a
 // bounded timeout, and it releases the lock only after the hook process has
 // returned. There is no sleep and no fixed-deadline poll anywhere.
+//
+// THIS TEST RUNS ON THE PRODUCTION TIER AND COSTS REAL SECONDS. That is the
+// price of the only end-to-end measurement in this command, and two cheaper
+// shapes will suggest themselves to a later reader. Both are refused here by
+// MECHANISM, not by preference:
+//
+//   - "Run it in-process and inject the short tier, like the other deadline
+//     proof." The tier is a PARAMETER OF A FUNCTION, and a parameter cannot
+//     cross a process boundary, so it can never reach the binary this test
+//     runs. Converting the test to reach the parameter would DELETE the
+//     process: no build, no start, no separate opener contending for the real
+//     lock. The elapsed bounds below would then bound one function call, which
+//     is not the thing a host waits for, so the host-budget claim would be
+//     gone while the test stayed green. The in-process proof of the same PATH
+//     already exists (see the abandoned-after-commit test); this one exists
+//     for the CLOCK, and nothing else measures it.
+//   - "Add an environment variable or a flag so the binary can be told to use
+//     a short tier." An environment variable or a flag is the only way a value
+//     can reach a separate process, and creating one makes the tier reachable
+//     BY A USER, which is exactly what the parameter's declaration refuses and
+//     for the reasons recorded there. There is no version of that change that
+//     shortens the tier for this test without also handing the dial to every
+//     person running the hook.
+//
+// So the tier here stays production and the elapsed assertions stay as they
+// are. If this test becomes too slow, the answer is to run it less often, not
+// to measure something else.
 func TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked(t *testing.T) {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "lifecycle-cli")
@@ -527,7 +555,7 @@ func TestAPanicInTheWorkGoroutineIsAFaultAndNeverABlock(t *testing.T) {
 	cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.10", dbPath)
 	cmd.SetIn(panickingReader{message: "the host payload reader failed"})
 
-	outcome := lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{})
+	outcome := lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile())
 
 	assert.Equal(t, hostexit.ExitContinue, outcome.Exit,
 		"a pasture panic must not stop the user working")
@@ -571,7 +599,7 @@ func TestAPanicBeforeTheWorkStartsIsAFaultAndNeverACrash(t *testing.T) {
 	//nolint:staticcheck // A nil context is the injected fault; cobra owns this seam.
 	cmd.SetContext(nil)
 
-	outcome := lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{})
+	outcome := lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile())
 
 	assert.Equal(t, hostexit.ExitContinue, outcome.Exit,
 		"the main-path recover must turn a panic into a fault that lets the host continue")
@@ -626,7 +654,15 @@ func TestAnInvocationAbandonedAfterItsCommitTellsTheHostTheTruth(t *testing.T) {
 
 	barrier := &blockingBarrier{reached: make(chan struct{}), release: make(chan struct{})}
 	outcomes := make(chan hostexit.Outcome, 1)
-	go func() { outcomes <- lifecycleOutcome(cmd, nil, barrier) }()
+	// The INJECTED SHORT TIER. This proof is about the PATH the invocation
+	// takes and the STATE it leaves, and neither comes from the length of the
+	// tier: the barrier holds the invocation at the commit boundary until the
+	// deadline fires, whatever the deadline is. Running it on the production
+	// tier would cost five seconds of the suite and prove nothing more. The
+	// PRODUCTION value is pinned where it belongs, against the smallest host
+	// budget, and it is unchanged.
+	budget := timeouts.DeadlineTestProfile()
+	go func() { outcomes <- lifecycleOutcome(cmd, nil, barrier, budget) }()
 
 	// The condition, not a sleep: the receipt is committed and the host has not
 	// been told anything.
@@ -643,8 +679,12 @@ func TestAnInvocationAbandonedAfterItsCommitTellsTheHostTheTruth(t *testing.T) {
 		"an abandoned invocation fails open, so the host is never stopped by it")
 	assert.Empty(t, outcome.Stdout,
 		"the host received NO continuation, because the work never reached the encode")
-	assert.Contains(t, outcome.Stderr, "stopped waiting at its 5s hook-invocation deadline",
+	assert.Contains(t, outcome.Stderr, "hook-invocation deadline",
 		"the diagnostic must name the deadline path, not any fault")
+	assert.Contains(t, outcome.Stderr, "abandoned the work",
+		"and it must say the work was abandoned, which is why the record state is unknown")
+	assert.NotContains(t, outcome.Stderr, "the hook could not evaluate event",
+		"that is the wording of the store-error path; if it appears, this test proved nothing about the deadline")
 	assert.Contains(t, outcome.Stderr, "MAY OR MAY NOT exist",
 		"the receipt IS committed here, so claiming the event was not recorded would be false")
 	assert.NotContains(t, outcome.Stderr, "no occurrence was recorded for it")
@@ -717,4 +757,70 @@ func TestTheRecoverIsInstalledBeforeAnythingElseRuns(t *testing.T) {
 		require.True(t, isGeneric && generic.Tok == token.VAR,
 			"only the declaration of the values the recover reads may precede it")
 	}
+}
+
+// TestTheProductionPathWiresThePassThroughBarrierAndTheProductionTier pins the
+// two seams this command injects, because both are production parameters whose
+// only other supplier today is a test.
+//
+// That shape is worth one assertion each. A parameter that only a test supplies
+// is one refactor away from being a parameter that production supplies
+// DIFFERENTLY, and neither drift would fail any existing test:
+//
+//   - a barrier that is not the pass-through one would run code between the
+//     durable commit and the host's continuation, which is the one place this
+//     command promises nothing happens;
+//   - a tier that is not the production one would silently move the deadline
+//     the whole host-budget claim rests on, and the hook would keep passing its
+//     own proofs while freezing a session.
+//
+// The assertion is structural because there is nothing to observe: both seams
+// are correct by being wired, and a wrong wiring produces no value a table can
+// read.
+func TestTheProductionPathWiresThePassThroughBarrierAndTheProductionTier(t *testing.T) {
+	t.Parallel()
+
+	sources, err := filepath.Glob("*.go")
+	require.NoError(t, err)
+
+	calls := 0
+	for _, name := range sources {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, parseErr := parser.ParseFile(token.NewFileSet(), name, nil, 0)
+		require.NoError(t, parseErr, "every production source of this command must be readable")
+		ast.Inspect(file, func(node ast.Node) bool {
+			call, isCall := node.(*ast.CallExpr)
+			if !isCall {
+				return true
+			}
+			function, isIdentifier := call.Fun.(*ast.Ident)
+			if !isIdentifier || function.Name != "lifecycleOutcome" {
+				return true
+			}
+			calls++
+			require.Len(t, call.Args, 4, "%s calls lifecycleOutcome with the wrong shape", name)
+			assert.Equal(t, "handlers.PassThroughCommitBarrier{}", sourceOf(call.Args[2]),
+				"%s must pass the pass-through commit barrier: production may never supply a barrier "+
+					"that runs between the durable commit and the host's continuation", name)
+			assert.Equal(t, "timeouts.ProductionProfile()", sourceOf(call.Args[3]),
+				"%s must pass the production timeout profile: the hook-invocation tier is chosen "+
+					"against the smallest host budget, and production may not run on another one", name)
+			return true
+		})
+	}
+	assert.Equal(t, 1, calls,
+		"the command has exactly ONE production entry into the exit authority; a second one is a "+
+			"second host-facing path, and every guarantee here is stated over one")
+}
+
+// sourceOf renders an expression back to source text, so an assertion can name
+// the exact argument a call site must pass.
+func sourceOf(node ast.Expr) string {
+	var rendered strings.Builder
+	if err := printer.Fprint(&rendered, token.NewFileSet(), node); err != nil {
+		return ""
+	}
+	return rendered.String()
 }
