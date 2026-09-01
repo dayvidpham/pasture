@@ -198,6 +198,12 @@ func TestFailClosedHasNoChannelOnTheThrowingHost(t *testing.T) {
 // result is a programming error at the call site, so it must be distinguishable
 // from a real continue outcome; a caller that reads it as "exit 0" would
 // recreate the silent proceed.
+//
+// It also pins the EXPLANATION of each refusal, because the caller prints it.
+//
+// MUTATION: make an arm of UnusableInputs name a different input — for example
+// let the declared-mode arm report the effective mode — or make an arm report
+// on a valid value. This test turns RED on the case for that input.
 func TestForFaultRefusesWhenThereIsNothingToMap(t *testing.T) {
 	t.Parallel()
 
