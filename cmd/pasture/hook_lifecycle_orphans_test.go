@@ -68,6 +68,12 @@ func leaveOrphanBlobs(t *testing.T, dbPath string, count int) {
 // A SUCCESSFUL invocation is ingested first, on purpose. Its blob IS named by
 // an occurrence, so it must not be counted; a count that reported it would tell
 // an operator that ordinary successful work leaves debris behind.
+//
+// MUTATION for the note assertions: drop OrphanPayloadNote from the text
+// renderer in handlers.HookLifecycleOrphans, leaving only the count, and this
+// test turns RED at BOTH readings. That mutation used to leave every owning
+// package green, which is why the note is asserted here on the binary's own
+// standard output and not only on the constant and the JSON.
 func TestOrphanCountIsZeroOnACleanStoreAndTrueAfterAbandonedInvocations(t *testing.T) {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "orphan-cli")
@@ -332,6 +338,11 @@ func TestTheOrphanCountLivesOnlyOnTheOrphansReadSurface(t *testing.T) {
 		"these sources must not count orphans. The count belongs to the orphans read surface alone: "+
 			"anywhere on the hook path it would spend the invocation deadline reading the very store "+
 			"that contends, and a slow enough count leaves one more orphan behind")
+	// MUTATION: point either glob at a directory with no production source, or
+	// narrow the walk back to a handful of named files, and this turns RED. It
+	// guards the guard: an empty or tiny scope passes every other assertion
+	// here while reading almost nothing, which is the exact way the deny-list
+	// version went quiet.
 	assert.Greater(t, walked, 10,
 		"the glob must actually reach the production sources of both packages; a scope that walked "+
 			"almost nothing would pass while guarding nothing")
