@@ -214,6 +214,15 @@ database and not inside it because the commonest fault is that the database
 could not be opened, and evidence that needs the failing store is lost exactly
 when it is wanted.
 
+A LINE'S `unusableFaultInputs` MEMBER IS ENGLISH, NOT A STABLE KEY. It is an
+empty array on every fault pasture could classify, and on the one arm it could
+not it carries a sentence per unusable input, worded for a person reading the
+line. Those sentences may be reworded, so anything that GROUPS faults by cause
+must not key on them. Writing such a reader is the trigger to give the result a
+typed member and keep the sentence beside it — the sentence itself must stay
+next to the condition, because that adjacency is what stops the refusal and its
+explanation from describing different things.
+
 THE FILE HAS NO RETENTION. One line of roughly 500 bytes is appended per
 faulting invocation; nothing rotates, trims or removes a line, and no command
 reads or clears it. A hook runs on every wired event, so a database that stays
