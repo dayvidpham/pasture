@@ -1099,60 +1099,57 @@ func markdownSection(t *testing.T, document, heading string) string {
 	return heading + rest[:end]
 }
 
-// durableStateWords are the words a claim about the journal cannot be made
-// without. A rewording that drops all of them has stopped making the claim,
-// which is why matching on them recognises the CLASS rather than a wording.
-var durableStateWords = []string{"occurrence", "journal", "recorded", "committed"}
-
-// nonClaimPhrases are the places this diagnostic legitimately mentions one of
-// those words WITHOUT making a durable-state claim. They are removed before the
-// check, and each is listed with the reason it is not a claim.
-var nonClaimPhrases = []string{
-	// The FAULT RECORD FILE is a different artefact from the occurrence
-	// journal: it is where the fault itself is appended, and pointing at it
-	// says nothing about whether a row exists.
-	"read the fault record file beside the database for this invocation",
-}
-
-// assertNoSecondDurableStateClaim requires the impact clause to make ITS OWN
-// stage's claim and no other.
-//
-// It removes the expected sentence and the phrases that mention a journal
-// without claiming anything about one, then requires the remainder to be silent
-// about the occurrence altogether. Pass an empty expectation for an arm that
-// may make no claim at all.
-func assertNoSecondDurableStateClaim(t *testing.T, stderr, expected string) {
+// impactClauseOf returns the diagnostic's impact clause, which is the only
+// place a durable-state claim is made.
+func impactClauseOf(t *testing.T, stderr string) string {
 	t.Helper()
-
 	const opens = "impact: "
 	start := strings.Index(stderr, opens)
 	require.NotEqual(t, -1, start,
-		"the diagnostic must still carry an impact clause; this check reads that clause and would "+
-			"pass vacuously without it")
+		"the diagnostic must carry an impact clause; this check reads that clause and would pass "+
+			"vacuously without it")
 	clause := stderr[start+len(opens):]
 	if ends := strings.Index(clause, "; fix: "); ends != -1 {
 		clause = clause[:ends]
 	}
+	return clause
+}
 
-	residue := strings.ToLower(clause)
-	if expected != "" {
-		require.Contains(t, residue, strings.ToLower(expected),
-			"the impact clause must make its own stage's claim before this check can ask what else "+
-				"it says")
-		residue = strings.ReplaceAll(residue, strings.ToLower(expected), " ")
+// expectedImpactClause composes the impact clause a given fault MUST render,
+// from the same four inputs the renderer reads.
+//
+// WHY EQUALITY, AND WHY THE WORD LIST IS GONE. Three rules have now been
+// written to hold this claim, and all three recognised a WORDING: first each
+// other stage's exact sentence, then a distinctive phrase of it, then a list of
+// four nouns "a durable-state claim cannot be made without". Every one was a
+// written-down list wearing a different coat, and a reviewer walked through all
+// three — the last with "a row for it may or may not exist in the lifecycle
+// store", which names none of the four words and makes the claim perfectly well.
+//
+// A CLAIM CANNOT BE RECOGNISED BY ITS VOCABULARY. It can be recognised by
+// EXHAUSTION: this clause is composed from the stage, the mode, the policy and
+// the exit, so the test composes it too and requires equality. Anything added,
+// reworded or moved fails, whatever words it uses, because the clause is no
+// longer the expected one. The population is the whole impact clause and the
+// rule is total over it — which is the first time that sentence is true here.
+//
+// WHAT IT DOES NOT COVER, STATED: the FIX clause beside it, and every other
+// part of the diagnostic. A durable-state claim smuggled into the fix line is
+// not read here.
+func expectedImpactClause(fault hostexit.Fault, exit hostexit.ExitStatus, recordClause string) string {
+	switch {
+	case exit == hostexit.ExitBlock:
+		return "the host refuses the operation, because this event is configured to fail closed and " +
+			"the host documents that it blocks on this exit code"
+	case fault.Policy == hostexit.FaultFailClosed && fault.Mode == pastureruntime.FailureThrowFailFast:
+		return "the host continues with its own default answer, and " + recordClause + "; " +
+			"fail-closed has no channel on OpenCode named callbacks until the typed refusal object " +
+			"exists; this invocation continued"
+	case fault.Stage == hostexit.FaultStageRecordUnknown:
+		return "the host continues with its own default answer; " + recordClause +
+			", and read the fault record file beside the database for this invocation"
 	}
-	for _, phrase := range nonClaimPhrases {
-		residue = strings.ReplaceAll(residue, strings.ToLower(phrase), " ")
-	}
-
-	for _, word := range durableStateWords {
-		assert.NotContains(t, residue, word,
-			"the impact clause says something ELSE about the occurrence after its own stage's claim "+
-				"is removed, and %q is the word it used. A durable-state claim cannot be made "+
-				"without naming the occurrence, the journal or the recording of one, so this "+
-				"catches any rewording of another stage's claim rather than the one wording that "+
-				"happened to be tried.\nremaining: %q", word, residue)
-	}
+	return "the host continues with its own default answer, and " + recordClause
 }
 
 // durableStateSentences is the durable-state sentence of every declared stage,
@@ -1296,7 +1293,21 @@ func TestEveryFaultStageRendersItsOwnDurableStateOnEveryArm(t *testing.T) {
 				// at all. Any rewording of any other stage's claim is caught,
 				// because a rewording that drops every one of those words has
 				// stopped making the claim.
-				assertNoSecondDurableStateClaim(t, outcome.Stderr, expected.Says)
+				// THE WHOLE CLAUSE, BY EQUALITY. Three predecessors recognised
+				// a wording and a reviewer walked through all three; this
+				// composes what the clause MUST be from the same inputs the
+				// renderer reads, so any rewording of any stage's claim fails
+				// because the clause is no longer the expected one.
+				assert.Equal(t,
+					expectedImpactClause(hostexit.Fault{
+						Mode: arm.Mode, DeclaredMode: arm.Declared, Policy: arm.Policy, Stage: stage,
+					}, outcome.Exit, expected.Says),
+					impactClauseOf(t, outcome.Stderr),
+					"the impact clause must be EXACTLY the one this stage and this arm compose. A "+
+						"durable-state claim cannot be recognised by its vocabulary — three rules "+
+						"tried and a reviewer walked through all three — so it is recognised by "+
+						"exhaustion instead: anything added, reworded or moved makes the clause "+
+						"differ from the one that belongs here")
 				assert.Contains(t, outcome.Stderr, "durable state "+stage.String(),
 					"the machine-readable stage must agree with the sentence beside it")
 			})
@@ -1328,7 +1339,17 @@ func TestTheBlockingArmMakesNoDurableStateClaim(t *testing.T) {
 
 	// The blocking arm may make NO durable-state claim at all, so nothing is
 	// removed before the check: the whole impact clause must be free of them.
-	assertNoSecondDurableStateClaim(t, outcome.Stderr, "")
+	assert.Equal(t,
+		expectedImpactClause(hostexit.Fault{
+			Mode:         pastureruntime.FailureExitTwoBlocks,
+			DeclaredMode: pastureruntime.FailureExitTwoBlocks,
+			Policy:       hostexit.FaultFailClosed,
+			Stage:        hostexit.FaultStageRecorded,
+		}, outcome.Exit, ""),
+		impactClauseOf(t, outcome.Stderr),
+		"the blocking arm's impact clause must be EXACTLY the refusal sentence. It does not read "+
+			"the stage, so any durable-state claim written into it would be made on behalf of "+
+			"every stage that can reach it — and equality forbids one however it is worded")
 }
 
 // TestTheEvidenceWordAgreesWithTheEvidenceAndWithTheAdviceBesideIt guards the

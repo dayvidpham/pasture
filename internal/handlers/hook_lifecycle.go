@@ -330,9 +330,22 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 // compatibility-sensitive: metamodel activation precedes derivation exactly
 // as it did before dry-run existed.
 func deliveryCommit(ctx context.Context, service receipt.Service, dispatch lifecycleDispatch, event registration.Event, delivery receipt.Delivery) (backend.HostResponse, error) {
+	// THIS REFUSAL IS BEFORE ANY WRITE, AND IT IS PAST THE CALLER'S MARKER.
+	//
+	// The marker stands at the call to this function, because the metamodel
+	// journalling below IS a write. The warrant step above it is not: it is a
+	// gate refusal, and it left the caller answering "MAY OR MAY NOT exist"
+	// while the same refusal on the invalid-capture arm answered not-recorded.
+	// One refusal, two answers, decided by which arm reached it.
+	//
+	// It is wrapped HERE rather than by moving the caller's marker, because the
+	// marker cannot sit inside a function the caller cannot see into, and
+	// because the sentinel is a property of the REGION wherever a refusal is
+	// raised — the same reason the harness refusal is wrapped where it is
+	// raised rather than where it is caught.
 	warrant, err := deliveryWarrant(delivery)
 	if err != nil {
-		return backend.HostResponse{}, err
+		return backend.HostResponse{}, fmt.Errorf("%w: %w", ErrLifecycleBeforeDurableWrite, err)
 	}
 	// On the valid-capture path, lazily journal the active metamodel BEFORE the
 	// delivery receipt is written. The definition-activation operation commits
@@ -403,7 +416,7 @@ func deliveryDerive(dispatch lifecycleDispatch, event registration.Event, delive
 // the delivery carrier of an already-classified native capture — the whole raw
 // stamping the shared pipeline applies (UAT Q2). The raw parsers are the only
 // producers that populate the origin carrier; the native path stays at the
-// zero value so its golden payloads stay byte-identical (SLICE-1 L3 pin).
+// zero value so its golden payloads stay byte-identical.
 func withRawOrigin(capture lifecycleCapture) lifecycleCapture {
 	capture.delivery.Envelope.Origin = origin.OriginRaw
 	capture.delivery.Origin = origin.OriginRaw

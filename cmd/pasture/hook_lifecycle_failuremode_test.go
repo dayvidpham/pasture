@@ -3619,8 +3619,8 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 	// defect it exists to catch, committed by the fix for an instance of it. A
 	// seventh route added to hook_lifecycle_orphans.go stayed INVISIBLE and the
 	// count stayed at six; the same route in hook_lifecycle.go was RED. AND THE
-	// FILE IT COULD NOT SEE IS THE ONE ROUND 28 HAD TO REMOVE FROM THE ROUTE
-	// LIST — the guard against a mis-enumeration could not read the very file
+	// FILE IT COULD NOT SEE IS THE ONE AN EARLIER CORRECTION HAD TO REMOVE FROM
+	// THE ROUTE LIST — the guard against a mis-enumeration could not read the very file
 	// the mis-enumeration named.
 	fileSet := token.NewFileSet()
 	entries, err := os.ReadDir(".")
@@ -3813,9 +3813,12 @@ func TestEveryWorkErrorMapsToTheDurableStateItCanSupport(t *testing.T) {
 		},
 		"the lifecycle fault happened before any durable write was attempted": {
 			Stage: hostexit.FaultStageNotRecorded,
-			Why: "the handler refused before it opened the store, so no row can exist; this row is the " +
-				"EVIDENCE that lets the ordinary refusals keep the precise claim now that the default " +
-				"is the weakest one",
+			Why: "the handler refused before it ATTEMPTED A WRITE, so no row can exist; this row is " +
+				"the EVIDENCE that lets the ordinary refusals keep the precise claim now that the " +
+				"default is the weakest one. It is defined by the WRITE and not by the open: this " +
+				"judgement claims to be reached independently of the production table, and while " +
+				"it said 'before it opened the store' it was inheriting a definition the region " +
+				"itself had already moved away from — true conclusion, false reason",
 		},
 	}
 
@@ -3856,8 +3859,10 @@ func TestEveryWorkErrorMapsToTheDurableStateItCanSupport(t *testing.T) {
 		"and a nil error must not reach a stronger claim either")
 
 	// The precise answer for the ordinary refusals is EVIDENCE, not assumption:
-	// the handler says it never opened the store, and only then is
-	// not-recorded claimed.
+	// the handler says NO WRITE WAS ATTEMPTED, and only then is not-recorded
+	// claimed. It is the write and not the open: an open creates a file and no
+	// occurrence, and refusals between the two are inside the sentinel's reach
+	// while being outside any region the open would have defined.
 	assert.Equal(t, hostexit.FaultStageNotRecorded,
 		faultStageForWorkError(fmt.Errorf("%w: %w",
 			handlers.ErrLifecycleBeforeDurableWrite, errors.New("the event is not registered"))),
@@ -4092,6 +4097,14 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 		Says            string
 		Tells           string
 		NamesIdentities bool
+		// IdentityClause is the exact clause the message must carry, its full
+		// stop included, or empty where the message must name no identity.
+		IdentityClause string
+		// Event is the coordinate to drive; empty means PreToolUse, which
+		// requires two identities. A SINGLE-identity event is driven too,
+		// because no row drove one and the singular arm therefore rendered
+		// text nothing had ever read.
+		Event string
 		// MentionsVersion says whether the HOST VERSION is a plausible cause of
 		// THIS refusal, and it is judged per disposition rather than derived
 		// from NamesIdentities. The two are not the same question: an event
@@ -4124,6 +4137,7 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 			Says:            "either an identity field is missing, renamed or unusable",
 			Tells:           identityAdvice,
 			NamesIdentities: true,
+			IdentityClause:  "; the identities this event requires are session, tool-call.",
 			MentionsVersion: true,
 		},
 		{
@@ -4136,6 +4150,21 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 			Says:            "carries a member the registration does not allow",
 			Tells:           identityAdvice,
 			NamesIdentities: true,
+			IdentityClause:  "; the identities this event requires are session, tool-call.",
+			MentionsVersion: true,
+		},
+		{
+			// A SINGLE-IDENTITY EVENT, which no row drove. The singular arm of
+			// the identity clause therefore rendered text nothing had ever
+			// read, and a reviewer restored the retired singular literal with
+			// the whole tree green.
+			Name:            "a renamed identity on an event that requires only one",
+			Event:           "SessionStart",
+			Payload:         []byte(`{"renamed":"s","hook_event_name":"SessionStart"}`),
+			Says:            "either an identity field is missing, renamed or unusable",
+			Tells:           identityAdvice,
+			NamesIdentities: true,
+			IdentityClause:  "; the identity this event requires is session.",
 			MentionsVersion: true,
 		},
 		{
@@ -4158,11 +4187,25 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 	// split, which lives in the ingress and the occurrence model and is not
 	// this slice's to make. What this closes is a disposition added with no
 	// payload driving it at all.
-	require.Len(t, refusals, len(handlers.CaptureDispositionAdvice())+1,
-		"every disposition this build states advice for must be driven here, and one disposition is "+
-			"driven TWICE because two of its causes render differently. A disposition added without a "+
-			"payload is advice nobody has read on a real invocation; a cause added without one is "+
-			"invisible to this count, which is the limit stated above")
+	// THE DRIVEN SET, NOT ITS CARDINALITY. The sentence said EVERY DISPOSITION
+	// must be driven and the check compared COUNTS: replacing the
+	// event-mismatch row with a second renamed-identity row kept the total and
+	// left that disposition driven by nothing at all. Comparing the set is what
+	// the sentence already claimed, and it retires the bare "+N" with it.
+	for disposition, advice := range handlers.CaptureDispositionAdvice() {
+		driven := false
+		for _, row := range refusals {
+			if strings.Contains(advice.Reason, row.Says) {
+				driven = true
+				break
+			}
+		}
+		assert.True(t, driven,
+			"disposition %d states advice that NO payload here drives. A count cannot see this: "+
+				"swapping one row for a duplicate of another keeps the total while a disposition "+
+				"goes unread on a real invocation, which is the difference between a set and its "+
+				"size", uint8(disposition))
+	}
 
 	for _, row := range refusals {
 		t.Run(row.Name, func(t *testing.T) {
@@ -4170,8 +4213,12 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 			database := filepath.Join(store, "pasture.db")
 			initializeLifecycleTestDatabase(t, database)
 
+			event := row.Event
+			if event == "" {
+				event = "PreToolUse"
+			}
 			run := runLifecycleHookOn(t, binary, database,
-				"claude-code", "PreToolUse", "2.1.222", row.Payload)
+				"claude-code", event, "2.1.222", row.Payload)
 
 			require.Contains(t, run.Stderr, row.Says,
 				"this subtest must drive the disposition it names; if it does not, everything below "+
@@ -4191,14 +4238,23 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 						"the refusal, so sending the reader to check it costs them an hour")
 			}
 
-			assert.NotContains(t, run.Stderr, "was not bound",
-				"the message must not report the RESULT of an inspection. Three causes share this "+
-					"disposition and they disagree about whether the identity loop ran at all: an "+
-					"unknown MEMBER returns before it, so a payload whose identities are present, "+
-					"correctly named and usable was told none of them bound")
-			if row.NamesIdentities {
-				assert.Contains(t, run.Stderr, "the identities this event requires are",
-					"where the reader must check identity fields, the message names them as context")
+			// THE CLAUSE IS PINNED WHOLE, INCLUDING ITS FULL STOP.
+			//
+			// It was NotContains("was not bound"), AND THAT STRING IS IN NO
+			// PRODUCTION TEXT — it lives only in two comments — so the
+			// assertion could never fire. Restoring the result claim in any
+			// other wording, "... are session, tool-call, and none of them was
+			// bound", left the whole tree green while the binary told an
+			// operator that identities it never inspected had failed to bind.
+			// A negative on one phrasing recognises that phrasing and nothing
+			// else; the clause ENDS at its full stop, so pinning it whole
+			// refuses every continuation of it.
+			if row.IdentityClause != "" {
+				assert.Contains(t, run.Stderr, row.IdentityClause,
+					"the identity clause must be EXACTLY %q. The message may NAME the identities "+
+						"this event requires — a reader needs them to check anything — and may "+
+						"assert NOTHING about them, because the three causes of this disposition "+
+						"disagree over whether the identity loop ran at all", row.IdentityClause)
 				return
 			}
 			assert.NotContains(t, run.Stderr, "identities this event requires",
@@ -4444,6 +4500,25 @@ func TestEveryRefusalBeforeAWriteSaysNoRowExists(t *testing.T) {
 // TestTheDurableRegionBeginsAtItsWrites reads the handler and requires the
 // evidence marker to stand at every write attempt and nowhere else.
 //
+// WHAT THIS READER VISITS, STATED BECAUSE THE LAST TWO VERSIONS CLAIMED MORE
+// THAN THEY READ:
+//   - THE SUBJECT is hookLifecycle. deliveryCommit writes too, and its writes
+//     are covered by the marker at its call site; its ONE step that precedes a
+//     write, the warrant, wraps its own refusal at the point it is raised, so
+//     nothing there depends on this reader.
+//   - THE STATEMENTS are every nested list a statement can hold — else
+//     branches, loops, switch and select cases, labelled statements and
+//     deferred closures — not IfStmt.Body alone, which is all the first version
+//     walked while its message spoke of every write in the function.
+//   - THE WRITERS are the shared commit tail and EVERY CALL HANDED THE RECEIPT
+//     SERVICE, by argument or as a receiver. Naming service.Receive and
+//     deliveryCommit was a list of the two anybody remembered, and it missed
+//     receipt.EnsureActiveMetamodel(ctx, service) — a real write one function
+//     away in this same file.
+//   - WHAT IT DOES NOT READ: a writer reached without the service in hand, and
+//     any write inside a function this reader does not open. Those are held by
+//     the behavioural routes, not here.
+//
 // THE MARKER IS A CLAIM ABOUT A REGION, so its placement is the whole of its
 // meaning. It was set above open(in.DBPath) and described as "the line the
 // durable region begins", and OPENING A STORE WRITES NO OCCURRENCE — so every
@@ -4491,14 +4566,31 @@ func TestTheDurableRegionBeginsAtItsWrites(t *testing.T) {
 			if !isCall {
 				return true
 			}
-			switch function := call.Fun.(type) {
-			case *ast.Ident:
-				if function.Name == "deliveryCommit" {
+			// THE WRITER POPULATION IS EVERY CALL THAT IS HANDED THE
+			// RECEIPT SERVICE, plus the shared commit tail.
+			//
+			// IT NAMED service.Receive AND deliveryCommit, and that is a list
+			// of the two writers anybody remembered. receipt has a
+			// package-level EnsureActiveMetamodel(ctx, service) that JOURNALS
+			// THE METAMODEL — a real write, called one function away in this
+			// same file — and it was invisible: not a method on the service, so
+			// the selector arm missed it, and not a bare identifier named
+			// deliveryCommit, so the ident arm missed it too.
+			//
+			// Recognising "the service is handed to it" needs no list to be
+			// kept: a call that can write is a call that was given the thing
+			// that writes.
+			if _, isIdentifier := call.Fun.(*ast.Ident); isIdentifier &&
+				sourceOf(call.Fun) == "deliveryCommit" {
+				found = true
+			}
+			for _, argument := range call.Args {
+				if name, isIdentifier := argument.(*ast.Ident); isIdentifier && name.Name == "service" {
 					found = true
 				}
-			case *ast.SelectorExpr:
-				if receiver, isIdentifier := function.X.(*ast.Ident); isIdentifier &&
-					receiver.Name == "service" && function.Sel.Name == "Receive" {
+			}
+			if selector, isSelector := call.Fun.(*ast.SelectorExpr); isSelector {
+				if receiver, isIdentifier := selector.X.(*ast.Ident); isIdentifier && receiver.Name == "service" {
 					found = true
 				}
 			}
@@ -4530,8 +4622,48 @@ func TestTheDurableRegionBeginsAtItsWrites(t *testing.T) {
 						fileSet.Position(statement.Pos()).Line))
 				}
 			}
-			if block, isBlock := statement.(*ast.IfStmt); isBlock {
-				walk(block.Body.List)
+			// EVERY NESTED STATEMENT LIST, not IfStmt.Body alone.
+			//
+			// THE WALK VISITED ONE POSITION. An unmarked write in an ELSE
+			// branch, a loop, a switch case, a select case or a deferred
+			// closure was never reached, so the guard's message — which speaks
+			// of every write in this function — was wider than the statements
+			// it read. The reader below visits every list a statement can hold.
+			switch nested := statement.(type) {
+			case *ast.IfStmt:
+				walk(nested.Body.List)
+				switch otherwise := nested.Else.(type) {
+				case *ast.BlockStmt:
+					walk(otherwise.List)
+				case *ast.IfStmt:
+					walk([]ast.Stmt{otherwise})
+				}
+			case *ast.BlockStmt:
+				walk(nested.List)
+			case *ast.ForStmt:
+				walk(nested.Body.List)
+			case *ast.RangeStmt:
+				walk(nested.Body.List)
+			case *ast.SwitchStmt:
+				walk(nested.Body.List)
+			case *ast.TypeSwitchStmt:
+				walk(nested.Body.List)
+			case *ast.SelectStmt:
+				walk(nested.Body.List)
+			case *ast.CaseClause:
+				walk(nested.Body)
+			case *ast.CommClause:
+				walk(nested.Body)
+			case *ast.LabeledStmt:
+				walk([]ast.Stmt{nested.Stmt})
+			case *ast.DeferStmt:
+				if closure, isClosure := nested.Call.Fun.(*ast.FuncLit); isClosure {
+					walk(closure.Body.List)
+				}
+			case *ast.GoStmt:
+				if closure, isClosure := nested.Call.Fun.(*ast.FuncLit); isClosure {
+					walk(closure.Body.List)
+				}
 			}
 		}
 	}

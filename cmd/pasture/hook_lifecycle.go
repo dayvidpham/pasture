@@ -379,8 +379,10 @@ var faultStageByError = []faultStageRow{
 	{
 		Err:   handlers.ErrLifecycleBeforeDurableWrite,
 		Stage: hostexit.FaultStageNotRecorded,
-		Why: "the handler refused before it opened the store, so no row can exist for this invocation; " +
-			"this is the EVIDENCE for a claim that used to be the default's assumption",
+		Why: "the handler refused before it ATTEMPTED A WRITE, so no row can exist for this invocation; " +
+			"this is the EVIDENCE for a claim that used to be the default's assumption. The boundary " +
+			"is the write and NOT the open: an open creates a file and no occurrence, and while " +
+			"these texts said 'the open' they described a region the code had already moved past",
 	},
 	{
 		Err:   errLifecycleWorkPanicked,
