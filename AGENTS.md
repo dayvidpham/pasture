@@ -221,7 +221,11 @@ line. Those sentences may be reworded, so anything that GROUPS faults by cause
 must not key on them. Writing such a reader is the trigger to give the result a
 typed member and keep the sentence beside it — the sentence itself must stay
 next to the condition, because that adjacency is what stops the refusal and its
-explanation from describing different things.
+explanation from describing different things. This paragraph is the ONLY place
+the trigger is written; the doc comment of `hostexit.Fault.UnusableInputs`
+points here rather than restating it, and
+`TestTheUnusableInputTriggerIsWrittenWhereAParserAuthorMeetsIt` fails if either
+end of that pointer is removed.
 
 THE FILE HAS NO RETENTION. One line of roughly 500 bytes is appended per
 faulting invocation; nothing rotates, trims or removes a line, and no command

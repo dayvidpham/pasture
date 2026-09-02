@@ -5,6 +5,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -813,4 +815,53 @@ func TestTheFaultTableIsDocumentedOnTheExitAuthorityItself(t *testing.T) {
 	} {
 		assert.NotContains(t, helper, phrase, why)
 	}
+}
+
+// TestTheUnusableInputTriggerIsWrittenWhereAParserAuthorMeetsIt holds the
+// de-duplication of the revisit trigger shut.
+//
+// The trigger — "a reader that groups faults by cause is what turns the English
+// sentences of unusableFaultInputs into a typed member" — stood in TWO places:
+// the doc comment of Fault.UnusableInputs, and the "The lifecycle fault record"
+// section of AGENTS.md. Nothing held the two together, so either could be
+// reworded or deleted while the other went on claiming to be the statement. The
+// AGENTS.md placement is the right one: the reader it addresses is an author of
+// a parser for lifecycle-faults.jsonl, and that person opens the record's
+// section, not this package's source.
+//
+// The doc comment now POINTS at that section instead of restating it, and this
+// test pins both ends of the pointer, so neither can leave without the other.
+//
+// MUTATION: delete the "de facto schema" paragraph from the AGENTS.md section,
+// or drop the "AGENTS.md" pointer from the UnusableInputs doc comment. This test
+// turns RED.
+func TestTheUnusableInputTriggerIsWrittenWhereAParserAuthorMeetsIt(t *testing.T) {
+	t.Parallel()
+
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	require.NoError(t, err, "resolve the repository root from internal/lifecycle/hostexit")
+	raw, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	require.NoError(t, err, "read AGENTS.md, which is where the revisit trigger is written")
+	agents := string(raw)
+
+	require.Contains(t, agents, "### The lifecycle fault record",
+		"the doc comment of Fault.UnusableInputs sends a parser author to this section by name; "+
+			"renaming or removing it leaves that pointer dangling")
+
+	section := agents[strings.Index(agents, "### The lifecycle fault record"):]
+	for phrase, why := range map[string]string{
+		"`unusableFaultInputs` MEMBER IS ENGLISH, NOT A STABLE KEY": "the section must still say what the member is, or the trigger below it has no subject",
+		"must not key on them": "the refusal is the whole instruction to a parser author, and it is written only here",
+		"typed member":         "the trigger is the promotion to a typed member; without it the section states a limitation and no way out",
+	} {
+		assert.Contains(t, section, phrase, why)
+	}
+
+	comment := declaredDoc(t, "Fault.UnusableInputs")
+	assert.Contains(t, comment, "AGENTS.md",
+		"the doc comment must POINT at the section rather than restate it, or the duplication "+
+			"this test removed returns")
+	assert.NotContains(t, comment, "de facto schema",
+		"the restatement was deleted on purpose; two copies of one trigger drift, and only one "+
+			"of them is where its reader looks")
 }

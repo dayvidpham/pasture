@@ -384,14 +384,14 @@ type Fault struct {
 // member was wrong. A typed value would add a second thing to keep in step
 // with the six conditions and buy no behaviour today.
 //
-// The trigger to revisit is a CONSUMER, not a preference. The durable fault
-// record now carries these sentences, which makes them a de facto schema for
-// anything that later reads that file. A reader that must group faults by
-// cause needs a stable key, and cannot get one from English that may be
-// reworded. When such a reader exists, give this result a typed member and
-// keep the sentence beside it; the sentence itself must not move away from the
-// condition, because that adjacency is what stops the refusal and the
-// explanation from describing different things.
+// The trigger to revisit is a CONSUMER, not a preference, and it is NOT
+// restated here. It is written once, in the "The lifecycle fault record"
+// section of AGENTS.md, where the person it is addressed to meets it: an author
+// of a parser for lifecycle-faults.jsonl opens that section, not this function.
+// It stood in both places with nothing holding them together, which is
+// duplication that drifts rather than a reader served twice.
+// TestTheUnusableInputTriggerIsWrittenWhereAParserAuthorMeetsIt keeps that one
+// statement in place, so removing it from AGENTS.md turns this package RED.
 func (f Fault) UnusableInputs() []string {
 	unusable := []string{}
 	if !f.Mode.IsValid() {
