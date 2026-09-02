@@ -128,6 +128,10 @@ func TestRawHelpRendersBuiltCLI(t *testing.T) {
 // lands (SLICE-2), the `hook lifecycle` parent golden is a deliberate,
 // reviewable diff — it is regenerated with UPDATE_GOLDEN=1 by the landing
 // wave only.
+// WHAT IT VISITS: the golden files listed below, one per native help surface
+// this command ships.
+// WHAT IT DOES NOT READ: a help surface with no golden. That every surface
+// HAS one is a different claim from this one, and it is not made here.
 func TestNativeHelpGoldenBytesUnchanged(t *testing.T) {
 	goldenDir := filepath.Join("testdata", "help-golden")
 	cases := []struct {

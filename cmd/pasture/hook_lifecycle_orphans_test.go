@@ -315,6 +315,12 @@ func TestAWiringFaultIsNamedAsOneAndNotAsAnOperatorMistake(t *testing.T) {
 // internal/tasks/lifecycle_identity.go are the three the two-package version
 // missed - and this test turns RED naming that file. Each was added and
 // removed in turn, and each turned it RED.
+// WHAT IT VISITS: every non-test Go file under the package roots listed
+// below, which are the surfaces a hook invocation can reach.
+// WHAT IT DOES NOT READ: a root not on that list. The list grew once
+// already, when a two-package version missed three files, and it is prose
+// rather than a derivation because "the surfaces a hook can reach" has no
+// source in the tree to read it from.
 func TestTheOrphanCountLivesOnlyOnTheOrphansReadSurface(t *testing.T) {
 	t.Parallel()
 

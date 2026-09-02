@@ -932,6 +932,12 @@ func codexFixture(t *testing.T, name string) []byte {
 // THIRD MUTATION: make declaredFailureArm consult the evidence, the way
 // evidenceBoundFailure does. The declared mode collapses onto the effective one
 // and this test turns RED on the same two rows.
+// WHAT IT VISITS: the two rows below — one declared-blocking gate with no
+// citation on each of two harnesses — because the demotion this pins applies
+// to both and a proof on one would not show it reaches the other.
+// WHAT IT DOES NOT READ: the other rows of either manifest. That the
+// evidence rule covers every row is held by the fault table over every
+// declared mode and policy, not by this pair.
 func TestTheFailClosedReasonFollowsTheDeclaredModeThroughTheBuiltBinary(t *testing.T) {
 	root := t.TempDir()
 	binary := filepath.Join(root, "lifecycle-cli")
@@ -3956,17 +3962,30 @@ func TestAPanicAfterTheCommitDoesNotClaimTheDeliveryWasNotRecorded(t *testing.T)
 // outer recovery covers the whole command body, and the region it covers AFTER
 // the work goroutine starts is, on this revision: a select on the completion
 // channel and the context; a read of the work struct; a struct literal; a
-// deferred cancel; and FOUR CALLS — lifecycleFault on the deadline arm,
-// faultStageForWorkError, lifecycleFault again on the handler-error arm, and
-// hostexit.ForDecision on the success path.
+// deferred cancel; and EIGHT CALLS:
 //
-// THE FOUR CALLS WERE OMITTED FROM THIS ENUMERATION, and that mattered because
-// one of them is the recovery's OWN handler: a panic inside lifecycleFault
-// would be caught by the defer that called it. The conclusion is unchanged —
-// none of the four can panic on this revision, each returning a value composed
-// from arguments already in hand — but an enumeration that lists only the cheap
-// statements and omits the calls is the shape this slice keeps finding, and
-// stating it honestly is the point of the paragraph.
+//	ctx.Done()                in the select
+//	lifecycleFault(...)       the deadline arm
+//	fmt.Errorf(...)           that arm's message
+//	ctx.Err()                 wrapped into it
+//	faultStageForWorkError()  the handler-error arm
+//	lifecycleFault(...)       that arm
+//	fmt.Errorf(...)           its message
+//	hostexit.ForDecision()    the success path
+//
+// THE ENUMERATION HAS BEEN WIDENED TWICE AND BOTH TIMES BY THE CONSTRUCTS
+// SOMEBODY FOUND INTERESTING. It first named four cheap statements and no
+// calls; then four calls and not the four beside them. The omitted four were
+// ctx.Done, ctx.Err and BOTH fmt.Errorf calls — and a %w-composing fmt.Errorf
+// is not a neutral construct in this command's history, where a nil cause once
+// panicked the record writer. The one call family with a panic record here was
+// the one the enumeration kept leaving out.
+//
+// THE CONCLUSION IS UNCHANGED AND EACH IS CHECKED: ctx.Done and ctx.Err read a
+// context that is non-nil for the whole region; both fmt.Errorf calls compose
+// values already in hand; faultStageForWorkError walks a table; ForDecision
+// composes an outcome. One of the eight is the recovery's OWN handler, so a
+// panic inside lifecycleFault would be caught by the defer that called it.
 //
 // So no input drives it, and no behavioural test can. The local is defensive:
 // it exists so that the next statement added to that region cannot inherit a
@@ -4106,6 +4125,12 @@ func claudePayloadWithAddedMember(t *testing.T) []byte {
 // MUTATION: give any disposition a fix belonging to another, or restore the
 // identity clause on a route that never reached the identities. That subtest
 // turns RED.
+// WHAT IT VISITS: one payload per disposition this build states advice for,
+// on the harness whose parser can produce it, driven through the built
+// binary; the disposition set itself is derived from the advice table.
+// WHAT IT DOES NOT READ: which of a disposition's several CAUSES fired —
+// the parser does not report that — and every harness for every row. It
+// drove ONE harness until a harness-specific contradiction survived it.
 func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 	root := t.TempDir()
 	binary := filepath.Join(root, "lifecycle-cli")
@@ -4128,6 +4153,15 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 		// because no row drove one and the singular arm therefore rendered
 		// text nothing had ever read.
 		Event string
+		// Harness is the parser to drive; empty means claude-code.
+		//
+		// EVERY ROW HERE WAS claude-code, AND THAT IS WHY A HARNESS-SPECIFIC
+		// CONTRADICTION SURVIVED THIS GUARD. The reason offered "or the payload
+		// carries a member the registration does not allow" to parsers that
+		// ignore such members, and this sweep could not see it because on the
+		// one harness it drove, the clause is TRUE. Neither of its two stated
+		// limits said it reads one harness.
+		Harness string
 		// MentionsVersion says whether the HOST VERSION is a plausible cause of
 		// THIS refusal, and it is judged per disposition rather than derived
 		// from NamesIdentities. The two are not the same question: an event
@@ -4191,6 +4225,20 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 			MentionsVersion: true,
 		},
 		{
+			// THE SAME DISPOSITION ON A LENIENT PARSER. The row above drives it
+			// on the validating parser, where every clause of the reason is
+			// true; this drives it where one clause is not, which is the case
+			// the single-harness sweep could not see.
+			Name:            "a renamed identity on a parser that decodes into a struct",
+			Harness:         "codex",
+			Payload:         []byte(`{"renamed":"s","hook_event_name":"PreToolUse"}`),
+			Says:            "an identity field is missing or unusable",
+			Tells:           identityAdvice,
+			NamesIdentities: true,
+			IdentityClause:  "; the identities this event requires are session, turn, tool-call.",
+			MentionsVersion: true,
+		},
+		{
 			Name:            "a payload that declares a different event",
 			Payload:         []byte(`{"session_id":"s","hook_event_name":"SessionEnd","tool_name":"R","tool_input":{}}`),
 			Says:            "the payload does not report this event — the field is absent, unreadable, or names a different event",
@@ -4215,12 +4263,17 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 	// event-mismatch row with a second renamed-identity row kept the total and
 	// left that disposition driven by nothing at all. Comparing the set is what
 	// the sentence already claimed, and it retires the bare "+N" with it.
-	for disposition, advice := range handlers.CaptureDispositionAdvice() {
+	for disposition := range handlers.CaptureDispositionAdvice() {
+		// AGAINST EVERY REASON THIS DISPOSITION CAN RENDER, not one string. One
+		// reason is composed from the parser that refused, so asking against a
+		// single text made a composed disposition look undriven.
 		driven := false
-		for _, row := range refusals {
-			if strings.Contains(advice.Reason, row.Says) {
-				driven = true
-				break
+		for _, reason := range handlers.CaptureDispositionReasons(disposition) {
+			for _, row := range refusals {
+				if strings.Contains(reason, row.Says) {
+					driven = true
+					break
+				}
 			}
 		}
 		assert.True(t, driven,
@@ -4240,8 +4293,15 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 			if event == "" {
 				event = "PreToolUse"
 			}
+			harness, version := row.Harness, "2.1.222"
+			if harness == "" {
+				harness = "claude-code"
+			}
+			if harness == "codex" {
+				version = "0.146.0"
+			}
 			run := runLifecycleHookOn(t, binary, database,
-				"claude-code", event, "2.1.222", row.Payload)
+				harness, event, version, row.Payload)
 
 			require.Contains(t, run.Stderr, row.Says,
 				"this subtest must drive the disposition it names; if it does not, everything below "+
@@ -4259,6 +4319,18 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 				assert.NotContains(t, run.Stderr, versionAdvice,
 					"the host version was never inspected on this route and could not have caused "+
 						"the refusal, so sending the reader to check it costs them an hour")
+			}
+
+			// THE REASON AND THE REMEDY MUST NOT DISAGREE. One offered an
+			// added member as a possible CAUSE while the other, three clauses
+			// later in the same rendered line, said added members are IGNORED.
+			// A reader cannot act on a sentence that argues with itself.
+			if strings.Contains(run.Stderr, "Members this build does not declare are IGNORED") {
+				assert.NotContains(t, run.Stderr, "carries a member the registration does not allow",
+					"this message offers an added member as a possible cause AND says added members "+
+						"are ignored. The remedy half was repaired and the diagnosis half was left, "+
+						"so one message now contradicts itself on every harness whose parser "+
+						"decodes into a struct")
 			}
 
 			// THE CLAUSE IS PINNED WHOLE, INCLUDING ITS FULL STOP.
@@ -4545,9 +4617,16 @@ func TestEveryRefusalBeforeAWriteSaysNoRowExists(t *testing.T) {
 //     deliveryCommit was a list of the two anybody remembered, and it missed
 //     receipt.EnsureActiveMetamodel(ctx, service) — a real write one function
 //     away in this same file.
-//   - WHAT IT DOES NOT READ: a writer reached without the service in hand, and
-//     any write inside a function this reader does not open. Those are held by
-//     the behavioural routes, not here.
+//   - WHAT IT DOES NOT READ: a writer reached without the service in hand; any
+//     write inside a function this reader does not open; and A SERVICE HELD IN
+//     A CONTAINER. The receiver and argument checks accept an IDENTIFIER, so
+//     `deps.Svc.Receive(...)`, `byName["a"].Receive(...)` and
+//     `holder[0].Receive(...)` are all genuine unmarked writes that pass — and
+//     a dependency struct is the ordinary Go way to carry collaborators, so
+//     this is the likeliest of the three to arrive. It is stated rather than
+//     closed because resolving a container element to the value it holds is
+//     type resolution, which this reader does not do; the earlier sentence
+//     "EVERY CALL HANDED THE RECEIPT SERVICE" was false of exactly this case.
 //
 // THE MARKER IS A CLAIM ABOUT A REGION, so its placement is the whole of its
 // meaning. It was set above open(in.DBPath) and described as "the line the
@@ -4925,13 +5004,93 @@ func TestTheWarrantRefusalCarriesItsOwnEvidence(t *testing.T) {
 // sweep below reads these and no others, because a guard it flags is a guard
 // somebody must be able to change, and reaching into another slice's file is
 // how ownership statements stop meaning anything.
-var guardSweepSubjects = []string{
+// guardSweepOwned are the test files in this package that are inside this
+// slice's DERIVED owned set. guardSweepForeign are the ones that are not, each
+// with the reason. Together they must be EXACTLY the directory.
+//
+// TWO LISTS AND A COVERAGE PIN, because each single list failed differently. A
+// positive list alone was a DEAD PIN: it was called derived, was hand-written,
+// and dropping two files from it left the suite green. Inverting it to an
+// exclusion list made the sweep reach into four files this slice does not own,
+// which is the opposite error. Requiring the two to PARTITION the directory
+// gives what neither had: a file cannot leave the sweep without being written
+// down as foreign, and a new file cannot arrive without being classified at all.
+var guardSweepOwned = []string{
 	"hook_environment_test.go",
 	"hook_lifecycle_codex_test.go",
 	"hook_lifecycle_docs_test.go",
 	"hook_lifecycle_failuremode_test.go",
 	"hook_lifecycle_orphans_test.go",
 	"hook_lifecycle_production_test.go",
+}
+
+// guardSweepForeign are the package's other test files, which this slice does
+// not own. The guards they carry are handed to their owners, not reached for.
+var guardSweepForeign = map[string]string{
+	"bundle_export_test.go":                      "outside the slice's derived owned set",
+	"epoch_test.go":                              "outside the slice's derived owned set",
+	"hook_lifecycle_context_production_test.go":  "outside the slice's derived owned set",
+	"hook_lifecycle_gate_test.go":                "outside the slice's derived owned set",
+	"hook_lifecycle_lineage_production_test.go":  "outside the slice's derived owned set",
+	"hook_lifecycle_raw_test.go":                 "outside the slice's derived owned set",
+	"hook_lifecycle_readback_production_test.go": "outside the slice's derived owned set",
+	"hook_test.go":                               "outside the slice's derived owned set",
+	"install_frontend_test.go":                   "outside the slice's derived owned set",
+	"install_test.go":                            "outside the slice's derived owned set",
+	"install_verbs_test.go":                      "outside the slice's derived owned set",
+	"integration_test.go":                        "outside the slice's derived owned set",
+	"main_test.go":                               "outside the slice's derived owned set",
+	"queue_test.go":                              "outside the slice's derived owned set",
+	"version_test.go":                            "outside the slice's derived owned set",
+}
+
+// guardSweepSubjects returns the owned files, and REQUIRES the two lists to
+// partition the directory so neither can drift from it.
+func guardSweepSubjects(t *testing.T) []string {
+	t.Helper()
+	entries, err := os.ReadDir(".")
+	require.NoError(t, err, "the package directory must be readable to classify its test files")
+
+	classified := map[string]bool{}
+	for _, name := range guardSweepOwned {
+		classified[name] = true
+	}
+	for name := range guardSweepForeign {
+		classified[name] = true
+	}
+	unclassified := []string{}
+	present := map[string]bool{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		present[name] = true
+		if !classified[name] {
+			unclassified = append(unclassified, name)
+		}
+	}
+	sort.Strings(unclassified)
+	require.Empty(t, unclassified,
+		"these test files are neither owned nor declared foreign: %v. Every file in this package "+
+			"must be one or the other, so a new one cannot arrive unswept and an owned one cannot "+
+			"leave the sweep without somebody writing down why", unclassified)
+
+	missing := []string{}
+	for name := range classified {
+		if !present[name] {
+			missing = append(missing, name)
+		}
+	}
+	sort.Strings(missing)
+	require.Empty(t, missing,
+		"these files are classified and do not exist: %v. A stale entry hides a real file behind a "+
+			"name nobody checks", missing)
+
+	subjects := append([]string{}, guardSweepOwned...)
+	sort.Strings(subjects)
+	require.NotEmpty(t, subjects, "the sweep must have subjects, or every assertion is vacuous")
+	return subjects
 }
 
 // guardReachClaims are the phrases a guard's own doc uses to claim it reads a
@@ -4952,11 +5111,22 @@ var guardReachClaims = []string{
 //
 // These phrases each say something about the guard's own REACH, in a form that
 // is hard to write by accident while describing something else.
+// guardReachDisclaimers are the LABELS that open a reach statement. A discharge
+// must HEAD ITS OWN LINE, which is what makes it about the guard rather than
+// about anything the doc happens to mention.
+//
+// THE SUBJECT AXIS, which two rewrites missed. The first discharge was single
+// words; the second was the phrases a reviewer had used; both were substring
+// tests over the whole doc, so a sentence about THE PRODUCT — "the product
+// READS ONLY the bytes on standard input", "WHAT IT DOES NOT do is open a
+// database" — silenced the sweep on the first attempt. Requiring the phrase to
+// open a line cannot be satisfied by prose describing something else, because
+// an honest reach statement is already written that way and an accidental one
+// is not.
 var guardReachDisclaimers = []string{
-	"what it visits", "what it does not", "does not read", "does not cover",
-	"what it does not read", "stated limit", "the limit, stated", "honest limit",
-	"cannot reach", "not visited", "out of reach", "passes vacuously",
-	"is not read here", "reads only", "visits only",
+	"what it visits", "what it does not read", "what it does not cover",
+	"what it does not visit", "the limit, stated", "an honest limit",
+	"what this does not read", "it reads only", "it visits only",
 }
 
 // rangesOverAConstantPopulation reports whether a function RANGES OVER a
@@ -4968,6 +5138,49 @@ var guardReachDisclaimers = []string{
 // SHAPE is what lets this sweep avoid being the thirteenth instance of the
 // class it looks for: it does not ask what a doc MEANS, it asks what the code
 // RANGES OVER.
+// compositeBehind resolves a ranged-over expression to the composite literal
+// that supplies it: the literal itself, or the one a name in this function is
+// bound to.
+//
+// WHAT IT VISITS: a literal at the range site, and a name assigned or declared
+// a literal inside the same function.
+// WHAT IT DOES NOT READ: a package-level variable, a value returned by a call,
+// and a table built by appends. Those remain invisible, and this sentence is
+// the only thing standing between that and a claim of completeness.
+func compositeBehind(function *ast.FuncDecl, ranged ast.Expr) *ast.CompositeLit {
+	if literal, isLiteral := ranged.(*ast.CompositeLit); isLiteral {
+		return literal
+	}
+	name, isIdentifier := ranged.(*ast.Ident)
+	if !isIdentifier {
+		return nil
+	}
+	var found *ast.CompositeLit
+	ast.Inspect(function, func(node ast.Node) bool {
+		switch bound := node.(type) {
+		case *ast.AssignStmt:
+			for index, target := range bound.Lhs {
+				if candidate, isName := target.(*ast.Ident); isName && candidate.Name == name.Name &&
+					index < len(bound.Rhs) {
+					if literal, isLiteral := bound.Rhs[index].(*ast.CompositeLit); isLiteral {
+						found = literal
+					}
+				}
+			}
+		case *ast.ValueSpec:
+			for index, candidate := range bound.Names {
+				if candidate.Name == name.Name && index < len(bound.Values) {
+					if literal, isLiteral := bound.Values[index].(*ast.CompositeLit); isLiteral {
+						found = literal
+					}
+				}
+			}
+		}
+		return true
+	})
+	return found
+}
+
 func rangesOverAConstantPopulation(function *ast.FuncDecl) bool {
 	found := false
 	ast.Inspect(function, func(node ast.Node) bool {
@@ -4975,8 +5188,14 @@ func rangesOverAConstantPopulation(function *ast.FuncDecl) bool {
 		if !isRange {
 			return true
 		}
-		literal, isLiteral := loop.X.(*ast.CompositeLit)
-		if !isLiteral || len(literal.Elts) < 2 {
+		// THE BINDING AXIS, which nobody had probed and which I did not widen
+		// when I widened the ELEMENT axis a reviewer did probe. A table lifted
+		// into a local or a package-level variable is the same written-down
+		// population one line further away, and it hid FIVE of this slice's own
+		// class-claiming guards — so "zero flagged" was an artefact of the
+		// reader, not an outcome of the code.
+		literal := compositeBehind(function, loop.X)
+		if literal == nil || len(literal.Elts) < 2 {
 			return true
 		}
 		// ANY WRITTEN-DOWN COLLECTION, NOT A LIST OF STRING LITERALS.
@@ -5012,9 +5231,11 @@ func rangesOverAConstantPopulation(function *ast.FuncDecl) bool {
 //
 // WHAT IT DOES NOT — AND THIS IS THE HONEST HALF, WITHOUT WHICH THIS SWEEP
 // WOULD BE THE THIRTEENTH INSTANCE:
+//
 //   - It CANNOT decide whether a stated population is TRUE of the code. That is
 //     the reviewers' work, and comparing a sentence to a reader's reach needs
 //     the meaning of both.
+//
 //   - THE SUBJECT IS THIS SLICE'S OWN TEST FILES IN THIS PACKAGE, and that
 //     bound is a fact about who may change what, not about where the defect
 //     lives. THE SET WAS TWO FILES AND IS SIX: it was written from the
@@ -5024,17 +5245,35 @@ func rangesOverAConstantPopulation(function *ast.FuncDecl) bool {
 //     the latter named verbatim in the slice's own ownership fold — were
 //     reported as somebody else's. The set here is derived from those
 //     statements plus the grants, and it must be widened with them.
-//     TestInvalidInvocationCreatesNoDatabaseFile (hook_lifecycle_gate_test.go)
-//     and TestCLI_QueueConcurrency_ReportsADatabaseWithNoQueues (queue_test.go)
-//     are genuinely outside and are reported to their owners.
+//     The files genuinely outside are named in guardSweepForeign with a reason,
+//     and the two lists must PARTITION the directory, so a file cannot leave
+//     the sweep unnoticed and a new one cannot arrive unclassified.
+//
+//     THE HANDOVER, MEASURED RATHER THAN REMEMBERED. Running the same predicate
+//     over the foreign files finds SEVEN guards carrying the shape; the previous
+//     handover named two. They are, for their owners to judge:
+//     TestCLI_HookRecord_FlagWiring_RoundTrips,
+//     TestCLI_QueueConcurrency_RejectsBadArguments,
+//     TestCLI_QueueConcurrency_ReportsADatabaseWithNoQueues,
+//     TestCLI_S10_TaskCreate_LeavesUnifiedAuditTables,
+//     TestInvalidInvocationCreatesNoDatabaseFile,
+//     TestLineageMaterializeThenSecondRunIsNoOp and
+//     TestRawContinuationParityWithNativePerEvent.
+//     TestTheOutOfSetHandoverNamesEveryGuardItFound keeps that list honest, so
+//     it cannot go stale the way the one it replaces did.
+//
 //   - Guards in internal/lifecycle/hostexit and internal/handlers are not
 //     visited; their packages must ask this of themselves.
-//   - It finds a list ONLY where the collection is written INLINE at the range
-//     site. A population held in a package-level variable, built by appends, or
-//     spelled as a switch is invisible to it. It no longer asks what the
-//     elements ARE — strings, structs, typed constants and map entries all
-//     count — because requiring string literals made it blind to the very shape
-//     of the archetype it was modelled on.
+//
+//   - It finds a list written INLINE at the range site, or held in a name bound
+//     a literal INSIDE THE SAME FUNCTION. A population held in a package-level
+//     variable, returned by a call, or built by appends is invisible to it, and
+//     so is one spelled as a switch. It no longer asks what the elements ARE —
+//     strings, structs, typed constants and map entries all count — because
+//     requiring string literals made it blind to the very shape of the
+//     archetype it was modelled on, and it no longer asks that the literal sit
+//     at the range site, because that hid five of this package's own guards.
+//
 //   - Its claim vocabulary is itself a list, which is the very move that failed
 //     three times. It is admissible only because it is not the whole rule: it
 //     narrows WHICH guards are asked, and the structural half above is what
@@ -5046,7 +5285,7 @@ func TestEveryGuardThatClaimsAClassSaysWhatItReads(t *testing.T) {
 
 	silent := []string{}
 	claiming := 0
-	for _, name := range guardSweepSubjects {
+	for _, name := range guardSweepSubjects(t) {
 		parsed, parseErr := parser.ParseFile(token.NewFileSet(), name, nil, parser.ParseComments)
 		require.NoError(t, parseErr, "every subject file must parse: %s", name)
 		entry := struct{ Name func() string }{Name: func() string { return name }}
@@ -5070,10 +5309,20 @@ func TestEveryGuardThatClaimsAClassSaysWhatItReads(t *testing.T) {
 			if !rangesOverAConstantPopulation(function) {
 				continue
 			}
+			// A LABEL AT THE HEAD OF A LINE, not a substring anywhere in the
+			// doc. Comment markers and leading punctuation are stripped first,
+			// because a doc line reads "// WHAT IT VISITS: ..." or
+			// "//   - WHAT IT DOES NOT READ: ...".
 			discharged := false
-			for _, phrase := range guardReachDisclaimers {
-				if strings.Contains(doc, phrase) {
-					discharged = true
+			for _, line := range strings.Split(doc, "\n") {
+				opening := strings.ToLower(strings.TrimLeft(line, " \t-*•"))
+				for _, phrase := range guardReachDisclaimers {
+					if strings.HasPrefix(opening, phrase) {
+						discharged = true
+						break
+					}
+				}
+				if discharged {
 					break
 				}
 			}
@@ -5097,23 +5346,60 @@ func TestEveryGuardThatClaimsAClassSaysWhatItReads(t *testing.T) {
 			"claims, or the vocabulary above no longer matches how they are written — and in the "+
 			"second case this sweep is asking nothing of anybody")
 
-	control, controlErr := parser.ParseFile(token.NewFileSet(), "control.go", `package main
+	// ONE CONTROL PER AXIS THE DETECTOR HAS. Once every owned guard states its
+	// reach, "zero flagged" is green whether the detector is wide or narrow, so
+	// narrowing it CANNOT be caught by the subject files. Each axis therefore
+	// gets a synthetic input the detector must still recognise. Both axes here
+	// were widened only after a reviewer probed them; the controls are what
+	// stop the next narrowing from being silent.
+	for _, control := range []struct {
+		Axis   string
+		Source string
+	}{
+		{
+			Axis: "a literal AT THE RANGE SITE",
+			Source: `package main
 func TestControl() {
 	for _, item := range []string{"one", "two"} {
 		_ = item
 	}
-}`, parser.ParseComments)
-	require.NoError(t, controlErr, "the negative control must parse")
-	controlFound := false
-	for _, node := range control.Decls {
-		if function, isFunction := node.(*ast.FuncDecl); isFunction {
-			controlFound = rangesOverAConstantPopulation(function)
-		}
+}`,
+		},
+		{
+			Axis: "a literal HELD IN A LOCAL, one line away from the range",
+			Source: `package main
+func TestControl() {
+	rows := []struct{ Name string }{{Name: "one"}, {Name: "two"}}
+	for _, item := range rows {
+		_ = item
 	}
-	require.True(t, controlFound,
-		"the structural half must still recognise a guard that RANGES OVER A WRITTEN-DOWN LIST. "+
-			"With no such guard in the subject files, this control is the only thing standing "+
-			"between a working detector and one that reports nothing because it sees nothing")
+}`,
+		},
+		{
+			Axis: "a literal held in a VAR DECLARATION",
+			Source: `package main
+func TestControl() {
+	var rows = map[string]string{"a": "one", "b": "two"}
+	for key := range rows {
+		_ = key
+	}
+}`,
+		},
+	} {
+		parsed, controlErr := parser.ParseFile(token.NewFileSet(), "control.go", control.Source, parser.ParseComments)
+		require.NoError(t, controlErr, "the %s control must parse", control.Axis)
+		recognised := false
+		for _, node := range parsed.Decls {
+			if function, isFunction := node.(*ast.FuncDecl); isFunction {
+				recognised = rangesOverAConstantPopulation(function)
+			}
+		}
+		require.True(t, recognised,
+			"the detector no longer recognises %s. With every owned guard discharged, narrowing it "+
+				"produces ZERO FLAGGED and a green suite, so this control is the only thing "+
+				"standing between a working detector and one that reports nothing because it sees "+
+				"nothing", control.Axis)
+	}
 	sort.Strings(silent)
 	assert.Empty(t, silent,
 		"these guards claim a CLASS in their doc and say nothing about the population they "+
@@ -5140,7 +5426,8 @@ func TestControl() {
 // pattern recognising its family. It is the same table its sibling carries, and
 // the same reasoning applies to every entry.
 var packageInternalReferenceForms = map[string]string{
-	"<project>-xxxxx": `\b[a-z][a-z0-9]*(?:-[a-z0-9]+)*-(?:[a-z0-9]{3,}[0-9][a-z0-9]*|[a-z0-9]*[0-9][a-z0-9]{3,})\b`,
+	// Built from the DERIVED prefix at run time; see packageTaskIdentifierCorpus.
+	"<project>-xxxxx": ``,
 	"beads://…":       `beads://`,
 	"p3-propose":      `\bp\d+-[a-z][a-z-]*\b`,
 	"s10-review":      `\bs\d+-[a-z][a-z-]*\b`,
@@ -5154,12 +5441,6 @@ var packageInternalReferenceForms = map[string]string{
 	"Scenario 14":     `\bScenario \d+\b`,
 	"D5":              `\bD\d{1,2}\b`,
 	"R13":             `\bR\d{1,2}\b`,
-}
-
-// packageWidthCheckedExamples must all be recognised, so a derivation cannot
-// come out narrower than the three literals it replaced.
-var packageWidthCheckedExamples = []string{
-	"aura-plugins-hc2jq3", "aura-plugins-a6h3d", "SLICE-3", "PROPOSAL-2", "URD", "p3-propose",
 }
 
 // packageInternalReferencePatterns derives the forbidden forms from the AGENTS.md
@@ -5208,20 +5489,34 @@ func packageInternalReferencePatterns(t *testing.T) []*regexp.Regexp {
 		"AGENTS.md spells these forbidden forms and this guard cannot recognise them: %v. The "+
 			"POPULATION is read from the rule so a new form cannot be missed in silence; give each "+
 			"a pattern, or map it to the empty string with the reason it is not recognised", unknown)
+	// THE SAME REPOSITORY SCAN ITS SIBLING RUNS. The two packages cannot share a
+	// helper, but they share a SOURCE: both derive the prefix and the corpus
+	// from this tree, so their populations are equal by construction rather
+	// than by a comment claiming they are. The two hand-written example lists
+	// this replaces had ALREADY diverged, eight against six, under a comment
+	// saying they carried the same ones.
+	prefix, corpus := packageTaskIdentifierCorpus(t, root)
+	patterns = append(patterns, regexp.MustCompile(`\b`+regexp.QuoteMeta(prefix)+`-[a-z0-9]{4,}\b`))
 	require.NotEmpty(t, patterns, "the guard must recognise at least one form")
 
-	for _, example := range packageWidthCheckedExamples {
+	for _, identifier := range corpus {
 		recognised := false
 		for _, pattern := range patterns {
-			if pattern.MatchString(example) {
+			if pattern.MatchString(identifier) {
 				recognised = true
 				break
 			}
 		}
 		require.True(t, recognised,
-			"the derived patterns do not recognise %q, which the literals this guard replaced did. "+
-				"A derivation narrower than its list is a regression wearing the word 'derived'",
-			example)
+			"the derived patterns do not recognise %q, a REAL identifier from this repository's "+
+				"own records. A derivation narrower than the population it stands for is a "+
+				"regression wearing the word 'derived'", identifier)
+	}
+	for _, durable := range packageDurableReferenceSamples {
+		for _, pattern := range patterns {
+			require.NotRegexp(t, pattern, packageStripDurablePaths(durable),
+				"%q is a reference the rule RECOMMENDS and %s refuses it", durable, pattern)
+		}
 	}
 	return patterns
 }
@@ -5234,7 +5529,7 @@ func packageInternalReferencePatterns(t *testing.T) []*regexp.Regexp {
 func assertNoInternalReferenceInPackage(t *testing.T, where, text string) {
 	t.Helper()
 	for _, pattern := range packageInternalReferencePatterns(t) {
-		assert.NotRegexp(t, pattern, text,
+		assert.NotRegexp(t, pattern, packageStripDurablePaths(text),
 			"%s carries an internal process reference matching %s. These identifiers mean nothing "+
 				"to the person reading them and they rot as tasks close and proposals are "+
 				"superseded; cite a durable file path, or nothing at all", where, pattern)
@@ -5315,4 +5610,199 @@ func TestTheSchemaAdviceFollowsTheParserThatRefused(t *testing.T) {
 				"nor may it be told names must match exactly, when SESSION_ID and sessionid both bind")
 		})
 	}
+}
+
+// stripDurablePaths removes the tokens the rule names as LEGITIMATE — file
+// paths and URLs — before the forbidden forms are looked for.
+//
+// WHY: the rule's own recommended replacement for an internal reference is
+// `docs/proposals/PROPOSAL-2-pasture-workflow-record.md`, and the PROPOSAL-N
+// pattern matches inside it. Without this, citing the document the rule tells
+// you to cite would fail the guard that enforces the rule.
+func packageStripDurablePaths(text string) string {
+	return regexp.MustCompile(`\S*/\S*`).ReplaceAllString(text, " ")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE TASK-IDENTIFIER CORPUS, DERIVED FROM THIS REPOSITORY'S OWN RECORDS
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// THE AXES THIS DERIVATION HAS TO COVER, NAMED BEFORE IT IS WRITTEN, because
+// the last two attempts were each exactly as wide as the probe that found them:
+//
+//	LENGTH    — a suffix is five OR six characters. The first pattern pinned
+//	            five, translated from the illustration beside the rule.
+//	ALPHABET  — a suffix is base-36 and about one in three carries NO DIGIT.
+//	            The second pattern required a digit, so 37 real ids in this
+//	            slice's own record passed, including the founding blocker.
+//	POPULATION— the examples that check the width were hand-written, so the
+//	            check measured LENGTH while the pattern had narrowed on ALPHABET
+//	            and nothing noticed.
+//	OVER-MATCH— the digit heuristic ALSO matched a workflow id, a content digest
+//	            and a versioned capture path, which are the DURABLE references
+//	            the rule recommends using instead of an internal id.
+//	DRIFT     — two packages carry this guard and their example lists had
+//	            already diverged while a comment said they were the same.
+//
+// ONE DERIVATION CLOSES ALL FIVE. The prefix and the ids are read from the
+// repository, so alphabet and length are whatever the real ids are; the width
+// check is the corpus itself, so it cannot measure a different axis from the
+// one the pattern narrows on; anchoring on the derived PREFIX makes a digest or
+// a workflow id impossible to match; and both packages scan the same tree, so
+// their populations are equal by construction rather than by a comment.
+
+// taskIdentifierCorpus returns the project prefix that task identifiers in this
+// repository carry, and every distinct identifier found under it.
+//
+// WHAT IT VISITS: every .go and .md file under the repository root.
+// WHAT IT DOES NOT READ: any other file kind, and identifiers that appear
+// nowhere in the tree. It derives the SHAPE from real instances; it cannot
+// invent a form the repository has never carried.
+func packageTaskIdentifierCorpus(t *testing.T, root string) (string, []string) {
+	t.Helper()
+
+	shape := regexp.MustCompile(`\b([a-z][a-z0-9]*(?:-[a-z0-9]+)*)-([a-z0-9]{5,6})\b`)
+	found := map[string]map[string]bool{}
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || info.IsDir() {
+			return nil
+		}
+		if ext := filepath.Ext(path); ext != ".go" && ext != ".md" {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		for _, match := range shape.FindAllStringSubmatch(string(raw), -1) {
+			prefix, suffix := match[1], match[2]
+			if found[prefix] == nil {
+				found[prefix] = map[string]bool{}
+			}
+			found[prefix][prefix+"-"+suffix] = true
+		}
+		return nil
+	})
+	require.NoError(t, err, "walk the repository for real task identifiers")
+
+	// THE SELECTOR IS DISTINCT SUFFIXES UNDER A MULTI-WORD PREFIX, and it is
+	// not occurrence count. Ranking by occurrences elects "review", because
+	// ordinary hyphenated English dominates a Go repository and any five- or
+	// six-letter word looks like a suffix. A task identifier is generated, so
+	// ONE prefix carries MANY DISTINCT random suffixes while an English phrase
+	// carries a handful: measured here, 56 against 8 for the runner-up. The
+	// prefix must itself be multi-word, which every project identifier is and
+	// most stray matches are not.
+	prefix, best := "", 0
+	for candidate, identifiers := range found {
+		if !strings.Contains(candidate, "-") {
+			continue
+		}
+		if distinct := len(identifiers); distinct > best ||
+			(distinct == best && candidate < prefix) {
+			prefix, best = candidate, distinct
+		}
+	}
+	require.NotEmpty(t, prefix,
+		"no task identifier shape occurs anywhere in this repository, so this guard has nothing to "+
+			"derive from and every assertion resting on it would pass vacuously")
+
+	identifiers := make([]string, 0, len(found[prefix]))
+	for identifier := range found[prefix] {
+		identifiers = append(identifiers, identifier)
+	}
+	sort.Strings(identifiers)
+
+	// THE CORPUS MUST COVER THE ALPHABET AXIS, or the width check measures
+	// length again while the pattern narrows on characters.
+	digitFree := 0
+	for _, identifier := range identifiers {
+		if !regexp.MustCompile(`[0-9]`).MatchString(identifier[len(prefix)+1:]) {
+			digitFree++
+		}
+	}
+	require.GreaterOrEqual(t, len(identifiers), 20,
+		"the corpus must be large enough to be a population rather than a handful; found %d",
+		len(identifiers))
+	require.NotZero(t, digitFree,
+		"the corpus carries no DIGIT-FREE identifier, so it cannot catch a pattern that narrows on "+
+			"the alphabet — which is exactly how the previous width check passed while one real "+
+			"identifier in three went unrecognised")
+	return prefix, identifiers
+}
+
+// durableReferenceSamples are references the rule RECOMMENDS. None may be
+// recognised as an internal identifier: a guard that refuses the replacement it
+// exists to encourage is worse than no guard.
+//
+// THEY ARE SAMPLES AND NOT THE CLASS, one per axis the over-match had: a
+// workflow identifier, a content digest, a versioned path, and ordinary
+// hyphenated English from this command's own diagnostics.
+var packageDurableReferenceSamples = []string{
+	"e005-416d-a53a-49b495cd5d4a",
+	"sha256-9f2a1b",
+	"pre-tool-use-0146",
+	"report-and-continue",
+	"throw-fail-fast",
+	"fail-closed",
+	"docs/proposals/PROPOSAL-2-pasture-workflow-record.md",
+}
+
+// TestTheOutOfSetHandoverNamesEveryGuardItFound runs the same predicate over the
+// FOREIGN files and requires the handover in this package to name every guard it
+// finds there.
+//
+// WHAT IT VISITS: every file in guardSweepForeign, with the same claim-and-shape
+// predicate the sweep uses on the owned ones.
+// WHAT IT DOES NOT READ: whether those guards are actually defective — that is
+// their owners' judgement, and this hands them a list rather than a verdict.
+//
+// WHY IT EXISTS. The handover was written from the guards a reviewer happened to
+// name, and said TWO where the predicate finds more. A handover assembled from
+// memory is the same defect as a population assembled from memory, one document
+// further out, and it is the one place where being wrong costs somebody ELSE the
+// time.
+func TestTheOutOfSetHandoverNamesEveryGuardItFound(t *testing.T) {
+	t.Parallel()
+
+	found := []string{}
+	for name := range guardSweepForeign {
+		parsed, parseErr := parser.ParseFile(token.NewFileSet(), name, nil, parser.ParseComments)
+		require.NoError(t, parseErr, "every foreign test file must parse: %s", name)
+		for _, node := range parsed.Decls {
+			function, isFunction := node.(*ast.FuncDecl)
+			if !isFunction || !strings.HasPrefix(function.Name.Name, "Test") || function.Doc == nil {
+				continue
+			}
+			doc := strings.ToLower(function.Doc.Text())
+			claims := false
+			for _, phrase := range guardReachClaims {
+				if strings.Contains(doc, phrase) {
+					claims = true
+					break
+				}
+			}
+			if claims && rangesOverAConstantPopulation(function) {
+				found = append(found, function.Name.Name)
+			}
+		}
+	}
+	sort.Strings(found)
+	require.NotEmpty(t, found,
+		"the predicate must find guards in the foreign files; finding none means it no longer "+
+			"matches how they are written and this handover is empty for the wrong reason")
+
+	handover, err := os.ReadFile("hook_lifecycle_failuremode_test.go")
+	require.NoError(t, err, "read the file that carries the handover")
+	unnamed := []string{}
+	for _, name := range found {
+		if !strings.Contains(string(handover), name) {
+			unnamed = append(unnamed, name)
+		}
+	}
+	assert.Empty(t, unnamed,
+		"the predicate finds these guards in files this slice does not own, and the handover in "+
+			"this package does not name them: %v. A handover written from the guards somebody "+
+			"remembered is the same defect as a population written that way, one document further "+
+			"out — and this is the one where being wrong costs another owner the time", unnamed)
 }

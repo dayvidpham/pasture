@@ -1471,14 +1471,11 @@ var internalReferenceForms = map[string]string{
 	// literals it replaced matched them all. A derivation that is NARROWER than
 	// the list it supersedes is a regression wearing the word "derived", which
 	// is why widthCheckedExamples below refuses one.
-	// The suffix is a RANGE with a DIGIT in it, and both halves are load-bearing.
-	// Pinning the length to five translated the illustration; widening it to
-	// "four or more" then matched every ordinary kebab-case phrase this
-	// diagnostic contains — report-and-continue, throw-fail-fast — and would
-	// have refused legitimate text. A Beads suffix is a generated token and
-	// always carries a digit, which is what separates it from a hyphenated
-	// English phrase.
-	"<project>-xxxxx": `\b[a-z][a-z0-9]*(?:-[a-z0-9]+)*-(?:[a-z0-9]{3,}[0-9][a-z0-9]*|[a-z0-9]*[0-9][a-z0-9]{3,})\b`,
+	// The task-identifier pattern is BUILT FROM THE DERIVED PREFIX at run time,
+	// so this entry is a placeholder the builder replaces. It is not a pattern
+	// written here because every pattern written here has narrowed: on length
+	// first, then on alphabet. See taskIdentifierCorpus.
+	"<project>-xxxxx": ``,
 	"beads://…":       `beads://`,
 	// Protocol process artefacts.
 	"p3-propose":  `\bp\d+-[a-z][a-z-]*\b`,
@@ -1540,31 +1537,6 @@ func internalReferenceExemplars(t *testing.T) []string {
 	return exemplars
 }
 
-// widthCheckedExamples are strings that MUST be recognised, whatever the
-// derivation produces.
-//
-// WHY A DERIVATION NEEDS THIS. Deriving the population from the rule removed
-// the risk that a form is missed because nobody remembered it, and introduced a
-// new one nobody was watching for: that the translation comes out NARROWER than
-// the literals it replaced. It did — the task-id pattern was translated from an
-// illustration spelling five x and matched no real six-character id, so the
-// "improvement" silently un-caught every task reference in this project's own
-// record.
-//
-// These are the retired literals' real instances. A derivation is only better
-// than the list it replaces if it is at least as WIDE, and this is where that
-// is checked rather than assumed.
-var widthCheckedExamples = []string{
-	"aura-plugins-hc2jq3", // six characters: the shape every id in this record has
-	"aura-plugins-a6h3d",  // five: the shape the exemplar spells
-	"aura-plugins-o71gub",
-	"aura-plugins-6gbpks",
-	"SLICE-3",
-	"PROPOSAL-2",
-	"URD",
-	"p3-propose",
-}
-
 // internalReferencePatterns returns the patterns that recognise a forbidden
 // reference, and REFUSES any exemplar the rule spells that it cannot expand.
 func internalReferencePatterns(t *testing.T) []*regexp.Regexp {
@@ -1589,23 +1561,43 @@ func internalReferencePatterns(t *testing.T) []*regexp.Regexp {
 			"POPULATION is read from the rule so a new form cannot be missed in silence; give each "+
 			"one a pattern, or map it to the empty string with the reason it is deliberately not "+
 			"recognised", unknown)
+
+	// THE TASK-IDENTIFIER PATTERN IS ANCHORED ON THE PREFIX THE REPOSITORY
+	// ACTUALLY USES, which is the one signal that is reliable in both
+	// directions: it admits every real suffix whatever its alphabet, and it
+	// cannot match a digest, a workflow id or a versioned path, because those
+	// carry a different prefix.
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	require.NoError(t, err, "resolve the repository root")
+	prefix, corpus := taskIdentifierCorpus(t, root)
+	patterns = append(patterns, regexp.MustCompile(`\b`+regexp.QuoteMeta(prefix)+`-[a-z0-9]{4,}\b`))
 	require.NotEmpty(t, patterns,
 		"the guard must recognise at least one form, or every text passes it")
 
-	// AT LEAST AS WIDE AS THE LITERALS IT REPLACED.
-	for _, example := range widthCheckedExamples {
+	// AT LEAST AS WIDE AS THE REAL POPULATION. The examples are the corpus, so
+	// this cannot measure one axis while the pattern narrows on another.
+	for _, identifier := range corpus {
 		recognised := false
 		for _, pattern := range patterns {
-			if pattern.MatchString(example) {
+			if pattern.MatchString(identifier) {
 				recognised = true
 				break
 			}
 		}
 		require.True(t, recognised,
-			"the derived patterns do not recognise %q, which the three literals this guard "+
-				"replaced did recognise. A derivation that comes out narrower than its list is a "+
-				"regression wearing the word 'derived': widen the pattern this exemplar expands "+
-				"to, and translate the RULE rather than the illustration beside it", example)
+			"the derived patterns do not recognise %q, which is a REAL identifier from this "+
+				"repository's own records. A derivation narrower than the population it stands "+
+				"for is a regression wearing the word 'derived'", identifier)
+	}
+
+	// AND NO WIDER THAN THE RULE ALLOWS. A reference the rule RECOMMENDS must
+	// never be refused; a guard that rejects the replacement it exists to
+	// encourage costs its reader more than no guard.
+	for _, durable := range durableReferenceSamples {
+		for _, pattern := range patterns {
+			require.NotRegexp(t, pattern, stripDurablePaths(durable),
+				"%q is a reference the rule RECOMMENDS and %s refuses it", durable, pattern)
+		}
 	}
 	return patterns
 }
@@ -1615,12 +1607,148 @@ func internalReferencePatterns(t *testing.T) []*regexp.Regexp {
 // WHAT IT VISITS: the string handed to it, against every pattern derived above.
 // WHAT IT DOES NOT: it cannot see text this test never renders, and it judges
 // the FORMS the rule spells rather than the intent behind a word.
+// stripDurablePaths removes the tokens the rule names as LEGITIMATE — file
+// paths and URLs — before the forbidden forms are looked for.
+//
+// WHY: the rule's own recommended replacement for an internal reference is
+// `docs/proposals/PROPOSAL-2-pasture-workflow-record.md`, and the PROPOSAL-N
+// pattern matches inside it. Without this, citing the document the rule tells
+// you to cite would fail the guard that enforces the rule.
+func stripDurablePaths(text string) string {
+	return regexp.MustCompile(`\S*/\S*`).ReplaceAllString(text, " ")
+}
+
 func assertNoInternalReference(t *testing.T, where, text string) {
 	t.Helper()
 	for _, pattern := range internalReferencePatterns(t) {
-		assert.NotRegexp(t, pattern, text,
+		assert.NotRegexp(t, pattern, stripDurablePaths(text),
 			"%s carries an internal process reference matching %s. These identifiers are "+
 				"meaningless to the person reading them and they rot as tasks close and proposals "+
 				"are superseded; cite a durable file path or nothing at all", where, pattern)
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE TASK-IDENTIFIER CORPUS, DERIVED FROM THIS REPOSITORY'S OWN RECORDS
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// THE AXES THIS DERIVATION HAS TO COVER, NAMED BEFORE IT IS WRITTEN, because
+// the last two attempts were each exactly as wide as the probe that found them:
+//
+//	LENGTH    — a suffix is five OR six characters. The first pattern pinned
+//	            five, translated from the illustration beside the rule.
+//	ALPHABET  — a suffix is base-36 and about one in three carries NO DIGIT.
+//	            The second pattern required a digit, so 37 real ids in this
+//	            slice's own record passed, including the founding blocker.
+//	POPULATION— the examples that check the width were hand-written, so the
+//	            check measured LENGTH while the pattern had narrowed on ALPHABET
+//	            and nothing noticed.
+//	OVER-MATCH— the digit heuristic ALSO matched a workflow id, a content digest
+//	            and a versioned capture path, which are the DURABLE references
+//	            the rule recommends using instead of an internal id.
+//	DRIFT     — two packages carry this guard and their example lists had
+//	            already diverged while a comment said they were the same.
+//
+// ONE DERIVATION CLOSES ALL FIVE. The prefix and the ids are read from the
+// repository, so alphabet and length are whatever the real ids are; the width
+// check is the corpus itself, so it cannot measure a different axis from the
+// one the pattern narrows on; anchoring on the derived PREFIX makes a digest or
+// a workflow id impossible to match; and both packages scan the same tree, so
+// their populations are equal by construction rather than by a comment.
+
+// taskIdentifierCorpus returns the project prefix that task identifiers in this
+// repository carry, and every distinct identifier found under it.
+//
+// WHAT IT VISITS: every .go and .md file under the repository root.
+// WHAT IT DOES NOT READ: any other file kind, and identifiers that appear
+// nowhere in the tree. It derives the SHAPE from real instances; it cannot
+// invent a form the repository has never carried.
+func taskIdentifierCorpus(t *testing.T, root string) (string, []string) {
+	t.Helper()
+
+	shape := regexp.MustCompile(`\b([a-z][a-z0-9]*(?:-[a-z0-9]+)*)-([a-z0-9]{5,6})\b`)
+	found := map[string]map[string]bool{}
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || info.IsDir() {
+			return nil
+		}
+		if ext := filepath.Ext(path); ext != ".go" && ext != ".md" {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		for _, match := range shape.FindAllStringSubmatch(string(raw), -1) {
+			prefix, suffix := match[1], match[2]
+			if found[prefix] == nil {
+				found[prefix] = map[string]bool{}
+			}
+			found[prefix][prefix+"-"+suffix] = true
+		}
+		return nil
+	})
+	require.NoError(t, err, "walk the repository for real task identifiers")
+
+	// THE SELECTOR IS DISTINCT SUFFIXES UNDER A MULTI-WORD PREFIX, and it is
+	// not occurrence count. Ranking by occurrences elects "review", because
+	// ordinary hyphenated English dominates a Go repository and any five- or
+	// six-letter word looks like a suffix. A task identifier is generated, so
+	// ONE prefix carries MANY DISTINCT random suffixes while an English phrase
+	// carries a handful: measured here, 56 against 8 for the runner-up. The
+	// prefix must itself be multi-word, which every project identifier is and
+	// most stray matches are not.
+	prefix, best := "", 0
+	for candidate, identifiers := range found {
+		if !strings.Contains(candidate, "-") {
+			continue
+		}
+		if distinct := len(identifiers); distinct > best ||
+			(distinct == best && candidate < prefix) {
+			prefix, best = candidate, distinct
+		}
+	}
+	require.NotEmpty(t, prefix,
+		"no task identifier shape occurs anywhere in this repository, so this guard has nothing to "+
+			"derive from and every assertion resting on it would pass vacuously")
+
+	identifiers := make([]string, 0, len(found[prefix]))
+	for identifier := range found[prefix] {
+		identifiers = append(identifiers, identifier)
+	}
+	sort.Strings(identifiers)
+
+	// THE CORPUS MUST COVER THE ALPHABET AXIS, or the width check measures
+	// length again while the pattern narrows on characters.
+	digitFree := 0
+	for _, identifier := range identifiers {
+		if !regexp.MustCompile(`[0-9]`).MatchString(identifier[len(prefix)+1:]) {
+			digitFree++
+		}
+	}
+	require.GreaterOrEqual(t, len(identifiers), 20,
+		"the corpus must be large enough to be a population rather than a handful; found %d",
+		len(identifiers))
+	require.NotZero(t, digitFree,
+		"the corpus carries no DIGIT-FREE identifier, so it cannot catch a pattern that narrows on "+
+			"the alphabet — which is exactly how the previous width check passed while one real "+
+			"identifier in three went unrecognised")
+	return prefix, identifiers
+}
+
+// durableReferenceSamples are references the rule RECOMMENDS. None may be
+// recognised as an internal identifier: a guard that refuses the replacement it
+// exists to encourage is worse than no guard.
+//
+// THEY ARE SAMPLES AND NOT THE CLASS, one per axis the over-match had: a
+// workflow identifier, a content digest, a versioned path, and ordinary
+// hyphenated English from this command's own diagnostics.
+var durableReferenceSamples = []string{
+	"e005-416d-a53a-49b495cd5d4a",
+	"sha256-9f2a1b",
+	"pre-tool-use-0146",
+	"report-and-continue",
+	"throw-fail-fast",
+	"fail-closed",
+	"docs/proposals/PROPOSAL-2-pasture-workflow-record.md",
 }

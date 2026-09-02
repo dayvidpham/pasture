@@ -22,6 +22,11 @@ func envMap(values map[string]string) func(string) (string, bool) {
 // load-bearing case is set-but-empty: a shell that exports an unset variable
 // produces an empty string, so reading "" as an opt-in would make an ordinary
 // shell habit block a user's session on any evaluation fault.
+// WHAT IT VISITS: the values listed below, chosen because each is a shell
+// habit that produces a non-obvious string — empty, whitespace, and mixed
+// case around the two accepted words.
+// WHAT IT DOES NOT READ: any other value. That the ACCEPTED set is exactly
+// two words is held where that set is declared, not here.
 func TestHookEnvironmentTreatsSetButEmptyAsUnset(t *testing.T) {
 	t.Parallel()
 

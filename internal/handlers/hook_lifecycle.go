@@ -719,9 +719,14 @@ var captureDispositionAdviceByDisposition = map[model.CaptureDisposition]capture
 	// it is true whichever fired. Telling them APART needs the classifier
 	// split, which is a change to the model enum and to the parsers.
 	model.CaptureUnsupportedSchema: {
-		Reason: "the payload does not match the shape this event's registration declares: either an identity " +
-			"field is missing, renamed or unusable, or the payload carries a member the registration does " +
-			"not allow",
+		// Reason is COMPOSED PER HARNESS where it is assembled, because the
+		// causes this disposition carries differ by parser: only a validating
+		// parser can refuse an undeclared member. Offering that cause to a
+		// struct decoder made ONE MESSAGE CONTRADICT ITSELF — the reason said
+		// an added member may be why, and the remedy three sentences later said
+		// added members are ignored. This entry holds the half that is true of
+		// every parser; unsupportedSchemaReason adds the rest.
+		Reason:          "",
 		Fix:             "", // composed per call: it names the event and the host version.
 		NamesIdentities: true,
 	},
@@ -740,6 +745,35 @@ var captureDispositionAdviceByDisposition = map[model.CaptureDisposition]capture
 		// the coordinate rather than at a field.
 		NamesIdentities: false,
 	},
+}
+
+// CaptureDispositionReasons returns every reason text a disposition can render,
+// across every harness this build dispatches on.
+//
+// IT IS A SET AND NOT A STRING because one disposition's reason is COMPOSED
+// FROM THE PARSER that refused: a validating parser can offer an undeclared
+// member as a cause and a struct decoder cannot. A test asking "is this
+// disposition driven" must ask against what it can actually say, or a
+// disposition whose reason is composed looks undriven.
+func CaptureDispositionReasons(disposition model.CaptureDisposition) []string {
+	advice, known := captureDispositionAdviceByDisposition[disposition]
+	if !known {
+		return nil
+	}
+	if advice.Reason != "" {
+		return []string{advice.Reason}
+	}
+	seen := map[string]bool{}
+	reasons := []string{}
+	for _, dispatch := range frontendRegistry {
+		reason := unsupportedSchemaReason(dispatch)
+		if !seen[reason] {
+			seen[reason] = true
+			reasons = append(reasons, reason)
+		}
+	}
+	sort.Strings(reasons)
+	return reasons
 }
 
 // LifecycleHarnessCoordinate names one harness this build dispatches on, with a
@@ -793,6 +827,28 @@ func CaptureDispositionAdvice() map[model.CaptureDisposition]captureDispositionA
 	return copied
 }
 
+// unsupportedSchemaReason names the causes THIS harness's parser can produce.
+//
+// THE DIAGNOSIS HALF WAS LEFT BEHIND WHEN THE REMEDY HALF WAS FIXED. The remedy
+// learned that a struct decoder IGNORES an undeclared member; the shared reason
+// went on offering that cause to every harness, so one rendered message told a
+// Codex operator both that an added member may be why their payload was refused
+// and that added members are ignored. A message that contradicts itself costs
+// its reader more than one that is merely incomplete.
+//
+// Both facts are on the dispatch row this already receives.
+func unsupportedSchemaReason(dispatch lifecycleDispatch) string {
+	naming := "an identity field is missing or unusable"
+	if dispatch.matchesFieldNamesExactly {
+		naming = "an identity field is missing, renamed or unusable"
+	}
+	if !dispatch.refusesUndeclaredMembers {
+		return "the payload does not match the shape this event's registration declares: " + naming
+	}
+	return "the payload does not match the shape this event's registration declares: either " +
+		naming + ", or the payload carries a member the registration does not allow"
+}
+
 // unbindableCaptureError says that an event WAS NOT EVALUATED, and says which
 // correlation identities could not be bound.
 //
@@ -830,6 +886,9 @@ func unbindableCaptureError(
 
 	advice, named := captureDispositionAdviceByDisposition[capture.disposition]
 	reason := advice.Reason
+	if capture.disposition == model.CaptureUnsupportedSchema {
+		reason = unsupportedSchemaReason(dispatch)
+	}
 	if !named {
 		reason = "the payload could not be classified, and this build states no reason for that classification"
 	}
