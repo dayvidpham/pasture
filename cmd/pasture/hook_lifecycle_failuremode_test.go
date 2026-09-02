@@ -3613,13 +3613,35 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 			"judged where they are written",
 	}
 
+	// EVERY NON-TEST SOURCE FILE OF THE PACKAGE, not one named file.
+	//
+	// THIS GUARD SAID "the command's source" AND PARSED ONE FILE, which is the
+	// defect it exists to catch, committed by the fix for an instance of it. A
+	// seventh route added to hook_lifecycle_orphans.go stayed INVISIBLE and the
+	// count stayed at six; the same route in hook_lifecycle.go was RED. AND THE
+	// FILE IT COULD NOT SEE IS THE ONE ROUND 28 HAD TO REMOVE FROM THE ROUTE
+	// LIST — the guard against a mis-enumeration could not read the very file
+	// the mis-enumeration named.
 	fileSet := token.NewFileSet()
-	file, err := parser.ParseFile(fileSet, "hook_lifecycle.go", nil, 0)
-	require.NoError(t, err, "the production source must be readable beside its test")
+	entries, err := os.ReadDir(".")
+	require.NoError(t, err, "the package directory must be readable to find the sources it declares")
+	sources := []*ast.File{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		parsed, parseErr := parser.ParseFile(fileSet, name, nil, 0)
+		require.NoError(t, parseErr, "every production source of this package must parse: %s", name)
+		sources = append(sources, parsed)
+	}
+	require.NotEmpty(t, sources,
+		"this sweep reads the package's own production sources; finding none means it is looking in "+
+			"the wrong directory and every assertion below would pass vacuously")
 
 	found := map[string]int{}
 	unjudged := []string{}
-	ast.Inspect(file, func(node ast.Node) bool {
+	inspect := func(node ast.Node) bool {
 		call, isCall := node.(*ast.CallExpr)
 		if !isCall {
 			return true
@@ -3635,11 +3657,15 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 		stage := sourceOf(call.Args[5])
 		found[stage]++
 		if _, isJudged := judged[stage]; !isJudged {
-			unjudged = append(unjudged, fmt.Sprintf("hook_lifecycle.go:%d passes %s",
-				fileSet.Position(call.Lparen).Line, stage))
+			position := fileSet.Position(call.Lparen)
+			unjudged = append(unjudged, fmt.Sprintf("%s:%d passes %s",
+				filepath.Base(position.Filename), position.Line, stage))
 		}
 		return true
-	})
+	}
+	for _, source := range sources {
+		ast.Inspect(source, inspect)
+	}
 
 	require.NotEmpty(t, found,
 		"this test reads every lifecycleFault call in the command; finding none means the call was "+
@@ -3749,7 +3775,7 @@ func TestTheRoutesThatNeverOpenAStoreSayTheDeliveryWasNotRecorded(t *testing.T) 
 // TestEveryWorkErrorMapsToTheDurableStateItCanSupport pins the ERROR-TO-STAGE
 // mapping as a population, over the sentinel errors themselves.
 //
-// WHY IT EXISTS. Round 27 corrected two of these rows for stating something
+// WHY IT EXISTS. An earlier change corrected two of these rows for stating something
 // false about the journal, and NOTHING HELD EITHER CORRECTION: reverting one
 // left the whole cmd/pasture package green for 213 seconds, because the
 // sentinel errors appeared in NO test file anywhere in the tree. The route
@@ -3785,6 +3811,12 @@ func TestEveryWorkErrorMapsToTheDurableStateItCanSupport(t *testing.T) {
 			Stage: hostexit.FaultStageRecordUnknown,
 			Why:   "the panic landed after the work started, so the commit may or may not have completed",
 		},
+		"the lifecycle fault happened before any durable write was attempted": {
+			Stage: hostexit.FaultStageNotRecorded,
+			Why: "the handler refused before it opened the store, so no row can exist; this row is the " +
+				"EVIDENCE that lets the ordinary refusals keep the precise claim now that the default " +
+				"is the weakest one",
+		},
 	}
 
 	require.Len(t, faultStageByError, len(judged),
@@ -3810,12 +3842,27 @@ func TestEveryWorkErrorMapsToTheDurableStateItCanSupport(t *testing.T) {
 			"%q must map the same when wrapped, because every producer wraps it", row.Err)
 	}
 
-	assert.Equal(t, hostexit.FaultStageNotRecorded,
+	// THE DEFAULT IS THE WEAKEST CLAIM, AND IT USED TO BE THE STRONGEST ONE
+	// POINTING THE OTHER WAY. not-recorded is not weak: it ASSERTS that nothing
+	// was written. The journal appender can fail after its commit succeeded —
+	// its own diagnostic says "the operation reported success" — and carries no
+	// sentinel, so that assertion reached an operator about a committed row.
+	assert.Equal(t, hostexit.FaultStageRecordUnknown,
 		faultStageForWorkError(errors.New("an error no row names")),
-		"an unmapped error takes the WEAKEST claim. Any other default would have pasture asserting "+
-			"something about the journal on the strength of not recognising an error")
-	assert.Equal(t, hostexit.FaultStageNotRecorded, faultStageForWorkError(nil),
+		"an unmapped error must take the WEAKEST claim. not-recorded ASSERTS that nothing was "+
+			"written, which is a promise about every error nobody enumerated, and at least one "+
+			"unsentinelled error can be raised after a successful commit")
+	assert.Equal(t, hostexit.FaultStageRecordUnknown, faultStageForWorkError(nil),
 		"and a nil error must not reach a stronger claim either")
+
+	// The precise answer for the ordinary refusals is EVIDENCE, not assumption:
+	// the handler says it never opened the store, and only then is
+	// not-recorded claimed.
+	assert.Equal(t, hostexit.FaultStageNotRecorded,
+		faultStageForWorkError(fmt.Errorf("%w: %w",
+			handlers.ErrLifecycleBeforeDurableWrite, errors.New("the event is not registered"))),
+		"a refusal that reports it happened before any durable write keeps the precise claim, "+
+			"because the site that knows said so")
 }
 
 // panickingCommitBarrier panics AFTER the durable receipt is committed. It is
@@ -4022,7 +4069,7 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 	binary := filepath.Join(root, "lifecycle-cli")
 	buildLifecycleBinary(t, binary)
 
-	const identityAdvice = "carries the identity fields this build's"
+	const identityAdvice = "Compare the payload with this build's"
 	const versionAdvice = "is the version the host actually runs"
 
 	for _, row := range []struct {
@@ -4060,7 +4107,7 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 		{
 			Name:              "a payload whose identity fields are renamed",
 			Payload:           []byte(`{"renamed":"s","hook_event_name":"PreToolUse","tool_name":"R","tool_input":{}}`),
-			Says:              "does not carry the identity fields this event's registration declares",
+			Says:              "either an identity field is missing, renamed or unusable",
 			Tells:             identityAdvice,
 			ReachedIdentities: true,
 			MentionsVersion:   true,
@@ -4112,4 +4159,150 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 					"never consulted")
 		})
 	}
+}
+
+// TestAdviceFollowsTheCauseAndNotTheClassifier drives the two causes that share
+// the record-unknown stage and requires each to be told only what is true of it.
+//
+// THE DEFECT. The remedy "a long-running writer holding the pasture store is
+// the usual reason, so find that writer or retry once it releases the store"
+// was keyed on the STAGE. That stage had one producer when the sentence was
+// written and now has three — the abandoned deadline, a panic raised after the
+// work began, and any error the stage table does not recognise — so a panicking
+// invocation was sent hunting for a writer that is not there, on the same line
+// whose cause says the work panicked.
+//
+// THE GENERAL FORM, which is the reason this test is a pair and not a case:
+// when a classifier gains a producer, every sentence keyed on that classifier
+// has to be re-asked. A sentence that was true of the only producer is not
+// thereby true of the classifier.
+//
+// MUTATION: move the writer remedy back onto the record-unknown arm of the
+// impact switch. The panic subtest turns RED; the deadline subtest stays green,
+// which is what shows the sentence is right for one cause and wrong for the
+// other.
+func TestAdviceFollowsTheCauseAndNotTheClassifier(t *testing.T) {
+	const writerRemedy = "holding the pasture store"
+
+	t.Run("a panic after the work began", func(t *testing.T) {
+		dir := t.TempDir()
+		dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
+		initializeLifecycleTestDatabase(t, dbPath)
+
+		cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.10", dbPath)
+		cmd.SetIn(bytes.NewReader(openCodeToolExecuteBeforeWire(t)))
+		outcome := lifecycleOutcome(cmd, nil,
+			panickingCommitBarrier{message: "the commit boundary failed after the receipt was written"},
+			timeouts.ProductionProfile())
+
+		require.Contains(t, outcome.Stderr, "durable state record-unknown",
+			"this subtest must reach the record-unknown stage, or it proves nothing about advice "+
+				"keyed on it")
+		require.Contains(t, outcome.Stderr, "the hook panicked",
+			"and it must reach it by PANICKING, which is the producer the remedy is wrong for")
+		assert.NotContains(t, outcome.Stderr, writerRemedy,
+			"a panicking invocation must not be told to go and find a long-running writer. Nothing "+
+				"is holding the store; the work raised a panic, and the same line says so")
+	})
+
+	t.Run("the abandoned deadline", func(t *testing.T) {
+		dir := t.TempDir()
+		dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
+		initializeLifecycleTestDatabase(t, dbPath)
+
+		cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.10", dbPath)
+		cmd.SetIn(bytes.NewReader(openCodeToolExecuteBeforeWire(t)))
+
+		// The barrier HOLDS the invocation at the commit boundary until the
+		// deadline fires, so the abandonment is driven by a condition and never
+		// by a sleep. It is the same seam the deadline proof beside this one
+		// uses.
+		barrier := &blockingBarrier{reached: make(chan struct{}), release: make(chan struct{})}
+		outcomes := make(chan hostexit.Outcome, 1)
+		go func() { outcomes <- lifecycleOutcome(cmd, nil, barrier, timeouts.DeadlineTestProfile()) }()
+		select {
+		case <-barrier.reached:
+		case outcome := <-outcomes:
+			t.Fatalf("the invocation finished without reaching the commit boundary: %+v", outcome)
+		}
+		outcome := <-outcomes
+		close(barrier.release)
+
+		require.Contains(t, outcome.Stderr, "durable state record-unknown",
+			"this subtest must reach the same stage as the one above; the two differ only in CAUSE")
+		require.Contains(t, outcome.Stderr, "deadline",
+			"and it must reach it by ABANDONMENT, which is the producer the remedy is right for")
+		assert.Contains(t, outcome.Stderr, writerRemedy,
+			"the remedy is not lost by being moved off the classifier: it lives with the cause it "+
+				"is true of, and this is that cause")
+	})
+}
+
+// TestAHostThatAddsAFieldIsRefusedWithATrueSentence drives the refusal a host
+// meets when it ADDS a member, which nothing drove before.
+//
+// WHY THIS ROUTE MATTERS MOST. A host adding a field is the most ordinary thing
+// that happens to a payload over time, so this is the refusal most likely to be
+// met in practice. It was told "the payload does not carry the identity fields
+// this event's registration declares, or carries them under different names" —
+// FALSE IN BOTH HALVES for a payload that carries every one of them under the
+// exact declared name. A reader would spend the day checking field names that
+// were already correct.
+//
+// THE CONTROL IS PART OF THE TEST, because the claim is that ONE ADDED MEMBER
+// is the whole difference: the same payload without it binds and says nothing.
+//
+// AN HONEST LIMIT, STATED. This refusal shares ONE disposition with the missing
+// and unusable identity cases, so the sentence names all three causes rather
+// than the one that fired. It is true of every payload that reaches it and it
+// does not DISCRIMINATE. Telling them apart needs a new disposition in the
+// model enum and a parser that returns it, which are outside this slice's files.
+//
+// MUTATION: narrow the reason back to the identity half. This test turns RED on
+// the added-member clause.
+func TestAHostThatAddsAFieldIsRefusedWithATrueSentence(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "lifecycle-cli")
+	buildLifecycleBinary(t, binary)
+
+	authentic := claudeFixture(t, "pre_tool_use_2_1_222.json")
+	var members map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(authentic, &members),
+		"the committed fixture must decode, or the control below proves nothing")
+	members["a_field_this_build_does_not_declare"] = json.RawMessage(`"x"`)
+	extended, err := json.Marshal(members)
+	require.NoError(t, err)
+
+	t.Run("the control: the same payload without the added member", func(t *testing.T) {
+		store := t.TempDir()
+		database := filepath.Join(store, "pasture.db")
+		initializeLifecycleTestDatabase(t, database)
+		run := runLifecycleHookOn(t, binary, database, "claude-code", "PreToolUse", "2.1.222", authentic)
+		require.Equal(t, 0, run.ExitCode)
+		require.Empty(t, run.Stderr,
+			"the authentic payload must bind in silence; if it does not, the added member is not "+
+				"the difference this test is about")
+	})
+
+	t.Run("one added member", func(t *testing.T) {
+		store := t.TempDir()
+		database := filepath.Join(store, "pasture.db")
+		initializeLifecycleTestDatabase(t, database)
+		run := runLifecycleHookOn(t, binary, database, "claude-code", "PreToolUse", "2.1.222", extended)
+
+		require.Equal(t, 0, run.ExitCode,
+			"an unreadable payload is fail-open: the host carries on with its own answer")
+		require.Contains(t, run.Stderr, "WAS NOT EVALUATED",
+			"this subtest must reach the refusal; if it does not, nothing below is about it")
+
+		assert.Contains(t, run.Stderr, "carries a member the registration does not allow",
+			"the reason must name the cause that actually fired. This payload carries EVERY identity "+
+				"field under the EXACT declared name, so a sentence about missing or renamed fields "+
+				"is false of it in both halves")
+		assert.Contains(t, run.Stderr, "must carry no member the registration does not declare",
+			"and the instruction must tell the reader to look in that direction too, or they check "+
+				"field names that are already correct")
+		assert.NotContains(t, run.Stderr, "does not carry the identity fields this event's registration declares",
+			"the retired sentence named one cause of a disposition that carries three")
+	})
 }

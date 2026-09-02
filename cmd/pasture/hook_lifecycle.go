@@ -338,9 +338,6 @@ type lifecycleWork struct {
 	err    error
 }
 
-// lifecyclePanicCause describes a recovered panic as the fault it is. A panic
-// means the event was never evaluated, so the host must be told, and the fault
-// policy decides whether the operation is refused.
 // errLifecycleWorkPanicked marks a panic raised INSIDE the work goroutine. It
 // exists so the stage table below can answer for it: the work had begun, so the
 // durable write may already have happened, and the not-recorded default would
@@ -380,6 +377,12 @@ var faultStageByError = []faultStageRow{
 			"not-recorded told the operator no occurrence existed while it sat in the journal",
 	},
 	{
+		Err:   handlers.ErrLifecycleBeforeDurableWrite,
+		Stage: hostexit.FaultStageNotRecorded,
+		Why: "the handler refused before it opened the store, so no row can exist for this invocation; " +
+			"this is the EVIDENCE for a claim that used to be the default's assumption",
+	},
+	{
 		Err:   errLifecycleWorkPanicked,
 		Stage: hostexit.FaultStageRecordUnknown,
 		Why: "the panic happened after the work began, so the commit may or may not have completed; pasture does " +
@@ -389,18 +392,38 @@ var faultStageByError = []faultStageRow{
 
 // faultStageForWorkError answers for one work error.
 //
-// THE DEFAULT IS THE WEAKEST CLAIM THAT IS TRUE OF EVERY UNLISTED ERROR: those
-// faults are raised before any durable write, or by a durable write that
-// returned an error and committed nothing.
+// THE DEFAULT IS THE WEAKEST CLAIM THERE IS, AND IT USED TO BE THE STRONGEST
+// ONE POINTING THE OTHER WAY. It answered not-recorded for every error no row
+// named, which is a promise about everything nobody enumerated — and the
+// journal appender falsifies it: that appender can fail AFTER the commit
+// succeeds, saying in its own diagnostic that "the operation reported success",
+// and it carries no sentinel. So a committed row was reported to the operator
+// as "no occurrence was recorded for it", which is the class of untruth this
+// whole command exists to remove.
+//
+// A DEFAULT IS A CLAIM ABOUT EVERYTHING YOU DID NOT ENUMERATE, so it has to be
+// the weakest one available. The precise answers did not get worse: the
+// ordinary pre-store refusals now carry ErrLifecycleBeforeDurableWrite, which
+// is EVIDENCE from the site that knows, rather than an assumption made here.
 func faultStageForWorkError(err error) hostexit.FaultStage {
 	for _, row := range faultStageByError {
 		if errors.Is(err, row.Err) {
 			return row.Stage
 		}
 	}
-	return hostexit.FaultStageNotRecorded
+	return hostexit.FaultStageRecordUnknown
 }
 
+// lifecyclePanicCause describes a recovered panic as the fault it is. A panic
+// means the event was never evaluated, so the host must be told, and the fault
+// policy decides whether the operation is refused.
+//
+// THIS COMMENT WAS SWALLOWED BY THE VAR BELOW IT. A declaration inserted
+// between the doc and its function takes the doc: `go doc -u -all` rendered the
+// sentinel's documentation opening with a sentence about this function, and
+// this function had none. The rendered artefact is where a reader meets a
+// comment, which is the same lesson as the diagnostic that was correct in the
+// source and absent on the console.
 func lifecyclePanicCause(coords lifecycleCoordinates, recovered any) error {
 	return fmt.Errorf("the hook panicked while handling event %q of harness %q: %v",
 		coords.Event, coords.Harness, recovered)

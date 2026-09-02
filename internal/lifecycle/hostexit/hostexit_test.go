@@ -57,6 +57,35 @@ func allFailureModes() []pastureruntime.FailureMode {
 	return modes
 }
 
+// TestEveryDeclaredFailureModeNamesItself requires a derived mode to have a
+// name, which is what the stage sweep beside it requires of a stage.
+//
+// WHY IT WAS MISSING. Deriving the SET from IsValid made the table grow with
+// the type, and stopped there: a seventh mode declared VALID but not added to
+// String() would enter every cell of the fault table and write an EMPTY STRING
+// into the durable fault record and into the operator's diagnostic, where the
+// mode is printed by name. The stage sweep already refused that for stages;
+// this is the same question asked of the neighbouring enum, and it had the same
+// answer missing.
+//
+// MUTATION: extend FailureMode.IsValid to admit one more value without adding
+// it to String(). This test turns RED naming the number.
+func TestEveryDeclaredFailureModeNamesItself(t *testing.T) {
+	t.Parallel()
+
+	modes := allFailureModes()
+	require.NotEmpty(t, modes,
+		"the derivation must find the declared modes; an empty set would make every assertion "+
+			"below vacuous, which is the failure this derivation replaced")
+	for _, mode := range modes {
+		assert.NotEmpty(t, mode.String(),
+			"failure mode %d is declared VALID and has no name. It reaches every cell of the fault "+
+				"table and is printed by name into the operator's diagnostic and into the durable "+
+				"fault record, where an empty string cannot be told from a member the writer forgot",
+			uint8(mode))
+	}
+}
+
 // TestForFaultCoversEveryModePolicyAndEvidenceCell is the whole fault table:
 // six failure modes x two fault policies x {evidence, none} = 24 cells.
 //
@@ -607,10 +636,22 @@ func TestTheImpactFollowsWhatPastureKnows(t *testing.T) {
 		"the reader must be told WHERE to look for the occurrence that may exist")
 	assert.Contains(t, unknown.Stderr, "fault record file beside the database",
 		"the reader must be told the other place to look")
-	assert.Contains(t, unknown.Stderr, "a long-running writer holding the pasture store",
-		"the reader must be told the usual cause")
-	assert.Contains(t, unknown.Stderr, "retry once it releases the store",
-		"the reader must be told how to recover")
+	// THESE TWO REQUIRED THE WRITER REMEDY OF THE STAGE, AND THAT PINNED A
+	// SENTENCE TO THE WRONG THING. "A long-running writer holding the pasture
+	// store is the usual reason" is true of the ABANDONED DEADLINE and of
+	// nothing else, and this stage has three producers: the deadline, a panic
+	// raised after the work began, and any error the caller's table does not
+	// recognise. Requiring it HERE required a panicking invocation to be sent
+	// hunting for a writer that is not there.
+	//
+	// The remedy is not lost. It lives on the deadline route's own cause, which
+	// is where it was true all along, and a caller-side pair drives both
+	// producers to show it appears for one and not the other. What this arm
+	// must still carry is what is true of the STAGE: that the row may or may
+	// not exist, and both places to look — asserted above.
+	assert.NotContains(t, unknown.Stderr, "a long-running writer holding the pasture store",
+		"the remedy for the deadline cause must not be attached to a stage that three different "+
+			"causes reach; a panic is not fixed by finding a writer")
 	assert.Contains(t, unknown.Stderr, "durable state record-unknown",
 		"the machine-readable stage travels with the text")
 }
@@ -1058,6 +1099,49 @@ func markdownSection(t *testing.T, document, heading string) string {
 	return heading + rest[:end]
 }
 
+// distinctivePhrases reduces each durable-state sentence to the fragment that
+// makes it THAT stage's claim, so a forbidden sentence is recognised even when
+// it has been reworded.
+//
+// WHY IT EXISTS. The forbidden lists were literals, and deriving them from the
+// sentence table fixed the set while narrowing the MATCH: a paraphrase of one
+// stage's claim appearing in another stage's arm was caught before and green
+// after. Deriving where the values come from is not the same as preserving what
+// the guard recognises.
+func distinctivePhrases(sentences []string) []string {
+	// Each key is a full sentence; each value is the phrase no other stage's
+	// sentence contains and no rewording of this one can drop without changing
+	// what it claims.
+	distinctive := map[string]string{
+		"no occurrence was recorded for it":                                    "no occurrence was recorded",
+		"the delivery for it IS committed in the lifecycle occurrence journal": "IS committed in the lifecycle occurrence journal",
+		"an occurrence for it MAY OR MAY NOT exist":                            "MAY OR MAY NOT exist",
+	}
+	phrases := make([]string, 0, len(sentences))
+	for _, sentence := range sentences {
+		phrase, known := distinctive[sentence]
+		if !known {
+			// A sentence with no distinctive phrase falls back to itself, which
+			// is the narrow behaviour; the coverage assertion below names it so
+			// the gap cannot pass unseen.
+			phrase = sentence
+		}
+		phrases = append(phrases, phrase)
+	}
+	return phrases
+}
+
+// allDurableStateSentences is every declared stage's sentence as a slice.
+func allDurableStateSentences() []string {
+	sentences := durableStateSentences()
+	all := make([]string, 0, len(sentences))
+	for _, sentence := range sentences {
+		all = append(all, sentence)
+	}
+	sort.Strings(all)
+	return all
+}
+
 // durableStateSentences is the durable-state sentence of every declared stage,
 // in ONE place, so the sweep and the blocking-arm pin cannot disagree about
 // what the set is. A stage added without a sentence here is caught by the
@@ -1146,6 +1230,11 @@ func TestEveryFaultStageRendersItsOwnDurableStateOnEveryArm(t *testing.T) {
 		if !stage.IsValid() {
 			continue
 		}
+		if sentence, hasSentence := says[stage]; hasSentence {
+			assert.NotEqual(t, sentence, distinctivePhrases([]string{sentence})[0],
+				"stage %q has no DISTINCTIVE PHRASE, so it is forbidden only as an exact string and "+
+					"a paraphrase of it would leak into another arm unseen", stage.String())
+		}
 		_, covered := stages[stage]
 		assert.True(t, covered,
 			"stage %q is declared and this sweep does not ask about it. Add the sentence it must "+
@@ -1176,7 +1265,16 @@ func TestEveryFaultStageRendersItsOwnDurableStateOnEveryArm(t *testing.T) {
 					"the diagnostic must state the durable state THIS CALLER DECLARED. The stage is "+
 						"the caller's answer to one question — was the delivery written? — and an arm "+
 						"that answers it differently tells the operator something the caller never said")
-				for _, forbidden := range expected.Forbids {
+				// THE MATCH IS ON THE DISTINCTIVE PHRASE, NOT THE WHOLE
+				// SENTENCE. Deriving the SET is not the same as preserving what
+				// the guard RECOGNISES: the literal lists this replaced happened
+				// to match short fragments, so a PARAPHRASE — "the row IS
+				// committed in the lifecycle occurrence journal" for "the
+				// delivery for it IS committed in ..." — was caught. Matching
+				// only the exact derived sentence let the paraphrase through.
+				// Each stage's sentence is reduced to the phrase that makes it
+				// that stage's claim, so a reworded leak is still a leak.
+				for _, forbidden := range distinctivePhrases(expected.Forbids) {
 					assert.NotContains(t, outcome.Stderr, forbidden,
 						"the diagnostic states a durable state BELONGING TO ANOTHER STAGE. Two of these "+
 							"sentences were hard-coded into arms of the impact switch, so an arm went on "+
@@ -1215,7 +1313,7 @@ func TestTheBlockingArmMakesNoDurableStateClaim(t *testing.T) {
 	// THE FORBIDDEN LIST IS DERIVED, for the same reason it is derived in the
 	// sweep: written out, it could not grow, so a fourth stage's sentence could
 	// appear in this arm with nothing to notice.
-	for _, claim := range durableStateSentences() {
+	for _, claim := range distinctivePhrases(allDurableStateSentences()) {
 		assert.NotContains(t, outcome.Stderr, claim,
 			"the blocking arm does not read the stage, so any durable-state sentence written into "+
 				"it would be a claim made on behalf of every stage that can reach it")

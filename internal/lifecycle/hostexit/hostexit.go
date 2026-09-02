@@ -568,8 +568,19 @@ func faultDiagnostic(fault Fault, exit ExitStatus) *ir.Diagnostic {
 	case fault.Stage == FaultStageRecordUnknown:
 		impact = "the host continues with its own default answer; " + recordClause +
 			", and read the fault record file beside the database for this invocation"
-		fix = "read the cause below and fix the reported condition; a long-running writer holding the pasture store is the usual reason, so find that writer or retry once it releases the store; " +
-			failClosedAdvice
+		// THE REMEDY BELONGS TO THE CAUSE, NOT TO THE STAGE. This arm used to
+		// add "a long-running writer holding the pasture store is the usual
+		// reason, so find that writer or retry once it releases the store".
+		// That is true of the DEADLINE cause and of nothing else, and this
+		// stage has three producers: the abandoned deadline, a panic raised
+		// after the work began, and any error the stage table does not
+		// recognise. A panicking invocation was being told to go hunting for a
+		// writer that is not there.
+		//
+		// The advice is not lost: the deadline route's own cause carries it,
+		// which is where it was true all along. What stays here is what is true
+		// of the STAGE — that the row may or may not exist, and where to look.
+		fix = "read the cause below and fix the reported condition; " + failClosedAdvice
 	}
 
 	return &ir.Diagnostic{
@@ -577,7 +588,13 @@ func faultDiagnostic(fault Fault, exit ExitStatus) *ir.Diagnostic {
 		Why: "an internal fault stopped the evaluation before it produced a decision, and a hook that cannot evaluate must say so rather than stay silent, " +
 			"because silence reads as a proceed",
 		Where: "internal/lifecycle/hostexit.ForFault",
-		Phase: "hook lifecycle fault handling, after the event was identified and before any decision was written; " +
+		// THE PHASE CLAIMED THE EVENT HAD BEEN IDENTIFIED, AND THIS PACKAGE
+		// CANNOT KNOW THAT. A Fault carries no event, so the clause was a claim
+		// with no evidence behind it — and it is false on the flag-parse route,
+		// where the very same message names the event as "". What is true of
+		// every route that reaches here is the second half: no decision had
+		// been written. The unsupported half is dropped rather than hedged.
+		Phase: "hook lifecycle fault handling, before any decision was written; " +
 			"declared failure mode " + fault.DeclaredMode.String() +
 			", effective failure mode " + fault.Mode.String() +
 			", fault policy " + fault.Policy.String() +

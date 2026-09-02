@@ -167,7 +167,30 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 	},
 }
 
-func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleStoreOpener) (backend.HostResponse, error) {
+func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleStoreOpener) (response backend.HostResponse, err error) {
+	// durablePossible RECORDS THE ONE FACT A CALLER CANNOT OTHERWISE LEARN:
+	// whether this invocation ever got far enough for a row to exist.
+	//
+	// It exists because the caller's DEFAULT had to become the weakest claim.
+	// The stage table answered not-recorded for every error it did not
+	// recognise, and that is a universal warrant this function cannot give:
+	// the journal appender can fail AFTER the commit succeeds — its own text
+	// says "the operation reported success" — and it carries no sentinel, so a
+	// committed row was reported to the operator as "no occurrence was recorded
+	// for it".
+	//
+	// With the default weakened, the PRECISE answer has to come from evidence
+	// rather than from assumption, and this is the evidence: everything
+	// returned before the store is opened is provably before any durable write.
+	// ONE LOCAL, SET ONCE, on the line the durable region begins — the same
+	// shape as the panic recovery's stage, and for the same reason.
+	durablePossible := false
+	defer func() {
+		if err != nil && !durablePossible {
+			err = fmt.Errorf("%w: %w", ErrLifecycleBeforeDurableWrite, err)
+		}
+	}()
+
 	if ctx == nil || in.Input == nil || in.Clock == nil || in.Operations == nil || open == nil {
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, "The lifecycle ingress boundary is incompletely wired.", "A context, stdin, clock, operation identity source, and store opener are required.", "Nothing was read or recorded.", "Invoke this path through the production lifecycle command.", nil)
 	}
@@ -216,6 +239,8 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("The native payload exceeds the %d-byte bound.", model.MaxNativePayloadBytes), "Ingress never truncates retained evidence.", "No database was opened.", "Reduce the host payload below the static bound.", nil)
 	}
 	capture := dispatch.parse(raw, event, in.HostVersion)
+	// FROM HERE A ROW MAY EXIST. See durablePossible.
+	durablePossible = true
 	tracker, err := open(in.DBPath)
 	if err != nil {
 		return backend.HostResponse{}, err
@@ -275,10 +300,11 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	// Valid captures converge on the shared delivery commit tail with the raw
 	// surface (URD R4.2), so the verification sequence cannot drift between
 	// the two handlers.
-	response, err := deliveryCommit(ctx, service, dispatch, event, capture.delivery)
+	committed, err := deliveryCommit(ctx, service, dispatch, event, capture.delivery)
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
+	response = committed
 	return response, nil
 }
 
@@ -434,6 +460,18 @@ var ErrLifecycleCommittedWithoutContinuation = errors.New("the lifecycle receipt
 // wrong place, and one claiming the event was evaluated would be worse.
 var ErrLifecycleDeliveryRefused = errors.New("the lifecycle delivery was recorded but its capture could not be bound")
 
+// ErrLifecycleBeforeDurableWrite marks a fault raised before this handler ever
+// opened the store, so no row can exist for the invocation.
+//
+// IT IS THE EVIDENCE FOR A CLAIM THAT USED TO BE AN ASSUMPTION. Its caller's
+// stage table answered "no occurrence was recorded" for every error it did not
+// recognise, which is a promise about the unenumerated. The journal appender
+// falsifies that promise: it can fail after the commit has succeeded, saying so
+// in its own words, and it carries no sentinel of its own. The caller's default
+// is now the WEAKEST claim, and this sentinel is what lets the ordinary
+// pre-store refusals keep the precise one.
+var ErrLifecycleBeforeDurableWrite = errors.New("the lifecycle fault happened before any durable write was attempted")
+
 // HookLifecycleNative records the lifecycle receipt and, only after the durable
 // commit has completed, returns the exact native continuation bytes the harness
 // reads on standard output — the single dispatch surface the CLI invokes. The
@@ -537,9 +575,23 @@ var captureDispositionAdviceByDisposition = map[model.CaptureDisposition]capture
 			"check was reached on this route; look for a payload assembled by concatenation or merged from two sources.",
 		ReachedIdentities: false,
 	},
+	// ONE DISPOSITION, THREE CAUSES, AND THE SENTENCE NAMED ONLY ONE OF THEM.
+	// A payload carrying EVERY identity field under the EXACT declared name is
+	// refused when it also carries ONE MEMBER the registration does not allow,
+	// and it was told its identity fields were missing or renamed — false of
+	// that payload in both halves. Measured with a control: remove the extra
+	// member and the same identity binds with zero bytes of stderr.
+	//
+	// A HOST ADDING A FIELD IS THE MOST ORDINARY THING THAT HAPPENS TO A
+	// PAYLOAD OVER TIME, so this is the route most likely to be met and the one
+	// most likely to cost its reader a day chasing field names that are
+	// correct. The sentence now names every cause this disposition carries, so
+	// it is true whichever fired. Telling them APART needs the classifier
+	// split, which is a change to the model enum and to the parsers.
 	model.CaptureUnsupportedSchema: {
-		Reason: "the payload does not carry the identity fields this event's registration declares, " +
-			"or carries them under different names",
+		Reason: "the payload does not match the shape this event's registration declares: either an identity " +
+			"field is missing, renamed or unusable, or the payload carries a member the registration does " +
+			"not allow",
 		Fix:               "", // composed per call: it names the event and the host version.
 		ReachedIdentities: true,
 	},
@@ -642,10 +694,12 @@ func unbindableCaptureError(
 			"version the host actually runs, because the event a host reports can change between versions.",
 			event.NativeName, in.HostVersion)
 	case capture.disposition == model.CaptureUnsupportedSchema:
-		fix = fmt.Sprintf("Check that the host payload carries the identity fields this build's %s registration "+
-			"declares for %q, under the names it expects, and that the host version on the command line (%q) is the "+
-			"version the host actually runs: a host that renames or drops a correlation field between versions "+
-			"arrives here.", dispatch.name, event.NativeName, in.HostVersion)
+		fix = fmt.Sprintf("Compare the payload with this build's %s registration for %q in BOTH directions: every "+
+			"identity field it declares must be present under the name it expects and carry a usable value, AND "+
+			"the payload must carry no member the registration does not declare — a host that ADDS a field is "+
+			"refused here just as one that renames or drops a correlation field is. Check too that the host "+
+			"version on the command line (%q) is the version the host actually runs.",
+			dispatch.name, event.NativeName, in.HostVersion)
 	}
 
 	// WHAT CARRIES THE WHOLE SENTENCE, and that is not redundancy. A
