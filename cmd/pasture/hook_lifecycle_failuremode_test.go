@@ -1105,9 +1105,48 @@ func TestAFaultThatCannotBeClassifiedNamesEveryInputThatWasNotUsable(t *testing.
 	assert.Contains(t, text, "one input of the fault was not usable: (1) ",
 		"the lead-in must agree with the count, because \"these inputs\" in front of a one-item "+
 			"list is wrong on the commonest case")
-	assert.Contains(t, text, "stops the tool call",
+	assert.Contains(t, text, "stops the tool call on its GATE rows",
 		"this arm leaves with exit 1, and the generated OpenCode plugin throws on any non-zero "+
-			"exit, so a message that claimed only \"the host is not blocked\" was false there")
+			"exit, so a message that claimed only \"the host is not blocked\" was false there; "+
+			"the stopping is true of the GATE callbacks only, so the claim must say which rows")
+	assert.Contains(t, text, "observation rows catch the same failure and only log it",
+		"the generated observation callback CATCHES the throw and logs, so a claim that every "+
+			"row is stopped would be false of every observation row this build ships")
+}
+
+// TestBothExitOneArmsCarryTheSameNarrowedClaim holds the sweep shut.
+//
+// This command has TWO arms that leave with exit 1: the fault the exit authority
+// could not classify, and the outcome that named no exit status. One of them was
+// corrected away from "the host is not blocked" and the other was not, so the
+// retired sentence survived on its sibling with no test anywhere near it. The
+// population is enumerated here so a third arm cannot be added silently: both
+// composers are named below, and both are asserted.
+//
+// MUTATION: put "the host is not blocked" back into either composer, or drop the
+// gate-row qualifier from either. This test turns RED.
+func TestBothExitOneArmsCarryTheSameNarrowedClaim(t *testing.T) {
+	t.Parallel()
+
+	unclassified := unclassifiableFaultDiagnostic(
+		lifecycleCoordinates{Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: "1.18.19"},
+		hostexit.Fault{}.UnusableInputs(), errors.New("the store could not be opened"))
+
+	for name, text := range map[string]string{
+		"unclassifiableFaultDiagnostic": unclassified,
+		"noExitDecisionDiagnostic":      noExitDecisionDiagnostic(),
+	} {
+		assert.NotContains(t, text, "the host is not blocked",
+			"%s leaves with exit 1, and exit 1 is not non-blocking on a host that reads any "+
+				"non-zero exit as a broken installation; this sentence was retired on one arm "+
+				"and must not survive on the other", name)
+		assert.Contains(t, text, "the hook still leaves with exit 1",
+			"%s must say which exit the operator is looking at, or the consequence below it "+
+				"has nothing to attach to", name)
+		assert.Contains(t, text, "stops the tool call on its GATE rows",
+			"%s must name the rows the throw actually stops, because the generated observation "+
+				"callback catches it and only logs", name)
+	}
 }
 
 // TestTheUnusableInputListHasAVisibleEnd pins the SHAPE of the multi-input

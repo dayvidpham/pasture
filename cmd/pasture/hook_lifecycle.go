@@ -378,9 +378,13 @@ func lifecycleFault(
 //
 // It also says what THIS exit means on a throwing host. This arm is the one
 // fault path that leaves with exit 1, and the pasture-generated OpenCode plugin
-// reads any non-zero exit as a broken installation and throws, which stops the
-// user's tool call. A message that said only "the host is not blocked" was
-// true of pasture's intent and false of what the user would see there.
+// reads any non-zero exit as a broken installation and throws. Nothing catches
+// that throw on a GATE callback, so the user's tool call is stopped there. An
+// OBSERVATION callback CATCHES it and only logs, so nothing is stopped on those
+// rows. A message that said only "the host is not blocked" was true of
+// pasture's intent and false of what a user on a gate row would see; a message
+// that said every row is stopped would be false of the observation rows, so the
+// sentence names the gate callbacks.
 func unclassifiableFaultDiagnostic(coords lifecycleCoordinates, unusable []string, cause error) string {
 	return fmt.Sprintf(
 		"pasture hook lifecycle could not classify a fault on event %q of harness %q, "+
@@ -388,8 +392,9 @@ func unclassifiableFaultDiagnostic(coords lifecycleCoordinates, unusable []strin
 			"This happened in lifecycleFault (cmd/pasture/hook_lifecycle.go) after the event "+
 			"coordinates were read; pasture did not ask the host to block, and this event was "+
 			"not evaluated; the hook still leaves with exit 1, and a host that reads any "+
-			"non-zero exit as a broken pasture installation — the generated OpenCode plugin "+
-			"does — stops the tool call on it; "+
+			"non-zero exit as a broken pasture installation stops the tool call on its GATE "+
+			"rows — the generated OpenCode plugin does, while its observation rows catch the "+
+			"same failure and only log it; "+
 			"report this with the cause below, which is: %v",
 		coords.Event, coords.Harness, unusableInputSentence(unusable), cause)
 }
@@ -554,6 +559,29 @@ func lifecycleFaultRecordPath() string {
 	return filepath.Join(directory, lifecycleFaultRecordFile)
 }
 
+// noExitDecisionDiagnostic composes the message for the second arm that leaves
+// with exit 1: an outcome that named no exit status at all.
+//
+// IT IS THE SIBLING OF unclassifiableFaultDiagnostic and it says the same thing
+// about the exit. It used to end "the host is not blocked", which is the
+// sentence that arm's message was corrected away from: exit 1 is not
+// non-blocking on a host that reads any non-zero exit as a broken pasture
+// installation. Both exit-1 arms of this command now carry the same, narrowed
+// claim, so an operator cannot meet the retired sentence on either one.
+//
+// The message is a function rather than a literal inside the arm so that a test
+// can read it. The arm itself calls os.Exit and is unreachable today, so a
+// literal there could hold any sentence at all and nothing would notice.
+func noExitDecisionDiagnostic() string {
+	return "pasture hook lifecycle produced no exit decision for this invocation; " +
+		"this happened in emitLifecycleOutcome (cmd/pasture/hook_lifecycle.go) after the hook ran; " +
+		"pasture did not ask the host to block, and the event may not have been recorded; " +
+		"the hook still leaves with exit 1, and a host that reads any non-zero exit as a broken " +
+		"pasture installation stops the tool call on its GATE rows — the generated OpenCode " +
+		"plugin does, while its observation rows catch the same failure and only log it; " +
+		"report this, and retry the hook input"
+}
+
 // emitLifecycleOutcome is the ONLY writer of this command's host-facing bytes
 // and the only place it leaves the process. stdout carries the native
 // continuation, stderr carries the diagnostic, and the process exit code is the
@@ -576,11 +604,7 @@ func emitLifecycleOutcome(cmd *cobra.Command, outcome hostexit.Outcome) {
 	if !known {
 		// An unset exit status means a path returned no decision at all. It
 		// must never become a silent exit 0.
-		fmt.Fprintf(cmd.ErrOrStderr(),
-			"pasture hook lifecycle produced no exit decision for this invocation; "+
-				"this happened in emitLifecycleOutcome (cmd/pasture/hook_lifecycle.go) after the hook ran; "+
-				"the host is not blocked, and the event may not have been recorded; "+
-				"report this, and retry the hook input\n")
+		fmt.Fprintln(cmd.ErrOrStderr(), noExitDecisionDiagnostic())
 		exitWithCode(1)
 		return
 	}

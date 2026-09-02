@@ -119,11 +119,14 @@ const (
 	// not set — a new fault stage, a new policy, or a continuation taken from
 	// a host table that has no entry for the event.
 	//
-	// IT IS NOT A HARMLESS STATUS WHEN IT IS REACHED. The pasture-generated
-	// OpenCode plugin reads ANY non-zero exit as a broken pasture installation
-	// and throws, which stops the user's tool call, so on that host this exit
-	// is not the non-blocking report its name promises. The diagnostic on that
-	// arm says so rather than claiming the host is not blocked.
+	// IT IS NOT A HARMLESS STATUS ON EVERY ROW. The pasture-generated OpenCode
+	// plugin reads ANY non-zero exit as a broken pasture installation and
+	// throws. On a GATE callback nothing catches that throw, so the user's tool
+	// call is stopped and this exit is not the non-blocking report its name
+	// promises. On an OBSERVATION callback the generated code CATCHES the throw
+	// and only logs, so nothing is stopped there and the name holds. The
+	// diagnostic on that arm names the gate callbacks rather than claiming
+	// either that the host is never blocked or that every row is stopped.
 	//
 	// One question stays open: whether a fail-open fault should use exit 1 on a
 	// host that is documented to show the standard error of a failing hook to
