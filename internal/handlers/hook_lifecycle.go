@@ -104,6 +104,24 @@ type lifecycleDispatch struct {
 	rawParse func([]byte, registration.Event, string) lifecycleCapture
 	bind     func(model.ContractEventKind, []model.NativeBinding) (waist.L1, []waist.Identity, error)
 	encode   func(backend.HostResponse) ([]byte, error)
+	// refusesUndeclaredMembers says whether THIS harness's parser rejects a
+	// payload carrying a member the registration does not declare.
+	//
+	// IT IS A ROW FIELD BECAUSE THE ANSWER DIFFERS PER PARSER AND THE ADVICE
+	// NAMED THE HARNESS. Claude validates the member set against the allowed
+	// fields and refuses an extra one; Codex and OpenCode decode into a struct,
+	// so an added member is IGNORED and the event is recorded — measured, rc 0
+	// with zero bytes on standard error. The refusal text told a Codex operator
+	// BY NAME that added members are refused and that identity names must match
+	// exactly, and both halves are false of that parser. The advice is derived
+	// from this row rather than written once for whichever harness the author
+	// had in mind.
+	refusesUndeclaredMembers bool
+	// matchesFieldNamesExactly says whether identity field names must match
+	// the registration's spelling. Claude looks names up in a map, so they
+	// must; the struct decoders accept a case-insensitive match, so SESSION_ID
+	// and sessionid bind where the advice said they would not.
+	matchesFieldNamesExactly bool
 }
 
 // frontendRegistry is the compile-time static dispatch map keyed by the closed
@@ -133,8 +151,10 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 			capture := claudeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
 			return withRawOrigin(lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery})
 		},
-		bind:   claudefrontend.Bind,
-		encode: nativeresponse.CanonicalProceed,
+		bind:                     claudefrontend.Bind,
+		encode:                   nativeresponse.CanonicalProceed,
+		refusesUndeclaredMembers: true,
+		matchesFieldNamesExactly: true,
 	},
 	ir.HarnessOpenCode: {
 		name:        "OpenCode",
@@ -150,6 +170,11 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 		},
 		bind:   opencodefrontend.Bind,
 		encode: nativeresponse.CanonicalProceed,
+		// This parser decodes into a struct, so an undeclared member is
+		// IGNORED and a field name matches case-insensitively. Both schema
+		// flags stay false, and the refusal text says only what holds here.
+		refusesUndeclaredMembers: false,
+		matchesFieldNamesExactly: false,
 	},
 	ir.HarnessCodex: {
 		name:        "Codex",
@@ -165,6 +190,11 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 		},
 		bind:   codexfrontend.Bind,
 		encode: nativeresponse.CodexContinuation,
+		// Same decoder shape as OpenCode: an added member is ignored and the
+		// event is recorded. Measured on the built binary, rc 0 with zero bytes
+		// on standard error.
+		refusesUndeclaredMembers: false,
+		matchesFieldNamesExactly: false,
 	},
 }
 
@@ -648,11 +678,18 @@ type captureDispositionAdvice struct {
 // which is a sentence nobody can check. If a parser ever produces one, the
 // unlisted default below refuses to invent a reason for it and says so.
 var captureDispositionAdviceByDisposition = map[model.CaptureDisposition]captureDispositionAdvice{
+	// "NOT WELL-FORMED JSON" IS FALSE FOR HALF THIS ARM'S INPUTS. `[]`,
+	// `"hello"` and `123` are all perfectly well-formed JSON and all three land
+	// here, because what the parser needs is a JSON OBJECT and it got a value
+	// of another kind. The sentence that is true of every input is the one
+	// about the SHAPE, and it covers the genuinely malformed case too: a
+	// fragment that does not parse is not an object either.
 	model.CaptureMalformed: {
-		Reason: "the payload is not well-formed JSON, so it was never decoded",
-		Fix: "Send well-formed JSON. Nothing about the fields or the host version was inspected on this route, " +
-			"because ingress stopped at the decode; capture the exact bytes the host sent and check them with a " +
-			"JSON parser first.",
+		Reason: "the payload is not a JSON object, so no field could be read from it",
+		Fix: "Send a JSON OBJECT: a well-formed array, string or number is refused here too, because the " +
+			"event's fields are read from an object's members. Nothing about the fields or the host version " +
+			"was inspected on this route, because ingress stopped at the decode; capture the exact bytes the " +
+			"host sent and check both that they parse AND that the top level is an object.",
 		NamesIdentities: false,
 	},
 	model.CaptureInvalidUTF8: {
@@ -688,9 +725,16 @@ var captureDispositionAdviceByDisposition = map[model.CaptureDisposition]capture
 		Fix:             "", // composed per call: it names the event and the host version.
 		NamesIdentities: true,
 	},
+	// THREE CAUSES, ONE LINE, AND THE SENTENCE NAMED ONLY THE THIRD. The parser
+	// returns this disposition when the event field is ABSENT, when it cannot
+	// be read, and when it names a different event — and a payload carrying no
+	// event at all was told it describes a different one. The cause does not
+	// survive the classification, so the sentence covers all three rather than
+	// guessing which fired; the same repair the identity clause took.
 	model.CaptureEventMismatch: {
-		Reason: "the payload describes a different event from the one named on the command line",
-		Fix:    "", // composed per call: it names the event and the host version.
+		Reason: "the payload does not report this event — the field is absent, unreadable, or names a " +
+			"different event",
+		Fix: "", // composed per call: it names the event and the host version.
 		// The event claim is checked BEFORE the identities, so this one did not
 		// reach them either: the payload decoded, and the refusal happened at
 		// the coordinate rather than at a field.
@@ -839,12 +883,27 @@ func unbindableCaptureError(
 			"version the host actually runs, because the event a host reports can change between versions.",
 			event.NativeName, in.HostVersion)
 	case capture.disposition == model.CaptureUnsupportedSchema:
-		fix = fmt.Sprintf("Compare the payload with this build's %s registration for %q in BOTH directions: every "+
-			"identity field it declares must be present under the name it expects and carry a usable value, AND "+
-			"the payload must carry no member the registration does not declare — a host that ADDS a field is "+
-			"refused here just as one that renames or drops a correlation field is. Check too that the host "+
-			"version on the command line (%q) is the version the host actually runs.",
-			dispatch.name, event.NativeName, in.HostVersion)
+		// THE ADVICE FOLLOWS WHAT THIS PARSER ENFORCES, and it used to name the
+		// harness while describing another one's rules. Both facts are on the
+		// dispatch row this call already receives, so no new plumbing and no
+		// classifier change is needed to stop telling a Codex operator that
+		// added members are refused and that field names must match exactly —
+		// neither of which is true of the parser that refused them.
+		naming := "must be present and carry a usable value"
+		if dispatch.matchesFieldNamesExactly {
+			naming = "must be present under the name it expects, spelled exactly, and carry a usable value"
+		}
+		members := "Members this build does not declare are IGNORED by this harness's parser, so an added " +
+			"field is not what refused this payload."
+		if dispatch.refusesUndeclaredMembers {
+			members = "AND the payload must carry no member the registration does not declare — on this " +
+				"harness a host that ADDS a field is refused just as one that renames or drops a " +
+				"correlation field is."
+		}
+		fix = fmt.Sprintf("Compare the payload with this build's %s registration for %q: every identity field "+
+			"it declares %s. %s Check too that the host version on the command line (%q) is the version the "+
+			"host actually runs.",
+			dispatch.name, event.NativeName, naming, members, in.HostVersion)
 	}
 
 	// WHAT CARRIES THE WHOLE SENTENCE, and that is not redundancy. A

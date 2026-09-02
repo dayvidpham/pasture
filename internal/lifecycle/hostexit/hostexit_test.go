@@ -1464,7 +1464,21 @@ const internalReferenceRuleHeading = "## References & Internal Identifiers"
 var internalReferenceForms = map[string]string{
 	// Beads task identifiers. The project prefix is part of the shipped
 	// module path, so the family is recognisable without naming this project.
-	"<project>-xxxxx": `\b[a-z][a-z0-9]*(-[a-z0-9]+)+-[a-z0-9]{5}\b`,
+	// THE SUFFIX IS A RANGE, AND IT WAS PINNED TO FIVE CHARACTERS BECAUSE THE
+	// EXEMPLAR SPELLS FIVE x. THAT TRANSLATED THE ILLUSTRATION, NOT THE RULE.
+	// Every task id in this project's own record is SIX — hc2jq3, o71gub,
+	// 6gbpks — so the derived pattern matched none of them while the three
+	// literals it replaced matched them all. A derivation that is NARROWER than
+	// the list it supersedes is a regression wearing the word "derived", which
+	// is why widthCheckedExamples below refuses one.
+	// The suffix is a RANGE with a DIGIT in it, and both halves are load-bearing.
+	// Pinning the length to five translated the illustration; widening it to
+	// "four or more" then matched every ordinary kebab-case phrase this
+	// diagnostic contains — report-and-continue, throw-fail-fast — and would
+	// have refused legitimate text. A Beads suffix is a generated token and
+	// always carries a digit, which is what separates it from a hyphenated
+	// English phrase.
+	"<project>-xxxxx": `\b[a-z][a-z0-9]*(?:-[a-z0-9]+)*-(?:[a-z0-9]{3,}[0-9][a-z0-9]*|[a-z0-9]*[0-9][a-z0-9]{3,})\b`,
 	"beads://…":       `beads://`,
 	// Protocol process artefacts.
 	"p3-propose":  `\bp\d+-[a-z][a-z-]*\b`,
@@ -1526,6 +1540,31 @@ func internalReferenceExemplars(t *testing.T) []string {
 	return exemplars
 }
 
+// widthCheckedExamples are strings that MUST be recognised, whatever the
+// derivation produces.
+//
+// WHY A DERIVATION NEEDS THIS. Deriving the population from the rule removed
+// the risk that a form is missed because nobody remembered it, and introduced a
+// new one nobody was watching for: that the translation comes out NARROWER than
+// the literals it replaced. It did — the task-id pattern was translated from an
+// illustration spelling five x and matched no real six-character id, so the
+// "improvement" silently un-caught every task reference in this project's own
+// record.
+//
+// These are the retired literals' real instances. A derivation is only better
+// than the list it replaces if it is at least as WIDE, and this is where that
+// is checked rather than assumed.
+var widthCheckedExamples = []string{
+	"aura-plugins-hc2jq3", // six characters: the shape every id in this record has
+	"aura-plugins-a6h3d",  // five: the shape the exemplar spells
+	"aura-plugins-o71gub",
+	"aura-plugins-6gbpks",
+	"SLICE-3",
+	"PROPOSAL-2",
+	"URD",
+	"p3-propose",
+}
+
 // internalReferencePatterns returns the patterns that recognise a forbidden
 // reference, and REFUSES any exemplar the rule spells that it cannot expand.
 func internalReferencePatterns(t *testing.T) []*regexp.Regexp {
@@ -1552,6 +1591,22 @@ func internalReferencePatterns(t *testing.T) []*regexp.Regexp {
 			"recognised", unknown)
 	require.NotEmpty(t, patterns,
 		"the guard must recognise at least one form, or every text passes it")
+
+	// AT LEAST AS WIDE AS THE LITERALS IT REPLACED.
+	for _, example := range widthCheckedExamples {
+		recognised := false
+		for _, pattern := range patterns {
+			if pattern.MatchString(example) {
+				recognised = true
+				break
+			}
+		}
+		require.True(t, recognised,
+			"the derived patterns do not recognise %q, which the three literals this guard "+
+				"replaced did recognise. A derivation that comes out narrower than its list is a "+
+				"regression wearing the word 'derived': widen the pattern this exemplar expands "+
+				"to, and translate the RULE rather than the illustration beside it", example)
+	}
 	return patterns
 }
 

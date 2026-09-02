@@ -184,8 +184,9 @@ func assertActionableEnvError(t *testing.T, err error) {
 	assert.Contains(t, message, "HookEnvironmentFromOS", "the reader must be told WHERE it failed")
 	assert.Contains(t, message, "cmd/pasture/hook_environment.go", "the reader must be told which file")
 	assert.Contains(t, message, "while the hook was starting", "the reader must be told WHEN it failed")
-	for _, internal := range []string{"SLICE-", "PROPOSAL-", "aura-plugins-"} {
-		assert.NotContains(t, message, internal,
-			"user-visible text must not carry an internal process reference")
-	}
+	// THE SAME THREE LITERALS UNDER THE SAME CLASS SENTENCE, in the second of
+	// two identical guards. The archetype fix reached one and not this one, so
+	// the forms it could not see were still green here: the population is
+	// derived from the AGENTS.md rule now, exactly as its sibling's is.
+	assertNoInternalReferenceInPackage(t, "the hook environment refusal", message)
 }

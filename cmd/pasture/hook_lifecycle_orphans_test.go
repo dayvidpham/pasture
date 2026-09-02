@@ -167,6 +167,12 @@ func TestOrphanCountAgreesWithTheEnumerationTheInvariantTestUses(t *testing.T) {
 // Each of the three claims below is pinned by a phrase, so an edit that
 // quietly turns "expected and reclaimable" into something that reads as a fault
 // turns this test RED.
+//
+// WHAT IT VISITS: the THREE claims listed below, in the wording this command
+// ships today.
+// WHAT IT DOES NOT READ: any fourth claim added to that output, and any
+// rewording that keeps the pinned phrases while changing what surrounds them.
+// It reads phrases, not the whole sentence.
 func TestOrphanCountWordingSaysWhatItIsThatItIsExpectedAndWhatALargeNumberMeans(t *testing.T) {
 	t.Parallel()
 

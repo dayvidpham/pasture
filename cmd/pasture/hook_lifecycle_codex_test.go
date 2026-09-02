@@ -22,6 +22,11 @@ import (
 // emits no native continuation, reports the actionable withheld diagnostic on
 // stderr, exits 0, and opens no database (admission enforced before any storage
 // access). Stop and PostToolUse are representative of the eight withheld events.
+//
+// WHAT IT VISITS: those TWO events, named here as representatives.
+// WHAT IT DOES NOT READ: the other six withheld events. The withheld SET is
+// derived and held by the activation support report; this drives a sample of it
+// through the built binary to show the admission decision reaches the host.
 func TestUnselectedCodexEventIsNotAdmittedByBuiltCLI(t *testing.T) {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "pasture")
