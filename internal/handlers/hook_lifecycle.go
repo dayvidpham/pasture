@@ -485,19 +485,72 @@ func activationFor(kind model.ContractEventKind, entries []activation.Entry) (ac
 	return activation.Entry{}, false
 }
 
-// captureDispositionReasons renders a non-valid capture disposition as the
-// reason an operator can act on. The disposition is a closed enum in the model
-// package and carries no words of its own; these are the words, kept beside the
-// one place that has to explain the classification to a person.
-var captureDispositionReasons = map[model.CaptureDisposition]string{
-	model.CaptureMalformed:      "the payload is not well-formed JSON",
-	model.CaptureDuplicateField: "the payload repeats a field, so which value was meant cannot be decided",
-	model.CaptureInvalidUTF8:    "the payload is not valid UTF-8",
-	model.CaptureTruncated:      "the payload ends part-way through",
-	model.CaptureOverLimit:      "the payload is larger than the bound ingress accepts",
-	model.CaptureUnsupportedSchema: "the payload does not carry the identity fields this event's registration declares, " +
-		"or carries them under different names",
-	model.CaptureEventMismatch: "the payload describes a different event from the one named on the command line",
+// captureDispositionAdvice is what an operator is told about ONE non-valid
+// disposition: why the payload could not be bound, and what to do about THAT.
+//
+// THE FIX FOLLOWS THE DIAGNOSIS, PER DISPOSITION. Only the event-mismatch row
+// had its own fix; every other disposition was told to check identity field
+// NAMES and the host VERSION — and on a malformed, invalid-UTF-8 or
+// duplicate-field payload NEITHER WAS EVER INSPECTED. Ingress stopped at the
+// decode, so the message sent its reader to compare fields against a
+// registration that was never consulted. A true sentence pointing at the wrong
+// thing costs the reader the same hour as a false one.
+type captureDispositionAdvice struct {
+	// Reason is the clause that completes "... could not be bound: <reason>".
+	Reason string
+	// Fix is the instruction that follows from THAT reason.
+	Fix string
+	// ReachedIdentities says whether the parser got as far as looking for the
+	// event's identities. A payload that never decoded did not, and telling its
+	// reader which identities went unbound describes a step that never ran.
+	ReachedIdentities bool
+}
+
+// captureDispositionAdviceByDisposition covers every disposition a parser on
+// this path can produce.
+//
+// CaptureTruncated AND CaptureOverLimit ARE ABSENT ON PURPOSE. They are
+// declared in the model and NO parser produces either: the over-limit condition
+// never reaches a capture at all, because the handler refuses a payload above
+// the bound before it parses, with its own error. Carrying words for a
+// disposition nothing produces is a sentence that cannot be true or false,
+// which is a sentence nobody can check. If a parser ever produces one, the
+// unlisted default below refuses to invent a reason for it and says so.
+var captureDispositionAdviceByDisposition = map[model.CaptureDisposition]captureDispositionAdvice{
+	model.CaptureMalformed: {
+		Reason: "the payload is not well-formed JSON, so it was never decoded",
+		Fix: "Send well-formed JSON. Nothing about the fields or the host version was inspected on this route, " +
+			"because ingress stopped at the decode; capture the exact bytes the host sent and check them with a " +
+			"JSON parser first.",
+		ReachedIdentities: false,
+	},
+	model.CaptureInvalidUTF8: {
+		Reason: "the payload is not valid UTF-8, so it was never decoded",
+		Fix: "Send UTF-8. Nothing about the fields or the host version was inspected on this route, because ingress " +
+			"stopped at the encoding check; the usual cause is a payload spliced together from bytes in another " +
+			"encoding, or truncated mid-character.",
+		ReachedIdentities: false,
+	},
+	model.CaptureDuplicateField: {
+		Reason: "the payload repeats a field, so which value was meant cannot be decided",
+		Fix: "Send each field once. Pasture will not guess between two values for one field, and no field or version " +
+			"check was reached on this route; look for a payload assembled by concatenation or merged from two sources.",
+		ReachedIdentities: false,
+	},
+	model.CaptureUnsupportedSchema: {
+		Reason: "the payload does not carry the identity fields this event's registration declares, " +
+			"or carries them under different names",
+		Fix:               "", // composed per call: it names the event and the host version.
+		ReachedIdentities: true,
+	},
+	model.CaptureEventMismatch: {
+		Reason: "the payload describes a different event from the one named on the command line",
+		Fix:    "", // composed per call: it names the event and the host version.
+		// The event claim is checked BEFORE the identities, so this one did not
+		// reach them either: the payload decoded, and the refusal happened at
+		// the coordinate rather than at a field.
+		ReachedIdentities: false,
+	},
 }
 
 // unbindableCaptureError says that an event WAS NOT EVALUATED, and says which
@@ -515,33 +568,50 @@ func unbindableCaptureError(
 	in HookLifecycleInput,
 	capture lifecycleCapture,
 ) error {
-	bound := make(map[model.NativeBindingKind]bool, len(capture.delivery.Bindings))
-	for _, binding := range capture.delivery.Bindings {
-		bound[binding.Kind] = true
-	}
-	unbound := []string{}
+	// THE LIST IS EVERY IDENTITY THE EVENT REQUIRES, AND IT NEVER DISCRIMINATES.
+	// It once filtered by which bindings survived, which read as a claim that
+	// the message names the fields that actually failed. IT DOES NOT AND CANNOT:
+	// every ingress parser returns NIL BINDINGS on a non-valid capture, so the
+	// filter removed nothing on any input a user can produce, and a payload
+	// missing one identity rendered a message byte-identical to one missing all
+	// of them. Dropping the filter changed no output anywhere.
+	//
+	// So the sentence says what is true — these are the identities the event
+	// REQUIRES, one of which is unsatisfied — rather than implying a
+	// discrimination the data cannot support. Narrowing it to the field that
+	// actually failed would need the parsers to report which one, and they do
+	// not; that is a change to ingress, not a rewording here.
+	required := []string{}
 	for _, identity := range event.IdentityFields() {
-		if identity.Required && !bound[identity.Binding] {
-			unbound = append(unbound, identity.Binding.String())
+		if identity.Required {
+			required = append(required, identity.Binding.String())
 		}
 	}
 
-	missing := "no identity this event declares could be bound"
-	switch {
-	case len(unbound) == 1:
-		missing = fmt.Sprintf("the required %s identity could not be bound", unbound[0])
-	case len(unbound) > 1:
-		missing = fmt.Sprintf("the required %s identities could not be bound", strings.Join(unbound, ", "))
-	case len(event.IdentityFields()) == 0:
-		missing = "this event declares no identities, so the payload itself could not be classified"
-	}
-
-	reason, named := captureDispositionReasons[capture.disposition]
+	advice, named := captureDispositionAdviceByDisposition[capture.disposition]
+	reason := advice.Reason
 	if !named {
-		reason = "the payload could not be classified, and the classification has no stated reason in this build"
+		reason = "the payload could not be classified, and this build states no reason for that classification"
 	}
 
-	why := fmt.Sprintf("%s, so %s", reason, missing)
+	// THE IDENTITY CLAUSE IS ONLY SPOKEN WHERE THE IDENTITIES WERE REACHED. A
+	// payload that never decoded, or that was refused at the event coordinate,
+	// never got as far as looking for them, and naming them there describes a
+	// step that did not run.
+	missing := ""
+	switch {
+	case !advice.ReachedIdentities:
+		missing = ""
+	case len(required) == 1:
+		missing = fmt.Sprintf(", so the %s identity this event requires was not bound", required[0])
+	case len(required) > 1:
+		missing = fmt.Sprintf(", so none of the identities this event requires was bound (%s)",
+			strings.Join(required, ", "))
+	case len(event.IdentityFields()) == 0:
+		missing = ", and this event declares no identities, so the payload itself could not be classified"
+	}
+
+	why := reason + missing
 	// THIS CLAUSE SAID "No occurrence was recorded for this event" AND THAT WAS
 	// FALSE. Measured on the built binary: the delivery IS written to the
 	// lifecycle occurrence journal, and `hook lifecycle list` shows it with an
@@ -557,21 +627,25 @@ func unbindableCaptureError(
 	// consulted, and what the row carries.
 	impact := "Nothing was derived from this delivery and no gate was consulted, so the event had no part in the " +
 		"host's answer; the row carries the disposition that refused it and an empty interpreted set."
-	// THE FIX FOLLOWS THE DIAGNOSIS. A payload that names a DIFFERENT EVENT is
-	// not fixed by checking identity field names, and telling its reader to do
-	// that sends them to inspect fields that were never the problem. The
-	// registered coordinate is authoritative on purpose, so the actionable
-	// instruction is to make the payload's own claim agree with it.
-	fix := fmt.Sprintf("Check that the host payload carries the identity fields this build's %s registration declares "+
-		"for %q, under the names it expects, and that the host version on the command line (%q) is the version the host "+
-		"actually runs: a host that renames or drops a correlation field between versions arrives here.",
-		dispatch.name, event.NativeName, in.HostVersion)
-	if capture.disposition == model.CaptureEventMismatch {
+	// THE FIX FOLLOWS THE DIAGNOSIS, and the two dispositions whose fix has to
+	// NAME the event and the host version compose it here; the rest carry their
+	// own, because theirs do not depend on this invocation.
+	fix := advice.Fix
+	switch {
+	case !named:
+		fix = fmt.Sprintf("Report this: a payload for %q was refused with a classification this build has no words "+
+			"for, so pasture cannot say what to change.", event.NativeName)
+	case capture.disposition == model.CaptureEventMismatch:
 		fix = fmt.Sprintf("Invoke the hook with the event the payload actually describes, or send the payload for %q: "+
 			"the event named on the command line is authoritative, and a payload that declares a different one is "+
 			"refused rather than reinterpreted. Check too that the host version on the command line (%q) is the "+
 			"version the host actually runs, because the event a host reports can change between versions.",
 			event.NativeName, in.HostVersion)
+	case capture.disposition == model.CaptureUnsupportedSchema:
+		fix = fmt.Sprintf("Check that the host payload carries the identity fields this build's %s registration "+
+			"declares for %q, under the names it expects, and that the host version on the command line (%q) is the "+
+			"version the host actually runs: a host that renames or drops a correlation field between versions "+
+			"arrives here.", dispatch.name, event.NativeName, in.HostVersion)
 	}
 
 	// WHAT CARRIES THE WHOLE SENTENCE, and that is not redundancy. A

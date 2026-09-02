@@ -3590,15 +3590,27 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 	// reason, so that a maintainer changing one must state why rather than edit
 	// a number.
 	judged := map[string]string{
+		// THE ROUTE LIST HERE WAS WRONG AT BOTH ENDS AND WAS PUBLISHED TWICE.
+		// It named an ORPHANS route that does not exist — neither orphans file
+		// holds a lifecycleFault call — and it OMITTED the flag-parse route
+		// inside SetFlagErrorFunc, the only one outside lifecycleOutcome. Both
+		// ends were found by enumerating from the source, which is what the
+		// reason had claimed to do. The six real routes are below.
 		"hostexit.FaultStageNotRecorded": "the route faults before any durable write, or the durable write itself " +
-			"returned an error and committed nothing: the panic recovery, the environment refusal, the argument " +
-			"refusal, the orphans subcommand, and every handler error that is not one of the two recorded cases",
+			"returned an error and committed nothing. Three routes pass it directly — the environment refusal and " +
+			"the argument refusal, neither of which opens a store, and the flag-parse refusal inside " +
+			"SetFlagErrorFunc, which runs before the command body — and it is also the default of the computed " +
+			"stage below",
 		"hostexit.FaultStageRecordUnknown": "the hook was abandoned at its deadline: the work runs in a goroutine and " +
 			"the receipt commits before the native bytes are produced, so the expiry can land on either side of it " +
 			"and pasture genuinely does not know",
 		"hostexit.FaultStageRecorded": "pasture observed the commit: a receipt committed without a continuation, and " +
 			"a delivery whose capture could not be bound, whose row carries the refusing disposition",
-		"stage": "the local computed immediately above the call, whose two branches are judged where they are written",
+		"panicStage": "the panic recovery's local, which is not-recorded until the work goroutine is started and " +
+			"record-unknown from that instant on; it is never recorded, because this recovery does not observe the " +
+			"commit, only that one became possible",
+		"stage": "the handler-error route's local, computed by the sentinel table faultStageByError, whose rows are " +
+			"judged where they are written",
 	}
 
 	fileSet := token.NewFileSet()
@@ -3644,4 +3656,460 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 	assert.NotZero(t, found["stage"],
 		"the handler-error route computes its stage in a local, and that local is where the two "+
 			"recorded cases are selected; if it is gone, the recorded stage has no producer here")
+
+	// THE ROUTE COUNT IS PINNED, because the published enumeration was wrong at
+	// both ends: it invented one route and missed another, and no count stood
+	// between the prose and the source. Six is what the source holds.
+	total := 0
+	for _, count := range found {
+		total += count
+	}
+	assert.Equal(t, 6, total,
+		"this command has SIX fault routes: the panic recovery, the environment refusal, the argument "+
+			"refusal, the deadline abandonment, the handler error, and the flag-parse refusal inside "+
+			"SetFlagErrorFunc. A route added or removed without updating the judged reasons above leaves "+
+			"the prose describing a command that does not exist, which has happened once already")
+}
+
+// TestTheRoutesThatNeverOpenAStoreSayTheDeliveryWasNotRecorded drives, on the
+// built binary, the two fault routes that had no behavioural pin at all.
+//
+// WHY THESE TWO. Four of the six routes are measured on host bytes somewhere in
+// this file. The FLAG-PARSE refusal inside SetFlagErrorFunc and the ARGUMENT
+// refusal were not, and both declare not-recorded. Mutating either to declare
+// "recorded" left the whole cmd/pasture package GREEN — over 208 seconds each —
+// while an operator was told THE DELIVERY IS COMMITTED IN THE JOURNAL about an
+// invocation THAT NEVER OPENED A STORE. Nothing was written, nothing could be,
+// and the message sent them to look for a row that cannot exist.
+//
+// NEITHER NEEDS A STORE, A LOCK OR A FIXTURE: an unparseable flag and a
+// positional argument are both refused before the command body runs.
+//
+// MUTATION, AT THE DEFECT SITE: change either route's stage argument to
+// hostexit.FaultStageRecorded. That subtest turns RED on the durable-state
+// assertion.
+func TestTheRoutesThatNeverOpenAStoreSayTheDeliveryWasNotRecorded(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "lifecycle-cli")
+	buildLifecycleBinary(t, binary)
+
+	for _, row := range []struct {
+		Name string
+		Args []string
+		Says string
+	}{
+		{
+			Name: "the flag-parse refusal",
+			Args: []string{"hook", "lifecycle", "--harness", "claude-code", "--event", "PreToolUse",
+				"--host-version", "2.1.222", "--not-a-flag"},
+			Says: "could not parse its flags",
+		},
+		{
+			Name: "the argument refusal",
+			Args: []string{"hook", "lifecycle", "--harness", "claude-code", "--event", "PreToolUse",
+				"--host-version", "2.1.222", "an-unexpected-argument"},
+			Says: "",
+		},
+	} {
+		t.Run(row.Name, func(t *testing.T) {
+			store := t.TempDir()
+			command := exec.Command(binary, append([]string{
+				databaseFlagName.Argument(), filepath.Join(store, "pasture.db")}, row.Args...)...)
+			command.Stdin = bytes.NewReader(nil)
+			var stdout, stderr bytes.Buffer
+			command.Stdout = &stdout
+			command.Stderr = &stderr
+			_ = command.Run()
+
+			require.NotEmpty(t, stderr.String(),
+				"this route must reach a diagnostic; if it does not, the assertions below prove nothing")
+			if row.Says != "" {
+				require.Contains(t, stderr.String(), row.Says,
+					"the subtest must drive the route it names, not some other refusal")
+			}
+
+			assert.Contains(t, stderr.String(), "durable state not-recorded",
+				"this route refuses BEFORE the command body opens anything, so nothing was written and "+
+					"nothing could have been")
+			assert.Contains(t, stderr.String(), "no occurrence was recorded for it",
+				"and the sentence beside the machine-readable stage must say the same thing")
+			assert.NotContains(t, stderr.String(), "IS committed in the lifecycle occurrence journal",
+				"an operator must never be sent to look for a row on an invocation that never opened a "+
+					"store. Declaring the recorded stage here left the whole package green while saying "+
+					"exactly that")
+
+			_, statErr := os.Stat(filepath.Join(store, "pasture.db"))
+			assert.True(t, os.IsNotExist(statErr),
+				"the claim under test is that NOTHING was written; if a store exists, not-recorded is "+
+					"the wrong stage and this test is asserting the wrong thing")
+		})
+	}
+}
+
+// TestEveryWorkErrorMapsToTheDurableStateItCanSupport pins the ERROR-TO-STAGE
+// mapping as a population, over the sentinel errors themselves.
+//
+// WHY IT EXISTS. Round 27 corrected two of these rows for stating something
+// false about the journal, and NOTHING HELD EITHER CORRECTION: reverting one
+// left the whole cmd/pasture package green for 213 seconds, because the
+// sentinel errors appeared in NO test file anywhere in the tree. The route
+// sweep could not see it — that is its own stated limit, which reads WHICH
+// stage a route declares and not whether the stage is true — and it was biting
+// on a route the same round had just corrected.
+//
+// It reads the production table directly, so a row added without a judgement
+// fails here, and each row's declared stage is checked against what that
+// sentinel actually means.
+//
+// MUTATION: change any row's stage, or delete a row so its error falls through
+// to the default. This test turns RED naming the sentinel.
+func TestEveryWorkErrorMapsToTheDurableStateItCanSupport(t *testing.T) {
+	t.Parallel()
+
+	// What each sentinel MEANS about the journal, judged here and independently
+	// of the production table, so the two must agree rather than one restating
+	// the other.
+	judged := map[string]struct {
+		Stage hostexit.FaultStage
+		Why   string
+	}{
+		"the lifecycle receipt was committed but the host received no continuation": {
+			Stage: hostexit.FaultStageRecorded,
+			Why:   "the error is named for a commit pasture observed, so the row is certainly there",
+		},
+		"the lifecycle delivery was recorded but its capture could not be bound": {
+			Stage: hostexit.FaultStageRecorded,
+			Why:   "the delivery row is written with the disposition that refused it",
+		},
+		"the lifecycle work panicked after it began": {
+			Stage: hostexit.FaultStageRecordUnknown,
+			Why:   "the panic landed after the work started, so the commit may or may not have completed",
+		},
+	}
+
+	require.Len(t, faultStageByError, len(judged),
+		"every row of the production mapping must be judged here, and every judgement must "+
+			"correspond to a row; a row added without one is a durable-state claim nobody checked")
+
+	for _, row := range faultStageByError {
+		expected, isJudged := judged[row.Err.Error()]
+		require.True(t, isJudged,
+			"the sentinel %q is mapped to a durable state that this test has not judged", row.Err)
+		assert.Equal(t, expected.Stage, row.Stage,
+			"%q must map to %q because %s; it maps to %q",
+			row.Err, expected.Stage.String(), expected.Why, row.Stage.String())
+		assert.NotEmpty(t, row.Why,
+			"every row states WHY its stage is true of it, so the next reader need not re-derive it")
+		require.True(t, row.Stage.IsValid(),
+			"a row may not map an error to an undeclared stage")
+
+		// The mapping is reached through errors.Is, so a WRAPPED sentinel must
+		// resolve the same way: every producer wraps its cause.
+		wrapped := fmt.Errorf("the hook could not evaluate this event: %w: %w", row.Err, errors.New("a cause"))
+		assert.Equal(t, row.Stage, faultStageForWorkError(wrapped),
+			"%q must map the same when wrapped, because every producer wraps it", row.Err)
+	}
+
+	assert.Equal(t, hostexit.FaultStageNotRecorded,
+		faultStageForWorkError(errors.New("an error no row names")),
+		"an unmapped error takes the WEAKEST claim. Any other default would have pasture asserting "+
+			"something about the journal on the strength of not recognising an error")
+	assert.Equal(t, hostexit.FaultStageNotRecorded, faultStageForWorkError(nil),
+		"and a nil error must not reach a stronger claim either")
+}
+
+// panickingCommitBarrier panics AFTER the durable receipt is committed. It is
+// injected through the barrier parameter the command already has, so no
+// production branch exists whose only user is a test.
+type panickingCommitBarrier struct{ message string }
+
+func (b panickingCommitBarrier) AfterCommit(context.Context, handlers.CommitBoundary) error {
+	panic(b.message)
+}
+
+// TestAPanicAfterTheCommitDoesNotClaimTheDeliveryWasNotRecorded drives the
+// panic recovery on the far side of the durable write.
+//
+// THE MEASURED DEFECT. A panic injected at the commit boundary reported
+// "durable state not-recorded" and "no occurrence was recorded for it" WHILE
+// THE JOURNAL HELD THE ROW WITH A FULL INTERPRETED SET. The recovery covered
+// the whole invocation and declared one stage for all of it, which is true only
+// until the work begins.
+//
+// WHICH RECOVERY THIS DRIVES, STATED BECAUSE I FIRST GOT IT WRONG. The barrier
+// runs INSIDE the work goroutine, so this panic is caught by the goroutine's
+// own recover and travels back as a wrapped sentinel that the error-to-stage
+// table answers for. It does NOT exercise the outer recovery's local. I
+// discovered that by mutation: deleting the line that widens the outer local
+// leaves this test GREEN, so citing it for that line would have been a dead
+// pin of the kind this slice keeps producing. The outer local is held
+// separately and structurally, by
+// TestTheOuterPanicRecoveryNeverClaimsMoreThanItsRegionCanSupport, which says
+// why structure is the only witness available for it.
+//
+// THE RULE BOTH RECOVERIES IMPLEMENT. A recovery may claim only the WEAKEST
+// TRUE claim for the region it stands in: not-recorded before the work begins,
+// record-unknown from that instant on, and NEVER recorded — because neither
+// recovery OBSERVES the commit, only that one became possible.
+//
+// MUTATION, AT THE DEFECT SITE: delete the errLifecycleWorkPanicked row from
+// the stage table, or change its stage. This test turns RED on the
+// durable-state assertions, and the row is in the journal either way.
+func TestAPanicAfterTheCommitDoesNotClaimTheDeliveryWasNotRecorded(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
+	initializeLifecycleTestDatabase(t, dbPath)
+
+	cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.10", dbPath)
+	cmd.SetIn(bytes.NewReader(openCodeToolExecuteBeforeWire(t)))
+
+	outcome := lifecycleOutcome(cmd, nil,
+		panickingCommitBarrier{message: "the commit boundary failed after the receipt was written"},
+		timeouts.ProductionProfile())
+
+	require.Equal(t, hostexit.ExitContinue, outcome.Exit,
+		"a pasture panic must still let the host carry on")
+	require.Contains(t, outcome.Stderr, "the hook panicked",
+		"this test must drive the panic path; if it does not, the assertions below prove nothing")
+
+	assert.Contains(t, outcome.Stderr, "durable state record-unknown",
+		"the commit had already happened when this panic landed, so the recovery may not say the "+
+			"delivery was never written. It said not-recorded while the row sat in the journal")
+	assert.Contains(t, outcome.Stderr, "MAY OR MAY NOT exist",
+		"and the sentence must match the machine-readable stage: pasture knows the write became "+
+			"possible, not that it completed")
+	assert.NotContains(t, outcome.Stderr, "no occurrence was recorded for it",
+		"this is the sentence that was false: an operator was told nothing was recorded and the "+
+			"journal held the row with a full interpreted set")
+	assert.NotContains(t, outcome.Stderr, "IS committed in the lifecycle occurrence journal",
+		"and the recovery must not overreach the other way either: it does not OBSERVE the commit, "+
+			"so it may not claim one")
+}
+
+// TestTheOuterPanicRecoveryNeverClaimsMoreThanItsRegionCanSupport reads the
+// outer panic recovery's stage local.
+//
+// WHY STRUCTURE IS THE ONLY WITNESS HERE, STATED RATHER THAN DRESSED UP. The
+// outer recovery covers the whole command body, but the region it covers AFTER
+// the work goroutine starts contains, on this revision, a channel receive, a
+// slice read, a struct literal and a deferred cancel — nothing that can panic.
+// So no input drives it, and no behavioural test can. The local is defensive:
+// it exists so that the next statement added to that region cannot inherit a
+// claim nobody re-examined, which is exactly how the recovery came to say
+// not-recorded about an invocation whose row was already committed.
+//
+// WHAT IT REQUIRES. The local starts at the weakest claim; it is assigned
+// exactly once more, to record-unknown, and that assignment stands ABOVE the
+// statement that starts the work; and it is NEVER assigned the recorded stage,
+// because this recovery does not observe the commit.
+//
+// IT IS ALSO A GUARD AGAINST THE FIX ITSELF GROWING. One local set once is the
+// design; a running "stage so far" updated at each step would reintroduce the
+// shared mutable claim this package removed by making the stage a required
+// argument with a refused zero value. A third assignment fails here.
+//
+// MUTATION: delete the widening assignment, move it below the `go` statement,
+// give the local a third assignment, or assign it the recorded stage. This test
+// turns RED on each.
+func TestTheOuterPanicRecoveryNeverClaimsMoreThanItsRegionCanSupport(t *testing.T) {
+	t.Parallel()
+
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, "hook_lifecycle.go", nil, 0)
+	require.NoError(t, err, "the production source must be readable beside its test")
+
+	var outcome *ast.FuncDecl
+	for _, node := range file.Decls {
+		function, isFunction := node.(*ast.FuncDecl)
+		if isFunction && function.Name.Name == "lifecycleOutcome" {
+			outcome = function
+			break
+		}
+	}
+	require.NotNil(t, outcome, "lifecycleOutcome must exist: it is where the outer recovery stands")
+
+	const local = "panicStage"
+	assignments := []struct {
+		Value string
+		Line  int
+		Pos   token.Pos
+	}{}
+	ast.Inspect(outcome, func(node ast.Node) bool {
+		assign, isAssign := node.(*ast.AssignStmt)
+		if !isAssign || len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
+			return true
+		}
+		if name, isIdentifier := assign.Lhs[0].(*ast.Ident); !isIdentifier || name.Name != local {
+			return true
+		}
+		assignments = append(assignments, struct {
+			Value string
+			Line  int
+			Pos   token.Pos
+		}{Value: sourceOf(assign.Rhs[0]), Line: fileSet.Position(assign.TokPos).Line, Pos: assign.TokPos})
+		return true
+	})
+
+	// The local is DECLARED in the var block the recovery reads — nothing but a
+	// declaration may precede the recover — so its initial value is checked
+	// there and its widening is the only assignment.
+	var declared string
+	ast.Inspect(outcome, func(node ast.Node) bool {
+		spec, isSpec := node.(*ast.ValueSpec)
+		if !isSpec || len(spec.Values) != 1 {
+			return true
+		}
+		for _, name := range spec.Names {
+			if name.Name == local {
+				declared = sourceOf(spec.Values[0])
+			}
+		}
+		return true
+	})
+	assert.Equal(t, "hostexit.FaultStageNotRecorded", declared,
+		"before the work starts, nothing can have been written, so the recovery begins at the "+
+			"weakest claim; it must also be DECLARED rather than assigned, because a statement "+
+			"before the recover could panic while no recovery exists")
+
+	require.Len(t, assignments, 1,
+		"the outer recovery's stage is ONE LOCAL WIDENED ONCE, where the work begins. A second "+
+			"assignment is a running \"stage so far\", which is the shared mutable claim this "+
+			"package removed by making the stage a required argument with a refused zero value; "+
+			"found %d assignments", len(assignments))
+	assert.Equal(t, "hostexit.FaultStageRecordUnknown", assignments[0].Value,
+		"once the work has begun the commit MAY have happened, and record-unknown is exactly that "+
+			"much knowledge. It must never be the recorded stage: this recovery does not observe "+
+			"the commit, only that one became possible")
+
+	// The widening must stand ABOVE the statement that starts the work, or the
+	// region between them inherits a claim that is already too strong.
+	var goStatement token.Pos
+	ast.Inspect(outcome, func(node ast.Node) bool {
+		if start, isGo := node.(*ast.GoStmt); isGo && !goStatement.IsValid() {
+			goStatement = start.Go
+		}
+		return true
+	})
+	require.True(t, goStatement.IsValid(),
+		"lifecycleOutcome must still start its work in a goroutine; that statement is what the "+
+			"widening below is positioned against")
+	assert.Less(t, int(assignments[0].Pos), int(goStatement),
+		"the widening must stand ABOVE the `go` statement at hook_lifecycle.go:%d. Below it, a panic "+
+			"raised between the two would be reported as not-recorded although the work had begun",
+		fileSet.Position(goStatement).Line)
+}
+
+// TestEachRefusalDispositionCarriesTheFixThatFollowsIt drives one payload per
+// producible disposition through the built binary and reads what the operator
+// is told to DO about it.
+//
+// THE DEFECT. Only the event-mismatch disposition had a fix of its own. A
+// malformed, invalid-UTF-8 or duplicate-field payload was told to CHECK THE
+// IDENTITY FIELD NAMES AND THE HOST VERSION — and on those routes ingress
+// stopped at the decode, so NEITHER WAS EVER INSPECTED. The sentence was true
+// of the product and pointed at the wrong thing, which costs its reader the
+// same hour a false one does.
+//
+// AND THE IDENTITY CLAUSE FOLLOWS THE DIAGNOSIS TOO. A payload that never
+// decoded never reached the identity lookup, so naming the identities that went
+// unbound described a step that did not run.
+//
+// MUTATION: give any disposition a fix belonging to another, or restore the
+// identity clause on a route that never reached the identities. That subtest
+// turns RED.
+func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "lifecycle-cli")
+	buildLifecycleBinary(t, binary)
+
+	const identityAdvice = "carries the identity fields this build's"
+	const versionAdvice = "is the version the host actually runs"
+
+	for _, row := range []struct {
+		Name              string
+		Payload           []byte
+		Says              string
+		Tells             string
+		ReachedIdentities bool
+		// MentionsVersion says whether the HOST VERSION is a plausible cause of
+		// THIS refusal, and it is judged per disposition rather than derived
+		// from ReachedIdentities. The two are not the same question: an event
+		// mismatch never reaches the identity lookup, yet the version is a real
+		// cause of it, because the event a host reports can change between
+		// versions. A decode failure has neither.
+		MentionsVersion bool
+	}{
+		{
+			Name:    "a payload that is not well-formed JSON",
+			Payload: []byte(`{"session_id":`),
+			Says:    "the payload is not well-formed JSON, so it was never decoded",
+			Tells:   "Send well-formed JSON",
+		},
+		{
+			Name:    "a payload that is not valid UTF-8",
+			Payload: []byte{'{', '"', 's', '"', ':', '"', 0xff, 0xfe, '"', '}'},
+			Says:    "the payload is not valid UTF-8, so it was never decoded",
+			Tells:   "Send UTF-8",
+		},
+		{
+			Name:    "a payload that repeats a field",
+			Payload: []byte(`{"session_id":"a","session_id":"b","hook_event_name":"PreToolUse","tool_name":"R","tool_input":{}}`),
+			Says:    "the payload repeats a field",
+			Tells:   "Send each field once",
+		},
+		{
+			Name:              "a payload whose identity fields are renamed",
+			Payload:           []byte(`{"renamed":"s","hook_event_name":"PreToolUse","tool_name":"R","tool_input":{}}`),
+			Says:              "does not carry the identity fields this event's registration declares",
+			Tells:             identityAdvice,
+			ReachedIdentities: true,
+			MentionsVersion:   true,
+		},
+		{
+			Name:            "a payload that declares a different event",
+			Payload:         []byte(`{"session_id":"s","hook_event_name":"SessionEnd","tool_name":"R","tool_input":{}}`),
+			Says:            "describes a different event from the one named on the command line",
+			Tells:           "Invoke the hook with the event the payload actually describes",
+			MentionsVersion: true,
+		},
+	} {
+		t.Run(row.Name, func(t *testing.T) {
+			store := t.TempDir()
+			database := filepath.Join(store, "pasture.db")
+			initializeLifecycleTestDatabase(t, database)
+
+			run := runLifecycleHookOn(t, binary, database,
+				"claude-code", "PreToolUse", "2.1.222", row.Payload)
+
+			require.Contains(t, run.Stderr, row.Says,
+				"this subtest must drive the disposition it names; if it does not, everything below "+
+					"is about some other refusal")
+			assert.Contains(t, run.Stderr, row.Tells,
+				"the instruction must follow THIS diagnosis. Every disposition but one was told to "+
+					"check identity field names and the host version, on routes where neither was "+
+					"ever inspected")
+
+			if row.MentionsVersion {
+				assert.Contains(t, run.Stderr, versionAdvice,
+					"the host version is a plausible cause of THIS refusal, so the reader is told to "+
+						"check it")
+			} else {
+				assert.NotContains(t, run.Stderr, versionAdvice,
+					"the host version was never inspected on this route and could not have caused "+
+						"the refusal, so sending the reader to check it costs them an hour")
+			}
+
+			if row.ReachedIdentities {
+				assert.Contains(t, run.Stderr, "none of the identities this event requires was bound",
+					"this route DID reach the identity lookup, so it names what the event requires")
+				return
+			}
+			assert.NotContains(t, run.Stderr, "identities this event requires",
+				"this route never reached the identity lookup — ingress stopped earlier — so naming "+
+					"the identities describes a step that did not run")
+			assert.NotContains(t, run.Stderr, identityAdvice,
+				"and it must not send the reader to compare fields against a registration that was "+
+					"never consulted")
+		})
+	}
 }

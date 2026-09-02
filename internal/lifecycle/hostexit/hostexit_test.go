@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -25,15 +26,35 @@ const citedSource = "https://docs.claude.com/en/docs/claude-code/hooks"
 // test proves the bytes it is GIVEN reach the host untouched.
 var openCodeProceed = []byte(`{"decision":"proceed"}`)
 
+// declaredScanBound is how far the derivations below look for declared members
+// of a closed enum.
+//
+// IT IS SIZED FROM THE UNDERLYING TYPE and not chosen. These enums are uint8,
+// so 256 values exhaust them: a bound smaller than that is a promise that
+// nobody will ever declare a member above it, which is exactly the kind of
+// written-down limit this file has been correcting. Scanning the full domain
+// costs nothing at test time and cannot be outgrown.
+const declaredScanBound = 1 << 8
+
+// allFailureModes returns EVERY DECLARED failure mode, derived from IsValid
+// rather than written down.
+//
+// IT WAS A LITERAL LIST, AND THAT MADE THE TABLE BELOW UNABLE TO GROW. A
+// seventh declared, valid mode left TestForFaultCoversEveryModePolicyAndEvidenceCell
+// passing on all twenty-four subtests, and its require.Len could not see the
+// gap either BECAUSE THE COUNT CAME FROM THIS SAME LIST. A count derived from
+// the thing it counts is not a count; it is the list agreeing with itself.
+// This is the second table in the slice to fail that question after the fault
+// stages, so the derivation is now the shape both use.
 func allFailureModes() []pastureruntime.FailureMode {
-	return []pastureruntime.FailureMode{
-		pastureruntime.FailureReportAndContinue,
-		pastureruntime.FailureExitTwoBlocks,
-		pastureruntime.FailureStrictHook,
-		pastureruntime.FailureStrictExitTwoBlocks,
-		pastureruntime.FailureThrowFailFast,
-		pastureruntime.FailureObserveOnly,
+	modes := []pastureruntime.FailureMode{}
+	for candidate := 0; candidate < declaredScanBound; candidate++ {
+		mode := pastureruntime.FailureMode(candidate)
+		if mode.IsValid() {
+			modes = append(modes, mode)
+		}
 	}
+	return modes
 }
 
 // TestForFaultCoversEveryModePolicyAndEvidenceCell is the whole fault table:
@@ -74,7 +95,10 @@ func TestForFaultCoversEveryModePolicyAndEvidenceCell(t *testing.T) {
 			}
 		}
 	}
-	require.Len(t, cells, 24, "the table must cover 6 modes x 2 policies x 2 evidence states")
+	// THE EXPECTED COUNT IS COMPUTED FROM THE AXES, not from the list that
+	// produced the cells. Taking it from len(allFailureModes()) would have been
+	// the list agreeing with itself again.
+	require.Len(t, cells, len(allFailureModes())*2*2, "the table must cover 6 modes x 2 policies x 2 evidence states")
 
 	blocked := 0
 	for _, c := range cells {
@@ -227,16 +251,16 @@ func TestForFaultRefusesWhenThereIsNothingToMap(t *testing.T) {
 	}{
 		{name: "nil cause", named: "the cause is nil, so there is no fault to report", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailClosed, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation}},
 		{name: "unset mode", named: "the effective failure mode is unset or not a known mode", fault: hostexit.Fault{DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailClosed, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
-		{name: "mode above the last arm", named: "the effective failure mode is unset or not a known mode", fault: hostexit.Fault{Mode: pastureruntime.FailureObserveOnly + 1, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
+		{name: "mode above the last arm", named: "the effective failure mode is unset or not a known mode", fault: hostexit.Fault{Mode: modeAboveTheLastArm(), DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
 		// The DECLARED mode is refused on the same terms as the effective one.
 		// It is required because a defaulted declaration is exactly how the
 		// fault text came to call a demoted row's mode "declared": a zero value
 		// there would silently pick the wrong sentence for a blocking gate, and
 		// nothing downstream could tell.
 		{name: "unset declared mode", named: "the declared failure mode is unset or not a known mode", fault: hostexit.Fault{Mode: blocks, Evidence: evidence, Policy: hostexit.FaultFailClosed, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
-		{name: "declared mode above the last arm", named: "the declared failure mode is unset or not a known mode", fault: hostexit.Fault{Mode: blocks, DeclaredMode: pastureruntime.FailureObserveOnly + 1, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
+		{name: "declared mode above the last arm", named: "the declared failure mode is unset or not a known mode", fault: hostexit.Fault{Mode: blocks, DeclaredMode: modeAboveTheLastArm(), Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
 		{name: "unset policy", named: "the fault policy is unset or not a known policy", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
-		{name: "policy above the last arm", named: "the fault policy is unset or not a known policy", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailClosed + 1, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
+		{name: "policy above the last arm", named: "the fault policy is unset or not a known policy", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: policyAboveTheLastArm(), Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
 		{name: "unset stage", named: "the fault stage is unset or not a known stage", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Continuation: continuation, Cause: fault}},
 		{name: "stage above the last arm", named: "the fault stage is unset or not a known stage", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: stageAboveTheLastArm(), Continuation: continuation, Cause: fault}},
 		{name: "continuation never set", named: "the host continuation was never set, so there are no proceed bytes to emit", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageNotRecorded, Cause: fault}},
@@ -321,20 +345,74 @@ func TestContinuationZeroValueIsUnusable(t *testing.T) {
 // TestFaultStageZeroValueRefuses pins the stage enum. The stage decides whether
 // the operator is told the event was not recorded or that the durable state is
 // unknown, so an unset stage must never fall through to the confident claim.
+// aboveTheLastArm returns the first value above every declared member of a
+// closed enum, given its validity predicate.
+//
+// IT IS THE SHAPE stageAboveTheLastArm ESTABLISHED, generalised to the other
+// three closed enums this file probes. Those probes still named
+// FailureObserveOnly+1, FaultFailClosed+1 and ExitBlock+1. Unlike the stage
+// case, none of them goes quiet when a member is appended — they are
+// range-shaped or equality-shaped and fail loudly — so this is a MAINTENANCE
+// COST rather than an untruth, and it is corrected on that ground and no other.
+// Whoever appends a member should not also have to remember three sentinels,
+// and the failure that would remind them points at the probe rather than at
+// what they changed.
+func aboveTheLastArm(isValid func(int) bool) int {
+	last := 0
+	for candidate := 1; candidate < declaredScanBound; candidate++ {
+		if isValid(candidate) {
+			last = candidate
+		}
+	}
+	return last + 1
+}
+
+// modeAboveTheLastArm, policyAboveTheLastArm and exitAboveTheLastArm are the
+// three sentinels, each derived from its own type's predicate.
+func modeAboveTheLastArm() pastureruntime.FailureMode {
+	return pastureruntime.FailureMode(aboveTheLastArm(func(candidate int) bool {
+		return pastureruntime.FailureMode(candidate).IsValid()
+	}))
+}
+
+func policyAboveTheLastArm() hostexit.FaultPolicy {
+	return hostexit.FaultPolicy(aboveTheLastArm(func(candidate int) bool {
+		return hostexit.FaultPolicy(candidate).IsValid()
+	}))
+}
+
+func exitAboveTheLastArm() hostexit.ExitStatus {
+	return hostexit.ExitStatus(aboveTheLastArm(func(candidate int) bool {
+		return hostexit.ExitStatus(candidate).IsValid()
+	}))
+}
+
 // stageAboveTheLastArm returns the first value ABOVE every declared stage.
 //
-// IT IS COMPUTED AND NOT WRITTEN DOWN. The refusal probes named
-// FaultStageRecordUnknown+1, so the moment a stage was APPENDED that expression
-// became the new stage itself: both probes went on passing while handing
-// ForFault a perfectly valid input, and the zero-value test asserted that a
-// declared stage was invalid. Neither would have failed for the right reason
-// again. Deriving the sentinel from IsValid means a stage added at the end
-// cannot quietly retire the probe that guards the end.
+// IT IS COMPUTED AND NOT WRITTEN DOWN, AND THE REASON RECORDED HERE WAS FALSE.
+// It said the literal sentinels "went on passing while testing nothing". THEY
+// DO NOT. Restoring FaultStageRecordUnknown+1 on this revision makes FIVE
+// assertions across TWO tests FAIL, loudly and at once, because that expression
+// now names a DECLARED stage while both tests assert it is invalid. Nothing
+// goes quiet, and no probe retires in silence.
+//
+// The true reason is smaller and is worth stating accurately: a written-down
+// sentinel is a MAINTENANCE COST, not an untruth. Whoever appends a stage must
+// remember to move it, and the failure that reminds them reads "should be
+// false" about a stage they have just declared — a message that points at the
+// probe rather than at what they changed. Deriving it removes the errand and
+// lets the probe describe itself.
+//
+// A TRUE FIX RESTING ON A FALSE REASON IS A TRAP FOR WHOEVER READS THE REASON
+// NEXT, which is why this is corrected in place rather than quietly edited: it
+// is the second time in this slice that a justification claimed more than the
+// thing it justified, after a pin that cited its own premise as its warrant.
 func stageAboveTheLastArm() hostexit.FaultStage {
 	last := hostexit.FaultStage(0)
-	for candidate := hostexit.FaultStage(1); candidate < 64; candidate++ {
-		if candidate.IsValid() {
-			last = candidate
+	for candidate := 1; candidate < declaredScanBound; candidate++ {
+		stage := hostexit.FaultStage(candidate)
+		if stage.IsValid() {
+			last = stage
 		}
 	}
 	return last + 1
@@ -579,7 +657,7 @@ func TestExitStatusCodesAreTheHostContract(t *testing.T) {
 	assert.Equal(t, 0, code)
 	assert.False(t, hostexit.ExitStatusUnset.IsValid())
 	assert.Empty(t, hostexit.ExitStatusUnset.String())
-	assert.False(t, (hostexit.ExitBlock + 1).IsValid())
+	assert.False(t, exitAboveTheLastArm().IsValid())
 }
 
 // TestForDecisionCarriesTheDecisionVerbatim proves what the body does: the
@@ -662,7 +740,7 @@ func TestFaultPolicyZeroValueRefuses(t *testing.T) {
 	assert.Empty(t, hostexit.FaultPolicyUnset.String())
 	assert.True(t, hostexit.FaultFailOpen.IsValid())
 	assert.True(t, hostexit.FaultFailClosed.IsValid())
-	assert.False(t, (hostexit.FaultFailClosed + 1).IsValid())
+	assert.False(t, policyAboveTheLastArm().IsValid())
 	assert.Equal(t, "fail-open", hostexit.FaultFailOpen.String())
 	assert.Equal(t, "fail-closed", hostexit.FaultFailClosed.String())
 }
@@ -980,6 +1058,18 @@ func markdownSection(t *testing.T, document, heading string) string {
 	return heading + rest[:end]
 }
 
+// durableStateSentences is the durable-state sentence of every declared stage,
+// in ONE place, so the sweep and the blocking-arm pin cannot disagree about
+// what the set is. A stage added without a sentence here is caught by the
+// coverage check in the sweep, which reads the declared set from IsValid.
+func durableStateSentences() map[hostexit.FaultStage]string {
+	return map[hostexit.FaultStage]string{
+		hostexit.FaultStageNotRecorded:   "no occurrence was recorded for it",
+		hostexit.FaultStageRecorded:      "the delivery for it IS committed in the lifecycle occurrence journal",
+		hostexit.FaultStageRecordUnknown: "an occurrence for it MAY OR MAY NOT exist",
+	}
+}
+
 // TestEveryFaultStageRendersItsOwnDurableStateOnEveryArm is the SWEEP over the
 // two things this diagnostic can say at once: which STAGE the caller declared,
 // and which ARM of the impact switch the fault lands in.
@@ -1002,22 +1092,32 @@ func markdownSection(t *testing.T, document, heading string) string {
 func TestEveryFaultStageRendersItsOwnDurableStateOnEveryArm(t *testing.T) {
 	t.Parallel()
 
+	// EACH STAGE DECLARES ONLY WHAT IT MUST SAY. What it must NOT say is
+	// DERIVED — it is every other stage's sentence — because the forbidden
+	// lists were written out and therefore could not grow: a fourth stage's
+	// sentence leaking into an arm passed, since no list mentioned it. The
+	// asked set was already derived from IsValid; the forbidden set is the same
+	// question one level down, and it had the same answer missing.
+	says := durableStateSentences()
+	forbids := func(stage hostexit.FaultStage) []string {
+		other := []string{}
+		for candidate, sentence := range says {
+			if candidate != stage {
+				other = append(other, sentence)
+			}
+		}
+		sort.Strings(other)
+		return other
+	}
 	stages := map[hostexit.FaultStage]struct {
 		Says    string
 		Forbids []string
-	}{
-		hostexit.FaultStageNotRecorded: {
-			Says:    "no occurrence was recorded for it",
-			Forbids: []string{"IS committed in the lifecycle occurrence journal", "MAY OR MAY NOT exist"},
-		},
-		hostexit.FaultStageRecorded: {
-			Says:    "the delivery for it IS committed in the lifecycle occurrence journal",
-			Forbids: []string{"no occurrence was recorded for it", "MAY OR MAY NOT exist"},
-		},
-		hostexit.FaultStageRecordUnknown: {
-			Says:    "an occurrence for it MAY OR MAY NOT exist",
-			Forbids: []string{"no occurrence was recorded for it", "IS committed in the lifecycle occurrence journal"},
-		},
+	}{}
+	for stage, sentence := range says {
+		stages[stage] = struct {
+			Says    string
+			Forbids []string
+		}{Says: sentence, Forbids: forbids(stage)}
 	}
 
 	// The arms of the impact switch a caller can reach, named by what selects
@@ -1029,10 +1129,10 @@ func TestEveryFaultStageRendersItsOwnDurableStateOnEveryArm(t *testing.T) {
 		Declared pastureruntime.FailureMode
 		Policy   hostexit.FaultPolicy
 	}{
-		{Name: "the default arm, fail-open", Mode: pastureruntime.FailureReportAndContinue, Declared: pastureruntime.FailureReportAndContinue, Policy: hostexit.FaultFailOpen},
-		{Name: "the default arm, fail-closed with no exit-code channel", Mode: pastureruntime.FailureReportAndContinue, Declared: pastureruntime.FailureReportAndContinue, Policy: hostexit.FaultFailClosed},
-		{Name: "the OpenCode fail-closed arm", Mode: pastureruntime.FailureThrowFailFast, Declared: pastureruntime.FailureThrowFailFast, Policy: hostexit.FaultFailClosed},
-		{Name: "the throwing host, fail-open", Mode: pastureruntime.FailureThrowFailFast, Declared: pastureruntime.FailureThrowFailFast, Policy: hostexit.FaultFailOpen},
+		{Name: "mode report-and-continue, fail-open", Mode: pastureruntime.FailureReportAndContinue, Declared: pastureruntime.FailureReportAndContinue, Policy: hostexit.FaultFailOpen},
+		{Name: "mode report-and-continue, fail-closed with no exit-code channel", Mode: pastureruntime.FailureReportAndContinue, Declared: pastureruntime.FailureReportAndContinue, Policy: hostexit.FaultFailClosed},
+		{Name: "mode throw-fail-fast, fail-closed", Mode: pastureruntime.FailureThrowFailFast, Declared: pastureruntime.FailureThrowFailFast, Policy: hostexit.FaultFailClosed},
+		{Name: "mode throw-fail-fast, fail-open", Mode: pastureruntime.FailureThrowFailFast, Declared: pastureruntime.FailureThrowFailFast, Policy: hostexit.FaultFailOpen},
 	}
 
 	// THE TABLE MUST COVER EVERY DECLARED STAGE, and this check was missing from
@@ -1041,15 +1141,16 @@ func TestEveryFaultStageRendersItsOwnDurableStateOnEveryArm(t *testing.T) {
 	// test green, because the table was WRITTEN DOWN rather than derived, so the
 	// new stage was simply never asked about. The declared set is now read from
 	// IsValid, so a stage cannot enter the type without entering the sweep.
-	for candidate := hostexit.FaultStage(1); candidate < 64; candidate++ {
-		if !candidate.IsValid() {
+	for candidate := 1; candidate < declaredScanBound; candidate++ {
+		stage := hostexit.FaultStage(candidate)
+		if !stage.IsValid() {
 			continue
 		}
-		_, covered := stages[candidate]
+		_, covered := stages[stage]
 		assert.True(t, covered,
 			"stage %q is declared and this sweep does not ask about it. Add the sentence it must "+
 				"render and the sentences it must not, or the arms below go unchecked for it",
-			candidate.String())
+			stage.String())
 	}
 
 	for stage, expected := range stages {
@@ -1111,11 +1212,10 @@ func TestTheBlockingArmMakesNoDurableStateClaim(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, hostexit.ExitBlock, outcome.Exit, "this pair must reach the blocking arm")
 
-	for _, claim := range []string{
-		"no occurrence was recorded for it",
-		"IS committed in the lifecycle occurrence journal",
-		"MAY OR MAY NOT exist",
-	} {
+	// THE FORBIDDEN LIST IS DERIVED, for the same reason it is derived in the
+	// sweep: written out, it could not grow, so a fourth stage's sentence could
+	// appear in this arm with nothing to notice.
+	for _, claim := range durableStateSentences() {
 		assert.NotContains(t, outcome.Stderr, claim,
 			"the blocking arm does not read the stage, so any durable-state sentence written into "+
 				"it would be a claim made on behalf of every stage that can reach it")

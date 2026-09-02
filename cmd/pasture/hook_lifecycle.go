@@ -146,11 +146,39 @@ func lifecycleOutcome(
 		}
 		policy       = hostexit.FaultFailOpen
 		continuation = hostexit.EmptyContinuation()
+		// panicStage is DECLARED here, with the other values the recovery
+		// reads, because NOTHING BUT A DECLARATION MAY PRECEDE THE RECOVER: a
+		// statement above it could panic while no recovery exists, and an
+		// uncaught panic arrives at Claude Code as exit 2, which that host
+		// reads as a BLOCK.
+		panicStage = hostexit.FaultStageNotRecorded
 	)
+
+	// panicStage is THE WEAKEST TRUE CLAIM THIS RECOVERY CAN MAKE about the
+	// region it stands in, and it is the only thing that moves.
+	//
+	// The recovery below covers the WHOLE function, and it declared
+	// not-recorded for all of it. That is true only until the work goroutine
+	// starts: from that instant the durable write may already have happened, so
+	// a panic anywhere after it cannot honestly say nothing was recorded. A
+	// panic injected after the commit was measured telling the operator "no
+	// occurrence was recorded for it" while the journal held the row with a
+	// full interpreted set.
+	//
+	// IT IS NEVER "recorded". This recovery does not observe the commit; it
+	// only knows the commit BECAME POSSIBLE. record-unknown is exactly that
+	// knowledge, and claiming more would be the same overreach in the other
+	// direction.
+	//
+	// ONE LOCAL, SET ONCE, ON THE LINE THAT STARTS THE WORK. It is deliberately
+	// not a running "stage so far" that the recovery consults for every step:
+	// this package removed shared mutable claims by making Stage a required
+	// argument with a refused zero value, and a widening local would put one
+	// back.
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			outcome = lifecycleFault(cmd, coords, failure, policy, continuation,
-				hostexit.FaultStageNotRecorded, lifecyclePanicCause(coords, recovered))
+				panicStage, lifecyclePanicCause(coords, recovered))
 		}
 	}()
 
@@ -228,10 +256,18 @@ func lifecycleOutcome(
 	// native continuation bytes this harness reads on stdout — so nothing is
 	// written to stdout before the commit completes.
 	completed := make(chan lifecycleWork, 1)
+	// FROM HERE THE DURABLE WRITE MAY ALREADY HAVE HAPPENED. See panicStage.
+	panicStage = hostexit.FaultStageRecordUnknown
 	go func() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				completed <- lifecycleWork{err: lifecyclePanicCause(coords, recovered)}
+				// A panic INSIDE the work is by construction after the work
+				// began, so it carries the same weakest-true claim as the
+				// recovery above. It travels as a wrapped sentinel because this
+				// path returns through the handler-error route, where the stage
+				// is decided by the error and not by position.
+				completed <- lifecycleWork{err: fmt.Errorf("%w: %w",
+					errLifecycleWorkPanicked, lifecyclePanicCause(coords, recovered))}
 			}
 		}()
 		native, err := handlers.HookLifecycleNative(ctx, handlers.HookLifecycleInput{
@@ -260,26 +296,7 @@ func lifecycleOutcome(
 		// A fault raised AFTER the durable commit leaves an occurrence behind.
 		// Saying "not recorded" there would send a maintainer to look in the
 		// wrong place, so the stage follows the error and not the position.
-		// THE STAGE FOLLOWS WHAT PASTURE KNOWS, and two of these answers were
-		// wrong until the recorded stage existed.
-		//
-		// A receipt committed without a continuation is RECORDED, not unknown:
-		// the error that marks it is named for the commit pasture observed, and
-		// its own declaration says the occurrence EXISTS. It was told the
-		// occurrence MAY OR MAY NOT exist, which sends a maintainer to hedge
-		// about a row that is certainly there.
-		//
-		// A delivery that could not be bound is RECORDED too: the row is
-		// written with the disposition that refused it and an empty interpreted
-		// set, and it was told no occurrence was recorded at all.
-		//
-		// Everything else here faults before any durable write, so the default
-		// stays not-recorded.
-		stage := hostexit.FaultStageNotRecorded
-		if errors.Is(work.err, handlers.ErrLifecycleCommittedWithoutContinuation) ||
-			errors.Is(work.err, handlers.ErrLifecycleDeliveryRefused) {
-			stage = hostexit.FaultStageRecorded
-		}
+		stage := faultStageForWorkError(work.err)
 		return lifecycleFault(cmd, coords, failure, policy, continuation, stage, fmt.Errorf(
 			"the hook could not evaluate event %q of harness %q at host version %q: %w",
 			coords.Event, coords.Harness, coords.HostVersion, work.err))
@@ -324,6 +341,66 @@ type lifecycleWork struct {
 // lifecyclePanicCause describes a recovered panic as the fault it is. A panic
 // means the event was never evaluated, so the host must be told, and the fault
 // policy decides whether the operation is refused.
+// errLifecycleWorkPanicked marks a panic raised INSIDE the work goroutine. It
+// exists so the stage table below can answer for it: the work had begun, so the
+// durable write may already have happened, and the not-recorded default would
+// be a claim this path cannot support.
+var errLifecycleWorkPanicked = errors.New("the lifecycle work panicked after it began")
+
+// faultStageRow maps ONE sentinel error to what pasture KNOWS about the
+// journal, with the reason it is true. It is a table and not a chain of ifs
+// because the mapping is the claim: an error whose stage nobody chose gets the
+// default, and the default has to be the weakest answer.
+type faultStageRow struct {
+	Err   error
+	Stage hostexit.FaultStage
+	Why   string
+}
+
+// faultStageByError is the WHOLE mapping from a work error to a durable-state
+// claim, in one place a test can read.
+//
+// IT IS A TABLE BECAUSE THE MAPPING WENT UNGUARDED. Two of these rows were
+// corrected for stating something false, and reverting either left the entire
+// cmd/pasture package green: the sentinel errors appeared in NO test file in
+// the tree, so nothing anywhere held the correction that had just been made.
+// TestEveryWorkErrorMapsToTheDurableStateItCanSupport reads this table.
+var faultStageByError = []faultStageRow{
+	{
+		Err:   handlers.ErrLifecycleCommittedWithoutContinuation,
+		Stage: hostexit.FaultStageRecorded,
+		Why: "the durable receipt was committed and the host then received no continuation; the error is named for " +
+			"the commit pasture observed and its own declaration says the occurrence EXISTS, so record-unknown told " +
+			"the operator to hedge about a row that is certainly there",
+	},
+	{
+		Err:   handlers.ErrLifecycleDeliveryRefused,
+		Stage: hostexit.FaultStageRecorded,
+		Why: "the delivery row is written with the disposition that refused it and an empty interpreted set; " +
+			"not-recorded told the operator no occurrence existed while it sat in the journal",
+	},
+	{
+		Err:   errLifecycleWorkPanicked,
+		Stage: hostexit.FaultStageRecordUnknown,
+		Why: "the panic happened after the work began, so the commit may or may not have completed; pasture does " +
+			"not observe which, and record-unknown is exactly that much knowledge",
+	},
+}
+
+// faultStageForWorkError answers for one work error.
+//
+// THE DEFAULT IS THE WEAKEST CLAIM THAT IS TRUE OF EVERY UNLISTED ERROR: those
+// faults are raised before any durable write, or by a durable write that
+// returned an error and committed nothing.
+func faultStageForWorkError(err error) hostexit.FaultStage {
+	for _, row := range faultStageByError {
+		if errors.Is(err, row.Err) {
+			return row.Stage
+		}
+	}
+	return hostexit.FaultStageNotRecorded
+}
+
 func lifecyclePanicCause(coords lifecycleCoordinates, recovered any) error {
 	return fmt.Errorf("the hook panicked while handling event %q of harness %q: %v",
 		coords.Event, coords.Harness, recovered)
