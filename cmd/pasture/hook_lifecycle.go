@@ -571,7 +571,9 @@ func lifecycleFaultRecordPath() string {
 //
 // The message is a function rather than a literal inside the arm so that a test
 // can read it. The arm itself calls os.Exit and is unreachable today, so a
-// literal there could hold any sentence at all and nothing would notice.
+// literal there could hold any sentence at all and nothing would notice. The
+// arm's EXIT CODE was left as a literal by that same reasoning and had the same
+// gap; it now comes from noExitDecisionExit, below.
 func noExitDecisionDiagnostic() string {
 	return "pasture hook lifecycle produced no exit decision for this invocation; " +
 		"this happened in emitLifecycleOutcome (cmd/pasture/hook_lifecycle.go) after the hook ran; " +
@@ -580,6 +582,23 @@ func noExitDecisionDiagnostic() string {
 		"pasture installation stops the tool call on its GATE rows — the generated OpenCode " +
 		"plugin does, while its observation rows catch the same failure and only log it; " +
 		"report this, and retry the hook input"
+}
+
+// noExitDecisionExit names the status the no-exit-decision arm leaves with.
+//
+// THE ARM HELD A BARE LITERAL 1. That literal sat OUTSIDE hostexit, which this
+// command made the SOLE exit authority, and nothing pinned it: mutating it to 0
+// left the whole cmd/pasture package green, while the comment two lines above
+// the arm promised it "must never become a silent exit 0" — the exact defect
+// this command exists to remove. The message beside it had already been moved
+// into a function so a test could read it; the integer on the next line was
+// left behind, where a literal could hold any CODE at all and nothing noticed.
+//
+// The status is a declared member of the closed set, so Code() always answers
+// for it. TestBothExitOneArmsCarryTheSameNarrowedClaim pins both the status and
+// that answer.
+func noExitDecisionExit() hostexit.ExitStatus {
+	return hostexit.ExitNonBlockingError
 }
 
 // emitLifecycleOutcome is the ONLY writer of this command's host-facing bytes
@@ -603,9 +622,14 @@ func emitLifecycleOutcome(cmd *cobra.Command, outcome hostexit.Outcome) {
 	code, known := outcome.Exit.Code()
 	if !known {
 		// An unset exit status means a path returned no decision at all. It
-		// must never become a silent exit 0.
+		// must never become a silent exit 0, so the code comes from the exit
+		// authority like every other exit of this command, and never from a
+		// literal here. Code() is discarded of its second result on purpose:
+		// noExitDecisionExit names a DECLARED status, for which the answer is
+		// always known, and the test named above pins that.
 		fmt.Fprintln(cmd.ErrOrStderr(), noExitDecisionDiagnostic())
-		exitWithCode(1)
+		fallback, _ := noExitDecisionExit().Code()
+		exitWithCode(fallback)
 		return
 	}
 	if code != 0 {

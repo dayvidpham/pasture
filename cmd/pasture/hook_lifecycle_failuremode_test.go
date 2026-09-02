@@ -1114,38 +1114,76 @@ func TestAFaultThatCannotBeClassifiedNamesEveryInputThatWasNotUsable(t *testing.
 			"row is stopped would be false of every observation row this build ships")
 }
 
-// TestBothExitOneArmsCarryTheSameNarrowedClaim holds the sweep shut.
+// TestBothExitOneArmsCarryTheSameNarrowedClaim holds the sweep shut, and holds
+// the EXIT of both arms shut with it.
 //
 // This command has TWO arms that leave with exit 1: the fault the exit authority
 // could not classify, and the outcome that named no exit status. One of them was
 // corrected away from "the host is not blocked" and the other was not, so the
 // retired sentence survived on its sibling with no test anywhere near it. The
 // population is enumerated here so a third arm cannot be added silently: both
-// composers are named below, and both are asserted.
+// arms are named below, and both are asserted.
+//
+// THE SECOND ARM'S EXIT CODE WAS A BARE LITERAL 1, written outside hostexit,
+// which this command made the SOLE exit authority. A reviewer mutated it to 0
+// and the whole cmd/pasture package stayed green, while the comment two lines
+// above the arm promised it "must never become a silent exit 0" — the exact
+// defect this command was written to remove. The message beside that literal had
+// already been moved into a function so a test could read it; the integer was
+// left where it was. Each arm now NAMES a hostexit.ExitStatus, and this test
+// asserts the status and the process code it answers with.
 //
 // MUTATION: put "the host is not blocked" back into either composer, or drop the
 // gate-row qualifier from either. This test turns RED.
+// MUTATION: return hostexit.ExitContinue from noExitDecisionExit, which is the
+// silent exit 0 the arm's own comment forbids. This test turns RED.
+// MUTATION: replace hostexit.ExitNonBlockingError with hostexit.ExitBlock on the
+// unclassifiable arm of lifecycleFault. This test turns RED.
 func TestBothExitOneArmsCarryTheSameNarrowedClaim(t *testing.T) {
-	t.Parallel()
+	coords := lifecycleCoordinates{Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: "1.18.19"}
 
-	unclassified := unclassifiableFaultDiagnostic(
-		lifecycleCoordinates{Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: "1.18.19"},
-		hostexit.Fault{}.UnusableInputs(), errors.New("the store could not be opened"))
+	dir := t.TempDir()
+	previous := flagDBPath
+	flagDBPath = filepath.Join(dir, "pasture.db")
+	t.Cleanup(func() { flagDBPath = previous })
 
-	for name, text := range map[string]string{
-		"unclassifiableFaultDiagnostic": unclassified,
-		"noExitDecisionDiagnostic":      noExitDecisionDiagnostic(),
+	// The unclassifiable arm is taken through PRODUCTION delivery, not through
+	// its composer, so the exit asserted below is the one a caller receives.
+	unclassified := lifecycleFault(hookLifecycleCmd, coords,
+		pastureruntime.LifecycleFailurePolicy{}, hostexit.FaultPolicyUnset,
+		hostexit.Continuation{}, hostexit.FaultStageUnset, nil)
+
+	for _, arm := range []struct {
+		name string
+		text string
+		exit hostexit.ExitStatus
+	}{
+		{name: "the unclassifiable fault of lifecycleFault", text: unclassified.Stderr, exit: unclassified.Exit},
+		{name: "the no-exit-decision arm of emitLifecycleOutcome", text: noExitDecisionDiagnostic(), exit: noExitDecisionExit()},
 	} {
-		assert.NotContains(t, text, "the host is not blocked",
+		assert.NotContains(t, arm.text, "the host is not blocked",
 			"%s leaves with exit 1, and exit 1 is not non-blocking on a host that reads any "+
 				"non-zero exit as a broken installation; this sentence was retired on one arm "+
-				"and must not survive on the other", name)
-		assert.Contains(t, text, "the hook still leaves with exit 1",
+				"and must not survive on the other", arm.name)
+		assert.Contains(t, arm.text, "the hook still leaves with exit 1",
 			"%s must say which exit the operator is looking at, or the consequence below it "+
-				"has nothing to attach to", name)
-		assert.Contains(t, text, "stops the tool call on its GATE rows",
+				"has nothing to attach to", arm.name)
+		assert.Contains(t, arm.text, "stops the tool call on its GATE rows",
 			"%s must name the rows the throw actually stops, because the generated observation "+
-				"callback catches it and only logs", name)
+				"callback catches it and only logs", arm.name)
+
+		assert.Equal(t, hostexit.ExitNonBlockingError, arm.exit,
+			"%s must NAME its exit status, and it must be the one its message describes; the "+
+				"second arm held a bare literal 1 outside the exit authority, so mutating it to "+
+				"a silent exit 0 left every test in this package green", arm.name)
+		code, known := arm.exit.Code()
+		assert.True(t, known,
+			"%s names a declared status, so the exit authority must answer for it; the arm "+
+				"discards this result and would exit 0 if it ever became false", arm.name)
+		assert.Equal(t, 1, code,
+			"%s promises the operator exit 1 in the message asserted above, so any other code makes "+
+				"that sentence false; a code of 0 in particular is the silent proceed a host reads "+
+				"as an evaluated event that never happened", arm.name)
 	}
 }
 

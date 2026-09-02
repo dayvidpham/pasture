@@ -105,19 +105,27 @@ const (
 	// ExitNonBlockingError reports a hook problem that must not stop the host.
 	// Process exit code 1.
 	//
-	// EXACTLY ONE fault path produces this status: the arm in the command that
-	// meets a false result from ForFault and refuses to exit 0 in silence.
-	// ForFault itself never answers it — failing open is defined as exit 0 plus
-	// the host's continue bytes, and blocking is exit 2 — so this status is
-	// reached only when a fault could not be classified at all.
+	// TWO paths in the command produce this status, and BOTH are refusals to
+	// exit 0 in silence. ForFault itself never answers it — failing open is
+	// defined as exit 0 plus the host's continue bytes, and blocking is exit 2
+	// — so neither path is a classified fault.
 	//
-	// THAT ARM IS UNREACHABLE TODAY, and it is unreachable by construction
-	// rather than by luck: ForFault refuses only on inputs the command always
-	// supplies, so an unknown event, an unknown host version, an unknown
-	// harness and a malformed payload all fail open at exit 0 instead. It
-	// becomes reachable the moment a caller builds a Fault from a value it did
-	// not set — a new fault stage, a new policy, or a continuation taken from
-	// a host table that has no entry for the event.
+	// FIRST, the arm in lifecycleFault that meets a false result from ForFault:
+	// a fault that could not be classified at all. SECOND, the arm in
+	// emitLifecycleOutcome that meets an outcome naming no exit status at all.
+	// The second arm was invisible from here for as long as it named its exit
+	// with a bare literal 1 rather than this status; that is why this comment
+	// once said there was only one, and it is why the arm now goes through
+	// Code() like every other exit of the command.
+	//
+	// BOTH ARMS ARE UNREACHABLE TODAY, and by construction rather than by luck.
+	// ForFault refuses only on inputs the command always supplies, so an unknown
+	// event, an unknown host version, an unknown harness and a malformed payload
+	// all fail open at exit 0 instead; and every outcome the command builds
+	// names a status. The first arm becomes reachable the moment a caller builds
+	// a Fault from a value it did not set — a new fault stage, a new policy, or
+	// a continuation taken from a host table that has no entry for the event.
+	// The second becomes reachable the moment a path returns the zero Outcome.
 	//
 	// IT IS NOT A HARMLESS STATUS ON EVERY ROW. The pasture-generated OpenCode
 	// plugin reads ANY non-zero exit as a broken pasture installation and
