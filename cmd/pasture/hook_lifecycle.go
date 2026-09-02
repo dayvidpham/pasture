@@ -475,9 +475,25 @@ func recordedCause(cause error) string {
 	return cause.Error()
 }
 
+// faultRecordLossSuffix is the clause EVERY failing arm of recordLifecycleFault
+// ends with. It is one constant and not five literals so that the arms cannot
+// drift apart again: three of them once carried it, two returned in silence,
+// and each round that fixed one left the others as they were.
+//
+// IT SAYS "BELOW", AND IT USED TO SAY "ABOVE". recordLifecycleFault runs INSIDE
+// lifecycleFault, which RETURNS the outcome; emitLifecycleOutcome writes the
+// fault afterwards. Measured on the built binary: the record message is line 1
+// of standard error and the fault is line 2. "above" sent the operator to a
+// line that had not been written yet, and the previous round added a third
+// instance of the wrong word and a test that pinned it.
+const faultRecordLossSuffix = "the fault below is reported on this stream only"
+
 // recordLifecycleFault appends one JSON line describing the fault. Every error
 // here is swallowed on purpose: the record is evidence for a maintainer, never
-// a condition of the host outcome.
+// a condition of the host outcome. SWALLOWED IS NOT SILENT: every failing arm
+// tells the operator on standard error that this fault has no durable record,
+// and TestEveryFailingArmOfTheFaultWriterTellsTheOperator enumerates them so a
+// sixth arm cannot be added without one.
 func recordLifecycleFault(
 	cmd *cobra.Command,
 	coords lifecycleCoordinates,
@@ -495,16 +511,26 @@ func recordLifecycleFault(
 		// tell the operator that the fault is on this stream only. The silence
 		// made two shipped sentences false: AGENTS.md says the line is appended
 		// beside the database, and the record-unknown diagnostic sends the
-		// reader to that file. Measured on "--db pasture.db" and on the
-		// documented PASTURE_DB_PATH=pasture.db with no flag: exit 0, correct
-		// host bytes, and no record anywhere.
+		// reader to that file.
+		//
+		// BOTH ROUTES ARE MEASURED, and only one of them was when this arm was
+		// written. "--db pasture.db" is driven by the in-process pin, and the
+		// documented PASTURE_DB_PATH=pasture.db with no flag at all is driven
+		// by TestTheFaultRecordRefusalQuotesThePathTheEnvironmentResolvedTo
+		// through the built binary. Both exit 0 with correct host bytes, so
+		// nothing else in the run gives the loss away.
+		//
+		// The quoted path comes from lifecycleStorePath and NEVER from
+		// flagDBPath: on the environment route the flag is empty, and quoting
+		// it prints `the store path "" names no directory`, which is the exact
+		// ambiguity lifecycleStorePath exists to remove.
 		fmt.Fprintf(cmd.ErrOrStderr(),
 			"pasture hook lifecycle could not place its fault record: the store path %q names no "+
 				"directory, so there is no directory to put %s beside; this happened in "+
-				"recordLifecycleFault (cmd/pasture/hook_lifecycle.go) while recording the fault "+
-				"above; the fault above is reported on this stream only; give --db a path that "+
-				"names a directory, or set PASTURE_DB_PATH to one, and the record returns\n",
-			lifecycleStorePath(), lifecycleFaultRecordFile)
+				"recordLifecycleFault (cmd/pasture/hook_lifecycle.go) while recording this fault; "+
+				"%s; give --db a path that names a directory, or set PASTURE_DB_PATH to one, and "+
+				"the record returns\n",
+			lifecycleStorePath(), lifecycleFaultRecordFile, faultRecordLossSuffix)
 		return
 	}
 
@@ -549,24 +575,53 @@ func recordLifecycleFault(
 		"cause":            recordedCause(cause),
 	})
 	if err != nil {
+		// UNREACHABLE BY CONSTRUCTION: every member of the map above is a
+		// string, a []string or a value composed of them, and encoding/json
+		// cannot refuse those. It reports anyway, because its four siblings
+		// report and a silent return here is what made this writer an N-1
+		// sweep twice over. No value can drive this arm, so the enumeration
+		// test TestEveryFailingArmOfTheFaultWriterTellsTheOperator reads the
+		// function and requires every arm of it to speak.
+		fmt.Fprintf(cmd.ErrOrStderr(),
+			"pasture hook lifecycle could not encode its fault record line: %v; this happened in "+
+				"recordLifecycleFault (cmd/pasture/hook_lifecycle.go) before anything was written "+
+				"to %s, so the record for this fault is lost; %s; report this, because a line this "+
+				"writer composes itself cannot be refused by a correct build\n",
+			err, path, faultRecordLossSuffix)
 		return
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		// The directory the record would sit in could not be made. This
+		// RETURNED IN SILENCE, and the silence falsified the rationale that
+		// justifies where this file lives. MEASURED ON THE BUILT BINARY with
+		// --db <dir>/afile/sub/pasture.db, where <dir>/afile is a FILE: exit 0,
+		// the host's continue bytes on stdout, the fault on standard error, NO
+		// record file anywhere, and no word that the record was lost. The
+		// placement of the record beside the database is justified by "the
+		// commonest fault is that the database could not be opened" — and that
+		// measured case IS that fault.
+		fmt.Fprintf(cmd.ErrOrStderr(),
+			"pasture hook lifecycle could not create the directory for its fault record at %s: %v; "+
+				"this happened in recordLifecycleFault (cmd/pasture/hook_lifecycle.go) while "+
+				"recording this fault, so the record for this fault is lost; %s; give --db a path "+
+				"whose parent directories can all be created, or set PASTURE_DB_PATH to one, and "+
+				"the record returns\n",
+			filepath.Dir(path), err, faultRecordLossSuffix)
 		return
 	}
 	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(),
 			"pasture hook lifecycle could not open its fault record at %s: %v; "+
-				"the fault above is reported on this stream only\n", path, err)
+				"%s\n", path, err, faultRecordLossSuffix)
 		return
 	}
 	defer file.Close()
 	if _, err := file.Write(append(line, '\n')); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(),
 			"pasture hook lifecycle could not append to its fault record at %s: %v; "+
-				"the fault above is reported on this stream only\n", path, err)
+				"%s\n", path, err, faultRecordLossSuffix)
 	}
 }
 
@@ -642,6 +697,13 @@ func noExitDecisionDiagnostic() string {
 // The status is a declared member of the closed set, so Code() always answers
 // for it. TestBothExitOneArmsCarryTheSameNarrowedClaim pins both the status and
 // that answer.
+//
+// PINNING THIS FUNCTION IS NOT PINNING THE ARM, and the round that added it
+// believed otherwise. Mutating the return here to ExitContinue is red, but
+// replacing the ARM's two lines with exitWithCode(0) left the whole cmd/pasture
+// package green, so the silent exit 0 was reinstated with nothing noticing.
+// TestTheNoExitDecisionArmTakesItsCodeFromTheExitAuthority reads the arm itself
+// and refuses any literal there.
 func noExitDecisionExit() hostexit.ExitStatus {
 	return hostexit.ExitNonBlockingError
 }

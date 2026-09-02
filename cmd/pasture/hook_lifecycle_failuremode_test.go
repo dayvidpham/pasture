@@ -381,7 +381,11 @@ func TestLifecycleFaultRecordIsBestEffort(t *testing.T) {
 	flagDBPath = filepath.Join(blocked, "pasture.db")
 	t.Cleanup(func() { flagDBPath = previous })
 
-	outcome := lifecycleFault(hookLifecycleCmd, coords, failure, hostexit.FaultFailClosed,
+	cmd := lifecycleTestCommand(t, string(coords.Harness), coords.Event, coords.HostVersion, flagDBPath)
+	var stderr bytes.Buffer
+	cmd.SetErr(&stderr)
+
+	outcome := lifecycleFault(cmd, coords, failure, hostexit.FaultFailClosed,
 		lifecycleContinuation(coords, failure), hostexit.FaultStageNotRecorded,
 		errors.New("the task store refused the write"))
 
@@ -389,6 +393,32 @@ func TestLifecycleFaultRecordIsBestEffort(t *testing.T) {
 		"an unwritable fault record must not change the host outcome")
 	assert.Contains(t, outcome.Stderr, "pasture could not evaluate this lifecycle hook event",
 		"the fault is still reported on stderr when the record cannot be written")
+
+	// BEST-EFFORT IS NOT SILENT. This is the MkdirAll arm, and it returned
+	// without a word while the open failure and the append failure below it
+	// both reported. Measured on the built binary with a record directory that
+	// is a FILE: exit 0, the host's continue bytes, the fault on standard
+	// error, NO record file anywhere and no word that the record was lost --
+	// on the very fault ("the database could not be opened") that the record's
+	// placement beside the database is justified by.
+	//
+	// MUTATION: put a bare "return" back in the MkdirAll arm of
+	// recordLifecycleFault. This test turns RED.
+	text := stderr.String()
+	assert.Contains(t, text, "could not create the directory for its fault record",
+		"the operator must be TOLD the record was not written; this arm returned in silence "+
+			"while the open failure and the append failure of the same writer both reported")
+	assert.Contains(t, text, "the fault below is reported on this stream only",
+		"every failing arm of this writer ends with the one clause, so the operator reads the "+
+			"same sentence for the same loss whichever arm produced it")
+	assert.Contains(t, text, blocked,
+		"the message must NAME the directory that could not be created, or the operator cannot "+
+			"tell which of the two path rules produced it")
+
+	unchanged, readErr := os.ReadFile(blocked)
+	require.NoError(t, readErr, "the file standing where the record directory would go must survive")
+	assert.Equal(t, "this is a file, not a directory", string(unchanged),
+		"nothing may be written where the record directory could not be created")
 }
 
 // TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked is the
@@ -1197,10 +1227,15 @@ func TestBothExitOneArmsCarryTheSameNarrowedClaim(t *testing.T) {
 //
 // The silence made two SHIPPED sentences false. AGENTS.md tells a maintainer the
 // line is appended beside the database, and the record-unknown diagnostic sends
-// the reader to that file; on this path neither holds and nothing said so. It is
-// reached by "--db pasture.db" and by the documented PASTURE_DB_PATH=pasture.db
-// with no flag, and on both the hook exits 0 with correct host bytes, so nothing
-// else in the run gives the loss away.
+// the reader to that file; on this path neither holds and nothing said so.
+//
+// THIS TEST COVERS THE FLAG ROUTE ONLY, and its comment used to claim both. The
+// arm is reached by "--db pasture.db" and by the documented
+// PASTURE_DB_PATH=pasture.db with no flag at all; on the second route flagDBPath
+// is EMPTY, so this test cannot tell lifecycleStorePath from flagDBPath and a
+// mutation that swapped them stayed green here. The environment route is driven
+// through the built binary by
+// TestTheFaultRecordRefusalQuotesThePathTheEnvironmentResolvedTo below.
 //
 // The default store path has a directory and the generated host hooks pass no
 // --db, so no user is harmed today; this pins the diagnostic, not a repair of
@@ -1234,9 +1269,12 @@ func TestTheFaultRecordSaysSoWhenTheStorePathNamesNoDirectory(t *testing.T) {
 	assert.Contains(t, text, "could not place its fault record",
 		"the operator must be TOLD the record was not written; this arm returned in silence "+
 			"while its two sibling failures both reported")
-	assert.Contains(t, text, "the fault above is reported on this stream only",
-		"this is the sentence the open failure and the append failure both use; the third "+
-			"failure of the same writer must not say something else for the same loss")
+	assert.Contains(t, text, "the fault below is reported on this stream only",
+		"this is the sentence every failing arm of the writer uses, and it must say BELOW: "+
+			"recordLifecycleFault runs inside lifecycleFault while emitLifecycleOutcome writes "+
+			"the fault afterwards, so this message is line 1 of stderr and the fault is line 2")
+	assert.NotContains(t, text, "the fault above",
+		"the retired word sent the operator to a line that had not been written yet")
 	assert.Contains(t, text, `"pasture.db"`,
 		"the message must QUOTE the resolved store path, because the path comes from either the "+
 			"--db flag or the default layout and the operator cannot otherwise tell which")
@@ -1520,4 +1558,247 @@ func TestTheUnmappableFaultRecordSaysWhatStderrSays(t *testing.T) {
 			"the refusal itself asks")
 	assert.Contains(t, outcome.Stderr, reasons[0],
 		"the two artefacts must not be able to describe different conditions")
+}
+
+// TestTheNoExitDecisionArmTakesItsCodeFromTheExitAuthority pins the ARM, and
+// not the value the arm asks for.
+//
+// The previous round moved the arm's bare literal 1 into noExitDecisionExit and
+// pinned THAT FUNCTION: mutating its return to ExitContinue is red. But the
+// defect was never in the function — it was in the arm. Two reviewers replaced
+// the arm's two lines with exitWithCode(0) and THE WHOLE cmd/pasture PACKAGE
+// STAYED GREEN, so the silent exit 0 that the arm's own comment forbids was
+// reinstated and nothing noticed. The round before that had moved the MESSAGE
+// into a function and left the INTEGER unpinned; this round left the ARM.
+//
+// The assertion is STRUCTURAL for the same reason the two structural pins above
+// it are: the arm calls os.Exit and is unreachable by construction today, so no
+// value a table can read is produced by it, and a literal there can hold any
+// code at all. It follows the precedent set by
+// TestTheRecoverIsInstalledBeforeAnythingElseRuns and
+// TestTheProductionPathWiresThePassThroughBarrierAndTheProductionTier.
+//
+// MUTATION, AT THE DEFECT SITE: replace the arm's two lines with
+// exitWithCode(0). This test turns RED.
+// SECOND MUTATION: replace them with exitWithCode(1). Still RED — a literal
+// that happens to be right is the defect, because nothing holds it right.
+func TestTheNoExitDecisionArmTakesItsCodeFromTheExitAuthority(t *testing.T) {
+	t.Parallel()
+
+	arm := unknownExitArm(t)
+
+	assignments := map[string]string{}
+	exits := []ast.Expr{}
+	ast.Inspect(arm, func(node ast.Node) bool {
+		if assign, isAssign := node.(*ast.AssignStmt); isAssign && len(assign.Lhs) > 0 && len(assign.Rhs) == 1 {
+			if name, isIdentifier := assign.Lhs[0].(*ast.Ident); isIdentifier {
+				assignments[name.Name] = sourceOf(assign.Rhs[0])
+			}
+		}
+		call, isCall := node.(*ast.CallExpr)
+		if !isCall {
+			return true
+		}
+		if function, isIdentifier := call.Fun.(*ast.Ident); isIdentifier && function.Name == "exitWithCode" {
+			require.Len(t, call.Args, 1, "exitWithCode takes exactly one code")
+			exits = append(exits, call.Args[0])
+		}
+		return true
+	})
+
+	require.Len(t, exits, 1,
+		"the no-exit-decision arm leaves the process exactly once; a second exit here is a second "+
+			"host-facing code, and the claim this test makes is stated over one")
+
+	code, isIdentifier := exits[0].(*ast.Ident)
+	require.True(t, isIdentifier,
+		"the arm's exit code must be a VALUE THE EXIT AUTHORITY ANSWERED FOR, never a literal "+
+			"written here: a literal in this arm is the exact defect this command exists to "+
+			"remove, and exitWithCode(0) in its place left the whole package green; found %q",
+		sourceOf(exits[0]))
+
+	require.Contains(t, assignments, code.Name,
+		"the code the arm exits with must be bound in the arm itself, so a reader sees where it "+
+			"came from; %q is bound somewhere this test cannot see", code.Name)
+	assert.Equal(t, "noExitDecisionExit().Code()", assignments[code.Name],
+		"the code must come from noExitDecisionExit, which is inside hostexit, the SOLE exit "+
+			"authority of this command; any other source puts an exit of this command back "+
+			"outside the authority")
+}
+
+// unknownExitArm returns the body of the "the outcome named no exit status"
+// branch of emitLifecycleOutcome, which is the arm the test above pins.
+func unknownExitArm(t *testing.T) *ast.BlockStmt {
+	t.Helper()
+
+	file, err := parser.ParseFile(token.NewFileSet(), "hook_lifecycle.go", nil, 0)
+	require.NoError(t, err, "the production source must be readable beside its test")
+
+	var emit *ast.FuncDecl
+	for _, node := range file.Decls {
+		function, isFunction := node.(*ast.FuncDecl)
+		if isFunction && function.Name.Name == "emitLifecycleOutcome" {
+			emit = function
+			break
+		}
+	}
+	require.NotNil(t, emit,
+		"emitLifecycleOutcome must exist: it is the only writer of this command's host-facing bytes")
+
+	var arm *ast.BlockStmt
+	ast.Inspect(emit, func(node ast.Node) bool {
+		branch, isBranch := node.(*ast.IfStmt)
+		if isBranch && sourceOf(branch.Cond) == "!known" {
+			arm = branch.Body
+			return false
+		}
+		return true
+	})
+	require.NotNil(t, arm,
+		"emitLifecycleOutcome must still branch on the outcome naming no exit status; that branch "+
+			"is what may never become a silent exit 0")
+	return arm
+}
+
+// TestEveryFailingArmOfTheFaultWriterTellsTheOperator enumerates the failure
+// population of recordLifecycleFault and requires each member to speak.
+//
+// THIS WRITER HAS BEEN SWEPT AT N-1 TWICE. Round 15 gave the "no directory" arm
+// a diagnostic and left the MkdirAll arm and the json.Marshal arm returning
+// without a word, while the open failure and the append failure below them both
+// reported. The count is asserted, not just the property, so a sixth arm cannot
+// be added in silence and call the sweep complete again.
+//
+// The assertion is STRUCTURAL because the population is not all drivable: the
+// json.Marshal arm is unreachable by construction — every member of the record
+// map is a string or a slice of them, and encoding/json cannot refuse those —
+// so no value test can reach it, and reading the function is what catches a
+// silent return there. The two drivable arms have value pins as well:
+// TestTheFaultRecordSaysSoWhenTheStorePathNamesNoDirectory and
+// TestLifecycleFaultRecordIsBestEffort.
+//
+// MUTATION, AT THE DEFECT SITE: put a bare "return" back in the MkdirAll arm,
+// or in the json.Marshal arm. This test turns RED.
+func TestEveryFailingArmOfTheFaultWriterTellsTheOperator(t *testing.T) {
+	t.Parallel()
+
+	file, err := parser.ParseFile(token.NewFileSet(), "hook_lifecycle.go", nil, 0)
+	require.NoError(t, err, "the production source must be readable beside its test")
+
+	var writer *ast.FuncDecl
+	for _, node := range file.Decls {
+		function, isFunction := node.(*ast.FuncDecl)
+		if isFunction && function.Name.Name == "recordLifecycleFault" {
+			writer = function
+			break
+		}
+	}
+	require.NotNil(t, writer, "recordLifecycleFault must exist to be the single writer of the record")
+
+	// The failure population is exactly the guarded branches of this function:
+	// the store path names no directory, the line cannot be encoded, the
+	// directory cannot be made, the file cannot be opened, the line cannot be
+	// appended.
+	arms := []*ast.IfStmt{}
+	ast.Inspect(writer, func(node ast.Node) bool {
+		if branch, isBranch := node.(*ast.IfStmt); isBranch {
+			arms = append(arms, branch)
+		}
+		return true
+	})
+	require.Len(t, arms, 5,
+		"the failure population of this writer is five arms; a sixth one has been added without "+
+			"this enumeration, which is how the same N-1 sweep happened twice")
+
+	for _, arm := range arms {
+		condition := sourceOf(arm.Cond)
+		reported := false
+		ast.Inspect(arm.Body, func(node ast.Node) bool {
+			call, isCall := node.(*ast.CallExpr)
+			if !isCall {
+				return true
+			}
+			selector, isSelector := call.Fun.(*ast.SelectorExpr)
+			if !isSelector {
+				return true
+			}
+			package_, isIdentifier := selector.X.(*ast.Ident)
+			if isIdentifier && package_.Name == "fmt" &&
+				(selector.Sel.Name == "Fprintf" || selector.Sel.Name == "Fprintln") {
+				reported = true
+				return false
+			}
+			return true
+		})
+		assert.True(t, reported,
+			"the arm guarded by %q returns WITHOUT A WORD: the fault it was recording then has no "+
+				"durable record and nothing anywhere says so, which is the loss the placement of "+
+				"this file beside the database exists to prevent", condition)
+	}
+}
+
+// TestTheFaultRecordRefusalQuotesThePathTheEnvironmentResolvedTo drives the
+// DOCUMENTED ENVIRONMENT ROUTE into the no-directory refusal, through the built
+// binary, with no --db flag at all.
+//
+// WHY IT IS A BUILT-BINARY TEST. The refusal must quote lifecycleStorePath and
+// not flagDBPath, and on the flag route the two are the same string, so the
+// in-process pin cannot tell them apart: quoting flagDBPath there left the full,
+// unfiltered package green. On this route the flag is EMPTY, and the mutant
+// prints `the store path "" names no directory` — an operator told that the
+// empty path names no directory learns nothing at all, which is the exact
+// ambiguity lifecycleStorePath was separated out to remove.
+//
+// The store path is a bare name, so it names no directory AND it is a directory
+// on disk, which makes the store unopenable. One input therefore produces both
+// the fault and the refusal, with nothing simulated.
+//
+// MUTATION, AT THE DEFECT SITE: quote flagDBPath instead of lifecycleStorePath()
+// in the no-directory arm of recordLifecycleFault. This test turns RED.
+func TestTheFaultRecordRefusalQuotesThePathTheEnvironmentResolvedTo(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "lifecycle-cli")
+	buildLifecycleBinary(t, binary)
+
+	// The working directory of the hook, so a bare store path resolves inside
+	// the test and never beside the package source.
+	work := t.TempDir()
+	const bareStorePath = "not-a-database"
+	require.NoError(t, os.Mkdir(filepath.Join(work, bareStorePath), 0o755),
+		"the store path must be a directory, so opening it as a database is a real storage fault")
+
+	command := exec.Command(binary, "hook", "lifecycle",
+		"--harness", "claude-code", "--event", "PreToolUse", "--host-version", "2.1.222")
+	command.Dir = work
+	command.Stdin = bytes.NewReader(claudeFixture(t, "pre_tool_use_2_1_222.json"))
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	command.Env = append(os.Environ(), tasks.DBPathEnv+"="+bareStorePath)
+
+	exitCode := 0
+	if runErr := command.Run(); runErr != nil {
+		var exit *exec.ExitError
+		require.ErrorAs(t, runErr, &exit, "the hook must exit with a status, not fail to start")
+		exitCode = exit.ExitCode()
+	}
+
+	require.Equal(t, 0, exitCode,
+		"this route is fail-open, and the record is evidence for a maintainer and never a "+
+			"condition of the host outcome")
+
+	text := stderr.String()
+	require.Contains(t, text, "could not place its fault record",
+		"the environment route must reach the same refusal the flag route reaches; if it does "+
+			"not, this test proves nothing about which path is quoted")
+	assert.Contains(t, text, `the store path "`+bareStorePath+`" names no directory`,
+		"the refusal must quote the path the ENVIRONMENT resolved to; flagDBPath is empty on this "+
+			"route, and quoting it prints `the store path \"\" names no directory`, which names "+
+			"nothing the operator can act on")
+	assert.NotContains(t, text, `the store path "" names no directory`,
+		"an empty quoted path is the mutant this test exists to catch")
+
+	_, statErr := os.Stat(filepath.Join(work, lifecycleFaultRecordFile))
+	assert.True(t, os.IsNotExist(statErr),
+		"nothing may be written to the working directory when the store path names no directory")
 }
