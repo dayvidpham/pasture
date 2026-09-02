@@ -232,7 +232,7 @@ fault. In the order the writer meets them:
 5. The file CANNOT BE CLOSED after the line was handed to it. A filesystem that
    defers the write — a network mount, or delayed allocation — reports the full
    disk or the device error of an earlier write at `close(2)` and NOT at
-   `write(2)`, so on that route route 4 never fires and the loss appears only
+   `write(2)`, so on that route, route 4 never fires and the loss appears only
    here. This route was once SILENT: the close was a bare `defer file.Close()`
    with its error discarded, which is a lost record with no word on any stream,
    and no guard saw it because a discarded error is not a branch.

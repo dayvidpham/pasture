@@ -502,20 +502,27 @@ const faultRecordLossSuffix = "the fault below is reported on this stream only"
 //   - TestEveryFailingArmOfTheFaultWriterTellsTheOperatorOnStandardError reads
 //     every GUARDED BRANCH — if arms, else blocks, switch cases, select cases,
 //     loop bodies and the bodies of deferred closures — and requires each to
-//     report. So a sixth branch cannot be added without a word.
-//   - The same test reads every WRITE the function makes, whatever the call
-//     shape: fmt.Fprint, Fprintf and Fprintln, and the Write and WriteString
-//     methods of any writer expression. It requires the writer of each to be
-//     cmd.ErrOrStderr(), and refuses any expression anywhere in this function
-//     that names standard output or standard input at all. So no word of this
-//     writer can move onto standard output — under a bare method call as much
-//     as under fmt, which is the shape that reinstated the founding defect of
-//     this command with the whole tree green.
+//     report. So a branch cannot be added without a word. It also requires
+//     every report to stand INSIDE one of those branches, so a word written
+//     between them is not missed by the arm reader.
+//   - The same test reads every WRITE the function makes. It collects three
+//     shapes: a write whose writer is an ARGUMENT (the fmt.Fprint family,
+//     io.WriteString), a write whose writer is a RECEIVER (.Write, .WriteString
+//     on any expression), and a write with NO WRITER EXPRESSION AT ALL (the
+//     fmt.Print family, the log package's package-level printers, and the print
+//     and println builtins, each recorded against a synthetic writer). It
+//     requires the writer of each to be cmd.ErrOrStderr() or the record file
+//     this function opened, and separately refuses any expression anywhere in
+//     the function that names standard output or standard input. Two of those
+//     three shapes were added after a reviewer put a word on standard output
+//     with the whole tree green — first `cmd.OutOrStdout().Write`, then
+//     `fmt.Println`, which names no stream for the third guard to refuse.
 //   - TestTheFaultWriterDiscardsNoResultThatCouldCarryALoss reads DISCARDED
 //     RESULTS, which are not branches: a bare `defer file.Close()`, a call
-//     statement that is not a report, an assignment that binds the last result
-//     to the blank identifier. A loss route need not be a branch, and the
-//     unchecked close below was one.
+//     statement that is not a report, and an assignment whose last left-hand
+//     name is the blank identifier, whatever stands on the right. A loss route
+//     need not be a branch — the unchecked close below was one, and so was a
+//     second closure spending a named error on `_ = name`.
 func recordLifecycleFault(
 	cmd *cobra.Command,
 	coords lifecycleCoordinates,

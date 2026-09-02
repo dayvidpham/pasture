@@ -1716,6 +1716,16 @@ func faultWriterArms(fileSet *token.FileSet, function *ast.FuncDecl) []faultWrit
 			add("a for body", branch.For, branch.Body.List)
 		case *ast.RangeStmt:
 			add("a range body", branch.For, branch.Body.List)
+		case *ast.FuncLit:
+			// A DEFERRED CLOSURE BODY IS AN ARM. Three sentences already said
+			// this reader collected one, and it did not: there was no FuncLit
+			// case at all, and the count held at six only because the single
+			// closure in the writer happens to contain an `if`. A second
+			// closure holding `syncErr := file.Sync(); _ = syncErr` kept the
+			// count, required no report, and lost the record in silence on a
+			// full disk — the identical defect the checked close was added to
+			// remove, in the one shape the guard could not read.
+			add("a deferred closure body", branch.Type.Func, branch.Body.List)
 		}
 		return true
 	})
@@ -1742,6 +1752,10 @@ func faultWriterArms(fileSet *token.FileSet, function *ast.FuncDecl) []faultWrit
 type faultWriterWrite struct {
 	// Shape names the call shape, so a failure says how the bytes left.
 	Shape string
+	// Pos identifies the write uniquely, so the same write collected twice —
+	// once inside an arm and once over the whole function — is recognised as
+	// one write. A LINE is not enough: two writes can share one.
+	Pos token.Pos
 	// Line is the line in hook_lifecycle.go the write stands on.
 	Line int
 	// Writer is the writer expression AS WRITTEN, so a message can quote what
@@ -1764,10 +1778,14 @@ type faultWriterWrite struct {
 // below, which needs no list of call shapes at all.
 func faultWriterWrites(fileSet *token.FileSet, body []ast.Stmt, bound map[string]string) []faultWriterWrite {
 	writes := []faultWriterWrite{}
-	record := func(shape string, position token.Pos, writer ast.Expr) {
-		text := sourceOf(writer)
+	record := func(shape string, position token.Pos, writer ast.Expr, synthetic string) {
+		text := synthetic
+		if writer != nil {
+			text = sourceOf(writer)
+		}
 		writes = append(writes, faultWriterWrite{
 			Shape:    shape,
+			Pos:      position,
 			Line:     fileSet.Position(position).Line,
 			Writer:   text,
 			Resolved: resolveWriterName(text, bound),
@@ -1779,6 +1797,18 @@ func faultWriterWrites(fileSet *token.FileSet, body []ast.Stmt, bound map[string
 			if !isCall {
 				return true
 			}
+			// A WRITE NEED NOT NAME ITS WRITER. fmt.Println reaches os.Stdout
+			// through a writer that appears in NO EXPRESSION, so a reader that
+			// starts from a writer argument or a receiver cannot see it, the
+			// forbidden-stream sweep has nothing to refuse, and binding both
+			// results to real names hides it from the discard reader too. It
+			// was planted in the CLOSE arm — the one arm this suite states it
+			// cannot drive, where structure is the sole witness — and the whole
+			// unfiltered package stayed green for 208s.
+			if shape, writer, isWriterless := writerlessPrint(call); isWriterless {
+				record(shape, call.Lparen, nil, writer)
+				return false
+			}
 			selector, isSelector := call.Fun.(*ast.SelectorExpr)
 			if !isSelector {
 				return true
@@ -1789,26 +1819,82 @@ func faultWriterWrites(fileSet *token.FileSet, body []ast.Stmt, bound map[string
 					switch selector.Sel.Name {
 					case "Fprint", "Fprintf", "Fprintln":
 						if len(call.Args) > 0 {
-							record("fmt."+selector.Sel.Name, call.Lparen, call.Args[0])
+							record("fmt."+selector.Sel.Name, call.Lparen, call.Args[0], "")
 							return false
 						}
 					}
 				case "io":
 					if selector.Sel.Name == "WriteString" && len(call.Args) > 0 {
-						record("io.WriteString", call.Lparen, call.Args[0])
+						record("io.WriteString", call.Lparen, call.Args[0], "")
 						return false
 					}
 				}
 			}
 			switch selector.Sel.Name {
 			case "Write", "WriteString":
-				record("a bare ."+selector.Sel.Name+" call", call.Lparen, selector.X)
+				record("a bare ."+selector.Sel.Name+" call", call.Lparen, selector.X, "")
 				return false
 			}
 			return true
 		})
 	}
 	return writes
+}
+
+// implicitStdoutWriter is the synthetic writer text recorded for a call that
+// reaches standard output WITHOUT NAMING IT. It is not valid Go, on purpose: it
+// can never be produced by sourceOf, so it can never be confused with a writer
+// a maintainer actually wrote, and it contains "os.Stdout" so the existing
+// standard-output refusal fires with the message that names the real harm.
+const implicitStdoutWriter = "os.Stdout (implicit, named by no expression)"
+
+// implicitBuiltinWriter is the synthetic writer text for the print and println
+// BUILTINS, whose Fun is a plain identifier rather than a selector and which
+// write to the process's standard error, outside the command stream every pin
+// in this package reads.
+const implicitBuiltinWriter = "the process's standard error (implicit, named by no expression)"
+
+// writerlessPrint reports whether a call writes through a writer that appears
+// in no expression, and returns the shape and the synthetic writer to record.
+//
+// THE POPULATION IT ADDS. fmt.Print, fmt.Printf and fmt.Println, which write to
+// os.Stdout; the fmt.Fatal-free log family (log.Print, log.Printf, log.Println,
+// log.Fatal, log.Fatalf, log.Fatalln, log.Panic, log.Panicf, log.Panicln),
+// which writes to whatever output log holds; and the print and println
+// builtins. None of these names a stream, so no reader that starts from a
+// writer argument or a receiver can see them.
+func writerlessPrint(call *ast.CallExpr) (string, string, bool) {
+	if name, isIdentifier := call.Fun.(*ast.Ident); isIdentifier {
+		switch name.Name {
+		case "print", "println":
+			return "the " + name.Name + " builtin", implicitBuiltinWriter, true
+		}
+		return "", "", false
+	}
+	selector, isSelector := call.Fun.(*ast.SelectorExpr)
+	if !isSelector {
+		return "", "", false
+	}
+	package_, isIdentifier := selector.X.(*ast.Ident)
+	if !isIdentifier {
+		return "", "", false
+	}
+	switch package_.Name {
+	case "fmt":
+		switch selector.Sel.Name {
+		case "Print", "Printf", "Println":
+			return "fmt." + selector.Sel.Name, implicitStdoutWriter, true
+		}
+	case "log":
+		switch selector.Sel.Name {
+		case "Print", "Printf", "Println",
+			"Fatal", "Fatalf", "Fatalln",
+			"Panic", "Panicf", "Panicln":
+			return "log." + selector.Sel.Name,
+				"the log package's own output (implicit, named by no expression)", true
+		}
+	}
+	return "", "", false
 }
 
 // resolveWriterName follows a bare name to the expression it was assigned in
@@ -1860,6 +1946,31 @@ func faultWriterBindings(function *ast.FuncDecl) map[string]string {
 	}
 	return bound
 }
+
+// faultWriterArmCount is the number of guarded branches recordLifecycleFault
+// has. It is a named constant and not a literal because TWO documents state it:
+// the enumeration guard below, and the route list in AGENTS.md, which a
+// maintainer reads to learn how a fault record can be lost. The document's
+// count was raised BY HAND when the close route was added, and nothing held it;
+// TestTheFaultRecordRouteListStatesTheCountTheCodeHas now does, against this.
+//
+// SIX ARMS, SEVEN BRANCHES. The six are the store path naming no directory, the
+// line that cannot be encoded, the directory that cannot be made, the file that
+// cannot be opened, the line that cannot be appended and the file that cannot
+// be closed. The seventh branch is the DEFERRED CLOSURE that holds the close
+// arm: it is a branch of the enumeration, not a way for the record to be lost,
+// so the document counts six and this counts seven.
+const faultWriterArmCount = 7
+
+// faultWriterLossRouteCount is how many of those branches are ways the record
+// can be LOST, which is what AGENTS.md enumerates. It excludes the deferred
+// closure, which holds a loss route rather than being one.
+const faultWriterLossRouteCount = faultWriterArmCount - 1
+
+// faultWriterUndrivableRoutes are the loss routes no input in this suite can
+// drive, so AGENTS.md's "routes a user can reach" count is derived and not
+// stated twice. The encode arm is unreachable by construction.
+const faultWriterUnreachableRoutes = 1
 
 // faultWriterStream is the ONE writer expression every report of the fault
 // writer is handed.
@@ -2019,23 +2130,36 @@ func assertFaultWriterStream(t *testing.T, where string, write faultWriterWrite)
 // DOMAIN IT IS READ OVER. Each round that narrowed one of these left the
 // sentence above it unchanged and wider than the guard:
 //
-//   - BRANCHES. Every guarded branch must report. The reader collects if arms,
-//     else blocks, switch cases, select cases, loop bodies and the bodies of
-//     deferred closures. An earlier reader collected *ast.IfStmt alone, so a
-//     switch-shaped silent return kept the count at five and the sentence held
-//     while the population did not.
-//   - WRITES. Every write, WHATEVER THE CALL SHAPE, must reach one of the TWO
-//     sinks this writer has and no third: the operator, on cmd.ErrOrStderr(),
-//     or the RECORD ITSELF, on the file this same function opened — recognised
-//     by resolving the writer to the os.OpenFile call that produced it, so
-//     renaming the local cannot disguise a write. The reports are counted
-//     against the branch count; the record write is required to happen exactly
-//     once. An earlier reader collected fmt.Fprint, Fprintf and Fprintln
+//   - BRANCHES. Every guarded branch must report, and every report must stand
+//     inside one. The reader collects if arms, else blocks, switch cases,
+//     select cases, loop bodies and the bodies of deferred closures. It
+//     collected *ast.IfStmt alone once, so a switch-shaped silent return kept
+//     the count at five; and it CLAIMED deferred closure bodies for a round
+//     before it read them, so a second closure spending a named Sync error on
+//     `_ = syncErr` held the count and lost the record in silence. A sentence
+//     wider than its reader is the defect these guards exist to catch, one
+//     level up.
+//   - WRITES. Every write must reach one of the TWO sinks this writer has and
+//     no third: the operator, on cmd.ErrOrStderr(), or the RECORD ITSELF, on
+//     the file this same function opened — recognised by resolving the writer
+//     to the os.OpenFile call that produced it, so renaming the local cannot
+//     disguise a write. The record write must happen exactly once.
+//     THE THREE SHAPES THE READER COLLECTS, stated because this population has
+//     been too narrow twice: a writer passed as an ARGUMENT (fmt.Fprint,
+//     Fprintf, Fprintln, io.WriteString); a writer used as a RECEIVER (.Write,
+//     .WriteString on any expression); and A WRITE WITH NO WRITER EXPRESSION
+//     (fmt.Print, Printf, Println; the log package's package-level printers;
+//     the print and println builtins), recorded against a synthetic writer so
+//     the refusal below can name the stream nobody wrote down.
+//     The first reader collected fmt.Fprint, Fprintf and Fprintln
 //     alone. ONE ADDED LINE in the MkdirAll arm,
 //     cmd.OutOrStdout().Write([]byte("pasture: ...")) — the idiom
 //     emitLifecycleOutcome uses for stdout in this same file — left the FULL
 //     unfiltered cmd/pasture package green while the built binary put 76 bytes
-//     on standard output ahead of the proceed and the shipped plugin threw.
+//     on standard output ahead of the proceed and the shipped plugin threw. The
+//     SECOND reader still started from a writer expression, so `fmt.Println` in
+//     the close arm — the one arm this suite cannot drive, where structure is
+//     the sole witness — left the full unfiltered package green for 208s.
 //   - STREAM EXPRESSIONS. No expression anywhere in the function may NAME
 //     standard output or standard input, whatever is then done with it. This
 //     one needs no list of call shapes, so a writer wrapped, encoded onto or
@@ -2049,12 +2173,23 @@ func assertFaultWriterStream(t *testing.T, where string, write faultWriterWrite)
 // THE ASSERTION IS STRUCTURAL BECAUSE ONE ARM IS NOT DRIVABLE. The json.Marshal
 // arm is unreachable by construction: every member of the record map is a
 // string or a slice of them, and encoding/json cannot refuse those. Reading the
-// function is what covers it. EVERY OTHER ARM IS DRIVEN ON THE BYTES A HOST
-// RECEIVES, through the built binary:
-// TestTheFaultRecordRefusalQuotesThePathTheEnvironmentResolvedTo (the
+// function is what covers it.
+//
+// THE ARMS DRIVEN ON THE BYTES A HOST RECEIVES, through the built binary, are
+// FOUR: TestTheFaultRecordRefusalQuotesThePathTheEnvironmentResolvedTo (the
 // no-directory arm), TestEveryDrivableFaultRecordLossIsMeasuredOnTheHostBytes
-// (the MkdirAll arm, the append arm and the close arm) and
+// (the MkdirAll arm and the append arm) and
 // TestTheFaultRecordOpenFailureIsReportedOnStandardErrorOnly (the open arm).
+//
+// THE CLOSE ARM IS NOT AMONG THEM, and this sentence said it was for a round.
+// No input in this suite drives a close failure: /dev/full, which gives the
+// append arm a real ENOSPC, accepts the close, and a route that reports at
+// close(2) needs a filesystem this suite does not have. The close arm is held
+// STRUCTURALLY — by the branch enumeration here and by
+// TestTheFaultWriterDiscardsNoResultThatCouldCarryALoss — and the limit is
+// written out where that test refuses to claim it, which is the honest
+// statement this one contradicted. Do not restore the wider sentence; either
+// drive the arm or leave the limit stated.
 //
 // A RETRACTION, BECAUSE A READER MEETS THE CLAIM HERE. This comment, and the
 // commit that wrote it, said the append arm "needs a write to fail on a file
@@ -2099,15 +2234,21 @@ func TestEveryFailingArmOfTheFaultWriterTellsTheOperatorOnStandardError(t *testi
 	// directory cannot be made, the file cannot be opened, the line cannot be
 	// appended, and the file cannot be closed.
 	arms := faultWriterArms(fileSet, writer)
-	require.Len(t, arms, 6,
-		"the failure population of this writer is six guarded branches, counted over if arms, "+
+	require.Len(t, arms, faultWriterArmCount,
+		"the failure population of this writer is %d guarded branches, counted over if arms, "+
 			"else blocks, switch cases, select cases, loop bodies and deferred closure bodies "+
-			"alike; a seventh one has been added without this enumeration, which is how the same "+
-			"N-1 sweep happened twice")
+			"alike; one has been added or removed without this enumeration, which is how the "+
+			"same N-1 sweep happened twice. The route list in AGENTS.md states this same count "+
+			"in words and is held against it", faultWriterArmCount)
 
 	// The stream is asserted here, arm by arm, so a failure names the branch.
+	// The reader descends, so an arm that CONTAINS another arm is credited with
+	// the writes of its child: the deferred closure body and the `if` inside it
+	// are two arms carrying one report between them, and each of them has told
+	// the operator.
+	reported := map[token.Pos]bool{}
 	for _, arm := range arms {
-		reports := 0
+		spoke := 0
 		for _, write := range faultWriterWrites(fileSet, arm.Body, bound) {
 			assertFaultWriterStream(t,
 				fmt.Sprintf("%s at hook_lifecycle.go:%d", arm.Shape, arm.Line), write)
@@ -2116,10 +2257,11 @@ func TestEveryFailingArmOfTheFaultWriterTellsTheOperatorOnStandardError(t *testi
 			// the same maintainer that the arm is silent as well would be the
 			// second false sentence about one input.
 			if faultWriterSinkOf(write) != sinkRecord {
-				reports++
+				spoke++
 			}
+			reported[write.Pos] = true
 		}
-		require.NotZero(t, reports,
+		require.NotZero(t, spoke,
 			"%s at hook_lifecycle.go:%d leaves WITHOUT A WORD: the fault it was recording then "+
 				"has no durable record and nothing anywhere says so, which is the loss the "+
 				"placement of this file beside the database exists to prevent", arm.Shape, arm.Line)
@@ -2128,19 +2270,32 @@ func TestEveryFailingArmOfTheFaultWriterTellsTheOperatorOnStandardError(t *testi
 	// THE SAME CLAIM OVER THE WHOLE FUNCTION, so a write standing OUTSIDE every
 	// branching shape above cannot escape it. The arm loop can only see what the
 	// enumeration collected; this sees every write the writer makes.
-	reports, records := []faultWriterWrite{}, []faultWriterWrite{}
+	//
+	// THE RELATION IS CONTAINMENT AND NOT A COUNT, and this is a re-derivation
+	// forced by the arm reader gaining deferred closure bodies. A count was
+	// sound only while the arms could not NEST: one report per arm made
+	// reports == arms an exact statement of "no report stands outside a
+	// branch". With nesting the closure body and its `if` are two arms sharing
+	// one report, so the count is false while the property it stood for still
+	// holds. Comparing POSITIONS says the property directly and survives any
+	// nesting a later arm introduces.
+	outside, records := []string{}, []faultWriterWrite{}
 	for _, write := range faultWriterWrites(fileSet, writer.Body.List, bound) {
 		assertFaultWriterStream(t, "over the whole of recordLifecycleFault", write)
 		if faultWriterSinkOf(write) == sinkRecord {
 			records = append(records, write)
 			continue
 		}
-		reports = append(reports, write)
+		if !reported[write.Pos] {
+			outside = append(outside, fmt.Sprintf("the %s write at hook_lifecycle.go:%d, handed %s",
+				write.Shape, write.Line, write.Writer))
+		}
 	}
-	assert.Len(t, reports, len(arms),
-		"this writer reports to the operator once per failing branch and never otherwise; a "+
-			"report count that differs from the branch count means a report stands somewhere "+
-			"the arm enumeration above cannot read, and the stream claim would not cover it")
+	assert.Empty(t, outside,
+		"every report of this writer must stand INSIDE a guarded branch the enumeration above "+
+			"collected. A report outside them all is a word the arm loop never read, so nothing "+
+			"checked which stream it used and nothing requires the branch it belongs to to "+
+			"speak; it is also the shape that made this writer an N-1 sweep twice")
 	assert.Len(t, records, 1,
 		"the record itself is written ONCE, to the file this function opened. A second write to "+
 			"that file is a second line for one fault, and a write to any other sink is bytes "+
@@ -2184,9 +2339,18 @@ func TestEveryFailingArmOfTheFaultWriterTellsTheOperatorOnStandardError(t *testi
 // was ok in 0.673s.
 //
 // WHAT IT REFUSES. A call statement that is not a report; a deferred or `go`
-// call that is not a closure whose body the enumeration above can read; an
-// assignment that binds the LAST result — which is where Go puts the error — to
-// the blank identifier.
+// call that is not a closure whose body the enumeration above can read; and an
+// assignment whose LAST left-hand name — which is where Go puts the error — is
+// the blank identifier, WHATEVER stands on the right.
+//
+// THE RIGHT-HAND SIDE IS DELIBERATELY UNRESTRICTED. It used to have to be a
+// call, and that let a second shape through: bind the result to a REAL name and
+// spend it on `_ = name`. The name makes the compiler happy, the discard is an
+// assignment from a bare identifier, and a call-shaped rule reads neither. With
+// the restriction gone, an error bound in this function can only be spent on a
+// branch, which the enumeration above collects and requires to speak, on a
+// report, which the write population reads, or on this discard, which is
+// refused. An unused name does not compile, so there is no fourth way.
 //
 // THE ONE EXEMPTION, STATED. fmt.Fprint, Fprintf and Fprintln as statements.
 // Their error is discarded because the report IS the last channel this writer
@@ -2252,18 +2416,31 @@ func TestTheFaultWriterDiscardsNoResultThatCouldCarryALoss(t *testing.T) {
 					" and throws away its result")
 			}
 		case *ast.AssignStmt:
-			if len(statement.Rhs) != 1 || len(statement.Lhs) == 0 {
-				return true
-			}
-			if _, isCall := statement.Rhs[0].(*ast.CallExpr); !isCall {
+			if len(statement.Lhs) == 0 {
 				return true
 			}
 			last, isIdentifier := statement.Lhs[len(statement.Lhs)-1].(*ast.Ident)
-			if isIdentifier && last.Name == "_" {
-				note(statement.TokPos, "binds the LAST result of "+
-					sourceOf(statement.Rhs[0])+" to the blank identifier, and the last result "+
-					"is where Go puts the error")
+			if !isIdentifier || last.Name != "_" {
+				return true
 			}
+			// THE RIGHT-HAND SIDE IS NOT REQUIRED TO BE A CALL, and requiring
+			// it was the hole. `syncErr := file.Sync()` binds a REAL name, so
+			// Go compels a use, and the use that discards is `_ = syncErr` —
+			// an assignment from a bare identifier, which a call-shaped rule
+			// walks straight past. Together the two statements lost the record
+			// in silence with every guard green.
+			//
+			// A NAME MUST THEREFORE BE CHECKED OR BE UNUSED, and an unused one
+			// does not compile. That is what closes the shape: the only ways
+			// to spend a bound error here are a branch, which the enumeration
+			// collects and requires to speak, a report, which the write
+			// population reads, or this discard, which is refused.
+			what := sourceOf(statement.Rhs[0])
+			if len(statement.Rhs) != 1 {
+				what = "this statement's last value"
+			}
+			note(statement.TokPos, "binds the LAST result of "+what+
+				" to the blank identifier, and the last result is where Go puts the error")
 		}
 		return true
 	})
@@ -2276,6 +2453,108 @@ func TestTheFaultWriterDiscardsNoResultThatCouldCarryALoss(t *testing.T) {
 			"like its siblings, or, if it genuinely cannot fail, bind it and say so where it is "+
 			"bound. The one exemption is fmt.Fprint, Fprintf and Fprintln, whose error has no "+
 			"channel left")
+}
+
+// spelledCounts maps the words AGENTS.md writes its route counts in to the
+// numbers they mean. The document states them in WORDS, which is right for
+// prose and useless to a guard unless the guard can read them.
+var spelledCounts = map[int]string{
+	4: "FOUR", 5: "FIVE", 6: "SIX", 7: "SEVEN", 8: "EIGHT", 9: "NINE",
+}
+
+// spelledOrdinals maps the same numbers to the ordinal the document uses for
+// the one failure it declares unreachable.
+var spelledOrdinals = map[int]string{
+	4: "FOURTH", 5: "FIFTH", 6: "SIXTH", 7: "SEVENTH", 8: "EIGHTH", 9: "NINTH",
+}
+
+// TestTheFaultRecordRouteListStatesTheCountTheCodeHas holds the route counts in
+// AGENTS.md to the count the enumeration guard reads out of the code.
+//
+// WHY. The document says "The writer has SIX guarded failures. FIVE of them are
+// routes a user can reach", it enumerates 1 to 5, and it calls the encode arm
+// "The SIXTH failure". Those numbers were raised BY HAND when the close route
+// was added, and NOTHING held them. The code-side count is pinned, so the next
+// maintainer who adds an arm is stopped by a loud message, bumps the constant,
+// and the document goes on saying SIX and FIVE with every gate green — a
+// maintainer note that quietly stops describing the product.
+//
+// This branch argued in its own commit message that "correcting a generator
+// without a pin leaves the wording resting on nothing". A hand-kept count in a
+// document a maintainer reads to learn how evidence is lost is the same claim
+// resting on the same nothing. internal/timeouts/docs_guard_test.go is the
+// precedent in this tree for holding AGENTS.md to live values.
+//
+// WHAT IS DERIVED AND WHAT IS STATED. The guarded-branch count comes from
+// faultWriterArmCount; the LOSS-ROUTE count is that minus the deferred closure,
+// which holds a route rather than being one; the reachable count is the loss
+// routes minus the arms no input can reach. Nothing here restates a number the
+// enumeration guard already owns.
+//
+// MUTATION: change any count in the AGENTS.md paragraph, or add an arm to
+// recordLifecycleFault and bump faultWriterArmCount without touching the
+// document. This test turns RED and names the number the document should carry.
+func TestTheFaultRecordRouteListStatesTheCountTheCodeHas(t *testing.T) {
+	t.Parallel()
+
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err, "resolve the repository root from cmd/pasture")
+	raw, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	require.NoError(t, err, "read AGENTS.md, which is where the fault-record routes are listed")
+
+	const heading = "### The lifecycle fault record"
+	document := string(raw)
+	require.Contains(t, document, heading,
+		"the route list must still live under its own heading; a guard that cannot find the "+
+			"section would pass on every document that does not contain it")
+	section := document[strings.Index(document, heading):]
+	if next := strings.Index(section[len(heading):], "\n### "); next != -1 {
+		section = section[:len(heading)+next]
+	}
+
+	losses := faultWriterLossRouteCount
+	reachable := losses - faultWriterUnreachableRoutes
+
+	require.Contains(t, spelledCounts, losses,
+		"the route count %d has no spelling in this table, so the document cannot be checked "+
+			"against it; add the word", losses)
+	require.Contains(t, spelledCounts, reachable,
+		"the reachable-route count %d has no spelling in this table; add the word", reachable)
+	require.Contains(t, spelledOrdinals, losses,
+		"the unreachable route's ordinal for %d has no spelling in this table; add the word", losses)
+
+	assert.Contains(t, section,
+		"The writer has "+spelledCounts[losses]+" guarded failures.",
+		"the route list must state the number of ways the record can be lost that the code "+
+			"actually has, which is %d: %d guarded branches in recordLifecycleFault less the %d "+
+			"deferred closure that holds one rather than being one. The document's numbers were "+
+			"raised by hand once and nothing held them",
+		losses, faultWriterArmCount, faultWriterArmCount-faultWriterLossRouteCount)
+	assert.Contains(t, section,
+		spelledCounts[reachable]+" of them are routes a user can reach",
+		"the route list must state how many of those %d routes an input can drive, which is %d: "+
+			"all of them but the %d that is unreachable by construction",
+		losses, reachable, faultWriterUnreachableRoutes)
+	assert.Contains(t, section,
+		"The "+spelledOrdinals[losses]+" failure, a record line that cannot be encoded, is unreachable by",
+		"the document names the unreachable failure by its ORDINAL, so that number moves with "+
+			"the count as well; it is the %s of %d", spelledOrdinals[losses], losses)
+
+	for route := 1; route <= reachable; route++ {
+		assert.Regexp(t, regexp.MustCompile(`(?m)^`+fmt.Sprint(route)+`\. `), section,
+			"the list must ENUMERATE every reachable route it claims, and route %d is missing. A "+
+				"count with no matching entry is the drift this guard exists to catch", route)
+	}
+	assert.NotRegexp(t, regexp.MustCompile(`(?m)^`+fmt.Sprint(reachable+1)+`\. `), section,
+		"the list enumerates %d reachable routes and must stop there; a further numbered entry "+
+			"is a route the counts above do not include", reachable)
+
+	// The record file the whole section is about is named by the product, so a
+	// rename cannot leave the document describing a file that no longer exists.
+	assert.Contains(t, section, lifecycleFaultRecordFile,
+		"the section must name the record file THIS BUILD writes (%s); renaming the product "+
+			"constant left this document, and the operator text beside it, naming a file that is "+
+			"not there", lifecycleFaultRecordFile)
 }
 
 // TestEveryTestNameCitedByTheLifecycleSourceExists holds every citation
@@ -2707,10 +2986,18 @@ func TestTheOpenCodeBeltPromisesOnlyWhatTheFaultRecordDelivers(t *testing.T) {
 			"%s must still send the operator to standard error. That is the half of the old "+
 				"sentence that was TRUE, and it is where pasture reports every such fault, "+
 				"including the case where it could not write a record", name)
-		assert.Contains(t, found, "A line may also have been appended to lifecycle-faults.jsonl",
-			"%s must OFFER the durable record rather than promise it: the file exists for most "+
-				"faults and for none of the loss routes, and an operator needs to know which "+
-				"case they are in before they go looking", name)
+		// THE FILENAME COMES FROM THE PRODUCT CONSTANT AND NEVER FROM A
+		// LITERAL HERE. Renaming lifecycleFaultRecordFile turns internal/codegen
+		// RED but left cmd/pasture — which owns BOTH the constant and the
+		// sentence that names the file — green for 203s, so the shipped
+		// operator text could go false in silence while the product renamed the
+		// file underneath it.
+		assert.Contains(t, found, "A line may also have been appended to "+lifecycleFaultRecordFile,
+			"%s must OFFER the durable record rather than promise it, and must name the file "+
+				"THIS BUILD writes (%s): the file exists for most faults and for none of the "+
+				"loss routes, and an operator needs to know which case they are in before they "+
+				"go looking. If the product renamed the record file, the sentence renames with "+
+				"it", name, lifecycleFaultRecordFile)
 		assert.Contains(t, found, "could not be placed or written leaves none",
 			"%s must say WHY the record may be absent. An offer with no reason leaves the "+
 				"operator unable to tell a missing file from a wrong path", name)
