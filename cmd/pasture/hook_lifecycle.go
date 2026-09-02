@@ -214,7 +214,7 @@ func lifecycleOutcome(
 	//
 	// The deadline is enforced HERE, around the work, and not only by handing a
 	// context down. Layers below retry a locked SQLite database on their own
-	// ceilings, which are longer than any host budget, and the deadline context
+	// ceilings, which are longer than the smallest host budget, and the deadline context
 	// does not reach all of them: the store opener takes no context, so the
 	// migrator below it runs to its own ceiling whatever this deadline says.
 	// Measured on a database held under a write lock, the hook returned after

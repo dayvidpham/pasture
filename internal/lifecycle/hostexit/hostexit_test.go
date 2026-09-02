@@ -87,13 +87,16 @@ func TestEveryDeclaredFailureModeNamesItself(t *testing.T) {
 }
 
 // TestForFaultCoversEveryModePolicyAndEvidenceCell is the whole fault table:
-// six failure modes x two fault policies x {evidence, none} = 24 cells.
+// every declared failure mode x every declared fault policy x {evidence, none}.
+// Both enum axes are derived from their types' own IsValid; at the revision
+// this was written that is 6 x 2 x 2 = 24 cells, and the count below is
+// computed from the axes rather than quoted.
 //
-// Exactly two cells block. They are the two exit-code arms, under the opt-in
-// fail-closed policy, with host evidence for the blocking claim. Every other
-// cell lets the host continue, EMITS THE HOST'S CONTINUE BYTES, and says why on
-// stderr. A fault must not stop a user working unless the user asked for that
-// AND the host is documented to block on the exit code.
+// The cells that block are the exit-code arms, under the opt-in fail-closed
+// policy, with host evidence for the blocking claim: at this revision, two.
+// Every other cell lets the host continue, EMITS THE HOST'S CONTINUE BYTES, and
+// says why on stderr. A fault must not stop a user working unless the user
+// asked for that AND the host is documented to block on the exit code.
 //
 // The continue bytes are the fix for a defect this table used to assert as
 // correct: it required an EMPTY stdout for every fault, which is a proceed only
@@ -113,21 +116,23 @@ func TestForFaultCoversEveryModePolicyAndEvidenceCell(t *testing.T) {
 		policy   hostexit.FaultPolicy
 		evidence pastureruntime.FailureEvidence
 	}
+	// THE EVIDENCE AXIS IS WRITTEN DOWN, and that is its whole domain: a
+	// FailureEvidence either names a source or it does not.
+	evidenceStates := []pastureruntime.FailureEvidence{{Source: citedSource}, {}}
 	cells := []cell{}
 	for _, mode := range allFailureModes() {
-		for _, policy := range []hostexit.FaultPolicy{hostexit.FaultFailOpen, hostexit.FaultFailClosed} {
-			for _, evidence := range []pastureruntime.FailureEvidence{
-				{Source: citedSource},
-				{},
-			} {
+		for _, policy := range allFaultPolicies() {
+			for _, evidence := range evidenceStates {
 				cells = append(cells, cell{mode: mode, policy: policy, evidence: evidence})
 			}
 		}
 	}
 	// THE EXPECTED COUNT IS COMPUTED FROM THE AXES, not from the list that
-	// produced the cells. Taking it from len(allFailureModes()) would have been
-	// the list agreeing with itself again.
-	require.Len(t, cells, len(allFailureModes())*2*2, "the table must cover 6 modes x 2 policies x 2 evidence states")
+	// produced the cells. Taking it from len(cells) would be the list agreeing
+	// with itself again.
+	require.Len(t, cells, len(allFailureModes())*len(allFaultPolicies())*len(evidenceStates),
+		"the table must cover %d modes x %d policies x %d evidence states",
+		len(allFailureModes()), len(allFaultPolicies()), len(evidenceStates))
 
 	blocked := 0
 	for _, c := range cells {
@@ -171,8 +176,47 @@ func TestForFaultCoversEveryModePolicyAndEvidenceCell(t *testing.T) {
 			blocked++
 		}
 	}
-	assert.Equal(t, 2, blocked,
-		"exactly two of the 24 cells may block: the two exit-code arms, under fail-closed, with evidence")
+	// THE BLOCKING COUNT IS DERIVED FROM THE SAME AXES: one cell per mode that
+	// blocks by exit code, under the one fail-closed policy, with evidence.
+	// That the exit-code modes are EXACTLY the two exit-2 arms is the design
+	// claim BlocksByExitCode documents, and it is pinned by name so a mode that
+	// gains a blocking exit code is a deliberate change here, not a drift.
+	require.ElementsMatch(t, []hostexit.FaultPolicy{hostexit.FaultFailOpen, hostexit.FaultFailClosed}, allFaultPolicies(),
+		"the declared policy set is the two policies the blocking rule below reasons about — a user "+
+			"opts into fail-closed or does not. A third policy must be decided here, not admitted by "+
+			"a scan and reasoned about by nobody")
+	blockingModes := []pastureruntime.FailureMode{}
+	for _, mode := range allFailureModes() {
+		if mode.BlocksByExitCode() {
+			blockingModes = append(blockingModes, mode)
+		}
+	}
+	assert.ElementsMatch(t,
+		[]pastureruntime.FailureMode{pastureruntime.FailureExitTwoBlocks, pastureruntime.FailureStrictExitTwoBlocks},
+		blockingModes,
+		"the modes that block by exit code are the two exit-2 arms and no other; a mode joining or "+
+			"leaving that set changes which faults can stop a user, and must be decided here")
+	assert.Equal(t, len(blockingModes), blocked,
+		"of the %d cells, exactly one per exit-code mode may block — under fail-closed, with "+
+			"evidence — which is %d", len(cells), len(blockingModes))
+}
+
+// allFaultPolicies returns EVERY DECLARED fault policy, derived from IsValid the
+// way allFailureModes derives the modes.
+//
+// The policy axis was the one hand-written list left in the fault table after
+// the mode axis was derived: two values, both real, and a third declared later
+// would have entered every cell of the exit table unasked. FaultPolicy is a
+// uint8, so the same bounded scan exhausts it.
+func allFaultPolicies() []hostexit.FaultPolicy {
+	policies := []hostexit.FaultPolicy{}
+	for candidate := 0; candidate < declaredScanBound; candidate++ {
+		policy := hostexit.FaultPolicy(candidate)
+		if policy.IsValid() {
+			policies = append(policies, policy)
+		}
+	}
+	return policies
 }
 
 // TestFailOpenEmitsTheContinuationItWasGiven pins the three real host shapes
@@ -1151,7 +1195,8 @@ func expectedImpactClause(fault hostexit.Fault, exit hostexit.ExitStatus, record
 			"exists; this invocation continued"
 	case fault.Stage == hostexit.FaultStageRecordUnknown:
 		return "the host continues with its own default answer; " + recordClause +
-			", and read the fault record file beside the database for this invocation"
+			", and the fault record file beside the database carries a line for this invocation " +
+			"unless a loss of that record was reported on this stream"
 	}
 	return "the host continues with its own default answer, and " + recordClause
 }
@@ -1462,19 +1507,14 @@ const internalReferenceRuleHeading = "## References & Internal Identifiers"
 // recognise, with the reason beside it. That is the honest half of the rule: a
 // narrow guard that says so beats a wide one that does not hold.
 var internalReferenceForms = map[string]string{
-	// Beads task identifiers. The project prefix is part of the shipped
-	// module path, so the family is recognisable without naming this project.
-	// THE SUFFIX IS A RANGE, AND IT WAS PINNED TO FIVE CHARACTERS BECAUSE THE
-	// EXEMPLAR SPELLS FIVE x. THAT TRANSLATED THE ILLUSTRATION, NOT THE RULE.
-	// Every task id in this project's own record is SIX — hc2jq3, o71gub,
-	// 6gbpks — so the derived pattern matched none of them while the three
-	// literals it replaced matched them all. A derivation that is NARROWER than
-	// the list it supersedes is a regression wearing the word "derived", which
-	// is why widthCheckedExamples below refuses one.
-	// The task-identifier pattern is BUILT FROM THE DERIVED PREFIX at run time,
-	// so this entry is a placeholder the builder replaces. It is not a pattern
-	// written here because every pattern written here has narrowed: on length
-	// first, then on alphabet. See taskIdentifierCorpus.
+	// Beads task identifiers. The pattern is BUILT FROM THE DERIVED PREFIX at
+	// run time, so this entry is a placeholder the builder fills. It is not a
+	// pattern written here because every pattern written here has narrowed:
+	// first to the five characters the illustration spells, while the real
+	// identifiers were five or six; then to suffixes carrying a digit, while
+	// one real identifier in nine carries none. The prefix is not in the
+	// module path or in the rule, so it is elected from the repository's own
+	// records instead. See taskIdentifierCorpus.
 	"<project>-xxxxx": ``,
 	"beads://…":       `beads://`,
 	// Protocol process artefacts.
@@ -1538,13 +1578,17 @@ func internalReferenceExemplars(t *testing.T) []string {
 }
 
 // internalReferencePatterns returns the patterns that recognise a forbidden
-// reference, and REFUSES any exemplar the rule spells that it cannot expand.
+// reference. It REFUSES an exemplar the rule spells that it cannot expand, an
+// entry the rule no longer spells, and a pattern that does not recognise its
+// own exemplar.
 func internalReferencePatterns(t *testing.T) []*regexp.Regexp {
 	t.Helper()
 
 	patterns := []*regexp.Regexp{}
 	unknown := []string{}
+	spelled := map[string]bool{}
 	for _, exemplar := range internalReferenceExemplars(t) {
+		spelled[exemplar] = true
 		expression, known := internalReferenceForms[exemplar]
 		if !known {
 			unknown = append(unknown, exemplar)
@@ -1553,7 +1597,15 @@ func internalReferencePatterns(t *testing.T) []*regexp.Regexp {
 		if expression == "" {
 			continue
 		}
-		patterns = append(patterns, regexp.MustCompile(expression))
+		pattern := regexp.MustCompile(expression)
+		// EACH PATTERN MUST RECOGNISE THE EXEMPLAR IT WAS WRITTEN FOR. That is
+		// the least a translation can be asked, and without it a pattern
+		// narrowed to nothing keeps its family's name and matches nothing.
+		require.Regexp(t, pattern, exemplar,
+			"the pattern %s was written for the exemplar %q the rule spells and does not recognise "+
+				"it. A pattern that misses its own exemplar has been narrowed past the family it "+
+				"stands for", pattern, exemplar)
+		patterns = append(patterns, pattern)
 	}
 	sort.Strings(unknown)
 	require.Empty(t, unknown,
@@ -1561,21 +1613,41 @@ func internalReferencePatterns(t *testing.T) []*regexp.Regexp {
 			"POPULATION is read from the rule so a new form cannot be missed in silence; give each "+
 			"one a pattern, or map it to the empty string with the reason it is deliberately not "+
 			"recognised", unknown)
+	// THE OTHER DIRECTION. A form that LEAVES the rule leaves the guard with
+	// it, and that used to happen in silence: deleting one exemplar from the
+	// rule retired its whole family from both copies and everything stayed
+	// green. An entry the rule no longer spells fails by name instead.
+	stale := []string{}
+	for exemplar := range internalReferenceForms {
+		if !spelled[exemplar] {
+			stale = append(stale, exemplar)
+		}
+	}
+	sort.Strings(stale)
+	require.Empty(t, stale,
+		"this guard carries a pattern for %v, which the AGENTS.md rule no longer spells. A form "+
+			"leaving the rule narrows this guard in silence unless somebody is made to say so: "+
+			"either restore the exemplar to the rule, or delete the entry here and record why that "+
+			"family is no longer forbidden", stale)
 
-	// THE TASK-IDENTIFIER PATTERN IS ANCHORED ON THE PREFIX THE REPOSITORY
-	// ACTUALLY USES, which is the one signal that is reliable in both
-	// directions: it admits every real suffix whatever its alphabet, and it
-	// cannot match a digest, a workflow id or a versioned path, because those
-	// carry a different prefix.
+	// THE TASK-IDENTIFIER PATTERN IS THE BARE PREFIX THE REPOSITORY ACTUALLY
+	// USES, which is EXACTLY the literal it replaced and so exactly as wide. It
+	// admits every real suffix whatever its length or alphabet, and it cannot
+	// match a digest, a workflow id or a versioned path, because those carry a
+	// different prefix. Every hand-written suffix shape has narrowed, and
+	// nothing in this tree says what shape a generated suffix takes, so no
+	// shape is asked for.
 	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	require.NoError(t, err, "resolve the repository root")
 	prefix, corpus := taskIdentifierCorpus(t, root)
-	patterns = append(patterns, regexp.MustCompile(`\b`+regexp.QuoteMeta(prefix)+`-[a-z0-9]{4,}\b`))
+	patterns = append(patterns, regexp.MustCompile(regexp.QuoteMeta(prefix+"-")))
 	require.NotEmpty(t, patterns,
 		"the guard must recognise at least one form, or every text passes it")
 
-	// AT LEAST AS WIDE AS THE REAL POPULATION. The examples are the corpus, so
-	// this cannot measure one axis while the pattern narrows on another.
+	// AT LEAST AS WIDE AS THE REAL POPULATION. This holds by construction
+	// today, and it stays here as the control against the next hand-written
+	// shape: the examples are the corpus, so a pattern cannot narrow on one
+	// axis while the check measures another.
 	for _, identifier := range corpus {
 		recognised := false
 		for _, pattern := range patterns {
@@ -1602,11 +1674,6 @@ func internalReferencePatterns(t *testing.T) []*regexp.Regexp {
 	return patterns
 }
 
-// assertNoInternalReference requires host-visible text to carry none of them.
-//
-// WHAT IT VISITS: the string handed to it, against every pattern derived above.
-// WHAT IT DOES NOT: it cannot see text this test never renders, and it judges
-// the FORMS the rule spells rather than the intent behind a word.
 // stripDurablePaths removes the tokens the rule names as LEGITIMATE — file
 // paths and URLs — before the forbidden forms are looked for.
 //
@@ -1618,6 +1685,11 @@ func stripDurablePaths(text string) string {
 	return regexp.MustCompile(`\S*/\S*`).ReplaceAllString(text, " ")
 }
 
+// assertNoInternalReference requires host-visible text to carry none of them.
+//
+// WHAT IT VISITS: the string handed to it, against every pattern derived above.
+// WHAT IT DOES NOT: it cannot see text this test never renders, and it judges
+// the FORMS the rule spells rather than the intent behind a word.
 func assertNoInternalReference(t *testing.T, where, text string) {
 	t.Helper()
 	for _, pattern := range internalReferencePatterns(t) {
@@ -1635,11 +1707,12 @@ func assertNoInternalReference(t *testing.T, where, text string) {
 // THE AXES THIS DERIVATION HAS TO COVER, NAMED BEFORE IT IS WRITTEN, because
 // the last two attempts were each exactly as wide as the probe that found them:
 //
-//	LENGTH    — a suffix is five OR six characters. The first pattern pinned
-//	            five, translated from the illustration beside the rule.
-//	ALPHABET  — a suffix is base-36 and about one in three carries NO DIGIT.
-//	            The second pattern required a digit, so 37 real ids in this
-//	            slice's own record passed, including the founding blocker.
+//	LENGTH    — the first pattern pinned a suffix to the five characters the
+//	            illustration beside the rule spells, and every identifier in
+//	            this tree's own records is five or six.
+//	ALPHABET  — a suffix is base-36, so it need not carry a digit, and many
+//	            real ones do not. The second pattern required one, so one
+//	            real identifier in nine passed, including the founding blocker.
 //	POPULATION— the examples that check the width were hand-written, so the
 //	            check measured LENGTH while the pattern had narrowed on ALPHABET
 //	            and nothing noticed.
@@ -1649,20 +1722,27 @@ func assertNoInternalReference(t *testing.T, where, text string) {
 //	DRIFT     — two packages carry this guard and their example lists had
 //	            already diverged while a comment said they were the same.
 //
-// ONE DERIVATION CLOSES ALL FIVE. The prefix and the ids are read from the
-// repository, so alphabet and length are whatever the real ids are; the width
-// check is the corpus itself, so it cannot measure a different axis from the
-// one the pattern narrows on; anchoring on the derived PREFIX makes a digest or
-// a workflow id impossible to match; and both packages scan the same tree, so
-// their populations are equal by construction rather than by a comment.
+// ONE DERIVATION CLOSES ALL FIVE. The prefix is elected from the repository's
+// own records and the pattern is that bare prefix, so length and alphabet are
+// not asked about at all; the width check is the corpus itself, so it cannot
+// measure a different axis from the one a pattern narrows on; a digest or a
+// workflow id carries another prefix, so it cannot match; and both packages
+// scan the same tree and hold their hand-written tables equal by test
+// (TestTheTwoInternalReferenceTablesAgree, in cmd/pasture, reads this file).
 
 // taskIdentifierCorpus returns the project prefix that task identifiers in this
 // repository carry, and every distinct identifier found under it.
 //
-// WHAT IT VISITS: every .go and .md file under the repository root.
-// WHAT IT DOES NOT READ: any other file kind, and identifiers that appear
-// nowhere in the tree. It derives the SHAPE from real instances; it cannot
-// invent a form the repository has never carried.
+// WHAT IT VISITS: every .go and .md file under the repository root, for tokens
+// shaped `<multi-word-prefix>-<five or six base-36 characters>`.
+// WHAT IT DOES NOT READ: any other file kind, and an identifier of another
+// length. THE LENGTH RANGE IS WRITTEN DOWN, AND IT IS LOAD-BEARING FOR THE
+// ELECTION ONLY: widening it to three characters lets ordinary hyphenated
+// English (`unified-schema-...`) carry more distinct tails than any generated
+// prefix, and the election flips. Measured on this tree, the five-or-six range
+// admits every identifier the records carry. The pattern the election feeds is
+// the bare prefix, so an identifier of another length under the elected prefix
+// is still recognised; only the corpus, which is a control, is bounded by it.
 func taskIdentifierCorpus(t *testing.T, root string) (string, []string) {
 	t.Helper()
 
@@ -1695,22 +1775,32 @@ func taskIdentifierCorpus(t *testing.T, root string) (string, []string) {
 	// ordinary hyphenated English dominates a Go repository and any five- or
 	// six-letter word looks like a suffix. A task identifier is generated, so
 	// ONE prefix carries MANY DISTINCT random suffixes while an English phrase
-	// carries a handful: measured here, 56 against 8 for the runner-up. The
-	// prefix must itself be multi-word, which every project identifier is and
-	// most stray matches are not.
-	prefix, best := "", 0
+	// carries a handful. The prefix must itself be multi-word, which every
+	// project identifier is and most stray matches are not. THE MARGIN IS
+	// PINNED BELOW rather than quoted here, so an election that gets close
+	// fails by name instead of flipping in silence.
+	prefix, best, runnerUp, runnerUpCount := "", 0, "", 0
 	for candidate, identifiers := range found {
 		if !strings.Contains(candidate, "-") {
 			continue
 		}
-		if distinct := len(identifiers); distinct > best ||
-			(distinct == best && candidate < prefix) {
+		distinct := len(identifiers)
+		switch {
+		case distinct > best || (distinct == best && candidate < prefix):
+			runnerUp, runnerUpCount = prefix, best
 			prefix, best = candidate, distinct
+		case distinct > runnerUpCount || (distinct == runnerUpCount && candidate < runnerUp):
+			runnerUp, runnerUpCount = candidate, distinct
 		}
 	}
 	require.NotEmpty(t, prefix,
 		"no task identifier shape occurs anywhere in this repository, so this guard has nothing to "+
 			"derive from and every assertion resting on it would pass vacuously")
+	require.Greater(t, best, 2*runnerUpCount,
+		"the elected prefix %q carries %d distinct suffixes and the runner-up %q carries %d, which "+
+			"is within a factor of two. The election rests on generated identifiers outnumbering "+
+			"hyphenated English by far; when they no longer do, this derivation is electing a "+
+			"phrase, and the guard must be given its prefix another way", prefix, best, runnerUp, runnerUpCount)
 
 	identifiers := make([]string, 0, len(found[prefix]))
 	for identifier := range found[prefix] {
@@ -1732,7 +1822,7 @@ func taskIdentifierCorpus(t *testing.T, root string) (string, []string) {
 	require.NotZero(t, digitFree,
 		"the corpus carries no DIGIT-FREE identifier, so it cannot catch a pattern that narrows on "+
 			"the alphabet — which is exactly how the previous width check passed while one real "+
-			"identifier in three went unrecognised")
+			"identifier in nine went unrecognised")
 	return prefix, identifiers
 }
 

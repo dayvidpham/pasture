@@ -162,11 +162,13 @@ serialized writer queue, and
 is tight on purpose so tests can prove deadline-breach behaviour quickly.
 
 `HookInvocation` is the budget the HOST pays for. A host freezes while it waits
-for a lifecycle hook, so the tier sits below the smallest host budget with
-headroom for process start: Claude Code allows a hook 10 s, Codex allows far
-longer, and the OpenCode plugin awaits the child process with no timeout of its
-own. The hook enforces this deadline around its own work rather than only handing
-a context down, because the retry ceilings below are longer than any host budget.
+for a lifecycle hook, so the tier sits below the smallest host budget this tree
+has evidence for, with headroom for process start: Claude Code allows a hook
+10 s (`hooks/hooks.json`), and the OpenCode plugin awaits the child process with
+no timeout of its own; this tree carries no measurement of the Codex hook
+budget, so the tier is sized against Claude's. The hook enforces this deadline
+around its own work rather than only handing a context down, because the retry
+ceilings below are longer than the smallest host budget.
 
 The tier bounds the WORK, not the whole process. After the deadline fires, three
 things still run outside it: mapping the fault, appending one line to the

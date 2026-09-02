@@ -566,8 +566,16 @@ func faultDiagnostic(fault Fault, exit ExitStatus) *ir.Diagnostic {
 		fix = "read the cause below and fix the reported condition; PASTURE_HOOK_FAIL_CLOSED refuses through the process exit code, which this host does not read as a refusal, " +
 			"so it cannot stop this event today; unset it if you expected it to"
 	case fault.Stage == FaultStageRecordUnknown:
+		// THE RECORD IS OFFERED, NOT PROMISED. This clause said "read the fault
+		// record file beside the database for this invocation", and on every
+		// route where that record cannot be placed or written the line above
+		// this diagnostic says exactly that. One message told its reader to
+		// open a file the line before it said did not exist; the generated
+		// OpenCode plugin's console line had the same defect and was corrected
+		// the same way.
 		impact = "the host continues with its own default answer; " + recordClause +
-			", and read the fault record file beside the database for this invocation"
+			", and the fault record file beside the database carries a line for this invocation " +
+			"unless a loss of that record was reported on this stream"
 		// THE REMEDY BELONGS TO THE CAUSE, NOT TO THE STAGE. This arm used to
 		// add "a long-running writer holding the pasture store is the usual
 		// reason, so find that writer or retry once it releases the store".

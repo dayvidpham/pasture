@@ -20,11 +20,13 @@
 //	outermost      WorkflowResult  30s          how long a caller waits for a
 //	                                            whole workflow to report a result
 //
-// HookInvocation sits below the smallest host budget with headroom for process
-// start. Claude Code gives a hook 10s by default (hooks/hooks.json), Codex
-// allows far longer, and the OpenCode plugin awaits the child process with no
-// timeout of its own. A hook that outruns the host budget freezes the session,
-// so pasture stops first and reports a fault, which fails open by default.
+// HookInvocation sits below the smallest host budget this tree has evidence
+// for, with headroom for process start. Claude Code gives a hook 10s by default
+// (hooks/hooks.json), and the OpenCode plugin awaits the child process with no
+// timeout of its own; this tree carries no measurement of the Codex hook
+// budget, so the tier is sized against Claude's. A hook that outruns the host
+// budget freezes the session, so pasture stops first and reports a fault, which
+// fails open by default.
 //
 // TestProfile (500ms / 2s / 3s / 6s / 30s) and DeadlineTestProfile (25ms /
 // 250ms / 500ms / 1s / 2s) keep the same ordering with different budgets. New
@@ -57,10 +59,11 @@ const (
 	DeadlineTest
 )
 
-// Profile is immutable and constructor-validated. The four tiers are ordered
+// Profile is immutable and constructor-validated. The five tiers are ordered
 // from innermost to outermost: a SQLite lock wait must complete before either
-// the ingress or the start_slice window can expire, and both of those must
-// complete before the caller stops waiting for the whole workflow.
+// the ingress or the start_slice window can expire; both of those must complete
+// before one hook invocation runs out of time; and that must complete before
+// the caller stops waiting for the whole workflow.
 type Profile struct {
 	kind           Kind
 	sqliteBusy     time.Duration

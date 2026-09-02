@@ -787,18 +787,29 @@ type LifecycleHarnessCoordinate struct {
 // LifecycleHarnessCoordinates derives the harness set from the SAME registry the
 // command dispatches on, so a test over "every harness" grows with the product
 // instead of with somebody's memory.
-func LifecycleHarnessCoordinates() []LifecycleHarnessCoordinate {
+//
+// IT RETURNS AN ERROR WHEN THE SET IS SMALLER THAN THE REGISTRY. A harness whose
+// activation proofs fail, or which admits no event, used to be dropped through
+// a silent `continue`; a caller ranging over the result then ran one subtest
+// fewer and stayed green, which is a derived population that shrank with no
+// reader noticing. The dropped harness is named instead, because the caller
+// cannot see the registry and has no other way to learn that its "every
+// harness" is one short.
+func LifecycleHarnessCoordinates() ([]LifecycleHarnessCoordinate, error) {
 	// AN ADMITTED EVENT, NOT THE FIRST ONE LISTED. The activation posture is
 	// resolved from the same generated proofs the command resolves it from,
 	// because a WITHHELD event refuses before the payload is ever read — a
 	// coordinate chosen without asking would drive a different arm on some
 	// harnesses and quietly prove nothing about this one.
 	coordinates := []LifecycleHarnessCoordinate{}
+	dropped := []string{}
 	for harness, dispatch := range frontendRegistry {
 		activations, err := dispatch.activations()
 		if err != nil {
+			dropped = append(dropped, fmt.Sprintf("%s: its activation proofs did not resolve (%v)", harness, err))
 			continue
 		}
+		admitted := false
 		for _, entry := range dispatch.manifest.Entries() {
 			state, found := activationFor(entry.Kind, activations)
 			if !found || state.State != activation.Enabled {
@@ -809,11 +820,23 @@ func LifecycleHarnessCoordinates() []LifecycleHarnessCoordinate {
 				Event:       entry.NativeName,
 				HostVersion: dispatch.manifest.Version,
 			})
+			admitted = true
 			break
 		}
+		if !admitted {
+			dropped = append(dropped, fmt.Sprintf("%s: its %s registration admits no event", harness, dispatch.manifest.Version))
+		}
+	}
+	sort.Strings(dropped)
+	if len(dropped) != 0 {
+		return nil, fmt.Errorf("LifecycleHarnessCoordinates (internal/handlers/hook_lifecycle.go) could not give every "+
+			"dispatched harness a coordinate while deriving the harness set: %s. A harness with no coordinate "+
+			"cannot be driven, so a caller that ranges over this set would run one subtest fewer and prove "+
+			"nothing about it; restore that harness's activation proofs, or enable at least one of its events, "+
+			"before relying on the set", strings.Join(dropped, "; "))
 	}
 	sort.Slice(coordinates, func(i, j int) bool { return coordinates[i].Harness < coordinates[j].Harness })
-	return coordinates
+	return coordinates, nil
 }
 
 // CaptureDispositionAdvice exposes the disposition advice table so a test can
