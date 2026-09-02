@@ -16,6 +16,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -2072,6 +2074,79 @@ func faultWriterSinkOf(write faultWriterWrite) faultWriterSink {
 	return sinkUnknown
 }
 
+// streamNamingHelpers returns the names of functions DECLARED IN THIS FILE
+// whose own body names a stream recordLifecycleFault may not use.
+//
+// THE FOURTH WRITE SHAPE IS A WRITE PERFORMED BY SOMEBODY ELSE. The write
+// population reads the calls recordLifecycleFault makes; the forbidden-stream
+// sweep reads the expressions it contains. A one-line helper beside it that
+// names cmd.OutOrStdout(), called with its result bound to a live name, is
+// invisible to both: the call site names no stream and performs no write that
+// this file's shapes recognise, and the bytes still land on standard output.
+// Measured green over the whole package.
+//
+// The reader is bounded at this FILE on purpose, and the bound is stated rather
+// than left implied: a helper in another package is not read, so the refusal
+// below is not a claim that no callee anywhere can write. It is the claim that
+// no neighbour of this writer can, which is where such a helper would be
+// written.
+func streamNamingHelpers(fileSet *token.FileSet, file *ast.File) map[string]string {
+	named := map[string]string{}
+	for _, declaration := range file.Decls {
+		function, isFunction := declaration.(*ast.FuncDecl)
+		if !isFunction || function.Name.Name == "recordLifecycleFault" {
+			continue
+		}
+		if found := faultWriterForbiddenStreams(fileSet, function); len(found) > 0 {
+			named[function.Name.Name] = found[0]
+		}
+	}
+	return named
+}
+
+// faultWriterHelperCalls returns every call recordLifecycleFault makes to one of
+// those helpers.
+func faultWriterHelperCalls(fileSet *token.FileSet, function *ast.FuncDecl, named map[string]string) []string {
+	found := []string{}
+	ast.Inspect(function, func(node ast.Node) bool {
+		call, isCall := node.(*ast.CallExpr)
+		if !isCall {
+			return true
+		}
+		name, isIdentifier := call.Fun.(*ast.Ident)
+		if !isIdentifier {
+			return true
+		}
+		if where, isNamed := named[name.Name]; isNamed {
+			found = append(found, fmt.Sprintf("%s at hook_lifecycle.go:%d, whose own body names %s",
+				name.Name, fileSet.Position(call.Lparen).Line, where))
+		}
+		return true
+	})
+	return found
+}
+
+// faultWriterSuccessGuards returns every condition in the function that is
+// entered because something SUCCEEDED, judged as an equality comparison against
+// nil.
+func faultWriterSuccessGuards(fileSet *token.FileSet, function *ast.FuncDecl) []string {
+	found := []string{}
+	ast.Inspect(function, func(node ast.Node) bool {
+		binary, isBinary := node.(*ast.BinaryExpr)
+		if !isBinary || binary.Op != token.EQL {
+			return true
+		}
+		left, right := sourceOf(binary.X), sourceOf(binary.Y)
+		if left != "nil" && right != "nil" {
+			return true
+		}
+		found = append(found, fmt.Sprintf("hook_lifecycle.go:%d tests %s",
+			fileSet.Position(binary.OpPos).Line, sourceOf(binary)))
+		return true
+	})
+	return found
+}
+
 // assertFaultWriterStream requires one write to be handed standard error, and
 // says the TRUE thing about the input when it is not.
 //
@@ -2302,9 +2377,37 @@ func TestEveryFailingArmOfTheFaultWriterTellsTheOperatorOnStandardError(t *testi
 			"that file is a second line for one fault, and a write to any other sink is bytes "+
 			"leaving this command by a route nothing here describes")
 
+	// NO BRANCH MAY BE ENTERED BECAUSE SOMETHING SUCCEEDED. The enumeration
+	// above reads the SHAPE of a branch and never its CONDITION, so inverting
+	// one — `if closeErr == nil` in place of `if closeErr != nil` — left the arm
+	// count, the containment property, the record count and the stream sweep all
+	// satisfied, because the arm still CONTAINS a report. The close route went
+	// silent again, and it is the one route this suite states structure alone
+	// holds.
+	//
+	// The rule is narrow and says what it reads: no condition in this writer may
+	// compare anything to nil for EQUALITY. Every arm here is entered on a
+	// failure, and a failure in Go is an error that is NOT nil. The
+	// no-directory arm tests `path == ""`, which is an equality but not against
+	// nil, so it is untouched — and that is the honest limit of this reader: it
+	// refuses a success-guard written against nil, not every success-guard
+	// imaginable.
+	assert.Empty(t, faultWriterSuccessGuards(fileSet, writer),
+		"a branch of this writer is entered when a call SUCCEEDED. Every arm here reports that "+
+			"the fault record was lost, so entering one on success means the report fires when "+
+			"nothing went wrong AND — the reason this matters — the failure it was written for "+
+			"now reports nothing at all")
+
 	// NO EXPRESSION MAY NAME A STREAM THIS WRITER MAY NOT USE. The two loops
 	// above can only refuse writes whose call shape is recognised; this refuses
 	// the stream itself, wherever it is named and whatever it is handed to.
+	assert.Empty(t, faultWriterHelperCalls(fileSet, writer, streamNamingHelpers(fileSet, file)),
+		"recordLifecycleFault may not CALL a function in this file that names a stream it may not "+
+			"use itself. A write performed by a callee is invisible to the write population, which "+
+			"reads the calls this function makes, and to the stream sweep, which reads the "+
+			"expressions it contains: the call site names no stream and performs no recognised "+
+			"write, and the bytes reach standard output all the same")
+
 	assert.Empty(t, faultWriterForbiddenStreams(fileSet, writer),
 		"recordLifecycleFault may name NO stream but %s. Every one of these reaches a stream "+
 			"whose bytes a host reads as the hook's answer, or reads the host's input, and a "+
@@ -2347,11 +2450,26 @@ func TestEveryFailingArmOfTheFaultWriterTellsTheOperatorOnStandardError(t *testi
 // THE RIGHT-HAND SIDE IS DELIBERATELY UNRESTRICTED. It used to have to be a
 // call, and that let a second shape through: bind the result to a REAL name and
 // spend it on `_ = name`. The name makes the compiler happy, the discard is an
-// assignment from a bare identifier, and a call-shaped rule reads neither. With
-// the restriction gone, an error bound in this function can only be spent on a
-// branch, which the enumeration above collects and requires to speak, on a
-// report, which the write population reads, or on this discard, which is
-// refused. An unused name does not compile, so there is no fourth way.
+// assignment from a bare identifier, and a call-shaped rule reads neither.
+//
+// THIS COMMENT ONCE ENDED "there is no fourth way". THAT WAS FALSE, and it was
+// falsified by being stated plainly enough to test: a result can also be spent
+// on a LIVE VARIABLE —
+//
+//	syncErr := file.Sync()
+//	unusable = append(unusable, recordedCause(syncErr))
+//
+// which is not a branch, not a report and not a blank discard. The whole
+// package stayed green.
+//
+// SO THE READER WAS WIDENED RATHER THAN THE SENTENCE RESTATED, and the sentence
+// now describes what the reader actually does: every name this function binds
+// from a call must be SPENT ON A DECISION OR ON A WORD — tested in a condition,
+// or handed to a write. A name spent any other way is refused, whatever it is
+// spent on, so the shape above and the shapes nobody has thought of are covered
+// by the same rule. The one thing this does not read is a value that is never
+// bound to a name at all, which cannot carry an error out of a call in Go
+// without being discarded first, and a discard is the rule above.
 //
 // THE ONE EXEMPTION, STATED. fmt.Fprint, Fprintf and Fprintln as statements.
 // Their error is discarded because the report IS the last channel this writer
@@ -2446,6 +2564,84 @@ func TestTheFaultWriterDiscardsNoResultThatCouldCarryALoss(t *testing.T) {
 		return true
 	})
 
+	// EVERY NAME BOUND FROM A CALL MUST BE SPENT ON A DECISION OR ON A WORD.
+	// A name tested in a condition reaches an arm the enumeration requires to
+	// speak; a name handed to a write reaches the operator. A name spent any
+	// other way — appended to a slice, formatted into a string, passed to a
+	// helper — carries its failure nowhere, and that is how `syncErr` was spent
+	// with the whole package green.
+	spent := map[string]bool{}
+	ast.Inspect(writer, func(node ast.Node) bool {
+		switch used := node.(type) {
+		case *ast.IfStmt:
+			ast.Inspect(used.Cond, func(inner ast.Node) bool {
+				if name, isIdentifier := inner.(*ast.Ident); isIdentifier {
+					spent[name.Name] = true
+				}
+				return true
+			})
+		case *ast.SwitchStmt:
+			if used.Tag != nil {
+				ast.Inspect(used.Tag, func(inner ast.Node) bool {
+					if name, isIdentifier := inner.(*ast.Ident); isIdentifier {
+						spent[name.Name] = true
+					}
+					return true
+				})
+			}
+		}
+		return true
+	})
+	ast.Inspect(writer, func(node ast.Node) bool {
+		call, isCall := node.(*ast.CallExpr)
+		if !isCall {
+			return true
+		}
+		if _, _, isWriterless := writerlessPrint(call); !isWriterless {
+			selector, isSelector := call.Fun.(*ast.SelectorExpr)
+			if !isSelector {
+				return true
+			}
+			package_, isPackage := selector.X.(*ast.Ident)
+			isFmtWrite := isPackage && package_.Name == "fmt" &&
+				(selector.Sel.Name == "Fprint" || selector.Sel.Name == "Fprintf" || selector.Sel.Name == "Fprintln")
+			isMethodWrite := selector.Sel.Name == "Write" || selector.Sel.Name == "WriteString"
+			if !isFmtWrite && !isMethodWrite {
+				return true
+			}
+			if isMethodWrite {
+				if name, isIdentifier := selector.X.(*ast.Ident); isIdentifier {
+					spent[name.Name] = true
+				}
+			}
+		}
+		for _, argument := range call.Args {
+			ast.Inspect(argument, func(inner ast.Node) bool {
+				if name, isIdentifier := inner.(*ast.Ident); isIdentifier {
+					spent[name.Name] = true
+				}
+				return true
+			})
+		}
+		return true
+	})
+
+	unspent := []string{}
+	for name, source := range faultWriterBindings(writer) {
+		if !strings.Contains(source, "(") || spent[name] {
+			continue
+		}
+		unspent = append(unspent, fmt.Sprintf("%s, bound from %s", name, source))
+	}
+	sort.Strings(unspent)
+	assert.Empty(t, unspent,
+		"recordLifecycleFault binds these names from a call and spends them on neither a DECISION "+
+			"nor a WORD. A name that is never tested in a condition reaches no arm this suite "+
+			"requires to speak, and a name never handed to a write reaches no operator, so a "+
+			"failure it carries is lost as completely as a discarded one. `syncErr := file.Sync()` "+
+			"appended to a slice is exactly this shape, and it passed while the comment above this "+
+			"guard claimed there was no way to do it")
+
 	assert.Empty(t, discards,
 		"recordLifecycleFault may throw away NO result that could carry a lost record. Every "+
 			"route that loses the record must tell the operator on standard error, and a "+
@@ -2508,8 +2704,14 @@ func TestTheOpenCodeBeltSurfacesTheDiagnosticItSendsTheOperatorTo(t *testing.T) 
 	const token = "pasture-diagnostic-token-the-operator-must-see"
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "pasture-stub")
+	// THE STUB WRITES ITS DIAGNOSTIC WITH NO TRAILING NEWLINE, on purpose. A
+	// diagnostic that does not end in one is what makes the forward's newline
+	// normalisation load-bearing: without it the forwarded bytes and the belt
+	// line that follows run together mid-sentence on one line, and the operator
+	// reads a single mangled sentence made of two speakers. Nothing held that,
+	// so dropping the normalisation was green.
 	require.NoError(t, os.WriteFile(stub,
-		[]byte("#!/bin/sh\nprintf '%s\\n' '"+token+"' >&2\nexit 0\n"), 0o700),
+		[]byte("#!/bin/sh\nprintf '%s' '"+token+"' >&2\nexit 0\n"), 0o700),
 		"write the stand-in binary the plugin will spawn")
 
 	for _, artefact := range openCodeBeltArtefacts {
@@ -2545,6 +2747,16 @@ console.log("HOST-CONTINUED");
 			require.Contains(t, stderr.String(), "and returned no decision",
 				"the belt line must be printed on this input; if it is not, the route under test "+
 					"was never taken and the token assertion below would pass vacuously")
+
+			assert.Contains(t, stderr.String(), token+"\n",
+				"the forwarded diagnostic must END ON ITS OWN LINE. pasture's diagnostic need not "+
+					"carry a trailing newline, and this stub's does not; without the forward's "+
+					"normalisation the belt line is appended to it and the operator reads one "+
+					"mangled sentence spoken by two different voices")
+			assert.NotContains(t, stderr.String(), token+"Pasture did not evaluate",
+				"the two speakers must not run together. This is the exact shape the normalisation "+
+					"prevents, and it is asserted directly so that removing the normalisation "+
+					"cannot stay green")
 
 			assert.Contains(t, stderr.String(), token,
 				"the belt tells the operator to read the pasture diagnostic on standard error, so "+
@@ -2650,6 +2862,34 @@ func TestTheFaultRecordRouteListStatesTheCountTheCodeHas(t *testing.T) {
 	assert.NotRegexp(t, regexp.MustCompile(`(?m)^`+fmt.Sprint(reachable+1)+`\. `), section,
 		"the list enumerates %d reachable routes and must stop there; a further numbered entry "+
 			"is a route the counts above do not include", reachable)
+
+	// THE PROSE CROSS-REFERENCES ARE HELD TOO. The counts, the ordinal and the
+	// filename were derived, and FIVE ordinals written into the surrounding
+	// sentences were left as hand-kept prose: "on that route, route 4 never
+	// fires", "ROUTES 1 AND 2 ARE ABOUT PLACING THE FILE, ROUTES 3, 4 AND 5 ARE
+	// ABOUT WRITING IT", "not exempt from routes 3, 4 and 5", "that is route 3".
+	// Every one of them points at a numbered entry, so every one of them can go
+	// stale the moment an entry is inserted or removed — which is precisely the
+	// drift the counts above were pinned against.
+	//
+	// The rule is the one thing that can be stated without restating the
+	// document: EVERY ordinal these sentences cite must be a route the list
+	// actually enumerates.
+	citedRoutes := regexp.MustCompile(`[Rr]outes? ((?:\d+(?:, | and | AND )?)+)`)
+	for _, match := range citedRoutes.FindAllStringSubmatch(section, -1) {
+		for _, ordinal := range regexp.MustCompile(`\d+`).FindAllString(match[1], -1) {
+			number, convErr := strconv.Atoi(ordinal)
+			require.NoError(t, convErr, "read the route ordinal %q cited in the section", ordinal)
+			assert.LessOrEqual(t, number, reachable,
+				"the section's prose cites route %d in %q, and the list enumerates only %d "+
+					"reachable routes. A cross-reference to a route that is not there sends a "+
+					"maintainer to a paragraph that does not exist, and these sentences are how "+
+					"the routes are explained to each other",
+				number, strings.TrimSpace(match[0]), reachable)
+			assert.Positive(t, number,
+				"a route ordinal is counted from 1; %q cites %d", strings.TrimSpace(match[0]), number)
+		}
+	}
 
 	// The record file the whole section is about is named by the product, so a
 	// rename cannot leave the document describing a file that no longer exists.
@@ -3084,10 +3324,30 @@ func TestTheOpenCodeBeltPromisesOnlyWhatTheFaultRecordDelivers(t *testing.T) {
 				"stated over its wording", name)
 		lines[name] = found
 
+		// THIS PIN READS WORDS, AND WHAT MAKES THE WORDS TRUE IS ELSEWHERE.
+		// Its message used to justify itself by asserting the very belief it
+		// exists to protect — that standard error "is where pasture reports
+		// every such fault". A guard that states its premise as its reason
+		// cannot fail when the premise is false, and that premise WAS false:
+		// an unbindable payload left as a decision rather than a fault, so
+		// pasture wrote nothing for the plugin to forward, and an operator who
+		// followed this sentence found the belt line alone.
+		//
+		// The premise is held by tests that RUN things, and they are named here
+		// so a maintainer who weakens one meets the other:
+		// TestAnUnbindableHostPayloadIsTreatedAsAnEventThatWasNotEvaluated
+		// requires pasture to produce the diagnostic at all, and
+		// TestTheOpenCodeBeltSurfacesTheDiagnosticItSendsTheOperatorTo requires
+		// the plugin to put it on the stream this sentence names. This
+		// assertion only checks that the sentence still points there.
 		assert.Contains(t, found, "Read the pasture diagnostic on standard error first",
-			"%s must still send the operator to standard error. That is the half of the old "+
-				"sentence that was TRUE, and it is where pasture reports every such fault, "+
-				"including the case where it could not write a record", name)
+			"%s must still send the operator to standard error, which is the half of the retired "+
+				"sentence that was true. This assertion does NOT establish that a diagnostic is "+
+				"there: that pasture writes one is held by "+
+				"TestAnUnbindableHostPayloadIsTreatedAsAnEventThatWasNotEvaluated, and that the "+
+				"plugin forwards it onto that stream is held by "+
+				"TestTheOpenCodeBeltSurfacesTheDiagnosticItSendsTheOperatorTo. If either is "+
+				"weakened, this sentence becomes an instruction to read an empty stream", name)
 		// THE FILENAME COMES FROM THE PRODUCT CONSTANT AND NEVER FROM A
 		// LITERAL HERE. Renaming lifecycleFaultRecordFile turns internal/codegen
 		// RED but left cmd/pasture — which owns BOTH the constant and the
@@ -3111,4 +3371,164 @@ func TestTheOpenCodeBeltPromisesOnlyWhatTheFaultRecordDelivers(t *testing.T) {
 				"for byte. An operator reads whichever copy their installation shipped, so a "+
 				"copy that says something else is a second promise nobody reviewed")
 	}
+}
+
+// unbindableHostPayloads are, per harness, a host payload whose IDENTITY FIELDS
+// have been RENAMED — the shape a host produces when it renames or drops a
+// correlation field between versions, which the design invites by retaining the
+// host version without using it as an admission check.
+//
+// Each is accompanied by the exact bytes that harness reads as "you may
+// continue", because the claim under test is about the bytes a host receives.
+var unbindableHostPayloads = []struct {
+	Harness     string
+	Event       string
+	HostVersion string
+	Payload     string
+	Continue    string
+	Identities  string
+}{
+	{
+		Harness: "opencode", Event: "tool.execute.before", HostVersion: "1.18.10",
+		Payload:    `{"input":{"session_id":"s","call_id":"c"},"output":{"args":{}}}`,
+		Continue:   `{"decision":"proceed"}`,
+		Identities: "session, tool-call",
+	},
+	{
+		Harness: "codex", Event: "PreToolUse", HostVersion: "0.146.0",
+		Payload:    `{"renamed_session":"s","hook_event_name":"PreToolUse"}`,
+		Continue:   `{"continue":true}`,
+		Identities: "session, turn, tool-call",
+	},
+	{
+		// Claude's continuation IS the empty body, so this row's continue bytes
+		// are empty on purpose. The claim it carries is the diagnostic and the
+		// record, which are what a Claude operator has.
+		Harness: "claude-code", Event: "PreToolUse", HostVersion: "2.1.222",
+		Payload:    `{"renamed_session":"s","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{}}`,
+		Continue:   "",
+		Identities: "session",
+	},
+}
+
+// TestAnUnbindableHostPayloadIsTreatedAsAnEventThatWasNotEvaluated drives the
+// built binary against a HEALTHY store with a payload whose identity fields
+// cannot be bound, and requires the full unevaluated-event answer.
+//
+// THE ROUTE THIS PINS PRODUCED NOTHING AT ALL. When the ingress parser could
+// not classify a payload, the handler wrote its disposition receipt and
+// returned a NIL ERROR. A nil error is how that handler says "evaluated", so
+// the command took its SUCCESS path and asked the exit authority for a decision
+// with EMPTY continuation bytes: exit 0, nothing on standard output, nothing on
+// standard error, no fault record, and no fail-closed consideration. AN EVENT
+// THAT WAS NEVER EVALUATED LEFT AS A DECISION.
+//
+// EVERY GUARD THIS FILE HOLDS WATCHES THE FAULT PATH, AND THIS ROUTE NEVER
+// ENTERED IT. That is why it survived: it is a success path that succeeds at
+// producing nothing. No broken database, no held lock, no old binary — one
+// renamed identity field on a healthy machine was enough, on all three
+// harnesses.
+//
+// THE HARM IS READ BY THE PLUGIN. On OpenCode an empty body reaches
+// JSON.parse inside a GATE callback of an already-installed older plugin, which
+// throws, and nothing catches it, so the user's tool call STOPS. That is the
+// founding defect of this slice, and lifecycleContinuation's own comment says
+// the continue bytes exist to protect exactly that reader. They were not
+// delivered here.
+//
+// MUTATION, AT THE DEFECT SITE: return `backend.HostResponse{}, err` from the
+// non-valid-capture arm of hookLifecycle in internal/handlers/hook_lifecycle.go,
+// as it did. Every subtest turns RED — on the continue bytes for the two
+// harnesses that have them, and on the diagnostic and the fault record for all
+// three.
+func TestAnUnbindableHostPayloadIsTreatedAsAnEventThatWasNotEvaluated(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "lifecycle-cli")
+	buildLifecycleBinary(t, binary)
+
+	for _, row := range unbindableHostPayloads {
+		t.Run(row.Harness, func(t *testing.T) {
+			store := t.TempDir()
+			database := filepath.Join(store, "pasture.db")
+			initializeLifecycleTestDatabase(t, database)
+
+			run := runLifecycleHookOn(t, binary, database,
+				row.Harness, row.Event, row.HostVersion, []byte(row.Payload))
+
+			require.Equal(t, 0, run.ExitCode,
+				"an unbindable payload is a FAIL-OPEN fault by default: the host must be allowed to "+
+					"carry on with its own answer, never blocked because pasture could not read the "+
+					"payload.\nstderr: %s", run.Stderr)
+
+			assert.Equal(t, row.Continue, strings.TrimSpace(run.Stdout),
+				"the host must receive THIS harness's continue bytes. They were EMPTY on this route, "+
+					"and on OpenCode an empty body reaches JSON.parse inside a gate callback of an "+
+					"already-installed older plugin, which throws with nothing to catch it and stops "+
+					"the user's tool call")
+
+			require.Contains(t, run.Stderr, "could not be bound, so the event WAS NOT EVALUATED",
+				"the operator must be told the event was NOT EVALUATED. This route said nothing at "+
+					"all: zero bytes on standard error, on a healthy machine")
+			assert.Contains(t, run.Stderr, row.Identities,
+				"the diagnostic must NAME the identities that could not be bound, taken from this "+
+					"build's generated registration; an operator told only that binding failed cannot "+
+					"tell which correlation field their host renamed")
+			assert.Contains(t, run.Stderr, "is the version the host actually runs",
+				"the diagnostic must point at the host version too: this build retains the version "+
+					"without using it as an admission check, so a host that changes a field name "+
+					"between versions arrives here by construction")
+
+			records := readFaultRecords(t, run.FaultDir)
+			assert.Len(t, records, 1,
+				"an unevaluated event must leave a durable fault record like every other one. This "+
+					"route wrote none, so nothing outlived the process to say the event was skipped")
+		})
+	}
+}
+
+// TestTheFailClosedOptInReachesAnUnbindableHostPayload requires the strict-gate
+// opt-in to be LIVE on the unbindable route.
+//
+// WHY IT IS A SEPARATE CLAIM. The opt-in exists so that an operator who would
+// rather stop than proceed unevaluated can say so. It worked on the fault path
+// and was INERT here, because this route never became a fault: the event that
+// was never evaluated is precisely the case a strict operator most wants
+// covered, and it was the one case the switch could not reach.
+//
+// Claude's PreToolUse is the row driven because it is an evidenced blocking
+// gate, so the evidence rule cannot demote it. A row with no host evidence
+// stays continuing under the opt-in BY DESIGN, and its diagnostic says so.
+//
+// MUTATION: restore the nil-error return in the non-valid-capture arm. This
+// test turns RED on the fail-closed exit code, which returns to 0.
+func TestTheFailClosedOptInReachesAnUnbindableHostPayload(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "lifecycle-cli")
+	buildLifecycleBinary(t, binary)
+
+	const payload = `{"renamed_session":"s","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{}}`
+
+	open := t.TempDir()
+	openDB := filepath.Join(open, "pasture.db")
+	initializeLifecycleTestDatabase(t, openDB)
+	openRun := runLifecycleHookOn(t, binary, openDB,
+		"claude-code", "PreToolUse", "2.1.222", []byte(payload))
+	require.Equal(t, 0, openRun.ExitCode,
+		"the default is fail-open, so this row must let the host continue.\nstderr: %s", openRun.Stderr)
+
+	closed := t.TempDir()
+	closedDB := filepath.Join(closed, "pasture.db")
+	initializeLifecycleTestDatabase(t, closedDB)
+	closedRun := runLifecycleHookOn(t, binary, closedDB,
+		"claude-code", "PreToolUse", "2.1.222", []byte(payload),
+		"PASTURE_HOOK_FAIL_CLOSED=1")
+
+	assert.Equal(t, 2, closedRun.ExitCode,
+		"PASTURE_HOOK_FAIL_CLOSED must REACH this route. An event that could not be evaluated is "+
+			"the case a strict operator most wants stopped, and the opt-in did nothing here while "+
+			"working on every other fault: exit stayed 0 under both policies.\nstderr: %s",
+		closedRun.Stderr)
+	assert.Contains(t, closedRun.Stderr, "could not be bound, so the event WAS NOT EVALUATED",
+		"the blocking exit must carry the same reason as the continuing one, so an operator who "+
+			"turns the opt-in on learns WHY their host was stopped")
 }

@@ -505,24 +505,35 @@ const faultRecordLossSuffix = "the fault below is reported on this stream only"
 //     report. So a branch cannot be added without a word. It also requires
 //     every report to stand INSIDE one of those branches, so a word written
 //     between them is not missed by the arm reader.
-//   - The same test reads every WRITE the function makes. It collects three
+//     It also refuses any condition here that tests something for EQUALITY to
+//     nil, because every branch of this writer is entered on a FAILURE: reading
+//     the shape of a branch and not its condition let `closeErr == nil` keep
+//     every count satisfied while the close route went silent.
+//   - The same test reads every WRITE the function makes. It collects four
 //     shapes: a write whose writer is an ARGUMENT (the fmt.Fprint family,
 //     io.WriteString), a write whose writer is a RECEIVER (.Write, .WriteString
-//     on any expression), and a write with NO WRITER EXPRESSION AT ALL (the
+//     on any expression), a write with NO WRITER EXPRESSION AT ALL (the
 //     fmt.Print family, the log package's package-level printers, and the print
-//     and println builtins, each recorded against a synthetic writer). It
-//     requires the writer of each to be cmd.ErrOrStderr() or the record file
-//     this function opened, and separately refuses any expression anywhere in
-//     the function that names standard output or standard input. Two of those
-//     three shapes were added after a reviewer put a word on standard output
-//     with the whole tree green — first `cmd.OutOrStdout().Write`, then
-//     `fmt.Println`, which names no stream for the third guard to refuse.
-//   - TestTheFaultWriterDiscardsNoResultThatCouldCarryALoss reads DISCARDED
-//     RESULTS, which are not branches: a bare `defer file.Close()`, a call
-//     statement that is not a report, and an assignment whose last left-hand
-//     name is the blank identifier, whatever stands on the right. A loss route
-//     need not be a branch — the unchecked close below was one, and so was a
-//     second closure spending a named error on `_ = name`.
+//     and println builtins, recorded against a synthetic writer), and a write
+//     performed by a CALLEE — a call to any function in this file whose own
+//     body names a stream this one may not use. It requires the writer of each
+//     to be cmd.ErrOrStderr() or the record file this function opened, and
+//     separately refuses any expression here that names standard output or
+//     standard input. THREE of those four shapes were added after a reviewer
+//     put a word on standard output with the whole tree green: first
+//     `cmd.OutOrStdout().Write`, then `fmt.Println`, which names no stream at
+//     all, then a one-line neighbour that named the stream on this writer's
+//     behalf.
+//   - TestTheFaultWriterDiscardsNoResultThatCouldCarryALoss reads RESULTS THAT
+//     GO NOWHERE, which are not branches. It refuses a bare `defer
+//     file.Close()`, a call statement that is not a report, an assignment whose
+//     last left-hand name is the blank identifier, and — the shape that
+//     falsified its predecessor — a name bound from a call and then spent on
+//     neither a DECISION nor a WORD, so that appending an error to a slice is
+//     as refused as discarding it. A loss route need not be a branch: the
+//     unchecked close below was one, a second closure spending a named error on
+//     `_ = name` was another, and `syncErr := file.Sync()` handed to append was
+//     a third.
 func recordLifecycleFault(
 	cmd *cobra.Command,
 	coords lifecycleCoordinates,

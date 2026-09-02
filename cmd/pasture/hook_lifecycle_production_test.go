@@ -491,7 +491,19 @@ func TestClaudePayloadEventCannotOverrideRegisteredCLIEvent(t *testing.T) {
 	command.Stderr = &stderr
 	require.NoError(t, command.Run(), stdout.String()+stderr.String())
 	require.Empty(t, stdout.String())
-	require.Empty(t, stderr.String())
+	// THE OLD REQUIREMENT HERE WAS require.Empty ON STDERR, and it pinned the
+	// same silence as the malformed case above. MEASURED BEFORE CHANGING IT,
+	// because this input is not obviously the same case: a payload whose event
+	// claim is overridden COULD have been a genuinely evaluated event, and
+	// making an evaluated event announce that it was not would have been a new
+	// false sentence. It is not evaluated — ingress returns no bindings on an
+	// event mismatch, and the assertions below require an empty interpreted set
+	// and no consultation. The delivery is refused, not reinterpreted.
+	//
+	// stdout stays empty above because Claude's continuation IS the empty body.
+	require.Contains(t, stderr.String(), "could not be bound, so the event WAS NOT EVALUATED",
+		"a payload that declares a different event is REFUSED, not reinterpreted, so the event was "+
+			"not evaluated and the operator must be told rather than left with silence")
 
 	tracker, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)
@@ -569,7 +581,24 @@ func TestMalformedClaudeEventToOccurrenceOnly(t *testing.T) {
 			command.Stderr = &stderr
 			require.NoError(t, command.Run(), stdout.String()+stderr.String())
 			require.Empty(t, stdout.String(), "malformed lifecycle input must never emit a host decision")
-			require.Empty(t, stderr.String())
+			// THE OLD REQUIREMENT HERE WAS require.Empty ON STDERR, AND IT
+			// PINNED THE DEFECT RATHER THAN A CONTRACT. It required an event
+			// that pasture could not read to say NOTHING, and that silence was
+			// the whole bug: the handler returned a nil error, which is how it
+			// says "evaluated", so the command took its success path and
+			// answered the host with a decision for an event nobody evaluated.
+			// This is not the requirement relaxed; it is the requirement
+			// inverted, because it was the wrong way round.
+			//
+			// Claude's continuation IS the empty body, so the stdout check
+			// above is unchanged and still fires. On this harness the
+			// diagnostic is the whole of what an operator has, and there was
+			// none. Every occurrence, interpreted and consultation assertion
+			// below is untouched: the delivery row is still the durable
+			// evidence, and it is still the only durable effect.
+			require.Contains(t, stderr.String(), "could not be bound, so the event WAS NOT EVALUATED",
+				"a payload pasture cannot read is an event that was NOT evaluated, and it must say so; "+
+					"staying silent is what let an unevaluated event leave as a decision")
 
 			tracker, err := tasks.OpenTaskTracker(dbPath)
 			require.NoError(t, err)

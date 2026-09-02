@@ -242,8 +242,34 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 		if refusal != nil {
 			return backend.HostResponse{}, refusal
 		}
-		_, err = service.Receive(ctx, warrant, capture.delivery)
-		return backend.HostResponse{}, err
+		if _, err = service.Receive(ctx, warrant, capture.delivery); err != nil {
+			return backend.HostResponse{}, err
+		}
+		// THE RECEIPT ROW IS DURABLE EVIDENCE, NOT A HOST ANSWER, AND THIS ARM
+		// USED TO RETURN A NIL ERROR BESIDE IT.
+		//
+		// A nil error is how this handler says "evaluated". Both native
+		// encoders answer nil for a zero HostResponse, so the command took its
+		// SUCCESS path and called the exit authority with EMPTY continuation
+		// bytes: exit 0, nothing on standard output, nothing on standard error,
+		// no fault record, and no fail-closed consideration. AN EVENT THAT WAS
+		// NEVER EVALUATED LEFT AS A DECISION.
+		//
+		// MEASURED ON A HEALTHY STORE: one renamed or empty identity field was
+		// enough, on every harness. Driven under Bun against the plugin this
+		// repository shipped before its empty-body belt existed — the
+		// already-installed older reader that the continue bytes exist to
+		// protect — the empty body made JSON.parse throw inside a gate callback
+		// and the user's tool call stopped. No broken database, no old binary,
+		// no diagnostic anywhere.
+		//
+		// Returning an error is the whole fix, and it is made HERE rather than
+		// in a new guard because this is the authority that decides whether an
+		// event was evaluated. The command routes every error through the fault
+		// path, so this route now receives what every other unevaluated event
+		// receives: this harness's continue bytes, a stderr diagnostic, a fault
+		// record line, and the fail-closed opt-in.
+		return backend.HostResponse{}, unbindableCaptureError(dispatch, event, in, capture)
 	}
 	// Valid captures converge on the shared delivery commit tail with the raw
 	// surface (URD R4.2), so the verification sequence cannot drift between
@@ -447,6 +473,107 @@ func activationFor(kind model.ContractEventKind, entries []activation.Entry) (ac
 		}
 	}
 	return activation.Entry{}, false
+}
+
+// captureDispositionReasons renders a non-valid capture disposition as the
+// reason an operator can act on. The disposition is a closed enum in the model
+// package and carries no words of its own; these are the words, kept beside the
+// one place that has to explain the classification to a person.
+var captureDispositionReasons = map[model.CaptureDisposition]string{
+	model.CaptureMalformed:        "the payload is not well-formed JSON",
+	model.CaptureDuplicateField:   "the payload repeats a field, so which value was meant cannot be decided",
+	model.CaptureInvalidUTF8:      "the payload is not valid UTF-8",
+	model.CaptureTruncated:        "the payload ends part-way through",
+	model.CaptureOverLimit:        "the payload is larger than the bound ingress accepts",
+	model.CaptureUnsupportedSchema: "the payload does not carry the identity fields this event's registration declares, " +
+		"or carries them under different names",
+	model.CaptureEventMismatch: "the payload describes a different event from the one named on the command line",
+}
+
+// unbindableCaptureError says that an event WAS NOT EVALUATED, and says which
+// correlation identities could not be bound.
+//
+// IT NAMES THE IDENTITIES FROM THE GENERATED REGISTRATION and never from a list
+// written here, so the message cannot drift from the contract it describes: the
+// required identities of the event are what ingress had to bind, and whatever
+// is missing from the bindings the parser DID recover is what it could not.
+// A host that renames or drops a correlation field between versions lands here
+// by construction, which is why the message points at the host version too.
+func unbindableCaptureError(
+	dispatch lifecycleDispatch,
+	event registration.Event,
+	in HookLifecycleInput,
+	capture lifecycleCapture,
+) error {
+	bound := make(map[model.NativeBindingKind]bool, len(capture.delivery.Bindings))
+	for _, binding := range capture.delivery.Bindings {
+		bound[binding.Kind] = true
+	}
+	unbound := []string{}
+	for _, identity := range event.IdentityFields() {
+		if identity.Required && !bound[identity.Binding] {
+			unbound = append(unbound, identity.Binding.String())
+		}
+	}
+
+	missing := "no identity this event declares could be bound"
+	switch {
+	case len(unbound) == 1:
+		missing = fmt.Sprintf("the required %s identity could not be bound", unbound[0])
+	case len(unbound) > 1:
+		missing = fmt.Sprintf("the required %s identities could not be bound", strings.Join(unbound, ", "))
+	case len(event.IdentityFields()) == 0:
+		missing = "this event declares no identities, so the payload itself could not be classified"
+	}
+
+	reason, named := captureDispositionReasons[capture.disposition]
+	if !named {
+		reason = "the payload could not be classified, and the classification has no stated reason in this build"
+	}
+
+	why := fmt.Sprintf("%s, so %s", reason, missing)
+	// THIS CLAUSE SAID "No occurrence was recorded for this event" AND THAT WAS
+	// FALSE. Measured on the built binary: the delivery IS written to the
+	// lifecycle occurrence journal, carrying its refused disposition, and
+	// `hook lifecycle list` shows it with an empty interpreted set. What is
+	// absent is anything DERIVED from it, not the row itself. The words are
+	// chosen to reconcile with the generic fault sentence this message is
+	// wrapped in, which speaks of an occurrence not being recorded: they say
+	// where the evidence IS, so a reader meets a clarification and not a
+	// contradiction.
+	impact := "Nothing was derived from this delivery and no gate was consulted, so the event had no part in the " +
+		"host's answer; the delivery itself IS in the lifecycle occurrence journal, carrying the disposition that " +
+		"refused it and an empty interpreted set, which is where to look for it."
+	// THE FIX FOLLOWS THE DIAGNOSIS. A payload that names a DIFFERENT EVENT is
+	// not fixed by checking identity field names, and telling its reader to do
+	// that sends them to inspect fields that were never the problem. The
+	// registered coordinate is authoritative on purpose, so the actionable
+	// instruction is to make the payload's own claim agree with it.
+	fix := fmt.Sprintf("Check that the host payload carries the identity fields this build's %s registration declares "+
+		"for %q, under the names it expects, and that the host version on the command line (%q) is the version the host "+
+		"actually runs: a host that renames or drops a correlation field between versions arrives here.",
+		dispatch.name, event.NativeName, in.HostVersion)
+	if capture.disposition == model.CaptureEventMismatch {
+		fix = fmt.Sprintf("Invoke the hook with the event the payload actually describes, or send the payload for %q: "+
+			"the event named on the command line is authoritative, and a payload that declares a different one is "+
+			"refused rather than reinterpreted. Check too that the host version on the command line (%q) is the "+
+			"version the host actually runs, because the event a host reports can change between versions.",
+			event.NativeName, in.HostVersion)
+	}
+
+	// WHAT CARRIES THE WHOLE SENTENCE, and that is not redundancy. A
+	// StructuredError renders as "category: What" once it is WRAPPED, and this
+	// error is always wrapped — the command folds it into the fault cause. Only
+	// Report prints Why and Fix, and nothing on this path calls Report. So an
+	// operator reads What and nothing else, and the identity that could not be
+	// bound has to be in it or it does not reach them. Why, Impact and Fix stay
+	// populated for any caller that does render the full block.
+	return lifecycleError(
+		pasterrors.CategoryValidation,
+		fmt.Sprintf("The %s payload for event %q at host version %q could not be bound, so the event WAS NOT EVALUATED: "+
+			"%s. %s %s",
+			dispatch.name, event.NativeName, in.HostVersion, why, impact, fix),
+		why, impact, fix, nil)
 }
 
 func lifecycleError(category pasterrors.Category, what, why, impact, fix string, cause error) error {
