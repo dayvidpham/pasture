@@ -492,8 +492,9 @@ const faultRecordLossSuffix = "the fault below is reported on this stream only"
 // here is swallowed on purpose: the record is evidence for a maintainer, never
 // a condition of the host outcome. SWALLOWED IS NOT SILENT: every failing arm
 // tells the operator on standard error that this fault has no durable record,
-// and TestEveryFailingArmOfTheFaultWriterTellsTheOperator enumerates them so a
-// sixth arm cannot be added without one.
+// and TestEveryFailingArmOfTheFaultWriterTellsTheOperatorOnStandardError
+// enumerates them and reads the STREAM of each, so a sixth arm cannot be added
+// without a word, and no arm's word can move onto standard output.
 func recordLifecycleFault(
 	cmd *cobra.Command,
 	coords lifecycleCoordinates,
@@ -580,8 +581,8 @@ func recordLifecycleFault(
 		// cannot refuse those. It reports anyway, because its four siblings
 		// report and a silent return here is what made this writer an N-1
 		// sweep twice over. No value can drive this arm, so the enumeration
-		// test TestEveryFailingArmOfTheFaultWriterTellsTheOperator reads the
-		// function and requires every arm of it to speak.
+		// test TestEveryFailingArmOfTheFaultWriterTellsTheOperatorOnStandardError
+		// reads the function and requires every arm of it to speak, on stderr.
 		fmt.Fprintf(cmd.ErrOrStderr(),
 			"pasture hook lifecycle could not encode its fault record line: %v; this happened in "+
 				"recordLifecycleFault (cmd/pasture/hook_lifecycle.go) before anything was written "+
