@@ -832,9 +832,29 @@ func TestTheFaultTableIsDocumentedOnTheExitAuthorityItself(t *testing.T) {
 // The doc comment now POINTS at that section instead of restating it, and this
 // test pins both ends of the pointer, so neither can leave without the other.
 //
+// IT PASSED VACUOUSLY AT BOTH ENDS AND NOW DOES NOT.
+//
+//   - The section was sliced from its heading TO THE END OF FILE — line 208 of
+//     890 — so moving the trigger paragraph out of its section, to anywhere
+//     later in the document, stayed green. PLACEMENT is this test's whole
+//     claim, and placement is what it could not see. The slice is now bounded
+//     at the next heading.
+//   - The doc-comment end asserted only that the word "AGENTS.md" occurs. A
+//     SECOND, unrelated sentence of the same comment also names AGENTS.md, so
+//     deleting the pointer sentence stayed green too. The pointer is now
+//     matched as the whole phrase that makes it a pointer.
+//
+// It also pins ITS OWN NAME, which two shipped documents cite: AGENTS.md tells
+// a maintainer that this test holds the pointer, and the doc comment of
+// Fault.UnusableInputs names it as well. Renaming the test used to leave both
+// documents citing a test that does not exist, with this package, the guard and
+// cmd/pasture all green. t.Name() is read at run time, so the citation cannot
+// survive a rename.
+//
 // MUTATION: delete the "de facto schema" paragraph from the AGENTS.md section,
-// or drop the "AGENTS.md" pointer from the UnusableInputs doc comment. This test
-// turns RED.
+// or drop the pointer sentence from the UnusableInputs doc comment, or move the
+// trigger paragraph out of its AGENTS.md section, or rename this test. This
+// test turns RED on each.
 func TestTheUnusableInputTriggerIsWrittenWhereAParserAuthorMeetsIt(t *testing.T) {
 	t.Parallel()
 
@@ -844,24 +864,78 @@ func TestTheUnusableInputTriggerIsWrittenWhereAParserAuthorMeetsIt(t *testing.T)
 	require.NoError(t, err, "read AGENTS.md, which is where the revisit trigger is written")
 	agents := string(raw)
 
-	require.Contains(t, agents, "### The lifecycle fault record",
+	const heading = "### The lifecycle fault record"
+	require.Contains(t, agents, heading,
 		"the doc comment of Fault.UnusableInputs sends a parser author to this section by name; "+
 			"renaming or removing it leaves that pointer dangling")
 
-	section := agents[strings.Index(agents, "### The lifecycle fault record"):]
+	section := markdownSection(t, agents, heading)
+	require.NotEqual(t, agents[strings.Index(agents, heading):], section,
+		"the section must END at the next heading; sliced to the end of the file it accepts the "+
+			"trigger written anywhere below, and placement is the whole of this test's claim")
+
 	for phrase, why := range map[string]string{
 		"`unusableFaultInputs` MEMBER IS ENGLISH, NOT A STABLE KEY": "the section must still say what the member is, or the trigger below it has no subject",
 		"must not key on them": "the refusal is the whole instruction to a parser author, and it is written only here",
 		"typed member":         "the trigger is the promotion to a typed member; without it the section states a limitation and no way out",
 	} {
-		assert.Contains(t, section, phrase, why)
+		assert.Contains(t, section, phrase,
+			"%s; the phrase must stand INSIDE the \"lifecycle fault record\" section, because a "+
+				"parser author opens that section and reads no further", why)
 	}
 
 	comment := declaredDoc(t, "Fault.UnusableInputs")
-	assert.Contains(t, comment, "AGENTS.md",
-		"the doc comment must POINT at the section rather than restate it, or the duplication "+
-			"this test removed returns")
+	assert.Contains(t, comment, `"The lifecycle fault record" section of AGENTS.md`,
+		"the doc comment must POINT at the section by NAME rather than restate it. Matching the "+
+			"bare word \"AGENTS.md\" was vacuous: a second, unrelated sentence of this comment "+
+			"names the file too, so the pointer sentence could be deleted with nothing noticing")
 	assert.NotContains(t, comment, "de facto schema",
 		"the restatement was deleted on purpose; two copies of one trigger drift, and only one "+
 			"of them is where its reader looks")
+
+	// Both documents CITE this test by name. An identifier written into a
+	// document and held by nothing is a citation of something that may not
+	// exist; renaming the test left both of them stale and every package green.
+	for where, text := range map[string]string{
+		"AGENTS.md":                            section,
+		"the Fault.UnusableInputs doc comment": comment,
+	} {
+		assert.Contains(t, text, t.Name(),
+			"%s names the test that holds the pointer shut, and this run is that test; a citation "+
+				"of a test that does not exist sends a maintainer looking for a guard that is "+
+				"not there", where)
+	}
+}
+
+// markdownSection returns the text of one heading's section: from the heading
+// itself up to the next heading of the SAME OR A HIGHER level, or the end of the
+// document when it is the last one.
+//
+// It exists because the assertion above is about PLACEMENT. A slice that runs to
+// the end of the file is satisfied by the same phrase written anywhere below the
+// heading, which is exactly the mutation the guard has to catch.
+func markdownSection(t *testing.T, document, heading string) string {
+	t.Helper()
+
+	start := strings.Index(document, heading)
+	require.NotEqual(t, -1, start, "the document must contain %q", heading)
+
+	level := len(heading) - len(strings.TrimLeft(heading, "#"))
+	rest := document[start+len(heading):]
+
+	end := len(rest)
+	for offset := 0; offset < len(rest); {
+		next := strings.Index(rest[offset:], "\n#")
+		if next == -1 {
+			break
+		}
+		at := offset + next + 1
+		candidate := rest[at:]
+		if depth := len(candidate) - len(strings.TrimLeft(candidate, "#")); depth <= level {
+			end = at
+			break
+		}
+		offset = at + 1
+	}
+	return heading + rest[:end]
 }

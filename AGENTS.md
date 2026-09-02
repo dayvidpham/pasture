@@ -214,6 +214,20 @@ database and not inside it because the commonest fault is that the database
 could not be opened, and evidence that needs the failing store is lost exactly
 when it is wanted.
 
+THE LINE IS NOT ALWAYS WRITTEN, and the promise above holds only for a store
+path the record can sit beside. On the default path it always can. It cannot
+when the resolved store path names no directory (`--db pasture.db`, or
+`PASTURE_DB_PATH=pasture.db` with no flag), and it cannot when that directory
+cannot be created (a parent that is a file). On those routes there is NO record
+for that fault anywhere. Every one of those arms now says so on standard error,
+which is the only channel left to it — and it is a channel the reader of this
+paragraph usually does not have, because a fail-open fault exits 0 and most
+hosts do not show the standard error of an exit-0 hook. So the honest statement
+is this: on a store path whose directory does not exist and cannot be made, a
+fault leaves no durable evidence, and the operator learns it only if the host
+shows the hook's standard error. Give `--db`, or `PASTURE_DB_PATH`, a path whose
+directory exists or can be created, and the record returns.
+
 A LINE'S `unusableFaultInputs` MEMBER IS ENGLISH, NOT A STABLE KEY. It is an
 empty array on every fault pasture could classify, and on the one arm it could
 not it carries a sentence per unusable input, worded for a person reading the
@@ -225,7 +239,8 @@ explanation from describing different things. This paragraph is the ONLY place
 the trigger is written; the doc comment of `hostexit.Fault.UnusableInputs`
 points here rather than restating it, and
 `TestTheUnusableInputTriggerIsWrittenWhereAParserAuthorMeetsIt` fails if either
-end of that pointer is removed.
+end of that pointer is removed, if this paragraph is moved OUT of this section,
+or if that test is renamed while these two documents go on citing it.
 
 THE FILE HAS NO RETENTION. One line of roughly 500 bytes is appended per
 faulting invocation; nothing rotates, trims or removes a line, and no command
