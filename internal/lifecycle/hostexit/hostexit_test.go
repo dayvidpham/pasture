@@ -669,10 +669,14 @@ func assertActionable(t *testing.T, stderr string, cause error) {
 	assert.Contains(t, stderr, cause.Error(),
 		"the cause names the event and the failing step, so it must survive verbatim")
 
-	for _, internal := range []string{"SLICE-", "PROPOSAL-", "aura-plugins-"} {
-		assert.NotContains(t, stderr, internal,
-			"host-visible text must not carry an internal process reference")
-	}
+	// THE FORBIDDEN POPULATION IS DERIVED FROM THE RULE THAT DEFINES IT.
+	//
+	// This read THREE LITERALS while its sentence spoke of "an internal process
+	// reference" — the whole class. Four other forms the rule spells were green
+	// in three packages. Widening the literal list would have been the move
+	// that has now failed three times, so the forms are read out of AGENTS.md
+	// instead, and an exemplar this guard cannot expand fails it by name.
+	assertNoInternalReference(t, "the fault diagnostic", stderr)
 }
 
 // TestExitStatusCodesAreTheHostContract pins the three process exit codes. The
@@ -1193,48 +1197,62 @@ func durableStateSentences() map[hostexit.FaultStage]string {
 func TestEveryFaultStageRendersItsOwnDurableStateOnEveryArm(t *testing.T) {
 	t.Parallel()
 
-	// EACH STAGE DECLARES ONLY WHAT IT MUST SAY. What it must NOT say is
-	// DERIVED — it is every other stage's sentence — because the forbidden
-	// lists were written out and therefore could not grow: a fourth stage's
-	// sentence leaking into an arm passed, since no list mentioned it. The
-	// asked set was already derived from IsValid; the forbidden set is the same
-	// question one level down, and it had the same answer missing.
+	// Each stage's own sentence, read from the one table that holds them.
 	says := durableStateSentences()
-	forbids := func(stage hostexit.FaultStage) []string {
-		other := []string{}
-		for candidate, sentence := range says {
-			if candidate != stage {
-				other = append(other, sentence)
-			}
-		}
-		sort.Strings(other)
-		return other
-	}
-	stages := map[hostexit.FaultStage]struct {
-		Says    string
-		Forbids []string
-	}{}
+	// THE FORBIDDEN SET IS GONE, NOT LEFT BESIDE A COMMENT THAT DESCRIBES IT AS
+	// LIVE. Equality over the whole impact clause replaced it and made it dead
+	// code; a dead rule described as living is worse than no rule, because the
+	// next reader budgets for a guard that is not running.
+	stages := map[hostexit.FaultStage]struct{ Says string }{}
 	for stage, sentence := range says {
-		stages[stage] = struct {
-			Says    string
-			Forbids []string
-		}{Says: sentence, Forbids: forbids(stage)}
+		stages[stage] = struct{ Says string }{Says: sentence}
 	}
 
 	// The arms of the impact switch a caller can reach, named by what selects
 	// them. The blocking arm is excluded on purpose and pinned below: it speaks
 	// of a refusal and makes no durable-state claim at all.
+	// THE ARMS ARE DERIVED, AND THEY WERE FOUR HAND-LISTED PAIRS.
+	//
+	// The stages were derived from IsValid and the arms were not, so the sweep
+	// covered TWO of six failure modes. A fault keyed on observe-only — the
+	// declared mode of thirty-plus committed OpenCode rows — rendered "durable
+	// state recorded" beside "no occurrence was recorded for it" with the whole
+	// tree green, which is the exact contradiction the assertion two lines
+	// below exists to refuse.
+	//
+	// Both axes of the switch are enumerated from their own types now: every
+	// declared failure mode against every declared fault policy. What that does
+	// NOT vary is the DeclaredMode, held equal to the effective mode, because
+	// the evidence rule that separates them is pinned by its own tests and
+	// varying it here would multiply the table without adding an arm.
 	arms := []struct {
 		Name     string
 		Mode     pastureruntime.FailureMode
 		Declared pastureruntime.FailureMode
 		Policy   hostexit.FaultPolicy
-	}{
-		{Name: "mode report-and-continue, fail-open", Mode: pastureruntime.FailureReportAndContinue, Declared: pastureruntime.FailureReportAndContinue, Policy: hostexit.FaultFailOpen},
-		{Name: "mode report-and-continue, fail-closed with no exit-code channel", Mode: pastureruntime.FailureReportAndContinue, Declared: pastureruntime.FailureReportAndContinue, Policy: hostexit.FaultFailClosed},
-		{Name: "mode throw-fail-fast, fail-closed", Mode: pastureruntime.FailureThrowFailFast, Declared: pastureruntime.FailureThrowFailFast, Policy: hostexit.FaultFailClosed},
-		{Name: "mode throw-fail-fast, fail-open", Mode: pastureruntime.FailureThrowFailFast, Declared: pastureruntime.FailureThrowFailFast, Policy: hostexit.FaultFailOpen},
+	}{}
+	for _, mode := range allFailureModes() {
+		for candidate := 1; candidate < declaredScanBound; candidate++ {
+			policy := hostexit.FaultPolicy(candidate)
+			if !policy.IsValid() {
+				continue
+			}
+			arms = append(arms, struct {
+				Name     string
+				Mode     pastureruntime.FailureMode
+				Declared pastureruntime.FailureMode
+				Policy   hostexit.FaultPolicy
+			}{
+				Name:     "mode " + mode.String() + ", " + policy.String(),
+				Mode:     mode,
+				Declared: mode,
+				Policy:   policy,
+			})
+		}
 	}
+	require.NotEmpty(t, arms,
+		"the arms must be derived from the declared modes and policies; an empty set would make "+
+			"every pair below vacuous, which is the failure this derivation replaces")
 
 	// THE TABLE MUST COVER EVERY DECLARED STAGE, and this check was missing from
 	// the first version of this sweep — a sweep with an N-1 hole of exactly the
@@ -1418,4 +1436,136 @@ func TestTheEvidenceWordAgreesWithTheEvidenceAndWithTheAdviceBesideIt(t *testing
 	assert.Contains(t, absent.Stderr, "carries no host evidence for it",
 		"and the advice must agree with the word: this row continued BECAUSE it has no citation, "+
 			"and that is the one action its operator has")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INTERNAL-REFERENCE RECOGNITION, DERIVED FROM THE RULE THAT FORBIDS THEM
+// ─────────────────────────────────────────────────────────────────────────────
+
+// internalReferenceRuleHeading opens the AGENTS.md block that DEFINES which
+// identifiers may never reach a shipped artefact. The population below is read
+// out of that block, so this guard and the rule cannot drift apart.
+const internalReferenceRuleHeading = "## References & Internal Identifiers"
+
+// internalReferenceForms maps each exemplar the rule spells in backticks to the
+// pattern that recognises its FAMILY.
+//
+// THE POPULATION IS DERIVED; THE TRANSLATION IS NOT, AND THAT IS THE STATED
+// LIMIT. Which forms exist is read from AGENTS.md at run time, so a form added
+// to the rule cannot be silently missed — an exemplar with no entry here fails
+// the guard by name rather than passing unseen. What is hand-written is the
+// regex each exemplar expands to, because "D5" cannot be turned into "any
+// decision code" by machinery without also matching every other two-character
+// token in the language.
+//
+// An exemplar mapped to an EMPTY pattern is one this guard deliberately does not
+// recognise, with the reason beside it. That is the honest half of the rule: a
+// narrow guard that says so beats a wide one that does not hold.
+var internalReferenceForms = map[string]string{
+	// Beads task identifiers. The project prefix is part of the shipped
+	// module path, so the family is recognisable without naming this project.
+	"<project>-xxxxx": `\b[a-z][a-z0-9]*(-[a-z0-9]+)+-[a-z0-9]{5}\b`,
+	"beads://…":       `beads://`,
+	// Protocol process artefacts.
+	"p3-propose":  `\bp\d+-[a-z][a-z-]*\b`,
+	"s10-review":  `\bs\d+-[a-z][a-z-]*\b`,
+	"PROPOSAL-N":  `\bPROPOSAL-\w+`,
+	"URD":         `\bURD\b`,
+	"URE":         `\bURE\b`,
+	"SLICE-N":     `\bSLICE-?\w*`,
+	"RATIFIED":    `\bRATIFIED\b`,
+	"§7.1":        `§\s*\d`,
+	"BLOCKER B3":  `\bBLOCKER\b`,
+	"Scenario 14": `\bScenario \d+\b`,
+	"D5":          `\bD\d{1,2}\b`,
+	"R13":         `\bR\d{1,2}\b`,
+}
+
+// internalReferenceExemplars reads the rule block out of AGENTS.md and returns
+// every backticked exemplar the two numbered items spell.
+func internalReferenceExemplars(t *testing.T) []string {
+	t.Helper()
+
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	require.NoError(t, err, "resolve the repository root")
+	raw, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	require.NoError(t, err, "read AGENTS.md, which is where the rule this guard enforces is written")
+
+	document := string(raw)
+	start := strings.Index(document, internalReferenceRuleHeading)
+	require.NotEqual(t, -1, start,
+		"AGENTS.md must still carry the %q section; this guard reads its population out of that "+
+			"section and would recognise NOTHING without it", internalReferenceRuleHeading)
+	// THE TWO NUMBERED RULE ITEMS, and not the whole section. The paragraphs
+	// around them backtick other things — the CLI fields the rule TARGETS, and
+	// the durable references it RECOMMENDS — and reading those as forbidden
+	// forms would make this guard refuse the words "Use" and "Where".
+	block := document[start:]
+	const opens = "**Rule — do NOT place"
+	require.Contains(t, block, opens,
+		"the section must still state its rule; this guard reads the forbidden forms out of the "+
+			"two numbered items beneath it")
+	block = block[strings.Index(block, opens):]
+	if ends := strings.Index(block, "\nThe rule targets"); ends != -1 {
+		block = block[:ends]
+	}
+
+	exemplars := []string{}
+	seen := map[string]bool{}
+	for _, match := range regexp.MustCompile("`([^`\n]+)`").FindAllStringSubmatch(block, -1) {
+		token := match[1]
+		if seen[token] {
+			continue
+		}
+		seen[token] = true
+		exemplars = append(exemplars, token)
+	}
+	require.NotEmpty(t, exemplars,
+		"the rule block must still spell its exemplars in backticks; finding none means this "+
+			"guard recognises nothing and every assertion resting on it passes vacuously")
+	return exemplars
+}
+
+// internalReferencePatterns returns the patterns that recognise a forbidden
+// reference, and REFUSES any exemplar the rule spells that it cannot expand.
+func internalReferencePatterns(t *testing.T) []*regexp.Regexp {
+	t.Helper()
+
+	patterns := []*regexp.Regexp{}
+	unknown := []string{}
+	for _, exemplar := range internalReferenceExemplars(t) {
+		expression, known := internalReferenceForms[exemplar]
+		if !known {
+			unknown = append(unknown, exemplar)
+			continue
+		}
+		if expression == "" {
+			continue
+		}
+		patterns = append(patterns, regexp.MustCompile(expression))
+	}
+	sort.Strings(unknown)
+	require.Empty(t, unknown,
+		"AGENTS.md spells these forbidden forms and this guard cannot recognise them: %v. The "+
+			"POPULATION is read from the rule so a new form cannot be missed in silence; give each "+
+			"one a pattern, or map it to the empty string with the reason it is deliberately not "+
+			"recognised", unknown)
+	require.NotEmpty(t, patterns,
+		"the guard must recognise at least one form, or every text passes it")
+	return patterns
+}
+
+// assertNoInternalReference requires host-visible text to carry none of them.
+//
+// WHAT IT VISITS: the string handed to it, against every pattern derived above.
+// WHAT IT DOES NOT: it cannot see text this test never renders, and it judges
+// the FORMS the rule spells rather than the intent behind a word.
+func assertNoInternalReference(t *testing.T, where, text string) {
+	t.Helper()
+	for _, pattern := range internalReferencePatterns(t) {
+		assert.NotRegexp(t, pattern, text,
+			"%s carries an internal process reference matching %s. These identifiers are "+
+				"meaningless to the person reading them and they rot as tasks close and proposals "+
+				"are superseded; cite a durable file path or nothing at all", where, pattern)
+	}
 }

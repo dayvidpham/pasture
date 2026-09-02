@@ -4551,6 +4551,42 @@ func TestTheDurableRegionBeginsAtItsWrites(t *testing.T) {
 
 	// A statement ATTEMPTS A WRITE when it calls the receipt service or the
 	// shared commit tail. Nothing else in this function can leave a row.
+	// EVERY NAME THAT HOLDS THE RECEIPT SERVICE, derived by following the
+	// assignments rather than by trusting one spelling. It starts at whatever
+	// the constructor returns and grows by transitive rebinding, so a service
+	// passed on under another name is still the service.
+	serviceNames := map[string]bool{}
+	for changed := true; changed; {
+		changed = false
+		ast.Inspect(handler, func(node ast.Node) bool {
+			assign, isAssign := node.(*ast.AssignStmt)
+			if !isAssign || len(assign.Rhs) != 1 || len(assign.Lhs) == 0 {
+				return true
+			}
+			source := sourceOf(assign.Rhs[0])
+			holds := strings.Contains(source, "NewLifecycleReceiptService")
+			if name, isIdentifier := assign.Rhs[0].(*ast.Ident); isIdentifier && serviceNames[name.Name] {
+				holds = true
+			}
+			if !holds {
+				return true
+			}
+			// THE FIRST RESULT ONLY. The constructor returns (Service, error),
+			// and taking every name on the left made "err" a service — after
+			// which every fmt.Errorf carrying it counted as a write. The
+			// service is the value; the error beside it is not.
+			name, isIdentifier := assign.Lhs[0].(*ast.Ident)
+			if isIdentifier && name.Name != "_" && !serviceNames[name.Name] {
+				serviceNames[name.Name] = true
+				changed = true
+			}
+			return true
+		})
+	}
+	require.NotEmpty(t, serviceNames,
+		"this handler must still construct a receipt service; finding no name that holds one means "+
+			"the writer population below is empty and every assertion passes vacuously")
+
 	attemptsWrite := func(statement ast.Stmt) bool {
 		found := false
 		ast.Inspect(statement, func(node ast.Node) bool {
@@ -4584,13 +4620,18 @@ func TestTheDurableRegionBeginsAtItsWrites(t *testing.T) {
 				sourceOf(call.Fun) == "deliveryCommit" {
 				found = true
 			}
+			// THE SERVICE BY IDENTITY, NOT BY ITS FOUR-LETTER SPELLING. The
+			// reader matched the name "service", so `svc := service` followed
+			// by an unmarked write through svc was green — and a rebound
+			// service IS the service in hand. serviceNames below derives every
+			// name that holds it.
 			for _, argument := range call.Args {
-				if name, isIdentifier := argument.(*ast.Ident); isIdentifier && name.Name == "service" {
+				if name, isIdentifier := argument.(*ast.Ident); isIdentifier && serviceNames[name.Name] {
 					found = true
 				}
 			}
 			if selector, isSelector := call.Fun.(*ast.SelectorExpr); isSelector {
-				if receiver, isIdentifier := selector.X.(*ast.Ident); isIdentifier && receiver.Name == "service" {
+				if receiver, isIdentifier := selector.X.(*ast.Ident); isIdentifier && serviceNames[receiver.Name] {
 					found = true
 				}
 			}
@@ -4656,15 +4697,20 @@ func TestTheDurableRegionBeginsAtItsWrites(t *testing.T) {
 				walk(nested.Body)
 			case *ast.LabeledStmt:
 				walk([]ast.Stmt{nested.Stmt})
-			case *ast.DeferStmt:
-				if closure, isClosure := nested.Call.Fun.(*ast.FuncLit); isClosure {
-					walk(closure.Body.List)
-				}
-			case *ast.GoStmt:
-				if closure, isClosure := nested.Call.Fun.(*ast.FuncLit); isClosure {
-					walk(closure.Body.List)
-				}
 			}
+			// ANY FUNCTION LITERAL, wherever it stands. The walk opened defer
+			// and go closures BY NAME while its sentence claimed every list a
+			// statement can hold, so an immediately-invoked literal holding an
+			// unmarked write was green. A literal is a statement list whoever
+			// wrote it, and this finds them at this level without descending
+			// into the nested blocks the switch above already visits.
+			ast.Inspect(statement, func(node ast.Node) bool {
+				if literal, isLiteral := node.(*ast.FuncLit); isLiteral {
+					walk(literal.Body.List)
+					return false
+				}
+				return true
+			})
 		}
 	}
 	walk(handler.Body.List)
@@ -4681,4 +4727,308 @@ func TestTheDurableRegionBeginsAtItsWrites(t *testing.T) {
 			"writes nothing — the open, the service construction, the gate — hands every refusal "+
 			"after it a claim too strong to support, which is exactly what sent an operator to the "+
 			"occurrence journal of a database that could not be opened")
+}
+
+// TestAnEmptyStandardInputNamesTheRealCondition drives a zero-length payload on
+// every harness this build supports.
+//
+// WHAT THE OPERATOR USED TO READ: "storage error: The lifecycle payload blob
+// could not be stored. Cause: constraint failed: NOT NULL constraint failed:
+// lifecycle_payload_blobs.body (1299)". A storage fault naming a column and an
+// SQLite error number, for a condition that is neither storage nor a fault of
+// the store — the host simply sent nothing. The read succeeded, so the
+// read-failure arm did not fire; the length was under the bound, so the
+// over-limit arm did not either; and the empty slice travelled to the blob
+// writer, where a nil body binds as NULL against a NOT NULL column.
+//
+// IT IS THE NIL-VERSUS-EMPTY CLASS AGAIN. An absent value and a present empty
+// one are different facts, and the layer that could not tell them apart was the
+// one that reported.
+//
+// THE HARNESSES ARE DERIVED from the registry the command dispatches on, so a
+// harness added to the product is driven here without anyone remembering to add
+// it.
+//
+// MUTATION: delete the zero-length arm from hookLifecycle. Every subtest turns
+// RED on the condition assertion, and the operator gets the column name back.
+func TestAnEmptyStandardInputNamesTheRealCondition(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "lifecycle-cli")
+	buildLifecycleBinary(t, binary)
+
+	harnesses := handlers.LifecycleHarnessCoordinates()
+	require.NotEmpty(t, harnesses,
+		"the harness set is derived from the command's own registry; an empty one would make every "+
+			"subtest below vacuous")
+
+	for _, row := range harnesses {
+		t.Run(row.Harness, func(t *testing.T) {
+			store := t.TempDir()
+			database := filepath.Join(store, "pasture.db")
+			initializeLifecycleTestDatabase(t, database)
+
+			run := runLifecycleHookOn(t, binary, database,
+				row.Harness, row.Event, row.HostVersion, nil)
+
+			require.Equal(t, 0, run.ExitCode,
+				"an empty payload is a fail-open refusal: the host carries on.\nstderr: %s", run.Stderr)
+
+			// C-ASSERT-CONTENT-NOT-PRESENCE: what it SAYS, not that it exists.
+			assert.Contains(t, run.Stderr, "The host sent no payload: standard input carried zero bytes.",
+				"the diagnostic must name the condition that actually occurred")
+			assert.Contains(t, run.Stderr, "writing the event payload to the hook's standard input",
+				"and it must tell the reader where to look: a hook wired without its input "+
+					"redirected is the ordinary cause, and no column name points at that")
+			assert.NotContains(t, run.Stderr, "NOT NULL constraint failed",
+				"an empty stream is not a storage fault, and a column name is not an instruction")
+			assert.NotContains(t, run.Stderr, "lifecycle_payload_blobs",
+				"nor may a schema table reach the person running a hook")
+			assert.Contains(t, run.Stderr, "durable state not-recorded",
+				"nothing was parsed and no store was opened, so no row can exist")
+		})
+	}
+}
+
+// TestTheWarrantRefusalCarriesItsOwnEvidence pins the wrap the previous round
+// added and nothing held.
+//
+// REVERTING IT LEFT THREE PACKAGES ENTIRELY GREEN, and a guard in this file
+// CITED that unheld property as its reason for not reading the shared commit
+// tail. A reason resting on an unpinned property is the shape this slice has
+// met before: the conclusion was right and the warrant for it was missing.
+//
+// The refusal is raised inside the commit tail, past the caller's marker and
+// before any write, so without its own wrap the same gate refusal answers
+// "not-recorded" on the invalid-capture arm and "MAY OR MAY NOT exist" here.
+// This reads the source because no host payload drives a warrant refusal: the
+// contract is derived from the delivery the parser produced, so a payload that
+// reaches this point has already produced a legal one. THAT IS THE LIMIT, and
+// it is why this is structural rather than behavioural.
+//
+// MUTATION: drop the ErrLifecycleBeforeDurableWrite wrap from the warrant
+// refusal. This test turns RED.
+func TestTheWarrantRefusalCarriesItsOwnEvidence(t *testing.T) {
+	t.Parallel()
+
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err, "resolve the repository root from cmd/pasture")
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet,
+		filepath.Join(root, "internal", "handlers", "hook_lifecycle.go"), nil, 0)
+	require.NoError(t, err, "the handler source must be readable")
+
+	var tail *ast.FuncDecl
+	for _, node := range file.Decls {
+		function, isFunction := node.(*ast.FuncDecl)
+		if isFunction && function.Name.Name == "deliveryCommit" {
+			tail = function
+			break
+		}
+	}
+	require.NotNil(t, tail, "deliveryCommit must exist: it is where the warrant refusal is raised")
+
+	var warrantArm *ast.IfStmt
+	for index, statement := range tail.Body.List {
+		if assign, isAssign := statement.(*ast.AssignStmt); isAssign &&
+			strings.Contains(sourceOf(assign.Rhs[0]), "deliveryWarrant(") {
+			require.Greater(t, len(tail.Body.List), index+1,
+				"the warrant call must still be followed by its refusal arm")
+			arm, isIf := tail.Body.List[index+1].(*ast.IfStmt)
+			require.True(t, isIf, "the statement after the warrant call must be its refusal arm")
+			warrantArm = arm
+			break
+		}
+	}
+	require.NotNil(t, warrantArm,
+		"deliveryCommit must still derive a warrant and refuse on it; finding neither means this "+
+			"guard reads nothing and passes vacuously")
+
+	returned := ""
+	ast.Inspect(warrantArm, func(node ast.Node) bool {
+		if statement, isReturn := node.(*ast.ReturnStmt); isReturn && len(statement.Results) == 2 {
+			returned = sourceOf(statement.Results[1])
+		}
+		return true
+	})
+	assert.Contains(t, returned, "ErrLifecycleBeforeDurableWrite",
+		"the warrant refusal is raised BEFORE any write and PAST the caller's marker, so it must "+
+			"carry its own evidence. Without it the same gate refusal tells one operator no row "+
+			"exists and another that theirs may or may not — decided by which arm reached it, "+
+			"which is not a fact about their invocation. Found: %q", returned)
+}
+
+// guardSweepSubjects are the test files THIS SLICE OWNS in this package. The
+// sweep below reads these and no others, because a guard it flags is a guard
+// somebody must be able to change, and reaching into another slice's file is
+// how ownership statements stop meaning anything.
+var guardSweepSubjects = []string{
+	"hook_lifecycle_failuremode_test.go",
+	"hook_lifecycle_production_test.go",
+}
+
+// guardReachClaims are the phrases a guard's own doc uses to claim it reads a
+// WHOLE CLASS. They are the vocabulary this slice has repeatedly used while
+// reading a list.
+var guardReachClaims = []string{
+	"every ", "each ", "any ", "all ", "no other", "whatever ", "wherever ",
+}
+
+// guardReachDisclaimers are the phrases that discharge such a claim by stating
+// what the guard actually visits, or where it stops.
+var guardReachDisclaimers = []string{
+	"what it visits", "what it does not", "does not read", "does not cover",
+	"the limit", "limit, stated", "stated limit", "cannot reach", "narrow",
+	"derived", "derives", "population",
+}
+
+// rangesOverAConstantPopulation reports whether a function RANGES OVER a
+// literal collection of constants — the shape of a written-down population.
+//
+// THIS IS THE DEFECT'S SIGNATURE, not its vocabulary. A guard that derives its
+// population reads it from a predicate, a registry or a document and has no
+// such literal; a guard that widened a list has exactly one. Detecting the
+// SHAPE is what lets this sweep avoid being the thirteenth instance of the
+// class it looks for: it does not ask what a doc MEANS, it asks what the code
+// RANGES OVER.
+func rangesOverAConstantPopulation(function *ast.FuncDecl) bool {
+	found := false
+	ast.Inspect(function, func(node ast.Node) bool {
+		loop, isRange := node.(*ast.RangeStmt)
+		if !isRange {
+			return true
+		}
+		literal, isLiteral := loop.X.(*ast.CompositeLit)
+		if !isLiteral || len(literal.Elts) < 2 {
+			return true
+		}
+		constants := 0
+		for _, element := range literal.Elts {
+			if value, isBasic := element.(*ast.BasicLit); isBasic && value.Kind == token.STRING {
+				constants++
+			}
+		}
+		if constants == len(literal.Elts) {
+			found = true
+		}
+		return true
+	})
+	return found
+}
+
+// TestEveryGuardThatClaimsAClassSaysWhatItReads is the closing sweep the class
+// itself asked for: a structural check for the defect this slice has met
+// thirteen times — a rule described one level more general than it is written.
+//
+// WHAT IT VISITS: every test function in THE FILES THIS SLICE OWNS that BOTH
+// claims a class in its doc AND ranges over a literal collection of string
+// constants. That
+// pair is the defect's signature: a sentence about a class, standing over a
+// written-down list. It requires such a guard's doc to say what it reads or
+// where it stops.
+//
+// WHAT IT DOES NOT — AND THIS IS THE HONEST HALF, WITHOUT WHICH THIS SWEEP
+// WOULD BE THE THIRTEENTH INSTANCE:
+//   - It CANNOT decide whether a stated population is TRUE of the code. That is
+//     the reviewers' work, and comparing a sentence to a reader's reach needs
+//     the meaning of both.
+//   - THE SUBJECT IS THIS SLICE'S OWN FILES, and that bound is a fact about who
+//     may change what, not about where the defect lives. Running it over the
+//     whole package named FOUR guards in files this slice does not own —
+//     TestUnselectedCodexEventIsNotAdmittedByBuiltCLI,
+//     TestInvalidInvocationCreatesNoDatabaseFile,
+//     TestOrphanCountWordingSaysWhatItIsThatItIsExpectedAndWhatALargeNumberMeans
+//     and TestCLI_QueueConcurrency_ReportsADatabaseWithNoQueues. They are
+//     reported to their owners rather than reached for. Widen guardSweepSubjects
+//     when this slice's owned set grows.
+//   - Guards in internal/lifecycle/hostexit and internal/handlers are not
+//     visited; their packages must ask this of themselves.
+//   - It finds a list ONLY where the list is written inline and ranged over. A
+//     population held in a package-level variable, built by appends, or spelled
+//     as a switch is invisible to it.
+//   - Its claim vocabulary is itself a list, which is the very move that failed
+//     three times. It is admissible only because it is not the whole rule: it
+//     narrows WHICH guards are asked, and the structural half above is what
+//     makes the asking worth anything.
+//
+// So this finds the SHAPE cheaply and never claims to find the class.
+func TestEveryGuardThatClaimsAClassSaysWhatItReads(t *testing.T) {
+	t.Parallel()
+
+	silent := []string{}
+	claiming := 0
+	for _, name := range guardSweepSubjects {
+		parsed, parseErr := parser.ParseFile(token.NewFileSet(), name, nil, parser.ParseComments)
+		require.NoError(t, parseErr, "every subject file must parse: %s", name)
+		entry := struct{ Name func() string }{Name: func() string { return name }}
+		for _, node := range parsed.Decls {
+			function, isFunction := node.(*ast.FuncDecl)
+			if !isFunction || !strings.HasPrefix(function.Name.Name, "Test") || function.Doc == nil {
+				continue
+			}
+			doc := strings.ToLower(function.Doc.Text())
+			claims := false
+			for _, phrase := range guardReachClaims {
+				if strings.Contains(doc, phrase) {
+					claims = true
+					break
+				}
+			}
+			if !claims {
+				continue
+			}
+			claiming++
+			if !rangesOverAConstantPopulation(function) {
+				continue
+			}
+			discharged := false
+			for _, phrase := range guardReachDisclaimers {
+				if strings.Contains(doc, phrase) {
+					discharged = true
+					break
+				}
+			}
+			if !discharged {
+				silent = append(silent, entry.Name()+": "+function.Name.Name)
+			}
+		}
+	}
+
+	// TWO VACUITY CHECKS, BECAUSE ZERO FLAGGED IS THE RIGHT ANSWER HERE AND MUST
+	// NOT BE INDISTINGUISHABLE FROM A DETECTOR THAT LOOKS AT NOTHING.
+	//
+	// The subject files currently contain NO guard with the defect's signature,
+	// which is the outcome this round worked for. So the sweep cannot prove
+	// itself by finding one. It proves itself in two other ways: the claim
+	// vocabulary must still match how guards here are written, and the
+	// structural half must still recognise the shape on an input built to have
+	// it.
+	require.NotZero(t, claiming,
+		"no guard in the subject files claims a class at all. Either they stopped making such "+
+			"claims, or the vocabulary above no longer matches how they are written — and in the "+
+			"second case this sweep is asking nothing of anybody")
+
+	control, controlErr := parser.ParseFile(token.NewFileSet(), "control.go", `package main
+func TestControl() {
+	for _, item := range []string{"one", "two"} {
+		_ = item
+	}
+}`, parser.ParseComments)
+	require.NoError(t, controlErr, "the negative control must parse")
+	controlFound := false
+	for _, node := range control.Decls {
+		if function, isFunction := node.(*ast.FuncDecl); isFunction {
+			controlFound = rangesOverAConstantPopulation(function)
+		}
+	}
+	require.True(t, controlFound,
+		"the structural half must still recognise a guard that RANGES OVER A WRITTEN-DOWN LIST. "+
+			"With no such guard in the subject files, this control is the only thing standing "+
+			"between a working detector and one that reports nothing because it sees nothing")
+	sort.Strings(silent)
+	assert.Empty(t, silent,
+		"these guards claim a CLASS in their doc and say nothing about the population they "+
+			"actually read. Three times running, the fix for that defect has contained it, because "+
+			"each fix was written the way the defect was. Either DERIVE the population from the "+
+			"same source the product derives it from, or STATE what the guard visits and what it "+
+			"does not — and never widen a list and call it a population")
 }

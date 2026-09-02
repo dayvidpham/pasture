@@ -1096,8 +1096,8 @@ func assertSharedOperation(t *testing.T, occurrence, interpreted provenance.Evid
 // --- activation-last integrated Codex production proof --------------------
 //
 // The committed Codex handler dispatch was default-off through implementation and
-// review (ratified proposal step 6, "activation last"): the two selected events
-// became enabled in the committed default only after M3 Implementation UAT. The
+// review ("activation last"): the two selected events
+// became enabled in the committed default only after acceptance review. The
 // proofs below exercise the enabled path NOW, on the real production handler
 // path, by injecting the committed activation catalog activation.Codex0_146_0()
 // through the sanctioned HookLifecycleInput.Activations pre-activation seam
@@ -1146,8 +1146,8 @@ var codexProductionFixtures = []codexProductionFixture{
 	},
 }
 
-// TestEnabledCodexHandlersToDurableReadBack is the M3-P1 (SessionStart ingress
-// smoke) and M3-P2 (PreToolUse gate) integrated production proof. For each
+// TestEnabledCodexHandlersToDurableReadBack is the SessionStart-ingress and
+// PreToolUse-gate integrated production proof. For each
 // authentic Codex 0.146.0 fixture it drives the real durable handler path with
 // the committed activation catalog injected, proves the durable receipt commits
 // before the native continuation bytes are available, and proves the persisted
@@ -1211,7 +1211,7 @@ func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
 	}
 }
 
-// TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts is the M3-P3
+// TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts is the
 // two-live-provider differential. It drives the authentic Codex PreToolUse gate
 // and the authentic OpenCode tool.execute.before gate through their real
 // production handler paths, then asserts their common Proceed gate semantics
@@ -1277,7 +1277,7 @@ func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
 	require.NotEqual(t, codexIdentities[runtime.IdentityToolCall], openCodeIdentities[runtime.IdentityToolCall], "tool-call identity values are provider-specific")
 }
 
-// TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated is the M3-P4
+// TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated is the
 // activation-isolation obligation at the committed-artifact layer. Codex now
 // publishes its OWN committed activation audit report at
 // .codex/pasture-codex-activation.json (Stage 1 #24, mirroring the Claude

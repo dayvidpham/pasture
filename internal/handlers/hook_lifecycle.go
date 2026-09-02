@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/dayvidpham/pasture/internal/acceptance/origin"
@@ -51,7 +52,7 @@ type HookLifecycleInput struct {
 	// event gate, overriding the statically dispatched per-harness manifest.
 	//
 	// Production callers (the CLI) leave this nil so the committed per-harness
-	// activation manifest governs admission. After M3 Implementation UAT the
+	// activation manifest governs admission. After acceptance review the
 	// Codex dispatch enables the accepted SessionStart and PreToolUse events via
 	// activation.Codex0_146_0(), exactly as the Claude and OpenCode cases do;
 	// the two selected events are admitted and every other Codex event stays
@@ -88,13 +89,13 @@ type lifecycleCapture struct {
 //     fallible, so the row stores the constructor func and hookLifecycle
 //     resolves it at dispatch time, preserving the wrapped error text verbatim.
 //   - encode is the per-target native emitter reached only through the registry
-//     row (D4), replacing the deleted nativeresponse.Encode harness switch.
+//     row, replacing the deleted nativeresponse.Encode harness switch.
 type lifecycleDispatch struct {
 	name        string
 	manifest    registration.Manifest
 	activations func() ([]activation.Entry, error)
 	parse       func([]byte, registration.Event, string) lifecycleCapture
-	// rawParse is the raw-ingestion classification row (M4, URD R4.2): the SAME
+	// rawParse is the raw-ingestion classification row: the SAME
 	// ingress Parse with an envelope pre-stamped with the raw origin and the
 	// resulting delivery origin stamped raw. It is a sibling, not a second
 	// pipeline: the raw hatch dispatches through the same row (same manifest,
@@ -116,7 +117,7 @@ type lifecycleDispatch struct {
 // the zero value is the documented default (the NATIVE sentinel
 // authentic-capture) for pre-origin callers, and omitted from serialized output
 // by the carrier's omitempty tag, satisfying the frozen golden native payload
-// pins. The raw path (M4) is the first producer to populate the origin carrier:
+// pins. The raw path is the first producer to populate the origin carrier:
 // it stamps OriginRaw on the envelope it passes to the per-harness ingress
 // parser and on the resulting delivery.
 var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
@@ -248,6 +249,38 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	if err != nil {
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, "The native payload could not be read.", "Standard input failed during the bounded read.", "No database was opened.", "Retry with a readable complete payload.", err)
 	}
+	// A ZERO-LENGTH PAYLOAD HAS ITS OWN ARM, AND IT HAD NONE.
+	//
+	// The read succeeds, so the arm above does not fire; the length is under
+	// the bound, so the arm below does not either. The empty slice then travels
+	// all the way to the blob writer, where a nil body binds as NULL against a
+	// NOT NULL column, and the operator is handed
+	// "constraint failed: NOT NULL constraint failed: lifecycle_payload_blobs.body (1299)"
+	// on all three harnesses — a storage fault naming a column, for a condition
+	// that is neither storage nor a fault of the store.
+	//
+	// It is the nil-versus-empty class again: an absent value and a present
+	// empty one are different facts, and a layer that cannot tell them apart
+	// reports the wrong one. The condition is known HERE, where the bytes were
+	// read and their count is in hand, so it is named here.
+	if len(raw) == 0 {
+		// WHAT CARRIES THE WHOLE SENTENCE, for the reason the sibling refusal
+		// records: a StructuredError renders as "category: What" once WRAPPED,
+		// and this error is always wrapped into the fault cause. Why and Fix
+		// reach nobody unless something calls Report, and nothing on this path
+		// does. They stay populated for a caller that renders the full block.
+		const emptyWhy = "A lifecycle event is evaluated from the payload the host writes to standard input, " +
+			"and this invocation received an empty stream rather than a malformed or partial one."
+		const emptyImpact = "Nothing was parsed and no database was opened, so no occurrence exists for " +
+			"this invocation."
+		const emptyFix = "Check that the host is writing the event payload to the hook's standard input: a " +
+			"hook wired without its input redirected, a wrapper that consumes stdin before pasture runs, " +
+			"or a manual invocation with no payload piped in all arrive here."
+		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation,
+			"The host sent no payload: standard input carried zero bytes. "+
+				emptyWhy+" "+emptyImpact+" "+emptyFix,
+			emptyWhy, emptyImpact, emptyFix, nil)
+	}
 	if len(raw) > model.MaxNativePayloadBytes {
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("The native payload exceeds the %d-byte bound.", model.MaxNativePayloadBytes), "Ingress never truncates retained evidence.", "No database was opened.", "Reduce the host payload below the static bound.", nil)
 	}
@@ -266,7 +299,7 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	}
 	// The native path is the only producer of the invalid-capture receipt row:
 	// it records the disposition evidence for a malformed host payload without
-	// the derived effects. Raw ingestion refuses outright instead (UAT Q1), so
+	// the derived effects. Raw ingestion refuses outright instead, so
 	// this write class exists only at the native surface. Every durable write
 	// presents the same origin-blind gate.Warrant as the shared commit tail.
 	if capture.disposition != model.CaptureValid {
@@ -311,7 +344,7 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 			ErrLifecycleDeliveryRefused, unbindableCaptureError(dispatch, event, in, capture))
 	}
 	// Valid captures converge on the shared delivery commit tail with the raw
-	// surface (URD R4.2), so the verification sequence cannot drift between
+	// surface, so the verification sequence cannot drift between
 	// the two handlers.
 	// A WRITE IS ATTEMPTED HERE. See durablePossible.
 	durablePossible = true
@@ -324,8 +357,7 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 }
 
 // deliveryCommit is the ONE verification-and-commit sequence shared by the
-// native and raw lifecycle surfaces (URD R4.2 "all flow into the same
-// pipeline"): deliveryWarrant (intent → legalize) → EnsureActiveMetamodel →
+// native and raw lifecycle surfaces — all flow into the same pipeline: deliveryWarrant (intent → legalize) → EnsureActiveMetamodel →
 // deliveryDerive (typed bind → NewEvent → Derive) → Receive. The ordering is
 // compatibility-sensitive: metamodel activation precedes derivation exactly
 // as it did before dry-run existed.
@@ -414,7 +446,7 @@ func deliveryDerive(dispatch lifecycleDispatch, event registration.Event, delive
 
 // withRawOrigin stamps the raw capture origin on BOTH the envelope carrier and
 // the delivery carrier of an already-classified native capture — the whole raw
-// stamping the shared pipeline applies (UAT Q2). The raw parsers are the only
+// stamping the shared pipeline applies. The raw parsers are the only
 // producers that populate the origin carrier; the native path stays at the
 // zero value so its golden payloads stay byte-identical.
 func withRawOrigin(capture lifecycleCapture) lifecycleCapture {
@@ -488,8 +520,17 @@ var ErrLifecycleCommittedWithoutContinuation = errors.New("the lifecycle receipt
 // wrong place, and one claiming the event was evaluated would be worse.
 var ErrLifecycleDeliveryRefused = errors.New("the lifecycle delivery was recorded but its capture could not be bound")
 
-// ErrLifecycleBeforeDurableWrite marks a fault raised before this handler ever
-// opened the store, so no row can exist for the invocation.
+// ErrLifecycleBeforeDurableWrite marks a fault raised before any WRITE was
+// attempted, so no row can exist for the invocation.
+//
+// IT IS THE WRITE AND NOT THE OPEN, and this doc said the open. That was the
+// first of three texts to define this sentinel that way and the only one left
+// uncorrected — and it is the EXPORTED doc, so it is what `go doc` prints and
+// the text the other two paraphrase. It had come to disagree with the error
+// string on the line below it, and it was false for five producers, one of them
+// added in the same round that corrected the other two. An open creates a file
+// and no occurrence; refusals between the open and the first write are inside
+// this sentinel's reach and outside any region the open would have described.
 //
 // IT IS THE EVIDENCE FOR A CLAIM THAT USED TO BE AN ASSUMPTION. Its caller's
 // stage table answered "no occurrence was recorded" for every error it did not
@@ -655,6 +696,46 @@ var captureDispositionAdviceByDisposition = map[model.CaptureDisposition]capture
 		// the coordinate rather than at a field.
 		NamesIdentities: false,
 	},
+}
+
+// LifecycleHarnessCoordinate names one harness this build dispatches on, with a
+// coordinate that reaches its ingress.
+type LifecycleHarnessCoordinate struct {
+	Harness     string
+	Event       string
+	HostVersion string
+}
+
+// LifecycleHarnessCoordinates derives the harness set from the SAME registry the
+// command dispatches on, so a test over "every harness" grows with the product
+// instead of with somebody's memory.
+func LifecycleHarnessCoordinates() []LifecycleHarnessCoordinate {
+	// AN ADMITTED EVENT, NOT THE FIRST ONE LISTED. The activation posture is
+	// resolved from the same generated proofs the command resolves it from,
+	// because a WITHHELD event refuses before the payload is ever read — a
+	// coordinate chosen without asking would drive a different arm on some
+	// harnesses and quietly prove nothing about this one.
+	coordinates := []LifecycleHarnessCoordinate{}
+	for harness, dispatch := range frontendRegistry {
+		activations, err := dispatch.activations()
+		if err != nil {
+			continue
+		}
+		for _, entry := range dispatch.manifest.Entries() {
+			state, found := activationFor(entry.Kind, activations)
+			if !found || state.State != activation.Enabled {
+				continue
+			}
+			coordinates = append(coordinates, LifecycleHarnessCoordinate{
+				Harness:     string(harness),
+				Event:       entry.NativeName,
+				HostVersion: dispatch.manifest.Version,
+			})
+			break
+		}
+	}
+	sort.Slice(coordinates, func(i, j int) bool { return coordinates[i].Harness < coordinates[j].Harness })
+	return coordinates
 }
 
 // CaptureDispositionAdvice exposes the disposition advice table so a test can
