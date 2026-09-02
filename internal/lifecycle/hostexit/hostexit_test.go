@@ -279,6 +279,10 @@ func TestAUsableFaultNamesNoUnusableInput(t *testing.T) {
 	require.True(t, ok, "this fault carries every input, so it must map")
 	assert.Empty(t, usable.UnusableInputs(),
 		"a fault that maps has no unusable input to name")
+	assert.NotNil(t, usable.UnusableInputs(),
+		"the empty result must be a NON-NIL slice: the caller writes it straight into a durable "+
+			"JSON record, where a nil slice becomes null and null cannot be told apart from a "+
+			"member the writer forgot")
 }
 
 // TestContinuationZeroValueIsUnusable pins the reason Continuation is a value

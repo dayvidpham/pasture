@@ -351,6 +351,14 @@ type Fault struct {
 // the order the members are declared. An empty result means ForFault can map
 // the fault.
 //
+// THE RESULT IS NEVER NIL. The empty result is an EMPTY SLICE, because the
+// caller writes it straight into a durable JSON record: a nil slice marshals to
+// `null` there, and `null` cannot be told apart from a member the writer
+// forgot, while `[]` says "asked, and nothing was unusable". That is the same
+// ambiguity recordedFailureMode exists to remove one member above it, and the
+// mappable arm is essentially every line that file will ever hold, because the
+// refusal arm is unreachable by construction.
+//
 // It exists so that a caller which meets the false result can SAY WHICH INPUT
 // WAS WRONG. Six separate conditions produce that result, and a message that
 // names one of them — or names the whole struct — sends the reader to the wrong
@@ -374,7 +382,7 @@ type Fault struct {
 // condition, because that adjacency is what stops the refusal and the
 // explanation from describing different things.
 func (f Fault) UnusableInputs() []string {
-	var unusable []string
+	unusable := []string{}
 	if !f.Mode.IsValid() {
 		unusable = append(unusable, "the effective failure mode is unset or not a known mode")
 	}

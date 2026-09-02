@@ -431,6 +431,23 @@ func recordedFailureMode(mode pastureruntime.FailureMode) string {
 	return mode.String()
 }
 
+// recordedCause renders the fault cause for the durable record.
+//
+// A NIL CAUSE IS ONE OF THE SIX INPUTS THAT MAKE A FAULT UNMAPPABLE, so it
+// reaches this writer on the one arm that exists to report exactly that. Calling
+// Error() on it panicked the writer BEFORE the composed diagnostic was emitted:
+// the top-level recover kept the hook failing open, so the user saw no harm, but
+// the operator got neither the list of unusable inputs nor a durable line — the
+// fault left no trace at all. The sentinel is written instead, and it cannot be
+// mistaken for the text of a real cause. The unusableFaultInputs member of the
+// same line names the nil cause in words.
+func recordedCause(cause error) string {
+	if cause == nil {
+		return "unset-or-missing"
+	}
+	return cause.Error()
+}
+
 // recordLifecycleFault appends one JSON line describing the fault. Every error
 // here is swallowed on purpose: the record is evidence for a maintainer, never
 // a condition of the host outcome.
@@ -469,11 +486,14 @@ func recordLifecycleFault(
 		// somebody supplies the host citation, the second never blocks.
 		"failureMode":         recordedFailureMode(failure.Mode),
 		"declaredFailureMode": recordedFailureMode(failure.DeclaredMode),
-		// unusableFaultInputs is empty on every fault the exit authority could
-		// map, and carries the refusal reasons on the one arm it could not.
-		// Without it the record of that arm wrote an empty mode and no reason,
-		// so the artefact that outlives the process could not say what stderr
-		// had just said.
+		// unusableFaultInputs is the EMPTY ARRAY [] on every fault the exit
+		// authority could map, and carries the refusal reasons on the one arm
+		// it could not. It is never null: UnusableInputs returns a non-nil
+		// slice for exactly this member, because null cannot be told apart from
+		// a member the writer forgot, which is the ambiguity recordedFailureMode
+		// exists to remove one member above. Without this member the record of
+		// the refusal arm wrote an empty mode and no reason, so the artefact
+		// that outlives the process could not say what stderr had just said.
 		"unusableFaultInputs": unusable,
 		"failureCitedBy":      failure.Evidence.Source,
 		"faultPolicy":         policy.String(),
@@ -484,7 +504,7 @@ func recordLifecycleFault(
 		// proceed is a byte shape, and a reader must be able to see that these
 		// bytes were emitted WITHOUT an evaluation.
 		"hostContinuation": string(outcome.Stdout),
-		"cause":            cause.Error(),
+		"cause":            recordedCause(cause),
 	})
 	if err != nil {
 		return

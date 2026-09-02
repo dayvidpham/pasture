@@ -1119,22 +1119,41 @@ func TestAFaultThatCannotBeClassifiedNamesEveryInputThatWasNotUsable(t *testing.
 // "this happened in lifecycleFault" is not an unusable input. Each item now
 // carries its ordinal and the list closes with a full stop.
 //
+// IT DRIVES THE DELIVERY, NOT THE COMPOSER. The earlier version handed a
+// zero-value fault straight to unclassifiableFaultDiagnostic, so it pinned a
+// shape lifecycleFault could not produce: the sixth unusable input is a NIL
+// CAUSE, and the record writer dereferenced it and panicked before the message
+// was ever emitted. A pin on the copy cannot see that. This goes through
+// lifecycleFault, so the widest list is pinned on the artefacts a caller
+// actually receives — the returned outcome AND the durable line.
+//
 // MUTATION: join the items with "; " and drop the ordinals, or drop the full
 // stop that closes the list. This test turns RED.
+// MUTATION: write cause.Error() instead of recordedCause(cause) in
+// recordLifecycleFault. This test turns RED with a nil-pointer panic, which is
+// the defect it exists to hold shut.
 func TestTheUnusableInputListHasAVisibleEnd(t *testing.T) {
-	t.Parallel()
+	coords := lifecycleCoordinates{Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: "1.18.19"}
 
-	// The zero-value fault makes EVERY one of the six inputs unusable, which is
-	// the widest list this message can ever carry.
-	fault := hostexit.Fault{}
-	unusable := fault.UnusableInputs()
-	require.Len(t, unusable, 6,
+	dir := t.TempDir()
+	previous := flagDBPath
+	flagDBPath = filepath.Join(dir, "pasture.db")
+	t.Cleanup(func() { flagDBPath = previous })
+
+	// EVERY member is left at the value that makes it unusable, INCLUDING the
+	// nil cause, which is the widest list this message can ever carry.
+	require.Len(t, hostexit.Fault{}.UnusableInputs(), 6,
 		"the zero-value fault must name all six inputs, or this test no longer covers the widest list")
 
-	text := unclassifiableFaultDiagnostic(
-		lifecycleCoordinates{Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: "1.18.19"},
-		unusable, errors.New("the store could not be opened"))
+	outcome := lifecycleFault(hookLifecycleCmd, coords,
+		pastureruntime.LifecycleFailurePolicy{}, hostexit.FaultPolicyUnset,
+		hostexit.Continuation{}, hostexit.FaultStageUnset, nil)
 
+	require.Equal(t, hostexit.ExitNonBlockingError, outcome.Exit,
+		"the delivery must still leave through the refusal arm with exit 1 when the cause is nil; "+
+			"the record writer used to panic here, and the top-level recover then exited 0 with no list at all")
+
+	text := outcome.Stderr
 	assert.Contains(t, text, "6 inputs of the fault were not usable:",
 		"the lead-in must state how many items follow, so the reader can count the list and see it ended")
 	for ordinal := 1; ordinal <= 6; ordinal++ {
@@ -1149,6 +1168,61 @@ func TestTheUnusableInputListHasAVisibleEnd(t *testing.T) {
 	assert.Contains(t, text, end,
 		"the last item must be closed by a full stop before the next clause, so that clause "+
 			"cannot be read as a seventh item")
+
+	records := readFaultRecords(t, filepath.Dir(flagDBPath))
+	require.Len(t, records, 1,
+		"the durable line must survive a nil cause; the writer used to panic before it was appended")
+	assert.Equal(t, "unset-or-missing", records[0]["cause"],
+		"a nil cause must be NAMED in the record, because an empty string there cannot be told "+
+			"apart from a cause whose own message was empty")
+	reasons, isArray := records[0]["unusableFaultInputs"].([]any)
+	require.True(t, isArray, "the refusal reasons must reach the durable line, not only stderr")
+	assert.Len(t, reasons, 6, "all six unusable inputs must be recorded, including the nil cause")
+}
+
+// TestTheMappableFaultRecordsAnEmptyArrayAndNotNull pins the shape of
+// unusableFaultInputs on the arm that is REACHABLE.
+//
+// The refusal arm is unreachable by construction, so essentially every line
+// lifecycle-faults.jsonl will ever hold comes from a fault the exit authority
+// COULD map — and on that arm the member was a nil slice, which marshals to
+// JSON `null`. `null` cannot be told apart from a member the writer forgot,
+// which is the exact ambiguity recordedFailureMode was added one member above
+// to remove. `[]` says "asked, and nothing was unusable".
+//
+// The only assertion on this member used to be inside the UNREACHABLE-arm test,
+// so the shape of every real line was pinned by nothing.
+//
+// MUTATION: restore "var unusable []string" in hostexit.Fault.UnusableInputs.
+// This test turns RED, because the member marshals to null and the type
+// assertion to []any fails.
+func TestTheMappableFaultRecordsAnEmptyArrayAndNotNull(t *testing.T) {
+	coords := lifecycleCoordinates{Harness: ir.HarnessClaudeCode, Event: "PreToolUse", HostVersion: "2.1.222"}
+
+	dir := t.TempDir()
+	previous := flagDBPath
+	flagDBPath = filepath.Join(dir, "pasture.db")
+	t.Cleanup(func() { flagDBPath = previous })
+
+	// Every member is usable, which is what every reachable fault looks like.
+	failure := lifecycleFailurePolicy(coords)
+	outcome := lifecycleFault(hookLifecycleCmd, coords, failure, hostexit.FaultFailOpen,
+		lifecycleContinuation(coords, failure), hostexit.FaultStageNotRecorded,
+		errors.New("the store could not be opened"))
+	require.Equal(t, hostexit.ExitContinue, outcome.Exit,
+		"this fault must be one the exit authority CAN map, or the test is back on the unreachable arm")
+
+	records := readFaultRecords(t, filepath.Dir(flagDBPath))
+	require.Len(t, records, 1)
+
+	value, present := records[0]["unusableFaultInputs"]
+	require.True(t, present, "the member must be written on every line, mappable or not")
+	reasons, isArray := value.([]any)
+	require.True(t, isArray,
+		"the member must decode as a JSON ARRAY; null decodes as nil here, and a later reader "+
+			"cannot tell null apart from a member the writer forgot")
+	assert.Empty(t, reasons,
+		"nothing was unusable on a mappable fault, so the array must be empty rather than carry a reason")
 }
 
 // lifecycleProfileRow names one declared row of one shipped lifecycle profile:
