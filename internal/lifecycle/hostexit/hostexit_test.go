@@ -238,7 +238,7 @@ func TestForFaultRefusesWhenThereIsNothingToMap(t *testing.T) {
 		{name: "unset policy", named: "the fault policy is unset or not a known policy", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
 		{name: "policy above the last arm", named: "the fault policy is unset or not a known policy", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailClosed + 1, Stage: hostexit.FaultStageNotRecorded, Continuation: continuation, Cause: fault}},
 		{name: "unset stage", named: "the fault stage is unset or not a known stage", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Continuation: continuation, Cause: fault}},
-		{name: "stage above the last arm", named: "the fault stage is unset or not a known stage", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageRecordUnknown + 1, Continuation: continuation, Cause: fault}},
+		{name: "stage above the last arm", named: "the fault stage is unset or not a known stage", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: stageAboveTheLastArm(), Continuation: continuation, Cause: fault}},
 		{name: "continuation never set", named: "the host continuation was never set, so there are no proceed bytes to emit", fault: hostexit.Fault{Mode: blocks, DeclaredMode: blocks, Evidence: evidence, Policy: hostexit.FaultFailOpen, Stage: hostexit.FaultStageNotRecorded, Cause: fault}},
 	}
 	for _, test := range tests {
@@ -321,6 +321,25 @@ func TestContinuationZeroValueIsUnusable(t *testing.T) {
 // TestFaultStageZeroValueRefuses pins the stage enum. The stage decides whether
 // the operator is told the event was not recorded or that the durable state is
 // unknown, so an unset stage must never fall through to the confident claim.
+// stageAboveTheLastArm returns the first value ABOVE every declared stage.
+//
+// IT IS COMPUTED AND NOT WRITTEN DOWN. The refusal probes named
+// FaultStageRecordUnknown+1, so the moment a stage was APPENDED that expression
+// became the new stage itself: both probes went on passing while handing
+// ForFault a perfectly valid input, and the zero-value test asserted that a
+// declared stage was invalid. Neither would have failed for the right reason
+// again. Deriving the sentinel from IsValid means a stage added at the end
+// cannot quietly retire the probe that guards the end.
+func stageAboveTheLastArm() hostexit.FaultStage {
+	last := hostexit.FaultStage(0)
+	for candidate := hostexit.FaultStage(1); candidate < 64; candidate++ {
+		if candidate.IsValid() {
+			last = candidate
+		}
+	}
+	return last + 1
+}
+
 func TestFaultStageZeroValueRefuses(t *testing.T) {
 	t.Parallel()
 
@@ -328,9 +347,13 @@ func TestFaultStageZeroValueRefuses(t *testing.T) {
 	assert.Empty(t, hostexit.FaultStageUnset.String())
 	assert.True(t, hostexit.FaultStageNotRecorded.IsValid())
 	assert.True(t, hostexit.FaultStageRecordUnknown.IsValid())
-	assert.False(t, (hostexit.FaultStageRecordUnknown + 1).IsValid())
+	assert.True(t, hostexit.FaultStageRecorded.IsValid())
+	assert.False(t, stageAboveTheLastArm().IsValid())
+	assert.Empty(t, stageAboveTheLastArm().String(),
+		"a value above every declared stage has no name, so it cannot be written into a fault record")
 	assert.Equal(t, "not-recorded", hostexit.FaultStageNotRecorded.String())
 	assert.Equal(t, "record-unknown", hostexit.FaultStageRecordUnknown.String())
+	assert.Equal(t, "recorded", hostexit.FaultStageRecorded.String())
 }
 
 // TestFaultDiagnosticIsActionable pins the six parts a reader needs: what went
@@ -955,4 +978,146 @@ func markdownSection(t *testing.T, document, heading string) string {
 		offset = at + 1
 	}
 	return heading + rest[:end]
+}
+
+// TestEveryFaultStageRendersItsOwnDurableStateOnEveryArm is the SWEEP over the
+// two things this diagnostic can say at once: which STAGE the caller declared,
+// and which ARM of the impact switch the fault lands in.
+//
+// WHY IT IS A SWEEP AND NOT A CASE. The durable-state sentence was written out
+// THREE times — the default arm, the OpenCode fail-closed arm, and the
+// record-unknown arm — and two of those copies hard-coded "no occurrence was
+// recorded for it" REGARDLESS OF STAGE. So correcting the default arm would
+// have left the fail-closed arm going on saying it, and only a reader who
+// happened to set PASTURE_HOOK_FAIL_CLOSED on a throwing host would ever have
+// seen the false one. That is the N-1 sweep this slice has produced ten times,
+// and a table is the only shape that answers it.
+//
+// The pairs are enumerated rather than remembered: every declared stage against
+// every arm a fail-open and a fail-closed caller can reach.
+//
+// MUTATION: hard-code any durable-state sentence into one arm of the impact
+// switch instead of taking the derived clause. This test turns RED on the pair
+// that reaches that arm.
+func TestEveryFaultStageRendersItsOwnDurableStateOnEveryArm(t *testing.T) {
+	t.Parallel()
+
+	stages := map[hostexit.FaultStage]struct {
+		Says    string
+		Forbids []string
+	}{
+		hostexit.FaultStageNotRecorded: {
+			Says:    "no occurrence was recorded for it",
+			Forbids: []string{"IS committed in the lifecycle occurrence journal", "MAY OR MAY NOT exist"},
+		},
+		hostexit.FaultStageRecorded: {
+			Says:    "the delivery for it IS committed in the lifecycle occurrence journal",
+			Forbids: []string{"no occurrence was recorded for it", "MAY OR MAY NOT exist"},
+		},
+		hostexit.FaultStageRecordUnknown: {
+			Says:    "an occurrence for it MAY OR MAY NOT exist",
+			Forbids: []string{"no occurrence was recorded for it", "IS committed in the lifecycle occurrence journal"},
+		},
+	}
+
+	// The arms of the impact switch a caller can reach, named by what selects
+	// them. The blocking arm is excluded on purpose and pinned below: it speaks
+	// of a refusal and makes no durable-state claim at all.
+	arms := []struct {
+		Name     string
+		Mode     pastureruntime.FailureMode
+		Declared pastureruntime.FailureMode
+		Policy   hostexit.FaultPolicy
+	}{
+		{Name: "the default arm, fail-open", Mode: pastureruntime.FailureReportAndContinue, Declared: pastureruntime.FailureReportAndContinue, Policy: hostexit.FaultFailOpen},
+		{Name: "the default arm, fail-closed with no exit-code channel", Mode: pastureruntime.FailureReportAndContinue, Declared: pastureruntime.FailureReportAndContinue, Policy: hostexit.FaultFailClosed},
+		{Name: "the OpenCode fail-closed arm", Mode: pastureruntime.FailureThrowFailFast, Declared: pastureruntime.FailureThrowFailFast, Policy: hostexit.FaultFailClosed},
+		{Name: "the throwing host, fail-open", Mode: pastureruntime.FailureThrowFailFast, Declared: pastureruntime.FailureThrowFailFast, Policy: hostexit.FaultFailOpen},
+	}
+
+	// THE TABLE MUST COVER EVERY DECLARED STAGE, and this check was missing from
+	// the first version of this sweep — a sweep with an N-1 hole of exactly the
+	// kind it exists to catch. Appending a stage and marking it valid left this
+	// test green, because the table was WRITTEN DOWN rather than derived, so the
+	// new stage was simply never asked about. The declared set is now read from
+	// IsValid, so a stage cannot enter the type without entering the sweep.
+	for candidate := hostexit.FaultStage(1); candidate < 64; candidate++ {
+		if !candidate.IsValid() {
+			continue
+		}
+		_, covered := stages[candidate]
+		assert.True(t, covered,
+			"stage %q is declared and this sweep does not ask about it. Add the sentence it must "+
+				"render and the sentences it must not, or the arms below go unchecked for it",
+			candidate.String())
+	}
+
+	for stage, expected := range stages {
+		require.True(t, stage.IsValid(),
+			"every stage in this table must be a declared stage; %d is not", uint8(stage))
+		require.NotEmpty(t, stage.String(),
+			"a declared stage must name itself for the diagnostic and the durable fault record")
+
+		for _, arm := range arms {
+			t.Run(stage.String()+" on "+arm.Name, func(t *testing.T) {
+				outcome, ok := hostexit.ForFault(hostexit.Fault{
+					Mode:         arm.Mode,
+					DeclaredMode: arm.Declared,
+					Policy:       arm.Policy,
+					Stage:        stage,
+					Continuation: hostexit.EmptyContinuation(),
+					Cause:        errors.New("the sweep's cause"),
+				})
+				require.True(t, ok, "every pair in this table must map to an outcome")
+				require.NotEmpty(t, outcome.Stderr, "a fault is never silent")
+
+				assert.Contains(t, outcome.Stderr, expected.Says,
+					"the diagnostic must state the durable state THIS CALLER DECLARED. The stage is "+
+						"the caller's answer to one question — was the delivery written? — and an arm "+
+						"that answers it differently tells the operator something the caller never said")
+				for _, forbidden := range expected.Forbids {
+					assert.NotContains(t, outcome.Stderr, forbidden,
+						"the diagnostic states a durable state BELONGING TO ANOTHER STAGE. Two of these "+
+							"sentences were hard-coded into arms of the impact switch, so an arm went on "+
+							"claiming nothing was recorded after a route existed that commits a row before "+
+							"it faults")
+				}
+				assert.Contains(t, outcome.Stderr, "durable state "+stage.String(),
+					"the machine-readable stage must agree with the sentence beside it")
+			})
+		}
+	}
+}
+
+// TestTheBlockingArmMakesNoDurableStateClaim pins the one arm deliberately left
+// out of the sweep above.
+//
+// It speaks of a REFUSAL, and it says nothing about whether the delivery was
+// written. That is correct and must stay correct: a durable-state sentence
+// added here would have to be true for every stage that can reach it, and the
+// arm does not read the stage.
+func TestTheBlockingArmMakesNoDurableStateClaim(t *testing.T) {
+	t.Parallel()
+
+	outcome, ok := hostexit.ForFault(hostexit.Fault{
+		Mode:         pastureruntime.FailureExitTwoBlocks,
+		DeclaredMode: pastureruntime.FailureExitTwoBlocks,
+		Evidence:     pastureruntime.FailureEvidence{Source: citedSource},
+		Policy:       hostexit.FaultFailClosed,
+		Stage:        hostexit.FaultStageRecorded,
+		Continuation: hostexit.EmptyContinuation(),
+		Cause:        errors.New("the blocking arm's cause"),
+	})
+	require.True(t, ok)
+	require.Equal(t, hostexit.ExitBlock, outcome.Exit, "this pair must reach the blocking arm")
+
+	for _, claim := range []string{
+		"no occurrence was recorded for it",
+		"IS committed in the lifecycle occurrence journal",
+		"MAY OR MAY NOT exist",
+	} {
+		assert.NotContains(t, outcome.Stderr, claim,
+			"the blocking arm does not read the stage, so any durable-state sentence written into "+
+				"it would be a claim made on behalf of every stage that can reach it")
+	}
 }

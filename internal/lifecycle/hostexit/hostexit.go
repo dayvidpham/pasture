@@ -256,11 +256,36 @@ const (
 	// continuation one atomic step and recording the abandoned gate under its
 	// own evaluation-fault reason; it must not inherit this arm unexamined.
 	FaultStageRecordUnknown
+	// FaultStageRecorded means pasture KNOWS the occurrence was committed. It
+	// is the third answer to the one question this type asks — was the delivery
+	// written? — and it existed as a fact before it existed as a stage, which
+	// is how two shipped sentences came to be false.
+	//
+	// WHO USES IT, AND WHY NEITHER OTHER STAGE WAS HONEST FOR THEM:
+	//
+	//   - A DELIVERY THAT COULD NOT BE BOUND. The host payload does not carry
+	//     the identity fields the event declares, so the delivery is REFUSED
+	//     rather than reinterpreted. The row is written with the disposition
+	//     that refused it and an empty interpreted set. FaultStageNotRecorded
+	//     said "no occurrence was recorded for it", and the row was there.
+	//   - A RECEIPT COMMITTED WITHOUT A CONTINUATION. The durable write
+	//     succeeded and the host never received its bytes.
+	//     FaultStageRecordUnknown said pasture "stopped before it learned
+	//     whether this event was recorded", and pasture had learned — the error
+	//     that marks this case is named for the commit it observed.
+	//
+	// THE STAGE SAYS NOTHING ABOUT WHETHER THE EVENT WAS EVALUATED, and that is
+	// deliberate rather than an omission: those two users differ on exactly
+	// that point — the first was not evaluated, the second was — and a stage
+	// that answered both questions at once could not have been true for both.
+	// Whether pasture could evaluate the event is stated once, in the
+	// diagnostic's What, and the cause carries the particulars.
+	FaultStageRecorded
 )
 
-// IsValid reports whether the stage is one of the two declared stages.
+// IsValid reports whether the stage is one of the declared stages.
 func (s FaultStage) IsValid() bool {
-	return s == FaultStageNotRecorded || s == FaultStageRecordUnknown
+	return s == FaultStageNotRecorded || s == FaultStageRecordUnknown || s == FaultStageRecorded
 }
 
 // String names the stage for a diagnostic and for the durable fault record. The
@@ -271,6 +296,8 @@ func (s FaultStage) String() string {
 		return "not-recorded"
 	case FaultStageRecordUnknown:
 		return "record-unknown"
+	case FaultStageRecorded:
+		return "recorded"
 	default:
 		return ""
 	}
@@ -467,7 +494,28 @@ func ForFault(fault Fault) (Outcome, bool) {
 // because the hook cannot claim the event was not recorded when it stopped
 // without finding out.
 func faultDiagnostic(fault Fault, exit ExitStatus) *ir.Diagnostic {
-	impact := "the host continues with its own default answer, and this lifecycle event was not evaluated and no occurrence was recorded for it"
+	// THE RECORD CLAUSE IS DERIVED FROM THE STAGE IN ONE PLACE, so that no arm
+	// of the switch below can state a different durable state from the one the
+	// caller declared. It was written out THREE times instead, and two of those
+	// copies were false the moment a route was added that commits a row before
+	// faulting: the default arm and the OpenCode fail-closed arm both said "no
+	// occurrence was recorded for it" REGARDLESS OF STAGE, so the fail-closed
+	// arm would have gone on saying it even once the default arm was corrected.
+	// Deriving it removes the copy that drifts.
+	//
+	// IT DOES NOT SAY WHETHER THE EVENT WAS EVALUATED. The What of this
+	// diagnostic already says pasture could not evaluate the event, and the
+	// stage's users disagree about evaluation while agreeing about the record,
+	// so a combined sentence could not be true for all of them.
+	recordClause := "no occurrence was recorded for it"
+	switch fault.Stage {
+	case FaultStageRecorded:
+		recordClause = "the delivery for it IS committed in the lifecycle occurrence journal, so look for it there rather than concluding it was lost"
+	case FaultStageRecordUnknown:
+		recordClause = "pasture stopped before it learned whether this event was recorded, so an occurrence for it MAY OR MAY NOT exist — look for it in the lifecycle occurrence journal"
+	}
+
+	impact := "the host continues with its own default answer, and " + recordClause
 
 	// failClosedAdvice is the trailing clause of the fix line, and WHICH ONE IS
 	// TRUE DEPENDS ON WHAT THE OPERATOR HAS ALREADY DONE.
@@ -513,13 +561,13 @@ func faultDiagnostic(fault Fault, exit ExitStatus) *ir.Diagnostic {
 		impact = "the host refuses the operation, because this event is configured to fail closed and the host documents that it blocks on this exit code"
 		fix = "read the cause below and fix the reported condition; to let the host continue through an evaluation fault, unset PASTURE_HOOK_FAIL_CLOSED"
 	case fault.Policy == FaultFailClosed && fault.Mode == pastureruntime.FailureThrowFailFast:
-		impact = "the host continues with its own default answer, and this lifecycle event was not evaluated and no occurrence was recorded for it; " +
+		impact = "the host continues with its own default answer, and " + recordClause + "; " +
 			"fail-closed has no channel on OpenCode named callbacks until the typed refusal object exists; this invocation continued"
 		fix = "read the cause below and fix the reported condition; PASTURE_HOOK_FAIL_CLOSED refuses through the process exit code, which this host does not read as a refusal, " +
 			"so it cannot stop this event today; unset it if you expected it to"
 	case fault.Stage == FaultStageRecordUnknown:
-		impact = "the host continues with its own default answer; pasture stopped before it learned whether this event was recorded, so an occurrence for it MAY OR MAY NOT exist — " +
-			"look for it in the lifecycle occurrence journal, and read the fault record file beside the database for this invocation"
+		impact = "the host continues with its own default answer; " + recordClause +
+			", and read the fault record file beside the database for this invocation"
 		fix = "read the cause below and fix the reported condition; a long-running writer holding the pasture store is the usual reason, so find that writer or retry once it releases the store; " +
 			failClosedAdvice
 	}

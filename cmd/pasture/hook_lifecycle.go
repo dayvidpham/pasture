@@ -260,9 +260,25 @@ func lifecycleOutcome(
 		// A fault raised AFTER the durable commit leaves an occurrence behind.
 		// Saying "not recorded" there would send a maintainer to look in the
 		// wrong place, so the stage follows the error and not the position.
+		// THE STAGE FOLLOWS WHAT PASTURE KNOWS, and two of these answers were
+		// wrong until the recorded stage existed.
+		//
+		// A receipt committed without a continuation is RECORDED, not unknown:
+		// the error that marks it is named for the commit pasture observed, and
+		// its own declaration says the occurrence EXISTS. It was told the
+		// occurrence MAY OR MAY NOT exist, which sends a maintainer to hedge
+		// about a row that is certainly there.
+		//
+		// A delivery that could not be bound is RECORDED too: the row is
+		// written with the disposition that refused it and an empty interpreted
+		// set, and it was told no occurrence was recorded at all.
+		//
+		// Everything else here faults before any durable write, so the default
+		// stays not-recorded.
 		stage := hostexit.FaultStageNotRecorded
-		if errors.Is(work.err, handlers.ErrLifecycleCommittedWithoutContinuation) {
-			stage = hostexit.FaultStageRecordUnknown
+		if errors.Is(work.err, handlers.ErrLifecycleCommittedWithoutContinuation) ||
+			errors.Is(work.err, handlers.ErrLifecycleDeliveryRefused) {
+			stage = hostexit.FaultStageRecorded
 		}
 		return lifecycleFault(cmd, coords, failure, policy, continuation, stage, fmt.Errorf(
 			"the hook could not evaluate event %q of harness %q at host version %q: %w",

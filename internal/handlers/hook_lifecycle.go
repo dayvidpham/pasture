@@ -269,7 +269,8 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 		// path, so this route now receives what every other unevaluated event
 		// receives: this harness's continue bytes, a stderr diagnostic, a fault
 		// record line, and the fail-closed opt-in.
-		return backend.HostResponse{}, unbindableCaptureError(dispatch, event, in, capture)
+		return backend.HostResponse{}, fmt.Errorf("%w: %w",
+			ErrLifecycleDeliveryRefused, unbindableCaptureError(dispatch, event, in, capture))
 	}
 	// Valid captures converge on the shared delivery commit tail with the raw
 	// surface (URD R4.2), so the verification sequence cannot drift between
@@ -424,6 +425,15 @@ func (PassThroughCommitBarrier) AfterCommit(context.Context, CommitBoundary) err
 // recorded would send a maintainer to look in the wrong place.
 var ErrLifecycleCommittedWithoutContinuation = errors.New("the lifecycle receipt was committed but the host received no continuation")
 
+// ErrLifecycleDeliveryRefused marks a delivery whose capture could not be
+// bound. It is the sibling of the error above and exists for the same reason:
+// the caller has to tell the host the truth about the durable state. For these
+// faults the delivery row EXISTS — it carries the disposition that refused it
+// and an empty interpreted set — while the event itself was NOT evaluated, so a
+// diagnostic claiming nothing was recorded sends a maintainer to look in the
+// wrong place, and one claiming the event was evaluated would be worse.
+var ErrLifecycleDeliveryRefused = errors.New("the lifecycle delivery was recorded but its capture could not be bound")
+
 // HookLifecycleNative records the lifecycle receipt and, only after the durable
 // commit has completed, returns the exact native continuation bytes the harness
 // reads on standard output — the single dispatch surface the CLI invokes. The
@@ -480,11 +490,11 @@ func activationFor(kind model.ContractEventKind, entries []activation.Entry) (ac
 // package and carries no words of its own; these are the words, kept beside the
 // one place that has to explain the classification to a person.
 var captureDispositionReasons = map[model.CaptureDisposition]string{
-	model.CaptureMalformed:        "the payload is not well-formed JSON",
-	model.CaptureDuplicateField:   "the payload repeats a field, so which value was meant cannot be decided",
-	model.CaptureInvalidUTF8:      "the payload is not valid UTF-8",
-	model.CaptureTruncated:        "the payload ends part-way through",
-	model.CaptureOverLimit:        "the payload is larger than the bound ingress accepts",
+	model.CaptureMalformed:      "the payload is not well-formed JSON",
+	model.CaptureDuplicateField: "the payload repeats a field, so which value was meant cannot be decided",
+	model.CaptureInvalidUTF8:    "the payload is not valid UTF-8",
+	model.CaptureTruncated:      "the payload ends part-way through",
+	model.CaptureOverLimit:      "the payload is larger than the bound ingress accepts",
 	model.CaptureUnsupportedSchema: "the payload does not carry the identity fields this event's registration declares, " +
 		"or carries them under different names",
 	model.CaptureEventMismatch: "the payload describes a different event from the one named on the command line",
@@ -534,16 +544,19 @@ func unbindableCaptureError(
 	why := fmt.Sprintf("%s, so %s", reason, missing)
 	// THIS CLAUSE SAID "No occurrence was recorded for this event" AND THAT WAS
 	// FALSE. Measured on the built binary: the delivery IS written to the
-	// lifecycle occurrence journal, carrying its refused disposition, and
-	// `hook lifecycle list` shows it with an empty interpreted set. What is
-	// absent is anything DERIVED from it, not the row itself. The words are
-	// chosen to reconcile with the generic fault sentence this message is
-	// wrapped in, which speaks of an occurrence not being recorded: they say
-	// where the evidence IS, so a reader meets a clarification and not a
-	// contradiction.
+	// lifecycle occurrence journal, and `hook lifecycle list` shows it with an
+	// empty interpreted set. What is absent is anything DERIVED from it, not
+	// the row itself.
+	//
+	// IT NO LONGER SAYS WHERE THE ROW IS, and that is deliberate. The generic
+	// fault diagnostic this message is wrapped in now derives that from the
+	// fault stage and says it once. A second copy here would be the same
+	// sentence maintained in two places, which is how the clause it replaced
+	// came to be false in the first place. This clause says only what the
+	// generic one cannot know: that nothing was derived and no gate was
+	// consulted, and what the row carries.
 	impact := "Nothing was derived from this delivery and no gate was consulted, so the event had no part in the " +
-		"host's answer; the delivery itself IS in the lifecycle occurrence journal, carrying the disposition that " +
-		"refused it and an empty interpreted set, which is where to look for it."
+		"host's answer; the row carries the disposition that refused it and an empty interpreted set."
 	// THE FIX FOLLOWS THE DIAGNOSIS. A payload that names a DIFFERENT EVENT is
 	// not fixed by checking identity field names, and telling its reader to do
 	// that sends them to inspect fields that were never the problem. The

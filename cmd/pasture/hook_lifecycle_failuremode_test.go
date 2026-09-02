@@ -11,8 +11,8 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
-	"os"
 	"net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -3478,6 +3478,20 @@ func TestAnUnbindableHostPayloadIsTreatedAsAnEventThatWasNotEvaluated(t *testing
 					"without using it as an admission check, so a host that changes a field name "+
 					"between versions arrives here by construction")
 
+			// THE DURABLE STATE IS READ ON THE RENDERED BYTES, not on the
+			// value the code constructed. This route was told "no occurrence
+			// was recorded for it" while its delivery row sat in the journal —
+			// a sentence that was correct nowhere and was only ever visible on
+			// the console. It is checked here, on what the operator receives,
+			// for the same reason the identity names are.
+			assert.Contains(t, run.Stderr, "durable state recorded",
+				"the machine-readable stage must say the delivery WAS written, because it was")
+			assert.Contains(t, run.Stderr, "the delivery for it IS committed in the lifecycle occurrence journal",
+				"the operator must be sent to the row that exists. This said no occurrence was "+
+					"recorded, which sends somebody looking for evidence they already have")
+			assert.NotContains(t, run.Stderr, "no occurrence was recorded for it",
+				"the retired sentence must not survive on any arm of the impact switch")
+
 			records := readFaultRecords(t, run.FaultDir)
 			assert.Len(t, records, 1,
 				"an unevaluated event must leave a durable fault record like every other one. This "+
@@ -3531,4 +3545,103 @@ func TestTheFailClosedOptInReachesAnUnbindableHostPayload(t *testing.T) {
 	assert.Contains(t, closedRun.Stderr, "could not be bound, so the event WAS NOT EVALUATED",
 		"the blocking exit must carry the same reason as the continuing one, so an operator who "+
 			"turns the opt-in on learns WHY their host was stopped")
+	assert.NotContains(t, openRun.Stderr, "no occurrence was recorded for it",
+		"the fail-OPEN arm must not claim the delivery was lost either. The durable-state sentence "+
+			"was written out in three places and two of them ignored the stage, so correcting one "+
+			"arm left the others saying it — this reads the arm a default operator actually meets")
+}
+
+// TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState is the ROUTE half
+// of the durable-state sweep. The stage half lives beside the renderer, in
+// TestEveryFaultStageRendersItsOwnDurableStateOnEveryArm; neither is enough
+// alone, because a route can declare a stage that renders perfectly and is
+// still the wrong answer for that route.
+//
+// WHY IT ENUMERATES FROM THE SOURCE. Two routes declared a stage that was false
+// about them, and both were found by asking "which routes exist?" rather than
+// by checking the ones anybody remembered:
+//
+//   - THE DELIVERY THAT COULD NOT BE BOUND declared not-recorded, and its row
+//     is in the journal.
+//   - THE RECEIPT COMMITTED WITHOUT A CONTINUATION declared record-unknown, and
+//     the error that marks it is NAMED for the commit pasture observed. Its own
+//     declaration says the occurrence EXISTS. Nobody had looked at that pair
+//     since the stage was introduced.
+//
+// So this test READS THE COMMAND'S SOURCE for every lifecycleFault call and
+// requires each stage argument to be one this file has judged, by name. Adding
+// a route without judging it fails here rather than shipping a sentence nobody
+// checked.
+//
+// WHAT IT DOES NOT READ, STATED SO NOBODY RELIES ON IT. This checks WHICH stage
+// each route declares, not whether that stage is TRUE of that route: swapping
+// two judged stages between two routes passes here, because both expressions
+// are in the table. Whether a route's stage is true of it is a judgement, made
+// in the prose beside each call and measured by the behavioural tests above,
+// which read the rendered bytes on a real store. What this catches is the case
+// that produced both defects — a route whose stage nobody has looked at.
+//
+// MUTATION: add a lifecycleFault call whose stage expression is not in the
+// table. This test turns RED naming the line.
+func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
+	t.Parallel()
+
+	// EVERY ROUTE, AND THE DURABLE STATE THAT IS TRUE OF IT. The value is the
+	// reason, so that a maintainer changing one must state why rather than edit
+	// a number.
+	judged := map[string]string{
+		"hostexit.FaultStageNotRecorded": "the route faults before any durable write, or the durable write itself " +
+			"returned an error and committed nothing: the panic recovery, the environment refusal, the argument " +
+			"refusal, the orphans subcommand, and every handler error that is not one of the two recorded cases",
+		"hostexit.FaultStageRecordUnknown": "the hook was abandoned at its deadline: the work runs in a goroutine and " +
+			"the receipt commits before the native bytes are produced, so the expiry can land on either side of it " +
+			"and pasture genuinely does not know",
+		"hostexit.FaultStageRecorded": "pasture observed the commit: a receipt committed without a continuation, and " +
+			"a delivery whose capture could not be bound, whose row carries the refusing disposition",
+		"stage": "the local computed immediately above the call, whose two branches are judged where they are written",
+	}
+
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, "hook_lifecycle.go", nil, 0)
+	require.NoError(t, err, "the production source must be readable beside its test")
+
+	found := map[string]int{}
+	unjudged := []string{}
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, isCall := node.(*ast.CallExpr)
+		if !isCall {
+			return true
+		}
+		name, isIdentifier := call.Fun.(*ast.Ident)
+		if !isIdentifier || name.Name != "lifecycleFault" {
+			return true
+		}
+		// The stage is the sixth argument of lifecycleFault.
+		require.Len(t, call.Args, 7,
+			"lifecycleFault takes seven arguments; this test reads the stage by position and must "+
+				"be updated with the signature")
+		stage := sourceOf(call.Args[5])
+		found[stage]++
+		if _, isJudged := judged[stage]; !isJudged {
+			unjudged = append(unjudged, fmt.Sprintf("hook_lifecycle.go:%d passes %s",
+				fileSet.Position(call.Lparen).Line, stage))
+		}
+		return true
+	})
+
+	require.NotEmpty(t, found,
+		"this test reads every lifecycleFault call in the command; finding none means the call was "+
+			"renamed and the sweep is passing vacuously")
+	assert.Empty(t, unjudged,
+		"a fault route declares a durable state this file has not judged. The stage is a CLAIM ABOUT "+
+			"THE JOURNAL made to the operator, and two routes have already claimed one that was false "+
+			"about them. Add the stage to the table above with the reason it is true for this route, "+
+			"or use one that already is")
+
+	// The recorded stage must actually be REACHED. A stage nothing passes is a
+	// sentence nothing renders, and this one was added because two routes
+	// needed it.
+	assert.NotZero(t, found["stage"],
+		"the handler-error route computes its stage in a local, and that local is where the two "+
+			"recorded cases are selected; if it is gone, the recorded stage has no producer here")
 }
