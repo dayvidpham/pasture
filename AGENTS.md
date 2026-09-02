@@ -215,8 +215,8 @@ could not be opened, and evidence that needs the failing store is lost exactly
 when it is wanted.
 
 THE LINE IS NOT ALWAYS WRITTEN, and the promise above holds only while the
-record can be both PLACED and WRITTEN. The writer has FIVE guarded failures.
-FOUR of them are routes a user can reach, and each one loses the record for that
+record can be both PLACED and WRITTEN. The writer has SIX guarded failures.
+FIVE of them are routes a user can reach, and each one loses the record for that
 fault. In the order the writer meets them:
 
 1. The resolved store path NAMES NO DIRECTORY, so the record has nothing to sit
@@ -229,18 +229,25 @@ fault. In the order the writer meets them:
    name.
 4. The line CANNOT BE APPENDED to a file that did open — the filesystem or the
    user's quota is full, or the device reports an I/O error.
+5. The file CANNOT BE CLOSED after the line was handed to it. A filesystem that
+   defers the write — a network mount, or delayed allocation — reports the full
+   disk or the device error of an earlier write at `close(2)` and NOT at
+   `write(2)`, so on that route route 4 never fires and the loss appears only
+   here. This route was once SILENT: the close was a bare `defer file.Close()`
+   with its error discarded, which is a lost record with no word on any stream,
+   and no guard saw it because a discarded error is not a branch.
 
-The FIFTH failure, a record line that cannot be encoded, is unreachable by
+The SIXTH failure, a record line that cannot be encoded, is unreachable by
 construction: every member of the line is a string or a slice of strings, and
 the JSON encoder cannot refuse those. It is counted here because the writer
 reports it like the rest, not because a user can meet it.
 
-ROUTES 1 AND 2 ARE ABOUT PLACING THE FILE, ROUTES 3 AND 4 ARE ABOUT WRITING IT,
-AND A DIRECTORY THAT EXISTS DOES NOT RULE THE SECOND PAIR OUT. Measured on the
-built binary with a store directory that exists and is read-only: exit 0,
+ROUTES 1 AND 2 ARE ABOUT PLACING THE FILE, ROUTES 3, 4 AND 5 ARE ABOUT WRITING
+IT, AND A DIRECTORY THAT EXISTS DOES NOT RULE THE SECOND GROUP OUT. Measured on
+the built binary with a store directory that exists and is read-only: exit 0,
 nothing at all on standard output, the open failure reported on standard error,
-and no record file anywhere. The default path is not exempt from routes 3 and 4
-either — `~/.local/share/pasture/` is an ordinary directory on an ordinary
+and no record file anywhere. The default path is not exempt from routes 3, 4 and
+5 either — `~/.local/share/pasture/` is an ordinary directory on an ordinary
 filesystem, so it can be full, read-only, or owned by somebody else.
 
 On every one of those routes there is NO record for that fault anywhere. Each

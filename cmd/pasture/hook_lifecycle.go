@@ -490,11 +490,32 @@ const faultRecordLossSuffix = "the fault below is reported on this stream only"
 
 // recordLifecycleFault appends one JSON line describing the fault. Every error
 // here is swallowed on purpose: the record is evidence for a maintainer, never
-// a condition of the host outcome. SWALLOWED IS NOT SILENT: every failing arm
-// tells the operator on standard error that this fault has no durable record,
-// and TestEveryFailingArmOfTheFaultWriterTellsTheOperatorOnStandardError
-// enumerates them and reads the STREAM of each, so a sixth arm cannot be added
-// without a word, and no arm's word can move onto standard output.
+// a condition of the host outcome. SWALLOWED IS NOT SILENT: every route that
+// loses the record tells the operator on standard error that this fault has no
+// durable record.
+//
+// WHAT HOLDS THAT, AND OVER WHICH POPULATION. Three guards read this function,
+// and each names the population it is stated over, because a claim wider than
+// the population it is read over is how this writer was twice left an N-1
+// sweep:
+//
+//   - TestEveryFailingArmOfTheFaultWriterTellsTheOperatorOnStandardError reads
+//     every GUARDED BRANCH — if arms, else blocks, switch cases, select cases,
+//     loop bodies and the bodies of deferred closures — and requires each to
+//     report. So a sixth branch cannot be added without a word.
+//   - The same test reads every WRITE the function makes, whatever the call
+//     shape: fmt.Fprint, Fprintf and Fprintln, and the Write and WriteString
+//     methods of any writer expression. It requires the writer of each to be
+//     cmd.ErrOrStderr(), and refuses any expression anywhere in this function
+//     that names standard output or standard input at all. So no word of this
+//     writer can move onto standard output — under a bare method call as much
+//     as under fmt, which is the shape that reinstated the founding defect of
+//     this command with the whole tree green.
+//   - TestTheFaultWriterDiscardsNoResultThatCouldCarryALoss reads DISCARDED
+//     RESULTS, which are not branches: a bare `defer file.Close()`, a call
+//     statement that is not a report, an assignment that binds the last result
+//     to the blank identifier. A loss route need not be a branch, and the
+//     unchecked close below was one.
 func recordLifecycleFault(
 	cmd *cobra.Command,
 	coords lifecycleCoordinates,
@@ -618,7 +639,33 @@ func recordLifecycleFault(
 				"%s\n", path, err, faultRecordLossSuffix)
 		return
 	}
-	defer file.Close()
+	// THE CLOSE IS CHECKED, AND IT WAS A BARE `defer file.Close()`.
+	//
+	// A close that fails loses the line that was handed to the file. A
+	// filesystem that defers the write — a network mount, or delayed
+	// allocation — reports the full disk or the I/O error of an earlier write
+	// at close(2) and not at write(2), and on that route the append arm below
+	// NEVER FIRES. The discarded error made that a record lost with NO WORD ON
+	// ANY STREAM, which is the single loss this writer exists to prevent.
+	//
+	// IT WAS INVISIBLE TO A GUARD THAT READ GUARDED BRANCHES, because a bare
+	// defer is not a branch: the arm count stayed at five, every report matched
+	// its stream, and the route was outside the population by construction. The
+	// guard now reads discarded results as well as branches, so the next one
+	// cannot be added in silence either.
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(),
+				"pasture hook lifecycle could not close its fault record at %s: %v; this happened "+
+					"in recordLifecycleFault (cmd/pasture/hook_lifecycle.go) after the line was "+
+					"handed to the file, so the line may never have reached the disk and the "+
+					"record for this fault is lost; %s; a filesystem that defers the write "+
+					"reports a full disk or a device error here rather than at the write, so "+
+					"check the free space, the quota and the health of the filesystem holding "+
+					"%s, and the record returns\n",
+				path, closeErr, faultRecordLossSuffix, filepath.Dir(path))
+		}
+	}()
 	if _, err := file.Write(append(line, '\n')); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(),
 			"pasture hook lifecycle could not append to its fault record at %s: %v; "+

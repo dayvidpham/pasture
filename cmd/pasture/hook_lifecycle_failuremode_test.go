@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -1721,16 +1722,57 @@ func faultWriterArms(fileSet *token.FileSet, function *ast.FuncDecl) []faultWrit
 	return arms
 }
 
-// faultWriterReports returns the STREAM EXPRESSION of every operator report in
-// the statements given, as source text, so an assertion can name the exact
-// writer a report was handed.
+// faultWriterWrite is ONE PLACE the fault writer hands bytes to a stream.
 //
-// It reads the FIRST ARGUMENT and not merely the fact of the call, because the
-// stream is the whole of the claim here. A report is any fmt.Fprint, fmt.Fprintf
-// or fmt.Fprintln: the writer uses Fprintf today, and a later arm written with
-// either sibling must be held to the same stream.
-func faultWriterReports(body []ast.Stmt) []string {
-	streams := []string{}
+// THE POPULATION USED TO BE ONE CALL SHAPE, and that is what let the founding
+// defect of this command back in. The previous reader collected a stream only
+// for a call whose Fun was a selector on the identifier `fmt` named Fprint,
+// Fprintf or Fprintln. Adding ONE LINE beside a correct stderr report,
+//
+//	cmd.OutOrStdout().Write([]byte("pasture: ...\n"))
+//
+// — the idiom emitLifecycleOutcome in the SAME FILE uses for stdout — left the
+// full, unfiltered cmd/pasture package green together with every
+// internal/lifecycle package, while the built binary put 76 bytes on standard
+// output AHEAD of {"decision":"proceed"} and the shipped OpenCode plugin's
+// JSON.parse threw on a GATE row, which stops the user's tool call.
+//
+// So the population is now every write of any shape this file can name, and
+// the claim is stated over exactly that.
+type faultWriterWrite struct {
+	// Shape names the call shape, so a failure says how the bytes left.
+	Shape string
+	// Line is the line in hook_lifecycle.go the write stands on.
+	Line int
+	// Writer is the writer expression AS WRITTEN, so a message can quote what
+	// the maintainer typed.
+	Writer string
+	// Resolved is Writer, or — when Writer is a bare name bound in this same
+	// function — the expression that name was assigned. A maintainer who
+	// hoists a writer into a local for readability has changed nothing about
+	// the stream, and refusing that with a message about standard output tells
+	// them they caused a defect they did not.
+	Resolved string
+}
+
+// faultWriterWrites returns every write in the statements given.
+//
+// It recognises the fmt.Fprint family (writer is the first argument), the Write
+// and WriteString methods of any writer expression (writer is the receiver),
+// and io.WriteString (writer is the first argument). Anything else that could
+// reach a stream is caught by the SEPARATE sweep for stream-naming expressions
+// below, which needs no list of call shapes at all.
+func faultWriterWrites(fileSet *token.FileSet, body []ast.Stmt, bound map[string]string) []faultWriterWrite {
+	writes := []faultWriterWrite{}
+	record := func(shape string, position token.Pos, writer ast.Expr) {
+		text := sourceOf(writer)
+		writes = append(writes, faultWriterWrite{
+			Shape:    shape,
+			Line:     fileSet.Position(position).Line,
+			Writer:   text,
+			Resolved: resolveWriterName(text, bound),
+		})
+	}
 	for _, statement := range body {
 		ast.Inspect(statement, func(node ast.Node) bool {
 			call, isCall := node.(*ast.CallExpr)
@@ -1741,21 +1783,224 @@ func faultWriterReports(body []ast.Stmt) []string {
 			if !isSelector {
 				return true
 			}
-			package_, isIdentifier := selector.X.(*ast.Ident)
-			if !isIdentifier || package_.Name != "fmt" {
-				return true
+			if package_, isIdentifier := selector.X.(*ast.Ident); isIdentifier {
+				switch package_.Name {
+				case "fmt":
+					switch selector.Sel.Name {
+					case "Fprint", "Fprintf", "Fprintln":
+						if len(call.Args) > 0 {
+							record("fmt."+selector.Sel.Name, call.Lparen, call.Args[0])
+							return false
+						}
+					}
+				case "io":
+					if selector.Sel.Name == "WriteString" && len(call.Args) > 0 {
+						record("io.WriteString", call.Lparen, call.Args[0])
+						return false
+					}
+				}
 			}
 			switch selector.Sel.Name {
-			case "Fprint", "Fprintf", "Fprintln":
-				if len(call.Args) > 0 {
-					streams = append(streams, sourceOf(call.Args[0]))
-				}
+			case "Write", "WriteString":
+				record("a bare ."+selector.Sel.Name+" call", call.Lparen, selector.X)
 				return false
 			}
 			return true
 		})
 	}
-	return streams
+	return writes
+}
+
+// resolveWriterName follows a bare name to the expression it was assigned in
+// the same function, so that hoisting a writer into a local is not reported as
+// a stream change. It stops at a fixed depth, and an unresolved name is
+// returned unchanged so the caller refuses it rather than assuming.
+func resolveWriterName(text string, bound map[string]string) string {
+	for depth := 0; depth < 4; depth++ {
+		next, isBound := bound[text]
+		if !isBound || next == text {
+			return text
+		}
+		text = next
+	}
+	return text
+}
+
+// faultWriterBindings maps each name a function binds to the source text of
+// the single expression it was bound to. It is how a hoisted writer is
+// resolved; a name assigned twice, or from a multi-value call, is left OUT, so
+// resolveWriterName returns the bare name and the guard refuses it.
+func faultWriterBindings(function *ast.FuncDecl) map[string]string {
+	bound := map[string]string{}
+	ambiguous := map[string]bool{}
+	ast.Inspect(function, func(node ast.Node) bool {
+		assign, isAssign := node.(*ast.AssignStmt)
+		if !isAssign || len(assign.Rhs) != 1 {
+			return true
+		}
+		// EVERY name on the left, not the single-value case alone: `file, err
+		// := os.OpenFile(...)` is how the record's own sink is bound, and a
+		// reader that skipped it could not tell the record write apart from a
+		// report.
+		for _, target := range assign.Lhs {
+			name, isIdentifier := target.(*ast.Ident)
+			if !isIdentifier || name.Name == "_" {
+				continue
+			}
+			if _, seen := bound[name.Name]; seen {
+				ambiguous[name.Name] = true
+				continue
+			}
+			bound[name.Name] = sourceOf(assign.Rhs[0])
+		}
+		return true
+	})
+	for name := range ambiguous {
+		delete(bound, name)
+	}
+	return bound
+}
+
+// faultWriterStream is the ONE writer expression every report of the fault
+// writer is handed.
+const faultWriterStream = "cmd.ErrOrStderr()"
+
+// forbiddenStreamAccessors are the cobra accessor names that reach a stream
+// this function may never touch. They are matched on the SELECTOR NAME ALONE,
+// whatever the receiver, so `cmd.OutOrStdout()`, `command.OutOrStdout()` and
+// `cmd.Root().OutOrStdout()` are all refused by one rule. The three names are
+// distinctive enough that nothing else in this file is called them.
+//
+// OutOrStderr is here as well although it CAN be standard error: it is the
+// command's OUT stream, which merely DEFAULTS to standard error, so a host that
+// sets Out redirects it onto standard output without a line of this file
+// changing.
+var forbiddenStreamAccessors = map[string]string{
+	"OutOrStdout": "the command's standard output",
+	"OutOrStderr": "the command's OUT stream, which is standard error only until a host sets Out",
+	"InOrStdin":   "the command's standard input",
+}
+
+// forbiddenProcessStreams are the process handles this function may not use.
+// They are matched as WHOLE EXPRESSIONS and not on the selector name, because
+// `Stdout` is also an ordinary member name — hostexit.Outcome has one, and the
+// record line writes it as the bytes the host was given.
+//
+// os.Stderr is refused as well as os.Stdout. The reports must go through the
+// command's own stream so that a test can capture them; a report written
+// straight to the process handle leaves the in-process pins reading nothing.
+var forbiddenProcessStreams = map[string]string{
+	"os.Stdout": "the process's standard output",
+	"os.Stderr": "the process's standard error, which bypasses the command stream the pins read",
+	"os.Stdin":  "the process's standard input",
+}
+
+// faultWriterForbiddenStreams returns every expression in the function that
+// names a stream this writer may not use, whatever it is then done with.
+//
+// IT NEEDS NO LIST OF CALL SHAPES. faultWriterWrites can only refuse writes it
+// recognises; this refuses the STREAM ITSELF, so a shape nobody thought of —
+// a bufio.Writer wrapped round it, an encoder constructed on it, a writer
+// stored in a struct — is refused where the stream is named, before it can be
+// handed anywhere at all.
+func faultWriterForbiddenStreams(fileSet *token.FileSet, function *ast.FuncDecl) []string {
+	found := []string{}
+	ast.Inspect(function, func(node ast.Node) bool {
+		selector, isSelector := node.(*ast.SelectorExpr)
+		if !isSelector {
+			return true
+		}
+		why, isForbidden := forbiddenStreamAccessors[selector.Sel.Name]
+		if !isForbidden {
+			why, isForbidden = forbiddenProcessStreams[sourceOf(selector)]
+		}
+		if !isForbidden {
+			return true
+		}
+		found = append(found, fmt.Sprintf("%s at hook_lifecycle.go:%d, which is %s",
+			sourceOf(selector), fileSet.Position(selector.Pos()).Line, why))
+		return true
+	})
+	return found
+}
+
+// faultWriterSink names what the bytes of one write reach. The fault writer has
+// exactly TWO legitimate sinks and no third: the operator, on the command's
+// standard error, and the RECORD ITSELF, on the file this same function opened.
+// Anything else is refused.
+type faultWriterSink int
+
+const (
+	// sinkOperator is the command's standard error, the only stream this
+	// function may name.
+	sinkOperator faultWriterSink = iota
+	// sinkRecord is the file os.OpenFile returned in this function: the one
+	// write that is the whole point of the writer rather than a report about
+	// it.
+	sinkRecord
+	// sinkUnknown is every other writer, including one this guard could not
+	// resolve. It is refused rather than assumed.
+	sinkUnknown
+)
+
+// faultRecordSinkPrefix is how the record's own file is recognised: the writer
+// expression resolves to the os.OpenFile call THIS FUNCTION made. Naming the
+// sink by what opened it, rather than by the local's spelling, means renaming
+// the local cannot turn the record write into an unexplained one.
+const faultRecordSinkPrefix = "os.OpenFile("
+
+// faultWriterSinkOf classifies one write.
+func faultWriterSinkOf(write faultWriterWrite) faultWriterSink {
+	switch {
+	case write.Resolved == faultWriterStream:
+		return sinkOperator
+	case strings.HasPrefix(write.Resolved, faultRecordSinkPrefix):
+		return sinkRecord
+	}
+	return sinkUnknown
+}
+
+// assertFaultWriterStream requires one write to be handed standard error, and
+// says the TRUE thing about the input when it is not.
+//
+// THE GUARD READS SOURCE TEXT, resolved through the names this same function
+// binds. It cannot follow a writer that arrives any other way, and it refuses
+// rather than assume — which is the safe direction, but the refusal has to
+// state the real requirement. It used to answer a hoisted, behaviour-identical
+// `operator := cmd.ErrOrStderr()` with "reports on operator ... operator is not
+// that stream", both untrue for that input.
+func assertFaultWriterStream(t *testing.T, where string, write faultWriterWrite) {
+	t.Helper()
+
+	if faultWriterSinkOf(write) != sinkUnknown {
+		return
+	}
+	quoted := write.Writer
+	if write.Resolved != write.Writer {
+		quoted = fmt.Sprintf("%s, which this function binds to %s", write.Writer, write.Resolved)
+	}
+	if strings.Contains(write.Resolved, "OutOrStdout") || strings.Contains(write.Resolved, "os.Stdout") {
+		assert.Fail(t, "a fault-writer report was put on standard output",
+			"%s: the %s write at hook_lifecycle.go:%d is handed %s. STANDARD OUTPUT CARRIES THE "+
+				"HOST'S CONTINUATION BYTES AND NOTHING ELSE; a diagnostic written there lands "+
+				"AHEAD of {\"decision\":\"proceed\"}, the generated OpenCode plugin's JSON.parse "+
+				"throws \"response is not JSON\", and on a gate callback nothing catches it, so "+
+				"the user's tool call is stopped. Hand this write %s instead",
+			where, write.Shape, write.Line, quoted, faultWriterStream)
+		return
+	}
+	assert.Fail(t, "a fault-writer report was handed a stream this guard cannot read",
+		"%s: the %s write at hook_lifecycle.go:%d is handed %s, and THIS GUARD CANNOT SEE THAT "+
+			"IT IS STANDARD ERROR. It reads source text, and resolves a bare name only to the "+
+			"expression that name is assigned once in this same function; it follows nothing "+
+			"else, and it refuses rather than assume, because standard output here stops the "+
+			"user's tool call on an OpenCode gate row. This is NOT a claim that you wrote to "+
+			"standard output. If this write is a REPORT, name the stream inline as %s, or bind "+
+			"it once in recordLifecycleFault to %s and hand the write that name. If it is the "+
+			"RECORD LINE, write it to the file os.OpenFile returned here: wrapping that file in "+
+			"a buffer or an encoder moves the write failure to a flush or a close, which is the "+
+			"loss this writer exists to report",
+		where, write.Shape, write.Line, quoted, faultWriterStream, faultWriterStream)
 }
 
 // TestEveryFailingArmOfTheFaultWriterTellsTheOperatorOnStandardError enumerates
@@ -1770,31 +2015,186 @@ func faultWriterReports(body []ast.Stmt) []string {
 // callback nothing catches that throw, so the user's tool call is STOPPED —
 // which is the founding defect of this slice.
 //
-// THE EARLIER GUARD ASSERTED THAT AN ARM SPOKE AND NEVER WHICH STREAM IT SPOKE
-// ON. Measured by two reviewers separately: changing ONE identifier in an arm,
-// cmd.ErrOrStderr() to cmd.OutOrStdout(), left the FULL UNFILTERED cmd/pasture
-// package green, and every internal/lifecycle package with it. Two of the five
-// arms — the open failure and the append failure — had no value pin at all, so
-// nothing anywhere read their stream.
+// THREE POPULATIONS, NAMED, BECAUSE A STRUCTURAL WITNESS IS ONLY AS WIDE AS THE
+// DOMAIN IT IS READ OVER. Each round that narrowed one of these left the
+// sentence above it unchanged and wider than the guard:
 //
-// THE ASSERTION IS STRUCTURAL BECAUSE THE POPULATION IS NOT ALL DRIVABLE. The
-// json.Marshal arm is unreachable by construction — every member of the record
-// map is a string or a slice of them, and encoding/json cannot refuse those —
-// and the append arm needs a write to fail on a file that opened, which no
-// portable input produces. Reading the function is what covers those two. The
-// drivable arms carry value pins as well:
-// TestTheFaultRecordSaysSoWhenTheStorePathNamesNoDirectory (the no-directory
-// arm), TestLifecycleFaultRecordIsBestEffort (the MkdirAll arm) and
-// TestTheFaultRecordOpenFailureIsReportedOnStandardErrorOnly (the open arm),
-// and the last of those reads stdout through the BUILT BINARY, so the stream
-// claim is measured on the bytes a host actually receives and not only in the
-// syntax tree.
+//   - BRANCHES. Every guarded branch must report. The reader collects if arms,
+//     else blocks, switch cases, select cases, loop bodies and the bodies of
+//     deferred closures. An earlier reader collected *ast.IfStmt alone, so a
+//     switch-shaped silent return kept the count at five and the sentence held
+//     while the population did not.
+//   - WRITES. Every write, WHATEVER THE CALL SHAPE, must reach one of the TWO
+//     sinks this writer has and no third: the operator, on cmd.ErrOrStderr(),
+//     or the RECORD ITSELF, on the file this same function opened — recognised
+//     by resolving the writer to the os.OpenFile call that produced it, so
+//     renaming the local cannot disguise a write. The reports are counted
+//     against the branch count; the record write is required to happen exactly
+//     once. An earlier reader collected fmt.Fprint, Fprintf and Fprintln
+//     alone. ONE ADDED LINE in the MkdirAll arm,
+//     cmd.OutOrStdout().Write([]byte("pasture: ...")) — the idiom
+//     emitLifecycleOutcome uses for stdout in this same file — left the FULL
+//     unfiltered cmd/pasture package green while the built binary put 76 bytes
+//     on standard output ahead of the proceed and the shipped plugin threw.
+//   - STREAM EXPRESSIONS. No expression anywhere in the function may NAME
+//     standard output or standard input, whatever is then done with it. This
+//     one needs no list of call shapes, so a writer wrapped, encoded onto or
+//     stored is refused where the stream is named.
+//
+// DISCARDED RESULTS ARE A FOURTH POPULATION AND ARE NOT HELD HERE. A loss route
+// need not be a branch — the fault writer's close was once a bare
+// `defer file.Close()` — and TestTheFaultWriterDiscardsNoResultThatCouldCarryALoss
+// is stated over that one.
+//
+// THE ASSERTION IS STRUCTURAL BECAUSE ONE ARM IS NOT DRIVABLE. The json.Marshal
+// arm is unreachable by construction: every member of the record map is a
+// string or a slice of them, and encoding/json cannot refuse those. Reading the
+// function is what covers it. EVERY OTHER ARM IS DRIVEN ON THE BYTES A HOST
+// RECEIVES, through the built binary:
+// TestTheFaultRecordRefusalQuotesThePathTheEnvironmentResolvedTo (the
+// no-directory arm), TestEveryDrivableFaultRecordLossIsMeasuredOnTheHostBytes
+// (the MkdirAll arm, the append arm and the close arm) and
+// TestTheFaultRecordOpenFailureIsReportedOnStandardErrorOnly (the open arm).
+//
+// A RETRACTION, BECAUSE A READER MEETS THE CLAIM HERE. This comment, and the
+// commit that wrote it, said the append arm "needs a write to fail on a file
+// that opened, which no portable input produces", and exempted it from a byte
+// measurement on that ground. THAT WAS WRONG. A symlink at the record path
+// pointing at /dev/full opens with O_APPEND|O_CREATE|O_WRONLY and then refuses
+// every write with ENOSPC — deterministic, binding on root as well, with no
+// loopback filesystem, no quota, no new dependency and no production seam. The
+// arm has a byte pin now, and the exemption is withdrawn rather than reworded.
 //
 // MUTATION, AT THE DEFECT SITE: change cmd.ErrOrStderr() to cmd.OutOrStdout()
-// in ANY ONE of the five arms. This test turns RED on each of the five.
+// in ANY ONE of the arms. This test turns RED on that arm and again over the
+// whole function.
+// MUTATION: ADD cmd.OutOrStdout().Write([]byte("leaked\n")) to any arm, leaving
+// its correct stderr report in place. This test turns RED: the added write is
+// in the write population, and the stream it names is in the forbidden set.
 // MUTATION: put a bare "return" back in any arm, of any branching shape. This
 // test turns RED.
+// MUTATION: rename this test and leave hook_lifecycle.go citing the old name.
+// This test turns RED on the citation, which two shipped comments carry.
 func TestEveryFailingArmOfTheFaultWriterTellsTheOperatorOnStandardError(t *testing.T) {
+	t.Parallel()
+
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, "hook_lifecycle.go", nil, parser.ParseComments)
+	require.NoError(t, err, "the production source must be readable beside its test")
+
+	var writer *ast.FuncDecl
+	for _, node := range file.Decls {
+		function, isFunction := node.(*ast.FuncDecl)
+		if isFunction && function.Name.Name == "recordLifecycleFault" {
+			writer = function
+			break
+		}
+	}
+	require.NotNil(t, writer, "recordLifecycleFault must exist to be the single writer of the record")
+
+	bound := faultWriterBindings(writer)
+
+	// The failure population is exactly the guarded branches of this function:
+	// the store path names no directory, the line cannot be encoded, the
+	// directory cannot be made, the file cannot be opened, the line cannot be
+	// appended, and the file cannot be closed.
+	arms := faultWriterArms(fileSet, writer)
+	require.Len(t, arms, 6,
+		"the failure population of this writer is six guarded branches, counted over if arms, "+
+			"else blocks, switch cases, select cases, loop bodies and deferred closure bodies "+
+			"alike; a seventh one has been added without this enumeration, which is how the same "+
+			"N-1 sweep happened twice")
+
+	// The stream is asserted here, arm by arm, so a failure names the branch.
+	for _, arm := range arms {
+		reports := 0
+		for _, write := range faultWriterWrites(fileSet, arm.Body, bound) {
+			assertFaultWriterStream(t,
+				fmt.Sprintf("%s at hook_lifecycle.go:%d", arm.Shape, arm.Line), write)
+			// A write whose stream this guard could not read still COUNTS AS
+			// A WORD: the assertion above has already refused it, and telling
+			// the same maintainer that the arm is silent as well would be the
+			// second false sentence about one input.
+			if faultWriterSinkOf(write) != sinkRecord {
+				reports++
+			}
+		}
+		require.NotZero(t, reports,
+			"%s at hook_lifecycle.go:%d leaves WITHOUT A WORD: the fault it was recording then "+
+				"has no durable record and nothing anywhere says so, which is the loss the "+
+				"placement of this file beside the database exists to prevent", arm.Shape, arm.Line)
+	}
+
+	// THE SAME CLAIM OVER THE WHOLE FUNCTION, so a write standing OUTSIDE every
+	// branching shape above cannot escape it. The arm loop can only see what the
+	// enumeration collected; this sees every write the writer makes.
+	reports, records := []faultWriterWrite{}, []faultWriterWrite{}
+	for _, write := range faultWriterWrites(fileSet, writer.Body.List, bound) {
+		assertFaultWriterStream(t, "over the whole of recordLifecycleFault", write)
+		if faultWriterSinkOf(write) == sinkRecord {
+			records = append(records, write)
+			continue
+		}
+		reports = append(reports, write)
+	}
+	assert.Len(t, reports, len(arms),
+		"this writer reports to the operator once per failing branch and never otherwise; a "+
+			"report count that differs from the branch count means a report stands somewhere "+
+			"the arm enumeration above cannot read, and the stream claim would not cover it")
+	assert.Len(t, records, 1,
+		"the record itself is written ONCE, to the file this function opened. A second write to "+
+			"that file is a second line for one fault, and a write to any other sink is bytes "+
+			"leaving this command by a route nothing here describes")
+
+	// NO EXPRESSION MAY NAME A STREAM THIS WRITER MAY NOT USE. The two loops
+	// above can only refuse writes whose call shape is recognised; this refuses
+	// the stream itself, wherever it is named and whatever it is handed to.
+	assert.Empty(t, faultWriterForbiddenStreams(fileSet, writer),
+		"recordLifecycleFault may name NO stream but %s. Every one of these reaches a stream "+
+			"whose bytes a host reads as the hook's answer, or reads the host's input, and a "+
+			"diagnostic that lands on standard output ahead of {\"decision\":\"proceed\"} stops "+
+			"the user's tool call on an OpenCode gate row", faultWriterStream)
+
+	// THE PRODUCTION SOURCE CITES THIS TEST BY NAME, TWICE, and nothing held
+	// either citation: renaming the guard in this file alone left the FULL
+	// unfiltered package green in 199s with two shipped comments pointing at a
+	// test that does not exist. The match is the WHOLE identifier, anchored on
+	// word boundaries, so a PREFIX rename cannot satisfy it either — the same
+	// pin internal/lifecycle/hostexit/hostexit_test.go carries.
+	source, readErr := os.ReadFile("hook_lifecycle.go")
+	require.NoError(t, readErr, "the production source must be readable beside its test")
+	assert.Regexp(t, regexp.MustCompile(`\b`+regexp.QuoteMeta(t.Name())+`\b`), string(source),
+		"hook_lifecycle.go names the guard that holds its fault writer shut, and this run is "+
+			"that guard; a citation of a test that does not exist sends a maintainer looking "+
+			"for something that is not there. The name must appear WHOLE: a citation of a "+
+			"LONGER identifier that merely starts with this name is a citation of something else")
+}
+
+// TestTheFaultWriterDiscardsNoResultThatCouldCarryALoss is stated over a
+// population that is NOT branches: the results this function throws away.
+//
+// WHY IT EXISTS. The enumeration above reads guarded branches, and a route that
+// loses the record need not be one. hook_lifecycle.go carried `defer
+// file.Close()` with its error discarded: a filesystem that defers the write
+// reports the full disk at close(2), the append arm never fires, and the record
+// is lost with NO WORD ON ANY STREAM. The arm count stayed at five, the write
+// count stayed equal to it, every value pin passed, and the whole tree was
+// green — twice measured, by two reviewers, on two separate probes. One of them
+// added `_, _ = file.Write([]byte("partial"))` to the writer and the package
+// was ok in 0.673s.
+//
+// WHAT IT REFUSES. A call statement that is not a report; a deferred or `go`
+// call that is not a closure whose body the enumeration above can read; an
+// assignment that binds the LAST result — which is where Go puts the error — to
+// the blank identifier.
+//
+// THE ONE EXEMPTION, STATED. fmt.Fprint, Fprintf and Fprintln as statements.
+// Their error is discarded because the report IS the last channel this writer
+// has: there is nowhere left to report a failure to report.
+//
+// MUTATION: put `defer file.Close()` back, or add `_, _ = file.Write(...)`, or
+// add any bare call statement to recordLifecycleFault. This test turns RED.
+func TestTheFaultWriterDiscardsNoResultThatCouldCarryALoss(t *testing.T) {
 	t.Parallel()
 
 	fileSet := token.NewFileSet()
@@ -1811,46 +2211,138 @@ func TestEveryFailingArmOfTheFaultWriterTellsTheOperatorOnStandardError(t *testi
 	}
 	require.NotNil(t, writer, "recordLifecycleFault must exist to be the single writer of the record")
 
-	// The failure population is exactly the guarded branches of this function:
-	// the store path names no directory, the line cannot be encoded, the
-	// directory cannot be made, the file cannot be opened, the line cannot be
-	// appended.
-	arms := faultWriterArms(fileSet, writer)
-	require.Len(t, arms, 5,
-		"the failure population of this writer is five guarded branches, counted over if arms, "+
-			"else blocks, switch cases, select cases and loop bodies alike; a sixth one has been "+
-			"added without this enumeration, which is how the same N-1 sweep happened twice")
+	discards := []string{}
+	note := func(position token.Pos, what string) {
+		discards = append(discards, fmt.Sprintf("hook_lifecycle.go:%d %s",
+			fileSet.Position(position).Line, what))
+	}
+	isReport := func(call *ast.CallExpr) bool {
+		selector, isSelector := call.Fun.(*ast.SelectorExpr)
+		if !isSelector {
+			return false
+		}
+		package_, isIdentifier := selector.X.(*ast.Ident)
+		if !isIdentifier || package_.Name != "fmt" {
+			return false
+		}
+		switch selector.Sel.Name {
+		case "Fprint", "Fprintf", "Fprintln":
+			return true
+		}
+		return false
+	}
+	ast.Inspect(writer, func(node ast.Node) bool {
+		switch statement := node.(type) {
+		case *ast.ExprStmt:
+			call, isCall := statement.X.(*ast.CallExpr)
+			if isCall && !isReport(call) {
+				note(call.Pos(), "throws away the result of "+sourceOf(call.Fun)+
+					", which is where a failure to write this record would be reported")
+			}
+		case *ast.DeferStmt:
+			if _, isClosure := statement.Call.Fun.(*ast.FuncLit); !isClosure {
+				note(statement.Defer, "defers "+sourceOf(statement.Call.Fun)+
+					" and throws away its result; a deferred close or flush is exactly where a "+
+					"filesystem that defers the write reports the full disk, so a discarded one "+
+					"is a record lost in silence")
+			}
+		case *ast.GoStmt:
+			if _, isClosure := statement.Call.Fun.(*ast.FuncLit); !isClosure {
+				note(statement.Go, "starts "+sourceOf(statement.Call.Fun)+
+					" and throws away its result")
+			}
+		case *ast.AssignStmt:
+			if len(statement.Rhs) != 1 || len(statement.Lhs) == 0 {
+				return true
+			}
+			if _, isCall := statement.Rhs[0].(*ast.CallExpr); !isCall {
+				return true
+			}
+			last, isIdentifier := statement.Lhs[len(statement.Lhs)-1].(*ast.Ident)
+			if isIdentifier && last.Name == "_" {
+				note(statement.TokPos, "binds the LAST result of "+
+					sourceOf(statement.Rhs[0])+" to the blank identifier, and the last result "+
+					"is where Go puts the error")
+			}
+		}
+		return true
+	})
 
-	// The stream is asserted here, arm by arm, so a failure names the branch.
-	for _, arm := range arms {
-		streams := faultWriterReports(arm.Body)
-		require.NotEmpty(t, streams,
-			"%s at hook_lifecycle.go:%d leaves WITHOUT A WORD: the fault it was recording then "+
-				"has no durable record and nothing anywhere says so, which is the loss the "+
-				"placement of this file beside the database exists to prevent", arm.Shape, arm.Line)
-		for _, stream := range streams {
-			assert.Equal(t, "cmd.ErrOrStderr()", stream,
-				"%s at hook_lifecycle.go:%d reports on %s. Standard output carries the host's "+
-					"continuation bytes and nothing else; a diagnostic written there lands AHEAD "+
-					"of {\"decision\":\"proceed\"}, the generated OpenCode plugin's JSON.parse "+
-					"throws \"response is not JSON\", and on a gate callback nothing catches it, "+
-					"so the user's tool call is stopped", arm.Shape, arm.Line, stream)
+	assert.Empty(t, discards,
+		"recordLifecycleFault may throw away NO result that could carry a lost record. Every "+
+			"route that loses the record must tell the operator on standard error, and a "+
+			"discarded error is a route with no branch, which the arm enumeration cannot see "+
+			"and no value pin reads. Check the result and report it with faultRecordLossSuffix "+
+			"like its siblings, or, if it genuinely cannot fail, bind it and say so where it is "+
+			"bound. The one exemption is fmt.Fprint, Fprintf and Fprintln, whose error has no "+
+			"channel left")
+}
+
+// TestEveryTestNameCitedByTheLifecycleSourceExists holds every citation
+// hook_lifecycle.go makes to a test.
+//
+// A TEST NAME WRITTEN INTO SHIPPED SOURCE IS A PROMISE THAT THE GUARD EXISTS.
+// Nothing held those promises: renaming a guard in the test file alone left the
+// full, unfiltered cmd/pasture package green in 199s while two production
+// comments sent a maintainer to a test that had gone. The worker of that round
+// had to hand-edit both citations, and the commit message says so — which is
+// itself the proof that no guard was standing over them.
+//
+// MUTATION: rename any test hook_lifecycle.go names, or misspell a citation.
+// This test turns RED and names the missing one.
+func TestEveryTestNameCitedByTheLifecycleSourceExists(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("hook_lifecycle.go")
+	require.NoError(t, err, "the production source must be readable beside its test")
+
+	declared := map[string]bool{}
+	entries, err := os.ReadDir(".")
+	require.NoError(t, err, "the package directory must be readable to find the tests it declares")
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		parsed, parseErr := parser.ParseFile(token.NewFileSet(), entry.Name(), nil, 0)
+		require.NoError(t, parseErr, "every test file of this package must parse")
+		for _, node := range parsed.Decls {
+			if function, isFunction := node.(*ast.FuncDecl); isFunction {
+				declared[function.Name.Name] = true
+			}
 		}
 	}
+	require.NotEmpty(t, declared,
+		"this test reads the package's own test files; finding none means it is looking in the "+
+			"wrong directory and would pass vacuously")
 
-	// THE SAME CLAIM OVER THE WHOLE FUNCTION, so a report written OUTSIDE every
-	// branching shape above cannot escape it. The arm loop can only see what the
-	// enumeration collected; this sees every report the writer makes.
-	whole := faultWriterReports(writer.Body.List)
-	assert.Len(t, whole, len(arms),
-		"this writer reports once per failing branch and never otherwise; a report count that "+
-			"differs from the branch count means a report stands somewhere the arm enumeration "+
-			"above cannot read, and the stream claim would not cover it")
-	for _, stream := range whole {
-		assert.Equal(t, "cmd.ErrOrStderr()", stream,
-			"every report of recordLifecycleFault writes to standard error, wherever in the "+
-				"function it stands; %s is not that stream", stream)
+	cited := regexp.MustCompile(`\bTest[A-Za-z0-9_]+`).FindAllString(string(source), -1)
+	require.NotEmpty(t, cited,
+		"hook_lifecycle.go cites the guards that hold its claims; finding no citation at all "+
+			"means either the pointers were deleted or this pattern no longer matches them, and "+
+			"an empty population makes the assertion below vacuous")
+
+	missing := []string{}
+	for _, name := range cited {
+		if !declared[name] && !alreadyListed(missing, name) {
+			missing = append(missing, name)
+		}
 	}
+	assert.Empty(t, missing,
+		"hook_lifecycle.go names these tests and this package declares none of them. A citation "+
+			"of a test that does not exist sends the next maintainer looking for a guard that is "+
+			"not there, and it is written in SHIPPED SOURCE where they will believe it. Rename "+
+			"the citation with the test, or delete it")
+}
+
+// alreadyListed reports whether a string is already in a slice. It keeps the report
+// above free of duplicates when one stale citation is written twice.
+func alreadyListed(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // TestTheFaultRecordRefusalQuotesThePathTheEnvironmentResolvedTo drives the
@@ -1914,6 +2406,14 @@ func TestTheFaultRecordRefusalQuotesThePathTheEnvironmentResolvedTo(t *testing.T
 	assert.NotContains(t, text, `the store path "" names no directory`,
 		"an empty quoted path is the mutant this test exists to catch")
 
+	assert.Empty(t, stdout.String(),
+		"standard output carries the host's continuation bytes and NOTHING else, and Claude "+
+			"Code's continuation is the empty body. THIS TEST ALREADY CAPTURED STDOUT AND NEVER "+
+			"READ IT, so the arm it drives had no byte pin at all: an added "+
+			"cmd.OutOrStdout().Write in this arm left the full package green while the built "+
+			"binary put the diagnostic ahead of {\"decision\":\"proceed\"}, where the generated "+
+			"OpenCode plugin's JSON.parse throws and a gate callback stops the user's tool call")
+
 	_, statErr := os.Stat(filepath.Join(work, lifecycleFaultRecordFile))
 	assert.True(t, os.IsNotExist(statErr),
 		"nothing may be written to the working directory when the store path names no directory")
@@ -1949,9 +2449,21 @@ func TestTheFaultRecordRefusalQuotesThePathTheEnvironmentResolvedTo(t *testing.T
 // bind a root user and this must fail the same way wherever it runs.
 //
 // MUTATION, AT THE DEFECT SITE: change cmd.ErrOrStderr() to cmd.OutOrStdout()
-// in the open arm of recordLifecycleFault. This test turns RED on the stdout
-// assertion. MUTATION: put a bare "return" in that arm. This test turns RED on
-// the stderr assertion.
+// in the open arm of recordLifecycleFault. This test turns RED on BOTH the
+// stderr assertion, because the diagnostic left that stream, AND the stdout
+// assertion, because it arrived on this one.
+//
+// THAT SENTENCE USED TO NAME THE STDOUT ASSERTION ALONE AND WAS FALSE. The
+// stderr check above it was a require, so the mutation called FailNow there and
+// the stdout assertion never ran: the only byte-level stdout pin of its round
+// was not evaluated by the mutation cited to justify it. The check is an assert
+// now, and the mutation was re-run to confirm it reaches both.
+//
+// MUTATION: put a bare "return" in that arm. This test turns RED on the stderr
+// assertion.
+// MUTATION: ADD one stdout write to that arm, leaving its stderr report in
+// place. This test turns RED on the stdout assertion alone, which is the case
+// no stream-change mutation can reach.
 func TestTheFaultRecordOpenFailureIsReportedOnStandardErrorOnly(t *testing.T) {
 	root := t.TempDir()
 	binary := filepath.Join(root, "lifecycle-cli")
@@ -1971,7 +2483,13 @@ func TestTheFaultRecordOpenFailureIsReportedOnStandardErrorOnly(t *testing.T) {
 	require.Equal(t, 0, run.ExitCode,
 		"this route is fail-open: the record is evidence for a maintainer and never a condition "+
 			"of the host outcome")
-	require.Contains(t, run.Stderr, "could not open its fault record",
+	// ASSERT AND NOT REQUIRE, ON PURPOSE. This was a require, so the documented
+	// mutation — cmd.ErrOrStderr() to cmd.OutOrStdout() in the open arm — failed
+	// HERE and called FailNow, and the stdout assertion below, the one byte-level
+	// stdout pin this test exists for, WAS NEVER EVALUATED. The cited mutation
+	// must reach the assertion it is cited for; run continues so that both the
+	// missing stderr and the leaked stdout are reported from one run.
+	assert.Contains(t, run.Stderr, "could not open its fault record",
 		"the open arm must reach its own diagnostic; if it does not, this test proves nothing "+
 			"about which stream that diagnostic uses")
 	assert.Contains(t, run.Stderr, faultRecordLossSuffix,
@@ -1983,4 +2501,117 @@ func TestTheFaultRecordOpenFailureIsReportedOnStandardErrorOnly(t *testing.T) {
 			"Code's continuation is the empty body. A diagnostic written here would arrive on "+
 			"OpenCode ahead of {\"decision\":\"proceed\"}, where the generated plugin's "+
 			"JSON.parse throws and a gate callback stops the user's tool call")
+}
+
+// devFull is the path of the character device that accepts an open and then
+// refuses every write with ENOSPC. It is what makes the append arm of the fault
+// writer drivable with no loopback filesystem, no quota and no production seam.
+const devFull = "/dev/full"
+
+// TestEveryDrivableFaultRecordLossIsMeasuredOnTheHostBytes drives the two
+// remaining reachable arms of recordLifecycleFault through the BUILT BINARY and
+// reads the bytes a host receives.
+//
+// WHY IT EXISTS. Of the writer's reachable arms, only the open arm was measured
+// on bytes. The MkdirAll arm was pinned in process, on outcome.Stderr alone, so
+// an ADDED cmd.OutOrStdout().Write beside its correct stderr report left the
+// full, unfiltered cmd/pasture package green while the built binary put 76
+// bytes on standard output ahead of {"decision":"proceed"} and the shipped
+// OpenCode plugin's JSON.parse threw on a gate row. The append arm was exempted
+// from a byte measurement altogether, on the ground that no portable input
+// produces a write failure on a file that opened. THE EXEMPTION RESTED ON A
+// FALSE PREMISE and it is withdrawn here rather than reworded.
+//
+// THE INPUTS ARE REAL AND BIND ROOT AS WELL.
+//   - The directory route: a --db path whose parent component is a FILE, so
+//     os.MkdirAll fails with ENOTDIR. The same path makes the store unopenable,
+//     so one input produces both the fault and the loss.
+//   - The append route: a SYMLINK at the record path pointing at /dev/full.
+//     os.OpenFile follows it and succeeds under O_APPEND|O_CREATE|O_WRONLY, its
+//     parent directory already exists so MkdirAll succeeds, and then every
+//     write returns ENOSPC. Nothing is simulated and nothing is mocked.
+//
+// The close arm is NOT driven here: /dev/full accepts the close, and a route
+// that reports at close(2) needs a filesystem this suite does not have. It is
+// held by the branch enumeration and by
+// TestTheFaultWriterDiscardsNoResultThatCouldCarryALoss, and that limit is
+// stated rather than dressed up as coverage.
+//
+// MUTATION, AT THE DEFECT SITE: change cmd.ErrOrStderr() to cmd.OutOrStdout()
+// in either arm. That subtest turns RED on BOTH its stderr assertion and its
+// stdout assertion. MUTATION: ADD a stdout write to either arm, leaving its
+// stderr report in place. That subtest turns RED on the stdout assertion.
+// MUTATION: put a bare "return" in either arm. That subtest turns RED on the
+// stderr assertion.
+func TestEveryDrivableFaultRecordLossIsMeasuredOnTheHostBytes(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "lifecycle-cli")
+	buildLifecycleBinary(t, binary)
+
+	t.Run("the directory for the record cannot be made", func(t *testing.T) {
+		store := t.TempDir()
+		blocker := filepath.Join(store, "afile")
+		require.NoError(t, os.WriteFile(blocker, []byte("not a directory\n"), 0o644),
+			"a parent component of the store path must be a FILE, so the record's directory "+
+				"cannot be created and opening the store is a real fault as well")
+
+		run := runLifecycleHook(t, binary, filepath.Join(blocker, "sub", "pasture.db"),
+			"PreToolUse", claudeFixture(t, "pre_tool_use_2_1_222.json"))
+
+		assert.Equal(t, 0, run.ExitCode,
+			"this route is fail-open: the record is evidence for a maintainer and never a "+
+				"condition of the host outcome")
+		assert.Contains(t, run.Stderr, "could not create the directory for its fault record",
+			"the MkdirAll arm must reach its own diagnostic; if it does not, this subtest "+
+				"proves nothing about which stream that diagnostic uses")
+		assert.Contains(t, run.Stderr, faultRecordLossSuffix,
+			"every route that loses the record ends with the one clause, so the operator reads "+
+				"the same sentence for the same loss whichever route produced it")
+		assert.Empty(t, run.Stdout,
+			"standard output carries the host's continuation bytes and NOTHING else, and "+
+				"Claude Code's continuation is the empty body. This arm had no byte pin at all: "+
+				"one added cmd.OutOrStdout().Write here left the whole tree green while the "+
+				"built binary put the diagnostic ahead of {\"decision\":\"proceed\"}, where the "+
+				"generated OpenCode plugin's JSON.parse throws and a gate callback stops the "+
+				"user's tool call")
+	})
+
+	t.Run("the line cannot be appended to a file that opened", func(t *testing.T) {
+		probe, probeErr := os.OpenFile(devFull, os.O_WRONLY, 0)
+		if probeErr != nil {
+			t.Skipf("this platform has no writable %s, which is what makes a real ENOSPC "+
+				"available without a loopback filesystem or a quota: %v", devFull, probeErr)
+		}
+		require.NoError(t, probe.Close())
+
+		store := t.TempDir()
+		database := filepath.Join(store, "not-a-database")
+		require.NoError(t, os.Mkdir(database, 0o755),
+			"the store path must be a directory, so opening it as a database is a real "+
+				"storage fault")
+		require.NoError(t, os.Symlink(devFull, filepath.Join(store, lifecycleFaultRecordFile)),
+			"the record path must resolve to a device that opens and then refuses every write, "+
+				"which is the append failure driven with nothing simulated")
+
+		run := runLifecycleHook(t, binary, database, "PreToolUse",
+			claudeFixture(t, "pre_tool_use_2_1_222.json"))
+
+		assert.Equal(t, 0, run.ExitCode,
+			"this route is fail-open: the record is evidence for a maintainer and never a "+
+				"condition of the host outcome")
+		assert.Contains(t, run.Stderr, "could not append to its fault record",
+			"the append arm must reach its own diagnostic; if it does not, this subtest proves "+
+				"nothing about which stream that diagnostic uses")
+		assert.Contains(t, run.Stderr, "no space left on device",
+			"the failure must be the REAL ENOSPC the device returned, quoted for the operator; "+
+				"a diagnostic that drops the cause tells them the record is gone and not why")
+		assert.Contains(t, run.Stderr, faultRecordLossSuffix,
+			"every route that loses the record ends with the one clause, so the operator reads "+
+				"the same sentence for the same loss whichever route produced it")
+		assert.Empty(t, run.Stdout,
+			"standard output carries the host's continuation bytes and NOTHING else, and "+
+				"Claude Code's continuation is the empty body. This arm was exempted from any "+
+				"byte pin on the ground that no portable input drives it; the exemption was "+
+				"wrong and this subtest is the input")
+	})
 }
