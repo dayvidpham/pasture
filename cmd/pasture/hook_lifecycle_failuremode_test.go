@@ -12,6 +12,7 @@ import (
 	"go/printer"
 	"go/token"
 	"os"
+	"net/url"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -2453,6 +2454,107 @@ func TestTheFaultWriterDiscardsNoResultThatCouldCarryALoss(t *testing.T) {
 			"like its siblings, or, if it genuinely cannot fail, bind it and say so where it is "+
 			"bound. The one exemption is fmt.Fprint, Fprintf and Fprintln, whose error has no "+
 			"channel left")
+}
+
+// openCodeBeltArtefacts are the two SHIPPED plugin copies, relative to the
+// repository root. The behavioural pin drives each one, because an operator
+// runs whichever their installation carries and a claim about the plugin's
+// behaviour must be measured on the bytes that ship.
+var openCodeBeltArtefacts = []string{
+	".opencode/plugins/pasture-lifecycle.ts",
+	"internal/target/opencode/assets/hooks/pasture-hooks.ts",
+}
+
+// TestTheOpenCodeBeltSurfacesTheDiagnosticItSendsTheOperatorTo drives the
+// empty-body belt of the SHIPPED plugin under Bun and requires the child's
+// standard error to reach a stream the operator has.
+//
+// WHY A BEHAVIOURAL PIN AND NOT A PHRASE. The belt line tells the operator to
+// read the pasture diagnostic on standard error. For one round that instruction
+// was FALSE FOR THE READER IT ADDRESSED: invokeLifecycle spawns with
+// stderr: "pipe", so fd 2 is captured rather than inherited, and the captured
+// value was used in exactly one place — the non-zero-exit throw. The belt route
+// is exit 0 with an empty body, so on every occasion the line fired, the
+// diagnostic it named had already been swallowed by the callback that printed
+// it, and reached neither the host's standard error nor anything else.
+// The content pin beside this one reads the sentence and cannot see that: a
+// phrase pin cannot tell whether the stream a phrase names is reachable from
+// the code that prints the phrase. Only running it can.
+//
+// THE INPUT IS THE READER THE BELT EXISTS FOR: a stand-in for an already
+// installed OLDER pasture that exits 0, writes NOTHING on stdout, and puts a
+// diagnostic on standard error. That is exactly the shape the belt was added to
+// survive, and it is driven here rather than described.
+//
+// MUTATION, AT THE DEFECT SITE: delete the forwarding line from
+// invokeLifecycle in internal/codegen/opencode_hooks.go and regenerate, or
+// delete it from a shipped artefact alone. This test turns RED on the token
+// assertion for that artefact: the belt line is still printed and the host
+// still continues, and the diagnostic is nowhere.
+func TestTheOpenCodeBeltSurfacesTheDiagnosticItSendsTheOperatorTo(t *testing.T) {
+	t.Parallel()
+
+	bun, err := exec.LookPath("bun")
+	require.NoError(t, err,
+		"Bun runs the generated OpenCode plugin, and this claim is about what that plugin does "+
+			"rather than about what it says; enter the flake dev shell")
+
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err, "resolve the repository root from cmd/pasture")
+
+	// A stand-in for an older installed pasture: exit 0, empty stdout, a
+	// diagnostic on standard error. No pasture build is needed, because the
+	// claim under test belongs to the PLUGIN and not to the binary.
+	const token = "pasture-diagnostic-token-the-operator-must-see"
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "pasture-stub")
+	require.NoError(t, os.WriteFile(stub,
+		[]byte("#!/bin/sh\nprintf '%s\\n' '"+token+"' >&2\nexit 0\n"), 0o700),
+		"write the stand-in binary the plugin will spawn")
+
+	for _, artefact := range openCodeBeltArtefacts {
+		t.Run(artefact, func(t *testing.T) {
+			module := (&url.URL{
+				Scheme: "file",
+				Path:   filepath.Join(root, filepath.FromSlash(artefact)),
+			}).String()
+			runner := filepath.Join(t.TempDir(), "belt.ts")
+			script := fmt.Sprintf(`
+import { toolExecuteBefore } from %q;
+const output = { args: { path: "a" } };
+await toolExecuteBefore({ tool: "read", sessionID: "s", callID: "c" }, output);
+console.log("HOST-CONTINUED");
+`, module)
+			require.NoError(t, os.WriteFile(runner, []byte(script), 0o600),
+				"write the harness that drives the belt route")
+
+			command := exec.Command(bun, runner)
+			command.Env = append(os.Environ(), "PASTURE_BIN="+stub)
+			var stdout, stderr bytes.Buffer
+			command.Stdout = &stdout
+			command.Stderr = &stderr
+			runErr := command.Run()
+			require.NoError(t, runErr,
+				"the belt must let the host continue, never throw: a throw on tool.execute.before "+
+					"is a GATE callback failing, which stops the user's tool call.\nstdout: %s\nstderr: %s",
+				stdout.String(), stderr.String())
+
+			require.Contains(t, stdout.String(), "HOST-CONTINUED",
+				"the user's action must proceed on this route; if it did not, this subtest proves "+
+					"nothing about what the operator was told")
+			require.Contains(t, stderr.String(), "and returned no decision",
+				"the belt line must be printed on this input; if it is not, the route under test "+
+					"was never taken and the token assertion below would pass vacuously")
+
+			assert.Contains(t, stderr.String(), token,
+				"the belt tells the operator to read the pasture diagnostic on standard error, so "+
+					"the diagnostic must BE on standard error. This plugin pipes the child's fd 2 "+
+					"rather than inheriting it, so the bytes reach no stream unless the plugin "+
+					"forwards them; without the forward, an operator who follows the instruction "+
+					"finds nothing and cannot tell a record-written fault from a record-lost one, "+
+					"which is the distinction the sentence exists to give them")
+		})
+	}
 }
 
 // spelledCounts maps the words AGENTS.md writes its route counts in to the

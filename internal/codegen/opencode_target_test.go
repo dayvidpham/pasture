@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -551,15 +552,46 @@ console.log(JSON.stringify({ continued: true, argsUnchanged: true }));
 	defer cancel()
 	proof := exec.CommandContext(ctx, bun, runner)
 	proof.Env = append(os.Environ(), "PASTURE_BIN="+fakeBinary)
-	output, err := proof.CombinedOutput()
+	// THE STREAMS ARE READ APART, AND THIS USED TO BE CombinedOutput. The
+	// assertion below required the combined bytes to EQUAL the confirmation, so
+	// the contract it stated was "the plugin emits nothing on any stream except
+	// its own stdout confirmation" — and that contract was the defect. The
+	// plugin spawns pasture with stderr piped rather than inherited, so the
+	// child's diagnostic reaches no stream unless the plugin forwards it, while
+	// the belt line it prints tells the operator to READ that diagnostic on
+	// standard error. Combined bytes cannot tell a confirmation from a
+	// diagnostic, so this proof could not have distinguished the behaviour that
+	// is wanted from the behaviour that was there.
+	//
+	// The stdout requirement is UNCHANGED and still exact: the host-facing
+	// confirmation is the whole of it and nothing may join it there.
+	var proofOut, proofErr bytes.Buffer
+	proof.Stdout = &proofOut
+	proof.Stderr = &proofErr
+	err = proof.Run()
 	if ctx.Err() != nil {
-		t.Fatalf("Bun fail-open belt proof exceeded its 20s bound: %v\n%s", ctx.Err(), output)
+		t.Fatalf("Bun fail-open belt proof exceeded its 20s bound: %v\nstdout: %s\nstderr: %s",
+			ctx.Err(), proofOut.String(), proofErr.String())
 	}
 	if err != nil {
-		t.Fatalf("an empty body aborted the generated named callback: %v\n%s", err, output)
+		t.Fatalf("an empty body aborted the generated named callback: %v\nstdout: %s\nstderr: %s",
+			err, proofOut.String(), proofErr.String())
 	}
-	if strings.TrimSpace(string(output)) != `{"continued":true,"argsUnchanged":true}` {
-		t.Fatalf("Bun fail-open belt output = %q, want the continue confirmation", output)
+	if strings.TrimSpace(proofOut.String()) != `{"continued":true,"argsUnchanged":true}` {
+		t.Fatalf("Bun fail-open belt stdout = %q, want the continue confirmation and nothing else",
+			proofOut.String())
+	}
+	// THE DIAGNOSTIC THE BELT SENDS THE OPERATOR TO MUST BE ON THE STREAM IT
+	// NAMES. The fake writes it on standard error at exit 0, which is the exact
+	// shape the belt exists for; the plugin captures it through the pipe and it
+	// is gone unless invokeLifecycle puts it back on a stream. Without the
+	// forward, this proof stayed green while an operator who followed the
+	// printed instruction found nothing and could not tell a record-written
+	// fault from a record-lost one.
+	if !strings.Contains(proofErr.String(), "pasture could not evaluate this lifecycle hook event") {
+		t.Fatalf("the generated plugin must FORWARD the child's diagnostic to standard error, "+
+			"because it pipes fd 2 rather than inheriting it and the line it prints on this route "+
+			"tells the operator to read that diagnostic there; stderr = %q", proofErr.String())
 	}
 }
 
