@@ -2615,3 +2615,111 @@ func TestEveryDrivableFaultRecordLossIsMeasuredOnTheHostBytes(t *testing.T) {
 				"wrong and this subtest is the input")
 	})
 }
+
+// openCodeBeltSources are the three files that must agree on the console line
+// the OpenCode plugin prints when pasture returns no decision: the generator
+// that composes it, and BOTH generated artefacts. They are listed relative to
+// the repository root.
+//
+// BOTH ARTEFACTS ARE READ AND NOT ONE. They are generated from the same source
+// and other guards hold them against it, but the claim here is what an OPERATOR
+// READS, and an operator reads whichever copy their installation shipped. A pin
+// on the generator alone would be a pin on the recipe and not on the meal.
+var openCodeBeltSources = []string{
+	"internal/codegen/opencode_hooks.go",
+	".opencode/plugins/pasture-lifecycle.ts",
+	"internal/target/opencode/assets/hooks/pasture-hooks.ts",
+}
+
+// openCodeBeltLinePrefix identifies the console line inside each of those files.
+const openCodeBeltLinePrefix = `console.error("Pasture did not evaluate " + event + " and returned no decision;`
+
+// retiredFaultRecordPromise is the clause this line USED TO END WITH, and it
+// was false on exactly the occasions the line is printed.
+//
+// A fault-record LOSS route is BY DEFINITION one where no record was written:
+// the store path names no directory, the directory cannot be created, the file
+// cannot be opened, the line cannot be appended, or the file cannot be closed.
+// On every one of those the operator was sent to read a file that is not there,
+// having just lost a gate evaluation. Standard error is the half that holds —
+// pasture reports every such fault there, and reports there too when it could
+// not place or write a record, quoting the path it tried.
+const retiredFaultRecordPromise = "Read the pasture diagnostic on standard error and the lifecycle " +
+	"fault record beside the pasture database."
+
+// TestTheOpenCodeBeltPromisesOnlyWhatTheFaultRecordDelivers holds the console
+// line of the OpenCode plugin's empty-body belt to what the product actually
+// leaves behind.
+//
+// WHY A TEST AND NOT A REVIEW NOTE. The line is GENERATED. Correcting the
+// generator without a pin leaves the wording resting on nothing: a later
+// regeneration from a reverted source, or a hand edit of one shipped artefact,
+// restores the false promise with every other guard green, because the drift
+// guards compare the artefacts WITH the generator and would happily agree on
+// the wrong sentence.
+//
+// WHAT IT REQUIRES. The retired clause appears in none of the three files; the
+// line still sends the operator to standard error, which is the half that is
+// true; the record is OFFERED and not PROMISED, with the reason a reader can
+// act on; and all three files carry the SAME line, byte for byte.
+//
+// MUTATION: restore the retired clause in any one of the three files. This test
+// turns RED on that file. MUTATION: reword the line in one artefact only, as a
+// stale regeneration would. This test turns RED on the agreement assertion.
+// MUTATION: drop the standard-error clause. This test turns RED.
+func TestTheOpenCodeBeltPromisesOnlyWhatTheFaultRecordDelivers(t *testing.T) {
+	t.Parallel()
+
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err, "resolve the repository root from cmd/pasture")
+
+	lines := map[string]string{}
+	for _, name := range openCodeBeltSources {
+		raw, readErr := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+		require.NoError(t, readErr,
+			"%s carries the console line an OpenCode operator reads when pasture returns no "+
+				"decision; if it has moved, this pin must move with it rather than pass "+
+				"vacuously", name)
+		text := string(raw)
+
+		assert.NotContains(t, text, retiredFaultRecordPromise,
+			"%s promises the operator a fault record UNCONDITIONALLY, and this line is printed "+
+				"on the occasions where there is none: every route that loses the record leaves "+
+				"no file to read. Offer the record and name what makes it missing, or say "+
+				"nothing about it", name)
+
+		var found string
+		for _, candidate := range strings.Split(text, "\n") {
+			if strings.Contains(candidate, openCodeBeltLinePrefix) {
+				require.Empty(t, found,
+					"%s prints this console line twice; two copies of one operator promise drift, "+
+						"and only one of them is the one that ran", name)
+				found = strings.TrimSpace(candidate)
+			}
+		}
+		require.NotEmpty(t, found,
+			"%s must still print the empty-body belt's console line. It is the ONLY report an "+
+				"OpenCode operator gets on this route from the plugin itself, and this pin is "+
+				"stated over its wording", name)
+		lines[name] = found
+
+		assert.Contains(t, found, "Read the pasture diagnostic on standard error first",
+			"%s must still send the operator to standard error. That is the half of the old "+
+				"sentence that was TRUE, and it is where pasture reports every such fault, "+
+				"including the case where it could not write a record", name)
+		assert.Contains(t, found, "A line may also have been appended to lifecycle-faults.jsonl",
+			"%s must OFFER the durable record rather than promise it: the file exists for most "+
+				"faults and for none of the loss routes, and an operator needs to know which "+
+				"case they are in before they go looking", name)
+		assert.Contains(t, found, "could not be placed or written leaves none",
+			"%s must say WHY the record may be absent. An offer with no reason leaves the "+
+				"operator unable to tell a missing file from a wrong path", name)
+	}
+
+	for _, name := range openCodeBeltSources[1:] {
+		assert.Equal(t, lines[openCodeBeltSources[0]], lines[name],
+			"the generator and every generated artefact must carry the SAME operator line, byte "+
+				"for byte. An operator reads whichever copy their installation shipped, so a "+
+				"copy that says something else is a second promise nobody reviewed")
+	}
+}

@@ -141,8 +141,16 @@ function acceptProceed(stdout, event) {
   // callback, so the callback continues and reports on the console. This belt
   // exists so that an OLD pasture binary, which emitted nothing on a fail-open
   // fault, still cannot abort the user's action.
+  //
+  // THE CONSOLE LINE SENDS THE OPERATOR TO STANDARD ERROR AND ONLY OFFERS THE
+  // RECORD. It used to promise both unconditionally. Standard error is where
+  // pasture reports every such fault, and it is also where it reports that it
+  // could not write a record at all; the durable line is the thing that may be
+  // missing, because a fault whose record cannot be placed or written leaves
+  // none. The old wording sent an operator who had just lost a gate evaluation
+  // to hunt for a file that is not there on exactly the routes it fires on.
   if (stdout.trim() === "") {
-    console.error("Pasture did not evaluate " + event + " and returned no decision; the host continues unevaluated. Read the pasture diagnostic on standard error and the lifecycle fault record beside the pasture database.");
+    console.error("Pasture did not evaluate " + event + " and returned no decision; the host continues unevaluated. Read the pasture diagnostic on standard error first: pasture reports every such fault there, including the case where it could not write a durable record. A line may also have been appended to lifecycle-faults.jsonl beside the pasture database, but a fault whose record could not be placed or written leaves none, and the diagnostic then quotes the path it tried.");
     return;
   }
   let response;
