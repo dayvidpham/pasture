@@ -169,7 +169,8 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 
 func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleStoreOpener) (response backend.HostResponse, err error) {
 	// durablePossible RECORDS THE ONE FACT A CALLER CANNOT OTHERWISE LEARN:
-	// whether this invocation ever got far enough for a row to exist.
+	// whether this invocation ever ATTEMPTED A WRITE, and so whether a row can
+	// exist for it.
 	//
 	// It exists because the caller's DEFAULT had to become the weakest claim.
 	// The stage table answered not-recorded for every error it did not
@@ -177,13 +178,25 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	// the journal appender can fail AFTER the commit succeeds — its own text
 	// says "the operation reported success" — and it carries no sentinel, so a
 	// committed row was reported to the operator as "no occurrence was recorded
-	// for it".
+	// for it". With the default weakened, the precise answer has to come from
+	// EVIDENCE, and this is the evidence.
 	//
-	// With the default weakened, the PRECISE answer has to come from evidence
-	// rather than from assumption, and this is the evidence: everything
-	// returned before the store is opened is provably before any durable write.
-	// ONE LOCAL, SET ONCE, on the line the durable region begins — the same
-	// shape as the panic recovery's stage, and for the same reason.
+	// THE REGION IS RE-DERIVED, AND IT IS NOT WHERE THE FIRST VERSION PUT IT.
+	// That version set the marker before open(in.DBPath) and called that "the
+	// line the durable region begins". OPENING A STORE WRITES NO OCCURRENCE.
+	// A --db under a read-only directory therefore reported record-unknown and
+	// sent the operator to "the lifecycle occurrence journal" of a database
+	// whose own cause says "unable to open database file" — advice that cannot
+	// be followed, about a file that does not exist.
+	//
+	// A ROW CAN EXIST ONLY WHERE A WRITE WAS ATTEMPTED, and in this function
+	// exactly two statements attempt one: the invalid-capture receipt, and the
+	// shared delivery commit. Nothing else here writes — not the open, not the
+	// service construction, not the gate. So the marker is set immediately
+	// before each of those two, and TestTheDurableRegionBeginsAtItsWrites reads
+	// this function and refuses any write not preceded by it: the producers of
+	// this evidence are a population, and this slice's whole lesson is that an
+	// unenumerated population is where the defect lives.
 	durablePossible := false
 	defer func() {
 		if err != nil && !durablePossible {
@@ -239,8 +252,6 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("The native payload exceeds the %d-byte bound.", model.MaxNativePayloadBytes), "Ingress never truncates retained evidence.", "No database was opened.", "Reduce the host payload below the static bound.", nil)
 	}
 	capture := dispatch.parse(raw, event, in.HostVersion)
-	// FROM HERE A ROW MAY EXIST. See durablePossible.
-	durablePossible = true
 	tracker, err := open(in.DBPath)
 	if err != nil {
 		return backend.HostResponse{}, err
@@ -267,6 +278,8 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 		if refusal != nil {
 			return backend.HostResponse{}, refusal
 		}
+		// A WRITE IS ATTEMPTED HERE. See durablePossible.
+		durablePossible = true
 		if _, err = service.Receive(ctx, warrant, capture.delivery); err != nil {
 			return backend.HostResponse{}, err
 		}
@@ -300,6 +313,8 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	// Valid captures converge on the shared delivery commit tail with the raw
 	// surface (URD R4.2), so the verification sequence cannot drift between
 	// the two handlers.
+	// A WRITE IS ATTEMPTED HERE. See durablePossible.
+	durablePossible = true
 	committed, err := deliveryCommit(ctx, service, dispatch, event, capture.delivery)
 	if err != nil {
 		return backend.HostResponse{}, err
@@ -481,9 +496,21 @@ var ErrLifecycleBeforeDurableWrite = errors.New("the lifecycle fault happened be
 // and returns the unchanged unsupported-harness error with nil bytes, so nothing
 // is written to stdout.
 func HookLifecycleNative(ctx context.Context, in HookLifecycleInput) ([]byte, error) {
+	// THIS REFUSAL NEVER REACHED hookLifecycle's WRAPPER, so it fell to the
+	// caller's weakest-claim default and told an operator its occurrence "MAY
+	// OR MAY NOT exist" and to read the record "beside the database" — on a run
+	// where the filesystem shows no database was ever created, and where this
+	// function's own doc and the error's own When field both say nothing was
+	// opened. One code path away, the withheld-event refusal answered
+	// correctly, because that one is raised inside the region the wrapper
+	// covers.
+	//
+	// The wrapper is a property of the REGION, not of one function, so every
+	// refusal raised before the first write attempt carries the sentinel
+	// wherever it is raised.
 	dispatch, err := dispatchLifecycle(in.Harness)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrLifecycleBeforeDurableWrite, err)
 	}
 	response, err := HookLifecycleResponse(ctx, in)
 	if err != nil {
@@ -538,10 +565,22 @@ type captureDispositionAdvice struct {
 	Reason string
 	// Fix is the instruction that follows from THAT reason.
 	Fix string
-	// ReachedIdentities says whether the parser got as far as looking for the
-	// event's identities. A payload that never decoded did not, and telling its
-	// reader which identities went unbound describes a step that never ran.
-	ReachedIdentities bool
+	// NamesIdentities says whether the message may name the event's identities
+	// AT ALL, and it deliberately no longer claims a RESULT for them.
+	//
+	// IT WAS ReachedIdentities, KEYED ON THE DISPOSITION, AND THE THREE CAUSES
+	// OF ONE DISPOSITION DISAGREE ON EXACTLY THAT QUESTION. A payload carrying
+	// every identity present, correctly named and usable is refused for an
+	// unknown MEMBER, and the allowed-member loop returns BEFORE the identity
+	// loop — so "none of the identities this event requires was bound" reported
+	// the result of a step that did not run. That is not imprecision about
+	// which cause fired; it is an inspection result invented for an inspection
+	// that never happened.
+	//
+	// So where the causes disagree, the message NAMES the identities as context
+	// and asserts nothing about them. Where a single cause is certain — the
+	// decode failures — it names nothing, because nothing was looked at.
+	NamesIdentities bool
 }
 
 // captureDispositionAdviceByDisposition covers every disposition a parser on
@@ -560,20 +599,20 @@ var captureDispositionAdviceByDisposition = map[model.CaptureDisposition]capture
 		Fix: "Send well-formed JSON. Nothing about the fields or the host version was inspected on this route, " +
 			"because ingress stopped at the decode; capture the exact bytes the host sent and check them with a " +
 			"JSON parser first.",
-		ReachedIdentities: false,
+		NamesIdentities: false,
 	},
 	model.CaptureInvalidUTF8: {
 		Reason: "the payload is not valid UTF-8, so it was never decoded",
 		Fix: "Send UTF-8. Nothing about the fields or the host version was inspected on this route, because ingress " +
 			"stopped at the encoding check; the usual cause is a payload spliced together from bytes in another " +
 			"encoding, or truncated mid-character.",
-		ReachedIdentities: false,
+		NamesIdentities: false,
 	},
 	model.CaptureDuplicateField: {
 		Reason: "the payload repeats a field, so which value was meant cannot be decided",
 		Fix: "Send each field once. Pasture will not guess between two values for one field, and no field or version " +
 			"check was reached on this route; look for a payload assembled by concatenation or merged from two sources.",
-		ReachedIdentities: false,
+		NamesIdentities: false,
 	},
 	// ONE DISPOSITION, THREE CAUSES, AND THE SENTENCE NAMED ONLY ONE OF THEM.
 	// A payload carrying EVERY identity field under the EXACT declared name is
@@ -592,8 +631,8 @@ var captureDispositionAdviceByDisposition = map[model.CaptureDisposition]capture
 		Reason: "the payload does not match the shape this event's registration declares: either an identity " +
 			"field is missing, renamed or unusable, or the payload carries a member the registration does " +
 			"not allow",
-		Fix:               "", // composed per call: it names the event and the host version.
-		ReachedIdentities: true,
+		Fix:             "", // composed per call: it names the event and the host version.
+		NamesIdentities: true,
 	},
 	model.CaptureEventMismatch: {
 		Reason: "the payload describes a different event from the one named on the command line",
@@ -601,8 +640,19 @@ var captureDispositionAdviceByDisposition = map[model.CaptureDisposition]capture
 		// The event claim is checked BEFORE the identities, so this one did not
 		// reach them either: the payload decoded, and the refusal happened at
 		// the coordinate rather than at a field.
-		ReachedIdentities: false,
+		NamesIdentities: false,
 	},
+}
+
+// CaptureDispositionAdvice exposes the disposition advice table so a test can
+// require every disposition this build states advice for to be DRIVEN on a real
+// invocation. It returns a copy; nothing may edit the table through it.
+func CaptureDispositionAdvice() map[model.CaptureDisposition]captureDispositionAdvice {
+	copied := make(map[model.CaptureDisposition]captureDispositionAdvice, len(captureDispositionAdviceByDisposition))
+	for disposition, advice := range captureDispositionAdviceByDisposition {
+		copied[disposition] = advice
+	}
+	return copied
 }
 
 // unbindableCaptureError says that an event WAS NOT EVALUATED, and says which
@@ -646,21 +696,22 @@ func unbindableCaptureError(
 		reason = "the payload could not be classified, and this build states no reason for that classification"
 	}
 
-	// THE IDENTITY CLAUSE IS ONLY SPOKEN WHERE THE IDENTITIES WERE REACHED. A
-	// payload that never decoded, or that was refused at the event coordinate,
-	// never got as far as looking for them, and naming them there describes a
-	// step that did not run.
+	// THE CLAUSE NAMES THE IDENTITIES AND ASSERTS NOTHING ABOUT THEM. It used
+	// to say they "was not bound", which is an inspection RESULT — and on the
+	// unknown-member cause the inspection never ran, because the allowed-member
+	// loop returns before the identity loop. Naming them is still worth doing:
+	// the reader needs to know which fields the event requires in order to
+	// check them. Claiming they failed is not.
 	missing := ""
 	switch {
-	case !advice.ReachedIdentities:
+	case !advice.NamesIdentities:
 		missing = ""
 	case len(required) == 1:
-		missing = fmt.Sprintf(", so the %s identity this event requires was not bound", required[0])
+		missing = fmt.Sprintf("; the identity this event requires is %s", required[0])
 	case len(required) > 1:
-		missing = fmt.Sprintf(", so none of the identities this event requires was bound (%s)",
-			strings.Join(required, ", "))
+		missing = fmt.Sprintf("; the identities this event requires are %s", strings.Join(required, ", "))
 	case len(event.IdentityFields()) == 0:
-		missing = ", and this event declares no identities, so the payload itself could not be classified"
+		missing = "; this event declares no identities, so the payload itself could not be classified"
 	}
 
 	why := reason + missing

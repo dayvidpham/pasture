@@ -1099,47 +1099,60 @@ func markdownSection(t *testing.T, document, heading string) string {
 	return heading + rest[:end]
 }
 
-// distinctivePhrases reduces each durable-state sentence to the fragment that
-// makes it THAT stage's claim, so a forbidden sentence is recognised even when
-// it has been reworded.
-//
-// WHY IT EXISTS. The forbidden lists were literals, and deriving them from the
-// sentence table fixed the set while narrowing the MATCH: a paraphrase of one
-// stage's claim appearing in another stage's arm was caught before and green
-// after. Deriving where the values come from is not the same as preserving what
-// the guard recognises.
-func distinctivePhrases(sentences []string) []string {
-	// Each key is a full sentence; each value is the phrase no other stage's
-	// sentence contains and no rewording of this one can drop without changing
-	// what it claims.
-	distinctive := map[string]string{
-		"no occurrence was recorded for it":                                    "no occurrence was recorded",
-		"the delivery for it IS committed in the lifecycle occurrence journal": "IS committed in the lifecycle occurrence journal",
-		"an occurrence for it MAY OR MAY NOT exist":                            "MAY OR MAY NOT exist",
-	}
-	phrases := make([]string, 0, len(sentences))
-	for _, sentence := range sentences {
-		phrase, known := distinctive[sentence]
-		if !known {
-			// A sentence with no distinctive phrase falls back to itself, which
-			// is the narrow behaviour; the coverage assertion below names it so
-			// the gap cannot pass unseen.
-			phrase = sentence
-		}
-		phrases = append(phrases, phrase)
-	}
-	return phrases
+// durableStateWords are the words a claim about the journal cannot be made
+// without. A rewording that drops all of them has stopped making the claim,
+// which is why matching on them recognises the CLASS rather than a wording.
+var durableStateWords = []string{"occurrence", "journal", "recorded", "committed"}
+
+// nonClaimPhrases are the places this diagnostic legitimately mentions one of
+// those words WITHOUT making a durable-state claim. They are removed before the
+// check, and each is listed with the reason it is not a claim.
+var nonClaimPhrases = []string{
+	// The FAULT RECORD FILE is a different artefact from the occurrence
+	// journal: it is where the fault itself is appended, and pointing at it
+	// says nothing about whether a row exists.
+	"read the fault record file beside the database for this invocation",
 }
 
-// allDurableStateSentences is every declared stage's sentence as a slice.
-func allDurableStateSentences() []string {
-	sentences := durableStateSentences()
-	all := make([]string, 0, len(sentences))
-	for _, sentence := range sentences {
-		all = append(all, sentence)
+// assertNoSecondDurableStateClaim requires the impact clause to make ITS OWN
+// stage's claim and no other.
+//
+// It removes the expected sentence and the phrases that mention a journal
+// without claiming anything about one, then requires the remainder to be silent
+// about the occurrence altogether. Pass an empty expectation for an arm that
+// may make no claim at all.
+func assertNoSecondDurableStateClaim(t *testing.T, stderr, expected string) {
+	t.Helper()
+
+	const opens = "impact: "
+	start := strings.Index(stderr, opens)
+	require.NotEqual(t, -1, start,
+		"the diagnostic must still carry an impact clause; this check reads that clause and would "+
+			"pass vacuously without it")
+	clause := stderr[start+len(opens):]
+	if ends := strings.Index(clause, "; fix: "); ends != -1 {
+		clause = clause[:ends]
 	}
-	sort.Strings(all)
-	return all
+
+	residue := strings.ToLower(clause)
+	if expected != "" {
+		require.Contains(t, residue, strings.ToLower(expected),
+			"the impact clause must make its own stage's claim before this check can ask what else "+
+				"it says")
+		residue = strings.ReplaceAll(residue, strings.ToLower(expected), " ")
+	}
+	for _, phrase := range nonClaimPhrases {
+		residue = strings.ReplaceAll(residue, strings.ToLower(phrase), " ")
+	}
+
+	for _, word := range durableStateWords {
+		assert.NotContains(t, residue, word,
+			"the impact clause says something ELSE about the occurrence after its own stage's claim "+
+				"is removed, and %q is the word it used. A durable-state claim cannot be made "+
+				"without naming the occurrence, the journal or the recording of one, so this "+
+				"catches any rewording of another stage's claim rather than the one wording that "+
+				"happened to be tried.\nremaining: %q", word, residue)
+	}
 }
 
 // durableStateSentences is the durable-state sentence of every declared stage,
@@ -1147,10 +1160,17 @@ func allDurableStateSentences() []string {
 // what the set is. A stage added without a sentence here is caught by the
 // coverage check in the sweep, which reads the declared set from IsValid.
 func durableStateSentences() map[hostexit.FaultStage]string {
+	// THE WHOLE CLAUSE, NOT A FRAGMENT OF IT. The claim check below removes the
+	// expected sentence and then requires the remainder to be silent about the
+	// occurrence; a fragment leaves the rest of the stage's own sentence behind
+	// and the stage accuses itself. Each of these is the exact recordClause its
+	// stage renders.
 	return map[hostexit.FaultStage]string{
-		hostexit.FaultStageNotRecorded:   "no occurrence was recorded for it",
-		hostexit.FaultStageRecorded:      "the delivery for it IS committed in the lifecycle occurrence journal",
-		hostexit.FaultStageRecordUnknown: "an occurrence for it MAY OR MAY NOT exist",
+		hostexit.FaultStageNotRecorded: "no occurrence was recorded for it",
+		hostexit.FaultStageRecorded: "the delivery for it IS committed in the lifecycle occurrence journal, " +
+			"so look for it there rather than concluding it was lost",
+		hostexit.FaultStageRecordUnknown: "pasture stopped before it learned whether this event was recorded, " +
+			"so an occurrence for it MAY OR MAY NOT exist — look for it in the lifecycle occurrence journal",
 	}
 }
 
@@ -1230,11 +1250,6 @@ func TestEveryFaultStageRendersItsOwnDurableStateOnEveryArm(t *testing.T) {
 		if !stage.IsValid() {
 			continue
 		}
-		if sentence, hasSentence := says[stage]; hasSentence {
-			assert.NotEqual(t, sentence, distinctivePhrases([]string{sentence})[0],
-				"stage %q has no DISTINCTIVE PHRASE, so it is forbidden only as an exact string and "+
-					"a paraphrase of it would leak into another arm unseen", stage.String())
-		}
 		_, covered := stages[stage]
 		assert.True(t, covered,
 			"stage %q is declared and this sweep does not ask about it. Add the sentence it must "+
@@ -1265,22 +1280,23 @@ func TestEveryFaultStageRendersItsOwnDurableStateOnEveryArm(t *testing.T) {
 					"the diagnostic must state the durable state THIS CALLER DECLARED. The stage is "+
 						"the caller's answer to one question — was the delivery written? — and an arm "+
 						"that answers it differently tells the operator something the caller never said")
-				// THE MATCH IS ON THE DISTINCTIVE PHRASE, NOT THE WHOLE
-				// SENTENCE. Deriving the SET is not the same as preserving what
-				// the guard RECOGNISES: the literal lists this replaced happened
-				// to match short fragments, so a PARAPHRASE — "the row IS
-				// committed in the lifecycle occurrence journal" for "the
-				// delivery for it IS committed in ..." — was caught. Matching
-				// only the exact derived sentence let the paraphrase through.
-				// Each stage's sentence is reduced to the phrase that makes it
-				// that stage's claim, so a reworded leak is still a leak.
-				for _, forbidden := range distinctivePhrases(expected.Forbids) {
-					assert.NotContains(t, outcome.Stderr, forbidden,
-						"the diagnostic states a durable state BELONGING TO ANOTHER STAGE. Two of these "+
-							"sentences were hard-coded into arms of the impact switch, so an arm went on "+
-							"claiming nothing was recorded after a route existed that commits a row before "+
-							"it faults")
-				}
+				// THE RULE RECOGNISES THE CLAIM, NOT A WORDING.
+				//
+				// Forbidding each other stage's SENTENCE recognised only that
+				// sentence; reducing it to a distinctive PHRASE recognised only
+				// the one paraphrase that had caught it. Both are rules tuned
+				// to their own example: two further paraphrases of that same
+				// leak passed tree-wide, one of them nothing but a change of
+				// case.
+				//
+				// A durable-state claim cannot be made without naming what it
+				// is about — the occurrence, the journal, or the recording of
+				// one. So the impact clause has ITS OWN stage's sentence
+				// removed, and whatever remains may not talk about those things
+				// at all. Any rewording of any other stage's claim is caught,
+				// because a rewording that drops every one of those words has
+				// stopped making the claim.
+				assertNoSecondDurableStateClaim(t, outcome.Stderr, expected.Says)
 				assert.Contains(t, outcome.Stderr, "durable state "+stage.String(),
 					"the machine-readable stage must agree with the sentence beside it")
 			})
@@ -1310,12 +1326,75 @@ func TestTheBlockingArmMakesNoDurableStateClaim(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, hostexit.ExitBlock, outcome.Exit, "this pair must reach the blocking arm")
 
-	// THE FORBIDDEN LIST IS DERIVED, for the same reason it is derived in the
-	// sweep: written out, it could not grow, so a fourth stage's sentence could
-	// appear in this arm with nothing to notice.
-	for _, claim := range distinctivePhrases(allDurableStateSentences()) {
-		assert.NotContains(t, outcome.Stderr, claim,
-			"the blocking arm does not read the stage, so any durable-state sentence written into "+
-				"it would be a claim made on behalf of every stage that can reach it")
+	// The blocking arm may make NO durable-state claim at all, so nothing is
+	// removed before the check: the whole impact clause must be free of them.
+	assertNoSecondDurableStateClaim(t, outcome.Stderr, "")
+}
+
+// TestTheEvidenceWordAgreesWithTheEvidenceAndWithTheAdviceBesideIt guards the
+// "host evidence" clause, which every fault line carries and which nothing read.
+//
+// TWO MUTATIONS WERE ENTIRELY GREEN TREE-WIDE. Inventing a citation rendered a
+// line that CONTRADICTS ITSELF — it cited Claude documentation on a Codex row
+// while the advice beside it said the row carries no evidence. Erasing a
+// present citation told a Claude operator the row can NEVER block, on the same
+// line that invites the opt-in WHICH WILL BLOCK IT. The shipped bytes are
+// correct today, so this is a MISSING GUARD and not an untruth: nothing anywhere
+// named the word, asserted the absent case, or tied it to the advice.
+//
+// THE CLAIM IS AGREEMENT, NOT WORDING. The evidence word and the fail-closed
+// advice are two statements about one fact, rendered from the same Fault by
+// different code, so the guard requires them to say the same thing rather than
+// requiring either to say a particular thing.
+//
+// MUTATION: render the evidence word from anything but fault.Evidence, or make
+// the fail-closed advice ignore it. This test turns RED on the pair that
+// disagrees.
+func TestTheEvidenceWordAgreesWithTheEvidenceAndWithTheAdviceBesideIt(t *testing.T) {
+	t.Parallel()
+
+	// A blocking row under the opt-in is the pair where the two statements meet:
+	// with evidence it BLOCKS, without evidence it continues and must say why.
+	render := func(t *testing.T, evidence pastureruntime.FailureEvidence) hostexit.Outcome {
+		t.Helper()
+		outcome, ok := hostexit.ForFault(hostexit.Fault{
+			Mode:         pastureruntime.FailureExitTwoBlocks,
+			DeclaredMode: pastureruntime.FailureExitTwoBlocks,
+			Evidence:     evidence,
+			Policy:       hostexit.FaultFailClosed,
+			Stage:        hostexit.FaultStageNotRecorded,
+			Continuation: hostexit.EmptyContinuation(),
+			Cause:        errors.New("the evidence guard's cause"),
+		})
+		require.True(t, ok)
+		return outcome
 	}
+
+	cited := render(t, pastureruntime.FailureEvidence{Source: citedSource})
+	assert.Contains(t, cited.Stderr, "host evidence "+citedSource,
+		"a row that CITES its host evidence must render that citation, so a reader can go and "+
+			"check the claim pasture is refusing on")
+	assert.NotContains(t, cited.Stderr, "host evidence none",
+		"and it must not also say it has none: the word is rendered from the evidence, so it "+
+			"cannot disagree with it")
+	assert.Equal(t, hostexit.ExitBlock, cited.Exit,
+		"this pair must reach the blocking arm, or the agreement below is about the wrong line")
+	assert.NotContains(t, cited.Stderr, "carries no host evidence for it",
+		"THE TWO STATEMENTS MUST AGREE. This row cites evidence AND blocks; telling the reader it "+
+			"carries none, on the line that just refused their operation, leaves them unable to "+
+			"tell which half to believe")
+
+	absent := render(t, pastureruntime.FailureEvidence{})
+	assert.Contains(t, absent.Stderr, "host evidence none",
+		"a row with NO citation must say so; nothing anywhere asserted the absent case, so the "+
+			"word could have rendered anything at all for it")
+	assert.NotContains(t, absent.Stderr, citedSource,
+		"and it must not cite a document it does not have — an invented citation sends a reader to "+
+			"another harness's documentation to explain a refusal it does not describe")
+	assert.NotEqual(t, hostexit.ExitBlock, absent.Exit,
+		"an unevidenced row may not refuse a user's operation, which is the rule the word exists "+
+			"to report")
+	assert.Contains(t, absent.Stderr, "carries no host evidence for it",
+		"and the advice must agree with the word: this row continued BECAUSE it has no citation, "+
+			"and that is the one action its operator has")
 }

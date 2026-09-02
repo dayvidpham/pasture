@@ -4046,6 +4046,20 @@ func TestTheOuterPanicRecoveryNeverClaimsMoreThanItsRegionCanSupport(t *testing.
 		fileSet.Position(goStatement).Line)
 }
 
+// claudePayloadWithAddedMember is the authentic Claude fixture plus ONE member
+// this build does not declare: every identity present, correctly named and
+// usable, and refused all the same.
+func claudePayloadWithAddedMember(t *testing.T) []byte {
+	t.Helper()
+	var members map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(claudeFixture(t, "pre_tool_use_2_1_222.json"), &members),
+		"the committed fixture must decode")
+	members["a_field_this_build_does_not_declare"] = json.RawMessage(`"x"`)
+	extended, err := json.Marshal(members)
+	require.NoError(t, err)
+	return extended
+}
+
 // TestEachRefusalDispositionCarriesTheFixThatFollowsIt drives one payload per
 // producible disposition through the built binary and reads what the operator
 // is told to DO about it.
@@ -4072,15 +4086,15 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 	const identityAdvice = "Compare the payload with this build's"
 	const versionAdvice = "is the version the host actually runs"
 
-	for _, row := range []struct {
-		Name              string
-		Payload           []byte
-		Says              string
-		Tells             string
-		ReachedIdentities bool
+	refusals := []struct {
+		Name            string
+		Payload         []byte
+		Says            string
+		Tells           string
+		NamesIdentities bool
 		// MentionsVersion says whether the HOST VERSION is a plausible cause of
 		// THIS refusal, and it is judged per disposition rather than derived
-		// from ReachedIdentities. The two are not the same question: an event
+		// from NamesIdentities. The two are not the same question: an event
 		// mismatch never reaches the identity lookup, yet the version is a real
 		// cause of it, because the event a host reports can change between
 		// versions. A decode failure has neither.
@@ -4105,12 +4119,24 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 			Tells:   "Send each field once",
 		},
 		{
-			Name:              "a payload whose identity fields are renamed",
-			Payload:           []byte(`{"renamed":"s","hook_event_name":"PreToolUse","tool_name":"R","tool_input":{}}`),
-			Says:              "either an identity field is missing, renamed or unusable",
-			Tells:             identityAdvice,
-			ReachedIdentities: true,
-			MentionsVersion:   true,
+			Name:            "a payload whose identity fields are renamed",
+			Payload:         []byte(`{"renamed":"s","hook_event_name":"PreToolUse","tool_name":"R","tool_input":{}}`),
+			Says:            "either an identity field is missing, renamed or unusable",
+			Tells:           identityAdvice,
+			NamesIdentities: true,
+			MentionsVersion: true,
+		},
+		{
+			// THE ROW THE WRITTEN LIST OMITTED, which is why nothing caught
+			// the inspection result invented for it. It shares a disposition
+			// with the renamed-identity row and differs in the cause that
+			// fired.
+			Name:            "a payload carrying a member the registration does not declare",
+			Payload:         claudePayloadWithAddedMember(t),
+			Says:            "carries a member the registration does not allow",
+			Tells:           identityAdvice,
+			NamesIdentities: true,
+			MentionsVersion: true,
 		},
 		{
 			Name:            "a payload that declares a different event",
@@ -4119,7 +4145,26 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 			Tells:           "Invoke the hook with the event the payload actually describes",
 			MentionsVersion: true,
 		},
-	} {
+	}
+	// EVERY DISPOSITION THIS BUILD STATES ADVICE FOR MUST BE DRIVEN HERE,
+	// derived from the production advice table rather than trusted to a list.
+	//
+	// THE LIMIT, STATED, BECAUSE IT IS THE ONE THAT BIT. This derives
+	// DISPOSITIONS, and the population that matters is CAUSES. One disposition
+	// carries three of them, and the row that exposed an inspection result
+	// invented for a step that never ran was missing from the written list
+	// while its disposition was already covered — so this derivation would NOT
+	// have caught that omission either. Enumerating causes needs the classifier
+	// split, which lives in the ingress and the occurrence model and is not
+	// this slice's to make. What this closes is a disposition added with no
+	// payload driving it at all.
+	require.Len(t, refusals, len(handlers.CaptureDispositionAdvice())+1,
+		"every disposition this build states advice for must be driven here, and one disposition is "+
+			"driven TWICE because two of its causes render differently. A disposition added without a "+
+			"payload is advice nobody has read on a real invocation; a cause added without one is "+
+			"invisible to this count, which is the limit stated above")
+
+	for _, row := range refusals {
 		t.Run(row.Name, func(t *testing.T) {
 			store := t.TempDir()
 			database := filepath.Join(store, "pasture.db")
@@ -4146,14 +4191,19 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 						"the refusal, so sending the reader to check it costs them an hour")
 			}
 
-			if row.ReachedIdentities {
-				assert.Contains(t, run.Stderr, "none of the identities this event requires was bound",
-					"this route DID reach the identity lookup, so it names what the event requires")
+			assert.NotContains(t, run.Stderr, "was not bound",
+				"the message must not report the RESULT of an inspection. Three causes share this "+
+					"disposition and they disagree about whether the identity loop ran at all: an "+
+					"unknown MEMBER returns before it, so a payload whose identities are present, "+
+					"correctly named and usable was told none of them bound")
+			if row.NamesIdentities {
+				assert.Contains(t, run.Stderr, "the identities this event requires are",
+					"where the reader must check identity fields, the message names them as context")
 				return
 			}
 			assert.NotContains(t, run.Stderr, "identities this event requires",
-				"this route never reached the identity lookup — ingress stopped earlier — so naming "+
-					"the identities describes a step that did not run")
+				"this route never looked at the identities — ingress stopped at the decode — so "+
+					"naming them at all points the reader at the wrong thing")
 			assert.NotContains(t, run.Stderr, identityAdvice,
 				"and it must not send the reader to compare fields against a registration that was "+
 					"never consulted")
@@ -4305,4 +4355,198 @@ func TestAHostThatAddsAFieldIsRefusedWithATrueSentence(t *testing.T) {
 		assert.NotContains(t, run.Stderr, "does not carry the identity fields this event's registration declares",
 			"the retired sentence named one cause of a disposition that carries three")
 	})
+}
+
+// TestEveryRefusalBeforeAWriteSaysNoRowExists drives, on the built binary, the
+// routes that refuse BEFORE this command ever attempts a write, and requires
+// each to say so.
+//
+// WHY IT EXISTS: THE PRODUCER OF THE EVIDENCE WAS UNPINNED. The stage table's
+// row was pinned and the weakest-claim default was pinned, but the thing that
+// PRODUCES the sentinel was not: deleting the wrapper whole left `go test ./...`
+// green on every package while the binary's answer degraded from "no occurrence
+// was recorded for it" to "MAY OR MAY NOT exist" — from a true claim to no
+// claim at all. A default is a claim about everything nobody enumerated, so its
+// PRODUCERS are a population, and this enumerates them.
+//
+// THE THREE ROUTES WERE FOUND BY THREE REVIEWERS TAKING THREE DIFFERENT
+// APPROACHES, and none found the same hole:
+//   - the store that cannot be OPENED, which the marker used to sit above, so
+//     an operator was sent to the occurrence journal of a database whose own
+//     cause says "unable to open database file";
+//   - the UNSUPPORTED HARNESS, refused in a function the wrapper did not cover
+//     at all;
+//   - the WITHHELD EVENT, which was already right, and is pinned here so it
+//     cannot become wrong while the other two are fixed.
+//
+// MUTATION: delete the ErrLifecycleBeforeDurableWrite wrapper from either
+// producer, or move the durablePossible marker back above the open. The
+// affected subtests turn RED on the durable-state assertions.
+func TestEveryRefusalBeforeAWriteSaysNoRowExists(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "lifecycle-cli")
+	buildLifecycleBinary(t, binary)
+	payload := claudeFixture(t, "pre_tool_use_2_1_222.json")
+
+	for _, row := range []struct {
+		Name    string
+		Harness string
+		Event   string
+		Store   func(t *testing.T) string
+	}{
+		{
+			Name: "the store cannot be opened", Harness: "claude-code", Event: "PreToolUse",
+			Store: func(t *testing.T) string {
+				// A directory the user may not write to, so the store cannot be
+				// created. Nothing is simulated.
+				readOnly := filepath.Join(t.TempDir(), "read-only")
+				require.NoError(t, os.Mkdir(readOnly, 0o500))
+				t.Cleanup(func() { _ = os.Chmod(readOnly, 0o700) })
+				return filepath.Join(readOnly, "pasture.db")
+			},
+		},
+		{
+			Name: "the harness is not one this build supports", Harness: "not-a-harness", Event: "PreToolUse",
+			Store: func(t *testing.T) string { return filepath.Join(t.TempDir(), "pasture.db") },
+		},
+		{
+			Name: "the event is withheld", Harness: "claude-code", Event: "Elicitation",
+			Store: func(t *testing.T) string { return filepath.Join(t.TempDir(), "pasture.db") },
+		},
+	} {
+		t.Run(row.Name, func(t *testing.T) {
+			dbPath := row.Store(t)
+			run := runLifecycleHookOn(t, binary, dbPath, row.Harness, row.Event, "2.1.222", payload)
+
+			require.Equal(t, 0, run.ExitCode,
+				"these refusals are fail-open: the host carries on.\nstderr: %s", run.Stderr)
+			require.NotEmpty(t, run.Stderr,
+				"this route must reach a diagnostic, or the assertions below prove nothing")
+
+			assert.Contains(t, run.Stderr, "durable state not-recorded",
+				"this route refused BEFORE any write was attempted, so no row can exist for it")
+			assert.Contains(t, run.Stderr, "no occurrence was recorded for it",
+				"and the sentence beside the machine-readable stage must say the same")
+			assert.NotContains(t, run.Stderr, "MAY OR MAY NOT exist",
+				"hedging here is not caution, it is a claim pasture need not make: it KNOWS no "+
+					"write was attempted, and the hedge sends the reader looking for a row")
+			assert.NotContains(t, run.Stderr, "IS committed in the lifecycle occurrence journal",
+				"and it must not claim a row either")
+
+			_, statErr := os.Stat(dbPath)
+			assert.True(t, os.IsNotExist(statErr),
+				"the claim under test is that NOTHING was written; a store on disk here would mean "+
+					"not-recorded is the wrong answer and this test asserts the wrong thing")
+		})
+	}
+}
+
+// TestTheDurableRegionBeginsAtItsWrites reads the handler and requires the
+// evidence marker to stand at every write attempt and nowhere else.
+//
+// THE MARKER IS A CLAIM ABOUT A REGION, so its placement is the whole of its
+// meaning. It was set above open(in.DBPath) and described as "the line the
+// durable region begins", and OPENING A STORE WRITES NO OCCURRENCE — so every
+// refusal between the open and the first write inherited a claim that was too
+// strong. Reading the source is what makes the region a population rather than
+// a remembered line.
+//
+// MUTATION: move the marker above the open, delete it from either write, or add
+// a write with no marker before it. This test turns RED naming the line.
+func TestTheDurableRegionBeginsAtItsWrites(t *testing.T) {
+	t.Parallel()
+
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err, "resolve the repository root from cmd/pasture")
+	path := filepath.Join(root, "internal", "handlers", "hook_lifecycle.go")
+
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, path, nil, 0)
+	require.NoError(t, err, "the handler source must be readable")
+
+	var handler *ast.FuncDecl
+	for _, node := range file.Decls {
+		function, isFunction := node.(*ast.FuncDecl)
+		if isFunction && function.Name.Name == "hookLifecycle" {
+			handler = function
+			break
+		}
+	}
+	require.NotNil(t, handler, "hookLifecycle must exist: it is the region this marker describes")
+
+	// A statement ATTEMPTS A WRITE when it calls the receipt service or the
+	// shared commit tail. Nothing else in this function can leave a row.
+	attemptsWrite := func(statement ast.Stmt) bool {
+		found := false
+		ast.Inspect(statement, func(node ast.Node) bool {
+			// PRUNE AT A NESTED BLOCK. The question is whether THIS statement
+			// attempts a write, not whether one occurs anywhere beneath it: a
+			// reader that descends reports the enclosing `if` as a write, and
+			// then demands a marker above a branch that only CONTAINS one. The
+			// walk below visits nested bodies in their own right.
+			if _, isBlock := node.(*ast.BlockStmt); isBlock {
+				return false
+			}
+			call, isCall := node.(*ast.CallExpr)
+			if !isCall {
+				return true
+			}
+			switch function := call.Fun.(type) {
+			case *ast.Ident:
+				if function.Name == "deliveryCommit" {
+					found = true
+				}
+			case *ast.SelectorExpr:
+				if receiver, isIdentifier := function.X.(*ast.Ident); isIdentifier &&
+					receiver.Name == "service" && function.Sel.Name == "Receive" {
+					found = true
+				}
+			}
+			return true
+		})
+		return found
+	}
+	marksRegion := func(statement ast.Stmt) bool {
+		assign, isAssign := statement.(*ast.AssignStmt)
+		if !isAssign || len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
+			return false
+		}
+		name, isIdentifier := assign.Lhs[0].(*ast.Ident)
+		return isIdentifier && name.Name == "durablePossible" && sourceOf(assign.Rhs[0]) == "true"
+	}
+
+	writes, markers := 0, 0
+	var unmarked []string
+	var walk func(body []ast.Stmt)
+	walk = func(body []ast.Stmt) {
+		for index, statement := range body {
+			if marksRegion(statement) {
+				markers++
+			}
+			if attemptsWrite(statement) {
+				writes++
+				if index == 0 || !marksRegion(body[index-1]) {
+					unmarked = append(unmarked, fmt.Sprintf("hook_lifecycle.go:%d",
+						fileSet.Position(statement.Pos()).Line))
+				}
+			}
+			if block, isBlock := statement.(*ast.IfStmt); isBlock {
+				walk(block.Body.List)
+			}
+		}
+	}
+	walk(handler.Body.List)
+
+	require.NotZero(t, writes,
+		"this handler must still attempt a write; finding none means the reader no longer "+
+			"recognises them and every assertion here would pass vacuously")
+	assert.Empty(t, unmarked,
+		"a write is attempted at %v with no durablePossible marker immediately above it. The marker "+
+			"is what lets a refusal claim NO ROW EXISTS, so a write outside it makes that claim "+
+			"about a statement that may have written one", unmarked)
+	assert.Equal(t, writes, markers,
+		"the marker must stand at every write and NOWHERE ELSE. A marker above a statement that "+
+			"writes nothing — the open, the service construction, the gate — hands every refusal "+
+			"after it a claim too strong to support, which is exactly what sent an operator to the "+
+			"occurrence journal of a database that could not be opened")
 }
