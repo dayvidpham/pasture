@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -855,6 +856,11 @@ func TestTheFaultTableIsDocumentedOnTheExitAuthorityItself(t *testing.T) {
 // or drop the pointer sentence from the UnusableInputs doc comment, or move the
 // trigger paragraph out of its AGENTS.md section, or rename this test. This
 // test turns RED on each.
+// MUTATION: rename this test to a PREFIX of its own name, such as
+// TestTheUnusableInputTrigger, and leave both documents citing the long name.
+// This test turns RED at both citations. It did not while the citation was
+// matched with assert.Contains, because a prefix IS a substring of the name the
+// documents still carried.
 func TestTheUnusableInputTriggerIsWrittenWhereAParserAuthorMeetsIt(t *testing.T) {
 	t.Parallel()
 
@@ -896,14 +902,25 @@ func TestTheUnusableInputTriggerIsWrittenWhereAParserAuthorMeetsIt(t *testing.T)
 	// Both documents CITE this test by name. An identifier written into a
 	// document and held by nothing is a citation of something that may not
 	// exist; renaming the test left both of them stale and every package green.
+	//
+	// THE MATCH IS THE WHOLE IDENTIFIER AND NOT A SUBSTRING. assert.Contains
+	// stood here and PASSED UNDER ANY PREFIX RENAME: shorten the name to
+	// TestTheUnusableInputTrigger and t.Name() is still a substring of the
+	// longer identifier both documents go on citing, so the guard stayed green
+	// while the citations pointed at a test that no longer existed — and the
+	// AGENTS.md sentence beside them claims that exact rename fails this guard.
+	// The pattern below is anchored on word boundaries, so the character after
+	// the name must not continue the identifier.
+	cited := regexp.MustCompile(`\b` + regexp.QuoteMeta(t.Name()) + `\b`)
 	for where, text := range map[string]string{
 		"AGENTS.md":                            section,
 		"the Fault.UnusableInputs doc comment": comment,
 	} {
-		assert.Contains(t, text, t.Name(),
+		assert.Regexp(t, cited, text,
 			"%s names the test that holds the pointer shut, and this run is that test; a citation "+
 				"of a test that does not exist sends a maintainer looking for a guard that is "+
-				"not there", where)
+				"not there. The name must appear WHOLE: a citation of a LONGER identifier that "+
+				"merely starts with this name is a citation of something else", where)
 	}
 }
 
