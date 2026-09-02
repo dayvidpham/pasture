@@ -440,12 +440,34 @@ func recordedFailureMode(mode pastureruntime.FailureMode) string {
 //
 // A NIL CAUSE IS ONE OF THE SIX INPUTS THAT MAKE A FAULT UNMAPPABLE, so it
 // reaches this writer on the one arm that exists to report exactly that. Calling
-// Error() on it panicked the writer BEFORE the composed diagnostic was emitted:
-// the top-level recover kept the hook failing open, so the user saw no harm, but
-// the operator got neither the list of unusable inputs nor a durable line — the
-// fault left no trace at all. The sentinel is written instead, and it cannot be
-// mistaken for the text of a real cause. The unusableFaultInputs member of the
-// same line names the nil cause in words.
+// Error() on it panics the writer BEFORE the composed diagnostic is emitted, and
+// the two arms that follow from that panic are DIFFERENT. They were once stated
+// as one sentence, which was false of each; they are stated apart here because
+// two readers of the same claim reported two different exit codes.
+//
+// The lifecycle path installs EXACTLY TWO recovers — the deferred one at the
+// head of lifecycleOutcome, and one inside the work goroutine — and main()
+// installs NONE, so a panic that passes them both is the Go runtime's exit 2.
+//
+// FIRST ARM, a panic from a NORMAL-PATH call: the deferred recover catches it
+// and re-enters lifecycleFault with the panic as the cause. That cause is not
+// nil, so the record IS written and the hook DOES fail open — exit 0, the
+// host's continue bytes, and one durable line. What the operator loses is the
+// ORIGINAL fault: the line and the diagnostic both describe the PANIC, and the
+// cause the first call was reporting is never emitted at all. Measured on the
+// built binary: exit 0, one line, its cause the panic, its hostExit continue.
+//
+// SECOND ARM, a nil cause that reaches BOTH calls: the recover's own call
+// panics too, inside the deferred function, where nothing is left to catch it.
+// The panic escapes to the runtime — exit 2, NO record, and a stack trace on
+// standard error that Claude Code reads as a policy refusal. Measured on the
+// built binary with the sentinel removed and a nil cause forced on both calls.
+//
+// THE FIRST RECOVER THEREFORE CATCHES A RECORD-WRITER PANIC ONCE ONLY. The
+// sentinel below is LOAD-BEARING and not belt-and-braces: it is what keeps the
+// nil cause off both arms. The sentinel cannot be mistaken for the text of a
+// real cause, and the unusableFaultInputs member of the same line names the nil
+// cause in words.
 func recordedCause(cause error) string {
 	if cause == nil {
 		return "unset-or-missing"
@@ -468,6 +490,21 @@ func recordLifecycleFault(
 ) {
 	path := lifecycleFaultRecordPath()
 	if path == "" {
+		// The record has no directory to sit beside. This RETURNED IN SILENCE,
+		// while the two sibling failures below — the open and the append — both
+		// tell the operator that the fault is on this stream only. The silence
+		// made two shipped sentences false: AGENTS.md says the line is appended
+		// beside the database, and the record-unknown diagnostic sends the
+		// reader to that file. Measured on "--db pasture.db" and on the
+		// documented PASTURE_DB_PATH=pasture.db with no flag: exit 0, correct
+		// host bytes, and no record anywhere.
+		fmt.Fprintf(cmd.ErrOrStderr(),
+			"pasture hook lifecycle could not place its fault record: the store path %q names no "+
+				"directory, so there is no directory to put %s beside; this happened in "+
+				"recordLifecycleFault (cmd/pasture/hook_lifecycle.go) while recording the fault "+
+				"above; the fault above is reported on this stream only; give --db a path that "+
+				"names a directory, or set PASTURE_DB_PATH to one, and the record returns\n",
+			lifecycleStorePath(), lifecycleFaultRecordFile)
 		return
 	}
 
@@ -548,15 +585,23 @@ func recordLifecycleFault(
 // out of scope here; the file is named in AGENTS.md with the command to clear
 // it so that somebody who never sees the diagnostic can still find it.
 func lifecycleFaultRecordPath() string {
-	path := flagDBPath
-	if path == "" {
-		path = tasks.DefaultDBPath()
-	}
-	directory := filepath.Dir(path)
+	directory := filepath.Dir(lifecycleStorePath())
 	if directory == "" || directory == "." {
 		return ""
 	}
 	return filepath.Join(directory, lifecycleFaultRecordFile)
+}
+
+// lifecycleStorePath resolves the store path THIS invocation would use, by the
+// same two rules the store itself follows: the --db flag first, then the
+// default layout. It is named separately from lifecycleFaultRecordPath because
+// the refusal above has to QUOTE it — an operator told only that the record was
+// not placed cannot tell which of the two rules produced the path.
+func lifecycleStorePath() string {
+	if flagDBPath != "" {
+		return flagDBPath
+	}
+	return tasks.DefaultDBPath()
 }
 
 // noExitDecisionDiagnostic composes the message for the second arm that leaves

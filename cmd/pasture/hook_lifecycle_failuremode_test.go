@@ -1187,6 +1187,67 @@ func TestBothExitOneArmsCarryTheSameNarrowedClaim(t *testing.T) {
 	}
 }
 
+// TestTheFaultRecordSaysSoWhenTheStorePathNamesNoDirectory holds the last silent
+// loss of the durable record shut.
+//
+// When the resolved store path has NO DIRECTORY COMPONENT, the record has
+// nowhere to sit beside the database, and the writer RETURNED WITHOUT A WORD —
+// while the same writer's two sibling failures, the open and the append, both
+// tell the operator that "the fault above is reported on this stream only".
+//
+// The silence made two SHIPPED sentences false. AGENTS.md tells a maintainer the
+// line is appended beside the database, and the record-unknown diagnostic sends
+// the reader to that file; on this path neither holds and nothing said so. It is
+// reached by "--db pasture.db" and by the documented PASTURE_DB_PATH=pasture.db
+// with no flag, and on both the hook exits 0 with correct host bytes, so nothing
+// else in the run gives the loss away.
+//
+// The default store path has a directory and the generated host hooks pass no
+// --db, so no user is harmed today; this pins the diagnostic, not a repair of
+// the placement, and the host outcome is unchanged.
+//
+// MUTATION: restore the bare "return" in place of the message in
+// recordLifecycleFault. This test turns RED.
+func TestTheFaultRecordSaysSoWhenTheStorePathNamesNoDirectory(t *testing.T) {
+	coords := lifecycleCoordinates{Harness: ir.HarnessClaudeCode, Event: "PreToolUse", HostVersion: "2.1.222"}
+
+	// A bare file name, which is what "--db pasture.db" resolves to. It names
+	// no directory, so lifecycleFaultRecordPath has nowhere to put the record.
+	cmd := lifecycleTestCommand(t, string(coords.Harness), coords.Event, coords.HostVersion, "pasture.db")
+	var stderr bytes.Buffer
+	cmd.SetErr(&stderr)
+
+	require.Empty(t, lifecycleFaultRecordPath(),
+		"this test only covers the silent arm while the path resolves to nothing; a resolved "+
+			"path means the placement was repaired and this pin belongs elsewhere")
+
+	failure := lifecycleFailurePolicy(coords)
+	outcome := lifecycleFault(cmd, coords, failure, hostexit.FaultFailOpen,
+		lifecycleContinuation(coords, failure), hostexit.FaultStageRecordUnknown,
+		errors.New("the store could not be opened"))
+
+	require.Equal(t, hostexit.ExitContinue, outcome.Exit,
+		"the host outcome must not change: the record is evidence for a maintainer and never a "+
+			"condition of the exit")
+
+	text := stderr.String()
+	assert.Contains(t, text, "could not place its fault record",
+		"the operator must be TOLD the record was not written; this arm returned in silence "+
+			"while its two sibling failures both reported")
+	assert.Contains(t, text, "the fault above is reported on this stream only",
+		"this is the sentence the open failure and the append failure both use; the third "+
+			"failure of the same writer must not say something else for the same loss")
+	assert.Contains(t, text, `"pasture.db"`,
+		"the message must QUOTE the resolved store path, because the path comes from either the "+
+			"--db flag or the default layout and the operator cannot otherwise tell which")
+	assert.Contains(t, text, "PASTURE_DB_PATH",
+		"the message must say how to fix it, and the environment variable is the documented way "+
+			"in that reaches this arm with no flag at all")
+
+	assert.Empty(t, readFaultRecords(t, "."),
+		"nothing may be written to the working directory when the path names no directory")
+}
+
 // TestTheUnusableInputListHasAVisibleEnd pins the SHAPE of the multi-input
 // list, which no test reached while only the one-item case was covered.
 //
