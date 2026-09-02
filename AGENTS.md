@@ -214,19 +214,47 @@ database and not inside it because the commonest fault is that the database
 could not be opened, and evidence that needs the failing store is lost exactly
 when it is wanted.
 
-THE LINE IS NOT ALWAYS WRITTEN, and the promise above holds only for a store
-path the record can sit beside. On the default path it always can. It cannot
-when the resolved store path names no directory (`--db pasture.db`, or
-`PASTURE_DB_PATH=pasture.db` with no flag), and it cannot when that directory
-cannot be created (a parent that is a file). On those routes there is NO record
-for that fault anywhere. Every one of those arms now says so on standard error,
-which is the only channel left to it — and it is a channel the reader of this
-paragraph usually does not have, because a fail-open fault exits 0 and most
-hosts do not show the standard error of an exit-0 hook. So the honest statement
-is this: on a store path whose directory does not exist and cannot be made, a
-fault leaves no durable evidence, and the operator learns it only if the host
-shows the hook's standard error. Give `--db`, or `PASTURE_DB_PATH`, a path whose
-directory exists or can be created, and the record returns.
+THE LINE IS NOT ALWAYS WRITTEN, and the promise above holds only while the
+record can be both PLACED and WRITTEN. The writer has FIVE guarded failures.
+FOUR of them are routes a user can reach, and each one loses the record for that
+fault. In the order the writer meets them:
+
+1. The resolved store path NAMES NO DIRECTORY, so the record has nothing to sit
+   beside (`--db pasture.db`, or `PASTURE_DB_PATH=pasture.db` with no flag).
+2. That directory CANNOT BE CREATED — a parent that is a file, or a parent the
+   user may not write to.
+3. The record file CANNOT BE OPENED although its directory exists — the
+   directory is read-only or owned by another user, the filesystem is mounted
+   read-only, or something that is not a regular file already stands at that
+   name.
+4. The line CANNOT BE APPENDED to a file that did open — the filesystem or the
+   user's quota is full, or the device reports an I/O error.
+
+The FIFTH failure, a record line that cannot be encoded, is unreachable by
+construction: every member of the line is a string or a slice of strings, and
+the JSON encoder cannot refuse those. It is counted here because the writer
+reports it like the rest, not because a user can meet it.
+
+ROUTES 1 AND 2 ARE ABOUT PLACING THE FILE, ROUTES 3 AND 4 ARE ABOUT WRITING IT,
+AND A DIRECTORY THAT EXISTS DOES NOT RULE THE SECOND PAIR OUT. Measured on the
+built binary with a store directory that exists and is read-only: exit 0,
+nothing at all on standard output, the open failure reported on standard error,
+and no record file anywhere. The default path is not exempt from routes 3 and 4
+either — `~/.local/share/pasture/` is an ordinary directory on an ordinary
+filesystem, so it can be full, read-only, or owned by somebody else.
+
+On every one of those routes there is NO record for that fault anywhere. Each
+arm says so on standard error, which is the only channel left to it — and it is
+a channel the reader of this paragraph usually does not have, because a
+fail-open fault exits 0 and most hosts do not show the standard error of an
+exit-0 hook. So the honest statement is this: a fault leaves durable evidence
+only where its record can be placed AND written, and on every other route the
+operator learns of the loss only if the host shows the hook's standard error.
+
+To get the record back, give `--db` or `PASTURE_DB_PATH` a path whose directory
+exists or can be created, IS WRITABLE by the user running the hook, and sits on
+a filesystem with space left. A directory that merely exists is not enough:
+that is route 3.
 
 A LINE'S `unusableFaultInputs` MEMBER IS ENGLISH, NOT A STABLE KEY. It is an
 empty array on every fault pasture could classify, and on the one arm it could
