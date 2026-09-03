@@ -1,6 +1,10 @@
 package timeouts
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -116,13 +120,65 @@ func TestNewRejectsAHookInvocationDeadlineOutsideItsOrder(t *testing.T) {
 }
 
 // TestProductionHookInvocationSitsBelowTheSmallestHostBudget pins the value
-// against the budget that pays for it. Claude Code gives a hook 10s by default;
-// a hook that outruns it freezes the session, so pasture must stop first, with
-// headroom for process start.
+// against the budget that pays for it. The smallest host budget this tree has
+// evidence for is the 10s that hooks/hooks.json sets on every pasture lifecycle
+// row for Claude Code ("timeout": 10); a hook that outruns it freezes the
+// session, so pasture must stop first, with headroom for process start.
+//
+// THE BUDGET IS CONFIGURED BY THIS TREE, PER ROW, AND IS NOT THE HOST'S OWN
+// DEFAULT, so this test reads the rows. A row of that file that carries no
+// timeout runs on a default this tree does not measure; a lifecycle row that
+// lost its timeout would run on it too, and the sentence that sizes this tier
+// would then be about a number no longer in the tree.
+//
+// WHAT IT VISITS: every hook row of hooks/hooks.json whose command runs
+// `hook lifecycle`.
+// WHAT IT DOES NOT READ: rows that run something else, which may carry any
+// timeout or none, and the hooks generated for the other harnesses, which carry
+// no timeout this tree has evidence for.
+//
+// MUTATION: remove "timeout" from one lifecycle row of hooks/hooks.json, or
+// change it. This test turns RED naming the row.
 func TestProductionHookInvocationSitsBelowTheSmallestHostBudget(t *testing.T) {
 	t.Parallel()
 
 	const smallestHostBudget = 10 * time.Second
+
+	raw, err := os.ReadFile(filepath.Join(docsRoot(t), "hooks", "hooks.json"))
+	if err != nil {
+		t.Fatalf("read hooks/hooks.json, which is where the 10s budget this tier is sized against is set: %v", err)
+	}
+	var configuration struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+				Timeout int    `json:"timeout"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(raw, &configuration); err != nil {
+		t.Fatalf("decode hooks/hooks.json: %v", err)
+	}
+	lifecycleRows := 0
+	for event, matchers := range configuration.Hooks {
+		for _, matcher := range matchers {
+			for _, hook := range matcher.Hooks {
+				if !strings.Contains(hook.Command, "hook lifecycle") {
+					continue
+				}
+				lifecycleRows++
+				if budget := time.Duration(hook.Timeout) * time.Second; budget != smallestHostBudget {
+					t.Errorf("hooks/hooks.json gives the %s lifecycle row a timeout of %s, and this tier is sized against %s; "+
+						"a row without that timeout runs on the host's own default, which this tree does not measure, "+
+						"so either restore the timeout in internal/codegen/claude_hooks.go and regenerate, or re-size the tier against the new value",
+						event, budget, smallestHostBudget)
+				}
+			}
+		}
+	}
+	if lifecycleRows == 0 {
+		t.Fatal("hooks/hooks.json carries no pasture lifecycle row, so nothing in the tree sets the 10s budget this tier is sized against")
+	}
 
 	got := ProductionProfile().HookInvocation()
 	if got != 5*time.Second {

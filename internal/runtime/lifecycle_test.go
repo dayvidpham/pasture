@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/codegen/scan"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/testutil"
@@ -463,4 +464,70 @@ func TestNoSecondFailureVocabularyIsDeclaredAnywhere(t *testing.T) {
 		}
 		return nil
 	}))
+}
+
+// TestEveryRegisteredRowIsDeclaredAndAnUnknownCoordinateIsNot pins the fact
+// LifecycleFailurePolicy.Declared rests on: every policy a lookup returns
+// carries a valid Semantic, and a coordinate the build does not declare is not
+// found at all. The hook command's fallback for such a coordinate builds a
+// policy with the zero Semantic, so Declared is what separates "treated as
+// observe-only" from "declares observe-only" in its diagnostic and its record.
+//
+// WHAT IT VISITS: every event of the three pinned lifecycle contracts, looked
+// up by its native name exactly as the hook command looks it up. The three are
+// written here by hand, and they are the three cases of the switch in
+// LookupLifecycleFailure; a fourth case added there must be added here.
+// WHAT IT DOES NOT READ: a contract this build does not pin, and a harness
+// that switch does not dispatch on.
+//
+// MUTATION: make Declared return true, or let lookupLifecycleFailure leave
+// Semantic unset. This test turns RED.
+func TestEveryRegisteredRowIsDeclaredAndAnUnknownCoordinateIsNot(t *testing.T) {
+	t.Parallel()
+
+	rows := 0
+	rows += assertEveryRowDeclared(t, ir.HarnessClaudeCode, runtime.ClaudeCode2_1_210Lifecycle(), runtime.ClaudeLifecycleEvents())
+	rows += assertEveryRowDeclared(t, ir.HarnessCodex, runtime.Codex0_146_0Lifecycle(), runtime.CodexLifecycleEvents())
+	rows += assertEveryRowDeclared(t, ir.HarnessOpenCode, runtime.OpenCode1_18_10Lifecycle(), runtime.OpenCodeLifecycleEvents())
+	require.NotZero(t, rows, "no contract yielded a row, so nothing above was asserted")
+
+	for _, coordinate := range []struct {
+		harness ir.HarnessID
+		event   string
+	}{
+		{harness: ir.HarnessID("gemini"), event: "NotAnEvent"},
+		{harness: ir.HarnessClaudeCode, event: "NotAnEvent"},
+	} {
+		policy, found := runtime.LookupLifecycleFailure(coordinate.harness, coordinate.event)
+		assert.False(t, found, "%s %s is not declared by this build and must not be found", coordinate.harness, coordinate.event)
+		assert.False(t, policy.Declared(),
+			"the policy returned for an undeclared coordinate must read as undeclared, or the hook "+
+				"command's fallback would be reported as a declaration")
+	}
+}
+
+// assertEveryRowDeclared looks up every event of one contract by its native
+// name and requires the returned policy to read as declared. It returns the
+// number of rows it checked.
+func assertEveryRowDeclared[E comparable](
+	t *testing.T,
+	harness ir.HarnessID,
+	contract runtime.LifecycleContract[E],
+	events []E,
+) int {
+	t.Helper()
+	rows := 0
+	for _, event := range events {
+		mapping, err := contract.Mapping(event)
+		if err != nil {
+			continue
+		}
+		policy, found := runtime.LookupLifecycleFailure(harness, mapping.NativeName())
+		require.True(t, found, "%s %s is a registered row and must be found", harness, mapping.NativeName())
+		assert.True(t, policy.Declared(),
+			"%s %s is a registered row and its policy must read as declared; a declared row with an "+
+				"invalid Semantic would be reported to the operator as undeclared", harness, mapping.NativeName())
+		rows++
+	}
+	return rows
 }

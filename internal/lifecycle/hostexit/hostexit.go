@@ -372,6 +372,19 @@ type Fault struct {
 	// defaulted DeclaredMode would restore exactly that untruth in silence, so a
 	// caller that forgets it gets a loud refusal instead.
 	DeclaredMode pastureruntime.FailureMode
+	// Undeclared reports that NO ROW of the host contract declares the
+	// coordinate this fault was raised on: the harness is not supported, or the
+	// event is not in this build's registration. DeclaredMode then carries the
+	// mode the command TREATS the coordinate as — observe-only, the weakest
+	// claim it can make — and it is still required, because the exit table
+	// needs a mode to obey; what changes is what the reader is told. Without
+	// this member the diagnostic and the durable record called that treated-as
+	// mode "declared", two clauses away from a cause saying nothing declares
+	// the row: a parser grouping the record by declaration counted a stale or
+	// mismatched hook among the rows that really declare observe-only, and an
+	// operator concluded the registration knew the event. A bool has no
+	// unusable state, so UnusableInputs and its six conditions are unchanged.
+	Undeclared bool
 	// Evidence is the citation for the blocking exit code of that mode.
 	Evidence pastureruntime.FailureEvidence
 	// Policy is the user's fault policy.
@@ -547,10 +560,15 @@ func faultDiagnostic(fault Fault, exit ExitStatus) *ir.Diagnostic {
 	if fault.Policy == FaultFailClosed && exit != ExitBlock {
 		// The opt-in is set and the event continued anyway. WHICH reason it was
 		// is a property of the ROW, so the row's own fields choose the sentence
-		// rather than one apologetic clause covering both.
-		if fault.DeclaredMode.BlocksByExitCode() {
+		// rather than one apologetic clause covering both. An UNDECLARED
+		// coordinate is asked first: it has no row, so neither row sentence is
+		// true of it, and DeclaredMode holds the mode it is treated as.
+		switch {
+		case fault.Undeclared:
+			failClosedAdvice = "PASTURE_HOOK_FAIL_CLOSED is already set and it had no channel on this event: no row of this build's registration declares the event, so it is treated as " + fault.DeclaredMode.String() + ", which does not refuse through a process exit code; there is no exit code the opt-in could turn into a refusal and the event continued; the opt-in reaches only the events whose declared mode blocks by exit code and that cite host evidence for it"
+		case fault.DeclaredMode.BlocksByExitCode():
 			failClosedAdvice = "PASTURE_HOOK_FAIL_CLOSED is already set and it had no channel on this event: the event declares the blocking exit code but carries no host evidence for it, and pasture will not refuse a user's operation on an unevidenced claim, so the event continued; to make this event able to block, add the host documentation or a committed capture showing the host refuses on that exit code"
-		} else {
+		default:
 			failClosedAdvice = "PASTURE_HOOK_FAIL_CLOSED is already set and it had no channel on this event: its declared failure mode " + fault.DeclaredMode.String() + " does not refuse through a process exit code, so there is no exit code the opt-in could turn into a refusal and the event continued; the opt-in reaches only the events whose declared mode blocks by exit code and that cite host evidence for it"
 		}
 	}
@@ -603,7 +621,7 @@ func faultDiagnostic(fault Fault, exit ExitStatus) *ir.Diagnostic {
 		// every route that reaches here is the second half: no decision had
 		// been written. The unsupported half is dropped rather than hedged.
 		Phase: "hook lifecycle fault handling, before any decision was written; " +
-			"declared failure mode " + fault.DeclaredMode.String() +
+			declaredModeClause(fault) +
 			", effective failure mode " + fault.Mode.String() +
 			", fault policy " + fault.Policy.String() +
 			", host evidence " + evidenceState(fault.Evidence) +
@@ -612,6 +630,19 @@ func faultDiagnostic(fault Fault, exit ExitStatus) *ir.Diagnostic {
 		Fix:    fix,
 		Cause:  fault.Cause,
 	}
+}
+
+// declaredModeClause names the declared mode in the phase line, and names it
+// as a declaration ONLY where a row declared it. On an undeclared coordinate
+// the mode in DeclaredMode is the one the command treats the event as, and
+// calling it "declared" contradicted the cause two clauses later, which says
+// nothing declares the row.
+func declaredModeClause(fault Fault) string {
+	if fault.Undeclared {
+		return "declared failure mode none (no row of this build's registration declares this event, so it is treated as " +
+			fault.DeclaredMode.String() + ")"
+	}
+	return "declared failure mode " + fault.DeclaredMode.String()
 }
 
 func evidenceState(evidence pastureruntime.FailureEvidence) string {

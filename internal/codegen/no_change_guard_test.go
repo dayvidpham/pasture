@@ -125,6 +125,23 @@ func TestACPAdapterRegistryIsUnchanged(t *testing.T) {
 // companion test below reads the repository the suite happens to run in, which
 // is a different question with a different answer, and the two must not be
 // confused: a hook installed by somebody else is not a pasture defect.
+//
+// WHAT IT VISITS: every regular file under the module root whose name or
+// extension can carry an executable instruction — Go, TypeScript and
+// JavaScript sources (.go .ts .js .mjs .cjs), shell (.sh .bash), Python, Nix,
+// Make (Makefile and .mk), JSON, YAML and TOML configuration, and any other
+// regular file with an executable bit — for three needles on lines that are
+// not comments: `hooksPath` (the Git key core.hooksPath, whole or with its
+// section spelled apart), `.git/hooks`, and `pre-commit install`. A hit is
+// refused whatever the surrounding code does.
+// WHAT IT DOES NOT READ: .git/ and legacy/ (the retired substrate, preserved
+// as written); this file, which names the needles in order to forbid them; a
+// key assembled at run time from parts that never spell hooksPath; a hook
+// written through a path variable that never spells .git/hooks; and any file
+// kind not named above. The first version read .go, .ts and .sh alone for
+// `core.hooksPath` whole, so a Makefile target or a Nix expression that
+// redirected the hooks directory was outside its reach, and its doc said none
+// of that.
 func TestPastureSourceInstallsNoGitHook(t *testing.T) {
 	t.Parallel()
 
@@ -133,12 +150,21 @@ func TestPastureSourceInstallsNoGitHook(t *testing.T) {
 
 	// The forbidden acts, each named by what it would do to a user's repository.
 	forbidden := map[string]string{
-		"core.hooksPath":     "redirect every Git hook of the repository",
+		"hooksPath":          "redirect every Git hook of the repository (core.hooksPath)",
 		".git/hooks":         "write into the Git hooks directory of the repository",
 		"pre-commit install": "hand hook installation to another tool",
 	}
+	// The kinds that can carry an executable instruction. A kind not listed
+	// here is outside this guard's reach, and the doc above says so.
+	guardedExtensions := map[string]bool{
+		".go": true, ".ts": true, ".js": true, ".mjs": true, ".cjs": true,
+		".sh": true, ".bash": true, ".py": true, ".nix": true, ".mk": true,
+		".json": true, ".yaml": true, ".yml": true, ".toml": true,
+	}
+	guardedNames := map[string]bool{"Makefile": true, "Dockerfile": true, "Justfile": true}
 	self := filepath.Join("internal", "codegen", "no_change_guard_test.go")
 
+	visited := 0
 	walkErr := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -149,7 +175,15 @@ func TestPastureSourceInstallsNoGitHook(t *testing.T) {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, ".ts") && !strings.HasSuffix(path, ".sh") {
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			return infoErr
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		executable := info.Mode()&0o111 != 0
+		if !guardedExtensions[filepath.Ext(path)] && !guardedNames[entry.Name()] && !executable {
 			return nil
 		}
 		relative, relErr := filepath.Rel(root, path)
@@ -164,6 +198,7 @@ func TestPastureSourceInstallsNoGitHook(t *testing.T) {
 		if readErr != nil {
 			return readErr
 		}
+		visited++
 		// Only EXECUTABLE lines are evidence. A comment that names one of these
 		// strings in order to deny doing it is the opposite of the defect, and
 		// treating it as a hit would teach everyone to stop writing the denial.
@@ -184,6 +219,9 @@ func TestPastureSourceInstallsNoGitHook(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, walkErr)
+	require.NotZero(t, visited,
+		"the walk read no file at all, so the rule above was asserted over nothing; the kinds it "+
+			"names must still exist under the module root")
 }
 
 // TestThisRepositoryHasNoInstalledGitHook reports the STATE of the checkout the

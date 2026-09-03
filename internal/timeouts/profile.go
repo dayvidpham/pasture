@@ -21,12 +21,17 @@
 //	                                            whole workflow to report a result
 //
 // HookInvocation sits below the smallest host budget this tree has evidence
-// for, with headroom for process start. Claude Code gives a hook 10s by default
-// (hooks/hooks.json), and the OpenCode plugin awaits the child process with no
-// timeout of its own; this tree carries no measurement of the Codex hook
-// budget, so the tier is sized against Claude's. A hook that outruns the host
-// budget freezes the session, so pasture stops first and reports a fault, which
-// fails open by default.
+// for, with headroom for process start. On Claude Code that budget is the 10s
+// that hooks/hooks.json sets on every pasture lifecycle row ("timeout": 10).
+// It is a value this tree configures per row and not the host's own default:
+// a row without a timeout runs on that default, which this tree does not
+// measure. The OpenCode plugin awaits the child process with no timeout of its
+// own, and this tree carries no measurement of the Codex hook budget, so the
+// tier is sized against the Claude rows;
+// TestProductionHookInvocationSitsBelowTheSmallestHostBudget holds every
+// lifecycle row of hooks/hooks.json to that value. A hook that outruns the
+// host budget freezes the session, so pasture stops first and reports a fault,
+// which fails open by default.
 //
 // TestProfile (500ms / 2s / 3s / 6s / 30s) and DeadlineTestProfile (25ms /
 // 250ms / 500ms / 1s / 2s) keep the same ordering with different budgets. New

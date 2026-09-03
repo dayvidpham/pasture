@@ -63,7 +63,11 @@ type lifecycleCoordinates struct {
 //
 // An event this build does not declare is treated as OBSERVE-ONLY. A build that
 // cannot name the event cannot know that the host blocks on it, and guessing
-// "blocking" would let a stale generated hook stop a user's session.
+// "blocking" would let a stale generated hook stop a user's session. The
+// fallback leaves Semantic zero on purpose: that is what marks the policy
+// UNDECLARED (LifecycleFailurePolicy.Declared), so the diagnostic and the
+// fault record say that no row declares the event instead of calling the
+// treated-as mode a declaration.
 func lifecycleFailurePolicy(coords lifecycleCoordinates) pastureruntime.LifecycleFailurePolicy {
 	if policy, found := pastureruntime.LookupLifecycleFailure(coords.Harness, coords.Event); found {
 		return policy
@@ -109,7 +113,9 @@ var hookLifecycleCmd = &cobra.Command{
 //   - A user who LENGTHENS the tier can FREEZE THEIR OWN SESSION. That is the
 //     exact failure this tier exists to prevent, and it is measured: with the
 //     store held under a write lock the work below took about 31 seconds,
-//     three times the smallest host budget of 10 seconds.
+//     three times the 10-second budget hooks/hooks.json sets on each pasture
+//     lifecycle row for Claude Code, the smallest host budget this tree has
+//     evidence for.
 //
 // A test may supply a shorter tier because a test is not a user: it observes
 // the deadline PATH in this process, and the value it supplies never reaches
@@ -457,6 +463,7 @@ func lifecycleFault(
 	rawFault := hostexit.Fault{
 		Mode:         failure.Mode,
 		DeclaredMode: failure.DeclaredMode,
+		Undeclared:   !failure.Declared(),
 		Evidence:     failure.Evidence,
 		Policy:       policy,
 		Stage:        stage,
@@ -552,6 +559,23 @@ func recordedFailureMode(mode pastureruntime.FailureMode) string {
 		return "unset-or-unknown"
 	}
 	return mode.String()
+}
+
+// recordedDeclaredFailureMode renders the declared mode for the durable record.
+// An unusable mode is reported as such first, because that is what the refusal
+// arm is recording; a usable mode that NO ROW declared is rendered as the word
+// "undeclared", so that a maintainer grouping the record by declaration does
+// not count a stale or mismatched hook among the rows that really declare the
+// mode it was treated as. It is one stable word and not a sentence, because
+// AGENTS.md anticipates a parser keying on this member.
+func recordedDeclaredFailureMode(failure pastureruntime.LifecycleFailurePolicy) string {
+	if !failure.DeclaredMode.IsValid() {
+		return recordedFailureMode(failure.DeclaredMode)
+	}
+	if !failure.Declared() {
+		return "undeclared"
+	}
+	return failure.DeclaredMode.String()
 }
 
 // recordedCause renders the fault cause for the durable record.
@@ -705,13 +729,18 @@ func recordLifecycleFault(
 		// failureMode is the EFFECTIVE mode, the one that decided the host
 		// exit. declaredFailureMode is what the host contract DECLARES for the
 		// row, before the failure-evidence rule demotes an uncited blocking
-		// gate. BOTH are written because the record outlives the process: with
-		// the effective mode alone, a demoted gate and a row that was always
+		// gate — or the word "undeclared" where no row of this build declares
+		// the coordinate at all, which the effective mode then reads as
+		// observe-only because that is what the command treats it as. BOTH are
+		// written because the record outlives the process: with the effective
+		// mode alone, a demoted gate and a row that was always
 		// report-and-continue are byte-identical here, although they need
 		// opposite maintainer action — the first becomes able to block once
-		// somebody supplies the host citation, the second never blocks.
+		// somebody supplies the host citation, the second never blocks — and a
+		// stale or mismatched hook was byte-identical to a row that really
+		// declares observe-only, of which OpenCode ships thirty-two.
 		"failureMode":         recordedFailureMode(failure.Mode),
-		"declaredFailureMode": recordedFailureMode(failure.DeclaredMode),
+		"declaredFailureMode": recordedDeclaredFailureMode(failure),
 		// unusableFaultInputs is the EMPTY ARRAY [] on every fault the exit
 		// authority could map, and carries the refusal reasons on the one arm
 		// it could not. It is never null: UnusableInputs returns a non-nil
@@ -770,9 +799,21 @@ func recordLifecycleFault(
 	}
 	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
+		// The file could not be opened although its directory exists: the
+		// directory is read-only or owned by another user, the filesystem is
+		// mounted read-only, or something that is not a regular file stands at
+		// that name. This arm and the append arm below reported the loss with
+		// no WHERE and no REMEDY while their three siblings carried both, and
+		// on this route standard error is the only channel the record has
+		// left; the remedy stood in AGENTS.md, which is the paragraph the
+		// operator reading this stream does not have open.
 		fmt.Fprintf(cmd.ErrOrStderr(),
-			"pasture hook lifecycle could not open its fault record at %s: %v; "+
-				"%s\n", path, err, faultRecordLossSuffix)
+			"pasture hook lifecycle could not open its fault record at %s: %v; this happened in "+
+				"recordLifecycleFault (cmd/pasture/hook_lifecycle.go) while recording this fault, so "+
+				"the record for this fault is lost; %s; make %s writable by the user running the "+
+				"hook, or give --db a path whose directory is, or set PASTURE_DB_PATH to one, and "+
+				"the record returns\n",
+			path, err, faultRecordLossSuffix, filepath.Dir(path))
 		return
 	}
 	// THE CLOSE IS CHECKED, AND IT WAS A BARE `defer file.Close()`.
@@ -803,9 +844,15 @@ func recordLifecycleFault(
 		}
 	}()
 	if _, err := file.Write(append(line, '\n')); err != nil {
+		// The file opened and the line could not be written: the filesystem or
+		// the user's quota is full, or the device reports an I/O error.
 		fmt.Fprintf(cmd.ErrOrStderr(),
-			"pasture hook lifecycle could not append to its fault record at %s: %v; "+
-				"%s\n", path, err, faultRecordLossSuffix)
+			"pasture hook lifecycle could not append to its fault record at %s: %v; this happened "+
+				"in recordLifecycleFault (cmd/pasture/hook_lifecycle.go) after the file opened, so "+
+				"the record for this fault is lost; %s; free space or quota on the filesystem "+
+				"holding %s, or give --db a path on a filesystem with space left, or set "+
+				"PASTURE_DB_PATH to one, and the record returns\n",
+			path, err, faultRecordLossSuffix, filepath.Dir(path))
 	}
 }
 

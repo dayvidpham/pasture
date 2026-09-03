@@ -520,7 +520,9 @@ func TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked(t *testin
 	assert.Less(t, elapsed, budget+processStartAllowance,
 		"the hook must return inside its %s deadline while the store is locked, so the host is never frozen", budget)
 
-	// The smallest host budget is 10s. Exceeding it is what freezes a session.
+	// The smallest host budget this tree has evidence for is the 10s that
+	// hooks/hooks.json sets on each Claude Code lifecycle row (held in
+	// internal/timeouts). Exceeding it is what freezes a session.
 	assert.Less(t, elapsed, 10*time.Second,
 		"the hook must always return inside the smallest host budget")
 
@@ -1976,6 +1978,36 @@ func faultWriterBindings(function *ast.FuncDecl) map[string]string {
 // so the document counts six and this counts seven.
 const faultWriterArmCount = 7
 
+// faultWriterWherePhrase is the WHERE every loss arm of the fault writer
+// carries, and faultWriterRemedyPhrase and faultWriterReportPhrase are the two
+// ACTIONS an arm may end with: the remedy, on every route an operator can
+// change, and the request to report, on the one arm a correct build cannot
+// reach. They are held on every arm by
+// TestEveryFailingArmOfTheFaultWriterTellsTheOperatorOnStandardError.
+const (
+	faultWriterWherePhrase  = "this happened in recordLifecycleFault (cmd/pasture/hook_lifecycle.go)"
+	faultWriterRemedyPhrase = "and the record returns"
+	faultWriterReportPhrase = "report this"
+)
+
+// faultWriterArmText concatenates every string literal in the statements
+// given, in source order, so a phrase split across a `+` chain is read whole.
+func faultWriterArmText(body []ast.Stmt) string {
+	var text strings.Builder
+	for _, statement := range body {
+		ast.Inspect(statement, func(node ast.Node) bool {
+			literal, isLiteral := node.(*ast.BasicLit)
+			if isLiteral && literal.Kind == token.STRING {
+				if unquoted, err := strconv.Unquote(literal.Value); err == nil {
+					text.WriteString(unquoted)
+				}
+			}
+			return true
+		})
+	}
+	return text.String()
+}
+
 // faultWriterLossRouteCount is how many of those branches are ways the record
 // can be LOST, which is what AGENTS.md enumerates. It excludes the deferred
 // closure, which holds a loss route rather than being one.
@@ -2287,6 +2319,16 @@ func assertFaultWriterStream(t *testing.T, where string, write faultWriterWrite)
 // loopback filesystem, no quota, no new dependency and no production seam. The
 // arm has a byte pin now, and the exemption is withdrawn rather than reworded.
 //
+// EVERY ARM ALSO SAYS WHERE IT FAILED AND WHAT TO DO. The open and append arms
+// reported the loss with neither while their three siblings carried both, and
+// on those routes standard error is the only channel left; the remedy stood in
+// AGENTS.md, which the operator reading the stream does not have open. Each
+// arm's string literals are read whole, in source order, so the WHERE clause
+// and one of the two ACTION clauses must appear in every arm, whatever `+`
+// chain they are split across.
+// MUTATION: delete "and the record returns" from the open arm, or its "this
+// happened in recordLifecycleFault" clause. This test turns RED naming the arm.
+//
 // MUTATION, AT THE DEFECT SITE: change cmd.ErrOrStderr() to cmd.OutOrStdout()
 // in ANY ONE of the arms. This test turns RED on that arm and again over the
 // whole function.
@@ -2352,6 +2394,19 @@ func TestEveryFailingArmOfTheFaultWriterTellsTheOperatorOnStandardError(t *testi
 			"%s at hook_lifecycle.go:%d leaves WITHOUT A WORD: the fault it was recording then "+
 				"has no durable record and nothing anywhere says so, which is the loss the "+
 				"placement of this file beside the database exists to prevent", arm.Shape, arm.Line)
+
+		// WHERE AND HOW TO FIX, on every arm. A loss reported with neither
+		// leaves the operator with bad news and no action, on the one channel
+		// this route has.
+		text := faultWriterArmText(arm.Body)
+		require.Contains(t, text, faultWriterWherePhrase,
+			"%s at hook_lifecycle.go:%d reports a lost record without saying WHERE it was lost; "+
+				"every arm of this writer names the function and the file, so the operator can "+
+				"find the code that gave up the record", arm.Shape, arm.Line)
+		require.Truef(t, strings.Contains(text, faultWriterRemedyPhrase) || strings.Contains(text, faultWriterReportPhrase),
+			"%s at hook_lifecycle.go:%d reports a lost record without an ACTION: it must end "+
+				"with %q after telling the operator what to change, or with %q on the one arm no "+
+				"input can drive", arm.Shape, arm.Line, faultWriterRemedyPhrase, faultWriterReportPhrase)
 	}
 
 	// THE SAME CLAIM OVER THE WHOLE FUNCTION, so a write standing OUTSIDE every
@@ -2784,7 +2839,7 @@ console.log("HOST-CONTINUED");
 // numbers they mean. The document states them in WORDS, which is right for
 // prose and useless to a guard unless the guard can read them.
 var spelledCounts = map[int]string{
-	4: "FOUR", 5: "FIVE", 6: "SIX", 7: "SEVEN", 8: "EIGHT", 9: "NINE",
+	1: "ONE", 2: "TWO", 3: "THREE", 4: "FOUR", 5: "FIVE", 6: "SIX", 7: "SEVEN", 8: "EIGHT", 9: "NINE",
 }
 
 // spelledOrdinals maps the same numbers to the ordinal the document uses for
@@ -3124,6 +3179,15 @@ func TestTheFaultRecordOpenFailureIsReportedOnStandardErrorOnly(t *testing.T) {
 	assert.Contains(t, run.Stderr, "could not open its fault record",
 		"the open arm must reach its own diagnostic; if it does not, this test proves nothing "+
 			"about which stream that diagnostic uses")
+	// WHERE AND HOW TO FIX, on the bytes the operator reads. This arm said
+	// neither while its siblings said both, and on this route standard error
+	// is the only channel the record has left.
+	assert.Contains(t, run.Stderr, faultWriterWherePhrase,
+		"the open arm must say WHERE the record was lost")
+	assert.Contains(t, run.Stderr, "writable by the user running the hook",
+		"the open arm must name the condition to change: the directory is not writable by this user")
+	assert.Contains(t, run.Stderr, faultWriterRemedyPhrase,
+		"the open arm must tell the operator that the record returns once the condition is changed")
 	assert.Contains(t, run.Stderr, faultRecordLossSuffix,
 		"every failing arm of this writer ends with the one clause, so the operator reads the "+
 			"same sentence for the same loss whichever arm produced it")
@@ -3237,6 +3301,14 @@ func TestEveryDrivableFaultRecordLossIsMeasuredOnTheHostBytes(t *testing.T) {
 		assert.Contains(t, run.Stderr, "no space left on device",
 			"the failure must be the REAL ENOSPC the device returned, quoted for the operator; "+
 				"a diagnostic that drops the cause tells them the record is gone and not why")
+		// WHERE AND HOW TO FIX, on the bytes the operator reads. This arm said
+		// neither while its siblings said both.
+		assert.Contains(t, run.Stderr, faultWriterWherePhrase,
+			"the append arm must say WHERE the record was lost")
+		assert.Contains(t, run.Stderr, "free space or quota on the filesystem holding",
+			"the append arm must name the condition to change: the filesystem or the quota is full")
+		assert.Contains(t, run.Stderr, faultWriterRemedyPhrase,
+			"the append arm must tell the operator that the record returns once the condition is changed")
 		assert.Contains(t, run.Stderr, faultRecordLossSuffix,
 			"every route that loses the record ends with the one clause, so the operator reads "+
 				"the same sentence for the same loss whichever route produced it")
@@ -5548,7 +5620,7 @@ func TestControl() {
 // pattern recognising its family. It is the same table its sibling carries, and
 // the same reasoning applies to every entry.
 var packageInternalReferenceForms = map[string]string{
-	// Built from the DERIVED prefix at run time; see packageTaskIdentifierCorpus.
+	// Built from the DERIVED prefixes at run time; see packageTaskIdentifierCorpus.
 	"<project>-xxxxx": ``,
 	"beads://…":       `beads://`,
 	"p3-propose":      `\bp\d+-[a-z][a-z-]*\b`,
@@ -5638,16 +5710,21 @@ func packageInternalReferencePatterns(t *testing.T) []*regexp.Regexp {
 			"either restore the exemplar to the rule, or delete the entry here and record why that "+
 			"family is no longer forbidden", stale)
 	// THE SAME REPOSITORY SCAN ITS SIBLING RUNS. The two packages cannot share a
-	// helper, but they share a SOURCE: both derive the prefix and the corpus
-	// from this tree, so their populations are equal by construction rather
-	// than by a comment claiming they are.
+	// helper, but they share a SOURCE: both derive the prefixes and the corpus
+	// from this tree, and both pin the same stated project prefix and the same
+	// floor (held equal by TestTheTwoInternalReferenceTablesAgree), so their
+	// populations are equal by construction rather than by a comment claiming
+	// they are.
 	//
-	// THE PATTERN IS THE BARE PREFIX, which is EXACTLY the literal it replaced
-	// and so exactly as wide. Every hand-written suffix shape has narrowed —
-	// on length first, then on alphabet — and nothing in this tree says what
-	// shape a generated suffix takes, so no shape is asked for.
-	prefix, corpus := packageTaskIdentifierCorpus(t, root)
-	patterns = append(patterns, regexp.MustCompile(regexp.QuoteMeta(prefix+"-")))
+	// THE PATTERNS ARE THE BARE PREFIXES, one per prefix over the floor, and a
+	// bare prefix is EXACTLY the literal it replaced and so exactly as wide.
+	// Every hand-written suffix shape has narrowed — on length first, then on
+	// alphabet — and nothing in this tree says what shape a generated suffix
+	// takes, so no shape is asked for.
+	prefixes, corpus := packageTaskIdentifierCorpus(t, root)
+	for _, prefix := range prefixes {
+		patterns = append(patterns, regexp.MustCompile(regexp.QuoteMeta(prefix+"-")))
+	}
 	require.NotEmpty(t, patterns, "the guard must recognise at least one form")
 
 	// AT LEAST AS WIDE AS THE REAL POPULATION. This holds by construction
@@ -5910,7 +5987,7 @@ func packageStripDurablePaths(text string) string {
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // THE AXES THIS DERIVATION HAS TO COVER, NAMED BEFORE IT IS WRITTEN, because
-// the last two attempts were each exactly as wide as the probe that found them:
+// the last three attempts were each exactly as wide as the probe that found them:
 //
 //	LENGTH    — the first pattern pinned a suffix to the five characters the
 //	            illustration beside the rule spells, and every identifier in
@@ -5926,37 +6003,73 @@ func packageStripDurablePaths(text string) string {
 //	            the rule recommends using instead of an internal id.
 //	DRIFT     — two packages carry this guard and their example lists had
 //	            already diverged while a comment said they were the same.
+//	IDENTITY  — the third attempt ELECTED one prefix by distinct-suffix count
+//	            and pinned only the MARGIN between the winner and the runner-up.
+//	            One Markdown file carrying more than twice as many distinct
+//	            tails under another hyphenated prefix won that election, passed
+//	            the margin pin, and the guard stopped recognising every real
+//	            identifier — in both packages, with the whole tree green.
 //
-// ONE DERIVATION CLOSES ALL FIVE. The prefix is elected from the repository's
-// own records and the pattern is that bare prefix, so length and alphabet are
-// not asked about at all; the width check is the corpus itself, so it cannot
-// measure a different axis from the one a pattern narrows on; a digest or a
-// workflow id carries another prefix, so it cannot match; and both packages
-// scan the same tree and hold their hand-written tables equal by test.
+// ONE DERIVATION CLOSES ALL SIX. The pattern is the bare prefix, so length and
+// alphabet are not asked about at all; the width check is the corpus itself,
+// so it cannot measure a different axis from the one a pattern narrows on; a
+// digest or a workflow id carries another prefix, so it cannot match; both
+// packages scan the same tree and hold their hand-written tables and their
+// two constants equal by test (TestTheTwoInternalReferenceTablesAgree, below,
+// reads the sibling's source); and NOTHING IS ELECTED. Every prefix over the
+// population floor is recognised, as a UNION, so a newcomer ADDS a pattern and
+// can never REPLACE one; and the project's own prefix is a stated FACT the
+// union must contain, not the result of a count.
 
-// packageTaskIdentifierCorpus returns the project prefix that task identifiers
-// in this repository carry, and every distinct identifier found under it.
+// packageProjectTaskIdentifierPrefix is the prefix this project's task tracker puts
+// on every task identifier. It is a FACT about the project, stated here, and
+// NOT a derivation: the tracker's configuration lives outside this tree, so
+// nothing in the tree can read it, and the derivation below cannot be trusted
+// to find it, because a derivation that can find a prefix can also lose it.
+// The derivation must FIND this prefix over the floor or fail by name. It may
+// find other prefixes beside it, and then it recognises those as well.
+const packageProjectTaskIdentifierPrefix = "aura-plugins"
+
+// packageTaskIdentifierPopulationFloor is the number of DISTINCT suffixes a multi-word
+// prefix must carry, over the whole tree, to be recognised as a task-identifier
+// prefix. A generated identifier family carries many distinct random tails
+// under one prefix; ordinary hyphenated English carries a handful. Measured on
+// this tree: the project prefix carries fifty-five, the widest phrase eight.
+const packageTaskIdentifierPopulationFloor = 20
+
+// packageTaskIdentifierCorpus returns every task-identifier prefix this repository's
+// own records carry, sorted, and every distinct identifier found under them.
 //
 // WHAT IT VISITS: every .go and .md file under the repository root, for tokens
-// shaped `<multi-word-prefix>-<five or six base-36 characters>`.
+// shaped `<multi-word-prefix>-<five or six base-36 characters>`; every
+// multi-word prefix carrying at least packageTaskIdentifierPopulationFloor distinct
+// suffixes is a prefix of the result.
 // WHAT IT DOES NOT READ: any other file kind, and an identifier of another
-// length. THE LENGTH RANGE IS WRITTEN DOWN, AND IT IS LOAD-BEARING FOR THE
-// ELECTION ONLY: widening it to three characters lets ordinary hyphenated
-// English (`unified-schema-...`) carry more distinct tails than any generated
-// prefix, and the election flips. Measured on this tree, the five-or-six range
-// admits every identifier the records carry. The pattern the election feeds is
-// the bare prefix, so an identifier of another length under the elected prefix
-// is still recognised; only the corpus, which is a control, is bounded by it.
-func packageTaskIdentifierCorpus(t *testing.T, root string) (string, []string) {
+// length. THE LENGTH RANGE IS WRITTEN DOWN, AND IT BOUNDS THE CORPUS ONLY: the
+// pattern the result feeds is the bare prefix, so an identifier of another
+// length under a recognised prefix is still recognised. Widening the range to
+// three characters lets ordinary hyphenated English (`unified-schema-...`)
+// clear the floor. Such a phrase JOINS the union, and the guard then refuses
+// that phrase in host-visible text BY NAME, quoting the pattern — an over-match
+// that is loud where it lands. What no widening, narrowing or newcomer can do
+// is REMOVE the project prefix: that is pinned below against the stated fact,
+// and a floor raised above the project's own records, a file kind that carries
+// them dropped from the walk, or a shape that no longer admits them, each
+// fails here by name instead of leaving the guard blind.
+func packageTaskIdentifierCorpus(t *testing.T, root string) ([]string, []string) {
 	t.Helper()
 
 	shape := regexp.MustCompile(`\b([a-z][a-z0-9]*(?:-[a-z0-9]+)*)-([a-z0-9]{5,6})\b`)
 	found := map[string]map[string]bool{}
+	// kinds records which file kinds each prefix was read from, so the walk
+	// can be held to BOTH kinds its doc names.
+	kinds := map[string]map[string]bool{}
 	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil || info.IsDir() {
 			return nil
 		}
-		if ext := filepath.Ext(path); ext != ".go" && ext != ".md" {
+		ext := filepath.Ext(path)
+		if ext != ".go" && ext != ".md" {
 			return nil
 		}
 		raw, readErr := os.ReadFile(path)
@@ -5967,67 +6080,104 @@ func packageTaskIdentifierCorpus(t *testing.T, root string) (string, []string) {
 			prefix, suffix := match[1], match[2]
 			if found[prefix] == nil {
 				found[prefix] = map[string]bool{}
+				kinds[prefix] = map[string]bool{}
 			}
 			found[prefix][prefix+"-"+suffix] = true
+			kinds[prefix][ext] = true
 		}
 		return nil
 	})
 	require.NoError(t, err, "walk the repository for real task identifiers")
 
 	// THE SELECTOR IS DISTINCT SUFFIXES UNDER A MULTI-WORD PREFIX, and it is
-	// not occurrence count. Ranking by occurrences elects "review", because
+	// not occurrence count. Ranking by occurrences admits "review", because
 	// ordinary hyphenated English dominates a Go repository and any five- or
 	// six-letter word looks like a suffix. A task identifier is generated, so
 	// ONE prefix carries MANY DISTINCT random suffixes while an English phrase
 	// carries a handful. The prefix must itself be multi-word, which every
-	// project identifier is and most stray matches are not. THE MARGIN IS
-	// PINNED BELOW rather than quoted here, so an election that gets close
-	// fails by name instead of flipping in silence.
-	prefix, best, runnerUp, runnerUpCount := "", 0, "", 0
+	// project identifier is and most stray matches are not.
+	//
+	// THERE IS NO WINNER. Every prefix over the floor is kept, so the one thing
+	// a newcomer can do is join, and the one thing it cannot do is push another
+	// prefix out. The previous version elected the single prefix with the most
+	// distinct suffixes and pinned the margin over the runner-up; a runner-up
+	// that overtook by MORE than that margin won in silence.
+	prefixes := []string{}
 	for candidate, identifiers := range found {
-		if !strings.Contains(candidate, "-") {
+		if !strings.Contains(candidate, "-") || len(identifiers) < packageTaskIdentifierPopulationFloor {
 			continue
 		}
-		distinct := len(identifiers)
-		switch {
-		case distinct > best || (distinct == best && candidate < prefix):
-			runnerUp, runnerUpCount = prefix, best
-			prefix, best = candidate, distinct
-		case distinct > runnerUpCount || (distinct == runnerUpCount && candidate < runnerUp):
-			runnerUp, runnerUpCount = candidate, distinct
-		}
+		prefixes = append(prefixes, candidate)
 	}
-	require.NotEmpty(t, prefix,
-		"no task identifier shape occurs anywhere in this repository, so this guard has nothing to "+
-			"derive from and every assertion resting on it would pass vacuously")
-	require.Greater(t, best, 2*runnerUpCount,
-		"the elected prefix %q carries %d distinct suffixes and the runner-up %q carries %d, which "+
-			"is within a factor of two. The election rests on generated identifiers outnumbering "+
-			"hyphenated English by far; when they no longer do, this derivation is electing a "+
-			"phrase, and the guard must be given its prefix another way", prefix, best, runnerUp, runnerUpCount)
+	sort.Strings(prefixes)
+	require.NotEmpty(t, prefixes,
+		"no multi-word prefix carries %d distinct five-or-six-character suffixes anywhere in this "+
+			"repository, so this guard has nothing to derive from and every assertion resting on "+
+			"it would pass vacuously", packageTaskIdentifierPopulationFloor)
 
-	identifiers := make([]string, 0, len(found[prefix]))
-	for identifier := range found[prefix] {
-		identifiers = append(identifiers, identifier)
+	// THE PROJECT PREFIX IS A FACT THE DERIVATION MUST FIND, not a result it
+	// may report. This is the pin the election never had: the recognised set
+	// may grow, and it may never lose the prefix the project's own records
+	// carry.
+	require.Contains(t, prefixes, packageProjectTaskIdentifierPrefix,
+		"the prefixes over the floor are %v, and %q — the prefix this project's task tracker "+
+			"assigns, stated as a fact above — is not among them: it carries %d distinct suffixes "+
+			"in the tree against a floor of %d. Either the records that carry it left the tree, "+
+			"the floor was raised above them, a file kind that carries them was dropped from the "+
+			"walk, or the shape no longer admits them. Left unpinned, the guard would stop "+
+			"recognising every real task identifier in silence, which is the flip this pin "+
+			"refuses", prefixes, packageProjectTaskIdentifierPrefix,
+		len(found[packageProjectTaskIdentifierPrefix]), packageTaskIdentifierPopulationFloor)
+
+	// EACH FILE KIND MUST CONTRIBUTE, or a kind can leave the walk in silence.
+	// Measured on this tree, the .md files alone carry the project prefix over
+	// the floor and the .go files alone do not, so dropping .go from the walk
+	// would leave the fact pin above satisfied while the corpus stopped
+	// reading source. The doc of this function names both kinds; this holds it
+	// to both.
+	for _, kind := range []string{".go", ".md"} {
+		require.True(t, kinds[packageProjectTaskIdentifierPrefix][kind],
+			"no %s file carries a %q identifier, so the walk no longer reads that kind, or the "+
+				"kind was dropped from it. The doc of this function states that both kinds are "+
+				"read, and the corpus must be read from both", kind, packageProjectTaskIdentifierPrefix)
+	}
+
+	identifiers := []string{}
+	for _, prefix := range prefixes {
+		for identifier := range found[prefix] {
+			identifiers = append(identifiers, identifier)
+		}
 	}
 	sort.Strings(identifiers)
 
-	// THE CORPUS MUST COVER THE ALPHABET AXIS, or the width check measures
-	// length again while the pattern narrows on characters.
-	digitFree := 0
-	for _, identifier := range identifiers {
-		if !regexp.MustCompile(`[0-9]`).MatchString(identifier[len(prefix)+1:]) {
+	// THE CORPUS MUST COVER THE ALPHABET AND THE LENGTH AXES over the project's
+	// own identifiers, or the width check measures one axis while a pattern or
+	// the shape narrows on another.
+	digitFree, fiveLong, sixLong := 0, 0, 0
+	for identifier := range found[packageProjectTaskIdentifierPrefix] {
+		suffix := identifier[len(packageProjectTaskIdentifierPrefix)+1:]
+		if !regexp.MustCompile(`[0-9]`).MatchString(suffix) {
 			digitFree++
 		}
+		switch len(suffix) {
+		case 5:
+			fiveLong++
+		case 6:
+			sixLong++
+		}
 	}
-	require.GreaterOrEqual(t, len(identifiers), 20,
-		"the corpus must be large enough to be a population rather than a handful; found %d",
-		len(identifiers))
 	require.NotZero(t, digitFree,
 		"the corpus carries no DIGIT-FREE identifier, so it cannot catch a pattern that narrows on "+
 			"the alphabet — which is exactly how the previous width check passed while one real "+
 			"identifier in nine went unrecognised")
-	return prefix, identifiers
+	require.NotZero(t, fiveLong,
+		"the corpus carries no FIVE-character project identifier, so the shape above no longer "+
+			"admits the length most real identifiers have")
+	require.NotZero(t, sixLong,
+		"the corpus carries no SIX-character project identifier, so the shape above no longer "+
+			"admits the length the first width check missed; a corpus bounded to one length "+
+			"cannot catch a pattern that narrows on the other")
+	return prefixes, identifiers
 }
 
 // packageDurableReferenceSamples are references the rule RECOMMENDS. None may
@@ -6057,10 +6207,14 @@ var packageDurableReferenceSamples = []string{
 // under a comment saying they carried the same ones. A comment cannot hold two
 // files equal; a test that reads one file from the other can.
 //
-// WHAT IT VISITS: the two package-level composite literals named below in the
-// sibling's test source, read through the parser.
+// WHAT IT VISITS: the two package-level composite literals and the two
+// package-level constants named below in the sibling's test source, read
+// through the parser.
 // WHAT IT DOES NOT READ: the sibling's derivation code, which is held equal to
-// this one's only by the shared sources it reads.
+// this one's only by the shared sources it reads — and by the two constants
+// it is pinned against, which ARE read here, because a floor raised in one
+// copy or a project prefix changed in one copy is drift in the derived half
+// that no shared source can prevent: those two values are stated, not read.
 func TestTheTwoInternalReferenceTablesAgree(t *testing.T) {
 	t.Parallel()
 
@@ -6114,6 +6268,38 @@ func TestTheTwoInternalReferenceTablesAgree(t *testing.T) {
 	assert.Equal(t, siblingSamples, packageDurableReferenceSamples,
 		"the durable samples here and the ones in internal/lifecycle/hostexit differ; a sample "+
 			"added to one copy measures an over-match the other copy cannot see")
+
+	// THE TWO CONSTANTS THE DERIVATION IS PINNED AGAINST: the stated project
+	// prefix and the population floor. Neither is read from a source, so
+	// nothing but this holds the two copies to the same values.
+	constants := map[string]string{}
+	for _, node := range parsed.Decls {
+		declaration, isDeclaration := node.(*ast.GenDecl)
+		if !isDeclaration || declaration.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range declaration.Specs {
+			value, isValue := spec.(*ast.ValueSpec)
+			if !isValue || len(value.Names) != 1 || len(value.Values) != 1 {
+				continue
+			}
+			if basic, isBasic := value.Values[0].(*ast.BasicLit); isBasic {
+				constants[value.Names[0].Name] = basic.Value
+			}
+		}
+	}
+	prefix, present := constants["projectTaskIdentifierPrefix"]
+	require.True(t, present, "the sibling must still state projectTaskIdentifierPrefix as a constant")
+	assert.Equal(t, strconv.Quote(packageProjectTaskIdentifierPrefix), prefix,
+		"the stated project prefix here and the one in internal/lifecycle/hostexit differ. The "+
+			"prefix is a fact about the project and there is one project; a copy that states "+
+			"another one pins its derivation to a prefix the records do not carry")
+	floor, present := constants["taskIdentifierPopulationFloor"]
+	require.True(t, present, "the sibling must still state taskIdentifierPopulationFloor as a constant")
+	assert.Equal(t, strconv.Itoa(packageTaskIdentifierPopulationFloor), floor,
+		"the population floor here and the one in internal/lifecycle/hostexit differ. A floor "+
+			"raised in one copy narrows what that copy recognises while the other still "+
+			"recognises it, which is the drift the two example lists already suffered")
 }
 
 // TestTheOutOfSetHandoverNamesEveryGuardItFound runs the same predicate over the
@@ -6214,4 +6400,240 @@ func TestTheOutOfSetHandoverNamesEveryGuardItFound(t *testing.T) {
 		"the handover names these guards and the predicate no longer finds them in the foreign "+
 			"files: %v. A name that outlives its finding sends an owner to look at a guard that "+
 			"has already been derived or discharged", stale)
+}
+
+// TestTheReadOnlyStoreRouteWritesOnlyTheHostsContinueBytesOnEveryHarness
+// measures route 3 of the fault record — the record cannot be opened although
+// its directory exists — on the bytes every host receives, and holds the
+// AGENTS.md sentence that describes the route to what each host received.
+//
+// THE SENTENCE WAS MEASURED ON ONE HARNESS AND WRITTEN FOR ALL. It said
+// "nothing at all on standard output", which is true of Claude Code, whose
+// continue bytes are empty, and false of OpenCode and Codex, which write their
+// continue bytes on this route because that is what fail-open means there. An
+// operator on those hosts, debugging a lost record, was told to expect an empty
+// standard output and met a JSON body with nothing saying it was the
+// continuation and not a decision.
+//
+// WHAT IT VISITS: every harness in the derived coordinate set, driven through
+// the built binary twice on one valid payload — once with the record path
+// standing as a DIRECTORY, which is route 3 on any user including root, and
+// once with it free, the CONTROL. The route must write the same standard output
+// as the control, exit 0 like the control, report the open failure on standard
+// error where the control reports none, and leave no record where the control
+// leaves one line. Then the "The lifecycle fault record" section of AGENTS.md
+// must state, per harness by name, the bytes that were measured.
+// WHAT IT DOES NOT READ: routes 1, 2, 4 and 5, which have their own byte pins;
+// and whether the host reads those bytes as a proceed, which the production
+// proofs measure.
+//
+// MUTATION: make the open arm write to cmd.OutOrStdout(), or return without a
+// word; every harness's subtest turns RED. MUTATION: restore "nothing at all on
+// standard output" in AGENTS.md in place of the per-harness clauses; the Codex
+// and OpenCode subtests turn RED on the document pin.
+func TestTheReadOnlyStoreRouteWritesOnlyTheHostsContinueBytesOnEveryHarness(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "lifecycle-cli")
+	buildLifecycleBinary(t, binary)
+
+	rows := map[string]struct {
+		Event       string
+		HostVersion string
+		Payload     []byte
+		// Name is how AGENTS.md names the host, which is what the document
+		// pin below looks for beside the measured bytes.
+		Name string
+	}{
+		"claude-code": {Event: "PreToolUse", HostVersion: "2.1.222",
+			Payload: claudeFixture(t, "pre_tool_use_2_1_222.json"), Name: "Claude Code"},
+		"codex": {Event: "PreToolUse", HostVersion: "0.146.0",
+			Payload: codexFixture(t, "pre_tool_use_0_146_0.json"), Name: "Codex"},
+		"opencode": {Event: "tool.execute.before", HostVersion: "1.18.10",
+			Payload: openCodeToolExecuteBeforeWire(t), Name: "OpenCode"},
+	}
+	coordinates, derivationErr := handlers.LifecycleHarnessCoordinates()
+	require.NoError(t, derivationErr, "the harness set is derived from the command's own registry")
+	derived := []string{}
+	for _, coordinate := range coordinates {
+		derived = append(derived, coordinate.Harness)
+	}
+	written := []string{}
+	for harness := range rows {
+		written = append(written, harness)
+	}
+	sort.Strings(derived)
+	sort.Strings(written)
+	require.Equal(t, derived, written,
+		"the payload rows here must cover EXACTLY the harnesses the command dispatches on. A harness "+
+			"with no row is measured by nothing, and the document sentence is then true of nothing")
+
+	repository, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err, "resolve the repository root from cmd/pasture")
+	raw, err := os.ReadFile(filepath.Join(repository, "AGENTS.md"))
+	require.NoError(t, err, "read AGENTS.md, which is where the route is described")
+	const heading = "### The lifecycle fault record"
+	document := string(raw)
+	require.Contains(t, document, heading, "the route description must still live under its own heading")
+	section := document[strings.Index(document, heading):]
+	if next := strings.Index(section[len(heading):], "\n### "); next != -1 {
+		section = section[:len(heading)+next]
+	}
+	// THE COUNT THE SENTENCE OPENS WITH IS THE SIZE OF THE DERIVED SET, so a
+	// fourth harness cannot leave "all three" standing.
+	require.Contains(t, spelledCounts, len(derived),
+		"the harness count %d has no spelling in this table; add the word", len(derived))
+	assert.Contains(t, section, "on all "+strings.ToLower(spelledCounts[len(derived)])+" harnesses",
+		"AGENTS.md must open the measurement with the number of harnesses it was taken on, "+
+			"which is the size of the derived set, %d", len(derived))
+
+	for _, harness := range written {
+		row := rows[harness]
+		t.Run(harness, func(t *testing.T) {
+			drive := func(recordPathIsADirectory bool) lifecycleRun {
+				store := t.TempDir()
+				database := filepath.Join(store, "not-a-database")
+				require.NoError(t, os.Mkdir(database, 0o755),
+					"the store path must be a directory, so opening it as a database is a real "+
+						"storage fault on every harness alike")
+				if recordPathIsADirectory {
+					require.NoError(t, os.Mkdir(filepath.Join(store, lifecycleFaultRecordFile), 0o755),
+						"the record's own path must be a directory, so its parent can be made and "+
+							"the file itself cannot be opened, on any user including root")
+				}
+				return runLifecycleHookOn(t, binary, database, harness, row.Event, row.HostVersion, row.Payload)
+			}
+			control := drive(false)
+			require.Equal(t, 0, control.ExitCode,
+				"the control is the same fault with a record that can be placed, and it is fail-open")
+			require.NotContains(t, control.Stderr, "could not open its fault record",
+				"the control must keep its record, or the route below is measured against a broken control")
+			require.Len(t, readFaultRecords(t, control.FaultDir), 1,
+				"the control must leave one record line, or nothing below is about the record")
+
+			route := drive(true)
+			assert.Equal(t, 0, route.ExitCode,
+				"route 3 is fail-open: the record is evidence for a maintainer and never a condition "+
+					"of the host outcome")
+			assert.Equal(t, control.Stdout, route.Stdout,
+				"standard output on route 3 must be EXACTLY what the same fault writes when its record "+
+					"can be placed: this host's continue bytes and nothing else. A byte more is a "+
+					"diagnostic ahead of the continuation, which stops an OpenCode gate; a byte fewer "+
+					"is a continuation the host never received")
+			assert.Contains(t, route.Stderr, "could not open its fault record",
+				"the open arm must reach its own diagnostic; if it does not, this subtest proves "+
+					"nothing about the route")
+			// The record path stands as a directory on this route by
+			// construction, so "no record file anywhere" is read as: the
+			// directory is still there and nothing was written into it.
+			entries, readErr := os.ReadDir(filepath.Join(route.FaultDir, lifecycleFaultRecordFile))
+			require.NoError(t, readErr,
+				"the record path must still be the directory this subtest made; anything else "+
+					"means the input did not drive route 3")
+			assert.Empty(t, entries, "no record can exist on route 3, and nothing may be written beside where it would stand")
+
+			// THE DOCUMENT STATES WHAT WAS MEASURED, PER HOST BY NAME.
+			if route.Stdout == "" {
+				assert.Contains(t, section, "nothing at all on "+row.Name,
+					"AGENTS.md must say, naming this host, that it receives nothing on standard output "+
+						"on this route; the sentence was true of this host and written for all")
+			} else {
+				assert.Contains(t, section, "`"+route.Stdout+"` on "+row.Name,
+					"AGENTS.md must state the bytes this host receives on standard output on this "+
+						"route, naming the host, or an operator on it expects an empty standard "+
+						"output and meets a JSON body")
+			}
+		})
+	}
+}
+
+// TestAnUndeclaredCoordinateIsNotReportedAsADeclaration drives the two routes a
+// host can reach with a stale generated hook or a mismatched binary — a harness
+// this build does not support, and an event name its registration does not
+// carry — and requires the diagnostic and the durable record to say that
+// NOTHING declares the row.
+//
+// ONE MESSAGE, TWO CLAUSES THAT DISAGREED. The command treats such a
+// coordinate as observe-only, which is the weakest claim it can make, and the
+// phase line rendered that as "declared failure mode observe-only" while the
+// cause two clauses later said the harness is not supported or the event is
+// not in the registration. The record wrote "declaredFailureMode":
+// "observe-only" as well, so a maintainer grouping the record by declaration
+// — the grouping AGENTS.md anticipates — counted a stale hook among the
+// thirty-two OpenCode rows that really declare observe-only.
+//
+// WHAT IT VISITS: the two undeclared routes through the built binary, the
+// phase line and the fail-closed advice on standard error, and the two mode
+// members of the record; plus a CONTROL on a declared row, which must keep
+// reading as a declaration.
+// WHAT IT DOES NOT READ: the cause text of either refusal, which its own tests
+// pin.
+//
+// MUTATION: give lifecycleFailurePolicy's fallback a valid Semantic, drop
+// `Undeclared:` from the Fault the command builds, or write
+// recordedFailureMode(failure.DeclaredMode) into the record again. The
+// undeclared subtests turn RED on "declared failure mode none" or on
+// "undeclared".
+func TestAnUndeclaredCoordinateIsNotReportedAsADeclaration(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "lifecycle-cli")
+	buildLifecycleBinary(t, binary)
+
+	const undeclaredClause = "declared failure mode none (no row of this build's registration declares this event, so it is treated as observe-only)"
+
+	for _, route := range []struct {
+		name, harness, event, hostVersion, cause string
+	}{
+		{name: "a harness this build does not support", harness: "gemini", event: "NotAnEvent",
+			hostVersion: "1.0", cause: "is not supported"},
+		{name: "an event the registration does not carry", harness: "claude-code", event: "NotAnEvent",
+			hostVersion: "2.1.222", cause: "is not in the generated"},
+	} {
+		route := route
+		t.Run(route.name, func(t *testing.T) {
+			dir := t.TempDir()
+			run := runLifecycleHookOn(t, binary, filepath.Join(dir, "pasture.db"),
+				route.harness, route.event, route.hostVersion, []byte("{}"))
+			require.Equal(t, 0, run.ExitCode, "an undeclared coordinate is treated as observe-only and continues")
+			require.Contains(t, run.Stderr, route.cause,
+				"this route must reach the cause that says nothing declares the row, or the assertions "+
+					"below are about another fault")
+			assert.Contains(t, run.Stderr, undeclaredClause,
+				"the phase line must say that no row declares the event and what the event is treated as")
+			assert.NotContains(t, run.Stderr, "declared failure mode observe-only",
+				"calling the treated-as mode a declaration contradicts the cause two clauses later")
+			assert.Contains(t, run.Stderr, "effective failure mode observe-only",
+				"the mode the row runs as is still named, because that one is true")
+
+			records := readFaultRecords(t, run.FaultDir)
+			require.Len(t, records, 1, "the fault must leave exactly one record line")
+			assert.Equal(t, "undeclared", records[0]["declaredFailureMode"],
+				"a parser grouping the record by declaration must not count this hook among the rows "+
+					"that declare observe-only; the member carries one stable word instead")
+			assert.Equal(t, "observe-only", records[0]["failureMode"],
+				"the effective mode is what the command treated the row as, and that is true")
+
+			optedIn := runLifecycleHookOn(t, binary, filepath.Join(t.TempDir(), "pasture.db"),
+				route.harness, route.event, route.hostVersion, []byte("{}"), hookFailClosedEnv+"=1")
+			require.Equal(t, 0, optedIn.ExitCode, "an undeclared coordinate has no exit code the opt-in could use")
+			assert.Contains(t, optedIn.Stderr,
+				"no row of this build's registration declares the event, so it is treated as observe-only",
+				"the fail-closed advice must give the reason that is true of this row: nothing declares it")
+			assert.NotContains(t, optedIn.Stderr, "its declared failure mode observe-only",
+				"the treated-as mode is not the row's declaration")
+		})
+	}
+
+	t.Run("a declared row is still reported as a declaration", func(t *testing.T) {
+		dir := t.TempDir()
+		run := runLifecycleHookOn(t, binary, unopenableDatabase(t, dir),
+			"claude-code", "PostToolUse", "2.1.222", claudeFixture(t, "post_tool_use_2_1_222.json"))
+		assert.Contains(t, run.Stderr, "declared failure mode report-and-continue",
+			"a declared row names its declaration, and the control must keep saying so")
+		assert.NotContains(t, run.Stderr, "declared failure mode none",
+			"the undeclared clause must not leak onto a declared row")
+		records := readFaultRecords(t, run.FaultDir)
+		require.Len(t, records, 1)
+		assert.Equal(t, "report-and-continue", records[0]["declaredFailureMode"],
+			"a declared row's record keeps the declared mode by name")
+	})
 }

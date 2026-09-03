@@ -617,6 +617,16 @@ type LifecycleFailurePolicy struct {
 	Semantic EventSemantic
 }
 
+// Declared reports whether a row of this build's registration declares the
+// event this policy describes. Every declared row carries a valid Semantic —
+// a lifecycle contract refuses a mapping without one, in
+// LifecycleEventMapping.validate — and the one producer of an undeclared
+// policy, the hook command's fallback for a coordinate this build cannot name,
+// leaves it zero. It exists so a diagnostic or a durable record can say
+// "undeclared" instead of calling the mode such a coordinate is treated as a
+// declaration.
+func (p LifecycleFailurePolicy) Declared() bool { return p.Semantic.IsValid() }
+
 // LookupLifecycleFailure returns the declared failure behaviour of one native
 // event, by the harness and the exact native NAME.
 //

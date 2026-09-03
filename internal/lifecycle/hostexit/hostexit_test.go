@@ -580,6 +580,86 @@ func TestFaultDiagnosticIsActionable(t *testing.T) {
 	// hostexit.faultDiagnostic, so the default clause is used again, and both
 	// subtests turn RED on "already set" and on the forbidden
 	// "set PASTURE_HOOK_FAIL_CLOSED=1".
+	// AN UNDECLARED COORDINATE DECLARES NOTHING, and the diagnostic must not say
+	// it does. The command treats a coordinate this build cannot name as
+	// observe-only and carries that mode in DeclaredMode, because the exit
+	// table needs a mode to obey; the phase line then read "declared failure
+	// mode observe-only" two clauses away from a cause saying nothing declares
+	// the row, and the fail-closed advice called the treated-as mode "its
+	// declared failure mode". Both are pinned to say that no row declares the
+	// event, and a CONTROL pins that a declared row still reads as declared.
+	//
+	// MUTATION: drop the Undeclared arm of declaredModeClause, or the
+	// Undeclared case of failClosedAdvice. The matching subtest turns RED.
+	t.Run("an undeclared coordinate is not reported as a declaration", func(t *testing.T) {
+		t.Parallel()
+		outcome, ok := hostexit.ForFault(hostexit.Fault{
+			Mode:         pastureruntime.FailureObserveOnly,
+			DeclaredMode: pastureruntime.FailureObserveOnly,
+			Undeclared:   true,
+			Evidence:     pastureruntime.FailureEvidence{},
+			Policy:       hostexit.FaultFailOpen,
+			Stage:        hostexit.FaultStageNotRecorded,
+			Continuation: hostexit.EmptyContinuation(),
+			Cause:        cause,
+		})
+		require.True(t, ok, "a bool has no unusable state, so an undeclared fault maps like any other")
+		require.Equal(t, hostexit.ExitContinue, outcome.Exit)
+		assertActionable(t, outcome.Stderr, cause)
+		assert.Contains(t, outcome.Stderr,
+			"declared failure mode none (no row of this build's registration declares this event, so it is treated as observe-only)",
+			"the reader must be told that nothing declares the row and what the row is treated as")
+		assert.NotContains(t, outcome.Stderr, "declared failure mode observe-only",
+			"calling the treated-as mode a declaration contradicts the cause, which says nothing declares the row")
+		assert.Contains(t, outcome.Stderr, "effective failure mode observe-only",
+			"the mode the row runs as is still named, because that one is true")
+	})
+
+	t.Run("fail closed on an undeclared coordinate names the missing row and not a declaration", func(t *testing.T) {
+		t.Parallel()
+		outcome, ok := hostexit.ForFault(hostexit.Fault{
+			Mode:         pastureruntime.FailureObserveOnly,
+			DeclaredMode: pastureruntime.FailureObserveOnly,
+			Undeclared:   true,
+			Evidence:     pastureruntime.FailureEvidence{},
+			Policy:       hostexit.FaultFailClosed,
+			Stage:        hostexit.FaultStageNotRecorded,
+			Continuation: hostexit.EmptyContinuation(),
+			Cause:        cause,
+		})
+		require.True(t, ok)
+		require.Equal(t, hostexit.ExitContinue, outcome.Exit,
+			"an undeclared coordinate has no evidence and no exit code the opt-in could use")
+		assertActionable(t, outcome.Stderr, cause)
+		assert.Contains(t, outcome.Stderr, "PASTURE_HOOK_FAIL_CLOSED is already set",
+			"the reader has taken the opt-in, so the text must start from that fact")
+		assert.Contains(t, outcome.Stderr,
+			"no row of this build's registration declares the event, so it is treated as observe-only",
+			"the reason the opt-in had no channel is that nothing declares the row")
+		assert.NotContains(t, outcome.Stderr, "its declared failure mode observe-only",
+			"the treated-as mode is not the row's declaration")
+	})
+
+	t.Run("a declared observe-only row is still reported as a declaration", func(t *testing.T) {
+		t.Parallel()
+		outcome, ok := hostexit.ForFault(hostexit.Fault{
+			Mode:         pastureruntime.FailureObserveOnly,
+			DeclaredMode: pastureruntime.FailureObserveOnly,
+			Evidence:     pastureruntime.FailureEvidence{},
+			Policy:       hostexit.FaultFailClosed,
+			Stage:        hostexit.FaultStageNotRecorded,
+			Continuation: hostexit.EmptyContinuation(),
+			Cause:        cause,
+		})
+		require.True(t, ok)
+		assert.Contains(t, outcome.Stderr, "declared failure mode observe-only",
+			"a row that declares observe-only is a declaration, and the control must keep saying so")
+		assert.NotContains(t, outcome.Stderr, "declared failure mode none",
+			"the undeclared clause must not leak onto a declared row")
+		assert.Contains(t, outcome.Stderr, "its declared failure mode observe-only does not refuse",
+			"the fail-closed advice of a declared row names its declaration")
+	})
+
 	t.Run("fail closed but the declared mode does not refuse by exit code", func(t *testing.T) {
 		t.Parallel()
 		outcome, ok := hostexit.ForFault(hostexit.Fault{
@@ -1507,14 +1587,15 @@ const internalReferenceRuleHeading = "## References & Internal Identifiers"
 // recognise, with the reason beside it. That is the honest half of the rule: a
 // narrow guard that says so beats a wide one that does not hold.
 var internalReferenceForms = map[string]string{
-	// Beads task identifiers. The pattern is BUILT FROM THE DERIVED PREFIX at
-	// run time, so this entry is a placeholder the builder fills. It is not a
+	// Beads task identifiers. The patterns are BUILT FROM THE DERIVED PREFIXES
+	// at run time, so this entry is a placeholder the builder fills. It is not a
 	// pattern written here because every pattern written here has narrowed:
 	// first to the five characters the illustration spells, while the real
 	// identifiers were five or six; then to suffixes carrying a digit, while
 	// one real identifier in nine carries none. The prefix is not in the
-	// module path or in the rule, so it is elected from the repository's own
-	// records instead. See taskIdentifierCorpus.
+	// module path or in the rule, so every prefix the repository's own records
+	// carry over a floor is recognised, and the project's own prefix is stated
+	// as a fact the derivation must find. See taskIdentifierCorpus.
 	"<project>-xxxxx": ``,
 	"beads://…":       `beads://`,
 	// Protocol process artefacts.
@@ -1630,17 +1711,21 @@ func internalReferencePatterns(t *testing.T) []*regexp.Regexp {
 			"either restore the exemplar to the rule, or delete the entry here and record why that "+
 			"family is no longer forbidden", stale)
 
-	// THE TASK-IDENTIFIER PATTERN IS THE BARE PREFIX THE REPOSITORY ACTUALLY
-	// USES, which is EXACTLY the literal it replaced and so exactly as wide. It
-	// admits every real suffix whatever its length or alphabet, and it cannot
-	// match a digest, a workflow id or a versioned path, because those carry a
-	// different prefix. Every hand-written suffix shape has narrowed, and
-	// nothing in this tree says what shape a generated suffix takes, so no
+	// THE TASK-IDENTIFIER PATTERNS ARE THE BARE PREFIXES THE REPOSITORY
+	// ACTUALLY USES, one per prefix over the population floor, and the project's
+	// own prefix is among them by a pin against a stated fact and not by an
+	// election. A bare prefix is EXACTLY the literal it replaced and so exactly
+	// as wide: it admits every real suffix whatever its length or alphabet, and
+	// it cannot match a digest, a workflow id or a versioned path, because those
+	// carry a different prefix. Every hand-written suffix shape has narrowed,
+	// and nothing in this tree says what shape a generated suffix takes, so no
 	// shape is asked for.
 	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	require.NoError(t, err, "resolve the repository root")
-	prefix, corpus := taskIdentifierCorpus(t, root)
-	patterns = append(patterns, regexp.MustCompile(regexp.QuoteMeta(prefix+"-")))
+	prefixes, corpus := taskIdentifierCorpus(t, root)
+	for _, prefix := range prefixes {
+		patterns = append(patterns, regexp.MustCompile(regexp.QuoteMeta(prefix+"-")))
+	}
 	require.NotEmpty(t, patterns,
 		"the guard must recognise at least one form, or every text passes it")
 
@@ -1705,7 +1790,7 @@ func assertNoInternalReference(t *testing.T, where, text string) {
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // THE AXES THIS DERIVATION HAS TO COVER, NAMED BEFORE IT IS WRITTEN, because
-// the last two attempts were each exactly as wide as the probe that found them:
+// the last three attempts were each exactly as wide as the probe that found them:
 //
 //	LENGTH    — the first pattern pinned a suffix to the five characters the
 //	            illustration beside the rule spells, and every identifier in
@@ -1721,38 +1806,73 @@ func assertNoInternalReference(t *testing.T, where, text string) {
 //	            the rule recommends using instead of an internal id.
 //	DRIFT     — two packages carry this guard and their example lists had
 //	            already diverged while a comment said they were the same.
+//	IDENTITY  — the third attempt ELECTED one prefix by distinct-suffix count
+//	            and pinned only the MARGIN between the winner and the runner-up.
+//	            One Markdown file carrying more than twice as many distinct
+//	            tails under another hyphenated prefix won that election, passed
+//	            the margin pin, and the guard stopped recognising every real
+//	            identifier — in both packages, with the whole tree green.
 //
-// ONE DERIVATION CLOSES ALL FIVE. The prefix is elected from the repository's
-// own records and the pattern is that bare prefix, so length and alphabet are
-// not asked about at all; the width check is the corpus itself, so it cannot
-// measure a different axis from the one a pattern narrows on; a digest or a
-// workflow id carries another prefix, so it cannot match; and both packages
-// scan the same tree and hold their hand-written tables equal by test
-// (TestTheTwoInternalReferenceTablesAgree, in cmd/pasture, reads this file).
+// ONE DERIVATION CLOSES ALL SIX. The pattern is the bare prefix, so length and
+// alphabet are not asked about at all; the width check is the corpus itself,
+// so it cannot measure a different axis from the one a pattern narrows on; a
+// digest or a workflow id carries another prefix, so it cannot match; both
+// packages scan the same tree and hold their hand-written tables and their
+// two constants equal by test (TestTheTwoInternalReferenceTablesAgree, in
+// cmd/pasture, reads this file); and NOTHING IS ELECTED. Every prefix over the
+// population floor is recognised, as a UNION, so a newcomer ADDS a pattern and
+// can never REPLACE one; and the project's own prefix is a stated FACT the
+// union must contain, not the result of a count.
 
-// taskIdentifierCorpus returns the project prefix that task identifiers in this
-// repository carry, and every distinct identifier found under it.
+// projectTaskIdentifierPrefix is the prefix this project's task tracker puts
+// on every task identifier. It is a FACT about the project, stated here, and
+// NOT a derivation: the tracker's configuration lives outside this tree, so
+// nothing in the tree can read it, and the derivation below cannot be trusted
+// to find it, because a derivation that can find a prefix can also lose it.
+// The derivation must FIND this prefix over the floor or fail by name. It may
+// find other prefixes beside it, and then it recognises those as well.
+const projectTaskIdentifierPrefix = "aura-plugins"
+
+// taskIdentifierPopulationFloor is the number of DISTINCT suffixes a multi-word
+// prefix must carry, over the whole tree, to be recognised as a task-identifier
+// prefix. A generated identifier family carries many distinct random tails
+// under one prefix; ordinary hyphenated English carries a handful. Measured on
+// this tree: the project prefix carries fifty-five, the widest phrase eight.
+const taskIdentifierPopulationFloor = 20
+
+// taskIdentifierCorpus returns every task-identifier prefix this repository's
+// own records carry, sorted, and every distinct identifier found under them.
 //
 // WHAT IT VISITS: every .go and .md file under the repository root, for tokens
-// shaped `<multi-word-prefix>-<five or six base-36 characters>`.
+// shaped `<multi-word-prefix>-<five or six base-36 characters>`; every
+// multi-word prefix carrying at least taskIdentifierPopulationFloor distinct
+// suffixes is a prefix of the result.
 // WHAT IT DOES NOT READ: any other file kind, and an identifier of another
-// length. THE LENGTH RANGE IS WRITTEN DOWN, AND IT IS LOAD-BEARING FOR THE
-// ELECTION ONLY: widening it to three characters lets ordinary hyphenated
-// English (`unified-schema-...`) carry more distinct tails than any generated
-// prefix, and the election flips. Measured on this tree, the five-or-six range
-// admits every identifier the records carry. The pattern the election feeds is
-// the bare prefix, so an identifier of another length under the elected prefix
-// is still recognised; only the corpus, which is a control, is bounded by it.
-func taskIdentifierCorpus(t *testing.T, root string) (string, []string) {
+// length. THE LENGTH RANGE IS WRITTEN DOWN, AND IT BOUNDS THE CORPUS ONLY: the
+// pattern the result feeds is the bare prefix, so an identifier of another
+// length under a recognised prefix is still recognised. Widening the range to
+// three characters lets ordinary hyphenated English (`unified-schema-...`)
+// clear the floor. Such a phrase JOINS the union, and the guard then refuses
+// that phrase in host-visible text BY NAME, quoting the pattern — an over-match
+// that is loud where it lands. What no widening, narrowing or newcomer can do
+// is REMOVE the project prefix: that is pinned below against the stated fact,
+// and a floor raised above the project's own records, a file kind that carries
+// them dropped from the walk, or a shape that no longer admits them, each
+// fails here by name instead of leaving the guard blind.
+func taskIdentifierCorpus(t *testing.T, root string) ([]string, []string) {
 	t.Helper()
 
 	shape := regexp.MustCompile(`\b([a-z][a-z0-9]*(?:-[a-z0-9]+)*)-([a-z0-9]{5,6})\b`)
 	found := map[string]map[string]bool{}
+	// kinds records which file kinds each prefix was read from, so the walk
+	// can be held to BOTH kinds its doc names.
+	kinds := map[string]map[string]bool{}
 	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil || info.IsDir() {
 			return nil
 		}
-		if ext := filepath.Ext(path); ext != ".go" && ext != ".md" {
+		ext := filepath.Ext(path)
+		if ext != ".go" && ext != ".md" {
 			return nil
 		}
 		raw, readErr := os.ReadFile(path)
@@ -1763,67 +1883,104 @@ func taskIdentifierCorpus(t *testing.T, root string) (string, []string) {
 			prefix, suffix := match[1], match[2]
 			if found[prefix] == nil {
 				found[prefix] = map[string]bool{}
+				kinds[prefix] = map[string]bool{}
 			}
 			found[prefix][prefix+"-"+suffix] = true
+			kinds[prefix][ext] = true
 		}
 		return nil
 	})
 	require.NoError(t, err, "walk the repository for real task identifiers")
 
 	// THE SELECTOR IS DISTINCT SUFFIXES UNDER A MULTI-WORD PREFIX, and it is
-	// not occurrence count. Ranking by occurrences elects "review", because
+	// not occurrence count. Ranking by occurrences admits "review", because
 	// ordinary hyphenated English dominates a Go repository and any five- or
 	// six-letter word looks like a suffix. A task identifier is generated, so
 	// ONE prefix carries MANY DISTINCT random suffixes while an English phrase
 	// carries a handful. The prefix must itself be multi-word, which every
-	// project identifier is and most stray matches are not. THE MARGIN IS
-	// PINNED BELOW rather than quoted here, so an election that gets close
-	// fails by name instead of flipping in silence.
-	prefix, best, runnerUp, runnerUpCount := "", 0, "", 0
+	// project identifier is and most stray matches are not.
+	//
+	// THERE IS NO WINNER. Every prefix over the floor is kept, so the one thing
+	// a newcomer can do is join, and the one thing it cannot do is push another
+	// prefix out. The previous version elected the single prefix with the most
+	// distinct suffixes and pinned the margin over the runner-up; a runner-up
+	// that overtook by MORE than that margin won in silence.
+	prefixes := []string{}
 	for candidate, identifiers := range found {
-		if !strings.Contains(candidate, "-") {
+		if !strings.Contains(candidate, "-") || len(identifiers) < taskIdentifierPopulationFloor {
 			continue
 		}
-		distinct := len(identifiers)
-		switch {
-		case distinct > best || (distinct == best && candidate < prefix):
-			runnerUp, runnerUpCount = prefix, best
-			prefix, best = candidate, distinct
-		case distinct > runnerUpCount || (distinct == runnerUpCount && candidate < runnerUp):
-			runnerUp, runnerUpCount = candidate, distinct
-		}
+		prefixes = append(prefixes, candidate)
 	}
-	require.NotEmpty(t, prefix,
-		"no task identifier shape occurs anywhere in this repository, so this guard has nothing to "+
-			"derive from and every assertion resting on it would pass vacuously")
-	require.Greater(t, best, 2*runnerUpCount,
-		"the elected prefix %q carries %d distinct suffixes and the runner-up %q carries %d, which "+
-			"is within a factor of two. The election rests on generated identifiers outnumbering "+
-			"hyphenated English by far; when they no longer do, this derivation is electing a "+
-			"phrase, and the guard must be given its prefix another way", prefix, best, runnerUp, runnerUpCount)
+	sort.Strings(prefixes)
+	require.NotEmpty(t, prefixes,
+		"no multi-word prefix carries %d distinct five-or-six-character suffixes anywhere in this "+
+			"repository, so this guard has nothing to derive from and every assertion resting on "+
+			"it would pass vacuously", taskIdentifierPopulationFloor)
 
-	identifiers := make([]string, 0, len(found[prefix]))
-	for identifier := range found[prefix] {
-		identifiers = append(identifiers, identifier)
+	// THE PROJECT PREFIX IS A FACT THE DERIVATION MUST FIND, not a result it
+	// may report. This is the pin the election never had: the recognised set
+	// may grow, and it may never lose the prefix the project's own records
+	// carry.
+	require.Contains(t, prefixes, projectTaskIdentifierPrefix,
+		"the prefixes over the floor are %v, and %q — the prefix this project's task tracker "+
+			"assigns, stated as a fact above — is not among them: it carries %d distinct suffixes "+
+			"in the tree against a floor of %d. Either the records that carry it left the tree, "+
+			"the floor was raised above them, a file kind that carries them was dropped from the "+
+			"walk, or the shape no longer admits them. Left unpinned, the guard would stop "+
+			"recognising every real task identifier in silence, which is the flip this pin "+
+			"refuses", prefixes, projectTaskIdentifierPrefix,
+		len(found[projectTaskIdentifierPrefix]), taskIdentifierPopulationFloor)
+
+	// EACH FILE KIND MUST CONTRIBUTE, or a kind can leave the walk in silence.
+	// Measured on this tree, the .md files alone carry the project prefix over
+	// the floor and the .go files alone do not, so dropping .go from the walk
+	// would leave the fact pin above satisfied while the corpus stopped
+	// reading source. The doc of this function names both kinds; this holds it
+	// to both.
+	for _, kind := range []string{".go", ".md"} {
+		require.True(t, kinds[projectTaskIdentifierPrefix][kind],
+			"no %s file carries a %q identifier, so the walk no longer reads that kind, or the "+
+				"kind was dropped from it. The doc of this function states that both kinds are "+
+				"read, and the corpus must be read from both", kind, projectTaskIdentifierPrefix)
+	}
+
+	identifiers := []string{}
+	for _, prefix := range prefixes {
+		for identifier := range found[prefix] {
+			identifiers = append(identifiers, identifier)
+		}
 	}
 	sort.Strings(identifiers)
 
-	// THE CORPUS MUST COVER THE ALPHABET AXIS, or the width check measures
-	// length again while the pattern narrows on characters.
-	digitFree := 0
-	for _, identifier := range identifiers {
-		if !regexp.MustCompile(`[0-9]`).MatchString(identifier[len(prefix)+1:]) {
+	// THE CORPUS MUST COVER THE ALPHABET AND THE LENGTH AXES over the project's
+	// own identifiers, or the width check measures one axis while a pattern or
+	// the shape narrows on another.
+	digitFree, fiveLong, sixLong := 0, 0, 0
+	for identifier := range found[projectTaskIdentifierPrefix] {
+		suffix := identifier[len(projectTaskIdentifierPrefix)+1:]
+		if !regexp.MustCompile(`[0-9]`).MatchString(suffix) {
 			digitFree++
 		}
+		switch len(suffix) {
+		case 5:
+			fiveLong++
+		case 6:
+			sixLong++
+		}
 	}
-	require.GreaterOrEqual(t, len(identifiers), 20,
-		"the corpus must be large enough to be a population rather than a handful; found %d",
-		len(identifiers))
 	require.NotZero(t, digitFree,
 		"the corpus carries no DIGIT-FREE identifier, so it cannot catch a pattern that narrows on "+
 			"the alphabet — which is exactly how the previous width check passed while one real "+
 			"identifier in nine went unrecognised")
-	return prefix, identifiers
+	require.NotZero(t, fiveLong,
+		"the corpus carries no FIVE-character project identifier, so the shape above no longer "+
+			"admits the length most real identifiers have")
+	require.NotZero(t, sixLong,
+		"the corpus carries no SIX-character project identifier, so the shape above no longer "+
+			"admits the length the first width check missed; a corpus bounded to one length "+
+			"cannot catch a pattern that narrows on the other")
+	return prefixes, identifiers
 }
 
 // durableReferenceSamples are references the rule RECOMMENDS. None may be

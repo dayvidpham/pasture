@@ -25,7 +25,12 @@
   that really is non-blocking reads the same sentence as before. The diagnostic
   also names the declared mode and the effective mode separately, so you can see
   when a gate runs as report-and-continue only because its citation is missing.
-  No exit code changed.
+  An event this build does not declare — an unsupported harness, or an event
+  name a stale generated hook still sends — is reported as declaring no failure
+  mode and being treated as observe-only, and its line in
+  `lifecycle-faults.jsonl` writes `"declaredFailureMode":"undeclared"`; it
+  used to read as an observe-only declaration beside a cause saying nothing
+  declares the event. No exit code changed.
 - A lifecycle hook that could not evaluate an event no longer looks like
   permission granted (#54). The `pasture hook lifecycle` command printed its
   error and exited 0 with empty standard output, which every host reads as
@@ -54,9 +59,10 @@
   decision, and the invocation that wrote them is recorded as a fault.
 - One whole hook invocation is now bounded at 5 seconds. Measured against a
   database held under a write lock, a hook took about 31 seconds to return,
-  which is more than three times the 10-second budget Claude Code gives a hook,
-  so the session was frozen while it waited. The hook now stops first and
-  reports the expiry as a fault.
+  which is more than three times the 10-second budget pasture's own hook
+  configuration (`hooks/hooks.json`) gives each of its Claude Code lifecycle
+  hooks, so the session was frozen while it waited. The hook now stops first
+  and reports the expiry as a fault.
 
 ### Changed
 - A blocking exit code must cite the host documentation or a committed capture

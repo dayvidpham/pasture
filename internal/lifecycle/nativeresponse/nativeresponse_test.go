@@ -2,11 +2,13 @@ package nativeresponse_test
 
 import (
 	"os"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
 	codexfrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/codex"
 	codexingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/codex"
@@ -112,7 +114,8 @@ func proceedResponse(t *testing.T) backend.HostResponse {
 }
 
 // TestFaultContinuationIsTheHostProceedForEveryHarness pins the bytes a
-// fail-open FAULT emits.
+// fail-open FAULT emits, for EVERY harness the hook command dispatches on
+// crossed with EVERY event class, the undeclared class included.
 //
 // The defect this locks out: a fault used to emit an EMPTY standard output on
 // every harness. That is a proceed only where the host reads the process exit
@@ -127,6 +130,20 @@ func proceedResponse(t *testing.T) backend.HostResponse {
 // that is intended: the host reads one channel, so it cannot be asked to tell
 // them apart. The distinction is carried on standard error and in the durable
 // fault record, which classifies the invocation as a fault.
+//
+// WHAT IT VISITS: the harness axis is DERIVED from the hook command's own
+// registry (handlers.LifecycleHarnessCoordinates, the same source the
+// built-binary proofs in cmd/pasture range over), and the class axis is derived
+// from EventSemantic's own IsValid plus its zero value, which is what an
+// undeclared event carries. The rows below are written by hand and PINNED to
+// that product: a harness added to the registry, a class added to the enum,
+// or a row deleted here fails by name until the table says what those bytes
+// are. The first version was eight rows over a set nothing derived, so a
+// harness added to FaultContinuation was described by nothing and a row
+// deleted here stayed green.
+// WHAT IT DOES NOT READ: whether a host really reads those bytes as a proceed.
+// That is the question of the built-binary and Bun-plugin proofs in
+// cmd/pasture.
 func TestFaultContinuationIsTheHostProceedForEveryHarness(t *testing.T) {
 	t.Parallel()
 
@@ -149,6 +166,18 @@ func TestFaultContinuationIsTheHostProceedForEveryHarness(t *testing.T) {
 			want:     nil,
 		},
 		{
+			name:     "claude explicit human response takes no bytes, for the same reason as its gate",
+			harness:  ir.HarnessClaudeCode,
+			semantic: pastureruntime.SemanticExplicitHumanResponse,
+			want:     nil,
+		},
+		{
+			name:     "an undeclared claude event takes no bytes, which the host reads as a proceed",
+			harness:  ir.HarnessClaudeCode,
+			semantic: 0,
+			want:     nil,
+		},
+		{
 			name:     "codex gate takes the universal continue object, which a blocking gate requires",
 			harness:  ir.HarnessCodex,
 			semantic: pastureruntime.SemanticGateConsultation,
@@ -159,6 +188,12 @@ func TestFaultContinuationIsTheHostProceedForEveryHarness(t *testing.T) {
 			harness:  ir.HarnessCodex,
 			semantic: pastureruntime.SemanticObservation,
 			want:     []byte(`{}`),
+		},
+		{
+			name:     "codex explicit human response takes the universal continue object, as every non-observation does",
+			harness:  ir.HarnessCodex,
+			semantic: pastureruntime.SemanticExplicitHumanResponse,
+			want:     []byte(`{"continue":true}`),
 		},
 		{
 			name:     "an undeclared codex event takes the universally accepted object",
@@ -179,12 +214,48 @@ func TestFaultContinuationIsTheHostProceedForEveryHarness(t *testing.T) {
 			want:     nil,
 		},
 		{
+			name:     "opencode explicit human response takes the canonical proceed object, as every named callback does",
+			harness:  ir.HarnessOpenCode,
+			semantic: pastureruntime.SemanticExplicitHumanResponse,
+			want:     []byte(`{"decision":"proceed"}`),
+		},
+		{
 			name:     "an undeclared opencode event takes the object a named callback accepts",
 			harness:  ir.HarnessOpenCode,
 			semantic: 0,
 			want:     []byte(`{"decision":"proceed"}`),
 		},
 	}
+
+	// THE POPULATION IS DERIVED, AND THE TABLE IS HELD TO IT.
+	coordinates, err := handlers.LifecycleHarnessCoordinates()
+	require.NoError(t, err, "the harness set is derived from the hook command's own registry")
+	classes := []pastureruntime.EventSemantic{0}
+	for candidate := 1; candidate < eventSemanticScanBound; candidate++ {
+		if class := pastureruntime.EventSemantic(candidate); class.IsValid() {
+			classes = append(classes, class)
+		}
+	}
+	require.Greater(t, len(classes), 1,
+		"EventSemantic declares no valid class, so the product below is the undeclared class alone "+
+			"and every gate and observation row would be refused as a row for no pair")
+	derived := []string{}
+	for _, coordinate := range coordinates {
+		for _, class := range classes {
+			derived = append(derived, coordinate.Harness+" / "+eventClassLabel(class))
+		}
+	}
+	written := []string{}
+	for _, test := range tests {
+		written = append(written, string(test.harness)+" / "+eventClassLabel(test.semantic))
+	}
+	sort.Strings(derived)
+	sort.Strings(written)
+	require.Equal(t, derived, written,
+		"the rows here must cover EXACTLY every harness the command dispatches on, crossed with "+
+			"every event class and the undeclared class. A pair with no row has bytes nothing "+
+			"describes, and a row for no pair describes nothing")
+
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
@@ -196,6 +267,19 @@ func TestFaultContinuationIsTheHostProceedForEveryHarness(t *testing.T) {
 			require.Equal(t, test.want, continuation.Bytes())
 		})
 	}
+}
+
+// eventSemanticScanBound is how far the class derivation above looks for
+// declared members of EventSemantic, which is a uint8.
+const eventSemanticScanBound = 1 << 8
+
+// eventClassLabel names a class for the product pin, and names the zero value,
+// which EventSemantic.String leaves empty because nothing declares it.
+func eventClassLabel(class pastureruntime.EventSemantic) string {
+	if !class.IsValid() {
+		return "undeclared"
+	}
+	return class.String()
 }
 
 // TestFaultContinuationRefusesAnUnsupportedHarness pins the refusal. A caller
@@ -215,10 +299,20 @@ func TestFaultContinuationRefusesAnUnsupportedHarness(t *testing.T) {
 }
 
 // TestTheFaultContinuationMatchesTheEvaluatedProceed proves the claim the
-// package doc makes rather than restating it: for each harness, the bytes a
+// package doc makes rather than restating it: for each pair below, the bytes a
 // FAULT emits are the bytes a successful evaluation of the same event class
 // emits. If the two ever diverge, a host is being handed a shape one of the two
 // paths never produces.
+//
+// WHAT IT VISITS: the five (harness, class) pairs whose evaluated proceed this
+// package can build in-process — the Codex gate and observation, the OpenCode
+// gate and observation, and the Claude observation.
+// WHAT IT DOES NOT READ: the Claude gate, where an evaluated proceed writes the
+// canonical object and a fault writes nothing, because Claude reads the exit
+// code and the two need not agree there (the built-binary proofs in cmd/pasture
+// pin the Claude gate bytes); the explicit-human-response class, for which no
+// evaluated proceed exists in this package; and the undeclared class, which has
+// no evaluation at all. The table above pins the bytes of every one of those.
 func TestTheFaultContinuationMatchesTheEvaluatedProceed(t *testing.T) {
 	t.Parallel()
 

@@ -1,9 +1,13 @@
 package codegen_test
 
 import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
-	"strings"
+	"sort"
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/codegen"
@@ -89,24 +93,88 @@ func TestStrictLifecycleRowGateAcceptsTheShippedProfiles(t *testing.T) {
 // The gate is only worth having if it aborts before generation writes anything:
 // a partially written tree with an unevidenced blocking row is worse than no
 // output at all. The shipped profiles pass the gate, so the ordering cannot be
-// proven by triggering it; this reads the production pipeline instead and fails
-// if the gate call ever moves below the first write.
+// proven by triggering it; this reads the production pipeline instead.
+//
+// WHAT IT VISITS: every call expression in the body of codegen.Generate, in
+// source order, read through the parser. The gate call is located; every call
+// BEFORE it must be the source-migration gate, which is the one call the doc of
+// Generate places ahead of it and which writes nothing; and the three writes
+// the pipeline makes today must all stand AFTER it.
+// WHAT IT DOES NOT READ: whether a call writes. A call ahead of the gate is
+// refused whatever it does, so a fourth write cannot be added above the gate
+// under a new name — the first version looked for three write names and a
+// write under any other name passed above the gate. A write hidden inside the
+// source-migration gate itself, or reached through a callee of a call that
+// stands after the gate, is outside its reach.
+//
+// MUTATION: call any function — a new one, or a write moved up — before the
+// lifecycle-row gate in Generate. This test turns RED naming the call.
 func TestStrictLifecycleRowGateRunsBeforeAnyWrite(t *testing.T) {
 	t.Parallel()
 
 	root, err := scan.ModuleRoot()
 	require.NoError(t, err)
-	source, err := os.ReadFile(filepath.Join(root, "internal/codegen/generate.go"))
-	require.NoError(t, err)
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, filepath.Join(root, "internal/codegen/generate.go"), nil, 0)
+	require.NoError(t, err, "the production pipeline must be readable beside its test")
 
-	body := string(source)
-	gate := strings.Index(body, "RequireEvidencedLifecycleRows(); err != nil")
+	var generate *ast.FuncDecl
+	for _, node := range parsed.Decls {
+		function, isFunction := node.(*ast.FuncDecl)
+		if isFunction && function.Recv == nil && function.Name.Name == "Generate" {
+			generate = function
+			break
+		}
+	}
+	require.NotNil(t, generate, "codegen.Generate must exist to be the production pipeline")
+
+	type call struct {
+		Name string
+		Pos  token.Pos
+	}
+	calls := []call{}
+	ast.Inspect(generate.Body, func(node ast.Node) bool {
+		expression, isCall := node.(*ast.CallExpr)
+		if !isCall {
+			return true
+		}
+		switch function := expression.Fun.(type) {
+		case *ast.Ident:
+			calls = append(calls, call{Name: function.Name, Pos: expression.Pos()})
+		case *ast.SelectorExpr:
+			calls = append(calls, call{Name: function.Sel.Name, Pos: expression.Pos()})
+		}
+		return true
+	})
+	sort.Slice(calls, func(i, j int) bool { return calls[i].Pos < calls[j].Pos })
+
+	gate := -1
+	for index, candidate := range calls {
+		if candidate.Name == "RequireEvidencedLifecycleRows" {
+			gate = index
+			break
+		}
+	}
 	require.NotEqual(t, -1, gate, "Generate no longer calls the strict lifecycle-row gate")
 
-	for _, write := range []string{"GenerateSchemaToFile(", "EmitHarness(", "emitInventoryRows("} {
-		at := strings.Index(body, write)
-		require.NotEqual(t, -1, at, "Generate no longer calls %s", write)
-		assert.Less(t, gate, at,
-			"the strict lifecycle-row gate must run before %s, or a refused row can leave partial output", write)
+	before := []string{}
+	for _, candidate := range calls[:gate] {
+		before = append(before, fmt.Sprintf("%s (generate.go:%d)", candidate.Name, fileSet.Position(candidate.Pos).Line))
+	}
+	sourceGate := fmt.Sprintf("RequireClassifiedSource (generate.go:%d)", fileSet.Position(calls[0].Pos).Line)
+	assert.Equal(t, []string{sourceGate}, before,
+		"the only call Generate may make before the strict lifecycle-row gate is the strict "+
+			"source-migration gate, which writes nothing. Every other call stands after it, "+
+			"whatever it does, because a refused row must leave NO partial output and this "+
+			"reader does not know which calls write")
+
+	after := map[string]bool{}
+	for _, candidate := range calls[gate+1:] {
+		after[candidate.Name] = true
+	}
+	for _, write := range []string{"GenerateSchemaToFile", "EmitHarness", "emitInventoryRows"} {
+		assert.True(t, after[write],
+			"Generate no longer calls %s after the strict lifecycle-row gate; the pipeline's three "+
+				"writes are named here so that one moved above the gate, or removed, fails by name", write)
 	}
 }

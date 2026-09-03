@@ -246,11 +246,15 @@ reports it like the rest, not because a user can meet it.
 
 ROUTES 1 AND 2 ARE ABOUT PLACING THE FILE, ROUTES 3, 4 AND 5 ARE ABOUT WRITING
 IT, AND A DIRECTORY THAT EXISTS DOES NOT RULE THE SECOND GROUP OUT. Measured on
-the built binary with a store directory that exists and is read-only: exit 0,
-nothing at all on standard output, the open failure reported on standard error,
-and no record file anywhere. The default path is not exempt from routes 3, 4 and
-5 either — `~/.local/share/pasture/` is an ordinary directory on an ordinary
-filesystem, so it can be full, read-only, or owned by somebody else.
+the built binary, on all three harnesses, with a store directory that exists and
+is read-only: exit 0; standard output carries that host's continue bytes and
+nothing else — nothing at all on Claude Code, whose continue bytes are empty,
+`{"continue":true}` on Codex and `{"decision":"proceed"}` on OpenCode, and those
+bytes are the fail-open continuation and not a decision; the open failure
+reported on standard error; and no record file anywhere. The default path is
+not exempt from routes 3, 4 and 5 either — `~/.local/share/pasture/` is an
+ordinary directory on an ordinary filesystem, so it can be full, read-only, or
+owned by somebody else.
 
 On every one of those routes there is NO record for that fault anywhere. Each
 arm says so on standard error, which is the only channel left to it — and it is
