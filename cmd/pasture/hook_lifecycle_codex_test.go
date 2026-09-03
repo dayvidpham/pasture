@@ -22,6 +22,11 @@ import (
 // emits no native continuation, reports the actionable withheld diagnostic on
 // stderr, exits 0, and opens no database (admission enforced before any storage
 // access). Stop and PostToolUse are representative of the eight withheld events.
+//
+// WHAT IT VISITS: those TWO events, named here as representatives.
+// WHAT IT DOES NOT READ: the other six withheld events. The withheld SET is
+// derived and held by the activation support report; this drives a sample of it
+// through the built binary to show the admission decision reaches the host.
 func TestUnselectedCodexEventIsNotAdmittedByBuiltCLI(t *testing.T) {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "pasture")
@@ -38,7 +43,13 @@ func TestUnselectedCodexEventIsNotAdmittedByBuiltCLI(t *testing.T) {
 			command.Stdout = &stdout
 			command.Stderr = &stderr
 			require.NoError(t, command.Run(), stderr.String())
-			require.Empty(t, stdout.String(), "a withheld Codex event must emit no native continuation on stdout")
+			// A withheld event is a FAULT: pasture deliberately did not
+			// evaluate it. Under the fail-open default the host must still
+			// proceed, and on Codex a proceed is a byte shape, so the hook
+			// emits the harness continue bytes. Emitting nothing would be a
+			// proceed only on a host that reads the exit code.
+			require.Equal(t, `{"continue":true}`, stdout.String(),
+				"a withheld Codex event must let the host continue with the Codex continue object")
 			require.Contains(t, stderr.String(), `Codex event "`+event+`" is withheld (reason outside-target-set)`)
 
 			_, statErr := os.Stat(dbPath)

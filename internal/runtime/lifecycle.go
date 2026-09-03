@@ -198,6 +198,103 @@ func (m FailureMode) IsValid() bool {
 	return m >= FailureReportAndContinue && m <= FailureObserveOnly
 }
 
+// BlocksByExitCode reports whether the mode makes the host REFUSE the native
+// operation because the pasture hook process exited with the blocking exit
+// code. Only the two exit-code arms do that: Claude Code reads exit 2 as
+// "block", and the Codex strict-output contract reads it the same way.
+//
+// The other four arms never turn a pasture process exit into a host refusal.
+// report-and-continue and observe-only are non-blocking by definition.
+// strict-hook-failure records a failed strict hook without blocking the
+// operation.
+//
+// throw-fail-fast IS a blocking behavior, and it is excluded for a reason worth
+// stating exactly, because a later slice will act on it. The OpenCode plugin
+// DOES read the process exit code — it throws on any non-zero exit — but that
+// throw is how it reports a FAULT, not how a policy refuses: on that host a
+// refusal is a typed object returned at exit 0. So the exit code is not the
+// refusal channel there, and the citation rule, which exists to make a claim
+// about somebody else's program cite its source, has nothing to add: the
+// blocking behaviour of that surface is carried by pasture's OWN generated
+// plugin, which is a committed artefact of this repository rather than a host
+// documentation URL.
+//
+// A capability derivation must therefore NOT reuse this predicate as its test
+// for "does this row have a blocking channel". A pasture-owned channel is
+// evidenceable in its own way, and keying a capability on this predicate would
+// make every OpenCode named callback capability-free forever.
+//
+// This predicate is the gate of the failure-evidence rule: only a mode that
+// blocks by exit code may claim a blocking exit, and only with evidence.
+func (m FailureMode) BlocksByExitCode() bool {
+	return m == FailureExitTwoBlocks || m == FailureStrictExitTwoBlocks
+}
+
+// FailureEvidence records WHERE the blocking behavior of a native failure mode
+// was read from the host. A blocking exit code is a claim about somebody else's
+// program, so it must cite its source.
+//
+// Source is a host documentation URL or a path committed in this repository. An
+// empty Source means "no evidence", and a row with no evidence never carries a
+// blocking exit code: it runs as report-and-continue until its harness supplies
+// the citation.
+type FailureEvidence struct {
+	Source string
+}
+
+// IsPresent reports whether the evidence cites a source. Whitespace alone is
+// not a citation, so it reads as no evidence and keeps the row non-blocking.
+func (e FailureEvidence) IsPresent() bool { return strings.TrimSpace(e.Source) != "" }
+
+// evidenceBoundFailure applies the failure-evidence rule to one row. A
+// non-blocking row keeps its harness's non-blocking arm. A blocking row keeps
+// its harness's blocking arm only while it cites evidence; without evidence it
+// runs as report-and-continue, so an undocumented guess can never refuse a
+// user's tool call or prompt.
+func evidenceBoundFailure(
+	blocking BlockingMode,
+	evidence FailureEvidence,
+	blockingArm FailureMode,
+	nonBlockingArm FailureMode,
+) FailureMode {
+	if blocking == NonBlocking {
+		return nonBlockingArm
+	}
+	if !evidence.IsPresent() {
+		return FailureReportAndContinue
+	}
+	return blockingArm
+}
+
+// declaredFailureArm is the mode the host contract DECLARES for one row, BEFORE
+// the evidence rule of evidenceBoundFailure demotes it. The two functions take
+// the same arms and differ in exactly one way: this one does not consult the
+// evidence.
+//
+// It exists because the demotion DESTROYS a fact that a reader still needs. A
+// blocking row with no citation runs as report-and-continue, and after that
+// nothing downstream can tell it apart from a row that is declared
+// report-and-continue. Those two rows need OPPOSITE advice: the first one can
+// be made blocking by supplying the citation, the second one can never block at
+// all. Telling the first operator that the event "does not refuse through a
+// process exit code" is false about the declaration AND withholds the only
+// action available.
+//
+// So the row keeps BOTH modes: the effective one, which every behaviour obeys,
+// and the declared one, which only explanations read. Nothing may decide an
+// exit status from the declared mode; the evidence rule stays the sole gate of
+// a blocking exit.
+func declaredFailureArm(
+	blocking BlockingMode,
+	blockingArm FailureMode,
+	nonBlockingArm FailureMode,
+) FailureMode {
+	if blocking == NonBlocking {
+		return nonBlockingArm
+	}
+	return blockingArm
+}
+
 func (m FailureMode) String() string {
 	switch m {
 	case FailureReportAndContinue:
@@ -312,8 +409,15 @@ type LifecycleEventMapping struct {
 	mutation       MutationMode
 	order          HandlerOrder
 	reconciliation ReconciliationMode
-	failure        FailureMode
-	stopLoop       StopLoopPolicy
+	// failure is the EFFECTIVE mode, after the evidence rule.
+	failure FailureMode
+	// declaredFailure is the mode the host contract declares for the row,
+	// BEFORE the evidence rule. It equals failure on every row the rule does
+	// not demote. Read it only to explain a row to a person; never to choose an
+	// exit status.
+	declaredFailure FailureMode
+	evidence        FailureEvidence
+	stopLoop        StopLoopPolicy
 }
 
 func (m LifecycleEventMapping) NativeName() string                 { return m.nativeName }
@@ -324,7 +428,15 @@ func (m LifecycleEventMapping) Mutation() MutationMode             { return m.mu
 func (m LifecycleEventMapping) Order() HandlerOrder                { return m.order }
 func (m LifecycleEventMapping) Reconciliation() ReconciliationMode { return m.reconciliation }
 func (m LifecycleEventMapping) Failure() FailureMode               { return m.failure }
-func (m LifecycleEventMapping) StopLoop() StopLoopPolicy           { return m.stopLoop }
+
+// DeclaredFailure is the mode the host contract declares for this row, before
+// the failure-evidence rule demotes an uncited blocking row. It is for
+// explaining the row to a person. Failure remains the mode every behaviour
+// obeys.
+func (m LifecycleEventMapping) DeclaredFailure() FailureMode { return m.declaredFailure }
+
+func (m LifecycleEventMapping) Evidence() FailureEvidence { return m.evidence }
+func (m LifecycleEventMapping) StopLoop() StopLoopPolicy  { return m.stopLoop }
 func (m LifecycleEventMapping) Identities() []NativeIdentityField {
 	return append([]NativeIdentityField(nil), m.identities...)
 }
@@ -343,12 +455,29 @@ func (m LifecycleEventMapping) validate(where string) error {
 	}
 	if !m.semantic.IsValid() || !m.surface.IsValid() || !m.blocking.IsValid() ||
 		!m.mutation.IsValid() || !m.order.IsValid() || !m.reconciliation.IsValid() ||
-		!m.failure.IsValid() || !m.stopLoop.IsValid() {
+		!m.failure.IsValid() || !m.declaredFailure.IsValid() || !m.stopLoop.IsValid() {
 		return runtimeError(
 			fmt.Sprintf("lifecycle event %q has an invalid semantic or native behavior enum", m.nativeName),
 			"every generation decision must be represented by a closed typed value",
 			where, "codegen could silently choose an unmodeled native behavior",
 			"classify every lifecycle behavior with the declared runtime enum constants", nil,
+		)
+	}
+
+	if m.evidence.IsPresent() && m.evidence.Source != strings.TrimSpace(m.evidence.Source) {
+		return runtimeError(
+			fmt.Sprintf("lifecycle event %q cites failure evidence %q with leading or trailing space", m.nativeName, m.evidence.Source),
+			"an evidence citation is a host documentation URL or a repository path, and both are exact strings",
+			where, "a reader checking the blocking claim could not resolve the citation",
+			fmt.Sprintf("trim the FailureEvidence of the %q row to the exact URL or committed path", m.nativeName), nil,
+		)
+	}
+	if m.failure.BlocksByExitCode() && !m.evidence.IsPresent() {
+		return runtimeError(
+			fmt.Sprintf("lifecycle event %q declares the blocking failure mode %q with no failure evidence", m.nativeName, m.failure),
+			"a blocking exit code refuses the user's operation, so the claim that the host blocks must cite where it was read",
+			where, "the generated adapter would refuse a prompt or a tool call on an undocumented guess",
+			fmt.Sprintf("cite the host documentation URL or the committed capture path in the FailureEvidence of the %q row, or leave the row as report-and-continue until the citation exists", m.nativeName), nil,
 		)
 	}
 

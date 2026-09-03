@@ -56,7 +56,10 @@ package nativeresponse
 import (
 	"fmt"
 
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
+	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
+	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 )
 
 // Native continuation byte shapes. These are the authoritative golden bytes;
@@ -105,4 +108,88 @@ func CanonicalProceed(response backend.HostResponse) ([]byte, error) {
 		return nil, fmt.Errorf("nativeresponse.CanonicalProceed: marshal canonical host response: %w", err)
 	}
 	return encoded, nil
+}
+
+// # The fault continuation: what "fail open" costs in bytes
+//
+// A pasture fault means the event was NOT evaluated. Under the fail-open
+// default the host must still proceed, and on two of the three harnesses
+// "proceed" is a byte shape, not an exit code:
+//
+//   - Claude Code reads an EMPTY standard output as "the hook has nothing to
+//     say", so its fault continuation is no bytes at all.
+//   - Codex parses a JSON continuation object. A blocking gate is refused
+//     unless continue == true, so a gate's fault continuation is
+//     {"continue":true}; an observation contributes no directives, so its
+//     fault continuation is the default object {}.
+//   - OpenCode's named callbacks are validated by the pasture-generated plugin,
+//     which accepts exactly the canonical response object, so the fault
+//     continuation of a gate or an explicit human response is
+//     {"decision":"proceed"}. An OpenCode OBSERVATION takes NO bytes, the same
+//     as its successful path: its callbacks never read standard output, and a
+//     decision word for an event class that has no decision would say more
+//     after a failure than after a success.
+//
+// These are the SAME bytes an evaluated proceed emits. That is the point: the
+// host cannot be asked to distinguish them, because the only channel it reads
+// is the continuation. The distinction is kept where it can be kept truthfully
+// — the diagnostic on standard error says the event was not evaluated, and the
+// durable fault record classifies the invocation as a FAULT. Nothing in this
+// path writes a decision record, so a fault never becomes an evaluated answer.
+//
+// An event the build does not declare has no semantic. Such an invocation comes
+// from a generated hook that does not match this binary, so the harness's
+// UNIVERSALLY accepted continuation is used: a gate must never be stopped
+// because pasture could not name its event.
+
+// canonicalProceedContinuation is the canonical Pasture host response body,
+// byte-identical to backend.HostResponse.MarshalJSON. Claude and OpenCode read
+// this object; the OpenCode generated plugin accepts exactly these bytes.
+var canonicalProceedContinuation = []byte(`{"decision":"proceed"}`)
+
+// FaultContinuation returns the continuation a host reads as "you may continue"
+// when pasture could NOT evaluate the event, for one harness and one declared
+// event semantic. Pass the zero EventSemantic for an event this build does not
+// declare.
+//
+// The error names an unsupported harness. A caller that cannot name the host
+// has no bytes to write, so it must fall back to the empty continuation rather
+// than guess a shape.
+func FaultContinuation(harness ir.HarnessID, semantic pastureruntime.EventSemantic) (hostexit.Continuation, error) {
+	switch harness {
+	case ir.HarnessClaudeCode:
+		// Claude's hook contract reads empty stdout as "nothing to say", which
+		// is exactly the fail-open claim.
+		return hostexit.EmptyContinuation(), nil
+	case ir.HarnessCodex:
+		if semantic == pastureruntime.SemanticObservation {
+			return hostexit.ContinuationOf(codexObservationContinuation), nil
+		}
+		// Gates, explicit human responses and undeclared events all take the
+		// universal continue object: it is accepted for every Codex hook and is
+		// the only shape a blocking gate accepts.
+		return hostexit.ContinuationOf(codexProceedContinuation), nil
+	case ir.HarnessOpenCode:
+		if semantic == pastureruntime.SemanticObservation {
+			// An observation has no decision to report, and the OpenCode
+			// observation callbacks never read standard output. Saying nothing
+			// is what a SUCCESSFUL observation does, so a failed one says the
+			// same. It is also safe on both sides of the plugin version skew
+			// the belt exists for: an older plugin ignores observation output
+			// entirely, and a newer one reads an empty body at exit 0 as "not
+			// evaluated, continue".
+			return hostexit.EmptyContinuation(), nil
+		}
+		// Gates, explicit human responses and undeclared events take the
+		// canonical object, because a named callback of the generated plugin
+		// accepts exactly those bytes.
+		return hostexit.ContinuationOf(canonicalProceedContinuation), nil
+	default:
+		return hostexit.Continuation{}, fmt.Errorf(
+			"nativeresponse.FaultContinuation: harness %q has no fail-open continuation, because this build has no native response contract for it; "+
+				"this happened while mapping a lifecycle hook fault, after the event coordinates were read and before the host was answered; "+
+				"the caller must fall back to an empty continuation rather than guess a byte shape the host would reject; "+
+				"invoke the hook with a harness listed in the generated lifecycle support report",
+			harness)
+	}
 }

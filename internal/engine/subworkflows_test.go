@@ -613,6 +613,7 @@ func newBackpressureEngine(t *testing.T, k int) *engine.Engine {
 		500*time.Millisecond, // SQLite lock wait, unchanged
 		time.Second,          // ingress, the production window; only the start-signal deadline moves
 		backpressureStartSliceDeadline,
+		backpressureStartSliceDeadline+time.Second, // hook-invocation deadline, kept above the start-slice deadline
 		30*time.Second, // workflow-result wait, the outermost tier
 	)
 	if err != nil {

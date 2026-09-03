@@ -491,7 +491,19 @@ func TestClaudePayloadEventCannotOverrideRegisteredCLIEvent(t *testing.T) {
 	command.Stderr = &stderr
 	require.NoError(t, command.Run(), stdout.String()+stderr.String())
 	require.Empty(t, stdout.String())
-	require.Empty(t, stderr.String())
+	// THE OLD REQUIREMENT HERE WAS require.Empty ON STDERR, and it pinned the
+	// same silence as the malformed case above. MEASURED BEFORE CHANGING IT,
+	// because this input is not obviously the same case: a payload whose event
+	// claim is overridden COULD have been a genuinely evaluated event, and
+	// making an evaluated event announce that it was not would have been a new
+	// false sentence. It is not evaluated — ingress returns no bindings on an
+	// event mismatch, and the assertions below require an empty interpreted set
+	// and no consultation. The delivery is refused, not reinterpreted.
+	//
+	// stdout stays empty above because Claude's continuation IS the empty body.
+	require.Contains(t, stderr.String(), "could not be bound, so the event WAS NOT EVALUATED",
+		"a payload that declares a different event is REFUSED, not reinterpreted, so the event was "+
+			"not evaluated and the operator must be told rather than left with silence")
 
 	tracker, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)
@@ -569,7 +581,24 @@ func TestMalformedClaudeEventToOccurrenceOnly(t *testing.T) {
 			command.Stderr = &stderr
 			require.NoError(t, command.Run(), stdout.String()+stderr.String())
 			require.Empty(t, stdout.String(), "malformed lifecycle input must never emit a host decision")
-			require.Empty(t, stderr.String())
+			// THE OLD REQUIREMENT HERE WAS require.Empty ON STDERR, AND IT
+			// PINNED THE DEFECT RATHER THAN A CONTRACT. It required an event
+			// that pasture could not read to say NOTHING, and that silence was
+			// the whole bug: the handler returned a nil error, which is how it
+			// says "evaluated", so the command took its success path and
+			// answered the host with a decision for an event nobody evaluated.
+			// This is not the requirement relaxed; it is the requirement
+			// inverted, because it was the wrong way round.
+			//
+			// Claude's continuation IS the empty body, so the stdout check
+			// above is unchanged and still fires. On this harness the
+			// diagnostic is the whole of what an operator has, and there was
+			// none. Every occurrence, interpreted and consultation assertion
+			// below is untouched: the delivery row is still the durable
+			// evidence, and it is still the only durable effect.
+			require.Contains(t, stderr.String(), "could not be bound, so the event WAS NOT EVALUATED",
+				"a payload pasture cannot read is an event that was NOT evaluated, and it must say so; "+
+					"staying silent is what let an unevaluated event leave as a decision")
 
 			tracker, err := tasks.OpenTaskTracker(dbPath)
 			require.NoError(t, err)
@@ -649,7 +678,26 @@ func TestWithheldOpenCodeEventIsNotAdmittedByBuiltCLI(t *testing.T) {
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 	require.NoError(t, command.Run(), stderr.String())
-	require.Empty(t, stdout.String())
+	// A withheld event is a FAULT, and the fail-open default must not stop the
+	// host. On OpenCode HOW a host is let through depends on the SURFACE of the
+	// event, not on the harness alone:
+	//
+	//   - A GATE reaches the plugin's NAMED-OUTPUT callback, which validates
+	//     exactly the canonical response object, so a gate fault emits those
+	//     bytes. That arm is pinned elsewhere in this command's tests.
+	//   - "session.updated" is an OBSERVATION on the catch-all event stream.
+	//     Nothing on that surface reads standard output at all, so there is no
+	//     reader to satisfy and no callback to abort. Writing a decision word
+	//     there would tell the host MORE after a failure than after a success,
+	//     because a SUCCESSFUL observation writes nothing.
+	//
+	// So the fault writes nothing, which is exactly what the success path
+	// writes. This is safe on both sides of the plugin version skew: an older
+	// plugin ignores observation output, and a newer one treats an empty body
+	// at exit 0 as "not evaluated, continue" and says so on standard error.
+	require.Empty(t, stdout.String(),
+		"a withheld OpenCode observation must say no more after a failure than after a success, "+
+			"and its surface has no reader of standard output to satisfy")
 	require.Contains(t, stderr.String(), `OpenCode event "session.updated" is withheld (reason outside-target-set)`)
 	tracker, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)
@@ -1045,11 +1093,11 @@ func assertSharedOperation(t *testing.T, occurrence, interpreted provenance.Evid
 	require.Equal(t, occurrence.ProducingOperationJournalID, interpreted.ProducingOperationJournalID)
 }
 
-// --- M3-SLICE-5: activation-last integrated Codex production proof ---------
+// --- activation-last integrated Codex production proof --------------------
 //
 // The committed Codex handler dispatch was default-off through implementation and
-// review (ratified proposal step 6, "activation last"): the two selected events
-// became enabled in the committed default only after M3 Implementation UAT. The
+// review ("activation last"): the two selected events
+// became enabled in the committed default only after acceptance review. The
 // proofs below exercise the enabled path NOW, on the real production handler
 // path, by injecting the committed activation catalog activation.Codex0_146_0()
 // through the sanctioned HookLifecycleInput.Activations pre-activation seam
@@ -1098,8 +1146,8 @@ var codexProductionFixtures = []codexProductionFixture{
 	},
 }
 
-// TestEnabledCodexHandlersToDurableReadBack is the M3-P1 (SessionStart ingress
-// smoke) and M3-P2 (PreToolUse gate) integrated production proof. For each
+// TestEnabledCodexHandlersToDurableReadBack is the SessionStart-ingress and
+// PreToolUse-gate integrated production proof. For each
 // authentic Codex 0.146.0 fixture it drives the real durable handler path with
 // the committed activation catalog injected, proves the durable receipt commits
 // before the native continuation bytes are available, and proves the persisted
@@ -1163,7 +1211,7 @@ func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
 	}
 }
 
-// TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts is the M3-P3
+// TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts is the
 // two-live-provider differential. It drives the authentic Codex PreToolUse gate
 // and the authentic OpenCode tool.execute.before gate through their real
 // production handler paths, then asserts their common Proceed gate semantics
@@ -1229,7 +1277,7 @@ func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
 	require.NotEqual(t, codexIdentities[runtime.IdentityToolCall], openCodeIdentities[runtime.IdentityToolCall], "tool-call identity values are provider-specific")
 }
 
-// TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated is the M3-P4
+// TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated is the
 // activation-isolation obligation at the committed-artifact layer. Codex now
 // publishes its OWN committed activation audit report at
 // .codex/pasture-codex-activation.json (Stage 1 #24, mirroring the Claude

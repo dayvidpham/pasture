@@ -247,34 +247,34 @@ contracts:
           - SessionStart
           - Setup
           - SessionEnd
+          - UserPromptExpansion
           - StopFailure
+          - PermissionRequest
           - PermissionDenied
           - PostToolUse
           - PostToolUseFailure
+          - PostToolBatch
           - FileChanged
           - CwdChanged
+          - ConfigChange
           - InstructionsLoaded
+          - WorktreeCreate
           - WorktreeRemove
           - SubagentStart
-          - PostCompact
-          - Notification
-          - MessageDisplay
-        exit-2-blocks:
-          - UserPromptSubmit
-          - UserPromptExpansion
-          - Stop
-          - PreToolUse
-          - PermissionRequest
-          - PostToolBatch
-          - ConfigChange
-          - WorktreeCreate
-          - SubagentStop
           - TeammateIdle
           - TaskCreated
           - TaskCompleted
           - PreCompact
+          - PostCompact
+          - Notification
+          - MessageDisplay
           - Elicitation
           - ElicitationResult
+        exit-2-blocks:
+          - UserPromptSubmit
+          - Stop
+          - PreToolUse
+          - SubagentStop
         strict-hook-failure: []
         strict-output-exit-2-blocks: []
         throw-fail-fast: []
@@ -442,12 +442,7 @@ contracts:
           - Stop
         sequential-mutation: []
       failure:
-        report-and-continue: []
-        exit-2-blocks: []
-        strict-hook-failure:
-          - SessionStart
-          - SubagentStart
-        strict-output-exit-2-blocks:
+        report-and-continue:
           - UserPromptSubmit
           - PreToolUse
           - PermissionRequest
@@ -456,6 +451,11 @@ contracts:
           - PostCompact
           - SubagentStop
           - Stop
+        exit-2-blocks: []
+        strict-hook-failure:
+          - SessionStart
+          - SubagentStart
+        strict-output-exit-2-blocks: []
         throw-fail-fast: []
         observe-only: []
       stop_loop:

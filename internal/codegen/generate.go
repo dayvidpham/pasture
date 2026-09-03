@@ -20,12 +20,16 @@ type GenerateResult struct {
 //     first and, on failure, returns immediately with no schema or harness
 //     output written — an unclassified harness-syntax candidate must abort
 //     generation with no partial or inconsistent output.
-//  2. schema.xml generation.
-//  3. Every requested harness target's skills, agents, verbatim copies, and
+//  2. The strict lifecycle-row gate (RequireEvidencedLifecycleRows), which
+//     refuses a pinned lifecycle row that claims a blocking exit code without
+//     citing the host evidence for it. It aborts before any write for the same
+//     reason.
+//  3. schema.xml generation.
+//  4. Every requested harness target's skills, agents, verbatim copies, and
 //     manifest.
-//  4. Global-ID uniqueness enforcement across the assembled registry.
+//  5. Global-ID uniqueness enforcement across the assembled registry.
 //
-// Steps 2–4 accumulate their errors so a single run reports every generation
+// Steps 3–5 accumulate their errors so a single run reports every generation
 // problem at once; the returned []error is nil only when the whole pipeline
 // succeeded. The strict gate in step 1 is a hard precondition: its failure is
 // returned as the sole error precisely because nothing downstream ran.
@@ -35,10 +39,15 @@ func Generate(root string, targets []TargetHarness, opts GenerateOptions) (Gener
 		return GenerateResult{}, []error{err}
 	}
 
+	// ── 2. Strict lifecycle-row gate (fail-closed, before any write) ─────────
+	if err := RequireEvidencedLifecycleRows(); err != nil {
+		return GenerateResult{}, []error{err}
+	}
+
 	var result GenerateResult
 	var errs []error
 
-	// ── 2. schema.xml ────────────────────────────────────────────────────────
+	// ── 3. schema.xml ────────────────────────────────────────────────────────
 	schemaPath := filepath.Join(root, "schema.xml")
 	if _, err := GenerateSchemaToFile(schemaPath, opts); err != nil {
 		errs = append(errs, fmt.Errorf("schema: %w", err))
@@ -46,7 +55,7 @@ func Generate(root string, targets []TargetHarness, opts GenerateOptions) (Gener
 		result.SchemaPath = schemaPath
 	}
 
-	// ── 3. Harness-specific skills, agents, verbatim copies, and manifests ───
+	// ── 4. Harness-specific skills, agents, verbatim copies, and manifests ───
 	for _, target := range targets {
 		files, err := EmitHarness(RepoRoots(root), target, opts)
 		if err != nil {
@@ -56,13 +65,13 @@ func Generate(root string, targets []TargetHarness, opts GenerateOptions) (Gener
 		result.Files = append(result.Files, files...)
 	}
 
-	// ── 4. Global-ID uniqueness enforcement ──────────────────────────────────
+	// ── 5. Global-ID uniqueness enforcement ──────────────────────────────────
 	// Runs after all generators so the full registry is assembled.
 	if err := ValidateGlobalIds(); err != nil {
 		errs = append(errs, fmt.Errorf("global-id validation: %w", err))
 	}
 
-	// ── 5. Authoring-side inventory projections (command + native axes) ───────
+	// ── 6. Authoring-side inventory projections (command + native axes) ───────
 	// The command-skill authoring surface and the contract-derived native call
 	// names are projected into internal/inventory as committed generated rows.
 	// (The lifecycle-event axis is emitted by hostcontractgen in its manifest

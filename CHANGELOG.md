@@ -2,6 +2,81 @@
 
 ## [Unreleased]
 
+### Added
+- `pasture hook lifecycle orphans` counts the payload blobs that no recorded
+  occurrence names. A hook writes the payload blob before it appends the journal
+  row, so an invocation abandoned between those two writes leaves one blob
+  behind, and at most one per abandoned invocation. The count reports how many
+  of those are present. It deletes nothing and changes no journal truth. The
+  number ships with the sentence that says what it means, in both `--format
+  text` and `--format json`, because the number alone reads as damage: it is
+  expected and reclaimable, and a large reading points at store contention that
+  made invocations get abandoned, not at a corrupt store. Use it after a run
+  where hooks were slow or a writer held the database.
+
+### Fixed
+- When you set `PASTURE_HOOK_FAIL_CLOSED=1` and an event continues anyway,
+  `pasture hook lifecycle` now tells you the reason that is true of THAT event.
+  A gate that declares the blocking exit code but has no host citation for it
+  was told that its failure mode cannot refuse through an exit code. That was
+  false about the gate, and it withheld the only action available. Such an event
+  now reads that it carries no host evidence, and that supplying the host
+  documentation or a committed capture would make it able to block. An event
+  that really is non-blocking reads the same sentence as before. The diagnostic
+  also names the declared mode and the effective mode separately, so you can see
+  when a gate runs as report-and-continue only because its citation is missing.
+  An event this build does not declare — an unsupported harness, or an event
+  name a stale generated hook still sends — is reported as declaring no failure
+  mode and being treated as observe-only, and its line in
+  `lifecycle-faults.jsonl` writes `"declaredFailureMode":"undeclared"`; it
+  used to read as an observe-only declaration beside a cause saying nothing
+  declares the event. No exit code changed.
+- A lifecycle hook that could not evaluate an event no longer looks like
+  permission granted (#54). The `pasture hook lifecycle` command printed its
+  error and exited 0 with empty standard output, which every host reads as
+  "proceed", so a validation refusal, a withheld event, a storage error and a
+  recovered panic were all indistinguishable from a granted tool call. The exit
+  code now follows the event's own declared failure mode: an evaluation fault of
+  a documented blocking gate exits 2 and refuses the operation when you opt in
+  with `PASTURE_HOOK_FAIL_CLOSED=1`, and every other case exits 0 with the
+  reason on standard error. The default is to let the host continue, so a broken
+  hook does not stop you working. Each fault is also appended to
+  `lifecycle-faults.jsonl` beside the database, which is written outside the
+  database on purpose, because the commonest fault is that the database could
+  not be opened.
+- A hook that cannot evaluate an event no longer stops a tool call on OpenCode
+  or Codex. Those two hosts read the hook's STANDARD OUTPUT to decide whether
+  you may carry on, so an empty answer is not a "carry on" there: the OpenCode
+  plugin treated it as a broken answer and aborted the tool call it was
+  watching. When pasture cannot evaluate an event it now answers with that
+  host's own "carry on" bytes and puts the reason on standard error, so your
+  action proceeds. On Claude Code the "carry on" answer is still no output at
+  all, so nothing changes there. On OpenCode this applies to the events a plugin
+  callback waits on; the OpenCode event stream is only watched, nothing there
+  reads standard output, and a failure on it writes nothing, which is what a
+  success on it writes. If you read hook output while debugging an integration,
+  note that these bytes say only "do not stop on our account": they are not a
+  decision, and the invocation that wrote them is recorded as a fault.
+- One whole hook invocation is now bounded at 5 seconds. Measured against a
+  database held under a write lock, a hook took about 31 seconds to return,
+  which is more than three times the 10-second budget pasture's own hook
+  configuration (`hooks/hooks.json`) gives each of its Claude Code lifecycle
+  hooks, so the session was frozen while it waited. The hook now stops first
+  and reports the expiry as a fault.
+
+### Changed
+- A blocking exit code must cite the host documentation or a committed capture
+  that shows the host blocks on it. A row with no citation runs as
+  report-and-continue instead, and code generation refuses a row that claims a
+  blocking exit code without one. Four Claude Code events keep their blocking
+  exit code: UserPromptSubmit, Stop, PreToolUse and SubagentStop. Eleven other
+  Claude Code events and all eight Codex gates now report instead of blocking
+  until their citation exists. No OpenCode event changes.
+- The three internal failure-mode vocabularies are now one. Two of them folded
+  six native behaviours into two, so a generated OpenCode manifest labelled a
+  plugin throw as a Claude exit-2 block. OpenCode rows now carry their real
+  behaviour. No Claude Code or Codex value changes.
+
 ## [0.0.8] - 2026-08-29
 
 ### Added

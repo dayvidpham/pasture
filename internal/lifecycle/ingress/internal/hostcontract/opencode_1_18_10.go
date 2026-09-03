@@ -33,7 +33,7 @@ func OpenCode1_18_10() Contract {
 			Name:     mapping.NativeName(),
 			Blocking: openCodeBlocking(mapping.Blocking()),
 			Mutation: MutationNone,
-			Failure:  openCodeFailure(mapping.Failure()),
+			Failure:  mapping.Failure(),
 			StopLoop: StopLoopNotApplicable,
 		}
 		switch runtimeEvent {
@@ -57,13 +57,6 @@ func openCodeBlocking(mode pastureruntime.BlockingMode) BlockingMode {
 		return NonBlocking
 	}
 	return Blocking
-}
-
-func openCodeFailure(mode pastureruntime.FailureMode) FailureMode {
-	if mode == pastureruntime.FailureObserveOnly {
-		return FailureReportAndContinue
-	}
-	return FailureExitTwoBlocks
 }
 
 func symbol(prefix, name string) string {

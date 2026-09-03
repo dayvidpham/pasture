@@ -19,10 +19,50 @@ async function invokeLifecycle(command, event, value) {
     child.exited,
   ]);
   if (exitCode !== 0) throw new Error("pasture hook lifecycle for " + event + " exited " + exitCode + ": " + (stderr.trim() || "no diagnostic was returned") + "; verify PASTURE_BIN and the generated OpenCode 1.18.10 configuration");
+  // FORWARD THE CHILD'S DIAGNOSTIC, VERBATIM, ONTO THIS PROCESS'S STANDARD
+  // ERROR. fd 2 is PIPED and not inherited, so anything pasture writes there
+  // reaches no stream at all unless this function puts it on one. The
+  // non-zero-exit throw above already surfaces it; on exit 0 it was read into a
+  // local and dropped, which is every fail-open fault and every empty-body
+  // belt. An operator told to read the pasture diagnostic on standard error
+  // found nothing there, because this callback had already swallowed it.
+  //
+  // IT GOES TO Bun.stderr AND NOT THROUGH console.error, on purpose. These
+  // bytes are PASTURE'S OWN operator text, not a message from this plugin:
+  // writing them verbatim keeps the diagnostic exactly as the binary composed
+  // it, and keeps this plugin's own reporting — the belt line below, and the
+  // observation-failure line — countable as the plugin's, which is what the
+  // generated-plugin contract proof reads. A successful evaluation writes
+  // nothing here, so this is silent in the ordinary case.
+  if (stderr.trim() !== "") await Bun.write(Bun.stderr, stderr.endsWith("\n") ? stderr : stderr + "\n");
   return stdout;
 }
 
-function acceptProceed(stdout) {
+function acceptProceed(stdout, event) {
+  // An EMPTY body at exit 0 means pasture could not evaluate the event and let
+  // this host continue. It is not a decision and it is not a fault of this
+  // callback, so the callback continues and reports on the console. This belt
+  // exists so that an OLD pasture binary, which emitted nothing on a fail-open
+  // fault, still cannot abort the user's action.
+  //
+  // THE CONSOLE LINE SENDS THE OPERATOR TO STANDARD ERROR AND ONLY OFFERS THE
+  // RECORD. It used to promise both unconditionally. Standard error is where
+  // pasture reports every such fault, and it is also where it reports that it
+  // could not write a record at all; the durable line is the thing that may be
+  // missing, because a fault whose record cannot be placed or written leaves
+  // none. The old wording sent an operator who had just lost a gate evaluation
+  // to hunt for a file that is not there on exactly the routes it fires on.
+  //
+  // THE STREAM IT NAMES IS REACHED BECAUSE invokeLifecycle FORWARDS IT. That is
+  // the whole reason the imperative is allowed to stand: for one round this
+  // line named standard error while the spawn above piped fd 2 and dropped
+  // everything it caught on the exit-0 route, so the operator was sent to a
+  // stream this callback had emptied. Evidence named to a reader who cannot
+  // reach it is the same defect as evidence that does not exist.
+  if (stdout.trim() === "") {
+    console.error("Pasture did not evaluate " + event + " and returned no decision; the host continues unevaluated. Read the pasture diagnostic on standard error first: this plugin forwards it there, and pasture reports every such fault there, including the case where it could not write a durable record. A line may also have been appended to lifecycle-faults.jsonl beside the pasture database, but a fault whose record could not be placed or written leaves none, and the diagnostic then quotes the path it tried.");
+    return;
+  }
   let response;
   try { response = JSON.parse(stdout); }
   catch (error) { throw new Error("pasture hook lifecycle response is not JSON: " + error); }
@@ -43,7 +83,7 @@ export async function sessionCreated(callback) {
 export async function toolExecuteBefore(input, output) {
   const args = output.args;
   const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", "1.18.10"], "tool.execute.before", { input, output: { args } });
-  acceptProceed(stdout);
+  acceptProceed(stdout, "tool.execute.before");
   // Proceed is a decision, not a mutation. Preserve the host-owned args value.
   output.args = args;
 }

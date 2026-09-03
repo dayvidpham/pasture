@@ -1,10 +1,12 @@
 package hostcontract
 
-import "github.com/dayvidpham/pasture/internal/lifecycle/model"
+import (
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
+)
 
 type BlockingMode uint8
 type MutationMode uint8
-type FailureMode uint8
 type StopLoopPolicy uint8
 
 const (
@@ -15,10 +17,6 @@ const (
 const (
 	MutationNone MutationMode = iota + 1
 	MutationInput
-)
-const (
-	FailureReportAndContinue FailureMode = iota + 1
-	FailureExitTwoBlocks
 )
 const (
 	StopLoopNotApplicable StopLoopPolicy = iota + 1
@@ -45,7 +43,7 @@ type Event struct {
 	Identities []Identity
 	Blocking   BlockingMode
 	Mutation   MutationMode
-	Failure    FailureMode
+	Failure    pastureruntime.FailureMode
 	StopLoop   StopLoopPolicy
 }
 

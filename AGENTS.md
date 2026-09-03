@@ -139,24 +139,51 @@ been retired with the Temporal daemon role.
 
 ### Timeout tiers (`internal/timeouts`)
 
-Every SQLite busy timeout, and the three caller deadlines above it, come from one
+Every SQLite busy timeout, and the four deadlines above it, come from one
 immutable `timeouts.Profile`. A SQLite lock wait must end before either caller
-window can expire, and both of those must end before the caller stops waiting for
-the whole workflow. `Ingress` and `StartSlice` are siblings: neither is inside the
-other, and the constructor does not order them against each other. It refuses any
-profile that inverts the rest:
+window can expire; both of those must end before one hook invocation runs out of
+time; and that must end before the caller stops waiting for the whole workflow.
+`Ingress` and `StartSlice` are siblings: neither is inside the other, and the
+constructor does not order them against each other. It refuses any profile that
+inverts the rest:
 
 | Tier | Field | Production | Bounds |
 |---|---|---|---|
 | innermost | `SQLiteBusy` | **500 ms** | one SQLite lock wait inside the driver, set as the DSN `busy_timeout` |
 | caller window | `Ingress` | **1 s** | one lifecycle receipt append, including its lock retries |
 | caller window | `StartSlice` | **2 s** | how long a slice sub-workflow waits for its `start_slice` signal |
+| host window | `HookInvocation` | **5 s** | how long one whole lifecycle hook invocation may take before it reports a fault to its host |
 | outermost | `WorkflowResult` | **30 s** | how long a caller waits for a whole workflow to report a result |
 
 The other two profiles keep the same ordering with different budgets:
-`TestProfile` (500 ms / 2 s / 3 s / 30 s) gives integration runs room for a
-serialized writer queue, and `DeadlineTestProfile` (25 ms / 250 ms / 500 ms / 2 s)
+`TestProfile` (500 ms / 2 s / 3 s / 6 s / 30 s) gives integration runs room for a
+serialized writer queue, and
+`DeadlineTestProfile` (25 ms / 250 ms / 500 ms / 1 s / 2 s)
 is tight on purpose so tests can prove deadline-breach behaviour quickly.
+
+`HookInvocation` is the budget the HOST pays for. A host freezes while it waits
+for a lifecycle hook, so the tier sits below the smallest host budget this tree
+has evidence for, with headroom for process start: Claude Code allows a hook
+10 s (`hooks/hooks.json`), and the OpenCode plugin awaits the child process with
+no timeout of its own; this tree carries no measurement of the Codex hook
+budget, so the tier is sized against Claude's. The hook enforces this deadline
+around its own work rather than only handing a context down, because the retry
+ceilings below are longer than the smallest host budget.
+
+The tier bounds the WORK, not the whole process. After the deadline fires, three
+things still run outside it: mapping the fault, appending one line to the
+lifecycle fault record, and writing the two output streams. That is a fixed
+number of local syscalls with no retry and no lock, so on a healthy filesystem
+the guarantee holds in practice. If the fault record ever grows a retry or a
+lock, it moves inside the bound.
+
+The context does NOT reach the code that waits. `OpenTaskTracker` takes no
+context and `audit.Migrate` has none either, so the retry loop below opens with
+its own background context and runs to its own ceiling. The loops themselves do
+honour a context; they are simply never given one. The goroutine and select at
+the hook boundary is therefore the ONLY thing that bounds a lifecycle hook
+invocation today. Threading a context through the opener is tracked separately,
+and until it lands nothing may claim the deadline bounds the retry loop.
 
 Two longer retry ceilings sit **above** the profile and are not part of it.
 Both bound a retry loop, not a single wait, and both are 30 s:
@@ -179,6 +206,129 @@ Rules:
   list when that file starts to carry a timeout.
 - A change to a tier is a change to observable behaviour under load. State the
   measurement that justifies it, and keep the ordering strict.
+
+### The lifecycle fault record
+
+A lifecycle hook that cannot evaluate its event appends one JSON line to
+`lifecycle-faults.jsonl`, in the same directory as the database the invocation
+would have used (`~/.local/share/pasture/` by default). It sits beside the
+database and not inside it because the commonest fault is that the database
+could not be opened, and evidence that needs the failing store is lost exactly
+when it is wanted.
+
+THE LINE IS NOT ALWAYS WRITTEN, and the promise above holds only while the
+record can be both PLACED and WRITTEN. The writer has SIX guarded failures.
+FIVE of them are routes a user can reach, and each one loses the record for that
+fault. In the order the writer meets them:
+
+1. The resolved store path NAMES NO DIRECTORY, so the record has nothing to sit
+   beside (`--db pasture.db`, or `PASTURE_DB_PATH=pasture.db` with no flag).
+2. That directory CANNOT BE CREATED — a parent that is a file, or a parent the
+   user may not write to.
+3. The record file CANNOT BE OPENED although its directory exists — the
+   directory is read-only or owned by another user, the filesystem is mounted
+   read-only, or something that is not a regular file already stands at that
+   name.
+4. The line CANNOT BE APPENDED to a file that did open — the filesystem or the
+   user's quota is full, or the device reports an I/O error.
+5. The file CANNOT BE CLOSED after the line was handed to it. A filesystem that
+   defers the write — a network mount, or delayed allocation — reports the full
+   disk or the device error of an earlier write at `close(2)` and NOT at
+   `write(2)`, so on that route, route 4 never fires and the loss appears only
+   here. This route was once SILENT: the close was a bare `defer file.Close()`
+   with its error discarded, which is a lost record with no word on any stream,
+   and no guard saw it because a discarded error is not a branch.
+
+The SIXTH failure, a record line that cannot be encoded, is unreachable by
+construction: every member of the line is a string or a slice of strings, and
+the JSON encoder cannot refuse those. It is counted here because the writer
+reports it like the rest, not because a user can meet it.
+
+ROUTES 1 AND 2 ARE ABOUT PLACING THE FILE, ROUTES 3, 4 AND 5 ARE ABOUT WRITING
+IT, AND A DIRECTORY THAT EXISTS DOES NOT RULE THE SECOND GROUP OUT. Measured on
+the built binary, on all three harnesses, with a store directory that exists and
+is read-only: exit 0; standard output carries that host's continue bytes and
+nothing else — nothing at all on Claude Code, whose continue bytes are empty,
+`{"continue":true}` on Codex and `{"decision":"proceed"}` on OpenCode, and those
+bytes are the fail-open continuation and not a decision; the open failure
+reported on standard error; and no record file anywhere. The default path is
+not exempt from routes 3, 4 and 5 either — `~/.local/share/pasture/` is an
+ordinary directory on an ordinary filesystem, so it can be full, read-only, or
+owned by somebody else.
+
+On every one of those routes there is NO record for that fault anywhere. Each
+arm says so on standard error, which is the only channel left to it — and it is
+a channel the reader of this paragraph usually does not have, because a
+fail-open fault exits 0 and most hosts do not show the standard error of an
+exit-0 hook. So the honest statement is this: a fault leaves durable evidence
+only where its record can be placed AND written, and on every other route the
+operator learns of the loss only if the host shows the hook's standard error.
+
+To get the record back, give `--db` or `PASTURE_DB_PATH` a path whose directory
+exists or can be created, IS WRITABLE by the user running the hook, and sits on
+a filesystem with space left. A directory that merely exists is not enough:
+that is route 3.
+
+A LINE'S `unusableFaultInputs` MEMBER IS ENGLISH, NOT A STABLE KEY. It is an
+empty array on every fault pasture could classify, and on the one arm it could
+not it carries a sentence per unusable input, worded for a person reading the
+line. Those sentences may be reworded, so anything that GROUPS faults by cause
+must not key on them. Writing such a reader is the trigger to give the result a
+typed member and keep the sentence beside it — the sentence itself must stay
+next to the condition, because that adjacency is what stops the refusal and its
+explanation from describing different things. This paragraph is the ONLY place
+the trigger is written; the doc comment of `hostexit.Fault.UnusableInputs`
+points here rather than restating it, and
+`TestTheUnusableInputTriggerIsWrittenWhereAParserAuthorMeetsIt` fails if either
+end of that pointer is removed, if this paragraph is moved OUT of this section,
+or if that test is renamed while these two documents go on citing it.
+
+THE FILE HAS NO RETENTION. One line of roughly 500 bytes is appended per
+faulting invocation; nothing rotates, trims or removes a line, and no command
+reads or clears it. A hook runs on every wired event, so a database that stays
+broken accumulates one line per event, silently, because a fail-open fault exits
+0 and most hosts do not show the standard error of an exit-0 hook. Delete the
+file to clear it. Retention and reclaim are deferred, and this file is one of
+the surfaces that work inherits.
+
+A second unreclaimed surface comes from the same failure class. A lifecycle
+invocation abandoned at its deadline can leave a committed payload blob with no
+occurrence — one orphan per abandoned invocation, holding that invocation's raw
+host payload, bounded by the 1 MiB ingress payload cap. The write order is
+deliberate: an orphan blob is reclaimable, while a journal row naming an absent
+blob is corruption. `receipt.SQLiteBlobStore.Reclaimable` identifies them and
+nothing deletes them yet.
+
+They can now be COUNTED. `pasture hook lifecycle orphans` reports how many
+payload blobs no occurrence names, in text or JSON, and it deletes nothing.
+`receipt.SQLiteBlobStore.ReclaimableCount` answers it from the same predicate
+`Reclaimable` enumerates, so the operator surface and the abandonment invariant
+can never describe different sets. The count rebuilds the disposable occurrence
+projection from the journal first, exactly as `pasture hook lifecycle list`
+does: taken against a projection that was never rebuilt, every blob would look
+unnamed.
+
+The number ships with its meaning, and the meaning is the point. Read alone, a
+large count invites an operator to hunt for corruption — for the very state the
+write order makes impossible. So the report says all three of these, and a test
+pins each phrase:
+
+1. **What an orphan is** — a payload blob that no recorded occurrence names,
+   left by a hook invocation abandoned between its two durable writes, at most
+   one per abandoned invocation.
+2. **That it is expected and reclaimable, not damage** — the blob is written
+   before the journal row deliberately, because a spare blob can be reclaimed
+   later while a journal row naming an absent blob could not be repaired at all.
+3. **What a large number means** — not corruption, but repeated abandonment, so
+   the thing to investigate is the store contention that caused it.
+
+The count lives on the read surface and NEVER on the hook path. That placement
+is load-bearing, not tidiness: on the hook path the count would run inside the
+`HookInvocation` deadline, and it reads the store, which is the resource that
+contends. It would therefore be slowest under exactly the condition that
+produces orphans, and a slow enough count would push the invocation into its
+deadline and leave one more orphan behind — making the counter a cause of the
+thing it counts. A test asserts that no hook-path source calls it.
 
 ### Schema migration (`pasture migrate`)
 
@@ -469,6 +619,29 @@ production callers never see the seam.
 Rule of thumb: if a test needs `t.Setenv` (or any global mutation) it must stay
 serial — so push the logic behind an injected parameter, test that in parallel,
 and keep exactly one serial test for the real-I/O wiring.
+
+**A seam only a test supplies needs a pin on what production supplies.** An
+injected parameter buys parallelism, and it also creates a second supplier of a
+value that used to be fixed. When the only other supplier is a test, nothing
+fails if production later supplies the parameter DIFFERENTLY, so the seam has to
+say what production passes. The lifecycle hook command has two such seams and
+one assertion covers both. `handlers.CommitBarrier` names the boundary between
+"the lifecycle receipt is durably committed" and "the host is told to continue";
+production passes `handlers.PassThroughCommitBarrier{}`, which does nothing, and
+one test passes a barrier that HOLDS the invocation at that boundary until the
+test releases it, which makes the interleaving deterministic without a clock.
+The deadline tier is the second: production passes `timeouts.ProductionProfile()`,
+chosen against the smallest host budget, while that same test passes
+`timeouts.DeadlineTestProfile()` so the expiry lands inside the held window. Neither is visible in any output, so a wrong wiring
+produces no value a table can read — a barrier that ran work between the commit
+and the continuation, or a tier that moved the deadline the host-budget claim
+rests on, would keep every existing test green. The pin is therefore structural:
+`TestTheProductionPathWiresThePassThroughBarrierAndTheProductionTier` parses
+every non-test source of `cmd/pasture`, finds each `lifecycleOutcome` call, and
+asserts the barrier and tier arguments verbatim, plus that there is exactly ONE
+such call, because every guarantee the command makes is stated over one
+host-facing path. Its scope is a glob and not a list of file names, so a source
+added later is covered the day it is written rather than escaping in silence.
 
 ### Quality gates (must pass before every commit)
 ```bash

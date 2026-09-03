@@ -14,12 +14,28 @@
 //	                                            including its lock retries
 //	caller window  StartSlice      2s           how long a slice sub-workflow
 //	                                            waits for its start_slice signal
+//	host window    HookInvocation  5s           how long one whole lifecycle hook
+//	                                            invocation may take before it
+//	                                            reports a fault to its host
 //	outermost      WorkflowResult  30s          how long a caller waits for a
 //	                                            whole workflow to report a result
 //
-// TestProfile (500ms / 2s / 3s / 30s) and DeadlineTestProfile (25ms / 250ms /
-// 500ms / 2s) keep the same ordering with different budgets. New rejects any
-// profile that inverts it.
+// HookInvocation sits below the smallest host budget this tree has evidence
+// for, with headroom for process start. On Claude Code that budget is the 10s
+// that hooks/hooks.json sets on every pasture lifecycle row ("timeout": 10).
+// It is a value this tree configures per row and not the host's own default:
+// a row without a timeout runs on that default, which this tree does not
+// measure. The OpenCode plugin awaits the child process with no timeout of its
+// own, and this tree carries no measurement of the Codex hook budget, so the
+// tier is sized against the Claude rows;
+// TestProductionHookInvocationSitsBelowTheSmallestHostBudget holds every
+// lifecycle row of hooks/hooks.json to that value. A hook that outruns the
+// host budget freezes the session, so pasture stops first and reports a fault,
+// which fails open by default.
+//
+// TestProfile (500ms / 2s / 3s / 6s / 30s) and DeadlineTestProfile (25ms /
+// 250ms / 500ms / 1s / 2s) keep the same ordering with different budgets. New
+// rejects any profile that inverts it.
 //
 // Production code must read these values from an injected Profile and must not
 // write a duration or a busy_timeout DSN literal of its own.
@@ -48,52 +64,60 @@ const (
 	DeadlineTest
 )
 
-// Profile is immutable and constructor-validated. The four tiers are ordered
+// Profile is immutable and constructor-validated. The five tiers are ordered
 // from innermost to outermost: a SQLite lock wait must complete before either
-// the ingress or the start_slice window can expire, and both of those must
-// complete before the caller stops waiting for the whole workflow.
+// the ingress or the start_slice window can expire; both of those must complete
+// before one hook invocation runs out of time; and that must complete before
+// the caller stops waiting for the whole workflow.
 type Profile struct {
 	kind           Kind
 	sqliteBusy     time.Duration
 	ingress        time.Duration
 	startSlice     time.Duration
+	hookInvocation time.Duration
 	workflowResult time.Duration
 }
 
-func New(kind Kind, sqliteBusy, ingress, startSlice, workflowResult time.Duration) (Profile, error) {
+func New(kind Kind, sqliteBusy, ingress, startSlice, hookInvocation, workflowResult time.Duration) (Profile, error) {
 	if kind != Production && kind != Test && kind != DeadlineTest {
 		return Profile{}, fmt.Errorf("timeout profile kind %d is unknown", kind)
 	}
-	if sqliteBusy <= 0 || ingress <= 0 || startSlice <= 0 || workflowResult <= 0 {
-		return Profile{}, fmt.Errorf("timeout profile durations must all be positive: sqlite=%s ingress=%s startSlice=%s workflowResult=%s", sqliteBusy, ingress, startSlice, workflowResult)
+	if sqliteBusy <= 0 || ingress <= 0 || startSlice <= 0 || hookInvocation <= 0 || workflowResult <= 0 {
+		return Profile{}, fmt.Errorf("timeout profile durations must all be positive: sqlite=%s ingress=%s startSlice=%s hookInvocation=%s workflowResult=%s", sqliteBusy, ingress, startSlice, hookInvocation, workflowResult)
 	}
 	if sqliteBusy >= ingress || sqliteBusy >= startSlice {
 		return Profile{}, fmt.Errorf("timeout profile is inverted: SQLite busy timeout %s must be strictly below ingress %s and start_slice %s", sqliteBusy, ingress, startSlice)
 	}
+	if hookInvocation <= ingress || hookInvocation <= startSlice {
+		return Profile{}, fmt.Errorf("timeout profile is inverted: the hook-invocation deadline %s must be strictly above ingress %s and start_slice %s, because one hook invocation contains the receipt append it performs", hookInvocation, ingress, startSlice)
+	}
+	if workflowResult <= hookInvocation {
+		return Profile{}, fmt.Errorf("timeout profile is inverted: the workflow-result wait %s must be strictly above the hook-invocation deadline %s, because a caller that stops waiting first cannot observe the inner windows", workflowResult, hookInvocation)
+	}
 	if workflowResult <= ingress || workflowResult <= startSlice {
 		return Profile{}, fmt.Errorf("timeout profile is inverted: the workflow-result wait %s must be strictly above ingress %s and start_slice %s, because a caller that stops waiting first cannot observe the inner windows", workflowResult, ingress, startSlice)
 	}
-	return Profile{kind: kind, sqliteBusy: sqliteBusy, ingress: ingress, startSlice: startSlice, workflowResult: workflowResult}, nil
+	return Profile{kind: kind, sqliteBusy: sqliteBusy, ingress: ingress, startSlice: startSlice, hookInvocation: hookInvocation, workflowResult: workflowResult}, nil
 }
 
 // ProductionProfile allocates half of ingress to each SQLite lock wait. This
 // preserves useful WAL contention absorption while leaving strict headroom
 // below the one- and two-second caller windows.
 func ProductionProfile() Profile {
-	return must(New(Production, 500*time.Millisecond, time.Second, 2*time.Second, 30*time.Second))
+	return must(New(Production, 500*time.Millisecond, time.Second, 2*time.Second, 5*time.Second, 30*time.Second))
 }
 
 // TestProfile favors deterministic integration runs: its two-second ingress
 // window exceeds the measured 48-writer serialized queue, while a 500 ms inner
 // retry remains strictly below both callers.
 func TestProfile() Profile {
-	return must(New(Test, 500*time.Millisecond, 2*time.Second, 3*time.Second, 30*time.Second))
+	return must(New(Test, 500*time.Millisecond, 2*time.Second, 3*time.Second, 6*time.Second, 30*time.Second))
 }
 
 // DeadlineTestProfile is deliberately tight and is used only by tests proving
 // deadline breach and crash-safe zero-receipt behavior.
 func DeadlineTestProfile() Profile {
-	return must(New(DeadlineTest, 25*time.Millisecond, 250*time.Millisecond, 500*time.Millisecond, 2*time.Second))
+	return must(New(DeadlineTest, 25*time.Millisecond, 250*time.Millisecond, 500*time.Millisecond, time.Second, 2*time.Second))
 }
 
 func KnownProfiles() []Profile {
@@ -104,6 +128,13 @@ func (p Profile) SQLiteBusy() time.Duration { return p.sqliteBusy }
 func (p Profile) Ingress() time.Duration    { return p.ingress }
 func (p Profile) StartSlice() time.Duration { return p.startSlice }
 
+// HookInvocation bounds ONE whole lifecycle hook invocation, from process start
+// to the outcome the host reads. It exists because the host, not pasture, pays
+// for a hook that does not return: the session freezes while it waits. The
+// value sits below the smallest host budget with headroom for process start, so
+// pasture stops first and reports a fault, which fails open by default.
+func (p Profile) HookInvocation() time.Duration { return p.hookInvocation }
+
 // WorkflowResult is the outermost tier: how long a caller waits for a whole
 // durable workflow to report its result. It is above every inner window on
 // purpose. A caller that gives up sooner than the inner windows would report a
@@ -112,7 +143,7 @@ func (p Profile) StartSlice() time.Duration { return p.startSlice }
 func (p Profile) WorkflowResult() time.Duration { return p.workflowResult }
 func (p Profile) IsZero() bool                  { return p.kind == 0 }
 func (p Profile) Validate() error {
-	_, err := New(p.kind, p.sqliteBusy, p.ingress, p.startSlice, p.workflowResult)
+	_, err := New(p.kind, p.sqliteBusy, p.ingress, p.startSlice, p.hookInvocation, p.workflowResult)
 	return err
 }
 

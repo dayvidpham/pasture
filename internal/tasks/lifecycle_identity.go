@@ -71,6 +71,18 @@ func NewLifecycleReader(tracker protocol.TaskTracker) (model.LifecycleReader, er
 	return projection.Reader{DB: store.auditDBHandle(), Facts: store.Journal().Facts()}, nil
 }
 
+// NewLifecycleBlobStore binds the payload blob store to the unified database
+// for READ-ONLY inspection. It is the seam an operator read surface uses to
+// ask how many payload blobs no occurrence names; it grants no write path that
+// receipt.Service does not already own.
+func NewLifecycleBlobStore(tracker protocol.TaskTracker) (receipt.SQLiteBlobStore, error) {
+	store, ok := tracker.(lifecycleReceiptStore)
+	if !ok || store.auditDBHandle() == nil {
+		return receipt.SQLiteBlobStore{}, &pasterrors.StructuredError{Category: pasterrors.CategoryValidation, What: "The supplied tracker cannot inspect lifecycle payload blobs.", Why: "Blob inspection needs the unified SQLite handle that the tracker holds.", Where: "Wiring lifecycle payload inspection (internal/tasks/lifecycle_identity.go in tasks.NewLifecycleBlobStore).", Impact: "No payload blob was inspected or changed.", Fix: "Use the tracker returned by tasks.OpenTaskTracker."}
+	}
+	return receipt.SQLiteBlobStore{DB: store.auditDBHandle()}, nil
+}
+
 // RebuildLifecycleOccurrences derives the disposable occurrence projection
 // exclusively from journal truth.
 func RebuildLifecycleOccurrences(ctx context.Context, tracker protocol.TaskTracker) error {

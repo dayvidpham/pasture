@@ -2,9 +2,15 @@ package runtime_test
 
 import (
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	"github.com/dayvidpham/pasture/internal/codegen/scan"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -249,7 +255,11 @@ func TestClaudeLifecyclePreservesBatchRequestAndStopSemantics(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, runtime.SemanticGateConsultation, batch.Semantic())
 	assert.Equal(t, runtime.Blocking, batch.Blocking())
-	assert.Equal(t, runtime.FailureExitTwoBlocks, batch.Failure())
+	// PostToolBatch still consults the gate, but the host reference does not
+	// state that it blocks on exit 2, so the row cites no evidence and runs as
+	// report-and-continue.
+	assert.Equal(t, runtime.FailureReportAndContinue, batch.Failure())
+	assert.False(t, batch.Evidence().IsPresent())
 	assert.Equal(t, []runtime.NativeIdentityKind{runtime.IdentityToolCall}, batch.UnresolvedIdentities())
 	unresolved := batch.UnresolvedIdentities()
 	unresolved[0] = runtime.IdentitySession
@@ -286,7 +296,10 @@ func TestCodexLifecyclePreservesStrictMutationAndConcurrencyWithoutMerge(t *test
 	assert.Equal(t, runtime.MutationInput, pre.Mutation())
 	assert.Equal(t, runtime.OrderConcurrentNative, pre.Order())
 	assert.Equal(t, runtime.ReconcileNoAdapterMerge, pre.Reconciliation())
-	assert.Equal(t, runtime.FailureStrictExitTwoBlocks, pre.Failure())
+	// No Codex row cites host evidence yet, so the strict blocking exit is not
+	// claimed and the row runs as report-and-continue.
+	assert.Equal(t, runtime.FailureReportAndContinue, pre.Failure())
+	assert.False(t, pre.Evidence().IsPresent())
 
 	post, err := contract.Mapping(runtime.CodexEventPostToolUse)
 	require.NoError(t, err)
@@ -363,4 +376,158 @@ func hasNativeIdentity(mapping runtime.LifecycleEventMapping, kind runtime.Nativ
 		}
 	}
 	return false
+}
+
+// TestFailureModeIsTheOnlyFailureVocabulary pins the single failure-mode enum
+// of the tree. Before this, three FailureMode types existed (this one, one in
+// internal/lifecycle/registration and one in the ingress host contract), and
+// the two small ones folded six native behaviors into two. A fold is silent: a
+// generated adapter cannot tell an OpenCode plugin throw from a Claude exit-2
+// block once both are labelled the same. The zero value must stay invalid so an
+// unset field can never read as a real native behavior.
+func TestFailureModeIsTheOnlyFailureVocabulary(t *testing.T) {
+	t.Parallel()
+
+	var unset runtime.FailureMode
+	assert.False(t, unset.IsValid(), "the zero FailureMode must never be a valid native behavior")
+	assert.Equal(t, "", unset.String(), "the zero FailureMode must not name a native behavior")
+	assert.False(t, runtime.FailureMode(uint8(runtime.FailureObserveOnly)+1).IsValid(),
+		"a value above the last declared arm must never be valid")
+
+	arms := []runtime.FailureMode{
+		runtime.FailureReportAndContinue,
+		runtime.FailureExitTwoBlocks,
+		runtime.FailureStrictHook,
+		runtime.FailureStrictExitTwoBlocks,
+		runtime.FailureThrowFailFast,
+		runtime.FailureObserveOnly,
+	}
+	seen := make(map[string]runtime.FailureMode, len(arms))
+	for _, arm := range arms {
+		assert.True(t, arm.IsValid(), "declared arm %d must be valid", uint8(arm))
+		name := arm.String()
+		require.NotEmpty(t, name, "declared arm %d must have a name", uint8(arm))
+		previous, duplicate := seen[name]
+		require.False(t, duplicate,
+			"arms %d and %d share the name %q, so a generated manifest could not tell them apart",
+			uint8(previous), uint8(arm), name)
+		seen[name] = arm
+	}
+	assert.Len(t, seen, 6, "the failure vocabulary has exactly six arms")
+}
+
+// TestNoSecondFailureVocabularyIsDeclaredAnywhere is the OTHER half of the
+// single-vocabulary claim, and it is the half a value cannot show.
+//
+// TestFailureModeIsTheOnlyFailureVocabulary proves the arms of THIS enum are
+// distinct and that its zero value is refused. It cannot prove that no SECOND
+// enum exists, because a second type in another package changes nothing this
+// package can observe. That is exactly how the tree acquired three of them: two
+// small enums folded six native behaviours into two, and a generated adapter
+// could no longer tell an OpenCode plugin throw from a Claude exit-2 block.
+//
+// So the absence is asserted over the SOURCE. A new declaration turns this RED
+// on the day it is written.
+func TestNoSecondFailureVocabularyIsDeclaredAnywhere(t *testing.T) {
+	t.Parallel()
+
+	root, err := scan.ModuleRoot()
+	require.NoError(t, err)
+
+	owner := filepath.Join(root, "internal", "runtime")
+	self := filepath.Join(owner, "lifecycle_test.go")
+	declaration := regexp.MustCompile(`(?m)^\s*type\s+\w*FailureMode\s`)
+
+	require.NoError(t, filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if entry.Name() == ".git" || entry.Name() == "legacy" || path == owner {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || path == self {
+			return nil
+		}
+		body, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if declaration.MatchString(string(body)) {
+			relative, _ := filepath.Rel(root, path)
+			t.Errorf("%s declares a second failure-mode vocabulary; "+
+				"one vocabulary is what lets a generated manifest tell an OpenCode plugin throw "+
+				"from a Claude exit-2 block, and a second one folds them back together silently",
+				relative)
+		}
+		return nil
+	}))
+}
+
+// TestEveryRegisteredRowIsDeclaredAndAnUnknownCoordinateIsNot pins the fact
+// LifecycleFailurePolicy.Declared rests on: every policy a lookup returns
+// carries a valid Semantic, and a coordinate the build does not declare is not
+// found at all. The hook command's fallback for such a coordinate builds a
+// policy with the zero Semantic, so Declared is what separates "treated as
+// observe-only" from "declares observe-only" in its diagnostic and its record.
+//
+// WHAT IT VISITS: every event of the three pinned lifecycle contracts, looked
+// up by its native name exactly as the hook command looks it up. The three are
+// written here by hand, and they are the three cases of the switch in
+// LookupLifecycleFailure; a fourth case added there must be added here.
+// WHAT IT DOES NOT READ: a contract this build does not pin, and a harness
+// that switch does not dispatch on.
+//
+// MUTATION: make Declared return true, or let lookupLifecycleFailure leave
+// Semantic unset. This test turns RED.
+func TestEveryRegisteredRowIsDeclaredAndAnUnknownCoordinateIsNot(t *testing.T) {
+	t.Parallel()
+
+	rows := 0
+	rows += assertEveryRowDeclared(t, ir.HarnessClaudeCode, runtime.ClaudeCode2_1_210Lifecycle(), runtime.ClaudeLifecycleEvents())
+	rows += assertEveryRowDeclared(t, ir.HarnessCodex, runtime.Codex0_146_0Lifecycle(), runtime.CodexLifecycleEvents())
+	rows += assertEveryRowDeclared(t, ir.HarnessOpenCode, runtime.OpenCode1_18_10Lifecycle(), runtime.OpenCodeLifecycleEvents())
+	require.NotZero(t, rows, "no contract yielded a row, so nothing above was asserted")
+
+	for _, coordinate := range []struct {
+		harness ir.HarnessID
+		event   string
+	}{
+		{harness: ir.HarnessID("gemini"), event: "NotAnEvent"},
+		{harness: ir.HarnessClaudeCode, event: "NotAnEvent"},
+	} {
+		policy, found := runtime.LookupLifecycleFailure(coordinate.harness, coordinate.event)
+		assert.False(t, found, "%s %s is not declared by this build and must not be found", coordinate.harness, coordinate.event)
+		assert.False(t, policy.Declared(),
+			"the policy returned for an undeclared coordinate must read as undeclared, or the hook "+
+				"command's fallback would be reported as a declaration")
+	}
+}
+
+// assertEveryRowDeclared looks up every event of one contract by its native
+// name and requires the returned policy to read as declared. It returns the
+// number of rows it checked.
+func assertEveryRowDeclared[E comparable](
+	t *testing.T,
+	harness ir.HarnessID,
+	contract runtime.LifecycleContract[E],
+	events []E,
+) int {
+	t.Helper()
+	rows := 0
+	for _, event := range events {
+		mapping, err := contract.Mapping(event)
+		if err != nil {
+			continue
+		}
+		policy, found := runtime.LookupLifecycleFailure(harness, mapping.NativeName())
+		require.True(t, found, "%s %s is a registered row and must be found", harness, mapping.NativeName())
+		assert.True(t, policy.Declared(),
+			"%s %s is a registered row and its policy must read as declared; a declared row with an "+
+				"invalid Semantic would be reported to the operator as undeclared", harness, mapping.NativeName())
+		rows++
+	}
+	return rows
 }

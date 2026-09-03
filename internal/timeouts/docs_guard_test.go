@@ -34,6 +34,7 @@ func productionTiers() []tier {
 		{field: "SQLiteBusy", value: profile.SQLiteBusy().String()},
 		{field: "Ingress", value: profile.Ingress().String()},
 		{field: "StartSlice", value: profile.StartSlice().String()},
+		{field: "HookInvocation", value: profile.HookInvocation().String()},
 		{field: "WorkflowResult", value: profile.WorkflowResult().String()},
 	}
 }
@@ -179,6 +180,32 @@ func TestPackageDocStatesTheLiveProductionTiers(t *testing.T) {
 		want := compact(fmt.Sprintf("%s  %s", tr.field, tr.value))
 		if !strings.Contains(table, want) {
 			t.Errorf("the package doc tier table has no row giving %s as %s; update profile.go to match ProductionProfile.", tr.field, tr.value)
+		}
+	}
+}
+
+// TestAgentsDocStatesTheLiveTestProfileBudgets pins the two non-production
+// budget lists in AGENTS.md to the live values. The production table already
+// had a guard; these two sentences did not, and they drifted the moment a fifth
+// tier arrived. A stale budget list teaches a reader the wrong ordering.
+func TestAgentsDocStatesTheLiveTestProfileBudgets(t *testing.T) {
+	t.Parallel()
+	body, err := os.ReadFile(filepath.Join(docsRoot(t), "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	text := compact(string(body))
+
+	for name, profile := range map[string]Profile{
+		"TestProfile":         TestProfile(),
+		"DeadlineTestProfile": DeadlineTestProfile(),
+	} {
+		want := compact(fmt.Sprintf("`%s` (%s / %s / %s / %s / %s)",
+			name,
+			profile.SQLiteBusy(), profile.Ingress(), profile.StartSlice(),
+			profile.HookInvocation(), profile.WorkflowResult()))
+		if !strings.Contains(text, want) {
+			t.Errorf("AGENTS.md does not state the live %s budgets %s; update it to match internal/timeouts.", name, want)
 		}
 	}
 }
