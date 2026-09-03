@@ -615,7 +615,7 @@ func TestAPanicInTheWorkGoroutineIsAFaultAndNeverABlock(t *testing.T) {
 	cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.10", dbPath)
 	cmd.SetIn(panickingReader{message: "the host payload reader failed"})
 
-	outcome := lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile())
+	outcome := lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), context.WithTimeout)
 
 	assert.Equal(t, hostexit.ExitContinue, outcome.Exit,
 		"a pasture panic must not stop the user working")
@@ -659,7 +659,7 @@ func TestAPanicBeforeTheWorkStartsIsAFaultAndNeverACrash(t *testing.T) {
 	//nolint:staticcheck // A nil context is the injected fault; cobra owns this seam.
 	cmd.SetContext(nil)
 
-	outcome := lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile())
+	outcome := lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), context.WithTimeout)
 
 	assert.Equal(t, hostexit.ExitContinue, outcome.Exit,
 		"the main-path recover must turn a panic into a fault that lets the host continue")
@@ -688,6 +688,89 @@ func (b *blockingBarrier) AfterCommit(context.Context, handlers.CommitBoundary) 
 	return nil
 }
 
+// trippedDeadline is a hook-invocation deadline with NO CLOCK in it. The signal
+// fires when the test trips it and never before, so the TEST orders the expiry
+// against the commit, and a slow store before the boundary can only make the
+// proof slower, never make it fail.
+//
+// The context it derives still descends from the invocation's own, so every
+// cancellation the production path honours is honoured here unchanged; the
+// only thing absent is the timer. The tier it is handed is printed by the
+// diagnostic and never started.
+type trippedDeadline struct {
+	signal context.Context
+	trip   context.CancelFunc
+}
+
+func newTrippedDeadline(t *testing.T) *trippedDeadline {
+	t.Helper()
+	signal, trip := context.WithCancel(context.Background())
+	t.Cleanup(trip)
+	return &trippedDeadline{signal: signal, trip: trip}
+}
+
+// derive has the shape of context.WithTimeout, which is what production passes
+// in its place.
+func (d *trippedDeadline) derive(parent context.Context, _ time.Duration) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(parent)
+	stop := context.AfterFunc(d.signal, cancel)
+	return ctx, func() { stop(); cancel() }
+}
+
+// preCommitStallCeiling bounds how long a proof waits for the invocation to
+// reach the commit boundary. It is a failure ceiling and not a wait: the proof
+// never passes because of it, it only fails with a sentence instead of hanging
+// until the test binary is killed. Nothing in the proof is ordered by it.
+const preCommitStallCeiling = 30 * time.Second
+
+// abandonAfterTheCommit runs ONE invocation of the prepared command, holds it
+// at the commit-to-emit boundary, trips the hook-invocation deadline there, and
+// returns the outcome the host receives. Every step is a condition:
+//
+//  1. the barrier signals that the durable receipt is committed and the host
+//     has not been told anything;
+//  2. the test trips the deadline, which is the signal the production select
+//     waits on, and only then;
+//  3. the outcome arrives, and the barrier is released afterwards, so the
+//     encode could not have run before the outcome was decided.
+//
+// No clock takes part. A proof that let the tier's timer trip the deadline
+// raced that timer against the store work before the boundary, and on a loaded
+// runner the timer won: the invocation abandoned work that had not committed,
+// and the proof failed with "finished without reaching the commit boundary".
+// That failure is what this shape makes impossible. The tier is the production
+// one, and it is printed and never started.
+func abandonAfterTheCommit(t *testing.T, cmd *cobra.Command) hostexit.Outcome {
+	t.Helper()
+
+	barrier := &blockingBarrier{reached: make(chan struct{}), release: make(chan struct{})}
+	deadline := newTrippedDeadline(t)
+	outcomes := make(chan hostexit.Outcome, 1)
+	go func() {
+		outcomes <- lifecycleOutcome(cmd, nil, barrier, timeouts.ProductionProfile(), deadline.derive)
+	}()
+
+	select {
+	case <-barrier.reached:
+	case outcome := <-outcomes:
+		close(barrier.release)
+		t.Fatalf("the invocation finished without reaching the commit boundary, so the work returned or "+
+			"faulted before the receipt committed and nothing here proves an abandonment after the "+
+			"commit; the outcome it returned instead is %+v", outcome)
+	case <-time.After(preCommitStallCeiling):
+		close(barrier.release)
+		t.Fatalf("the invocation did not reach the commit boundary within %s: the store work before the "+
+			"commit (open, migrate, blob, journal row) stalled, and no deadline in this proof can end it "+
+			"because the proof owns the deadline; look for another writer holding %s",
+			preCommitStallCeiling, flagDBPath)
+	}
+
+	deadline.trip()
+	outcome := <-outcomes
+	close(barrier.release)
+	return outcome
+}
+
 // TestAnInvocationAbandonedAfterItsCommitTellsTheHostTheTruth is the honesty
 // proof for the abandonment path.
 //
@@ -696,9 +779,11 @@ func (b *blockingBarrier) AfterCommit(context.Context, handlers.CommitBoundary) 
 // commit. The hook then cannot claim the event was not evaluated, and it used to
 // claim exactly that.
 //
-// The barrier makes that interleaving deterministic: the invocation is held at
-// the named commit-to-emit boundary until the deadline fires. The state is then
-// read back through the PRODUCTION read path.
+// The interleaving is deterministic and owned by the test: the invocation is
+// held at the named commit-to-emit boundary, and the deadline is tripped THERE
+// by the test, so no clock orders the expiry against the commit. The shape is
+// abandonAfterTheCommit. The state is then read back through the PRODUCTION
+// read path.
 //
 // This is the FOURTH of the four states an abandoned invocation can land in — a
 // committed occurrence with no continuation to the host. The other three, and
@@ -712,28 +797,7 @@ func TestAnInvocationAbandonedAfterItsCommitTellsTheHostTheTruth(t *testing.T) {
 	cmd := lifecycleTestCommand(t, "claude-code", "SessionStart", "2.1.222", dbPath)
 	cmd.SetIn(bytes.NewReader(claudeFixture(t, "session_start_2_1_222.json")))
 
-	barrier := &blockingBarrier{reached: make(chan struct{}), release: make(chan struct{})}
-	outcomes := make(chan hostexit.Outcome, 1)
-	// The INJECTED SHORT TIER. This proof is about the PATH the invocation
-	// takes and the STATE it leaves, and neither comes from the length of the
-	// tier: the barrier holds the invocation at the commit boundary until the
-	// deadline fires, whatever the deadline is. Running it on the production
-	// tier would cost five seconds of the suite and prove nothing more. The
-	// PRODUCTION value is pinned where it belongs, against the smallest host
-	// budget, and it is unchanged.
-	budget := timeouts.DeadlineTestProfile()
-	go func() { outcomes <- lifecycleOutcome(cmd, nil, barrier, budget) }()
-
-	// The condition, not a sleep: the receipt is committed and the host has not
-	// been told anything.
-	select {
-	case <-barrier.reached:
-	case outcome := <-outcomes:
-		t.Fatalf("the invocation finished without reaching the commit boundary: %+v", outcome)
-	}
-
-	outcome := <-outcomes
-	close(barrier.release)
+	outcome := abandonAfterTheCommit(t, cmd)
 
 	assert.Equal(t, hostexit.ExitContinue, outcome.Exit,
 		"an abandoned invocation fails open, so the host is never stopped by it")
@@ -820,22 +884,25 @@ func TestTheRecoverIsInstalledBeforeAnythingElseRuns(t *testing.T) {
 }
 
 // TestTheProductionPathWiresThePassThroughBarrierAndTheProductionTier pins the
-// two seams this command injects, because both are production parameters whose
-// only other supplier today is a test.
+// three seams this command injects, because each is a production parameter
+// whose only other supplier today is a test.
 //
 // That shape is worth one assertion each. A parameter that only a test supplies
 // is one refactor away from being a parameter that production supplies
-// DIFFERENTLY, and neither drift would fail any existing test:
+// DIFFERENTLY, and no such drift would fail any existing test:
 //
 //   - a barrier that is not the pass-through one would run code between the
 //     durable commit and the host's continuation, which is the one place this
 //     command promises nothing happens;
 //   - a tier that is not the production one would silently move the deadline
 //     the whole host-budget claim rests on, and the hook would keep passing its
-//     own proofs while freezing a session.
+//     own proofs while freezing a session;
+//   - a deadline that is not context.WithTimeout would start the clock somewhere
+//     other than the work, or start no clock at all, and the tier would be a
+//     number printed in a diagnostic that bounds nothing.
 //
-// The assertion is structural because there is nothing to observe: both seams
-// are correct by being wired, and a wrong wiring produces no value a table can
+// The assertion is structural because there is nothing to observe: each seam
+// is correct by being wired, and a wrong wiring produces no value a table can
 // read.
 func TestTheProductionPathWiresThePassThroughBarrierAndTheProductionTier(t *testing.T) {
 	t.Parallel()
@@ -860,13 +927,17 @@ func TestTheProductionPathWiresThePassThroughBarrierAndTheProductionTier(t *test
 				return true
 			}
 			calls++
-			require.Len(t, call.Args, 4, "%s calls lifecycleOutcome with the wrong shape", name)
+			require.Len(t, call.Args, 5, "%s calls lifecycleOutcome with the wrong shape", name)
 			assert.Equal(t, "handlers.PassThroughCommitBarrier{}", sourceOf(call.Args[2]),
 				"%s must pass the pass-through commit barrier: production may never supply a barrier "+
 					"that runs between the durable commit and the host's continuation", name)
 			assert.Equal(t, "timeouts.ProductionProfile()", sourceOf(call.Args[3]),
 				"%s must pass the production timeout profile: the hook-invocation tier is chosen "+
 					"against the smallest host budget, and production may not run on another one", name)
+			assert.Equal(t, "context.WithTimeout", sourceOf(call.Args[4]),
+				"%s must pass context.WithTimeout as the deadline: the production deadline is a clock "+
+					"that starts with the work and expires at the tier, and production may not derive "+
+					"it any other way", name)
 			return true
 		})
 	}
@@ -4006,7 +4077,7 @@ func TestAPanicAfterTheCommitDoesNotClaimTheDeliveryWasNotRecorded(t *testing.T)
 
 	outcome := lifecycleOutcome(cmd, nil,
 		panickingCommitBarrier{message: "the commit boundary failed after the receipt was written"},
-		timeouts.ProductionProfile())
+		timeouts.ProductionProfile(), context.WithTimeout)
 
 	require.Equal(t, hostexit.ExitContinue, outcome.Exit,
 		"a pasture panic must still let the host carry on")
@@ -4514,7 +4585,7 @@ func TestAdviceFollowsTheCauseAndNotTheClassifier(t *testing.T) {
 		cmd.SetIn(bytes.NewReader(openCodeToolExecuteBeforeWire(t)))
 		outcome := lifecycleOutcome(cmd, nil,
 			panickingCommitBarrier{message: "the commit boundary failed after the receipt was written"},
-			timeouts.ProductionProfile())
+			timeouts.ProductionProfile(), context.WithTimeout)
 
 		require.Contains(t, outcome.Stderr, "durable state record-unknown",
 			"this subtest must reach the record-unknown stage, or it proves nothing about advice "+
@@ -4534,20 +4605,11 @@ func TestAdviceFollowsTheCauseAndNotTheClassifier(t *testing.T) {
 		cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.10", dbPath)
 		cmd.SetIn(bytes.NewReader(openCodeToolExecuteBeforeWire(t)))
 
-		// The barrier HOLDS the invocation at the commit boundary until the
-		// deadline fires, so the abandonment is driven by a condition and never
-		// by a sleep. It is the same seam the deadline proof beside this one
-		// uses.
-		barrier := &blockingBarrier{reached: make(chan struct{}), release: make(chan struct{})}
-		outcomes := make(chan hostexit.Outcome, 1)
-		go func() { outcomes <- lifecycleOutcome(cmd, nil, barrier, timeouts.DeadlineTestProfile()) }()
-		select {
-		case <-barrier.reached:
-		case outcome := <-outcomes:
-			t.Fatalf("the invocation finished without reaching the commit boundary: %+v", outcome)
-		}
-		outcome := <-outcomes
-		close(barrier.release)
+		// The same shape as the abandonment proof beside this one: the
+		// invocation is HELD at the commit boundary and the deadline is tripped
+		// there by the test, so the abandonment is driven by conditions and
+		// never by a clock or a sleep.
+		outcome := abandonAfterTheCommit(t, cmd)
 
 		require.Contains(t, outcome.Stderr, "durable state record-unknown",
 			"this subtest must reach the same stage as the one above; the two differ only in CAUSE")

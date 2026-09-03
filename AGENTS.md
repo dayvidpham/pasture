@@ -624,24 +624,35 @@ and keep exactly one serial test for the real-I/O wiring.
 injected parameter buys parallelism, and it also creates a second supplier of a
 value that used to be fixed. When the only other supplier is a test, nothing
 fails if production later supplies the parameter DIFFERENTLY, so the seam has to
-say what production passes. The lifecycle hook command has two such seams and
-one assertion covers both. `handlers.CommitBarrier` names the boundary between
-"the lifecycle receipt is durably committed" and "the host is told to continue";
-production passes `handlers.PassThroughCommitBarrier{}`, which does nothing, and
-one test passes a barrier that HOLDS the invocation at that boundary until the
-test releases it, which makes the interleaving deterministic without a clock.
-The deadline tier is the second: production passes `timeouts.ProductionProfile()`,
-chosen against the smallest host budget, while that same test passes
-`timeouts.DeadlineTestProfile()` so the expiry lands inside the held window. Neither is visible in any output, so a wrong wiring
-produces no value a table can read — a barrier that ran work between the commit
-and the continuation, or a tier that moved the deadline the host-budget claim
-rests on, would keep every existing test green. The pin is therefore structural:
+say what production passes. The lifecycle hook command has three such seams and
+one assertion covers all of them. `handlers.CommitBarrier` names the boundary
+between "the lifecycle receipt is durably committed" and "the host is told to
+continue"; production passes `handlers.PassThroughCommitBarrier{}`, which does
+nothing, and the abandonment proof passes a barrier that HOLDS the invocation at
+that boundary until the test releases it, which makes the interleaving
+deterministic without a clock. The deadline tier is the second: production
+passes `timeouts.ProductionProfile()`, chosen against the smallest host budget;
+a test may pass a shorter one to observe the deadline path under a value it
+chooses. The deadline itself is the third: production passes
+`context.WithTimeout`, so the clock starts with the work and expires at the
+tier, while the abandonment proof passes a deadline with NO clock in it and
+trips the signal itself once the barrier reports the commit. The tier is
+printed and never started, so no clock can order the expiry against the commit.
+An earlier shape of that proof let the tier's clock trip the signal; the clock
+then raced the store work BEFORE the boundary, and on a loaded CI runner the
+clock won and the proof failed without proving anything. None of the three
+seams is visible in any output, so a wrong wiring produces no value a table can
+read — a barrier that ran work between the commit and the continuation, a tier
+that moved the deadline the host-budget claim rests on, or a deadline that
+started no clock at all, would keep every existing test green. The pin is
+therefore structural:
 `TestTheProductionPathWiresThePassThroughBarrierAndTheProductionTier` parses
 every non-test source of `cmd/pasture`, finds each `lifecycleOutcome` call, and
-asserts the barrier and tier arguments verbatim, plus that there is exactly ONE
-such call, because every guarantee the command makes is stated over one
-host-facing path. Its scope is a glob and not a list of file names, so a source
-added later is covered the day it is written rather than escaping in silence.
+asserts the barrier, tier and deadline arguments verbatim, plus that there is
+exactly ONE such call, because every guarantee the command makes is stated over
+one host-facing path. Its scope is a glob and not a list of file names, so a
+source added later is covered the day it is written rather than escaping in
+silence.
 
 ### Quality gates (must pass before every commit)
 ```bash
