@@ -75,9 +75,10 @@ func countLinkEvidence(t *testing.T, dbPath string) int {
 // (three session edges + one tool-call edge), and an immediate second invocation
 // derives and commits NOTHING — the read-side materialize-then-no-op property.
 func TestLineageMaterializeThenSecondRunIsNoOp(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
@@ -127,9 +128,10 @@ func TestLineageMaterializeThenSecondRunIsNoOp(t *testing.T) {
 // A delivery produces the SAME native bytes and commits ZERO link effects
 // whether or not committed lineage links already exist in the store.
 func TestLineageDeliveryPathStaysByteEquivalent(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
@@ -169,6 +171,8 @@ func TestLineageDeliveryPathStaysByteEquivalent(t *testing.T) {
 // per-operation cap. The command refuses actionably and commits NO links
 // (read-back empty), rather than paginating (a deferred follow-up).
 func TestLineageOverCapRefusesAndCommitsNothing(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)

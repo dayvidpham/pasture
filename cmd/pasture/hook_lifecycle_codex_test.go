@@ -28,9 +28,9 @@ import (
 // derived and held by the activation support report; this drives a sample of it
 // through the built binary to show the admission decision reaches the host.
 func TestUnselectedCodexEventIsNotAdmittedByBuiltCLI(t *testing.T) {
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	t.Parallel()
+
+	binary := lifecycleBinary(t)
 
 	for _, event := range []string{"Stop", "PostToolUse"} {
 		event := event
@@ -77,6 +77,9 @@ func (w *erroringWriter) Write(p []byte) (int, error) {
 // reach the write path through the built CLI; we use Claude to keep the test
 // harness-neutral and focused on the write-failure branch).
 // lost when the canonical-only writeLifecycleResponse helper was removed.
+//
+// SERIAL: this test executes the shared rootCmd in-process and sets its
+// streams, so it must not use t.Parallel.
 func TestLifecycleCommandReportsStdoutWriteFailureAfterDurableCommit(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)

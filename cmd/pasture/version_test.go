@@ -51,6 +51,8 @@ func runVersion(t *testing.T, binary string) string {
 // triple, so a consumer scraping the line for a release tag finds nothing and
 // cannot freeze a fiction into a compatibility floor.
 func TestUnstampedBuildReportsDevelMarker(t *testing.T) {
+	t.Parallel()
+
 	binary := filepath.Join(t.TempDir(), "pasture")
 	buildVersionBinary(t, binary, "")
 
@@ -62,6 +64,8 @@ func TestUnstampedBuildReportsDevelMarker(t *testing.T) {
 // the binary reports, in the `pasture version vX.Y.Z` shape downstream tooling
 // parses.
 func TestStampedBuildReportsTheStampedVersion(t *testing.T) {
+	t.Parallel()
+
 	binary := filepath.Join(t.TempDir(), "pasture")
 	buildVersionBinary(t, binary, "-X main.version=v1.2.3")
 
@@ -71,6 +75,9 @@ func TestStampedBuildReportsTheStampedVersion(t *testing.T) {
 // TestRootCommandUsesTheStampableVariable pins the in-process wiring: cobra
 // reports whatever the package-level variable currently holds, so stamping the
 // variable is sufficient to change the reported version.
+//
+// SERIAL: this test reads the shared rootCmd, which other serial tests execute,
+// so it must not use t.Parallel.
 func TestRootCommandUsesTheStampableVariable(t *testing.T) {
 	require.Equal(t, version, rootCmd.Version,
 		"rootCmd.Version must read the stampable package variable")

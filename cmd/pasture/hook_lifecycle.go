@@ -84,10 +84,33 @@ var hookLifecycleCmd = &cobra.Command{
 	Args:  cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		emitLifecycleOutcome(cmd, lifecycleOutcome(cmd, args,
-			handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile()))
+			handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), context.WithTimeout))
 		return nil
 	},
 }
+
+// lifecycleDeadline derives the context ONE invocation's work runs under from
+// the invocation's own context and the hook-invocation tier. Its Done channel
+// is the deadline signal lifecycleOutcome selects on.
+//
+// It is the signature of context.WithTimeout, and PRODUCTION PASSES
+// context.WithTimeout ITSELF: the production deadline is a timer that starts
+// when the work starts and expires at the tier, unchanged. That wiring is
+// pinned by name beside the barrier and the tier.
+//
+// It is a parameter for the same reason those two are. The proof that an expiry
+// landing AFTER the commit is reported truthfully must hold the invocation at
+// the commit boundary and then trip the signal. While a clock tripped it, the
+// same clock raced the store work BEFORE the boundary, and on a loaded runner
+// the clock won: the expiry landed early, the invocation abandoned nothing that
+// was committed, and the proof failed without proving anything. With the
+// signal in the test's hands the tier is printed and never started, so no clock
+// can order the events. The value a test passes never reaches a host.
+//
+// A nil deadline is NOT normalized, unlike the zero profile below. A Profile
+// value has a silent zero that a caller reaches by omission; a nil function is
+// a caller that wrote nil, and the one production caller is pinned by name.
+type lifecycleDeadline func(parent context.Context, tier time.Duration) (context.Context, context.CancelFunc)
 
 // lifecycleOutcome runs one hook invocation and returns the ONE outcome the
 // host receives. Every path out of the command, including a recovered panic,
@@ -122,6 +145,13 @@ var hookLifecycleCmd = &cobra.Command{
 // a host. That distinction is what makes the seam safe, and it is pinned by
 // an assertion that the command path passes the production tier.
 //
+// The deadline derives the work's context from the tier. Production passes
+// context.WithTimeout, which is what the type is the signature of; a proof of
+// the expiry that lands after the commit passes a deadline it trips itself, so
+// the interleaving is ordered by conditions and never by a clock. The reason
+// it is a parameter, and the reason a nil one is not normalized, are recorded
+// on the type.
+//
 // A supplied profile is NOT re-validated here, and it does not need to be:
 // timeouts.New is the only constructor, its fields are unexported, and it
 // refuses an out-of-order hook-invocation tier. So the only profile a caller
@@ -138,6 +168,7 @@ func lifecycleOutcome(
 	args []string,
 	barrier handlers.CommitBarrier,
 	budget timeouts.Profile,
+	deadline lifecycleDeadline,
 ) (outcome hostexit.Outcome) {
 	// The recover is installed FIRST, before the coordinates and the
 	// environment are read, so a panic in either is a fault and not a process
@@ -241,10 +272,12 @@ func lifecycleOutcome(
 	// CANNOT know is whether the receipt committed first, so the fault is
 	// reported with an unknown durable state rather than a false claim.
 	//
-	// The deadline arrives as a parameter, so an in-process proof can observe
-	// this PATH in about a second instead of five. The reason there is no
-	// environment variable and no flag for it is recorded where the parameter
-	// is declared, above; it is a refusal, not a gap.
+	// The tier and the deadline both arrive as parameters: the tier so an
+	// in-process proof can observe this PATH under a value it chooses, and the
+	// deadline so a proof can trip the signal at a chosen point instead of
+	// racing a clock against the work. The reason there is no environment
+	// variable and no flag for either is recorded where the parameters are
+	// declared, above; it is a refusal, not a gap.
 	//
 	// The zero profile reads as the production one, so a caller that supplies
 	// nothing still runs under the tier the host budget requires. It is
@@ -253,8 +286,8 @@ func lifecycleOutcome(
 	if budget.IsZero() {
 		budget = timeouts.ProductionProfile()
 	}
-	deadline := budget.HookInvocation()
-	ctx, cancel := context.WithTimeout(cmd.Context(), deadline)
+	tier := budget.HookInvocation()
+	ctx, cancel := deadline(cmd.Context(), tier)
 	defer cancel()
 
 	// HookLifecycleNative is the single dispatch surface: it commits the
@@ -294,7 +327,7 @@ func lifecycleOutcome(
 				"the hook stopped waiting at its %s hook-invocation deadline and abandoned the work for event %q of harness %q "+
 					"at host version %q, so the host is not left waiting; the usual reason is another writer holding the pasture "+
 					"store, so find that writer or retry once it releases the store: %w",
-				deadline,
+				tier,
 				coords.Event, coords.Harness, coords.HostVersion, ctx.Err()))
 	}
 

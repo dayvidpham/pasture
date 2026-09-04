@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/dayvidpham/provenance"
@@ -32,14 +33,16 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/testutil"
 )
 
 func TestEnabledOpenCodeHandlersToDurableReadBack(t *testing.T) {
+	t.Parallel()
+
 	bun, err := exec.LookPath("bun")
 	require.NoError(t, err, "Bun is required for the generated OpenCode production proof; enter the flake dev shell")
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
@@ -240,6 +243,8 @@ var claudeProductionFixtures = []claudeProductionFixture{
 }
 
 func TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence(t *testing.T) {
+	t.Parallel()
+
 	manifest, err := activation.ClaudeCode2_1_210()
 	require.NoError(t, err)
 	enabled := make([]model.ContractEventKind, 0, len(expectedEnabledClaudeEvents))
@@ -251,8 +256,7 @@ func TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence(t *testing.T) {
 	require.Equal(t, expectedEnabledClaudeEvents, enabled, "literal production rows must equal the complete static enabled set")
 
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 
 	initializeLifecycleTestDatabase(t, dbPath)
@@ -373,9 +377,9 @@ func TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence(t *testing.T) {
 }
 
 func TestEnabledClaudeAuthenticFixturesToDurableEvidence(t *testing.T) {
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	t.Parallel()
+
+	binary := lifecycleBinary(t)
 
 	for _, testCase := range claudeProductionFixtures {
 		testCase := testCase
@@ -475,9 +479,10 @@ func TestEnabledClaudeAuthenticFixturesToDurableEvidence(t *testing.T) {
 }
 
 func TestClaudePayloadEventCannotOverrideRegisteredCLIEvent(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 	authentic := readProductionClaudeFixture(t, "session_start_2_1_222.json", "SessionStart")
@@ -531,9 +536,9 @@ func TestClaudePayloadEventCannotOverrideRegisteredCLIEvent(t *testing.T) {
 }
 
 func TestWithheldClaudeElicitationIsNotAdmittedByBuiltCLI(t *testing.T) {
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	t.Parallel()
+
+	binary := lifecycleBinary(t)
 	cases := []struct{ event, fixture string }{
 		{event: "Elicitation", fixture: "elicitation_2_1_222.json"},
 		{event: "ElicitationResult", fixture: "elicitation_result_2_1_222.json"},
@@ -559,9 +564,9 @@ func TestWithheldClaudeElicitationIsNotAdmittedByBuiltCLI(t *testing.T) {
 }
 
 func TestMalformedClaudeEventToOccurrenceOnly(t *testing.T) {
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	t.Parallel()
+
+	binary := lifecycleBinary(t)
 	raw := []byte(`{"session_id":`)
 	for _, testCase := range []struct {
 		name  string
@@ -620,9 +625,10 @@ func TestMalformedClaudeEventToOccurrenceOnly(t *testing.T) {
 }
 
 func TestLifecycleLeafFaultsExitZeroAndReport(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	fixture, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_210.json"))
 	require.NoError(t, err)
 	base := []string{databaseFlagName.Argument(), filepath.Join(dir, tasks.DefaultDBFilename.String()), "hook", "lifecycle", "--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.220"}
@@ -658,6 +664,8 @@ func TestLifecycleLeafFaultsExitZeroAndReport(t *testing.T) {
 }
 
 func TestInvalidLifecycleInvocationCreatesNoDatabase(t *testing.T) {
+	t.Parallel()
+
 	dbPath := filepath.Join(t.TempDir(), "missing", tasks.DefaultDBFilename.String())
 	err := handlers.HookLifecycle(context.Background(), handlers.HookLifecycleInput{DBPath: dbPath, Harness: "claude-code", Event: "Unknown", HostVersion: "2.1.220", Input: bytes.NewBufferString("{}"), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{}})
 	require.Error(t, err)
@@ -666,9 +674,10 @@ func TestInvalidLifecycleInvocationCreatesNoDatabase(t *testing.T) {
 }
 
 func TestWithheldOpenCodeEventIsNotAdmittedByBuiltCLI(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
@@ -718,9 +727,10 @@ func TestWithheldOpenCodeEventIsNotAdmittedByBuiltCLI(t *testing.T) {
 }
 
 func TestLifecycleListRejectsCursorBeforeDatabaseOpen(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, "missing", tasks.DefaultDBFilename.String())
 	command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "list", "--cursor", "not-base64!")
 	var stderr bytes.Buffer
@@ -734,9 +744,10 @@ func TestLifecycleListRejectsCursorBeforeDatabaseOpen(t *testing.T) {
 }
 
 func TestLifecycleListStandardExitCategories(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	connectionPath := filepath.Join(dir, "database-directory")
 	storagePath := filepath.Join(dir, "future.db")
 	cases := []struct {
@@ -764,9 +775,10 @@ func TestLifecycleListStandardExitCategories(t *testing.T) {
 }
 
 func TestLifecycleProjectionRebuildOccurrenceAndBindingsAreAtomic(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_210.json"))
@@ -862,15 +874,132 @@ type interpretedMetamodelPayload struct {
 	Content string `json:"content"`
 }
 
-func buildLifecycleBinary(t *testing.T, binary string) {
+// childInstrumentation says whether a shared child build carries the race
+// detector. It is an enum and not a bool so a call site reads as what it asks
+// for.
+type childInstrumentation int
+
+const (
+	// plainChild is an ordinary `go build`: the binary an operator installs.
+	plainChild childInstrumentation = iota
+	// raceChild is `go build -race`, for the one proof that needs a
+	// race-instrumented separate process.
+	raceChild
+)
+
+// buildArguments returns the `go` arguments that build this command into
+// output with this instrumentation.
+func (instrumentation childInstrumentation) buildArguments(output string) []string {
+	arguments := []string{"build"}
+	if instrumentation == raceChild {
+		arguments = append(arguments, "-race")
+	}
+	return append(arguments, "-o", output, ".")
+}
+
+// sharedChildBinary is one build of this command that every test in the
+// process shares. The build runs once, on first request, and the directory
+// that holds it is registered with testutil so TestMain removes it after the
+// last test has run; no single test may own it, because it outlives them all.
+type sharedChildBinary struct {
+	instrumentation childInstrumentation
+	name            string
+
+	once sync.Once
+	path string
+	err  error
+}
+
+// resolve returns the path of the built binary, building it on the first call.
+// A failed build fails every caller with the same diagnostic, not just the
+// first one.
+func (binary *sharedChildBinary) resolve(t *testing.T) string {
 	t.Helper()
-	build := exec.Command("go", "build", "-race", "-o", binary, ".")
+	binary.once.Do(binary.build)
+	require.NoError(t, binary.err)
+	return binary.path
+}
+
+func (binary *sharedChildBinary) build() {
+	dir, err := os.MkdirTemp("", "pasture-"+binary.name+"-*")
+	if err != nil {
+		binary.err = fmt.Errorf("could not create a directory for the shared %s binary before the first "+
+			"built-binary test ran (cmd/pasture, sharedChildBinary.build): %w; every test that runs the "+
+			"built CLI will fail until the temporary directory can be created", binary.name, err)
+		return
+	}
+	testutil.RegisterFixtureDir(dir)
+	binary.path = filepath.Join(dir, "pasture")
+
+	build := exec.Command("go", binary.instrumentation.buildArguments(binary.path)...)
 	build.Dir = "."
-	// The repository's standard test target keeps the outer suite CGO-free.
-	// This child build intentionally uses the race detector, which requires CGO.
-	build.Env = append(build.Environ(), "CGO_ENABLED=1")
+	if binary.instrumentation == raceChild {
+		// The repository's standard test target keeps the outer suite CGO-free.
+		// The race detector requires CGO, so this build turns it on for itself.
+		build.Env = append(build.Environ(), "CGO_ENABLED=1")
+	}
 	output, err := build.CombinedOutput()
-	require.NoError(t, err, string(output))
+	if err != nil {
+		binary.err = fmt.Errorf("could not build the shared %s binary with `go %s` before the first "+
+			"built-binary test ran (cmd/pasture, sharedChildBinary.build): %w; every test that runs the "+
+			"built CLI will fail until the command compiles again. Build output:\n%s",
+			binary.name, strings.Join(binary.instrumentation.buildArguments(binary.path), " "), err, output)
+	}
+}
+
+var (
+	plainLifecycleChild = &sharedChildBinary{instrumentation: plainChild, name: "lifecycle-child"}
+	raceLifecycleChild  = &sharedChildBinary{instrumentation: raceChild, name: "lifecycle-race-child"}
+)
+
+// lifecycleBinary returns the ONE plain build of this command that every
+// built-binary proof in this package runs. The first caller builds it; every
+// later caller receives the same path. Each test keeps its own store in its
+// own t.TempDir, so the binary is the only thing the tests share, and no test
+// writes to or deletes the path it receives.
+//
+// WHY ONE BUILD. Every call site used to build its own copy into its TempDir,
+// 51 builds per run of the package, for a binary that is the same bytes each
+// time. One build per test process is the same proof at a fraction of the
+// cost.
+//
+// WHY NOT -race. The copies were built with the race detector, and one hook
+// invocation of a race-instrumented child costs 1.1-1.3 s where the plain
+// child does the same store open, bootstrap and journal write in 0.01-0.06 s.
+// Every CONCURRENT path a child runs (the hook's work goroutine, its deadline
+// select and the fault writer, all inside lifecycleOutcome) also runs
+// IN-PROCESS in this package under the outer `go test -race`: the fault, panic
+// and abandonment proofs drive lifecycleOutcome and the handler entry points
+// directly, so the race detector already reads those paths once per run. Two
+// subcommands reach the child only: `hook lifecycle raw` and `hook lifecycle
+// manifest`. Both RunE bodies are sequential and neither handler starts a
+// goroutine, so the race detector had nothing to observe on either of them.
+// The manifest handler is also exercised under -race in internal/handlers; the
+// raw handler is exercised in this module only through the plain child in this
+// package, and a plain child loses nothing on a sequential path. Instrumenting
+// the child as well duplicated that coverage at 20x per invocation, across
+// hundreds of invocations per run, and it was the largest part of the
+// package's wall time. The one proof that needs a race-instrumented SEPARATE PROCESS, because
+// a second opener contends for the real SQLite lock while the hook waits on
+// its deadline, runs raceLifecycleBinary instead.
+//
+// The build needs no cgo: the SQLite driver is pure Go, and the smoke binary
+// that TestMain builds for the command tests is built the same way.
+func lifecycleBinary(t *testing.T) string {
+	t.Helper()
+	return plainLifecycleChild.resolve(t)
+}
+
+// raceLifecycleBinary returns the ONE race-instrumented build of this command,
+// built on first request and shared for the rest of the process. It exists for
+// the held-lock deadline proof alone: that proof measures a live process that
+// contends with a second opener for the real SQLite write lock, and the race
+// detector reading that contention in a separate process is what no in-process
+// proof can give. Every other built-binary proof runs lifecycleBinary; see its
+// doc for why a race-instrumented child there bought nothing at 20x the cost.
+func raceLifecycleBinary(t *testing.T) string {
+	t.Helper()
+	return raceLifecycleChild.resolve(t)
 }
 
 func initializeLifecycleTestDatabase(t *testing.T, dbPath string) {
@@ -1154,6 +1283,8 @@ var codexProductionFixtures = []codexProductionFixture{
 // evidence is provider-correct on bounded public read-back. It mirrors
 // TestEnabledOpenCodeHandlersToDurableReadBack for the Codex provider.
 func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
+	t.Parallel()
+
 	activations, err := activation.Codex0_146_0()
 	require.NoError(t, err)
 	for _, tc := range codexProductionFixtures {
@@ -1218,6 +1349,8 @@ func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
 // agree while provider-specific identity, contract, event-name, and native
 // continuation facts stay distinct. It never asserts whole-payload identity.
 func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
+	t.Parallel()
+
 	// --- Codex PreToolUse gate: live production path, injected committed catalog.
 	codexActivations, err := activation.Codex0_146_0()
 	require.NoError(t, err)

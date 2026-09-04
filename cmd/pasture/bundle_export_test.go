@@ -59,6 +59,8 @@ func runBundleExportVerb(t *testing.T, source export.BundleSource, args ...strin
 }
 
 func TestBundleExport_WritesAssetsAndComponentSet(t *testing.T) {
+	t.Parallel()
+
 	outDir := filepath.Join(t.TempDir(), "release")
 	output, err := runBundleExportVerb(t, bundleExportTestSource(t), "--version", "1.4.0", "--out", outDir)
 	if err != nil {
@@ -82,6 +84,8 @@ func TestBundleExport_WritesAssetsAndComponentSet(t *testing.T) {
 }
 
 func TestBundleExport_JSONReportMatchesWrittenBytes(t *testing.T) {
+	t.Parallel()
+
 	outDir := filepath.Join(t.TempDir(), "release")
 	output, err := runBundleExportVerb(t, bundleExportTestSource(t), "--version", "1.4.0", "--out", outDir, "--json")
 	if err != nil {
@@ -112,6 +116,8 @@ func TestBundleExport_JSONReportMatchesWrittenBytes(t *testing.T) {
 }
 
 func TestBundleExport_RejectsMissingAndInvalidFlags(t *testing.T) {
+	t.Parallel()
+
 	source := bundleExportTestSource(t)
 	outDir := filepath.Join(t.TempDir(), "release")
 	cases := []struct {
@@ -142,6 +148,9 @@ func TestBundleExport_RejectsMissingAndInvalidFlags(t *testing.T) {
 
 // The verb lives under the top-level bundle command, and nowhere else: the
 // installer family must not carry a release-production surface.
+//
+// SERIAL: this test reads the shared bundleCmd, installCmd and rootCmd trees,
+// which other serial tests execute, so it must not use t.Parallel.
 func TestBundleExport_IsWiredUnderBundle(t *testing.T) {
 	var found *cobra.Command
 	for _, sub := range bundleCmd.Commands() {

@@ -31,10 +31,31 @@ func renderHelp(t *testing.T, cmdPath ...string) string {
 	t.Helper()
 	var out bytes.Buffer
 	cmd := rootCmd
+	rendered, _, err := cmd.Find(cmdPath)
+	if err != nil {
+		t.Fatalf("pasture %s: no such command in the production tree: %v", strings.Join(cmdPath, " "), err)
+	}
 	cmd.SetArgs(append(append([]string{}, cmdPath...), "--help"))
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
+	previousSilence := cmd.SilenceErrors
 	cmd.SilenceErrors = true
+	t.Cleanup(func() {
+		// Restore the production tree as it was: the root's arguments, streams
+		// and silence setting, and the help flag cobra parsed onto the rendered
+		// command. cobra keeps a parsed flag's value between Execute calls in
+		// one process, so a --help left true turns the next execution of the
+		// same command into a help print. The second run of the package in one
+		// process (-count=2 and above) showed it.
+		cmd.SetArgs(nil)
+		cmd.SetOut(nil)
+		cmd.SetErr(nil)
+		cmd.SilenceErrors = previousSilence
+		if help := rendered.Flags().Lookup("help"); help != nil {
+			_ = help.Value.Set("false")
+			help.Changed = false
+		}
+	})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("pasture %s --help: %v", strings.Join(cmdPath, " "), err)
 	}
@@ -60,6 +81,8 @@ func newRawCommandRenderCommand() *cobra.Command {
 // path."). The banner is the visible authority §10 mark: raw is for imports
 // and migration, never the default path.
 func TestRawBannerExactWording(t *testing.T) {
+	t.Parallel()
+
 	const want = "raw ingestion — for imports and migration; not the default path."
 	if hookLifecycleRawBanner != want {
 		t.Errorf("hookLifecycleRawBanner = %q, want %q", hookLifecycleRawBanner, want)
@@ -81,6 +104,8 @@ func TestRawBannerExactWording(t *testing.T) {
 // non-recommended marking is visible in the rendered --help output, and that
 // the raw path is not presented as the default.
 func TestRawHelpRendersBanner(t *testing.T) {
+	t.Parallel()
+
 	var out bytes.Buffer
 	cmd := newRawCommandRenderCommand()
 	cmd.SetOut(&out)
@@ -106,8 +131,9 @@ func TestRawHelpRendersBanner(t *testing.T) {
 // only the Cobra constants: the command must be registered, expose --dry-run,
 // lead with the non-default banner, and state that preview performs no write.
 func TestRawHelpRendersBuiltCLI(t *testing.T) {
-	binary := filepath.Join(t.TempDir(), "pasture")
-	buildLifecycleBinary(t, binary)
+	t.Parallel()
+
+	binary := lifecycleBinary(t)
 	command := exec.Command(binary, "hook", "lifecycle", "raw", "--help")
 	rendered, err := command.CombinedOutput()
 	if err != nil {
@@ -132,6 +158,8 @@ func TestRawHelpRendersBuiltCLI(t *testing.T) {
 // this command ships.
 // WHAT IT DOES NOT READ: a help surface with no golden. That every surface
 // HAS one is a different claim from this one, and it is not made here.
+// SERIAL: renderHelp executes the shared rootCmd in-process, so this test must
+// not use t.Parallel.
 func TestNativeHelpGoldenBytesUnchanged(t *testing.T) {
 	goldenDir := filepath.Join("testdata", "help-golden")
 	cases := []struct {
@@ -182,6 +210,8 @@ func TestNativeHelpGoldenBytesUnchanged(t *testing.T) {
 // generated artifact BECAUSE it is the non-recommended escape hatch: it is
 // only discoverable through the CLI's own --help marking.
 func TestGeneratedLifecycleDocsAbsenceOfRaw(t *testing.T) {
+	t.Parallel()
+
 	root := repoRootFromTest(t)
 	generated := []string{
 		filepath.Join(root, "hooks", "hooks.json"),
@@ -207,6 +237,8 @@ func TestGeneratedLifecycleDocsAbsenceOfRaw(t *testing.T) {
 // section) must mark raw exactly — escape hatch, never the default, no second
 // semantic model — in one precise paragraph.
 func TestProtocolDocsNonRecommendedMarking(t *testing.T) {
+	t.Parallel()
+
 	root := repoRootFromTest(t)
 	data, err := os.ReadFile(filepath.Join(root, "README.md"))
 	if err != nil {

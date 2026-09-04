@@ -37,6 +37,8 @@ func (emptyManifestReader) ReadPluginManifest(string) ([]byte, error) {
 }
 
 func TestComposeInstallService_UsesInjectedGraphThroughCobra(t *testing.T) {
+	t.Parallel()
+
 	home := filepath.Clean(t.TempDir())
 	statePath := filepath.Join(home, "state", "installations.yaml")
 	if err := os.MkdirAll(filepath.Dir(statePath), 0o700); err != nil {
@@ -127,6 +129,8 @@ func (failingRegistry) Load(context.Context) (registry.Store, error) {
 func (failingRegistry) Save(context.Context, registry.Store) error { return nil }
 
 func TestApplyCell_InjectedFailureReturnsActionableNonzeroStatus(t *testing.T) {
+	t.Parallel()
+
 	serviceUnderTest, err := service.New(service.Config{Registry: failingRegistry{}})
 	if err != nil {
 		t.Fatal(err)
@@ -157,6 +161,8 @@ func TestApplyCell_InjectedFailureReturnsActionableNonzeroStatus(t *testing.T) {
 // alone made such a row read as "ensure completed" for a cell that was neither
 // attempted nor installed; the observation column makes the row truthful.
 func TestWriteApplyText_RowsCarryTheirLiveObservation(t *testing.T) {
+	t.Parallel()
+
 	hooks, err := cell.New(ir.HarnessClaudeCode, cell.HooksAxis())
 	if err != nil {
 		t.Fatal(err)
@@ -192,6 +198,8 @@ func TestWriteApplyText_RowsCarryTheirLiveObservation(t *testing.T) {
 // observation column never becomes trailing noise on a row without a
 // diagnostic.
 func TestApplyTextRow_UnobservedRowLeavesNoTrailingWhitespace(t *testing.T) {
+	t.Parallel()
+
 	skills, err := cell.New(ir.HarnessOpenCode, cell.SkillsAxis())
 	if err != nil {
 		t.Fatal(err)
@@ -209,6 +217,8 @@ func TestApplyTextRow_UnobservedRowLeavesNoTrailingWhitespace(t *testing.T) {
 // straight into the observation column instead of leaving the pinned
 // single-space separator.
 func TestApplyTextRow_WidestStatusKeepsColumnsAligned(t *testing.T) {
+	t.Parallel()
+
 	skills, err := cell.New(ir.HarnessClaudeCode, cell.SkillsAxis())
 	if err != nil {
 		t.Fatal(err)

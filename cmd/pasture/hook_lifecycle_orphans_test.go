@@ -76,9 +76,10 @@ func leaveOrphanBlobs(t *testing.T, dbPath string, count int) {
 // package green, which is why the note is asserted here on the binary's own
 // standard output and not only on the constant and the JSON.
 func TestOrphanCountIsZeroOnACleanStoreAndTrueAfterAbandonedInvocations(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "orphan-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
@@ -131,6 +132,8 @@ func TestOrphanCountIsZeroOnACleanStoreAndTrueAfterAbandonedInvocations(t *testi
 // question, the operator surface and the proof would describe different stores
 // and the operator's would be the one nobody checked.
 func TestOrphanCountAgreesWithTheEnumerationTheInvariantTestUses(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
@@ -221,9 +224,10 @@ func TestOrphanCountWordingSaysWhatItIsThatItIsExpectedAndWhatALargeNumberMeans(
 // internal/handlers.HookLifecycleOrphans, or restore the older wording that
 // listed the context and the output writer, and this test turns RED.
 func TestARefusedFormatNamesTheValueGivenAndTheValuesAccepted(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "orphan-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 

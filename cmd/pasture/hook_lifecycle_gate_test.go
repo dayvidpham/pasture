@@ -27,9 +27,9 @@ import (
 // only if a future change moves the store open ahead of an invalid-invocation
 // refusal.
 func TestInvalidInvocationCreatesNoDatabaseFile(t *testing.T) {
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	t.Parallel()
+
+	binary := lifecycleBinary(t)
 
 	dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
 	command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "not-a-harness", "--event", "SessionStart", "--host-version", "1.0.0")

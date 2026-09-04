@@ -269,6 +269,8 @@ func runCLIWithHome(t *testing.T, home string, args ...string) runOutcome {
 }
 
 func TestCLI_InstallHelpAndStrictDesiredValidation(t *testing.T) {
+	t.Parallel()
+
 	// The human-facing help now documents the additive "<harness> <extension>..."
 	// grammar. The scriptable apply-selection surface is hidden but still
 	// registered for Home Manager; its strict desired-document validation must
@@ -288,6 +290,8 @@ func TestCLI_InstallHelpAndStrictDesiredValidation(t *testing.T) {
 }
 
 func TestCLI_InstallScriptableApplyLeavesPreferencesUnchanged(t *testing.T) {
+	t.Parallel()
+
 	home := t.TempDir()
 	configDir := filepath.Join(home, ".config", "pasture")
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
@@ -320,6 +324,8 @@ func TestCLI_InstallScriptableApplyLeavesPreferencesUnchanged(t *testing.T) {
 }
 
 func TestCLI_InstallApplySelectionLeavesSeededPreferencesUnchanged(t *testing.T) {
+	t.Parallel()
+
 	home := t.TempDir()
 	configDir := filepath.Join(home, ".config", "pasture")
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
@@ -364,6 +370,8 @@ cells:
 }
 
 func TestCLI_InstallApplyCellTextOutputIsExact(t *testing.T) {
+	t.Parallel()
+
 	out := runCLIWithHome(t, t.TempDir(), "install", "apply-cell", "--harness", "opencode", "--extension", "skills", "--enabled=false")
 	if out.exitCode != 0 {
 		t.Fatalf("apply-cell exit %d: %s%s", out.exitCode, out.stdout, out.stderr)
@@ -377,6 +385,8 @@ func TestCLI_InstallApplyCellTextOutputIsExact(t *testing.T) {
 }
 
 func TestCLI_InstallApplySelectionUsesProductionCommandPath(t *testing.T) {
+	t.Parallel()
+
 	home := t.TempDir()
 	plan := runCLI(t, "install", "plan", "--config", filepath.Join(home, "missing-config.yaml"))
 	if plan.exitCode != 0 {
