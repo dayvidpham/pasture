@@ -51,6 +51,8 @@ func (readbackCLIClock) Now() time.Time { return time.Unix(100, 0).UTC() }
 // FAILS until L3: neither renderer discloses the origin yet (expected L2
 // failure — see the L2 leaf comment for the missing render contract).
 func TestRawOriginReadBackDisclosedInListTextAndJSON(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
@@ -80,6 +82,8 @@ func TestRawOriginReadBackDisclosedInListTextAndJSON(t *testing.T) {
 // BOTH formats to the pre-M4 read surface. The golden files were captured from
 // the SLICE-3 baseline binary (pre-origin rendering); they must match exactly.
 func TestNativeListReadBackGoldenBytesUnchanged(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())

@@ -61,6 +61,8 @@ func runVerb(t *testing.T, makeService installServiceFactory, newCmd func(instal
 }
 
 func TestParseHarnessAlias(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		in   string
 		want ir.HarnessID
@@ -85,6 +87,8 @@ func TestParseHarnessAlias(t *testing.T) {
 }
 
 func TestResolveInstallCells(t *testing.T) {
+	t.Parallel()
+
 	skills, _ := cell.New(ir.HarnessOpenCode, cell.SkillsAxis())
 	agents, _ := cell.New(ir.HarnessOpenCode, cell.AgentsAxis())
 
@@ -133,6 +137,8 @@ func TestResolveInstallCells(t *testing.T) {
 }
 
 func TestInstallVerb_BareAndLoneHarnessPrintHelp(t *testing.T) {
+	t.Parallel()
+
 	home := t.TempDir()
 	factory := func() (*service.Service, error) { return isolatedInstallService(t, home), nil }
 	for _, args := range [][]string{{}, {"opencode"}} {
@@ -147,6 +153,8 @@ func TestInstallVerb_BareAndLoneHarnessPrintHelp(t *testing.T) {
 }
 
 func TestInstallVerb_AdditiveMultiCellLeavesSiblingUntouched(t *testing.T) {
+	t.Parallel()
+
 	home := t.TempDir()
 	factory := func() (*service.Service, error) { return isolatedInstallService(t, home), nil }
 
@@ -187,6 +195,8 @@ func TestInstallVerb_AdditiveMultiCellLeavesSiblingUntouched(t *testing.T) {
 }
 
 func TestInstallVerb_AttemptAllReportsEveryCellOnFailure(t *testing.T) {
+	t.Parallel()
+
 	// A failing registry makes every ApplyCell fail; attempt-all must still
 	// report one failed row per named cell rather than stopping at the first.
 	svc, err := service.New(service.Config{Registry: failingRegistry{}})

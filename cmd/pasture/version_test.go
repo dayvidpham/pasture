@@ -51,6 +51,8 @@ func runVersion(t *testing.T, binary string) string {
 // triple, so a consumer scraping the line for a release tag finds nothing and
 // cannot freeze a fiction into a compatibility floor.
 func TestUnstampedBuildReportsDevelMarker(t *testing.T) {
+	t.Parallel()
+
 	binary := filepath.Join(t.TempDir(), "pasture")
 	buildVersionBinary(t, binary, "")
 
@@ -62,6 +64,8 @@ func TestUnstampedBuildReportsDevelMarker(t *testing.T) {
 // the binary reports, in the `pasture version vX.Y.Z` shape downstream tooling
 // parses.
 func TestStampedBuildReportsTheStampedVersion(t *testing.T) {
+	t.Parallel()
+
 	binary := filepath.Join(t.TempDir(), "pasture")
 	buildVersionBinary(t, binary, "-X main.version=v1.2.3")
 

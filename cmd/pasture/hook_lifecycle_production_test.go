@@ -37,6 +37,8 @@ import (
 )
 
 func TestEnabledOpenCodeHandlersToDurableReadBack(t *testing.T) {
+	t.Parallel()
+
 	bun, err := exec.LookPath("bun")
 	require.NoError(t, err, "Bun is required for the generated OpenCode production proof; enter the flake dev shell")
 	dir := t.TempDir()
@@ -241,6 +243,8 @@ var claudeProductionFixtures = []claudeProductionFixture{
 }
 
 func TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence(t *testing.T) {
+	t.Parallel()
+
 	manifest, err := activation.ClaudeCode2_1_210()
 	require.NoError(t, err)
 	enabled := make([]model.ContractEventKind, 0, len(expectedEnabledClaudeEvents))
@@ -373,6 +377,8 @@ func TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence(t *testing.T) {
 }
 
 func TestEnabledClaudeAuthenticFixturesToDurableEvidence(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 
 	for _, testCase := range claudeProductionFixtures {
@@ -473,6 +479,8 @@ func TestEnabledClaudeAuthenticFixturesToDurableEvidence(t *testing.T) {
 }
 
 func TestClaudePayloadEventCannotOverrideRegisteredCLIEvent(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
@@ -528,6 +536,8 @@ func TestClaudePayloadEventCannotOverrideRegisteredCLIEvent(t *testing.T) {
 }
 
 func TestWithheldClaudeElicitationIsNotAdmittedByBuiltCLI(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 	cases := []struct{ event, fixture string }{
 		{event: "Elicitation", fixture: "elicitation_2_1_222.json"},
@@ -554,6 +564,8 @@ func TestWithheldClaudeElicitationIsNotAdmittedByBuiltCLI(t *testing.T) {
 }
 
 func TestMalformedClaudeEventToOccurrenceOnly(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 	raw := []byte(`{"session_id":`)
 	for _, testCase := range []struct {
@@ -613,6 +625,8 @@ func TestMalformedClaudeEventToOccurrenceOnly(t *testing.T) {
 }
 
 func TestLifecycleLeafFaultsExitZeroAndReport(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	binary := lifecycleBinary(t)
 	fixture, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_210.json"))
@@ -650,6 +664,8 @@ func TestLifecycleLeafFaultsExitZeroAndReport(t *testing.T) {
 }
 
 func TestInvalidLifecycleInvocationCreatesNoDatabase(t *testing.T) {
+	t.Parallel()
+
 	dbPath := filepath.Join(t.TempDir(), "missing", tasks.DefaultDBFilename.String())
 	err := handlers.HookLifecycle(context.Background(), handlers.HookLifecycleInput{DBPath: dbPath, Harness: "claude-code", Event: "Unknown", HostVersion: "2.1.220", Input: bytes.NewBufferString("{}"), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{}})
 	require.Error(t, err)
@@ -658,6 +674,8 @@ func TestInvalidLifecycleInvocationCreatesNoDatabase(t *testing.T) {
 }
 
 func TestWithheldOpenCodeEventIsNotAdmittedByBuiltCLI(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
@@ -709,6 +727,8 @@ func TestWithheldOpenCodeEventIsNotAdmittedByBuiltCLI(t *testing.T) {
 }
 
 func TestLifecycleListRejectsCursorBeforeDatabaseOpen(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, "missing", tasks.DefaultDBFilename.String())
@@ -724,6 +744,8 @@ func TestLifecycleListRejectsCursorBeforeDatabaseOpen(t *testing.T) {
 }
 
 func TestLifecycleListStandardExitCategories(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	binary := lifecycleBinary(t)
 	connectionPath := filepath.Join(dir, "database-directory")
@@ -753,6 +775,8 @@ func TestLifecycleListStandardExitCategories(t *testing.T) {
 }
 
 func TestLifecycleProjectionRebuildOccurrenceAndBindingsAreAtomic(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
@@ -1252,6 +1276,8 @@ var codexProductionFixtures = []codexProductionFixture{
 // evidence is provider-correct on bounded public read-back. It mirrors
 // TestEnabledOpenCodeHandlersToDurableReadBack for the Codex provider.
 func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
+	t.Parallel()
+
 	activations, err := activation.Codex0_146_0()
 	require.NoError(t, err)
 	for _, tc := range codexProductionFixtures {
@@ -1316,6 +1342,8 @@ func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
 // agree while provider-specific identity, contract, event-name, and native
 // continuation facts stay distinct. It never asserts whole-payload identity.
 func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
+	t.Parallel()
+
 	// --- Codex PreToolUse gate: live production path, injected committed catalog.
 	codexActivations, err := activation.Codex0_146_0()
 	require.NoError(t, err)

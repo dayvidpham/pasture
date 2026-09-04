@@ -27,6 +27,8 @@ import (
 // only if a future change moves the store open ahead of an invalid-invocation
 // refusal.
 func TestInvalidInvocationCreatesNoDatabaseFile(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 
 	dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())

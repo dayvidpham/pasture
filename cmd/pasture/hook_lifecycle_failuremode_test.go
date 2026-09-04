@@ -149,6 +149,8 @@ func readFaultRecords(t *testing.T, dir string) []map[string]any {
 // blocking exit code and still exit 0. Keying this table on the declared mode
 // would read as a rule this build does not have.
 func TestLifecycleHookExitFollowsTheEffectiveFailureMode(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 
 	preToolUse := claudeFixture(t, "pre_tool_use_2_1_222.json")
@@ -469,6 +471,8 @@ func TestLifecycleFaultRecordIsBestEffort(t *testing.T) {
 // to ride in the child to read it. TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild
 // holds this arrangement.
 func TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	binary := raceLifecycleBinary(t)
 
@@ -1134,6 +1138,8 @@ func codexFixture(t *testing.T, name string) []byte {
 // evidence rule covers every row is held by the fault table over every
 // declared mode and policy, not by this pair.
 func TestTheFailClosedReasonFollowsTheDeclaredModeThroughTheBuiltBinary(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 
 	const (
@@ -1242,6 +1248,8 @@ func TestTheFailClosedReasonFollowsTheDeclaredModeThroughTheBuiltBinary(t *testi
 // MUTATION: remove the "effective failure mode" clause from faultDiagnostic, or
 // print fault.Mode again after the word "declared". This test turns RED.
 func TestTheDiagnosticSeparatesTheDeclaredModeFromTheEffectiveOne(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 
 	dir := t.TempDir()
@@ -1268,6 +1276,8 @@ func TestTheDiagnosticSeparatesTheDeclaredModeFromTheEffectiveOne(t *testing.T) 
 // MUTATION: remove the "declaredFailureMode" member from recordLifecycleFault,
 // or write failure.Mode into it. This test turns RED.
 func TestTheFaultRecordTellsADemotedGateFromADeclaredObservation(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 
 	demotedDir := t.TempDir()
@@ -3238,6 +3248,8 @@ func alreadyListed(values []string, want string) bool {
 // MUTATION, AT THE DEFECT SITE: quote flagDBPath instead of lifecycleStorePath()
 // in the no-directory arm of recordLifecycleFault. This test turns RED.
 func TestTheFaultRecordRefusalQuotesThePathTheEnvironmentResolvedTo(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 
 	// The working directory of the hook, so a bare store path resolves inside
@@ -3337,6 +3349,8 @@ func TestTheFaultRecordRefusalQuotesThePathTheEnvironmentResolvedTo(t *testing.T
 // place. This test turns RED on the stdout assertion alone, which is the case
 // no stream-change mutation can reach.
 func TestTheFaultRecordOpenFailureIsReportedOnStandardErrorOnly(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 
 	store := t.TempDir()
@@ -3423,6 +3437,8 @@ const devFull = "/dev/full"
 // MUTATION: put a bare "return" in either arm. That subtest turns RED on the
 // stderr assertion.
 func TestEveryDrivableFaultRecordLossIsMeasuredOnTheHostBytes(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 
 	t.Run("the directory for the record cannot be made", func(t *testing.T) {
@@ -3706,6 +3722,8 @@ var unbindableHostPayloads = []struct {
 // harnesses that have them, and on the diagnostic and the fault record for all
 // three.
 func TestAnUnbindableHostPayloadIsTreatedAsAnEventThatWasNotEvaluated(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 
 	for _, row := range unbindableHostPayloads {
@@ -3778,6 +3796,8 @@ func TestAnUnbindableHostPayloadIsTreatedAsAnEventThatWasNotEvaluated(t *testing
 // MUTATION: restore the nil-error return in the non-valid-capture arm. This
 // test turns RED on the fail-closed exit code, which returns to 0.
 func TestTheFailClosedOptInReachesAnUnbindableHostPayload(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 
 	const payload = `{"renamed_session":"s","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{}}`
@@ -3981,6 +4001,8 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 // behavioural pins; and it does not check that the route SET is complete, which
 // the route sweep reads from the package source.
 func TestTheRoutesThatNeverOpenAStoreSayTheDeliveryWasNotRecorded(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 
 	for _, row := range []struct {
@@ -4421,6 +4443,8 @@ func claudePayloadWithAddedMember(t *testing.T) []byte {
 // the parser does not report that — and every harness for every row. It
 // drove ONE harness until a harness-specific contradiction survived it.
 func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 
 	const identityAdvice = "Compare the payload with this build's"
@@ -4746,6 +4770,8 @@ func TestAdviceFollowsTheCauseAndNotTheClassifier(t *testing.T) {
 // MUTATION: narrow the reason back to the identity half. This test turns RED on
 // the added-member clause.
 func TestAHostThatAddsAFieldIsRefusedWithATrueSentence(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 
 	authentic := claudeFixture(t, "pre_tool_use_2_1_222.json")
@@ -4823,6 +4849,8 @@ func TestAHostThatAddsAFieldIsRefusedWithATrueSentence(t *testing.T) {
 // per route is held here; that no route is MISSING is held by the route sweep,
 // which reads every lifecycleFault call in the package.
 func TestEveryRefusalBeforeAWriteSaysNoRowExists(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 	payload := claudeFixture(t, "pre_tool_use_2_1_222.json")
 
@@ -5210,6 +5238,8 @@ func TestTheDurableRegionBeginsAtItsWrites(t *testing.T) {
 // Or make one harness's activation proofs fail: the derivation turns RED naming
 // that harness before any subtest runs.
 func TestAnEmptyStandardInputNamesTheRealCondition(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 
 	harnesses, derivationErr := handlers.LifecycleHarnessCoordinates()
@@ -5962,6 +5992,8 @@ func assertNoInternalReferenceInPackage(t *testing.T, where, text string) {
 // stays false (decode with DisallowUnknownFields in the Codex ingress). The
 // subtest for that harness turns RED.
 func TestTheSchemaAdviceFollowsTheParserThatRefused(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 
 	rows := map[string]struct {
@@ -6588,6 +6620,8 @@ func TestTheOutOfSetHandoverNamesEveryGuardItFound(t *testing.T) {
 // standard output" in AGENTS.md in place of the per-harness clauses; the Codex
 // and OpenCode subtests turn RED on the document pin.
 func TestTheReadOnlyStoreRouteWritesOnlyTheHostsContinueBytesOnEveryHarness(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 
 	rows := map[string]struct {
@@ -6728,6 +6762,8 @@ func TestTheReadOnlyStoreRouteWritesOnlyTheHostsContinueBytesOnEveryHarness(t *t
 // undeclared subtests turn RED on "declared failure mode none" or on
 // "undeclared".
 func TestAnUndeclaredCoordinateIsNotReportedAsADeclaration(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 
 	const undeclaredClause = "declared failure mode none (no row of this build's registration declares this event, so it is treated as observe-only)"

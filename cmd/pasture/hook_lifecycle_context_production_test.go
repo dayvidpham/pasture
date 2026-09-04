@@ -72,6 +72,8 @@ func disclosureRows(t *testing.T, dbPath string, kind provenance.EvidenceKind) [
 // digest equals the sha256 of the exact projection printed to stdout (read-back
 // matches).
 func TestContextDisclosureCommitsOneOpBeforePrint(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
@@ -128,6 +130,8 @@ func TestContextDisclosureCommitsOneOpBeforePrint(t *testing.T) {
 // changes nothing hosts see. A delivery produces the SAME native bytes and
 // commits ZERO disclosure facts, whether or not a disclosure has been recorded.
 func TestContextDisclosureHostResponseByteIdenticalProceed(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
@@ -158,6 +162,8 @@ func TestContextDisclosureHostResponseByteIdenticalProceed(t *testing.T) {
 // error (routed to stderr, never exit code 2) and the durable trail — the one
 // plan/attempt/result operation — remains intact.
 func TestContextDisclosurePostCommitStdoutFailureReportsStderrWithTrailIntact(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)

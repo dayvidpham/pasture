@@ -60,6 +60,8 @@ func newRawCommandRenderCommand() *cobra.Command {
 // path."). The banner is the visible authority §10 mark: raw is for imports
 // and migration, never the default path.
 func TestRawBannerExactWording(t *testing.T) {
+	t.Parallel()
+
 	const want = "raw ingestion — for imports and migration; not the default path."
 	if hookLifecycleRawBanner != want {
 		t.Errorf("hookLifecycleRawBanner = %q, want %q", hookLifecycleRawBanner, want)
@@ -81,6 +83,8 @@ func TestRawBannerExactWording(t *testing.T) {
 // non-recommended marking is visible in the rendered --help output, and that
 // the raw path is not presented as the default.
 func TestRawHelpRendersBanner(t *testing.T) {
+	t.Parallel()
+
 	var out bytes.Buffer
 	cmd := newRawCommandRenderCommand()
 	cmd.SetOut(&out)
@@ -106,6 +110,8 @@ func TestRawHelpRendersBanner(t *testing.T) {
 // only the Cobra constants: the command must be registered, expose --dry-run,
 // lead with the non-default banner, and state that preview performs no write.
 func TestRawHelpRendersBuiltCLI(t *testing.T) {
+	t.Parallel()
+
 	binary := lifecycleBinary(t)
 	command := exec.Command(binary, "hook", "lifecycle", "raw", "--help")
 	rendered, err := command.CombinedOutput()
@@ -181,6 +187,8 @@ func TestNativeHelpGoldenBytesUnchanged(t *testing.T) {
 // generated artifact BECAUSE it is the non-recommended escape hatch: it is
 // only discoverable through the CLI's own --help marking.
 func TestGeneratedLifecycleDocsAbsenceOfRaw(t *testing.T) {
+	t.Parallel()
+
 	root := repoRootFromTest(t)
 	generated := []string{
 		filepath.Join(root, "hooks", "hooks.json"),
@@ -206,6 +214,8 @@ func TestGeneratedLifecycleDocsAbsenceOfRaw(t *testing.T) {
 // section) must mark raw exactly — escape hatch, never the default, no second
 // semantic model — in one precise paragraph.
 func TestProtocolDocsNonRecommendedMarking(t *testing.T) {
+	t.Parallel()
+
 	root := repoRootFromTest(t)
 	data, err := os.ReadFile(filepath.Join(root, "README.md"))
 	if err != nil {
