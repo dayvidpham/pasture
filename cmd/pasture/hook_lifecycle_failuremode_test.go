@@ -697,12 +697,18 @@ func lifecycleTestCommand(t *testing.T, harness, event, version, dbPath string) 
 	for name, value := range map[string]string{"harness": harness, "event": event, "host-version": version} {
 		require.NoError(t, cmd.Flags().Set(name, value))
 	}
-	previousIn, previousOut, previousErr := cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr()
 	cmd.SetContext(context.Background())
 	t.Cleanup(func() {
-		cmd.SetIn(previousIn)
-		cmd.SetOut(previousOut)
-		cmd.SetErr(previousErr)
+		// Production never sets a stream on this subcommand; it inherits the
+		// root's. Restoring nil restores that inheritance. Restoring the
+		// RESOLVED streams (InOrStdin and friends) pinned os.Stdout onto the
+		// subcommand, so a later test that redirected the root's output read
+		// nothing back: help goldens came out empty and the stdout-failure proof
+		// saw no write on its failing writer. The second run of the package in
+		// one process (-count=2 and above) showed it.
+		cmd.SetIn(nil)
+		cmd.SetOut(nil)
+		cmd.SetErr(nil)
 		cmd.SetContext(context.Background())
 		for _, name := range []string{"harness", "event", "host-version"} {
 			_ = cmd.Flags().Set(name, "")

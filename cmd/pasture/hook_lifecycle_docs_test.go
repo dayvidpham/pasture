@@ -31,10 +31,31 @@ func renderHelp(t *testing.T, cmdPath ...string) string {
 	t.Helper()
 	var out bytes.Buffer
 	cmd := rootCmd
+	rendered, _, err := cmd.Find(cmdPath)
+	if err != nil {
+		t.Fatalf("pasture %s: no such command in the production tree: %v", strings.Join(cmdPath, " "), err)
+	}
 	cmd.SetArgs(append(append([]string{}, cmdPath...), "--help"))
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
+	previousSilence := cmd.SilenceErrors
 	cmd.SilenceErrors = true
+	t.Cleanup(func() {
+		// Restore the production tree as it was: the root's arguments, streams
+		// and silence setting, and the help flag cobra parsed onto the rendered
+		// command. cobra keeps a parsed flag's value between Execute calls in
+		// one process, so a --help left true turns the next execution of the
+		// same command into a help print. The second run of the package in one
+		// process (-count=2 and above) showed it.
+		cmd.SetArgs(nil)
+		cmd.SetOut(nil)
+		cmd.SetErr(nil)
+		cmd.SilenceErrors = previousSilence
+		if help := rendered.Flags().Lookup("help"); help != nil {
+			_ = help.Value.Set("false")
+			help.Changed = false
+		}
+	})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("pasture %s --help: %v", strings.Join(cmdPath, " "), err)
 	}
