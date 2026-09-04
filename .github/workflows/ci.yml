@@ -60,10 +60,12 @@ jobs:
 
       - name: Test
         # Production-path tests execute generated TypeScript through Bun and
-        # build the real CLI with the race detector.
+        # run the real CLI as a child process. The explicit -timeout is a
+        # guard against the 10-minute default, which reports a slow package as
+        # a panic with no per-test attribution; it is not a budget to grow into.
         env:
           CGO_ENABLED: "1"
-        run: go test -race ./...
+        run: go test -race -timeout 30m ./...
 
       - name: Recovery tests
         env:

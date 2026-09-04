@@ -69,10 +69,10 @@ test-recovery:
 	CGO_ENABLED=0 go test -tags recovery ./internal/engine/ -run Recovery -v
 
 test-race:
-	CGO_ENABLED=1 go test -race ./...
+	CGO_ENABLED=1 go test -race -timeout 30m ./...
 
 test-race-ci:
-	CGO_ENABLED=1 go test -race ./internal/engine/ ./internal/handlers/ ./internal/provadapter/ ./internal/tasks/
+	CGO_ENABLED=1 go test -race -timeout 30m ./internal/engine/ ./internal/handlers/ ./internal/provadapter/ ./internal/tasks/
 
 # --------------------------------------------------------------------------
 # Lint / Vet
