@@ -337,6 +337,9 @@ func TestLifecycleHookExitFollowsTheEffectiveFailureMode(t *testing.T) {
 // built binary because no host input can make the binary panic on purpose, and
 // adding an input that could would mean shipping a second code path whose only
 // user is this test.
+//
+// SERIAL: this test drives the shared hookLifecycleCmd and writes flagDBPath,
+// so it must not use t.Parallel.
 func TestLifecycleHookPanicBecomesAFault(t *testing.T) {
 	coords := lifecycleCoordinates{Harness: "claude-code", Event: "PreToolUse", HostVersion: "2.1.222"}
 	failure := lifecycleFailurePolicy(coords)
@@ -663,6 +666,213 @@ func TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild(t *testing.T) {
 			"instrumenting it is the 20x cost this arrangement exists to avoid")
 }
 
+// TestEveryTestThatReachesSharedProcessStateStaysSerial pins why the serial
+// tests of this package do not use t.Parallel, so the next maintainer cannot
+// add it without meeting this test. The tests that stay serial reach state the
+// whole process shares: they write a production package-level variable
+// (flagDBPath through lifecycleTestCommand), they drive a production cobra
+// command (rootCmd, hookLifecycleCmd, bundleCmd, installCmd: flags, streams and
+// context live on the command), or they change the process environment or
+// working directory (t.Setenv, t.Chdir). Two such tests running at once is a
+// wrong-store or wrong-stream failure that names no cause, and a data race
+// only when the two interleave under -race. The reason is derived from the
+// source, not written down as a list, so a new test that reaches the same state
+// is caught the same way.
+//
+// WHAT IT VISITS: every function declared in this package's test files, the
+// package-level variables its production files declare, and the calls from
+// test functions to test helpers, followed transitively.
+// WHAT IT DOES NOT READ: state a production function reaches inside its own
+// body. lifecycleFault takes hookLifecycleCmd as an argument at every test
+// site, so that reference is visible here; a helper that hid a global behind a
+// production call would not be. It also does not read goroutines or files.
+func TestEveryTestThatReachesSharedProcessStateStaysSerial(t *testing.T) {
+	t.Parallel()
+
+	fileSet := token.NewFileSet()
+	entries, err := os.ReadDir(".")
+	require.NoError(t, err, "the package directory must be readable to find its sources")
+
+	productionVariables := map[string]bool{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		parsed, parseErr := parser.ParseFile(fileSet, name, nil, 0)
+		require.NoError(t, parseErr, "every production source of this package must parse: %s", name)
+		for _, node := range parsed.Decls {
+			declaration, isGeneral := node.(*ast.GenDecl)
+			if !isGeneral || declaration.Tok != token.VAR {
+				continue
+			}
+			for _, spec := range declaration.Specs {
+				for _, identifier := range spec.(*ast.ValueSpec).Names {
+					productionVariables[identifier.Name] = true
+				}
+			}
+		}
+	}
+	require.NotEmpty(t, productionVariables,
+		"this pin reads the package's production variables; finding none means it is looking in the "+
+			"wrong directory and would pass vacuously")
+
+	sharedEnvironmentCalls := map[string]bool{
+		"t.Setenv": true, "t.Chdir": true, "os.Setenv": true, "os.Unsetenv": true, "os.Chdir": true,
+	}
+	type testFunction struct {
+		isTest   bool
+		parallel bool
+		reasons  map[string]bool
+		calls    map[string]bool
+	}
+	functions := map[string]*testFunction{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		parsed, parseErr := parser.ParseFile(fileSet, name, nil, 0)
+		require.NoError(t, parseErr, "every test file of this package must parse: %s", name)
+		for _, node := range parsed.Decls {
+			function, isFunction := node.(*ast.FuncDecl)
+			if !isFunction || function.Body == nil || function.Recv != nil {
+				continue
+			}
+			record := &testFunction{reasons: map[string]bool{}, calls: map[string]bool{}}
+			record.isTest = strings.HasPrefix(function.Name.Name, "Test") &&
+				len(function.Type.Params.List) == 1 &&
+				sourceOf(function.Type.Params.List[0].Type) == "*testing.T"
+			for _, statement := range function.Body.List {
+				expression, isExpression := statement.(*ast.ExprStmt)
+				if isExpression && sourceOf(expression.X) == "t.Parallel()" {
+					record.parallel = true
+				}
+			}
+			// A name the function declares itself (a parameter, a := or var, a
+			// range variable) shadows the production variable of the same name;
+			// an assignment to it is local and is not a reason.
+			local := map[string]bool{}
+			for _, parameter := range function.Type.Params.List {
+				for _, identifier := range parameter.Names {
+					local[identifier.Name] = true
+				}
+			}
+			ast.Inspect(function.Body, func(inner ast.Node) bool {
+				switch value := inner.(type) {
+				case *ast.AssignStmt:
+					if value.Tok == token.DEFINE {
+						for _, target := range value.Lhs {
+							if identifier, isIdentifier := target.(*ast.Ident); isIdentifier {
+								local[identifier.Name] = true
+							}
+						}
+					}
+				case *ast.ValueSpec:
+					for _, identifier := range value.Names {
+						local[identifier.Name] = true
+					}
+				case *ast.RangeStmt:
+					for _, target := range []ast.Expr{value.Key, value.Value} {
+						if identifier, isIdentifier := target.(*ast.Ident); isIdentifier {
+							local[identifier.Name] = true
+						}
+					}
+				}
+				return true
+			})
+			ast.Inspect(function.Body, func(inner ast.Node) bool {
+				switch value := inner.(type) {
+				case *ast.AssignStmt:
+					if value.Tok == token.DEFINE {
+						break
+					}
+					for _, target := range value.Lhs {
+						identifier, isIdentifier := target.(*ast.Ident)
+						if isIdentifier && productionVariables[identifier.Name] && !local[identifier.Name] {
+							record.reasons["writes "+identifier.Name] = true
+						}
+					}
+				case *ast.Ident:
+					if productionVariables[value.Name] && strings.HasSuffix(value.Name, "Cmd") {
+						record.reasons["drives "+value.Name] = true
+					}
+				case *ast.SelectorExpr:
+					if sharedEnvironmentCalls[sourceOf(value)] {
+						record.reasons["calls "+sourceOf(value)] = true
+					}
+				case *ast.CallExpr:
+					if callee, isIdentifier := value.Fun.(*ast.Ident); isIdentifier {
+						record.calls[callee.Name] = true
+					}
+				}
+				return true
+			})
+			functions[function.Name.Name] = record
+		}
+	}
+
+	// Reasons flow from a helper to every function that calls it, to a fixpoint,
+	// so a test that reaches shared state through lifecycleTestCommand or
+	// renderHelp carries the helper's reason with the helper's name on it.
+	for changed := true; changed; {
+		changed = false
+		for _, function := range functions {
+			for callee := range function.calls {
+				helper, isHelper := functions[callee]
+				if !isHelper || helper == function {
+					continue
+				}
+				for reason := range helper.reasons {
+					inherited := reason
+					if !strings.Contains(reason, " via ") {
+						inherited = reason + " via " + callee
+					}
+					if !function.reasons[inherited] && !function.reasons[reason] {
+						function.reasons[inherited] = true
+						changed = true
+					}
+				}
+			}
+		}
+	}
+
+	reasoned := []string{}
+	violations := []string{}
+	for name, function := range functions {
+		if !function.isTest || len(function.reasons) == 0 {
+			continue
+		}
+		reasoned = append(reasoned, name)
+		if function.parallel {
+			reasons := []string{}
+			for reason := range function.reasons {
+				reasons = append(reasons, reason)
+			}
+			sort.Strings(reasons)
+			violations = append(violations, name+": "+strings.Join(reasons, "; "))
+		}
+	}
+	sort.Strings(reasoned)
+	sort.Strings(violations)
+
+	// Two anchors keep the derivation honest: a test that executes rootCmd and
+	// the one test that sets the environment must both be found, or the walk
+	// has stopped seeing the state it exists to see.
+	require.Contains(t, reasoned, "TestLifecycleCommandReportsStdoutWriteFailureAfterDurableCommit",
+		"the in-process stdout-failure proof executes rootCmd and must be found by this walk; if it "+
+			"was renamed, rename it here, and if it is missing, the walk no longer sees command references")
+	require.Contains(t, reasoned, "TestHookEnvironmentReadsTheRealProcessEnvironment",
+		"the one environment-reading test calls t.Setenv and must be found by this walk; if it was "+
+			"renamed, rename it here, and if it is missing, the walk no longer sees environment calls")
+
+	assert.Empty(t, violations,
+		"these tests use t.Parallel and reach state the whole process shares. Running two of them "+
+			"at once gives a wrong store or a wrong stream with no pointer to the cause, and a data "+
+			"race under -race only when they interleave. Remove t.Parallel, or stop reaching the "+
+			"named state (own store, fresh command, injected environment)")
+}
+
 // buildSettingsOf reads the build settings the Go toolchain recorded in a
 // binary, keyed by setting name, so a test can ask what flags built it.
 func buildSettingsOf(t *testing.T, binary string) map[string]string {
@@ -686,6 +896,10 @@ func (r panickingReader) Read([]byte) (int, error) { panic(r.message) }
 // lifecycleTestCommand prepares the PRODUCTION command for one in-process
 // invocation and restores every global it touches, so the command a later test
 // receives is the one it expects.
+//
+// SERIAL: every caller drives the shared hookLifecycleCmd and writes
+// flagDBPath, so no caller may use t.Parallel.
+// TestEveryTestThatReachesSharedProcessStateStaysSerial holds that.
 func lifecycleTestCommand(t *testing.T, harness, event, version, dbPath string) *cobra.Command {
 	t.Helper()
 
@@ -1389,6 +1603,9 @@ func TestAFaultThatCannotBeClassifiedNamesEveryInputThatWasNotUsable(t *testing.
 // named sites in one function and not a class with a source to derive from.
 // WHAT IT DOES NOT READ: any third exit-one arm somebody adds. The arm count of
 // this command is held by the exit-authority guards, not here.
+//
+// SERIAL: this test drives the shared hookLifecycleCmd and writes flagDBPath,
+// so it must not use t.Parallel.
 func TestBothExitOneArmsCarryTheSameNarrowedClaim(t *testing.T) {
 	coords := lifecycleCoordinates{Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: "1.18.19"}
 
@@ -1535,6 +1752,9 @@ func TestTheFaultRecordSaysSoWhenTheStorePathNamesNoDirectory(t *testing.T) {
 // MUTATION: write cause.Error() instead of recordedCause(cause) in
 // recordLifecycleFault. This test turns RED with a nil-pointer panic, which is
 // the defect it exists to hold shut.
+//
+// SERIAL: this test drives the shared hookLifecycleCmd and writes flagDBPath,
+// so it must not use t.Parallel.
 func TestTheUnusableInputListHasAVisibleEnd(t *testing.T) {
 	coords := lifecycleCoordinates{Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: "1.18.19"}
 
@@ -1599,6 +1819,9 @@ func TestTheUnusableInputListHasAVisibleEnd(t *testing.T) {
 // MUTATION: restore "var unusable []string" in hostexit.Fault.UnusableInputs.
 // This test turns RED, because the member marshals to null and the type
 // assertion to []any fails.
+//
+// SERIAL: this test drives the shared hookLifecycleCmd and writes flagDBPath,
+// so it must not use t.Parallel.
 func TestTheMappableFaultRecordsAnEmptyArrayAndNotNull(t *testing.T) {
 	coords := lifecycleCoordinates{Harness: ir.HarnessClaudeCode, Event: "PreToolUse", HostVersion: "2.1.222"}
 
@@ -1746,6 +1969,9 @@ func TestEveryDeclaredRowDiffersFromItsEffectiveModeOnlyByTheEvidenceRule(t *tes
 //
 // MUTATION: return mode.String() unconditionally from recordedFailureMode, or
 // drop the unusableFaultInputs member from the record map. This test turns RED.
+//
+// SERIAL: this test drives the shared hookLifecycleCmd and writes flagDBPath,
+// so it must not use t.Parallel.
 func TestTheUnmappableFaultRecordSaysWhatStderrSays(t *testing.T) {
 	coords := lifecycleCoordinates{Harness: ir.HarnessClaudeCode, Event: "PreToolUse", HostVersion: "2.1.222"}
 

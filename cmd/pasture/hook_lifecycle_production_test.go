@@ -966,13 +966,17 @@ var (
 // WHY NOT -race. The copies were built with the race detector, and one hook
 // invocation of a race-instrumented child costs 1.1-1.3 s where the plain
 // child does the same store open, bootstrap and journal write in 0.01-0.06 s.
-// Every code path a child runs also runs IN-PROCESS in this package under the
-// outer `go test -race`: the fault, panic and abandonment proofs drive
-// lifecycleOutcome and the handler entry points directly, so the race detector
-// already reads those paths once per run. Instrumenting the child as well
-// duplicated that coverage at 20x per invocation, across hundreds of
-// invocations per run, and it was the largest part of the package's wall
-// time. The one proof that needs a race-instrumented SEPARATE PROCESS, because
+// Every CONCURRENT path a child runs (the hook's work goroutine, its deadline
+// select and the fault writer, all inside lifecycleOutcome) also runs
+// IN-PROCESS in this package under the outer `go test -race`: the fault, panic
+// and abandonment proofs drive lifecycleOutcome and the handler entry points
+// directly, so the race detector already reads those paths once per run. Two
+// subcommands reach the child only: `hook lifecycle raw` and `hook lifecycle
+// manifest`. Both RunE bodies are sequential, neither handler starts a
+// goroutine, and both handlers run under -race in internal/handlers, so a
+// plain child loses nothing there. Instrumenting the child as well duplicated
+// that coverage at 20x per invocation, across hundreds of invocations per run,
+// and it was the largest part of the package's wall time. The one proof that needs a race-instrumented SEPARATE PROCESS, because
 // a second opener contends for the real SQLite lock while the hook waits on
 // its deadline, runs raceLifecycleBinary instead.
 //

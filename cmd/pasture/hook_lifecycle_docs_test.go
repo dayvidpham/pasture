@@ -158,6 +158,8 @@ func TestRawHelpRendersBuiltCLI(t *testing.T) {
 // this command ships.
 // WHAT IT DOES NOT READ: a help surface with no golden. That every surface
 // HAS one is a different claim from this one, and it is not made here.
+// SERIAL: renderHelp executes the shared rootCmd in-process, so this test must
+// not use t.Parallel.
 func TestNativeHelpGoldenBytesUnchanged(t *testing.T) {
 	goldenDir := filepath.Join("testdata", "help-golden")
 	cases := []struct {

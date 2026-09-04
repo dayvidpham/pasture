@@ -75,6 +75,9 @@ func TestStampedBuildReportsTheStampedVersion(t *testing.T) {
 // TestRootCommandUsesTheStampableVariable pins the in-process wiring: cobra
 // reports whatever the package-level variable currently holds, so stamping the
 // variable is sufficient to change the reported version.
+//
+// SERIAL: this test reads the shared rootCmd, which other serial tests execute,
+// so it must not use t.Parallel.
 func TestRootCommandUsesTheStampableVariable(t *testing.T) {
 	require.Equal(t, version, rootCmd.Version,
 		"rootCmd.Version must read the stampable package variable")

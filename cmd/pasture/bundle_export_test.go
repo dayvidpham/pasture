@@ -148,6 +148,9 @@ func TestBundleExport_RejectsMissingAndInvalidFlags(t *testing.T) {
 
 // The verb lives under the top-level bundle command, and nowhere else: the
 // installer family must not carry a release-production surface.
+//
+// SERIAL: this test reads the shared bundleCmd, installCmd and rootCmd trees,
+// which other serial tests execute, so it must not use t.Parallel.
 func TestBundleExport_IsWiredUnderBundle(t *testing.T) {
 	var found *cobra.Command
 	for _, sub := range bundleCmd.Commands() {
