@@ -41,7 +41,10 @@ import (
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/audit"
+	"github.com/dayvidpham/pasture/internal/dbconn"
+	"github.com/dayvidpham/pasture/internal/engine"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 
 	_ "modernc.org/sqlite"
 )
@@ -572,66 +575,87 @@ func (w *readyOutput) String() string {
 	return w.buf.String()
 }
 
-// acceptedLoserOutcomes are the start-up failures a LOSER of the concurrent-open
-// race is allowed to exit with. The contract this test enforces is not "both
-// processes start" — it is: exactly one process performs the upgrade, the other
-// either no-ops, waits out a bounded contention ceiling, or loses a benign
-// start-up race on shared setup; and a rerun converges.
+// safeLoserDiagnostics are the sentences a process that LOST the concurrent
+// open may exit with. Each one is written by pasture for a contention it lost,
+// says so, and is produced only after nothing was written:
+//   - the audit trail's open met a locked file on every attempt for its whole
+//     ceiling — the other process was switching the file to write-ahead
+//     logging or upgrading it (internal/audit/open_retry.go);
+//   - the audit-database migrator waited out its busy-retry ceiling behind the
+//     other process's upgrade (internal/audit/migrate.go);
+//   - the durable-execution schema bootstrap lost its create race and hit its
+//     bounded retry ceiling (internal/engine/dbosinit.go);
+//   - the durable schema gate watched the other process write the layout and
+//     ran out of its bound (internal/engine/schema_gate.go).
 //
-// Each entry is a bounded, actionable, no-data-written outcome:
-//   - the audit-database upgrade lost the write-lock race and hit its ceiling;
-//   - the durable-execution schema setup lost its own create race and hit its
-//     bounded retry ceiling;
-//   - the governed slice allocator was refused because the durable root it
-//     binds to never came up for this process.
+// Nothing else is accepted. A loser that exits with any other text — a generic
+// wrapper, a raw driver error, a refusal that blames an older build for a file
+// the winner was writing — fails this test with that text quoted, because such
+// an exit is either a wrong sentence or a lock nobody retried, and both are
+// defects to surface rather than outcomes to allow. The generic wrapper this
+// list used to accept ("audit trail initialisation failed") hid exactly such a
+// lock: the loser's first statement on a rollback-journal fixture lost the
+// switch to write-ahead logging, and nobody retried it.
 //
-// Widening this list cannot mask corruption: the real oracle is the post-race
-// invariant block below (7 legacy-role rows not 14, 1024 audit events, integrity
-// check ok, schema at the current version). Those assertions run unconditionally
-// against the file both processes touched, whatever either one printed.
-//
-// The GENERIC durable-execution failure ("Couldn't initialize the durable-
-// execution context.") is deliberately NOT accepted: now that the bounded
-// schema-race loss has its own specific message, any other durable-execution
-// start-up failure is a regression and must stay loud.
-//
-// readinessTimeout must stay above the worst case of every accepted outcome;
-// see the arithmetic at its use site below.
-const readinessTimeout = 90 * time.Second
-
-var acceptedLoserOutcomes = []string{
-	"audit trail initialisation failed",
-	"Couldn't open the audit subsystem",
+// The list cannot mask corruption: the post-race invariants below are the real
+// oracle, and they run against the file both processes touched whatever either
+// one printed.
+var safeLoserDiagnostics = []string{
+	"Another pasture process held the audit database while this one was opening it.",
+	"Another pasture process is already upgrading the audit database.",
 	"Couldn't set up the durable-execution schema in the pasture database.",
-	"Couldn't bind governed slice allocation to the durable engine.",
+	"another process was migrating it and did not finish",
 }
 
-func isAcceptedLoserOutcome(output string) bool {
-	for _, accepted := range acceptedLoserOutcomes {
-		if strings.Contains(output, accepted) {
+// safeLoserExitCode is the exit code every accepted loss carries: each sentence
+// above belongs to a storage-category error, and pastured exits with the code
+// of the error's category.
+const safeLoserExitCode = 5
+
+func namesASafeLoss(output string) bool {
+	for _, sentence := range safeLoserDiagnostics {
+		if strings.Contains(output, sentence) {
 			return true
 		}
 	}
 	return false
 }
 
+// readinessTimeout bounds how long the test waits for ONE process to reach a
+// terminal start-up state: readiness, or an exit. It must clear the SLOWEST
+// accepted loss, not the fastest. Three 30 s waits sit on a loser's path: the
+// audit migrator's busy-retry ceiling (busyRetryCeiling in
+// internal/audit/migrate.go), the durable schema gate's bound (WorkflowResult
+// in the production profile the daemon runs on, internal/engine/schema_gate.go)
+// and the durable-execution bootstrap retry ceiling (dbosRaceRetryCeiling in
+// internal/engine/dbosinit.go). A loser meets at most one of them before it
+// exits, and the retry ceilings bound when the LAST attempt may START rather
+// than total wall clock, so the worst accepted path is one ceiling, one more
+// attempt, and shutdown: about 35 s. 90 s leaves room for that on a loaded CI
+// runner while still failing fast on a genuinely hung process. Two sequential
+// waits make the worst case 180 s for the whole test.
+const readinessTimeout = 90 * time.Second
+
 // TestTwoDaemonsOpeningOneLegacyDatabaseMigrateItOnceAndTheLoserFailsSafely
 // proves that when two pastured processes start against the same v1 file at
-// the same moment, exactly one performs the migration. The other either reads
-// the completed migration and reaches readiness, or exits before readiness
-// with one of the bounded, actionable outcomes in acceptedLoserOutcomes; any
-// other early exit fails the test.
+// the same moment, exactly one performs the migration, and the other either
+// serves the migrated database or loses safely.
 //
-// Both processes are signalled to stop once each has reached its terminal
-// start-up state. The file is then inspected as the daemons left it, and
-// again after this test reopens it through audit.NewSqliteAuditTrail; both
-// observations must show:
+// The test waits on a CONDITION, not on a choreography: each process is
+// awaited until it reaches a terminal start-up state — the daemon-ready log, or
+// an exit — and only then is a verdict taken over both:
 //
-//   - agents_software legacy-role count == 7 (NOT 14 — exactly one process
-//     migrated; the idempotent find-or-create did not double-insert).
-//   - audit_events row count == 1024 (no data loss across the race).
-//   - PRAGMA integrity_check == "ok".
-//   - MAX(version) == MaxKnownSchemaVersion.
+//   - at least one process reached readiness (the winner);
+//   - every process that exited early lost safely: it exited with the storage
+//     exit code and one of the safeLoserDiagnostics, so its sentence is TRUE
+//     for what happened to it.
+//
+// Both processes are then stopped, and the file is inspected as the daemons
+// left it, and again after this test reopens it through
+// audit.NewSqliteAuditTrail. Both observations must show the four post-race
+// invariants (assertRaceInvariants). The daemon-left file must also pass the
+// durable schema gate a daemon runs at start, which proves the durable layout
+// the winner wrote is complete and the loser wrote no partial one.
 func TestTwoDaemonsOpeningOneLegacyDatabaseMigrateItOnceAndTheLoserFailsSafely(t *testing.T) {
 	t.Parallel()
 	// Build pastured (or reuse an already-built copy in this test run).
@@ -650,14 +674,14 @@ func TestTwoDaemonsOpeningOneLegacyDatabaseMigrateItOnceAndTheLoserFailsSafely(t
 		t.Fatalf("write empty config file: %v", err)
 	}
 
-	// Spawn both processes concurrently and wait until each emits the daemon
-	// runtime-ready log. That log is produced only after the unified database
-	// has been opened/migrated and the engine constructed, so it is a real
-	// cross-process readiness signal rather than a fixed sleep.
 	type procResult struct {
 		output string
 		err    error
 	}
+	// spawnPastured starts one daemon. The returned channel delivers its exit
+	// exactly once; done closes after that, so the cleanup below can tell a
+	// process that exited from one it must still kill without touching the
+	// exec.Cmd from two goroutines.
 	spawnPastured := func() (*exec.Cmd, chan procResult) {
 		outBuf := newReadyOutput()
 		cmd := exec.Command( //nolint:gosec // test-only, paths are local
@@ -673,65 +697,86 @@ func TestTwoDaemonsOpeningOneLegacyDatabaseMigrateItOnceAndTheLoserFailsSafely(t
 			ch <- procResult{err: startErr}
 			return nil, ch
 		}
+		done := make(chan struct{})
 		go func() {
 			waitErr := cmd.Wait()
 			ch <- procResult{output: outBuf.String(), err: waitErr}
+			close(done)
 		}()
+		t.Cleanup(func() {
+			select {
+			case <-done:
+			default:
+				_ = cmd.Process.Kill()
+				<-done
+			}
+		})
 		return cmd, ch
 	}
 
 	cmd1, ch1 := spawnPastured()
 	cmd2, ch2 := spawnPastured()
 
-	waitReady := func(name string, ch chan procResult, cmd *exec.Cmd) *procResult {
+	// startupOutcome is one process's terminal start-up state: it reached
+	// readiness, or it exited first.
+	type startupOutcome struct {
+		name   string
+		ready  bool
+		exited *procResult
+	}
+	awaitStartup := func(name string, ch chan procResult, cmd *exec.Cmd) startupOutcome {
 		t.Helper()
 		if cmd == nil {
 			r := <-ch
 			t.Fatalf("%s failed to start: %v\n%s", name, r.err, r.output)
 		}
 		out := cmd.Stdout.(*readyOutput)
-		// The timer must clear the SLOWEST accepted outcome, not the fastest.
-		// A loser of the durable-execution schema race re-attempts start-up
-		// under a 30s ceiling, and that ceiling bounds only when the LAST
-		// attempt may start — so the wall clock is (time to reach durable
-		// start-up) + (up to 30s of re-attempts) + (one more attempt) +
-		// shutdown. A 30s readiness timer would therefore hard-fail before
-		// that outcome could ever be observed, making it unreachable. 90s
-		// leaves room for all three terms on a loaded CI runner while still
-		// failing fast on a genuinely hung process.
 		timer := time.NewTimer(readinessTimeout)
 		defer timer.Stop()
 		select {
 		case <-out.ready:
-			return nil
+			return startupOutcome{name: name, ready: true}
 		case r := <-ch:
-			if isAcceptedLoserOutcome(r.output) {
-				return &r
-			}
-			t.Fatalf("%s exited before readiness: %v\n%s", name, r.err, r.output)
+			return startupOutcome{name: name, exited: &r}
 		case <-timer.C:
-			t.Fatalf("%s did not emit daemon runtime readiness within %s; output:\n%s", name, readinessTimeout, out.String())
+			t.Fatalf("%s reached neither readiness nor an exit within %s; output:\n%s", name, readinessTimeout, out.String())
 		}
-		return nil
+		return startupOutcome{}
 	}
-	early1 := waitReady("pastured-1", ch1, cmd1)
-	early2 := waitReady("pastured-2", ch2, cmd2)
+	outcomes := []startupOutcome{
+		awaitStartup("pastured-1", ch1, cmd1),
+		awaitStartup("pastured-2", ch2, cmd2),
+	}
 
-	// Exactly-one-winner. waitReady returns nil for a process that reached
-	// readiness and non-nil for one that exited with an accepted loser
-	// outcome, so both being non-nil means NEITHER process got the database
-	// open. Without this check the invariants below could pass vacuously on a
-	// file that no daemon ever migrated (they would then be asserting only
-	// what this test's own reopen did).
-	if early1 != nil && early2 != nil {
+	// Verdict 1: exactly-one-winner. Without this the invariants below could
+	// pass vacuously on a file that no daemon ever migrated (they would then be
+	// asserting only what this test's own reopen did).
+	if !outcomes[0].ready && !outcomes[1].ready {
 		t.Fatalf("neither pastured process reached readiness — the race produced no winner, "+
 			"so nothing below tests the concurrent-migration path\npastured-1:\n%s\npastured-2:\n%s",
-			early1.output, early2.output)
+			outcomes[0].exited.output, outcomes[1].exited.output)
+	}
+	// Verdict 2: every early exit is a safe loss, with a TRUE sentence and the
+	// storage exit code. Any other early exit fails here with its text quoted.
+	for _, outcome := range outcomes {
+		if outcome.exited == nil {
+			continue
+		}
+		exitCode := -1
+		var exitErr *exec.ExitError
+		if stderrors.As(outcome.exited.err, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		}
+		if exitCode != safeLoserExitCode || !namesASafeLoss(outcome.exited.output) {
+			t.Fatalf("%s exited before readiness with exit code %d and a diagnostic that is not an accepted safe loss "+
+				"(want exit %d and one of %q); the loser must serve the migrated database or say truthfully what it lost:\n%s",
+				outcome.name, exitCode, safeLoserExitCode, safeLoserDiagnostics, outcome.exited.output)
+		}
+		t.Logf("%s lost the concurrent open safely (exit %d)", outcome.name, exitCode)
 	}
 
-	// Signal both processes to stop.  If a process already exited (e.g. it
-	// hit the migrator's busy-retry ceiling and exited 5), Signal returns an
-	// error we can safely ignore.
+	// Signal both processes to stop.  If a process already exited (a safe
+	// loss), Signal returns an error we can safely ignore.
 	if cmd1 != nil {
 		_ = cmd1.Process.Signal(os.Interrupt)
 	}
@@ -739,18 +784,26 @@ func TestTwoDaemonsOpeningOneLegacyDatabaseMigrateItOnceAndTheLoserFailsSafely(t
 		_ = cmd2.Process.Signal(os.Interrupt)
 	}
 
-	// Collect exit status and log output for diagnostics.
-	var r1, r2 procResult
-	if early1 != nil {
-		r1 = *early1
-	} else {
-		r1 = <-ch1
+	// Collect exit status and log output for diagnostics. The wait is bounded:
+	// a daemon that ignores the stop signal is killed by the cleanup above and
+	// reported here rather than hanging the test.
+	collect := func(outcome startupOutcome, ch chan procResult) procResult {
+		t.Helper()
+		if outcome.exited != nil {
+			return *outcome.exited
+		}
+		timer := time.NewTimer(readinessTimeout)
+		defer timer.Stop()
+		select {
+		case r := <-ch:
+			return r
+		case <-timer.C:
+			t.Fatalf("%s did not exit within %s of the stop signal", outcome.name, readinessTimeout)
+		}
+		return procResult{}
 	}
-	if early2 != nil {
-		r2 = *early2
-	} else {
-		r2 = <-ch2
-	}
+	r1 := collect(outcomes[0], ch1)
+	r2 := collect(outcomes[1], ch2)
 	t.Logf("pastured-1 exit: %v\noutput:\n%s", r1.err, r1.output)
 	t.Logf("pastured-2 exit: %v\noutput:\n%s", r2.err, r2.output)
 
@@ -769,6 +822,25 @@ func TestTwoDaemonsOpeningOneLegacyDatabaseMigrateItOnceAndTheLoserFailsSafely(t
 	// isn't contending with this test's own handle.
 	if err := daemonState.Close(); err != nil {
 		t.Fatalf("close the daemon-state handle before reopening: %v", err)
+	}
+
+	// The durable layout the daemons left must pass the same gate a daemon
+	// runs at start, on the same kind of handle. A complete layout passes at
+	// the first look; a partial one — a loser that wrote some of it and died,
+	// or a winner that never finished — is refused with the gate's own
+	// sentence, which this failure quotes.
+	shared, err := dbconn.OpenSharedDBWithProfile(raceDB, timeouts.TestProfile())
+	if err != nil {
+		t.Fatalf("open the daemon-left database on the shared handle: %v", err)
+	}
+	if err := engine.RequireSupportedDurableSchema(t.Context(),
+		"Checking the durable layout the daemons left (internal/audit/migrate_v3_backfill_test.go).",
+		shared, raceDB, timeouts.TestProfile()); err != nil {
+		_ = shared.Close()
+		t.Fatalf("the durable layout the daemons left does not pass the gate a daemon runs at start: %v", err)
+	}
+	if err := shared.Close(); err != nil {
+		t.Fatalf("close the shared handle after the gate: %v", err)
 	}
 
 	// Reopen via NewSqliteAuditTrail to exercise the no-op migration path.
