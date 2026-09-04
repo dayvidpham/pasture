@@ -734,7 +734,9 @@ const preCommitStallCeiling = 30 * time.Second
 //  3. the outcome arrives, and the barrier is released afterwards, so the
 //     encode could not have run before the outcome was decided.
 //
-// No clock takes part. A proof that let the tier's timer trip the deadline
+// No clock orders any step; the only clock in the function is the failure
+// ceiling below, which can only fail the proof, never pass it. A proof that
+// let the tier's timer trip the deadline
 // raced that timer against the store work before the boundary, and on a loaded
 // runner the timer won: the invocation abandoned work that had not committed,
 // and the proof failed with "finished without reaching the commit boundary".
@@ -889,17 +891,23 @@ func TestTheRecoverIsInstalledBeforeAnythingElseRuns(t *testing.T) {
 //
 // That shape is worth one assertion each. A parameter that only a test supplies
 // is one refactor away from being a parameter that production supplies
-// DIFFERENTLY, and no such drift would fail any existing test:
+// DIFFERENTLY. Only the barrier drift would fail no existing test; the other
+// two would fail one test that costs real seconds and names no seam:
 //
 //   - a barrier that is not the pass-through one would run code between the
 //     durable commit and the host's continuation, which is the one place this
-//     command promises nothing happens;
+//     command promises nothing happens, and no existing test would catch it;
 //   - a tier that is not the production one would silently move the deadline
-//     the whole host-budget claim rests on, and the hook would keep passing its
-//     own proofs while freezing a session;
-//   - a deadline that is not context.WithTimeout would start the clock somewhere
-//     other than the work, or start no clock at all, and the tier would be a
-//     number printed in a diagnostic that bounds nothing.
+//     the whole host-budget claim rests on; the built-binary test that holds
+//     the store under a real lock reads the tier's number in its diagnostic
+//     and would turn red, but only after paying for that lock;
+//   - a deadline that is not context.WithTimeout would start the clock
+//     somewhere other than the work, or start no clock at all; that same
+//     built-binary test bounds the elapsed time and would turn red, again
+//     only after paying for the lock.
+//
+// The pin makes all three fail by NAME in milliseconds instead, and it is the
+// only guard the barrier drift has at all.
 //
 // The assertion is structural because there is nothing to observe: each seam
 // is correct by being wired, and a wrong wiring produces no value a table can

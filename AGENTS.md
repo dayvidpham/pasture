@@ -640,12 +640,15 @@ trips the signal itself once the barrier reports the commit. The tier is
 printed and never started, so no clock can order the expiry against the commit.
 An earlier shape of that proof let the tier's clock trip the signal; the clock
 then raced the store work BEFORE the boundary, and on a loaded CI runner the
-clock won and the proof failed without proving anything. None of the three
-seams is visible in any output, so a wrong wiring produces no value a table can
-read — a barrier that ran work between the commit and the continuation, a tier
-that moved the deadline the host-budget claim rests on, or a deadline that
-started no clock at all, would keep every existing test green. The pin is
-therefore structural:
+clock won and the proof failed without proving anything. Only the barrier seam
+is invisible in any output, so a wrong barrier wiring produces no value a table
+can read. The tier and the deadline ARE visible, but only through the one
+built-binary test that holds the store under a real lock and costs real
+seconds: it reads the tier's number in the diagnostic and bounds the elapsed
+time, so a wrong tier or a clockless deadline turns that one test red instead
+of failing silently. The pin is still structural for all three, because it
+makes every drift fail by NAME in milliseconds instead of waiting on that one
+slow test, and it is the only guard the barrier seam has at all:
 `TestTheProductionPathWiresThePassThroughBarrierAndTheProductionTier` parses
 every non-test source of `cmd/pasture`, finds each `lifecycleOutcome` call, and
 asserts the barrier, tier and deadline arguments verbatim, plus that there is
