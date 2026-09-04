@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"debug/buildinfo"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -148,9 +149,7 @@ func readFaultRecords(t *testing.T, dir string) []map[string]any {
 // blocking exit code and still exit 0. Keying this table on the declared mode
 // would read as a rule this build does not have.
 func TestLifecycleHookExitFollowsTheEffectiveFailureMode(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "lifecycle-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	preToolUse := claudeFixture(t, "pre_tool_use_2_1_222.json")
 	sessionStart := claudeFixture(t, "session_start_2_1_222.json")
@@ -460,10 +459,18 @@ func TestLifecycleFaultRecordIsBestEffort(t *testing.T) {
 // So the tier here stays production and the elapsed assertions stay as they
 // are. If this test becomes too slow, the answer is to run it less often, not
 // to measure something else.
+//
+// THE CHILD IS THE RACE-INSTRUMENTED ONE, and this is the only proof that runs
+// it. Every other built-binary proof runs the plain shared child, because the
+// paths it drives are already read by the race detector in-process (see
+// lifecycleBinary). Here the thing under proof is a live process contending
+// with a second opener for the real write lock while its deadline runs, and
+// that contention exists only across the process boundary, so the detector has
+// to ride in the child to read it. TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild
+// holds this arrangement.
 func TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked(t *testing.T) {
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "lifecycle-cli")
-	buildLifecycleBinary(t, binary)
+	binary := raceLifecycleBinary(t)
 
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
@@ -557,6 +564,112 @@ func TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked(t *testin
 		"an abandoned invocation cannot know whether the occurrence committed, and the record must say so")
 	assert.Contains(t, records[0]["cause"], "hook-invocation deadline",
 		"the durable record must agree with the host-facing diagnostic about which path ran")
+}
+
+// TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild pins the child-binary
+// arrangement that keeps this package's wall time down without losing its one
+// live-process race proof.
+//
+// The arrangement has three parts, and a drift in any one of them would leave
+// the package green while the proofs quietly changed what they measure:
+//
+//   - The held-lock deadline proof runs raceLifecycleBinary, and not the plain
+//     child. Pointed at the plain child it would still pass, still bound the
+//     elapsed time, and its doc would claim a detector that was not there.
+//   - raceLifecycleBinary is built with -race and lifecycleBinary is not. This
+//     is read from the BUILD SETTINGS recorded in each binary, not from the
+//     helper's source: a build whose flags drifted would carry different
+//     settings whatever its source said.
+//   - No other test runs the race child. The plain child exists because a
+//     race-instrumented child costs 20x per invocation; a second caller of the
+//     race child is the cost coming back one test at a time, and it should
+//     arrive as a decision written here, not as a slow run.
+//
+// WHAT IT VISITS: every test function declared in this package's test files,
+// for the two identifiers it asks about; and the build settings of the two
+// shared children.
+// WHAT IT DOES NOT READ: whether either child is up to date with the source,
+// or whether the held-lock proof's assertions still hold; the proof itself
+// does that.
+func TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild(t *testing.T) {
+	t.Parallel()
+
+	const heldLockProof = "TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked"
+	const thisPin = "TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild"
+
+	entries, err := os.ReadDir(".")
+	require.NoError(t, err, "the package directory must be readable to find the tests it declares")
+	callers := map[string][]string{}
+	heldLockFound := false
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		parsed, parseErr := parser.ParseFile(token.NewFileSet(), entry.Name(), nil, 0)
+		require.NoError(t, parseErr, "every test file of this package must parse")
+		for _, node := range parsed.Decls {
+			function, isFunction := node.(*ast.FuncDecl)
+			if !isFunction || function.Body == nil {
+				continue
+			}
+			ast.Inspect(function.Body, func(inner ast.Node) bool {
+				call, isCall := inner.(*ast.CallExpr)
+				if !isCall {
+					return true
+				}
+				if callee, isName := call.Fun.(*ast.Ident); isName {
+					switch callee.Name {
+					case "raceLifecycleBinary", "lifecycleBinary":
+						callers[callee.Name] = append(callers[callee.Name], function.Name.Name)
+					}
+				}
+				return true
+			})
+			if function.Name.Name == heldLockProof {
+				heldLockFound = true
+			}
+		}
+	}
+	require.True(t, heldLockFound,
+		"the held-lock proof %s is not declared in this package; if it was renamed, rename it here too, "+
+			"or this pin holds nothing", heldLockProof)
+	require.NotEmpty(t, callers["lifecycleBinary"],
+		"no test calls lifecycleBinary; the built-binary proofs must run the plain shared child, and an "+
+			"empty population here means the walk found nothing and every assertion below is vacuous")
+
+	assert.Contains(t, callers["raceLifecycleBinary"], heldLockProof,
+		"the held-lock deadline proof must run the race-instrumented child; its doc promises a race "+
+			"detector riding in the live process, and on the plain child that sentence is false")
+	assert.NotContains(t, callers["lifecycleBinary"], heldLockProof,
+		"the held-lock deadline proof must not also run the plain child")
+
+	sort.Strings(callers["raceLifecycleBinary"])
+	assert.Equal(t, []string{heldLockProof, thisPin}, callers["raceLifecycleBinary"],
+		"only the held-lock proof (and this pin, which reads the child's build settings) may run the "+
+			"race-instrumented child; a new caller pays 20x per hook invocation and must be a decision "+
+			"recorded here, not a slow run")
+
+	raceSettings := buildSettingsOf(t, raceLifecycleBinary(t))
+	plainSettings := buildSettingsOf(t, lifecycleBinary(t))
+	assert.Equal(t, "true", raceSettings["-race"],
+		"the race child must record -race=true in its build settings; without it the held-lock proof "+
+			"runs no detector and its doc is false")
+	assert.NotEqual(t, "true", plainSettings["-race"],
+		"the plain child must not be race-instrumented; every other built-binary proof runs it, and "+
+			"instrumenting it is the 20x cost this arrangement exists to avoid")
+}
+
+// buildSettingsOf reads the build settings the Go toolchain recorded in a
+// binary, keyed by setting name, so a test can ask what flags built it.
+func buildSettingsOf(t *testing.T, binary string) map[string]string {
+	t.Helper()
+	info, err := buildinfo.ReadFile(binary)
+	require.NoError(t, err, "the built binary must carry readable Go build information")
+	settings := map[string]string{}
+	for _, setting := range info.Settings {
+		settings[setting.Key] = setting.Value
+	}
+	return settings
 }
 
 // panickingReader is a TEST INPUT, not a production branch. cobra already owns
@@ -1021,9 +1134,7 @@ func codexFixture(t *testing.T, name string) []byte {
 // evidence rule covers every row is held by the fault table over every
 // declared mode and policy, not by this pair.
 func TestTheFailClosedReasonFollowsTheDeclaredModeThroughTheBuiltBinary(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "lifecycle-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	const (
 		evidenceReason = "the event declares the blocking exit code but carries no host evidence for it"
@@ -1131,9 +1242,7 @@ func TestTheFailClosedReasonFollowsTheDeclaredModeThroughTheBuiltBinary(t *testi
 // MUTATION: remove the "effective failure mode" clause from faultDiagnostic, or
 // print fault.Mode again after the word "declared". This test turns RED.
 func TestTheDiagnosticSeparatesTheDeclaredModeFromTheEffectiveOne(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "lifecycle-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	dir := t.TempDir()
 	run := runLifecycleHookOn(t, binary, unopenableDatabase(t, dir),
@@ -1159,9 +1268,7 @@ func TestTheDiagnosticSeparatesTheDeclaredModeFromTheEffectiveOne(t *testing.T) 
 // MUTATION: remove the "declaredFailureMode" member from recordLifecycleFault,
 // or write failure.Mode into it. This test turns RED.
 func TestTheFaultRecordTellsADemotedGateFromADeclaredObservation(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "lifecycle-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	demotedDir := t.TempDir()
 	demoted := runLifecycleHookOn(t, binary, unopenableDatabase(t, demotedDir),
@@ -3131,9 +3238,7 @@ func alreadyListed(values []string, want string) bool {
 // MUTATION, AT THE DEFECT SITE: quote flagDBPath instead of lifecycleStorePath()
 // in the no-directory arm of recordLifecycleFault. This test turns RED.
 func TestTheFaultRecordRefusalQuotesThePathTheEnvironmentResolvedTo(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "lifecycle-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	// The working directory of the hook, so a bare store path resolves inside
 	// the test and never beside the package source.
@@ -3232,9 +3337,7 @@ func TestTheFaultRecordRefusalQuotesThePathTheEnvironmentResolvedTo(t *testing.T
 // place. This test turns RED on the stdout assertion alone, which is the case
 // no stream-change mutation can reach.
 func TestTheFaultRecordOpenFailureIsReportedOnStandardErrorOnly(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "lifecycle-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	store := t.TempDir()
 	database := filepath.Join(store, "not-a-database")
@@ -3320,9 +3423,7 @@ const devFull = "/dev/full"
 // MUTATION: put a bare "return" in either arm. That subtest turns RED on the
 // stderr assertion.
 func TestEveryDrivableFaultRecordLossIsMeasuredOnTheHostBytes(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "lifecycle-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	t.Run("the directory for the record cannot be made", func(t *testing.T) {
 		store := t.TempDir()
@@ -3605,9 +3706,7 @@ var unbindableHostPayloads = []struct {
 // harnesses that have them, and on the diagnostic and the fault record for all
 // three.
 func TestAnUnbindableHostPayloadIsTreatedAsAnEventThatWasNotEvaluated(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "lifecycle-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	for _, row := range unbindableHostPayloads {
 		t.Run(row.Harness, func(t *testing.T) {
@@ -3679,9 +3778,7 @@ func TestAnUnbindableHostPayloadIsTreatedAsAnEventThatWasNotEvaluated(t *testing
 // MUTATION: restore the nil-error return in the non-valid-capture arm. This
 // test turns RED on the fail-closed exit code, which returns to 0.
 func TestTheFailClosedOptInReachesAnUnbindableHostPayload(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "lifecycle-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	const payload = `{"renamed_session":"s","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{}}`
 
@@ -3884,9 +3981,7 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 // behavioural pins; and it does not check that the route SET is complete, which
 // the route sweep reads from the package source.
 func TestTheRoutesThatNeverOpenAStoreSayTheDeliveryWasNotRecorded(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "lifecycle-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	for _, row := range []struct {
 		Name string
@@ -4326,9 +4421,7 @@ func claudePayloadWithAddedMember(t *testing.T) []byte {
 // the parser does not report that — and every harness for every row. It
 // drove ONE harness until a harness-specific contradiction survived it.
 func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "lifecycle-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	const identityAdvice = "Compare the payload with this build's"
 	const versionAdvice = "is the version the host actually runs"
@@ -4653,9 +4746,7 @@ func TestAdviceFollowsTheCauseAndNotTheClassifier(t *testing.T) {
 // MUTATION: narrow the reason back to the identity half. This test turns RED on
 // the added-member clause.
 func TestAHostThatAddsAFieldIsRefusedWithATrueSentence(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "lifecycle-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	authentic := claudeFixture(t, "pre_tool_use_2_1_222.json")
 	var members map[string]json.RawMessage
@@ -4732,9 +4823,7 @@ func TestAHostThatAddsAFieldIsRefusedWithATrueSentence(t *testing.T) {
 // per route is held here; that no route is MISSING is held by the route sweep,
 // which reads every lifecycleFault call in the package.
 func TestEveryRefusalBeforeAWriteSaysNoRowExists(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "lifecycle-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	payload := claudeFixture(t, "pre_tool_use_2_1_222.json")
 
 	for _, row := range []struct {
@@ -5121,9 +5210,7 @@ func TestTheDurableRegionBeginsAtItsWrites(t *testing.T) {
 // Or make one harness's activation proofs fail: the derivation turns RED naming
 // that harness before any subtest runs.
 func TestAnEmptyStandardInputNamesTheRealCondition(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "lifecycle-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	harnesses, derivationErr := handlers.LifecycleHarnessCoordinates()
 	require.NoError(t, derivationErr,
@@ -5875,9 +5962,7 @@ func assertNoInternalReferenceInPackage(t *testing.T, where, text string) {
 // stays false (decode with DisallowUnknownFields in the Codex ingress). The
 // subtest for that harness turns RED.
 func TestTheSchemaAdviceFollowsTheParserThatRefused(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "lifecycle-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	rows := map[string]struct {
 		Event       string
@@ -6503,9 +6588,7 @@ func TestTheOutOfSetHandoverNamesEveryGuardItFound(t *testing.T) {
 // standard output" in AGENTS.md in place of the per-harness clauses; the Codex
 // and OpenCode subtests turn RED on the document pin.
 func TestTheReadOnlyStoreRouteWritesOnlyTheHostsContinueBytesOnEveryHarness(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "lifecycle-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	rows := map[string]struct {
 		Event       string
@@ -6645,9 +6728,7 @@ func TestTheReadOnlyStoreRouteWritesOnlyTheHostsContinueBytesOnEveryHarness(t *t
 // undeclared subtests turn RED on "declared failure mode none" or on
 // "undeclared".
 func TestAnUndeclaredCoordinateIsNotReportedAsADeclaration(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "lifecycle-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	const undeclaredClause = "declared failure mode none (no row of this build's registration declares this event, so it is treated as observe-only)"
 

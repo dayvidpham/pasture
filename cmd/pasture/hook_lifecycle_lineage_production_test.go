@@ -76,8 +76,7 @@ func countLinkEvidence(t *testing.T, dbPath string) int {
 // derives and commits NOTHING — the read-side materialize-then-no-op property.
 func TestLineageMaterializeThenSecondRunIsNoOp(t *testing.T) {
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
@@ -128,8 +127,7 @@ func TestLineageMaterializeThenSecondRunIsNoOp(t *testing.T) {
 // whether or not committed lineage links already exist in the store.
 func TestLineageDeliveryPathStaysByteEquivalent(t *testing.T) {
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 

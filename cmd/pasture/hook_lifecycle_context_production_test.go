@@ -73,8 +73,7 @@ func disclosureRows(t *testing.T, dbPath string, kind provenance.EvidenceKind) [
 // matches).
 func TestContextDisclosureCommitsOneOpBeforePrint(t *testing.T) {
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
@@ -130,8 +129,7 @@ func TestContextDisclosureCommitsOneOpBeforePrint(t *testing.T) {
 // commits ZERO disclosure facts, whether or not a disclosure has been recorded.
 func TestContextDisclosureHostResponseByteIdenticalProceed(t *testing.T) {
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 

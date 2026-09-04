@@ -42,9 +42,7 @@ import (
 // binary does not yet accept `hook lifecycle raw`; these tests are the
 // contract L3 must satisfy. Do not green-wash them.
 func TestRawLifecycleGateFlowMirrorsNative(t *testing.T) {
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_222.json"))
 	require.NoError(t, err)
@@ -97,9 +95,7 @@ func TestRawLifecycleGateFlowMirrorsNative(t *testing.T) {
 // IMPORTANT-1: the former hardcoded rawAcknowledge printed a Proceed object
 // for every event including observations).
 func TestRawContinuationParityWithNativePerEvent(t *testing.T) {
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	invoke := func(surface string, args []string, payload []byte) (string, string) {
 		dbPath := filepath.Join(t.TempDir(), surface, tasks.DefaultDBFilename.String())
@@ -174,9 +170,7 @@ func TestRawContinuationParityWithNativePerEvent(t *testing.T) {
 // evidence are byte-equivalent. A raw-side regression that dispatched a
 // different event kind or emitted different bindings would fail here.
 func TestRawAndNativeCommitEquivalentRecordsModuloOrigin(t *testing.T) {
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	for _, tc := range []struct {
 		name         string
@@ -297,9 +291,7 @@ func lookup(values map[string]json.RawMessage, key string) json.RawMessage {
 }
 
 func TestRawWithheldEventIsNotAdmitted(t *testing.T) {
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
 
 	command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
@@ -321,9 +313,7 @@ func TestRawWithheldEventIsNotAdmitted(t *testing.T) {
 // an unknown --schema-version must refuse BEFORE the store opens and leave no
 // database file (nor -wal/-shm sidecar) behind.
 func TestRawSchemaVersionRefusalCreatesNoDatabaseFile(t *testing.T) {
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
 
 	command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
@@ -347,9 +337,7 @@ func TestRawSchemaVersionRefusalCreatesNoDatabaseFile(t *testing.T) {
 // refuse at dispatch resolution — before the store opens — leaving no
 // database file, no stdout, and an actionable stderr diagnostic.
 func TestRawUnknownHarnessCreatesNoDatabaseFile(t *testing.T) {
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
 
 	command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
@@ -368,9 +356,7 @@ func TestRawUnknownHarnessCreatesNoDatabaseFile(t *testing.T) {
 }
 
 func TestRawMalformedStdinCreatesNoDatabaseFile(t *testing.T) {
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
 
 	command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
@@ -389,9 +375,7 @@ func TestRawMalformedStdinCreatesNoDatabaseFile(t *testing.T) {
 }
 
 func TestRawOverLimitStdinCreatesNoDatabaseFile(t *testing.T) {
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
 
 	command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
@@ -415,9 +399,7 @@ func TestRawOverLimitStdinCreatesNoDatabaseFile(t *testing.T) {
 // while one byte over is refused at the bound. This pins the strict `>` so an
 // off-by-one in either direction cannot slip through green.
 func TestRawPayloadBoundaryReachesClassification(t *testing.T) {
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
 
 	for _, tc := range []struct {
@@ -461,9 +443,7 @@ func checkNoDatabaseFiles(t *testing.T, dbPath string) {
 // opening the store or issuing a receipt. Both an observation (empty
 // continuation) and a gate event (non-empty continuation) pin the parity.
 func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	for _, tc := range []struct {
 		name             string
@@ -583,9 +563,7 @@ func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
 // does: the same typed diagnostic on stderr, empty stdout, exit 0, and no
 // database file. The dry-run must never widen admission or soften refusal.
 func TestRawDryRunRefusesIdentically(t *testing.T) {
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	for _, tc := range []struct {
 		name    string

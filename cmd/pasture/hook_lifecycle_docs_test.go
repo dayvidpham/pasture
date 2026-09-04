@@ -106,8 +106,7 @@ func TestRawHelpRendersBanner(t *testing.T) {
 // only the Cobra constants: the command must be registered, expose --dry-run,
 // lead with the non-default banner, and state that preview performs no write.
 func TestRawHelpRendersBuiltCLI(t *testing.T) {
-	binary := filepath.Join(t.TempDir(), "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	command := exec.Command(binary, "hook", "lifecycle", "raw", "--help")
 	rendered, err := command.CombinedOutput()
 	if err != nil {

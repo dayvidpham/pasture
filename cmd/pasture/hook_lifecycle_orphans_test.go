@@ -77,8 +77,7 @@ func leaveOrphanBlobs(t *testing.T, dbPath string, count int) {
 // standard output and not only on the constant and the JSON.
 func TestOrphanCountIsZeroOnACleanStoreAndTrueAfterAbandonedInvocations(t *testing.T) {
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "orphan-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
@@ -222,8 +221,7 @@ func TestOrphanCountWordingSaysWhatItIsThatItIsExpectedAndWhatALargeNumberMeans(
 // listed the context and the output writer, and this test turns RED.
 func TestARefusedFormatNamesTheValueGivenAndTheValuesAccepted(t *testing.T) {
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "orphan-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 

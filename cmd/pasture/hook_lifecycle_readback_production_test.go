@@ -52,8 +52,7 @@ func (readbackCLIClock) Now() time.Time { return time.Unix(100, 0).UTC() }
 // failure — see the L2 leaf comment for the missing render contract).
 func TestRawOriginReadBackDisclosedInListTextAndJSON(t *testing.T) {
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 	seedRawOriginOccurrence(t, dbPath)
@@ -82,8 +81,7 @@ func TestRawOriginReadBackDisclosedInListTextAndJSON(t *testing.T) {
 // the SLICE-3 baseline binary (pre-origin rendering); they must match exactly.
 func TestNativeListReadBackGoldenBytesUnchanged(t *testing.T) {
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "life-cli")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 

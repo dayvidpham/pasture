@@ -28,9 +28,7 @@ import (
 // derived and held by the activation support report; this drives a sample of it
 // through the built binary to show the admission decision reaches the host.
 func TestUnselectedCodexEventIsNotAdmittedByBuiltCLI(t *testing.T) {
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	buildLifecycleBinary(t, binary)
+	binary := lifecycleBinary(t)
 
 	for _, event := range []string{"Stop", "PostToolUse"} {
 		event := event
