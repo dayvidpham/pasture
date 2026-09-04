@@ -41,7 +41,7 @@
 // write a duration or a busy_timeout DSN literal of its own.
 //
 // guard.CheckTimeoutSource enforces a narrow part of that rule: over the files
-// listed in internal/lifecycle/guard/timeouts_test.go (seven today) it reports
+// listed in internal/lifecycle/guard/timeouts_test.go (eight today) it reports
 // use of the retired DefaultIngressDeadline identifier and a string literal
 // carrying the retired five-second busy_timeout pragma, and nothing else.
 //
@@ -49,6 +49,12 @@
 // bound a retry loop rather than a single wait: busyRetryCeiling in
 // internal/audit/migrate.go and dbosRaceRetryCeiling in
 // internal/engine/dbosinit.go, both 30s.
+//
+// The durable schema gate in internal/engine/schema_gate.go waits on two tiers
+// of this profile when it finds a layout below the floor it reads: SQLiteBusy
+// between looks at the recorded layout version, and WorkflowResult in total.
+// No tier is defined for waiting out another process's whole bootstrap;
+// WorkflowResult is the closest, as the outermost whole-operation wait.
 package timeouts
 
 import (

@@ -21,10 +21,13 @@ func TestProductionTimeoutSitesUseInjectedProfile(t *testing.T) {
 	// the handles the durable engine writes through; internal/acceptance/
 	// snapshot.go builds its own read-only connection string and carried a
 	// hard-coded five-second retry until it was moved onto the profile.
+	// internal/engine/schema_gate.go waits on two of the profile's windows
+	// before the durable runtime starts.
 	for _, relative := range []string{
 		"internal/dbconn/dbconn.go",
 		"internal/engine/slice.go",
 		"internal/engine/engine.go",
+		"internal/engine/schema_gate.go",
 		"internal/audit/sqlite.go",
 		"internal/acceptance/snapshot.go",
 		"internal/lifecycle/receipt/clock.go",

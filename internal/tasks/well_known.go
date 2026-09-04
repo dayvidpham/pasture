@@ -1,7 +1,6 @@
 // Package tasks — well_known.go
 //
-// Idempotent automaton-agent registration at `pastured` startup
-// (PROPOSAL-2 §7.7.3, BLOCKER A2).
+// Idempotent automaton-agent registration at `pastured` startup.
 //
 // The flow per well-known name:
 //
@@ -11,9 +10,15 @@
 //  2. If absent: call `provenance.Tracker.RegisterSoftwareAgent("pasture",
 //     name, version, source)` — this mints one fresh UUIDv7 in the
 //     Provenance subsystem (separate `*sql.DB` handle on the same file).
-//  3. INSERT into `pasture_well_known_agents` (agent_id, name) AND
-//     `pasture_agent_categories` (agent_id, automaton_role, pasture_role)
-//     under one `BEGIN IMMEDIATE` transaction on the audit `*sql.DB`.
+//  3. INSERT into `pasture_well_known_agents` (agent_id, name), doing nothing
+//     on a name conflict, read back the id the name is bound to, and — only
+//     when it is the id minted in step 2 — INSERT `pasture_agent_categories`
+//     (agent_id, automaton_role, pasture_role); all under one `BEGIN
+//     IMMEDIATE` transaction on the audit `*sql.DB`. See bindWellKnownAgent.
+//
+// Two daemons starting against one file at the same moment both miss step 1
+// and both mint in step 2. Step 3 is where they meet: the one that takes the
+// write lock second finds the name bound, adopts that id, and writes nothing.
 //
 // Why a transaction on the audit handle (and not on Provenance's handle)?
 // Provenance writes are serialised through its own connection pool; the
@@ -37,7 +42,7 @@
 //     because (a) duplicate SoftwareAgents in `agents_software` are not a
 //     correctness violation, only a hygiene issue; (b) the cleanup cost is
 //     bounded by retries-until-success; (c) orphan-detection / cleanup is
-//     out of scope for S7.
+//     out of scope here.
 
 package tasks
 
@@ -72,7 +77,7 @@ type auditDBHolder interface {
 // RegisterWellKnownAgents mints (or recovers) every entry in
 // WellKnownAgents() against the supplied tracker and populates cache.
 //
-// Idempotency contract (Scenario 14): two consecutive calls against the same
+// Idempotency contract: two consecutive calls against the same
 // underlying database produce identical row counts in `agents`,
 // `agents_software`, `pasture_well_known_agents`, and `pasture_agent_categories`,
 // AND identical AgentIDs in `pasture_well_known_agents` (pointwise across
@@ -166,7 +171,7 @@ func RegisterWellKnownAgents(ctx context.Context, tracker protocol.TaskTracker, 
 	}
 
 	// Defensive: ensure pasture-side tables exist. tasks.OpenTaskTracker calls
-	// this too (post-S2 via the migrator path; pre-S2 via ensurePastureTables);
+	// this too (through the migrator path);
 	// repeating here means RegisterWellKnownAgents is robust to future
 	// constructor refactors that drop the defensive call.
 	if err := ensurePastureTables(auditDB); err != nil {
@@ -228,7 +233,7 @@ func RegisterWellKnownAgents(ctx context.Context, tracker protocol.TaskTracker, 
 }
 
 // ensureWellKnownAgent implements the lookup-then-register-then-insert flow
-// for a single well-known name (PROPOSAL-2 §7.7.3 pseudocode). It returns
+// for a single well-known name. It returns
 // the AgentId for the name (recovered from the database on a hit, freshly
 // minted on a miss) and a *StructuredError if any step fails.
 //
@@ -357,11 +362,37 @@ func ensureWellKnownAgent(
 		}
 	}
 
-	// 3. Insert mapping rows in ONE transaction on the audit handle. Either
-	//    both INSERTs land or neither does. We do not use BEGIN IMMEDIATE
-	//    explicitly here because the audit handle has SetMaxOpenConns(1) and
-	//    the busy-timeout retry — the implicit DEFERRED lock upgrades to RESERVED
-	//    on first write under the same serialisation guarantees.
+	// 3. Bind the name to the minted id in ONE transaction on the audit
+	//    handle — or learn that another process bound it first.
+	return bindWellKnownAgent(ctx, auditDB, sa.ID, spec)
+}
+
+// bindWellKnownAgent writes the two pasture-side rows that bind a freshly
+// minted agent id to a well-known name, in one transaction on the audit
+// handle, and returns the id the name is bound to when that transaction ends.
+//
+// THAT ID IS NOT ALWAYS THE MINTED ONE. Two daemons that start against one
+// file both miss the fast-path lookup, both mint an agent, and both arrive
+// here with a different id for the same name. The name is UNIQUE, so a bare
+// INSERT killed the second daemon with a constraint failure that nothing
+// retried. The insert now does nothing on a conflict, and the bound id is
+// read back under the same transaction: a daemon whose insert was skipped
+// learns the id the other daemon bound, returns that id, and writes no role
+// row of its own — the other daemon's transaction, which this one waited
+// behind on the write lock, already committed both rows together. The minted
+// agent that lost stays unused in the task store; the ordering note at the
+// top of this file says why that is acceptable.
+//
+// Either both rows land or neither does. BEGIN IMMEDIATE is not written here
+// because the audit handle's connection string makes every transaction
+// immediate: the write lock is taken at BEGIN, and the driver's busy_timeout
+// waits out the other daemon's transaction before this one starts.
+func bindWellKnownAgent(
+	ctx context.Context,
+	auditDB *sql.DB,
+	minted provenance.AgentID,
+	spec WellKnownAgentSpec,
+) (provenance.AgentID, error) {
 	tx, err := auditDB.BeginTx(ctx, nil)
 	if err != nil {
 		return provenance.AgentID{}, &pasterrors.StructuredError{
@@ -370,7 +401,7 @@ func ensureWellKnownAgent(
 			Why: fmt.Sprintf(
 				"A fresh agent record (id %q) was just created, but starting the database\n"+
 					"transaction that would link the name to that id failed.",
-				sa.ID.String(),
+				minted.String(),
 			),
 			Where: "Registering a built-in agent (internal/tasks/well_known.go in tasks.ensureWellKnownAgent).",
 			Impact: "The agent isn't fully registered yet. The daemon will retry on the\n" +
@@ -391,15 +422,16 @@ func ensureWellKnownAgent(
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO pasture_well_known_agents (agent_id, name) VALUES (?, ?)`,
-		sa.ID.String(), spec.Name,
+		`INSERT INTO pasture_well_known_agents (agent_id, name) VALUES (?, ?)
+		 ON CONFLICT(name) DO NOTHING`,
+		minted.String(), spec.Name,
 	); err != nil {
 		return provenance.AgentID{}, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     fmt.Sprintf("Pasture couldn't save the name-to-id mapping for the built-in agent %q.", spec.Name),
 			Why: fmt.Sprintf(
 				"Tried to write the row binding name %q to id %q but the database refused.",
-				spec.Name, sa.ID.String(),
+				spec.Name, minted.String(),
 			),
 			Where: "Registering a built-in agent (internal/tasks/well_known.go in tasks.ensureWellKnownAgent).",
 			Impact: "The name can't be looked up later, so anything that needs this agent\n" +
@@ -415,10 +447,65 @@ func ensureWellKnownAgent(
 		}
 	}
 
+	// Read back which id the name is bound to now. When it is not the minted
+	// one, another process bound the name first and committed its role row
+	// with it; there is nothing left to write, and the deferred rollback
+	// releases the lock.
+	var boundStr string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT agent_id FROM pasture_well_known_agents WHERE name = ?`, spec.Name,
+	).Scan(&boundStr); err != nil {
+		return provenance.AgentID{}, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     fmt.Sprintf("Pasture couldn't read back which id the built-in agent %q is bound to.", spec.Name),
+			Why: fmt.Sprintf(
+				"The row binding name %q was written or found a moment ago, but reading it back\n"+
+					"inside the same transaction failed.",
+				spec.Name,
+			),
+			Where: "Registering a built-in agent (internal/tasks/well_known.go in tasks.bindWellKnownAgent).",
+			Impact: "The transaction is being rolled back, so nothing is saved. The daemon will\n" +
+				"retry registration on the next startup.",
+			Fix: "1. Confirm the database is readable and at the latest schema version:\n" +
+				"     pasture migrate --dry-run\n" +
+				"2. Restart the daemon once the database is healthy:\n" +
+				"     pkill -f pastured && pastured",
+			Cause: err,
+		}
+	}
+	if boundStr != minted.String() {
+		bound, perr := provenance.ParseAgentID(boundStr)
+		if perr != nil {
+			return provenance.AgentID{}, &pasterrors.StructuredError{
+				Category: pasterrors.CategoryStorage,
+				What:     fmt.Sprintf("The saved id for built-in agent %q is corrupted.", spec.Name),
+				Why: fmt.Sprintf(
+					"Another process bound this name a moment ago, but the id it saved, %q,\n"+
+						"doesn't look like a valid agent id.",
+					boundStr,
+				),
+				Where: "Registering a built-in agent (internal/tasks/well_known.go in tasks.bindWellKnownAgent).",
+				Impact: "Anything that tries to attribute an action to this agent will fail\n" +
+					"until the row is cleaned up.",
+				Fix: fmt.Sprintf("1. Look at the broken row directly:\n"+
+					"     sqlite3 <db-path> \\\n"+
+					"       \"SELECT * FROM pasture_well_known_agents WHERE name = %q\"\n"+
+					"2. Remove the broken row and restart pastured so a fresh id is created:\n"+
+					"     sqlite3 <db-path> \\\n"+
+					"       \"DELETE FROM pasture_well_known_agents WHERE name = %q\"\n"+
+					"     pkill -f pastured && pastured\n"+
+					"   Removing rows is destructive — back up the database file first.",
+					spec.Name, spec.Name),
+				Cause: perr,
+			}
+		}
+		return bound, nil
+	}
+
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO pasture_agent_categories (agent_id, automaton_role, pasture_role)
 		 VALUES (?, ?, 'None')`,
-		sa.ID.String(), string(spec.Role),
+		minted.String(), string(spec.Role),
 	); err != nil {
 		return provenance.AgentID{}, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
@@ -463,5 +550,5 @@ func ensureWellKnownAgent(
 		}
 	}
 
-	return sa.ID, nil
+	return minted, nil
 }

@@ -66,6 +66,10 @@ type SqliteAuditTrail struct {
 type sqliteAuditTrailOptions struct {
 	skipMigrations bool
 	timeouts       timeouts.Profile
+	// busyRetry bounds the retry the open runs around the statements outside
+	// the migrator's transaction (open_retry.go). The zero value means the
+	// migrator's own budget; only in-package tests set another.
+	busyRetry busyRetryPolicy
 }
 
 func WithTimeoutProfile(profile timeouts.Profile) SqliteAuditTrailOption {
@@ -181,16 +185,41 @@ func NewSqliteAuditTrailWithOptions(dbPath string, opts ...SqliteAuditTrailOptio
 	// the rebuild and back on afterward is the documented SQLite procedure for
 	// ALTER-by-rebuild. Safe here because this handle is single-connection, so
 	// the PRAGMA and the migration run on the same connection.
-	if _, err := db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+	//
+	// This is the FIRST statement on the handle, so it also opens the first
+	// connection and runs the connection string's pragmas, one of which
+	// switches a rollback-journal file to write-ahead logging. Two processes
+	// opening the same such file at the same moment both try that switch, and
+	// the one that loses gets a SQLITE_BUSY that no busy handler retries (see
+	// open_retry.go). The retry opens a fresh connection each time, which finds
+	// the file already switched, or the lock cleared, and proceeds.
+	busyRetry := cfg.busyRetry
+	if busyRetry == (busyRetryPolicy{}) {
+		busyRetry = defaultBusyRetryPolicy()
+	}
+	openCtx := context.Background()
+	if err := execWithBusyRetry(openCtx, busyRetry, db, dbPath,
+		"relax foreign-key enforcement for the migration window", `PRAGMA foreign_keys=OFF`); err != nil {
 		db.Close()
+		if isStructuredError(err) {
+			return nil, err
+		}
 		return nil, fmt.Errorf(
 			"audit.NewSqliteAuditTrail: cannot relax foreign-key enforcement for migration on %q: %w",
 			dbPath, err,
 		)
 	}
 
-	if err := ensureSchema(db); err != nil {
+	// The base tables are created with IF NOT EXISTS, so a create that met a
+	// lock the other process held for longer than one busy window is safe to
+	// run again.
+	if err := retryOnBusy(openCtx, busyRetry, dbPath, "create the audit tables", func() error {
+		return ensureSchema(db)
+	}); err != nil {
 		db.Close()
+		if isStructuredError(err) {
+			return nil, err
+		}
 		return nil, fmt.Errorf(
 			"audit.NewSqliteAuditTrail: schema migration failed for %q: %w",
 			dbPath, err,
