@@ -19,6 +19,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/testutil"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
 // ciLostRaceError is the verbatim failure a losing process produced in CI when
@@ -484,7 +485,7 @@ func TestRequireSupportedDurableSchema_RefusesADatabaseAnOlderBuildWrote(t *test
 	path, before := testutil.WriteSupersededDurableDatabase(t)
 	db := openTestSQLite(t, path)
 
-	err := RequireSupportedDurableSchema(t.Context(), engineConstructionSite, db, path)
+	err := RequireSupportedDurableSchema(t.Context(), engineConstructionSite, db, path, timeouts.DeadlineTestProfile())
 	if err == nil {
 		t.Fatal("the gate accepted a database whose durable layout an older build wrote")
 	}
@@ -532,7 +533,7 @@ func TestRequireSupportedDurableSchema_AcceptsAFreshDatabase(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "fresh.db")
 	db := openTestSQLite(t, path)
-	if err := RequireSupportedDurableSchema(t.Context(), engineConstructionSite, db, path); err != nil {
+	if err := RequireSupportedDurableSchema(t.Context(), engineConstructionSite, db, path, timeouts.DeadlineTestProfile()); err != nil {
 		t.Fatalf("the gate refused a fresh database: %v", err)
 	}
 }
@@ -547,6 +548,9 @@ func TestEngineNew_RefusesADatabaseAnOlderBuildWrote(t *testing.T) {
 		DBPath:             path,
 		ApplicationVersion: "test-app-refuses-superseded",
 		ExecutorID:         "test-executor-refuses-superseded",
+		// The gate watches a below-floor layout for one SQLiteBusy window
+		// before it calls it stable; the deadline profile keeps that short.
+		Timeouts: timeouts.DeadlineTestProfile(),
 	})
 	// Measure the database FIRST, before any assertion below opens a handle of
 	// its own: an open connection under WAL journal mode keeps a -shm sidecar
@@ -647,7 +651,7 @@ func TestRequireSupportedDurableSchema_ReportsALayoutItCannotRead(t *testing.T) 
 		t.Fatalf("create a foreign %s table in %s: %v", testutil.DurableMigrationTable, path, err)
 	}
 
-	err := RequireSupportedDurableSchema(t.Context(), engineConstructionSite, db, path)
+	err := RequireSupportedDurableSchema(t.Context(), engineConstructionSite, db, path, timeouts.DeadlineTestProfile())
 	if err == nil {
 		t.Fatal("the gate accepted a database whose durable layout it could not read")
 	}

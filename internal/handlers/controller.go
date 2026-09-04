@@ -25,6 +25,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/engine"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -205,7 +206,12 @@ func OpenEpochController(dbPath string) (EpochController, error) {
 const unnamedClientSiteWhere = "Opening a durable client (internal/handlers/controller.go in openClient)."
 
 // gateDurableSchema refuses a database whose durable layout an older build
-// wrote, described for the caller named by site.
+// wrote, described for the caller named by site, and waits out one that
+// another process is writing at this moment.
+//
+// The handle was opened by dbconn.OpenSharedDB, which gives it the production
+// timeout profile; the gate's wait runs on that same profile, so the lock wait
+// the handle already made and the windows the gate uses come from one place.
 //
 // An unnamed caller does NOT switch the gate off. Refusing such a database does
 // not depend on knowing which command asked for it, and running it anyway is
@@ -213,10 +219,11 @@ const unnamedClientSiteWhere = "Opening a durable client (internal/handlers/cont
 // and the naming defect is joined to the refusal, so neither is lost. The
 // refusal leads: see the note at the join.
 func gateDurableSchema(db *sql.DB, dbPath string, site clientSite) error {
+	profile := timeouts.ProductionProfile()
 	where, siteErr := site.startupWhere()
 	if siteErr != nil {
 		if err := engine.RequireSupportedDurableSchema(
-			context.Background(), unnamedClientSiteWhere, db, dbPath); err != nil {
+			context.Background(), unnamedClientSiteWhere, db, dbPath, profile); err != nil {
 			// The REFUSAL leads and the naming defect follows. Both are true,
 			// but only one of them is the operator's to act on, and the joined
 			// error is read from the top: leading with pasture's own naming
@@ -228,7 +235,7 @@ func gateDurableSchema(db *sql.DB, dbPath string, site clientSite) error {
 		}
 		return nil
 	}
-	return engine.RequireSupportedDurableSchema(context.Background(), where, db, dbPath)
+	return engine.RequireSupportedDurableSchema(context.Background(), where, db, dbPath, profile)
 }
 
 // durableClientLogger is the logger every durable client opened here is given.

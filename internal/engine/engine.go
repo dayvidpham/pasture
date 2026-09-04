@@ -244,9 +244,12 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 	// process writes data to the file, so a refused database carries exactly the
 	// records it arrived with. The one byte-level exception is the journal mode:
 	// the shared handle's connection string normalises it on the gate's first
-	// query, before a refusal is possible. The refusal is permanent, so it stays
-	// outside the bounded retry that follows. See internal/engine/dbosinit.go.
-	if err := RequireSupportedDurableSchema(ctx, engineConstructionSite, db, cfg.DBPath); err != nil {
+	// query, before a refusal is possible. A layout that another process is
+	// writing at this moment is waited out, on the windows of cfg.Timeouts; a
+	// layout that stands still below the floor is refused for good, so that
+	// refusal stays outside the bounded retry that follows. See
+	// internal/engine/schema_gate.go.
+	if err := RequireSupportedDurableSchema(ctx, engineConstructionSite, db, cfg.DBPath, cfg.Timeouts); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
