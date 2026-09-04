@@ -37,13 +37,30 @@ import (
 // scriptedLayout is a look at the layout that returns a scripted sequence and
 // then repeats its last entry. next, when set, generates every look past the
 // script instead.
+//
+// maxLooks bounds how many looks one wait may take. A wait that exceeds it has
+// lost its deadline check, and the test fails BY NAME at that look instead of
+// looping until the package times out. looksWithinBound derives it from the
+// profile the test hands the gate.
 type scriptedLayout struct {
-	script []durableLayoutObservation
-	next   func(look int) durableLayoutObservation
-	looks  int
+	t        *testing.T
+	script   []durableLayoutObservation
+	next     func(look int) durableLayoutObservation
+	looks    int
+	maxLooks int
+}
+
+// looksWithinBound is the most looks a wait on profile may take: the first
+// look, one per interval up to the bound, and a margin of two.
+func looksWithinBound(profile timeouts.Profile) int {
+	return int(profile.WorkflowResult()/profile.SQLiteBusy()) + 3
 }
 
 func (s *scriptedLayout) probe(context.Context) (durableLayoutObservation, error) {
+	if s.maxLooks > 0 && s.looks >= s.maxLooks {
+		s.t.Fatalf("the gate took %d looks, more than the bound allows (%d); the deadline check is gone",
+			s.looks+1, s.maxLooks)
+	}
 	look := s.looks
 	s.looks++
 	if look < len(s.script) {
@@ -112,7 +129,8 @@ const gateTestPath = "/var/lib/pasture/pasture.db"
 func TestALoserThatOpensMidBootstrapWaitsForTheWinnerAndIsAccepted(t *testing.T) {
 	t.Parallel()
 	profile := timeouts.ProductionProfile()
-	look := &scriptedLayout{script: []durableLayoutObservation{belowFloor(1), writerHeld, belowFloor(20), belowFloor(41), usable}}
+	look := &scriptedLayout{t: t, maxLooks: looksWithinBound(profile),
+		script: []durableLayoutObservation{belowFloor(1), writerHeld, belowFloor(20), belowFloor(41), usable}}
 	clock := &fakeSchemaClock{at: time.Unix(1_700_000_000, 0)}
 	start := clock.at
 
@@ -148,7 +166,7 @@ func TestALoserThatOpensMidBootstrapWaitsForTheWinnerAndIsAccepted(t *testing.T)
 func TestAStableOldLayoutIsRefusedWithTheOlderBuildSentenceAfterOneWindow(t *testing.T) {
 	t.Parallel()
 	profile := timeouts.ProductionProfile()
-	look := &scriptedLayout{script: []durableLayoutObservation{belowFloor(41)}}
+	look := &scriptedLayout{t: t, maxLooks: looksWithinBound(profile), script: []durableLayoutObservation{belowFloor(41)}}
 	clock := &fakeSchemaClock{at: time.Unix(1_700_000_000, 0)}
 	start := clock.at
 
@@ -181,11 +199,18 @@ func TestAStableOldLayoutIsRefusedWithTheOlderBuildSentenceAfterOneWindow(t *tes
 //
 // MUTATION: report the expired bound with the older-build error. This test
 // fails on the unfinished sentence, and again on the forbidden one.
+//
+// MUTATION: remove the deadline check ("if false && ..."). The look cap fails
+// this test by name — "the gate took N looks, more than the bound allows; the
+// deadline check is gone" — at the look after the bound, instead of the
+// package hanging until go test's timeout.
 func TestAMigrationThatOutlivesTheBoundIsReportedAsUnfinishedAndNeverAsAnOlderBuild(t *testing.T) {
 	t.Parallel()
 	profile := timeouts.ProductionProfile()
 	look := &scriptedLayout{
-		script: []durableLayoutObservation{belowFloor(1)},
+		t:        t,
+		maxLooks: looksWithinBound(profile),
+		script:   []durableLayoutObservation{belowFloor(1)},
 		// Every later look sees the version one higher, and never the floor.
 		next: func(look int) durableLayoutObservation { return belowFloor(int64(look + 1)) },
 	}
@@ -226,7 +251,8 @@ func TestACancelledWaitSaysWhatItWasWaitingFor(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	look := &scriptedLayout{script: []durableLayoutObservation{belowFloor(3), belowFloor(4)}}
+	look := &scriptedLayout{t: t, maxLooks: looksWithinBound(timeouts.ProductionProfile()),
+		script: []durableLayoutObservation{belowFloor(3), belowFloor(4)}}
 	clock := &fakeSchemaClock{at: time.Unix(1_700_000_000, 0)}
 	clock.onPause = func(pause int) {
 		if pause == 1 {
@@ -247,6 +273,156 @@ func TestACancelledWaitSaysWhatItWasWaitingFor(t *testing.T) {
 	}
 	if !strings.Contains(structured.Why, "recorded layout version 4") {
 		t.Errorf("the refusal does not report the last observation:\n%s", renderReport(structured))
+	}
+}
+
+// A look that fails BECAUSE the caller's context ended is a cancelled wait,
+// and must be reported as one — never as an unreadable, damaged file. The
+// cancel can land at the statement's own context check inside a look, on the
+// first look when the context was already cancelled before the gate ran, or
+// between a pause and the next look. Both look sites are pinned here with a
+// look that returns the context's error, so no clock is involved.
+//
+// MUTATION: drop the ctx.Err() checks at the two look sites. Both cases then
+// carry the unreadable-file sentence and fail here.
+func TestALookThatFailsOnTheCancelledContextIsReportedAsCancelledNotDamaged(t *testing.T) {
+	t.Parallel()
+	profile := timeouts.ProductionProfile()
+	failsOnContext := func(ctx context.Context) (durableLayoutObservation, error) {
+		if err := ctx.Err(); err != nil {
+			return durableLayoutObservation{}, fmt.Errorf("probe sqlite_master: %w", err)
+		}
+		return belowFloor(7), nil
+	}
+
+	t.Run("cancelled before the first look", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		clock := &fakeSchemaClock{at: time.Unix(1_700_000_000, 0)}
+		err := awaitSupportedDurableSchema(ctx, engineConstructionSite, gateTestPath, failsOnContext, profile, clock.clock())
+		assertCancelledNotDamaged(t, err)
+	})
+
+	t.Run("cancelled between a pause and the next look", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		// A pause that does not see the cancel itself, so the NEXT look is
+		// the first thing that meets the cancelled context.
+		clock := &fakeSchemaClock{at: time.Unix(1_700_000_000, 0)}
+		blind := clock.clock()
+		blind.pause = func(_ context.Context, d time.Duration) error {
+			cancel()
+			clock.at = clock.at.Add(d)
+			return nil
+		}
+		err := awaitSupportedDurableSchema(ctx, engineConstructionSite, gateTestPath, failsOnContext, profile, blind)
+		assertCancelledNotDamaged(t, err)
+	})
+}
+
+func assertCancelledNotDamaged(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("a look that failed on the cancelled context returned nil")
+	}
+	structured := requireStructuredStorageError(t, err)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("the cancellation is not wrapped as the cause: %v", err)
+	}
+	if !strings.Contains(structured.What, "was cancelled") {
+		t.Errorf("the refusal does not say the wait was cancelled:\n%s", renderReport(structured))
+	}
+	for _, forbidden := range []string{"unreadable, damaged", "Couldn't check the durable-execution layout"} {
+		if strings.Contains(renderReport(structured), forbidden) {
+			t.Errorf("a cancelled wait was reported with %q:\n%s", forbidden, renderReport(structured))
+		}
+	}
+}
+
+// The real clock's pause must return at the cancellation, not at the end of
+// the interval. This is the only thing that turns a shutdown signal during
+// the wait into a prompt return, and no seam test can see it: the seam tests
+// inject their own clock.
+//
+// MUTATION: make realSchemaGateClock.pause ignore its context ("<-timer.C;
+// return nil"). The pause then runs to its full length and returns nil, and
+// this test fails on both.
+func TestTheRealClockPauseReturnsAtCancellation(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	const pause = 2 * time.Second
+	start := time.Now()
+	err := realSchemaGateClock().pause(ctx, pause)
+	elapsed := time.Since(start)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("pause returned %v after its context was cancelled, want the cancellation", err)
+	}
+	if elapsed >= pause {
+		t.Errorf("pause ran for %s, its full length, after its context was cancelled; it must return at the cancellation", elapsed)
+	}
+}
+
+// A cancel that lands during the REAL wait — while the real look is blocked
+// on the driver's busy window, or in a real pause — comes back promptly as the
+// cancelled sentence, never as an unreadable, damaged file. The gate is held
+// waiting by a second handle that holds the file's write lock, so every look
+// reports a writer and the wait would otherwise run to the bound.
+//
+// MUTATION: report a look that failed on the cancelled context as unreadable
+// (drop the ctx.Err() checks at the two look sites). The sentence then says the
+// file is unreadable or damaged, and this test fails on it.
+func TestACancelDuringTheRealWaitIsReportedAsCancelledNotDamaged(t *testing.T) {
+	t.Parallel()
+	profile := timeouts.DeadlineTestProfile()
+	path, _ := testutil.WriteSupersededDurableDatabase(t)
+	db, err := dbconn.OpenSharedDBWithProfile(path, profile)
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	holder, err := dbconn.OpenSharedDBWithProfile(path, profile)
+	if err != nil {
+		t.Fatalf("open the lock-holding handle on %s: %v", path, err)
+	}
+	t.Cleanup(func() { _ = holder.Close() })
+	held, err := holder.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatalf("hold the write lock on %s: %v", path, err)
+	}
+	t.Cleanup(func() { _ = held.Rollback() })
+
+	// The caller's own deadline is the cancel; it lands well inside the bound.
+	const callerDeadline = 150 * time.Millisecond
+	ctx, cancel := context.WithTimeout(t.Context(), callerDeadline)
+	defer cancel()
+	start := time.Now()
+	err = RequireSupportedDurableSchema(ctx, engineConstructionSite, db, path, profile)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("a cancelled wait on a held, below-floor file returned nil")
+	}
+	structured := requireStructuredStorageError(t, err)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("the caller's deadline is not wrapped as the cause: %v", err)
+	}
+	if !strings.Contains(structured.What, "was cancelled") {
+		t.Errorf("the refusal does not say the wait was cancelled:\n%s", renderReport(structured))
+	}
+	for _, forbidden := range []string{"unreadable, damaged", "Couldn't check the durable-execution layout"} {
+		if strings.Contains(renderReport(structured), forbidden) {
+			t.Errorf("a cancelled wait was reported with %q:\n%s", forbidden, renderReport(structured))
+		}
+	}
+	// Bounded: the return is the deadline plus at most one busy window and one
+	// interval of the profile, with room for scheduling — never the bound.
+	if limit := callerDeadline + profile.SQLiteBusy()*2 + 500*time.Millisecond; elapsed > limit {
+		t.Errorf("the cancelled wait returned after %s, want within %s", elapsed, limit)
+	}
+	if elapsed >= profile.WorkflowResult() {
+		t.Errorf("the cancelled wait ran to the bound %s; the cancel did not end it", profile.WorkflowResult())
 	}
 }
 

@@ -196,9 +196,10 @@ The durable schema gate (`RequireSupportedDurableSchema` in
 `internal/engine/schema_gate.go`) uses two tiers of the profile when it finds a
 layout below the floor it reads. It re-reads the recorded layout version every
 `SQLiteBusy`; a version that did not move for one such window, with no writer
-holding the file's lock, is stable, and the gate refuses it as a database an
-older build wrote. A version that moves, or a writer that holds the lock, is a
-migration in flight, and the gate waits for it up to `WorkflowResult`. When that
+holding the file's lock and no progress seen before, is stable, and the gate
+refuses it as a database an older build wrote. A version that moves, or a
+writer that holds the lock, is a migration in flight, and the gate waits for it
+up to `WorkflowResult` — a quiet window after progress does not end the wait. When that
 bound runs out it says another process was migrating the file and did not
 finish, and it never blames an older build for a file it watched being written.
 No tier is defined for waiting out a peer's whole bootstrap; `WorkflowResult` is

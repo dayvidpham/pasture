@@ -47,10 +47,12 @@ import (
 // that holds the file's write lock, as a migration in flight. It gives up in
 // two ways, each with its own sentence:
 //
-//   - The version did not move for one SQLiteBusy window, and no writer held
-//     the lock in that window. The layout is standing still below the floor:
-//     an older build wrote it, or a first start was interrupted. The refusal
-//     says so, and says what to do with the file.
+//   - The version did not move for one SQLiteBusy window, no writer held the
+//     lock in that window, and no progress was seen before. The layout is
+//     standing still below the floor: an older build wrote it, or a first
+//     start was interrupted. The refusal says so, and says what to do with
+//     the file. Once progress HAS been seen, a quiet window does not end the
+//     wait: the gate waits to the bound and reports the next case.
 //   - Progress was observed, and the WorkflowResult bound ran out before the
 //     layout reached the floor. Another process was migrating the file and did
 //     not finish in time. The refusal says that, and never blames an older
@@ -66,12 +68,15 @@ import (
 // (busyRetryCeiling in internal/audit/migrate.go and dbosRaceRetryCeiling in
 // dbosinit.go).
 //
-// KNOWN LIMIT — A LIVE MIGRATOR THAT COMMITS NOTHING FOR A WHOLE WINDOW LOOKS
+// KNOWN LIMIT — A LIVE MIGRATOR THAT COMMITS NOTHING FOR THE FIRST WINDOW LOOKS
 // STABLE. The runtime's migrations are small and back to back, so a live
-// process that neither commits nor holds the lock for one SQLiteBusy window
-// (500 ms in production) has stalled, not paused. If that happens the gate
-// refuses with the older-build sentence, exactly as every read of the file did
-// before the wait existed. The wait narrows that outcome; it does not remove it.
+// process that neither commits nor holds the lock for the first SQLiteBusy
+// window after the gate's first look (500 ms in production) has stalled, not
+// paused. If that happens the gate refuses with the older-build sentence,
+// exactly as every read of the file did before the wait existed. A stall that
+// comes AFTER the gate saw progress is not refused that way: the gate waits to
+// the bound and reports the migration as unfinished. The wait narrows the first
+// outcome; it does not remove it.
 
 // KNOWN LIMIT — THE GATE IS A FLOOR, NOT A RANGE. It refuses a layout version
 // BELOW the supported floor and accepts every version at or above it, so a
@@ -195,6 +200,9 @@ func awaitSupportedDurableSchema(
 
 	first, err := probe(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			return durableSchemaWaitCancelledError(where, dbPath, err, durableLayoutObservation{})
+		}
 		return unreadableDurableSchemaError(where, dbPath, err)
 	}
 	if first.state == durableLayoutUsable {
@@ -219,6 +227,12 @@ func awaitSupportedDurableSchema(
 		}
 		observed, err := probe(ctx)
 		if err != nil {
+			// A look that failed because the caller's context ended is a
+			// cancelled wait, not an unreadable file: the statement's own
+			// context check is one more place the cancel can land.
+			if ctx.Err() != nil {
+				return durableSchemaWaitCancelledError(where, dbPath, err, last)
+			}
 			return unreadableDurableSchemaError(where, dbPath, err)
 		}
 		switch observed.state {
