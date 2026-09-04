@@ -972,11 +972,14 @@ var (
 // and abandonment proofs drive lifecycleOutcome and the handler entry points
 // directly, so the race detector already reads those paths once per run. Two
 // subcommands reach the child only: `hook lifecycle raw` and `hook lifecycle
-// manifest`. Both RunE bodies are sequential, neither handler starts a
-// goroutine, and both handlers run under -race in internal/handlers, so a
-// plain child loses nothing there. Instrumenting the child as well duplicated
-// that coverage at 20x per invocation, across hundreds of invocations per run,
-// and it was the largest part of the package's wall time. The one proof that needs a race-instrumented SEPARATE PROCESS, because
+// manifest`. Both RunE bodies are sequential and neither handler starts a
+// goroutine, so the race detector had nothing to observe on either of them.
+// The manifest handler is also exercised under -race in internal/handlers; the
+// raw handler is exercised in this module only through the plain child in this
+// package, and a plain child loses nothing on a sequential path. Instrumenting
+// the child as well duplicated that coverage at 20x per invocation, across
+// hundreds of invocations per run, and it was the largest part of the
+// package's wall time. The one proof that needs a race-instrumented SEPARATE PROCESS, because
 // a second opener contends for the real SQLite lock while the hook waits on
 // its deadline, runs raceLifecycleBinary instead.
 //

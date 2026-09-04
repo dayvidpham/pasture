@@ -679,9 +679,17 @@ func TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild(t *testing.T) {
 // source, not written down as a list, so a new test that reaches the same state
 // is caught the same way.
 //
-// WHAT IT VISITS: every function declared in this package's test files, the
-// package-level variables its production files declare, and the calls from
-// test functions to test helpers, followed transitively.
+// Three anchors on the real files and one synthetic control per rule keep the
+// derivation honest: a rule that stopped seeing its input would drop an anchor
+// or leave its control unreported, and neither can happen while the tree is
+// correctly classified by accident.
+//
+// WHAT IT VISITS: every top-level function and every method declared in this
+// package's test files, the package-level variables its production files
+// declare, and the calls from one test-file function to another, by identifier
+// for functions and by method name for methods, followed transitively. Two
+// test types that share a method name share that method's reasons, which can
+// add a reason and never hide one.
 // WHAT IT DOES NOT READ: state a production function reaches inside its own
 // body. lifecycleFault takes hookLifecycleCmd as an argument at every test
 // site, so that reference is visible here; a helper that hid a global behind a
@@ -694,13 +702,18 @@ func TestEveryTestThatReachesSharedProcessStateStaysSerial(t *testing.T) {
 	require.NoError(t, err, "the package directory must be readable to find its sources")
 
 	productionVariables := map[string]bool{}
+	testFiles := []*ast.File{}
 	for _, entry := range entries {
 		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") {
 			continue
 		}
 		parsed, parseErr := parser.ParseFile(fileSet, name, nil, 0)
-		require.NoError(t, parseErr, "every production source of this package must parse: %s", name)
+		require.NoError(t, parseErr, "every source of this package must parse: %s", name)
+		if strings.HasSuffix(name, "_test.go") {
+			testFiles = append(testFiles, parsed)
+			continue
+		}
 		for _, node := range parsed.Decls {
 			declaration, isGeneral := node.(*ast.GenDecl)
 			if !isGeneral || declaration.Tok != token.VAR {
@@ -716,39 +729,143 @@ func TestEveryTestThatReachesSharedProcessStateStaysSerial(t *testing.T) {
 	require.NotEmpty(t, productionVariables,
 		"this pin reads the package's production variables; finding none means it is looking in the "+
 			"wrong directory and would pass vacuously")
+	require.NotEmpty(t, testFiles, "this pin reads the package's test files; finding none would pass vacuously")
 
+	functions := sharedStateReach(testFiles, productionVariables)
+	reasoned, violations := serialVerdicts(functions)
+
+	// THREE ANCHORS, ONE PER RULE. Each names a test that today reaches shared
+	// state by exactly that rule, so a rule that stops seeing its input drops
+	// its anchor. The writes anchor checks the REASON and not membership alone:
+	// every flagDBPath writer today also references hookLifecycleCmd, so it
+	// would stay a member with the writes rule blind.
+	require.Contains(t, reasoned, "TestLifecycleCommandReportsStdoutWriteFailureAfterDurableCommit",
+		"the in-process stdout-failure proof executes rootCmd and must be found by this walk; if it "+
+			"was renamed, rename it here, and if it is missing, the walk no longer sees command references")
+	require.Contains(t, reasoned, "TestHookEnvironmentReadsTheRealProcessEnvironment",
+		"the one environment-reading test calls t.Setenv and must be found by this walk; if it was "+
+			"renamed, rename it here, and if it is missing, the walk no longer sees environment calls")
+	faultRecordProof := functions["TestLifecycleFaultRecordIsBestEffort"]
+	require.NotNil(t, faultRecordProof,
+		"the fault-record proof must be declared in this package; if it was renamed, rename it here")
+	require.True(t, faultRecordProof.reasons["writes flagDBPath"],
+		"the fault-record proof writes flagDBPath directly and must be found by the writes rule with "+
+			"that reason; if the reason is missing, the walk no longer sees variable writes. Its reasons: %v",
+		faultRecordProof.reasons)
+
+	assert.Empty(t, violations,
+		"these tests use t.Parallel and reach state the whole process shares. Running two of them "+
+			"at once gives a wrong store or a wrong stream with no pointer to the cause, and a data "+
+			"race under -race only when they interleave. Remove t.Parallel, or stop reaching the "+
+			"named state (own store, fresh command, injected environment)")
+
+	// ONE CONTROL PER RULE, on synthetic sources the walk must still report.
+	// The real files are correctly classified today, so "zero violations" is
+	// green whether the walk is wide or narrow; each control is an input built
+	// to have the defect, with the reason the report must carry.
+	for _, control := range []struct {
+		Rule   string
+		Source string
+		Reason string
+	}{
+		{
+			Rule: "a write to a production variable",
+			Source: `package main
+func TestControl(t *testing.T) {
+	t.Parallel()
+	flagDBPath = "elsewhere"
+}`,
+			Reason: "writes flagDBPath",
+		},
+		{
+			Rule: "a production command reached through a helper function",
+			Source: `package main
+func TestControl(t *testing.T) {
+	t.Parallel()
+	touchThroughFunction()
+}
+func touchThroughFunction() { hookLifecycleCmd.SetArgs(nil) }`,
+			Reason: "drives hookLifecycleCmd via touchThroughFunction",
+		},
+		{
+			Rule: "a production command reached through a method",
+			Source: `package main
+type toucher struct{}
+func (toucher) touch() { hookLifecycleCmd.SetArgs(nil) }
+func TestControl(t *testing.T) {
+	t.Parallel()
+	toucher{}.touch()
+}`,
+			Reason: "drives hookLifecycleCmd via touch",
+		},
+		{
+			Rule: "an environment call",
+			Source: `package main
+func TestControl(t *testing.T) {
+	t.Parallel()
+	t.Setenv("KEY", "value")
+}`,
+			Reason: "calls t.Setenv",
+		},
+	} {
+		parsed, parseErr := parser.ParseFile(token.NewFileSet(), "control.go", control.Source, 0)
+		require.NoError(t, parseErr, "the control source for %s must parse", control.Rule)
+		records := sharedStateReach([]*ast.File{parsed}, map[string]bool{"flagDBPath": true, "hookLifecycleCmd": true})
+		_, controlViolations := serialVerdicts(records)
+		require.Len(t, controlViolations, 1,
+			"the control for %s must be reported as exactly one violation; the rule it exercises has "+
+				"stopped seeing its input", control.Rule)
+		assert.Contains(t, controlViolations[0], control.Reason,
+			"the control for %s must be reported with its reason", control.Rule)
+	}
+}
+
+// reachRecord is what sharedStateReach knows about one function or method
+// declared in a test file.
+type reachRecord struct {
+	isTest   bool
+	parallel bool
+	reasons  map[string]bool
+	calls    map[string]bool
+}
+
+// sharedStateReach classifies every function and method declared in files by
+// the shared process state it reaches: a write to a production package-level
+// variable (a name the function declares itself is local and does not count),
+// a reference to a production cobra command variable, or a call that changes
+// the process environment or working directory. Reasons flow from a callee to
+// its callers to a fixpoint, with the callee's name attached, so a caller reads
+// which helper carried the state. Functions are keyed by name and methods by
+// method name; a method call is followed by its selector's name, so two test
+// types that share a method name share its reasons.
+func sharedStateReach(files []*ast.File, productionVariables map[string]bool) map[string]*reachRecord {
 	sharedEnvironmentCalls := map[string]bool{
 		"t.Setenv": true, "t.Chdir": true, "os.Setenv": true, "os.Unsetenv": true, "os.Chdir": true,
 	}
-	type testFunction struct {
-		isTest   bool
-		parallel bool
-		reasons  map[string]bool
-		calls    map[string]bool
-	}
-	functions := map[string]*testFunction{}
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		parsed, parseErr := parser.ParseFile(fileSet, name, nil, 0)
-		require.NoError(t, parseErr, "every test file of this package must parse: %s", name)
-		for _, node := range parsed.Decls {
+	functions := map[string]*reachRecord{}
+	for _, file := range files {
+		for _, node := range file.Decls {
 			function, isFunction := node.(*ast.FuncDecl)
-			if !isFunction || function.Body == nil || function.Recv != nil {
+			if !isFunction || function.Body == nil {
 				continue
 			}
-			record := &testFunction{reasons: map[string]bool{}, calls: map[string]bool{}}
-			record.isTest = strings.HasPrefix(function.Name.Name, "Test") &&
-				len(function.Type.Params.List) == 1 &&
-				sourceOf(function.Type.Params.List[0].Type) == "*testing.T"
+			record := functions[function.Name.Name]
+			if record == nil {
+				record = &reachRecord{reasons: map[string]bool{}, calls: map[string]bool{}}
+				functions[function.Name.Name] = record
+			}
+			if function.Recv == nil {
+				record.isTest = strings.HasPrefix(function.Name.Name, "Test") &&
+					len(function.Type.Params.List) == 1 &&
+					sourceOf(function.Type.Params.List[0].Type) == "*testing.T"
+			}
 			for _, statement := range function.Body.List {
 				expression, isExpression := statement.(*ast.ExprStmt)
 				if isExpression && sourceOf(expression.X) == "t.Parallel()" {
 					record.parallel = true
 				}
 			}
+
 			// A name the function declares itself (a parameter, a := or var, a
 			// range variable) shadows the production variable of the same name;
 			// an assignment to it is local and is not a reason.
@@ -802,19 +919,18 @@ func TestEveryTestThatReachesSharedProcessStateStaysSerial(t *testing.T) {
 						record.reasons["calls "+sourceOf(value)] = true
 					}
 				case *ast.CallExpr:
-					if callee, isIdentifier := value.Fun.(*ast.Ident); isIdentifier {
+					switch callee := value.Fun.(type) {
+					case *ast.Ident:
 						record.calls[callee.Name] = true
+					case *ast.SelectorExpr:
+						record.calls[callee.Sel.Name] = true
 					}
 				}
 				return true
 			})
-			functions[function.Name.Name] = record
 		}
 	}
 
-	// Reasons flow from a helper to every function that calls it, to a fixpoint,
-	// so a test that reaches shared state through lifecycleTestCommand or
-	// renderHelp carries the helper's reason with the helper's name on it.
 	for changed := true; changed; {
 		changed = false
 		for _, function := range functions {
@@ -836,9 +952,13 @@ func TestEveryTestThatReachesSharedProcessStateStaysSerial(t *testing.T) {
 			}
 		}
 	}
+	return functions
+}
 
-	reasoned := []string{}
-	violations := []string{}
+// serialVerdicts lists, sorted, the test functions that carry at least one
+// reason, and among them the ones that also start with t.Parallel, each with
+// its reasons spelled out.
+func serialVerdicts(functions map[string]*reachRecord) (reasoned, violations []string) {
 	for name, function := range functions {
 		if !function.isTest || len(function.reasons) == 0 {
 			continue
@@ -855,22 +975,7 @@ func TestEveryTestThatReachesSharedProcessStateStaysSerial(t *testing.T) {
 	}
 	sort.Strings(reasoned)
 	sort.Strings(violations)
-
-	// Two anchors keep the derivation honest: a test that executes rootCmd and
-	// the one test that sets the environment must both be found, or the walk
-	// has stopped seeing the state it exists to see.
-	require.Contains(t, reasoned, "TestLifecycleCommandReportsStdoutWriteFailureAfterDurableCommit",
-		"the in-process stdout-failure proof executes rootCmd and must be found by this walk; if it "+
-			"was renamed, rename it here, and if it is missing, the walk no longer sees command references")
-	require.Contains(t, reasoned, "TestHookEnvironmentReadsTheRealProcessEnvironment",
-		"the one environment-reading test calls t.Setenv and must be found by this walk; if it was "+
-			"renamed, rename it here, and if it is missing, the walk no longer sees environment calls")
-
-	assert.Empty(t, violations,
-		"these tests use t.Parallel and reach state the whole process shares. Running two of them "+
-			"at once gives a wrong store or a wrong stream with no pointer to the cause, and a data "+
-			"race under -race only when they interleave. Remove t.Parallel, or stop reaching the "+
-			"named state (own store, fresh command, injected environment)")
+	return reasoned, violations
 }
 
 // buildSettingsOf reads the build settings the Go toolchain recorded in a
