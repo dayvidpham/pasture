@@ -909,9 +909,10 @@ func TestTheRecoverIsInstalledBeforeAnythingElseRuns(t *testing.T) {
 // The pin makes all three fail by NAME in milliseconds instead, and it is the
 // only guard the barrier drift has at all.
 //
-// The assertion is structural because there is nothing to observe: each seam
-// is correct by being wired, and a wrong wiring produces no value a table can
-// read.
+// The assertion is structural because the barrier drift has nothing to
+// observe, and the other two are observable only after real seconds and
+// without a name: each seam is correct by being wired, so the pin reads the
+// wiring itself.
 func TestTheProductionPathWiresThePassThroughBarrierAndTheProductionTier(t *testing.T) {
 	t.Parallel()
 
