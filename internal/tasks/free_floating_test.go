@@ -1,17 +1,17 @@
 package tasks_test
 
-// free_floating_test.go — Unit / integration tests for the SLICE-9 free-
-// floating event recording helpers (RecordGitEvent / RecordSkillEvent /
-// RecordSessionEvent).
+// free_floating_test.go — Unit / integration tests for the free-floating
+// event recording helpers (RecordGitEvent / RecordSkillEvent /
+// RecordSessionEvent in internal/tasks/free_floating.go).
 //
-// PROPOSAL-2 §11 Scenario 6 (free-floating git event recording, writer side)
-// is the headline scenario; the reader-side CLI assertion lives in S6's
-// subprocess CLI tests. Until S6 lands, these tests verify the same end state
-// by querying context_edges directly via raw SQL.
+// The headline behaviour is the writer side of free-floating git event
+// recording: an event recorded outside any epoch gets a GitContext edge and
+// no EpochContext edge. These tests verify that end state by querying
+// context_edges directly via raw SQL, independent of the reader CLI.
 //
-// Per pasture/CLAUDE.md and IMPL_PLAN §1.2: file-backed `t.TempDir()` only —
-// never in-memory SQLite (which bypasses WAL / busy_timeout / fsync, the very
-// mechanisms D11 relies on).
+// File-backed `t.TempDir()` only — never in-memory SQLite, which bypasses
+// WAL / busy_timeout / fsync, the very mechanisms the shared-file writer
+// discipline relies on.
 
 import (
 	"context"
@@ -65,7 +65,7 @@ func openFreeFloatingFixture(t *testing.T) (protocol.TaskTracker, *sql.DB, strin
 
 // queryContextEdges returns all context_edges rows for the (kind, contextId)
 // pair. Used by tests that want to verify the writer-side end state without
-// depending on the (not-yet-landed) S6 reader CLI.
+// depending on the reader CLI.
 func queryContextEdges(t *testing.T, dbPath string, kind protocol.ContextKind, contextId string) []contextEdgeRow {
 	t.Helper()
 	verifyDB, err := sql.Open("sqlite", dbPath)
@@ -106,7 +106,7 @@ type contextEdgeRow struct {
 // queryContextEdgesByEvent returns all context_edges rows for the given
 // (eventId, kind) pair via a fresh verification handle. Used to assert
 // non-existence of edges for a specific kind without depending on the
-// tracker.EventContexts code path (which is independently tested by S5).
+// tracker.EventContexts code path (which tracker_test.go tests on its own).
 func queryContextEdgesByEvent(t *testing.T, dbPath string, eventId int64, kind protocol.ContextKind) []contextEdgeRow {
 	t.Helper()
 	verifyDB, err := sql.Open("sqlite", dbPath)
@@ -137,7 +137,7 @@ func queryContextEdgesByEvent(t *testing.T, dbPath string, eventId int64, kind p
 
 // queryAuditEvent returns the audit_events row by id; t.Fatal if missing.
 //
-// Post-S4 (v4 schema): audit_events.epoch_id is gone; epoch attachment is
+// From schema version 4 on, audit_events.epoch_id is gone; epoch attachment is
 // recovered via context_edges with kind='EpochContext'. The LEFT JOIN
 // keeps row.epochId empty when the event has no epoch attachment (the
 // free-floating event case), preserving the assertion semantics this
@@ -176,7 +176,7 @@ type auditEventRow struct {
 	eventType string
 }
 
-// ─── BDD Scenario 6: Free-floating git event recording (writer side) ─────────
+// ─── Recording a git event outside an epoch (writer side) ────────────────────
 //
 // Given the unified system with no active EpochWorkflow,
 // When a git commit hook fires through tasks.RecordGitEvent (which calls
@@ -188,7 +188,7 @@ type auditEventRow struct {
 // Should not the event require an epoch_id column or fail because no epoch
 //   is active.
 
-func TestScenario6_FreeFloatingGitEventRecording(t *testing.T) {
+func TestRecordingAGitEventOutsideAnEpochAttachesOnlyAGitContext(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
@@ -213,7 +213,8 @@ func TestScenario6_FreeFloatingGitEventRecording(t *testing.T) {
 	if row.eventType != string(tasks.EventGitCommit) {
 		t.Errorf("audit_events.event_type = %q, want %q", row.eventType, tasks.EventGitCommit)
 	}
-	// epoch_id should be empty (not NULL — NOT NULL constraint applies until S4 drops the column)
+	// epoch_id must be empty: queryAuditEvent derives it from an EpochContext
+	// edge, and a free-floating event has none.
 	if row.epochId != "" {
 		t.Errorf("audit_events.epoch_id = %q, want \"\" (free-floating event)", row.epochId)
 	}
@@ -228,10 +229,8 @@ func TestScenario6_FreeFloatingGitEventRecording(t *testing.T) {
 	}
 
 	// ─── Then: NO context_edges row of kind=EpochContext exists ────────
-	// The slice spec calls this out explicitly: "assert no context_edges row
-	// of kind=EpochContext exists for this event." We query the raw table
-	// rather than tracker.EventContexts to keep the assertion robust against
-	// other parallel slices (S3) that may rewrite SELECTed columns.
+	// We query the raw table rather than tracker.EventContexts so this
+	// assertion does not depend on the SELECT projection that method uses.
 	epochEdges := queryContextEdgesByEvent(t, dbPath, eventId, protocol.ContextEpoch)
 	if len(epochEdges) != 0 {
 		t.Errorf("expected zero ContextEpoch edges for free-floating event %d, got %d", eventId, len(epochEdges))
@@ -251,15 +250,11 @@ func TestScenario6_FreeFloatingGitEventRecording(t *testing.T) {
 
 	// Note: tracker.Timeline(GitContext, sha) — the read path that
 	// `pasture task events --context-kind=GitContext --context-id=<sha>`
-	// will route through once S6's reader CLI lands — is exercised by S5's
-	// own test suite (TestScenario7_MultiContextAttachment etc.) and by the
-	// S6 worker's CLI subprocess tests. We do NOT re-assert it here because
-	// the Timeline SQL projection currently includes audit_events.role,
-	// which a parallel S3 migration drops; depending on slice landing order
-	// this test would fail for reasons unrelated to S9's writer-side work.
-	// The writer-side contract (the audit_events row + the context_edges
-	// row) is fully verified above via raw SQL — that is the contract S9
-	// owns (per the slice scope: "writer side; reader CLI side in S6").
+	// routes through — is exercised by tracker_test.go
+	// (TestAnEventAttachedToTwoContextsAppearsOnBothTimelines) and by the
+	// CLI subprocess tests under cmd/pasture. It is not re-asserted here:
+	// the writer-side contract (the audit_events row + the context_edges
+	// row) is fully verified above via raw SQL.
 }
 
 // ─── RecordSkillEvent: ContextSkill end-to-end ───────────────────────────────
@@ -328,12 +323,12 @@ func TestRecordSessionEvent_RecordsContextSessionEdge(t *testing.T) {
 	}
 }
 
-// ─── Multi-context attachment piggyback (cross-ref Scenario 7) ───────────────
+// ─── Multi-context attachment piggyback ──────────────────────────────────────
 //
 // A post-epoch git commit citing epoch X gets BOTH a ContextGit edge (from
 // RecordGitEvent) AND a ContextEpoch edge (from a follow-up AttachContext
-// call). The slice description explicitly notes this case. We verify the
-// helper returns an event id usable for the follow-up attach.
+// call). We verify the helper returns an event id usable for the follow-up
+// attach.
 
 func TestRecordGitEvent_PiggybackEpochContext(t *testing.T) {
 	t.Parallel()
@@ -343,7 +338,7 @@ func TestRecordGitEvent_PiggybackEpochContext(t *testing.T) {
 
 	const (
 		sha     = "deadbeefcafebabe1234567890abcdef12345678"
-		epochId = "aura-plugins--01968a3c-ffff-7000-8000-000000000099"
+		epochId = "epoch--01968a3c-ffff-7000-8000-000000000099"
 	)
 
 	eventId, err := tasks.RecordGitEvent(
@@ -376,7 +371,7 @@ func TestRecordGitEvent_PiggybackEpochContext(t *testing.T) {
 	}
 
 	// Both kinds visible at the SQL layer too (raw assertions don't depend
-	// on the SELECT projection that S3's WIP migration is reshaping).
+	// on the SELECT projection tracker.EventContexts uses).
 	gitRows := queryContextEdges(t, dbPath, protocol.ContextGit, sha)
 	if len(gitRows) != 1 || gitRows[0].eventId != eventId {
 		t.Errorf("context_edges (Git, %q) = %v, want one row with event_id=%d", sha, gitRows, eventId)
@@ -469,13 +464,13 @@ func TestRecordSessionEvent_RejectsEmptySessionId(t *testing.T) {
 // SELECT MAX(id) workaround (the edge could be attached to a different
 // goroutine's higher-id row, silently misattributing context).
 //
-// History: Phase 10 W3's free_floating.go fix had to drop this assertion
-// because tracker.RecordEventReturningId recovered the id via SELECT MAX(id)
-// after the INSERT, and concurrent writes really did return duplicate ids
-// to two callers (D11-bounded race, observable under -race in CI). Phase 11
-// R1-B (commit cf6c1a9) extended audit.Trail with RecordEventReturningId
-// that uses sql.Result.LastInsertId from the SAME INSERT statement, so the
-// returned id is now race-safe under any concurrency level. The
+// History: an earlier free_floating.go had to drop this assertion because
+// tracker.RecordEventReturningId recovered the id via SELECT MAX(id) after
+// the INSERT, and concurrent writes really did return duplicate ids to two
+// callers (observable under -race in CI). Commit cf6c1a9 extended
+// audit.Trail with RecordEventReturningId that uses sql.Result.LastInsertId
+// from the SAME INSERT statement, so the returned id is now race-safe under
+// any concurrency level. The
 // per-statement LastInsertId guarantee is regression-tested at the storage
 // boundary by TestSqliteAuditTrail_RecordEventReturningId_ConcurrentUnique
 // (sqlite_test.go) and TestInMemoryAuditTrail_RecordEventReturningId_ConcurrentUnique
@@ -533,14 +528,14 @@ func TestRecordGitEvent_ConcurrentBurst(t *testing.T) {
 	}
 
 	// (1) Per-call uniqueness — every goroutine must have received a distinct
-	// event_id. This is the Phase 11 R1-C re-tightened assertion: pre-R1-B
-	// (when tracker.RecordEventReturningId used SELECT MAX(id) under the hood)
-	// this would intermittently fail because two goroutines could observe the
-	// same MAX(id) between their INSERT and SELECT. Post-R1-B (cf6c1a9) the
-	// per-statement sql.Result.LastInsertId guarantee makes this race-free.
+	// event_id. Before commit cf6c1a9 (when tracker.RecordEventReturningId
+	// used SELECT MAX(id) under the hood) this would intermittently fail
+	// because two goroutines could observe the same MAX(id) between their
+	// INSERT and SELECT. Since that commit the per-statement
+	// sql.Result.LastInsertId guarantee makes this race-free.
 	//
-	// If this assertion fails, the per-statement LastInsertId guarantee from
-	// R1-B has regressed — first check audit.SqliteAuditTrail.RecordEventReturningId
+	// If this assertion fails, that per-statement LastInsertId guarantee has
+	// regressed — first check audit.SqliteAuditTrail.RecordEventReturningId
 	// (sqlite.go) and its regression test
 	// TestSqliteAuditTrail_RecordEventReturningId_ConcurrentUnique.
 	seen := make(map[int64]int, N)
@@ -550,7 +545,7 @@ func TestRecordGitEvent_ConcurrentBurst(t *testing.T) {
 	for id, count := range seen {
 		if count > 1 {
 			t.Errorf("RecordGitEvent returned duplicate event_id %d to %d concurrent callers; "+
-				"the per-statement LastInsertId guarantee from Phase 11 R1-B (commit cf6c1a9) appears broken — "+
+				"the per-statement LastInsertId guarantee (commit cf6c1a9) appears broken — "+
 				"re-check audit.SqliteAuditTrail.RecordEventReturningId and its regression test "+
 				"TestSqliteAuditTrail_RecordEventReturningId_ConcurrentUnique", id, count)
 		}

@@ -1,29 +1,29 @@
 // Package audit_test — migrate_v3_backfill_test.go
 //
-// BDD-style scenario tests for Slice S3 (PROPOSAL-2 §11):
+// Behaviour tests for the audit-database migrator against the checked-in
+// legacy fixture testdata/legacy_audit_v1.db (1024 events over seven legacy
+// roles):
 //
-//   - Scenario 4: Auto-migration on open with the checked-in fixture
-//     legacy_audit_v1.db. Asserts post-migration invariants on the v3
-//     output: every event has agent_id, every distinct legacy role
-//     produced exactly one agents_software row, integrity_check is "ok",
-//     row count is exactly 1024, and re-running Migrate is a no-op.
+//   - Opening a legacy database migrates it to the current schema and
+//     backfills one software agent per legacy role. Every event keeps its
+//     row and gains an agent_id, integrity_check is "ok", and a second open
+//     changes nothing.
 //
-//   - Scenario 11: Crash mid-migration recovery via the test-only
-//     pasture-migrate-crash binary. Spawns the binary with os/exec.Cmd
-//     against a fixture copy; observes the non-zero exit; reopens via
-//     audit.NewSqliteAuditTrail and asserts the file is either at v=2
-//     (rolled back, then re-migrated cleanly) or v=3 (WAL flushed
-//     before kill); never half-migrated.
+//   - A crash in the middle of a migration leaves the database whole. The
+//     test-only pasture-migrate-crash binary (cmd/pasture-migrate-crash) is
+//     killed inside a migration transaction; the next open finds the file
+//     either rolled back or fully committed, never half-migrated, and
+//     finishes the upgrade without duplicating agents.
 //
-//   - Scenario 12: Concurrent-migrator race — spawns two pastured
-//     processes simultaneously against the same v1 db, waits until both emit
-//     the daemon-ready log, and asserts exactly one process migrated
-//     (agents_software count == 7, audit_events count == 1024, integrity
-//     check ok).
+//   - Two daemons opening one legacy database migrate it exactly once. Two
+//     pastured processes start against the same v1 file; the file ends with
+//     seven legacy-role agents (not fourteen), 1024 events and a clean
+//     integrity check, and the process that lost the open either serves the
+//     migrated database or exits with a bounded, actionable diagnostic.
 //
-// All tests are file-backed via t.TempDir() per pasture/CLAUDE.md and
-// IMPL_PLAN §1.2: in-memory SQLite would bypass WAL/busy_timeout/fsync,
-// the exact mechanisms D11/§7.10.3 rely on.
+// All tests are file-backed via t.TempDir(): in-memory SQLite would bypass
+// WAL, busy_timeout and fsync, which are the exact mechanisms the migrator's
+// write-lock discipline relies on (internal/audit/migrate.go).
 package audit_test
 
 import (
@@ -122,27 +122,25 @@ func copyFixtureToTemp(t *testing.T, dstName string) string {
 	return dst
 }
 
-// ─── Scenario 4: Auto-migration on open with checked-in fixture ─────────────
+// ─── Opening a legacy database migrates it and backfills agents ─────────────
 
-// TestScenario4_AutoMigrationOnOpen_FixtureBackfill verifies the §11
-// Scenario 4 invariants for the v3 end-state. (S4 will extend this when
-// it lands the v3→v4 step; for now we assert v3.)
+// TestOpeningALegacyDatabaseMigratesItAndBackfillsOneAgentPerRole proves
+// that one NewSqliteAuditTrail call on a legacy v1 file brings it to the
+// current schema and attributes every event to an agent.
 //
-// Given: the fixture file copied to t.TempDir() / "scenario4.db".
+// Given: the fixture file copied to t.TempDir() / "legacy_open.db".
 // When: audit.NewSqliteAuditTrail(<copy>) is called.
-// Then: the migrator runs v1→v2→v3, the file ends up at v3, every
+// Then: the migrator runs every step up to MaxKnownSchemaVersion, every
 //
 //	audit_events row has agent_id populated, every distinct legacy
 //	role produced exactly one agents_software row, PRAGMA
 //	integrity_check returns "ok", and SELECT COUNT(*) FROM
 //	audit_events is exactly 1024.
 //
-// Should not: any data be lost, any row be duplicated, or the migration
-//
-//	partially apply.
-func TestScenario4_AutoMigrationOnOpen_FixtureBackfill(t *testing.T) {
+// Should not: lose a row, duplicate a row, or apply a step partially.
+func TestOpeningALegacyDatabaseMigratesItAndBackfillsOneAgentPerRole(t *testing.T) {
 	t.Parallel()
-	dst := copyFixtureToTemp(t, "scenario4.db")
+	dst := copyFixtureToTemp(t, "legacy_open.db")
 
 	// ── When ────────────────────────────────────────────────────────────
 	trail, err := audit.NewSqliteAuditTrail(dst)
@@ -223,21 +221,23 @@ func TestScenario4_AutoMigrationOnOpen_FixtureBackfill(t *testing.T) {
 		t.Errorf("PRAGMA integrity_check = %q, want %q", ic, "ok")
 	}
 
-	// 6. audit_events.role column gone (S3 dropped it via table rebuild).
-	//    audit_events.epoch_id column gone (S4 dropped it via table rebuild).
+	// 6. audit_events.role column gone (the v2→v3 table rebuild dropped it,
+	//    internal/audit/migrate_v2_v3.go). audit_events.epoch_id column gone
+	//    (the v3→v4 table rebuild dropped it, internal/audit/migrate_v3_v4.go).
 	cols := tableInfo(t, db, "audit_events")
 	for _, c := range cols {
 		if c.name == "role" {
-			t.Error("audit_events.role still present post-Migrate; S3 table-rebuild failed to drop it")
+			t.Error("audit_events.role still present after Migrate; the v2→v3 table rebuild did not drop it")
 		}
 		if c.name == "epoch_id" {
-			t.Error("audit_events.epoch_id still present post-Migrate; S4 table-rebuild failed to drop it")
+			t.Error("audit_events.epoch_id still present after Migrate; the v3→v4 table rebuild did not drop it")
 		}
 	}
 
 	// 7. Schema meta records the binary's MaxKnownSchemaVersion. Read from
 	//    the constant so this assertion follows the binary as new v* steps
-	//    land. Asserts >= 4 as the published guarantee from S4.
+	//    land. Asserts >= 4 because the epoch_id check above only holds from
+	//    version 4 on.
 	var version int
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		t.Fatalf("MAX(version): %v", err)
@@ -247,7 +247,7 @@ func TestScenario4_AutoMigrationOnOpen_FixtureBackfill(t *testing.T) {
 			version, audit.MaxKnownSchemaVersion)
 	}
 	if audit.MaxKnownSchemaVersion < 4 {
-		t.Errorf("audit.MaxKnownSchemaVersion = %d, want >= 4 (S4 published guarantee)",
+		t.Errorf("audit.MaxKnownSchemaVersion = %d, want >= 4 (the epoch_id drop asserted above landed in version 4)",
 			audit.MaxKnownSchemaVersion)
 	}
 
@@ -279,13 +279,12 @@ func TestScenario4_AutoMigrationOnOpen_FixtureBackfill(t *testing.T) {
 	}
 }
 
-// TestScenario4_ReRunMigrate_NoDuplicateAgents verifies that calling
-// Migrate again on an already-v3 file does not double the
-// agents_software rows. This is the §11 Scenario 14 idempotency
-// contribution from S3.
-func TestScenario4_ReRunMigrate_NoDuplicateAgents(t *testing.T) {
+// TestOpeningAMigratedDatabaseAgainCreatesNoDuplicateAgents proves that a
+// second open of an already-current file is a no-op for the backfill: the
+// find-or-create step does not add a second agents_software row per role.
+func TestOpeningAMigratedDatabaseAgainCreatesNoDuplicateAgents(t *testing.T) {
 	t.Parallel()
-	dst := copyFixtureToTemp(t, "scenario4_rerun.db")
+	dst := copyFixtureToTemp(t, "legacy_reopen.db")
 
 	// First open + migrate.
 	trail1, err := audit.NewSqliteAuditTrail(dst)
@@ -323,17 +322,17 @@ func TestScenario4_ReRunMigrate_NoDuplicateAgents(t *testing.T) {
 		t.Fatalf("second agents count: %v", err)
 	}
 	if secondCount != firstCount {
-		t.Errorf("second migration changed legacy-role agents count: %d → %d (Scenario 14 idempotency violated)",
+		t.Errorf("second migration changed legacy-role agents count: %d → %d (a second open must not touch the agents table)",
 			firstCount, secondCount)
 	}
 }
 
-// ─── Scenario 11: Crash mid-migration recovery ──────────────────────────────
+// ─── A crash mid-migration leaves the database whole ────────────────────────
 
 // crashBinaryPath returns the absolute path of the pasture-migrate-crash
 // binary, building it on demand if it doesn't already exist. The binary
-// is required by Scenario 11 to inject an OS-level kill in the middle
-// of a SQLite transaction (Go's defer/panic cannot simulate this).
+// exists to inject an OS-level kill in the middle of a SQLite transaction
+// (Go's defer/panic cannot simulate this).
 //
 // Build-on-demand keeps the test self-contained: contributors who run
 // `go test ./internal/audit/...` directly (without first running
@@ -365,26 +364,25 @@ func crashBinaryPath(t *testing.T) string {
 	return crashBinaryCache.path
 }
 
-// TestScenario11_CrashMidMigration_RolledBackCleanly verifies the §11
-// Scenario 11 invariants. A child pasture-migrate-crash process is
-// spawned against a fixture copy; we observe its non-zero exit, then
-// reopen via NewSqliteAuditTrail and assert the file is in one of two
-// acceptable end-states.
+// TestACrashMidMigrationLeavesTheDatabaseWholeAndTheNextOpenFinishesTheUpgrade
+// spawns pasture-migrate-crash against a fixture copy, observes its non-zero
+// exit, then reopens the file through NewSqliteAuditTrail and asserts the
+// file was in one of two acceptable end-states, never a third.
 //
 // The two acceptable end-states are:
 //
 //	(a) MAX(version) = 2 (rolled back; the v3 transaction was uncommitted
 //	    when the OS killed the process, WAL recovery rolled it back).
-//	    Subsequent NewSqliteAuditTrail → audit.Migrate runs the v3 step
-//	    cleanly → MAX(version) becomes 3.
-//	(b) MAX(version) = 3 (acceptable per the scenario: WAL happened to
-//	    flush the audit_schema_meta INSERT before the kill arrived;
-//	    the migration is fully consistent at v3).
+//	    The reopen then runs the v3 step cleanly.
+//	(b) MAX(version) = 3 (the WAL happened to flush the audit_schema_meta
+//	    INSERT before the kill arrived; the migration is fully consistent).
+//
+// Either way the reopen brings the file to MaxKnownSchemaVersion.
 //
 // MUST NOT: the file is half-migrated — MAX(version)=3 AND any
 // audit_events row with NULL agent_id, OR pasture_well_known_agents
 // has rows but version is 2.
-func TestScenario11_CrashMidMigration_RolledBackCleanly(t *testing.T) {
+func TestACrashMidMigrationLeavesTheDatabaseWholeAndTheNextOpenFinishesTheUpgrade(t *testing.T) {
 	t.Parallel()
 	dst := copyFixtureToTemp(t, "crash.db")
 	binPath := crashBinaryPath(t)
@@ -479,9 +477,10 @@ func TestScenario11_CrashMidMigration_RolledBackCleanly(t *testing.T) {
 	}
 }
 
-// TestScenario11_CrashBinary_Validates verifies that the crash binary
-// rejects bad input cleanly (exit 1, actionable stderr).
-func TestScenario11_CrashBinary_Validates(t *testing.T) {
+// TestTheCrashInjectorRefusesBadInputWithExitOneAndADiagnostic proves the
+// crash binary rejects a missing argument and a missing file cleanly: exit
+// 1 and an actionable message on stderr.
+func TestTheCrashInjectorRefusesBadInputWithExitOneAndADiagnostic(t *testing.T) {
 	t.Parallel()
 	binPath := crashBinaryPath(t)
 
@@ -494,9 +493,9 @@ func TestScenario11_CrashBinary_Validates(t *testing.T) {
 	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() != 1 {
 		t.Errorf("crash binary with no args exit = %d, want 1", exitErr.ExitCode())
 	}
-	// L2e (cmd/) rewrote the crash binary's CLI errors to plain language
-	// (Phase 11 R2). The substring is case-insensitive against "Usage:" so
-	// the assertion stays robust if the wording is tweaked further.
+	// The crash binary's CLI errors are plain language. The substring is
+	// matched case-insensitively against "usage:" so the assertion survives
+	// a rewording.
 	if !strings.Contains(strings.ToLower(string(output)), "usage:") {
 		t.Errorf("missing-arg stderr lacks Usage guidance: %q", output)
 	}
@@ -510,16 +509,15 @@ func TestScenario11_CrashBinary_Validates(t *testing.T) {
 	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() != 1 {
 		t.Errorf("crash binary with missing file exit = %d, want 1", exitErr.ExitCode())
 	}
-	// Post-Phase-11-R2: the CLI's "missing file" message uses the plain-
-	// language "no such file" wording surfaced by os.Stat. Match that
-	// substring (case-insensitive) so the test stays in step with the
-	// new error format.
+	// The CLI's missing-file message carries the "no such file" wording that
+	// os.Stat surfaces. Match that substring case-insensitively so the test
+	// stays in step with the error format.
 	if !strings.Contains(strings.ToLower(string(output)), "no such file") {
 		t.Errorf("missing-file stderr lacks 'no such file' diagnostic: %q", output)
 	}
 }
 
-// ─── Scenario 12: Concurrent-migrator race ───────────────────────────────────
+// ─── Two daemons opening one legacy database ─────────────────────────────────
 
 // pastedBinaryPath returns the absolute path of a freshly-built pastured
 // binary, building it on demand.  The build-on-demand approach keeps the
@@ -617,24 +615,24 @@ func isAcceptedLoserOutcome(output string) bool {
 	return false
 }
 
-// TestScenario12_ConcurrentMigratorRace verifies the §11 Scenario 12
-// invariants: when two pastured processes start against the same v1 db
-// simultaneously, exactly one performs the migration and the other
-// either no-ops (saw the completed migration) or hits the §7.10.3
-// busy-retry ceiling.
+// TestTwoDaemonsOpeningOneLegacyDatabaseMigrateItOnceAndTheLoserFailsSafely
+// proves that when two pastured processes start against the same v1 file at
+// the same moment, exactly one performs the migration. The other either reads
+// the completed migration and reaches readiness, or exits before readiness
+// with one of the bounded, actionable outcomes in acceptedLoserOutcomes; any
+// other early exit fails the test.
 //
-// The --idle-after-migrate=2s flag (landed in S7, aura-plugins-9ye50)
-// widens the window during which a second process can race the first.
-//
-// After both processes exit (both will exit non-zero because the test
-// environment runs no daemon), the db is opened via
-// audit.NewSqliteAuditTrail and the following invariants are asserted:
+// Both processes are signalled to stop once each has reached its terminal
+// start-up state. The file is then inspected as the daemons left it, and
+// again after this test reopens it through audit.NewSqliteAuditTrail; both
+// observations must show:
 //
 //   - agents_software legacy-role count == 7 (NOT 14 — exactly one process
 //     migrated; the idempotent find-or-create did not double-insert).
 //   - audit_events row count == 1024 (no data loss across the race).
 //   - PRAGMA integrity_check == "ok".
-func TestScenario12_ConcurrentMigratorRace(t *testing.T) {
+//   - MAX(version) == MaxKnownSchemaVersion.
+func TestTwoDaemonsOpeningOneLegacyDatabaseMigrateItOnceAndTheLoserFailsSafely(t *testing.T) {
 	t.Parallel()
 	// Build pastured (or reuse an already-built copy in this test run).
 	binPath := pastedBinaryPath(t)
@@ -732,8 +730,8 @@ func TestScenario12_ConcurrentMigratorRace(t *testing.T) {
 	}
 
 	// Signal both processes to stop.  If a process already exited (e.g. it
-	// hit the Scenario 12 busy-retry ceiling and returned exit 5/1), Signal
-	// returns an error we can safely ignore.
+	// hit the migrator's busy-retry ceiling and exited 5), Signal returns an
+	// error we can safely ignore.
 	if cmd1 != nil {
 		_ = cmd1.Process.Signal(os.Interrupt)
 	}
@@ -840,39 +838,24 @@ func assertRaceInvariants(t *testing.T, db *sql.DB, when string) {
 	}
 }
 
-// ─── Direct unit test of the busy-retry path (no daemon dependency) ─────────
+// ─── Direct unit test of the busy-retry error shape (no daemon dependency) ──
 
-// TestRunStep_BusyRetryReturnsScenario12Error exercises the §7.10.3 retry
-// ceiling without spawning real subprocesses. A second sql.Open on the
-// same file (with _txlock=immediate) acquires the write lock; we then
-// call audit.NewSqliteAuditTrail in a goroutine and assert it returns
-// the actionable Scenario 12 error after the busy ceiling elapses.
+// TestRunStep_BusyRetry_ErrorShape pins the shape of the error the migrator
+// reports when its busy-retry ceiling elapses: a *StructuredError of
+// category CategoryStorage whose What names the other process, mapping to
+// exit code 5.
 //
-// We don't use the real 30-second ceiling here — the test would be too
-// slow. Instead we verify the error SHAPE on a short-circuit path: open
-// a fresh DB, hold an IMMEDIATE transaction in this goroutine, and call
-// NewSqliteAuditTrail with a context that's already cancelled.
-//
-// NOTE: this is a thin verification of the wiring — the full 30-second
-// ceiling is verified by Scenario 12 once S7 lands.
+// The real 30-second ceiling (busyRetryCeiling in internal/audit/migrate.go)
+// is not run here — the test would be too slow, and reproducing the
+// busy-retry timing deterministically in a unit test is brittle. The error
+// value is built in this test with the fields beginImmediateWithRetry fills
+// in, so what is pinned is the category, the What text and the exit-code
+// mapping, not the retry loop. The loop itself runs in the two-daemon test
+// above.
 func TestRunStep_BusyRetry_ErrorShape(t *testing.T) {
 	t.Parallel()
-	// This test exercises the error-shape contract: when a busy timeout
-	// fires, the returned error must be a *StructuredError of category
-	// CategoryStorage with the specific What field per §7.10.3.
-	//
-	// We synthesise the error directly because reproducing the busy-
-	// retry timing deterministically in a unit test is brittle.
-	//
-	// The error shape is asserted to match the spec's exact wording
-	// (PROPOSAL-2 §7.10.3 paragraph 2, second outcome).
 	wantWhat := "Another pasture process is already upgrading the audit database."
 
-	// Verify the error shape would be returned by inspecting the
-	// audit-package error message — we synthesise the call by reading
-	// the source of beginImmediateWithRetry. This is a minimal
-	// structural test; the real busy-retry timing is verified by
-	// Scenario 12 once S7 lands.
 	se := &pasterrors.StructuredError{
 		Category: pasterrors.CategoryStorage,
 		What:     wantWhat,
@@ -890,11 +873,11 @@ func TestRunStep_BusyRetry_ErrorShape(t *testing.T) {
 			"     pasture task agents list",
 	}
 	if pasterrors.ExitCode(se) != 5 {
-		t.Errorf("Scenario 12 error exit code = %d, want 5", pasterrors.ExitCode(se))
+		t.Errorf("busy-ceiling error exit code = %d, want 5", pasterrors.ExitCode(se))
 	}
 	var got *pasterrors.StructuredError
 	if !stderrors.As(se, &got) {
-		t.Fatalf("Scenario 12 error does not unwrap to *StructuredError")
+		t.Fatalf("busy-ceiling error does not unwrap to *StructuredError")
 	}
 	if got.Category != pasterrors.CategoryStorage {
 		t.Errorf("Category = %q, want %q", got.Category, pasterrors.CategoryStorage)

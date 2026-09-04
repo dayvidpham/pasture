@@ -2,14 +2,14 @@ package tasks_test
 
 // tracker_test.go — Unit + integration tests for the TaskTracker wrapper.
 //
-// PROPOSAL-2 §10.3 (testing strategy): the system under test is the
-// trackerImpl wrapper. Its dependencies (provenance.Tracker, audit.Trail) may
-// be mocked when the test only cares about forwarding correctness; the
-// pasture-only methods (SetAgentCategories, AttachContext, etc.) require a
-// real *sql.DB so the SQL layer is exercised end-to-end.
+// The system under test is the trackerImpl wrapper (internal/tasks/tracker.go).
+// Its dependencies (provenance.Tracker, audit.Trail) may be mocked when the
+// test only cares about forwarding correctness; the pasture-only methods
+// (SetAgentCategories, AttachContext, etc.) require a real *sql.DB so the SQL
+// layer is exercised end-to-end.
 //
-// Per pasture/CLAUDE.md and IMPL_PLAN §1.2: file-backed `t.TempDir()` only —
-// never in-memory SQLite (which bypasses WAL / busy_timeout / fsync).
+// File-backed `t.TempDir()` only — never in-memory SQLite (which bypasses
+// WAL / busy_timeout / fsync).
 
 import (
 	"context"
@@ -61,9 +61,10 @@ func registerSoftwareAgentForTest(t *testing.T, tracker protocol.TaskTracker, na
 }
 
 // recordEventForTest records one audit event and returns the event ID via a
-// direct SELECT (audit.Trail.RecordEvent doesn't return the row ID; we need
-// it for AttachContext). Adequate for tests; production callers will get the
-// ID from a future audit-side enhancement (out of scope for S5).
+// direct SELECT MAX(id) (audit.Trail.RecordEvent doesn't return the row ID;
+// we need it for AttachContext). Adequate for these serial tests; production
+// callers use RecordEventReturningId, which returns the id from the INSERT
+// itself.
 func recordEventForTest(t *testing.T, ctx context.Context, tracker protocol.TaskTracker, dbPath string, ev protocol.AuditEvent) int64 {
 	t.Helper()
 	if err := tracker.RecordEvent(ctx, ev); err != nil {
@@ -82,17 +83,17 @@ func recordEventForTest(t *testing.T, ctx context.Context, tracker protocol.Task
 	return id
 }
 
-// ─── BDD Scenario 1: Single .db file with epoch alignment ────────────────────
+// ─── One database file holds tasks, events and the epoch edge between them ───
 //
 // Given a fresh ~/.local/share/pasture/pasture.db,
-// When the user creates a REQUEST task, records one audit event, and attaches
+// When the user creates a request task, records one audit event, and attaches
 //   an EpochContext edge,
 // Then the database contains: a row in `tasks` (Provenance), one row in
 //   audit_events (audit), and a matching row in context_edges with
 //   kind=EpochContext and context_id=<task-id-string>,
 // Should not there be a separate audit.db or provenance.db file.
 
-func TestScenario1_SingleDBFileWithEpochAlignment(t *testing.T) {
+func TestOneDatabaseFileHoldsTheTaskItsEventAndTheEpochEdgeThatLinksThem(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
@@ -126,11 +127,11 @@ func TestScenario1_SingleDBFileWithEpochAlignment(t *testing.T) {
 		t.Errorf("unexpected sidecar file in tempDir: %q (only pasture.db[-wal,-shm] are permitted)", base)
 	}
 
-	// ─── When: create REQUEST task via Provenance ──────────────────────
+	// ─── When: create a request task via Provenance ────────────────────
 	req, err := tracker.Create(
-		"aura-plugins-test",
+		"pasture-test",
 		"Build X",
-		"Scenario 1 test request",
+		"single-file test request",
 		provenance.TaskTypeFeature,
 		provenance.PriorityMedium,
 		provenance.PhaseRequest,
@@ -205,23 +206,23 @@ func TestScenario1_SingleDBFileWithEpochAlignment(t *testing.T) {
 	}
 }
 
-// ─── BDD Scenario 7: Multi-context attachment ────────────────────────────────
+// ─── An event attached to two contexts appears on both timelines ─────────────
 //
-// Given a workflow running for epochId=E1 with active slice S1,
-// When an event is recorded and attached to BOTH ContextEpoch=E1 and
-//   ContextSlice=S1 via two AttachContext calls,
-// Then Timeline(ContextEpoch, E1) AND Timeline(ContextSlice, S1) both include
-//   the event.
+// Given a workflow running for one epoch id with one active slice id,
+// When an event is recorded and attached to BOTH ContextEpoch=<epoch id> and
+//   ContextSlice=<slice id> via two AttachContext calls,
+// Then Timeline(ContextEpoch, <epoch id>) AND Timeline(ContextSlice, <slice id>)
+//   both include the event.
 // Should not the event be findable only via one context.
 
-func TestScenario7_MultiContextAttachment(t *testing.T) {
+func TestAnEventAttachedToTwoContextsAppearsOnBothTimelines(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
 	tracker, dbPath := openTrackerForTest(t)
 	const (
-		epochId = "aura-plugins--01968a3c-1234-7000-8000-000000000001"
-		sliceId = "aura-plugins--01968a3c-1234-7000-8000-000000000002"
+		epochId = "epoch--01968a3c-1234-7000-8000-000000000001"
+		sliceId = "slice--01968a3c-1234-7000-8000-000000000002"
 	)
 
 	ev := protocol.AuditEvent{
@@ -229,7 +230,7 @@ func TestScenario7_MultiContextAttachment(t *testing.T) {
 		Phase:     protocol.PhaseWorkerSlices,
 		Role:      "worker",
 		EventType: protocol.EventSliceStarted,
-		Payload:   map[string]any{"slice": "S5"},
+		Payload:   map[string]any{"slice": "slice-a"},
 		Timestamp: time.Now().UTC(),
 	}
 	eventId := recordEventForTest(t, ctx, tracker, dbPath, ev)
