@@ -100,7 +100,7 @@ func proceedResponse(t *testing.T) backend.HostResponse {
 		}
 	}
 	require.NotZero(t, event.Kind)
-	capture := codexingress.Parse(raw, event, "0.146.0", model.OccurrenceEnvelopeRef{})
+	capture := codexingress.Parse(raw, event, registration.Codex0_146_0().Version, model.OccurrenceEnvelopeRef{})
 	require.Equal(t, model.CaptureValid, capture.Disposition)
 	l1, identities, err := codexfrontend.Bind(capture.Delivery.Event, capture.Delivery.Bindings)
 	require.NoError(t, err)

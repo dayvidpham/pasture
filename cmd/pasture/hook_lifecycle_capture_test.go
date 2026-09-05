@@ -20,6 +20,11 @@ import (
 	"github.com/dayvidpham/pasture/internal/tasks"
 )
 
+// captureFileName is the file the capture sink writes for one Claude Code
+// Notification payload at the recorded host version:
+// <harness>_<snake_event>_<version with dots as underscores>.<n>.json.
+var captureFileName = "claude-code_notification_" + strings.ReplaceAll(registration.ClaudeCode2_1_210().Version, ".", "_") + ".1.json"
+
 // captureNoticePrefix is the load-bearing phrase of the one notice the hook
 // prints when it records a session. It is pinned here on the binary as it is
 // pinned on the sink, because this is where an operator reads it.
@@ -66,7 +71,7 @@ func TestCaptureDirectoryRefusalsLeaveTheHostOutcomeUnchanged(t *testing.T) {
 	assert.Equal(t, base.Stdout, inRepo.Stdout)
 	assert.Contains(t, inRepo.Stderr, "which is inside the repository at")
 	assert.NotContains(t, inRepo.Stderr, captureNoticePrefix)
-	_, err = os.Stat(filepath.Join(inside, "claude-code_notification_2_1_210.1.json"))
+	_, err = os.Stat(filepath.Join(inside, captureFileName))
 	assert.ErrorIs(t, err, os.ErrNotExist, "nothing may be written inside the repository")
 
 	outside := t.TempDir()
@@ -75,7 +80,7 @@ func TestCaptureDirectoryRefusalsLeaveTheHostOutcomeUnchanged(t *testing.T) {
 	assert.Equal(t, base.Stdout, accepted.Stdout)
 	assert.Equal(t, 1, strings.Count(accepted.Stderr, captureNoticePrefix+outside), "the notice is printed exactly once per invocation")
 	assert.Contains(t, accepted.Stderr, "is withheld", "a withheld event is captured AND still refused, unchanged")
-	captured, err := os.ReadFile(filepath.Join(outside, "claude-code_notification_2_1_210.1.json"))
+	captured, err := os.ReadFile(filepath.Join(outside, captureFileName))
 	require.NoError(t, err)
 	assert.Equal(t, payload, captured, "the capture is the exact bytes the host wrote")
 }
