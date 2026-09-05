@@ -16,7 +16,6 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/projection"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
-	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/pkg/protocol"
@@ -175,7 +174,14 @@ func commitPreM5V1Record(ctx context.Context, t *testing.T, tracker protocol.Tas
 		t.Fatalf("resolve lifecycle identity: %v", err)
 	}
 
-	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Contract.String())
+	// This record is FROZEN at the host version that wrote it. The literal below
+	// is a historical fact about a record committed by the pre-M5 receipt
+	// service, not a ceiling that moves: it never follows the current host
+	// version root, and a bump of that root must leave this line alone. The id
+	// is used only to build the occurrence envelope of the record this test
+	// commits; it is never compared with the frozen interpreted bytes or with
+	// their sha256 pin.
+	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "claude-code/2.1.210")
 	if err != nil {
 		t.Fatalf("construct runtime contract: %v", err)
 	}
