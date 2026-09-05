@@ -424,7 +424,7 @@ func TestTheCodexDocCommentsStateTheDerivedCounts(t *testing.T) {
 	}{
 		{codexDocComments[0], catalogue, fmt.Sprintf("Of the %d registered Codex events, %d have no authentic capture", counts.registered, counts.withoutCapture)},
 		{codexDocComments[0], catalogue, fmt.Sprintf("The failure mode of every one of the %d rows is read from the runtime Codex profile", counts.registered)},
-		{codexDocComments[0], catalogue, fmt.Sprintf("the two artefacts disagree on the failure mode of %d of the %d rows", counts.failureDiverged, counts.registered)},
+		{codexDocComments[0], catalogue, fmt.Sprintf("the committed manifest rendered from this source and that profile disagree on the failure mode of %d of the %d rows", counts.failureDiverged, counts.registered)},
 		{codexDocComments[0], catalogue, fmt.Sprintf("and this source declares identities for %d of those %d", counts.captureFreeWithIdentity, counts.withoutCapture)},
 		{codexDocComments[0], catalogue, fmt.Sprintf("is complete over all %d registered events", counts.registered)},
 		{codexDocComments[1], frontend, fmt.Sprintf("the same failure mode on all %d of the %d registered events", counts.registered-counts.failureDiverged, counts.registered)},
@@ -434,7 +434,10 @@ func TestTheCodexDocCommentsStateTheDerivedCounts(t *testing.T) {
 	for _, pin := range pins {
 		if !strings.Contains(pin.text, pin.sentence) {
 			t.Errorf("the committed file %s does not state the count the tree derives; it must carry the sentence %q. "+
-				"A count in a doc comment is a claim about the tree: sweep it in the commit that moves it",
+				"A count in a doc comment is a claim about the tree: sweep it in the commit that moves it. "+
+				"EVERY count above is derived from the COMMITTED generated manifest internal/lifecycle/registration/codex_0_153_0.gen.go. "+
+				"So if you have changed internal/runtime/lifecycle_profiles_codex.go or the source catalogue and have not yet run make generate, RUN IT FIRST: "+
+				"the number this message asks for is then measured against a stale manifest, and sweeping the sentence by hand would write a count the next generation undoes",
 				pin.path, pin.sentence)
 		}
 	}
@@ -510,8 +513,11 @@ func TestTheCodexDocCommentsStateTheDerivedCounts(t *testing.T) {
 			"so a read that returned the DECLARED field would satisfy every check above and the pins prove nothing. The derived Codex counts are %+v", counts)
 	}
 	if counts.failureDiverged != 0 || counts.overClaiming != 0 {
-		t.Errorf("the Codex catalogue and the runtime profile disagree on the failure mode of %d rows, %d of them over-claiming a blocking exit code, want none; "+
-			"the catalogue READS that field from the profile, so a disagreement means a row went back to a hand-written arm",
+		t.Errorf("the committed Codex registration manifest and the runtime profile state a different failure mode on %d rows, %d of them claiming a blocking exit code the profile does not hold, want none. "+
+			"The value compared here is the COMMITTED internal/lifecycle/registration/codex_0_153_0.gen.go, and the source it is rendered from, "+
+			"internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go, READS this field from internal/runtime/lifecycle_profiles_codex.go. "+
+			"CHECK THE TWO CAUSES IN THIS ORDER. (1) The profile moved and the manifest was not regenerated: run make generate. That is the ordinary cause, and it is the only one a profile edit on its own can produce. "+
+			"(2) The source catalogue went back to a hand-written arm: restore the read in codexFailureReader there, then run make generate",
 			counts.failureDiverged, counts.overClaiming)
 	}
 	// The blocking population, DERIVED on both sides. The catalogue's blocking
@@ -521,11 +527,13 @@ func TestTheCodexDocCommentsStateTheDerivedCounts(t *testing.T) {
 	// stays green; only a hand-written arm, or an evidence rule that promoted
 	// without a citation, can part them.
 	if !sameRows(counts.catalogueGateRows, counts.evidencedGateRows) {
-		t.Errorf("the Codex catalogue states a blocking exit code on %d of its %d rows %v, and the runtime profile holds %d rows that declare a blocking exit code AND cite host evidence for it %v; "+
-			"these two lists must name the same rows, because the catalogue READS the arm the evidence rule produced, and the rule keeps a blocking arm only where a citation stands. "+
-			"A row in the FIRST list only is a refusal the product cannot perform. A row in the SECOND list only means the catalogue went back to a hand-written arm. "+
+		t.Errorf("the committed Codex registration manifest states a blocking exit code on %d of its %d rows %v, and the runtime profile holds %d rows that declare a blocking exit code AND cite host evidence for it %v; "+
+			"these two lists must name the same rows, because the manifest is rendered from a source catalogue that READS the arm the evidence rule produced, and the rule keeps a blocking arm only where a citation stands. "+
 			"The profile demotes %d declared gates for want of a citation. "+
-			"Repair by citing the host emission site in the FailureEvidence of that row in internal/runtime/lifecycle_profiles_codex.go, or by letting the catalogue read the demoted arm again",
+			"CHECK THE THREE CAUSES IN THIS ORDER. (1) The profile moved and the manifest was not regenerated: run make generate. A citation added to or taken from "+
+			"internal/runtime/lifecycle_profiles_codex.go moves the SECOND list at once and the FIRST list only after generation, so the two lists part until the generator runs. "+
+			"(2) The source catalogue internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go went back to a hand-written arm: restore the read in codexFailureReader, then run make generate. "+
+			"(3) Neither of those, and then a row in the FIRST list only is a refusal the product cannot perform, and a row in the SECOND list only is an arm the manifest has not taken up",
 			len(counts.catalogueGateRows), counts.registered, counts.catalogueGateRows,
 			len(counts.evidencedGateRows), counts.evidencedGateRows, counts.demotedGates)
 	}

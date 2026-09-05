@@ -115,7 +115,8 @@ func codexFailureReader() func(name string) pastureruntime.FailureMode {
 // THE FAILURE MODE IS READ, NOT DECLARED HERE. The failure mode of every one of
 // the 12 rows is read from the runtime Codex profile
 // (internal/runtime/lifecycle_profiles_codex.go) by codexFailureReader above,
-// so the two artefacts disagree on the failure mode of 0 of the 12 rows. Before
+// so the committed manifest rendered from this source and that profile disagree
+// on the failure mode of 0 of the 12 rows. Before
 // that read existed, this source declared a blocking exit code on each of its
 // gate rows while the profile, which every behavior obeys, ran all of them as
 // report-and-continue for want of a host citation. A reader of this file

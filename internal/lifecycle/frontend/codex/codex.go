@@ -9,13 +9,14 @@
 // event without an authentic fixture stays withheld upstream and never reaches
 // Bind in production.
 //
-// MEASURED: the self-contained ingress catalogue
-// (internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go, the source
-// code generation renders into the committed manifest the handler admits with)
-// and the runtime Codex profile (read by Bind) state the same failure mode on
-// all 12 of the 12 registered events, because the catalogue READS that field
-// from the profile. It was written twice before, and the catalogue then claimed
-// a blocking exit code on rows the profile ran as report-and-continue.
+// MEASURED: the committed manifest the handler admits with
+// (internal/lifecycle/registration/codex_0_153_0.gen.go, which code generation
+// renders from the self-contained ingress catalogue
+// internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go) and the
+// runtime Codex profile (read by Bind) state the same failure mode on all 12 of
+// the 12 registered events, because that catalogue READS that field from the
+// profile. It was written twice before, and the catalogue then claimed a
+// blocking exit code on rows the profile ran as report-and-continue.
 //
 // Three axes still hold two descriptions, because the read copies one field and
 // nothing else. The gate-or-observation semantic differs on PostCompact, an
