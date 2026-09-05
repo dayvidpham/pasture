@@ -17,8 +17,8 @@ import (
 
 // The sink's notice and refusals are operator text: sentences a person acts
 // on. The load-bearing phrases are pinned here, and each pin is proved by
-// mutation in the slice report: alter the phrase in capture_sink.go and the
-// matching test turns RED.
+// mutation: alter the phrase in capture_sink.go and the matching test turns
+// RED.
 const (
 	pinNotice           = "capture mode is recording this session to"
 	pinNotCaptured      = "so nothing is captured"

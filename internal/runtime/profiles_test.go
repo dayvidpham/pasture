@@ -209,7 +209,7 @@ func collectLifecycleProfileRows[E comparable](t *testing.T, contract runtime.Li
 // gains, loses or changes any column during a move turns the test below RED,
 // naming the harness and the event.
 //
-// It is a table of strings and not a golden file so that a reviewer can read
+// It is a table of strings and not a golden file so that a reader can read
 // one row and check it against the profile source directly.
 var pinnedLifecycleProfileRows = []lifecycleProfileRow{
 	{"claude-code", "SessionStart", "observation", "claude-command-json", "nonblocking", "none", "concurrent-native", "none", "report-and-continue", "report-and-continue", "", "not-applicable", "session:session_id:required", ""},

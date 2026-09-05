@@ -147,8 +147,9 @@ func TestACaptureFailureNeverChangesTheHostOutcomeOnAnEnabledEvent(t *testing.T)
 // and not by a list, so a source added later is read the day it is written.
 // WHAT IT DOES NOT READ: the handler package, whose own read of standard
 // input on the unset path is pinned by its own tests; and whether the bytes
-// are identical to a build without capture, which the review wave proves on
-// the binary against the previous release.
+// are identical to a build without capture, which is proven by running the
+// built binary beside a build of the previous release on the same host input
+// and comparing exit code, standard output and standard error byte for byte.
 func TestTheCaptureReadIsGatedOnTheVariableAndSitsInsideTheWork(t *testing.T) {
 	t.Parallel()
 	sources, err := filepath.Glob("*.go")

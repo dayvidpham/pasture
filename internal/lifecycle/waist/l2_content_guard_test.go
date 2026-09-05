@@ -65,7 +65,8 @@ var (
 // does not end in id is content, not correlation: prompt, tool_input,
 // tool_response, message, output. The rule is deliberately narrow so that a
 // new legitimate identity name that does not fit it fails loudly here and is
-// widened by a reviewer, rather than a content field passing quietly.
+// widened on purpose, by an edit to this rule that the failure names, rather
+// than a content field passing quietly.
 var identifierFieldName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 
 func isIdentifierFieldName(name string) bool {

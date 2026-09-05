@@ -27,7 +27,8 @@ var clearanceHeadings = []string{
 }
 
 // clearancePins are the load-bearing phrases of the template body, each
-// proved by mutation in the slice report.
+// proved by mutation: reword the phrase in the template and the test that
+// reads it turns RED naming the phrase.
 var clearancePins = []string{
 	"outside the repository",
 	"`home-path-v1`, then `free-text-v1`",
@@ -79,7 +80,9 @@ func TestEveryHarnessFixtureDirectoryCarriesTheClearanceTemplate(t *testing.T) {
 const agentsCaptureHeading = "### Capturing host payloads and clearing them into fixtures"
 
 // agentsCapturePins are the load-bearing phrases of that section, each a
-// mechanism a reader acts on and each proved by mutation in the slice report.
+// mechanism a reader acts on and each proved by mutation: reword the phrase
+// in AGENTS.md and the test that reads it turns RED naming the section and
+// the phrase.
 var agentsCapturePins = []string{
 	"`PASTURE_CAPTURE_DIR`",
 	"ABSOLUTE path",
