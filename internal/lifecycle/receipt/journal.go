@@ -202,3 +202,49 @@ func (a JournalAppender) Append(ctx context.Context, in provenance.OperationInpu
 func structured(category pasterrors.Category, what, why, where, impact, fix string, cause error) error {
 	return &pasterrors.StructuredError{Category: category, What: what, Why: why, Where: where, Impact: impact, Fix: fix, Cause: cause}
 }
+
+// PayloadReclaimer is the NARROW DELETE door on the payload blob table, and
+// the only one. It is a separate type from SQLiteBlobStore on purpose: that
+// type's doc says read-only inspection plus the receipt write, and a delete
+// arriving on it would make the doc false and the value unsafe to hand around.
+//
+// It runs inside a transaction it is handed, never on a bare handle, because
+// the one caller that constructs it is the projection rebuild's reclaim, which
+// may delete only against a projection it has just rebuilt in that same
+// transaction. Against a stale projection a blob that a journal row names
+// looks named by nothing, and deleting it would leave a journal row naming an
+// absent blob, the one state the blob-before-journal write order exists to
+// prevent.
+type PayloadReclaimer struct{ Tx *sql.Tx }
+
+// ReclaimOrphansWrittenBefore deletes, oldest first and at most limit, the
+// payload blobs that no lifecycle_occurrences row names and whose written_at
+// is before the given instant, in unix nanoseconds. It returns the digests it
+// deleted. A legacy blob, stamped 0 by the migration that added the column, is
+// older than any instant and is deleted as soon as nothing names it.
+func (r PayloadReclaimer) ReclaimOrphansWrittenBefore(ctx context.Context, before int64, limit int) ([]digest.Digest, error) {
+	if r.Tx == nil || limit <= 0 {
+		return nil, structured(pasterrors.CategoryValidation, "The orphan payload reclaim is invalid.", "A transaction and a positive limit are required; the reclaim never runs on a bare handle, because it must delete only against a projection rebuilt in the same transaction.", "Reclaiming orphan lifecycle payloads (internal/lifecycle/receipt/journal.go in receipt.PayloadReclaimer.ReclaimOrphansWrittenBefore).", "Nothing was deleted.", "Construct the reclaimer from the projection rebuild's own transaction with a limit of at least 1.", nil)
+	}
+	rows, err := r.Tx.QueryContext(ctx, `DELETE FROM lifecycle_payload_blobs WHERE digest IN (SELECT b.digest FROM lifecycle_payload_blobs b LEFT JOIN lifecycle_occurrences o ON o.payload_digest = b.digest WHERE o.journal_id IS NULL AND b.written_at < ? ORDER BY b.written_at ASC, b.digest ASC LIMIT ?) RETURNING digest`, before, limit)
+	if err != nil {
+		return nil, structured(pasterrors.CategoryStorage, "Orphan lifecycle payloads could not be reclaimed.", "SQLite rejected the bounded orphan delete.", "Reclaiming orphan lifecycle payloads (internal/lifecycle/receipt/journal.go in receipt.PayloadReclaimer.ReclaimOrphansWrittenBefore).", "Nothing was deleted; the enclosing savepoint is rolled back by the caller.", "Run `pasture migrate` so the payload blob table carries its written-at stamp, confirm database health, and run a read command again.", err)
+	}
+	defer rows.Close()
+	deleted := make([]digest.Digest, 0, limit)
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		ref, err := digest.Parse(raw)
+		if err != nil {
+			return nil, fmt.Errorf("reclaimed lifecycle payload digest %q is invalid: %w", raw, err)
+		}
+		deleted = append(deleted, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return deleted, nil
+}
