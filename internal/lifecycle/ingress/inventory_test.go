@@ -313,11 +313,24 @@ func TestFixtureInventoryReport(t *testing.T) {
 // of the fixtures that predate that procedure, over a different population
 // and for a different question, and the two lists are kept apart on purpose.
 // A digest key means no other fixture, and no altered copy of these, can
-// claim this exemption. The non-vacuity control is the loop after the corpus
-// walk: the list is non-empty, every entry must still resolve to a committed
-// fixture that carries free text, and a stale entry is an error. These
-// fixtures are deleted at the next pin bump, and each entry goes with its
-// fixture.
+// claim this exemption.
+//
+// HOW IT IS COUNTED: one entry per committed fixture whose payload the
+// inventory classifies as carrying at least one free-text field and whose
+// sidecar does not declare free-text-v1. The count is the number of entries in
+// this map, len(freeTextExemptDigests), and the corpus walk below is its
+// authority: a fixture that carries free text without the rule and is not
+// listed here fails that walk, so the map can never be smaller than the
+// population; and the loop after the walk fails on any entry that no longer
+// resolves, so the map can never be larger. SIX entries at the time of
+// writing: four Claude fixtures (elicitation, post_tool_batch, post_tool_use,
+// post_tool_use_failure), one Codex fixture (pre_tool_use) and one OpenCode
+// fixture (session_created). The number falls by one each time one of them is
+// re-captured under the rule, and reaches zero when the last goes; at that
+// point this map and its non-vacuity control are deleted together. The
+// non-vacuity control is the loop after the corpus walk: the list is
+// non-empty, every entry must still resolve to a committed fixture that
+// carries free text, and a stale entry is an error.
 var freeTextExemptDigests = map[string]string{
 	"b3a426a5a273ff4a52c5834dc1846295617c706f2427d38a7e40f6b0f0e98112": "claude elicitation_2_1_222.json",
 	"2dd6c5e05902d1a07ca86258ef91adfd7b957118cac5c17d5d888f8b533b5e6e": "claude post_tool_batch_2_1_222.json",
