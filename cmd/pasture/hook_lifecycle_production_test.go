@@ -642,7 +642,7 @@ func TestLifecycleLeafFaultsExitZeroAndReport(t *testing.T) {
 		want string
 	}{
 		{name: "unwritable database", args: append([]string{databaseFlagName.Argument(), databaseDirectory}, base[2:]...), in: fixture, want: "open"},
-		{name: "missing flag", args: []string{databaseFlagName.Argument(), filepath.Join(dir, "missing.db"), "hook", "lifecycle", "--harness", "claude-code", "--host-version", "2.1.220"}, in: fixture, want: "not in the generated Claude registration"},
+		{name: "missing flag", args: []string{databaseFlagName.Argument(), filepath.Join(dir, "missing.db"), "hook", "lifecycle", "--harness", "claude-code", "--host-version", "2.1.220"}, in: fixture, want: `declares no native event named ""`},
 		{name: "unknown flag", args: append(append([]string(nil), base...), "--unknown-lifecycle-flag"), in: fixture, want: "flag error"},
 		{name: "extra positional", args: append(append([]string(nil), base...), "unexpected"), in: fixture, want: "unexpected positional arguments"},
 		{name: "oversized payload", args: base, in: []byte(strings.Repeat("x", model.MaxNativePayloadBytes+1)), want: "exceeds"},
