@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dayvidpham/pasture/internal/acceptance"
+	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/codegen"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
@@ -758,7 +759,11 @@ func TestLifecycleListStandardExitCategories(t *testing.T) {
 		initializeLifecycleTestDatabase(t, storagePath)
 		db, err := sql.Open("sqlite", storagePath)
 		require.NoError(t, err)
-		_, err = db.Exec(`DELETE FROM audit_schema_meta; INSERT INTO audit_schema_meta(version,applied_at) VALUES(8,1)`)
+		// A schema version newer than this build knows, derived from the
+		// constant: a later schema version lands on another branch of this
+		// slice, and a hard-coded literal would become a known version at the
+		// fold and stop proving the refusal.
+		_, err = db.Exec(fmt.Sprintf(`DELETE FROM audit_schema_meta; INSERT INTO audit_schema_meta(version,applied_at) VALUES(%d,1)`, audit.MaxKnownSchemaVersion+1))
 		require.NoError(t, err)
 		require.NoError(t, db.Close())
 	}, 5}}
