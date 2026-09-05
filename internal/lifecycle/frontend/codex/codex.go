@@ -23,16 +23,16 @@
 // differs on PostToolUse, which mutates the tool OUTPUT in the profile and has
 // no output arm to be spelled with in the catalogue vocabulary. The correlation
 // identities are the widest: the profile declares on 8 rows where the catalogue
-// declares none, and each of those 8 is an event with no authentic capture,
-// because the catalogue declares an identity only from a capture. The frontend
-// binds with the profile's row; the handler admits with the row code generation
-// wrote into internal/lifecycle/registration/codex_0_153_0.gen.go from the
-// catalogue.
+// declares none, and 8 of those 8 are events with no authentic capture, because
+// the catalogue declares an identity only from a capture. The frontend binds
+// with the profile's row; the handler admits with the row code generation wrote
+// into internal/lifecycle/registration/codex_0_153_0.gen.go from the catalogue.
 //
-// The counts above are read back from the tree by
+// EVERY count and EVERY row name above is read back from the tree by
 // internal/lifecycle/registration/failure_divergence_test.go, so a new
 // registration or a new capture turns that test RED instead of leaving a stale
-// number here.
+// number here. Each row name is held INSIDE the sentence about its own axis, so
+// a name that moves to the wrong axis turns that test RED as well.
 package codex
 
 import (

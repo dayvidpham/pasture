@@ -118,7 +118,7 @@ func codexFailureReader() func(name string) pastureruntime.FailureMode {
 // until a reader of the host emission site settles it deliberately.
 //
 // Of the 12 registered Codex events, 10 have no authentic capture, and this
-// source declares no identities for any of those 10.
+// source declares identities for 0 of those 10.
 //
 // The diverging metadata never reaches ingest, and the mechanism that stops it
 // is the ACTIVATION TABLE, which withholds every event without a capture proof
@@ -127,10 +127,14 @@ func codexFailureReader() func(name string) pastureruntime.FailureMode {
 // events. The runtime profile is the authority for non-ingress event semantics,
 // and it is the one to believe when the two disagree.
 //
-// The counts above are read back from the tree by
+// EVERY count above is read back from the tree by
 // internal/lifecycle/registration/failure_divergence_test.go, so a new
 // registration or a new capture turns that test RED instead of leaving a stale
-// number here.
+// number here. The claim covers all five: the 12 registered rows, the 10
+// without a capture, the 0 of those 10 that carry an identity here, the 0 rows
+// the two artefacts disagree on, and the 12 the frontend mapping is complete
+// over. A sentence that stands beside a pinned one and is not itself pinned
+// borrows credit it did not earn, so none is left out.
 //
 // The identities are the field still written twice. Give a row its identities
 // here once an authentic capture shows what the host writes on the wire for it.

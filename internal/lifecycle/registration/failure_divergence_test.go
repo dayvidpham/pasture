@@ -9,6 +9,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 )
@@ -191,9 +192,27 @@ type codexDivergenceCounts struct {
 	// positive, the evidence rule really is moving Codex rows, and the
 	// catalogue is following the moved arm rather than a constant.
 	demotedGates int
+	// catalogueGateRows names the rows whose COMMITTED manifest arm blocks by
+	// exit code. It is derived. Nothing here assumes the list is empty: it is
+	// empty only while no Codex row cites host evidence, and that is a state of
+	// the tree today and not a property of it.
+	catalogueGateRows []string
+	// evidencedGateRows names the runtime rows that DECLARE a blocking exit code
+	// AND cite host evidence for it, so the evidence rule keeps the arm. It is
+	// the INPUT side of the rule whose OUTPUT catalogueGateRows is, so the two
+	// lists must name the same rows in every citation state.
+	evidencedGateRows []string
 	// identityAbsent names the rows where the profile declares correlation
 	// identities and the catalogue declares none.
 	identityAbsent []string
+	// identityAbsentWithoutCapture counts the identityAbsent rows that also have
+	// no authentic capture. The frontend comment states this number, so it is
+	// derived rather than typed.
+	identityAbsentWithoutCapture int
+	// captureFreeWithIdentity counts the rows with no authentic capture on which
+	// the CATALOGUE declares an identity. The catalogue comment states this
+	// number, so it is derived rather than typed.
+	captureFreeWithIdentity int
 	// semanticDiverged names the rows the catalogue and the profile classify
 	// differently as a gate or an observation.
 	semanticDiverged []string
@@ -259,9 +278,13 @@ func deriveCodexDivergenceCounts(t *testing.T) codexDivergenceCounts {
 		}
 		if event.Failure.BlocksByExitCode() {
 			counts.catalogueGates++
+			counts.catalogueGateRows = append(counts.catalogueGateRows, event.NativeName)
 			if !runtimeRow.Mode.BlocksByExitCode() {
 				counts.overClaiming++
 			}
+		}
+		if runtimeRow.DeclaredMode.BlocksByExitCode() && runtimeRow.Evidence.IsPresent() {
+			counts.evidencedGateRows = append(counts.evidencedGateRows, event.NativeName)
 		}
 		if runtimeRow.DeclaredMode.BlocksByExitCode() && !runtimeRow.Mode.BlocksByExitCode() {
 			counts.demotedGates++
@@ -284,6 +307,8 @@ func deriveCodexDivergenceCounts(t *testing.T) codexDivergenceCounts {
 	sort.Strings(counts.identityAbsent)
 	sort.Strings(counts.semanticDiverged)
 	sort.Strings(counts.mutationDiverged)
+	sort.Strings(counts.catalogueGateRows)
+	sort.Strings(counts.evidencedGateRows)
 
 	entries, err := activation.Codex0_153_0()
 	if err != nil {
@@ -293,12 +318,68 @@ func deriveCodexDivergenceCounts(t *testing.T) codexDivergenceCounts {
 		t.Fatalf("the Codex activation manifest holds %d entries for %d registered events; the two must be exhaustive over each other",
 			len(entries), counts.registered)
 	}
+	// nameByKind lets the capture state be read BY ROW, so the two sentences
+	// that cross the capture axis with the identity axis are derived and not
+	// typed. A kind the manifest does not name would leave a capture-free row
+	// uncounted, so it stops the derivation instead.
+	nameByKind := map[model.ContractEventKind]string{}
+	catalogueIdentities := map[string]int{}
+	for _, event := range manifest.Entries() {
+		nameByKind[event.Kind] = event.NativeName
+		catalogueIdentities[event.NativeName] = len(event.Identities)
+	}
+	captureFree := map[string]bool{}
 	for _, entry := range entries {
-		if !entry.CaptureProof.IsValid() {
-			counts.withoutCapture++
+		if entry.CaptureProof.IsValid() {
+			continue
+		}
+		counts.withoutCapture++
+		name, named := nameByKind[entry.Event]
+		if !named {
+			t.Fatalf("the Codex activation manifest holds an entry for event kind %d that the registration manifest does not name, "+
+				"so the capture state of that row cannot be crossed with its identities", uint16(entry.Event))
+		}
+		captureFree[name] = true
+		if catalogueIdentities[name] > 0 {
+			counts.captureFreeWithIdentity++
+		}
+	}
+	for _, name := range counts.identityAbsent {
+		if captureFree[name] {
+			counts.identityAbsentWithoutCapture++
 		}
 	}
 	return counts
+}
+
+// sameRows reports whether two derived row lists name the same rows. Both are
+// sorted by the derivation, so order is meaning here and not an accident.
+func sameRows(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+// axisClause returns the sentence of a doc comment that OPENS with marker. A
+// name pin runs against that sentence and never against the whole file: the two
+// axes below name one row each, both names stand in the same comment, and a pin
+// that searched the file would stay green if the two names were swapped.
+func axisClause(text, marker string) (string, bool) {
+	start := strings.Index(text, marker)
+	if start < 0 {
+		return "", false
+	}
+	sentence := text[start:]
+	if end := strings.Index(sentence, ". "); end >= 0 {
+		sentence = sentence[:end]
+	}
+	return sentence, true
 }
 
 // codexDocComments are the two committed files that state the divergence in
@@ -344,8 +425,11 @@ func TestTheCodexDocCommentsStateTheDerivedCounts(t *testing.T) {
 		{codexDocComments[0], catalogue, fmt.Sprintf("Of the %d registered Codex events, %d have no authentic capture", counts.registered, counts.withoutCapture)},
 		{codexDocComments[0], catalogue, fmt.Sprintf("The failure mode of every one of the %d rows is read from the runtime Codex profile", counts.registered)},
 		{codexDocComments[0], catalogue, fmt.Sprintf("the two artefacts disagree on the failure mode of %d of the %d rows", counts.failureDiverged, counts.registered)},
+		{codexDocComments[0], catalogue, fmt.Sprintf("and this source declares identities for %d of those %d", counts.captureFreeWithIdentity, counts.withoutCapture)},
+		{codexDocComments[0], catalogue, fmt.Sprintf("is complete over all %d registered events", counts.registered)},
 		{codexDocComments[1], frontend, fmt.Sprintf("the same failure mode on all %d of the %d registered events", counts.registered-counts.failureDiverged, counts.registered)},
 		{codexDocComments[1], frontend, fmt.Sprintf("the profile declares on %d rows where the catalogue declares none", len(counts.identityAbsent))},
+		{codexDocComments[1], frontend, fmt.Sprintf("and %d of those %d are events with no authentic capture", counts.identityAbsentWithoutCapture, len(counts.identityAbsent))},
 	}
 	for _, pin := range pins {
 		if !strings.Contains(pin.text, pin.sentence) {
@@ -358,17 +442,45 @@ func TestTheCodexDocCommentsStateTheDerivedCounts(t *testing.T) {
 	// The two axes the doc comments name row by row. The names are derived, so a
 	// row that starts or stops diverging on one of them turns this RED naming
 	// the file that must say so.
-	for _, named := range []struct {
-		axis  string
-		names []string
+	//
+	// Each name is held INSIDE the sentence about its own axis. The two axes name
+	// one row each today, and both names stand in the same comment, so a pin that
+	// searched the whole comment would stay green if the two names were swapped
+	// and the comment then described the wrong axis for both rows.
+	axes := []struct {
+		marker string
+		axis   string
+		names  []string
 	}{
-		{"the gate-or-observation semantic", counts.semanticDiverged},
-		{"the mutation mode", counts.mutationDiverged},
-	} {
+		{"The gate-or-observation semantic differs on", "the gate-or-observation semantic", counts.semanticDiverged},
+		{"The mutation mode differs on", "the mutation mode", counts.mutationDiverged},
+	}
+	for position, named := range axes {
+		clause, present := axisClause(frontend, named.marker)
+		if !present {
+			t.Errorf("the committed file %s must open its sentence about %s with %q; the row names are held inside THAT sentence, so the pin cannot run without it",
+				codexDocComments[1], named.axis, named.marker)
+			continue
+		}
 		for _, name := range named.names {
-			if !strings.Contains(frontend, name) {
-				t.Errorf("the committed file %s states which rows differ on %s and does not name %q, which the tree says differs there",
-					codexDocComments[1], named.axis, name)
+			if !strings.Contains(clause, name) {
+				t.Errorf("the committed file %s does not name %q in its sentence about %s, and the tree says that row differs there. "+
+					"The sentence it carries is %q. The pin reads that sentence and not the whole comment, so a name written under the wrong axis is RED here",
+					codexDocComments[1], name, named.axis, clause)
+			}
+		}
+		// A row that the tree says differs on the OTHER axis, and not on this
+		// one, must not stand in this sentence. This is the half that catches a
+		// name MOVED between the axes rather than dropped.
+		other := axes[(position+1)%len(axes)]
+		for _, name := range other.names {
+			if contains(named.names, name) {
+				continue
+			}
+			if strings.Contains(clause, name) {
+				t.Errorf("the committed file %s names %q in its sentence about %s, and the tree says that row differs on %s instead. "+
+					"The sentence it carries is %q; move the name to the sentence about the axis it belongs to",
+					codexDocComments[1], name, named.axis, other.axis, clause)
 			}
 		}
 	}
@@ -386,23 +498,47 @@ func TestTheCodexDocCommentsStateTheDerivedCounts(t *testing.T) {
 		}
 	}
 
-	// Non-vacuity. The agreement the sentences state is worth nothing if the
-	// evidence rule is moving no Codex row: both artefacts would then hold the
-	// same arm because neither has anything to say. While demotedGates is
-	// positive, the profile IS demoting declared Codex gates, and the catalogue
-	// is carrying the demoted arm rather than a constant of its own.
-	if counts.registered == 0 || counts.withoutCapture == 0 || counts.demotedGates == 0 {
-		t.Fatalf("the derived Codex counts are %+v; a zero in the registered, capture-free or demoted-gate count means the derivation reads nothing and the pins above prove nothing", counts)
+	// Non-vacuity. Each clause names a way the derivation could read nothing, and
+	// NONE of them is a statement about today's Codex citation or capture state.
+	// A control with an expiry date is how this class returns: the first real
+	// citation, and the first authentic capture, both move those states.
+	if counts.registered == 0 {
+		t.Fatalf("the derivation walked 0 registered Codex rows, so every pin above passed on an empty population; the derived Codex counts are %+v", counts)
+	}
+	if counts.demotedGates == 0 && len(counts.evidencedGateRows) == 0 {
+		t.Fatalf("the evidence rule moves no Codex row: no row is demoted for want of a citation and no row cites host evidence, "+
+			"so a read that returned the DECLARED field would satisfy every check above and the pins prove nothing. The derived Codex counts are %+v", counts)
 	}
 	if counts.failureDiverged != 0 || counts.overClaiming != 0 {
 		t.Errorf("the Codex catalogue and the runtime profile disagree on the failure mode of %d rows, %d of them over-claiming a blocking exit code, want none; "+
 			"the catalogue READS that field from the profile, so a disagreement means a row went back to a hand-written arm",
 			counts.failureDiverged, counts.overClaiming)
 	}
-	if counts.catalogueGates != 0 {
-		t.Errorf("the Codex catalogue states a blocking exit code on %d rows while the runtime profile cites no Codex evidence for one; "+
-			"a reader of the catalogue would learn a refusal the product cannot perform", counts.catalogueGates)
+	// The blocking population, DERIVED on both sides. The catalogue's blocking
+	// rows are the OUTPUT of the evidence rule and the profile's cited gates are
+	// its INPUT, so the two lists must name the same rows whatever the citation
+	// state is. A citation that promotes a row moves BOTH lists, and this check
+	// stays green; only a hand-written arm, or an evidence rule that promoted
+	// without a citation, can part them.
+	if !sameRows(counts.catalogueGateRows, counts.evidencedGateRows) {
+		t.Errorf("the Codex catalogue states a blocking exit code on %d of its %d rows %v, and the runtime profile holds %d rows that declare a blocking exit code AND cite host evidence for it %v; "+
+			"these two lists must name the same rows, because the catalogue READS the arm the evidence rule produced, and the rule keeps a blocking arm only where a citation stands. "+
+			"A row in the FIRST list only is a refusal the product cannot perform. A row in the SECOND list only means the catalogue went back to a hand-written arm. "+
+			"The profile demotes %d declared gates for want of a citation. "+
+			"Repair by citing the host emission site in the FailureEvidence of that row in internal/runtime/lifecycle_profiles_codex.go, or by letting the catalogue read the demoted arm again",
+			len(counts.catalogueGateRows), counts.registered, counts.catalogueGateRows,
+			len(counts.evidencedGateRows), counts.evidencedGateRows, counts.demotedGates)
 	}
+}
+
+// contains reports whether names holds one name.
+func contains(names []string, want string) bool {
+	for _, name := range names {
+		if name == want {
+			return true
+		}
+	}
+	return false
 }
 
 // TestTheCodexArtefactsDisagreeOnExactlyTheseOtherAxes pins what the failure-
