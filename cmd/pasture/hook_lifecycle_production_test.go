@@ -760,9 +760,10 @@ func TestLifecycleListStandardExitCategories(t *testing.T) {
 		db, err := sql.Open("sqlite", storagePath)
 		require.NoError(t, err)
 		// A schema version newer than this build knows, derived from the
-		// constant: a later schema version lands on another branch of this
-		// slice, and a hard-coded literal would become a known version at the
-		// fold and stop proving the refusal.
+		// constant. The audit schema ceiling moves with every migration, so a
+		// literal that encodes "newer than known" stops being newer once the
+		// ceiling passes it, and the case would then prove nothing; the
+		// derivation keeps it one above the ceiling without an edit.
 		_, err = db.Exec(fmt.Sprintf(`DELETE FROM audit_schema_meta; INSERT INTO audit_schema_meta(version,applied_at) VALUES(%d,1)`, audit.MaxKnownSchemaVersion+1))
 		require.NoError(t, err)
 		require.NoError(t, db.Close())
