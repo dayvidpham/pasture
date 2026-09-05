@@ -555,9 +555,17 @@ func boundedContext(t *testing.T, profile timeouts.Profile) context.Context {
 	return ctx
 }
 
-// clocklessDeadline reports a deadline with no timer behind it: Done and Err
-// come from the parent, which the proof cancels itself, so no clock can race
-// the barrier it holds.
+// clocklessDeadline reports a deadline for the receipt service's writer-window
+// refusal and DOES NOT ENFORCE ONE: Done and Err come from the parent, which
+// the proof cancels itself, so no clock can race the barrier it holds and no
+// real time has to pass. It changes what the context SAYS, not what the test
+// WAITS ON. The production guarantee is unaffected, because production
+// contexts come from context.WithTimeout and enforce their deadline. It is a
+// true statement only inside a test: it lives in this test file, is never
+// imported by production code, and is used ONLY by the abandonment proof,
+// whose clock-free property is deliberate; every other Receive call in this
+// package carries a REAL deadline through boundedContext, so the refusal keeps
+// its coverage.
 type clocklessDeadline struct {
 	context.Context
 	at time.Time

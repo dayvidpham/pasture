@@ -162,6 +162,10 @@ func (s Service) boundedWriter(ctx context.Context) error {
 	if !hasDeadline {
 		return structured(pasterrors.CategoryValidation, fmt.Sprintf("The lifecycle delivery carries no deadline; every writer must expire within the %s writer window (the WorkflowResult tier).", s.Window), "The window is the longest time a writer may hold between the payload write and the journal append, so that a payload blob older than the window that no occurrence names is known to be abandoned rather than in flight.", where, "Nothing was recorded.", "Call Receive with a context whose deadline lies within the writer window; the native hook derives one from the hook-invocation tier and the raw import from the WorkflowResult tier.", nil)
 	}
+	// MEASURED, so that the wall-clock choice above is not re-litigated as a
+	// flake: compared against s.Clock instead, every test that scripts a 1970
+	// clock refused its own bounded context with a deadline about 496826 h
+	// away, because the two clocks disagree by the age of the epoch.
 	if remaining := time.Until(deadline); remaining > s.Window {
 		return structured(pasterrors.CategoryValidation, fmt.Sprintf("The lifecycle delivery deadline is %s away, beyond the %s writer window (the WorkflowResult tier).", remaining.Round(time.Millisecond), s.Window), "A writer that may hold the store longer than the WorkflowResult tier is one the orphan reclaim cannot distinguish from an abandoned one.", where, "Nothing was recorded.", "Derive the delivery context from the WorkflowResult tier or a shorter tier of the same profile.", nil)
 	}
