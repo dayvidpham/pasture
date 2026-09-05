@@ -23,6 +23,23 @@ var codexFields = []Field{
 	{fCodexToolUseID, "FieldCodexToolUseID", "tool_use_id"},
 }
 
+// codexReaderRefusalCost is the blast radius both arms of codexFailureReader
+// report, and it is measured from the import graph rather than assumed.
+//
+// WHAT MAY BE CLAIMED HERE. This package has exactly one caller outside its own
+// tests: the generator internal/lifecycle/ingress/cmd/hostcontractgen. No
+// pasture binary links it (it is in the dependency set of none of the five
+// commands under cmd/). The Codex hook path admits with the COMMITTED
+// internal/lifecycle/registration/codex_0_153_0.gen.go, which is plain Go data
+// and calls nothing here. So a refusal here stops REGENERATION and never
+// admission, and the message must say the smaller, true thing: a maintainer who
+// is told the product is down looks for an outage that is not there.
+const codexReaderRefusalCost = "WHAT IT COSTS: code generation stops here and admission does not. " +
+	"The generator internal/lifecycle/ingress/cmd/hostcontractgen is the only caller of this catalog outside this package's own tests, " +
+	"and it renders every harness in one pass, so make generate writes no file for any harness and the committed generated files keep the bytes they have. " +
+	"A running pasture is unaffected: no pasture binary links this package, and a Codex hook is still admitted from the committed internal/lifecycle/registration/codex_0_153_0.gen.go. " +
+	"HOW TO REPAIR: "
+
 // codexFailureReader returns the failure mode of one Codex row, by native name,
 // as the runtime Codex profile holds it.
 //
@@ -50,8 +67,8 @@ func codexFailureReader() func(name string) pastureruntime.FailureMode {
 				"the Codex host contract cannot be built: the runtime Codex profile holds no mapping for its own event %d (%v). "+
 					"This happened in codexFailureReader in internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go, "+
 					"while reading the failure mode of every Codex row from internal/runtime/lifecycle_profiles_codex.go. "+
-					"Every caller of Codex0_153_0 fails, so no Codex manifest can be generated and no Codex hook can be admitted. "+
-					"Add the missing mapping to codexLifecycleMappings in internal/runtime/lifecycle_profiles_codex.go: %v",
+					codexReaderRefusalCost+
+					"Add the missing mapping to codexLifecycleMappings in internal/runtime/lifecycle_profiles_codex.go, then run make generate: %v",
 				uint8(event), event, err))
 		}
 		modes[mapping.NativeName()] = mapping.Failure()
@@ -63,8 +80,8 @@ func codexFailureReader() func(name string) pastureruntime.FailureMode {
 				"the Codex host contract cannot be built: this catalog declares the event %q, and the runtime Codex profile declares no row of that native name, "+
 					"so there is no failure mode to read for it. "+
 					"This happened in codexFailureReader in internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go, while building the Codex 0.153.0 contract. "+
-					"Every caller of Codex0_153_0 fails, so no Codex manifest can be generated and no Codex hook can be admitted. "+
-					"Add the row to codexLifecycleMappings in internal/runtime/lifecycle_profiles_codex.go, or spell the name here as the profile spells it",
+					codexReaderRefusalCost+
+					"Add the row to codexLifecycleMappings in internal/runtime/lifecycle_profiles_codex.go, or spell the name here as the profile spells it, then run make generate",
 				name))
 		}
 		return mode

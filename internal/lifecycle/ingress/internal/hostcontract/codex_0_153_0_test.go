@@ -69,6 +69,14 @@ func TestEveryCodexCatalogRowCarriesTheRuntimeFailureMode(t *testing.T) {
 // production diagnostic of the read. The catalog cannot return an error, so a
 // name the profile does not hold stops the build of the contract; the message
 // must name the event and both files, because the repair is in one of them.
+//
+// It also pins the COST the message states, and the cost is measured from the
+// import graph. This package has one caller outside its own tests, the generator
+// internal/lifecycle/ingress/cmd/hostcontractgen, and no pasture binary links
+// it, so a refusal here stops code generation and NEVER admission: a Codex hook
+// is still admitted from the committed generated manifest. A message that told
+// the reader the product was down for Codex would send that person to look for
+// an outage that is not there, so the phrase is held here.
 func TestTheCodexFailureReaderRefusesAnEventTheProfileDoesNotDeclare(t *testing.T) {
 	t.Parallel()
 
@@ -92,11 +100,16 @@ func TestTheCodexFailureReaderRefusesAnEventTheProfileDoesNotDeclare(t *testing.
 		`"NoSuchCodexEvent"`,
 		"internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go",
 		"internal/runtime/lifecycle_profiles_codex.go",
-		"no Codex manifest can be generated and no Codex hook can be admitted",
+		"code generation stops here and admission does not",
+		"a Codex hook is still admitted from the committed internal/lifecycle/registration/codex_0_153_0.gen.go",
+		"then run make generate",
 	} {
 		require.Containsf(t, message, phrase,
 			"the refusal must carry %q, so the reader learns which event failed, where it failed, what it costs and where the repair goes", phrase)
 	}
+	require.NotContains(t, message, "no Codex hook can be admitted",
+		"the refusal must not claim admission stops: no pasture binary links this package, and the Codex hook path admits with the committed generated manifest, "+
+			"so a reader who believes that phrase looks for an outage that is not there")
 	require.False(t, strings.Contains(message, "invalid"),
 		"the refusal must describe the state it found, not label it")
 }

@@ -10,12 +10,12 @@
 // Bind in production.
 //
 // MEASURED: the self-contained ingress catalogue
-// (internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go, read by the
-// handler's admission) and the runtime Codex profile (read by Bind) state the
-// same failure mode on all 12 of the 12 registered events, because the catalogue
-// READS that field from the profile. It was written twice before, and the
-// catalogue then claimed a blocking exit code on rows the profile ran as
-// report-and-continue.
+// (internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go, the source
+// code generation renders into the committed manifest the handler admits with)
+// and the runtime Codex profile (read by Bind) state the same failure mode on
+// all 12 of the 12 registered events, because the catalogue READS that field
+// from the profile. It was written twice before, and the catalogue then claimed
+// a blocking exit code on rows the profile ran as report-and-continue.
 //
 // Three axes still hold two descriptions, because the read copies one field and
 // nothing else. The gate-or-observation semantic differs on PostCompact, an
@@ -25,7 +25,9 @@
 // identities are the widest: the profile declares on 8 rows where the catalogue
 // declares none, and each of those 8 is an event with no authentic capture,
 // because the catalogue declares an identity only from a capture. The frontend
-// binds with the profile's row; the handler admits with the catalogue's row.
+// binds with the profile's row; the handler admits with the row code generation
+// wrote into internal/lifecycle/registration/codex_0_153_0.gen.go from the
+// catalogue.
 //
 // The counts above are read back from the tree by
 // internal/lifecycle/registration/failure_divergence_test.go, so a new
