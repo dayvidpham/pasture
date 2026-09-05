@@ -33,6 +33,8 @@ var clearancePins = []string{
 	"`home-path-v1`, then `free-text-v1`",
 	"Structure, keys, types and nulls are unchanged",
 	"Nothing in this directory reaches a remote before this section is filled",
+	"a fixture may name this file only after this section holds the acceptance",
+	"finds the grant recorded and never a blank form",
 	"Appended by the integrator in the landing commit",
 }
 

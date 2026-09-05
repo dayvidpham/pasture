@@ -77,25 +77,39 @@ func committedFixtures(t *testing.T) []corpusFixture {
 	return fixtures
 }
 
-// redactionRules reads the rules a sidecar declares. A sidecar written before
-// the rule list existed carries one rule as a string, or the word none; a
-// sidecar written after carries a list, in the order the rules were applied.
+// redactionRuleSet is the closed set of rule names a sidecar may list. It
+// mirrors the closed set the capture provenance declares; the two are held
+// equal at the fold of the two sides.
+var redactionRuleSet = map[string]struct{}{"none": {}, ingress.HomePathRule: {}, ingress.FreeTextRule: {}}
+
+// redactionRules reads the rules a sidecar declares, in the ONE shape the
+// capture provenance publishes: the JSON member "redaction" is a STRING that
+// encodes an ordered list, either "none" alone or every applied rule in the
+// order applied joined by ",", for example "home-path-v1,free-text-v1". Any
+// other JSON shape, an unknown rule name, a duplicate, or "none" beside a
+// rule is refused here, so a sidecar cannot satisfy the corpus assertion by
+// carrying a shape the provenance reader would not accept.
 func redactionRules(t *testing.T, fixture corpusFixture) []string {
 	t.Helper()
 	raw, present := fixture.sidecar["redaction"]
-	if !present {
+	require.True(t, present, "%s declares no redaction member; every provenance sidecar states the rules applied, or none", fixture.name)
+	var encoded string
+	require.NoError(t, json.Unmarshal(raw, &encoded), "%s declares a redaction that is not a JSON string; the provenance shape is one string encoding an ordered, comma-joined rule list", fixture.name)
+	require.NotEmpty(t, encoded, "%s declares an empty redaction; the provenance shape is \"none\" or a comma-joined rule list", fixture.name)
+	if encoded == "none" {
 		return nil
 	}
-	var single string
-	if err := json.Unmarshal(raw, &single); err == nil {
-		if single == "none" || single == "" {
-			return nil
-		}
-		return []string{single}
+	rules := strings.Split(encoded, ",")
+	seen := map[string]struct{}{}
+	for _, rule := range rules {
+		_, known := redactionRuleSet[rule]
+		require.True(t, known, "%s declares the redaction rule %q, which is not in the closed rule set", fixture.name, rule)
+		require.NotEqual(t, "none", rule, "%s lists \"none\" beside a rule; \"none\" stands alone", fixture.name)
+		_, duplicate := seen[rule]
+		require.False(t, duplicate, "%s lists the redaction rule %q twice", fixture.name, rule)
+		seen[rule] = struct{}{}
 	}
-	var list []string
-	require.NoError(t, json.Unmarshal(raw, &list), "%s declares a redaction that is neither a rule name nor a list of rule names", fixture.name)
-	return list
+	return rules
 }
 
 func TestClassifyEveryClass(t *testing.T) {
@@ -309,12 +323,18 @@ func TestFixtureInventoryReport(t *testing.T) {
 	fmt.Printf("%d payloads inventoried in %s\n", reported, dir)
 }
 
-// freeTextExemptDigests are the committed fixtures that carry free text and
-// were captured before the free-text rule existed, keyed by the SHA-256 of
-// their payload bytes so that no other fixture, and no altered version of
-// these, can claim the exemption. They are deleted at the next pin bump, and
-// each entry is deleted with its fixture: an entry whose fixture is gone
-// turns the corpus test RED.
+// freeTextExemptDigests COUNTS the committed fixtures that CARRY FREE TEXT and
+// PREDATE THE REDACTION RULE free-text-v1, keyed by the SHA-256 of their
+// payload bytes. That is the whole population it names, and it is not the
+// clearance exemption: the clearance procedure keeps its own enumerated list
+// of the fixtures that predate that procedure, over a different population
+// and for a different question, and the two lists are kept apart on purpose.
+// A digest key means no other fixture, and no altered copy of these, can
+// claim this exemption. The non-vacuity control is the loop after the corpus
+// walk: the list is non-empty, every entry must still resolve to a committed
+// fixture that carries free text, and a stale entry is an error. These
+// fixtures are deleted at the next pin bump, and each entry goes with its
+// fixture.
 var freeTextExemptDigests = map[string]string{
 	"b3a426a5a273ff4a52c5834dc1846295617c706f2427d38a7e40f6b0f0e98112": "claude elicitation_2_1_222.json",
 	"2dd6c5e05902d1a07ca86258ef91adfd7b957118cac5c17d5d888f8b533b5e6e": "claude post_tool_batch_2_1_222.json",
@@ -366,6 +386,7 @@ func TestEveryCommittedFixtureWithFreeTextListsTheFreeTextRule(t *testing.T) {
 			assert.Less(t, home, free, "fixture %s lists the rules out of order; %s is applied before %s", fixture.name, ingress.HomePathRule, ingress.FreeTextRule)
 		}
 	}
+	require.NotEmpty(t, freeTextExemptDigests, "the free-text exemption list is empty while this test still exists; delete the list and this control together when the last legacy fixture goes")
 	for digest, name := range freeTextExemptDigests {
 		assert.True(t, seen[digest], "the exemption for %s (%s) names a fixture that no longer exists or no longer carries free text; delete the entry", name, digest)
 	}

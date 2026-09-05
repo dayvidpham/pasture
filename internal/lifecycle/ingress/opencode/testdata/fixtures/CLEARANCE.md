@@ -45,7 +45,10 @@ One line per committed fixture: file name, native event, payload digest.
 ## User acceptance
 
 The user's verbatim acceptance for this batch, with its date. Nothing in this
-directory reaches a remote before this section is filled.
+directory reaches a remote before this section is filled. This file is the
+clearance authority a fixture's provenance names by path: a fixture may name
+this file only after this section holds the acceptance, so that a reader who
+follows the path finds the grant recorded and never a blank form.
 
 ## Pull request
 
