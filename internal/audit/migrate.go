@@ -38,10 +38,19 @@
 //     (migrate_v4_v5.go).
 //   - v5 → v6: lifecycle payload blobs and replay-derived occurrences.
 //   - v6 → v7: normalized byte-exact lifecycle occurrence bindings.
+//   - v7 → v8: written_at stamp on lifecycle payload blobs; every row that
+//     existed before the column is stamped with the migration instant
+//     (migrate_v7_v8.go).
 //
-// This binary tops out at v7. Future migrations extend the dispatch table in
-// migrationSteps() below by appending a new step and bumping
-// MaxKnownSchemaVersion.
+// The ceiling is MaxKnownSchemaVersion below, not a number in this comment,
+// and the steps this binary applies are the dispatch table migrationSteps().
+// The list above describes that table and is maintained by hand; the table
+// and the constant are the authority, and the two cannot disagree silently:
+// TestMigrate_FreshDB_LandsAtMaxKnownVersion runs Migrate on a fresh file and
+// requires the recorded version to equal the constant, which fails when the
+// table ends below it, and Migrate refuses a table with a gap. A future
+// migration appends a step to migrationSteps(), bumps MaxKnownSchemaVersion,
+// and adds its line to the list above.
 package audit
 
 import (
