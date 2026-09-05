@@ -199,7 +199,6 @@ func mustFloorContract(harness ir.HarnessID, core CoreRuntimeBindings) RuntimeCo
 // removed team-lifecycle call (TeamCreate/TeamDelete). Any schema or semantic
 // change to this profile requires a new RuntimeContractID.
 func ClaudeCode2_1_261() RuntimeContract {
-	version := productionHostVersion(ir.HarnessClaudeCode).String()
 	table := map[ir.OperationKind]operationLowering{
 		ir.OperationInvokeSkill: {
 			class:  effects.RuntimeClassNative,
@@ -219,7 +218,7 @@ func ClaudeCode2_1_261() RuntimeContract {
 		},
 		ir.OperationCollectAssignmentResults: {
 			class:    effects.RuntimeClassParentMediated,
-			mediated: mustMediated("parent orchestrator", fmt.Sprintf("the parent gathers each delegated Agent result as it completes; Claude Code %s exposes no native batch-wait tool", version)),
+			mediated: mustMediated("parent orchestrator", "the parent gathers each delegated Agent result as it completes; this contract binds no native batch-wait call"),
 		},
 		ir.OperationStopAssignment: {
 			class:  effects.RuntimeClassNative,
@@ -241,7 +240,6 @@ func ClaudeCode2_1_261() RuntimeContract {
 // documented native surface are lowered as semantic instructions, and stopping
 // an assignment is explicitly unsupported rather than a fabricated close call.
 func OpenCode1_18_29() RuntimeContract {
-	version := productionHostVersion(ir.HarnessOpenCode).String()
 	table := map[ir.OperationKind]operationLowering{
 		ir.OperationInvokeSkill: {
 			class:  effects.RuntimeClassNative,
@@ -253,19 +251,19 @@ func OpenCode1_18_29() RuntimeContract {
 		},
 		ir.OperationContinueAssignment: {
 			class:    effects.RuntimeClassSemanticInstruction,
-			semantic: mustSemantic(fmt.Sprintf("OpenCode %s exposes no follow-up tool: reconstruct the assignment as a fresh task with its complete retained role, evidence, decisions, and outstanding work", version)),
+			semantic: mustSemantic("this contract binds no native follow-up call: reconstruct the assignment as a fresh task with its complete retained role, evidence, decisions, and outstanding work"),
 		},
 		ir.OperationSendAssignmentMessage: {
 			class:    effects.RuntimeClassSemanticInstruction,
-			semantic: mustSemantic(fmt.Sprintf("OpenCode %s exposes no persistent-message tool: carry the message content into the next task prompt for the target assignment", version)),
+			semantic: mustSemantic("this contract binds no native persistent-message call: carry the message content into the next task prompt for the target assignment"),
 		},
 		ir.OperationCollectAssignmentResults: {
 			class:    effects.RuntimeClassSemanticInstruction,
-			semantic: mustSemantic(fmt.Sprintf("OpenCode %s exposes no wait tool: collect each task result inline as tasks return", version)),
+			semantic: mustSemantic("this contract binds no native wait call: collect each task result inline as tasks return"),
 		},
 		ir.OperationStopAssignment: {
 			class:  effects.RuntimeClassUnsupported,
-			reason: fmt.Sprintf("OpenCode %s exposes no close/stop tool; stopping a running task has no modeled native semantics and must not be lowered to a fabricated close call", version),
+			reason: "this contract binds no native close or stop call; stopping a running task has no modeled native semantics and must not be lowered to a fabricated close call",
 		},
 		ir.OperationRequestUserDecision: {
 			class:  effects.RuntimeClassNative,
@@ -277,20 +275,21 @@ func OpenCode1_18_29() RuntimeContract {
 
 // Codex0_153_0 is the runtime contract for Codex at the recorded host version,
 // the one its id carries (artifact.ProductionRuntimeContract). Admission is a
-// floor: that version and every later release. It lowers only the exposed
-// collaboration/request-input functions; operations with no exposed Codex
-// function are parent-mediated or lowered as semantic instructions rather than
-// invented.
+// floor: that version and every later release. It binds a native call only
+// where this contract declares one; every other operation is parent-mediated or
+// lowered as a semantic instruction rather than invented. The instruction texts
+// state what THIS CONTRACT binds; they make no claim about what the host does
+// or does not expose, because a claim about the host cannot be held true by a
+// version bump.
 func Codex0_153_0() RuntimeContract {
-	version := productionHostVersion(ir.HarnessCodex).String()
 	table := map[ir.OperationKind]operationLowering{
 		ir.OperationInvokeSkill: {
 			class:    effects.RuntimeClassSemanticInstruction,
-			semantic: mustSemantic(fmt.Sprintf("Codex %s exposes no skill function: perform the skill's steps directly following its reviewed protocol instructions", version)),
+			semantic: mustSemantic("this contract binds no native skill call: perform the skill's steps directly following its reviewed protocol instructions"),
 		},
 		ir.OperationDelegateAssignment: {
 			class:    effects.RuntimeClassParentMediated,
-			mediated: mustMediated("parent orchestrator", fmt.Sprintf("the parent drives Codex delegation over the collaboration surface; Codex %s exposes no self-service spawn function", version)),
+			mediated: mustMediated("parent orchestrator", "the parent drives Codex delegation over the collaboration surface; this contract binds no native agent-spawn call"),
 		},
 		ir.OperationContinueAssignment: {
 			class:    effects.RuntimeClassParentMediated,
@@ -306,7 +305,7 @@ func Codex0_153_0() RuntimeContract {
 		},
 		ir.OperationStopAssignment: {
 			class:    effects.RuntimeClassParentMediated,
-			mediated: mustMediated("parent orchestrator", fmt.Sprintf("the parent stops the Codex assignment; Codex %s exposes no self-service stop function", version)),
+			mediated: mustMediated("parent orchestrator", "the parent stops the Codex assignment; this contract binds no native stop call"),
 		},
 		ir.OperationRequestUserDecision: {
 			class:  effects.RuntimeClassNative,

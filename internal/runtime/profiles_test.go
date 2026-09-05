@@ -55,6 +55,104 @@ func TestPinnedContractsClassifyEveryCoreOperation(t *testing.T) {
 	}
 }
 
+// contractInstructionText is one prose text a runtime contract hands an agent
+// or an operator: the instruction of a semantic lowering, the instruction of a
+// parent-mediated lowering, or the reason an unsupported operation is refused.
+// It carries the harness and the operation so a failure names the row a person
+// must open.
+type contractInstructionText struct {
+	harness   ir.HarnessID
+	operation ir.OperationKind
+	kind      string
+	text      string
+}
+
+// contractInstructionTexts DERIVES the population from the contracts
+// themselves, through the same production lookup an agent uses: every pinned
+// contract, every core operation, and the text of whichever lowering that row
+// carries. A contract, an operation or a harness added later is covered the day
+// it exists, with no list to update here.
+func contractInstructionTexts(t *testing.T) []contractInstructionText {
+	t.Helper()
+
+	var texts []contractInstructionText
+	for _, contract := range runtime.PinnedContracts() {
+		for _, kind := range ir.AllOperationKinds() {
+			descriptor, ok := runtime.CoreOperationDescriptorFor(kind)
+			require.True(t, ok, "core operation %q has no descriptor", kind)
+			binding, err := runtime.LookupOperationBinding(contract, descriptor)
+			if err != nil {
+				// An unsupported operation yields no binding: its refusal reason
+				// reaches the caller inside this error, which is the only place a
+				// person ever reads it.
+				texts = append(texts, contractInstructionText{contract.Harness(), kind, "refusal", err.Error()})
+				continue
+			}
+			if semantic, isSemantic := binding.Semantic(); isSemantic {
+				texts = append(texts, contractInstructionText{contract.Harness(), kind, "semantic instruction", semantic.InstructionTemplate()})
+			}
+			if mediated, isMediated := binding.Mediated(); isMediated {
+				texts = append(texts, contractInstructionText{contract.Harness(), kind, "mediated instruction", mediated.Instruction()})
+			}
+		}
+	}
+	return texts
+}
+
+// hostCapabilityClaims are the shapes of a sentence that asserts what the HOST
+// does or does not offer. A contract cannot know that: it knows only what it
+// itself binds. Each of these once appeared in a shipped instruction with the
+// pinned host version formatted into it, so a version bump silently re-asserted
+// an unchecked claim about a different host — and at least one of them was
+// false of the host it named.
+var hostCapabilityClaims = []string{
+	"exposes no",
+	"has no native",
+	"does not expose",
+	"offers no",
+}
+
+// TestNoContractInstructionClaimsWhatTheHostExposes holds every instruction,
+// mediation reason and refusal reason of every pinned contract to what a
+// contract can truthfully say. Two rules: no host-capability claim, and no
+// pinned host version inside the prose, because a number inside a sentence
+// makes the sentence a claim about that host and a bump re-asserts it unread.
+//
+// The population is derived, and the test refuses to pass on an empty or
+// implausibly small one, so deleting the rows cannot make it green.
+func TestNoContractInstructionClaimsWhatTheHostExposes(t *testing.T) {
+	t.Parallel()
+
+	texts := contractInstructionTexts(t)
+	require.GreaterOrEqual(t, len(texts), 8,
+		"only %d instruction texts were derived from the pinned contracts; the population is too small to be the real one, so this guard would pass vacuously", len(texts))
+
+	harnesses := make(map[ir.HarnessID]int, 3)
+	for _, entry := range texts {
+		harnesses[entry.harness]++
+	}
+	require.Len(t, harnesses, len(runtime.PinnedContracts()),
+		"the derived population does not cover every pinned contract: %v", harnesses)
+
+	versions := make([]string, 0, len(runtime.PinnedContracts()))
+	for _, contract := range runtime.PinnedContracts() {
+		versions = append(versions, contract.Versions().Min().String())
+	}
+
+	for _, entry := range texts {
+		for _, claim := range hostCapabilityClaims {
+			assert.NotContains(t, entry.text, claim,
+				"the %s of operation %q on harness %q claims what the host exposes (%q); a contract states what IT binds, not what the host offers: %s",
+				entry.kind, entry.operation, entry.harness, claim, entry.text)
+		}
+		for _, version := range versions {
+			assert.NotContains(t, entry.text, version,
+				"the %s of operation %q on harness %q carries the pinned host version %q, which turns it into a claim about that host that a bump re-asserts unread: %s",
+				entry.kind, entry.operation, entry.harness, version, entry.text)
+		}
+	}
+}
+
 func TestClaudeContractNamesNoRemovedTeamLifecycleCalls(t *testing.T) {
 	t.Parallel()
 	claude := runtime.ClaudeCode2_1_261()

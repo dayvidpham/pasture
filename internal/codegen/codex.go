@@ -5,11 +5,12 @@
 // independently selectable Codex plugin packages:
 //
 //   - skills  (`.agents/skills/<dir>/SKILL.md`): protocol skills rendered as
-//     semantic-instruction markdown. Codex at the recorded version has no native skill
-//     invocation, so these carry the reviewed protocol steps the agent performs
-//     directly (matching the pinned contract's semantic lowering of
+//     semantic-instruction markdown. The pinned runtime contract binds no
+//     native skill call, so these carry the reviewed protocol steps the agent
+//     performs directly (matching that contract's semantic lowering of
 //     InvokeSkill), plus the hand-authored `protocol`/`install-cli` support
-//     trees copied verbatim.
+//     trees copied verbatim. This says what the contract binds; it makes no
+//     claim about what the host exposes.
 //   - agents  (`.codex/agents/<role>.toml`): one standalone Codex agent profile
 //     per tool-bearing role (see codex_agent.go).
 //   - hooks   (`.codex/hooks/`): version-bounded per-event lifecycle adapters
