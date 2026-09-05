@@ -1465,7 +1465,7 @@ func TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(codexReport, &parsed))
 	require.Equal(t, "codex", parsed.Harness, "the Codex audit report is the Codex-only artifact")
-	require.Len(t, parsed.Events, 10, "the Codex activation report is exhaustive over all 10 generated Codex events")
+	require.Len(t, parsed.Events, len(registration.Codex0_146_0().Entries()), "the Codex activation report is exhaustive over every generated Codex event")
 	enabled := make([]string, 0, 2)
 	for _, entry := range parsed.Events {
 		if entry.State == "enabled" {

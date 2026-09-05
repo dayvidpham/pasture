@@ -22,7 +22,7 @@ func TestDescriptorPublishesPinnedClaudeIdentity(t *testing.T) {
 	wantContract := runtime.ClaudeCode2_1_210().ID()
 	assert.Equal(t, wantContract, d.RuntimeContractID(),
 		"the target must publish the exact contract identity it was compiled under")
-	assert.Equal(t, "claude-code/claude-code@2.1.210", d.RuntimeContractID().String())
+	assert.Equal(t, "claude-code/claude-code@"+runtime.ClaudeCode2_1_210().Versions().Min().String(), d.RuntimeContractID().String(), "the public spelling is harness/harness@version, the version read from the runtime contract")
 	assert.Equal(t, ir.HarnessClaudeCode, d.RuntimeContractID().Harness())
 }
 

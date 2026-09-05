@@ -33,7 +33,7 @@ func TestRequestUserDecisionScopeAndResultsAreCanonical(t *testing.T) {
 
 	prompt := ir.FreeTextPrompt{Stimulus: ir.PromptStimulus{Question: "What changed?"}}
 	request, err := ir.NewRequestUserDecision(
-		"request-scope-1", ir.HarnessClaudeCode, mustContract(t, ir.HarnessClaudeCode, "2.1.210"),
+		"request-scope-1", ir.HarnessClaudeCode, mustContract(t, ir.HarnessClaudeCode, productionVersion(t, ir.HarnessClaudeCode)),
 		mustTaskRef(t, "epoch-1"), mustTaskRef(t, "gate-1"), "test-purpose", prompt,
 		scope, declaration,
 	)
@@ -92,7 +92,7 @@ func TestRequestUserDecisionRejectsOutOfScopeResult(t *testing.T) {
 
 	prompt := ir.FreeTextPrompt{Stimulus: ir.PromptStimulus{Question: "What changed?"}}
 	_, err = ir.NewRequestUserDecision(
-		"request-scope-2", ir.HarnessClaudeCode, mustContract(t, ir.HarnessClaudeCode, "2.1.210"),
+		"request-scope-2", ir.HarnessClaudeCode, mustContract(t, ir.HarnessClaudeCode, productionVersion(t, ir.HarnessClaudeCode)),
 		mustTaskRef(t, "epoch-1"), mustTaskRef(t, "gate-1"), "test-purpose", prompt,
 		requestScope, declaration,
 	)
@@ -123,7 +123,7 @@ func TestReportedUserDecisionCopiesScopeAndResultsFromRequest(t *testing.T) {
 
 	prompt := ir.FreeTextPrompt{Stimulus: ir.PromptStimulus{Question: "What changed?"}}
 	request, err := ir.NewRequestUserDecision(
-		"request-scope-3", ir.HarnessClaudeCode, mustContract(t, ir.HarnessClaudeCode, "2.1.210"),
+		"request-scope-3", ir.HarnessClaudeCode, mustContract(t, ir.HarnessClaudeCode, productionVersion(t, ir.HarnessClaudeCode)),
 		mustTaskRef(t, "epoch-1"), mustTaskRef(t, "gate-1"), "test-purpose", prompt,
 		scope, declaration,
 	)
@@ -158,7 +158,7 @@ func TestRequestUserDecisionRejectsCrossHarnessRuntimeContract(t *testing.T) {
 	require.NoError(t, err)
 	prompt := ir.FreeTextPrompt{Stimulus: ir.PromptStimulus{Question: "Explain"}}
 
-	openCodeContract := mustContract(t, ir.HarnessOpenCode, "1.18.10")
+	openCodeContract := mustContract(t, ir.HarnessOpenCode, productionVersion(t, ir.HarnessOpenCode))
 	_, err = ir.NewRequestUserDecision(
 		"request-cross-harness", ir.HarnessClaudeCode, openCodeContract,
 		mustTaskRef(t, "epoch-1"), mustTaskRef(t, "gate-1"), "test-purpose", prompt,
@@ -173,7 +173,7 @@ func TestRequestUserDecisionRejectsCrossHarnessRuntimeContract(t *testing.T) {
 	// compareReportIdentity is exact-equality, so this also demonstrates the
 	// forged-value path end to end through the decode boundary, not just at
 	// construction time.
-	claudeContract := mustContract(t, ir.HarnessClaudeCode, "2.1.210")
+	claudeContract := mustContract(t, ir.HarnessClaudeCode, productionVersion(t, ir.HarnessClaudeCode))
 	request, err := ir.NewRequestUserDecision(
 		"request-forged", ir.HarnessClaudeCode, claudeContract,
 		mustTaskRef(t, "epoch-1"), mustTaskRef(t, "gate-1"), "test-purpose", prompt,

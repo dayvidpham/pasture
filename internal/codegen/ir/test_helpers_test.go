@@ -1,9 +1,13 @@
 package ir_test
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	"github.com/dayvidpham/pasture/internal/runtime"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/pkg/protocol/portable"
 	"github.com/stretchr/testify/require"
 )
@@ -34,4 +38,41 @@ func mustContract(t testing.TB, harness ir.HarnessID, value string) ir.RuntimeCo
 	contract, err := ir.NewRuntimeContractID(harness, value)
 	require.NoError(t, err)
 	return contract
+}
+
+// productionVersion is the host version the tree's production runtime contract
+// records for harness, read from the one root, so a sample contract id in a
+// test never restates a version.
+func productionVersion(t testing.TB, harness ir.HarnessID) string {
+	t.Helper()
+	root, err := artifact.ProductionRuntimeContract(harness)
+	require.NoError(t, err)
+	_, version, ok := strings.Cut(root.String(), "@")
+	require.True(t, ok, "production runtime contract %s has no version", root)
+	return version
+}
+
+// mustProductionVersion is productionVersion for fixture builders that run
+// before any testing.TB exists; it panics instead of failing a test.
+func mustProductionVersion(harness ir.HarnessID) string {
+	root, err := artifact.ProductionRuntimeContract(harness)
+	if err != nil {
+		panic(err)
+	}
+	_, version, ok := strings.Cut(root.String(), "@")
+	if !ok {
+		panic("production runtime contract has no version: " + root.String())
+	}
+	return version
+}
+
+// differentVersion is a host version one patch above the recorded production
+// version for harness. A control that must differ from the production contract
+// is derived from it, so a moved root can never make the control collide with
+// the value it is meant to differ from.
+func differentVersion(t testing.TB, harness ir.HarnessID) string {
+	t.Helper()
+	production, err := runtime.ParseHostVersion(productionVersion(t, harness))
+	require.NoError(t, err)
+	return testutil.Bump(t, production, 0, 0, 1).String()
 }

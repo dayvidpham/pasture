@@ -431,7 +431,9 @@ type fixtureHost struct {
 }
 
 func newHost(marketplace bool, rows ...pluginRow) *fixtureHost {
-	host := &fixtureHost{version: "2.1.233", marketplace: marketplace, plugins: map[string]pluginRow{}}
+	// The fake host reports the recorded Claude Code version, read from the
+	// runtime contract, so the probe admits it whatever the root records.
+	host := &fixtureHost{version: runtime.ClaudeCode2_1_210().Versions().Min().String(), marketplace: marketplace, plugins: map[string]pluginRow{}}
 	for _, row := range rows {
 		key := row.ID
 		if _, duplicate := host.plugins[key]; duplicate {

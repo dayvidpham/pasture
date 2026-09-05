@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/acceptance/origin"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/formatters"
@@ -36,7 +37,7 @@ func TestHookLifecycleFormatterDisclosesRawOriginInText(t *testing.T) {
 	var text bytes.Buffer
 	require.NoError(t, formatters.HookLifecycle(&text, page, "text"))
 	require.Equal(t, text.String(),
-		"1\t1\tregistration=claude-code/claude-code@2.1.210\tinterpreted=-\tmetamodel=-\torigin=raw\n",
+		"1\t1\tregistration="+productionClaudeContract(t)+"\tinterpreted=-\tmetamodel=-\torigin=raw\n",
 		"text renderer must disclose the raw origin marking on the row")
 }
 
@@ -92,7 +93,7 @@ func TestHookLifecycleFormatterNativeOriginGoldenBytes(t *testing.T) {
 	var text, rawText bytes.Buffer
 	require.NoError(t, formatters.HookLifecycle(&text, page, "text"))
 	require.Equal(t,
-		"1\t1\tregistration=claude-code/claude-code@2.1.210\tinterpreted=claude-code/claude-code@2.1.210\tmetamodel=unresolved (pre-M5)\n",
+		"1\t1\tregistration="+productionClaudeContract(t)+"\tinterpreted="+productionClaudeContract(t)+"\tmetamodel=unresolved (pre-M5)\n",
 		text.String(), "native text row must stay byte-identical to the pre-M4 formatter")
 	require.NotContains(t, text.String(), "origin=", "native text row must not render an origin clause")
 
@@ -109,4 +110,13 @@ func TestHookLifecycleFormatterNativeOriginGoldenBytes(t *testing.T) {
 func newOriginOccurrence(id int64, contract ir.RuntimeContractID, value origin.CaptureOrigin) model.OccurrenceRecord {
 	envelope := model.OccurrenceEnvelopeRef{Origin: value}
 	return model.NewOccurrenceRecord(model.OccurrenceID(id), model.ContractEventKind(1), contract, envelope, time.Unix(0, 0).UTC(), provenance.AgentID{}, nil, model.CaptureValid, model.EvidencePayloadRef{})
+}
+
+// productionClaudeContract is the Claude runtime contract id the tree records,
+// read from the one root so an expected row never restates a version.
+func productionClaudeContract(t *testing.T) string {
+	t.Helper()
+	root, err := artifact.ProductionRuntimeContract(artifact.HarnessClaudeCode)
+	require.NoError(t, err)
+	return root.String()
 }

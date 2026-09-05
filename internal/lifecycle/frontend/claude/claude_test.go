@@ -2,6 +2,7 @@ package claude_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 
@@ -69,9 +70,9 @@ func TestBindRejectsInvalidNativeBindings(t *testing.T) {
 	}{
 		{
 			name:         "unknown ordinal",
-			kind:         model.ContractEventKind(31),
+			kind:         registration.EventOpenCodeCommandExecuted, // declared by another harness, never by Claude
 			bindings:     nil,
-			whatFragment: "ordinal 31",
+			whatFragment: fmt.Sprintf("ordinal %d", registration.EventOpenCodeCommandExecuted),
 			fixFragment:  "generated Claude event ordinals",
 		},
 		{

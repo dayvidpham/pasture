@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/dayvidpham/pasture/artifact"
 	origin "github.com/dayvidpham/pasture/internal/acceptance/origin"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/provenance"
@@ -22,7 +24,7 @@ import (
 // origin is absent/unset, so pre-origin callers and golden native records stay
 // unchanged. A change to the encoder (e.g. emitting an empty or defaulted
 // origin member) fails this pin.
-const baselineUnsetOriginPayload = `{"bindings":null,"body_digest":"sha256:f352f3001468c4e837240ca5714239468d614ec48ca47016bd69f2c64ad5fd8d","capture":1,"contract":"claude-code/2.1.210","envelope":{"HostVersion":"","Implementation":{"Definition":{"Content":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Definition":0,"Kind":0}},"Retention":{"Definition":{"Content":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Definition":0,"Kind":0}},"Runtime":{"Contract":"claude-code/2.1.210","Definition":{"Content":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Definition":0,"Kind":0}},"Schema":{"Definition":{"Content":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Definition":0,"Kind":0}}},"event":1}`
+var baselineUnsetOriginPayload = fmt.Sprintf(`{"bindings":null,"body_digest":"sha256:f352f3001468c4e837240ca5714239468d614ec48ca47016bd69f2c64ad5fd8d","capture":1,"contract":"%s","envelope":{"HostVersion":"","Implementation":{"Definition":{"Content":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Definition":0,"Kind":0}},"Retention":{"Definition":{"Content":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Definition":0,"Kind":0}},"Runtime":{"Contract":"%s","Definition":{"Content":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Definition":0,"Kind":0}},"Schema":{"Definition":{"Content":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Definition":0,"Kind":0}}},"event":1}`, productionRegistrationContract(), productionRegistrationContract())
 
 // receiveOnce delivers delivery through the in-memory service and returns the
 // committed occurrence effect payload, mirroring the gate_test.go call-slice
@@ -162,4 +164,16 @@ func TestReceiveOriginPayloadDeterministic(t *testing.T) {
 			t.Fatalf("goroutine %d payload differs from the sequential payload", i)
 		}
 	}
+}
+
+// productionRegistrationContract is the registration contract spelling
+// ("claude-code/<version>") the occurrence payload carries, read from the one
+// root so the frozen baseline follows the recorded host version.
+func productionRegistrationContract() string {
+	root, err := artifact.ProductionRuntimeContract(artifact.HarnessClaudeCode)
+	if err != nil {
+		panic(err)
+	}
+	_, version, _ := strings.Cut(root.String(), "@")
+	return "claude-code/" + version
 }

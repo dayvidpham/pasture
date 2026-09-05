@@ -33,9 +33,9 @@ func TestGoldmarkDocumentCompilesEntirelyInMemory(t *testing.T) {
 	require.NoError(t, err)
 	verbatimSource[1] = '!'
 
-	claudeContract := mustContract(t, ir.HarnessClaudeCode, "2.1.210")
-	openCodeContract := mustContract(t, ir.HarnessOpenCode, "1.18.10")
-	codexContract := mustContract(t, ir.HarnessCodex, "0.146.0")
+	claudeContract := mustContract(t, ir.HarnessClaudeCode, productionVersion(t, ir.HarnessClaudeCode))
+	openCodeContract := mustContract(t, ir.HarnessOpenCode, productionVersion(t, ir.HarnessOpenCode))
+	codexContract := mustContract(t, ir.HarnessCodex, productionVersion(t, ir.HarnessCodex))
 	claudeLiteral, err := ir.LiteralForHarness(ir.HarnessClaudeCode, claudeContract, []byte("\nClaude contract literal.\n"), "pinned schema has no portable equivalent")
 	require.NoError(t, err)
 	openCodeUnsupported, err := ir.LiteralUnsupported(ir.HarnessOpenCode, "the pinned host has no equivalent")
@@ -89,7 +89,7 @@ func TestGoldmarkDocumentCompilesEntirelyInMemory(t *testing.T) {
 	fileAgain, ok := tree.File(file.Path())
 	require.True(t, ok)
 	assert.Equal(t, byte('#'), fileAgain.Content()[0])
-	assert.Equal(t, openCodeContract, mustContract(t, ir.HarnessOpenCode, "1.18.10"))
+	assert.Equal(t, openCodeContract, mustContract(t, ir.HarnessOpenCode, productionVersion(t, ir.HarnessOpenCode)))
 }
 
 // TestCompileFailureMatrixReturnsZeroTreeAndShortCircuits is the per-stage
@@ -118,7 +118,7 @@ func TestCompileFailureMatrixReturnsZeroTreeAndShortCircuits(t *testing.T) {
 	require.NoError(t, err)
 	document, err := ir.NewDocument(markdown, operation)
 	require.NoError(t, err)
-	contract := mustContract(t, ir.HarnessClaudeCode, "2.1.210")
+	contract := mustContract(t, ir.HarnessClaudeCode, productionVersion(t, ir.HarnessClaudeCode))
 
 	t.Run("empty document short-circuits before any target use", func(t *testing.T) {
 		t.Parallel()
@@ -288,7 +288,7 @@ func TestTargetLiteralRequiresExhaustiveUniqueCasesAndExactContract(t *testing.T
 	t.Parallel()
 
 	location := mustLocation(t, "literal-validation", 0)
-	claudeContract := mustContract(t, ir.HarnessClaudeCode, "2.1.210")
+	claudeContract := mustContract(t, ir.HarnessClaudeCode, productionVersion(t, ir.HarnessClaudeCode))
 	claude, err := ir.LiteralForHarness(ir.HarnessClaudeCode, claudeContract, []byte("literal"), "reviewed")
 	require.NoError(t, err)
 	openCode, err := ir.LiteralUnsupported(ir.HarnessOpenCode, "unsupported")
@@ -304,12 +304,12 @@ func TestTargetLiteralRequiresExhaustiveUniqueCasesAndExactContract(t *testing.T
 	require.NoError(t, err)
 	document, err := ir.NewDocument(part)
 	require.NoError(t, err)
-	differentContract := mustContract(t, ir.HarnessClaudeCode, "2.1.211")
+	differentContract := mustContract(t, ir.HarnessClaudeCode, differentVersion(t, ir.HarnessClaudeCode))
 	tree, err := ir.Compile(document, mustTarget(t, differentContract, nil))
 	require.Error(t, err)
 	assert.Zero(t, tree.Len())
 
-	openCodeTarget := mustTargetForHarness(t, ir.HarnessOpenCode, mustContract(t, ir.HarnessOpenCode, "1.18.10"), nil)
+	openCodeTarget := mustTargetForHarness(t, ir.HarnessOpenCode, mustContract(t, ir.HarnessOpenCode, productionVersion(t, ir.HarnessOpenCode)), nil)
 	tree, err = ir.Compile(document, openCodeTarget)
 	require.Error(t, err)
 	assert.Zero(t, tree.Len())
@@ -345,7 +345,7 @@ func FuzzMarkdownPart(f *testing.F) {
 		}
 		document, err := ir.NewDocument(part)
 		require.NoError(t, err)
-		contract := mustContract(t, ir.HarnessCodex, "0.146.0")
+		contract := mustContract(t, ir.HarnessCodex, productionVersion(t, ir.HarnessCodex))
 		target := mustTargetForHarness(t, ir.HarnessCodex, contract, nil)
 		tree, err := ir.Compile(document, target)
 		require.NoError(t, err)

@@ -86,8 +86,8 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 	if err := json.Unmarshal([]byte(support), &report); err != nil {
 		t.Fatal(err)
 	}
-	if len(report.Events) != 30 {
-		t.Fatalf("support entries=%d, want 30", len(report.Events))
+	if want := len(registration.ClaudeCode2_1_210().Entries()); len(report.Events) != want {
+		t.Fatalf("support entries=%d, want %d (one per registered Claude event)", len(report.Events), want)
 	}
 	expected := []struct{ event, state, reason string }{
 		{"SessionStart", "enabled", ""}, {"Setup", "withheld", "outside-target-set"}, {"SessionEnd", "enabled", ""}, {"UserPromptSubmit", "withheld", "outside-target-set"}, {"UserPromptExpansion", "withheld", "outside-target-set"}, {"Stop", "withheld", "outside-target-set"}, {"StopFailure", "withheld", "outside-target-set"}, {"PreToolUse", "enabled", ""}, {"PermissionRequest", "withheld", "outside-target-set"}, {"PermissionDenied", "withheld", "outside-target-set"}, {"PostToolUse", "enabled", ""}, {"PostToolUseFailure", "enabled", ""}, {"PostToolBatch", "enabled", ""}, {"FileChanged", "withheld", "outside-target-set"}, {"CwdChanged", "withheld", "outside-target-set"}, {"ConfigChange", "withheld", "outside-target-set"}, {"InstructionsLoaded", "withheld", "outside-target-set"}, {"WorktreeCreate", "withheld", "outside-target-set"}, {"WorktreeRemove", "withheld", "outside-target-set"}, {"SubagentStart", "withheld", "outside-target-set"}, {"SubagentStop", "withheld", "outside-target-set"}, {"TeammateIdle", "withheld", "outside-target-set"}, {"TaskCreated", "withheld", "outside-target-set"}, {"TaskCompleted", "withheld", "outside-target-set"}, {"PreCompact", "enabled", ""}, {"PostCompact", "enabled", ""}, {"Notification", "withheld", "outside-target-set"}, {"MessageDisplay", "withheld", "outside-target-set"}, {"Elicitation", "withheld", "missing-request-correlation"}, {"ElicitationResult", "withheld", "missing-request-correlation"},
@@ -124,8 +124,8 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 			t.Errorf("numeric reason leaked: %+v", entry)
 		}
 	}
-	if len(seen) != 30 {
-		t.Fatalf("unique support events=%d, want 30", len(seen))
+	if want := len(registration.ClaudeCode2_1_210().Entries()); len(seen) != want {
+		t.Fatalf("unique support events=%d, want %d", len(seen), want)
 	}
 	manifestEntries := manifest.Entries()
 	for i, want := range expected {

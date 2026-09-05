@@ -624,7 +624,7 @@ func TestGlobalHookCommandReachesInstalledRunnerFromUnrelatedDirectory(t *testin
 	if err != nil {
 		t.Fatalf("installed runner did not reach the injected Pasture binary: %v", err)
 	}
-	if !strings.Contains(string(args), "hook lifecycle --harness codex --event SessionStart --host-version 0.146.0") {
+	if !strings.Contains(string(args), "hook lifecycle --harness codex --event SessionStart --host-version "+runtime.Codex0_146_0().Versions().Min().String()) {
 		t.Fatalf("installed global runner forwarded wrong argv: %q", args)
 	}
 }

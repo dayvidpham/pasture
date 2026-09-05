@@ -338,8 +338,8 @@ func TestClaudeCatalogueMatchesRuntimeMappingForAllOrdinals(t *testing.T) {
 	// downstream agrees on which host it describes.
 	require.Equal(t, runtimeContract.Versions().Min().String(), manifest.Version, "the registration manifest and the runtime contract record one host version")
 	runtimeEvents := runtime.ClaudeLifecycleEvents()
-	require.Len(t, manifest.Events, 30)
-	require.Len(t, runtimeEvents, 30)
+	require.NotEmpty(t, runtimeEvents)
+	require.Len(t, manifest.Events, len(runtimeEvents), "one registration row per runtime profile event")
 	require.NotEqual(t, manifest.Contract, runtimeContract.ID(), "occurrence registration and semantic runtime contracts are intentionally distinct")
 
 	for index, registered := range manifest.Events {

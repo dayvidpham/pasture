@@ -5,10 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
@@ -21,8 +23,26 @@ import (
 const (
 	expectedInterpretedResultSlot   = provenance.ResultSlotID("interpreted")
 	expectedInterpretedEvidenceKind = provenance.EvidenceKind("pasture.lifecycle.interpreted.v2")
-	expectedInterpretedContract     = "claude-code/claude-code@2.1.210"
 )
+
+// expectedInterpretedContract is the Claude runtime contract id the tree
+// records, read from the one root so an expected record never restates a version.
+var expectedInterpretedContract = func() string {
+	root, err := artifact.ProductionRuntimeContract(artifact.HarnessClaudeCode)
+	if err != nil {
+		panic(err)
+	}
+	return root.String()
+}()
+
+// expectedInterpretedVersion is the bare host version inside that contract id.
+var expectedInterpretedVersion = func() string {
+	_, version, ok := strings.Cut(expectedInterpretedContract, "@")
+	if !ok {
+		panic("production runtime contract has no version: " + expectedInterpretedContract)
+	}
+	return version
+}()
 
 func TestNewInterpretedSessionStartPreservesTypedValues(t *testing.T) {
 	t.Parallel()
@@ -88,7 +108,15 @@ func TestNewInterpretedRejectsInvalidInputs(t *testing.T) {
 
 	contract := mustClaudeLifecycleContract(t)
 	l2 := mustSessionStartL2(t, "session-1")
-	mismatched, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "2.1.220")
+	// The mismatched contract is one patch above the recorded production
+	// version, derived from it so a moved root cannot make the two collide.
+	production, err := runtime.ParseHostVersion(expectedInterpretedVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	major, minor, patch := production.Release()
+	mismatchedVersion := fmt.Sprintf("%d.%d.%d", major, minor, patch+1)
+	mismatched, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, mismatchedVersion)
 	if err != nil {
 		t.Fatalf("NewRuntimeContractID() error = %v", err)
 	}
@@ -106,7 +134,7 @@ func TestNewInterpretedRejectsInvalidInputs(t *testing.T) {
 			l2:                    l2,
 			contract:              mismatched,
 			wantWhat:              "does not match",
-			wantContractFragments: []string{"claude-code/2.1.220", "claude-code/claude-code@2.1.210"},
+			wantContractFragments: []string{"claude-code/" + mismatchedVersion, expectedInterpretedContract},
 		},
 	}
 	for _, test := range tests {
@@ -161,7 +189,7 @@ func TestInterpretedEffectIsCanonicalAndOwnsBytes(t *testing.T) {
 	}
 	effect := record.Effect()
 	activeContent := metamodel.Active().Content
-	wantPayload := []byte(`{"semantic":1,"identities":[{"kind":1,"value":"session-é-<>&"}],"unresolved_facts":[],"contract":"claude-code/claude-code@2.1.210","manifest":{"id":"pasture.lifecycle.metamodel","version":1,"content":"` + hex.EncodeToString(activeContent[:]) + `"}}`)
+	wantPayload := []byte(`{"semantic":1,"identities":[{"kind":1,"value":"session-é-<>&"}],"unresolved_facts":[],"contract":"` + expectedInterpretedContract + `","manifest":{"id":"pasture.lifecycle.metamodel","version":1,"content":"` + hex.EncodeToString(activeContent[:]) + `"}}`)
 	decoded := mustDecodeInterpretedEffectPayload(t, effect.Payload)
 	if decoded.Semantic != uint8(runtime.SemanticObservation) {
 		t.Fatalf("decoded semantic = %d, want %d", decoded.Semantic, runtime.SemanticObservation)
