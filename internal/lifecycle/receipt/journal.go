@@ -32,11 +32,56 @@ type IdentityResolver interface {
 	ResolveLifecycleIdentity(context.Context) (Identity, error)
 }
 
+// BlobStore is the NARROW WRITE door on the payload blob table: one method,
+// which stores a content-addressed body and stamps the instant it was written.
+// The receipt service is its only caller and depends on nothing else about the
+// store, so a fake that records the call satisfies it. The delete door is a
+// separate type, PayloadReclaimer, which nothing on a write path constructs.
 type BlobStore interface {
 	Put(context.Context, digest.Digest, []byte) error
 }
 
-type SQLiteBlobStore struct{ DB *sql.DB }
+// SQLiteBlobStore writes and inspects payload blobs on the unified store. It
+// holds its own clock for the written-at stamp: the wall clock unless a
+// scripted clock is injected through NewSQLiteBlobStore, so a store built as
+// a bare literal stamps real time and a test can choose the instant.
+type SQLiteBlobStore struct {
+	DB    *sql.DB
+	clock Clock
+}
+
+// BlobStoreOption configures a SQLiteBlobStore at construction.
+type BlobStoreOption func(*SQLiteBlobStore)
+
+// WithPayloadClock makes the store stamp written_at from the given clock
+// instead of the wall clock. It exists for tests that must place a blob at a
+// chosen instant relative to the reclaim window; production wires no clock
+// and stamps real time.
+func WithPayloadClock(clock Clock) BlobStoreOption {
+	return func(s *SQLiteBlobStore) { s.clock = clock }
+}
+
+// NewSQLiteBlobStore builds a store on the unified handle with the options
+// applied. Without options it is identical to the literal SQLiteBlobStore{DB: db}.
+func NewSQLiteBlobStore(db *sql.DB, options ...BlobStoreOption) SQLiteBlobStore {
+	store := SQLiteBlobStore{DB: db}
+	for _, option := range options {
+		option(&store)
+	}
+	return store
+}
+
+// writeInstant is the instant a Put stamps. The wall clock is the default
+// because the stamp's only reader, the orphan reclaim, ages a blob against a
+// snapshot instant taken from the same wall clock in production; a store
+// built without a clock must therefore stamp real time, never zero, or every
+// fresh blob would read as a legacy row older than any bound.
+func (s SQLiteBlobStore) writeInstant() time.Time {
+	if s.clock == nil {
+		return time.Now()
+	}
+	return s.clock.Now()
+}
 
 const MaxReclaimablePayloads = 256
 
@@ -54,7 +99,13 @@ func (s SQLiteBlobStore) Put(ctx context.Context, ref digest.Digest, body []byte
 			_ = tx.Rollback()
 		}
 	}()
-	if _, err = tx.ExecContext(ctx, `INSERT INTO lifecycle_payload_blobs (digest, body, byte_count) VALUES (?, ?, ?) ON CONFLICT(digest) DO NOTHING`, ref.String(), body, len(body)); err != nil {
+	// The stamp is REFRESHED on a repeated Put and never moved back. A writer
+	// re-delivering a body whose digest an old orphan already carries is in
+	// flight between this write and its journal append exactly like a first
+	// writer, so the age the reclaim reads must be this writer's instant, not
+	// the orphan's; a stamp left at the old instant would let a read command
+	// delete the blob under an append that then names an absent blob.
+	if _, err = tx.ExecContext(ctx, `INSERT INTO lifecycle_payload_blobs (digest, body, byte_count, written_at) VALUES (?, ?, ?, ?) ON CONFLICT(digest) DO UPDATE SET written_at = max(lifecycle_payload_blobs.written_at, excluded.written_at)`, ref.String(), body, len(body), s.writeInstant().UnixNano()); err != nil {
 		return structured(pasterrors.CategoryStorage, "The lifecycle payload blob could not be stored.", "SQLite rejected the content-addressed blob write before the occurrence transaction began.", "Writing the content-addressed payload blob (internal/lifecycle/receipt/journal.go in receipt.SQLiteBlobStore.Put).", "No occurrence was committed; a previous identical blob, if any, is unchanged.", "Run `pasture migrate`, confirm the database is writable, and retry the delivery.", err)
 	}
 	if err = tx.Commit(); err != nil {

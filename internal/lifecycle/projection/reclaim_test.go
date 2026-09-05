@@ -434,3 +434,88 @@ func TestReclaimFailureLineNamesTheOutcome(t *testing.T) {
 	assert.Contains(t, line, "the rebuild still completed and nothing was deleted")
 	assert.Contains(t, line, "the next read command retries the reclaim")
 }
+
+// TestAFreshlyPutBlobIsNeverReclaimedWhileItsWriterMayStillAppend is the age
+// test on the production write: a blob the production store Put at the
+// snapshot instant is younger than the window and survives the reclaim,
+// while one it Put earlier than the window is reclaimed. A store that wrote
+// no stamp would leave both at zero and reclaim both.
+func TestAFreshlyPutBlobIsNeverReclaimedWhileItsWriterMayStillAppend(t *testing.T) {
+	t.Parallel()
+	tracker, db := openReclaimStore(t)
+	ctx := context.Background()
+	fresh := []byte(`{"hook_event_name":"Stop","writer":"in flight"}`)
+	freshRef := digest.FromBytes(fresh)
+	require.NoError(t, receipt.NewSQLiteBlobStore(db, receipt.WithPayloadClock(&sequenceClock{instants: []time.Time{snapshotEpoch}})).Put(ctx, freshRef, fresh))
+	stale := []byte(`{"hook_event_name":"Stop","writer":"abandoned long ago"}`)
+	staleRef := digest.FromBytes(stale)
+	require.NoError(t, receipt.NewSQLiteBlobStore(db, receipt.WithPayloadClock(&sequenceClock{instants: []time.Time{snapshotEpoch.Add(-reclaimWindow - time.Nanosecond)}})).Put(ctx, staleRef, stale))
+
+	report, _ := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch}})
+	require.NoError(t, report.Failure)
+	assert.True(t, blobExists(t, db, freshRef), "a blob the production store wrote inside the window is never reclaimed: its writer may still be between the blob write and the journal append")
+	assert.False(t, blobExists(t, db, staleRef), "control: a blob the production store wrote before the window is reclaimed")
+	assert.Equal(t, []digest.Digest{staleRef}, report.Reclaimed)
+}
+
+// TestARedeliveredOrphanBodyIsProtectedByItsNewWriter: a legacy orphan
+// carries the body a new delivery re-sends. The new writer's Put must refresh
+// the stamp, or the reclaim would delete the blob under that writer's append
+// and the journal would then name an absent blob. The control is a legacy
+// orphan nobody re-sent, which is reclaimed at once.
+func TestARedeliveredOrphanBodyIsProtectedByItsNewWriter(t *testing.T) {
+	t.Parallel()
+	tracker, db := openReclaimStore(t)
+	redelivered := []byte(`{"hook_event_name":"SessionStart","body":"seen before"}`)
+	redeliveredRef := seedBlob(t, db, redelivered, time.Time{})
+	untouchedRef := seedBlob(t, db, []byte(`{"hook_event_name":"SessionStart","body":"never seen again"}`), time.Time{})
+	require.NoError(t, receipt.NewSQLiteBlobStore(db, receipt.WithPayloadClock(&sequenceClock{instants: []time.Time{snapshotEpoch}})).Put(context.Background(), redeliveredRef, redelivered))
+
+	report, _ := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch}})
+	require.NoError(t, report.Failure)
+	assert.True(t, blobExists(t, db, redeliveredRef), "a legacy orphan whose body a new writer re-delivered inside the window is protected by that writer's refreshed stamp")
+	assert.False(t, blobExists(t, db, untouchedRef), "control: the legacy orphan nobody re-delivered is reclaimed")
+}
+
+// TestTheReclaimIsOneBoundedStatement is the budget proof's structural half:
+// the work a rebuild adds is ONE SQL statement whose row count the cap bounds,
+// so a read command's added latency scales with the cap and not with the
+// backlog, and the drain proof above (exactly the cap, then the rest) is the
+// behavioural half. WHAT IT VISITS: the body of ReclaimOrphansWrittenBefore
+// in internal/lifecycle/receipt/journal.go, every call on the transaction, and
+// the string literal that call is given. WHAT IT DOES NOT READ: any other
+// function, the projection package, or SQLite's plan for the statement.
+func TestTheReclaimIsOneBoundedStatement(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(moduleRootFrom(t), "internal", "lifecycle", "receipt", "journal.go")
+	file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	require.NoError(t, err)
+	var body *ast.BlockStmt
+	for _, declaration := range file.Decls {
+		if function, ok := declaration.(*ast.FuncDecl); ok && function.Name.Name == "ReclaimOrphansWrittenBefore" {
+			body = function.Body
+		}
+	}
+	require.NotNil(t, body, "ReclaimOrphansWrittenBefore must be declared in journal.go")
+	statements := []string{}
+	ast.Inspect(body, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || !strings.HasPrefix(renderExpr(selector.X), "r.Tx") {
+			return true
+		}
+		require.GreaterOrEqual(t, len(call.Args), 2, "a statement on the transaction takes the context and the SQL first")
+		literal, ok := call.Args[1].(*ast.BasicLit)
+		require.True(t, ok, "the SQL must be a literal so this pin can read it")
+		statements = append(statements, selector.Sel.Name+": "+literal.Value)
+		return true
+	})
+	require.Len(t, statements, 1, "the reclaim issues exactly one statement on the transaction: %v", statements)
+	assert.Contains(t, statements[0], "LIMIT ?", "the one statement carries the cap as its LIMIT")
+	assert.Contains(t, statements[0], "b.written_at < ?", "the one statement carries the age bound")
+	assert.Contains(t, statements[0], "o.journal_id IS NULL", "the one statement carries the named-by-nothing condition")
+	assert.Contains(t, statements[0], "ORDER BY b.written_at ASC", "the one statement takes the oldest first")
+}
