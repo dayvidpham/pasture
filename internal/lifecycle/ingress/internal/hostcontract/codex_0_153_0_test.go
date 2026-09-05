@@ -102,6 +102,59 @@ func TestEveryCodexCatalogRowCarriesTheRuntimeFailureMode(t *testing.T) {
 		arms)
 }
 
+// constructedCodexRow is a runtime Codex row BUILT FOR THIS TEST, not read from
+// the profile. It is the whole point of the control below: the state that tells
+// a right read from a wrong one is a row whose two failure arms DIFFER, and the
+// tree holds such a row only while some declared Codex gate cites no host
+// evidence. That is a state the product is designed to leave. A control that
+// waited for it would go quiet on the day every Codex row is cited, which is
+// the day the catalogue's central claim most needs a guard.
+type constructedCodexRow struct {
+	name     string
+	failure  pastureruntime.FailureMode
+	declared pastureruntime.FailureMode
+}
+
+func (r constructedCodexRow) NativeName() string                          { return r.name }
+func (r constructedCodexRow) Failure() pastureruntime.FailureMode         { return r.failure }
+func (r constructedCodexRow) DeclaredFailure() pastureruntime.FailureMode { return r.declared }
+
+// TestTheCodexFailureReadTakesTheEvidenceBoundArmAndNotTheDeclaredOne CONSTRUCTS
+// the state that discriminates instead of waiting for the tree to be in it.
+//
+// The catalogue must take the arm the failure-evidence rule PRODUCED and never
+// the arm the profile row DECLARES before that rule runs. A declared arm claims
+// a refusal no code path performs, and a reader of the catalogue then believes
+// pasture can stop a user's action where it cannot.
+//
+// WHY THIS CANNOT BE ASKED OF THE LIVE PROFILE. The two arms differ only on a
+// row the rule MOVED, which is a declared gate that cites no host evidence. A
+// cited row carries the same value in both arms. So in a fully cited profile
+// every comparison of the two artefacts passes under EITHER read, and no test
+// that reads the tree can tell them apart. The row below is built here, so this
+// control is equally sharp with no Codex row cited, with one cited, and with
+// every one cited.
+func TestTheCodexFailureReadTakesTheEvidenceBoundArmAndNotTheDeclaredOne(t *testing.T) {
+	t.Parallel()
+
+	row := constructedCodexRow{
+		name:     "ConstructedDemotedCodexGate",
+		failure:  pastureruntime.FailureStrictHook,
+		declared: pastureruntime.FailureStrictExitTwoBlocks,
+	}
+	require.NotEqualf(t, row.declared, row.failure,
+		"the constructed row must hold two DIFFERENT arms, or this control cannot tell the evidence-bound read from the declared one; it holds %v twice",
+		row.failure)
+
+	got := codexFailureReaderOver([]codexRuntimeRow{row})(row.name)
+	require.Equalf(t, row.failure, got,
+		"the Codex catalogue read answered %v for a row whose evidence-bound arm is %v and whose declared arm is %v. "+
+			"The catalogue must take the arm the failure-evidence rule PRODUCED, because a declared blocking arm claims a refusal the product cannot perform. "+
+			"The row is built in this test and not read from the tree, so this holds whether or not any live Codex row cites host evidence. "+
+			"Repair the read in codexFailureReaderOver in internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go",
+		got, row.failure, row.declared)
+}
+
 // TestTheCodexFailureReaderRefusesAnEventTheProfileDoesNotDeclare pins the
 // production diagnostic of the read. The catalog cannot return an error, so a
 // name the profile does not hold stops the build of the contract; the message

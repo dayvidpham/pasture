@@ -501,23 +501,53 @@ func TestTheCodexDocCommentsStateTheDerivedCounts(t *testing.T) {
 		}
 	}
 
-	// Non-vacuity. Each clause names a way the derivation could read nothing, and
-	// NONE of them is a statement about today's Codex citation or capture state.
-	// A control with an expiry date is how this class returns: the first real
-	// citation, and the first authentic capture, both move those states.
+	// Non-vacuity. The population must not be empty, and this clause is not a
+	// statement about today's Codex citation or capture state: the first real
+	// citation and the first authentic capture both move those states.
 	if counts.registered == 0 {
 		t.Fatalf("the derivation walked 0 registered Codex rows, so every pin above passed on an empty population; the derived Codex counts are %+v", counts)
 	}
-	if counts.demotedGates == 0 && len(counts.evidencedGateRows) == 0 {
-		t.Fatalf("the evidence rule moves no Codex row: no row is demoted for want of a citation and no row cites host evidence, "+
-			"so a read that returned the DECLARED field would satisfy every check above and the pins prove nothing. The derived Codex counts are %+v", counts)
+
+	// WHICH FIELD THE CATALOGUE READS CANNOT BE DECIDED HERE IN EVERY WORLD, and
+	// a control that waited for the tree to be in the world where it can be is
+	// silent in the world this work is heading for.
+	//
+	// THE MEASUREMENT. A cited row is a row the failure-evidence rule does NOT
+	// move: the rule keeps the declared blocking arm while a citation stands, so
+	// the effective arm and the declared arm are equal on that row. In a profile
+	// where every declared Codex gate cites host evidence, the two arms are
+	// equal on EVERY row, both candidate reads render the same manifest, and
+	// nothing this subject compares can tell them apart. A control keyed on a
+	// count of demoted or cited rows says nothing exactly there, and the count of
+	// cited rows is a number the citation work is designed to raise.
+	//
+	// So the proof of WHICH field is read is CONSTRUCTED rather than observed,
+	// and it lives beside the read: the row it needs holds two different arms
+	// whatever the tree holds, so it is equally sharp with no Codex row cited,
+	// with one cited and with every one cited. The pointer is guarded here, so a
+	// renamed or deleted proof is RED rather than silent.
+	const (
+		fieldReadProofFile = "../ingress/internal/hostcontract/codex_0_153_0_test.go"
+		fieldReadProofTest = "TestTheCodexFailureReadTakesTheEvidenceBoundArmAndNotTheDeclaredOne"
+	)
+	proof, err := os.ReadFile(fieldReadProofFile)
+	if err != nil {
+		t.Fatalf("the constructed proof that the Codex catalogue reads the evidence-bound failure arm cannot be read at %q: %v. "+
+			"This subject compares two artefacts and cannot tell the two candidate reads apart once every Codex row cites host evidence, "+
+			"so that proof is the only one that holds in every citation state", fieldReadProofFile, err)
+	}
+	if !strings.Contains(string(proof), "func "+fieldReadProofTest+"(") {
+		t.Fatalf("the file %q no longer declares %s. That test builds a row whose declared arm and evidence-bound arm DIFFER, "+
+			"and it is what proves the Codex catalogue reads the arm the evidence rule produced. This subject cannot prove it: "+
+			"once every Codex row cites host evidence the two arms are equal on every row and both reads render the same manifest. "+
+			"Restore that test, or move the constructed proof and name it here", fieldReadProofFile, fieldReadProofTest)
 	}
 	if counts.failureDiverged != 0 || counts.overClaiming != 0 {
 		t.Errorf("the committed Codex registration manifest and the runtime profile state a different failure mode on %d rows, %d of them claiming a blocking exit code the profile does not hold, want none. "+
 			"The value compared here is the COMMITTED internal/lifecycle/registration/codex_0_153_0.gen.go, and the source it is rendered from, "+
 			"internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go, READS this field from internal/runtime/lifecycle_profiles_codex.go. "+
 			"CHECK THE TWO CAUSES IN THIS ORDER. (1) The profile moved and the manifest was not regenerated: run make generate. That is the ordinary cause, and it is the only one a profile edit on its own can produce. "+
-			"(2) The source catalogue went back to a hand-written arm: restore the read in codexFailureReader there, then run make generate",
+			"(2) The source catalogue went back to a hand-written arm: restore the read in codexFailureReaderOver there, then run make generate",
 			counts.failureDiverged, counts.overClaiming)
 	}
 	// The blocking population, DERIVED on both sides. The catalogue's blocking
@@ -532,7 +562,7 @@ func TestTheCodexDocCommentsStateTheDerivedCounts(t *testing.T) {
 			"The profile demotes %d declared gates for want of a citation. "+
 			"CHECK THE THREE CAUSES IN THIS ORDER. (1) The profile moved and the manifest was not regenerated: run make generate. A citation added to or taken from "+
 			"internal/runtime/lifecycle_profiles_codex.go moves the SECOND list at once and the FIRST list only after generation, so the two lists part until the generator runs. "+
-			"(2) The source catalogue internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go went back to a hand-written arm: restore the read in codexFailureReader, then run make generate. "+
+			"(2) The source catalogue internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go went back to a hand-written arm: restore the read in codexFailureReaderOver, then run make generate. "+
 			"(3) Neither of those, and then a row in the FIRST list only is a refusal the product cannot perform, and a row in the SECOND list only is an arm the manifest has not taken up",
 			len(counts.catalogueGateRows), counts.registered, counts.catalogueGateRows,
 			len(counts.evidencedGateRows), counts.evidencedGateRows, counts.demotedGates)

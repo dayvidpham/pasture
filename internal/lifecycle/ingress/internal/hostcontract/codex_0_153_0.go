@@ -23,8 +23,9 @@ var codexFields = []Field{
 	{fCodexToolUseID, "FieldCodexToolUseID", "tool_use_id"},
 }
 
-// codexReaderRefusalCost is the blast radius both arms of codexFailureReader
-// report, and it is measured from the import graph rather than assumed.
+// codexReaderRefusalCost is the blast radius both refusal arms of the Codex
+// failure-mode read report, and it is measured from the import graph rather
+// than assumed.
 //
 // THE MEASUREMENT THAT SUPPORTS THE COST. "go list -deps ./cmd/..." names this
 // package ZERO times, with and without the recovery build tag, so no pasture
@@ -69,21 +70,61 @@ const codexReaderRefusalCost = "WHAT IT COSTS: code generation stops here and ad
 // ordering or its identities, so a row that the two artefacts describe
 // differently on any other axis keeps both descriptions.
 func codexFailureReader() func(name string) pastureruntime.FailureMode {
+	return codexFailureReaderOver(codexProfileRows())
+}
+
+// codexRuntimeRow is the part of one runtime Codex row this catalog reads. It
+// is an interface so the read can be exercised over a CONSTRUCTED row, and the
+// production row type pastureruntime.LifecycleEventMapping satisfies it.
+//
+// It carries BOTH arms although the read takes only one. DeclaredFailure is the
+// arm the profile row declares BEFORE the failure-evidence rule runs, and it is
+// named here so that a read of the wrong field is a thing a test can write and
+// catch. A row that cites host evidence carries the SAME value in both arms, so
+// a control that waited for the tree to hold a moved row would say nothing at
+// all once every Codex row is cited. The control builds its own row instead.
+type codexRuntimeRow interface {
+	NativeName() string
+	Failure() pastureruntime.FailureMode
+	DeclaredFailure() pastureruntime.FailureMode
+}
+
+// codexProfileRows returns every row of the runtime Codex profile. It is the
+// shell around the read: it reaches the process-wide profile and refuses a
+// profile that cannot answer for its own event, and it decides nothing about
+// which field is read.
+func codexProfileRows() []codexRuntimeRow {
 	contract := pastureruntime.Codex0_153_0Lifecycle()
 	events := pastureruntime.CodexLifecycleEvents()
-	modes := make(map[string]pastureruntime.FailureMode, len(events))
+	rows := make([]codexRuntimeRow, 0, len(events))
 	for _, event := range events {
 		mapping, err := contract.Mapping(event)
 		if err != nil {
 			panic(fmt.Sprintf(
 				"the Codex host contract cannot be built: the runtime Codex profile holds no mapping for its own event %d (%v). "+
-					"This happened in codexFailureReader in internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go, "+
-					"while reading the failure mode of every Codex row from internal/runtime/lifecycle_profiles_codex.go. "+
+					"This happened in codexProfileRows in internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go, "+
+					"while collecting every Codex row of internal/runtime/lifecycle_profiles_codex.go for the failure-mode read. "+
 					codexReaderRefusalCost+
 					"Add the missing mapping to codexLifecycleMappings in internal/runtime/lifecycle_profiles_codex.go, then run make generate: %v",
 				uint8(event), event, err))
 		}
-		modes[mapping.NativeName()] = mapping.Failure()
+		rows = append(rows, mapping)
+	}
+	return rows
+}
+
+// codexFailureReaderOver IS THE READ, and it is the only place in this catalog
+// that chooses a failure field. It takes the arm the failure-evidence rule
+// PRODUCED, never the arm the row DECLARES, so a gate whose blocking exit code
+// cites nothing carries the demoted arm here too.
+//
+// The rows are a parameter so that this choice can be proved over a row built
+// for the purpose, in which the two arms differ whatever the runtime profile
+// holds today. Production passes codexProfileRows().
+func codexFailureReaderOver(rows []codexRuntimeRow) func(name string) pastureruntime.FailureMode {
+	modes := make(map[string]pastureruntime.FailureMode, len(rows))
+	for _, row := range rows {
+		modes[row.NativeName()] = row.Failure()
 	}
 	return func(name string) pastureruntime.FailureMode {
 		mode, present := modes[name]
@@ -91,7 +132,7 @@ func codexFailureReader() func(name string) pastureruntime.FailureMode {
 			panic(fmt.Sprintf(
 				"the Codex host contract cannot be built: this catalog declares the event %q, and the runtime Codex profile declares no row of that native name, "+
 					"so there is no failure mode to read for it. "+
-					"This happened in codexFailureReader in internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go, while building the Codex 0.153.0 contract. "+
+					"This happened in the read codexFailureReaderOver returns, in internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go, while building the Codex 0.153.0 contract. "+
 					codexReaderRefusalCost+
 					"Add the row to codexLifecycleMappings in internal/runtime/lifecycle_profiles_codex.go, or spell the name here as the profile spells it, then run make generate",
 				name))
