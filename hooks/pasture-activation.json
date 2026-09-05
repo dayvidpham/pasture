@@ -225,7 +225,7 @@
       "state": "withheld",
       "reason": "outside-target-set",
       "responseCapability": "unset",
-      "failureEvidence": ""
+      "failureEvidence": "claude-code 2.1.261 installed binary hook-event table (~/.local/share/claude/versions/2.1.261): PreModelSwitch \"Exit code 2 - block the switch and show stderr to user\""
     },
     {
       "event": "PostModelSwitch",

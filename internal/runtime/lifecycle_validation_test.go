@@ -307,6 +307,9 @@ func TestPinnedProfilesCiteEvidenceForEveryBlockingExitCode(t *testing.T) {
 		"claude:Stop":             claudeHooksReference,
 		"claude:PreToolUse":       claudeHooksReference,
 		"claude:SubagentStop":     claudeHooksReference,
+		// Read from the installed binary's own hook-event table, not from the
+		// hook reference: the reference does not name this event.
+		"claude:PreModelSwitch": claudeInstalledBinaryHookTable2_1_261,
 	}
 	if len(blocking) != len(want) {
 		t.Fatalf("rows claiming a blocking exit code = %v, want exactly %v", blocking, want)

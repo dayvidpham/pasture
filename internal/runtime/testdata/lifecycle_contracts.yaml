@@ -48,7 +48,6 @@ contracts:
           - PostToolUse
           - PostToolUseFailure
           - FileChanged
-          - PreModelSwitch
           - PostModelSwitch
           - DirectoryAdded
           - CwdChanged
@@ -73,6 +72,7 @@ contracts:
           - TaskCompleted
           - PreCompact
           - Elicitation
+          - PreModelSwitch
         explicit-human-response:
           - ElicitationResult
       surface:
@@ -120,7 +120,6 @@ contracts:
           - PostToolUse
           - PostToolUseFailure
           - FileChanged
-          - PreModelSwitch
           - PostModelSwitch
           - DirectoryAdded
           - CwdChanged
@@ -145,6 +144,7 @@ contracts:
           - PreCompact
           - Elicitation
           - ElicitationResult
+          - PreModelSwitch
         conditionally-blocking:
           - ConfigChange
       mutation:
@@ -230,7 +230,6 @@ contracts:
           - PostToolUse
           - PostToolUseFailure
           - FileChanged
-          - PreModelSwitch
           - PostModelSwitch
           - DirectoryAdded
           - CwdChanged
@@ -256,6 +255,7 @@ contracts:
           - PreCompact
           - Elicitation
           - ElicitationResult
+          - PreModelSwitch
         no-adapter-merge: []
         sequential-mutation: []
       failure:
@@ -271,7 +271,6 @@ contracts:
           - PostToolUseFailure
           - PostToolBatch
           - FileChanged
-          - PreModelSwitch
           - PostModelSwitch
           - DirectoryAdded
           - CwdChanged
@@ -294,6 +293,7 @@ contracts:
           - Stop
           - PreToolUse
           - SubagentStop
+          - PreModelSwitch
         strict-hook-failure: []
         strict-output-exit-2-blocks: []
         throw-fail-fast: []

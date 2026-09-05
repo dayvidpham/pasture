@@ -32,6 +32,8 @@ events:
   - {name: MessageDisplay, fields: [message, content], behavior: observation}
   - {name: Elicitation, fields: [request_id, fields, mcp_server_name, message, mode, requested_schema], behavior: gate}
   - {name: ElicitationResult, fields: [request_id, response, mcp_server_name, mode, action, content], behavior: human-response}
-  - {name: PreModelSwitch, fields: [], behavior: observation}
+  # The installed 2.1.261 binary states "Exit code 2 - block the switch and show
+  # stderr to user" for this event, so it is a gate on that host.
+  - {name: PreModelSwitch, fields: [], behavior: gate}
   - {name: PostModelSwitch, fields: [], behavior: observation}
   - {name: DirectoryAdded, fields: [], behavior: observation}

@@ -119,7 +119,23 @@ func ClaudeCode2_1_261() Contract {
 		// row declares the common fields only and no identity beyond them; a
 		// capture decides its optional fields. They stay withheld until a capture
 		// and a production proof land.
-		o(31, "EventPreModelSwitch", "PreModelSwitch"), o(32, "EventPostModelSwitch", "PostModelSwitch"), o(33, "EventDirectoryAdded", "DirectoryAdded"),
+		//
+		// The blocking mode of each of the three rows is decided by the exit-code
+		// paragraph the installed 2.1.261 binary carries for that event in its own
+		// hook-event table. The paragraphs are quoted in the pinning test
+		// (claude_2_1_261_test.go) and in the runtime profile's citation:
+		//   - PreModelSwitch is a GATE: "Exit code 2 - block the switch and show
+		//     stderr to user". The same binary also carries "model switch blocked
+		//     by a PreModelSwitch hook" and "A PreModelSwitch hook asked you to
+		//     confirm", so a hook can refuse the operator's model switch.
+		//   - PostModelSwitch is an OBSERVATION: its paragraph names exit code 0
+		//     and "Other exit codes - show stderr to user only". The binary carries
+		//     no blocking string for it.
+		//   - DirectoryAdded is an OBSERVATION: its paragraph names exit code 0 and
+		//     debug-logged stderr on other exit codes. The binary carries no
+		//     blocking string for it, only "DirectoryAdded hook execution failed"
+		//     and "DirectoryAdded hook failed".
+		g(31, "EventPreModelSwitch", "PreModelSwitch"), o(32, "EventPostModelSwitch", "PostModelSwitch"), o(33, "EventDirectoryAdded", "DirectoryAdded"),
 	}
 	return Contract{Version: "2.1.261", Fields: append([]Field(nil), claudeFields...), Events: events}
 }

@@ -121,6 +121,13 @@ var (
 // blocking exit code.
 const claudeHooksReference = "https://docs.claude.com/en/docs/claude-code/hooks"
 
+// claudeInstalledBinaryHookTable2_1_261 is the hook-event table the installed
+// Claude Code 2.1.261 binary carries in itself. Each entry states the exit-code
+// behaviour of one event, so the table decides which events are gates on that
+// host. It is the citation for a Claude row whose blocking exit code is read
+// from the binary rather than from the hook reference.
+const claudeInstalledBinaryHookTable2_1_261 = `claude-code 2.1.261 installed binary hook-event table (~/.local/share/claude/versions/2.1.261): PreModelSwitch "Exit code 2 - block the switch and show stderr to user"`
+
 func claudeLifecycleMapping(
 	event ClaudeLifecycleEvent,
 	semantic EventSemantic,
@@ -168,6 +175,11 @@ func claudeLifecycleMappings() map[ClaudeLifecycleEvent]LifecycleEventMapping {
 	evidencedGate := func(event ClaudeLifecycleEvent, mutation MutationMode, extra ...NativeIdentityField) LifecycleEventMapping {
 		return claudeLifecycleMapping(event, SemanticGateConsultation, Blocking, mutation, StopLoopNotApplicable, documented, extra...)
 	}
+	// binaryEvidencedGate cites the installed binary's own hook-event table
+	// instead of the hook reference, for a gate the reference does not name.
+	binaryEvidencedGate := func(event ClaudeLifecycleEvent, mutation MutationMode, extra ...NativeIdentityField) LifecycleEventMapping {
+		return claudeLifecycleMapping(event, SemanticGateConsultation, Blocking, mutation, StopLoopNotApplicable, FailureEvidence{Source: claudeInstalledBinaryHookTable2_1_261}, extra...)
+	}
 	mappings := map[ClaudeLifecycleEvent]LifecycleEventMapping{
 		ClaudeEventSessionStart:        observe(ClaudeEventSessionStart),
 		ClaudeEventSetup:               observe(ClaudeEventSetup),
@@ -199,10 +211,17 @@ func claudeLifecycleMappings() map[ClaudeLifecycleEvent]LifecycleEventMapping {
 		ClaudeEventMessageDisplay:      observe(ClaudeEventMessageDisplay),
 		ClaudeEventElicitation:         gate(ClaudeEventElicitation, MutationNone, claudeRequestIdentity),
 		ClaudeEventElicitationResult:   claudeLifecycleMapping(ClaudeEventElicitationResult, SemanticExplicitHumanResponse, Blocking, MutationNone, StopLoopNotApplicable, unevidenced, claudeRequestIdentity),
-		// Registered at 2.1.261 without an authentic capture: observations,
-		// non-blocking, report-and-continue, no evidence, no identity beyond the
-		// session every Claude payload carries.
-		ClaudeEventPreModelSwitch:  observe(ClaudeEventPreModelSwitch),
+		// Registered at 2.1.261 without an authentic capture. The blocking mode
+		// of each row is decided by the exit-code paragraph the installed binary
+		// carries for that event, not by the absence of a capture:
+		//   - PreModelSwitch: "Exit code 2 - block the switch and show stderr to
+		//     user", so it is a gate and it cites the binary's table.
+		//   - PostModelSwitch and DirectoryAdded: exit code 0 and "other exit
+		//     codes" without a block, so they stay observations with no evidence.
+		// All three declare no identity beyond the session every Claude payload
+		// carries, and all three stay withheld until a capture and a production
+		// proof land.
+		ClaudeEventPreModelSwitch:  binaryEvidencedGate(ClaudeEventPreModelSwitch, MutationNone),
 		ClaudeEventPostModelSwitch: observe(ClaudeEventPostModelSwitch),
 		ClaudeEventDirectoryAdded:  observe(ClaudeEventDirectoryAdded),
 	}
