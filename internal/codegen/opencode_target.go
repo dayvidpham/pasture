@@ -214,6 +214,28 @@ func (d OpenCodeTargetDescriptor) Manifest() (string, error) {
 	return string(data) + "\n", nil
 }
 
+// renderOpenCodeActivationReport builds the committed OpenCode activation
+// audit report written to OpenCodeActivationReportPath, in the shape shared
+// with the Claude Code and Codex reports. The target manifest keeps its own
+// activation array as target data; the two are derived from the same
+// activation entries in one generation, and a test holds them equal.
+func renderOpenCodeActivationReport() (string, error) {
+	manifest := registration.OpenCode1_18_10()
+	states, err := openCodeActivationEntries()
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderOpenCodeActivationReport: %w", err)
+	}
+	report, err := buildActivationSupportReport("codegen.renderOpenCodeActivationReport", manifest, states)
+	if err != nil {
+		return "", err
+	}
+	wire, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderOpenCodeActivationReport: marshal activation report: %w", err)
+	}
+	return string(wire) + "\n", nil
+}
+
 func openCodeActivationManifest() ([]openCodeActivationManifestEntry, error) {
 	entries, err := openCodeActivationEntries()
 	if err != nil {

@@ -440,6 +440,7 @@ func TestGeneratedOutputInventory(t *testing.T) {
 	addExpectedOutput(t, expectedClaudeHarness, "hooks/pasture-activation.json", "ClaudeCodeTarget.Manifest activation support report")
 	addExpectedOutput(t, expectedOpenCodeHarness, filepath.ToSlash(OpenCodeHooksModulePath), "OpenCodeTarget.Manifest lifecycle plugin")
 	addExpectedOutput(t, expectedOpenCodeHarness, filepath.ToSlash(OpenCodeTargetManifestPath), "OpenCodeTarget.Manifest target descriptor")
+	addExpectedOutput(t, expectedOpenCodeHarness, filepath.ToSlash(OpenCodeActivationReportPath), "OpenCodeTarget.Manifest activation audit report")
 	addExpectedOutput(t, expectedOpenCodeHarness, "opencode.json", "OpenCodeTarget.Manifest")
 	for _, path := range []string{codexTargetManifestPath, ".codex/hooks.json"} {
 		addExpectedOutput(t, expectedCodexHarness, path, "CodexTarget.Manifest")

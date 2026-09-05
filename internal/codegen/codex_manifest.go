@@ -162,12 +162,9 @@ func codexRunnerRelPath(event string) string {
 // so they must carry the proven matcher, not the inherited empty convention.
 //
 // Provenance: authentic Codex capture configuration recorded 2026-08-03 —
-// SessionStart used "startup", PreToolUse used "*". Evidence report
-// .agents.local/opencode-codex-authentic-capture-2026-08-03.md (digest
-// e4af95db2b8098e90f212c0a962fa824f777ba4ec778143c2534047f47693a24); user
-// clearance aura-plugins-a6h3d. Also recorded in the plan's Corrected
-// Current-Tree Facts (aura-plugins-28786). Any deviation from these values must
-// be justified against an in-tree contract fact (none currently exists).
+// SessionStart used "startup", PreToolUse used "*". Any deviation from these
+// values must be justified against an in-tree contract fact (none currently
+// exists).
 var codexAuthenticMatchers = map[string]string{
 	"SessionStart": "startup",
 	"PreToolUse":   "*",
@@ -342,30 +339,24 @@ func codexEnabledEventNamesFrom(manifest registration.Manifest, states []activat
 // the generated catalog and the activation decisions (invalid/duplicate/missing/
 // non-manifest entry), so a drifted catalog fails generation rather than
 // silently shipping a partial audit.
+// RenderCodexActivationReport renders the committed Codex activation audit
+// report exactly as generation writes it, so a test can hold the committed
+// artifact to the product's own emitter instead of to a second copy of the
+// report shape.
+func RenderCodexActivationReport() (string, error) {
+	return renderCodexActivationReport()
+}
+
 func renderCodexActivationReport() (string, error) {
 	manifest := registration.Codex0_146_0()
-	stateByKind, err := codexActivationByKind()
+	states, err := activation.Codex0_146_0()
 	if err != nil {
-		return "", fmt.Errorf("codegen.renderCodexActivationReport: %w", err)
+		return "", fmt.Errorf("codegen.renderCodexActivationReport: build activation manifest: %w", err)
 	}
-
-	report := activationSupportReport{Harness: string(manifest.Harness), Contract: manifest.Contract.String()}
-	for _, event := range manifest.Events {
-		state, present := stateByKind[event.Kind]
-		if !present {
-			return "", fmt.Errorf("codegen.renderCodexActivationReport: generated event %q has no activation entry; add one exhaustive typed decision", event.NativeName)
-		}
-		entry := activationSupportEntry{Event: event.NativeName, State: state.State.String(), Reason: state.Reason.String()}
-		if state.State == activation.Enabled {
-			entry.CaptureProof = state.CaptureProof.Name()
-			entry.ProductionProof = state.ProductionProof.Name()
-		}
-		report.Events = append(report.Events, entry)
+	report, err := buildActivationSupportReport("codegen.renderCodexActivationReport", manifest, states)
+	if err != nil {
+		return "", err
 	}
-	if len(stateByKind) != len(manifest.Events) {
-		return "", fmt.Errorf("codegen.renderCodexActivationReport: activation has %d entries for %d generated events; remove non-manifest entries and provide one exact decision per event", len(stateByKind), len(manifest.Events))
-	}
-
 	wire, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("codegen.renderCodexActivationReport: marshal activation report: %w", err)
