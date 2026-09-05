@@ -405,8 +405,11 @@ committed corpus:
    `null`), flags every free-text field, and names every refused class and
    every reason a payload is unclearable.
 3. Substitute values, never structure. Two rules exist, applied in this
-   order and listed in the fixture's provenance: `home-path-v1` rewrites the
-   capturing user's home directory, and `free-text-v1` replaces each
+   order and listed in the fixture's provenance: `home-path-v1` rewrites
+   every spelling of the capturing user's home directory to the `user`
+   placeholder — the absolute `/home/<user>`, the relative `home/<user>/`,
+   the directory slug a host derives from a path (`-home-<user>-`), and any
+   occurrence inside free text — and `free-text-v1` replaces each
    free-text string by placeholder text of the same raw length. Keys,
    nesting, types and nulls are unchanged; a fixture that lost a field, a
    key, a type or a null would no longer falsify the contract. A committed
