@@ -11,15 +11,21 @@
 //
 // MEASURED: the self-contained ingress catalogue
 // (internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go, read by the
-// handler's admission) and the runtime Codex profile (read by Bind) disagree on
-// every registered event on at least one axis: the failure mode on 11 of the 12
-// (the catalogue declares report-and-continue or exit-2-blocks where the profile
-// declares strict-hook-failure or a demoted exit-2-blocks), the mutation mode on
-// PreToolUse and PostToolUse, the blocking mode on PostCompact, and the declared
-// identities on the 10 events without an authentic capture. The frontend
+// handler's admission) and the runtime Codex profile (read by Bind) state the
+// same failure mode on all 12 of the 12 registered events, because the catalogue
+// READS that field from the profile. It was written twice before, and the
+// catalogue then claimed a blocking exit code on rows the profile ran as
+// report-and-continue.
+//
+// Three axes still hold two descriptions, because the read copies one field and
+// nothing else. The gate-or-observation semantic differs on PostCompact, an
+// observation in the catalogue and a gate in the profile. The mutation mode
+// differs on PostToolUse, which mutates the tool OUTPUT in the profile and has
+// no output arm to be spelled with in the catalogue vocabulary. The correlation
+// identities are the widest: the profile declares on 8 rows where the catalogue
+// declares none, and each of those 8 is an event with no authentic capture,
+// because the catalogue declares an identity only from a capture. The frontend
 // binds with the profile's row; the handler admits with the catalogue's row.
-// Re-deriving the catalogue from the profile is the OpenCode-style remedy and is
-// separate work; until it lands, this package states the divergence.
 //
 // The counts above are read back from the tree by
 // internal/lifecycle/registration/failure_divergence_test.go, so a new

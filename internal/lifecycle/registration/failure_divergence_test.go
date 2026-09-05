@@ -17,13 +17,12 @@ import (
 // DISAGREE ABOUT WHICH EVENTS BLOCK, and the disagreement must not grow or
 // shrink by accident.
 //
-// Two committed artefacts now speak the SAME failure vocabulary and give
+// Two committed artefacts speak the SAME failure vocabulary and can give
 // DIFFERENT answers for the same event. The generated registration manifests
-// take their failure mode from the ingress host-contract catalogues, which
-// hard-code the blocking arm for their gate rows. The runtime profile applies
-// the evidence rule: a row may claim a blocking exit code only while it cites
-// host evidence for it, and most rows cite none yet, so they run as
-// report-and-continue.
+// take their failure mode from the ingress host-contract catalogues. The
+// runtime profile applies the evidence rule: a row may claim a blocking exit
+// code only while it cites host evidence for it, and most rows cite none yet,
+// so they run as report-and-continue.
 //
 // The divergence is INERT today, and that is a reason it is not a BLOCKER
 // rather than a reason to leave it unwatched. Nothing in production reads
@@ -31,39 +30,34 @@ import (
 // mapping. What is wrong is that a false claim sits in a committed artefact and
 // nothing fails when it grows.
 //
-// The shape that removes the class already exists in one of the three
-// catalogues: the OpenCode catalogue derives its Failure from the runtime
-// mapping, so it cannot diverge at all. Doing the same for Claude and Codex is a
-// smaller change than re-deriving those catalogues, and it is the fix the
-// harness slices should prefer.
+// The shape that removes the class exists in two of the three catalogues now.
+// The OpenCode catalogue derives its whole row from the runtime mapping, and
+// the Codex catalogue READS the failure mode from it, so neither can diverge on
+// that field at all. Doing the same for Claude is a smaller change than
+// re-deriving that catalogue, and it is the fix the Claude work should prefer.
 //
 // This test pins the divergent set EXACTLY. It turns RED when the set GROWS,
 // which is a new silent divergence, and RED when it SHRINKS, which means a
-// harness slice fixed a row and must record that here deliberately.
+// harness fixed a row and must record that here deliberately.
 
 // divergentRows is the MEASURED set: every event whose committed registration
 // manifest states a different failure mode from the runtime profile that
-// governs behaviour. It is 22 rows, and it is NOT the same set as the rows the
+// governs behaviour. It is 11 rows, and it is NOT the same set as the rows the
 // evidence rule demoted, which is a distinction worth keeping straight:
 //
-//   - 18 rows OVER-CLAIM BLOCKING: 11 Claude rows and all 7 Codex gates.
-//     The manifest says the host refuses on the pasture exit code; the runtime
-//     says report-and-continue, because the row cites no host evidence for that
-//     claim. Believing the manifest is the dangerous mistake here.
-//   - 4 rows differ only between two NON-BLOCKING arms: the Codex SessionStart,
-//     SessionEnd, Interrupt and SubagentStart observations read report-and-continue in the manifest
-//     and strict-hook-failure in the runtime. That divergence pre-dates the
-//     evidence rule and comes from the catalogue simplifying its non-blocking
-//     arm. Neither arm can refuse anything, so nothing is over-claimed.
-//   - Codex PostCompact is a gate in the runtime profile and an observation in
-//     the catalogue, and the two land on the same arm by coincidence. It is
-//     therefore absent from this list even though the two artefacts do not
-//     agree about what the event IS.
-//
-// The count differs from the count of rows the evidence rule demoted (11 Claude
-// plus all 7 Codex gates). The two sets overlap and are not the same question:
-// one asks what the runtime profile changed, the other asks where the two
-// committed artefacts disagree today.
+//   - 11 Claude rows OVER-CLAIM BLOCKING. The manifest says the host refuses on
+//     the pasture exit code; the runtime says report-and-continue, because the
+//     row cites no host evidence for that claim. Believing the manifest is the
+//     dangerous mistake here.
+//   - The Codex list is EMPTY, and it is empty BY CONSTRUCTION: the Codex
+//     catalogue reads its failure mode from the runtime profile, in
+//     internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go, so the
+//     two artefacts cannot state different modes for one Codex row. That list
+//     held 11 rows while the field was written twice, 7 of them over-claiming a
+//     blocking exit code and 4 sitting between two non-blocking arms.
+//   - The Codex read copies the failure arm and NEVER the gate-or-observation
+//     semantic, the mutation mode or the identities. Those axes still disagree,
+//     and they are pinned by name below rather than left unwatched.
 var divergentRows = map[ir.HarnessID][]string{
 	ir.HarnessClaudeCode: {
 		"ConfigChange",
@@ -78,19 +72,7 @@ var divergentRows = map[ir.HarnessID][]string{
 		"UserPromptExpansion",
 		"WorktreeCreate",
 	},
-	ir.HarnessCodex: {
-		"Interrupt",
-		"PermissionRequest",
-		"PostToolUse",
-		"PreCompact",
-		"PreToolUse",
-		"SessionEnd",
-		"SessionStart",
-		"Stop",
-		"SubagentStart",
-		"SubagentStop",
-		"UserPromptSubmit",
-	},
+	ir.HarnessCodex:    {},
 	ir.HarnessOpenCode: {},
 }
 
@@ -103,10 +85,7 @@ var overClaimsBlocking = map[ir.HarnessID][]string{
 		"PostToolBatch", "PreCompact", "TaskCompleted", "TaskCreated",
 		"TeammateIdle", "UserPromptExpansion", "WorktreeCreate",
 	},
-	ir.HarnessCodex: {
-		"PermissionRequest", "PostToolUse", "PreCompact", "PreToolUse",
-		"Stop", "SubagentStop", "UserPromptSubmit",
-	},
+	ir.HarnessCodex:    {},
 	ir.HarnessOpenCode: {},
 }
 
@@ -157,8 +136,8 @@ func TestTheManifestAndTheRuntimeDisagreeOnExactlyTheseRows(t *testing.T) {
 		total += len(divergentRows[harness])
 	}
 
-	if total != 22 {
-		t.Fatalf("the recorded divergence covers %d rows, want 22: 11 Claude rows plus 11 Codex rows", total)
+	if total != 11 {
+		t.Fatalf("the recorded divergence covers %d rows, want 11: 11 Claude rows, no Codex row and no OpenCode row", total)
 	}
 }
 
@@ -166,8 +145,6 @@ func TestTheManifestAndTheRuntimeDisagreeOnExactlyTheseRows(t *testing.T) {
 // disagreement for the rows where direction matters. The manifest claims a
 // blocking exit code the runtime does not, so a reader who believes the
 // manifest thinks pasture can stop a user's action on a row where it cannot.
-// The other two divergent rows sit between two non-blocking arms and can
-// mislead nobody about refusal, which is why they are listed apart.
 func TestTheOverClaimingRowsAreNamedSeparately(t *testing.T) {
 	t.Parallel()
 
@@ -195,19 +172,66 @@ func TestTheOverClaimingRowsAreNamedSeparately(t *testing.T) {
 		}
 		overClaiming += len(names)
 	}
-	if overClaiming != 18 {
-		t.Fatalf("%d rows over-claim blocking, want 18 of the 22 divergent rows", overClaiming)
+	if overClaiming != 11 {
+		t.Fatalf("%d rows over-claim blocking, want 11 of the 11 divergent rows", overClaiming)
 	}
 }
 
-// codexDivergenceCounts is every number the two committed Codex doc comments
-// state about the divergence, derived from the tree at head.
+// codexDivergenceCounts is every number and every name the two committed Codex
+// doc comments state about the two artefacts, derived from the tree at head.
 type codexDivergenceCounts struct {
 	registered      int
 	withoutCapture  int
 	failureDiverged int
 	overClaiming    int
 	catalogueGates  int
+	// demotedGates counts the rows whose runtime row DECLARES a blocking exit
+	// code and does not keep it, for want of a citation. It is the control that
+	// keeps the agreement above from passing on an empty question: while it is
+	// positive, the evidence rule really is moving Codex rows, and the
+	// catalogue is following the moved arm rather than a constant.
+	demotedGates int
+	// identityAbsent names the rows where the profile declares correlation
+	// identities and the catalogue declares none.
+	identityAbsent []string
+	// semanticDiverged names the rows the catalogue and the profile classify
+	// differently as a gate or an observation.
+	semanticDiverged []string
+	// mutationDiverged names the rows the two state a different mutation mode
+	// for.
+	mutationDiverged []string
+}
+
+// codexRuntimeMappings returns the runtime Codex rows by native name. It walks
+// the profile's own event catalog, so a row added there is measured with no
+// edit here.
+func codexRuntimeMappings(t *testing.T) map[string]pastureruntime.LifecycleEventMapping {
+	t.Helper()
+
+	contract := pastureruntime.Codex0_153_0Lifecycle()
+	rows := map[string]pastureruntime.LifecycleEventMapping{}
+	for _, event := range pastureruntime.CodexLifecycleEvents() {
+		mapping, err := contract.Mapping(event)
+		if err != nil {
+			t.Fatalf("the runtime Codex profile holds no mapping for its own event %v: %v", event, err)
+		}
+		rows[mapping.NativeName()] = mapping
+	}
+	return rows
+}
+
+// mutationAgrees reports whether the catalogue's mutation arm and the runtime's
+// are the same behaviour. The catalogue vocabulary has no output arm, so a
+// runtime row that mutates the tool OUTPUT can never agree with it.
+func mutationAgrees(catalogue registration.MutationMode, runtimeMode pastureruntime.MutationMode) bool {
+	switch catalogue {
+	case registration.MutationNone:
+		return runtimeMode == pastureruntime.MutationNone
+	case registration.MutationInput:
+		return runtimeMode == pastureruntime.MutationInput
+	default:
+		return false
+	}
 }
 
 // deriveCodexDivergenceCounts measures the counts from the product's own
@@ -218,12 +242,17 @@ type codexDivergenceCounts struct {
 func deriveCodexDivergenceCounts(t *testing.T) codexDivergenceCounts {
 	t.Helper()
 
+	runtimeRows := codexRuntimeMappings(t)
 	manifest := registration.Codex0_153_0()
 	counts := codexDivergenceCounts{registered: len(manifest.Entries())}
 	for _, event := range manifest.Entries() {
 		runtimeRow, declared := pastureruntime.LookupLifecycleFailure(ir.HarnessCodex, event.NativeName)
 		if !declared {
 			t.Fatalf("manifest event %q of harness %q is not declared by the runtime profile", event.NativeName, ir.HarnessCodex)
+		}
+		mapping, present := runtimeRows[event.NativeName]
+		if !present {
+			t.Fatalf("the runtime Codex profile holds no row named %q, so its axes cannot be compared", event.NativeName)
 		}
 		if event.Failure != runtimeRow.Mode {
 			counts.failureDiverged++
@@ -234,7 +263,27 @@ func deriveCodexDivergenceCounts(t *testing.T) codexDivergenceCounts {
 				counts.overClaiming++
 			}
 		}
+		if runtimeRow.DeclaredMode.BlocksByExitCode() && !runtimeRow.Mode.BlocksByExitCode() {
+			counts.demotedGates++
+		}
+		if (event.Blocking == registration.Blocking) != (runtimeRow.Semantic == pastureruntime.SemanticGateConsultation) {
+			counts.semanticDiverged = append(counts.semanticDiverged, event.NativeName)
+		}
+		if !mutationAgrees(event.Mutation, mapping.Mutation()) {
+			counts.mutationDiverged = append(counts.mutationDiverged, event.NativeName)
+		}
+		switch {
+		case len(event.Identities) == 0 && len(mapping.Identities()) > 0:
+			counts.identityAbsent = append(counts.identityAbsent, event.NativeName)
+		case len(event.Identities) != len(mapping.Identities()):
+			t.Errorf("the Codex catalogue declares %d identities on row %q and the runtime profile declares %d; "+
+				"the doc comments describe the identity difference as rows where the catalogue declares NONE, and this row is a third case they do not cover",
+				len(event.Identities), event.NativeName, len(mapping.Identities()))
+		}
 	}
+	sort.Strings(counts.identityAbsent)
+	sort.Strings(counts.semanticDiverged)
+	sort.Strings(counts.mutationDiverged)
 
 	entries, err := activation.Codex0_153_0()
 	if err != nil {
@@ -293,15 +342,34 @@ func TestTheCodexDocCommentsStateTheDerivedCounts(t *testing.T) {
 		sentence string
 	}{
 		{codexDocComments[0], catalogue, fmt.Sprintf("Of the %d registered Codex events, %d have no authentic capture", counts.registered, counts.withoutCapture)},
-		{codexDocComments[0], catalogue, fmt.Sprintf("the two artefacts disagree on %d rows, and on %d of those this source declares a BLOCKING failure mode", counts.failureDiverged, counts.overClaiming)},
-		{codexDocComments[1], frontend, fmt.Sprintf("the failure mode on %d of the %d", counts.failureDiverged, counts.registered)},
-		{codexDocComments[1], frontend, fmt.Sprintf("identities on the %d events without an authentic capture", counts.withoutCapture)},
+		{codexDocComments[0], catalogue, fmt.Sprintf("The failure mode of every one of the %d rows is read from the runtime Codex profile", counts.registered)},
+		{codexDocComments[0], catalogue, fmt.Sprintf("the two artefacts disagree on the failure mode of %d of the %d rows", counts.failureDiverged, counts.registered)},
+		{codexDocComments[1], frontend, fmt.Sprintf("the same failure mode on all %d of the %d registered events", counts.registered-counts.failureDiverged, counts.registered)},
+		{codexDocComments[1], frontend, fmt.Sprintf("the profile declares on %d rows where the catalogue declares none", len(counts.identityAbsent))},
 	}
 	for _, pin := range pins {
 		if !strings.Contains(pin.text, pin.sentence) {
 			t.Errorf("the committed file %s does not state the count the tree derives; it must carry the sentence %q. "+
 				"A count in a doc comment is a claim about the tree: sweep it in the commit that moves it",
 				pin.path, pin.sentence)
+		}
+	}
+
+	// The two axes the doc comments name row by row. The names are derived, so a
+	// row that starts or stops diverging on one of them turns this RED naming
+	// the file that must say so.
+	for _, named := range []struct {
+		axis  string
+		names []string
+	}{
+		{"the gate-or-observation semantic", counts.semanticDiverged},
+		{"the mutation mode", counts.mutationDiverged},
+	} {
+		for _, name := range named.names {
+			if !strings.Contains(frontend, name) {
+				t.Errorf("the committed file %s states which rows differ on %s and does not name %q, which the tree says differs there",
+					codexDocComments[1], named.axis, name)
+			}
 		}
 	}
 
@@ -318,12 +386,80 @@ func TestTheCodexDocCommentsStateTheDerivedCounts(t *testing.T) {
 		}
 	}
 
-	// Non-vacuity: a derivation that measures nothing would pass every pin above.
-	if counts.registered == 0 || counts.withoutCapture == 0 || counts.failureDiverged == 0 || counts.overClaiming == 0 {
-		t.Fatalf("the derived Codex counts are %+v; a zero means the derivation reads nothing and the pins above prove nothing", counts)
+	// Non-vacuity. The agreement the sentences state is worth nothing if the
+	// evidence rule is moving no Codex row: both artefacts would then hold the
+	// same arm because neither has anything to say. While demotedGates is
+	// positive, the profile IS demoting declared Codex gates, and the catalogue
+	// is carrying the demoted arm rather than a constant of its own.
+	if counts.registered == 0 || counts.withoutCapture == 0 || counts.demotedGates == 0 {
+		t.Fatalf("the derived Codex counts are %+v; a zero in the registered, capture-free or demoted-gate count means the derivation reads nothing and the pins above prove nothing", counts)
 	}
-	if counts.catalogueGates != len(overClaimsBlocking[ir.HarnessCodex]) {
-		t.Errorf("the Codex catalogue declares %d gate rows and %d of them over-claim blocking; while the runtime profile cites no Codex evidence the two counts are equal, and the notes that say so must be swept together",
-			counts.catalogueGates, len(overClaimsBlocking[ir.HarnessCodex]))
+	if counts.failureDiverged != 0 || counts.overClaiming != 0 {
+		t.Errorf("the Codex catalogue and the runtime profile disagree on the failure mode of %d rows, %d of them over-claiming a blocking exit code, want none; "+
+			"the catalogue READS that field from the profile, so a disagreement means a row went back to a hand-written arm",
+			counts.failureDiverged, counts.overClaiming)
+	}
+	if counts.catalogueGates != 0 {
+		t.Errorf("the Codex catalogue states a blocking exit code on %d rows while the runtime profile cites no Codex evidence for one; "+
+			"a reader of the catalogue would learn a refusal the product cannot perform", counts.catalogueGates)
+	}
+}
+
+// TestTheCodexArtefactsDisagreeOnExactlyTheseOtherAxes pins what the failure-
+// mode read deliberately did NOT align. The read copies one field. The
+// gate-or-observation semantic, the mutation mode and the identities stay
+// declared in the catalogue, so the rows below still hold two descriptions.
+//
+// The lists are pinned EXACTLY, for the same reason the failure list above is:
+// a row that starts diverging is a new silent difference, and a row that stops
+// is a deliberate alignment somebody must record here.
+func TestTheCodexArtefactsDisagreeOnExactlyTheseOtherAxes(t *testing.T) {
+	t.Parallel()
+
+	counts := deriveCodexDivergenceCounts(t)
+
+	for _, axis := range []struct {
+		name string
+		got  []string
+		want []string
+		why  string
+	}{
+		{
+			name: "the gate-or-observation semantic",
+			got:  counts.semanticDiverged,
+			want: []string{"PostCompact"},
+			why: "PostCompact is an observation in the catalogue and a gate in the runtime profile, and the two land on the same failure arm only " +
+				"because the profile's gate cites no evidence; aligning that semantic needs the host emission site read, not a failure-mode read",
+		},
+		{
+			name: "the mutation mode",
+			got:  counts.mutationDiverged,
+			want: []string{"PostToolUse"},
+			why: "the catalogue vocabulary has no output arm, so a runtime row that mutates the tool OUTPUT cannot be spelled there; " +
+				"closing this needs the catalogue vocabulary widened, not a failure-mode read",
+		},
+		{
+			name: "the declared identities",
+			got:  counts.identityAbsent,
+			want: []string{
+				"PermissionRequest", "PostCompact", "PostToolUse", "PreCompact",
+				"Stop", "SubagentStart", "SubagentStop", "UserPromptSubmit",
+			},
+			why: "the catalogue declares an identity only from an authentic capture, and these rows have none; " +
+				"a capture is what removes a row from this list",
+		},
+	} {
+		if len(axis.got) != len(axis.want) {
+			t.Errorf("the two Codex artefacts disagree on %s for %d rows %v, want exactly %d %v; %s",
+				axis.name, len(axis.got), axis.got, len(axis.want), axis.want, axis.why)
+			continue
+		}
+		for index := range axis.want {
+			if axis.got[index] != axis.want[index] {
+				t.Errorf("the two Codex artefacts disagree on %s for rows %v, want %v; %s",
+					axis.name, axis.got, axis.want, axis.why)
+				break
+			}
+		}
 	}
 }
