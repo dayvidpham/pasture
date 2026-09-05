@@ -285,7 +285,7 @@ func Codex0_153_0() RuntimeContract {
 	table := map[ir.OperationKind]operationLowering{
 		ir.OperationInvokeSkill: {
 			class:    effects.RuntimeClassSemanticInstruction,
-			semantic: mustSemantic("this contract binds no native skill call: perform the skill's steps directly following its reviewed protocol instructions"),
+			semantic: mustSemantic("this contract binds no native skill call: perform the skill's steps directly following its protocol instructions"),
 		},
 		ir.OperationDelegateAssignment: {
 			class:    effects.RuntimeClassParentMediated,

@@ -117,7 +117,7 @@ func TestAuthenticCodexPayloadsProduceProviderCorrectVerifiedL2(t *testing.T) {
 			require.Equal(t, ir.HarnessCodex, l2.Origin().Harness())
 			require.Equal(t, waist.NativeEventName(tc.nativeName), l2.Origin().NativeEventName())
 			// IP-1 (resolved at M3-WAVE-1 consolidation): origin must carry the
-			// pinned codex@0.153.0 contract owned by M3-SLICE-1.
+			// pinned codex@0.153.0 contract.
 			require.Equal(t, runtime.Codex0_153_0Lifecycle().ID(), l2.Origin().Contract())
 		})
 	}

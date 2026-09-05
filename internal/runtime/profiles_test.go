@@ -112,11 +112,82 @@ var hostCapabilityClaims = []string{
 	"offers no",
 }
 
+// processWords name this project's own workflow, not anything the reader of a
+// contract instruction can act on. A contract or an operation added later is
+// covered the day it exists because this list is checked against the same
+// derived population as hostCapabilityClaims. Matching is case-insensitive and
+// whole-word, so "reviewed" catches "reviewed" but not, say, "unreviewed".
+var processWords = []string{
+	"reviewed",
+	"review",
+	"slice",
+	"phase",
+	"proposal",
+}
+
+// wordBoundaryPattern reports whether text contains word as a whole word,
+// case-insensitively.
+func containsWholeWord(text, word string) bool {
+	lowerText := strings.ToLower(text)
+	lowerWord := strings.ToLower(word)
+	start := 0
+	for {
+		idx := strings.Index(lowerText[start:], lowerWord)
+		if idx < 0 {
+			return false
+		}
+		idx += start
+		before := idx == 0 || !isWordChar(lowerText[idx-1])
+		afterPos := idx + len(lowerWord)
+		after := afterPos == len(lowerText) || !isWordChar(lowerText[afterPos])
+		if before && after {
+			return true
+		}
+		start = idx + 1
+	}
+}
+
+func isWordChar(b byte) bool {
+	return b == '_' ||
+		(b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z') ||
+		(b >= '0' && b <= '9')
+}
+
+// actionableErrorLabels are the actionable-error format's own field labels
+// (what/why/where/when/phase/impact/fix — see AGENTS.md "Actionable Errors").
+// A refusal reason is built from that shape, and "phase:" is the format's key
+// vocabulary, not operator prose about the Pasture Protocol's phases. The
+// process-word scan strips these labels from a refusal reason before matching
+// so the field label itself cannot trip the rule; it must not stop a real
+// process word that appears inside a label's VALUE.
+var actionableErrorLabels = []string{
+	"what:",
+	"why:",
+	"where:",
+	"when:",
+	"phase:",
+	"impact:",
+	"fix:",
+}
+
+// stripActionableErrorLabels removes every actionable-error field label from
+// text, leaving each label's value in place so a process word inside a value
+// is still caught by the scan that follows.
+func stripActionableErrorLabels(text string) string {
+	for _, label := range actionableErrorLabels {
+		text = strings.ReplaceAll(text, label, "")
+	}
+	return text
+}
+
 // TestNoContractInstructionClaimsWhatTheHostExposes holds every instruction,
 // mediation reason and refusal reason of every pinned contract to what a
-// contract can truthfully say. Two rules: no host-capability claim, and no
-// pinned host version inside the prose, because a number inside a sentence
-// makes the sentence a claim about that host and a bump re-asserts it unread.
+// contract can truthfully say. Three rules: no host-capability claim, no
+// pinned host version inside the prose (a number inside a sentence makes the
+// sentence a claim about that host and a bump re-asserts it unread), and no
+// process word (this project's own workflow vocabulary, which the reader
+// cannot act on and which the product cannot claim to have applied).
 //
 // The population is derived, and the test refuses to pass on an empty or
 // implausibly small one, so deleting the rows cannot make it green.
@@ -150,7 +221,48 @@ func TestNoContractInstructionClaimsWhatTheHostExposes(t *testing.T) {
 				"the %s of operation %q on harness %q carries the pinned host version %q, which turns it into a claim about that host that a bump re-asserts unread: %s",
 				entry.kind, entry.operation, entry.harness, version, entry.text)
 		}
+		processWordScanText := entry.text
+		if entry.kind == "refusal" {
+			// A refusal reason is built in the actionable-error shape
+			// (what/why/where/when/phase/impact/fix); strip the labels so the
+			// format's own "phase:" key does not trip the scan, while a
+			// process word inside a label's value is still caught below.
+			processWordScanText = stripActionableErrorLabels(entry.text)
+		}
+		for _, word := range processWords {
+			assert.False(t, containsWholeWord(processWordScanText, word),
+				"the %s of operation %q on harness %q carries the process word %q, which names this project's own workflow rather than anything the reader can act on: %s",
+				entry.kind, entry.operation, entry.harness, word, entry.text)
+		}
 	}
+}
+
+// TestActionableErrorLabelStrippingDoesNotHideAProcessWordInAValue is the
+// required control for stripActionableErrorLabels: stripping the format's own
+// labels must not also swallow a real process word that sits inside one
+// label's VALUE. A planted refusal text carries "phase" only inside the value
+// of its own "phase:" label ("phase: during the review phase"), so if the
+// exemption were built by dropping everything at "phase:" onward, or by
+// matching on the word rather than the labelled key, this would wrongly turn
+// green.
+func TestActionableErrorLabelStrippingDoesNotHideAProcessWordInAValue(t *testing.T) {
+	t.Parallel()
+
+	planted := "what: something failed; why: it is unsupported; where: LookupOperationBinding; when: contract lookup; phase: during the review phase; impact: nothing lowers; fix: use a supported operation"
+	stripped := stripActionableErrorLabels(planted)
+
+	require.NotContains(t, stripped, "phase:",
+		"the label token itself must be removed: %q", stripped)
+
+	found := false
+	for _, word := range processWords {
+		if containsWholeWord(stripped, word) {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found,
+		"stripping the actionable-error labels must not hide a process word inside a label's value; stripped text: %q", stripped)
 }
 
 func TestClaudeContractNamesNoRemovedTeamLifecycleCalls(t *testing.T) {

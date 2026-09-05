@@ -11,7 +11,7 @@
 // boundary. When selected, Codex loads the generated per-event command runners;
 // none of these files installs a Git hook or changes core.hooksPath.
 //
-// Transport shape (Codex at the recorded version, Python-free per #65 and Phase 8 decision 2):
+// Transport shape (Codex at the recorded version, Python-free per #65):
 // each `.codex/hooks.json` entry is a PLAIN command string — `sh
 // .codex/hooks/events/<Event>.sh` — with no host-side ${VAR} expansion, because
 // authentic capture only proves plain-command-string invocation. Each runner is
