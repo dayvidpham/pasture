@@ -42,15 +42,21 @@ const captureNoticePrefix = "pasture: capture mode is recording this session to 
 func TestCaptureDirectoryRefusalsLeaveTheHostOutcomeUnchanged(t *testing.T) {
 	t.Parallel()
 	binary := lifecycleBinary(t)
-	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
-	require.NoError(t, err)
+	// The test builds the repository it needs and starts the hook inside it,
+	// instead of borrowing the checkout the suite runs from. The hook derives
+	// the repository from its own working directory, so this drives the same
+	// production path; and it makes the proof hold in every environment,
+	// including a `git archive` copy that carries no .git, where borrowing the
+	// ambient checkout gave no repository and the refusal could not happen.
+	repoRoot := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(repoRoot, ".git"), 0o755))
 	payload := []byte(`{"session_id":"s","hook_event_name":"Notification","message":"hello there"}`)
 	run := func(captureDir string) lifecycleRun {
 		dbPath := filepath.Join(t.TempDir(), "pasture.db")
 		if captureDir == "" {
-			return runLifecycleHookOn(t, binary, dbPath, "claude-code", "Notification", registration.ClaudeCode2_1_261().Version, payload)
+			return runLifecycleHookIn(t, repoRoot, binary, dbPath, "claude-code", "Notification", registration.ClaudeCode2_1_261().Version, payload)
 		}
-		return runLifecycleHookOn(t, binary, dbPath, "claude-code", "Notification", registration.ClaudeCode2_1_261().Version, payload, "PASTURE_CAPTURE_DIR="+captureDir)
+		return runLifecycleHookIn(t, repoRoot, binary, dbPath, "claude-code", "Notification", registration.ClaudeCode2_1_261().Version, payload, "PASTURE_CAPTURE_DIR="+captureDir)
 	}
 	base := run("")
 	require.Equal(t, 0, base.ExitCode, base.Stderr)
@@ -66,12 +72,13 @@ func TestCaptureDirectoryRefusalsLeaveTheHostOutcomeUnchanged(t *testing.T) {
 	assert.NotContains(t, relative.Stderr, captureNoticePrefix)
 
 	inside := filepath.Join(repoRoot, "internal")
+	require.NoError(t, os.Mkdir(inside, 0o755))
 	inRepo := run(inside)
 	assert.Equal(t, base.ExitCode, inRepo.ExitCode)
 	assert.Equal(t, base.Stdout, inRepo.Stdout)
 	assert.Contains(t, inRepo.Stderr, "which is inside the repository at")
 	assert.NotContains(t, inRepo.Stderr, captureNoticePrefix)
-	_, err = os.Stat(filepath.Join(inside, captureFileName))
+	_, err := os.Stat(filepath.Join(inside, captureFileName))
 	assert.ErrorIs(t, err, os.ErrNotExist, "nothing may be written inside the repository")
 
 	outside := t.TempDir()

@@ -74,6 +74,25 @@ func runLifecycleHookOn(
 ) lifecycleRun {
 	t.Helper()
 
+	return runLifecycleHookIn(t, "", binary, dbPath, harness, event, hostVersion, payload, env...)
+}
+
+// runLifecycleHookIn is runLifecycleHookOn with the WORKING DIRECTORY of the
+// hook open. The hook decides whether a capture directory is inside a
+// repository from the directory the host started it in, so a test about that
+// decision must be able to start the hook inside a repository it built itself
+// rather than inside the checkout the suite happens to run from. An empty
+// workdir keeps the suite's own directory, which is what every other caller
+// wants.
+func runLifecycleHookIn(
+	t *testing.T,
+	workdir string,
+	binary, dbPath, harness, event, hostVersion string,
+	payload []byte,
+	env ...string,
+) lifecycleRun {
+	t.Helper()
+
 	command := exec.Command(binary,
 		databaseFlagName.Argument(), dbPath,
 		"hook", "lifecycle",
@@ -83,6 +102,7 @@ func runLifecycleHookOn(
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 	command.Env = append(os.Environ(), env...)
+	command.Dir = workdir
 
 	code := 0
 	if err := command.Run(); err != nil {
