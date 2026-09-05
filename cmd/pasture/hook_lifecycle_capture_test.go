@@ -1,12 +1,13 @@
 package main
 
 import (
-	"context"
+	"bytes"
 	"go/ast"
 	"go/parser"
 	"go/printer"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,10 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dayvidpham/pasture/internal/handlers"
-	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/tasks"
-	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
 // captureNoticePrefix is the load-bearing phrase of the one notice the hook
@@ -144,6 +142,13 @@ func TestACaptureFailureNeverChangesTheHostOutcomeOnAnEnabledEvent(t *testing.T)
 // mutation that turns this RED is moving the read out of the `if`, or out of
 // the goroutine, where a stalled stdin would no longer be bounded by the
 // invocation deadline.
+//
+// WHAT IT VISITS: every non-test Go source of this command, found by glob
+// and not by a list, so a source added later is read the day it is written.
+// WHAT IT DOES NOT READ: the handler package, whose own read of standard
+// input on the unset path is pinned by its own tests; and whether the bytes
+// are identical to a build without capture, which the review wave proves on
+// the binary against the previous release.
 func TestTheCaptureReadIsGatedOnTheVariableAndSitsInsideTheWork(t *testing.T) {
 	t.Parallel()
 	sources, err := filepath.Glob("*.go")
@@ -271,71 +276,68 @@ func enclosingChain(root ast.Node, target ast.Node) []ast.Node {
 	return chain
 }
 
-// stallingReader is a standard input that never delivers a byte until it is
-// released. It signals when a read has begun, so a proof can wait on that
-// condition instead of a clock.
-type stallingReader struct {
-	entered chan struct{}
-	release chan struct{}
-	once    bool
-}
-
-func (r *stallingReader) Read(p []byte) (int, error) {
-	if !r.once {
-		r.once = true
-		close(r.entered)
-	}
-	<-r.release
-	return 0, context.Canceled
-}
-
-// stallCeiling bounds how long the proof waits for the invocation to enter
-// the read or to return. It is a failure ceiling and not a wait: no step is
-// ordered by it.
-const stallCeiling = 30 * time.Second
+// stallCeiling bounds how long the proof waits for the hook process to exit.
+// It is a failure ceiling and not a wait: the proof passes only when the
+// process returns on its own, and the ceiling only turns a hang into a
+// sentence. It is far above the production hook-invocation tier, so a slow
+// runner cannot make the proof fail for the wrong reason.
+const stallCeiling = 60 * time.Second
 
 // TestAStalledStdinUnderCaptureIsBoundedByTheInvocationDeadline proves
-// condition (c) of the wiring on a CONDITION and not on a clock: with a
-// capture directory set and a standard input that never closes, the
-// invocation enters the capture read, the test trips the hook-invocation
-// deadline, and the outcome arrives as the deadline fault. If the read sat
-// outside the work goroutine, no deadline could end it and this proof would
-// fail at its ceiling instead of returning.
+// condition (c) of the wiring on the built binary: with a capture directory
+// set and a standard input that NEVER closes, the hook returns on its own
+// with the deadline fault, exit 0 and empty standard output, and nothing is
+// captured. The condition waited on is the process exit; the only clock is
+// the failure ceiling. If the capture read sat outside the work goroutine, no
+// deadline could end the read and the process would not return.
 //
-// It is serial: it sets the process environment and the command's store path.
+// It runs the binary and not the in-process seam on purpose: an in-process
+// invocation abandoned inside a read leaves its work goroutine alive after the
+// test returns, and that goroutine then reads the package's store path while
+// the next test writes it.
 func TestAStalledStdinUnderCaptureIsBoundedByTheInvocationDeadline(t *testing.T) {
+	t.Parallel()
+	binary := lifecycleBinary(t)
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 	captureDir := t.TempDir()
-	t.Setenv("PASTURE_CAPTURE_DIR", captureDir)
 
-	cmd := lifecycleTestCommand(t, "claude-code", "SessionStart", "2.1.222", dbPath)
-	reader := &stallingReader{entered: make(chan struct{}), release: make(chan struct{})}
-	t.Cleanup(func() { close(reader.release) })
-	cmd.SetIn(reader)
+	// A pipe whose write end is held open for the whole run: the hook can
+	// read nothing and sees no end of file until the test closes it, which
+	// happens only after the process has exited.
+	stdinRead, stdinWrite, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = stdinWrite.Close(); _ = stdinRead.Close() })
 
-	deadline := newTrippedDeadline(t)
-	outcomes := make(chan hostexit.Outcome, 1)
-	go func() {
-		outcomes <- lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), deadline.derive)
-	}()
+	command := exec.Command(binary,
+		databaseFlagName.Argument(), dbPath,
+		"hook", "lifecycle",
+		"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.222")
+	command.Stdin = stdinRead
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	command.Env = append(os.Environ(), "PASTURE_CAPTURE_DIR="+captureDir)
+	require.NoError(t, command.Start())
+	_ = stdinRead.Close()
 
+	exited := make(chan error, 1)
+	go func() { exited <- command.Wait() }()
 	select {
-	case <-reader.entered:
-	case outcome := <-outcomes:
-		t.Fatalf("the invocation returned before it read standard input: %+v", outcome)
+	case waitErr := <-exited:
+		code := 0
+		if waitErr != nil {
+			var exit *exec.ExitError
+			require.ErrorAs(t, waitErr, &exit, "the hook must exit with a status, not fail to run")
+			code = exit.ExitCode()
+		}
+		assert.Equal(t, 0, code, "the deadline fault fails open")
+		assert.Empty(t, stdout.String(), "a Claude fault carries no bytes on standard output")
+		assert.Contains(t, stderr.String(), "hook-invocation deadline", "the outcome is the deadline fault, not a hang and not a capture error")
 	case <-time.After(stallCeiling):
-		t.Fatalf("the invocation did not reach the capture read within %s", stallCeiling)
-	}
-
-	deadline.trip()
-	select {
-	case outcome := <-outcomes:
-		assert.Equal(t, hostexit.ExitContinue, outcome.Exit, "the deadline fault fails open")
-		assert.Contains(t, outcome.Stderr, "hook-invocation deadline", "the outcome is the deadline fault, not a hang and not a capture error")
-	case <-time.After(stallCeiling):
-		t.Fatalf("the invocation did not return within %s after the deadline was tripped: the capture read is outside the bounded work", stallCeiling)
+		_ = command.Process.Kill()
+		t.Fatalf("the hook did not return within %s with a standard input that never closes: the capture read is outside the bounded work", stallCeiling)
 	}
 	entries, err := os.ReadDir(captureDir)
 	require.NoError(t, err)

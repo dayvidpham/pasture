@@ -5703,6 +5703,7 @@ func TestTheWarrantRefusalCarriesItsOwnEvidence(t *testing.T) {
 // down as foreign, and a new file cannot arrive without being classified at all.
 var guardSweepOwned = []string{
 	"hook_environment_test.go",
+	"hook_lifecycle_capture_test.go",
 	"hook_lifecycle_codex_test.go",
 	"hook_lifecycle_docs_test.go",
 	"hook_lifecycle_failuremode_test.go",
