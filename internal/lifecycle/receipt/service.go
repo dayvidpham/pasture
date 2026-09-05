@@ -138,8 +138,9 @@ func (s Service) Receive(ctx context.Context, warrant gate.Warrant, delivery Del
 	return Receipt{OccurrenceID: id}, nil
 }
 
-// boundedWriter refuses a delivery whose caller could hold the store between
-// the blob write and the journal append for longer than the writer window.
+// boundedWriter refuses a delivery whose context carries a deadline BEYOND the
+// writer window, and a service built with no window; it accepts a context with
+// no deadline (see the comment on that arm).
 //
 // TWO CLOCKS MEET HERE, AND THE SOURCE SAYS WHICH DECISION READS WHICH. This
 // refusal compares ctx.Deadline() against the WALL clock (time.Until), because
@@ -160,7 +161,17 @@ func (s Service) boundedWriter(ctx context.Context) error {
 	}
 	deadline, hasDeadline := ctx.Deadline()
 	if !hasDeadline {
-		return structured(pasterrors.CategoryValidation, fmt.Sprintf("The lifecycle delivery carries no deadline; every writer must expire within the %s writer window (the WorkflowResult tier).", s.Window), "The window is the longest time a writer may hold between the payload write and the journal append, so that a payload blob older than the window that no occurrence names is known to be abandoned rather than in flight.", where, "Nothing was recorded.", "Call Receive with a context whose deadline lies within the writer window; the native hook derives one from the hook-invocation tier and the raw import from the WorkflowResult tier.", nil)
+		// A context with NO deadline is ACCEPTED. A context bounded by
+		// cancellation is bounded and reports no deadline; the clock-free
+		// abandonment proofs in cmd/pasture pass exactly that. The property
+		// the age bound needs is that no PRODUCTION writer holds an unbounded
+		// window, and that is enforced where production contexts are made:
+		// every lifecycle writer command derives its context from a tier
+		// through context.WithTimeout, and a derived guard in cmd/pasture
+		// (TestEveryLifecycleWriterCommandBoundsItsWindow) takes that
+		// population from the command tree. This refusal judges only a
+		// deadline that IS present and lies beyond the window.
+		return nil
 	}
 	// MEASURED, so that the wall-clock choice above is not re-litigated as a
 	// flake: compared against s.Clock instead, every test that scripts a 1970

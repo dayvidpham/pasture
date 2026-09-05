@@ -5710,6 +5710,7 @@ var guardSweepOwned = []string{
 	"hook_lifecycle_orphans_test.go",
 	"hook_lifecycle_production_test.go",
 	"hook_lifecycle_raw_test.go",
+	"hook_lifecycle_writers_test.go",
 }
 
 // guardSweepForeign are the package's other test files, which this slice did

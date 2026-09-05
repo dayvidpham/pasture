@@ -1,6 +1,7 @@
 package receipt
 
 import (
+	"context"
 	stderrors "errors"
 	"testing"
 	"time"
@@ -33,7 +34,7 @@ func TestReceiveRefusesZeroWarrantBeforeAnyIO(t *testing.T) {
 	calls := []string{}
 	clock := testClock{now: time.Unix(10, 0)}
 	s := Service{Window: time.Second, Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: contextJournal{calls: &calls}, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "gate-zero-warrant"}}
-	_, err := s.Receive(boundedContext(t), gate.Warrant{}, validDelivery())
+	_, err := s.Receive(context.Background(), gate.Warrant{}, validDelivery())
 	if err == nil {
 		t.Fatal("Receive accepted a zero-value warrant; want a typed *gate.Refusal")
 	}
@@ -57,7 +58,7 @@ func TestReceiveRefusesClassMismatchWarrantBeforeAnyIO(t *testing.T) {
 	calls := []string{}
 	clock := testClock{now: time.Unix(10, 0)}
 	s := Service{Window: time.Second, Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: contextJournal{calls: &calls}, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "gate-class-mismatch"}}
-	_, err := s.Receive(boundedContext(t), lineageWarrant(t), validDelivery())
+	_, err := s.Receive(context.Background(), lineageWarrant(t), validDelivery())
 	if err == nil {
 		t.Fatal("Receive accepted a lineage-links warrant for a delivery-receipt write; want a typed *gate.Refusal")
 	}

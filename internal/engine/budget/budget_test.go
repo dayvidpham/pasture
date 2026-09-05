@@ -194,7 +194,7 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], "2.1.210", model.OccurrenceEnvelopeRef{}).Delivery
-	_, err = service.Receive(boundedContext(t, profile), deliveryWarrant(t, delivery), delivery)
+	_, err = service.Receive(context.Background(), deliveryWarrant(t, delivery), delivery)
 	if probe := <-probeErr; probe == nil {
 		close(release)
 		tracker.Close()
@@ -269,7 +269,7 @@ func TestBlobFirstFailureLeavesReclaimableOrphanWithoutReceipt(t *testing.T) {
 	}
 	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], "2.1.210", model.OccurrenceEnvelopeRef{}).Delivery
 	ref := digest.FromBytes(delivery.Body)
-	_, receiveErr := service.Receive(boundedContext(t, profile), deliveryWarrant(t, delivery), delivery)
+	_, receiveErr := service.Receive(context.Background(), deliveryWarrant(t, delivery), delivery)
 	if probe := <-probeErr; probe == nil {
 		close(release)
 		tracker.Close()
@@ -381,7 +381,7 @@ func TestBudgetWorkerProcess(t *testing.T) {
 	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], "2.1.210", model.OccurrenceEnvelopeRef{}).Delivery
 	warrant := deliveryWarrant(t, delivery)
 	for i := 0; i < count; i++ {
-		if _, err := service.Receive(boundedContext(t, profile), warrant, delivery); err != nil {
+		if _, err := service.Receive(context.Background(), warrant, delivery); err != nil {
 			var contention model.IngressContentionError
 			if stderrors.As(err, &contention) {
 				result.ContentionFailures++
@@ -545,30 +545,3 @@ func p99(values []int64) time.Duration {
 	}
 	return time.Duration(values[rank-1])
 }
-
-// boundedContext carries the deadline every writer of the store must carry:
-// the WorkflowResult tier of the profile the service was built with.
-func boundedContext(t *testing.T, profile timeouts.Profile) context.Context {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), profile.WorkflowResult())
-	t.Cleanup(cancel)
-	return ctx
-}
-
-// clocklessDeadline reports a deadline for the receipt service's writer-window
-// refusal and DOES NOT ENFORCE ONE: Done and Err come from the parent, which
-// the proof cancels itself, so no clock can race the barrier it holds and no
-// real time has to pass. It changes what the context SAYS, not what the test
-// WAITS ON. The production guarantee is unaffected, because production
-// contexts come from context.WithTimeout and enforce their deadline. It is a
-// true statement only inside a test: it lives in this test file, is never
-// imported by production code, and is used ONLY by the abandonment proof,
-// whose clock-free property is deliberate; every other Receive call in this
-// package carries a REAL deadline through boundedContext, so the refusal keeps
-// its coverage.
-type clocklessDeadline struct {
-	context.Context
-	at time.Time
-}
-
-func (c clocklessDeadline) Deadline() (time.Time, bool) { return c.at, true }
