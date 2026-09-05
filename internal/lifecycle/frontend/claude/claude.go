@@ -14,6 +14,7 @@ import (
 // claudeEventMappings is the sole Claude frontend event mapping. Keep every
 // generated model ordinal explicit here: the registration and runtime
 // enumerations are separate contracts even though their current ordinals agree.
+// A test holds the mapping total over the registration and each pair correct.
 var claudeEventMappings = map[model.ContractEventKind]runtime.ClaudeLifecycleEvent{
 	registration.EventSessionStart:        runtime.ClaudeEventSessionStart,
 	registration.EventSetup:               runtime.ClaudeEventSetup,

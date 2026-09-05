@@ -17,6 +17,7 @@ import (
 	codexfrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/codex"
 	opencodefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/opencode"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
+	"github.com/dayvidpham/pasture/internal/lifecycle/ingress"
 	claudeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
 	codexingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/codex"
 	opencodeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/opencode"
@@ -257,15 +258,12 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	if strings.TrimSpace(in.HostVersion) == "" {
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, "The observed host version is missing.", "Every retained occurrence records which host version produced it, without using the value as an admission check.", "The input was not read and no database was opened.", "Pass the observed version through --host-version.", nil)
 	}
-	var event registration.Event
-	for _, candidate := range dispatch.manifest.Events {
-		if candidate.NativeName == in.Event {
-			event = candidate
-			break
-		}
-	}
-	if event.Kind == 0 {
-		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("Event %q is not in the generated %s registration.", in.Event, dispatch.name), "Ingress trusts the generated registration coordinate rather than an unparsed payload claim.", "The input was not read and no database was opened.", "Invoke one of the events present in the support report.", nil)
+	// The event is resolved by the one validating reverse lookup every ingress
+	// path shares, so a name the registration does not declare is refused with
+	// one text: the harness, the version and the name, spelled exactly.
+	event, err := ingress.EventByNativeName(dispatch.manifest, in.Event)
+	if err != nil {
+		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, err.Error(), "The generated registration is the only authority for native event names.", "The input was not read and no database was opened.", "Invoke the hook with a native event name present in the support report.", nil)
 	}
 	state, found := activationFor(event.Kind, activations)
 	if !found || state.State != activation.Enabled {

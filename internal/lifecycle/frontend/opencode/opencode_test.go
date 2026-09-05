@@ -13,6 +13,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
 	"github.com/dayvidpham/pasture/internal/runtime"
+	"github.com/dayvidpham/pasture/internal/testutil"
 )
 
 type capturedRecord struct {
@@ -67,4 +68,13 @@ func identityKinds(values []waist.SemanticIdentity) []runtime.NativeIdentityKind
 		out[i] = values[i].Kind
 	}
 	return out
+}
+
+// TestEventMappingsCoverEveryRegisteredOpenCodeEvent holds the OpenCode
+// frontend mapping total over the generated registration and each pair correct
+// by native name. A mapped event is not an enabled one: admission is decided by
+// the activation table before any payload is read (internal/handlers).
+func TestEventMappingsCoverEveryRegisteredOpenCodeEvent(t *testing.T) {
+	t.Parallel()
+	testutil.AssertEventMappingsCoverRegistration(t, registration.OpenCode1_18_10(), runtime.OpenCode1_18_10Lifecycle(), opencode.Bind)
 }

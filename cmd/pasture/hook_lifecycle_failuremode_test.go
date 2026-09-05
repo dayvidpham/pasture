@@ -7113,7 +7113,7 @@ func TestAnUndeclaredCoordinateIsNotReportedAsADeclaration(t *testing.T) {
 		{name: "a harness this build does not support", harness: "gemini", event: "NotAnEvent",
 			hostVersion: "1.0", cause: "is not supported"},
 		{name: "an event the registration does not carry", harness: "claude-code", event: "NotAnEvent",
-			hostVersion: "2.1.222", cause: "is not in the generated"},
+			hostVersion: "2.1.222", cause: `declares no native event named "NotAnEvent"`},
 	} {
 		route := route
 		t.Run(route.name, func(t *testing.T) {

@@ -2,13 +2,25 @@
 // host data for the generic lifecycle frontend. All control flow lives in
 // internal/lifecycle/frontend; this package is data plus a monomorphic wrapper.
 //
-// This frontend binds ONLY the two authenticity-proven events, SessionStart
-// (observation smoke) and PreToolUse (gate); every other source-derived catalog
-// entry is rejected by Bind. Because of that closed positive scope, the
-// deliberate divergence between the self-contained ingress catalog
-// (internal/lifecycle/ingress/internal/hostcontract/codex_0_146_0.go) and the
-// runtime Codex profile on the 8 non-proven events is inert here — that
-// metadata is never ingested.
+// The event mapping is COMPLETE over the generated Codex registration: every
+// registered event maps to its runtime profile row, paired by native name, and
+// a test holds the pairing total. A complete mapping is not an enabled event:
+// the activation table decides admission before any payload is read, so an
+// event without an authentic fixture stays withheld upstream and never reaches
+// Bind in production.
+//
+// MEASURED: the self-contained ingress catalogue
+// (internal/lifecycle/ingress/internal/hostcontract/codex_0_146_0.go, read by the
+// handler's admission) and the runtime Codex profile (read by Bind) disagree on
+// every registered event on at least one axis: the failure mode on all ten
+// (the catalogue declares report-and-continue or exit-2-blocks where the profile
+// declares strict-hook-failure or a demoted exit-2-blocks), the mutation mode on
+// PreToolUse and PostToolUse, the blocking mode on PostCompact, and the declared
+// identities on the eight events without an authentic capture. The frontend
+// binds with the profile's row; the handler admits with the catalogue's row.
+// Re-deriving the catalogue from the profile is the OpenCode-style remedy and is
+// separate work; until it lands, this package states the divergence and does not
+// call it inert.
 package codex
 
 import (
@@ -19,20 +31,27 @@ import (
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
-// codexLifecycle returns the pinned Codex runtime lifecycle contract used to
-// bind native events into the waist.
-//
-// IP-1 (resolved at M3-WAVE-1 consolidation): the sole runtime seam in this
-// package. M3-SLICE-1 owns the exact profile; this frontend binds against the
-// Codex runtime contract and its two authentically proven events
-// (SessionStart observation, PreToolUse gate).
+// codexLifecycle returns the Codex runtime lifecycle contract used to bind
+// native events into the waist: the sole runtime seam in this package.
 func codexLifecycle() runtime.LifecycleContract[runtime.CodexLifecycleEvent] {
 	return runtime.Codex0_146_0Lifecycle()
 }
 
+// eventMappings pairs every generated Codex registration ordinal with its
+// runtime profile event, by native name. The registration and runtime
+// enumerations are separate contracts, so every ordinal is explicit here and a
+// test holds the pairing total and correct.
 var eventMappings = map[model.ContractEventKind]runtime.CodexLifecycleEvent{
-	registration.EventCodexSessionStart: runtime.CodexEventSessionStart,
-	registration.EventCodexPreToolUse:   runtime.CodexEventPreToolUse,
+	registration.EventCodexSessionStart:      runtime.CodexEventSessionStart,      // SessionStart
+	registration.EventCodexUserPromptSubmit:  runtime.CodexEventUserPromptSubmit,  // UserPromptSubmit
+	registration.EventCodexPreToolUse:        runtime.CodexEventPreToolUse,        // PreToolUse
+	registration.EventCodexPermissionRequest: runtime.CodexEventPermissionRequest, // PermissionRequest
+	registration.EventCodexPostToolUse:       runtime.CodexEventPostToolUse,       // PostToolUse
+	registration.EventCodexPreCompact:        runtime.CodexEventPreCompact,        // PreCompact
+	registration.EventCodexPostCompact:       runtime.CodexEventPostCompact,       // PostCompact
+	registration.EventCodexSubagentStart:     runtime.CodexEventSubagentStart,     // SubagentStart
+	registration.EventCodexSubagentStop:      runtime.CodexEventSubagentStop,      // SubagentStop
+	registration.EventCodexStop:              runtime.CodexEventStop,              // Stop
 }
 
 // host is the pinned Codex data consumed by the generic frontend engine.
@@ -42,10 +61,8 @@ var host = frontend.Host[runtime.CodexLifecycleEvent]{
 	Events:   eventMappings,
 }
 
-// Bind creates L1 and typed identities for an authentically proven Codex
-// command-hook event. Only SessionStart and PreToolUse have authentic runtime
-// evidence and a frontend binding; every other catalog entry is rejected. It
-// delegates to the generic strictest-common frontend engine.
+// Bind creates L1 and typed identities for a registered Codex command-hook
+// event. It delegates to the generic strictest-common frontend engine.
 func Bind(modelKind model.ContractEventKind, bindings []model.NativeBinding) (waist.L1, []waist.Identity, error) {
 	return frontend.Bind(host, modelKind, bindings)
 }

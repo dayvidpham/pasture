@@ -135,6 +135,30 @@ func TestEventByNativeNameRefusesAnUnknownNameNamingHarnessAndName(t *testing.T)
 				assert.Contains(t, err.Error(), "the "+string(manifest.Harness)+" registration")
 				assert.Contains(t, err.Error(), "nothing was read or recorded")
 			}
+			// A name another harness declares is not this harness's name: every
+			// foreign name this manifest does not also declare is refused, and
+			// at least one such name exists for every other harness.
+			declared := make(map[string]struct{}, len(manifest.Events))
+			for _, event := range manifest.Events {
+				declared[event.NativeName] = struct{}{}
+			}
+			foreign := 0
+			for _, other := range harnessParsers() {
+				if other.manifest.Harness == manifest.Harness {
+					continue
+				}
+				for _, event := range other.manifest.Events {
+					if _, shared := declared[event.NativeName]; shared {
+						continue
+					}
+					foreign++
+					got, err := ingress.EventByNativeName(manifest, event.NativeName)
+					require.Error(t, err, "%s name %q offered to the %s lookup must be refused", other.manifest.Harness, event.NativeName, manifest.Harness)
+					assert.Zero(t, got.Kind)
+					assert.Contains(t, err.Error(), "the "+string(manifest.Harness)+" registration")
+				}
+			}
+			require.Positive(t, foreign, "some other harness declares at least one name %s does not", manifest.Harness)
 		})
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
+	"github.com/dayvidpham/pasture/internal/testutil"
 )
 
 const sessionID = "b3cfe877-feb4-4ba3-9500-414c8bfb51c4"
@@ -164,4 +165,12 @@ func TestBindReturnsWaistIdentityValuesWithoutReinterpretingThem(t *testing.T) {
 	require.Equal(t, sessionID, identities[0].Value())
 	require.Equal(t, "session_id", identities[0].NativeName())
 	require.True(t, l1.IsValid())
+}
+
+// TestEventMappingsCoverEveryRegisteredClaudeEvent holds the Claude frontend
+// mapping total over the generated registration and each pair correct by
+// native name.
+func TestEventMappingsCoverEveryRegisteredClaudeEvent(t *testing.T) {
+	t.Parallel()
+	testutil.AssertEventMappingsCoverRegistration(t, registration.ClaudeCode2_1_210(), runtime.ClaudeCode2_1_210Lifecycle(), claude.Bind)
 }
