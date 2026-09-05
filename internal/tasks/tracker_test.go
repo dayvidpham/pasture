@@ -620,17 +620,41 @@ func TestTheStoreRefusesANilDiagnosticSinkAndANilClock(t *testing.T) {
 // TestEveryProductionOpenerPassesTheProcessStderrAndTheWallClock is the
 // ENUMERATION of production construction sites, derived from source rather
 // than listed: every exported function of the tasks package that returns a
-// protocol.TaskTracker is a production opener, and the closure of each over
-// the package's non-test functions must reach the process stderr and the wall
-// clock. The nil refusal above is what makes this enumeration complete: an
-// opener that reached neither would open nothing.
-// WHAT IT VISITS: every non-test .go file of internal/tasks; the bodies of the
-// exported openers and of every same-package function they call by name.
-// WHAT IT DOES NOT READ: test files, method calls, or any other package.
+// protocol.TaskTracker is a production opener. For each one it checks two
+// things, and the test name is true only because both are checked:
+//
+//  1. THE OPTIONS VALUE THE OPENER PASSES IS ROOTED IN productionOpenDefaults().
+//     The closure of the opener over the package's non-test functions must
+//     contain at least one call to openTaskTrackerWithOptions, and the
+//     options argument of EVERY such call must be either the call
+//     productionOpenDefaults() itself or a local variable whose declaration
+//     in the enclosing function is assigned from that call. Reaching
+//     productionOpenDefaults somewhere in the closure is NOT enough: an opener
+//     that builds a fresh options literal and copies one field out of the
+//     defaults reaches the function and passes neither the sink nor the
+//     clock, and only the argument check catches it.
+//  2. productionOpenDefaults() ITSELF NAMES os.Stderr AND wallClock{} in its
+//     body, so a value rooted there carries the process stderr and the wall
+//     clock.
+//
+// WHAT IT VISITS: every non-test .go file of internal/tasks; the bodies of
+// the exported openers and of every same-package function they call by name;
+// the arguments of each openTaskTrackerWithOptions call in those bodies; the
+// declarations of the local variables those arguments name; and the body of
+// productionOpenDefaults.
+// WHAT IT DOES NOT READ: test files, method calls, any other package, or what
+// an OpenTaskTrackerOption does to the value AFTER it was rooted in the
+// defaults. An option that sets the sink or the clock to nil is not seen
+// here; it is caught at runtime by the refusal in openTaskTrackerWithOptions,
+// which TestTheStoreRefusesANilDiagnosticSinkAndANilClock pins.
 // NON-VACUITY: at least two openers are derived (the plain opener and the
 // options opener today); fewer is RED.
-// MUTATION: make OpenTaskTrackerWithOptions start from an empty options value
-// instead of the production defaults and this test is RED naming it.
+// MUTATIONS, each RED naming the opener: make OpenTaskTrackerWithOptions
+// start from an empty options value instead of the production defaults; add
+// an exported opener that passes openTaskTrackerOptions{timeouts:
+// productionOpenDefaults().timeouts}, which reaches the defaults and passes
+// neither the sink nor the clock; remove os.Stderr or wallClock{} from
+// productionOpenDefaults.
 func TestEveryProductionOpenerPassesTheProcessStderrAndTheWallClock(t *testing.T) {
 	t.Parallel()
 	dir := "."
@@ -651,6 +675,28 @@ func TestEveryProductionOpenerPassesTheProcessStderrAndTheWallClock(t *testing.T
 			}
 		}
 	}
+
+	// 2. The defaults value names the process stderr and the wall clock.
+	defaults, known := funcs["productionOpenDefaults"]
+	require.True(t, known, "productionOpenDefaults must be declared in a non-test file of internal/tasks: it is the one place the production sink and clock are named")
+	stderr, wall := false, false
+	ast.Inspect(defaults.Body, func(node ast.Node) bool {
+		switch typed := node.(type) {
+		case *ast.SelectorExpr:
+			if pkg, ok := typed.X.(*ast.Ident); ok && pkg.Name == "os" && typed.Sel.Name == "Stderr" {
+				stderr = true
+			}
+		case *ast.CompositeLit:
+			if ident, ok := typed.Type.(*ast.Ident); ok && ident.Name == "wallClock" {
+				wall = true
+			}
+		}
+		return true
+	})
+	require.True(t, stderr, "productionOpenDefaults never names os.Stderr: the diagnostics sink is a required input and the production defaults must carry the process stderr")
+	require.True(t, wall, "productionOpenDefaults never names wallClock{}: the store clock is a required input and the production defaults must carry the wall clock")
+
+	// 1. Every opener passes a value rooted in the defaults, at every call.
 	openers := []string{}
 	for name, function := range funcs {
 		if !function.Name.IsExported() || function.Type.Results == nil {
@@ -668,36 +714,81 @@ func TestEveryProductionOpenerPassesTheProcessStderrAndTheWallClock(t *testing.T
 			continue
 		}
 		openers = append(openers, name)
-		seen := map[string]bool{}
-		bodies := []*ast.BlockStmt{function.Body}
-		stderr, wall := false, false
-		for index := 0; index < len(bodies); index++ {
-			ast.Inspect(bodies[index], func(node ast.Node) bool {
-				switch typed := node.(type) {
-				case *ast.CallExpr:
-					if ident, ok := typed.Fun.(*ast.Ident); ok && !seen[ident.Name] {
-						if callee, known := funcs[ident.Name]; known {
-							seen[ident.Name] = true
-							bodies = append(bodies, callee.Body)
-						}
-					}
-				case *ast.SelectorExpr:
-					if pkg, ok := typed.X.(*ast.Ident); ok && pkg.Name == "os" && typed.Sel.Name == "Stderr" {
-						stderr = true
-					}
-				case *ast.CompositeLit:
-					if ident, ok := typed.Type.(*ast.Ident); ok && ident.Name == "wallClock" {
-						wall = true
-					}
+		seen := map[string]bool{name: true}
+		closure := []*ast.FuncDecl{function}
+		constructorCalls := 0
+		for index := 0; index < len(closure); index++ {
+			enclosing := closure[index]
+			ast.Inspect(enclosing.Body, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				ident, ok := call.Fun.(*ast.Ident)
+				if !ok {
+					return true
+				}
+				if ident.Name == "openTaskTrackerWithOptions" {
+					constructorCalls++
+					require.Len(t, call.Args, 2, "production opener %s: openTaskTrackerWithOptions takes the path and the options value", name)
+					assert.True(t, optionsRootedInProductionDefaults(call.Args[1], enclosing.Body),
+						"production opener %s passes openTaskTrackerWithOptions an options value that is not rooted in productionOpenDefaults() (in %s): it must pass the call itself or a local assigned from it, or the opener carries neither the process stderr nor the wall clock", name, enclosing.Name.Name)
+					return true
+				}
+				if callee, known := funcs[ident.Name]; known && !seen[ident.Name] {
+					seen[ident.Name] = true
+					closure = append(closure, callee)
 				}
 				return true
 			})
 		}
-		assert.True(t, stderr, "production opener %s never reaches os.Stderr: the diagnostics sink is a required input and the opener must pass the process stderr", name)
-		assert.True(t, wall, "production opener %s never reaches the wall clock: the store clock is a required input and the opener must pass it", name)
+		assert.Positive(t, constructorCalls, "production opener %s never reaches openTaskTrackerWithOptions through same-package calls, so nothing here can say what it passes", name)
 	}
 	sort.Strings(openers)
 	require.GreaterOrEqual(t, len(openers), 2, "non-vacuity: at least two production openers must be derived; found %v", openers)
+}
+
+// optionsRootedInProductionDefaults reports whether an options argument is the
+// call productionOpenDefaults() itself, or an identifier whose declaration in
+// the enclosing body is assigned from that call (cfg := productionOpenDefaults()
+// or var cfg = productionOpenDefaults()). Anything else, a composite literal
+// in particular, is not rooted, whatever it reaches.
+func optionsRootedInProductionDefaults(argument ast.Expr, enclosing *ast.BlockStmt) bool {
+	switch typed := argument.(type) {
+	case *ast.CallExpr:
+		return isProductionDefaultsCall(typed)
+	case *ast.Ident:
+		rooted := false
+		ast.Inspect(enclosing, func(node ast.Node) bool {
+			switch statement := node.(type) {
+			case *ast.AssignStmt:
+				if statement.Tok != token.DEFINE || len(statement.Lhs) != 1 || len(statement.Rhs) != 1 {
+					return true
+				}
+				if lhs, ok := statement.Lhs[0].(*ast.Ident); ok && lhs.Name == typed.Name {
+					if call, isCall := statement.Rhs[0].(*ast.CallExpr); isCall && isProductionDefaultsCall(call) {
+						rooted = true
+					}
+				}
+			case *ast.ValueSpec:
+				if len(statement.Names) != 1 || len(statement.Values) != 1 || statement.Names[0].Name != typed.Name {
+					return true
+				}
+				if call, isCall := statement.Values[0].(*ast.CallExpr); isCall && isProductionDefaultsCall(call) {
+					rooted = true
+				}
+			}
+			return true
+		})
+		return rooted
+	default:
+		return false
+	}
+}
+
+func isProductionDefaultsCall(call *ast.CallExpr) bool {
+	ident, ok := call.Fun.(*ast.Ident)
+	return ok && ident.Name == "productionOpenDefaults" && len(call.Args) == 0
 }
 
 // TestAFailedReclaimIsOneLineOnTheStoreSinkAndSuccessIsSilent: the store owns
