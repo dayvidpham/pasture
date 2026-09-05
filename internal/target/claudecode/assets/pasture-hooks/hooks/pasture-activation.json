@@ -219,6 +219,27 @@
       "reason": "missing-request-correlation",
       "responseCapability": "unset",
       "failureEvidence": "unset"
+    },
+    {
+      "event": "PreModelSwitch",
+      "state": "withheld",
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
+    },
+    {
+      "event": "PostModelSwitch",
+      "state": "withheld",
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
+    },
+    {
+      "event": "DirectoryAdded",
+      "state": "withheld",
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     }
   ]
 }

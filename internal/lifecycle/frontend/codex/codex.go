@@ -53,6 +53,7 @@ var eventMappings = map[model.ContractEventKind]runtime.CodexLifecycleEvent{
 	registration.EventCodexSubagentStop:      runtime.CodexEventSubagentStop,      // SubagentStop
 	registration.EventCodexStop:              runtime.CodexEventStop,              // Stop
 	registration.EventCodexSessionEnd:        runtime.CodexEventSessionEnd,        // SessionEnd
+	registration.EventCodexInterrupt:         runtime.CodexEventInterrupt,         // Interrupt
 }
 
 // host is the pinned Codex data consumed by the generic frontend engine.

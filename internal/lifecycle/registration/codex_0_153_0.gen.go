@@ -20,6 +20,7 @@ func Codex0_153_0() Manifest {
 		{Kind: EventCodexSubagentStop, NativeName: "SubagentStop", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: Blocking, Mutation: MutationNone, Failure: pastureruntime.FailureExitTwoBlocks, StopLoop: StopLoopConsultWhenInactive},
 		{Kind: EventCodexStop, NativeName: "Stop", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: Blocking, Mutation: MutationNone, Failure: pastureruntime.FailureExitTwoBlocks, StopLoop: StopLoopConsultWhenInactive},
 		{Kind: EventCodexSessionEnd, NativeName: "SessionEnd", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: NonBlocking, Mutation: MutationNone, Failure: pastureruntime.FailureReportAndContinue, StopLoop: StopLoopNotApplicable},
+		{Kind: EventCodexInterrupt, NativeName: "Interrupt", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: NonBlocking, Mutation: MutationNone, Failure: pastureruntime.FailureReportAndContinue, StopLoop: StopLoopNotApplicable},
 	}
 	contract, err := ir.NewRuntimeContractID(ir.HarnessCodex, "0.153.0")
 	if err != nil {

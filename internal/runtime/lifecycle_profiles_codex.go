@@ -23,6 +23,7 @@ const (
 	CodexEventSubagentStop
 	CodexEventStop
 	CodexEventSessionEnd
+	CodexEventInterrupt
 	codexLifecycleEventLimit
 )
 
@@ -38,6 +39,7 @@ var codexLifecycleEventNames = [...]string{
 	"SubagentStop",
 	"Stop",
 	"SessionEnd",
+	"Interrupt",
 }
 
 func (e CodexLifecycleEvent) IsValid() bool { return e > 0 && e < codexLifecycleEventLimit }
@@ -128,6 +130,7 @@ func codexLifecycleMappings() map[CodexLifecycleEvent]LifecycleEventMapping {
 		CodexEventSubagentStop:      codexLifecycleMapping(CodexEventSubagentStop, SemanticGateConsultation, Blocking, MutationNone, StopLoopConsultWhenInactive, true, unevidenced, codexAgentIdentity),
 		CodexEventStop:              codexLifecycleMapping(CodexEventStop, SemanticGateConsultation, Blocking, MutationNone, StopLoopConsultWhenInactive, true, unevidenced),
 		CodexEventSessionEnd:        codexUnprovenObservationMapping(CodexEventSessionEnd, unevidenced),
+		CodexEventInterrupt:         codexUnprovenObservationMapping(CodexEventInterrupt, unevidenced),
 	}
 }
 

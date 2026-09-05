@@ -35,6 +35,9 @@ func init() {
 		{Key{Harness: ir.HarnessClaudeCode, Kind: KindLifecycleEvent, ID: "MessageDisplay"}},
 		{Key{Harness: ir.HarnessClaudeCode, Kind: KindLifecycleEvent, ID: "Elicitation"}},
 		{Key{Harness: ir.HarnessClaudeCode, Kind: KindLifecycleEvent, ID: "ElicitationResult"}},
+		{Key{Harness: ir.HarnessClaudeCode, Kind: KindLifecycleEvent, ID: "PreModelSwitch"}},
+		{Key{Harness: ir.HarnessClaudeCode, Kind: KindLifecycleEvent, ID: "PostModelSwitch"}},
+		{Key{Harness: ir.HarnessClaudeCode, Kind: KindLifecycleEvent, ID: "DirectoryAdded"}},
 		{Key{Harness: ir.HarnessOpenCode, Kind: KindLifecycleEvent, ID: "command.executed"}},
 		{Key{Harness: ir.HarnessOpenCode, Kind: KindLifecycleEvent, ID: "file.edited"}},
 		{Key{Harness: ir.HarnessOpenCode, Kind: KindLifecycleEvent, ID: "file.watcher.updated"}},
@@ -93,5 +96,6 @@ func init() {
 		{Key{Harness: ir.HarnessCodex, Kind: KindLifecycleEvent, ID: "SubagentStop"}},
 		{Key{Harness: ir.HarnessCodex, Kind: KindLifecycleEvent, ID: "Stop"}},
 		{Key{Harness: ir.HarnessCodex, Kind: KindLifecycleEvent, ID: "SessionEnd"}},
+		{Key{Harness: ir.HarnessCodex, Kind: KindLifecycleEvent, ID: "Interrupt"}},
 	}
 }

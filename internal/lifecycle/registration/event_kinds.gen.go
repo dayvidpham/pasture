@@ -34,6 +34,9 @@ const (
 	EventMessageDisplay
 	EventElicitation
 	EventElicitationResult
+	EventPreModelSwitch
+	EventPostModelSwitch
+	EventDirectoryAdded
 	EventOpenCodeCommandExecuted
 	EventOpenCodeFileEdited
 	EventOpenCodeFileWatcherUpdated
@@ -92,6 +95,7 @@ const (
 	EventCodexSubagentStop
 	EventCodexStop
 	EventCodexSessionEnd
+	EventCodexInterrupt
 )
 
 const (

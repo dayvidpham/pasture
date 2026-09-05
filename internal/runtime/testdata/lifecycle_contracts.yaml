@@ -31,6 +31,9 @@ contracts:
       - MessageDisplay
       - Elicitation
       - ElicitationResult
+      - PreModelSwitch
+      - PostModelSwitch
+      - DirectoryAdded
     unresolved_by_event:
       PostToolBatch:
         - tool-call
@@ -45,6 +48,9 @@ contracts:
           - PostToolUse
           - PostToolUseFailure
           - FileChanged
+          - PreModelSwitch
+          - PostModelSwitch
+          - DirectoryAdded
           - CwdChanged
           - InstructionsLoaded
           - WorktreeRemove
@@ -85,6 +91,9 @@ contracts:
           - PostToolUseFailure
           - PostToolBatch
           - FileChanged
+          - PreModelSwitch
+          - PostModelSwitch
+          - DirectoryAdded
           - CwdChanged
           - ConfigChange
           - InstructionsLoaded
@@ -111,6 +120,9 @@ contracts:
           - PostToolUse
           - PostToolUseFailure
           - FileChanged
+          - PreModelSwitch
+          - PostModelSwitch
+          - DirectoryAdded
           - CwdChanged
           - InstructionsLoaded
           - WorktreeRemove
@@ -150,6 +162,9 @@ contracts:
           - PostToolUseFailure
           - PostToolBatch
           - FileChanged
+          - PreModelSwitch
+          - PostModelSwitch
+          - DirectoryAdded
           - CwdChanged
           - ConfigChange
           - InstructionsLoaded
@@ -186,6 +201,9 @@ contracts:
           - PostToolUseFailure
           - PostToolBatch
           - FileChanged
+          - PreModelSwitch
+          - PostModelSwitch
+          - DirectoryAdded
           - CwdChanged
           - ConfigChange
           - InstructionsLoaded
@@ -212,6 +230,9 @@ contracts:
           - PostToolUse
           - PostToolUseFailure
           - FileChanged
+          - PreModelSwitch
+          - PostModelSwitch
+          - DirectoryAdded
           - CwdChanged
           - InstructionsLoaded
           - WorktreeRemove
@@ -250,6 +271,9 @@ contracts:
           - PostToolUseFailure
           - PostToolBatch
           - FileChanged
+          - PreModelSwitch
+          - PostModelSwitch
+          - DirectoryAdded
           - CwdChanged
           - ConfigChange
           - InstructionsLoaded
@@ -289,6 +313,9 @@ contracts:
           - PostToolUseFailure
           - PostToolBatch
           - FileChanged
+          - PreModelSwitch
+          - PostModelSwitch
+          - DirectoryAdded
           - CwdChanged
           - ConfigChange
           - InstructionsLoaded
@@ -350,12 +377,14 @@ contracts:
       - SubagentStop
       - Stop
       - SessionEnd
+      - Interrupt
     axes:
       semantic:
         observation:
           - SessionStart
           - SubagentStart
           - SessionEnd
+          - Interrupt
         gate-consultation:
           - UserPromptSubmit
           - PreToolUse
@@ -379,11 +408,13 @@ contracts:
           - SubagentStop
           - Stop
           - SessionEnd
+          - Interrupt
       blocking:
         nonblocking:
           - SessionStart
           - SubagentStart
           - SessionEnd
+          - Interrupt
         blocking:
           - UserPromptSubmit
           - PreToolUse
@@ -405,6 +436,7 @@ contracts:
           - SubagentStop
           - Stop
           - SessionEnd
+          - Interrupt
         input:
           - PreToolUse
         output:
@@ -423,6 +455,7 @@ contracts:
           - SubagentStop
           - Stop
           - SessionEnd
+          - Interrupt
       reconciliation:
         none: []
         host-native: []
@@ -438,6 +471,7 @@ contracts:
           - SubagentStop
           - Stop
           - SessionEnd
+          - Interrupt
         sequential-mutation: []
       failure:
         report-and-continue:
@@ -454,6 +488,7 @@ contracts:
           - SessionStart
           - SubagentStart
           - SessionEnd
+          - Interrupt
         strict-output-exit-2-blocks: []
         throw-fail-fast: []
         observe-only: []
@@ -468,6 +503,7 @@ contracts:
           - PostCompact
           - SubagentStart
           - SessionEnd
+          - Interrupt
         consult-when-inactive:
           - SubagentStop
           - Stop
@@ -479,6 +515,7 @@ contracts:
         SessionStart:
           - session:session_id:required
         SessionEnd: []
+        Interrupt: []
         PreToolUse:
           - session:session_id:required
           - turn:turn_id:required

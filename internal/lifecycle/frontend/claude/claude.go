@@ -46,6 +46,9 @@ var claudeEventMappings = map[model.ContractEventKind]runtime.ClaudeLifecycleEve
 	registration.EventMessageDisplay:      runtime.ClaudeEventMessageDisplay,
 	registration.EventElicitation:         runtime.ClaudeEventElicitation,
 	registration.EventElicitationResult:   runtime.ClaudeEventElicitationResult,
+	registration.EventPreModelSwitch:      runtime.ClaudeEventPreModelSwitch,
+	registration.EventPostModelSwitch:     runtime.ClaudeEventPostModelSwitch,
+	registration.EventDirectoryAdded:      runtime.ClaudeEventDirectoryAdded,
 }
 
 // host is the pinned Claude data consumed by the generic frontend engine.

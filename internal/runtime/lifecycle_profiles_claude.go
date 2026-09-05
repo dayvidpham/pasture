@@ -43,6 +43,9 @@ const (
 	ClaudeEventMessageDisplay
 	ClaudeEventElicitation
 	ClaudeEventElicitationResult
+	ClaudeEventPreModelSwitch
+	ClaudeEventPostModelSwitch
+	ClaudeEventDirectoryAdded
 	claudeLifecycleEventLimit
 )
 
@@ -77,6 +80,9 @@ var claudeLifecycleEventNames = [...]string{
 	"MessageDisplay",
 	"Elicitation",
 	"ElicitationResult",
+	"PreModelSwitch",
+	"PostModelSwitch",
+	"DirectoryAdded",
 }
 
 func (e ClaudeLifecycleEvent) IsValid() bool {
@@ -193,6 +199,12 @@ func claudeLifecycleMappings() map[ClaudeLifecycleEvent]LifecycleEventMapping {
 		ClaudeEventMessageDisplay:      observe(ClaudeEventMessageDisplay),
 		ClaudeEventElicitation:         gate(ClaudeEventElicitation, MutationNone, claudeRequestIdentity),
 		ClaudeEventElicitationResult:   claudeLifecycleMapping(ClaudeEventElicitationResult, SemanticExplicitHumanResponse, Blocking, MutationNone, StopLoopNotApplicable, unevidenced, claudeRequestIdentity),
+		// Registered at 2.1.261 without an authentic capture: observations,
+		// non-blocking, report-and-continue, no evidence, no identity beyond the
+		// session every Claude payload carries.
+		ClaudeEventPreModelSwitch:  observe(ClaudeEventPreModelSwitch),
+		ClaudeEventPostModelSwitch: observe(ClaudeEventPostModelSwitch),
+		ClaudeEventDirectoryAdded:  observe(ClaudeEventDirectoryAdded),
 	}
 	postToolBatch := mappings[ClaudeEventPostToolBatch]
 	postToolBatch.unresolved = []NativeIdentityKind{IdentityToolCall}

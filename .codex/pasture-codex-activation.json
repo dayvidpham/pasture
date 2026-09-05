@@ -80,6 +80,13 @@
       "reason": "outside-target-set",
       "responseCapability": "unset",
       "failureEvidence": ""
+    },
+    {
+      "event": "Interrupt",
+      "state": "withheld",
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     }
   ]
 }

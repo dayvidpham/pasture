@@ -39,15 +39,15 @@ import (
 
 // divergentRows is the MEASURED set: every event whose committed registration
 // manifest states a different failure mode from the runtime profile that
-// governs behaviour. It is 21 rows, and it is NOT the same set as the rows the
+// governs behaviour. It is 22 rows, and it is NOT the same set as the rows the
 // evidence rule demoted, which is a distinction worth keeping straight:
 //
 //   - 18 rows OVER-CLAIM BLOCKING: 11 Claude rows and 7 of the 8 Codex gates.
 //     The manifest says the host refuses on the pasture exit code; the runtime
 //     says report-and-continue, because the row cites no host evidence for that
 //     claim. Believing the manifest is the dangerous mistake here.
-//   - 3 rows differ only between two NON-BLOCKING arms: the Codex SessionStart,
-//     SessionEnd and SubagentStart observations read report-and-continue in the manifest
+//   - 4 rows differ only between two NON-BLOCKING arms: the Codex SessionStart,
+//     SessionEnd, Interrupt and SubagentStart observations read report-and-continue in the manifest
 //     and strict-hook-failure in the runtime. That divergence pre-dates the
 //     evidence rule and comes from the catalogue simplifying its non-blocking
 //     arm. Neither arm can refuse anything, so nothing is over-claimed.
@@ -75,6 +75,7 @@ var divergentRows = map[ir.HarnessID][]string{
 		"WorktreeCreate",
 	},
 	ir.HarnessCodex: {
+		"Interrupt",
 		"PermissionRequest",
 		"PostToolUse",
 		"PreCompact",
@@ -152,8 +153,8 @@ func TestTheManifestAndTheRuntimeDisagreeOnExactlyTheseRows(t *testing.T) {
 		total += len(divergentRows[harness])
 	}
 
-	if total != 21 {
-		t.Fatalf("the recorded divergence covers %d rows, want 21: 11 Claude rows plus 10 Codex rows", total)
+	if total != 22 {
+		t.Fatalf("the recorded divergence covers %d rows, want 22: 11 Claude rows plus 11 Codex rows", total)
 	}
 }
 

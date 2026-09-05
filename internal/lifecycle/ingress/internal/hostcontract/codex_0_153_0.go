@@ -91,6 +91,12 @@ func Codex0_153_0() Contract {
 	// declared identity. Like every other unproven Codex row, this row declares no identity and
 	// no payload field until an authentic capture proves what the host writes on the wire.
 	sessionEnd := observe(11, "EventCodexSessionEnd", "SessionEnd")
+	// Interrupt is emitted from 0.153.0 (the HookEventName arm and
+	// codex-rs/hooks/src/events/interrupt.rs arrived between 0.146.0 and 0.153.0).
+	// The emitter declares session_id, turn_id, transcript_path, cwd and
+	// hook_event_name: the cited shape, not declared identities, for the same
+	// reason as SessionEnd above.
+	interrupt := observe(12, "EventCodexInterrupt", "Interrupt")
 
 	events := []Event{
 		sessionStart,
@@ -104,6 +110,7 @@ func Codex0_153_0() Contract {
 		gate(9, "EventCodexSubagentStop", "SubagentStop", MutationNone, StopLoopConsultWhenInactive),
 		gate(10, "EventCodexStop", "Stop", MutationNone, StopLoopConsultWhenInactive),
 		sessionEnd,
+		interrupt,
 	}
 	return Contract{Version: "0.153.0", Fields: append([]Field(nil), codexFields...), Events: events}
 }

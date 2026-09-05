@@ -113,6 +113,13 @@ func ClaudeCode2_1_261() Contract {
 		g(13, "EventPostToolBatch", "PostToolBatch", fBatchResults, fToolCalls), o(14, "EventFileChanged", "FileChanged", fFilePath), o(15, "EventCwdChanged", "CwdChanged"), nativeEvent(16, "EventConfigChange", "ConfigChange", []model.NativeFieldID{fConfigSource}, nil, ConditionallyBlocking, MutationNone, pastureruntime.FailureExitTwoBlocks, StopLoopNotApplicable), o(17, "EventInstructionsLoaded", "InstructionsLoaded", fFilePath, fMemoryType, fLoadReason, fGlobs, fTriggerFilePath, fParentFilePath), g(18, "EventWorktreeCreate", "WorktreeCreate"), o(19, "EventWorktreeRemove", "WorktreeRemove"),
 		nativeEvent(20, "EventSubagentStart", "SubagentStart", nil, agent, NonBlocking, MutationNone, pastureruntime.FailureReportAndContinue, StopLoopNotApplicable), nativeEvent(21, "EventSubagentStop", "SubagentStop", []model.NativeFieldID{fAgentTranscriptPath, fStopHookActive}, agent, Blocking, MutationNone, pastureruntime.FailureExitTwoBlocks, StopLoopConsultWhenInactive), g(22, "EventTeammateIdle", "TeammateIdle", fTeammateName), g(23, "EventTaskCreated", "TaskCreated", fTaskID), g(24, "EventTaskCompleted", "TaskCompleted", fTaskID), g(25, "EventPreCompact", "PreCompact", fTrigger, fCustomInstructions), o(26, "EventPostCompact", "PostCompact", fTrigger, fCompactSummary), o(27, "EventNotification", "Notification", fMessage, fNotificationType, fTitle), o(28, "EventMessageDisplay", "MessageDisplay", fMessage, fContent),
 		nativeEvent(29, "EventElicitation", "Elicitation", []model.NativeFieldID{fRequestID, fFields, fMCPServerName, fMessage, fMode, fRequestedSchema}, request, Blocking, MutationNone, pastureruntime.FailureExitTwoBlocks, StopLoopNotApplicable), nativeEvent(30, "EventElicitationResult", "ElicitationResult", []model.NativeFieldID{fRequestID, fResponse, fMCPServerName, fMode, fAction, fContent}, request, Blocking, MutationNone, pastureruntime.FailureExitTwoBlocks, StopLoopNotApplicable),
+		// Registered at Claude Code 2.1.261 from the installed binary's hook-event
+		// enumeration and the hooks reference (https://code.claude.com/docs/en/hooks);
+		// absent at 2.1.210. No authentic capture of these events exists, so each
+		// row declares the common fields only and no identity beyond them; a
+		// capture decides its optional fields. They stay withheld until a capture
+		// and a production proof land.
+		o(31, "EventPreModelSwitch", "PreModelSwitch"), o(32, "EventPostModelSwitch", "PostModelSwitch"), o(33, "EventDirectoryAdded", "DirectoryAdded"),
 	}
 	return Contract{Version: "2.1.261", Fields: append([]Field(nil), claudeFields...), Events: events}
 }

@@ -32,3 +32,6 @@ events:
   - {name: MessageDisplay, fields: [message, content], behavior: observation}
   - {name: Elicitation, fields: [request_id, fields, mcp_server_name, message, mode, requested_schema], behavior: gate}
   - {name: ElicitationResult, fields: [request_id, response, mcp_server_name, mode, action, content], behavior: human-response}
+  - {name: PreModelSwitch, fields: [], behavior: observation}
+  - {name: PostModelSwitch, fields: [], behavior: observation}
+  - {name: DirectoryAdded, fields: [], behavior: observation}
