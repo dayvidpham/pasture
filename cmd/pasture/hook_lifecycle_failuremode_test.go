@@ -29,6 +29,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
@@ -2058,8 +2059,9 @@ func TestEveryDeclaredRowDiffersFromItsEffectiveModeOnlyByTheEvidenceRule(t *tes
 			"change can reach this line — the counter is unconditional and the lookup check above "+
 			"ends the test first — so it guards a later exemption, filter or early continue added "+
 			"inside this loop, which would silently shrink the population every assertion above sees")
-	require.GreaterOrEqual(t, checked, 87,
-		"the three pinned profiles declare 87 rows between them (30 Claude, 10 Codex, 47 OpenCode); a catalog that returned fewer would pass every assertion above while walking a fraction of the population, which is the defect this size assertion replaces")
+	registered := len(registration.ClaudeCode2_1_210().Entries()) + len(registration.Codex0_146_0().Entries()) + len(registration.OpenCode1_18_10().Entries())
+	require.GreaterOrEqual(t, checked, registered,
+		"the three pinned profiles declare %d rows between them, one per registered event; a catalog that returned fewer would pass every assertion above while walking a fraction of the population, which is the defect this size assertion replaces", registered)
 }
 
 // TestTheUnmappableFaultRecordSaysWhatStderrSays drives the ONE arm the exit

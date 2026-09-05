@@ -69,6 +69,7 @@ func TestCodexActivationWithholdsEveryNonTargetGeneratedEvent(t *testing.T) {
 		registration.EventCodexSubagentStart,
 		registration.EventCodexSubagentStop,
 		registration.EventCodexStop,
+		registration.EventCodexSessionEnd,
 	} {
 		require.Equal(t, activation.Withheld, stateByEvent[event], "non-target generated Codex event %d must be withheld", event)
 	}

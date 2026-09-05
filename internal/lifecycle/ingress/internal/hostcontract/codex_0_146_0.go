@@ -35,14 +35,14 @@ var codexFields = []Field{
 //
 // Known divergence, and why it is inert. This catalog and the runtime Codex
 // profile (internal/runtime/lifecycle_profiles.go) both describe the Codex
-// event set, and they disagree on the 8 events that have no authentic capture,
-// which are also every Codex gate. This source declares no identities for them,
+// event set, and they disagree on the 9 events that have no authentic capture,
+// which are every Codex gate plus the SessionEnd and SubagentStart observations. This source declares no identities for them,
 // and it declares a BLOCKING failure mode for all 7 of its gate rows while the
 // runtime profile now declares none: a blocking exit code needs a citation, and
 // the Codex rows carry none yet. So this source OVER-CLAIMS blocking relative
 // to the runtime profile; it does not merely simplify it. The Codex frontend
 // (internal/lifecycle/frontend/codex) binds ONLY the 2 authenticity-proven
-// events and rejects the other 8, so the diverging metadata never reaches
+// events and rejects the other 9, so the diverging metadata never reaches
 // ingest. The runtime profile is the authority for non-ingress event semantics,
 // and it is the one to believe when the two disagree.
 //
@@ -83,6 +83,15 @@ func Codex0_146_0() Contract {
 		{Field: fCodexToolUseID, Binding: model.BindingToolCall, Required: true},
 	}
 
+	// SessionEnd is emitted by the host at 0.146.0 (codex-rs/core/src/hook_runtime.rs:378-392,
+	// root session only) and still at 0.153.0 (:464-478). It was absent from this catalogue
+	// although the host emitted it all along, so the catalogue was 10 of 11. The emitter
+	// declares session_id, transcript_path, cwd, hook_event_name and reason
+	// (codex-rs/hooks/src/events/session_end.rs:64-68): that is the cited payload SHAPE, not a
+	// declared identity. Like every other unproven Codex row, this row declares no identity and
+	// no payload field until an authentic capture proves what the host writes on the wire.
+	sessionEnd := observe(11, "EventCodexSessionEnd", "SessionEnd")
+
 	events := []Event{
 		sessionStart,
 		gate(2, "EventCodexUserPromptSubmit", "UserPromptSubmit", MutationNone, StopLoopNotApplicable),
@@ -94,6 +103,7 @@ func Codex0_146_0() Contract {
 		observe(8, "EventCodexSubagentStart", "SubagentStart"),
 		gate(9, "EventCodexSubagentStop", "SubagentStop", MutationNone, StopLoopConsultWhenInactive),
 		gate(10, "EventCodexStop", "Stop", MutationNone, StopLoopConsultWhenInactive),
+		sessionEnd,
 	}
 	return Contract{Version: "0.146.0", Fields: append([]Field(nil), codexFields...), Events: events}
 }

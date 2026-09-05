@@ -1,6 +1,6 @@
 // Package metamodel is the generated, content-addressed lifecycle interpretation
 // vocabulary (D1). One document describes the FULL pinned per-harness event
-// catalogs (Claude 30, OpenCode 47, Codex 10) — for each event: native name,
+// catalogs (Claude, OpenCode, Codex) — for each event: native name,
 // semantic, blocking, mutation, failure, stop-loop, and declared identity kinds.
 //
 // The metamodel describes the interpretation FUNCTION, which is defined over the

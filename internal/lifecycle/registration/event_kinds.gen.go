@@ -91,6 +91,7 @@ const (
 	EventCodexSubagentStart
 	EventCodexSubagentStop
 	EventCodexStop
+	EventCodexSessionEnd
 )
 
 const (

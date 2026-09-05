@@ -349,11 +349,13 @@ contracts:
       - SubagentStart
       - SubagentStop
       - Stop
+      - SessionEnd
     axes:
       semantic:
         observation:
           - SessionStart
           - SubagentStart
+          - SessionEnd
         gate-consultation:
           - UserPromptSubmit
           - PreToolUse
@@ -376,10 +378,12 @@ contracts:
           - SubagentStart
           - SubagentStop
           - Stop
+          - SessionEnd
       blocking:
         nonblocking:
           - SessionStart
           - SubagentStart
+          - SessionEnd
         blocking:
           - UserPromptSubmit
           - PreToolUse
@@ -400,6 +404,7 @@ contracts:
           - SubagentStart
           - SubagentStop
           - Stop
+          - SessionEnd
         input:
           - PreToolUse
         output:
@@ -417,6 +422,7 @@ contracts:
           - SubagentStart
           - SubagentStop
           - Stop
+          - SessionEnd
       reconciliation:
         none: []
         host-native: []
@@ -431,6 +437,7 @@ contracts:
           - SubagentStart
           - SubagentStop
           - Stop
+          - SessionEnd
         sequential-mutation: []
       failure:
         report-and-continue:
@@ -446,6 +453,7 @@ contracts:
         strict-hook-failure:
           - SessionStart
           - SubagentStart
+          - SessionEnd
         strict-output-exit-2-blocks: []
         throw-fail-fast: []
         observe-only: []
@@ -459,6 +467,7 @@ contracts:
           - PreCompact
           - PostCompact
           - SubagentStart
+          - SessionEnd
         consult-when-inactive:
           - SubagentStop
           - Stop
@@ -469,6 +478,7 @@ contracts:
       by_event:
         SessionStart:
           - session:session_id:required
+        SessionEnd: []
         PreToolUse:
           - session:session_id:required
           - turn:turn_id:required

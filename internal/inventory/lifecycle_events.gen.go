@@ -92,5 +92,6 @@ func init() {
 		{Key{Harness: ir.HarnessCodex, Kind: KindLifecycleEvent, ID: "SubagentStart"}},
 		{Key{Harness: ir.HarnessCodex, Kind: KindLifecycleEvent, ID: "SubagentStop"}},
 		{Key{Harness: ir.HarnessCodex, Kind: KindLifecycleEvent, ID: "Stop"}},
+		{Key{Harness: ir.HarnessCodex, Kind: KindLifecycleEvent, ID: "SessionEnd"}},
 	}
 }

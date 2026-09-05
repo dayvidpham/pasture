@@ -22,6 +22,7 @@ const (
 	CodexEventSubagentStart
 	CodexEventSubagentStop
 	CodexEventStop
+	CodexEventSessionEnd
 	codexLifecycleEventLimit
 )
 
@@ -36,6 +37,7 @@ var codexLifecycleEventNames = [...]string{
 	"SubagentStart",
 	"SubagentStop",
 	"Stop",
+	"SessionEnd",
 }
 
 func (e CodexLifecycleEvent) IsValid() bool { return e > 0 && e < codexLifecycleEventLimit }
@@ -125,6 +127,31 @@ func codexLifecycleMappings() map[CodexLifecycleEvent]LifecycleEventMapping {
 		CodexEventSubagentStart:     codexLifecycleMapping(CodexEventSubagentStart, SemanticObservation, NonBlocking, MutationNone, StopLoopNotApplicable, true, unevidenced, codexAgentIdentity),
 		CodexEventSubagentStop:      codexLifecycleMapping(CodexEventSubagentStop, SemanticGateConsultation, Blocking, MutationNone, StopLoopConsultWhenInactive, true, unevidenced, codexAgentIdentity),
 		CodexEventStop:              codexLifecycleMapping(CodexEventStop, SemanticGateConsultation, Blocking, MutationNone, StopLoopConsultWhenInactive, true, unevidenced),
+		CodexEventSessionEnd:        codexUnprovenObservationMapping(CodexEventSessionEnd, unevidenced),
+	}
+}
+
+// codexUnprovenObservationMapping builds a non-blocking observation row that
+// declares NO identity, so its IdentityPolicy is None. A declared identity is a
+// claim the product acts on (the L2 content guard, the frontend Bind), and this
+// tree derives such claims from authentic captures only. SessionEnd's emitter
+// names session_id, but no capture has shown what the host writes on the wire,
+// so the row stays identity-free until one does; the same rule gave the other
+// unproven Codex rows their shape in the host contract.
+func codexUnprovenObservationMapping(event CodexLifecycleEvent, evidence FailureEvidence) LifecycleEventMapping {
+	return LifecycleEventMapping{
+		nativeName:      event.NativeName(),
+		semantic:        SemanticObservation,
+		surface:         SurfaceCodexStrictCommandJSON,
+		blocking:        NonBlocking,
+		identities:      identities(nil),
+		mutation:        MutationNone,
+		order:           OrderConcurrentNative,
+		reconciliation:  ReconcileNoAdapterMerge,
+		failure:         evidenceBoundFailure(NonBlocking, evidence, FailureStrictExitTwoBlocks, FailureStrictHook),
+		declaredFailure: declaredFailureArm(NonBlocking, FailureStrictExitTwoBlocks, FailureStrictHook),
+		evidence:        evidence,
+		stopLoop:        StopLoopNotApplicable,
 	}
 }
 

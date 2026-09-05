@@ -73,6 +73,13 @@
       "reason": "outside-target-set",
       "responseCapability": "unset",
       "failureEvidence": "unset"
+    },
+    {
+      "event": "SessionEnd",
+      "state": "withheld",
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     }
   ]
 }
