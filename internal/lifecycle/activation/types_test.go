@@ -17,11 +17,11 @@ import (
 
 func TestClaudeActivationIsCompleteAndExactlyPartitioned(t *testing.T) {
 	t.Parallel()
-	entries, err := activation.ClaudeCode2_1_210()
+	entries, err := activation.ClaudeCode2_1_261()
 	require.NoError(t, err)
-	require.Len(t, entries, 30)
+	require.Len(t, entries, len(registration.ClaudeCode2_1_261().Entries()), "one activation entry per registered Claude event")
 	targets := make(map[model.ContractEventKind]struct{})
-	for _, event := range activation.ClaudeCode2_1_210TargetEvents() {
+	for _, event := range activation.ClaudeCode2_1_261TargetEvents() {
 		targets[event] = struct{}{}
 	}
 	require.Len(t, targets, 10)
@@ -70,22 +70,22 @@ func TestClaudeActivationIsCompleteAndExactlyPartitioned(t *testing.T) {
 	}
 	require.Equal(t, 8, enabled)
 	require.Equal(t, 2, missingCorrelation)
-	require.Equal(t, 20, outsideTarget)
+	require.Equal(t, len(entries)-len(targets), outsideTarget, "every registered event outside the declared target set is withheld outside-target-set")
 	require.Equal(t, registration.EventSessionStart, entries[0].Event)
 }
 
 func TestActivationTargetEventsReturnsDefensiveCopyAndManifestIsFresh(t *testing.T) {
 	t.Parallel()
-	targets := activation.ClaudeCode2_1_210TargetEvents()
+	targets := activation.ClaudeCode2_1_261TargetEvents()
 	require.Len(t, targets, 10)
 	targets[0] = model.ContractEventKind(999)
-	freshTargets := activation.ClaudeCode2_1_210TargetEvents()
+	freshTargets := activation.ClaudeCode2_1_261TargetEvents()
 	require.Equal(t, registration.EventSessionStart, freshTargets[0])
 
-	entries, err := activation.ClaudeCode2_1_210()
+	entries, err := activation.ClaudeCode2_1_261()
 	require.NoError(t, err)
 	entries[0].State = activation.Withheld
-	freshEntries, err := activation.ClaudeCode2_1_210()
+	freshEntries, err := activation.ClaudeCode2_1_261()
 	require.NoError(t, err)
 	require.Equal(t, activation.Enabled, freshEntries[0].State)
 }

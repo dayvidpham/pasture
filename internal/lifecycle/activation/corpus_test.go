@@ -14,6 +14,8 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
+	"github.com/dayvidpham/pasture/internal/runtime"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
 )
@@ -275,7 +277,7 @@ func TestEvaluateContainmentPrecedenceAndEvidenceErrors(t *testing.T) {
 		root, corpus := copiedReviewedEvidenceCorpus(t)
 		outside := filepath.Join(t.TempDir(), "outside.provenance.json")
 		require.NoError(t, os.WriteFile(outside, []byte("{}"), 0o600))
-		path := filepath.Join(root, "fixtures", "session_start_2_1_210.provenance.json")
+		path := filepath.Join(root, "fixtures", "session_start_2_1_261.provenance.json")
 		require.NoError(t, os.Remove(path))
 		if err := os.Symlink(outside, path); err != nil {
 			t.Skipf("symlinks unsupported: %v", err)
@@ -295,7 +297,10 @@ func TestEvaluateContainmentPrecedenceAndEvidenceErrors(t *testing.T) {
 			p["rawFileDigest"] = "sha256:" + strings.Repeat("0", 64)
 			p["harnessVersion"] = "bad"
 		}, activation.CorpusReasonDigestMismatch, ""},
-		"harness-before-bad-version": {func(p map[string]any) { p["harnessVersion"] = "2.2.0"; p["harness"] = "codex-cli" }, 0, `names harness "codex-cli", not "claude-code"`},
+		"harness-before-bad-version": {func(p map[string]any) {
+			p["harnessVersion"] = belowFloorString(activation.ClaudeCodeEvaluator().Admission().Min())
+			p["harness"] = "codex-cli"
+		}, 0, `names harness "codex-cli", not "claude-code"`},
 		"malformed-digest":           {func(p map[string]any) { p["rawFileDigest"] = "bad" }, 0, "malformed SHA-256"},
 		"malformed-version":          {func(p map[string]any) { p["harnessVersion"] = "bad" }, 0, "malformed host version"},
 		"wrong-harness":              {func(p map[string]any) { p["harness"] = "codex-cli" }, 0, `not "claude-code"`},
@@ -308,7 +313,7 @@ func TestEvaluateContainmentPrecedenceAndEvidenceErrors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			root, corpus := copiedReviewedEvidenceCorpus(t)
-			rewriteProvenance(t, filepath.Join(root, "fixtures", "session_start_2_1_210.provenance.json"), tc.mutate)
+			rewriteProvenance(t, filepath.Join(root, "fixtures", "session_start_2_1_261.provenance.json"), tc.mutate)
 			got, err := activation.ClaudeCodeEvaluator().Evaluate(root, corpus.Cases()[0])
 			if tc.wantError != "" {
 				require.ErrorContains(t, err, tc.wantError)
@@ -327,25 +332,25 @@ func TestEvaluateContainmentPrecedenceAndEvidenceErrors(t *testing.T) {
 		want   string
 	}{
 		"missing-fixture": {func(root string) {
-			require.NoError(t, os.Remove(filepath.Join(root, "fixtures", "session_start_2_1_210.json")))
+			require.NoError(t, os.Remove(filepath.Join(root, "fixtures", "session_start_2_1_261.json")))
 		}, "resolve fixture"},
 		"missing-provenance": {func(root string) {
-			require.NoError(t, os.Remove(filepath.Join(root, "fixtures", "session_start_2_1_210.provenance.json")))
+			require.NoError(t, os.Remove(filepath.Join(root, "fixtures", "session_start_2_1_261.provenance.json")))
 		}, "resolve provenance"},
 		"malformed-json": {func(root string) {
-			require.NoError(t, os.WriteFile(filepath.Join(root, "fixtures", "session_start_2_1_210.provenance.json"), []byte("{"), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(root, "fixtures", "session_start_2_1_261.provenance.json"), []byte("{"), 0o600))
 		}, "decode provenance"},
 		"trailing-json": {func(root string) {
-			p := filepath.Join(root, "fixtures", "session_start_2_1_210.provenance.json")
+			p := filepath.Join(root, "fixtures", "session_start_2_1_261.provenance.json")
 			body, err := os.ReadFile(p)
 			require.NoError(t, err)
 			require.NoError(t, os.WriteFile(p, append(body, []byte("{}")...), 0o600))
 		}, "exactly one JSON object"},
 		"oversized-json": {func(root string) {
-			require.NoError(t, os.WriteFile(filepath.Join(root, "fixtures", "session_start_2_1_210.provenance.json"), []byte(strings.Repeat(" ", activation.MaxProvenanceBytes+1)), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(root, "fixtures", "session_start_2_1_261.provenance.json"), []byte(strings.Repeat(" ", activation.MaxProvenanceBytes+1)), 0o600))
 		}, "exceeds"},
 		"oversized-fixture": {func(root string) {
-			require.NoError(t, os.WriteFile(filepath.Join(root, "fixtures", "session_start_2_1_210.json"), []byte(strings.Repeat("x", activation.MaxFixtureBytes+1)), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(root, "fixtures", "session_start_2_1_261.json"), []byte(strings.Repeat("x", activation.MaxFixtureBytes+1)), 0o600))
 		}, "native payload bound"},
 	} {
 		name, tc := name, tc
@@ -364,9 +369,9 @@ func TestEvaluateIgnoresCorpusOracleAndReviewMetadata(t *testing.T) {
 	t.Parallel()
 	root, _ := copiedReviewedEvidenceCorpus(t)
 	variants := []string{
-		strings.Replace(validCorpusYAML("fixtures/session_start_2_1_210.json"), "source: requirement, ref: ref", "source: bug, ref: contradictory-review", 1),
-		strings.Replace(validCorpusYAML("fixtures/session_start_2_1_210.json"), "description: pass", "description: contradictory mutation prose", 1),
-		strings.Replace(validCorpusYAML("fixtures/session_start_2_1_210_origin_authored.json"), "decision: enabled, reason: \"\"", "decision: enabled, reason: \"\"", 1),
+		strings.Replace(validCorpusYAML("fixtures/session_start_2_1_261.json"), "source: requirement, ref: ref", "source: bug, ref: contradictory-review", 1),
+		strings.Replace(validCorpusYAML("fixtures/session_start_2_1_261.json"), "description: pass", "description: contradictory mutation prose", 1),
+		strings.Replace(validCorpusYAML("fixtures/session_start_2_1_261_origin_authored.json"), "decision: enabled, reason: \"\"", "decision: enabled, reason: \"\"", 1),
 	}
 	for i, body := range variants {
 		corpus, err := loadCorpusTextAt(t, root, body)
@@ -391,7 +396,7 @@ func copiedReviewedEvidenceCorpus(t *testing.T) (string, activation.Corpus) {
 	fixtureDir := filepath.Join(root, "fixtures")
 	require.NoError(t, os.Mkdir(fixtureDir, 0o700))
 	source := filepath.Join("..", "ingress", "claude", "testdata", "fixtures")
-	names := []string{"session_start_2_1_210", "session_start_2_1_210_origin_authored", "session_start_2_1_210_digest_mismatch", "session_start_2_1_210_version_out_of_range"}
+	names := []string{"session_start_2_1_261", "session_start_2_1_261_origin_authored", "session_start_2_1_261_digest_mismatch", "session_start_2_1_261_version_out_of_range"}
 	for _, name := range names {
 		for _, ext := range []string{".json", ".provenance.json"} {
 			body, err := os.ReadFile(filepath.Join(source, name+ext))
@@ -406,25 +411,25 @@ func copiedReviewedEvidenceCorpus(t *testing.T) (string, activation.Corpus) {
 	}
 	corpusYAML := `cases:
 - name: pass
-  input: {fixture: fixtures/session_start_2_1_210.json}
+  input: {fixture: fixtures/session_start_2_1_261.json}
   expected: {decision: enabled, reason: ""}
   classification: must-pass
   provenance: {source: requirement, ref: reviewed-capture}
   mutation: {description: copied reviewed capture bytes}
 - name: origin
-  input: {fixture: fixtures/session_start_2_1_210_origin_authored.json}
+  input: {fixture: fixtures/session_start_2_1_261_origin_authored.json}
   expected: {decision: withheld, reason: non-authentic-origin}
   classification: must-fail
   provenance: {source: bug, ref: control}
   mutation: {description: non-authentic origin control}
 - name: digest
-  input: {fixture: fixtures/session_start_2_1_210_digest_mismatch.json}
+  input: {fixture: fixtures/session_start_2_1_261_digest_mismatch.json}
   expected: {decision: withheld, reason: digest-mismatch}
   classification: must-fail
   provenance: {source: bug, ref: control}
   mutation: {description: digest control}
 - name: version
-  input: {fixture: fixtures/session_start_2_1_210_version_out_of_range.json}
+  input: {fixture: fixtures/session_start_2_1_261_version_out_of_range.json}
   expected: {decision: withheld, reason: version-out-of-range}
   classification: must-fail
   provenance: {source: enum, ref: control}
@@ -542,7 +547,7 @@ func TestClaudeEvaluatorDecidesTheCommittedClaudeCorpusAsBefore(t *testing.T) {
 	}
 	require.Equal(t, 8, enabled, "the eight enabled Claude targets evaluate as enabled")
 	require.Equal(t, acceptance.HarnessClaudeCode, selected.Harness())
-	require.Equal(t, activation.ClaudeCode2_1_210TargetEvents(), selected.TargetEvents())
+	require.Equal(t, activation.ClaudeCode2_1_261TargetEvents(), selected.TargetEvents())
 }
 
 // harnessSample is one harness's real committed capture bytes, re-homed in a
@@ -562,10 +567,35 @@ type harnessSample struct {
 
 func harnessSamples() []harnessSample {
 	return []harnessSample{
-		{acceptance.HarnessClaudeCode, "2.1.222", "SessionStart", filepath.Join("..", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_222.json"), "session_start.json", registration.EventSessionStart, activation.ClaudeCodeEvaluator(), "2.2.0"},
-		{acceptance.HarnessCodexCLI, "0.146.0", "SessionStart", filepath.Join("..", "ingress", "codex", "testdata", "fixtures", "session_start_0_146_0.json"), "session_start.json", registration.EventCodexSessionStart, activation.CodexEvaluator(), "0.146.1"},
-		{acceptance.HarnessOpenCode, "1.18.10", "session.created", filepath.Join("..", "ingress", "opencode", "testdata", "fixtures", "session_created_1_18_10.capture.json"), "session_created.capture.json", registration.EventOpenCodeSessionCreated, activation.OpenCodeEvaluator(), "1.18.11"},
+		sample(acceptance.HarnessClaudeCode, "SessionStart", filepath.Join("..", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"), "session_start.json", registration.EventSessionStart, activation.ClaudeCodeEvaluator()),
+		sample(acceptance.HarnessCodexCLI, "SessionStart", filepath.Join("..", "ingress", "codex", "testdata", "fixtures", "session_start_0_153_0.json"), "session_start.json", registration.EventCodexSessionStart, activation.CodexEvaluator()),
+		sample(acceptance.HarnessOpenCode, "session.created", filepath.Join("..", "ingress", "opencode", "testdata", "fixtures", "session_created_1_18_29.json"), "session_created.capture.json", registration.EventOpenCodeSessionCreated, activation.OpenCodeEvaluator()),
 	}
+}
+
+// sample builds one harness sample whose admitted version is the evaluator's
+// own floor and whose out-of-range version is the release one step below it,
+// so neither is a number that goes stale when a contract moves.
+func sample(harness acceptance.HarnessKind, event, source, fixture string, want model.ContractEventKind, evaluator activation.Evaluator) harnessSample {
+	min := evaluator.Admission().Min()
+	return harnessSample{harness: harness, version: min.String(), event: event, source: source, fixture: fixture, wantEvent: want, evaluator: evaluator, outOfRange: belowFloorString(min)}
+}
+
+// belowFloorString is testutil.BelowFloor for callers that run before any
+// testing.T exists (the sample table). It steps one release below v.
+func belowFloorString(v runtime.HostVersion) string {
+	major, minor, patch := v.Release()
+	switch {
+	case patch > 0:
+		patch--
+	case minor > 0:
+		minor--
+		patch = 0
+	default:
+		major--
+		minor, patch = 0, 0
+	}
+	return fmt.Sprintf("%d.%d.%d", major, minor, patch)
 }
 
 // canonicalCorpus copies the sample's committed bytes into a temp corpus root
@@ -704,8 +734,8 @@ func TestEvaluatorRefusalsFireForEveryHarness(t *testing.T) {
 
 func TestProvenancePathSitsBesideTheFixtureUnderThePlainName(t *testing.T) {
 	t.Parallel()
-	require.Equal(t, "fixtures/session_created_1_18_10.provenance.json", activation.ProvenancePath("fixtures/session_created_1_18_10.capture.json"))
-	require.Equal(t, "fixtures/session_start_2_1_222.provenance.json", activation.ProvenancePath("fixtures/session_start_2_1_222.json"))
+	require.Equal(t, "fixtures/session_created_1_18_29.provenance.json", activation.ProvenancePath("fixtures/session_created_1_18_29.json"))
+	require.Equal(t, "fixtures/session_start_2_1_261.provenance.json", activation.ProvenancePath("fixtures/session_start_2_1_261.json"))
 }
 
 func TestEvaluatorForIsClosedAndTheZeroEvaluatorRefuses(t *testing.T) {
@@ -720,48 +750,48 @@ func TestEvaluatorForIsClosedAndTheZeroEvaluatorRefuses(t *testing.T) {
 	require.ErrorContains(t, err, "evaluator is not constructed")
 }
 
-// TestVersionAdmissionFollowsEachHarnessContract states the admission shape
-// per harness and proves it on fixtures: Claude Code admits a RANGE, so a
-// patch release inside it (the frozen 2.1.251 pin among them) is admitted;
-// Codex and OpenCode admit EXACTLY their pinned version. A version outside
-// admission is withheld with a detail that names the observed and the
-// admitted versions, because a reader who cannot see both cannot act.
+// Version admission follows each harness's contract, and every contract is a
+// FLOOR at its recorded host version: that version and every later release are
+// admitted; the release below it and a prerelease of it are withheld with a
+// detail that names the observed version and the admitted versions through the
+// contract's own renderer, because a reader who cannot see both cannot act.
+// The population is the harness evaluators themselves.
 func TestVersionAdmissionFollowsEachHarnessContract(t *testing.T) {
 	t.Parallel()
-	require.False(t, activation.ClaudeCodeEvaluator().AdmitsExactly(), "Claude Code admits a range")
-	require.True(t, activation.CodexEvaluator().AdmitsExactly(), "Codex admits exactly its pinned version")
-	require.True(t, activation.OpenCodeEvaluator().AdmitsExactly(), "OpenCode admits exactly its pinned version")
-
-	for _, tc := range []struct {
-		sample   harnessSample
-		version  string
-		admitted bool
-		detail   string
-	}{
-		{harnessSamples()[0], "2.1.222", true, ""},
-		{harnessSamples()[0], "2.1.223", true, ""},
-		{harnessSamples()[0], "2.1.251", true, ""},
-		{harnessSamples()[0], "2.2.0", false, `observed host version "2.2.0" is outside the admitted claude-code versions, from 2.1.210 through 2.2.0-0`},
-		{harnessSamples()[0], "2.1.209", false, `observed host version "2.1.209" is outside the admitted claude-code versions, from 2.1.210 through 2.2.0-0`},
-		{harnessSamples()[1], "0.146.0", true, ""},
-		{harnessSamples()[1], "0.146.1", false, `observed host version "0.146.1" is outside the admitted codex-cli versions, exactly 0.146.0`},
-		{harnessSamples()[2], "1.18.10", true, ""},
-		{harnessSamples()[2], "1.18.11", false, `observed host version "1.18.11" is outside the admitted opencode versions, exactly 1.18.10`},
-	} {
-		tc := tc
-		t.Run(string(tc.sample.harness)+"-"+tc.version, func(t *testing.T) {
-			t.Parallel()
-			root, corpus := canonicalCorpus(t, tc.sample)
-			rewriteProvenance(t, filepath.Join(root, "fixtures", activation.ProvenancePath(tc.sample.fixture)), func(p map[string]any) { p["harnessVersion"] = tc.version })
-			got, err := tc.sample.evaluator.Evaluate(root, corpus.Cases()[0])
-			require.NoError(t, err)
-			if tc.admitted {
-				require.Equal(t, activation.DecisionEnabled, got.Decision(), "version %s must be admitted", tc.version)
-				require.Empty(t, got.Detail())
-				return
-			}
-			require.Equal(t, activation.CorpusReasonVersionOutOfRange, got.Reason())
-			require.Equal(t, tc.detail, got.Detail())
-		})
+	samples := harnessSamples()
+	require.Len(t, samples, 3, "one sample per harness evaluator")
+	for _, sample := range samples {
+		sample := sample
+		admission := sample.evaluator.Admission()
+		min := admission.Min()
+		require.False(t, admission.HasUpperBound(), "%s admission is a floor", sample.harness)
+		for _, tc := range []struct {
+			version  string
+			admitted bool
+		}{
+			{min.String(), true},
+			{testutil.Bump(t, min, 0, 0, 1).String(), true},
+			{testutil.Bump(t, min, 0, 1, 0).String(), true},
+			{testutil.Bump(t, min, 1, 0, 0).String(), true},
+			{testutil.BelowFloor(t, min).String(), false},
+			{min.String() + "-rc.1", false},
+		} {
+			tc := tc
+			t.Run(string(sample.harness)+"-"+tc.version, func(t *testing.T) {
+				t.Parallel()
+				root, corpus := canonicalCorpus(t, sample)
+				rewriteProvenance(t, filepath.Join(root, "fixtures", activation.ProvenancePath(sample.fixture)), func(p map[string]any) { p["harnessVersion"] = tc.version })
+				got, err := sample.evaluator.Evaluate(root, corpus.Cases()[0])
+				require.NoError(t, err)
+				if tc.admitted {
+					require.Equal(t, activation.DecisionEnabled, got.Decision(), "version %s must be admitted", tc.version)
+					require.Empty(t, got.Detail())
+					return
+				}
+				require.Equal(t, activation.CorpusReasonVersionOutOfRange, got.Reason())
+				require.Equal(t, fmt.Sprintf("observed host version %q is outside the admitted %s versions, %s", tc.version, sample.harness, admission.Describe()), got.Detail())
+				require.Contains(t, got.Detail(), "at or above "+min.String(), "the detail spells the floor through the contract's renderer")
+			})
+		}
 	}
 }

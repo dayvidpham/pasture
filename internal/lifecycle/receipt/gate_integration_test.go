@@ -73,11 +73,11 @@ func TestReceiveGateRefusalLeavesStoreEmpty(t *testing.T) {
 		t.Fatalf("wire production receipt service: %v", err)
 	}
 
-	raw, err := os.ReadFile(filepath.Join("..", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_210.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], "2.1.210", model.OccurrenceEnvelopeRef{}).Delivery
+	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_261().Events[0], registration.ClaudeCode2_1_261().Version, model.OccurrenceEnvelopeRef{}).Delivery
 
 	t.Run("zero warrant", func(t *testing.T) {
 		_, err := service.Receive(ctx, gate.Warrant{}, delivery)

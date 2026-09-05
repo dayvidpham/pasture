@@ -52,10 +52,10 @@ func TestNewRuntimeContractValidatesHarnessAgreement(t *testing.T) {
 	t.Parallel()
 	core, err := runtime.NewCoreRuntimeBindings(fullCoreOperationBindings(t), nil)
 	require.NoError(t, err)
-	constraint, err := runtime.NewExactVersion(mustParse(t, "2.1.210"))
+	constraint, err := runtime.NewExactVersion(mustParse(t, "2.1.261"))
 	require.NoError(t, err)
 
-	id, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "claude-code@2.1.210")
+	id, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "claude-code@2.1.261")
 	require.NoError(t, err)
 
 	_, err = runtime.NewRuntimeContract(id, ir.HarnessOpenCode, constraint, core)
@@ -64,7 +64,7 @@ func TestNewRuntimeContractValidatesHarnessAgreement(t *testing.T) {
 	contract, err := runtime.NewRuntimeContract(id, ir.HarnessClaudeCode, constraint, core)
 	require.NoError(t, err)
 	assert.Equal(t, ir.HarnessClaudeCode, contract.Harness())
-	assert.True(t, contract.Supports(mustParse(t, "2.1.210")))
+	assert.True(t, contract.Supports(mustParse(t, "2.1.261")))
 	assert.False(t, contract.Supports(mustParse(t, "2.1.211")))
 }
 
@@ -72,9 +72,9 @@ func TestNewRuntimeContractRejectsDuplicateAndConflictingCapabilities(t *testing
 	t.Parallel()
 	core, err := runtime.NewCoreRuntimeBindings(fullCoreOperationBindings(t), nil)
 	require.NoError(t, err)
-	constraint, err := runtime.NewExactVersion(mustParse(t, "2.1.210"))
+	constraint, err := runtime.NewExactVersion(mustParse(t, "2.1.261"))
 	require.NoError(t, err)
-	id, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "claude-code@2.1.210")
+	id, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "claude-code@2.1.261")
 	require.NoError(t, err)
 
 	capability := mustCapability[sampleInput, sampleOutput](t, "pasture.cap.render/v1", "1.0.0")

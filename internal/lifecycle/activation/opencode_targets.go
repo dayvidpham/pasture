@@ -16,8 +16,8 @@ import (
 // openCodeCaptureProofs declares every OpenCode capture proof. The arm becomes
 // the constant CaptureProof<arm>.
 var openCodeCaptureProofs = [...]captureProofDeclaration{
-	{ordinal: 200, arm: "OpenCodeSessionCreated", event: registration.EventOpenCodeSessionCreated, fixture: "internal/lifecycle/ingress/opencode/testdata/fixtures/session_created_1_18_10.capture.json (OpenCode 1.18.10 authentic callback-object capture)"},
-	{ordinal: 201, arm: "OpenCodeToolExecuteBefore", event: registration.EventOpenCodeToolExecuteBefore, fixture: "internal/lifecycle/ingress/opencode/testdata/fixtures/tool_execute_before_1_18_10.capture.json (OpenCode 1.18.10 authentic callback-object capture)"},
+	{ordinal: 200, arm: "OpenCodeSessionCreated", event: registration.EventOpenCodeSessionCreated, fixture: "internal/lifecycle/ingress/opencode/testdata/fixtures/session_created_1_18_29.json (OpenCode 1.18.29 authentic callback-object capture)"},
+	{ordinal: 201, arm: "OpenCodeToolExecuteBefore", event: registration.EventOpenCodeToolExecuteBefore, fixture: "internal/lifecycle/ingress/opencode/testdata/fixtures/tool_execute_before_1_18_29.json (OpenCode 1.18.29 authentic callback-object capture)"},
 }
 
 // openCodeProductionProofs declares every OpenCode production proof. The arm
@@ -28,19 +28,19 @@ var openCodeProductionProofs = [...]productionProofDeclaration{
 }
 
 // openCodeTargetEventDeclarations is the static typed target declaration for
-// OpenCode 1.18.10. Generated catalog membership alone carries no proof.
+// OpenCode at the recorded version. Generated catalog membership alone carries no proof.
 var openCodeTargetEventDeclarations = [...]targetEventDeclaration{
 	{event: registration.EventOpenCodeSessionCreated, captureProof: CaptureProofOpenCodeSessionCreated, productionProof: ProductionProofOpenCodeSessionCreated},
 	{event: registration.EventOpenCodeToolExecuteBefore, captureProof: CaptureProofOpenCodeToolExecuteBefore, productionProof: ProductionProofOpenCodeToolExecuteBefore},
 }
 
-// OpenCode1_18_10TargetEvents returns a defensive copy of the proved target set.
-func OpenCode1_18_10TargetEvents() []model.ContractEventKind {
+// OpenCode1_18_29TargetEvents returns a defensive copy of the proved target set.
+func OpenCode1_18_29TargetEvents() []model.ContractEventKind {
 	return targetEvents(openCodeTargetEventDeclarations[:])
 }
 
-// OpenCode1_18_10 derives a fresh exhaustive activation manifest from the
+// OpenCode1_18_29 derives a fresh exhaustive activation manifest from the
 // generated host manifest and the proved static target declaration.
-func OpenCode1_18_10() ([]Entry, error) {
-	return deriveManifest("activation.OpenCode1_18_10", registration.OpenCode1_18_10().Entries(), openCodeTargetEventDeclarations[:])
+func OpenCode1_18_29() ([]Entry, error) {
+	return deriveManifest("activation.OpenCode1_18_29", registration.OpenCode1_18_29().Entries(), openCodeTargetEventDeclarations[:])
 }

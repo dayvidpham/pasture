@@ -50,7 +50,7 @@ func TestLifecycleContractRejectsInvalidUnresolvedIdentityMetadata(t *testing.T)
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			_, err := newLifecycleContract(
-				ClaudeCode2_1_210(),
+				ClaudeCode2_1_261(),
 				[]ClaudeLifecycleEvent{ClaudeEventSessionStart},
 				map[ClaudeLifecycleEvent]LifecycleEventMapping{
 					ClaudeEventSessionStart: test.mapping(),
@@ -85,7 +85,7 @@ func TestLifecycleContractRejectsOptionalRequestForHumanResponse(t *testing.T) {
 		nativeIdentity(IdentityRequest, "request_id", false),
 	}
 	_, err := newLifecycleContract(
-		ClaudeCode2_1_210(),
+		ClaudeCode2_1_261(),
 		[]ClaudeLifecycleEvent{ClaudeEventElicitationResult},
 		map[ClaudeLifecycleEvent]LifecycleEventMapping{
 			ClaudeEventElicitationResult: mapping,
@@ -212,7 +212,7 @@ func TestLifecycleContractBindsBlockingExitCodesToEvidence(t *testing.T) {
 			}
 
 			_, err := newLifecycleContract(
-				ClaudeCode2_1_210(),
+				ClaudeCode2_1_261(),
 				[]ClaudeLifecycleEvent{ClaudeEventSessionStart},
 				map[ClaudeLifecycleEvent]LifecycleEventMapping{
 					ClaudeEventSessionStart: mapping,
@@ -307,6 +307,9 @@ func TestPinnedProfilesCiteEvidenceForEveryBlockingExitCode(t *testing.T) {
 		"claude:Stop":             claudeHooksReference,
 		"claude:PreToolUse":       claudeHooksReference,
 		"claude:SubagentStop":     claudeHooksReference,
+		// Read from the installed binary's own hook-event table, not from the
+		// hook reference: the reference does not name this event.
+		"claude:PreModelSwitch": claudeInstalledBinaryHookTable2_1_261,
 	}
 	if len(blocking) != len(want) {
 		t.Fatalf("rows claiming a blocking exit code = %v, want exactly %v", blocking, want)

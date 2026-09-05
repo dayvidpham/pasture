@@ -18,7 +18,7 @@ const (
 
 func TestNewEventDerivesEverySemanticArm(t *testing.T) {
 	t.Parallel()
-	contract := runtime.ClaudeCode2_1_210Lifecycle()
+	contract := runtime.ClaudeCode2_1_261Lifecycle()
 	tests := []struct {
 		name           string
 		event          runtime.ClaudeLifecycleEvent
@@ -335,7 +335,7 @@ func TestWaistAccessorsDefensivelyCopySlices(t *testing.T) {
 
 func TestNewEventClaudeCatalogueHasOnlyPostToolBatchUnresolvedFact(t *testing.T) {
 	t.Parallel()
-	contract := runtime.ClaudeCode2_1_210Lifecycle()
+	contract := runtime.ClaudeCode2_1_261Lifecycle()
 	for _, eventKind := range runtime.ClaudeLifecycleEvents() {
 		eventKind := eventKind
 		t.Run(eventKind.NativeName(), func(t *testing.T) {
@@ -401,7 +401,7 @@ func buildIdentities(t *testing.T, specs []identitySpec) []Identity {
 
 func mustBinding(t *testing.T, event runtime.ClaudeLifecycleEvent) EventBinding {
 	t.Helper()
-	binding, err := BindEvent(runtime.ClaudeCode2_1_210Lifecycle(), event)
+	binding, err := BindEvent(runtime.ClaudeCode2_1_261Lifecycle(), event)
 	if err != nil {
 		t.Fatalf("BindEvent() error = %v", err)
 	}

@@ -119,7 +119,7 @@ func TestPersistedCompleteRecordsRoundTripExactly(t *testing.T) {
 	configPath, _ := artifact.NewPath(".claude/settings.json")
 	identity, _ := registry.NewSharedConfigIdentity("pasture-hooks")
 	config, _ := registry.NewSharedConfigOwnership(configPath, identity, artifact.DigestBytes([]byte("entry")))
-	version, _ := registry.NewVersion("claude-code@2.1.210")
+	version, _ := registry.NewVersion("claude-code@2.1.261")
 	selector, _ := registry.NewSelector("pasture-skills@user")
 	globalRecord, err := registry.NewRecord(registry.RecordInput{Key: globalKey, Source: registry.SourceInstaller, Strategy: activation.DirectFileKindValue(), Managed: true, ArtifactID: bundleID, Version: version, Selector: selector, Leaves: []registry.Leaf{leaf}, CreatedDirs: []artifact.Path{dir}, Observation: registry.ObservationInstalled, Trust: registry.TrustPending, LastOperation: registry.OperationEnsure, LastOutcome: registry.OutcomeCompleted, Diagnostic: "global confirmed"})
 	if err != nil {

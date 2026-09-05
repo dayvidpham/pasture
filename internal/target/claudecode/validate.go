@@ -11,7 +11,7 @@ import (
 )
 
 // removedTeamLifecycleCalls are the Claude Code team-lifecycle tools the pinned
-// 2.1.210 profile deliberately never lowers to. They belong to the orchestration
+// 2.1.261 profile deliberately never lowers to. They belong to the orchestration
 // vocabulary — so an agent that grants one is naming a removed native call — but
 // the pinned contract classifies none of the core operations to them.
 var removedTeamLifecycleCalls = []string{"TeamCreate", "TeamDelete"}
@@ -25,7 +25,7 @@ func ReviewedNativeCalls(contract runtime.RuntimeContract) ([]string, error) {
 		return nil, fmt.Errorf(
 			"claudecode.ReviewedNativeCalls: the runtime contract is zero or invalid — " +
 				"the reviewed native vocabulary is read from a contract's bindings; " +
-				"pass a contract built by runtime.ClaudeCode2_1_210 or NewRuntimeContract",
+				"pass a contract built by runtime.ClaudeCode2_1_261 or NewRuntimeContract",
 		)
 	}
 	seen := make(map[string]struct{})
@@ -84,7 +84,7 @@ func ValidateAgentFidelity(d TargetDescriptor) error {
 				"build it with claudecode.Descriptor",
 		)
 	}
-	contract := runtime.ClaudeCode2_1_210()
+	contract := runtime.ClaudeCode2_1_261()
 	reviewed, err := ReviewedNativeCalls(contract)
 	if err != nil {
 		return fmt.Errorf("claudecode.ValidateAgentFidelity: %w", err)

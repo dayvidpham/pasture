@@ -1,6 +1,6 @@
 {
   "harness": "opencode",
-  "contract": "opencode/1.18.10",
+  "contract": "opencode/1.18.29",
   "events": [
     {
       "event": "command.executed",
@@ -31,7 +31,7 @@
       "failureEvidence": ""
     },
     {
-      "event": "installation.update_available",
+      "event": "installation.update-available",
       "state": "withheld",
       "reason": "outside-target-set",
       "responseCapability": "unset",
@@ -110,7 +110,7 @@
     {
       "event": "session.created",
       "state": "enabled",
-      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/session_created_1_18_10.capture.json (OpenCode 1.18.10 authentic callback-object capture)",
+      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/session_created_1_18_29.json (OpenCode 1.18.29 authentic callback-object capture)",
       "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCodeHandlersToDurableReadBack/session.created",
       "responseCapability": "unset",
       "failureEvidence": ""
@@ -265,7 +265,7 @@
     {
       "event": "tool.execute.before",
       "state": "enabled",
-      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/tool_execute_before_1_18_10.capture.json (OpenCode 1.18.10 authentic callback-object capture)",
+      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/tool_execute_before_1_18_29.json (OpenCode 1.18.29 authentic callback-object capture)",
       "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCodeHandlersToDurableReadBack/tool.execute.before",
       "responseCapability": "unset",
       "failureEvidence": "unset"

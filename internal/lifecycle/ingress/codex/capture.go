@@ -1,5 +1,5 @@
 // Package codex captures exact command-hook stdin bytes from the pinned Codex
-// 0.146.0 CLI lifecycle contract. Unlike the OpenCode ingress, the captured
+// CLI lifecycle contract at the recorded version. Unlike the OpenCode ingress, the captured
 // bytes ARE the native command-hook stdin payload; there is no in-process
 // callback object and no nested record envelope to unwrap.
 package codex
@@ -33,7 +33,7 @@ type Capture struct {
 // unflattened in the body.
 func Parse(raw []byte, event registration.Event, observedVersion string, envelope model.OccurrenceEnvelopeRef) Capture {
 	validation := ingress.Validate(raw)
-	manifest := registration.Codex0_146_0()
+	manifest := registration.Codex0_153_0()
 	envelope.Runtime.Contract = manifest.Contract
 	envelope.HostVersion = observedVersion
 	result := Capture{Digest: validation.Digest, Disposition: validation.Disposition}

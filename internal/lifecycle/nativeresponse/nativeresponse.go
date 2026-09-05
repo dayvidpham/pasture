@@ -21,9 +21,9 @@
 //     final native bytes here rather than delegating encoding to a shell or
 //     Python shim.
 //
-// # Derivation of the exact Codex 0.146.0 native shapes
+// # Derivation of the exact Codex 0.153.0 native shapes
 //
-// The two Codex shapes are derived from the pinned Codex 0.146.0 command-hook
+// The two Codex shapes are derived from the pinned Codex 0.153.0 command-hook
 // output contract (inspected source revision
 // d6407d735942c7cfc996aa2bc7d0f97fc8f0e4bf):
 //

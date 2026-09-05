@@ -13,10 +13,10 @@ import (
 )
 
 func TestReviewedNativeCallsDerivedFromContract(t *testing.T) {
-	calls, err := claudecode.ReviewedNativeCalls(runtime.ClaudeCode2_1_210())
+	calls, err := claudecode.ReviewedNativeCalls(runtime.ClaudeCode2_1_261())
 	require.NoError(t, err)
 
-	// The pinned 2.1.210 profile lowers core operations to exactly these native
+	// The pinned 2.1.261 profile lowers core operations to exactly these native
 	// calls; CollectAssignmentResults is parent-mediated and contributes none.
 	assert.ElementsMatch(t,
 		[]string{"Agent", "AskUserQuestion", "SendMessage", "Skill", "TaskStop"},
@@ -55,7 +55,7 @@ func TestValidateAgentFidelityRejectsRemovedTeamLifecycleGrant(t *testing.T) {
 	agentsComponent, err := claudecode.NewComponent(agentsID, forgedAgents, false)
 	require.NoError(t, err)
 
-	contract := runtime.ClaudeCode2_1_210().ID()
+	contract := runtime.ClaudeCode2_1_261().ID()
 	forged, err := claudecode.NewTargetDescriptor(contract, d.Skills(), agentsComponent, d.Hooks())
 	require.NoError(t, err)
 

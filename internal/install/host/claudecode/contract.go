@@ -22,13 +22,14 @@ const (
 	LegacyVersion   = "0.0.4"
 )
 
-// Contract is the complete static Claude activation contract. Its range is the
-// same reviewed >=2.1.210,<2.2.0 range as the target runtime contract.
+// Contract is the complete static Claude activation contract. Its admission is
+// the target runtime contract's own: a floor at the recorded Claude Code
+// version, read from that contract and never restated here.
 func Contract(descriptor target.TargetDescriptor) (activation.ActivationContract, error) {
 	if !descriptor.IsValid() || descriptor.Harness() != ir.HarnessClaudeCode {
 		return activation.ActivationContract{}, fault("Claude activation contract construction", "valid Claude target descriptor", "the target descriptor is zero, invalid, or belongs to another harness", "Contract", "binding immutable Claude components", "the installer cannot prove which artifacts it would activate", "pass claudecode.Descriptor() from the target package", nil)
 	}
-	runtimeContract := runtime.ClaudeCode2_1_210()
+	runtimeContract := runtime.ClaudeCode2_1_261()
 	if descriptor.RuntimeContractID() != runtimeContract.ID() {
 		return activation.ActivationContract{}, fault("Claude activation contract construction", "matching reviewed runtime identity", fmt.Sprintf("target runtime %s differs from reviewed runtime %s", descriptor.RuntimeContractID(), runtimeContract.ID()), "Contract", "binding host compatibility", "manager behavior could be applied outside the artifact's reviewed contract", "rebuild the target and activation contract from the same release", nil)
 	}
@@ -45,7 +46,10 @@ func Contract(descriptor target.TargetDescriptor) (activation.ActivationContract
 	if err != nil {
 		return activation.ActivationContract{}, err
 	}
-	id, err := activation.NewActivationContractID("claude-code/native-plugins@2.1")
+	// The native-plugin activation id names the MAJOR.MINOR family of the
+	// recorded Claude Code version, read from the runtime contract.
+	major, minor, _ := runtimeContract.Versions().Min().Release()
+	id, err := activation.NewActivationContractID(fmt.Sprintf("claude-code/native-plugins@%d.%d", major, minor))
 	if err != nil {
 		return activation.ActivationContract{}, err
 	}

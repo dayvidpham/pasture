@@ -12,6 +12,15 @@ import (
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
+// ClaudeHooksConfigPath and ClaudeActivationReportPath are the two files the
+// Claude Code lifecycle emitter writes, relative to the repository root. They
+// live beside hand-authored hook payload files, so a guard that reads the
+// emitted set finds them here rather than by listing the directory.
+const (
+	ClaudeHooksConfigPath      = "hooks/hooks.json"
+	ClaudeActivationReportPath = "hooks/pasture-activation.json"
+)
+
 // adapterBinaryEnv is the environment variable a generated lifecycle transport
 // reads to override the Pasture executable it invokes (default: PATH lookup of
 // `pasture`). It is consumed by the Codex exec-only runner and the OpenCode
@@ -106,8 +115,8 @@ func sortedUniqueStrings(values []string) []string {
 }
 
 func claudeNativeFields(event string) []string {
-	manifest := registration.ClaudeCode2_1_210()
-	fieldNames := registration.ClaudeCode2_1_210NativeFieldNames()
+	manifest := registration.ClaudeCode2_1_261()
+	fieldNames := registration.ClaudeCode2_1_261NativeFieldNames()
 	for _, candidate := range manifest.Events {
 		if candidate.NativeName != event {
 			continue
@@ -140,8 +149,8 @@ type claudeHooksConfig struct {
 }
 
 func (claudeHooksEmitter) Emit(root string, opts GenerateOptions) ([]GeneratedFile, error) {
-	manifest := registration.ClaudeCode2_1_210()
-	states, err := activation.ClaudeCode2_1_210()
+	manifest := registration.ClaudeCode2_1_261()
+	states, err := activation.ClaudeCode2_1_261()
 	if err != nil {
 		return nil, fmt.Errorf("codegen.claudeHooksEmitter.Emit: build activation manifest: %w", err)
 	}
@@ -211,8 +220,8 @@ func emitClaudeHooks(root string, opts GenerateOptions, manifest registration.Ma
 		path    string
 		content string
 	}{
-		{path: filepath.Join(root, "hooks", "hooks.json"), content: string(configJSON)},
-		{path: filepath.Join(root, "hooks", "pasture-activation.json"), content: string(supportJSON)},
+		{path: filepath.Join(root, filepath.FromSlash(ClaudeHooksConfigPath)), content: string(configJSON)},
+		{path: filepath.Join(root, filepath.FromSlash(ClaudeActivationReportPath)), content: string(supportJSON)},
 	}
 	files := make([]GeneratedFile, 0, len(outputs))
 	for _, output := range outputs {

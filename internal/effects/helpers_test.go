@@ -202,7 +202,7 @@ func mustRenderedTree(t testing.TB, outputPath, content string) ir.RenderedTree 
 	require.NoError(t, err)
 	document, err := ir.NewDocument(markdown)
 	require.NoError(t, err)
-	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "2.1.210")
+	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "2.1.261")
 	require.NoError(t, err)
 	target, err := ir.NewTarget(ir.HarnessClaudeCode, contract, outputPath, nil)
 	require.NoError(t, err)

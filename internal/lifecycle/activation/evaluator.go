@@ -26,13 +26,15 @@ import (
 // refused by name, never evaluated against the wrong contract. The zero value
 // is invalid and evaluates nothing.
 //
-// VERSION ADMISSION follows each harness's declared contract, and the shape
-// differs per harness: Claude Code admits a RANGE of host versions (the pinned
-// contract is a range contract, so a patch release inside it is admitted),
-// while Codex and OpenCode admit EXACTLY their pinned version. The admission
+// VERSION ADMISSION follows each harness's declared contract, and every
+// harness declares the same shape: a FLOOR at the recorded host version, so
+// that version and every later release is admitted and a host below it is
+// refused (runtime.VersionConstraint, built by NewVersionFloor). The admission
 // is judged here, on a fixture whose sidecar records the host version as a
 // fact, and nowhere on the live hook path, where a host may pass no usable
-// version at all.
+// version at all. The sentence a withheld fixture carries spells the admitted
+// versions through the contract's own renderer (VersionConstraint.Describe),
+// so it follows the contract when the contract moves.
 type Evaluator struct {
 	harness     acceptance.HarnessKind
 	contract    ir.RuntimeContractID
@@ -56,34 +58,19 @@ func newEvaluator[E comparable](harness acceptance.HarnessKind, contract runtime
 // Admission returns the host-version constraint the evaluator admits.
 func (e Evaluator) Admission() runtime.VersionConstraint { return e.admission }
 
-// AdmitsExactly reports whether the admission is one exact host version (Codex,
-// OpenCode) rather than a range (Claude Code).
-func (e Evaluator) AdmitsExactly() bool {
-	return runtime.ComparePrecedence(e.admission.Min(), e.admission.Max()) == 0
-}
-
-// describeAdmission spells a constraint for a reader: "exactly X" for a pinned
-// point, "from X through Y" for a range.
-func describeAdmission(c runtime.VersionConstraint) string {
-	if runtime.ComparePrecedence(c.Min(), c.Max()) == 0 {
-		return fmt.Sprintf("exactly %s", c.Min())
-	}
-	return fmt.Sprintf("from %s through %s", c.Min(), c.Max())
-}
-
 // ClaudeCodeEvaluator evaluates against the pinned Claude Code contract.
 func ClaudeCodeEvaluator() Evaluator {
-	return newEvaluator(acceptance.HarnessClaudeCode, runtime.ClaudeCode2_1_210Lifecycle(), registration.ClaudeCode2_1_210(), claudeTargetEventDeclarations[:])
+	return newEvaluator(acceptance.HarnessClaudeCode, runtime.ClaudeCode2_1_261Lifecycle(), registration.ClaudeCode2_1_261(), claudeTargetEventDeclarations[:])
 }
 
 // CodexEvaluator evaluates against the pinned Codex contract.
 func CodexEvaluator() Evaluator {
-	return newEvaluator(acceptance.HarnessCodexCLI, runtime.Codex0_146_0Lifecycle(), registration.Codex0_146_0(), codexTargetEventDeclarations[:])
+	return newEvaluator(acceptance.HarnessCodexCLI, runtime.Codex0_153_0Lifecycle(), registration.Codex0_153_0(), codexTargetEventDeclarations[:])
 }
 
 // OpenCodeEvaluator evaluates against the pinned OpenCode contract.
 func OpenCodeEvaluator() Evaluator {
-	return newEvaluator(acceptance.HarnessOpenCode, runtime.OpenCode1_18_10Lifecycle(), registration.OpenCode1_18_10(), openCodeTargetEventDeclarations[:])
+	return newEvaluator(acceptance.HarnessOpenCode, runtime.OpenCode1_18_29Lifecycle(), registration.OpenCode1_18_29(), openCodeTargetEventDeclarations[:])
 }
 
 // EvaluatorFor selects the evaluator of one harness. The set is closed: a
@@ -193,7 +180,7 @@ func (e Evaluator) Evaluate(root string, c Case) (Evaluation, error) {
 	}
 	if !e.admission.Allows(version) {
 		return withheldEvaluationWithDetail(c.name, CorpusReasonVersionOutOfRange,
-			fmt.Sprintf("observed host version %q is outside the admitted %s versions, %s", p.HarnessVersion, e.harness, describeAdmission(e.admission))), nil
+			fmt.Sprintf("observed host version %q is outside the admitted %s versions, %s", p.HarnessVersion, e.harness, e.admission.Describe())), nil
 	}
 	var event model.ContractEventKind
 	found := false

@@ -32,15 +32,15 @@ type harnessParser struct {
 
 func harnessParsers() []harnessParser {
 	return []harnessParser{
-		{registration.ClaudeCode2_1_210(), func(raw []byte, event registration.Event, version string, envelope model.OccurrenceEnvelopeRef) (model.CaptureDisposition, []model.NativeBinding, []byte, digest.Digest) {
+		{registration.ClaudeCode2_1_261(), func(raw []byte, event registration.Event, version string, envelope model.OccurrenceEnvelopeRef) (model.CaptureDisposition, []model.NativeBinding, []byte, digest.Digest) {
 			capture := claude.Parse(raw, event, version, envelope)
 			return capture.Disposition, capture.Delivery.Bindings, capture.Delivery.Body, capture.Digest
 		}},
-		{registration.Codex0_146_0(), func(raw []byte, event registration.Event, version string, envelope model.OccurrenceEnvelopeRef) (model.CaptureDisposition, []model.NativeBinding, []byte, digest.Digest) {
+		{registration.Codex0_153_0(), func(raw []byte, event registration.Event, version string, envelope model.OccurrenceEnvelopeRef) (model.CaptureDisposition, []model.NativeBinding, []byte, digest.Digest) {
 			capture := codex.Parse(raw, event, version, envelope)
 			return capture.Disposition, capture.Delivery.Bindings, capture.Delivery.Body, capture.Digest
 		}},
-		{registration.OpenCode1_18_10(), func(raw []byte, event registration.Event, version string, envelope model.OccurrenceEnvelopeRef) (model.CaptureDisposition, []model.NativeBinding, []byte, digest.Digest) {
+		{registration.OpenCode1_18_29(), func(raw []byte, event registration.Event, version string, envelope model.OccurrenceEnvelopeRef) (model.CaptureDisposition, []model.NativeBinding, []byte, digest.Digest) {
 			capture := opencode.Parse(raw, event, version, envelope)
 			return capture.Disposition, capture.Delivery.Bindings, capture.Delivery.Body, capture.Digest
 		}},
@@ -135,6 +135,30 @@ func TestEventByNativeNameRefusesAnUnknownNameNamingHarnessAndName(t *testing.T)
 				assert.Contains(t, err.Error(), "the "+string(manifest.Harness)+" registration")
 				assert.Contains(t, err.Error(), "nothing was read or recorded")
 			}
+			// A name another harness declares is not this harness's name: every
+			// foreign name this manifest does not also declare is refused, and
+			// at least one such name exists for every other harness.
+			declared := make(map[string]struct{}, len(manifest.Events))
+			for _, event := range manifest.Events {
+				declared[event.NativeName] = struct{}{}
+			}
+			foreign := 0
+			for _, other := range harnessParsers() {
+				if other.manifest.Harness == manifest.Harness {
+					continue
+				}
+				for _, event := range other.manifest.Events {
+					if _, shared := declared[event.NativeName]; shared {
+						continue
+					}
+					foreign++
+					got, err := ingress.EventByNativeName(manifest, event.NativeName)
+					require.Error(t, err, "%s name %q offered to the %s lookup must be refused", other.manifest.Harness, event.NativeName, manifest.Harness)
+					assert.Zero(t, got.Kind)
+					assert.Contains(t, err.Error(), "the "+string(manifest.Harness)+" registration")
+				}
+			}
+			require.Positive(t, foreign, "some other harness declares at least one name %s does not", manifest.Harness)
 		})
 	}
 }
@@ -196,9 +220,9 @@ func TestAnIdentityPolicyNoneEventLandsWithoutIdentitiesOrUnresolvedReason(t *te
 	t.Parallel()
 	var rows []noIdentityRow
 	declared := 0
-	collectNoIdentityRows(t, runtime.ClaudeCode2_1_210Lifecycle(), &rows, &declared)
-	collectNoIdentityRows(t, runtime.Codex0_146_0Lifecycle(), &rows, &declared)
-	collectNoIdentityRows(t, runtime.OpenCode1_18_10Lifecycle(), &rows, &declared)
+	collectNoIdentityRows(t, runtime.ClaudeCode2_1_261Lifecycle(), &rows, &declared)
+	collectNoIdentityRows(t, runtime.Codex0_153_0Lifecycle(), &rows, &declared)
+	collectNoIdentityRows(t, runtime.OpenCode1_18_29Lifecycle(), &rows, &declared)
 	require.NotEmpty(t, rows, "no pinned profile row declares zero identities, so this test would check nothing")
 	require.Positive(t, declared, "no pinned profile row declares an identity, so the label has one value only")
 

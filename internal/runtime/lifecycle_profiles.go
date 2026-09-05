@@ -69,17 +69,17 @@ func (m LifecycleEventMapping) IdentityPolicy() IdentityPolicy {
 // writes anything, so it calls this instead and prints the six-part diagnostic.
 func ValidatePinnedLifecycleProfiles() error {
 	if _, err := newLifecycleContract(
-		ClaudeCode2_1_210(), ClaudeLifecycleEvents(), claudeLifecycleMappings(),
+		ClaudeCode2_1_261(), ClaudeLifecycleEvents(), claudeLifecycleMappings(),
 	); err != nil {
 		return err
 	}
 	if _, err := newLifecycleContract(
-		Codex0_146_0(), CodexLifecycleEvents(), codexLifecycleMappings(),
+		Codex0_153_0(), CodexLifecycleEvents(), codexLifecycleMappings(),
 	); err != nil {
 		return err
 	}
 	if _, err := newLifecycleContract(
-		OpenCode1_18_10(), OpenCodeLifecycleEvents(), openCodeLifecycleMappings(),
+		OpenCode1_18_29(), OpenCodeLifecycleEvents(), openCodeLifecycleMappings(),
 	); err != nil {
 		return err
 	}
@@ -137,11 +137,11 @@ func (p LifecycleFailurePolicy) Declared() bool { return p.Semantic.IsValid() }
 func LookupLifecycleFailure(harness ir.HarnessID, nativeName string) (LifecycleFailurePolicy, bool) {
 	switch harness {
 	case ir.HarnessClaudeCode:
-		return lookupLifecycleFailure(ClaudeCode2_1_210Lifecycle(), ClaudeLifecycleEvents(), nativeName)
+		return lookupLifecycleFailure(ClaudeCode2_1_261Lifecycle(), ClaudeLifecycleEvents(), nativeName)
 	case ir.HarnessCodex:
-		return lookupLifecycleFailure(Codex0_146_0Lifecycle(), CodexLifecycleEvents(), nativeName)
+		return lookupLifecycleFailure(Codex0_153_0Lifecycle(), CodexLifecycleEvents(), nativeName)
 	case ir.HarnessOpenCode:
-		return lookupLifecycleFailure(OpenCode1_18_10Lifecycle(), OpenCodeLifecycleEvents(), nativeName)
+		return lookupLifecycleFailure(OpenCode1_18_29Lifecycle(), OpenCodeLifecycleEvents(), nativeName)
 	default:
 		return LifecycleFailurePolicy{}, false
 	}

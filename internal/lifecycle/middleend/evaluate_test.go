@@ -98,7 +98,7 @@ func TestZeroDerivationIsInvalid(t *testing.T) {
 
 func realL2(t *testing.T, event runtime.ClaudeLifecycleEvent) waist.L2 {
 	t.Helper()
-	binding, err := waist.BindEvent(runtime.ClaudeCode2_1_210Lifecycle(), event)
+	binding, err := waist.BindEvent(runtime.ClaudeCode2_1_261Lifecycle(), event)
 	if err != nil {
 		t.Fatalf("BindEvent() error = %v", err)
 	}

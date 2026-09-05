@@ -35,11 +35,14 @@ func init() {
 		{Key{Harness: ir.HarnessClaudeCode, Kind: KindLifecycleEvent, ID: "MessageDisplay"}},
 		{Key{Harness: ir.HarnessClaudeCode, Kind: KindLifecycleEvent, ID: "Elicitation"}},
 		{Key{Harness: ir.HarnessClaudeCode, Kind: KindLifecycleEvent, ID: "ElicitationResult"}},
+		{Key{Harness: ir.HarnessClaudeCode, Kind: KindLifecycleEvent, ID: "PreModelSwitch"}},
+		{Key{Harness: ir.HarnessClaudeCode, Kind: KindLifecycleEvent, ID: "PostModelSwitch"}},
+		{Key{Harness: ir.HarnessClaudeCode, Kind: KindLifecycleEvent, ID: "DirectoryAdded"}},
 		{Key{Harness: ir.HarnessOpenCode, Kind: KindLifecycleEvent, ID: "command.executed"}},
 		{Key{Harness: ir.HarnessOpenCode, Kind: KindLifecycleEvent, ID: "file.edited"}},
 		{Key{Harness: ir.HarnessOpenCode, Kind: KindLifecycleEvent, ID: "file.watcher.updated"}},
 		{Key{Harness: ir.HarnessOpenCode, Kind: KindLifecycleEvent, ID: "installation.updated"}},
-		{Key{Harness: ir.HarnessOpenCode, Kind: KindLifecycleEvent, ID: "installation.update_available"}},
+		{Key{Harness: ir.HarnessOpenCode, Kind: KindLifecycleEvent, ID: "installation.update-available"}},
 		{Key{Harness: ir.HarnessOpenCode, Kind: KindLifecycleEvent, ID: "lsp.client.diagnostics"}},
 		{Key{Harness: ir.HarnessOpenCode, Kind: KindLifecycleEvent, ID: "lsp.updated"}},
 		{Key{Harness: ir.HarnessOpenCode, Kind: KindLifecycleEvent, ID: "message.updated"}},
@@ -92,5 +95,7 @@ func init() {
 		{Key{Harness: ir.HarnessCodex, Kind: KindLifecycleEvent, ID: "SubagentStart"}},
 		{Key{Harness: ir.HarnessCodex, Kind: KindLifecycleEvent, ID: "SubagentStop"}},
 		{Key{Harness: ir.HarnessCodex, Kind: KindLifecycleEvent, ID: "Stop"}},
+		{Key{Harness: ir.HarnessCodex, Kind: KindLifecycleEvent, ID: "SessionEnd"}},
+		{Key{Harness: ir.HarnessCodex, Kind: KindLifecycleEvent, ID: "Interrupt"}},
 	}
 }

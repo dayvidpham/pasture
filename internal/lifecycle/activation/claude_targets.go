@@ -17,14 +17,14 @@ import (
 // fixture that proves a reviewed native capture exists for the pinned
 // contract. The arm becomes the constant CaptureProof<arm>.
 var claudeCaptureProofs = [...]captureProofDeclaration{
-	{ordinal: 1, arm: "SessionStart", event: registration.EventSessionStart, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/session_start_2_1_222.json (Claude Code 2.1.222 authentic capture)"},
-	{ordinal: 2, arm: "SessionEnd", event: registration.EventSessionEnd, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/session_end_2_1_222.json (Claude Code 2.1.222 authentic capture)"},
-	{ordinal: 3, arm: "PreToolUse", event: registration.EventPreToolUse, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/pre_tool_use_2_1_222.json (Claude Code 2.1.222 authentic capture)"},
-	{ordinal: 4, arm: "PostToolUse", event: registration.EventPostToolUse, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_use_2_1_222.json (Claude Code 2.1.222 authentic capture)"},
-	{ordinal: 5, arm: "PostToolUseFailure", event: registration.EventPostToolUseFailure, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_use_failure_2_1_222.json (Claude Code 2.1.222 authentic capture)"},
-	{ordinal: 6, arm: "PostToolBatch", event: registration.EventPostToolBatch, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_batch_2_1_222.json (Claude Code 2.1.222 authentic capture)"},
-	{ordinal: 7, arm: "PreCompact", event: registration.EventPreCompact, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/pre_compact_2_1_222.json (Claude Code 2.1.222 authentic capture)"},
-	{ordinal: 8, arm: "PostCompact", event: registration.EventPostCompact, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/post_compact_2_1_222.json (Claude Code 2.1.222 authentic capture)"},
+	{ordinal: 1, arm: "SessionStart", event: registration.EventSessionStart, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/session_start_2_1_261.json (Claude Code 2.1.261 authentic capture)"},
+	{ordinal: 2, arm: "SessionEnd", event: registration.EventSessionEnd, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/session_end_2_1_261.json (Claude Code 2.1.261 authentic capture)"},
+	{ordinal: 3, arm: "PreToolUse", event: registration.EventPreToolUse, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/pre_tool_use_2_1_261.json (Claude Code 2.1.261 authentic capture)"},
+	{ordinal: 4, arm: "PostToolUse", event: registration.EventPostToolUse, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_use_2_1_261.json (Claude Code 2.1.261 authentic capture)"},
+	{ordinal: 5, arm: "PostToolUseFailure", event: registration.EventPostToolUseFailure, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_use_failure_2_1_261.json (Claude Code 2.1.261 authentic capture)"},
+	{ordinal: 6, arm: "PostToolBatch", event: registration.EventPostToolBatch, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_batch_2_1_261.json (Claude Code 2.1.261 authentic capture)"},
+	{ordinal: 7, arm: "PreCompact", event: registration.EventPreCompact, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/pre_compact_2_1_261.json (Claude Code 2.1.261 authentic capture)"},
+	{ordinal: 8, arm: "PostCompact", event: registration.EventPostCompact, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/post_compact_2_1_261.json (Claude Code 2.1.261 authentic capture)"},
 }
 
 // claudeProductionProofs declares every Claude Code production proof: the
@@ -55,15 +55,15 @@ var claudeTargetEventDeclarations = [...]targetEventDeclaration{
 	{event: registration.EventElicitationResult, withheldReason: WithheldMissingRequestCorrelation},
 }
 
-// ClaudeCode2_1_210TargetEvents returns the typed target subset in declaration
+// ClaudeCode2_1_261TargetEvents returns the typed target subset in declaration
 // order. The returned slice is independent of the static declaration table.
-func ClaudeCode2_1_210TargetEvents() []model.ContractEventKind {
+func ClaudeCode2_1_261TargetEvents() []model.ContractEventKind {
 	return targetEvents(claudeTargetEventDeclarations[:])
 }
 
-// ClaudeCode2_1_210 returns a fresh exhaustive activation manifest. The
+// ClaudeCode2_1_261 returns a fresh exhaustive activation manifest. The
 // manifest is derived only from the generated registration manifest and the
 // static typed target declaration table; it performs no filesystem access.
-func ClaudeCode2_1_210() ([]Entry, error) {
-	return deriveManifest("activation.ClaudeCode2_1_210", registration.ClaudeCode2_1_210().Entries(), claudeTargetEventDeclarations[:])
+func ClaudeCode2_1_261() ([]Entry, error) {
+	return deriveManifest("activation.ClaudeCode2_1_261", registration.ClaudeCode2_1_261().Entries(), claudeTargetEventDeclarations[:])
 }

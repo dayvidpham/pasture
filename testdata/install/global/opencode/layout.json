@@ -1,5 +1,4 @@
 {
-  "activation_contract": "opencode/activation@1.18.10",
   "version_probe": ["opencode", "--version"],
   "skills_root": "skills",
   "agents_root": "agent",

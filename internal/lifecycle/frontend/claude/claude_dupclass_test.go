@@ -2,6 +2,7 @@ package claude_test
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -65,9 +66,9 @@ func TestClaudeDuplicateClassControl(t *testing.T) {
 		},
 		{
 			name:     "unknown ordinal (pre-loop site shares the unified Where)",
-			kind:     model.ContractEventKind(31),
+			kind:     registration.EventOpenCodeCommandExecuted, // declared by another harness, never by Claude
 			bindings: nil,
-			wantWhat: "Claude lifecycle event ordinal 31 is not declared.",
+			wantWhat: fmt.Sprintf("Claude lifecycle event ordinal %d is not declared.", registration.EventOpenCodeCommandExecuted),
 		},
 	}
 

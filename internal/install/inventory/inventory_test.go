@@ -27,7 +27,7 @@ func TestViewMutatesCallerOwnedStoreAndPreservesProjects(t *testing.T) {
 	}
 
 	bundleID, _ := artifact.ParseBundleID("artifact.bundle.v1:sha256:" + strings.Repeat("a", 64))
-	version, _ := inventory.NewVersion("claude-code@2.1.210")
+	version, _ := inventory.NewVersion("claude-code@2.1.261")
 	selector, _ := inventory.NewSelector("pasture-skills@user")
 	global, err := inventory.NewRecord(inventory.RecordInput{Cell: c, Source: inventory.InstallerSource(), Strategy: activation.NativePluginKindValue(), Managed: true, ArtifactID: bundleID, Version: version, Selector: selector, Observation: inventory.Installed(), Trust: inventory.TrustNotApplicable(), LastOperation: inventory.OperationEnsure, LastOutcome: inventory.OutcomeCompleted})
 	if err != nil {

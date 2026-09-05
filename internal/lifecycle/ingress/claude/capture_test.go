@@ -8,24 +8,40 @@ import (
 	digest "github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/internal/acceptance"
 	"github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 )
 
-const authenticFixtureDigest = "sha256:30d524e5d2cb22d486faad05adbaa1a4b7e0d72cd6301f38fe18ca5e3f167003"
+// authenticSessionStart reads the committed SessionStart fixture with its
+// sidecar; the digest and the session id come from the corpus, never a literal.
+func authenticSessionStart(t *testing.T) (raw []byte, sidecar acceptance.CaptureProvenance, sessionID string) {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/fixtures/session_start_2_1_261.json")
+	require.NoError(t, err)
+	sidecarBytes, err := os.ReadFile("testdata/fixtures/session_start_2_1_261.provenance.json")
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(sidecarBytes, &sidecar))
+	var payload struct {
+		SessionID string `json:"session_id"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &payload))
+	require.NotEmpty(t, payload.SessionID)
+	return raw, sidecar, payload.SessionID
+}
 
 func TestAuthenticSessionStartCapturePreservesExactBytes(t *testing.T) {
 	t.Parallel()
-	raw, err := os.ReadFile("testdata/fixtures/session_start_2_1_210.json")
-	require.NoError(t, err)
-	event := registration.ClaudeCode2_1_210().Events[0]
-	capture := claude.Parse(raw, event, "2.1.220", model.OccurrenceEnvelopeRef{})
+	raw, sidecar, sessionID := authenticSessionStart(t)
+	manifest := registration.ClaudeCode2_1_261()
+	event := manifest.Events[0]
+	capture := claude.Parse(raw, event, manifest.Version, model.OccurrenceEnvelopeRef{})
 	require.Equal(t, model.CaptureValid, capture.Disposition)
-	require.Equal(t, authenticFixtureDigest, digest.FromBytes(raw).String())
+	require.Equal(t, sidecar.RawFileDigest, digest.FromBytes(raw).String(), "the committed bytes are the cleared bytes the sidecar records")
 	require.Equal(t, digest.FromBytes(raw), capture.Digest)
 	require.Equal(t, raw, capture.Delivery.Body)
-	require.Equal(t, "2.1.220", capture.Delivery.Envelope.HostVersion)
+	require.Equal(t, manifest.Version, capture.Delivery.Envelope.HostVersion)
 	wire, err := json.Marshal(capture.Delivery.Envelope)
 	require.NoError(t, err)
 	var roundTrip model.OccurrenceEnvelopeRef
@@ -33,14 +49,14 @@ func TestAuthenticSessionStartCapturePreservesExactBytes(t *testing.T) {
 	require.True(t, roundTrip.Runtime.Contract.IsValid())
 	require.Len(t, capture.Delivery.Bindings, 1)
 	require.Equal(t, "session_id", capture.Delivery.Bindings[0].NativeName)
-	require.Equal(t, "b3cfe877-feb4-4ba3-9500-414c8bfb51c4", capture.Delivery.Bindings[0].Value)
+	require.Equal(t, sessionID, capture.Delivery.Bindings[0].Value)
 	raw[0] = '!'
 	require.Equal(t, byte('{'), capture.Delivery.Body[0], "delivery owns a defensive byte copy")
 }
 
 func TestCaptureClassifiesBeforeExtraction(t *testing.T) {
 	t.Parallel()
-	event := registration.ClaudeCode2_1_210().Events[0]
+	event := registration.ClaudeCode2_1_261().Events[0]
 	tests := []struct {
 		name string
 		raw  []byte
@@ -69,7 +85,7 @@ func TestCaptureClassifiesBeforeExtraction(t *testing.T) {
 func TestCaptureDropsBindingsWhenLaterRequiredIdentityFails(t *testing.T) {
 	t.Parallel()
 	var event registration.Event
-	for _, candidate := range registration.ClaudeCode2_1_210().Events {
+	for _, candidate := range registration.ClaudeCode2_1_261().Events {
 		if candidate.Kind == registration.EventPreToolUse {
 			event = candidate
 			break

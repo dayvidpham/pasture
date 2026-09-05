@@ -27,10 +27,10 @@ func TestEnabledHarnessIDsIsDefensiveAndExact(t *testing.T) {
 func TestRuntimeContractIDIsOpaqueAndHarnessBound(t *testing.T) {
 	t.Parallel()
 
-	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "2.1.210")
+	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, productionVersion(t, ir.HarnessClaudeCode))
 	require.NoError(t, err)
 	assert.Equal(t, ir.HarnessClaudeCode, contract.Harness())
-	assert.Equal(t, "claude-code/2.1.210", contract.String())
+	assert.Equal(t, "claude-code/"+productionVersion(t, ir.HarnessClaudeCode), contract.String())
 	assert.True(t, contract.IsValid())
 	assert.False(t, (ir.RuntimeContractID{}).IsValid(), "the zero value must not be a valid contract")
 
@@ -64,13 +64,13 @@ func TestRuntimeContractIDConstructorRejectsInvalidValues(t *testing.T) {
 
 	t.Run("padded name", func(t *testing.T) {
 		t.Parallel()
-		_, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, " 2.1.210 ")
+		_, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, " "+productionVersion(t, ir.HarnessClaudeCode)+" ")
 		require.Error(t, err)
 	})
 
 	t.Run("control character in name", func(t *testing.T) {
 		t.Parallel()
-		_, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "2.1.210\n")
+		_, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, productionVersion(t, ir.HarnessClaudeCode)+"\n")
 		require.Error(t, err)
 	})
 
@@ -97,11 +97,11 @@ func TestRuntimeContractIDConstructorRejectsInvalidValues(t *testing.T) {
 func TestRuntimeContractIDJSONRoundTripAndForgedValues(t *testing.T) {
 	t.Parallel()
 
-	contract, err := ir.NewRuntimeContractID(ir.HarnessCodex, "0.146.0")
+	contract, err := ir.NewRuntimeContractID(ir.HarnessCodex, productionVersion(t, ir.HarnessCodex))
 	require.NoError(t, err)
 	encoded, err := json.Marshal(contract)
 	require.NoError(t, err)
-	assert.JSONEq(t, `"codex/0.146.0"`, string(encoded))
+	assert.JSONEq(t, `"codex/`+productionVersion(t, ir.HarnessCodex)+`"`, string(encoded))
 
 	var decoded ir.RuntimeContractID
 	require.NoError(t, json.Unmarshal(encoded, &decoded))

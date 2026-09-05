@@ -17,8 +17,8 @@ import (
 
 func TestClaudeHooksFailClosedOnActivationMismatch(t *testing.T) {
 	t.Parallel()
-	manifest := registration.ClaudeCode2_1_210()
-	states, err := activation.ClaudeCode2_1_210()
+	manifest := registration.ClaudeCode2_1_261()
+	states, err := activation.ClaudeCode2_1_261()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,8 +62,8 @@ func TestClaudeHooksFailClosedOnActivationMismatch(t *testing.T) {
 
 func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 	t.Parallel()
-	manifest := registration.ClaudeCode2_1_210()
-	states, err := activation.ClaudeCode2_1_210()
+	manifest := registration.ClaudeCode2_1_261()
+	states, err := activation.ClaudeCode2_1_261()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,21 +86,21 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 	if err := json.Unmarshal([]byte(support), &report); err != nil {
 		t.Fatal(err)
 	}
-	if len(report.Events) != 30 {
-		t.Fatalf("support entries=%d, want 30", len(report.Events))
+	if want := len(registration.ClaudeCode2_1_261().Entries()); len(report.Events) != want {
+		t.Fatalf("support entries=%d, want %d (one per registered Claude event)", len(report.Events), want)
 	}
 	expected := []struct{ event, state, reason string }{
-		{"SessionStart", "enabled", ""}, {"Setup", "withheld", "outside-target-set"}, {"SessionEnd", "enabled", ""}, {"UserPromptSubmit", "withheld", "outside-target-set"}, {"UserPromptExpansion", "withheld", "outside-target-set"}, {"Stop", "withheld", "outside-target-set"}, {"StopFailure", "withheld", "outside-target-set"}, {"PreToolUse", "enabled", ""}, {"PermissionRequest", "withheld", "outside-target-set"}, {"PermissionDenied", "withheld", "outside-target-set"}, {"PostToolUse", "enabled", ""}, {"PostToolUseFailure", "enabled", ""}, {"PostToolBatch", "enabled", ""}, {"FileChanged", "withheld", "outside-target-set"}, {"CwdChanged", "withheld", "outside-target-set"}, {"ConfigChange", "withheld", "outside-target-set"}, {"InstructionsLoaded", "withheld", "outside-target-set"}, {"WorktreeCreate", "withheld", "outside-target-set"}, {"WorktreeRemove", "withheld", "outside-target-set"}, {"SubagentStart", "withheld", "outside-target-set"}, {"SubagentStop", "withheld", "outside-target-set"}, {"TeammateIdle", "withheld", "outside-target-set"}, {"TaskCreated", "withheld", "outside-target-set"}, {"TaskCompleted", "withheld", "outside-target-set"}, {"PreCompact", "enabled", ""}, {"PostCompact", "enabled", ""}, {"Notification", "withheld", "outside-target-set"}, {"MessageDisplay", "withheld", "outside-target-set"}, {"Elicitation", "withheld", "missing-request-correlation"}, {"ElicitationResult", "withheld", "missing-request-correlation"},
+		{"SessionStart", "enabled", ""}, {"Setup", "withheld", "outside-target-set"}, {"SessionEnd", "enabled", ""}, {"UserPromptSubmit", "withheld", "outside-target-set"}, {"UserPromptExpansion", "withheld", "outside-target-set"}, {"Stop", "withheld", "outside-target-set"}, {"StopFailure", "withheld", "outside-target-set"}, {"PreToolUse", "enabled", ""}, {"PermissionRequest", "withheld", "outside-target-set"}, {"PermissionDenied", "withheld", "outside-target-set"}, {"PostToolUse", "enabled", ""}, {"PostToolUseFailure", "enabled", ""}, {"PostToolBatch", "enabled", ""}, {"FileChanged", "withheld", "outside-target-set"}, {"CwdChanged", "withheld", "outside-target-set"}, {"ConfigChange", "withheld", "outside-target-set"}, {"InstructionsLoaded", "withheld", "outside-target-set"}, {"WorktreeCreate", "withheld", "outside-target-set"}, {"WorktreeRemove", "withheld", "outside-target-set"}, {"SubagentStart", "withheld", "outside-target-set"}, {"SubagentStop", "withheld", "outside-target-set"}, {"TeammateIdle", "withheld", "outside-target-set"}, {"TaskCreated", "withheld", "outside-target-set"}, {"TaskCompleted", "withheld", "outside-target-set"}, {"PreCompact", "enabled", ""}, {"PostCompact", "enabled", ""}, {"Notification", "withheld", "outside-target-set"}, {"MessageDisplay", "withheld", "outside-target-set"}, {"Elicitation", "withheld", "missing-request-correlation"}, {"ElicitationResult", "withheld", "missing-request-correlation"}, {"PreModelSwitch", "withheld", "outside-target-set"}, {"PostModelSwitch", "withheld", "outside-target-set"}, {"DirectoryAdded", "withheld", "outside-target-set"},
 	}
 	enabledProofs := map[string]struct{ capture, production string }{
-		"SessionStart":       {"internal/lifecycle/ingress/claude/testdata/fixtures/session_start_2_1_222.json (Claude Code 2.1.222 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/SessionStart"},
-		"SessionEnd":         {"internal/lifecycle/ingress/claude/testdata/fixtures/session_end_2_1_222.json (Claude Code 2.1.222 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/SessionEnd"},
-		"PreToolUse":         {"internal/lifecycle/ingress/claude/testdata/fixtures/pre_tool_use_2_1_222.json (Claude Code 2.1.222 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PreToolUse"},
-		"PostToolUse":        {"internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_use_2_1_222.json (Claude Code 2.1.222 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolUse"},
-		"PostToolUseFailure": {"internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_use_failure_2_1_222.json (Claude Code 2.1.222 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolUseFailure"},
-		"PostToolBatch":      {"internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_batch_2_1_222.json (Claude Code 2.1.222 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolBatch"},
-		"PreCompact":         {"internal/lifecycle/ingress/claude/testdata/fixtures/pre_compact_2_1_222.json (Claude Code 2.1.222 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PreCompact"},
-		"PostCompact":        {"internal/lifecycle/ingress/claude/testdata/fixtures/post_compact_2_1_222.json (Claude Code 2.1.222 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostCompact"},
+		"SessionStart":       {"internal/lifecycle/ingress/claude/testdata/fixtures/session_start_2_1_261.json (Claude Code 2.1.261 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/SessionStart"},
+		"SessionEnd":         {"internal/lifecycle/ingress/claude/testdata/fixtures/session_end_2_1_261.json (Claude Code 2.1.261 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/SessionEnd"},
+		"PreToolUse":         {"internal/lifecycle/ingress/claude/testdata/fixtures/pre_tool_use_2_1_261.json (Claude Code 2.1.261 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PreToolUse"},
+		"PostToolUse":        {"internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_use_2_1_261.json (Claude Code 2.1.261 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolUse"},
+		"PostToolUseFailure": {"internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_use_failure_2_1_261.json (Claude Code 2.1.261 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolUseFailure"},
+		"PostToolBatch":      {"internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_batch_2_1_261.json (Claude Code 2.1.261 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolBatch"},
+		"PreCompact":         {"internal/lifecycle/ingress/claude/testdata/fixtures/pre_compact_2_1_261.json (Claude Code 2.1.261 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PreCompact"},
+		"PostCompact":        {"internal/lifecycle/ingress/claude/testdata/fixtures/post_compact_2_1_261.json (Claude Code 2.1.261 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostCompact"},
 	}
 	seen := make(map[string]struct{}, len(expected))
 	for index, want := range expected {
@@ -124,8 +124,8 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 			t.Errorf("numeric reason leaked: %+v", entry)
 		}
 	}
-	if len(seen) != 30 {
-		t.Fatalf("unique support events=%d, want 30", len(seen))
+	if want := len(registration.ClaudeCode2_1_261().Entries()); len(seen) != want {
+		t.Fatalf("unique support events=%d, want %d", len(seen), want)
 	}
 	manifestEntries := manifest.Entries()
 	for i, want := range expected {
@@ -206,8 +206,8 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 
 func TestClaudeHooksAbsentSessionStartDoesNotPanic(t *testing.T) {
 	t.Parallel()
-	manifest := registration.ClaudeCode2_1_210()
-	states, err := activation.ClaudeCode2_1_210()
+	manifest := registration.ClaudeCode2_1_261()
+	states, err := activation.ClaudeCode2_1_261()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestLifecycleIdentityFieldsBelongToPinnedPayloadShapes(t *testing.T) {
 	t.Run("Claude", func(t *testing.T) {
 		assertIdentityFieldsInPayloadShape(
 			t,
-			runtime.ClaudeCode2_1_210Lifecycle(),
+			runtime.ClaudeCode2_1_261Lifecycle(),
 			runtime.ClaudeLifecycleEvents(),
 			"generated Claude registration",
 			claudeNativeFields,
@@ -272,9 +272,9 @@ func TestLifecycleIdentityFieldsBelongToPinnedPayloadShapes(t *testing.T) {
 	// path in codex_transport_test.go.
 }
 
-func TestClaudeLifecycleTransportAllowsAuthentic2_1_222FieldShapes(t *testing.T) {
+func TestClaudeLifecycleTransportAllowsAuthentic2_1_261FieldShapes(t *testing.T) {
 	t.Parallel()
-	metadata, err := lifecycleMetadata(runtime.ClaudeCode2_1_210Lifecycle(), "2.1.210", claudeNativeFields)
+	metadata, err := lifecycleMetadata(runtime.ClaudeCode2_1_261Lifecycle(), runtime.ClaudeCode2_1_261Lifecycle().Versions().Min().String(), claudeNativeFields)
 	if err != nil {
 		t.Fatalf("build Claude lifecycle transport metadata: %v", err)
 	}
@@ -290,12 +290,27 @@ func TestClaudeLifecycleTransportAllowsAuthentic2_1_222FieldShapes(t *testing.T)
 		events[event.Name] = event
 	}
 	fixtureRoot := filepath.Join("..", "lifecycle", "ingress", "claude", "testdata", "fixtures")
-	fixtures, err := filepath.Glob(filepath.Join(fixtureRoot, "*_2_1_222.json"))
+	fixtures, err := filepath.Glob(filepath.Join(fixtureRoot, "*_2_1_261.json"))
 	if err != nil {
 		t.Fatalf("list authentic Claude fixtures: %v", err)
 	}
-	if len(fixtures) != 10 {
-		t.Fatalf("authentic Claude fixture count = %d, want 10", len(fixtures))
+	// One authentic fixture per ENABLED Claude event: the corpus is exactly the
+	// events the activation table enables, read from that table.
+	entries, err := activation.ClaudeCode2_1_261()
+	if err != nil {
+		t.Fatalf("derive the Claude activation manifest: %v", err)
+	}
+	enabled := 0
+	for _, entry := range entries {
+		if entry.State == activation.Enabled {
+			enabled++
+		}
+	}
+	if enabled == 0 {
+		t.Fatal("the Claude activation manifest enables no event, so this walk would check nothing")
+	}
+	if len(fixtures) != enabled {
+		t.Fatalf("authentic Claude fixture count = %d, want %d (one per enabled Claude event)", len(fixtures), enabled)
 	}
 	for _, fixture := range fixtures {
 		raw, err := os.ReadFile(fixture)
@@ -325,8 +340,8 @@ func TestClaudeLifecycleTransportAllowsAuthentic2_1_222FieldShapes(t *testing.T)
 
 func TestClaudeLifecycleTransportFieldsMatchGeneratedRegistration(t *testing.T) {
 	t.Parallel()
-	fieldNames := registration.ClaudeCode2_1_210NativeFieldNames()
-	for _, event := range registration.ClaudeCode2_1_210().Entries() {
+	fieldNames := registration.ClaudeCode2_1_261NativeFieldNames()
+	for _, event := range registration.ClaudeCode2_1_261().Entries() {
 		expected := make([]string, 0, len(event.AllowedFields))
 		for _, field := range event.AllowedFields {
 			name, present := fieldNames[field]

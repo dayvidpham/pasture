@@ -100,9 +100,9 @@ func (id *RuntimeContractID) UnmarshalJSON(data []byte) error {
 }
 
 const (
-	claudeCodeProductionProfile = "claude-code@2.1.210"
-	openCodeProductionProfile   = "opencode@1.18.10"
-	codexProductionProfile      = "codex@0.146.0"
+	claudeCodeProductionProfile = "claude-code@2.1.261"
+	openCodeProductionProfile   = "opencode@1.18.29"
+	codexProductionProfile      = "codex@0.153.0"
 )
 
 // ProductionRuntimeContract returns the sole registered target profile accepted

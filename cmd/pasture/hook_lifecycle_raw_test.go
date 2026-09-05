@@ -22,7 +22,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/tasks"
+)
+
+// The raw schema identities the binary accepts are the registration contracts,
+// read from the generated manifests so a moved host version moves every
+// --schema-version in these tests with it.
+var (
+	claudeRawSchema   = registration.ClaudeCode2_1_261().Contract.String()
+	codexRawSchema    = registration.Codex0_153_0().Contract.String()
+	openCodeRawSchema = registration.OpenCode1_18_29().Contract.String()
 )
 
 // build raw CLI exec-binary tests (SLICE-2 L2). These import the production
@@ -55,7 +65,7 @@ func TestRawLifecycleGateFlowMirrorsNative(t *testing.T) {
 
 	binary := lifecycleBinary(t)
 
-	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_222.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"))
 	require.NoError(t, err)
 
 	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
@@ -65,8 +75,8 @@ func TestRawLifecycleGateFlowMirrorsNative(t *testing.T) {
 	initializeLifecycleTestDatabase(t, dbPath)
 	command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
 		"hook", "lifecycle", "raw",
-		"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.222",
-		"--schema-version", "claude-code/2.1.210")
+		"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.261",
+		"--schema-version", claudeRawSchema)
 	command.Stdin = bytes.NewReader(raw)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -143,23 +153,23 @@ func TestRawContinuationParityWithNativePerEvent(t *testing.T) {
 	}{
 		{
 			name: "claude session start observation", harness: "claude-code", event: "SessionStart",
-			hostVersion: "2.1.222", schema: "claude-code/2.1.210",
-			fixture: "session_start_2_1_222.json", pkg: "claude",
+			hostVersion: "2.1.261", schema: claudeRawSchema,
+			fixture: "session_start_2_1_261.json", pkg: "claude",
 		},
 		{
 			name: "claude pre-tool-use gate", harness: "claude-code", event: "PreToolUse",
-			hostVersion: "2.1.222", schema: "claude-code/2.1.210",
-			fixture: "pre_tool_use_2_1_222.json", pkg: "claude", want: `{"decision":"proceed"}`,
+			hostVersion: "2.1.261", schema: claudeRawSchema,
+			fixture: "pre_tool_use_2_1_261.json", pkg: "claude", want: `{"decision":"proceed"}`,
 		},
 		{
 			name: "codex session start observation", harness: "codex", event: "SessionStart",
-			hostVersion: "0.146.0", schema: "codex/0.146.0",
-			fixture: "session_start_0_146_0.json", pkg: "codex", want: `{}`,
+			hostVersion: registration.Codex0_153_0().Version, schema: codexRawSchema,
+			fixture: "session_start_0_153_0.json", pkg: "codex", want: `{}`,
 		},
 		{
 			name: "codex pre-tool-use gate", harness: "codex", event: "PreToolUse",
-			hostVersion: "0.146.0", schema: "codex/0.146.0",
-			fixture: "pre_tool_use_0_146_0.json", pkg: "codex", want: `{"continue":true}`,
+			hostVersion: registration.Codex0_153_0().Version, schema: codexRawSchema,
+			fixture: "pre_tool_use_0_153_0.json", pkg: "codex", want: `{"continue":true}`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -201,8 +211,8 @@ func TestRawAndNativeCommitEquivalentRecordsModuloOrigin(t *testing.T) {
 		wantStdout   string
 		wantReaction bool // gate consultations emit consultation evidence
 	}{
-		{name: "observation session start", fixture: "session_start_2_1_222.json", event: "SessionStart"},
-		{name: "gate pre-tool-use", fixture: "pre_tool_use_2_1_222.json", event: "PreToolUse", wantStdout: `{"decision":"proceed"}`, wantReaction: true},
+		{name: "observation session start", fixture: "session_start_2_1_261.json", event: "SessionStart"},
+		{name: "gate pre-tool-use", fixture: "pre_tool_use_2_1_261.json", event: "PreToolUse", wantStdout: `{"decision":"proceed"}`, wantReaction: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			payload, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", tc.fixture))
@@ -214,10 +224,10 @@ func TestRawAndNativeCommitEquivalentRecordsModuloOrigin(t *testing.T) {
 				var args []string
 				if surface == "raw" {
 					args = []string{"hook", "lifecycle", "raw",
-						"--harness", "claude-code", "--event", tc.event, "--host-version", "2.1.222", "--schema-version", "claude-code/2.1.210"}
+						"--harness", "claude-code", "--event", tc.event, "--host-version", "2.1.261", "--schema-version", claudeRawSchema}
 				} else {
 					args = []string{"hook", "lifecycle",
-						"--harness", "claude-code", "--event", tc.event, "--host-version", "2.1.222"}
+						"--harness", "claude-code", "--event", tc.event, "--host-version", "2.1.261"}
 				}
 				command := exec.Command(binary, append([]string{databaseFlagName.Argument(), dbPath}, args...)...)
 				command.Stdin = bytes.NewReader(payload)
@@ -320,8 +330,8 @@ func TestRawWithheldEventIsNotAdmitted(t *testing.T) {
 
 	command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
 		"hook", "lifecycle", "raw",
-		"--harness", "opencode", "--event", "session.updated", "--host-version", "1.18.10",
-		"--schema-version", "opencode/1.18.10")
+		"--harness", "opencode", "--event", "session.updated", "--host-version", registration.OpenCode1_18_29().Version,
+		"--schema-version", openCodeRawSchema)
 	command.Stdin = strings.NewReader(`{"event":{"type":"session.updated"}}`)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -344,7 +354,7 @@ func TestRawSchemaVersionRefusalCreatesNoDatabaseFile(t *testing.T) {
 
 	command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
 		"hook", "lifecycle", "raw",
-		"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.222",
+		"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.261",
 		"--schema-version", "claude-code/9.9.9")
 	command.Stdin = bytes.NewReader([]byte(`{"hook_event_name":"SessionStart"}`))
 	var stdout, stderr bytes.Buffer
@@ -370,8 +380,8 @@ func TestRawUnknownHarnessCreatesNoDatabaseFile(t *testing.T) {
 
 	command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
 		"hook", "lifecycle", "raw",
-		"--harness", "not-a-harness", "--event", "SessionStart", "--host-version", "2.1.222",
-		"--schema-version", "claude-code/2.1.210")
+		"--harness", "not-a-harness", "--event", "SessionStart", "--host-version", "2.1.261",
+		"--schema-version", claudeRawSchema)
 	command.Stdin = strings.NewReader(`{"hook_event_name":"SessionStart"}`)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -391,8 +401,8 @@ func TestRawMalformedStdinCreatesNoDatabaseFile(t *testing.T) {
 
 	command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
 		"hook", "lifecycle", "raw",
-		"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.222",
-		"--schema-version", "claude-code/2.1.210")
+		"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.261",
+		"--schema-version", claudeRawSchema)
 	command.Stdin = bytes.NewReader([]byte(`not json at all`))
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -412,8 +422,8 @@ func TestRawOverLimitStdinCreatesNoDatabaseFile(t *testing.T) {
 
 	command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
 		"hook", "lifecycle", "raw",
-		"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.222",
-		"--schema-version", "claude-code/2.1.210")
+		"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.261",
+		"--schema-version", claudeRawSchema)
 	command.Stdin = bytes.NewReader([]byte(strings.Repeat("x", model.MaxNativePayloadBytes+1)))
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -447,8 +457,8 @@ func TestRawPayloadBoundaryReachesClassification(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
 				"hook", "lifecycle", "raw",
-				"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.222",
-				"--schema-version", "claude-code/2.1.210")
+				"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.261",
+				"--schema-version", claudeRawSchema)
 			command.Stdin = bytes.NewReader(bytes.Repeat([]byte("x"), tc.size))
 			var stdout, stderr bytes.Buffer
 			command.Stdout = &stdout
@@ -488,8 +498,8 @@ func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
 		wantEffects      int
 		wantContinuation string
 	}{
-		{name: "observation", fixture: "session_start_2_1_222.json", event: "SessionStart", wantEffects: 1},
-		{name: "gate", fixture: "pre_tool_use_2_1_222.json", event: "PreToolUse", wantEffects: 2, wantContinuation: `{"decision":"proceed"}`},
+		{name: "observation", fixture: "session_start_2_1_261.json", event: "SessionStart", wantEffects: 1},
+		{name: "gate", fixture: "pre_tool_use_2_1_261.json", event: "PreToolUse", wantEffects: 2, wantContinuation: `{"decision":"proceed"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			payload, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", tc.fixture))
@@ -499,8 +509,8 @@ func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
 			previewDB := filepath.Join(t.TempDir(), "preview", tasks.DefaultDBFilename.String())
 			previewCmd := exec.Command(binary, databaseFlagName.Argument(), previewDB,
 				"hook", "lifecycle", "raw",
-				"--harness", "claude-code", "--event", tc.event, "--host-version", "2.1.222",
-				"--schema-version", "claude-code/2.1.210", "--dry-run")
+				"--harness", "claude-code", "--event", tc.event, "--host-version", "2.1.261",
+				"--schema-version", claudeRawSchema, "--dry-run")
 			previewCmd.Stdin = bytes.NewReader(payload)
 			var previewOut, previewErr bytes.Buffer
 			previewCmd.Stdout = &previewOut
@@ -535,10 +545,10 @@ func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
 			require.True(t, preview.DryRun, "preview must mark itself as a dry run")
 			require.Equal(t, "Claude", preview.Harness)
 			require.Equal(t, tc.event, preview.Event)
-			require.Equal(t, "2.1.222", preview.HostVersion)
-			require.Equal(t, "claude-code/2.1.210", preview.Schema)
+			require.Equal(t, "2.1.261", preview.HostVersion)
+			require.Equal(t, claudeRawSchema, preview.Schema)
 			require.Equal(t, "raw", preview.Origin, "preview must disclose the raw origin")
-			require.Equal(t, "claude-code/2.1.210", preview.Contract)
+			require.Equal(t, claudeRawSchema, preview.Contract)
 			require.Len(t, preview.Effects, tc.wantEffects)
 			require.Equal(t, tc.wantContinuation, preview.Continuation)
 			for _, effect := range preview.Effects {
@@ -557,8 +567,8 @@ func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
 			initializeLifecycleTestDatabase(t, commitDB)
 			commitCmd := exec.Command(binary, databaseFlagName.Argument(), commitDB,
 				"hook", "lifecycle", "raw",
-				"--harness", "claude-code", "--event", tc.event, "--host-version", "2.1.222",
-				"--schema-version", "claude-code/2.1.210")
+				"--harness", "claude-code", "--event", tc.event, "--host-version", "2.1.261",
+				"--schema-version", claudeRawSchema)
 			commitCmd.Stdin = bytes.NewReader(payload)
 			var commitOut, commitErr bytes.Buffer
 			commitCmd.Stdout = &commitOut
@@ -622,8 +632,8 @@ func TestRawDryRunRefusesIdentically(t *testing.T) {
 				dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
 				args := []string{databaseFlagName.Argument(), dbPath,
 					"hook", "lifecycle", "raw",
-					"--harness", "claude-code", "--event", tc.event, "--host-version", "2.1.222",
-					"--schema-version", "claude-code/2.1.210"}
+					"--harness", "claude-code", "--event", tc.event, "--host-version", "2.1.261",
+					"--schema-version", claudeRawSchema}
 				if dryRun {
 					args = append(args, "--dry-run")
 				}
@@ -745,9 +755,9 @@ func TestARawImportWhoseDeadlineHasPassedCommitsNothing(t *testing.T) {
 	defer cancel()
 
 	_, err := handlers.HookLifecycleRaw(ctx, handlers.HookLifecycleRawInput{
-		DBPath: dbPath, Harness: ir.HarnessClaudeCode, Event: "SessionStart", HostVersion: "2.1.222",
-		SchemaVersion: handlers.RawSchemaVersion("claude-code/2.1.210"),
-		Input:         bytes.NewReader(claudeFixture(t, "session_start_2_1_222.json")),
+		DBPath: dbPath, Harness: ir.HarnessClaudeCode, Event: "SessionStart", HostVersion: "2.1.261",
+		SchemaVersion: handlers.RawSchemaVersion(claudeRawSchema),
+		Input:         bytes.NewReader(claudeFixture(t, "session_start_2_1_261.json")),
 		Clock:         lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 	})
 	require.Error(t, err, "an expired deadline must stop the import")

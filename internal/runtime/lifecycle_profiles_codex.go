@@ -22,6 +22,8 @@ const (
 	CodexEventSubagentStart
 	CodexEventSubagentStop
 	CodexEventStop
+	CodexEventSessionEnd
+	CodexEventInterrupt
 	codexLifecycleEventLimit
 )
 
@@ -36,6 +38,8 @@ var codexLifecycleEventNames = [...]string{
 	"SubagentStart",
 	"SubagentStop",
 	"Stop",
+	"SessionEnd",
+	"Interrupt",
 }
 
 func (e CodexLifecycleEvent) IsValid() bool { return e > 0 && e < codexLifecycleEventLimit }
@@ -102,7 +106,7 @@ func codexLifecycleMappings() map[CodexLifecycleEvent]LifecycleEventMapping {
 	// therefore runs as report-and-continue until the Codex coverage work fills
 	// the citation in.
 	//
-	// The evidence itself is NOT missing. The pinned Codex 0.146.0 command-hook
+	// The evidence itself is NOT missing. The Codex command-hook
 	// output contract IS committed in this repository, with its inspected source
 	// revision, in internal/lifecycle/nativeresponse/nativeresponse.go: it
 	// records that a blocking hook is rejected unless continue == true. That
@@ -125,11 +129,37 @@ func codexLifecycleMappings() map[CodexLifecycleEvent]LifecycleEventMapping {
 		CodexEventSubagentStart:     codexLifecycleMapping(CodexEventSubagentStart, SemanticObservation, NonBlocking, MutationNone, StopLoopNotApplicable, true, unevidenced, codexAgentIdentity),
 		CodexEventSubagentStop:      codexLifecycleMapping(CodexEventSubagentStop, SemanticGateConsultation, Blocking, MutationNone, StopLoopConsultWhenInactive, true, unevidenced, codexAgentIdentity),
 		CodexEventStop:              codexLifecycleMapping(CodexEventStop, SemanticGateConsultation, Blocking, MutationNone, StopLoopConsultWhenInactive, true, unevidenced),
+		CodexEventSessionEnd:        codexUnprovenObservationMapping(CodexEventSessionEnd, unevidenced),
+		CodexEventInterrupt:         codexUnprovenObservationMapping(CodexEventInterrupt, unevidenced),
 	}
 }
 
-// Codex0_146_0Lifecycle returns the immutable Codex CLI lifecycle table bound
-// to the same exact host version and RuntimeContractID as Codex0_146_0.
-func Codex0_146_0Lifecycle() LifecycleContract[CodexLifecycleEvent] {
-	return mustLifecycleContract(Codex0_146_0(), CodexLifecycleEvents(), codexLifecycleMappings())
+// codexUnprovenObservationMapping builds a non-blocking observation row that
+// declares NO identity, so its IdentityPolicy is None. A declared identity is a
+// claim the product acts on (the L2 content guard, the frontend Bind), and this
+// tree derives such claims from authentic captures only. SessionEnd's emitter
+// names session_id, but no capture has shown what the host writes on the wire,
+// so the row stays identity-free until one does; the same rule gave the other
+// unproven Codex rows their shape in the host contract.
+func codexUnprovenObservationMapping(event CodexLifecycleEvent, evidence FailureEvidence) LifecycleEventMapping {
+	return LifecycleEventMapping{
+		nativeName:      event.NativeName(),
+		semantic:        SemanticObservation,
+		surface:         SurfaceCodexStrictCommandJSON,
+		blocking:        NonBlocking,
+		identities:      identities(nil),
+		mutation:        MutationNone,
+		order:           OrderConcurrentNative,
+		reconciliation:  ReconcileNoAdapterMerge,
+		failure:         evidenceBoundFailure(NonBlocking, evidence, FailureStrictExitTwoBlocks, FailureStrictHook),
+		declaredFailure: declaredFailureArm(NonBlocking, FailureStrictExitTwoBlocks, FailureStrictHook),
+		evidence:        evidence,
+		stopLoop:        StopLoopNotApplicable,
+	}
+}
+
+// Codex0_153_0Lifecycle returns the immutable Codex CLI lifecycle table bound
+// to the same exact host version and RuntimeContractID as Codex0_153_0.
+func Codex0_153_0Lifecycle() LifecycleContract[CodexLifecycleEvent] {
+	return mustLifecycleContract(Codex0_153_0(), CodexLifecycleEvents(), codexLifecycleMappings())
 }

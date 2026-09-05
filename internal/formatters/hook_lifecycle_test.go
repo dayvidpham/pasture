@@ -22,7 +22,7 @@ import (
 // coordinate for a legacy record.
 func TestHookLifecycleFormatterRendersMetamodelColumn(t *testing.T) {
 	t.Parallel()
-	contract := runtime.ClaudeCode2_1_210Lifecycle().ID()
+	contract := runtime.ClaudeCode2_1_261Lifecycle().ID()
 	identities := []waist.SemanticIdentity{{Kind: runtime.IdentitySession, Value: "s"}}
 
 	v1, err := model.NewInterpretedRecord(model.InterpretationID(10), model.OccurrenceID(1), runtime.SemanticObservation, identities, nil, contract)

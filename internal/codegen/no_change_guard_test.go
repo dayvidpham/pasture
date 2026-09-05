@@ -333,6 +333,14 @@ func TestThisRepositoryHasNoInstalledGitHook(t *testing.T) {
 	root, err := scan.ModuleRoot()
 	require.NoError(t, err)
 
+	// The guard reads the Git directory of the checkout it runs in, so it needs
+	// one. A tree with no Git directory is an ordinary environment: every gate in
+	// this project runs from a `git archive` copy, which carries no .git at all,
+	// and a failure there would be read as a defect of the change under gate.
+	if exec.Command("git", "-C", root, "rev-parse", "--git-dir").Run() != nil {
+		t.Skip("not inside a git repo; skipping the installed-hook guard")
+	}
+
 	hooksPath, err := gitConfig(root, "core.hooksPath")
 	require.NoError(t, err)
 	assert.Empty(t, hooksPath,

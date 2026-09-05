@@ -14,6 +14,7 @@ import (
 // claudeEventMappings is the sole Claude frontend event mapping. Keep every
 // generated model ordinal explicit here: the registration and runtime
 // enumerations are separate contracts even though their current ordinals agree.
+// A test holds the mapping total over the registration and each pair correct.
 var claudeEventMappings = map[model.ContractEventKind]runtime.ClaudeLifecycleEvent{
 	registration.EventSessionStart:        runtime.ClaudeEventSessionStart,
 	registration.EventSetup:               runtime.ClaudeEventSetup,
@@ -45,12 +46,15 @@ var claudeEventMappings = map[model.ContractEventKind]runtime.ClaudeLifecycleEve
 	registration.EventMessageDisplay:      runtime.ClaudeEventMessageDisplay,
 	registration.EventElicitation:         runtime.ClaudeEventElicitation,
 	registration.EventElicitationResult:   runtime.ClaudeEventElicitationResult,
+	registration.EventPreModelSwitch:      runtime.ClaudeEventPreModelSwitch,
+	registration.EventPostModelSwitch:     runtime.ClaudeEventPostModelSwitch,
+	registration.EventDirectoryAdded:      runtime.ClaudeEventDirectoryAdded,
 }
 
 // host is the pinned Claude data consumed by the generic frontend engine.
 var host = frontend.Host[runtime.ClaudeLifecycleEvent]{
 	Label:    "Claude",
-	Contract: runtime.ClaudeCode2_1_210Lifecycle,
+	Contract: runtime.ClaudeCode2_1_261Lifecycle,
 	Events:   claudeEventMappings,
 }
 

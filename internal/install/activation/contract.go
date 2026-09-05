@@ -32,7 +32,7 @@ func NewActivationContractID(value string) (ActivationContractID, error) {
 			"the activation contract id is empty",
 			"internal/install/activation.NewActivationContractID", "identifying an activation contract",
 			"the contract cannot be referenced or bound",
-			"provide a stable id such as claude-code/activation@2.1.210", nil,
+			"provide a stable id such as claude-code/activation@2.1.261", nil,
 		)
 	}
 	return ActivationContractID(value), nil

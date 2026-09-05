@@ -96,7 +96,7 @@ func TestZeroValuesAreDefensive(t *testing.T) {
 
 func realL2(t *testing.T, event runtime.ClaudeLifecycleEvent) waist.L2 {
 	t.Helper()
-	contract := runtime.ClaudeCode2_1_210Lifecycle()
+	contract := runtime.ClaudeCode2_1_261Lifecycle()
 	binding, err := waist.BindEvent(contract, event)
 	if err != nil {
 		t.Fatalf("BindEvent(%v): %v", event, err)

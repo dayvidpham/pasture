@@ -16,8 +16,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/tasks"
 )
+
+// captureFileName is the file the capture sink writes for one Claude Code
+// Notification payload at the recorded host version:
+// <harness>_<snake_event>_<version with dots as underscores>.<n>.json.
+var captureFileName = "claude-code_notification_" + strings.ReplaceAll(registration.ClaudeCode2_1_261().Version, ".", "_") + ".1.json"
 
 // captureNoticePrefix is the load-bearing phrase of the one notice the hook
 // prints when it records a session. It is pinned here on the binary as it is
@@ -36,15 +42,21 @@ const captureNoticePrefix = "pasture: capture mode is recording this session to 
 func TestCaptureDirectoryRefusalsLeaveTheHostOutcomeUnchanged(t *testing.T) {
 	t.Parallel()
 	binary := lifecycleBinary(t)
-	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
-	require.NoError(t, err)
+	// The test builds the repository it needs and starts the hook inside it,
+	// instead of borrowing the checkout the suite runs from. The hook derives
+	// the repository from its own working directory, so this drives the same
+	// production path; and it makes the proof hold in every environment,
+	// including a `git archive` copy that carries no .git, where borrowing the
+	// ambient checkout gave no repository and the refusal could not happen.
+	repoRoot := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(repoRoot, ".git"), 0o755))
 	payload := []byte(`{"session_id":"s","hook_event_name":"Notification","message":"hello there"}`)
 	run := func(captureDir string) lifecycleRun {
 		dbPath := filepath.Join(t.TempDir(), "pasture.db")
 		if captureDir == "" {
-			return runLifecycleHookOn(t, binary, dbPath, "claude-code", "Notification", "2.1.210", payload)
+			return runLifecycleHookIn(t, repoRoot, binary, dbPath, "claude-code", "Notification", registration.ClaudeCode2_1_261().Version, payload)
 		}
-		return runLifecycleHookOn(t, binary, dbPath, "claude-code", "Notification", "2.1.210", payload, "PASTURE_CAPTURE_DIR="+captureDir)
+		return runLifecycleHookIn(t, repoRoot, binary, dbPath, "claude-code", "Notification", registration.ClaudeCode2_1_261().Version, payload, "PASTURE_CAPTURE_DIR="+captureDir)
 	}
 	base := run("")
 	require.Equal(t, 0, base.ExitCode, base.Stderr)
@@ -60,12 +72,13 @@ func TestCaptureDirectoryRefusalsLeaveTheHostOutcomeUnchanged(t *testing.T) {
 	assert.NotContains(t, relative.Stderr, captureNoticePrefix)
 
 	inside := filepath.Join(repoRoot, "internal")
+	require.NoError(t, os.Mkdir(inside, 0o755))
 	inRepo := run(inside)
 	assert.Equal(t, base.ExitCode, inRepo.ExitCode)
 	assert.Equal(t, base.Stdout, inRepo.Stdout)
 	assert.Contains(t, inRepo.Stderr, "which is inside the repository at")
 	assert.NotContains(t, inRepo.Stderr, captureNoticePrefix)
-	_, err = os.Stat(filepath.Join(inside, "claude-code_notification_2_1_210.1.json"))
+	_, err := os.Stat(filepath.Join(inside, captureFileName))
 	assert.ErrorIs(t, err, os.ErrNotExist, "nothing may be written inside the repository")
 
 	outside := t.TempDir()
@@ -74,7 +87,7 @@ func TestCaptureDirectoryRefusalsLeaveTheHostOutcomeUnchanged(t *testing.T) {
 	assert.Equal(t, base.Stdout, accepted.Stdout)
 	assert.Equal(t, 1, strings.Count(accepted.Stderr, captureNoticePrefix+outside), "the notice is printed exactly once per invocation")
 	assert.Contains(t, accepted.Stderr, "is withheld", "a withheld event is captured AND still refused, unchanged")
-	captured, err := os.ReadFile(filepath.Join(outside, "claude-code_notification_2_1_210.1.json"))
+	captured, err := os.ReadFile(filepath.Join(outside, captureFileName))
 	require.NoError(t, err)
 	assert.Equal(t, payload, captured, "the capture is the exact bytes the host wrote")
 }
@@ -92,12 +105,12 @@ func TestACaptureFailureNeverChangesTheHostOutcomeOnAnEnabledEvent(t *testing.T)
 		t.Skip("root ignores directory permissions, so an unwritable directory cannot be arranged")
 	}
 	binary := lifecycleBinary(t)
-	payload := claudeFixture(t, "session_start_2_1_222.json")
+	payload := claudeFixture(t, "session_start_2_1_261.json")
 	run := func(env ...string) lifecycleRun {
 		dir := t.TempDir()
 		dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 		initializeLifecycleTestDatabase(t, dbPath)
-		return runLifecycleHookOn(t, binary, dbPath, "claude-code", "SessionStart", "2.1.222", payload, env...)
+		return runLifecycleHookOn(t, binary, dbPath, "claude-code", "SessionStart", "2.1.261", payload, env...)
 	}
 	base := run()
 	require.Equal(t, 0, base.ExitCode, base.Stderr)
@@ -123,7 +136,7 @@ func TestACaptureFailureNeverChangesTheHostOutcomeOnAnEnabledEvent(t *testing.T)
 	// standard output, so the durable state is what tells them apart: the
 	// event must be RECORDED, which a fault would not do.
 	listed := runLifecycleList(t, binary, failed.FaultDir+"/"+tasks.DefaultDBFilename.String(), "json")
-	assert.Contains(t, listed, `"registrationContract":"claude-code/2.1.210"`, "the event was recorded although the capture failed")
+	assert.Contains(t, listed, `"registrationContract":"`+registration.ClaudeCode2_1_261().Contract.String()+`"`, "the event was recorded although the capture failed")
 	assert.Contains(t, listed, `"event":1`, "the recorded occurrence is the SessionStart kind")
 }
 
@@ -314,7 +327,7 @@ func TestAStalledStdinUnderCaptureIsBoundedByTheInvocationDeadline(t *testing.T)
 	command := exec.Command(binary,
 		databaseFlagName.Argument(), dbPath,
 		"hook", "lifecycle",
-		"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.222")
+		"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.261")
 	command.Stdin = stdinRead
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout

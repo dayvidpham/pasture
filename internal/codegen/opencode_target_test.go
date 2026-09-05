@@ -21,7 +21,7 @@ import (
 )
 
 // expectedOpenCodeNativeTools is the exact native tool allow-list OpenCode
-// 1.18.10 declares: invoke-skill -> skill, delegate-assignment -> task,
+// the recorded version declares: invoke-skill -> skill, delegate-assignment -> task,
 // request-user-decision -> question. Every other core operation is
 // semantic-instruction or unsupported and contributes no native tool.
 var expectedOpenCodeNativeTools = []string{"question", "skill", "task"}
@@ -43,7 +43,7 @@ func TestOpenCodeNativeToolNames_MatchPinnedContract(t *testing.T) {
 
 	// Cross-check every name really is native in the pinned contract, proving the
 	// allow-list is the contract's own declared surface, not a hand-copied list.
-	contract := runtime.OpenCode1_18_10()
+	contract := runtime.OpenCode1_18_29()
 	native := map[string]bool{}
 	for _, kind := range ir.AllOperationKinds() {
 		desc, ok := runtime.CoreOperationDescriptorFor(kind)
@@ -148,9 +148,64 @@ func TestOpenCodeHooksModule_SelfContainedAndDiscoverable(t *testing.T) {
 	if strings.Contains(module, "require(") {
 		t.Error("hooks module uses require(); it must depend on no npm package")
 	}
-	// Discoverable: a default export is required for OpenCode plugin loading.
-	if !strings.Contains(module, "export default PastureLifecycle") {
-		t.Error("hooks module lacks a default export; OpenCode plugin auto-discovery needs one")
+	// Discoverable: OpenCode reads the default export first and uses it when it
+	// is an object with server(); a bare function default falls back to a scan
+	// of every export that throws on the first non-function export.
+	if !strings.Contains(module, openCodePluginDefaultExport) {
+		t.Errorf("hooks module lacks the default export OpenCode's loader reads first, %q; without it the loader scans every export and throws on PASTURE_NATIVE_TOOLS", openCodePluginDefaultExport)
+	}
+}
+
+// openCodePluginDefaultExport is the one line OpenCode's plugin loader reads
+// first: a default-exported object whose server() is the plugin function.
+const openCodePluginDefaultExport = `export default { id: "pasture-lifecycle", server: PastureLifecycle };`
+
+// TestOpenCodeHooksModule_SatisfiesHostPluginLoaderRule loads the generated
+// module the way OpenCode does and applies OpenCode's own acceptance rule to
+// it: the default export is an object; it carries id, server or tui; server
+// is a function; tui is absent; a path plugin carries a non-empty string id.
+// When the default export passes that rule the loader reads nothing else, so
+// the legacy scan of every export (which throws on a non-function export) is
+// never reached. The rule is transcribed from OpenCode's loader
+// (packages/opencode/src/plugin/shared.ts readV1Plugin, readPluginId,
+// resolvePluginId; packages/opencode/src/plugin/index.ts applyPlugin,
+// getLegacyPlugins), identical at host versions 1.18.10 and 1.18.29.
+func TestOpenCodeHooksModule_SatisfiesHostPluginLoaderRule(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("bun is required to load the generated OpenCode lifecycle plugin the way the host does; enter the flake dev shell or install the flake-locked Bun package")
+	}
+	module, err := GenerateOpenCodeHooksModule()
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	dir := t.TempDir()
+	modulePath := filepath.Join(dir, "pasture-hooks.ts")
+	if err := os.WriteFile(modulePath, []byte(module), 0o644); err != nil {
+		t.Fatalf("write module: %v", err)
+	}
+	runner := filepath.Join(dir, "loader-rule.ts")
+	script := fmt.Sprintf(`
+const mod = await import(%q);
+const value = mod.default;
+const isRecord = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+if (!isRecord(value) || (!("id" in value) && !("server" in value) && !("tui" in value))) {
+  throw new Error("the default export is not an object with server(): OpenCode falls back to scanning every export and throws \"Plugin export is not a function\" on the first non-function export");
+}
+if (typeof value.server !== "function") throw new Error("the default export has no server() function; OpenCode refuses the plugin");
+if (value.tui !== undefined) throw new Error("the default export also carries tui(); OpenCode refuses a plugin that exports both");
+if (typeof value.id !== "string" || value.id.trim() === "") throw new Error("a path plugin must export a non-empty string id; OpenCode refuses it otherwise");
+console.log(JSON.stringify({ id: value.id, server: typeof value.server }));
+`, modulePath)
+	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
+		t.Fatalf("write loader-rule runner: %v", err)
+	}
+	out, err := exec.Command(bun, runner).CombinedOutput()
+	if err != nil {
+		t.Fatalf("the generated module does not satisfy OpenCode's plugin loader rule: %v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != `{"id":"pasture-lifecycle","server":"function"}` {
+		t.Fatalf("loader-rule runner reported %q", got)
 	}
 }
 
@@ -162,8 +217,8 @@ func TestOpenCodeHooksModulePreservesNamedAndObservationBoundary(t *testing.T) {
 		t.Fatalf("generate: %v", err)
 	}
 	for _, required := range []string{
-		`["hook", "lifecycle", "--harness", "opencode", "--event", "session.created", "--host-version", "1.18.10"]`,
-		`["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", "1.18.10"]`,
+		fmt.Sprintf(`["hook", "lifecycle", "--harness", "opencode", "--event", "session.created", "--host-version", %q]`, openCodeHostVersion()),
+		fmt.Sprintf(`["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", %q]`, openCodeHostVersion()),
 		`{ input, output: { args } }`, `response.decision !== "proceed"`, `output.args = args`,
 	} {
 		if !strings.Contains(module, required) {
@@ -226,15 +281,15 @@ func TestOpenCodeGeneratedLifecycleCallbacks_RunBuiltCLIWithAuthenticFixtures(t 
 import { sessionCreated, toolExecuteBefore } from %q;
 const sessionCapture = await Bun.file(%q).json();
 const toolCapture = await Bun.file(%q).json();
-await sessionCreated(sessionCapture.value);
-const output = toolCapture.value.output;
+await sessionCreated(sessionCapture);
+const output = toolCapture.output;
 const before = JSON.stringify(output.args);
-await toolExecuteBefore(toolCapture.value.input, output);
+await toolExecuteBefore(toolCapture.input, output);
 if (JSON.stringify(output.args) !== before) throw new Error("generated tool.execute.before callback changed output.args");
 console.log(JSON.stringify({ argsUnchanged: true }));
 `, moduleURL,
-		filepath.Join(fixtureDir, "session_created_1_18_10.capture.json"),
-		filepath.Join(fixtureDir, "tool_execute_before_1_18_10.capture.json"))
+		filepath.Join(fixtureDir, "session_created_1_18_29.json"),
+		filepath.Join(fixtureDir, "tool_execute_before_1_18_29.json"))
 	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
 		t.Fatalf("write Bun production-proof runner: %v", err)
 	}
@@ -259,8 +314,8 @@ console.log(JSON.stringify({ argsUnchanged: true }));
 		t.Fatalf("read back generated callback receipts through production CLI: %v\n%s", err, readbackOutput)
 	}
 	for _, required := range []string{
-		`"registrationContract":"opencode/1.18.10"`,
-		`"contract":"opencode/opencode@1.18.10"`,
+		fmt.Sprintf(`"registrationContract":"opencode/%s"`, openCodeHostVersion()),
+		fmt.Sprintf(`"contract":%q`, runtime.OpenCode1_18_29().ID().String()),
 		`"semantic":1`,
 		`"semantic":2`,
 	} {
@@ -481,7 +536,7 @@ func TestOpenCodeTargetDescriptor_RuntimeContractIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("descriptor: %v", err)
 	}
-	want := runtime.OpenCode1_18_10().ID()
+	want := runtime.OpenCode1_18_29().ID()
 	if desc.RuntimeContract() != want {
 		t.Errorf("descriptor RuntimeContract = %v, want %v", desc.RuntimeContract(), want)
 	}
@@ -634,14 +689,14 @@ func TestOpenCodeGeneratedGateSurvivesARealPastureFault(t *testing.T) {
 import { toolExecuteBefore } from %q;
 const toolCapture = await Bun.file(%q).json();
 
-const output = toolCapture.value.output;
+const output = toolCapture.output;
 const before = JSON.stringify(output.args);
-await toolExecuteBefore(toolCapture.value.input, output);
+await toolExecuteBefore(toolCapture.input, output);
 if (JSON.stringify(output.args) !== before) {
   throw new Error("a pasture fault changed output.args");
 }
 console.log(JSON.stringify({ toolCallProceeded: true }));
-`, moduleURL, filepath.Join(fixtureDir, "tool_execute_before_1_18_10.capture.json"))
+`, moduleURL, filepath.Join(fixtureDir, "tool_execute_before_1_18_29.json"))
 	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
 		t.Fatalf("write Bun fail-open proof runner: %v", err)
 	}

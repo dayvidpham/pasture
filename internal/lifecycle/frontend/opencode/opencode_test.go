@@ -1,7 +1,6 @@
 package opencode_test
 
 import (
-	"encoding/json"
 	"os"
 	"testing"
 
@@ -13,11 +12,8 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
 	"github.com/dayvidpham/pasture/internal/runtime"
+	"github.com/dayvidpham/pasture/internal/testutil"
 )
-
-type capturedRecord struct {
-	Value json.RawMessage `json:"value"`
-}
 
 func TestAuthenticCallbacksProduceProviderCorrectVerifiedL2(t *testing.T) {
 	t.Parallel()
@@ -27,18 +23,16 @@ func TestAuthenticCallbacksProduceProviderCorrectVerifiedL2(t *testing.T) {
 		semantic   runtime.EventSemantic
 		identities []runtime.NativeIdentityKind
 	}{
-		{"session created", "session_created_1_18_10.capture.json", registration.EventOpenCodeSessionCreated, runtime.SemanticObservation, []runtime.NativeIdentityKind{runtime.IdentitySession}},
-		{"tool execute before", "tool_execute_before_1_18_10.capture.json", registration.EventOpenCodeToolExecuteBefore, runtime.SemanticGateConsultation, []runtime.NativeIdentityKind{runtime.IdentitySession, runtime.IdentityToolCall}},
+		{"session created", "session_created_1_18_29.json", registration.EventOpenCodeSessionCreated, runtime.SemanticObservation, []runtime.NativeIdentityKind{runtime.IdentitySession}},
+		{"tool execute before", "tool_execute_before_1_18_29.json", registration.EventOpenCodeToolExecuteBefore, runtime.SemanticGateConsultation, []runtime.NativeIdentityKind{runtime.IdentitySession, runtime.IdentityToolCall}},
 	}
-	manifest := registration.OpenCode1_18_10()
+	manifest := registration.OpenCode1_18_29()
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			raw, err := os.ReadFile("../../ingress/opencode/testdata/fixtures/" + test.file)
 			require.NoError(t, err)
-			var record capturedRecord
-			require.NoError(t, json.Unmarshal(raw, &record))
 			var event registration.Event
 			for _, candidate := range manifest.Events {
 				if candidate.Kind == test.kind {
@@ -46,7 +40,7 @@ func TestAuthenticCallbacksProduceProviderCorrectVerifiedL2(t *testing.T) {
 					break
 				}
 			}
-			capture := opencodeingress.Parse(record.Value, event, "1.18.10", model.OccurrenceEnvelopeRef{})
+			capture := opencodeingress.Parse(raw, event, manifest.Version, model.OccurrenceEnvelopeRef{})
 			require.Equal(t, model.CaptureValid, capture.Disposition)
 			l1, identities, err := opencode.Bind(capture.Delivery.Event, capture.Delivery.Bindings)
 			require.NoError(t, err)
@@ -56,7 +50,7 @@ func TestAuthenticCallbacksProduceProviderCorrectVerifiedL2(t *testing.T) {
 			require.True(t, l2.IsValid())
 			require.Equal(t, test.semantic, l2.Semantics().Semantic())
 			require.Equal(t, test.identities, identityKinds(l2.Semantics().Identities()))
-			require.Equal(t, runtime.OpenCode1_18_10Lifecycle().ID(), l2.Origin().Contract())
+			require.Equal(t, runtime.OpenCode1_18_29Lifecycle().ID(), l2.Origin().Contract())
 		})
 	}
 }
@@ -67,4 +61,13 @@ func identityKinds(values []waist.SemanticIdentity) []runtime.NativeIdentityKind
 		out[i] = values[i].Kind
 	}
 	return out
+}
+
+// TestEventMappingsCoverEveryRegisteredOpenCodeEvent holds the OpenCode
+// frontend mapping total over the generated registration and each pair correct
+// by native name. A mapped event is not an enabled one: admission is decided by
+// the activation table before any payload is read (internal/handlers).
+func TestEventMappingsCoverEveryRegisteredOpenCodeEvent(t *testing.T) {
+	t.Parallel()
+	testutil.AssertEventMappingsCoverRegistration(t, registration.OpenCode1_18_29(), runtime.OpenCode1_18_29Lifecycle(), opencode.Bind)
 }

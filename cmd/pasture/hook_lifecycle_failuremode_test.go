@@ -29,6 +29,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
@@ -57,7 +58,7 @@ type lifecycleRun struct {
 func runLifecycleHook(t *testing.T, binary, dbPath, event string, payload []byte, env ...string) lifecycleRun {
 	t.Helper()
 
-	return runLifecycleHookOn(t, binary, dbPath, "claude-code", event, "2.1.222", payload, env...)
+	return runLifecycleHookOn(t, binary, dbPath, "claude-code", event, "2.1.261", payload, env...)
 }
 
 // runLifecycleHookOn is runLifecycleHook with the harness and the host version
@@ -73,6 +74,25 @@ func runLifecycleHookOn(
 ) lifecycleRun {
 	t.Helper()
 
+	return runLifecycleHookIn(t, "", binary, dbPath, harness, event, hostVersion, payload, env...)
+}
+
+// runLifecycleHookIn is runLifecycleHookOn with the WORKING DIRECTORY of the
+// hook open. The hook decides whether a capture directory is inside a
+// repository from the directory the host started it in, so a test about that
+// decision must be able to start the hook inside a repository it built itself
+// rather than inside the checkout the suite happens to run from. An empty
+// workdir keeps the suite's own directory, which is what every other caller
+// wants.
+func runLifecycleHookIn(
+	t *testing.T,
+	workdir string,
+	binary, dbPath, harness, event, hostVersion string,
+	payload []byte,
+	env ...string,
+) lifecycleRun {
+	t.Helper()
+
 	command := exec.Command(binary,
 		databaseFlagName.Argument(), dbPath,
 		"hook", "lifecycle",
@@ -82,6 +102,7 @@ func runLifecycleHookOn(
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 	command.Env = append(os.Environ(), env...)
+	command.Dir = workdir
 
 	code := 0
 	if err := command.Run(); err != nil {
@@ -153,8 +174,8 @@ func TestLifecycleHookExitFollowsTheEffectiveFailureMode(t *testing.T) {
 
 	binary := lifecycleBinary(t)
 
-	preToolUse := claudeFixture(t, "pre_tool_use_2_1_222.json")
-	sessionStart := claudeFixture(t, "session_start_2_1_222.json")
+	preToolUse := claudeFixture(t, "pre_tool_use_2_1_261.json")
+	sessionStart := claudeFixture(t, "session_start_2_1_261.json")
 
 	// The two events used below carry the two ends of the contract, read from
 	// the shipped profile rather than restated here.
@@ -262,7 +283,7 @@ func TestLifecycleHookExitFollowsTheEffectiveFailureMode(t *testing.T) {
 
 		command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
 			"hook", "lifecycle", "--harness", "claude-code", "--event", "PreToolUse",
-			"--host-version", "2.1.222", "--no-such-flag")
+			"--host-version", "2.1.261", "--no-such-flag")
 		command.Stdin = bytes.NewReader(preToolUse)
 		var stdout, stderr bytes.Buffer
 		command.Stdout = &stdout
@@ -290,7 +311,7 @@ func TestLifecycleHookExitFollowsTheEffectiveFailureMode(t *testing.T) {
 
 		command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
 			"hook", "lifecycle", "--harness", "claude-code", "--event", "PreToolUse",
-			"--host-version", "2.1.222", "unexpected-argument")
+			"--host-version", "2.1.261", "unexpected-argument")
 		command.Stdin = bytes.NewReader(preToolUse)
 		var stdout, stderr bytes.Buffer
 		command.Stdout = &stdout
@@ -341,7 +362,7 @@ func TestLifecycleHookExitFollowsTheEffectiveFailureMode(t *testing.T) {
 // SERIAL: this test drives the shared hookLifecycleCmd and writes flagDBPath,
 // so it must not use t.Parallel.
 func TestLifecycleHookPanicBecomesAFault(t *testing.T) {
-	coords := lifecycleCoordinates{Harness: "claude-code", Event: "PreToolUse", HostVersion: "2.1.222"}
+	coords := lifecycleCoordinates{Harness: "claude-code", Event: "PreToolUse", HostVersion: "2.1.261"}
 	failure := lifecycleFailurePolicy(coords)
 	require.Equal(t, pastureruntime.FailureExitTwoBlocks, failure.Mode)
 
@@ -377,7 +398,7 @@ func TestLifecycleHookPanicBecomesAFault(t *testing.T) {
 // change what the host is told. The record is evidence for a maintainer; a host
 // must not be blocked, or released, by pasture's own bookkeeping.
 func TestLifecycleFaultRecordIsBestEffort(t *testing.T) {
-	coords := lifecycleCoordinates{Harness: "claude-code", Event: "PreToolUse", HostVersion: "2.1.222"}
+	coords := lifecycleCoordinates{Harness: "claude-code", Event: "PreToolUse", HostVersion: "2.1.261"}
 	failure := lifecycleFailurePolicy(coords)
 
 	dir := t.TempDir()
@@ -481,7 +502,7 @@ func TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked(t *testin
 
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
-	sessionStart := claudeFixture(t, "session_start_2_1_222.json")
+	sessionStart := claudeFixture(t, "session_start_2_1_261.json")
 
 	locked := make(chan struct{})
 	release := make(chan struct{})
@@ -1054,7 +1075,7 @@ func TestAPanicInTheWorkGoroutineIsAFaultAndNeverABlock(t *testing.T) {
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
-	cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.10", dbPath)
+	cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.29", dbPath)
 	cmd.SetIn(panickingReader{message: "the host payload reader failed"})
 
 	outcome := lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), context.WithTimeout)
@@ -1096,8 +1117,8 @@ func TestAPanicBeforeTheWorkStartsIsAFaultAndNeverACrash(t *testing.T) {
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
-	cmd := lifecycleTestCommand(t, "claude-code", "SessionStart", "2.1.222", dbPath)
-	cmd.SetIn(bytes.NewReader(claudeFixture(t, "session_start_2_1_222.json")))
+	cmd := lifecycleTestCommand(t, "claude-code", "SessionStart", "2.1.261", dbPath)
+	cmd.SetIn(bytes.NewReader(claudeFixture(t, "session_start_2_1_261.json")))
 	//nolint:staticcheck // A nil context is the injected fault; cobra owns this seam.
 	cmd.SetContext(nil)
 
@@ -1238,8 +1259,8 @@ func TestAnInvocationAbandonedAfterItsCommitTellsTheHostTheTruth(t *testing.T) {
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
-	cmd := lifecycleTestCommand(t, "claude-code", "SessionStart", "2.1.222", dbPath)
-	cmd.SetIn(bytes.NewReader(claudeFixture(t, "session_start_2_1_222.json")))
+	cmd := lifecycleTestCommand(t, "claude-code", "SessionStart", "2.1.261", dbPath)
+	cmd.SetIn(bytes.NewReader(claudeFixture(t, "session_start_2_1_261.json")))
 
 	outcome := abandonAfterTheCommit(t, cmd)
 
@@ -1491,8 +1512,8 @@ func TestTheFailClosedReasonFollowsTheDeclaredModeThroughTheBuiltBinary(t *testi
 			name:         "a declared blocking Claude gate with no citation reads the evidence reason",
 			harness:      "claude-code",
 			event:        "PreCompact",
-			hostVersion:  "2.1.222",
-			payload:      claudeFixture(t, "pre_compact_2_1_222.json"),
+			hostVersion:  "2.1.261",
+			payload:      claudeFixture(t, "pre_compact_2_1_261.json"),
 			wantDeclared: pastureruntime.FailureExitTwoBlocks,
 			wantExitCode: 0,
 			wantReason:   evidenceReason,
@@ -1502,8 +1523,8 @@ func TestTheFailClosedReasonFollowsTheDeclaredModeThroughTheBuiltBinary(t *testi
 			name:         "a declared blocking Codex gate with no citation reads the evidence reason",
 			harness:      "codex",
 			event:        "PreToolUse",
-			hostVersion:  "0.146.0",
-			payload:      codexFixture(t, "pre_tool_use_0_146_0.json"),
+			hostVersion:  "0.153.0",
+			payload:      codexFixture(t, "pre_tool_use_0_153_0.json"),
 			wantDeclared: pastureruntime.FailureStrictExitTwoBlocks,
 			wantExitCode: 0,
 			wantReason:   evidenceReason,
@@ -1513,8 +1534,8 @@ func TestTheFailClosedReasonFollowsTheDeclaredModeThroughTheBuiltBinary(t *testi
 			name:         "a declared non-blocking Claude observation reads the mode reason",
 			harness:      "claude-code",
 			event:        "PostToolUse",
-			hostVersion:  "2.1.222",
-			payload:      claudeFixture(t, "post_tool_use_2_1_222.json"),
+			hostVersion:  "2.1.261",
+			payload:      claudeFixture(t, "post_tool_use_2_1_261.json"),
 			wantDeclared: pastureruntime.FailureReportAndContinue,
 			wantExitCode: 0,
 			wantReason:   modeReason,
@@ -1524,8 +1545,8 @@ func TestTheFailClosedReasonFollowsTheDeclaredModeThroughTheBuiltBinary(t *testi
 			name:         "a declared blocking Claude gate WITH a citation still refuses the operation",
 			harness:      "claude-code",
 			event:        "PreToolUse",
-			hostVersion:  "2.1.222",
-			payload:      claudeFixture(t, "pre_tool_use_2_1_222.json"),
+			hostVersion:  "2.1.261",
+			payload:      claudeFixture(t, "pre_tool_use_2_1_261.json"),
 			wantDeclared: pastureruntime.FailureExitTwoBlocks,
 			wantEvidence: true,
 			wantExitCode: 2,
@@ -1579,8 +1600,8 @@ func TestTheDiagnosticSeparatesTheDeclaredModeFromTheEffectiveOne(t *testing.T) 
 
 	dir := t.TempDir()
 	run := runLifecycleHookOn(t, binary, unopenableDatabase(t, dir),
-		"claude-code", "PreCompact", "2.1.222",
-		claudeFixture(t, "pre_compact_2_1_222.json"), hookFailClosedEnv+"=1")
+		"claude-code", "PreCompact", "2.1.261",
+		claudeFixture(t, "pre_compact_2_1_261.json"), hookFailClosedEnv+"=1")
 
 	assert.Contains(t, run.Stderr, "declared failure mode exit-2-blocks",
 		"the DECLARED mode of an uncited blocking gate is the blocking one, and the diagnostic must say so")
@@ -1607,12 +1628,12 @@ func TestTheFaultRecordTellsADemotedGateFromADeclaredObservation(t *testing.T) {
 
 	demotedDir := t.TempDir()
 	demoted := runLifecycleHookOn(t, binary, unopenableDatabase(t, demotedDir),
-		"claude-code", "PreCompact", "2.1.222",
-		claudeFixture(t, "pre_compact_2_1_222.json"))
+		"claude-code", "PreCompact", "2.1.261",
+		claudeFixture(t, "pre_compact_2_1_261.json"))
 	observationDir := t.TempDir()
 	observation := runLifecycleHookOn(t, binary, unopenableDatabase(t, observationDir),
-		"claude-code", "PostToolUse", "2.1.222",
-		claudeFixture(t, "post_tool_use_2_1_222.json"))
+		"claude-code", "PostToolUse", "2.1.261",
+		claudeFixture(t, "post_tool_use_2_1_261.json"))
 
 	demotedRecords := readFaultRecords(t, demoted.FaultDir)
 	require.Len(t, demotedRecords, 1)
@@ -1654,7 +1675,7 @@ func TestAFaultThatCannotBeClassifiedNamesEveryInputThatWasNotUsable(t *testing.
 		"a fault with no declared mode has nothing to map, which is the case this message explains")
 
 	text := unclassifiableFaultDiagnostic(
-		lifecycleCoordinates{Harness: ir.HarnessClaudeCode, Event: "PreToolUse", HostVersion: "2.1.222"},
+		lifecycleCoordinates{Harness: ir.HarnessClaudeCode, Event: "PreToolUse", HostVersion: "2.1.261"},
 		fault.UnusableInputs(), fault.Cause)
 
 	assert.Contains(t, text, "the declared failure mode is unset or not a known mode",
@@ -1712,7 +1733,7 @@ func TestAFaultThatCannotBeClassifiedNamesEveryInputThatWasNotUsable(t *testing.
 // SERIAL: this test drives the shared hookLifecycleCmd and writes flagDBPath,
 // so it must not use t.Parallel.
 func TestBothExitOneArmsCarryTheSameNarrowedClaim(t *testing.T) {
-	coords := lifecycleCoordinates{Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: "1.18.19"}
+	coords := lifecycleCoordinates{Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: pastureruntime.OpenCode1_18_29().Versions().Min().String()}
 
 	dir := t.TempDir()
 	previous := flagDBPath
@@ -1793,7 +1814,7 @@ func TestBothExitOneArmsCarryTheSameNarrowedClaim(t *testing.T) {
 // MUTATION: restore the bare "return" in place of the message in
 // recordLifecycleFault. This test turns RED.
 func TestTheFaultRecordSaysSoWhenTheStorePathNamesNoDirectory(t *testing.T) {
-	coords := lifecycleCoordinates{Harness: ir.HarnessClaudeCode, Event: "PreToolUse", HostVersion: "2.1.222"}
+	coords := lifecycleCoordinates{Harness: ir.HarnessClaudeCode, Event: "PreToolUse", HostVersion: "2.1.261"}
 
 	// A bare file name, which is what "--db pasture.db" resolves to. It names
 	// no directory, so lifecycleFaultRecordPath has nowhere to put the record.
@@ -1861,7 +1882,7 @@ func TestTheFaultRecordSaysSoWhenTheStorePathNamesNoDirectory(t *testing.T) {
 // SERIAL: this test drives the shared hookLifecycleCmd and writes flagDBPath,
 // so it must not use t.Parallel.
 func TestTheUnusableInputListHasAVisibleEnd(t *testing.T) {
-	coords := lifecycleCoordinates{Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: "1.18.19"}
+	coords := lifecycleCoordinates{Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: pastureruntime.OpenCode1_18_29().Versions().Min().String()}
 
 	dir := t.TempDir()
 	previous := flagDBPath
@@ -1928,7 +1949,7 @@ func TestTheUnusableInputListHasAVisibleEnd(t *testing.T) {
 // SERIAL: this test drives the shared hookLifecycleCmd and writes flagDBPath,
 // so it must not use t.Parallel.
 func TestTheMappableFaultRecordsAnEmptyArrayAndNotNull(t *testing.T) {
-	coords := lifecycleCoordinates{Harness: ir.HarnessClaudeCode, Event: "PreToolUse", HostVersion: "2.1.222"}
+	coords := lifecycleCoordinates{Harness: ir.HarnessClaudeCode, Event: "PreToolUse", HostVersion: "2.1.261"}
 
 	dir := t.TempDir()
 	previous := flagDBPath
@@ -2058,8 +2079,9 @@ func TestEveryDeclaredRowDiffersFromItsEffectiveModeOnlyByTheEvidenceRule(t *tes
 			"change can reach this line — the counter is unconditional and the lookup check above "+
 			"ends the test first — so it guards a later exemption, filter or early continue added "+
 			"inside this loop, which would silently shrink the population every assertion above sees")
-	require.GreaterOrEqual(t, checked, 87,
-		"the three pinned profiles declare 87 rows between them (30 Claude, 10 Codex, 47 OpenCode); a catalog that returned fewer would pass every assertion above while walking a fraction of the population, which is the defect this size assertion replaces")
+	registered := len(registration.ClaudeCode2_1_261().Entries()) + len(registration.Codex0_153_0().Entries()) + len(registration.OpenCode1_18_29().Entries())
+	require.GreaterOrEqual(t, checked, registered,
+		"the three pinned profiles declare %d rows between them, one per registered event; a catalog that returned fewer would pass every assertion above while walking a fraction of the population, which is the defect this size assertion replaces", registered)
 }
 
 // TestTheUnmappableFaultRecordSaysWhatStderrSays drives the ONE arm the exit
@@ -2078,7 +2100,7 @@ func TestEveryDeclaredRowDiffersFromItsEffectiveModeOnlyByTheEvidenceRule(t *tes
 // SERIAL: this test drives the shared hookLifecycleCmd and writes flagDBPath,
 // so it must not use t.Parallel.
 func TestTheUnmappableFaultRecordSaysWhatStderrSays(t *testing.T) {
-	coords := lifecycleCoordinates{Harness: ir.HarnessClaudeCode, Event: "PreToolUse", HostVersion: "2.1.222"}
+	coords := lifecycleCoordinates{Harness: ir.HarnessClaudeCode, Event: "PreToolUse", HostVersion: "2.1.261"}
 
 	dir := t.TempDir()
 	previous := flagDBPath
@@ -3597,9 +3619,9 @@ func TestTheFaultRecordRefusalQuotesThePathTheEnvironmentResolvedTo(t *testing.T
 		"the store path must be a directory, so opening it as a database is a real storage fault")
 
 	command := exec.Command(binary, "hook", "lifecycle",
-		"--harness", "claude-code", "--event", "PreToolUse", "--host-version", "2.1.222")
+		"--harness", "claude-code", "--event", "PreToolUse", "--host-version", "2.1.261")
 	command.Dir = work
-	command.Stdin = bytes.NewReader(claudeFixture(t, "pre_tool_use_2_1_222.json"))
+	command.Stdin = bytes.NewReader(claudeFixture(t, "pre_tool_use_2_1_261.json"))
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr
@@ -3699,7 +3721,7 @@ func TestTheFaultRecordOpenFailureIsReportedOnStandardErrorOnly(t *testing.T) {
 			"itself cannot be opened, on any user including root")
 
 	run := runLifecycleHook(t, binary, database, "PreToolUse",
-		claudeFixture(t, "pre_tool_use_2_1_222.json"))
+		claudeFixture(t, "pre_tool_use_2_1_261.json"))
 
 	require.Equal(t, 0, run.ExitCode,
 		"this route is fail-open: the record is evidence for a maintainer and never a condition "+
@@ -3786,7 +3808,7 @@ func TestEveryDrivableFaultRecordLossIsMeasuredOnTheHostBytes(t *testing.T) {
 				"cannot be created and opening the store is a real fault as well")
 
 		run := runLifecycleHook(t, binary, filepath.Join(blocker, "sub", "pasture.db"),
-			"PreToolUse", claudeFixture(t, "pre_tool_use_2_1_222.json"))
+			"PreToolUse", claudeFixture(t, "pre_tool_use_2_1_261.json"))
 
 		assert.Equal(t, 0, run.ExitCode,
 			"this route is fail-open: the record is evidence for a maintainer and never a "+
@@ -3824,7 +3846,7 @@ func TestEveryDrivableFaultRecordLossIsMeasuredOnTheHostBytes(t *testing.T) {
 				"which is the append failure driven with nothing simulated")
 
 		run := runLifecycleHook(t, binary, database, "PreToolUse",
-			claudeFixture(t, "pre_tool_use_2_1_222.json"))
+			claudeFixture(t, "pre_tool_use_2_1_261.json"))
 
 		assert.Equal(t, 0, run.ExitCode,
 			"this route is fail-open: the record is evidence for a maintainer and never a "+
@@ -4006,13 +4028,13 @@ var unbindableHostPayloads = []struct {
 	Identities  string
 }{
 	{
-		Harness: "opencode", Event: "tool.execute.before", HostVersion: "1.18.10",
+		Harness: "opencode", Event: "tool.execute.before", HostVersion: "1.18.29",
 		Payload:    `{"input":{"session_id":"s","call_id":"c"},"output":{"args":{}}}`,
 		Continue:   `{"decision":"proceed"}`,
 		Identities: "session, tool-call",
 	},
 	{
-		Harness: "codex", Event: "PreToolUse", HostVersion: "0.146.0",
+		Harness: "codex", Event: "PreToolUse", HostVersion: "0.153.0",
 		Payload:    `{"renamed_session":"s","hook_event_name":"PreToolUse"}`,
 		Continue:   `{"continue":true}`,
 		Identities: "session, turn, tool-call",
@@ -4021,7 +4043,7 @@ var unbindableHostPayloads = []struct {
 		// Claude's continuation IS the empty body, so this row's continue bytes
 		// are empty on purpose. The claim it carries is the diagnostic and the
 		// record, which are what a Claude operator has.
-		Harness: "claude-code", Event: "PreToolUse", HostVersion: "2.1.222",
+		Harness: "claude-code", Event: "PreToolUse", HostVersion: "2.1.261",
 		Payload:    `{"renamed_session":"s","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{}}`,
 		Continue:   "",
 		Identities: "session",
@@ -4143,7 +4165,7 @@ func TestTheFailClosedOptInReachesAnUnbindableHostPayload(t *testing.T) {
 	openDB := filepath.Join(open, "pasture.db")
 	initializeLifecycleTestDatabase(t, openDB)
 	openRun := runLifecycleHookOn(t, binary, openDB,
-		"claude-code", "PreToolUse", "2.1.222", []byte(payload))
+		"claude-code", "PreToolUse", "2.1.261", []byte(payload))
 	require.Equal(t, 0, openRun.ExitCode,
 		"the default is fail-open, so this row must let the host continue.\nstderr: %s", openRun.Stderr)
 
@@ -4151,7 +4173,7 @@ func TestTheFailClosedOptInReachesAnUnbindableHostPayload(t *testing.T) {
 	closedDB := filepath.Join(closed, "pasture.db")
 	initializeLifecycleTestDatabase(t, closedDB)
 	closedRun := runLifecycleHookOn(t, binary, closedDB,
-		"claude-code", "PreToolUse", "2.1.222", []byte(payload),
+		"claude-code", "PreToolUse", "2.1.261", []byte(payload),
 		"PASTURE_HOOK_FAIL_CLOSED=1")
 
 	assert.Equal(t, 2, closedRun.ExitCode,
@@ -4350,13 +4372,13 @@ func TestTheRoutesThatNeverOpenAStoreSayTheDeliveryWasNotRecorded(t *testing.T) 
 		{
 			Name: "the flag-parse refusal",
 			Args: []string{"hook", "lifecycle", "--harness", "claude-code", "--event", "PreToolUse",
-				"--host-version", "2.1.222", "--not-a-flag"},
+				"--host-version", "2.1.261", "--not-a-flag"},
 			Says: "could not parse its flags",
 		},
 		{
 			Name: "the argument refusal",
 			Args: []string{"hook", "lifecycle", "--harness", "claude-code", "--event", "PreToolUse",
-				"--host-version", "2.1.222", "an-unexpected-argument"},
+				"--host-version", "2.1.261", "an-unexpected-argument"},
 			Says: "",
 		},
 	} {
@@ -4535,7 +4557,7 @@ func TestAPanicAfterTheCommitDoesNotClaimTheDeliveryWasNotRecorded(t *testing.T)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
-	cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.10", dbPath)
+	cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.29", dbPath)
 	cmd.SetIn(bytes.NewReader(openCodeToolExecuteBeforeWire(t)))
 
 	outcome := lifecycleOutcome(cmd, nil,
@@ -4747,7 +4769,7 @@ func TestTheOuterPanicRecoveryNeverClaimsMoreThanItsRegionCanSupport(t *testing.
 func claudePayloadWithAddedMember(t *testing.T) []byte {
 	t.Helper()
 	var members map[string]json.RawMessage
-	require.NoError(t, json.Unmarshal(claudeFixture(t, "pre_tool_use_2_1_222.json"), &members),
+	require.NoError(t, json.Unmarshal(claudeFixture(t, "pre_tool_use_2_1_261.json"), &members),
 		"the committed fixture must decode")
 	members["a_field_this_build_does_not_declare"] = json.RawMessage(`"x"`)
 	extended, err := json.Marshal(members)
@@ -4941,12 +4963,12 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 			if event == "" {
 				event = "PreToolUse"
 			}
-			harness, version := row.Harness, "2.1.222"
+			harness, version := row.Harness, "2.1.261"
 			if harness == "" {
 				harness = "claude-code"
 			}
 			if harness == "codex" {
-				version = "0.146.0"
+				version = "0.153.0"
 			}
 			run := runLifecycleHookOn(t, binary, database,
 				harness, event, version, row.Payload)
@@ -5044,7 +5066,7 @@ func TestAdviceFollowsTheCauseAndNotTheClassifier(t *testing.T) {
 		dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 		initializeLifecycleTestDatabase(t, dbPath)
 
-		cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.10", dbPath)
+		cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.29", dbPath)
 		cmd.SetIn(bytes.NewReader(openCodeToolExecuteBeforeWire(t)))
 		outcome := lifecycleOutcome(cmd, nil,
 			panickingCommitBarrier{message: "the commit boundary failed after the receipt was written"},
@@ -5065,7 +5087,7 @@ func TestAdviceFollowsTheCauseAndNotTheClassifier(t *testing.T) {
 		dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 		initializeLifecycleTestDatabase(t, dbPath)
 
-		cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.10", dbPath)
+		cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.29", dbPath)
 		cmd.SetIn(bytes.NewReader(openCodeToolExecuteBeforeWire(t)))
 
 		// The same shape as the abandonment proof beside this one: the
@@ -5111,7 +5133,7 @@ func TestAHostThatAddsAFieldIsRefusedWithATrueSentence(t *testing.T) {
 
 	binary := lifecycleBinary(t)
 
-	authentic := claudeFixture(t, "pre_tool_use_2_1_222.json")
+	authentic := claudeFixture(t, "pre_tool_use_2_1_261.json")
 	var members map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(authentic, &members),
 		"the committed fixture must decode, or the control below proves nothing")
@@ -5123,7 +5145,7 @@ func TestAHostThatAddsAFieldIsRefusedWithATrueSentence(t *testing.T) {
 		store := t.TempDir()
 		database := filepath.Join(store, "pasture.db")
 		initializeLifecycleTestDatabase(t, database)
-		run := runLifecycleHookOn(t, binary, database, "claude-code", "PreToolUse", "2.1.222", authentic)
+		run := runLifecycleHookOn(t, binary, database, "claude-code", "PreToolUse", "2.1.261", authentic)
 		require.Equal(t, 0, run.ExitCode)
 		require.Empty(t, run.Stderr,
 			"the authentic payload must bind in silence; if it does not, the added member is not "+
@@ -5134,7 +5156,7 @@ func TestAHostThatAddsAFieldIsRefusedWithATrueSentence(t *testing.T) {
 		store := t.TempDir()
 		database := filepath.Join(store, "pasture.db")
 		initializeLifecycleTestDatabase(t, database)
-		run := runLifecycleHookOn(t, binary, database, "claude-code", "PreToolUse", "2.1.222", extended)
+		run := runLifecycleHookOn(t, binary, database, "claude-code", "PreToolUse", "2.1.261", extended)
 
 		require.Equal(t, 0, run.ExitCode,
 			"an unreadable payload is fail-open: the host carries on with its own answer")
@@ -5189,7 +5211,7 @@ func TestEveryRefusalBeforeAWriteSaysNoRowExists(t *testing.T) {
 	t.Parallel()
 
 	binary := lifecycleBinary(t)
-	payload := claudeFixture(t, "pre_tool_use_2_1_222.json")
+	payload := claudeFixture(t, "pre_tool_use_2_1_261.json")
 
 	for _, row := range []struct {
 		Name    string
@@ -5219,7 +5241,7 @@ func TestEveryRefusalBeforeAWriteSaysNoRowExists(t *testing.T) {
 	} {
 		t.Run(row.Name, func(t *testing.T) {
 			dbPath := row.Store(t)
-			run := runLifecycleHookOn(t, binary, dbPath, row.Harness, row.Event, "2.1.222", payload)
+			run := runLifecycleHookOn(t, binary, dbPath, row.Harness, row.Event, "2.1.261", payload)
 
 			require.Equal(t, 0, run.ExitCode,
 				"these refusals are fail-open: the host carries on.\nstderr: %s", run.Stderr)
@@ -6347,19 +6369,19 @@ func TestTheSchemaAdviceFollowsTheParserThatRefused(t *testing.T) {
 		Renamed []byte
 	}{
 		"claude-code": {
-			Event: "PreToolUse", HostVersion: "2.1.222",
-			Valid:    claudeFixture(t, "pre_tool_use_2_1_222.json"),
+			Event: "PreToolUse", HostVersion: "2.1.261",
+			Valid:    claudeFixture(t, "pre_tool_use_2_1_261.json"),
 			Identity: "session_id",
 			Renamed:  []byte(`{"renamed":"s","hook_event_name":"PreToolUse","tool_name":"R","tool_input":{}}`),
 		},
 		"codex": {
-			Event: "PreToolUse", HostVersion: "0.146.0",
-			Valid:    codexFixture(t, "pre_tool_use_0_146_0.json"),
+			Event: "PreToolUse", HostVersion: "0.153.0",
+			Valid:    codexFixture(t, "pre_tool_use_0_153_0.json"),
 			Identity: "session_id",
 			Renamed:  []byte(`{"renamed":"s","hook_event_name":"PreToolUse"}`),
 		},
 		"opencode": {
-			Event: "tool.execute.before", HostVersion: "1.18.10",
+			Event: "tool.execute.before", HostVersion: "1.18.29",
 			Valid:    openCodeToolExecuteBeforeWire(t),
 			Identity: "sessionID",
 			Renamed:  []byte(`{"input":{"tool":"read","renamed":"ses1","callID":"call1"},"output":{"args":{}}}`),
@@ -6971,11 +6993,11 @@ func TestTheReadOnlyStoreRouteWritesOnlyTheHostsContinueBytesOnEveryHarness(t *t
 		// pin below looks for beside the measured bytes.
 		Name string
 	}{
-		"claude-code": {Event: "PreToolUse", HostVersion: "2.1.222",
-			Payload: claudeFixture(t, "pre_tool_use_2_1_222.json"), Name: "Claude Code"},
-		"codex": {Event: "PreToolUse", HostVersion: "0.146.0",
-			Payload: codexFixture(t, "pre_tool_use_0_146_0.json"), Name: "Codex"},
-		"opencode": {Event: "tool.execute.before", HostVersion: "1.18.10",
+		"claude-code": {Event: "PreToolUse", HostVersion: "2.1.261",
+			Payload: claudeFixture(t, "pre_tool_use_2_1_261.json"), Name: "Claude Code"},
+		"codex": {Event: "PreToolUse", HostVersion: "0.153.0",
+			Payload: codexFixture(t, "pre_tool_use_0_153_0.json"), Name: "Codex"},
+		"opencode": {Event: "tool.execute.before", HostVersion: "1.18.29",
 			Payload: openCodeToolExecuteBeforeWire(t), Name: "OpenCode"},
 	}
 	coordinates, derivationErr := handlers.LifecycleHarnessCoordinates()
@@ -7113,7 +7135,7 @@ func TestAnUndeclaredCoordinateIsNotReportedAsADeclaration(t *testing.T) {
 		{name: "a harness this build does not support", harness: "gemini", event: "NotAnEvent",
 			hostVersion: "1.0", cause: "is not supported"},
 		{name: "an event the registration does not carry", harness: "claude-code", event: "NotAnEvent",
-			hostVersion: "2.1.222", cause: "is not in the generated"},
+			hostVersion: "2.1.261", cause: `declares no native event named "NotAnEvent"`},
 	} {
 		route := route
 		t.Run(route.name, func(t *testing.T) {
@@ -7153,7 +7175,7 @@ func TestAnUndeclaredCoordinateIsNotReportedAsADeclaration(t *testing.T) {
 	t.Run("a declared row is still reported as a declaration", func(t *testing.T) {
 		dir := t.TempDir()
 		run := runLifecycleHookOn(t, binary, unopenableDatabase(t, dir),
-			"claude-code", "PostToolUse", "2.1.222", claudeFixture(t, "post_tool_use_2_1_222.json"))
+			"claude-code", "PostToolUse", "2.1.261", claudeFixture(t, "post_tool_use_2_1_261.json"))
 		assert.Contains(t, run.Stderr, "declared failure mode report-and-continue",
 			"a declared row names its declaration, and the control must keep saying so")
 		assert.NotContains(t, run.Stderr, "declared failure mode none",

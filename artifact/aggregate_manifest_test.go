@@ -21,8 +21,8 @@ func TestAggregateManifestRejectsMovingAssetAndRevisionMismatch(t *testing.T) {
 		{"moving alias", `"asset":"pasture-1.2.0-claude-skills.tgz"`, `"asset":"pasture-stable"`},
 		{"moving alias token", `"asset":"pasture-1.2.0-claude-skills.tgz"`, `"asset":"pasture-stable-1.2.0.tgz"`},
 		{"revision mismatch", `"pasture_revision":"1111111111111111111111111111111111111111"`, `"pasture_revision":"3333333333333333333333333333333333333333"`},
-		{"wrong runtime harness", `"runtime_contract":"claude-code/claude-code@2.1.210"`, `"runtime_contract":"codex/codex@0.144.1"`},
-		{"unknown runtime profile", `"runtime_contract":"claude-code/claude-code@2.1.210"`, `"runtime_contract":"claude-code/typo"`},
+		{"wrong runtime harness", claudeRuntimeContractMember(t), `"runtime_contract":"codex/codex@0.144.1"`},
+		{"unknown runtime profile", claudeRuntimeContractMember(t), `"runtime_contract":"claude-code/typo"`},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
@@ -126,7 +126,7 @@ func TestStrictSemanticFaultMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	componentLine := `{"id":"claude-code/skills","harness":"claude-code","extension":"skills","asset":"pasture-1.2.0-claude-skills.tgz","digest":"sha256:71f23de8f2deec7f803d7279181636edb9492b97571a78f402d94c00f93429ad","bundle_id":"artifact.bundle.v1:sha256:1111111111111111111111111111111111111111111111111111111111111111","runtime_contract":"claude-code/claude-code@2.1.210","pasture_revision":"1111111111111111111111111111111111111111","aura_revision":"2222222222222222222222222222222222222222"},
+	componentLine := `{"id":"claude-code/skills","harness":"claude-code","extension":"skills","asset":"pasture-1.2.0-claude-skills.tgz","digest":"sha256:71f23de8f2deec7f803d7279181636edb9492b97571a78f402d94c00f93429ad","bundle_id":"artifact.bundle.v1:sha256:1111111111111111111111111111111111111111111111111111111111111111","runtime_contract":"` + productionClaudeContract(t) + `","pasture_revision":"1111111111111111111111111111111111111111","aura_revision":"2222222222222222222222222222222222222222"},
 `
 	cases := []struct {
 		name  string
@@ -160,4 +160,22 @@ func TestChecksumErrorsHaveTypedLocation(t *testing.T) {
 	if !errors.As(err, &validation) || validation.Stage != "manifest checksum verification" || validation.Field != artifact.AggregateChecksumAsset {
 		t.Fatalf("error=%v", err)
 	}
+}
+
+// productionClaudeContract is the Claude runtime contract id the tree records,
+// read from the one root so a fixture line never restates a version.
+func productionClaudeContract(t *testing.T) string {
+	t.Helper()
+	root, err := artifact.ProductionRuntimeContract(artifact.HarnessClaudeCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root.String()
+}
+
+// claudeRuntimeContractMember is the manifest member a component line carries
+// for the recorded Claude runtime contract.
+func claudeRuntimeContractMember(t *testing.T) string {
+	t.Helper()
+	return `"runtime_contract":"` + productionClaudeContract(t) + `"`
 }

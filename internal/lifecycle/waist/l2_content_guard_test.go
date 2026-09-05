@@ -102,9 +102,9 @@ func collectGuardRows[E comparable](t *testing.T, contract runtime.LifecycleCont
 // lifecycle profiles.
 func pinnedProfileRows(t *testing.T) []guardRow {
 	t.Helper()
-	rows := collectGuardRows(t, runtime.ClaudeCode2_1_210Lifecycle())
-	rows = append(rows, collectGuardRows(t, runtime.Codex0_146_0Lifecycle())...)
-	rows = append(rows, collectGuardRows(t, runtime.OpenCode1_18_10Lifecycle())...)
+	rows := collectGuardRows(t, runtime.ClaudeCode2_1_261Lifecycle())
+	rows = append(rows, collectGuardRows(t, runtime.Codex0_153_0Lifecycle())...)
+	rows = append(rows, collectGuardRows(t, runtime.OpenCode1_18_29Lifecycle())...)
 	return rows
 }
 
@@ -113,7 +113,7 @@ func pinnedProfileRows(t *testing.T) []guardRow {
 func registrationRows(t *testing.T) map[string]registration.Event {
 	t.Helper()
 	rows := map[string]registration.Event{}
-	for _, manifest := range []registration.Manifest{registration.ClaudeCode2_1_210(), registration.Codex0_146_0(), registration.OpenCode1_18_10()} {
+	for _, manifest := range []registration.Manifest{registration.ClaudeCode2_1_261(), registration.Codex0_153_0(), registration.OpenCode1_18_29()} {
 		entries := manifest.Entries()
 		require.NotEmpty(t, entries, "the %s registration manifest declared no events, so this guard would check nothing for it", manifest.Harness)
 		for _, event := range entries {

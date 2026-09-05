@@ -34,6 +34,9 @@ const (
 	EventMessageDisplay
 	EventElicitation
 	EventElicitationResult
+	EventPreModelSwitch
+	EventPostModelSwitch
+	EventDirectoryAdded
 	EventOpenCodeCommandExecuted
 	EventOpenCodeFileEdited
 	EventOpenCodeFileWatcherUpdated
@@ -91,10 +94,13 @@ const (
 	EventCodexSubagentStart
 	EventCodexSubagentStop
 	EventCodexStop
+	EventCodexSessionEnd
+	EventCodexInterrupt
 )
 
 const (
 	FieldSessionID model.NativeFieldID = iota + 1
+	FieldScratchpadDir
 	FieldTranscriptPath
 	FieldCWD
 	FieldPermissionMode

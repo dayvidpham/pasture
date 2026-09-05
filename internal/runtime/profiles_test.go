@@ -6,12 +6,14 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/effects"
 	"github.com/dayvidpham/pasture/internal/runtime"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -54,9 +56,212 @@ func TestPinnedContractsClassifyEveryCoreOperation(t *testing.T) {
 	}
 }
 
+// contractInstructionText is one prose text a runtime contract hands an agent
+// or an operator: the instruction of a semantic lowering, the instruction of a
+// parent-mediated lowering, or the reason an unsupported operation is refused.
+// It carries the harness and the operation so a failure names the row a person
+// must open.
+type contractInstructionText struct {
+	harness   ir.HarnessID
+	operation ir.OperationKind
+	kind      string
+	text      string
+}
+
+// contractInstructionTexts DERIVES the population from the contracts
+// themselves, through the same production lookup an agent uses: every pinned
+// contract, every core operation, and the text of whichever lowering that row
+// carries. A contract, an operation or a harness added later is covered the day
+// it exists, with no list to update here.
+func contractInstructionTexts(t *testing.T) []contractInstructionText {
+	t.Helper()
+
+	var texts []contractInstructionText
+	for _, contract := range runtime.PinnedContracts() {
+		for _, kind := range ir.AllOperationKinds() {
+			descriptor, ok := runtime.CoreOperationDescriptorFor(kind)
+			require.True(t, ok, "core operation %q has no descriptor", kind)
+			binding, err := runtime.LookupOperationBinding(contract, descriptor)
+			if err != nil {
+				// An unsupported operation yields no binding: its refusal reason
+				// reaches the caller inside this error, which is the only place a
+				// person ever reads it.
+				texts = append(texts, contractInstructionText{contract.Harness(), kind, "refusal", err.Error()})
+				continue
+			}
+			if semantic, isSemantic := binding.Semantic(); isSemantic {
+				texts = append(texts, contractInstructionText{contract.Harness(), kind, "semantic instruction", semantic.InstructionTemplate()})
+			}
+			if mediated, isMediated := binding.Mediated(); isMediated {
+				texts = append(texts, contractInstructionText{contract.Harness(), kind, "mediated instruction", mediated.Instruction()})
+			}
+		}
+	}
+	return texts
+}
+
+// hostCapabilityClaims are the shapes of a sentence that asserts what the HOST
+// does or does not offer. A contract cannot know that: it knows only what it
+// itself binds. Each of these once appeared in a shipped instruction with the
+// pinned host version formatted into it, so a version bump silently re-asserted
+// an unchecked claim about a different host — and at least one of them was
+// false of the host it named.
+var hostCapabilityClaims = []string{
+	"exposes no",
+	"has no native",
+	"does not expose",
+	"offers no",
+}
+
+// processWords name this project's own workflow with no product meaning in a
+// contract instruction: nothing in the runtime ever names a "review", a
+// "reviewer" or a "proposal". Matching is case-insensitive and whole-word, so
+// "reviewed" catches "reviewed" but not, say, "unreviewed".
+var processWords = []string{
+	"reviewed",
+	"review",
+	"reviewer",
+	"proposal",
+}
+
+// protocolNumberedShapes are the NUMBERED or ROLE-TOKENED forms of "phase"
+// and "slice" that name a Pasture Protocol tracking artefact ("Phase 8",
+// "phase-8", "SLICE-1", "M3-SLICE-1"). A BARE "phase" or "slice" is allowed:
+// from the field-labelled actionable-error shape (what/why/where/when/phase/
+// impact/fix) onward, "phase" is also ordinary product vocabulary for a task
+// phase, and a bare word carries no tracking reference by itself. Only the
+// numbered form does.
+var protocolNumberedShapes = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bphase[ -]\d`),
+	regexp.MustCompile(`(?i)\bslice[ -][A-Za-z0-9]`),
+}
+
+// wordBoundaryPattern reports whether text contains word as a whole word,
+// case-insensitively.
+func containsWholeWord(text, word string) bool {
+	lowerText := strings.ToLower(text)
+	lowerWord := strings.ToLower(word)
+	start := 0
+	for {
+		idx := strings.Index(lowerText[start:], lowerWord)
+		if idx < 0 {
+			return false
+		}
+		idx += start
+		before := idx == 0 || !isWordChar(lowerText[idx-1])
+		afterPos := idx + len(lowerWord)
+		after := afterPos == len(lowerText) || !isWordChar(lowerText[afterPos])
+		if before && after {
+			return true
+		}
+		start = idx + 1
+	}
+}
+
+func isWordChar(b byte) bool {
+	return b == '_' ||
+		(b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z') ||
+		(b >= '0' && b <= '9')
+}
+
+// TestNoContractInstructionClaimsWhatTheHostExposes holds every instruction,
+// mediation reason and refusal reason of every pinned contract to what a
+// contract can truthfully say. Three rules: no host-capability claim, no
+// pinned host version inside the prose (a number inside a sentence makes the
+// sentence a claim about that host and a bump re-asserts it unread), and no
+// Pasture Protocol tracking reference — the process words that have no
+// product meaning in an instruction ("reviewed", "review", "reviewer",
+// "proposal"), and the numbered or role-tokened forms of "phase" and "slice"
+// ("Phase 8", "SLICE-1", "M3-SLICE-1"). A bare "phase" or "slice" is allowed:
+// the actionable-error shape carries a field labelled "phase" that names an
+// operation step, and that is product vocabulary, not a tracking reference.
+//
+// The population is derived, and the test refuses to pass on an empty or
+// implausibly small one, so deleting the rows cannot make it green.
+func TestNoContractInstructionClaimsWhatTheHostExposes(t *testing.T) {
+	t.Parallel()
+
+	texts := contractInstructionTexts(t)
+	require.GreaterOrEqual(t, len(texts), 8,
+		"only %d instruction texts were derived from the pinned contracts; the population is too small to be the real one, so this guard would pass vacuously", len(texts))
+
+	harnesses := make(map[ir.HarnessID]int, 3)
+	for _, entry := range texts {
+		harnesses[entry.harness]++
+	}
+	require.Len(t, harnesses, len(runtime.PinnedContracts()),
+		"the derived population does not cover every pinned contract: %v", harnesses)
+
+	versions := make([]string, 0, len(runtime.PinnedContracts()))
+	for _, contract := range runtime.PinnedContracts() {
+		versions = append(versions, contract.Versions().Min().String())
+	}
+
+	for _, entry := range texts {
+		for _, claim := range hostCapabilityClaims {
+			assert.NotContains(t, entry.text, claim,
+				"the %s of operation %q on harness %q claims what the host exposes (%q); a contract states what IT binds, not what the host offers: %s",
+				entry.kind, entry.operation, entry.harness, claim, entry.text)
+		}
+		for _, version := range versions {
+			assert.NotContains(t, entry.text, version,
+				"the %s of operation %q on harness %q carries the pinned host version %q, which turns it into a claim about that host that a bump re-asserts unread: %s",
+				entry.kind, entry.operation, entry.harness, version, entry.text)
+		}
+		for _, word := range processWords {
+			assert.False(t, containsWholeWord(entry.text, word),
+				"the %s of operation %q on harness %q carries the process word %q, which names this project's own workflow rather than anything the reader can act on: %s",
+				entry.kind, entry.operation, entry.harness, word, entry.text)
+		}
+		for _, shape := range protocolNumberedShapes {
+			match := shape.FindString(entry.text)
+			assert.Empty(t, match,
+				"the %s of operation %q on harness %q carries the Pasture Protocol tracking reference %q, which names an internal tracking artefact rather than anything the reader can act on: %s",
+				entry.kind, entry.operation, entry.harness, match, entry.text)
+		}
+	}
+}
+
+// TestProtocolNumberedShapesDistinguishTrackingReferencesFromProductVocabulary
+// is the required control for protocolNumberedShapes: a NUMBERED or
+// ROLE-TOKENED form of "phase"/"slice" is a Pasture Protocol tracking
+// reference and must be refused, while a BARE "phase" or "slice" — including
+// the actionable-error shape's own "phase:" field label — is product
+// vocabulary and must pass.
+func TestProtocolNumberedShapesDistinguishTrackingReferencesFromProductVocabulary(t *testing.T) {
+	t.Parallel()
+
+	refused := []string{
+		"per Phase 8 decision 2",
+		"owned by M3-SLICE-1",
+	}
+	for _, text := range refused {
+		matched := false
+		for _, shape := range protocolNumberedShapes {
+			if shape.MatchString(text) {
+				matched = true
+				break
+			}
+		}
+		assert.True(t, matched, "expected a tracking-reference match in %q", text)
+	}
+
+	allowed := []string{
+		"phase: runtime contract validation",
+		"the task phase is unset",
+	}
+	for _, text := range allowed {
+		for _, shape := range protocolNumberedShapes {
+			assert.False(t, shape.MatchString(text),
+				"a bare %q must not match the tracking-reference shape %s", text, shape)
+		}
+	}
+}
+
 func TestClaudeContractNamesNoRemovedTeamLifecycleCalls(t *testing.T) {
 	t.Parallel()
-	claude := runtime.ClaudeCode2_1_210()
+	claude := runtime.ClaudeCode2_1_261()
 	for _, kind := range ir.AllOperationKinds() {
 		_, callName := classify(t, claude, kind)
 		lowered := strings.ToLower(callName)
@@ -67,7 +272,7 @@ func TestClaudeContractNamesNoRemovedTeamLifecycleCalls(t *testing.T) {
 
 func TestOpenCodeContractInventsNoTools(t *testing.T) {
 	t.Parallel()
-	opencode := runtime.OpenCode1_18_10()
+	opencode := runtime.OpenCode1_18_29()
 
 	// No invented persistent-message / follow-up / wait native tools.
 	forbidden := []string{"task_agent_message", "follow_up", "followup", "wait", "task_close"}
@@ -95,43 +300,44 @@ func TestOpenCodeContractInventsNoTools(t *testing.T) {
 	assert.Equal(t, "question", questionCall)
 }
 
+// Every runtime contract admits a FLOOR at its recorded host version: that
+// version and every later release are admitted; the release below it, a
+// prerelease of it and an unparsed host are refused. The population is the
+// contracts themselves, so a contract added later is covered without an edit.
 func TestPinnedContractVersionBoundaries(t *testing.T) {
 	t.Parallel()
-	claude := runtime.ClaudeCode2_1_210()
-	assert.False(t, claude.Supports(mustParse(t, "2.1.209")))
-	assert.True(t, claude.Supports(mustParse(t, "2.1.210")))
-	assert.True(t, claude.Supports(mustParse(t, "2.1.220")))
-	assert.True(t, claude.Supports(mustParse(t, "2.1.999")))
-	assert.False(t, claude.Supports(mustParse(t, "2.2.0")))
-
-	cases := []struct {
-		contract runtime.RuntimeContract
-		exact    string
-		lower    string
-		higher   string
-	}{
-		{contract: runtime.OpenCode1_18_10(), exact: "1.18.10", lower: "1.18.9", higher: "1.18.11"},
-		{contract: runtime.Codex0_146_0(), exact: "0.146.0", lower: "0.145.0", higher: "0.146.1"},
+	contracts := runtime.PinnedContracts()
+	require.Len(t, contracts, 3, "one runtime contract per enabled harness")
+	harnesses := make(map[ir.HarnessID]int, len(contracts))
+	for _, contract := range contracts {
+		harnesses[contract.Harness()]++
 	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.contract.ID().String(), func(t *testing.T) {
+	for harness, count := range harnesses {
+		require.Equal(t, 1, count, "harness %s has one runtime contract", harness)
+	}
+	for _, contract := range contracts {
+		contract := contract
+		t.Run(contract.ID().String(), func(t *testing.T) {
 			t.Parallel()
-			assert.True(t, tc.contract.Supports(mustParse(t, tc.exact)), "exact accepted boundary")
-			assert.True(t, tc.contract.Supports(mustParse(t, tc.exact+"+build.5")), "build metadata does not change precedence")
-			assert.False(t, tc.contract.Supports(mustParse(t, tc.lower)), "immediately lower rejected")
-			assert.False(t, tc.contract.Supports(mustParse(t, tc.higher)), "immediately higher rejected")
-			assert.False(t, tc.contract.Supports(mustParse(t, tc.exact+"-rc.1")), "prerelease requires explicit inclusion")
-			assert.False(t, tc.contract.Supports(runtime.HostVersion{}), "unparsed host rejected")
+			min := contract.Versions().Min()
+			assert.False(t, contract.Versions().HasUpperBound(), "admission is a floor with no upper bound")
+			assert.True(t, contract.Supports(min), "the recorded version is admitted")
+			assert.True(t, contract.Supports(mustParse(t, min.String()+"+build.5")), "build metadata does not change precedence")
+			assert.True(t, contract.Supports(testutil.Bump(t, min, 0, 0, 1)), "the next patch release is admitted")
+			assert.True(t, contract.Supports(testutil.Bump(t, min, 0, 1, 0)), "a later minor release is admitted")
+			assert.True(t, contract.Supports(testutil.Bump(t, min, 1, 0, 0)), "a later major release is admitted")
+			assert.False(t, contract.Supports(testutil.BelowFloor(t, min)), "the release below the recorded version is refused")
+			assert.False(t, contract.Supports(mustParse(t, min.String()+"-rc.1")), "a prerelease of the recorded version is refused")
+			assert.False(t, contract.Supports(runtime.HostVersion{}), "unparsed host rejected")
 		})
 	}
 }
 
 func TestPinnedContractHarnessBinding(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, ir.HarnessClaudeCode, runtime.ClaudeCode2_1_210().Harness())
-	assert.Equal(t, ir.HarnessOpenCode, runtime.OpenCode1_18_10().Harness())
-	assert.Equal(t, ir.HarnessCodex, runtime.Codex0_146_0().Harness())
+	assert.Equal(t, ir.HarnessClaudeCode, runtime.ClaudeCode2_1_261().Harness())
+	assert.Equal(t, ir.HarnessOpenCode, runtime.OpenCode1_18_29().Harness())
+	assert.Equal(t, ir.HarnessCodex, runtime.Codex0_153_0().Harness())
 }
 
 // lifecycleProfileRow is one pinned lifecycle row rendered as strings, so the
@@ -242,6 +448,9 @@ var pinnedLifecycleProfileRows = []lifecycleProfileRow{
 	{"claude-code", "MessageDisplay", "observation", "claude-command-json", "nonblocking", "none", "concurrent-native", "none", "report-and-continue", "report-and-continue", "", "not-applicable", "session:session_id:required", ""},
 	{"claude-code", "Elicitation", "gate-consultation", "claude-command-json", "blocking", "none", "concurrent-native", "host-native", "report-and-continue", "exit-2-blocks", "", "not-applicable", "session:session_id:required request:request_id:required", ""},
 	{"claude-code", "ElicitationResult", "explicit-human-response", "claude-command-json", "blocking", "none", "concurrent-native", "host-native", "report-and-continue", "exit-2-blocks", "", "not-applicable", "session:session_id:required request:request_id:required", ""},
+	{"claude-code", "PreModelSwitch", "gate-consultation", "claude-command-json", "blocking", "none", "concurrent-native", "host-native", "exit-2-blocks", "exit-2-blocks", `claude-code 2.1.261 installed binary hook-event table (~/.local/share/claude/versions/2.1.261): PreModelSwitch "Exit code 2 - block the switch and show stderr to user"`, "not-applicable", "session:session_id:required", ""},
+	{"claude-code", "PostModelSwitch", "observation", "claude-command-json", "nonblocking", "none", "concurrent-native", "none", "report-and-continue", "report-and-continue", "", "not-applicable", "session:session_id:required", ""},
+	{"claude-code", "DirectoryAdded", "observation", "claude-command-json", "nonblocking", "none", "concurrent-native", "none", "report-and-continue", "report-and-continue", "", "not-applicable", "session:session_id:required", ""},
 	{"codex", "SessionStart", "observation", "codex-strict-command-json", "nonblocking", "none", "concurrent-native", "no-adapter-merge", "strict-hook-failure", "strict-hook-failure", "", "not-applicable", "session:session_id:required", ""},
 	{"codex", "UserPromptSubmit", "gate-consultation", "codex-strict-command-json", "blocking", "none", "concurrent-native", "no-adapter-merge", "report-and-continue", "strict-output-exit-2-blocks", "", "not-applicable", "session:session_id:required turn:turn_id:required", ""},
 	{"codex", "PreToolUse", "gate-consultation", "codex-strict-command-json", "blocking", "input", "concurrent-native", "no-adapter-merge", "report-and-continue", "strict-output-exit-2-blocks", "", "not-applicable", "session:session_id:required turn:turn_id:required tool-call:tool_use_id:required", ""},
@@ -252,11 +461,13 @@ var pinnedLifecycleProfileRows = []lifecycleProfileRow{
 	{"codex", "SubagentStart", "observation", "codex-strict-command-json", "nonblocking", "none", "concurrent-native", "no-adapter-merge", "strict-hook-failure", "strict-hook-failure", "", "not-applicable", "session:session_id:required turn:turn_id:required agent:agent_id:required", ""},
 	{"codex", "SubagentStop", "gate-consultation", "codex-strict-command-json", "blocking", "none", "concurrent-native", "no-adapter-merge", "report-and-continue", "strict-output-exit-2-blocks", "", "consult-when-inactive", "session:session_id:required turn:turn_id:required agent:agent_id:required", ""},
 	{"codex", "Stop", "gate-consultation", "codex-strict-command-json", "blocking", "none", "concurrent-native", "no-adapter-merge", "report-and-continue", "strict-output-exit-2-blocks", "", "consult-when-inactive", "session:session_id:required turn:turn_id:required", ""},
+	{"codex", "SessionEnd", "observation", "codex-strict-command-json", "nonblocking", "none", "concurrent-native", "no-adapter-merge", "strict-hook-failure", "strict-hook-failure", "", "not-applicable", "", ""},
+	{"codex", "Interrupt", "observation", "codex-strict-command-json", "nonblocking", "none", "concurrent-native", "no-adapter-merge", "strict-hook-failure", "strict-hook-failure", "", "not-applicable", "", ""},
 	{"opencode", "command.executed", "observation", "opencode-catch-all-sse", "nonblocking", "none", "observation-stream", "none", "observe-only", "observe-only", "", "not-applicable", "session:sessionID:required", ""},
 	{"opencode", "file.edited", "observation", "opencode-catch-all-sse", "nonblocking", "none", "observation-stream", "none", "observe-only", "observe-only", "", "not-applicable", "", ""},
 	{"opencode", "file.watcher.updated", "observation", "opencode-catch-all-sse", "nonblocking", "none", "observation-stream", "none", "observe-only", "observe-only", "", "not-applicable", "", ""},
 	{"opencode", "installation.updated", "observation", "opencode-catch-all-sse", "nonblocking", "none", "observation-stream", "none", "observe-only", "observe-only", "", "not-applicable", "", ""},
-	{"opencode", "installation.update_available", "observation", "opencode-catch-all-sse", "nonblocking", "none", "observation-stream", "none", "observe-only", "observe-only", "", "not-applicable", "", ""},
+	{"opencode", "installation.update-available", "observation", "opencode-catch-all-sse", "nonblocking", "none", "observation-stream", "none", "observe-only", "observe-only", "", "not-applicable", "", ""},
 	{"opencode", "lsp.client.diagnostics", "observation", "opencode-catch-all-sse", "nonblocking", "none", "observation-stream", "none", "observe-only", "observe-only", "", "not-applicable", "", ""},
 	{"opencode", "lsp.updated", "observation", "opencode-catch-all-sse", "nonblocking", "none", "observation-stream", "none", "observe-only", "observe-only", "", "not-applicable", "", ""},
 	{"opencode", "message.updated", "observation", "opencode-catch-all-sse", "nonblocking", "none", "observation-stream", "none", "observe-only", "observe-only", "", "not-applicable", "", ""},
@@ -315,9 +526,9 @@ func TestPinnedLifecycleProfileRowsMatchTheCommittedTable(t *testing.T) {
 
 	observed := make(map[string]lifecycleProfileRow, len(pinnedLifecycleProfileRows))
 	perHarness := map[string]int{
-		string(ir.HarnessClaudeCode): collectLifecycleProfileRows(t, runtime.ClaudeCode2_1_210Lifecycle(), observed),
-		string(ir.HarnessCodex):      collectLifecycleProfileRows(t, runtime.Codex0_146_0Lifecycle(), observed),
-		string(ir.HarnessOpenCode):   collectLifecycleProfileRows(t, runtime.OpenCode1_18_10Lifecycle(), observed),
+		string(ir.HarnessClaudeCode): collectLifecycleProfileRows(t, runtime.ClaudeCode2_1_261Lifecycle(), observed),
+		string(ir.HarnessCodex):      collectLifecycleProfileRows(t, runtime.Codex0_153_0Lifecycle(), observed),
+		string(ir.HarnessOpenCode):   collectLifecycleProfileRows(t, runtime.OpenCode1_18_29Lifecycle(), observed),
 	}
 	total := 0
 	for harness, count := range perHarness {

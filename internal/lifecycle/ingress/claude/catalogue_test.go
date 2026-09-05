@@ -22,64 +22,112 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
 	"github.com/dayvidpham/pasture/internal/runtime"
+	"github.com/dayvidpham/pasture/internal/testutil"
 )
 
-const canonicalAuthenticFixtureDigest = "sha256:30d524e5d2cb22d486faad05adbaa1a4b7e0d72cd6301f38fe18ca5e3f167003"
-
-type expectedCaptureCase struct {
-	name           string
-	fixture        string
-	classification string
-	decision       string
-	reason         string
+// canonicalAuthenticFixtureDigest is the cleared digest the committed
+// SessionStart sidecar records; the fixture bytes must reproduce it exactly.
+func canonicalAuthenticFixtureDigest(t *testing.T) string {
+	t.Helper()
+	sidecarBytes, err := os.ReadFile("testdata/fixtures/session_start_2_1_261.provenance.json")
+	require.NoError(t, err)
+	var sidecar acceptance.CaptureProvenance
+	require.NoError(t, json.Unmarshal(sidecarBytes, &sidecar))
+	require.NotEmpty(t, sidecar.RawFileDigest)
+	return sidecar.RawFileDigest
 }
 
-var expectedCaptureCases = []expectedCaptureCase{
-	{name: "authentic-session-start", fixture: "fixtures/session_start_2_1_222.json", classification: "must-pass", decision: "enabled", reason: ""},
-	{name: "authentic-session-end", fixture: "fixtures/session_end_2_1_222.json", classification: "must-pass", decision: "enabled", reason: ""},
-	{name: "authentic-pre-tool-use", fixture: "fixtures/pre_tool_use_2_1_222.json", classification: "must-pass", decision: "enabled", reason: ""},
-	{name: "authentic-post-tool-use", fixture: "fixtures/post_tool_use_2_1_222.json", classification: "must-pass", decision: "enabled", reason: ""},
-	{name: "authentic-post-tool-use-failure", fixture: "fixtures/post_tool_use_failure_2_1_222.json", classification: "must-pass", decision: "enabled", reason: ""},
-	{name: "authentic-post-tool-batch", fixture: "fixtures/post_tool_batch_2_1_222.json", classification: "must-pass", decision: "enabled", reason: ""},
-	{name: "authentic-pre-compact", fixture: "fixtures/pre_compact_2_1_222.json", classification: "must-pass", decision: "enabled", reason: ""},
-	{name: "authentic-post-compact", fixture: "fixtures/post_compact_2_1_222.json", classification: "must-pass", decision: "enabled", reason: ""},
-	{name: "authored-origin-control", fixture: "fixtures/session_start_2_1_210_origin_authored.json", classification: "must-fail", decision: "withheld", reason: "non-authentic-origin"},
-	{name: "digest-mismatch-control", fixture: "fixtures/session_start_2_1_210_digest_mismatch.json", classification: "must-fail", decision: "withheld", reason: "digest-mismatch"},
-	{name: "version-out-of-range-control", fixture: "fixtures/session_start_2_1_210_version_out_of_range.json", classification: "must-fail", decision: "withheld", reason: "version-out-of-range"},
-	{name: "path-escape-control", fixture: "../fixtures/session_start_2_1_210.json", classification: "must-fail", decision: "withheld", reason: "path-escape"},
+// expectedCase is one corpus row as the product defines it: a name, a
+// classification, and the decision and reason the evaluator must return.
+type expectedCase struct {
+	name           string
+	classification activation.Classification
+	decision       activation.Decision
+	reason         activation.CorpusReason
+}
+
+// requiredControls are the must-fail controls the corpus loader requires, one
+// per closed withheld reason it demands coverage for (activation.LoadCorpus
+// refuses a corpus that lacks any of them), in source order.
+var requiredControls = []expectedCase{
+	{name: "authored-origin-control", classification: activation.ClassificationMustFail, decision: activation.DecisionWithheld, reason: activation.CorpusReasonNonAuthenticOrigin},
+	{name: "digest-mismatch-control", classification: activation.ClassificationMustFail, decision: activation.DecisionWithheld, reason: activation.CorpusReasonDigestMismatch},
+	{name: "version-out-of-range-control", classification: activation.ClassificationMustFail, decision: activation.DecisionWithheld, reason: activation.CorpusReasonVersionOutOfRange},
+	{name: "path-escape-control", classification: activation.ClassificationMustFail, decision: activation.DecisionWithheld, reason: activation.CorpusReasonPathEscape},
+}
+
+// expectedCorpusCases derives the corpus shape from the product: one must-pass
+// case per ENABLED Claude target event, in declaration order and named
+// "authentic-<event>", then the required controls. A declared target that is
+// withheld has no authentic fixture and therefore no corpus case. A target
+// enabled later is covered here without an edit to this file, and the list is
+// never empty.
+func expectedCorpusCases(t *testing.T) []expectedCase {
+	t.Helper()
+	targets := enabledClaudeTargets(t)
+	out := make([]expectedCase, 0, len(targets)+len(requiredControls))
+	for _, target := range targets {
+		out = append(out, expectedCase{name: "authentic-" + kebabCase(nativeNameOf(t, target)), classification: activation.ClassificationMustPass, decision: activation.DecisionEnabled, reason: activation.CorpusReasonNone})
+	}
+	return append(out, requiredControls...)
+}
+
+// enabledClaudeTargets returns the declared Claude target events whose
+// activation entry is Enabled, in declaration order, and refuses an empty set.
+func enabledClaudeTargets(t *testing.T) []model.ContractEventKind {
+	t.Helper()
+	entries, err := activation.ClaudeCode2_1_261()
+	require.NoError(t, err)
+	state := make(map[model.ContractEventKind]activation.State, len(entries))
+	for _, entry := range entries {
+		state[entry.Event] = entry.State
+	}
+	var enabled []model.ContractEventKind
+	for _, target := range activation.ClaudeCode2_1_261TargetEvents() {
+		if state[target] == activation.Enabled {
+			enabled = append(enabled, target)
+		}
+	}
+	require.NotEmpty(t, enabled, "the Claude target table enables at least one event")
+	return enabled
+}
+
+// nativeNameOf reads the native event name of a registered kind from the
+// generated Claude manifest.
+func nativeNameOf(t *testing.T, kind model.ContractEventKind) string {
+	t.Helper()
+	for _, entry := range registration.ClaudeCode2_1_261().Entries() {
+		if entry.Kind == kind {
+			return entry.NativeName
+		}
+	}
+	t.Fatalf("event kind %d is not in the generated Claude manifest", kind)
+	return ""
+}
+
+// kebabCase lowers a CamelCase native event name to the corpus case spelling:
+// PostToolUseFailure -> post-tool-use-failure.
+func kebabCase(name string) string {
+	var b strings.Builder
+	for index, r := range name {
+		if index > 0 && r >= 'A' && r <= 'Z' {
+			b.WriteByte('-')
+		}
+		b.WriteRune(r)
+	}
+	return strings.ToLower(b.String())
 }
 
 func TestRealCaptureCorpusDrivesStaticActivation(t *testing.T) {
 	t.Parallel()
 
-	type expectedCase struct {
-		name           string
-		classification activation.Classification
-		decision       activation.Decision
-		reason         activation.CorpusReason
-	}
-	wantCases := []expectedCase{
-		{name: "authentic-session-start", classification: activation.ClassificationMustPass, decision: activation.DecisionEnabled, reason: activation.CorpusReasonNone},
-		{name: "authentic-session-end", classification: activation.ClassificationMustPass, decision: activation.DecisionEnabled, reason: activation.CorpusReasonNone},
-		{name: "authentic-pre-tool-use", classification: activation.ClassificationMustPass, decision: activation.DecisionEnabled, reason: activation.CorpusReasonNone},
-		{name: "authentic-post-tool-use", classification: activation.ClassificationMustPass, decision: activation.DecisionEnabled, reason: activation.CorpusReasonNone},
-		{name: "authentic-post-tool-use-failure", classification: activation.ClassificationMustPass, decision: activation.DecisionEnabled, reason: activation.CorpusReasonNone},
-		{name: "authentic-post-tool-batch", classification: activation.ClassificationMustPass, decision: activation.DecisionEnabled, reason: activation.CorpusReasonNone},
-		{name: "authentic-pre-compact", classification: activation.ClassificationMustPass, decision: activation.DecisionEnabled, reason: activation.CorpusReasonNone},
-		{name: "authentic-post-compact", classification: activation.ClassificationMustPass, decision: activation.DecisionEnabled, reason: activation.CorpusReasonNone},
-		{name: "authored-origin-control", classification: activation.ClassificationMustFail, decision: activation.DecisionWithheld, reason: activation.CorpusReasonNonAuthenticOrigin},
-		{name: "digest-mismatch-control", classification: activation.ClassificationMustFail, decision: activation.DecisionWithheld, reason: activation.CorpusReasonDigestMismatch},
-		{name: "version-out-of-range-control", classification: activation.ClassificationMustFail, decision: activation.DecisionWithheld, reason: activation.CorpusReasonVersionOutOfRange},
-		{name: "path-escape-control", classification: activation.ClassificationMustFail, decision: activation.DecisionWithheld, reason: activation.CorpusReasonPathEscape},
-	}
-
+	wantCases := expectedCorpusCases(t)
 	corpus, err := activation.LoadCorpus(filepath.Join("testdata", "captures.yaml"))
 	require.NoError(t, err)
 	cases := corpus.Cases()
-	require.Len(t, cases, 12)
-	require.Len(t, cases, len(wantCases))
+	require.Len(t, cases, len(wantCases), "one must-pass case per declared target plus the required controls")
 
-	entries, err := activation.ClaudeCode2_1_210()
+	entries, err := activation.ClaudeCode2_1_261()
 	require.NoError(t, err)
 	entryByEvent := make(map[model.ContractEventKind]activation.Entry, len(entries))
 	enabledEvents := make(map[model.ContractEventKind]struct{})
@@ -141,8 +189,8 @@ func TestRealCaptureCorpusDrivesStaticActivation(t *testing.T) {
 		}
 	}
 
-	require.Equal(t, 8, passCount)
-	require.Equal(t, 4, failCount)
+	require.Equal(t, len(enabledClaudeTargets(t)), passCount, "one must-pass case per enabled target")
+	require.Equal(t, len(requiredControls), failCount, "one control per required withheld reason")
 	require.Equal(t, map[activation.CorpusReason]struct{}{
 		activation.CorpusReasonNonAuthenticOrigin: {},
 		activation.CorpusReasonDigestMismatch:     {},
@@ -157,7 +205,7 @@ func TestRealCaptureCorpusDrivesStaticActivation(t *testing.T) {
 	}, admittedEvents)
 	require.Equal(t, enabledEvents, admittedEvents, "every enabled event needs independent real-corpus admission")
 
-	for _, event := range activation.ClaudeCode2_1_210TargetEvents() {
+	for _, event := range activation.ClaudeCode2_1_261TargetEvents() {
 		entry, exists := entryByEvent[event]
 		require.True(t, exists, "target event %d", event)
 		if _, enabled := admittedEvents[event]; enabled {
@@ -209,11 +257,11 @@ func TestNonAuthenticTargetBreadthThroughProductionWaist(t *testing.T) {
 			require.Equal(t, row.nativeName, registered.NativeName)
 
 			input := append([]byte(nil), row.payload...)
-			capture := Parse(input, registered, "2.1.220", model.OccurrenceEnvelopeRef{})
+			capture := Parse(input, registered, registration.ClaudeCode2_1_261().Version, model.OccurrenceEnvelopeRef{})
 			input[0] = ' '
 			require.Equal(t, model.CaptureValid, capture.Disposition)
 			require.Equal(t, model.CaptureValid, capture.Delivery.Capture)
-			require.Equal(t, registration.ClaudeCode2_1_210().Contract, capture.Delivery.Contract)
+			require.Equal(t, registration.ClaudeCode2_1_261().Contract, capture.Delivery.Contract)
 			require.Equal(t, row.event, capture.Delivery.Event)
 			require.Equal(t, row.payload, capture.Delivery.Body, "delivery retains defensive exact bytes")
 			require.Equal(t, row.bindings, capture.Delivery.Bindings, "native binding order/name/kind/value")
@@ -245,7 +293,7 @@ func TestNonAuthenticTargetBreadthThroughProductionWaist(t *testing.T) {
 
 func requireRegistrationEvent(t *testing.T, kind model.ContractEventKind) registration.Event {
 	t.Helper()
-	for _, event := range registration.ClaudeCode2_1_210().Entries() {
+	for _, event := range registration.ClaudeCode2_1_261().Entries() {
 		if event.Kind == kind {
 			return event
 		}
@@ -264,10 +312,10 @@ func TestIndependentCatalogueCoversGeneratedManifest(t *testing.T) {
 	var catalogue struct {
 		Events []row `yaml:"events"`
 	}
-	raw, err := os.ReadFile("testdata/corpora/claude_2_1_210_catalogue.yaml")
+	raw, err := os.ReadFile("testdata/corpora/claude_2_1_261_catalogue.yaml")
 	require.NoError(t, err)
 	require.NoError(t, yaml.Unmarshal(raw, &catalogue))
-	manifest := registration.ClaudeCode2_1_210()
+	manifest := registration.ClaudeCode2_1_261()
 	require.Len(t, catalogue.Events, len(manifest.Events))
 	for i, expected := range catalogue.Events {
 		require.Equal(t, expected.Name, manifest.Events[i].NativeName, "independent catalogue order %d", i)
@@ -293,11 +341,15 @@ func TestIndependentCatalogueCoversGeneratedManifest(t *testing.T) {
 func TestClaudeCatalogueMatchesRuntimeMappingForAllOrdinals(t *testing.T) {
 	t.Parallel()
 
-	manifest := registration.ClaudeCode2_1_210()
-	runtimeContract := runtime.ClaudeCode2_1_210Lifecycle()
+	manifest := registration.ClaudeCode2_1_261()
+	runtimeContract := runtime.ClaudeCode2_1_261Lifecycle()
+	// Two roots record the host version: the runtime contract id and the host
+	// contract the manifest is generated from. They are one version or nothing
+	// downstream agrees on which host it describes.
+	require.Equal(t, runtimeContract.Versions().Min().String(), manifest.Version, "the registration manifest and the runtime contract record one host version")
 	runtimeEvents := runtime.ClaudeLifecycleEvents()
-	require.Len(t, manifest.Events, 30)
-	require.Len(t, runtimeEvents, 30)
+	require.NotEmpty(t, runtimeEvents)
+	require.Len(t, manifest.Events, len(runtimeEvents), "one registration row per runtime profile event")
 	require.NotEqual(t, manifest.Contract, runtimeContract.ID(), "occurrence registration and semantic runtime contracts are intentionally distinct")
 
 	for index, registered := range manifest.Events {
@@ -371,7 +423,11 @@ type captureMutation struct {
 	Description string `yaml:"description"`
 }
 
-func TestCaptureCorpusHasFrozenTwelveCaseShape(t *testing.T) {
+// TestCaptureCorpusShapeFollowsTheTargetTable reads the committed corpus file
+// as data and requires its shape to be the one the product derives: the
+// must-pass cases in target-declaration order, then the required controls, each
+// must-pass fixture carrying a sidecar for the event it stands for.
+func TestCaptureCorpusShapeFollowsTheTargetTable(t *testing.T) {
 	t.Parallel()
 
 	raw, err := os.ReadFile("testdata/captures.yaml")
@@ -380,15 +436,25 @@ func TestCaptureCorpusHasFrozenTwelveCaseShape(t *testing.T) {
 	decoder.KnownFields(true)
 	var corpus captureCorpus
 	require.NoError(t, decoder.Decode(&corpus))
-	require.Len(t, corpus.Cases, 12)
-	require.Len(t, expectedCaptureCases, 12)
-	for index, want := range expectedCaptureCases {
+	want := expectedCorpusCases(t)
+	require.Len(t, corpus.Cases, len(want), "one must-pass case per declared target plus the required controls")
+	for index, w := range want {
 		got := corpus.Cases[index]
-		require.Equal(t, want.name, got.Name, "corpus case %d name", index)
-		require.Equal(t, want.fixture, got.Input.Fixture, "corpus case %d fixture", index)
-		require.Equal(t, want.classification, got.Classification, "corpus case %d classification", index)
-		require.Equal(t, want.decision, got.Expected.Decision, "corpus case %d decision", index)
-		require.Equal(t, want.reason, got.Expected.Reason, "corpus case %d reason", index)
+		require.Equal(t, w.name, got.Name, "corpus case %d name", index)
+		require.Equal(t, w.classification.String(), got.Classification, "corpus case %d classification", index)
+		require.Equal(t, w.decision.String(), got.Expected.Decision, "corpus case %d decision", index)
+		if w.reason == activation.CorpusReasonNone {
+			require.Empty(t, got.Expected.Reason, "corpus case %d reason", index)
+		} else {
+			require.Equal(t, w.reason.String(), got.Expected.Reason, "corpus case %d reason", index)
+		}
+		if w.classification == activation.ClassificationMustPass {
+			sidecar, err := os.ReadFile(filepath.Join("testdata", activation.ProvenancePath(got.Input.Fixture)))
+			require.NoError(t, err, "must-pass case %q has a provenance sidecar", got.Name)
+			var record acceptance.CaptureProvenance
+			require.NoError(t, json.Unmarshal(sidecar, &record))
+			require.Equal(t, "authentic-"+kebabCase(record.Event), got.Name, "the case is named after the event its fixture recorded")
+		}
 	}
 
 	wantReasons := map[string]struct{}{
@@ -435,25 +501,25 @@ func TestCaptureCorpusHasFrozenTwelveCaseShape(t *testing.T) {
 			t.Fatalf("case %q has unknown classification %q", testCase.Name, testCase.Classification)
 		}
 	}
-	require.Equal(t, 8, passCount)
-	require.Equal(t, 4, failCount)
+	require.Equal(t, len(enabledClaudeTargets(t)), passCount, "one must-pass case per enabled target")
+	require.Equal(t, len(requiredControls), failCount, "one control per required withheld reason")
 	require.Equal(t, wantReasons, seenReasons)
 }
 
 func TestAuthenticProvenanceValidatesUnchangedFixture(t *testing.T) {
 	t.Parallel()
 
-	provenanceBytes, err := os.ReadFile("testdata/fixtures/session_start_2_1_210.provenance.json")
+	provenanceBytes, err := os.ReadFile("testdata/fixtures/session_start_2_1_261.provenance.json")
 	require.NoError(t, err)
-	raw, err := os.ReadFile("testdata/fixtures/session_start_2_1_210.json")
+	raw, err := os.ReadFile("testdata/fixtures/session_start_2_1_261.json")
 	require.NoError(t, err)
-	require.Equal(t, canonicalAuthenticFixtureDigest, digest.FromBytes(raw).String())
+	require.Equal(t, canonicalAuthenticFixtureDigest(t), digest.FromBytes(raw).String())
 	var provenanceRecord acceptance.CaptureProvenance
 	// Decode through encoding/json without DisallowUnknownFields: redaction and
 	// event are intentional provenance metadata outside CaptureProvenance.
 	require.NoError(t, json.Unmarshal(provenanceBytes, &provenanceRecord))
-	require.Equal(t, canonicalAuthenticFixtureDigest, provenanceRecord.RawFileDigest)
-	require.NoError(t, provenanceRecord.ValidateFixture("testdata", "fixtures/session_start_2_1_210.json"))
+	require.Equal(t, canonicalAuthenticFixtureDigest(t), provenanceRecord.RawFileDigest)
+	require.NoError(t, provenanceRecord.ValidateFixture("testdata", "fixtures/session_start_2_1_261.json"))
 }
 
 func TestCaptureCorpusMetadataControlsHaveSiblingProvenance(t *testing.T) {
@@ -477,8 +543,8 @@ func TestCaptureCorpusMetadataControlsHaveSiblingProvenance(t *testing.T) {
 		require.NoError(t, err, "sibling provenance for %s", testCase.Input.Fixture)
 		var fields map[string]json.RawMessage
 		require.NoError(t, json.Unmarshal(provenanceBytes, &fields))
-		require.Len(t, fields, 8, "provenance for %s", testCase.Input.Fixture)
-		for _, field := range []string{"origin", "harness", "harnessVersion", "captureSource", "rawFileDigest", "capturedAt", "redaction", "event"} {
+		require.Len(t, fields, 9, "provenance for %s", testCase.Input.Fixture)
+		for _, field := range []string{"origin", "harness", "harnessVersion", "captureSource", "rawFileDigest", "capturedAt", "redaction", "event", "clearance"} {
 			_, present := fields[field]
 			require.True(t, present, "provenance %s has %s", provenancePath, field)
 		}
@@ -491,9 +557,16 @@ func TestCaptureCorpusMetadataControlsHaveSiblingProvenance(t *testing.T) {
 		case "non-authentic-origin":
 			require.Equal(t, acceptance.OriginAuthored, provenanceRecord.Origin)
 		case "digest-mismatch":
-			require.NotEqual(t, canonicalAuthenticFixtureDigest, provenanceRecord.RawFileDigest)
+			require.NotEqual(t, canonicalAuthenticFixtureDigest(t), provenanceRecord.RawFileDigest)
 		case "version-out-of-range":
-			require.Equal(t, "2.2.0", provenanceRecord.HarnessVersion)
+			// The control sits exactly one patch release below the floor the
+			// evaluator admits, so it proves the floor is exclusive there and it
+			// follows the contract when the contract moves.
+			controlVersion, err := runtime.ParseHostVersion(provenanceRecord.HarnessVersion)
+			require.NoError(t, err)
+			admission := activation.ClaudeCodeEvaluator().Admission()
+			require.False(t, admission.Allows(controlVersion), "the control version must be refused by the contract")
+			require.Equal(t, testutil.BelowFloor(t, admission.Min()).String(), provenanceRecord.HarnessVersion, "the control is the floor minus one patch release")
 		default:
 			t.Fatalf("unexpected corpus reason %q", testCase.Expected.Reason)
 		}
@@ -503,12 +576,12 @@ func TestCaptureCorpusMetadataControlsHaveSiblingProvenance(t *testing.T) {
 func TestDerivedCorpusFixturesAreByteIdenticalMetadataControls(t *testing.T) {
 	t.Parallel()
 
-	base, err := os.ReadFile("testdata/fixtures/session_start_2_1_210.json")
+	base, err := os.ReadFile("testdata/fixtures/session_start_2_1_261.json")
 	require.NoError(t, err)
 	for _, name := range []string{
-		"session_start_2_1_210_origin_authored.json",
-		"session_start_2_1_210_digest_mismatch.json",
-		"session_start_2_1_210_version_out_of_range.json",
+		"session_start_2_1_261_origin_authored.json",
+		"session_start_2_1_261_digest_mismatch.json",
+		"session_start_2_1_261_version_out_of_range.json",
 	} {
 		derived, err := os.ReadFile(filepath.Join("testdata/fixtures", name))
 		require.NoError(t, err)
@@ -551,7 +624,7 @@ func TestCaptureScriptEmitsMatchingDeterministicSiblings(t *testing.T) {
 }
 
 func isCommonField(name string) bool {
-	for _, common := range []string{"session_id", "transcript_path", "cwd", "permission_mode", "hook_event_name", "effort", "agent_id", "agent_type", "prompt_id"} {
+	for _, common := range []string{"session_id", "transcript_path", "cwd", "permission_mode", "hook_event_name", "effort", "agent_id", "agent_type", "prompt_id", "scratchpad_dir"} {
 		if name == common {
 			return true
 		}

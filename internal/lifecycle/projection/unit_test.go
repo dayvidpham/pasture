@@ -8,6 +8,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/provenance"
 )
@@ -24,12 +25,12 @@ import (
 
 // canonicalV1Interpreted is a canonical interpreted.v1 payload (no metamodel
 // member) — the pre-M5 read shape DecodeInterpreted accepts.
-const canonicalV1Interpreted = `{"semantic":1,"identities":[{"kind":1,"value":"session-v1"}],"unresolved_facts":[],"contract":"claude-code/claude-code@2.1.210"}`
+const canonicalV1Interpreted = `{"semantic":1,"identities":[{"kind":1,"value":"session-v1"}],"unresolved_facts":[],"contract":"claude-code/claude-code@2.1.261"}`
 
 // canonicalV2Interpreted is a canonical interpreted.v2 payload carrying a
 // versioned metamodel coordinate — the post-M5 read shape DecodeInterpretedV2
 // accepts. Its content is a fixed nonzero sha256 hex so the coordinate is valid.
-const canonicalV2Interpreted = `{"semantic":1,"identities":[{"kind":1,"value":"session-v2"}],"unresolved_facts":[],"contract":"claude-code/claude-code@2.1.210","manifest":{"id":"pasture.lifecycle.metamodel","version":1,"content":"1111111111111111111111111111111111111111111111111111111111111111"}}`
+const canonicalV2Interpreted = `{"semantic":1,"identities":[{"kind":1,"value":"session-v2"}],"unresolved_facts":[],"contract":"claude-code/claude-code@2.1.261","manifest":{"id":"pasture.lifecycle.metamodel","version":1,"content":"1111111111111111111111111111111111111111111111111111111111111111"}}`
 
 // canonicalLink is a canonical committed link payload DecodeLink accepts (its
 // field order matches the receipt package's linkPayload encoder).
@@ -151,7 +152,7 @@ func evidenceRow(jid int64, op string, kind provenance.EvidenceKind, payload str
 
 func occurrence(t *testing.T, jid int64) model.OccurrenceRecord {
 	t.Helper()
-	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "claude-code/2.1.210")
+	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Contract.String())
 	if err != nil {
 		t.Fatalf("construct runtime contract: %v", err)
 	}

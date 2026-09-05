@@ -39,7 +39,7 @@ func mustBundle(t *testing.T, rel, content string) artifact.Bundle {
 
 func claudeContract(t *testing.T) activation.ActivationContract {
 	t.Helper()
-	host, _ := runtime.ParseHostVersion("2.1.210")
+	host, _ := runtime.ParseHostVersion("2.1.261")
 	constraint, _ := runtime.NewExactVersion(host)
 	probe, err := activation.NewCommandSchema("claude", "--version")
 	if err != nil {
@@ -65,7 +65,7 @@ func claudeContract(t *testing.T) activation.ActivationContract {
 	if err != nil {
 		t.Fatalf("exhaustive: %v", err)
 	}
-	id, _ := activation.NewActivationContractID("claude-code/activation@2.1.210")
+	id, _ := activation.NewActivationContractID("claude-code/activation@2.1.261")
 	contract, err := activation.NewActivationContract(id, ir.HarnessClaudeCode, constraint, probe, exhaustive)
 	if err != nil {
 		t.Fatalf("contract: %v", err)

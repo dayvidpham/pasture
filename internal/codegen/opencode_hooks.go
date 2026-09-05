@@ -19,7 +19,7 @@ import (
 const OpenCodeHooksModulePath = ".opencode/plugins/pasture-lifecycle.ts"
 
 // deriveOpenCodeNativeToolNames returns, sorted and de-duplicated, exactly the
-// native tool names the pinned OpenCode 1.18.10 runtime contract declares — and
+// native tool names the OpenCode runtime contract declares — and
 // nothing else. It resolves every core orchestration operation against the
 // contract via the delivered runtime lookup and collects only the operations the
 // contract classifies as native. Semantic-instruction, parent-mediated, and
@@ -27,7 +27,7 @@ const OpenCodeHooksModulePath = ".opencode/plugins/pasture-lifecycle.ts"
 // never reference an invented OpenCode tool: the allow-list is the contract's
 // own declared surface, computed here rather than hand-copied.
 func deriveOpenCodeNativeToolNames() ([]string, error) {
-	contract := runtime.OpenCode1_18_10()
+	contract := runtime.OpenCode1_18_29()
 	seen := make(map[string]struct{})
 	var names []string
 	for _, kind := range ir.AllOperationKinds() {
@@ -43,7 +43,7 @@ func deriveOpenCodeNativeToolNames() ([]string, error) {
 		}
 		binding, err := runtime.LookupOperationBinding(contract, descriptor)
 		if err != nil {
-			// Unsupported operations (for OpenCode 1.18.10, stopping an
+			// Unsupported operations (for OpenCode at the recorded version, stopping an
 			// assignment) return a lookup error by contract; they are correctly
 			// absent from a native allow-list, so skip rather than fail.
 			continue
@@ -73,7 +73,7 @@ func GenerateOpenCodeHooksModule() (string, error) {
 		return "", fmt.Errorf("codegen.GenerateOpenCodeHooksModule: activation: %w", err)
 	}
 	enabled := make(map[model.ContractEventKind]bool, 2)
-	manifest := registration.OpenCode1_18_10().Entries()
+	manifest := registration.OpenCode1_18_29().Entries()
 	for index, entry := range activationEntries {
 		enabled[manifest[index].Kind] = entry.State == activation.Enabled
 	}
@@ -93,8 +93,8 @@ func GenerateOpenCodeHooksModule() (string, error) {
 		return "", fmt.Errorf("codegen.GenerateOpenCodeHooksModule: derive native tool allow-list: %w", err)
 	}
 	metadata, err := lifecycleMetadata(
-		runtime.OpenCode1_18_10Lifecycle(),
-		"1.18.10",
+		runtime.OpenCode1_18_29Lifecycle(),
+		openCodeHostVersion(),
 		func(string) []string { return nil },
 	)
 	if err != nil {
@@ -131,7 +131,7 @@ async function invokeLifecycle(command, event, value) {
     new Response(child.stderr).text(),
     child.exited,
   ]);
-  if (exitCode !== 0) throw new Error("pasture hook lifecycle for " + event + " exited " + exitCode + ": " + (stderr.trim() || "no diagnostic was returned") + "; verify PASTURE_BIN and the generated OpenCode 1.18.10 configuration");
+  if (exitCode !== 0) throw new Error("pasture hook lifecycle for " + event + " exited " + exitCode + ": " + (stderr.trim() || "no diagnostic was returned") + "; verify PASTURE_BIN and the generated OpenCode %s configuration");
   // FORWARD THE CHILD'S DIAGNOSTIC, VERBATIM, ONTO THIS PROCESS'S STANDARD
   // ERROR. fd 2 is PIPED and not inherited, so anything pasture writes there
   // reaches no stream at all unless this function puts it on one. The
@@ -186,7 +186,7 @@ function acceptProceed(stdout, event) {
 
 export async function sessionCreated(callback) {
   try {
-    await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.created", "--host-version", "1.18.10"], "session.created", callback);
+    await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.created", "--host-version", %q], "session.created", callback);
   } catch (error) {
     // Observation is never a gate and cannot terminate the native event bus.
     console.error("Pasture lifecycle observation failed for session.created: " + error);
@@ -195,7 +195,7 @@ export async function sessionCreated(callback) {
 
 export async function toolExecuteBefore(input, output) {
   const args = output.args;
-  const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", "1.18.10"], "tool.execute.before", { input, output: { args } });
+  const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", %q], "tool.execute.before", { input, output: { args } });
   acceptProceed(stdout, "tool.execute.before");
   // Proceed is a decision, not a mutation. Preserve the host-owned args value.
   output.args = args;
@@ -212,7 +212,11 @@ export const PastureLifecycle = async ({ client }) => ({
   },
 });
 
-export default PastureLifecycle;
+// OpenCode reads the default export first. When it is an object whose server()
+// is the plugin function, the loader uses it and reads nothing else. A bare
+// function default falls back to a scan of every export, which throws on the
+// first export that is not a function (PASTURE_NATIVE_TOOLS above).
+export default { id: "pasture-lifecycle", server: PastureLifecycle };
 `
 
 	return fmt.Sprintf(
@@ -222,24 +226,27 @@ export default PastureLifecycle;
 		metadata.Contract,
 		string(metadataJSON),
 		adapterBinaryEnv,
+		openCodeHostVersion(),
+		openCodeHostVersion(),
+		openCodeHostVersion(),
 	), nil
 }
 
 func openCodeEventByKind(kind model.ContractEventKind) (registration.Event, error) {
-	for _, event := range registration.OpenCode1_18_10().Entries() {
+	for _, event := range registration.OpenCode1_18_29().Entries() {
 		if event.Kind == kind {
 			return event, nil
 		}
 	}
-	return registration.Event{}, fmt.Errorf("codegen.openCodeEventByKind: generated OpenCode 1.18.10 manifest lacks event kind %d; regenerate the host contract before activation", kind)
+	return registration.Event{}, fmt.Errorf("codegen.openCodeEventByKind: generated OpenCode %s manifest lacks event kind %d; regenerate the host contract before activation", registration.OpenCode1_18_29().Version, kind)
 }
 
 func openCodeActivationEntries() ([]activation.Entry, error) {
-	entries, err := activation.OpenCode1_18_10()
+	entries, err := activation.OpenCode1_18_29()
 	if err != nil {
 		return nil, err
 	}
-	manifest := registration.OpenCode1_18_10().Entries()
+	manifest := registration.OpenCode1_18_29().Entries()
 	if len(entries) != len(manifest) {
 		return nil, fmt.Errorf("activation has %d entries but generated OpenCode manifest has %d; activation must exhaustively classify every generated event", len(entries), len(manifest))
 	}
@@ -251,7 +258,10 @@ func openCodeActivationEntries() ([]activation.Entry, error) {
 	return entries, nil
 }
 
-// openCodeHostVersion is the pinned OpenCode host version this target generates
-// for. It is display metadata for the generated header; the authoritative
-// version bound lives in the runtime contract.
-const openCodeHostVersion = "1.18.10"
+// openCodeHostVersion is the OpenCode host version this target generates for,
+// read from the OpenCode runtime contract, the one root. The generated plugin
+// passes it to every hook invocation and the target manifest records it, so
+// neither restates a number that could drift from the contract.
+func openCodeHostVersion() string {
+	return runtime.OpenCode1_18_29().Versions().Min().String()
+}

@@ -95,13 +95,13 @@ func TestCodexManifestIsDeterministic(t *testing.T) {
 // codexLifecycleEventNamesForTest returns the native names of exactly the Codex
 // events the pinned activation catalog enables, in runtime catalog order — the
 // exact input the production transport renderer consumes. It derives the set
-// from the proved target declaration (activation.Codex0_146_0TargetEvents) and
+// from the proved target declaration (activation.Codex0_153_0TargetEvents) and
 // the generated registration manifest, independently of the production filter,
 // so a filter that widened back to the whole catalog would fail these tests.
 func codexLifecycleEventNamesForTest() []string {
 	enabled := make(map[string]struct{})
-	for _, kind := range activation.Codex0_146_0TargetEvents() {
-		for _, event := range registration.Codex0_146_0().Events {
+	for _, kind := range activation.Codex0_153_0TargetEvents() {
+		for _, event := range registration.Codex0_153_0().Events {
 			if event.Kind == kind {
 				enabled[event.NativeName] = struct{}{}
 			}
@@ -164,7 +164,7 @@ func TestCodexHooksConfigCoversActivatedEvents(t *testing.T) {
 
 // TestCodexHooksMatchersMatchAuthenticCapture pins the generated hooks.json
 // matcher values for the two authentically-proven, activation-bound Codex
-// 0.146.0 events to the EXACT values recorded by the irreplaceable authentic
+// Codex events to the EXACT values recorded by the irreplaceable authentic
 // capture configuration. These values can never be re-verified (Codex usage is
 // exhausted), so this golden freezes them against silent drift.
 //
@@ -291,10 +291,10 @@ func TestCodexHostVersionLabelTracksContract(t *testing.T) {
 // ones, so the branches are reachable without a build tag or a test-only export.
 func TestCodexEnabledEventNamesFailsClosed(t *testing.T) {
 	t.Parallel()
-	manifest := registration.Codex0_146_0()
-	states, err := activation.Codex0_146_0()
+	manifest := registration.Codex0_153_0()
+	states, err := activation.Codex0_153_0()
 	if err != nil {
-		t.Fatalf("activation.Codex0_146_0: %v", err)
+		t.Fatalf("activation.Codex0_153_0: %v", err)
 	}
 	catalog := runtime.CodexLifecycleEvents()
 	enabledName := "SessionStart"
@@ -382,11 +382,11 @@ func TestCodexEnabledEventNamesFailsClosed(t *testing.T) {
 // fail-closed matrix above could pass against a divergent test-only path.
 func TestCodexEnabledEventNamesInjectionMatchesProduction(t *testing.T) {
 	t.Parallel()
-	states, err := activation.Codex0_146_0()
+	states, err := activation.Codex0_153_0()
 	if err != nil {
-		t.Fatalf("activation.Codex0_146_0: %v", err)
+		t.Fatalf("activation.Codex0_153_0: %v", err)
 	}
-	injected, err := codexEnabledEventNamesFrom(registration.Codex0_146_0(), states, runtime.CodexLifecycleEvents())
+	injected, err := codexEnabledEventNamesFrom(registration.Codex0_153_0(), states, runtime.CodexLifecycleEvents())
 	if err != nil {
 		t.Fatalf("codexEnabledEventNamesFrom with the pinned sources: %v", err)
 	}

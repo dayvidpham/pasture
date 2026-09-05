@@ -61,7 +61,11 @@ func TestClaudeProductionDescriptorUsesPublicRuntimeIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parsed, err := artifact.ParseRuntimeContractID("claude-code/claude-code@2.1.210")
+	root, err := artifact.ProductionRuntimeContract(artifact.HarnessClaudeCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := artifact.ParseRuntimeContractID(root.String())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,11 +1,11 @@
 {
   "harness": "codex",
-  "contract": "codex/0.146.0",
+  "contract": "codex/0.153.0",
   "events": [
     {
       "event": "SessionStart",
       "state": "enabled",
-      "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/session_start_0_146_0.json (Codex 0.146.0 authentic command-hook capture)",
+      "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/session_start_0_153_0.json (Codex 0.153.0 authentic command-hook capture)",
       "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledCodexHandlersToDurableReadBack/SessionStart",
       "responseCapability": "unset",
       "failureEvidence": ""
@@ -20,7 +20,7 @@
     {
       "event": "PreToolUse",
       "state": "enabled",
-      "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/pre_tool_use_0_146_0.json (Codex 0.146.0 authentic command-hook capture)",
+      "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/pre_tool_use_0_153_0.json (Codex 0.153.0 authentic command-hook capture)",
       "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledCodexHandlersToDurableReadBack/PreToolUse",
       "responseCapability": "unset",
       "failureEvidence": "unset"
@@ -73,6 +73,20 @@
       "reason": "outside-target-set",
       "responseCapability": "unset",
       "failureEvidence": "unset"
+    },
+    {
+      "event": "SessionEnd",
+      "state": "withheld",
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
+    },
+    {
+      "event": "Interrupt",
+      "state": "withheld",
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     }
   ]
 }

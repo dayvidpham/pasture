@@ -93,7 +93,9 @@ func New(configRoot string) (Controller, error) {
 	if err != nil {
 		return Controller{}, fmt.Errorf("opencode.New: assemble exhaustive direct-file cells: %w", err)
 	}
-	id, err := activation.NewActivationContractID("opencode/activation@1.18.10")
+	// The id's version is read from the OpenCode runtime contract, the one
+	// root, so it follows the recorded host version instead of restating it.
+	id, err := activation.NewActivationContractID("opencode/activation@" + runtime.OpenCode1_18_29().Versions().Min().String())
 	if err != nil {
 		return Controller{}, err
 	}
@@ -101,7 +103,7 @@ func New(configRoot string) (Controller, error) {
 	if err != nil {
 		return Controller{}, err
 	}
-	contract, err := activation.NewActivationContract(id, descriptor.RuntimeContractID().Harness(), runtime.OpenCode1_18_10().Versions(), probe, exhaustive)
+	contract, err := activation.NewActivationContract(id, descriptor.RuntimeContractID().Harness(), runtime.OpenCode1_18_29().Versions(), probe, exhaustive)
 	if err != nil {
 		return Controller{}, fmt.Errorf("opencode.New: construct activation contract: %w", err)
 	}

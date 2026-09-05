@@ -10,11 +10,12 @@ import (
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 )
 
 func validContract(t *testing.T) ir.RuntimeContractID {
 	t.Helper()
-	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "2.1.210")
+	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Version)
 	if err != nil {
 		t.Fatalf("build runtime contract: %v", err)
 	}

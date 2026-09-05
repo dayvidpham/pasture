@@ -176,18 +176,18 @@ func (p CaptureProvenance) ValidateFixture(root, fixture string) error {
 // bounded capture bytes. Non-authentic provenance remains non-normative.
 //
 // An authentic capture must carry its event, its redaction record and its
-// clearance path. Bytes alone cannot prove a committed path, so this entry
-// point never applies the legacy exemption; ValidateCommittedFixtureBytes and
-// ValidateFixture do, because they know where the bytes are committed.
+// clearance path, whatever its host version. No committed capture is exempt:
+// the last captures that predated those three fields left the corpus when the
+// events were recaptured at the recorded host versions.
 func (p CaptureProvenance) ValidateFixtureBytes(body []byte) error {
 	return p.validateBytes("", body)
 }
 
 // ValidateCommittedFixtureBytes validates already bounded capture bytes that
 // are committed at path (absolute or repository-relative, as resolved by the
-// caller). A capture whose committed path AND digest are both on the legacy
-// exemption list validates without its event, redaction and clearance; every
-// other capture needs all three whatever its host version.
+// caller). The path is kept for the error a caller reports; the rules are the
+// same as ValidateFixtureBytes, and every capture needs its event, redaction
+// and clearance whatever its host version.
 func (p CaptureProvenance) ValidateCommittedFixtureBytes(path string, body []byte) error {
 	return p.validateBytes(path, body)
 }
@@ -209,10 +209,10 @@ func (p CaptureProvenance) validateBytes(committedPath string, body []byte) erro
 	}
 	got := digest.FromBytes(body)
 	if got != want {
+		if committedPath != "" {
+			return fmt.Errorf("authentic capture bytes at %s digest is %s, want %s", committedPath, got, want)
+		}
 		return fmt.Errorf("authentic capture bytes digest is %s, want %s", got, want)
-	}
-	if committedPath != "" && IsLegacyExemptCapture(committedPath, got) {
-		return nil
 	}
 	if strings.TrimSpace(p.Event) == "" {
 		return fmt.Errorf("authentic capture provenance event is empty; record the exact native event name the host declared for this capture")
@@ -252,77 +252,6 @@ func hasParentTraversal(p string) bool {
 		}
 	}
 	return false
-}
-
-// LegacyExemptCapture is one committed capture that predates the event,
-// redaction and clearance fields: its committed repository-relative path and
-// the sha256 of its committed bytes. Both must match for the exemption to
-// apply, so neither a new fixture that copies a legacy payload to another
-// path nor new bytes at a legacy path can inherit it.
-type LegacyExemptCapture struct {
-	Path   string
-	Digest digest.Digest
-}
-
-// legacyExemptCaptures enumerates the committed authentic captures that were
-// committed before a capture sidecar carried an event, a redaction record and
-// a clearance path. Only a capture at one of these paths with these bytes may
-// validate without those three fields.
-//
-// WHAT IS COUNTED. The Claude ingress corpus holds 14 sidecars in the
-// CaptureProvenance shape (the Codex and OpenCode sidecars of the same era use
-// a provider shape that no code path decodes as a CaptureProvenance). Of the
-// 14, two never reach this list: the origin-authored control returns before
-// any field check, and the digest-mismatch control fails the digest check by
-// design. The remaining 12 are listed here. They carry 11 distinct payloads:
-// the session_start_2_1_210 capture and its version-out-of-range control share
-// one.
-//
-// This list is a bridge, not a policy. The next pin bump recaptures these
-// events at the frozen host versions, deletes these fixtures, and deletes this
-// list with them; TestLegacyExemptionListEqualsCommittedSidecarsWithoutClearance
-// holds the list equal, in both directions, to the committed sidecars that
-// still lack a clearance path and requires it non-empty while they exist, so
-// the list can neither rot, nor grow, nor outlive them.
-var legacyExemptCaptures = [...]LegacyExemptCapture{
-	{Path: "internal/lifecycle/ingress/claude/testdata/fixtures/elicitation_2_1_222.json", Digest: "sha256:b3a426a5a273ff4a52c5834dc1846295617c706f2427d38a7e40f6b0f0e98112"},
-	{Path: "internal/lifecycle/ingress/claude/testdata/fixtures/elicitation_result_2_1_222.json", Digest: "sha256:661515e7e208f0fc8d27ebd8d0083be25708fa97a52739e4dff749bbca1d49f3"},
-	{Path: "internal/lifecycle/ingress/claude/testdata/fixtures/post_compact_2_1_222.json", Digest: "sha256:963fd4e58ff6424f9195a3e7c321fb01686bcfa4369dd50264e7af41322ccf20"},
-	{Path: "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_batch_2_1_222.json", Digest: "sha256:2dd6c5e05902d1a07ca86258ef91adfd7b957118cac5c17d5d888f8b533b5e6e"},
-	{Path: "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_use_2_1_222.json", Digest: "sha256:b7de90f8fa0afb1a62f947b311cde85799417e794e5a58305e920d0006bf3da9"},
-	{Path: "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_use_failure_2_1_222.json", Digest: "sha256:a0ec3e466598b80607b244524e01b859dfb953c5fba3e50ba2546222f73b58b7"},
-	{Path: "internal/lifecycle/ingress/claude/testdata/fixtures/pre_compact_2_1_222.json", Digest: "sha256:5d5034c61e3ac28bba586d189323e9a0943d5c07a59e3eafe3da56b7ed714df1"},
-	{Path: "internal/lifecycle/ingress/claude/testdata/fixtures/pre_tool_use_2_1_222.json", Digest: "sha256:b147a832c7f9781b991443813dd0438ef9990af21af35f9113ad63e50435192e"},
-	{Path: "internal/lifecycle/ingress/claude/testdata/fixtures/session_end_2_1_222.json", Digest: "sha256:dfdbd5d6c525d2d057171c7c15c6439c235f7506e11988c6cd7ae80e827ba16e"},
-	{Path: "internal/lifecycle/ingress/claude/testdata/fixtures/session_start_2_1_222.json", Digest: "sha256:7b3b956017b2c9cf5e430878fb24d8cce77ce93eb6c4fed8a9ea3826124721d7"},
-	{Path: "internal/lifecycle/ingress/claude/testdata/fixtures/session_start_2_1_210.json", Digest: "sha256:30d524e5d2cb22d486faad05adbaa1a4b7e0d72cd6301f38fe18ca5e3f167003"},
-	{Path: "internal/lifecycle/ingress/claude/testdata/fixtures/session_start_2_1_210_version_out_of_range.json", Digest: "sha256:30d524e5d2cb22d486faad05adbaa1a4b7e0d72cd6301f38fe18ca5e3f167003"},
-}
-
-// IsLegacyExemptCapture reports whether bytes with digest d committed at path
-// predate the event, redaction and clearance fields and may validate without
-// them. The path may be absolute or repository-relative: an entry matches when
-// its committed path is the whole slash-normalised path or a "/"-bounded
-// suffix of it, so an archive copy of the repository resolves and a copy of
-// the payload under any other name does not.
-func IsLegacyExemptCapture(path string, d digest.Digest) bool {
-	normalised := filepath.ToSlash(path)
-	for _, entry := range legacyExemptCaptures {
-		if entry.Digest != d {
-			continue
-		}
-		if normalised == entry.Path || strings.HasSuffix(normalised, "/"+entry.Path) {
-			return true
-		}
-	}
-	return false
-}
-
-// LegacyExemptCaptures returns the enumerated exemption as a fresh slice.
-func LegacyExemptCaptures() []LegacyExemptCapture {
-	out := make([]LegacyExemptCapture, len(legacyExemptCaptures))
-	copy(out, legacyExemptCaptures[:])
-	return out
 }
 
 // IsBareTrackerID reports whether a value has the shape of a bare

@@ -25,14 +25,11 @@ import (
 	"github.com/dayvidpham/pasture/internal/install/service"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	targetcodex "github.com/dayvidpham/pasture/internal/target/codex"
+	"github.com/dayvidpham/pasture/internal/testutil"
 )
 
 type layoutFixture struct {
-	Contract        string `json:"contract"`
-	RuntimeContract string `json:"runtime_contract"`
-	HostMin         string `json:"host_min"`
-	HostMax         string `json:"host_max"`
-	Components      []struct {
+	Components []struct {
 		Extension      string   `json:"extension"`
 		Package        string   `json:"package"`
 		Prefix         string   `json:"prefix"`
@@ -107,14 +104,17 @@ func TestContractMatchesReviewedGlobalLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if contract.ID().String() != fixture.Contract {
-		t.Fatalf("contract fixture mismatch: got %s / %s", contract.ID(), descriptor.RuntimeContractID())
+	// The ids and the admission are read from the Codex runtime contract, the
+	// one root, never restated in the fixture.
+	root := runtime.Codex0_153_0()
+	if contract.ID().String() != hostcodex.ActivationContractID() || contract.ID().String() != "codex/global@"+root.Versions().Min().String() {
+		t.Fatalf("contract id %s is not derived from the Codex runtime contract version %s", contract.ID(), root.Versions().Min())
 	}
-	if descriptor.RuntimeContractID().String() != fixture.RuntimeContract || len(fixture.Components) != 3 {
+	if descriptor.RuntimeContractID() != root.ID() || len(fixture.Components) != 3 {
 		t.Fatalf("runtime/layout fixture mismatch: %s", descriptor.RuntimeContractID())
 	}
-	if contract.HostVersions().Min().String() != fixture.HostMin || contract.HostVersions().Max().String() != fixture.HostMax {
-		t.Fatalf("installer host range = [%s,%s], fixture = [%s,%s]", contract.HostVersions().Min(), contract.HostVersions().Max(), fixture.HostMin, fixture.HostMax)
+	if contract.HostVersions().HasUpperBound() || contract.HostVersions().Min().String() != root.Versions().Min().String() {
+		t.Fatalf("installer admission %q is not the runtime contract's floor %q", contract.HostVersions().Describe(), root.Versions().Describe())
 	}
 	for index, component := range descriptor.Components() {
 		row := fixture.Components[index]
@@ -150,13 +150,17 @@ func TestInstallerCompatibilityRangeBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The admission is a floor at the recorded version: derive every probe
+	// from it so the boundary test follows the contract when it moves.
+	min := contract.HostVersions().Min()
 	cases := map[string]bool{
-		"0.144.0":         false,
-		"0.144.1":         false,
-		"0.146.0":         true,
-		"0.146.1":         false,
-		"0.146.0-rc.1":    false,
-		"0.146.0+build.7": true,
+		testutil.BelowFloor(t, min).String():    false,
+		min.String():                            true,
+		testutil.Bump(t, min, 0, 0, 1).String(): true,
+		testutil.Bump(t, min, 0, 1, 0).String(): true,
+		testutil.Bump(t, min, 1, 0, 0).String(): true,
+		min.String() + "-rc.1":                  false,
+		min.String() + "+build.7":               true,
 	}
 	for text, want := range cases {
 		version, err := runtime.ParseHostVersion(text)
@@ -620,7 +624,7 @@ func TestGlobalHookCommandReachesInstalledRunnerFromUnrelatedDirectory(t *testin
 	if err != nil {
 		t.Fatalf("installed runner did not reach the injected Pasture binary: %v", err)
 	}
-	if !strings.Contains(string(args), "hook lifecycle --harness codex --event SessionStart --host-version 0.146.0") {
+	if !strings.Contains(string(args), "hook lifecycle --harness codex --event SessionStart --host-version "+runtime.Codex0_153_0().Versions().Min().String()) {
 		t.Fatalf("installed global runner forwarded wrong argv: %q", args)
 	}
 }
@@ -800,9 +804,9 @@ func stubDirectFileContract(t *testing.T, harness ir.HarnessID, root string) (ac
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, _ := activation.NewActivationContractID(string(harness) + "/test@0.146.0")
+	id, _ := activation.NewActivationContractID(string(harness) + "/test@0.153.0")
 	probe, _ := activation.NewCommandSchema("true", "--version")
-	version, _ := runtime.ParseHostVersion("0.146.0")
+	version, _ := runtime.ParseHostVersion("0.153.0")
 	versions, _ := runtime.NewVersionConstraint(version, version, false)
 	contract, err := activation.NewActivationContract(id, harness, versions, probe, exhaustive)
 	if err != nil {

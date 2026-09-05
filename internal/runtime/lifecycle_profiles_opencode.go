@@ -68,7 +68,7 @@ var openCodeLifecycleEventNames = [...]string{
 	"file.edited",
 	"file.watcher.updated",
 	"installation.updated",
-	"installation.update_available",
+	"installation.update-available", // spelled as OpenCode emits it: packages/schema/src/installation-event.ts, identical at 1.18.10 and 1.18.29
 	"lsp.client.diagnostics",
 	"lsp.updated",
 	"message.updated",
@@ -230,8 +230,8 @@ func openCodeLifecycleMappings() map[OpenCodeLifecycleEvent]LifecycleEventMappin
 	}
 }
 
-// OpenCode1_18_10Lifecycle returns the immutable OpenCode lifecycle table bound
-// to the same exact host version and RuntimeContractID as OpenCode1_18_10.
-func OpenCode1_18_10Lifecycle() LifecycleContract[OpenCodeLifecycleEvent] {
-	return mustLifecycleContract(OpenCode1_18_10(), OpenCodeLifecycleEvents(), openCodeLifecycleMappings())
+// OpenCode1_18_29Lifecycle returns the immutable OpenCode lifecycle table bound
+// to the same exact host version and RuntimeContractID as OpenCode1_18_29.
+func OpenCode1_18_29Lifecycle() LifecycleContract[OpenCodeLifecycleEvent] {
+	return mustLifecycleContract(OpenCode1_18_29(), OpenCodeLifecycleEvents(), openCodeLifecycleMappings())
 }

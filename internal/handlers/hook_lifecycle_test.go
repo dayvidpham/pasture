@@ -16,6 +16,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/tasks"
 )
 
@@ -26,10 +27,6 @@ func (fixedLifecycleClock) Now() time.Time { return time.Unix(1_700_000_000, 0).
 type fixedLifecycleOperations struct{ id string }
 
 func (s fixedLifecycleOperations) NewOperationID() (string, error) { return s.id, nil }
-
-type openCodeRecord struct {
-	Value json.RawMessage `json:"value"`
-}
 
 type readTrackingLifecycleInput struct{ reads int }
 
@@ -43,7 +40,7 @@ func TestHookLifecycleResponseRejectsWithheldOpenCodeBeforeInputAndStorage(t *te
 	dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
 	input := &readTrackingLifecycleInput{}
 	response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-		DBPath: dbPath, Harness: ir.HarnessOpenCode, Event: "session.updated", HostVersion: "1.18.10",
+		DBPath: dbPath, Harness: ir.HarnessOpenCode, Event: "session.updated", HostVersion: registration.OpenCode1_18_29().Version,
 		Input: input, Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.withheld"},
 	})
 	require.ErrorContains(t, err, `OpenCode event "session.updated" is withheld (reason outside-target-set)`)
@@ -62,7 +59,7 @@ func TestHookLifecycleResponseRejectsUncorrelatedClaudeElicitationBeforeInputAnd
 			dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
 			input := &readTrackingLifecycleInput{}
 			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-				DBPath: dbPath, Harness: ir.HarnessClaudeCode, Event: event, HostVersion: "2.1.222",
+				DBPath: dbPath, Harness: ir.HarnessClaudeCode, Event: event, HostVersion: "2.1.261",
 				Input: input, Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.withheld.claude"},
 			})
 			require.ErrorContains(t, err, `Claude event "`+event+`" is withheld (reason missing-request-correlation)`)
@@ -81,8 +78,8 @@ func TestHookLifecycleResponseOpenCodeCommitsBeforeReturning(t *testing.T) {
 		wantResponse         bool
 		wantEvidence         []provenance.EvidenceKind
 	}{
-		{name: "observation", fixture: "session_created_1_18_10.capture.json", event: "session.created", wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2"}},
-		{name: "gate", fixture: "tool_execute_before_1_18_10.capture.json", event: "tool.execute.before", wantResponse: true, wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2", "pasture.lifecycle.consultation.v1"}},
+		{name: "observation", fixture: "session_created_1_18_29.json", event: "session.created", wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2"}},
+		{name: "gate", fixture: "tool_execute_before_1_18_29.json", event: "tool.execute.before", wantResponse: true, wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2", "pasture.lifecycle.consultation.v1"}},
 	}
 	for _, test := range tests {
 		test := test
@@ -90,8 +87,6 @@ func TestHookLifecycleResponseOpenCodeCommitsBeforeReturning(t *testing.T) {
 			t.Parallel()
 			raw, err := os.ReadFile(filepath.Join("..", "lifecycle", "ingress", "opencode", "testdata", "fixtures", test.fixture))
 			require.NoError(t, err)
-			var record openCodeRecord
-			require.NoError(t, json.Unmarshal(raw, &record))
 			dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 			bootstrap, err := tasks.OpenTaskTracker(dbPath)
 			require.NoError(t, err)
@@ -99,8 +94,8 @@ func TestHookLifecycleResponseOpenCodeCommitsBeforeReturning(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, bootstrap.Close())
 			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-				DBPath: dbPath, Harness: ir.HarnessOpenCode, Event: test.event, HostVersion: "1.18.10",
-				Input: bytes.NewReader(record.Value), Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test." + test.name},
+				DBPath: dbPath, Harness: ir.HarnessOpenCode, Event: test.event, HostVersion: registration.OpenCode1_18_29().Version,
+				Input: bytes.NewReader(raw), Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test." + test.name},
 			})
 			require.NoError(t, err)
 			require.Equal(t, test.wantResponse, response.IsValid())
@@ -146,15 +141,13 @@ func queryOneEvidence(t *testing.T, tracker interface{ Journal() provenance.Jour
 
 func TestHookLifecycleResponsePersistenceFailureReturnsNoResponse(t *testing.T) {
 	t.Parallel()
-	raw, err := os.ReadFile(filepath.Join("..", "lifecycle", "ingress", "opencode", "testdata", "fixtures", "tool_execute_before_1_18_10.capture.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "lifecycle", "ingress", "opencode", "testdata", "fixtures", "tool_execute_before_1_18_29.json"))
 	require.NoError(t, err)
-	var record openCodeRecord
-	require.NoError(t, json.Unmarshal(raw, &record))
 	directory := filepath.Join(t.TempDir(), "database-directory")
 	require.NoError(t, os.Mkdir(directory, 0o700))
 	response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-		DBPath: directory, Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: "1.18.10",
-		Input: bytes.NewReader(record.Value), Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.failure"},
+		DBPath: directory, Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: registration.OpenCode1_18_29().Version,
+		Input: bytes.NewReader(raw), Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.failure"},
 	})
 	require.Error(t, err)
 	require.False(t, response.IsValid(), "a response must not escape when persistence fails")

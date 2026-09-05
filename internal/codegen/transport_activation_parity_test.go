@@ -15,6 +15,8 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/inventory"
+	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 )
@@ -197,11 +199,11 @@ func registeredBlockingModes(t *testing.T, harness ir.HarnessID) map[string]regi
 	var manifest registration.Manifest
 	switch harness {
 	case ir.HarnessClaudeCode:
-		manifest = registration.ClaudeCode2_1_210()
+		manifest = registration.ClaudeCode2_1_261()
 	case ir.HarnessCodex:
-		manifest = registration.Codex0_146_0()
+		manifest = registration.Codex0_153_0()
 	case ir.HarnessOpenCode:
-		manifest = registration.OpenCode1_18_10()
+		manifest = registration.OpenCode1_18_29()
 	default:
 		t.Fatalf("harness %q has no registration manifest in this test", harness)
 	}
@@ -650,4 +652,122 @@ func requireSameEvents(t *testing.T, artifact string, enabled, wired map[string]
 	require.Emptyf(t, missing,
 		"%s does not wire %v, which the activation manifest enables. An enabled event with no transport entry never reaches the handler. Regenerate with `make generate`.",
 		artifact, missing)
+}
+
+// enabledFloor names, per harness, the events that are enabled today and must
+// stay enabled: every one has an authentic capture and a production proof
+// behind it, so a regeneration that withholds any of them has lost evidence
+// the corpus still holds. The list is a floor, never a ceiling: a later capture
+// adds a name here deliberately; nothing removes one without the removal being
+// this list's own change.
+//
+// It is a POLICY statement and not the mechanism. The mechanism is
+// derivedEnabledEvents below, which reads the enabled entries of the three
+// activation manifests; the test holds this list EQUAL to that derivation, so
+// an event enabled by a later capture is protected the moment it is enabled and
+// not when somebody remembers to type it here.
+var enabledFloor = map[string][]string{
+	"claude-code": {"SessionStart", "SessionEnd", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PostToolBatch", "PreCompact", "PostCompact"},
+	"codex":       {"SessionStart", "PreToolUse"},
+	"opencode":    {"session.created", "tool.execute.before"},
+}
+
+// derivedEnabledEvents reads the enabled set of every harness from the
+// activation manifests themselves. activation.NewEnabled refuses an entry
+// without an event-bound capture proof and an event-bound production proof, so
+// an enabled entry IS the evidence claim this floor exists to protect.
+//
+// The names come from the generated registration manifest of the same harness,
+// which is the only source that pairs an event kind with the name the host
+// spells.
+func derivedEnabledEvents(t *testing.T) map[string]map[string]struct{} {
+	t.Helper()
+
+	sources := []struct {
+		harness  string
+		entries  func() ([]activation.Entry, error)
+		manifest registration.Manifest
+	}{
+		{"claude-code", activation.ClaudeCode2_1_261, registration.ClaudeCode2_1_261()},
+		{"codex", activation.Codex0_153_0, registration.Codex0_153_0()},
+		{"opencode", activation.OpenCode1_18_29, registration.OpenCode1_18_29()},
+	}
+
+	derived := make(map[string]map[string]struct{}, len(sources))
+	for _, source := range sources {
+		names := make(map[model.ContractEventKind]string, len(source.manifest.Entries()))
+		for _, event := range source.manifest.Entries() {
+			names[event.Kind] = event.NativeName
+		}
+		entries, err := source.entries()
+		require.NoErrorf(t, err, "the %s activation manifest does not derive, so no floor can be read from it", source.harness)
+		enabled := make(map[string]struct{})
+		for _, entry := range entries {
+			if entry.State != activation.Enabled {
+				continue
+			}
+			name, ok := names[entry.Event]
+			require.Truef(t, ok, "the %s activation manifest enables event kind %d, which its registration manifest does not declare", source.harness, entry.Event)
+			enabled[name] = struct{}{}
+		}
+		require.NotEmptyf(t, enabled, "the %s activation manifest enables no event, so the derived floor would hold nothing", source.harness)
+		derived[source.harness] = enabled
+	}
+	return derived
+}
+
+// TestEnabledEventsNeverDropBelowTheFloor holds the enabled set of every
+// harness at three places at once: the activation manifests (the source that
+// refuses an entry without its proofs), the COMMITTED activation reports (the
+// artefacts the hosts ship with) and the policy list above.
+//
+// It fails on a stale regeneration as well as on a table change, because it
+// reads the committed artefacts and not the emitters, and it fails when the
+// policy list lags a newly enabled event, because the derivation grew and the
+// list did not. Non-vacuity: every harness has a non-empty derived floor and a
+// non-empty enabled set in its committed report.
+func TestEnabledEventsNeverDropBelowTheFloor(t *testing.T) {
+	t.Parallel()
+	root := repoRoot(t)
+	reports := map[string]string{
+		"claude-code": filepath.Join(root, "hooks", "pasture-activation.json"),
+		"codex":       filepath.Join(root, ".codex", "pasture-codex-activation.json"),
+		"opencode":    filepath.Join(root, ".opencode", "pasture-opencode-activation.json"),
+	}
+	derived := derivedEnabledEvents(t)
+	require.Len(t, enabledFloor, len(reports), "every harness with a committed activation report declares a floor")
+	require.Len(t, derived, len(reports), "every harness with a committed activation report derives a floor")
+	for harness, report := range reports {
+		harness, report := harness, report
+		t.Run(harness, func(t *testing.T) {
+			t.Parallel()
+			floor := derived[harness]
+			require.NotEmpty(t, floor, "the derived %s floor is empty, so this guard would hold nothing", harness)
+			enabled := enabledEventsFromActivationReport(t, report)
+			require.NotEmpty(t, enabled, "the committed %s activation report enables no event", harness)
+			for event := range floor {
+				_, ok := enabled[event]
+				require.True(t, ok, "%s: %s is on the enabled floor but the committed activation report %s does not enable it; an enabled event with an authentic capture and a production proof was withheld by a regeneration, or the activation target declaration must withhold it deliberately", harness, event, filepath.Base(report))
+			}
+			for event := range enabled {
+				_, ok := floor[event]
+				require.True(t, ok, "%s: the committed activation report %s enables %s, which the activation manifest does not; the committed report is stale, so run `make generate`", harness, filepath.Base(report), event)
+			}
+			// The policy list is held EQUAL to the derivation, so it can never
+			// protect fewer events than the tree enables.
+			policy := make(map[string]struct{}, len(enabledFloor[harness]))
+			for _, event := range enabledFloor[harness] {
+				policy[event] = struct{}{}
+			}
+			require.NotEmpty(t, policy, "the %s policy floor is empty, so this guard would hold nothing", harness)
+			for event := range floor {
+				_, ok := policy[event]
+				require.True(t, ok, "%s: %s is enabled by the activation manifest but the policy floor in this file does not name it; a newly enabled event must be added here in the same change that enables it", harness, event)
+			}
+			for event := range policy {
+				_, ok := floor[event]
+				require.True(t, ok, "%s: the policy floor names %s, which the activation manifest does not enable; a name is removed from the floor only deliberately, with the reason in the commit", harness, event)
+			}
+		})
+	}
 }

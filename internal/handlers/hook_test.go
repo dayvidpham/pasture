@@ -905,6 +905,15 @@ func TestHookRecord_RealGit_RepoAndRemotes(t *testing.T) {
 	}
 	t.Chdir(strings.TrimSpace(string(repoRoot)))
 
+	// The test reads the "origin" remote of the ambient repository, so it needs
+	// one. A repository with no origin is an ordinary environment: every gate in
+	// this project runs from a `git archive` copy, which has no remote at all,
+	// and a failure there would be read as a defect of the change under gate.
+	originOut, err := exec.Command("git", "remote", "get-url", "origin").Output()
+	if err != nil || !strings.Contains(string(originOut), "pasture") {
+		t.Skip("no parsable pasture 'origin' remote in this repo; skipping real-git repo+remotes test")
+	}
+
 	shaOut, err := exec.Command("git", "rev-parse", "HEAD").Output()
 	if err != nil {
 		t.Fatalf("git rev-parse HEAD: %v", err)

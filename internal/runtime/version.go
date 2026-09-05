@@ -40,7 +40,7 @@ type HostVersion struct {
 }
 
 // ParseHostVersion parses one harness host version. It accepts a leading "v"
-// (so `v2.1.210` and `2.1.210` are the same version), a MAJOR.MINOR.PATCH
+// (so `v2.1.261` and `2.1.261` are the same version), a MAJOR.MINOR.PATCH
 // triple, an optional `-prerelease` series, and optional `+build` metadata. It
 // rejects empty, padded, or otherwise unparsable output actionably rather than
 // letting a garbage string silently compare as some default version.
@@ -84,7 +84,7 @@ func ParseHostVersion(value string) (HostVersion, error) {
 			fmt.Sprintf("host version %q is not a MAJOR.MINOR.PATCH triple", value),
 			"contract matching compares three numeric release components in order",
 			where, "the host cannot be matched against any runtime contract",
-			"supply exactly three dot-separated numeric components, e.g. 2.1.210", nil,
+			"supply exactly three dot-separated numeric components, e.g. 2.1.261", nil,
 		)
 	}
 	numbers := make([]uint64, 3)
@@ -168,6 +168,13 @@ func isAllDigits(s string) bool {
 }
 
 func (v HostVersion) IsValid() bool { return v.parsed }
+
+// Release returns the MAJOR, MINOR and PATCH release components. A caller
+// that derives a coarser identity from a version (a "MAJOR.MINOR" family, for
+// example) reads them here instead of re-parsing String().
+func (v HostVersion) Release() (major, minor, patch uint64) {
+	return v.major, v.minor, v.patch
+}
 
 // HasPrerelease reports whether the version carries a prerelease series, which
 // a constraint must explicitly include before it matches.
@@ -266,15 +273,24 @@ func parseNumericIdentifier(value string) (uint64, bool) {
 	return parsed, true
 }
 
-// VersionConstraint is a closed, inclusive host-version range [min, max]
-// bounded by semantic-version precedence, plus an explicit prerelease-inclusion
-// policy. A pinned point contract sets min == max. Prereleases are matched only
-// when the constraint explicitly includes them, so an unreleased build never
-// silently satisfies a stable contract.
+// VersionConstraint is a host-version admission bounded by semantic-version
+// precedence, in one of two shapes, plus an explicit prerelease-inclusion
+// policy:
+//
+//   - a closed, inclusive range [min, max] (NewVersionConstraint); a pinned
+//     point contract sets min == max (NewExactVersion);
+//   - an open floor "at or above min" with no upper bound (NewVersionFloor),
+//     so every later release of the host is admitted without a re-pin.
+//
+// Prereleases are matched only when the constraint explicitly includes them,
+// so an unreleased build never silently satisfies a stable contract. A floor
+// never includes prereleases: a prerelease of a release above the floor is not
+// that release.
 type VersionConstraint struct {
 	min                HostVersion
 	max                HostVersion
 	includePrereleases bool
+	floor              bool
 	constructed        bool
 }
 
@@ -282,6 +298,25 @@ type VersionConstraint struct {
 // version. It is the constructor for the initial pinned point ranges.
 func NewExactVersion(version HostVersion) (VersionConstraint, error) {
 	return NewVersionConstraint(version, version, false)
+}
+
+// NewVersionFloor returns a constraint that accepts min and every release with
+// higher precedence, with no upper bound. It is the admission shape for a host
+// contract whose recorded version is a baseline: the host is allowed to move
+// forward, and a host below the recorded version is refused. Prereleases are
+// never admitted by a floor. HasUpperBound reports false for the result, and
+// Max returns the zero HostVersion, so a caller that needs an upper bound must
+// ask before it reads one.
+func NewVersionFloor(min HostVersion) (VersionConstraint, error) {
+	if !min.IsValid() {
+		return VersionConstraint{}, runtimeError(
+			"version floor has a zero or unparsed lower bound",
+			"a floor requires one parsed host version to compare against",
+			"NewVersionFloor", "no runtime contract can be built on this floor",
+			"construct the bound with ParseHostVersion", nil,
+		)
+	}
+	return VersionConstraint{min: min, floor: true, constructed: true}, nil
 }
 
 // NewVersionConstraint returns an inclusive [min, max] host-version range.
@@ -309,16 +344,25 @@ func NewVersionConstraint(min, max HostVersion, includePrereleases bool) (Versio
 
 func (c VersionConstraint) IsValid() bool { return c.constructed }
 
-// Min and Max return the inclusive bounds.
+// Min returns the inclusive lower bound of either shape.
 func (c VersionConstraint) Min() HostVersion { return c.min }
+
+// Max returns the inclusive upper bound of a closed range. A floor has no
+// upper bound, so Max returns the zero HostVersion for it; check
+// HasUpperBound first.
 func (c VersionConstraint) Max() HostVersion { return c.max }
+
+// HasUpperBound reports whether the constraint is a closed range (true) or an
+// open floor (false).
+func (c VersionConstraint) HasUpperBound() bool { return c.constructed && !c.floor }
 
 // IncludesPrereleases reports the prerelease-inclusion policy.
 func (c VersionConstraint) IncludesPrereleases() bool { return c.includePrereleases }
 
 // Allows reports whether version satisfies the constraint. A prerelease host is
 // eligible only when the constraint explicitly includes prereleases; build
-// metadata never changes the decision.
+// metadata never changes the decision. A floor admits min and every release
+// above it; a closed range admits min through max inclusive.
 func (c VersionConstraint) Allows(version HostVersion) bool {
 	if !c.constructed || !version.IsValid() {
 		return false
@@ -326,7 +370,30 @@ func (c VersionConstraint) Allows(version HostVersion) bool {
 	if version.HasPrerelease() && !c.includePrereleases {
 		return false
 	}
-	return ComparePrecedence(version, c.min) >= 0 && ComparePrecedence(version, c.max) <= 0
+	if ComparePrecedence(version, c.min) < 0 {
+		return false
+	}
+	if c.floor {
+		return true
+	}
+	return ComparePrecedence(version, c.max) <= 0
+}
+
+// Describe spells the admission for a reader who must act on it: "exactly X"
+// for a pinned point, "from X through Y" for a closed range, and "at or above
+// X" for a floor. Diagnostics quote this text rather than a hand-written
+// number, so the text follows the contract when the contract moves.
+func (c VersionConstraint) Describe() string {
+	switch {
+	case !c.constructed:
+		return ""
+	case c.floor:
+		return fmt.Sprintf("at or above %s", c.min)
+	case ComparePrecedence(c.min, c.max) == 0:
+		return fmt.Sprintf("exactly %s", c.min)
+	default:
+		return fmt.Sprintf("from %s through %s", c.min, c.max)
+	}
 }
 
 // CapabilityVersionRange is an inclusive range over

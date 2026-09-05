@@ -9,14 +9,18 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
+	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
 func TestClaudeManifestIsCompleteAndDefensivelyCopied(t *testing.T) {
 	t.Parallel()
-	manifest := registration.ClaudeCode2_1_210()
-	require.Len(t, manifest.Events, 30)
+	manifest := registration.ClaudeCode2_1_261()
+	// One registration row per runtime profile event: the count and the last
+	// name are read from the profile, never restated.
+	profile := runtime.ClaudeLifecycleEvents()
+	require.Len(t, manifest.Events, len(profile))
 	require.Equal(t, "SessionStart", manifest.Events[0].NativeName)
-	require.Equal(t, "ElicitationResult", manifest.Events[29].NativeName)
+	require.Equal(t, profile[len(profile)-1].NativeName(), manifest.Events[len(manifest.Events)-1].NativeName)
 	copy := manifest.Entries()
 	copy[0].NativeName = "changed"
 	copy[0].AllowedFields[0] = 0

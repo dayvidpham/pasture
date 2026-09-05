@@ -102,10 +102,10 @@ func TestOrphanCountIsZeroOnACleanStoreAndTrueAfterAbandonedInvocations(t *testi
 			"prevent. The note ships at ZERO as well, because an operator meets the term for the "+
 			"first time whichever number is beside it")
 
-	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_222.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"))
 	require.NoError(t, err)
 	ingest := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle",
-		"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.222")
+		"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.261")
 	ingest.Stdin = bytes.NewReader(raw)
 	require.NoError(t, ingest.Run())
 
@@ -625,12 +625,12 @@ func TestEveryReadCommandReachesTheReclaim(t *testing.T) {
 
 	arguments := map[string][]string{
 		"list":    {},
-		"context": {"--binding", "session:session_id=3696b790-3973-49f2-b156-9d82146bf7ec"},
-		"lineage": {"--binding", "session:session_id=3696b790-3973-49f2-b156-9d82146bf7ec"},
+		"context": {"--binding", "session:session_id=c02859c0-10ab-49c3-9b93-29280bd45fbb"},
+		"lineage": {"--binding", "session:session_id=c02859c0-10ab-49c3-9b93-29280bd45fbb"},
 		"orphans": {},
 	}
 	binary := lifecycleBinary(t)
-	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_222.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"))
 	require.NoError(t, err)
 
 	derived := []string{}
@@ -649,7 +649,7 @@ func TestEveryReadCommandReachesTheReclaim(t *testing.T) {
 		dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 		initializeLifecycleTestDatabase(t, dbPath)
 		ingest := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle",
-			"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.222")
+			"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.261")
 		ingest.Stdin = bytes.NewReader(raw)
 		require.NoError(t, ingest.Run(), "%s: the referenced occurrence must ingest", command.Name())
 		before, referenced := payloadBlobRows(t, dbPath)

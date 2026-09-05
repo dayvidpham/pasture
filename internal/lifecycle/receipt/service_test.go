@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
@@ -408,7 +409,7 @@ func TestAppenderClassifiesContextStateBeforeUpstreamError(t *testing.T) {
 type nonContextJournal struct{ provenance.Journal }
 
 func validDelivery() Delivery {
-	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "2.1.210")
+	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, productionClaudeVersion())
 	if err != nil {
 		panic(err)
 	}
@@ -420,7 +421,7 @@ func validDelivery() Delivery {
 // delivery-receipt warrant; the gate certifies only the write class, so one
 // warrant covers every delivery in these tests.
 func mustDeliveryWarrant() gate.Warrant {
-	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "2.1.210")
+	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, productionClaudeVersion())
 	if err != nil {
 		panic(err)
 	}
@@ -514,4 +515,16 @@ func TestReceiveRefusesAServiceWithoutAWriterWindow(t *testing.T) {
 	s.Window = 0
 	_, err := s.Receive(context.Background(), mustDeliveryWarrant(), validDelivery())
 	requireWindowRefusal(t, err, calls, "has no writer window", "WorkflowResult tier")
+}
+
+// productionClaudeVersion is the Claude host version the tree's production
+// runtime contract records, read from the one root, so a test delivery never
+// restates a version.
+func productionClaudeVersion() string {
+	root, err := artifact.ProductionRuntimeContract(artifact.HarnessClaudeCode)
+	if err != nil {
+		panic(err)
+	}
+	_, version, _ := strings.Cut(root.String(), "@")
+	return version
 }

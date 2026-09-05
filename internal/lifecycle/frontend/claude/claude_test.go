@@ -1,7 +1,9 @@
 package claude_test
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 
@@ -13,9 +15,24 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
+	"github.com/dayvidpham/pasture/internal/testutil"
 )
 
-const sessionID = "b3cfe877-feb4-4ba3-9500-414c8bfb51c4"
+// sessionID is the session_id the committed SessionStart fixture carries, read
+// from the corpus so the frontend proof follows the capture.
+var sessionID = func() string {
+	raw, err := os.ReadFile("../../ingress/claude/testdata/fixtures/session_start_2_1_261.json")
+	if err != nil {
+		panic(err)
+	}
+	var payload struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.SessionID == "" {
+		panic("the committed SessionStart fixture carries no session_id")
+	}
+	return payload.SessionID
+}()
 
 func TestBindSessionStartBuildsProductionWaistEvent(t *testing.T) {
 	t.Parallel()
@@ -41,12 +58,12 @@ func TestBindSessionStartBuildsProductionWaistEvent(t *testing.T) {
 func TestBindAuthenticParseRetainsNativeNameAndContractLayers(t *testing.T) {
 	t.Parallel()
 
-	raw, err := os.ReadFile("../../ingress/claude/testdata/fixtures/session_start_2_1_210.json")
+	raw, err := os.ReadFile("../../ingress/claude/testdata/fixtures/session_start_2_1_261.json")
 	require.NoError(t, err)
-	capture := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], "2.1.220", model.OccurrenceEnvelopeRef{})
+	capture := claudeingress.Parse(raw, registration.ClaudeCode2_1_261().Events[0], registration.ClaudeCode2_1_261().Version, model.OccurrenceEnvelopeRef{})
 	require.Equal(t, model.CaptureValid, capture.Disposition)
-	require.Equal(t, registration.ClaudeCode2_1_210().Contract, capture.Delivery.Contract)
-	require.NotEqual(t, capture.Delivery.Contract, runtime.ClaudeCode2_1_210Lifecycle().ID(), "capture-schema and semantic runtime contracts are distinct layers")
+	require.Equal(t, registration.ClaudeCode2_1_261().Contract, capture.Delivery.Contract)
+	require.NotEqual(t, capture.Delivery.Contract, runtime.ClaudeCode2_1_261Lifecycle().ID(), "capture-schema and semantic runtime contracts are distinct layers")
 
 	l1, identities, err := claude.Bind(capture.Delivery.Event, capture.Delivery.Bindings)
 	require.NoError(t, err)
@@ -68,9 +85,9 @@ func TestBindRejectsInvalidNativeBindings(t *testing.T) {
 	}{
 		{
 			name:         "unknown ordinal",
-			kind:         model.ContractEventKind(31),
+			kind:         registration.EventOpenCodeCommandExecuted, // declared by another harness, never by Claude
 			bindings:     nil,
-			whatFragment: "ordinal 31",
+			whatFragment: fmt.Sprintf("ordinal %d", registration.EventOpenCodeCommandExecuted),
 			fixFragment:  "generated Claude event ordinals",
 		},
 		{
@@ -164,4 +181,12 @@ func TestBindReturnsWaistIdentityValuesWithoutReinterpretingThem(t *testing.T) {
 	require.Equal(t, sessionID, identities[0].Value())
 	require.Equal(t, "session_id", identities[0].NativeName())
 	require.True(t, l1.IsValid())
+}
+
+// TestEventMappingsCoverEveryRegisteredClaudeEvent holds the Claude frontend
+// mapping total over the generated registration and each pair correct by
+// native name.
+func TestEventMappingsCoverEveryRegisteredClaudeEvent(t *testing.T) {
+	t.Parallel()
+	testutil.AssertEventMappingsCoverRegistration(t, registration.ClaudeCode2_1_261(), runtime.ClaudeCode2_1_261Lifecycle(), claude.Bind)
 }

@@ -36,17 +36,20 @@ func TestControllerMatchesDocumentedGlobalLayout(t *testing.T) {
 	raw, err := os.ReadFile(fixturePath)
 	require.NoError(t, err)
 	var fixture struct {
-		ActivationContract string   `json:"activation_contract"`
-		VersionProbe       []string `json:"version_probe"`
-		SkillsRoot         string   `json:"skills_root"`
-		AgentsRoot         string   `json:"agents_root"`
-		HooksRoot          string   `json:"hooks_root"`
-		HookFile           string   `json:"hook_file"`
-		ConfigReadOrder    []string `json:"config_read_order"`
-		NativeWriterOrder  []string `json:"native_writer_order"`
+		VersionProbe      []string `json:"version_probe"`
+		SkillsRoot        string   `json:"skills_root"`
+		AgentsRoot        string   `json:"agents_root"`
+		HooksRoot         string   `json:"hooks_root"`
+		HookFile          string   `json:"hook_file"`
+		ConfigReadOrder   []string `json:"config_read_order"`
+		NativeWriterOrder []string `json:"native_writer_order"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &fixture))
-	require.Equal(t, fixture.ActivationContract, controller.Contract().ID().String())
+	// The id and the admission are read from the OpenCode runtime contract, the
+	// one root, never restated in the fixture.
+	require.Equal(t, "opencode/activation@"+runtime.OpenCode1_18_29().Versions().Min().String(), controller.Contract().ID().String())
+	require.False(t, controller.Contract().HostVersions().HasUpperBound(), "installer admission is the runtime contract's floor")
+	require.Equal(t, runtime.OpenCode1_18_29().Versions().Min().String(), controller.Contract().HostVersions().Min().String())
 	require.Equal(t, fixture.VersionProbe[0], controller.Contract().VersionProbe().Program())
 	require.Equal(t, fixture.VersionProbe[1:], controller.Contract().VersionProbe().Args())
 	require.Equal(t, filepath.Join(root, fixture.SkillsRoot), destination(t, controller, artifact.ExtensionSkills))
@@ -523,7 +526,7 @@ func fakeSiblingContracts(t *testing.T, base string) map[ir.HarnessID]activation
 		require.NoError(t, err)
 		id, _ := activation.NewActivationContractID(string(harness) + "/test@1")
 		probe, _ := activation.NewCommandSchema("unused", "--version")
-		contract, err := activation.NewActivationContract(id, ir.HarnessID(harness), runtime.OpenCode1_18_10().Versions(), probe, exhaustive)
+		contract, err := activation.NewActivationContract(id, ir.HarnessID(harness), runtime.OpenCode1_18_29().Versions(), probe, exhaustive)
 		require.NoError(t, err)
 		out[ir.HarnessID(harness)] = contract
 	}

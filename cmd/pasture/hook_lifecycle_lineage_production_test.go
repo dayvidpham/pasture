@@ -19,7 +19,7 @@ const lineageLinkEvidenceKind = provenance.EvidenceKind("pasture.lifecycle.link.
 
 // sharedSessionIdentity is the Claude session carried by the PreToolUse,
 // PostToolUse, PostToolUseFailure, and PostToolBatch authentic fixtures.
-const sharedSessionIdentity = "5f8d1e67-8c33-4d23-a7fe-ffd9eb711e68"
+const sharedSessionIdentity = "c02859c0-10ab-49c3-9b93-29280bd45fbb"
 
 type lineageEdgeOut struct {
 	Harness string `json:"harness"`
@@ -37,7 +37,7 @@ type lineageOut struct {
 
 func deliverClaudeBuilt(t *testing.T, binary, dbPath, event string, raw []byte) string {
 	t.Helper()
-	cmd := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", event, "--host-version", "2.1.222")
+	cmd := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", event, "--host-version", "2.1.261")
 	cmd.Stdin = bytes.NewReader(raw)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
@@ -83,10 +83,10 @@ func TestLineageMaterializeThenSecondRunIsNoOp(t *testing.T) {
 	initializeLifecycleTestDatabase(t, dbPath)
 
 	for _, tc := range []struct{ event, fixture string }{
-		{"PreToolUse", "pre_tool_use_2_1_222.json"},
-		{"PostToolUse", "post_tool_use_2_1_222.json"},
-		{"PostToolUseFailure", "post_tool_use_failure_2_1_222.json"},
-		{"PostToolBatch", "post_tool_batch_2_1_222.json"},
+		{"PreToolUse", "pre_tool_use_2_1_261.json"},
+		{"PostToolUse", "post_tool_use_2_1_261.json"},
+		{"PostToolUseFailure", "post_tool_use_failure_2_1_261.json"},
+		{"PostToolBatch", "post_tool_batch_2_1_261.json"},
 	} {
 		deliverClaudeBuilt(t, binary, dbPath, tc.event, readProductionClaudeFixture(t, tc.fixture, tc.event))
 	}
@@ -135,7 +135,7 @@ func TestLineageDeliveryPathStaysByteEquivalent(t *testing.T) {
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
-	preToolUse := readProductionClaudeFixture(t, "pre_tool_use_2_1_222.json", "PreToolUse")
+	preToolUse := readProductionClaudeFixture(t, "pre_tool_use_2_1_261.json", "PreToolUse")
 
 	// Delivery BEFORE any lineage exists: capture the native continuation bytes.
 	bytesBefore := deliverClaudeBuilt(t, binary, dbPath, "PreToolUse", preToolUse)
@@ -146,9 +146,9 @@ func TestLineageDeliveryPathStaysByteEquivalent(t *testing.T) {
 
 	// Build a committed chain and materialize it, so the store now holds links.
 	for _, tc := range []struct{ event, fixture string }{
-		{"PostToolUse", "post_tool_use_2_1_222.json"},
-		{"PostToolUseFailure", "post_tool_use_failure_2_1_222.json"},
-		{"PostToolBatch", "post_tool_batch_2_1_222.json"},
+		{"PostToolUse", "post_tool_use_2_1_261.json"},
+		{"PostToolUseFailure", "post_tool_use_failure_2_1_261.json"},
+		{"PostToolBatch", "post_tool_batch_2_1_261.json"},
 	} {
 		deliverClaudeBuilt(t, binary, dbPath, tc.event, readProductionClaudeFixture(t, tc.fixture, tc.event))
 	}
@@ -176,12 +176,12 @@ func TestLineageOverCapRefusesAndCommitsNothing(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
-	raw := readProductionClaudeFixture(t, "session_start_2_1_222.json", "SessionStart")
+	raw := readProductionClaudeFixture(t, "session_start_2_1_261.json", "SessionStart")
 
 	const deliveries = 66 // 66 occurrences -> 65 predecessor edges > 64 cap
 	for i := 0; i < deliveries; i++ {
 		require.NoError(t, handlers.HookLifecycle(context.Background(), handlers.HookLifecycleInput{
-			DBPath: dbPath, Harness: "claude-code", Event: "SessionStart", HostVersion: "2.1.222",
+			DBPath: dbPath, Harness: "claude-code", Event: "SessionStart", HostVersion: "2.1.261",
 			Input: bytes.NewReader(raw), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 		}))
 	}
@@ -189,7 +189,7 @@ func TestLineageOverCapRefusesAndCommitsNothing(t *testing.T) {
 	var out bytes.Buffer
 	code, err := handlers.HookLifecycleLineage(context.Background(), &out, handlers.HookLifecycleLineageInput{
 		DBPath:     dbPath,
-		Binding:    "session:session_id=3696b790-3973-49f2-b156-9d82146bf7ec",
+		Binding:    "session:session_id=c02859c0-10ab-49c3-9b93-29280bd45fbb",
 		Clock:      lifecycleCLIClock{},
 		Operations: lifecycleCLIOperations{},
 	}, "text")

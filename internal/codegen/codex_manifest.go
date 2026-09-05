@@ -11,7 +11,7 @@
 // boundary. When selected, Codex loads the generated per-event command runners;
 // none of these files installs a Git hook or changes core.hooksPath.
 //
-// Transport shape (Codex 0.146.0, Python-free per #65 and Phase 8 decision 2):
+// Transport shape (Codex at the recorded version, Python-free per #65):
 // each `.codex/hooks.json` entry is a PLAIN command string — `sh
 // .codex/hooks/events/<Event>.sh` — with no host-side ${VAR} expansion, because
 // authentic capture only proves plain-command-string invocation. Each runner is
@@ -142,7 +142,7 @@ type codexHooksConfig struct {
 }
 
 // codexRunnerRelPath is the plain (variable-free) command path each hooks.json
-// entry uses to invoke an event runner. Codex 0.146.0 authentic capture proves
+// entry uses to invoke an event runner. The committed authentic Codex capture proves
 // only plain-command-string invocation; host-side ${VAR} expansion inside
 // hooks.json command strings is unproven and must not be relied on, so the path
 // is spelled literally relative to the project root.
@@ -151,12 +151,12 @@ func codexRunnerRelPath(event string) string {
 }
 
 // codexAuthenticMatchers pins the two authentically-proven, activation-bound
-// Codex 0.146.0 events to the EXACT matcher values recorded by the irreplaceable
+// Codex events to the EXACT matcher values recorded by the irreplaceable
 // authentic capture configuration. Matcher input-selection semantics carry no
 // in-tree contract backing (the host contract documents identities/semantics and
 // nativeresponse documents only OUTPUT continuation), and Codex usage is
 // exhausted, so these proven values can never be re-verified or regained. If a
-// non-proven value ("") were shipped for these two events and 0.146.0 selects
+// non-proven value ("") were shipped for these two events and the recorded Codex version selects
 // differently at runtime, S5/Wave-3 activation would silently fail to fire with
 // no evidence left to diagnose. These are exactly the two events M3 activates,
 // so they must carry the proven matcher, not the inherited empty convention.
@@ -235,7 +235,7 @@ func EmitCodexGlobalHooksConfig() (GeneratedFile, error) {
 // fails closed on an invalid or duplicated decision, so a drifted catalog stops
 // generation instead of shipping a partial transport or a partial audit report.
 func codexActivationByKind() (map[model.ContractEventKind]activation.Entry, error) {
-	states, err := activation.Codex0_146_0()
+	states, err := activation.Codex0_153_0()
 	if err != nil {
 		return nil, fmt.Errorf("build activation manifest: %w", err)
 	}
@@ -245,7 +245,7 @@ func codexActivationByKind() (map[model.ContractEventKind]activation.Entry, erro
 // codexActivationByKindFrom is the injectable body of codexActivationByKind. It
 // takes the activation decisions as an argument instead of reading the pinned
 // catalog, so a test can drive every fail-closed branch with a mutated decision
-// set. Production callers pass activation.Codex0_146_0().
+// set. Production callers pass activation.Codex0_153_0().
 func codexActivationByKindFrom(states []activation.Entry) (map[model.ContractEventKind]activation.Entry, error) {
 	stateByKind := make(map[model.ContractEventKind]activation.Entry, len(states))
 	for _, state := range states {
@@ -271,11 +271,11 @@ func codexActivationByKindFrom(states []activation.Entry) (map[model.ContractEve
 // carry is a contract drift, not a transport decision, so it fails generation
 // rather than silently disappearing from the wiring.
 func codexEnabledEventNames() ([]string, error) {
-	states, err := activation.Codex0_146_0()
+	states, err := activation.Codex0_153_0()
 	if err != nil {
 		return nil, fmt.Errorf("codegen.codexEnabledEventNames: build activation manifest: %w", err)
 	}
-	return codexEnabledEventNamesFrom(registration.Codex0_146_0(), states, runtime.CodexLifecycleEvents())
+	return codexEnabledEventNamesFrom(registration.Codex0_153_0(), states, runtime.CodexLifecycleEvents())
 }
 
 // codexEnabledEventNamesFrom is the injectable body of codexEnabledEventNames.
@@ -294,7 +294,7 @@ func codexEnabledEventNamesFrom(manifest registration.Manifest, states []activat
 		state, present := stateByKind[event.Kind]
 		if !present {
 			return nil, fmt.Errorf(
-				"codegen.codexEnabledEventNames: generated event %q has no activation entry; add one exhaustive typed decision in internal/lifecycle/activation/codex_0_146_0.go before generating the transport",
+				"codegen.codexEnabledEventNames: generated event %q has no activation entry; add one exhaustive typed decision in internal/lifecycle/activation/codex_0_153_0.go before generating the transport",
 				event.NativeName)
 		}
 		if state.State == activation.Enabled {
@@ -332,8 +332,8 @@ func codexEnabledEventNamesFrom(manifest registration.Manifest, states []activat
 // dispositions are the audit payload, not a side effect of enablement.
 //
 // The report derives solely from the pinned Codex registration manifest
-// (registration.Codex0_146_0()) and activation catalog
-// (activation.Codex0_146_0()) — no filesystem access and no live Codex — reusing
+// (registration.Codex0_153_0()) and activation catalog
+// (activation.Codex0_153_0()) — no filesystem access and no live Codex — reusing
 // the shared activationSupportReport shape so the Claude and Codex audit reports
 // can never diverge. The exhaustiveness checks reject any disagreement between
 // the generated catalog and the activation decisions (invalid/duplicate/missing/
@@ -348,8 +348,8 @@ func RenderCodexActivationReport() (string, error) {
 }
 
 func renderCodexActivationReport() (string, error) {
-	manifest := registration.Codex0_146_0()
-	states, err := activation.Codex0_146_0()
+	manifest := registration.Codex0_153_0()
+	states, err := activation.Codex0_153_0()
 	if err != nil {
 		return "", fmt.Errorf("codegen.renderCodexActivationReport: build activation manifest: %w", err)
 	}

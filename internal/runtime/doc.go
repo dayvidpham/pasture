@@ -27,8 +27,8 @@
 // exactly once, and rejects missing, duplicate, or conflicting contributions.
 //
 // The package also exposes three closed native lifecycle profiles through
-// ClaudeCode2_1_210Lifecycle, Codex0_146_0Lifecycle, and
-// OpenCode1_18_10Lifecycle. Their harness-specific numeric event enums map every
+// ClaudeCode2_1_261Lifecycle, Codex0_153_0Lifecycle, and
+// OpenCode1_18_29Lifecycle. Their harness-specific numeric event enums map every
 // pinned native event to observation, gate consultation, or an explicit human
 // response, together with exact transport, blocking, identity, mutation,
 // ordering, reconciliation, failure, and stop-loop behavior. There is no string

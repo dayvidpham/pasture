@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -36,9 +38,9 @@ func TestInventoryLifecycleRowsAgreeWithPinnedContracts(t *testing.T) {
 		contract hostcontract.Contract
 	}
 	pinned := []harnessContract{
-		{ir.HarnessClaudeCode, hostcontract.ClaudeCode2_1_210()},
-		{ir.HarnessOpenCode, hostcontract.OpenCode1_18_10()},
-		{ir.HarnessCodex, hostcontract.Codex0_146_0()},
+		{ir.HarnessClaudeCode, hostcontract.ClaudeCode2_1_261()},
+		{ir.HarnessOpenCode, hostcontract.OpenCode1_18_29()},
+		{ir.HarnessCodex, hostcontract.Codex0_153_0()},
 	}
 	var derived []string
 	for _, hc := range pinned {
@@ -121,9 +123,9 @@ func diffLifecycleRowSets(want, got []string) (missing, extra []string) {
 // that reads that label would block a session on a plugin that only throws.
 func TestGeneratedManifestsCarryRuntimeFailureModesVerbatim(t *testing.T) {
 	openCode := string(renderProviderManifest(
-		hostcontract.OpenCode1_18_10(), "OpenCode1_18_10", "ir.HarnessOpenCode"))
+		hostcontract.OpenCode1_18_29(), "OpenCode1_18_29", "ir.HarnessOpenCode"))
 	codex := string(renderProviderManifest(
-		hostcontract.Codex0_146_0(), "Codex0_146_0", "ir.HarnessCodex"))
+		hostcontract.Codex0_153_0(), "Codex0_153_0", "ir.HarnessCodex"))
 
 	for _, rendered := range []string{openCode, codex} {
 		if !strings.Contains(rendered, `pastureruntime "github.com/dayvidpham/pasture/internal/runtime"`) {
@@ -163,6 +165,47 @@ func TestGeneratedManifestsCarryRuntimeFailureModesVerbatim(t *testing.T) {
 			t.Errorf(
 				"OpenCode rows carry %d %s rows, want %d; a lossy collapse of the runtime failure vocabulary would change this count",
 				counts[arm], arm, wantCount)
+		}
+	}
+}
+
+// TestGeneratedNamesFollowTheContractVersion pins the moved-ceiling rule as a
+// mechanism: the generated registration and payload files, and the manifest
+// functions they declare, are named from Contract.Version. The expectation is
+// derived from the contracts, so moving a version moves the expected names with
+// it; a generated file that kept an old name, or a hand-named one, turns RED.
+func TestGeneratedNamesFollowTheContractVersion(t *testing.T) {
+	root, err := moduleRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		contract     hostcontract.Contract
+		registration string
+		payload      string
+		function     string
+	}{
+		{hostcontract.ClaudeCode2_1_261(), "internal/lifecycle/registration/claude_TOKEN.gen.go", "internal/lifecycle/ingress/claude/payload_TOKEN.gen.go", "func ClaudeCodeTOKEN() Manifest"},
+		{hostcontract.OpenCode1_18_29(), "internal/lifecycle/registration/opencode_TOKEN.gen.go", "internal/lifecycle/ingress/opencode/payload_TOKEN.gen.go", "func OpenCodeTOKEN() Manifest"},
+		{hostcontract.Codex0_153_0(), "internal/lifecycle/registration/codex_TOKEN.gen.go", "internal/lifecycle/ingress/codex/payload_TOKEN.gen.go", "func CodexTOKEN() Manifest"},
+	} {
+		token := versionToken(tc.contract)
+		if token == "" || token != strings.ReplaceAll(tc.contract.Version, ".", "_") {
+			t.Fatalf("versionToken(%q) = %q", tc.contract.Version, token)
+		}
+		registration := strings.ReplaceAll(tc.registration, "TOKEN", token)
+		payload := strings.ReplaceAll(tc.payload, "TOKEN", token)
+		for _, rel := range []string{registration, payload} {
+			if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
+				t.Errorf("the generated file named from Contract.Version %q is not committed: %v", tc.contract.Version, err)
+			}
+		}
+		body, err := os.ReadFile(filepath.Join(root, registration))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := strings.ReplaceAll(tc.function, "TOKEN", token); !strings.Contains(string(body), want) {
+			t.Errorf("the generated registration for version %q does not declare %q; the function name did not follow the version", tc.contract.Version, want)
 		}
 	}
 }

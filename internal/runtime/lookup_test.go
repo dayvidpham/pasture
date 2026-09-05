@@ -12,7 +12,7 @@ import (
 
 func TestLookupOperationBindingNative(t *testing.T) {
 	t.Parallel()
-	contract := runtime.ClaudeCode2_1_210()
+	contract := runtime.ClaudeCode2_1_261()
 	descriptor, ok := runtime.CoreOperationDescriptorFor(ir.OperationDelegateAssignment)
 	require.True(t, ok)
 
@@ -29,7 +29,7 @@ func TestLookupOperationBindingNative(t *testing.T) {
 
 func TestLookupOperationBindingMediatedAndSemantic(t *testing.T) {
 	t.Parallel()
-	claude := runtime.ClaudeCode2_1_210()
+	claude := runtime.ClaudeCode2_1_261()
 	collect, ok := runtime.CoreOperationDescriptorFor(ir.OperationCollectAssignmentResults)
 	require.True(t, ok)
 	binding, err := runtime.LookupOperationBinding(claude, collect)
@@ -39,7 +39,7 @@ func TestLookupOperationBindingMediatedAndSemantic(t *testing.T) {
 	require.True(t, isMediated)
 	assert.NotEmpty(t, mediated.Mediator())
 
-	opencode := runtime.OpenCode1_18_10()
+	opencode := runtime.OpenCode1_18_29()
 	cont, ok := runtime.CoreOperationDescriptorFor(ir.OperationContinueAssignment)
 	require.True(t, ok)
 	semBinding, err := runtime.LookupOperationBinding(opencode, cont)
@@ -52,7 +52,7 @@ func TestLookupOperationBindingMediatedAndSemantic(t *testing.T) {
 
 func TestLookupOperationBindingUnsupportedFailsActionably(t *testing.T) {
 	t.Parallel()
-	opencode := runtime.OpenCode1_18_10()
+	opencode := runtime.OpenCode1_18_29()
 	stop, ok := runtime.CoreOperationDescriptorFor(ir.OperationStopAssignment)
 	require.True(t, ok)
 
@@ -64,7 +64,7 @@ func TestLookupOperationBindingUnsupportedFailsActionably(t *testing.T) {
 
 func TestLookupOperationBindingUnbound(t *testing.T) {
 	t.Parallel()
-	contract := runtime.ClaudeCode2_1_210()
+	contract := runtime.ClaudeCode2_1_261()
 	unknown := mustOperationDescriptor[sampleInput, sampleOutput](t, "pasture.custom.unbound/v1")
 
 	binding, err := runtime.LookupOperationBinding(contract, unknown)
@@ -75,7 +75,7 @@ func TestLookupOperationBindingUnbound(t *testing.T) {
 
 func TestLookupOperationBindingTypeMismatch(t *testing.T) {
 	t.Parallel()
-	contract := runtime.ClaudeCode2_1_210()
+	contract := runtime.ClaudeCode2_1_261()
 	coreID, ok := ir.CoreOperationID(ir.OperationInvokeSkill)
 	require.True(t, ok)
 	// Same descriptor identity, different In type: must not reuse the binding.
@@ -108,9 +108,9 @@ func TestLookupEffectBinding(t *testing.T) {
 
 	core, err := runtime.NewCoreRuntimeBindings(fullCoreOperationBindings(t), []runtime.EffectBinding{native, unsupported})
 	require.NoError(t, err)
-	id, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "claude-code@2.1.210")
+	id, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "claude-code@2.1.261")
 	require.NoError(t, err)
-	constraint, err := runtime.NewExactVersion(mustParse(t, "2.1.210"))
+	constraint, err := runtime.NewExactVersion(mustParse(t, "2.1.261"))
 	require.NoError(t, err)
 	contract, err := runtime.NewRuntimeContract(id, ir.HarnessClaudeCode, constraint, core)
 	require.NoError(t, err)
@@ -138,9 +138,9 @@ func TestLookupCapabilityBinding(t *testing.T) {
 
 	core, err := runtime.NewCoreRuntimeBindings(fullCoreOperationBindings(t), nil)
 	require.NoError(t, err)
-	id, err := ir.NewRuntimeContractID(ir.HarnessOpenCode, "opencode@1.18.10")
+	id, err := ir.NewRuntimeContractID(ir.HarnessOpenCode, "opencode@1.18.29")
 	require.NoError(t, err)
-	constraint, err := runtime.NewExactVersion(mustParse(t, "1.18.10"))
+	constraint, err := runtime.NewExactVersion(mustParse(t, "1.18.29"))
 	require.NoError(t, err)
 	contract, err := runtime.NewRuntimeContract(id, ir.HarnessOpenCode, constraint, core, contribution)
 	require.NoError(t, err)

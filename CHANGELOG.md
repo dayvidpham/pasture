@@ -3,6 +3,26 @@
 ## [Unreleased]
 
 ### Added
+- The lifecycle contracts record Claude Code 2.1.261, Codex 0.153.0 and
+  OpenCode 1.18.29. Admission is a floor at each recorded version: a host at
+  or above it is admitted, a host below it is refused with the version it
+  needs. The floor decides installation and fixture admission; on the live
+  hook path the observed host version is recorded as provenance and never
+  judged, because some routes pass no usable version at all. The twelve
+  enabled events were recaptured at those versions in live host sessions and
+  cleared under the documented procedure; every committed
+  fixture carries a provenance sidecar that names its event, its substitution
+  rules and the `CLEARANCE.md` holding the user's verbatim acceptance, and no
+  committed capture is exempt from those three fields any more. Claude Code
+  2.1.261 writes `scratchpad_dir` on every payload; the registration allows
+  it. Newly registered and withheld until captured: Claude Code
+  `PreModelSwitch`, `PostModelSwitch` and `DirectoryAdded`; Codex `SessionEnd`
+  (emitted since before 0.146.0 and never registered) and `Interrupt`. The
+  OpenCode event type `installation.update-available` is spelled as the host
+  emits it; the old underscore spelling matched nothing a host sends. Enabled
+  sets are unchanged: 8 Claude Code, 2 Codex, 2 OpenCode events, and a test
+  holds each set at that floor by name.
+
 - `pasture hook lifecycle orphans` counts the payload blobs that no recorded
   occurrence names. A hook writes the payload blob before it appends the journal
   row, so an invocation abandoned between those two writes leaves one blob
