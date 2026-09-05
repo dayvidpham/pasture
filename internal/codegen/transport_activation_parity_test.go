@@ -651,3 +651,46 @@ func requireSameEvents(t *testing.T, artifact string, enabled, wired map[string]
 		"%s does not wire %v, which the activation manifest enables. An enabled event with no transport entry never reaches the handler. Regenerate with `make generate`.",
 		artifact, missing)
 }
+
+// enabledFloor names, per harness, the events that are enabled today and must
+// stay enabled: every one has an authentic capture and a production proof
+// behind it, so a regeneration that withholds any of them has lost evidence
+// the corpus still holds. The list is a floor, never a ceiling: a later capture
+// adds a name here deliberately; nothing removes one without the removal being
+// this list's own change.
+var enabledFloor = map[string][]string{
+	"claude-code": {"SessionStart", "SessionEnd", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PostToolBatch", "PreCompact", "PostCompact"},
+	"codex":       {"SessionStart", "PreToolUse"},
+	"opencode":    {"session.created", "tool.execute.before"},
+}
+
+// TestEnabledEventsNeverDropBelowTheFloor reads the three COMMITTED activation
+// reports and holds every floor event enabled in them. It fails on a stale
+// regeneration as well as on a table change, because it reads the artifacts the
+// hosts ship with, not the emitters. Non-vacuity: every harness has a non-empty
+// floor and a non-empty enabled set in its report.
+func TestEnabledEventsNeverDropBelowTheFloor(t *testing.T) {
+	t.Parallel()
+	root := repoRoot(t)
+	reports := map[string]string{
+		"claude-code": filepath.Join(root, "hooks", "pasture-activation.json"),
+		"codex":       filepath.Join(root, ".codex", "pasture-codex-activation.json"),
+		"opencode":    filepath.Join(root, ".opencode", "pasture-opencode-activation.json"),
+	}
+	require.Len(t, enabledFloor, len(reports), "every harness with a committed activation report declares a floor")
+	for harness, report := range reports {
+		harness, report := harness, report
+		t.Run(harness, func(t *testing.T) {
+			t.Parallel()
+			floor := enabledFloor[harness]
+			require.NotEmpty(t, floor, "the %s floor is empty, so this guard would hold nothing", harness)
+			enabled := enabledEventsFromActivationReport(t, report)
+			require.NotEmpty(t, enabled, "the committed %s activation report enables no event", harness)
+			for _, event := range floor {
+				_, ok := enabled[event]
+				require.True(t, ok, "%s: %s is on the enabled floor but the committed activation report %s does not enable it; an enabled event with an authentic capture and a production proof was withheld by a regeneration, or the floor must be lowered deliberately here", harness, event, filepath.Base(report))
+			}
+			require.GreaterOrEqual(t, len(enabled), len(floor), "%s enables %d events, below its floor of %d", harness, len(enabled), len(floor))
+		})
+	}
+}
