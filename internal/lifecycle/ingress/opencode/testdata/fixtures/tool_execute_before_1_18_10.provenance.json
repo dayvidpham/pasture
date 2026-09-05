@@ -11,6 +11,5 @@
   "callbackValueBytes": 287,
   "callbackValueSHA256": "b43f3ba21c6c42afd7c2f881da14430e0832600fe521eedd625c214ab9a125df",
   "origin": "authentic-capture",
-  "redaction": "none",
-  "clearanceAuthority": ".agents.local/opencode-codex-authentic-capture-2026-08-03.md"
+  "redaction": "none"
 }

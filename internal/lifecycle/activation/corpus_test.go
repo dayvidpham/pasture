@@ -394,6 +394,11 @@ func copiedReviewedEvidenceCorpus(t *testing.T) (string, activation.Corpus) {
 			require.NoError(t, err)
 			require.NoError(t, os.WriteFile(filepath.Join(fixtureDir, name+ext), body, 0o600))
 		}
+		// A copy under a temp root is not at the committed path of the legacy
+		// exemption, so it is a new capture and carries a clearance like one.
+		rewriteProvenance(t, filepath.Join(fixtureDir, name+".provenance.json"), func(p map[string]any) {
+			p["clearance"] = "internal/lifecycle/ingress/claude/testdata/CLEARANCE.md"
+		})
 	}
 	corpusYAML := `cases:
 - name: pass

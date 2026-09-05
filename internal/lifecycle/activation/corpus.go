@@ -533,11 +533,7 @@ func Evaluate(root string, c Case) (Evaluation, error) {
 	if len(praw) > MaxProvenanceBytes {
 		return Evaluation{}, fmt.Errorf("activation.Evaluate: provenance %q exceeds %d bytes; reduce it", provenance, MaxProvenanceBytes)
 	}
-	type envelope struct {
-		acceptance.CaptureProvenance
-		Event string `json:"event"`
-	}
-	var p envelope
+	var p acceptance.CaptureProvenance
 	jd := json.NewDecoder(bytes.NewReader(praw))
 	if err := jd.Decode(&p); err != nil {
 		return Evaluation{}, fmt.Errorf("activation.Evaluate: decode provenance %q: %w", provenance, err)
@@ -589,7 +585,7 @@ func Evaluate(root string, c Case) (Evaluation, error) {
 	if !target {
 		return Evaluation{}, fmt.Errorf("activation.Evaluate: provenance event %q is generated but outside the activation target set; capture one of the ten declared targets", p.Event)
 	}
-	if err := p.CaptureProvenance.ValidateFixtureBytes(body); err != nil {
+	if err := p.ValidateCommittedFixtureBytes(fixture, body); err != nil {
 		return Evaluation{}, fmt.Errorf("activation.Evaluate: final fixture validation failed for case %q: %w", c.name, err)
 	}
 	return Evaluation{caseName: c.name, event: event, decision: DecisionEnabled, reason: CorpusReasonNone, eventPresent: true, constructed: true}, nil

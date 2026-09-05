@@ -1600,14 +1600,12 @@ func readCodexProductionFixture(t *testing.T, fixture, expectedEvent string, cap
 		Redaction              string `json:"redaction"`
 		RawBytes               int    `json:"rawBytes"`
 		RawSHA256              string `json:"rawSHA256"`
-		ClearanceAuthority     string `json:"clearanceAuthority"`
 	}
 	require.NoError(t, json.Unmarshal(provenanceBytes, &sidecar))
 	require.Equal(t, "codex", sidecar.Provider)
 	require.Equal(t, "0.146.0", sidecar.ObservedRuntimeVersion)
 	require.Equal(t, "authentic-capture", sidecar.Origin)
 	require.Equal(t, "none", sidecar.Redaction)
-	require.Equal(t, "aura-plugins-a6h3d", sidecar.ClearanceAuthority)
 	require.Equal(t, len(raw), sidecar.RawBytes, "authentic Codex fixture byte count must match its provenance sidecar")
 	sum := sha256.Sum256(raw)
 	require.Equal(t, hex.EncodeToString(sum[:]), sidecar.RawSHA256, "authentic Codex fixture digest must match the cleared digest exactly")

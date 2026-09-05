@@ -8,6 +8,5 @@
   "rawBytes": 291,
   "rawSHA256": "69f56b0b3f98e7739828d64f1af6749931b750895eec433fa037600a623c7a04",
   "origin": "authentic-capture",
-  "redaction": "none",
-  "clearanceAuthority": "aura-plugins-a6h3d"
+  "redaction": "none"
 }

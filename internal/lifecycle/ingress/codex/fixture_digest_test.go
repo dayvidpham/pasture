@@ -24,7 +24,6 @@ type provenance struct {
 	RawSHA256               string `json:"rawSHA256"`
 	Origin                  string `json:"origin"`
 	Redaction               string `json:"redaction"`
-	ClearanceAuthority      string `json:"clearanceAuthority"`
 }
 
 // TestClearedFixtureBytesMatchPinnedDigests pins the two irreplaceable
@@ -81,7 +80,6 @@ func TestClearedFixtureBytesMatchPinnedDigests(t *testing.T) {
 			require.Equal(t, tc.sha256, prov.RawSHA256, "provenance digest must equal the payload digest")
 			require.Equal(t, "authentic-capture", prov.Origin)
 			require.Equal(t, "none", prov.Redaction)
-			require.Equal(t, "aura-plugins-a6h3d", prov.ClearanceAuthority)
 		})
 	}
 }
