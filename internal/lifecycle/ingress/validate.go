@@ -111,3 +111,7 @@ func EventByNativeName(manifest registration.Manifest, nativeName string) (regis
 			"invoke the hook with one of the native event names present in the %s support report, spelled exactly",
 		manifest.Harness, manifest.Version, nativeName, manifest.Harness)
 }
+
+// validDisposition is the disposition Validate reports for an admitted
+// payload, named once so the inventory can compare against it.
+func validDisposition() model.CaptureDisposition { return model.CaptureValid }
