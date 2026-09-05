@@ -64,8 +64,14 @@ const (
 	// or the hook key at the recorded version and never emits the event or
 	// calls the key. This covers two kinds of declared-but-silent name: an
 	// event name present only in generated SDK types with no publisher, or a
-	// declared hook key nothing calls. It is a user decision: a row that
-	// carries it names the CLEARANCE.md where the decision is recorded.
+	// declared hook key nothing calls. A row may take this reason only on a
+	// CITED absence of an emission site in the host source at the recorded
+	// version — the file and symbol searched, with the search stated in the
+	// recorded decision — never on the absence of a payload file, a
+	// documentation page, or a struct; a directory listing alone can miss a
+	// real emitter. It is a user decision: a row that carries it names the
+	// CLEARANCE.md where the decision, including that cited search, is
+	// recorded.
 	WithheldNotEmittedByHost
 	// WithheldEmittedOutsideTransport records that the host does emit the
 	// event, but on a channel the harness transport does not observe, so no
@@ -425,9 +431,15 @@ func NewWithheld(event model.ContractEventKind, reason WithheldReason) (Entry, e
 }
 
 // NewWithheldByDecision builds a withheld entry for a reason that records a
-// user decision (no reachable trigger, unclearable payload). The clearance is
-// the committed CLEARANCE.md path that holds the decision; it is validated by
-// the same rule a capture sidecar's clearance is.
+// user decision (no reachable trigger, unclearable payload, provider hook,
+// not emitted by host, emitted outside transport). The clearance is the
+// committed CLEARANCE.md path that holds the decision; it is validated by the
+// same rule a capture sidecar's clearance is. For WithheldNotEmittedByHost
+// specifically, the acceptance rule is stricter than an empty-path check: the
+// recorded decision at that path must cite the search that found no emission
+// site (the file and symbol searched, at the recorded host version), never
+// only the absence of a payload file, a documentation page, or a struct; see
+// the WithheldNotEmittedByHost doc comment.
 func NewWithheldByDecision(event model.ContractEventKind, reason WithheldReason, clearance string) (Entry, error) {
 	if event == 0 || !reason.IsValid() {
 		return Entry{}, fmt.Errorf("activation.NewWithheldByDecision: event %d or reason %q is invalid; support reporting requires a generated event ordinal and one declared typed withholding reason", event, reason.String())
