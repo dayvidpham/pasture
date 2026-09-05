@@ -74,8 +74,9 @@ func NewSQLiteBlobStore(db *sql.DB, options ...BlobStoreOption) SQLiteBlobStore 
 // writeInstant is the instant a Put stamps. The wall clock is the default
 // because the stamp's only reader, the orphan reclaim, ages a blob against a
 // snapshot instant taken from the same wall clock in production; a store
-// built without a clock must therefore stamp real time, never zero, or every
-// fresh blob would read as a legacy row older than any bound.
+// built without a clock must therefore stamp real time, never zero: a zero
+// stamp means an UNKNOWN age, which the reclaim never treats as old, so an
+// unstamped orphan would never be reclaimed.
 //
 // This is one of the two INJECTED clocks the age bound reads (the other is the
 // rebuild's snapshot clock). The writer-window refusal in Service.Receive reads
@@ -275,15 +276,28 @@ func structured(category pasterrors.Category, what, why, where, impact, fix stri
 type PayloadReclaimer struct{ Tx *sql.Tx }
 
 // ReclaimOrphansWrittenBefore deletes, oldest first and at most limit, the
-// payload blobs that no lifecycle_occurrences row names and whose written_at
-// is before the given instant, in unix nanoseconds. It returns the digests it
-// deleted. A legacy blob, stamped 0 by the migration that added the column, is
-// older than any instant and is deleted as soon as nothing names it.
+// payload blobs that no lifecycle_occurrences row names, whose written_at is
+// KNOWN, and whose written_at is before the given instant, in unix
+// nanoseconds. It returns the digests it deleted.
+//
+// A written_at of 0 means UNKNOWN, never "older than any bound", and a row at
+// 0 is NEVER eligible. The migration that added the column stamps every row
+// that existed before it with the migration instant, so after the upgrade a
+// row can read 0 only when a build that predates the column inserted it after
+// the upgrade; its age is unknown, and an unknown age must never satisfy an
+// age bound. The trade is stated here beside the predicate: such a row is a
+// small, bounded and rare leak (one orphan per abandoned invocation of an
+// older build on an upgraded store, until a later delivery of the same body
+// by a stamping build refreshes the stamp through the Put's max() update and
+// makes it eligible in due course), and that leak is accepted over the
+// alternative, which deletes a blob whose writer may still be between its
+// blob write and its journal append and so manufactures a journal row naming
+// an absent blob.
 func (r PayloadReclaimer) ReclaimOrphansWrittenBefore(ctx context.Context, before int64, limit int) ([]digest.Digest, error) {
 	if r.Tx == nil || limit <= 0 {
 		return nil, structured(pasterrors.CategoryValidation, "The orphan payload reclaim is invalid.", "A transaction and a positive limit are required; the reclaim never runs on a bare handle, because it must delete only against a projection rebuilt in the same transaction.", "Reclaiming orphan lifecycle payloads (internal/lifecycle/receipt/journal.go in receipt.PayloadReclaimer.ReclaimOrphansWrittenBefore).", "Nothing was deleted.", "Construct the reclaimer from the projection rebuild's own transaction with a limit of at least 1.", nil)
 	}
-	rows, err := r.Tx.QueryContext(ctx, `DELETE FROM lifecycle_payload_blobs WHERE digest IN (SELECT b.digest FROM lifecycle_payload_blobs b LEFT JOIN lifecycle_occurrences o ON o.payload_digest = b.digest WHERE o.journal_id IS NULL AND b.written_at < ? ORDER BY b.written_at ASC, b.digest ASC LIMIT ?) RETURNING digest`, before, limit)
+	rows, err := r.Tx.QueryContext(ctx, `DELETE FROM lifecycle_payload_blobs WHERE digest IN (SELECT b.digest FROM lifecycle_payload_blobs b LEFT JOIN lifecycle_occurrences o ON o.payload_digest = b.digest WHERE o.journal_id IS NULL AND b.written_at > 0 AND b.written_at < ? ORDER BY b.written_at ASC, b.digest ASC LIMIT ?) RETURNING digest`, before, limit)
 	if err != nil {
 		return nil, structured(pasterrors.CategoryStorage, "Orphan lifecycle payloads could not be reclaimed.", "SQLite rejected the bounded orphan delete.", "Reclaiming orphan lifecycle payloads (internal/lifecycle/receipt/journal.go in receipt.PayloadReclaimer.ReclaimOrphansWrittenBefore).", "Nothing was deleted; the enclosing savepoint is rolled back by the caller.", "Run `pasture migrate` so the payload blob table carries its written-at stamp, confirm database health, and run a read command again.", err)
 	}

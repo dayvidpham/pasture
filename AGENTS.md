@@ -325,11 +325,20 @@ longest window any writer may hold between its payload write and its journal
 append. A blob that a journal row names is never selected, because the
 projection it reads was rebuilt in the same transaction; a blob younger than
 the window is never selected, because its writer may still be between its two
-writes. Legacy blobs stamped 0 by the migration are older than any bound and
-drain at the cap per read command. A reclaim that fails rolls back alone, the
-rebuild still commits, and the store prints ONE line on the diagnostic sink it
-was constructed with (the process stderr in production); on success it prints
-nothing. The orphans command prints BOTH numbers because it mutates what it
+writes. Two rules cover the rows that predate the stamp. First, the migration
+that adds `written_at` stamps every pre-existing blob with the MIGRATION
+INSTANT, so legacy orphans become eligible one writer window after the
+upgrade, not at once, and a writer of an older build that was between its two
+writes at the upgrade instant gets the same grace as any other writer. Second,
+a `written_at` of 0 means UNKNOWN and is never eligible: after the upgrade a 0
+can only come from an older build inserting into the upgraded store, and an
+unknown age never satisfies an age bound; that row is a small, bounded, rare
+leak accepted over a manufactured corruption, until a later delivery of the
+same body by a stamping build refreshes the stamp. The legacy orphans still
+drain at the cap per read command, one window later. A reclaim that fails
+rolls back alone, the rebuild still commits, and the store prints ONE line on
+the diagnostic sink it was constructed with (the process stderr in
+production); on success it prints nothing. The orphans command prints BOTH numbers because it mutates what it
 measures by running; a single count that shrank because the command ran would
 be a defect unless the output said so.
 The remaining count comes from `receipt.SQLiteBlobStore.ReclaimableCount`, the

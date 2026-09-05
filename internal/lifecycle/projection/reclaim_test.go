@@ -169,19 +169,21 @@ func TestReclaimingRebuildReclaimsOnlyUnnamedBlobsOlderThanTheWindow(t *testing.
 	youngOrphan := seedBlob(t, db, []byte("young orphan"), snapshotEpoch.Add(-reclaimWindow+time.Second))
 	oldNamed := seedBlob(t, db, []byte("old named"), snapshotEpoch.Add(-1000*time.Second))
 	commitOccurrenceNaming(t, tracker, oldNamed, "reclaim.named.old")
-	legacyNamed := seedBlob(t, db, []byte("legacy named"), time.Time{})
-	commitOccurrenceNaming(t, tracker, legacyNamed, "reclaim.named.legacy")
-	legacyOrphan := seedBlob(t, db, []byte("legacy orphan"), time.Time{})
+	unstampedNamed := seedBlob(t, db, []byte("unstamped named"), time.Time{})
+	commitOccurrenceNaming(t, tracker, unstampedNamed, "reclaim.named.unstamped")
+	unstampedOrphan := seedBlob(t, db, []byte("unstamped orphan"), time.Time{})
+	olderOrphan := seedBlob(t, db, []byte("older orphan"), snapshotEpoch.Add(-2*reclaimWindow))
 
 	report := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch}})
 	require.NoError(t, report.Failure, "a reclaim that succeeds reports no failure, so the store prints nothing")
-	assert.Equal(t, []digest.Digest{legacyOrphan, oldOrphan}, report.Reclaimed, "oldest first: the legacy blob at 0, then the orphan older than the window")
+	assert.Equal(t, []digest.Digest{olderOrphan, oldOrphan}, report.Reclaimed, "oldest first among the KNOWN stamps: the orphan two windows old, then the one just past the window; the unstamped orphan is not in the order at all")
 
 	assert.False(t, blobExists(t, db, oldOrphan), "an unnamed blob older than the window is reclaimed")
-	assert.False(t, blobExists(t, db, legacyOrphan), "an unnamed legacy blob at written_at 0 is older than any bound and is reclaimed")
+	assert.False(t, blobExists(t, db, olderOrphan), "an unnamed blob far older than the window is reclaimed first")
+	assert.True(t, blobExists(t, db, unstampedOrphan), "an unnamed blob at written_at 0 has an UNKNOWN age and is NEVER reclaimed: an unknown age must not satisfy an age bound")
 	assert.True(t, blobExists(t, db, youngOrphan), "an unnamed blob inside the window is NEVER reclaimed: its journal append may still be in flight")
 	assert.True(t, blobExists(t, db, oldNamed), "a blob an occurrence names is never reclaimed at any age (%s)", oldNamed)
-	assert.True(t, blobExists(t, db, legacyNamed), "a legacy blob an occurrence names is never reclaimed (%s)", legacyNamed)
+	assert.True(t, blobExists(t, db, unstampedNamed), "an unstamped blob an occurrence names is never reclaimed (%s)", unstampedNamed)
 	var projected int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM lifecycle_occurrences`).Scan(&projected))
 	assert.Equal(t, 2, projected, "the rebuild still projected every journal occurrence")
@@ -446,23 +448,128 @@ func TestAFreshlyPutBlobIsNeverReclaimedWhileItsWriterMayStillAppend(t *testing.
 	assert.Equal(t, []digest.Digest{staleRef}, report.Reclaimed)
 }
 
-// TestARedeliveredOrphanBodyIsProtectedByItsNewWriter: a legacy orphan
-// carries the body a new delivery re-sends. The new writer's Put must refresh
-// the stamp, or the reclaim would delete the blob under that writer's append
-// and the journal would then name an absent blob. The control is a legacy
-// orphan nobody re-sent, which is reclaimed at once.
+// TestARedeliveredOrphanBodyIsProtectedByItsNewWriter: an old orphan carries
+// the body a new delivery re-sends. The new writer's Put must refresh the
+// stamp, or the reclaim would delete the blob under that writer's append and
+// the journal would then name an absent blob. The control is an old orphan
+// nobody re-sent, which is reclaimed at once. The second half is the same
+// refresh lifting an UNSTAMPED orphan (written_at 0, an unknown age that is
+// never eligible on its own) to the writer's instant, so that it becomes
+// eligible in due course.
 func TestARedeliveredOrphanBodyIsProtectedByItsNewWriter(t *testing.T) {
 	t.Parallel()
 	tracker, db := openReclaimStore(t)
+	old := snapshotEpoch.Add(-reclaimWindow - time.Nanosecond)
 	redelivered := []byte(`{"hook_event_name":"SessionStart","body":"seen before"}`)
-	redeliveredRef := seedBlob(t, db, redelivered, time.Time{})
-	untouchedRef := seedBlob(t, db, []byte(`{"hook_event_name":"SessionStart","body":"never seen again"}`), time.Time{})
-	require.NoError(t, receipt.NewSQLiteBlobStore(db, receipt.WithPayloadClock(&sequenceClock{instants: []time.Time{snapshotEpoch}})).Put(context.Background(), redeliveredRef, redelivered))
+	redeliveredRef := seedBlob(t, db, redelivered, old)
+	untouchedRef := seedBlob(t, db, []byte(`{"hook_event_name":"SessionStart","body":"never seen again"}`), old)
+	unstamped := []byte(`{"hook_event_name":"SessionStart","body":"seen before, by an older build"}`)
+	unstampedRef := seedBlob(t, db, unstamped, time.Time{})
+	writer := receipt.NewSQLiteBlobStore(db, receipt.WithPayloadClock(&sequenceClock{instants: []time.Time{snapshotEpoch}}))
+	require.NoError(t, writer.Put(context.Background(), redeliveredRef, redelivered))
+	require.NoError(t, writer.Put(context.Background(), unstampedRef, unstamped))
 
 	report := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch}})
 	require.NoError(t, report.Failure)
-	assert.True(t, blobExists(t, db, redeliveredRef), "a legacy orphan whose body a new writer re-delivered inside the window is protected by that writer's refreshed stamp")
-	assert.False(t, blobExists(t, db, untouchedRef), "control: the legacy orphan nobody re-delivered is reclaimed")
+	assert.True(t, blobExists(t, db, redeliveredRef), "an old orphan whose body a new writer re-delivered inside the window is protected by that writer's refreshed stamp")
+	assert.False(t, blobExists(t, db, untouchedRef), "control: the old orphan nobody re-delivered is reclaimed")
+	assert.True(t, blobExists(t, db, unstampedRef), "an unstamped orphan re-delivered inside the window is protected like any fresh blob")
+
+	later := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch.Add(reclaimWindow + time.Nanosecond)}})
+	require.NoError(t, later.Failure)
+	assert.False(t, blobExists(t, db, unstampedRef), "the re-delivery refreshed the unknown stamp to the writer's instant, so one window later the blob is eligible: that refresh is how an unstamped orphan stops leaking")
+}
+
+// TestAnUnstampedBlobIsNeverReclaimedAtAnyAge: a payload blob whose written_at
+// is 0 has an UNKNOWN age. The migration that added the column stamps every
+// pre-existing row with the migration instant, so after the upgrade a 0 can
+// only come from a build that predates the column writing to the upgraded
+// store; the reclaim must never treat that unknown age as older than the
+// window, however far the snapshot clock has moved. The control beside it is
+// a blob with a KNOWN stamp one nanosecond above 0, which the same run
+// reclaims, so the bound that keeps the unstamped blob is "written_at > 0"
+// and nothing wider. MUTATION: drop "AND b.written_at > 0" from the reclaim
+// statement and this is RED at the first assertion.
+func TestAnUnstampedBlobIsNeverReclaimedAtAnyAge(t *testing.T) {
+	t.Parallel()
+	tracker, db := openReclaimStore(t)
+	unstamped := seedBlob(t, db, []byte("written by a build that predates the stamp"), time.Time{})
+	earliestKnown := seedBlob(t, db, []byte("written at the first known instant"), time.Unix(0, 1).UTC())
+
+	farFuture := snapshotEpoch.Add(10 * 365 * 24 * time.Hour)
+	report := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{farFuture}})
+	require.NoError(t, report.Failure)
+	assert.True(t, blobExists(t, db, unstamped), "a blob at written_at 0 is never reclaimed, even ten years past the window: 0 means the age is unknown, and an unknown age never satisfies an age bound")
+	assert.False(t, blobExists(t, db, earliestKnown), "control: a blob at written_at 1, the smallest KNOWN stamp, is reclaimed by the same run")
+	assert.Equal(t, []digest.Digest{earliestKnown}, report.Reclaimed)
+}
+
+// openStoreUpgradedFromV7 builds a store whose payload blob table has the
+// shape a build without the written_at column left behind, holding the given
+// bodies as unstamped rows, and then opens it through the production opener so
+// the real version 7 to 8 migration runs on it. The shape is reconstructed
+// from a store this build made, by removing the column and the version row
+// the migration added; the schema the migration then meets is the version 7
+// schema. It returns the open tracker, its handle, the digests of the bodies,
+// and the migration instant the migration recorded as the applied_at of
+// version 8.
+func openStoreUpgradedFromV7(t *testing.T, bodies ...[]byte) (protocol.TaskTracker, *sql.DB, []digest.Digest, time.Time) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	bootstrap, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	_, err = bootstrap.Create("file://projection-reclaim-upgrade-test", "bootstrap", "initialize the persisted ingress identity", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
+	require.NoError(t, err)
+	v7 := auditDB(t, bootstrap)
+	_, err = v7.Exec(`ALTER TABLE lifecycle_payload_blobs DROP COLUMN written_at`)
+	require.NoError(t, err)
+	_, err = v7.Exec(`DELETE FROM audit_schema_meta WHERE version = 8`)
+	require.NoError(t, err)
+	refs := make([]digest.Digest, 0, len(bodies))
+	for _, body := range bodies {
+		ref := digest.FromBytes(body)
+		_, err = v7.Exec(`INSERT INTO lifecycle_payload_blobs(digest, body, byte_count) VALUES(?,?,?)`, ref.String(), body, len(body))
+		require.NoError(t, err)
+		refs = append(refs, ref)
+	}
+	require.NoError(t, bootstrap.Close())
+
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err, "the production opener must upgrade the version 7 store")
+	t.Cleanup(func() { _ = tracker.Close() })
+	db := auditDB(t, tracker)
+	var appliedAt int64
+	require.NoError(t, db.QueryRow(`SELECT applied_at FROM audit_schema_meta WHERE version = 8`).Scan(&appliedAt), "the upgrade must have recorded version 8")
+	return tracker, db, refs, time.Unix(0, appliedAt).UTC()
+}
+
+// TestAPreExistingBlobIsReclaimedOnlyOneWindowAfterTheUpgrade: a blob that
+// existed before the written_at column did is stamped with the MIGRATION
+// INSTANT, not 0, so the first reclaim after the upgrade keeps it (its writer
+// may have been between its two writes at the upgrade instant), and a reclaim
+// one window after the migration instant, driven by the scripted clock,
+// reclaims it. MUTATION: drop the UPDATE from the migration and this is RED
+// at the stamp read ("carries 0") and again at the second reclaim, which then
+// reclaims nothing because the row reads as an unknown age: the opposite
+// failure, a legacy orphan that never drains.
+func TestAPreExistingBlobIsReclaimedOnlyOneWindowAfterTheUpgrade(t *testing.T) {
+	t.Parallel()
+	tracker, db, refs, migrationInstant := openStoreUpgradedFromV7(t, []byte("written by the build that predates the stamp, moments before the upgrade"))
+	legacy := refs[0]
+	var stamp int64
+	require.NoError(t, db.QueryRow(`SELECT written_at FROM lifecycle_payload_blobs WHERE digest = ?`, legacy.String()).Scan(&stamp))
+	require.NotZero(t, stamp, "a pre-existing blob carries 0 after the upgrade; the migration must stamp it with the migration instant")
+	require.Equal(t, migrationInstant.UnixNano(), stamp, "the pre-existing blob must carry exactly the migration instant")
+
+	inside := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{migrationInstant.Add(reclaimWindow - time.Second)}})
+	require.NoError(t, inside.Failure)
+	assert.True(t, blobExists(t, db, legacy), "inside one window of the upgrade the pre-existing blob is kept: a writer of the older build may still be between its blob write and its journal append")
+	assert.Empty(t, inside.Reclaimed)
+
+	after := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{migrationInstant.Add(reclaimWindow + time.Nanosecond)}})
+	require.NoError(t, after.Failure)
+	assert.False(t, blobExists(t, db, legacy), "one window after the upgrade the pre-existing orphan drains: the migration instant is a KNOWN age and the bound now holds")
+	assert.Equal(t, []digest.Digest{legacy}, after.Reclaimed)
 }
 
 // TestTheReclaimIsOneBoundedStatement is the budget proof's structural half:
@@ -504,6 +611,7 @@ func TestTheReclaimIsOneBoundedStatement(t *testing.T) {
 	require.Len(t, statements, 1, "the reclaim issues exactly one statement on the transaction: %v", statements)
 	assert.Contains(t, statements[0], "LIMIT ?", "the one statement carries the cap as its LIMIT")
 	assert.Contains(t, statements[0], "b.written_at < ?", "the one statement carries the age bound")
+	assert.Contains(t, statements[0], "b.written_at > 0", "the one statement refuses an unknown age: a blob at written_at 0 is never eligible")
 	assert.Contains(t, statements[0], "o.journal_id IS NULL", "the one statement carries the named-by-nothing condition")
 	assert.Contains(t, statements[0], "ORDER BY b.written_at ASC", "the one statement takes the oldest first")
 }

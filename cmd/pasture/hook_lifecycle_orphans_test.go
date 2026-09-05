@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	digest "github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/assert"
@@ -431,22 +432,100 @@ func lifecycleStoreHandle(t *testing.T, dbPath string) (*sql.DB, func()) {
 	return concrete.DB, func() { _ = tracker.Close() }
 }
 
-// seedLegacyOrphans writes payload blobs stamped 0, the value the migration
-// that added written_at gave every pre-existing row. They are older than any
-// bound and no occurrence names them, so a read command reclaims them at once,
-// up to the cap.
+// legacyOrphanAge is how far in the past seedLegacyOrphans stamps its rows:
+// one hour, far beyond any writer window, so the built binary, which ages
+// against the wall clock, sees them as reclaimable on the run that follows.
+const legacyOrphanAge = time.Hour
+
+// seedLegacyOrphans writes payload blobs stamped one hour in the past, the
+// state a pre-existing orphan is in one window after the migration stamped it
+// with the migration instant. They are older than the window and no
+// occurrence names them, so a read command reclaims them, up to the cap. The
+// stamp is a KNOWN instant on purpose: a row at 0 has an unknown age and is
+// never reclaimed, and that case is proven separately below.
 func seedLegacyOrphans(t *testing.T, dbPath string, count int) {
 	t.Helper()
 	db, closeStore := lifecycleStoreHandle(t, dbPath)
 	defer closeStore()
 	tx, err := db.Begin()
 	require.NoError(t, err)
+	stamp := time.Now().Add(-legacyOrphanAge).UnixNano()
 	for i := 0; i < count; i++ {
 		body := []byte(fmt.Sprintf(`{"legacy-orphan":%d}`, i))
-		_, err := tx.Exec(`INSERT INTO lifecycle_payload_blobs(digest, body, byte_count, written_at) VALUES(?,?,?,0)`, digest.FromBytes(body).String(), body, len(body))
+		_, err := tx.Exec(`INSERT INTO lifecycle_payload_blobs(digest, body, byte_count, written_at) VALUES(?,?,?,?)`, digest.FromBytes(body).String(), body, len(body), stamp)
 		require.NoError(t, err)
 	}
 	require.NoError(t, tx.Commit())
+}
+
+// downgradePayloadBlobsToV7 gives the store the shape a build without the
+// written_at column left behind: the column and the version 8 row are removed,
+// so the schema is the version 7 schema and the next open runs the version 7
+// to 8 migration. The given bodies are inserted the way a version 7 Put wrote
+// them, with no stamp. It returns their digests.
+func downgradePayloadBlobsToV7(t *testing.T, dbPath string, bodies ...[]byte) []string {
+	t.Helper()
+	db, closeStore := lifecycleStoreHandle(t, dbPath)
+	defer closeStore()
+	_, err := db.Exec(`ALTER TABLE lifecycle_payload_blobs DROP COLUMN written_at`)
+	require.NoError(t, err)
+	_, err = db.Exec(`DELETE FROM audit_schema_meta WHERE version = 8`)
+	require.NoError(t, err)
+	digests := make([]string, 0, len(bodies))
+	for _, body := range bodies {
+		ref := digest.FromBytes(body).String()
+		_, err = db.Exec(`INSERT INTO lifecycle_payload_blobs(digest, body, byte_count) VALUES(?,?,?)`, ref, body, len(body))
+		require.NoError(t, err)
+		digests = append(digests, ref)
+	}
+	return digests
+}
+
+// TestTheFirstReadCommandAfterTheUpgradeReclaimsNothingWrittenBeforeIt is the
+// upgrade case through the BUILT BINARY: a store at version 7 holds a blob a
+// build without the written_at column wrote moments ago (its writer may still
+// be between its blob write and its journal append), and the first read
+// command of this build upgrades the store and runs its reclaim in the same
+// process. The command must reclaim NOTHING: the migration stamps the blob
+// with the migration instant, which is inside the window. The stamp is read
+// back and must equal the applied_at of version 8. A second unstamped row is
+// then inserted AFTER the upgrade, standing for the older build still writing
+// to the upgraded store; a further run reclaims nothing again, because an
+// unknown age never satisfies the bound, and it still counts that row as an
+// orphan.
+// WHAT IT VISITS: the migration, the reclaim and the report, all through the
+// binary a user runs. WHAT IT DOES NOT RUN: the older build itself; the
+// version 7 shape is reconstructed from a store this build made.
+// MUTATION: make the migration leave pre-existing rows at 0 again and the
+// first run reclaims one, RED at the "reclaimed by this run: 0" reading.
+func TestTheFirstReadCommandAfterTheUpgradeReclaimsNothingWrittenBeforeIt(t *testing.T) {
+	t.Parallel()
+	binary := lifecycleBinary(t)
+	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+	initializeLifecycleTestDatabase(t, dbPath)
+	digests := downgradePayloadBlobsToV7(t, dbPath, []byte(`{"written":"moments before the upgrade, by the older build"}`))
+
+	text := runLifecycleOrphans(t, binary, dbPath, "text")
+	assert.Contains(t, text, "orphan payload blobs reclaimed by this run: 0\n",
+		"the first read command after the upgrade must reclaim nothing: the pre-existing blob is stamped with the migration instant, inside the window, and its writer may still be between its two writes")
+	assert.Contains(t, text, "orphan payload blobs remaining: 1\n",
+		"the pre-existing orphan is still there and still counted")
+
+	db, closeStore := lifecycleStoreHandle(t, dbPath)
+	var stamp, appliedAt int64
+	require.NoError(t, db.QueryRow(`SELECT written_at FROM lifecycle_payload_blobs WHERE digest = ?`, digests[0]).Scan(&stamp))
+	require.NoError(t, db.QueryRow(`SELECT applied_at FROM audit_schema_meta WHERE version = 8`).Scan(&appliedAt))
+	assert.NotZero(t, stamp, "the pre-existing blob must not carry 0 after the upgrade")
+	assert.Equal(t, appliedAt, stamp, "the pre-existing blob carries exactly the migration instant the upgrade recorded")
+	late := []byte(`{"written":"after the upgrade, by the older build, with no stamp"}`)
+	_, err := db.Exec(`INSERT INTO lifecycle_payload_blobs(digest, body, byte_count) VALUES(?,?,?)`, digest.FromBytes(late).String(), late, len(late))
+	require.NoError(t, err)
+	closeStore()
+
+	var view orphanReportView
+	require.NoError(t, json.Unmarshal([]byte(runLifecycleOrphans(t, binary, dbPath, "json")), &view))
+	assert.Equal(t, int64(0), view.ReclaimedThisRun, "a row inserted after the upgrade with no stamp has an unknown age and is never reclaimed; the migration-instant row is still inside the window")
+	assert.Equal(t, int64(2), view.Remaining, "both rows remain and both are counted as orphans")
 }
 
 func payloadBlobRows(t *testing.T, dbPath string) (int, []string) {
@@ -481,7 +560,7 @@ func TestTheOrphansReportSaysWhatThisRunReclaimedAndWhatRemains(t *testing.T) {
 
 	text := runLifecycleOrphans(t, binary, dbPath, "text")
 	assert.Contains(t, text, "orphan payload blobs reclaimed by this run: 5\n",
-		"five legacy orphans are older than any bound, so this run reclaims all five and says so")
+		"five orphans stamped an hour ago are older than the window, so this run reclaims all five and says so")
 	assert.Contains(t, text, "orphan payload blobs remaining: 0\n",
 		"after the reclaim nothing remains, and the remaining number is true of the store this run left behind")
 
@@ -503,7 +582,7 @@ func TestTheOrphansReportSaysWhatThisRunReclaimedAndWhatRemains(t *testing.T) {
 // today); a derived command with no entry in the argument table is RED, so a
 // new read command cannot arrive unproven.
 // PER COMMAND, through the built binary: a store holding ONE referenced blob
-// (a real ingested occurrence) and cap+3 legacy orphans (written_at 0); the
+// (a real ingested occurrence) and cap+3 orphans stamped an hour ago; the
 // command exits 0 with EMPTY standard error; afterwards exactly the cap was
 // reclaimed, the three youngest-by-digest-order survivors remain, and the
 // referenced blob SURVIVES.

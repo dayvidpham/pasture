@@ -50,8 +50,8 @@ func writtenAt(t *testing.T, db *sql.DB, ref digest.Digest) int64 {
 // TestPutStampsTheWriteInstantFromTheStoreClock: the stamp the orphan reclaim
 // ages a blob against is the store clock's instant at the Put, in unix
 // nanoseconds. A store that wrote no stamp would leave the column at its
-// migration default of zero, and every fresh blob would then read as a
-// legacy row older than any bound.
+// default of zero, which the reclaim reads as an UNKNOWN age and never
+// reclaims, so every fresh orphan would then leak.
 func TestPutStampsTheWriteInstantFromTheStoreClock(t *testing.T) {
 	t.Parallel()
 	db := openBlobStoreDB(t)

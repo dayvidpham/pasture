@@ -93,6 +93,22 @@ var errReclaimSavepoint = errors.New("the orphan reclaim savepoint could not be 
 // the snapshot is in the projection and its blob is named. Both halves are
 // needed, and both are pinned by tests.
 //
+// A blob whose written_at is 0 has an UNKNOWN age and is never selected,
+// whatever the snapshot instant: the migration that added the column stamps
+// every pre-existing row with the migration instant, so a 0 after the upgrade
+// can only come from a build that predates the column writing to an upgraded
+// store, and an unknown age must never satisfy an age bound. That rule lives
+// in the one statement (receipt.PayloadReclaimer.ReclaimOrphansWrittenBefore)
+// and the trade it makes is stated there.
+//
+// TWO CLOCKS. The age this reclaim computes reads the INJECTED clocks only:
+// the blob store's clock at the Put (the stamp) and the rebuild's clock at the
+// snapshot (RebuildOptions.Clock). The writer-window refusal in
+// receipt.Service.Receive reads the WALL clock, because it judges a context
+// deadline. In production all of these are the wall clock, so the window the
+// refusal enforces is the window this reclaim ages against; a test that
+// scripts one injected clock must script the other.
+//
 // It runs under a savepoint so that a failure of the delete rolls back the
 // reclaim alone and the rebuild still commits. The second result reports that
 // failure; the third is true only when the savepoint machinery itself failed,
