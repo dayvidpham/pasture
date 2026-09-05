@@ -102,6 +102,58 @@ func TestNewVersionConstraintRejectsInvertedBounds(t *testing.T) {
 	require.Error(t, err)
 }
 
+// A floor is the admission shape for a recorded baseline version: the host
+// may move forward without a re-pin, and a host below the baseline is refused.
+func TestVersionFloorAdmitsMinAndEveryHigherRelease(t *testing.T) {
+	t.Parallel()
+	constraint, err := runtime.NewVersionFloor(mustParse(t, "2.1.261"))
+	require.NoError(t, err)
+
+	assert.True(t, constraint.IsValid())
+	assert.False(t, constraint.HasUpperBound(), "a floor has no upper bound")
+	assert.False(t, constraint.Max().IsValid(), "Max of a floor is the zero version; HasUpperBound is the question to ask")
+	assert.Equal(t, "2.1.261", constraint.Min().String())
+
+	assert.True(t, constraint.Allows(mustParse(t, "2.1.261")), "the floor itself is admitted")
+	assert.True(t, constraint.Allows(mustParse(t, "2.1.262")), "immediately higher patch release admitted")
+	assert.True(t, constraint.Allows(mustParse(t, "2.2.0")), "higher minor release admitted")
+	assert.True(t, constraint.Allows(mustParse(t, "3.0.0")), "higher major release admitted")
+	assert.True(t, constraint.Allows(mustParse(t, "2.1.261+build.9")), "build metadata does not change acceptance")
+	assert.False(t, constraint.Allows(mustParse(t, "2.1.260")), "immediately lower release rejected")
+	assert.False(t, constraint.Allows(mustParse(t, "2.0.999")), "lower minor release rejected")
+	assert.False(t, constraint.Allows(mustParse(t, "2.1.262-rc.1")), "a prerelease above the floor is not admitted: a floor never includes prereleases")
+	assert.False(t, constraint.Allows(mustParse(t, "2.1.261-rc.1")), "a prerelease of the floor release is below it and rejected")
+	assert.False(t, constraint.Allows(runtime.HostVersion{}), "zero version rejected")
+}
+
+func TestNewVersionFloorRejectsUnparsedBound(t *testing.T) {
+	t.Parallel()
+	_, err := runtime.NewVersionFloor(runtime.HostVersion{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "version floor has a zero or unparsed lower bound")
+	assert.False(t, runtime.VersionConstraint{}.HasUpperBound(), "the zero constraint has no bound of any kind")
+	assert.Equal(t, "", runtime.VersionConstraint{}.Describe(), "the zero constraint describes nothing")
+}
+
+// Describe is the text a diagnostic quotes for the admitted versions. Each
+// phrase is load-bearing: a reader decides from it whether the host must move
+// up, stay, or move down.
+func TestVersionConstraintDescribeNamesEachShape(t *testing.T) {
+	t.Parallel()
+	exact, err := runtime.NewExactVersion(mustParse(t, "0.146.0"))
+	require.NoError(t, err)
+	closed, err := runtime.NewVersionConstraint(mustParse(t, "2.1.210"), mustParse(t, "2.2.0-0"), false)
+	require.NoError(t, err)
+	floor, err := runtime.NewVersionFloor(mustParse(t, "1.18.29"))
+	require.NoError(t, err)
+
+	assert.Equal(t, "exactly 0.146.0", exact.Describe())
+	assert.Equal(t, "from 2.1.210 through 2.2.0-0", closed.Describe())
+	assert.Equal(t, "at or above 1.18.29", floor.Describe())
+	assert.True(t, exact.HasUpperBound())
+	assert.True(t, closed.HasUpperBound())
+}
+
 func TestCapabilityVersionRange(t *testing.T) {
 	t.Parallel()
 	rng, err := runtime.NewCapabilityVersionRange(ir.CapabilityContractVersion("1.0.0"), ir.CapabilityContractVersion("1.4.0"))
